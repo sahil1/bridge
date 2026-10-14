@@ -52,16 +52,36 @@
     "win": {
       "icon": "build/icon.png",
       "target": [
-        "nsis"
-      ]
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "Bridge-AI-win-${arch}.${ext}"
     },
     "linux": {
       "icon": "build/icon.png",
       "target": [
-        "AppImage",
-        "deb"
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
-      "category": "Development"
+      "category": "Development",
+      "executableName": "bridge-ai",
+      "synopsis": "Run and talk to all your AI coding agents",
+      "maintainer": "Bridge AI contributors <sahil1@users.noreply.github.com>",
+      "artifactName": "Bridge-AI-linux-${arch}.${ext}"
     },
     "extraResources": [
       {
@@ -89,10 +109,17 @@
       "format": "ULFO",
       "writeUpdateInfo": false
     },
-    "compression": "normal"
+    "compression": "normal",
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false
+    }
   },
   "devDependencies": {
     "electron": "^38.0.0",
     "electron-builder": "^26.0.0"
-  }
+  },
+  "homepage": "https://github.com/sahil1/bridge"
 }

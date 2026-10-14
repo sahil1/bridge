@@ -37,7 +37,7 @@ for (const f of fs.readdirSync(path.join(OUT, 'dist', 'assets'))) if (f.endsWith
 const used = new Set()
 const scan = (p) => {
   if (fs.statSync(p).isDirectory()) return fs.readdirSync(p).forEach((f) => scan(path.join(p, f)))
-  if (!/\.(m?js|cjs)$|\/bridge$/.test(p)) return
+  if (!/\.(m?js|cjs)$|[\\/]bridge$/.test(p)) return
   const src = fs.readFileSync(p, 'utf8')
   for (const m of src.matchAll(/(?:from\s+|import\(\s*|require\(\s*)['"]((?:@[^/'"]+\/)?[^./'"][^/'"]*)/g)) used.add(m[1])
   for (const m of src.matchAll(/localBin\(\s*['"]([^'"]+)/g)) used.add(m[1])

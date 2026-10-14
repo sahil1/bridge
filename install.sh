@@ -1,13 +1,16 @@
 #!/bin/sh
-# Install Bridge AI on a Mac with one command:
+# Install Bridge AI on macOS or Linux with one command:
 #
 #   curl -fsSL https://raw.githubusercontent.com/sahil1/bridge/main/install.sh | sh
 #
-# Downloads the app for your Mac (Apple Silicon or Intel), puts it in Applications and opens it.
+# macOS: downloads the app for your Mac (Apple Silicon or Intel), puts it in Applications, opens it.
+# Linux: installs the .deb on Debian and Ubuntu (asks for your password), otherwise the AppImage in
+#        ~/.local with a menu entry. (Windows: see install.ps1.)
 # Run it again to update. Options, as environment variables:
-#   BRIDGE_VERSION=v1.23.1   a specific release instead of the latest
-#   BRIDGE_APP_DIR=~/Apps    where to put the app (default /Applications, or ~/Applications)
-#   BRIDGE_ZIP=./file.zip    install from a zip you already have
+#   BRIDGE_VERSION=v1.24.0   a specific release instead of the latest
+#   BRIDGE_APP_DIR=~/Apps    macOS: where to put the app (default /Applications, or ~/Applications)
+#   BRIDGE_ZIP=./file.zip    macOS: install from a zip you already have
+#   BRIDGE_FILE=./file       Linux: install from a .deb or .AppImage you already have
 set -eu
 
 REPO="sahil1/bridge"
@@ -16,7 +19,59 @@ APP="Bridge AI.app"
 say() { printf '%s\n' "$*"; }
 fail() { printf 'Bridge AI install: %s\n' "$*" >&2; exit 1; }
 
-[ "$(uname -s)" = "Darwin" ] || fail "this installer is for macOS. On Windows and Linux, see https://github.com/$REPO#desktop-app"
+url_for() {
+  if [ -n "${BRIDGE_VERSION:-}" ]; then echo "https://github.com/$REPO/releases/download/$BRIDGE_VERSION/$1"
+  else echo "https://github.com/$REPO/releases/latest/download/$1"
+  fi
+}
+
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+# ---------- Linux ----------
+install_linux() {
+  [ "$(uname -m)" = x86_64 ] || fail "Bridge AI is built for 64-bit Intel/AMD Linux so far; on $(uname -m), run it from source: https://github.com/$REPO#from-source"
+  if command -v apt-get >/dev/null 2>&1 && command -v dpkg >/dev/null 2>&1; then
+    FILE="$TMP/Bridge-AI-linux-amd64.deb"
+    if [ -n "${BRIDGE_FILE:-}" ]; then cp "$BRIDGE_FILE" "$FILE"
+    else say "Downloading Bridge AI..."; curl -fL --progress-bar "$(url_for Bridge-AI-linux-amd64.deb)" -o "$FILE" || fail "couldn't download the .deb"
+    fi
+    pkill -TERM -x bridge-ai 2>/dev/null && sleep 1 || true
+    say "Installing (this asks for your password)..."
+    SUDO=""; [ "$(id -u)" = 0 ] || SUDO=sudo
+    $SUDO apt-get install -y "$FILE" || fail "apt couldn't install the package"
+    BIN=bridge-ai
+  else
+    DIR="$HOME/.local/share/bridge-ai"; BIN="$HOME/.local/bin/bridge-ai"
+    mkdir -p "$DIR" "$HOME/.local/bin" "$HOME/.local/share/applications" "$HOME/.local/share/icons/hicolor/512x512/apps"
+    if [ -n "${BRIDGE_FILE:-}" ]; then cp "$BRIDGE_FILE" "$TMP/app"
+    else say "Downloading Bridge AI..."; curl -fL --progress-bar "$(url_for Bridge-AI-linux-x86_64.AppImage)" -o "$TMP/app" || fail "couldn't download the AppImage"
+    fi
+    pkill -TERM -f "$DIR/Bridge-AI.AppImage" 2>/dev/null && sleep 1 || true
+    mv "$TMP/app" "$DIR/Bridge-AI.AppImage"; chmod +x "$DIR/Bridge-AI.AppImage"
+    ln -sf "$DIR/Bridge-AI.AppImage" "$BIN"
+    curl -fsSL "https://raw.githubusercontent.com/$REPO/main/public/icon-512.png" -o "$HOME/.local/share/icons/hicolor/512x512/apps/bridge-ai.png" 2>/dev/null || true
+    printf '[Desktop Entry]\nName=Bridge AI\nComment=Run and talk to all your AI coding agents\nExec=%s %%U\nIcon=bridge-ai\nType=Application\nCategories=Development;\nTerminal=false\n' "$DIR/Bridge-AI.AppImage" > "$HOME/.local/share/applications/bridge-ai.desktop"
+    say "Installed to $DIR, with a menu entry and the command $BIN."
+    # AppImages need FUSE 2, which newer distributions leave out.
+    if ! ldconfig -p 2>/dev/null | grep -q 'libfuse\.so\.2'; then
+      say "If it doesn't open: install FUSE 2 (Ubuntu and Debian: sudo apt install libfuse2; Fedora: sudo dnf install fuse-libs)."
+    fi
+  fi
+  say "Bridge AI is installed."
+  if [ -z "${BRIDGE_NO_OPEN:-}" ] && { [ -n "${DISPLAY:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; }; then
+    nohup "$BIN" >/dev/null 2>&1 &
+    say "Opening it now. Next time, find it in your applications menu."
+  fi
+}
+
+case "$(uname -s)" in
+  Darwin) ;;
+  Linux) install_linux; exit 0 ;;
+  *) fail "this installer is for macOS and Linux. On Windows, in PowerShell: irm https://raw.githubusercontent.com/$REPO/main/install.ps1 | iex" ;;
+esac
+
+# ---------- macOS ----------
 
 case "$(uname -m)" in
   arm64) ARCH=arm64; KIND="Apple Silicon" ;;
@@ -32,15 +87,10 @@ else DEST="$HOME/Applications"
 fi
 mkdir -p "$DEST"
 
-TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
-
 if [ -n "${BRIDGE_ZIP:-}" ]; then
   cp "$BRIDGE_ZIP" "$TMP/bridge.zip"
 else
-  if [ -n "${BRIDGE_VERSION:-}" ]; then URL="https://github.com/$REPO/releases/download/$BRIDGE_VERSION/Bridge-AI-mac-$ARCH.zip"
-  else URL="https://github.com/$REPO/releases/latest/download/Bridge-AI-mac-$ARCH.zip"
-  fi
+  URL="$(url_for "Bridge-AI-mac-$ARCH.zip")"
   say "Downloading Bridge AI for $KIND Macs..."
   curl -fL --progress-bar "$URL" -o "$TMP/bridge.zip" || fail "couldn't download $URL"
 fi
