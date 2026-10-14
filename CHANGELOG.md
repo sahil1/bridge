@@ -2,6 +2,32 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
+## 1.24.0
+
+Bridge AI for Windows and Linux.
+
+### Install
+
+- **macOS and Linux:** `curl -fsSL https://raw.githubusercontent.com/sahil1/bridge/main/install.sh | sh`
+- **Windows (PowerShell):** `irm https://raw.githubusercontent.com/sahil1/bridge/main/install.ps1 | iex`
+
+Or download the file for your system below:
+
+| System | File |
+|---|---|
+| macOS, Apple Silicon | `Bridge-AI-mac-arm64.dmg` |
+| macOS, Intel | `Bridge-AI-mac-x64.dmg` |
+| Windows | `Bridge-AI-win-x64.exe` |
+| Linux, Debian and Ubuntu | `Bridge-AI-linux-amd64.deb` |
+| Linux, other | `Bridge-AI-linux-x86_64.AppImage` |
+
+The apps aren't signed yet, so macOS and Windows ask before the first open of a downloaded file (macOS: System Settings › Privacy & Security › **Open Anyway**; Windows: **More info › Run anyway**). The install commands skip that.
+
+### What's new
+
+- **Windows and Linux apps**, with one-line installers. Windows installs for your user with no admin rights; Linux installs the .deb on Debian and Ubuntu, or the AppImage elsewhere.
+- Every platform is built and tested automatically before a release is published.
+
 ## 1.23.1
 
 Faster to install and faster to use.

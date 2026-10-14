@@ -6,7 +6,9 @@ Bridge AI runs on your machine. Your agents use their own logins; Bridge AI only
 
 ## Install
 
-### Mac app (recommended)
+The app needs nothing else installed: no Node, no clone. Bridge AI finds the agent CLIs you already have and offers to install one if you have none.
+
+### macOS
 
 Paste this in Terminal:
 
@@ -14,11 +16,29 @@ Paste this in Terminal:
 curl -fsSL https://raw.githubusercontent.com/sahil1/bridge/main/install.sh | sh
 ```
 
-It downloads the app for your Mac (Apple Silicon or Intel), puts it in Applications and opens it, in a few seconds. Run it again to update. You don't need Node or anything else; Bridge AI finds the agent CLIs you already have and offers to install one if you have none.
+It downloads the app for your Mac (Apple Silicon or Intel), puts it in Applications and opens it, in a few seconds. Run it again to update.
 
 Prefer a download? Get `Bridge-AI-mac-arm64.dmg` (Apple Silicon) or `Bridge-AI-mac-x64.dmg` (Intel) from [Releases](https://github.com/sahil1/bridge/releases/latest) and drag Bridge AI to Applications. The app isn't signed by Apple yet, so macOS asks before the first open: click Done, then System Settings › Privacy & Security › **Open Anyway**. The install command above skips that step.
 
-Windows and Linux: run from source (below), or build the app with `npm run desktop:dist`.
+### Windows
+
+Paste this in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/sahil1/bridge/main/install.ps1 | iex
+```
+
+It installs Bridge AI for your user (no admin needed), adds it to the Start menu and opens it. Run it again to update. Or download `Bridge-AI-win-x64.exe` from [Releases](https://github.com/sahil1/bridge/releases/latest); it isn't signed yet, so SmartScreen may ask first: **More info › Run anyway**.
+
+### Linux
+
+The same command as macOS:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sahil1/bridge/main/install.sh | sh
+```
+
+On Debian and Ubuntu it installs the `.deb` (it asks for your password); elsewhere it puts the AppImage in `~/.local/share/bridge-ai` with a menu entry and a `bridge-ai` command. 64-bit Intel/AMD only for now. Both files are also on the [Releases](https://github.com/sahil1/bridge/releases/latest) page.
 
 ### From source
 
@@ -168,25 +188,18 @@ npm run desktop:dist     # build an installer to share
 | Build on | You get (in `desktop/dist/`) |
 |---|---|
 | macOS | `Bridge-AI-mac-arm64` (Apple Silicon) and `Bridge-AI-mac-x64` (Intel), each as `.dmg` and `.zip`. The `.zip` files are what `install.sh` downloads. |
-| Windows | `Bridge AI Setup <version>.exe` |
-| Linux | `.AppImage` and `.deb` |
+| Windows | `Bridge-AI-win-x64.exe` |
+| Linux | `Bridge-AI-linux-x86_64.AppImage` and `Bridge-AI-linux-amd64.deb` |
 
 To publish a release:
 
 1. Set the new version in `package.json` and `desktop/package.json`, and add a `## <version>` section to [CHANGELOG.md](CHANGELOG.md).
-2. Commit, and merge to `main`.
-3. `npm run desktop:dist`, then `npm run release`.
+2. Commit, merge to `main`, and check out `main`.
+3. `npm run release`.
 
-`npm run release` checks that the built apps are that version and that `main` has the code, then creates the GitHub release with the four Mac files (named so `install.sh` and the "latest" download links find them), their checksums, and the changelog section as notes. Try `npm run release -- --dry-run` first, or `-- --draft` to look the release over before publishing it.
+`npm run release` checks that `main` has your code, the changelog has that version, and the tag is new, then pushes the tag `v<version>`. GitHub Actions ([release.yml](.github/workflows/release.yml)) builds the app on macOS, Windows and Linux, starts each build and checks it works (`scripts/smoke.js`), and publishes the release with every installer, checksums, and the changelog section as notes. It takes about 15 minutes; if any platform fails, nothing is published. Try `npm run release -- --dry-run` first.
 
-Build each platform on that platform. The first build downloads Electron, which takes a minute.
-
-The builds aren't signed with an Apple or Microsoft certificate, so the first open asks for confirmation:
-
-- **macOS:** open the .dmg and drag Bridge AI to Applications. On first launch macOS says it can't check the app; click Done, then go to System Settings › Privacy & Security and click **Open Anyway**. If it says the app is damaged, run `xattr -dr com.apple.quarantine "/Applications/Bridge AI.app"` once.
-- **Windows:** SmartScreen may say it protected your PC; click **More info › Run anyway**.
-
-Closing the window leaves Bridge AI running in the background so agents keep working. **Bridge AI › Quit and Stop Agents** stops everything.
+You can also run the builds without releasing: Actions › Release › Run workflow. The installers are attached to the run.
 
 ## Security
 

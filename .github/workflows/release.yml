@@ -8,7 +8,6 @@ name: Release
 on:
   push:
     tags: ['v*']
-    branches: [sandbox] # TEMPORARY: test the builds before this workflow is on main
   workflow_dispatch:
 
 permissions:
