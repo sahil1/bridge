@@ -8,3 +8,4 @@ config.local.json
 *.pem
 routines.json
 ideas.md
+.vite/
