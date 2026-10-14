@@ -1,7 +1,7 @@
 {
   "name": "bridge-ai-desktop",
   "productName": "Bridge AI",
-  "version": "1.23.0",
+  "version": "1.23.1",
   "description": "Bridge AI as a desktop app for macOS, Windows and Linux",
   "license": "Apache-2.0",
   "author": "Bridge AI contributors",
@@ -33,13 +33,21 @@
             "arm64",
             "x64"
           ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
         }
       ],
       "identity": "-",
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Bridge AI records voice notes for your agents; audio is transcribed on this computer."
       },
-      "hardenedRuntime": false
+      "hardenedRuntime": false,
+      "artifactName": "Bridge-AI-mac-${arch}.${ext}"
     },
     "win": {
       "icon": "build/icon.png",
@@ -71,7 +79,17 @@
         ]
       }
     ],
-    "artifactName": "${productName}-${version}-${arch}.${ext}"
+    "artifactName": "${productName}-${version}-${arch}.${ext}",
+    "electronLanguages": [
+      "en",
+      "en-GB",
+      "en-US"
+    ],
+    "dmg": {
+      "format": "ULFO",
+      "writeUpdateInfo": false
+    },
+    "compression": "normal"
   },
   "devDependencies": {
     "electron": "^38.0.0",

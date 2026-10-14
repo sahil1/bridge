@@ -729,9 +729,16 @@ mcpRoutes(app, { cfg, installed })
 // ---------- Static UI ----------
 
 const dist = path.join(ROOT, 'dist')
-app.use(express.static(dist, { index: false, maxAge: '1h' }))
+// Built files carry a content hash in their name, so the browser keeps them for good and a
+// reopen loads them from its cache without asking. index.html is always checked, so an update
+// shows up on the next load.
+app.use(express.static(dist, {
+  index: false,
+  setHeaders: (res, file) => res.setHeader('Cache-Control', file.includes(`${path.sep}assets${path.sep}`) ? 'public, max-age=31536000, immutable' : 'no-cache'),
+}))
 app.get('/{*splat}', (req, res) => {
   if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'Not found' })
+  res.setHeader('Cache-Control', 'no-cache')
   res.sendFile(path.join(dist, 'index.html'))
 })
 

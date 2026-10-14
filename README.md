@@ -4,7 +4,23 @@ One place to run, watch and talk to all your coding agents. Start Claude Code, C
 
 Bridge AI runs on your machine. Your agents use their own logins; Bridge AI only reads their screens and transcripts and types into them for you. Nothing is sent anywhere else.
 
-## Quick start
+## Install
+
+### Mac app (recommended)
+
+Paste this in Terminal:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sahil1/bridge/main/install.sh | sh
+```
+
+It downloads the app for your Mac (Apple Silicon or Intel), puts it in Applications and opens it, in a few seconds. Run it again to update. You don't need Node or anything else; Bridge AI finds the agent CLIs you already have and offers to install one if you have none.
+
+Prefer a download? Get `Bridge-AI-mac-arm64.dmg` (Apple Silicon) or `Bridge-AI-mac-x64.dmg` (Intel) from [Releases](https://github.com/sahil1/bridge/releases/latest) and drag Bridge AI to Applications. The app isn't signed by Apple yet, so macOS asks before the first open: click Done, then System Settings › Privacy & Security › **Open Anyway**. The install command above skips that step.
+
+Windows and Linux: run from source (below), or build the app with `npm run desktop:dist`.
+
+### From source
 
 You need [Node.js](https://nodejs.org) 20 or newer and at least one agent CLI installed (for example [Claude Code](https://docs.claude.com/en/docs/claude-code) or [Codex](https://github.com/openai/codex)).
 
@@ -16,7 +32,7 @@ npm start
 
 Open http://127.0.0.1:7420. The first start installs dependencies and builds the UI, which takes a minute.
 
-The first time you open it, Bridge AI looks at what's already on your computer: the agent CLIs you have and whether you're signed in to them (your Claude, ChatGPT or Gemini subscriptions keep working as they are), your name and your time zone. **Set up automatically** saves that and starts your chief of staff; **Let me choose** lets you adjust it first. If no agent is installed yet, it offers to install one in a terminal tab you can watch.
+The first time you open it, Bridge AI looks at what's already on your computer: the agent CLIs you have and whether you're signed in to them (your Claude, ChatGPT or Gemini subscriptions keep working as they are), your name and your time zone. Change anything that's off right there, then **Finish setup** saves it and starts your chief of staff; **More options** lets you pick a default agent too. If no agent is installed yet, it offers to install one in a terminal tab you can watch.
 
 ```bash
 npm start -- dev     # hot reload: open :7421; UI edits appear live, server edits restart the API
@@ -151,9 +167,11 @@ npm run desktop:dist     # build an installer to share
 
 | Build on | You get (in `desktop/dist/`) |
 |---|---|
-| macOS | `Bridge AI-<version>-arm64.dmg` (Apple Silicon) and `Bridge AI-<version>-x64.dmg` (Intel) |
+| macOS | `Bridge-AI-mac-arm64` (Apple Silicon) and `Bridge-AI-mac-x64` (Intel), each as `.dmg` and `.zip`. The `.zip` files are what `install.sh` downloads. |
 | Windows | `Bridge AI Setup <version>.exe` |
 | Linux | `.AppImage` and `.deb` |
+
+To publish a release, attach the four Mac files to a GitHub release with those exact names, so `install.sh` and the "latest" download links find them.
 
 Build each platform on that platform. The first build downloads Electron, which takes a minute.
 

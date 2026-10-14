@@ -17,36 +17,57 @@ export const settingsChanged = () => window.dispatchEvent(new Event('bridge-sett
 
 // Poll an endpoint while the tab is visible. Returns { data, error, loading, refresh }.
 // After an error it retries within a minute, whatever the interval.
+// Polled GETs are shared across the app: components asking for the same path at the same time
+// share one request, and a view that mounts again starts from the last answer (then refreshes)
+// instead of an empty state.
+const lastData = new Map() // path -> { data, at }
+const inflight = new Map() // path -> Promise
+function sharedGet(path, force) {
+  const hit = lastData.get(path)
+  if (!force && hit && Date.now() - hit.at < 1500) return Promise.resolve(hit.data)
+  if (!force && inflight.has(path)) return inflight.get(path)
+  const p = api(path).then((data) => { lastData.set(path, { data, at: Date.now() }); return data }).finally(() => { if (inflight.get(path) === p) inflight.delete(path) })
+  inflight.set(path, p)
+  return p
+}
+
 export function usePoll(path, intervalMs, { enabled = true } = {}) {
-  const [state, setState] = useState({ data: null, error: null, loading: true })
+  const [state, setState] = useState(() => {
+    const hit = path && lastData.get(path)
+    return hit ? { data: hit.data, error: null, loading: false } : { data: null, error: null, loading: true }
+  })
   const pathRef = useRef(path)
   pathRef.current = path
 
-  const refresh = useCallback(async (suffix = '') => {
+  // Timed and on-mount loads share requests; a refresh you ask for (after a change, or with
+  // ?refresh=1) always goes to the server.
+  const load = useCallback(async (suffix = '', shared = false) => {
     if (!pathRef.current) return
     try {
-      const data = await api(pathRef.current + suffix)
+      const data = suffix ? await api(pathRef.current + suffix) : await sharedGet(pathRef.current, !shared)
       setState({ data, error: null, loading: false })
     } catch (error) {
       setState((s) => ({ ...s, error: error.message, loading: false }))
     }
   }, [])
+  const refresh = useCallback((suffix = '') => load(suffix, false), [load])
 
   useEffect(() => {
     if (!enabled || !path) return
     setState((s) => ({ ...s, loading: !s.data }))
-    refresh()
-    const id = setInterval(() => { if (!document.hidden) refresh() }, intervalMs)
-    const onVis = () => { if (!document.hidden) refresh() }
-    const onSettings = () => refresh()
+    load('', true)
+    const id = setInterval(() => { if (!document.hidden) load('', true) }, intervalMs)
+    const onVis = () => { if (!document.hidden) load('', true) }
+    // Settings changed: drop the cached answer, then reload (once, shared by every view using it).
+    const onSettings = () => { lastData.delete(path); load('', true) }
     document.addEventListener('visibilitychange', onVis)
     window.addEventListener('bridge-settings', onSettings)
     return () => { clearInterval(id); document.removeEventListener('visibilitychange', onVis); window.removeEventListener('bridge-settings', onSettings) }
-  }, [path, intervalMs, enabled, refresh])
+  }, [path, intervalMs, enabled, load])
 
   useEffect(() => {
     if (!state.error || !enabled || !path || intervalMs <= 60000) return
-    const t = setTimeout(() => refresh(), 60000)
+    const t = setTimeout(() => load('', true), 60000)
     return () => clearTimeout(t)
   }, [state.error, enabled, path, intervalMs, refresh])
 

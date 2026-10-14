@@ -82,10 +82,13 @@ function saveBounds() {
 
 const isLocal = (u) => { try { const x = new URL(u); return (x.hostname === '127.0.0.1' || x.hostname === 'localhost') && Number(x.port) === PORT } catch { return false } }
 
+// Shown for the second or so while the server starts: the logo and a line of text.
+const LOGO = (() => { for (const f of ['dist/mark.svg', 'public/mark.svg']) { try { return fs.readFileSync(path.join(ROOT, f), 'utf8') } catch { /* next */ } } return '' })()
 function splash(text) {
   const bg = nativeTheme.shouldUseDarkColors ? '#0f1115' : '#eef0f3'
   const fg = nativeTheme.shouldUseDarkColors ? '#a9b0bf' : '#4a5263'
-  return `data:text/html;charset=utf-8,${encodeURIComponent(`<html><body style="margin:0;height:100vh;display:grid;place-items:center;background:${bg};color:${fg};font:14px -apple-system,sans-serif;-webkit-app-region:drag"><div style="text-align:center"><div style="font-size:28px;margin-bottom:10px">☸</div>${text}</div></body></html>`)}`
+  const logo = LOGO ? `<div style="width:64px;height:64px;margin:0 auto 16px;border-radius:15px;overflow:hidden;box-shadow:0 10px 30px rgb(0 0 0 / .25)">${LOGO.replace('<svg ', '<svg width="64" height="64" ')}</div>` : ''
+  return `data:text/html;charset=utf-8,${encodeURIComponent(`<html><body style="margin:0;height:100vh;display:grid;place-items:center;background:${bg};color:${fg};font:14px -apple-system,system-ui,sans-serif;-webkit-app-region:drag"><div style="text-align:center">${logo}${text}</div></body></html>`)}`
 }
 
 async function createWindow() {

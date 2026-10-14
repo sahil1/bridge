@@ -1,12 +1,12 @@
 // Brand marks for model providers and agent CLIs, drawn on a rounded-square tile.
-// Real marks come from simple-icons (CC0; each import is tree-shaken by Vite). Brands it
+// Real marks come from simple-icons (CC0), copied into brandIcons.js by scripts/brand-icons.js. Brands it
 // doesn't carry (OpenAI, xAI, AWS, Azure, Groq, Together, Fireworks, Cohere, Cerebras, Aider,
 // Goose, Crush, Amp) get a simple glyph or wordmark in the brand's color instead.
 import {
   siAnthropic, siClaude, siGooglegemini, siMistralai, siDeepseek, siPerplexity, siKimi, siZdotai,
   siGooglecloud, siOpenrouter, siHuggingface, siOllama, siLmstudio, siGithubcopilot, siCursor,
   siQwen, siOpencode, siMeta,
-} from 'simple-icons'
+} from './brandIcons.js'
 
 // Fallback glyphs, drawn in a 24x24 box in the tile's foreground color.
 const G = {

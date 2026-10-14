@@ -1,16 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Icon, { StatusDot } from './components/Icon.jsx'
-import Settings from './components/Settings.jsx'
-import Onboarding from './components/Onboarding.jsx'
 import { useAppearance } from './appearance.js'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
 import Rail from './components/Rail.jsx'
 import Board from './components/Board.jsx'
 import Dock from './components/Dock.jsx'
 import Console, { MateEmpty } from './components/Console.jsx'
-import HerdrView from './components/HerdrView.jsx'
-import Terminals from './components/Terminals.jsx'
-import ShellTab from './components/ShellTab.jsx'
+import { Settings, Onboarding, HerdrView, Terminals, ShellTab, preloadViews } from './lazy.jsx'
 import NewAgent from './components/NewAgent.jsx'
 import Palette from './components/Palette.jsx'
 import { NextMeetingChip } from './components/Agenda.jsx'
@@ -102,6 +98,7 @@ export default function App() {
   // screen (how Bridge AI works) isn't swept away the moment setup is saved.
   const [onboarding, setOnboarding] = useState(false)
   useEffect(() => { if (conf && !conf.setupDone) setOnboarding(true) }, [conf])
+  useEffect(() => { preloadViews() }, [])
   const liveView = !!conf?.runtime?.liveView
   const view = liveView ? savedView : 'command'
   const [look, saveLook] = useAppearance()
