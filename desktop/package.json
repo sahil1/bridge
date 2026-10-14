@@ -1,0 +1,80 @@
+{
+  "name": "bridge-ai-desktop",
+  "productName": "Bridge AI",
+  "version": "1.23.0",
+  "description": "Bridge AI as a desktop app for macOS, Windows and Linux",
+  "license": "Apache-2.0",
+  "author": "Bridge AI contributors",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "icons": "electron render-icons.js",
+    "dist": "node stage.js && npm run icons && electron-builder"
+  },
+  "build": {
+    "appId": "dev.bridge-ai.app",
+    "productName": "Bridge AI",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "package.json"
+    ],
+    "mac": {
+      "icon": "build/icon.png",
+      "category": "public.app-category.developer-tools",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "identity": "-",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Bridge AI records voice notes for your agents; audio is transcribed on this computer."
+      },
+      "hardenedRuntime": false
+    },
+    "win": {
+      "icon": "build/icon.png",
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "icon": "build/icon.png",
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Development"
+    },
+    "extraResources": [
+      {
+        "from": "build/app-root",
+        "to": "app-root",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "build/app-root/node_modules",
+        "to": "app-root/node_modules",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "artifactName": "${productName}-${version}-${arch}.${ext}"
+  },
+  "devDependencies": {
+    "electron": "^38.0.0",
+    "electron-builder": "^26.0.0"
+  }
+}

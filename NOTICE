@@ -1,0 +1,11 @@
+Bridge AI
+Copyright 2026 The Bridge AI authors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Bridge AI can drive herdr (https://herdr.dev) when it is installed. herdr is a separate
+program, licensed separately, and is not included in this repository.
+
+Product names and logos shown in the app (agents, model providers, MCP servers) belong to
+their owners and are used only to identify the tools Bridge AI works with. Most logos come from
+Simple Icons (https://simpleicons.org, CC0).

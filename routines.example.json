@@ -1,0 +1,14 @@
+{
+  "routines": [
+    {
+      "id": "weekly-dependency-check",
+      "name": "Weekly dependency check",
+      "detail": "Check the main project for outdated or vulnerable dependencies",
+      "every": "week",
+      "cwd": "~/code/my-project",
+      "workspace": "Maintenance",
+      "kind": "claude",
+      "command": "Check this repo for outdated and vulnerable dependencies. List what to upgrade and why; don't change anything yet."
+    }
+  ]
+}

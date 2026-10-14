@@ -1,0 +1,20 @@
+{
+  "port": 7420,
+  "host": "127.0.0.1",
+  "runtime": "builtin",
+  "defaultAgent": "claude",
+  "name": "",
+  "location": null,
+  "chief": { "kind": "claude" },
+  "assistant": { "kind": null, "cwd": "~" },
+  "mail": { "myDomains": [] },
+  "allowedHosts": [],
+  "quota": { "ttlMinutes": 5, "hideNotSetUp": true },
+  "market": {
+    "indices": [["^GSPC", "S&P 500"], ["^IXIC", "NASDAQ"], ["^DJI", "DOW"]],
+    "stocks": [],
+    "metals": [["GC=F", "Gold"], ["SI=F", "Silver"]],
+    "crypto": ["bitcoin", "ethereum"]
+  },
+  "mortgage": null
+}

@@ -1,0 +1,183 @@
+# Bridge AI
+
+One place to run, watch and talk to all your coding agents. Start Claude Code, Codex, Gemini CLI, Copilot, OpenCode and others in any folder, see at a glance which ones are working, finished or waiting on you, chat with them from your laptop or phone, and hand work to a chief of staff agent that routes it to the right one.
+
+Bridge AI runs on your machine. Your agents use their own logins; Bridge AI only reads their screens and transcripts and types into them for you. Nothing is sent anywhere else.
+
+## Quick start
+
+You need [Node.js](https://nodejs.org) 20 or newer and at least one agent CLI installed (for example [Claude Code](https://docs.claude.com/en/docs/claude-code) or [Codex](https://github.com/openai/codex)).
+
+```bash
+git clone https://github.com/sahil1/bridge.git
+cd bridge
+npm start
+```
+
+Open http://127.0.0.1:7420. The first start installs dependencies and builds the UI, which takes a minute.
+
+The first time you open it, Bridge AI looks at what's already on your computer: the agent CLIs you have and whether you're signed in to them (your Claude, ChatGPT or Gemini subscriptions keep working as they are), your name and your time zone. **Set up automatically** saves that and starts your chief of staff; **Let me choose** lets you adjust it first. If no agent is installed yet, it offers to install one in a terminal tab you can watch.
+
+```bash
+npm start -- dev     # hot reload: open :7421; UI edits appear live, server edits restart the API
+npm run desktop:dev  # the desktop app with hot reload (runs next to the installed app)
+npm start -- phone   # also publish over Tailscale HTTPS for your phone
+npm run stop         # stop the server
+```
+
+### From your terminal
+
+Run `npm link` once in the repo to get the `bridge-ai` command:
+
+```bash
+bridge-ai list              # every agent and shell, numbered
+bridge-ai attach 2          # work in one from this terminal (or: bridge-ai attach "api tests"); Ctrl+] detaches
+bridge-ai attach            # pick from a list
+bridge-ai open              # open the app in your browser
+bridge-ai start / stop
+```
+
+Attaching gives you the agent's real terminal, in your terminal app, with its keys, fonts and scrollback, the way `tmux attach` or `herdr` does. The agent keeps running in Bridge AI when you detach, and the app stays in sync. The terminal button on each agent (and "Open in terminal app" in the sidebar menu) opens the same thing in Ghostty, iTerm, Warp, WezTerm, kitty, Alacritty or Terminal on macOS, your terminal on Linux, or Windows Terminal; pick which in Settings › General. With the herdr runtime, `attach` focuses the agent and opens herdr.
+
+## What works where
+
+| | macOS | Linux | Windows |
+|---|---|---|---|
+| Agents, chat, terminal, files, changes, chief of staff | ✓ | ✓ | ✓ |
+| herdr runtime and the live Herdr view | ✓ | ✓ | (herdr isn't on Windows) |
+| Desktop app | ✓ | ✓ | ✓ |
+| Inbox (Apple Mail) and Calendar (macOS Calendar) | ✓ | not yet | not yet |
+
+Day-to-day use so far has been on macOS. Linux and Windows use the same code paths (node-pty and Electron both support them) but have had little testing, so please open an issue if something breaks.
+
+## Agents
+
+Bridge AI finds the agent CLIs on your PATH. Each one is described in [`server/agents.js`](server/agents.js): how to start it, how to resume a session, and what its screen looks like while it works.
+
+| Agent | Command | Chat view | Extras |
+|---|---|---|---|
+| Claude Code | `claude` | ✓ | subagents, slash commands, question cards, safe sending |
+| Codex | `codex` | ✓ | slash commands |
+| Gemini CLI | `gemini` | terminal | |
+| GitHub Copilot CLI | `copilot` | terminal | |
+| OpenCode | `opencode` | terminal | |
+| Cursor Agent | `cursor-agent` | terminal | |
+| Grok | `grok` | terminal | |
+| Amp | `amp` | terminal | |
+| Qwen Code | `qwen` | terminal | |
+| Aider | `aider` | terminal | |
+| Goose | `goose` | terminal | |
+| Muse Code (Meta) | `muse` | terminal | |
+| Crush | `crush` | terminal | |
+
+Agents without a chat view work fully in the Terminal tab, and their status (working, waiting on you, finished) still shows in the sidebar. Adding an agent, or a chat view for one, is a small change; see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Runtimes: where agents run
+
+| Runtime | What it is | When it's used |
+|---|---|---|
+| **Built in** | Bridge AI runs each agent in its own terminal (node-pty, with a headless xterm keeping the screen). Nothing else to install. Spaces and tabs are saved, and after a restart Claude Code and Codex sessions resume where they were. | Default |
+| **herdr** | [herdr](https://herdr.dev) is a terminal multiplexer for agents. Bridge AI drives it and adds a live Herdr view (`Alt+2`) with herdr's own UI in the browser. Agents keep running when Bridge AI stops. | Optional. Only when you choose it; install herdr separately |
+
+Choose in Settings › General › Where agents run, or set `"runtime": "builtin"` or `"herdr"` in your config. herdr is never required, and Bridge AI won't switch to it just because it's installed.
+
+## Your data and settings
+
+Everything personal lives in `~/.bridge-ai` (set `BRIDGE_HOME` to move it), never in the repo:
+
+| File | What it holds |
+|---|---|
+| `config.json` | Your settings (see below) |
+| `chief/` | The chief of staff's folder: its instructions, `state/playbook.md` (what it has learned about how you work) and `state/ledger.md` |
+| `routines.json`, `ideas.md` | Recurring jobs and your ideas backlog ([`routines.example.json`](routines.example.json) shows the shape) |
+| `runtime.json` | Spaces and tabs for the built-in runtime |
+| `cache/` | Queued messages, watchlist, uploads, mail rules |
+
+Settings start from [`config.example.json`](config.example.json). Put yours in `~/.bridge-ai/config.json`; [`config.local.example.json`](config.local.example.json) shows the shape.
+
+| Key | What it does |
+|---|---|
+| `name` | What the chief of staff and the morning brief call you |
+| `defaultAgent` | Agent used when none is picked (`claude`, `codex`, `gemini`, ...) |
+| `chief.kind` | Agent the chief of staff runs on |
+| `runtime` | `builtin` (default) or `herdr` |
+| `port` | Default 7420 |
+| `location` | `{ label, lat, lon, timezone }` for weather and the brief |
+| `mail.myDomains` | Your organisation's email domains, so colleagues aren't marked External |
+| `assistant.cwd` | Folder that mail and meeting agents start in (point it at notes that describe you) |
+| `market`, `mortgage` | Watchlist and an optional mortgage card |
+| `allowedHosts` | Extra host names allowed to reach the server (Tailscale `*.ts.net` names are allowed already) |
+
+You rarely need to edit the file by hand. **Settings** (the gear in the top bar, or `⌘,` / `Ctrl+,`) has:
+
+| Section | What's there |
+|---|---|
+| General | Your name, default agent and default model, which agent runs the chief of staff, your location (from your device or a city search), where agents run |
+| Agents | Every supported agent: installed or not, signed in or not, one-click install, start a chat |
+| Model providers | API keys, cloud accounts and local model servers (Ollama, LM Studio) your agents can use |
+| MCP servers | The tools your agents can call, across all of them, with a catalog of 35 popular servers by category (web search, docs and notes, planning, Microsoft 365, deploy and monitoring, data, design) |
+| Appearance | Theme, color mode, text size, density, font |
+| Config file | Your `config.json`, editable, checked before it's saved, with the effective settings and defaults beside it |
+
+## What's in the app
+
+- **Sidebar**: spaces and tabs with each agent's status, folder and git branch. Drag to reorder, double-click to rename.
+- **Tabs**: open any agent as a tab, drag tabs to reorder, put two side by side.
+- **Each agent** has Chat (its transcript), Terminal (a live mirror you can type in), Files (a read-only browser with syntax highlighting and markdown) and Changes (git status and diffs).
+- **Message box**: `@` to reference files and folders, `/` for slash commands, ↑ for earlier messages, voice notes (whisper.cpp, on your machine) and attachments. Messages to a busy agent are queued and sent when it's free.
+- **Questions and approvals** from an agent show as cards you can click.
+- **Subagents** that Claude Code starts show live above the message box.
+- **Consult other models**: the chief of staff (or you, with `node ~/.bridge-ai/chief/bin/bridge ask`) can put a one-off question to Grok, GPT, Claude, Gemini, Muse Spark, Perplexity, DeepSeek, a local Ollama model and others, for a second opinion, live news, or a very long document. It uses each agent's CLI and your existing subscription where it can, and an API key from Model providers otherwise. Settings › Agents shows who is reachable and how.
+- **Plain chats**: talk to Claude, Codex or any agent directly, like its own app, with no project folder (New agent › Plain chat, or New chat in `⌘K`).
+- **Chief of staff**: tell it what you need; it sends the work to the agent already on that topic or starts a new one, tracks it, and tells you when it's done. It learns where work lives and how you like things done, in a playbook you can read and edit.
+- **Today**: schedule, inbox ranking, morning brief, routines, ideas, usage and quota, weather, markets and news.
+- **Usage**: tokens and cost per day, model and project, with a year heatmap (from your agents' local logs via ccusage).
+- **Phone**: the same app over Tailscale, with tabs for Chief, Agents, Terminals and Today.
+- **Appearance**: Slack-style themes that color the window frame, light and dark modes, and custom colors you can share as a string.
+
+## Desktop app
+
+`desktop/` wraps Bridge AI in an app window with a badge for agents that need you, notifications, and a global shortcut (`Alt+Cmd+A` on macOS, `Alt+Ctrl+A` elsewhere; change it with `desktop.shortcut` in config).
+
+```bash
+npm run desktop          # run it from your clone
+npm run desktop:dev      # same, with hot reload
+npm run desktop:dist     # build an installer to share
+```
+
+### Build it to share
+
+`npm run desktop:dist` builds a self-contained app: Bridge AI's server, the UI and their dependencies go inside it, and it runs on the app's own Node. The people you give it to don't need Node, npm or a clone. They only need the agent CLIs they want to use (Claude Code, Codex, ...), and onboarding offers to install those. Nothing of yours goes in: settings, history and the chief of staff's memory live in each person's own `~/.bridge-ai`.
+
+| Build on | You get (in `desktop/dist/`) |
+|---|---|
+| macOS | `Bridge AI-<version>-arm64.dmg` (Apple Silicon) and `Bridge AI-<version>-x64.dmg` (Intel) |
+| Windows | `Bridge AI Setup <version>.exe` |
+| Linux | `.AppImage` and `.deb` |
+
+Build each platform on that platform. The first build downloads Electron, which takes a minute.
+
+The builds aren't signed with an Apple or Microsoft certificate, so the first open asks for confirmation:
+
+- **macOS:** open the .dmg and drag Bridge AI to Applications. On first launch macOS says it can't check the app; click Done, then go to System Settings › Privacy & Security and click **Open Anyway**. If it says the app is damaged, run `xattr -dr com.apple.quarantine "/Applications/Bridge AI.app"` once.
+- **Windows:** SmartScreen may say it protected your PC; click **More info › Run anyway**.
+
+Closing the window leaves Bridge AI running in the background so agents keep working. **Bridge AI › Quit and Stop Agents** stops everything.
+
+## Security
+
+- The server listens on `127.0.0.1` only. It answers requests whose Host is this machine or a Tailscale name and, from a browser, whose Origin is too, so other web pages can't drive your agents through localhost.
+- File and git endpoints are read-only and stay inside the agent's folder.
+- Anyone who can reach the server can type into your agents. To use it from your phone, publish it with `tailscale serve` (tailnet only, as `npm start -- phone` does). Never expose it with `tailscale funnel` or a public port.
+- Mail and meeting agents are told that email text is data, not instructions, and never to send or post without your OK.
+
+## Optional setup
+
+- **Quota in the top bar**: run `npx quota-axi --provider claude --allow-keychain-prompt` once and allow access.
+- **Voice notes**: install `ffmpeg` and `whisper-cli` (whisper.cpp) and put a model at `~/.bridge-ai/models/ggml-small.en-q5_1.bin`.
+- **Inbox (macOS)**: turn on Mail for your account, open Mail once, and give Full Disk Access to the app that starts Bridge AI.
+- **Calendar (macOS)**: `brew install ical-buddy`.
+
+## License
+
+[Apache-2.0](LICENSE). See [NOTICE](NOTICE).
