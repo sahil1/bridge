@@ -171,7 +171,13 @@ npm run desktop:dist     # build an installer to share
 | Windows | `Bridge AI Setup <version>.exe` |
 | Linux | `.AppImage` and `.deb` |
 
-To publish a release, attach the four Mac files to a GitHub release with those exact names, so `install.sh` and the "latest" download links find them.
+To publish a release:
+
+1. Set the new version in `package.json` and `desktop/package.json`, and add a `## <version>` section to [CHANGELOG.md](CHANGELOG.md).
+2. Commit, and merge to `main`.
+3. `npm run desktop:dist`, then `npm run release`.
+
+`npm run release` checks that the built apps are that version and that `main` has the code, then creates the GitHub release with the four Mac files (named so `install.sh` and the "latest" download links find them), their checksums, and the changelog section as notes. Try `npm run release -- --dry-run` first, or `-- --draft` to look the release over before publishing it.
 
 Build each platform on that platform. The first build downloads Electron, which takes a minute.
 
