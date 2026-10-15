@@ -6,6 +6,8 @@ import Agents from './settings/Agents.jsx'
 import Providers from './settings/Providers.jsx'
 import Mcp from './settings/Mcp.jsx'
 import ConfigFile from './settings/ConfigFile.jsx'
+import Phone from './settings/Phone.jsx'
+import About from './settings/About.jsx'
 
 // One Settings window, Slack style: sections down the left, one scrolling panel on the right.
 // On a phone the sections become a row of chips above the panel.
@@ -14,8 +16,10 @@ export const SECTIONS = [
   { id: 'agents', label: 'Agents', icon: 'bot', hint: 'Installed agents and sign-in' },
   { id: 'providers', label: 'Model providers', icon: 'layers', hint: 'API keys, clouds, local models' },
   { id: 'mcp', label: 'MCP servers', icon: 'tool', hint: 'Tools your agents can use' },
+  { id: 'phone', label: 'Phone & notifications', icon: 'phone', hint: 'Open Bridge AI on your phone; what to notify you about' },
   { id: 'appearance', label: 'Appearance', icon: 'palette', hint: 'Theme, text size, density' },
   { id: 'config', label: 'Config file', icon: 'braces', hint: 'Every setting, as JSON' },
+  { id: 'about', label: 'About & updates', icon: 'info', hint: 'Version, updates, reporting a problem' },
 ]
 
 export default function Settings({ section = 'general', onClose, onOpenAgent }) {
@@ -55,6 +59,8 @@ export default function Settings({ section = 'general', onClose, onOpenAgent }) 
             {at === 'mcp' && <Mcp />}
             {at === 'appearance' && <Appearance />}
             {at === 'config' && <ConfigFile />}
+            {at === 'phone' && <Phone />}
+            {at === 'about' && <About />}
           </div>
         </section>
       </div>

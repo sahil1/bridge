@@ -34,10 +34,15 @@ import * as settings from './settings.js'
 import * as consult from './consult.js'
 import { terminals, openAttach } from './terminal.js'
 import { mcpRoutes } from './mcp.js'
+import * as notify from './notify.js'
+import * as push from './push.js'
+import * as phone from './phone.js'
+import * as updates from './updates.js'
 
 ensureDir(DATA)
 ensureDir(CACHE)
 const cfg = loadConfig()
+const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version
 let TZ = cfg.location?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone
 // The chief of staff: one agent, started in its own folder in the data dir, that routes work to the others.
 const CHIEF_DIR = expand(cfg.chief?.path) || prepareChief(cfg)
@@ -261,6 +266,15 @@ app.post('/api/agents/:pane/queue', wrap(async (req) => {
   pushFleet()
   return item
 }))
+// Send now: interrupt what the agent is doing (Esc) and send this as soon as it's back at its prompt.
+app.post('/api/agents/:pane/steer', wrap(async (req) => {
+  const text = String(req.body?.text || '').trim()
+  if (!text) throw new Error('Empty message')
+  await rt.keys(req.params.pane, ['esc'])
+  const item = queue.add(req.params.pane, text, { now: true })
+  pushFleet()
+  return { ...item, steered: true }
+}))
 app.delete('/api/agents/:pane/queue/:id', wrap(async (req) => { queue.remove(req.params.pane, req.params.id); pushFleet(); return { ok: true } }))
 
 app.get('/api/places', wrap(async () => {
@@ -353,12 +367,14 @@ app.get('/api/events', (req, res) => {
   req.on('close', () => clients.delete(res))
 })
 async function pollFleet() {
-  if (clients.size || queue.size()) {
+  // Watched while a window is open, work is queued, or a notification channel (your phone) is on.
+  if (clients.size || queue.size() || notify.active()) {
     try {
       let f = await fleetView()
       if (queue.size() && await queue.deliver(f.agents, (id, text, a) => promptSafe(rt, id, text, a), (id) => rt.read(id, 40))) f = await fleetView()
       const key = JSON.stringify([f.agents.map((a) => [a.paneId, a.status, a.title, a.seq]), f.tabs.map((t) => [t.tabId, t.label, t.panes.map((p) => [p.paneId, p.cwd, p.rect?.width, p.rect?.height, p.rect?.x, p.rect?.y])]), f.workspaces.map((w) => w.label), f.queue])
       lastFleet = f
+      notify.onFleet(f, cfg)
       if (key !== lastFleetKey) {
         lastFleetKey = key
         for (const c of clients) c.write(`event: fleet\ndata: ${JSON.stringify(f)}\n\n`)
@@ -616,7 +632,42 @@ app.get('/api/brief', wrap(async (req) => {
   return { greeting: cfg.name ? `${greeting}, ${cfg.name}` : greeting, date: new Date().toISOString(), lines }
 }))
 
+// ---------- Notifications, phone, updates ----------
+notify.use(push.channel)
+// Quotas: checked every 10 minutes while a notification channel is on.
+setInterval(() => { if (notify.active()) quota().then((q) => notify.onQuota(q, cfg), () => {}) }, 10 * 60 * 1000)
+
+app.get('/api/push/key', wrap(() => ({ publicKey: push.publicKey() })))
+app.get('/api/push/devices', wrap(() => push.devices()))
+app.post('/api/push/subscribe', wrap((req) => push.subscribe(req.body?.subscription, req.body?.label)))
+app.post('/api/push/unsubscribe', wrap((req) => push.unsubscribe(req.body || {})))
+app.post('/api/push/test', wrap(() => notify.send({ kind: 'test', title: 'Bridge AI', body: 'Notifications are working.', url: '/', tag: 'test' })))
+
+app.get('/api/phone', wrap(() => phone.status(cfg.port)))
+app.post('/api/phone', wrap((req) => (req.body?.enabled ? phone.enable(cfg.port) : phone.disable(cfg.port))))
+
+// For bug reports: facts about this install, nothing personal (no names, emails, paths, location).
+app.get('/api/diagnostics', wrap(async () => {
+  const [agents, subs, ph] = await Promise.all([installed().catch(() => []), subscriptions().catch(() => []), phone.status(cfg.port).catch(() => ({}))])
+  const signed = new Map(subs.map((x) => [x.kind, x.signedIn]))
+  return {
+    bridgeAi: VERSION,
+    install: process.versions.electron ? `desktop app (Electron ${process.versions.electron})` : `from source (Node ${process.versions.node})`,
+    system: `${process.platform} ${os.release()} ${process.arch}`,
+    runtime: rt.name,
+    agents: agents.map((a) => `${a.kind}${signed.get(a.kind) === true ? ' (signed in)' : signed.get(a.kind) === false ? ' (not signed in)' : ''}`),
+    phone: ph.installed ? `Tailscale ${ph.state || 'unknown'}${ph.enabled ? ', phone access on' : ''}` : 'Tailscale not installed',
+    pushDevices: push.devices().length,
+    setupDone: !!cfg.setupDone,
+    uptimeMinutes: Math.round(process.uptime() / 60),
+  }
+}))
+
+app.get('/api/updates', wrap((req) => updates.status({ force: req.query.refresh === '1', disabled: cfg.updates?.check === false })))
+app.post('/api/updates/install', wrap(() => updates.install()))
+
 app.get('/api/config', (req, res) => res.json({
+  version: VERSION,
   name: cfg.name || '', location: cfg.location?.label || null, hasMortgage: !!cfg.mortgage,
   runtime: { name: rt.name, ...rt.caps }, platform: process.platform, mail: IS_MAC, calendar: IS_MAC,
   defaultAgent: cfg.defaultAgent || 'claude', chiefKind: cfg.chief?.kind || 'claude', setupDone: !!cfg.setupDone,

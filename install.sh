@@ -102,7 +102,9 @@ ditto -x -k "$TMP/bridge.zip" "$TMP/app" || fail "the download looks damaged; ru
 # Updating: close the running app and stop its server, so the new version starts fresh. Your
 # agents' sessions resume when it starts again.
 if [ -d "$DEST/$APP" ]; then
-  pkill -TERM -f "$DEST/$APP/Contents/MacOS/" 2>/dev/null && sleep 1 || true
+  # -a: include our own parents (and the signal must come first on macOS). When the app updates itself, it started this installer, and
+  # without -a macOS pkill skips it and its server, leaving the old version running.
+  pkill -TERM -a -f "$DEST/$APP/Contents/MacOS/" 2>/dev/null && sleep 1 || true
   PIDFILE="${BRIDGE_HOME:-$HOME/.bridge-ai}/cache/server.pid"
   if [ -f "$PIDFILE" ]; then
     PID="$(cat "$PIDFILE" 2>/dev/null || true)"

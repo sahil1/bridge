@@ -4,8 +4,10 @@ import App from './App.jsx'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
 import './styles.css'
 import { apply } from './appearance.js'
+import { registerServiceWorker } from './pwa.js'
 
 apply()
+registerServiceWorker()
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

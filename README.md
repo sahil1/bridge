@@ -168,7 +168,7 @@ You rarely need to edit the file by hand. **Settings** (the gear in the top bar,
 - **Chief of staff**: tell it what you need; it sends the work to the agent already on that topic or starts a new one, tracks it, and tells you when it's done. It learns where work lives and how you like things done, in a playbook you can read and edit.
 - **Today**: schedule, inbox ranking, morning brief, routines, ideas, usage and quota, weather, markets and news.
 - **Usage**: tokens and cost per day, model and project, with a year heatmap (from your agents' local logs via ccusage).
-- **Phone**: the same app over Tailscale, with tabs for Chief, Agents, Terminals and Today.
+- **Phone**: the same app on your phone, as a Home Screen app with notifications. See [On your phone](#on-your-phone).
 - **Appearance**: Slack-style themes that color the window frame, light and dark modes, and custom colors you can share as a string.
 
 ## Desktop app
@@ -201,11 +201,22 @@ To publish a release:
 
 You can also run the builds without releasing: Actions › Release › Run workflow. The installers are attached to the run.
 
+## On your phone
+
+Bridge AI works on your phone as an app on the Home Screen, with notifications when an agent needs you or finishes. No app store is involved: it's the same app, opened from your computer through [Tailscale](https://tailscale.com), a free private network between your own devices.
+
+1. On the computer: install Tailscale and sign in. In Bridge AI, open **Settings › Phone & notifications** and click **Turn on phone access**. It shows a QR code.
+2. On the phone: install Tailscale and sign in with the same account. Scan the QR code with the camera.
+3. Add it to the Home Screen: iPhone, Share › **Add to Home Screen**; Android, ⋮ › **Install app**.
+4. Open Bridge AI from the Home Screen, go to **Settings › Phone & notifications**, and click **Turn on notifications**.
+
+Choose what you're notified about in the same place: an agent needs you, an agent finished, and usage running low (5 to 25% left). Notifications are encrypted end to end to your phone. Only devices signed in to your Tailscale account can reach Bridge AI; nothing is opened to the internet. iPhone needs iOS 16.4 or later for notifications.
+
 ## Security
 
 - The server listens on `127.0.0.1` only. It answers requests whose Host is this machine or a Tailscale name and, from a browser, whose Origin is too, so other web pages can't drive your agents through localhost.
 - File and git endpoints are read-only and stay inside the agent's folder.
-- Anyone who can reach the server can type into your agents. To use it from your phone, publish it with `tailscale serve` (tailnet only, as `npm start -- phone` does). Never expose it with `tailscale funnel` or a public port.
+- Anyone who can reach the server can type into your agents. Phone access uses `tailscale serve`, which only devices on your tailnet can reach. Never expose Bridge AI with `tailscale funnel` or a public port.
 - Mail and meeting agents are told that email text is data, not instructions, and never to send or post without your OK.
 
 ## Optional setup

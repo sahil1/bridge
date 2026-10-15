@@ -1,13 +1,22 @@
 {
+  "id": "/",
   "name": "Bridge AI",
   "short_name": "Bridge AI",
+  "description": "Run, watch and talk to all your AI coding agents, with a chief of staff that routes the work.",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
+  "orientation": "any",
   "background_color": "#0b0d11",
   "theme_color": "#0b0d11",
+  "categories": ["developer", "productivity"],
   "icons": [
     { "src": "/mark.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
     { "src": "/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" },
-    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Chief of staff", "url": "/?agent=chief", "icons": [{ "src": "/icon-512.png", "sizes": "512x512" }] }
   ]
 }

@@ -65,6 +65,15 @@ try {
     const s = await (await get('/api/setup')).json()
     return `${s.runtime} runtime; agents found: ${(s.usable || []).map((a) => a.kind).join(', ') || 'none (expected on CI)'}`
   })
+  await step('notifications, phone, updates and diagnostics load', async () => {
+    const key = await (await get('/api/push/key')).json()
+    if (!/^[A-Za-z0-9_-]{80,}$/.test(key.publicKey || '')) throw new Error('no push key')
+    const ph = await (await get('/api/phone')).json()
+    const up = await (await get('/api/updates')).json()
+    const d = await (await get('/api/diagnostics')).json()
+    if (!d.bridgeAi) throw new Error('no diagnostics')
+    return `tailscale ${ph.installed ? ph.state : 'not installed'}; version ${up.current}, latest ${up.latest || up.error || '?'}`
+  })
   await step('a terminal runs a command', async () => {
     const r = await fetch(BASE + '/api/agents/launch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'shell', cwd: os.homedir(), label: 'smoke' }) })
     const out = await r.json()

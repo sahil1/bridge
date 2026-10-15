@@ -7,6 +7,7 @@ import Board from './components/Board.jsx'
 import Dock from './components/Dock.jsx'
 import Console, { MateEmpty } from './components/Console.jsx'
 import { Settings, Onboarding, HerdrView, Terminals, ShellTab, preloadViews } from './lazy.jsx'
+import { openLink } from './pwa.js'
 import NewAgent from './components/NewAgent.jsx'
 import Palette from './components/Palette.jsx'
 import { NextMeetingChip } from './components/Agenda.jsx'
@@ -116,6 +117,7 @@ export default function App() {
   const [cmdRef, cmdW] = useWidth()
   const [rowRef, rowW] = useWidth()
   const quota = usePoll('/quota', 5 * 60 * 1000)
+  const update = usePoll('/updates', 6 * 60 * 60 * 1000)
   const prevStatus = useRef({})
   useRuntimeTheme()
 
@@ -173,12 +175,33 @@ export default function App() {
 
   // Clicking a notification (browser or the Mac app) opens the agent it was about.
   const openAgentRef = useRef(null)
+  const fleetRef = useRef(null)
+  fleetRef.current = fleet
   openAgentRef.current = openAgent
   useEffect(() => {
-    const on = (e) => { if (e.detail?.paneId) openAgentRef.current?.(e.detail.paneId) }
+    // "chief" (the home-screen shortcut) means whichever agent is the chief of staff.
+    const on = (e) => {
+      let id = e.detail?.paneId
+      if (id === 'chief') {
+        id = fleetRef.current?.agents?.find((a) => a.chief)?.paneId
+        // No chief running: show where to start one (the phone's Chief tab; on a wide screen the
+        // main area already offers it).
+        if (!id) { setMtab('mate'); return }
+      }
+      if (id) openAgentRef.current?.(id)
+    }
     window.addEventListener('bridge-open-agent', on)
     return () => window.removeEventListener('bridge-open-agent', on)
   }, [])
+  const showCardRef = useRef(null)
+  useEffect(() => {
+    const on = (e) => { if (e.detail?.id) showCardRef.current?.(e.detail.id) }
+    window.addEventListener('bridge-open-card', on)
+    return () => window.removeEventListener('bridge-open-card', on)
+  }, [])
+  // Opened from a notification link (?agent=... or ?card=...): go there once agents have loaded.
+  const linked = useRef(false)
+  useEffect(() => { if (fleet && !linked.current) { linked.current = true; openLink() } }, [fleet])
 
   const closeTab = (id) => setW((w) => {
     const tabs = w.tabs.filter((t) => t !== id)
@@ -210,6 +233,8 @@ export default function App() {
     else set({ dockMin: false, max: L.max === 'dock' ? 'dock' : null })
     setTimeout(() => document.getElementById(`card-${id}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 80)
   }
+  showCardRef.current = showCard
+
   // Open a Today tab full size (desktop) or in the phone's Today tab.
   const showToday = (tab, detail) => {
     setView('command')
@@ -294,6 +319,11 @@ export default function App() {
         )}
         <NextMeetingChip onClick={() => showCard('calendar')} />
         <ProviderChip quota={quota.data} primary={primary} onClick={() => showCard('gauge')} />
+        {update.data?.available && (
+          <button className="top-chip update-chip" onClick={() => setSettings('about')} title={`Bridge AI ${update.data.latest} is available (you have ${update.data.current})`}>
+            <Icon name="download" size={13} /><span className="hide-sm">Update</span>
+          </button>
+        )}
         <WeatherChip onClick={() => showCard('sun')} />
         <Clock />
         <button className="win-btn" onClick={() => setSettings('general')} aria-label="Settings" title="Settings (⌘,)">

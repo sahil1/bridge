@@ -241,7 +241,8 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
     }
   }
 
-  const send = async () => {
+  // now: while the agent is working, interrupt it and send this straight away instead of queueing.
+  const send = async (now = false) => {
     const text = draft.text.trim()
     if (!text && !draft.files.length) return
     const attach = draft.files.length ? `\n\nAttached: ${draft.files.map((f) => f.path).join(' ')}` : ''
@@ -251,7 +252,7 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
     hist.current = null
     setDraft({ text: '', files: [] })
     saveDraft(id, { text: '', files: [] })
-    const ok = await onSend(message)
+    const ok = await onSend(message, { now: now === true })
     if (ok === false) setDraft(prev) // keep what you wrote if sending failed
   }
 
@@ -356,7 +357,7 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
     }
     if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey && !e.altKey && !e.metaKey && recall(e)) { e.preventDefault(); return }
     const touch = window.matchMedia('(pointer: coarse)').matches
-    if (e.key === 'Enter' && !e.shiftKey && !touch && !e.nativeEvent.isComposing) { e.preventDefault(); send() }
+    if (e.key === 'Enter' && !e.shiftKey && !touch && !e.nativeEvent.isComposing) { e.preventDefault(); send(agentBusy && (e.metaKey || e.ctrlKey)) }
   }
 
   const recording = voice.state === 'recording'
@@ -420,10 +421,11 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
               </button>
               <input ref={fileRef} type="file" multiple hidden onChange={(e) => { upload(e.target.files); e.target.value = '' }} />
               <span className={`comp-hint ${status ? 'status' : ''}`}>{status || (agentBusy
-                ? <span className="busy-hint">Working{queuedCount ? ` · ${queuedCount} queued` : ''}<span className="hide-touch"> · <kbd>⏎</kbd> queues your message</span></span>
+                ? <span className="busy-hint">Working{queuedCount ? ` · ${queuedCount} queued` : ''}<span className="hide-touch"> · <kbd>⏎</kbd> queue · <kbd>{/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl'}⏎</kbd> send now</span></span>
                 : <span className="hide-touch"><kbd>⏎</kbd> send · <kbd>⇧⏎</kbd> new line</span>)}</span>
               {agentBusy && onStop && <button className="stop-btn" onClick={onStop} title="Interrupt the agent (sends Esc)" aria-label="Stop the agent"><Icon name="stop" size={11} /> Stop</button>}
-              <button className={`send ${agentBusy ? 'queue' : ''}`} onClick={send} disabled={!canSend} aria-label={agentBusy ? 'Queue message' : 'Send'} title={agentBusy ? 'Queue: sends when the agent is free' : 'Send'}>
+              {agentBusy && canSend && <button className="now-btn" onClick={() => send(true)} title="Stop what the agent is doing and send this now">Send now</button>}
+              <button className={`send ${agentBusy ? 'queue' : ''}`} onClick={() => send(false)} disabled={!canSend} aria-label={agentBusy ? 'Queue message' : 'Send'} title={agentBusy ? 'Queue: sends when the agent is free' : 'Send'}>
                 <Icon name={agentBusy ? 'clock' : 'send'} size={15} />
               </button>
             </>

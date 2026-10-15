@@ -369,14 +369,15 @@ const DETECT = {
     if (/oauth|login/i.test(type)) return S(null, 'subscription')
     return S(false)
   },
-  async copilot() {
+  async copilot(isInstalled) {
     if (anyEnv('COPILOT_GITHUB_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN')) return S(true, 'api key')
     const cfg = readJSON(path.join(HOME, '.copilot', 'config.json'))
     if (cfg && (cfg.logged_in_users?.length || cfg.last_logged_in_user)) return S(true, 'subscription')
     if (await keychainHas('copilot-cli')) return S(true, 'subscription')
     // Copilot CLI falls back to the GitHub CLI's login. Whether the account has a Copilot plan
-    // can't be told from here, so this counts as signed in to GitHub only.
-    if ((await run('gh', ['auth', 'status'], 5000)).code === 0) return S(true, 'subscription', 'via GitHub CLI')
+    // can't be told from here, so this counts as signed in to GitHub only. `gh auth status` goes
+    // over the network, so only ask when Copilot is actually installed.
+    if (isInstalled && (await run('gh', ['auth', 'status'], 5000)).code === 0) return S(true, 'subscription', 'via GitHub CLI')
     return S(null)
   },
   async cursor() {
@@ -464,7 +465,7 @@ async function checkSubscriptions(installedFn) {
     const isIn = have.has(a.kind)
     let s = S(null)
     // Checks that run the CLI itself (cursor-agent, gh) only make sense when it's installed.
-    if (DETECT[a.kind] && (isIn || a.kind !== 'cursor')) { try { s = await DETECT[a.kind]() } catch { s = S(null) } }
+    if (DETECT[a.kind] && (isIn || a.kind !== 'cursor')) { try { s = await DETECT[a.kind](isIn) } catch { s = S(null) } }
     return { kind: a.kind, label: a.label, installed: isIn, ...s, hint: HINTS[a.kind] || null }
   }))
   subsCache = { at: Date.now(), list }

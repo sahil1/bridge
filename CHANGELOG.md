@@ -2,6 +2,27 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
+## 2.0.0
+
+Bridge AI on your phone, with notifications.
+
+### What's new
+
+- **On your phone, no app store:** Settings › Phone & notifications turns on phone access through Tailscale (free, private to your own devices) and shows a QR code. Add Bridge AI to your Home Screen and it opens like an app.
+- **Notifications** on your phone or in your browser when an agent needs you, when it finishes, and when a usage quota runs low (you pick the threshold). They're end-to-end encrypted to your device. Tapping one opens that agent.
+- **Send now:** while an agent is working, Enter still queues your message; **Send now** (or ⌘/Ctrl+Enter) interrupts the agent and sends it straight away.
+- **Updates:** Bridge AI tells you when a new version is out (a chip in the top bar) and the desktop app updates itself in one click. Settings › About & updates.
+- **Reporting problems:** Settings › About & updates › Copy details gives the version and system details for a bug report, and nothing personal.
+- **Works offline gracefully:** if your phone can't reach your computer, it says so instead of a blank page.
+- **Faster everywhere:** finding installed agents no longer starts a process per agent (much faster on Windows), and the GitHub sign-in check only runs when Copilot is installed.
+
+### Install
+
+- **macOS and Linux:** `curl -fsSL https://raw.githubusercontent.com/sahil1/bridge/main/install.sh | sh`
+- **Windows (PowerShell):** `irm https://raw.githubusercontent.com/sahil1/bridge/main/install.ps1 | iex`
+
+Already on 1.24? Run the install command again. From 2.0 on, Bridge AI updates itself from Settings › About & updates.
+
 ## 1.24.0
 
 Bridge AI for Windows and Linux.

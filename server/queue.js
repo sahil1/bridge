@@ -13,9 +13,11 @@ const save = () => { fs.mkdirSync(path.dirname(FILE), { recursive: true }); fs.w
 export const all = () => q
 export const size = () => Object.values(q).reduce((n, l) => n + l.length, 0)
 
-export function add(paneId, text) {
-  const item = { id: crypto.randomBytes(4).toString('hex'), text, at: new Date().toISOString() }
-  q[paneId] = [...(q[paneId] || []), item]
+// { now: true } puts it first and sends it as soon as the agent is back at its prompt: "send now",
+// after the agent was interrupted.
+export function add(paneId, text, { now = false } = {}) {
+  const item = { id: crypto.randomBytes(4).toString('hex'), text, at: new Date().toISOString(), ...(now ? { now: true } : {}) }
+  q[paneId] = now ? [item, ...(q[paneId] || [])] : [...(q[paneId] || []), item]
   save()
   return item
 }
@@ -49,7 +51,7 @@ export async function deliver(agents, prompt, readScreen) {
     const a = agents.find((x) => x.paneId === paneId)
     if (!['idle', 'done'].includes(a.status)) { readySince.delete(paneId); continue }
     if (!readySince.has(paneId)) readySince.set(paneId, Date.now())
-    if (Date.now() - readySince.get(paneId) < 3000) continue
+    if (Date.now() - readySince.get(paneId) < (q[paneId][0]?.now ? 400 : 3000)) continue
     try { if (looksBusy(await readScreen(paneId))) continue } catch { continue }
     const [next, ...rest] = q[paneId]
     try {

@@ -23,6 +23,8 @@
 //               see what's typed in its prompt and avoid merging messages
 import { execFile } from 'node:child_process'
 import crypto from 'node:crypto'
+import fs from 'node:fs'
+import path from 'node:path'
 import { IS_WIN, withNodeShim } from './paths.js'
 
 const ESC_INTERRUPT = /esc to (interrupt|cancel)|ctrl\+c to (interrupt|cancel|stop)|press esc to stop/i
@@ -78,11 +80,23 @@ export function loginPath() {
   return loginPathCache
 }
 
+// Find a program on PATH the way a shell would, by looking in each folder: no process to start,
+// which matters on Windows where starting `where` 13 times took seconds. On Windows only real
+// program types count (PATHEXT: .exe, .cmd, ...), so npm's extension-less shell shims are skipped.
+const EXTS = IS_WIN ? (process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean) : ['']
 function which(bin, PATH) {
-  return new Promise((resolve) => {
-    const [cmd, args] = IS_WIN ? ['where', [bin]] : ['/bin/sh', ['-c', `command -v ${bin}`]]
-    execFile(cmd, args, { timeout: 5000, env: { ...process.env, PATH } }, (err, out) => resolve(err ? null : out.trim().split(/\r?\n/)[0] || null))
-  })
+  for (const dir of String(PATH || '').split(path.delimiter)) {
+    if (!dir) continue
+    for (const ext of EXTS) {
+      const p = path.join(dir, bin + ext)
+      try {
+        if (!fs.statSync(p).isFile()) continue
+        if (!IS_WIN) fs.accessSync(p, fs.constants.X_OK)
+        return Promise.resolve(p)
+      } catch { /* not here */ }
+    }
+  }
+  return Promise.resolve(null)
 }
 
 // Which agents are installed, with the program each one runs. Cached for a minute; callers that

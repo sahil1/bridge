@@ -327,10 +327,15 @@ export default function Console({ agent, variant = 'focus', controls = {}, onBac
   const pid = encodeURIComponent(agent.paneId)
   const minimized = controls.minimized
 
-  const send = async (t) => {
-    // Busy agent: the server holds the message and sends it when the agent is free.
+  const send = async (t, { now = false } = {}) => {
+    // Busy agent: the server holds the message and sends it when the agent is free, or with
+    // "send now", interrupts the agent and sends it as soon as it's back at its prompt.
     if (agent.status === 'working') {
-      try { await api(`/agents/${pid}/queue`, { method: 'POST', body: { text: t } }); return true } catch (e) { setFlash(e.message); return false }
+      try {
+        await api(`/agents/${pid}/${now ? 'steer' : 'queue'}`, { method: 'POST', body: { text: t } })
+        if (now) setFlash('Interrupted; sending your message')
+        return true
+      } catch (e) { setFlash(e.message); return false }
     }
     const id = Date.now()
     setPending((p) => [...p, { id, text: t }])
