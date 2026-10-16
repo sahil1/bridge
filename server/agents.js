@@ -28,6 +28,9 @@ import path from 'node:path'
 import { IS_WIN, withNodeShim } from './paths.js'
 
 const ESC_INTERRUPT = /esc to (interrupt|cancel)|ctrl\+c to (interrupt|cancel|stop)|press esc to stop/i
+// Claude Code's working line: a spinner and a word ending in "…" ("✻ Infusing…", "✶ Pondering… (12s)").
+// Newer versions dropped the "esc to interrupt" text; the finished line ("✻ Brewed for 8s") has no "…".
+const CLAUDE_BUSY = new RegExp(`${ESC_INTERRUPT.source}|^\\s*[✻✳✶✢✽·*]\\s+[A-Z][\\w'-]*…`, 'im')
 
 export const AGENTS = [
   {
@@ -35,16 +38,21 @@ export const AGENTS = [
     sessionId: 'assign',
     start: ({ sessionId, prompt }) => [...(sessionId ? ['--session-id', sessionId] : []), ...(prompt ? [prompt] : [])], promptArg: true,
     resume: (id) => ['--resume', id],
-    busy: ESC_INTERRUPT,
-    caps: { chat: true, subagents: true, commands: true, questions: true, inputBox: true },
+    // A copy of a conversation under a new id (the original stays as it is).
+    fork: (id, newId) => ['--resume', id, '--fork-session', ...(newId ? ['--session-id', newId] : [])],
+    busy: CLAUDE_BUSY,
+    // typeAhead: takes messages while it works (queues or folds them in itself), like typing in its
+    // terminal. rewind: Bridge AI can edit a sent message through its Rewind list. btw: /btw side questions.
+    caps: { chat: true, subagents: true, commands: true, questions: true, inputBox: true, typeAhead: true, rewind: true, btw: true, fork: true },
   },
   {
     kind: 'codex', label: 'Codex', model: (m) => ['--model', m], models: [], install: { npm: '@openai/codex' }, bin: ['codex'], herdr: 'codex', usage: 'codex',
     sessionId: 'discover',
     start: ({ prompt }) => (prompt ? [prompt] : []), promptArg: true,
     resume: (id) => ['resume', id],
+    fork: (id) => ['fork', id],
     busy: ESC_INTERRUPT,
-    caps: { chat: true, commands: true },
+    caps: { chat: true, commands: true, typeAhead: true, fork: true, rewind: true },
   },
   { kind: 'gemini', label: 'Gemini CLI', install: { npm: '@google/gemini-cli' }, bin: ['gemini'], herdr: 'gemini', start: ({ prompt }) => (prompt ? ['-i', prompt] : []), promptArg: true, busy: ESC_INTERRUPT, caps: {} },
   { kind: 'grok', label: 'Grok', model: (m) => ['--model', m], models: [], install: { npm: '@vibe-kit/grok-cli' }, bin: ['grok'], herdr: 'grok', start: () => [], busy: ESC_INTERRUPT, caps: {} },

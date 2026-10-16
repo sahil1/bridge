@@ -49,6 +49,31 @@ function charRatio(family) {
 }
 
 const OPTION = /^\s*(?:[❯›>]\s*)?(\d)\.\s+\S/
+const RULE = /^\s*─{3,}/
+
+// The screen is a copy drawn here, so xterm's cursor would sit wherever the drawing stopped (the
+// end of the status bar). Put it where typing goes instead: the end of what's typed in the
+// agent's input box (Claude: "❯" between two rules; Codex: "›" near the bottom), at the start
+// when the box only shows a dimmed placeholder. No input box on screen: no cursor.
+function placeCursor(term) {
+  const b = term.buffer.active
+  const text = (y) => b.getLine(y)?.translateToString(true) || ''
+  for (let y = b.length - 1; y >= Math.max(0, b.length - 40); y--) {
+    if (!/^[❯›](\s|$)/.test(text(y))) continue
+    const claude = RULE.test(text(y - 1))
+    if (!claude && !(text(y).startsWith('›') && b.length - y <= 8)) continue
+    let end = y
+    if (claude) while (end + 1 < b.length && !RULE.test(text(end + 1)) && end - y < 30) end++
+    const cell = b.getLine(y)?.getCell(2)
+    const placeholder = end === y && cell && (cell.isDim() || cell.isItalic())
+    const col = placeholder ? 2 : Math.max(2, text(end).replace(/\s+$/, '').length)
+    const row = end - b.baseY + 1
+    if (row < 1 || row > term.rows) break
+    term.write(`\x1b[?25h\x1b[${row};${col + 1}H`)
+    return
+  }
+  term.write('\x1b[?25l')
+}
 
 // Text size from Appearance (one step smaller on a phone).
 const termFont = () => {
@@ -70,19 +95,36 @@ export default function Terminal({ paneId, active, focusKey, onChat }) {
   const [error, setError] = useState(null)
   const [noHistory, setNoHistory] = useState(false)
 
-  // Size the font so the pane's real column count fills the width.
+  // Size the font so the pane's real column count fills the width: the room inside the padding,
+  // less xterm's own scrollbar. The first guess comes from the font's shape; then the drawn width
+  // is measured and the size trimmed, since xterm rounds each cell to whole device pixels.
   const layout = () => {
     const term = termRef.current
     const host = hostRef.current
     if (!term || !host || !host.clientWidth) return
     const cols = colsRef.current
     if (cols) {
-      const family = term.options.fontFamily
-      const size = Math.max(10, Math.min(14, Math.floor(((host.clientWidth - 14) / (cols * charRatio(family))) * 10) / 10))
-      if (Math.abs(term.options.fontSize - size) > 0.05) term.options.fontSize = size
+      const cs = getComputedStyle(host)
+      const vp = term.element?.querySelector('.xterm-viewport')
+      const bar = vp ? Math.max(0, vp.offsetWidth - vp.clientWidth) : 0
+      const room = host.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - bar - 2
+      const fit = (size) => {
+        size = Math.max(10, Math.min(14, Math.floor(size * 10) / 10))
+        if (Math.abs(term.options.fontSize - size) > 0.05) term.options.fontSize = size
+      }
+      fit(room / (cols * charRatio(term.options.fontFamily)))
       const dims = fitRef.current.proposeDimensions()
-      const rows = Math.max(5, (dims?.rows || 30) - 2) // room for the host padding and the sideways scrollbar
+      const rows = Math.max(5, (dims?.rows || 30) - 1)
       if (term.cols !== cols || term.rows !== rows) term.resize(cols, rows)
+      requestAnimationFrame(() => {
+        const drawn = term.element?.querySelector('.xterm-screen')?.getBoundingClientRect().width
+        if (drawn && drawn > room + 0.5) {
+          fit(term.options.fontSize * (room / drawn) - 0.05)
+          const r = Math.max(5, (fitRef.current.proposeDimensions()?.rows || 30) - 1)
+          if (term.rows !== r) term.resize(cols, r)
+        }
+        host.classList.toggle('wide', term.options.fontSize <= 10 && (term.element?.querySelector('.xterm-screen')?.getBoundingClientRect().width || 0) > room + 0.5)
+      })
     } else {
       try { fitRef.current.fit() } catch { /* detached */ }
     }
@@ -92,7 +134,7 @@ export default function Terminal({ paneId, active, focusKey, onChat }) {
     const css = getComputedStyle(document.documentElement)
     const theme = () => {
       const c = getComputedStyle(document.documentElement)
-      return { background: c.getPropertyValue('--term-bg').trim(), foreground: c.getPropertyValue('--term-fg').trim(), cursor: 'transparent', selectionBackground: c.getPropertyValue('--accent-soft').trim() || 'rgba(80,130,240,.3)' }
+      return { background: c.getPropertyValue('--term-bg').trim(), foreground: c.getPropertyValue('--term-fg').trim(), cursor: c.getPropertyValue('--term-fg').trim(), selectionBackground: c.getPropertyValue('--accent-soft').trim() || 'rgba(80,130,240,.3)' }
     }
     const term = new XTerm({
       convertEol: false,
@@ -101,6 +143,7 @@ export default function Terminal({ paneId, active, focusKey, onChat }) {
       fontFamily: css.getPropertyValue('--font-mono').trim() || 'monospace',
       theme: theme(),
       cursorStyle: 'bar',
+      cursorBlink: true,
       cursorInactiveStyle: 'none',
       macOptionIsMeta: true,
       allowProposedApi: true,
@@ -175,7 +218,10 @@ export default function Terminal({ paneId, active, focusKey, onChat }) {
     pendingRef.current = null
     lastRef.current = ansi
     term.reset()
-    term.write(ansi, () => term.scrollToBottom())
+    // The agent's screen is often taller than what it drew (a short prompt at the top of a tall
+    // terminal); drop the blank rows below, so the view doesn't scroll down to empty space.
+    // eslint-disable-next-line no-control-regex
+    term.write(ansi.replace(/(?:\r?\n(?:\x1b\[[0-9;?]*[A-Za-z]|[ \t])*)+$/, ''), () => { term.scrollToBottom(); placeCursor(term) })
   }
 
   // Asked to take the keyboard (e.g. after a slash command opened a picker in the agent).

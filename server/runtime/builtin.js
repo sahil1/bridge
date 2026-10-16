@@ -54,7 +54,7 @@ function save() {
   try { fs.writeFileSync(STATE, JSON.stringify(out, null, 2)) } catch { /* read-only disk: keep going */ }
 }
 
-async function spawnPane({ paneId, tabId, workspaceId, kind, cwd, sessionId, resume, opening, model, account }) {
+async function spawnPane({ paneId, tabId, workspaceId, kind, cwd, sessionId, resume, fork, opening, model, account }) {
   const a = adapter(kind)
   const PATH = await loginPath()
   let bin = null
@@ -64,7 +64,11 @@ async function spawnPane({ paneId, tabId, workspaceId, kind, cwd, sessionId, res
     // Resume only a session that has a transcript (one that never got a message can't be resumed).
     let hasLog = false
     try { hasLog = !!(resume && sessionId && a.resume && locate(kind, sessionId, cwd)) } catch { /* no transcript folder */ }
-    if (hasLog) args = a.resume(sessionId)
+    if (fork && a.fork) {
+      // A copy of session `fork`: Claude takes the new id we give it; Codex names its own.
+      sessionId = a.sessionId === 'assign' ? newSessionId() : null
+      args = a.fork(fork, sessionId || undefined)
+    } else if (hasLog) args = a.resume(sessionId)
     else {
       if (resume) sessionId = null
       if (a.sessionId === 'assign' && !sessionId) sessionId = newSessionId()
@@ -274,6 +278,8 @@ export async function prompt(paneId, t) {
   return { ok: true }
 }
 export async function focusAgent(paneId) { need(paneId).seen = true }
+// The agent now continues in another session (Codex after an edit): resume that one from here on.
+export async function setSession(paneId, sessionId) { need(paneId).sessionId = sessionId; save() }
 export async function focusTab() {}
 
 function renameIn(list, key, idv, label) {
@@ -343,7 +349,8 @@ export async function moveTab(tabId, index) {
   save()
 }
 
-export async function launch({ kind = 'claude', cwd, label, workspaceId, newSpace, prompt: opening, model, account }) {
+// resume: a session id to open again; fork: a session id to copy into a new conversation.
+export async function launch({ kind = 'claude', cwd, label, workspaceId, newSpace, prompt: opening, model, account, resume, fork }) {
   const space = String(newSpace || '').trim()
   let ws = !space && workspaceId ? spaces.find((w) => w.id === workspaceId) : null
   if (!ws) { ws = { id: `w${id()}`, label: (space || label || 'Space').slice(0, 80) }; spaces.push(ws) }
@@ -352,7 +359,7 @@ export async function launch({ kind = 'claude', cwd, label, workspaceId, newSpac
   tabs.push(tab)
   const paneId = `${ws.id}:p${id()}`
   try {
-    await spawnPane({ paneId, tabId: tab.tabId, workspaceId: ws.id, kind, cwd, opening, model, account })
+    await spawnPane({ paneId, tabId: tab.tabId, workspaceId: ws.id, kind, cwd, opening, model, account, sessionId: resume || undefined, resume: !!resume, fork })
   } catch (e) {
     // Don't leave an empty tab (or space) behind.
     tabs = tabs.filter((t) => t !== tab)

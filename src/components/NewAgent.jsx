@@ -19,6 +19,8 @@ export default function NewAgent({ fleet, initial = {}, onClose, onLaunched }) {
   const [spaceName, setSpaceName] = useState('')
   const [name, setName] = useState('')
   const [prompt, setPrompt] = useState('')
+  // Compare: the same first message to a second agent, side by side.
+  const [also, setAlso] = useState('')
   const [dirs, setDirs] = useState({ dirs: [], exists: true })
   const [showDirs, setShowDirs] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -65,6 +67,7 @@ export default function NewAgent({ fleet, initial = {}, onClose, onLaunched }) {
         kind, cwd, label: name || folderName, prompt, account: pickedAccount?.id,
         workspaceId: space === '__new' ? null : space,
         newSpace: space === '__new' ? (spaceName || name || folderName) : null,
+        alsoKind: also && prompt.trim() ? also : undefined,
       } })
       const clean = tildePath(dirs.path || cwd).replace(/\/$/, '')
       setRecent([clean, ...recent.filter((r) => r !== clean)].slice(0, 8))
@@ -154,6 +157,17 @@ export default function NewAgent({ fleet, initial = {}, onClose, onLaunched }) {
           <textarea rows={3} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={mode === 'chat' ? 'What do you want to talk about?' : 'e.g. /review, or describe the task'}
             onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) launch(e) }} />
         </label>
+
+        {mode === 'project' && (kinds || []).length > 1 && (
+          <label className="na-field na-also">
+            <span className="na-label">Compare with <i>optional</i></span>
+            <select value={also} onChange={(e) => setAlso(e.target.value)} aria-label="Also run with">
+              <option value="">No, just this agent</option>
+              {(kinds || []).filter((k) => k.kind !== kind).map((k) => <option key={k.kind} value={k.kind}>{k.label}, same first message, side by side</option>)}
+            </select>
+            {also && !prompt.trim() && <span className="muted small">Write a first message to compare their answers.</span>}
+          </label>
+        )}
 
         {error && <p className="error-text">{error}</p>}
         <footer className="modal-foot">

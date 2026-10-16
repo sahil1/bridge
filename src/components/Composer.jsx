@@ -2,10 +2,16 @@ import { useEffect, useRef, useState } from 'react'
 import Icon from './Icon.jsx'
 import { api } from '../api.js'
 import { usePersisted } from './layout.jsx'
+import Lightbox from './Lightbox.jsx'
 
 // Drafts survive navigation and reloads: one per agent, kept in this browser.
 const draftKey = (id) => `cc-draft-${id}`
 const loadDraft = (id) => { try { return JSON.parse(localStorage.getItem(draftKey(id))) || { text: '', files: [] } } catch { return { text: '', files: [] } } }
+// Attached images numbered in order (Image 1, Image 2), so you can refer to one in your message.
+const numbered = (files) => {
+  const imgs = files.filter((f) => f.image)
+  return { count: imgs.length, of: (f) => imgs.indexOf(f) + 1 || null }
+}
 // Sent messages per agent, newest last, for ↑/↓ recall like a terminal.
 const histKey = (id) => `cc-hist-${id}`
 const loadHist = (id) => { try { return JSON.parse(localStorage.getItem(histKey(id))) || [] } catch { return [] } }
@@ -145,14 +151,111 @@ function SlashMenu({ items, sel, onPick, onHover, title, mention, jumps = [] }) 
   )
 }
 
-export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKeys, busy: agentBusy = false, onStop, queuedCount = 0, commandsUrl, filesUrl, onInteractive, historyUrl }) {
+// Saved prompts: pick one to put in the box, save what's in the box as one, rename or delete.
+const BLANK = /\{\{[^{}\n]{0,40}\}\}/g
+function SavedPrompts({ current, onPick, onClose }) {
+  const [list, setList] = useState(null)
+  const [q, setQ] = useState('')
+  const [naming, setNaming] = useState(null) // { id?, name } while saving or renaming
+  const [err, setErr] = useState(null)
+  const ref = useRef(null)
+  const load = () => api('/prompts').then((d) => setList(d.prompts)).catch((e) => setErr(e.message))
+  useEffect(() => { load() }, [])
+  useEffect(() => {
+    const down = (e) => { if (!ref.current?.contains(e.target)) onClose() }
+    document.addEventListener('mousedown', down)
+    return () => document.removeEventListener('mousedown', down)
+  }, [onClose])
+  const shown = (list || []).filter((p) => !q || `${p.name}\n${p.text}`.toLowerCase().includes(q.toLowerCase()))
+  const saveName = async (e) => {
+    e.preventDefault()
+    try {
+      if (naming.id) await api(`/prompts/${naming.id}`, { method: 'PATCH', body: { name: naming.name } })
+      else await api('/prompts', { method: 'POST', body: { name: naming.name, text: current } })
+      setNaming(null); load()
+    } catch (x) { setErr(x.message) }
+  }
+  return (
+    <div className="saved-pop" ref={ref} role="dialog" aria-label="Saved prompts" onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); onClose() } }}>
+      <div className="saved-head">
+        <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Saved prompts" aria-label="Find a saved prompt" />
+      </div>
+      <div className="saved-list">
+        {list && !list.length && <p className="muted small pad">Nothing saved yet. Write a message you send often, then save it below. Use {'{{week}}'}-style blanks for the parts that change.</p>}
+        {shown.map((p) => naming?.id === p.id ? (
+          <form key={p.id} className="saved-name" onSubmit={saveName}><input autoFocus value={naming.name} onChange={(e) => setNaming({ ...naming, name: e.target.value })} aria-label="Prompt name" /><button className="btn small">Save</button></form>
+        ) : (
+          <div key={p.id} className="saved-item">
+            <button className="saved-pick" onClick={() => { onPick(p); api(`/prompts/${p.id}/used`, { method: 'POST' }).catch(() => {}) }} title={p.text}>
+              <b>{p.name}</b><span className="muted small">{p.text.replace(/\s+/g, ' ').slice(0, 90)}</span>
+            </button>
+            <button className="win-btn" onClick={() => setNaming({ id: p.id, name: p.name })} aria-label={`Rename ${p.name}`} title="Rename"><Icon name="edit" size={12} /></button>
+            <button className="win-btn" onClick={async () => { if (window.confirm(`Delete the saved prompt "${p.name}"?`)) { await api(`/prompts/${p.id}`, { method: 'DELETE' }).catch(() => {}); load() } }} aria-label={`Delete ${p.name}`} title="Delete"><Icon name="trash" size={12} /></button>
+          </div>
+        ))}
+      </div>
+      {err && <p className="error-text small pad">{err}</p>}
+      {naming && !naming.id
+        ? <form className="saved-name saved-foot" onSubmit={saveName}><input autoFocus value={naming.name} onChange={(e) => setNaming({ ...naming, name: e.target.value })} placeholder="Name it, like Weekly update" aria-label="Prompt name" /><button className="btn small primary" disabled={!naming.name.trim()}>Save</button></form>
+        : <button className="saved-foot ghost-btn" disabled={!current.trim()} onClick={() => setNaming({ name: '' })} title={current.trim() ? 'Save what you wrote as a prompt' : 'Write something in the message box first'}><Icon name="plus" size={12} /> Save the message box as a prompt</button>}
+    </div>
+  )
+}
+
+export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKeys, busy: agentBusy = false, typeAhead = false, prefill = null, editing = null, onEditChange, onDraft, mirroring = false, onStop, queuedCount = 0, commandsUrl, filesUrl, onInteractive, historyUrl }) {
   const [draft, setDraft] = useState(() => loadDraft(id))
   const [note, setNote] = useState(null)
   const [uploading, setUploading] = useState(0)
+  const [viewing, setViewing] = useState(null) // index of the attached image shown full size
+  const [savedOpen, setSavedOpen] = useState(false)
+  // A saved prompt goes in the box (after what's there); its first {{blank}} is selected to type over.
+  const pickSaved = (p) => {
+    setSavedOpen(false)
+    const before = draft.text.trim() ? `${draft.text.replace(/\s+$/, '')}\n\n` : ''
+    const text = before + p.text
+    setDraft((d) => ({ ...d, text }))
+    requestAnimationFrame(() => {
+      const el = taRef.current
+      if (!el) return
+      el.focus()
+      BLANK.lastIndex = before.length
+      const m = BLANK.exec(text)
+      if (m) { el.selectionStart = m.index; el.selectionEnd = m.index + m[0].length } else el.selectionStart = el.selectionEnd = text.length
+    })
+  }
+  // Tab jumps to the next {{blank}} (wrapping around) while there is one.
+  const nextBlank = (el) => {
+    const all = [...el.value.matchAll(BLANK)]
+    if (!all.length) return false
+    const m = all.find((x) => x.index >= el.selectionEnd) || all[0]
+    el.selectionStart = m.index
+    el.selectionEnd = m.index + m[0].length
+    return true
+  }
   const taRef = useRef(null)
   const fileRef = useRef(null)
 
   useEffect(() => { setDraft(loadDraft(id)); setNote(null); hist.current = null }, [id])
+  // Editing a sent message: its text comes into the box; what you had typed is put back after.
+  const stash = useRef(null)
+  useEffect(() => {
+    if (!prefill) return
+    // Added to what you're writing (a picture from Preview), not an edit.
+    if (prefill.append) {
+      // add: goes after what you've written (a file mentioned from Files); otherwise only into an empty box.
+      setDraft((d) => ({ text: !d.text.trim() ? prefill.text || '' : prefill.add ? `${d.text.replace(/\s*$/, ' ')}${prefill.text}` : d.text, files: [...d.files, ...(prefill.files || [])] }))
+      requestAnimationFrame(() => { const el = taRef.current; if (el) { el.focus(); el.selectionStart = el.selectionEnd = el.value.length } })
+      return
+    }
+    if (stash.current == null) stash.current = draft
+    setDraft({ text: prefill.text, files: [] })
+    requestAnimationFrame(() => { const el = taRef.current; if (el) { el.focus(); el.selectionStart = el.selectionEnd = el.value.length } })
+  }, [prefill?.n]) // eslint-disable-line react-hooks/exhaustive-deps
+  const endEdit = (cancelled) => {
+    if (stash.current) setDraft(stash.current)
+    stash.current = null
+    if (cancelled) onEditChange?.(null)
+  }
   // ↑ on the first line walks back through what you've sent here; ↓ on the last line comes forward.
   const hist = useRef(null) // { list, i, saved } while browsing
   // The agent's own past messages (typed anywhere), fetched when the box gets focus.
@@ -191,6 +294,7 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
     return true
   }
   useEffect(() => { const t = setTimeout(() => saveDraft(id, draft), 250); return () => clearTimeout(t) }, [id, draft])
+  useEffect(() => { onDraft?.(draft.text) }, [draft.text]) // eslint-disable-line react-hooks/exhaustive-deps
   // Height: grows with the text up to 200px, unless you've dragged the grip to set your own.
   const [manualH, setManualH] = usePersisted('cc-composer-h', null)
   const fit = () => {
@@ -245,6 +349,8 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
   const send = async (now = false) => {
     const text = draft.text.trim()
     if (!text && !draft.files.length) return
+    // Plain paths, in the order of the chips: Claude turns each into an image in that order, so
+    // "image 2" means the same to it as the second chip. (Labels between the paths stop that.)
     const attach = draft.files.length ? `\n\nAttached: ${draft.files.map((f) => f.path).join(' ')}` : ''
     const message = `${text}${attach}`.trim()
     const prev = draft
@@ -252,8 +358,10 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
     hist.current = null
     setDraft({ text: '', files: [] })
     saveDraft(id, { text: '', files: [] })
+    const wasEditing = !!editing
     const ok = await onSend(message, { now: now === true })
     if (ok === false) setDraft(prev) // keep what you wrote if sending failed
+    else if (wasEditing) endEdit(false)
   }
 
   // Pasted screenshots/photos and dropped files upload like the paperclip.
@@ -343,6 +451,7 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
   const trackCaret = (e) => setCaret(e.currentTarget.selectionStart ?? 0)
 
   const onKeyDown = (e) => {
+    if (editing && e.key === 'Escape') { e.preventDefault(); endEdit(true); return }
     if (mentionItems.length || mentionJumps.length) {
       if (e.key === 'ArrowDown') { e.preventDefault(); setMentionSel((i) => Math.min(i + 1, mentionItems.length - 1)); return }
       if (e.key === 'ArrowUp') { e.preventDefault(); setMentionSel((i) => Math.max(i - 1, 0)); return }
@@ -355,6 +464,7 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
       if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') { e.preventDefault(); pickSlash(slashItems[slashSel]); return }
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setSlashOff(true); setArgFor(null); return }
     }
+    if (e.key === 'Tab' && !e.shiftKey && nextBlank(e.currentTarget)) { e.preventDefault(); return }
     if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey && !e.altKey && !e.metaKey && recall(e)) { e.preventDefault(); return }
     const touch = window.matchMedia('(pointer: coarse)').matches
     if (e.key === 'Enter' && !e.shiftKey && !touch && !e.nativeEvent.isComposing) { e.preventDefault(); send(agentBusy && (e.metaKey || e.ctrlKey)) }
@@ -363,10 +473,20 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
   const recording = voice.state === 'recording'
   const busy = voice.state === 'transcribing'
   const canSend = !!(draft.text.trim() || draft.files.length) && !uploading
+  const attachNums = numbered(draft.files)
+  const attachPics = draft.files.filter((f) => f.image && f.preview).map((f) => ({ path: f.path, src: f.preview, name: attachNums.count > 1 ? `Image ${attachNums.of(f)} · ${f.name}` : f.name }))
   const status = busy ? 'Transcribing on your Mac…' : uploading ? `Uploading ${uploading} file${uploading > 1 ? 's' : ''}…` : note
 
   return (
     <div className="composer-stack">
+      {editing && (
+        <div className="edit-bar" role="status">
+          <Icon name="edit" size={12} />
+          <span>Editing a sent message. Sending it takes back everything after it.</span>
+          {editing.canUndoFiles && <label><input type="checkbox" checked={!!editing.undoFiles} onChange={(e) => onEditChange?.({ ...editing, undoFiles: e.target.checked })} /> Also undo file changes since then</label>}
+          <button className="link-btn" onClick={() => endEdit(true)}>Cancel <kbd>Esc</kbd></button>
+        </div>
+      )}
       <SlashMenu items={slashItems} sel={slashSel} onHover={setSlashSel} onPick={pickSlash} title={slashTitle} />
       {mentionQ != null && <SlashMenu items={mentionItems} sel={mentionSel} onHover={setMentionSel} onPick={pickMention} title={/^[~/]/.test(mentionQ) ? mentionQ.replace(/[^/]*$/, '') || '~/' : mentionQ.endsWith('/') ? mentionQ : mentionQ ? `Matching "${mentionQ}"` : `${cwdName || 'This folder'}/`}
         jumps={mentionJumps} mention />}
@@ -379,14 +499,22 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
           }}><span /></div>
         {draft.files.length > 0 && (
           <div className="attach-row">
-            {draft.files.map((f) => (
-              <span key={f.path} className="attach-chip" title={f.path}>
-                {f.image && f.preview ? <img className="attach-thumb" src={f.preview} alt="" /> : <Icon name={f.image ? 'image' : 'file'} size={12} />} <span className="attach-name">{f.name}</span>
-                <button aria-label={`Remove ${f.name}`} onClick={() => setDraft((d) => ({ ...d, files: d.files.filter((x) => x.path !== f.path) }))}><Icon name="x" size={11} /></button>
-              </span>
-            ))}
+            {draft.files.map((f) => {
+              const n = attachNums.count > 1 ? attachNums.of(f) : null
+              const label = f.image ? (n ? `Image ${n}` : f.name) : f.name
+              return (
+                <span key={f.path} className={`attach-chip ${f.image && f.preview ? 'pic' : ''}`} title={f.image ? `${f.name} · click to view${n ? `. Call it "image ${n}" in your message.` : ''}` : f.path}>
+                  {f.image && f.preview
+                    ? <button type="button" className="attach-view" onClick={() => setViewing(attachPics.findIndex((p) => p.path === f.path))} aria-label={`View ${label}`}><img className="attach-thumb" src={f.preview} alt="" />{n && <span className="pic-num">{n}</span>}</button>
+                    : <Icon name={f.image ? 'image' : 'file'} size={12} />}
+                  <span className="attach-name">{label}</span>
+                  <button type="button" aria-label={`Remove ${label}`} onClick={() => setDraft((d) => ({ ...d, files: d.files.filter((x) => x.path !== f.path) }))}><Icon name="x" size={11} /></button>
+                </span>
+              )
+            })}
           </div>
         )}
+        {viewing != null && attachPics[viewing] && <Lightbox pics={attachPics} at={viewing} onAt={setViewing} onClose={() => setViewing(null)} />}
         {recording ? (
           <div className="rec-bar" role="status" aria-live="polite">
             <span className="rec-dot" />
@@ -416,17 +544,24 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
             <>
               <button className={`comp-btn ${keysOpen ? 'on' : ''}`} onClick={onToggleKeys} aria-label="Toggle keys" title="Keys (Esc, arrows, 1/2/3…)"><Icon name="keyboard" size={16} /></button>
               <button className="comp-btn" onClick={() => fileRef.current?.click()} aria-label="Attach photo or file" title="Attach a photo or file"><Icon name="paperclip" size={16} /></button>
+              <span className="saved-wrap">
+                <button className={`comp-btn ${savedOpen ? 'on' : ''}`} onClick={() => setSavedOpen((v) => !v)} aria-label="Saved prompts" title="Saved prompts"><Icon name="star" size={16} /></button>
+                {savedOpen && <SavedPrompts current={draft.text} onPick={pickSaved} onClose={() => setSavedOpen(false)} />}
+              </span>
               <button className={`comp-btn ${busy ? 'busy' : ''}`} onClick={voice.start} disabled={busy} aria-label="Dictate" title="Dictate (transcribed on your Mac)">
                 <Icon name={busy ? 'refresh' : 'mic'} size={16} className={busy ? 'spin' : ''} />
               </button>
               <input ref={fileRef} type="file" multiple hidden onChange={(e) => { upload(e.target.files); e.target.value = '' }} />
               <span className={`comp-hint ${status ? 'status' : ''}`}>{status || (agentBusy
-                ? <span className="busy-hint">Working{queuedCount ? ` · ${queuedCount} queued` : ''}<span className="hide-touch"> · <kbd>⏎</kbd> queue · <kbd>{/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl'}⏎</kbd> send now</span></span>
+                // typeAhead: the agent takes messages while it works, like typing in its terminal.
+                ? <span className="busy-hint">Working{queuedCount ? ` · ${queuedCount} queued` : ''}<span className="hide-touch"> · <kbd>⏎</kbd> {typeAhead ? 'send (it picks it up next)' : 'queue'} · <kbd>{/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl'}⏎</kbd> interrupt and send</span></span>
+                : mirroring ? <span className="hide-touch">Shows in the agent's input line above as you type · <kbd>⏎</kbd> send</span>
                 : <span className="hide-touch"><kbd>⏎</kbd> send · <kbd>⇧⏎</kbd> new line</span>)}</span>
               {agentBusy && onStop && <button className="stop-btn" onClick={onStop} title="Interrupt the agent (sends Esc)" aria-label="Stop the agent"><Icon name="stop" size={11} /> Stop</button>}
               {agentBusy && canSend && <button className="now-btn" onClick={() => send(true)} title="Stop what the agent is doing and send this now">Send now</button>}
-              <button className={`send ${agentBusy ? 'queue' : ''}`} onClick={() => send(false)} disabled={!canSend} aria-label={agentBusy ? 'Queue message' : 'Send'} title={agentBusy ? 'Queue: sends when the agent is free' : 'Send'}>
-                <Icon name={agentBusy ? 'clock' : 'send'} size={15} />
+              <button className={`send ${agentBusy && !typeAhead ? 'queue' : ''}`} onClick={() => send(false)} disabled={!canSend} aria-label={editing ? 'Send edit' : agentBusy && !typeAhead ? 'Queue message' : 'Send'}
+                title={agentBusy ? (typeAhead ? 'Send: the agent picks it up after its current step (/btw asks a side question)' : 'Queue: sends when the agent is free') : 'Send'}>
+                <Icon name={agentBusy && !typeAhead ? 'clock' : 'send'} size={15} />
               </button>
             </>
           )}

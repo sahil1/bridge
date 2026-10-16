@@ -3,6 +3,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
+import { OFFICE } from './office.js'
 
 const HIDDEN = new Set(['.git', 'node_modules', '.DS_Store', '__pycache__', '.venv', 'venv', '.next', 'dist', '.cache', '.turbo'])
 const MAX_TEXT = 1024 * 1024
@@ -46,6 +47,7 @@ export function readFile(root, rel) {
   const base = { path: r, name: path.basename(real), ext, size: st.size, mtime: st.mtimeMs }
   if (IMAGE[ext]) return { ...base, kind: 'image' }
   if (PDF[ext]) return { ...base, kind: 'pdf' }
+  if (OFFICE[ext]) return { ...base, kind: 'office', office: OFFICE[ext] }
   const fd = fs.openSync(real, 'r')
   const len = Math.min(st.size, MAX_TEXT)
   const buf = Buffer.alloc(len)
@@ -172,3 +174,154 @@ export async function gitDiff(root, rel) {
   if (f.kind !== 'text') return { diff: '', note: `${f.kind} file` }
   return { diff: `--- /dev/null\n+++ b/${relToRoot}\n@@ new file @@\n` + f.text.split('\n').map((l) => `+${l}`).join('\n'), untracked: true }
 }
+
+// ---------- Acting on changes (the Changes tab) ----------
+// Run git with input on stdin; resolves { ok, out } instead of throwing.
+function gitIn(cwd, args, input = '', timeout = 20000) {
+  return new Promise((resolve) => {
+    const p = execFile('git', args, { cwd, timeout, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => resolve({ ok: !err, out: `${stdout || ''}${stderr || ''}`.trim() }))
+    if (input) p.stdin.end(input); else p.stdin.end()
+  })
+}
+async function repoOf(root, rel) {
+  const { realRoot } = safePath(root, '')
+  const top = (await git(realRoot, ['rev-parse', '--show-toplevel']))?.trim()
+  if (!top) throw new Error("This folder isn't a git repository")
+  // A path that no longer exists (deleted) can't go through realpath; check it lexically.
+  const abs = path.resolve(realRoot, String(rel || '').replace(/^\/+/, ''))
+  if (rel && abs !== realRoot && !abs.startsWith(realRoot + path.sep)) throw new Error('Outside the agent folder')
+  return { realRoot, top, abs, relTop: rel ? path.relative(top, abs) : null }
+}
+
+// Throw away every change to one file: back to the last commit, or gone if it's new.
+export async function discardFile(root, rel) {
+  const { top, abs, relTop } = await repoOf(root, rel)
+  const tracked = await gitIn(top, ['cat-file', '-e', `HEAD:${relTop}`])
+  if (tracked.ok) {
+    const r = await gitIn(top, ['checkout', 'HEAD', '--', relTop])
+    if (!r.ok) throw new Error(r.out || "Couldn't restore the file")
+  } else {
+    await gitIn(top, ['rm', '--cached', '--quiet', '--', relTop])
+    if (fs.existsSync(abs) && fs.statSync(abs).isFile()) fs.rmSync(abs)
+  }
+  return { ok: true }
+}
+
+// Throw away one change (hunk) in a file: the hunk-th "@@" block of its diff against HEAD.
+export async function discardHunk(root, rel, hunk) {
+  const { top, relTop } = await repoOf(root, rel)
+  const diff = (await gitIn(top, ['diff', 'HEAD', '--no-color', '-U3', '--', relTop])).out
+  const at = diff.indexOf('\n@@')
+  if (at < 0) throw new Error('No changes to undo in that file')
+  const header = diff.slice(0, at + 1)
+  const hunks = diff.slice(at + 1).split(/\n(?=@@ )/)
+  const h = hunks[Number(hunk)]
+  if (h == null) throw new Error('That change is no longer there; reload the diff')
+  const patch = `${header}${h.endsWith('\n') ? h : `${h}\n`}`
+  const r = await gitIn(top, ['apply', '-R', '--whitespace=nowarn', '-'], patch)
+  if (!r.ok) throw new Error(`Couldn't undo that change: ${r.out.slice(0, 200)}`)
+  return { ok: true }
+}
+
+// Commit the given files (or every change in the folder) with a message. Git's own hooks run.
+export async function commit(root, { message, paths = null }) {
+  const msg = String(message || '').trim()
+  if (!msg) throw new Error('Write a commit message')
+  const { realRoot, top } = await repoOf(root, '')
+  const list = Array.isArray(paths) && paths.length ? paths.map((p) => path.relative(top, path.resolve(realRoot, String(p)))) : [path.relative(top, realRoot) || '.']
+  if (list.some((p) => p.startsWith('..'))) throw new Error('Outside the agent folder')
+  const add = await gitIn(top, ['add', '-A', '--', ...list])
+  if (!add.ok) throw new Error(add.out || "Couldn't stage the files")
+  const r = await gitIn(top, ['commit', '-m', msg, '--', ...list], '', 120000)
+  if (!r.ok) throw new Error(r.out.slice(-600) || 'The commit failed')
+  const head = (await git(top, ['log', '-1', '--format=%h']))?.trim()
+  return { ok: true, hash: head, output: r.out.slice(-400) }
+}
+
+// ---------- File actions (the file tree's menu) ----------
+// Each acts on one path inside the agent's folder, never the folder itself.
+const IS_MAC = process.platform === 'darwin'
+const IS_WIN = process.platform === 'win32'
+const run = (cmd, args) => new Promise((resolve, reject) => execFile(cmd, args, { timeout: 30000, windowsHide: true }, (err, _o, stderr) => (err ? reject(new Error(String(stderr || err.message).trim().split('\n')[0])) : resolve())))
+function inside(root, rel) {
+  const r = safePath(root, rel)
+  if (r.real === r.realRoot) throw new Error("That's the agent's own folder")
+  return r
+}
+function checkName(name) {
+  name = String(name || '').trim()
+  if (!name || name === '.' || name === '..' || /[/\\\0]/.test(name) || (IS_WIN && /[<>:"|?*]/.test(name))) throw new Error('Pick a name without slashes')
+  return name
+}
+
+// "report.docx" -> "report copy.docx", then "report copy 2.docx", like Finder.
+export function duplicate(root, rel) {
+  const { real, realRoot } = inside(root, rel)
+  const dir = path.dirname(real)
+  const ext = fs.statSync(real).isDirectory() ? '' : path.extname(real)
+  const stem = path.basename(real, ext)
+  let dest
+  for (let n = 1; n < 500; n++) { dest = path.join(dir, `${stem} copy${n > 1 ? ` ${n}` : ''}${ext}`); if (!fs.existsSync(dest)) break }
+  fs.cpSync(real, dest, { recursive: true, errorOnExist: true, force: false })
+  return { path: path.relative(realRoot, dest) }
+}
+
+export function rename(root, rel, name) {
+  const { real, realRoot } = inside(root, rel)
+  const dest = path.join(path.dirname(real), checkName(name))
+  if (dest === real) return { path: path.relative(realRoot, real) }
+  if (fs.existsSync(dest) && dest.toLowerCase() !== real.toLowerCase()) throw new Error(`${path.basename(dest)} already exists here`)
+  fs.renameSync(real, dest)
+  return { path: path.relative(realRoot, dest) }
+}
+
+// A new empty file or folder in `dirRel` ('' is the agent's folder).
+export function create(root, dirRel, name, { folder = false } = {}) {
+  const { real, realRoot } = safePath(root, dirRel)
+  if (!fs.statSync(real).isDirectory()) throw new Error('Not a folder')
+  const dest = path.join(real, checkName(name))
+  if (fs.existsSync(dest)) throw new Error(`${path.basename(dest)} already exists here`)
+  if (folder) fs.mkdirSync(dest)
+  else fs.writeFileSync(dest, '', { flag: 'wx' })
+  return { path: path.relative(realRoot, dest) }
+}
+
+// To the Trash (Recycle Bin), so it can be put back; never deleted outright.
+export async function trash(root, rel) {
+  const { real } = inside(root, rel)
+  if (IS_MAC) {
+    if (fs.existsSync('/usr/bin/trash')) await run('/usr/bin/trash', [real])
+    else await run('osascript', ['-e', 'on run argv', '-e', 'tell application "Finder" to delete (POSIX file (item 1 of argv) as alias)', '-e', 'end run', real])
+  } else if (IS_WIN) {
+    const kind = fs.statSync(real).isDirectory() ? 'DeleteDirectory' : 'DeleteFile'
+    const quoted = `'${real.replace(/'/g, "''")}'`
+    await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::${kind}(${quoted}, 'OnlyErrorDialogs', 'SendToRecycleBin')`])
+  } else {
+    await run('gio', ['trash', real]).catch(() => { throw new Error("Couldn't move it to the Trash (gio isn't available)") })
+  }
+  return { ok: true }
+}
+
+// Show it in Finder / Explorer / the file manager, selected.
+export async function reveal(root, rel) {
+  const { real } = safePath(root, rel)
+  if (IS_MAC) await run('open', ['-R', real])
+  else if (IS_WIN) await run('explorer.exe', [`/select,${real}`]).catch(() => {}) // explorer exits 1 even when it worked
+  else await run('xdg-open', [fs.statSync(real).isDirectory() ? real : path.dirname(real)])
+  return { ok: true }
+}
+
+// Open in its usual app (Word, Excel, Preview…). Documents and media only: never something
+// that runs (a script, an app, a shortcut), since this can be asked for from a page.
+const OPENABLE = new Set(['.pdf', '.docx', '.doc', '.odt', '.rtf', '.pptx', '.ppt', '.odp', '.key', '.xlsx', '.xlsm', '.xls', '.ods', '.numbers', '.pages', '.csv', '.tsv', '.txt', '.md',
+  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.heic', '.tif', '.tiff', '.bmp', '.mp4', '.mov', '.m4v', '.webm', '.mp3', '.m4a', '.wav', '.aac', '.flac', '.zip', '.epub'])
+export async function openDefault(root, rel) {
+  const { real } = inside(root, rel)
+  const ext = path.extname(real).toLowerCase()
+  if (fs.statSync(real).isDirectory() || !OPENABLE.has(ext)) throw new Error('Only documents, images and media open from here')
+  if (IS_MAC) await run('open', [real])
+  else if (IS_WIN) await run('explorer.exe', [real]).catch(() => {})
+  else await run('xdg-open', [real])
+  return { ok: true }
+}
+export const canOpen = (name) => OPENABLE.has(path.extname(String(name)).toLowerCase())

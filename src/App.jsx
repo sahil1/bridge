@@ -9,6 +9,7 @@ import Console, { MateEmpty } from './components/Console.jsx'
 import { Settings, Onboarding, HerdrView, Terminals, ShellTab, preloadViews } from './lazy.jsx'
 import { openLink } from './pwa.js'
 import NewAgent from './components/NewAgent.jsx'
+import History from './components/History.jsx'
 import Palette from './components/Palette.jsx'
 import { NextMeetingChip } from './components/Agenda.jsx'
 import { TodayTabs, TodayBody, openToday } from './components/Dock.jsx'
@@ -114,6 +115,7 @@ export default function App() {
   const [mobileAgent, setMobileAgent] = useState(null)
   const [palette, setPalette] = useState(false)
   const [newAgent, setNewAgent] = useState(null) // null = closed, {} = open with defaults
+  const [history, setHistory] = useState(false) // search every conversation, closed agents
   const [cmdRef, cmdW] = useWidth()
   const [rowRef, rowW] = useWidth()
   const quota = usePoll('/quota', 5 * 60 * 1000)
@@ -253,18 +255,21 @@ export default function App() {
     openAgent(id)
     setTimeout(() => window.dispatchEvent(new CustomEvent('cc-set-view', { detail: { paneId: id, view: 'files', path: filePath } })), 60)
   }
-  const onLaunched = (out) => { setNewAgent(null); if (out?.paneId) setTimeout(() => openAgent(out.paneId), 1200) }
+  // A compare launch opens the second agent beside the first.
+  const onLaunched = (out) => { setNewAgent(null); if (out?.paneId) setTimeout(() => { openAgent(out.paneId); if (out.alsoPaneId) openAgent(out.alsoPaneId, { toSide: true }) }, 1200) }
   const queuedFor = (id) => fleet?.queue?.[id] || []
 
   const mateLaunch = useLaunchMate(openAgent)
   useHotkey(useCallback((e) => (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k', []), () => setPalette((p) => !p))
   useHotkey(useCallback((e) => (e.metaKey || e.ctrlKey) && e.key === ',', []), () => setSettings((v) => (v ? null : 'general')))
+  useHotkey(useCallback((e) => (e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'f', []), () => setHistory((v) => !v))
   useHotkey(useCallback((e) => e.altKey && (e.code === 'Digit1' || e.code === 'Digit2'), []), (e) => setView(e.code === 'Digit1' ? 'command' : 'herdr'))
   useHotkey(useCallback((e) => e.key === 'Escape' && !e.target.closest?.('.xterm, textarea, input, .quick-open'), []), () => set({ max: null }))
 
   const nextTheme = { system: 'dark', dark: 'light', light: 'system' }[theme]
   const paletteActions = [
     { id: 'a:new', label: 'New agent…', icon: 'plus', keywords: 'launch start claude codex gemini copilot opencode project', run: () => setNewAgent({ mode: 'project' }) },
+    { id: 'a:history', label: 'Search history and closed agents…', icon: 'clock', keywords: 'search find transcript conversation closed archived resume old past', run: () => setHistory(true) },
     { id: 'a:chat', label: 'New chat…', icon: 'chat', keywords: 'plain vanilla talk ask claude codex gemini assistant', run: () => setNewAgent({ mode: 'chat' }) },
     { id: 'a:settings', label: 'Settings…', icon: 'settings', hint: '⌘,', keywords: 'preferences name default agent model location runtime', run: () => setSettings('general') },
     { id: 'a:providers', label: 'Model providers', icon: 'layers', keywords: 'api key openai anthropic gemini openrouter bedrock vertex ollama lm studio', run: () => setSettings('providers') },
@@ -290,6 +295,7 @@ export default function App() {
       {settings && <Settings section={settings} onClose={() => setSettings(null)} onOpenAgent={openAgent} />}
       {onboarding && <Onboarding onDone={(pane) => { setOnboarding(false); confPoll.refresh(); if (pane) setTimeout(() => openAgent(pane), 800) }} />}
       {newAgent && <NewAgent fleet={fleet} initial={newAgent} onClose={() => setNewAgent(null)} onLaunched={onLaunched} />}
+      {history && <History onClose={() => setHistory(false)} onOpen={(id, fresh) => (fresh ? setTimeout(() => openAgent(id), 1200) : openAgent(id))} />}
     </>
   )
 
@@ -480,7 +486,7 @@ export default function App() {
         <main className="cmd" hidden={view !== 'command'} ref={cmdRef}>
           <div className="slot rail-slot" style={{ width: railOpen ? L.railW : 52 }}>
             <Rail fleet={fleet} live={live} collapsed={!railOpen} onToggle={() => set({ railOpen: !L.railOpen })}
-              selected={W.active} onOpen={openAgent} onOpenInHerdr={openInHerdr} onOpenFiles={openFiles} onNewAgent={(init) => setNewAgent(init || {})} />
+              selected={W.active} onOpen={openAgent} onOpenInHerdr={openInHerdr} onOpenFiles={openFiles} onNewAgent={(init) => setNewAgent(init || {})} onHistory={() => setHistory(true)} />
           </div>
           {railOpen && <Handle axis="x" size={L.railW} min={180} max={380} onSize={(v) => set({ railW: v })} onToggle={() => set({ railOpen: false })} label="Resize sidebar" />}
 

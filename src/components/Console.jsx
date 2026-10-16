@@ -1,9 +1,10 @@
-import { createContext, Fragment, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createContext, Fragment, useContext, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import Icon, { StatusDot } from './Icon.jsx'
-import { Terminal, FilesView, ChangesView } from '../lazy.jsx'
+import { Terminal, FilesView, ChangesView, PreviewView } from '../lazy.jsx'
 import Subagents from './Subagents.jsx'
 import Question, { parseScreen } from './Question.jsx'
 import Composer from './Composer.jsx'
+import Lightbox from './Lightbox.jsx'
 import { PaneHeader } from './layout.jsx'
 import { tildePath } from './Rail.jsx'
 import { api, usePoll, useLive, fmtTime, openInTerminal } from '../api.js'
@@ -126,7 +127,9 @@ const splitAttached = (text) => {
   })
   return { body, files }
 }
-const normMsg = (t) => splitAttached(String(t || '').replace(/\[Image #\d+\]/g, '')).body.replace(/\s+/g, ' ').trim()
+// Claude turns an attached image path into "[Image #3]" and "[Image: source: /path]"; the image itself is shown separately.
+const IMAGE_MARK = /\[Image (?:#\d+|: source: [^\]\n]+)\]\s*/g
+const normMsg = (t) => splitAttached(String(t || '').replace(IMAGE_MARK, '')).body.replace(/\s+/g, ' ').trim()
 // The agent's copy can differ from what was sent: Claude rewrites attachments, and text already
 // in its input box could get merged in. Containment covers both.
 const sameMsg = (a, b) => {
@@ -137,15 +140,37 @@ const sameMsg = (a, b) => {
 }
 
 // A user message with its attachments shown as chips instead of raw markers and paths.
-function UserText({ text }) {
-  const images = [...String(text).matchAll(/\[Image #(\d+)\]/g)].map((m) => `Image ${m[1]}`)
-  const split = splitAttached(String(text).replace(/\[Image #\d+\]\s*/g, ''))
+const IMG = /\.(png|jpe?g|gif|webp)$/i
+const uploadUrl = (p) => `/api/upload/raw?path=${encodeURIComponent(p)}`
+// Your message, with what you attached still there to look at: images as thumbnails that open
+// full size (pasted into the agent, read back from its transcript; or attached here), other
+// files as chips that open them.
+function UserText({ text, images = [], paneId }) {
+  const [view, setView] = useState(null) // index into pics
+  const split = splitAttached(String(text).replace(IMAGE_MARK, ''))
   const body = split.body.trim()
-  const chips = [...images, ...split.files.map((f) => f.split('/').pop())]
+  const pics = [
+    ...images.map((im) => ({ src: `/api/agents/${encodeURIComponent(paneId)}/image?uuid=${encodeURIComponent(im.uuid)}&i=${im.i}`, name: 'Pasted image' })),
+    ...split.files.filter((f) => IMG.test(f)).map((f) => ({ src: uploadUrl(f), name: f.split('/').pop() })),
+  ].map((p, k, all) => ({ ...p, name: all.length > 1 ? `Image ${k + 1} · ${p.name}` : p.name }))
+  // "[Image #2]" with no image we can show (sent before Bridge AI kept them): a plain chip.
+  const lost = images.length ? [] : [...String(text).matchAll(/\[Image #(\d+)\]/g)].map((m) => `Image ${m[1]}`)
+  const others = split.files.filter((f) => !IMG.test(f))
   return (
     <>
       {body && <RichText text={body} />}
-      {chips.length > 0 && <div className="msg-attach">{chips.map((c, i) => <span key={i} className="msg-chip"><Icon name={/\.(png|jpe?g|gif|webp|heic)$/i.test(c) || c.startsWith('Image') ? 'image' : 'file'} size={11} /> {c}</span>)}</div>}
+      {pics.length > 0 && (
+        <div className="msg-pics">
+          {pics.map((p, i) => <button key={i} className="msg-pic" onClick={() => setView(i)} title={`${p.name} (click to view)`}><img src={p.src} alt={p.name} loading="lazy" />{pics.length > 1 && <span className="pic-num">{i + 1}</span>}</button>)}
+        </div>
+      )}
+      {(others.length > 0 || lost.length > 0) && (
+        <div className="msg-attach">
+          {others.map((f) => <a key={f} className="msg-chip" href={uploadUrl(f)} target="_blank" rel="noreferrer" title={f}><Icon name="file" size={11} /> {f.split('/').pop()}</a>)}
+          {lost.map((c) => <span key={c} className="msg-chip"><Icon name="image" size={11} /> {c}</span>)}
+        </div>
+      )}
+      {view != null && <Lightbox pics={pics} at={view} onAt={setView} onClose={() => setView(null)} />}
     </>
   )
 }
@@ -156,7 +181,7 @@ function UserText({ text }) {
 const plainText = (s) => String(s || '').replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\x1b\][^\x07]*\x07/g, '').replace(/\r/g, '')
 function activityFrom(ansi) {
   const lines = plainText(ansi).split('\n').map((l) => l.trim()).filter(Boolean).slice(-16)
-  const status = [...lines].reverse().find((l) => /esc to (interrupt|cancel)|ctrl\+c to (interrupt|cancel)/i.test(l))
+  const status = [...lines].reverse().find((l) => /esc to (interrupt|cancel)|ctrl\+c to (interrupt|cancel)/i.test(l) || /^[✻✳✶✢✽·*]\s+[A-Z][\w'-]*…/.test(l))
   if (!status) return null
   return status
     .replace(/^[^\p{L}\p{N}]+/u, '') // spinner glyphs
@@ -176,7 +201,7 @@ function LiveActivity({ paneId }) {
   )
 }
 
-function Chat({ agent, pending, queued = [], onCancelQueued }) {
+function Chat({ agent, pending, queued = [], onCancelQueued, onEdit, editingText }) {
   const { data, error } = useLive(`/agents/${encodeURIComponent(agent.paneId)}/transcript`)
   const scrollRef = useRef(null)
   const stick = useRef(true)
@@ -214,14 +239,18 @@ function Chat({ agent, pending, queued = [], onCancelQueued }) {
             : m.role === 'event'
             ? <div key={i} className={`chat-event ev-${m.status}`}><span className="ev-dot" />{m.text}<time>{fmtTime(m.ts)}</time></div>
             : (
-              <div key={i} className={`msg ${m.role}`}>
-                <div className="msg-text">{m.role === 'user' ? <UserText text={m.text} /> : <RichText text={m.text} />}</div>
-                <div className="msg-time">{fmtTime(m.ts)}</div>
+              <div key={i} className={`msg ${m.role} ${editingText && m.role === 'user' && m.text === editingText ? 'editing' : ''}`}>
+                <div className="msg-text">{m.role === 'user' ? <UserText text={m.text} images={m.images} paneId={agent.paneId} /> : <RichText text={m.text} />}</div>
+                <div className="msg-time">
+                  {fmtTime(m.ts)}
+                  {m.role === 'user' && onEdit && <button className="msg-edit-btn" onClick={() => onEdit({ original: m.text, back: messages.slice(i).filter((x) => x.role === 'user').length })}
+                    aria-label="Edit this message" title="Edit and resend: the agent goes back to this point"><Icon name="edit" size={11} /> Edit</button>}
+                </div>
               </div>
             ))}
         {shownPending.map((p) => (
           <div key={p.id} className="msg user pending">
-            <div className="msg-text"><UserText text={p.text} /></div>
+            <div className="msg-text"><UserText text={p.text} paneId={agent.paneId} /></div>
             <div className="msg-time">{p.error ? <span className="error-text">{p.error}</span>
               : Date.now() - p.id > 30000 ? <span className="warn-text">Not in the agent's chat yet. Check the Terminal tab; ↑ in the message box brings it back to resend.</span>
               : 'sending…'}</div>
@@ -230,7 +259,7 @@ function Chat({ agent, pending, queued = [], onCancelQueued }) {
         {agent.status === 'working' && <LiveActivity paneId={agent.paneId} />}
         {queued.map((q) => (
           <div key={q.id} className="msg user queued">
-            <div className="msg-text"><UserText text={q.text} /></div>
+            <div className="msg-text"><UserText text={q.text} paneId={agent.paneId} /></div>
             <div className="msg-time">
               <Icon name="clock" size={11} /> Queued, sends when {agent.chief ? 'Chief of staff' : 'the agent'} is free
               <button className="link" onClick={() => onCancelQueued(q.id)}>Cancel</button>
@@ -283,7 +312,7 @@ export function MateEmpty({ onLaunch, launching, error }) {
   )
 }
 
-const VIEWS = [['chat', 'chat', 'Chat'], ['terminal', 'terminal', 'Terminal'], ['files', 'folder', 'Files'], ['changes', 'branch', 'Changes']]
+const VIEWS = [['chat', 'chat', 'Chat'], ['terminal', 'terminal', 'Terminal'], ['files', 'folder', 'Files'], ['changes', 'branch', 'Changes'], ['preview', 'play', 'Preview']]
 
 function readViews() { try { return JSON.parse(localStorage.getItem('cc-agent-views') || '{}') } catch { return {} } }
 
@@ -305,6 +334,12 @@ export default function Console({ agent, variant = 'focus', controls = {}, onBac
   }
   const [pending, setPending] = useState([])
   const [flash, setFlash] = useState(null)
+  const [btw, setBtw] = useState(null) // a /btw side question and its answer
+  // Editing a sent message: it goes into the message box; sending it rewinds the agent to just
+  // before it. { original, back, undoFiles }, and prefill puts the text in the box.
+  const [editTarget, setEditTarget] = useState(null)
+  const [prefill, setPrefill] = useState(null)
+  useEffect(() => { setEditTarget(null) }, [agent?.paneId])
   const [keysOpen, setKeysOpen] = useState(false)
   const [termFocus, setTermFocus] = useState(0)
   const places = usePoll('/places', 15000)
@@ -323,14 +358,63 @@ export default function Console({ agent, variant = 'focus', controls = {}, onBac
   useEffect(() => { if (!flash) return; const t = setTimeout(() => setFlash(null), flash.length > 60 ? 8000 : 3000); return () => clearTimeout(t) }, [flash])
   useEffect(() => { if (agent?.status === 'blocked') setKeysOpen(true) }, [agent?.status])
 
+  // In the Terminal tab, what you type below shows up live in the agent's own input line (only
+  // the difference is sent: backspaces, then new text). Sending replaces that line with your
+  // message as usual, so nothing doubles up. Only while the input box is showing (not a menu).
+  const mirrored = useRef('')
+  const mirrorTimer = useRef(null)
+  const mirrorOn = view === 'terminal' && !!agent?.caps?.inputBox && agent?.status !== 'blocked'
+  const draftNow = useRef('')
+  const syncMirror = useCallback(() => {
+    clearTimeout(mirrorTimer.current)
+    mirrorTimer.current = setTimeout(() => {
+      const want = mirrorOn ? draftNow.current : ''
+      const have = mirrored.current
+      if (want === have || !agent) return
+      const a = Array.from(have)
+      const b = Array.from(want)
+      let p = 0
+      while (p < a.length && p < b.length && a[p] === b[p]) p++
+      const steps = []
+      if (a.length > p) steps.push({ keys: Array(a.length - p).fill('backspace') })
+      b.slice(p).join('').split('\n').forEach((part, i) => { if (i) steps.push({ keys: ['shift+enter'] }); if (part) steps.push({ text: part }) })
+      mirrored.current = want
+      if (steps.length) api(`/panes/${encodeURIComponent(agent.paneId)}/input`, { method: 'POST', body: { steps } }).catch(() => {})
+    }, 120)
+  }, [mirrorOn, agent?.paneId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { syncMirror() }, [mirrorOn]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => clearTimeout(mirrorTimer.current), [])
+  useEffect(() => { mirrored.current = '' }, [agent?.paneId])
+
   if (!agent) return null
   const pid = encodeURIComponent(agent.paneId)
   const minimized = controls.minimized
 
   const send = async (t, { now = false } = {}) => {
-    // Busy agent: the server holds the message and sends it when the agent is free, or with
-    // "send now", interrupts the agent and sends it as soon as it's back at its prompt.
-    if (agent.status === 'working') {
+    // Whatever was mirrored is replaced by this send (the agent's box is cleared first).
+    clearTimeout(mirrorTimer.current)
+    const wasMirrored = mirrored.current
+    mirrored.current = ''
+    draftNow.current = ''
+    if (editTarget) {
+      const ok = await editSent({ ...editTarget, text: t })
+      if (ok) setEditTarget(null)
+      return ok
+    }
+    // A side question (/btw): answered in a panel, not the chat; shown here as a card.
+    if (agent.caps?.btw && /^\/btw\s/.test(t)) {
+      setBtw({ q: t.replace(/^\/btw\s+/, ''), a: null })
+      try {
+        const r = await api(`/agents/${pid}/prompt`, { method: 'POST', body: { text: t } })
+        if (r?.queued) { setBtw(null); setFlash(`Held, not lost: ${r.reason} in the agent.`); return true }
+        setBtw({ q: t.replace(/^\/btw\s+/, ''), a: r?.btw || 'No answer came back. Check the Terminal tab.' })
+        return true
+      } catch (e) { setBtw(null); setFlash(e.message); return false }
+    }
+    // Busy agent: agents that take messages while they work (typeAhead) get it straight away, as
+    // if typed in their terminal. Others: the server holds it and sends it when the agent is free.
+    // "Send now" interrupts the agent and sends it as soon as it's back at its prompt.
+    if (agent.status === 'working' && (now || !agent.caps?.typeAhead)) {
       try {
         await api(`/agents/${pid}/${now ? 'steer' : 'queue'}`, { method: 'POST', body: { text: t } })
         if (now) setFlash('Interrupted; sending your message')
@@ -347,7 +431,7 @@ export default function Console({ agent, variant = 'focus', controls = {}, onBac
         setFlash(`Held, not lost: ${r.reason} in the agent. It sends once that closes (Esc in the Terminal tab closes most panels).`)
         return true
       }
-      if (r?.cleared) setFlash(`Cleared "${r.cleared.length > 60 ? `${r.cleared.slice(0, 60)}…` : r.cleared}" that was already typed in the agent's input box`)
+      if (r?.cleared && r.cleared !== wasMirrored.trim()) setFlash(`Cleared "${r.cleared.length > 60 ? `${r.cleared.slice(0, 60)}…` : r.cleared}" that was already typed in the agent's input box`)
       return true
     } catch (e) {
       setPending((p) => p.filter((x) => x.id !== id))
@@ -356,6 +440,14 @@ export default function Console({ agent, variant = 'focus', controls = {}, onBac
     }
   }
 
+  // Edit a message you sent: the agent rewinds to just before it and gets the new text instead.
+  const editSent = async ({ original, back, text, undoFiles }) => {
+    try {
+      await api(`/agents/${pid}/rewind`, { method: 'POST', body: { original, back, text, undoFiles } })
+      setFlash(undoFiles ? 'Rewound (files too) and sent your edit' : 'Rewound and sent your edit')
+      return true
+    } catch (e) { setFlash(e.message); return false }
+  }
   const cancelQueued = async (qid) => { try { await api(`/agents/${pid}/queue/${qid}`, { method: 'DELETE' }) } catch (e) { setFlash(e.message) } }
   const stop = async () => {
     try { await api(`/agents/${pid}/keys`, { method: 'POST', body: { keys: ['esc'] } }); setFlash('Sent Esc to interrupt') } catch (e) { setFlash(e.message) }
@@ -392,6 +484,16 @@ export default function Console({ agent, variant = 'focus', controls = {}, onBac
           </div>
         )}
         {extraActions}
+        {!minimized && agent.caps?.fork && agent.sessionId && (
+          <button className="win-btn" title="Fork: a copy of this conversation in a new tab, to try another way (this one stays as it is)" aria-label="Fork this conversation"
+            onClick={async () => {
+              try {
+                const r = await api(`/agents/${pid}/fork`, { method: 'POST' })
+                setFlash('Forked into a new tab next to this one')
+                setTimeout(() => window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: r.paneId } })), 1200)
+              } catch (e) { setFlash(e.message) }
+            }}><Icon name="split" size={14} /></button>
+        )}
         {!minimized && (
           <button className="win-btn" onClick={async () => { try { setFlash(`Opened in ${(await openInTerminal(agent.paneId)).app}. Ctrl+] detaches there.`) } catch (e) { setFlash(e.message) } }}
             title="Open in your terminal app" aria-label="Open in your terminal app"><Icon name="terminal" size={14} /></button>
@@ -405,18 +507,19 @@ export default function Console({ agent, variant = 'focus', controls = {}, onBac
         <>
           <div className="console-body">
             <PathCtx.Provider value={openFromChat}>
-              {view === 'chat' && <Chat agent={agent} pending={pending} queued={queued} onCancelQueued={cancelQueued} />}
+              {view === 'chat' && <Chat agent={agent} pending={pending} queued={queued} onCancelQueued={cancelQueued} onEdit={agent.caps?.rewind ? (t) => { setEditTarget({ ...t, undoFiles: false, canUndoFiles: agent.kind === 'claude' }); setPrefill({ text: t.original, n: Date.now() }) } : null} editingText={editTarget?.original} />}
             </PathCtx.Provider>
             <div className="term-wrap" hidden={view !== 'terminal'}><Terminal paneId={agent.paneId} active={view === 'terminal'} focusKey={termFocus} onChat={() => setView('chat')} /></div>
-            {view === 'files' && <FilesView agent={agent} openPath={openPath} onConsumed={() => setOpenPath(null)} />}
+            {view === 'files' && <FilesView agent={agent} openPath={openPath} onConsumed={() => setOpenPath(null)} onMention={(p) => setPrefill({ text: /\s/.test(p) ? `@"${p}" ` : `@${p} `, add: true, append: true, n: Date.now() })} />}
             {view === 'changes' && <ChangesView agent={agent} onOpenFile={(p) => { setOpenPath(p); setView('files') }} />}
+            {view === 'preview' && <PreviewView agent={agent} onSendToAgent={({ text, files }) => { setView('chat'); setPrefill({ text, files, append: true, n: Date.now() }) }} />}
           </div>
 
           {agent.status === 'blocked' && view === 'chat' && (
             <BlockedCard agent={agent} onKey={sendKeys} onOpenTerminal={() => setView('terminal')} />
           )}
 
-          <div className="composer-wrap" hidden={view === 'files' || view === 'changes'}>
+          <div className="composer-wrap" hidden={view === 'files' || view === 'changes' || view === 'preview'}>
             {agent.caps?.subagents && view === 'chat' && <Subagents paneId={agent.paneId} working={agent.status === 'working'} Rich={RichText} />}
             {keysOpen && (
               <div className="keybar" aria-label="Send keys">
@@ -425,9 +528,18 @@ export default function Console({ agent, variant = 'focus', controls = {}, onBac
               </div>
             )}
             {!keysOpen && flash && <div className="comp-note">{flash}</div>}
+            {btw && view === 'chat' && (
+              <div className="btw-card" role="status">
+                <div className="btw-head"><Icon name="chat" size={12} /><span>Side question</span><button className="win-btn" onClick={() => setBtw(null)} aria-label="Close side answer" title="Close"><Icon name="x" size={12} /></button></div>
+                <div className="btw-q">{btw.q}</div>
+                <div className="btw-a">{btw.a ? <RichText text={btw.a} /> : <span className="muted"><Icon name="refresh" size={11} className="spin" /> Thinking…</span>}</div>
+              </div>
+            )}
             <Composer id={agent.paneId} placeholder={agent.chief ? 'Tell your chief of staff what you need…' : `Message ${title}…`}
               onSend={send} keysOpen={keysOpen} onToggleKeys={() => setKeysOpen(!keysOpen)}
-              busy={agent.status === 'working'} onStop={stop} queuedCount={queued.length}
+              busy={agent.status === 'working'} typeAhead={!!agent.caps?.typeAhead}
+              prefill={prefill} editing={editTarget} onEditChange={(e) => setEditTarget(e)}
+              mirroring={mirrorOn} onDraft={(t) => { draftNow.current = t; if (mirrorOn || mirrored.current) syncMirror() }} onStop={stop} queuedCount={queued.length}
               commandsUrl={agent.caps?.commands ? `/agents/${encodeURIComponent(agent.paneId)}/commands` : null}
               filesUrl={`/agents/${encodeURIComponent(agent.paneId)}/mentions`}
               historyUrl={agent.caps?.chat ? `/agents/${encodeURIComponent(agent.paneId)}/transcript` : null}

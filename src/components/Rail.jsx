@@ -109,7 +109,7 @@ function HoverCard({ row, rect, git, preview }) {
   )
 }
 
-export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpen, onOpenInHerdr, onOpenFiles, onNewAgent }) {
+export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpen, onOpenInHerdr, onOpenFiles, onNewAgent, onHistory }) {
   const [launching, setLaunching] = useState(false)
   const [error, setError] = useState(null)
   const [closedWs, setClosedWs] = usePersisted('cc-rail-closed', {})
@@ -228,6 +228,7 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
         <span className="rail-tools">
           <button className="rail-tool" onClick={() => onNewAgent?.()} aria-label="New agent" title="New agent"><Icon name="plus" size={14} /></button>
           <button className="rail-tool" onClick={() => setNaming(true)} aria-label="New space" title="New space"><Icon name="layers" size={14} /></button>
+          <button className="rail-tool" onClick={() => onHistory?.()} aria-label="History" title="Search every conversation, and closed agents (⌘⇧F)"><Icon name="clock" size={14} /></button>
           <button className="rail-tool" onClick={() => setAll(!allClosed)} aria-label={allClosed ? 'Expand all spaces' : 'Collapse all spaces'} title={allClosed ? 'Expand all' : 'Collapse all'}>
             <Icon name={allClosed ? 'unfold-all' : 'fold-all'} size={14} />
           </button>

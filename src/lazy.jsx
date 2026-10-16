@@ -12,6 +12,7 @@ const LOADERS = {
   ShellTab: () => import('./components/ShellTab.jsx'),
   Terminal: () => import('./components/Terminal.jsx'),
   Files: () => import('./components/Files.jsx'),
+  Preview: () => import('./components/Preview.jsx'),
   CalendarView: () => import('./components/CalendarView.jsx'),
   UsageStats: () => import('./components/UsageStats.jsx'),
 }
@@ -39,6 +40,7 @@ export const ShellTab = wrap(LOADERS.ShellTab)
 export const Terminal = wrap(LOADERS.Terminal)
 export const FilesView = wrap(LOADERS.Files, 'FilesView')
 export const ChangesView = wrap(LOADERS.Files, 'ChangesView')
+export const PreviewView = wrap(LOADERS.Preview)
 export const CalendarView = wrap(LOADERS.CalendarView)
 export const UsageStats = wrap(LOADERS.UsageStats)
 

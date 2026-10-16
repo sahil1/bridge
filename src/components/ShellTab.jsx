@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import Icon from './Icon.jsx'
-import { FilesView, ChangesView } from '../lazy.jsx'
+import { FilesView, ChangesView, PreviewView } from '../lazy.jsx'
 import { PaneHeader, usePersisted, useWidth } from './layout.jsx'
 import { api, openInTerminal } from '../api.js'
 import disposeTerm from '../disposeTerm.js'
@@ -91,6 +91,12 @@ export default function ShellTab({ tab, controls = {}, onOpenInHerdr }) {
   const [selId, setSelId] = useState(null)
   const [zoom, setZoom] = useState(null)
   const [view, setView] = usePersisted(`cc-shell-view-${tab.tabId}`, 'panes')
+  // Another view (the file viewer's "Show the app") asking to switch.
+  useEffect(() => {
+    const on = (e) => { if (tab.panes.some((p) => p.paneId === e.detail?.paneId)) setView(e.detail.view) }
+    window.addEventListener('cc-set-view', on)
+    return () => window.removeEventListener('cc-set-view', on)
+  })
   const [text, setText] = useState('')
   const [withEnter, setWithEnter] = usePersisted('cc-term-enter', true)
   const [keysOpen, setKeysOpen] = useState(false)
@@ -133,7 +139,7 @@ export default function ShellTab({ tab, controls = {}, onOpenInHerdr }) {
     <section className={`pane console shell-tab ${controls.minimized ? 'is-min' : ''}`} aria-label={`${tab.label} tab`}>
       <PaneHeader icon="terminal" title={tab.label || 'shell'} subtitle={`${tab.workspace} · ${panes.length} pane${panes.length === 1 ? '' : 's'} · ${home(sel.cwd)}`} {...controls}>
         <div className="seg" role="tablist">
-          {[['panes', 'grid', 'Panes'], ['files', 'folder', 'Files'], ['changes', 'branch', 'Changes']].map(([id, icon, label]) => (
+          {[['panes', 'grid', 'Panes'], ['files', 'folder', 'Files'], ['changes', 'branch', 'Changes'], ['preview', 'play', 'Preview']].map(([id, icon, label]) => (
             <button key={id} role="tab" aria-selected={view === id} className={view === id ? 'on' : ''} onClick={() => setView(id)} title={label}><Icon name={icon} size={14} /><span>{label}</span></button>
           ))}
         </div>
@@ -152,6 +158,7 @@ export default function ShellTab({ tab, controls = {}, onOpenInHerdr }) {
         )}
         {view === 'files' && <FilesView key={sel.paneId} agent={{ paneId: sel.paneId, cwd: sel.cwd }} />}
         {view === 'changes' && <ChangesView key={sel.paneId} agent={{ paneId: sel.paneId, cwd: sel.cwd }} onOpenFile={() => setView('files')} />}
+        {view === 'preview' && <PreviewView key={sel.paneId} agent={{ paneId: sel.paneId, cwd: sel.cwd }} />}
       </div>
       {view === 'panes' && (
         <div className="composer-wrap">

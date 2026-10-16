@@ -2,6 +2,41 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
+## 2.2.0
+
+See your app running, keep talking while agents work, and edit what you sent.
+
+### What's new
+
+- **Preview tab:** next to Files and Changes, it shows the web servers running from the agent's folder (port, program, page title) and the app itself, with an address bar, reload, open in your browser and stop. Nothing running? It offers the project's own way to start one (`./start.sh`, `npm run dev`, `make dev` and others), in a terminal tab you can watch, and shows the app as soon as it answers. An `index.html` that needs its dev server now says so in the file viewer.
+- **Type while the agent works:** with Claude Code and Codex, Enter sends straight to the agent, the way typing in its terminal does (it picks it up after its current step). ⌘/Ctrl+Enter still interrupts and sends now.
+- **/btw side questions:** ask Claude something while it keeps working; the answer appears in a card above the message box.
+- **Edit a sent message (Claude Code and Codex):** hover your message and choose Edit. It goes into the message box; send it and the agent goes back to just before it and answers your edit instead. Your files stay as they are unless you also choose to undo the agent's file changes since then (Claude Code).
+- **Send what you see to the agent:** in the Preview tab, Send to agent attaches a picture of the app to a message, with its address.
+- **History (⌘/Ctrl+Shift+F):** search every Claude Code and Codex conversation on this computer, and open or resume the one you find. Agents you close are kept there too, to resume later with their full history.
+- **Fork:** copy an agent's conversation into a new tab next to it, to try another way while the original stays as it is.
+- **Undo and commit in the Changes tab:** undo one change or a whole file, and commit all changes or just the file you're looking at.
+- **Compare two agents:** in New agent, send the same first message to a second kind of agent and see both side by side.
+- **Saved prompts:** the star in the message box keeps messages you send often. {{Blanks}} like {{week}} are selected for you to fill in; Tab goes to the next.
+- **Terminal tab:** the cursor sits where you type (the agent's input line), and what you type in the message box shows up there as you type. The agent's screen now fits the pane's width (no cut-off lines or sideways scrolling), scrollbars match the terminal, and a short screen no longer leaves the view scrolled down to empty space.
+- **Images stay in your messages:** pictures you attached or pasted show as thumbnails after sending; click one to see it full size. In the message box, attached images are bigger, numbered (Image 1, Image 2) so you can refer to one, and open full size with a click.
+- **Word, PowerPoint and Excel in Files:** spreadsheets and CSV files show as a table with a tab per sheet. Documents and decks show laid out page by page when LibreOffice is installed (Bridge AI uses it in the background); without it, you see the text in them. "Open in app" opens one in Word, Excel or PowerPoint.
+- **File menu in Files:** right-click a file or folder (or use ⋯ in the viewer) for Reveal in Finder, Open in its app, Mention to the agent, Copy path, Copy relative path, Duplicate, Rename, Move to Trash, and New file or folder. The + at the top of the tree adds a file or folder there.
+
+### Fixes
+
+- Claude Code showed as idle while working on the built-in runtime with newer Claude Code versions.
+- Chat no longer shows messages that were rewound away (also when you rewind in the terminal).
+- The file viewer no longer opens every file in Edit after you edited one.
+- Chat's live activity line works again with newer Claude Code versions, and Chat follows Codex after you rewind it in its terminal.
+
+### Install
+
+- **macOS and Linux:** `curl -fsSL https://raw.githubusercontent.com/sahil1/bridge/main/install.sh | sh`
+- **Windows (PowerShell):** `irm https://raw.githubusercontent.com/sahil1/bridge/main/install.ps1 | iex`
+
+On 2.0 or later? Settings › About & updates updates it in one click.
+
 ## 2.1.0
 
 Edit files in place, more than one account per agent, and spaces you can arrange.

@@ -2,7 +2,7 @@ import express from 'express'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { transcript, preview, locate } from './transcripts.js'
+import { transcript, preview, locate, imageFrom } from './transcripts.js'
 import { listSubagents } from './subagents.js'
 import { ttyHandler } from './tty.js'
 import { attachHandler } from './attach.js'
@@ -10,7 +10,12 @@ import { makeGuard } from './guard.js'
 import { usage } from './usage.js'
 import { usageStats } from './usagestats.js'
 import * as files from './files.js'
+import * as office from './office.js'
 import * as accounts from './accounts.js'
+import * as servers from './servers.js'
+import * as archive from './archive.js'
+import * as savedPrompts from './prompts.js'
+import { search as searchSessions } from './search.js'
 import http from 'node:http'
 import { makeQuota, makeWeather, makeMortgage } from './feeds.js'
 import * as mk from './market.js'
@@ -24,6 +29,7 @@ import { makeMacro } from './macro.js'
 import * as slash from './commands.js'
 import * as mentions from './mentions.js'
 import { promptSafe } from './promptsafe.js'
+import { rewindAndSend, codexRewindAndSend, btwAnswer } from './rewind.js'
 import { makeNews } from './news.js'
 import { execFile } from 'node:child_process'
 import { pickRuntime } from './runtime/index.js'
@@ -213,6 +219,13 @@ app.put('/api/agents/:pane/file', async (req, res) => {
 })
 app.get('/api/agents/:pane/find', wrap(async (req) => ({ files: await files.findFiles(await rootOf(req.params.pane), String(req.query.q || '').slice(0, 100)) })))
 app.get('/api/agents/:pane/git', wrap(async (req) => files.gitStatus(await rootOf(req.params.pane))))
+app.post('/api/agents/:pane/discard', wrap(async (req) => {
+  const root = await rootOf(req.params.pane)
+  const rel = String(req.body?.path || '')
+  if (!rel) throw new Error('Which file?')
+  return req.body?.hunk == null ? files.discardFile(root, rel) : files.discardHunk(root, rel, Number(req.body.hunk))
+}))
+app.post('/api/agents/:pane/commit', wrap(async (req) => files.commit(await rootOf(req.params.pane), { message: req.body?.message, paths: req.body?.paths })))
 app.get('/api/agents/:pane/diff', wrap(async (req) => files.gitDiff(await rootOf(req.params.pane), String(req.query.path || ''))))
 app.get('/api/agents/:pane/raw', async (req, res) => {
   try {
@@ -224,6 +237,36 @@ app.get('/api/agents/:pane/raw', async (req, res) => {
     res.status(404).json({ error: err.message })
   }
 })
+
+// Word, PowerPoint and Excel: a spreadsheet as a table, a document or deck as a PDF (LibreOffice),
+// or its text when LibreOffice isn't installed.
+app.get('/api/agents/:pane/office/sheet', wrap(async (req) => office.sheet(files.safePath(await rootOf(req.params.pane), String(req.query.path || '')).real)))
+app.get('/api/agents/:pane/office/outline', wrap(async (req) => office.outline(files.safePath(await rootOf(req.params.pane), String(req.query.path || '')).real)))
+app.get('/api/agents/:pane/office/pdf', async (req, res) => {
+  try {
+    const out = await office.convert(files.safePath(await rootOf(req.params.pane), String(req.query.path || '')).real, 'pdf')
+    res.set({ 'Content-Type': 'application/pdf', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store' })
+    res.sendFile(out)
+  } catch (err) {
+    res.status(err.needs ? 501 : 502).json({ error: err.message, needs: err.needs || null })
+  }
+})
+app.get('/api/office', wrap(async () => ({ libreoffice: !!office.soffice() })))
+
+// The file tree's menu: duplicate, rename, new file or folder, move to Trash, show in Finder,
+// open in its usual app.
+app.post('/api/agents/:pane/fileop', wrap(async (req) => {
+  const root = await rootOf(req.params.pane)
+  const { op, path: rel = '', name } = req.body || {}
+  const p = String(rel)
+  if (op === 'duplicate') return files.duplicate(root, p)
+  if (op === 'rename') return files.rename(root, p, name)
+  if (op === 'newFile' || op === 'newFolder') return files.create(root, p, name, { folder: op === 'newFolder' })
+  if (op === 'trash') return files.trash(root, p)
+  if (op === 'reveal') return files.reveal(root, p)
+  if (op === 'open') return files.openDefault(root, p)
+  throw new Error('Unknown action')
+}))
 
 // HTML preview: the page runs in a sandbox with no access to this app (an opaque origin, which
 // the guard refuses for any API call), but its scripts, styles and images work.
@@ -237,6 +280,28 @@ app.get('/api/agents/:pane/site/*rest', async (req, res) => {
     res.status(404).json({ error: err.message })
   }
 })
+
+// ---------- Dev servers (the Preview tab) ----------
+// The web servers running from the agent's folder, and the project's own ways to start one.
+app.get('/api/agents/:pane/servers', wrap(async (req) => {
+  const root = await rootOf(req.params.pane)
+  return { servers: await servers.serversFor(root, { exclude: [cfg.port || 7420] }), commands: servers.startCommands(root) }
+}))
+// Start one of those commands (only those: nothing typed in from the page) in a terminal tab in
+// the agent's space, where you can watch it and stop it.
+app.post('/api/agents/:pane/servers/start', wrap(async (req) => {
+  const pane = ((await rt.fleet()).panes || []).find((x) => x.paneId === req.params.pane)
+  if (!pane) throw new Error(`No pane ${req.params.pane}`)
+  const cmd = servers.startCommands(pane.cwd).find((c) => c.command === String(req.body?.command || ''))
+  if (!cmd) throw new Error("That isn't one of this project's start commands")
+  const out = await rt.launch({ kind: 'shell', cwd: pane.cwd, label: `Server: ${cmd.label}`.slice(0, 60), workspaceId: pane.workspaceId })
+  await new Promise((r) => setTimeout(r, 1200))
+  await rt.text(out.paneId, cmd.command)
+  await rt.paneKeys(out.paneId, ['enter'])
+  pushFleet()
+  return { ...out, openId: await openIdOf(out.paneId) }
+}))
+app.post('/api/agents/:pane/servers/:port/stop', wrap(async (req) => servers.stop(await rootOf(req.params.pane), req.params.port)))
 
 app.post('/api/agents/:pane/focus', wrap(async (req) => {
   await rt.focusAgent(req.params.pane)
@@ -255,9 +320,12 @@ app.post('/api/agents/:pane/prompt', wrap(async (req) => {
   const text = String(req.body?.text || '').trim()
   if (!text) throw new Error('Empty prompt')
   try {
-    const r = await promptSafe(rt, req.params.pane, text, await findAgent(req.params.pane).catch(() => null))
+    const agent = await findAgent(req.params.pane).catch(() => null)
+    const r = await promptSafe(rt, req.params.pane, text, agent)
     // Show "working" right away rather than at the next fleet poll.
     for (const ms of [150, 700, 1600]) setTimeout(pushFleet, ms)
+    // A side question: its answer is in a panel, not the chat, so bring it back here.
+    if (agent && caps(agent.kind).btw && /^\/btw\s/.test(text)) return { ...r, btw: (await btwAnswer(rt, req.params.pane, text)) || null }
     return r
   } catch (e) {
     if (e.code !== 'not_at_prompt') throw e
@@ -297,6 +365,22 @@ app.post('/api/agents/:pane/queue', wrap(async (req) => {
   return item
 }))
 // Send now: interrupt what the agent is doing (Esc) and send this as soon as it's back at its prompt.
+// Edit a message you sent: rewind the agent to just before it and send the new text instead.
+app.post('/api/agents/:pane/rewind', wrap(async (req) => {
+  const agent = await findAgent(req.params.pane)
+  if (!caps(agent.kind).rewind) throw new Error(`Editing sent messages isn't supported for ${adapter(agent.kind).label} yet`)
+  const text = String(req.body?.text || '').trim()
+  const original = String(req.body?.original || '').trim()
+  const back = Number(req.body?.back) || 1
+  if (!text || !original) throw new Error('Nothing to send')
+  const r = agent.kind === 'codex'
+    ? await codexRewindAndSend(rt, agent, { original, back, text })
+    : await rewindAndSend(rt, agent, { original, back, text, undoFiles: !!req.body?.undoFiles })
+  // Codex continues in a new session after an edit: follow it, so Chat and resume use it.
+  if (r.sessionId && r.sessionId !== agent.sessionId) await rt.setSession?.(agent.paneId, r.sessionId)
+  for (const ms of [150, 700, 1600]) setTimeout(pushFleet, ms)
+  return r
+}))
 app.post('/api/agents/:pane/steer', wrap(async (req) => {
   const text = String(req.body?.text || '').trim()
   if (!text) throw new Error('Empty message')
@@ -313,18 +397,35 @@ app.get('/api/places', wrap(async () => {
 app.get('/api/dirs', wrap((req) => places.completeDir(req.query.q)))
 app.get('/api/agent-kinds', wrap(() => installed()))
 app.post('/api/agents/launch', wrap(async (req) => {
-  const { kind = cfg.defaultAgent || 'claude', cwd, workspaceId, newSpace, label, prompt, account } = req.body || {}
+  const { kind = cfg.defaultAgent || 'claude', cwd, workspaceId, newSpace, label, prompt, account, alsoKind } = req.body || {}
   if (kind !== 'shell' && !(await installed()).some((k) => k.kind === kind)) throw new Error(`${adapter(kind).label} isn't installed`)
   const dir = places.resolveDir(cwd)
   const name = String(label || path.basename(dir)).trim().slice(0, 60)
   const space = String(newSpace || '').trim()
   // New space: the workspace takes the space name and its first tab the agent's name.
   const out = await launchAgent({ kind, cwd: dir, label: name, workspaceId: space ? null : workspaceId || null, newSpace: space || (workspaceId ? undefined : name), prompt: String(prompt || '').trim() || undefined, account: account ? String(account) : undefined })
+  // Compare: the same first message to a second kind of agent, in the same space.
+  if (alsoKind && alsoKind !== kind && String(prompt || '').trim() && (await installed()).some((k) => k.kind === alsoKind)) {
+    const ws = ((await rt.fleet()).panes || []).find((p) => p.paneId === out.paneId)?.workspaceId
+    try {
+      const two = await launchAgent({ kind: alsoKind, cwd: dir, label: `${name} (${adapter(alsoKind).label})`.slice(0, 60), workspaceId: ws || null, newSpace: ws ? undefined : space || name, prompt: String(prompt).trim() })
+      out.alsoPaneId = two.paneId
+    } catch (e) { out.alsoError = e.message }
+  }
   pushFleet()
   return out
 }))
 app.post('/api/tabs/:tab/rename', wrap(async (req) => { await rt.renameTab(req.params.tab, String(req.body?.label || '').trim()); pushFleet(); return { ok: true } }))
-app.post('/api/tabs/:tab/close', wrap(async (req) => { await rt.closeTab(req.params.tab); pushFleet(); return { ok: true } }))
+// Closing ends the terminal; the conversation is kept in "Closed agents" to find and resume.
+async function archiveWhere(match) {
+  for (const a of (await rt.fleet()).agents.filter(match)) {
+    if (!a.sessionId || !adapter(a.kind).resume) continue
+    let last = ''
+    try { last = preview(a)?.text || '' } catch { /* no transcript */ }
+    archive.add({ kind: a.kind, sessionId: a.sessionId, cwd: a.cwd, label: a.chief ? 'Chief of staff' : a.tab && !/^\d+$/.test(a.tab) ? a.tab : a.title, workspace: a.workspace, preview: last })
+  }
+}
+app.post('/api/tabs/:tab/close', wrap(async (req) => { await archiveWhere((a) => a.tabId === req.params.tab).catch(() => {}); await rt.closeTab(req.params.tab); pushFleet(); return { ok: true } }))
 app.post('/api/workspaces/:ws/rename', wrap(async (req) => { await rt.renameWorkspace(req.params.ws, String(req.body?.label || '').trim()); pushFleet(); return { ok: true } }))
 // Reorder: index is the position of the item to drop in front of (the list length = last).
 app.post('/api/workspaces/:ws/move', wrap(async (req) => {
@@ -359,7 +460,58 @@ app.post('/api/workspaces', wrap(async (req) => {
   pushFleet()
   return out
 }))
-app.post('/api/workspaces/:ws/close', wrap(async (req) => { await rt.closeWorkspace(req.params.ws); pushFleet(); return { ok: true } }))
+app.post('/api/workspaces/:ws/close', wrap(async (req) => { await archiveWhere((a) => a.workspaceId === req.params.ws).catch(() => {}); await rt.closeWorkspace(req.params.ws); pushFleet(); return { ok: true } }))
+
+// ---------- Saved prompts ----------
+app.get('/api/prompts', wrap(() => ({ prompts: savedPrompts.all() })))
+app.post('/api/prompts', wrap((req) => savedPrompts.add(req.body || {})))
+app.patch('/api/prompts/:id', wrap((req) => savedPrompts.update(req.params.id, req.body || {})))
+app.post('/api/prompts/:id/used', wrap((req) => { savedPrompts.used(req.params.id); return { ok: true } }))
+app.delete('/api/prompts/:id', wrap((req) => { savedPrompts.remove(req.params.id); return { ok: true } }))
+
+// ---------- History: search every conversation, closed agents, resume and fork ----------
+const liveBySession = async () => Object.fromEntries(((await rt.fleet()).agents || []).filter((a) => a.sessionId).map((a) => [a.sessionId, a.paneId]))
+app.get('/api/search', wrap(async (req) => {
+  const out = await searchSessions(String(req.query.q || '').slice(0, 200))
+  const live = await liveBySession()
+  const closed = Object.fromEntries(archive.all().map((x) => [x.sessionId, x]))
+  const agents = Object.fromEntries(((await rt.fleet()).agents || []).filter((x) => x.sessionId).map((x) => [x.sessionId, x]))
+  const nameOf = (x) => (x.chief ? 'Chief of staff' : x.tab && !/^\d+$/.test(x.tab) ? x.tab : x.title || null)
+  out.results = out.results.map((r) => {
+    const a = agents[r.sessionId]
+    return { ...r, paneId: live[r.sessionId] || null, label: (a && nameOf(a)) || closed[r.sessionId]?.label || null, workspace: a?.workspace || closed[r.sessionId]?.workspace || null, cwd: r.cwd ? r.cwd.replace(os.homedir(), '~') : null, fullCwd: r.cwd }
+  })
+  return out
+}))
+app.get('/api/archive', wrap(async () => {
+  const live = await liveBySession()
+  return { items: archive.all().map((x) => ({ ...x, paneId: live[x.sessionId] || null, cwd: x.cwd?.replace(os.homedir(), '~'), fullCwd: x.cwd })) }
+}))
+app.delete('/api/archive/:id', wrap((req) => { archive.remove(req.params.id); return { ok: true } }))
+// Open a past conversation again, with its history: in its old space if that's still open.
+app.post('/api/sessions/resume', wrap(async (req) => {
+  const { kind, sessionId, cwd, label, workspace } = req.body || {}
+  if (!adapter(kind).resume || !/^[\w-]{8,64}$/.test(String(sessionId || ''))) throw new Error("That conversation can't be resumed")
+  const live = (await liveBySession())[sessionId]
+  if (live) return { paneId: live, already: true }
+  const dir = places.resolveDir(cwd || '~')
+  if (!fs.existsSync(dir)) throw new Error(`Its folder is gone: ${cwd}`)
+  if (!(await installed()).some((k) => k.kind === kind)) throw new Error(`${adapter(kind).label} isn't installed`)
+  const ws = workspace ? (await rt.fleet()).workspaces.find((w) => w.label === workspace) : null
+  const out = await launchAgent({ kind, cwd: dir, label: String(label || path.basename(dir)).slice(0, 60), workspaceId: ws?.id || null, newSpace: ws ? undefined : (workspace || 'Resumed'), resume: sessionId })
+  archive.removeSession(sessionId)
+  pushFleet()
+  return out
+}))
+// A copy of an agent's conversation in a new tab next to it, to try another way.
+app.post('/api/agents/:pane/fork', wrap(async (req) => {
+  const a = await findAgent(req.params.pane)
+  if (!adapter(a.kind).fork || !a.sessionId) throw new Error(`Forking isn't available for ${adapter(a.kind).label}${a.sessionId ? '' : ' until it has a conversation'}`)
+  const name = a.tab && !/^\d+$/.test(a.tab) ? a.tab : a.title || adapter(a.kind).label
+  const out = await launchAgent({ kind: a.kind, cwd: a.cwd, label: `${name} (fork)`.slice(0, 60), workspaceId: a.workspaceId, fork: a.sessionId })
+  pushFleet()
+  return out
+}))
 
 // ---------- Routines (recurring jobs, last run read from evidence) ----------
 app.get('/api/routines', wrap((req) => routines.list(req.query.refresh === '1')))
@@ -474,6 +626,16 @@ app.post('/api/upload', express.raw({ type: () => true, limit: '50mb' }), wrap(a
 }))
 
 // Thumbnails for attachments: only files inside the uploads folder.
+// An image you pasted into an agent, out of its transcript, to view after sending.
+app.get('/api/agents/:pane/image', async (req, res) => {
+  try {
+    const a = await findAgent(req.params.pane)
+    const img = imageFrom(a, String(req.query.uuid || ''), Number(req.query.i) || 0)
+    if (!img) return res.status(404).json({ error: 'Not found' })
+    res.set({ 'Content-Type': img.type, 'Content-Security-Policy': "default-src 'none'; sandbox", 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, max-age=86400' })
+    res.send(img.data)
+  } catch (e) { res.status(404).json({ error: e.message }) }
+})
 app.get('/api/upload/raw', (req, res) => {
   const p = path.resolve(String(req.query.path || ''))
   if (!p.startsWith(UPLOADS + path.sep) || !fs.existsSync(p)) return res.status(404).json({ error: 'Not found' })

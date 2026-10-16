@@ -3,7 +3,16 @@
 //   built app (npm run desktop:dist)  the copy of Bridge AI inside the app, on the app's own Node,
 //                                     so the person using it needs nothing else installed
 //   from source (npm run desktop)     your clone, with `node scripts/start.js`
-const { app, BrowserWindow, Menu, shell, globalShortcut, Notification, session, nativeTheme } = require('electron')
+const { app, BrowserWindow, Menu, shell, globalShortcut, Notification, session, nativeTheme, ipcMain } = require('electron')
+
+// A picture of part of the window (the Preview tab's app), for sending to an agent. Only this
+// window, only a rectangle of it, only when the page asks.
+ipcMain.handle('bridge:capture', async (e, r) => {
+  const w = BrowserWindow.fromWebContents(e.sender)
+  if (!w || !r) return null
+  const rect = { x: Math.max(0, Math.round(r.x)), y: Math.max(0, Math.round(r.y)), width: Math.max(1, Math.round(r.width)), height: Math.max(1, Math.round(r.height)) }
+  return (await w.webContents.capturePage(rect)).toPNG().toString('base64')
+})
 const { execFile } = require('node:child_process')
 const fs = require('node:fs')
 const os = require('node:os')

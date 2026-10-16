@@ -7,7 +7,7 @@ import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import * as cli from './herdr-cli.js'
 import * as sock from './herdr-socket.js'
-import { adapter } from '../agents.js'
+import { adapter, newSessionId } from '../agents.js'
 import { quoteCommand } from './spawn.js'
 import { envFor } from '../accounts.js'
 
@@ -20,8 +20,13 @@ export function available() {
   return !!cli.herdrSocket()
 }
 
+// Agents that continue in another session than herdr reports (Codex after an edit).
+const followed = new Map() // paneId -> sessionId
+export async function setSession(paneId, sessionId) { followed.set(paneId, sessionId) }
+
 export async function fleet() {
   const [f, snap] = await Promise.all([cli.fleet(), cli.snapshot()])
+  for (const a of f.agents || []) if (followed.has(a.paneId)) a.sessionId = followed.get(a.paneId)
   const ws = Object.fromEntries((snap.workspaces || []).map((w, i) => [w.workspace_id, { label: w.label, number: i + 1 }]))
   const tabs = Object.fromEntries((snap.tabs || []).map((t) => [t.tab_id, t.label]))
   const rects = {}
@@ -88,14 +93,16 @@ export async function moveTabToSpace(tabId, { workspaceId, newSpace, index } = {
 
 // A new agent in a new space (newSpace) or a new tab of an existing one (workspaceId).
 // herdr starts the agents it knows itself, so a default model applies only to the others.
-export async function launch({ kind = 'claude', cwd, label, workspaceId, newSpace, prompt: opening, model, account }) {
+// resume: a session id to open again; fork: a session id to copy into a new conversation.
+export async function launch({ kind = 'claude', cwd, label, workspaceId, newSpace, prompt: opening, model, account, resume, fork }) {
   const env = envFor(kind, account) // a second account's config folder, if one was picked
+  const extra = fork && a.fork ? a.fork(fork, a.sessionId === 'assign' ? newSessionId() : undefined) : resume && a.resume ? a.resume(resume) : []
   const a = adapter(kind)
   const name = `ba-${Date.now().toString(36)}`
   const space = String(newSpace || '').trim()
   let out
   if (a.herdr) {
-    out = await cli.launchTask({ name, kind: a.herdr, cwd, label: space || label, workspaceId: space ? null : workspaceId || null, prompt: opening, env })
+    out = await cli.launchTask({ name, kind: a.herdr, cwd, label: space || label, workspaceId: space ? null : workspaceId || null, prompt: opening, env, args: extra })
   } else {
     // herdr doesn't know this agent: open a pane and run it like you would by hand.
     const created = workspaceId && !space
@@ -103,7 +110,7 @@ export async function launch({ kind = 'claude', cwd, label, workspaceId, newSpac
       : await cli.run(['workspace', 'create', '--cwd', cwd, '--label', space || label, '--no-focus', ...Object.entries(env).flatMap(([k, v]) => ['--env', `${k}=${v}`])])
     const paneId = cli.findPaneId(created)
     if (!paneId) throw new Error('herdr did not return a pane for the new tab')
-    await cli.paneSendText(paneId, quoteCommand(a.bin[0], [...(model && a.model ? a.model(model) : []), ...a.start({})]))
+    await cli.paneSendText(paneId, quoteCommand(a.bin[0], [...(model && a.model ? a.model(model) : []), ...(extra.length ? extra : a.start({}))]))
     await cli.paneSendKeys(paneId, ['enter'])
     out = { paneId, promptPending: !!opening }
     if (opening) setTimeout(() => cli.prompt(paneId, opening).catch(() => cli.paneSendText(paneId, opening).then(() => cli.paneSendKeys(paneId, ['enter'])).catch(() => {})), 6000)

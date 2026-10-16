@@ -175,7 +175,8 @@ export async function launchAgent({ name, kind, cwd, label }) {
 // Start an agent with an opening prompt (e.g. a slash command) in a new tab of an
 // existing workspace, or a new workspace when that one isn't open.
 // env: extra variables for the pane (an account's config folder, say), set before the agent starts.
-export async function launchTask({ name, kind = 'claude', cwd, label, workspaceId, prompt, env = {} }) {
+// args: extra arguments for the agent (resume or fork a session), before the opening prompt.
+export async function launchTask({ name, kind = 'claude', cwd, label, workspaceId, prompt, env = {}, args = [] }) {
   const envArgs = Object.entries(env).flatMap(([k, v]) => ['--env', `${k}=${v}`])
   const created = workspaceId
     ? await run(['tab', 'create', '--workspace', workspaceId, '--cwd', cwd, '--label', label, ...envArgs])
@@ -185,7 +186,7 @@ export async function launchTask({ name, kind = 'claude', cwd, label, workspaceI
   // herdr only passes simple one-line prompts on the command line; longer ones are sent once the agent is up.
   const inline = prompt && !/[\n"'`$\\]/.test(prompt) ? prompt : null
   try {
-    await run(['agent', 'start', name, '--kind', kind, '--pane', paneId, '--timeout', '60000', '--', ...(inline ? [inline] : [])], { timeout: 70000 })
+    await run(['agent', 'start', name, '--kind', kind, '--pane', paneId, '--timeout', '60000', '--', ...args, ...(inline ? [inline] : [])], { timeout: 70000 })
   } catch (err) {
     if (/not.?ready|blocked/i.test(err.message)) return { paneId, waiting: true, promptPending: !!prompt && !inline }
     throw err

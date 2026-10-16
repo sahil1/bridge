@@ -21,6 +21,7 @@ import DOMPurify from 'dompurify'
 import Icon from './Icon.jsx'
 import { Handle, usePersisted, useWidth } from './layout.jsx'
 import { api, usePoll } from '../api.js'
+import { OfficeView, Menu, menuItems, NameDialog, fileOp, onComputer } from './FileExtras.jsx'
 
 Object.entries({ javascript, typescript, python, json, bash, css, xml, markdown, yaml, sql, go, rust, java, ini, diff: diffLang, dockerfile })
   .forEach(([n, l]) => hljs.registerLanguage(n, l))
@@ -36,17 +37,18 @@ const enc = encodeURIComponent
 const parentOf = (p) => p.split('/').slice(0, -1).join('/')
 const fmtSize = (n) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n > 1024 ? `${(n / 1024).toFixed(1)} KB` : `${n} B`)
 
-const FILE_ICON = { md: 'doc', json: 'braces', js: 'code', jsx: 'code', ts: 'code', tsx: 'code', py: 'code', css: 'code', html: 'code', sh: 'terminal', png: 'image', jpg: 'image', jpeg: 'image', gif: 'image', svg: 'image', webp: 'image', pdf: 'doc' }
+const FILE_ICON = { md: 'doc', json: 'braces', js: 'code', jsx: 'code', ts: 'code', tsx: 'code', py: 'code', css: 'code', html: 'code', sh: 'terminal', png: 'image', jpg: 'image', jpeg: 'image', gif: 'image', svg: 'image', webp: 'image', pdf: 'doc', docx: 'doc', doc: 'doc', odt: 'doc', rtf: 'doc', pptx: 'layers', ppt: 'layers', key: 'layers', xlsx: 'grid', xls: 'grid', xlsm: 'grid', csv: 'grid', tsv: 'grid' }
 const iconFor = (name) => FILE_ICON[name.split('.').pop().toLowerCase()] || 'file'
 
 // ---------- tree ----------
-function TreeNode({ pane, entry, depth, selected, onOpen, expanded, toggle, showHidden }) {
+function TreeNode({ pane, entry, depth, selected, onOpen, expanded, toggle, showHidden, ver, onMenu }) {
   const open = expanded.has(entry.path)
-  const { data } = usePoll(entry.dir && open ? `/agents/${enc(pane)}/files?path=${enc(entry.path)}${showHidden ? '&hidden=1' : ''}` : null, 15000)
+  const { data } = usePoll(entry.dir && open ? `/agents/${enc(pane)}/files?path=${enc(entry.path)}${showHidden ? '&hidden=1' : ''}&v=${ver}` : null, 15000)
   return (
     <>
       <button className={`tree-row ${selected === entry.path ? 'on' : ''}`} style={{ paddingLeft: 8 + depth * 14 }}
-        onClick={() => (entry.dir ? toggle(entry.path) : onOpen(entry.path))} title={entry.path}>
+        onClick={() => (entry.dir ? toggle(entry.path) : onOpen(entry.path))} title={entry.path}
+        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onMenu(entry, e) }}>
         {entry.dir
           ? <Icon name="chevron" size={11} className={`tree-caret ${open ? 'rot90' : ''}`} />
           : <span className="tree-caret-sp" />}
@@ -54,7 +56,7 @@ function TreeNode({ pane, entry, depth, selected, onOpen, expanded, toggle, show
         <span className="tree-name">{entry.name}</span>
       </button>
       {entry.dir && open && (data?.entries || []).map((e) => (
-        <TreeNode key={e.path} pane={pane} entry={e} depth={depth + 1} selected={selected} onOpen={onOpen} expanded={expanded} toggle={toggle} showHidden={showHidden} />
+        <TreeNode key={e.path} pane={pane} entry={e} depth={depth + 1} selected={selected} onOpen={onOpen} expanded={expanded} toggle={toggle} showHidden={showHidden} ver={ver} onMenu={onMenu} />
       ))}
     </>
   )
@@ -185,7 +187,7 @@ function Editor({ value, onChange, onSave }) {
   return <textarea className="file-editor" value={value} onChange={(e) => onChange(e.target.value)} onKeyDown={onKey} spellCheck={false} autoFocus aria-label="File text" />
 }
 
-function Viewer({ pane, filePath, onOpenPath, onBack }) {
+function Viewer({ pane, filePath, onOpenPath, onBack, onMenu, ver }) {
   const [state, setState] = useState({ loading: true })
   const [mode, setMode] = usePersisted('cc-md-mode', 'preview')
   const [copied, setCopied] = useState(false)
@@ -200,18 +202,28 @@ function Viewer({ pane, filePath, onOpenPath, onBack }) {
     api(`/agents/${enc(pane)}/file?path=${enc(filePath)}`).then((f) => setState({ f })).catch((e) => setState({ error: e.message }))
   }, [pane, filePath])
   useEffect(() => { setState({ loading: true }); load() }, [load])
+  useEffect(() => { if (ver) load() }, [ver]) // eslint-disable-line react-hooks/exhaustive-deps
   const f = state.f
   const raw = `/api/agents/${enc(pane)}/raw?path=${enc(filePath)}`
   const isMd = f?.kind === 'text' && f.ext === '.md'
   const isHtml = f?.kind === 'text' && /^\.html?$/.test(f.ext)
   const canEdit = f?.kind === 'text' && !f.truncated
   const dirty = draft != null && f?.kind === 'text' && draft !== f.text
-  const editing = canEdit && mode === 'edit'
+  // Preview or Source is remembered for every file; Edit only for this one (with a draft, it
+  // reopens in Edit).
+  const [editOn, setEditOn] = useState(() => drafts.has(key))
+  const editing = canEdit && editOn
   const shown = editing ? 'edit' : (isMd || isHtml) ? (mode === 'edit' ? 'preview' : mode) : 'source'
   // Preview and Source show your unsaved edits too, so on a narrow screen you can flip to check them.
   const text = dirty ? draft : f?.text
   const site = siteUrl(pane, filePath)
   const crumbs = filePath.split('/')
+  // An app's index.html is often only a shell that its dev server fills in (a blank page here):
+  // point to the running app, or to starting it, in the Preview tab.
+  const devInfo = usePoll(isHtml && /^index\.html?$/i.test(f?.name || '') ? `/agents/${enc(pane)}/servers` : null, 15000).data
+  const devHint = devInfo && (devInfo.servers?.length
+    ? { text: `Your app is running on port ${devInfo.servers[0].port}${devInfo.servers.length > 1 ? ` (and ${devInfo.servers.length - 1} more)` : ''}. This file alone may show a blank page.`, act: 'Show the app' }
+    : devInfo.commands?.some((c) => c.label !== 'Serve this folder') ? { text: 'If this page comes out blank, it probably needs the project\'s dev server.', act: 'Start it in Preview' } : null)
 
   const save = useCallback(async (force = false) => {
     if (!f || draft == null) return
@@ -225,12 +237,13 @@ function Viewer({ pane, filePath, onOpenPath, onBack }) {
       setTimeout(() => setSaveMsg((m) => (m?.ok ? null : m)), 1500)
     } catch (e) { setSaveMsg({ text: e.message }) } finally { setSaving(false) }
   }, [f, draft, pane, filePath, setDraft])
-  const startEdit = () => { if (draft == null && f) setDraft(f.text); setMode('edit') }
+  const startEdit = () => { if (draft == null && f) setDraft(f.text); setEditOn(true) }
   const discard = () => { setDraft(null); setSaveMsg(null); load() }
   // Leaving Edit with unsaved changes keeps them until you save or revert.
   const pick = (m) => {
     if (m === 'edit') return startEdit()
     if (!dirty) setDraft(null)
+    setEditOn(false)
     setMode(m)
   }
   // Unsaved edits: ask before the page closes.
@@ -282,8 +295,16 @@ function Viewer({ pane, filePath, onOpenPath, onBack }) {
           </button>
           {!dirty && <button className="win-btn" title="Reload" aria-label="Reload" onClick={() => { load(); setFrameKey((k) => k + 1) }}><Icon name="refresh" size={13} /></button>}
           {(f?.kind === 'image' || f?.kind === 'pdf' || isHtml) && <a className="win-btn" href={isHtml ? site : raw} target="_blank" rel="noreferrer" title="Open in new tab" aria-label="Open in new tab"><Icon name="external" size={13} /></a>}
+          {f?.kind === 'office' && onComputer && <button className="btn small" onClick={() => fileOp(pane, 'open', filePath).catch((e) => setSaveMsg({ text: e.message }))} title="Open it in the app that usually opens it"><Icon name="external" size={12} /> Open in app</button>}
+          {onMenu && <button className="win-btn" title="More" aria-label="More actions for this file" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); onMenu({ path: filePath, name: crumbs.at(-1), dir: false }, { clientX: r.right - 200, clientY: r.bottom + 4 }) }}><Icon name="more" size={14} /></button>}
         </div>
       </div>
+      {devHint && shown === 'preview' && (
+        <div className="dev-hint" role="note">
+          <Icon name="play" size={12} /><span>{devHint.text}</span>
+          <button className="link-btn" onClick={() => window.dispatchEvent(new CustomEvent('cc-set-view', { detail: { paneId: pane, view: 'preview' } }))}>{devHint.act}</button>
+        </div>
+      )}
       {saveMsg?.conflict && (
         <div className="save-conflict" role="alert">
           <Icon name="alert" size={13} /><span>{saveMsg.text}, probably by an agent.</span>
@@ -309,6 +330,7 @@ function Viewer({ pane, filePath, onOpenPath, onBack }) {
         {f?.truncated && <p className="muted small pad">Showing the first 1 MB, so this file can't be edited here.</p>}
         {f?.kind === 'image' && <div className="img-view"><img src={raw} alt={f.name} /></div>}
         {f?.kind === 'pdf' && <iframe className="pdf-view" src={raw} title={f.name} />}
+        {f?.kind === 'office' && <OfficeView pane={pane} f={f} />}
         {f?.kind === 'binary' && <div className="viewer-empty"><Icon name="file" size={22} /><p>Binary file, {fmtSize(f.size)}</p></div>}
       </div>
     </div>
@@ -316,15 +338,22 @@ function Viewer({ pane, filePath, onOpenPath, onBack }) {
 }
 
 // ---------- Files view ----------
-export function FilesView({ agent, openPath, onConsumed }) {
+export function FilesView({ agent, openPath, onConsumed, onMention }) {
   const pane = agent.paneId
   const [treeW, setTreeW] = usePersisted('cc-tree-w', 250)
   const [showHidden, setShowHidden] = usePersisted('cc-show-hidden', false)
   const [selected, setSelected] = useState(null)
   const [expanded, setExpanded] = useState(() => new Set())
   const [quick, setQuick] = useState(false)
-  const root = usePoll(`/agents/${enc(pane)}/files${showHidden ? '?hidden=1' : ''}`, 15000)
-  const rootName = agent.cwd.split('/').pop()
+  const [ver, setVer] = useState(0)
+  const root = usePoll(`/agents/${enc(pane)}/files?v=${ver}${showHidden ? '&hidden=1' : ''}`, 15000)
+  const rootName = agent.cwd.split(/[\\/]/).pop()
+  const [menu, setMenu] = useState(null) // { x, y, entry }
+  const [dialog, setDialog] = useState(null)
+  const [toast, setToast] = useState(null)
+  const say = (text) => { setToast(text); setTimeout(() => setToast((t) => (t === text ? null : t)), 2200) }
+  const onMenu = useCallback((entry, e) => setMenu({ x: e.clientX, y: e.clientY, entry }), [])
+  const closeMenu = useCallback(() => setMenu(null), [])
   // Phones and narrow panes: one column. The tree fills it; a file opens full width with a back button.
   const [boxRef, boxW] = useWidth()
   const narrow = boxW > 0 && boxW < 640
@@ -343,6 +372,44 @@ export function FilesView({ agent, openPath, onConsumed }) {
   const toggle = (p) => setExpanded((s) => { const n = new Set(s); if (n.has(p)) n.delete(p); else n.add(p); return n })
 
   useEffect(() => { setSelected(null); setExpanded(new Set()) }, [pane])
+
+  // The menu's actions. Paths are relative to the agent's folder ('' is the folder itself).
+  const sep = agent.cwd.includes('\\') && !agent.cwd.includes('/') ? '\\' : '/'
+  const act = async (op, e) => {
+    const refresh = () => setVer((v) => v + 1)
+    const moved = (from, to) => setSelected((s) => (s === from ? to : s?.startsWith(`${from}/`) ? (to ? to + s.slice(from.length) : null) : s))
+    try {
+      if (op === 'copyPath' || op === 'copyRel') {
+        const text = op === 'copyRel' ? e.path : e.path ? `${agent.cwd}${sep}${e.path.split('/').join(sep)}` : agent.cwd
+        await navigator.clipboard.writeText(text)
+        return say('Path copied')
+      }
+      if (op === 'newFile' || op === 'newFolder') {
+        return setDialog({ title: `New ${op === 'newFile' ? 'file' : 'folder'} in ${e.path || rootName}`, action: 'Create', initial: '', submit: async (name) => {
+          const r = await fileOp(pane, op, e.path, name)
+          if (e.path) setExpanded((x) => new Set(x).add(e.path))
+          refresh()
+          if (op === 'newFile') open(r.path)
+        } })
+      }
+      if (op === 'rename') {
+        return setDialog({ title: `Rename ${e.name}`, action: 'Rename', initial: e.name, submit: async (name) => { const r = await fileOp(pane, 'rename', e.path, name); moved(e.path, r.path); refresh() } })
+      }
+      if (op === 'trash') {
+        if (!window.confirm(`Move ${e.name} to the Trash?${e.dir ? ' Everything in the folder goes with it.' : ''}`)) return
+        await fileOp(pane, 'trash', e.path)
+        moved(e.path, null); refresh()
+        return say(`${e.name} moved to the Trash`)
+      }
+      if (op === 'duplicate') {
+        const r = await fileOp(pane, 'duplicate', e.path)
+        refresh()
+        if (!e.dir) open(r.path)
+        return say(`Made ${r.path.split('/').pop()}`)
+      }
+      await fileOp(pane, op, e.path) // reveal, open
+    } catch (x) { say(x.message) }
+  }
   useEffect(() => { if (openPath) { open(openPath); onConsumed?.() } }, [openPath]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const onKey = (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'p') { e.preventDefault(); setQuick(true) } }
@@ -355,21 +422,23 @@ export function FilesView({ agent, openPath, onConsumed }) {
       <aside className="tree" style={narrow ? undefined : { width: treeW }} hidden={narrow && !!selected}>
         <div className="tree-head">
           <span className="tree-root" title={agent.cwd}><Icon name="folder" size={13} /> {rootName}</span>
+          <button className="win-btn" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); onMenu({ path: '', name: rootName, dir: true }, { clientX: r.left, clientY: r.bottom + 4 }) }} title="New file or folder" aria-label="New file or folder"><Icon name="plus" size={13} /></button>
           <button className="win-btn" onClick={() => setQuick(true)} title="Go to file (⌘P)" aria-label="Go to file"><Icon name="search" size={13} /></button>
           <button className={`win-btn ${showHidden ? 'on' : ''}`} onClick={() => setShowHidden(!showHidden)} title={showHidden ? 'Hide dotfiles' : 'Show dotfiles'} aria-label="Toggle hidden files"><Icon name={showHidden ? 'eye' : 'eye-off'} size={13} /></button>
           <button className="win-btn" onClick={() => setExpanded(new Set())} title="Collapse all" aria-label="Collapse all"><Icon name="shrink" size={13} /></button>
         </div>
-        <div className="tree-scroll">
+        <div className="tree-scroll" onContextMenu={(e) => { e.preventDefault(); onMenu({ path: '', name: rootName, dir: true }, e) }}>
           {root.error && <p className="error-text pad">{root.error}</p>}
           {(root.data?.entries || []).map((e) => (
-            <TreeNode key={e.path} pane={pane} entry={e} depth={0} selected={selected} onOpen={open} expanded={expanded} toggle={toggle} showHidden={showHidden} />
+            <TreeNode key={e.path} pane={pane} entry={e} depth={0} selected={selected} onOpen={open} expanded={expanded} toggle={toggle} showHidden={showHidden} ver={ver} onMenu={onMenu} />
           ))}
         </div>
+        {toast && <div className="tree-toast" role="status">{toast}</div>}
       </aside>
       {!narrow && <Handle axis="x" size={treeW} min={160} max={520} onSize={setTreeW} label="Resize file tree" />}
       <section className="viewer-wrap" hidden={narrow && !selected}>
         {selected
-          ? <Viewer key={selected} pane={pane} filePath={selected} onOpenPath={open} onBack={narrow ? () => setSelected(null) : undefined} />
+          ? <Viewer key={selected} pane={pane} filePath={selected} onOpenPath={open} onBack={narrow ? () => setSelected(null) : undefined} onMenu={onMenu} ver={ver} />
           : (
             <div className="viewer-empty">
               <Icon name="folder-open" size={26} />
@@ -378,6 +447,8 @@ export function FilesView({ agent, openPath, onConsumed }) {
             </div>
           )}
       </section>
+      {menu && <Menu x={menu.x} y={menu.y} items={menuItems(menu.entry, act, { onMention })} onClose={closeMenu} />}
+      {dialog && <NameDialog title={dialog.title} initial={dialog.initial} action={dialog.action} onSubmit={dialog.submit} onClose={() => setDialog(null)} />}
       {quick && <div className="qo-backdrop" onClick={(e) => { if (e.target === e.currentTarget) setQuick(false) }}><QuickOpen pane={pane} onPick={open} onClose={() => setQuick(false)} /></div>}
     </div>
   )
@@ -386,8 +457,15 @@ export function FilesView({ agent, openPath, onConsumed }) {
 // ---------- Changes view ----------
 const STATUS = { modified: ['M', 'mod'], added: ['A', 'add'], deleted: ['D', 'del'], untracked: ['U', 'add'], renamed: ['R', 'mod'] }
 
-function DiffView({ pane, filePath }) {
-  const { data, error } = usePoll(`/agents/${enc(pane)}/diff?path=${enc(filePath)}`, 10000)
+function DiffView({ pane, filePath, onChanged }) {
+  const { data, error, refresh } = usePoll(`/agents/${enc(pane)}/diff?path=${enc(filePath)}`, 10000)
+  const [busy, setBusy] = useState(null)
+  const undoHunk = async (hunk) => {
+    if (!window.confirm('Undo this change? The lines go back to how they were at the last commit.')) return
+    setBusy(hunk)
+    try { await api(`/agents/${enc(pane)}/discard`, { method: 'POST', body: { path: filePath, hunk } }); refresh(); onChanged?.() } catch (e) { window.alert(e.message) } finally { setBusy(null) }
+  }
+  let hunkNo = -1
   if (error) return <div className="viewer-empty"><p>{error}</p></div>
   if (!data) return <div className="pad"><div className="skeleton-rows"><div /><div /></div></div>
   if (!data.diff && data.note === 'image file') return <div className="img-view"><img src={`/api/agents/${enc(pane)}/raw?path=${enc(filePath)}`} alt={filePath} /></div>
@@ -396,6 +474,11 @@ function DiffView({ pane, filePath }) {
     <pre className="diff-view">
       {data.diff.split('\n').map((l, i) => {
         const cls = l.startsWith('@@') ? 'hunk' : l.startsWith('+++') || l.startsWith('---') || l.startsWith('diff ') || l.startsWith('index ') ? 'meta' : l.startsWith('+') ? 'plus' : l.startsWith('-') ? 'minus' : ''
+        // Each change (hunk) can be undone on its own, except in a new file (undo the file instead).
+        if (cls === 'hunk' && !data.untracked) {
+          const n = ++hunkNo
+          return <div key={i} className="dl hunk hunk-row"><span>{l}</span><button className="hunk-undo" onClick={() => undoHunk(n)} disabled={busy != null}>{busy === n ? 'Undoing…' : 'Undo this change'}</button></div>
+        }
         return <div key={i} className={`dl ${cls}`}>{l || ' '}</div>
       })}
     </pre>
@@ -403,8 +486,23 @@ function DiffView({ pane, filePath }) {
 }
 
 export function ChangesView({ agent, onOpenFile }) {
+  const [message, setMessage] = useState('')
+  const [committing, setCommitting] = useState(false)
+  const [note, setNote] = useState(null)
   const pane = agent.paneId
-  const { data, error } = usePoll(`/agents/${enc(pane)}/git`, 8000)
+  const { data, error, refresh } = usePoll(`/agents/${enc(pane)}/git`, 8000)
+  const undoFile = async (f) => {
+    const what = f.status === 'untracked' || f.status === 'added' ? `Delete the new file ${f.path}?` : `Undo every change to ${f.path}? It goes back to how it was at the last commit.`
+    if (!window.confirm(what)) return
+    try { await api(`/agents/${enc(pane)}/discard`, { method: 'POST', body: { path: f.path } }); if (sel === f.path) setSel(null); refresh() } catch (e) { window.alert(e.message) }
+  }
+  const commit = async (paths) => {
+    setCommitting(true); setNote(null)
+    try {
+      const r = await api(`/agents/${enc(pane)}/commit`, { method: 'POST', body: { message, paths } })
+      setMessage(''); setSel(null); setNote({ ok: true, text: `Committed ${r.hash}` }); refresh()
+    } catch (e) { setNote({ text: e.message }) } finally { setCommitting(false) }
+  }
   const [sel, setSel] = useState(null)
   const [listW, setListW] = usePersisted('cc-changes-w', 280)
   const [boxRef, boxW] = useWidth()
@@ -432,9 +530,22 @@ export function ChangesView({ agent, onOpenFile }) {
               <span className="tree-name">{f.path.split('/').pop()}</span>
               <span className="chg-dir">{parentOf(f.path)}</span>
               {(f.add || f.del) ? <span className="chg-n"><span className="plus">+{f.add}</span><span className="minus">−{f.del}</span></span> : null}
+              <span role="button" tabIndex={0} className="chg-undo" title={f.status === 'untracked' ? 'Delete this new file' : 'Undo every change to this file'} aria-label={`Undo changes to ${f.path}`}
+                onClick={(e) => { e.stopPropagation(); undoFile(f) }} onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); undoFile(f) } }}><Icon name="x" size={11} /></span>
             </button>
           ))}
         </div>
+        {data.files.length > 0 && (
+          <form className="commit-box" onSubmit={(e) => { e.preventDefault(); commit(null) }}>
+            <textarea value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Commit message" rows={2} aria-label="Commit message"
+              onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commit(null) } }} />
+            <div className="commit-acts">
+              {sel && <button type="button" className="btn small" disabled={!message.trim() || committing} onClick={() => commit([sel])} title={`Commit only ${sel}`}>This file</button>}
+              <button type="submit" className="btn small primary" disabled={!message.trim() || committing}>{committing ? 'Committing…' : `Commit all ${data.files.length}`}</button>
+            </div>
+            {note && <p className={`small ${note.ok ? 'ok-text' : 'error-text'}`}>{note.text}</p>}
+          </form>
+        )}
         {data.lastCommit && data.files.length > 0 && <div className="tree-foot muted small">HEAD {data.lastCommit.hash} · {data.lastCommit.when}</div>}
       </aside>
       {!narrow && <Handle axis="x" size={listW} min={180} max={520} onSize={setListW} label="Resize changes list" />}
@@ -448,7 +559,7 @@ export function ChangesView({ agent, onOpenFile }) {
                 <button className="ghost-btn" onClick={() => onOpenFile(sel)}><Icon name="file" size={12} /> Open file</button>
               </div>
             </div>
-            <div className="viewer-body"><DiffView pane={pane} filePath={sel} /></div>
+            <div className="viewer-body"><DiffView pane={pane} filePath={sel} onChanged={refresh} /></div>
           </div>
         ) : <div className="viewer-empty"><p>Select a changed file</p></div>}
       </section>
