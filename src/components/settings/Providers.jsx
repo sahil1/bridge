@@ -52,6 +52,98 @@ function AgentsStrip({ subs, error, onRefresh, refreshing }) {
   )
 }
 
+// More than one sign-in per agent (work and personal, say). The active one is used by new agents.
+function AccountRow({ a, kind, onChange, onOpenAgent }) {
+  const [busy, setBusy] = useState(null)
+  const [err, setErr] = useState(null)
+  const [renaming, setRenaming] = useState(false)
+  const [name, setName] = useState(a.label)
+  const act = async (what) => {
+    setBusy(what); setErr(null)
+    try {
+      if (what === 'use') await api(`/accounts/active/${kind}`, { method: 'POST', body: { id: a.id } })
+      if (what === 'login') { const r = await api(`/accounts/${a.id}/login`, { method: 'POST' }); onOpenAgent?.(r.openId || r.paneId) }
+      if (what === 'remove') { if (!window.confirm(`Sign out of ${a.label} and remove it from Bridge AI?`)) return; await api(`/accounts/${a.id}`, { method: 'DELETE' }) }
+      if (what === 'rename') { await api(`/accounts/${a.id}`, { method: 'PATCH', body: { label: name } }); setRenaming(false) }
+      onChange()
+    } catch (e) { setErr(e.message) } finally { setBusy(null) }
+  }
+  const chip = a.signedIn ? { tone: 'good', text: a.plan ? `Signed in · ${a.plan}` : 'Signed in' } : a.signedIn === false ? { tone: 'off', text: 'Not signed in' } : { tone: 'unknown', text: 'Unknown' }
+  return (
+    <li className={`pv-acct ${a.active ? 'on' : ''}`}>
+      <label className="pv-acct-use" title={a.active ? 'New agents use this account' : 'Use this account for new agents'}>
+        <input type="radio" name={`acct-${kind}`} checked={a.active} onChange={() => act('use')} disabled={!!busy} />
+      </label>
+      {renaming
+        ? <form className="pv-acct-rename" onSubmit={(e) => { e.preventDefault(); act('rename') }}>
+            <input value={name} onChange={(e) => setName(e.target.value)} autoFocus maxLength={40} aria-label="Account name" />
+            <button className="btn small" type="submit" disabled={!!busy}>Save</button>
+            <button className="ghost-btn" type="button" onClick={() => { setRenaming(false); setName(a.label) }}>Cancel</button>
+          </form>
+        : <span className="pv-acct-name">{a.label}{a.isDefault && <span className="muted small"> (your usual login)</span>}</span>}
+      <Chip tone={chip.tone}>{chip.text}</Chip>
+      <span className="pv-spacer" />
+      {err && <span className="pv-msg bad" role="status"><Icon name="alert" size={12} />{err}</span>}
+      <button type="button" className="btn small" onClick={() => act('login')} disabled={!!busy} title="Opens the sign-in flow in a terminal tab (Setup space)">
+        {busy === 'login' ? 'Opening…' : a.signedIn ? 'Sign in again' : 'Sign in'}
+      </button>
+      {!a.isDefault && !renaming && <button type="button" className="ghost-btn" onClick={() => setRenaming(true)} aria-label={`Rename ${a.label}`} title="Rename"><Icon name="edit" size={12} /></button>}
+      {!a.isDefault && <button type="button" className="ghost-btn" onClick={() => act('remove')} disabled={!!busy} aria-label={`Remove ${a.label}`} title="Sign out and remove"><Icon name="trash" size={12} /></button>}
+    </li>
+  )
+}
+
+function AccountsSection({ onOpenAgent }) {
+  const [kinds, setKinds] = useState(null)
+  const [err, setErr] = useState(null)
+  const [adding, setAdding] = useState(null) // kind
+  const [label, setLabel] = useState('')
+  const [addErr, setAddErr] = useState(null)
+  const load = useCallback((refresh) => api(`/accounts${refresh ? '?refresh=1' : ''}`).then((d) => { setKinds(d); setErr(null) }).catch((e) => setErr(e.message)), [])
+  useEffect(() => { load() }, [load])
+  // Signing in happens in a terminal; check again when you come back to this window.
+  useEffect(() => { const f = () => load(true); window.addEventListener('focus', f); return () => window.removeEventListener('focus', f) }, [load])
+  const add = async (kind) => {
+    setAddErr(null)
+    try {
+      const a = await api('/accounts', { method: 'POST', body: { kind, label } })
+      setAdding(null); setLabel('')
+      await load()
+      const r = await api(`/accounts/${a.id}/login`, { method: 'POST' })
+      onOpenAgent?.(r.openId || r.paneId)
+    } catch (e) { setAddErr(e.message) }
+  }
+  if (err) return <p className="pv-note pv-err">Couldn't load accounts: {err}</p>
+  const list = (kinds || []).filter((k) => k.installed)
+  if (!list.length) return null
+  return (
+    <section className="pv-sec">
+      <div className="pv-head">
+        <h4>Accounts</h4>
+        <span className="muted small">Several sign-ins per agent, like work and personal. New agents use the one you pick.</span>
+        <button type="button" className="ghost-btn pv-head-btn" onClick={() => load(true)} aria-label="Check accounts again"><Icon name="refresh" size={12} />Recheck</button>
+      </div>
+      {list.map((k) => (
+        <div key={k.kind} className="pv-acct-group">
+          <div className="pv-acct-kind"><AgentIcon kind={k.kind} size={20} name={k.label} /><b>{k.label}</b></div>
+          <ul className="pv-accts">
+            {k.accounts.map((a) => <AccountRow key={a.id} a={a} kind={k.kind} onChange={() => load(true)} onOpenAgent={onOpenAgent} />)}
+          </ul>
+          {adding === k.kind
+            ? <form className="pv-acct-add" onSubmit={(e) => { e.preventDefault(); add(k.kind) }}>
+                <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Name it, like Work or Personal" autoFocus maxLength={40} aria-label="Account name" />
+                <button className="btn small primary" type="submit" disabled={!label.trim()}>Add and sign in</button>
+                <button className="ghost-btn" type="button" onClick={() => { setAdding(null); setAddErr(null) }}>Cancel</button>
+                {addErr && <span className="pv-msg bad" role="status"><Icon name="alert" size={12} />{addErr}</span>}
+              </form>
+            : <button type="button" className="ghost-btn pv-more" onClick={() => { setAdding(k.kind); setLabel('') }}><Icon name="plus" size={12} />Add {k.label} account</button>}
+        </div>
+      ))}
+      <p className="pv-note">Sign in uses whichever account your browser is signed in to, so switch accounts there first (or open the link it prints in a private window). Each account keeps only its own login; settings, skills and session history are shared with your usual setup. Agents already running keep the account they started with.</p>
+    </section>
+  )
+}
+
 function SecretInput({ field, value, onChange, id }) {
   const [show, setShow] = useState(false)
   const saved = field.saved?.set
@@ -184,7 +276,7 @@ function Card({ p, open, onToggle, children }) {
   )
 }
 
-export default function Providers() {
+export default function Providers({ onOpenAgent }) {
   const [providers, setProviders] = useState(null)
   const [subs, setSubs] = useState(null)
   const [err, setErr] = useState(null)
@@ -212,6 +304,7 @@ export default function Providers() {
       </p>
 
       <AgentsStrip subs={subs} error={subsErr} onRefresh={() => loadSubs(true)} refreshing={refreshing} />
+      <AccountsSection onOpenAgent={onOpenAgent} />
 
       {err && <p className="pv-note pv-err">Couldn't load providers: {err} <button type="button" className="ghost-btn" onClick={loadProviders}>Retry</button></p>}
       {!providers && !err && <div className="pv-grid" aria-busy="true">{[0, 1, 2, 3, 4, 5].map((i) => <div key={i} className="pv-card pv-skel-card" />)}</div>}

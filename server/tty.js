@@ -3,8 +3,10 @@
 // tab detaches that client only. The herdr session itself is never touched.
 import { WebSocketServer } from 'ws'
 import { execFileSync } from 'node:child_process'
+import fs from 'node:fs'
 import os from 'node:os'
 import pty from 'node-pty'
+import { sessionName, herdrSocket } from './runtime/herdr-cli.js'
 
 function herdrBin() {
   try { return execFileSync('which', ['herdr']).toString().trim() } catch { return 'herdr' }
@@ -12,6 +14,9 @@ function herdrBin() {
 
 function runningSession(preferred) {
   if (preferred) return preferred
+  // The same session the rest of Bridge AI talks to, when it's running.
+  const same = sessionName()
+  if (same && fs.existsSync(herdrSocket())) return same
   try {
     const out = execFileSync(herdrBin(), ['session', 'list']).toString()
     const row = out.split('\n').slice(1).map((l) => l.trim().split(/\s+/)).find((c) => c[1] === 'running')

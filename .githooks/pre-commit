@@ -1,0 +1,4 @@
+#!/bin/sh
+# Refuse a commit that would put personal data in the repo (see scripts/check-private.js).
+# Turned on by `npm install` (scripts/install-hooks.js), or by hand: git config core.hooksPath .githooks
+exec node scripts/check-private.js --staged

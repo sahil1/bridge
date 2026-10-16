@@ -40,7 +40,7 @@ export function groupByWorkspace(fleet) {
   })
 }
 
-const rowCwd = (r) => (r.kind === 'agent' ? r.agent.cwd : r.tab.panes.find((p) => !p.agent)?.cwd || r.tab.panes[0]?.cwd)
+const rowCwd = (r) => (r.kind === 'agent' ? r.agent.cwd : r.tab?.panes.find((p) => !p.agent)?.cwd || r.tab?.panes[0]?.cwd)
 const rowName = (r) => (r.kind === 'agent'
   ? (r.agent.chief ? 'Chief of staff' : r.agent.tab && !/^\d+$/.test(r.agent.tab) ? r.agent.tab : r.agent.title || 'agent')
   : (r.tab.label && !/^\d+$/.test(r.tab.label) ? r.tab.label : 'shell'))
@@ -117,7 +117,9 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
   const [renaming, setRenaming] = useState(null) // { kind: 'tab'|'ws', id }
   const [hover, setHover] = useState(null) // { row, rect }
   const [flash, setFlash] = useState(null)
-  const [drag, setDrag] = useState(null) // { kind: 'ws'|'tab', id, ws }
+  const [drag, setDrag] = useState(null) // { kind: 'ws'|'tab', id, ws, name, rowId }
+  const [naming, setNaming] = useState(false) // the "New space" name box
+  const [moving, setMoving] = useState(null) // a tab whose "Move to space" list is open
   const [over, setOver] = useState(null) // { id, after }
   const [pending, setPending] = useState(null) // optimistic order of space ids until the server confirms
   let groups = groupByWorkspace(fleet)
@@ -170,6 +172,20 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
     if (from < 0 || to === from || to === from + 1) return
     act(() => api(`/tabs/${encodeURIComponent(tabId)}/move`, { method: 'POST', body: { index: to } }))
   }
+  // Move a tab into another space (at `index` among its tabs, or last), or into a new space
+  // (newSpace: its name). herdr gives moved panes new ids, so the open one is followed there.
+  const moveToSpace = (d, { workspaceId, newSpace, index }) => act(async () => {
+    const out = await api(`/tabs/${encodeURIComponent(d.id)}/move`, { method: 'POST', body: { workspaceId, newSpace, index } })
+    if (selected && selected === d.rowId) {
+      const next = d.rowId.startsWith('tab:') ? `tab:${out.tabId}` : out.moved?.[d.rowId]
+      if (next && next !== d.rowId) onOpen(next)
+    }
+  }, newSpace ? `Moved to a new space, ${newSpace}` : `Moved to ${groups.find((g) => g.id === workspaceId)?.label || 'that space'}`)
+  const createSpace = async (label) => {
+    setNaming(false)
+    if (!label) return
+    await act(() => api('/workspaces', { method: 'POST', body: { label } }), `Made ${label}. Start an agent in it with +, or drag one in.`)
+  }
   const dropOn = (e, id) => {
     const r = e.currentTarget.getBoundingClientRect()
     return { id, after: e.clientY > r.top + r.height / 2 }
@@ -211,6 +227,7 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
         <span className={`live-dot ${live ? 'on' : ''}`} title={live ? 'Live updates' : 'Reconnecting'} />
         <span className="rail-tools">
           <button className="rail-tool" onClick={() => onNewAgent?.()} aria-label="New agent" title="New agent"><Icon name="plus" size={14} /></button>
+          <button className="rail-tool" onClick={() => setNaming(true)} aria-label="New space" title="New space"><Icon name="layers" size={14} /></button>
           <button className="rail-tool" onClick={() => setAll(!allClosed)} aria-label={allClosed ? 'Expand all spaces' : 'Collapse all spaces'} title={allClosed ? 'Expand all' : 'Collapse all'}>
             <Icon name={allClosed ? 'unfold-all' : 'fold-all'} size={14} />
           </button>
@@ -220,13 +237,35 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
 
       <div className="rail-scroll">
         {!fleet && <div className="skeleton-rows pad"><div /><div /><div /></div>}
+        {naming && (
+          <div className="ws-row new-space-row">
+            <Icon name="layers" size={12} className="muted" />
+            <InlineRename value="" onDone={createSpace} />
+          </div>
+        )}
         {groups.map((g) => {
           const closed = !!closedWs[g.id]
           const needs = g.agents.filter((a) => a.status === 'blocked').length
           return (
-            <section key={g.id} className={`ws ${closed ? 'is-closed' : ''} ${drag?.kind === 'ws' && drag.id === g.id ? 'dragging' : ''} ${drag?.kind === 'ws' && over?.id === g.id ? (over.after ? 'drop-after' : 'drop-before') : ''}`}
-              onDragOver={(e) => { if (drag?.kind !== 'ws') return; e.preventDefault(); setOver(dropOn(e, g.id)) }}
-              onDrop={(e) => { if (drag?.kind !== 'ws') return; e.preventDefault(); const idx = groups.findIndex((x) => x.id === g.id); moveWs(drag.id, idx + (over?.after ? 1 : 0)); endDrag() }}>
+            <section key={g.id} className={`ws ${closed ? 'is-closed' : ''} ${drag?.kind === 'tab' && over?.id === `into:${g.id}` && drag.ws !== g.id ? 'drop-into' : ''} ${drag?.kind === 'ws' && drag.id === g.id ? 'dragging' : ''} ${drag?.kind === 'ws' && over?.id === g.id ? (over.after ? 'drop-after' : 'drop-before') : ''}`}
+              onDragOver={(e) => {
+                if (drag?.kind === 'tab') { e.preventDefault(); setOver({ id: `into:${g.id}` }); return }
+                if (drag?.kind !== 'ws') return
+                e.preventDefault(); setOver(dropOn(e, g.id))
+              }}
+              onDrop={(e) => {
+                // A tab dropped on a space (its name, or anywhere that isn't another tab): to the end of it.
+                if (drag?.kind === 'tab') {
+                  e.preventDefault()
+                  const d = drag
+                  endDrag()
+                  if (d.ws === g.id) moveTab(g, d.id, [...new Set(g.rows.filter((x) => x.tab).map((x) => x.tab.tabId))].length)
+                  else moveToSpace(d, { workspaceId: g.id })
+                  return
+                }
+                if (drag?.kind !== 'ws') return
+                e.preventDefault(); const idx = groups.findIndex((x) => x.id === g.id); moveWs(drag.id, idx + (over?.after ? 1 : 0)); endDrag()
+              }}>
               <div className={`ws-row ${g.rows.length ? '' : 'empty'}`} draggable={!renaming}
                 onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', g.label); setDrag({ kind: 'ws', id: g.id }) }} onDragEnd={endDrag}
                 title="Drag to reorder">
@@ -262,15 +301,19 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
                 return (
                   <div key={r.id} className={`tab-row ${r.kind === 'shell' ? 'shell' : ''} ${selected === r.id ? 'on' : ''} ${drag?.kind === 'tab' && t && drag.id === t.tabId ? 'dragging' : ''} ${drag?.kind === 'tab' && over?.id === r.id ? (over.after ? 'drop-after' : 'drop-before') : ''}`}
                     draggable={!!t && !isRen}
-                    onDragStart={(e) => { if (!t) return; e.stopPropagation(); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', rowName(r)); setDrag({ kind: 'tab', id: t.tabId, ws: g.id }) }}
+                    onDragStart={(e) => { if (!t) return; e.stopPropagation(); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', rowName(r)); setDrag({ kind: 'tab', id: t.tabId, ws: g.id, name: rowName(r), rowId: r.id }) }}
                     onDragEnd={endDrag}
-                    onDragOver={(e) => { if (drag?.kind !== 'tab' || drag.ws !== g.id || !t) return; e.preventDefault(); e.stopPropagation(); setOver(dropOn(e, r.id)) }}
+                    onDragOver={(e) => { if (drag?.kind !== 'tab' || !t) return; e.preventDefault(); e.stopPropagation(); setOver(dropOn(e, r.id)) }}
                     onDrop={(e) => {
-                      if (drag?.kind !== 'tab' || drag.ws !== g.id || !t) return
+                      if (drag?.kind !== 'tab' || !t) return
                       e.preventDefault(); e.stopPropagation()
                       const tabs = [...new Set(g.rows.filter((x) => x.tab).map((x) => x.tab.tabId))]
-                      moveTab(g, drag.id, tabs.indexOf(t.tabId) + (over?.after ? 1 : 0))
+                      const at = tabs.indexOf(t.tabId) + (over?.after ? 1 : 0)
+                      const d = drag
                       endDrag()
+                      // Within the space: reorder. From another space: move it in, here.
+                      if (d.ws === g.id) moveTab(g, d.id, at)
+                      else moveToSpace(d, { workspaceId: g.id, index: at })
                     }}>
                     <button className="tab-main" onClick={() => onOpen(r.id)} onDoubleClick={() => t && setRenaming({ kind: 'tab', id: t.tabId })}
                       title={`${r.kind === 'agent' ? r.agent.title : t.label}\n${tildePath(cwd)}${git(cwd) ? `\n${git(cwd).branch}${git(cwd).dirty ? ` +${git(cwd).dirty}` : ''}` : ''}`}>
@@ -293,7 +336,15 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
                         onOpenInHerdr && { icon: 'external', label: 'Open in Herdr view', run: () => onOpenInHerdr(r.id) },
                         t && '-',
                         t && { icon: 'edit', label: 'Rename tab', run: () => setRenaming({ kind: 'tab', id: t.tabId }) },
+                        t && { icon: 'layers', label: 'Move to space…', run: () => setMoving({ rowId: r.id, id: t.tabId, ws: g.id, name: rowName(r) }) },
                         t && { icon: 'x', label: 'Close tab…', danger: true, run: () => closeTab(t) },
+                      ]} />
+                    )}
+                    {moving?.rowId === r.id && (
+                      <Menu onClose={() => setMoving(null)} items={[
+                        ...groups.filter((x) => x.id !== g.id).map((x) => ({ icon: 'layers', label: `${x.number}. ${x.label}`, run: () => moveToSpace(moving, { workspaceId: x.id }) })),
+                        '-',
+                        { icon: 'plus', label: 'A new space', run: () => moveToSpace(moving, { newSpace: moving.name || 'New space' }) },
                       ]} />
                     )}
                   </div>
@@ -302,8 +353,15 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
             </section>
           )
         })}
+        {drag?.kind === 'tab' && (
+          <div className={`new-space-drop ${over?.id === 'new-space' ? 'on' : ''}`}
+            onDragOver={(e) => { e.preventDefault(); setOver({ id: 'new-space' }) }}
+            onDragLeave={() => setOver(null)}
+            onDrop={(e) => { e.preventDefault(); const d = drag; endDrag(); moveToSpace(d, { newSpace: d.name || 'New space' }) }}>
+            <Icon name="plus" size={13} /> Drop here for a new space
+          </div>
+        )}
       </div>
-
       {flash && <div className="rail-flash" role="status">{flash}</div>}
       {fleet && !hasMate && (
         <div className="rail-foot">

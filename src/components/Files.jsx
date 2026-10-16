@@ -150,19 +150,101 @@ function normalize(p) {
   return out.join('/')
 }
 
+// The page itself, sandboxed: its scripts run, but it can't reach this app (an opaque origin,
+// which the server refuses for any API call). From disk, or from the text you're editing.
+const SANDBOX = 'allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms allow-modals'
+const siteUrl = (pane, p) => `/api/agents/${enc(pane)}/site/${p.split('/').map(enc).join('/')}`
+function HtmlView({ pane, filePath, text, reload = 0 }) {
+  // While editing, show the draft (after a short pause in typing). A <base> makes its relative
+  // links (styles, scripts, images) load from the file's folder, as they would from disk.
+  const [doc, setDoc] = useState(text)
+  useEffect(() => { if (text == null) return; const t = setTimeout(() => setDoc(text), 300); return () => clearTimeout(t) }, [text])
+  if (text == null) return <iframe key={reload} className="html-view" src={siteUrl(pane, filePath)} title={filePath} sandbox={SANDBOX} />
+  const dir = parentOf(filePath)
+  const base = `<base href="${siteUrl(pane, dir ? `${dir}/` : '')}">`
+  const html = /<head[^>]*>/i.test(doc || '') ? doc.replace(/<head[^>]*>/i, (m) => m + base) : base + (doc || '')
+  return <iframe className="html-view" srcDoc={html} title={filePath} sandbox={SANDBOX} />
+}
+
+// Edits you haven't saved, kept while you look at other files (until the page reloads).
+const drafts = new Map()
+
+function Editor({ value, onChange, onSave }) {
+  const onKey = (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') { e.preventDefault(); onSave() }
+    // Tab indents instead of leaving the editor.
+    if (e.key === 'Tab' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      e.preventDefault()
+      const el = e.target
+      const { selectionStart: a, selectionEnd: b } = el
+      const next = `${value.slice(0, a)}  ${value.slice(b)}`
+      onChange(next)
+      requestAnimationFrame(() => { el.selectionStart = el.selectionEnd = a + 2 })
+    }
+  }
+  return <textarea className="file-editor" value={value} onChange={(e) => onChange(e.target.value)} onKeyDown={onKey} spellCheck={false} autoFocus aria-label="File text" />
+}
+
 function Viewer({ pane, filePath, onOpenPath, onBack }) {
   const [state, setState] = useState({ loading: true })
   const [mode, setMode] = usePersisted('cc-md-mode', 'preview')
   const [copied, setCopied] = useState(false)
+  const key = `${pane}\n${filePath}`
+  const [draft, setDraftState] = useState(() => drafts.get(key) ?? null)
+  const [saving, setSaving] = useState(false)
+  const [saveMsg, setSaveMsg] = useState(null)
+  const [frameKey, setFrameKey] = useState(0)
+  const [boxRef, boxW] = useWidth()
+  const setDraft = useCallback((t) => { if (t == null) drafts.delete(key); else drafts.set(key, t); setDraftState(t) }, [key])
   const load = useCallback(() => {
     api(`/agents/${enc(pane)}/file?path=${enc(filePath)}`).then((f) => setState({ f })).catch((e) => setState({ error: e.message }))
   }, [pane, filePath])
   useEffect(() => { setState({ loading: true }); load() }, [load])
   const f = state.f
   const raw = `/api/agents/${enc(pane)}/raw?path=${enc(filePath)}`
+  const isMd = f?.kind === 'text' && f.ext === '.md'
+  const isHtml = f?.kind === 'text' && /^\.html?$/.test(f.ext)
+  const canEdit = f?.kind === 'text' && !f.truncated
+  const dirty = draft != null && f?.kind === 'text' && draft !== f.text
+  const editing = canEdit && mode === 'edit'
+  const shown = editing ? 'edit' : (isMd || isHtml) ? (mode === 'edit' ? 'preview' : mode) : 'source'
+  // Preview and Source show your unsaved edits too, so on a narrow screen you can flip to check them.
+  const text = dirty ? draft : f?.text
+  const site = siteUrl(pane, filePath)
   const crumbs = filePath.split('/')
+
+  const save = useCallback(async (force = false) => {
+    if (!f || draft == null) return
+    setSaving(true); setSaveMsg(null)
+    try {
+      const res = await fetch(`/api/agents/${enc(pane)}/file`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: filePath, text: draft, mtime: f.mtime, force }) })
+      const data = await res.json().catch(() => ({}))
+      if (res.status === 409) { setSaveMsg({ conflict: true, text: data.error }); return }
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+      setState({ f: data }); setDraft(null); setSaveMsg({ ok: true, text: 'Saved' }); setFrameKey((k) => k + 1)
+      setTimeout(() => setSaveMsg((m) => (m?.ok ? null : m)), 1500)
+    } catch (e) { setSaveMsg({ text: e.message }) } finally { setSaving(false) }
+  }, [f, draft, pane, filePath, setDraft])
+  const startEdit = () => { if (draft == null && f) setDraft(f.text); setMode('edit') }
+  const discard = () => { setDraft(null); setSaveMsg(null); load() }
+  // Leaving Edit with unsaved changes keeps them until you save or revert.
+  const pick = (m) => {
+    if (m === 'edit') return startEdit()
+    if (!dirty) setDraft(null)
+    setMode(m)
+  }
+  // Unsaved edits: ask before the page closes.
+  useEffect(() => {
+    if (!dirty) return
+    const warn = (e) => { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [dirty])
+
+  // Editing Markdown or HTML: the text on the left and how it looks on the right, when there's room.
+  const split = editing && (isMd || isHtml) && boxW > 640
   return (
-    <div className="viewer">
+    <div className="viewer" ref={boxRef}>
       <div className="viewer-head">
         {onBack && <button className="win-btn narrow-back" onClick={onBack} aria-label="Back to files"><Icon name="chevron" size={15} className="flip" /></button>}
         <div className="crumbs">
@@ -171,32 +253,60 @@ function Viewer({ pane, filePath, onOpenPath, onBack }) {
               {i > 0 && <Icon name="chevron" size={10} />}
               {i < crumbs.length - 1
                 ? <button onClick={() => onOpenPath(crumbs.slice(0, i + 1).join('/'), true)}>{c}</button>
-                : <b>{c}</b>}
+                : <b>{c}{dirty && <span className="dirty-dot" title="Unsaved changes" aria-label="Unsaved changes" />}</b>}
             </span>
           ))}
         </div>
         <div className="viewer-tools">
-          {f && <span className="muted small file-meta">{fmtSize(f.size)} · {new Date(f.mtime).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>}
-          {f?.ext === '.md' && (
+          {saveMsg && !saveMsg.conflict && <span className={`small save-msg ${saveMsg.ok ? 'ok' : 'bad'}`} role="status">{saveMsg.text}</span>}
+          {f && !editing && !dirty && <span className="muted small file-meta">{fmtSize(f.size)} · {new Date(f.mtime).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>}
+          {canEdit && (
             <div className="seg small-seg">
-              <button className={mode === 'preview' ? 'on' : ''} onClick={() => setMode('preview')}>Preview</button>
-              <button className={mode === 'source' ? 'on' : ''} onClick={() => setMode('source')}>Source</button>
+              {(isMd || isHtml) && <button className={shown === 'preview' ? 'on' : ''} onClick={() => pick('preview')}>Preview</button>}
+              <button className={shown === 'source' ? 'on' : ''} onClick={() => pick('source')}>{isMd || isHtml ? 'Source' : 'View'}</button>
+              <button className={shown === 'edit' ? 'on' : ''} onClick={() => pick('edit')}>Edit</button>
             </div>
           )}
+          {!canEdit && (isMd || isHtml) && (
+            <div className="seg small-seg">
+              <button className={shown === 'preview' ? 'on' : ''} onClick={() => setMode('preview')}>Preview</button>
+              <button className={shown === 'source' ? 'on' : ''} onClick={() => setMode('source')}>Source</button>
+            </div>
+          )}
+          {(editing || dirty) && <>
+            <button className="btn small" onClick={discard} disabled={saving || !dirty} title="Throw away your changes">Revert</button>
+            <button className="btn small primary" onClick={() => save()} disabled={saving || !dirty} title="Save (⌘S)">{saving ? 'Saving…' : 'Save'}</button>
+          </>}
           <button className="win-btn" title="Copy path" aria-label="Copy path" onClick={() => { navigator.clipboard?.writeText(filePath); setCopied(true); setTimeout(() => setCopied(false), 1200) }}>
             <Icon name={copied ? 'check' : 'copy'} size={13} />
           </button>
-          <button className="win-btn" title="Reload" aria-label="Reload" onClick={load}><Icon name="refresh" size={13} /></button>
-          {(f?.kind === 'image' || f?.kind === 'pdf') && <a className="win-btn" href={raw} target="_blank" rel="noreferrer" title="Open in new tab" aria-label="Open in new tab"><Icon name="external" size={13} /></a>}
+          {!dirty && <button className="win-btn" title="Reload" aria-label="Reload" onClick={() => { load(); setFrameKey((k) => k + 1) }}><Icon name="refresh" size={13} /></button>}
+          {(f?.kind === 'image' || f?.kind === 'pdf' || isHtml) && <a className="win-btn" href={isHtml ? site : raw} target="_blank" rel="noreferrer" title="Open in new tab" aria-label="Open in new tab"><Icon name="external" size={13} /></a>}
         </div>
       </div>
-      <div className="viewer-body">
+      {saveMsg?.conflict && (
+        <div className="save-conflict" role="alert">
+          <Icon name="alert" size={13} /><span>{saveMsg.text}, probably by an agent.</span>
+          <button className="btn small" onClick={discard}>Discard mine, load theirs</button>
+          <button className="btn small" onClick={() => save(true)}>Overwrite with mine</button>
+        </div>
+      )}
+      <div className={`viewer-body ${editing ? 'editing' : ''} ${split ? 'split' : ''}`}>
         {state.loading && <div className="pad"><div className="skeleton-rows"><div /><div /><div /></div></div>}
         {state.error && <div className="viewer-empty"><Icon name="alert" size={22} /><p>{state.error}</p></div>}
-        {f?.kind === 'text' && (f.ext === '.md' && mode === 'preview'
-          ? <Markdown text={f.text} pane={pane} filePath={f.path} onOpenPath={onOpenPath} />
-          : <Code text={f.text} ext={f.ext.slice(1) || f.name.toLowerCase()} />)}
-        {f?.truncated && <p className="muted small pad">Showing the first 1 MB.</p>}
+        {f?.kind === 'text' && (shown === 'edit'
+          ? <>
+              <Editor value={draft ?? f.text} onChange={setDraft} onSave={() => save()} />
+              {split && <div className="edit-preview">{isMd
+                ? <Markdown text={draft ?? f.text} pane={pane} filePath={f.path} onOpenPath={onOpenPath} />
+                : <HtmlView pane={pane} filePath={f.path} text={draft ?? f.text} />}</div>}
+            </>
+          : shown === 'preview' && isMd
+          ? <Markdown text={text} pane={pane} filePath={f.path} onOpenPath={onOpenPath} />
+          : shown === 'preview' && isHtml
+          ? <HtmlView pane={pane} filePath={f.path} text={dirty ? draft : undefined} reload={frameKey} />
+          : <Code text={text} ext={f.ext.slice(1) || f.name.toLowerCase()} />)}
+        {f?.truncated && <p className="muted small pad">Showing the first 1 MB, so this file can't be edited here.</p>}
         {f?.kind === 'image' && <div className="img-view"><img src={raw} alt={f.name} /></div>}
         {f?.kind === 'pdf' && <iframe className="pdf-view" src={raw} title={f.name} />}
         {f?.kind === 'binary' && <div className="viewer-empty"><Icon name="file" size={22} /><p>Binary file, {fmtSize(f.size)}</p></div>}

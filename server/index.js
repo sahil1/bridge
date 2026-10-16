@@ -10,6 +10,7 @@ import { makeGuard } from './guard.js'
 import { usage } from './usage.js'
 import { usageStats } from './usagestats.js'
 import * as files from './files.js'
+import * as accounts from './accounts.js'
 import http from 'node:http'
 import { makeQuota, makeWeather, makeMortgage } from './feeds.js'
 import * as mk from './market.js'
@@ -26,6 +27,7 @@ import { promptSafe } from './promptsafe.js'
 import { makeNews } from './news.js'
 import { execFile } from 'node:child_process'
 import { pickRuntime } from './runtime/index.js'
+import { sessionName as herdrSession, sessions as herdrSessions } from './runtime/herdr-cli.js'
 import { installed, caps, adapter, catalog as agentCatalog, installCommand, clearInstalledCache } from './agents.js'
 import { loadConfig, ROOT, DATA, CACHE, expand, ensureDir, cacheFile, IS_MAC } from './paths.js'
 import { prepareChief } from './chief.js'
@@ -61,7 +63,10 @@ const news = makeNews(cfg)
 const guard = makeGuard(cfg)
 const app = express()
 app.use(guard.http)
-app.use(express.json({ limit: '1mb' }))
+// Saving a file from the viewer can send more than the usual 1 MB.
+const jsonSmall = express.json({ limit: '1mb' })
+const jsonFile = express.json({ limit: '6mb' })
+app.use((req, res, next) => (req.method === 'PUT' && /^\/api\/agents\/[^/]+\/file$/.test(req.path) ? jsonFile : jsonSmall)(req, res, next))
 
 const wrap = (fn) => async (req, res) => {
   try {
@@ -73,7 +78,11 @@ const wrap = (fn) => async (req, res) => {
 
 // Start an agent with your default model for that kind (Settings › General).
 const modelFor = (kind) => cfg.agents?.[kind]?.model || null
-const launchAgent = (o) => rt.launch({ ...o, model: o.model || modelFor(o.kind || cfg.defaultAgent || 'claude') })
+// And with the account you made active for that kind (Settings › Providers), unless one is picked.
+const launchAgent = (o) => {
+  const kind = o.kind || cfg.defaultAgent || 'claude'
+  return rt.launch({ ...o, model: o.model || modelFor(kind), account: (accounts.supports(kind) && o.account) || accounts.activeId(kind) })
+}
 
 // ---------- Fleet ----------
 
@@ -194,6 +203,14 @@ const rootOf = async (pane) => {
 }
 app.get('/api/agents/:pane/files', wrap(async (req) => files.listDir(await rootOf(req.params.pane), String(req.query.path || ''), { showHidden: req.query.hidden === '1' })))
 app.get('/api/agents/:pane/file', wrap(async (req) => files.readFile(await rootOf(req.params.pane), String(req.query.path || ''))))
+app.put('/api/agents/:pane/file', async (req, res) => {
+  try {
+    const { path: rel, text, mtime, force } = req.body || {}
+    res.json(files.writeFile(await rootOf(req.params.pane), String(rel || ''), text, { mtime, force: !!force }))
+  } catch (err) {
+    res.status(err.conflict ? 409 : 502).json({ error: err.message, conflict: !!err.conflict })
+  }
+})
 app.get('/api/agents/:pane/find', wrap(async (req) => ({ files: await files.findFiles(await rootOf(req.params.pane), String(req.query.q || '').slice(0, 100)) })))
 app.get('/api/agents/:pane/git', wrap(async (req) => files.gitStatus(await rootOf(req.params.pane))))
 app.get('/api/agents/:pane/diff', wrap(async (req) => files.gitDiff(await rootOf(req.params.pane), String(req.query.path || ''))))
@@ -203,6 +220,19 @@ app.get('/api/agents/:pane/raw', async (req, res) => {
     // SVG can carry script; serve it sandboxed.
     res.set({ 'Content-Type': type, 'Content-Security-Policy': "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox", 'X-Content-Type-Options': 'nosniff' })
     res.sendFile(file)
+  } catch (err) {
+    res.status(404).json({ error: err.message })
+  }
+})
+
+// HTML preview: the page runs in a sandbox with no access to this app (an opaque origin, which
+// the guard refuses for any API call), but its scripts, styles and images work.
+app.get('/api/agents/:pane/site/*rest', async (req, res) => {
+  try {
+    const rel = [].concat(req.params.rest || []).join('/')
+    const { file, type, html } = files.siteFile(await rootOf(req.params.pane), rel)
+    res.set({ 'Content-Type': type, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store', 'Content-Security-Policy': html ? 'sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms allow-modals' : "sandbox; default-src 'none'" })
+    res.sendFile(file, { dotfiles: 'allow' })
   } catch (err) {
     res.status(404).json({ error: err.message })
   }
@@ -283,13 +313,13 @@ app.get('/api/places', wrap(async () => {
 app.get('/api/dirs', wrap((req) => places.completeDir(req.query.q)))
 app.get('/api/agent-kinds', wrap(() => installed()))
 app.post('/api/agents/launch', wrap(async (req) => {
-  const { kind = cfg.defaultAgent || 'claude', cwd, workspaceId, newSpace, label, prompt } = req.body || {}
+  const { kind = cfg.defaultAgent || 'claude', cwd, workspaceId, newSpace, label, prompt, account } = req.body || {}
   if (kind !== 'shell' && !(await installed()).some((k) => k.kind === kind)) throw new Error(`${adapter(kind).label} isn't installed`)
   const dir = places.resolveDir(cwd)
   const name = String(label || path.basename(dir)).trim().slice(0, 60)
   const space = String(newSpace || '').trim()
   // New space: the workspace takes the space name and its first tab the agent's name.
-  const out = await launchAgent({ kind, cwd: dir, label: name, workspaceId: space ? null : workspaceId || null, newSpace: space || (workspaceId ? undefined : name), prompt: String(prompt || '').trim() || undefined })
+  const out = await launchAgent({ kind, cwd: dir, label: name, workspaceId: space ? null : workspaceId || null, newSpace: space || (workspaceId ? undefined : name), prompt: String(prompt || '').trim() || undefined, account: account ? String(account) : undefined })
   pushFleet()
   return out
 }))
@@ -304,12 +334,30 @@ app.post('/api/workspaces/:ws/move', wrap(async (req) => {
   pushFleet()
   return { ok: true }
 }))
+// Within its space, or to another space (workspaceId) or a new one (newSpace: its name). Moving
+// across spaces returns the moved panes' ids, old -> new, since herdr renumbers them.
 app.post('/api/tabs/:tab/move', wrap(async (req) => {
-  const index = Number(req.body?.index)
-  if (!Number.isInteger(index) || index < 0) throw new Error('Bad position')
+  const { workspaceId, newSpace } = req.body || {}
+  const index = req.body?.index == null ? null : Number(req.body.index)
+  if (index != null && (!Number.isInteger(index) || index < 0)) throw new Error('Bad position')
+  const space = String(newSpace || '').trim()
+  if (space || workspaceId) {
+    const out = await rt.moveTabToSpace(req.params.tab, { workspaceId: workspaceId ? String(workspaceId) : null, newSpace: space || null, index: index ?? undefined })
+    pushFleet()
+    return out
+  }
+  if (index == null) throw new Error('Bad position')
   await rt.moveTab(req.params.tab, index)
   pushFleet()
   return { ok: true }
+}))
+// A new space, from the sidebar.
+app.post('/api/workspaces', wrap(async (req) => {
+  const label = String(req.body?.label || '').trim()
+  if (!label) throw new Error('Give the space a name')
+  const out = await rt.createSpace({ label: label.slice(0, 80) })
+  pushFleet()
+  return out
 }))
 app.post('/api/workspaces/:ws/close', wrap(async (req) => { await rt.closeWorkspace(req.params.ws); pushFleet(); return { ok: true } }))
 
@@ -669,7 +717,7 @@ app.post('/api/updates/install', wrap(() => updates.install()))
 app.get('/api/config', (req, res) => res.json({
   version: VERSION,
   name: cfg.name || '', location: cfg.location?.label || null, hasMortgage: !!cfg.mortgage,
-  runtime: { name: rt.name, ...rt.caps }, platform: process.platform, mail: IS_MAC, calendar: IS_MAC,
+  runtime: { name: rt.name, ...rt.caps, ...(rt.name === 'herdr' ? { session: herdrSession() } : {}) }, platform: process.platform, mail: IS_MAC, calendar: IS_MAC,
   defaultAgent: cfg.defaultAgent || 'claude', chiefKind: cfg.chief?.kind || 'claude', setupDone: !!cfg.setupDone,
 }))
 
@@ -723,6 +771,11 @@ app.post('/api/setup', wrap(async (req) => {
   if (b.chiefKind) p.chief = { kind: String(b.chiefKind) }
   return afterChange(settings.patch(p))
 }))
+// The id the UI opens a shell tab by (shell tabs are opened as tabs, not panes).
+const openIdOf = async (paneId) => {
+  const t = ((await rt.fleet()).tabs || []).find((x) => (x.panes || []).some((p) => p.paneId === paneId))
+  return t ? `tab:${t.tabId}` : paneId
+}
 // Install an agent in a terminal tab you can watch (and answer, if it asks anything).
 app.post('/api/setup/install/:kind', wrap(async (req) => {
   const cmd = installCommand(req.params.kind)
@@ -735,7 +788,27 @@ app.post('/api/setup/install/:kind', wrap(async (req) => {
   await rt.paneKeys(out.paneId, ['enter'])
   clearInstalledCache()
   pushFleet()
-  return { ...out, command: cmd }
+  return { ...out, openId: await openIdOf(out.paneId), command: cmd }
+}))
+
+// ---------- Accounts: more than one sign-in per agent ----------
+app.get('/api/accounts', wrap((req) => accounts.list({ refresh: !!req.query.refresh })))
+app.post('/api/accounts', wrap((req) => accounts.add(String(req.body?.kind || ''), req.body?.label)))
+app.patch('/api/accounts/:id', wrap((req) => accounts.rename(req.params.id, req.body?.label)))
+app.delete('/api/accounts/:id', wrap((req) => accounts.remove(req.params.id)))
+app.post('/api/accounts/active/:kind', wrap((req) => accounts.setActive(req.params.kind, String(req.body?.id || ''))))
+// Sign in: the agent's own login flow (like /login) in a terminal tab you can watch and answer.
+app.post('/api/accounts/:id/login', wrap(async (req) => {
+  const { kind, command } = accounts.loginCommand(req.params.id)
+  const f = await rt.fleet()
+  const ws = f.workspaces.find((w) => w.label === 'Setup')
+  const label = accounts.labelOf(req.params.id) || 'Default'
+  const out = await rt.launch({ kind: 'shell', cwd: os.homedir(), label: `Sign in: ${adapter(kind).label} (${label})`, workspaceId: ws?.id, newSpace: ws ? undefined : 'Setup' })
+  await new Promise((r) => setTimeout(r, 1200))
+  await rt.text(out.paneId, command)
+  await rt.paneKeys(out.paneId, ['enter'])
+  pushFleet()
+  return { ...out, openId: await openIdOf(out.paneId) }
 }))
 
 // A plain chat: an agent with no project, like talking to Claude or Codex directly. Chats share
@@ -749,9 +822,14 @@ app.post('/api/chats', wrap(async (req) => {
   const f = await rt.fleet()
   const ws = f.workspaces.find((w) => w.label === 'Chats')
   const title = String(req.body?.title || req.body?.prompt || 'New chat').replace(/\s+/g, ' ').trim().slice(0, 40) || 'New chat'
-  const out = await launchAgent({ kind, model: req.body?.model || undefined, cwd: dir, label: title, workspaceId: ws?.id, newSpace: ws ? undefined : 'Chats', prompt: String(req.body?.prompt || '').trim() || undefined })
+  const out = await launchAgent({ kind, model: req.body?.model || undefined, cwd: dir, label: title, workspaceId: ws?.id, newSpace: ws ? undefined : 'Chats', prompt: String(req.body?.prompt || '').trim() || undefined, account: req.body?.account ? String(req.body.account) : undefined })
   pushFleet()
   return out
+}))
+
+// ---------- herdr sessions (Settings › Where agents run) ----------
+app.get('/api/herdr/sessions', wrap(async () => {
+  try { return { installed: true, ...(await herdrSessions()) } } catch (e) { return { installed: false, sessions: [], error: e.message } }
 }))
 
 // ---------- Open a pane in your own terminal app ----------

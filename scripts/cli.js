@@ -65,10 +65,10 @@ async function attach(q) {
   if (!t) throw new Error(q ? `No agent or shell matches "${q}". Run: bridge-ai list` : 'Nothing picked.')
   const { runtime } = await api('/config')
 
-  // herdr owns these panes: focus this one and open herdr itself.
+  // herdr owns these panes: focus this one and open herdr itself, in the session Bridge AI uses.
   if (runtime?.name === 'herdr') {
     await api(`/agents/${encodeURIComponent(t.paneId)}/focus`, { method: 'POST' }).catch(() => {})
-    const r = spawnSync('herdr', [], { stdio: 'inherit' })
+    const r = spawnSync('herdr', runtime.session ? ['session', 'attach', runtime.session] : [], { stdio: 'inherit' })
     process.exit(r.status ?? 0)
   }
 

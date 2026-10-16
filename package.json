@@ -1,6 +1,6 @@
 {
   "name": "bridge-ai",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "type": "module",
   "scripts": {
     "start": "node scripts/start.js",
@@ -11,7 +11,9 @@
     "desktop:dev": "node scripts/desktop.js dev",
     "desktop:dist": "node scripts/desktop.js dist",
     "icons:brands": "node scripts/brand-icons.js",
-    "release": "node scripts/release.js"
+    "release": "node scripts/release.js",
+    "check:private": "node scripts/check-private.js",
+    "prepare": "node scripts/install-hooks.js"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",

@@ -7,21 +7,40 @@ import path from 'node:path'
 
 const HERDR = process.env.HERDR_BIN || 'herdr'
 
-// Which herdr to talk to. Inside herdr the CLI gets HERDR_SOCKET_PATH from the environment;
-// started any other way (the Mac app at login, a plain terminal) it would fall back to an old
-// default path and see nothing. So find the running session's socket: the inherited one if it
-// still exists, else "main", else the most recently used session. Checked on every call, so
-// herdr starting after Bridge (or a herdr restart) is picked up.
+// Which herdr to talk to. A session picked in Settings (`herdr.session`) always wins. Otherwise:
+// inside herdr the CLI gets HERDR_SOCKET_PATH from the environment; started any other way (the
+// Mac app at login, a plain terminal) it would fall back to an old default path and see nothing.
+// So find the running session's socket: the inherited one if it still exists, else "main", else
+// the most recently used session. Checked on every call, so herdr starting after Bridge (or a
+// herdr restart) is picked up.
 const SESSIONS = path.join(os.homedir(), '.config', 'herdr', 'sessions')
+const DEFAULT_SOCK = path.join(os.homedir(), '.config', 'herdr', 'herdr.sock') // the unnamed "default" session
 const inherited = process.env.HERDR_SOCKET_PATH
+let wanted = null
+export function useSession(name) { wanted = /^[\w.-]{1,64}$/.test(String(name || '')) ? String(name) : null }
+const socketOf = (name) => (name === 'default' ? DEFAULT_SOCK : path.join(SESSIONS, name, 'herdr.sock'))
 export function herdrSocket() {
+  if (wanted) return socketOf(wanted) // even when it isn't running, so you see that instead of another session
   if (inherited && fs.existsSync(inherited)) return inherited
   try {
-    const live = fs.readdirSync(SESSIONS).map((name) => path.join(SESSIONS, name, 'herdr.sock')).filter((p) => fs.existsSync(p))
+    const live = [...fs.readdirSync(SESSIONS).map((name) => path.join(SESSIONS, name, 'herdr.sock')), DEFAULT_SOCK].filter((p) => fs.existsSync(p))
     const main = live.find((p) => p.includes(`${path.sep}main${path.sep}`))
     if (main) return main
     return live.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0] || inherited || null
   } catch { return inherited || null }
+}
+// The session's name for `herdr session attach` (Herdr view, opening in your terminal).
+export function sessionName(sock = herdrSocket()) {
+  if (wanted) return wanted
+  if (!sock) return null
+  return sock === DEFAULT_SOCK ? 'default' : path.basename(path.dirname(sock))
+}
+
+// Every herdr session on this computer, for the picker in Settings.
+export async function sessions() {
+  const res = await run(['session', 'list', '--json'])
+  const current = sessionName()
+  return { picked: wanted, current, sessions: (res?.sessions || []).map((s) => ({ name: s.name, running: !!s.running, current: s.name === current })) }
 }
 const herdrEnv = () => { const sock = herdrSocket(); return sock ? { ...process.env, HERDR_SOCKET_PATH: sock } : process.env }
 
@@ -155,10 +174,12 @@ export async function launchAgent({ name, kind, cwd, label }) {
 
 // Start an agent with an opening prompt (e.g. a slash command) in a new tab of an
 // existing workspace, or a new workspace when that one isn't open.
-export async function launchTask({ name, kind = 'claude', cwd, label, workspaceId, prompt }) {
+// env: extra variables for the pane (an account's config folder, say), set before the agent starts.
+export async function launchTask({ name, kind = 'claude', cwd, label, workspaceId, prompt, env = {} }) {
+  const envArgs = Object.entries(env).flatMap(([k, v]) => ['--env', `${k}=${v}`])
   const created = workspaceId
-    ? await run(['tab', 'create', '--workspace', workspaceId, '--cwd', cwd, '--label', label])
-    : await run(['workspace', 'create', '--cwd', cwd, '--label', label, '--no-focus'])
+    ? await run(['tab', 'create', '--workspace', workspaceId, '--cwd', cwd, '--label', label, ...envArgs])
+    : await run(['workspace', 'create', '--cwd', cwd, '--label', label, '--no-focus', ...envArgs])
   const paneId = findPaneId(created)
   if (!paneId) throw new Error('herdr did not return a pane for the new tab')
   // herdr only passes simple one-line prompts on the command line; longer ones are sent once the agent is up.

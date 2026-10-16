@@ -55,7 +55,7 @@ export default function Settings({ section = 'general', onClose, onOpenAgent }) 
           <div className="st-scroll">
             {at === 'general' && <General onGo={go} />}
             {at === 'agents' && <Agents onOpenAgent={(id) => { onOpenAgent?.(id); onClose() }} />}
-            {at === 'providers' && <Providers />}
+            {at === 'providers' && <Providers onOpenAgent={(id) => { onOpenAgent?.(id); onClose() }} />}
             {at === 'mcp' && <Mcp />}
             {at === 'appearance' && <Appearance />}
             {at === 'config' && <ConfigFile />}

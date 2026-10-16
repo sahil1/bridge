@@ -19,7 +19,15 @@ function termTheme() {
   return { background: c.getPropertyValue('--term-bg').trim(), foreground: c.getPropertyValue('--term-fg').trim(), cursor: 'transparent' }
 }
 
-function MiniTerm({ pane, selected, onSelect, onZoom, zoomed, fontSize }) {
+// How wide and tall a cell of this font really is, per pixel of font size. The layout is sized
+// from these, so a guess that's a little small cuts off the last lines of a pane.
+function charRatio(family) {
+  const ctx = document.createElement('canvas').getContext('2d')
+  ctx.font = `100px ${family}`
+  return ctx.measureText('M'.repeat(50)).width / 50 / 100 || 0.6
+}
+
+function MiniTerm({ pane, selected, onSelect, onZoom, zoomed, fontSize, onLineHeight }) {
   const hostRef = useRef(null)
   const termRef = useRef(null)
   const last = useRef('')
@@ -35,7 +43,16 @@ function MiniTerm({ pane, selected, onSelect, onZoom, zoomed, fontSize }) {
     return () => { mo.disconnect(); disposeTerm(term); termRef.current = null; last.current = '' }
   }, [pane.paneId, cols, rows])
 
-  useEffect(() => { if (termRef.current && termRef.current.options.fontSize !== fontSize) termRef.current.options.fontSize = fontSize }, [fontSize, pane.paneId, cols, rows])
+  useEffect(() => {
+    const term = termRef.current
+    if (!term) return
+    if (term.options.fontSize !== fontSize) term.options.fontSize = fontSize
+    // Tell the layout the real line height once xterm has drawn at this size.
+    requestAnimationFrame(() => {
+      const h = hostRef.current?.querySelector('.xterm-screen')?.getBoundingClientRect().height
+      if (h && fontSize) onLineHeight?.(h / rows / fontSize)
+    })
+  }, [fontSize, pane.paneId, cols, rows]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     let stop = false
@@ -79,6 +96,8 @@ export default function ShellTab({ tab, controls = {}, onOpenInHerdr }) {
   const [keysOpen, setKeysOpen] = useState(false)
   const [flash, setFlash] = useState(null)
   const [layRef, layW] = useWidth()
+  const [lh, setLh] = useState(1.25)
+  const [cw] = useState(() => charRatio(getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim() || 'monospace'))
   const sel = panes.find((p) => p.paneId === selId) || panes[0]
   useEffect(() => { if (!flash) return; const t = setTimeout(() => setFlash(null), 2500); return () => clearTimeout(t) }, [flash])
   useEffect(() => { if (zoom && !panes.some((p) => p.paneId === zoom)) setZoom(null) }, [panes, zoom])
@@ -87,14 +106,14 @@ export default function ShellTab({ tab, controls = {}, onOpenInHerdr }) {
   const area = tab.area || { width: 1, height: 1, x: 0, y: 0 }
   const shown = zoom ? panes.filter((p) => p.paneId === zoom) : panes
   // One font for the tab, as in herdr: the full width of the layout holds the tab's columns.
-  // Height follows from it, and the body scrolls if the window is short.
-  const CW = 0.6
-  const LH = 1.2
+  // Height follows from it (measured, not guessed), and the body scrolls if the window is short.
+  const CW = cw
+  const LH = lh
   const zp = zoom && panes.find((p) => p.paneId === zoom)
   const spanCols = zp ? zp.rect?.width || 100 : area.width
-  const fontSize = layW ? Math.max(7, Math.min(13, Math.floor(((layW - 16 * (zp ? 1 : 2)) / (spanCols * CW)) * 2) / 2)) : 9
+  const fontSize = layW ? Math.max(7, Math.min(13, Math.floor(((layW - 20 * (zp ? 1 : 2)) / (spanCols * CW)) * 2) / 2)) : 9
   const bands = zp ? 1 : new Set(panes.map((p) => p.rect?.y)).size
-  const layoutH = Math.ceil((zp ? zp.rect?.height || 30 : area.height) * fontSize * LH + bands * 52)
+  const layoutH = Math.ceil((zp ? zp.rect?.height || 30 : area.height) * fontSize * LH + bands * 56)
   const place = (p) => {
     if (zoom || !p.rect) return { left: 0, top: 0, width: '100%', height: '100%' }
     const pct = (v, total) => `${(v / total) * 100}%`
@@ -126,7 +145,7 @@ export default function ShellTab({ tab, controls = {}, onOpenInHerdr }) {
           <div className="pane-layout" ref={layRef} style={{ height: layoutH }}>
             {shown.map((p) => (
               <div key={p.paneId} className="pane-slot" style={place(p)}>
-                <MiniTerm pane={p} fontSize={fontSize} selected={p.paneId === sel.paneId} zoomed={!!zoom} onSelect={setSelId} onZoom={(id) => { setSelId(id); setZoom(zoom ? null : id) }} />
+                <MiniTerm pane={p} fontSize={fontSize} onLineHeight={(r) => setLh((v) => (Math.abs(v - r) > 0.01 && r > 0.9 && r < 2 ? r : v))} selected={p.paneId === sel.paneId} zoomed={!!zoom} onSelect={setSelId} onZoom={(id) => { setSelId(id); setZoom(zoom ? null : id) }} />
               </div>
             ))}
           </div>

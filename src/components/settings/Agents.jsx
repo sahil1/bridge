@@ -22,7 +22,7 @@ export default function Agents({ onOpenAgent }) {
     setBusy(a.kind); setMsg(null)
     try {
       const r = await api(`/setup/install/${a.kind}`, { method: 'POST' })
-      setMsg({ ok: `Installing ${a.label} in a terminal tab (Setup space). Answer anything it asks there; come back and press Refresh when it's done.`, paneId: r.paneId })
+      setMsg({ ok: `Installing ${a.label} in a terminal tab (Setup space). Answer anything it asks there; come back and press Refresh when it's done.`, paneId: r.openId || r.paneId })
     } catch (e) { setMsg({ error: e.message }) }
     setBusy(null)
   }

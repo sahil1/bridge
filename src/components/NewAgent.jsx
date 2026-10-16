@@ -24,6 +24,12 @@ export default function NewAgent({ fleet, initial = {}, onClose, onLaunched }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
   const dirRef = useRef(null)
+  // Agents with more than one sign-in (Settings › Providers › Accounts): which one to use.
+  const [accts, setAccts] = useState([])
+  const [account, setAccount] = useState(null)
+  useEffect(() => { api('/accounts').then(setAccts).catch(() => {}) }, [])
+  const kindAccts = accts.find((k) => k.kind === kind)?.accounts || []
+  const pickedAccount = kindAccts.find((a) => a.id === account) || kindAccts.find((a) => a.active)
 
   // Installed agents; if the last one you used isn't installed here, start from your default.
   useEffect(() => {
@@ -52,11 +58,11 @@ export default function NewAgent({ fleet, initial = {}, onClose, onLaunched }) {
     setError(null)
     try {
       if (mode === 'chat') {
-        onLaunched(await api('/chats', { method: 'POST', body: { kind, prompt } }))
+        onLaunched(await api('/chats', { method: 'POST', body: { kind, prompt, account: pickedAccount?.id } }))
         return
       }
       const out = await api('/agents/launch', { method: 'POST', body: {
-        kind, cwd, label: name || folderName, prompt,
+        kind, cwd, label: name || folderName, prompt, account: pickedAccount?.id,
         workspaceId: space === '__new' ? null : space,
         newSpace: space === '__new' ? (spaceName || name || folderName) : null,
       } })
@@ -89,6 +95,19 @@ export default function NewAgent({ fleet, initial = {}, onClose, onLaunched }) {
             ))}
           </div>
         </div>
+
+        {kindAccts.length > 1 && (
+          <div className="na-field">
+            <span className="na-label">Account</span>
+            <div className="seg small-seg na-accts" role="radiogroup" aria-label="Account">
+              {kindAccts.map((a) => (
+                <button type="button" key={a.id} role="radio" aria-checked={pickedAccount?.id === a.id} className={pickedAccount?.id === a.id ? 'on' : ''} onClick={() => setAccount(a.id)} title={a.signedIn === false ? 'Not signed in yet' : undefined}>
+                  {a.label}{a.signedIn === false && <span className="muted"> · not signed in</span>}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {mode === 'project' && <>
         <div className="na-field">

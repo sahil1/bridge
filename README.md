@@ -117,6 +117,8 @@ Agents without a chat view work fully in the Terminal tab, and their status (wor
 
 Choose in Settings › General › Where agents run, or set `"runtime": "builtin"` or `"herdr"` in your config. herdr is never required, and Bridge AI won't switch to it just because it's installed.
 
+Bridge AI joins the herdr session you already have running; it doesn't start a new one. It shows the agents and panes in it, and anything you start from Bridge AI opens there too, so you see it in herdr as well. If you run several sessions, pick one in Settings › General › Where agents run (or set `herdr.session`). Bridge AI then uses that session for everything: the agent list, the Herdr view and "Open in terminal". To use two sessions side by side, run a second copy of Bridge AI with its own data folder and port (`BRIDGE_HOME=~/.bridge-ai-work BRIDGE_PORT=7430 npm start`).
+
 ## Your data and settings
 
 Everything personal lives in `~/.bridge-ai` (set `BRIDGE_HOME` to move it), never in the repo:
@@ -137,6 +139,7 @@ Settings start from [`config.example.json`](config.example.json). Put yours in `
 | `defaultAgent` | Agent used when none is picked (`claude`, `codex`, `gemini`, ...) |
 | `chief.kind` | Agent the chief of staff runs on |
 | `runtime` | `builtin` (default) or `herdr` |
+| `herdr.session` | Which herdr session to use when you run more than one (`herdr --session work`). Unset: `main`, else the latest one running. Also in Settings › General |
 | `port` | Default 7420 |
 | `location` | `{ label, lat, lon, timezone }` for weather and the brief |
 | `mail.myDomains` | Your organisation's email domains, so colleagues aren't marked External |

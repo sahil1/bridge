@@ -88,3 +88,15 @@
   .pv-spacer { flex-basis: 100%; height: 0; }
   .pv-msg { order: -1; flex-basis: 100%; }
 }
+
+/* Accounts */
+.pv-acct-group { display: grid; gap: 6px; }
+.pv-acct-kind { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink); }
+.pv-accts { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.pv-acct { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; padding: 6px 10px; border-radius: var(--r-sm); background: var(--pane-2); border: 1px solid var(--line); min-width: 0; }
+.pv-acct.on { border-color: var(--accent); }
+.pv-acct-use { display: inline-flex; }
+.pv-acct-use input { accent-color: var(--accent); margin: 0; }
+.pv-acct-name { font-size: 12.5px; font-weight: 600; color: var(--ink); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pv-acct-rename, .pv-acct-add { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.pv-acct-rename input, .pv-acct-add input { height: 28px; padding: 0 9px; border-radius: 7px; border: 1px solid var(--line-2); background: var(--pane-2); color: var(--ink); font: inherit; font-size: 12.5px; min-width: 0; width: 220px; max-width: 100%; }

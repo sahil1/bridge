@@ -107,7 +107,27 @@ export default function General({ onGo }) {
             <button key={id} type="button" role="radio" aria-checked={(eff.runtime === 'herdr' ? 'herdr' : 'builtin') === id} className={(eff.runtime === 'herdr' ? 'herdr' : 'builtin') === id ? 'on' : ''} onClick={() => save({ runtime: id })}>{label}</button>
           ))}
         </div>
+        {eff.runtime === 'herdr' && <HerdrSession value={eff.herdr?.session || ''} onSave={(session) => save({ herdr: { ...(eff.herdr || {}), session: session || null } })} />}
       </section>
+    </div>
+  )
+}
+
+// With several herdr sessions (`herdr --session work`), pick the one Bridge AI shows and drives.
+function HerdrSession({ value, onSave }) {
+  const [d, setD] = useState(null)
+  useEffect(() => { api('/herdr/sessions').then(setD).catch(() => setD({ sessions: [] })) }, [])
+  if (!d) return null
+  if (!d.installed) return <p className="muted small">herdr isn't installed or didn't answer. Install it from herdr.dev, start it once, then come back here.</p>
+  const names = d.sessions.map((s) => s.name)
+  if (value && !names.includes(value)) names.push(value)
+  return (
+    <div className="st-row">
+      <label className="small" htmlFor="st-herdr-session">Session</label>
+      <select id="st-herdr-session" className="st-input" value={value} onChange={(e) => onSave(e.target.value)}>
+        <option value="">Automatic{d.current && !value ? ` (now ${d.current})` : ''}: main, else the latest one running</option>
+        {names.map((n) => { const s = d.sessions.find((x) => x.name === n); return <option key={n} value={n}>{n}{s ? (s.running ? ' · running' : ' · stopped') : ' · not found'}</option> })}
+      </select>
     </div>
   )
 }

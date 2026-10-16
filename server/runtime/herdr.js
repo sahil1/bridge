@@ -9,6 +9,7 @@ import * as cli from './herdr-cli.js'
 import * as sock from './herdr-socket.js'
 import { adapter } from '../agents.js'
 import { quoteCommand } from './spawn.js'
+import { envFor } from '../accounts.js'
 
 export const name = 'herdr'
 export const caps = { liveView: true, reorder: true, splits: true }
@@ -50,20 +51,56 @@ export const closeWorkspace = cli.closeWorkspace
 export const moveWorkspace = (wsId, index) => sock.call('workspace.move', { workspace_id: wsId, insert_index: index })
 export const moveTab = (tabId, index) => sock.call('tab.move', { tab_id: tabId, insert_index: index })
 
+// A new space. herdr has no empty spaces: it opens with a shell tab in your home folder.
+export async function createSpace({ label, cwd = os.homedir() }) {
+  const r = await sock.call('workspace.create', { label: String(label || 'Space').slice(0, 80), cwd, focus: false })
+  return { workspaceId: r?.workspace?.workspace_id || null }
+}
+
+// Move a tab to another space (or a new one named newSpace), at `index` among its tabs. herdr
+// moves panes, not tabs: the first pane becomes a new tab there, the others join it side by
+// side. The terminals keep running, but get new pane ids (returned as moved: old -> new).
+// The space left empty closes by itself.
+export async function moveTabToSpace(tabId, { workspaceId, newSpace, index } = {}) {
+  const snap = await cli.snapshot()
+  const tab = (snap.tabs || []).find((t) => t.tab_id === tabId)
+  if (!tab) throw new Error('Not found')
+  const ids = (snap.layouts || []).find((l) => l.tab_id === tabId)?.panes?.map((p) => p.pane_id)
+    || (snap.panes || []).filter((p) => p.tab_id === tabId).map((p) => p.pane_id)
+  if (!ids.length) throw new Error('That tab has nothing in it')
+  const label = tab.label && !/^\d+$/.test(tab.label) ? tab.label : null
+  const moved = {}
+  const first = await sock.call('pane.move', { pane_id: ids[0], destination: newSpace
+    ? { type: 'new_workspace', label: String(newSpace).slice(0, 80), tab_label: label }
+    : { type: 'new_tab', workspace_id: workspaceId, label } })
+  const pane = first?.move_result?.pane
+  if (!pane) throw new Error('herdr did not move the tab')
+  moved[ids[0]] = pane.pane_id
+  for (const id of ids.slice(1)) {
+    const r = await sock.call('pane.move', { pane_id: id, destination: { type: 'tab', tab_id: pane.tab_id, split: 'right' } })
+    if (r?.move_result?.pane) moved[id] = r.move_result.pane.pane_id
+  }
+  if (Number.isInteger(index) && !newSpace) {
+    try { await sock.call('tab.move', { tab_id: pane.tab_id, insert_index: index }) } catch { /* left at the end */ }
+  }
+  return { workspaceId: pane.workspace_id, tabId: pane.tab_id, moved }
+}
+
 // A new agent in a new space (newSpace) or a new tab of an existing one (workspaceId).
 // herdr starts the agents it knows itself, so a default model applies only to the others.
-export async function launch({ kind = 'claude', cwd, label, workspaceId, newSpace, prompt: opening, model }) {
+export async function launch({ kind = 'claude', cwd, label, workspaceId, newSpace, prompt: opening, model, account }) {
+  const env = envFor(kind, account) // a second account's config folder, if one was picked
   const a = adapter(kind)
   const name = `ba-${Date.now().toString(36)}`
   const space = String(newSpace || '').trim()
   let out
   if (a.herdr) {
-    out = await cli.launchTask({ name, kind: a.herdr, cwd, label: space || label, workspaceId: space ? null : workspaceId || null, prompt: opening })
+    out = await cli.launchTask({ name, kind: a.herdr, cwd, label: space || label, workspaceId: space ? null : workspaceId || null, prompt: opening, env })
   } else {
     // herdr doesn't know this agent: open a pane and run it like you would by hand.
     const created = workspaceId && !space
-      ? await cli.run(['tab', 'create', '--workspace', workspaceId, '--cwd', cwd, '--label', label])
-      : await cli.run(['workspace', 'create', '--cwd', cwd, '--label', space || label, '--no-focus'])
+      ? await cli.run(['tab', 'create', '--workspace', workspaceId, '--cwd', cwd, '--label', label, ...Object.entries(env).flatMap(([k, v]) => ['--env', `${k}=${v}`])])
+      : await cli.run(['workspace', 'create', '--cwd', cwd, '--label', space || label, '--no-focus', ...Object.entries(env).flatMap(([k, v]) => ['--env', `${k}=${v}`])])
     const paneId = cli.findPaneId(created)
     if (!paneId) throw new Error('herdr did not return a pane for the new tab')
     await cli.paneSendText(paneId, quoteCommand(a.bin[0], [...(model && a.model ? a.model(model) : []), ...a.start({})]))

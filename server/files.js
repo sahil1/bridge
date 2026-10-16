@@ -1,5 +1,5 @@
-// Read-only file and git access inside an agent's working folder.
-// Every path is resolved with realpath and must stay inside the agent's root.
+// File and git access inside an agent's working folder: reading, and saving a text file you
+// edited in the viewer. Every path is resolved with realpath and must stay inside the agent's root.
 import fs from 'node:fs'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
@@ -55,10 +55,39 @@ export function readFile(root, rel) {
   return { ...base, kind: 'text', text: buf.toString('utf8'), truncated: st.size > MAX_TEXT }
 }
 
+// Save a text file edited in the viewer. Only files that already exist (so a path can't be made
+// up), and only if nobody changed it since you opened it: `mtime` is what you loaded, and a
+// different one on disk means an agent wrote to it meanwhile (pass force to overwrite anyway).
+const MAX_SAVE = 5 * 1024 * 1024
+export function writeFile(root, rel, text, { mtime, force = false } = {}) {
+  if (typeof text !== 'string') throw new Error('Expected the file text')
+  if (Buffer.byteLength(text) > MAX_SAVE) throw new Error('Too large to save from here (5 MB at most)')
+  const { real } = safePath(root, rel)
+  const st = fs.statSync(real)
+  if (!st.isFile()) throw new Error('Not a file')
+  if (!force && mtime != null && Math.abs(st.mtimeMs - Number(mtime)) > 1) {
+    const err = new Error('The file changed on disk since you opened it')
+    err.conflict = true
+    throw err
+  }
+  fs.writeFileSync(real, text)
+  return readFile(root, rel)
+}
+
 export function rawFile(root, rel) {
   const { real } = safePath(root, rel)
   const ext = path.extname(real).toLowerCase()
   return { file: real, type: IMAGE[ext] || PDF[ext] || 'application/octet-stream' }
+}
+
+// An HTML page and the files next to it (styles, scripts, images), served by path so the page's
+// relative links work. The route serves it sandboxed, away from this app's origin.
+const SITE = { '.html': 'text/html; charset=utf-8', '.htm': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8', '.txt': 'text/plain; charset=utf-8', '.csv': 'text/plain; charset=utf-8', '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.otf': 'font/otf', '.mp4': 'video/mp4', '.webm': 'video/webm', '.mp3': 'audio/mpeg', '.wav': 'audio/wav' }
+export function siteFile(root, rel) {
+  const { real } = safePath(root, rel)
+  if (fs.statSync(real).isDirectory()) throw new Error('Not found')
+  const ext = path.extname(real).toLowerCase()
+  return { file: real, type: SITE[ext] || IMAGE[ext] || PDF[ext] || 'application/octet-stream', html: ext === '.html' || ext === '.htm' }
 }
 
 function git(cwd, args, timeout = 10000) {

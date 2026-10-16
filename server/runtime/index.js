@@ -6,10 +6,11 @@
 // server never needs to know which one is in use.
 import * as herdr from './herdr.js'
 import * as builtin from './builtin.js'
+import { useSession } from './herdr-cli.js'
 
 export async function pickRuntime(cfg = {}) {
   const want = String(process.env.BRIDGE_RUNTIME || cfg.runtime || 'builtin').toLowerCase()
-  if (want === 'herdr') return herdr
+  if (want === 'herdr') { useSession(cfg.herdr?.session); return herdr }
   // Anything else, including the old "auto", is built in: having herdr installed shouldn't move
   // your agents into it without asking.
   await builtin.restore()

@@ -12,6 +12,7 @@ import { discoverSession, locate } from '../transcripts.js'
 import { dataFile, ensureDir, DATA } from '../paths.js'
 import { shellCommand, agentEnv } from './spawn.js'
 import { providerEnv } from '../providers.js'
+import * as accounts from '../accounts.js'
 
 const { Terminal } = headless
 
@@ -29,7 +30,7 @@ const STATE = dataFile('runtime.json')
 const COLS = Number(process.env.BRIDGE_COLS) || 120
 const ROWS = Number(process.env.BRIDGE_ROWS) || 40
 
-let spaces = [] // { id, label }
+let spaces = [] // { id, label, fresh } (fresh: made empty from the UI and nothing put in it yet)
 let tabs = [] // { tabId, workspaceId, label }
 const panes = new Map() // paneId -> live pane
 let nextId = 1
@@ -41,16 +42,19 @@ const plain = (s) => String(s || '').replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').repl
 // A menu, permission prompt or question waiting on the user.
 const ASKING = /(enter to (continue|confirm|select|submit)|do you want to|\(y\/n\)|\[y\/n\]|❯\s*\d+\.|allow .* \?|trust (this|the files in this) folder|Review your answers)/i
 
+// Spaces go away with their last tab, except a new one you made that's still waiting for its first.
+const prune = () => { spaces = spaces.filter((w) => w.fresh || tabs.some((t) => t.workspaceId === w.id)) }
+
 function save() {
   ensureDir(DATA)
   const out = {
     nextId, spaces, tabs,
-    panes: [...panes.values()].map((p) => ({ paneId: p.paneId, tabId: p.tabId, workspaceId: p.workspaceId, kind: p.kind, cwd: p.cwd, model: p.model, sessionId: p.sessionId })),
+    panes: [...panes.values()].map((p) => ({ paneId: p.paneId, tabId: p.tabId, workspaceId: p.workspaceId, kind: p.kind, cwd: p.cwd, model: p.model, sessionId: p.sessionId, account: p.account })),
   }
   try { fs.writeFileSync(STATE, JSON.stringify(out, null, 2)) } catch { /* read-only disk: keep going */ }
 }
 
-async function spawnPane({ paneId, tabId, workspaceId, kind, cwd, sessionId, resume, opening, model }) {
+async function spawnPane({ paneId, tabId, workspaceId, kind, cwd, sessionId, resume, opening, model, account }) {
   const a = adapter(kind)
   const PATH = await loginPath()
   let bin = null
@@ -69,10 +73,10 @@ async function spawnPane({ paneId, tabId, workspaceId, kind, cwd, sessionId, res
     if (model && a.model) args = [...a.model(model), ...args]
   }
   const [file, argv] = shellCommand(bin, args)
-  const proc = pty.spawn(file, argv, { name: 'xterm-256color', cols: COLS, rows: ROWS, cwd: fs.existsSync(cwd) ? cwd : process.env.HOME, env: agentEnv(PATH, providerEnv()) })
+  const proc = pty.spawn(file, argv, { name: 'xterm-256color', cols: COLS, rows: ROWS, cwd: fs.existsSync(cwd) ? cwd : process.env.HOME, env: agentEnv(PATH, { ...providerEnv(), ...accounts.envFor(kind, account) }) })
   const term = new Terminal({ cols: COLS, rows: ROWS, scrollback: 5000, allowProposedApi: true })
   const p = {
-    paneId, tabId, workspaceId, kind, cwd, model: model || null, sessionId: sessionId || null, proc, term,
+    paneId, tabId, workspaceId, kind, cwd, model: model || null, sessionId: sessionId || null, account: account || null, proc, term,
     title: '', status: kind === 'shell' ? null : 'idle', seq: 0, seen: true,
     startedAt: Date.now(), lastOutput: 0, lastInput: 0, clients: new Set(),
   }
@@ -117,7 +121,7 @@ export async function restore() {
     try { await spawnPane({ ...p, resume: true }) } catch { /* agent no longer installed */ }
   }
   tabs = tabs.filter((t) => [...panes.values()].some((p) => p.tabId === t.tabId))
-  spaces = spaces.filter((w) => tabs.some((t) => t.workspaceId === w.id))
+  prune()
   save()
 }
 
@@ -153,7 +157,7 @@ export async function fleet() {
   const agents = live.filter((p) => p.kind !== 'shell').map((p) => ({
     paneId: p.paneId, tabId: p.tabId, workspaceId: p.workspaceId,
     workspace: wsLabel(p.workspaceId), tab: tabOf(p.tabId)?.label || '',
-    kind: p.kind, status: statusOf(p), title: p.title, cwd: p.cwd,
+    kind: p.kind, status: statusOf(p), title: p.title, cwd: p.cwd, account: accounts.labelOf(p.account),
     sessionId: p.sessionId, focused: false, seq: p.seq,
   }))
   const tabList = tabs.map((t) => ({
@@ -284,7 +288,7 @@ export const renameWorkspace = (wsId, label) => renameIn(spaces, 'id', wsId, lab
 export async function closeTab(tabId) {
   for (const p of [...panes.values()]) if (p.tabId === tabId) { try { p.proc.kill() } catch { /* gone */ } panes.delete(p.paneId) }
   tabs = tabs.filter((t) => t.tabId !== tabId)
-  spaces = spaces.filter((w) => tabs.some((t) => t.workspaceId === w.id))
+  prune()
   save()
 }
 export async function closeWorkspace(wsId) {
@@ -300,6 +304,36 @@ const moveIn = (list, pred, index) => {
   save()
 }
 export async function moveWorkspace(wsId, index) { moveIn(spaces, (w) => w.id === wsId, index) }
+// A new, empty space; agents are started in it or dragged into it.
+export async function createSpace({ label }) {
+  const ws = { id: `w${id()}`, label: String(label || 'Space').slice(0, 80), fresh: true }
+  spaces.push(ws)
+  save()
+  return { workspaceId: ws.id }
+}
+
+// Move a tab (and everything in it) to another space, or to a new one (newSpace: its name), at
+// `index` among that space's tabs (default: last). The terminals keep running. Returns the moved
+// panes' ids, old -> new (unchanged here; herdr gives them new ones).
+export async function moveTabToSpace(tabId, { workspaceId, newSpace, index } = {}) {
+  const t = tabs.find((x) => x.tabId === tabId)
+  if (!t) throw new Error('Not found')
+  let ws = newSpace ? null : spaces.find((w) => w.id === workspaceId)
+  if (!ws && !newSpace) throw new Error('No such space')
+  if (!ws) { ws = { id: `w${id()}`, label: String(newSpace).slice(0, 80) }; spaces.push(ws) }
+  delete ws.fresh
+  const moved = {}
+  for (const p of panes.values()) if (p.tabId === tabId) { p.workspaceId = ws.id; moved[p.paneId] = p.paneId }
+  tabs = tabs.filter((x) => x !== t)
+  t.workspaceId = ws.id
+  const peers = tabs.filter((x) => x.workspaceId === ws.id)
+  peers.splice(Number.isInteger(index) ? Math.min(Math.max(index, 0), peers.length) : peers.length, 0, t)
+  tabs = [...tabs.filter((x) => x.workspaceId !== ws.id), ...peers]
+  prune()
+  save()
+  return { workspaceId: ws.id, tabId, moved }
+}
+
 export async function moveTab(tabId, index) {
   const t = tabs.find((x) => x.tabId === tabId)
   if (!t) throw new Error('Not found')
@@ -309,19 +343,20 @@ export async function moveTab(tabId, index) {
   save()
 }
 
-export async function launch({ kind = 'claude', cwd, label, workspaceId, newSpace, prompt: opening, model }) {
+export async function launch({ kind = 'claude', cwd, label, workspaceId, newSpace, prompt: opening, model, account }) {
   const space = String(newSpace || '').trim()
   let ws = !space && workspaceId ? spaces.find((w) => w.id === workspaceId) : null
   if (!ws) { ws = { id: `w${id()}`, label: (space || label || 'Space').slice(0, 80) }; spaces.push(ws) }
+  delete ws.fresh
   const tab = { tabId: `${ws.id}:t${id()}`, workspaceId: ws.id, label: (label || kind).slice(0, 80) }
   tabs.push(tab)
   const paneId = `${ws.id}:p${id()}`
   try {
-    await spawnPane({ paneId, tabId: tab.tabId, workspaceId: ws.id, kind, cwd, opening, model })
+    await spawnPane({ paneId, tabId: tab.tabId, workspaceId: ws.id, kind, cwd, opening, model, account })
   } catch (e) {
     // Don't leave an empty tab (or space) behind.
     tabs = tabs.filter((t) => t !== tab)
-    spaces = spaces.filter((w) => tabs.some((t) => t.workspaceId === w.id))
+    prune()
     save()
     throw new Error(`Couldn't start ${kind}: ${e.message}`)
   }
