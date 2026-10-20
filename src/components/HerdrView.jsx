@@ -6,6 +6,7 @@ import '@xterm/xterm/css/xterm.css'
 import Icon from './Icon.jsx'
 import { usePersisted } from './layout.jsx'
 import disposeTerm from '../disposeTerm.js'
+import { openSocket } from '../api.js'
 
 // One Dark, matching herdr's theme and Ghostty's default.
 const ONE_DARK = {
@@ -78,8 +79,7 @@ export default function HerdrView({ active, onViewHotkey }) {
     let closed = false
     const connect = () => {
       setStatus('connecting')
-      const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-      const ws = new WebSocket(`${proto}://${location.host}/api/tty?cols=${term.cols}&rows=${term.rows}`)
+      const ws = openSocket(`/api/tty?cols=${term.cols}&rows=${term.rows}`)
       ws.binaryType = 'arraybuffer'
       wsRef.current = ws
       ws.onmessage = (ev) => {

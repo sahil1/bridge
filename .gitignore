@@ -9,3 +9,4 @@ config.local.json
 routines.json
 ideas.md
 .vite/
+relay/dist/

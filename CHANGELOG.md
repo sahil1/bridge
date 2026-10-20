@@ -2,6 +2,28 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
+## 2.2.1
+
+Your phone from anywhere, all of a long conversation in Chat, agents in their own windows, and updates in one click.
+
+### What's new
+
+- **Your phone, from anywhere, through your own relay:** in Settings › Phone & notifications, sign in with Cloudflare and Bridge AI puts a small relay on your own free Cloudflare account. Pair a phone with a QR code and it reaches this computer from anywhere: no VPN, nothing to keep connected, no port opened. Everything between phone and computer is end-to-end encrypted, so the relay can't read it. Remove a phone any time. Tailscale still works as before, and neither is needed to use Bridge AI on the computer.
+- **Keep the computer awake:** an option to stop it sleeping while it's plugged in (macOS and Linux), so your phone can always reach it.
+
+- **Earlier messages in Chat:** "Show earlier messages" at the top of Chat goes back through the whole conversation, across every /compact, a page at a time (a long agent's log can be hundreds of MB, so it's never read all at once). "Earlier conversation summarized" opens to show Claude's summary.
+- **An agent in its own window:** the ⧉ button in an agent's header opens it in a window of its own, to put on another screen. Its tab in Bridge AI says so, with Show window and Bring back here; Bring back in the window does the same.
+- **Update from the top bar:** when a new version is out, the Update button shows what's new and updates in one click (Bridge AI closes, installs it and reopens; your agents carry on).
+
+### Fixes
+
+- After an update or a reinstall, the app could keep talking to the background server of the version before, so some changes didn't show until the server was restarted. The app now checks which build the running server is and replaces one left over from another build. A server you run yourself from source is left alone.
+- **Terminal tab:** after switching the same panel to another agent, keys you pressed in the Terminal tab went to the agent it showed first, so a picker like /model looked stuck. They now go to the agent on screen.
+- **Terminal tab:** what you type in the message box no longer lands in a picker or menu open over the agent's input line (the "s" in /fast picked "this session only" in the /model picker). It catches up once the input line is back.
+- **Terminal tab:** the empty rows Claude Code leaves between its output and its input box are shortened, so the view no longer looks blank after a command.
+- **Relay setup:** a new Cloudflare account without a workers.dev address is now set up in one go (Cloudflare refused the relay before the address existed), and Pair a phone turns on by itself once the relay connects.
+- **Relay security:** the relay's address is public, so connections that don't prove they're a paired phone within 15 seconds are dropped, and strangers can't fill the relay and lock your phone out. Its public status says only that it's up. New relays get a random name instead of your computer's.
+
 ## 2.2.0
 
 See your app running, keep talking while agents work, and edit what you sent.

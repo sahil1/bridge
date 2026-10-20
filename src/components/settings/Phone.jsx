@@ -1,14 +1,17 @@
 import { useEffect, useState } from 'react'
 import Icon from '../Icon.jsx'
-import { api } from '../../api.js'
+import { api, viaRelay } from '../../api.js'
+import Relay from './Relay.jsx'
 import { useSettings, SaveNote } from './General.jsx'
 import { pushSupport, pushState, enablePush, disablePush, isIOS } from '../../pwa.js'
 
-// Settings › Phone & notifications: open Bridge AI on your phone (through Tailscale, as a Home
-// Screen app), and choose what you get notified about, on which devices.
+// Settings › Phone & notifications: open Bridge AI on your phone (through your own relay, or
+// through Tailscale, as a Home Screen app), and choose what you get notified about, on which
+// devices. Both are optional; Bridge AI works on this computer without either.
 export default function Phone() {
   return (
     <div className="st-sections">
+      <Relay />
       <PhoneAccess />
       <ThisDevice />
       <WhatToSend />
@@ -18,6 +21,7 @@ export default function Phone() {
 }
 
 function PhoneAccess() {
+  if (viaRelay) return null
   // Opened through the phone link already: nothing to set up from here.
   if (location.hostname.endsWith('.ts.net')) {
     return (
@@ -45,8 +49,8 @@ function PhoneSetup() {
 
   return (
     <section className="st-sec">
-      <h4>Use on your phone</h4>
-      <p className="muted small">Your phone opens Bridge AI from this computer through <a href="https://tailscale.com" target="_blank" rel="noreferrer">Tailscale</a>, a free private network between your own devices. Nothing is opened to the internet, and only devices signed in to your Tailscale account can reach it.</p>
+      <h4>Or through Tailscale</h4>
+      <p className="muted small">If you already use <a href="https://tailscale.com" target="_blank" rel="noreferrer">Tailscale</a>, a free private network between your own devices, your phone can open Bridge AI through it instead. Nothing is opened to the internet, and only devices signed in to your Tailscale account can reach it. Tailscale has to be connected on both the phone and this computer.</p>
       {!st ? <div className="skeleton-rows"><div /></div>
         : !st.installed ? (
           <ol className="ph-steps">

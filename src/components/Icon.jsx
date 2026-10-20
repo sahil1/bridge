@@ -52,6 +52,7 @@ const PATHS = {
   external: <><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></>,
   grid: <><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></>,
   'panel-left': <><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></>,
+  popout: <><rect x="9" y="3" width="12" height="12" rx="2"/><path d="M15 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h4"/></>,
   'panel-right': <><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M15 3v18"/></>,
   layers: <><path d="m12 2 10 5-10 5L2 7z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/></>,
   command: <><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5"/></>,

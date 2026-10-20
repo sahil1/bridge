@@ -23,7 +23,7 @@ console.log('Copying Bridge AI into the app...')
 fs.rmSync(OUT, { recursive: true, force: true })
 fs.mkdirSync(OUT, { recursive: true })
 // The server shares one file with the UI: the MCP server catalog.
-const COPY = ['server', 'scripts', 'chief', 'dist', 'src/components/settings/mcpCatalog.js', 'package.json', 'package-lock.json', '.npmrc', 'config.example.json', 'LICENSE', 'NOTICE', 'README.md']
+const COPY = ['server', 'scripts', 'chief', 'relay', 'dist', 'src/components/settings/mcpCatalog.js', 'package.json', 'package-lock.json', '.npmrc', 'config.example.json', 'LICENSE', 'NOTICE', 'README.md']
 // Only files git knows about: tracked, or new and not ignored (dist/ is built just above). So
 // nothing ignored, like your settings or a filled-in chief of staff note, rides along into the
 // app; the privacy check below looks at the rest.
@@ -62,6 +62,8 @@ const all = Object.keys(pkg.dependencies || {})
 pkg.dependencies = Object.fromEntries(Object.entries(pkg.dependencies || {}).filter(([d]) => used.has(d)))
 delete pkg.devDependencies
 if (pkg.scripts) delete pkg.scripts.prepare // sets up git hooks in a clone; the app isn't one
+// Which build this is, so the app can tell its own server from one an older build left running.
+pkg.bridgeBuild = new Date().toISOString()
 fs.writeFileSync(pkgFile, JSON.stringify(pkg, null, 2) + '\n')
 console.log(`Installing what the server uses: ${Object.keys(pkg.dependencies).join(', ')} (left out: ${all.filter((d) => !used.has(d)).join(', ')})`)
 run(['install', '--omit=dev', '--no-audit', '--no-fund'], OUT) // versions from package-lock.json

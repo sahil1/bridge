@@ -206,20 +206,38 @@ You can also run the builds without releasing: Actions › Release › Run workf
 
 ## On your phone
 
-Bridge AI works on your phone as an app on the Home Screen, with notifications when an agent needs you or finishes. No app store is involved: it's the same app, opened from your computer through [Tailscale](https://tailscale.com), a free private network between your own devices.
+Bridge AI works on your phone as an app on the Home Screen, with notifications when an agent needs you or finishes. No app store is involved: it's the same app, served by your computer. There are two ways to reach it; both are optional, and Bridge AI works the same on the computer without either.
+
+### From anywhere, through your own relay
+
+A small relay ([relay/](relay)) runs on your own free Cloudflare account. Bridge AI keeps one outgoing connection to it, and your phone reaches your computer through it. There's no VPN to keep connected, nothing to install on the phone, and no port opened on the computer.
+
+1. In Bridge AI, open **Settings › Phone & notifications** and click **Sign in with Cloudflare** (or use an API token made with Cloudflare's "Edit Cloudflare Workers" template). Bridge AI deploys the relay to your account. Its sign-in is kept apart from any other Cloudflare tools you use.
+2. Click **Pair a phone** and scan the QR code with the phone's camera (or open the relay's address and type the code).
+3. Add it to the Home Screen: iPhone, Share › **Add to Home Screen**; Android, ⋮ › **Install app**. Open it from there, and type the code again if it asks.
+4. In Bridge AI on the phone, go to **Settings › Phone & notifications** and click **Turn on notifications**.
+
+Everything between the phone and the computer is end-to-end encrypted ([relay/web/link.js](relay/web/link.js)): each paired phone has its own key, kept on the phone, and each connection makes fresh keys. The relay, and Cloudflare, see when and how much, never what. It stores nothing but when your computer was last online. Remove a phone in Settings and it's out. A phone can't pair other phones or change the relay; that's done on the computer.
+
+Your computer has to be on and Bridge AI running. **Keep this computer awake while it's plugged in** (macOS and Linux) stops it sleeping. The free Cloudflare plan is plenty for one person; if it's ever used up, Cloudflare stops serving until the next day rather than charging you.
+
+### Through Tailscale
+
+If you already use [Tailscale](https://tailscale.com), a free private network between your own devices:
 
 1. On the computer: install Tailscale and sign in. In Bridge AI, open **Settings › Phone & notifications** and click **Turn on phone access**. It shows a QR code.
 2. On the phone: install Tailscale and sign in with the same account. Scan the QR code with the camera.
-3. Add it to the Home Screen: iPhone, Share › **Add to Home Screen**; Android, ⋮ › **Install app**.
-4. Open Bridge AI from the Home Screen, go to **Settings › Phone & notifications**, and click **Turn on notifications**.
+3. Add it to the Home Screen and turn on notifications, as above.
 
-Choose what you're notified about in the same place: an agent needs you, an agent finished, and usage running low (5 to 25% left). Notifications are encrypted end to end to your phone. Only devices signed in to your Tailscale account can reach Bridge AI; nothing is opened to the internet. iPhone needs iOS 16.4 or later for notifications.
+Only devices signed in to your Tailscale account can reach Bridge AI; nothing is opened to the internet.
+
+Either way, choose what you're notified about in Settings › Phone & notifications: an agent needs you, an agent finished, and usage running low (5 to 25% left). Notifications are encrypted end to end to your phone. iPhone needs iOS 16.4 or later for notifications.
 
 ## Security
 
 - The server listens on `127.0.0.1` only. It answers requests whose Host is this machine or a Tailscale name and, from a browser, whose Origin is too, so other web pages can't drive your agents through localhost.
 - File and git endpoints are read-only and stay inside the agent's folder.
-- Anyone who can reach the server can type into your agents. Phone access uses `tailscale serve`, which only devices on your tailnet can reach. Never expose Bridge AI with `tailscale funnel` or a public port.
+- Anyone who can reach the server can type into your agents. Phone access uses your own relay, which only lets in phones you paired (end-to-end encrypted), or `tailscale serve`, which only devices on your tailnet can reach. Never expose Bridge AI with `tailscale funnel` or a public port.
 - Mail and meeting agents are told that email text is data, not instructions, and never to send or post without your OK.
 
 ## Optional setup

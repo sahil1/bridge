@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 
+// Opened on a phone through your own relay (relay/): the app runs inside the relay's page, which
+// carries its requests to your computer over an end-to-end encrypted link.
+const relayPage = (() => { try { return window.parent !== window ? window.parent.bridgeRelay || null : null } catch { return null } })()
+export const viaRelay = !!relayPage
+
+// A WebSocket to this server (the live terminal), through the relay's link when there is one.
+export const openSocket = (path) => (relayPage ? new relayPage.WebSocket(path) : new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${path}`))
+
 export async function api(path, opts = {}) {
   const res = await fetch(`/api${path}`, {
     ...opts,

@@ -2,7 +2,7 @@ import express from 'express'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { transcript, preview, locate, imageFrom } from './transcripts.js'
+import { transcript, earlier, preview, locate, imageFrom } from './transcripts.js'
 import { listSubagents } from './subagents.js'
 import { ttyHandler } from './tty.js'
 import { attachHandler } from './attach.js'
@@ -28,7 +28,7 @@ import { makeMail, setRule } from './mail.js'
 import { makeMacro } from './macro.js'
 import * as slash from './commands.js'
 import * as mentions from './mentions.js'
-import { promptSafe } from './promptsafe.js'
+import { promptSafe, draftIn } from './promptsafe.js'
 import { rewindAndSend, codexRewindAndSend, btwAnswer } from './rewind.js'
 import { makeNews } from './news.js'
 import { execFile } from 'node:child_process'
@@ -45,6 +45,7 @@ import { mcpRoutes } from './mcp.js'
 import * as notify from './notify.js'
 import * as push from './push.js'
 import * as phone from './phone.js'
+import * as relay from './relay.js'
 import * as updates from './updates.js'
 
 ensureDir(DATA)
@@ -148,8 +149,11 @@ app.get('/api/agents/:pane/mentions', wrap(async (req) => {
   return { cwd: a.cwd, ...(await mentions.search(a.cwd, req.query.q)) }
 }))
 // Live typing from the terminal view: [{ text } | { keys: [...] }] in order.
+// atPrompt: only if the agent's input box is showing (the composer's live mirror), so typing
+// in the message box can't press keys in a picker or menu that has opened over it.
 app.post('/api/panes/:pane/input', wrap(async (req) => {
   const steps = Array.isArray(req.body?.steps) ? req.body.steps.slice(0, 200) : []
+  if (req.body?.atPrompt && draftIn(await rt.read(req.params.pane, 30)) === null) return { ok: false, notAtPrompt: true }
   await rt.input(req.params.pane, steps)
   return { ok: true }
 }))
@@ -160,6 +164,7 @@ app.get('/api/agents/:pane/subagents', wrap(async (req) => {
   return listSubagents(locate('claude', a.sessionId, a.cwd))
 }))
 app.get('/api/agents/:pane/transcript', wrap(async (req) => transcript(await findAgent(req.params.pane))))
+app.get('/api/agents/:pane/transcript/earlier', wrap(async (req) => earlier(await findAgent(req.params.pane), Number(req.query.before), String(req.query.after || '') || null, Math.min(200, Number(req.query.want) || 60))))
 // The same, live: pushed the moment the agent writes to its transcript file, so a reply shows up
 // as soon as it lands instead of at the next poll. A slow sweep also catches a new session (/clear).
 app.get('/api/agents/:pane/transcript/live', (req, res) => {
@@ -855,6 +860,16 @@ app.post('/api/push/test', wrap(() => notify.send({ kind: 'test', title: 'Bridge
 
 app.get('/api/phone', wrap(() => phone.status(cfg.port)))
 app.post('/api/phone', wrap((req) => (req.body?.enabled ? phone.enable(cfg.port) : phone.disable(cfg.port))))
+// Your own relay (relay.js). Set up from the computer only: a phone using the relay can see it,
+// but can't pair more phones, remove one, or change where the relay is.
+const onComputer = (req) => { if (req.headers['x-bridge-relay']) throw Object.assign(new Error('Do this in Bridge AI on your computer'), { status: 403 }) }
+app.get('/api/relay', wrap((req) => ({ ...relay.status(), here: req.headers['x-bridge-relay'] || null })))
+app.post('/api/relay/deploy', wrap((req) => { onComputer(req); return relay.deploy({ method: req.body?.method, token: req.body?.token }) }))
+app.post('/api/relay/update', wrap((req) => { onComputer(req); return relay.update() }))
+app.post('/api/relay/pair', wrap((req) => { onComputer(req); return req.body?.stop ? relay.stopPairing() : relay.pair() }))
+app.post('/api/relay/awake', wrap((req) => { onComputer(req); return relay.setAwake(!!req.body?.on) }))
+app.post('/api/relay/forget', wrap((req) => { onComputer(req); return relay.forget() }))
+app.delete('/api/relay/devices/:id', wrap((req) => { onComputer(req); return relay.removeDevice(req.params.id) }))
 
 // For bug reports: facts about this install, nothing personal (no names, emails, paths, location).
 app.get('/api/diagnostics', wrap(async () => {
@@ -875,6 +890,11 @@ app.get('/api/diagnostics', wrap(async () => {
 
 app.get('/api/updates', wrap((req) => updates.status({ force: req.query.refresh === '1', disabled: cfg.updates?.check === false })))
 app.post('/api/updates/install', wrap(() => updates.install()))
+
+// Which server this is, so the desktop app can tell when one left over from an older build (or
+// another copy of the app) is still running, and replace it with its own.
+const BUILD = (() => { try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).bridgeBuild || null } catch { return null } })()
+app.get('/api/version', (req, res) => res.json({ version: VERSION, build: BUILD, bundled: !!process.versions.electron, pid: process.pid }))
 
 app.get('/api/config', (req, res) => res.json({
   version: VERSION,
@@ -1052,5 +1072,6 @@ server.listen(cfg.port, cfg.host, () => {
   // quotas) now, so they're ready or nearly ready when the page asks.
   subscriptions().catch(() => {})
   quota().catch(() => {})
+  relay.start(`http://127.0.0.1:${cfg.port}`)
 })
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { rt.shutdown?.(); process.exit(0) })

@@ -10,6 +10,8 @@ import { Settings, Onboarding, HerdrView, Terminals, ShellTab, preloadViews } fr
 import { openLink } from './pwa.js'
 import NewAgent from './components/NewAgent.jsx'
 import History from './components/History.jsx'
+import UpdateChip from './components/UpdateChip.jsx'
+import { CHANNEL, nameOf, popOut, tell } from './components/Solo.jsx'
 import Palette from './components/Palette.jsx'
 import { NextMeetingChip } from './components/Agenda.jsx'
 import { TodayTabs, TodayBody, openToday } from './components/Dock.jsx'
@@ -195,6 +197,22 @@ export default function App() {
     window.addEventListener('bridge-open-agent', on)
     return () => window.removeEventListener('bridge-open-agent', on)
   }, [])
+  // Agents open in a window of their own: their tab here says so, with Show and Bring back.
+  const [popped, setPopped] = useState(() => new Set())
+  useEffect(() => {
+    const ch = new BroadcastChannel(CHANNEL)
+    ch.onmessage = (e) => {
+      const { type, paneId } = e.data || {}
+      if (!paneId) return
+      if (type === 'open') setPopped((s) => new Set(s).add(paneId))
+      if (type === 'closed' || type === 'back') setPopped((s) => { const n = new Set(s); n.delete(paneId); return n })
+      if (type === 'back') window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId } }))
+    }
+    ch.postMessage({ type: 'ping' }) // windows already open (after a reload) say so
+    return () => ch.close()
+  }, [])
+  const showPopped = (id) => { if (window.bridgeApp?.focusPopout) window.bridgeApp.focusPopout(id); else tell({ type: 'focus', paneId: id }) }
+  const bringBack = (id) => { tell({ type: 'close', paneId: id }); setPopped((s) => { const n = new Set(s); n.delete(id); return n }) }
   const showCardRef = useRef(null)
   useEffect(() => {
     const on = (e) => { if (e.detail?.id) showCardRef.current?.(e.detail.id) }
@@ -325,11 +343,7 @@ export default function App() {
         )}
         <NextMeetingChip onClick={() => showCard('calendar')} />
         <ProviderChip quota={quota.data} primary={primary} onClick={() => showCard('gauge')} />
-        {update.data?.available && (
-          <button className="top-chip update-chip" onClick={() => setSettings('about')} title={`Bridge AI ${update.data.latest} is available (you have ${update.data.current})`}>
-            <Icon name="download" size={13} /><span className="hide-sm">Update</span>
-          </button>
-        )}
+        {update.data?.available && <UpdateChip u={update.data} onDetails={() => setSettings('about')} />}
         <WeatherChip onClick={() => showCard('sun')} />
         <Clock />
         <button className="win-btn" onClick={() => setSettings('general')} aria-label="Settings" title="Settings (⌘,)">
@@ -402,7 +416,20 @@ export default function App() {
       <div className={`group ${split && W.group === group ? 'focused' : ''}`} onMouseDown={() => split && W.group !== group && setW((w) => ({ ...w, group }))}>
         {a.shellTab
           ? <ShellTab key={a.paneId} tab={a} onOpenInHerdr={openInHerdr} controls={controls} />
-          : <ErrorBoundary name="This agent's view" resetKey={a.paneId}><Console agent={a} variant={a.chief ? 'mate' : 'focus'} onOpenInHerdr={openInHerdr} controls={controls} queued={queuedFor(a.paneId)} /></ErrorBoundary>}
+          : popped.has(a.paneId)
+            ? (
+              <section className="pane popped-pane">
+                <div className="viewer-empty">
+                  <Icon name="popout" size={26} />
+                  <p><b>{nameOf(a)}</b> is open in its own window.</p>
+                  <div className="popped-acts">
+                    <button className="btn small" onClick={() => showPopped(a.paneId)}>Show window</button>
+                    <button className="btn small primary" onClick={() => bringBack(a.paneId)}>Bring back here</button>
+                  </div>
+                </div>
+              </section>
+            )
+            : <ErrorBoundary name="This agent's view" resetKey={a.paneId}><Console agent={a} variant={a.chief ? 'mate' : 'focus'} onOpenInHerdr={openInHerdr} onPopOut={() => popOut(a)} controls={controls} queued={queuedFor(a.paneId)} /></ErrorBoundary>}
       </div>
     )
   }

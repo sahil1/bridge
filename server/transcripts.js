@@ -72,17 +72,18 @@ export function locate(kind, sessionId, cwd) {
   return file
 }
 
-function tailLines(file, bytes = TAIL_BYTES) {
+// The end of the file, as whole lines; `start` is where the first whole line begins.
+function readTail(file, bytes = TAIL_BYTES) {
   const { size } = fs.statSync(file)
-  const start = Math.max(0, size - bytes)
+  let start = Math.max(0, size - bytes)
   const fd = fs.openSync(file, 'r')
-  const buf = Buffer.alloc(size - start)
+  let buf = Buffer.alloc(size - start)
   fs.readSync(fd, buf, 0, buf.length, start)
   fs.closeSync(fd)
-  const lines = buf.toString('utf8').split('\n')
-  if (start > 0) lines.shift() // first line is likely partial
-  return lines.filter(Boolean)
+  if (start > 0) { const nl = buf.indexOf(10); buf = nl < 0 ? Buffer.alloc(0) : buf.subarray(nl + 1); start = nl < 0 ? size : start + nl + 1 } // the first line is likely partial
+  return { lines: buf.toString('utf8').split('\n').filter(Boolean), start }
 }
+const tailLines = (file, bytes) => readTail(file, bytes).lines
 
 function toolLabel(block) {
   const input = block.input || {}
@@ -93,24 +94,54 @@ function toolLabel(block) {
 // Only the conversation as it stands. Claude never deletes from its log: after a rewind (an
 // edited message) the old turns stay in the file, and each entry points at its parent. So start
 // at the newest entry and follow the parents back; entries off that path were rewound away.
+// A /compact starts a new chain. Its first entry (the compact boundary) points back to the old one:
+// older Claude versions with logicalParentUuid, newer ones through the messages it kept from before
+// (compactMetadata.preservedMessages), which sit just before the boundary. So the walk goes back by
+// place in the file, to the latest of those it finds, and on through every compaction. Each
+// message is kept once, where it first appeared. `frontier` lists the ids to look for further back
+// in the file (null at the start of the conversation).
+const backTo = (e) => (e.parentUuid ? [e.parentUuid] : [e.logicalParentUuid, ...(e.compactMetadata?.preservedMessages?.allUuids || e.compactMetadata?.preservedMessages?.uuids || []), e.compactMetadata?.preservedSegment?.headUuid].filter(Boolean))
 function activeBranch(entries) {
-  const byId = new Map()
-  for (const e of entries) if (e.uuid && !e.isSidechain) byId.set(e.uuid, e)
-  const tip = entries.findLast((e) => e.uuid && !e.isSidechain)
-  if (!tip) return entries
+  const at = new Map() // uuid -> indexes, ascending
+  entries.forEach((e, i) => { if (e.uuid && !e.isSidechain) { if (!at.has(e.uuid)) at.set(e.uuid, []); at.get(e.uuid).push(i) } })
+  let i = entries.findLastIndex((e) => e.uuid && !e.isSidechain)
+  if (i < 0) return { kept: entries, frontier: null }
   const keep = new Set()
-  for (let e = tip; e && !keep.has(e.uuid); e = byId.get(e.parentUuid || e.logicalParentUuid)) keep.add(e.uuid)
-  return entries.filter((e) => !e.uuid || keep.has(e.uuid))
+  let frontier = null
+  for (;;) {
+    keep.add(i)
+    const e = entries[i]
+    const ids = backTo(e)
+    frontier = ids.length ? ids : null
+    if (!frontier) break
+    const prev = Math.max(-1, ...ids.flatMap((u) => (at.get(u) || []).filter((j) => j < i)))
+    if (prev < 0) break // further back than this part of the file
+    i = prev
+  }
+  const seen = new Set()
+  return { kept: entries.filter((e, j) => !e.uuid || (keep.has(j) && !seen.has(e.uuid) && seen.add(e.uuid))), frontier }
 }
 
-function parseClaude(lines) {
+const parseLines = (lines) => { const out = []; for (const line of lines) { try { out.push(JSON.parse(line)) } catch { /* partial line */ } } return out }
+function parseClaude(lines) { return claudeMessages(activeBranch(parseLines(lines)).kept) }
+
+function claudeMessages(entries) {
   const out = []
-  const entries = []
-  for (const line of lines) { try { entries.push(JSON.parse(line)) } catch { /* partial line */ } }
-  for (const e of activeBranch(entries)) {
+  // Each message keeps its entry's id, so pages of older messages join up without repeats.
+  let cur = null
+  let k = 0
+  const add = (m) => out.push(cur ? { ...m, id: `${cur}:${k++}` } : m)
+  for (const e of entries) {
+    cur = e.uuid || null
+    k = 0
     if ((e.type !== 'user' && e.type !== 'assistant') || e.isMeta || e.isSidechain) continue
     // Claude's summary of earlier turns (after /compact or "summarize"): a note, not your message.
-    if (e.isCompactSummary) { out.push({ role: 'event', status: 'completed', text: 'Earlier conversation summarized', ts: e.timestamp }); continue }
+    if (e.isCompactSummary) {
+      const c = e.message?.content
+      const summary = typeof c === 'string' ? c : Array.isArray(c) ? c.map((b) => b.text || '').join('\n') : ''
+      add({ role: 'event', status: 'completed', text: 'Earlier conversation summarized', summary: summary.slice(0, 40000), ts: e.timestamp })
+      continue
+    }
     const content = e.message?.content
     const ts = e.timestamp
     if (typeof content === 'string') {
@@ -118,10 +149,10 @@ function parseClaude(lines) {
       // Claude's own "background task finished" notice: a short event line, not a message from you.
       if (e.type === 'user' && /^<task-notification>/.test(content.trim())) {
         const tag = (t) => (new RegExp(`<${t}>([\\s\\S]*?)</${t}>`).exec(content) || [])[1]?.trim()
-        out.push({ role: 'event', status: tag('status') || '', text: tag('summary') || 'A background task finished', ts })
+        add({ role: 'event', status: tag('status') || '', text: tag('summary') || 'A background task finished', ts })
         continue
       }
-      out.push({ role: e.type, text: content, ts })
+      add({ role: e.type, text: content, ts })
       continue
     }
     if (!Array.isArray(content)) continue
@@ -129,26 +160,25 @@ function parseClaude(lines) {
     const images = e.type === 'user' && e.uuid ? content.map((b, i) => (b.type === 'image' ? { uuid: e.uuid, i } : null)).filter(Boolean) : []
     if (images.length) {
       const text = content.filter((b) => b.type === 'text' && b.text?.trim() && !/^<(system-reminder|command-)/.test(b.text.trim())).map((b) => b.text).join('\n\n')
-      out.push({ role: 'user', text, images, ts })
+      add({ role: 'user', text, images, ts })
       continue
     }
     for (const b of content) {
       if (b.type === 'text' && b.text?.trim()) {
         if (e.type === 'user' && /^<(system-reminder|command-)/.test(b.text.trim())) continue
-        out.push({ role: e.type, text: b.text, ts })
+        add({ role: e.type, text: b.text, ts })
       } else if (b.type === 'tool_use') {
-        out.push({ role: 'tool', ...toolLabel(b), ts })
+        add({ role: 'tool', ...toolLabel(b), ts })
       }
     }
   }
   return out
 }
 
-function parseCodex(lines) {
+function parseCodex(lines) { return codexMessages(parseLines(lines)) }
+function codexMessages(entries) {
   const out = []
-  for (const line of lines) {
-    let e
-    try { e = JSON.parse(line) } catch { continue }
+  for (const e of entries) {
     const p = e.payload || {}
     if (e.type === 'response_item' && p.type === 'message' && (p.role === 'user' || p.role === 'assistant')) {
       const text = (p.content || []).map((c) => c.text || '').join('').trim()
@@ -163,13 +193,82 @@ function parseCodex(lines) {
   return out
 }
 
-export function transcript({ kind, sessionId, cwd }, limit = 150) {
+// Everything in the last 3 MB: no cap on the count, so nothing falls between this and the older pages.
+export function transcript({ kind, sessionId, cwd }, limit = 2000) {
   if (!sessionId) return { supported: false, messages: [] }
   const file = locate(kind, sessionId, cwd)
   if (!file) return { supported: false, messages: [] }
-  const lines = tailLines(file)
-  const messages = kind === 'claude' ? parseClaude(lines) : parseCodex(lines)
-  return { supported: true, messages: messages.slice(-limit) }
+  const { lines, start } = readTail(file)
+  if (kind !== 'claude') return { supported: true, messages: parseCodex(lines).slice(-limit), more: start > 0 ? { before: start } : null }
+  const { kept, frontier } = activeBranch(parseLines(lines))
+  const messages = claudeMessages(kept)
+  // More before this: the file goes back further, and the conversation does too.
+  return { supported: true, messages: messages.slice(-limit), more: start > 0 && frontier ? { before: start, after: frontier.join(',') } : null }
+}
+
+// Older messages, before what Chat has (`before`: a place in the file; `after`: for Claude, the
+// entry the conversation continues back from). Reads backwards a few MB at a time until it has
+// about `want` messages, or 64 MB, or the start. Agent logs can run to hundreds of MB, mostly tool
+// output and pictures, so the whole file is never read at once.
+const CHUNK = 4 * 1024 * 1024
+export function earlier({ kind, sessionId, cwd }, before, after, want = 60) {
+  const file = sessionId && locate(kind, sessionId, cwd)
+  if (!file) return { messages: [], more: null }
+  const fd = fs.openSync(file, 'r')
+  try {
+    let end = Math.min(Number(before) || 0, fs.fstatSync(fd).size)
+    let carry = Buffer.alloc(0) // the start of a line whose rest is in the chunk read before
+    let lineStart = end
+    let frontier = kind === 'claude' && after ? String(after).split(',').filter(Boolean) : null
+    let pos = end // the walk's place in the file: the next entry is before it
+    const at = new Map() // uuid -> [{ off, e }]
+    const kept = [] // { off, e }
+    let read = 0
+    while (end > 0 && read < 64 * 1024 * 1024) {
+      const start = Math.max(0, end - CHUNK)
+      const chunk = Buffer.alloc(end - start)
+      fs.readSync(fd, chunk, 0, chunk.length, start)
+      read += chunk.length
+      let data = Buffer.concat([chunk, carry])
+      let base = start
+      if (start > 0) { const nl = data.indexOf(10); carry = data.subarray(0, nl < 0 ? data.length : nl); data = nl < 0 ? Buffer.alloc(0) : data.subarray(nl + 1); base = nl < 0 ? end : start + nl + 1 } else carry = Buffer.alloc(0)
+      lineStart = base
+      end = start
+      // Each line with where it starts in the file.
+      let off = base
+      for (const line of data.toString('utf8').split('\n')) {
+        const here = off
+        off += Buffer.byteLength(line) + 1
+        if (!line) continue
+        let e
+        try { e = JSON.parse(line) } catch { continue }
+        if (kind !== 'claude') { kept.push({ off: here, e }); continue }
+        if (!e.uuid || e.isSidechain) continue
+        if (!at.has(e.uuid)) at.set(e.uuid, [])
+        at.get(e.uuid).push({ off: here, e })
+      }
+      if (kind === 'claude') {
+        while (frontier) {
+          const prev = frontier.flatMap((u) => at.get(u) || []).filter((x) => x.off < pos).sort((x, y) => y.off - x.off)[0]
+          if (!prev) break
+          kept.push(prev)
+          pos = prev.off
+          const ids = backTo(prev.e)
+          frontier = ids.length ? ids : null
+        }
+        if (!frontier) break
+      }
+      const n = list().filter((m) => m.role === 'user' || m.role === 'assistant').length
+      if (n >= want) break
+    }
+    function list() {
+      const seen = new Set()
+      const es = [...kept].sort((x, y) => x.off - y.off).map((x) => x.e).filter((e) => !e.uuid || (!seen.has(e.uuid) && seen.add(e.uuid)))
+      return kind === 'claude' ? claudeMessages(es) : codexMessages(es)
+    }
+    const more = lineStart > 0 && (kind !== 'claude' || frontier) ? { before: lineStart, ...(frontier ? { after: frontier.join(',') } : {}) } : null
+    return { messages: list(), more }
+  } finally { fs.closeSync(fd) }
 }
 
 // Last thing the agent said, for board tiles. Reads a small tail only.

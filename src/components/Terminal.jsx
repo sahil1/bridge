@@ -90,6 +90,10 @@ export default function Terminal({ paneId, active, focusKey, onChat }) {
   const fastUntil = useRef(0)
   const kick = useRef(null)
   const pendingRef = useRef(null)
+  // The xterm and its key handlers are made once, but the same panel is reused when you switch
+  // agents: keystrokes must go to the agent on screen now, not the one the panel first showed.
+  const paneRef = useRef(paneId)
+  paneRef.current = paneId
   const [focused, setFocused] = useState(false)
   const [held, setHeld] = useState(false)
   const [error, setError] = useState(null)
@@ -206,9 +210,9 @@ export default function Terminal({ paneId, active, focusKey, onChat }) {
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const send = async (steps) => {
-    if (!steps.length) return
+    if (!steps.length || !paneRef.current) return
     fastUntil.current = Date.now() + 2500
-    try { await api(`/panes/${encodeURIComponent(paneId)}/input`, { method: 'POST', body: { steps } }); setError(null) } catch (e) { setError(e.message) }
+    try { await api(`/panes/${encodeURIComponent(paneRef.current)}/input`, { method: 'POST', body: { steps } }); setError(null) } catch (e) { setError(e.message) }
     kick.current?.()
   }
 
@@ -220,8 +224,14 @@ export default function Terminal({ paneId, active, focusKey, onChat }) {
     term.reset()
     // The agent's screen is often taller than what it drew (a short prompt at the top of a tall
     // terminal); drop the blank rows below, so the view doesn't scroll down to empty space.
+    // Claude also pads the space between its output and its input box with empty rows; on a view
+    // shorter than the pane that pushed everything but the input box off screen, so it looked
+    // stuck. Shorten each long run to two rows.
     // eslint-disable-next-line no-control-regex
-    term.write(ansi.replace(/(?:\r?\n(?:\x1b\[[0-9;?]*[A-Za-z]|[ \t])*)+$/, ''), () => { term.scrollToBottom(); placeCursor(term) })
+    const blank = /^(?:\x1b\[[0-9;?]*[A-Za-z]|[ \t\r])*$/
+    const lines = ansi.split('\n').filter((l, i, all) => !(blank.test(l) && i > 0 && blank.test(all[i - 1]) && blank.test(all[i + 1] ?? '')))
+    // eslint-disable-next-line no-control-regex
+    term.write(lines.join('\n').replace(/(?:\r?\n(?:\x1b\[[0-9;?]*[A-Za-z]|[ \t])*)+$/, ''), () => { term.scrollToBottom(); placeCursor(term) })
   }
 
   // Asked to take the keyboard (e.g. after a slash command opened a picker in the agent).

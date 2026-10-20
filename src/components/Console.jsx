@@ -129,7 +129,9 @@ const splitAttached = (text) => {
 }
 // Claude turns an attached image path into "[Image #3]" and "[Image: source: /path]"; the image itself is shown separately.
 const IMAGE_MARK = /\[Image (?:#\d+|: source: [^\]\n]+)\]\s*/g
-const normMsg = (t) => splitAttached(String(t || '').replace(IMAGE_MARK, '')).body.replace(/\s+/g, ' ').trim()
+// Claude Code wraps text you pasted in <pasted_content> tags; show the text alone.
+const PASTE_TAG = /<\/?pasted_content\b[^>]*>\n?/g
+const normMsg = (t) => splitAttached(String(t || '').replace(IMAGE_MARK, '').replace(PASTE_TAG, '')).body.replace(/\s+/g, ' ').trim()
 // The agent's copy can differ from what was sent: Claude rewrites attachments, and text already
 // in its input box could get merged in. Containment covers both.
 const sameMsg = (a, b) => {
@@ -147,7 +149,7 @@ const uploadUrl = (p) => `/api/upload/raw?path=${encodeURIComponent(p)}`
 // files as chips that open them.
 function UserText({ text, images = [], paneId }) {
   const [view, setView] = useState(null) // index into pics
-  const split = splitAttached(String(text).replace(IMAGE_MARK, ''))
+  const split = splitAttached(String(text).replace(IMAGE_MARK, '').replace(PASTE_TAG, ''))
   const body = split.body.trim()
   const pics = [
     ...images.map((im) => ({ src: `/api/agents/${encodeURIComponent(paneId)}/image?uuid=${encodeURIComponent(im.uuid)}&i=${im.i}`, name: 'Pasted image' })),
@@ -205,12 +207,34 @@ function Chat({ agent, pending, queued = [], onCancelQueued, onEdit, editingText
   const { data, error } = useLive(`/agents/${encodeURIComponent(agent.paneId)}/transcript`)
   const scrollRef = useRef(null)
   const stick = useRef(true)
-  const messages = groupMessages(data?.messages || [])
+  // Older messages, loaded on request: Chat starts with the end of the agent's log, which after
+  // long work and a few /compacts holds only the latest part of the conversation.
+  const [older, setOlder] = useState({ messages: [], more: undefined, busy: false, error: null })
+  useEffect(() => { setOlder({ messages: [], more: undefined, busy: false, error: null }) }, [agent.paneId])
+  const more = older.more === undefined ? data?.more : older.more
+  const anchor = useRef(null) // scroll height before older messages went in above
+  const loadEarlier = async () => {
+    if (!more || older.busy) return
+    setOlder((o) => ({ ...o, busy: true, error: null }))
+    try {
+      const r = await api(`/agents/${encodeURIComponent(agent.paneId)}/transcript/earlier?before=${more.before}${more.after ? `&after=${encodeURIComponent(more.after)}` : ''}`)
+      anchor.current = scrollRef.current?.scrollHeight ?? null
+      setOlder((o) => ({ messages: [...r.messages, ...o.messages], more: r.more, busy: false, error: null }))
+    } catch (e) { setOlder((o) => ({ ...o, busy: false, error: e.message })) }
+  }
+  const recent = data?.messages || []
+  const recentIds = new Set(recent.map((m) => m.id).filter(Boolean))
+  const all = [...older.messages.filter((m) => !m.id || !recentIds.has(m.id)), ...recent]
+  const messages = groupMessages(all)
+  // Edit goes back through the agent's own rewind, which reaches only since its last /compact.
+  const editFrom = messages.findLastIndex((m) => m.summary != null) + 1
 
   useLayoutEffect(() => {
     const el = scrollRef.current
-    if (el && stick.current) el.scrollTop = el.scrollHeight
-  }, [data, pending, queued.length])
+    if (!el) return
+    if (anchor.current != null) { el.scrollTop += el.scrollHeight - anchor.current; anchor.current = null; return }
+    if (stick.current) el.scrollTop = el.scrollHeight
+  }, [data, pending, queued.length, older.messages.length])
 
   const shownPending = pending.filter((p) => !(data?.messages || []).some((m) => m.role === 'user' && sameMsg(m.text, p.text)))
 
@@ -233,21 +257,30 @@ function Chat({ agent, pending, queued = [], onCancelQueued, onEdit, editingText
       <div className="chat-col">
         {!data && !error && <div className="skeleton-rows"><div /><div /><div /></div>}
         {error && <div className="error-text">{error}</div>}
-        {messages.map((m, i) =>
+        {more && (
+          <div className="chat-earlier">
+            <button className="ghost-btn" onClick={loadEarlier} disabled={older.busy}><Icon name={older.busy ? 'refresh' : 'up'} size={12} className={older.busy ? 'spin' : ''} /> {older.busy ? 'Loading…' : 'Show earlier messages'}</button>
+            {older.error && <span className="error-text small">{older.error}</span>}
+          </div>
+        )}
+        {data && !more && older.messages.length > 0 && <div className="chat-earlier muted small">Start of the conversation</div>}
+        {messages.map((m, i) => { const k = m.id || m.items?.[0]?.id || i; return (
           m.role === 'tools'
-            ? <ToolGroup key={i} items={m.items} />
+            ? <ToolGroup key={k} items={m.items} />
             : m.role === 'event'
-            ? <div key={i} className={`chat-event ev-${m.status}`}><span className="ev-dot" />{m.text}<time>{fmtTime(m.ts)}</time></div>
+            ? m.summary
+              ? <details key={k} className="chat-summary"><summary className={`chat-event ev-${m.status}`}><span className="ev-dot" />{m.text}<time>{fmtTime(m.ts)}</time><Icon name="chevron" size={10} className="sum-caret" /></summary><div className="chat-summary-body"><RichText text={m.summary} /></div></details>
+              : <div key={k} className={`chat-event ev-${m.status}`}><span className="ev-dot" />{m.text}<time>{fmtTime(m.ts)}</time></div>
             : (
-              <div key={i} className={`msg ${m.role} ${editingText && m.role === 'user' && m.text === editingText ? 'editing' : ''}`}>
+              <div key={k} className={`msg ${m.role} ${editingText && m.role === 'user' && m.text === editingText ? 'editing' : ''}`}>
                 <div className="msg-text">{m.role === 'user' ? <UserText text={m.text} images={m.images} paneId={agent.paneId} /> : <RichText text={m.text} />}</div>
                 <div className="msg-time">
                   {fmtTime(m.ts)}
-                  {m.role === 'user' && onEdit && <button className="msg-edit-btn" onClick={() => onEdit({ original: m.text, back: messages.slice(i).filter((x) => x.role === 'user').length })}
+                  {m.role === 'user' && onEdit && i >= editFrom && <button className="msg-edit-btn" onClick={() => onEdit({ original: m.text, back: messages.slice(i).filter((x) => x.role === 'user').length })}
                     aria-label="Edit this message" title="Edit and resend: the agent goes back to this point"><Icon name="edit" size={11} /> Edit</button>}
                 </div>
               </div>
-            ))}
+            ))})}
         {shownPending.map((p) => (
           <div key={p.id} className="msg user pending">
             <div className="msg-text"><UserText text={p.text} paneId={agent.paneId} /></div>
@@ -316,7 +349,7 @@ const VIEWS = [['chat', 'chat', 'Chat'], ['terminal', 'terminal', 'Terminal'], [
 
 function readViews() { try { return JSON.parse(localStorage.getItem('cc-agent-views') || '{}') } catch { return {} } }
 
-export default function Console({ agent, variant = 'focus', controls = {}, onBack, onOpenInHerdr, extraActions, queued = [] }) {
+export default function Console({ agent, variant = 'focus', controls = {}, onBack, onOpenInHerdr, onPopOut, extraActions, queued = [] }) {
   const [view, setViewRaw] = useState('chat')
   const [openPath, setOpenPath] = useState(null)
   const setView = (v) => {
@@ -379,7 +412,9 @@ export default function Console({ agent, variant = 'focus', controls = {}, onBac
       if (a.length > p) steps.push({ keys: Array(a.length - p).fill('backspace') })
       b.slice(p).join('').split('\n').forEach((part, i) => { if (i) steps.push({ keys: ['shift+enter'] }); if (part) steps.push({ text: part }) })
       mirrored.current = want
-      if (steps.length) api(`/panes/${encodeURIComponent(agent.paneId)}/input`, { method: 'POST', body: { steps } }).catch(() => {})
+      // Not typed when a picker or menu covers the input box; it catches up on the next change.
+      if (steps.length) api(`/panes/${encodeURIComponent(agent.paneId)}/input`, { method: 'POST', body: { steps, atPrompt: true } })
+        .then((r) => { if (r?.notAtPrompt && mirrored.current === want) mirrored.current = have }).catch(() => {})
     }, 120)
   }, [mirrorOn, agent?.paneId]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { syncMirror() }, [mirrorOn]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -497,6 +532,9 @@ export default function Console({ agent, variant = 'focus', controls = {}, onBac
         {!minimized && (
           <button className="win-btn" onClick={async () => { try { setFlash(`Opened in ${(await openInTerminal(agent.paneId)).app}. Ctrl+] detaches there.`) } catch (e) { setFlash(e.message) } }}
             title="Open in your terminal app" aria-label="Open in your terminal app"><Icon name="terminal" size={14} /></button>
+        )}
+        {onPopOut && !minimized && (
+          <button className="win-btn" onClick={onPopOut} title="Open in its own window (bring it back from there)" aria-label="Open in its own window"><Icon name="popout" size={14} /></button>
         )}
         {onOpenInHerdr && !minimized && (
           <button className="win-btn" onClick={() => onOpenInHerdr(agent.paneId)} title="Open in Herdr view" aria-label="Open in Herdr view"><Icon name="external" size={14} /></button>

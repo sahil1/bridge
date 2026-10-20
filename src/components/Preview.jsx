@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from 'react'
 import Icon from './Icon.jsx'
 import { usePersisted } from './layout.jsx'
-import { api, usePoll } from '../api.js'
+import { api, usePoll, viaRelay } from '../api.js'
 
 const enc = encodeURIComponent
 // On this computer the app is at localhost; from a phone (over Tailscale) it's this computer's
@@ -144,6 +144,8 @@ export default function PreviewView({ agent, onSendToAgent }) {
         )}
         {current && (current.framable === false
           ? <div className="viewer-empty"><Icon name="external" size={22} /><p>This app doesn't allow being shown inside another page.</p><a className="btn small" href={urlOf(current.port, shown)} target="_blank" rel="noreferrer">Open it in your browser</a></div>
+          : viaRelay
+          ? <div className="viewer-empty"><Icon name="phone" size={22} /><p>Previews aren't sent through your relay yet.</p><p className="muted small">Open it on the computer, or through Tailscale.</p></div>
           : remote && current.localOnly
           ? <div className="viewer-empty"><Icon name="phone" size={22} /><p>This server only answers on the computer itself, so it can't be shown on this device.</p><p className="muted small">Restart it listening on all addresses (for Vite, <code>--host</code>), or open it on the computer.</p></div>
           : <Frame key={`${current.port}-${reload}`} src={urlOf(current.port, shown)} title={current.title || `Port ${current.port}`} />)}

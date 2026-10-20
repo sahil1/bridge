@@ -23,7 +23,9 @@ export function openLink(href = location.href) {
 }
 
 export const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-export const isStandalone = () => window.matchMedia?.('(display-mode: standalone)').matches || navigator.standalone === true
+// Through the relay, the app is a frame inside the relay's page: ask the page that was opened.
+const topWin = () => { try { return window.top.matchMedia ? window.top : window } catch { return window } }
+export const isStandalone = () => topWin().matchMedia?.('(display-mode: standalone)').matches || topWin().navigator.standalone === true
 
 // Can this device get push notifications, and if not, why not.
 export function pushSupport() {

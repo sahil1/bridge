@@ -113,6 +113,10 @@ async function createWindow() {
   if (b.maximized) win.maximize()
   win.once('ready-to-show', () => win.show())
   for (const ev of ['resize', 'move', 'close']) win.on(ev, saveBounds)
+  // With an agent open in its own window, closing this one doesn't end the app; forget it so the
+  // Dock icon, the shortcut or Bring back opens a new one.
+  const self = win
+  win.on('closed', () => { if (win === self) win = null })
 
   // Links to anything but the app open in their own apps (Teams, Outlook, Mail, the browser).
   win.webContents.setWindowOpenHandler(({ url }) => { if (!isLocal(url)) shell.openExternal(url); return { action: 'deny' } })
@@ -123,7 +127,73 @@ async function createWindow() {
   await connect()
 }
 
+// The server outlives the window, so the one on the port can be left over from an older build or
+// another copy of the app (an update that couldn't stop it, a copy run from elsewhere). Its code is
+// the old one, so stop it and start this app's own. Agents in herdr carry on; built-in ones resume.
+// A server you run from source (npm start) is left alone.
+async function replaceStale() {
+  if (!BUNDLED) return
+  const mine = (() => { try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')) } catch { return {} } })()
+  let theirs = null
+  try { const r = await fetch(`${URL_BASE}/api/version`, { signal: AbortSignal.timeout(1500) }); theirs = r.ok ? await r.json() : null } catch { /* older server */ }
+  if (theirs && (!theirs.bundled || (theirs.version === app.getVersion() && theirs.build === (mine.bridgeBuild || null)))) return
+  let pid = theirs?.pid
+  // Servers from before 2.2.1 don't say who they are: only the app's own bundled server, by its pid file.
+  if (!pid && process.platform !== 'win32') {
+    try {
+      const p = Number(fs.readFileSync(PID, 'utf8'))
+      const cmd = require('node:child_process').execFileSync('ps', ['-o', 'command=', '-p', String(p)], { encoding: 'utf8' })
+      if (/app-root[\\/]server[\\/]index\.js/.test(cmd)) pid = p
+    } catch { /* not running */ }
+  }
+  if (!pid) return
+  try { process.kill(pid, 'SIGTERM') } catch { return }
+  for (let i = 0; i < 50 && await serverUp(); i++) await new Promise((r) => setTimeout(r, 100))
+}
+
+// An agent in a window of its own (the ⧉ button in its header), one window per agent. Only the
+// app's own pages can ask, and only for the app's own page.
+const pops = new Map() // paneId -> BrowserWindow
+const fromApp = (e) => isLocal(e.senderFrame?.url || e.sender.getURL())
+ipcMain.handle('bridge:popout', (e, { paneId, title } = {}) => {
+  if (!fromApp(e) || typeof paneId !== 'string' || !paneId || paneId.length > 200) return false
+  const have = pops.get(paneId)
+  if (have && !have.isDestroyed()) { have.show(); have.focus(); return true }
+  const at = win && !win.isDestroyed() ? win.getBounds() : null
+  const n = pops.size
+  const w = new BrowserWindow({
+    width: 980, height: 840, minWidth: 420, minHeight: 400,
+    ...(at ? { x: at.x + 60 + n * 28, y: at.y + 50 + n * 28 } : {}),
+    title: `${String(title || 'Agent').slice(0, 80)} · Bridge AI`,
+    ...(IS_MAC ? {} : { autoHideMenuBar: true }),
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#0f1115' : '#eef0f3',
+    show: false,
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true },
+  })
+  w.once('ready-to-show', () => w.show())
+  w.webContents.setWindowOpenHandler(({ url }) => { if (!isLocal(url)) shell.openExternal(url); return { action: 'deny' } })
+  w.webContents.on('will-navigate', (ev, url) => { if (!isLocal(url)) { ev.preventDefault(); shell.openExternal(url) } })
+  w.loadURL(`${URL_BASE}/?window=${encodeURIComponent(paneId)}`)
+  pops.set(paneId, w)
+  w.on('closed', () => { if (pops.get(paneId) === w) pops.delete(paneId) })
+  return true
+})
+ipcMain.handle('bridge:focus-main', (e) => {
+  if (!fromApp(e)) return false
+  if (!win || win.isDestroyed()) createWindow()
+  else { win.show(); win.focus() }
+  return true
+})
+ipcMain.handle('bridge:focus-popout', (e, paneId) => {
+  const w = fromApp(e) && pops.get(paneId)
+  if (!w || w.isDestroyed()) return false
+  w.show(); w.focus()
+  return true
+})
+
 async function connect() {
+  // Never in the way of opening: if the check fails, use whatever server is there.
+  if (await serverUp()) await replaceStale().catch(() => {})
   if (await serverUp()) return win.loadURL(URL_BASE)
   win.loadURL(splash('Starting Bridge AI…'))
   // Dev mode needs both ports; a normal server already on the API port would block it.
