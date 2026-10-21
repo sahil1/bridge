@@ -19,10 +19,14 @@ export default function UpdateChip({ u, onDetails }) {
     setState('installing')
     try { await api('/updates/install', { method: 'POST' }) } catch (e) { setState({ error: e.message }) }
   }
-  // The release notes' first lines: the summary and the first few changes.
-  const lines = String(u.notes || '').split('\n').map((l) => l.trim()).filter((l) => l && !/^#/.test(l) && !/checksums/i.test(l))
+  // The release notes' first lines: the summary and the first few changes, each its label and
+  // first sentence. Install is for new computers, not an update, so the notes stop there.
+  const lines = String(u.notes || '').split(/^#+ Install\b/m)[0].split('\n').map((l) => l.trim()).filter((l) => l && !/^#/.test(l) && !/checksums/i.test(l))
   const summary = lines.find((l) => !l.startsWith('-')) || ''
-  const items = lines.filter((l) => l.startsWith('- ')).slice(0, 4).map((l) => l.slice(2).replace(/\*\*([^*]+?):?\*\*:?/, '$1:').replace(/[`*]/g, '').split(/(?<=\.)\s/)[0])
+  const items = lines.filter((l) => l.startsWith('- ')).slice(0, 4).map((l) => {
+    const [, label = '', text = l.slice(2)] = l.slice(2).match(/^\*\*(.+?):?\*\*:?\s*(.*)$/) || []
+    return { label, text: text.replace(/[`*]/g, '').split(/(?<=\.)\s/)[0] }
+  })
   return (
     <div className="update-wrap" ref={ref}>
       <button className="top-chip update-chip" onClick={() => setOpen((o) => !o)} aria-expanded={open} title={`Bridge AI ${u.latest} is available (you have ${u.current})`}>
@@ -32,7 +36,7 @@ export default function UpdateChip({ u, onDetails }) {
         <div className="update-pop" role="dialog" aria-label="Update Bridge AI">
           <div className="update-head"><b>Bridge AI {u.latest}</b><span className="muted small">you have {u.current}</span></div>
           {summary && <p className="small">{summary}</p>}
-          {items.length > 0 && <ul className="update-list small">{items.map((t, i) => <li key={i}>{t}</li>)}</ul>}
+          {items.length > 0 && <ul className="update-list small">{items.map((t, i) => <li key={i}>{t.label && <b>{t.label}: </b>}{t.text}</li>)}</ul>}
           {state === 'installing'
             ? <p className="st-note ok small"><Icon name="refresh" size={12} className="spin" /> Updating. Bridge AI closes and reopens by itself in a few seconds; your agents carry on.</p>
             : u.how === 'app'

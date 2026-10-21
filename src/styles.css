@@ -1814,7 +1814,7 @@ button.yg-day:hover { box-shadow: 0 0 0 1.5px var(--accent); }
   --pane: var(--chrome-fill); --pane-2: var(--chrome-fill-2); --pane-3: var(--chrome-fill-3);
   --shadow: none; color: var(--ink);
 }
-:root[data-chrome] :is(.rail .menu, .ws-tab.main, .ws-tab.side) {
+:root[data-chrome] :is(.rail .menu, .ws-tab.main, .ws-tab.side, .update-pop) {
   --ink: var(--root-ink); --ink-2: var(--root-ink-2); --ink-3: var(--root-ink-3);
   --line: var(--root-line); --line-2: var(--root-line-2);
   --pane: var(--root-pane); --pane-2: var(--root-pane-2); --pane-3: var(--root-pane-3);

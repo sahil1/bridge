@@ -2,6 +2,14 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
+## 2.2.3
+
+A tidier Update window.
+
+### Fixes
+
+- **Update window:** with a theme on, the window under the Update button was see-through, so the page showed through it. It also listed the install commands from the release notes as if they were changes. It's now solid in every theme and shows just what's new, each change with its name in bold.
+
 ## 2.2.2
 
 Your agents show up again when Bridge AI opens at login.
