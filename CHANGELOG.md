@@ -4,12 +4,14 @@ Each version's section here becomes its GitHub release notes (`npm run release`)
 
 ## 2.2.1
 
-Your phone from anywhere, all of a long conversation in Chat, agents in their own windows, and updates in one click.
+Your phone from anywhere, apps for iPhone and Android, all of a long conversation in Chat, agents in their own windows, and updates in one click.
 
 ### What's new
 
 - **Your phone, from anywhere, through your own relay:** in Settings › Phone & notifications, sign in with Cloudflare and Bridge AI puts a small relay on your own free Cloudflare account. Pair a phone with a QR code and it reaches this computer from anywhere: no VPN, nothing to keep connected, no port opened. Everything between phone and computer is end-to-end encrypted, so the relay can't read it. Remove a phone any time. Tailscale still works as before, and neither is needed to use Bridge AI on the computer.
 - **Keep the computer awake:** an option to stop it sleeping while it's plugged in (macOS and Linux), so your phone can always reach it.
+- **Apps for iPhone and Android (early, build them yourself):** the same Bridge AI through your relay, in an app that scans the pairing code itself. One app can be paired with several computers; switch between them in Settings or from the "offline" screen. They aren't in the App Store or Google Play yet: `mobile/README.md` says how to build them with Xcode or Android Studio.
+- **Your agents on the lock screen (in the apps):** while agents work, the iPhone app shows them on the lock screen and in the Dynamic Island, and the Android app in a notification: which are working, which need you and which finished. An agent that starts waiting on you gets its own alert, and tapping opens it. On iPhone it updates while the app is open; once the phone is locked it says how old it is.
 
 - **Earlier messages in Chat:** "Show earlier messages" at the top of Chat goes back through the whole conversation, across every /compact, a page at a time (a long agent's log can be hundreds of MB, so it's never read all at once). "Earlier conversation summarized" opens to show Claude's summary.
 - **An agent in its own window:** the ⧉ button in an agent's header opens it in a window of its own, to put on another screen. Its tab in Bridge AI says so, with Show window and Bring back here; Bring back in the window does the same.
@@ -23,6 +25,16 @@ Your phone from anywhere, all of a long conversation in Chat, agents in their ow
 - **Terminal tab:** the empty rows Claude Code leaves between its output and its input box are shortened, so the view no longer looks blank after a command.
 - **Relay setup:** a new Cloudflare account without a workers.dev address is now set up in one go (Cloudflare refused the relay before the address existed), and Pair a phone turns on by itself once the relay connects.
 - **Relay security:** the relay's address is public, so connections that don't prove they're a paired phone within 15 seconds are dropped, and strangers can't fill the relay and lock your phone out. Its public status says only that it's up. New relays get a random name instead of your computer's.
+- **On a phone:** after picking "Needs you" in Agents, the other filters disappeared, leaving no way back to all agents. All now stays next to it, and tapping the chosen filter again shows every agent.
+- A conversation with no messages yet (a new chief of staff session, say) showed a blank screen. It now says so.
+- **Phone page:** Bridge AI no longer leaves a doubled gap under the iPhone notch, and keeps clear of the Home indicator and Android's gesture bar.
+
+### Install
+
+- **macOS and Linux:** `curl -fsSL https://raw.githubusercontent.com/sahil1/bridge/main/install.sh | sh`
+- **Windows (PowerShell):** `irm https://raw.githubusercontent.com/sahil1/bridge/main/install.ps1 | iex`
+
+On 2.0 or later? Settings › About & updates updates it in one click.
 
 ## 2.2.0
 
