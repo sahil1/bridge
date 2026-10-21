@@ -13,7 +13,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { spawn } from 'node:child_process'
+import { spawn, execFileSync } from 'node:child_process'
 import { randomBytes, webcrypto } from 'node:crypto'
 import QRCode from 'qrcode'
 import WebSocket from 'ws'
@@ -68,10 +68,20 @@ async function key() {
 }
 
 // ---------- status ----------
+// What a phone with several computers calls this one: the name you gave it on a Mac ("Sam's
+// MacBook Pro"), or its host name.
+let computer = null
+function computerName() {
+  if (computer) return computer
+  if (IS_MAC) try { computer = execFileSync('scutil', ['--get', 'ComputerName'], { encoding: 'utf8', timeout: 2000 }).trim() } catch { /* use the host name */ }
+  return (computer ||= os.hostname().replace(/\.local$/, '') || 'Computer')
+}
+
 export function status() {
   const live = new Set([...conns.values()].filter((c) => c.session).map((c) => c.device?.id))
   return {
     configured: !!(conf.url && conf.token),
+    computer: computerName(),
     url: conf.url || null,
     online,
     error: lastError,
@@ -306,7 +316,8 @@ export function stopPairing() { pairing = null; return status() }
 export function removeDevice(id) {
   conf.devices = (conf.devices || []).filter((d) => d.id !== id)
   save()
-  for (const c of [...conns.values()]) if (c.device?.id === id) c.close()
+  // A moment later, so a phone removing itself still gets the answer.
+  setTimeout(() => { for (const c of [...conns.values()]) if (c.device?.id === id) c.close() }, 500)
   return status()
 }
 

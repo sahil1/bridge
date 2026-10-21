@@ -27,5 +27,14 @@ app.whenReady().then(async () => {
   // Home-screen icons are square; the phone rounds the corners itself.
   fs.writeFileSync(path.join(PUB, 'apple-touch-icon.png'), await render(win, read('mark.svg'), 180, '#0b0d11'))
   fs.writeFileSync(path.join(PUB, 'icon-512.png'), await render(win, read('mark.svg'), 512, '#0b0d11'))
+  // The phone apps (mobile/): square too, rounded or masked by the phone.
+  const MOBILE = path.join(__dirname, '..', 'mobile')
+  fs.writeFileSync(path.join(MOBILE, 'ios', 'BridgeAI', 'Assets.xcassets', 'AppIcon.appiconset', 'icon-1024.png'), await render(win, read('mark.svg'), 1024, '#0b0d11'))
+  const RES = path.join(MOBILE, 'android', 'app', 'src', 'main', 'res')
+  for (const [dpi, scale] of [['mdpi', 1], ['hdpi', 1.5], ['xhdpi', 2], ['xxhdpi', 3], ['xxxhdpi', 4]]) {
+    fs.mkdirSync(path.join(RES, `mipmap-${dpi}`), { recursive: true })
+    fs.writeFileSync(path.join(RES, `mipmap-${dpi}`, 'ic_launcher.png'), await render(win, read('mark.svg'), 48 * scale, '#0b0d11'))
+    fs.writeFileSync(path.join(RES, `mipmap-${dpi}`, 'ic_launcher_foreground.png'), await render(win, read('mark.svg'), 108 * scale, '#0b0d11'))
+  }
   app.quit()
 })

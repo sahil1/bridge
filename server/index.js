@@ -869,7 +869,8 @@ app.post('/api/relay/update', wrap((req) => { onComputer(req); return relay.upda
 app.post('/api/relay/pair', wrap((req) => { onComputer(req); return req.body?.stop ? relay.stopPairing() : relay.pair() }))
 app.post('/api/relay/awake', wrap((req) => { onComputer(req); return relay.setAwake(!!req.body?.on) }))
 app.post('/api/relay/forget', wrap((req) => { onComputer(req); return relay.forget() }))
-app.delete('/api/relay/devices/:id', wrap((req) => { onComputer(req); return relay.removeDevice(req.params.id) }))
+// A phone can also remove itself (when it forgets this computer).
+app.delete('/api/relay/devices/:id', wrap((req) => { if (req.headers['x-bridge-relay'] !== req.params.id) onComputer(req); return relay.removeDevice(req.params.id) }))
 
 // For bug reports: facts about this install, nothing personal (no names, emails, paths, location).
 app.get('/api/diagnostics', wrap(async () => {

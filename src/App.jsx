@@ -16,7 +16,7 @@ import Palette from './components/Palette.jsx'
 import { NextMeetingChip } from './components/Agenda.jsx'
 import { TodayTabs, TodayBody, openToday } from './components/Dock.jsx'
 import { Handle, usePersisted, useMedia, useHotkey, useWidth, useShared, store } from './components/layout.jsx'
-import { api, useFleet, usePoll } from './api.js'
+import { api, useFleet, usePoll, relayActivity } from './api.js'
 
 const MIN_PANE = 420
 const MIN_WORK = 620
@@ -158,6 +158,11 @@ export default function App() {
       }
       prevStatus.current[a.paneId] = a.status
     }
+  }, [fleet]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // In the phone apps: the agents at work, for the lock screen.
+  useEffect(() => {
+    if (relayActivity && fleet) relayActivity(agents.map((a) => ({ id: a.paneId, name: a.chief ? 'Chief of staff' : a.title || a.tab || a.workspace || 'Agent', status: a.status })))
   }, [fleet]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const openAgent = useCallback((paneId, { toSide = false } = {}) => {

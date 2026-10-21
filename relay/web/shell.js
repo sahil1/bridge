@@ -2,12 +2,24 @@
 // end-to-end encrypted link to it through the relay and shows Bridge AI, from your computer, in a
 // frame. The service worker (sw.js) hands every request the app makes to this page, which sends it
 // over the link; the app's live terminal uses bridgeRelay.WebSocket below.
+//
+// In the iPhone app (mobile/ios) there's no service worker: the app serves this page itself and
+// hands each request the frame makes to bridgeTunnel() below (window.bridgeNative is the app). The
+// Android app (mobile/android) opens the relay page as it is, adding window.bridgeAndroid.
+//
+// The apps can be paired with several computers, each with its own relay: they keep the list, and
+// this page shows it (on the waiting screens, and to Bridge AI's Settings as bridgeRelay.computers).
 import { phoneHello, phoneFinish, newKey, splitCode, normCode, formatCode, plainFrame, readPlain, K, pack, unpack, json, text, utf8, CHUNK } from './link.js'
 
 const $ = (id) => document.getElementById(id)
-const show = (id) => { for (const s of ['pair', 'wait', 'home']) $(s).hidden = s !== id; if (id) $('app').hidden = true }
+const show = (id) => { for (const s of ['pair', 'wait', 'home']) $(s).hidden = s !== id; if (id) $('app').hidden = true; if (id) listOthers() }
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true
+// The iPhone app; the Android app opens this page as it is, and says so in its user agent.
+const native = window.bridgeNative || null
+const inApp = !!native || /BridgeAIApp\//.test(navigator.userAgent)
+const standalone = inApp || matchMedia('(display-mode: standalone)').matches || navigator.standalone === true
+// The relay: this page's own address, or in the iPhone app the one it was paired through.
+let relay = native ? native.relay : location.origin
 
 // ---------- what this phone keeps (IndexedDB: its key can be stored without being readable) ----------
 const store = (() => {
@@ -22,10 +34,133 @@ const store = (() => {
   return { get: (k) => tx('readonly', (s) => s.get(k)), set: (k, v) => tx('readwrite', (s) => s.put(v, k)), del: (k) => tx('readwrite', (s) => s.delete(k)) }
 })()
 
+// The pairing. The iPhone app can't keep a key in IndexedDB, so it keeps the pairing in the
+// iPhone's Keychain, on this phone only (bridgeNative.pairing at start, { type: 'keep' } to change it).
+const ECDH = { name: 'ECDH', namedCurve: 'P-256' }
+const pairing = native
+  ? {
+      get: async () => {
+        const p = native.pairing
+        if (!p?.device) return null
+        const device = { privateKey: await crypto.subtle.importKey('jwk', p.device.priv, ECDH, true, ['deriveBits']), publicKey: await crypto.subtle.importKey('jwk', p.device.pub, ECDH, true, []) }
+        return { ...p, device }
+      },
+      set: async (p) => {
+        const device = { priv: await crypto.subtle.exportKey('jwk', p.device.privateKey), pub: await crypto.subtle.exportKey('jwk', p.device.publicKey) }
+        native.pairing = { ...p, device }
+        native.post({ type: 'keep', pairing: native.pairing })
+      },
+      del: async () => { native.pairing = null; native.post({ type: 'keep', pairing: null }) },
+    }
+  : { get: () => store.get('pairing'), set: (p) => store.set('pairing', p), del: () => store.del('pairing') }
+
 function deviceName() {
   const ua = navigator.userAgent
   const os = /iPhone/.test(ua) ? 'iPhone' : /iPad/.test(ua) || isIOS ? 'iPad' : /Android/.test(ua) ? 'Android' : /Mac/.test(ua) ? 'Mac' : /Windows/.test(ua) ? 'Windows' : 'Device'
   return standalone ? `${os} (app)` : `${os}, browser`
+}
+
+// ---------- several computers (the apps) ----------
+// Each computer has its own relay and its own pairing. The iPhone app keeps both; on Android each
+// relay is its own site with its own pairing, and the app keeps the list.
+const android = typeof window.bridgeAndroid?.computers === 'function' ? window.bridgeAndroid : null
+const apps = native
+  ? {
+      list: () => native.computers || [],
+      open: (r) => native.post({ type: 'switch', url: r }),
+      forget: (r) => native.post({ type: 'forget', url: r }),
+      name: (n) => native.post({ type: 'name', name: n }),
+      paired: () => {}, // the app saves it with the pairing
+      other: () => false, // a link to another relay pairs right here (setRelay)
+      activity: (state) => native.post({ type: 'activity', state }),
+    }
+  : android
+    ? {
+        list: () => { try { return JSON.parse(android.computers()) } catch { return [] } },
+        open: (r) => android.open(r),
+        forget: (r) => android.forget(r),
+        name: (n) => android.name(n),
+        paired: () => android.paired(),
+        other: (link) => { if (link.origin === relay) return false; android.pair(link.href); return true }, // another relay is another page
+        activity: (state) => android.activity?.(JSON.stringify(state)),
+      }
+    : null
+let adding = false // pairing another computer: the link to this one rests meanwhile
+const computerName = (c) => c.name || new URL(c.relay).hostname.split('.')[0]
+// With several computers, say which one.
+const thisComputer = () => { const list = apps ? apps.list() : []; const c = list.length > 1 && list.find((x) => x.relay === relay); return c ? computerName(c) : 'Your computer' }
+
+function listOthers() {
+  for (const box of document.querySelectorAll('.others')) {
+    const list = apps ? apps.list().filter((c) => adding || c.relay !== relay) : []
+    box.hidden = !list.length
+    box.replaceChildren(...(list.length ? [Object.assign(document.createElement('p'), { className: 'small', textContent: adding ? 'Or go back to:' : 'Your other computers:' })] : []), ...list.map((c) => {
+      const b = Object.assign(document.createElement('button'), { type: 'button', className: 'ghost', textContent: computerName(c) })
+      b.onclick = () => (c.relay === relay ? location.reload() : apps.open(c.relay))
+      return b
+    }))
+  }
+}
+
+// Pair another computer: the pairing screen, for a link (a code alone doesn't say which relay).
+function addComputer() {
+  adding = true
+  clearTimeout(retryTimer)
+  dropSession()
+  try { ws?.close() } catch { /* closed */ }
+  ws = null
+  appShown = false
+  $('app').src = 'about:blank'
+  linkOnly()
+  $('pair').querySelector('h1').textContent = 'Add a computer'
+  $('pair-err').hidden = true
+  $('code').value = ''
+  show('pair')
+}
+function linkOnly() {
+  $('pair-how').textContent = 'Or paste the link from Copy link:'
+  $('code').placeholder = 'https://…/#pair=…'
+  $('code').style.textTransform = 'none'
+}
+
+// ---------- agents at work, on the lock screen (the apps) ----------
+// Bridge AI tells this page about its agents (bridgeRelay.activity). While any are working or
+// waiting on you, the apps show them on the lock screen: a Live Activity on iPhone, a notification
+// on Android. The ones that ran meanwhile stay on it as finished, until all are done.
+const lock = { agents: new Map(), sent: '' }
+function activity(agents) {
+  if (!apps?.activity || !Array.isArray(agents)) return
+  const now = Date.now()
+  const busy = (st) => st === 'working' || st === 'blocked'
+  for (const a of agents) {
+    const was = lock.agents.get(a.id)
+    if (busy(a.status)) lock.agents.set(a.id, { id: a.id, name: String(a.name || 'Agent').slice(0, 60), status: a.status, since: was?.status === a.status ? was.since : now })
+    else if (was && was.status !== 'done') lock.agents.set(a.id, { ...was, status: 'done', since: now })
+  }
+  // Closed meanwhile.
+  for (const [id, a] of lock.agents) if (a.status !== 'done' && !agents.some((x) => x.id === id)) lock.agents.set(id, { ...a, status: 'done', since: now })
+  const list = [...lock.agents.values()]
+  if (!list.length) return
+  const count = (st) => list.filter((a) => a.status === st).length
+  const order = { blocked: 0, working: 1, done: 2 }
+  const c = apps.list().find((x) => x.relay === relay)
+  const state = {
+    computer: c ? computerName(c) : 'Your computer',
+    working: count('working'), blocked: count('blocked'), finished: count('done'),
+    agents: list.sort((a, b) => order[a.status] - order[b.status] || a.since - b.since).slice(0, 4),
+    ended: !count('working') && !count('blocked'),
+  }
+  const key = JSON.stringify(state)
+  if (key !== lock.sent) { lock.sent = key; apps.activity(state) }
+  if (state.ended) lock.agents.clear() // the next one starts a new card
+}
+
+// The lock screen card was tapped: show that agent.
+let openOnLoad = null
+window.bridgeOpenAgent = (paneId) => {
+  const w = appShown && $('app').contentWindow
+  if (w?.document?.readyState === 'complete') w.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId } }))
+  else openOnLoad = paneId
 }
 
 // ---------- the link ----------
@@ -60,8 +195,9 @@ function bar(msg, off) {
 
 function connect() {
   clearTimeout(retryTimer)
+  if (adding) return
   if (ws && ws.readyState <= 1) return
-  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/_relay/link`)
+  ws = new WebSocket(`${relay.replace(/^http/, 'ws')}/_relay/link`)
   ws.binaryType = 'arraybuffer'
   // One message at a time, in order: a response's pieces must reach the app in sequence.
   ws.onmessage = (e) => { inbox = inbox.then(() => (typeof e.data === 'string' ? onStatus(JSON.parse(e.data)) : onData(e.data))).catch(fail) }
@@ -77,7 +213,7 @@ async function onStatus(st) {
   hostSeen = st.seen || hostSeen
   if (!st.host) {
     dropSession(offlineText())
-    if (!appShown) waitScreen('Your computer is offline', `${offlineText()} Bridge AI connects as soon as it's back on and Bridge AI is running.`, true)
+    if (!appShown) waitScreen(`${thisComputer()} is offline`, `${offlineText()} Bridge AI connects as soon as it's back on and Bridge AI is running.`, true)
     else bar(offlineText(), true)
     return
   }
@@ -86,7 +222,7 @@ async function onStatus(st) {
 
 async function handshake() {
   if (!paired && !code) return show('pair')
-  if (!paired) paired = { device: await newKey(false) }
+  if (!paired) paired = { device: await newKey(!!native) } // the app has to be able to write it to the Keychain
   const pair = paired.hostKey ? null : splitCode(code)
   const state = await phoneHello(paired.device, pair, deviceName())
   waiting = { state, pair }
@@ -105,11 +241,12 @@ async function onData(buf) {
     backoff = 1000
     if (!paired.hostKey) {
       paired = { device: paired.device, hostKey: done.hostKey, code, pairedAt: Date.now() }
-      await store.set('pairing', paired)
+      await pairing.set(paired)
       code = null
       if (location.hash) history.replaceState(null, '', location.pathname + location.search)
       if (isIOS && !standalone) { show('home'); return }
     }
+    apps?.paired()
     for (const w of readyWaiters.splice(0)) w.ok()
     bar(null)
     showApp()
@@ -139,7 +276,7 @@ const WHY = {
 }
 async function refused(why) {
   dropSession()
-  if (paired?.hostKey) { await store.del('pairing'); paired = null }
+  if (paired?.hostKey) { await pairing.del(); paired = null }
   else paired = null
   code = null
   appShown = false
@@ -169,11 +306,24 @@ function send(kind, id, body) {
   return p
 }
 
-// ---------- requests from the service worker ----------
-navigator.serviceWorker?.addEventListener('message', async (e) => {
-  if (e.data?.type !== 'fetch') return
-  const port = e.ports[0]
-  const { m, u, h, body } = e.data
+// ---------- requests from the service worker (or the iPhone app) ----------
+navigator.serviceWorker?.addEventListener('message', (e) => { if (e.data?.type === 'fetch') tunnel(e.data, e.ports[0]) })
+navigator.serviceWorker?.startMessages?.()
+
+// The iPhone app's side: it calls this for each request, and gets the answer back in pieces.
+const b64 = (u8) => { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode(...u8.subarray(i, i + 0x8000)); return btoa(s) }
+const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0))
+const cancels = new Map() // the app's request id -> cancel
+window.bridgeTunnel = (rid, { m, u, h, body }) => {
+  const port = {
+    postMessage: (x) => native.post({ type: 'res', id: rid, ...(x.chunk ? { chunk: b64(new Uint8Array(x.chunk)) } : x) }),
+    set onmessage(fn) { cancels.set(rid, () => fn({ data: { cancel: true } })) },
+  }
+  tunnel({ m, u, h, body: body ? unb64(body).buffer : null }, port)
+}
+window.bridgeCancel = (rid) => { cancels.get(rid)?.(); cancels.delete(rid) }
+
+async function tunnel({ m, u, h, body }, port) {
   const id = nextId++
   let cancelled = false
   port.onmessage = (x) => { if (x.data?.cancel) { cancelled = true; streams.delete(id); send(K.CANCEL, id).catch(() => {}) } }
@@ -195,8 +345,7 @@ navigator.serviceWorker?.addEventListener('message', async (e) => {
     streams.delete(id)
     port.postMessage({ error: err.message })
   }
-})
-navigator.serviceWorker?.startMessages?.()
+}
 
 // ---------- WebSockets for the app (the live terminal), through the link ----------
 class RelaySocket extends EventTarget {
@@ -234,7 +383,26 @@ class RelaySocket extends EventTarget {
   }
 }
 RelaySocket.CONNECTING = 0; RelaySocket.OPEN = 1; RelaySocket.CLOSING = 2; RelaySocket.CLOSED = 3
-window.bridgeRelay = { WebSocket: RelaySocket, unpair: async () => { await store.del('pairing'); location.reload() } }
+window.bridgeRelay = {
+  WebSocket: RelaySocket,
+  activity,
+  unpair: async () => { await pairing.del(); location.reload() },
+  // The computers this app is paired with ({ relay, name, current }), for Bridge AI's Settings.
+  computers: apps && {
+    list: () => apps.list().map((c) => ({ ...c, name: computerName(c), current: c.relay === relay })),
+    open: (r) => apps.open(r),
+    add: () => addComputer(),
+    // Forget a computer on this phone. This one is told too, so it stops listing this phone.
+    forget: async (r) => {
+      if (r === relay && session) {
+        const w = $('app').contentWindow
+        await w.fetch('/api/relay').then((x) => x.json()).then((j) => j.here && w.fetch('/api/relay/devices/' + encodeURIComponent(j.here), { method: 'DELETE' })).catch(() => {})
+      }
+      if (r === relay) await pairing.del()
+      apps.forget(r)
+    },
+  },
+}
 
 // ---------- the app ----------
 function showApp() {
@@ -243,7 +411,8 @@ function showApp() {
   f.hidden = false
   if (appShown) return
   appShown = true
-  f.src = `/${location.search}`
+  f.src = openOnLoad ? `/?agent=${encodeURIComponent(openOnLoad)}` : `/${location.search}`
+  openOnLoad = null
   // Match the app's background and bar colour around it (the notch and the Home indicator area).
   f.onload = () => {
     try {
@@ -253,6 +422,15 @@ function showApp() {
       const tc = [...d.querySelectorAll('meta[name="theme-color"]')].find((m) => !m.media || matchMedia(m.media).matches)?.content
       if (tc) document.querySelector('meta[name="theme-color"]').content = tc
       document.title = d.title || 'Bridge AI'
+      // The apps list this computer by the name it goes by.
+      if (apps) f.contentWindow.fetch('/api/relay').then((r) => r.json()).then((j) => j.computer && apps.name(j.computer)).catch(() => {})
+      // Some browsers (Safari, the iPhone app) give the page inside the notch's space too, and it
+      // keeps clear of the notch itself; then the frame fills the screen instead of doubling the gap.
+      const t = d.createElement('div')
+      t.style.cssText = 'position:fixed;visibility:hidden;padding-top:env(safe-area-inset-top)'
+      d.body.appendChild(t)
+      document.body.classList.toggle('insets-inside', parseFloat(getComputedStyle(t).paddingTop) > 0)
+      t.remove()
     } catch { /* not loaded */ }
   }
 }
@@ -268,7 +446,16 @@ $('retry').onclick = () => { backoff = 1000; try { ws?.close() } catch { /* clos
 $('skip').onclick = () => { for (const w of readyWaiters.splice(0)) w.ok(); showApp() }
 $('pair-form').onsubmit = async (e) => {
   e.preventDefault()
-  const c = normCode($('code').value)
+  // A whole pairing link (from Copy link on the computer) also says which relay to use.
+  const typed = $('code').value.trim()
+  let link = null
+  try { link = /^(https:\/\/|http:\/\/127\.0\.0\.1[:/])/i.test(typed) ? new URL(typed) : null } catch { /* a code */ } // (or a test relay on this computer)
+  if (adding && !link) { $('pair-err').hidden = false; $('pair-err').textContent = 'Scan the QR code, or paste the link from Copy link on the other computer.'; return }
+  if (link && apps?.other(link)) return
+  if (link && native) setRelay(link.origin)
+  adding = false
+  const c = normCode(link ? new URLSearchParams(link.hash.slice(1)).get('pair') : typed)
+  if (!relay) { $('pair-err').hidden = false; $('pair-err').textContent = 'Scan the QR code, or paste the link from Copy link on the computer.'; return }
   if (c.length < 20) { $('pair-err').hidden = false; $('pair-err').textContent = 'The code has 20 letters and digits.'; return }
   $('pair-err').hidden = true
   code = c
@@ -278,17 +465,36 @@ $('pair-form').onsubmit = async (e) => {
   else if (ws?.readyState === 1) waitScreen('Your computer is offline', `${offlineText()} Pairing finishes as soon as it's back.`, true)
   else connect()
 }
-$('code').oninput = (e) => { const v = normCode(e.target.value).slice(0, 20); e.target.value = formatCode(v) }
+$('code').oninput = (e) => { if (/[:/.]/.test(e.target.value)) return; const v = normCode(e.target.value).slice(0, 20); e.target.value = formatCode(v) }
+$('scan').onclick = () => (native ? native.post({ type: 'scan' }) : window.bridgeAndroid.scan())
+
+// The iPhone app: a relay from a pairing link. A different relay is a different computer.
+function setRelay(origin) {
+  if (origin === relay) return
+  relay = origin
+  hostOnline = false
+  native.post({ type: 'relay', url: origin })
+  try { ws?.close() } catch { /* closed */ }
+  ws = null
+}
 
 async function start() {
-  if (!('serviceWorker' in navigator)) { waitScreen('This browser can\'t run Bridge AI', 'Use Safari on iPhone or Chrome on Android.'); return }
-  await navigator.serviceWorker.register('/sw.js', { scope: '/' })
-  await navigator.serviceWorker.ready
-  paired = (await store.get('pairing')) || null
+  if (native || window.bridgeAndroid) $('scan').hidden = false // the apps scan the QR code themselves
+  if (!native) {
+    if (!('serviceWorker' in navigator)) { waitScreen('This browser can\'t run Bridge AI', 'Use Safari on iPhone or Chrome on Android.'); return }
+    await navigator.serviceWorker.register('/sw.js', { scope: '/' })
+    await navigator.serviceWorker.ready
+  }
+  paired = (await pairing.get()) || null
   // A code you just scanned pairs this phone afresh, even if it was paired before (a new
   // computer, or after it was removed).
   const fromLink = new URLSearchParams(location.hash.slice(1)).get('pair')
   if (fromLink && normCode(fromLink) !== paired?.code) { code = normCode(fromLink); paired = null }
+  if (!relay) { // the iPhone app before its first pairing: the link says which relay, a code alone doesn't
+    linkOnly()
+    show('pair')
+    return
+  }
   if (!paired && !code) { show('pair'); connect(); return }
   waitScreen(paired ? 'Connecting to your computer…' : 'Pairing…', '')
   connect()

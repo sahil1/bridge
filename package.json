@@ -10,6 +10,8 @@
     "desktop": "node scripts/desktop.js start",
     "desktop:dev": "node scripts/desktop.js dev",
     "desktop:dist": "node scripts/desktop.js dist",
+    "mobile:ios": "cd mobile/ios && xcodegen generate && open BridgeAI.xcodeproj",
+    "mobile:android": "open -a \"Android Studio\" mobile/android",
     "icons:brands": "node scripts/brand-icons.js",
     "release": "node scripts/release.js",
     "check:private": "node scripts/check-private.js",

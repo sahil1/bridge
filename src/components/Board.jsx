@@ -57,7 +57,7 @@ export default function Board({ fleet, selected, onOpen, onOpenInHerdr, minimize
               const n = id === 'all' ? all.length : counts[id] || 0
               if (id !== 'all' && !n && filter !== id) return null
               return (
-                <button key={id} role="tab" aria-selected={filter === id} className={`fchip ${filter === id ? 'on' : ''} f-${id}`} onClick={() => setFilter(id)}>
+                <button key={id} role="tab" aria-selected={filter === id} className={`fchip ${filter === id ? 'on' : ''} f-${id}`} onClick={() => setFilter(filter === id ? 'all' : id)}>
                   {id !== 'all' && <StatusDot status={id} size={7} />}{label}<span className="fcount">{n}</span>
                 </button>
               )

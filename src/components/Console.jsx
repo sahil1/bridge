@@ -238,7 +238,9 @@ function Chat({ agent, pending, queued = [], onCancelQueued, onEdit, editingText
 
   const shownPending = pending.filter((p) => !(data?.messages || []).some((m) => m.role === 'user' && sameMsg(m.text, p.text)))
 
-  if (data && !data.supported && !shownPending.length && !queued.length) {
+  // No chat to show, or none yet (a new session): say so rather than leave the space blank.
+  const nothing = data && (!data.supported || (!recent.length && !more && agent.status !== 'working'))
+  if (nothing && !shownPending.length && !queued.length) {
     return (
       <div className="chat-empty">
         <Icon name={agent.chief ? 'helm' : 'chat'} size={28} />

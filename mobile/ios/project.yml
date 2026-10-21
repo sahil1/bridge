@@ -1,0 +1,59 @@
+# The iPhone app. `npm run mobile:ios` makes BridgeAI.xcodeproj from this (with XcodeGen) and
+# opens it in Xcode. The phone page it shows is the relay's own (relay/web), bundled in.
+name: BridgeAI
+options:
+  bundleIdPrefix: dev.bridge-ai
+  deploymentTarget:
+    iOS: "16.2"
+  createIntermediateGroups: true
+settings:
+  base:
+    MARKETING_VERSION: "2.2.1"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.0"
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+targets:
+  BridgeAI:
+    type: application
+    platform: iOS
+    sources:
+      - path: BridgeAI
+      - path: Shared
+      - path: ../../relay/web
+        type: folder
+        buildPhase: resources
+      - path: ../../public/icon-512.png
+        buildPhase: resources
+      - path: ../../public/apple-touch-icon.png
+        buildPhase: resources
+      - path: ../../public/mark.svg
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.bridge-ai.phone
+        PRODUCT_NAME: Bridge AI
+        INFOPLIST_FILE: BridgeAI/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: NO
+    dependencies:
+      - target: Widgets
+        embed: true
+  # The lock screen card and the Dynamic Island (Live Activities).
+  Widgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Widgets
+      - path: Shared
+      - path: ../../public/apple-touch-icon.png
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.bridge-ai.phone.widgets
+        PRODUCT_NAME: Widgets
+        INFOPLIST_FILE: Widgets/Info.plist
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: NO
+        SKIP_INSTALL: YES

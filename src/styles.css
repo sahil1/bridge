@@ -510,7 +510,7 @@ kbd { font: 11px var(--font-mono); padding: 1px 5px; border-radius: 4px; backgro
 @container (max-width: 560px) {
   .pane-head .state-tag { font-size: 0; gap: 0; padding: 0 7px; }
   .pane-sub .sub-where { display: none; }
-  .board .chips .fchip:not(.on):not(.f-blocked) { display: none; }
+  .board .chips .fchip:not(.on):not(.f-blocked):not(.f-all) { display: none; }
 }
 @container (max-width: 420px) {
   .pane-head .pane-icon { display: none; }

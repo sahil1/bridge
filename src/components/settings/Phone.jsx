@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import Icon from '../Icon.jsx'
-import { api, viaRelay } from '../../api.js'
+import { api, viaRelay, relayComputers } from '../../api.js'
 import Relay from './Relay.jsx'
 import { useSettings, SaveNote } from './General.jsx'
 import { pushSupport, pushState, enablePush, disablePush, isIOS } from '../../pwa.js'
@@ -103,7 +103,8 @@ function ThisDevice() {
   return (
     <section className="st-sec">
       <h4>Notifications on this device</h4>
-      {support.why === 'desktop' ? <p className="muted small">The desktop app notifies you itself when an agent needs you or finishes, while its window isn't in front.</p>
+      {relayComputers ? <p className="muted small">Notifications aren't in the Bridge AI app yet. To get them today, open your relay's address in {isIOS() ? 'Safari' : 'Chrome'}, pair it with a new code, and add it to your Home Screen.</p>
+        : support.why === 'desktop' ? <p className="muted small">The desktop app notifies you itself when an agent needs you or finishes, while its window isn't in front.</p>
         : support.why === 'ios-home-screen' ? <p className="muted small">On {isIOS() ? 'iPhone and iPad' : 'this device'}, notifications work in the Home Screen app: tap Share › Add to Home Screen, open Bridge AI from there, and turn them on here.</p>
         : support.why === 'insecure' ? <p className="muted small">Notifications need a secure connection. Open Bridge AI through its phone link (above), or on this computer at <code>http://127.0.0.1</code>.</p>
         : support.why === 'unsupported' ? <p className="muted small">This browser can't receive notifications.</p>

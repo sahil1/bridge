@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import Icon from '../Icon.jsx'
-import { api, viaRelay } from '../../api.js'
+import { api, viaRelay, relayComputers } from '../../api.js'
 
 // Settings › Phone & notifications › "From anywhere": your own relay on your Cloudflare account
 // (server/relay.js). Optional: Bridge AI works the same without it.
@@ -42,6 +42,7 @@ export default function Relay() {
       <section className="st-sec">
         <h4>From anywhere</h4>
         <p className="muted small"><Icon name="check" size={12} /> This phone is connected to your computer through your own relay, end-to-end encrypted. To add or remove phones, use Bridge AI on the computer.</p>
+        {relayComputers && <Computers />}
       </section>
     )
   }
@@ -118,6 +119,34 @@ export default function Relay() {
       )}
       {(err || st.error) && !busy && <p className="st-note bad"><Icon name="alert" size={13} /> {err || st.error}</p>}
     </section>
+  )
+}
+
+// In the iPhone or Android app: the computers it's paired with, to switch between, add or forget.
+function Computers() {
+  const [list, setList] = useState(() => relayComputers.list())
+  const forget = async (c) => {
+    const msg = c.current ? `Forget ${c.name} on this phone? It's removed from this computer's paired phones too, and you'd need a new code to pair again.` : `Forget ${c.name} on this phone? To remove this phone there too, use Bridge AI on that computer.`
+    if (!window.confirm(msg)) return
+    await relayComputers.forget(c.relay)
+    setList(relayComputers.list())
+  }
+  return (
+    <>
+      <h4>Your computers</h4>
+      <ul className="ph-devices">
+        {list.map((c) => (
+          <li key={c.relay}>
+            <Icon name="laptop" size={14} /><span>{c.name}</span>
+            <span className="muted small">{c.current ? 'showing now' : ''}</span>
+            {!c.current && <button type="button" className="ghost-btn" onClick={() => relayComputers.open(c.relay)}>Open</button>}
+            <button type="button" className="ghost-btn" onClick={() => forget(c)}>Forget</button>
+          </li>
+        ))}
+      </ul>
+      <p className="muted small">Bridge AI on another computer? On it, open Settings › Phone &amp; notifications and click Pair a phone, then add it here.</p>
+      <div><button type="button" className="ghost-btn" onClick={() => relayComputers.add()}><Icon name="plus" size={12} /> Add a computer</button></div>
+    </>
   )
 }
 

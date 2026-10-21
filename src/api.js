@@ -4,6 +4,10 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 // carries its requests to your computer over an end-to-end encrypted link.
 const relayPage = (() => { try { return window.parent !== window ? window.parent.bridgeRelay || null : null } catch { return null } })()
 export const viaRelay = !!relayPage
+// In the iPhone or Android app: the computers it's paired with ({ list, open, add, forget }).
+export const relayComputers = relayPage?.computers || null
+// ...which shows the agents at work on the phone's lock screen (older relay pages can't).
+export const relayActivity = relayPage?.activity || null
 
 // A WebSocket to this server (the live terminal), through the relay's link when there is one.
 export const openSocket = (path) => (relayPage ? new relayPage.WebSocket(path) : new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${path}`))
