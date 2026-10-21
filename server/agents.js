@@ -24,8 +24,9 @@
 import { execFile } from 'node:child_process'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
-import { IS_WIN, withNodeShim } from './paths.js'
+import { IS_WIN, withNodeShim, nodeShimDir } from './paths.js'
 
 const ESC_INTERRUPT = /esc to (interrupt|cancel)|ctrl\+c to (interrupt|cancel|stop)|press esc to stop/i
 // Claude Code's working line: a spinner and a word ending in "…" ("✻ Infusing…", "✶ Pondering… (12s)").
@@ -77,13 +78,22 @@ export const newSessionId = () => crypto.randomUUID()
 
 // Your login shell's PATH: apps opened from the Dock or a launcher get a bare one, and agent
 // CLIs usually live in ~/.local/bin, Homebrew or npm's global folder.
+const USUAL_DIRS = [path.join(os.homedir(), '.local', 'bin'), '/opt/homebrew/bin', '/usr/local/bin']
 let loginPathCache = null
 export function loginPath() {
   if (IS_WIN) return Promise.resolve(process.env.PATH || '') // already includes the node fallback (paths.js)
   if (loginPathCache) return loginPathCache
   loginPathCache = new Promise((resolve) => {
     // Interactive login shell, like a terminal window, so PATH set in .zshrc/.bashrc (nvm, say) counts.
-    execFile(process.env.SHELL || '/bin/sh', ['-lic', 'printf "%s" "$PATH"'], { timeout: 8000 }, (err, out) => resolve(err || !out ? process.env.PATH || '' : withNodeShim(out.trim().split('\n').pop())))
+    execFile(process.env.SHELL || '/bin/sh', ['-lic', 'printf "%s" "$PATH"'], { timeout: 8000 }, (err, out) => {
+      if (!err && out) return resolve(withNodeShim(out.trim().split('\n').pop()))
+      // Started at login, the shell can be too slow to answer while the Mac is still busy (after an
+      // update, say). Use the usual folders for now and ask again in a minute, rather than miss
+      // herdr and your agents until Bridge AI restarts.
+      setTimeout(() => { loginPathCache = null }, 60_000).unref()
+      const bare = String(process.env.PATH || '').split(path.delimiter).filter((d) => d && d !== nodeShimDir())
+      resolve(withNodeShim([...bare, ...USUAL_DIRS].join(path.delimiter)))
+    })
   })
   return loginPathCache
 }
@@ -92,7 +102,7 @@ export function loginPath() {
 // which matters on Windows where starting `where` 13 times took seconds. On Windows only real
 // program types count (PATHEXT: .exe, .cmd, ...), so npm's extension-less shell shims are skipped.
 const EXTS = IS_WIN ? (process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean) : ['']
-function which(bin, PATH) {
+export function which(bin, PATH) {
   for (const dir of String(PATH || '').split(path.delimiter)) {
     if (!dir) continue
     for (const ext of EXTS) {

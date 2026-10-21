@@ -6,19 +6,15 @@ import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import pty from 'node-pty'
-import { sessionName, herdrSocket } from './runtime/herdr-cli.js'
+import { sessionName, herdrSocket, herdrBin } from './runtime/herdr-cli.js'
 
-function herdrBin() {
-  try { return execFileSync('which', ['herdr']).toString().trim() } catch { return 'herdr' }
-}
-
-function runningSession(preferred) {
+function runningSession(preferred, bin) {
   if (preferred) return preferred
   // The same session the rest of Bridge AI talks to, when it's running.
   const same = sessionName()
   if (same && fs.existsSync(herdrSocket())) return same
   try {
-    const out = execFileSync(herdrBin(), ['session', 'list']).toString()
+    const out = execFileSync(bin, ['session', 'list']).toString()
     const row = out.split('\n').slice(1).map((l) => l.trim().split(/\s+/)).find((c) => c[1] === 'running')
     return row?.[0] || null
   } catch {
@@ -37,10 +33,9 @@ const MIN_COLS = 100
 // Returns the upgrade handler for /api/tty; the server's upgrade router calls it.
 export function ttyHandler({ session } = {}) {
   const wss = new WebSocketServer({ noServer: true })
-  const bin = herdrBin()
   const handle = (req, socket, head) => wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req))
 
-  wss.on('connection', (ws, req) => {
+  wss.on('connection', async (ws, req) => {
     const url = new URL(req.url, 'http://x')
     const cols = Math.min(400, Number(url.searchParams.get('cols')) || 0)
     const rows = Math.max(10, Math.min(200, Number(url.searchParams.get('rows')) || 40))
@@ -50,7 +45,8 @@ export function ttyHandler({ session } = {}) {
       ws.send(JSON.stringify({ type: 'error', message: `Herdr view needs at least ${MIN_COLS} columns; use Terminals on small screens` }))
       return ws.close(4001, 'too narrow')
     }
-    const name = runningSession(session)
+    const bin = await herdrBin()
+    const name = runningSession(session, bin)
     if (!name) {
       ws.send(JSON.stringify({ type: 'error', message: 'No running herdr session' }))
       return ws.close()

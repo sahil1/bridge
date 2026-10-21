@@ -2,6 +2,21 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
+## 2.2.2
+
+Your agents show up again when Bridge AI opens at login.
+
+### Fixes
+
+- **Opened at login, no agents:** when Bridge AI started with your Mac while it was still busy (right after a macOS update, say), it couldn't find herdr or your agent tools until you restarted it. The board showed 0 agents, starting an agent said it wasn't installed, and the Herdr view said "detached". It now looks in the usual folders (`~/.local/bin`, Homebrew) straight away and checks your shell's settings again a minute later.
+
+### Install
+
+- **macOS and Linux:** `curl -fsSL https://raw.githubusercontent.com/sahil1/bridge/main/install.sh | sh`
+- **Windows (PowerShell):** `irm https://raw.githubusercontent.com/sahil1/bridge/main/install.ps1 | iex`
+
+On 2.0 or later? Settings › About & updates updates it in one click.
+
 ## 2.2.1
 
 Your phone from anywhere, apps for iPhone and Android, all of a long conversation in Chat, agents in their own windows, and updates in one click.

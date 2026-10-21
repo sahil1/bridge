@@ -4,8 +4,14 @@ import { execFile } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { loginPath, which } from '../agents.js'
 
-const HERDR = process.env.HERDR_BIN || 'herdr'
+// The herdr program. The Mac app started at login or from the Dock has a bare PATH without
+// ~/.local/bin, where herdr installs itself, so look on your login shell's PATH.
+export async function herdrBin() {
+  if (process.env.HERDR_BIN) return process.env.HERDR_BIN
+  return (await which('herdr', await loginPath())) || 'herdr'
+}
 
 // Which herdr to talk to. A session picked in Settings (`herdr.session`) always wins. Otherwise:
 // inside herdr the CLI gets HERDR_SOCKET_PATH from the environment; started any other way (the
@@ -44,9 +50,10 @@ export async function sessions() {
 }
 const herdrEnv = () => { const sock = herdrSocket(); return sock ? { ...process.env, HERDR_SOCKET_PATH: sock } : process.env }
 
-export function run(args, { timeout = 15000, json = true } = {}) {
+export async function run(args, { timeout = 15000, json = true } = {}) {
+  const bin = await herdrBin()
   return new Promise((resolve, reject) => {
-    execFile(HERDR, args, { timeout, maxBuffer: 16 * 1024 * 1024, env: herdrEnv() }, (err, stdout, stderr) => {
+    execFile(bin, args, { timeout, maxBuffer: 16 * 1024 * 1024, env: herdrEnv() }, (err, stdout, stderr) => {
       if (err) {
         // herdr reports structured errors on stdout as {"error":{...}}
         let msg = (stderr || '').trim() || err.message

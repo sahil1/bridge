@@ -1,6 +1,6 @@
 {
   "name": "bridge-ai",
-  "version": "2.2.1",
+  "version": "2.2.2",
   "type": "module",
   "scripts": {
     "start": "node scripts/start.js",
