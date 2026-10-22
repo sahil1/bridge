@@ -75,7 +75,7 @@ const TEMPLATES = { 'chief/state/ledger.md': /\{\{name\}\}/, 'chief/state/playbo
 
 // ---------- Text that is personal ----------
 const ALLOW_EMAIL = /(noreply|no-reply)@|@(users\.noreply\.github\.com|example\.(com|org)|anthropic\.com|openai\.com)$|^git@github\.com$/i
-// (bridge: the user inside the Docker image, /home/bridge.)
+// (bridge: the user inside the Docker image, whose home is /home/bridge)
 const GENERIC_USER = new Set(['you', 'me', 'user', 'username', 'name', 'runner', 'example', 'shared', 'public', 'yourname', 'your-name', '<you>', 'jane', 'john', 'alice', 'bob', 'admin', 'default', 'bridge'])
 const PATTERNS = [
   ['an Anthropic key', /sk-ant-[A-Za-z0-9_-]{20,}/],
@@ -126,7 +126,8 @@ const esc = (v) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const mine = [...personalValues()].filter(([v]) => !PUBLIC_NAMES.has(v.toLowerCase())).map(([v, from]) => [new RegExp(`(?<![A-Za-z0-9])${esc(v)}(?![A-Za-z0-9])`, 'i'), from])
 const BINARY = /\.(png|jpe?g|gif|webp|ico|icns|woff2?|ttf|otf|pdf|zip|gz|dmg|exe|node|wasm|mp[34]|wav)$/i
 const SKIP_TEXT = new Set(['package-lock.json', 'desktop/package-lock.json'])
-const self = path.relative(ROOT, fileURLToPath(import.meta.url))
+// This file itself, with / separators like the paths it's compared with (Windows gives \).
+const self = path.relative(ROOT, fileURLToPath(import.meta.url)).split(path.sep).join('/')
 // Built bundles carry the libraries' own credits (authors' emails); your values and secrets are
 // still looked for in them.
 const BUNDLE = /(^|\/)assets\/[^/]+\.(js|css|map)$/
