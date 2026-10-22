@@ -2,6 +2,14 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
+## 2.2.4
+
+Update from your phone.
+
+### Fixes
+
+- **Update on a phone:** tapping Update did nothing, because its window opened off the edge of the screen. On a phone it now drops down under the top bar, full width, and Update now works from there.
+
 ## 2.2.3
 
 A tidier Update window.

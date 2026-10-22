@@ -2083,6 +2083,8 @@ button.yg-day:hover { box-shadow: 0 0 0 1.5px var(--accent); }
 .update-acts.col { display: grid; gap: 6px; }
 .update-acts code { padding: 6px 8px; border-radius: 6px; background: var(--pane-2); word-break: break-all; }
 .update-pop .link-btn { justify-self: start; color: var(--ink-3); }
+/* Phone: the chips' row clips what spills out of it, so the window drops from the top bar instead. */
+.app.narrow .update-pop { position: fixed; top: calc(50px + var(--safe-top) + 6px); left: max(12px, env(safe-area-inset-left)); right: max(12px, env(safe-area-inset-right)); width: auto; }
 .now-btn { height: 30px; padding: 0 10px; border-radius: 8px; font-size: 12.5px; font-weight: 600; color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); background: var(--accent-soft); }
 .now-btn:hover { filter: brightness(1.06); }
 .st-sec a.btn, .st-sec a.ghost-btn { text-decoration: none; }
