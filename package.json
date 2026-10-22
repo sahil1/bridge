@@ -1,23 +1,27 @@
 {
   "name": "bridge-ai",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "type": "module",
   "scripts": {
     "start": "node scripts/start.js",
     "stop": "node scripts/stop.js",
     "dev": "concurrently -n api,web \"node --watch server/index.js\" \"vite\"",
     "build": "vite build",
+    "demo:build": "vite build --mode demo",
     "desktop": "node scripts/desktop.js start",
     "desktop:dev": "node scripts/desktop.js dev",
     "desktop:dist": "node scripts/desktop.js dist",
     "mobile:ios": "cd mobile/ios && xcodegen generate && open BridgeAI.xcodeproj",
     "mobile:android": "open -a \"Android Studio\" mobile/android",
+    "mobile:android:release": "cd mobile/android && JAVA_HOME=\"${JAVA_HOME:-/Applications/Android Studio.app/Contents/jbr/Contents/Home}\" ANDROID_HOME=\"${ANDROID_HOME:-$HOME/Library/Android/sdk}\" ./gradlew bundleRelease && echo \"Google Play bundle: mobile/android/app/build/outputs/bundle/release/app-release.aab\"",
     "icons:brands": "node scripts/brand-icons.js",
     "release": "node scripts/release.js",
     "check:private": "node scripts/check-private.js",
     "prepare": "node scripts/install-hooks.js"
   },
   "dependencies": {
+    "@fontsource-variable/geist": "^5.3.0",
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/addon-unicode11": "^0.8.0",
     "@xterm/headless": "^5.5.0",

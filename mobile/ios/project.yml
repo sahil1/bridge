@@ -8,7 +8,7 @@ options:
   createIntermediateGroups: true
 settings:
   base:
-    MARKETING_VERSION: "2.2.1"
+    MARKETING_VERSION: "2.4.0"
     CURRENT_PROJECT_VERSION: "1"
     SWIFT_VERSION: "5.0"
     DEVELOPMENT_TEAM: ""
@@ -29,8 +29,25 @@ targets:
         buildPhase: resources
       - path: ../../public/mark.svg
         buildPhase: resources
+      # Bridge AI's own UI on made-up data, for Try the demo (BundledUI.swift), built by the script below.
+      - path: build/bundled/demo
+        type: folder
+        buildPhase: resources
+        optional: true
+    preBuildScripts:
+      # The demo, from the repo's src/ (npm run demo:build), when it's missing or older than its
+      # sources. npm from your login shell, since Xcode's PATH doesn't have it.
+      - name: Build the demo
+        basedOnDependencyAnalysis: false
+        script: |
+          cd "$PROJECT_DIR/../.." || exit 1
+          out="$PROJECT_DIR/build/bundled/demo"
+          if [ ! -f "$out/index.html" ] || [ -n "$(find src index.html vite.config.js package.json -newer "$out/index.html" | head -1)" ]; then
+            "${SHELL:-/bin/zsh}" -lic "npm run --silent demo:build -- --outDir '$out' --logLevel warn" || exit 1
+          fi
     settings:
       base:
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
         PRODUCT_BUNDLE_IDENTIFIER: dev.bridge-ai.phone
         PRODUCT_NAME: Bridge AI
         INFOPLIST_FILE: BridgeAI/Info.plist

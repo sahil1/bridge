@@ -58,7 +58,12 @@ const cmds = {
     })))
     for (const { a, last, lastUser, subs } of rows) {
       const q = (f.queue?.[a.paneId] || []).length
-      console.log(`${a.paneId}  [${a.status}]${q ? ` (${q} queued)` : ''}  ${where(a)}  · ${a.kind} · ${a.worktree ? `${tilde(a.worktree.repo)} on its own branch ${a.worktree.branch}` : tilde(a.cwd)}`)
+      const c = a.cloud
+      const held = c?.held || 0
+      console.log(c
+        ? `${a.paneId}  [${c.failed ? 'failed' : a.status}]${held ? ` (${held} held)` : ''}  ${where(a)}  · ${c.label} cloud agent · ${c.repo || 'no repo'}${c.branch ? ` on ${c.branch}` : ''}${c.prUrl ? ` · PR ${c.prUrl}` : ''}`
+        : `${a.paneId}  [${a.status}]${q ? ` (${q} queued)` : ''}  ${where(a)}  · ${a.kind} · ${a.worktree ? `${tilde(a.worktree.repo)} on its own branch ${a.worktree.branch}` : tilde(a.cwd)}`)
+      if (c?.ask) console.log(`    waiting on: ${clip(c.ask, 200)}`)
       if (a.title) console.log(`    title: ${clip(a.title, 120)}`)
       if (lastUser) console.log(`    last ask (${ago(lastUser.ts)}): ${clip(lastUser.text, 200)}`)
       if (last && last !== lastUser) console.log(`    last reply (${ago(last.ts)}): ${clip(last.text, 300)}`)

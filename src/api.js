@@ -8,6 +8,13 @@ export const viaRelay = !!relayPage
 export const relayComputers = relayPage?.computers || null
 // ...which shows the agents at work on the phone's lock screen (older relay pages can't).
 export const relayActivity = relayPage?.activity || null
+// What the phone sent while your computer was offline, and how each is doing ({ list, subscribe, dismiss }).
+export const relayOutbox = relayPage?.outbox || null
+export function useOutbox(paneId) {
+  const [items, setItems] = useState(() => relayOutbox?.list(paneId) || [])
+  useEffect(() => relayOutbox?.subscribe(() => setItems(relayOutbox.list(paneId))), [paneId])
+  return items
+}
 
 // A WebSocket to this server (the live terminal), through the relay's link when there is one.
 export const openSocket = (path) => (relayPage ? new relayPage.WebSocket(path) : new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${path}`))
@@ -26,6 +33,8 @@ export async function api(path, opts = {}) {
 // Tell every poller that settings changed (location, name, default agent…), so cards that
 // depend on them refetch now instead of at their next interval.
 export const settingsChanged = () => window.dispatchEvent(new Event('bridge-settings'))
+// The same for one endpoint (after an account switch, every view of /quota).
+export const refetch = (path) => window.dispatchEvent(new CustomEvent('bridge-refetch', { detail: path }))
 
 // Poll an endpoint while the tab is visible. Returns { data, error, loading, refresh }.
 // After an error it retries within a minute, whatever the interval.
@@ -72,9 +81,11 @@ export function usePoll(path, intervalMs, { enabled = true } = {}) {
     const onVis = () => { if (!document.hidden) load('', true) }
     // Settings changed: drop the cached answer, then reload (once, shared by every view using it).
     const onSettings = () => { lastData.delete(path); load('', true) }
+    const onRefetch = (e) => { if (e.detail === path) onSettings() }
     document.addEventListener('visibilitychange', onVis)
     window.addEventListener('bridge-settings', onSettings)
-    return () => { clearInterval(id); document.removeEventListener('visibilitychange', onVis); window.removeEventListener('bridge-settings', onSettings) }
+    window.addEventListener('bridge-refetch', onRefetch)
+    return () => { clearInterval(id); document.removeEventListener('visibilitychange', onVis); window.removeEventListener('bridge-settings', onSettings); window.removeEventListener('bridge-refetch', onRefetch) }
   }, [path, intervalMs, enabled, load])
 
   useEffect(() => {

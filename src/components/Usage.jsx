@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import Icon from './Icon.jsx'
 import { usePersisted, useShared, useWidth } from './layout.jsx'
-import { usePoll, fmtTime } from '../api.js'
+import { api, usePoll, fmtTime, settingsChanged } from '../api.js'
+import { AllowKeychain, level, statusText } from './AccountMenu.jsx'
 
 const NAMES = { claude: 'Claude', codex: 'Codex', cursor: 'Cursor', grok: 'Grok', copilot: 'Copilot', openrouter: 'OpenRouter', deepseek: 'DeepSeek', kimi: 'Kimi', zai: 'Z.ai', agy: 'Antigravity' }
 const nice = (p) => NAMES[p] || p[0].toUpperCase() + p.slice(1)
@@ -158,7 +159,7 @@ function maskEmail(e) {
   return `${u.slice(0, 2)}•••@${d}`
 }
 
-function Activity({ provider }) {
+function Activity({ provider, note }) {
   const { data, loading } = usePoll(`/usage/${provider}`, 5 * 60 * 1000)
   if (loading && !data) return <div className="skeleton-rows"><div /><div /></div>
   if (!data?.supported) return null
@@ -180,6 +181,7 @@ function Activity({ provider }) {
         </p>
       )}
       {t.tokens > 0 && <p className="muted small cache-note">{Math.round((t.cacheRead / t.tokens) * 100)}% of today's tokens came from cache. Cost is at API prices, not your bill.</p>}
+      {note && (t.tokens > 0 || anyMonth) && <p className="muted small cache-note">{note}</p>}
       {anyMonth && <DailyChart daily={data.daily} />}
     </div>
   )
@@ -222,7 +224,7 @@ function ProviderRow({ p, open, onToggle, best, isPrimary, onMakePrimary }) {
               <Icon name="star" size={12} /> {isPrimary ? 'Default' : 'Make default'}
             </button>
           </div>
-          {!p.usable && p.hint && <p className="hint mono">{p.hint}</p>}
+          {p.allow ? <AllowKeychain id={`${p.provider}-default`} /> : !p.usable && p.hint && <p className="hint mono">{p.hint}</p>}
           <div className="w-list">
             {main && <WindowRow w={main} />}
             {rest.map((w) => <WindowRow key={w.id} w={w} />)}
@@ -234,22 +236,169 @@ function ProviderRow({ p, open, onToggle, best, isPrimary, onMakePrimary }) {
   )
 }
 
+// ---------- several accounts ----------
+// Every account's share of one window, kept apart: what's left in each (an empty one stays
+// empty, not averaged away), their total in windows, and the soonest reset.
+function combine(accounts, kind) {
+  const parts = accounts.map((a) => {
+    const w = a.usable ? a.windows.find((x) => x.kind === kind) : null
+    return { id: a.id, label: a.label, pct: w?.percentRemaining ?? null, resetsAt: w?.resetsAt || null }
+  })
+  const known = parts.filter((x) => x.pct != null)
+  const resets = known.map((x) => x.resetsAt).filter(Boolean).sort((a, b) => new Date(a) - new Date(b))
+  return { parts, n: known.length, sum: known.reduce((s, x) => s + x.pct / 100, 0), missing: parts.length - known.length, soonest: resets[0] || null }
+}
+const fmtSum = (v) => (Math.round(v * 10) / 10).toFixed(1).replace(/\.0$/, '')
+function combinedText(c, what) {
+  if (!c.n) return null
+  const total = `${fmtSum(c.sum)} of ${c.n} account${c.n === 1 ? "'s" : "s'"} ${what}${c.n === 1 ? '' : 's'} left`
+  return [total, c.soonest && `next reset in ${fmtIn(c.soonest)}`, c.missing && `${c.missing} not read`].filter(Boolean).join(' · ')
+}
+
+function SegBar({ parts }) {
+  return (
+    <span className="seg-bar" role="img" aria-label={parts.map((x) => `${x.label} ${x.pct == null ? 'no data' : `${x.pct}% left`}`).join(', ')}>
+      {parts.map((x) => (
+        <span key={x.id} className={`seg-part ${x.pct == null ? 'unread' : ''}`} title={`${x.label}: ${x.pct == null ? 'no data' : `${x.pct}% left`}`}>
+          {x.pct != null && <span className={`u-fill f-${level(x.pct)}`} style={{ width: `${Math.max(x.pct ? 4 : 0, x.pct)}%` }} />}
+        </span>
+      ))}
+    </span>
+  )
+}
+
+// One account: its name, plan and 5-hour meter; open for every window and its sign-in.
+function AccountUsage({ a, auto, open, onToggle }) {
+  const [reveal, setReveal] = usePersisted('cc-usage-reveal', false)
+  const main = a.windows.find((w) => w.kind === 'session') || a.windows.find((w) => w.kind !== 'credits') || a.windows[0]
+  const rest = a.windows.filter((w) => w !== main && (w.kind !== 'credits' || w.percentRemaining < 100))
+  const h = main ? health(main) : { level: 'unknown' }
+  return (
+    <li className={`acct-u ${open ? 'open' : ''}`}>
+      <button className="acct-u-head" onClick={onToggle} aria-expanded={open}>
+        <span className="prov-name">
+          <b>{a.label}</b>
+          {a.plan && <span className="plan-tag">{a.plan}</span>}
+          {a.active && <span className="best-tag" title="New agents start on this account">{auto ? 'auto' : 'active'}</span>}
+        </span>
+        {a.usable && main ? (
+          <span className="prov-meter">
+            <PaceBar w={main} level={h.level} />
+            <span className={`prov-pct t-${h.level}`}>{main.percentRemaining}%</span>
+          </span>
+        ) : <span className="prov-status">{statusText(a)}</span>}
+        <Icon name="chevron" size={12} className={`caret ${open ? 'rot90' : ''}`} />
+      </button>
+      {open && (
+        <div className="acct-u-body">
+          {a.account?.email && (
+            <div className="acct">
+              <span className="acct-email">{reveal ? a.account.email : maskEmail(a.account.email)}</span>
+              <button className="icon-btn" onClick={() => setReveal(!reveal)} aria-label={reveal ? 'Hide email' : 'Show email'} title={reveal ? 'Hide email' : 'Show email'}>
+                <Icon name={reveal ? 'eye-off' : 'eye'} size={12} />
+              </button>
+            </div>
+          )}
+          {a.allow && <AllowKeychain id={a.id} />}
+          {!a.allow && !a.usable && <p className="muted small">{a.signedIn === false ? 'Not signed in. Sign in from Settings › Model providers › Accounts.' : a.status === 'pending' ? 'Reading its usage…' : `Couldn't read its usage${a.error ? ` (${a.error.replace(/_/g, ' ')})` : ''}.`}</p>}
+          {a.usable && main && <div className="w-list"><WindowRow w={main} />{rest.map((w) => <WindowRow key={w.id} w={w} />)}</div>}
+        </div>
+      )}
+    </li>
+  )
+}
+
+// An agent with several accounts: all of them together in the header, a row each inside, and
+// the cost history once (it's one history for every account).
+function AccountsRow({ g, open, onToggle, isPrimary, onMakePrimary }) {
+  const [openAcct, setOpenAcct] = useState(null)
+  const sess = combine(g.accounts, 'session')
+  const week = combine(g.accounts, 'weekly')
+  const auto = g.setting === 'auto'
+  return (
+    <li className={`prov ${open ? 'open' : ''}`}>
+      <button className="prov-head" onClick={onToggle} aria-expanded={open}>
+        <span className={`avatar sm av-${g.kind}`}>{nice(g.kind)[0]}</span>
+        <span className="prov-name grp">
+          <b>{nice(g.kind)}</b>
+          <span className="grp-count">{g.accounts.length} accounts</span>
+        </span>
+        {sess.n ? (
+          <span className="prov-meter" title={combinedText(sess, '5h window')}>
+            <SegBar parts={sess.parts} />
+            <span className="prov-pct">{fmtSum(sess.sum)}<small className="muted">/{sess.n}</small></span>
+          </span>
+        ) : <span className="prov-status">no data</span>}
+        <Icon name="chevron" size={12} className={`caret ${open ? 'rot90' : ''}`} />
+      </button>
+      {open && (
+        <div className="prov-body">
+          <div className="acct">
+            <span className="muted">{auto ? 'New agents start on the account with the most left' : 'New agents start on the active account'}</span>
+            <button className={`star ${isPrimary ? 'on' : ''}`} onClick={onMakePrimary} title={isPrimary ? 'Shown in the top bar' : 'Show in the top bar'} aria-pressed={isPrimary}>
+              <Icon name="star" size={12} /> {isPrimary ? 'Default' : 'Make default'}
+            </button>
+          </div>
+          {(sess.n > 0 || week.n > 0) && (
+            <div className="acct-sum">
+              <b>All accounts</b>
+              {sess.n > 0 && <span>{combinedText(sess, '5h window')}</span>}
+              {week.n > 0 && <span>{combinedText(week, 'weekly window')}</span>}
+            </div>
+          )}
+          <ul className="acct-us">
+            {g.accounts.map((a) => <AccountUsage key={a.id} a={a} auto={auto} open={openAcct === a.id} onToggle={() => setOpenAcct(openAcct === a.id ? null : a.id)} />)}
+          </ul>
+          {(g.kind === 'claude' || g.kind === 'codex') && <Activity provider={g.kind} note={`Cost and tokens are for all your ${nice(g.kind)} accounts together: they share one history.`} />}
+        </div>
+      )}
+    </li>
+  )
+}
+
 export default function Usage({ data, error }) {
   const providers = data?.providers || []
+  const groups = (data?.accounts || []).filter((g) => g.accounts.length > 1)
   const [primary, setPrimary] = useShared('cc-primary', 'claude')
   const [openId, setOpenId] = usePersisted('cc-usage-open', 'claude')
-  // Default provider first, then the rest in quota-axi's order.
-  const sorted = [...providers].sort((a, b) => (b.provider === primary) - (a.provider === primary))
+  // One row per provider, and one for all of an agent's accounts when it has several (even if its
+  // usual login isn't set up). Default provider first, then the rest in quota-axi's order.
+  const ids = [...new Set([...providers.map((p) => p.provider), ...groups.map((g) => g.kind)])]
+  const sorted = ids.sort((a, b) => (b === primary) - (a === primary))
+  if (data?.off) return <div className="usage"><UsageOff /></div>
   return (
     <div className="usage">
       {error && <p className="error-text">{error}</p>}
       {!data && !error && <div className="skeleton-rows"><div /><div /><div /></div>}
       <ul className="prov-list">
-        {sorted.map((p) => (
-          <ProviderRow key={p.provider} p={p} open={openId === p.provider} onToggle={() => setOpenId(openId === p.provider ? null : p.provider)}
-            best={data.bestNow === p.provider} isPrimary={primary === p.provider} onMakePrimary={() => setPrimary(p.provider)} />
-        ))}
+        {sorted.map((id) => {
+          const g = groups.find((x) => x.kind === id)
+          const row = { open: openId === id, onToggle: () => setOpenId(openId === id ? null : id), best: data.bestNow === id, isPrimary: primary === id, onMakePrimary: () => setPrimary(id) }
+          return g ? <AccountsRow key={id} g={g} {...row} /> : <ProviderRow key={id} p={providers.find((p) => p.provider === id)} {...row} />
+        })}
       </ul>
+    </div>
+  )
+}
+
+// Plan usage is off until you turn it on: reading it asks each provider with the sign-in your
+// agents use on this computer, and some providers' terms don't allow other apps to do that.
+export const USAGE_OFF_WHY = 'To show it, Bridge AI asks each provider with the sign-in your agents already use on this computer (through quota-axi). Some providers, Anthropic among them, don\'t allow other apps to use their sign-ins, so it stays off unless you turn it on. Cost and token stats come from files on this computer and work either way.'
+
+function UsageOff() {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+  const turnOn = async () => {
+    setBusy(true)
+    setErr(null)
+    try { await api('/settings', { method: 'PATCH', body: { quota: { read: true } } }); settingsChanged() } catch (e) { setErr(e.message); setBusy(false) }
+  }
+  return (
+    <div className="usage-off">
+      <p>See how much of each plan is left (Claude, Codex and the others), here and in the top bar.</p>
+      <p className="muted small">{USAGE_OFF_WHY}</p>
+      {err && <p className="error-text">{err}</p>}
+      <button type="button" className="btn small" onClick={turnOn} disabled={busy}>{busy ? 'Reading your plans…' : 'Turn on'}</button>
     </div>
   )
 }

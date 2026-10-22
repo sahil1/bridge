@@ -28,8 +28,9 @@ async function check(force = false) {
   return last
 }
 
-// How this copy was installed decides how it updates.
-const how = () => (IN_APP ? (IS_MAC || IS_WIN ? 'app' : 'app-linux') : 'source')
+// How this copy was installed decides how it updates. The Docker image sets BRIDGE_DOCKER.
+const how = () => (IN_APP ? (IS_MAC || IS_WIN ? 'app' : 'app-linux') : process.env.BRIDGE_DOCKER ? 'docker' : 'source')
+const COMMAND = { source: 'git pull && npm start', 'app-linux': `curl -fsSL https://raw.githubusercontent.com/${REPO}/main/install.sh | sh`, docker: 'docker compose pull && docker compose up -d' }
 
 export async function status({ force = false, disabled = false } = {}) {
   if (disabled) return { current, disabled: true }
@@ -43,8 +44,9 @@ export async function status({ force = false, disabled = false } = {}) {
     checkedAt: s.at ? new Date(s.at).toISOString() : null,
     error: s.error,
     how: how(),
-    // Shown when the app can't update itself: from source, or Linux (the .deb asks for a password).
-    command: how() === 'source' ? 'git pull && npm start' : how() === 'app-linux' ? `curl -fsSL https://raw.githubusercontent.com/${REPO}/main/install.sh | sh` : null,
+    // Shown when the app can't update itself: from source, Linux (the .deb asks for a password),
+    // or Docker (on the machine running it, in the folder with docker-compose.yml).
+    command: COMMAND[how()] || null,
   }
 }
 

@@ -57,7 +57,7 @@ else list = [...new Set([...git('ls-files', '-z').split('\0'), ...git('ls-files'
 const PRIVATE_FILES = [
   [/(^|\/)config\.json$/, 'your Bridge AI settings (only config.example.json belongs here)', (f) => !/^(desktop|public)\//.test(f)],
   [/(^|\/)config\.local\.json$/, 'your local settings'],
-  [/(^|\/)(secrets|push|accounts|runtime|routines|queue|ideas)\.json$/, 'Bridge AI data-folder file'],
+  [/(^|\/)(secrets|push|accounts|runtime|routines|queue|ideas|cloud-keys|cloud-agents)\.json$/, 'Bridge AI data-folder file'],
   [/(^|\/)ideas\.md$/, 'your ideas list'],
   [/(^|\/)\.credentials\.json$|(^|\/)auth\.json$|(^|\/)oauth_creds\.json$/, 'an agent login'],
   [/\.jsonl$/, 'a session transcript or history log'],
@@ -75,7 +75,8 @@ const TEMPLATES = { 'chief/state/ledger.md': /\{\{name\}\}/, 'chief/state/playbo
 
 // ---------- Text that is personal ----------
 const ALLOW_EMAIL = /(noreply|no-reply)@|@(users\.noreply\.github\.com|example\.(com|org)|anthropic\.com|openai\.com)$|^git@github\.com$/i
-const GENERIC_USER = new Set(['you', 'me', 'user', 'username', 'name', 'runner', 'example', 'shared', 'public', 'yourname', 'your-name', '<you>', 'jane', 'john', 'alice', 'bob', 'admin', 'default'])
+// (bridge: the user inside the Docker image, /home/bridge.)
+const GENERIC_USER = new Set(['you', 'me', 'user', 'username', 'name', 'runner', 'example', 'shared', 'public', 'yourname', 'your-name', '<you>', 'jane', 'john', 'alice', 'bob', 'admin', 'default', 'bridge'])
 const PATTERNS = [
   ['an Anthropic key', /sk-ant-[A-Za-z0-9_-]{20,}/],
   ['an OpenAI-style key', /\bsk-(proj-|svcacct-)?[A-Za-z0-9_-]{32,}/],
@@ -109,6 +110,7 @@ function personalValues() {
     for (const m of [].concat(c.mail?.accounts || [])) addVal(m?.address || m?.email, 'a mail account in your settings')
   } catch { /* no settings */ }
   try { for (const v of Object.values(JSON.parse(fs.readFileSync(path.join(data, 'secrets.json'), 'utf8')))) if (String(v).length >= 8) addVal(v, 'a key saved in Bridge AI') } catch { /* none */ }
+  try { for (const v of Object.values(JSON.parse(fs.readFileSync(path.join(data, 'cloud-keys.json'), 'utf8')))) if (String(v).length >= 8) addVal(v, 'a cloud agent key saved in Bridge AI') } catch { /* none */ }
   try { addVal(JSON.parse(fs.readFileSync(path.join(data, 'push.json'), 'utf8'))?.keys?.privateKey, 'your push key') } catch { /* none */ }
   return vals
 }

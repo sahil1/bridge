@@ -21,7 +21,8 @@ function Tile({ a, p, selected, onOpen, onOpenInHerdr, onOpenSide }) {
         <div className="tile-meta">
           <span>{a.workspace}</span>
           {a.tab && !/^\d+$/.test(a.tab) && <><Icon name="chevron" size={10} /><span>{a.tab}</span></>}
-          <span className={`tile-kind ${a.crew ? 'crew' : ''}`}>{a.crew ? `crew · ${a.kind}` : a.kind}</span>
+          {a.cloud?.repo && <><Icon name="chevron" size={10} /><span>{a.cloud.repo}</span></>}
+          <span className={`tile-kind ${a.crew ? 'crew' : ''}`}>{a.crew ? `crew · ${a.kind}` : a.cloud ? `${a.cloud.label} cloud` : a.kind}</span>
         </div>
         {p?.tool && a.status === 'working'
           ? <p className="tile-preview mono"><Icon name="tool" size={11} /> {p.tool}</p>
@@ -30,7 +31,7 @@ function Tile({ a, p, selected, onOpen, onOpenInHerdr, onOpenSide }) {
       <footer className="tile-foot">
         <span className="muted">{p?.ts ? fmtRelative(p.ts) : ''}</span>
         <div className="tile-acts">
-          {onOpenInHerdr && <button className="ghost-btn" onClick={() => onOpenInHerdr(a.paneId)} title="Open in Herdr view"><Icon name="external" size={12} /> Herdr</button>}
+          {onOpenInHerdr && !a.cloud && <button className="ghost-btn" onClick={() => onOpenInHerdr(a.paneId)} title="Open in Herdr view"><Icon name="external" size={12} /> Herdr</button>}
           {onOpenSide && <button className="ghost-btn" onClick={() => onOpenSide(a.paneId)} title="Open beside the current tab"><Icon name="split" size={12} /> Side</button>}
           <button className="ghost-btn strong" onClick={() => onOpen(a.paneId)}><Icon name="chat" size={12} /> Open</button>
         </div>

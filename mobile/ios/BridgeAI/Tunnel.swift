@@ -21,6 +21,7 @@ final class Tunnel: NSObject, WKURLSchemeHandler {
         "/_relay/shell": ("index", "web", "text/html; charset=utf-8"),
         "/shell.js": ("shell", "web", "text/javascript; charset=utf-8"),
         "/link.js": ("link", "web", "text/javascript; charset=utf-8"),
+        "/offline.js": ("offline", "web", "text/javascript; charset=utf-8"),
         "/manifest.webmanifest": ("manifest", "web", "application/manifest+json"),
         "/icon-512.png": ("icon-512", nil, "image/png"),
         "/apple-touch-icon.png": ("apple-touch-icon", nil, "image/png"),

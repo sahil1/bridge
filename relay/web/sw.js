@@ -1,11 +1,12 @@
 // The relay page's service worker. Bridge AI's own files and data live on your computer, so every
 // request the app makes (pages, /api, /assets, pictures) is handed to the open relay page, which
-// sends it through the encrypted link and streams the answer back here. Only the relay page's own
-// files come from the relay itself.
+// sends it through the encrypted link and streams the answer back here (or, with your computer
+// offline, answers from what the phone kept: offline.js). Only the relay page's own files come from
+// the relay itself.
 // Also shows notifications from your computer, like Bridge AI's own service worker, and answers
 // one from its buttons over a short encrypted link of its own (the page may be closed meanwhile).
 const ASSETS = 'bridge-relay-assets-v1'
-const OWN = new Set(['/index.html', '/shell.js', '/sw.js', '/link.js', '/link-sw.js', '/manifest.webmanifest', '/icon-512.png', '/apple-touch-icon.png', '/mark.svg'])
+const OWN = new Set(['/index.html', '/shell.js', '/sw.js', '/link.js', '/link-sw.js', '/offline.js', '/manifest.webmanifest', '/icon-512.png', '/apple-touch-icon.png', '/mark.svg'])
 // link.js as a plain script (relay/build.js makes it): self.bridgeLink. Only answer buttons need it.
 try { importScripts('/link-sw.js') } catch { /* buttons then open the app instead */ }
 
@@ -27,13 +28,19 @@ self.addEventListener('fetch', (e) => {
       const hit = await c.match(req)
       if (hit) return hit
       const res = await tunnel(req, url)
-      if (res.ok) await c.put(req, res.clone()).catch(() => {})
+      if (res.ok) await c.put(req, res.clone()).then(() => trim(c)).catch(() => {})
       return res
     }))
     return
   }
   e.respondWith(tunnel(req, url))
 })
+
+// Each update of Bridge AI brings new files: keep the latest ones (the page uses about 30).
+async function trim(c) {
+  const keys = await c.keys()
+  for (const k of keys.slice(0, Math.max(0, keys.length - 150))) await c.delete(k)
+}
 
 // The relay page that holds the link: the one in front if there are several.
 async function shell() {

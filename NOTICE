@@ -6,6 +6,11 @@ This product is licensed under the Apache License, Version 2.0 (see LICENSE).
 Bridge AI can drive herdr (https://herdr.dev) when it is installed. herdr is a separate
 program, licensed separately, and is not included in this repository.
 
-Product names and logos shown in the app (agents, model providers, MCP servers) belong to
-their owners and are used only to identify the tools Bridge AI works with. Most logos come from
-Simple Icons (https://simpleicons.org, CC0).
+Bridge AI is an independent project, not affiliated with, endorsed or sponsored by Anthropic,
+OpenAI, Google, GitHub, Microsoft, Anysphere (Cursor), Cloudflare, Apple or any other company whose
+products it works with. Product names and logos shown in the app (agents, model providers, MCP
+servers) belong to their owners and are used only to identify the tools Bridge AI works with.
+Most logos come from Simple Icons (https://simpleicons.org, CC0).
+
+The Geist and JetBrains Mono fonts are included under the SIL Open Font License 1.1 (via
+Fontsource).

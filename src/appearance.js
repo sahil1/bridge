@@ -31,7 +31,7 @@ export const TEXT_SIZES = [
 ]
 
 export const FONTS = [
-  { id: 'geist', name: 'Geist', css: 'Geist, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' },
+  { id: 'geist', name: 'Geist', css: '"Geist Variable", Geist, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' },
   { id: 'system', name: 'System', css: 'ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' },
   { id: 'rounded', name: 'Rounded', css: 'ui-rounded, "SF Pro Rounded", -apple-system, BlinkMacSystemFont, sans-serif' },
 ]

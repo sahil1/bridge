@@ -9,10 +9,14 @@
 //
 // The apps can be paired with several computers, each with its own relay: they keep the list, and
 // this page shows it (on the waiting screens, and to Bridge AI's Settings as bridgeRelay.computers).
+//
+// With your computer offline, it shows Bridge AI from what the phone kept (offline.js) under a
+// banner saying so, and messages you send wait for the computer (in the relay, sealed for it).
 import { phoneHello, phoneFinish, newKey, splitCode, normCode, formatCode, plainFrame, readPlain, K, pack, unpack, json, text, utf8, CHUNK } from './link.js'
+import * as offline from './offline.js'
 
 const $ = (id) => document.getElementById(id)
-const show = (id) => { for (const s of ['pair', 'wait', 'home']) $(s).hidden = s !== id; if (id) $('app').hidden = true; if (id) listOthers() }
+const show = (id) => { for (const s of ['pair', 'wait', 'home']) $(s).hidden = s !== id; if (id) $('app').hidden = true; if (id) { listOthers(); offerDemo() } }
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
 // The iPhone app; the Android app opens this page as it is, and says so in its user agent.
 const native = window.bridgeNative || null
@@ -102,11 +106,18 @@ function listOthers() {
   }
 }
 
+// The iPhone app's demo, bundled in it: Bridge AI on made-up agents, for before the first pairing.
+function offerDemo() {
+  $('demo').hidden = !native?.bundled?.includes('demo') || adding || !!apps?.list().length
+}
+$('demo-open').onclick = () => native.post({ type: 'open', name: 'demo' })
+
 // Pair another computer: the pairing screen, for a link (a code alone doesn't say which relay).
 function addComputer() {
   adding = true
   clearTimeout(retryTimer)
   dropSession()
+  awayBanner(false)
   try { ws?.close() } catch { /* closed */ }
   ws = null
   appShown = false
@@ -129,7 +140,7 @@ function linkOnly() {
 // on Android. The ones that ran meanwhile stay on it as finished, until all are done.
 const lock = { agents: new Map(), sent: '' }
 function activity(agents) {
-  if (!apps?.activity || !Array.isArray(agents)) return
+  if (!apps?.activity || !Array.isArray(agents) || away) return // what it last sent isn't news
   const now = Date.now()
   const busy = (st) => st === 'working' || st === 'blocked'
   for (const a of agents) {
@@ -173,12 +184,14 @@ let backoff = 1000
 let retryTimer = null
 let readyWaiters = []
 let appShown = false
+let relayKeeps = false // this relay keeps notes for the computer (offline.js)
+let away = false // showing what the computer last sent: it's offline, or the relay can't be reached
 const streams = new Map() // id -> { onHead, onChunk, onEnd, onError }
 let nextId = 1
 let inbox = Promise.resolve()
 
-// Wait for the link, unless the relay already said the computer is away.
-const ready = (ms = 15000) => (session ? Promise.resolve() : ws?.readyState === 1 && !hostOnline ? Promise.reject(new Error(offlineText())) : new Promise((ok, no) => {
+// Wait for the link, unless the relay already said the computer is away (or it can't be reached).
+const ready = (ms = away ? 0 : 15000) => (session ? Promise.resolve() : ws?.readyState === 1 && !hostOnline ? Promise.reject(new Error(offlineText())) : new Promise((ok, no) => {
   const w = { ok, no }
   readyWaiters.push(w)
   setTimeout(() => { readyWaiters = readyWaiters.filter((x) => x !== w); no(new Error(offlineText())) }, ms)
@@ -188,10 +201,64 @@ let hostOnline = false
 const offlineText = () => (hostOnline ? 'Reconnecting to your computer…' : hostSeen ? `Your computer is offline (since ${new Date(hostSeen).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}).` : 'Your computer isn\'t connected to the relay right now.')
 
 function bar(msg, off) {
+  clearTimeout(barTimer)
   $('bar').hidden = !msg
   $('bar').classList.toggle('off', !!off)
+  $('bar').classList.remove('ok', 'brief')
   $('bar-text').textContent = msg || ''
 }
+// A moment's news (what became of a message), unless something lasting is showing.
+let barTimer = null
+function notice(msg, ok) {
+  if (!$('bar').hidden && !$('bar').classList.contains('brief')) return
+  bar(msg, !ok)
+  $('bar').classList.add('brief')
+  $('bar').classList.toggle('ok', !!ok)
+  barTimer = setTimeout(() => bar(null), ok ? 6000 : 12000)
+}
+
+// ---------- while your computer is offline ----------
+const when = (t) => new Date(t).toLocaleString([], new Date(t).toDateString() === new Date().toDateString() ? { hour: 'numeric', minute: '2-digit' } : { weekday: 'short', hour: 'numeric', minute: '2-digit' })
+function awayBanner(on = true) {
+  away = on
+  document.body.classList.toggle('away', on)
+  $('away').hidden = !on
+  try { $('app').contentDocument.documentElement.classList.toggle('bridge-saved', on) } catch { /* not loaded */ }
+  if (!on) return
+  bar(null)
+  const relayDown = ws?.readyState !== 1
+  $('away-title').textContent = relayDown ? 'Can\'t reach your relay right now.' : `${thisComputer()} is offline${hostSeen ? ` since ${when(hostSeen)}` : ''}.`
+  $('away-text').textContent = `Showing what it last sent. Messages you send ${relayKeeps && !relayDown ? 'go out when it\'s back' : 'wait on this phone until it\'s back'}.`
+  document.body.style.setProperty('--away', `${$('away').offsetHeight}px`)
+}
+// Open Bridge AI from what this phone kept, if it kept it.
+async function openSaved() {
+  if (!paired?.hostKey || adding || !(await offline.hasCopy())) return false
+  awayBanner()
+  showApp()
+  return true
+}
+// Back: the app asks for everything again (its polls listen for this), and what waited goes out.
+function backOnline() {
+  if (away) {
+    awayBanner(false)
+    try { $('app').contentWindow.dispatchEvent(new Event('bridge-settings')) } catch { /* not loaded */ }
+  }
+  offline.online().catch(() => {})
+}
+const clip = (s) => (s.length > 40 ? `${s.slice(0, 40)}…` : s)
+offline.use({
+  relay: () => relay,
+  pairing: () => paired,
+  send: (obj) => { if (!relayKeeps || ws?.readyState !== 1) return false; ws.send(JSON.stringify(obj)); return true },
+  call,
+})
+offline.subscribe((done) => {
+  if (!appShown || !done.length) return
+  const failed = done.filter((it) => it.state === 'failed')
+  if (failed.length) notice(`"${clip(failed[0].text)}" wasn't delivered: ${failed[0].whyText}.`)
+  else notice(done.length === 1 ? 'Your message was delivered.' : `${done.length} messages were delivered.`, true)
+})
 
 function connect() {
   clearTimeout(retryTimer)
@@ -199,22 +266,31 @@ function connect() {
   if (ws && ws.readyState <= 1) return
   ws = new WebSocket(`${relay.replace(/^http/, 'ws')}/_relay/link`)
   ws.binaryType = 'arraybuffer'
+  relayKeeps = false
   // One message at a time, in order: a response's pieces must reach the app in sequence.
-  ws.onmessage = (e) => { inbox = inbox.then(() => (typeof e.data === 'string' ? onStatus(JSON.parse(e.data)) : onData(e.data))).catch(fail) }
+  ws.onmessage = (e) => { inbox = inbox.then(() => (typeof e.data === 'string' ? onText(JSON.parse(e.data)) : onData(e.data))).catch(fail) }
   ws.onclose = (e) => {
     dropSession(offlineText())
     retryTimer = setTimeout(connect, e.code === 4001 ? 300 : backoff)
     backoff = Math.min(backoff * 2, 30000)
+    // The relay can't be reached (no signal?): what this phone kept, after a couple of tries.
+    if (backoff >= 4000 && e.code !== 4001) { if (away) awayBanner(); else if (!appShown && paired?.hostKey) openSaved() }
   }
+}
+
+// The relay's own messages: whether your computer is there, or about the notes it keeps.
+function onText(m) {
+  if (m.t) return offline.fromRelay(m)
+  if (m.q === 1 && !relayKeeps) { relayKeeps = true; offline.relayReady().catch(() => {}) }
+  return onStatus(m)
 }
 
 async function onStatus(st) {
   hostOnline = !!st.host
   hostSeen = st.seen || hostSeen
   if (!st.host) {
-    dropSession(offlineText())
-    if (!appShown) waitScreen(`${thisComputer()} is offline`, `${offlineText()} Bridge AI connects as soon as it's back on and Bridge AI is running.`, true)
-    else bar(offlineText(), true)
+    dropSession(offlineText()) // with Bridge AI showing, the banner
+    if (!appShown && !(await openSaved())) waitScreen(`${thisComputer()} is offline`, `${offlineText()} Bridge AI connects as soon as it's back on and Bridge AI is running.`, true)
     return
   }
   await handshake()
@@ -250,6 +326,7 @@ async function onData(buf) {
     for (const w of readyWaiters.splice(0)) w.ok()
     bar(null)
     showApp()
+    backOnline()
     return
   }
   if (!session) return
@@ -276,7 +353,10 @@ const WHY = {
 }
 async function refused(why) {
   dropSession()
-  if (paired?.hostKey) { await pairing.del(); paired = null }
+  awayBanner(false)
+  bar(null)
+  // Removed on the computer: what this phone kept for it goes too.
+  if (paired?.hostKey) { await pairing.del(); await offline.clear(); paired = null }
   else paired = null
   code = null
   appShown = false
@@ -291,7 +371,7 @@ function dropSession(msg) {
   waiting = null
   for (const [, s] of streams) { s.onError?.(msg || 'Connection lost'); s.onClose?.({ c: 1006, r: 'connection lost' }) }
   streams.clear()
-  if (msg && appShown) bar(msg, !hostOnline)
+  if (msg && appShown) { if (!hostOnline && paired?.hostKey) awayBanner(); else bar(msg, !hostOnline) }
 }
 
 function fail(e) { console.error(e); try { ws?.close(4002, 'error') } catch { /* closed */ } }
@@ -327,11 +407,12 @@ async function tunnel({ m, u, h, body }, port) {
   const id = nextId++
   let cancelled = false
   port.onmessage = (x) => { if (x.data?.cancel) { cancelled = true; streams.delete(id); send(K.CANCEL, id).catch(() => {}) } }
-  try { await ready() } catch (err) { port.postMessage({ error: err.message }); return }
+  try { await ready() } catch (err) { whileAway({ m, u, body }, port, err.message).catch((e) => port.postMessage({ error: e.message })); return }
+  let keep = null // what this phone keeps of the answer, for when the computer is offline
   streams.set(id, {
-    onHead: (head) => port.postMessage({ head }),
-    onChunk: (c) => { if (!cancelled) port.postMessage({ chunk: c.buffer }, [c.buffer]) },
-    onEnd: () => port.postMessage({ end: true }),
+    onHead: (head) => { if (m === 'GET') keep = offline.tap(u, head, { assets: !!native }); port.postMessage({ head }) },
+    onChunk: (c) => { keep?.chunk(c); if (!cancelled) port.postMessage({ chunk: c.buffer }, [c.buffer]) },
+    onEnd: () => { keep?.end(); port.postMessage({ end: true }) },
     onError: (msg) => port.postMessage({ error: msg }),
   })
   try {
@@ -345,6 +426,59 @@ async function tunnel({ m, u, h, body }, port) {
     streams.delete(id)
     port.postMessage({ error: err.message })
   }
+}
+
+// Your computer is offline: answer from what this phone kept, leave a message for the computer,
+// or say it needs the computer. Nothing kept answers calmly, and the app shows it as empty.
+async function whileAway({ m, u, body }, port, why) {
+  const answer = (s, obj) => {
+    const b = utf8(JSON.stringify(obj))
+    port.postMessage({ head: { s, h: [['content-type', 'application/json'], ['cache-control', 'no-store']] } })
+    port.postMessage({ chunk: b.buffer }, [b.buffer])
+    port.postMessage({ end: true })
+  }
+  if (!paired?.hostKey) return port.postMessage({ error: why })
+  if (m === 'GET' || m === 'HEAD') {
+    const hit = await offline.saved(u)
+    if (hit) {
+      port.postMessage({ head: { s: hit.s, h: [...hit.h, ['x-bridge-saved', String(hit.at)]] } })
+      if (m === 'GET') port.postMessage({ chunk: hit.body.buffer }, [hit.body.buffer])
+      return port.postMessage({ end: true })
+    }
+    if (!u.startsWith('/api/')) return port.postMessage({ error: why }) // a page or a file
+    return answer(503, { error: 'Not saved on this phone. It shows when your computer is back.', offline: true })
+  }
+  const q = offline.queueable(m, u, body)
+  if (q?.error) return answer(503, { error: q.error, offline: true })
+  if (q) return answer(202, { ok: true, offline: true, id: (await offline.add(q)).id })
+  answer(503, { error: 'That needs your computer, and it\'s offline right now.', offline: true })
+}
+
+// A request of this page's own over the link (the outbox's): { status, json }.
+function call(m, u, body) {
+  return new Promise((resolve, reject) => {
+    if (!session) return reject(new Error(offlineText()))
+    const id = nextId++
+    let head = null
+    const parts = []
+    streams.set(id, {
+      onHead: (x) => { head = x },
+      onChunk: (c) => parts.push(c),
+      onEnd: () => {
+        let j = null
+        try { j = JSON.parse(parts.map((c) => text(c)).join('')) } catch { /* not JSON */ }
+        resolve({ status: head?.s || 0, json: j })
+      },
+      onError: (msg) => reject(new Error(msg)),
+    })
+    const b = body ? utf8(JSON.stringify(body)) : null
+    ;(async () => {
+      await send(K.REQ, id, { m, u, h: [['content-type', 'application/json']], body: !!b })
+      if (!b) return
+      for (let o = 0; o < b.byteLength; o += CHUNK) await send(K.BODY, id, b.subarray(o, o + CHUNK))
+      await send(K.END, id)
+    })().catch((e) => { streams.delete(id); reject(e) })
+  })
 }
 
 // ---------- WebSockets for the app (the live terminal), through the link ----------
@@ -386,7 +520,9 @@ RelaySocket.CONNECTING = 0; RelaySocket.OPEN = 1; RelaySocket.CLOSING = 2; Relay
 window.bridgeRelay = {
   WebSocket: RelaySocket,
   activity,
-  unpair: async () => { await pairing.del(); location.reload() },
+  unpair: async () => { await pairing.del(); await offline.clear(); location.reload() },
+  // What this phone sent while the computer was offline, and how each is doing (offline.js).
+  outbox: { list: offline.list, subscribe: offline.subscribe, dismiss: offline.dismiss },
   // The computers this app is paired with ({ relay, name, current }), for Bridge AI's Settings.
   computers: apps && {
     list: () => apps.list().map((c) => ({ ...c, name: computerName(c), current: c.relay === relay })),
@@ -398,7 +534,7 @@ window.bridgeRelay = {
         const w = $('app').contentWindow
         await w.fetch('/api/relay').then((x) => x.json()).then((j) => j.here && w.fetch('/api/relay/devices/' + encodeURIComponent(j.here), { method: 'DELETE' })).catch(() => {})
       }
-      if (r === relay) await pairing.del()
+      if (r === relay) { await pairing.del(); await offline.clear() }
       apps.forget(r)
     },
   },
@@ -417,6 +553,7 @@ function showApp() {
   f.onload = () => {
     try {
       const d = f.contentDocument
+      d.documentElement.classList.toggle('bridge-saved', away)
       const bg = getComputedStyle(d.body).backgroundColor
       if (bg) document.body.style.background = bg
       const tc = [...d.querySelectorAll('meta[name="theme-color"]')].find((m) => !m.media || matchMedia(m.media).matches)?.content
@@ -486,6 +623,7 @@ async function start() {
     await navigator.serviceWorker.ready
   }
   paired = (await pairing.get()) || null
+  offline.tidy().catch(() => {})
   // A code you just scanned pairs this phone afresh, even if it was paired before (a new
   // computer, or after it was removed).
   const fromLink = new URLSearchParams(location.hash.slice(1)).get('pair')

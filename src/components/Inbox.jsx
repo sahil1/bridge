@@ -1,7 +1,7 @@
 import Icon from './Icon.jsx'
 import { Card, Updated } from './Trackers.jsx'
 import { fmtRelative } from '../api.js'
-import { useMail, threads, Reasons } from './MailView.jsx'
+import { useMail, threads, Reasons, MailSetup } from './MailView.jsx'
 import { openToday } from './today.js'
 
 // Overview card: the few threads that need you, with counts. The Mail tab has the rest.
@@ -11,14 +11,8 @@ export function Inbox() {
     return (
       <Card icon="mail" title="Inbox" summary="Needs setup">
         <div className="mail-setup">
-          <p>{data.setup}</p>
-          <ol>
-            <li>System Settings › Internet Accounts › your Exchange account: turn on <b>Mail</b>, then open Mail once so it syncs.</li>
-            <li>System Settings › Privacy & Security › Full Disk Access: add the app that started Bridge AI (your terminal app, or Bridge AI itself).</li>
-            <li>Restart Bridge AI: <code>npm run stop</code>, then <code>npm start</code></li>
-          </ol>
+          <MailSetup data={data} onCheck={() => refresh('?refresh=1')} />
           <p className="muted small">The dashboard reads Mail's local index read-only. Nothing is sent anywhere.</p>
-          <button className="btn" onClick={() => refresh('?refresh=1')}><Icon name="refresh" size={13} /> Check again</button>
         </div>
       </Card>
     )

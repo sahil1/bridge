@@ -5,9 +5,10 @@ import Subagents from './Subagents.jsx'
 import Question, { parseScreen } from './Question.jsx'
 import Composer from './Composer.jsx'
 import Lightbox from './Lightbox.jsx'
+import CloudConsole from './CloudConsole.jsx'
 import { PaneHeader } from './layout.jsx'
 import { tildePath, Menu } from './Rail.jsx'
-import { api, usePoll, useLive, fmtTime, openInTerminal } from '../api.js'
+import { api, usePoll, useLive, fmtTime, openInTerminal, useOutbox, relayOutbox } from '../api.js'
 
 const KEYS = [
   ['1', '1'], ['2', '2'], ['3', '3'], ['enter', '⏎ Enter'], ['esc', 'Esc'],
@@ -283,7 +284,7 @@ function LiveActivity({ paneId }) {
   )
 }
 
-function Chat({ agent, pending, queued = [], onCancelQueued, onEdit, onUndo, editingText }) {
+function Chat({ agent, pending, queued = [], outbox = [], onCancelQueued, onEdit, onUndo, editingText }) {
   const { data, error } = useLive(`/agents/${encodeURIComponent(agent.paneId)}/transcript`)
   const scrollRef = useRef(null)
   const stick = useRef(true)
@@ -317,13 +318,19 @@ function Chat({ agent, pending, queued = [], onCancelQueued, onEdit, onUndo, edi
     if (!el) return
     if (anchor.current != null) { el.scrollTop += el.scrollHeight - anchor.current; anchor.current = null; return }
     if (stick.current) el.scrollTop = el.scrollHeight
-  }, [data, pending, queued.length, older.messages.length])
+  }, [data, pending, queued.length, outbox.length, older.messages.length])
 
   const shownPending = pending.filter((p) => !(data?.messages || []).some((m) => m.role === 'user' && sameMsg(m.text, p.text)))
+  // Sent from the phone while your computer was offline: once delivered and in the chat, the
+  // message there says so instead.
+  const inChat = (o) => o.kind === 'say' && o.state === 'delivered' && recent.some((m) => m.role === 'user' && sameMsg(m.text, o.text))
+  const delivered = outbox.filter(inChat)
+  const shownOutbox = outbox.filter((o) => !inChat(o))
+  const fromPhone = (m) => m.role === 'user' && delivered.some((o) => sameMsg(m.text, o.text))
 
   // No chat to show, or none yet (a new session): say so rather than leave the space blank.
   const nothing = data && (!data.supported || (!recent.length && !more && agent.status !== 'working'))
-  if (nothing && !shownPending.length && !queued.length) {
+  if (nothing && !shownPending.length && !queued.length && !shownOutbox.length) {
     if (agent.status === 'blocked') return null // its question card, below, says what's needed
     return (
       <div className="chat-empty">
@@ -358,10 +365,11 @@ function Chat({ agent, pending, queued = [], onCancelQueued, onEdit, onUndo, edi
               ? <details key={k} className="chat-summary"><summary className={`chat-event ev-${m.status}`}><span className="ev-dot" />{m.text}<time>{fmtTime(m.ts)}</time><Icon name="chevron" size={10} className="sum-caret" /></summary><div className="chat-summary-body"><RichText text={m.summary} /></div></details>
               : <div key={k} className={`chat-event ev-${m.status}`}><span className="ev-dot" />{m.text}<time>{fmtTime(m.ts)}</time></div>
             : (
-              <div key={k} className={`msg ${m.role} ${editingText && m.role === 'user' && m.text === editingText ? 'editing' : ''}`}>
+              <div key={k} className={`msg ${m.role} ${editingText && m.role === 'user' && m.text === editingText ? 'editing' : ''} ${fromPhone(m) ? 'from-phone' : ''}`}>
                 <div className="msg-text">{m.role === 'user' ? <UserText text={m.text} images={m.images} paneId={agent.paneId} /> : <RichText text={m.text} />}</div>
                 <div className="msg-time">
                   {fmtTime(m.ts)}
+                  {fromPhone(m) && <span className="msg-sent"><Icon name="check" size={11} /> Delivered from your phone</span>}
                   {m.role === 'user' && onEdit && i >= editFrom && <button className="msg-edit-btn" onClick={() => onEdit({ original: m.text, back: messages.slice(i).filter((x) => x.role === 'user').length })}
                     aria-label="Edit this message" title="Edit and resend: the agent goes back to this point"><Icon name="edit" size={11} /> Edit</button>}
                 </div>
@@ -378,6 +386,15 @@ function Chat({ agent, pending, queued = [], onCancelQueued, onEdit, onUndo, edi
             <div className="msg-time">{p.error ? <span className="error-text">{p.error}</span>
               : Date.now() - p.id > 30000 ? <span className="warn-text">Not in the agent's chat yet. Check the Terminal tab; ↑ in the message box brings it back to resend.</span>
               : 'sending…'}</div>
+          </div>
+        ))}
+        {shownOutbox.map((o) => (
+          <div key={o.id} className={`msg user outbox ${o.state}`}>
+            <div className="msg-text">{o.kind === 'answer' ? `Answer: ${o.text}` : <UserText text={o.text} paneId={agent.paneId} />}</div>
+            <div className="msg-time">
+              <Icon name={o.state === 'waiting' ? 'clock' : o.state === 'delivered' ? 'check' : 'x'} size={11} /> {o.status}
+              {o.state !== 'delivered' && relayOutbox && <button className="link" onClick={() => relayOutbox.dismiss(o.id)}>{o.state === 'waiting' ? 'Cancel' : 'Dismiss'}</button>}
+            </div>
           </div>
         ))}
         {agent.status === 'working' && <LiveActivity paneId={agent.paneId} />}
@@ -404,7 +421,11 @@ function BlockedCard({ agent, onKey, onOpenTerminal }) {
   const tail = plain.split('\n').filter((l) => l.trim() && !/^[─━\s]+$/.test(l)).slice(-12).join('\n')
   const send = async (steps) => {
     setBusy(true)
-    try { await api(`/panes/${encodeURIComponent(agent.paneId)}/input`, { method: 'POST', body: { steps } }) } catch { /* the screen poll shows what happened */ }
+    // Which question it answers, and what you picked: with your computer offline, the phone keeps
+    // the answer for it, and it's only given if the same question is still waiting.
+    const label = steps.map((st) => st.text || (st.keys || []).map((k) => q?.options.find((o) => o.n === k)?.label || k).join(' ')).join(', ')
+    const expect = q && { title: q.title || '', ask: q.ask || [], options: q.options.map((o) => o.label) }
+    try { await api(`/panes/${encodeURIComponent(agent.paneId)}/input`, { method: 'POST', body: { steps, ...(expect ? { expect, label } : {}) } }) } catch { /* the screen poll shows what happened */ }
     setTimeout(() => { refresh?.(); setBusy(false) }, 450)
   }
   return (
@@ -430,7 +451,7 @@ export function MateEmpty({ onLaunch, launching, error }) {
       <div className="hero-mark"><Icon name="helm" size={30} /></div>
       <h3>No chief of staff running</h3>
       <p>Your chief of staff is the one agent you talk to. It sends each request to the agent already working on that topic, starts a new one in the right space when nothing fits, and reports back when the work is done.</p>
-      <button className="btn primary" onClick={onLaunch} disabled={launching}><Icon name="helm" /> {launching ? 'Launching…' : 'Start chief of staff'}</button>
+      <button className="btn primary" data-tour="chief" onClick={onLaunch} disabled={launching}><Icon name="helm" /> {launching ? 'Launching…' : 'Start chief of staff'}</button>
       {error && <p className="error-text">{error}</p>}
     </div>
   )
@@ -445,7 +466,12 @@ export function showChat(paneId) {
   setTimeout(() => window.dispatchEvent(new CustomEvent('cc-set-view', { detail: { paneId, view: 'chat' } })), 60)
 }
 
-export default function Console({ agent, variant = 'focus', controls = {}, onBack, onOpenInHerdr, onPopOut, extraActions, queued = [] }) {
+// Cloud agents (Cursor, Copilot, Jules, Claude in their own cloud) have a view of their own.
+export default function Console(props) {
+  return props.agent?.cloud ? <CloudConsole {...props} Rich={RichText} /> : <AgentConsole {...props} />
+}
+
+function AgentConsole({ agent, variant = 'focus', controls = {}, onBack, onOpenInHerdr, onPopOut, extraActions, queued = [] }) {
   const [view, setViewRaw] = useState('chat')
   const [openPath, setOpenPath] = useState(null)
   const setView = (v) => {
@@ -474,7 +500,13 @@ export default function Console({ agent, variant = 'focus', controls = {}, onBac
   const [keysOpen, setKeysOpen] = useState(false)
   const [termFocus, setTermFocus] = useState(0)
   const [menu, setMenu] = useState(false)
+  const outbox = useOutbox(agent?.paneId)
   const places = usePoll('/places', 15000)
+  // Continue on another account: Claude Code and Codex, once there's a conversation to resume.
+  const movable = (agent?.kind === 'claude' || agent?.kind === 'codex') && !!agent?.sessionId
+  const quota = usePoll('/quota', 5 * 60 * 1000, { enabled: movable })
+  const accts = quota.data?.accounts?.find((g) => g.kind === agent?.kind)?.accounts || []
+  const others = movable && accts.length > 1 ? accts.filter((x) => x.id !== agent.accountId) : []
   // The sidebar's "Browse folder" asks an open agent to switch views.
   useEffect(() => {
     const on = (e) => { if (e.detail?.paneId === agent?.paneId) { setView(e.detail.view); if (e.detail.path) setOpenPath(e.detail.path) } }
@@ -561,6 +593,8 @@ export default function Console({ agent, variant = 'focus', controls = {}, onBac
     setPending((p) => [...p, { id, text: t }])
     try {
       const r = await api(`/agents/${pid}/prompt`, { method: 'POST', body: { text: t } })
+      // Your computer is offline: it waits for it (the phone shows how it's doing).
+      if (r?.offline) { setPending((p) => p.filter((x) => x.id !== id)); return true }
       if (r?.queued) {
         // Something covered the agent's input box; the server holds the message until it's back.
         setPending((p) => p.filter((x) => x.id !== id))
@@ -607,6 +641,13 @@ export default function Console({ agent, variant = 'focus', controls = {}, onBac
   const mute = async (on) => {
     try { await api(`/agents/${pid}/mute`, { method: 'POST', body: { muted: on } }); setFlash(on ? 'Muted: no notifications from this agent until you unmute it' : 'Notifications are back on for this agent') } catch (e) { setFlash(e.message) }
   }
+  const continueOn = async (x) => {
+    if (!window.confirm(`Continue this conversation on ${x.label}?\n\nThe agent stops and starts again signed in as ${x.label}, with the same conversation.`)) return
+    try {
+      const r = await api(`/agents/${pid}/continue`, { method: 'POST', body: { account: x.id } })
+      setTimeout(() => window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: r.paneId } })), 1200)
+    } catch (e) { setFlash(e.message) }
+  }
 
   const title = agent.chief ? 'Chief of staff' : agent.title || agent.tab || agent.workspace
   const where = agent.chief ? `${agent.kind} · routes work to your agents` : `${agent.workspace}${agent.tab && !/^\d+$/.test(agent.tab) ? ` › ${agent.tab}` : ''} · ${agent.kind}`
@@ -629,9 +670,9 @@ export default function Console({ agent, variant = 'focus', controls = {}, onBac
         <span className={`state-tag st-${agent.status}`}><StatusDot status={agent.status} size={7} />{{ blocked: 'Needs you', done: 'Done', working: 'Working', idle: 'Idle' }[agent.status] || 'Unknown'}</span>
         {agent.muted && <span className="muted-tag" role="img" title="Notifications muted (⋯ to unmute)" aria-label="Notifications muted"><Icon name="bell-off" size={13} /></span>}
         {!minimized && (
-          <div className="seg" role="tablist">
+          <div className="seg" role="tablist" data-tour="views">
             {VIEWS.map(([id, icon, label]) => (
-              <button key={id} role="tab" aria-selected={view === id} className={view === id ? 'on' : ''} onClick={() => setView(id)} title={label}><Icon name={icon} size={14} /><span>{label}</span></button>
+              <button key={id} role="tab" aria-selected={view === id} className={view === id ? 'on' : ''} data-tour={id === 'changes' ? 'changes' : undefined} onClick={() => setView(id)} title={label}><Icon name={icon} size={14} /><span>{label}</span></button>
             ))}
           </div>
         )}
@@ -661,7 +702,9 @@ export default function Console({ agent, variant = 'focus', controls = {}, onBac
             <button className="win-btn" onClick={() => setMenu(!menu)} title="More" aria-label="More actions"><Icon name="more" size={14} /></button>
             {menu && <Menu onClose={() => setMenu(false)} items={[agent.muted
               ? { icon: 'bell', label: 'Unmute notifications', run: () => mute(false) }
-              : { icon: 'bell-off', label: 'Mute notifications', run: () => mute(true) }]} />}
+              : { icon: 'bell-off', label: 'Mute notifications', run: () => mute(true) },
+            others.length > 0 && '-',
+            ...others.map((x) => ({ icon: 'users', label: `Continue on ${x.label}${x.usable && x.percentRemaining != null ? ` (${x.percentRemaining}% left)` : ''}`, run: () => continueOn(x) }))]} />}
           </span>
         )}
       </PaneHeader>
@@ -670,7 +713,7 @@ export default function Console({ agent, variant = 'focus', controls = {}, onBac
         <>
           <div className="console-body">
             <PathCtx.Provider value={openFromChat}>
-              {view === 'chat' && <Chat agent={agent} pending={pending} queued={queued} onCancelQueued={cancelQueued} onEdit={agent.caps?.rewind ? (t) => { setEditTarget({ ...t, undoFiles: false, canUndoFiles: agent.kind === 'claude' }); setPrefill({ text: t.original, n: Date.now() }) } : null}
+              {view === 'chat' && <Chat agent={agent} pending={pending} queued={queued} outbox={outbox} onCancelQueued={cancelQueued} onEdit={agent.caps?.rewind ? (t) => { setEditTarget({ ...t, undoFiles: false, canUndoFiles: agent.kind === 'claude' }); setPrefill({ text: t.original, n: Date.now() }) } : null}
                 onUndo={agent.caps?.undo ? undoReply : null} editingText={editTarget?.original} />}
             </PathCtx.Provider>
             <div className="term-wrap" hidden={view !== 'terminal'}><Terminal paneId={agent.paneId} active={view === 'terminal'} focusKey={termFocus} onChat={() => setView('chat')} /></div>
@@ -680,11 +723,11 @@ export default function Console({ agent, variant = 'focus', controls = {}, onBac
             {view === 'preview' && <PreviewView agent={agent} onSendToAgent={({ text, files }) => { setView('chat'); setPrefill({ text, files, append: true, n: Date.now() }) }} />}
           </div>
 
-          {agent.status === 'blocked' && view === 'chat' && (
+          {agent.status === 'blocked' && view === 'chat' && !outbox.some((o) => o.kind === 'answer' && o.state === 'waiting') && (
             <BlockedCard agent={agent} onKey={sendKeys} onOpenTerminal={() => setView('terminal')} />
           )}
 
-          <div className="composer-wrap" hidden={view === 'files' || view === 'changes' || view === 'preview'}>
+          <div className="composer-wrap" data-tour="composer" hidden={view === 'files' || view === 'changes' || view === 'preview'}>
             {agent.caps?.subagents && view === 'chat' && <Subagents paneId={agent.paneId} working={agent.status === 'working'} Rich={RichText} />}
             {keysOpen && (
               <div className="keybar" aria-label="Send keys">

@@ -4,10 +4,13 @@ import { usePersisted } from './layout.jsx'
 import { tildePath } from './Rail.jsx'
 import { api } from '../api.js'
 import AgentMark from './settings/agentMark.jsx'
+import { AccountPicker } from './AccountMenu.jsx'
+import NewCloudAgent from './NewCloudAgent.jsx'
 
 // Start any installed agent in a project folder (in an existing space or a new one), or as a
 // plain chat with no project, like talking to Claude or Codex directly. Optionally with a first message.
-export default function NewAgent({ fleet, initial = {}, onClose, onLaunched }) {
+// Or in the cloud: on Cursor, Copilot, Jules or Claude's computers, with your key (NewCloudAgent).
+export default function NewAgent({ fleet, initial = {}, onClose, onLaunched, onAddAccount, onCloudSettings }) {
   const [kinds, setKinds] = useState(null)
   const [recent, setRecent] = usePersisted('cc-recent-dirs', [])
   const [kind, setKind] = usePersisted('cc-new-kind', 'claude')
@@ -26,12 +29,14 @@ export default function NewAgent({ fleet, initial = {}, onClose, onLaunched }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
   const dirRef = useRef(null)
-  // Agents with more than one sign-in (Settings › Providers › Accounts): which one to use.
+  // Agents with more than one sign-in (Settings › Providers › Accounts): which one to use. Starts
+  // at your choice for that agent (an account, or Auto), for this agent only.
   const [accts, setAccts] = useState([])
-  const [account, setAccount] = useState(null)
+  const [account, setAccount] = useState({}) // kind -> 'auto' or an account id
   useEffect(() => { api('/accounts').then(setAccts).catch(() => {}) }, [])
-  const kindAccts = accts.find((k) => k.kind === kind)?.accounts || []
-  const pickedAccount = kindAccts.find((a) => a.id === account) || kindAccts.find((a) => a.active)
+  const group = accts.find((k) => k.kind === kind)
+  const kindAccts = group?.accounts || []
+  const pickedAccount = account[kind] || group?.setting
   // Own branch, for a folder in a git repo: off unless you turned it on there last time.
   const [repo, setRepo] = useState(null)
   const [own, setOwn] = useState(false)
@@ -70,7 +75,7 @@ export default function NewAgent({ fleet, initial = {}, onClose, onLaunched }) {
   }, [cwd, name, branch, mode, folderName])
   const ownOn = mode === 'project' && !!repo && own
   // Folders agents already work in (the repo, for one on its own branch), then ones you've launched into before.
-  const suggestions = [...new Set([...recent, ...(fleet?.agents || []).map((a) => tildePath(a.worktree?.repo || a.cwd))])].slice(0, 8)
+  const suggestions = [...new Set([...recent, ...(fleet?.agents || []).filter((a) => !a.cloud).map((a) => tildePath(a.worktree?.repo || a.cwd))])].slice(0, 8)
 
   const launch = async (e) => {
     e?.preventDefault()
@@ -78,11 +83,11 @@ export default function NewAgent({ fleet, initial = {}, onClose, onLaunched }) {
     setError(null)
     try {
       if (mode === 'chat') {
-        onLaunched(await api('/chats', { method: 'POST', body: { kind, prompt, account: pickedAccount?.id } }))
+        onLaunched(await api('/chats', { method: 'POST', body: { kind, prompt, account: pickedAccount } }))
         return
       }
       const out = await api('/agents/launch', { method: 'POST', body: {
-        kind, cwd, label: name || folderName, prompt, account: pickedAccount?.id,
+        kind, cwd, label: name || folderName, prompt, account: pickedAccount,
         workspaceId: space === '__new' ? null : space,
         newSpace: space === '__new' ? (spaceName || name || folderName) : null,
         alsoKind: also && prompt.trim() ? also : undefined,
@@ -97,18 +102,21 @@ export default function NewAgent({ fleet, initial = {}, onClose, onLaunched }) {
 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
-      <form className="modal new-agent" onSubmit={launch} role="dialog" aria-label={mode === 'chat' ? 'New chat' : 'New agent'}>
+      <form className="modal new-agent" onSubmit={(e) => { if (mode === 'cloud') e.preventDefault(); else launch(e) }} role="dialog" aria-label={mode === 'chat' ? 'New chat' : mode === 'cloud' ? 'New cloud agent' : 'New agent'}>
         <header className="modal-head">
-          <Icon name={mode === 'chat' ? 'chat' : 'bot'} size={16} />
-          <h3>{mode === 'chat' ? 'New chat' : 'New agent'}</h3>
+          <Icon name={mode === 'chat' ? 'chat' : mode === 'cloud' ? 'cloud' : 'bot'} size={16} />
+          <h3>{mode === 'chat' ? 'New chat' : mode === 'cloud' ? 'New cloud agent' : 'New agent'}</h3>
           <button type="button" className="win-btn" onClick={onClose} aria-label="Close"><Icon name="x" size={14} /></button>
         </header>
 
         <div className="seg na-mode" role="radiogroup" aria-label="Kind of agent">
           <button type="button" role="radio" aria-checked={mode === 'project'} className={mode === 'project' ? 'on' : ''} onClick={() => setMode('project')}><Icon name="folder" size={13} /> In a project folder</button>
           <button type="button" role="radio" aria-checked={mode === 'chat'} className={mode === 'chat' ? 'on' : ''} onClick={() => setMode('chat')}><Icon name="chat" size={13} /> Plain chat</button>
+          <button type="button" role="radio" aria-checked={mode === 'cloud'} className={mode === 'cloud' ? 'on' : ''} onClick={() => setMode('cloud')}><Icon name="cloud" size={13} /> In the cloud</button>
         </div>
         {mode === 'chat' && <p className="muted small na-hint">Just talk to the agent, like its own app: no project folder, saved in a "Chats" space.</p>}
+
+        {mode === 'cloud' ? <NewCloudAgent onLaunched={onLaunched} onClose={onClose} onSettings={onCloudSettings} /> : <>
 
         <div className="na-field">
           <span className="na-label">Agent</span>
@@ -122,13 +130,7 @@ export default function NewAgent({ fleet, initial = {}, onClose, onLaunched }) {
         {kindAccts.length > 1 && (
           <div className="na-field">
             <span className="na-label">Account</span>
-            <div className="seg small-seg na-accts" role="radiogroup" aria-label="Account">
-              {kindAccts.map((a) => (
-                <button type="button" key={a.id} role="radio" aria-checked={pickedAccount?.id === a.id} className={pickedAccount?.id === a.id ? 'on' : ''} onClick={() => setAccount(a.id)} title={a.signedIn === false ? 'Not signed in yet' : undefined}>
-                  {a.label}{a.signedIn === false && <span className="muted"> · not signed in</span>}
-                </button>
-              ))}
-            </div>
+            <AccountPicker group={group} value={pickedAccount} onChange={(id) => setAccount((m) => ({ ...m, [kind]: id }))} onAdd={onAddAccount} />
           </div>
         )}
 
@@ -226,6 +228,7 @@ export default function NewAgent({ fleet, initial = {}, onClose, onLaunched }) {
           <button type="button" className="btn" onClick={onClose}>Cancel</button>
           <button type="submit" className="btn primary" disabled={busy || (mode === 'project' && !dirs.exists) || (ownOn && !repo.branch)}>{busy ? 'Starting…' : mode === 'chat' ? 'Start chat' : 'Start agent'}</button>
         </footer>
+        </>}
       </form>
     </div>
   )

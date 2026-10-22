@@ -2,6 +2,36 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
+## 2.4.0
+
+Several accounts with a quick switcher, agents in the cloud, a phone that keeps working while your computer sleeps, Bridge AI on an always-on machine, a demo, a walkthrough for your first run, and one-click fixes for what macOS asks you to allow.
+
+### What's new
+
+- **Several accounts:** add a work and a personal Claude or Codex account, then switch from the usage chip in the top bar or in New agent. **Auto** starts each new agent on the account with the most left. Usage shows each account and the total, and **Continue on** (in an agent's ⋯ menu) picks up the same conversation on another account when one runs low. Each extra Claude account needs one Allow in the macOS Keychain before its numbers show.
+- **Cloud agents:** start and follow agents that run in Cursor's, GitHub Copilot's, Jules' or Claude's cloud, on a repo on GitHub (Cursor also takes GitLab, Bitbucket and Azure DevOps), with your own key in Settings › Model providers › Cloud agents. They show up in a Cloud space next to your other agents, and notify you when they finish or need you. Claude cloud agents use an API key and are billed per use, not by your Pro or Max plan.
+- **Your phone, while your computer sleeps:** the phone keeps what it last saw and opens it when your computer is offline. Messages and answers you send wait in your relay, sealed so it can't read them, and go out when the computer is back.
+- **Try the demo:** the phone apps open a demo with made-up agents before you pair anything, and `npm run demo:build` makes the same demo as a web page you can host anywhere.
+- **Run it on an always-on machine:** a Docker image, plus `bridge-ai relay setup`, `bridge-ai pair` and `bridge-ai status` for a machine with no screen, so your agents keep working with your laptop closed. See "Run it on an always-on machine" in the README.
+- **A walkthrough** the first time you open Bridge AI, on the computer and on the phone. Take it again from Settings or ⌘K.
+- **Voice notes set themselves up:** the first tap on the mic offers to download the speech model and install what's missing. Your audio still never leaves your computer.
+- **Allow what macOS asks for in one click:** when Inbox needs Full Disk Access, its card opens the right page of System Settings, shows Bridge AI in Finder so you can drag it into the list, and restarts Bridge AI so it takes effect. The Calendar card installs icalBuddy for you.
+- **Android app ready for Google Play:** it targets Android 16, the lock-screen card shows by default, and pairings are left out of backups.
+
+### Changed
+
+- **Plan usage is off until you turn it on:** reading how much of a plan is left means asking each provider with the sign-in your agents use, and some providers, Anthropic among them, don't allow other apps to use their sign-ins. Turn it on in the Usage card or Settings › General if you're comfortable with that. Cost and token stats don't need it.
+- **No more Google Fonts:** the fonts ship inside the app, so opening Bridge AI no longer contacts Google.
+- **Terms of use:** [TERMS.md](TERMS.md) says plainly what the license means (as is, no warranty), that you're in charge of your agents and your accounts with other services, and that Bridge AI isn't affiliated with any of them. The privacy policy ([PRIVACY.md](PRIVACY.md)) now covers everything above.
+
+### Fixes
+
+- **Mic on the phone:** it listened, then nothing happened, because the speech model was missing and the error was hidden. It now says what's needed and offers to set it up.
+- **Send now** no longer wraps onto two lines on a phone.
+- **Chat for new Claude Code users:** with no `~/.claude/projects` folder yet, Chat showed an error instead of an empty conversation.
+- **Choosing a Cloudflare account** while setting up the relay could never finish. Fixed.
+- **Codex sign-in on Linux with no desktop** now shows a code to enter on another device.
+
 ## 2.3.0
 
 Review and ship from Changes, undo one reply, an optional branch of its own for each agent, notifications that take you to the answer, and no more freezes while macOS asks for access to your folders.

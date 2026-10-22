@@ -86,7 +86,8 @@ export function question(ansi) {
   const id = crypto.createHash('sha256').update(JSON.stringify([q.kind, q.title, q.ask, q.tabs.map((t) => t.label), q.options.map((o) => [o.n, o.label, o.desc]), !!q.other, !!q.chat])).digest('base64url').slice(0, 22)
   return { text, id, simple }
 }
-const asking = (paneId) => (rt ? rt.read(paneId, 60).then(question, () => null) : Promise.resolve(null))
+// A cloud agent (cloud.js) has no screen: it says what it's waiting for itself.
+const asking = (a) => (a.cloud ? Promise.resolve(a.cloud.ask ? { text: a.cloud.ask, simple: null } : null) : rt ? rt.read(a.paneId, 60).then(question, () => null) : Promise.resolve(null))
 
 // ---------- Answer buttons ----------
 // Each button carries a token signed with a key that lasts only as long as this server, bound to
@@ -148,12 +149,12 @@ export function onFleet(fleet, cfg = {}) {
     const changed = before ? before.status !== a.status || before.seq !== a.seq : primed
     if (!changed || muted.has(a.paneId)) continue
     const label = a.chief ? 'Chief of staff' : a.title || a.tab || a.workspace || 'An agent'
-    const where = [a.workspace, a.tab && a.tab !== label ? a.tab : null].filter(Boolean).join(' › ')
+    const where = a.cloud ? [`${a.cloud.label} cloud`, a.cloud.repo].filter(Boolean).join(' · ') : [a.workspace, a.tab && a.tab !== label ? a.tab : null].filter(Boolean).join(' › ')
     if (a.status === 'blocked' && want.needsYou !== false) {
       // Say what it's asking, so you know whether it can wait.
-      asking(a.paneId).then((q) => send({ kind: 'needs-you', title: `${label} needs you`, body: q?.text || where || 'Open Bridge AI to answer', paneId: a.paneId, url: linkTo(a.paneId), tag: `agent-${a.paneId}`, actions: want.actions === false ? [] : buttons(a, q), ...reach(cfg) })).catch(() => {})
+      asking(a).then((q) => send({ kind: 'needs-you', title: `${label} needs you`, body: q?.text || where || 'Open Bridge AI to answer', paneId: a.paneId, url: linkTo(a.paneId), tag: `agent-${a.paneId}`, actions: want.actions === false ? [] : buttons(a, q), ...reach(cfg) })).catch(() => {})
     } else if (a.status === 'done' && want.finished !== false) {
-      send({ kind: 'finished', title: `${label} finished`, body: where || 'Open Bridge AI to see the result', paneId: a.paneId, url: `/?agent=${encodeURIComponent(a.paneId)}`, tag: `agent-${a.paneId}`, ...reach(cfg) })
+      send({ kind: 'finished', title: `${label} ${a.cloud?.failed ? 'failed' : 'finished'}`, body: where || 'Open Bridge AI to see the result', paneId: a.paneId, url: `/?agent=${encodeURIComponent(a.paneId)}`, tag: `agent-${a.paneId}`, ...reach(cfg) })
     }
   }
   primed = true

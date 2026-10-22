@@ -2,6 +2,7 @@
 // serving its last good value (flagged stale) if a refresh fails.
 import { execFile } from 'node:child_process'
 import { localBin, IS_WIN } from './paths.js'
+import * as accounts from './accounts.js'
 
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36'
 
@@ -31,10 +32,13 @@ async function getJSON(url, timeout = 10000, ua = UA) {
 
 // ---------- Quota (quota-axi) ----------
 
-function runQuotaAxi(maxAge) {
+// provider: just that one; env: added to ours (an account's config folder); allow: let macOS ask
+// for the Keychain once (only when you click Allow).
+function runQuotaAxi(maxAge, { provider, env, allow } = {}) {
   const bin = localBin('quota-axi')
+  const args = [...(provider ? ['--provider', provider] : []), '--json', '--full', '--max-age', maxAge, ...(allow ? ['--allow-keychain-prompt'] : [])]
   return new Promise((resolve, reject) => {
-    execFile(bin, ['--json', '--full', '--max-age', maxAge], { shell: IS_WIN, timeout: 120000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
+    execFile(bin, args, { shell: IS_WIN, timeout: 120000, maxBuffer: 8 * 1024 * 1024, env: env ? { ...process.env, ...env } : undefined }, (err, stdout) => {
       if (err && !stdout) return reject(err)
       try { resolve(JSON.parse(stdout)) } catch (e) { reject(e) }
     })
@@ -44,6 +48,8 @@ function runQuotaAxi(maxAge) {
 const STATUS_HINTS = {
   keychain_prompt_required: 'Run: npx quota-axi --provider claude --allow-keychain-prompt, then choose Always Allow',
 }
+// Readings macOS holds back until you allow Keychain access once (the Allow button).
+const NEEDS_ALLOW = new Set(['keychain_prompt_required', 'keychain_access_denied', 'keychain_prompt_timeout'])
 
 function normalizeProvider(p) {
   const avail = p.quotaSemantics?.effectiveAvailability || []
@@ -55,6 +61,7 @@ function normalizeProvider(p) {
     status: p.state?.status || 'unknown',
     error: p.state?.error || null,
     hint: STATUS_HINTS[p.state?.error] || null,
+    allow: NEEDS_ALLOW.has(p.state?.error),
     notSetUp: !!p.notSetUp,
     usable,
     percentRemaining: primary?.effectivePercentRemaining ?? null,
@@ -75,26 +82,72 @@ function normalizeProvider(p) {
   }
 }
 
+// providers: your usual logins, as before. accounts: every account of the agents that can have
+// several (accounts.js), each with its own reading; the usual login is that kind's Default.
 export function makeQuota(cfg) {
   const ttl = (cfg.quota?.ttlMinutes || 5) * 60 * 1000
+  const maxAge = `${Math.max(1, cfg.quota?.ttlMinutes || 5)}m`
   // Reused (cached) quota-axi readings omit account identity; remember it from fresh reads.
-  const accounts = {}
-  return cached(ttl, async () => {
-    let raw = await runQuotaAxi(`${Math.max(1, cfg.quota?.ttlMinutes || 5)}m`)
-    const missing = (raw.providers || []).some((p) => p.state?.status === 'fresh' && !p.account && !accounts[p.provider])
+  const who = {}
+  const remember = (key, p) => { if (p.account) who[key] = p.account; else if (who[key]) p.account = who[key] }
+  const base = cached(ttl, async () => {
+    let raw = await runQuotaAxi(maxAge)
+    const missing = (raw.providers || []).some((p) => p.state?.status === 'fresh' && !p.account && !who[p.provider])
     if (missing) raw = await runQuotaAxi('0s')
-    for (const p of raw.providers || []) {
-      if (p.account) accounts[p.provider] = p.account
-      else if (accounts[p.provider]) p.account = accounts[p.provider]
-    }
-    let providers = (raw.providers || []).map(normalizeProvider)
-    if (cfg.quota?.hideNotSetUp !== false) providers = providers.filter((p) => !p.notSetUp)
+    for (const p of raw.providers || []) remember(p.provider, p)
+    const all = (raw.providers || []).map(normalizeProvider)
+    for (const kind of new Set(all.map((p) => p.provider))) if (accounts.supports(kind)) accounts.noteQuota(`${kind}-default`, all.find((p) => p.provider === kind))
+    const providers = cfg.quota?.hideNotSetUp !== false ? all.filter((p) => !p.notSetUp) : all
     // quota-axi's spendPriority: higher means "spend this first" (use it before it resets).
     const best = providers
       .filter((p) => p.usable && p.percentRemaining > 5 && p.spendPriority != null)
       .sort((a, b) => b.spendPriority - a.spendPriority)[0]
     return { generatedAt: raw.generatedAt, providers, bestNow: best?.provider || null }
   })
+
+  // Extra accounts: the same reading for that one agent, with the account's folder in the
+  // environment so quota-axi reads its login (on macOS, its own Keychain item). Each is cached on
+  // its own and read in parallel, so a new account shows up on the next look and a slow one
+  // doesn't hold up the rest.
+  const extra = new Map() // account id -> cached reading
+  const readerOf = (t) => {
+    if (!extra.has(t.id)) {
+      extra.set(t.id, cached(ttl, async () => {
+        const raw = await runQuotaAxi(maxAge, { provider: t.kind, env: t.env })
+        // Codex also answers for other logins it finds (Pi's); keep this folder's own.
+        const lanes = (raw.providers || []).filter((p) => p.provider === t.kind)
+        const p = lanes.find((x) => x.accountKeys?.includes('codex-home')) || lanes.find((x) => !x.accountKeys?.some((k) => k.startsWith('openai-codex')))
+        if (p) remember(t.id, p)
+        return { reading: p ? normalizeProvider(p) : null }
+      }))
+    }
+    return extra.get(t.id)
+  }
+  const failed = (e) => ({ status: 'error', error: e.message, usable: false, percentRemaining: null, windows: [] })
+
+  // Off unless you turn it on (the Usage card, or quota.read in settings): reading how much of a
+  // plan is left means asking each provider with the sign-in your agents use here, and some
+  // providers' terms don't allow other apps to do that.
+  const off = () => !cfg.quota?.read
+  const quota = async (force = false) => {
+    if (off()) return { generatedAt: null, providers: [], bestNow: null, off: true, accounts: accounts.groups() }
+    const targets = accounts.quotaTargets()
+    const [q, more] = await Promise.all([base(force), Promise.all(targets.map((t) => readerOf(t)(force).then((v) => v.reading, failed)))])
+    targets.forEach((t, i) => accounts.noteQuota(t.id, more[i]))
+    return { ...q, accounts: accounts.groups() }
+  }
+  // Allow: quota-axi once with --allow-keychain-prompt for that account, so macOS shows its
+  // Keychain window (Always Allow lets later reads through without asking), then read it again.
+  quota.allow = async (id) => {
+    if (off()) throw new Error('Turn on plan usage first (Usage card)')
+    // Your usual login of any provider (Copilot's CLI asks too), or an extra account.
+    const t = /-default$/.test(id) ? { id, kind: id.replace(/-default$/, '') } : accounts.quotaTargets().find((x) => x.id === id)
+    if (!t || !/^[a-z][a-z0-9-]*$/.test(t.kind)) throw new Error('No such account')
+    await runQuotaAxi('0', { provider: t.kind, env: t.env, allow: true })
+    await (t.env ? readerOf(t)(true) : base(true))
+    return quota()
+  }
+  return quota
 }
 
 // ---------- Weather (Open-Meteo, no key) ----------

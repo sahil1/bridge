@@ -1,10 +1,12 @@
 // Settings › Providers: which agents are signed in, and the model providers Bridge AI can hand
 // keys for. Cards in a grid by group; clicking one opens its editor in place.
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { api } from '../../api.js'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { api, refetch } from '../../api.js'
 import Icon from '../Icon.jsx'
+import { AllowKeychain, leftOf, level } from '../AccountMenu.jsx'
 import ProviderIcon, { AgentIcon } from './ProviderIcon.jsx'
 import { GROUPS, AGENT_LABEL, providerChip, agentChip } from './providerCatalog.js'
+import CloudKeys from './CloudKeys.jsx'
 import './providers.css'
 
 function Chip({ tone, children, title }) {
@@ -52,8 +54,29 @@ function AgentsStrip({ subs, error, onRefresh, refreshing }) {
   )
 }
 
+// Auto: new agents start on whichever account has the most left at the time.
+function AutoRow({ k, onChange }) {
+  const [err, setErr] = useState(null)
+  const on = k.setting === 'auto'
+  const pick = k.accounts.find((a) => a.id === k.pick)
+  const use = async () => {
+    setErr(null)
+    try { await api(`/accounts/active/${k.kind}`, { method: 'POST', body: { id: 'auto' } }); refetch('/quota'); onChange() } catch (e) { setErr(e.message) }
+  }
+  return (
+    <li className={`pv-acct ${on ? 'on' : ''}`}>
+      <label className="pv-acct-use" title="New agents start on the account with the most left">
+        <input type="radio" name={`acct-${k.kind}`} checked={on} onChange={use} />
+      </label>
+      <span className="pv-acct-name">Auto</span>
+      <span className="muted small">The account with the most left{pick ? `, now ${pick.label}` : ''}</span>
+      {err && <span className="pv-msg bad" role="status"><Icon name="alert" size={12} />{err}</span>}
+    </li>
+  )
+}
+
 // More than one sign-in per agent (work and personal, say). The active one is used by new agents.
-function AccountRow({ a, kind, onChange, onOpenAgent }) {
+function AccountRow({ a, kind, setting, pick, onChange, onOpenAgent }) {
   const [busy, setBusy] = useState(null)
   const [err, setErr] = useState(null)
   const [renaming, setRenaming] = useState(false)
@@ -61,18 +84,21 @@ function AccountRow({ a, kind, onChange, onOpenAgent }) {
   const act = async (what) => {
     setBusy(what); setErr(null)
     try {
-      if (what === 'use') await api(`/accounts/active/${kind}`, { method: 'POST', body: { id: a.id } })
+      if (what === 'use') { await api(`/accounts/active/${kind}`, { method: 'POST', body: { id: a.id } }); refetch('/quota') }
       if (what === 'login') { const r = await api(`/accounts/${a.id}/login`, { method: 'POST' }); onOpenAgent?.(r.openId || r.paneId) }
       if (what === 'remove') { if (!window.confirm(`Sign out of ${a.label} and remove it from Bridge AI?`)) return; await api(`/accounts/${a.id}`, { method: 'DELETE' }) }
       if (what === 'rename') { await api(`/accounts/${a.id}`, { method: 'PATCH', body: { label: name } }); setRenaming(false) }
       onChange()
     } catch (e) { setErr(e.message) } finally { setBusy(null) }
   }
-  const chip = a.signedIn ? { tone: 'good', text: a.plan ? `Signed in · ${a.plan}` : 'Signed in' } : a.signedIn === false ? { tone: 'off', text: 'Not signed in' } : { tone: 'unknown', text: 'Unknown' }
+  const plan = a.statusPlan || a.plan
+  const chip = a.signedIn ? { tone: 'good', text: plan ? `Signed in · ${plan}` : 'Signed in' } : a.signedIn === false ? { tone: 'off', text: 'Not signed in' } : { tone: 'unknown', text: 'Unknown' }
+  const on = setting === a.id
+  const left = leftOf(a)
   return (
-    <li className={`pv-acct ${a.active ? 'on' : ''}`}>
-      <label className="pv-acct-use" title={a.active ? 'New agents use this account' : 'Use this account for new agents'}>
-        <input type="radio" name={`acct-${kind}`} checked={a.active} onChange={() => act('use')} disabled={!!busy} />
+    <li className={`pv-acct ${on ? 'on' : ''}`}>
+      <label className="pv-acct-use" title={on ? 'New agents use this account' : 'Use this account for new agents'}>
+        <input type="radio" name={`acct-${kind}`} checked={on} onChange={() => act('use')} disabled={!!busy} />
       </label>
       {renaming
         ? <form className="pv-acct-rename" onSubmit={(e) => { e.preventDefault(); act('rename') }}>
@@ -82,6 +108,8 @@ function AccountRow({ a, kind, onChange, onOpenAgent }) {
           </form>
         : <span className="pv-acct-name">{a.label}{a.isDefault && <span className="muted small"> (your usual login)</span>}</span>}
       <Chip tone={chip.tone}>{chip.text}</Chip>
+      {left && <span className={`small t-${level(left.pct)}`} title="Left of the tighter of its 5-hour and weekly windows">{left.pct}% left <span className="muted">{left.win}</span></span>}
+      {setting === 'auto' && pick === a.id && <span className="best-tag">auto</span>}
       <span className="pv-spacer" />
       {err && <span className="pv-msg bad" role="status"><Icon name="alert" size={12} />{err}</span>}
       <button type="button" className="btn small" onClick={() => act('login')} disabled={!!busy} title="Opens the sign-in flow in a terminal tab (Setup space)">
@@ -89,11 +117,13 @@ function AccountRow({ a, kind, onChange, onOpenAgent }) {
       </button>
       {!a.isDefault && !renaming && <button type="button" className="ghost-btn" onClick={() => setRenaming(true)} aria-label={`Rename ${a.label}`} title="Rename"><Icon name="edit" size={12} /></button>}
       {!a.isDefault && <button type="button" className="ghost-btn" onClick={() => act('remove')} disabled={!!busy} aria-label={`Remove ${a.label}`} title="Sign out and remove"><Icon name="trash" size={12} /></button>}
+      {a.allow && <AllowKeychain id={a.id} onDone={onChange} />}
     </li>
   )
 }
 
-function AccountsSection({ onOpenAgent }) {
+function AccountsSection({ onOpenAgent, focus, ready }) {
+  const ref = useRef(null)
   const [kinds, setKinds] = useState(null)
   const [err, setErr] = useState(null)
   const [adding, setAdding] = useState(null) // kind
@@ -103,6 +133,9 @@ function AccountsSection({ onOpenAgent }) {
   useEffect(() => { load() }, [load])
   // Signing in happens in a terminal; check again when you come back to this window.
   useEffect(() => { const f = () => load(true); window.addEventListener('focus', f); return () => window.removeEventListener('focus', f) }, [load])
+  // Opened from Add account: scroll here once this list and the agents above it are in.
+  const shown = !!kinds && ready
+  useEffect(() => { if (focus === 'accounts' && shown) ref.current?.scrollIntoView({ block: 'start', behavior: 'smooth' }) }, [focus, shown])
   const add = async (kind) => {
     setAddErr(null)
     try {
@@ -117,17 +150,18 @@ function AccountsSection({ onOpenAgent }) {
   const list = (kinds || []).filter((k) => k.installed)
   if (!list.length) return null
   return (
-    <section className="pv-sec">
+    <section className="pv-sec" id="pv-accounts" ref={ref}>
       <div className="pv-head">
         <h4>Accounts</h4>
-        <span className="muted small">Several sign-ins per agent, like work and personal. New agents use the one you pick.</span>
+        <span className="muted small">Several sign-ins per agent, like work and personal. New agents use the one you pick, or Auto picks the one with the most left.</span>
         <button type="button" className="ghost-btn pv-head-btn" onClick={() => load(true)} aria-label="Check accounts again"><Icon name="refresh" size={12} />Recheck</button>
       </div>
       {list.map((k) => (
         <div key={k.kind} className="pv-acct-group">
           <div className="pv-acct-kind"><AgentIcon kind={k.kind} size={20} name={k.label} /><b>{k.label}</b></div>
           <ul className="pv-accts">
-            {k.accounts.map((a) => <AccountRow key={a.id} a={a} kind={k.kind} onChange={() => load(true)} onOpenAgent={onOpenAgent} />)}
+            {k.accounts.length > 1 && <AutoRow k={k} onChange={() => load(true)} />}
+            {k.accounts.map((a) => <AccountRow key={a.id} a={a} kind={k.kind} setting={k.setting} pick={k.pick} onChange={() => load(true)} onOpenAgent={onOpenAgent} />)}
           </ul>
           {adding === k.kind
             ? <form className="pv-acct-add" onSubmit={(e) => { e.preventDefault(); add(k.kind) }}>
@@ -139,7 +173,7 @@ function AccountsSection({ onOpenAgent }) {
             : <button type="button" className="ghost-btn pv-more" onClick={() => { setAdding(k.kind); setLabel('') }}><Icon name="plus" size={12} />Add {k.label} account</button>}
         </div>
       ))}
-      <p className="pv-note">Sign in uses whichever account your browser is signed in to, so switch accounts there first (or open the link it prints in a private window). Each account keeps only its own login; settings, skills and session history are shared with your usual setup. Agents already running keep the account they started with.</p>
+      <p className="pv-note">Sign in uses whichever account your browser is signed in to, so switch accounts there first (or open the link it prints in a private window). Each account keeps only its own login; settings, skills and session history are shared with your usual setup, so cost and token history in Usage covers every account together. Agents already running keep the account they started with; the ⋯ menu on a Claude or Codex agent can continue its conversation on another account.</p>
     </section>
   )
 }
@@ -276,7 +310,7 @@ function Card({ p, open, onToggle, children }) {
   )
 }
 
-export default function Providers({ onOpenAgent }) {
+export default function Providers({ onOpenAgent, focus }) {
   const [providers, setProviders] = useState(null)
   const [subs, setSubs] = useState(null)
   const [err, setErr] = useState(null)
@@ -304,7 +338,8 @@ export default function Providers({ onOpenAgent }) {
       </p>
 
       <AgentsStrip subs={subs} error={subsErr} onRefresh={() => loadSubs(true)} refreshing={refreshing} />
-      <AccountsSection onOpenAgent={onOpenAgent} />
+      <AccountsSection onOpenAgent={onOpenAgent} focus={focus} ready={!!subs || !!subsErr} />
+      <CloudKeys focus={focus} />
 
       {err && <p className="pv-note pv-err">Couldn't load providers: {err} <button type="button" className="ghost-btn" onClick={loadProviders}>Retry</button></p>}
       {!providers && !err && <div className="pv-grid" aria-busy="true">{[0, 1, 2, 3, 4, 5].map((i) => <div key={i} className="pv-card pv-skel-card" />)}</div>}

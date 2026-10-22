@@ -23,8 +23,8 @@ console.log('Copying Bridge AI into the app...')
 fs.rmSync(OUT, { recursive: true, force: true })
 fs.mkdirSync(OUT, { recursive: true })
 // The server shares two files with the UI: the MCP server catalog, and how a question is read
-// off an agent's screen.
-const COPY = ['server', 'scripts', 'chief', 'relay', 'dist', 'src/components/settings/mcpCatalog.js', 'src/components/questionParse.js', 'package.json', 'package-lock.json', '.npmrc', 'config.example.json', 'LICENSE', 'NOTICE', 'README.md']
+// off an agent's screen. shared/ holds code the server and the phone apps both run (cloud agents).
+const COPY = ['server', 'shared', 'scripts', 'chief', 'relay', 'dist', 'src/components/settings/mcpCatalog.js', 'src/components/questionParse.js', 'package.json', 'package-lock.json', '.npmrc', 'config.example.json', 'LICENSE', 'NOTICE', 'README.md']
 // Only files git knows about: tracked, or new and not ignored (dist/ is built just above). So
 // nothing ignored, like your settings or a filled-in chief of staff note, rides along into the
 // app; the privacy check below looks at the rest.
@@ -56,7 +56,7 @@ const scan = (p) => {
   for (const m of src.matchAll(/(?:from\s+|import\(\s*|require\(\s*)['"]((?:@[^/'"]+\/)?[^./'"][^/'"]*)/g)) used.add(m[1])
   for (const m of src.matchAll(/localBin\(\s*['"]([^'"]+)/g)) used.add(m[1])
 }
-for (const d of ['server', 'scripts', 'chief']) scan(path.join(OUT, d))
+for (const d of ['server', 'shared', 'scripts', 'chief']) scan(path.join(OUT, d))
 const pkgFile = path.join(OUT, 'package.json')
 const pkg = JSON.parse(fs.readFileSync(pkgFile, 'utf8'))
 const all = Object.keys(pkg.dependencies || {})

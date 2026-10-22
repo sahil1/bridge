@@ -1,6 +1,7 @@
 package dev.bridgeai.phone
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Context
@@ -13,11 +14,13 @@ import android.os.Bundle
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowInsets
 import android.webkit.JavascriptInterface
 import android.webkit.PermissionRequest
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -26,7 +29,11 @@ import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.window.OnBackInvokedCallback
+import android.window.OnBackInvokedDispatcher
+import androidx.webkit.WebViewAssetLoader
 import com.google.zxing.integration.android.IntentIntegrator
+import com.journeyapps.barcodescanner.CaptureActivity
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -63,6 +70,9 @@ class MainActivity : Activity() {
         // For testing on an emulator, which can't scan: adb shell am start -n dev.bridgeai.phone/.MainActivity --es pair <link>
         val testLink = if (BuildConfig.DEBUG) intent.getStringExtra("pair") else null
         if (testLink != null) return usePairingLink(testLink)
+        // ...and --es open demo goes straight to a bundled UI.
+        val testOpen = if (BuildConfig.DEBUG) intent.getStringExtra("open") else null
+        if (testOpen != null && hasBundled(testOpen)) return openBundled(testOpen)
         pendingAgent = intent.getStringExtra(AgentsService.AGENT)
         val r = relay
         if (r == null) showStart(null) else openPage(r)
@@ -83,12 +93,22 @@ class MainActivity : Activity() {
     private fun showStart(error: String?) {
         web?.destroy()
         web = null
+        showingBundled = false
+        updateBack()
         val dp = resources.displayMetrics.density
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL or Gravity.CENTER_VERTICAL
             setPadding((24 * dp).toInt(), 0, (24 * dp).toInt(), 0)
             setBackgroundColor(Color.parseColor("#0B0D11"))
+        }
+        // From Android 15 the app draws under the bars and the keyboard (edge-to-edge), so
+        // adjustResize no longer makes room: keep the form clear of them. (The page does it itself.)
+        if (Build.VERSION.SDK_INT >= 35) box.setOnApplyWindowInsetsListener { v, insets ->
+            val bars = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+            val keyboard = insets.getInsets(WindowInsets.Type.ime())
+            v.setPadding(bars.left + (24 * dp).toInt(), bars.top, bars.right + (24 * dp).toInt(), maxOf(bars.bottom, keyboard.bottom))
+            WindowInsets.CONSUMED
         }
         val icon = ImageView(this).apply { setImageResource(R.mipmap.ic_launcher) }
         box.addView(icon, LinearLayout.LayoutParams((64 * dp).toInt(), (64 * dp).toInt()))
@@ -116,7 +136,32 @@ class MainActivity : Activity() {
         box.addView(field, wide)
         box.addView(Button(this).apply { text = "Pair"; setOnClickListener { usePairingLink(field.text.toString().trim()) } }, wide)
         if (error != null) box.addView(TextView(this).apply { text = error; setTextColor(Color.parseColor("#F87171")); gravity = Gravity.CENTER }, wide)
+        // No computer yet: look around Bridge AI on made-up agents first.
+        if (hasBundled("demo")) {
+            box.addView(TextView(this).apply {
+                text = "No computer to pair yet?"
+                textSize = 14f
+                setTextColor(Color.parseColor("#9AA1AD"))
+                gravity = Gravity.CENTER
+                setPadding(0, (22 * dp).toInt(), 0, 0)
+            })
+            box.addView(Button(this).apply { text = "Try the demo"; setOnClickListener { openBundled("demo") } }, wide)
+        }
         setContentView(box)
+    }
+
+    // ---------- Bridge AI's UI bundled in the app ----------
+    // Built into the app's assets (app/build.gradle.kts) and served from an https address of the
+    // app's own, so the page works as it does on the web. It runs with no computer behind it.
+    private val bundled by lazy { WebViewAssetLoader.Builder().addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this)).build() }
+    private var showingBundled = false
+
+    private fun hasBundled(name: String) = runCatching { assets.list(name)?.contains("index.html") == true }.getOrDefault(false)
+
+    private fun openBundled(name: String) {
+        showingBundled = true
+        val w = web ?: makeWebView().also { web = it; setContentView(it) }
+        w.loadUrl("https://$BUNDLED_HOST/assets/$name/index.html")
     }
 
     private fun startScan() {
@@ -125,6 +170,7 @@ class MainActivity : Activity() {
             setPrompt("Point at the code on your computer")
             setBeepEnabled(false)
             setOrientationLocked(false)
+            setCaptureActivity(ScanActivity::class.java)
         }.initiateScan()
     }
 
@@ -145,6 +191,7 @@ class MainActivity : Activity() {
 
     // ---------- the page ----------
     private fun openPage(url: String) {
+        showingBundled = false
         val w = web ?: makeWebView().also { web = it; setContentView(it) }
         w.loadUrl(url)
     }
@@ -161,16 +208,22 @@ class MainActivity : Activity() {
             settings.userAgentString = "${settings.userAgentString} BridgeAIApp/${BuildConfig.VERSION_NAME}"
             addJavascriptInterface(Bridge(), "bridgeAndroid")
             webViewClient = object : WebViewClient() {
+                override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) = updateBack()
+
                 override fun onPageFinished(view: WebView, url: String) {
                     val id = pendingAgent ?: return
                     pendingAgent = null
                     view.evaluateJavascript("window.bridgeOpenAgent && window.bridgeOpenAgent(${JSONObject.quote(id)})", null)
                 }
 
+                // The bundled UI's files, from the app.
+                override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
+                    if (request.url.host == BUNDLED_HOST) bundled.shouldInterceptRequest(request.url) else null
+
                 // Pages other than your relay (links in messages, a server's page) open in the browser.
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                     if (!request.isForMainFrame) return false
-                    val host = Uri.parse(relay ?: "").host
+                    val host = if (showingBundled) BUNDLED_HOST else Uri.parse(relay ?: "").host
                     if (request.url.host == host) return false
                     runCatching { startActivity(Intent(Intent.ACTION_VIEW, request.url)) }
                     return true
@@ -239,6 +292,10 @@ class MainActivity : Activity() {
             relay = next
             if (next != null) openPage(next) else showStart(null)
         }
+
+        // Back to the start screen, from a bundled UI (the demo's "Pair a computer").
+        @JavascriptInterface
+        fun home() = runOnUiThread { if (showingBundled) showStart(null) }
     }
 
     private var askedNotifications = false
@@ -279,10 +336,32 @@ class MainActivity : Activity() {
         if (requestCode == NOTIFY && results.firstOrNull() == PackageManager.PERMISSION_GRANTED) lastActivity?.let { AgentsService.show(applicationContext, it) }
     }
 
-    @Deprecated("Back goes back in the page first")
-    override fun onBackPressed() {
+    // Back goes back in the page first. From Android 13 the system asks ahead whether the app
+    // takes Back (predictive back, the only way from Android 16), so the app takes it only while
+    // the page has somewhere to go back to; otherwise it's Android's own. A bundled UI goes back
+    // to the start screen last.
+    private fun back() {
         val w = web
-        if (w != null && w.canGoBack()) w.goBack() else super.onBackPressed()
+        if (w != null && w.canGoBack()) w.goBack() else if (showingBundled) showStart(null)
+    }
+    private val pageBack: Any? = if (Build.VERSION.SDK_INT >= 33) OnBackInvokedCallback { back() } else null
+    private var backTaken = false
+
+    private fun updateBack() {
+        if (Build.VERSION.SDK_INT < 33) return
+        val take = web?.canGoBack() == true || showingBundled
+        if (take == backTaken) return
+        backTaken = take
+        val cb = pageBack as OnBackInvokedCallback
+        if (take) onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, cb)
+        else onBackInvokedDispatcher.unregisterOnBackInvokedCallback(cb)
+    }
+
+    // ...and Android 12 and older, which call this instead.
+    @Deprecated("Android 12 and older")
+    @SuppressLint("GestureBackNavigation")
+    override fun onBackPressed() {
+        if (web?.canGoBack() == true || showingBundled) back() else super.onBackPressed()
     }
 
     override fun onDestroy() {
@@ -294,6 +373,8 @@ class MainActivity : Activity() {
         private const val FILES = 1
         private const val MIC = 2
         private const val NOTIFY = 3
+        // The app's own address for what it serves itself (WebViewAssetLoader's default).
+        private const val BUNDLED_HOST = "appassets.androidplatform.net"
     }
 }
 
@@ -310,5 +391,18 @@ class PageView(context: Context) : WebView(context) {
 
     override fun onWindowVisibilityChanged(visibility: Int) {
         super.onWindowVisibilityChanged(if (keepRunning) View.VISIBLE else visibility)
+    }
+}
+
+// The QR scanner. From Android 15 it draws under the navigation bar (edge-to-edge), which would
+// hide its prompt at the bottom; this keeps it clear.
+class ScanActivity : CaptureActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        if (Build.VERSION.SDK_INT >= 35) findViewById<View>(android.R.id.content).setOnApplyWindowInsetsListener { v, insets ->
+            val bars = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+            v.setPadding(bars.left, 0, bars.right, bars.bottom)
+            insets
+        }
     }
 }

@@ -38,7 +38,7 @@ export default function Onboarding({ onDone }) {
     return (
       <div className="onb">
         <div className="onb-card">
-          <img src="/mark.svg" alt="" width="56" height="56" className="onb-logo" />
+          <img src={`${import.meta.env.BASE_URL}mark.svg`} alt="" width="56" height="56" className="onb-logo" />
           <h1>Welcome to Bridge AI</h1>
           {err ? <p className="error-text">{err}</p> : <p className="muted">Looking at what's on this computer…</p>}
         </div>
@@ -53,7 +53,7 @@ export default function Onboarding({ onDone }) {
   return (
     <div className="onb">
       <div className="onb-card">
-        <img src="/mark.svg" alt="" width="56" height="56" className="onb-logo" />
+        <img src={`${import.meta.env.BASE_URL}mark.svg`} alt="" width="56" height="56" className="onb-logo" />
         {step === 'done' ? (
           <>
             <h1>You're set{pick?.name ? `, ${pick.name}` : ''}</h1>

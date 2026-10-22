@@ -10,6 +10,9 @@
 // Kept in ~/.bridge-ai/relay.json (only you can read it): the relay's address and the token that
 // lets this computer (and only it) connect to it, this computer's key, the phones you paired, and
 // how to reach Cloudflare to update the relay.
+//
+// Messages a phone sent while this computer was offline wait in the relay, sealed for this
+// computer; it takes them as soon as it's connected again (inbox.js opens, checks and sends each).
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -20,7 +23,8 @@ import WebSocket from 'ws'
 import { dataFile, ensureDir, IS_MAC, IS_WIN } from './paths.js'
 import { loginPath } from './agents.js'
 import { bundle } from '../relay/build.js'
-import { computerWelcome, newPairCode, splitCode, formatCode, plainFrame, readPlain, b64u, K, pack, unpack, json, utf8, CHUNK } from '../relay/web/link.js'
+import { computerWelcome, newPairCode, splitCode, formatCode, plainFrame, readPlain, b64u, boxId, K, pack, unpack, json, utf8, CHUNK } from '../relay/web/link.js'
+import * as inbox from './inbox.js'
 
 const FILE = dataFile('relay.json')
 const WRANGLER = 'wrangler@4.149.0'
@@ -120,10 +124,16 @@ function connect() {
       if (Date.now() - pongAt > 75000) return ws.terminate() // the relay went quiet: start over
       try { ws.send('ping') } catch { /* closing */ }
     }, 25000)
+    roster('take').catch(() => {})
     checkBuild().catch(() => {})
   })
   ws.on('message', (data, isBinary) => {
-    if (!isBinary) { pongAt = Date.now(); return }
+    if (!isBinary) {
+      pongAt = Date.now()
+      const s = String(data)
+      if (s[0] === '{') try { const m = JSON.parse(s); if (m.t === 'note' && m.note) onNote(m.box, m.note) } catch { /* not ours */ }
+      return
+    }
     const b = new Uint8Array(data)
     const id = Buffer.from(b.buffer, b.byteOffset, b.byteLength).readUInt32BE(1)
     if (b[0] === OP.OPEN) conns.set(id, new Conn(id))
@@ -169,6 +179,7 @@ const toRelay = (op, id, payload) => {
   link.send(Buffer.concat([h, p]))
   return true
 }
+const toRelayText = (obj) => { if (link?.readyState === 1) link.send(JSON.stringify(obj)) }
 // Big answers (a picture, a PDF) go out in pieces; wait while the connection is backed up.
 const drained = async () => { while (link && link.bufferedAmount > 4 * 1024 * 1024) await new Promise((r) => setTimeout(r, 20)) }
 
@@ -243,6 +254,7 @@ class Conn {
       pairing.uses++
       device = { id: randomBytes(6).toString('base64url'), key: r.newDevice.key, name: r.newDevice.name || 'Phone', addedAt: new Date().toISOString() }
       conf.devices = [...(conf.devices || []), device]
+      roster().catch(() => {})
     }
     device = (conf.devices || []).find((d) => d.id === device.id)
     device.lastSeen = new Date().toISOString()
@@ -316,9 +328,40 @@ export function stopPairing() { pairing = null; return status() }
 export function removeDevice(id) {
   conf.devices = (conf.devices || []).filter((d) => d.id !== id)
   save()
+  roster().catch(() => {})
   // A moment later, so a phone removing itself still gets the answer.
   setTimeout(() => { for (const c of [...conns.values()]) if (c.device?.id === id) c.close() }, 500)
   return status()
+}
+
+// ---------- messages a phone left while this computer was offline ----------
+// Taken from the relay when this computer connects (the relay also hears which phones are paired,
+// so no one else can leave any), and as they come while it stays connected. One at a time, oldest
+// first. Done with each, the relay deletes it and keeps the receipt for the phone.
+const boxes = () => Promise.all((conf.devices || []).map((d) => boxId(d.key)))
+async function roster(t = 'roster') { if (link?.readyState === 1) toRelayText({ t, boxes: await boxes() }) }
+let notes = Promise.resolve()
+function onNote(box, note) {
+  notes = notes.then(async () => {
+    const r = await inbox.receive(note, { host: await key(), devices: conf.devices, base })
+    if (r.id) toRelayText({ t: 'ack', box, id: r.id, receipt: r.receipt || null })
+  }).catch((e) => console.error('relay:', e.message))
+}
+
+// The same notes over a phone's own link: an older relay can't keep them, so the phone holds them
+// until both are online; and a phone that hasn't had a receipt yet sends them again (each is still
+// acted on once). The relay is told too, so it drops its copy.
+export async function fromPhone(deviceId, body) {
+  const device = deviceId && (conf.devices || []).find((d) => d.id === deviceId)
+  if (!device) throw Object.assign(new Error('Only a paired phone sends these'), { status: 403 })
+  const box = await boxId(device.key)
+  const results = []
+  for (const note of (Array.isArray(body?.notes) ? body.notes : []).slice(0, 50)) {
+    const r = await inbox.receive(note, { host: await key(), devices: conf.devices, base, from: device.id })
+    if (r.id && r.receipt) toRelayText({ t: 'ack', box, id: r.id, receipt: r.receipt })
+    results.push({ id: r.id, ok: r.ok, ...(r.ok ? { held: r.held } : { why: r.why, text: r.text }) })
+  }
+  return { results }
 }
 
 // ---------- keeping the computer awake ----------

@@ -16,7 +16,7 @@ export const tell = (msg) => { const ch = new BroadcastChannel(CHANNEL); ch.post
 
 export function popOut(agent) {
   if (window.bridgeApp?.popOut) return window.bridgeApp.popOut(agent.paneId, nameOf(agent))
-  window.open(`/?window=${encodeURIComponent(agent.paneId)}`, `bridge-${agent.paneId}`, 'popup,width=960,height=820')
+  window.open(`?window=${encodeURIComponent(agent.paneId)}`, `bridge-${agent.paneId}`, 'popup,width=960,height=820')
 }
 
 export default function Solo({ paneId }) {

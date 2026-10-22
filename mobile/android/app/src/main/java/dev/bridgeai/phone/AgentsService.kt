@@ -41,7 +41,7 @@ class AgentsService : Service() {
     companion object {
         const val AGENT = "agent"
         private const val STATE = "state"
-        private const val CHANNEL = "agents"
+        private const val CHANNEL = "agents-at-work"
         private const val ALERTS = "needs-you"
         private const val ONGOING = 1
         private const val ENDED = 2
@@ -73,9 +73,15 @@ class AgentsService : Service() {
         }
 
         private fun channels(nm: NotificationManager) {
-            nm.createNotificationChannel(NotificationChannel(CHANNEL, "Agents at work", NotificationManager.IMPORTANCE_LOW).apply {
+            // Default importance but no sound: Android hides "silent" (low importance) ones from
+            // the lock screen unless you change its settings. A channel's importance can't be
+            // raised once made, so this is a new one in place of the first, silent "agents".
+            nm.deleteNotificationChannel("agents")
+            nm.createNotificationChannel(NotificationChannel(CHANNEL, "Agents at work", NotificationManager.IMPORTANCE_DEFAULT).apply {
                 description = "Which agents are working, on the lock screen"
                 setShowBadge(false)
+                setSound(null, null)
+                enableVibration(false)
             })
             nm.createNotificationChannel(NotificationChannel(ALERTS, "Agent needs you", NotificationManager.IMPORTANCE_HIGH).apply {
                 description = "When an agent starts waiting on you"

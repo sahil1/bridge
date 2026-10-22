@@ -1,8 +1,28 @@
 import { useEffect, useState } from 'react'
 import Icon from './Icon.jsx'
 import { Card, Updated } from './Trackers.jsx'
-import { usePoll } from '../api.js'
+import { api, usePoll, viaRelay } from '../api.js'
 import { openToday } from './today.js'
+
+// No icalBuddy yet: a button that installs it in a terminal tab you can watch (Homebrew).
+export function CalendarSetup({ error, onCheck }) {
+  const [msg, setMsg] = useState(null)
+  if (!/icalBuddy/.test(error)) return <p className="error-text">{error}</p>
+  const install = async () => {
+    try { setMsg({ openId: (await api('/fix/install', { method: 'POST', body: { what: 'icalbuddy' } })).openId }) } catch (e) { setMsg({ error: e.message }) }
+  }
+  const show = () => window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: msg.openId } }))
+  return (
+    <div className="mail-setup">
+      <p>The calendar reads macOS Calendar through icalBuddy, a small free tool from Homebrew. macOS asks once whether Bridge AI may see your calendars.</p>
+      {viaRelay ? <p className="muted small">Install it on your computer: <code>brew install ical-buddy</code></p>
+        : <button type="button" className="btn small primary" onClick={install}><Icon name="download" size={12} /> Install icalBuddy</button>}
+      {msg?.openId && <p className="muted small">Installing in a terminal tab. <button type="button" className="link-btn" onClick={show}>Show it</button></p>}
+      {msg?.error && <p className="error-text">{msg.error}</p>}
+      <button type="button" className="btn" onClick={onCheck}><Icon name="refresh" size={13} /> Check again</button>
+    </div>
+  )
+}
 
 // Today's schedule from the Mac's Calendar (your Exchange calendar plus personal ones).
 const fmt = (iso) => new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
@@ -92,7 +112,7 @@ export function Agenda() {
     <Card icon="calendar" title="Schedule" className="agenda" summary={summary}
       right={<span className="updated">{t && ahead.length > 0 && <span className="ag-left">{ahead.length} left · {dur(bookedLeft)}</span>}<Updated data={data} onRefresh={() => refresh('?refresh=1')} /></span>}>
       {!data && !error && <div className="skeleton-rows"><div /><div /></div>}
-      {error && <p className="error-text">{error}</p>}
+      {error && <CalendarSetup error={error} onCheck={() => refresh('?refresh=1')} />}
       {t && (
         <>
           {cur && (

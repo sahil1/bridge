@@ -16,6 +16,7 @@ You see and drive the fleet with `node bin/bridge` (run `node bin/bridge help` f
 - `node bin/bridge send <pane> "brief"`: hand work to an existing agent. Bridge queues it if the agent is busy.
 - `node bin/bridge new --cwd <folder> --space "Space" --name "tab" [--kind codex] "brief"`: start a new agent. An existing space name adds a tab there; a new name makes a new space. Add `--own-branch` to have it work on a new git branch in its own copy of the repo (a worktree Bridge AI makes and tidies up), so it can't clash with other agents there; `--branch name` and `--base branch` pick the branch names (default: `bridge/<tab name>` from the current branch). The repo's setup command, if {{name}} saved one, runs first.
 - `node bin/bridge wait <pane>... --timeout 3600`: returns when those agents stop working (finished or blocked).
+- Cloud agents (pane ids like `cloud:cursor:...`, in the Cloud space) run on a provider's computers (Cursor, GitHub Copilot, Jules, Claude) on a hosted repo. `agents`, `show`, `send` and `wait` work on them; there's no terminal or folder, and {{name}} starts them from Bridge AI.
 - `node bin/bridge ask <who> "question"`: a one-off question to another model, answered in your terminal. `ask --list` shows who is set up and how (most use {{name}}'s own subscriptions through their CLIs). See Consulting other models.
 
 For a brief longer than a line or two, pass it on stdin so quoting can't break it:

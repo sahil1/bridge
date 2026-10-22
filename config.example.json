@@ -9,7 +9,7 @@
   "assistant": { "kind": null, "cwd": "~" },
   "mail": { "myDomains": [] },
   "allowedHosts": [],
-  "quota": { "ttlMinutes": 5, "hideNotSetUp": true },
+  "quota": { "read": false, "ttlMinutes": 5, "hideNotSetUp": true },
   "market": {
     "indices": [["^GSPC", "S&P 500"], ["^IXIC", "NASDAQ"], ["^DJI", "DOW"]],
     "stocks": [],

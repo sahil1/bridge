@@ -14,8 +14,11 @@ function claudeFile(sessionId, cwd) {
   const root = path.join(HOME, '.claude', 'projects')
   const direct = path.join(root, cwd.replace(/[^a-zA-Z0-9]/g, '-'), `${sessionId}.jsonl`)
   if (fs.existsSync(direct)) return direct
-  // The agent may have changed directory after starting; scan project dirs.
-  for (const dir of fs.readdirSync(root)) {
+  // The agent may have changed directory after starting; scan project dirs. A Claude Code that has
+  // never saved a session has no projects folder yet: no transcript, not an error.
+  let dirs = []
+  try { dirs = fs.readdirSync(root) } catch { return null }
+  for (const dir of dirs) {
     const p = path.join(root, dir, `${sessionId}.jsonl`)
     if (fs.existsSync(p)) return p
   }

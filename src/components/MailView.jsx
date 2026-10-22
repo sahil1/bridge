@@ -2,10 +2,19 @@ import { useEffect, useMemo, useState } from 'react'
 import Icon from './Icon.jsx'
 import { usePersisted, useWidth } from './layout.jsx'
 import { api, usePoll, fmtRelative } from '../api.js'
+import PermissionFix from './PermissionFix.jsx'
 
 // Mail triage over the Mac Mail app's local index: what needs you, automated items that want
 // action, threads waiting on someone else, and an agent that can act on any message.
 const isPhone = () => /iPhone|iPad|Android/i.test(navigator.userAgent)
+
+// Why Mail can't be read yet, with buttons that take you to the right place in System Settings.
+export function MailSetup({ data, onCheck }) {
+  if (data.reason === 'noAccess') return <PermissionFix pane="full-disk" onCheck={onCheck}><p>{data.setup}</p></PermissionFix>
+  if (data.reason === 'noMail') return <PermissionFix pane="internet-accounts" grant={false} onCheck={onCheck}><p>{data.setup}</p></PermissionFix>
+  return <><p>{data.setup}</p><button className="btn" onClick={onCheck}><Icon name="refresh" size={13} /> Check again</button></>
+}
+
 export const outlookUrl = () => (isPhone() ? 'ms-outlook://' : 'https://outlook.office.com/mail/')
 const mailLink = (mid) => (mid && !isPhone() ? `message://%3c${encodeURIComponent(mid)}%3e` : null)
 
@@ -206,7 +215,7 @@ export default function MailView({ onOpenAgent, openId }) {
   }
 
   if (data && !data.available) {
-    return <div className="mailv"><div className="mail-setup pad"><p>{data.setup}</p><button className="btn" onClick={() => refresh('?refresh=1')}><Icon name="refresh" size={13} /> Check again</button></div></div>
+    return <div className="mailv"><div className="mail-setup pad"><MailSetup data={data} onCheck={() => refresh('?refresh=1')} /></div></div>
   }
   const counts = { needs: lists.needs.filter((t) => t.unread).length || lists.needs.length, action: lists.action.length, waiting: waiting.length, all: null }
   const showReader = !narrow || sel

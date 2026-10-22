@@ -5,9 +5,12 @@
 // the same setup and history, and Bridge AI finds its transcripts in the usual place.
 //
 // "Default" is the login you already have (~/.claude, ~/.codex). New agents of a kind start with
-// the account marked active; Sign in opens the agent's own login flow in a terminal tab.
-// Like the sign-in checks in providers.js, nothing here reads tokens or sends emails to the UI:
-// an account shows the name you gave it and, at most, its plan.
+// the account marked active, or with Auto, the one with the most of its usage window left at the
+// last quota reading (feeds.js reads each account's). Sign in opens the agent's own login flow in
+// a terminal tab.
+// Like the sign-in checks in providers.js, nothing here reads tokens or sends emails to the
+// account list: an account shows the name you gave it and, at most, its plan. (The quota feed
+// passes on quota-axi's account identity, as it does for your usual login.)
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
@@ -18,6 +21,9 @@ import { agentEnv, quoteCommand } from './runtime/spawn.js'
 
 const FILE = dataFile('accounts.json')
 const DIR = path.join(DATA, 'accounts')
+// A server or container with no desktop: no browser here, so a sign-in link is opened on your
+// phone or laptop, and a login that waits for the browser to call back to this machine can't finish.
+const NO_BROWSER = !IS_WIN && process.platform !== 'darwin' && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY
 
 // What each agent needs: the variable that moves its config folder, your usual folder, what to
 // share from it, and how to sign in, sign out and ask whether it's signed in.
@@ -42,7 +48,8 @@ const KINDS = {
     home: () => process.env.CODEX_HOME || path.join(HOME, '.codex'),
     share: ['config.toml', 'sessions', 'archived_sessions', 'AGENTS.md', 'prompts', 'skills', 'rules', 'hooks.json', 'plugins', 'history.jsonl'],
     shareDirs: ['sessions'],
-    login: ['login'],
+    // Codex's usual login waits for the browser on localhost:1455; with no browser here, a code instead.
+    login: NO_BROWSER ? ['login', '--device-auth'] : ['login'],
     logout: ['logout'],
     async status(bin, env) {
       const r = await run(bin, ['login', 'status'], env)
@@ -100,14 +107,45 @@ function prepare(a) {
   return dir
 }
 
+// ---------- Usage per account (feeds.js notes each reading; Auto picks by them) ----------
+const readings = new Map() // account id -> its last quota reading (feeds.js normalizeProvider)
+export const noteQuota = (id, r) => { if (r) readings.set(id, r) }
+
+// The extra accounts whose usage to read: each one's folder, in the variable the agent uses. Only
+// the path: quota-axi reads the login in it, so nothing needs linking first.
+export const quotaTargets = () => load().accounts.map((a) => ({ id: a.id, kind: a.kind, env: { [KINDS[a.kind].env]: dirOf(a) } }))
+
+const rowsOf = (kind, d) => [{ id: defaultId(kind), kind, label: 'Default', isDefault: true }, ...d.accounts.filter((a) => a.kind === kind)]
+// Auto: the signed-in account with the most left at the last reading (the tighter of its 5-hour
+// and weekly windows, so one about to hit its weekly cap isn't picked). Default until there's one.
+function autoPick(kind, d = load()) {
+  let best = null
+  for (const { id } of rowsOf(kind, d)) {
+    const r = readings.get(id)
+    if (r?.usable && r.percentRemaining != null && (!best || r.percentRemaining > readings.get(best).percentRemaining)) best = id
+  }
+  return best || defaultId(kind)
+}
+// What you chose for this kind: an account id, or 'auto'.
+function settingOf(kind, d) {
+  const id = d.active[kind]
+  return id === 'auto' || (id && find(d, id)) ? id : defaultId(kind)
+}
+// The setting, Auto's pick, and the account new agents get from the two.
+function choice(kind, d) {
+  const setting = settingOf(kind, d)
+  const pick = autoPick(kind, d)
+  return { setting, pick, active: setting === 'auto' ? pick : setting }
+}
+
 // ---------- Used by the runtime ----------
 // Which account a new agent of this kind starts with.
 export function activeId(kind) {
-  if (!KINDS[kind]) return null
-  const d = load()
-  const id = d.active[kind]
-  return id && find(d, id) ? id : defaultId(kind)
+  return KINDS[kind] ? choice(kind, load()).active : null
 }
+// An account picked for one launch; 'auto' is resolved now, so the agent keeps the one it got.
+export const resolve = (kind, id) => (id === 'auto' && KINDS[kind] ? autoPick(kind) : id)
+export const has = (kind, id) => !!KINDS[kind] && (id === defaultId(kind) || find(load(), id)?.kind === kind)
 
 // Environment for an agent started with this account: its config folder, or nothing for Default
 // (or an account that has since been removed, which falls back to Default).
@@ -136,6 +174,31 @@ async function statusOf(kind, id, bin, PATH) {
   return s
 }
 
+// One account as the UI shows it: its name, whether new agents start with it (active: the one
+// you picked, or Auto's pick), and its last usage reading, flattened. Signed in: from its status
+// check, else from what the reading says.
+function view(a, active, s = statusCache.get(a.id)?.s) {
+  const r = readings.get(a.id)
+  const read = r?.usable ? true : r?.status === 'auth_required' || r?.notSetUp ? false : null
+  return {
+    id: a.id, label: a.label, isDefault: !!a.isDefault, active: a.id === active,
+    signedIn: s?.signedIn ?? read, plan: r?.plan || s?.plan || null,
+    usable: !!r?.usable, status: r ? r.status : 'pending', error: r?.error || null, hint: r?.hint || null, allow: !!r?.allow,
+    percentRemaining: r?.percentRemaining ?? null, windows: r?.windows || [], refreshedAt: r?.refreshedAt || null,
+  }
+}
+
+// Every account of each kind with its last reading, for the switcher and Usage. No checks run:
+// it's what's known now (the quota feed calls this on each read).
+export function groups() {
+  const d = load()
+  return Object.keys(KINDS).map((kind) => {
+    const { setting, pick, active } = choice(kind, d)
+    // With who quota-axi says it is, as the quota feed gives for your usual login (Usage masks it).
+    return { kind, label: adapter(kind).label, setting, pick, accounts: rowsOf(kind, d).map((a) => ({ ...view(a, active), account: readings.get(a.id)?.account || null })) }
+  })
+}
+
 export async function list({ refresh = false } = {}) {
   if (refresh) statusCache = new Map()
   const d = load()
@@ -143,10 +206,13 @@ export async function list({ refresh = false } = {}) {
   const PATH = await loginPath()
   return Promise.all(Object.keys(KINDS).map(async (kind) => {
     const bin = inst.find((x) => x.kind === kind)?.path || null
-    const active = activeId(kind)
-    const rows = [{ id: defaultId(kind), kind, label: 'Default', isDefault: true }, ...d.accounts.filter((a) => a.kind === kind)]
-    const accounts = await Promise.all(rows.map(async (a) => ({ id: a.id, label: a.label, isDefault: !!a.isDefault, active: a.id === active, ...(await statusOf(kind, a.id, bin, PATH)) })))
-    return { kind, label: adapter(kind).label, installed: !!bin, accounts }
+    const { setting, pick, active } = choice(kind, d)
+    // statusPlan: the plan as the sign-in check names it (Max, ChatGPT), as Settings shows it.
+    const accounts = await Promise.all(rowsOf(kind, d).map(async (a) => {
+      const s = await statusOf(kind, a.id, bin, PATH)
+      return { ...view(a, active, s), statusPlan: s.plan }
+    }))
+    return { kind, label: adapter(kind).label, installed: !!bin, setting, pick, accounts }
   }))
 }
 
@@ -177,10 +243,11 @@ export function rename(id, label) {
   return a
 }
 
+// id: an account, or 'auto' for whichever has the most left when an agent starts.
 export function setActive(kind, id) {
   if (!KINDS[kind]) throw new Error(`Accounts aren't supported for ${kind} yet`)
   const d = load()
-  if (id !== defaultId(kind) && find(d, id)?.kind !== kind) throw new Error('No such account')
+  if (id !== 'auto' && id !== defaultId(kind) && find(d, id)?.kind !== kind) throw new Error('No such account')
   d.active[kind] = id
   save(d)
   return { kind, active: id }
@@ -208,6 +275,7 @@ export async function remove(id) {
   if (d.active[a.kind] === id) delete d.active[a.kind]
   save(d)
   statusCache.delete(id)
+  readings.delete(id)
   return { ok: true }
 }
 

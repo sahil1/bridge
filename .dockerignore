@@ -1,0 +1,18 @@
+# Only what the server needs goes into the image: never your data, sign-ins or local settings.
+.git
+.github
+.githooks
+.claude
+.playwright-mcp
+node_modules
+dist
+desktop
+mobile
+relay/dist
+config.local.json
+.env
+*.pem
+*.log
+.DS_Store
+Dockerfile
+docker-compose.yml

@@ -13,6 +13,8 @@ import * as files from './files.js'
 import * as pr from './pr.js'
 import * as office from './office.js'
 import * as accounts from './accounts.js'
+import * as voice from './voice.js'
+import * as fixes from './fixes.js'
 import * as servers from './servers.js'
 import * as archive from './archive.js'
 import * as worktrees from './worktrees.js'
@@ -33,7 +35,6 @@ import * as mentions from './mentions.js'
 import { promptSafe, draftIn } from './promptsafe.js'
 import { rewindAndSend, codexRewindAndSend, undoReply, btwAnswer } from './rewind.js'
 import { makeNews } from './news.js'
-import { execFile } from 'node:child_process'
 import { pickRuntime } from './runtime/index.js'
 import { sessionName as herdrSession, sessions as herdrSessions } from './runtime/herdr-cli.js'
 import { installed, caps, adapter, catalog as agentCatalog, installCommand, clearInstalledCache } from './agents.js'
@@ -49,6 +50,7 @@ import * as push from './push.js'
 import * as phone from './phone.js'
 import * as relay from './relay.js'
 import * as updates from './updates.js'
+import * as cloud from './cloud.js'
 
 ensureDir(DATA)
 ensureDir(CACHE)
@@ -91,10 +93,14 @@ const exists = (p) => fs.promises.access(p).then(() => true, () => false)
 // Start an agent with your default model for that kind (Settings › General).
 const modelFor = (kind) => cfg.agents?.[kind]?.model || null
 // And with the account you made active for that kind (Settings › Providers), unless one is picked.
+// Auto, either way, is the account with the most left right now.
 const launchAgent = (o) => {
   const kind = o.kind || cfg.defaultAgent || 'claude'
-  return rt.launch({ ...o, model: o.model || modelFor(kind), account: (accounts.supports(kind) && o.account) || accounts.activeId(kind) })
+  return rt.launch({ ...o, model: o.model || modelFor(kind), account: accounts.resolve(kind, accounts.supports(kind) && o.account) || accounts.activeId(kind) })
 }
+
+// Cloud agents (cloud.js) answer the agent routes below for their own panes, so they go first.
+cloud.routes(app, { pushFleet: () => pushFleet() })
 
 // ---------- Fleet ----------
 
@@ -115,6 +121,8 @@ async function fleetView() {
     else if (generic && a.tab && !/^\d+$/.test(a.tab)) a.title = a.tab
   }
   for (const t of f.tabs || []) for (const p of t.panes || []) p.worktree = worktrees.describe(p.cwd)
+  // Cloud agents you started from Bridge AI, in their own Cloud space.
+  cloud.addTo(f, { isMuted: notify.isMuted })
   const rank = { blocked: 0, done: 1, working: 2, idle: 3, unknown: 4 }
   f.agents.sort((a, b) => (b.chief - a.chief) || (rank[a.status] ?? 9) - (rank[b.status] ?? 9) || b.seq - a.seq)
   f.counts = f.agents.reduce((c, a) => ({ ...c, [a.status]: (c[a.status] || 0) + 1 }), {})
@@ -213,7 +221,7 @@ app.get('/api/previews', wrap(async () => {
   for (const a of f.agents) {
     try { out[a.paneId] = preview(a) } catch { out[a.paneId] = null }
   }
-  return out
+  return { ...out, ...cloud.previews() }
 }))
 
 // ---------- Files + git (read-only, scoped to the agent's folder) ----------
@@ -551,6 +559,8 @@ app.get('/api/search', wrap(async (req) => {
     const a = agents[r.sessionId]
     return { ...r, paneId: live[r.sessionId] || null, label: (a && nameOf(a)) || closed[r.sessionId]?.label || null, workspace: a?.workspace || closed[r.sessionId]?.workspace || null, cwd: r.cwd ? r.cwd.replace(os.homedir(), '~') : null, fullCwd: r.cwd }
   })
+  const fromCloud = cloud.search(req.query.q)
+  if (fromCloud.length) { out.results = [...fromCloud, ...out.results]; out.total = (out.total || 0) + fromCloud.length }
   return out
 }))
 app.get('/api/archive', wrap(async () => {
@@ -583,6 +593,28 @@ app.post('/api/agents/:pane/fork', wrap(async (req) => {
   if (!adapter(a.kind).fork || !a.sessionId) throw new Error(`Forking isn't available for ${adapter(a.kind).label}${a.sessionId ? '' : ' until it has a conversation'}`)
   const name = a.tab && !/^\d+$/.test(a.tab) ? a.tab : a.title || adapter(a.kind).label
   const out = await launchAgent({ kind: a.kind, cwd: a.cwd, label: `${name} (fork)`.slice(0, 60), workspaceId: a.workspaceId, fork: a.sessionId })
+  pushFleet()
+  return out
+}))
+// Continue on another account (when this one hits its limit, say): the same conversation,
+// restarted signed in as that account. Every account keeps its transcripts in your usual folder,
+// so the other one can resume it. The agent stops first, so two never write to one session.
+app.post('/api/agents/:pane/continue', wrap(async (req) => {
+  const a = await findAgent(req.params.pane)
+  const id = String(req.body?.account || '')
+  if (!accounts.supports(a.kind) || !adapter(a.kind).resume || !a.sessionId) throw new Error(`Continuing on another account isn't available for ${adapter(a.kind).label}${a.sessionId ? '' : ' until it has a conversation'}`)
+  if (!accounts.has(a.kind, id)) throw new Error('No such account')
+  if (a.status === 'working') throw new Error('The agent is working. Wait for it to finish, or press Esc, then try again.')
+  if (((await rt.fleet()).panes || []).some((p) => p.tabId === a.tabId && p.paneId !== a.paneId)) throw new Error('This tab has other panes. Close them first.')
+  const name = a.tab && !/^\d+$/.test(a.tab) ? a.tab : a.title || adapter(a.kind).label
+  // Kept in Closed agents until it's back, so a failed restart loses nothing.
+  await archiveWhere((x) => x.paneId === a.paneId).catch(() => {})
+  await rt.closeTab(a.tabId)
+  await new Promise((r) => setTimeout(r, 800)) // let it exit before the new one opens the session
+  // Its space goes with its last tab; open a new one by the same name then.
+  const still = (await rt.fleet()).workspaces.some((w) => w.id === a.workspaceId)
+  const out = await launchAgent({ kind: a.kind, cwd: a.cwd, label: name.slice(0, 60), workspaceId: still ? a.workspaceId : null, newSpace: still ? undefined : a.workspace, resume: a.sessionId, account: id })
+  archive.removeSession(a.sessionId)
   pushFleet()
   return out
 }))
@@ -660,30 +692,44 @@ async function pollFleet() {
 const pushFleet = async () => { try { lastFleetKey = ''; const f = await fleetView(); lastFleet = f; for (const c of clients) c.write(`event: fleet\ndata: ${JSON.stringify(f)}\n\n`) } catch { /* next poll */ } }
 pollFleet()
 setInterval(() => { for (const c of clients) c.write(': ping\n\n') }, 25000)
+// Cloud agents are checked on their own, gently; finished ones only while someone's watching.
+cloud.start({ watched: () => clients.size > 0 || notify.active() })
 
 // ---------- Voice: local transcription with whisper.cpp ----------
-const MODEL = cfg.voice?.model ? expand(cfg.voice.model) : path.join(DATA, 'models', 'ggml-small.en-q5_1.bin')
-const runBin = (bin, args, timeout = 120000) => new Promise((resolve, reject) => {
-  execFile(bin, args, { timeout, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => (err ? reject(new Error((stderr || err.message).slice(-300))) : resolve(stdout)))
-})
-app.post('/api/transcribe', express.raw({ type: () => true, limit: '30mb' }), wrap(async (req) => {
-  if (!req.body?.length) throw new Error('No audio received')
-  if (!(await exists(MODEL))) throw new Error(`Speech model missing at ${MODEL}`)
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-voice-'))
-  try {
-    const input = path.join(dir, 'in')
-    const wav = path.join(dir, 'in.wav')
-    fs.writeFileSync(input, req.body)
-    await runBin('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-i', input, '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', wav])
-    // A vocabulary hint so tool names come out right; add your own words with voice.prompt.
-    const hint = cfg.voice?.prompt || 'chief of staff, Claude, Codex, Gemini, Cursor, Grok, Copilot, GitHub, worktree, PR, repo.'
-    const out = await runBin('whisper-cli', ['-m', MODEL, '-f', wav, '-nt', '-np', '-l', 'en', '-t', '6', '--prompt', hint])
-    const text = out.replace(/\[(BLANK_AUDIO|MUSIC|SOUND|NOISE)[^\]]*\]/gi, '').replace(/\s+/g, ' ').trim()
-    return { text }
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true })
-  }
+voice.configure(cfg)
+app.get('/api/voice', wrap(() => voice.status()))
+// One-time setup: download the speech model, and install the programs in a terminal tab you can
+// watch (Homebrew may ask for your password).
+// A terminal tab in the Setup space that runs an install command you can watch.
+async function setupTab(label, command) {
+  const f = await rt.fleet()
+  const ws = f.workspaces.find((w) => w.label === 'Setup')
+  const out = await rt.launch({ kind: 'shell', cwd: os.homedir(), label, workspaceId: ws?.id, newSpace: ws ? undefined : 'Setup' })
+  await new Promise((r) => setTimeout(r, 1200))
+  await rt.text(out.paneId, command)
+  await rt.paneKeys(out.paneId, ['enter'])
+  pushFleet()
+  return openIdOf(out.paneId)
+}
+app.post('/api/voice/setup', wrap(async () => {
+  const s = await voice.status()
+  if (!s.model) await voice.fetchModel()
+  const openId = s.installCommand ? await setupTab('Install voice notes', s.installCommand) : null
+  return { ...(await voice.status()), openId }
 }))
+// ---------- What macOS asks you to allow (fixes.js) ----------
+app.get('/api/fix', wrap(() => fixes.status()))
+app.post('/api/fix/settings', wrap((req) => { onComputer(req); return fixes.openSettings(String(req.body?.pane || '')) }))
+app.post('/api/fix/reveal', wrap((req) => { onComputer(req); return fixes.reveal() }))
+// Only these, never a command from the request.
+const INSTALLS = { icalbuddy: { label: 'Install icalBuddy', command: 'brew install ical-buddy' } }
+app.post('/api/fix/install', wrap(async (req) => {
+  onComputer(req)
+  const it = INSTALLS[req.body?.what]
+  if (!it) throw new Error('Nothing to install')
+  return { openId: await setupTab(it.label, it.command) }
+}))
+app.post('/api/transcribe', express.raw({ type: () => true, limit: '30mb' }), wrap((req) => voice.transcribe(req.body)))
 
 // ---------- Uploads from the phone (kept outside the agent's repo) ----------
 const UPLOADS = cacheFile('uploads')
@@ -735,6 +781,8 @@ app.post('/api/panes/:pane/keys', wrap(async (req) => {
 // ---------- Trackers ----------
 
 app.get('/api/quota', wrap((req) => quota(req.query.refresh === '1')))
+// macOS keeps a second Claude account's login in its own Keychain item: let quota-axi read it.
+app.post('/api/quota/allow/:id', wrap((req) => quota.allow(req.params.id)))
 app.get('/api/weather', wrap(() => weather()))
 app.get('/api/calendar', wrap((req) => calendar(req.query.refresh === '1')))
 app.get('/api/mail', wrap((req) => mail(req.query.refresh === '1')))
@@ -881,7 +929,8 @@ app.get('/api/brief', wrap(async (req) => {
       routines: due.map((x) => ({ id: x.id, name: x.name, state: x.state })),
     })
   }
-  if (q) {
+  // Plan usage off (the default): nothing to say about it.
+  if (q && !q.off) {
     const low = q.providers.filter((p) => p.usable && p.percentRemaining != null && p.percentRemaining < 25)
     const auth = q.providers.filter((p) => !p.usable)
     const NAMES = { claude: 'Claude', codex: 'Codex', cursor: 'Cursor', grok: 'Grok' }
@@ -933,7 +982,7 @@ app.post('/api/push/test', wrap(() => notify.send({ kind: 'test', title: 'Bridge
 app.get('/api/agents/:pane/question', wrap(async (req) => { const q = notify.question(await rt.read(req.params.pane, 60)); return { text: q?.text || null } }))
 // Mute an agent's notifications (its ⋯ menu), until unmuted.
 app.post('/api/agents/:pane/mute', wrap(async (req) => {
-  notify.mute(req.params.pane, !!req.body?.muted, (await rt.fleet()).agents.map((a) => a.paneId))
+  notify.mute(req.params.pane, !!req.body?.muted, (await fleetView()).agents.map((a) => a.paneId))
   pushFleet()
   return { ok: true, muted: !!req.body?.muted }
 }))
@@ -948,13 +997,15 @@ app.post('/api/phone', wrap((req) => (req.body?.enabled ? phone.enable(cfg.port)
 // but can't pair more phones, remove one, or change where the relay is.
 const onComputer = (req) => { if (req.headers['x-bridge-relay']) throw Object.assign(new Error('Do this in Bridge AI on your computer'), { status: 403 }) }
 app.get('/api/relay', wrap((req) => ({ ...relay.status(), here: req.headers['x-bridge-relay'] || null })))
-app.post('/api/relay/deploy', wrap((req) => { onComputer(req); return relay.deploy({ method: req.body?.method, token: req.body?.token }) }))
+app.post('/api/relay/deploy', wrap((req) => { onComputer(req); return relay.deploy({ method: req.body?.method, token: req.body?.token, account: req.body?.account }) }))
 app.post('/api/relay/update', wrap((req) => { onComputer(req); return relay.update() }))
 app.post('/api/relay/pair', wrap((req) => { onComputer(req); return req.body?.stop ? relay.stopPairing() : relay.pair() }))
 app.post('/api/relay/awake', wrap((req) => { onComputer(req); return relay.setAwake(!!req.body?.on) }))
 app.post('/api/relay/forget', wrap((req) => { onComputer(req); return relay.forget() }))
 // A phone can also remove itself (when it forgets this computer).
 app.delete('/api/relay/devices/:id', wrap((req) => { if (req.headers['x-bridge-relay'] !== req.params.id) onComputer(req); return relay.removeDevice(req.params.id) }))
+// Messages a phone sent while this computer was offline, still on the phone (server/inbox.js).
+app.post('/api/relay/inbox', wrap((req) => relay.fromPhone(req.headers['x-bridge-relay'], req.body)))
 
 // For bug reports: facts about this install, nothing personal (no names, emails, paths, location).
 app.get('/api/diagnostics', wrap(async () => {
@@ -962,7 +1013,7 @@ app.get('/api/diagnostics', wrap(async () => {
   const signed = new Map(subs.map((x) => [x.kind, x.signedIn]))
   return {
     bridgeAi: VERSION,
-    install: process.versions.electron ? `desktop app (Electron ${process.versions.electron})` : `from source (Node ${process.versions.node})`,
+    install: process.versions.electron ? `desktop app (Electron ${process.versions.electron})` : process.env.BRIDGE_DOCKER ? `Docker image (Node ${process.versions.node})` : `from source (Node ${process.versions.node})`,
     system: `${process.platform} ${os.release()} ${process.arch}`,
     runtime: rt.name,
     agents: agents.map((a) => `${a.kind}${signed.get(a.kind) === true ? ' (signed in)' : signed.get(a.kind) === false ? ' (not signed in)' : ''}`),
@@ -1153,6 +1204,7 @@ server.on('upgrade', (req, socket, head) => {
 })
 server.listen(cfg.port, cfg.host, () => {
   console.log(`Bridge AI on http://${cfg.host}:${cfg.port} (runtime: ${rt.name}, data: ${DATA})`)
+  if (!/^(127\.0\.0\.1|localhost|::1)$/.test(cfg.host)) console.log(`Listening on ${cfg.host}, not 127.0.0.1: anyone who can reach port ${cfg.port} can drive your agents. In Docker, publish it as 127.0.0.1:${cfg.port}:${cfg.port} only.`)
   // Start the slow lookups the first screen needs (which agents you have, their sign-ins, usage
   // quotas) now, so they're ready or nearly ready when the page asks.
   subscriptions().catch(() => {})

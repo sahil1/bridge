@@ -52,7 +52,7 @@ npm start
 
 Open http://127.0.0.1:7420. The first start installs dependencies and builds the UI, which takes a minute.
 
-The first time you open it, Bridge AI looks at what's already on your computer: the agent CLIs you have and whether you're signed in to them (your Claude, ChatGPT or Gemini subscriptions keep working as they are), your name and your time zone. Change anything that's off right there, then **Finish setup** saves it and starts your chief of staff; **More options** lets you pick a default agent too. If no agent is installed yet, it offers to install one in a terminal tab you can watch.
+The first time you open it, Bridge AI looks at what's already on your computer: the agent CLIs you have and whether you're signed in to them (your Claude, ChatGPT or Gemini subscriptions keep working as they are), your name and your time zone. Change anything that's off right there, then **Finish setup** saves it and starts your chief of staff; **More options** lets you pick a default agent too. If no agent is installed yet, it offers to install one in a terminal tab you can watch. Then a short tour points out the main parts of the app (the phone gets its own); take it again any time from Settings › About & updates or `⌘K`.
 
 ```bash
 npm start -- dev     # hot reload: open :7421; UI edits appear live, server edits restart the API
@@ -71,6 +71,10 @@ bridge-ai attach 2          # work in one from this terminal (or: bridge-ai atta
 bridge-ai attach            # pick from a list
 bridge-ai open              # open the app in your browser
 bridge-ai start / stop
+bridge-ai status            # is it running, which agents, the relay and paired phones
+bridge-ai relay setup       # your phone relay, with a Cloudflare API token (no browser needed)
+bridge-ai pair              # pair a phone: QR code, link and code, right in the terminal
+bridge-ai phones            # paired phones (bridge-ai phones remove <name>)
 ```
 
 Attaching gives you the agent's real terminal, in your terminal app, with its keys, fonts and scrollback, the way `tmux attach` or `herdr` does. The agent keeps running in Bridge AI when you detach, and the app stays in sync. The terminal button on each agent (and "Open in terminal app" in the sidebar menu) opens the same thing in Ghostty, iTerm, Warp, WezTerm, kitty, Alacritty or Terminal on macOS, your terminal on Linux, or Windows Terminal; pick which in Settings › General. With the herdr runtime, `attach` focuses the agent and opens herdr.
@@ -84,7 +88,7 @@ Attaching gives you the agent's real terminal, in your terminal app, with its ke
 | Desktop app | ✓ | ✓ | ✓ |
 | Inbox (Apple Mail) and Calendar (macOS Calendar) | ✓ | not yet | not yet |
 
-Day-to-day use so far has been on macOS. Linux and Windows use the same code paths (node-pty and Electron both support them) but have had little testing, so please open an issue if something breaks.
+Day-to-day use so far has been on macOS. Linux and Windows use the same code paths (node-pty and Electron both support them) but have had little testing, so please open an issue if something breaks. On Linux the server has been tested mostly in the [Docker image](#run-it-on-an-always-on-machine) (Debian, amd64 and arm64): agents, terminals, git, sign-in and pairing a phone. On a Linux machine with no desktop, **Sign in** for Codex uses its device code login, since there's no browser to come back to.
 
 ## Agents
 
@@ -108,6 +112,19 @@ Bridge AI finds the agent CLIs on your PATH. Each one is described in [`server/a
 
 Agents without a chat view work fully in the Terminal tab, and their status (working, waiting on you, finished) still shows in the sidebar. Adding an agent, or a chat view for one, is a small change; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## Cloud agents
+
+Some providers run coding agents on their own computers, on a repo they host, and keep going while your computer sleeps. Add your key in Settings › Model providers › Cloud agents, then start one from New agent › In the cloud: pick the provider, the repo and a branch, and say what to do. They show up in a Cloud space in the sidebar with the same dots (working, waiting on you, done) and the same notifications, here and on your phone. Chat shows what the agent said and did, the message box sends follow-ups, and the header has Stop and the pull request. The chief of staff sees them too.
+
+| Provider | How it works | Key | Cost |
+|---|---|---|---|
+| Cursor | Cursor Cloud Agents API. It pushes a branch and opens a pull request | API key from [cursor.com/dashboard/api](https://cursor.com/dashboard/api) | Your Cursor plan |
+| GitHub Copilot | Bridge AI opens an issue with your task and assigns it to Copilot, which works in a draft pull request. Follow-ups are `@copilot` comments there | A fine-grained token (Metadata: read; Actions, Contents, Issues and Pull requests: read and write), or your GitHub CLI sign-in | Your Copilot plan |
+| Jules | Jules API, on a repo you've connected to Jules. You can ask to see its plan first | API key from [jules.google.com/settings](https://jules.google.com/settings#api) | Your Jules plan |
+| Claude | Claude Managed Agents, with your repo mounted. It pushes a branch | API key from the [Claude Console](https://platform.claude.com/settings/keys), plus an optional GitHub token for private repos and pushing | Pay per use on your Claude Console account, not your Pro or Max plan |
+
+Bridge AI checks on running agents every 10 to 20 seconds, less often when several run at once or once they wait or finish, and backs off when a provider asks it to slow down or has trouble. Copilot and Jules have no stop in their APIs, so Stop for those is on their own pages. The provider code is in [`shared/cloud/`](shared/cloud/) and uses only `fetch`, so the phone apps can run it too.
+
 ## Runtimes: where agents run
 
 | Runtime | What it is | When it's used |
@@ -129,6 +146,7 @@ Everything personal lives in `~/.bridge-ai` (set `BRIDGE_HOME` to move it), neve
 | `chief/` | The chief of staff's folder: its instructions, `state/playbook.md` (what it has learned about how you work) and `state/ledger.md` |
 | `routines.json`, `ideas.md` | Recurring jobs and your ideas backlog ([`routines.example.json`](routines.example.json) shows the shape) |
 | `runtime.json` | Spaces and tabs for the built-in runtime |
+| `cloud-keys.json`, `cloud-agents.json` | Your cloud agent keys (readable only by you, never given to the agents on your computer) and the cloud agents you started |
 | `cache/` | Queued messages, watchlist, uploads, mail rules |
 
 Settings start from [`config.example.json`](config.example.json). Put yours in `~/.bridge-ai/config.json`; [`config.local.example.json`](config.local.example.json) shows the shape.
@@ -153,7 +171,7 @@ You rarely need to edit the file by hand. **Settings** (the gear in the top bar,
 |---|---|
 | General | Your name, default agent and default model, which agent runs the chief of staff, your location (from your device or a city search), where agents run |
 | Agents | Every supported agent: installed or not, signed in or not, one-click install, start a chat |
-| Model providers | API keys, cloud accounts and local model servers (Ollama, LM Studio) your agents can use |
+| Model providers | API keys, cloud accounts and local model servers (Ollama, LM Studio) your agents can use, and your keys for cloud agents |
 | MCP servers | The tools your agents can call, across all of them, with a catalog of 35 popular servers by category (web search, docs and notes, planning, Microsoft 365, deploy and monitoring, data, design) |
 | Appearance | Theme, color mode, text size, density, font |
 | Config file | Your `config.json`, editable, checked before it's saved, with the effective settings and defaults beside it |
@@ -176,6 +194,16 @@ You rarely need to edit the file by hand. **Settings** (the gear in the top bar,
 - **Usage**: tokens and cost per day, model and project, with a year heatmap (from your agents' local logs via ccusage).
 - **Phone**: the same app on your phone, as a Home Screen app with notifications. See [On your phone](#on-your-phone).
 - **Appearance**: Slack-style themes that color the window frame, light and dark modes, and custom colors you can share as a string.
+
+## The demo
+
+Bridge AI's own UI on made-up agents, spaces and data, with no computer or install behind it. It's what **Try the demo** opens in the phone apps.
+
+```bash
+npm run demo:build   # a static site in dist-demo/
+```
+
+`dist-demo/` is plain files with relative paths, and nothing in it loads from the network, so any static host can serve it, from any folder. The agents work, ask and reply on a script ([src/demo/](src/demo)); what needs a real computer (voice notes, your terminal app, pairing a phone, updates, adding accounts) says so in one line.
 
 ## Desktop app
 
@@ -209,7 +237,7 @@ You can also run the builds without releasing: Actions › Release › Run workf
 
 ## On your phone
 
-Bridge AI works on your phone as an app on the Home Screen, with notifications when an agent needs you or finishes. No app store is involved: it's the same app, served by your computer. There are two ways to reach it; both are optional, and Bridge AI works the same on the computer without either.
+Bridge AI works on your phone as an app on the Home Screen, with notifications when an agent needs you or finishes. It's the same app, served by your computer, so you don't need an app store; there are also iPhone and Android apps ([mobile/](mobile)) that add a lock-screen card and a demo. There are two ways to reach your computer; both are optional, and Bridge AI works the same on the computer without either.
 
 ### From anywhere, through your own relay
 
@@ -220,9 +248,9 @@ A small relay ([relay/](relay)) runs on your own free Cloudflare account. Bridge
 3. Add it to the Home Screen: iPhone, Share › **Add to Home Screen**; Android, ⋮ › **Install app**. Open it from there, and type the code again if it asks.
 4. In Bridge AI on the phone, go to **Settings › Phone & notifications** and click **Turn on notifications**.
 
-Everything between the phone and the computer is end-to-end encrypted ([relay/web/link.js](relay/web/link.js)): each paired phone has its own key, kept on the phone, and each connection makes fresh keys. The relay, and Cloudflare, see when and how much, never what. It stores nothing but when your computer was last online. Remove a phone in Settings and it's out. A phone can't pair other phones or change the relay; that's done on the computer.
+Everything between the phone and the computer is end-to-end encrypted ([relay/web/link.js](relay/web/link.js)): each paired phone has its own key, kept on the phone, and each connection makes fresh keys. The relay, and Cloudflare, see when and how much, never what. It stores when your computer was last online, and messages waiting for your computer (below), sealed so it can't read them. Remove a phone in Settings and it's out. A phone can't pair other phones or change the relay; that's done on the computer.
 
-Your computer has to be on and Bridge AI running. **Keep this computer awake while it's plugged in** (macOS and Linux) stops it sleeping. The free Cloudflare plan is plenty for one person; if it's ever used up, Cloudflare stops serving until the next day rather than charging you.
+Your computer has to be on and Bridge AI running. **Keep this computer awake while it's plugged in** (macOS and Linux) stops it sleeping. When it's off or asleep, the phone shows what it last sent (your agents, recent chats, usage, the brief) under a banner saying so. A message you send an agent then, or an answer to its question, waits in your relay, sealed for your computer, and goes through when the computer is back, even if you've closed the phone by then; it says "Waiting for your computer", then "Delivered". Anything else needs the computer on. Messages wait 7 days at most. The free Cloudflare plan is plenty for one person; if it's ever used up, Cloudflare stops serving until the next day rather than charging you.
 
 ### Through Tailscale
 
@@ -241,9 +269,64 @@ Either way, choose what you're notified about in Settings › Phone & notificati
 - **Quiet while you're at the computer**: while Bridge AI is in front on your computer, or you typed or clicked in it in the last 2 minutes, your phone isn't notified (the computer's own notifications still are). **Notify my phone even when I'm at the computer** changes that.
 - **Mute an agent**: ⋯ › **Mute notifications** in its header or the sidebar, until you unmute it.
 
+## Run it on an always-on machine
+
+Run Bridge AI on a machine that stays on, and your agents keep working with your laptop closed. Your phone pairs with it like with any other computer, through your relay.
+
+| Machine | What to know | Rough cost |
+|---|---|---|
+| A Mac mini at home | The simplest: install the app as usual | The Mac, plus a few dollars of power a month |
+| A Raspberry Pi 5 | Small and quiet. Get 8 GB of memory, with Raspberry Pi OS (64-bit) and Docker | About $100 once |
+| A cloud server | Nothing at home to look after. 2 CPUs and 4 GB of memory or more, Ubuntu or Debian with Docker | About $10 to $25 a month |
+
+Agents need memory (Claude Code asks for 4 GB), so give the machine more if you run several at once.
+
+### A Mac mini
+
+Install Bridge AI as above. In **Settings › Phone & notifications** set up the relay, pair your phone and turn on **Keep this computer awake while it's plugged in**. Turn on **Open at Login** in the Bridge AI menu, and in System Settings turn on **Start up automatically after a power failure** (Energy) and automatic login (Users & Groups), so it comes back by itself after a power cut.
+
+### Linux, a Raspberry Pi or a cloud server: Docker
+
+[Install Docker](https://docs.docker.com/engine/install/), then:
+
+```bash
+mkdir bridge-ai && cd bridge-ai
+curl -fsSLO https://raw.githubusercontent.com/sahil1/bridge/main/docker-compose.yml
+docker compose up -d
+docker compose exec bridge bridge-ai relay setup   # once: your relay, with a Cloudflare API token
+docker compose exec bridge bridge-ai pair          # shows a QR code: scan it with your phone
+```
+
+`relay setup` asks for a Cloudflare API token. Make one at [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens): **Create Token**, then the **Edit Cloudflare Workers** template, or a custom token with only **Account › Workers Scripts › Edit** and **Account › Account Settings › Read**, for your account. Bridge AI keeps it in its data folder (readable only by you) to update the relay later. `pair` prints the QR code, the link and the code to type; then finish on the phone as in [On your phone](#on-your-phone).
+
+- **What's in it**: Node, git, `gh` and Bridge AI's server, for 64-bit Intel/AMD and Arm. It runs as a normal user, not root.
+- **What's kept**: three volumes. Your home folder in the container (every agent's sign-in, git and SSH settings, agents you install), Bridge AI's data folder, and `~/code` for your repos.
+- **Restarts**: after a crash or a reboot it starts again and reconnects to the relay. `docker compose exec bridge bridge-ai status` shows how it's doing.
+- **Updates**: `docker compose pull && docker compose up -d`.
+- **No open port**: your phone comes in through the relay. For a browser on that machine or over `ssh -L 7420:127.0.0.1:7420`, see the comments in [docker-compose.yml](docker-compose.yml); the port stays on 127.0.0.1.
+
+Without Docker, the server runs on its own too: clone the repo, `npm link`, then `bridge-ai start` (the same as `npm start`, no app window). The commands above work the same way (`bridge-ai relay setup`, `bridge-ai pair`, `bridge-ai status`).
+
+### Signing in to your agents
+
+Install agents in **Settings › Agents** (from your phone is fine), or with `docker compose exec bridge npm install -g @anthropic-ai/claude-code @openai/codex`. They go in your home folder, so they stay through image updates and can update themselves. You can also bake them into your own build of the image: see the `AGENTS` setting in the [Dockerfile](Dockerfile).
+
+The machine has no browser, so a sign-in shows a link that you open on your phone or laptop. On the phone, **Settings › Model providers › Sign in** next to an agent runs its sign-in in a terminal tab you can type in. From a laptop, SSH to the machine and use `docker compose exec -it bridge bash`.
+
+- **Claude Code**: `claude auth login` (or `/login` in Claude Code) shows a link. Sign in there, then paste the code the page shows at **Paste code here if prompted**. Or, with a Claude subscription, run `claude setup-token` on any computer with a browser and put the token it prints in docker-compose.yml as `CLAUDE_CODE_OAUTH_TOKEN` under `environment`. An `ANTHROPIC_API_KEY` works too. ([Claude Code docs](https://code.claude.com/docs/en/authentication))
+- **Codex**: `codex login --device-auth` shows a link and a one-time code to enter there (Bridge AI's Sign in button uses it on a machine with no desktop). Turn on device code login in your ChatGPT security settings first; for a workspace, an admin does. Or use an API key: `printenv OPENAI_API_KEY | codex login --with-api-key`. ([Codex docs](https://developers.openai.com/codex/auth))
+
+### Getting your code there
+
+Put repos in `~/code`: agents start in folders inside the home folder. In a terminal on the machine (`docker compose exec -it bridge bash`), set your name for commits once (`git config --global user.name "Your Name"` and `user.email`), then either:
+
+- **GitHub CLI**, for all your repos (and pull requests from Bridge AI): `gh auth login`, pick GitHub.com, HTTPS and "Login with a web browser", and open the link it shows on your phone with the one-time code. Then `gh repo clone you/your-repo ~/code/your-repo`.
+- **A deploy key**, for one repo and nothing else: `ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519`, add `~/.ssh/id_ed25519.pub` in the repo's **Settings › Deploy keys** (tick **Allow write access** so agents can push), then `git clone git@github.com:you/your-repo.git ~/code/your-repo`.
+
 ## Security
 
 - The server listens on `127.0.0.1` only. It answers requests whose Host is this machine or a Tailscale name and, from a browser, whose Origin is too, so other web pages can't drive your agents through localhost.
+- In Docker it runs as a normal user and publishes no port. If you publish one for a browser, bind it to 127.0.0.1 as [docker-compose.yml](docker-compose.yml) shows, never to the network.
 - File and git actions stay inside the agent's folder. They change things only when you ask from the app: saving a file, undoing a change, committing, pushing (never forced) or opening a pull request.
 - Anyone who can reach the server can type into your agents. Phone access uses your own relay, which only lets in phones you paired (end-to-end encrypted), or `tailscale serve`, which only devices on your tailnet can reach. Never expose Bridge AI with `tailscale funnel` or a public port.
 - Mail and meeting agents are told that email text is data, not instructions, and never to send or post without your OK.
@@ -251,10 +334,13 @@ Either way, choose what you're notified about in Settings › Phone & notificati
 ## Optional setup
 
 - **Quota in the top bar**: run `npx quota-axi --provider claude --allow-keychain-prompt` once and allow access.
-- **Voice notes**: install `ffmpeg` and `whisper-cli` (whisper.cpp) and put a model at `~/.bridge-ai/models/ggml-small.en-q5_1.bin`.
-- **Inbox (macOS)**: turn on Mail for your account, open Mail once, and give Full Disk Access to the app that starts Bridge AI.
-- **Calendar (macOS)**: `brew install ical-buddy`.
+- **Voice notes**: tap the mic in the message box, on the computer or your phone. The first time, Bridge AI offers to set them up: it downloads the speech model (190 MB, to `~/.bridge-ai/models`) and, on a Mac with Homebrew, installs `ffmpeg` and `whisper-cpp` in a terminal tab. Elsewhere, install `ffmpeg` and whisper.cpp's `whisper-cli` yourself. Speech is turned into text on your computer; audio never leaves it.
+- **Inbox (macOS)**: turn on Mail for your account, open Mail once, and give Full Disk Access to the app that starts Bridge AI. The Inbox card has buttons that open the right page of System Settings and show Bridge AI in Finder to drag into the list.
+- **Calendar (macOS)**: `brew install ical-buddy`, or click Install icalBuddy in the Calendar card.
+- **Plan usage**: off until you turn it on (the Usage card, or Settings › General). It asks each provider how much of your plan is left, with the sign-in your agents use on this computer, through [quota-axi](https://www.npmjs.com/package/quota-axi). Some providers, Anthropic among them, don't allow other apps to use their sign-ins, so it's your call.
 
-## License
+## License, terms and privacy
 
 [Apache-2.0](LICENSE). See [NOTICE](NOTICE).
+
+Bridge AI is provided as is, with no warranty, and you're responsible for what your agents do and for following the terms of the services you connect ([TERMS.md](TERMS.md)). It's an independent project, not affiliated with or endorsed by Anthropic, OpenAI, Google, GitHub, Cursor, Cloudflare or any other company whose tools it works with; their names and logos belong to them. The project collects nothing about you ([PRIVACY.md](PRIVACY.md)).

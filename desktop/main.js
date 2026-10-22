@@ -187,6 +187,14 @@ ipcMain.handle('bridge:focus-main', (e) => {
 // Seconds since you last touched the computer, so a window left in front while you're away
 // doesn't keep your phone quiet.
 ipcMain.handle('bridge:idle', (e) => (fromApp(e) ? powerMonitor.getSystemIdleTime() : null))
+// Restart Bridge AI, server too: what you allow in System Settings (Full Disk Access, say) only
+// reaches processes started after. The relaunched app starts the server again.
+ipcMain.handle('bridge:restart', (e) => {
+  if (!fromApp(e)) return false
+  app.relaunch()
+  stopServerAndQuit()
+  return true
+})
 ipcMain.handle('bridge:focus-popout', (e, paneId) => {
   const w = fromApp(e) && pops.get(paneId)
   if (!w || w.isDestroyed()) return false

@@ -33,6 +33,9 @@ const readJSON = (file) => { try { return JSON.parse(fs.readFileSync(file, 'utf8
 export function loadConfig() {
   const merged = { ...readJSON(path.join(ROOT, 'config.example.json')), ...readJSON(dataFile('config.json')), ...readJSON(path.join(ROOT, 'config.local.json')) }
   if (process.env.BRIDGE_PORT) merged.port = Number(process.env.BRIDGE_PORT)
+  // Only for a container whose port is published to 127.0.0.1 on its machine (docker-compose.yml):
+  // there the server has to listen on the container's own network to be reached at all.
+  if (process.env.BRIDGE_HOST) merged.host = process.env.BRIDGE_HOST
   return merged
 }
 

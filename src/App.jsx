@@ -11,8 +11,10 @@ import { openLink } from './pwa.js'
 import NewAgent from './components/NewAgent.jsx'
 import History from './components/History.jsx'
 import UpdateChip from './components/UpdateChip.jsx'
+import AccountMenu, { several, listed, setDefault } from './components/AccountMenu.jsx'
 import { CHANNEL, nameOf, popOut, tell } from './components/Solo.jsx'
 import Palette from './components/Palette.jsx'
+import Tour from './components/Tour.jsx'
 import { NextMeetingChip } from './components/Agenda.jsx'
 import { TodayTabs, TodayBody, openToday } from './components/Dock.jsx'
 import { Handle, usePersisted, useMedia, useHotkey, useWidth, useShared, store } from './components/layout.jsx'
@@ -51,24 +53,51 @@ function Clock() {
 
 const NAMES = { claude: 'Claude', codex: 'Codex', cursor: 'Cursor', grok: 'Grok' }
 
-// Top bar chips: default provider's session + week, and current weather.
-function ProviderChip({ quota, primary, onClick }) {
-  const p = quota?.providers?.find((x) => x.provider === primary)
+// Top bar chips: default provider's session + week, and current weather. With several accounts
+// it shows the one new agents start with (yours, or Auto's pick) and opens the account switcher.
+function ProviderChip({ quota, primary, onClick, onAddAccount }) {
+  const [open, setOpen] = useState(false)
+  const wrap = useRef(null)
+  const groups = quota?.accounts || []
+  const multi = several(groups)
+  const g = groups.find((x) => x.kind === primary)
+  const act = g?.accounts.length > 1 ? g.accounts.find((a) => a.active) : null
+  const p = act || quota?.providers?.find((x) => x.provider === primary)
+  if (quota?.off) {
+    return (
+      <button className="top-chip usage-chip" data-tour="usage" onClick={onClick} title="Plan usage is off · click to see it or turn it on">
+        <Icon name="gauge" size={13} /><span className="muted">Usage</span>
+      </button>
+    )
+  }
   if (!p) return null
   const sess = p.windows.find((w) => w.kind === 'session') || p.windows[0]
   const week = p.windows.find((w) => w.kind === 'weekly')
   const lv = (v) => (v == null ? 'unknown' : v < 10 ? 'critical' : v < 30 ? 'warning' : 'good')
-  return (
-    <button className="top-chip usage-chip" onClick={onClick} title={`${NAMES[primary] || primary} usage${sess ? ` · ${sess.percentRemaining}% left this ${sess.kind === 'session' ? '5-hour window' : sess.label}` : ''}${week ? ` · ${week.percentRemaining}% left this week` : ''} · click for details`}>
+  const name = `${NAMES[primary] || primary}${act ? ` (${act.label})` : ''}`
+  const chip = (
+    <button className="top-chip usage-chip" data-tour="usage" onClick={multi ? () => setOpen((o) => !o) : onClick} aria-haspopup={multi ? 'menu' : undefined} aria-expanded={multi ? open : undefined}
+      onKeyDown={(e) => { if (multi && e.key === 'ArrowDown' && !open) { e.preventDefault(); setOpen(true) } }}
+      title={`${name} usage${sess ? ` · ${sess.percentRemaining}% left this ${sess.kind === 'session' ? '5-hour window' : sess.label}` : ''}${week ? ` · ${week.percentRemaining}% left this week` : ''} · ${multi ? 'click to switch accounts' : 'click for details'}`}>
       <span className={`mini-ring r-${lv(sess?.percentRemaining)}`} style={{ '--p': sess?.percentRemaining ?? 0 }} />
       <b className="usage-name">{NAMES[primary] || primary}</b>
+      {act && <b className="usage-acct">{act.label}</b>}
       {p.usable ? (
         <>
           {sess && <span>{sess.percentRemaining}%<small> {sess.kind === 'session' ? '5h' : sess.label}</small></span>}
           {week && <span className="chip-sep">{week.percentRemaining}%<small> wk</small></span>}
         </>
-      ) : <span className="muted">sign in</span>}
+      ) : <span className="muted">{act?.allow ? 'allow' : 'sign in'}</span>}
+      {multi && <Icon name="down" size={11} className="usage-caret" />}
     </button>
+  )
+  if (!multi) return chip
+  return (
+    <div className="acct-wrap" ref={wrap}>
+      {chip}
+      {open && <AccountMenu groups={listed(groups)} anchor={wrap} className="top" onClose={() => setOpen(false)} onPick={(kind, id) => setDefault(groups, kind, id)}
+        onAdd={onAddAccount} extra={[{ icon: 'gauge', label: 'Usage details', run: onClick }]} />}
+    </div>
   )
 }
 
@@ -118,6 +147,8 @@ export default function App() {
   const [palette, setPalette] = useState(false)
   const [newAgent, setNewAgent] = useState(null) // null = closed, {} = open with defaults
   const [history, setHistory] = useState(false) // search every conversation, closed agents
+  const [tour, setTour] = useState(false)
+  const [toured, setToured] = usePersisted('cc-toured', {}) // { desktop, phone }: seen on this device
   const [cmdRef, cmdW] = useWidth()
   const [rowRef, rowW] = useWidth()
   const quota = usePoll('/quota', 5 * 60 * 1000)
@@ -296,15 +327,37 @@ export default function App() {
   useHotkey(useCallback((e) => (e.metaKey || e.ctrlKey) && e.key === ',', []), () => setSettings((v) => (v ? null : 'general')))
   useHotkey(useCallback((e) => (e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'f', []), () => setHistory((v) => !v))
   useHotkey(useCallback((e) => e.altKey && (e.code === 'Digit1' || e.code === 'Digit2'), []), (e) => setView(e.code === 'Digit1' ? 'command' : 'herdr'))
-  useHotkey(useCallback((e) => e.key === 'Escape' && !e.target.closest?.('.xterm, textarea, input, .quick-open'), []), () => set({ max: null }))
+  useHotkey(useCallback((e) => e.key === 'Escape' && !e.target.closest?.('.xterm, textarea, input, .quick-open, .tour'), []), () => set({ max: null }))
+
+  // The tour: once per device after setup (the phone layout has its own), and again on request.
+  // It waits while anything else is open on top, and starts from the beginning after.
+  const device = wide ? 'desktop' : 'phone'
+  const covered = !!(onboarding || settings || newAgent || palette || history)
+  const ready = !!fleet && !!conf?.setupDone && view === 'command'
+  useEffect(() => {
+    if (tour || toured[device] || covered || !ready) return
+    const t = setTimeout(() => setTour(true), 1500) // let the chief of staff's tab open first
+    return () => clearTimeout(t)
+  }, [tour, toured[device], device, covered, ready]) // eslint-disable-line react-hooks/exhaustive-deps
+  const takeTour = () => { setSettings(null); setView('command'); setTour(true) }
+  const takeTourRef = useRef(null)
+  takeTourRef.current = takeTour
+  useEffect(() => {
+    const on = () => takeTourRef.current?.()
+    window.addEventListener('bridge-tour', on)
+    return () => window.removeEventListener('bridge-tour', on)
+  }, [])
+  const endTour = () => { setTour(false); setToured((t) => ({ ...t, [device]: true })) }
 
   const nextTheme = { system: 'dark', dark: 'light', light: 'system' }[theme]
   const paletteActions = [
     { id: 'a:new', label: 'New agent…', icon: 'plus', keywords: 'launch start claude codex gemini copilot opencode project', run: () => setNewAgent({ mode: 'project' }) },
     { id: 'a:history', label: 'Search history and closed agents…', icon: 'clock', keywords: 'search find transcript conversation closed archived resume old past', run: () => setHistory(true) },
+    { id: 'a:cloud', label: 'New cloud agent…', icon: 'cloud', keywords: 'cursor copilot jules claude managed remote github repo pull request', run: () => setNewAgent({ mode: 'cloud' }) },
     { id: 'a:chat', label: 'New chat…', icon: 'chat', keywords: 'plain vanilla talk ask claude codex gemini assistant', run: () => setNewAgent({ mode: 'chat' }) },
     { id: 'a:settings', label: 'Settings…', icon: 'settings', hint: '⌘,', keywords: 'preferences name default agent model location runtime', run: () => setSettings('general') },
     { id: 'a:providers', label: 'Model providers', icon: 'layers', keywords: 'api key openai anthropic gemini openrouter bedrock vertex ollama lm studio', run: () => setSettings('providers') },
+    { id: 'a:accounts', label: 'Accounts…', icon: 'users', keywords: 'account switch work personal sign in login claude codex auto', run: () => setSettings('accounts') },
     { id: 'a:mcp', label: 'MCP servers', icon: 'tool', keywords: 'tools mcp github playwright', run: () => setSettings('mcp') },
     { id: 'a:config', label: 'Edit config file', icon: 'braces', keywords: 'json config.json settings', run: () => setSettings('config') },
     { id: 'a:mate', label: 'Go to chief of staff', icon: 'helm', keywords: 'chief staff dispatch route', run: () => (mate ? openAgent(mate.paneId) : mateLaunch.launch()) },
@@ -320,21 +373,24 @@ export default function App() {
     { id: 'a:routines', label: 'Show routines', icon: 'repeat', run: () => showCard('repeat') },
     { id: 'a:usage', label: 'Show usage', icon: 'gauge', keywords: 'quota tokens cost', run: () => showCard('gauge') },
     { id: 'a:stats', label: 'Usage stats and history', icon: 'gauge', keywords: 'stats heatmap tokens cost models projects', run: () => openToday('usage') },
+    { id: 'a:tour', label: 'Take the tour', icon: 'sparkle', keywords: 'help guide walkthrough intro getting started how', run: takeTour },
   ].filter(Boolean)
   const overlays = (
     <>
       {palette && <Palette fleet={fleet} activeId={wide ? W.active : mobileAgent} onClose={() => setPalette(false)} onOpen={openAgent} onOpenFile={openFiles} actions={paletteActions} />}
       {settings && <Settings section={settings} onClose={() => setSettings(null)} onOpenAgent={openAgent} />}
       {onboarding && <Onboarding onDone={(pane) => { setOnboarding(false); confPoll.refresh(); if (pane) setTimeout(() => openAgent(pane), 800) }} />}
-      {newAgent && <NewAgent fleet={fleet} initial={newAgent} onClose={() => setNewAgent(null)} onLaunched={onLaunched} />}
+      {newAgent && <NewAgent fleet={fleet} initial={newAgent} onClose={() => setNewAgent(null)} onLaunched={onLaunched} onAddAccount={() => { setNewAgent(null); setSettings('accounts') }} onCloudSettings={() => { setNewAgent(null); setSettings('cloud') }} />}
       {history && <History onClose={() => setHistory(false)} onOpen={(id, fresh) => (fresh ? setTimeout(() => openAgent(id), 1200) : openAgent(id))} />}
+      {tour && !covered && <Tour key={device} phone={!wide} actionLabel={agents.some((a) => !a.chief) ? 'Start an agent' : 'Start your first agent'}
+        onClose={endTour} onAction={() => { endTour(); setNewAgent({ mode: 'project' }) }} />}
     </>
   )
 
   const topbar = (
     <header className="topbar">
       <div className="top-left">
-      <img className="mark" src="/mark.svg" alt="Bridge AI" width="24" height="24" />
+      <img className="mark" src={`${import.meta.env.BASE_URL}mark.svg`} alt="Bridge AI" width="24" height="24" />
       {wide && liveView && (
         <nav className="view-tabs" role="tablist" aria-label="View">
           <button role="tab" aria-selected={view === 'command'} className={view === 'command' ? 'on' : ''} onClick={() => setView('command')} title="Alt+1">
@@ -346,7 +402,7 @@ export default function App() {
         </nav>
       )}
       </div>
-      <button className="search-btn" onClick={() => setPalette(true)} aria-label="Search and commands" title="Search and commands (⌘K)">
+      <button className="search-btn" data-tour="search" onClick={() => setPalette(true)} aria-label="Search and commands" title="Search and commands (⌘K)">
         <Icon name="search" size={15} /> <span className="hide-sm">Search agents, files and commands</span> <kbd className="hide-touch">⌘K</kbd>
       </button>
       <div className="top-right">
@@ -356,11 +412,11 @@ export default function App() {
           </button>
         )}
         <NextMeetingChip onClick={() => showCard('calendar')} />
-        <ProviderChip quota={quota.data} primary={primary} onClick={() => showCard('gauge')} />
+        <ProviderChip quota={quota.data} primary={primary} onClick={() => showCard('gauge')} onAddAccount={() => setSettings('accounts')} />
         {update.data?.available && <UpdateChip u={update.data} onDetails={() => setSettings('about')} />}
         <WeatherChip onClick={() => showCard('sun')} />
         <Clock />
-        <button className="win-btn" onClick={() => setSettings('general')} aria-label="Settings" title="Settings (⌘,)">
+        <button className="win-btn" data-tour="settings" onClick={() => setSettings('general')} aria-label="Settings" title="Settings (⌘,)">
           <Icon name="settings" size={15} />
         </button>
       </div>
@@ -389,7 +445,7 @@ export default function App() {
         </main>
         <nav className="tabbar" aria-label="Sections">
           {tabs.map(([id, icon, label]) => (
-            <button key={id} className={mtab === id ? 'on' : ''} onClick={() => { setMtab(id); if (id === 'agents' && mtab === 'agents') setMobileAgent(null) }} aria-current={mtab === id}>
+            <button key={id} className={mtab === id ? 'on' : ''} data-tour={{ mate: 'chief', agents: 'agents' }[id]} onClick={() => { setMtab(id); if (id === 'agents' && mtab === 'agents') setMobileAgent(null) }} aria-current={mtab === id}>
               <span className="tab-icon">
                 <Icon name={icon} size={20} />
                 {id === 'agents' && needsYou.length > 0 && <span className="badge">{needsYou.length}</span>}
@@ -500,7 +556,7 @@ export default function App() {
         })}
       </div>
       <div className="ws-tab-tools">
-        {!mate && <button className="ghost-btn" onClick={mateLaunch.launch} disabled={mateLaunch.launching}><Icon name="helm" size={12} /> {mateLaunch.launching ? 'Launching…' : 'Start chief of staff'}</button>}
+        {!mate && <button className="ghost-btn" data-tour="chief" onClick={mateLaunch.launch} disabled={mateLaunch.launching}><Icon name="helm" size={12} /> {mateLaunch.launching ? 'Launching…' : 'Start chief of staff'}</button>}
         <button className={`win-btn ${split ? 'on' : ''}`} onClick={toggleSplit} disabled={!canSplit || W.tabs.length < 2}
           title={!canSplit ? 'Not enough room to split' : W.tabs.length < 2 ? 'Open a second agent to split' : split ? 'Unsplit' : 'Split side by side'} aria-label="Split">
           <Icon name="split" size={15} />

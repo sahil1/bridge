@@ -1,0 +1,24 @@
+/* The demo's strip at the top, over the notch's space and the top of the app's top bar. */
+:root { --demo-bar: 28px; }
+.demo-bar {
+  position: fixed; z-index: 40; top: 0; left: 0; right: 0;
+  height: calc(var(--demo-bar) + env(safe-area-inset-top)); padding: env(safe-area-inset-top) max(12px, env(safe-area-inset-right)) 0 max(12px, env(safe-area-inset-left));
+  display: flex; align-items: center; gap: 10px; font: 500 12px/1 var(--font); color: var(--ink-2);
+  background: color-mix(in srgb, var(--accent) 9%, var(--pane)); border-bottom: 1px solid var(--line);
+}
+.demo-tag { flex: none; padding: 3px 7px; border-radius: 6px; background: var(--accent); color: var(--on-accent); font-weight: 700; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; }
+.demo-what { color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.demo-grow { flex: 1; }
+.demo-bar a { flex: none; color: var(--accent); text-decoration: none; font-weight: 600; white-space: nowrap; }
+.demo-bar a:hover { text-decoration: underline; }
+.demo-bar button { flex: none; height: 20px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--line-2); background: var(--pane); color: var(--ink); font: 600 11.5px var(--font); white-space: nowrap; }
+@media (max-width: 520px) {
+  .demo-what { display: none; }
+}
+@media (max-width: 380px) {
+  .demo-long { display: none; }
+}
+/* The app's top bar already keeps clear of the notch (--safe-top); it keeps clear of the strip too. */
+body.demo-on { --safe-top: calc(env(safe-area-inset-top, 0px) + var(--demo-bar)); }
+/* In the demo, the only errors are notes that something needs the real thing: say them calmly. */
+body.demo-on .error-text { color: var(--ink-3); }

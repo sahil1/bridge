@@ -14,17 +14,19 @@ import About from './settings/About.jsx'
 export const SECTIONS = [
   { id: 'general', label: 'General', icon: 'home', hint: 'Name, default agent and model, location' },
   { id: 'agents', label: 'Agents', icon: 'bot', hint: 'Installed agents and sign-in' },
-  { id: 'providers', label: 'Model providers', icon: 'layers', hint: 'API keys, clouds, local models' },
+  { id: 'providers', label: 'Model providers', icon: 'layers', hint: 'API keys, clouds, local models, cloud agents' },
   { id: 'mcp', label: 'MCP servers', icon: 'tool', hint: 'Tools your agents can use' },
   { id: 'phone', label: 'Phone & notifications', icon: 'phone', hint: 'Open Bridge AI on your phone; what to notify you about' },
   { id: 'appearance', label: 'Appearance', icon: 'palette', hint: 'Theme, text size, density' },
   { id: 'config', label: 'Config file', icon: 'braces', hint: 'Every setting, as JSON' },
-  { id: 'about', label: 'About & updates', icon: 'info', hint: 'Version, updates, reporting a problem' },
+  { id: 'about', label: 'About & updates', icon: 'info', hint: 'Version, updates, the tour, reporting a problem' },
 ]
 
+// "accounts" and "cloud" open Model providers at its Accounts or Cloud agents list.
 export default function Settings({ section = 'general', onClose, onOpenAgent }) {
-  const [at, setAt] = useState(SECTIONS.some((s) => s.id === section) ? section : 'general')
-  useEffect(() => { if (SECTIONS.some((s) => s.id === section)) setAt(section) }, [section])
+  const to = section === 'accounts' || section === 'cloud' ? 'providers' : section
+  const [at, setAt] = useState(SECTIONS.some((s) => s.id === to) ? to : 'general')
+  useEffect(() => { if (SECTIONS.some((s) => s.id === to)) setAt(to) }, [to])
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape' && !e.target.closest?.('textarea, input')) onClose() }
     window.addEventListener('keydown', onKey)
@@ -55,7 +57,7 @@ export default function Settings({ section = 'general', onClose, onOpenAgent }) 
           <div className="st-scroll">
             {at === 'general' && <General onGo={go} />}
             {at === 'agents' && <Agents onOpenAgent={(id) => { onOpenAgent?.(id); onClose() }} />}
-            {at === 'providers' && <Providers onOpenAgent={(id) => { onOpenAgent?.(id); onClose() }} />}
+            {at === 'providers' && <Providers focus={section === 'accounts' || section === 'cloud' ? section : null} onOpenAgent={(id) => { onOpenAgent?.(id); onClose() }} />}
             {at === 'mcp' && <Mcp />}
             {at === 'appearance' && <Appearance />}
             {at === 'config' && <ConfigFile />}

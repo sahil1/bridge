@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
@@ -16,7 +15,10 @@
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
         android:theme="@style/Theme.BridgeAI"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/no_backup"
         android:hardwareAccelerated="true"
+        android:enableOnBackInvokedCallback="true"
         android:supportsRtl="true">
         <activity
             android:name=".MainActivity"
@@ -37,10 +39,13 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Shows which AI agents on the user's own computer are working or waiting on them, and keeps the encrypted link to that computer open so it stays current." />
         </service>
-        <!-- The QR scanner, which would otherwise open sideways. -->
+        <!-- The QR scanner: zxing's, upright (it would open sideways) and clear of the bars. -->
         <activity
-            android:name="com.journeyapps.barcodescanner.CaptureActivity"
+            android:name=".ScanActivity"
             android:screenOrientation="fullSensor"
-            tools:replace="screenOrientation" />
+            android:clearTaskOnLaunch="true"
+            android:stateNotNeeded="true"
+            android:theme="@style/zxing_CaptureTheme"
+            android:windowSoftInputMode="stateAlwaysHidden" />
     </application>
 </manifest>

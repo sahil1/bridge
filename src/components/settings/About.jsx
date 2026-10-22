@@ -2,15 +2,21 @@ import { useEffect, useState } from 'react'
 import Icon from '../Icon.jsx'
 import { api } from '../../api.js'
 import { useSettings } from './General.jsx'
+import { startTour } from '../Tour.jsx'
 
 const REPO = 'https://github.com/sahil1/bridge'
 
 // Settings › About & updates: which version you have, whether there's a newer one (and updating
-// to it), and what to include when you report a problem.
+// to it), the tour again, and what to include when you report a problem.
 export default function About() {
   return (
     <div className="st-sections">
       <Updates />
+      <section className="st-sec">
+        <h4>Tour</h4>
+        <p className="muted small">A quick look at the main parts of Bridge AI, the same one you saw after setup.</p>
+        <div className="st-row"><button type="button" className="btn" onClick={startTour}><Icon name="sparkle" size={14} /> Take the tour</button></div>
+      </section>
       <Report />
     </div>
   )
@@ -51,7 +57,7 @@ function Updates() {
               ? <p className="st-note ok"><Icon name="refresh" size={13} /> Updating to {u.latest}. Bridge AI closes and reopens by itself in a few seconds; your agents carry on where they were.</p>
               : u.how === 'app'
                 ? <div className="st-row"><button type="button" className="btn primary" onClick={install}><Icon name="download" size={14} /> Update to {u.latest}</button><a className="small" href={u.url} target="_blank" rel="noreferrer">What's new</a></div>
-                : <div className="ab-cmd"><p className="muted small">{u.how === 'source' ? 'You run Bridge AI from a clone; update it in a terminal, in that folder:' : 'Update from a terminal (it asks for your password to install the package):'}</p><code>{u.command}</code><div className="st-row"><button type="button" className="ghost-btn" onClick={() => navigator.clipboard?.writeText(u.command).catch(() => {})}><Icon name="copy" size={12} /> Copy</button><a className="small" href={u.url} target="_blank" rel="noreferrer">What's new</a></div></div>
+                : <div className="ab-cmd"><p className="muted small">{u.how === 'source' ? 'You run Bridge AI from a clone; update it in a terminal, in that folder:' : u.how === 'docker' ? 'Bridge AI runs in Docker; update it on that machine, in the folder with docker-compose.yml:' : 'Update from a terminal (it asks for your password to install the package):'}</p><code>{u.command}</code><div className="st-row"><button type="button" className="ghost-btn" onClick={() => navigator.clipboard?.writeText(u.command).catch(() => {})}><Icon name="copy" size={12} /> Copy</button><a className="small" href={u.url} target="_blank" rel="noreferrer">What's new</a></div></div>
           )}
           {state?.error && <p className="st-note bad"><Icon name="alert" size={13} /> {state.error}</p>}
           <div className="st-row">
@@ -81,6 +87,7 @@ function Report() {
         <a className="btn" href={issue} target="_blank" rel="noreferrer"><Icon name="external" size={13} /> Report a problem</a>
         <a className="ghost-btn" href={`${REPO}/issues/new?template=feature.yml`} target="_blank" rel="noreferrer">Suggest an idea</a>
       </div>
+      <p className="muted small">Free and open source under the Apache License 2.0, as is, with no warranty. Not affiliated with Anthropic, OpenAI, Google, GitHub or the other companies whose tools it works with. <a href={`${REPO}/blob/main/TERMS.md`} target="_blank" rel="noreferrer">Terms</a> · <a href={`${REPO}/blob/main/PRIVACY.md`} target="_blank" rel="noreferrer">Privacy</a> · <a href={`${REPO}/blob/main/LICENSE`} target="_blank" rel="noreferrer">License</a></p>
     </section>
   )
 }

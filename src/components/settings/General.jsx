@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import Icon from '../Icon.jsx'
 import AgentMark from './agentMark.jsx'
 import LocationPicker from './LocationPicker.jsx'
+import { USAGE_OFF_WHY } from '../Usage.jsx'
 import { api, settingsChanged } from '../../api.js'
 
 // Settings › General: who you are, which agent and model to use by default, where you are.
@@ -95,6 +96,16 @@ export default function General({ onGo }) {
         <h4>Location</h4>
         <p className="muted small">For the weather and the morning brief. Only the coordinates you pick are saved, on this computer.</p>
         <LocationPicker value={eff.location} onChange={(loc) => save({ location: loc })} />
+      </section>
+
+      <section className="st-sec">
+        <h4>Plan usage</h4>
+        <p className="muted small">{USAGE_OFF_WHY}</p>
+        <div className="seg ap-seg" role="radiogroup" aria-label="Plan usage">
+          {[[false, 'Off'], [true, 'On']].map(([on, label]) => (
+            <button key={label} type="button" role="radio" aria-checked={!!eff.quota?.read === on} className={!!eff.quota?.read === on ? 'on' : ''} onClick={() => save({ quota: { read: on } })}>{label}</button>
+          ))}
+        </div>
       </section>
 
       <TerminalApp value={eff.terminal?.app || 'auto'} onSave={(app) => save({ terminal: { ...(eff.terminal || {}), app } })} />

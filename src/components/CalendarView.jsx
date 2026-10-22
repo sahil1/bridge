@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import Icon from './Icon.jsx'
 import { usePersisted, useWidth } from './layout.jsx'
 import { api, usePoll } from '../api.js'
+import { CalendarSetup } from './Agenda.jsx'
 
 // Day / week / month / year views over the Mac's Calendar (Exchange plus personal calendars).
 const DAY = 864e5
@@ -419,7 +420,7 @@ export default function CalendarView({ onOpenAgent, focusDate }) {
           <button className="icon-btn" onClick={() => refresh('&refresh=1')} aria-label="Refresh" title="Refresh"><Icon name="refresh" size={13} /></button>
         </div>
       </div>
-      {error && <p className="error-text pad">{error}</p>}
+      {error && <div className="pad"><CalendarSetup error={error} onCheck={() => refresh('&refresh=1')} /></div>}
       <div className={`calv-body ${selected && !narrow ? 'with-detail' : ''}`}>
         <div className="calv-main">
           {mode === 'day' && <TimeGrid days={days} events={events} colors={colors} now={now} selected={selected} onSelect={setSelected} compactCols />}

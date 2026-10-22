@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import Icon, { StatusDot } from './Icon.jsx'
 import { usePersisted } from './layout.jsx'
 import { api, usePoll, fmtRelative, openInTerminal } from '../api.js'
+import { CloudMark, linkOf, whereOf } from './cloudBits.jsx'
 
 // Mirrors herdr's sidebar: numbered workspaces, each with its tabs. Spaces fold,
 // every row shows the folder it works in, and a ⋯ menu covers rename/close/copy.
@@ -36,7 +37,7 @@ export function groupByWorkspace(fleet) {
       else if (t.panes.length) rows.push({ kind: 'shell', id: `tab:${t.tabId}`, tab: t })
     }
     for (const a of list) if (!rows.some((r) => r.id === a.paneId)) rows.push({ kind: 'agent', id: a.paneId, agent: a, tab: null })
-    return { ...w, number: i + 1, agents: list, rows, status: list.length ? worst(list) : 'unknown' }
+    return { ...w, number: i + 1, agents: list, rows, status: list.length ? worst(list) : 'unknown', cloud: w.id === 'cloud' }
   })
 }
 
@@ -105,11 +106,13 @@ function HoverCard({ row, rect, git, preview }) {
         <b>{a ? (a.chief ? 'Chief of staff' : a.title || rowName(row)) : rowName(row)}</b>
       </div>
       <div className="hc-meta">
-        {a ? <span>{STATUS_LABEL[a.status]} · {a.kind}</span> : <span>{row.tab.panes.length} pane{row.tab.panes.length === 1 ? '' : 's'}</span>}
+        {a ? <span>{a.cloud?.failed ? 'Failed' : STATUS_LABEL[a.status]} · {a.cloud ? `${a.cloud.label} cloud` : a.kind}</span> : <span>{row.tab.panes.length} pane{row.tab.panes.length === 1 ? '' : 's'}</span>}
         {preview?.ts && <span>{fmtRelative(preview.ts)}</span>}
       </div>
       {preview?.text && <p className="hc-preview">{preview.text}</p>}
-      <div className="hc-path"><Icon name="folder" size={11} /> <span>{tildePath(cwd)}</span></div>
+      {a?.cloud
+        ? <div className="hc-path"><Icon name="cloud" size={11} /> <span>{a.cloud.label}{whereOf(a.cloud) ? ` · ${whereOf(a.cloud)}` : ''}</span></div>
+        : <div className="hc-path"><Icon name="folder" size={11} /> <span>{tildePath(cwd)}</span></div>}
       {git && <div className="hc-path"><GitBit g={git} own={!!rowTree(row)} /></div>}
     </div>,
     document.body,
@@ -204,6 +207,25 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
   }
   const endDrag = () => { setDrag(null); setOver(null) }
 
+  // A cloud agent's ⋯ menu: its pull request or page, notifications, Stop, and no longer following it.
+  const cloudItems = (a) => {
+    const c = a.cloud
+    const link = linkOf(c)
+    const pid = encodeURIComponent(a.paneId)
+    return [
+      link && { icon: 'external', label: link.label, run: () => window.open(link.href, '_blank', 'noopener') },
+      c.prUrl && c.url && { icon: 'external', label: c.urlLabel || `Open in ${c.label}`, run: () => window.open(c.url, '_blank', 'noopener') },
+      { icon: a.muted ? 'bell' : 'bell-off', label: a.muted ? 'Unmute notifications' : 'Mute notifications',
+        run: () => act(() => api(`/agents/${pid}/mute`, { method: 'POST', body: { muted: !a.muted } }), a.muted ? 'Notifications back on' : 'Muted until you unmute it') },
+      a.status === 'working' && c.canStop && { icon: 'stop', label: 'Stop', run: () => act(() => api(`/cloud/agents/${pid}/stop`, { method: 'POST' }), 'Asked it to stop') },
+      '-',
+      { icon: 'x', label: 'Remove from Bridge AI…', danger: true, run: () => {
+        if (!window.confirm(`Stop following "${a.title}" in Bridge AI?\n\nThe agent stays in ${c.label}, with its branch and any pull request.`)) return
+        act(() => api(`/cloud/agents/${pid}`, { method: 'DELETE' }), `Removed ${a.title}. It's still in ${c.label}.`)
+      } },
+    ]
+  }
+
   const closeWs = (g) => {
     if (!window.confirm(`Close the space "${g.label}" and all ${g.rows.length} of its tabs?\n\nEverything running in it stops, the same as closing it in the terminal.`)) return
     act(() => api(`/workspaces/${encodeURIComponent(g.id)}/close`, { method: 'POST' }), (r) => closedNote(g.label, r))
@@ -211,14 +233,14 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
 
   if (collapsed) {
     return (
-      <nav className="rail collapsed" aria-label="Workspaces" onMouseLeave={() => setHover(null)}>
+      <nav className="rail collapsed" aria-label="Workspaces" data-tour="agents" onMouseLeave={() => setHover(null)}>
         <button className="rail-toggle" onClick={onToggle} aria-label="Expand sidebar" title="Expand sidebar"><Icon name="panel-left" size={16} /></button>
         <div className="rail-mini">
           {groups.filter((g) => g.rows.length).map((g) => (
             <div key={g.id} className="mini-ws">
               <span className="mini-num" title={g.label}>{g.number}</span>
               {g.rows.map((r) => (
-                <button key={r.id} className={`mini-agent ${selected === r.id ? 'on' : ''}`} onClick={() => onOpen(r.id)} aria-label={rowName(r)}
+                <button key={r.id} className={`mini-agent ${selected === r.id ? 'on' : ''}`} data-tour={r.agent?.chief ? 'chief' : undefined} onClick={() => onOpen(r.id)} aria-label={rowName(r)}
                   onMouseEnter={(e) => setHover({ row: r, rect: e.currentTarget.getBoundingClientRect() })} onFocus={(e) => setHover({ row: r, rect: e.currentTarget.getBoundingClientRect() })} onBlur={() => setHover(null)}>
                   {r.kind === 'agent' ? <StatusDot status={r.agent.status} size={9} /> : <Icon name="terminal" size={11} />}
                 </button>
@@ -233,12 +255,12 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
   }
 
   return (
-    <nav className="rail" aria-label="Workspaces">
+    <nav className="rail" aria-label="Workspaces" data-tour="agents">
       <div className="rail-head">
         <span className="rail-label">Spaces</span>
         <span className={`live-dot ${live ? 'on' : ''}`} title={live ? 'Live updates' : 'Reconnecting'} />
         <span className="rail-tools">
-          <button className="rail-tool" onClick={() => onNewAgent?.()} aria-label="New agent" title="New agent"><Icon name="plus" size={14} /></button>
+          <button className="rail-tool" data-tour="new-agent" onClick={() => onNewAgent?.()} aria-label="New agent" title="New agent"><Icon name="plus" size={14} /></button>
           <button className="rail-tool" onClick={() => setNaming(true)} aria-label="New space" title="New space"><Icon name="layers" size={14} /></button>
           <button className="rail-tool" onClick={() => onHistory?.()} aria-label="History" title="Search every conversation, and closed agents (⌘⇧F)"><Icon name="clock" size={14} /></button>
           <button className="rail-tool" onClick={() => setAll(!allClosed)} aria-label={allClosed ? 'Expand all spaces' : 'Collapse all spaces'} title={allClosed ? 'Expand all' : 'Collapse all'}>
@@ -262,6 +284,7 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
           return (
             <section key={g.id} className={`ws ${closed ? 'is-closed' : ''} ${drag?.kind === 'tab' && over?.id === `into:${g.id}` && drag.ws !== g.id ? 'drop-into' : ''} ${drag?.kind === 'ws' && drag.id === g.id ? 'dragging' : ''} ${drag?.kind === 'ws' && over?.id === g.id ? (over.after ? 'drop-after' : 'drop-before') : ''}`}
               onDragOver={(e) => {
+                if (g.cloud) return // cloud agents run elsewhere: nothing moves in or out
                 if (drag?.kind === 'tab') { e.preventDefault(); setOver({ id: `into:${g.id}` }); return }
                 if (drag?.kind !== 'ws') return
                 e.preventDefault(); setOver(dropOn(e, g.id))
@@ -279,7 +302,7 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
                 if (drag?.kind !== 'ws') return
                 e.preventDefault(); const idx = groups.findIndex((x) => x.id === g.id); moveWs(drag.id, idx + (over?.after ? 1 : 0)); endDrag()
               }}>
-              <div className={`ws-row ${g.rows.length ? '' : 'empty'}`} draggable={!renaming}
+              <div className={`ws-row ${g.rows.length ? '' : 'empty'} ${g.cloud ? 'ws-cloud' : ''}`} draggable={!renaming && !g.cloud}
                 onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', g.label); setDrag({ kind: 'ws', id: g.id }) }} onDragEnd={endDrag}
                 title="Drag to reorder">
                 <button className="ws-fold" onClick={() => toggleWs(g.id)} aria-expanded={!closed} aria-label={`${closed ? 'Expand' : 'Collapse'} ${g.label}`} title={closed ? 'Expand' : 'Collapse'}>
@@ -289,14 +312,15 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
                 <span className="ws-num">{g.number}</span>
                 {renaming?.kind === 'ws' && renaming.id === g.id
                   ? <InlineRename value={g.label} onDone={rename} />
-                  : <span className="ws-label" onDoubleClick={() => setRenaming({ kind: 'ws', id: g.id })} title={g.label}>{g.label}</span>}
+                  : <span className="ws-label" onDoubleClick={() => !g.cloud && setRenaming({ kind: 'ws', id: g.id })} title={g.cloud ? "Agents running in a provider's cloud" : g.label}>{g.cloud && <Icon name="cloud" size={12} />}{g.label}</span>}
                 {g.crew && <span className="crew-tag">crew</span>}
                 {closed && <span className="ws-count" title={`${g.rows.length} tab${g.rows.length === 1 ? '' : 's'}${needs ? `, ${needs} need${needs === 1 ? 's' : ''} you` : ''}`}>{needs ? <b className="needs">{needs}</b> : g.rows.length}</span>}
                 <span className="ws-acts">
-                  <button className="tab-act" onClick={() => onNewAgent?.({ workspaceId: g.id, cwd: rowCwd(g.rows[0] || {}) })} aria-label={`New agent in ${g.label}`} title="New agent here"><Icon name="plus" size={12} /></button>
+                  <button className="tab-act" onClick={() => onNewAgent?.(g.cloud ? { mode: 'cloud' } : { workspaceId: g.id, cwd: rowCwd(g.rows[0] || {}) })} aria-label={g.cloud ? 'New cloud agent' : `New agent in ${g.label}`} title={g.cloud ? 'New cloud agent' : 'New agent here'}><Icon name="plus" size={12} /></button>
                   <button className="tab-act" onClick={() => setMenu(menu === `ws:${g.id}` ? null : `ws:${g.id}`)} aria-label={`${g.label} actions`} title="More"><Icon name="more" size={13} /></button>
                 </span>
-                {menu === `ws:${g.id}` && (
+                {menu === `ws:${g.id}` && g.cloud && <Menu onClose={() => setMenu(null)} items={[{ icon: 'plus', label: 'New cloud agent', run: () => onNewAgent?.({ mode: 'cloud' }) }]} />}
+                {menu === `ws:${g.id}` && !g.cloud && (
                   <Menu onClose={() => setMenu(null)} items={[
                     { icon: 'plus', label: 'New agent here', run: () => onNewAgent?.({ workspaceId: g.id, cwd: rowCwd(g.rows[0] || {}) }) },
                     { icon: 'edit', label: 'Rename space', run: () => setRenaming({ kind: 'ws', id: g.id }) },
@@ -313,7 +337,7 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
                 const isRen = renaming?.kind === 'tab' && t && renaming.id === t.tabId
                 return (
                   <div key={r.id} className={`tab-row ${r.kind === 'shell' ? 'shell' : ''} ${selected === r.id ? 'on' : ''} ${drag?.kind === 'tab' && t && drag.id === t.tabId ? 'dragging' : ''} ${drag?.kind === 'tab' && over?.id === r.id ? (over.after ? 'drop-after' : 'drop-before') : ''}`}
-                    draggable={!!t && !isRen}
+                    draggable={!!t && !isRen} data-tour={r.agent?.chief ? 'chief' : undefined}
                     onDragStart={(e) => { if (!t) return; e.stopPropagation(); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', rowName(r)); setDrag({ kind: 'tab', id: t.tabId, ws: g.id, name: rowName(r), rowId: r.id }) }}
                     onDragEnd={endDrag}
                     onDragOver={(e) => { if (drag?.kind !== 'tab' || !t) return; e.preventDefault(); e.stopPropagation(); setOver(dropOn(e, r.id)) }}
@@ -329,7 +353,7 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
                       else moveToSpace(d, { workspaceId: g.id, index: at })
                     }}>
                     <button className="tab-main" onClick={() => onOpen(r.id)} onDoubleClick={() => t && setRenaming({ kind: 'tab', id: t.tabId })}
-                      title={`${r.kind === 'agent' ? r.agent.title : t.label}\n${tildePath(cwd)}${gitOf(r) ? `\n${gitOf(r).branch}${gitOf(r).dirty ? ` +${gitOf(r).dirty}` : ''}` : ''}`}>
+                      title={r.agent?.cloud ? `${r.agent.title}\n${r.agent.cloud.label} cloud${whereOf(r.agent.cloud) ? ` · ${whereOf(r.agent.cloud)}` : ''}` : `${r.kind === 'agent' ? r.agent.title : t.label}\n${tildePath(cwd)}${gitOf(r) ? `\n${gitOf(r).branch}${gitOf(r).dirty ? ` +${gitOf(r).dirty}` : ''}` : ''}`}>
                       {r.kind === 'agent' ? <StatusDot status={r.agent.status} size={8} /> : <Icon name="terminal" size={12} className="muted" />}
                       <span className="tab-lines">
                         <span className="tab-line1">
@@ -338,11 +362,14 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
                           {r.kind === 'agent' && r.agent.muted && <Icon name="bell-off" size={11} className="muted" />}
                           {r.kind === 'shell' && t.panes.length > 1 && <span className="tab-count">{t.panes.length}</span>}
                         </span>
-                        <span className="tab-path"><span className="tp-dir">{rowTree(r) ? rowTree(r).repo.split(/[\\/]/).pop() : shortPath(cwd)}</span><GitBit g={gitOf(r)} own={!!rowTree(r)} /></span>
+                        {r.agent?.cloud
+                          ? <span className="tab-path"><span className="tp-dir cloud-where"><CloudMark provider={r.agent.cloud.provider} label={r.agent.cloud.label} size={12} />{r.agent.cloud.repo ? r.agent.cloud.repo.split('/').pop() : r.agent.cloud.label}</span>{r.agent.cloud.branch && <span className="git-bit own" title={`Branch ${r.agent.cloud.branch}`}><Icon name="branch" size={10} /><span className="gb-name">{r.agent.cloud.branch}</span></span>}</span>
+                          : <span className="tab-path"><span className="tp-dir">{rowTree(r) ? rowTree(r).repo.split(/[\\/]/).pop() : shortPath(cwd)}</span><GitBit g={gitOf(r)} own={!!rowTree(r)} /></span>}
                       </span>
                     </button>
                     <button className="tab-act" onClick={() => setMenu(menu === r.id ? null : r.id)} aria-label={`${rowName(r)} actions`} title="More"><Icon name="more" size={13} /></button>
-                    {menu === r.id && (
+                    {menu === r.id && r.agent?.cloud && <Menu onClose={() => setMenu(null)} items={cloudItems(r.agent)} />}
+                    {menu === r.id && !r.agent?.cloud && (
                       <Menu onClose={() => setMenu(null)} items={[
                         { icon: 'folder', label: 'Browse folder', run: () => onOpenFiles?.(r.id) },
                         { icon: 'copy', label: 'Copy folder path', run: () => copy(cwd) },
@@ -381,7 +408,7 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
       {flash && <div className="rail-flash" role="status">{flash}</div>}
       {fleet && !hasMate && (
         <div className="rail-foot">
-          <button className="btn primary block" onClick={launch} disabled={launching}>
+          <button className="btn primary block" data-tour="chief" onClick={launch} disabled={launching}>
             <Icon name="helm" /> {launching ? 'Launching…' : 'Start chief of staff'}
           </button>
           {error && <p className="error-text">{error}</p>}

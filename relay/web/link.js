@@ -9,6 +9,7 @@
 // Session keys = HKDF(ECDH(eP,eH) | ECDH(D,eH) | ECDH(eP,H)): only the real computer (H) and a
 // paired phone (D) can work them out. The first time a phone pairs, the one-time code from the
 // computer proves each side to the other (an HMAC over the handshake), so the relay can't step in.
+// Messages that wait in the relay while the computer is offline are sealed on their own: see notes.
 const subtle = globalThis.crypto.subtle
 const ALG = { name: 'ECDH', namedCurve: 'P-256' }
 const enc = new TextEncoder()
@@ -142,6 +143,48 @@ export class Session {
 // Handshake messages travel as [0][JSON]; sealed records as [1][ciphertext].
 export const plainFrame = (obj) => cat([0], enc.encode(JSON.stringify(obj)))
 export const readPlain = (buf) => { const b = new Uint8Array(buf); return b[0] === 0 ? JSON.parse(dec.decode(b.subarray(1))) : null }
+
+// ---------- notes: messages that wait in the relay ----------
+// A message you send while your computer is offline waits in your relay until it's back, even if
+// the phone is closed by then; what became of it goes back the same way. The link above needs both
+// ends online, so each note is sealed on its own, to the other end's long-term key:
+//   phone to computer: HKDF(ECDH(n,H) | ECDH(D,H)), n a fresh key for each note
+//   computer to phone: HKDF(ECDH(n,D) | ECDH(H,D))
+// Only this phone (D) and the computer (H) can work out ECDH(D,H), so a note that opens was sealed
+// by one of them: the relay can't read one or make one up, and the computer still checks that D is
+// a phone it paired and hasn't removed. With n, a key leaked for one note opens no other. A note's
+// id and time are sealed in too (AES-GCM's additional data), so the relay can't change them; it
+// can only hold a note back, drop it or hand it over again, and the computer acts on each id once
+// and refuses one older than the 7 days a note may wait (server/inbox.js).
+export const NOTE_DAYS = 7
+export const newNoteId = () => b64u(globalThis.crypto.getRandomValues(new Uint8Array(16)))
+// The phone's box in the relay, where its notes and their answers wait: named by its key, but not the key.
+export const boxId = async (d) => b64u((await sha256(cat(enc.encode('bridge box v1'), typeof d === 'string' ? unb64u(d) : d))).subarray(0, 16))
+const noteAad = (n, dir) => enc.encode(JSON.stringify(['bridge note v1', dir, n.id, n.at, n.d || null, n.e]))
+const noteKey = async (ikm, e, from, to, dir) => hkdf(ikm, await sha256(cat(e, from, to)), `bridge note v1 ${dir}`)
+
+// `me` is this end's key ({ privateKey, public: raw bytes }), `to` the other end's public key (raw).
+// dir: 'up' (phone to computer: the note says which phone, d) or 'down' (computer to phone).
+export async function sealNote(me, to, plain, dir, { id, at } = {}) {
+  const n = await newKey()
+  const e = await rawPublic(n)
+  const note = { v: 1, id: id || newNoteId(), at: at || Date.now(), e: b64u(e) }
+  if (dir === 'up') note.d = b64u(me.public)
+  const key = await noteKey(cat(await dh(n.privateKey, to), await dh(me.privateKey, to)), e, me.public, to, dir)
+  const iv = globalThis.crypto.getRandomValues(new Uint8Array(12))
+  note.c = b64u(cat(iv, await subtle.encrypt({ name: 'AES-GCM', iv, additionalData: noteAad(note, dir) }, key, typeof plain === 'string' ? enc.encode(plain) : plain)))
+  return note
+}
+
+// Throws if it doesn't open: not sealed by `from` for `me`, or changed on the way.
+export async function openNote(me, from, note, dir) {
+  if (note?.v !== 1 || typeof note.id !== 'string' || !Number.isFinite(note.at) || typeof note.e !== 'string' || typeof note.c !== 'string') throw new Error('not a note')
+  const e = unb64u(note.e)
+  const c = unb64u(note.c)
+  if (e.byteLength !== 65 || c.byteLength < 29) throw new Error('not a note')
+  const key = await noteKey(cat(await dh(me.privateKey, e), await dh(me.privateKey, from)), e, from, me.public, dir)
+  return new Uint8Array(await subtle.decrypt({ name: 'AES-GCM', iv: c.subarray(0, 12), additionalData: noteAad(note, dir) }, key, c.subarray(12)))
+}
 
 // ---------- what goes inside: requests, responses and sockets ----------
 // [kind][stream id, 4 bytes][body]. JSON bodies for headers; raw bytes for content.

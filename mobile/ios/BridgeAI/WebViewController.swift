@@ -4,7 +4,8 @@ import WebKit
 // The whole app: the relay's phone page (relay/web, bundled in), served from bridge-app://app.
 // The page keeps the end-to-end encrypted link to your computer, as it does in Safari. Safari
 // gives it a service worker to carry Bridge AI's requests over that link; an app can't have one
-// for an address that's different for everyone, so Tunnel does that job here.
+// for an address that's different for everyone, so Tunnel does that job here. With no computer,
+// the phone page can offer the demo instead, which is bundled in too (BundledUI).
 final class WebViewController: UIViewController, WKScriptMessageHandler, WKUIDelegate, WKNavigationDelegate {
     static let scheme = "bridge-app"
     private static let shell = URL(string: "bridge-app://app/_relay/shell")!
@@ -12,6 +13,9 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKUIDel
 
     private var web: WKWebView!
     private let tunnel = Tunnel()
+    private let bundled = BundledUI()
+    private var showingBundled = false
+    private let store = OfflineStore() // what the page keeps for when your computer is offline
 
     // The computer showing now, by its relay (from its pairing link). The others are in the Keychain.
     private var relay: String? {
@@ -22,11 +26,13 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKUIDel
     override func loadView() {
         let config = WKWebViewConfiguration()
         config.setURLSchemeHandler(tunnel, forURLScheme: Self.scheme)
+        config.setURLSchemeHandler(bundled, forURLScheme: BundledUI.scheme)
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1"
         // The page tells the app from Safari by this, and Bridge AI names the phone "iPhone (app)".
         config.applicationNameForUserAgent = "BridgeAIApp/\(version) Mobile/15E148 Safari/604.1"
         config.allowsInlineMediaPlayback = true
         config.userContentController.add(WeakHandler(self), name: "bridge")
+        config.userContentController.addScriptMessageHandler(store, contentWorld: .page, name: "store")
         web = WKWebView(frame: .zero, configuration: config)
         web.uiDelegate = self
         web.navigationDelegate = self
@@ -48,6 +54,8 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKUIDel
         #if DEBUG
         // For testing on the simulator, which has no camera: launch with -pair <link>.
         if let link = UserDefaults.standard.string(forKey: "pair"), usePairingLink(link) { return }
+        // ...and with -open demo, straight to a bundled UI.
+        if let name = UserDefaults.standard.string(forKey: "open"), BundledUI.has(name) { return openBundled(name) }
         #endif
         load(fragment: nil)
     }
@@ -55,17 +63,41 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKUIDel
     override var preferredStatusBarStyle: UIStatusBarStyle { .default }
 
     private func load(fragment: String?) {
+        showingBundled = false
         let ucc = web.configuration.userContentController
         ucc.removeAllUserScripts()
         let pairing = Keychain.computers().first(where: { $0["relay"] as? String == relay })?["pairing"]
+        // bundled: the UIs in the app the page can offer (the demo).
         ucc.addUserScript(WKUserScript(source: """
-            window.bridgeNative = { platform: 'ios', relay: \(Self.js(relay)), pairing: \(Self.js(pairing)), computers: \(Self.js(listed())), post: (m) => window.webkit.messageHandlers.bridge.postMessage(m) }
+            window.bridgeNative = { platform: 'ios', relay: \(Self.js(relay)), pairing: \(Self.js(pairing)), computers: \(Self.js(listed())), bundled: \(Self.js(["demo"].filter(BundledUI.has))), post: (m) => window.webkit.messageHandlers.bridge.postMessage(m) }
             """, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         // Bodies that are Blobs (a photo, a voice note) don't reach an app's own handler, so send
         // their bytes instead.
         ucc.addUserScript(WKUserScript(source: """
             (() => { const f = window.fetch; window.fetch = async function (input, init) { if (init && init.body instanceof Blob) init = { ...init, body: await init.body.arrayBuffer() }; return f.call(this, input, init) } })()
             """, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+        logConsole(ucc)
+        var url = URLComponents(url: Self.shell, resolvingAgainstBaseURL: false)!
+        url.fragment = fragment
+        web.load(URLRequest(url: url.url!))
+    }
+
+    // A UI bundled in the app (BundledUI), in place of the phone page. It knows nothing of your
+    // computers, and can only ask to go back to the start (bridgeNative.post({ type: 'home' })).
+    private func openBundled(_ name: String) {
+        guard BundledUI.has(name) else { return }
+        showingBundled = true
+        let ucc = web.configuration.userContentController
+        ucc.removeAllUserScripts()
+        ucc.addUserScript(WKUserScript(source: """
+            window.bridgeNative = { platform: 'ios', post: (m) => window.webkit.messageHandlers.bridge.postMessage(m) }
+            """, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        logConsole(ucc)
+        web.load(URLRequest(url: BundledUI.url(name)))
+    }
+
+    // Debug builds pass the page's console to Xcode's.
+    private func logConsole(_ ucc: WKUserContentController) {
         #if DEBUG
         ucc.addUserScript(WKUserScript(source: """
             (() => { const send = (k, a) => { try { window.webkit.messageHandlers.bridge.postMessage({ type: 'log', text: k + ' ' + a.map((x) => x && x.stack ? x.name + ': ' + x.message + ' @ ' + x.stack : String(x)).join(' ') }) } catch {} }
@@ -74,15 +106,16 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKUIDel
             addEventListener('unhandledrejection', (e) => send('rejection', [e.reason && (e.reason.stack || e.reason)])) })()
             """, injectionTime: .atDocumentStart, forMainFrameOnly: false))
         #endif
-        var url = URLComponents(url: Self.shell, resolvingAgainstBaseURL: false)!
-        url.fragment = fragment
-        web.load(URLRequest(url: url.url!))
     }
 
     // ---------- messages from the page ----------
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let m = message.body as? [String: Any], let type = m["type"] as? String else { return }
+        // A bundled UI can only go back to the start.
+        if showingBundled && type != "home" && type != "log" { return }
         switch type {
+        case "open": if let name = m["name"] as? String { openBundled(name) }
+        case "home": load(fragment: nil)
         case "res": tunnel.answer(m)
         case "relay": if let url = m["url"] as? String { relay = url }
         case "scan": scan()
@@ -136,6 +169,7 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKUIDel
 
     private func forget(_ url: String) {
         Keychain.save(Keychain.computers().filter { $0["relay"] as? String != url })
+        OfflineStore.forget(url)
         guard url == relay else { return updateList() }
         relay = Keychain.computers().first?["relay"] as? String
         load(fragment: nil)

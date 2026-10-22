@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Icon from './Icon.jsx'
 import { api } from '../api.js'
 import { usePersisted } from './layout.jsx'
@@ -34,8 +34,10 @@ function pickMime() {
   return ''
 }
 
-// Tap to record, tap to stop; audio is transcribed on the Mac by whisper.cpp.
-function useRecorder(onText, onError) {
+// Tap to record, tap to stop; audio is transcribed on your computer by whisper.cpp. That needs a
+// one-time setup, so it's checked before recording: nobody should talk for a minute into a
+// recording that can't be turned into text.
+function useRecorder(onText, onError, onSetup) {
   const [state, setState] = useState('idle') // idle | recording | transcribing
   const [secs, setSecs] = useState(0)
   const [level, setLevel] = useState(0)
@@ -50,6 +52,8 @@ function useRecorder(onText, onError) {
 
   const start = async () => {
     if (!navigator.mediaDevices?.getUserMedia) return onError('Microphone needs HTTPS (open the Tailscale address)')
+    const v = await api('/voice').catch(() => null) // unknown: try anyway, and say why if it fails
+    if (v && !v.ready) return onSetup(v)
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       const mime = pickMime()
@@ -67,7 +71,11 @@ function useRecorder(onText, onError) {
           if (!res.ok) throw new Error(data.error || 'Transcription failed')
           if (data.text) onText(data.text)
           else onError('No speech detected')
-        } catch (e) { onError(e.message) } finally { setState('idle') }
+        } catch (e) {
+          const v = await api('/voice').catch(() => null)
+          if (v && !v.ready) onSetup(v)
+          else onError(`Couldn't transcribe: ${e.message}`)
+        } finally { setState('idle') }
       }
       // Live input level for the meter.
       const ctx = new (window.AudioContext || window.webkitAudioContext)()
@@ -96,6 +104,49 @@ function useRecorder(onText, onError) {
   const cancel = () => { if (rec.current?.mr) { rec.current.mr.onstop = () => stopTracks(); rec.current.mr.stop() } setState('idle') }
   useEffect(() => () => { try { cancel() } catch { /* unmounted */ } }, []) // eslint-disable-line react-hooks/exhaustive-deps
   return { state, secs, level, start, stop, cancel }
+}
+
+// Shown when the mic is tapped before voice notes are set up on the computer: what's needed, one
+// tap to set it up, and progress until it's ready.
+function VoiceSetup({ initial, onClose }) {
+  const [v, setV] = useState(initial)
+  const [started, setStarted] = useState(!!initial.downloading)
+  const [err, setErr] = useState(null)
+  useEffect(() => {
+    if (v.ready) { const t = setTimeout(onClose, 5000); return () => clearTimeout(t) }
+    if (!started || v.error) return
+    const t = setInterval(() => api('/voice').then(setV).catch(() => {}), 1500)
+    return () => clearInterval(t)
+  }, [v.ready, v.error, started, onClose])
+  const setup = async () => {
+    setErr(null)
+    try { setV(await api('/voice/setup', { method: 'POST' })); setStarted(true) } catch (e) { setErr(e.message) }
+  }
+  const tools = v.missing.length > 0
+  const needs = [!v.model && `a ${v.modelMB} MB speech model`, tools && (v.installCommand ? 'ffmpeg and whisper-cpp from Homebrew' : 'ffmpeg and whisper.cpp')].filter(Boolean)
+  const canSetup = !v.model || !!v.installCommand
+  const touch = matchMedia('(pointer: coarse)').matches
+  let text, actions = null
+  if (v.ready) text = 'Voice notes are ready. Tap the mic and talk.'
+  else if (v.error) { text = `The speech model didn't download: ${v.error}`; actions = <button className="btn small primary" onClick={setup}>Try again</button> }
+  else if (v.downloading) text = `Downloading the speech model… ${v.downloading.percent}%`
+  else if (started && tools && v.installCommand) text = 'Installing ffmpeg and whisper-cpp in a terminal tab, in the Setup space. If it asks for your password, answer it there.'
+  else if (started && tools) text = 'Install ffmpeg and whisper.cpp (whisper-cli) on your computer, then tap the mic again.'
+  else {
+    text = `Voice notes are turned into text on your computer, so your audio never leaves it. They need a one-time setup there: ${needs.join(' and ')}.${touch ? " Your keyboard's own mic works meanwhile." : ''}`
+    actions = canSetup ? <button className="btn small primary" onClick={setup}>Set up</button> : null
+  }
+  return (
+    <div className="voice-setup" role="status" aria-live="polite">
+      <p>{text}</p>
+      {v.downloading && <span className="vs-bar"><span style={{ width: `${v.downloading.percent}%` }} /></span>}
+      {err && <p className="error-text small">{err}</p>}
+      <div className="vs-actions">
+        <button className="ghost-btn" onClick={onClose}>{v.ready || started ? 'Close' : 'Not now'}</button>
+        {actions}
+      </div>
+    </div>
+  )
 }
 
 
@@ -326,11 +377,14 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
     setManualH(h)
   }
   const onGripUp = () => { grip.current = null }
-  useEffect(() => { if (!note) return; const t = setTimeout(() => setNote(null), 4000); return () => clearTimeout(t) }, [note])
+  useEffect(() => { if (!note) return; const t = setTimeout(() => setNote(null), 6000); return () => clearTimeout(t) }, [note])
 
+  const [voiceSetup, setVoiceSetup] = useState(null)
+  const closeVoiceSetup = useCallback(() => setVoiceSetup(null), [])
   const voice = useRecorder(
     (t) => setDraft((d) => ({ ...d, text: d.text ? `${d.text.replace(/\s+$/, '')} ${t}` : t })),
     (msg) => setNote(msg),
+    setVoiceSetup,
   )
 
   const upload = async (fileList) => {
@@ -475,7 +529,7 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
   const canSend = !!(draft.text.trim() || draft.files.length) && !uploading
   const attachNums = numbered(draft.files)
   const attachPics = draft.files.filter((f) => f.image && f.preview).map((f) => ({ path: f.path, src: f.preview, name: attachNums.count > 1 ? `Image ${attachNums.of(f)} · ${f.name}` : f.name }))
-  const status = busy ? 'Transcribing on your Mac…' : uploading ? `Uploading ${uploading} file${uploading > 1 ? 's' : ''}…` : note
+  const status = busy ? 'Transcribing on your computer…' : uploading ? `Uploading ${uploading} file${uploading > 1 ? 's' : ''}…` : null
 
   return (
     <div className="composer-stack">
@@ -490,6 +544,8 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
       <SlashMenu items={slashItems} sel={slashSel} onHover={setSlashSel} onPick={pickSlash} title={slashTitle} />
       {mentionQ != null && <SlashMenu items={mentionItems} sel={mentionSel} onHover={setMentionSel} onPick={pickMention} title={/^[~/]/.test(mentionQ) ? mentionQ.replace(/[^/]*$/, '') || '~/' : mentionQ.endsWith('/') ? mentionQ : mentionQ ? `Matching "${mentionQ}"` : `${cwdName || 'This folder'}/`}
         jumps={mentionJumps} mention />}
+      {voiceSetup && <VoiceSetup initial={voiceSetup} onClose={closeVoiceSetup} />}
+      {note && <div className="comp-note" role="status">{note}</div>}
       <div className={`composer ${recording ? 'rec' : ''} ${dragging ? 'drop' : ''} ${manualH ? 'sized' : ''}`} {...dropProps} onPaste={onPaste}>
         <div className="comp-grip" role="separator" aria-orientation="horizontal" aria-label="Resize the message box" title={manualH ? 'Drag to resize · double-click to fit the text again' : 'Drag to make the box taller'}
           onPointerDown={onGripDown} onPointerMove={onGripMove} onPointerUp={onGripUp} onPointerCancel={onGripUp} onDoubleClick={() => setManualH(null)}
@@ -548,7 +604,7 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
                 <button className={`comp-btn ${savedOpen ? 'on' : ''}`} onClick={() => setSavedOpen((v) => !v)} aria-label="Saved prompts" title="Saved prompts"><Icon name="star" size={16} /></button>
                 {savedOpen && <SavedPrompts current={draft.text} onPick={pickSaved} onClose={() => setSavedOpen(false)} />}
               </span>
-              <button className={`comp-btn ${busy ? 'busy' : ''}`} onClick={voice.start} disabled={busy} aria-label="Dictate" title="Dictate (transcribed on your Mac)">
+              <button className={`comp-btn ${busy ? 'busy' : ''}`} onClick={voice.start} disabled={busy} aria-label="Dictate" title="Dictate (turned into text on your computer)">
                 <Icon name={busy ? 'refresh' : 'mic'} size={16} className={busy ? 'spin' : ''} />
               </button>
               <input ref={fileRef} type="file" multiple hidden onChange={(e) => { upload(e.target.files); e.target.value = '' }} />

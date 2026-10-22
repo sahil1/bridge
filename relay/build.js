@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 
 const DIR = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(DIR, '..')
-const TEXT = ['index.html', 'shell.js', 'sw.js', 'link.js', 'manifest.webmanifest']
+const TEXT = ['index.html', 'shell.js', 'sw.js', 'link.js', 'offline.js', 'manifest.webmanifest']
 const ICONS = ['icon-512.png', 'apple-touch-icon.png', 'mark.svg']
 
 export function bundle() {
