@@ -11,6 +11,8 @@ import { openLink } from './pwa.js'
 import NewAgent from './components/NewAgent.jsx'
 import History from './components/History.jsx'
 import UpdateChip from './components/UpdateChip.jsx'
+import RestartChip from './components/RestartChip.jsx'
+import RuntimeNotice from './components/RuntimeNotice.jsx'
 import AccountMenu, { several, listed, setDefault } from './components/AccountMenu.jsx'
 import { CHANNEL, nameOf, popOut, tell } from './components/Solo.jsx'
 import Palette from './components/Palette.jsx'
@@ -18,7 +20,8 @@ import Tour from './components/Tour.jsx'
 import { NextMeetingChip } from './components/Agenda.jsx'
 import { TodayTabs, TodayBody, openToday } from './components/Dock.jsx'
 import { Handle, usePersisted, useMedia, useHotkey, useWidth, useShared, store } from './components/layout.jsx'
-import { api, useFleet, usePoll, relayActivity } from './api.js'
+import { api, useFleet, usePoll, relayActivity, cloudOnly, refetch } from './api.js'
+import CloudHome from './components/CloudHome.jsx'
 
 const MIN_PANE = 420
 const MIN_WORK = 620
@@ -40,7 +43,7 @@ function useLaunchMate(onOpen) {
   const [state, setState] = useState({ launching: false, error: null })
   const launch = async () => {
     setState({ launching: true, error: null })
-    try { onOpen((await api('/chief/launch', { method: 'POST' })).paneId); setState({ launching: false, error: null }) } catch (e) { setState({ launching: false, error: e.message }) }
+    try { onOpen((await api('/chief/launch', { method: 'POST' })).paneId); setState({ launching: false, error: null }) } catch (e) { setState({ launching: false, error: e.message, code: e.code }) }
   }
   return { ...state, launch }
 }
@@ -52,6 +55,10 @@ function Clock() {
 }
 
 const NAMES = { claude: 'Claude', codex: 'Codex', cursor: 'Cursor', grok: 'Grok' }
+
+// The phone apps' way back to their start screen, from the phone's Cloud agents (cloudOnly).
+const toStart = !cloudOnly ? null : window.bridgeAndroid?.home ? () => window.bridgeAndroid.home()
+  : window.bridgeNative?.post ? () => window.bridgeNative.post({ type: 'home' }) : null
 
 // Top bar chips: default provider's session + week, and current weather. With several accounts
 // it shows the one new agents start with (yours, or Auto's pick) and opens the account switcher.
@@ -87,7 +94,7 @@ function ProviderChip({ quota, primary, onClick, onAddAccount }) {
           {sess && <span>{sess.percentRemaining}%<small> {sess.kind === 'session' ? '5h' : sess.label}</small></span>}
           {week && <span className="chip-sep">{week.percentRemaining}%<small> wk</small></span>}
         </>
-      ) : <span className="muted">{act?.allow ? 'allow' : 'sign in'}</span>}
+      ) : <span className="muted">{p.allow ? 'allow' : p.status === 'auth_required' || p.notSetUp || p.signedIn === false ? 'sign in' : p.status === 'pending' ? '…' : 'no data'}</span>}
       {multi && <Icon name="down" size={11} className="usage-caret" />}
     </button>
   )
@@ -122,7 +129,8 @@ function WeatherChip({ onClick }) {
 
 export default function App() {
   const { fleet, live } = useFleet()
-  const wide = useMedia('(min-width: 900px)')
+  // The phone's Cloud agents keep the phone layout on any screen.
+  const wide = useMedia('(min-width: 900px)') && !cloudOnly
   const [savedView, setView] = usePersisted('cc-view', 'command')
   // The live herdr view exists only when herdr is the runtime (see server/runtime).
   const confPoll = usePoll('/config', 10 * 60 * 1000)
@@ -207,6 +215,8 @@ export default function App() {
     setView('command')
     if (!wide) {
       const a = byId[paneId]
+      // On the phone's Cloud agents, Back (Android's) closes the agent first.
+      if (cloudOnly && paneId !== mobileAgent) { if (window.history.state?.agent) window.history.replaceState({ agent: paneId }, ''); else window.history.pushState({ agent: paneId }, '') }
       if (a?.chief) { setMtab('mate'); setMobileAgent(null) } else { setMtab('agents'); setMobileAgent(paneId) }
       return
     }
@@ -217,7 +227,13 @@ export default function App() {
       return { ...w, tabs, active: paneId, group: 'main' }
     })
     setL((l) => (l.max ? { ...l, max: null } : l))
-  }, [wide, fleet]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [wide, fleet, mobileAgent]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!cloudOnly) return
+    const back = () => setMobileAgent(null)
+    window.addEventListener('popstate', back)
+    return () => window.removeEventListener('popstate', back)
+  }, [])
 
   // Clicking a notification (browser or the Mac app) opens the agent it was about.
   const openAgentRef = useRef(null)
@@ -259,6 +275,12 @@ export default function App() {
   const showPopped = (id) => { if (window.bridgeApp?.focusPopout) window.bridgeApp.focusPopout(id); else tell({ type: 'focus', paneId: id }) }
   const bringBack = (id) => { tell({ type: 'close', paneId: id }); setPopped((s) => { const n = new Set(s); n.delete(id); return n }) }
   const showCardRef = useRef(null)
+  // Any part of the app can open a section of Settings (a fix that lives there).
+  useEffect(() => {
+    const on = (e) => setSettings(e.detail?.section || 'general')
+    window.addEventListener('bridge-open-settings', on)
+    return () => window.removeEventListener('bridge-open-settings', on)
+  }, [])
   useEffect(() => {
     const on = (e) => { if (e.detail?.id) showCardRef.current?.(e.detail.id) }
     window.addEventListener('bridge-open-card', on)
@@ -335,7 +357,7 @@ export default function App() {
   const covered = !!(onboarding || settings || newAgent || palette || history)
   const ready = !!fleet && !!conf?.setupDone && view === 'command'
   useEffect(() => {
-    if (tour || toured[device] || covered || !ready) return
+    if (tour || toured[device] || covered || !ready || cloudOnly) return
     const t = setTimeout(() => setTour(true), 1500) // let the chief of staff's tab open first
     return () => clearTimeout(t)
   }, [tour, toured[device], device, covered, ready]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -375,10 +397,17 @@ export default function App() {
     { id: 'a:stats', label: 'Usage stats and history', icon: 'gauge', keywords: 'stats heatmap tokens cost models projects', run: () => openToday('usage') },
     { id: 'a:tour', label: 'Take the tour', icon: 'sparkle', keywords: 'help guide walkthrough intro getting started how', run: takeTour },
   ].filter(Boolean)
+  // The phone's Cloud agents: only what it has.
+  const actions = cloudOnly ? [
+    ...paletteActions.filter((a) => ['a:cloud', 'a:history'].includes(a.id)),
+    { id: 'a:settings', label: 'Cloud agent keys…', icon: 'settings', keywords: 'settings key cursor copilot jules claude', run: () => setSettings('cloud') },
+    ...paletteActions.filter((a) => ['a:appearance', 'a:theme'].includes(a.id)),
+  ] : paletteActions
+  const closeSettings = () => { setSettings(null); if (cloudOnly) refetch('/cloud') }
   const overlays = (
     <>
-      {palette && <Palette fleet={fleet} activeId={wide ? W.active : mobileAgent} onClose={() => setPalette(false)} onOpen={openAgent} onOpenFile={openFiles} actions={paletteActions} />}
-      {settings && <Settings section={settings} onClose={() => setSettings(null)} onOpenAgent={openAgent} />}
+      {palette && <Palette fleet={fleet} activeId={wide ? W.active : mobileAgent} onClose={() => setPalette(false)} onOpen={openAgent} onOpenFile={openFiles} actions={actions} />}
+      {settings && <Settings section={settings} onClose={closeSettings} onOpenAgent={openAgent} />}
       {onboarding && <Onboarding onDone={(pane) => { setOnboarding(false); confPoll.refresh(); if (pane) setTimeout(() => openAgent(pane), 800) }} />}
       {newAgent && <NewAgent fleet={fleet} initial={newAgent} onClose={() => setNewAgent(null)} onLaunched={onLaunched} onAddAccount={() => { setNewAgent(null); setSettings('accounts') }} onCloudSettings={() => { setNewAgent(null); setSettings('cloud') }} />}
       {history && <History onClose={() => setHistory(false)} onOpen={(id, fresh) => (fresh ? setTimeout(() => openAgent(id), 1200) : openAgent(id))} />}
@@ -411,11 +440,17 @@ export default function App() {
             <StatusDot status="blocked" size={8} /> {needsYou.length}<span className="needs-word"> need{needsYou.length === 1 ? 's' : ''} you</span>
           </button>
         )}
-        <NextMeetingChip onClick={() => showCard('calendar')} />
-        <ProviderChip quota={quota.data} primary={primary} onClick={() => showCard('gauge')} onAddAccount={() => setSettings('accounts')} />
-        {update.data?.available && <UpdateChip u={update.data} onDetails={() => setSettings('about')} />}
-        <WeatherChip onClick={() => showCard('sun')} />
-        <Clock />
+        {!cloudOnly && (
+          <>
+            <NextMeetingChip onClick={() => showCard('calendar')} />
+            <ProviderChip quota={quota.data} primary={primary} onClick={() => showCard('gauge')} onAddAccount={() => setSettings('accounts')} />
+            {update.data?.available && <UpdateChip u={update.data} onDetails={() => setSettings('about')} />}
+            <RestartChip fleet={fleet} runtime={conf?.runtime?.name} />
+            <WeatherChip onClick={() => showCard('sun')} />
+            <Clock />
+          </>
+        )}
+        {toStart && <button className="win-btn" onClick={toStart} aria-label="Your computer" title="Back to the start: pair or open a computer"><Icon name="laptop" size={15} /></button>}
         <button className="win-btn" data-tour="settings" onClick={() => setSettings('general')} aria-label="Settings" title="Settings (⌘,)">
           <Icon name="settings" size={15} />
         </button>
@@ -424,12 +459,29 @@ export default function App() {
   )
 
   // ---------- Phone ----------
+  // The phone's Cloud agents: their list (or the first key), and one agent at a time.
+  if (cloudOnly) {
+    const mAgent = byId[mobileAgent]
+    const back = () => { if (window.history.state?.agent) window.history.back(); else setMobileAgent(null) }
+    return (
+      <div className="app narrow cloud-only">
+        {topbar}
+        <main className="m-body">
+          {mAgent
+            ? <ErrorBoundary name="This agent's view" resetKey={mAgent.paneId}><Console agent={mAgent} variant="mobile" onBack={back} /></ErrorBoundary>
+            : <CloudHome fleet={fleet} onOpen={openAgent} onNew={() => setNewAgent({ mode: 'cloud' })} />}
+        </main>
+        {overlays}
+      </div>
+    )
+  }
   if (!wide) {
     const mAgent = byId[mobileAgent]
     const tabs = [['mate', 'helm', 'Chief'], ['agents', 'grid', 'Agents'], ['herdr', 'terminal', 'Terminals'], ['today', 'today', 'Today']]
     return (
       <div className="app narrow">
         {topbar}
+        <RuntimeNotice runtime={conf?.runtime?.name} />
         <main className="m-body">
           {mtab === 'mate' && (mate ? <Console agent={mate} variant="mobile" queued={queuedFor(mate.paneId)} /> : <MateEmpty onLaunch={mateLaunch.launch} {...mateLaunch} />)}
           {mtab === 'agents' && (mAgent
@@ -579,6 +631,7 @@ export default function App() {
   return (
     <div className="app wide">
       {topbar}
+      <RuntimeNotice runtime={conf?.runtime?.name} />
       <div className="views">
         <main className="cmd" hidden={view !== 'command'} ref={cmdRef}>
           <div className="slot rail-slot" style={{ width: railOpen ? L.railW : 52 }}>

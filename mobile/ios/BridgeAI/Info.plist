@@ -76,6 +76,19 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>UIApplicationShortcutItems</key>
+	<array>
+		<dict>
+			<key>UIApplicationShortcutItemType</key>
+			<string>dev.bridge-ai.phone.cloud</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>Cloud agents</string>
+			<key>UIApplicationShortcutItemSubtitle</key>
+			<string>On this phone, with your own keys</string>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>cloud</string>
+		</dict>
+	</array>
 	<key>UIStatusBarStyle</key>
 	<string>UIStatusBarStyleLightContent</string>
 </dict>

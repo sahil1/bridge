@@ -1,11 +1,13 @@
 // Settings › Model providers › Cloud agents: a key for each provider that runs agents in its own
 // cloud (Cursor, GitHub Copilot, Jules, Claude Managed Agents). Add, test and remove; the server
 // keeps them in the data folder and only ever says whether one is saved and its last 4 characters.
+// In the phone apps' Cloud agents (cloudOnly) the app keeps them instead, and says no more.
 import { useEffect, useRef, useState } from 'react'
-import { api } from '../../api.js'
+import { api, cloudOnly, keyStore } from '../../api.js'
 import Icon from '../Icon.jsx'
 import { CloudMark } from '../cloudBits.jsx'
 import '../cloud.css'
+import './providers.css'
 
 function Secret({ id, value, onChange, saved, placeholder }) {
   const [show, setShow] = useState(false)
@@ -48,7 +50,11 @@ function Card({ p, open, onToggle, onChange }) {
   const save = () => act('save', () => api(`/cloud/keys/${p.id}`, { method: 'PUT', body: { key } }))
   const test = () => act('test', () => api(`/cloud/keys/${p.id}/test`, { method: 'POST' }))
   const remove = () => {
-    if (!window.confirm(`Remove your ${p.name} key from Bridge AI?${p.agents ? `\n\nIts ${p.agents} cloud agent${p.agents === 1 ? '' : 's'} leave the sidebar until you add a key again. They keep running at ${p.name}.` : ''}`)) return
+    const many = `${p.agents} cloud agent${p.agents === 1 ? '' : 's'}`
+    const ask = cloudOnly
+      ? `Remove your ${p.name} key from this phone?${p.agents ? `\n\nThis phone stops following its ${many} and forgets them. They keep running at ${p.name}.` : ''}`
+      : `Remove your ${p.name} key from Bridge AI?${p.agents ? `\n\nIts ${many} leave the sidebar until you add a key again. They keep running at ${p.name}.` : ''}`
+    if (!window.confirm(ask)) return
     act('remove', () => api(`/cloud/keys/${p.id}`, { method: 'DELETE' }))
   }
   const useCli = () => act('gh', () => api('/cloud/keys/copilot/gh', { method: 'POST' }))
@@ -109,20 +115,24 @@ function Card({ p, open, onToggle, onChange }) {
   )
 }
 
-export default function CloudKeys({ focus }) {
+// bare: just the providers, under a heading of the caller's (the phone's first screen).
+// onChange: after a key is saved or removed.
+export default function CloudKeys({ focus, bare = false, onChange }) {
   const ref = useRef(null)
   const [list, setList] = useState(null)
   const [err, setErr] = useState(null)
   const [open, setOpen] = useState(null)
-  const load = () => api('/cloud').then((d) => { setList(d.providers || []); setErr(null) }).catch((e) => setErr(e.message))
+  const load = () => api('/cloud').then((d) => { setList(d.providers || []); setErr(null); onChange?.(d) }).catch((e) => setErr(e.message))
   useEffect(() => { load() }, [])
   useEffect(() => { if (focus === 'cloud' && list) setTimeout(() => ref.current?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 120) }, [focus, !!list]) // eslint-disable-line react-hooks/exhaustive-deps
   return (
-    <section className="pv-sec" id="pv-cloud" ref={ref}>
-      <div className="pv-head">
-        <h4>Cloud agents</h4>
-        <span className="muted small">Agents that run on the provider's computers, on a repo it hosts. Start one from New agent › In the cloud.</span>
-      </div>
+    <section className={`pv-sec ${bare ? 'bare' : ''}`} id="pv-cloud" ref={ref}>
+      {!bare && (
+        <div className="pv-head">
+          <h4>Cloud agents</h4>
+          <span className="muted small">Agents that run on the provider's computers, on a repo it hosts. Start one from {cloudOnly ? 'New cloud agent' : 'New agent › In the cloud'}.</span>
+        </div>
+      )}
       {err && <p className="pv-note pv-err">Couldn't load cloud agents: {err}</p>}
       {!list && !err && <div className="pv-agents pv-loading" aria-busy="true"><span className="pv-skel" /><span className="pv-skel" /></div>}
       {list && (
@@ -130,7 +140,9 @@ export default function CloudKeys({ focus }) {
           {list.map((p) => <Card key={p.id} p={p} open={open === p.id} onToggle={() => setOpen((o) => (o === p.id ? null : p.id))} onChange={load} />)}
         </div>
       )}
-      <p className="pv-note">Keys stay on this computer, in your Bridge AI data folder (readable only by you). Bridge AI talks to the provider with your key; the agents it starts on this computer don't get these keys.</p>
+      {cloudOnly
+        ? <p className="pv-note">Keys stay on this phone, in {keyStore}, and go only to their own provider: the app adds the key to each request itself. Bridge AI on a computer keeps keys of its own.</p>
+        : <p className="pv-note">Keys stay on this computer, in your Bridge AI data folder (readable only by you). Bridge AI talks to the provider with your key; the agents it starts on this computer don't get these keys.</p>}
     </section>
   )
 }

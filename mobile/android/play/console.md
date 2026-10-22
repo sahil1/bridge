@@ -47,6 +47,11 @@ sign-in. Real use pairs with Bridge AI on the user's computer, by QR code. Instr
 > phone. Then it shows the agents running there, and lists the ones at work on the lock screen.
 >
 > A video of pairing and the lock-screen notification: <link to an unlisted YouTube video>
+>
+> Cloud agents, also on the first screen, runs coding agents on Cursor, GitHub Copilot, Jules or
+> Claude with the user's own key from that provider, paid for on the user's own plan there. We
+> can't supply such a key. Try the demo shows the same screens on made-up cloud agents, one for
+> each provider: open the Cloud space, then any of its agents.
 
 The demo covers app access. The video is still needed for the foreground service declaration
 below (the demo doesn't show the agents notification), so record it: pairing, an agent working,
@@ -68,7 +73,8 @@ the rest. On the questions about users:
 - Digital purchases: **No**.
 - Unrestricted internet access (like a web browser): **No**. Links to other sites open in your browser.
 - If it asks about AI-generated content: the app shows the output of AI coding agents that you run
-  on your own computer with your own accounts; it doesn't generate anything itself.
+  on your own computer with your own accounts, or on a cloud provider you pick with your own key;
+  it doesn't generate anything itself.
 
 ### Target audience and content
 
@@ -82,20 +88,70 @@ answered.
 
 ### Data safety
 
-**Does your app collect or share any of the required user data types? No.**
+**Does your app collect or share any of the required user data types? Yes**, since Cloud agents.
+One data type, and only for people who add a key of their own:
 
-Why that's true:
+- **App activity › Other user-generated content**: what the user asks a cloud agent to do (the
+  task and follow-ups), with the repo and branch they pick.
+  - Collected: **Yes**. Shared: **No**.
+  - Processed ephemerally: **No** (the provider keeps the agent's conversation, in the user's
+    account there).
+  - Required or optional: **Optional**. Cloud agents is something the user turns on by adding a
+    key; the rest of the app works without it.
+  - Purpose: **App functionality**.
+- **Is all of the user data collected by your app encrypted in transit? Yes.** Pairing traffic is
+  end-to-end encrypted, and Cloud agents only ever talks to each provider's `https://` API (release
+  builds have no way to use any other address; see Cloud agents below).
+- **Do you provide a way for users to request that their data is deleted? No.** The project never
+  receives any of it, so there's nothing for it to delete. On the phone, removing a provider's key
+  deletes the key and that provider's agents; at the provider, the user deletes them in their
+  account there. Worth a line in the form's notes if it has room.
 
-- Everything the app sends off the phone goes to your own computer over an end-to-end encrypted
-  link (`relay/web/link.js`). Google's rules exempt that: "User data that is sent off device, but
-  that is unreadable by you or anyone other than the sender and recipient as a result of end-to-end
-  encryption does not need to be disclosed."
+Why Cloud agents counts as collection, and why it isn't sharing (Google's definitions, in
+[Provide information for Google Play's Data safety section](https://support.google.com/googleplay/android-developer/answer/10787469)):
+
+- "'Collect' means transmitting data from your app off a user's device", and the same section
+  counts data sent by an app's code "irrespective of whether data is transmitted to you or a
+  third-party server". Cloud agents sends the task straight from the app to Cursor, GitHub,
+  Google (Jules) or Anthropic over HTTPS. That isn't end-to-end encrypted in Google's sense (the
+  provider reads it, as it has to), so the end-to-end exemption doesn't cover it. So it's
+  declared, even though the project never sees it.
+- Sharing is "transferring user data collected from your app to a third party", but not when it's
+  "based on a specific user-initiated action, where the user reasonably expects the data to be
+  shared" (Google's example: a messaging app that lets users send an SMS through their mobile
+  provider). Here the user picks the provider, adds their own key for it, and taps Start or Send
+  for each message, to that provider's agent. So: not shared.
+- Optional fits Google's wording: data is optional when "a user has control over its collection
+  and can use the app without providing it".
+
+What else Cloud agents sends or keeps, and why none of it is a data type to declare:
+
+- **The key itself** goes only to the provider that issued it, in the header that provider asks
+  for. Play's data types have no type for an API key or password; it isn't the user's name, email,
+  user ID or any other listed type. If the form ever asks about credentials, this is the one.
+- **The account name** a provider returns when the user taps Test comes into the phone and is
+  shown there. It isn't sent anywhere.
+- **The background check** (WorkManager, about every 15 minutes, only while a key is saved and
+  notifications are allowed) asks the same providers how the user's agents are doing, with the same
+  key. Nothing new leaves the phone, and nothing goes to the project.
+- **On the phone**: keys are encrypted with an AES key in the Android Keystore and kept with the
+  list of agents started from the phone in the app's no-backup storage
+  (`noBackupFilesDir/cloud-keys.json` and `cloud-state.json`), so neither is in backups or moved to
+  a new phone.
+
+Why the rest is still true:
+
+- Everything else the app sends off the phone goes to your own computer over an end-to-end
+  encrypted link (`relay/web/link.js`). Google's rules exempt that: "User data that is sent off
+  device, but that is unreadable by you or anyone other than the sender and recipient as a result
+  of end-to-end encryption does not need to be disclosed."
 - It goes through a relay, a Cloudflare Worker on the user's own Cloudflare account. The developer
   doesn't run it and gets nothing from it. It passes encrypted bytes and stores only when the
   computer was last online.
 - No SDKs that collect anything. The only libraries are zxing-android-embedded (scans the QR code
-  on the phone), AndroidX Core and AndroidX WebKit (serves the demo from the app's own files). No
-  analytics, crash reporting, ads, Firebase or Google Play services.
+  on the phone), AndroidX Core, AndroidX WebKit (serves the demo and Cloud agents from the app's
+  own files) and AndroidX WorkManager (schedules Cloud agents' background check). No analytics,
+  crash reporting, ads, Firebase or Google Play services.
 - The demo (Try the demo) runs entirely on the phone, from files in the app, on made-up data. It
   sends nothing anywhere.
 - The camera is used only to scan the pairing QR code; frames stay on the phone.
@@ -107,7 +163,9 @@ Why that's true:
 
 What the relay and Cloudflare do see, in plain text: the phone's IP address, when it connects and
 how much it sends, and the app's user agent (which says `BridgeAIApp/<version>`). That's under the
-user's own Cloudflare account, never the developer's, and `PRIVACY.md` says so.
+user's own Cloudflare account, never the developer's, and `PRIVACY.md` says so. Cloud agents'
+providers see the same kind of thing (IP address, `BridgeAI/<version> (Android)`), under their own
+terms, and `PRIVACY.md` says that too.
 
 No account, so nothing for account deletion.
 

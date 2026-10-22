@@ -22,6 +22,15 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         window.makeKeyAndVisible()
         self.window = window
         if let url = connectionOptions.urlContexts.first?.url { controller.loadViewIfNeeded(); controller.open(url) }
+        if connectionOptions.shortcutItem?.type == Self.cloud { controller.loadViewIfNeeded(); controller.openCloud() }
+    }
+
+    // The Home Screen quick action (Info.plist): Cloud agents, paired or not.
+    private static let cloud = "dev.bridge-ai.phone.cloud"
+    func windowScene(_ windowScene: UIWindowScene, performActionFor shortcutItem: UIApplicationShortcutItem, completionHandler: @escaping (Bool) -> Void) {
+        let ok = shortcutItem.type == Self.cloud
+        if ok { (window?.rootViewController as? WebViewController)?.openCloud() }
+        completionHandler(ok)
     }
 
     func scene(_ scene: UIScene, openURLContexts contexts: Set<UIOpenURLContext>) {

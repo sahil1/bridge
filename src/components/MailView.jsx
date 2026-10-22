@@ -1,18 +1,44 @@
 import { useEffect, useMemo, useState } from 'react'
 import Icon from './Icon.jsx'
 import { usePersisted, useWidth } from './layout.jsx'
-import { api, usePoll, fmtRelative } from '../api.js'
-import PermissionFix from './PermissionFix.jsx'
+import { api, usePoll, fmtRelative, viaRelay } from '../api.js'
+import PermissionFix, { useRecheck } from './PermissionFix.jsx'
 
 // Mail triage over the Mac Mail app's local index: what needs you, automated items that want
 // action, threads waiting on someone else, and an agent that can act on any message.
 const isPhone = () => /iPhone|iPad|Android/i.test(navigator.userAgent)
 
-// Why Mail can't be read yet, with buttons that take you to the right place in System Settings.
+// Why Mail can't be read yet, and one button that fixes it: Allow access (Full Disk Access), or
+// Open Mail to add your account and let it sync. Checks again when you come back to the window.
 export function MailSetup({ data, onCheck }) {
   if (data.reason === 'noAccess') return <PermissionFix pane="full-disk" onCheck={onCheck}><p>{data.setup}</p></PermissionFix>
-  if (data.reason === 'noMail') return <PermissionFix pane="internet-accounts" grant={false} onCheck={onCheck}><p>{data.setup}</p></PermissionFix>
-  return <><p>{data.setup}</p><button className="btn" onClick={onCheck}><Icon name="refresh" size={13} /> Check again</button></>
+  if (data.reason === 'noMail') return <MailNotSetUp text={data.setup} onCheck={onCheck} />
+  return <><p>{data.setup}</p><button className="ghost-btn" onClick={onCheck}><Icon name="refresh" size={12} /> Check again</button></>
+}
+
+function MailNotSetUp({ text, onCheck }) {
+  const [opened, setOpened] = useState(false)
+  const [err, setErr] = useState(null)
+  // Mail syncs for a while after you add an account: look every 20 seconds once you've opened it.
+  useRecheck(onCheck, opened ? 20000 : 0)
+  const run = async (path, body) => {
+    setErr(null)
+    try { await api(path, { method: 'POST', body }); setOpened(true) } catch (e) { setErr(e.message) }
+  }
+  return (
+    <div className="perm-fix">
+      <p>{text}</p>
+      {viaRelay ? <p className="muted small">Do this in Mail on your computer.</p> : (
+        <div className="perm-acts">
+          <button type="button" className="btn small primary" onClick={() => run('/fix/app', { app: 'mail' })}><Icon name="mail" size={12} /> Open Mail</button>
+          <button type="button" className="ghost-btn" onClick={() => run('/fix/settings', { pane: 'internet-accounts' })}><Icon name="external" size={12} /> Internet Accounts</button>
+          <button type="button" className="ghost-btn" onClick={onCheck}><Icon name="refresh" size={12} /> Check again</button>
+        </div>
+      )}
+      {opened && <p className="muted small">Your mail shows up here once Mail has synced.</p>}
+      {err && <p className="error-text">{err}</p>}
+    </div>
+  )
 }
 
 export const outlookUrl = () => (isPhone() ? 'ms-outlook://' : 'https://outlook.office.com/mail/')

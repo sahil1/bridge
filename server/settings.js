@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { ROOT, dataFile, ensureDir, DATA, IS_MAC } from './paths.js'
+import { gitReady } from './gitready.js'
 
 export const FILE = dataFile('config.json')
 // Changes to these only take effect when the server starts again.
@@ -77,9 +78,19 @@ export async function guessLocation() {
 
 // ---------- Your name ----------
 const run = (cmd, args) => new Promise((resolve) => execFile(cmd, args, { timeout: 4000 }, (err, out) => resolve(err ? '' : String(out).trim())))
+// "Jane D [Contoso]", "Doe, Jane (Contractor)" -> "Jane": a directory's tags in brackets
+// or parentheses go, "Last, First" turns round, and the first word reads best in a greeting.
+export const cleanName = (raw) => String(raw || '').replace(/[[({<][^\])}>]*[\])}>]/g, ' ').replace(/[[\](){}<>]/g, ' ').replace(/\s+/g, ' ').trim()
+const TITLES = /^(dr|mr|mrs|ms|mx|prof|sir)\.?$/i
+export function firstName(raw) {
+  let s = cleanName(raw)
+  if (/^[^,]+,\s*\S/.test(s)) s = s.slice(s.indexOf(',') + 1).trim()
+  const word = s.split(' ').find((w) => /\p{L}/u.test(w) && !w.includes('@') && !TITLES.test(w)) || ''
+  return word.replace(/^[^\p{L}]+|[^\p{L}'’.-]+$/gu, '').replace(/\.$/, '')
+}
 export async function guessName() {
   const full = IS_MAC ? await run('id', ['-F']) : ''
-  const git = await run('git', ['config', '--global', 'user.name'])
-  const raw = full || git || os.userInfo().username || ''
-  return raw.split(/\s+/)[0] || '' // first name reads better in a greeting
+  // Not git on a Mac without the developer tools: it would pop up macOS's install dialog.
+  const git = !full && await gitReady() ? await run('git', ['config', '--global', 'user.name']) : ''
+  return firstName(full) || firstName(git) || firstName(os.userInfo().username) || ''
 }

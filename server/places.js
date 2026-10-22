@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
+import { gitReady } from './gitready.js'
 
 const sh = (cmd, args, opts = {}) => new Promise((resolve) => {
   execFile(cmd, args, { timeout: 5000, maxBuffer: 4 * 1024 * 1024, ...opts }, (err, out) => resolve(err ? null : out))
@@ -15,6 +16,7 @@ export async function gitSummary(cwds) {
   await Promise.all([...new Set(cwds.filter(Boolean))].map(async (cwd) => {
     const hit = gitCache.get(cwd)
     if (hit && Date.now() - hit.at < 10_000) { out[cwd] = hit.v; return }
+    if (!(await gitReady())) { out[cwd] = null; return }
     const branch = (await sh('git', ['-C', cwd, 'rev-parse', '--abbrev-ref', 'HEAD']))?.trim() || null
     let v = null
     if (branch) {
@@ -30,9 +32,9 @@ export async function gitSummary(cwds) {
 
 const HOME = os.homedir()
 const expand = (p) => (p?.startsWith('~') ? path.join(HOME, p.slice(1)) : p)
-// Never a blocking call on your folders: macOS can hold the first look into Desktop or Documents
-// until you answer its permission prompt, and only the request that asked should wait for that.
-const isDir = (p) => fs.promises.stat(p).then((st) => st.isDirectory(), () => false)
+// Never a blocking call on your folders (fs.promises below): macOS can hold the first look into
+// Desktop or Documents until you answer its permission prompt, and only the request that asked
+// should wait for that.
 
 // Directory completion inside the home folder: "~/Desk" -> ~/Desktop, "~/Desktop/" -> its folders.
 export async function completeDir(input) {
@@ -42,17 +44,23 @@ export async function completeDir(input) {
   const endsSlash = /\/$/.test(raw)
   const dir = endsSlash ? full : path.dirname(full)
   const prefix = endsSlash ? '' : path.basename(full).toLowerCase()
-  const [ents, exists] = await Promise.all([fs.promises.readdir(dir, { withFileTypes: true }).catch(() => []), isDir(full)]) // [] when not a folder
+  const [ents, st] = await Promise.all([fs.promises.readdir(dir, { withFileTypes: true }).catch(() => []), fs.promises.stat(full).catch((e) => e)]) // [] when not a folder
+  const exists = !!st?.isDirectory?.()
+  // denied: macOS said no to the folder it's in (Desktop, Documents...); the app offers to allow it.
+  const denied = st?.code === 'EPERM'
   const names = ents
     .filter((d) => d.isDirectory() && !d.name.startsWith('.') && d.name !== 'node_modules' && d.name.toLowerCase().startsWith(prefix))
     .map((d) => d.name).sort().slice(0, 30)
   const tilde = (p) => (p.startsWith(HOME) ? `~${p.slice(HOME.length)}` : p)
-  return { exists, path: tilde(full), dirs: names.map((n) => tilde(path.join(dir, n)) + '/') }
+  return { exists, denied, path: tilde(full), dirs: names.map((n) => tilde(path.join(dir, n)) + '/') }
 }
 
 export const resolveDir = async (p) => {
   const full = path.resolve(expand(String(p || '~')))
   if (full !== HOME && !full.startsWith(HOME + path.sep)) throw new Error('Pick a folder inside your home folder')
-  if (!(await isDir(full))) throw new Error(`Folder not found: ${p}`)
+  const st = await fs.promises.stat(full).catch((e) => e)
+  // macOS said no to Desktop, Documents or Downloads (EPERM): the app offers to allow it.
+  if (st?.code === 'EPERM') throw Object.assign(new Error(`macOS hasn't let Bridge AI into ${p}`), { code: 'EPERM' })
+  if (!st?.isDirectory?.()) throw new Error(`Folder not found: ${p}`)
   return full
 }

@@ -29,8 +29,13 @@ targets:
         buildPhase: resources
       - path: ../../public/mark.svg
         buildPhase: resources
-      # Bridge AI's own UI on made-up data, for Try the demo (BundledUI.swift), built by the script below.
+      # Bridge AI's own UI on made-up data, for Try the demo (BundledUI.swift), and Cloud agents
+      # (CloudBridge.swift), built by the scripts below.
       - path: build/bundled/demo
+        type: folder
+        buildPhase: resources
+        optional: true
+      - path: build/bundled/cloud
         type: folder
         buildPhase: resources
         optional: true
@@ -42,8 +47,17 @@ targets:
         script: |
           cd "$PROJECT_DIR/../.." || exit 1
           out="$PROJECT_DIR/build/bundled/demo"
-          if [ ! -f "$out/index.html" ] || [ -n "$(find src index.html vite.config.js package.json -newer "$out/index.html" | head -1)" ]; then
+          if [ ! -f "$out/index.html" ] || [ -n "$(find src shared index.html vite.config.js package.json -newer "$out/index.html" | head -1)" ]; then
             "${SHELL:-/bin/zsh}" -lic "npm run --silent demo:build -- --outDir '$out' --logLevel warn" || exit 1
+          fi
+      # Cloud agents, the same way (npm run cloud:build).
+      - name: Build Cloud agents
+        basedOnDependencyAnalysis: false
+        script: |
+          cd "$PROJECT_DIR/../.." || exit 1
+          out="$PROJECT_DIR/build/bundled/cloud"
+          if [ ! -f "$out/index.html" ] || [ -n "$(find src shared index.html vite.config.js package.json -newer "$out/index.html" | head -1)" ]; then
+            "${SHELL:-/bin/zsh}" -lic "npm run --silent cloud:build -- --outDir '$out' --logLevel warn" || exit 1
           fi
     settings:
       base:

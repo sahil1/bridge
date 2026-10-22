@@ -3,7 +3,7 @@
 //   built app (npm run desktop:dist)  the copy of Bridge AI inside the app, on the app's own Node,
 //                                     so the person using it needs nothing else installed
 //   from source (npm run desktop)     your clone, with `node scripts/start.js`
-const { app, BrowserWindow, Menu, shell, globalShortcut, Notification, session, nativeTheme, ipcMain, powerMonitor } = require('electron')
+const { app, BrowserWindow, Menu, shell, globalShortcut, Notification, session, nativeTheme, ipcMain, powerMonitor, screen, nativeImage, systemPreferences } = require('electron')
 
 // A picture of part of the window (the Preview tab's app), for sending to an agent. Only this
 // window, only a rectangle of it, only when the page asks.
@@ -193,6 +193,106 @@ ipcMain.handle('bridge:restart', (e) => {
   if (!fromApp(e)) return false
   app.relaunch()
   stopServerAndQuit()
+  return true
+})
+// ---------- Allow access: a tile next to System Settings ----------
+// After Allow access opens a page of System Settings, a small tile floats at the bottom of the
+// screen, above it: the app's icon, which you drag into the list (a real file drag of the app),
+// and what to do there. It closes when access is detected, when you close it, or after 5 minutes.
+const BUNDLE = IS_MAC ? /^(.*?\.app)\//.exec(process.execPath)?.[1] || null : null
+const APP_NAME = BUNDLE ? path.basename(BUNDLE, '.app') : 'Bridge AI'
+const TILE_STEPS = {
+  'full-disk': { drag: true, text: `Drag ${APP_NAME} into the list above, then turn it on` },
+  files: { text: `Under ${APP_NAME}, turn on the folders your projects are in` },
+  calendars: { text: `Turn on ${APP_NAME} in the list above` },
+  microphone: { text: `Turn on ${APP_NAME} in the list above` },
+  automation: { text: `Under ${APP_NAME}, turn on Finder` },
+  notifications: { text: `Turn on Allow notifications for ${APP_NAME}` },
+}
+let tile = null // { win, pane, timer, poll, icon }
+function closeTile() {
+  if (!tile) return
+  clearTimeout(tile.timer); clearInterval(tile.poll)
+  if (!tile.win.isDestroyed()) tile.win.close()
+  tile = null
+}
+// Access on yet? The server answers for the folders it reads; the app asks macOS for the mic.
+async function tileDone(pane) {
+  if (pane === 'microphone') return systemPreferences.getMediaAccessStatus('microphone') === 'granted'
+  try {
+    const r = await fetch(`${URL_BASE}/api/fix/check?pane=${encodeURIComponent(pane)}`, { signal: AbortSignal.timeout(20000) })
+    const d = r.ok ? await r.json() : null
+    return d?.state === 'ok' || d?.state === 'restart'
+  } catch { return false }
+}
+async function showTile(pane) {
+  const step = TILE_STEPS[pane]
+  if (!IS_MAC || !BUNDLE || !step) return false
+  closeTile()
+  let icon = null
+  try { icon = await nativeImage.createThumbnailFromPath(BUNDLE, { width: 128, height: 128 }) } catch { /* below */ }
+  if (!icon || icon.isEmpty()) icon = await app.getFileIcon(BUNDLE, { size: 'normal' }).catch(() => null)
+  if (!icon || icon.isEmpty()) return false
+  const W = 440, H = 96
+  const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea
+  const w = new BrowserWindow({
+    width: W, height: H, x: Math.round(area.x + (area.width - W) / 2), y: Math.round(area.y + area.height - H - 28),
+    frame: false, transparent: true, resizable: false, minimizable: false, maximizable: false, fullscreenable: false,
+    skipTaskbar: true, hasShadow: false, alwaysOnTop: true, acceptFirstMouse: true, show: false, title: `${APP_NAME}: allow access`,
+    webPreferences: { preload: path.join(__dirname, 'tile-preload.js'), contextIsolation: true, sandbox: true },
+  })
+  w.setAlwaysOnTop(true, 'floating')
+  w.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  w.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  w.webContents.on('will-navigate', (e) => e.preventDefault())
+  const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+  const html = `<!doctype html><html><head><meta charset="utf-8"><style>
+    :root { color-scheme: light dark; --bg: #ffffff; --ink: #1d2433; --ink2: #5b6476; --line: rgba(16,24,40,.12); --accent: #2f6fe0; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #1b1f27; --ink: #e8ebf1; --ink2: #a9b0bf; --line: rgba(255,255,255,.12); --accent: #4e82ef; } }
+    html, body { margin: 0; height: 100%; background: transparent; font: 13px -apple-system, system-ui, sans-serif; color: var(--ink); overflow: hidden; user-select: none; }
+    .tile { position: absolute; inset: 8px; display: flex; align-items: center; gap: 12px; padding: 0 12px 0 10px; border-radius: 14px; background: var(--bg); border: 1px solid var(--line); box-shadow: 0 8px 24px rgb(0 0 0 / .22); -webkit-app-region: drag; }
+    .icon { width: 56px; height: 56px; flex: none; border-radius: 12px; cursor: grab; -webkit-app-region: no-drag; animation: nudge 2.4s ease-in-out infinite; }
+    .icon:active { cursor: grabbing; }
+    @keyframes nudge { 0%, 70%, 100% { transform: translateY(0); } 80% { transform: translateY(-5px); } 90% { transform: translateY(0); } }
+    @media (prefers-reduced-motion: reduce) { .icon { animation: none; } }
+    .text { flex: 1; min-width: 0; line-height: 1.35; }
+    .text b { display: block; font-weight: 600; }
+    .text span { color: var(--ink2); }
+    button { -webkit-app-region: no-drag; flex: none; width: 26px; height: 26px; border: 0; border-radius: 7px; background: transparent; color: var(--ink2); font-size: 17px; line-height: 1; cursor: pointer; }
+    button:hover { background: var(--line); color: var(--ink); }
+  </style></head><body><div class="tile">
+    <img class="icon" id="icon" src="${icon.resize({ width: 112, height: 112 }).toDataURL()}" alt="${esc(APP_NAME)}" draggable="${step.drag ? 'true' : 'false'}" title="${step.drag ? `Drag ${esc(APP_NAME)} into the list` : ''}">
+    <div class="text"><b>${esc(APP_NAME)}</b><span>${esc(step.text)}</span></div>
+    <button id="x" aria-label="Close" title="Close">×</button>
+  </div><script>
+    document.getElementById('icon').addEventListener('dragstart', (e) => { e.preventDefault(); window.tile.drag() })
+    document.getElementById('x').addEventListener('click', () => window.tile.close())
+    addEventListener('keydown', (e) => { if (e.key === 'Escape') window.tile.close() })
+  </script></body></html>`
+  w.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
+  w.once('ready-to-show', () => w.showInactive())
+  const t = { win: w, pane, icon: icon.resize({ width: 64, height: 64 }) }
+  t.timer = setTimeout(closeTile, 5 * 60 * 1000)
+  // Gently, only while the tile is up.
+  t.poll = setInterval(async () => { if (tile === t && await tileDone(pane) && tile === t) closeTile() }, 2500)
+  w.on('closed', () => { if (tile === t) { clearTimeout(t.timer); clearInterval(t.poll); tile = null } })
+  tile = t
+  return true
+}
+ipcMain.handle('bridge:fix-tile', (e, pane) => (fromApp(e) && typeof pane === 'string' ? showTile(pane) : false))
+ipcMain.handle('bridge:fix-tile-close', (e) => { if (fromApp(e)) closeTile(); return true })
+// Only the tile may start the drag, and only of the app itself.
+ipcMain.on('bridge:tile-drag', (e) => {
+  if (!tile || e.sender !== tile.win.webContents || !TILE_STEPS[tile.pane]?.drag) return
+  e.sender.startDrag({ file: BUNDLE, icon: tile.icon })
+})
+ipcMain.on('bridge:tile-close', (e) => { if (tile && e.sender === tile.win.webContents) closeTile() })
+// Whether macOS lets the app use the mic: granted, denied, restricted or not-determined.
+ipcMain.handle('bridge:media-access', (e, kind) => (fromApp(e) && kind === 'microphone' && IS_MAC ? systemPreferences.getMediaAccessStatus('microphone') : null))
+// A notification to see whether macOS shows them (it doesn't say when they're turned off).
+ipcMain.handle('bridge:notify-test', (e) => {
+  if (!fromApp(e) || !Notification.isSupported()) return false
+  new Notification({ title: 'Bridge AI', body: 'Notifications are on. You\'ll see one when an agent needs you or finishes.' }).show()
   return true
 })
 ipcMain.handle('bridge:focus-popout', (e, paneId) => {

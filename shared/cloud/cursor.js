@@ -2,7 +2,7 @@
 // An agent is durable; each prompt (the first one and every follow-up) is a "run" on it. The
 // run carries the status, the final reply (result) and the pushed branch and pull request.
 // v1 has no conversation endpoint, so the chat is your prompts (kept in memo) and each run's result.
-import { makeCall, CloudError, oneLine, repoName } from './http.js'
+import { makeCall, CloudError, oneLine, repoName, authHeader } from './http.js'
 
 export const info = {
   id: 'cursor',
@@ -13,6 +13,7 @@ export const info = {
   keyHint: 'Cursor dashboard › Integrations › API keys',
   cost: 'Uses your Cursor plan.',
   base: 'https://api.cursor.com',
+  auth: { header: 'Authorization', scheme: 'Bearer' },
   hosts: 'GitHub, GitLab, Bitbucket and Azure DevOps',
   repoPlaceholder: 'https://github.com/owner/repo',
   models: true,
@@ -34,7 +35,7 @@ const repoUrl = (r) => {
 }
 
 export function create({ key, fetch, base = info.base, memo = null }) {
-  const call = makeCall({ fetch, base, name: 'Cursor', secrets: [key], headers: { Authorization: `Bearer ${key}` } })
+  const call = makeCall({ fetch, base, name: 'Cursor', secrets: [key], headers: authHeader(info.auth, key) })
   const prompts = (id) => (memo?.get(`cursor:prompts:${id}`) || [])
   const note = (id, text, runId) => memo?.set(`cursor:prompts:${id}`, [...prompts(id), { text, ts: new Date().toISOString(), runId }].slice(-200))
 

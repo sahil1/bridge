@@ -1,12 +1,15 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Icon from './Icon.jsx'
 import AgentMark from './settings/agentMark.jsx'
 import LocationPicker from './settings/LocationPicker.jsx'
+import { usePhoneOffer, PhonePick, PhoneDone } from './OnboardingPhone.jsx'
 import { api, settingsChanged } from '../api.js'
+import SignInButton from './SignIn.jsx'
 
 // First run. Bridge AI looks at what's already on this computer (agent CLIs and their sign-ins,
 // your name, your time zone) and proposes a setup you can accept with one click, or adjust.
 const STARTERS = ['claude', 'codex', 'gemini', 'copilot']
+const OWN_LOGIN = new Set(['claude', 'codex']) // signed in from here (SignIn.jsx); others in their first run
 
 export default function Onboarding({ onDone }) {
   const [d, setD] = useState(null)
@@ -14,8 +17,14 @@ export default function Onboarding({ onDone }) {
   const [step, setStep] = useState('welcome') // welcome | choose | working | done
   const [pick, setPick] = useState(null) // { name, location, defaultAgent, chiefKind }
   const [installing, setInstalling] = useState({})
-  const [editing, setEditing] = useState(null) // which row on the welcome step is open: name | location | chief
+  const [editing, setEditing] = useState(null) // which row on the welcome step is open: name | location | chief | phone
+  const wasOut = useRef(new Set()) // agents seen signed out here
+  const phone = usePhoneOffer() // Bridge AI's relay, once it exists (OnboardingPhone.jsx)
   const load = () => api('/setup').then((r) => { setD(r); setPick((p) => p || r.suggested) }).catch((e) => setErr(e.message))
+  // After Sign in: just the sign-in checks again (not the whole look around).
+  const recheckSignIn = () => api('/subscriptions?refresh=1').then((list) => setD((x) => x && ({
+    ...x, usable: x.usable.map((a) => ({ ...a, signedIn: list.find((s) => s.kind === a.kind)?.signedIn ?? a.signedIn })),
+  }))).catch(() => {})
   useEffect(() => { load() }, [])
 
   const finish = async (choice) => {
@@ -24,9 +33,10 @@ export default function Onboarding({ onDone }) {
       await api('/setup', { method: 'POST', body: choice })
       settingsChanged()
       let chief = null
-      if (choice.chiefKind) chief = await api('/chief/launch', { method: 'POST' }).catch(() => null)
+      let chiefErr = null
+      if (choice.chiefKind) chief = await api('/chief/launch', { method: 'POST' }).catch((e) => { chiefErr = e.message; return null })
       setStep('done')
-      setPick((p) => ({ ...p, chiefPane: chief?.paneId }))
+      setPick((p) => ({ ...p, chiefPane: chief?.paneId, chiefErr }))
     } catch (e) { setErr(e.message); setStep('welcome') }
   }
   const install = async (kind) => {
@@ -49,6 +59,12 @@ export default function Onboarding({ onDone }) {
   const usable = d.usable || []
   const label = (k) => d.agents.find((a) => a.kind === k)?.label || k
   const none = !usable.length
+  // The chief's agent, not signed in yet: sign in here rather than in its first chat.
+  const chiefAgent = usable.find((a) => a.kind === pick?.chiefKind)
+  const chiefOut = chiefAgent?.signedIn === false
+  if (chiefOut) wasOut.current.add(chiefAgent.kind)
+  // Signed in from here: say so, where the button was.
+  const chiefIn = chiefAgent?.signedIn === true && wasOut.current.has(chiefAgent.kind)
 
   return (
     <div className="onb">
@@ -59,11 +75,13 @@ export default function Onboarding({ onDone }) {
             <h1>You're set{pick?.name ? `, ${pick.name}` : ''}</h1>
             <p className="onb-lede">Here's how Bridge AI works:</p>
             <ol className="onb-tips">
-              <li><Icon name="helm" size={16} /><span><b>Talk to your chief of staff.</b> Ask for anything; it sends the work to the right agent, starts new ones when needed, and tells you when it's done. The first time, it asks you to trust its folder: click Yes on the card.</span></li>
+              <li><Icon name="helm" size={16} /><span><b>Talk to your chief of staff.</b> Ask for anything; it sends the work to the right agent, starts new ones when needed, and tells you when it's done. The first time, a card in its chat walks you through its own setup.</span></li>
               <li><Icon name="plus" size={16} /><span><b>Start agents yourself</b> with <kbd>+</kbd> in the sidebar: a project agent in a folder, or a plain chat.</span></li>
               <li><Icon name="blocked" size={16} /><span><b>Watch the sidebar.</b> A pulsing dot means an agent needs you; open it to answer.</span></li>
               <li><Icon name="palette" size={16} /><span><b>Make it yours</b> in Settings (<kbd>⌘,</kbd> or <kbd>Ctrl+,</kbd>): default model, providers, MCP tools, theme.</span></li>
             </ol>
+            {pick?.chiefErr && <p className="muted small">The chief of staff didn't start: {pick.chiefErr} You can start it from its tab.</p>}
+            {phone.offer && phone.use && <PhoneDone />}
             <button className="btn primary onb-btn" onClick={() => onDone(pick?.chiefPane)}>Open Bridge AI</button>
           </>
         ) : step === 'working' ? (
@@ -126,10 +144,31 @@ export default function Onboarding({ onDone }) {
                       <option value="">Don't start one now</option>
                     </select>
                   </Row>
+                  {chiefOut && (
+                    <li className="onb-signin">
+                      <Icon name="users" size={15} /><span className="onb-key">Sign in</span>
+                      <span className="onb-val">
+                        <span className="muted small">{label(pick.chiefKind)} isn't signed in on this computer yet.{OWN_LOGIN.has(pick.chiefKind) ? '' : ' It asks you the first time it opens.'}</span>
+                        {OWN_LOGIN.has(pick.chiefKind) && <SignInButton kind={pick.chiefKind} label={`Sign in to ${label(pick.chiefKind)}`} onCheck={recheckSignIn} terminalLink={false} className="btn small" />}
+                      </span>
+                    </li>
+                  )}
+                  {chiefIn && (
+                    <li className="onb-signin">
+                      <Icon name="users" size={15} /><span className="onb-key">Sign in</span>
+                      <span className="onb-val"><b>{label(pick.chiefKind)}</b><span className="muted small"><Icon name="check" size={11} /> signed in</span></span>
+                    </li>
+                  )}
                   <li>
                     <Icon name="terminal" size={15} /><span className="onb-key">Agents run</span>
                     <span className="onb-val"><b>{d.runtime === 'herdr' ? 'In herdr' : 'Inside Bridge AI'}</b><span className="muted small">change later in Settings</span></span>
                   </li>
+                  {phone.offer && (
+                    <Row icon="phone" label="On your phone" open={editing === 'phone'} onToggle={() => setEditing(editing === 'phone' ? null : 'phone')}
+                      value={phone.use ? <><b>Bridge AI's relay</b><span className="muted small">pair your phone next</span></> : <span className="muted">Not now</span>}>
+                      <PhonePick phone={phone} onDone={() => setEditing(null)} />
+                    </Row>
+                  )}
                 </ul>
                 <div className="onb-acts">
                   <button className="btn primary onb-btn" onClick={() => finish(pick)}>Finish setup</button>
@@ -152,6 +191,7 @@ export default function Onboarding({ onDone }) {
                   </select>
                 </label>
                 <div className="onb-field"><span>Location, for weather</span><LocationPicker value={pick.location} onChange={(loc) => setPick({ ...pick, location: loc })} /></div>
+                {phone.offer && <label className="onb-field"><span>On your phone</span><PhonePick phone={phone} /></label>}
                 <div className="onb-acts">
                   <button className="btn primary onb-btn" onClick={() => finish(pick)}>Finish setup</button>
                   <button className="btn onb-btn" onClick={() => setStep('welcome')}>Back</button>
@@ -159,7 +199,7 @@ export default function Onboarding({ onDone }) {
               </div>
             )}
             {err && <p className="error-text">{err}</p>}
-            <button className="ghost-btn onb-skip" onClick={() => finish({})}>Skip setup for now</button>
+            <button className="ghost-btn onb-skip" onClick={() => { phone.setUse(false); finish({}) }}>Skip setup for now</button>
             <p className="muted small onb-foot">Everything stays on this computer, in <code>{d.dataDir.replace(/^\/Users\/[^/]+|^\/home\/[^/]+|^C:\\Users\\[^\\]+/i, '~')}</code>. Your agents keep using their own sign-ins.</p>
           </>
         )}

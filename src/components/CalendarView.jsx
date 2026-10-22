@@ -371,7 +371,7 @@ export default function CalendarView({ onOpenAgent, focusDate }) {
   const now = useNow()
   const anchor = parseDay(anchorIso)
   const range = rangeFor(mode, anchor)
-  const { data, error, loading, refresh } = usePoll(`/calendar/range?from=${isoDay(range[0])}&to=${isoDay(range[1])}`, 5 * 60 * 1000)
+  const { data, error, errorCode, loading, refresh } = usePoll(`/calendar/range?from=${isoDay(range[0])}&to=${isoDay(range[1])}`, 5 * 60 * 1000)
   const events = useMemo(() => (data?.from === isoDay(range[0]) ? data.events : []), [data, anchorIso, mode]) // eslint-disable-line react-hooks/exhaustive-deps
   const colors = useCalColors(events)
   const narrow = width > 0 && width < 620
@@ -420,7 +420,7 @@ export default function CalendarView({ onOpenAgent, focusDate }) {
           <button className="icon-btn" onClick={() => refresh('&refresh=1')} aria-label="Refresh" title="Refresh"><Icon name="refresh" size={13} /></button>
         </div>
       </div>
-      {error && <div className="pad"><CalendarSetup error={error} onCheck={() => refresh('&refresh=1')} /></div>}
+      {error && <div className="pad"><CalendarSetup error={error} code={errorCode} onCheck={() => refresh('&refresh=1')} /></div>}
       <div className={`calv-body ${selected && !narrow ? 'with-detail' : ''}`}>
         <div className="calv-main">
           {mode === 'day' && <TimeGrid days={days} events={events} colors={colors} now={now} selected={selected} onSelect={setSelected} compactCols />}

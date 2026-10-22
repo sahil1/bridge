@@ -40,7 +40,9 @@ function Tile({ a, p, selected, onOpen, onOpenInHerdr, onOpenSide }) {
   )
 }
 
-export default function Board({ fleet, selected, onOpen, onOpenInHerdr, minimized, maximized, onMinimize, onMaximize, compact }) {
+// title, icon, action (in the header), empty (instead of the plain note) and tally (what each is
+// doing rather than how many run, as agents in the cloud end): the phone's Cloud agents.
+export default function Board({ fleet, selected, onOpen, onOpenInHerdr, minimized, maximized, onMinimize, onMaximize, compact, title = 'Agents', icon = 'grid', action = null, empty = null, tally = false }) {
   const [filter, setFilter] = usePersisted('cc-board-filter', 'all')
   const previews = usePoll('/previews', 5000, { enabled: !minimized })
   const all = (fleet?.agents || []).filter((a) => !a.chief)
@@ -50,7 +52,7 @@ export default function Board({ fleet, selected, onOpen, onOpenInHerdr, minimize
 
   return (
     <section className={`pane board ${minimized ? 'is-min' : ''}`} aria-label="Agents">
-      <PaneHeader icon="grid" title="Agents" subtitle={minimized ? summary(counts) : `${all.length} running`}
+      <PaneHeader icon={icon} title={title} subtitle={minimized || tally ? summary(counts) : `${all.length} running`}
         minimized={minimized} maximized={maximized} onMinimize={onMinimize} onMaximize={onMaximize}>
         {!minimized && (
           <div className="chips" role="tablist" aria-label="Filter agents">
@@ -65,13 +67,14 @@ export default function Board({ fleet, selected, onOpen, onOpenInHerdr, minimize
             })}
           </div>
         )}
+        {action}
       </PaneHeader>
       {!minimized && (
         <div className={`board-grid ${compact ? 'compact' : ''}`}>
           {shown.map((a) => (
             <Tile key={a.paneId} a={a} p={previews.data?.[a.paneId]} selected={selected === a.paneId} onOpen={onOpen} onOpenInHerdr={onOpenInHerdr} onOpenSide={compact ? null : (id) => onOpen(id, { toSide: true })} />
           ))}
-          {fleet && !shown.length && <p className="muted empty-note">{filter === 'all' ? 'No other agents running.' : 'Nothing here right now.'}</p>}
+          {fleet && !shown.length && (filter === 'all' && empty ? empty : <p className="muted empty-note">{filter === 'all' ? 'No other agents running.' : 'Nothing here right now.'}</p>)}
         </div>
       )}
     </section>

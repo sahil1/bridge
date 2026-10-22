@@ -6,7 +6,7 @@
 // There's no API to stop it ("Stop session" is on GitHub), and the docs name no Copilot-specific
 // timeline events, so its state is read from the documented ones: the PR opening, review
 // requests, your @copilot comments, merged and closed.
-import { makeCall, CloudError, oneLine, repoName } from './http.js'
+import { makeCall, CloudError, oneLine, repoName, authHeader } from './http.js'
 
 export const info = {
   id: 'copilot',
@@ -23,6 +23,7 @@ export const info = {
     'A classic token needs the repo scope instead',
   ],
   base: 'https://api.github.com',
+  auth: { header: 'Authorization', scheme: 'Bearer' },
   hosts: 'GitHub',
   repoPlaceholder: 'owner/repo',
   ghLogin: true, // can use the GitHub CLI's sign-in
@@ -69,7 +70,7 @@ export function status({ issue, pr, events = [], me = null, now = Date.now() }) 
 
 export function create({ key, fetch, base = info.base, memo = null }) {
   const etags = new Map()
-  const call = makeCall({ fetch, base, name: 'GitHub', secrets: [key], etags, headers: { Authorization: `Bearer ${key}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' } })
+  const call = makeCall({ fetch, base, name: 'GitHub', secrets: [key], etags, headers: { ...authHeader(info.auth, key), Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' } })
   const prs = new Map() // task id -> PR number, once found
   const repoInfo = new Map() // "owner/repo" -> { defaultBranch }
   const path = (repo) => repo.split('/').map(encodeURIComponent).join('/')

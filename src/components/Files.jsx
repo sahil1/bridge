@@ -22,6 +22,7 @@ import DOMPurify from 'dompurify'
 import Icon from './Icon.jsx'
 import { Handle, usePersisted, useWidth } from './layout.jsx'
 import { api, usePoll } from '../api.js'
+import PermissionFix, { InstallFix, protectedFolder } from './PermissionFix.jsx'
 import { OfficeView, Menu, menuItems, NameDialog, fileOp, onComputer } from './FileExtras.jsx'
 
 Object.entries({ javascript, typescript, python, json, bash, css, xml, markdown, yaml, sql, go, rust, java, ini, diff: diffLang, dockerfile })
@@ -353,6 +354,7 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
   const [dialog, setDialog] = useState(null)
   const [toast, setToast] = useState(null)
   const say = (text) => { setToast(text); setTimeout(() => setToast((t) => (t === text ? null : t)), 2200) }
+  const [automation, setAutomation] = useState(false) // macOS said no to Finder (Trash on older macOS)
   const onMenu = useCallback((entry, e) => setMenu({ x: e.clientX, y: e.clientY, entry }), [])
   const closeMenu = useCallback(() => setMenu(null), [])
   // Phones and narrow panes: one column. The tree fills it; a file opens full width with a back button.
@@ -409,7 +411,7 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
         return say(`Made ${r.path.split('/').pop()}`)
       }
       await fileOp(pane, op, e.path) // reveal, open
-    } catch (x) { say(x.message) }
+    } catch (x) { if (x.code === 'automation') setAutomation(true); else say(x.message) }
   }
   useEffect(() => { if (openPath) { open(openPath); onConsumed?.() } }, [openPath]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
@@ -429,12 +431,15 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
           <button className="win-btn" onClick={() => setExpanded(new Set())} title="Collapse all" aria-label="Collapse all"><Icon name="shrink" size={13} /></button>
         </div>
         <div className="tree-scroll" onContextMenu={(e) => { e.preventDefault(); onMenu({ path: '', name: rootName, dir: true }, e) }}>
-          {root.error && <p className="error-text pad">{root.error}</p>}
+          {root.error && root.errorCode === 'EPERM' && protectedFolder(agent.cwd)
+            ? <div className="pad"><PermissionFix pane="files" folder={protectedFolder(agent.cwd)} onCheck={() => root.refresh()}><p>This project is in your {protectedFolder(agent.cwd)} folder, and macOS hasn't let Bridge AI in yet.</p></PermissionFix></div>
+            : root.error && <p className="error-text pad">{root.error}</p>}
           {(root.data?.entries || []).map((e) => (
             <TreeNode key={e.path} pane={pane} entry={e} depth={0} selected={selected} onOpen={open} expanded={expanded} toggle={toggle} showHidden={showHidden} ver={ver} onMenu={onMenu} />
           ))}
         </div>
         {toast && <div className="tree-toast" role="status">{toast}</div>}
+        {automation && <div className="pad"><PermissionFix pane="automation" onCheck={() => setAutomation(false)}><p>Moving to the Trash goes through Finder on this Mac, and macOS asks you to allow that once.</p></PermissionFix></div>}
       </aside>
       {!narrow && <Handle axis="x" size={treeW} min={160} max={520} onSize={setTreeW} label="Resize file tree" />}
       <section className="viewer-wrap" hidden={narrow && !selected}>
@@ -746,11 +751,11 @@ export function ChangesView({ agent, onOpenFile, onSendReview }) {
       const p = andPush ? await api(`/agents/${enc(pane)}/push`, { method: 'POST' }) : null
       setNote({ ok: true, text: p ? `Committed ${hash} and pushed to ${p.remote}` : `Committed ${hash}` })
       if (p) prs.refresh()
-    } catch (e) { setNote({ text: hash ? `Committed ${hash}, but the push didn't go through. ${e.message}` : e.message }) } finally { setCommitting(false); refresh() }
+    } catch (e) { setNote({ text: hash ? `Committed ${hash}, but the push didn't go through. ${e.message}` : e.message, code: e.code }) } finally { setCommitting(false); refresh() }
   }
   const push = async () => {
     setCommitting('push'); setNote(null)
-    try { const p = await api(`/agents/${enc(pane)}/push`, { method: 'POST' }); setNote({ ok: true, text: `Pushed ${p.branch} to ${p.remote}` }); prs.refresh() } catch (e) { setNote({ text: e.message }) } finally { setCommitting(false); refresh() }
+    try { const p = await api(`/agents/${enc(pane)}/push`, { method: 'POST' }); setNote({ ok: true, text: `Pushed ${p.branch} to ${p.remote}` }); prs.refresh() } catch (e) { setNote({ text: e.message, code: e.code }) } finally { setCommitting(false); refresh() }
   }
   const [sel, setSel] = useState(null)
   const [listW, setListW] = usePersisted('cc-changes-w', 280)
@@ -760,6 +765,9 @@ export function ChangesView({ agent, onOpenFile, onSendReview }) {
   useEffect(() => { if (!sel && !narrow && boxW && data?.files?.length) setSel(data.files[0].path) }, [data, sel, narrow, boxW])
   if (error) return <div className="viewer-empty"><p>{error}</p></div>
   if (!data) return <div className="pad"><div className="skeleton-rows"><div /><div /></div></div>
+  if (!data.repo && data.noGit) {
+    return <div className="viewer-empty"><Icon name="branch" size={24} /><InstallFix what="xcode" label="Install developer tools" onCheck={refresh}><p>Changes needs git, which comes with Apple's command line developer tools. They aren't on this Mac yet.</p></InstallFix></div>
+  }
   if (!data.repo) return <div className="viewer-empty"><Icon name="branch" size={24} /><p>This folder isn't a git repository.</p></div>
   const adds = data.files.reduce((s, f) => s + (f.add || 0), 0)
   const dels = data.files.reduce((s, f) => s + (f.del || 0), 0)
@@ -767,7 +775,9 @@ export function ChangesView({ agent, onOpenFile, onSendReview }) {
   const checks = checksLine(pr?.checks)
   // Push when the branch has commits the remote doesn't (or isn't there at all yet).
   const canPush = !!data.remote && !data.detached && !!data.lastCommit && (!data.upstream || data.ahead > 0)
-  const canPr = !!prs.data?.github && prs.data.gh && !data.detached && data.branch !== prs.data.base && pr?.state !== 'OPEN'
+  const canPr = !!prs.data?.github && prs.data.gh && !prs.data.signIn && !data.detached && data.branch !== prs.data.base && pr?.state !== 'OPEN'
+  // Pull requests go through GitHub's gh: offer to install it, or to sign it in.
+  const ghFix = prs.data?.github && !prs.data.gh ? 'gh' : prs.data?.signIn || note?.code === 'pushAuth' ? 'gh-login' : null
   const fileNotes = (p) => notes.filter((c) => c.path === p)
   return (
     <div className="changes-view">
@@ -815,7 +825,7 @@ export function ChangesView({ agent, onOpenFile, onSendReview }) {
               </div>
             </form>
           )}
-          {(canPush || canPr || note || prs.data?.error) && (
+          {(canPush || canPr || note || prs.data?.error || ghFix) && (
             <div className="ship-box">
               {(canPush || canPr) && (
                 <div className="ship-row">
@@ -824,8 +834,10 @@ export function ChangesView({ agent, onOpenFile, onSendReview }) {
                   {canPr && <button className="btn small" onClick={() => setPrOpen(true)} disabled={!!committing} title={`Open a pull request for ${data.branch} on GitHub`}>Pull request</button>}
                 </div>
               )}
-              {prs.data?.error && <p className="small muted">{prs.data.error}</p>}
+              {prs.data?.error && !prs.data.signIn && <p className="small muted">{prs.data.error}</p>}
               {note && <p className={`small ${note.ok ? 'ok-text' : 'error-text'}`} role="status">{note.text}</p>}
+              {ghFix === 'gh' && <InstallFix what="gh" label="Install GitHub CLI" compact onCheck={() => prs.refresh('?refresh=1')}><p>Pull requests go through GitHub's gh tool, which isn't installed.</p></InstallFix>}
+              {ghFix === 'gh-login' && <InstallFix what="gh-login" label="Sign in to GitHub" icon="users" compact onCheck={() => prs.refresh('?refresh=1')}><p>gh isn't signed in to GitHub yet.</p></InstallFix>}
             </div>
           )}
           {data.lastCommit && data.files.length > 0 && <div className="tree-foot muted small">HEAD {data.lastCommit.hash} · {data.lastCommit.when}</div>}

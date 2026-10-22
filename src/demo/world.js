@@ -217,7 +217,7 @@ export function reply(agent, text, n) {
 // The chief of staff: answers what's going on, or hands the work to the right agent.
 export function chiefReply(text, agents) {
   const t = text.toLowerCase()
-  const named = (a) => a.tab
+  const named = (a) => a.tab || a.title
   if (/status|what('s| is| needs)|need(s)? me|update|today|summary|how('s| are)/.test(t) || t.length < 4) {
     const by = (s) => agents.filter((a) => !a.chief && a.status === s).map(named)
     const parts = []

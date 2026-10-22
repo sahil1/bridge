@@ -5,7 +5,7 @@
 // One agent and one environment are made the first time and remembered (memo); each task is a
 // session with your GitHub repo mounted. A GitHub token lets it clone private repos and push its
 // branch; it opens no pull request itself, so the link is GitHub's compare page for that branch.
-import { makeCall, CloudError, oneLine, repoName } from './http.js'
+import { makeCall, CloudError, oneLine, repoName, authHeader } from './http.js'
 import { create as githubClient } from './github.js'
 
 export const info = {
@@ -18,6 +18,7 @@ export const info = {
   cost: 'Billed to your Claude Console account: tokens, plus $0.08 per session-hour while it runs. A Claude Pro or Max plan doesn\'t cover it.',
   perUse: true,
   base: 'https://api.anthropic.com',
+  auth: { header: 'x-api-key' },
   hosts: 'GitHub',
   repoPlaceholder: 'owner/repo',
   github: true, // takes an optional GitHub token, for private repos and pushing
@@ -51,7 +52,7 @@ export function status(s, stop) {
 }
 
 export function create({ key, fetch, base = info.base, memo = null, github = null, githubBase }) {
-  const call = makeCall({ fetch, base, name: 'Claude', secrets: [key, github], headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-beta': BETA } })
+  const call = makeCall({ fetch, base, name: 'Claude', secrets: [key, github], headers: { ...authHeader(info.auth, key), 'anthropic-version': '2023-06-01', 'anthropic-beta': BETA } })
   const gh = github ? githubClient({ key: github, fetch, base: githubBase }) : null
   const sid = (id) => encodeURIComponent(id)
 

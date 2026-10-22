@@ -1,6 +1,7 @@
 node_modules/
 dist/
 dist-demo/
+dist-cloud/
 config.local.json
 .cache/
 *.log

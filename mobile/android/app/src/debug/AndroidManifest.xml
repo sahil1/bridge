@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application android:networkSecurityConfig="@xml/test_relay" />
+    <application android:networkSecurityConfig="@xml/test_relay">
+        <!-- Cloud agents' background check, once, on request (CloudCheckNow.kt). -->
+        <receiver android:name=".CloudCheckNow" android:exported="true" />
+    </application>
 </manifest>

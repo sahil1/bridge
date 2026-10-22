@@ -6,6 +6,7 @@ import { loginPath, which } from './agents.js'
 import * as consult from './consult.js'
 import { safePath, push } from './files.js'
 import { IS_WIN } from './paths.js'
+import { gitReady } from './gitready.js'
 
 // A program run in the repo goes through a shell that enters the folder once it has started: on
 // macOS the server waits while a new program enters its folder, so a folder macOS is still asking
@@ -16,7 +17,7 @@ const run = (bin, args, { cwd, input = '', env, timeout = 30000 } = {}) => new P
   const p = execFile(file, argv, { cwd: dir, env, timeout, maxBuffer: 16 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => resolve({ ok: !err, out: String(stdout || '').trim(), err: String(stderr || err?.message || '').trim() }))
   p.stdin?.end(input)
 })
-const git = async (cwd, args) => { const r = await run('git', args, { cwd, timeout: 15000 }); return r.ok ? r.out : null }
+const git = async (cwd, args) => { if (!(await gitReady())) return null; const r = await run('git', args, { cwd, timeout: 15000 }); return r.ok ? r.out : null }
 const ghPath = async () => which('gh', await loginPath())
 async function gh(cwd, args, input = '') {
   const bin = await ghPath()
@@ -94,7 +95,8 @@ export async function status(root, { refresh = false } = {}) {
     if (x.ok) {
       try { const j = JSON.parse(x.out); pr = { number: j.number, state: j.state, url: j.url, title: j.title, draft: !!j.isDraft, checks: checks(j.statusCheckRollup) } } catch { error = "Couldn't read gh's answer" }
     } else if (!/no (open )?pull requests? found/i.test(x.err)) error = ghError(x.err)
-    const data = { github: true, gh: true, branch: r.branch, base, pr, error }
+    // signIn: gh needs signing in to GitHub (the app offers it in a terminal tab).
+    const data = { github: true, gh: true, branch: r.branch, base, pr, error, signIn: !x.ok && AUTH.test(x.err) }
     prs.set(key, { at: Date.now(), ttl: pr?.state === 'OPEN' ? 60_000 : 180_000, data })
     return data
   })().finally(() => inflight.delete(key))
@@ -102,8 +104,9 @@ export async function status(root, { refresh = false } = {}) {
   return p
 }
 
+const AUTH = /gh auth login|not logged in|authentication|HTTP 401/i
 function ghError(err) {
-  if (/gh auth login|not logged in|authentication|HTTP 401/i.test(err)) return "gh isn't signed in to GitHub. Run gh auth login in a terminal"
+  if (AUTH.test(err)) return "gh isn't signed in to GitHub"
   return err.split('\n').filter(Boolean).slice(-2).join(' ').slice(0, 300) || 'gh failed'
 }
 

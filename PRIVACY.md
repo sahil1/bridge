@@ -65,7 +65,8 @@ Tailscale's privacy policy.
 ## The phone apps
 
 The iPhone and Android apps show Bridge AI from your computer, through your relay. They have no
-account and send nothing anywhere but to your relay and, through it, end to end to your computer.
+account. Apart from Cloud agents (below), they send nothing anywhere but to your relay and, through
+it, end to end to your computer.
 
 - **What they keep**: the list of computers you paired and each one's pairing (the phone's key),
   on the phone only. iPhone keeps them in the Keychain, on this device only. Android keeps them in
@@ -82,6 +83,31 @@ account and send nothing anywhere but to your relay and, through it, end to end 
   your computer, which turns it into text there.
 - **Lock screen**: the agents notification on Android and the Live Activity on iPhone are made on
   the phone from what your computer sends over the encrypted link.
+
+### Cloud agents on the phone
+
+Cloud agents in the phone apps runs agents on Cursor, GitHub Copilot, Jules or Claude with no
+computer, with keys you add on the phone.
+
+- **Your keys** stay on the phone. iPhone keeps them in the Keychain, on this device only, so they
+  aren't in backups or moved to a new phone. Android encrypts them with a key from the Android
+  Keystore, which can't be taken off the phone, and leaves them out of backups and transfers. The
+  page you see in the app never gets a key: the app adds it to each request itself, and only to
+  requests for that provider's own address.
+- **Where things go**: the app talks to each provider directly, over HTTPS: Cursor
+  (api.cursor.com), GitHub (api.github.com), Jules (jules.googleapis.com) and Anthropic
+  (api.anthropic.com). Nothing goes through your relay, your computer or the project. A provider
+  gets your key, the repo and branch you pick, and what you ask its agent to do, under that
+  provider's terms. If you give Claude a GitHub token, it goes to Anthropic with each task so the
+  agent can reach your repo. Like any site, a provider also sees your IP address and the app's
+  user agent (`BridgeAI` and its version).
+- **What the phone keeps**: the agents you started from it, what you sent them and what they last
+  said, in the app's own storage, left out of backups. Remove a provider's key and the phone
+  forgets its agents too. They stay with the provider, in your account there.
+- **Checking in the background**: on Android, once you've added a key and allowed notifications,
+  the app checks on your agents about every 15 minutes while it's closed, talking only to those
+  providers, and tells you when one finishes, fails or needs you. Remove your keys and it stops.
+  The iPhone app checks only while it's open.
 
 ## Notifications from the Home Screen page
 

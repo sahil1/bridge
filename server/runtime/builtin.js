@@ -13,6 +13,7 @@ import { dataFile, ensureDir, DATA, IS_WIN } from '../paths.js'
 import { shellCommand, agentEnv, SETUP_DONE } from './spawn.js'
 import { providerEnv } from '../providers.js'
 import * as accounts from '../accounts.js'
+import { firstRun, knows } from '../firstrun.js'
 
 const { Terminal } = headless
 
@@ -143,14 +144,29 @@ function screenText(p, lines = 14) {
   return out.filter((l) => l.trim()).slice(-lines).join('\n')
 }
 
-// working / blocked / done / idle, from what's on screen and how recently it changed.
+// The whole screen, a string per row.
+function screenRows(p) {
+  const buf = p.term.buffer.active
+  const out = []
+  for (let y = buf.baseY; y < buf.baseY + p.term.rows; y++) out.push(buf.getLine(y)?.translateToString(true) ?? '')
+  return out
+}
+
+// working / blocked / done / idle, from what's on screen and how recently it changed. A new
+// agent's first-run screens (its look, sign-in, trusting the folder) count as needing you, and say
+// which one it is (p.setup), until it has done some work.
 function statusOf(p) {
   if (p.kind === 'shell') return null
   const a = adapter(p.kind)
   const tail = screenText(p)
+  const busy = !!a.busy?.test(tail)
+  // Not gated on busy: the trust screen itself says "Esc to cancel".
+  const setup = knows(p.kind) && !p.pastSetup ? firstRun(p.kind, screenRows(p)) : null
+  const key = setup ? `${setup.step} ${setup.url || ''}` : null
+  if (key !== (p.setupKey ?? null)) { p.setupKey = key; p.setup = setup; p.seq++ }
   let s = 'idle'
-  if (ASKING.test(tail)) s = 'blocked'
-  else if (a.busy?.test(tail)) s = 'working'
+  if (setup || ASKING.test(tail)) s = 'blocked'
+  else if (busy) { s = 'working'; p.pastSetup = true }
   // No busy indicator to read: fall back to "output is streaming that you didn't type".
   else if (a.busyFromOutput && Date.now() - p.lastOutput < 1200 && Date.now() - p.lastInput > 1500 && Date.now() - p.startedAt > 4000) s = 'working'
   if (s === 'working' && p.status !== 'working') p.seen = false
@@ -169,6 +185,7 @@ export async function fleet() {
     workspace: wsLabel(p.workspaceId), tab: tabOf(p.tabId)?.label || '',
     kind: p.kind, status: statusOf(p), title: p.title, cwd: p.cwd, account: accounts.labelOf(p.account), accountId: p.account,
     sessionId: p.sessionId, focused: false, seq: p.seq,
+    setup: p.setup?.step || null, setupUrl: p.setup?.url || null,
   }))
   const tabList = tabs.map((t) => ({
     tabId: t.tabId, workspaceId: t.workspaceId, workspace: wsLabel(t.workspaceId), label: t.label,

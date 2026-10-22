@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import Icon from './Icon.jsx'
 import { usePersisted } from './layout.jsx'
-import { api } from '../api.js'
+import { api, cloudOnly } from '../api.js'
 import { CloudMark } from './cloudBits.jsx'
 
 // A text box with suggestions under it (typed text always counts, so any repo or branch works).
@@ -88,8 +88,8 @@ export default function NewCloudAgent({ onLaunched, onClose, onSettings }) {
     return (
       <>
         <div className="na-cloud-empty">
-          <p>Run an agent on Cursor, GitHub Copilot, Jules or Claude's computers, on a repo they host. It keeps going while this computer sleeps, and you follow it here and on your phone.</p>
-          <p>Add your key for one of them first. It stays on this computer.</p>
+          <p>Run an agent on Cursor, GitHub Copilot, Jules or Claude's computers, on a repo they host. {cloudOnly ? 'You follow it here, with no computer of yours on.' : 'It keeps going while this computer sleeps, and you follow it here and on your phone.'}</p>
+          <p>Add your key for one of them first. It stays on this {cloudOnly ? 'phone' : 'computer'}.</p>
           <button type="button" className="btn primary" onClick={onSettings}><Icon name="settings" size={13} /> Set up cloud agents</button>
         </div>
         {error && <p className="error-text">{error}</p>}

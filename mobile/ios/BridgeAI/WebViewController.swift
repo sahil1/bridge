@@ -5,7 +5,8 @@ import WebKit
 // The page keeps the end-to-end encrypted link to your computer, as it does in Safari. Safari
 // gives it a service worker to carry Bridge AI's requests over that link; an app can't have one
 // for an address that's different for everyone, so Tunnel does that job here. With no computer,
-// the phone page can offer the demo instead, which is bundled in too (BundledUI).
+// the phone page can offer the demo instead, which is bundled in too (BundledUI), and Cloud agents:
+// agents on Cursor, Copilot, Jules or Claude with your own keys, kept by the app (CloudBridge).
 final class WebViewController: UIViewController, WKScriptMessageHandler, WKUIDelegate, WKNavigationDelegate {
     static let scheme = "bridge-app"
     private static let shell = URL(string: "bridge-app://app/_relay/shell")!
@@ -14,6 +15,7 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKUIDel
     private var web: WKWebView!
     private let tunnel = Tunnel()
     private let bundled = BundledUI()
+    private let cloud = CloudBridge()
     private var showingBundled = false
     private let store = OfflineStore() // what the page keeps for when your computer is offline
 
@@ -66,10 +68,11 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKUIDel
         showingBundled = false
         let ucc = web.configuration.userContentController
         ucc.removeAllUserScripts()
+        ucc.removeScriptMessageHandler(forName: CloudBridge.name, contentWorld: .page)
         let pairing = Keychain.computers().first(where: { $0["relay"] as? String == relay })?["pairing"]
-        // bundled: the UIs in the app the page can offer (the demo).
+        // bundled: the UIs in the app the page can offer (the demo, Cloud agents).
         ucc.addUserScript(WKUserScript(source: """
-            window.bridgeNative = { platform: 'ios', relay: \(Self.js(relay)), pairing: \(Self.js(pairing)), computers: \(Self.js(listed())), bundled: \(Self.js(["demo"].filter(BundledUI.has))), post: (m) => window.webkit.messageHandlers.bridge.postMessage(m) }
+            window.bridgeNative = { platform: 'ios', relay: \(Self.js(relay)), pairing: \(Self.js(pairing)), computers: \(Self.js(listed())), bundled: \(Self.js(["demo", "cloud"].filter(BundledUI.has))), post: (m) => window.webkit.messageHandlers.bridge.postMessage(m) }
             """, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         // Bodies that are Blobs (a photo, a voice note) don't reach an app's own handler, so send
         // their bytes instead.
@@ -84,11 +87,14 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKUIDel
 
     // A UI bundled in the app (BundledUI), in place of the phone page. It knows nothing of your
     // computers, and can only ask to go back to the start (bridgeNative.post({ type: 'home' })).
+    // Cloud agents alone also gets its channel for keys and requests (CloudBridge).
     private func openBundled(_ name: String) {
         guard BundledUI.has(name) else { return }
         showingBundled = true
         let ucc = web.configuration.userContentController
         ucc.removeAllUserScripts()
+        ucc.removeScriptMessageHandler(forName: CloudBridge.name, contentWorld: .page)
+        if name == "cloud" { ucc.addScriptMessageHandler(cloud, contentWorld: .page, name: CloudBridge.name) }
         ucc.addUserScript(WKUserScript(source: """
             window.bridgeNative = { platform: 'ios', post: (m) => window.webkit.messageHandlers.bridge.postMessage(m) }
             """, injectionTime: .atDocumentStart, forMainFrameOnly: true))
@@ -130,6 +136,9 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKUIDel
         default: break
         }
     }
+
+    // Cloud agents, from the Home Screen quick action.
+    func openCloud() { if CloudBridge.available() { openBundled("cloud") } }
 
     // The lock screen card was tapped (bridgeai://agent?id=<pane>): show that agent.
     func open(_ url: URL) {

@@ -7,7 +7,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { DATA, IS_MAC, expand } from './paths.js'
-import { loginPath, which } from './agents.js'
+import { tool } from './fixes.js'
 
 const MODEL_NAME = 'ggml-small.en-q5_1.bin'
 const MODEL_URL = `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${MODEL_NAME}`
@@ -18,11 +18,11 @@ export const configure = (c) => { cfg = c || {} }
 const modelPath = () => (cfg.voice?.model ? expand(cfg.voice.model) : path.join(DATA, 'models', MODEL_NAME))
 const exists = (p) => fs.promises.access(p).then(() => true, () => false)
 
-// Looked up on the login PATH: opened at login, the app's own PATH has no Homebrew folders.
+// Looked up on the login PATH and where Homebrew puts things: opened at login, the app's own PATH
+// has no Homebrew folders, and a new Homebrew isn't on your PATH until your shell profile says so.
 async function tools() {
-  const PATH = await loginPath()
-  const [ffmpeg, whisper] = await Promise.all([which('ffmpeg', PATH), which('whisper-cli', PATH)])
-  return { ffmpeg, whisper, brew: IS_MAC ? await which('brew', PATH) : null }
+  const [ffmpeg, whisper] = await Promise.all([tool('ffmpeg'), tool('whisper-cli')])
+  return { ffmpeg, whisper, brew: IS_MAC ? await tool('brew') : null }
 }
 
 let download = null // { got, total, error } while the model is downloading, or after it failed
@@ -37,6 +37,8 @@ export async function status() {
     missing,
     // What setup would type in a terminal for the programs, when we know how on this computer.
     installCommand: missing.length ? installCommand(t, missing) : null,
+    // A Mac with no Homebrew: the app offers to install it first.
+    needsBrew: IS_MAC && !t.brew && missing.length > 0,
     downloading: download && !download.error ? { percent: download.total ? Math.floor((download.got / download.total) * 100) : 0 } : null,
     error: download?.error || null,
   }
@@ -45,7 +47,8 @@ export async function status() {
 // Homebrew on a Mac. Elsewhere package names vary, so the app just says what's needed.
 function installCommand(t, missing) {
   if (!t.brew) return null
-  return `brew install ${missing.map((m) => (m === 'whisper-cli' ? 'whisper-cpp' : m)).join(' ')}`
+  const q = (s) => (/^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`)
+  return `${q(t.brew)} install ${missing.map((m) => (m === 'whisper-cli' ? 'whisper-cpp' : m)).join(' ')}`
 }
 
 // Downloads the model in the background; status() reports progress. Written to a temporary name

@@ -89,6 +89,10 @@ export function makeCall({ fetch, base, headers = {}, name = 'The provider', sec
   }
 }
 
+// The header that carries the key, from an adapter's info.auth ({ header, scheme }). The phone
+// apps add it themselves, from the same info (vite.config.js writes it out for them).
+export const authHeader = (auth, key) => ({ [auth.header]: auth.scheme ? `${auth.scheme} ${key}` : key })
+
 // Shorten a long text to one line for previews and notifications.
 export const oneLine = (s, n = 200) => {
   const t = String(s || '').replace(/[*`#>_]/g, '').replace(/\s+/g, ' ').trim()

@@ -3,6 +3,8 @@ import Icon, { StatusDot } from './Icon.jsx'
 import { Terminal, FilesView, ChangesView, PreviewView } from '../lazy.jsx'
 import Subagents from './Subagents.jsx'
 import Question, { parseScreen } from './Question.jsx'
+import FirstRunCard, { showsFirstRun } from './FirstRun.jsx'
+import { InstallAgentButton } from './SignIn.jsx'
 import Composer from './Composer.jsx'
 import Lightbox from './Lightbox.jsx'
 import CloudConsole from './CloudConsole.jsx'
@@ -284,7 +286,7 @@ function LiveActivity({ paneId }) {
   )
 }
 
-function Chat({ agent, pending, queued = [], outbox = [], onCancelQueued, onEdit, onUndo, editingText }) {
+function Chat({ agent, pending, queued = [], outbox = [], onCancelQueued, onEdit, onUndo, editingText, onOpenTerminal }) {
   const { data, error } = useLive(`/agents/${encodeURIComponent(agent.paneId)}/transcript`)
   const scrollRef = useRef(null)
   const stick = useRef(true)
@@ -330,7 +332,10 @@ function Chat({ agent, pending, queued = [], outbox = [], onCancelQueued, onEdit
 
   // No chat to show, or none yet (a new session): say so rather than leave the space blank.
   const nothing = data && (!data.supported || (!recent.length && !more && agent.status !== 'working'))
+  // A new agent still on its first-run screens (sign-in and so on): walk through them here.
+  const firstRun = showsFirstRun(agent) && <FirstRunCard agent={agent} onOpenTerminal={onOpenTerminal} />
   if (nothing && !shownPending.length && !queued.length && !shownOutbox.length) {
+    if (firstRun) return <div className="chat-empty firstrun-wrap">{firstRun}</div>
     if (agent.status === 'blocked') return null // its question card, below, says what's needed
     return (
       <div className="chat-empty">
@@ -398,6 +403,7 @@ function Chat({ agent, pending, queued = [], outbox = [], onCancelQueued, onEdit
           </div>
         ))}
         {agent.status === 'working' && <LiveActivity paneId={agent.paneId} />}
+        {firstRun}
         {queued.map((q) => (
           <div key={q.id} className="msg user queued">
             <div className="msg-text"><UserText text={q.text} paneId={agent.paneId} /></div>
@@ -445,14 +451,17 @@ function BlockedCard({ agent, onKey, onOpenTerminal }) {
   )
 }
 
-export function MateEmpty({ onLaunch, launching, error }) {
+export function MateEmpty({ onLaunch, launching, error, code }) {
+  // Its agent isn't installed: install it here, and the chief starts once it's there.
+  const missing = code?.startsWith('install:') ? code.slice(8) : null
   return (
     <div className="mate-hero">
       <div className="hero-mark"><Icon name="helm" size={30} /></div>
       <h3>No chief of staff running</h3>
       <p>Your chief of staff is the one agent you talk to. It sends each request to the agent already working on that topic, starts a new one in the right space when nothing fits, and reports back when the work is done.</p>
       <button className="btn primary" data-tour="chief" onClick={onLaunch} disabled={launching}><Icon name="helm" /> {launching ? 'Launching…' : 'Start chief of staff'}</button>
-      {error && <p className="error-text">{error}</p>}
+      {error && <p className={missing ? 'muted' : 'error-text'}>{error}</p>}
+      {missing && <InstallAgentButton kind={missing} label="Install it" onCheck={onLaunch} />}
     </div>
   )
 }
@@ -520,7 +529,9 @@ function AgentConsole({ agent, variant = 'focus', controls = {}, onBack, onOpenI
     setViewRaw(saved || (agent?.caps?.chat ? 'chat' : 'terminal'))
   }, [agent?.paneId, agent?.kind])
   useEffect(() => { if (!flash) return; const t = setTimeout(() => setFlash(null), flash.length > 60 ? 8000 : 3000); return () => clearTimeout(t) }, [flash])
-  useEffect(() => { if (agent?.status === 'blocked') setKeysOpen(true) }, [agent?.status])
+  // Its first-run screens have their own card (FirstRun.jsx), so no raw keys for those.
+  const firstRunNow = showsFirstRun(agent)
+  useEffect(() => { if (agent?.status === 'blocked' && !firstRunNow) setKeysOpen(true) }, [agent?.status, firstRunNow])
 
   // In the Terminal tab, what you type below shows up live in the agent's own input line (only
   // the difference is sent: backspaces, then new text). Sending replaces that line with your
@@ -714,7 +725,7 @@ function AgentConsole({ agent, variant = 'focus', controls = {}, onBack, onOpenI
           <div className="console-body">
             <PathCtx.Provider value={openFromChat}>
               {view === 'chat' && <Chat agent={agent} pending={pending} queued={queued} outbox={outbox} onCancelQueued={cancelQueued} onEdit={agent.caps?.rewind ? (t) => { setEditTarget({ ...t, undoFiles: false, canUndoFiles: agent.kind === 'claude' }); setPrefill({ text: t.original, n: Date.now() }) } : null}
-                onUndo={agent.caps?.undo ? undoReply : null} editingText={editTarget?.original} />}
+                onUndo={agent.caps?.undo ? undoReply : null} editingText={editTarget?.original} onOpenTerminal={() => setView('terminal')} />}
             </PathCtx.Provider>
             <div className="term-wrap" hidden={view !== 'terminal'}><Terminal paneId={agent.paneId} active={view === 'terminal'} focusKey={termFocus} onChat={() => setView('chat')} /></div>
             {view === 'files' && <FilesView agent={agent} openPath={openPath} onConsumed={() => setOpenPath(null)} onMention={(p) => setPrefill({ text: /\s/.test(p) ? `@"${p}" ` : `@${p} `, add: true, append: true, n: Date.now() })} />}
@@ -723,11 +734,11 @@ function AgentConsole({ agent, variant = 'focus', controls = {}, onBack, onOpenI
             {view === 'preview' && <PreviewView agent={agent} onSendToAgent={({ text, files }) => { setView('chat'); setPrefill({ text, files, append: true, n: Date.now() }) }} />}
           </div>
 
-          {agent.status === 'blocked' && view === 'chat' && !outbox.some((o) => o.kind === 'answer' && o.state === 'waiting') && (
+          {agent.status === 'blocked' && view === 'chat' && !showsFirstRun(agent) && !outbox.some((o) => o.kind === 'answer' && o.state === 'waiting') && (
             <BlockedCard agent={agent} onKey={sendKeys} onOpenTerminal={() => setView('terminal')} />
           )}
 
-          <div className="composer-wrap" data-tour="composer" hidden={view === 'files' || view === 'changes' || view === 'preview'}>
+          <div className="composer-wrap" data-tour="composer" hidden={view === 'files' || view === 'changes' || view === 'preview' || (view === 'chat' && showsFirstRun(agent))}>
             {agent.caps?.subagents && view === 'chat' && <Subagents paneId={agent.paneId} working={agent.status === 'working'} Rich={RichText} />}
             {keysOpen && (
               <div className="keybar" aria-label="Send keys">

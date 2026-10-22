@@ -4,7 +4,9 @@ import { usePersisted, useShared } from './layout.jsx'
 import Usage from './Usage.jsx'
 import { openToday } from './today.js'
 import Markets, { RangePicker } from './Markets.jsx'
-import { usePoll, fmtTime } from '../api.js'
+import { api, usePoll, fmtTime, refetch, settingsChanged } from '../api.js'
+import LocationPicker from './settings/LocationPicker.jsx'
+import SignInButton from './SignIn.jsx'
 
 // Collapsible section; open/closed is remembered per card. `summary` shows when collapsed.
 export function Card({ icon, title, right, summary, children, className = '' }) {
@@ -42,7 +44,7 @@ const Loading = () => <div className="skeleton-rows"><div /><div /></div>
 export function Brief({ onOpenAgent, onShowCard }) {
   const [unit] = useShared('cc-unit', 'f')
   const [primary] = useShared('cc-primary', 'claude')
-  const { data, error } = usePoll(`/brief?unit=${unit}&primary=${primary}`, 5 * 60 * 1000)
+  const { data, error, refresh } = usePoll(`/brief?unit=${unit}&primary=${primary}`, 5 * 60 * 1000)
   return (
     <Card icon="today" title={data?.greeting || 'Brief'} className="brief" summary={data?.lines?.[0]?.text} right={data && <span className="updated">{new Date(data.date).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}</span>}>
       {!data && !error && <Loading />}
@@ -57,6 +59,11 @@ export function Brief({ onOpenAgent, onShowCard }) {
                 {l.routines.map((r) => (
                   <button key={r.id} className={`chip r-chip ${r.state}`} onClick={() => onShowCard('repeat')}><Icon name="repeat" size={11} /> {r.name}</button>
                 ))}
+              </div>
+            )}
+            {l.signIn?.length > 0 && (
+              <div className="brief-items">
+                {l.signIn.map((s) => <SignInButton key={s.kind} kind={s.kind} label={`Sign in to ${s.label}`} className="chip" onCheck={() => { refetch('/quota'); refresh() }} />)}
               </div>
             )}
             {l.items?.length > 0 && (
@@ -106,8 +113,15 @@ function weatherIcon(code) {
 }
 
 export function Weather() {
-  const { data, error } = usePoll('/weather', 15 * 60 * 1000)
+  const { data, error, errorCode } = usePoll('/weather', 15 * 60 * 1000)
   const [unit, setUnit] = useShared('cc-unit', 'f')
+  const [saveErr, setSaveErr] = useState(null)
+  // No city yet: pick one right here (saved to your settings, as in Settings › General).
+  const pick = async (loc) => {
+    if (!loc) return
+    setSaveErr(null)
+    try { await api('/settings', { method: 'PATCH', body: { location: loc } }); settingsChanged() } catch (e) { setSaveErr(e.message) }
+  }
   const c = unit === 'c'
   const t = (f) => Math.round(c ? (f - 32) * 5 / 9 : f)
   const wind = (mph) => (c ? `${Math.round(mph * 1.609)} km/h` : `${mph} mph`)
@@ -118,9 +132,11 @@ export function Weather() {
     </div>
   )
   return (
-    <Card icon="sun" title={data?.location || 'Weather'} summary={data ? `${t(data.current.temp)}° ${data.current.summary}` : ''} right={toggle}>
+    <Card icon="sun" title={data?.location || 'Weather'} summary={data ? `${t(data.current.temp)}° ${data.current.summary}` : errorCode === 'noLocation' ? 'Pick your city' : ''} right={toggle}>
       {!data && !error && <Loading />}
-      {error && <p className="error-text">{error}</p>}
+      {error && errorCode === 'noLocation'
+        ? <div className="perm-fix"><p>{error}</p><LocationPicker value={null} onChange={pick} />{saveErr && <p className="error-text">{saveErr}</p>}</div>
+        : error && <p className="error-text">{error}</p>}
       {data && (
         <>
           <div className="wx-now">

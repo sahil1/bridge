@@ -296,6 +296,16 @@ kbd { font: 11px var(--font-mono); padding: 1px 5px; border-radius: 4px; backgro
 .blocked-screen { margin: 0; padding: 10px 12px; max-height: 190px; overflow: auto; font: 11.5px/1.45 var(--font-mono); background: var(--term-bg); color: var(--term-fg); white-space: pre-wrap; }
 .blocked-actions { display: flex; gap: 6px; padding: 9px 12px; flex-wrap: wrap; }
 .blocked-actions .btn { height: 34px; min-width: 44px; }
+/* A new agent's first-run screens, as a card (FirstRun.jsx) */
+.firstrun-wrap { width: calc(100% - 28px); max-width: 560px; }
+.firstrun-wrap .blocked-card { width: 100%; max-width: none; margin: 0; text-align: left; }
+.blocked-card.firstrun .blocked-head .link { margin-left: auto; font-weight: 500; }
+.firstrun-body { display: grid; gap: 10px; justify-items: start; padding: 2px 12px 12px; background: var(--pane); border-top: 1px solid color-mix(in srgb, var(--needs) 25%, transparent); padding-top: 12px; }
+.firstrun-body p { margin: 0; font-size: 13px; line-height: 1.5; color: var(--ink); }
+.firstrun-body a.btn, .firstrun-body a.ghost-btn { text-decoration: none; }
+.firstrun-code { display: flex; gap: 6px; width: 100%; max-width: 420px; }
+.firstrun-code input { flex: 1; min-width: 0; height: 28px; padding: 0 9px; border-radius: 7px; border: 1px solid var(--line-2); background: var(--pane-2); color: var(--ink); font: 12.5px var(--font); outline: none; }
+.firstrun-code input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 
 .composer-wrap { flex: none; padding: 6px 14px 14px; }
 .keybar { display: flex; gap: 5px; padding: 0 0 8px; overflow-x: auto; scrollbar-width: none; align-items: center; max-width: 860px; margin: 0 auto; }
@@ -1310,11 +1320,25 @@ kbd { font: 11px var(--font-mono); padding: 1px 5px; border-radius: 4px; backgro
 .join-btn, .join-btn:hover { text-decoration: none; }
 .idea-more { margin-top: 4px; }
 
-/* ---------- Inbox ---------- */
+/* ---------- Inbox, and what needs setting up (PermissionFix.jsx) ---------- */
 .perm-fix { display: grid; gap: 10px; justify-items: start; align-content: start; }
-.perm-steps { margin: 0; padding-left: 18px; display: grid; gap: 10px; align-content: start; font-size: 12.5px; line-height: 1.5; color: var(--ink); }
-.perm-steps li > span { display: block; margin-bottom: 6px; }
-.perm-steps .btn { height: 28px; }
+.perm-fix > p { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); max-width: 46em; }
+.perm-fix > p.muted { color: var(--ink-3); font-size: 12px; }
+.perm-fix > p.error-text { color: var(--critical); font-size: 12px; }
+.perm-acts { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
+.perm-ok { display: inline-flex; align-items: flex-start; gap: 6px; }
+.perm-fix > .perm-ok { color: var(--ink); }
+.perm-ok svg { color: var(--good); flex: none; margin-top: 3px; }
+.perm-steps { margin: 0; padding-left: 18px; display: grid; gap: 6px; align-content: start; font-size: 12.5px; line-height: 1.5; color: var(--ink); }
+.perm-steps code { font: 11.5px var(--font-mono); }
+.rt-notice { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin: 0 14px 8px; padding: 8px 12px; border-radius: 10px; font-size: 12.5px; color: var(--ink); background: var(--pane); border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--line-2)); }
+.rt-notice > svg { color: var(--warning); flex: none; }
+.rt-notice > span { flex: 1; min-width: 200px; }
+.perm-fix a, .rt-notice a { color: var(--accent); text-underline-offset: 2px; }
+.signin { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+.signin .error-text { flex-basis: 100%; }
+.prov-signin { padding: 0 12px 10px 44px; }
+.mate-hero .signin { justify-content: center; }
 .mail-setup { display: grid; gap: 4px; justify-items: start; align-content: start; }
 .mail-setup p { margin: 0 0 8px; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
 .mail-setup ol { margin: 0 0 10px; padding-left: 18px; font-size: 12.5px; line-height: 1.6; color: var(--ink); display: grid; gap: 4px; }
@@ -2417,6 +2441,18 @@ table.sheet tbody tr:hover td { background: var(--pane-2); }
 /* Settings › Phone: your own relay */
 .relay-box { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--pane-2); }
 .relay-box p { margin: 0; }
+/* …and the choice of ways, once Bridge AI's relay is offered */
+.ph-ways { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; }
+.ph-way { display: grid; gap: 3px; align-content: start; padding: 10px 12px; border-radius: 11px; border: 1px solid var(--line-2); background: var(--pane-2); text-align: left; transition: border-color .12s, box-shadow .12s; }
+.ph-way:hover { border-color: var(--ink-3); }
+.ph-way.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.ph-way-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13.5px; }
+@media (max-width: 560px) { .ph-ways { grid-template-columns: 1fr; } }
+.ph-facts { margin: 0; padding-left: 18px; display: grid; gap: 5px; font-size: 12.5px; line-height: 1.45; color: var(--ink-2); }
+.onb-phone { margin-bottom: 6px; }
+.onb-phone h3 { display: flex; align-items: center; gap: 7px; margin: 0; }
+.onb-phone h3 .icon { color: var(--accent); }
+.onb-phone .ph-pair-text { text-align: left; justify-items: start; }
 
 /* ============ Tour ============ */
 /* Above every window but the image viewer. Clicks on the dimmed page land on .tour and stop there. */

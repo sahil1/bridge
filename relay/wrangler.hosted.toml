@@ -1,0 +1,46 @@
+# Bridge AI's hosted relay: the same Worker as everyone's own relay, with HOSTED on (HOSTED.md).
+# Replace example.com with the relay's domain (here and in [vars]), then from the repo:
+#   node relay/build.js relay/dist/worker.js
+#   npx wrangler@4.149.0 deploy -c relay/wrangler.hosted.toml
+name = "bridge-relay"
+main = "dist/worker.js"
+compatibility_date = "2025-06-01"
+workers_dev = false
+preview_urls = false
+
+# The bare domain (a small page, and where computers register) and one level below it (one
+# address per computer). Both need a proxied DNS record (HOSTED.md).
+routes = [
+  { pattern = "example.com/*", zone_name = "example.com" },
+  { pattern = "*.example.com/*", zone_name = "example.com" },
+]
+
+# One Hub per computer, plus one that counts registrations. SQLite-backed, so Workers Free works too.
+[[durable_objects.bindings]]
+name = "HUB"
+class_name = "Hub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Hub"]
+
+# The anonymous counts (HOSTED.md lists them). Leave this out and nothing is counted.
+[[analytics_engine_datasets]]
+binding = "STATS"
+dataset = "bridge_relay"
+
+[vars]
+HOSTED = "1"
+HOSTED_DOMAIN = "example.com"
+# The kill switch: "1" (or a message of your own) refuses new computers and every connection.
+HOSTED_OFF = "0"
+# Limits per computer, and for registering. These are the defaults; HOSTED.md says why.
+MAX_PHONES = "16"
+MAX_MESSAGE_KB = "256"
+MESSAGES_PER_SECOND = "200"
+MESSAGE_BURST = "2000"
+DAILY_MB = "512"
+DAILY_MESSAGES = "200000"
+IDLE_DAYS = "90"
+REGISTER_PER_IP = "10"
+REGISTER_PER_DAY = "1000"

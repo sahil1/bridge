@@ -35,7 +35,7 @@ const CLAUDE_BUSY = new RegExp(`${ESC_INTERRUPT.source}|^\\s*[✻✳✶✢✽·*
 
 export const AGENTS = [
   {
-    kind: 'claude', label: 'Claude Code', model: (m) => ['--model', m], models: ['opus', 'sonnet', 'haiku', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1'], install: { npm: '@anthropic-ai/claude-code' }, bin: ['claude'], herdr: 'claude', usage: 'claude',
+    kind: 'claude', label: 'Claude Code', model: (m) => ['--model', m], models: ['opus', 'sonnet', 'haiku', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1'], install: { unix: 'curl -fsSL https://claude.ai/install.sh | bash', win: 'powershell -ExecutionPolicy ByPass -c "irm https://claude.ai/install.ps1 | iex"', npm: '@anthropic-ai/claude-code', brew: '--cask claude-code' }, bin: ['claude'], herdr: 'claude', usage: 'claude',
     sessionId: 'assign',
     start: ({ sessionId, prompt }) => [...(sessionId ? ['--session-id', sessionId] : []), ...(prompt ? [prompt] : [])], promptArg: true,
     resume: (id) => ['--resume', id],
@@ -48,7 +48,7 @@ export const AGENTS = [
     caps: { chat: true, subagents: true, commands: true, questions: true, inputBox: true, typeAhead: true, rewind: true, undo: true, btw: true, fork: true },
   },
   {
-    kind: 'codex', label: 'Codex', model: (m) => ['--model', m], models: [], install: { npm: '@openai/codex' }, bin: ['codex'], herdr: 'codex', usage: 'codex',
+    kind: 'codex', label: 'Codex', model: (m) => ['--model', m], models: [], install: { unix: 'curl -fsSL https://chatgpt.com/codex/install.sh | sh', win: 'powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"', npm: '@openai/codex', brew: '--cask codex' }, bin: ['codex'], herdr: 'codex', usage: 'codex',
     sessionId: 'discover',
     start: ({ prompt }) => (prompt ? [prompt] : []), promptArg: true,
     resume: (id) => ['resume', id],
@@ -56,10 +56,10 @@ export const AGENTS = [
     busy: ESC_INTERRUPT,
     caps: { chat: true, commands: true, typeAhead: true, fork: true, rewind: true },
   },
-  { kind: 'gemini', label: 'Gemini CLI', install: { npm: '@google/gemini-cli' }, bin: ['gemini'], herdr: 'gemini', start: ({ prompt }) => (prompt ? ['-i', prompt] : []), promptArg: true, busy: ESC_INTERRUPT, caps: {} },
+  { kind: 'gemini', label: 'Gemini CLI', install: { npm: '@google/gemini-cli', brew: 'gemini-cli' }, bin: ['gemini'], herdr: 'gemini', start: ({ prompt }) => (prompt ? ['-i', prompt] : []), promptArg: true, busy: ESC_INTERRUPT, caps: {} },
   { kind: 'grok', label: 'Grok', model: (m) => ['--model', m], models: [], install: { npm: '@vibe-kit/grok-cli' }, bin: ['grok'], herdr: 'grok', start: () => [], busy: ESC_INTERRUPT, caps: {} },
   { kind: 'cursor', label: 'Cursor Agent', model: (m) => ['--model', m], models: [], install: { unix: 'curl https://cursor.com/install -fsS | bash' }, bin: ['cursor-agent'], herdr: 'cursor', start: () => [], busy: ESC_INTERRUPT, caps: {} },
-  { kind: 'copilot', label: 'GitHub Copilot CLI', install: { npm: '@github/copilot' }, bin: ['copilot'], start: () => [], busy: ESC_INTERRUPT, caps: {} },
+  { kind: 'copilot', label: 'GitHub Copilot CLI', install: { unix: 'curl -fsSL https://gh.io/copilot-install | bash', win: 'winget install GitHub.Copilot', npm: '@github/copilot', brew: 'copilot-cli' }, bin: ['copilot'], start: () => [], busy: ESC_INTERRUPT, caps: {} },
   { kind: 'opencode', label: 'OpenCode', model: (m) => ['--model', m], models: [], install: { npm: 'opencode-ai' }, bin: ['opencode'], start: () => [], busy: ESC_INTERRUPT, caps: {} },
   { kind: 'amp', label: 'Amp', install: { npm: '@sourcegraph/amp' }, bin: ['amp'], start: () => [], busy: ESC_INTERRUPT, caps: {} },
   { kind: 'qwen', label: 'Qwen Code', install: { npm: '@qwen-code/qwen-code' }, bin: ['qwen'], start: ({ prompt }) => (prompt ? ['-i', prompt] : []), promptArg: true, busy: ESC_INTERRUPT, caps: {} },
@@ -87,7 +87,9 @@ export function loginPath() {
   loginPathCache = new Promise((resolve) => {
     // Interactive login shell, like a terminal window, so PATH set in .zshrc/.bashrc (nvm, say) counts.
     execFile(process.env.SHELL || '/bin/sh', ['-lic', 'printf "%s" "$PATH"'], { timeout: 8000 }, (err, out) => {
-      if (!err && out) return resolve(withNodeShim(out.trim().split('\n').pop()))
+      // Plus the usual folders: agents' own installers put them in ~/.local/bin, which a new Mac's
+      // shell doesn't list until you add it.
+      if (!err && out) return resolve(withNodeShim([...new Set([...out.trim().split('\n').pop().split(path.delimiter), ...USUAL_DIRS])].join(path.delimiter)))
       // Started at login, the shell can be too slow to answer while the Mac is still busy (after an
       // update, say). Use the usual folders for now and ask again in a minute, rather than miss
       // herdr and your agents until Bridge AI restarts.
@@ -138,20 +140,35 @@ async function findInstalled() {
   return installedCache.list
 }
 
-// The install command for this platform, as you'd type it in a terminal.
-export function installCommand(kind) {
+// The install command for this platform, as you'd type it in a terminal. The agent's own installer
+// when it has one (it needs nothing else, which matters on a new Mac with no Node), else npm when
+// you have it, else Homebrew when you have it, else npm (which then says what's missing).
+// have: { npm, brew } from installTools(); brew is its path.
+export function installCommand(kind, have = { npm: true }) {
   const i = adapter(kind).install
   if (!i) return null
-  if (i.npm) return `npm install -g ${i.npm}`
-  return (IS_WIN ? i.win : i.unix) || null
+  const own = IS_WIN ? i.win : i.unix
+  if (own) return own
+  if (i.npm && have.npm) return `npm install -g ${i.npm}`
+  if (i.brew && have.brew) return `${have.brew} install ${i.brew}`
+  return i.npm ? `npm install -g ${i.npm}` : null
+}
+
+// What there is to install with here. Homebrew is looked for where it puts itself too, since a new
+// install isn't on the PATH until your shell profile says so.
+export async function installTools() {
+  const PATH = await loginPath()
+  const [npm, brew] = await Promise.all([which('npm', PATH), IS_WIN ? null : which('brew', [PATH, '/opt/homebrew/bin', '/usr/local/bin'].join(path.delimiter))])
+  return { npm: !!npm, brew }
 }
 
 // Every known agent with what the UI needs to show it (installed or not).
 export async function catalog() {
-  const have = new Map((await installed()).map((x) => [x.kind, x]))
+  const [list, tools] = await Promise.all([installed(), installTools()])
+  const have = new Map(list.map((x) => [x.kind, x]))
   return AGENTS.map((a) => ({
     kind: a.kind, label: a.label, installed: have.has(a.kind), path: have.get(a.kind)?.path || null,
-    caps: a.caps || {}, install: installCommand(a.kind), modelFlag: !!a.model, models: a.models || [],
+    caps: a.caps || {}, install: installCommand(a.kind, tools), modelFlag: !!a.model, models: a.models || [],
   }))
 }
 export const clearInstalledCache = () => { installedCache = { at: 0, list: null } }

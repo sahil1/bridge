@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, useState } from 'react'
 
 // Views that aren't on the first screen load on demand, so the app opens faster: the terminal
 // (xterm), the file viewer (highlighter, markdown), Settings, onboarding, calendar and usage stats.
@@ -26,8 +26,10 @@ const ensure = (load) => (loaded.has(load) ? Promise.resolve(loaded.get(load)) :
 function wrap(load, name = 'default') {
   const C = lazy(() => ensure(load).then((m) => ({ default: m[name] })))
   return function Lazy(props) {
-    const Ready = loaded.get(load)?.[name]
-    if (Ready) return <Ready {...props} />
+    // Which way is decided once: a view opened while still loading would otherwise start over
+    // (losing what you'd done in it) the next time it's drawn, once loaded.
+    const [direct] = useState(() => !!loaded.get(load)?.[name])
+    if (direct) { const Ready = loaded.get(load)[name]; return <Ready {...props} /> }
     return <Suspense fallback={null}><C {...props} /></Suspense>
   }
 }

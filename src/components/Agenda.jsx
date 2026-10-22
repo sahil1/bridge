@@ -1,25 +1,53 @@
 import { useEffect, useState } from 'react'
 import Icon from './Icon.jsx'
 import { Card, Updated } from './Trackers.jsx'
-import { api, usePoll, viaRelay } from '../api.js'
+import { api, refetch, usePoll, viaRelay } from '../api.js'
+import PermissionFix, { useFix, useRecheck } from './PermissionFix.jsx'
 import { openToday } from './today.js'
 
-// No icalBuddy yet: a button that installs it in a terminal tab you can watch (Homebrew).
-export function CalendarSetup({ error, onCheck }) {
-  const [msg, setMsg] = useState(null)
-  if (!/icalBuddy/.test(error)) return <p className="error-text">{error}</p>
-  const install = async () => {
-    try { setMsg({ openId: (await api('/fix/install', { method: 'POST', body: { what: 'icalbuddy' } })).openId }) } catch (e) { setMsg({ error: e.message }) }
+// Why the calendar can't be read yet, and one button that fixes it: install icalBuddy in a terminal
+// tab you can watch (and Homebrew first, when the Mac has none), or allow Bridge AI to see your
+// calendars. It looks again by itself while an install runs and when you come back to the window.
+export function CalendarSetup({ error, code, onCheck }) {
+  const { data: fix } = useFix()
+  const [msg, setMsg] = useState(null) // { openId, what } | { error }
+  const installing = msg?.openId ? msg.what : null
+  // Homebrew going in: watch for it, to offer icalBuddy next. icalBuddy going in: try the calendar.
+  useRecheck(installing === 'homebrew' ? () => refetch('/fix') : onCheck, installing ? 8000 : 0, code === 'noIcalBuddy')
+  if (code === 'calendarAccess') {
+    return <PermissionFix pane="calendars" onCheck={onCheck}><p>Bridge AI needs your permission to read Calendar. Your events stay on this Mac.</p></PermissionFix>
+  }
+  if (code !== 'noIcalBuddy') {
+    return <div className="perm-fix"><p className="error-text">{error}</p><button type="button" className="ghost-btn" onClick={onCheck}><Icon name="refresh" size={12} /> Check again</button></div>
+  }
+  const noBrew = fix?.tools?.brew === false
+  const install = async (what) => {
+    setMsg(null)
+    try { setMsg({ what, openId: (await api('/fix/install', { method: 'POST', body: { what } })).openId }) } catch (e) {
+      if (e.code === 'noBrew') refetch('/fix')
+      setMsg({ error: e.message })
+    }
   }
   const show = () => window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: msg.openId } }))
+  const what = noBrew ? 'homebrew' : 'icalbuddy'
   return (
-    <div className="mail-setup">
-      <p>The calendar reads macOS Calendar through icalBuddy, a small free tool from Homebrew. macOS asks once whether Bridge AI may see your calendars.</p>
-      {viaRelay ? <p className="muted small">Install it on your computer: <code>brew install ical-buddy</code></p>
-        : <button type="button" className="btn small primary" onClick={install}><Icon name="download" size={12} /> Install icalBuddy</button>}
-      {msg?.openId && <p className="muted small">Installing in a terminal tab. <button type="button" className="link-btn" onClick={show}>Show it</button></p>}
+    <div className="perm-fix">
+      <p>{noBrew
+        ? <>The calendar reads macOS Calendar through icalBuddy, a small free tool. It comes from Homebrew, which isn't on this Mac yet (<a href="https://brew.sh" target="_blank" rel="noreferrer">brew.sh</a>).</>
+        : 'The calendar reads macOS Calendar through icalBuddy, a small free tool from Homebrew.'}</p>
+      {viaRelay ? <p className="muted small">Install it on your computer: open the calendar there and click Install.</p> : (
+        <div className="perm-acts">
+          <button type="button" className="btn small primary" disabled={installing === what} onClick={() => install(what)}><Icon name="download" size={12} /> {noBrew ? 'Install Homebrew' : 'Install icalBuddy'}</button>
+          <button type="button" className="ghost-btn" onClick={() => { refetch('/fix'); onCheck() }}><Icon name="refresh" size={12} /> Check again</button>
+        </div>
+      )}
+      {installing && (
+        <p className="muted small">
+          {installing === 'homebrew' ? 'Installing Homebrew in a terminal tab. It asks for your Mac password there.' : 'Installing in a terminal tab. The calendar shows up here when it\'s done.'}{' '}
+          <button type="button" className="link-btn" onClick={show}>Show it</button>
+        </p>
+      )}
       {msg?.error && <p className="error-text">{msg.error}</p>}
-      <button type="button" className="btn" onClick={onCheck}><Icon name="refresh" size={13} /> Check again</button>
     </div>
   )
 }
@@ -87,7 +115,7 @@ function EventRow({ e, now, past }) {
 }
 
 export function Agenda() {
-  const { data, error, refresh } = useCalendar()
+  const { data, error, errorCode, refresh } = useCalendar()
   const now = useNow()
   const [showPast, setShowPast] = useState(false)
   const [showTomorrow, setShowTomorrow] = useState(false)
@@ -112,7 +140,7 @@ export function Agenda() {
     <Card icon="calendar" title="Schedule" className="agenda" summary={summary}
       right={<span className="updated">{t && ahead.length > 0 && <span className="ag-left">{ahead.length} left · {dur(bookedLeft)}</span>}<Updated data={data} onRefresh={() => refresh('?refresh=1')} /></span>}>
       {!data && !error && <div className="skeleton-rows"><div /><div /></div>}
-      {error && <CalendarSetup error={error} onCheck={() => refresh('?refresh=1')} />}
+      {error && <CalendarSetup error={error} code={errorCode} onCheck={() => refresh('?refresh=1')} />}
       {t && (
         <>
           {cur && (

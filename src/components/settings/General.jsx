@@ -3,7 +3,8 @@ import Icon from '../Icon.jsx'
 import AgentMark from './agentMark.jsx'
 import LocationPicker from './LocationPicker.jsx'
 import { USAGE_OFF_WHY } from '../Usage.jsx'
-import { api, settingsChanged } from '../../api.js'
+import { api, settingsChanged, refetch } from '../../api.js'
+import { askRestart, useRecheck } from '../PermissionFix.jsx'
 
 // Settings › General: who you are, which agent and model to use by default, where you are.
 export function useSettings() {
@@ -26,7 +27,12 @@ export function useSettings() {
 export function SaveNote({ note }) {
   if (!note) return null
   if (note.error) return <p className="st-note bad"><Icon name="alert" size={13} /> {note.error}</p>
-  if (note.restart) return <p className="st-note warn"><Icon name="refresh" size={13} /> Saved. {note.restart.join(', ')} take{note.restart.length === 1 ? 's' : ''} effect when Bridge AI restarts (<code>npm run stop</code>, then <code>npm start</code>).</p>
+  if (note.restart) {
+    return (
+      <p className="st-note warn"><Icon name="refresh" size={13} /> Saved. {note.restart.join(', ')} take{note.restart.length === 1 ? 's' : ''} effect when Bridge AI restarts.
+        <button type="button" className="link-btn" onClick={() => { refetch('/fix'); setTimeout(askRestart, 300) }}>Restart to apply…</button></p>
+    )
+  }
   return <p className="st-note ok"><Icon name="check" size={13} /> Saved</p>
 }
 
@@ -127,9 +133,17 @@ export default function General({ onGo }) {
 // With several herdr sessions (`herdr --session work`), pick the one Bridge AI shows and drives.
 function HerdrSession({ value, onSave }) {
   const [d, setD] = useState(null)
-  useEffect(() => { api('/herdr/sessions').then(setD).catch(() => setD({ sessions: [] })) }, [])
+  const load = () => api('/herdr/sessions').then(setD).catch(() => setD({ sessions: [] }))
+  useEffect(() => { load() }, [])
+  // Installed or started meanwhile: noticed when you come back to the window.
+  useRecheck(load, 0, d?.installed === false)
   if (!d) return null
-  if (!d.installed) return <p className="muted small">herdr isn't installed or didn't answer. Install it from herdr.dev, start it once, then come back here.</p>
+  if (!d.installed) {
+    return (
+      <p className="st-note warn"><Icon name="alert" size={13} /> herdr isn't installed, or isn't running. Install it from <a href="https://herdr.dev" target="_blank" rel="noreferrer">herdr.dev</a> and start it once, or choose Built in above.
+        <button type="button" className="link-btn" onClick={load}>Check again</button></p>
+    )
+  }
   const names = d.sessions.map((s) => s.name)
   if (value && !names.includes(value)) names.push(value)
   return (

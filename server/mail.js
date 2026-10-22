@@ -17,9 +17,9 @@ const MAIL = path.join(os.homedir(), 'Library', 'Mail')
 const RULES = cacheFile('mail-rules.json')
 
 const SETUP = {
-  noAccess: 'macOS is blocking access to Mail data. Turn on Full Disk Access for Bridge AI (or the terminal you started it from), then restart Bridge AI.',
+  noAccess: 'Bridge AI needs Full Disk Access to read Mail\'s local index. Nothing leaves your Mac.',
   notMac: 'The inbox reads Apple Mail on macOS. It isn\'t available on this platform yet.',
-  noMail: 'Mail has no local data yet. Turn on Mail for your Exchange account (System Settings › Internet Accounts), open Mail once and let it sync.',
+  noMail: 'Mail has nothing on this Mac yet. Add your account to Mail and open it once, so it can sync.',
 }
 
 function findIndex() {

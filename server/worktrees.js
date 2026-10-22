@@ -9,6 +9,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { DATA, dataFile, ensureDir } from './paths.js'
+import { gitReady, NO_GIT } from './gitready.js'
 
 const FILE = dataFile('worktrees.json')
 // Read once and kept: the fleet asks which agents are in one every few seconds.
@@ -22,10 +23,10 @@ const save = (d) => { memo = d; ensureDir(DATA); fs.writeFileSync(FILE, JSON.str
 
 // git, resolving { ok, out } (its output, or what went wrong) instead of throwing. It enters the
 // folder itself (-C), so a folder macOS is still asking about holds only git, not the server.
-const git = (cwd, args, input = '') => new Promise((resolve) => {
+const git = async (cwd, args, input = '') => (!(await gitReady()) ? { ok: false, out: NO_GIT } : new Promise((resolve) => {
   const p = execFile('git', cwd ? ['-C', cwd, ...args] : args, { timeout: 60000, maxBuffer: 32 * 1024 * 1024 }, (err, stdout, stderr) => resolve({ ok: !err, out: err ? String(stderr || err.message).trim() : stdout }))
   p.stdin.end(input)
-})
+}))
 const slug = (s) => String(s || '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9._-]+/g, '-').replace(/[-.]{2,}/g, '-').replace(/^[-.]+|[-.]+$/g, '').slice(0, 40) || 'agent'
 // Repos are in your folders, which macOS can hold a look into until you answer its permission
 // prompt: those are only ever checked without blocking. Worktrees are in the data folder.

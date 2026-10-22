@@ -2,6 +2,27 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
+## 2.5.0
+
+A much smoother first run: one-click fixes wherever a new Mac needs something, agents that install without Node, Claude Code and Codex set up from the chat, and cloud agents straight from your phone.
+
+### What's new
+
+- **Allow access, in one click:** when Mail needs Full Disk Access, **Allow access** opens the right page of System Settings and puts a Bridge AI tile at the bottom of the screen to drag into the list. Bridge AI notices when it's on, and **Restart to apply** waits in the top bar, like Update, until you're ready. The same goes for Calendars, your Desktop and Documents folders, the microphone and notifications.
+- **Agents set themselves up:** a Claude Code or Codex that has never run used to sit at its own first-run questions where Chat couldn't show them. Its chat now walks you through them (theme, sign-in, trusting the folder) with one button each, then carries on. First-run setup also checks the agent is signed in before starting the chief of staff.
+- **Install without Node:** Install buttons use each agent's own installer where it has one (Claude Code, Codex, Copilot), so a new Mac doesn't need Node or npm first. Gemini CLI uses Homebrew when npm isn't there.
+- **A button wherever something's missing:** Homebrew, icalBuddy, Mail not set up yet, signing in to an agent, the GitHub CLI, Apple's developer tools for git, herdr, an agent that isn't installed, and a city for the weather. Each fixes itself once it's done.
+- **Cloud agents on your phone, with no computer:** the iPhone and Android apps run Cursor, Copilot, Jules and Claude agents on their own, with your keys kept in the phone's Keychain or Keystore, never shown to the page. Android checks on them in the background and notifies you.
+- **The demo** shows cloud agents too, and `?clean=1` hides its Demo strip for recording.
+
+### Fixes
+
+- **Calendar on a new Mac:** icalBuddy wasn't found when the app couldn't see Homebrew's folder, and denied Calendar access showed an empty calendar with no reason.
+- **git without Apple's developer tools:** checking a repo's branch every 15 seconds popped macOS's install dialog over and over.
+- **The greeting** no longer includes tags from your Mac account name, like "[Apple]".
+- **"You're set"** now shows after Finish setup.
+- **The privacy check** skips itself on Windows too.
+
 ## 2.4.0
 
 Several accounts with a quick switcher, agents in the cloud, a phone that keeps working while your computer sleeps, Bridge AI on an always-on machine, a demo, a walkthrough for your first run, and one-click fixes for what macOS asks you to allow.

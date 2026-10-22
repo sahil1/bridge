@@ -2,9 +2,14 @@ import { useEffect, useState } from 'react'
 import Icon from '../Icon.jsx'
 import AgentMark from './agentMark.jsx'
 import { api } from '../../api.js'
+import SignInButton from '../SignIn.jsx'
+import { useRecheck } from '../PermissionFix.jsx'
 
 // Settings › Agents: every agent CLI Bridge AI knows, whether it's installed and signed in,
 // and one click to install it (in a terminal tab you can watch) or start it.
+// Their own sign-in, from here (SignIn.jsx); the others sign in the first time they open.
+const OWN_LOGIN = new Set(['claude', 'codex'])
+
 export default function Agents({ onOpenAgent }) {
   const [list, setList] = useState(null)
   const [subs, setSubs] = useState({})
@@ -17,12 +22,18 @@ export default function Agents({ onOpenAgent }) {
     api('/subscriptions').then((r) => setSubs(Object.fromEntries((r || []).map((x) => [x.kind, x])))).catch(() => {})
   }
   useEffect(load, [])
+  // After Install or Sign in: look again while it runs and when you come back, so the list catches up.
+  const recheck = () => {
+    api('/agents/catalog').then(setList).catch(() => {})
+    api('/subscriptions?refresh=1').then((r) => setSubs(Object.fromEntries((r || []).map((x) => [x.kind, x])))).catch(() => {})
+  }
+  useRecheck(recheck, msg?.paneId ? 8000 : 0)
 
   const install = async (a) => {
     setBusy(a.kind); setMsg(null)
     try {
       const r = await api(`/setup/install/${a.kind}`, { method: 'POST' })
-      setMsg({ ok: `Installing ${a.label} in a terminal tab (Setup space). Answer anything it asks there; come back and press Refresh when it's done.`, paneId: r.openId || r.paneId })
+      setMsg({ ok: `Installing ${a.label} in a terminal tab (Setup space). Answer anything it asks there; this list catches up when it's done.`, paneId: r.openId || r.paneId })
     } catch (e) { setMsg({ error: e.message }) }
     setBusy(null)
   }
@@ -67,11 +78,13 @@ export default function Agents({ onOpenAgent }) {
                 <b>{a.label}</b>
                 <span className={`st-chip ${state.c}`}>{state.t}</span>
                 {!a.installed && a.install && <code className="st-cmd" title="Install command">{a.install}</code>}
-                {a.installed && sub?.signedIn === false && sub.hint && <span className="muted small">{sub.hint}</span>}
+                {a.installed && sub?.signedIn === false && sub.hint && !OWN_LOGIN.has(a.kind) && <span className="muted small">{sub.hint}</span>}
                 <span className="st-caps muted small">{a.caps?.chat ? 'Chat and terminal' : 'Terminal'}{a.caps?.subagents ? ' · subagents' : ''}{a.caps?.commands ? ' · slash commands' : ''}</span>
               </div>
               <div className="st-agent-acts">
-                {a.installed
+                {a.installed && sub?.signedIn === false && OWN_LOGIN.has(a.kind)
+                  ? <SignInButton kind={a.kind} onCheck={recheck} />
+                  : a.installed
                   ? <button type="button" className="btn" disabled={busy === a.kind} onClick={() => start(a)}>{sub?.signedIn === false ? 'Open to sign in' : 'New chat'}</button>
                   : a.install
                     ? <>

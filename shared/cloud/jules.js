@@ -2,7 +2,7 @@
 // A "source" is a GitHub repo you've connected to Jules; a "session" is one task on it. What
 // happens in a session (its plan, messages, progress) is a list of "activities". There's no way
 // to stop or pause a session through the API (only on jules.google.com).
-import { makeCall, CloudError, oneLine, repoName } from './http.js'
+import { makeCall, CloudError, oneLine, repoName, authHeader } from './http.js'
 
 export const info = {
   id: 'jules',
@@ -13,6 +13,7 @@ export const info = {
   keyHint: 'jules.google.com › Settings › API',
   cost: 'Uses your Jules plan and its daily task limit.',
   base: 'https://jules.googleapis.com',
+  auth: { header: 'x-goog-api-key' },
   hosts: 'GitHub repos connected to Jules',
   repoPlaceholder: 'owner/repo',
   planApproval: true,
@@ -43,7 +44,7 @@ function entry(a) {
 }
 
 export function create({ key, fetch, base = info.base }) {
-  const call = makeCall({ fetch, base, name: 'Jules', secrets: [key], headers: { 'x-goog-api-key': key } })
+  const call = makeCall({ fetch, base, name: 'Jules', secrets: [key], headers: authHeader(info.auth, key) })
   const sources = new Map() // "owner/repo" -> source
   const acts = new Map() // session id -> { list, last } (activities never change once made)
   const sid = (id) => encodeURIComponent(String(id).replace(/^sessions\//, ''))

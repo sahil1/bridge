@@ -3,15 +3,25 @@
 // Meeting notes carry Teams passcodes and organizer links; only the join link and the
 // short agenda above the Teams boilerplate are kept.
 import { execFile } from 'node:child_process'
+import { tool } from './fixes.js'
 
 const SEP_EV = '@@EV@@'
 const SEP_PROP = '¦' // ¦
 const DEFAULT_EXCLUDE = ['United States holidays', 'Birthdays', 'Tasks', 'Reminders']
 
-function run(args) {
+// code on the error: what the app can offer to fix (noIcalBuddy: install it; calendarAccess: allow
+// Bridge AI in System Settings › Privacy & Security › Calendars).
+const fail = (message, code) => Object.assign(new Error(message), code ? { code } : {})
+async function run(args) {
+  if (process.platform !== 'darwin') throw fail('The calendar reads macOS Calendar. It isn\'t available on this platform yet.')
+  // Found where Homebrew puts it too: opened at login, the app's own PATH has no Homebrew folders.
+  const bin = await tool('icalBuddy')
+  if (!bin) throw fail('The calendar needs icalBuddy, a small free tool from Homebrew.', 'noIcalBuddy')
   return new Promise((resolve, reject) => {
-    execFile('icalBuddy', args, { timeout: 20000, maxBuffer: 8 * 1024 * 1024, env: { ...process.env, LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8' } }, (err, out, errOut) => {
-      if (err?.code === 'ENOENT') return reject(new Error(process.platform === 'darwin' ? 'Install icalBuddy to see your calendar: brew install ical-buddy' : 'The calendar reads macOS Calendar. It isn\'t available on this platform yet.'))
+    execFile(bin, args, { timeout: 20000, maxBuffer: 8 * 1024 * 1024, env: { ...process.env, LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8' } }, (err, out, errOut) => {
+      // macOS hasn't let it see your calendars (you said no, or turned it off).
+      if (/^\s*error: No calendars/im.test(`${out}\n${errOut}`)) return reject(fail('Bridge AI isn\'t allowed to see your calendars yet.', 'calendarAccess'))
+      if (err?.code === 'ENOENT') return reject(fail('The calendar needs icalBuddy, a small free tool from Homebrew.', 'noIcalBuddy'))
       if (err) return reject(new Error((errOut || err.message).trim().split('\n')[0] || 'icalBuddy failed'))
       resolve(out)
     })

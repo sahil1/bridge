@@ -64,3 +64,15 @@
 /* Three ways to start an agent fit on a phone without their icons. */
 .app.narrow .na-mode button svg { display: none; }
 .app.narrow .na-mode button { padding: 0 6px; white-space: nowrap; }
+
+/* The phone apps' Cloud agents, with no computer (cloudOnly): the first screen, before any key,
+   and the list's New button. */
+.cl-welcome { flex: 1; min-height: 0; overflow-y: auto; display: grid; gap: 18px; align-content: start; padding: 22px max(16px, env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
+.cl-hello { display: grid; gap: 10px; justify-items: start; }
+.cl-hello h3 { margin: 4px 0 0; font-size: 19px; }
+.cl-hello p { margin: 0; color: var(--ink-2); font-size: 14px; line-height: 1.5; }
+.pv-sec.bare { border-top: 0; padding-top: 0; }
+.pv-sec.bare .pv-note { margin: 4px 2px 0; font-size: 12.5px; color: var(--ink-3); line-height: 1.5; }
+.cl-new { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 12px 0 10px; margin-left: auto; flex: none; }
+.cloud-only .board .pane-head { gap: 10px; }
+.cl-none { padding-top: 40px; }

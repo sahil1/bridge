@@ -75,9 +75,11 @@ kotlin {
 }
 
 // Bridge AI's own UI, bundled in the app to run with no computer behind it: the demo (Try the demo
-// on the start screen). Each is built from the repo's src/ with `npm run <name>:build` into the app's
-// assets, and served from https://appassets.androidplatform.net/assets/<name>/ (MainActivity).
-val bundledUis = listOf("demo")
+// on the start screen) and Cloud agents (CloudBridge). Each is built from the repo's src/ with
+// `npm run <name>:build` into the app's assets, and served from
+// https://appassets.androidplatform.net/assets/<name>/ (MainActivity); Cloud agents from an address
+// of its own, cloud.appassets.androidplatform.net, so its storage is its own.
+val bundledUis = listOf("demo", "cloud")
 
 abstract class BuildBundledUis : DefaultTask() {
     @get:Input abstract val names: ListProperty<String>
@@ -104,7 +106,7 @@ androidComponents {
             val root = rootProject.layout.projectDirectory.dir("../..")
             names.set(bundledUis)
             repo.set(root)
-            sources.from(root.dir("src"), listOf("index.html", "vite.config.js", "package.json", "public/mark.svg").map(root::file))
+            sources.from(root.dir("src"), root.dir("shared"), listOf("index.html", "vite.config.js", "package.json", "public/mark.svg").map(root::file))
         }
         variant.sources.assets?.addGeneratedSourceDirectory(task, BuildBundledUis::outputDir)
     }
@@ -115,6 +117,9 @@ dependencies {
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
     // ...which uses androidx.core without bringing it.
     implementation("androidx.core:core:1.13.1")
-    // Serves the bundled UIs (the demo) from the app's assets at an https address (WebViewAssetLoader).
+    // Serves the bundled UIs (the demo, Cloud agents) from the app's assets at an https address
+    // (WebViewAssetLoader), and gives the Cloud agents page alone its channel to the app.
     implementation("androidx.webkit:webkit:1.14.0")
+    // Cloud agents' background check, at most every 15 minutes while a key is saved (CloudCheck).
+    implementation("androidx.work:work-runtime:2.10.5")
 }

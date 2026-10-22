@@ -16,6 +16,12 @@ export function useOutbox(paneId) {
   return items
 }
 
+// The phone apps' Cloud agents (src/cloud, `vite build --mode cloud`): this UI for cloud agents
+// alone, on the phone with no computer, so everything else is left out.
+export const cloudOnly = import.meta.env.MODE === 'cloud'
+// Where that keeps keys, in its own words.
+export const keyStore = /Android/i.test(navigator.userAgent) ? "Android's Keystore" : /iPhone|iPad|Macintosh/i.test(navigator.userAgent) ? "this iPhone's Keychain" : "the phone's secure storage"
+
 // A WebSocket to this server (the live terminal), through the relay's link when there is one.
 export const openSocket = (path) => (relayPage ? new relayPage.WebSocket(path) : new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${path}`))
 
@@ -26,7 +32,8 @@ export async function api(path, opts = {}) {
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   })
   const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+  // code: set when the app can offer a fix (EPERM, noBrew, calendarAccess...).
+  if (!res.ok) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), data.code ? { code: data.code } : {})
   return data
 }
 
@@ -66,9 +73,9 @@ export function usePoll(path, intervalMs, { enabled = true } = {}) {
     if (!pathRef.current) return
     try {
       const data = suffix ? await api(pathRef.current + suffix) : await sharedGet(pathRef.current, !shared)
-      setState({ data, error: null, loading: false })
+      setState({ data, error: null, errorCode: null, loading: false })
     } catch (error) {
-      setState((s) => ({ ...s, error: error.message, loading: false }))
+      setState((s) => ({ ...s, error: error.message, errorCode: error.code || null, loading: false }))
     }
   }, [])
   const refresh = useCallback((suffix = '') => load(suffix, false), [load])

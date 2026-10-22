@@ -5,6 +5,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
+import { gitReady } from './gitready.js'
 
 const HOME = os.homedir()
 const SKIP = new Set(['node_modules', '.git', 'dist', 'build', '__pycache__', '.venv', 'venv', '.next', '.cache'])
@@ -15,7 +16,7 @@ const cache = new Map()
 const exists = (p) => fs.promises.access(p).then(() => true, () => false)
 const readdir = (dir) => fs.promises.readdir(dir, { withFileTypes: true })
 
-const gitFiles = (cwd) => new Promise((resolve) => {
+const gitFiles = async (cwd) => (await gitReady()) && new Promise((resolve) => {
   execFile('git', ['-C', cwd, 'ls-files', '-co', '--exclude-standard', '-z'], { timeout: 8000, maxBuffer: 64 * 1024 * 1024 }, (err, out) => {
     resolve(err ? null : out.split('\0').filter(Boolean).slice(0, MAX_FILES))
   })

@@ -8,6 +8,7 @@ import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { OFFICE } from './office.js'
 import { loginPath } from './agents.js'
+import { gitReady, NO_GIT } from './gitready.js'
 
 const HIDDEN = new Set(['.git', 'node_modules', '.DS_Store', '__pycache__', '.venv', 'venv', '.next', 'dist', '.cache', '.turbo'])
 const MAX_TEXT = 1024 * 1024
@@ -100,7 +101,8 @@ export async function siteFile(root, rel) {
 // would freeze everything, not just this call.
 const inRepo = (cwd, args) => (cwd ? ['-C', cwd, ...args] : args)
 
-function git(cwd, args, timeout = 10000) {
+async function git(cwd, args, timeout = 10000) {
+  if (!(await gitReady())) return null
   return new Promise((resolve) => {
     execFile('git', inRepo(cwd, args), { timeout, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => resolve(err ? null : stdout))
   })
@@ -144,7 +146,7 @@ export async function findFiles(root, q, limit = 60) {
 export async function gitStatus(root) {
   const { realRoot } = await safePath(root, '')
   const top = (await git(realRoot, ['rev-parse', '--show-toplevel']))?.trim()
-  if (!top) return { repo: false }
+  if (!top) return (await gitReady()) ? { repo: false } : { repo: false, noGit: true }
   const out = await git(realRoot, ['status', '--porcelain=v1', '-b', '--untracked-files=all', '--', '.'])
   const lines = (out || '').split('\n').filter(Boolean)
   const head = lines[0]?.startsWith('## ') ? lines.shift().slice(3) : ''
@@ -189,7 +191,8 @@ export async function gitDiff(root, rel) {
 
 // ---------- Acting on changes (the Changes tab) ----------
 // Run git with input on stdin; resolves { ok, out } instead of throwing.
-function gitIn(cwd, args, input = '', timeout = 20000, env = undefined) {
+async function gitIn(cwd, args, input = '', timeout = 20000, env = undefined) {
+  if (!(await gitReady())) return { ok: false, out: NO_GIT, timedOut: false }
   return new Promise((resolve) => {
     const p = execFile('git', inRepo(cwd, args), { timeout, env, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => resolve({ ok: !err, out: `${stdout || ''}${stderr || ''}`.trim(), timedOut: !!err?.killed }))
     if (input) p.stdin.end(input); else p.stdin.end()
@@ -265,9 +268,11 @@ export async function push(root) {
   const remote = tracked ? upRemote : remotes.includes('origin') ? 'origin' : remotes[0]
   const env = { ...process.env, PATH: await loginPath(), GIT_TERMINAL_PROMPT: '0' }
   const r = await gitIn(top, ['push', ...(tracked ? [] : ['--set-upstream']), remote, branch], '', 90000, env)
-  if (!r.ok) throw new Error(r.timedOut ? `The push to ${remote} took over 90 seconds and was stopped. It may be waiting for a password or passphrase; try git push in a terminal once` : pushError(r.out, remote, branch))
+  if (r.timedOut) throw new Error(`The push to ${remote} took over 90 seconds and was stopped. It may be waiting for a password or passphrase; try git push in a terminal once`)
+  if (!r.ok) { const msg = pushError(r.out, remote, branch); throw Object.assign(new Error(msg), SIGN_IN.test(msg) ? { code: 'pushAuth' } : {}) }
   return { ok: true, branch, remote, upstream: !tracked, output: r.out.slice(-400) }
 }
+const SIGN_IN = /turned down the sign-in/
 function pushError(out, remote, branch) {
   if (/\[rejected\]|\[remote rejected\]|non-fast-forward|fetch first/i.test(out) && !/hook/i.test(out)) return `${remote} has commits on ${branch} that you don't have here. Pull them in first (ask the agent to pull and rebase), then push again`
   if (/Authentication failed|could not read (Username|Password)|terminal prompts disabled|Permission denied|permission to .* denied|access denied|HTTP 40[13]|publickey|Host key verification failed/i.test(out)) return `${remote} turned down the sign-in. Check that git push works from your terminal (gh auth login, or your SSH key)`
@@ -329,7 +334,13 @@ export async function trash(root, rel) {
   const { real } = await inside(root, rel)
   if (IS_MAC) {
     if (fs.existsSync('/usr/bin/trash')) await run('/usr/bin/trash', [real])
-    else await run('osascript', ['-e', 'on run argv', '-e', 'tell application "Finder" to delete (POSIX file (item 1 of argv) as alias)', '-e', 'end run', real])
+    // Older macOS: through Finder, which macOS asks you to allow once (Automation).
+    else {
+      await run('osascript', ['-e', 'on run argv', '-e', 'tell application "Finder" to delete (POSIX file (item 1 of argv) as alias)', '-e', 'end run', real]).catch((e) => {
+        if (/-1743|not authori[sz]ed to send apple events/i.test(e.message)) throw Object.assign(new Error('macOS didn\'t let Bridge AI ask Finder to move it to the Trash.'), { code: 'automation' })
+        throw e
+      })
+    }
   } else if (IS_WIN) {
     const kind = (await fsp.stat(real)).isDirectory() ? 'DeleteDirectory' : 'DeleteFile'
     const quoted = `'${real.replace(/'/g, "''")}'`

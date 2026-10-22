@@ -8,6 +8,8 @@ import Mcp from './settings/Mcp.jsx'
 import ConfigFile from './settings/ConfigFile.jsx'
 import Phone from './settings/Phone.jsx'
 import About from './settings/About.jsx'
+import CloudKeys from './settings/CloudKeys.jsx'
+import { cloudOnly } from '../api.js'
 
 // One Settings window, Slack style: sections down the left, one scrolling panel on the right.
 // On a phone the sections become a row of chips above the panel.
@@ -22,17 +24,24 @@ export const SECTIONS = [
   { id: 'about', label: 'About & updates', icon: 'info', hint: 'Version, updates, the tour, reporting a problem' },
 ]
 
+// The phone's Cloud agents (cloudOnly): only what there is on the phone alone.
+const PHONE = [
+  { id: 'cloud', label: 'Cloud agents', icon: 'cloud', hint: 'Your keys for Cursor, GitHub Copilot, Jules and Claude' },
+  { id: 'appearance', label: 'Appearance', icon: 'palette', hint: 'Theme, text size, density' },
+]
+
 // "accounts" and "cloud" open Model providers at its Accounts or Cloud agents list.
 export default function Settings({ section = 'general', onClose, onOpenAgent }) {
-  const to = section === 'accounts' || section === 'cloud' ? 'providers' : section
-  const [at, setAt] = useState(SECTIONS.some((s) => s.id === to) ? to : 'general')
-  useEffect(() => { if (SECTIONS.some((s) => s.id === to)) setAt(to) }, [to])
+  const sections = cloudOnly ? PHONE : SECTIONS
+  const to = cloudOnly ? (section === 'appearance' ? 'appearance' : 'cloud') : section === 'accounts' || section === 'cloud' ? 'providers' : section
+  const [at, setAt] = useState(sections.some((s) => s.id === to) ? to : sections[0].id)
+  useEffect(() => { if (sections.some((s) => s.id === to)) setAt(to) }, [to]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape' && !e.target.closest?.('textarea, input')) onClose() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
-  const cur = SECTIONS.find((s) => s.id === at)
+  const cur = sections.find((s) => s.id === at)
   const go = (id) => setAt(id)
 
   return (
@@ -40,7 +49,7 @@ export default function Settings({ section = 'general', onClose, onOpenAgent }) 
       <div className="modal settings" role="dialog" aria-label="Settings">
         <nav className="st-nav" aria-label="Settings sections">
           <div className="st-nav-title">Settings</div>
-          {SECTIONS.map((s) => (
+          {sections.map((s) => (
             <button key={s.id} type="button" className={`st-nav-item ${at === s.id ? 'on' : ''}`} aria-current={at === s.id ? 'page' : undefined} onClick={() => go(s.id)}>
               <Icon name={s.icon} size={15} /><span>{s.label}</span>
             </button>
@@ -63,6 +72,7 @@ export default function Settings({ section = 'general', onClose, onOpenAgent }) 
             {at === 'config' && <ConfigFile />}
             {at === 'phone' && <Phone />}
             {at === 'about' && <About />}
+            {at === 'cloud' && <CloudKeys focus="cloud" bare />}
           </div>
         </section>
       </div>

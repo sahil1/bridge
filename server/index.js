@@ -37,7 +37,7 @@ import { rewindAndSend, codexRewindAndSend, undoReply, btwAnswer } from './rewin
 import { makeNews } from './news.js'
 import { pickRuntime } from './runtime/index.js'
 import { sessionName as herdrSession, sessions as herdrSessions } from './runtime/herdr-cli.js'
-import { installed, caps, adapter, catalog as agentCatalog, installCommand, clearInstalledCache } from './agents.js'
+import { installed, caps, adapter, catalog as agentCatalog, installCommand, installTools, clearInstalledCache } from './agents.js'
 import { loadConfig, ROOT, DATA, CACHE, expand, ensureDir, cacheFile, IS_MAC } from './paths.js'
 import { prepareChief } from './chief.js'
 import { providerRoutes, providerEnv, subscriptions } from './providers.js'
@@ -83,7 +83,8 @@ const wrap = (fn) => async (req, res) => {
   try {
     res.json(await fn(req, res))
   } catch (err) {
-    res.status(502).json({ error: err.message })
+    // code: what the app can offer a fix for (EPERM, noBrew, calendarAccess...).
+    res.status(502).json({ error: err.message, ...(typeof err.code === 'string' ? { code: err.code } : {}) })
   }
 }
 // Your folders are only ever checked without blocking: macOS can hold the first look into Desktop
@@ -379,11 +380,16 @@ app.post('/api/chief/launch', wrap(async () => {
   if (existing) return { paneId: existing.paneId, existing: true }
   if (!(await exists(CHIEF_DIR))) throw new Error(`Chief of staff folder not found at ${CHIEF_DIR}`)
   const kind = cfg.chief?.kind || 'claude'
-  if (!(await installed()).some((k) => k.kind === kind)) throw new Error(`The chief of staff runs on ${adapter(kind).label}, which isn't installed. Install it, or set "chief": { "kind": "..." } in ~/.bridge-ai/config.json`)
+  if (!(await installed()).some((k) => k.kind === kind)) throw notInstalled(kind, `The chief of staff runs on ${adapter(kind).label}, which isn't installed yet.`)
   const out = await launchAgent({ kind, cwd: CHIEF_DIR, label: 'Chief of staff', newSpace: 'Chief of staff' })
   pushFleet()
   return out
 }))
+
+// An agent that isn't installed: code install:<kind> lets the app offer its Install button.
+function notInstalled(kind, message = `${adapter(kind).label} isn't installed`) {
+  return Object.assign(new Error(message), installCommand(kind) ? { code: `install:${kind}` } : {})
+}
 
 // ---------- Queue, launch, rename/close, folders ----------
 app.post('/api/agents/:pane/queue', wrap(async (req) => {
@@ -446,7 +452,7 @@ app.get('/api/repo', wrap(async (req) => {
 }))
 app.post('/api/agents/launch', wrap(async (req) => {
   const { kind = cfg.defaultAgent || 'claude', cwd, workspaceId, newSpace, label, prompt, account, alsoKind, ownBranch, branch, base, setup, remember } = req.body || {}
-  if (kind !== 'shell' && !(await installed()).some((k) => k.kind === kind)) throw new Error(`${adapter(kind).label} isn't installed`)
+  if (kind !== 'shell' && !(await installed()).some((k) => k.kind === kind)) throw notInstalled(kind)
   const dir = await places.resolveDir(cwd)
   const name = String(label || path.basename(dir)).trim().slice(0, 60)
   const space = String(newSpace || '').trim()
@@ -574,7 +580,7 @@ app.post('/api/sessions/resume', wrap(async (req) => {
   if (!adapter(kind).resume || !/^[\w-]{8,64}$/.test(String(sessionId || ''))) throw new Error("That conversation can't be resumed")
   const live = (await liveBySession())[sessionId]
   if (live) return { paneId: live, already: true }
-  if (!(await installed()).some((k) => k.kind === kind)) throw new Error(`${adapter(kind).label} isn't installed`)
+  if (!(await installed()).some((k) => k.kind === kind)) throw notInstalled(kind)
   // On its own branch: its worktree may live outside your home folder, and if it was removed when
   // the agent closed, it's checked out again at the same path first (then the setup command runs).
   const own = worktrees.folderOf(expand(String(cwd || '')))
@@ -719,14 +725,15 @@ app.post('/api/voice/setup', wrap(async () => {
 }))
 // ---------- What macOS asks you to allow (fixes.js) ----------
 app.get('/api/fix', wrap(() => fixes.status()))
+app.get('/api/fix/check', wrap((req) => fixes.check(String(req.query.pane || ''), { folder: String(req.query.folder || '') })))
+app.post('/api/fix/claim', wrap((req) => fixes.claim(String(req.body?.pane || ''))))
 app.post('/api/fix/settings', wrap((req) => { onComputer(req); return fixes.openSettings(String(req.body?.pane || '')) }))
+app.post('/api/fix/app', wrap((req) => { onComputer(req); return fixes.openApp(String(req.body?.app || '')) }))
 app.post('/api/fix/reveal', wrap((req) => { onComputer(req); return fixes.reveal() }))
-// Only these, never a command from the request.
-const INSTALLS = { icalbuddy: { label: 'Install icalBuddy', command: 'brew install ical-buddy' } }
+// Only the fixed commands in fixes.js, never one from the request.
 app.post('/api/fix/install', wrap(async (req) => {
   onComputer(req)
-  const it = INSTALLS[req.body?.what]
-  if (!it) throw new Error('Nothing to install')
+  const it = await fixes.installCommand(String(req.body?.what || ''))
   return { openId: await setupTab(it.label, it.command) }
 }))
 app.post('/api/transcribe', express.raw({ type: () => true, limit: '30mb' }), wrap((req) => voice.transcribe(req.body)))
@@ -932,17 +939,20 @@ app.get('/api/brief', wrap(async (req) => {
   // Plan usage off (the default): nothing to say about it.
   if (q && !q.off) {
     const low = q.providers.filter((p) => p.usable && p.percentRemaining != null && p.percentRemaining < 25)
-    const auth = q.providers.filter((p) => !p.usable)
+    // Signed out (not a reading that failed for another reason), for agents on this computer: the
+    // brief offers Sign in.
+    const have = new Set((await installed().catch(() => [])).map((k) => k.kind))
+    const auth = q.providers.filter((p) => !p.usable && !p.allow && (p.status === 'auth_required' || p.notSetUp) && have.has(p.provider))
     const NAMES = { claude: 'Claude', codex: 'Codex', cursor: 'Cursor', grok: 'Grok' }
     const prim = q.providers.find((p) => p.provider === (req.query.primary || 'claude'))
     const win = (p, kind) => p?.windows?.find((x) => x.kind === kind)
     let text = prim?.usable
       ? `${NAMES[prim.provider] || prim.provider}: ${win(prim, 'session')?.percentRemaining ?? prim.percentRemaining}% of the 5h window and ${win(prim, 'weekly')?.percentRemaining ?? '?'}% of the week left.`
-      : q.bestNow ? `Most budget expiring soonest: ${q.bestNow}.` : 'No provider has usable quota data.'
+      : q.bestNow ? `Most budget expiring soonest: ${q.bestNow}.` : auth.length ? '' : 'No provider has usable quota data.'
     if (prim?.usable && q.bestNow && q.bestNow !== prim.provider) text += ` ${NAMES[q.bestNow] || q.bestNow} has the most budget expiring soonest.`
     if (low.length) text += ` Low: ${low.map((p) => `${p.provider} ${p.percentRemaining}%`).join(', ')}.`
-    if (auth.length) text += ` Needs sign-in: ${auth.map((p) => p.provider).join(', ')}.`
-    lines.push({ key: 'quota', text })
+    if (auth.length) text += `${text ? ' ' : ''}Not signed in: ${auth.map((p) => NAMES[p.provider] || p.provider).join(', ')}.`
+    lines.push({ key: 'quota', text, signIn: auth.map((p) => ({ kind: p.provider, label: NAMES[p.provider] || p.provider })) })
   }
   if (w) {
     const t = w.daily[0]
@@ -962,7 +972,9 @@ app.get('/api/brief', wrap(async (req) => {
     else text += '.'
     lines.push({ key: 'mortgage', text })
   }
-  return { greeting: cfg.name ? `${greeting}, ${cfg.name}` : greeting, date: new Date().toISOString(), lines }
+  // A name saved by an earlier version can carry a directory tag ("Jane D [Contoso]"); not in a greeting.
+  const name = settings.cleanName(cfg.name)
+  return { greeting: name ? `${greeting}, ${name}` : greeting, date: new Date().toISOString(), lines }
 }))
 
 // ---------- Notifications, phone, updates ----------
@@ -1053,9 +1065,15 @@ const settingsView = () => ({
   file: settings.FILE, raw: settings.readRaw(), user: settings.readUser(), defaults: settings.defaults(),
   effective: cfg, restartKeys: settings.RESTART_KEYS,
 })
+// Settings that only apply at start, as they were when this server started: the top bar offers
+// Restart to apply while any differs (and stops if you change it back).
+const atStart = Object.fromEntries(settings.RESTART_KEYS.map((k) => [k, JSON.stringify(settings.readUser()[k])]))
 const afterChange = (changed) => {
   applyConfig()
-  return { ok: true, changed, restart: changed.filter((k) => settings.RESTART_KEYS.includes(k)), settings: settingsView() }
+  const restart = changed.filter((k) => settings.RESTART_KEYS.includes(k))
+  const now = settings.readUser()
+  fixes.noteRestart(settings.RESTART_KEYS.filter((k) => JSON.stringify(now[k]) !== atStart[k]))
+  return { ok: true, changed, restart, settings: settingsView() }
 }
 app.get('/api/settings', wrap(() => settingsView()))
 app.patch('/api/settings', wrap((req) => afterChange(settings.patch(req.body || {}))))
@@ -1096,7 +1114,7 @@ const openIdOf = async (paneId) => {
 }
 // Install an agent in a terminal tab you can watch (and answer, if it asks anything).
 app.post('/api/setup/install/:kind', wrap(async (req) => {
-  const cmd = installCommand(req.params.kind)
+  const cmd = installCommand(req.params.kind, await installTools())
   if (!cmd) throw new Error(`No install command for ${req.params.kind}; see its website`)
   const f = await rt.fleet()
   const ws = f.workspaces.find((w) => w.label === 'Setup')
@@ -1118,6 +1136,7 @@ app.post('/api/accounts/active/:kind', wrap((req) => accounts.setActive(req.para
 // Sign in: the agent's own login flow (like /login) in a terminal tab you can watch and answer.
 app.post('/api/accounts/:id/login', wrap(async (req) => {
   const { kind, command } = accounts.loginCommand(req.params.id)
+  if (!(await installed()).some((k) => k.kind === kind)) throw notInstalled(kind)
   const f = await rt.fleet()
   const ws = f.workspaces.find((w) => w.label === 'Setup')
   const label = accounts.labelOf(req.params.id) || 'Default'
@@ -1134,7 +1153,7 @@ app.post('/api/accounts/:id/login', wrap(async (req) => {
 const CHAT_NOTE = `# Chat\n\nThis is a plain conversation with the user, not a project. Answer directly and helpfully. There are no project files here; only read or change files elsewhere if the user asks.\n`
 app.post('/api/chats', wrap(async (req) => {
   const kind = String(req.body?.kind || cfg.defaultAgent || 'claude')
-  if (!(await installed()).some((k) => k.kind === kind)) throw new Error(`${adapter(kind).label} isn't installed`)
+  if (!(await installed()).some((k) => k.kind === kind)) throw notInstalled(kind)
   const dir = ensureDir(path.join(DATA, 'chats'))
   for (const f of ['CLAUDE.md', 'AGENTS.md', 'GEMINI.md']) fs.writeFileSync(path.join(dir, f), CHAT_NOTE)
   const f = await rt.fleet()

@@ -7,6 +7,10 @@ import { SPACES, AGENTS, SHELLS, TAB_ORDER, finishedNote, reply, chiefReply } fr
 import * as F from './feeds.js'
 import { screenOf, shell as shellScreen, COLS, ROWS } from './screens.js'
 import { editLines, gitDiff, count, undoHunk } from './diff.js'
+import { createClouds } from './clouds.js'
+import { ADAPTERS } from '../../shared/cloud/index.js'
+import { follow } from '../../shared/cloud/follow.js'
+import { cloudApi, NOT_CLOUD } from '../standalone/cloud.js'
 
 // What only a real computer can do. Said calmly, in one line.
 const needs = (what, verb = 'needs') => { throw Object.assign(new Error(`${what} ${verb} Bridge AI on your computer.`), { status: 501 }) }
@@ -61,6 +65,21 @@ export function createDemo() {
     }, 30)
   }
   const setStatus = (a, status) => { if (a.status !== status) { a.status = status; a.seq = ++S.seq } bump() }
+
+  // ---------- Cloud agents ----------
+  // One per provider, on made-up provider APIs (clouds.js) and the real adapters, followed the
+  // way Bridge AI follows them (shared/cloud/follow.js). Every provider has a (made-up) key.
+  const clouds = createClouds()
+  const memo = new Map()
+  const clients = {}
+  const client = (id) => (clients[id] ||= ADAPTERS[id].create({ key: 'demo-key', fetch: clouds.fetch, memo: { get: (k) => memo.get(k), set: (k, v) => memo.set(k, v) }, github: id === 'claude' ? 'demo-token' : null }))
+  const cloud = follow({ tasks: clouds.seed(), client, saved: () => ({ set: true, last4: '' }) })
+  cloud.on({ change: () => bump() })
+  const cloudReq = cloudApi(cloud, {
+    keys: { put: () => needs('Saving a key'), remove: () => needs('Removing a key') },
+    mute: (t, on) => { t.muted = on; bump(); return { ok: true, muted: on } },
+  })
+  const cloudMuted = (pane) => !!cloud.find(pane)?.muted
 
   // ---------- Conversations ----------
   const push = (a, m, ts = Date.now()) => { a.log.push({ id: `${uid()}:0`, ts: iso(ts), ...m }); bump() }
@@ -296,7 +315,8 @@ export function createDemo() {
   const rect = { x: 0, y: 0, width: COLS, height: ROWS }
   function fleet() {
     const rank = { blocked: 0, done: 1, working: 2, idle: 3, unknown: 4 }
-    const agents = [...S.agents.values()].map(viewAgent).sort((x, y) => (y.chief - x.chief) || (rank[x.status] ?? 9) - (rank[y.status] ?? 9) || y.seq - x.seq)
+    const inCloud = cloud.fleetAgents({ isMuted: cloudMuted })
+    const agents = [...[...S.agents.values()].map(viewAgent), ...inCloud].sort((x, y) => (y.chief - x.chief) || (rank[x.status] ?? 9) - (rank[y.status] ?? 9) || y.seq - x.seq)
     const order = (id) => S.spaces.findIndex((w) => w.id === id)
     const tabs = S.tabs.map((t) => ({
       tabId: t.tabId, workspaceId: t.workspaceId, workspace: spaceOf(t.workspaceId)?.label || '', label: t.label,
@@ -308,6 +328,7 @@ export function createDemo() {
       const st = agents.filter((a) => a.workspaceId === w.id).map((a) => a.status)
       return { id: w.id, label: w.label, status: ['blocked', 'working', 'done', 'idle'].find((s) => st.includes(s)) || 'idle' }
     })
+    if (inCloud.length) workspaces.push(cloud.space(inCloud))
     return { agents, tabs, workspaces, counts: agents.reduce((c, a) => ({ ...c, [a.status]: (c[a.status] || 0) + 1 }), {}), queue: S.queue }
   }
   function panes() {
@@ -413,7 +434,7 @@ export function createDemo() {
   on('GET', '/config', () => ({ version, name: S.cfg.name || '', location: S.cfg.location?.label || null, hasMortgage: false, runtime: { name: 'builtin', liveView: false, reorder: true, splits: false }, platform: 'darwin', mail: true, calendar: true, defaultAgent: S.cfg.defaultAgent || 'claude', chiefKind: 'claude', setupDone: true }))
   on('GET', '/runtime-theme', () => ({}))
   on('GET', '/version', () => ({ version, build: 'demo', bundled: false }))
-  on('GET', '/previews', () => Object.fromEntries([...S.agents.values()].map((a) => [a.paneId, preview(a)])))
+  on('GET', '/previews', () => ({ ...Object.fromEntries([...S.agents.values()].map((a) => [a.paneId, preview(a)])), ...cloud.previews() }))
   on('GET', '/places', () => places())
   on('GET', '/panes', () => ({ panes: panes() }))
   on('GET', '/agent-kinds', () => F.kinds())
@@ -705,6 +726,7 @@ export function createDemo() {
       const hits = a.log.filter((m) => (m.role === 'user' || m.role === 'assistant') && m.text.toLowerCase().includes(q)).slice(-3).map((m) => ({ role: m.role, text: m.text.slice(0, 300) }))
       return hits.length && { sessionId: a.sessionId, kind: a.kind, title: tabOf(a.tabId)?.label, cwd: tilde(a.cwd), fullCwd: a.cwd, last: a.log.at(-1)?.ts, hits, paneId: a.paneId, label: a.chief ? 'Chief of staff' : tabOf(a.tabId)?.label, workspace: spaceOf(a.workspaceId)?.label }
     }).filter(Boolean)
+    results.push(...cloud.search(q))
     return { results, total: results.length }
   })
   on('POST', '/sessions/resume', ({ body }) => {
@@ -862,6 +884,7 @@ export function createDemo() {
     if (sh) S.shells.set(sh.paneId, { ...sh, lines: [`  ${new Date().toLocaleTimeString()} [vite] page reload src/pages/Orders.tsx`], draft: '' })
   }
   // What the agents still have to do plays out while you watch.
+  cloud.start()
   setTimeout(() => {
     const chief = [...S.agents.values()].find((a) => a.chief)
     for (const def of AGENTS) {
@@ -876,6 +899,8 @@ export function createDemo() {
   return {
     async request({ method, path, query, body }) {
       const route = path.replace(/\/$/, '') || '/'
+      const fromCloud = await cloudReq(method, route, query, body)
+      if (fromCloud !== NOT_CLOUD) return fromCloud
       for (const [m, re, fn] of routes) {
         if (m !== method) continue
         const hit = re.exec(route)

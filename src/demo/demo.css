@@ -21,4 +21,4 @@
 /* The app's top bar already keeps clear of the notch (--safe-top); it keeps clear of the strip too. */
 body.demo-on { --safe-top: calc(env(safe-area-inset-top, 0px) + var(--demo-bar)); }
 /* In the demo, the only errors are notes that something needs the real thing: say them calmly. */
-body.demo-on .error-text { color: var(--ink-3); }
+body.demo-app .error-text { color: var(--ink-3); }

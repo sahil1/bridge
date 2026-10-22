@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import Icon from './Icon.jsx'
 import { usePersisted } from './layout.jsx'
 import { tildePath } from './Rail.jsx'
-import { api } from '../api.js'
+import { api, cloudOnly } from '../api.js'
+import PermissionFix, { protectedFolder } from './PermissionFix.jsx'
+import { InstallAgentButton } from './SignIn.jsx'
 import AgentMark from './settings/agentMark.jsx'
 import { AccountPicker } from './AccountMenu.jsx'
 import NewCloudAgent from './NewCloudAgent.jsx'
@@ -15,7 +17,8 @@ export default function NewAgent({ fleet, initial = {}, onClose, onLaunched, onA
   const [recent, setRecent] = usePersisted('cc-recent-dirs', [])
   const [kind, setKind] = usePersisted('cc-new-kind', 'claude')
   const [savedMode, saveMode] = usePersisted('cc-new-mode', 'project')
-  const [mode, setModeNow] = useState(initial.mode || savedMode)
+  // The phone's Cloud agents start cloud agents only.
+  const [mode, setModeNow] = useState(cloudOnly ? 'cloud' : initial.mode || savedMode)
   const setMode = (m) => { setModeNow(m); saveMode(m) }
   const [cwd, setCwd] = useState(tildePath(initial.cwd) || recent[0] || '~/')
   const [space, setSpace] = useState(initial.workspaceId || '__new')
@@ -25,9 +28,11 @@ export default function NewAgent({ fleet, initial = {}, onClose, onLaunched, onA
   // Compare: the same first message to a second agent, side by side.
   const [also, setAlso] = useState('')
   const [dirs, setDirs] = useState({ dirs: [], exists: true })
+  const [dirsVer, setDirsVer] = useState(0) // look at the folder again (after Allow access)
   const [showDirs, setShowDirs] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
+  const [errorCode, setErrorCode] = useState(null)
   const dirRef = useRef(null)
   // Agents with more than one sign-in (Settings › Providers › Accounts): which one to use. Starts
   // at your choice for that agent (an account, or Auto), for this agent only.
@@ -55,7 +60,7 @@ export default function NewAgent({ fleet, initial = {}, onClose, onLaunched, onA
   useEffect(() => {
     const t = setTimeout(() => api(`/dirs?q=${encodeURIComponent(cwd)}`).then(setDirs).catch(() => {}), 120)
     return () => clearTimeout(t)
-  }, [cwd])
+  }, [cwd, dirsVer])
   useEffect(() => {
     const k = (e) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', k)
@@ -97,7 +102,7 @@ export default function NewAgent({ fleet, initial = {}, onClose, onLaunched, onA
       setRecent([clean, ...recent.filter((r) => r !== clean)].slice(0, 8))
       if (out.setupError) window.alert(`The agent started, but the setup command failed:\n\n${out.setupError}`)
       onLaunched(out)
-    } catch (x) { setError(x.message) } finally { setBusy(false) }
+    } catch (x) { setError(x.message); setErrorCode(x.code || null) } finally { setBusy(false) }
   }
 
   return (
@@ -109,11 +114,11 @@ export default function NewAgent({ fleet, initial = {}, onClose, onLaunched, onA
           <button type="button" className="win-btn" onClick={onClose} aria-label="Close"><Icon name="x" size={14} /></button>
         </header>
 
-        <div className="seg na-mode" role="radiogroup" aria-label="Kind of agent">
+        {!cloudOnly && <div className="seg na-mode" role="radiogroup" aria-label="Kind of agent">
           <button type="button" role="radio" aria-checked={mode === 'project'} className={mode === 'project' ? 'on' : ''} onClick={() => setMode('project')}><Icon name="folder" size={13} /> In a project folder</button>
           <button type="button" role="radio" aria-checked={mode === 'chat'} className={mode === 'chat' ? 'on' : ''} onClick={() => setMode('chat')}><Icon name="chat" size={13} /> Plain chat</button>
           <button type="button" role="radio" aria-checked={mode === 'cloud'} className={mode === 'cloud' ? 'on' : ''} onClick={() => setMode('cloud')}><Icon name="cloud" size={13} /> In the cloud</button>
-        </div>
+        </div>}
         {mode === 'chat' && <p className="muted small na-hint">Just talk to the agent, like its own app: no project folder, saved in a "Chats" space.</p>}
 
         {mode === 'cloud' ? <NewCloudAgent onLaunched={onLaunched} onClose={onClose} onSettings={onCloudSettings} /> : <>
@@ -149,7 +154,9 @@ export default function NewAgent({ fleet, initial = {}, onClose, onLaunched, onA
               </ul>
             )}
           </div>
-          {!dirs.exists && <span className="na-warn">That folder doesn't exist yet</span>}
+          {!dirs.exists && (dirs.denied && protectedFolder(cwd)
+            ? <PermissionFix pane="files" folder={protectedFolder(cwd)} onCheck={() => setDirsVer((v) => v + 1)}><p>This folder is in your {protectedFolder(cwd)} folder, and macOS hasn't let Bridge AI in yet.</p></PermissionFix>
+            : <span className="na-warn">That folder doesn't exist yet</span>)}
           {suggestions.length > 0 && (
             <div className="na-recent">
               {suggestions.map((d) => <button type="button" key={d} className="fchip" onClick={() => setCwd(d)} title={d}>{d.split('/').pop()}</button>)}
@@ -222,7 +229,10 @@ export default function NewAgent({ fleet, initial = {}, onClose, onLaunched, onA
           </label>
         )}
 
-        {error && <p className="error-text">{error}</p>}
+        {error && errorCode === 'EPERM' && protectedFolder(cwd)
+          ? <PermissionFix pane="files" folder={protectedFolder(cwd)} onCheck={() => { setError(null); setErrorCode(null) }}><p>This folder is in your {protectedFolder(cwd)} folder, and macOS hasn't let Bridge AI in yet.</p></PermissionFix>
+          : error && <p className="error-text">{error}</p>}
+        {error && errorCode?.startsWith('install:') && <InstallAgentButton kind={errorCode.slice(8)} onCheck={() => api('/agent-kinds').then((ks) => { setKinds(ks); if (ks.some((k) => k.kind === errorCode.slice(8))) { setError(null); setErrorCode(null) } }).catch(() => {})} />}
         <footer className="modal-foot">
           <span className="muted small hide-touch">⌘⏎ to start</span>
           <button type="button" className="btn" onClick={onClose}>Cancel</button>

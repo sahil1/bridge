@@ -16,6 +16,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
 import android.webkit.JavascriptInterface
+import android.webkit.JsResult
 import android.webkit.PermissionRequest
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -44,6 +45,10 @@ import org.json.JSONObject
 //
 // It can be paired with several computers, each with its own relay. Each relay is its own site in
 // the WebView, so each keeps its own pairing; the app keeps the list and which one is showing.
+//
+// It also runs Cloud agents with no computer at all: Bridge AI's UI for them, bundled in the app,
+// with your keys kept by the app (CloudBridge) and a background check (CloudCheck). From the start
+// screen, the app's long-press shortcut, or the phone page when it offers it, paired or not.
 class MainActivity : Activity() {
     private var web: PageView? = null
     private var fileCallback: ValueCallback<Array<Uri>>? = null
@@ -70,8 +75,14 @@ class MainActivity : Activity() {
         // For testing on an emulator, which can't scan: adb shell am start -n dev.bridgeai.phone/.MainActivity --es pair <link>
         val testLink = if (BuildConfig.DEBUG) intent.getStringExtra("pair") else null
         if (testLink != null) return usePairingLink(testLink)
+        // ...and --es cloudMock 127.0.0.1 points Cloud agents at stand-in providers (TestHosts).
+        if (BuildConfig.DEBUG) TestHosts.remember(this, intent)
+        CloudCheck.schedule(this)
+        // A cloud agent's notification, or the Cloud agents shortcut.
+        if (intent.hasExtra(CLOUD_AGENT) || intent.action == CLOUD_ACTION) return openCloud(intent.getStringExtra(CLOUD_AGENT))
         // ...and --es open demo goes straight to a bundled UI.
         val testOpen = if (BuildConfig.DEBUG) intent.getStringExtra("open") else null
+        if (testOpen == CLOUD) return openCloud(null)
         if (testOpen != null && hasBundled(testOpen)) return openBundled(testOpen)
         pendingAgent = intent.getStringExtra(AgentsService.AGENT)
         val r = relay
@@ -81,6 +92,7 @@ class MainActivity : Activity() {
     // A tap on the agents notification while the app is open.
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        if (intent.hasExtra(CLOUD_AGENT) || intent.action == CLOUD_ACTION) return openCloud(intent.getStringExtra(CLOUD_AGENT))
         val id = intent.getStringExtra(AgentsService.AGENT) ?: return
         val w = web ?: return
         w.evaluateJavascript("window.bridgeOpenAgent && window.bridgeOpenAgent(${JSONObject.quote(id)})", null)
@@ -147,6 +159,17 @@ class MainActivity : Activity() {
             })
             box.addView(Button(this).apply { text = "Try the demo"; setOnClickListener { openBundled("demo") } }, wide)
         }
+        // Or no computer at all: coding agents in the cloud, with your own key.
+        if (CloudBridge.available(this)) {
+            box.addView(TextView(this).apply {
+                text = "Or run agents on Cursor, Copilot, Jules or Claude from this phone, with your own key:"
+                textSize = 14f
+                setTextColor(Color.parseColor("#9AA1AD"))
+                gravity = Gravity.CENTER
+                setPadding(0, (18 * dp).toInt(), 0, 0)
+            })
+            box.addView(Button(this).apply { text = "Cloud agents"; setOnClickListener { openCloud(null) } }, wide)
+        }
         setContentView(box)
     }
 
@@ -159,9 +182,49 @@ class MainActivity : Activity() {
     private fun hasBundled(name: String) = runCatching { assets.list(name)?.contains("index.html") == true }.getOrDefault(false)
 
     private fun openBundled(name: String) {
+        leavePage()
         showingBundled = true
         val w = web ?: makeWebView().also { web = it; setContentView(it) }
         w.loadUrl("https://$BUNDLED_HOST/assets/$name/index.html")
+    }
+
+    // Cloud agents (CloudBridge), at an address of its own; agent: open that one (a notification).
+    private val cloudPages by lazy { CloudBridge.loader(this) }
+    private fun openCloud(agent: String?) {
+        if (!CloudBridge.available(this)) return
+        val w = web
+        if (w != null && Uri.parse(w.url ?: "").host == CloudBridge.HOST) {
+            if (agent != null) w.evaluateJavascript("window.bridgeOpenAgent && window.bridgeOpenAgent(${JSONObject.quote(agent)})", null)
+            return
+        }
+        leavePage()
+        showingBundled = true
+        val page = web ?: makeWebView().also { web = it; setContentView(it) }
+        page.loadUrl(if (agent != null) "${CloudBridge.PAGE}?agent=${Uri.encode(agent)}" else CloudBridge.PAGE)
+    }
+
+    // Away from your computer's page: its link closes, so its agents leave the lock screen until
+    // you're back on it.
+    private fun leavePage() {
+        if (showingBundled || web == null) return
+        web?.keepRunning = false
+        AgentsService.stop(this)
+    }
+
+    // Back from a bundled UI: to your computer's page, or the start screen.
+    private fun leaveBundled() {
+        val r = relay
+        if (r != null) openPage(r) else showStart(null)
+    }
+
+    // A key was saved or removed on the Cloud agents page: the background check goes on or off,
+    // after asking to notify (Android 13 and later) the first time there's a key.
+    private fun onCloudKeys() {
+        if (CloudVault(this).any() && !CloudCheck.allowed(this) && Build.VERSION.SDK_INT >= 33 && !prefs.getBoolean("askedCloudNotify", false)) {
+            prefs.edit().putBoolean("askedCloudNotify", true).apply()
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), CLOUD_NOTIFY)
+        }
+        CloudCheck.schedule(this)
     }
 
     private fun startScan() {
@@ -203,12 +266,22 @@ class MainActivity : Activity() {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.databaseEnabled = true
+            settings.allowFileAccess = false
+            settings.allowContentAccess = false
             settings.mediaPlaybackRequiresUserGesture = false
             // The page tells the app from Chrome by this, and Bridge AI names the phone "Android (app)".
             settings.userAgentString = "${settings.userAgentString} BridgeAIApp/${BuildConfig.VERSION_NAME}"
             addJavascriptInterface(Bridge(), "bridgeAndroid")
+            // Cloud agents' keys and requests, for the Cloud agents page's address only.
+            CloudBridge.attach(this, CloudBridge(this@MainActivity, onKeys = { onCloudKeys() }))
             webViewClient = object : WebViewClient() {
-                override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) = updateBack()
+                override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
+                    // Back can lead from a bundled UI to your computer's page, and the other way.
+                    val host = Uri.parse(url ?: "").host
+                    showingBundled = host == BUNDLED_HOST || host == CloudBridge.HOST
+                    updateCloudShowing()
+                    updateBack()
+                }
 
                 override fun onPageFinished(view: WebView, url: String) {
                     val id = pendingAgent ?: return
@@ -216,20 +289,37 @@ class MainActivity : Activity() {
                     view.evaluateJavascript("window.bridgeOpenAgent && window.bridgeOpenAgent(${JSONObject.quote(id)})", null)
                 }
 
-                // The bundled UI's files, from the app.
-                override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
-                    if (request.url.host == BUNDLED_HOST) bundled.shouldInterceptRequest(request.url) else null
+                // The bundled UIs' files, from the app.
+                override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? = when (request.url.host) {
+                    BUNDLED_HOST -> bundled.shouldInterceptRequest(request.url)
+                    CloudBridge.HOST -> CloudBridge.serve(cloudPages, request.url)
+                    else -> null
+                }
 
                 // Pages other than your relay (links in messages, a server's page) open in the browser.
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                     if (!request.isForMainFrame) return false
-                    val host = if (showingBundled) BUNDLED_HOST else Uri.parse(relay ?: "").host
-                    if (request.url.host == host) return false
+                    // Your computer's page and the UIs bundled in the app stay here.
+                    if (request.url.host in setOf(BUNDLED_HOST, CloudBridge.HOST, Uri.parse(relay ?: "").host)) return false
                     runCatching { startActivity(Intent(Intent.ACTION_VIEW, request.url)) }
                     return true
                 }
             }
             webChromeClient = object : WebChromeClient() {
+                // The page's alerts and questions as the app's own dialogs, without the page's
+                // address as a title (Android's default), as on iPhone.
+                override fun onJsAlert(view: WebView, url: String?, message: String?, result: JsResult): Boolean {
+                    AlertDialog.Builder(this@MainActivity).setMessage(message).setPositiveButton("OK") { _, _ -> result.confirm() }
+                        .setOnCancelListener { result.confirm() }.show()
+                    return true
+                }
+
+                override fun onJsConfirm(view: WebView, url: String?, message: String?, result: JsResult): Boolean {
+                    AlertDialog.Builder(this@MainActivity).setMessage(message).setPositiveButton("OK") { _, _ -> result.confirm() }
+                        .setNegativeButton("Cancel") { _, _ -> result.cancel() }.setOnCancelListener { result.cancel() }.show()
+                    return true
+                }
+
                 override fun onShowFileChooser(view: WebView, callback: ValueCallback<Array<Uri>>, params: FileChooserParams): Boolean {
                     fileCallback?.onReceiveValue(null)
                     fileCallback = callback
@@ -293,9 +383,18 @@ class MainActivity : Activity() {
             if (next != null) openPage(next) else showStart(null)
         }
 
-        // Back to the start screen, from a bundled UI (the demo's "Pair a computer").
+        // Back to the start screen (or your computer's page), from a bundled UI: the demo's
+        // "Pair a computer", Cloud agents' computer button.
         @JavascriptInterface
-        fun home() = runOnUiThread { if (showingBundled) showStart(null) }
+        fun home() = runOnUiThread { if (showingBundled) leaveBundled() }
+
+        // The UIs bundled in the app that the phone page can open (Cloud agents; the demo is on
+        // the app's own start screen), and opening one.
+        @JavascriptInterface
+        fun bundled(): String = JSONArray().apply { if (CloudBridge.available(this@MainActivity)) put(CLOUD) }.toString()
+
+        @JavascriptInterface
+        fun openBundled(name: String) = runOnUiThread { if (name == CLOUD) openCloud(null) }
     }
 
     private var askedNotifications = false
@@ -334,6 +433,7 @@ class MainActivity : Activity() {
         }
         // Allowed: the notification Android held back until now.
         if (requestCode == NOTIFY && results.firstOrNull() == PackageManager.PERMISSION_GRANTED) lastActivity?.let { AgentsService.show(applicationContext, it) }
+        if (requestCode == CLOUD_NOTIFY) CloudCheck.schedule(this)
     }
 
     // Back goes back in the page first. From Android 13 the system asks ahead whether the app
@@ -342,7 +442,7 @@ class MainActivity : Activity() {
     // to the start screen last.
     private fun back() {
         val w = web
-        if (w != null && w.canGoBack()) w.goBack() else if (showingBundled) showStart(null)
+        if (w != null && w.canGoBack()) w.goBack() else if (showingBundled) leaveBundled()
     }
     private val pageBack: Any? = if (Build.VERSION.SDK_INT >= 33) OnBackInvokedCallback { back() } else null
     private var backTaken = false
@@ -364,15 +464,36 @@ class MainActivity : Activity() {
         if (web?.canGoBack() == true || showingBundled) back() else super.onBackPressed()
     }
 
+    // Cloud agents in front: the background check leaves it to the page.
+    private var resumed = false
+    private fun updateCloudShowing() { cloudShowing = resumed && Uri.parse(web?.url ?: "").host == CloudBridge.HOST }
+
+    override fun onResume() {
+        super.onResume()
+        resumed = true
+        updateCloudShowing()
+    }
+
+    override fun onPause() {
+        resumed = false
+        updateCloudShowing()
+        super.onPause()
+    }
+
     override fun onDestroy() {
         web?.destroy()
         super.onDestroy()
     }
 
     companion object {
+        const val CLOUD_AGENT = "cloudAgent"
+        private const val CLOUD_ACTION = "dev.bridgeai.phone.CLOUD"
+        private const val CLOUD = "cloud"
+        @Volatile var cloudShowing = false
         private const val FILES = 1
         private const val MIC = 2
         private const val NOTIFY = 3
+        private const val CLOUD_NOTIFY = 4
         // The app's own address for what it serves itself (WebViewAssetLoader's default).
         private const val BUNDLED_HOST = "appassets.androidplatform.net"
     }

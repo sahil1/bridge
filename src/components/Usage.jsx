@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import Icon from './Icon.jsx'
 import { usePersisted, useShared, useWidth } from './layout.jsx'
-import { api, usePoll, fmtTime, settingsChanged } from '../api.js'
+import { api, usePoll, fmtTime, settingsChanged, refetch } from '../api.js'
+import SignInButton from './SignIn.jsx'
 import { AllowKeychain, level, statusText } from './AccountMenu.jsx'
 
 const NAMES = { claude: 'Claude', codex: 'Codex', cursor: 'Cursor', grok: 'Grok', copilot: 'Copilot', openrouter: 'OpenRouter', deepseek: 'DeepSeek', kimi: 'Kimi', zai: 'Z.ai', agy: 'Antigravity' }
@@ -187,6 +188,9 @@ function Activity({ provider, note }) {
   )
 }
 
+// Not signed in, as the quota reading says it (not a reading that failed for another reason).
+const signedOut = (p) => !p.usable && !p.allow && (p.status === 'auth_required' || p.notSetUp)
+
 function ProviderRow({ p, open, onToggle, best, isPrimary, onMakePrimary }) {
   const [reveal, setReveal] = usePersisted('cc-usage-reveal', false)
   const main = p.windows.find((w) => w.kind === 'session') || p.windows.find((w) => w.kind !== 'credits') || p.windows[0]
@@ -207,9 +211,10 @@ function ProviderRow({ p, open, onToggle, best, isPrimary, onMakePrimary }) {
             <PaceBar w={main} level={h.level} />
             <span className={`prov-pct t-${h.level}`}>{main.percentRemaining}%</span>
           </span>
-        ) : <span className="prov-status">{p.status.replace('_', ' ')}</span>}
+        ) : <span className="prov-status">{signedOut(p) ? 'not signed in' : p.status.replace(/_/g, ' ')}</span>}
         <Icon name="chevron" size={12} className={`caret ${open ? 'rot90' : ''}`} />
       </button>
+      {signedOut(p) && <div className="prov-signin"><SignInButton kind={p.provider} onCheck={() => refetch('/quota')} /></div>}
       {open && (
         <div className="prov-body">
           <div className="acct">
@@ -224,7 +229,7 @@ function ProviderRow({ p, open, onToggle, best, isPrimary, onMakePrimary }) {
               <Icon name="star" size={12} /> {isPrimary ? 'Default' : 'Make default'}
             </button>
           </div>
-          {p.allow ? <AllowKeychain id={`${p.provider}-default`} /> : !p.usable && p.hint && <p className="hint mono">{p.hint}</p>}
+          {p.allow ? <AllowKeychain id={`${p.provider}-default`} /> : !signedOut(p) && !p.usable && p.hint && <p className="hint mono">{p.hint}</p>}
           <div className="w-list">
             {main && <WindowRow w={main} />}
             {rest.map((w) => <WindowRow key={w.id} w={w} />)}
@@ -300,7 +305,8 @@ function AccountUsage({ a, auto, open, onToggle }) {
             </div>
           )}
           {a.allow && <AllowKeychain id={a.id} />}
-          {!a.allow && !a.usable && <p className="muted small">{a.signedIn === false ? 'Not signed in. Sign in from Settings › Model providers › Accounts.' : a.status === 'pending' ? 'Reading its usage…' : `Couldn't read its usage${a.error ? ` (${a.error.replace(/_/g, ' ')})` : ''}.`}</p>}
+          {!a.allow && !a.usable && a.signedIn === false && <SignInButton kind={a.id.replace(/-[^-]+$/, '')} account={a.id} onCheck={() => refetch('/quota')} />}
+          {!a.allow && !a.usable && a.signedIn !== false && <p className="muted small">{a.status === 'pending' ? 'Reading its usage…' : `Couldn't read its usage${a.error ? ` (${a.error.replace(/_/g, ' ')})` : ''}.`}</p>}
           {a.usable && main && <div className="w-list"><WindowRow w={main} />{rest.map((w) => <WindowRow key={w.id} w={w} />)}</div>}
         </div>
       )}

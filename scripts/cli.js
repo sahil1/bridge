@@ -11,6 +11,7 @@
 // These ask the running server, which does the work (server/relay.js), exactly as Settings does:
 //   bridge-ai status                is it running, which agents, the relay and paired phones
 //   bridge-ai relay setup           put your relay on Cloudflare with an API token
+//                                   (--hosted: Bridge AI's relay instead, once it exists: server/hosted.js)
 //   bridge-ai relay [update|forget] update the relay, or stop using it
 //   bridge-ai pair                  pair a phone: QR code, link and code
 //   bridge-ai phones [remove <name>]  paired phones, or remove one
@@ -19,6 +20,7 @@ import path from 'node:path'
 import readline from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import { loadConfig, IS_WIN, IS_MAC } from '../server/paths.js'
+import { hostedBase } from '../server/hosted.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const cfg = loadConfig()
@@ -166,8 +168,9 @@ async function secret(q) {
 function relayLine(r) {
   if (r.busy) return r.busy
   if (!r.configured) return 'not set up. Set it up with: bridge-ai relay setup'
-  const update = r.needsUpdate ? DIM(' (an update is ready: bridge-ai relay update)') : ''
-  return r.online ? `online at ${r.url}${update}` : `offline${r.error ? `: ${r.error}` : ', connecting'} (${r.url})`
+  const update = r.needsUpdate ? DIM(' (an update is ready: bridge-ai relay update)') : r.hosted ? DIM(' (Bridge AI\'s relay)') : ''
+  const limit = r.limit ? `\n            ${r.limit.why === 'day' ? `Today's allowance is used up; phones can connect again after ${new Date(r.limit.until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.` : r.limit.text}` : ''
+  return (r.online ? `online at ${r.url}${update}` : `offline${r.error ? `: ${r.error}` : ', connecting'} (${r.url})`) + limit
 }
 const phoneLine = (d) => `${d.name}  ${DIM(d.connected ? 'connected now' : `last seen ${ago(d.lastSeen)}`)}`
 
@@ -204,14 +207,40 @@ Bridge AI keeps the token in its data folder (relay.json, readable only by you) 
 relay after Bridge AI updates.
 `
 
-// Deploy (or redeploy) the relay with an API token, showing what the server is doing meanwhile.
-async function relaySetup(args) {
+// Another relay is another address, and phones pair per address: say so, and ask first.
+async function switching(before, to, args) {
+  console.log(`This computer uses ${before.hosted ? 'Bridge AI\'s relay' : 'its own relay'} now (${before.url}). Moving to ${to} means pairing your phones again.`)
+  if (flag(args, 'yes')) return
+  if (!process.stdin.isTTY) throw new Error('Run it again with --yes to go ahead.')
+  if (!/^y/i.test(await ask('Go ahead? (y/N) '))) process.exit(0)
+}
+
+// Bridge AI's relay: nothing to sign in to; the server gets this computer an address on it.
+async function hostedSetup(args) {
   const before = await api('/relay')
   if (before.busy) throw new Error(`Bridge AI is busy with the relay: ${before.busy}`)
-  if (before.configured) console.log(`Your relay is set up already (${before.url}). Deploying it again with this token.\n`)
+  if (!before.hostedAvailable) throw new Error('Bridge AI\'s relay isn\'t available. Put a relay on your own Cloudflare account instead: bridge-ai relay setup')
+  if (before.configured && before.hosted) return console.log(`Relay: ${relayLine(before)}`)
+  if (before.configured) await switching(before, 'Bridge AI\'s relay', args)
+  console.log(DIM('Setting up Bridge AI\'s relay...'))
+  await api('/relay/deploy', { method: 'POST', body: { method: 'hosted' } })
+  let s = await api('/relay')
+  for (let i = 0; i < 15 && !s.online; i++) { await sleep(1000); s = await api('/relay') }
+  console.log(`\nRelay: ${relayLine(s)}`)
+  console.log(DIM('Bridge AI\'s relay passes your phone\'s connection on, end-to-end encrypted: it can\'t read it, but sees IP addresses, and when and how much. It has a daily allowance per computer.'))
+  if (s.online) console.log('Next, pair your phone: bridge-ai pair')
+}
+
+// Deploy (or redeploy) the relay with an API token, showing what the server is doing meanwhile.
+async function relaySetup(args) {
+  if (flag(args, 'hosted')) return hostedSetup(args)
+  const before = await api('/relay')
+  if (before.busy) throw new Error(`Bridge AI is busy with the relay: ${before.busy}`)
+  if (before.configured && before.hosted) await switching(before, 'a relay on your own Cloudflare account', args)
+  else if (before.configured) console.log(`Your relay is set up already (${before.url}). Deploying it again with this token.\n`)
   let token = typeof flag(args, 'token') === 'string' ? flag(args, 'token') : process.env.CLOUDFLARE_API_TOKEN || ''
   if (!token) {
-    if (process.stdin.isTTY) console.log(TOKEN_HELP)
+    if (process.stdin.isTTY) console.log(TOKEN_HELP + (before.hostedAvailable && !before.hosted ? `\nNo Cloudflare account? ${DIM('bridge-ai relay setup --hosted')} uses Bridge AI's relay instead.\n` : ''))
     token = await secret('Cloudflare API token: ')
   }
   if (!token) throw new Error('No token given.')
@@ -254,8 +283,9 @@ async function relayCmd(args) {
       if (!process.stdin.isTTY) throw new Error('This forgets your relay and every paired phone. Run it again with --yes to go ahead.')
       if (!/^y/i.test(await ask('Stop using the relay here and forget every paired phone? (y/N) '))) return
     }
+    const was = await api('/relay')
     await api('/relay/forget', { method: 'POST' })
-    return console.log('Done. The relay stays on your Cloudflare account (delete it there if you like); paired phones are forgotten.')
+    return console.log(was.hosted ? 'Done. This computer\'s address on Bridge AI\'s relay is removed, and paired phones are forgotten.' : 'Done. The relay stays on your Cloudflare account (delete it there if you like); paired phones are forgotten.')
   }
   if (sub && sub !== 'status') throw new Error(`Unknown: bridge-ai relay ${sub}. Try: setup, update, forget`)
   const r = await api('/relay')
@@ -343,7 +373,8 @@ const run = {
 
   bridge-ai status              is it running, which agents, the relay and paired phones
   bridge-ai relay setup         put your phone relay on Cloudflare with an API token
-                                (asks for it, or reads CLOUDFLARE_API_TOKEN or stdin)
+                                (asks for it, or reads CLOUDFLARE_API_TOKEN or stdin)${hostedBase() ? `
+  bridge-ai relay setup --hosted  use Bridge AI's relay instead: no account needed` : ''}
   bridge-ai relay [update|forget]  update the relay, or stop using it
   bridge-ai pair [--stop]       pair a phone: shows a QR code, the link and the code
   bridge-ai phones [remove <name>]  paired phones, or remove one`),

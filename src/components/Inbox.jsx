@@ -12,7 +12,6 @@ export function Inbox() {
       <Card icon="mail" title="Inbox" summary="Needs setup">
         <div className="mail-setup">
           <MailSetup data={data} onCheck={() => refresh('?refresh=1')} />
-          <p className="muted small">The dashboard reads Mail's local index read-only. Nothing is sent anywhere.</p>
         </div>
       </Card>
     )

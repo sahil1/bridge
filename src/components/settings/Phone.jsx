@@ -9,10 +9,14 @@ import { pushSupport, pushState, enablePush, disablePush, isIOS } from '../../pw
 // through Tailscale, as a Home Screen app), and choose what you get notified about, on which
 // devices. Both are optional; Bridge AI works on this computer without either.
 export default function Phone() {
+  // With Bridge AI's relay offered, Relay starts with a choice of three ways; Tailscale's section
+  // shows when it's the one picked (or already on).
+  const [way, setWay] = useState(null)
+  const [offer, setOffer] = useState(false)
   return (
     <div className="st-sections">
-      <Relay />
-      <PhoneAccess />
+      <Relay way={way} setWay={setWay} onOffer={setOffer} />
+      <PhoneAccess quiet={offer && way !== 'tailscale'} picked={offer && way === 'tailscale'} />
       <ThisDevice />
       <WhatToSend />
       <Devices />
@@ -20,7 +24,7 @@ export default function Phone() {
   )
 }
 
-function PhoneAccess() {
+function PhoneAccess({ quiet, picked }) {
   if (viaRelay) return null
   // Opened through the phone link already: nothing to set up from here.
   if (location.hostname.endsWith('.ts.net')) {
@@ -31,10 +35,11 @@ function PhoneAccess() {
       </section>
     )
   }
-  return <PhoneSetup />
+  return <PhoneSetup quiet={quiet} picked={picked} />
 }
 
-function PhoneSetup() {
+// quiet: only if it's on already (Bridge AI's relay is offered, and Tailscale isn't the way picked).
+function PhoneSetup({ quiet, picked }) {
   const [st, setSt] = useState(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
@@ -46,10 +51,11 @@ function PhoneSetup() {
     setBusy(false)
   }
   const link = err?.match(/https:\/\/\S+/)?.[0]
+  if (quiet && !st?.enabled) return null
 
   return (
     <section className="st-sec">
-      <h4>Or through Tailscale</h4>
+      <h4>{picked ? 'Through Tailscale' : 'Or through Tailscale'}</h4>
       <p className="muted small">If you already use <a href="https://tailscale.com" target="_blank" rel="noreferrer">Tailscale</a>, a free private network between your own devices, your phone can open Bridge AI through it instead. Nothing is opened to the internet, and only devices signed in to your Tailscale account can reach it. Tailscale has to be connected on both the phone and this computer.</p>
       {!st ? <div className="skeleton-rows"><div /></div>
         : !st.installed ? (
@@ -104,7 +110,7 @@ function ThisDevice() {
     <section className="st-sec">
       <h4>Notifications on this device</h4>
       {relayComputers ? <p className="muted small">Notifications aren't in the Bridge AI app yet. To get them today, open your relay's address in {isIOS() ? 'Safari' : 'Chrome'}, pair it with a new code, and add it to your Home Screen.</p>
-        : support.why === 'desktop' ? <p className="muted small">The desktop app notifies you itself when an agent needs you or finishes, while its window isn't in front.</p>
+        : support.why === 'desktop' ? <DesktopNotes onMsg={setMsg} />
         : support.why === 'ios-home-screen' ? <p className="muted small">On {isIOS() ? 'iPhone and iPad' : 'this device'}, notifications work in the Home Screen app: tap Share › Add to Home Screen, open Bridge AI from there, and turn them on here.</p>
         : support.why === 'insecure' ? <p className="muted small">Notifications need a secure connection. Open Bridge AI through its phone link (above), or on this computer at <code>http://127.0.0.1</code>.</p>
         : support.why === 'unsupported' ? <p className="muted small">This browser can't receive notifications.</p>
@@ -123,6 +129,33 @@ function ThisDevice() {
       {msg?.error && <p className="st-note bad"><Icon name="alert" size={13} /> {msg.error}</p>}
       {msg?.ok && <p className="st-note ok"><Icon name="check" size={13} /> {msg.ok}</p>}
     </section>
+  )
+}
+
+// The desktop app's own notifications. macOS doesn't tell an app when you've turned them off, so:
+// send a test, and if it doesn't show, one click opens Bridge AI's page in System Settings ›
+// Notifications.
+function DesktopNotes({ onMsg }) {
+  const [sent, setSent] = useState(false)
+  const test = async () => {
+    onMsg(null)
+    try { setSent(!!(await window.bridgeApp?.testNotification?.())) } catch (e) { onMsg({ error: e.message }) }
+  }
+  const open = async () => {
+    onMsg(null)
+    try { await api('/fix/settings', { method: 'POST', body: { pane: 'notifications' } }) } catch (e) { onMsg({ error: e.message }) }
+  }
+  return (
+    <>
+      <p className="muted small">The desktop app notifies you itself when an agent needs you or finishes, while its window isn't in front.</p>
+      {window.bridgeApp?.testNotification && (
+        <div className="st-row">
+          <button type="button" className="ghost-btn" onClick={test}><Icon name="bell" size={12} /> Send a test</button>
+          {sent && <span className="muted small">Didn't see it?</span>}
+          {sent && <button type="button" className="btn small primary" onClick={open}><Icon name="external" size={12} /> Turn on in System Settings</button>}
+        </div>
+      )}
+    </>
   )
 }
 

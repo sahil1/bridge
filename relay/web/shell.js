@@ -109,8 +109,17 @@ function listOthers() {
 // The iPhone app's demo, bundled in it: Bridge AI on made-up agents, for before the first pairing.
 function offerDemo() {
   $('demo').hidden = !native?.bundled?.includes('demo') || adding || !!apps?.list().length
+  offerCloud()
 }
 $('demo-open').onclick = () => native.post({ type: 'open', name: 'demo' })
+
+// Cloud agents, bundled in the apps: agents in the cloud with keys kept on this phone, paired or
+// not, so on the pairing and waiting screens alike (the Android app says what it has).
+const bundledUis = native?.bundled || (() => { try { return JSON.parse(window.bridgeAndroid?.bundled?.() || '[]') } catch { return [] } })()
+function offerCloud() {
+  for (const el of document.querySelectorAll('.cloud-try')) el.hidden = !bundledUis.includes('cloud') || adding
+}
+for (const b of document.querySelectorAll('.cloud-open')) b.onclick = () => (native ? native.post({ type: 'open', name: 'cloud' }) : window.bridgeAndroid.openBundled('cloud'))
 
 // Pair another computer: the pairing screen, for a link (a code alone doesn't say which relay).
 function addComputer() {
@@ -200,6 +209,19 @@ let hostSeen = null
 let hostOnline = false
 const offlineText = () => (hostOnline ? 'Reconnecting to your computer…' : hostSeen ? `Your computer is offline (since ${new Date(hostSeen).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}).` : 'Your computer isn\'t connected to the relay right now.')
 
+// Bridge AI's hosted relay turned this phone away for now: its daily limit for your computer, too
+// much at once, or it's switched off. Until then, no trying again.
+let limited = { until: 0 }
+function onLimit(m) {
+  const until = Math.min(Math.max(Number(m.until) || 0, Date.now() + 3000), Date.now() + 26 * 3600000)
+  const text = m.why === 'day'
+    ? `The hosted relay's daily limit for this computer is used up. It resets at ${when(until)}. For no limits, put the relay on your own Cloudflare account (Settings › Phone & notifications, on the computer).`
+    : String(m.text || 'Bridge AI\'s relay can\'t take this right now.').slice(0, 300)
+  limited = { why: m.why, text, until }
+  if (appShown) bar(text, true)
+  else waitScreen(m.why === 'day' ? 'Daily limit reached' : m.why === 'off' ? 'Bridge AI\'s relay is off' : 'One moment…', text, false)
+}
+
 function bar(msg, off) {
   clearTimeout(barTimer)
   $('bar').hidden = !msg
@@ -270,6 +292,12 @@ function connect() {
   // One message at a time, in order: a response's pieces must reach the app in sequence.
   ws.onmessage = (e) => { inbox = inbox.then(() => (typeof e.data === 'string' ? onText(JSON.parse(e.data)) : onData(e.data))).catch(fail) }
   ws.onclose = (e) => {
+    // Bridge AI's hosted relay said to wait (a limit, or it's switched off): until then.
+    if (limited.until > Date.now()) {
+      dropSession(limited.text)
+      retryTimer = setTimeout(connect, limited.until - Date.now() + Math.random() * 3000)
+      return
+    }
     dropSession(offlineText())
     retryTimer = setTimeout(connect, e.code === 4001 ? 300 : backoff)
     backoff = Math.min(backoff * 2, 30000)
@@ -280,6 +308,7 @@ function connect() {
 
 // The relay's own messages: whether your computer is there, or about the notes it keeps.
 function onText(m) {
+  if (m.t === 'limit') return onLimit(m)
   if (m.t) return offline.fromRelay(m)
   if (m.q === 1 && !relayKeeps) { relayKeeps = true; offline.relayReady().catch(() => {}) }
   return onStatus(m)

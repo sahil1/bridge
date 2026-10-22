@@ -8,6 +8,8 @@
     "dev": "concurrently -n api,web \"node --watch server/index.js\" \"vite\"",
     "build": "vite build",
     "demo:build": "vite build --mode demo",
+    "cloud:build": "vite build --mode cloud",
+    "cloud:mocks": "node scripts/cloud-mocks.js",
     "desktop": "node scripts/desktop.js start",
     "desktop:dev": "node scripts/desktop.js dev",
     "desktop:dist": "node scripts/desktop.js dist",

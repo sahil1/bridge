@@ -123,7 +123,9 @@ Some providers run coding agents on their own computers, on a repo they host, an
 | Jules | Jules API, on a repo you've connected to Jules. You can ask to see its plan first | API key from [jules.google.com/settings](https://jules.google.com/settings#api) | Your Jules plan |
 | Claude | Claude Managed Agents, with your repo mounted. It pushes a branch | API key from the [Claude Console](https://platform.claude.com/settings/keys), plus an optional GitHub token for private repos and pushing | Pay per use on your Claude Console account, not your Pro or Max plan |
 
-Bridge AI checks on running agents every 10 to 20 seconds, less often when several run at once or once they wait or finish, and backs off when a provider asks it to slow down or has trouble. Copilot and Jules have no stop in their APIs, so Stop for those is on their own pages. The provider code is in [`shared/cloud/`](shared/cloud/) and uses only `fetch`, so the phone apps can run it too.
+Bridge AI checks on running agents every 10 to 20 seconds, less often when several run at once or once they wait or finish, and backs off when a provider asks it to slow down or has trouble. Copilot and Jules have no stop in their APIs, so Stop for those is on their own pages. The provider code is in [`shared/cloud/`](shared/cloud/) and uses only `fetch`, so the phone apps run it too.
+
+**With no computer**: the iPhone and Android apps have Cloud agents on their start screen. Add your key on the phone and start and follow agents from there. Keys stay on the phone (iPhone's Keychain, Android's Keystore) and go only to their own provider; the phone keeps its own keys and agents, apart from your computer's. Android checks on them in the background and notifies you; iPhone checks while the app is open. More in [mobile/README.md](mobile/README.md#cloud-agents).
 
 ## Runtimes: where agents run
 
@@ -333,11 +335,18 @@ Put repos in `~/code`: agents start in folders inside the home folder. In a term
 
 ## Optional setup
 
-- **Quota in the top bar**: run `npx quota-axi --provider claude --allow-keychain-prompt` once and allow access.
-- **Voice notes**: tap the mic in the message box, on the computer or your phone. The first time, Bridge AI offers to set them up: it downloads the speech model (190 MB, to `~/.bridge-ai/models`) and, on a Mac with Homebrew, installs `ffmpeg` and `whisper-cpp` in a terminal tab. Elsewhere, install `ffmpeg` and whisper.cpp's `whisper-cli` yourself. Speech is turned into text on your computer; audio never leaves it.
-- **Inbox (macOS)**: turn on Mail for your account, open Mail once, and give Full Disk Access to the app that starts Bridge AI. The Inbox card has buttons that open the right page of System Settings and show Bridge AI in Finder to drag into the list.
-- **Calendar (macOS)**: `brew install ical-buddy`, or click Install icalBuddy in the Calendar card.
-- **Plan usage**: off until you turn it on (the Usage card, or Settings › General). It asks each provider how much of your plan is left, with the sign-in your agents use on this computer, through [quota-axi](https://www.npmjs.com/package/quota-axi). Some providers, Anthropic among them, don't allow other apps to use their sign-ins, so it's your call.
+Each of these shows up where it's needed, with one button that does it. Installs run in a terminal tab you can watch (in the Setup space), and the screen picks up by itself once it's done.
+
+- **Signing in to your agents**: Bridge AI's first-run setup offers Sign in for Claude Code and Codex. An agent still on its own first-run screens (look, sign-in, trusting its folder) shows them as a card in its chat. Settings › Agents and the Usage card have Sign in too.
+- **Voice notes**: tap the mic in the message box, on the computer or your phone. The first time, Bridge AI offers to set them up: it downloads the speech model (190 MB, to `~/.bridge-ai/models`) and, on a Mac, installs `ffmpeg` and `whisper-cpp` with Homebrew (and Homebrew first, if the Mac has none). Elsewhere, install `ffmpeg` and whisper.cpp's `whisper-cli` yourself. Speech is turned into text on your computer; audio never leaves it. If macOS has the microphone off for the app, the mic offers Allow access.
+- **Inbox (macOS)**: Mail needs your account and one sync (the Inbox card's Open Mail), and Bridge AI needs Full Disk Access (Allow access). In the desktop app, Allow access opens System Settings with a tile beside it: drag Bridge AI from the tile into the list and turn it on. Restart to apply then appears at the top, for whenever it suits you.
+- **Calendar (macOS)**: Install icalBuddy in the Calendar card (it offers Homebrew first when it's missing), then Allow access for Calendars when macOS asks.
+- **Pull requests**: the Changes tab offers to install GitHub's `gh` and sign it in. On a Mac without Apple's developer tools, it offers those for git.
+- **Agents' folders in Desktop or Documents**: if macOS was told no, the Files tab and New agent offer Allow access (Files & Folders).
+- **Plan usage**: off until you turn it on (the Usage card, or Settings › General). It asks each provider how much of your plan is left, with the sign-in your agents use on this computer, through [quota-axi](https://www.npmjs.com/package/quota-axi). Some providers, Anthropic among them, don't allow other apps to use their sign-ins, so it's your call. For Claude, macOS asks once for Keychain access (the Usage card's Allow).
+- **Weather**: the Weather card asks for your city when it doesn't know it.
+
+Testing these without changing anything on your Mac: `BRIDGE_FIX_DRYRUN=1` makes Bridge AI log what it would open in System Settings instead of opening it.
 
 ## License, terms and privacy
 

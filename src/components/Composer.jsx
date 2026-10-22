@@ -3,6 +3,7 @@ import Icon from './Icon.jsx'
 import { api } from '../api.js'
 import { usePersisted } from './layout.jsx'
 import Lightbox from './Lightbox.jsx'
+import PermissionFix from './PermissionFix.jsx'
 
 // Drafts survive navigation and reloads: one per agent, kept in this browser.
 const draftKey = (id) => `cc-draft-${id}`
@@ -97,7 +98,12 @@ function useRecorder(onText, onError, onSetup) {
       setState('recording')
       navigator.vibrate?.(15)
     } catch (e) {
-      onError(e.name === 'NotAllowedError' ? 'Microphone permission was denied' : e.message)
+      // In the desktop app, macOS's own answer: when it says no, offer to allow it there.
+      if (e.name === 'NotAllowedError' && window.bridgeApp?.mediaAccess) {
+        const s = await window.bridgeApp.mediaAccess('microphone').catch(() => null)
+        if (s === 'denied' || s === 'restricted') return onSetup({ mic: true })
+      }
+      onError(e.name === 'NotAllowedError' ? 'The microphone is blocked. Allow it for this page in your browser\'s site settings.' : e.message)
     }
   }
   const stop = () => { if (rec.current?.mr.state === 'recording') rec.current.mr.stop(); navigator.vibrate?.(10) }
@@ -112,15 +118,20 @@ function VoiceSetup({ initial, onClose }) {
   const [v, setV] = useState(initial)
   const [started, setStarted] = useState(!!initial.downloading)
   const [err, setErr] = useState(null)
+  const [brewing, setBrewing] = useState(false) // Homebrew installing, in a terminal tab
   useEffect(() => {
     if (v.ready) { const t = setTimeout(onClose, 5000); return () => clearTimeout(t) }
-    if (!started || v.error) return
+    if ((!started && !brewing) || v.error) return
     const t = setInterval(() => api('/voice').then(setV).catch(() => {}), 1500)
     return () => clearInterval(t)
-  }, [v.ready, v.error, started, onClose])
+  }, [v.ready, v.error, started, brewing, onClose])
   const setup = async () => {
     setErr(null)
     try { setV(await api('/voice/setup', { method: 'POST' })); setStarted(true) } catch (e) { setErr(e.message) }
+  }
+  const installBrew = async () => {
+    setErr(null)
+    try { await api('/fix/install', { method: 'POST', body: { what: 'homebrew' } }); setBrewing(true) } catch (e) { setErr(e.message) }
   }
   const tools = v.missing.length > 0
   const needs = [!v.model && `a ${v.modelMB} MB speech model`, tools && (v.installCommand ? 'ffmpeg and whisper-cpp from Homebrew' : 'ffmpeg and whisper.cpp')].filter(Boolean)
@@ -130,7 +141,10 @@ function VoiceSetup({ initial, onClose }) {
   if (v.ready) text = 'Voice notes are ready. Tap the mic and talk.'
   else if (v.error) { text = `The speech model didn't download: ${v.error}`; actions = <button className="btn small primary" onClick={setup}>Try again</button> }
   else if (v.downloading) text = `Downloading the speech model… ${v.downloading.percent}%`
+  else if (brewing && v.installCommand) { text = 'Homebrew is in. One more step: ffmpeg and whisper-cpp.'; actions = <button className="btn small primary" onClick={() => { setBrewing(false); setup() }}>Set up</button> }
+  else if (brewing) text = 'Installing Homebrew in a terminal tab, in the Setup space. It asks for your Mac password there.'
   else if (started && tools && v.installCommand) text = 'Installing ffmpeg and whisper-cpp in a terminal tab, in the Setup space. If it asks for your password, answer it there.'
+  else if (v.needsBrew && (started || v.model)) { text = 'Voice notes also need ffmpeg and whisper-cpp. They come from Homebrew, which isn\'t on this Mac yet.'; actions = <button className="btn small primary" onClick={installBrew}>Install Homebrew</button> }
   else if (started && tools) text = 'Install ffmpeg and whisper.cpp (whisper-cli) on your computer, then tap the mic again.'
   else {
     text = `Voice notes are turned into text on your computer, so your audio never leaves it. They need a one-time setup there: ${needs.join(' and ')}.${touch ? " Your keyboard's own mic works meanwhile." : ''}`
@@ -149,6 +163,19 @@ function VoiceSetup({ initial, onClose }) {
   )
 }
 
+
+// The desktop app with the mic turned off for it in System Settings: one button to allow it.
+const micAccess = async () => ((await window.bridgeApp.mediaAccess('microphone')) === 'granted' ? 'ok' : 'denied')
+function MicFix({ onClose }) {
+  const [ok, setOk] = useState(false)
+  return (
+    <div className="voice-setup" role="status" aria-live="polite">
+      {ok ? <p>The microphone is on. Tap the mic and talk.</p>
+        : <PermissionFix pane="microphone" probe={micAccess} onCheck={() => setOk(true)}><p>Bridge AI needs the microphone for voice notes. Your audio is turned into text on this computer.</p></PermissionFix>}
+      <div className="vs-actions"><button className="ghost-btn" onClick={onClose}>{ok ? 'Close' : 'Not now'}</button></div>
+    </div>
+  )
+}
 
 // "/" menu: built-ins, skills and plugin commands, with choices for commands that take one.
 function useSlash(url) {
@@ -544,7 +571,7 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
       <SlashMenu items={slashItems} sel={slashSel} onHover={setSlashSel} onPick={pickSlash} title={slashTitle} />
       {mentionQ != null && <SlashMenu items={mentionItems} sel={mentionSel} onHover={setMentionSel} onPick={pickMention} title={/^[~/]/.test(mentionQ) ? mentionQ.replace(/[^/]*$/, '') || '~/' : mentionQ.endsWith('/') ? mentionQ : mentionQ ? `Matching "${mentionQ}"` : `${cwdName || 'This folder'}/`}
         jumps={mentionJumps} mention />}
-      {voiceSetup && <VoiceSetup initial={voiceSetup} onClose={closeVoiceSetup} />}
+      {voiceSetup && (voiceSetup.mic ? <MicFix onClose={closeVoiceSetup} /> : <VoiceSetup initial={voiceSetup} onClose={closeVoiceSetup} />)}
       {note && <div className="comp-note" role="status">{note}</div>}
       <div className={`composer ${recording ? 'rec' : ''} ${dragging ? 'drop' : ''} ${manualH ? 'sized' : ''}`} {...dropProps} onPaste={onPaste}>
         <div className="comp-grip" role="separator" aria-orientation="horizontal" aria-label="Resize the message box" title={manualH ? 'Drag to resize · double-click to fit the text again' : 'Drag to make the box taller'}
