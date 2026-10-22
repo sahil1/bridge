@@ -1,34 +1,38 @@
 // File and git access inside an agent's working folder: reading, and saving a text file you
 // edited in the viewer. Every path is resolved with realpath and must stay inside the agent's root.
+// All of it is non-blocking: macOS holds a call into a protected folder (Desktop, Documents...)
+// until you answer its prompt, and a blocking one would freeze the whole server meanwhile.
 import fs from 'node:fs'
+import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { OFFICE } from './office.js'
+import { loginPath } from './agents.js'
 
 const HIDDEN = new Set(['.git', 'node_modules', '.DS_Store', '__pycache__', '.venv', 'venv', '.next', 'dist', '.cache', '.turbo'])
 const MAX_TEXT = 1024 * 1024
 const IMAGE = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' }
 const PDF = { '.pdf': 'application/pdf' }
 
-export function safePath(root, rel = '') {
-  const realRoot = fs.realpathSync(root)
+export async function safePath(root, rel = '') {
+  const realRoot = await fsp.realpath(root)
   const target = path.resolve(realRoot, rel.replace(/^\/+/, ''))
   let real
-  try { real = fs.realpathSync(target) } catch { throw new Error('Not found') }
+  try { real = await fsp.realpath(target) } catch { throw new Error('Not found') }
   if (real !== realRoot && !real.startsWith(realRoot + path.sep)) throw new Error('Outside the agent folder')
   return { real, realRoot, rel: path.relative(realRoot, real) }
 }
+const exists = (p) => fsp.access(p).then(() => true, () => false)
 
-export function listDir(root, rel, { showHidden = false } = {}) {
-  const { real, rel: r } = safePath(root, rel)
-  const entries = fs.readdirSync(real, { withFileTypes: true })
+export async function listDir(root, rel, { showHidden = false } = {}) {
+  const { real, rel: r } = await safePath(root, rel)
+  const shown = (await fsp.readdir(real, { withFileTypes: true }))
     .filter((e) => (showHidden ? e.name !== '.git' && e.name !== '.DS_Store' : !HIDDEN.has(e.name) && !e.name.startsWith('.')))
-    .map((e) => {
-      const p = path.join(real, e.name)
-      let st = null
-      try { st = fs.statSync(p) } catch { /* broken link */ }
-      return { name: e.name, path: path.join(r, e.name), dir: !!st?.isDirectory(), size: st?.size ?? 0, mtime: st?.mtimeMs ?? 0 }
-    })
+  // Every entry's stat at once, so a big folder isn't one wait after another.
+  const entries = (await Promise.all(shown.map(async (e) => {
+    const st = await fsp.stat(path.join(real, e.name)).catch(() => null) // null: a broken link
+    return { name: e.name, path: path.join(r, e.name), dir: !!st?.isDirectory(), size: st?.size ?? 0, mtime: st?.mtimeMs ?? 0 }
+  })))
     .sort((a, b) => (b.dir - a.dir) || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }))
   return { path: r, entries }
 }
@@ -39,20 +43,19 @@ function looksBinary(buf) {
   return false
 }
 
-export function readFile(root, rel) {
-  const { real, rel: r } = safePath(root, rel)
-  const st = fs.statSync(real)
+export async function readFile(root, rel) {
+  const { real, rel: r } = await safePath(root, rel)
+  const st = await fsp.stat(real)
   if (st.isDirectory()) throw new Error('Is a folder')
   const ext = path.extname(real).toLowerCase()
   const base = { path: r, name: path.basename(real), ext, size: st.size, mtime: st.mtimeMs }
   if (IMAGE[ext]) return { ...base, kind: 'image' }
   if (PDF[ext]) return { ...base, kind: 'pdf' }
   if (OFFICE[ext]) return { ...base, kind: 'office', office: OFFICE[ext] }
-  const fd = fs.openSync(real, 'r')
+  const fh = await fsp.open(real, 'r')
   const len = Math.min(st.size, MAX_TEXT)
   const buf = Buffer.alloc(len)
-  fs.readSync(fd, buf, 0, len, 0)
-  fs.closeSync(fd)
+  await fh.read(buf, 0, len, 0).finally(() => fh.close())
   if (looksBinary(buf)) return { ...base, kind: 'binary' }
   return { ...base, kind: 'text', text: buf.toString('utf8'), truncated: st.size > MAX_TEXT }
 }
@@ -61,23 +64,23 @@ export function readFile(root, rel) {
 // up), and only if nobody changed it since you opened it: `mtime` is what you loaded, and a
 // different one on disk means an agent wrote to it meanwhile (pass force to overwrite anyway).
 const MAX_SAVE = 5 * 1024 * 1024
-export function writeFile(root, rel, text, { mtime, force = false } = {}) {
+export async function writeFile(root, rel, text, { mtime, force = false } = {}) {
   if (typeof text !== 'string') throw new Error('Expected the file text')
   if (Buffer.byteLength(text) > MAX_SAVE) throw new Error('Too large to save from here (5 MB at most)')
-  const { real } = safePath(root, rel)
-  const st = fs.statSync(real)
+  const { real } = await safePath(root, rel)
+  const st = await fsp.stat(real)
   if (!st.isFile()) throw new Error('Not a file')
   if (!force && mtime != null && Math.abs(st.mtimeMs - Number(mtime)) > 1) {
     const err = new Error('The file changed on disk since you opened it')
     err.conflict = true
     throw err
   }
-  fs.writeFileSync(real, text)
+  await fsp.writeFile(real, text)
   return readFile(root, rel)
 }
 
-export function rawFile(root, rel) {
-  const { real } = safePath(root, rel)
+export async function rawFile(root, rel) {
+  const { real } = await safePath(root, rel)
   const ext = path.extname(real).toLowerCase()
   return { file: real, type: IMAGE[ext] || PDF[ext] || 'application/octet-stream' }
 }
@@ -85,37 +88,42 @@ export function rawFile(root, rel) {
 // An HTML page and the files next to it (styles, scripts, images), served by path so the page's
 // relative links work. The route serves it sandboxed, away from this app's origin.
 const SITE = { '.html': 'text/html; charset=utf-8', '.htm': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8', '.txt': 'text/plain; charset=utf-8', '.csv': 'text/plain; charset=utf-8', '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.otf': 'font/otf', '.mp4': 'video/mp4', '.webm': 'video/webm', '.mp3': 'audio/mpeg', '.wav': 'audio/wav' }
-export function siteFile(root, rel) {
-  const { real } = safePath(root, rel)
-  if (fs.statSync(real).isDirectory()) throw new Error('Not found')
+export async function siteFile(root, rel) {
+  const { real } = await safePath(root, rel)
+  if ((await fsp.stat(real)).isDirectory()) throw new Error('Not found')
   const ext = path.extname(real).toLowerCase()
   return { file: real, type: SITE[ext] || IMAGE[ext] || PDF[ext] || 'application/octet-stream', html: ext === '.html' || ext === '.htm' }
 }
 
+// git enters the folder itself (-C) rather than being started in it: on macOS the server waits
+// while a new program enters its folder, so one macOS is still asking about (your Desktop, say)
+// would freeze everything, not just this call.
+const inRepo = (cwd, args) => (cwd ? ['-C', cwd, ...args] : args)
+
 function git(cwd, args, timeout = 10000) {
   return new Promise((resolve) => {
-    execFile('git', args, { cwd, timeout, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => resolve(err ? null : stdout))
+    execFile('git', inRepo(cwd, args), { timeout, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => resolve(err ? null : stdout))
   })
 }
 
 // File-name search: git's index when it's a repo, otherwise a bounded walk.
 export async function findFiles(root, q, limit = 60) {
-  const { realRoot } = safePath(root, '')
+  const { realRoot } = await safePath(root, '')
   let files = null
   const tracked = await git(realRoot, ['ls-files', '--cached', '--others', '--exclude-standard'])
   if (tracked != null) files = tracked.split('\n').filter(Boolean)
   if (!files) {
     files = []
-    const walk = (dir, depth) => {
+    const walk = async (dir, depth) => {
       if (depth > 6 || files.length > 8000) return
-      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      for (const e of await fsp.readdir(dir, { withFileTypes: true })) {
         if (HIDDEN.has(e.name) || e.name.startsWith('.')) continue
         const p = path.join(dir, e.name)
-        if (e.isDirectory()) walk(p, depth + 1)
+        if (e.isDirectory()) await walk(p, depth + 1)
         else files.push(path.relative(realRoot, p))
       }
     }
-    walk(realRoot, 0)
+    await walk(realRoot, 0)
   }
   const needle = q.toLowerCase()
   const score = (f) => {
@@ -134,7 +142,7 @@ export async function findFiles(root, q, limit = 60) {
 }
 
 export async function gitStatus(root) {
-  const { realRoot } = safePath(root, '')
+  const { realRoot } = await safePath(root, '')
   const top = (await git(realRoot, ['rev-parse', '--show-toplevel']))?.trim()
   if (!top) return { repo: false }
   const out = await git(realRoot, ['status', '--porcelain=v1', '-b', '--untracked-files=all', '--', '.'])
@@ -161,30 +169,34 @@ export async function gitStatus(root) {
   }
   for (const f of files) Object.assign(f, counts[f.path] || {})
   const last = (await git(realRoot, ['log', '-1', '--format=%h%x09%s%x09%cr']))?.trim().split('\t')
-  return { repo: true, branch, ahead, behind, files, lastCommit: last ? { hash: last[0], subject: last[1], when: last[2] } : null }
+  // Where a push would go: the branch's upstream, else origin, else the only remote (none: no push).
+  const upstream = head.match(/\.\.\.(\S+)/)?.[1] || null
+  const remotes = (await git(realRoot, ['remote']) || '').split('\n').filter(Boolean)
+  const remote = remotes.find((r) => upstream?.startsWith(`${r}/`)) || (remotes.includes('origin') ? 'origin' : remotes[0]) || null
+  return { repo: true, branch, ahead, behind, upstream, remote, detached: /^HEAD \(no branch\)|^No commits yet/.test(head), files, lastCommit: last ? { hash: last[0], subject: last[1], when: last[2] } : null }
 }
 
 export async function gitDiff(root, rel) {
-  const { real, realRoot } = safePath(root, rel)
+  const { real, realRoot } = await safePath(root, rel)
   const relToRoot = path.relative(realRoot, real)
   const diff = await git(realRoot, ['diff', 'HEAD', '--no-color', '-U3', '--', relToRoot])
   if (diff) return { diff }
   // Untracked: show the whole file as added.
-  const f = readFile(root, rel)
+  const f = await readFile(root, rel)
   if (f.kind !== 'text') return { diff: '', note: `${f.kind} file` }
   return { diff: `--- /dev/null\n+++ b/${relToRoot}\n@@ new file @@\n` + f.text.split('\n').map((l) => `+${l}`).join('\n'), untracked: true }
 }
 
 // ---------- Acting on changes (the Changes tab) ----------
 // Run git with input on stdin; resolves { ok, out } instead of throwing.
-function gitIn(cwd, args, input = '', timeout = 20000) {
+function gitIn(cwd, args, input = '', timeout = 20000, env = undefined) {
   return new Promise((resolve) => {
-    const p = execFile('git', args, { cwd, timeout, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => resolve({ ok: !err, out: `${stdout || ''}${stderr || ''}`.trim() }))
+    const p = execFile('git', inRepo(cwd, args), { timeout, env, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => resolve({ ok: !err, out: `${stdout || ''}${stderr || ''}`.trim(), timedOut: !!err?.killed }))
     if (input) p.stdin.end(input); else p.stdin.end()
   })
 }
 async function repoOf(root, rel) {
-  const { realRoot } = safePath(root, '')
+  const { realRoot } = await safePath(root, '')
   const top = (await git(realRoot, ['rev-parse', '--show-toplevel']))?.trim()
   if (!top) throw new Error("This folder isn't a git repository")
   // A path that no longer exists (deleted) can't go through realpath; check it lexically.
@@ -202,7 +214,7 @@ export async function discardFile(root, rel) {
     if (!r.ok) throw new Error(r.out || "Couldn't restore the file")
   } else {
     await gitIn(top, ['rm', '--cached', '--quiet', '--', relTop])
-    if (fs.existsSync(abs) && fs.statSync(abs).isFile()) fs.rmSync(abs)
+    if ((await fsp.stat(abs).catch(() => null))?.isFile()) await fsp.rm(abs)
   }
   return { ok: true }
 }
@@ -238,13 +250,39 @@ export async function commit(root, { message, paths = null }) {
   return { ok: true, hash: head, output: r.out.slice(-400) }
 }
 
+// Push the current branch, setting its upstream the first time (or when it tracks another branch,
+// as one made from origin/main does). Never forced. Your login shell's PATH finds credential helpers
+// and ssh, and git fails instead of waiting for a password nobody can type here.
+export async function push(root) {
+  const { top } = await repoOf(root, '')
+  const branch = (await git(top, ['symbolic-ref', '--quiet', '--short', 'HEAD']))?.trim()
+  if (!branch) throw new Error("You're not on a branch (detached HEAD), so there's nothing to push")
+  const remotes = (await git(top, ['remote']) || '').split('\n').filter(Boolean)
+  if (!remotes.length) throw new Error('This repository has no remote to push to. Add one first (git remote add origin <url>)')
+  const upRemote = (await git(top, ['config', '--get', `branch.${branch}.remote`]))?.trim()
+  const upMerge = (await git(top, ['config', '--get', `branch.${branch}.merge`]))?.trim()
+  const tracked = remotes.includes(upRemote) && upMerge === `refs/heads/${branch}`
+  const remote = tracked ? upRemote : remotes.includes('origin') ? 'origin' : remotes[0]
+  const env = { ...process.env, PATH: await loginPath(), GIT_TERMINAL_PROMPT: '0' }
+  const r = await gitIn(top, ['push', ...(tracked ? [] : ['--set-upstream']), remote, branch], '', 90000, env)
+  if (!r.ok) throw new Error(r.timedOut ? `The push to ${remote} took over 90 seconds and was stopped. It may be waiting for a password or passphrase; try git push in a terminal once` : pushError(r.out, remote, branch))
+  return { ok: true, branch, remote, upstream: !tracked, output: r.out.slice(-400) }
+}
+function pushError(out, remote, branch) {
+  if (/\[rejected\]|\[remote rejected\]|non-fast-forward|fetch first/i.test(out) && !/hook/i.test(out)) return `${remote} has commits on ${branch} that you don't have here. Pull them in first (ask the agent to pull and rebase), then push again`
+  if (/Authentication failed|could not read (Username|Password)|terminal prompts disabled|Permission denied|permission to .* denied|access denied|HTTP 40[13]|publickey|Host key verification failed/i.test(out)) return `${remote} turned down the sign-in. Check that git push works from your terminal (gh auth login, or your SSH key)`
+  if (/Repository not found|does not appear to be a git repository|not found/i.test(out)) return `Couldn't find the repository at ${remote}, or you don't have access to it`
+  if (/Could not resolve host|Connection (refused|timed out)|Network is unreachable|unable to access/i.test(out)) return `Couldn't reach ${remote}. Check your connection`
+  return out.split('\n').filter((l) => l.trim() && !/^(To |hint:)/.test(l)).slice(-4).join('\n').slice(-500) || 'The push failed'
+}
+
 // ---------- File actions (the file tree's menu) ----------
 // Each acts on one path inside the agent's folder, never the folder itself.
 const IS_MAC = process.platform === 'darwin'
 const IS_WIN = process.platform === 'win32'
 const run = (cmd, args) => new Promise((resolve, reject) => execFile(cmd, args, { timeout: 30000, windowsHide: true }, (err, _o, stderr) => (err ? reject(new Error(String(stderr || err.message).trim().split('\n')[0])) : resolve())))
-function inside(root, rel) {
-  const r = safePath(root, rel)
+async function inside(root, rel) {
+  const r = await safePath(root, rel)
   if (r.real === r.realRoot) throw new Error("That's the agent's own folder")
   return r
 }
@@ -255,45 +293,45 @@ function checkName(name) {
 }
 
 // "report.docx" -> "report copy.docx", then "report copy 2.docx", like Finder.
-export function duplicate(root, rel) {
-  const { real, realRoot } = inside(root, rel)
+export async function duplicate(root, rel) {
+  const { real, realRoot } = await inside(root, rel)
   const dir = path.dirname(real)
-  const ext = fs.statSync(real).isDirectory() ? '' : path.extname(real)
+  const ext = (await fsp.stat(real)).isDirectory() ? '' : path.extname(real)
   const stem = path.basename(real, ext)
   let dest
-  for (let n = 1; n < 500; n++) { dest = path.join(dir, `${stem} copy${n > 1 ? ` ${n}` : ''}${ext}`); if (!fs.existsSync(dest)) break }
-  fs.cpSync(real, dest, { recursive: true, errorOnExist: true, force: false })
+  for (let n = 1; n < 500; n++) { dest = path.join(dir, `${stem} copy${n > 1 ? ` ${n}` : ''}${ext}`); if (!(await exists(dest))) break }
+  await fsp.cp(real, dest, { recursive: true, errorOnExist: true, force: false })
   return { path: path.relative(realRoot, dest) }
 }
 
-export function rename(root, rel, name) {
-  const { real, realRoot } = inside(root, rel)
+export async function rename(root, rel, name) {
+  const { real, realRoot } = await inside(root, rel)
   const dest = path.join(path.dirname(real), checkName(name))
   if (dest === real) return { path: path.relative(realRoot, real) }
-  if (fs.existsSync(dest) && dest.toLowerCase() !== real.toLowerCase()) throw new Error(`${path.basename(dest)} already exists here`)
-  fs.renameSync(real, dest)
+  if (await exists(dest) && dest.toLowerCase() !== real.toLowerCase()) throw new Error(`${path.basename(dest)} already exists here`)
+  await fsp.rename(real, dest)
   return { path: path.relative(realRoot, dest) }
 }
 
 // A new empty file or folder in `dirRel` ('' is the agent's folder).
-export function create(root, dirRel, name, { folder = false } = {}) {
-  const { real, realRoot } = safePath(root, dirRel)
-  if (!fs.statSync(real).isDirectory()) throw new Error('Not a folder')
+export async function create(root, dirRel, name, { folder = false } = {}) {
+  const { real, realRoot } = await safePath(root, dirRel)
+  if (!(await fsp.stat(real)).isDirectory()) throw new Error('Not a folder')
   const dest = path.join(real, checkName(name))
-  if (fs.existsSync(dest)) throw new Error(`${path.basename(dest)} already exists here`)
-  if (folder) fs.mkdirSync(dest)
-  else fs.writeFileSync(dest, '', { flag: 'wx' })
+  if (await exists(dest)) throw new Error(`${path.basename(dest)} already exists here`)
+  if (folder) await fsp.mkdir(dest)
+  else await fsp.writeFile(dest, '', { flag: 'wx' })
   return { path: path.relative(realRoot, dest) }
 }
 
 // To the Trash (Recycle Bin), so it can be put back; never deleted outright.
 export async function trash(root, rel) {
-  const { real } = inside(root, rel)
+  const { real } = await inside(root, rel)
   if (IS_MAC) {
     if (fs.existsSync('/usr/bin/trash')) await run('/usr/bin/trash', [real])
     else await run('osascript', ['-e', 'on run argv', '-e', 'tell application "Finder" to delete (POSIX file (item 1 of argv) as alias)', '-e', 'end run', real])
   } else if (IS_WIN) {
-    const kind = fs.statSync(real).isDirectory() ? 'DeleteDirectory' : 'DeleteFile'
+    const kind = (await fsp.stat(real)).isDirectory() ? 'DeleteDirectory' : 'DeleteFile'
     const quoted = `'${real.replace(/'/g, "''")}'`
     await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::${kind}(${quoted}, 'OnlyErrorDialogs', 'SendToRecycleBin')`])
   } else {
@@ -304,10 +342,10 @@ export async function trash(root, rel) {
 
 // Show it in Finder / Explorer / the file manager, selected.
 export async function reveal(root, rel) {
-  const { real } = safePath(root, rel)
+  const { real } = await safePath(root, rel)
   if (IS_MAC) await run('open', ['-R', real])
   else if (IS_WIN) await run('explorer.exe', [`/select,${real}`]).catch(() => {}) // explorer exits 1 even when it worked
-  else await run('xdg-open', [fs.statSync(real).isDirectory() ? real : path.dirname(real)])
+  else await run('xdg-open', [(await fsp.stat(real)).isDirectory() ? real : path.dirname(real)])
   return { ok: true }
 }
 
@@ -316,9 +354,9 @@ export async function reveal(root, rel) {
 const OPENABLE = new Set(['.pdf', '.docx', '.doc', '.odt', '.rtf', '.pptx', '.ppt', '.odp', '.key', '.xlsx', '.xlsm', '.xls', '.ods', '.numbers', '.pages', '.csv', '.tsv', '.txt', '.md',
   '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.heic', '.tif', '.tiff', '.bmp', '.mp4', '.mov', '.m4v', '.webm', '.mp3', '.m4a', '.wav', '.aac', '.flac', '.zip', '.epub'])
 export async function openDefault(root, rel) {
-  const { real } = inside(root, rel)
+  const { real } = await inside(root, rel)
   const ext = path.extname(real).toLowerCase()
-  if (fs.statSync(real).isDirectory() || !OPENABLE.has(ext)) throw new Error('Only documents, images and media open from here')
+  if ((await fsp.stat(real)).isDirectory() || !OPENABLE.has(ext)) throw new Error('Only documents, images and media open from here')
   if (IS_MAC) await run('open', [real])
   else if (IS_WIN) await run('explorer.exe', [real]).catch(() => {})
   else await run('xdg-open', [real])

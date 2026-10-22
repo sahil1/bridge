@@ -58,7 +58,7 @@ const cmds = {
     })))
     for (const { a, last, lastUser, subs } of rows) {
       const q = (f.queue?.[a.paneId] || []).length
-      console.log(`${a.paneId}  [${a.status}]${q ? ` (${q} queued)` : ''}  ${where(a)}  · ${a.kind} · ${tilde(a.cwd)}`)
+      console.log(`${a.paneId}  [${a.status}]${q ? ` (${q} queued)` : ''}  ${where(a)}  · ${a.kind} · ${a.worktree ? `${tilde(a.worktree.repo)} on its own branch ${a.worktree.branch}` : tilde(a.cwd)}`)
       if (a.title) console.log(`    title: ${clip(a.title, 120)}`)
       if (lastUser) console.log(`    last ask (${ago(lastUser.ts)}): ${clip(lastUser.text, 200)}`)
       if (last && last !== lastUser) console.log(`    last reply (${ago(last.ts)}): ${clip(last.text, 300)}`)
@@ -131,15 +131,20 @@ const cmds = {
 
   async new(args) {
     const opt = (k) => { const i = args.indexOf(k); if (i < 0) return null; const v = args[i + 1]; args.splice(i, 2); return v }
+    const flag = (k) => { const i = args.indexOf(k); if (i >= 0) args.splice(i, 1); return i >= 0 }
     const space = opt('--space'), cwd = opt('--cwd'), name = opt('--name'), kind = opt('--kind') || undefined
+    // Own branch: a new git worktree on a new branch (--branch, or bridge/<name>) from --base.
+    const branch = opt('--branch'), base = opt('--base'), own = flag('--own-branch') || !!branch
     let prompt = args.join(' ')
     if (prompt === '-' || (!prompt && !process.stdin.isTTY)) prompt = fs.readFileSync(0, 'utf8')
-    if (!cwd || !prompt.trim()) throw new Error('Usage: bridge new --cwd <folder> [--space "Name"] [--name "tab name"] [--kind claude|codex|gemini|...] "brief"')
+    if (!cwd || !prompt.trim()) throw new Error('Usage: bridge new --cwd <folder> [--space "Name"] [--name "tab name"] [--kind claude|codex|gemini|...] [--own-branch [--branch name] [--base branch]] "brief"')
     const f = await fleet()
     // An existing space by that name gets a new tab; otherwise a new space is made.
     const ws = space && (f.workspaces || []).find((w) => w.label.toLowerCase() === space.toLowerCase())
-    const out = await api('/agents/launch', { method: 'POST', body: { kind, cwd, label: name || undefined, workspaceId: ws?.id, newSpace: ws ? undefined : space || undefined, prompt: `${prompt.trim()}\n\n(Started by ${WHO} chief of staff.)` } })
+    const out = await api('/agents/launch', { method: 'POST', body: { kind, cwd, label: name || undefined, workspaceId: ws?.id, newSpace: ws ? undefined : space || undefined, prompt: `${prompt.trim()}\n\n(Started by ${WHO} chief of staff.)`, ...(own ? { ownBranch: true, branch: branch || undefined, base: base || undefined } : {}) } })
     console.log(`Started ${kind || 'the default agent'} in ${out.paneId}${space ? ` (space "${ws ? ws.label : space}"${ws ? '' : ', new'})` : ''}, folder ${cwd}.`)
+    if (out.worktree) console.log(`It works on its own branch, ${out.worktree.branch} (from ${out.worktree.base}), in ${tilde(out.worktree.folder)}. The repo's checkout is untouched.`)
+    if (out.setupError) console.log(`The repo's setup command failed: ${out.setupError}`)
   },
 
   async wait(args) {
@@ -195,6 +200,9 @@ const cmds = {
   bridge send <pane> "message"      hand it work; queued if it's busy (- reads stdin)
   bridge new --cwd <folder> [--space "Name"] [--name "tab"] [--kind claude|codex|...] "brief"
                                     start a new agent; an existing space name adds a tab there (- reads stdin)
+      [--own-branch [--branch name] [--base branch]]
+                                    ...on its own git branch, in its own worktree, so it can't clash with
+                                    other agents in that repo (branch default: bridge/<name>)
   bridge wait <pane>… [--timeout s] block until those agents stop working: finished or blocked (run in the background)
   bridge ask --list                 who you can consult (other models), and how each is reached
   bridge ask <who> [--model m] "question"

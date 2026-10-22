@@ -3,6 +3,7 @@
 // viewer as any PDF); without it, their text is read straight from the file so there is something
 // to look at. Nothing is sent anywhere: it all happens on this computer.
 import fs from 'node:fs'
+import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import crypto from 'node:crypto'
@@ -21,8 +22,9 @@ const MAX_COLS = 80
 const MAX_ENTRY = 60 * 1024 * 1024 // unpacked size of one part of the file
 
 // ---------- zip (docx, pptx and xlsx are zip files of XML) ----------
-function unzip(file) {
-  const buf = fs.readFileSync(file)
+// Read without blocking: the file is in your folders, where macOS can hold a read while it asks you.
+async function unzip(file) {
+  const buf = await fsp.readFile(file)
   let eocd = -1
   for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65557); i--) if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break }
   if (eocd < 0) throw new Error("This file isn't in the newer Office format, or it's damaged")
@@ -69,8 +71,8 @@ function fmtNumber(v, code) {
   return String(+n.toPrecision(12))
 }
 
-function readXlsx(file) {
-  const part = unzip(file)
+async function readXlsx(file) {
+  const part = await unzip(file)
   const wb = part('xl/workbook.xml')
   if (!wb) throw new Error("Couldn't find the sheets in this workbook")
   const rels = new Map([...(part('xl/_rels/workbook.xml.rels') || '').matchAll(/<Relationship\b[^>]*>/g)].map((m) => [attr(m[0], 'Id'), attr(m[0], 'Target')]))
@@ -123,8 +125,8 @@ function readXlsx(file) {
   return sheets
 }
 
-function readCsv(file, sep) {
-  const text = fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '')
+async function readCsv(file, sep) {
+  const text = (await fsp.readFile(file, 'utf8')).replace(/^\uFEFF/, '')
   const rows = []
   let row = []
   let cell = ''
@@ -149,22 +151,22 @@ function readCsv(file, sep) {
 
 export async function sheet(file) {
   const ext = path.extname(file).toLowerCase()
-  if (ext === '.csv' || ext === '.tsv') return { sheets: readCsv(file, ext === '.tsv' ? '\t' : sepOf(file)) }
-  if (ext === '.xlsx' || ext === '.xlsm') return { sheets: readXlsx(file) }
+  if (ext === '.csv' || ext === '.tsv') return { sheets: await readCsv(file, ext === '.tsv' ? '\t' : await sepOf(file)) }
+  if (ext === '.xlsx' || ext === '.xlsm') return { sheets: await readXlsx(file) }
   // Older or OpenDocument spreadsheets: LibreOffice turns them into .xlsx first.
-  return { sheets: readXlsx(await convert(file, 'xlsx')) }
+  return { sheets: await readXlsx(await convert(file, 'xlsx')) }
 }
 // Some "CSV" files use semicolons (Excel in many European settings).
-function sepOf(file) {
-  const head = fs.readFileSync(file, 'utf8').slice(0, 4000).split(/\r?\n/)[0] || ''
+async function sepOf(file) {
+  const head = (await fsp.readFile(file, 'utf8')).slice(0, 4000).split(/\r?\n/)[0] || ''
   return (head.match(/;/g) || []).length > (head.match(/,/g) || []).length ? ';' : ','
 }
 
 // ---------- documents and decks: their text, when LibreOffice isn't there ----------
-export function outline(file) {
+export async function outline(file) {
   const ext = path.extname(file).toLowerCase()
   if (ext !== '.docx' && ext !== '.pptx') throw new Error('Install LibreOffice to see this file here')
-  const part = unzip(file)
+  const part = await unzip(file)
   if (ext === '.docx') {
     const xml = part('word/document.xml') || ''
     const blocks = []
@@ -201,14 +203,14 @@ export function soffice() {
 
 // One conversion at a time; each result is kept (by file, size and time) so opening it again is instant.
 let queue = Promise.resolve()
-export function convert(file, to = 'pdf') {
+export async function convert(file, to = 'pdf') {
   const bin = soffice()
-  if (!bin) return Promise.reject(Object.assign(new Error('LibreOffice is needed to show this file here'), { needs: 'libreoffice' }))
-  const st = fs.statSync(file)
+  if (!bin) throw Object.assign(new Error('LibreOffice is needed to show this file here'), { needs: 'libreoffice' })
+  const st = await fsp.stat(file)
   const dir = ensureDir(path.join(CACHE, 'office'))
   const key = crypto.createHash('sha1').update(`${file}\0${st.size}\0${st.mtimeMs}\0${to}`).digest('hex').slice(0, 20)
   const out = path.join(dir, `${key}.${to}`)
-  if (fs.existsSync(out)) return Promise.resolve(out)
+  if (fs.existsSync(out)) return out
   const run = () => new Promise((resolve, reject) => {
     if (fs.existsSync(out)) return resolve(out)
     const work = fs.mkdtempSync(path.join(dir, 'job-'))

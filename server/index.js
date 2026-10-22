@@ -2,7 +2,7 @@ import express from 'express'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { transcript, earlier, preview, locate, imageFrom } from './transcripts.js'
+import { transcript, earlier, replyDiffs, markUndone, preview, locate, imageFrom } from './transcripts.js'
 import { listSubagents } from './subagents.js'
 import { ttyHandler } from './tty.js'
 import { attachHandler } from './attach.js'
@@ -10,10 +10,12 @@ import { makeGuard } from './guard.js'
 import { usage } from './usage.js'
 import { usageStats } from './usagestats.js'
 import * as files from './files.js'
+import * as pr from './pr.js'
 import * as office from './office.js'
 import * as accounts from './accounts.js'
 import * as servers from './servers.js'
 import * as archive from './archive.js'
+import * as worktrees from './worktrees.js'
 import * as savedPrompts from './prompts.js'
 import { search as searchSessions } from './search.js'
 import http from 'node:http'
@@ -29,7 +31,7 @@ import { makeMacro } from './macro.js'
 import * as slash from './commands.js'
 import * as mentions from './mentions.js'
 import { promptSafe, draftIn } from './promptsafe.js'
-import { rewindAndSend, codexRewindAndSend, btwAnswer } from './rewind.js'
+import { rewindAndSend, codexRewindAndSend, undoReply, btwAnswer } from './rewind.js'
 import { makeNews } from './news.js'
 import { execFile } from 'node:child_process'
 import { pickRuntime } from './runtime/index.js'
@@ -82,6 +84,9 @@ const wrap = (fn) => async (req, res) => {
     res.status(502).json({ error: err.message })
   }
 }
+// Your folders are only ever checked without blocking: macOS can hold the first look into Desktop
+// or Documents until you answer its permission prompt, and only the request that asked should wait.
+const exists = (p) => fs.promises.access(p).then(() => true, () => false)
 
 // Start an agent with your default model for that kind (Settings › General).
 const modelFor = (kind) => cfg.agents?.[kind]?.model || null
@@ -101,11 +106,15 @@ async function fleetView() {
     a.caps = caps(a.kind)
     a.kindLabel = adapter(a.kind).label
     a.tabNumber = f.tabs.find((t) => t.tabId === a.tabId)?.number ?? 0
+    // On its own branch: the repo and branch, since its folder is in the data folder.
+    a.worktree = worktrees.describe(a.cwd)
+    a.muted = notify.isMuted(a.paneId)
     const generic = !a.title || a.title.toLowerCase() === a.kindLabel.toLowerCase() || /^(claude code|claude|codex|grok|cursor( agent)?|gemini)$/i.test(a.title)
     if (a.chief) a.title = 'Chief of staff'
     // A fresh session has no title yet; the tab name (e.g. a routine's) says more than "Claude Code".
     else if (generic && a.tab && !/^\d+$/.test(a.tab)) a.title = a.tab
   }
+  for (const t of f.tabs || []) for (const p of t.panes || []) p.worktree = worktrees.describe(p.cwd)
   const rank = { blocked: 0, done: 1, working: 2, idle: 3, unknown: 4 }
   f.agents.sort((a, b) => (b.chief - a.chief) || (rank[a.status] ?? 9) - (rank[b.status] ?? 9) || b.seq - a.seq)
   f.counts = f.agents.reduce((c, a) => ({ ...c, [a.status]: (c[a.status] || 0) + 1 }), {})
@@ -165,6 +174,8 @@ app.get('/api/agents/:pane/subagents', wrap(async (req) => {
 }))
 app.get('/api/agents/:pane/transcript', wrap(async (req) => transcript(await findAgent(req.params.pane))))
 app.get('/api/agents/:pane/transcript/earlier', wrap(async (req) => earlier(await findAgent(req.params.pane), Number(req.query.before), String(req.query.after || '') || null, Math.min(200, Number(req.query.want) || 60))))
+// One reply's own file changes as diffs, by the ids of its edit calls (Chat's "Changed 3 files").
+app.get('/api/agents/:pane/transcript/diffs', wrap(async (req) => replyDiffs(await findAgent(req.params.pane), String(req.query.calls || '').split(',').filter(Boolean))))
 // The same, live: pushed the moment the agent writes to its transcript file, so a reply shows up
 // as soon as it lands instead of at the next poll. A slow sweep also catches a new session (/clear).
 app.get('/api/agents/:pane/transcript/live', (req, res) => {
@@ -217,7 +228,7 @@ app.get('/api/agents/:pane/file', wrap(async (req) => files.readFile(await rootO
 app.put('/api/agents/:pane/file', async (req, res) => {
   try {
     const { path: rel, text, mtime, force } = req.body || {}
-    res.json(files.writeFile(await rootOf(req.params.pane), String(rel || ''), text, { mtime, force: !!force }))
+    res.json(await files.writeFile(await rootOf(req.params.pane), String(rel || ''), text, { mtime, force: !!force }))
   } catch (err) {
     res.status(err.conflict ? 409 : 502).json({ error: err.message, conflict: !!err.conflict })
   }
@@ -231,10 +242,15 @@ app.post('/api/agents/:pane/discard', wrap(async (req) => {
   return req.body?.hunk == null ? files.discardFile(root, rel) : files.discardHunk(root, rel, Number(req.body.hunk))
 }))
 app.post('/api/agents/:pane/commit', wrap(async (req) => files.commit(await rootOf(req.params.pane), { message: req.body?.message, paths: req.body?.paths })))
+app.post('/api/agents/:pane/push', wrap(async (req) => files.push(await rootOf(req.params.pane))))
+// The branch's pull request (cached; gh goes over the network), a drafted title and body, and opening one.
+app.get('/api/agents/:pane/pr', wrap(async (req) => pr.status(await rootOf(req.params.pane), { refresh: req.query.refresh === '1' })))
+app.post('/api/agents/:pane/pr/draft', wrap(async (req) => pr.draft(await rootOf(req.params.pane), { base: req.body?.base })))
+app.post('/api/agents/:pane/pr', wrap(async (req) => pr.create(await rootOf(req.params.pane), req.body || {})))
 app.get('/api/agents/:pane/diff', wrap(async (req) => files.gitDiff(await rootOf(req.params.pane), String(req.query.path || ''))))
 app.get('/api/agents/:pane/raw', async (req, res) => {
   try {
-    const { file, type } = files.rawFile(await rootOf(req.params.pane), String(req.query.path || ''))
+    const { file, type } = await files.rawFile(await rootOf(req.params.pane), String(req.query.path || ''))
     // SVG can carry script; serve it sandboxed.
     res.set({ 'Content-Type': type, 'Content-Security-Policy': "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox", 'X-Content-Type-Options': 'nosniff' })
     res.sendFile(file)
@@ -245,11 +261,11 @@ app.get('/api/agents/:pane/raw', async (req, res) => {
 
 // Word, PowerPoint and Excel: a spreadsheet as a table, a document or deck as a PDF (LibreOffice),
 // or its text when LibreOffice isn't installed.
-app.get('/api/agents/:pane/office/sheet', wrap(async (req) => office.sheet(files.safePath(await rootOf(req.params.pane), String(req.query.path || '')).real)))
-app.get('/api/agents/:pane/office/outline', wrap(async (req) => office.outline(files.safePath(await rootOf(req.params.pane), String(req.query.path || '')).real)))
+app.get('/api/agents/:pane/office/sheet', wrap(async (req) => office.sheet((await files.safePath(await rootOf(req.params.pane), String(req.query.path || ''))).real)))
+app.get('/api/agents/:pane/office/outline', wrap(async (req) => office.outline((await files.safePath(await rootOf(req.params.pane), String(req.query.path || ''))).real)))
 app.get('/api/agents/:pane/office/pdf', async (req, res) => {
   try {
-    const out = await office.convert(files.safePath(await rootOf(req.params.pane), String(req.query.path || '')).real, 'pdf')
+    const out = await office.convert((await files.safePath(await rootOf(req.params.pane), String(req.query.path || ''))).real, 'pdf')
     res.set({ 'Content-Type': 'application/pdf', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store' })
     res.sendFile(out)
   } catch (err) {
@@ -278,7 +294,7 @@ app.post('/api/agents/:pane/fileop', wrap(async (req) => {
 app.get('/api/agents/:pane/site/*rest', async (req, res) => {
   try {
     const rel = [].concat(req.params.rest || []).join('/')
-    const { file, type, html } = files.siteFile(await rootOf(req.params.pane), rel)
+    const { file, type, html } = await files.siteFile(await rootOf(req.params.pane), rel)
     res.set({ 'Content-Type': type, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store', 'Content-Security-Policy': html ? 'sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms allow-modals' : "sandbox; default-src 'none'" })
     res.sendFile(file, { dotfiles: 'allow' })
   } catch (err) {
@@ -290,14 +306,14 @@ app.get('/api/agents/:pane/site/*rest', async (req, res) => {
 // The web servers running from the agent's folder, and the project's own ways to start one.
 app.get('/api/agents/:pane/servers', wrap(async (req) => {
   const root = await rootOf(req.params.pane)
-  return { servers: await servers.serversFor(root, { exclude: [cfg.port || 7420] }), commands: servers.startCommands(root) }
+  return { servers: await servers.serversFor(root, { exclude: [cfg.port || 7420] }), commands: await servers.startCommands(root) }
 }))
 // Start one of those commands (only those: nothing typed in from the page) in a terminal tab in
 // the agent's space, where you can watch it and stop it.
 app.post('/api/agents/:pane/servers/start', wrap(async (req) => {
   const pane = ((await rt.fleet()).panes || []).find((x) => x.paneId === req.params.pane)
   if (!pane) throw new Error(`No pane ${req.params.pane}`)
-  const cmd = servers.startCommands(pane.cwd).find((c) => c.command === String(req.body?.command || ''))
+  const cmd = (await servers.startCommands(pane.cwd)).find((c) => c.command === String(req.body?.command || ''))
   if (!cmd) throw new Error("That isn't one of this project's start commands")
   const out = await rt.launch({ kind: 'shell', cwd: pane.cwd, label: `Server: ${cmd.label}`.slice(0, 60), workspaceId: pane.workspaceId })
   await new Promise((r) => setTimeout(r, 1200))
@@ -353,7 +369,7 @@ app.post('/api/chief/launch', wrap(async () => {
   const f = await fleetView()
   const existing = f.agents.find((a) => a.chief)
   if (existing) return { paneId: existing.paneId, existing: true }
-  if (!fs.existsSync(CHIEF_DIR)) throw new Error(`Chief of staff folder not found at ${CHIEF_DIR}`)
+  if (!(await exists(CHIEF_DIR))) throw new Error(`Chief of staff folder not found at ${CHIEF_DIR}`)
   const kind = cfg.chief?.kind || 'claude'
   if (!(await installed()).some((k) => k.kind === kind)) throw new Error(`The chief of staff runs on ${adapter(kind).label}, which isn't installed. Install it, or set "chief": { "kind": "..." } in ~/.bridge-ai/config.json`)
   const out = await launchAgent({ kind, cwd: CHIEF_DIR, label: 'Chief of staff', newSpace: 'Chief of staff' })
@@ -386,6 +402,19 @@ app.post('/api/agents/:pane/rewind', wrap(async (req) => {
   for (const ms of [150, 700, 1600]) setTimeout(pushFleet, ms)
   return r
 }))
+// Undo a reply: the agent's own rewind to just before the message that started it, files and
+// conversation. Nothing is sent, and the old message it puts back in its input box is cleared.
+app.post('/api/agents/:pane/undo', wrap(async (req) => {
+  const agent = await findAgent(req.params.pane)
+  if (!caps(agent.kind).undo) throw new Error(`Undoing a reply isn't supported for ${adapter(agent.kind).label}`)
+  if (agent.status === 'working' || agent.status === 'blocked') throw new Error('The agent is busy. Undo once it has finished.')
+  const original = String(req.body?.original || '').trim()
+  if (!original) throw new Error('No message to go back to')
+  const r = await undoReply(rt, agent, { original, back: Number(req.body?.back) || 1 })
+  markUndone(agent, String(req.body?.id || '').split(':')[0])
+  for (const ms of [150, 700, 1600]) setTimeout(pushFleet, ms)
+  return r
+}))
 app.post('/api/agents/:pane/steer', wrap(async (req) => {
   const text = String(req.body?.text || '').trim()
   if (!text) throw new Error('Empty message')
@@ -401,20 +430,34 @@ app.get('/api/places', wrap(async () => {
 }))
 app.get('/api/dirs', wrap((req) => places.completeDir(req.query.q)))
 app.get('/api/agent-kinds', wrap(() => installed()))
+// The new agent dialog's Own branch option for a folder (null repo outside git).
+app.get('/api/repo', wrap(async (req) => {
+  let dir
+  try { dir = await places.resolveDir(req.query.dir) } catch { return { repo: null } }
+  return worktrees.info(dir, { branch: req.query.branch, label: req.query.label })
+}))
 app.post('/api/agents/launch', wrap(async (req) => {
-  const { kind = cfg.defaultAgent || 'claude', cwd, workspaceId, newSpace, label, prompt, account, alsoKind } = req.body || {}
+  const { kind = cfg.defaultAgent || 'claude', cwd, workspaceId, newSpace, label, prompt, account, alsoKind, ownBranch, branch, base, setup, remember } = req.body || {}
   if (kind !== 'shell' && !(await installed()).some((k) => k.kind === kind)) throw new Error(`${adapter(kind).label} isn't installed`)
-  const dir = places.resolveDir(cwd)
+  const dir = await places.resolveDir(cwd)
   const name = String(label || path.basename(dir)).trim().slice(0, 60)
   const space = String(newSpace || '').trim()
+  // The dialog's Own branch choice (and setup command) is remembered per repo; the chief's isn't.
+  if (remember) await worktrees.remember(dir, { own: !!ownBranch, setup: ownBranch ? setup : undefined })
+  // Own branch: the agent starts in a new worktree on a new branch (worktrees.js), after the
+  // repo's setup command. If it can't start, the worktree goes again (the branch stays).
+  const own = ownBranch ? await worktrees.create(dir, { branch, base, label: name }) : null
+  const start = (o, tree) => launchAgent({ ...o, cwd: tree?.cwd || dir, setup: tree?.setup || undefined }).catch(async (e) => { if (tree) await worktrees.tidy(tree.folder); throw e })
   // New space: the workspace takes the space name and its first tab the agent's name.
-  const out = await launchAgent({ kind, cwd: dir, label: name, workspaceId: space ? null : workspaceId || null, newSpace: space || (workspaceId ? undefined : name), prompt: String(prompt || '').trim() || undefined, account: account ? String(account) : undefined })
-  // Compare: the same first message to a second kind of agent, in the same space.
+  const out = await start({ kind, label: name, workspaceId: space ? null : workspaceId || null, newSpace: space || (workspaceId ? undefined : name), prompt: String(prompt || '').trim() || undefined, account: account ? String(account) : undefined }, own)
+  if (own) out.worktree = { branch: own.branch, base: own.base, folder: own.folder, copied: own.copied }
+  // Compare: the same first message to a second kind of agent, in the same space (with a branch of its own too).
   if (alsoKind && alsoKind !== kind && String(prompt || '').trim() && (await installed()).some((k) => k.kind === alsoKind)) {
     const ws = ((await rt.fleet()).panes || []).find((p) => p.paneId === out.paneId)?.workspaceId
     try {
-      const two = await launchAgent({ kind: alsoKind, cwd: dir, label: `${name} (${adapter(alsoKind).label})`.slice(0, 60), workspaceId: ws || null, newSpace: ws ? undefined : space || name, prompt: String(prompt).trim() })
-      out.alsoPaneId = two.paneId
+      const two = `${name} (${adapter(alsoKind).label})`.slice(0, 60)
+      const own2 = ownBranch ? await worktrees.create(dir, { base, label: two }) : null
+      out.alsoPaneId = (await start({ kind: alsoKind, label: two, workspaceId: ws || null, newSpace: ws ? undefined : space || name, prompt: String(prompt).trim() }, own2)).paneId
     } catch (e) { out.alsoError = e.message }
   }
   pushFleet()
@@ -430,7 +473,22 @@ async function archiveWhere(match) {
     archive.add({ kind: a.kind, sessionId: a.sessionId, cwd: a.cwd, label: a.chief ? 'Chief of staff' : a.tab && !/^\d+$/.test(a.tab) ? a.tab : a.title, workspace: a.workspace, preview: last })
   }
 }
-app.post('/api/tabs/:tab/close', wrap(async (req) => { await archiveWhere((a) => a.tabId === req.params.tab).catch(() => {}); await rt.closeTab(req.params.tab); pushFleet(); return { ok: true } }))
+// The Bridge-made worktrees of the panes about to close; once they have, each one no other pane
+// still works in is removed if nothing would be lost (worktrees.tidy says what it kept and why).
+const treesWhere = async (match) => [...new Set(((await rt.fleet()).panes || []).filter(match).map((p) => worktrees.folderOf(p.cwd)).filter(Boolean))]
+async function tidyTrees(folders) {
+  if (!folders.length) return {}
+  const busy = new Set(((await rt.fleet()).panes || []).map((p) => worktrees.folderOf(p.cwd)))
+  return { worktrees: (await Promise.all(folders.filter((f) => !busy.has(f)).map(worktrees.tidy))).filter(Boolean) }
+}
+app.post('/api/tabs/:tab/close', wrap(async (req) => {
+  const match = (a) => a.tabId === req.params.tab
+  const trees = await treesWhere(match)
+  await archiveWhere(match).catch(() => {})
+  await rt.closeTab(req.params.tab)
+  pushFleet()
+  return { ok: true, ...(await tidyTrees(trees)) }
+}))
 app.post('/api/workspaces/:ws/rename', wrap(async (req) => { await rt.renameWorkspace(req.params.ws, String(req.body?.label || '').trim()); pushFleet(); return { ok: true } }))
 // Reorder: index is the position of the item to drop in front of (the list length = last).
 app.post('/api/workspaces/:ws/move', wrap(async (req) => {
@@ -465,7 +523,14 @@ app.post('/api/workspaces', wrap(async (req) => {
   pushFleet()
   return out
 }))
-app.post('/api/workspaces/:ws/close', wrap(async (req) => { await archiveWhere((a) => a.workspaceId === req.params.ws).catch(() => {}); await rt.closeWorkspace(req.params.ws); pushFleet(); return { ok: true } }))
+app.post('/api/workspaces/:ws/close', wrap(async (req) => {
+  const match = (a) => a.workspaceId === req.params.ws
+  const trees = await treesWhere(match)
+  await archiveWhere(match).catch(() => {})
+  await rt.closeWorkspace(req.params.ws)
+  pushFleet()
+  return { ok: true, ...(await tidyTrees(trees)) }
+}))
 
 // ---------- Saved prompts ----------
 app.get('/api/prompts', wrap(() => ({ prompts: savedPrompts.all() })))
@@ -499,11 +564,15 @@ app.post('/api/sessions/resume', wrap(async (req) => {
   if (!adapter(kind).resume || !/^[\w-]{8,64}$/.test(String(sessionId || ''))) throw new Error("That conversation can't be resumed")
   const live = (await liveBySession())[sessionId]
   if (live) return { paneId: live, already: true }
-  const dir = places.resolveDir(cwd || '~')
-  if (!fs.existsSync(dir)) throw new Error(`Its folder is gone: ${cwd}`)
   if (!(await installed()).some((k) => k.kind === kind)) throw new Error(`${adapter(kind).label} isn't installed`)
+  // On its own branch: its worktree may live outside your home folder, and if it was removed when
+  // the agent closed, it's checked out again at the same path first (then the setup command runs).
+  const own = worktrees.folderOf(expand(String(cwd || '')))
+  const back = own ? await worktrees.restore(own) : null
+  const dir = own ? path.resolve(expand(cwd)) : await places.resolveDir(cwd || '~')
+  if (!(await exists(dir))) throw new Error(`Its folder is gone: ${cwd}`)
   const ws = workspace ? (await rt.fleet()).workspaces.find((w) => w.label === workspace) : null
-  const out = await launchAgent({ kind, cwd: dir, label: String(label || path.basename(dir)).slice(0, 60), workspaceId: ws?.id || null, newSpace: ws ? undefined : (workspace || 'Resumed'), resume: sessionId })
+  const out = await launchAgent({ kind, cwd: dir, label: String(label || path.basename(dir)).slice(0, 60), workspaceId: ws?.id || null, newSpace: ws ? undefined : (workspace || 'Resumed'), resume: sessionId, setup: back?.setup || undefined })
   archive.removeSession(sessionId)
   pushFleet()
   return out
@@ -528,7 +597,7 @@ app.post('/api/routines/:id/run', wrap(async (req) => {
   const def = routines.readDefs().find((d) => d.id === req.params.id)
   if (!def) throw new Error('No such routine')
   const cwd = routines.resolveCwd(def)
-  if (!fs.existsSync(cwd)) throw new Error(`Folder not found: ${def.cwd}`)
+  if (!(await exists(cwd))) throw new Error(`Folder not found: ${def.cwd}`)
   const f = await rt.fleet()
   const ws = def.workspace && f.workspaces.find((w) => w.label.toLowerCase() === def.workspace.toLowerCase())
   const out = await launchAgent({ kind: def.kind || cfg.defaultAgent || 'claude', cwd, label: def.name, workspaceId: ws?.id, newSpace: ws ? undefined : def.workspace || def.name, prompt: def.command })
@@ -536,8 +605,8 @@ app.post('/api/routines/:id/run', wrap(async (req) => {
   return out
 }))
 app.get('/api/insights', wrap(() => routines.insights()))
-app.get('/api/insights/report', (req, res) => {
-  const file = routines.insightsFile()
+app.get('/api/insights/report', async (req, res) => {
+  const file = await routines.insightsFile()
   if (!file) return res.status(404).json({ error: 'No insights report yet; run /insights in Claude Code' })
   // Generated HTML: show it, but sandboxed away from this app's origin.
   res.set({ 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src data: https:", 'X-Content-Type-Options': 'nosniff' })
@@ -577,7 +646,7 @@ async function pollFleet() {
     try {
       let f = await fleetView()
       if (queue.size() && await queue.deliver(f.agents, (id, text, a) => promptSafe(rt, id, text, a), (id) => rt.read(id, 40))) f = await fleetView()
-      const key = JSON.stringify([f.agents.map((a) => [a.paneId, a.status, a.title, a.seq]), f.tabs.map((t) => [t.tabId, t.label, t.panes.map((p) => [p.paneId, p.cwd, p.rect?.width, p.rect?.height, p.rect?.x, p.rect?.y])]), f.workspaces.map((w) => w.label), f.queue])
+      const key = JSON.stringify([f.agents.map((a) => [a.paneId, a.status, a.title, a.seq, a.muted]), f.tabs.map((t) => [t.tabId, t.label, t.panes.map((p) => [p.paneId, p.cwd, p.rect?.width, p.rect?.height, p.rect?.x, p.rect?.y])]), f.workspaces.map((w) => w.label), f.queue])
       lastFleet = f
       notify.onFleet(f, cfg)
       if (key !== lastFleetKey) {
@@ -599,7 +668,7 @@ const runBin = (bin, args, timeout = 120000) => new Promise((resolve, reject) =>
 })
 app.post('/api/transcribe', express.raw({ type: () => true, limit: '30mb' }), wrap(async (req) => {
   if (!req.body?.length) throw new Error('No audio received')
-  if (!fs.existsSync(MODEL)) throw new Error(`Speech model missing at ${MODEL}`)
+  if (!(await exists(MODEL))) throw new Error(`Speech model missing at ${MODEL}`)
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-voice-'))
   try {
     const input = path.join(dir, 'in')
@@ -684,7 +753,7 @@ async function launchInSpace(spaceName, tabLabel, prompt) {
   const f = await rt.fleet()
   const ws = f.workspaces.find((w) => w.label.toLowerCase() === spaceName.toLowerCase())
   const label = String(tabLabel).replace(/\s+/g, ' ').trim().slice(0, 48) || spaceName
-  const out = await launchAgent({ kind: cfg.assistant?.kind || cfg.defaultAgent || 'claude', cwd: fs.existsSync(ASSIST_DIR) ? ASSIST_DIR : os.homedir(), label, workspaceId: ws?.id || null, newSpace: ws ? undefined : spaceName, prompt })
+  const out = await launchAgent({ kind: cfg.assistant?.kind || cfg.defaultAgent || 'claude', cwd: (await exists(ASSIST_DIR)) ? ASSIST_DIR : os.homedir(), label, workspaceId: ws?.id || null, newSpace: ws ? undefined : spaceName, prompt })
   pushFleet()
   return out
 }
@@ -849,14 +918,29 @@ app.get('/api/brief', wrap(async (req) => {
 
 // ---------- Notifications, phone, updates ----------
 notify.use(push.channel)
+notify.useRuntime(rt)
+// This computer itself, not a phone (through the relay, or Tailscale's name for it).
+const fromHere = (req) => !req.headers['x-bridge-relay'] && /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i.test(req.headers.host || '')
 // Quotas: checked every 10 minutes while a notification channel is on.
 setInterval(() => { if (notify.active()) quota().then((q) => notify.onQuota(q, cfg), () => {}) }, 10 * 60 * 1000)
 
 app.get('/api/push/key', wrap(() => ({ publicKey: push.publicKey() })))
 app.get('/api/push/devices', wrap(() => push.devices()))
-app.post('/api/push/subscribe', wrap((req) => push.subscribe(req.body?.subscription, req.body?.label)))
+app.post('/api/push/subscribe', wrap((req) => push.subscribe(req.body?.subscription, req.body?.label, fromHere(req))))
 app.post('/api/push/unsubscribe', wrap((req) => push.unsubscribe(req.body || {})))
 app.post('/api/push/test', wrap(() => notify.send({ kind: 'test', title: 'Bridge AI', body: 'Notifications are working.', url: '/', tag: 'test' })))
+// What a waiting agent is asking, for the desktop app's and the browser's own notifications.
+app.get('/api/agents/:pane/question', wrap(async (req) => { const q = notify.question(await rt.read(req.params.pane, 60)); return { text: q?.text || null } }))
+// Mute an agent's notifications (its ⋯ menu), until unmuted.
+app.post('/api/agents/:pane/mute', wrap(async (req) => {
+  notify.mute(req.params.pane, !!req.body?.muted, (await rt.fleet()).agents.map((a) => a.paneId))
+  pushFleet()
+  return { ok: true, muted: !!req.body?.muted }
+}))
+// A notification's answer button (the token says which agent, question and answer).
+app.post('/api/notify/answer', wrap((req) => notify.answer(req.body?.token)))
+// You're using Bridge AI on this computer: phones stay quiet meanwhile. Phones can't say this.
+app.post('/api/presence', wrap((req) => { if (fromHere(req)) notify.presence(req.body || {}); return { ok: true } }))
 
 app.get('/api/phone', wrap(() => phone.status(cfg.port)))
 app.post('/api/phone', wrap((req) => (req.body?.enabled ? phone.enable(cfg.port) : phone.disable(cfg.port))))

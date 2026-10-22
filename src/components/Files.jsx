@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import hljs from 'highlight.js/lib/core'
 import javascript from 'highlight.js/lib/languages/javascript'
 import typescript from 'highlight.js/lib/languages/typescript'
@@ -457,51 +458,299 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
 // ---------- Changes view ----------
 const STATUS = { modified: ['M', 'mod'], added: ['A', 'add'], deleted: ['D', 'del'], untracked: ['U', 'add'], renamed: ['R', 'mod'] }
 
-function DiffView({ pane, filePath, onChanged }) {
-  const { data, error, refresh } = usePoll(`/agents/${enc(pane)}/diff?path=${enc(filePath)}`, 10000)
+// Each diff line with its number: the new file's for added and unchanged lines, the old file's
+// for removed ones. `key` finds the line again after a refresh (n12: new line 12, o7: old line 7).
+function numberDiff(diff) {
+  const lines = diff.split('\n')
+  if (lines.at(-1) === '') lines.pop()
+  let o = 0
+  let n = 0
+  let body = false
+  return lines.map((l) => {
+    if (l.startsWith('@@')) {
+      const h = /^@@ -(\d+)(?:,\d+)? \+(\d+)/.exec(l)
+      o = h ? Number(h[1]) : 1; n = h ? Number(h[2]) : 1 // "@@ new file @@": a new file shown whole
+      body = true
+      return { l, cls: 'hunk' }
+    }
+    if (!body || l.startsWith('\\')) return { l, cls: 'meta' }
+    if (l.startsWith('+')) return { l, cls: 'plus', no: n, key: `n${n++}` }
+    if (l.startsWith('-')) return { l, cls: 'minus', no: o, key: `o${o++}` }
+    o++
+    return { l, cls: '', no: n, key: `n${n++}` }
+  })
+}
+
+// ---------- Review: comments on lines of the diff, sent to the agent as one message ----------
+// Comments not sent yet, per agent: kept while you switch views or agents (until the page reloads).
+const reviews = new Map()
+const reviewSubs = new Set()
+function useReview(pane) {
+  const [, bump] = useState(0)
+  useEffect(() => { const f = () => bump((n) => n + 1); reviewSubs.add(f); return () => { reviewSubs.delete(f) } }, [])
+  const set = useCallback((fn) => {
+    const next = fn(reviews.get(pane) || [])
+    if (next.length) reviews.set(pane, next); else reviews.delete(pane)
+    reviewSubs.forEach((f) => f())
+  }, [pane])
+  return [reviews.get(pane) || [], set]
+}
+
+const span = (ns) => { const a = Math.min(...ns), b = Math.max(...ns); return a === b ? `${a}` : `${a}-${b}` }
+// A comment on lines a..b: where it is (path:line, in the new file unless only removed lines are
+// picked) and the lines themselves, as they were when you wrote it.
+function noteOn(path, lines, a, b, text) {
+  const picked = lines.slice(Math.min(a, b), Math.max(a, b) + 1).filter((x) => x.key)
+  const kept = picked.filter((x) => x.cls !== 'minus').map((x) => x.no)
+  const where = kept.length ? `${path}:${span(kept)}` : `${path}:${span(picked.map((x) => x.no))} (removed line${picked.length > 1 ? 's' : ''})`
+  return { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, path, where, keys: picked.map((x) => x.key), quote: picked.map((x) => x.l), text }
+}
+const QUOTE_MAX = 30
+const reviewMessage = (notes) => `I reviewed your changes. Please address these comments:\n\n${notes.map((c, i) => [
+  `${i + 1}. ${c.where}`,
+  ...c.quote.slice(0, QUOTE_MAX).map((q) => `   > ${q}`), ...(c.quote.length > QUOTE_MAX ? ['   > ...'] : []),
+  ...c.text.split('\n').map((t) => `   ${t}`),
+].join('\n')).join('\n\n')}`
+
+const touchOnly = () => typeof matchMedia === 'function' && matchMedia('(hover: none)').matches
+
+function DiffView({ pane, filePath, onChanged, notes, onNote, onDrop }) {
+  const [pick, setPick] = useState(null) // { a, b }: the lines you're commenting on
+  const [text, setText] = useState('')
+  // Hold the diff still while you write a comment, so the lines don't move under you.
+  const { data, error, refresh } = usePoll(`/agents/${enc(pane)}/diff?path=${enc(filePath)}`, 10000, { enabled: !pick })
   const [busy, setBusy] = useState(null)
+  const [wrapRef, wrapW] = useWidth()
+  // While you drag, the comment box waits: opening it under the first line would push the rest
+  // down under the pointer.
+  const drag = useRef(null)
+  const [dragging, setDragging] = useState(false)
+  const lines = useMemo(() => numberDiff(data?.diff || ''), [data?.diff])
+  useEffect(() => {
+    const up = () => { if (drag.current != null) { drag.current = null; setDragging(false) } }
+    window.addEventListener('mouseup', up)
+    return () => window.removeEventListener('mouseup', up)
+  }, [])
   const undoHunk = async (hunk) => {
     if (!window.confirm('Undo this change? The lines go back to how they were at the last commit.')) return
     setBusy(hunk)
     try { await api(`/agents/${enc(pane)}/discard`, { method: 'POST', body: { path: filePath, hunk } }); refresh(); onChanged?.() } catch (e) { window.alert(e.message) } finally { setBusy(null) }
+  }
+  // Click a line to comment on it; shift-click, or drag down the line numbers, for several. On a
+  // phone, tap another line before you type to take in the lines between. Once you've typed, the
+  // comment stays put until you add or cancel it.
+  const choose = (i, e) => {
+    if (!onNote) return
+    if (pick && e.shiftKey) { window.getSelection?.().removeAllRanges(); return setPick({ a: pick.a, b: i }) }
+    if (window.getSelection?.().toString()) return // selecting text to copy
+    if (pick && text.trim()) return
+    if (pick && touchOnly()) return setPick({ a: pick.a, b: i })
+    setPick({ a: i, b: i }); setText('')
+  }
+  const grab = (i, e) => {
+    if (!onNote || e.button !== 0 || touchOnly() || (pick && text.trim() && !e.shiftKey)) return
+    e.preventDefault()
+    setDragging(true)
+    if (e.shiftKey && pick) { drag.current = pick.a; setPick({ a: pick.a, b: i }) } else { drag.current = i; setPick({ a: i, b: i }); setText('') }
+  }
+  const add = () => {
+    if (!pick || !text.trim()) return
+    onNote(noteOn(filePath, lines, pick.a, pick.b, text.trim()))
+    setPick(null); setText('')
   }
   let hunkNo = -1
   if (error) return <div className="viewer-empty"><p>{error}</p></div>
   if (!data) return <div className="pad"><div className="skeleton-rows"><div /><div /></div></div>
   if (!data.diff && data.note === 'image file') return <div className="img-view"><img src={`/api/agents/${enc(pane)}/raw?path=${enc(filePath)}`} alt={filePath} /></div>
   if (!data.diff) return <div className="viewer-empty"><p>{data.note || 'No textual changes'}</p></div>
+  // Comments show under the last of their lines, when those lines are still in the diff.
+  const at = new Map(lines.map((x, i) => [x.key, i]))
+  const under = new Map()
+  const noted = new Set()
+  for (const c of notes || []) {
+    const idx = c.keys.map((k) => at.get(k)).filter((i) => i != null)
+    if (!idx.length) continue
+    c.keys.forEach((k) => noted.add(k))
+    const last = Math.max(...idx)
+    under.set(last, [...(under.get(last) || []), c])
+  }
+  const lo = pick ? Math.min(pick.a, pick.b) : -1
+  const hi = pick ? Math.max(pick.a, pick.b) : -1
+  const draft = pick && noteOn(filePath, lines, pick.a, pick.b, '')
   return (
-    <pre className="diff-view">
-      {data.diff.split('\n').map((l, i) => {
-        const cls = l.startsWith('@@') ? 'hunk' : l.startsWith('+++') || l.startsWith('---') || l.startsWith('diff ') || l.startsWith('index ') ? 'meta' : l.startsWith('+') ? 'plus' : l.startsWith('-') ? 'minus' : ''
-        // Each change (hunk) can be undone on its own, except in a new file (undo the file instead).
-        if (cls === 'hunk' && !data.untracked) {
-          const n = ++hunkNo
-          return <div key={i} className="dl hunk hunk-row"><span>{l}</span><button className="hunk-undo" onClick={() => undoHunk(n)} disabled={busy != null}>{busy === n ? 'Undoing…' : 'Undo this change'}</button></div>
-        }
-        return <div key={i} className={`dl ${cls}`}>{l || ' '}</div>
-      })}
-    </pre>
+    <div className="diff-wrap" ref={wrapRef} style={{ '--diff-w': `${wrapW}px` }}>
+      <pre className={`diff-view ${onNote ? 'reviewing' : ''}`}>
+        {lines.map((x, i) => {
+          // Each change (hunk) can be undone on its own, except in a new file (undo the file instead).
+          if (x.cls === 'hunk' && !data.untracked) {
+            const n = ++hunkNo
+            return <div key={i} className="dl hunk hunk-row"><span className="dl-n" /><span>{x.l}</span><button className="hunk-undo" onClick={() => undoHunk(n)} disabled={busy != null}>{busy === n ? 'Undoing…' : 'Undo this change'}</button></div>
+          }
+          const row = (
+            <div key={i} className={`dl ${x.cls}${x.key && i >= lo && i <= hi ? ' pick' : ''}${noted.has(x.key) ? ' noted' : ''}`}
+              onClick={x.key ? (e) => choose(i, e) : undefined} onMouseEnter={x.key ? () => { if (drag.current != null) setPick({ a: drag.current, b: i }) } : undefined}>
+              <span className="dl-n" onMouseDown={x.key ? (e) => grab(i, e) : undefined}>{x.no ?? ''}</span>{x.l || ' '}
+            </div>
+          )
+          if (!under.has(i) && i !== hi) return row
+          return (
+            <Fragment key={i}>
+              {row}
+              {(under.get(i) || []).map((c) => (
+                <div key={c.id} className="rv-note">
+                  <Icon name="chat" size={12} /><span>{c.text}</span>
+                  <button className="win-btn" onClick={() => onDrop(c.id)} title="Remove comment" aria-label="Remove comment"><Icon name="x" size={11} /></button>
+                </div>
+              ))}
+              {i === hi && !dragging && (
+                <div className="rv-box">
+                  <div className="rv-where">{draft.keys.length > 1 ? 'Lines' : 'Line'} {draft.where.slice(filePath.length + 1)}<span className="muted">{touchOnly() ? 'Tap another line to take in more' : 'Shift-click or drag line numbers for more'}</span></div>
+                  <textarea autoFocus rows={2} value={text} onChange={(e) => setText(e.target.value)} placeholder="Your comment for the agent" aria-label="Comment"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); add() }
+                      if (e.key === 'Escape') { e.stopPropagation(); setPick(null) }
+                    }} />
+                  <div className="rv-acts">
+                    <button className="btn small" onClick={() => setPick(null)}>Cancel</button>
+                    <button className="btn small primary" onClick={add} disabled={!text.trim()}>Add comment</button>
+                  </div>
+                </div>
+              )}
+            </Fragment>
+          )
+        })}
+      </pre>
+    </div>
   )
 }
 
-export function ChangesView({ agent, onOpenFile }) {
+// The comments you've written, and sending them to the agent as one message.
+function ReviewTray({ notes, onDrop, onClear, onSend, onShow }) {
+  const [open, setOpen] = useState(false)
+  const [sending, setSending] = useState(false)
+  const send = async () => {
+    setSending(true)
+    try { if (await onSend(reviewMessage(notes))) onClear() } finally { setSending(false) }
+  }
+  return (
+    <div className="rv-tray">
+      {open && (
+        <ul className="rv-list">
+          {notes.map((c) => (
+            <li key={c.id}>
+              <button className="rv-loc" onClick={() => onShow(c.path)} title="Show in the diff">{c.where}</button>
+              <span className="rv-text">{c.text}</span>
+              <button className="win-btn" onClick={() => onDrop(c.id)} title="Remove comment" aria-label="Remove comment"><Icon name="x" size={11} /></button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="rv-bar">
+        <button className="rv-count" onClick={() => setOpen(!open)} aria-expanded={open} title={open ? 'Hide comments' : 'Show comments'}>
+          <Icon name="chat" size={13} /> Review <b>{notes.length}</b><Icon name="chevron" size={10} className={open ? 'rot90' : 'rot-up'} />
+        </button>
+        <span className="muted small rv-sub">{notes.length === 1 ? '1 comment' : `${notes.length} comments`}, sent as one message</span>
+        <button className="ghost-btn" onClick={() => { if (window.confirm(`Throw away ${notes.length === 1 ? 'this comment' : `these ${notes.length} comments`}?`)) onClear() }}>Clear</button>
+        <button className="btn small primary" onClick={send} disabled={sending}><Icon name="send" size={12} /> {sending ? 'Sending…' : 'Send review'}</button>
+      </div>
+    </div>
+  )
+}
+
+// ---------- Ship: push, and pull requests through gh ----------
+const PR_STATE = { OPEN: 'Open', MERGED: 'Merged', CLOSED: 'Closed' }
+function checksLine(c) {
+  const total = c ? c.pass + c.fail + c.pending : 0
+  if (!total) return null
+  if (c.fail) return { cls: 'bad', text: `${c.fail} of ${total} checks failing` }
+  if (c.pending) return { cls: 'wait', text: `${c.pending} of ${total} checks running` }
+  return { cls: 'ok', text: total === 1 ? 'Check passed' : `${total} checks passed` }
+}
+
+function PrDialog({ pane, branch, base: base0, uncommitted, onClose, onDone }) {
+  const [f, setF] = useState({ title: '', body: '', base: base0 || '', draft: false })
+  const [info, setInfo] = useState({ writing: true })
+  const [busy, setBusy] = useState(false)
+  const touched = useRef(false)
+  // A title and description from the branch's commits and diff, written by the cheapest model you
+  // can reach (or taken from the commits). Anything you type first is kept.
+  const write = useCallback((base, force) => {
+    setInfo({ writing: true })
+    return api(`/agents/${enc(pane)}/pr/draft`, { method: 'POST', body: { base } })
+      .then((d) => { if (force || !touched.current) { touched.current = false; setF((x) => ({ ...x, title: d.title, body: d.body, base: d.base })) } setInfo({ via: d.via, note: d.note }) })
+      .catch((e) => setInfo({ err: e.message }))
+  }, [pane])
+  useEffect(() => { write(base0) }, [write, base0])
+  const edit = (k) => (e) => { if (k === 'title' || k === 'body') touched.current = true; setF((x) => ({ ...x, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value })) }
+  const submit = async (e) => {
+    e.preventDefault()
+    if (!f.title.trim()) return
+    setBusy(true); setInfo((s) => ({ ...s, err: null }))
+    try { onDone(await api(`/agents/${enc(pane)}/pr`, { method: 'POST', body: f })); onClose() } catch (x) { setInfo((s) => ({ ...s, err: x.message })); setBusy(false) }
+  }
+  return createPortal(
+    <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) onClose() }}>
+      <form className="modal pr-dialog" onSubmit={submit} onKeyDown={(e) => { if (e.key === 'Escape' && !busy) { e.stopPropagation(); onClose() } }}>
+        <header className="modal-head"><Icon name="branch" size={15} /><h3>Open a pull request</h3></header>
+        <div className="pr-into small"><span className="mono">{branch}</span><span className="muted">into</span>
+          <input className="mono" value={f.base} onChange={edit('base')} aria-label="Base branch" spellCheck={false} />
+          <button type="button" className="link-btn" onClick={() => write(f.base, true)} disabled={info.writing || busy} title="Write the title and description again, for this base branch">Write again</button>
+        </div>
+        <label className="na-field"><span className="na-label">Title</span>
+          <input value={f.title} onChange={edit('title')} placeholder={info.writing ? 'Writing…' : 'What this pull request does'} autoFocus />
+        </label>
+        <label className="na-field"><span className="na-label">Description</span>
+          <textarea value={f.body} onChange={edit('body')} rows={9} placeholder={info.writing ? 'Writing from your commits…' : 'Optional'} />
+        </label>
+        <p className="small muted pr-info" role="status">
+          {info.writing ? <><Icon name="refresh" size={11} className="spin" /> Writing a title and description from your commits…</>
+            : info.err ? null : info.note || (info.via ? `Written by ${info.via}. Change anything you like.` : 'From your commit messages. Change anything you like.')}
+        </p>
+        {uncommitted > 0 && <p className="small na-warn">{uncommitted === 1 ? '1 uncommitted change isn\'t' : `${uncommitted} uncommitted changes aren't`} in it. Commit first to include {uncommitted === 1 ? 'it' : 'them'}.</p>}
+        {info.err && <p className="error-text small">{info.err}</p>}
+        <div className="modal-foot">
+          <label className="pr-draft small muted"><input type="checkbox" checked={f.draft} onChange={edit('draft')} /> Draft</label>
+          <button type="button" className="btn small" onClick={onClose} disabled={busy}>Cancel</button>
+          <button type="submit" className="btn small primary" disabled={busy || !f.title.trim() || !f.base.trim()}>{busy ? 'Pushing and opening…' : 'Create pull request'}</button>
+        </div>
+      </form>
+    </div>,
+    document.body,
+  )
+}
+
+export function ChangesView({ agent, onOpenFile, onSendReview }) {
   const [message, setMessage] = useState('')
-  const [committing, setCommitting] = useState(false)
+  const [committing, setCommitting] = useState(false) // false, 'commit', 'commit+push' or 'push'
   const [note, setNote] = useState(null)
+  const [prOpen, setPrOpen] = useState(false)
   const pane = agent.paneId
   const { data, error, refresh } = usePoll(`/agents/${enc(pane)}/git`, 8000)
+  // The branch's pull request, when the remote is on GitHub and gh is installed. The server keeps
+  // gh's answer a minute or more, so this stays cheap.
+  const prs = usePoll(data?.repo && data.remote && !data.detached ? `/agents/${enc(pane)}/pr` : null, 60000)
+  const [notes, setNotes] = useReview(pane)
   const undoFile = async (f) => {
     const what = f.status === 'untracked' || f.status === 'added' ? `Delete the new file ${f.path}?` : `Undo every change to ${f.path}? It goes back to how it was at the last commit.`
     if (!window.confirm(what)) return
     try { await api(`/agents/${enc(pane)}/discard`, { method: 'POST', body: { path: f.path } }); if (sel === f.path) setSel(null); refresh() } catch (e) { window.alert(e.message) }
   }
-  const commit = async (paths) => {
-    setCommitting(true); setNote(null)
+  // Commit, and push too when asked: the commit stands even if the push doesn't go through.
+  const commit = async (paths, andPush = false) => {
+    setCommitting(andPush ? 'commit+push' : 'commit'); setNote(null)
+    let hash = null
     try {
-      const r = await api(`/agents/${enc(pane)}/commit`, { method: 'POST', body: { message, paths } })
-      setMessage(''); setSel(null); setNote({ ok: true, text: `Committed ${r.hash}` }); refresh()
-    } catch (e) { setNote({ text: e.message }) } finally { setCommitting(false) }
+      hash = (await api(`/agents/${enc(pane)}/commit`, { method: 'POST', body: { message, paths } })).hash
+      // The new list first, so a committed file isn't picked again from the old one.
+      setMessage(''); await refresh(); setSel(null)
+      const p = andPush ? await api(`/agents/${enc(pane)}/push`, { method: 'POST' }) : null
+      setNote({ ok: true, text: p ? `Committed ${hash} and pushed to ${p.remote}` : `Committed ${hash}` })
+      if (p) prs.refresh()
+    } catch (e) { setNote({ text: hash ? `Committed ${hash}, but the push didn't go through. ${e.message}` : e.message }) } finally { setCommitting(false); refresh() }
+  }
+  const push = async () => {
+    setCommitting('push'); setNote(null)
+    try { const p = await api(`/agents/${enc(pane)}/push`, { method: 'POST' }); setNote({ ok: true, text: `Pushed ${p.branch} to ${p.remote}` }); prs.refresh() } catch (e) { setNote({ text: e.message }) } finally { setCommitting(false); refresh() }
   }
   const [sel, setSel] = useState(null)
   const [listW, setListW] = usePersisted('cc-changes-w', 280)
@@ -514,55 +763,99 @@ export function ChangesView({ agent, onOpenFile }) {
   if (!data.repo) return <div className="viewer-empty"><Icon name="branch" size={24} /><p>This folder isn't a git repository.</p></div>
   const adds = data.files.reduce((s, f) => s + (f.add || 0), 0)
   const dels = data.files.reduce((s, f) => s + (f.del || 0), 0)
+  const pr = prs.data?.pr
+  const checks = checksLine(pr?.checks)
+  // Push when the branch has commits the remote doesn't (or isn't there at all yet).
+  const canPush = !!data.remote && !data.detached && !!data.lastCommit && (!data.upstream || data.ahead > 0)
+  const canPr = !!prs.data?.github && prs.data.gh && !data.detached && data.branch !== prs.data.base && pr?.state !== 'OPEN'
+  const fileNotes = (p) => notes.filter((c) => c.path === p)
   return (
-    <div className={`files-view ${narrow ? 'narrow' : ''}`} ref={boxRef}>
-      <aside className="tree" style={narrow ? undefined : { width: listW }} hidden={narrow && !!sel}>
-        <div className="tree-head changes-head">
-          <span className="tree-root"><Icon name="branch" size={13} /> {data.branch}</span>
-          {(data.ahead > 0 || data.behind > 0) && <span className="muted small">↑{data.ahead} ↓{data.behind}</span>}
-          <span className="chg-count"><span className="plus">+{adds}</span> <span className="minus">−{dels}</span></span>
-        </div>
-        <div className="tree-scroll">
-          {data.files.length === 0 && <p className="muted pad small">No uncommitted changes.{data.lastCommit ? ` Last commit ${data.lastCommit.hash}: ${data.lastCommit.subject} (${data.lastCommit.when}).` : ''}</p>}
-          {data.files.map((f) => (
-            <button key={f.path} className={`tree-row chg-row ${sel === f.path ? 'on' : ''}`} onClick={() => setSel(f.path)} title={f.path}>
-              <span className={`chg-badge s-${STATUS[f.status]?.[1]}`}>{STATUS[f.status]?.[0] || '?'}</span>
-              <span className="tree-name">{f.path.split('/').pop()}</span>
-              <span className="chg-dir">{parentOf(f.path)}</span>
-              {(f.add || f.del) ? <span className="chg-n"><span className="plus">+{f.add}</span><span className="minus">−{f.del}</span></span> : null}
-              <span role="button" tabIndex={0} className="chg-undo" title={f.status === 'untracked' ? 'Delete this new file' : 'Undo every change to this file'} aria-label={`Undo changes to ${f.path}`}
-                onClick={(e) => { e.stopPropagation(); undoFile(f) }} onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); undoFile(f) } }}><Icon name="x" size={11} /></span>
-            </button>
-          ))}
-        </div>
-        {data.files.length > 0 && (
-          <form className="commit-box" onSubmit={(e) => { e.preventDefault(); commit(null) }}>
-            <textarea value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Commit message" rows={2} aria-label="Commit message"
-              onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commit(null) } }} />
-            <div className="commit-acts">
-              {sel && <button type="button" className="btn small" disabled={!message.trim() || committing} onClick={() => commit([sel])} title={`Commit only ${sel}`}>This file</button>}
-              <button type="submit" className="btn small primary" disabled={!message.trim() || committing}>{committing ? 'Committing…' : `Commit all ${data.files.length}`}</button>
+    <div className="changes-view">
+      <div className={`files-view ${narrow ? 'narrow' : ''}`} ref={boxRef}>
+        <aside className="tree" style={narrow ? undefined : { width: listW }} hidden={narrow && !!sel}>
+          <div className="tree-head changes-head">
+            <span className="tree-root"><Icon name="branch" size={13} /> {data.branch}</span>
+            {(data.ahead > 0 || data.behind > 0) && <span className="muted small">↑{data.ahead} ↓{data.behind}</span>}
+            <span className="chg-count"><span className="plus">+{adds}</span> <span className="minus">−{dels}</span></span>
+          </div>
+          {pr && (
+            <a className={`pr-strip pr-${String(pr.state).toLowerCase()}`} href={pr.url} target="_blank" rel="noreferrer" title={`${pr.title}\nOpen on GitHub`}>
+              <b>#{pr.number}</b>
+              <span className="pr-state">{pr.draft && pr.state === 'OPEN' ? 'Draft' : PR_STATE[pr.state] || pr.state}</span>
+              {checks && <span className={`pr-checks ${checks.cls}`}>{checks.text}</span>}
+              <span className="pr-title">{pr.title}</span>
+              <Icon name="external" size={11} />
+            </a>
+          )}
+          <div className="tree-scroll">
+            {data.files.length === 0 && <p className="muted pad small">No uncommitted changes.{data.lastCommit ? ` Last commit ${data.lastCommit.hash}: ${data.lastCommit.subject} (${data.lastCommit.when}).` : ''}</p>}
+            {data.files.map((f) => {
+              const n = onSendReview ? fileNotes(f.path).length : 0
+              return (
+                <button key={f.path} className={`tree-row chg-row ${sel === f.path ? 'on' : ''}`} onClick={() => setSel(f.path)} title={f.path}>
+                  <span className={`chg-badge s-${STATUS[f.status]?.[1]}`}>{STATUS[f.status]?.[0] || '?'}</span>
+                  <span className="tree-name">{f.path.split('/').pop()}</span>
+                  <span className="chg-dir">{parentOf(f.path)}</span>
+                  {n > 0 && <span className="chg-notes" title={`${n} review comment${n > 1 ? 's' : ''}`}><Icon name="chat" size={10} />{n}</span>}
+                  {(f.add || f.del) ? <span className="chg-n"><span className="plus">+{f.add}</span><span className="minus">−{f.del}</span></span> : null}
+                  <span role="button" tabIndex={0} className="chg-undo" title={f.status === 'untracked' ? 'Delete this new file' : 'Undo every change to this file'} aria-label={`Undo changes to ${f.path}`}
+                    onClick={(e) => { e.stopPropagation(); undoFile(f) }} onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); undoFile(f) } }}><Icon name="x" size={11} /></span>
+                </button>
+              )
+            })}
+          </div>
+          {data.files.length > 0 && (
+            <form className="commit-box" onSubmit={(e) => { e.preventDefault(); commit(null) }}>
+              <textarea value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Commit message" rows={2} aria-label="Commit message"
+                onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commit(null) } }} />
+              <div className="commit-acts">
+                {sel && <button type="button" className="btn small" disabled={!message.trim() || !!committing} onClick={() => commit([sel])} title={`Commit only ${sel}`}>This file</button>}
+                <button type="submit" className="btn small primary" disabled={!message.trim() || !!committing}>{committing === 'commit' ? 'Committing…' : `Commit all ${data.files.length}`}</button>
+                {data.remote && !data.detached && <button type="button" className="btn small" disabled={!message.trim() || !!committing} onClick={() => commit(null, true)} title={`Commit all, then push ${data.branch} to ${data.remote}`}>{committing === 'commit+push' ? 'Pushing…' : 'Commit & push'}</button>}
+              </div>
+            </form>
+          )}
+          {(canPush || canPr || note || prs.data?.error) && (
+            <div className="ship-box">
+              {(canPush || canPr) && (
+                <div className="ship-row">
+                  <span className="muted small">{!canPush ? `Up to date with ${data.upstream}` : !data.upstream ? `Not on ${data.remote} yet` : `${data.ahead} commit${data.ahead > 1 ? 's' : ''} to push`}</span>
+                  {canPush && <button className="btn small" onClick={push} disabled={!!committing}>{committing === 'push' ? 'Pushing…' : 'Push'}</button>}
+                  {canPr && <button className="btn small" onClick={() => setPrOpen(true)} disabled={!!committing} title={`Open a pull request for ${data.branch} on GitHub`}>Pull request</button>}
+                </div>
+              )}
+              {prs.data?.error && <p className="small muted">{prs.data.error}</p>}
+              {note && <p className={`small ${note.ok ? 'ok-text' : 'error-text'}`} role="status">{note.text}</p>}
             </div>
-            {note && <p className={`small ${note.ok ? 'ok-text' : 'error-text'}`}>{note.text}</p>}
-          </form>
-        )}
-        {data.lastCommit && data.files.length > 0 && <div className="tree-foot muted small">HEAD {data.lastCommit.hash} · {data.lastCommit.when}</div>}
-      </aside>
-      {!narrow && <Handle axis="x" size={listW} min={180} max={520} onSize={setListW} label="Resize changes list" />}
-      <section className="viewer-wrap" hidden={narrow && !sel}>
-        {sel ? (
-          <div className="viewer">
-            <div className="viewer-head">
-              {narrow && <button className="win-btn narrow-back" onClick={() => setSel(null)} aria-label="Back to changes"><Icon name="chevron" size={15} className="flip" /></button>}
-              <div className="crumbs"><b>{sel}</b></div>
-              <div className="viewer-tools">
-                <button className="ghost-btn" onClick={() => onOpenFile(sel)}><Icon name="file" size={12} /> Open file</button>
+          )}
+          {data.lastCommit && data.files.length > 0 && <div className="tree-foot muted small">HEAD {data.lastCommit.hash} · {data.lastCommit.when}</div>}
+        </aside>
+        {!narrow && <Handle axis="x" size={listW} min={180} max={520} onSize={setListW} label="Resize changes list" />}
+        <section className="viewer-wrap" hidden={narrow && !sel}>
+          {sel ? (
+            <div className="viewer">
+              <div className="viewer-head">
+                {narrow && <button className="win-btn narrow-back" onClick={() => setSel(null)} aria-label="Back to changes"><Icon name="chevron" size={15} className="flip" /></button>}
+                <div className="crumbs"><b>{sel}</b></div>
+                <div className="viewer-tools">
+                  <button className="ghost-btn" onClick={() => onOpenFile(sel)}><Icon name="file" size={12} /> Open file</button>
+                </div>
+              </div>
+              <div className="viewer-body">
+                <DiffView key={sel} pane={pane} filePath={sel} onChanged={refresh} notes={fileNotes(sel)}
+                  onNote={onSendReview ? (c) => setNotes((l) => [...l, c]) : null} onDrop={(id) => setNotes((l) => l.filter((c) => c.id !== id))} />
               </div>
             </div>
-            <div className="viewer-body"><DiffView pane={pane} filePath={sel} onChanged={refresh} /></div>
-          </div>
-        ) : <div className="viewer-empty"><p>Select a changed file</p></div>}
-      </section>
+          ) : <div className="viewer-empty"><p>{!data.files.length ? 'Nothing to review' : onSendReview ? 'Select a changed file. Click a line in its diff to comment on it for the agent.' : 'Select a changed file'}</p></div>}
+        </section>
+      </div>
+      {onSendReview && notes.length > 0 && (
+        <ReviewTray notes={notes} onDrop={(id) => setNotes((l) => l.filter((c) => c.id !== id))} onClear={() => setNotes(() => [])} onSend={onSendReview} onShow={setSel} />
+      )}
+      {prOpen && (
+        <PrDialog pane={pane} branch={data.branch} base={prs.data?.base} uncommitted={data.files.length} onClose={() => setPrOpen(false)}
+          onDone={(r) => { setNote({ ok: true, text: r.number ? `Opened pull request #${r.number}` : 'Opened the pull request' }); prs.refresh(); refresh() }} />
+      )}
     </div>
   )
 }

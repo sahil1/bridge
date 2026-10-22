@@ -10,6 +10,10 @@ const HOME = os.homedir()
 const SKIP = new Set(['node_modules', '.git', 'dist', 'build', '__pycache__', '.venv', 'venv', '.next', '.cache'])
 const MAX_FILES = 40000
 const cache = new Map()
+// Agents often work in Desktop or Documents, which macOS can hold a look into until you answer
+// its permission prompt: nothing here blocks, so only this request waits for it.
+const exists = (p) => fs.promises.access(p).then(() => true, () => false)
+const readdir = (dir) => fs.promises.readdir(dir, { withFileTypes: true })
 
 const gitFiles = (cwd) => new Promise((resolve) => {
   execFile('git', ['-C', cwd, 'ls-files', '-co', '--exclude-standard', '-z'], { timeout: 8000, maxBuffer: 64 * 1024 * 1024 }, (err, out) => {
@@ -17,13 +21,13 @@ const gitFiles = (cwd) => new Promise((resolve) => {
   })
 })
 
-function walk(cwd) {
+async function walk(cwd) {
   const out = []
   const stack = ['']
   while (stack.length && out.length < MAX_FILES) {
     const rel = stack.pop()
     let ents = []
-    try { ents = fs.readdirSync(path.join(cwd, rel), { withFileTypes: true }) } catch { continue }
+    try { ents = await readdir(path.join(cwd, rel)) } catch { continue }
     for (const e of ents) {
       if (e.name.startsWith('.') || SKIP.has(e.name)) continue
       const p = rel ? `${rel}/${e.name}` : e.name
@@ -36,19 +40,13 @@ function walk(cwd) {
 // Repos kept inside another repo (often ignored by it, like a code repo inside a notes vault) are
 // otherwise invisible; list their files too, one or two folders down.
 function nestedRepos(cwd) {
-  const out = []
-  const look = (rel, depth) => {
+  const look = async (rel, depth) => {
     let ents = []
-    try { ents = fs.readdirSync(path.join(cwd, rel), { withFileTypes: true }) } catch { return }
-    for (const e of ents) {
-      if (!e.isDirectory() || e.name.startsWith('.') || SKIP.has(e.name)) continue
-      const p = rel ? `${rel}/${e.name}` : e.name
-      if (fs.existsSync(path.join(cwd, p, '.git'))) out.push(p)
-      else if (depth < 2) look(p, depth + 1)
-    }
+    try { ents = await readdir(path.join(cwd, rel)) } catch { return [] }
+    const dirs = ents.filter((e) => e.isDirectory() && !e.name.startsWith('.') && !SKIP.has(e.name)).map((e) => (rel ? `${rel}/${e.name}` : e.name))
+    return (await Promise.all(dirs.map(async (p) => ((await exists(path.join(cwd, p, '.git'))) ? [p] : depth < 2 ? look(p, depth + 1) : [])))).flat()
   }
-  look('', 1)
-  return out
+  return look('', 1)
 }
 
 async function index(cwd) {
@@ -57,11 +55,11 @@ async function index(cwd) {
   let files = await gitFiles(cwd)
   if (files) {
     const have = new Set(files)
-    for (const sub of nestedRepos(cwd)) {
+    for (const sub of await nestedRepos(cwd)) {
       if (files.length >= MAX_FILES) break
       for (const f of (await gitFiles(path.join(cwd, sub))) || []) { const p = `${sub}/${f}`; if (!have.has(p)) files.push(p) }
     }
-  } else files = walk(cwd)
+  } else files = await walk(cwd)
   const dirs = new Set()
   for (const f of files) {
     let i = f.lastIndexOf('/')
@@ -91,7 +89,7 @@ const up = (to) => ({ path: to, dir: true, label: '..', hint: 'Up one level' })
 
 // Paths outside the agent's folder ("~/…" or "/…") browse one level at a time, within home.
 // "~/Desk" matches names starting with (then containing) "desk".
-function listDir(q) {
+async function listDir(q) {
   if (q === '~') q = '~/'
   const full = q.startsWith('~') ? path.join(HOME, q.slice(1)) : q
   const endsSlash = q.endsWith('/')
@@ -100,7 +98,7 @@ function listDir(q) {
   const prefix = endsSlash ? '' : path.basename(full).toLowerCase()
   const shown = endsSlash ? q : q.slice(0, q.length - path.basename(full).length)
   let ents = []
-  try { ents = fs.readdirSync(dir, { withFileTypes: true }) } catch { return [] }
+  try { ents = await readdir(dir) } catch { return [] }
   const items = ents
     .filter((e) => e.name.toLowerCase().includes(prefix) && (prefix.startsWith('.') || !e.name.startsWith('.')))
     .map((e) => ({ path: `${shown}${e.name}${e.isDirectory() ? '/' : ''}`, dir: e.isDirectory(), r: e.name.toLowerCase().startsWith(prefix) ? 0 : 1 }))
@@ -116,13 +114,14 @@ const PLACES = [['~/', 'Home'], ['~/Desktop/', 'Desktop'], ['~/Documents/', 'Doc
 
 export async function search(cwd, query) {
   const q = String(query || '').trim()
-  if (q.startsWith('/') || q.startsWith('~')) return { items: listDir(q) }
-  if (!cwd || !fs.existsSync(cwd)) return { items: [] }
+  if (q.startsWith('/') || q.startsWith('~')) return { items: await listDir(q) }
+  if (!cwd || !(await exists(cwd))) return { items: [] }
   const all = await index(cwd)
   if (!q) {
     // Nothing typed yet: this folder's top level, a way up, then the usual places.
     const top = all.filter((e) => !e.path.replace(/\/$/, '').includes('/')).sort(byName).slice(0, 60)
-    const places = PLACES.filter(([p]) => fs.existsSync(path.join(HOME, p.slice(1))) && path.join(HOME, p.slice(1)).replace(/\/$/, '') !== cwd)
+    const there = await Promise.all(PLACES.map(([p]) => exists(path.join(HOME, p.slice(1)))))
+    const places = PLACES.filter(([p], i) => there[i] && path.join(HOME, p.slice(1)).replace(/\/$/, '') !== cwd)
       .map(([p, label]) => ({ path: p, dir: true, label, hint: p, place: true }))
     const parent = cwd !== HOME && cwd.startsWith(HOME + path.sep) ? [up(tilde(path.dirname(cwd)))] : []
     return { items: [...top, ...parent, ...places], total: all.length }

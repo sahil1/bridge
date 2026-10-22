@@ -9,8 +9,8 @@ import pty from 'node-pty'
 import headless from '@xterm/headless'
 import { adapter, loginPath, newSessionId, installed } from '../agents.js'
 import { discoverSession, locate } from '../transcripts.js'
-import { dataFile, ensureDir, DATA } from '../paths.js'
-import { shellCommand, agentEnv } from './spawn.js'
+import { dataFile, ensureDir, DATA, IS_WIN } from '../paths.js'
+import { shellCommand, agentEnv, SETUP_DONE } from './spawn.js'
 import { providerEnv } from '../providers.js'
 import * as accounts from '../accounts.js'
 
@@ -54,7 +54,7 @@ function save() {
   try { fs.writeFileSync(STATE, JSON.stringify(out, null, 2)) } catch { /* read-only disk: keep going */ }
 }
 
-async function spawnPane({ paneId, tabId, workspaceId, kind, cwd, sessionId, resume, fork, opening, model, account }) {
+async function spawnPane({ paneId, tabId, workspaceId, kind, cwd, sessionId, resume, fork, opening, model, account, setup }) {
   const a = adapter(kind)
   const PATH = await loginPath()
   let bin = null
@@ -76,16 +76,19 @@ async function spawnPane({ paneId, tabId, workspaceId, kind, cwd, sessionId, res
     }
     if (model && a.model) args = [...a.model(model), ...args]
   }
-  const [file, argv] = shellCommand(bin, args)
-  const proc = pty.spawn(file, argv, { name: 'xterm-256color', cols: COLS, rows: ROWS, cwd: fs.existsSync(cwd) ? cwd : process.env.HOME, env: agentEnv(PATH, { ...providerEnv(), ...accounts.envFor(kind, account) }) })
+  const [file, argv] = shellCommand(bin, args, setup, cwd)
+  // Checked without blocking: macOS can hold a look into Desktop or Documents until you answer its
+  // permission prompt, and the rest of Bridge AI shouldn't wait for that.
+  const there = await fs.promises.access(cwd).then(() => true, () => false)
+  const proc = pty.spawn(file, argv, { name: 'xterm-256color', cols: COLS, rows: ROWS, cwd: there ? cwd : process.env.HOME, env: agentEnv(PATH, { ...providerEnv(), ...accounts.envFor(kind, account) }) })
   const term = new Terminal({ cols: COLS, rows: ROWS, scrollback: 5000, allowProposedApi: true })
   const p = {
     paneId, tabId, workspaceId, kind, cwd, model: model || null, sessionId: sessionId || null, account: account || null, proc, term,
-    title: '', status: kind === 'shell' ? null : 'idle', seq: 0, seen: true,
+    title: '', status: kind === 'shell' ? null : 'idle', seq: 0, seen: true, setupPending: !!setup && !IS_WIN,
     startedAt: Date.now(), lastOutput: 0, lastInput: 0, clients: new Set(),
   }
   term.onTitleChange((t) => { p.title = t })
-  proc.onData((d) => { term.write(d); p.lastOutput = Date.now(); for (const c of p.clients) c.onData(d) })
+  proc.onData((d) => { if (p.setupPending && d.includes(SETUP_DONE)) p.setupPending = false; term.write(d); p.lastOutput = Date.now(); for (const c of p.clients) c.onData(d) })
   proc.onExit(() => {
     for (const c of p.clients) c.onExit?.()
     if (stopping) return
@@ -94,15 +97,18 @@ async function spawnPane({ paneId, tabId, workspaceId, kind, cwd, sessionId, res
 
   // An opening prompt the CLI can't take as an argument: type it in once the agent settles.
   if (opening && kind !== 'shell' && !a.promptArg) {
-    const begun = Date.now()
+    let begun = Date.now()
     const tick = setInterval(() => {
+      if (!panes.has(paneId)) return clearInterval(tick)
+      if (p.setupPending && Date.now() - p.startedAt < 15 * 60000) { begun = Date.now(); return }
       const quiet = Date.now() - p.lastOutput > 1500 && Date.now() - begun > 2500
       if (quiet || Date.now() - begun > 25000) { clearInterval(tick); prompt(paneId, opening).catch(() => {}) }
     }, 500)
   }
-  // Agents that name their own session (Codex): find it in their transcript folder.
+  // Agents that name their own session (Codex): find it in their transcript folder (later too
+  // when a setup command runs first).
   if (a.sessionId === 'discover' && !p.sessionId) {
-    for (const ms of [3000, 8000, 20000, 45000]) {
+    for (const ms of [3000, 8000, 20000, 45000, ...(setup ? [90000, 180000, 300000, 600000] : [])]) {
       setTimeout(() => {
         if (p.sessionId || !panes.has(paneId)) return
         const sid = discoverSession(kind, p.cwd, p.startedAt)
@@ -350,7 +356,8 @@ export async function moveTab(tabId, index) {
 }
 
 // resume: a session id to open again; fork: a session id to copy into a new conversation.
-export async function launch({ kind = 'claude', cwd, label, workspaceId, newSpace, prompt: opening, model, account, resume, fork }) {
+// setup: { command, cwd } run in the terminal before the agent starts (a new worktree's `npm install`).
+export async function launch({ kind = 'claude', cwd, label, workspaceId, newSpace, prompt: opening, model, account, resume, fork, setup }) {
   const space = String(newSpace || '').trim()
   let ws = !space && workspaceId ? spaces.find((w) => w.id === workspaceId) : null
   if (!ws) { ws = { id: `w${id()}`, label: (space || label || 'Space').slice(0, 80) }; spaces.push(ws) }
@@ -359,7 +366,7 @@ export async function launch({ kind = 'claude', cwd, label, workspaceId, newSpac
   tabs.push(tab)
   const paneId = `${ws.id}:p${id()}`
   try {
-    await spawnPane({ paneId, tabId: tab.tabId, workspaceId: ws.id, kind, cwd, opening, model, account, sessionId: resume || undefined, resume: !!resume, fork })
+    await spawnPane({ paneId, tabId: tab.tabId, workspaceId: ws.id, kind, cwd, opening, model, account, sessionId: resume || undefined, resume: !!resume, fork, setup })
   } catch (e) {
     // Don't leave an empty tab (or space) behind.
     tabs = tabs.filter((t) => t !== tab)

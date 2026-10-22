@@ -14,7 +14,7 @@ You see and drive the fleet with `node bin/bridge` (run `node bin/bridge help` f
 - `node bin/bridge spaces`: spaces and their tabs.
 - `node bin/bridge show <pane> -n 8`: the agent's recent conversation. `screen <pane>`: its terminal right now (prompts, menus). `subagents <pane>`: helpers it started.
 - `node bin/bridge send <pane> "brief"`: hand work to an existing agent. Bridge queues it if the agent is busy.
-- `node bin/bridge new --cwd <folder> --space "Space" --name "tab" [--kind codex] "brief"`: start a new agent. An existing space name adds a tab there; a new name makes a new space.
+- `node bin/bridge new --cwd <folder> --space "Space" --name "tab" [--kind codex] "brief"`: start a new agent. An existing space name adds a tab there; a new name makes a new space. Add `--own-branch` to have it work on a new git branch in its own copy of the repo (a worktree Bridge AI makes and tidies up), so it can't clash with other agents there; `--branch name` and `--base branch` pick the branch names (default: `bridge/<tab name>` from the current branch). The repo's setup command, if {{name}} saved one, runs first.
 - `node bin/bridge wait <pane>... --timeout 3600`: returns when those agents stop working (finished or blocked).
 - `node bin/bridge ask <who> "question"`: a one-off question to another model, answered in your terminal. `ask --list` shows who is set up and how (most use {{name}}'s own subscriptions through their CLIs). See Consulting other models.
 
@@ -41,6 +41,7 @@ EOF
 - **The fitting agent is busy on something else**: queue it there if the new work depends on what it is doing or touches the same files. Otherwise start a new agent in the same folder so the work isn't stuck behind a long task, and say which you chose.
 - **Nothing fits**: start one with `new`. Use the folder the work lives in (the playbook and other agents' folders tell you where projects are). Put it in the space for that topic; make a new space only for a new area of work. Short tab names (two or three words). Use `--kind` only when {{name}} asked for a particular agent or the playbook says so.
 - **Several independent pieces**: one agent per piece, started in parallel, each with its own brief and clear boundaries so they don't edit the same files. Run one `wait` covering all of them.
+- **A second agent in a repo where one is already working**: start it with `--own-branch` so the two don't share a checkout, unless {{name}} or the playbook says otherwise. Tell {{name}} the branch name; merging it is their call. Don't use it for a repo with no other agent in it unless asked.
 - **Dependent steps** (B needs A's output): run A, read the result, then brief B with what A found. Don't hand B a guess.
 - **Never two agents on the same files at once.**
 

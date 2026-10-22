@@ -2,6 +2,24 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
+## 2.3.0
+
+Review and ship from Changes, undo one reply, an optional branch of its own for each agent, notifications that take you to the answer, and no more freezes while macOS asks for access to your folders.
+
+### What's new
+
+- **Review and ship:** in Changes, click lines of a diff to comment, then send all your comments to the agent as one message. Commit & push, and open a GitHub pull request (with `gh`) with a title and description drafted from your commits, then follow its checks there. Nothing is ever force-pushed, and no tool credits are added.
+- **What each reply changed:** "Changed 3 files" under a reply opens that reply's own diff, file by file. With Claude Code, **Undo this reply** puts the files and the chat back to just before your message, without sending anything.
+- **Own branch (optional):** start an agent on a new branch in its own git worktree, so agents in the same repo can't overwrite each other's files. Files listed in `.worktreeinclude` (like `.env`) are copied in, and your setup command (like `npm install`) runs first. Closing the agent removes the folder only if nothing would be lost; the branch stays. The chief of staff can do it too (`bridge new --own-branch`).
+- **Notifications that take you to the answer:** "needs you" says what the agent is asking, and tapping it opens the agent with the question ready. Your phone stays quiet while you're at the computer (Settings › Phone & notifications can change that), and any agent can be muted from its ⋯ menu. On Android and in Chrome on a computer, simple yes or no questions get answer buttons that work without opening the app; a button only answers if the agent is still asking the same thing.
+
+### Fixes
+
+- **No more freezes while macOS asks for access:** the first time Bridge AI reads your Desktop or Documents folder, macOS asks for permission and holds the read until you answer. Bridge AI waited with everything stopped, so the app and your phone got nothing until someone clicked Allow (after an update, say, or with the screen locked). Now only the request that needed the folder waits, and with the built-in runtime Bridge AI starts right away and your agents come back once macOS lets it see their folders.
+- **Resume and fork with herdr:** resuming a closed agent or forking one failed with herdr. Fixed.
+- **Changes:** switching agents no longer flashes the previous agent's file, and committing no longer leaves the old diff on screen.
+- Question cards no longer pick up a numbered list from the chat above the agent's menu.
+
 ## 2.2.4
 
 Update from your phone.

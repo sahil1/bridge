@@ -1,5 +1,6 @@
 // Bridge AI's service worker: what makes it an installable app on your phone.
-//   Notifications: shows pushes ("API tests needs you") and opens that agent when you tap one.
+//   Notifications: shows pushes ("API tests needs you" and what it asks) and opens that agent when
+//   you tap one. Simple questions get answer buttons, where the browser shows them.
 //   Speed: keeps the app's built files, so it opens instantly; the page itself is always fetched
 //   fresh, so updates show up. When your computer can't be reached, it says so.
 const ASSETS = 'bridge-assets-v1'
@@ -36,13 +37,16 @@ self.addEventListener('push', (e) => {
     // Already looking at Bridge AI? It shows this itself.
     const open = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
     if (open.some((c) => c.visibilityState === 'visible' && c.focused)) return
+    // Answer buttons, up to what this browser shows (Chrome: 2; iPhone: none).
+    const actions = (n.actions || []).slice(0, self.Notification?.maxActions || 0)
     await self.registration.showNotification(n.title || 'Bridge AI', {
       body: n.body || '',
       tag: n.tag || undefined,
       renotify: !!n.tag,
       icon: '/icon-512.png',
       badge: '/icon-512.png',
-      data: { url: n.url || '/' },
+      data: { url: n.url || '/', actions },
+      ...(actions.length ? { actions: actions.map(({ action, title }) => ({ action, title })) } : {}),
       requireInteraction: n.kind === 'needs-you',
     })
   })())
@@ -50,14 +54,46 @@ self.addEventListener('push', (e) => {
 
 self.addEventListener('notificationclick', (e) => {
   e.notification.close()
-  const url = new URL(e.notification.data?.url || '/', location.origin).href
-  e.waitUntil((async () => {
-    const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
-    const win = wins.find((c) => new URL(c.url).origin === location.origin)
-    if (win) { await win.focus(); win.postMessage({ type: 'open', url }); return }
-    await self.clients.openWindow(url)
-  })())
+  e.waitUntil(clicked(e.notification, e.action))
 })
+
+// A tap opens Bridge AI at that agent. A button answers it from here, without opening anything,
+// if the same question is still waiting (your computer checks); otherwise Bridge AI opens.
+async function clicked(n, action) {
+  const d = n.data || {}
+  const pick = action && (d.actions || []).find((a) => a.action === action)
+  let url = d.url || '/'
+  if (pick) {
+    const r = await answer(pick.token)
+    if (r?.ok) return answered(n, pick)
+    url = r?.url || url
+  }
+  return openApp(new URL(url, location.origin).href, n)
+}
+
+// Quick, or the browser no longer lets this open a window for the tap.
+async function answer(token) {
+  try {
+    const res = await fetch('/api/notify/answer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }), signal: AbortSignal.timeout(6000) })
+    return res.ok ? await res.json() : null
+  } catch { return null }
+}
+
+// Says it went through, briefly and without a sound.
+async function answered(n, pick) {
+  const tag = `${n.tag || 'bridge'}-answered`
+  await self.registration.showNotification(n.title, { body: `Answered: ${pick.title}`, tag, silent: true, icon: '/icon-512.png', badge: '/icon-512.png', data: { url: n.data?.url || '/' } })
+  await new Promise((r) => setTimeout(r, 4000))
+  for (const x of await self.registration.getNotifications({ tag })) x.close()
+}
+
+async function openApp(url, n) {
+  const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+  const win = wins.find((c) => new URL(c.url).origin === location.origin)
+  if (win) { await win.focus().catch(() => {}); win.postMessage({ type: 'open', url }); return }
+  // Too long after the tap for the browser to open a window: leave a notification that does.
+  await self.clients.openWindow(url).catch(() => self.registration.showNotification(n.title, { body: 'Open Bridge AI to answer', tag: n.tag || undefined, icon: '/icon-512.png', badge: '/icon-512.png', data: { url } }))
+}
 
 const OFFLINE = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Bridge AI</title>
 <style>body{margin:0;min-height:100vh;display:grid;place-items:center;font:15px -apple-system,system-ui,sans-serif;background:#0f1115;color:#c9ced8;text-align:center;padding:24px;box-sizing:border-box}

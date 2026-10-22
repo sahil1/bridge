@@ -25,17 +25,21 @@ function state() {
 
 export const publicKey = () => state().keys.publicKey
 
+// Devices on this computer (its browser) still get notified while you're at it; phones don't.
+// Those added before this was noted: a computer's name says so ("Mac, Chrome").
+const isHere = (dev) => dev.here ?? /^(Mac|Windows|Linux)\b/.test(dev.label)
+
 export function devices() {
-  return state().devices.map(({ id, label, addedAt, lastOk }) => ({ id, label, addedAt, lastOk }))
+  return state().devices.map((dev) => ({ id: dev.id, label: dev.label, addedAt: dev.addedAt, lastOk: dev.lastOk, here: isHere(dev) }))
 }
 
-export function subscribe(sub, label) {
+export function subscribe(sub, label, here = false) {
   if (!sub?.endpoint || !sub?.keys?.p256dh || !sub?.keys?.auth) throw new Error('Not a push subscription')
   if (!/^https:\/\//.test(sub.endpoint)) throw new Error('Push endpoints must be https')
   const d = state()
   const id = Buffer.from(sub.endpoint).toString('base64url').slice(-16)
   d.devices = d.devices.filter((x) => x.sub.endpoint !== sub.endpoint)
-  d.devices.push({ id, label: String(label || 'Device').slice(0, 60), addedAt: new Date().toISOString(), sub: { endpoint: sub.endpoint, keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth } } })
+  d.devices.push({ id, label: String(label || 'Device').slice(0, 60), here: !!here, addedAt: new Date().toISOString(), sub: { endpoint: sub.endpoint, keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth } } })
   write(d)
   return { id }
 }
@@ -55,10 +59,10 @@ export const channel = {
   async send(note) {
     const d = state()
     const opts = { vapidDetails: { subject: 'https://github.com/sahil1/bridge', publicKey: d.keys.publicKey, privateKey: d.keys.privateKey }, TTL: 60 * 60, urgency: note.kind === 'needs-you' ? 'high' : 'normal', topic: (note.tag || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 32) || undefined }
-    const payload = JSON.stringify({ title: note.title, body: note.body, url: note.url || '/', tag: note.tag, kind: note.kind })
+    const payload = JSON.stringify({ title: note.title, body: note.body, url: note.url || '/', tag: note.tag, kind: note.kind, actions: note.actions?.length ? note.actions : undefined })
     let sent = 0
     const gone = []
-    await Promise.all(d.devices.map(async (dev) => {
+    await Promise.all(d.devices.filter((dev) => !note.onlyHere || isHere(dev)).map(async (dev) => {
       try {
         await webpush.sendNotification(dev.sub, payload, opts)
         dev.lastOk = new Date().toISOString()

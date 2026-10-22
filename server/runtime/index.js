@@ -12,7 +12,9 @@ export async function pickRuntime(cfg = {}) {
   const want = String(process.env.BRIDGE_RUNTIME || cfg.runtime || 'builtin').toLowerCase()
   if (want === 'herdr') { useSession(cfg.herdr?.session); return herdr }
   // Anything else, including the old "auto", is built in: having herdr installed shouldn't move
-  // your agents into it without asking.
-  await builtin.restore()
+  // your agents into it without asking. Bring your agents back, but don't hold the server for it:
+  // if macOS is still asking about their folder (your Desktop, say), the server answers meanwhile
+  // and they appear once you allow it.
+  await Promise.race([builtin.restore().catch(() => {}), new Promise((r) => setTimeout(r, 3000))])
   return builtin
 }

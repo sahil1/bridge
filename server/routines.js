@@ -19,6 +19,7 @@ const DAY = 864e5
 
 const readJSON = (f, fallback) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')) } catch { return fallback } }
 const writeJSON = (f, v) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(v, null, 2) + '\n') }
+const exists = (p) => fs.promises.access(p).then(() => true, () => false)
 
 export const readDefs = () => readJSON(DEFS, { routines: [] }).routines || []
 const writeDefs = (routines) => writeJSON(DEFS, { routines })
@@ -85,24 +86,24 @@ async function lastInvocation(name) {
 }
 
 // ---------- evidence: files ----------
-function newestFile(dir, pattern) {
+// Outputs often land in Documents or Desktop, which macOS can hold a look into until you answer
+// its permission prompt: read without blocking, so only this list waits for it.
+async function newestFile(dir, pattern) {
   let best = null
   const re = new RegExp(pattern)
   try {
-    for (const name of fs.readdirSync(expand(dir))) {
-      if (!re.test(name)) continue
-      const st = fs.statSync(path.join(expand(dir), name))
-      if (!best || st.mtimeMs > best.m) best = { name, m: st.mtimeMs }
-    }
+    const names = (await fs.promises.readdir(expand(dir))).filter((name) => re.test(name))
+    const stats = await Promise.all(names.map((name) => fs.promises.stat(path.join(expand(dir), name))))
+    names.forEach((name, i) => { if (!best || stats[i].mtimeMs > best.m) best = { name, m: stats[i].mtimeMs } })
   } catch { return null }
   return best && { at: new Date(best.m).toISOString(), file: best.name }
 }
 
-function latestWeekFile(dir, pattern) {
+async function latestWeekFile(dir, pattern) {
   const re = new RegExp(pattern)
   let best = null
   try {
-    for (const name of fs.readdirSync(expand(dir))) {
+    for (const name of await fs.promises.readdir(expand(dir))) {
       const m = /(\d{4})-W(\d{1,2})\b/.exec(name)
       if (!m || !re.test(name)) continue
       const key = Number(m[1]) * 100 + Number(m[2])
@@ -111,7 +112,7 @@ function latestWeekFile(dir, pattern) {
   } catch { return null }
   if (!best) return null
   // Report it as created on that week's Monday-ish: use the file's birth time when it falls in that week.
-  const st = fs.statSync(path.join(expand(dir), best.name))
+  const st = await fs.promises.stat(path.join(expand(dir), best.name))
   return { at: (st.birthtime || st.mtime).toISOString(), source: best.name, label: `W${best.week}` }
 }
 
@@ -130,10 +131,10 @@ async function statusOf(def, log) {
   }
   if (d.files && d.match?.includes('{week}')) {
     // Weekly files: the latest week by name (sync clients rewrite modified times).
-    const f = latestWeekFile(d.files, d.any || '-W\\d+')
+    const f = await latestWeekFile(d.files, d.any || '-W\\d+')
     if (f) ev.push(f)
   } else if (d.files) {
-    const f = newestFile(d.files, d.any || d.match || '.')
+    const f = await newestFile(d.files, d.any || d.match || '.')
     if (f) ev.push({ at: f.at, source: f.file })
   }
   for (const at of log[def.id]?.done || []) ev.push({ at, source: 'marked done' })
@@ -145,7 +146,7 @@ async function statusOf(def, log) {
   let note = null
   if (d.files && d.match && d.match.includes('{week}')) {
     // Weekly outputs: done when this week's file exists.
-    const thisWeek = newestFile(d.files, fillWeek(d.match))
+    const thisWeek = await newestFile(d.files, fillWeek(d.match))
     const { week } = isoWeek()
     state = thisWeek ? 'ok' : 'due'
     note = thisWeek ? `W${week} is in place` : `W${week} not created yet${last?.label ? `, latest is ${last.label}` : ''}`
@@ -190,11 +191,11 @@ export function noteLaunch(id, paneId) {
 
 const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'routine'
 
-export function add({ name, command, cwd, every, workspace, detail }) {
+export async function add({ name, command, cwd, every, workspace, detail }) {
   name = String(name || '').trim()
   command = String(command || '').trim()
   if (!name || !command) throw new Error('A routine needs a name and a command')
-  if (cwd && !fs.existsSync(expand(cwd))) throw new Error(`Folder not found: ${cwd}`)
+  if (cwd && !(await exists(expand(cwd)))) throw new Error(`Folder not found: ${cwd}`)
   const defs = readDefs()
   let id = slug(name)
   while (defs.some((d) => d.id === id)) id += '-2'
@@ -227,13 +228,13 @@ export const resolveCwd = (def) => expand(def.cwd || '~')
 const USAGE = path.join(os.homedir(), '.claude', 'usage-data')
 const strip = (h) => h.replace(/<[^>]+>/g, ' ').replace(/&apos;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#39;/g, "'").replace(/\s+/g, ' ').trim()
 
-export function insightsFile() {
-  const f = newestFile(USAGE, '^report.*\\.html$')
+export async function insightsFile() {
+  const f = await newestFile(USAGE, '^report.*\\.html$')
   return f ? path.join(USAGE, f.file) : null
 }
 
-export function insights() {
-  const file = insightsFile()
+export async function insights() {
+  const file = await insightsFile()
   if (!file) return { available: false }
   const html = fs.readFileSync(file, 'utf8')
   const subtitle = strip(/class="subtitle"[^>]*>([\s\S]*?)<\/(p|div)>/.exec(html)?.[1] || '')

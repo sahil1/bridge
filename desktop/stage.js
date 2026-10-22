@@ -22,8 +22,9 @@ run(['run', 'build'], REPO)
 console.log('Copying Bridge AI into the app...')
 fs.rmSync(OUT, { recursive: true, force: true })
 fs.mkdirSync(OUT, { recursive: true })
-// The server shares one file with the UI: the MCP server catalog.
-const COPY = ['server', 'scripts', 'chief', 'relay', 'dist', 'src/components/settings/mcpCatalog.js', 'package.json', 'package-lock.json', '.npmrc', 'config.example.json', 'LICENSE', 'NOTICE', 'README.md']
+// The server shares two files with the UI: the MCP server catalog, and how a question is read
+// off an agent's screen.
+const COPY = ['server', 'scripts', 'chief', 'relay', 'dist', 'src/components/settings/mcpCatalog.js', 'src/components/questionParse.js', 'package.json', 'package-lock.json', '.npmrc', 'config.example.json', 'LICENSE', 'NOTICE', 'README.md']
 // Only files git knows about: tracked, or new and not ignored (dist/ is built just above). So
 // nothing ignored, like your settings or a filled-in chief of staff note, rides along into the
 // app; the privacy check below looks at the rest.

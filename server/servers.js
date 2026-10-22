@@ -6,6 +6,7 @@
 // (its working folder is the folder or inside it). macOS and Linux read that from the system;
 // Windows can't tell, so there every local web server is listed.
 import fs from 'node:fs'
+import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { IS_WIN } from './paths.js'
@@ -85,7 +86,8 @@ async function probe(port) {
 }
 
 const inside = (dir, root) => !!dir && (dir === root || dir.startsWith(root + path.sep))
-const realOr = (p) => { try { return fs.realpathSync(p) } catch { return p } }
+// Never blocking: a folder in Desktop or Documents can be held by macOS while it asks you for access.
+const realOr = (p) => fsp.realpath(p).catch(() => p)
 // A short name for the program: "vite", "node server/index.js", "python3 -m http.server".
 function programName(cmd) {
   const parts = String(cmd || '').split(/\s+/).filter(Boolean)
@@ -99,29 +101,33 @@ function programName(cmd) {
 
 // The web servers running from `root`, newest port first. `exclude`: ports to leave out.
 export async function serversFor(root, { exclude = [] } = {}) {
-  const realRoot = realOr(root)
+  const realRoot = await realOr(root)
   const socks = (await listening()).filter((s) => s.port >= 1024 && !exclude.includes(s.port) && s.pid !== process.pid)
   const byPort = new Map()
   for (const s of socks) if (!byPort.has(s.port)) byPort.set(s.port, s)
   const info = await procInfo([...new Set([...byPort.values()].map((s) => s.pid))])
-  const mine = [...byPort.values()].filter((s) => IS_WIN || inside(realOr(info.get(s.pid)?.cwd || ''), realRoot))
+  await Promise.all([...info.values()].map(async (i) => { i.real = await realOr(i.cwd || '') }))
+  const mine = [...byPort.values()].filter((s) => IS_WIN || inside(info.get(s.pid)?.real || '', realRoot))
   const out = await Promise.all(mine.map(async (s) => {
     const p = await probe(s.port)
     if (!p.http) return null
     const i = info.get(s.pid) || {}
-    return { port: s.port, pid: s.pid, program: programName(i.command), cwd: i.cwd ? path.relative(realRoot, realOr(i.cwd)) || '.' : null, title: p.title, status: p.status, framable: p.framable, localOnly: /^(127\.|\[?::1\]?|localhost)/.test(s.host) }
+    return { port: s.port, pid: s.pid, program: programName(i.command), cwd: i.cwd ? path.relative(realRoot, i.real) || '.' : null, title: p.title, status: p.status, framable: p.framable, localOnly: /^(127\.|\[?::1\]?|localhost)/.test(s.host) }
   }))
   return out.filter(Boolean).sort((a, b) => a.port - b.port)
 }
 
 // How this project starts a server, best guesses first: [{ label, command }]
-export function startCommands(root) {
+export async function startCommands(root) {
   const out = []
-  const has = (f) => fs.existsSync(path.join(root, f))
-  const read = (f) => { try { return fs.readFileSync(path.join(root, f), 'utf8') } catch { return '' } }
+  // Every file it checks for at once, so a slow folder is one wait, not one per file.
+  const names = ['start.sh', 'dev.sh', 'run.sh', 'serve.sh', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lockb', 'bun.lock', 'manage.py', 'docker-compose.yml', 'compose.yaml', 'docker-compose.yaml', 'index.html']
+  const read = (f) => fsp.readFile(path.join(root, f), 'utf8').catch(() => '')
+  const [found, pkgText, make] = await Promise.all([Promise.all(names.map((f) => fsp.access(path.join(root, f)).then(() => f, () => null))), read('package.json'), read('Makefile')])
+  const has = (f) => found.includes(f)
   for (const f of ['start.sh', 'dev.sh', 'run.sh', 'serve.sh']) if (has(f)) out.push({ label: `./${f}`, command: IS_WIN ? `bash ./${f}` : `./${f}` })
   let pkg = null
-  try { pkg = JSON.parse(read('package.json')) } catch { /* none */ }
+  try { pkg = JSON.parse(pkgText) } catch { /* none */ }
   if (pkg?.scripts) {
     const pm = has('pnpm-lock.yaml') ? 'pnpm' : has('yarn.lock') ? 'yarn' : has('bun.lockb') || has('bun.lock') ? 'bun' : 'npm'
     for (const s of ['dev', 'start', 'serve', 'preview', 'develop']) {
@@ -130,7 +136,6 @@ export function startCommands(root) {
       out.push({ label: command, command, detail: String(pkg.scripts[s]).slice(0, 80) })
     }
   }
-  const make = read('Makefile')
   for (const t of ['dev', 'run', 'serve', 'start']) if (new RegExp(`^${t}:`, 'm').test(make)) out.push({ label: `make ${t}`, command: `make ${t}` })
   if (has('manage.py')) out.push({ label: 'python manage.py runserver', command: 'python3 manage.py runserver' })
   if (has('docker-compose.yml') || has('compose.yaml') || has('docker-compose.yaml')) out.push({ label: 'docker compose up', command: 'docker compose up' })

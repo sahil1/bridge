@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import Icon from '../Icon.jsx'
-import { api, viaRelay, relayComputers } from '../../api.js'
+import { api, usePoll, viaRelay, relayComputers } from '../../api.js'
 import Relay from './Relay.jsx'
 import { useSettings, SaveNote } from './General.jsx'
 import { pushSupport, pushState, enablePush, disablePush, isIOS } from '../../pwa.js'
@@ -128,10 +128,13 @@ function ThisDevice() {
 
 function WhatToSend() {
   const { s, save, note } = useSettings()
+  const fleet = usePoll('/fleet', 15000)
   if (!s) return null
   const n = s.effective.notify || {}
   const set = (k, v) => save({ notify: { ...n, [k]: v } })
   const below = n.quotaBelow ?? 15
+  const muted = (fleet.data?.agents || []).filter((a) => a.muted)
+  const unmute = async (a) => { await api(`/agents/${encodeURIComponent(a.paneId)}/mute`, { method: 'POST', body: { muted: false } }).catch(() => {}); fleet.refresh() }
   return (
     <section className="st-sec">
       <h4>What to notify about</h4>
@@ -143,6 +146,24 @@ function WhatToSend() {
           {[5, 10, 15, 25].map((p) => <option key={p} value={p}>{p}% or less left</option>)}
         </select>
       </label>
+      <label className="ph-check"><input type="checkbox" checked={n.actions !== false} onChange={(e) => set('actions', e.target.checked)} /> Answer buttons for simple questions (yes or no, or two short choices)</label>
+      <p className="muted small">Where the phone shows them: Android and Chrome on a computer, not iPhone. A button only answers if the agent is still asking the same thing; otherwise Bridge AI opens.</p>
+      <label className="ph-check"><input type="checkbox" checked={!!n.phoneAtComputer} onChange={(e) => set('phoneAtComputer', e.target.checked)} /> Notify my phone even when I'm at the computer</label>
+      <p className="muted small">Otherwise your phone stays quiet while Bridge AI is in front on this computer, or you typed or clicked in it in the last 2 minutes. This computer's own notifications don't change.</p>
+      {muted.length > 0 && (
+        <>
+          <p className="muted small">Muted (an agent's ⋯ menu): no notifications from these until you unmute them.</p>
+          <ul className="ph-devices">
+            {muted.map((a) => (
+              <li key={a.paneId}>
+                <Icon name="bell-off" size={14} /><span>{a.chief ? 'Chief of staff' : a.title || a.tab || a.workspace}</span>
+                <span className="muted small">{a.workspace}</span>
+                <button type="button" className="ghost-btn" onClick={() => unmute(a)}>Unmute</button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
       <SaveNote note={note} />
     </section>
   )
@@ -160,7 +181,7 @@ function Devices() {
       <ul className="ph-devices">
         {list.map((d) => (
           <li key={d.id}>
-            <Icon name="phone" size={14} /><span>{d.label}</span>
+            <Icon name={d.here ? 'laptop' : 'phone'} size={14} /><span>{d.label}{d.here ? ' (this computer)' : ''}</span>
             <span className="muted small">added {new Date(d.addedAt).toLocaleDateString()}{d.lastOk ? `, last sent ${new Date(d.lastOk).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : ''}</span>
             <button type="button" className="ghost-btn" onClick={() => remove(d.id)}>Remove</button>
           </li>

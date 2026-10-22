@@ -1,8 +1,8 @@
-import { api } from './api.js'
+import { api, viaRelay } from './api.js'
 
 // Bridge AI as an app on your phone (or in your browser): the service worker, push notifications
 // for this device, and links from notifications. The desktop app has its own notifications, so
-// none of this runs there.
+// none of that runs there; it does say when you're at the computer (reportPresence).
 const inDesktopApp = () => typeof window !== 'undefined' && !!window.bridgeApp
 
 export function registerServiceWorker() {
@@ -12,14 +12,34 @@ export function registerServiceWorker() {
   navigator.serviceWorker.addEventListener('message', (e) => { if (e.data?.type === 'open') openLink(e.data.url) })
 }
 
-// ?agent=<pane> opens that agent; ?card=<id> shows a Today card. Used by notifications.
+// ?agent=<pane> opens that agent (&ask=1: at its Chat, where its question card is); ?card=<id>
+// shows a Today card. Used by notifications.
 export function openLink(href = location.href) {
   const url = new URL(href, location.origin)
   const agent = url.searchParams.get('agent')
   const card = url.searchParams.get('card')
-  if (agent) window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: agent } }))
+  if (agent) window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: agent, view: url.searchParams.get('ask') ? 'chat' : undefined } }))
   if (card) window.dispatchEvent(new CustomEvent('bridge-open-card', { detail: { id: card } }))
   if (agent || card) history.replaceState(null, '', url.pathname)
+}
+
+// Say when you're using Bridge AI on this computer (its window in front, or you typed or clicked in
+// it), so your phone stays quiet meanwhile. Only from this computer; a phone never says it.
+export function reportPresence() {
+  if (viaRelay || !/^(127\.0\.0\.1|localhost|\[::1\])$/.test(location.hostname)) return
+  const id = Math.random().toString(36).slice(2)
+  let told = 0
+  const say = async (input) => {
+    // The desktop app also knows how long since you last touched the computer at all.
+    const idle = await window.bridgeApp?.idle?.().catch(() => null)
+    api('/presence', { method: 'POST', body: { id, focused: document.hasFocus() && !document.hidden, input, idle } }).catch(() => {})
+  }
+  const onInput = () => { if (Date.now() - told > 20000) { told = Date.now(); say(true) } }
+  for (const ev of ['focus', 'blur']) window.addEventListener(ev, () => say(false))
+  document.addEventListener('visibilitychange', () => say(false))
+  for (const ev of ['keydown', 'pointerdown']) window.addEventListener(ev, onInput, true)
+  setInterval(() => { if (document.hasFocus()) say(false) }, 30000)
+  say(false)
 }
 
 export const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)

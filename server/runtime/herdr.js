@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process'
 import * as cli from './herdr-cli.js'
 import * as sock from './herdr-socket.js'
 import { adapter, newSessionId } from '../agents.js'
-import { quoteCommand } from './spawn.js'
+import { quoteCommand, runSetup } from './spawn.js'
 import { envFor } from '../accounts.js'
 
 export const name = 'herdr'
@@ -94,10 +94,14 @@ export async function moveTabToSpace(tabId, { workspaceId, newSpace, index } = {
 // A new agent in a new space (newSpace) or a new tab of an existing one (workspaceId).
 // herdr starts the agents it knows itself, so a default model applies only to the others.
 // resume: a session id to open again; fork: a session id to copy into a new conversation.
-export async function launch({ kind = 'claude', cwd, label, workspaceId, newSpace, prompt: opening, model, account, resume, fork }) {
+// setup: { command, cwd } to run first (a new worktree's `npm install`). herdr starts an
+// agent only at an idle shell prompt, so it runs before the pane opens; if it fails, the agent
+// still starts and setupError says why.
+export async function launch({ kind = 'claude', cwd, label, workspaceId, newSpace, prompt: opening, model, account, resume, fork, setup }) {
   const env = envFor(kind, account) // a second account's config folder, if one was picked
-  const extra = fork && a.fork ? a.fork(fork, a.sessionId === 'assign' ? newSessionId() : undefined) : resume && a.resume ? a.resume(resume) : []
   const a = adapter(kind)
+  const extra = fork && a.fork ? a.fork(fork, a.sessionId === 'assign' ? newSessionId() : undefined) : resume && a.resume ? a.resume(resume) : []
+  const setupError = setup ? await runSetup(setup) : null
   const name = `ba-${Date.now().toString(36)}`
   const space = String(newSpace || '').trim()
   let out
@@ -116,7 +120,7 @@ export async function launch({ kind = 'claude', cwd, label, workspaceId, newSpac
     if (opening) setTimeout(() => cli.prompt(paneId, opening).catch(() => cli.paneSendText(paneId, opening).then(() => cli.paneSendKeys(paneId, ['enter'])).catch(() => {})), 6000)
   }
   if (space) { try { await cli.renameTabOfPane(out.paneId, label) } catch { /* default tab name */ } }
-  return out
+  return setupError ? { ...out, setupError } : out
 }
 
 // Your herdr status colors, so both views use the same ones.

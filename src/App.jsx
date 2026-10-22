@@ -5,7 +5,7 @@ import ErrorBoundary from './components/ErrorBoundary.jsx'
 import Rail from './components/Rail.jsx'
 import Board from './components/Board.jsx'
 import Dock from './components/Dock.jsx'
-import Console, { MateEmpty } from './components/Console.jsx'
+import Console, { MateEmpty, showChat } from './components/Console.jsx'
 import { Settings, Onboarding, HerdrView, Terminals, ShellTab, preloadViews } from './lazy.jsx'
 import { openLink } from './pwa.js'
 import NewAgent from './components/NewAgent.jsx'
@@ -151,10 +151,16 @@ export default function App() {
     for (const a of agents) {
       const before = prevStatus.current[a.paneId]
       // In the Mac app, Bridge itself posts these (so they work while the window is hidden).
-      if (before && before !== a.status && (a.status === 'blocked' || a.status === 'done') && document.hidden && !window.bridgeApp &&
+      if (before && before !== a.status && (a.status === 'blocked' || a.status === 'done') && document.hidden && !window.bridgeApp && !a.muted &&
         'Notification' in window && Notification.permission === 'granted') {
-        const n = new Notification(a.status === 'blocked' ? 'Agent needs you' : 'Agent finished', { body: a.title || a.workspace, tag: a.paneId })
-        n.onclick = () => { window.focus(); openAgentRef.current?.(a.paneId); n.close() }
+        const name = a.title || a.workspace
+        const show = (q) => {
+          const n = new Notification(a.status === 'blocked' ? (q?.text ? `${name} needs you` : 'Agent needs you') : 'Agent finished', { body: q?.text || name, tag: a.paneId })
+          n.onclick = () => { window.focus(); if (a.status === 'blocked') showChat(a.paneId); openAgentRef.current?.(a.paneId); n.close() }
+        }
+        // Say what it's asking.
+        if (a.status === 'blocked') api(`/agents/${encodeURIComponent(a.paneId)}/question`).then(show, () => show(null))
+        else show(null)
       }
       prevStatus.current[a.paneId] = a.status
     }
@@ -197,7 +203,10 @@ export default function App() {
         // main area already offers it).
         if (!id) { setMtab('mate'); return }
       }
-      if (id) openAgentRef.current?.(id)
+      if (!id) return
+      // From a "needs you" notification: at its Chat, where the question card is.
+      if (e.detail.view === 'chat') showChat(id)
+      openAgentRef.current?.(id)
     }
     window.addEventListener('bridge-open-agent', on)
     return () => window.removeEventListener('bridge-open-agent', on)

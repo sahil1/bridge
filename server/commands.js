@@ -50,9 +50,14 @@ const CODEX_BUILTINS = [
   { name: 'mcp', description: 'MCP tools', mode: 'terminal' },
 ]
 
-function frontmatter(file) {
+// A project's own commands are in its folder, often in Desktop or Documents, which macOS can hold
+// a look into until you answer its permission prompt: read without blocking, so only this waits.
+const exists = (p) => fs.promises.access(p).then(() => true, () => false)
+const names = (dir) => fs.promises.readdir(dir).catch(() => []) // none when there's no such folder
+
+async function frontmatter(file) {
   try {
-    const head = fs.readFileSync(file, 'utf8').slice(0, 4000)
+    const head = (await fs.promises.readFile(file, 'utf8')).slice(0, 4000)
     const m = /^---\n([\s\S]*?)\n---/.exec(head)
     if (!m) return {}
     const out = {}
@@ -64,30 +69,25 @@ function frontmatter(file) {
   } catch { return {} }
 }
 
-function scan(dir, source, prefix = '') {
-  const out = []
+async function scan(dir, source, prefix = '') {
   const skills = path.join(dir, 'skills')
   const commands = path.join(dir, 'commands')
-  try {
-    for (const d of fs.readdirSync(skills)) {
-      const f = path.join(skills, d, 'SKILL.md')
-      if (!fs.existsSync(f)) continue
-      const fm = frontmatter(f)
-      if (fm['user-invocable'] === 'false') continue
-      out.push({ name: prefix + (fm.name || d), description: (fm.description || '').slice(0, 200), source, mode: 'fill' })
-    }
-  } catch { /* no skills here */ }
-  try {
-    for (const f of fs.readdirSync(commands)) {
-      if (!f.endsWith('.md')) continue
-      const fm = frontmatter(path.join(commands, f))
-      out.push({ name: prefix + f.slice(0, -3), description: (fm.description || '').slice(0, 200), source, mode: 'fill', hint: fm['argument-hint'] || null })
-    }
-  } catch { /* no commands here */ }
-  return out
+  const [sk, cm] = await Promise.all([names(skills), names(commands)])
+  const fromSkills = await Promise.all(sk.map(async (d) => {
+    const f = path.join(skills, d, 'SKILL.md')
+    if (!(await exists(f))) return null
+    const fm = await frontmatter(f)
+    if (fm['user-invocable'] === 'false') return null
+    return { name: prefix + (fm.name || d), description: (fm.description || '').slice(0, 200), source, mode: 'fill' }
+  }))
+  const fromCommands = await Promise.all(cm.filter((f) => f.endsWith('.md')).map(async (f) => {
+    const fm = await frontmatter(path.join(commands, f))
+    return { name: prefix + f.slice(0, -3), description: (fm.description || '').slice(0, 200), source, mode: 'fill', hint: fm['argument-hint'] || null }
+  }))
+  return [...fromSkills.filter(Boolean), ...fromCommands]
 }
 
-function plugins() {
+async function plugins() {
   let installed = {}
   let enabled = null
   try { installed = JSON.parse(fs.readFileSync(path.join(CLAUDE, 'plugins', 'installed_plugins.json'), 'utf8')).plugins || {} } catch { /* none */ }
@@ -97,24 +97,25 @@ function plugins() {
     if (enabled && enabled[id] === false) continue
     const entry = Array.isArray(v) ? v[0] : v
     if (!entry?.installPath) continue
-    out.push(...scan(entry.installPath, 'plugin', `${id.split('@')[0]}:`))
+    out.push(scan(entry.installPath, 'plugin', `${id.split('@')[0]}:`))
   }
-  return out
+  return (await Promise.all(out)).flat()
 }
 
 let cache = { at: 0, key: '', value: null }
-export function list(kind = 'claude', cwd = '') {
+export async function list(kind = 'claude', cwd = '') {
   const key = `${kind}|${cwd}`
   if (cache.value && cache.key === key && Date.now() - cache.at < 30000) return cache.value
   let commands
   if (kind === 'codex') commands = CODEX_BUILTINS.map((c) => ({ ...c, source: 'built-in' }))
   else if (kind === 'claude') {
     const seen = new Set()
+    const [project, skills, plugged] = await Promise.all([cwd ? scan(path.join(cwd, '.claude'), 'project') : [], scan(CLAUDE, 'skill'), plugins()])
     commands = [
       ...CLAUDE_BUILTINS.map((c) => ({ ...c, source: 'built-in' })),
-      ...(cwd ? scan(path.join(cwd, '.claude'), 'project') : []),
-      ...scan(CLAUDE, 'skill'),
-      ...plugins(),
+      ...project,
+      ...skills,
+      ...plugged,
     ].filter((c) => { if (seen.has(c.name)) return false; seen.add(c.name); return true })
   } else commands = []
   const value = { kind, commands }

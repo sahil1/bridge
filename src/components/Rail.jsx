@@ -41,21 +41,28 @@ export function groupByWorkspace(fleet) {
 }
 
 const rowCwd = (r) => (r.kind === 'agent' ? r.agent.cwd : r.tab?.panes.find((p) => !p.agent)?.cwd || r.tab?.panes[0]?.cwd)
+// On its own branch (a worktree Bridge AI made): { repo, branch, base }, else null.
+const rowTree = (r) => (r.kind === 'agent' ? r.agent.worktree : (r.tab?.panes.find((p) => !p.agent) || r.tab?.panes[0])?.worktree) || null
 const rowName = (r) => (r.kind === 'agent'
   ? (r.agent.chief ? 'Chief of staff' : r.agent.tab && !/^\d+$/.test(r.agent.tab) ? r.agent.tab : r.agent.title || 'agent')
   : (r.tab.label && !/^\d+$/.test(r.tab.label) ? r.tab.label : 'shell'))
 
-function GitBit({ g }) {
+// own: it works on its own branch, in a worktree Bridge AI made.
+function GitBit({ g, own }) {
   if (!g) return null
   return (
-    <span className="git-bit" title={`${g.branch}${g.dirty ? `, ${g.dirty} uncommitted change${g.dirty === 1 ? '' : 's'}` : ', clean'}`}>
-      <Icon name="branch" size={10} />{g.branch}{g.dirty > 0 && <b>+{g.dirty}</b>}
+    <span className={`git-bit ${own ? 'own' : ''}`} title={`${own ? 'Own branch, in its own folder: ' : ''}${g.branch}${g.dirty ? `, ${g.dirty} uncommitted change${g.dirty === 1 ? '' : 's'}` : ', clean'}`}>
+      <Icon name="branch" size={10} /><span className="gb-name">{g.branch}</span>{g.dirty > 0 && <b>+{g.dirty}</b>}
     </span>
   )
 }
+// What a close did with the worktrees of the agents in it (server: worktrees.tidy).
+const closedNote = (label, r) => [`Closed ${label}.`, ...(r?.worktrees || []).map((w) => (w.removed
+  ? `Its branch ${w.branch} is kept; its folder is removed.`
+  : `Kept its folder on ${w.branch}: ${w.kept}.`))].join(' ')
 
 // Small dropdown that closes on outside click or Esc.
-function Menu({ items, onClose, align = 'right' }) {
+export function Menu({ items, onClose, align = 'right' }) {
   const ref = useRef(null)
   useEffect(() => {
     const down = (e) => { if (!ref.current?.contains(e.target)) onClose() }
@@ -103,7 +110,7 @@ function HoverCard({ row, rect, git, preview }) {
       </div>
       {preview?.text && <p className="hc-preview">{preview.text}</p>}
       <div className="hc-path"><Icon name="folder" size={11} /> <span>{tildePath(cwd)}</span></div>
-      {git && <div className="hc-path"><GitBit g={git} /></div>}
+      {git && <div className="hc-path"><GitBit g={git} own={!!rowTree(row)} /></div>}
     </div>,
     document.body,
   )
@@ -132,7 +139,10 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
   const places = usePoll('/places', 15000)
   const previews = usePoll('/previews', 10000, { enabled: collapsed })
   const git = (cwd) => places.data?.[cwd] || null
-  useEffect(() => { if (!flash) return; const t = setTimeout(() => setFlash(null), 2500); return () => clearTimeout(t) }, [flash])
+  // An agent on its own branch shows it from the start, before the folder's git status is in.
+  const gitOf = (r) => git(rowCwd(r)) || (rowTree(r) ? { branch: rowTree(r).branch, dirty: 0 } : null)
+  // Longer notes (what a close kept, and why) stay up long enough to read.
+  useEffect(() => { if (!flash) return; const t = setTimeout(() => setFlash(null), Math.max(2500, flash.length * 60)); return () => clearTimeout(t) }, [flash])
 
   const launch = async () => {
     setLaunching(true)
@@ -143,7 +153,8 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
   const setAll = (closed) => setClosedWs(closed ? Object.fromEntries(groups.map((g) => [g.id, true])) : {})
   const toggleWs = (id) => setClosedWs((c) => { const n = { ...c }; if (n[id]) delete n[id]; else n[id] = true; return n })
 
-  const act = async (fn, ok) => { try { await fn(); if (ok) setFlash(ok) } catch (e) { setFlash(e.message) } }
+  // ok: the note to show after, or a function of the reply that makes it.
+  const act = async (fn, ok) => { try { const r = await fn(); if (ok) setFlash(typeof ok === 'function' ? ok(r) : ok) } catch (e) { setFlash(e.message) } }
   const copy = (text) => { navigator.clipboard?.writeText(text).then(() => setFlash('Path copied'), () => setFlash(text)) }
   const rename = async (label) => {
     const r = renaming
@@ -153,8 +164,9 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
   }
   const closeTab = (t) => {
     const n = t.panes.length
-    if (!window.confirm(`Close the tab "${t.label}"?\n\nThis ends ${n === 1 ? 'the process' : `all ${n} processes`} running in it, the same as closing it in the terminal.`)) return
-    act(() => api(`/tabs/${encodeURIComponent(t.tabId)}/close`, { method: 'POST' }), `Closed ${t.label}`)
+    const own = t.panes.some((p) => p.worktree)
+    if (!window.confirm(`Close the tab "${t.label}"?\n\nThis ends ${n === 1 ? 'the process' : `all ${n} processes`} running in it, the same as closing it in the terminal.${own ? '\n\nIts own branch stays. Its folder is removed only if nothing would be lost (no uncommitted changes, no commits that are only there).' : ''}`)) return
+    act(() => api(`/tabs/${encodeURIComponent(t.tabId)}/close`, { method: 'POST' }), (r) => closedNote(t.label, r))
   }
   // Reorder spaces (and tabs inside a space); herdr gets the same order.
   const moveWs = (id, to) => {
@@ -194,7 +206,7 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
 
   const closeWs = (g) => {
     if (!window.confirm(`Close the space "${g.label}" and all ${g.rows.length} of its tabs?\n\nEverything running in it stops, the same as closing it in the terminal.`)) return
-    act(() => api(`/workspaces/${encodeURIComponent(g.id)}/close`, { method: 'POST' }), `Closed ${g.label}`)
+    act(() => api(`/workspaces/${encodeURIComponent(g.id)}/close`, { method: 'POST' }), (r) => closedNote(g.label, r))
   }
 
   if (collapsed) {
@@ -215,7 +227,7 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
           ))}
         </div>
         <span className={`live-dot ${live ? 'on' : ''}`} title={live ? 'Live' : 'Reconnecting'} />
-        {hover && <HoverCard row={hover.row} rect={hover.rect} git={git(rowCwd(hover.row))} preview={hover.row.kind === 'agent' ? previews.data?.[hover.row.id] : null} />}
+        {hover && <HoverCard row={hover.row} rect={hover.rect} git={gitOf(hover.row)} preview={hover.row.kind === 'agent' ? previews.data?.[hover.row.id] : null} />}
       </nav>
     )
   }
@@ -317,15 +329,16 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
                       else moveToSpace(d, { workspaceId: g.id, index: at })
                     }}>
                     <button className="tab-main" onClick={() => onOpen(r.id)} onDoubleClick={() => t && setRenaming({ kind: 'tab', id: t.tabId })}
-                      title={`${r.kind === 'agent' ? r.agent.title : t.label}\n${tildePath(cwd)}${git(cwd) ? `\n${git(cwd).branch}${git(cwd).dirty ? ` +${git(cwd).dirty}` : ''}` : ''}`}>
+                      title={`${r.kind === 'agent' ? r.agent.title : t.label}\n${tildePath(cwd)}${gitOf(r) ? `\n${gitOf(r).branch}${gitOf(r).dirty ? ` +${gitOf(r).dirty}` : ''}` : ''}`}>
                       {r.kind === 'agent' ? <StatusDot status={r.agent.status} size={8} /> : <Icon name="terminal" size={12} className="muted" />}
                       <span className="tab-lines">
                         <span className="tab-line1">
                           {isRen ? <InlineRename value={t.label} onDone={rename} /> : <span className="tab-name">{rowName(r)}</span>}
                           {r.kind === 'agent' && r.agent.chief && <Icon name="helm" size={12} className="tab-badge" />}
+                          {r.kind === 'agent' && r.agent.muted && <Icon name="bell-off" size={11} className="muted" />}
                           {r.kind === 'shell' && t.panes.length > 1 && <span className="tab-count">{t.panes.length}</span>}
                         </span>
-                        <span className="tab-path"><span className="tp-dir">{shortPath(cwd)}</span><GitBit g={git(cwd)} /></span>
+                        <span className="tab-path"><span className="tp-dir">{rowTree(r) ? rowTree(r).repo.split(/[\\/]/).pop() : shortPath(cwd)}</span><GitBit g={gitOf(r)} own={!!rowTree(r)} /></span>
                       </span>
                     </button>
                     <button className="tab-act" onClick={() => setMenu(menu === r.id ? null : r.id)} aria-label={`${rowName(r)} actions`} title="More"><Icon name="more" size={13} /></button>
@@ -335,6 +348,8 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
                         { icon: 'copy', label: 'Copy folder path', run: () => copy(cwd) },
                         { icon: 'terminal', label: 'Open in terminal app', run: () => openInTerminal(r.id).catch((e) => window.alert(e.message)) },
                         onOpenInHerdr && { icon: 'external', label: 'Open in Herdr view', run: () => onOpenInHerdr(r.id) },
+                        r.kind === 'agent' && { icon: r.agent.muted ? 'bell' : 'bell-off', label: r.agent.muted ? 'Unmute notifications' : 'Mute notifications',
+                          run: () => act(() => api(`/agents/${encodeURIComponent(r.id)}/mute`, { method: 'POST', body: { muted: !r.agent.muted } }), r.agent.muted ? 'Notifications back on' : 'Muted until you unmute it') },
                         t && '-',
                         t && { icon: 'edit', label: 'Rename tab', run: () => setRenaming({ kind: 'tab', id: t.tabId }) },
                         t && { icon: 'layers', label: 'Move to space…', run: () => setMoving({ rowId: r.id, id: t.tabId, ws: g.id, name: rowName(r) }) },

@@ -54,6 +54,27 @@ async function choose(rt, paneId, label) {
 // is, 1 = the last) and send `text` instead. undoFiles also restores the files the agent changed
 // since then (Claude's own checkpoints; edits made with shell commands aren't covered).
 export async function rewindAndSend(rt, agent, { original, back = 1, text, undoFiles = false }) {
+  await rewindTo(rt, agent, { original, back, undoFiles })
+  // Back at the prompt with the old message in the box; send the new text (promptSafe clears it).
+  return promptSafe(rt, agent.paneId, text, agent)
+}
+
+// Undo a reply: back to just before the message that started it, files and conversation, and
+// nothing sent. Claude puts that message back in its input box; clear it, so it can't end up in
+// front of the next thing you send. files: whether Claude restored them too.
+export async function undoReply(rt, agent, { original, back = 1 }) {
+  const { files } = await rewindTo(rt, agent, { original, back, undoFiles: true, needFiles: true })
+  const paneId = agent.paneId
+  if (draftIn(await screenOf(rt, paneId))) await key(rt, paneId, 'ctrl+c')
+  if (!(await waitFor(rt, paneId, (s) => draftIn(s) === '', 3000))) throw new Error("The agent went back, but its input box still has your old message in it; clear it in the Terminal tab")
+  return { ok: true, files }
+}
+
+// Opens the agent's Rewind list, picks the message and what to restore, and waits for the input
+// box to come back (with the old message in it). needFiles: if Claude offers no file restore for
+// that point, back out and change nothing rather than rewind the conversation alone. (With no
+// file changes at all Claude may skip the question and go straight back; files is false then.)
+async function rewindTo(rt, agent, { original, back = 1, undoFiles = false, needFiles = false }) {
   const paneId = agent.paneId
   // Interrupt a turn in progress; the picker only opens at the prompt.
   if (agent.status === 'working') {
@@ -84,13 +105,13 @@ export async function rewindAndSend(rt, agent, { original, back = 1, text, undoF
   // conversation, conversation, code, summarize...; without: conversation, summarize...), so
   // pick by name, never by position: a wrong pick could summarize or undo files.
   const next = await waitFor(rt, paneId, (s) => /Restore conversation/.test(plain(s)) || draftIn(s) !== null, 4000)
-  if (next && /Restore conversation/.test(plain(next))) {
-    const want = undoFiles && /Restore code and conversation/.test(plain(next)) ? /^Restore code and conversation\b/ : /^Restore conversation\b/
-    if (!(await choose(rt, paneId, want))) { await key(rt, paneId, 'esc'); await sleep(200); await key(rt, paneId, 'esc'); throw new Error("Couldn't pick the restore option in the agent's rewind; nothing was changed") }
-  }
-  // Back at the prompt with the old message in the box; send the new text (promptSafe clears it).
+  const menu = next && /Restore conversation/.test(plain(next))
+  const files = !!menu && undoFiles && /Restore code and conversation/.test(plain(next))
+  const backOut = async (why) => { await key(rt, paneId, 'esc'); await sleep(200); await key(rt, paneId, 'esc'); throw new Error(why) }
+  if (needFiles && menu && !files) await backOut('The agent has no saved copy of the files from before that message, so nothing was undone')
+  if (menu && !(await choose(rt, paneId, files ? /^Restore code and conversation\b/ : /^Restore conversation\b/))) await backOut("Couldn't pick the restore option in the agent's rewind; nothing was changed")
   if (!(await waitFor(rt, paneId, (s) => draftIn(s) !== null, 5000))) throw new Error('The agent rewound, but its input box didn\'t come back; check the Terminal tab')
-  return promptSafe(rt, paneId, text, agent)
+  return { files }
 }
 
 // After sending "/btw ...": the answer, once it stops changing, then close the panel.

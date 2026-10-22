@@ -44,7 +44,8 @@ export const AGENTS = [
     busy: CLAUDE_BUSY,
     // typeAhead: takes messages while it works (queues or folds them in itself), like typing in its
     // terminal. rewind: Bridge AI can edit a sent message through its Rewind list. btw: /btw side questions.
-    caps: { chat: true, subagents: true, commands: true, questions: true, inputBox: true, typeAhead: true, rewind: true, btw: true, fork: true },
+    // undo: that rewind can restore files too, so Chat offers "Undo this reply".
+    caps: { chat: true, subagents: true, commands: true, questions: true, inputBox: true, typeAhead: true, rewind: true, undo: true, btw: true, fork: true },
   },
   {
     kind: 'codex', label: 'Codex', model: (m) => ['--model', m], models: [], install: { npm: '@openai/codex' }, bin: ['codex'], herdr: 'codex', usage: 'codex',
@@ -101,20 +102,22 @@ export function loginPath() {
 // Find a program on PATH the way a shell would, by looking in each folder: no process to start,
 // which matters on Windows where starting `where` 13 times took seconds. On Windows only real
 // program types count (PATHEXT: .exe, .cmd, ...), so npm's extension-less shell shims are skipped.
+// Never blocking: a PATH folder can be in Desktop or Documents, which macOS can hold a look into
+// until you answer its permission prompt.
 const EXTS = IS_WIN ? (process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean) : ['']
-export function which(bin, PATH) {
+export async function which(bin, PATH) {
   for (const dir of String(PATH || '').split(path.delimiter)) {
     if (!dir) continue
     for (const ext of EXTS) {
       const p = path.join(dir, bin + ext)
       try {
-        if (!fs.statSync(p).isFile()) continue
-        if (!IS_WIN) fs.accessSync(p, fs.constants.X_OK)
-        return Promise.resolve(p)
+        if (!(await fs.promises.stat(p)).isFile()) continue
+        if (!IS_WIN) await fs.promises.access(p, fs.constants.X_OK)
+        return p
       } catch { /* not here */ }
     }
   }
-  return Promise.resolve(null)
+  return null
 }
 
 // Which agents are installed, with the program each one runs. Cached for a minute; callers that

@@ -6,7 +6,7 @@ import Question, { parseScreen } from './Question.jsx'
 import Composer from './Composer.jsx'
 import Lightbox from './Lightbox.jsx'
 import { PaneHeader } from './layout.jsx'
-import { tildePath } from './Rail.jsx'
+import { tildePath, Menu } from './Rail.jsx'
 import { api, usePoll, useLive, fmtTime, openInTerminal } from '../api.js'
 
 const KEYS = [
@@ -113,6 +113,86 @@ function ToolGroup({ items }) {
   )
 }
 
+// "[Request interrupted by user]" isn't a new message from you: what follows carries on the same reply.
+const opensReply = (m) => m.role === 'user' && !/^\[Request interrupted/.test(m.text || '')
+
+// The replies that changed files, by the index of each one's last part: the index of your message
+// that started it (-1 when that's further back than Chat has loaded) and its edit steps.
+function replyEdits(messages) {
+  const out = new Map()
+  let from = -1, last = -1, items = []
+  const close = () => { if (items.length) out.set(last, { from, items }) }
+  messages.forEach((m, i) => {
+    if (opensReply(m)) { close(); from = i; items = []; return }
+    last = i
+    if (m.role === 'tools') items.push(...m.items.filter((t) => t.changes?.length))
+  })
+  close()
+  return out
+}
+
+// What a reply changed: "Changed 3 files" under it, opening to each file with that reply's own
+// diff. It comes from the agent's edits in its transcript, so other work in the folder doesn't mix in.
+function ReplyChanges({ items, paneId, cwd, onUndo }) {
+  const openPath = useContext(PathCtx)
+  const [open, setOpen] = useState(false)
+  const [got, setGot] = useState(null) // { files } or { error }
+  const [undoing, setUndoing] = useState(false)
+  const calls = items.map((t) => t.call).join(',')
+  useEffect(() => {
+    if (!open) return
+    let live = true
+    api(`/agents/${encodeURIComponent(paneId)}/transcript/diffs?calls=${encodeURIComponent(calls)}`).then((r) => live && setGot(r), (e) => live && setGot({ error: e.message }))
+    return () => { live = false }
+  }, [open, calls, paneId])
+  const files = new Map()
+  for (const c of items.flatMap((t) => t.changes)) {
+    const f = files.get(c.path) || files.set(c.path, { path: c.path, add: 0, del: 0 }).get(c.path)
+    f.add += c.add
+    f.del += c.del
+  }
+  const all = [...files.values()]
+  const sum = (k) => all.reduce((n, f) => n + f[k], 0)
+  const rel = (p) => (p.startsWith(`${cwd}/`) ? p.slice(cwd.length + 1) : p)
+  return (
+    <div className="reply-changes">
+      <div className="rc-bar">
+        <button className="tool-summary" onClick={() => setOpen(!open)} aria-expanded={open}>
+          <Icon name="file" size={12} />
+          <span>Changed {all.length === 1 ? rel(all[0].path).split('/').pop() : `${all.length} files`}</span>
+          <span className="chg-n"><span className="plus">+{sum('add')}</span><span className="minus">−{sum('del')}</span></span>
+          <Icon name="chevron" size={11} className={open ? 'rot90' : ''} />
+        </button>
+        {onUndo && <button className="msg-edit-btn rc-undo" disabled={undoing} onClick={async () => { setUndoing(true); try { await onUndo() } finally { setUndoing(false) } }}
+          title="Put the files and the chat back to just before the message that started this reply"><Icon name="undo" size={11} /> {undoing ? 'Undoing…' : 'Undo this reply'}</button>}
+      </div>
+      {open && (
+        <div className="rc-files">
+          {all.map((f) => {
+            const d = got?.files?.find((x) => x.path === f.path)
+            return (
+              <div key={f.path} className="rc-file">
+                <div className="rc-head">
+                  <button className="path-link" onClick={() => openPath?.(f.path)} title="Open in Files"><code>{rel(f.path)}</code></button>
+                  <span className="chg-n"><span className="plus">+{f.add}</span><span className="minus">−{f.del}</span></span>
+                </div>
+                {d ? (
+                  <div className="rc-diff">
+                    <pre className="diff-view">
+                      {d.lines.map((l, i) => <div key={i} className={`dl ${l.startsWith('@@') ? 'hunk' : l[0] === '+' ? 'plus' : l[0] === '-' ? 'minus' : ''}`}>{l === '@@' ? '⋯' : l || ' '}</div>)}
+                      {d.cut > 0 && <div className="dl meta">{d.cut} more lines not shown; open the file to see it all</div>}
+                    </pre>
+                  </div>
+                ) : <div className="rc-note muted small">{got?.error || (got ? 'No diff found for this file' : 'Loading…')}</div>}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Claude Code rewrites attached image paths as "[Image #N]", so compare messages without
 // attachment markers when matching a "sending…" bubble to the message the agent received.
 // Paths on an "Attached:" line become chips; any other words there are just text.
@@ -203,7 +283,7 @@ function LiveActivity({ paneId }) {
   )
 }
 
-function Chat({ agent, pending, queued = [], onCancelQueued, onEdit, editingText }) {
+function Chat({ agent, pending, queued = [], onCancelQueued, onEdit, onUndo, editingText }) {
   const { data, error } = useLive(`/agents/${encodeURIComponent(agent.paneId)}/transcript`)
   const scrollRef = useRef(null)
   const stick = useRef(true)
@@ -228,6 +308,9 @@ function Chat({ agent, pending, queued = [], onCancelQueued, onEdit, editingText
   const messages = groupMessages(all)
   // Edit goes back through the agent's own rewind, which reaches only since its last /compact.
   const editFrom = messages.findLastIndex((m) => m.summary != null) + 1
+  // Undo this reply uses the same rewind, so the same limit, and only while the agent is idle.
+  const replies = replyEdits(messages)
+  const canUndo = !!onUndo && agent.status !== 'working' && agent.status !== 'blocked'
 
   useLayoutEffect(() => {
     const el = scrollRef.current
@@ -241,6 +324,7 @@ function Chat({ agent, pending, queued = [], onCancelQueued, onEdit, editingText
   // No chat to show, or none yet (a new session): say so rather than leave the space blank.
   const nothing = data && (!data.supported || (!recent.length && !more && agent.status !== 'working'))
   if (nothing && !shownPending.length && !queued.length) {
+    if (agent.status === 'blocked') return null // its question card, below, says what's needed
     return (
       <div className="chat-empty">
         <Icon name={agent.chief ? 'helm' : 'chat'} size={28} />
@@ -266,7 +350,7 @@ function Chat({ agent, pending, queued = [], onCancelQueued, onEdit, editingText
           </div>
         )}
         {data && !more && older.messages.length > 0 && <div className="chat-earlier muted small">Start of the conversation</div>}
-        {messages.map((m, i) => { const k = m.id || m.items?.[0]?.id || i; return (
+        {messages.flatMap((m, i) => { const k = m.id || m.items?.[0]?.id || i; const r = replies.get(i); return [(
           m.role === 'tools'
             ? <ToolGroup key={k} items={m.items} />
             : m.role === 'event'
@@ -282,7 +366,12 @@ function Chat({ agent, pending, queued = [], onCancelQueued, onEdit, editingText
                     aria-label="Edit this message" title="Edit and resend: the agent goes back to this point"><Icon name="edit" size={11} /> Edit</button>}
                 </div>
               </div>
-            ))})}
+            )),
+          // Under a reply's last part: what it changed in files, and Undo (back through the agent's
+          // rewind). Keyed by your message, so it stays open while the reply grows.
+          r && <ReplyChanges key={`chg-${messages[r.from]?.id || r.from}`} items={r.items} paneId={agent.paneId} cwd={agent.cwd}
+            onUndo={canUndo && r.from >= 0 && r.from >= editFrom ? () => onUndo({ id: messages[r.from].id, original: messages[r.from].text, back: messages.slice(r.from).filter(opensReply).length }) : null} />,
+        ] })}
         {shownPending.map((p) => (
           <div key={p.id} className="msg user pending">
             <div className="msg-text"><UserText text={p.text} paneId={agent.paneId} /></div>
@@ -350,6 +439,11 @@ export function MateEmpty({ onLaunch, launching, error }) {
 const VIEWS = [['chat', 'chat', 'Chat'], ['terminal', 'terminal', 'Terminal'], ['files', 'folder', 'Files'], ['changes', 'branch', 'Changes'], ['preview', 'play', 'Preview']]
 
 function readViews() { try { return JSON.parse(localStorage.getItem('cc-agent-views') || '{}') } catch { return {} } }
+// Show an agent's Chat, where its question card is (opening a "needs you" notification).
+export function showChat(paneId) {
+  try { localStorage.setItem('cc-agent-views', JSON.stringify({ ...readViews(), [paneId]: 'chat' })) } catch { /* private mode */ }
+  setTimeout(() => window.dispatchEvent(new CustomEvent('cc-set-view', { detail: { paneId, view: 'chat' } })), 60)
+}
 
 export default function Console({ agent, variant = 'focus', controls = {}, onBack, onOpenInHerdr, onPopOut, extraActions, queued = [] }) {
   const [view, setViewRaw] = useState('chat')
@@ -374,9 +468,12 @@ export default function Console({ agent, variant = 'focus', controls = {}, onBac
   // before it. { original, back, undoFiles }, and prefill puts the text in the box.
   const [editTarget, setEditTarget] = useState(null)
   const [prefill, setPrefill] = useState(null)
-  useEffect(() => { setEditTarget(null) }, [agent?.paneId])
+  // After Undo this reply: the message it went back to, offered to edit and send again.
+  const [undone, setUndone] = useState(null)
+  useEffect(() => { setEditTarget(null); setUndone(null) }, [agent?.paneId])
   const [keysOpen, setKeysOpen] = useState(false)
   const [termFocus, setTermFocus] = useState(0)
+  const [menu, setMenu] = useState(false)
   const places = usePoll('/places', 15000)
   // The sidebar's "Browse folder" asks an open agent to switch views.
   useEffect(() => {
@@ -427,13 +524,15 @@ export default function Console({ agent, variant = 'focus', controls = {}, onBac
   const pid = encodeURIComponent(agent.paneId)
   const minimized = controls.minimized
 
-  const send = async (t, { now = false } = {}) => {
+  // review: a review from the Changes tab, always a new message (never the edit you have open).
+  const send = async (t, { now = false, review = false } = {}) => {
     // Whatever was mirrored is replaced by this send (the agent's box is cleared first).
     clearTimeout(mirrorTimer.current)
     const wasMirrored = mirrored.current
     mirrored.current = ''
     draftNow.current = ''
-    if (editTarget) {
+    setUndone(null)
+    if (editTarget && !review) {
       const ok = await editSent({ ...editTarget, text: t })
       if (ok) setEditTarget(null)
       return ok
@@ -485,6 +584,18 @@ export default function Console({ agent, variant = 'focus', controls = {}, onBac
       return true
     } catch (e) { setFlash(e.message); return false }
   }
+  // Undo a reply: the files and the chat go back to just before the message that started it,
+  // through the agent's own rewind. Nothing is sent; the message is offered back to edit.
+  const undoReply = async ({ id, original, back }) => {
+    const short = original.length > 80 ? `${original.slice(0, 80)}…` : original
+    const later = back > 2 ? `\n\nYour ${back - 1} later messages and their replies go too.` : back === 2 ? '\n\nYour later message and its reply go too.' : ''
+    if (!window.confirm(`Undo this reply?\n\nThe files and the chat go back to just before "${short}". Nothing is sent to the agent.${later}\n\nFiles changed by commands it ran (not by its edits) stay as they are.`)) return
+    try {
+      const r = await api(`/agents/${pid}/undo`, { method: 'POST', body: { id, original, back } })
+      setEditTarget(null)
+      setUndone({ text: original, files: r.files })
+    } catch (e) { setFlash(e.message) }
+  }
   const cancelQueued = async (qid) => { try { await api(`/agents/${pid}/queue/${qid}`, { method: 'DELETE' }) } catch (e) { setFlash(e.message) } }
   const stop = async () => {
     try { await api(`/agents/${pid}/keys`, { method: 'POST', body: { keys: ['esc'] } }); setFlash('Sent Esc to interrupt') } catch (e) { setFlash(e.message) }
@@ -492,6 +603,9 @@ export default function Console({ agent, variant = 'focus', controls = {}, onBac
 
   const sendKeys = async (keys) => {
     try { await api(`/agents/${pid}/keys`, { method: 'POST', body: { keys } }); setFlash(`Sent ${keys.join(' ')}`) } catch (e) { setFlash(e.message) }
+  }
+  const mute = async (on) => {
+    try { await api(`/agents/${pid}/mute`, { method: 'POST', body: { muted: on } }); setFlash(on ? 'Muted: no notifications from this agent until you unmute it' : 'Notifications are back on for this agent') } catch (e) { setFlash(e.message) }
   }
 
   const title = agent.chief ? 'Chief of staff' : agent.title || agent.tab || agent.workspace
@@ -513,6 +627,7 @@ export default function Console({ agent, variant = 'focus', controls = {}, onBac
       <PaneHeader icon={agent.chief ? 'helm' : 'bot'} title={title} subtitle={subtitle} {...controls}
         leading={onBack && <button className="win-btn back" onClick={onBack} aria-label="Back"><Icon name="chevron" size={16} className="flip" /></button>}>
         <span className={`state-tag st-${agent.status}`}><StatusDot status={agent.status} size={7} />{{ blocked: 'Needs you', done: 'Done', working: 'Working', idle: 'Idle' }[agent.status] || 'Unknown'}</span>
+        {agent.muted && <span className="muted-tag" role="img" title="Notifications muted (⋯ to unmute)" aria-label="Notifications muted"><Icon name="bell-off" size={13} /></span>}
         {!minimized && (
           <div className="seg" role="tablist">
             {VIEWS.map(([id, icon, label]) => (
@@ -541,17 +656,27 @@ export default function Console({ agent, variant = 'focus', controls = {}, onBac
         {onOpenInHerdr && !minimized && (
           <button className="win-btn" onClick={() => onOpenInHerdr(agent.paneId)} title="Open in Herdr view" aria-label="Open in Herdr view"><Icon name="external" size={14} /></button>
         )}
+        {!minimized && (
+          <span className="menu-anchor">
+            <button className="win-btn" onClick={() => setMenu(!menu)} title="More" aria-label="More actions"><Icon name="more" size={14} /></button>
+            {menu && <Menu onClose={() => setMenu(false)} items={[agent.muted
+              ? { icon: 'bell', label: 'Unmute notifications', run: () => mute(false) }
+              : { icon: 'bell-off', label: 'Mute notifications', run: () => mute(true) }]} />}
+          </span>
+        )}
       </PaneHeader>
 
       {!minimized && (
         <>
           <div className="console-body">
             <PathCtx.Provider value={openFromChat}>
-              {view === 'chat' && <Chat agent={agent} pending={pending} queued={queued} onCancelQueued={cancelQueued} onEdit={agent.caps?.rewind ? (t) => { setEditTarget({ ...t, undoFiles: false, canUndoFiles: agent.kind === 'claude' }); setPrefill({ text: t.original, n: Date.now() }) } : null} editingText={editTarget?.original} />}
+              {view === 'chat' && <Chat agent={agent} pending={pending} queued={queued} onCancelQueued={cancelQueued} onEdit={agent.caps?.rewind ? (t) => { setEditTarget({ ...t, undoFiles: false, canUndoFiles: agent.kind === 'claude' }); setPrefill({ text: t.original, n: Date.now() }) } : null}
+                onUndo={agent.caps?.undo ? undoReply : null} editingText={editTarget?.original} />}
             </PathCtx.Provider>
             <div className="term-wrap" hidden={view !== 'terminal'}><Terminal paneId={agent.paneId} active={view === 'terminal'} focusKey={termFocus} onChat={() => setView('chat')} /></div>
             {view === 'files' && <FilesView agent={agent} openPath={openPath} onConsumed={() => setOpenPath(null)} onMention={(p) => setPrefill({ text: /\s/.test(p) ? `@"${p}" ` : `@${p} `, add: true, append: true, n: Date.now() })} />}
-            {view === 'changes' && <ChangesView agent={agent} onOpenFile={(p) => { setOpenPath(p); setView('files') }} />}
+            {view === 'changes' && <ChangesView key={agent.paneId} agent={agent} onOpenFile={(p) => { setOpenPath(p); setView('files') }}
+              onSendReview={async (t) => { const ok = await send(t, { review: true }); setView(agent.caps?.chat ? 'chat' : 'terminal'); return ok }} />}
             {view === 'preview' && <PreviewView agent={agent} onSendToAgent={({ text, files }) => { setView('chat'); setPrefill({ text, files, append: true, n: Date.now() }) }} />}
           </div>
 
@@ -568,6 +693,14 @@ export default function Console({ agent, variant = 'focus', controls = {}, onBac
               </div>
             )}
             {!keysOpen && flash && <div className="comp-note">{flash}</div>}
+            {undone && view === 'chat' && (
+              <div className="edit-bar undone-bar" role="status">
+                <Icon name="undo" size={12} />
+                <span>{undone.files ? 'Reply undone. The files and the chat are back to before your message.' : 'The chat is back to before your message. The agent had no file changes to restore.'}</span>
+                <button className="link-btn" onClick={() => { setPrefill({ text: undone.text, append: true, add: true, n: Date.now() }); setUndone(null) }}>Edit and send again</button>
+                <button className="win-btn" onClick={() => setUndone(null)} aria-label="Close" title="Close"><Icon name="x" size={12} /></button>
+              </div>
+            )}
             {btw && view === 'chat' && (
               <div className="btw-card" role="status">
                 <div className="btw-head"><Icon name="chat" size={12} /><span>Side question</span><button className="win-btn" onClick={() => setBtw(null)} aria-label="Close side answer" title="Close"><Icon name="x" size={12} /></button></div>

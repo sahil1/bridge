@@ -32,6 +32,13 @@ export default function NewAgent({ fleet, initial = {}, onClose, onLaunched }) {
   useEffect(() => { api('/accounts').then(setAccts).catch(() => {}) }, [])
   const kindAccts = accts.find((k) => k.kind === kind)?.accounts || []
   const pickedAccount = kindAccts.find((a) => a.id === account) || kindAccts.find((a) => a.active)
+  // Own branch, for a folder in a git repo: off unless you turned it on there last time.
+  const [repo, setRepo] = useState(null)
+  const [own, setOwn] = useState(false)
+  const [branch, setBranch] = useState('')
+  const [base, setBase] = useState('')
+  const [setup, setSetup] = useState('')
+  const repoSeen = useRef(null)
 
   // Installed agents; if the last one you used isn't installed here, start from your default.
   useEffect(() => {
@@ -51,8 +58,19 @@ export default function NewAgent({ fleet, initial = {}, onClose, onLaunched }) {
   }, [onClose])
 
   const folderName = cwd.replace(/\/$/, '').split('/').pop() || 'agent'
-  // Folders agents already work in, then ones you've launched into before.
-  const suggestions = [...new Set([...recent, ...(fleet?.agents || []).map((a) => tildePath(a.cwd))])].slice(0, 8)
+  // The repo the folder is in, and the branch name a launch would use (a number added if taken).
+  useEffect(() => {
+    if (mode !== 'project') return
+    const t = setTimeout(() => api(`/repo?dir=${encodeURIComponent(cwd)}&label=${encodeURIComponent(name || folderName)}&branch=${encodeURIComponent(branch)}`).then((r) => {
+      setRepo(r.repo ? r : null)
+      if (r.repo && r.repo !== repoSeen.current) { setOwn(r.own); setSetup(r.setup); setBase('') }
+      repoSeen.current = r.repo
+    }).catch(() => setRepo(null)), 250)
+    return () => clearTimeout(t)
+  }, [cwd, name, branch, mode, folderName])
+  const ownOn = mode === 'project' && !!repo && own
+  // Folders agents already work in (the repo, for one on its own branch), then ones you've launched into before.
+  const suggestions = [...new Set([...recent, ...(fleet?.agents || []).map((a) => tildePath(a.worktree?.repo || a.cwd))])].slice(0, 8)
 
   const launch = async (e) => {
     e?.preventDefault()
@@ -68,9 +86,11 @@ export default function NewAgent({ fleet, initial = {}, onClose, onLaunched }) {
         workspaceId: space === '__new' ? null : space,
         newSpace: space === '__new' ? (spaceName || name || folderName) : null,
         alsoKind: also && prompt.trim() ? also : undefined,
+        ...(repo ? { remember: true, ownBranch: own, ...(own ? { branch: branch.trim() || undefined, base: base || undefined, setup } : {}) } : {}),
       } })
       const clean = tildePath(dirs.path || cwd).replace(/\/$/, '')
       setRecent([clean, ...recent.filter((r) => r !== clean)].slice(0, 8))
+      if (out.setupError) window.alert(`The agent started, but the setup command failed:\n\n${out.setupError}`)
       onLaunched(out)
     } catch (x) { setError(x.message) } finally { setBusy(false) }
   }
@@ -150,6 +170,37 @@ export default function NewAgent({ fleet, initial = {}, onClose, onLaunched }) {
         {space === '__new' && (
           <label className="na-field"><span className="na-label">Tab name</span><input value={name} onChange={(e) => setName(e.target.value)} placeholder={folderName} /></label>
         )}
+
+        {repo && (
+          <div className={`na-own ${own ? 'on' : ''}`}>
+            <label className="na-check">
+              <input type="checkbox" checked={own} onChange={(e) => setOwn(e.target.checked)} />
+              <span><b>Own branch</b> <span className="muted">A new branch in its own copy of {repo.name}, so it can't clash with other agents</span></span>
+            </label>
+            {own && <>
+              <div className="na-row">
+                <label className="na-field">
+                  <span className="na-label">Branch</span>
+                  <input className="mono" value={branch} onChange={(e) => setBranch(e.target.value)} placeholder={repo.branch || 'bridge/…'} spellCheck="false" autoCapitalize="off" autoCorrect="off" />
+                </label>
+                <label className="na-field">
+                  <span className="na-label">From</span>
+                  <select value={base || repo.current || ''} onChange={(e) => setBase(e.target.value)}>
+                    {!repo.current && <option value="">This commit</option>}
+                    {[...new Set([repo.current, ...repo.branches].filter(Boolean))].map((b) => <option key={b} value={b}>{b}</option>)}
+                  </select>
+                </label>
+              </div>
+              {!repo.branch && <span className="na-warn">That can't be a branch name</span>}
+              {repo.branch && branch.trim() && repo.branch !== branch.trim() && <span className="na-warn">{branch.trim()} exists, so it'll be {repo.branch}</span>}
+              <label className="na-field">
+                <span className="na-label">Setup command <i>optional, runs first, saved for this repo</i></span>
+                <input className="mono" value={setup} onChange={(e) => setSetup(e.target.value)} placeholder="e.g. npm install" spellCheck="false" autoCapitalize="off" autoCorrect="off" />
+              </label>
+              <span className="muted small">{repo.include ? 'Ignored files listed in .worktreeinclude (like .env) are copied in.' : 'To copy ignored files like .env, list them in .worktreeinclude.'} When you close the agent, its folder goes if nothing would be lost; the branch stays.</span>
+            </>}
+          </div>
+        )}
         </>}
 
         <label className="na-field">
@@ -173,7 +224,7 @@ export default function NewAgent({ fleet, initial = {}, onClose, onLaunched }) {
         <footer className="modal-foot">
           <span className="muted small hide-touch">⌘⏎ to start</span>
           <button type="button" className="btn" onClick={onClose}>Cancel</button>
-          <button type="submit" className="btn primary" disabled={busy || (mode === 'project' && !dirs.exists)}>{busy ? 'Starting…' : mode === 'chat' ? 'Start chat' : 'Start agent'}</button>
+          <button type="submit" className="btn primary" disabled={busy || (mode === 'project' && !dirs.exists) || (ownOn && !repo.branch)}>{busy ? 'Starting…' : mode === 'chat' ? 'Start chat' : 'Start agent'}</button>
         </footer>
       </form>
     </div>

@@ -14,6 +14,10 @@ const ICONS = ['icon-512.png', 'apple-touch-icon.png', 'mark.svg']
 export function bundle() {
   const files = {}
   for (const f of TEXT) files[f] = { text: fs.readFileSync(path.join(DIR, 'web', f), 'utf8') }
+  // The service worker can't import modules in every browser, so it gets link.js as a plain
+  // script too (for answering a notification's buttons): self.bridgeLink.
+  const names = [...files['link.js'].text.matchAll(/^export (?:async )?(?:const|function|class) (\w+)/gm)].map((m) => m[1])
+  files['link-sw.js'] = { text: `self.bridgeLink = (() => {\n${files['link.js'].text.replace(/^export /gm, '')}\nreturn { ${names.join(', ')} }\n})()\n` }
   for (const f of ICONS) {
     const p = [path.join(ROOT, 'dist', f), path.join(ROOT, 'public', f)].find((x) => fs.existsSync(x))
     if (p) files[f] = f.endsWith('.svg') ? { text: fs.readFileSync(p, 'utf8') } : { b64: fs.readFileSync(p).toString('base64') }

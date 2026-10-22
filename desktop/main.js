@@ -3,7 +3,7 @@
 //   built app (npm run desktop:dist)  the copy of Bridge AI inside the app, on the app's own Node,
 //                                     so the person using it needs nothing else installed
 //   from source (npm run desktop)     your clone, with `node scripts/start.js`
-const { app, BrowserWindow, Menu, shell, globalShortcut, Notification, session, nativeTheme, ipcMain } = require('electron')
+const { app, BrowserWindow, Menu, shell, globalShortcut, Notification, session, nativeTheme, ipcMain, powerMonitor } = require('electron')
 
 // A picture of part of the window (the Preview tab's app), for sending to an agent. Only this
 // window, only a rectangle of it, only when the page asks.
@@ -184,6 +184,9 @@ ipcMain.handle('bridge:focus-main', (e) => {
   else { win.show(); win.focus() }
   return true
 })
+// Seconds since you last touched the computer, so a window left in front while you're away
+// doesn't keep your phone quiet.
+ipcMain.handle('bridge:idle', (e) => (fromApp(e) ? powerMonitor.getSystemIdleTime() : null))
 ipcMain.handle('bridge:focus-popout', (e, paneId) => {
   const w = fromApp(e) && pops.get(paneId)
   if (!w || w.isDestroyed()) return false
@@ -225,22 +228,25 @@ function updateBadge(title) {
 }
 
 // Agent notifications come from Bridge AI itself: watch the server's live fleet feed and post one
-// when an agent starts waiting on you or finishes. Clicking it opens that agent.
+// when an agent starts waiting on you (with what it's asking) or finishes. Clicking it opens that
+// agent, at its question.
 const seen = new Map() // paneId -> { status, seq } last seen
 const live = new Map() // paneId -> Notification (kept so macOS doesn't drop the click handler)
-function notifyFor(a) {
+async function notifyFor(a) {
   const label = a.chief ? 'Chief of staff' : a.title || a.tab || a.workspace
+  const blocked = a.status === 'blocked'
+  const q = blocked ? await fetch(`${URL_BASE}/api/agents/${encodeURIComponent(a.paneId)}/question`).then((r) => r.json(), () => null).catch(() => null) : null
   const n = new Notification({
-    title: a.status === 'blocked' ? 'Needs you' : 'Finished',
+    title: blocked ? (q?.text ? `${label} needs you` : 'Needs you') : 'Finished',
     subtitle: `${a.workspace}${a.tab && a.tab !== label ? ` › ${a.tab}` : ''}`,
-    body: label,
-    silent: a.status !== 'blocked',
+    body: q?.text || label,
+    silent: !blocked,
   })
   n.on('click', () => {
     if (!win) return
     if (win.isMinimized()) win.restore()
     win.show(); win.focus()
-    win.webContents.executeJavaScript(`window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: ${JSON.stringify(a.paneId)} } }))`).catch(() => {})
+    win.webContents.executeJavaScript(`window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: ${JSON.stringify(a.paneId)}, view: ${JSON.stringify(blocked ? 'chat' : undefined)} } }))`).catch(() => {})
     live.delete(a.paneId)
   })
   n.on('close', () => live.delete(a.paneId))
@@ -255,9 +261,9 @@ function onFleet(f) {
     // A change to "needs you" or "finished", or a new agent that shows up already there. The
     // state counter catches quick tasks that start and finish between two updates.
     const changed = before ? before.status !== a.status || before.seq !== a.seq : primed
-    if (changed && (a.status === 'blocked' || a.status === 'done')) {
+    if (changed && (a.status === 'blocked' || a.status === 'done') && !a.muted) {
       // Skip it if you're already looking at Bridge AI.
-      if (!(win && win.isFocused() && win.isVisible())) notifyFor(a)
+      if (!(win && win.isFocused() && win.isVisible())) notifyFor(a).catch(() => {})
     }
     seen.set(a.paneId, { status: a.status, seq: a.seq })
   }

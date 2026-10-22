@@ -30,28 +30,29 @@ export async function gitSummary(cwds) {
 
 const HOME = os.homedir()
 const expand = (p) => (p?.startsWith('~') ? path.join(HOME, p.slice(1)) : p)
+// Never a blocking call on your folders: macOS can hold the first look into Desktop or Documents
+// until you answer its permission prompt, and only the request that asked should wait for that.
+const isDir = (p) => fs.promises.stat(p).then((st) => st.isDirectory(), () => false)
 
 // Directory completion inside the home folder: "~/Desk" -> ~/Desktop, "~/Desktop/" -> its folders.
-export function completeDir(input) {
+export async function completeDir(input) {
   const raw = String(input || '~/').trim() || '~/'
   const full = path.resolve(expand(raw.startsWith('/') || raw.startsWith('~') ? raw : `~/${raw}`))
   if (full !== HOME && !full.startsWith(HOME + path.sep)) return { dirs: [] }
   const endsSlash = /\/$/.test(raw)
   const dir = endsSlash ? full : path.dirname(full)
   const prefix = endsSlash ? '' : path.basename(full).toLowerCase()
-  let names = []
-  try {
-    names = fs.readdirSync(dir, { withFileTypes: true })
-      .filter((d) => d.isDirectory() && !d.name.startsWith('.') && d.name !== 'node_modules' && d.name.toLowerCase().startsWith(prefix))
-      .map((d) => d.name).sort().slice(0, 30)
-  } catch { /* not a folder */ }
+  const [ents, exists] = await Promise.all([fs.promises.readdir(dir, { withFileTypes: true }).catch(() => []), isDir(full)]) // [] when not a folder
+  const names = ents
+    .filter((d) => d.isDirectory() && !d.name.startsWith('.') && d.name !== 'node_modules' && d.name.toLowerCase().startsWith(prefix))
+    .map((d) => d.name).sort().slice(0, 30)
   const tilde = (p) => (p.startsWith(HOME) ? `~${p.slice(HOME.length)}` : p)
-  return { exists: fs.existsSync(full) && fs.statSync(full).isDirectory(), path: tilde(full), dirs: names.map((n) => tilde(path.join(dir, n)) + '/') }
+  return { exists, path: tilde(full), dirs: names.map((n) => tilde(path.join(dir, n)) + '/') }
 }
 
-export const resolveDir = (p) => {
+export const resolveDir = async (p) => {
   const full = path.resolve(expand(String(p || '~')))
   if (full !== HOME && !full.startsWith(HOME + path.sep)) throw new Error('Pick a folder inside your home folder')
-  if (!fs.existsSync(full) || !fs.statSync(full).isDirectory()) throw new Error(`Folder not found: ${p}`)
+  if (!(await isDir(full))) throw new Error(`Folder not found: ${p}`)
   return full
 }

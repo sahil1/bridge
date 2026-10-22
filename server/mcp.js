@@ -274,7 +274,7 @@ function serverView(name, raw, read) {
 }
 const signature = (v) => JSON.stringify([v.transport, v.command || '', v.args, v.url || ''])
 
-function readAgent(kind, label) {
+async function readAgent(kind, label) {
   const spec = SPECS[kind]
   const file = spec.file()
   const found = []
@@ -284,12 +284,16 @@ function readAgent(kind, label) {
     const map = data?.[spec.key]
     for (const [name, raw] of Object.entries(map && typeof map === 'object' ? map : {})) found.push({ view: serverView(name, raw, spec.read), scope: 'user', source: short(file) })
     // Claude also keeps per-project servers: "local" scope in ~/.claude.json, "project" in .mcp.json.
+    // Projects are in your folders (Desktop, Documents), which macOS can hold a look into until you
+    // answer its permission prompt, so their .mcp.json is read without blocking.
     if (kind === 'claude' && data?.projects && typeof data.projects === 'object') {
-      for (const [proj, p] of Object.entries(data.projects)) {
+      const projects = Object.entries(data.projects)
+      const shared = await Promise.all(projects.map(([proj]) => fs.promises.readFile(path.join(proj, '.mcp.json'), 'utf8').catch(() => null)))
+      for (const [i, [proj, p]] of projects.entries()) {
         for (const [name, raw] of Object.entries(p?.mcpServers || {})) found.push({ view: serverView(name, raw, readStd), scope: 'local', project: proj, source: short(file) })
         const mcpJson = path.join(proj, '.mcp.json')
         try {
-          const servers = JSON.parse(fs.readFileSync(mcpJson, 'utf8'))?.mcpServers || {}
+          const servers = JSON.parse(shared[i])?.mcpServers || {}
           for (const [name, raw] of Object.entries(servers)) found.push({ view: serverView(name, raw, readStd), scope: 'project', project: proj, source: short(mcpJson) })
         } catch { /* no .mcp.json there */ }
       }
@@ -311,7 +315,7 @@ const usesCli = (agent) => !!(SPECS[agent.kind].cli && agent.path && !NO_CLI)
 
 async function listAll(installed) {
   const agents = await agentsWithMcp(installed)
-  const reads = agents.map((a) => readAgent(a.kind, a.label))
+  const reads = await Promise.all(agents.map((a) => readAgent(a.kind, a.label)))
   const byName = new Map()
   for (const r of reads) {
     for (const f of r.found) {
