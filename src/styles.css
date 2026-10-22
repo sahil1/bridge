@@ -1832,6 +1832,9 @@ button.yg-day:hover { box-shadow: 0 0 0 1.5px var(--accent); }
 /* ============ Question card (Claude's picker and menus, clickable) ============ */
 .blocked-card { width: calc(100% - 28px); max-width: min(1040px, max(860px, 74%)); margin: 0 auto 10px; align-self: center; }
 .qcard { background: var(--pane); border-top: 1px solid color-mix(in srgb, var(--needs) 25%, transparent); padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 10px; max-height: min(60vh, 560px); overflow-y: auto; }
+/* Phone: when there's little room (the keyboard is up, a small screen), the card gives way and
+   scrolls instead of pushing the message box (and the field you're typing in) out of sight. */
+.app.narrow .blocked-card { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .q-tabs { display: flex; flex-wrap: wrap; gap: 4px; }
 .q-tab { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-3); padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); }
 .q-tab:hover { color: var(--ink); border-color: var(--line-2); }
@@ -2470,6 +2473,7 @@ table.sheet tbody tr:hover td { background: var(--pane-2); }
 .tour-legend > span { display: inline-flex; align-items: center; gap: 6px; }
 .tour-legend > span > span { display: inline-flex; }
 .tour-foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.tour-foot .btn { white-space: nowrap; }
 .tour-dots { display: flex; gap: 5px; margin-right: auto; }
 .tour-dots span { width: 6px; height: 6px; border-radius: 3px; background: var(--line-2); transition: width .2s ease, background .2s ease; }
 .tour-dots span.on { width: 16px; background: var(--accent); }

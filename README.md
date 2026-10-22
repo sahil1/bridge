@@ -4,6 +4,10 @@ One place to run, watch and talk to all your coding agents. Start Claude Code, C
 
 Bridge AI runs on your machine. Your agents use their own logins; Bridge AI only reads their screens and transcripts and types into them for you. Nothing is sent anywhere else.
 
+[![Bridge AI in 30 seconds](site/poster.jpg)](https://sahil1.github.io/bridge/)
+
+**[Download](https://sahil1.github.io/bridge/)** for macOS, Windows or Linux · **[Try the demo](https://sahil1.github.io/bridge/demo/)** in your browser, with made-up agents · [All releases](https://github.com/sahil1/bridge/releases/latest)
+
 ## Install
 
 The app needs nothing else installed: no Node, no clone. Bridge AI finds the agent CLIs you already have and offers to install one if you have none.

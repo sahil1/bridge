@@ -370,6 +370,9 @@ export default function App() {
     return () => window.removeEventListener('bridge-tour', on)
   }, [])
   const endTour = () => { setTour(false); setToured((t) => ({ ...t, [device]: true })) }
+  // The tab being dragged (below). Up here, before the phone layout returns, so a phone turned
+  // sideways into the wide layout keeps the same hooks instead of crashing.
+  const [tabDrag, setTabDrag] = useState(null) // { id, over, after }
 
   const nextTheme = { system: 'dark', dark: 'light', light: 'system' }[theme]
   const paletteActions = [
@@ -557,7 +560,6 @@ export default function App() {
   }
 
   // Drag a tab to reorder; Ctrl+Shift+←/→ moves the focused tab. The order is saved with the layout.
-  const [tabDrag, setTabDrag] = useState(null) // { id, over, after }
   const moveTab = (id, target, after) => setW((w) => {
     if (id === target) return w
     const rest = w.tabs.filter((t) => t !== id)

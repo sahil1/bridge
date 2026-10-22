@@ -14,9 +14,14 @@ A much smoother first run: one-click fixes wherever a new Mac needs something, a
 - **A button wherever something's missing:** Homebrew, icalBuddy, Mail not set up yet, signing in to an agent, the GitHub CLI, Apple's developer tools for git, herdr, an agent that isn't installed, and a city for the weather. Each fixes itself once it's done.
 - **Cloud agents on your phone, with no computer:** the iPhone and Android apps run Cursor, Copilot, Jules and Claude agents on their own, with your keys kept in the phone's Keychain or Keystore, never shown to the page. Android checks on them in the background and notifies you.
 - **The demo** shows cloud agents too, and `?clean=1` hides its Demo strip for recording.
+- **Your phone, free, from the walkthrough:** its phone step says how to put Bridge AI on your phone with a free Cloudflare account (or Tailscale), and **Set up phone** takes you there.
+- **A website to share:** [sahil1.github.io/bridge](https://sahil1.github.io/bridge/) has the right download for your computer, the install commands, and the demo running in your browser.
 
 ### Fixes
 
+- **Android app keyboard:** on Android 15 and later the keyboard covered the message box, dialogs and the fields you type in. The app now makes room for it, a long question card scrolls instead of pushing the message box away, and the start screen scrolls when it needs to.
+- **Turning a phone sideways,** or widening a narrow window into the full layout, crashed the page with "hit an error". Fixed.
+- **New agent with herdr:** starting an agent in a new space could fail with "agent_pane_busy … is not an available shell", because the new tab's shell was still starting. Bridge AI now waits for its prompt, and herdr's errors read as sentences instead of raw JSON.
 - **Calendar on a new Mac:** icalBuddy wasn't found when the app couldn't see Homebrew's folder, and denied Calendar access showed an empty calendar with no reason.
 - **git without Apple's developer tools:** checking a repo's branch every 15 seconds popped macOS's install dialog over and over.
 - **The greeting** no longer includes tags from your Mac account name, like "[Apple]".

@@ -29,6 +29,7 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
@@ -72,6 +73,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        fitKeyboard()
         // For testing on an emulator, which can't scan: adb shell am start -n dev.bridgeai.phone/.MainActivity --es pair <link>
         val testLink = if (BuildConfig.DEBUG) intent.getStringExtra("pair") else null
         if (testLink != null) return usePairingLink(testLink)
@@ -101,6 +103,21 @@ class MainActivity : Activity() {
     // ...or that opened it: shown once the page is there.
     private var pendingAgent: String? = null
 
+    // From Android 15 the app draws under the bars and the keyboard (edge-to-edge), and adjustResize
+    // no longer makes room for the keyboard. So the screen ends where the keyboard begins, for the
+    // page and the start screen alike: the message box, a dialog or the field you're typing in stays
+    // just above it. The bars are still drawn under (the page keeps clear of them with its safe-area
+    // insets), less what's now below the screen, so the page doesn't make room a second time.
+    // Before Android 15 the system does this.
+    private fun fitKeyboard() {
+        if (Build.VERSION.SDK_INT < 35) return
+        findViewById<View>(android.R.id.content).setOnApplyWindowInsetsListener { v, insets ->
+            val keyboard = insets.getInsets(WindowInsets.Type.ime()).bottom
+            v.setPadding(0, 0, 0, keyboard)
+            insets.inset(0, 0, 0, keyboard)
+        }
+    }
+
     // ---------- before the first pairing ----------
     private fun showStart(error: String?) {
         web?.destroy()
@@ -114,12 +131,16 @@ class MainActivity : Activity() {
             setPadding((24 * dp).toInt(), 0, (24 * dp).toInt(), 0)
             setBackgroundColor(Color.parseColor("#0B0D11"))
         }
-        // From Android 15 the app draws under the bars and the keyboard (edge-to-edge), so
-        // adjustResize no longer makes room: keep the form clear of them. (The page does it itself.)
-        if (Build.VERSION.SDK_INT >= 35) box.setOnApplyWindowInsetsListener { v, insets ->
+        // Centred, and it scrolls when the keyboard (or a small screen) leaves too little room.
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            addView(box)
+        }
+        // From Android 15 the app draws under the bars (edge-to-edge): keep the form clear of them.
+        // (The page does it itself; fitKeyboard keeps both clear of the keyboard.)
+        if (Build.VERSION.SDK_INT >= 35) scroll.setOnApplyWindowInsetsListener { v, insets ->
             val bars = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
-            val keyboard = insets.getInsets(WindowInsets.Type.ime())
-            v.setPadding(bars.left + (24 * dp).toInt(), bars.top, bars.right + (24 * dp).toInt(), maxOf(bars.bottom, keyboard.bottom))
+            v.setPadding(bars.left, bars.top, bars.right, bars.bottom)
             WindowInsets.CONSUMED
         }
         val icon = ImageView(this).apply { setImageResource(R.mipmap.ic_launcher) }
@@ -170,7 +191,7 @@ class MainActivity : Activity() {
             })
             box.addView(Button(this).apply { text = "Cloud agents"; setOnClickListener { openCloud(null) } }, wide)
         }
-        setContentView(box)
+        setContentView(scroll)
     }
 
     // ---------- Bridge AI's UI bundled in the app ----------

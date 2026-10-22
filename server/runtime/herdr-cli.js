@@ -55,13 +55,16 @@ export async function run(args, { timeout = 15000, json = true } = {}) {
   return new Promise((resolve, reject) => {
     execFile(bin, args, { timeout, maxBuffer: 16 * 1024 * 1024, env: herdrEnv() }, (err, stdout, stderr) => {
       if (err) {
-        // herdr reports structured errors on stdout as {"error":{...}}
+        // herdr reports structured errors as {"error":{"code","message"}}, on stdout or stderr
         let msg = (stderr || '').trim() || err.message
-        try {
-          const parsed = JSON.parse(stdout)
-          if (parsed.error) msg = parsed.error.message || parsed.error.code || msg
-        } catch { /* not json */ }
-        return reject(new Error(msg))
+        let code
+        for (const out of [stdout, stderr]) {
+          try {
+            const parsed = JSON.parse(out)
+            if (parsed.error) { msg = parsed.error.message || parsed.error.code || msg; code = parsed.error.code; break }
+          } catch { /* not json */ }
+        }
+        return reject(Object.assign(new Error(msg), code ? { code } : {}))
       }
       if (!json) return resolve(stdout)
       try {
@@ -163,13 +166,31 @@ export function sendKeys(paneId, keys) {
   return run(['agent', 'send-keys', paneId, ...keys])
 }
 
+// herdr starts an agent only at a pane's interactive shell prompt. A pane that was just created is
+// still running your shell's startup (.zshrc and the like), which herdr answers with
+// agent_pane_busy, so wait for the prompt and try again rather than fail. Nothing is typed into
+// the pane until herdr accepts.
+const PROMPT_WAIT = 30000
+async function startAgent(name, kind, paneId, rest = []) {
+  const until = Date.now() + PROMPT_WAIT
+  for (let wait = 400; ; wait = Math.min(Math.round(wait * 1.5), 2000)) {
+    try {
+      return await run(['agent', 'start', name, '--kind', kind, '--pane', paneId, '--timeout', '60000', ...rest], { timeout: 70000 })
+    } catch (err) {
+      if (err.code !== 'agent_pane_busy') throw err
+      if (Date.now() + wait > until) throw new Error(`The new tab's shell didn't reach its prompt within ${PROMPT_WAIT / 1000} seconds, so the agent couldn't start there. Something in your shell's startup may be waiting; open the tab to see, then try again.`)
+      await new Promise((r) => setTimeout(r, wait))
+    }
+  }
+}
+
 // Open a new workspace in `cwd` and start an agent of `kind` in its first pane.
 export async function launchAgent({ name, kind, cwd, label }) {
   const created = await run(['workspace', 'create', '--cwd', cwd, '--label', label || name, '--no-focus'])
   const paneId = findPaneId(created)
   if (!paneId) throw new Error('herdr did not return a pane for the new workspace')
   try {
-    await run(['agent', 'start', name, '--kind', kind, '--pane', paneId, '--timeout', '60000'], { timeout: 70000 })
+    await startAgent(name, kind, paneId)
   } catch (err) {
     // A first launch usually stops at a trust or login prompt. The agent exists
     // and is waiting on you, which the UI shows as "Needs you".
@@ -193,7 +214,7 @@ export async function launchTask({ name, kind = 'claude', cwd, label, workspaceI
   // herdr only passes simple one-line prompts on the command line; longer ones are sent once the agent is up.
   const inline = prompt && !/[\n"'`$\\]/.test(prompt) ? prompt : null
   try {
-    await run(['agent', 'start', name, '--kind', kind, '--pane', paneId, '--timeout', '60000', '--', ...args, ...(inline ? [inline] : [])], { timeout: 70000 })
+    await startAgent(name, kind, paneId, ['--', ...args, ...(inline ? [inline] : [])])
   } catch (err) {
     if (/not.?ready|blocked/i.test(err.message)) return { paneId, waiting: true, promptPending: !!prompt && !inline }
     throw err

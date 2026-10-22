@@ -16,3 +16,4 @@ config.local.json
 .DS_Store
 Dockerfile
 docker-compose.yml
+site

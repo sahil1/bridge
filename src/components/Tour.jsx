@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { StatusDot } from './Icon.jsx'
+import { openSettings } from './SignIn.jsx'
 
 // A short walk through the real UI for someone new: the page dims, the part being explained stays
 // lit, and a card beside it says what it is. Shown once per device after setup (the phone layout
@@ -19,7 +20,8 @@ const legend = (
 const CHIEF = { at: 'chief', title: 'Your chief of staff', body: 'Tell it what you need in plain words. It hands the work to the right agent, starts a new one when nothing fits, and tells you when it\'s done.' }
 
 // at: the data-tour name to point at. last: always shown (mid-screen if its element isn't there),
-// with the first-action button.
+// with the first-action button. link: a second button that ends the tour and opens that part of
+// Settings.
 const STEPS = {
   desktop: [
     { at: 'agents', title: 'Your agents', body: <>Everything you run, grouped in spaces, with its folder and git branch. The dot shows what each one is doing: {legend}</> },
@@ -28,7 +30,7 @@ const STEPS = {
     { at: 'composer', title: 'Talk to it', body: 'Type here to send a message: @ adds a file, / runs a command. When an agent asks you something, its question shows up just above as a card you can click.' },
     { at: 'changes', title: 'Review and ship', body: 'Changes shows what the agent edited. Comment on any line to send it feedback, then commit, push and open a pull request from here.' },
     { at: 'usage', title: 'Usage at a glance', body: 'How much of your plan is left: this 5-hour window and this week. Click it for the details, or to switch accounts if you have more than one.' },
-    { at: 'settings', title: 'On your phone too', body: 'In Settings › Phone & notifications, put Bridge AI on your phone and get a ping when an agent needs you or finishes.' },
+    { at: 'settings', title: 'On your phone too, free', body: 'In Settings › Phone & notifications, sign in with a free Cloudflare account (or use Tailscale) and scan the QR code with your phone. Everything between your phone and this computer is end-to-end encrypted, and you get a ping when an agent needs you or finishes.', link: { label: 'Set up phone', section: 'phone' } },
     { at: 'new-agent', title: 'Your turn', body: 'Pick any folder and any agent you have installed. In a git repo it can work on its own branch, so agents don\'t trip over each other.', last: true },
   ],
   phone: [
@@ -190,6 +192,7 @@ export default function Tour({ phone, actionLabel, onAction, onClose }) {
             </span>
           )}
           {live.avail.some((i) => i < at) && <button type="button" className="btn small" onClick={prev}>Back</button>}
+          {step.link && <button type="button" className="btn small" onClick={() => { onClose(); openSettings(step.link.section) }}>{step.link.label}</button>}
           <button type="button" ref={primaryRef} className="btn small primary" onClick={last ? onAction : next}>{last ? actionLabel : 'Next'}</button>
         </footer>
       </div>
