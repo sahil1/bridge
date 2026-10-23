@@ -478,7 +478,8 @@ export function modelOf({ kind, sessionId, cwd }) {
 // them into "1 question, ⇧← to answer" and drops them when the turn ends, answered or not, so
 // they're read from the log. One is open until you answer it (a reply naming it, from Codex's own
 // editor) or send any other message, which is when Codex drops them too. working: its turn is
-// still running. The log is read on from where the last look stopped.
+// still running (null: no turn starts or ends in what was read). The log is read on from where
+// the last look stopped.
 export const REPLY = /<send_user_message_question_reply>([\s\S]*?)<\/send_user_message_question_reply>/
 const askState = new Map() // file -> { size, state }
 const ASK_LINE = /"delivery":"async"|"task_started"|"task_complete"|"turn_aborted"|"role":"user"/
@@ -489,7 +490,7 @@ export function asksOf({ kind, sessionId, cwd }) {
   let size
   try { size = fs.statSync(file).size } catch { return null }
   let c = askState.get(file)
-  if (!c || size < c.size) c = { size: 0, state: { open: [], working: false } }
+  if (!c || size < c.size) c = { size: 0, state: { open: [], working: null } }
   if (size > c.size) {
     // From the tail the first time, then only what was added (whole lines; a partial one waits).
     const from = c.size || Math.max(0, size - TAIL_BYTES)

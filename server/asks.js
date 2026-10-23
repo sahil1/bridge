@@ -23,8 +23,9 @@ export function decorate(a) {
   let q = null
   try { q = asksOf(a) } catch { return }
   if (!q?.open.length) return
-  // status: what it's doing meanwhile, for what goes by that (the message queue).
-  a.asking = { count: q.open.length, title: flat(q.open[0].title), working: a.status === 'working', status: a.status }
+  // working: from Codex's log, which knows when its turn ends (herdr can still say it's working).
+  // status: what the runtime says, for what goes by that (the message queue).
+  a.asking = { count: q.open.length, title: flat(q.open[0].title), working: q.working ?? a.status === 'working', status: a.status }
   a.status = 'blocked'
 }
 
@@ -38,7 +39,7 @@ export function routes(app, { wrap, findAgent, sendPrompt }) {
   app.get('/api/agents/:pane/asks', wrap(async (req) => {
     const a = await findAgent(req.params.pane)
     const q = a.kind === 'codex' ? asksOf(a) : null
-    return { questions: q?.open || [], working: !!q?.working }
+    return { questions: q?.open || [], working: q?.working ?? a.status === 'working' }
   }))
 
   // { answers: [{ id, index, answer }] }: every question still open, in one message.
