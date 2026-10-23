@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bridge AI</title>
-<meta name="description" content="Run Claude Code, Codex, Gemini CLI and other coding agents side by side. See which ones need you, review and ship their changes, and answer them from your phone. Free and open source.">
+<meta name="description" content="The bridge between you and your AI agents. Tell a chief of staff what you need, and your agents work in parallel, organized in spaces, in one window for every provider. Free and open source.">
 <meta property="og:title" content="Bridge AI">
-<meta property="og:description" content="All your coding agents in one place, on your computer and your phone. Free and open source.">
+<meta property="og:description" content="The bridge between you and your AI agents. Free and open source.">
 <meta property="og:image" content="https://sahil1.github.io/bridge/poster.jpg">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
@@ -59,7 +59,7 @@
   .card p { margin: 0; color: var(--ink-2); font-size: 14.5px; }
   .dots { display: inline-flex; gap: 6px; margin-right: 6px; vertical-align: middle; }
   .dots i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
-  .install { display: grid; gap: 12px; }
+  .install { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .cmd { display: flex; align-items: center; gap: 10px; background: var(--pane); border: 1px solid var(--line); border-radius: 12px; padding: 10px 10px 10px 14px; }
   .cmd .os { flex: none; width: 92px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
   .cmd code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; font-size: 13px; }
@@ -74,6 +74,7 @@
     .grid { grid-template-columns: 1fr; }
     .hero { padding-top: 24px; }
     .cmd { flex-wrap: wrap; }
+    .cmd code { flex-basis: 100%; }
     .cmd .os { width: 100%; }
   }
 </style>
@@ -86,8 +87,8 @@
   </header>
 
   <div class="hero">
-    <h1>All your coding agents,<br>in one place.</h1>
-    <p class="lede">Run Claude Code, Codex, Gemini CLI and the others side by side. See which ones need you, review and ship their changes, and answer them from your phone. Free and open source.</p>
+    <h1>The bridge between you<br>and your AI agents.</h1>
+    <p class="lede">Tell your chief of staff what you need, and your agents get to work in parallel. Spaces keep every project organized, and one window holds them all: Claude, Codex, Gemini, Copilot and cloud agents. Free and open source.</p>
     <div class="ctas">
       <a class="btn primary" id="dl" href="https://github.com/sahil1/bridge/releases/latest">Download</a>
       <a class="btn" href="demo/">Try the demo</a>
@@ -101,12 +102,12 @@
   <section>
     <h2>What it does</h2>
     <div class="grid">
-      <div class="card"><h3>Every agent, side by side</h3><p>Claude Code, Codex, Gemini CLI, Copilot, OpenCode and more, each in its own folder and git branch, grouped in spaces.</p></div>
-      <div class="card"><h3><span class="dots"><i style="background:var(--working)"></i><i style="background:var(--done)"></i><i style="background:var(--needs)"></i></span>Who needs you</h3><p>Working, finished or waiting on you, at a glance. Questions show up as cards you answer in one click.</p></div>
-      <div class="card"><h3>Review and ship</h3><p>See what each agent changed, comment on any line, then commit, push and open a pull request from the same place.</p></div>
-      <div class="card"><h3>On your phone, free</h3><p>Pair your phone with a free Cloudflare account or Tailscale. End-to-end encrypted, with a ping when an agent needs you.</p></div>
-      <div class="card"><h3>A chief of staff</h3><p>Say what you need in plain words. It hands the work to the right agent and tells you when it's done.</p></div>
-      <div class="card"><h3>Cloud agents too</h3><p>Start Cursor, Copilot, Jules and Claude agents in their clouds with your own keys, next to the ones on your computer.</p></div>
+      <div class="card"><h3>Your chief of staff</h3><p>Say what you need in plain words. It hands the work to the right agent, starts a new one when nothing fits, and tells you when it's done.</p></div>
+      <div class="card"><h3><span class="dots"><i style="background:var(--working)"></i><i style="background:var(--done)"></i><i style="background:var(--needs)"></i></span>Agents in parallel</h3><p>Many agents working at once, each on its own task, so you build and ship much faster. See at a glance which are working, done or waiting on you.</p></div>
+      <div class="card"><h3>Spaces for every project</h3><p>Group agents by project, fold away what you're not working on, and pick up right where you left off.</p></div>
+      <div class="card"><h3>One window, every provider</h3><p>Claude Code, Codex, Gemini CLI, Copilot, OpenCode and more on your computer, plus Cursor, Copilot, Jules and Claude agents in the cloud, all in one place.</p></div>
+      <div class="card"><h3>Never miss a question</h3><p>When an agent needs you, answer in one click, at your desk or on your phone. Pair it free with a Cloudflare account or Tailscale, end-to-end encrypted.</p></div>
+      <div class="card"><h3>Review and ship</h3><p>See what each agent changed, leave notes, and send the work out from the same window when it's ready.</p></div>
     </div>
   </section>
 

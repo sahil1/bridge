@@ -1,10 +1,10 @@
 # Bridge AI
 
-One place to run, watch and talk to all your coding agents. Start Claude Code, Codex, Gemini CLI, Copilot, OpenCode and others in any folder, see at a glance which ones are working, finished or waiting on you, chat with them from your laptop or phone, and hand work to a chief of staff agent that routes it to the right one.
+**The bridge between you and your AI agents.** Tell a chief of staff what you need and it hands the work to the right agent, while your agents (Claude Code, Codex, Gemini CLI, Copilot, OpenCode and others, plus cloud agents) work in parallel. Spaces keep every project organized, and one window holds every provider, on your computer and your phone.
 
 Bridge AI runs on your machine. Your agents use their own logins; Bridge AI only reads their screens and transcripts and types into them for you. Nothing is sent anywhere else.
 
-[![Bridge AI in 35 seconds, with sound](site/poster.jpg)](https://sahil1.github.io/bridge/)
+[![Bridge AI in 40 seconds, with sound](site/poster.jpg)](https://sahil1.github.io/bridge/)
 
 **[Download](https://sahil1.github.io/bridge/)** for macOS, Windows or Linux · **[Try the demo](https://sahil1.github.io/bridge/demo/)** in your browser, with made-up agents · [All releases](https://github.com/sahil1/bridge/releases/latest)
 
