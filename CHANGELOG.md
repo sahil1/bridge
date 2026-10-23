@@ -2,6 +2,14 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
+## 2.7.1
+
+A fix for the herdr session menu with a colour theme.
+
+### Fixes
+
+- **The herdr session menu in the sidebar was see-through with a colour theme** (Sky, Midnight and the others in Settings › Appearance), so the spaces under it showed through and it was hard to read. It's solid now, like the sidebar's other menus.
+
 ## 2.7.0
 
 Agents that keep running when Bridge AI restarts, handing work from one agent to another, herdr sessions in the sidebar, and Codex's questions as cards you can answer.
