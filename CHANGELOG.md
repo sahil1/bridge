@@ -2,6 +2,21 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
+## 2.6.0
+
+Two accounts side by side, a model picker in the message box, and a chief of staff that does work itself.
+
+### What's new
+
+- **A work and a personal account, side by side:** **Add another account** is in the usage menu in the top bar, in New agent and in `⌘K`, even when you have only one. One dialog takes you through it: pick Claude Code or Codex, name it, sign in right there, then start an agent on it. Each agent shows the account it's on in its header, the sidebar and the board, and keeps it when you fork it, reopen it or restart it on another model.
+- **Switch models from the message box:** a chip next to the mic shows the model the agent is on. Pick another one, Default, or type any name. Claude Code and Aider switch in place (Claude Code also keeps it as your default for new sessions, as `/model` does in its terminal), and Codex restarts on it with the same conversation. The chief of staff can switch an agent's model too (`bridge model`).
+- **The chief of staff does work itself:** questions, research, drafts, plans and comparisons it now does on its own, in its own folder, while project work still goes to an agent. It keeps its own task list, shown in a Tasks panel above its message box: add a task there to send it over, mark one done or reopen it, and open what it produced. The morning brief mentions its open tasks. Your playbook and ledger stay as they were.
+
+### Fixes
+
+- **With herdr,** Bridge AI now remembers which account each agent was started on, also after it restarts. On either runtime, forks and agents reopened from Closed agents start on their own account instead of the active one.
+- **Agent headers** with the Today panel open squeezed the agent's name to a letter or two. The view buttons show as icons at that width, so the name fits.
+
 ## 2.5.0
 
 A much smoother first run: one-click fixes wherever a new Mac needs something, agents that install without Node, Claude Code and Codex set up from the chat, and cloud agents straight from your phone.

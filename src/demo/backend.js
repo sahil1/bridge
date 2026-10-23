@@ -34,6 +34,7 @@ export function createDemo() {
     accts: F.makeAccounts(),
     routines: F.makeRoutines(),
     ideas: F.makeIdeas(),
+    chiefTasks: F.makeChiefTasks(),
     prompts: [{ id: 'pr1', name: 'Review before commit', text: 'Review your changes as a senior engineer would: bugs first, then naming and tests. Fix what you find.', used: 3, createdAt: iso() }],
     archive: F.archive().items,
     cfg: { ...F.CONFIG },
@@ -94,6 +95,7 @@ export function createDemo() {
     if (st.edit) edit(a, st.edit, st.with, ts)
     if (st.commit) commit(a, ts)
     if (st.ask) { a.question = st.ask; a.onAnswer = st.then; a.qtyping = null }
+    if (st.fx) st.fx()
   }
 
   function edit(a, rel, fn, ts) {
@@ -159,9 +161,23 @@ export function createDemo() {
   function prompt(a, text) {
     a.draft = ''
     if (a.question) fail('agent_blocked')
+    if (a.kind === 'claude' && /^\/model\s+\S/.test(text)) return switchModel(a, text.split(/\s+/)[1])
     push(a, { role: 'user', text })
     if (/^\/clear\b/.test(text)) { a.log = []; bump(); return }
     if (/^\/compact\b/.test(text)) return play(a, [{ doing: 'Compacting', wait: 1600 }, { event: 'Conversation compacted' }])
+    // A task from the Tasks panel: the chief does it itself and ticks it off.
+    const task = a.chief && /^Task (\d+) from my Tasks panel: (.+)/.exec(text)
+    if (task) {
+      const [, id, title] = task
+      const file = `work/${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || `task-${id}`}/draft.md`
+      const outcome = 'A first draft is ready for your edits.'
+      return play(a, [
+        { run: `node bin/bridge task doing ${id}`, doing: 'Starting', fx: () => setTask(id, { status: 'doing' }) },
+        { edit: file, with: () => `# ${title}\n\nA first draft. Change anything that doesn't sound like you.\n`, doing: 'Writing' },
+        { run: `node bin/bridge task done ${id} "…" --file ${file}`, fx: () => setTask(id, { status: 'done', outcome, link: file }) },
+        { say: `Done: a first draft of "${title}" is in \`${file}\`. Task ${id} is ticked off.` },
+      ])
+    }
     if (a.chief) {
       const r = chiefReply(text, fleet().agents)
       return play(a, r.steps, {
@@ -172,6 +188,21 @@ export function createDemo() {
       })
     }
     return play(a, reply(a, text, a.replies++))
+  }
+
+  // Claude Code's /model: it takes it after the step it's on, then says so in the chat.
+  function switchModel(a, model) {
+    a.switching = { model, at: iso(), state: 'sent', said: null }
+    bump()
+    a.chain = a.chain.then(async () => {
+      await sleep(900)
+      const id = F.MODEL_IDS[model] || model
+      const said = model === 'default' ? `Set model to Default (${F.modelName(id)})` : `Set model to ${F.modelName(id)}${id !== model ? ` (${id})` : ''}`
+      a.model = model === 'default' ? F.MODEL_ON.claude : id
+      a.switching = { ...a.switching, state: 'done', said }
+      push(a, { role: 'event', status: 'completed', text: said })
+    })
+    return a.chain
   }
 
   function interrupt(a) {
@@ -237,7 +268,7 @@ export function createDemo() {
       paneId: def.paneId, tabId: def.tabId, workspaceId: def.workspaceId, kind: def.kind, cwd: def.cwd, chief: !!def.chief,
       status: 'idle', seq: ++S.seq, account: def.account || (F.CAPS[def.kind] && S.accts[def.kind] ? `${def.kind}-default` : null), sessionId: def.sessionId || `demo-${def.paneId.replace(':', '-')}`,
       muted: false, worktree: def.worktree || null, log: [], question: null, onAnswer: null, qtyping: null, doing: null, since: Date.now(), draft: '',
-      chain: Promise.resolve(), gen: 0, replies: 0, reportTo: null,
+      chain: Promise.resolve(), gen: 0, replies: 0, reportTo: null, model: F.MODEL_ON[def.kind] || null, switching: null,
     }
     S.agents.set(a.paneId, a)
     if (replay) {
@@ -398,6 +429,21 @@ export function createDemo() {
     return { path: rel, name, ext, size: text.length, mtime: Date.now() - 36e5, kind: 'text', text, truncated: false }
   }
 
+  // ---------- The chief's own tasks ----------
+  const setTask = (id, patch) => {
+    const it = S.chiefTasks.find((x) => x.id === String(id).replace(/^#/, '')) || fail(`No task ${id} on the list`)
+    if (patch.status && patch.status !== 'done') Object.assign(it, { done: null, outcome: null })
+    if (patch.status && patch.status !== 'waiting') it.needs = null
+    if (patch.status === 'done' && it.status !== 'done') it.done = new Date().toLocaleDateString('en-CA')
+    Object.assign(it, patch)
+    return it
+  }
+  const RANK = { waiting: 0, doing: 1, open: 2 }
+  const chiefTasks = () => [
+    ...S.chiefTasks.filter((x) => x.status !== 'done').sort((a, b) => RANK[a.status] - RANK[b.status] || b.id - a.id),
+    ...S.chiefTasks.filter((x) => x.status === 'done').sort((a, b) => String(b.done).localeCompare(String(a.done)) || b.id - a.id),
+  ]
+
   // ---------- The brief ----------
   function brief(primary = 'claude') {
     const f = fleet()
@@ -418,6 +464,12 @@ export function createDemo() {
         { key: 'calendar', text: `${cal.length} meeting${cal.length === 1 ? '' : 's'} still ahead today.${next ? ` Next: ${next.title} at ${t(next.start)}.` : ''}` },
         { key: 'email', text: `${mail.length} unread need${mail.length === 1 ? 's' : ''} you, from ${[...new Set(mail.map((m) => m.from))].join(', ')}.` },
         { key: 'agents', text: `${by('working').length} working, ${by('blocked').length} waiting on you, ${by('done').length} finished and unread.`, items: [...by('blocked'), ...by('done')].slice(0, 5).map((a) => ({ paneId: a.paneId, status: a.status, label: a.title })) },
+        ...(() => {
+          const open = chiefTasks().filter((x) => x.status !== 'done')
+          const wait = open.filter((x) => x.status === 'waiting').length
+          const head = `${open.length} open task${open.length === 1 ? '' : 's'}${wait ? `, ${wait} waiting on you` : ''}`
+          return open.length ? [{ key: 'chief', text: open.length <= 3 ? `${head}: ${open.map((x) => x.title).join(', ')}.` : `${head}. First up: ${open.slice(0, 2).map((x) => x.title).join(', ')}.` }] : []
+        })(),
         { key: 'routines', text: due.length ? `${due.length} due: ${due.map((r) => r.name).join(', ')}.` : 'All routines are up to date.', routines: due.map((r) => ({ id: r.id, name: r.name, state: r.state })) },
         { key: 'quota', text: `${p.provider === 'claude' ? 'Claude' : 'Codex'}: ${p.windows[0].percentRemaining}% of the 5h window and ${p.windows[1].percentRemaining}% of the week left.` },
         { key: 'weather', text: `${w.location}: ${w.current.temp}°F and ${w.current.summary.toLowerCase()} now, high ${w.daily[0].hi}°F, low ${w.daily[0].lo}°F.` },
@@ -580,6 +632,30 @@ export function createDemo() {
     b.log = a.log.map((m) => ({ ...m }))
     bump()
     return { paneId: b.paneId }
+  })
+  // The message box's model chip: Claude switches in place, Codex restarts on the model.
+  on('GET', '/agents/:pane/model', ({ p }) => {
+    const a = agent(p.pane)
+    const mode = a.kind === 'claude' ? 'switch' : a.kind === 'codex' ? 'restart' : null
+    return { kind: a.kind, label: kindLabel(a.kind), mode, current: a.model, source: a.model ? 'agent' : null, checked: a.picked || 'default', models: F.MODELS[a.kind] || [], canDefault: !!mode, canResume: true, switching: a.switching }
+  })
+  on('POST', '/agents/:pane/model', ({ p, body }) => {
+    const a = agent(p.pane)
+    const model = String(body?.model || '').trim()
+    if (!/^[A-Za-z0-9][\w.:/@[\]-]{0,99}$/.test(model)) fail("That isn't a model name")
+    a.picked = model
+    if (a.kind === 'claude') {
+      const command = `/model ${model}`
+      if (a.question) { (S.queue[a.paneId] ||= []).push({ id: uid(), text: command, at: iso() }); a.switching = { model, at: iso(), state: 'queued', said: null }; bump(); return { ok: true, queued: true, reason: 'a question is waiting for your answer', mode: 'switch', command } }
+      switchModel(a, model)
+      return { ok: true, mode: 'switch', command }
+    }
+    if (a.kind !== 'codex') fail(`${kindLabel(a.kind)} picks its model when it starts`)
+    if (a.status === 'working') fail('The agent is working. Wait for it to finish, or press Esc, then try again.')
+    a.model = model === 'default' ? F.MODEL_ON.codex : model
+    a.switching = { model, at: iso(), state: 'done', said: null }
+    push(a, { role: 'event', status: 'completed', text: `Restarted on ${model === 'default' ? 'its default model' : model}, same conversation` })
+    return { paneId: a.paneId, mode: 'restart', restarted: true }
   })
   on('POST', '/agents/:pane/continue', ({ p, body }) => {
     const a = agent(p.pane)
@@ -777,6 +853,19 @@ export function createDemo() {
   })
   on('POST', '/routines/insights/run', () => needs('Claude Code insights'))
   on('GET', '/insights', () => ({ available: false }))
+  on('GET', '/chief/tasks', () => ({ items: chiefTasks(), file: `${CHIEF_DIR}/state/tasks.md`, dir: CHIEF_DIR }))
+  on('POST', '/chief/tasks', ({ body }) => {
+    const title = String(body?.title || '').replace(/\s+/g, ' ').trim().slice(0, 200) || fail('Say what the task is')
+    const item = { id: String(Math.max(0, ...S.chiefTasks.map((x) => Number(x.id))) + 1), title, status: body?.status === 'doing' ? 'doing' : 'open', added: new Date().toLocaleDateString('en-CA'), from: body?.send ? 'you' : null }
+    S.chiefTasks.push(item)
+    if (!body?.send) return { item }
+    const chief = [...S.agents.values()].find((a) => a.chief)
+    if (!chief || chief.question) return { item, sent: false }
+    const queued = chief.status === 'working'
+    prompt(chief, `Task ${item.id} from my Tasks panel: ${item.title}`)
+    return { item, sent: true, queued }
+  })
+  on('PATCH', '/chief/tasks/:id', ({ p, body }) => ({ item: setTask(p.id, Object.fromEntries(['status', 'outcome', 'link', 'needs', 'title'].filter((k) => body?.[k] !== undefined).map((k) => [k, body[k]]))) }))
   on('GET', '/ideas', () => ({ items: S.ideas, file: '~/.bridge-ai/ideas.md' }))
   on('POST', '/ideas', ({ body }) => {
     const raw = String(body?.text || '').trim() || fail('Write the idea first')

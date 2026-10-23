@@ -16,7 +16,11 @@
 //   busyFromOutput  no such text: treat steady output you didn't type as working (built-in runtime)
 //   herdr       herdr's own name for this agent, when herdr can start and track it natively
 //   model(m)    arguments that pick a model (from your settings: agents.<kind>.model)
-//   models      suggestions shown in Settings (you can type any model the CLI accepts)
+//   models      suggestions shown in Settings and the message box's model menu (any model the CLI
+//               accepts can be typed)
+//   switchModel switch a running agent's model in place, from the message box: { command(m), the
+//               command typed into it; dflt: the name that goes back to its default }. Without it,
+//               an agent with model() and resume() restarts on the new model, same conversation.
 //   install     how to install it ({ npm } package, or a { unix, win } shell command)
 //   caps        chat: a transcript Bridge can render; subagents; commands: a "/" menu;
 //               questions: Claude-style pickers become clickable cards; inputBox: Bridge can
@@ -35,7 +39,9 @@ const CLAUDE_BUSY = new RegExp(`${ESC_INTERRUPT.source}|^\\s*[✻✳✶✢✽·*
 
 export const AGENTS = [
   {
-    kind: 'claude', label: 'Claude Code', model: (m) => ['--model', m], models: ['opus', 'sonnet', 'haiku', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1'], install: { unix: 'curl -fsSL https://claude.ai/install.sh | bash', win: 'powershell -ExecutionPolicy ByPass -c "irm https://claude.ai/install.ps1 | iex"', npm: '@anthropic-ai/claude-code', brew: '--cask claude-code' }, bin: ['claude'], herdr: 'claude', usage: 'claude',
+    kind: 'claude', label: 'Claude Code', model: (m) => ['--model', m], models: ['opus', 'sonnet', 'haiku', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1'],
+    // Its own /model (code.claude.com/docs/en/model-config): "default" clears the override.
+    switchModel: { command: (m) => `/model ${m}`, dflt: 'default' }, install: { unix: 'curl -fsSL https://claude.ai/install.sh | bash', win: 'powershell -ExecutionPolicy ByPass -c "irm https://claude.ai/install.ps1 | iex"', npm: '@anthropic-ai/claude-code', brew: '--cask claude-code' }, bin: ['claude'], herdr: 'claude', usage: 'claude',
     sessionId: 'assign',
     start: ({ sessionId, prompt }) => [...(sessionId ? ['--session-id', sessionId] : []), ...(prompt ? [prompt] : [])], promptArg: true,
     resume: (id) => ['--resume', id],
@@ -63,7 +69,8 @@ export const AGENTS = [
   { kind: 'opencode', label: 'OpenCode', model: (m) => ['--model', m], models: [], install: { npm: 'opencode-ai' }, bin: ['opencode'], start: () => [], busy: ESC_INTERRUPT, caps: {} },
   { kind: 'amp', label: 'Amp', install: { npm: '@sourcegraph/amp' }, bin: ['amp'], start: () => [], busy: ESC_INTERRUPT, caps: {} },
   { kind: 'qwen', label: 'Qwen Code', install: { npm: '@qwen-code/qwen-code' }, bin: ['qwen'], start: ({ prompt }) => (prompt ? ['-i', prompt] : []), promptArg: true, busy: ESC_INTERRUPT, caps: {} },
-  { kind: 'aider', label: 'Aider', model: (m) => ['--model', m], models: [], install: { unix: 'python3 -m pip install aider-install && aider-install', win: 'py -m pip install aider-install; aider-install' }, bin: ['aider'], start: () => [], busyFromOutput: true, caps: {} },
+  // Aider's /model switches its main model in place (aider.chat/docs/usage/commands.html).
+  { kind: 'aider', label: 'Aider', model: (m) => ['--model', m], models: [], switchModel: { command: (m) => `/model ${m}` }, install: { unix: 'python3 -m pip install aider-install && aider-install', win: 'py -m pip install aider-install; aider-install' }, bin: ['aider'], start: () => [], busyFromOutput: true, caps: {} },
   { kind: 'goose', label: 'Goose', install: { unix: 'curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh | bash' }, bin: ['goose'], start: () => ['session'], busy: ESC_INTERRUPT, caps: {} },
   { kind: 'muse', label: 'Muse Code (Meta)', install: { unix: 'curl -fsSL https://dev.meta.ai/install.sh | bash' }, bin: ['muse'], start: () => [], busy: ESC_INTERRUPT, caps: {} },
   { kind: 'crush', label: 'Crush', install: { npm: '@charmland/crush' }, bin: ['crush'], start: () => [], busy: ESC_INTERRUPT, caps: {} },

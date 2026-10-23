@@ -1,8 +1,8 @@
 # Chief of staff
 
-The chief of staff is an agent you talk to instead of switching between agent windows. You tell it what you want; it finds the agent that already has the context (or starts a new one in the right folder and space), writes it a complete brief, keeps track of the hand-off, and tells you when something is done or needs you.
+The chief of staff is an agent you talk to instead of switching between agent windows. You tell it what you want. For project work it finds the agent that already has the context (or starts a new one in the right folder and space), writes it a complete brief, keeps track of the hand-off, and tells you when something is done or needs you. Standalone tasks that belong to no project (questions, research, drafts, plans, checklists) it does itself, in its own `work/` folder, and ticks off on its task list.
 
-It never answers an agent's permission prompt for you, and it won't ask an agent to send, post, merge, deploy or change tickets unless you asked for that.
+It never edits your projects' files, never answers an agent's permission prompt for you, and won't send, post, merge, deploy or change tickets (or ask an agent to) unless you asked for that.
 
 ## What's in this folder
 
@@ -11,10 +11,11 @@ It never answers an agent's permission prompt for you, and it won't ask an agent
 | `INSTRUCTIONS.md` | The template for the chief's instructions. Bridge AI writes it out as `CLAUDE.md`, `AGENTS.md` and `GEMINI.md` so any supported agent can run as chief. `{{name}}` becomes your name; `{{playbook}}` pulls in the playbook. |
 | `state/playbook.md` | Starter playbook: what the chief has learned about how you work. |
 | `state/ledger.md` | Starter ledger: hand-offs that are open or recently closed. |
+| `state/tasks.md` | Starter task list: work the chief does itself. It's changed through `bin/bridge task`, which the Tasks panel in Bridge AI shares. |
 | `bin/bridge` | The command line the chief uses to see and drive agents. Run `node bin/bridge help`. |
-| `.claude/settings.json` | Lets Claude Code run `bin/bridge` and edit `state/` without asking. |
+| `.claude/settings.json` | Lets Claude Code run `bin/bridge` and edit `state/` and `work/` without asking. |
 
-The chief's working folder lives in your Bridge AI data folder, under `chief/`. The instructions and `bin/bridge` are refreshed from this template each time the chief starts. Your playbook and ledger are copied once and never overwritten, so they stay yours and never land in the repo.
+The chief's working folder lives in your Bridge AI data folder, under `chief/`. The instructions and `bin/bridge` are refreshed from this template each time Bridge AI starts; a chief that's already running reads them when it next starts. Your playbook, ledger and task list are copied once (a folder from an older version gets the ones it lacks) and never overwritten, so they stay yours and never land in the repo. What the chief makes for its tasks goes in `work/` there.
 
 ## How it learns
 
@@ -32,7 +33,7 @@ Corrections teach it the most. If a hand-off goes to the wrong place, say so pla
 
 Open `chief/state/playbook.md` in your Bridge AI data folder in any editor, or ask the chief to change it ("forget the rule about the docs tab"). Write short rules, one per line. Lines in the playbook override the default instructions. Keep it under about 150 lines; the chief prunes it when it grows past that. Don't put secrets or credentials in it.
 
-To start over, delete `state/playbook.md` or `state/ledger.md` there; a fresh copy is made the next time the chief starts.
+To start over, delete `state/playbook.md`, `state/ledger.md` or `state/tasks.md` there; a fresh copy is made the next time Bridge AI starts.
 
 ## Sources
 

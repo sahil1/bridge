@@ -40,6 +40,7 @@ import { sessionName as herdrSession, sessions as herdrSessions } from './runtim
 import { installed, caps, adapter, catalog as agentCatalog, installCommand, installTools, clearInstalledCache } from './agents.js'
 import { loadConfig, ROOT, DATA, CACHE, expand, ensureDir, cacheFile, IS_MAC } from './paths.js'
 import { prepareChief } from './chief.js'
+import { makeTasks } from './chieftasks.js'
 import { providerRoutes, providerEnv, subscriptions } from './providers.js'
 import * as settings from './settings.js'
 import * as consult from './consult.js'
@@ -51,6 +52,7 @@ import * as phone from './phone.js'
 import * as relay from './relay.js'
 import * as updates from './updates.js'
 import * as cloud from './cloud.js'
+import { makeModels, forLaunch } from './models.js'
 
 ensureDir(DATA)
 ensureDir(CACHE)
@@ -59,6 +61,8 @@ const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf
 let TZ = cfg.location?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone
 // The chief of staff: one agent, started in its own folder in the data dir, that routes work to the others.
 const CHIEF_DIR = expand(cfg.chief?.path) || prepareChief(cfg)
+// Its own task list (state/tasks.md): the Tasks panel and its `bridge task` commands.
+const chiefTasks = makeTasks(CHIEF_DIR, () => String(cfg.name || '').trim() || 'the user')
 // Where agents run: herdr, or Bridge AI's own terminals (see runtime/index.js).
 const rt = await pickRuntime(cfg)
 
@@ -93,11 +97,14 @@ const exists = (p) => fs.promises.access(p).then(() => true, () => false)
 
 // Start an agent with your default model for that kind (Settings › General).
 const modelFor = (kind) => cfg.agents?.[kind]?.model || null
-// And with the account you made active for that kind (Settings › Providers), unless one is picked.
-// Auto, either way, is the account with the most left right now.
+// And with the account you made active for that kind (Settings › Providers), unless one is picked
+// or the conversation it resumes or forks was on one. Auto, either way, is the account with the
+// most left right now.
+// A model picked from the message box can be 'default': the agent's own, with no model given.
 const launchAgent = (o) => {
   const kind = o.kind || cfg.defaultAgent || 'claude'
-  return rt.launch({ ...o, model: o.model || modelFor(kind), account: accounts.resolve(kind, accounts.supports(kind) && o.account) || accounts.activeId(kind) })
+  const picked = o.account === 'auto' || accounts.has(kind, o.account) ? o.account : accounts.accountOf(kind, null, o.resume || o.fork)
+  return rt.launch({ ...o, model: o.model === 'default' ? null : o.model || modelFor(kind), account: accounts.resolve(kind, picked) || accounts.activeId(kind) })
 }
 
 // Cloud agents (cloud.js) answer the agent routes below for their own panes, so they go first.
@@ -116,6 +123,7 @@ async function fleetView() {
     // On its own branch: the repo and branch, since its folder is in the data folder.
     a.worktree = worktrees.describe(a.cwd)
     a.muted = notify.isMuted(a.paneId)
+    if (a.accountId && a.sessionId) accounts.noteSession(a.sessionId, a.accountId)
     const generic = !a.title || a.title.toLowerCase() === a.kindLabel.toLowerCase() || /^(claude code|claude|codex|grok|cursor( agent)?|gemini)$/i.test(a.title)
     if (a.chief) a.title = 'Chief of staff'
     // A fresh session has no title yet; the tab name (e.g. a routine's) says more than "Claude Code".
@@ -438,6 +446,8 @@ app.post('/api/agents/:pane/steer', wrap(async (req) => {
   return { ...item, steered: true }
 }))
 app.delete('/api/agents/:pane/queue/:id', wrap(async (req) => { queue.remove(req.params.pane, req.params.id); pushFleet(); return { ok: true } }))
+// The message box's model menu: what the agent is on, and switching it (models.js).
+makeModels({ rt, cfg, findAgent, launchAgent, archiveWhere, archive, pushFleet: () => pushFleet() }).routes(app, wrap)
 
 app.get('/api/places', wrap(async () => {
   return places.gitSummary(((await rt.fleet()).panes || []).map((p) => p.cwd))
@@ -588,7 +598,8 @@ app.post('/api/sessions/resume', wrap(async (req) => {
   const dir = own ? path.resolve(expand(cwd)) : await places.resolveDir(cwd || '~')
   if (!(await exists(dir))) throw new Error(`Its folder is gone: ${cwd}`)
   const ws = workspace ? (await rt.fleet()).workspaces.find((w) => w.label === workspace) : null
-  const out = await launchAgent({ kind, cwd: dir, label: String(label || path.basename(dir)).slice(0, 60), workspaceId: ws?.id || null, newSpace: ws ? undefined : (workspace || 'Resumed'), resume: sessionId, setup: back?.setup || undefined })
+  const model = forLaunch(kind, sessionId) // the model you last picked for it, if any
+  const out = await launchAgent({ kind, cwd: dir, label: String(label || path.basename(dir)).slice(0, 60), workspaceId: ws?.id || null, newSpace: ws ? undefined : (workspace || 'Resumed'), resume: sessionId, setup: back?.setup || undefined, model, pinModel: !!model })
   archive.removeSession(sessionId)
   pushFleet()
   return out
@@ -598,7 +609,7 @@ app.post('/api/agents/:pane/fork', wrap(async (req) => {
   const a = await findAgent(req.params.pane)
   if (!adapter(a.kind).fork || !a.sessionId) throw new Error(`Forking isn't available for ${adapter(a.kind).label}${a.sessionId ? '' : ' until it has a conversation'}`)
   const name = a.tab && !/^\d+$/.test(a.tab) ? a.tab : a.title || adapter(a.kind).label
-  const out = await launchAgent({ kind: a.kind, cwd: a.cwd, label: `${name} (fork)`.slice(0, 60), workspaceId: a.workspaceId, fork: a.sessionId })
+  const out = await launchAgent({ kind: a.kind, cwd: a.cwd, label: `${name} (fork)`.slice(0, 60), workspaceId: a.workspaceId, fork: a.sessionId, account: a.accountId || undefined })
   pushFleet()
   return out
 }))
@@ -619,7 +630,8 @@ app.post('/api/agents/:pane/continue', wrap(async (req) => {
   await new Promise((r) => setTimeout(r, 800)) // let it exit before the new one opens the session
   // Its space goes with its last tab; open a new one by the same name then.
   const still = (await rt.fleet()).workspaces.some((w) => w.id === a.workspaceId)
-  const out = await launchAgent({ kind: a.kind, cwd: a.cwd, label: name.slice(0, 60), workspaceId: still ? a.workspaceId : null, newSpace: still ? undefined : a.workspace, resume: a.sessionId, account: id })
+  const model = forLaunch(a.kind, a.sessionId) || a.model || undefined // on the same model
+  const out = await launchAgent({ kind: a.kind, cwd: a.cwd, label: name.slice(0, 60), workspaceId: still ? a.workspaceId : null, newSpace: still ? undefined : a.workspace, resume: a.sessionId, account: id, model, pinModel: !!model })
   archive.removeSession(a.sessionId)
   pushFleet()
   return out
@@ -666,6 +678,35 @@ app.post('/api/ideas/:id/send', wrap(async (req) => {
   ideas.update(it.id, { sent: true })
   return { ok: true, paneId: mate.paneId }
 }))
+
+// ---------- The chief of staff's own tasks (state/tasks.md in its folder) ----------
+app.get('/api/chief/tasks', wrap(() => chiefTasks.list()))
+// send: added in the Tasks panel, so the chief hears about it now (held if it's busy). Without a
+// running chief it waits on the list, which the chief reads before each request.
+app.post('/api/chief/tasks', wrap(async (req) => {
+  const send = !!req.body?.send
+  const item = chiefTasks.add(req.body?.title, { status: req.body?.status, link: req.body?.link, from: send ? 'you' : null })
+  if (!send) return { item }
+  const mate = (await fleetView().catch(() => null))?.agents.find((a) => a.chief)
+  if (!mate) return { item, sent: false }
+  const text = `Task ${item.id} from my Tasks panel: ${item.title}\n\n(It's on your task list as ${item.id}. Keep it current with \`node bin/bridge task\`.)`
+  try {
+    if (mate.status === 'working' || mate.status === 'blocked' || queue.all()[mate.paneId]?.length) {
+      queue.add(mate.paneId, text)
+      pushFleet()
+      return { item, sent: true, queued: true }
+    }
+    await promptSafe(rt, mate.paneId, text, mate)
+    for (const ms of [150, 700, 1600]) setTimeout(pushFleet, ms)
+    return { item, sent: true }
+  } catch (e) {
+    if (e.code !== 'not_at_prompt') return { item, sent: false, error: e.message }
+    queue.add(mate.paneId, text)
+    pushFleet()
+    return { item, sent: true, queued: true }
+  }
+}))
+app.patch('/api/chief/tasks/:id', wrap((req) => ({ item: chiefTasks.update(req.params.id, req.body || {}) })))
 
 // Server-sent events: push the fleet whenever any agent changes state.
 const clients = new Set()
@@ -928,6 +969,13 @@ app.get('/api/brief', wrap(async (req) => {
       items: [...needs, ...done].slice(0, 5).map((a) => ({ paneId: a.paneId, status: a.status, label: a.title || a.tab || a.workspace })),
     })
   }
+  // The chief of staff's own open tasks, the ones waiting on you first.
+  const ct = (() => { try { return chiefTasks.list().items.filter((x) => x.status !== 'done') } catch { return [] } })()
+  if (ct.length) {
+    const wait = ct.filter((x) => x.status === 'waiting').length
+    const head = `${ct.length} open task${ct.length === 1 ? '' : 's'}${wait ? `, ${wait} waiting on you` : ''}`
+    lines.push({ key: 'chief', text: ct.length <= 3 ? `${head}: ${ct.map((x) => x.title).join(', ')}.` : `${head}. First up: ${ct.slice(0, 2).map((x) => x.title).join(', ')}.` })
+  }
   if (r?.routines?.length) {
     const due = r.routines.filter((x) => ['due', 'overdue', 'never'].includes(x.state))
     lines.push({
@@ -1133,6 +1181,7 @@ app.post('/api/accounts', wrap((req) => accounts.add(String(req.body?.kind || ''
 app.patch('/api/accounts/:id', wrap((req) => accounts.rename(req.params.id, req.body?.label)))
 app.delete('/api/accounts/:id', wrap((req) => accounts.remove(req.params.id)))
 app.post('/api/accounts/active/:kind', wrap((req) => accounts.setActive(req.params.kind, String(req.body?.id || ''))))
+app.get('/api/accounts/:id/status', wrap((req) => accounts.check(req.params.id)))
 // Sign in: the agent's own login flow (like /login) in a terminal tab you can watch and answer.
 app.post('/api/accounts/:id/login', wrap(async (req) => {
   const { kind, command } = accounts.loginCommand(req.params.id)
@@ -1145,7 +1194,8 @@ app.post('/api/accounts/:id/login', wrap(async (req) => {
   await rt.text(out.paneId, command)
   await rt.paneKeys(out.paneId, ['enter'])
   pushFleet()
-  return { ...out, openId: await openIdOf(out.paneId) }
+  const openId = await openIdOf(out.paneId)
+  return { ...out, openId, tabId: openId.startsWith('tab:') ? openId.slice(4) : null }
 }))
 
 // A plain chat: an agent with no project, like talking to Claude or Codex directly. Chats share

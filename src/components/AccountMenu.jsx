@@ -12,8 +12,9 @@ const kindName = (k) => KIND_NAMES[k] || k
 
 // More than one account for some agent: only then is there anything to switch.
 export const several = (groups) => (groups || []).some((g) => g.accounts.length > 1)
-// Agents to list: those with several accounts, and those whose one login has a reading.
-export const listed = (groups) => (groups || []).filter((g) => g.accounts.length > 1 || g.accounts[0]?.usable)
+// Agents to list: those with several accounts, those whose one login has a reading, and `also`
+// (the top bar's agent), so its account and Add another account show before there's a second.
+export const listed = (groups, also) => (groups || []).filter((g) => g.accounts.length > 1 || g.accounts[0]?.usable || g.kind === also)
 
 // What's left: the tighter of the 5-hour and weekly windows (quota-axi's figure, which Auto
 // compares), and which window that is.
@@ -24,14 +25,21 @@ export function leftOf(a) {
   return { pct: a.percentRemaining, win: tight?.kind === 'weekly' ? 'wk' : '5h' }
 }
 export const level = (v) => (v == null ? 'unknown' : v < 10 ? 'critical' : v < 30 ? 'warning' : 'good')
-export const statusText = (a) => (a.allow ? 'needs Allow' : a.signedIn === false ? 'not signed in' : a.status === 'pending' ? 'checking…' : a.status === 'error' ? "couldn't read" : 'no data')
+// off: plan usage is off, so there's no reading to wait for.
+export function statusText(a, off) {
+  if (a.allow) return 'needs Allow'
+  if (a.signedIn === false) return 'not signed in'
+  // No usage to show (plan usage off, or not read yet): whether it's signed in, when known.
+  if (off || (a.status === 'pending' && a.signedIn)) return a.signedIn ? 'signed in' : ''
+  return a.status === 'pending' ? 'checking…' : a.status === 'error' ? "couldn't read" : 'no data'
+}
 // Each window in words, for a tooltip.
 const windowsText = (a) => (a.windows || []).filter((w) => w.kind === 'session' || w.kind === 'weekly')
   .map((w) => `${w.percentRemaining}% of the ${w.kind === 'session' ? '5-hour window' : 'week'} left`).join(', ')
 
-function Left({ a }) {
+function Left({ a, off }) {
   const l = leftOf(a)
-  if (!l) return <span className="acct-left muted">{statusText(a)}</span>
+  if (!l) return <span className="acct-left muted">{statusText(a, off)}</span>
   const lv = level(l.pct)
   return (
     <span className="acct-left">
@@ -52,7 +60,8 @@ function nowText(groups) {
 // groups: the agents to list. value (dialog only): 'auto' or an account id; without it, a pick
 // changes the default. onPick(kind, id) may return a promise (kind null: Auto for every agent).
 // anchor: the element holding the button that opened it (clicks there don't count as outside).
-export default function AccountMenu({ groups, value, onPick, onAdd, extra = [], onClose, anchor, className = '' }) {
+// onAdd(kind): Add another account (kind: the menu's one agent, if it lists one). off: plan usage is off.
+export default function AccountMenu({ groups, value, onPick, onAdd, extra = [], onClose, anchor, off, className = '' }) {
   const ref = useRef(null)
   const [err, setErr] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -113,8 +122,9 @@ export default function AccountMenu({ groups, value, onPick, onAdd, extra = [], 
                 <span className="acct-check">{on && <Icon name="check" size={13} />}</span>
                 <span className="acct-main">
                   <span className="acct-name">{a.label}{a.plan && <span className="plan-tag">{a.plan}</span>}{auto && <span className="best-tag">auto</span>}</span>
+                  {a.isDefault && g.accounts.length === 1 && <span className="acct-desc">Your usual login</span>}
                 </span>
-                <Left a={a} />
+                <Left a={a} off={off} />
               </button>
             )
           })}
@@ -123,8 +133,12 @@ export default function AccountMenu({ groups, value, onPick, onAdd, extra = [], 
       {err && <p className="error-text small acct-err" role="alert">{err}</p>}
       <div className="acct-sep" role="separator" />
       {onAdd && (
-        <button type="button" data-item role="menuitem" className="acct-item plain" onClick={() => run(onAdd)}>
-          <span className="acct-check"><Icon name="plus" size={13} /></span><span className="acct-main"><span className="acct-name">Add account…</span></span>
+        <button type="button" data-item role="menuitem" className="acct-item plain" onClick={() => run(() => onAdd(groups.length === 1 ? groups[0].kind : undefined))}>
+          <span className="acct-check"><Icon name="plus" size={13} /></span>
+          <span className="acct-main">
+            <span className="acct-name">Add another account…</span>
+            <span className="acct-desc">A work and a personal {groups.length === 1 ? kindName(groups[0].kind) : 'Claude'}, side by side</span>
+          </span>
         </button>
       )}
       {extra.map((x) => (
@@ -145,7 +159,7 @@ export async function setDefault(groups, kind, id) {
 }
 
 // The New agent dialog's control: a button showing the choice, opening the menu for that agent.
-export function AccountPicker({ group, value, onChange, onAdd }) {
+export function AccountPicker({ group, value, onChange, onAdd, off }) {
   const [open, setOpen] = useState(false)
   const wrap = useRef(null)
   const cur = value === 'auto' ? group.accounts.find((a) => a.id === group.pick) : group.accounts.find((a) => a.id === value)
@@ -158,10 +172,10 @@ export function AccountPicker({ group, value, onChange, onAdd }) {
           {value === 'auto' ? <><b>Auto</b><span className="muted"> · {cur?.label || 'Default'}</span></> : <b>{cur?.label || 'Default'}</b>}
           {cur?.plan && <span className="plan-tag">{cur.plan}</span>}
         </span>
-        {l ? <span className={`acct-btn-left t-${level(l.pct)}`}>{l.pct}% <small className="muted">{l.win}</small></span> : cur && <span className="muted small">{statusText(cur)}</span>}
+        {l ? <span className={`acct-btn-left t-${level(l.pct)}`}>{l.pct}% <small className="muted">{l.win}</small></span> : cur && <span className="muted small">{statusText(cur, off)}</span>}
         <Icon name="down" size={12} className="muted" />
       </button>
-      {open && <AccountMenu groups={[group]} value={value} anchor={wrap} className="in-field" onClose={() => setOpen(false)} onPick={(k, id) => onChange(id)} onAdd={onAdd} />}
+      {open && <AccountMenu groups={[group]} value={value} anchor={wrap} className="in-field" off={off} onClose={() => setOpen(false)} onPick={(k, id) => onChange(id)} onAdd={onAdd} />}
     </div>
   )
 }

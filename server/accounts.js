@@ -163,6 +163,65 @@ export function labelOf(id) {
   return find(load(), id)?.label || null
 }
 
+// ---------- Which account each agent is on ----------
+// herdr starts the agents and doesn't know about accounts, so Bridge AI remembers the account of
+// each pane it started there. And of each conversation, so one opened again from Closed agents
+// (or forked) stays on its account, and a pane herdr renumbers can be matched again.
+const USED = dataFile('account-use.json')
+const MAX_SESSIONS = 500
+let used = null // { panes: { paneId: { id, kind } }, sessions: { sessionId: id } }
+function usedNow() {
+  if (used) return used
+  try { used = JSON.parse(fs.readFileSync(USED, 'utf8')) } catch { /* none yet */ }
+  if (!used || typeof used !== 'object') used = {}
+  used.panes = used.panes && typeof used.panes === 'object' ? used.panes : {}
+  used.sessions = used.sessions && typeof used.sessions === 'object' ? used.sessions : {}
+  return used
+}
+function saveUsed() {
+  const s = Object.entries(used.sessions)
+  if (s.length > MAX_SESSIONS) used.sessions = Object.fromEntries(s.slice(-MAX_SESSIONS))
+  try { ensureDir(DATA); fs.writeFileSync(USED, JSON.stringify(used) + '\n', { mode: 0o600 }) } catch { /* read-only disk: keep it in memory */ }
+}
+// A pane just started on account `id` (or moved from `from`, when herdr gives it a new id).
+export function notePane(paneId, kind, id) {
+  if (!paneId || !KINDS[kind] || !id) return
+  const u = usedNow()
+  if (u.panes[paneId]?.id === id && u.panes[paneId]?.kind === kind) return
+  u.panes[paneId] = { id, kind }
+  saveUsed()
+}
+export function movePane(from, to) {
+  const u = usedNow()
+  if (!u.panes[from] || from === to) return
+  u.panes[to] = u.panes[from]
+  delete u.panes[from]
+  saveUsed()
+}
+// Panes that are gone: forget them, so a new pane given the same id later doesn't inherit one.
+export function keepPanes(live) {
+  const u = usedNow()
+  const gone = Object.keys(u.panes).filter((p) => !live.has(p))
+  if (!gone.length) return
+  for (const p of gone) delete u.panes[p]
+  saveUsed()
+}
+export function noteSession(sessionId, id) {
+  if (!sessionId || !id) return
+  const u = usedNow()
+  if (u.sessions[sessionId] === id) return
+  delete u.sessions[sessionId] // newest last, for the trim in saveUsed
+  u.sessions[sessionId] = id
+  saveUsed()
+}
+// The account of an agent of this kind in this pane, or that had this conversation.
+export function accountOf(kind, paneId, sessionId) {
+  const u = usedNow()
+  const p = u.panes[paneId]
+  const id = p && p.kind === kind ? p.id : sessionId ? u.sessions[sessionId] : null
+  return id && has(kind, id) ? id : null
+}
+
 // ---------- Listing, with sign-in status ----------
 let statusCache = new Map() // id -> { at, s }
 async function statusOf(kind, id, bin, PATH) {
@@ -214,6 +273,17 @@ export async function list({ refresh = false } = {}) {
     }))
     return { kind, label: adapter(kind).label, installed: !!bin, setting, pick, accounts }
   }))
+}
+
+// One account's sign-in, checked now rather than from the cache: the add-account dialog asks
+// every few seconds while you sign in, and moves on once it says yes.
+export async function check(id) {
+  const kind = String(id || '').replace(/-[^-]+$/, '')
+  if (!has(kind, id)) throw new Error('No such account')
+  statusCache.delete(id)
+  const bin = (await installed().catch(() => [])).find((x) => x.kind === kind)?.path || null
+  const s = await statusOf(kind, id, bin, await loginPath())
+  return { id, kind, label: labelOf(id) || 'Default', signedIn: s.signedIn, plan: s.plan }
 }
 
 // ---------- Changes ----------

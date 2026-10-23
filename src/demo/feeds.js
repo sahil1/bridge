@@ -18,7 +18,11 @@ export const CAPS = {
   opencode: {},
 }
 export const LABELS = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI', opencode: 'OpenCode' }
-const MODELS = { claude: ['opus', 'sonnet', 'haiku'] }
+export const MODELS = { claude: ['opus', 'sonnet', 'haiku', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1'], codex: ['gpt-6.1-sol', 'gpt-6-luna'] }
+// What each agent is on, for the message box's model chip, and what Claude's aliases stand for.
+export const MODEL_ON = { claude: 'claude-opus-5-5', codex: 'gpt-6.1-sol' }
+export const MODEL_IDS = { opus: 'claude-opus-5-5', sonnet: 'claude-sonnet-5-5', haiku: 'claude-haiku-5-5', fable: 'claude-fable-5-1', default: 'claude-opus-5-5' }
+export const modelName = (id) => { const m = /^claude-(\w+)-(\d+)-(\d+)$/.exec(id); return m ? `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}.${m[3]}` : id }
 export const kinds = () => Object.keys(CAPS).map((kind) => ({ kind, label: LABELS[kind], path: `/opt/homebrew/bin/${kind}`, caps: CAPS[kind] }))
 export const catalog = () => [
   ...Object.keys(CAPS).map((kind) => ({ kind, label: LABELS[kind], installed: true, path: `/opt/homebrew/bin/${kind}`, caps: CAPS[kind], install: null, modelFlag: kind !== 'gemini', models: MODELS[kind] || [] })),
@@ -192,6 +196,18 @@ export function makeIdeas() {
     { id: 'i2', text: 'Weekly email with order stats', raw: 'Weekly email with order stats #billing', tags: ['billing'], done: false, sent: null },
     { id: 'i3', text: 'Dark mode for the docs', raw: 'Dark mode for the docs #docs', tags: ['docs'], done: false, sent: null },
     { id: 'i4', text: 'Retry failed webhooks with backoff', raw: 'Retry failed webhooks with backoff #billing', tags: ['billing'], done: true, sent: null },
+  ]
+}
+
+// The chief of staff's own tasks: work it did itself, one waiting on you, one from you.
+export function makeChiefTasks() {
+  const on = (offset) => day(offset).toLocaleDateString('en-CA')
+  return [
+    { id: '5', title: 'Draft a reply to the Acme Goods support thread', status: 'open', added: on(0), from: 'you' },
+    { id: '4', title: 'Plan the webhook rate limit rollout', status: 'doing', added: on(0) },
+    { id: '3', title: 'Draft the release notes for 1.8', status: 'waiting', added: on(-1), needs: 'Should CSV export be in them, or wait until it merges?' },
+    { id: '2', title: "Summarize this week's agent work for the Monday update", status: 'done', added: on(-1), done: on(-1), outcome: 'Login redirect fixed, CSV export under way, billing tests cleaned up. Ready to paste.', link: 'work/monday-update/update.md' },
+    { id: '1', title: 'Compare error trackers for acme-shop', status: 'done', added: on(-3), done: on(-2), outcome: 'Sentry fits best: the free tier covers our volume. Bugsnag is a close second.', link: 'work/error-trackers/comparison.md' },
   ]
 }
 

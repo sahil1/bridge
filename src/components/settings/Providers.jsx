@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, refetch } from '../../api.js'
 import Icon from '../Icon.jsx'
 import { AllowKeychain, leftOf, level } from '../AccountMenu.jsx'
+import { addAccount } from '../AddAccount.jsx'
 import ProviderIcon, { AgentIcon } from './ProviderIcon.jsx'
 import { GROUPS, AGENT_LABEL, providerChip, agentChip } from './providerCatalog.js'
 import CloudKeys from './CloudKeys.jsx'
@@ -76,7 +77,7 @@ function AutoRow({ k, onChange }) {
 }
 
 // More than one sign-in per agent (work and personal, say). The active one is used by new agents.
-function AccountRow({ a, kind, setting, pick, onChange, onOpenAgent }) {
+function AccountRow({ a, kind, setting, pick, onChange }) {
   const [busy, setBusy] = useState(null)
   const [err, setErr] = useState(null)
   const [renaming, setRenaming] = useState(false)
@@ -85,7 +86,7 @@ function AccountRow({ a, kind, setting, pick, onChange, onOpenAgent }) {
     setBusy(what); setErr(null)
     try {
       if (what === 'use') { await api(`/accounts/active/${kind}`, { method: 'POST', body: { id: a.id } }); refetch('/quota') }
-      if (what === 'login') { const r = await api(`/accounts/${a.id}/login`, { method: 'POST' }); onOpenAgent?.(r.openId || r.paneId) }
+      if (what === 'login') { addAccount(kind, { id: a.id, kind, label: a.label }); return }
       if (what === 'remove') { if (!window.confirm(`Sign out of ${a.label} and remove it from Bridge AI?`)) return; await api(`/accounts/${a.id}`, { method: 'DELETE' }) }
       if (what === 'rename') { await api(`/accounts/${a.id}`, { method: 'PATCH', body: { label: name } }); setRenaming(false) }
       onChange()
@@ -112,8 +113,8 @@ function AccountRow({ a, kind, setting, pick, onChange, onOpenAgent }) {
       {setting === 'auto' && pick === a.id && <span className="best-tag">auto</span>}
       <span className="pv-spacer" />
       {err && <span className="pv-msg bad" role="status"><Icon name="alert" size={12} />{err}</span>}
-      <button type="button" className="btn small" onClick={() => act('login')} disabled={!!busy} title="Opens the sign-in flow in a terminal tab (Setup space)">
-        {busy === 'login' ? 'Opening…' : a.signedIn ? 'Sign in again' : 'Sign in'}
+      <button type="button" className="btn small" onClick={() => act('login')} disabled={!!busy} title="Runs the agent's own sign-in for this account, in a terminal tab you can follow">
+        {a.signedIn ? 'Sign in again' : 'Sign in'}
       </button>
       {!a.isDefault && !renaming && <button type="button" className="ghost-btn" onClick={() => setRenaming(true)} aria-label={`Rename ${a.label}`} title="Rename"><Icon name="edit" size={12} /></button>}
       {!a.isDefault && <button type="button" className="ghost-btn" onClick={() => act('remove')} disabled={!!busy} aria-label={`Remove ${a.label}`} title="Sign out and remove"><Icon name="trash" size={12} /></button>}
@@ -122,30 +123,23 @@ function AccountRow({ a, kind, setting, pick, onChange, onOpenAgent }) {
   )
 }
 
-function AccountsSection({ onOpenAgent, focus, ready }) {
+function AccountsSection({ focus, ready }) {
   const ref = useRef(null)
   const [kinds, setKinds] = useState(null)
   const [err, setErr] = useState(null)
-  const [adding, setAdding] = useState(null) // kind
-  const [label, setLabel] = useState('')
-  const [addErr, setAddErr] = useState(null)
   const load = useCallback((refresh) => api(`/accounts${refresh ? '?refresh=1' : ''}`).then((d) => { setKinds(d); setErr(null) }).catch((e) => setErr(e.message)), [])
   useEffect(() => { load() }, [load])
-  // Signing in happens in a terminal; check again when you come back to this window.
-  useEffect(() => { const f = () => load(true); window.addEventListener('focus', f); return () => window.removeEventListener('focus', f) }, [load])
+  // Signing in happens in a terminal; check again when you come back to this window, and when
+  // the Add another account dialog changes something.
+  useEffect(() => {
+    const f = () => load(true)
+    window.addEventListener('focus', f)
+    window.addEventListener('bridge-accounts-changed', f)
+    return () => { window.removeEventListener('focus', f); window.removeEventListener('bridge-accounts-changed', f) }
+  }, [load])
   // Opened from Add account: scroll here once this list and the agents above it are in.
   const shown = !!kinds && ready
   useEffect(() => { if (focus === 'accounts' && shown) ref.current?.scrollIntoView({ block: 'start', behavior: 'smooth' }) }, [focus, shown])
-  const add = async (kind) => {
-    setAddErr(null)
-    try {
-      const a = await api('/accounts', { method: 'POST', body: { kind, label } })
-      setAdding(null); setLabel('')
-      await load()
-      const r = await api(`/accounts/${a.id}/login`, { method: 'POST' })
-      onOpenAgent?.(r.openId || r.paneId)
-    } catch (e) { setAddErr(e.message) }
-  }
   if (err) return <p className="pv-note pv-err">Couldn't load accounts: {err}</p>
   const list = (kinds || []).filter((k) => k.installed)
   if (!list.length) return null
@@ -161,16 +155,9 @@ function AccountsSection({ onOpenAgent, focus, ready }) {
           <div className="pv-acct-kind"><AgentIcon kind={k.kind} size={20} name={k.label} /><b>{k.label}</b></div>
           <ul className="pv-accts">
             {k.accounts.length > 1 && <AutoRow k={k} onChange={() => load(true)} />}
-            {k.accounts.map((a) => <AccountRow key={a.id} a={a} kind={k.kind} setting={k.setting} pick={k.pick} onChange={() => load(true)} onOpenAgent={onOpenAgent} />)}
+            {k.accounts.map((a) => <AccountRow key={a.id} a={a} kind={k.kind} setting={k.setting} pick={k.pick} onChange={() => load(true)} />)}
           </ul>
-          {adding === k.kind
-            ? <form className="pv-acct-add" onSubmit={(e) => { e.preventDefault(); add(k.kind) }}>
-                <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Name it, like Work or Personal" autoFocus maxLength={40} aria-label="Account name" />
-                <button className="btn small primary" type="submit" disabled={!label.trim()}>Add and sign in</button>
-                <button className="ghost-btn" type="button" onClick={() => { setAdding(null); setAddErr(null) }}>Cancel</button>
-                {addErr && <span className="pv-msg bad" role="status"><Icon name="alert" size={12} />{addErr}</span>}
-              </form>
-            : <button type="button" className="ghost-btn pv-more" onClick={() => { setAdding(k.kind); setLabel('') }}><Icon name="plus" size={12} />Add {k.label} account</button>}
+          <button type="button" className="ghost-btn pv-more" onClick={() => addAccount(k.kind)}><Icon name="plus" size={12} />Add another {k.label} account</button>
         </div>
       ))}
       <p className="pv-note">Sign in uses whichever account your browser is signed in to, so switch accounts there first (or open the link it prints in a private window). Each account keeps only its own login; settings, skills and session history are shared with your usual setup, so cost and token history in Usage covers every account together. Agents already running keep the account they started with; the ⋯ menu on a Claude or Codex agent can continue its conversation on another account.</p>
@@ -310,7 +297,7 @@ function Card({ p, open, onToggle, children }) {
   )
 }
 
-export default function Providers({ onOpenAgent, focus }) {
+export default function Providers({ focus }) {
   const [providers, setProviders] = useState(null)
   const [subs, setSubs] = useState(null)
   const [err, setErr] = useState(null)
@@ -338,7 +325,7 @@ export default function Providers({ onOpenAgent, focus }) {
       </p>
 
       <AgentsStrip subs={subs} error={subsErr} onRefresh={() => loadSubs(true)} refreshing={refreshing} />
-      <AccountsSection onOpenAgent={onOpenAgent} focus={focus} ready={!!subs || !!subsErr} />
+      <AccountsSection focus={focus} ready={!!subs || !!subsErr} />
       <CloudKeys focus={focus} />
 
       {err && <p className="pv-note pv-err">Couldn't load providers: {err} <button type="button" className="ghost-btn" onClick={loadProviders}>Retry</button></p>}

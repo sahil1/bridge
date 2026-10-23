@@ -262,6 +262,22 @@ done.
 - billing-api: test cleanup (Refactor billing tests), webhook rate limits (Rate limit webhooks)
 - docs-site: README quick start (Update README), link check (Check broken links)
 `,
+  'work/monday-update/update.md': `# Monday update
+
+- **acme-shop:** the login redirect is fixed and merged. CSV export for orders is under way on its own branch.
+- **billing-api:** the billing tests are cleaned up; webhook rate limits are next.
+- **docs-site:** the README quick start is rewritten; the broken link check found 3 links to fix.
+`,
+  'work/error-trackers/comparison.md': `# Error trackers for acme-shop
+
+| | Sentry | Bugsnag | Rollbar |
+| --- | --- | --- | --- |
+| Free tier | 5k errors/mo | 7.5k events/mo | 5k events/mo |
+| Python SDK | Yes | Yes | Yes |
+| Release tracking | Yes | Yes | Paid plans |
+
+Sentry fits best: the free tier covers our volume, and the team knows it. Bugsnag is a close second.
+`,
 }
 
 // The repos, by folder: the last commit's files (head) and what's on disk now (work). Agents'

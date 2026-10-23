@@ -9,7 +9,7 @@ import * as cli from './herdr-cli.js'
 import * as sock from './herdr-socket.js'
 import { adapter, newSessionId } from '../agents.js'
 import { quoteCommand, runSetup } from './spawn.js'
-import { envFor } from '../accounts.js'
+import { envFor, notePane, movePane, keepPanes, accountOf, labelOf } from '../accounts.js'
 
 export const name = 'herdr'
 export const caps = { liveView: true, reorder: true, splits: true }
@@ -26,7 +26,13 @@ export async function setSession(paneId, sessionId) { followed.set(paneId, sessi
 
 export async function fleet() {
   const [f, snap] = await Promise.all([cli.fleet(), cli.snapshot()])
-  for (const a of f.agents || []) if (followed.has(a.paneId)) a.sessionId = followed.get(a.paneId)
+  for (const a of f.agents || []) {
+    if (followed.has(a.paneId)) a.sessionId = followed.get(a.paneId)
+    // herdr doesn't know which account an agent uses: the one it was started on from here.
+    a.accountId = accountOf(a.kind, a.paneId, a.sessionId)
+    a.account = labelOf(a.accountId)
+  }
+  if (snap.panes?.length) keepPanes(new Set(snap.panes.map((p) => p.pane_id)))
   const ws = Object.fromEntries((snap.workspaces || []).map((w, i) => [w.workspace_id, { label: w.label, number: i + 1 }]))
   const tabs = Object.fromEntries((snap.tabs || []).map((t) => [t.tab_id, t.label]))
   const rects = {}
@@ -85,6 +91,7 @@ export async function moveTabToSpace(tabId, { workspaceId, newSpace, index } = {
     const r = await sock.call('pane.move', { pane_id: id, destination: { type: 'tab', tab_id: pane.tab_id, split: 'right' } })
     if (r?.move_result?.pane) moved[id] = r.move_result.pane.pane_id
   }
+  for (const [from, to] of Object.entries(moved)) movePane(from, to)
   if (Number.isInteger(index) && !newSpace) {
     try { await sock.call('tab.move', { tab_id: pane.tab_id, insert_index: index }) } catch { /* left at the end */ }
   }
@@ -92,15 +99,17 @@ export async function moveTabToSpace(tabId, { workspaceId, newSpace, index } = {
 }
 
 // A new agent in a new space (newSpace) or a new tab of an existing one (workspaceId).
-// herdr starts the agents it knows itself, so a default model applies only to the others.
+// herdr starts the agents it knows itself, so a default model applies only to the others, unless
+// pinModel says this agent must start on it (restarted on another model from the message box).
 // resume: a session id to open again; fork: a session id to copy into a new conversation.
 // setup: { command, cwd } to run first (a new worktree's `npm install`). herdr starts an
 // agent only at an idle shell prompt, so it runs before the pane opens; if it fails, the agent
 // still starts and setupError says why.
-export async function launch({ kind = 'claude', cwd, label, workspaceId, newSpace, prompt: opening, model, account, resume, fork, setup }) {
+export async function launch({ kind = 'claude', cwd, label, workspaceId, newSpace, prompt: opening, model, pinModel, account, resume, fork, setup }) {
   const env = envFor(kind, account) // a second account's config folder, if one was picked
   const a = adapter(kind)
-  const extra = fork && a.fork ? a.fork(fork, a.sessionId === 'assign' ? newSessionId() : undefined) : resume && a.resume ? a.resume(resume) : []
+  const resumed = fork && a.fork ? a.fork(fork, a.sessionId === 'assign' ? newSessionId() : undefined) : resume && a.resume ? a.resume(resume) : []
+  const extra = pinModel && model && a.model && a.herdr ? [...a.model(model), ...resumed] : resumed
   const setupError = setup ? await runSetup(setup) : null
   const name = `ba-${Date.now().toString(36)}`
   const space = String(newSpace || '').trim()
@@ -120,6 +129,7 @@ export async function launch({ kind = 'claude', cwd, label, workspaceId, newSpac
     if (opening) setTimeout(() => cli.prompt(paneId, opening).catch(() => cli.paneSendText(paneId, opening).then(() => cli.paneSendKeys(paneId, ['enter'])).catch(() => {})), 6000)
   }
   if (space) { try { await cli.renameTabOfPane(out.paneId, label) } catch { /* default tab name */ } }
+  notePane(out.paneId, kind, account)
   return setupError ? { ...out, setupError } : out
 }
 

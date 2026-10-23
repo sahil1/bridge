@@ -359,6 +359,7 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
                         <span className="tab-line1">
                           {isRen ? <InlineRename value={t.label} onDone={rename} /> : <span className="tab-name">{rowName(r)}</span>}
                           {r.kind === 'agent' && r.agent.chief && <Icon name="helm" size={12} className="tab-badge" />}
+                          {r.kind === 'agent' && r.agent.account && <span className="acct-tag" title={`On the ${r.agent.account} account`}>{r.agent.account}</span>}
                           {r.kind === 'agent' && r.agent.muted && <Icon name="bell-off" size={11} className="muted" />}
                           {r.kind === 'shell' && t.panes.length > 1 && <span className="tab-count">{t.panes.length}</span>}
                         </span>

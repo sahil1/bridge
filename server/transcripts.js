@@ -134,16 +134,45 @@ function parseClaude(lines, sessionId) { const entries = parseLines(lines); retu
 // A tool message that edits files carries its call id and { path, add, del } per file (edits.js).
 const changesOf = (edits) => edits.map(({ path, add, del }) => ({ path, add, del }))
 
+// A model switch (/model, typed anywhere): Claude Code logs the command, then what it said, as
+// local command entries (type "system" in newer versions, "user" in older ones).
+// eslint-disable-next-line no-control-regex
+const noAnsi = (s) => String(s || '').replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')
+const entryText = (e) => (typeof e.content === 'string' ? e.content : typeof e.message?.content === 'string' ? e.message.content : '')
+const MODEL_CMD = /<command-name>\/model<\/command-name>/
+const LOCAL_OUT = /<local-command-stdout>([\s\S]*?)<\/local-command-stdout>/
+// { arg } for the /model command entry, { said } for its output, null for anything else.
+function modelStep(e) {
+  if (e.isSidechain) return null
+  const t = entryText(e)
+  if (!t) return null
+  if (MODEL_CMD.test(t)) return { arg: (/<command-args>([^<]*)<\/command-args>/.exec(t)?.[1] || '').trim() }
+  if (/<command-name>/.test(t)) return { other: true }
+  const out = LOCAL_OUT.exec(t)
+  return out ? { said: noAnsi(out[1]).trim() } : null
+}
+const SET_MODEL = /^(set model to|kept model as)\b/i
+
 function claudeMessages(entries) {
   const out = []
   const calls = new Map() // edit call id -> { m: its message, b: the call }, for the count its result brings
   // Each message keeps its entry's id, so pages of older messages join up without repeats.
   let cur = null
   let k = 0
+  let modelCmd = false // the last local command was /model: its output says how the switch went
   const add = (m) => out.push(cur ? { ...m, id: `${cur}:${k++}` } : m)
   for (const e of entries) {
     cur = e.uuid || null
     k = 0
+    const step = modelStep(e)
+    if (step?.arg != null || step?.other) modelCmd = step.arg != null
+    if (step?.arg != null) continue
+    if (step?.said != null) {
+      // "Set model to Sonnet 4.5": a line in the chat, like Claude's own terminal shows it.
+      if (modelCmd || SET_MODEL.test(step.said)) add({ role: 'event', status: /^set model/i.test(step.said) ? 'completed' : SET_MODEL.test(step.said) ? '' : 'failed', text: step.said.split('\n')[0].replace(/`/g, '').slice(0, 200), ts: e.timestamp })
+      modelCmd = false
+      continue
+    }
     if ((e.type !== 'user' && e.type !== 'assistant') || e.isMeta || e.isSidechain) continue
     // Claude's summary of earlier turns (after /compact or "summarize"): a note, not your message.
     if (e.isCompactSummary) {
@@ -383,6 +412,39 @@ function leafOf(sessionId, entries) {
   if (entries.findLast((e) => e.uuid && !e.isSidechain)?.uuid === u.newest) return u.leaf
   undone.delete(sessionId) // the log has moved on and says where the conversation is
   return undefined
+}
+
+// The model an agent is on, from the end of its transcript: the model of its latest reply
+// (reply), its latest /model and what Claude Code said to it (set: { arg, said, ok, model, at }),
+// and the latest one that worked (switched).
+// Codex logs the model of each turn (turn_context). Reads a small tail only.
+export function modelOf({ kind, sessionId, cwd }) {
+  if (!sessionId || (kind !== 'claude' && kind !== 'codex')) return null
+  const file = locate(kind, sessionId, cwd)
+  if (!file) return null
+  const entries = parseLines(tailLines(file, 512 * 1024).filter((l) => l.includes('model') || l.includes('local-command')))
+  let reply = null
+  let set = null
+  let switched = null
+  let cmd = null
+  for (const e of entries) {
+    if (kind === 'codex') {
+      if (e.type === 'turn_context' && e.payload?.model) reply = { model: String(e.payload.model), at: e.timestamp || null }
+      continue
+    }
+    if (e.type === 'assistant' && !e.isSidechain && e.message?.model && e.message.model !== '<synthetic>') reply = { model: e.message.model, at: e.timestamp || null }
+    const step = modelStep(e)
+    if (step?.other) cmd = null
+    else if (step?.arg != null) cmd = { arg: step.arg, at: e.timestamp || null }
+    else if (step?.said != null && (cmd || SET_MODEL.test(step.said))) {
+      // The model id it names, as in "Set model to Opus 5.5 (claude-opus-5-5)", else what was asked for.
+      const id = /\((claude-[\w.[\]-]+)\)/.exec(step.said)?.[1] || null
+      set = { arg: cmd?.arg || null, said: step.said.split('\n')[0].replace(/`/g, '').slice(0, 200), ok: /^set model to\b/i.test(step.said), model: id || cmd?.arg || null, at: e.timestamp || null }
+      if (set.ok) switched = set
+      cmd = null
+    }
+  }
+  return { reply, set, switched }
 }
 
 // Last thing the agent said, for board tiles. Reads a small tail only.

@@ -1,0 +1,49 @@
+/* Add another account (AddAccount.jsx): name it, sign in, start an agent on it. */
+.modal.add-acct { width: min(520px, 100%); gap: 12px; align-content: start; }
+.aa-body { display: grid; gap: 12px; min-width: 0; }
+.aa-lead { margin: 0; font-size: 13px; line-height: 1.5; color: var(--ink-2); }
+
+.aa-steps { display: flex; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 12px; color: var(--ink-3); }
+.aa-steps li { display: inline-flex; align-items: center; gap: 6px; flex: 1; min-width: 0; white-space: nowrap; }
+.aa-step-name { overflow: hidden; text-overflow: ellipsis; }
+.aa-steps li + li::before { content: ""; flex: 0 0 14px; height: 1px; background: var(--line-2); margin-right: 2px; }
+.aa-steps li.now { color: var(--ink); font-weight: 600; }
+.aa-steps li.did { color: var(--ink-2); }
+.aa-num { display: inline-grid; place-items: center; flex: none; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--line-2); font: 600 10.5px var(--font); }
+.aa-steps li.now .aa-num { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
+.aa-steps li.did .aa-num { border-color: color-mix(in srgb, var(--good) 45%, transparent); color: var(--good); }
+
+.aa-suggest { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; margin-top: -6px; }
+.aa-suggest .fchip { border: 1px solid var(--line-2); }
+.aa-suggest .muted { margin-left: 4px; }
+
+.aa-state { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border-radius: 10px; background: var(--pane-2); border: 1px solid var(--line); color: var(--ink-2); }
+.aa-state > div { display: grid; gap: 3px; min-width: 0; font-size: 12.5px; line-height: 1.45; }
+.aa-state b { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; color: var(--ink); font-size: 13.5px; }
+.aa-state > svg { flex: none; margin-top: 2px; }
+.aa-state.bad { background: color-mix(in srgb, var(--critical) 8%, transparent); border-color: color-mix(in srgb, var(--critical) 28%, transparent); }
+.aa-state.bad > svg { color: var(--critical); }
+.aa-state.good { background: color-mix(in srgb, var(--good) 9%, transparent); border-color: color-mix(in srgb, var(--good) 30%, transparent); }
+.aa-state.good > svg { color: var(--good); }
+.aa-spin { flex: none; width: 15px; height: 15px; margin-top: 2px; border-radius: 50%; border: 2px solid var(--line-2); border-top-color: var(--accent); animation: aa-spin .9s linear infinite; }
+@keyframes aa-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .aa-spin { animation-duration: 3s; } }
+.aa-link { justify-self: start; text-decoration: none; }
+
+.aa-term { display: grid; min-width: 0; border-radius: 10px; overflow: hidden; border: 1px solid var(--line-2); background: var(--term-bg); }
+.aa-term-head { display: flex; align-items: center; gap: 6px; padding: 6px 10px; font-size: 11.5px; color: #9aa3ae; border-bottom: 1px solid rgb(255 255 255 / .07); }
+.aa-term pre { margin: 0; padding: 8px 10px; min-height: 64px; max-height: 168px; overflow: auto; font: 11.5px/1.5 var(--font-mono); color: #d5dae0; white-space: pre-wrap; word-break: break-all; }
+.aa-type { display: flex; align-items: center; gap: 4px; padding: 6px; border-top: 1px solid rgb(255 255 255 / .07); }
+.aa-type input { flex: 1; min-width: 0; height: 28px; padding: 0 8px; border-radius: 7px; border: 1px solid rgb(255 255 255 / .12); background: rgb(255 255 255 / .05); color: #e6e9ed; font: 12px var(--font-mono); outline: none; }
+.aa-type input::placeholder { color: #7d8691; }
+.aa-type input:focus { border-color: var(--accent); }
+.aa-type .ghost-btn { color: #b8c0c9; height: 28px; padding: 0 8px; }
+.aa-type .ghost-btn:hover { background: rgb(255 255 255 / .08); color: #fff; }
+.aa-type .btn { height: 28px; background: rgb(255 255 255 / .08); border-color: rgb(255 255 255 / .12); color: #e6e9ed; }
+.aa-open { margin-right: auto; font-size: 12.5px; }
+
+@media (max-width: 640px) {
+  .aa-steps li:not(.now) { flex: 0 1 auto; }
+  .aa-steps li:not(.now) .aa-step-name { display: none; }
+  .aa-type input { font-size: 16px; }
+}

@@ -37,8 +37,20 @@ export default function NewAgent({ fleet, initial = {}, onClose, onLaunched, onA
   // Agents with more than one sign-in (Settings › Providers › Accounts): which one to use. Starts
   // at your choice for that agent (an account, or Auto), for this agent only.
   const [accts, setAccts] = useState([])
-  const [account, setAccount] = useState({}) // kind -> 'auto' or an account id
-  useEffect(() => { api('/accounts').then(setAccts).catch(() => {}) }, [])
+  const [account, setAccount] = useState(initial.kind && initial.account ? { [initial.kind]: initial.account } : {}) // kind -> 'auto' or an account id
+  useEffect(() => { if (initial.kind) setKind(initial.kind) }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  // An account added meanwhile (Add another account, over this dialog): list it, and once it's
+  // signed in, start on it.
+  useEffect(() => {
+    const load = (e) => {
+      api('/accounts').then(setAccts).catch(() => {})
+      const d = e?.detail
+      if (d?.ready && d.kind && d.id) { setKind(d.kind); setAccount((m) => ({ ...m, [d.kind]: d.id })) }
+    }
+    load()
+    window.addEventListener('bridge-accounts-changed', load)
+    return () => window.removeEventListener('bridge-accounts-changed', load)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const group = accts.find((k) => k.kind === kind)
   const kindAccts = group?.accounts || []
   const pickedAccount = account[kind] || group?.setting
@@ -135,7 +147,16 @@ export default function NewAgent({ fleet, initial = {}, onClose, onLaunched, onA
         {kindAccts.length > 1 && (
           <div className="na-field">
             <span className="na-label">Account</span>
-            <AccountPicker group={group} value={pickedAccount} onChange={(id) => setAccount((m) => ({ ...m, [kind]: id }))} onAdd={onAddAccount} />
+            <AccountPicker group={group} value={pickedAccount} onChange={(id) => setAccount((m) => ({ ...m, [kind]: id }))} onAdd={() => onAddAccount(kind)} />
+          </div>
+        )}
+        {kindAccts.length === 1 && (
+          <div className="na-field">
+            <span className="na-label">Account</span>
+            <div className="na-acct-one">
+              <b>Default</b><span className="muted">your usual login</span>
+              <button type="button" className="link-btn" onClick={() => onAddAccount(kind)} title="A work and a personal account, side by side">Add another…</button>
+            </div>
           </div>
         )}
 

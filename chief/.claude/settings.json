@@ -5,7 +5,9 @@
       "Bash(bin/bridge:*)",
       "Bash(./bin/bridge:*)",
       "Edit(state/**)",
-      "Write(state/**)"
+      "Write(state/**)",
+      "Edit(work/**)",
+      "Write(work/**)"
     ]
   }
 }

@@ -149,7 +149,7 @@ Everything personal lives in `~/.bridge-ai` (set `BRIDGE_HOME` to move it), neve
 | File | What it holds |
 |---|---|
 | `config.json` | Your settings (see below) |
-| `chief/` | The chief of staff's folder: its instructions, `state/playbook.md` (what it has learned about how you work) and `state/ledger.md` |
+| `chief/` | The chief of staff's folder: its instructions, `state/playbook.md` (what it has learned about how you work), `state/ledger.md` (its hand-offs), `state/tasks.md` (tasks it does itself) and `work/` (what it makes for them) |
 | `routines.json`, `ideas.md` | Recurring jobs and your ideas backlog ([`routines.example.json`](routines.example.json) shows the shape) |
 | `runtime.json` | Spaces and tabs for the built-in runtime |
 | `cloud-keys.json`, `cloud-agents.json` | Your cloud agent keys (readable only by you, never given to the agents on your computer) and the cloud agents you started |
@@ -195,7 +195,8 @@ You rarely need to edit the file by hand. **Settings** (the gear in the top bar,
 - **Subagents** that Claude Code starts show live above the message box.
 - **Consult other models**: the chief of staff (or you, with `node ~/.bridge-ai/chief/bin/bridge ask`) can put a one-off question to Grok, GPT, Claude, Gemini, Muse Spark, Perplexity, DeepSeek, a local Ollama model and others, for a second opinion, live news, or a very long document. It uses each agent's CLI and your existing subscription where it can, and an API key from Model providers otherwise. Settings › Agents shows who is reachable and how.
 - **Plain chats**: talk to Claude, Codex or any agent directly, like its own app, with no project folder (New agent › Plain chat, or New chat in `⌘K`).
-- **Chief of staff**: tell it what you need; it sends the work to the agent already on that topic or starts a new one, tracks it, and tells you when it's done. It learns where work lives and how you like things done, in a playbook you can read and edit.
+- **Several accounts**: a work and a personal Claude (or Codex), running side by side. **Add another account** is in the usage chip's menu in the top bar, in New agent's Account row and in `⌘K`: name it, sign in right there (the agent's own login, for that account only), then start an agent on it. Each agent shows the account it's on and keeps it when you fork or reopen it, and its ⋯ menu can continue the conversation on another account. An account keeps only its own login; settings, skills and history stay shared.
+- **Chief of staff**: tell it what you need. Project work goes to the agent already on that topic, or a new one, and it tells you when that's done. Standalone tasks it does itself: questions and research, drafts (emails, docs, plans, summaries), checklists and planning. It writes only in its own `work/` folder and never edits your projects. Its own tasks are in a Tasks panel above its message box: add one there to send it to the chief, mark one done or reopen it, and open what a finished task produced. The morning brief mentions its open tasks. It learns where work lives and how you like things done, in a playbook you can read and edit.
 - **Today**: schedule, inbox ranking, morning brief, routines, ideas, usage and quota, weather, markets and news.
 - **Usage**: tokens and cost per day, model and project, with a year heatmap (from your agents' local logs via ccusage).
 - **Phone**: the same app on your phone, as a Home Screen app with notifications. See [On your phone](#on-your-phone).

@@ -9,11 +9,12 @@ import Console, { MateEmpty, showChat } from './components/Console.jsx'
 import { Settings, Onboarding, HerdrView, Terminals, ShellTab, preloadViews } from './lazy.jsx'
 import { openLink } from './pwa.js'
 import NewAgent from './components/NewAgent.jsx'
+import AddAccount from './components/AddAccount.jsx'
 import History from './components/History.jsx'
 import UpdateChip from './components/UpdateChip.jsx'
 import RestartChip from './components/RestartChip.jsx'
 import RuntimeNotice from './components/RuntimeNotice.jsx'
-import AccountMenu, { several, listed, setDefault } from './components/AccountMenu.jsx'
+import AccountMenu, { listed, setDefault } from './components/AccountMenu.jsx'
 import { CHANNEL, nameOf, popOut, tell } from './components/Solo.jsx'
 import Palette from './components/Palette.jsx'
 import Tour from './components/Tour.jsx'
@@ -61,48 +62,57 @@ const toStart = !cloudOnly ? null : window.bridgeAndroid?.home ? () => window.br
   : window.bridgeNative?.post ? () => window.bridgeNative.post({ type: 'home' }) : null
 
 // Top bar chips: default provider's session + week, and current weather. With several accounts
-// it shows the one new agents start with (yours, or Auto's pick) and opens the account switcher.
+// it shows the one new agents start with (yours, or Auto's pick). For the agents that can have
+// several (Claude Code, Codex) it opens the account menu: switch, Add another account, Usage details.
 function ProviderChip({ quota, primary, onClick, onAddAccount }) {
   const [open, setOpen] = useState(false)
   const wrap = useRef(null)
   const groups = quota?.accounts || []
-  const multi = several(groups)
+  const menu = groups.length > 0
   const g = groups.find((x) => x.kind === primary)
   const act = g?.accounts.length > 1 ? g.accounts.find((a) => a.active) : null
   const p = act || quota?.providers?.find((x) => x.provider === primary)
+  const opens = menu
+    ? { onClick: () => setOpen((o) => !o), 'aria-haspopup': 'menu', 'aria-expanded': open, onKeyDown: (e) => { if (e.key === 'ArrowDown' && !open) { e.preventDefault(); setOpen(true) } } }
+    : { onClick }
+  const caret = menu && <Icon name="down" size={11} className="usage-caret" />
+  let chip
   if (quota?.off) {
-    return (
-      <button className="top-chip usage-chip" data-tour="usage" onClick={onClick} title="Plan usage is off · click to see it or turn it on">
+    chip = (
+      <button className="top-chip usage-chip" data-tour="usage" {...opens} title={`Plan usage is off · click ${menu ? 'for accounts and usage' : 'to see it or turn it on'}`}>
         <Icon name="gauge" size={13} /><span className="muted">Usage</span>
+        {act && <b className="usage-acct">{act.label}</b>}
+        {caret}
+      </button>
+    )
+  } else {
+    if (!p) return null
+    const sess = p.windows.find((w) => w.kind === 'session') || p.windows[0]
+    const week = p.windows.find((w) => w.kind === 'weekly')
+    const lv = (v) => (v == null ? 'unknown' : v < 10 ? 'critical' : v < 30 ? 'warning' : 'good')
+    const name = `${NAMES[primary] || primary}${act ? ` (${act.label})` : ''}`
+    chip = (
+      <button className="top-chip usage-chip" data-tour="usage" {...opens}
+        title={`${name} usage${sess ? ` · ${sess.percentRemaining}% left this ${sess.kind === 'session' ? '5-hour window' : sess.label}` : ''}${week ? ` · ${week.percentRemaining}% left this week` : ''} · ${menu ? 'click for accounts and usage' : 'click for details'}`}>
+        <span className={`mini-ring r-${lv(sess?.percentRemaining)}`} style={{ '--p': sess?.percentRemaining ?? 0 }} />
+        <b className="usage-name">{NAMES[primary] || primary}</b>
+        {act && <b className="usage-acct">{act.label}</b>}
+        {p.usable ? (
+          <>
+            {sess && <span>{sess.percentRemaining}%<small> {sess.kind === 'session' ? '5h' : sess.label}</small></span>}
+            {week && <span className="chip-sep">{week.percentRemaining}%<small> wk</small></span>}
+          </>
+        ) : <span className="muted">{p.allow ? 'allow' : p.status === 'auth_required' || p.notSetUp || p.signedIn === false ? 'sign in' : p.status === 'pending' ? '…' : 'no data'}</span>}
+        {caret}
       </button>
     )
   }
-  if (!p) return null
-  const sess = p.windows.find((w) => w.kind === 'session') || p.windows[0]
-  const week = p.windows.find((w) => w.kind === 'weekly')
-  const lv = (v) => (v == null ? 'unknown' : v < 10 ? 'critical' : v < 30 ? 'warning' : 'good')
-  const name = `${NAMES[primary] || primary}${act ? ` (${act.label})` : ''}`
-  const chip = (
-    <button className="top-chip usage-chip" data-tour="usage" onClick={multi ? () => setOpen((o) => !o) : onClick} aria-haspopup={multi ? 'menu' : undefined} aria-expanded={multi ? open : undefined}
-      onKeyDown={(e) => { if (multi && e.key === 'ArrowDown' && !open) { e.preventDefault(); setOpen(true) } }}
-      title={`${name} usage${sess ? ` · ${sess.percentRemaining}% left this ${sess.kind === 'session' ? '5-hour window' : sess.label}` : ''}${week ? ` · ${week.percentRemaining}% left this week` : ''} · ${multi ? 'click to switch accounts' : 'click for details'}`}>
-      <span className={`mini-ring r-${lv(sess?.percentRemaining)}`} style={{ '--p': sess?.percentRemaining ?? 0 }} />
-      <b className="usage-name">{NAMES[primary] || primary}</b>
-      {act && <b className="usage-acct">{act.label}</b>}
-      {p.usable ? (
-        <>
-          {sess && <span>{sess.percentRemaining}%<small> {sess.kind === 'session' ? '5h' : sess.label}</small></span>}
-          {week && <span className="chip-sep">{week.percentRemaining}%<small> wk</small></span>}
-        </>
-      ) : <span className="muted">{p.allow ? 'allow' : p.status === 'auth_required' || p.notSetUp || p.signedIn === false ? 'sign in' : p.status === 'pending' ? '…' : 'no data'}</span>}
-      {multi && <Icon name="down" size={11} className="usage-caret" />}
-    </button>
-  )
-  if (!multi) return chip
+  if (!menu) return chip
+  const shown = listed(groups, primary)
   return (
     <div className="acct-wrap" ref={wrap}>
       {chip}
-      {open && <AccountMenu groups={listed(groups)} anchor={wrap} className="top" onClose={() => setOpen(false)} onPick={(kind, id) => setDefault(groups, kind, id)}
+      {open && <AccountMenu groups={shown.length ? shown : groups.slice(0, 1)} anchor={wrap} className="top" off={!!quota?.off} onClose={() => setOpen(false)} onPick={(kind, id) => setDefault(groups, kind, id)}
         onAdd={onAddAccount} extra={[{ icon: 'gauge', label: 'Usage details', run: onClick }]} />}
     </div>
   )
@@ -155,6 +165,7 @@ export default function App() {
   const [palette, setPalette] = useState(false)
   const [newAgent, setNewAgent] = useState(null) // null = closed, {} = open with defaults
   const [history, setHistory] = useState(false) // search every conversation, closed agents
+  const [addAcct, setAddAcct] = useState(null) // the Add another account dialog: { kind, account }
   const [tour, setTour] = useState(false)
   const [toured, setToured] = usePersisted('cc-toured', {}) // { desktop, phone }: seen on this device
   const [cmdRef, cmdW] = useWidth()
@@ -282,6 +293,11 @@ export default function App() {
     return () => window.removeEventListener('bridge-open-settings', on)
   }, [])
   useEffect(() => {
+    const on = (e) => setAddAcct(e.detail || {})
+    window.addEventListener('bridge-add-account', on)
+    return () => window.removeEventListener('bridge-add-account', on)
+  }, [])
+  useEffect(() => {
     const on = (e) => { if (e.detail?.id) showCardRef.current?.(e.detail.id) }
     window.addEventListener('bridge-open-card', on)
     return () => window.removeEventListener('bridge-open-card', on)
@@ -383,6 +399,7 @@ export default function App() {
     { id: 'a:settings', label: 'Settings…', icon: 'settings', hint: '⌘,', keywords: 'preferences name default agent model location runtime', run: () => setSettings('general') },
     { id: 'a:providers', label: 'Model providers', icon: 'layers', keywords: 'api key openai anthropic gemini openrouter bedrock vertex ollama lm studio', run: () => setSettings('providers') },
     { id: 'a:accounts', label: 'Accounts…', icon: 'users', keywords: 'account switch work personal sign in login claude codex auto', run: () => setSettings('accounts') },
+    { id: 'a:add-account', label: 'Add another account…', icon: 'plus', keywords: 'account second work personal sign in login claude codex both two', run: () => setAddAcct({}) },
     { id: 'a:mcp', label: 'MCP servers', icon: 'tool', keywords: 'tools mcp github playwright', run: () => setSettings('mcp') },
     { id: 'a:config', label: 'Edit config file', icon: 'braces', keywords: 'json config.json settings', run: () => setSettings('config') },
     { id: 'a:mate', label: 'Go to chief of staff', icon: 'helm', keywords: 'chief staff dispatch route', run: () => (mate ? openAgent(mate.paneId) : mateLaunch.launch()) },
@@ -412,8 +429,10 @@ export default function App() {
       {palette && <Palette fleet={fleet} activeId={wide ? W.active : mobileAgent} onClose={() => setPalette(false)} onOpen={openAgent} onOpenFile={openFiles} actions={actions} />}
       {settings && <Settings section={settings} onClose={closeSettings} onOpenAgent={openAgent} />}
       {onboarding && <Onboarding onDone={(pane) => { setOnboarding(false); confPoll.refresh(); if (pane) setTimeout(() => openAgent(pane), 800) }} />}
-      {newAgent && <NewAgent fleet={fleet} initial={newAgent} onClose={() => setNewAgent(null)} onLaunched={onLaunched} onAddAccount={() => { setNewAgent(null); setSettings('accounts') }} onCloudSettings={() => { setNewAgent(null); setSettings('cloud') }} />}
+      {newAgent && <NewAgent fleet={fleet} initial={newAgent} onClose={() => setNewAgent(null)} onLaunched={onLaunched} onAddAccount={(kind) => setAddAcct({ kind })} onCloudSettings={() => { setNewAgent(null); setSettings('cloud') }} />}
       {history && <History onClose={() => setHistory(false)} onOpen={(id, fresh) => (fresh ? setTimeout(() => openAgent(id), 1200) : openAgent(id))} />}
+      {addAcct && <AddAccount initial={addAcct} onClose={() => setAddAcct(null)} onOpenAgent={(id) => { setSettings(null); setNewAgent(null); openAgent(id) }}
+        onStart={(kind, account) => { setAddAcct(null); setSettings(null); if (!newAgent) setNewAgent({ mode: 'project', kind, account }) }} />}
       {tour && !covered && <Tour key={device} phone={!wide} actionLabel={agents.some((a) => !a.chief) ? 'Start an agent' : 'Start your first agent'}
         onClose={endTour} onAction={() => { endTour(); setNewAgent({ mode: 'project' }) }} />}
     </>
@@ -446,7 +465,7 @@ export default function App() {
         {!cloudOnly && (
           <>
             <NextMeetingChip onClick={() => showCard('calendar')} />
-            <ProviderChip quota={quota.data} primary={primary} onClick={() => showCard('gauge')} onAddAccount={() => setSettings('accounts')} />
+            <ProviderChip quota={quota.data} primary={primary} onClick={() => showCard('gauge')} onAddAccount={(kind) => setAddAcct({ kind })} />
             {update.data?.available && <UpdateChip u={update.data} onDetails={() => setSettings('about')} />}
             <RestartChip fleet={fleet} runtime={conf?.runtime?.name} />
             <WeatherChip onClick={() => showCard('sun')} />

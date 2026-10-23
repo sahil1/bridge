@@ -2,10 +2,12 @@ import { createContext, Fragment, useContext, useCallback, useEffect, useLayoutE
 import Icon, { StatusDot } from './Icon.jsx'
 import { Terminal, FilesView, ChangesView, PreviewView } from '../lazy.jsx'
 import Subagents from './Subagents.jsx'
+import ChiefTasks from './ChiefTasks.jsx'
 import Question, { parseScreen } from './Question.jsx'
 import FirstRunCard, { showsFirstRun } from './FirstRun.jsx'
 import { InstallAgentButton } from './SignIn.jsx'
 import Composer from './Composer.jsx'
+import ModelChip from './ModelChip.jsx'
 import Lightbox from './Lightbox.jsx'
 import CloudConsole from './CloudConsole.jsx'
 import { PaneHeader } from './layout.jsx'
@@ -515,7 +517,10 @@ function AgentConsole({ agent, variant = 'focus', controls = {}, onBack, onOpenI
   const movable = (agent?.kind === 'claude' || agent?.kind === 'codex') && !!agent?.sessionId
   const quota = usePoll('/quota', 5 * 60 * 1000, { enabled: movable })
   const accts = quota.data?.accounts?.find((g) => g.kind === agent?.kind)?.accounts || []
-  const others = movable && accts.length > 1 ? accts.filter((x) => x.id !== agent.accountId) : []
+  // Not the one it's on (one started outside Bridge AI is taken to be on your usual login).
+  const others = movable && accts.length > 1 ? accts.filter((x) => x.id !== (agent.accountId || `${agent.kind}-default`)) : []
+  // The account it's on, in the header, when it isn't your usual login (as in the sidebar).
+  const onAccount = agent?.account || null
   // The sidebar's "Browse folder" asks an open agent to switch views.
   useEffect(() => {
     const on = (e) => { if (e.detail?.paneId === agent?.paneId) { setView(e.detail.view); if (e.detail.path) setOpenPath(e.detail.path) } }
@@ -663,8 +668,10 @@ function AgentConsole({ agent, variant = 'focus', controls = {}, onBack, onOpenI
   const title = agent.chief ? 'Chief of staff' : agent.title || agent.tab || agent.workspace
   const where = agent.chief ? `${agent.kind} · routes work to your agents` : `${agent.workspace}${agent.tab && !/^\d+$/.test(agent.tab) ? ` › ${agent.tab}` : ''} · ${agent.kind}`
   const g = places.data?.[agent.cwd]
+  const acctTag = (at) => onAccount && <span className={`acct-tag ${at}`} title={`On the ${onAccount} account${others.length ? ' (⋯ to continue on another)' : ''}`}>{onAccount}</span>
   const subtitle = (
     <>
+      {acctTag('in-sub')}
       <span className="sub-where">{where}</span>
       <button className="path-chip" onClick={() => setView('files')} title={`${tildePath(agent.cwd)}\nClick to browse; right-click to copy`}
         onContextMenu={(e) => { e.preventDefault(); navigator.clipboard?.writeText(agent.cwd); setFlash('Path copied') }}>
@@ -679,6 +686,7 @@ function AgentConsole({ agent, variant = 'focus', controls = {}, onBack, onOpenI
       <PaneHeader icon={agent.chief ? 'helm' : 'bot'} title={title} subtitle={subtitle} {...controls}
         leading={onBack && <button className="win-btn back" onClick={onBack} aria-label="Back"><Icon name="chevron" size={16} className="flip" /></button>}>
         <span className={`state-tag st-${agent.status}`}><StatusDot status={agent.status} size={7} />{{ blocked: 'Needs you', done: 'Done', working: 'Working', idle: 'Idle' }[agent.status] || 'Unknown'}</span>
+        {acctTag('in-head')}
         {agent.muted && <span className="muted-tag" role="img" title="Notifications muted (⋯ to unmute)" aria-label="Notifications muted"><Icon name="bell-off" size={13} /></span>}
         {!minimized && (
           <div className="seg" role="tablist" data-tour="views">
@@ -739,6 +747,7 @@ function AgentConsole({ agent, variant = 'focus', controls = {}, onBack, onOpenI
           )}
 
           <div className="composer-wrap" data-tour="composer" hidden={view === 'files' || view === 'changes' || view === 'preview' || (view === 'chat' && showsFirstRun(agent))}>
+            {agent.chief && view === 'chat' && <ChiefTasks agent={agent} onOpenPath={(p) => { setOpenPath(p); setView('files') }} />}
             {agent.caps?.subagents && view === 'chat' && <Subagents paneId={agent.paneId} working={agent.status === 'working'} Rich={RichText} />}
             {keysOpen && (
               <div className="keybar" aria-label="Send keys">
@@ -770,6 +779,7 @@ function AgentConsole({ agent, variant = 'focus', controls = {}, onBack, onOpenI
               commandsUrl={agent.caps?.commands ? `/agents/${encodeURIComponent(agent.paneId)}/commands` : null}
               filesUrl={`/agents/${encodeURIComponent(agent.paneId)}/mentions`}
               historyUrl={agent.caps?.chat ? `/agents/${encodeURIComponent(agent.paneId)}/transcript` : null}
+              tools={<ModelChip agent={agent} onNote={setFlash} onSent={() => { mirrored.current = ''; syncMirror() }} />}
               onInteractive={() => { setView('terminal'); setTermFocus(Date.now()) }} />
           </div>
         </>

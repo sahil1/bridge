@@ -280,7 +280,8 @@ function SavedPrompts({ current, onPick, onClose }) {
   )
 }
 
-export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKeys, busy: agentBusy = false, typeAhead = false, prefill = null, editing = null, onEditChange, onDraft, mirroring = false, onStop, queuedCount = 0, commandsUrl, filesUrl, onInteractive, historyUrl }) {
+// tools: more controls for the tools row (the agent's model chip).
+export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKeys, busy: agentBusy = false, typeAhead = false, prefill = null, editing = null, onEditChange, onDraft, mirroring = false, onStop, queuedCount = 0, commandsUrl, filesUrl, onInteractive, historyUrl, tools = null }) {
   const [draft, setDraft] = useState(() => loadDraft(id))
   const [note, setNote] = useState(null)
   const [uploading, setUploading] = useState(0)
@@ -634,6 +635,7 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
               <button className={`comp-btn ${busy ? 'busy' : ''}`} onClick={voice.start} disabled={busy} aria-label="Dictate" title="Dictate (turned into text on your computer)">
                 <Icon name={busy ? 'refresh' : 'mic'} size={16} className={busy ? 'spin' : ''} />
               </button>
+              {tools}
               <input ref={fileRef} type="file" multiple hidden onChange={(e) => { upload(e.target.files); e.target.value = '' }} />
               <span className={`comp-hint ${status ? 'status' : ''}`}>{status || (agentBusy
                 // typeAhead: the agent takes messages while it works, like typing in its terminal.

@@ -184,7 +184,7 @@ export async function fleet() {
     paneId: p.paneId, tabId: p.tabId, workspaceId: p.workspaceId,
     workspace: wsLabel(p.workspaceId), tab: tabOf(p.tabId)?.label || '',
     kind: p.kind, status: statusOf(p), title: p.title, cwd: p.cwd, account: accounts.labelOf(p.account), accountId: p.account,
-    sessionId: p.sessionId, focused: false, seq: p.seq,
+    sessionId: p.sessionId, model: p.model, focused: false, seq: p.seq,
     setup: p.setup?.step || null, setupUrl: p.setup?.url || null,
   }))
   const tabList = tabs.map((t) => ({
@@ -303,6 +303,8 @@ export async function prompt(paneId, t) {
 export async function focusAgent(paneId) { need(paneId).seen = true }
 // The agent now continues in another session (Codex after an edit): resume that one from here on.
 export async function setSession(paneId, sessionId) { need(paneId).sessionId = sessionId; save() }
+// It switched model (from the message box): reopen it on that one after a restart (null: its default).
+export async function setModel(paneId, model) { need(paneId).model = model || null; save() }
 export async function focusTab() {}
 
 function renameIn(list, key, idv, label) {

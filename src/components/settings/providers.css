@@ -98,5 +98,5 @@
 .pv-acct-use { display: inline-flex; }
 .pv-acct-use input { accent-color: var(--accent); margin: 0; }
 .pv-acct-name { font-size: 12.5px; font-weight: 600; color: var(--ink); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pv-acct-rename, .pv-acct-add { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
-.pv-acct-rename input, .pv-acct-add input { height: 28px; padding: 0 9px; border-radius: 7px; border: 1px solid var(--line-2); background: var(--pane-2); color: var(--ink); font: inherit; font-size: 12.5px; min-width: 0; width: 220px; max-width: 100%; }
+.pv-acct-rename { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.pv-acct-rename input { height: 28px; padding: 0 9px; border-radius: 7px; border: 1px solid var(--line-2); background: var(--pane-2); color: var(--ink); font: inherit; font-size: 12.5px; min-width: 0; width: 220px; max-width: 100%; }

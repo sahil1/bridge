@@ -66,12 +66,12 @@ const PRIVATE_FILES = [
   [/(^|\/)\.env(\.|$)/, 'environment secrets'],
   [/\.(pem|key|p12|pfx|keychain)$/, 'a key or certificate'],
   [/(^|\/)desktop\/root\.json$/, 'a path on your machine'],
-  [/(^|\/)chief\/(state\/(?!(ledger|playbook)\.md$)|\.claude\/settings\.local\.json$|CLAUDE\.local\.md$)/, "the chief of staff's memory"],
+  [/(^|\/)chief\/(state\/(?!(ledger|playbook|tasks)\.md$)|work\/|\.claude\/settings\.local\.json$|CLAUDE\.local\.md$)/, "the chief of staff's memory or work"],
   [/(^|\/)(cache|chats|accounts)\/[^/]+/, 'a data-folder entry', (f) => !/^(src|server|scripts|public)\//.test(f)],
 ]
 
 // The chief of staff templates ship with placeholders, never filled in.
-const TEMPLATES = { 'chief/state/ledger.md': /\{\{name\}\}/, 'chief/state/playbook.md': /\{\{name\}\}/ }
+const TEMPLATES = { 'chief/state/ledger.md': /\{\{name\}\}/, 'chief/state/playbook.md': /\{\{name\}\}/, 'chief/state/tasks.md': /\{\{name\}\}/, 'chief/INSTRUCTIONS.md': /\{\{name\}\}[\s\S]*\{\{playbook\}\}/ }
 
 // ---------- Text that is personal ----------
 const ALLOW_EMAIL = /(noreply|no-reply)@|@(users\.noreply\.github\.com|example\.(com|org)|anthropic\.com|openai\.com)$|^git@github\.com$/i

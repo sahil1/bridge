@@ -413,7 +413,8 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
       await fileOp(pane, op, e.path) // reveal, open
     } catch (x) { if (x.code === 'automation') setAutomation(true); else say(x.message) }
   }
-  useEffect(() => { if (openPath) { open(openPath); onConsumed?.() } }, [openPath]) // eslint-disable-line react-hooks/exhaustive-deps
+  // A path ending in / is a folder: shown open in the tree.
+  useEffect(() => { if (openPath) { open(openPath.replace(/\/$/, ''), openPath.endsWith('/')); onConsumed?.() } }, [openPath]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const onKey = (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'p') { e.preventDefault(); setQuick(true) } }
     window.addEventListener('keydown', onKey)

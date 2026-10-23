@@ -23,6 +23,7 @@ function Tile({ a, p, selected, onOpen, onOpenInHerdr, onOpenSide }) {
           {a.tab && !/^\d+$/.test(a.tab) && <><Icon name="chevron" size={10} /><span>{a.tab}</span></>}
           {a.cloud?.repo && <><Icon name="chevron" size={10} /><span>{a.cloud.repo}</span></>}
           <span className={`tile-kind ${a.crew ? 'crew' : ''}`}>{a.crew ? `crew · ${a.kind}` : a.cloud ? `${a.cloud.label} cloud` : a.kind}</span>
+          {a.account && <span className="acct-tag" title={`On the ${a.account} account`}>{a.account}</span>}
         </div>
         {p?.tool && a.status === 'working'
           ? <p className="tile-preview mono"><Icon name="tool" size={11} /> {p.tool}</p>
