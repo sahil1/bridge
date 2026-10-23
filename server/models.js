@@ -124,11 +124,14 @@ export function makeModels({ rt, cfg, findAgent, launchAgent, archiveWhere, push
     let current = setAt > replyAt ? m.switched.model : m?.reply?.model || null
     let source = current ? 'agent' : null
     if (s?.state === 'done' && (!current || s.at > Math.max(replyAt, setAt))) { current = s.model; source = 'switch' }
+    // A restart on a model always starts on it, so a pick newer than its last turn is what it's on
+    // (also after Bridge AI restarts, when the switch above is forgotten).
+    const pickAt = Math.max(0, ...keysOf(a).map((k) => (picked[k]?.at ? new Date(picked[k].at).getTime() : 0)))
+    if (mode === 'restart' && pick && pickAt > Math.max(replyAt, setAt)) { current = pick; source = 'picked' }
     if (!current && pick) { current = pick; source = 'picked' }
     if (!current && a.model) { current = a.model; source = 'started' }
     if (!current && cfg.agents?.[a.kind]?.model) { current = cfg.agents[a.kind].model; source = 'settings' }
     // The menu's tick: what you picked here, or a /model typed in the agent itself since, or what it started on.
-    const pickAt = Math.max(0, ...keysOf(a).map((k) => (picked[k]?.at ? new Date(picked[k].at).getTime() : 0)))
     let checked = pick || a.model || cfg.agents?.[a.kind]?.model || 'default'
     if (m?.switched?.arg && setAt > pickAt) checked = m.switched.arg
     return {

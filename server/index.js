@@ -36,7 +36,8 @@ import { promptSafe, draftIn } from './promptsafe.js'
 import { rewindAndSend, codexRewindAndSend, undoReply, btwAnswer } from './rewind.js'
 import { makeNews } from './news.js'
 import { pickRuntime } from './runtime/index.js'
-import { sessionName as herdrSession, sessions as herdrSessions } from './runtime/herdr-cli.js'
+import { sessionName as herdrSession, useSession as useHerdrSession } from './runtime/herdr-cli.js'
+import * as herdrSessions from './runtime/herdr-sessions.js'
 import { installed, caps, adapter, catalog as agentCatalog, installCommand, installTools, clearInstalledCache } from './agents.js'
 import { loadConfig, ROOT, DATA, CACHE, expand, ensureDir, cacheFile, IS_MAC } from './paths.js'
 import { prepareChief } from './chief.js'
@@ -44,7 +45,7 @@ import { makeTasks } from './chieftasks.js'
 import { providerRoutes, providerEnv, subscriptions } from './providers.js'
 import * as settings from './settings.js'
 import * as consult from './consult.js'
-import { terminals, openAttach } from './terminal.js'
+import { terminals, openAttach, openCommand } from './terminal.js'
 import { mcpRoutes } from './mcp.js'
 import * as notify from './notify.js'
 import * as push from './push.js'
@@ -53,6 +54,8 @@ import * as relay from './relay.js'
 import * as updates from './updates.js'
 import * as cloud from './cloud.js'
 import { makeModels, forLaunch } from './models.js'
+import { makeHandoff } from './handoff.js'
+import * as asks from './asks.js'
 
 ensureDir(DATA)
 ensureDir(CACHE)
@@ -116,6 +119,7 @@ async function fleetView() {
   const f = await rt.fleet()
   delete f.panes
   for (const a of f.agents) {
+    asks.decorate(a) // a question Codex asked while working: it needs you
     a.chief = path.resolve(a.cwd || '') === path.resolve(CHIEF_DIR)
     a.caps = caps(a.kind)
     a.kindLabel = adapter(a.kind).label
@@ -354,24 +358,29 @@ app.post('/api/tabs/:tab/focus', wrap(async (req) => {
 // Status colors from the runtime (herdr's theme), so both views use the same ones.
 app.get('/api/runtime-theme', (req, res) => res.json(rt.theme()))
 
-app.post('/api/agents/:pane/prompt', wrap(async (req) => {
-  const text = String(req.body?.text || '').trim()
-  if (!text) throw new Error('Empty prompt')
+// A message to an agent: typed into its input box, or held until that box is back.
+async function sendPrompt(paneId, text, agent) {
   try {
-    const agent = await findAgent(req.params.pane).catch(() => null)
-    const r = await promptSafe(rt, req.params.pane, text, agent)
+    const r = await promptSafe(rt, paneId, text, agent)
     // Show "working" right away rather than at the next fleet poll.
     for (const ms of [150, 700, 1600]) setTimeout(pushFleet, ms)
-    // A side question: its answer is in a panel, not the chat, so bring it back here.
-    if (agent && caps(agent.kind).btw && /^\/btw\s/.test(text)) return { ...r, btw: (await btwAnswer(rt, req.params.pane, text)) || null }
     return r
   } catch (e) {
     if (e.code !== 'not_at_prompt') throw e
     // Hold it and send when the input box is back (the queue checks before each try).
-    const item = queue.add(req.params.pane, text)
+    const item = queue.add(paneId, text)
     pushFleet()
     return { ok: true, queued: true, reason: e.reason, id: item.id }
   }
+}
+app.post('/api/agents/:pane/prompt', wrap(async (req) => {
+  const text = String(req.body?.text || '').trim()
+  if (!text) throw new Error('Empty prompt')
+  const agent = await findAgent(req.params.pane).catch(() => null)
+  const r = await sendPrompt(req.params.pane, text, agent)
+  // A side question: its answer is in a panel, not the chat, so bring it back here.
+  if (!r.queued && agent && caps(agent.kind).btw && /^\/btw\s/.test(text)) return { ...r, btw: (await btwAnswer(rt, req.params.pane, text)) || null }
+  return r
 }))
 
 const ALLOWED_KEYS = /^(enter|esc|tab|up|down|left|right|space|backspace|delete|home|end|pageup|pagedown|ctrl\+[a-z\[\]]|alt\+[a-z]|shift\+tab|[0-9yn])$/
@@ -448,6 +457,9 @@ app.post('/api/agents/:pane/steer', wrap(async (req) => {
 app.delete('/api/agents/:pane/queue/:id', wrap(async (req) => { queue.remove(req.params.pane, req.params.id); pushFleet(); return { ok: true } }))
 // The message box's model menu: what the agent is on, and switching it (models.js).
 makeModels({ rt, cfg, findAgent, launchAgent, archiveWhere, archive, pushFleet: () => pushFleet() }).routes(app, wrap)
+// Hand off to another agent from the same menu (handoff.js): Claude Code to Codex, say, with a handover.
+makeHandoff({ rt, cfg, chiefDir: CHIEF_DIR, findAgent, launchAgent, archiveWhere, pushFleet: () => pushFleet(), setChiefKind: (kind) => afterChange(settings.patch({ chief: { kind } })) }).routes(app, wrap)
+asks.routes(app, { wrap, findAgent, sendPrompt })
 
 app.get('/api/places', wrap(async () => {
   return places.gitSummary(((await rt.fleet()).panes || []).map((p) => p.cwd))
@@ -719,24 +731,42 @@ app.get('/api/events', (req, res) => {
   if (lastFleet) res.write(`event: fleet\ndata: ${JSON.stringify(lastFleet)}\n\n`)
   req.on('close', () => clients.delete(res))
 })
+// A switch to another herdr session: a fleet read before it is dropped, not shown or announced.
+let fleetGen = 0
+let notifiedSession
+function sessionSwitched() { fleetGen++; lastFleet = null; geo = { at: 0, cols: {} }; pushFleet() }
 async function pollFleet() {
   // Watched while a window is open, work is queued, or a notification channel (your phone) is on.
   if (clients.size || queue.size() || notify.active()) {
     try {
+      const gen = fleetGen
+      const same = () => gen === fleetGen
       let f = await fleetView()
-      if (queue.size() && await queue.deliver(f.agents, (id, text, a) => promptSafe(rt, id, text, a), (id) => rt.read(id, 40))) f = await fleetView()
-      const key = JSON.stringify([f.agents.map((a) => [a.paneId, a.status, a.title, a.seq, a.muted]), f.tabs.map((t) => [t.tabId, t.label, t.panes.map((p) => [p.paneId, p.cwd, p.rect?.width, p.rect?.height, p.rect?.x, p.rect?.y])]), f.workspaces.map((w) => w.label), f.queue])
-      lastFleet = f
-      notify.onFleet(f, cfg)
-      if (key !== lastFleetKey) {
-        lastFleetKey = key
-        for (const c of clients) c.write(`event: fleet\ndata: ${JSON.stringify(f)}\n\n`)
+      if (same() && !f.down && queue.size() && await queue.deliver(f.agents, (id, text, a) => (same() ? promptSafe(rt, id, text, a) : Promise.reject(new Error('Another session is in view'))), (id) => rt.read(id, 40))) f = await fleetView()
+      if (same()) {
+        const key = JSON.stringify([f.session, f.down, f.agents.map((a) => [a.paneId, a.status, a.title, a.seq, a.muted, a.asking?.count, a.asking?.working]), f.tabs.map((t) => [t.tabId, t.label, t.panes.map((p) => [p.paneId, p.cwd, p.rect?.width, p.rect?.height, p.rect?.x, p.rect?.y])]), f.workspaces.map((w) => w.label), f.queue])
+        lastFleet = f
+        // Another session's agents are new to the notifications, not news (see notify.forget).
+        if (f.session !== notifiedSession) { notifiedSession = f.session; notify.forget() }
+        if (!f.down) notify.onFleet(f, cfg)
+        if (key !== lastFleetKey) {
+          lastFleetKey = key
+          for (const c of clients) c.write(`event: fleet\ndata: ${JSON.stringify(f)}\n\n`)
+        }
       }
     } catch { /* runtime briefly unavailable */ }
   }
   setTimeout(pollFleet, 1500)
 }
-const pushFleet = async () => { try { lastFleetKey = ''; const f = await fleetView(); lastFleet = f; for (const c of clients) c.write(`event: fleet\ndata: ${JSON.stringify(f)}\n\n`) } catch { /* next poll */ } }
+const pushFleet = async () => {
+  try {
+    const gen = fleetGen
+    const f = await fleetView()
+    if (gen !== fleetGen) return // a newer push follows
+    lastFleetKey = ''; lastFleet = f
+    for (const c of clients) c.write(`event: fleet\ndata: ${JSON.stringify(f)}\n\n`)
+  } catch { /* next poll */ }
+}
 pollFleet()
 setInterval(() => { for (const c of clients) c.write(': ping\n\n') }, 25000)
 // Cloud agents are checked on their own, gently; finished ones only while someone's watching.
@@ -963,9 +993,13 @@ app.get('/api/brief', wrap(async (req) => {
     const needs = f.agents.filter((a) => a.status === 'blocked')
     const done = f.agents.filter((a) => a.status === 'done')
     const working = f.agents.filter((a) => a.status === 'working')
+    // With more than one herdr session running: which one this is, and who waits in the others.
+    const others = rt.name === 'herdr' ? await herdrSessions.list({ needs: true }).then((r) => r.sessions.filter((x) => x.running && !x.current), () => []) : []
+    const where = others.length && f.session ? `In ${f.session}: ` : ''
+    const away = others.filter((x) => x.needsYou).map((x) => ` ${x.name}: ${x.needsYou} waiting on you.`).join('')
     lines.push({
       key: 'agents',
-      text: `${working.length} working, ${needs.length} waiting on you, ${done.length} finished and unread.`,
+      text: f.down ? `${f.session ? `The herdr session ${f.session}` : 'herdr'} isn't running.${away}` : `${where}${working.length} working, ${needs.length} waiting on you, ${done.length} finished and unread.${away}`,
       items: [...needs, ...done].slice(0, 5).map((a) => ({ paneId: a.paneId, status: a.status, label: a.title || a.tab || a.workspace })),
     })
   }
@@ -1039,7 +1073,12 @@ app.post('/api/push/subscribe', wrap((req) => push.subscribe(req.body?.subscript
 app.post('/api/push/unsubscribe', wrap((req) => push.unsubscribe(req.body || {})))
 app.post('/api/push/test', wrap(() => notify.send({ kind: 'test', title: 'Bridge AI', body: 'Notifications are working.', url: '/', tag: 'test' })))
 // What a waiting agent is asking, for the desktop app's and the browser's own notifications.
-app.get('/api/agents/:pane/question', wrap(async (req) => { const q = notify.question(await rt.read(req.params.pane, 60)); return { text: q?.text || null } }))
+app.get('/api/agents/:pane/question', wrap(async (req) => {
+  const a = (await fleetView()).agents.find((x) => x.paneId === req.params.pane)
+  if (asks.askText(a)) return { text: asks.askText(a) }
+  const q = notify.question(await rt.read(req.params.pane, 60))
+  return { text: q?.text || null }
+}))
 // Mute an agent's notifications (its ⋯ menu), until unmuted.
 app.post('/api/agents/:pane/mute', wrap(async (req) => {
   notify.mute(req.params.pane, !!req.body?.muted, (await fleetView()).agents.map((a) => a.paneId))
@@ -1095,7 +1134,7 @@ app.get('/api/version', (req, res) => res.json({ version: VERSION, build: BUILD,
 app.get('/api/config', (req, res) => res.json({
   version: VERSION,
   name: cfg.name || '', location: cfg.location?.label || null, hasMortgage: !!cfg.mortgage,
-  runtime: { name: rt.name, ...rt.caps, ...(rt.name === 'herdr' ? { session: herdrSession() } : {}) }, platform: process.platform, mail: IS_MAC, calendar: IS_MAC,
+  runtime: { name: rt.name, ...rt.caps, ...(rt.name === 'herdr' ? { session: herdrSession() } : { keep: cfg.keepAgents !== false }) }, platform: process.platform, mail: IS_MAC, calendar: IS_MAC,
   defaultAgent: cfg.defaultAgent || 'claude', chiefKind: cfg.chief?.kind || 'claude', setupDone: !!cfg.setupDone,
 }))
 
@@ -1108,6 +1147,12 @@ function applyConfig() {
   TZ = cfg.location?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone
   weather = makeWeather(cfg)
   prepareChief(cfg)
+  // The herdr session in view (the sidebar's session menu, Settings), at once.
+  if (rt.name === 'herdr') {
+    const before = herdrSession()
+    useHerdrSession(cfg.herdr?.session)
+    if (herdrSession() !== before) sessionSwitched()
+  }
 }
 const settingsView = () => ({
   file: settings.FILE, raw: settings.readRaw(), user: settings.readUser(), defaults: settings.defaults(),
@@ -1118,6 +1163,7 @@ const settingsView = () => ({
 const atStart = Object.fromEntries(settings.RESTART_KEYS.map((k) => [k, JSON.stringify(settings.readUser()[k])]))
 const afterChange = (changed) => {
   applyConfig()
+  rt.setKeep?.(cfg.keepAgents !== false) // applies right away
   const restart = changed.filter((k) => settings.RESTART_KEYS.includes(k))
   const now = settings.readUser()
   fixes.noteRestart(settings.RESTART_KEYS.filter((k) => JSON.stringify(now[k]) !== atStart[k]))
@@ -1214,9 +1260,42 @@ app.post('/api/chats', wrap(async (req) => {
   return out
 }))
 
-// ---------- herdr sessions (Settings › Where agents run) ----------
-app.get('/api/herdr/sessions', wrap(async () => {
-  try { return { installed: true, ...(await herdrSessions()) } } catch (e) { return { installed: false, sessions: [], error: e.message } }
+// ---------- herdr sessions (the sidebar's session menu, Settings › Where agents run) ----------
+// needs=1: also how many agents wait on you in each running session (read from its socket).
+app.get('/api/herdr/sessions', wrap(async (req) => {
+  try { return { installed: true, ...(await herdrSessions.list({ needs: req.query.needs === '1' })) } } catch (e) { return { installed: false, sessions: [], error: e.message } }
+}))
+const herdrOnly = () => { if (rt.name !== 'herdr') throw new Error('Agents run in Bridge AI itself, not in herdr, so there are no herdr sessions to switch') }
+// Show another session: saved as herdr.session, like the pick in Settings; the fleet, board and
+// Herdr view follow at once (applyConfig).
+function showSession(name) {
+  afterChange(settings.patch({ herdr: { ...(settings.readUser().herdr || {}), session: name } }))
+  return { ok: true, session: herdrSession() }
+}
+app.post('/api/herdr/session', wrap(async (req) => {
+  herdrOnly()
+  const name = String(req.body?.name || '')
+  if (!(await herdrSessions.list()).sessions.some((x) => x.name === name)) throw new Error(`There's no herdr session named ${name}`)
+  return showSession(name)
+}))
+// Start a new session (or a stopped one) in the background, then show it.
+app.post('/api/herdr/sessions', wrap(async (req) => {
+  herdrOnly()
+  const name = String(req.body?.name || '').trim()
+  const r = await herdrSessions.start(name)
+  return { ...r, ...showSession(name) }
+}))
+app.post('/api/herdr/sessions/:name/stop', wrap(async (req) => {
+  herdrOnly()
+  const r = await herdrSessions.stop(req.params.name)
+  pushFleet()
+  return r
+}))
+// Open a session in your terminal app (create: make it there, when it can't start in the background).
+app.post('/api/herdr/sessions/:name/terminal', wrap(async (req) => {
+  herdrOnly()
+  const argv = await herdrSessions.attachCommand(req.params.name, { create: !!req.body?.create })
+  return openCommand(argv, { app: cfg.terminal?.app, label: `herdr session ${req.params.name}`, unset: ['HERDR_SOCKET_PATH', 'HERDR_SESSION', 'HERDR_ENV', 'TMUX'] })
 }))
 
 // ---------- Open a pane in your own terminal app ----------
@@ -1262,7 +1341,7 @@ const server = http.createServer(app)
 // WebSockets: herdr's live view (herdr runtime) and terminal clients attaching to a pane
 // (`bridge-ai attach`, built-in runtime). Each checked by the guard first.
 const upgrades = [
-  ...(rt.name === 'herdr' ? [['/api/tty', ttyHandler({ session: cfg.herdr?.session })]] : []),
+  ...(rt.name === 'herdr' ? [['/api/tty', ttyHandler()]] : []),
   ...(rt.attach ? [['/api/panes/', attachHandler(rt)]] : []),
 ]
 server.on('upgrade', (req, socket, head) => {
@@ -1280,4 +1359,5 @@ server.listen(cfg.port, cfg.host, () => {
   quota().catch(() => {})
   relay.start(`http://127.0.0.1:${cfg.port}`)
 })
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { rt.shutdown?.(); process.exit(0) })
+// Agents keep running in the terminal host unless you turned that off (Settings › General).
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { rt.shutdown?.({ keep: cfg.keepAgents !== false }); process.exit(0) })

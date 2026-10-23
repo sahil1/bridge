@@ -4,27 +4,34 @@ import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { cacheFile } from './paths.js'
+import { paneKey, inView, paneOfKey, adopt } from './scope.js'
 
 const FILE = cacheFile('queue.json')
 let q = {}
 try { q = JSON.parse(fs.readFileSync(FILE, 'utf8')) } catch { q = {} }
 const save = () => { fs.mkdirSync(path.dirname(FILE), { recursive: true }); fs.writeFileSync(FILE, JSON.stringify(q, null, 2)) }
+// Filed per herdr session (scope.js): only the session in view's messages show and go out.
+const ours = () => { if (adopt(q)) save(); return Object.keys(q).filter(inView) }
 
-export const all = () => q
-export const size = () => Object.values(q).reduce((n, l) => n + l.length, 0)
+export const all = () => Object.fromEntries(ours().map((k) => [paneOfKey(k), q[k]]))
+export const size = () => ours().reduce((n, k) => n + q[k].length, 0)
 
 // { now: true } puts it first and sends it as soon as the agent is back at its prompt: "send now",
 // after the agent was interrupted.
 export function add(paneId, text, { now = false } = {}) {
   const item = { id: crypto.randomBytes(4).toString('hex'), text, at: new Date().toISOString(), ...(now ? { now: true } : {}) }
-  q[paneId] = now ? [item, ...(q[paneId] || [])] : [...(q[paneId] || []), item]
+  ours()
+  const k = paneKey(paneId)
+  q[k] = now ? [item, ...(q[k] || [])] : [...(q[k] || []), item]
   save()
   return item
 }
 
 export function remove(paneId, id) {
-  q[paneId] = (q[paneId] || []).filter((x) => x.id !== id)
-  if (!q[paneId].length) delete q[paneId]
+  ours()
+  const k = paneKey(paneId)
+  q[k] = (q[k] || []).filter((x) => x.id !== id)
+  if (!q[k].length) delete q[k]
   save()
 }
 
@@ -46,19 +53,21 @@ const readySince = new Map()
 export async function deliver(agents, prompt, readScreen) {
   let changed = false
   const live = new Set(agents.map((a) => a.paneId))
-  for (const paneId of Object.keys(q)) {
-    if (!live.has(paneId)) { delete q[paneId]; readySince.delete(paneId); changed = true; continue } // pane closed
+  for (const k of ours()) {
+    const paneId = paneOfKey(k)
+    if (!live.has(paneId)) { delete q[k]; readySince.delete(k); changed = true; continue } // pane closed
     const a = agents.find((x) => x.paneId === paneId)
-    if (!['idle', 'done'].includes(a.status)) { readySince.delete(paneId); continue }
-    if (!readySince.has(paneId)) readySince.set(paneId, Date.now())
-    if (Date.now() - readySince.get(paneId) < (q[paneId][0]?.now ? 400 : 3000)) continue
+    // A question Codex asked shows it as needing you (asks.js); a message can still go in.
+    if (!['idle', 'done'].includes(a.asking?.status || a.status)) { readySince.delete(k); continue }
+    if (!readySince.has(k)) readySince.set(k, Date.now())
+    if (Date.now() - readySince.get(k) < (q[k][0]?.now ? 400 : 3000)) continue
     try { if (looksBusy(await readScreen(paneId))) continue } catch { continue }
-    const [next, ...rest] = q[paneId]
+    const [next, ...rest] = q[k]
     try {
       await prompt(paneId, next.text, a)
-      if (rest.length) q[paneId] = rest
-      else delete q[paneId]
-      readySince.delete(paneId)
+      if (rest.length) q[k] = rest
+      else delete q[k]
+      readySince.delete(k)
       a.status = 'working'
       changed = true
     } catch { /* try again next pass */ }

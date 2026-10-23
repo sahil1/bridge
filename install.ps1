@@ -24,7 +24,9 @@ try {
     Invoke-WebRequest -Uri $url -OutFile $exe -UseBasicParsing
   }
 
-  # Updating: close the app and its server (both run as "Bridge AI"), so the new version starts fresh.
+  # Updating: close the app, its server and its terminal host (all run as "Bridge AI"), so the new
+  # version starts fresh. Windows can't replace a program that's running, so agents stop here and
+  # resume their sessions when the new version starts.
   Get-Process -Name 'Bridge AI' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
   Start-Sleep -Milliseconds 500
 

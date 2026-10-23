@@ -134,6 +134,14 @@ function parseClaude(lines, sessionId) { const entries = parseLines(lines); retu
 // A tool message that edits files carries its call id and { path, add, del } per file (edits.js).
 const changesOf = (edits) => edits.map(({ path, add, del }) => ({ path, add, del }))
 
+// The first message of an agent started by a hand-off (handoff.js): in Chat, a line saying where
+// it came from, with the handover itself folded under it, rather than a wall of text from you.
+export const HANDOVER = /^\[Bridge AI handover from ([^\]\n]{1,60})\]\s*/
+const handover = (text, ts) => {
+  const m = HANDOVER.exec(text)
+  return m && { role: 'event', status: 'completed', text: `Handed over from ${m[1]}`, summary: text.slice(m[0].length).slice(0, 40000), handover: m[1], ts }
+}
+
 // A model switch (/model, typed anywhere): Claude Code logs the command, then what it said, as
 // local command entries (type "system" in newer versions, "user" in older ones).
 // eslint-disable-next-line no-control-regex
@@ -191,7 +199,7 @@ function claudeMessages(entries) {
         add({ role: 'event', status: tag('status') || '', text: tag('summary') || 'A background task finished', ts })
         continue
       }
-      add({ role: e.type, text: content, ts })
+      add((e.type === 'user' && handover(content, ts)) || { role: e.type, text: content, ts })
       continue
     }
     if (!Array.isArray(content)) continue
@@ -205,7 +213,7 @@ function claudeMessages(entries) {
     for (const b of content) {
       if (b.type === 'text' && b.text?.trim()) {
         if (e.type === 'user' && /^<(system-reminder|command-)/.test(b.text.trim())) continue
-        add({ role: e.type, text: b.text, ts })
+        add((e.type === 'user' && handover(b.text, ts)) || { role: e.type, text: b.text, ts })
       } else if (b.type === 'tool_use') {
         const edit = CLAUDE_EDITS.has(b.name) && claudeEdit(b.name, b.input)
         add({ role: 'tool', ...toolLabel(b), ...(edit && { call: b.id, changes: changesOf([edit]) }), ts })
@@ -221,15 +229,33 @@ function claudeMessages(entries) {
 }
 
 function parseCodex(lines) { return codexMessages(parseLines(lines)) }
+// Codex's async messages (a question asked while it works, or a note to you) are logged only as
+// events, not as messages. Shown as what it said; the question's tool call adds nothing to that.
+const ASYNC_TOOLS = new Set(['request_user_input_async', 'send_message_to_user_async'])
+const asyncText = (it) => (it.questions?.length
+  ? it.questions.map((q) => [`**${String(q.title || '').trim()}**`, ...(q.options || []).map((o) => `- ${o}`)].join('\n')).join('\n\n')
+  : (it.content || []).map((c) => c.text || '').join('').trim())
+// Your answer from Codex's own question editor, as the question and what you said.
+function replyText(text) {
+  const m = REPLY.exec(text)
+  if (!m) return null
+  try { return JSON.parse(m[1].trim()).map((r) => `> ${String(r.question || '').trim()}\n\n${String(r.answer || '').trim()}`).join('\n\n') } catch { return null }
+}
 function codexMessages(entries) {
   const out = []
   const calls = new Map() // apply_patch call id -> its message
   for (const e of entries) {
     const p = e.payload || {}
     if (e.type === 'response_item' && p.type === 'message' && (p.role === 'user' || p.role === 'assistant')) {
-      const text = (p.content || []).map((c) => c.text || '').join('').trim()
+      let text = (p.content || []).map((c) => c.text || '').join('').trim()
+      if (p.role === 'user') text = replyText(text) || text
       if (!text || text.startsWith('<environment_context>') || text.startsWith('<user_instructions>')) continue
-      out.push({ role: p.role, text, ts: e.timestamp })
+      out.push((p.role === 'user' && handover(text, e.timestamp)) || { role: p.role, text, ts: e.timestamp })
+    } else if (e.type === 'event_msg' && p.type === 'item_completed' && p.item?.type === 'AgentMessage' && p.item.delivery === 'async') {
+      const text = asyncText(p.item)
+      if (text) out.push({ role: 'assistant', text, ts: e.timestamp, ...(p.item.questions?.length && { asked: true }) })
+    } else if (e.type === 'response_item' && (p.type === 'function_call' || p.type === 'custom_tool_call') && ASYNC_TOOLS.has(p.name)) {
+      continue
     } else if (e.type === 'response_item' && (p.type === 'function_call' || p.type === 'custom_tool_call')) {
       const patch = codexPatch(p)
       let hint = patch ? patch.map((f) => f.path).join(', ') : typeof p.input === 'string' ? p.input.split('\n')[0] : ''
@@ -447,6 +473,70 @@ export function modelOf({ kind, sessionId, cwd }) {
   return { reply, set, switched }
 }
 
+// Codex's questions asked while it works (its request_user_input_async tool, Codex 0.160+): it
+// logs each as an async agent message with { title, options } and carries on. Its terminal folds
+// them into "1 question, ⇧← to answer" and drops them when the turn ends, answered or not, so
+// they're read from the log. One is open until you answer it (a reply naming it, from Codex's own
+// editor) or send any other message, which is when Codex drops them too. working: its turn is
+// still running. The log is read on from where the last look stopped.
+export const REPLY = /<send_user_message_question_reply>([\s\S]*?)<\/send_user_message_question_reply>/
+const askState = new Map() // file -> { size, state }
+const ASK_LINE = /"delivery":"async"|"task_started"|"task_complete"|"turn_aborted"|"role":"user"/
+export function asksOf({ kind, sessionId, cwd }) {
+  if (kind !== 'codex' || !sessionId) return null
+  const file = locate(kind, sessionId, cwd)
+  if (!file) return null
+  let size
+  try { size = fs.statSync(file).size } catch { return null }
+  let c = askState.get(file)
+  if (!c || size < c.size) c = { size: 0, state: { open: [], working: false } }
+  if (size > c.size) {
+    // From the tail the first time, then only what was added (whole lines; a partial one waits).
+    const from = c.size || Math.max(0, size - TAIL_BYTES)
+    const fd = fs.openSync(file, 'r')
+    const buf = Buffer.alloc(size - from)
+    try { fs.readSync(fd, buf, 0, buf.length, from) } finally { fs.closeSync(fd) }
+    const end = buf.lastIndexOf(10)
+    if (end >= 0) {
+      let lines = buf.subarray(0, end).toString('utf8').split('\n')
+      if (!c.size && from > 0) lines = lines.slice(1)
+      for (const line of lines) if (ASK_LINE.test(line)) { try { askStep(c.state, JSON.parse(line)) } catch { /* not JSON */ } }
+      c = { size: from + end + 1, state: c.state }
+    }
+    askState.set(file, c)
+  }
+  const s = c.state
+  return { open: s.open.map((q) => ({ ...q, options: [...q.options] })), working: s.working }
+}
+function askStep(s, e) {
+  const p = e.payload || {}
+  if (e.type === 'event_msg') {
+    if (p.type === 'task_started') s.working = true
+    else if (p.type === 'task_complete' || p.type === 'turn_aborted') s.working = false
+    const it = p.item
+    if (p.type === 'item_completed' && it?.type === 'AgentMessage' && it.delivery === 'async' && Array.isArray(it.questions)) {
+      it.questions.forEach((q, index) => {
+        const title = String(q?.title || '').trim()
+        if (title && !s.open.some((o) => o.id === it.id && o.index === index)) s.open.push({ id: String(it.id || ''), index, title: title.slice(0, 4000), options: (Array.isArray(q.options) ? q.options : []).map(String).filter((o) => o.trim()).slice(0, 32), at: e.timestamp || null })
+      })
+    }
+  } else if (e.type === 'response_item' && p.type === 'message' && p.role === 'user') {
+    const text = (p.content || []).map((x) => x.text || '').join('').trim()
+    const reply = REPLY.exec(text)
+    if (reply) {
+      // [{ answer, question, questionItemId }]: the id is ["request_user_input_async", message id, index]
+      // (or, from older clients, the message id alone).
+      let replies = []
+      try { replies = JSON.parse(reply[1].trim()) } catch { /* unreadable: leave them open */ }
+      for (const r of Array.isArray(replies) ? replies : []) {
+        let qid = r?.questionItemId
+        try { qid = JSON.parse(qid) } catch { /* a plain message id */ }
+        s.open = s.open.filter((o) => !(Array.isArray(qid) ? o.id === qid[1] && o.index === qid[2] : o.id === qid))
+      }
+    } else if (text && !text.startsWith('<')) s.open = [] // anything you say (not Codex's own context)
+  }
+}
+
 // Last thing the agent said, for board tiles. Reads a small tail only.
 export function preview({ kind, sessionId, cwd }) {
   if (!sessionId || (kind !== 'claude' && kind !== 'codex')) return null
@@ -463,6 +553,54 @@ export function preview({ kind, sessionId, cwd }) {
     tool: lastTool ? `${lastTool.tool}${lastTool.hint ? `: ${lastTool.hint}` : ''}` : null,
     ts: msgs.at(-1)?.ts || null,
   }
+}
+
+// The start of a conversation, for a handover (handoff.js): its first messages from the top of the
+// file (the 3 MB tail Chat reads can miss them in a long one). Reads the first 1 MB only.
+export function opening({ kind, sessionId, cwd }) {
+  const file = sessionId && (kind === 'claude' || kind === 'codex') && locate(kind, sessionId, cwd)
+  if (!file) return []
+  const fd = fs.openSync(file, 'r')
+  let text
+  try {
+    const buf = Buffer.alloc(Math.min(fs.fstatSync(fd).size, 1024 * 1024))
+    fs.readSync(fd, buf, 0, buf.length, 0)
+    text = buf.toString('utf8')
+  } finally { fs.closeSync(fd) }
+  const lines = text.split('\n')
+  if (lines.length > 1) lines.pop() // likely cut short
+  const entries = parseLines(lines.filter(Boolean))
+  return kind === 'claude' ? claudeMessages(entries.filter((e) => !e.isSidechain)) : codexMessages(entries)
+}
+
+// The agent's own to-do list as it last left it: Claude Code's TodoWrite (or its newer TaskCreate
+// and TaskUpdate), Codex's update_plan. [{ text, status: pending|in_progress|completed }] or null.
+export function planOf({ kind, sessionId, cwd }) {
+  const file = sessionId && (kind === 'claude' || kind === 'codex') && locate(kind, sessionId, cwd)
+  if (!file) return null
+  const lines = readTail(file).lines.filter((l) => /TodoWrite|TaskCreate|TaskUpdate|update_plan/.test(l))
+  let plan = null
+  const tasks = new Map() // TaskCreate numbers its tasks in order, from 1
+  for (const e of parseLines(lines)) {
+    if (kind === 'codex') {
+      const p = e.payload || {}
+      if (p.type !== 'function_call' || p.name !== 'update_plan') continue
+      try { const a = JSON.parse(p.arguments || '{}'); if (Array.isArray(a.plan)) plan = a.plan.map((x) => ({ text: String(x.step || ''), status: String(x.status || 'pending') })) } catch { /* not JSON */ }
+      continue
+    }
+    if (e.type !== 'assistant' || e.isSidechain || !Array.isArray(e.message?.content)) continue
+    for (const b of e.message.content) {
+      if (b.type !== 'tool_use') continue
+      if (b.name === 'TodoWrite' && Array.isArray(b.input?.todos)) { plan = b.input.todos.map((x) => ({ text: String(x.content || ''), status: String(x.status || 'pending') })); tasks.clear() }
+      else if (b.name === 'TaskCreate') tasks.set(String(tasks.size + 1), { text: String(b.input?.subject || b.input?.description || ''), status: 'pending' })
+      else if (b.name === 'TaskUpdate' && tasks.has(String(b.input?.taskId))) {
+        const t = tasks.get(String(b.input.taskId))
+        if (b.input.status === 'deleted') tasks.delete(String(b.input.taskId)); else if (b.input.status) t.status = String(b.input.status)
+      }
+    }
+    if (tasks.size) plan = [...tasks.values()]
+  }
+  return plan?.filter((x) => x.text) || null
 }
 
 // The session an agent started after `since` in `cwd`, for agents that name their own session

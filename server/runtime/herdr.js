@@ -7,9 +7,11 @@ import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import * as cli from './herdr-cli.js'
 import * as sock from './herdr-socket.js'
+import { answers } from './herdr-sessions.js'
 import { adapter, newSessionId } from '../agents.js'
 import { quoteCommand, runSetup } from './spawn.js'
 import { envFor, notePane, movePane, keepPanes, accountOf, labelOf } from '../accounts.js'
+import { paneKey } from '../scope.js'
 
 export const name = 'herdr'
 export const caps = { liveView: true, reorder: true, splits: true }
@@ -21,13 +23,23 @@ export function available() {
 }
 
 // Agents that continue in another session than herdr reports (Codex after an edit).
-const followed = new Map() // paneId -> sessionId
-export async function setSession(paneId, sessionId) { followed.set(paneId, sessionId) }
+const followed = new Map() // pane key (scope.js: per herdr session) -> sessionId
+export async function setSession(paneId, sessionId) { followed.set(paneKey(paneId), sessionId) }
 
+// session: the herdr session in view (the sidebar's session menu). When it isn't running, an
+// empty fleet that says so (down), so the last session's agents don't linger on screen.
 export async function fleet() {
-  const [f, snap] = await Promise.all([cli.fleet(), cli.snapshot()])
+  const session = cli.sessionName()
+  let f, snap
+  try {
+    [f, snap] = await Promise.all([cli.fleet(), cli.snapshot()])
+  } catch (err) {
+    if (await answers(cli.herdrSocket())) throw err
+    return { agents: [], tabs: [], workspaces: [], panes: [], session, down: true }
+  }
+  f.session = session
   for (const a of f.agents || []) {
-    if (followed.has(a.paneId)) a.sessionId = followed.get(a.paneId)
+    if (followed.has(paneKey(a.paneId))) a.sessionId = followed.get(paneKey(a.paneId))
     // herdr doesn't know which account an agent uses: the one it was started on from here.
     a.accountId = accountOf(a.kind, a.paneId, a.sessionId)
     a.account = labelOf(a.accountId)

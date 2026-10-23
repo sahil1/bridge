@@ -49,12 +49,17 @@ export async function terminals() {
 
 const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`
 
+async function pickApp(app, yourself) {
+  const found = await terminals()
+  const pick = (app && app !== 'auto' && found.find((t) => t.id === app)) || found[0]
+  if (!pick) throw new Error(`No terminal app found. Set "terminal": { "app": "..." } in your config, or run \`${yourself}\` yourself.`)
+  return pick
+}
+
 // Open `bridge-ai attach <pane>` in a new terminal window. `env` carries a non-default data folder
 // or port so the client finds this server.
 export async function openAttach(paneId, { app, env = {}, label = 'agent' } = {}) {
-  const found = await terminals()
-  const pick = (app && app !== 'auto' && found.find((t) => t.id === app)) || found[0]
-  if (!pick) throw new Error('No terminal app found. Set "terminal": { "app": "..." } in your config, or run `bridge-ai attach` yourself.')
+  const pick = await pickApp(app, 'bridge-ai attach')
   const cli = path.join(ROOT, 'scripts', 'cli.js')
   if (IS_WIN) {
     const sets = Object.entries({ ...env, ...NODE.env }).map(([k, v]) => `$env:${k}='${String(v).replace(/'/g, "''")}'; `).join('')
@@ -69,6 +74,24 @@ export async function openAttach(paneId, { app, env = {}, label = 'agent' } = {}
   fs.writeFileSync(file, `#!/bin/sh\n# Opened by Bridge AI: attach to ${label.replace(/\n/g, ' ')}\n${exports}\nexec "\${SHELL:-/bin/sh}" -lc ${shq(`${shq(NODE.bin)} ${shq(cli)} attach ${shq(paneId)}`)}\n`, { mode: 0o755 })
   const list = IS_MAC ? MAC : LINUX
   const [cmd, args] = list.find((t) => t.id === pick.id).run(file)
+  spawn(cmd, args, { detached: true, stdio: 'ignore' }).unref()
+  return { app: pick.name }
+}
+
+// Run a command (argv) in a new terminal window, in your login shell: "Open in terminal" for a
+// herdr session. `unset`: variables to clear first (herdr won't start inside herdr).
+export async function openCommand(argv, { app, label = 'command', unset = [] } = {}) {
+  const line = argv.map(shq).join(' ')
+  const pick = await pickApp(app, argv.join(' '))
+  if (IS_WIN) {
+    const [cmd, args] = WIN.find((t) => t.id === pick.id).run(`& ${argv.map((a) => `'${String(a).replace(/'/g, "''")}'`).join(' ')}`)
+    spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: false }).unref()
+    return { app: pick.name }
+  }
+  const dir = ensureDir(cacheFile('terminal'))
+  const file = path.join(dir, `${label.replace(/[^\w.-]+/g, '_').slice(0, 60)}.command`)
+  fs.writeFileSync(file, `#!/bin/sh\n# Opened by Bridge AI: ${label.replace(/\n/g, ' ')}\n${unset.length ? `unset ${unset.join(' ')}\n` : ''}exec "\${SHELL:-/bin/sh}" -lc ${shq(line)}\n`, { mode: 0o755 })
+  const [cmd, args] = (IS_MAC ? MAC : LINUX).find((t) => t.id === pick.id).run(file)
   spawn(cmd, args, { detached: true, stdio: 'ignore' }).unref()
   return { app: pick.name }
 }

@@ -5,6 +5,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { loginPath, which } from '../agents.js'
+import { useSessions } from '../scope.js'
 
 // The herdr program. The Mac app started at login or from the Dock has a bare PATH without
 // ~/.local/bin, where herdr installs itself, so look on your login shell's PATH.
@@ -13,7 +14,7 @@ export async function herdrBin() {
   return (await which('herdr', await loginPath())) || 'herdr'
 }
 
-// Which herdr to talk to. A session picked in Settings (`herdr.session`) always wins. Otherwise:
+// Which herdr to talk to. A session picked in the sidebar or Settings (`herdr.session`) always wins. Otherwise:
 // inside herdr the CLI gets HERDR_SOCKET_PATH from the environment; started any other way (the
 // Mac app at login, a plain terminal) it would fall back to an old default path and see nothing.
 // So find the running session's socket: the inherited one if it still exists, else "main", else
@@ -23,8 +24,15 @@ const SESSIONS = path.join(os.homedir(), '.config', 'herdr', 'sessions')
 const DEFAULT_SOCK = path.join(os.homedir(), '.config', 'herdr', 'herdr.sock') // the unnamed "default" session
 const inherited = process.env.HERDR_SOCKET_PATH
 let wanted = null
-export function useSession(name) { wanted = /^[\w.-]{1,64}$/.test(String(name || '')) ? String(name) : null }
-const socketOf = (name) => (name === 'default' ? DEFAULT_SOCK : path.join(SESSIONS, name, 'herdr.sock'))
+// herdr's own rule for session names; "default" is the unnamed session.
+export const validName = (name) => /^[A-Za-z0-9._-]{1,64}$/.test(String(name ?? '')) && name !== '.' && name !== '..'
+// Applies at once: every call looks the socket up again. What Bridge AI keeps per pane is filed
+// under the session in view (scope.js), since each session numbers its panes from the start.
+export function useSession(name) {
+  wanted = validName(name) ? String(name) : null
+  useSessions(() => sessionName())
+}
+export const socketOf = (name) => (name === 'default' ? DEFAULT_SOCK : path.join(SESSIONS, name, 'herdr.sock'))
 export function herdrSocket() {
   if (wanted) return socketOf(wanted) // even when it isn't running, so you see that instead of another session
   if (inherited && fs.existsSync(inherited)) return inherited
@@ -42,12 +50,7 @@ export function sessionName(sock = herdrSocket()) {
   return sock === DEFAULT_SOCK ? 'default' : path.basename(path.dirname(sock))
 }
 
-// Every herdr session on this computer, for the picker in Settings.
-export async function sessions() {
-  const res = await run(['session', 'list', '--json'])
-  const current = sessionName()
-  return { picked: wanted, current, sessions: (res?.sessions || []).map((s) => ({ name: s.name, running: !!s.running, current: s.name === current })) }
-}
+export const picked = () => wanted
 const herdrEnv = () => { const sock = herdrSocket(); return sock ? { ...process.env, HERDR_SOCKET_PATH: sock } : process.env }
 
 export async function run(args, { timeout = 15000, json = true } = {}) {

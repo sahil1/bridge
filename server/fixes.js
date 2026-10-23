@@ -116,6 +116,10 @@ export function reveal() {
 // the new "yes" right away (and asks on Bridge AI's behalf: macOS counts the app that started it).
 // If that ever stops holding on some macOS version, nothing breaks: the card keeps saying "not
 // allowed yet", and "I've turned it on" (claim below) still leads to the restart.
+// The restart is the server's. Built-in agents keep running in the terminal host (runtime/
+// ptyhost.js) unless Keep agents running is off. By the same rule, each agent is a program of its
+// own: one started after you allow access gets it, and one that already asked and was refused
+// keeps that answer until it's restarted (closed and resumed).
 const FOLDERS = ['Desktop', 'Documents', 'Downloads']
 function target(pane, folder) {
   if (pane === 'full-disk') return path.join(HOME, 'Library', 'Mail')

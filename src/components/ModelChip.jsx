@@ -1,11 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import Icon from './Icon.jsx'
+import { AgentIcon } from './settings/ProviderIcon.jsx'
 import { api, usePoll } from '../api.js'
+import { HandoffSection, HandoffPanel, useHandoff, useHandedNote } from './Handoff.jsx'
 
-// The model chip in the message box: which model the agent is on, and a menu to switch it.
-// Claude Code switches in place (its own /model, sent like a message); agents that can't, like
-// Codex, restart on the new model with the same conversation. The server does the work
-// (server/models.js); this shows it and says how it went.
+// The model chip in the message box: which agent and model this is, and a menu to switch the model
+// or hand the work to another agent (Handoff.jsx). Claude Code switches model in place (its own
+// /model, sent like a message); agents that can't, like Codex, restart on the new model with the
+// same conversation. The server does the work (server/models.js, server/handoff.js); this shows
+// it and says how it went.
 
 // Short names: "Opus 5.5", "Sonnet", "Sonnet 1M"; anything else as the CLI names it.
 const ALIAS = { opus: 'Opus', sonnet: 'Sonnet', haiku: 'Haiku', fable: 'Fable', best: 'Best', opusplan: 'Opus Plan', default: 'Default' }
@@ -32,13 +35,17 @@ export default function ModelChip({ agent, onNote, onSent }) {
   // Quick while a switch is under way (just over usePoll's 1.5 s sharing, so each one asks).
   const { data, refresh } = usePoll(`/agents/${pid}/model`, fast ? 1600 : 10000)
   const [open, setOpen] = useState(false)
+  const [panel, setPanel] = useState(null) // the agent picked to hand off to: its confirm panel shows
   const [sending, setSending] = useState(null) // the model being sent, until the server answers
   const wrap = useRef(null)
+  const ho = useHandoff(agent, open)
+  useHandedNote(agent, onNote)
+  const close = () => { setOpen(false); setPanel(null) }
   const started = useRef(null) // a switch made from here: { model, t, said }, until it's reported
   const sw = data?.switching
   const live = !!sw && ['queued', 'sent', 'confirm'].includes(sw.state)
   useEffect(() => { setFast(live || !!sending) }, [live, sending])
-  useEffect(() => { started.current = null; setOpen(false) }, [agent.paneId])
+  useEffect(() => { started.current = null; close() }, [agent.paneId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Say in the chat area how the switch went, once per change.
   useEffect(() => {
@@ -61,21 +68,18 @@ export default function ModelChip({ agent, onNote, onSent }) {
     onNote?.(`Restarted on ${sw.model === 'default' ? 'its default model' : modelLabel(sw.model)}, with the same conversation.`)
   }, [data?.mode, sw?.state, sw?.at, agent.paneId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!data?.mode) return null
+  if (!data || agent.kind === 'shell') return null
   const switching = sending || (live ? sw.model : null)
-  const label = switching ? modelLabel(switching) : modelLabel(data.current)
+  // No model to show (an agent with no model setting, or one that picks its own and hasn't said): the agent.
+  const plainKind = !data.mode || (data.mode === 'fixed' && !data.current)
+  const label = switching ? modelLabel(switching) : plainKind ? data.label : modelLabel(data.current)
   const where = data.source === 'agent' ? `${data.label} reports it` : data.source === 'started' ? 'it started on it' : data.source === 'settings' ? 'your default in Settings' : data.source === 'picked' ? 'you picked it' : data.source === 'switch' ? 'switched from here' : null
   const title = switching ? `Switching to ${modelLabel(switching)}${sw?.state === 'queued' ? ' (queued until the agent is free)' : sw?.state === 'confirm' ? ' (the agent asks you to confirm)' : ''}`
-    : `Model: ${data.current || `${data.label}'s default`}${where ? ` (${where})` : ''}`
-
-  // Set when it starts (Cursor, OpenCode...): shown, not changed here.
-  if (data.mode === 'fixed') {
-    if (!data.current) return null
-    return <span className="model-chip ro" title={`${title}. ${data.label} picks its model when it starts.`}><Icon name="sparkle" size={12} /><span className="mc-name">{label}</span></span>
-  }
+    : plainKind ? `${data.label}. Hand off to another agent`
+    : `${data.label}, model: ${data.current || `${data.label}'s default`}${where ? ` (${where})` : ''}${data.mode === 'fixed' ? `. ${data.label} picks its model when it starts` : ''}`
 
   const pick = async (model) => {
-    setOpen(false)
+    close()
     if (data.mode === 'restart' && !window.confirm(`Restart ${data.label} on ${model === 'default' ? 'its default model' : modelLabel(model)}?\n\nThe agent stops and starts again on it, with the same conversation. Anything typed in its terminal and not sent is lost.`)) return
     setSending(model)
     if (data.mode === 'restart') onNote?.(`Restarting on ${model === 'default' ? 'its default model' : modelLabel(model)}…`)
@@ -94,22 +98,26 @@ export default function ModelChip({ agent, onNote, onSent }) {
 
   return (
     <span className="model-wrap" ref={wrap}>
-      <button type="button" className={`model-chip ${open ? 'on' : ''} ${switching ? 'busy' : ''}`} aria-haspopup="menu" aria-expanded={open} aria-label={`Model: ${label}. Change model`} title={title}
-        onClick={() => setOpen((o) => !o)} onKeyDown={(e) => {
+      <button type="button" className={`model-chip ${open ? 'on' : ''} ${switching ? 'busy' : ''}`} aria-haspopup="menu" aria-expanded={open}
+        aria-label={plainKind ? `${data.label}. Hand off to another agent` : `${data.label}, model: ${label}. Change model or hand off`} title={title}
+        onClick={() => (open ? close() : setOpen(true))} onKeyDown={(e) => {
           if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !open) { e.preventDefault(); setOpen(true) }
-          if (e.key === 'Escape' && open) { e.preventDefault(); e.stopPropagation(); setOpen(false) }
+          if (e.key === 'Escape' && open) { e.preventDefault(); e.stopPropagation(); close() }
         }}>
-        <Icon name={switching ? 'refresh' : 'sparkle'} size={12} className={switching ? 'spin' : ''} />
+        {switching ? <Icon name="refresh" size={12} className="spin" /> : <AgentIcon kind={agent.kind} size={14} name={data.label} className="mc-mark" />}
         <span className="mc-name">{label}</span>
         <Icon name="down" size={11} className="mc-caret" />
       </button>
-      {open && <ModelMenu data={data} agent={agent} anchor={wrap} onPick={pick} onClose={() => setOpen(false)} />}
+      {open && (panel
+        ? <HandoffPanel agent={agent} view={ho.view} target={panel} anchor={wrap} onBack={() => setPanel(null)} onClose={close} onNote={onNote} />
+        : <ModelMenu data={data} agent={agent} anchor={wrap} onPick={pick} onClose={close}
+          handoff={<HandoffSection view={ho.view} error={ho.error} onPick={(t) => setPanel(t)} separate={!!data.mode} />} />)}
     </span>
   )
 }
 
 // The menu, in the style of the account switcher: Default first, the agent's models, Other….
-function ModelMenu({ data, agent, anchor, onPick, onClose }) {
+function ModelMenu({ data, agent, anchor, onPick, onClose, handoff = null }) {
   const ref = useRef(null)
   const [other, setOther] = useState(null) // the typed name while "Other…" is open
   const restart = data.mode === 'restart'
@@ -168,8 +176,14 @@ function ModelMenu({ data, agent, anchor, onPick, onClose }) {
   const current = !restart && data.current && !models.includes(data.current) && data.current !== data.checked ? data.current : null
   const typed = (other || '').trim()
   const okName = VALID.test(typed)
+  const switches = data.mode === 'switch' || data.mode === 'restart'
   return (
-    <div className="acct-pop model-pop" ref={ref} role="menu" tabIndex={-1} aria-label={`${data.label} model`} onKeyDown={onKeyDown}>
+    <div className="acct-pop model-pop" ref={ref} role="menu" tabIndex={-1} aria-label={switches ? `${data.label} model` : data.label} onKeyDown={onKeyDown}>
+      {data.mode === 'fixed' && <>
+        <div className="acct-sec" aria-hidden="true">{data.label} model</div>
+        <p className="model-note muted">{data.current ? `On ${modelLabel(data.current)}. ` : ''}{data.label} picks its model when it starts.</p>
+      </>}
+      {switches && <>
       <div className="acct-sec" aria-hidden="true">{data.label} model</div>
       {blocked && <p className="model-note">{blocked}</p>}
       {data.canDefault && row('default', 'Default (recommended)', restart ? `${data.label} picks, as when you start it yourself` : `${data.label}'s default for your account`, 'default', true)}
@@ -192,6 +206,8 @@ function ModelMenu({ data, agent, anchor, onPick, onClose }) {
         ? `${data.label} can't switch while it runs, so it restarts on the model and picks up the same conversation.`
         : data.kind === 'claude' ? 'Sent as /model, like typing it in the terminal. Claude Code also keeps it as your default for new sessions.'
         : `Sent as ${data.kind === 'aider' ? '/model' : 'its switch command'}, like typing it in the terminal.`}</p>
+      </>}
+      {handoff}
     </div>
   )
 }

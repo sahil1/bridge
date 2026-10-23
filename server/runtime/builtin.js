@@ -1,7 +1,11 @@
 // Runtime: built in. Bridge AI runs the terminals itself (node-pty, with a headless xterm keeping
-// each screen), so nothing else needs installing, on macOS, Linux or Windows. Spaces and tabs
-// are saved to the data folder; after a restart, agents that can resume a session (Claude
-// Code, Codex) reopen where they were, and the rest start fresh in the same folder.
+// each screen), so nothing else needs installing, on macOS, Linux or Windows. The terminals live
+// in a small terminal host process (ptyhost.js), so agents keep running while the server quits,
+// restarts or updates, and the next server picks them up as they are (Settings › General › Keep
+// agents running; off, they end with the server). Here each one has a copy of its screen, fed
+// from the host. Spaces and tabs are saved to the data folder; when the host is gone too (after
+// a reboot), agents that can resume a session (Claude Code, Codex) reopen where they were, and
+// the rest start fresh in the same folder. If the host can't start, terminals run in this process.
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
@@ -14,6 +18,8 @@ import { shellCommand, agentEnv, SETUP_DONE } from './spawn.js'
 import { providerEnv } from '../providers.js'
 import * as accounts from '../accounts.js'
 import { firstRun, knows } from '../firstrun.js'
+import { lineAnsi, SCROLLBACK } from './screen.js'
+import * as host from './hostlink.js'
 
 const { Terminal } = headless
 
@@ -37,6 +43,12 @@ const panes = new Map() // paneId -> live pane
 let nextId = 1
 let stopping = false
 const id = () => nextId++
+// The terminal host, while this server has it. BRIDGE_PTY_HOST=0 runs terminals in this process.
+let link = null
+let keepOn = true // Settings › Keep agents running
+let hostOff = process.env.BRIDGE_PTY_HOST === '0'
+let retryAt = 0
+const losses = []
 
 // eslint-disable-next-line no-control-regex
 const plain = (s) => String(s || '').replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\x1b\][^\x07]*(\x07|\x1b\\)/g, '').replace(/\r/g, '')
@@ -81,20 +93,15 @@ async function spawnPane({ paneId, tabId, workspaceId, kind, cwd, sessionId, res
   // Checked without blocking: macOS can hold a look into Desktop or Documents until you answer its
   // permission prompt, and the rest of Bridge AI shouldn't wait for that.
   const there = await fs.promises.access(cwd).then(() => true, () => false)
-  const proc = pty.spawn(file, argv, { name: 'xterm-256color', cols: COLS, rows: ROWS, cwd: there ? cwd : process.env.HOME, env: agentEnv(PATH, { ...providerEnv(), ...accounts.envFor(kind, account) }) })
-  const term = new Terminal({ cols: COLS, rows: ROWS, scrollback: 5000, allowProposedApi: true })
+  // What a later server needs to show it, should it find the terminal before the saved layout does.
+  const meta = { tabId, workspaceId, kind, cwd, model: model || null, sessionId: sessionId || null, account: account || null, tab: tabs.find((t) => t.tabId === tabId)?.label, space: spaces.find((w) => w.id === workspaceId)?.label }
+  const { proc, remote } = await openTerm(paneId, file, argv, { cols: COLS, rows: ROWS, cwd: there ? cwd : process.env.HOME, env: agentEnv(PATH, { ...providerEnv(), ...accounts.envFor(kind, account) }) }, meta)
   const p = {
-    paneId, tabId, workspaceId, kind, cwd, model: model || null, sessionId: sessionId || null, account: account || null, proc, term,
+    paneId, tabId, workspaceId, kind, cwd, model: model || null, sessionId: sessionId || null, account: account || null, proc, remote, term: null,
     title: '', status: kind === 'shell' ? null : 'idle', seq: 0, seen: true, setupPending: !!setup && !IS_WIN,
     startedAt: Date.now(), lastOutput: 0, lastInput: 0, clients: new Set(),
   }
-  term.onTitleChange((t) => { p.title = t })
-  proc.onData((d) => { if (p.setupPending && d.includes(SETUP_DONE)) p.setupPending = false; term.write(d); p.lastOutput = Date.now(); for (const c of p.clients) c.onData(d) })
-  proc.onExit(() => {
-    for (const c of p.clients) c.onExit?.()
-    if (stopping) return
-    panes.delete(paneId); tabs = tabs.filter((t) => t.tabId !== tabId || [...panes.values()].some((x) => x.tabId === tabId)); save() })
-  panes.set(paneId, p)
+  await wire(p)
 
   // An opening prompt the CLI can't take as an argument: type it in once the agent settles.
   if (opening && kind !== 'shell' && !a.promptArg) {
@@ -106,30 +113,144 @@ async function spawnPane({ paneId, tabId, workspaceId, kind, cwd, sessionId, res
       if (quiet || Date.now() - begun > 25000) { clearInterval(tick); prompt(paneId, opening).catch(() => {}) }
     }, 500)
   }
-  // Agents that name their own session (Codex): find it in their transcript folder (later too
-  // when a setup command runs first).
-  if (a.sessionId === 'discover' && !p.sessionId) {
-    for (const ms of [3000, 8000, 20000, 45000, ...(setup ? [90000, 180000, 300000, 600000] : [])]) {
-      setTimeout(() => {
-        if (p.sessionId || !panes.has(paneId)) return
-        const sid = discoverSession(kind, p.cwd, p.startedAt)
-        if (sid) { p.sessionId = sid; save() }
-      }, ms)
-    }
-  }
+  findSession(p, !!setup)
   save()
   return p
 }
 
-// Bring back the last saved layout.
-export async function restore() {
-  let s
-  try { s = JSON.parse(fs.readFileSync(STATE, 'utf8')) } catch { return }
+// Agents that name their own session (Codex): find it in their transcript folder (later too
+// when a setup command runs first).
+function findSession(p, setup) {
+  if (adapter(p.kind).sessionId !== 'discover' || p.sessionId) return
+  for (const ms of [3000, 8000, 20000, 45000, ...(setup ? [90000, 180000, 300000, 600000] : [])]) {
+    setTimeout(() => {
+      if (p.sessionId || panes.get(p.paneId) !== p) return
+      const sid = discoverSession(p.kind, p.cwd, p.startedAt)
+      if (sid) { p.sessionId = sid; save() }
+    }, ms)
+  }
+}
+
+// The terminal host for this server: the one already running, or a new one. Null means run
+// terminals here (it couldn't start, or BRIDGE_PTY_HOST=0).
+let opening = null
+function hostLink() {
+  if (link && !link.closed) return Promise.resolve(link)
+  if (hostOff || Date.now() < retryAt) return Promise.resolve(null)
+  // One at a time: agents started together share the one host.
+  opening ||= (async () => {
+    const l = await host.open({ keep: keepOn }).catch((e) => { console.log(`Terminal host: ${e.message}`); return null })
+    if (!l || l.busy) {
+      if (l?.busy) console.log(`Another Bridge AI server is using the agents in ${DATA}; agents started here end with this server.`)
+      retryAt = Date.now() + 60000
+      return null
+    }
+    link = l
+    link.onLost = () => { link = null; lost().catch((e) => console.log(`Terminal host: ${e.message}`)) }
+    return link
+  })().finally(() => { opening = null })
+  return opening
+}
+
+// A new terminal: in the host when there is one, else in this process.
+async function openTerm(paneId, file, argv, opts, meta) {
+  const l = await hostLink()
+  if (l) return { proc: await l.spawn(paneId, { file, args: argv, ...opts, meta }), remote: true }
+  return { proc: pty.spawn(file, argv, { name: 'xterm-256color', ...opts }), remote: false }
+}
+
+// The pane's own copy of its screen (from the host's, when picking one up), fed by its terminal,
+// and what happens when the terminal ends.
+async function wire(p, from) {
+  p.term = new Terminal({ cols: from?.cols || COLS, rows: from?.rows || ROWS, scrollback: SCROLLBACK, allowProposedApi: true })
+  p.term.onTitleChange((t) => { p.title = t })
+  if (from?.screen) await new Promise((r) => p.term.write(from.screen, r))
+  p.proc.onData((d) => { if (p.setupPending && d.includes(SETUP_DONE)) p.setupPending = false; p.term.write(d); p.lastOutput = Date.now(); for (const c of p.clients) c.onData(d) })
+  p.proc.onExit(() => {
+    for (const c of p.clients) c.onExit?.()
+    if (stopping || panes.get(p.paneId) !== p) return
+    panes.delete(p.paneId); tabs = tabs.filter((t) => t.tabId !== p.tabId || [...panes.values()].some((x) => x.tabId === p.tabId)); save()
+  })
+  panes.set(p.paneId, p)
+}
+
+// A terminal still running in the host (Bridge AI quit, restarted or updated meanwhile): picked
+// up as it is, the same program with its screen and scrollback. s: what's saved about it.
+async function adopt(t, s) {
+  const { term: proc, screen, cols, rows } = await link.attach(t.id)
+  proc.pid = t.pid
+  const kind = s.kind || 'shell'
+  const p = {
+    paneId: t.id, tabId: s.tabId, workspaceId: s.workspaceId, kind, cwd: s.cwd, model: s.model || null, sessionId: s.sessionId || null, account: s.account || null, proc, remote: true, term: null,
+    title: t.title || '', status: kind === 'shell' ? null : 'idle', seq: 0, seen: true, setupPending: false,
+    startedAt: t.startedAt || Date.now(), lastOutput: t.lastOutput || 0, lastInput: 0, clients: new Set(),
+  }
+  await wire(p, { screen, cols, rows })
+  // Sized for a terminal app that was attached when the server stopped: back to the usual size.
+  if (cols !== COLS || rows !== ROWS) { proc.resize(COLS, ROWS); p.term.resize(COLS, ROWS) }
+  findSession(p)
+  return p
+}
+
+// Bring back the last saved layout: terminals still running in the host just as they are, and
+// the rest started again (after a reboot, say, or with Keep agents running off).
+export async function restore({ keep = true } = {}) {
+  keepOn = keep
+  let s = {}
+  try { s = JSON.parse(fs.readFileSync(STATE, 'utf8')) } catch { /* nothing saved yet */ }
   spaces = s.spaces || []
   tabs = s.tabs || []
   nextId = s.nextId || 1
-  for (const p of s.panes || []) {
+  const saved = new Map((s.panes || []).map((p) => [p.paneId, p]))
+  const l = await hostLink()
+  for (const t of l ? await l.list().catch(() => []) : []) {
+    // Never hand out an id the host already uses.
+    for (const n of String(t.id).match(/\d+/g) || []) nextId = Math.max(nextId, Number(n) + 1)
+    const m = { ...(t.meta || {}), ...(saved.get(t.id) || {}) }
+    saved.delete(t.id)
+    if (t.exited) continue // it ended while Bridge AI was away, like any agent that exits
+    // Started just before the last server stopped, so not in the saved layout: put its tab back.
+    if (!m.workspaceId || !m.tabId) { m.workspaceId ||= `w${id()}`; m.tabId = `${m.workspaceId}:t${id()}` }
+    if (!spaces.some((w) => w.id === m.workspaceId)) spaces.push({ id: m.workspaceId, label: String(m.space || 'Space').slice(0, 80) })
+    if (!tabs.some((x) => x.tabId === m.tabId)) tabs.push({ tabId: m.tabId, workspaceId: m.workspaceId, label: String(m.tab || m.kind || 'shell').slice(0, 80) })
+    try { await adopt(t, m) } catch (e) {
+      // Never leave one running that nobody can see.
+      if (e.code !== 'gone') { console.log(`Couldn't pick up ${t.id} (${e.message}); stopping it`); l.send({ t: 'kill', id: t.id }) }
+    }
+  }
+  for (const p of saved.values()) {
     try { await spawnPane({ ...p, resume: true }) } catch { /* agent no longer installed */ }
+  }
+  tabs = tabs.filter((t) => [...panes.values()].some((p) => p.tabId === t.tabId))
+  prune()
+  save()
+}
+
+// The connection to the host dropped while running: the host crashed or was stopped (its
+// terminals with it), or it let go of a server that stopped reading. Pick up what's still
+// running, and start the rest again, resuming their sessions.
+async function lost() {
+  // A beat first: when everything is being stopped at once (an update on Windows stops every
+  // "Bridge AI" process), this server is next, and mustn't start a new host meanwhile.
+  await new Promise((r) => setTimeout(r, 1000))
+  if (stopping) return
+  const now = Date.now()
+  losses.push(now)
+  while (now - losses[0] > 120000) losses.shift()
+  if (losses.length >= 3) { hostOff = true; console.log('The terminal host keeps stopping; terminals run in the server until it restarts') }
+  const mine = [...panes.values()].filter((p) => p.remote)
+  console.log(`Lost the terminal host; picking up ${mine.length} terminal(s) again`)
+  const l = await hostLink()
+  const live = new Map((l ? await l.list().catch(() => []) : []).map((t) => [t.id, t]))
+  for (const p of mine) {
+    if (panes.get(p.paneId) !== p) continue
+    for (const c of p.clients) c.onExit?.()
+    const t = live.get(p.paneId)
+    try {
+      if (t && !t.exited) await adopt(t, p)
+      else if (!t) await spawnPane({ ...p, resume: true })
+      else panes.delete(p.paneId)
+    } catch { if (panes.get(p.paneId) === p) panes.delete(p.paneId) }
   }
   tabs = tabs.filter((t) => [...panes.values()].some((p) => p.tabId === t.tabId))
   prune()
@@ -209,42 +330,6 @@ const need = (paneId) => {
   const p = panes.get(paneId)
   if (!p) throw new Error(`No pane ${paneId}`)
   return p
-}
-
-// One buffer line as text with color codes (SGR only, no cursor moves), the same shape herdr returns.
-function sgrOf(c) {
-  const out = [0]
-  if (c.isBold()) out.push(1)
-  if (c.isDim()) out.push(2)
-  if (c.isItalic()) out.push(3)
-  if (c.isUnderline()) out.push(4)
-  if (c.isInverse()) out.push(7)
-  if (c.isStrikethrough?.()) out.push(9)
-  const color = (base, rgb, pal, v) => {
-    if (rgb) return [base + 8, 2, (v >> 16) & 255, (v >> 8) & 255, v & 255]
-    if (pal) return v < 8 ? [base + v] : v < 16 ? [base + 60 + v - 8] : [base + 8, 5, v]
-    return []
-  }
-  out.push(...color(30, c.isFgRGB(), c.isFgPalette(), c.getFgColor()), ...color(40, c.isBgRGB(), c.isBgPalette(), c.getBgColor()))
-  return out.join(';')
-}
-function lineAnsi(line, cols, cell) {
-  if (!line) return ''
-  let out = ''
-  let cur = '0'
-  let pendingSpaces = ''
-  for (let x = 0; x < cols; x++) {
-    const c = line.getCell(x, cell)
-    if (!c || c.getWidth() === 0) continue
-    const ch = c.getChars() || ' '
-    const sgr = sgrOf(c)
-    // Keep trailing default-styled blanks out of the line.
-    if (ch === ' ' && sgr === '0') { pendingSpaces += ' '; continue }
-    if (pendingSpaces) { if (cur !== '0') { out += '\x1b[0m'; cur = '0' } out += pendingSpaces; pendingSpaces = '' }
-    if (sgr !== cur) { out += `\x1b[${sgr}m`; cur = sgr }
-    out += ch
-  }
-  return cur !== '0' ? `${out}\x1b[0m` : out
 }
 
 export async function read(paneId, lines = 300) {
@@ -435,9 +520,18 @@ export function attach(paneId, { cols, rows }, onData, onExit) {
   }
 }
 
-// Closing Bridge AI ends its terminals; the layout is saved and comes back next time.
-export function shutdown() {
+// Settings › General › Keep agents running: whether the terminals outlive this server.
+export function setKeep(on) {
+  keepOn = !!on
+  if (link && !link.closed) link.setKeep(keepOn)
+}
+
+// The server is stopping. With Keep agents running on, the terminals carry on in the host for the
+// next server to pick up. Off (or without a host), they end now; the layout is saved, and they
+// come back next time, resuming their sessions.
+export function shutdown({ keep = keepOn } = {}) {
   save()
   stopping = true
-  for (const p of panes.values()) { try { p.proc.kill() } catch { /* gone */ } }
+  if (link && !link.closed) { if (keep) link.detach(true); else link.quit() }
+  for (const p of panes.values()) if (!p.remote) { try { p.proc.kill() } catch { /* gone */ } }
 }

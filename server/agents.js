@@ -39,7 +39,7 @@ const CLAUDE_BUSY = new RegExp(`${ESC_INTERRUPT.source}|^\\s*[✻✳✶✢✽·*
 
 export const AGENTS = [
   {
-    kind: 'claude', label: 'Claude Code', model: (m) => ['--model', m], models: ['opus', 'sonnet', 'haiku', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1'],
+    kind: 'claude', label: 'Claude Code', model: (m) => ['--model', m], models: ['opus', 'sonnet', 'haiku', 'claude-fable-5-1'],
     // Its own /model (code.claude.com/docs/en/model-config): "default" clears the override.
     switchModel: { command: (m) => `/model ${m}`, dflt: 'default' }, install: { unix: 'curl -fsSL https://claude.ai/install.sh | bash', win: 'powershell -ExecutionPolicy ByPass -c "irm https://claude.ai/install.ps1 | iex"', npm: '@anthropic-ai/claude-code', brew: '--cask claude-code' }, bin: ['claude'], herdr: 'claude', usage: 'claude',
     sessionId: 'assign',

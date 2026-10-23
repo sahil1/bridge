@@ -23,6 +23,7 @@ import { TodayTabs, TodayBody, openToday } from './components/Dock.jsx'
 import { Handle, usePersisted, useMedia, useHotkey, useWidth, useShared, store } from './components/layout.jsx'
 import { api, useFleet, usePoll, relayActivity, cloudOnly, refetch } from './api.js'
 import CloudHome from './components/CloudHome.jsx'
+import SessionSwitcher from './components/Sessions.jsx'
 
 const MIN_PANE = 420
 const MIN_WORK = 620
@@ -184,9 +185,24 @@ export default function App() {
   const mate = agents.find((a) => a.chief)
   const needsYou = agents.filter((a) => a.status === 'blocked')
 
-  // The chief of staff is the first tab that loads, not a fixture: it's added only when no tabs are open.
+  // herdr sessions each have their own agents (and number panes alike), so each keeps its own open
+  // tabs, and a switch announces nothing: the last session's agents only left the view.
+  const [wsBySession, setWsBySession] = usePersisted('cc-ws-sessions', {})
   useEffect(() => {
     if (!fleet) return
+    const s = fleet.session || ''
+    if (W.session === undefined) { if (s) setW((w) => ({ ...w, session: s })); return }
+    if (W.session === s) return
+    prevStatus.current = {}
+    setMobileAgent(null)
+    setWsBySession((m) => ({ ...m, [W.session]: W }))
+    setW({ ...WS, ...wsBySession[s], session: s })
+  }, [fleet]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The chief of staff is the first tab that loads, not a fixture: it's added only when no tabs are open.
+  // (Not while the herdr session is stopped: its tabs come back with it.)
+  useEffect(() => {
+    if (!fleet || fleet.down) return
     setW((w) => {
       const tabs = w.tabs.filter((id) => byId[id])
       if (!tabs.length && mate) return { ...w, tabs: [mate.paneId], active: mate.paneId, side: null, split: false }
@@ -218,7 +234,8 @@ export default function App() {
 
   // In the phone apps: the agents at work, for the lock screen.
   useEffect(() => {
-    if (relayActivity && fleet) relayActivity(agents.map((a) => ({ id: a.paneId, name: a.chief ? 'Chief of staff' : a.title || a.tab || a.workspace || 'Agent', status: a.status })))
+    // With the herdr session: another session's agents left the view, they didn't finish.
+    if (relayActivity && fleet && !fleet.down) relayActivity(agents.map((a) => ({ id: a.paneId, name: a.chief ? 'Chief of staff' : a.title || a.tab || a.workspace || 'Agent', status: a.status })), { session: fleet.session || null })
   }, [fleet]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const openAgent = useCallback((paneId, { toSide = false } = {}) => {
@@ -467,7 +484,7 @@ export default function App() {
             <NextMeetingChip onClick={() => showCard('calendar')} />
             <ProviderChip quota={quota.data} primary={primary} onClick={() => showCard('gauge')} onAddAccount={(kind) => setAddAcct({ kind })} />
             {update.data?.available && <UpdateChip u={update.data} onDetails={() => setSettings('about')} />}
-            <RestartChip fleet={fleet} runtime={conf?.runtime?.name} />
+            <RestartChip fleet={fleet} runtime={conf?.runtime?.name} keep={!!conf?.runtime?.keep} />
             <WeatherChip onClick={() => showCard('sun')} />
             <Clock />
           </>
@@ -508,8 +525,8 @@ export default function App() {
           {mtab === 'mate' && (mate ? <Console agent={mate} variant="mobile" queued={queuedFor(mate.paneId)} /> : <MateEmpty onLaunch={mateLaunch.launch} {...mateLaunch} />)}
           {mtab === 'agents' && (mAgent
             ? <Console agent={mAgent} variant="mobile" onBack={() => setMobileAgent(null)} queued={queuedFor(mAgent.paneId)} />
-            : <Board fleet={fleet} compact onOpen={openAgent} />)}
-          {mtab === 'herdr' && <Terminals onChat={(id) => openAgent(id)} />}
+            : <><SessionSwitcher fleet={fleet} phone /><Board fleet={fleet} compact onOpen={openAgent} /></>)}
+          {mtab === 'herdr' && <Terminals key={fleet?.session || ''} onChat={(id) => openAgent(id)} />}
           {mtab === 'today' && (
             <div className="m-today">
               <TodayTabs tab={todayTab} setTab={setTodayTab} compact />
@@ -545,12 +562,15 @@ export default function App() {
   const split = W.split && !!byId[W.side] && W.side !== W.active && canSplit
   const sideW = Math.max(MIN_PANE, Math.min(L.sideW, rowW ? rowW - MIN_PANE - 10 : L.sideW))
 
+  // A pane id names another agent in another herdr session: its views start afresh.
+  const sessionKey = fleet?.session ? `${fleet.session}/` : ''
   const paneFor = (id, group) => {
     const a = byId[id]
     if (!a) {
       return (
         <section className="pane empty-pane">
-          {mate || W.tabs.length ? <div className="viewer-empty"><Icon name="grid" size={24} /><p>Open an agent from the sidebar or the board.</p></div>
+          {fleet?.down ? <div className="viewer-empty"><Icon name="terminal" size={24} /><p>{fleet.session ? <>The herdr session <b>{fleet.session}</b> isn't running. Start it from the sidebar.</> : 'No herdr session is running.'}</p></div>
+            : mate || W.tabs.length ? <div className="viewer-empty"><Icon name="grid" size={24} /><p>Open an agent from the sidebar or the board.</p></div>
             : <MateEmpty onLaunch={mateLaunch.launch} {...mateLaunch} />}
         </section>
       )
@@ -559,7 +579,7 @@ export default function App() {
     return (
       <div className={`group ${split && W.group === group ? 'focused' : ''}`} onMouseDown={() => split && W.group !== group && setW((w) => ({ ...w, group }))}>
         {a.shellTab
-          ? <ShellTab key={a.paneId} tab={a} onOpenInHerdr={openInHerdr} controls={controls} />
+          ? <ShellTab key={sessionKey + a.paneId} tab={a} onOpenInHerdr={openInHerdr} controls={controls} />
           : popped.has(a.paneId)
             ? (
               <section className="pane popped-pane">
@@ -573,7 +593,7 @@ export default function App() {
                 </div>
               </section>
             )
-            : <ErrorBoundary name="This agent's view" resetKey={a.paneId}><Console agent={a} variant={a.chief ? 'mate' : 'focus'} onOpenInHerdr={openInHerdr} onPopOut={() => popOut(a)} controls={controls} queued={queuedFor(a.paneId)} /></ErrorBoundary>}
+            : <ErrorBoundary key={sessionKey + a.paneId} name="This agent's view" resetKey={a.paneId}><Console agent={a} variant={a.chief ? 'mate' : 'focus'} onOpenInHerdr={openInHerdr} onPopOut={() => popOut(a)} controls={controls} queued={queuedFor(a.paneId)} /></ErrorBoundary>}
       </div>
     )
   }
@@ -629,7 +649,7 @@ export default function App() {
         })}
       </div>
       <div className="ws-tab-tools">
-        {!mate && <button className="ghost-btn" data-tour="chief" onClick={mateLaunch.launch} disabled={mateLaunch.launching}><Icon name="helm" size={12} /> {mateLaunch.launching ? 'Launching…' : 'Start chief of staff'}</button>}
+        {!mate && !fleet?.down && <button className="ghost-btn" data-tour="chief" onClick={mateLaunch.launch} disabled={mateLaunch.launching}><Icon name="helm" size={12} /> {mateLaunch.launching ? 'Launching…' : 'Start chief of staff'}</button>}
         <button className={`win-btn ${split ? 'on' : ''}`} onClick={toggleSplit} disabled={!canSplit || W.tabs.length < 2}
           title={!canSplit ? 'Not enough room to split' : W.tabs.length < 2 ? 'Open a second agent to split' : split ? 'Unsplit' : 'Split side by side'} aria-label="Split">
           <Icon name="split" size={15} />
@@ -686,7 +706,7 @@ export default function App() {
             </>
           )}
         </main>
-        {liveView && <HerdrView active={view === 'herdr'} onViewHotkey={setView} />}
+        {liveView && <HerdrView active={view === 'herdr'} onViewHotkey={setView} session={fleet?.session} />}
       </div>
       {overlays}
     </div>

@@ -2,6 +2,26 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
+## 2.7.0
+
+Agents that keep running when Bridge AI restarts, handing work from one agent to another, herdr sessions in the sidebar, and Codex's questions as cards you can answer.
+
+### What's new
+
+- **Agents keep running when Bridge AI quits, restarts or updates,** without herdr. The built-in runtime now keeps its terminals in a small background process, and Bridge AI picks them up again with their screens and scrollback when it's back, so Restart to apply and updates no longer cut an agent off mid-task. Turn off **Keep agents running when Bridge AI quits** in Settings › General to stop them with the app instead; **Quit and Stop Agents** stops them either way. After a reboot, Claude Code and Codex reopen their conversations as before. On Windows an update still stops them, and they resume after it.
+- **Hand off to another agent:** the model chip's menu lists the other agents you're signed in to. Pick one and it starts in the same folder and branch with a summary of the conversation so far: the goal, files changed, recent messages and the open to-do list. You can preview it, or ask the current agent to write it first. The old agent goes to Closed agents, or stays open next to the new one. The chief of staff can switch itself to another agent the same way and keeps its playbook, ledger and tasks.
+- **herdr sessions in the sidebar:** with herdr, the top of the sidebar shows which session you're in and how many agents wait on you in the others. Switch in one click, start a new session or a stopped one, stop one (not while its agents are busy), or open it in your terminal. Each session keeps its own tabs, queued messages and muted agents.
+- **Codex's questions as cards:** Codex can ask you something and keep working (its "? 1 question, ⇧← to answer" line). Bridge AI now shows that agent as needing you, says what it asks in the notification, and puts the question in Chat with its answers to click and a box for your own. With several questions, answer them all and send once. The card stays after Codex's turn ends, when Codex's own screen drops the question. The Terminal tab shows the question too, with a button to answer it.
+
+### Fixes
+
+- **A message to Codex could merge with keys left in its input box**, such as a "1" typed in the Terminal tab for a menu, and arrive as "1your message". Bridge AI now clears what's left there first, without stopping a turn that's running.
+- **Codex's name** showed its whole terminal title, such as "[ ! ] Action Required | Fix the login page | shop". It's now just "Fix the login page".
+- **Codex's live status** under the chat read "Working (4s" with the bracket left open.
+- **Picking a herdr session in Settings** took effect only after a restart. It now applies at once.
+- **A Codex agent restarted on another model** showed its old model again after Bridge AI restarted, until its next reply.
+- **Claude Code's model menu** listed each model twice, by name and by full id. It now lists Opus, Sonnet, Haiku and Fable once, so the menu fits on screen with the hand-off list under it. A pinned version is still under Other….
+
 ## 2.6.0
 
 Two accounts side by side, a model picker in the message box, and a chief of staff that does work itself.

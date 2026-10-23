@@ -1,0 +1,36 @@
+/* Hand off to another agent (Handoff.jsx): the model chip's menu section and its confirm panel. */
+.model-chip .pv-tile, .ho-mark .pv-tile, .ho-head .pv-tile { display: inline-grid; place-items: center; flex: none; box-shadow: inset 0 0 0 1px rgb(0 0 0 / .06); }
+.model-chip .pv-tile svg, .ho-mark .pv-tile svg, .ho-head .pv-tile svg { display: block; color: inherit; }
+.ho-item:disabled { opacity: .55; }
+.ho-status { font-size: 11.5px; color: var(--ink-3); white-space: nowrap; }
+.ho-status.off { color: var(--warning); }
+
+.ho-pop { gap: 10px; padding: 8px 10px 10px; width: min(380px, calc(100vw - 24px)); }
+.ho-head { display: flex; align-items: center; gap: 8px; margin: 0 -2px; }
+.ho-head h4 { margin: 0; flex: 1; min-width: 0; font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ho-lead { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--ink-2); }
+.ho-carry { display: grid; gap: 6px; padding: 8px 10px; border-radius: 9px; background: var(--pane-2); border: 1px solid var(--line); font-size: 12.5px; line-height: 1.45; }
+.ho-preview summary { cursor: pointer; color: var(--accent); font-size: 12px; width: fit-content; border-radius: 4px; }
+.ho-preview summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ho-preview pre { margin: 6px 0 0; max-height: 220px; overflow: auto; padding: 8px; border-radius: 7px; background: var(--pane); border: 1px solid var(--line); font: 11.5px/1.5 var(--font-mono); color: var(--ink-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.ho-preview pre:focus-visible { outline: none; border-color: var(--accent); }
+.ho-ask { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12px; line-height: 1.4; }
+.ho-ask .link-btn { display: inline-flex; align-items: center; gap: 5px; padding: 0; color: var(--accent); font-size: 12px; }
+.ho-ask .link-btn:disabled { color: var(--ink-3); }
+.ho-ask .muted { color: var(--ink-3); }
+.na-check.ho-ask { flex-wrap: nowrap; align-items: flex-start; }
+.ho-pick { display: grid; gap: 8px; }
+.ho-pick.two { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.ho-hint { display: block; font-size: 11.5px; color: var(--ink-3); }
+.ho-pop .na-field input, .ho-pop .na-field select, .ho-pop .na-field textarea { height: 32px; font-size: 13px; }
+.ho-pop .na-field textarea { height: auto; min-height: 32px; padding-top: 6px; padding-bottom: 6px; }
+.ho-pop .na-field input.mono { font: 12.5px var(--font-mono); }
+.ho-old { font-size: 12.5px; line-height: 1.45; color: var(--ink-2); }
+.ho-warn { margin: 0; font-size: 12px; line-height: 1.45; color: var(--warning); }
+.ho-foot { display: flex; justify-content: flex-end; gap: 6px; padding-top: 2px; }
+.ho-foot .btn.primary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Phone: across the message box, with inputs big enough not to zoom. */
+.app.narrow .ho-pop { width: auto; }
+.app.narrow .ho-pop .na-field input, .app.narrow .ho-pop .na-field select, .app.narrow .ho-pop .na-field textarea { font-size: 16px; height: 36px; }
+.app.narrow .ho-pop .na-field textarea { height: auto; }
+.app.narrow .ho-foot .btn { height: 34px; }

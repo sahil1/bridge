@@ -147,10 +147,25 @@ function linkOnly() {
 // Bridge AI tells this page about its agents (bridgeRelay.activity). While any are working or
 // waiting on you, the apps show them on the lock screen: a Live Activity on iPhone, a notification
 // on Android. The ones that ran meanwhile stay on it as finished, until all are done.
-const lock = { agents: new Map(), sent: '' }
-function activity(agents) {
+const lock = { agents: new Map(), sent: '', session: undefined }
+function activity(agents, view) {
   if (!apps?.activity || !Array.isArray(agents) || away) return // what it last sent isn't news
   const now = Date.now()
+  // Another herdr session in view (view.session): the last one's agents are out of view, not
+  // finished. They keep their place on the card as last seen, filed under their session (the same
+  // pane ids name other agents now), and pick up again when that session is back in view.
+  const session = view?.session ?? null
+  if (lock.session !== undefined && session !== lock.session) {
+    const next = new Map()
+    for (const a of lock.agents.values()) {
+      const from = a.away || lock.session
+      const bare = a.away ? a.id.slice(a.away.length + 1) : a.id
+      if (from === session) next.set(bare, { ...a, id: bare, away: null })
+      else next.set(`${from}/${bare}`, { ...a, id: `${from}/${bare}`, away: from })
+    }
+    lock.agents = next
+  }
+  lock.session = session
   const busy = (st) => st === 'working' || st === 'blocked'
   for (const a of agents) {
     const was = lock.agents.get(a.id)
@@ -158,8 +173,8 @@ function activity(agents) {
     else if (was && was.status !== 'done') lock.agents.set(a.id, { ...was, status: 'done', since: now })
   }
   // Closed meanwhile.
-  for (const [id, a] of lock.agents) if (a.status !== 'done' && !agents.some((x) => x.id === id)) lock.agents.set(id, { ...a, status: 'done', since: now })
-  const list = [...lock.agents.values()]
+  for (const [id, a] of lock.agents) if (!a.away && a.status !== 'done' && !agents.some((x) => x.id === id)) lock.agents.set(id, { ...a, status: 'done', since: now })
+  const list = [...lock.agents.values()].map(({ away: _, ...a }) => a)
   if (!list.length) return
   const count = (st) => list.filter((a) => a.status === st).length
   const order = { blocked: 0, working: 1, done: 2 }

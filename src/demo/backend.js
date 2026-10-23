@@ -483,7 +483,7 @@ export function createDemo() {
   const on = (method, pattern, fn) => routes.push([method, new RegExp(`^${pattern.replace(/:(\w+)/g, '(?<$1>[^/]+)')}$`), fn])
 
   on('GET', '/fleet', () => fleet())
-  on('GET', '/config', () => ({ version, name: S.cfg.name || '', location: S.cfg.location?.label || null, hasMortgage: false, runtime: { name: 'builtin', liveView: false, reorder: true, splits: false }, platform: 'darwin', mail: true, calendar: true, defaultAgent: S.cfg.defaultAgent || 'claude', chiefKind: 'claude', setupDone: true }))
+  on('GET', '/config', () => ({ version, name: S.cfg.name || '', location: S.cfg.location?.label || null, hasMortgage: false, runtime: { name: 'builtin', liveView: false, reorder: true, splits: false }, platform: 'darwin', mail: true, calendar: true, defaultAgent: S.cfg.defaultAgent || 'claude', chiefKind: S.cfg.chief?.kind || 'claude', setupDone: true }))
   on('GET', '/runtime-theme', () => ({}))
   on('GET', '/version', () => ({ version, build: 'demo', bundled: false }))
   on('GET', '/previews', () => ({ ...Object.fromEntries([...S.agents.values()].map((a) => [a.paneId, preview(a)])), ...cloud.previews() }))
@@ -663,6 +663,113 @@ export function createDemo() {
     a.account = String(body?.account || a.account)
     push(a, { role: 'event', status: 'completed', text: `Continued on ${accountLabel(a) || 'Default'}` })
     return { paneId: a.paneId }
+  })
+  // Hand off to another agent (the model chip's menu): a new agent of that kind in the old one's
+  // place, starting from a handover built from its chat (as server/handoff.js does), which then
+  // says where things stand. The old one goes to Closed agents unless you keep it open.
+  const handed = new Map() // new paneId -> { from, label, at }
+  const asks = new Map() // paneId -> { to, state, at, text }
+  const ASK = '[Bridge AI: handover request]'
+  const clipTo = (t, n) => { t = String(t || '').trim(); return t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t }
+  const quoted = (t) => String(t).split('\n').map((l) => (l ? `> ${l}` : '>')).join('\n')
+  const porcelain = (files) => files.map((f) => `${f.status === 'untracked' ? '??' : ' M'} ${f.path}`).join('\n')
+  function handover(a, { note, own } = {}) {
+    const from = kindLabel(a.kind)
+    const said = a.log.filter((m) => (m.role === 'user' || m.role === 'assistant') && !m.text.startsWith(ASK))
+    const goal = a.chief ? null : said.find((m) => m.role === 'user')
+    const last = said.at(-1)
+    const repo = repoOf(a.cwd)
+    const files = repo && !repo.notGit ? changes(repo) : []
+    const recent = said.filter((m) => m !== goal && m !== last).slice(-6)
+    const steps = a.log.filter((m) => m.role === 'tool').slice(-4).map((m) => `${m.tool}${m.hint ? ` ${clipTo(m.hint, 50)}` : ''}`)
+    const out = [a.chief
+      ? `[Bridge AI handover from ${from}]\nYou're taking over as the user's chief of staff from ${from}, which ran in this folder until now. Your instructions, playbook, ledger and task list are in this folder as usual: read them first and carry on as they say. You can't see the earlier conversation; this sums up its recent part.`
+      : `[Bridge AI handover from ${from}]\nYou're taking over from ${from}, another coding agent, which was working in this folder until now. The user moved the work to you with Bridge AI. You can't see that conversation; this sums it up, from its transcript and the folder's git state. Pick up where it stopped rather than starting over, and where this and the files disagree, trust the files.`]
+    if (!a.chief) out.push(`Folder: ${tilde(a.cwd)}\n${a.worktree ? `Git: on its own branch ${a.worktree.branch} (from ${a.worktree.base}), in a worktree of ${tilde(a.worktree.repo)}. Stay on this branch.` : repo && !repo.notGit ? `Git: branch ${repo.branch}` : 'Not a git repository.'}`)
+    if (goal) out.push(`## The goal\nIn the user's first message:\n${quoted(clipTo(goal.text, 1000))}\n(If later messages changed it, the conversation below says so.)`)
+    if (files.length) out.push(`## Changes so far\ngit status --porcelain:\n${porcelain(files)}`)
+    if (own) out.push(`## ${from}'s own handover (written just now, at the user's request)\n${own}`)
+    else {
+      if (recent.length) out.push(`## Recent conversation (oldest first)\n${recent.map((m) => `${m.role === 'user' ? 'User' : from}: ${clipTo(m.text, m.role === 'user' ? 600 : 900)}`).join('\n')}${steps.length ? `\n  (${steps.join(' · ')})` : ''}`)
+      if (last) out.push(`## Where it stopped\n${last.role === 'assistant' ? 'Its last reply' : "The user's last message, which it hadn't finished answering"}:\n${quoted(clipTo(last.text, 1500))}`)
+    }
+    if (a.question) out.push(`It was waiting on the user to answer: ${a.question.text}`)
+    const n = String(note || '').trim()
+    out.push(a.chief ? `## Next\n${n ? `Read your instructions and state files, then answer the user's next message:\n${n}` : "Read your instructions and state files, then tell the user in a line that you've taken over as chief of staff, and wait for their next request."}`
+      : `## Next\n${n ? `Check the files above first. Then, from the user:\n${n}` : "Check the files above first. Then tell the user in a few lines where things stand and what you'd do next, and wait for their reply before changing anything."}`)
+    const text = out.join('\n\n')
+    return { text, chars: text.length, parts: { goal: !!goal, messages: own ? 0 : recent.length, files: files.length, branch: a.worktree?.branch || (repo && !repo.notGit ? repo.branch : null), todo: 0, queued: 0, screen: false, own: !!own, compacted: false }, from, to: null }
+  }
+  on('GET', '/agents/:pane/handoff', ({ p, query }) => {
+    const a = agent(p.pane)
+    if (query.get('lite') === '1') return { handedFrom: handed.get(a.paneId) || null }
+    const groups = F.groups(S.accts)
+    const busy = a.status === 'working' ? 'working' : a.status === 'blocked' || a.question ? 'blocked' : null
+    const s = asks.get(a.paneId)
+    return {
+      from: { kind: a.kind, label: kindLabel(a.kind), chief: a.chief, resumable: true, chat: !!F.CAPS[a.kind]?.chat },
+      busy, tabMates: false, canAsk: !!F.CAPS[a.kind]?.chat && !busy, handedFrom: handed.get(a.paneId) || null,
+      asked: s ? { to: s.to, state: s.state, at: s.at, error: null } : null,
+      targets: Object.keys(F.CAPS).filter((k) => k !== a.kind).map((kind) => {
+        const g = groups.find((x) => x.kind === kind)
+        return {
+          kind, label: kindLabel(kind), signedIn: true, hint: null, chat: !!F.CAPS[kind].chat, resumable: kind === 'claude' || kind === 'codex',
+          accounts: g && g.accounts.length > 1 ? g.accounts.map((x) => ({ id: x.id, label: x.label, signedIn: true, active: x.active, isDefault: !!x.isDefault })) : null,
+          setting: g?.setting || null, modelFlag: kind !== 'gemini', models: F.MODELS[kind] || [],
+        }
+      }),
+    }
+  })
+  on('GET', '/agents/:pane/handoff/preview', ({ p, query }) => {
+    const a = agent(p.pane)
+    const s = asks.get(a.paneId)
+    return handover(a, { note: query.get('note') || '', own: query.get('summary') === '1' && s?.state === 'ready' && s.to === query.get('to') ? s.text : null })
+  })
+  on('POST', '/agents/:pane/handoff/ask', ({ p, body }) => {
+    const a = agent(p.pane)
+    const to = String(body?.to || '')
+    if (a.status === 'working' || a.question) fail(`${kindLabel(a.kind)} is busy. Ask once it's done.`)
+    const s = { to, state: 'asking', at: iso(), text: null }
+    asks.set(a.paneId, s)
+    push(a, { role: 'user', text: `${ASK} The user is handing this work over to ${kindLabel(to)}, another coding agent, which can't see this conversation. Write the handover it will start from.` })
+    const goal = a.log.find((m) => m.role === 'user' && !m.text.startsWith(ASK))
+    const repo = repoOf(a.cwd)
+    const files = repo && !repo.notGit ? changes(repo) : []
+    const summary = `Goal: ${clipTo(goal?.text || 'see the conversation', 200)}\nDone: ${files.length ? `changes in ${files.map((f) => f.path).join(', ')}` : 'nothing changed in the folder yet'}.\nLeft: ${a.chief ? 'the open hand-offs in the ledger' : 'finish the change and run the tests'}.\nWatch out: nothing is committed yet.`
+    play(a, [{ doing: 'Writing the handover', wait: 1800 }, { say: summary }], { then: () => { s.state = 'ready'; s.text = summary } })
+    return { ok: true, state: 'asking' }
+  })
+  on('POST', '/agents/:pane/handoff', ({ p, body }) => {
+    const a = agent(p.pane)
+    const to = String(body?.to || '')
+    const from = kindLabel(a.kind)
+    if (!F.CAPS[to] || to === a.kind) fail('Pick another agent to hand off to')
+    const keep = !!body?.keep && !a.chief
+    if (!keep && a.status === 'working') fail(`${from} is working. Hand off once it's done (or press Stop), or keep it open too.`)
+    if (!keep && (a.status === 'blocked' || a.question)) fail(`${from} is waiting on you. Answer it first, or keep it open too.`)
+    const s = asks.get(a.paneId)
+    if (body?.summary && s?.state !== 'ready') fail(`${from}'s handover isn't in yet`)
+    const { text } = handover(a, { note: body?.note, own: body?.summary ? s.text : null })
+    const base = a.chief ? 'Chief of staff' : String(tabOf(a.tabId)?.label || kindLabel(to)).replace(/\s*\((Claude Code|Codex|Gemini CLI|OpenCode)\)$/, '')
+    const t = addTab(a.workspaceId, keep ? `${base} (${kindLabel(to)})` : base)
+    S.tabs = S.tabs.filter((x) => x !== t)
+    S.tabs.splice(S.tabs.findIndex((x) => x.tabId === a.tabId) + 1, 0, t) // right after it, then in its place
+    const b = addAgent({ paneId: `${a.workspaceId}:p${++S.next}`, tabId: t.tabId, workspaceId: a.workspaceId, kind: to, cwd: a.cwd, worktree: a.worktree, chief: a.chief, account: body?.account && body.account !== 'auto' ? body.account : null }, { replay: false })
+    if (body?.model && body.model !== 'default') { b.model = F.MODEL_IDS[body.model] || body.model; b.picked = body.model }
+    push(b, { role: 'event', status: 'completed', text: `Handed over from ${from}`, summary: text })
+    handed.set(b.paneId, { from: a.kind, label: from, at: iso() })
+    if (a.chief) S.cfg.chief = { ...(S.cfg.chief || {}), kind: to }
+    asks.delete(a.paneId)
+    if (!keep) closeTab(a.tabId)
+    const repo = repoOf(a.cwd)
+    const files = repo && !repo.notGit ? changes(repo) : []
+    const note = String(body?.note || '').trim()
+    setTimeout(() => play(b, a.chief
+      ? [{ doing: 'Reading', wait: 900 }, { tool: 'Read', hint: 'state/ledger.md' }, { say: note ? `I've taken over as chief of staff, on ${kindLabel(to)}. On it: ${note}` : `I've taken over as chief of staff, on ${kindLabel(to)}. I've read the playbook, the ledger and the task list. What's next?` }]
+      : [{ doing: 'Reading the handover', wait: 1200 }, { run: 'git status --short', out: porcelain(files) || '(clean)' },
+        { say: `Picked up from ${from}. ${files.length ? `So far: changes in ${files.slice(0, 3).map((f) => `\`${f.path}\``).join(', ')}${files.length > 3 ? ' and more' : ''}, not committed.` : 'Nothing has changed in the folder yet.'} ${note ? `Next, as you asked: ${note}` : 'Tell me when to carry on, or what to change first.'}` }]), 700)
+    bump()
+    return { paneId: b.paneId, closed: !keep, archived: !keep, chars: text.length }
   })
   on('POST', '/agents/:pane/mute', ({ p, body }) => { agent(p.pane).muted = !!body?.muted; bump(); return { ok: true, muted: !!body?.muted } })
   on('POST', '/agents/:pane/focus', () => ok)

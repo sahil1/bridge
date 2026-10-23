@@ -100,7 +100,9 @@ ditto -x -k "$TMP/bridge.zip" "$TMP/app" || fail "the download looks damaged; ru
 [ -d "$TMP/app/$APP" ] || fail "the download doesn't contain $APP"
 
 # Updating: close the running app and stop its server, so the new version starts fresh. Your
-# agents' sessions resume when it starts again.
+# agents keep running in its terminal host, which shows as "Bridge AI terminal host" rather than
+# the app's path, so this leaves it be; the new version picks them up (or, if its host is too
+# different, resumes their sessions).
 if [ -d "$DEST/$APP" ]; then
   # -a: include our own parents (and the signal must come first on macOS). When the app updates itself, it started this installer, and
   # without -a macOS pkill skips it and its server, leaving the old version running.

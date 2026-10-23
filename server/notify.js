@@ -11,6 +11,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { cacheFile } from './paths.js'
+import { paneKey, inView, paneOfKey, adopt } from './scope.js'
 import { parseScreen } from '../src/components/questionParse.js'
 
 const channels = new Set()
@@ -43,17 +44,23 @@ export const atComputer = () => Date.now() - lastInput < AWAY || [...fronts.valu
 const reach = (cfg) => (cfg.notify?.phoneAtComputer || !atComputer() ? {} : { onlyHere: true })
 
 // ---------- Muted agents ----------
-// Muted from an agent's ⋯ menu, by pane, until you unmute it.
+// Muted from an agent's ⋯ menu, by pane (filed per herdr session, see scope.js), until you unmute it.
 const MUTED = cacheFile('muted.json')
 let muted = new Set((() => { try { return JSON.parse(fs.readFileSync(MUTED, 'utf8')) } catch { return [] } })())
-export const isMuted = (paneId) => muted.has(paneId)
+const saveMuted = () => { fs.mkdirSync(path.dirname(MUTED), { recursive: true }); fs.writeFileSync(MUTED, JSON.stringify([...muted])) }
+function mutedNow() {
+  const byKey = Object.fromEntries([...muted].map((k) => [k, true]))
+  if (adopt(byKey)) { muted = new Set(Object.keys(byKey)); saveMuted() }
+  return muted
+}
+export const isMuted = (paneId) => mutedNow().has(paneKey(paneId))
 export function mute(paneId, on, live = []) {
-  if (on) muted.add(paneId)
-  else muted.delete(paneId)
-  // Agents that are gone don't need remembering.
-  muted = new Set([...muted].filter((id) => id === paneId || live.includes(id)))
-  fs.mkdirSync(path.dirname(MUTED), { recursive: true })
-  fs.writeFileSync(MUTED, JSON.stringify([...muted]))
+  const key = paneKey(paneId)
+  if (on) mutedNow().add(key)
+  else mutedNow().delete(key)
+  // Agents that are gone don't need remembering (another session's are only out of view).
+  muted = new Set([...muted].filter((k) => k === key || !inView(k) || live.includes(paneOfKey(k))))
+  saveMuted()
 }
 
 // ---------- What an agent is asking ----------
@@ -86,8 +93,11 @@ export function question(ansi) {
   const id = crypto.createHash('sha256').update(JSON.stringify([q.kind, q.title, q.ask, q.tabs.map((t) => t.label), q.options.map((o) => [o.n, o.label, o.desc]), !!q.other, !!q.chat])).digest('base64url').slice(0, 22)
   return { text, id, simple }
 }
-// A cloud agent (cloud.js) has no screen: it says what it's waiting for itself.
-const asking = (a) => (a.cloud ? Promise.resolve(a.cloud.ask ? { text: a.cloud.ask, simple: null } : null) : rt ? rt.read(a.paneId, 60).then(question, () => null) : Promise.resolve(null))
+// A cloud agent (cloud.js) has no screen: it says what it's waiting for itself. Nor does a
+// question Codex asked while working (asks.js): it's in its log, and it's answered in the app.
+const asking = (a) => (a.cloud ? Promise.resolve(a.cloud.ask ? { text: a.cloud.ask, simple: null } : null)
+  : a.asking ? Promise.resolve({ text: clip(a.asking.title, 160), simple: null })
+  : rt ? rt.read(a.paneId, 60).then(question, () => null) : Promise.resolve(null))
 
 // ---------- Answer buttons ----------
 // Each button carries a token signed with a key that lasts only as long as this server, bound to
@@ -139,6 +149,9 @@ export async function answer(t) {
 // ---------- Agents ----------
 const seen = new Map() // paneId -> { status, seq }
 let primed = false
+// Another herdr session in view: its agents are new to us, not news, and the last session's
+// agents only left the view (they didn't finish). Called before the first fleet of that session.
+export function forget() { seen.clear(); primed = false }
 export function onFleet(fleet, cfg = {}) {
   const want = cfg.notify || {}
   for (const a of fleet.agents || []) {
@@ -147,7 +160,7 @@ export function onFleet(fleet, cfg = {}) {
     // A change to "needs you" or "finished", or a new agent that shows up already there (after
     // the first look, so a restart doesn't announce everything again).
     const changed = before ? before.status !== a.status || before.seq !== a.seq : primed
-    if (!changed || muted.has(a.paneId)) continue
+    if (!changed || isMuted(a.paneId)) continue
     const label = a.chief ? 'Chief of staff' : a.title || a.tab || a.workspace || 'An agent'
     const where = a.cloud ? [`${a.cloud.label} cloud`, a.cloud.repo].filter(Boolean).join(' · ') : [a.workspace, a.tab && a.tab !== label ? a.tab : null].filter(Boolean).join(' › ')
     if (a.status === 'blocked' && want.needsYou !== false) {

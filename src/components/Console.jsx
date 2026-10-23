@@ -4,6 +4,7 @@ import { Terminal, FilesView, ChangesView, PreviewView } from '../lazy.jsx'
 import Subagents from './Subagents.jsx'
 import ChiefTasks from './ChiefTasks.jsx'
 import Question, { parseScreen } from './Question.jsx'
+import AskCard from './AskCard.jsx'
 import FirstRunCard, { showsFirstRun } from './FirstRun.jsx'
 import { InstallAgentButton } from './SignIn.jsx'
 import Composer from './Composer.jsx'
@@ -275,6 +276,7 @@ function activityFrom(ansi) {
     .replace(/\s*[·•(]?\s*(esc|ctrl\+c) to (interrupt|cancel)\)?/i, '')
     .replace(/[(·•\s]+$/, '')
     .replace(/\(\s*\)$/, '')
+    .replace(/\(([^()]*)$/, '($1)') // Codex: "Working (4s • esc to interrupt)"
     .trim()
 }
 function LiveActivity({ paneId }) {
@@ -333,7 +335,7 @@ function Chat({ agent, pending, queued = [], outbox = [], onCancelQueued, onEdit
   const fromPhone = (m) => m.role === 'user' && delivered.some((o) => sameMsg(m.text, o.text))
 
   // No chat to show, or none yet (a new session): say so rather than leave the space blank.
-  const nothing = data && (!data.supported || (!recent.length && !more && agent.status !== 'working'))
+  const nothing = data && (!data.supported || (!recent.length && !more && !isWorking(agent)))
   // A new agent still on its first-run screens (sign-in and so on): walk through them here.
   const firstRun = showsFirstRun(agent) && <FirstRunCard agent={agent} onOpenTerminal={onOpenTerminal} />
   if (nothing && !shownPending.length && !queued.length && !shownOutbox.length) {
@@ -404,7 +406,7 @@ function Chat({ agent, pending, queued = [], outbox = [], onCancelQueued, onEdit
             </div>
           </div>
         ))}
-        {agent.status === 'working' && <LiveActivity paneId={agent.paneId} />}
+        {isWorking(agent) && <LiveActivity paneId={agent.paneId} />}
         {firstRun}
         {queued.map((q) => (
           <div key={q.id} className="msg user queued">
@@ -419,6 +421,9 @@ function Chat({ agent, pending, queued = [], outbox = [], onCancelQueued, onEdit
     </div>
   )
 }
+
+// Working, also under a question it asked while working (it shows as needing you then).
+const isWorking = (a) => a.status === 'working' || !!a.asking?.working
 
 function BlockedCard({ agent, onKey, onOpenTerminal }) {
   const [busy, setBusy] = useState(false)
@@ -536,7 +541,7 @@ function AgentConsole({ agent, variant = 'focus', controls = {}, onBack, onOpenI
   useEffect(() => { if (!flash) return; const t = setTimeout(() => setFlash(null), flash.length > 60 ? 8000 : 3000); return () => clearTimeout(t) }, [flash])
   // Its first-run screens have their own card (FirstRun.jsx), so no raw keys for those.
   const firstRunNow = showsFirstRun(agent)
-  useEffect(() => { if (agent?.status === 'blocked' && !firstRunNow) setKeysOpen(true) }, [agent?.status, firstRunNow])
+  useEffect(() => { if (agent?.status === 'blocked' && !agent.asking && !firstRunNow) setKeysOpen(true) }, [agent?.status, !!agent?.asking, firstRunNow]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // In the Terminal tab, what you type below shows up live in the agent's own input line (only
   // the difference is sent: backspaces, then new text). Sending replaces that line with your
@@ -742,13 +747,21 @@ function AgentConsole({ agent, variant = 'focus', controls = {}, onBack, onOpenI
             {view === 'preview' && <PreviewView agent={agent} onSendToAgent={({ text, files }) => { setView('chat'); setPrefill({ text, files, append: true, n: Date.now() }) }} />}
           </div>
 
-          {agent.status === 'blocked' && view === 'chat' && !showsFirstRun(agent) && !outbox.some((o) => o.kind === 'answer' && o.state === 'waiting') && (
+          {agent.asking && view === 'chat' && <AskCard agent={agent} Rich={RichText} onNote={setFlash} onOpenTerminal={() => setView('terminal')} />}
+          {agent.status === 'blocked' && !agent.asking && view === 'chat' && !showsFirstRun(agent) && !outbox.some((o) => o.kind === 'answer' && o.state === 'waiting') && (
             <BlockedCard agent={agent} onKey={sendKeys} onOpenTerminal={() => setView('terminal')} />
           )}
 
           <div className="composer-wrap" data-tour="composer" hidden={view === 'files' || view === 'changes' || view === 'preview' || (view === 'chat' && showsFirstRun(agent))}>
             {agent.chief && view === 'chat' && <ChiefTasks agent={agent} onOpenPath={(p) => { setOpenPath(p); setView('files') }} />}
             {agent.caps?.subagents && view === 'chat' && <Subagents paneId={agent.paneId} working={agent.status === 'working'} Rich={RichText} />}
+            {agent.asking && view === 'terminal' && (
+              <div className="ask-strip" role="status">
+                <StatusDot status="blocked" />
+                <span className="ask-strip-text"><b>{agent.kindLabel} asks you:</b> {agent.asking.title}</span>
+                <button className="btn small primary" onClick={() => setView('chat')}>Answer</button>
+              </div>
+            )}
             {keysOpen && (
               <div className="keybar" aria-label="Send keys">
                 {KEYS.map(([k, label]) => <button key={k} className="key" onClick={() => sendKeys([k])}>{label}</button>)}
@@ -773,7 +786,7 @@ function AgentConsole({ agent, variant = 'focus', controls = {}, onBack, onOpenI
             )}
             <Composer id={agent.paneId} placeholder={agent.chief ? 'Tell your chief of staff what you need…' : `Message ${title}…`}
               onSend={send} keysOpen={keysOpen} onToggleKeys={() => setKeysOpen(!keysOpen)}
-              busy={agent.status === 'working'} typeAhead={!!agent.caps?.typeAhead}
+              busy={isWorking(agent)} typeAhead={!!agent.caps?.typeAhead}
               prefill={prefill} editing={editTarget} onEditChange={(e) => setEditTarget(e)}
               mirroring={mirrorOn} onDraft={(t) => { draftNow.current = t; if (mirrorOn || mirrored.current) syncMirror() }} onStop={stop} queuedCount={queued.length}
               commandsUrl={agent.caps?.commands ? `/agents/${encodeURIComponent(agent.paneId)}/commands` : null}

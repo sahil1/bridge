@@ -129,7 +129,8 @@ async function createWindow() {
 
 // The server outlives the window, so the one on the port can be left over from an older build or
 // another copy of the app (an update that couldn't stop it, a copy run from elsewhere). Its code is
-// the old one, so stop it and start this app's own. Agents in herdr carry on; built-in ones resume.
+// the old one, so stop it and start this app's own. Agents carry on (in the terminal host, or in
+// herdr); with Keep agents running off (Settings › General), built-in ones resume.
 // A server you run from source (npm start) is left alone.
 async function replaceStale() {
   if (!BUNDLED) return
@@ -188,11 +189,13 @@ ipcMain.handle('bridge:focus-main', (e) => {
 // doesn't keep your phone quiet.
 ipcMain.handle('bridge:idle', (e) => (fromApp(e) ? powerMonitor.getSystemIdleTime() : null))
 // Restart Bridge AI, server too: what you allow in System Settings (Full Disk Access, say) only
-// reaches processes started after. The relaunched app starts the server again.
+// reaches processes started after. The relaunched app starts the server again. Agents keep
+// running in the terminal host meanwhile, unless Keep agents running is off.
 ipcMain.handle('bridge:restart', (e) => {
   if (!fromApp(e)) return false
   app.relaunch()
-  stopServerAndQuit()
+  stopServer()
+  app.quit()
   return true
 })
 // ---------- Allow access: a tile next to System Settings ----------
@@ -363,7 +366,12 @@ async function notifyFor(a) {
   n.show()
 }
 let primed = false
+let shownSession
 function onFleet(f) {
+  // Another herdr session in view: its agents are new here, not news, and the last session's only
+  // left the view (they didn't finish). The same pane ids name other agents there.
+  if ((f.session ?? null) !== shownSession) { if (shownSession !== undefined) { seen.clear(); primed = false } shownSession = f.session ?? null }
+  if (f.down) return
   for (const a of f.agents || []) {
     const before = seen.get(a.paneId)
     // A change to "needs you" or "finished", or a new agent that shows up already there. The
@@ -400,10 +408,32 @@ async function watchFleet() {
   }
 }
 
-// Quitting leaves the server (and your agents) running. This stops it too.
-function stopServerAndQuit() {
+// Quitting leaves the server (and your agents) running. This stops the server; agents keep
+// running in the terminal host unless Keep agents running is off (Settings › General).
+function stopServer() {
   try { const pid = Number(fs.readFileSync(PID, 'utf8')); if (pid) process.kill(pid, 'SIGTERM') } catch { /* not running */ }
   try { fs.rmSync(PID) } catch { /* fine */ }
+}
+// Ask the terminal host to end its agents and exit, with the two messages every version of it
+// understands (server/runtime/ptyhost.js). Its socket and token are in the data folder.
+function stopAgents() {
+  return new Promise((resolve) => {
+    let info
+    try { info = JSON.parse(fs.readFileSync(path.join(DATA, 'host', 'host.json'), 'utf8')) } catch { return resolve() }
+    const s = require('node:net').connect(info.sock)
+    const done = () => { s.destroy(); resolve() }
+    s.on('connect', () => s.write(`${JSON.stringify({ t: 'hello', token: info.token, protocol: info.protocol })}\n${JSON.stringify({ t: 'quit' })}\n`))
+    s.on('error', done)
+    s.on('close', done)
+    setTimeout(done, 3000)
+  })
+}
+// Quit and Stop Agents: the server first (it saves your agents, to resume them next time), then
+// them. Not from under a server that's still running (one this app didn't start).
+async function stopAllAndQuit() {
+  stopServer()
+  for (let i = 0; i < 30 && await serverUp(); i++) await new Promise((r) => setTimeout(r, 100))
+  if (!(await serverUp())) await stopAgents()
   app.quit()
 }
 
@@ -424,7 +454,7 @@ function buildMenu() {
       { type: 'separator' },
       ...(IS_MAC ? [{ role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }] : []),
       { role: 'quit' },
-      { label: 'Quit and Stop Agents', click: stopServerAndQuit },
+      { label: 'Quit and Stop Agents', click: () => { stopAllAndQuit().catch(() => app.quit()) } },
     ] },
     { role: 'editMenu' },
     { label: 'View', submenu: [

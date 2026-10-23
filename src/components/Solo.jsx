@@ -1,7 +1,7 @@
 // One agent in a window of its own (the ⧉ button in an agent's header). The main window shows
 // that the agent is out here; "Bring back" closes this window and opens the agent there again.
 // The windows talk over a BroadcastChannel, so this works in the desktop app and in a browser.
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import Console from './Console.jsx'
 import ErrorBoundary from './ErrorBoundary.jsx'
 import Icon from './Icon.jsx'
@@ -21,7 +21,11 @@ export function popOut(agent) {
 
 export default function Solo({ paneId }) {
   const { fleet } = useFleet()
-  const agent = fleet?.agents?.find((a) => a.paneId === paneId)
+  // The herdr session it was opened in: another session's pane with the same id is another agent.
+  const home = useRef(undefined)
+  if (fleet && !fleet.down && home.current === undefined) home.current = fleet.session || ''
+  const away = !!fleet && home.current !== undefined && (fleet.session || '') !== home.current
+  const agent = away ? null : fleet?.agents?.find((a) => a.paneId === paneId)
 
   useEffect(() => {
     const ch = new BroadcastChannel(CHANNEL)
@@ -57,7 +61,7 @@ export default function Solo({ paneId }) {
           : (
             <div className="viewer-empty">
               <Icon name="x" size={22} />
-              <p>This agent isn't running any more.</p>
+              <p>{away ? `This agent is in the herdr session ${home.current}. Switch back to it to see it here.` : "This agent isn't running any more."}</p>
               <button className="btn small" onClick={() => window.close()}>Close this window</button>
             </div>
           )}

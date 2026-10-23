@@ -8,11 +8,11 @@ import os from 'node:os'
 import pty from 'node-pty'
 import { sessionName, herdrSocket, herdrBin } from './runtime/herdr-cli.js'
 
-function runningSession(preferred, bin) {
-  if (preferred) return preferred
-  // The same session the rest of Bridge AI talks to, when it's running.
+// The same session the rest of Bridge AI shows (picked in the sidebar or Settings), looked up on
+// each connect so the view follows a switch. A picked session that isn't running isn't started here.
+function runningSession(bin) {
   const same = sessionName()
-  if (same && fs.existsSync(herdrSocket())) return same
+  if (same) return fs.existsSync(herdrSocket()) ? same : { stopped: same }
   try {
     const out = execFileSync(bin, ['session', 'list']).toString()
     const row = out.split('\n').slice(1).map((l) => l.trim().split(/\s+/)).find((c) => c[1] === 'running')
@@ -31,7 +31,7 @@ function cleanEnv() {
 const MIN_COLS = 100
 
 // Returns the upgrade handler for /api/tty; the server's upgrade router calls it.
-export function ttyHandler({ session } = {}) {
+export function ttyHandler() {
   const wss = new WebSocketServer({ noServer: true })
   const handle = (req, socket, head) => wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req))
 
@@ -46,9 +46,9 @@ export function ttyHandler({ session } = {}) {
       return ws.close(4001, 'too narrow')
     }
     const bin = await herdrBin()
-    const name = runningSession(session, bin)
-    if (!name) {
-      ws.send(JSON.stringify({ type: 'error', message: 'No running herdr session' }))
+    const name = runningSession(bin)
+    if (!name || name.stopped) {
+      ws.send(JSON.stringify({ type: 'error', message: name ? `The herdr session ${name.stopped} isn't running. Start it from the session menu in the sidebar.` : 'No running herdr session' }))
       return ws.close()
     }
     const term = pty.spawn(bin, ['session', 'attach', name], { name: 'xterm-256color', cols, rows, cwd: os.homedir(), env: cleanEnv() })

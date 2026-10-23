@@ -18,6 +18,7 @@ import { execFile } from 'node:child_process'
 import { DATA, HOME, IS_WIN, dataFile, ensureDir } from './paths.js'
 import { adapter, installed, loginPath } from './agents.js'
 import { agentEnv, quoteCommand } from './runtime/spawn.js'
+import { paneKey, inView, paneOfKey, adopt } from './scope.js'
 
 const FILE = dataFile('accounts.json')
 const DIR = path.join(DATA, 'accounts')
@@ -176,6 +177,7 @@ function usedNow() {
   if (!used || typeof used !== 'object') used = {}
   used.panes = used.panes && typeof used.panes === 'object' ? used.panes : {}
   used.sessions = used.sessions && typeof used.sessions === 'object' ? used.sessions : {}
+  if (adopt(used.panes)) saveUsed() // panes are filed per herdr session (scope.js)
   return used
 }
 function saveUsed() {
@@ -187,23 +189,26 @@ function saveUsed() {
 export function notePane(paneId, kind, id) {
   if (!paneId || !KINDS[kind] || !id) return
   const u = usedNow()
-  if (u.panes[paneId]?.id === id && u.panes[paneId]?.kind === kind) return
-  u.panes[paneId] = { id, kind }
+  const k = paneKey(paneId)
+  if (u.panes[k]?.id === id && u.panes[k]?.kind === kind) return
+  u.panes[k] = { id, kind }
   saveUsed()
 }
 export function movePane(from, to) {
   const u = usedNow()
-  if (!u.panes[from] || from === to) return
-  u.panes[to] = u.panes[from]
-  delete u.panes[from]
+  const [a, b] = [paneKey(from), paneKey(to)]
+  if (!u.panes[a] || a === b) return
+  u.panes[b] = u.panes[a]
+  delete u.panes[a]
   saveUsed()
 }
 // Panes that are gone: forget them, so a new pane given the same id later doesn't inherit one.
+// Only the session in view's: another herdr session's panes are just out of view.
 export function keepPanes(live) {
   const u = usedNow()
-  const gone = Object.keys(u.panes).filter((p) => !live.has(p))
+  const gone = Object.keys(u.panes).filter((k) => inView(k) && !live.has(paneOfKey(k)))
   if (!gone.length) return
-  for (const p of gone) delete u.panes[p]
+  for (const k of gone) delete u.panes[k]
   saveUsed()
 }
 export function noteSession(sessionId, id) {
@@ -217,7 +222,7 @@ export function noteSession(sessionId, id) {
 // The account of an agent of this kind in this pane, or that had this conversation.
 export function accountOf(kind, paneId, sessionId) {
   const u = usedNow()
-  const p = u.panes[paneId]
+  const p = paneId ? u.panes[paneKey(paneId)] : null
   const id = p && p.kind === kind ? p.id : sessionId ? u.sessions[sessionId] : null
   return id && has(kind, id) ? id : null
 }

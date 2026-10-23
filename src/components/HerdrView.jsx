@@ -15,15 +15,19 @@ const ONE_DARK = {
   brightBlack: '#4f5666', brightRed: '#ff616e', brightGreen: '#a5e075', brightYellow: '#f0a45d', brightBlue: '#4dc4ff', brightMagenta: '#de73ff', brightCyan: '#4cd1e0', brightWhite: '#e6e6e6',
 }
 
+const clearTerm = (term) => { try { term?.reset() } catch { /* disposed */ } }
+
 const TOUCH_KEYS = [
   ['⌃b', '\x02'], ['Esc', '\x1b'], ['Tab', '\t'], ['⇧Tab', '\x1b[Z'], ['↑', '\x1b[A'], ['↓', '\x1b[B'], ['←', '\x1b[D'], ['→', '\x1b[C'], ['⏎', '\r'], ['⌃c', '\x03'],
 ]
 
-export default function HerdrView({ active, onViewHotkey }) {
+// session: the herdr session Bridge AI shows (the sidebar's session menu); the view follows it.
+export default function HerdrView({ active, onViewHotkey, session: want }) {
   const hostRef = useRef(null)
   const termRef = useRef(null)
   const fitRef = useRef(null)
   const wsRef = useRef(null)
+  const soonRef = useRef(false) // reconnect at once (another session picked), not after a pause
   const [status, setStatus] = useState('idle')
   const [session, setSession] = useState(null)
   const [fontSize, setFontSize] = usePersisted('cc-herdr-font', window.innerWidth < 700 ? 10 : 13)
@@ -98,7 +102,8 @@ export default function HerdrView({ active, onViewHotkey }) {
         if (closed) return
         if (ev.code === 4001) { setStatus('Screen too narrow for herdr; use Terminals'); return }
         setStatus((s) => (s === 'live' || s === 'connecting' ? 'reconnecting' : s))
-        retry = setTimeout(connect, 2500)
+        retry = setTimeout(connect, soonRef.current ? 0 : 2500)
+        soonRef.current = false
       }
     }
     connect()
@@ -119,6 +124,14 @@ export default function HerdrView({ active, onViewHotkey }) {
     if (!active || !termRef.current) return
     requestAnimationFrame(() => { try { fitRef.current.fit() } catch { /* hidden */ } termRef.current.focus() })
   }, [active])
+
+  // Another session picked: attach to that one instead.
+  useEffect(() => {
+    if (!want || !session || want === session) return
+    clearTerm(termRef.current)
+    soonRef.current = true
+    wsRef.current?.close()
+  }, [want]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const reconnect = () => wsRef.current?.close()
   const sendRaw = (data) => {

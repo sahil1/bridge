@@ -118,13 +118,19 @@ export default function General({ onGo }) {
 
       <section className="st-sec">
         <h4>Where agents run</h4>
-        <p className="muted small">Built in needs nothing else. herdr (optional, installed separately) adds its own terminal UI and keeps agents running when Bridge AI stops; your agents then share your herdr session. Applies after a restart.</p>
+        <p className="muted small">Built in needs nothing else. herdr (optional, installed separately) adds its own terminal UI, split panes and the live Herdr view; your agents then share your herdr session. Applies after a restart.</p>
         <div className="seg ap-seg" role="radiogroup" aria-label="Runtime">
           {[['builtin', 'Built in'], ['herdr', 'herdr']].map(([id, label]) => (
             <button key={id} type="button" role="radio" aria-checked={(eff.runtime === 'herdr' ? 'herdr' : 'builtin') === id} className={(eff.runtime === 'herdr' ? 'herdr' : 'builtin') === id ? 'on' : ''} onClick={() => save({ runtime: id })}>{label}</button>
           ))}
         </div>
         {eff.runtime === 'herdr' && <HerdrSession value={eff.herdr?.session || ''} onSave={(session) => save({ herdr: { ...(eff.herdr || {}), session: session || null } })} />}
+        {eff.runtime !== 'herdr' && (
+          <>
+            <label className="ph-check small"><input type="checkbox" checked={eff.keepAgents !== false} onChange={(e) => save({ keepAgents: e.target.checked })} /> Keep agents running when Bridge AI quits</label>
+            <p className="muted small">They carry on through updates and restarts, and Bridge AI picks them up as they are when it starts. Off: they stop with it, and Claude Code and Codex resume their conversations next time.</p>
+          </>
+        )}
       </section>
     </div>
   )
@@ -153,6 +159,7 @@ function HerdrSession({ value, onSave }) {
         <option value="">Automatic{d.current && !value ? ` (now ${d.current})` : ''}: main, else the latest one running</option>
         {names.map((n) => { const s = d.sessions.find((x) => x.name === n); return <option key={n} value={n}>{n}{s ? (s.running ? ' · running' : ' · stopped') : ' · not found'}</option> })}
       </select>
+      <p className="muted small" style={{ flexBasis: '100%', margin: 0 }}>Switches at once. The session menu at the top of the sidebar also starts, stops and opens sessions.</p>
     </div>
   )
 }

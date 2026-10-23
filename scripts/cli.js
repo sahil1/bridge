@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // bridge-ai: Bridge AI from your terminal. Run `npm link` once in the repo to put it on your PATH.
 //   bridge-ai start [dev|phone]     start the server (same as npm start)
-//   bridge-ai stop                  stop it
+//   bridge-ai stop [agents]         stop it (agents keep running; with "agents", them too)
 //   bridge-ai open                  open the app in your browser
 //   bridge-ai list                  every agent and shell, numbered
 //   bridge-ai attach [target]       work in an agent from this terminal; Ctrl+] to detach.
@@ -365,7 +365,7 @@ const run = {
   help: () => console.log(`bridge-ai: Bridge AI from your terminal
 
   bridge-ai start [dev|phone]   start the server
-  bridge-ai stop                stop it
+  bridge-ai stop [agents]       stop it; agents keep running unless you add "agents"
   bridge-ai open                open the app in your browser (${BASE})
   bridge-ai list                every agent and shell, numbered
   bridge-ai attach [target]     work in an agent from this terminal (Ctrl+] detaches)

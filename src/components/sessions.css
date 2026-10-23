@@ -1,0 +1,74 @@
+/* herdr sessions (Sessions.jsx): the session switcher under the sidebar's Spaces header, and at
+   the top of the phone's Agents tab. */
+.hs { position: relative; margin: 0 8px 6px; }
+.hs-trigger {
+  display: flex; align-items: center; gap: 6px; width: 100%; height: 30px; padding: 0 8px 0 9px;
+  border-radius: 8px; border: 1px solid var(--line); background: transparent; color: var(--ink-2);
+  font-size: 12.5px; text-align: left; transition: background .12s, border-color .12s;
+}
+.hs-trigger:hover, .hs-trigger.on { background: var(--pane); border-color: var(--line-2); color: var(--ink); }
+.hs-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.hs-icon { flex: none; color: var(--ink-3); }
+.hs-kind { flex: none; font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.hs-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--ink); }
+.hs-state { flex: none; font-size: 11px; color: var(--ink-3); }
+.hs-caret { flex: none; margin-left: auto; color: var(--ink-3); transform: rotate(90deg); transition: transform .15s; }
+.hs-caret.flip-up { transform: rotate(-90deg); }
+.hs-badge {
+  flex: none; display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 5px; border-radius: 9px;
+  background: var(--needs); color: #fff; font: 700 10px var(--font); font-variant-numeric: tabular-nums;
+}
+.hs-trigger .hs-badge { margin-left: auto; }
+.hs-trigger .hs-badge + .hs-caret { margin-left: 0; }
+
+.hs-menu {
+  position: absolute; z-index: 60; top: calc(100% + 4px); left: 0; right: 0; min-width: 228px; padding: 4px;
+  border-radius: 10px; background: var(--pane); border: 1px solid var(--line-2);
+  box-shadow: 0 10px 30px rgb(0 0 0 / .14), 0 2px 6px rgb(0 0 0 / .06);
+}
+.hs-head { padding: 6px 9px 4px; font-size: 10.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
+.hs-empty { margin: 4px 9px 8px; font-size: 12px; color: var(--ink-2); }
+.hs-row { display: flex; align-items: center; gap: 2px; border-radius: 7px; }
+.hs-row:hover { background: var(--pane-2); }
+.hs-row.here { background: var(--accent-soft); }
+.hs-pick {
+  display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; height: 32px; padding: 0 8px 0 9px;
+  border-radius: 7px; font-size: 12.5px; color: var(--ink); text-align: left;
+}
+.hs-pick:focus-visible, .hs-act:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.hs-pick:disabled { cursor: default; }
+.hs-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: transparent; border: 1.5px solid var(--ink-3); }
+.hs-dot.on { background: var(--good); border-color: var(--good); }
+.hs-row-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hs-row.here .hs-row-name { font-weight: 600; }
+.hs-row-state { flex: none; font-size: 11px; color: var(--ink-3); }
+.hs-pick .hs-badge, .hs-check { margin-left: auto; }
+.hs-check { flex: none; color: var(--accent); }
+.hs-act { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 7px; color: var(--ink-3); }
+.hs-act:hover:not(:disabled) { background: var(--pane-3); color: var(--ink); }
+.hs-act.danger:hover:not(:disabled) { color: var(--critical); background: color-mix(in srgb, var(--critical) 10%, transparent); }
+.hs-act:disabled { opacity: .35; cursor: default; }
+
+.hs-new { display: flex; align-items: center; gap: 6px; padding: 4px; }
+.hs-input {
+  flex: 1; min-width: 0; height: 28px; padding: 0 8px; border-radius: 7px; border: 1px solid var(--accent);
+  background: var(--pane); color: var(--ink); font: 500 12.5px var(--font-mono); outline: none; box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.hs-new .btn.small { flex: none; }
+
+.hs-note { margin: 6px 2px 0; font-size: 12px; line-height: 1.4; color: var(--ink-2); }
+.hs-note.bad { color: var(--critical); }
+.hs-note.in-menu { margin: 4px 9px 6px; }
+.hs-note .link-btn { display: inline; margin-left: 6px; font-size: 12px; }
+.hs-down { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; margin-top: 6px; padding: 7px 9px; border-radius: 8px; background: var(--pane-2); border: 1px solid var(--line); font-size: 12px; color: var(--ink-2); }
+.hs-down .ghost-btn { margin-left: auto; height: 24px; }
+
+/* Phone: a full-width bar at the top of the Agents tab, with room for a thumb. */
+.hs-phone { margin: 10px 14px 4px; }
+.hs-phone .hs-trigger { height: 40px; border-radius: 11px; background: var(--pane); border-color: var(--line-2); font-size: 14px; }
+.hs-phone .hs-menu { padding: 6px; }
+.hs-phone .hs-pick { height: 44px; font-size: 14px; }
+.hs-phone .hs-act { width: 40px; height: 40px; }
+.hs-phone .hs-input { height: 36px; font-size: 14px; }
+.hs-phone .hs-new .btn.small { height: 36px; }
+.hs-phone .menu-item { height: 40px; font-size: 14px; }

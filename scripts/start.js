@@ -37,7 +37,8 @@ const portFree = (port) => new Promise((resolve) => {
 
 if (mode === 'dev') {
   // Hot reload: UI edits show instantly (Vite, on port + 1); server edits restart the API by
-  // itself (node --watch). Built-in agents restart with it and resume their sessions.
+  // itself (node --watch). Built-in agents keep running through that in the terminal host (with
+  // Keep agents running off, they restart with it and resume their sessions).
   for (const p of [cfg.port, cfg.port + 1]) {
     if (!(await portFree(p))) { console.error(`Port ${p} is already in use. Run "npm run stop" first.`); process.exit(1) }
   }

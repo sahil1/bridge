@@ -130,6 +130,27 @@ const cmds = {
     console.log(`${r.queued ? 'Queued' : 'Sent'} ${r.command} to ${pane}. Run bridge model ${pane} in a moment to see it took.`)
   },
 
+  // Move an agent's work to another kind of agent (Claude Code to Codex, say), only when asked: it
+  // starts in the same folder with a summary of the conversation; the old one goes to Closed agents.
+  async handoff(args) {
+    const opt = (k) => { const i = args.indexOf(k); if (i < 0) return null; const v = args[i + 1]; args.splice(i, 2); return v }
+    const flag = (k) => { const i = args.indexOf(k); if (i >= 0) args.splice(i, 1); return i >= 0 }
+    const model = opt('--model'), account = opt('--account'), keep = flag('--keep')
+    const [pane, kind] = args
+    if (!pane || !kind) throw new Error('Usage: bridge handoff <pane> <kind> [--model m] [--account name] [--keep]')
+    const a = (await fleet()).agents.find((x) => x.paneId === pane)
+    if (!a) throw new Error(`No agent in pane ${pane}. Run bridge agents.`)
+    if (a.chief) throw new Error("That's you. Switching your own agent is done from the menu in your chat.")
+    let id
+    if (account) {
+      const g = (await api('/accounts')).find((x) => x.kind === kind)
+      id = g?.accounts.find((x) => x.id === account || x.label.toLowerCase() === account.toLowerCase())?.id
+      if (!id) throw new Error(`No ${kind} account called ${account}.${g ? ` Its accounts: ${g.accounts.map((x) => x.label).join(', ')}.` : ''}`)
+    }
+    const r = await api(`/agents/${encodeURIComponent(pane)}/handoff`, { method: 'POST', body: { to: kind, model: model || undefined, account: id, keep } })
+    console.log(`Handed ${pane} (${where(a)}) to ${kind}. It's now pane ${r.paneId}, in the same folder, starting from a summary of the conversation. ${r.closed ? `The ${a.kind} agent ${r.archived ? 'is in Closed agents' : 'closed'}.` : `The ${a.kind} agent stays open too.`}`)
+  },
+
   async send(args) {
     const [pane, ...rest] = args
     let text = rest.join(' ')
@@ -268,6 +289,9 @@ const cmds = {
   bridge send <pane> "message"      hand it work; queued if it's busy (- reads stdin)
   bridge model <pane> [name]        the model it's on; with a name (or default), switch it (Claude Code in place,
                                     Codex restarts on it with the same conversation)
+  bridge handoff <pane> <kind> [--model m] [--account name] [--keep]
+                                    move its work to another kind of agent (codex, claude, gemini...): it starts in
+                                    the same folder with a summary of the conversation; the old one goes to Closed agents
   bridge new --cwd <folder> [--space "Name"] [--name "tab"] [--kind claude|codex|...] "brief"
                                     start a new agent; an existing space name adds a tab there (- reads stdin)
       [--own-branch [--branch name] [--base branch]]

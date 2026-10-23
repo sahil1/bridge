@@ -62,7 +62,7 @@ The first time you open it, Bridge AI looks at what's already on your computer: 
 npm start -- dev     # hot reload: open :7421; UI edits appear live, server edits restart the API
 npm run desktop:dev  # the desktop app with hot reload (runs next to the installed app)
 npm start -- phone   # also publish over Tailscale HTTPS for your phone
-npm run stop         # stop the server
+npm run stop         # stop the server; agents keep running (npm run stop -- agents stops them too)
 ```
 
 ### From your terminal
@@ -101,7 +101,7 @@ Bridge AI finds the agent CLIs on your PATH. Each one is described in [`server/a
 | Agent | Command | Chat view | Extras |
 |---|---|---|---|
 | Claude Code | `claude` | ✓ | subagents, slash commands, question cards, safe sending |
-| Codex | `codex` | ✓ | slash commands |
+| Codex | `codex` | ✓ | slash commands, question cards, safe sending |
 | Gemini CLI | `gemini` | terminal | |
 | GitHub Copilot CLI | `copilot` | terminal | |
 | OpenCode | `opencode` | terminal | |
@@ -135,12 +135,24 @@ Bridge AI checks on running agents every 10 to 20 seconds, less often when sever
 
 | Runtime | What it is | When it's used |
 |---|---|---|
-| **Built in** | Bridge AI runs each agent in its own terminal (node-pty, with a headless xterm keeping the screen). Nothing else to install. Spaces and tabs are saved, and after a restart Claude Code and Codex sessions resume where they were. | Default |
-| **herdr** | [herdr](https://herdr.dev) is a terminal multiplexer for agents. Bridge AI drives it and adds a live Herdr view (`Alt+2`) with herdr's own UI in the browser. Agents keep running when Bridge AI stops. | Optional. Only when you choose it; install herdr separately |
+| **Built in** | Bridge AI runs each agent in its own terminal (node-pty, with a headless xterm keeping the screen). Nothing else to install. The terminals live in a small terminal host process, so agents keep running when Bridge AI quits, restarts or updates, and it picks them up as they are, screen and scrollback included. After a reboot, Claude Code and Codex sessions resume where they were. | Default |
+| **herdr** | [herdr](https://herdr.dev) is a terminal multiplexer for agents. Bridge AI drives it, and you get herdr's own terminal UI, split panes and the live Herdr view (`Alt+2`) in the browser. | Optional. Only when you choose it; install herdr separately |
 
 Choose in Settings › General › Where agents run, or set `"runtime": "builtin"` or `"herdr"` in your config. herdr is never required, and Bridge AI won't switch to it just because it's installed.
 
-Bridge AI joins the herdr session you already have running; it doesn't start a new one. It shows the agents and panes in it, and anything you start from Bridge AI opens there too, so you see it in herdr as well. If you run several sessions, pick one in Settings › General › Where agents run (or set `herdr.session`). Bridge AI then uses that session for everything: the agent list, the Herdr view and "Open in terminal". To use two sessions side by side, run a second copy of Bridge AI with its own data folder and port (`BRIDGE_HOME=~/.bridge-ai-work BRIDGE_PORT=7430 npm start`).
+To have built-in agents stop with Bridge AI instead, turn off **Keep agents running when Bridge AI quits** there (`"keepAgents": false`); they resume next time, as after a reboot. **Quit and Stop Agents** in the app's menu, or `npm run stop -- agents`, stops them either way. On Windows an app update still stops them (Windows can't replace a running program) and they resume after it; in the Docker image they stop and resume with the container.
+
+The terminal host listens on no network. Bridge AI reaches it over a socket in a folder only you can open (a named pipe on Windows) and must give it a random token first. It exits by itself once it has no agents and no Bridge AI to keep them for.
+
+Bridge AI joins the herdr session you already have running. It shows the agents and panes in it, and anything you start from Bridge AI opens there too, so you see it in herdr as well.
+
+**Several sessions** (`herdr --session work`): the session menu at the top of the sidebar (on the phone, at the top of Agents) lists every session herdr knows, running or not, with how many agents wait on you in each. Pick one and the agent list, the board and the Herdr view switch to it at once. The pick is saved as `herdr.session`, the same setting as Settings › General › Where agents run, so the two stay in step. From the menu you can also:
+
+- start a new session in the background (herdr's headless server, `herdr --session <name> server`), or start a stopped one again with its saved layout;
+- stop one (`herdr session stop`), after you confirm. Bridge AI refuses while any agent in it is working or waiting on you;
+- open one in your terminal app (`herdr session attach`). If a new session can't start in the background, the menu offers this instead.
+
+Each session keeps its own open tabs, queued messages and muted agents. Notifications cover the session you're looking at, and switching never announces anything: agents in the other sessions are out of view, not finished. herdr notes that a server started from a background job may not reach the macOS Keychain; if a tool in a session started here can't, stop it and start it from your terminal. To watch two sessions side by side, run a second copy of Bridge AI with its own data folder and port (`BRIDGE_HOME=~/.bridge-ai-work BRIDGE_PORT=7430 npm start`).
 
 ## Your data and settings
 
@@ -152,6 +164,7 @@ Everything personal lives in `~/.bridge-ai` (set `BRIDGE_HOME` to move it), neve
 | `chief/` | The chief of staff's folder: its instructions, `state/playbook.md` (what it has learned about how you work), `state/ledger.md` (its hand-offs), `state/tasks.md` (tasks it does itself) and `work/` (what it makes for them) |
 | `routines.json`, `ideas.md` | Recurring jobs and your ideas backlog ([`routines.example.json`](routines.example.json) shows the shape) |
 | `runtime.json` | Spaces and tabs for the built-in runtime |
+| `host/` | The terminal host's token, socket and log (built-in runtime), readable only by you |
 | `cloud-keys.json`, `cloud-agents.json` | Your cloud agent keys (readable only by you, never given to the agents on your computer) and the cloud agents you started |
 | `cache/` | Queued messages, watchlist, uploads, mail rules |
 
@@ -163,7 +176,8 @@ Settings start from [`config.example.json`](config.example.json). Put yours in `
 | `defaultAgent` | Agent used when none is picked (`claude`, `codex`, `gemini`, ...) |
 | `chief.kind` | Agent the chief of staff runs on |
 | `runtime` | `builtin` (default) or `herdr` |
-| `herdr.session` | Which herdr session to use when you run more than one (`herdr --session work`). Unset: `main`, else the latest one running. Also in Settings › General |
+| `keepAgents` | Built-in agents keep running when Bridge AI quits, restarts or updates (default `true`). Also in Settings › General |
+| `herdr.session` | Which herdr session Bridge AI shows when you run more than one (`herdr --session work`). Unset: `main`, else the latest one running. Switch from the sidebar's session menu or Settings › General; applies at once |
 | `port` | Default 7420 |
 | `location` | `{ label, lat, lon, timezone }` for weather and the brief |
 | `mail.myDomains` | Your organisation's email domains, so colleagues aren't marked External |
@@ -190,12 +204,13 @@ You rarely need to edit the file by hand. **Settings** (the gear in the top bar,
 - **Each agent** has Chat (its transcript), Terminal (a live mirror you can type in), Files (a read-only browser with syntax highlighting and markdown) and Changes (git status and diffs).
 - **Review and ship**: in Changes, click lines of a diff to comment and send all your comments to the agent as one message; commit and push, and open a GitHub pull request (with `gh`) drafted from your commits, then watch its checks there.
 - **Message box**: `@` to reference files and folders, `/` for slash commands, ↑ for earlier messages, voice notes (whisper.cpp, on your machine) and attachments. Messages to a busy agent are queued and sent when it's free.
-- **Questions and approvals** from an agent show as cards you can click.
+- **Questions and approvals** from an agent show as cards you can click. That includes the questions Codex asks while it keeps working: the agent shows as needing you, and the card stays until you answer, even after Codex's own screen has dropped the question at the end of its turn.
 - **What each reply changed**: "Changed 3 files" under a reply opens its own diff per file. With Claude Code, **Undo this reply** puts the files and the chat back to just before your message, without sending anything.
 - **Subagents** that Claude Code starts show live above the message box.
 - **Consult other models**: the chief of staff (or you, with `node ~/.bridge-ai/chief/bin/bridge ask`) can put a one-off question to Grok, GPT, Claude, Gemini, Muse Spark, Perplexity, DeepSeek, a local Ollama model and others, for a second opinion, live news, or a very long document. It uses each agent's CLI and your existing subscription where it can, and an API key from Model providers otherwise. Settings › Agents shows who is reachable and how.
 - **Plain chats**: talk to Claude, Codex or any agent directly, like its own app, with no project folder (New agent › Plain chat, or New chat in `⌘K`).
 - **Several accounts**: a work and a personal Claude (or Codex), running side by side. **Add another account** is in the usage chip's menu in the top bar, in New agent's Account row and in `⌘K`: name it, sign in right there (the agent's own login, for that account only), then start an agent on it. Each agent shows the account it's on and keeps it when you fork or reopen it, and its ⋯ menu can continue the conversation on another account. An account keeps only its own login; settings, skills and history stay shared.
+- **Hand off to another agent**: the model chip in the message box also lists your other installed agents and whether each is signed in. Pick one (Claude Code to Codex, say) and it starts in the same folder, on the same branch or worktree, on the account and model you choose. Agents can't open each other's conversations, so it starts with a handover Bridge AI builds from the transcript and git: your goal, the recent messages, changed files, where it stopped and what's still open (or, if you ask, the old agent's own summary). You can read it before it goes. The old agent goes to Closed agents unless you keep it open too. In the chief of staff's chat, the same menu switches the agent the chief runs on.
 - **Chief of staff**: tell it what you need. Project work goes to the agent already on that topic, or a new one, and it tells you when that's done. Standalone tasks it does itself: questions and research, drafts (emails, docs, plans, summaries), checklists and planning. It writes only in its own `work/` folder and never edits your projects. Its own tasks are in a Tasks panel above its message box: add one there to send it to the chief, mark one done or reopen it, and open what a finished task produced. The morning brief mentions its open tasks. It learns where work lives and how you like things done, in a playbook you can read and edit.
 - **Today**: schedule, inbox ranking, morning brief, routines, ideas, usage and quota, weather, markets and news.
 - **Usage**: tokens and cost per day, model and project, with a year heatmap (from your agents' local logs via ccusage).

@@ -6,7 +6,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { draftIn, promptSafe } from './promptsafe.js'
+import { draftIn, codexBox, promptSafe } from './promptsafe.js'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 // eslint-disable-next-line no-control-regex
@@ -149,17 +149,6 @@ function codexSelected(s) {
     if (/^(\x1b\[[0-9;]*m)*›/.test(raw) && /\x1b\[[0-9;]*\b7m/.test(raw.slice(raw.indexOf('›')))) return plain(raw).replace(/^›\s*/, '').trim()
   }
   return ''
-}
-// Codex's input box: the last "› " line near the bottom; empty when only its dim placeholder shows.
-function codexBox(s) {
-  const lines = String(s || '').replace(/\r/g, '').split('\n')
-  for (let i = lines.length - 1; i >= Math.max(0, lines.length - 10); i--) {
-    const raw = lines[i]
-    if (!/^(\x1b\[[0-9;]*m)*›/.test(raw)) continue
-    const after = raw.slice(raw.indexOf('›') + 1).replace(/^(\x1b\[0m)?\s?/, '')
-    return /^\x1b\[[0-9;]*\b2m/.test(after) ? '' : plain(raw).replace(/^›\s*/, '').trim()
-  }
-  return null
 }
 
 export async function codexRewindAndSend(rt, agent, { original, back = 1, text }) {

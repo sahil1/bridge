@@ -3,25 +3,21 @@
 // so a herdr restart never leaves a stale socket behind.
 import net from 'node:net'
 import { herdrSocket } from './herdr-cli.js'
-import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-let sockPath = null
-// Same lookup the CLI wrapper uses, so this works however the server was started.
-function socket() {
-  if (sockPath && fs.existsSync(sockPath)) return sockPath
-  sockPath = herdrSocket() || path.join(os.homedir(), '.config', 'herdr', 'sessions', 'main', 'herdr.sock')
-  return sockPath
-}
+// Same lookup the CLI wrapper uses, so this works however the server was started, and follows
+// a switch to another session at once.
+const socket = () => herdrSocket() || path.join(os.homedir(), '.config', 'herdr', 'sessions', 'main', 'herdr.sock')
 
 let seq = 0
-export function call(method, params, timeout = 8000) {
+// at: another session's socket (the session menu's "needs you" counts), else the one in view.
+export function call(method, params, timeout = 8000, at = socket()) {
   return new Promise((resolve, reject) => {
-    const s = net.connect(socket())
+    const s = net.connect(at)
     let buf = ''
     const timer = setTimeout(() => { s.destroy(); reject(new Error(`herdr ${method} timed out`)) }, timeout)
-    s.on('error', (e) => { clearTimeout(timer); sockPath = null; reject(e) })
+    s.on('error', (e) => { clearTimeout(timer); reject(e) })
     s.on('data', (d) => {
       buf += d
       const nl = buf.indexOf('\n')

@@ -4,7 +4,7 @@
 import { caps } from './agents.js'
 
 // eslint-disable-next-line no-control-regex
-const plain = (s) => s.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\x1b\][^\x07]*\x07/g, '').replace(/\r/g, '')
+const plain = (s) => s.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\x1b\][^\x07]*(\x07|\x1b\\)/g, '').replace(/\r/g, '')
 const RULE = /^\s*─{3,}/
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -42,6 +42,19 @@ export function draftIn(ansi) {
   return null
 }
 
+// Codex's input box: the last "› " line near the bottom; empty when only its dim placeholder shows,
+// null when there's none.
+export function codexBox(s) {
+  const lines = String(s || '').replace(/\r/g, '').split('\n')
+  for (let i = lines.length - 1; i >= Math.max(0, lines.length - 10); i--) {
+    const raw = lines[i]
+    if (!/^(\x1b\[[0-9;]*m)*›/.test(raw)) continue
+    const after = raw.slice(raw.indexOf('›') + 1).replace(/^(\x1b\[0m)?\s?/, '')
+    return /^\x1b\[[0-9;]*\b2m/.test(after) ? '' : plain(raw).replace(/^›\s*/, '').trim()
+  }
+  return null
+}
+
 // A one-line name for whatever is covering the input box, for the "held" note.
 function coverName(ansi) {
   if (/Enter to select|Review your answers/.test(plain(String(ansi || '')))) return 'a question is waiting for your answer'
@@ -73,6 +86,21 @@ export async function promptSafe(rt, paneId, text, agent) {
       if (draftIn(await rt.read(paneId, 30))) throw new Error(`The agent's input box already has text in it ("${left.slice(0, 80)}") and it couldn't be cleared. Clear it in the Terminal tab, then send again.`)
       cleared = left
     }
+  }
+  // Codex: keys typed in its Terminal tab and left there (a "1" meant for a menu) would start the
+  // message. Cleared with Backspace: Ctrl+C would also stop a turn that's running. No box found
+  // (something covers it): sent as before.
+  if (agent?.kind === 'codex') {
+    try {
+      for (let i = 0; i < 2; i++) {
+        const left = codexBox(await rt.read(paneId, 30))
+        if (!left) break
+        cleared = cleared || left
+        await rt.input(paneId, [{ keys: Array(Math.min(left.length + 2, 400)).fill('backspace') }])
+        await sleep(300)
+      }
+    } catch { /* couldn't read the screen: send as before */ }
+    if (cleared && codexBox(await rt.read(paneId, 30).catch(() => ''))) throw new Error(`Codex's input box already has text in it ("${cleared.slice(0, 80)}") and it couldn't be cleared. Clear it in the Terminal tab, then send again.`)
   }
   await rt.prompt(paneId, text)
   return { ok: true, cleared }

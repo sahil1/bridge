@@ -2,6 +2,7 @@
   "port": 7420,
   "host": "127.0.0.1",
   "runtime": "builtin",
+  "keepAgents": true,
   "defaultAgent": "claude",
   "name": "",
   "location": null,

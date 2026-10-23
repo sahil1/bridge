@@ -29,6 +29,8 @@ const app = {
 if (!app || !fs.existsSync(app.exe)) { console.error(`smoke: no built app found for ${process.platform} (${app?.exe})`); process.exit(1) }
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-smoke-'))
+// Terminals still run in the terminal host, but end with the server here, so nothing is left behind.
+fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ keepAgents: false }))
 const log = []
 const server = spawn(app.exe, [path.join(app.root, 'server', 'index.js')], {
   cwd: app.root,

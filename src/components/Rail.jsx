@@ -4,6 +4,7 @@ import Icon, { StatusDot } from './Icon.jsx'
 import { usePersisted } from './layout.jsx'
 import { api, usePoll, fmtRelative, openInTerminal } from '../api.js'
 import { CloudMark, linkOf, whereOf } from './cloudBits.jsx'
+import SessionSwitcher from './Sessions.jsx'
 
 // Mirrors herdr's sidebar: numbered workspaces, each with its tabs. Spaces fold,
 // every row shows the folder it works in, and a ⋯ menu covers rename/close/copy.
@@ -269,6 +270,7 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
           <button className="rail-toggle" onClick={onToggle} aria-label="Collapse sidebar" title="Collapse sidebar"><Icon name="panel-left" size={16} /></button>
         </span>
       </div>
+      <SessionSwitcher fleet={fleet} />
 
       <div className="rail-scroll">
         {!fleet && <div className="skeleton-rows pad"><div /><div /><div /></div>}
@@ -407,7 +409,7 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
         )}
       </div>
       {flash && <div className="rail-flash" role="status">{flash}</div>}
-      {fleet && !hasMate && (
+      {fleet && !hasMate && !fleet.down && (
         <div className="rail-foot">
           <button className="btn primary block" data-tour="chief" onClick={launch} disabled={launching}>
             <Icon name="helm" /> {launching ? 'Launching…' : 'Start chief of staff'}

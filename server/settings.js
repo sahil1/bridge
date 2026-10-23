@@ -8,8 +8,8 @@ import { ROOT, dataFile, ensureDir, DATA, IS_MAC } from './paths.js'
 import { gitReady } from './gitready.js'
 
 export const FILE = dataFile('config.json')
-// Changes to these only take effect when the server starts again.
-export const RESTART_KEYS = ['port', 'host', 'runtime', 'herdr', 'allowedHosts']
+// Changes to these only take effect when the server starts again. (herdr.session applies at once.)
+export const RESTART_KEYS = ['port', 'host', 'runtime', 'allowedHosts']
 
 const readJSON = (f, d = {}) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')) } catch { return d } }
 export const readUser = () => readJSON(FILE)
