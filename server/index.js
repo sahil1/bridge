@@ -1077,6 +1077,21 @@ app.delete('/api/meetings/:id/sections/:i', wrap((req) => meetings.removeSection
 // Who said a line (by you), or every line on the call worked out by a model.
 app.patch('/api/meetings/:id/speakers', wrap((req) => meetings.setSpeaker(req.params.id, String(req.body?.key || ''), req.body?.name ?? null, { all: !!req.body?.all })))
 app.post('/api/meetings/:id/speakers', wrap((req) => meetings.nameSpeakers(req.params.id, { model: req.body?.model })))
+// The transcript cleaned up by a model (it happens by itself when a meeting ends), and back to as
+// heard: one line (key), or all of it.
+app.post('/api/meetings/:id/cleanup', wrap((req) => meetings.cleanup(req.params.id, { model: req.body?.model })))
+app.post('/api/meetings/:id/cleanup/undo', wrap((req) => meetings.uncleanLine(req.params.id, req.body?.key == null ? null : String(req.body.key))))
+// AI Assist while it records: on or off (and so for the meetings after), Suggest now, and a
+// suggestion kept (into your notes) or dismissed.
+app.post('/api/meetings/:id/assist', wrap(async (req) => {
+  if (typeof req.body?.on === 'boolean') {
+    const r = meetings.setAssist(req.params.id, req.body.on)
+    afterChange(settings.patch({ meetings: { assist: req.body.on } }))
+    return r
+  }
+  return meetings.assist(req.params.id, { now: true, model: req.body?.model })
+}))
+app.patch('/api/meetings/:id/assist/:aid', wrap((req) => meetings.markAssist(req.params.id, req.params.aid, String(req.body?.state || ''))))
 // A look at the screen being watched while someone on the call talks: its text is kept, not the
 // picture, to tell who said what.
 app.post('/api/meetings/:id/glances', express.raw({ type: () => true, limit: '16mb' }), wrap((req) => meetings.glance(req.params.id, req.body)))

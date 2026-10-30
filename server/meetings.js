@@ -63,6 +63,48 @@ function echo(a, b) {
   for (const w of x) if (y.has(w)) same++
   return same / x.size >= 0.6
 }
+// A line of yours with your words and the call's (you both talked in that stretch) keeps only
+// yours: a run of four or more words that Them said around then, three words at a time, is cut.
+// The two hear the same words a little differently, so a few words between two such runs go too,
+// and so does a scrap of four words or fewer left beside a cut (the rest of a sentence of theirs
+// heard another way). What's left, or null when that's nothing worth a line.
+const tokens = (s) => [...String(s).matchAll(/[\p{L}\p{N}']+/gu)].map((x) => ({ w: x[0].toLowerCase(), at: x.index }))
+const SCRAP = 4
+function unecho(text, near) {
+  const you = tokens(text)
+  if (you.length < 4) return text
+  const grams = new Set()
+  const ws = near.flatMap((t) => tokens(t.text).map((x) => x.w))
+  for (let i = 0; i + 2 < ws.length; i++) grams.add(`${ws[i]} ${ws[i + 1]} ${ws[i + 2]}`)
+  const hit = you.map(() => false)
+  for (let i = 0; i + 2 < you.length; i++) if (grams.has(`${you[i].w} ${you[i + 1].w} ${you[i + 2].w}`)) hit[i] = hit[i + 1] = hit[i + 2] = true
+  // Runs of hits, joined across a gap of up to two words, or up to four between two runs of four.
+  const runs = []
+  for (let i = 0; i < you.length; i++) {
+    if (!hit[i]) continue
+    let j = i
+    while (j + 1 < you.length && hit[j + 1]) j++
+    const last = runs[runs.length - 1]
+    const gap = last ? i - last.b - 1 : Infinity
+    if (gap <= 2 || (gap <= SCRAP && last.n >= 4 && j - i + 1 >= 4)) { last.b = j; last.n += j - i + 1 } else runs.push({ a: i, b: j, n: j - i + 1 })
+    i = j
+  }
+  const cut = runs.filter((r) => r.n >= 4)
+  if (!cut.length) return text
+  // The pieces between the cuts, each without a scrap beside a cut: the start of one up to its
+  // first full stop, the end of one after its last.
+  const bounds = [0, ...cut.flatMap((r) => [you[r.a].at, r.b + 1 < you.length ? you[r.b + 1].at : text.length]), text.length]
+  const count = (x) => tokens(x).length
+  const out = []
+  for (let k = 0; k < bounds.length; k += 2) {
+    let piece = text.slice(bounds[k], bounds[k + 1])
+    if (k > 0) { const lead = /^[^.?!]*(?:[.?!]+\s*|$)/.exec(piece)[0]; if (count(lead) <= SCRAP) piece = piece.slice(lead.length) }
+    if (k + 2 < bounds.length) { const i = piece.search(/[.?!][^.?!]*$/); const trail = i < 0 ? piece : piece.slice(i + 1); if (count(trail) <= SCRAP) piece = i < 0 ? '' : piece.slice(0, i + 1) }
+    out.push(piece)
+  }
+  const left = out.join(' ').replace(/\s+/g, ' ').replace(/\s+([,.!?;:])/g, '$1').replace(/([,;:])(?:\s*[,.;:])+/g, '$1').replace(/^[\s,.;:-]+/, '').replace(/[\s,;:-]+$/, '').trim()
+  return count(left) >= 2 ? left : null
+}
 // The transcript as shown: names fixed from meeting memory, and your own edits on top. Both sit
 // beside transcript.jsonl (which only ever gets added to), so what was heard stays and an edit
 // can be undone: a line edited or fixed says what was heard.
@@ -71,24 +113,45 @@ const editsOf = (id) => readJSON(path.join(dirOf(id), 'edits.json'), {})
 // Who said a line, when it's known: { key: { name, guess } }. guess: named by a model (nameSpeakers),
 // not by you. name null: Them, as you put it back (in a call with one other person, who it'd be).
 const namesOf = (id) => readJSON(path.join(dirOf(id), 'speakers.json'), {})
-export function transcript(id, { raw = false } = {}) {
+// The transcript cleaned up by a model once the meeting ended (cleanup): { fix: { key: text },
+// drop: [key], model, at }.
+const cleanedOf = (id) => readJSON(path.join(dirOf(id), 'cleaned.json'), null)
+// clean: with that cleanup (false: as heard, for the next one). dropped: with the lines it left
+// out, marked, for the page to show on request.
+export function transcript(id, { raw = false, clean = true, dropped = false } = {}) {
   // Without lines of only an engine's notes ("[END]"), kept by versions before 3.0.9.
   const all = lines(id).filter((l) => !l.text || speech.spoken(l.text)).sort((a, b) => a.t0 - b.t0)
   const them = all.filter((l) => l.src === 'them' && l.text)
-  const kept = all.filter((l) => !(l.src === 'you' && l.text && them.some((t) => t.t1 > l.t0 - 2 && t.t0 < l.t1 + 2 && echo(l, t))))
+  const kept = []
+  for (const l of all) {
+    const near = l.src === 'you' && l.text ? them.filter((t) => t.t1 > l.t0 - 5 && t.t0 < l.t1 + 5) : []
+    if (!near.length) { kept.push(l); continue }
+    // Their words cut out first; then what's left that's still mostly theirs (heard a little
+    // differently) is left out whole.
+    const text = unecho(l.text, near)
+    if (!text || near.some((t) => t.t1 > l.t0 - 2 && t.t0 < l.t1 + 2 && echo({ text }, t))) continue
+    kept.push(text === l.text ? l : { ...l, text, heard: l.text, trimmed: true })
+  }
   if (raw) return kept
   const edits = editsOf(id)
   const names = namesOf(id)
+  const c = clean ? cleanedOf(id) : null
+  const drop = new Set(c?.drop || [])
   let one = null
   try { one = onlyGuest(meta(id)) } catch { /* gone */ }
-  return kept.map((l) => {
+  const out = []
+  for (const l of kept) {
     const k = keyOf(l)
     const s = names[k]
     const n = s ? (s.name ? { name: s.name, guess: !!s.guess } : {}) : one && l.src === 'them' ? { name: one, guess: true } : {}
-    if (edits[k] != null) return { ...l, key: k, ...n, text: edits[k], edited: true, heard: l.text }
-    const t = memory.fix(l.text)
-    return t === l.text ? { ...l, key: k, ...n } : { ...l, key: k, ...n, text: t, fixed: true, heard: l.text }
-  })
+    const heard = l.heard ?? l.text
+    if (edits[k] != null) { out.push({ ...l, key: k, ...n, text: edits[k], edited: true, heard }); continue }
+    if (drop.has(k)) { if (dropped) out.push({ ...l, key: k, ...n, dropped: true, heard }); continue }
+    const fixed = c?.fix?.[k]
+    const t = memory.fix(fixed ?? l.text)
+    out.push(t === l.text ? { ...l, key: k, ...n } : { ...l, key: k, ...n, text: t, heard, ...(fixed != null ? { cleaned: true } : { fixed: true }) })
+  }
+  return out
 }
 const clock = (s) => { const t = Math.max(0, Math.round(s)); const h = Math.floor(t / 3600); const m = Math.floor((t % 3600) / 60); const ss = String(t % 60).padStart(2, '0'); return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}` }
 export const who = (src) => (src === 'them' ? 'Them' : 'You')
@@ -277,10 +340,11 @@ async function run(job) {
     // short so the last thing said still fits.
     // Words only: an engine's "[END]" there led it to write "[END]" for everything after.
     const before = lines(job.id).filter((l) => l.src === job.src && speech.spoken(l.text)).slice(-2).map((l) => memory.fix(speech.spoken(l.text))).join(' ').slice(-200)
-    const hint = [m.title, ...(m.event?.attendees || []).slice(0, 12), cfg.meetings?.vocabulary, memory.hint(250)].filter(Boolean).join(', ').slice(0, 380)
+    // The names in the files that go with it (a resume, a deck) too: fileTerms.
+    const hint = [m.title, ...(m.event?.attendees || []).slice(0, 12), cfg.meetings?.vocabulary, m.fileTerms, memory.hint(200)].filter(Boolean).join(', ').slice(0, 440)
     const r = await speech.transcribe(wav(job.pcm), { cfg: job.cfg || cfg, language: job.language || m.language || cfg.meetings?.language, prompt: [hint, before].filter(Boolean).join('. ') })
     const text = speech.spoken(r.text)
-    if (text && !/^(thank you\.?|thanks for watching!?|you)$/i.test(text)) append(job.id, { src: job.src, t0: round(job.t0), t1: round(job.t1), text, engine: r.engine })
+    if (text && !/^(thank you\.?|thanks for watching!?|you)$/i.test(text)) { append(job.id, { src: job.src, t0: round(job.t0), t1: round(job.t1), text, engine: r.engine }); if (!job.retry) assistSoon(job.id) }
     if (job.retry) fs.rmSync(job.retry, { force: true })
   } catch (e) {
     job.tries = (job.tries || 0) + 1
@@ -295,13 +359,19 @@ async function run(job) {
 const round = (s) => Math.round(s * 100) / 100
 function append(id, line) { fs.appendFileSync(path.join(dirOf(id), 'transcript.jsonl'), `${JSON.stringify(line)}\n`) }
 const waiting = (id) => [...queue, ...running].filter((j) => j.id === id).length
-// Recording stopped and every stretch is in: the meeting is done, and summarized if you asked
-// for that to happen by itself.
+// Recording stopped and every stretch is in: the meeting is done, its transcript cleaned up and
+// then summarized, each when you have it happen by itself (Settings › Meetings).
 function settle(id) {
   const m = readJSON(path.join(DIR, id, 'meeting.json'))
   if (!m || m.status !== 'transcribing' || waiting(id) || decoding.has(id)) return
   saveMeta({ ...m, status: 'done', ...(m.again ? { again: { ...m.again, done: new Date().toISOString() } } : {}) })
-  if (cfg.meetings?.autoSummary !== false && transcriptText(id)) summarize(id).catch(() => {})
+  const clean = cfg.meetings?.cleanup !== false && transcript(id).filter((l) => l.text).length >= 3
+  const sum = cfg.meetings?.autoSummary !== false
+  if (!clean && !sum) return
+  ;(async () => {
+    if (clean) await cleanup(id).catch(() => {})
+    if (sum && transcriptText(id)) await summarize(id).catch(() => {})
+  })()
 }
 
 // ---------- The meeting's life ----------
@@ -313,16 +383,30 @@ export function list() {
     .sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt)))
 }
 
+// The kind of meeting its name says it is, when it says: "Interview - Priya Shah", "Daily standup",
+// "Dan / Priya 1:1". One you pick (setKind) stays, whatever it's called.
+export function kindOf(title) {
+  const s = String(title || '')
+  return /\binterview|\bscreening\b|\bcandidate\b/i.test(s) ? 'interview'
+    : /\bstand-?ups?\b|\bdaily scrum\b/i.test(s) ? 'standup'
+      : /(^|[^\d:/-])1\s*[:/]\s*1(?![\d:/])|\bone[- ]on[- ]one\b/i.test(s) ? 'one_on_one'
+        : /\bbrainstorm/i.test(s) ? 'brainstorm' : 'general'
+}
+const guessKind = (m, title) => (m.kindPicked || (m.kind && m.kind !== 'general') ? {} : { kind: kindOf(title) })
+
 // event: the calendar event it's for ({ title, start, end, attendees }), when there's one.
-// kind: the kind of meeting (KINDS), for the summary. The call's sound is recorded too unless it's
-// turned off (Settings › Meetings) or this one asks not to.
+// kind: the kind of meeting (KINDS), for the summary; else the kind its name says. The call's sound
+// is recorded too unless it's turned off (Settings › Meetings) or this one asks not to. AI Assist is
+// on when you have it on for every meeting.
 export function start({ title, event, language, kind, call = true, callApps = [] } = {}) {
   const id = `${new Date().toISOString().slice(0, 10)}-${crypto.randomBytes(3).toString('hex')}`
+  const name = String(title || event?.title || 'Meeting').slice(0, 200)
   saveMeta({
-    id, title: String(title || event?.title || 'Meeting').slice(0, 200), event: event ? { title: event.title, start: event.start, end: event.end, attendees: (event.attendees || []).slice(0, 50) } : null,
+    id, title: name, event: event ? { title: event.title, start: event.start, end: event.end, attendees: (event.attendees || []).slice(0, 50) } : null,
     links: inviteLinks(event),
-    startedAt: new Date().toISOString(), endedAt: null, status: 'recording', language: language || null, kind: KINDS[kind] ? kind : 'general', seconds: 0, call: 'off',
+    startedAt: new Date().toISOString(), endedAt: null, status: 'recording', language: language || null, kind: KINDS[kind] ? kind : kindOf(`${name} ${event?.title || ''}`), ...(KINDS[kind] ? { kindPicked: true } : {}), seconds: 0, call: 'off',
     callApps: [...new Set([].concat(callApps || []).map(String))].slice(0, 5),
+    assist: cfg.meetings?.assist === true,
   })
   const why = call && cfg.meetings?.callAudio !== false ? listen(id) : 'Recording the call\'s sound is off (Settings › Meetings).'
   speech.prepare(cfg)
@@ -382,6 +466,7 @@ export async function stop(id) {
   if (m.status !== 'recording' && m.status !== 'paused') return m
   unlisten(id)
   clearTimeout(stopping.get(id)); stopping.delete(id)
+  clearTimeout(assistLater.get(id)); assistLater.delete(id)
   const l = live.get(id)
   live.delete(id)
   const seconds = l ? Math.max(0, ...Object.values(l.sources).map((x) => x.samples)) / RATE : m.seconds
@@ -463,9 +548,10 @@ export async function retranscribe(id, { engine, localModel, language } = {}) {
   const old = path.join(d, 'transcript.jsonl')
   if (fs.existsSync(old)) fs.renameSync(old, path.join(d, `transcript-${Date.now()}.jsonl`))
   fs.rmSync(path.join(d, 'pending'), { recursive: true, force: true })
+  fs.rmSync(path.join(d, 'cleaned.json'), { force: true }) // it was of the lines heard before
   const sources = [...new Set(files.map((f) => f.split('-')[1].split('.')[0]))]
   decoding.set(id, { done: 0, total: Math.max(1, (m.seconds || 0) * sources.length) })
-  saveMeta({ ...m, status: 'transcribing', error: null, again: { engine: st.engine, model: st.engine === 'local' ? st.local.model : null, language: language || null, at: new Date().toISOString(), done: null } })
+  saveMeta({ ...m, status: 'transcribing', error: null, cleanedAt: null, again: { engine: st.engine, model: st.engine === 'local' ? st.local.model : null, language: language || null, at: new Date().toISOString(), done: null } })
   speech.prepare(c)
   ;(async () => {
     try {
@@ -520,11 +606,12 @@ export function get(id) {
   const dec = decoding.get(id)
   const progress = dec ? Math.min(99, Math.round((dec.done / dec.total) * 100)) : null
   const links = (m.links || []).map((l) => (l.kind === 'file' ? { ...l, exists: fs.existsSync(l.path), readable: doctext.readable(l.path) } : l))
+  const help = assistOf(id)
   // me: your name (Settings › General), for your lines.
-  return { ...m, links, captures: m.captures || [], canRead: !!doctext.ocrBin(), me: String(cfg.name || '').trim() || null, levels, callQuiet: quiet, transcript: transcript(id), notes: readText(path.join(d, 'notes.md')), summary: readText(path.join(d, 'summary.md')), waiting: waiting(id), pending: pending.length, saved: m.saved || null, progress }
+  return { ...m, links, captures: m.captures || [], canRead: !!doctext.ocrBin(), me: String(cfg.name || '').trim() || null, levels, callQuiet: quiet, transcript: transcript(id, { dropped: true }), notes: readText(path.join(d, 'notes.md')), summary: readText(path.join(d, 'summary.md')), waiting: waiting(id), pending: pending.length, saved: m.saved || null, progress, assistItems: help.items.filter((x) => x.state !== 'dismissed').slice(-20), assistError: help.error || null, assisting: assisting.has(id) }
 }
 
-export function setKind(id, kind) { return patchMeta(id, { kind: KINDS[kind] ? kind : 'general' }) }
+export function setKind(id, kind) { return patchMeta(id, { kind: KINDS[kind] ? kind : 'general', kindPicked: true }) }
 // When it was (fixed by hand: recorded late, or on the wrong day). Its end moves with it, and saved
 // notes move to the folder for the new date.
 export function setStart(id, when) {
@@ -561,7 +648,7 @@ export function revealSaved(id) {
   if (process.env.BRIDGE_FIX_DRYRUN) return { ok: true, dry: [bin, ...args] }
   return new Promise((resolve) => { execFile(bin, args, { timeout: 10000 }, () => resolve({ ok: true })) })
 }
-export function rename(id, title) { const m = patchMeta(id, { title: String(title || '').trim().slice(0, 200) || meta(id).title }); resave(id, 500); return m }
+export function rename(id, title) { const was = meta(id); const name = String(title || '').trim().slice(0, 200) || was.title; const m = patchMeta(id, { title: name, ...guessKind(was, name) }); resave(id, 500); return m }
 // base: the notes the page last had. A note added meanwhile somewhere else (the floating card, the
 // top bar) is kept: it's added to the end of what the page sends.
 export function setNotes(id, text, base) {
@@ -719,7 +806,7 @@ export async function nameSpeakers(id, { model } = {}) {
     return `${byN.size}. [${clock(x.t0)}] Them: ${x.text}`
   })
   const mem = memory.about(`${m.title}\n${people.join('\n')}\n${said.map((l) => l.text).join('\n')}`)
-  const about = [`Meeting: ${m.title}`, people.length ? `Invited, besides You: ${people.join(', ')}` : 'There is no list of who was invited.', me ? `"You" is ${me}, who recorded it.` : '"You" is the person who recorded it.'].join('\n')
+  const about = [`Meeting: ${m.title}`, people.length ? `Invited, besides You: ${people.join(', ')}` : 'There is no list of who was invited, but the meeting\'s name may say who it was with.', me ? `"You" is ${me}, who recorded it.` : '"You" is the person who recorded it.'].join('\n')
   const ask = [about, mem ? `\n${mem}` : '', '',
     '"Them" is everyone else on the call: they share one sound, so the transcript doesn\'t say which of them spoke. Say who said each numbered Them line, from what was said (names used, introductions, a question put to someone and their answer, who presents what), the words on the screen at the time and who was invited.',
     'The screen is the call\'s window, read as text. Video calls show names on their tiles; the one talking is often the big tile, or named in a label like "Talking: Priya Shah" or "Priya Shah is presenting"; captions show who said what ("Priya Shah" and then their words). Match those words and names to the lines said at that time.',
@@ -749,6 +836,98 @@ export async function nameSpeakers(id, { model } = {}) {
   return { ok: true, named: n, of: byN.size, model: used }
 }
 
+// ---------- Cleaning up the transcript ----------
+// Speech to text mishears names and jargon, cuts a word in two where a stretch ends, and makes up
+// words in a pause ("Thanks for watching"). Once the meeting ends, a model reads the transcript with
+// what the meeting is about (its name and people, the files that go with it, meeting memory) and
+// says which lines to fix and which nobody said. Its fixes sit beside transcript.jsonl in
+// cleaned.json, like your edits: a line it fixed says what was heard, Undo puts one back, and your
+// own edits come first. A fix that reads like a rewrite (other words, or many more or fewer) isn't
+// taken, and only a short line, or one of yours that repeats the call, is left out.
+const nearby = (l, said, s = 10) => said.filter((t) => t.src !== l.src && t.t1 > l.t0 - s && t.t0 < l.t1 + s)
+function close(heard, fixed) {
+  const a = tokens(heard).map((x) => x.w), b = tokens(fixed).map((x) => x.w)
+  if (!b.length || b.length > a.length * 1.5 + 3 || b.length < a.length * 0.6 - 2) return false
+  const have = new Set(a)
+  return a.length <= 4 || b.filter((w) => have.has(w)).length >= b.length * 0.5
+}
+function droppable(l, said) {
+  const ws = tokens(l.text).map((x) => x.w)
+  if (ws.length <= 8) return true
+  if (l.src !== 'you') return false
+  const them = new Set(nearby(l, said).flatMap((t) => tokens(t.text).map((x) => x.w)))
+  return ws.filter((w) => them.has(w)).length >= ws.length * 0.6
+}
+const cleaning = new Map() // id -> promise
+export function cleanup(id, { model } = {}) {
+  if (cleaning.has(id)) return cleaning.get(id)
+  const p = (async () => {
+    const m = meta(id)
+    if (m.status === 'recording' || m.status === 'paused') throw new Error('Still recording')
+    const use = model || m.summaryModelPick || cfg.meetings?.model || await helpers.pickModel()
+    if (!use) throw noModel()
+    const said = transcript(id, { clean: false }).filter((l) => l.text)
+    if (!said.length) throw new Error('Nothing was transcribed yet')
+    patchMeta(id, { cleaning: true, cleanError: null })
+    const me = String(cfg.name || '').trim()
+    const people = guests(m)
+    const byN = new Map()
+    const rows = said.map((l) => { byN.set(byN.size + 1, l); return `${byN.size}. [${clock(l.t0)}] ${speaker(l)}: ${l.text}` })
+    const mem = memory.about(`${m.title}\n${people.join('\n')}\n${said.map((l) => l.text).join('\n')}`)
+    const more = await extras(id, { ...m, captures: [] }, 30_000)
+    const ask = [
+      `Meeting: ${m.title}`, people.length ? `Invited, besides You: ${people.join(', ')}` : '', me ? `"You" is ${me}, who recorded it (their microphone). "Them" is the call.` : '"You" is the person who recorded it (their microphone). "Them" is the call.',
+      mem ? `\n${mem}` : '', more ? `\n${more}` : '', '',
+      'This transcript was made by speech to text, a stretch of speech at a time, and it makes mistakes. Fix them, line by line:',
+      '- Words and names it misheard. Spell names, companies, products and jargon the way the invite, the files, meeting memory or the rest of the meeting do. Fix a word only when the sound of it and the context make clear what was said.',
+      '- A word split in two or two run together ("spreadsheet" heard as "spre adsheet"), and a word cut where one line ends and the next begins.',
+      '- Leave how people talk alone: their grammar, fillers, false starts and repeats stay. Don\'t reword, shorten, summarize or add anything.',
+      'And say which lines nobody said, to leave out:',
+      '- Words speech to text makes up in a pause, out of place with what\'s around them: "Thanks for watching", "Please subscribe", "Subtitles by the community".',
+      '- A You line that only repeats what Them said just before or after (the microphone heard the call).',
+      'Answer with one JSON object and nothing else, with only the lines that change: {"fix": {"12": "the line as it should be"}, "drop": [7, 30]}. {"fix": {}, "drop": []} when there\'s nothing to do.',
+    ].filter((x) => x !== '').join('\n')
+    const got = { fix: {}, drop: [] }
+    let used = use
+    for (const part of pieces(rows.join('\n'), Math.max(8000, Math.min(60_000, budget(use) - ask.length - 2000)))) {
+      const r = await replyAny(used, [{ role: 'user', text: `${ask}\n\nTranscript:\n${part}` }], { system: 'You correct speech-to-text transcripts. You change only what was clearly misheard, and say so with JSON.' })
+      used = r.model
+      const j = /\{[\s\S]*\}/.exec(String(r.text || ''))
+      try { const o = JSON.parse(j ? j[0] : '{}'); Object.assign(got.fix, o.fix && typeof o.fix === 'object' ? o.fix : {}); got.drop.push(...[].concat(o.drop || [])) } catch { /* not JSON: nothing from this part */ }
+    }
+    const out = { fix: {}, drop: [], model: used, at: new Date().toISOString() }
+    for (const [num, text] of Object.entries(got.fix)) {
+      const l = byN.get(Number(num))
+      const v = typeof text === 'string' ? text.replace(/\s+/g, ' ').trim().slice(0, 5000) : ''
+      if (l && !l.edited && v && v !== l.text && close(l.text, v)) out.fix[l.key] = v
+    }
+    for (const num of got.drop) {
+      const l = byN.get(Number(num))
+      if (l && !l.edited && droppable(l, said)) { out.drop.push(l.key); delete out.fix[l.key] }
+    }
+    writeFileAtomic(path.join(dirOf(id), 'cleaned.json'), JSON.stringify(out, null, 1))
+    patchMeta(id, { cleaning: false, cleanedAt: out.at, cleanedModel: used, cleanError: null })
+    resave(id, 2000)
+    return { ok: true, fixed: Object.keys(out.fix).length, dropped: out.drop.length, of: said.length, model: used }
+  })().catch((e) => { try { patchMeta(id, { cleaning: false, cleanError: e.message }) } catch { /* gone */ } throw e }).finally(() => cleaning.delete(id))
+  cleaning.set(id, p)
+  return p
+}
+// Back to as heard: one line (key), or the whole cleanup.
+export function uncleanLine(id, key) {
+  meta(id)
+  const f = path.join(dirOf(id), 'cleaned.json')
+  const c = readJSON(f, null)
+  if (!c) return { ok: true }
+  if (key == null) { fs.rmSync(f, { force: true }); patchMeta(id, { cleanedAt: null, cleanedModel: null }) } else {
+    delete c.fix?.[key]
+    c.drop = (c.drop || []).filter((k) => k !== key)
+    writeFileAtomic(f, JSON.stringify(c, null, 1))
+  }
+  resave(id, 2000)
+  return { ok: true }
+}
+
 // The calendar event a meeting was for, picked afterwards (when it was recorded without one): its
 // people, its time and its links. The name too, while it's still the one it started with. Who said
 // what is worked out again with its people, at the next summary.
@@ -758,7 +937,7 @@ export function setEvent(id, event) {
   const ev = { title: clean(event.title, 200), start: event.start || null, end: event.end || null, attendees: [].concat(event.attendees || []).map((x) => clean(x, 80)).filter(Boolean).slice(0, 50) }
   const plain = /^(Meeting|.+ call), /.test(m.title) || m.title === 'Meeting'
   const have = new Set((m.links || []).map((l) => l.url || l.path))
-  const p = patchMeta(id, { event: ev, namedAt: null, ...(plain ? { title: ev.title } : {}), links: [...(m.links || []), ...inviteLinks(event).filter((l) => !have.has(l.url || l.path))] })
+  const p = patchMeta(id, { event: ev, namedAt: null, ...(plain ? { title: ev.title } : {}), ...guessKind(m, `${plain ? ev.title : m.title} ${ev.title}`), links: [...(m.links || []), ...inviteLinks(event).filter((l) => !have.has(l.url || l.path))] })
   resave(id, 1000)
   return p
 }
@@ -987,6 +1166,7 @@ export function addLink(id, { path: file, url, name, from = 'you', mail } = {}) 
   const out = { id: linkId(), ...l, from: by, addedAt: new Date().toISOString() }
   patchMeta(id, { links: [...links, out] })
   resave(id, 3000)
+  if (out.kind === 'file') readTerms(id)
   return out
 }
 // A file sent from a browser page: kept in the meeting, then linked like any other.
@@ -1009,6 +1189,7 @@ export function removeLink(id, lid) {
   if (l.kind === 'file' && l.path.startsWith(path.join(dirOf(id), 'files') + path.sep)) fs.rmSync(l.path, { force: true })
   patchMeta(id, { links: m.links.filter((x) => x.id !== l.id) })
   resave(id, 3000)
+  if (l.kind === 'file') readTerms(id)
   return { ok: true }
 }
 // One of Mail's attachments (~/Library/Mail), which a phone may link too.
@@ -1030,15 +1211,87 @@ export function openLink(id, lid, { reveal = false } = {}) {
   if (process.env.BRIDGE_FIX_DRYRUN) return { ok: true, dry: [bin, ...args] } // tests: nothing opens
   return new Promise((resolve) => { execFile(bin, args, { timeout: 10000 }, () => resolve({ ok: true })) })
 }
-// The invite's links not added yet, and emails about it with files (Mail, on a Mac).
+// What may go with it, to add with a click: emails about it with files (Mail, on a Mac), and files
+// you got lately (recent).
 export async function suggest(id) {
   const m = meta(id)
   const have = m.links || []
-  const mail = helpers.mailRelated ? await helpers.mailRelated({ title: m.event?.title || m.title, start: m.startedAt }).catch(() => null) : null
+  const [mail, recent] = await Promise.all([
+    helpers.mailRelated ? helpers.mailRelated({ title: m.event?.title || m.title, start: m.startedAt }).catch(() => null) : null,
+    recentFiles(m).catch(() => ({ files: [] })),
+  ])
   return {
     mail: (mail?.messages || []).map((x) => ({ ...x, linked: have.some((l) => l.kind === 'mail' && l.mail.id === x.id), files: x.files.map((f) => ({ ...f, linked: !!f.path && have.some((l) => l.path === f.path) })) })),
     mailReason: mail && !mail.available ? mail.reason : null,
+    recent: recent.files.filter((f) => !have.some((l) => l.path === f.path)),
+    recentBlocked: recent.blocked || null,
   }
+}
+
+// Files you got lately that look like they go with a meeting: in Downloads or on the Desktop, from
+// two days before it to just after it, named after someone in it or a word of its name ("Priya
+// Shah - Resume.pdf"), a resume or CV before an interview, or anything that came while it recorded.
+// Only those folders' own files are looked at, each with fs.promises, so a big folder can't hold
+// the server up. blocked: the folder macOS hasn't let Bridge AI read (Privacy & Security › Files and
+// Folders).
+const PLAIN_WORDS = new Set('meeting meetings call sync with and the for re fw fwd weekly daily monthly quarterly review update chat intro interview round team catch catchup check discussion invite zoom teams meet google microsoft online new from via about our your notes'.split(' '))
+const nameWords = (s) => String(s || '').replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 3 && !/^\d+$/.test(w))
+export async function recentFiles(m) {
+  const t0 = Date.parse(m.startedAt), t1 = m.endedAt ? Date.parse(m.endedAt) : Date.now()
+  const people = new Set([...(m.event?.attendees || []), ...(m.people || [])].flatMap(nameWords).filter((w) => !PLAIN_WORDS.has(w)))
+  const title = new Set(nameWords(`${m.title} ${m.event?.title || ''}`).filter((w) => !PLAIN_WORDS.has(w) && w.length >= 4))
+  const files = []
+  let blocked = null
+  for (const folder of ['Downloads', 'Desktop']) {
+    const dir = path.join(os.homedir(), folder)
+    let names
+    try { names = (await fs.promises.readdir(dir)).filter((n) => !n.startsWith('.') && !/\.(crdownload|part|download|tmp)$/i.test(n)).slice(0, 600) } catch (e) { if (e.code === 'EPERM' || e.code === 'EACCES') blocked ||= folder; continue }
+    for (const n of names) {
+      const f = path.join(dir, n)
+      let st
+      try { st = await fs.promises.stat(f) } catch { continue }
+      const at = st.mtimeMs // when it was downloaded or saved there
+      if (!st.isFile() || at < t0 - 2 * 86400e3 || at > t1 + 30 * 60e3) continue
+      const ws = new Set(nameWords(path.parse(n).name))
+      const who = [...people].filter((w) => ws.has(w))
+      const about = [...title].filter((w) => ws.has(w))
+      const why = who.length ? 'name' : about.length ? 'title' : m.kind === 'interview' && [...ws].some((w) => /^(resume|cv|candidate|profile)$/.test(w)) ? 'resume' : at >= t0 - 5 * 60e3 ? 'during' : null
+      if (!why) continue
+      files.push({ path: f, name: n, folder, size: st.size, at: new Date(at).toISOString(), why, words: [...who, ...about].slice(0, 3), score: (why === 'name' ? 3 : why === 'resume' ? 2.5 : why === 'title' ? 2 : 1) + who.length + about.length * 0.5 - Math.abs(at - t0) / 86400e3 })
+    }
+  }
+  return { files: files.sort((a, b) => b.score - a.score).slice(0, 6).map(({ score, ...f }) => f), blocked }
+}
+
+// The names and terms in the files that go with a meeting (a resume, a deck), for the speech engine
+// to spell: words with a capital in them that aren't just the start of a sentence (Northwind,
+// Contoso, OKRs), the ones that come up most first. Worked out again when a file is added or taken
+// away.
+const COMMON = new Set('the a an and or but for with from into over under to of in on at by as is are was were be been it its this that these those we our us i my me you your he she they them their his her if then than so not no yes all any each every some more most other such only own same very can will just also about after before during while when where which who what why how here there summary experience education skills projects project certifications profile contact objective achievements responsibilities agenda overview introduction conclusion appendix thanks questions page'.split(' '))
+export function namesIn(text, n = 30) {
+  const s = String(text || '')
+  const lower = new Set((s.match(/(?<![\p{L}\p{N}])\p{Ll}\p{L}*/gu) || []))
+  const count = new Map()
+  for (const [w] of s.matchAll(/[\p{L}\p{N}][\p{L}\p{N}+#]*/gu)) {
+    if (w.length < 2 || !/\p{Lu}/u.test(w) || COMMON.has(w.toLowerCase())) continue
+    // Capitalized only at the start of a sentence, or a heading in capitals.
+    if (/^\p{Lu}\p{Ll}+$/u.test(w) && lower.has(w.toLowerCase())) continue
+    if (/^\p{Lu}+$/u.test(w) && w.length > 6) continue
+    count.set(w, (count.get(w) || 0) + 1)
+  }
+  return [...count].sort((a, b) => b[1] - a[1]).slice(0, n).map(([w]) => w)
+}
+const termsLater = new Map() // id -> timer
+function readTerms(id) {
+  clearTimeout(termsLater.get(id))
+  termsLater.set(id, setTimeout(async () => {
+    termsLater.delete(id)
+    try {
+      const files = (meta(id).links || []).filter((l) => l.kind === 'file' && doctext.readable(l.path)).slice(0, 6)
+      const text = (await Promise.all(files.map((l) => doctext.textOf(l.path, 40_000).catch(() => '')))).join('\n')
+      patchMeta(id, { fileTerms: namesIn(text, 30).join(', ').slice(0, 240) || null })
+    } catch { /* gone */ }
+  }, 300))
 }
 
 // The words on the screen and in the files and emails, for the model: by time for the screen;
@@ -1113,7 +1366,7 @@ const SUMMARY_RULES = [
   'In the transcript, "You" is the person who recorded it (their microphone) and "Them" is everyone on the call.',
   'Speech to text mishears names. Write names the way the meeting memory, the title, the people invited or the user\'s notes spell them.',
   'When there are words from the screen or files and emails that go with the meeting, use them for names, numbers and what was being shown, and say when a point is from a slide or a document. The meeting comes first: don\'t summarize the files on their own.',
-  'After the notes, add one fenced block for Bridge AI (it is removed from the notes), like this:\n```terms\n{"names": ["Acme", "Northwind Traders"], "misheard": {"Ack me": "Acme"}}\n```\n"names": the proper nouns in this meeting (people, companies, products, places, acronyms), spelled as they should be. "misheard": only clear speech-to-text mistakes of a name, as transcribed: as it should be. Empty when there are none.',
+  'After the notes, add one fenced block for Bridge AI (it is removed from the notes), like this:\n```terms\n{"names": ["Acme", "Northwind Traders"], "misheard": {"Ack me": "Acme"}, "about": {"Priya Shah": "head of data at Northwind, the main contact there"}}\n```\n"names": the proper nouns in this meeting (people, companies, products, places, acronyms), spelled as they should be. "misheard": only clear speech-to-text mistakes of a name, as transcribed: as it should be. "about": who or what a name is, in a few words, only when this meeting makes it clear (a person\'s role and company and how they relate to the person who recorded it; what a product or project is), for the meetings after. Empty when there are none.',
 ].join('\n')
 export const SUMMARY_LANGS = { auto: null, en: 'English', es: 'Spanish', fr: 'French', de: 'German', it: 'Italian', pt: 'Portuguese', nl: 'Dutch', hi: 'Hindi', zh: 'Chinese', ja: 'Japanese', ko: 'Korean', ar: 'Arabic' }
 
@@ -1158,11 +1411,10 @@ export function summarize(id, { model, kind, language, again = false } = {}) {
     const k = KINDS[kind || m.kind || 'general'] || KINDS.general
     const lang = SUMMARY_LANGS[language ?? m.summaryLanguage ?? 'auto'] || null
     patchMeta(id, { summarizing: true, summaryError: null, summaryRetryAt: null, kind: kind || m.kind || 'general', ...(model ? { summaryModelPick: model } : {}), ...(language ? { summaryLanguage: language } : {}), ...(again ? {} : { summaryTries: 0 }) })
-    // Who said what on the call, worked out once before the first summary when there's a list of who
-    // was invited or names on the screen (Settings › Meetings can turn it off). The summary can then
-    // say who's doing what. With one other person invited, it's them.
-    const shown = (m.captures || []).some((c) => c.text) || glances(id).length > 0
-    if (cfg.meetings?.nameSpeakers !== false && !m.namedAt && !onlyGuest(m) && ((m.event?.attendees || []).length || shown) && transcript(id).some((l) => l.src === 'them' && l.text)) {
+    // Who said what on the call, worked out once before the first summary (Settings › Meetings can
+    // turn it off): from who was invited, names said ("Hi, Priya"), the meeting's name and the screen.
+    // The summary can then say who's doing what. With one other person invited, it's them.
+    if (cfg.meetings?.nameSpeakers !== false && !m.namedAt && !onlyGuest(m) && transcript(id).some((l) => l.src === 'them' && l.text)) {
       await nameSpeakers(id, { model: use }).catch(() => patchMeta(id, { namedAt: new Date().toISOString() }))
     }
     const text = transcriptText(id)
@@ -1226,13 +1478,117 @@ export async function ask(id, question, { model } = {}) {
   return { answer: String(r.text || '').trim(), model: r.model, note: r.fellBack ? `${r.fellBack} couldn't be reached, so ${r.model} answered.` : null }
 }
 
+// ---------- AI Assist ----------
+// While a meeting records with AI Assist on, a model reads along and now and then suggests what to
+// ask, raise or check next: from what's been said, the invite, the files that go with it (the
+// candidate's resume, the deck) and your notes. Each says what it's based on, so you can tell a
+// good one at a glance. Meeting memory is only background, used when today's meeting touches it.
+// It's asked after a new line comes in, at most every ASSIST_MS and only once enough more has been
+// said; Suggest now asks straight away. Kept in assist.json: { items: [{ id, t, kind, text, why,
+// state: new | kept | dismissed }], at, upTo, error }.
+const ASSIST_MS = Number(process.env.BRIDGE_ASSIST_MS || 60_000)
+const ASSIST_WORDS = 40 // said since it last looked
+const ASSIST_KINDS = {
+  interview: 'You\'re helping the interviewer. Compare what the candidate says with their resume and the role (from the invite and the files). Suggest probing follow-ups: the specifics behind a claim (numbers, their own part versus the team\'s, how they measured it, trade-offs, what went wrong), a gap or a mismatch with the resume, an important part of the resume or the role not covered yet, and, when time is short, what\'s left (their questions, next steps).',
+  customer: 'You\'re helping on a call with a customer or prospect. Suggest discovery questions not asked yet (goals, pains, budget, timing, who decides), an objection worth answering, and a next step to pin down.',
+  one_on_one: 'You\'re helping in a 1:1. Suggest follow-ups on how they\'re doing, blockers, feedback either way, and what each of you agreed to do.',
+  standup: 'You\'re helping in a standup. Point out a blocker nobody owns, something to take offline, and a missing update.',
+  brainstorm: 'You\'re helping in a brainstorm. Suggest an angle not explored yet, an idea worth building on, and a question that sharpens the problem.',
+  general: 'Suggest a question that would clear something up, a decision that has no owner or date yet, a risk or a point worth raising, or a useful idea.',
+}
+const KIND_WORD = { question: 'Ask', point: 'Raise', check: 'Check', idea: 'Idea' }
+const assistFile = (id) => path.join(dirOf(id), 'assist.json')
+export const assistOf = (id) => readJSON(assistFile(id), null) || { items: [], at: null, upTo: 0, error: null }
+const assisting = new Map() // id -> promise
+const assistLater = new Map() // id -> timer
+// Called as each line comes in: ask once it's time, if it's on.
+function assistSoon(id) {
+  let m
+  try { m = meta(id) } catch { return }
+  if (!m.assist || m.status !== 'recording' || assisting.has(id) || assistLater.has(id)) return
+  const a = assistOf(id)
+  const wait = Math.max(0, ASSIST_MS - (Date.now() - Date.parse(a.at || 0)))
+  assistLater.set(id, setTimeout(() => { assistLater.delete(id); assist(id).catch(() => {}) }, wait))
+}
+export function setAssist(id, on) {
+  const m = patchMeta(id, { assist: !!on })
+  if (on) assistSoon(id)
+  return { on: !!m.assist, ...assistOf(id) }
+}
+// now: Suggest now (whatever was said since). Resolves with assist.json as it is then.
+export function assist(id, { now = false, model } = {}) {
+  if (assisting.has(id)) return assisting.get(id)
+  const p = (async () => {
+    const m = meta(id)
+    const a = assistOf(id)
+    const said = transcript(id).filter((l) => l.text)
+    const fresh = said.filter((l) => l.t1 > (a.upTo || 0))
+    if (!now && fresh.reduce((n, l) => n + tokens(l.text).length, 0) < ASSIST_WORDS) return a
+    if (!said.length && !now) return a
+    const use = model || cfg.meetings?.assistModel || m.summaryModelPick || cfg.meetings?.model || await helpers.pickModel()
+    if (!use) throw noModel()
+    const me = String(cfg.name || '').trim()
+    const people = guests(m)
+    const secs = nowIn(id, m) ?? m.seconds ?? 0
+    const end = m.event?.end ? Math.round((Date.parse(m.event.end) - Date.now()) / 60000) : null
+    const text = said.map((l) => `[${clock(l.t0)}] ${speaker(l)}: ${l.text}`).join('\n')
+    const recent = text.length > 14_000 ? `(earlier lines left out)\n${text.slice(-14_000)}` : text
+    const notes = filled(readText(path.join(dirOf(id), 'notes.md')), m.sections)
+    const more = await extras(id, { ...m, captures: (m.captures || []).slice(-6) }, 24_000)
+    const mem = memory.about(`${m.title}\n${people.join('\n')}\n${recent.slice(-4000)}`, 12)
+    const before = a.items.slice(-12).map((x) => `- ${x.text}${x.state === 'dismissed' ? ' (not useful)' : ''}`).join('\n')
+    const ask = [
+      `Meeting: ${m.title}`, people.length ? `Invited, besides You: ${people.join(', ')}` : '', me ? `"You" is ${me}, who you're helping.` : '"You" is the person you\'re helping.',
+      `It's ${clock(secs)} in${end != null ? (end >= 0 ? `, with ${end} minutes left` : `, ${-end} minutes past its end`) : ''}.`,
+      more ? `\n${more}` : '', notes ? `\nYour notes so far:\n${notes}` : '',
+      mem ? `\nBackground from earlier meetings (it may be out of date; use it only when today's meeting clearly touches it, and say so in "why"):\n${mem}` : '',
+      before ? `\nSuggested already (don't repeat these or anything already covered):\n${before}` : '',
+      '', `This meeting is going on now. ${ASSIST_KINDS[m.kind] || ASSIST_KINDS.general}`,
+      'At most three suggestions, each a sentence or two to read at a glance mid-conversation. Fewer is better, and none is right when nothing stands out.',
+      'Base each one on something specific: what was just said, the invite, a file or the notes, and say which in "why", briefly ("Resume: moved the fleet to electric vans at Northwind", "At 12:04 they said the launch slipped a month"). Never make up facts.',
+      'kind: "question" (to ask), "point" (to raise or say), "check" (a claim or number that doesn\'t add up, or worth checking), "idea".',
+      'Answer with one JSON object and nothing else: {"items": [{"kind": "question", "text": "...", "why": "..."}]}, or {"items": []}.',
+    ].filter((x) => x !== '').join('\n')
+    try {
+      const r = await replyAny(use, [{ role: 'user', text: `${ask}\n\nTranscript so far:\n${recent || '(nothing yet)'}` }], { system: 'You quietly help someone during a live meeting with a few sharp, specific suggestions. You are brief and never make things up.' })
+      const j = /\{[\s\S]*\}/.exec(String(r.text || ''))
+      let items = []
+      try { items = [].concat(JSON.parse(j ? j[0] : '{}').items || []) } catch { /* not JSON: nothing this time */ }
+      const was = new Set(a.items.map((x) => x.text.toLowerCase()))
+      const add = items.filter((x) => x && typeof x.text === 'string' && x.text.trim() && !was.has(x.text.trim().toLowerCase())).slice(0, 3)
+        .map((x) => ({ id: crypto.randomBytes(4).toString('hex'), t: Math.round(secs), kind: KIND_WORD[x.kind] ? x.kind : 'idea', text: clean(x.text, 300), why: clean(x.why, 200), state: 'new', model: r.model }))
+      const out = { items: [...a.items, ...add].slice(-60), at: new Date().toISOString(), upTo: said.length ? said[said.length - 1].t1 : 0, error: null }
+      writeFileAtomic(assistFile(id), JSON.stringify(out, null, 1))
+      return out
+    } catch (e) {
+      const out = { ...a, at: new Date().toISOString(), error: e.message }
+      writeFileAtomic(assistFile(id), JSON.stringify(out, null, 1))
+      throw e
+    }
+  })().finally(() => assisting.delete(id))
+  assisting.set(id, p)
+  return p
+}
+// A suggestion kept (it goes in your notes, "- [12:04] Ask: ...") or waved away.
+export function markAssist(id, aid, state) {
+  const a = assistOf(id)
+  const x = a.items.find((i) => i.id === String(aid))
+  if (!x) throw new Error('No such suggestion')
+  if (!['kept', 'dismissed', 'new'].includes(state)) throw new Error('Keep it or dismiss it')
+  if (state === 'kept' && x.state !== 'kept') quickNote(id, `${KIND_WORD[x.kind] || 'Idea'}: ${x.text}`)
+  x.state = state
+  writeFileAtomic(assistFile(id), JSON.stringify(a, null, 1))
+  return a
+}
+export const assisted = (id) => assisting.has(id)
+
 // ---------- Across meetings ----------
 // Each meeting's words for search and for questions about several, kept until its files change.
 const texts = new Map() // id -> { key, summary, notes, lines }
 function textOf(m) {
   const d = dirOf(m.id)
   const at = (f) => { try { return fs.statSync(path.join(d, f)).mtimeMs } catch { return 0 } }
-  const key = `${at('summary.md')}|${at('notes.md')}|${at('transcript.jsonl')}|${at('edits.json')}|${memory.changed()}`
+  const key = `${at('summary.md')}|${at('notes.md')}|${at('transcript.jsonl')}|${at('edits.json')}|${at('cleaned.json')}|${memory.changed()}`
   const had = texts.get(m.id)
   if (had?.key === key) return had
   const t = { key, summary: readText(path.join(d, 'summary.md')).trim(), notes: readText(path.join(d, 'notes.md')).trim(), lines: transcript(m.id).filter((l) => l.text) }
