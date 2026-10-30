@@ -6,11 +6,11 @@
 import fs from 'node:fs'
 import * as webpush from './webpush.js'
 import path from 'node:path'
-import { dataFile, ensureDir } from './paths.js'
+import { dataFile, ensureDir, writeFileAtomic } from './paths.js'
 
 const FILE = dataFile('push.json')
 const read = () => { try { return JSON.parse(fs.readFileSync(FILE, 'utf8')) } catch { return {} } }
-const write = (d) => { ensureDir(path.dirname(FILE)); fs.writeFileSync(FILE, JSON.stringify(d, null, 2), { mode: 0o600 }) }
+const write = (d) => { ensureDir(path.dirname(FILE)); writeFileAtomic(FILE, JSON.stringify(d, null, 2), { mode: 0o600 }) }
 
 function state() {
   const d = read()

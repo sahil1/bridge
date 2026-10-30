@@ -8,7 +8,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { execFile } from 'node:child_process'
-import { DATA, dataFile, ensureDir } from './paths.js'
+import { DATA, dataFile, ensureDir, writeFileAtomic } from './paths.js'
 import { gitReady, NO_GIT } from './gitready.js'
 
 const FILE = dataFile('worktrees.json')
@@ -19,7 +19,7 @@ const load = () => {
   try { const d = JSON.parse(fs.readFileSync(FILE, 'utf8')); memo = { repos: d.repos || {}, trees: d.trees || {} } } catch { memo = { repos: {}, trees: {} } }
   return memo
 }
-const save = (d) => { memo = d; ensureDir(DATA); fs.writeFileSync(FILE, JSON.stringify(d, null, 2) + '\n', { mode: 0o600 }) }
+const save = (d) => { memo = d; ensureDir(DATA); writeFileAtomic(FILE, JSON.stringify(d, null, 2) + '\n', { mode: 0o600 }) }
 
 // git, resolving { ok, out } (its output, or what went wrong) instead of throwing. It enters the
 // folder itself (-C), so a folder macOS is still asking about holds only git, not the server.

@@ -7,7 +7,7 @@
 // A thread's chief gets BRIDGE_THREAD=<id> in its environment, which is how `bridge` says which
 // thread it speaks for. Kept in chief-threads.json in the data folder; with herdr, per session.
 import fs from 'node:fs'
-import { dataFile } from './paths.js'
+import { dataFile, writeFileAtomic } from './paths.js'
 
 const FILE = dataFile('chief-threads.json')
 const KEEP_AGENTS = 30
@@ -16,7 +16,7 @@ const GONE_AFTER = 3 * 60000 // a thread whose chief has been missing this long 
 export function makeThreads() {
   let data = { next: 1, threads: [] } // threads: { id, session, paneId, tabId, sessionId, created, agents: [{ paneId, tabId, sessionId, at }] }
   try { data = { ...data, ...JSON.parse(fs.readFileSync(FILE, 'utf8')) } } catch { /* none yet */ }
-  const save = () => { try { fs.writeFileSync(FILE, JSON.stringify(data, null, 2)) } catch { /* read-only disk */ } }
+  const save = () => { try { writeFileAtomic(FILE, JSON.stringify(data, null, 2)) } catch { /* read-only disk */ } }
   const missing = new Map() // thread id -> when its chief was first missed
   let launching = 0 // a thread's chief can show up before its launch returns: don't take it for a stray one
   const ofSession = (f) => data.threads.filter((t) => (t.session || '') === (f.session || ''))

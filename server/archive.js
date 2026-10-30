@@ -3,13 +3,13 @@
 // resumed with its full history. Stored in <data>/archive.json, newest first.
 import fs from 'node:fs'
 import crypto from 'node:crypto'
-import { dataFile, ensureDir, DATA } from './paths.js'
+import { dataFile, ensureDir, DATA, writeFileAtomic } from './paths.js'
 
 const FILE = dataFile('archive.json')
 const MAX = 400
 
 function load() { try { const d = JSON.parse(fs.readFileSync(FILE, 'utf8')); return Array.isArray(d) ? d : [] } catch { return [] } }
-function save(list) { ensureDir(DATA); fs.writeFileSync(FILE, JSON.stringify(list.slice(0, MAX), null, 2) + '\n', { mode: 0o600 }) }
+function save(list) { ensureDir(DATA); writeFileAtomic(FILE, JSON.stringify(list.slice(0, MAX), null, 2) + '\n', { mode: 0o600 }) }
 
 export const all = () => load()
 export const find = (id) => load().find((x) => x.id === id) || null

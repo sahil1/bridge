@@ -10,7 +10,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import { cacheFile } from './paths.js'
+import { cacheFile, writeFileAtomic } from './paths.js'
 import { paneKey, inView, paneOfKey, adopt } from './scope.js'
 import { parseScreen } from '../src/components/questionParse.js'
 
@@ -47,7 +47,7 @@ const reach = (cfg) => (cfg.notify?.phoneAtComputer || !atComputer() ? {} : { on
 // Muted from an agent's ⋯ menu, by pane (filed per herdr session, see scope.js), until you unmute it.
 const MUTED = cacheFile('muted.json')
 let muted = new Set((() => { try { return JSON.parse(fs.readFileSync(MUTED, 'utf8')) } catch { return [] } })())
-const saveMuted = () => { fs.mkdirSync(path.dirname(MUTED), { recursive: true }); fs.writeFileSync(MUTED, JSON.stringify([...muted])) }
+const saveMuted = () => { fs.mkdirSync(path.dirname(MUTED), { recursive: true }); writeFileAtomic(MUTED, JSON.stringify([...muted])) }
 function mutedNow() {
   const byKey = Object.fromEntries([...muted].map((k) => [k, true]))
   if (adopt(byKey)) { muted = new Set(Object.keys(byKey)); saveMuted() }

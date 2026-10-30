@@ -12,7 +12,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import { DATA } from './paths.js'
+import { DATA, writeFileAtomic } from './paths.js'
 
 const FILE = path.join(DATA, 'meetings', 'memory.json')
 const MAX = 2000
@@ -27,8 +27,7 @@ function load() {
 }
 function store() {
   fs.mkdirSync(path.dirname(FILE), { recursive: true })
-  fs.writeFileSync(`${FILE}.tmp`, JSON.stringify({ terms }, null, 2))
-  fs.renameSync(`${FILE}.tmp`, FILE)
+  writeFileAtomic(FILE, JSON.stringify({ terms }, null, 2))
   version++
   matcher = null
 }

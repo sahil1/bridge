@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
-import { ROOT, dataFile, ensureDir, DATA, IS_MAC } from './paths.js'
+import { ROOT, dataFile, ensureDir, DATA, IS_MAC, writeFileAtomic } from './paths.js'
 import { gitReady } from './gitready.js'
 
 export const FILE = dataFile('config.json')
@@ -18,9 +18,7 @@ export const defaults = () => readJSON(path.join(ROOT, 'config.example.json'))
 
 function writeUser(obj) {
   ensureDir(DATA)
-  const tmp = `${FILE}.tmp`
-  fs.writeFileSync(tmp, `${JSON.stringify(obj, null, 2)}\n`)
-  fs.renameSync(tmp, FILE)
+  writeFileAtomic(FILE, `${JSON.stringify(obj, null, 2)}\n`)
 }
 
 // Which top-level keys differ, so the app can say what needs a restart.

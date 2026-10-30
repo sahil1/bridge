@@ -8,7 +8,7 @@
 //     File: work/crm-quotes/comparison.md
 import fs from 'node:fs'
 import path from 'node:path'
-import { ROOT } from './paths.js'
+import { ROOT, writeFileAtomic } from './paths.js'
 
 export const STATUSES = ['open', 'doing', 'waiting', 'done']
 const ITEM = /^\s*- \[( |x|X)\] (.*?)\s*(?:<!--(.*?)-->)?\s*$/
@@ -77,7 +77,7 @@ export function makeTasks(dir, you = () => 'the user') {
     const done = all.filter((x) => x.status === 'done')
     const text = [head || blank().split('\n## ')[0].trimEnd(), '', '## Open', '', ...open.flatMap(format), ...(open.length ? [''] : []), '## Done', '', ...done.flatMap(format), ''].join('\n')
     fs.mkdirSync(path.dirname(FILE), { recursive: true })
-    fs.writeFileSync(FILE, text.replace(/\n{3,}/g, '\n\n'))
+    writeFileAtomic(FILE, text.replace(/\n{3,}/g, '\n\n'))
   }
 
   // A file the chief made: inside its folder it's kept relative to it (work/...), so the app can

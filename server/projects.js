@@ -11,7 +11,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fork } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { DATA, dataFile, expand } from './paths.js'
+import { DATA, dataFile, expand, writeFileAtomic } from './paths.js'
 
 const HOME = os.homedir()
 const CLAUDE = () => path.join(process.env.CLAUDE_CONFIG_DIR || path.join(HOME, '.claude'), 'projects')
@@ -177,7 +177,7 @@ export async function scan({ fresh = false, wait = 60_000 } = {}) {
 
 // ---------- The ones you keep ----------
 const load = () => { try { const d = JSON.parse(fs.readFileSync(FILE, 'utf8')); return Array.isArray(d.projects) ? d.projects : [] } catch { return [] } }
-const save = (list) => { fs.mkdirSync(path.dirname(FILE), { recursive: true }); fs.writeFileSync(FILE, `${JSON.stringify({ projects: list }, null, 2)}\n`) }
+const save = (list) => { fs.mkdirSync(path.dirname(FILE), { recursive: true }); writeFileAtomic(FILE, `${JSON.stringify({ projects: list }, null, 2)}\n`) }
 
 // Set up before there was a project list (2.8 and earlier): it starts with the ones setup would
 // have ticked, once, a moment after the server starts or when it's first needed. After that it's

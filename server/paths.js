@@ -26,6 +26,40 @@ export const dataFile = (...parts) => path.join(DATA, ...parts)
 export const cacheFile = (...parts) => path.join(CACHE, ...parts)
 export const ensureDir = (dir) => { fs.mkdirSync(dir, { recursive: true }); return dir }
 
+// Saves a file whole or not at all: written next to it, flushed to disk and renamed over it, so a
+// crash or a power cut leaves the last save or this one, never half of each. mode: as
+// writeFileSync's (0o600 for a file with keys or tokens); without one, the file keeps the mode it
+// has. A rename onto a file another program has open (on Windows: an antivirus scan, a backup, an
+// editor) can be refused for a moment: it's tried again briefly, then written in place as before.
+let saves = 0
+const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+export function writeFileAtomic(file, data, { mode } = {}) {
+  let keep = mode
+  if (keep == null) { try { keep = fs.statSync(file).mode & 0o777 } catch { /* a new file */ } }
+  const tmp = `${file}.${process.pid}-${(saves++).toString(36)}.tmp`
+  let fd = null
+  try {
+    fd = fs.openSync(tmp, 'w', keep ?? 0o666)
+    if (keep != null && !IS_WIN) fs.fchmodSync(fd, keep) // exactly, whatever the umask
+    fs.writeFileSync(fd, data)
+    fs.fsyncSync(fd)
+    fs.closeSync(fd)
+    fd = null
+    for (const wait of [15, 30, 60, 120, null]) {
+      try { fs.renameSync(tmp, file); return } catch (e) {
+        if (!['EPERM', 'EACCES', 'EBUSY'].includes(e.code)) throw e
+        if (wait) { pause(wait); continue }
+        fs.writeFileSync(file, data, keep == null ? undefined : { mode: keep })
+        fs.rmSync(tmp, { force: true })
+      }
+    }
+  } catch (e) {
+    if (fd != null) try { fs.closeSync(fd) } catch { /* closed */ }
+    try { fs.rmSync(tmp, { force: true }) } catch { /* not there */ }
+    throw e
+  }
+}
+
 const readJSON = (file) => { try { return JSON.parse(fs.readFileSync(file, 'utf8')) } catch { return {} } }
 
 // Defaults from the repo, then your settings: ~/.bridge-ai/config.json (and config.local.json
