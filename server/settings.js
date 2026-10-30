@@ -75,7 +75,7 @@ export async function guessLocation() {
 }
 
 // ---------- Your name ----------
-const run = (cmd, args) => new Promise((resolve) => execFile(cmd, args, { timeout: 4000 }, (err, out) => resolve(err ? '' : String(out).trim())))
+const run = (cmd, args) => new Promise((resolve) => execFile(cmd, args, { timeout: 4000, windowsHide: true }, (err, out) => resolve(err ? '' : String(out).trim())))
 // "Jane D [Contoso]", "Doe, Jane (Contractor)" -> "Jane": a directory's tags in brackets
 // or parentheses go, "Last, First" turns round, and the first word reads best in a greeting.
 export const cleanName = (raw) => String(raw || '').replace(/[[({<][^\])}>]*[\])}>]/g, ' ').replace(/[[\](){}<>]/g, ' ').replace(/\s+/g, ' ').trim()

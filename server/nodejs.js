@@ -25,7 +25,7 @@ export function ours() {
 export const progress = () => job && { step: job.step, percent: job.total ? Math.floor((job.got / job.total) * 100) : 0, error: job.error }
 
 const run = (cmd, args) => new Promise((resolve, reject) => {
-  execFile(cmd, args, { timeout: 120_000 }, (err, out, errOut) => (err ? reject(new Error(String(errOut || err.message).trim().split('\n').pop())) : resolve(String(out).trim())))
+  execFile(cmd, args, { timeout: 120_000, windowsHide: true }, (err, out, errOut) => (err ? reject(new Error(String(errOut || err.message).trim().split('\n').pop())) : resolve(String(out).trim())))
 })
 const get = async (url, ms = 30_000) => {
   const res = await fetch(url, { signal: AbortSignal.timeout(ms) })

@@ -16,7 +16,7 @@ const compact = (d) => ymd(d).replaceAll('-', '')
 
 function ccusage(args) {
   return new Promise((resolve, reject) => {
-    execFile(BIN, [...args, '--json', '--offline'], { shell: IS_WIN, timeout: 90000, maxBuffer: 32 * 1024 * 1024 }, (err, stdout) => {
+    execFile(BIN, [...args, '--json', '--offline'], { shell: IS_WIN, timeout: 90000, maxBuffer: 32 * 1024 * 1024, windowsHide: true }, (err, stdout) => {
       if (err && !stdout) return reject(err)
       try { resolve(JSON.parse(stdout)) } catch (e) { reject(e) }
     })
