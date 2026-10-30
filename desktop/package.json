@@ -16,6 +16,7 @@
     "appId": "dev.bridge-ai.app",
     "productName": "Bridge AI",
     "afterPack": "./after-pack.js",
+    "afterSign": "./notarize-app.js",
     "afterAllArtifactBuild": "./notarize-dmg.js",
     "directories": {
       "output": "dist"
@@ -48,6 +49,7 @@
       ],
       "identity": "-",
       "sign": "./sign.js",
+      "notarize": false,
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Bridge AI records voice notes and meetings you start. Audio is transcribed with the engine you pick in Settings.",
         "NSAudioCaptureUsageDescription": "Bridge AI records a call's sound for the meeting notes you start, so the transcript has both sides.",
