@@ -27,6 +27,12 @@ through quota-axi. If you add an API key for a model provider (Settings › Mode
 Bridge AI uses it to check the key and, when you or the chief of staff ask, to put a question to
 that model. Both go straight from your computer to that provider.
 
+Dictation and voice notes are turned into text on your computer, and the recording isn't kept. The
+dictation key from other apps (Settings › Voice) is heard for that one key only: on a Mac it's
+registered with macOS, which tells Bridge AI when it's pressed and let go; on Windows and Linux a
+keyboard hook runs only while the key is held, to hear it let go, and ignores every other key.
+Nothing is pasted into other apps.
+
 If you run Bridge AI on a server or in Docker, all of this applies to that machine instead of your
 computer.
 

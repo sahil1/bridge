@@ -1,5 +1,6 @@
 // Records a meeting in the page: each source (your mic; on a Mac the server records the call's
-// sound itself, meetings.js) is turned into 16 kHz mono 16-bit PCM by a small audio worklet, and sent to the server about
+// sound itself, meetings.js) is turned into 16 kHz mono 16-bit PCM by a small audio worklet
+// (src/audio/pcm.js, which dictation shares), and sent to the server about
 // once a second (meetings.js finds the speech and transcribes it). The audio context runs at 16 kHz,
 // so the browser does the resampling, and nothing here encodes or analyses audio: it stays light
 // for a three-hour meeting.
@@ -15,42 +16,7 @@
 // could be heard. The server times the meeting by the sound it gets, so that stretch is left out,
 // as a pause is.
 import { BASE } from '../../api.js'
-
-const WORKLET = `
-class Pcm extends AudioWorkletProcessor {
-  constructor() {
-    super()
-    this.buf = new Int16Array(16000)
-    this.n = 0
-    this.peak = 0
-    this.ticks = 0
-    this.port.onmessage = (e) => { if (e.data === 'flush') this.send() }
-  }
-  send() {
-    if (!this.n) return
-    const out = this.buf.slice(0, this.n)
-    this.port.postMessage({ pcm: out.buffer }, [out.buffer])
-    this.n = 0
-  }
-  process(inputs) {
-    const ch = inputs[0] && inputs[0][0]
-    const len = ch ? ch.length : 128
-    for (let i = 0; i < len; i++) {
-      const v = ch ? Math.max(-1, Math.min(1, ch[i])) : 0
-      this.buf[this.n++] = v < 0 ? v * 0x8000 : v * 0x7fff
-      const a = v < 0 ? -v : v
-      if (a > this.peak) this.peak = a
-      if (this.n === this.buf.length) this.send()
-    }
-    // The level, about ten times a second, for the meter.
-    if (++this.ticks % 12 === 0) { this.port.postMessage({ level: this.peak }); this.peak = 0 }
-    return true
-  }
-}
-registerProcessor('bridge-pcm', Pcm)
-`
-
-const RATE = 16000
+import { RATE, addWorklet } from '../../audio/pcm.js'
 
 // streams: { you: MediaStream, them?: MediaStream }. onLevel({ you, them }) for the meters;
 // onTrouble(message | null) when pieces aren't getting through, and when they are again;
@@ -58,9 +24,7 @@ const RATE = 16000
 // stretch when nothing could be heard.
 export async function record(meetingId, streams, { onLevel, onTrouble, reopen = {}, onGap } = {}) {
   const ctx = new AudioContext({ sampleRate: RATE })
-  const url = URL.createObjectURL(new Blob([WORKLET], { type: 'text/javascript' }))
-  await ctx.audioWorklet.addModule(url)
-  URL.revokeObjectURL(url)
+  await addWorklet(ctx) // src/audio/pcm.js
   const levels = {}
   const sinks = []
   let paused = false

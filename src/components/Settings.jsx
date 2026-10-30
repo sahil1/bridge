@@ -9,6 +9,7 @@ import ConfigFile from './settings/ConfigFile.jsx'
 import Phone from './settings/Phone.jsx'
 import About from './settings/About.jsx'
 import Meetings from './settings/Meetings.jsx'
+import Voice from './settings/Voice.jsx'
 import CloudKeys from './settings/CloudKeys.jsx'
 import ErrorBoundary from './ErrorBoundary.jsx'
 import { cloudOnly } from '../api.js'
@@ -21,6 +22,7 @@ export const SECTIONS = [
   { id: 'agents', label: tx('Agents'), icon: 'bot', hint: tx('Installed agents and sign-in') },
   { id: 'providers', label: tx('Model providers'), icon: 'layers', hint: tx('API keys, clouds, local models, cloud agents') },
   { id: 'meetings', label: tx('Meetings'), icon: 'mic', hint: tx('How meetings are transcribed and summarized') },
+  { id: 'voice', label: tx('Voice'), icon: 'mic', hint: tx('Speech to text on this computer, and dictation') },
   { id: 'mcp', label: tx('MCP servers'), icon: 'tool', hint: tx('Tools your agents can use') },
   { id: 'phone', label: tx('Devices'), icon: 'phone', hint: tx('Your phone and your other computers, through your relay or Tailscale; what to notify you about') },
   { id: 'appearance', label: tx('Appearance'), icon: 'palette', hint: tx('Theme, text size, density') },
@@ -75,6 +77,7 @@ export default function Settings({ section = 'general', onClose, onOpenAgent }) 
             {at === 'agents' && <Agents onOpenAgent={(id) => { onOpenAgent?.(id); onClose() }} />}
             {at === 'providers' && <Providers focus={section === 'accounts' || section === 'cloud' ? section : null} onOpenAgent={(id) => { onOpenAgent?.(id); onClose() }} />}
             {at === 'meetings' && <Meetings />}
+            {at === 'voice' && <Voice />}
             {at === 'mcp' && <Mcp />}
             {at === 'appearance' && <Appearance />}
             {at === 'config' && <ConfigFile />}

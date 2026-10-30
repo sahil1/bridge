@@ -6,6 +6,8 @@ import Lightbox from './Lightbox.jsx'
 import { Menu } from './Rail.jsx'
 import PermissionFix from './PermissionFix.jsx'
 import { t, tx } from '../i18n/index.js'
+import { keyLabel } from '../../shared/dictation/keys.js'
+import { useDictation, registerBox, noteBoxFocus, press, release, finish, cancel, dismiss, retry, settings, keysPlatform, dictationKey, listeningHint } from '../dictation/controller.js'
 
 // Drafts survive navigation and reloads: one per agent, kept in this browser.
 const draftKey = (id) => `cc-draft-${id}`
@@ -31,92 +33,9 @@ const saveDraft = (id, d) => {
   } catch { /* private mode */ }
 }
 
-function pickMime() {
-  if (typeof MediaRecorder === 'undefined') return null
-  for (const t of ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm', 'audio/ogg']) if (MediaRecorder.isTypeSupported(t)) return t
-  return ''
-}
-
-// Tap to record, tap to stop; audio is transcribed on your computer by whisper.cpp. That needs a
-// one-time setup, so it's checked before recording: nobody should talk for a minute into a
-// recording that can't be turned into text.
-function useRecorder(onText, onError, onSetup) {
-  const [state, setState] = useState('idle') // idle | recording | transcribing
-  const [secs, setSecs] = useState(0)
-  const [level, setLevel] = useState(0)
-  const rec = useRef(null)
-
-  const stopTracks = () => {
-    rec.current?.stream.getTracks().forEach((t) => t.stop())
-    rec.current?.ctx?.close().catch(() => {})
-    clearInterval(rec.current?.timer)
-    cancelAnimationFrame(rec.current?.raf)
-  }
-
-  const start = async () => {
-    if (!navigator.mediaDevices?.getUserMedia) return onError(t('Microphone needs HTTPS (open the Tailscale address)'))
-    const v = await api('/voice').catch(() => null) // unknown: try anyway, and say why if it fails
-    if (v && !v.ready) return onSetup(v)
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const mime = pickMime()
-      const mr = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined)
-      const chunks = []
-      mr.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data) }
-      mr.onstop = async () => {
-        stopTracks()
-        const blob = new Blob(chunks, { type: mr.mimeType || 'audio/mp4' })
-        if (blob.size < 2000) { setState('idle'); return onError(t('Recording too short')) }
-        setState('transcribing')
-        try {
-          const res = await fetch(`${BASE}/api/transcribe`, { method: 'POST', headers: { 'Content-Type': blob.type }, body: blob })
-          const data = await res.json()
-          if (!res.ok) throw new Error(data.error || t('Transcription failed'))
-          if (data.text) onText(data.text)
-          else onError(t('No speech detected'))
-        } catch (e) {
-          const v = await api('/voice').catch(() => null)
-          if (v && !v.ready) onSetup(v)
-          else onError(t("Couldn't transcribe: {error}", { error: e.message }))
-        } finally { setState('idle') }
-      }
-      // Live input level for the meter.
-      const ctx = new (window.AudioContext || window.webkitAudioContext)()
-      const an = ctx.createAnalyser()
-      an.fftSize = 256
-      ctx.createMediaStreamSource(stream).connect(an)
-      const buf = new Uint8Array(an.frequencyBinCount)
-      const tick = () => {
-        an.getByteTimeDomainData(buf)
-        let peak = 0
-        for (const v of buf) peak = Math.max(peak, Math.abs(v - 128))
-        setLevel(Math.min(1, peak / 64))
-        rec.current.raf = requestAnimationFrame(tick)
-      }
-      rec.current = { mr, stream, ctx, timer: setInterval(() => setSecs((s) => s + 1), 1000) }
-      rec.current.raf = requestAnimationFrame(tick)
-      setSecs(0)
-      mr.start()
-      setState('recording')
-      navigator.vibrate?.(15)
-    } catch (e) {
-      // In the desktop app, macOS's own answer: when it says no, offer to allow it there.
-      if (e.name === 'NotAllowedError' && window.bridgeApp?.mediaAccess) {
-        const s = await window.bridgeApp.mediaAccess('microphone').catch(() => null)
-        if (s === 'denied' || s === 'restricted') return onSetup({ mic: true })
-      }
-      onError(e.name === 'NotAllowedError' ? t('The microphone is blocked. Allow it for this page in your browser\'s site settings.') : e.message)
-    }
-  }
-  const stop = () => { if (rec.current?.mr.state === 'recording') rec.current.mr.stop(); navigator.vibrate?.(10) }
-  const cancel = () => { if (rec.current?.mr) { rec.current.mr.onstop = () => stopTracks(); rec.current.mr.stop() } setState('idle') }
-  useEffect(() => () => { try { cancel() } catch { /* unmounted */ } }, []) // eslint-disable-line react-hooks/exhaustive-deps
-  return { state, secs, level, start, stop, cancel }
-}
-
 // Shown when the mic is tapped before voice notes are set up on the computer: what's needed, one
 // tap to set it up, and progress until it's ready.
-function VoiceSetup({ initial, onClose }) {
+export function VoiceSetup({ initial, onClose }) {
   const [v, setV] = useState(initial)
   const [started, setStarted] = useState(!!initial.downloading)
   const [err, setErr] = useState(null)
@@ -170,7 +89,7 @@ function VoiceSetup({ initial, onClose }) {
 
 // The desktop app with the mic turned off for it in System Settings: one button to allow it.
 const micAccess = async () => ((await window.bridgeApp.mediaAccess('microphone')) === 'granted' ? 'ok' : 'denied')
-function MicFix({ onClose }) {
+export function MicFix({ onClose }) {
   const [ok, setOk] = useState(false)
   return (
     <div className="voice-setup" role="status" aria-live="polite">
@@ -205,6 +124,19 @@ function useMentions(url, query) {
 }
 // Claude reads @path; a path with spaces needs quotes.
 const mentionText = (p) => (/\s/.test(p) ? `@"${p}"` : `@${p}`)
+// A file said in dictation (@payments.ts): the one file of that name in the agent's folder, by its
+// path there. Left as said when there's none or more than one.
+async function mentionFiles(text, url) {
+  if (!url) return text
+  let out = text
+  for (const m of [...text.matchAll(/(^|\s)@([^\s@/"]+\.\w+)/g)].slice(0, 5)) {
+    const name = m[2]
+    const items = await Promise.race([api(`${url}?q=${encodeURIComponent(name)}`).then((d) => d.items || [], () => []), new Promise((r) => setTimeout(() => r([]), 1500))])
+    const hits = items.filter((f) => !f.dir && !f.place && typeof f.path === 'string' && f.path.split('/').pop().toLowerCase() === name.toLowerCase())
+    if (hits.length === 1) out = out.replace(`@${name}`, mentionText(hits[0].path))
+  }
+  return out
+}
 
 const SOURCE_LABEL = { skill: tx('skill'), plugin: tx('plugin'), project: tx('project') }
 
@@ -412,13 +344,48 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
   const onGripUp = () => { grip.current = null }
   useEffect(() => { if (!note) return; const t = setTimeout(() => setNote(null), 6000); return () => clearTimeout(t) }, [note])
 
+  // Dictation (dictation/controller.js): the mic button or the dictation key, held to talk or tapped
+  // to keep listening. What's said goes in this box at its cursor; a file said as "at payments dot
+  // ts" becomes a mention of the one file of that name in the agent's folder.
+  const dict = useDictation()
+  const mine = dict.target?.kind === 'composer' && dict.target.id === id
   const [voiceSetup, setVoiceSetup] = useState(null)
-  const closeVoiceSetup = useCallback(() => setVoiceSetup(null), [])
-  const voice = useRecorder(
-    (t) => setDraft((d) => ({ ...d, text: d.text ? `${d.text.replace(/\s+$/, '')} ${t}` : t })),
-    (msg) => setNote(msg),
-    setVoiceSetup,
-  )
+  const closeVoiceSetup = useCallback(() => { setVoiceSetup(null); dismiss() }, [])
+  useEffect(() => { if (mine && dict.setup) setVoiceSetup(dict.setup) }, [mine, dict.setup])
+  const [dictated, setDictated] = useState(false)
+  useEffect(() => { if (!dictated) return; const t = setTimeout(() => setDictated(false), 1200); return () => clearTimeout(t) }, [dictated])
+  const draftRef = useRef(draft)
+  draftRef.current = draft
+  const filesRef = useRef(filesUrl)
+  filesRef.current = filesUrl
+  const rootRef = useRef(null)
+  useEffect(() => registerBox(id, {
+    visible: () => !!rootRef.current?.getClientRects().length,
+    insert: async (said, caret) => {
+      const text = await mentionFiles(said, filesRef.current)
+      const d = draftRef.current
+      const a = Math.min(caret?.[0] ?? d.text.length, d.text.length)
+      const b = Math.min(Math.max(caret?.[1] ?? a, a), d.text.length)
+      const before = d.text.slice(0, a), after = d.text.slice(b)
+      const ins = `${before && !/\s$/.test(before) ? ' ' : ''}${text}${after && !/^\s/.test(after) ? ' ' : ''}`
+      hist.current = null
+      setDraft({ ...draftRef.current, text: before + ins + after })
+      setDictated(true)
+      requestAnimationFrame(() => { const el = taRef.current; if (el) { el.focus(); el.setSelectionRange(a + ins.length, a + ins.length) } })
+    },
+  }), [id]) // eslint-disable-line react-hooks/exhaustive-deps
+  const caretNow = () => { const el = taRef.current; return el ? [el.selectionStart, el.selectionEnd] : null }
+  // The mic button: held, it listens until let go (wherever the pointer is by then); a click or a
+  // tap keeps listening until ✓.
+  const micDown = (e) => {
+    if (e.button !== 0 || dict.phase === 'working') return
+    e.preventDefault()
+    press({ kind: 'composer', id, caret: caretNow() })
+    const up = () => { window.removeEventListener('pointerup', up, true); window.removeEventListener('pointercancel', up, true); release() }
+    window.addEventListener('pointerup', up, true)
+    window.addEventListener('pointercancel', up, true)
+  }
+  const [, tick] = useState(0)
 
   const upload = async (fileList) => {
     for (const f of Array.from(fileList || [])) {
@@ -557,8 +524,13 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
     if (e.key === 'Enter' && !e.shiftKey && !touch && !e.nativeEvent.isComposing) { e.preventDefault(); send(agentBusy && (e.metaKey || e.ctrlKey)) }
   }
 
-  const recording = voice.state === 'recording'
-  const busy = voice.state === 'transcribing'
+  const recording = mine && (dict.phase === 'opening' || dict.phase === 'listening')
+  const busy = mine && dict.phase === 'working'
+  useEffect(() => { if (!recording) return; const t = setInterval(() => tick((n) => n + 1), 500); return () => clearInterval(t) }, [recording])
+  const secs = recording ? Math.max(0, Math.floor((Date.now() - dict.since) / 1000)) : 0
+  const touch = matchMedia('(pointer: coarse)').matches
+  const keyName = keyLabel(dictationKey(settings()), keysPlatform())
+  const dictNote = mine && dict.phase === 'idle' && !dict.setup && dict.note
   const canSend = !!(draft.text.trim() || draft.files.length) && !uploading
   const attachNums = numbered(draft.files)
   const attachPics = draft.files.filter((f) => f.image && f.preview).map((f) => ({ path: f.path, src: f.preview, name: attachNums.count > 1 ? t('Image {n} · {name}', { n: attachNums.of(f), name: f.name }) : f.name }))
@@ -579,7 +551,8 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
         jumps={mentionJumps} mention />}
       {voiceSetup && (voiceSetup.mic ? <MicFix onClose={closeVoiceSetup} /> : <VoiceSetup initial={voiceSetup} onClose={closeVoiceSetup} />)}
       {note && <div className="comp-note" role="status">{note}</div>}
-      <div className={`composer ${recording ? 'rec' : ''} ${dragging ? 'drop' : ''} ${manualH ? 'sized' : ''}`} {...dropProps} onPaste={onPaste}>
+      {dictNote && <div className="comp-note" role="status">{dictNote} {dict.retry && <button className="link-btn" onClick={retry}>{t('Try again')}</button>} <button className="link-btn" onClick={dismiss}>{t('Close')}</button></div>}
+      <div ref={rootRef} className={`composer ${recording ? 'rec' : ''} ${dragging ? 'drop' : ''} ${manualH ? 'sized' : ''} ${dictated ? 'dictated' : ''}`} {...dropProps} onPaste={onPaste}>
         <div className="comp-grip" role="separator" aria-orientation="horizontal" aria-label={t('Resize the message box')} title={manualH ? t('Drag to resize · double-click to fit the text again') : t('Drag to make the box taller')}
           onPointerDown={onGripDown} onPointerMove={onGripMove} onPointerUp={onGripUp} onPointerCancel={onGripUp} onDoubleClick={() => setManualH(null)}
           tabIndex={0} onKeyDown={(e) => {
@@ -607,8 +580,8 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
         {recording ? (
           <div className="rec-bar" role="status" aria-live="polite">
             <span className="rec-dot" />
-            <span className="rec-time">{Math.floor(voice.secs / 60)}:{String(voice.secs % 60).padStart(2, '0')}</span>
-            <span className="rec-meter"><span style={{ transform: `scaleX(${0.08 + voice.level * 0.92})` }} /></span>
+            <span className="rec-time">{Math.floor(secs / 60)}:{String(secs % 60).padStart(2, '0')}</span>
+            <span className="rec-meter"><span style={{ transform: `scaleX(${0.08 + dict.level * 0.92})` }} /></span>
           </div>
         ) : (
           <textarea
@@ -618,16 +591,17 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
             placeholder={placeholder}
             onChange={(e) => { hist.current = null; setDraft((d) => ({ ...d, text: e.target.value })); trackCaret(e) }}
             onSelect={trackCaret}
-            onFocus={loadPast}
+            onFocus={() => { loadPast(); noteBoxFocus(id) }}
             onKeyDown={onKeyDown}
+            data-composer={id}
           />
         )}
         <div className="comp-tools">
           {recording ? (
             <>
-              <span className="comp-hint">{t("Listening… tap ✓ when you're done")}</span>
-              <button className="comp-text-btn" onClick={voice.cancel}>{t('Cancel')}</button>
-              <button className="send rec-stop" onClick={voice.stop} aria-label={t('Stop and transcribe')} title={t('Stop and transcribe')}><Icon name="check" size={16} /></button>
+              <span className="comp-hint">{touch ? (dict.mode === 'free' ? t("Listening… tap ✓ when you're done") : t('Talking… let go to add it')) : listeningHint(dict.mode, keyName)}</span>
+              <button className="comp-text-btn" onClick={cancel}>{t('Cancel')}</button>
+              <button className="send rec-stop" onClick={finish} aria-label={t('Stop and transcribe')} title={t('Stop and transcribe')}><Icon name="check" size={16} /></button>
             </>
           ) : (
             <>
@@ -646,7 +620,9 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
                 <button className={`comp-btn comp-wide ${savedOpen ? 'on' : ''}`} onClick={() => setSavedOpen((v) => !v)} aria-label={t('Saved prompts')} title={t('Saved prompts')}><Icon name="star" size={16} /></button>
                 {savedOpen && <SavedPrompts current={draft.text} onPick={pickSaved} onClose={() => setSavedOpen(false)} />}
               </span>
-              <button className={`comp-btn ${busy ? 'busy' : ''}`} onClick={voice.start} disabled={busy} aria-label={t('Dictate')} title={t('Dictate (turned into text on your computer)')}>
+              <button className={`comp-btn mic-btn ${busy ? 'busy' : ''}`} onPointerDown={micDown} onContextMenu={(e) => e.preventDefault()} disabled={busy} aria-label={t('Dictate')}
+                onClick={(e) => { if (e.detail === 0) { press({ kind: 'composer', id, caret: caretNow() }); release() } }}
+                title={touch ? t('Hold to talk, or tap and talk. Turned into text on your computer.') : t('Hold to talk, or click and talk. {key} works too. Turned into text on your computer.', { key: keyName })}>
                 <Icon name={busy ? 'refresh' : 'mic'} size={16} className={busy ? 'spin' : ''} />
               </button>
               {tools}
