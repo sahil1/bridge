@@ -1428,6 +1428,13 @@ app.post('/api/notify/answer', wrap((req) => notify.answer(req.body?.token)))
 // You're using Bridge AI on this computer: phones stay quiet meanwhile. Phones can't say this.
 app.post('/api/presence', wrap((req) => { if (fromHere(req)) notify.presence(req.body || {}); return { ok: true } }))
 
+// The computer is shutting down or restarting (the desktop app heard it; Windows warns background
+// processes of nothing): the open agents, and which were mid-task, are kept to reopen afterwards.
+app.post('/api/system/stopping', wrap((req) => {
+  if (!fromHere(req)) throw Object.assign(new Error('Only this computer can say it\'s shutting down'), { status: 403 })
+  rt.systemStopping?.('system')
+  return { ok: true }
+}))
 // Whether Tailscale publishes this computer decides, with the relay's phones, whether it stays awake.
 const tailnetSaid = (st) => { relay.setTailnet(!!st?.enabled); return st }
 app.get('/api/phone', wrap(() => phone.status(cfg.port).then(tailnetSaid)))

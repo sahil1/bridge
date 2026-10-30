@@ -64,7 +64,7 @@ class Term {
 
 class Link {
   constructor(sock) {
-    Object.assign(this, { sock, n: 0, waiting: new Map(), terms: new Map(), closed: false, leaving: false, onLost: null, info: null })
+    Object.assign(this, { sock, n: 0, waiting: new Map(), terms: new Map(), closed: false, leaving: false, onLost: null, onEnding: null, info: null })
     let buf = ''
     sock.setEncoding('utf8')
     sock.on('data', (chunk) => {
@@ -97,6 +97,7 @@ class Link {
   }
   message(m) {
     if (m.re) { const w = this.waiting.get(m.re); this.waiting.delete(m.re); return w?.(m) }
+    if (m.ev === 'ending') return this.onEnding?.()
     const t = this.terms.get(m.id)
     if (m.ev === 'data') t?.data(m.d)
     else if (m.ev === 'exit') { this.terms.delete(m.id); t?.exit(m.code, m.signal) }

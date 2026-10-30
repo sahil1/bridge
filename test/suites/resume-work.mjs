@@ -2,10 +2,13 @@
 // stops with its agents' terminals (as an update that replaces the terminal host, a crash or the
 // computer restarting does) and starts again. The agent that was working reopens its conversation
 // and is told to carry on, once; the one that had finished reopens and waits. With Settings ›
-// General › Pick up unfinished work off, a working one reopens and waits too.
+// General › Pick up unfinished work off, a working one reopens and waits too. Then the computer shuts
+// down: its terminals end one by one, after the terminal host is stopped from outside (a Mac or
+// Linux shutting down) or after the desktop app says so (Windows warns background processes of
+// nothing); the working agent stays on the list to reopen, and carries on after the restart.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, checks, until, sleep, TEST } from '../lib/harness.mjs'
+import { startKit, checks, until, sleep, TEST, IS_WIN } from '../lib/harness.mjs'
 
 const { ok, done } = checks('resume-work')
 const kit = await startKit('resume-work')
@@ -44,6 +47,21 @@ try {
   ok(!!(await until(() => agentOf((a) => a.paneId === busy2.paneId), 60000, 500)), 'it comes back after the restart')
   await sleep(6000)
   ok(carryOns() === 1, 'and waits for you: nothing is sent', typed())
+
+  // The computer shuts down.
+  await kit.api('/settings', { resumeWork: true }, 'PATCH')
+  const busy3 = await kit.api('/agents/launch', { kind: 'claude', cwd: dir, label: 'Busy at night', newSpace: 'Busy at night', prompt: 'Check the billing code' })
+  ok(!!(await until(() => agentOf((a) => a.paneId === busy3.paneId && a.sessionId && a.status === 'working'), 60000, 500)), 'an agent is working when the computer shuts down')
+  const midTask = () => JSON.parse(fs.readFileSync(path.join(kit.data, 'runtime.json'), 'utf8')).panes.some((p) => p.paneId === busy3.paneId && p.midTask)
+  await until(midTask, 10000, 300)
+  const host = JSON.parse(fs.readFileSync(path.join(kit.data, 'host', 'host.json'), 'utf8')).pid
+  if (IS_WIN) { await kit.api('/system/stopping', {}); process.kill(host) } else process.kill(host, 'SIGTERM')
+  ok(!!(await until(() => /The computer is shutting down/.test(kit.log()), 10000, 200)), 'Bridge AI hears the computer is shutting down', kit.log().slice(-600))
+  await sleep(3000) // the terminals end meanwhile
+  ok(midTask(), 'the agent stays on the list to reopen, with what it was doing', JSON.parse(fs.readFileSync(path.join(kit.data, 'runtime.json'), 'utf8')).panes)
+  await kit.restart()
+  ok(!!(await until(() => agentOf((a) => a.paneId === busy3.paneId), 60000, 500)), 'after the restart it\'s back')
+  ok(!!(await until(() => carryOns() === 2, 30000, 500)), 'and told to carry on', typed())
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
   console.log(kit.log().slice(-1500))
