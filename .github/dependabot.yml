@@ -34,3 +34,8 @@ updates:
       interval: weekly
     cooldown:
       default-days: 7
+    # The image stays on an LTS Node.js: odd majors never become one. Dependabot can't say "odd",
+    # so they're named (Bundler-style ranges, which Docker tags use here).
+    ignore:
+      - dependency-name: node
+        versions: ['~> 25.0', '~> 27.0', '~> 29.0', '~> 31.0']

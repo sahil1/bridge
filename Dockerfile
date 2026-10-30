@@ -11,11 +11,11 @@
 # Bridge AI instead (Settings › Agents, or `npm install -g <package>` in a terminal tab): those
 # go in your home folder volume, so they survive image updates and can update themselves.
 
-# Node.js 22, by digest: a tag can be pointed at another image, a digest can't. Dependabot moves
-# both FROM lines on together when the image gets fixes (.github/dependabot.yml).
+# Node.js 24, an LTS, by digest: a tag can be pointed at another image, a digest can't. Dependabot
+# moves both FROM lines on together when the image gets fixes (.github/dependabot.yml).
 
 # ---------- Build: dependencies (node-pty is compiled here, for this CPU) and the UI ----------
-FROM node:22-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da AS build
+FROM node:24-bookworm-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c AS build
 RUN apt-get update \
  && apt-get install -y --no-install-recommends python3 make g++ git ca-certificates \
  && rm -rf /var/lib/apt/lists/*
@@ -27,7 +27,7 @@ COPY . .
 RUN npm run build && npm prune --omit=dev --no-audit --no-fund
 
 # ---------- Run ----------
-FROM node:22-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da
+FROM node:24-bookworm-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c
 ARG AGENTS=""
 ARG UID=1000
 ARG GID=1000
