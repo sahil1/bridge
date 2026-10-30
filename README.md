@@ -42,7 +42,7 @@ The same command as macOS:
 curl -fsSL https://raw.githubusercontent.com/sahil1/bridge/main/install.sh | sh
 ```
 
-On Debian and Ubuntu it installs the `.deb` (it asks for your password); elsewhere it puts the AppImage in `~/.local/share/bridge-ai` with a menu entry and a `bridge-ai` command. 64-bit Intel/AMD only for now. Both files are also on the [Releases](https://github.com/sahil1/bridge/releases/latest) page.
+On Debian and Ubuntu it installs the `.deb` (it asks for your password); elsewhere, or without sudo, it unpacks the AppImage into `~/.local/share/bridge-ai` (no FUSE needed) with a menu entry and a `bridge-ai` command. 64-bit Intel/AMD only for now. Both files are also on the [Releases](https://github.com/sahil1/bridge/releases/latest) page.
 
 ### From source
 
