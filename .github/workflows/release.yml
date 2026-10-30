@@ -108,6 +108,24 @@ jobs:
           APPLE_API_KEY_ID: ${{ matrix.platform == 'mac' && secrets.APPLE_API_KEY_P8 && secrets.APPLE_API_ISSUER && secrets.APPLE_API_KEY_ID || '' }}
           APPLE_API_ISSUER: ${{ matrix.platform == 'mac' && secrets.APPLE_API_KEY_P8 && secrets.APPLE_API_KEY_ID && secrets.APPLE_API_ISSUER || '' }}
 
+      # macOS remembers what people allowed (their folders, the mic, Calendar) by the app's signature.
+      # With the Developer ID it's the same for every version, so an update keeps all of it; signed any
+      # other way (the secrets missing, say), an update would ask for everything again. Not released so.
+      - name: The Mac app keeps what people allowed
+        if: matrix.platform == 'mac' && startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          apps=$(find desktop/dist -maxdepth 2 -name 'Bridge AI.app')
+          [ -n "$apps" ] || { echo "::error::No Bridge AI.app was built"; exit 1; }
+          while IFS= read -r app; do
+            for b in "$app" "$app/Contents/Frameworks/Bridge AI Helper.app"; do
+              req=$(codesign -d -r- "$b" 2>&1)
+              echo "$b: $req" | tail -1
+              grep -q 'identifier "dev.bridge-ai.app' <<<"$req" && grep -q 'certificate leaf\[subject.OU\] = K6QK66LQDM' <<<"$req" ||
+                { echo "::error::$b isn't signed with the Developer ID: updating to it would make macOS ask people for their folders, the mic and Calendar again"; exit 1; }
+            done
+          done <<<"$apps"
+
       - name: Smoke test
         run: node scripts/smoke.js
 
