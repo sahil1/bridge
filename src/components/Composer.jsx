@@ -136,6 +136,8 @@ function useMentions(url, query) {
 }
 // Claude reads @path; a path with spaces needs quotes.
 const mentionText = (p) => (/\s/.test(p) ? `@"${p}"` : `@${p}`)
+// Dictation as a message box sees it when it isn't the one recording.
+const QUIET = { phase: 'idle', level: 0 }
 // A file said in dictation (@payments.ts): the one file of that name in the agent's folder, by its
 // path there. Left as said when there's none or more than one.
 async function mentionFiles(text, url) {
@@ -359,8 +361,8 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
   // Dictation (dictation/controller.js): the mic button or the dictation key, held to talk or tapped
   // to keep listening. What's said goes in this box at its cursor; a file said as "at payments dot
   // ts" becomes a mention of the one file of that name in the agent's folder.
-  const dict = useDictation()
-  const mine = dict.target?.kind === 'composer' && dict.target.id === id
+  const dict = useDictation((s) => (s.target?.kind === 'composer' && s.target.id === id ? s : QUIET))
+  const mine = dict !== QUIET
   const [voiceSetup, setVoiceSetup] = useState(null)
   const closeVoiceSetup = useCallback(() => { setVoiceSetup(null); dismiss() }, [])
   useEffect(() => { if (mine && dict.setup) setVoiceSetup(dict.setup) }, [mine, dict.setup])
