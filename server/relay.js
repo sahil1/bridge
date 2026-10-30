@@ -28,6 +28,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawn, execFile, execFileSync } from 'node:child_process'
 import net from 'node:net'
+import zlib from 'node:zlib'
+import { Readable, pipeline } from 'node:stream'
 import { randomBytes, webcrypto } from 'node:crypto'
 import QRCode from 'qrcode'
 import WebSocket from 'ws'
@@ -75,7 +77,8 @@ let loginUrl = null
 let relayBuild = null
 let pairing = null // { id, secret, code, expires, uses, tries }
 let retry = null
-let backoff = 2000
+const FIRST_TRY = 500 // after the connection drops: soon, then less and less often
+let backoff = FIRST_TRY
 let limit = null // what Bridge AI's relay last said about its limits: { why, text, until }
 let pinger = null
 let hostKey = null // { privateKey, public }
@@ -169,23 +172,33 @@ function connect() {
   // (Bridge AI's relay hears which version this is, for its counts: HOSTED.md.)
   const ws = new WebSocket(`${conf.url.replace(/^http/, 'ws').replace(/\/$/, '')}/_relay/host`, { headers: { Authorization: `Bearer ${conf.token}`, ...(conf.hosted ? { 'X-Bridge-Version': VERSION } : {}) }, handshakeTimeout: 15000 })
   link = ws
-  let pongAt = Date.now()
+  let heard = Date.now() // when the relay last sent anything
+  let asked = 0 // when the last ping went out
   ws.on('open', () => {
     online = true
     lastError = null
     limit = null
-    backoff = 2000
+    backoff = FIRST_TRY
     clearInterval(pinger)
+    // A ping every 15 s, which the relay answers at once; just after this computer wakes from sleep
+    // (the clock jumped), one straight away. Nothing back in 10 s: the connection died without a word
+    // (a sleep, another network) though it still looks open, and no phone can reach this computer
+    // until it's replaced, so start over. (While a big answer is still going out, the ping waits
+    // behind it: then 75 s.)
+    let tick = Date.now()
     pinger = setInterval(() => {
-      if (Date.now() - pongAt > 75000) return ws.terminate() // the relay went quiet: start over
-      try { ws.send('ping') } catch { /* closing */ }
-    }, 25000)
+      const now = Date.now()
+      const woke = now - tick > 15000
+      tick = now
+      if (asked && heard < asked) { if (now - asked > (ws.bufferedAmount > 65536 ? 75000 : 10000)) ws.terminate(); return }
+      if (woke || now - asked >= 15000) { asked = now; try { ws.send('ping') } catch { /* closing */ } }
+    }, 5000)
     roster('take').catch(() => {})
     checkBuild().catch(() => {})
   })
   ws.on('message', (data, isBinary) => {
+    heard = Date.now()
     if (!isBinary) {
-      pongAt = Date.now()
       const s = String(data)
       if (s[0] === '{') try { const m = JSON.parse(s); if (m.t === 'note' && m.note) onNote(m.box, m.note); else if (m.t === 'limit') onLimit(m) } catch { /* not ours */ }
       return
@@ -259,6 +272,8 @@ const drained = async () => { while (link && link.bufferedAmount > 4 * 1024 * 10
 // ---------- one phone ----------
 const DROP = new Set(['host', 'connection', 'origin', 'referer', 'cookie', 'content-length', 'accept-encoding', 'upgrade', 'keep-alive', 'transfer-encoding'])
 const DROP_BACK = new Set(['content-encoding', 'content-length', 'transfer-encoding', 'connection', 'keep-alive', 'set-cookie'])
+// Worth compressing: text (pictures and fonts are compressed already).
+const PACKS = /javascript|css|json|svg|html|text\/|wasm|xml/
 
 class Conn {
   constructor(id) {
@@ -373,7 +388,7 @@ class Conn {
   }
 
   // A request from the phone, run against this server.
-  request(sid, { m, u, h, body }) {
+  request(sid, { m, u, h, body, z }) {
     const target = new URL(String(u || '/'), base)
     if (target.origin !== new URL(base).origin) return this.send(K.ERR, sid, utf8('Not allowed'))
     const abort = new AbortController()
@@ -385,9 +400,14 @@ class Conn {
         const headers = Object.fromEntries((h || []).filter(([k]) => !DROP.has(k.toLowerCase()) && !/^(sec-|x-bridge-relay$)/i.test(k)))
         headers['x-bridge-relay'] = this.device.id
         const res = await fetch(target, { method: m || 'GET', headers, body: s.body ? Buffer.concat(s.body) : undefined, signal: abort.signal, redirect: 'manual' })
-        await this.send(K.HEAD, sid, { s: res.status, h: [...res.headers].filter(([k]) => !DROP_BACK.has(k)) })
+        // The app's own files (dist/assets, the same for everyone with this version) go compressed
+        // when the phone asks: a third of the size, and the first screen sooner. Nothing else does:
+        // the relay sees how big each record is, and compressed, the size of something of yours
+        // would say a little about what's in it.
+        const zip = z === 'gzip' && (m || 'GET') === 'GET' && target.pathname.startsWith('/assets/') && res.status === 200 && !!res.body && !res.headers.get('content-encoding') && PACKS.test(res.headers.get('content-type') || '')
+        await this.send(K.HEAD, sid, { s: res.status, h: [...res.headers].filter(([k]) => !DROP_BACK.has(k)), ...(zip ? { z: 'gzip' } : {}) })
         if (res.body) {
-          for await (const chunk of res.body) {
+          for await (const chunk of zip ? pipeline(Readable.fromWeb(res.body), zlib.createGzip(), () => {}) : res.body) {
             if (abort.signal.aborted) break
             for (let o = 0; o < chunk.byteLength; o += CHUNK) await this.send(K.BODY, sid, chunk.subarray(o, o + CHUNK))
           }
