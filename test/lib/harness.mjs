@@ -215,7 +215,9 @@ export async function page(b, url, { mode = 'light', theme = 'sky', width = 1440
   if (before) await before(ctx)
   const p = await ctx.newPage()
   const errors = []
-  p.on('pageerror', (e) => errors.push(e.message))
+  // A ResizeObserver that couldn't hand over every change in one frame is reported as a page error
+  // (by WebKit, now and then). It's the browser's notice, not a fault in the page.
+  p.on('pageerror', (e) => { if (e.message !== 'ResizeObserver loop completed with undelivered notifications.') errors.push(e.message) })
   await p.goto(url)
   return { ctx, p, errors }
 }
