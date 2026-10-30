@@ -6,6 +6,7 @@ import Lightbox from './Lightbox.jsx'
 import { Menu } from './Rail.jsx'
 import PermissionFix from './PermissionFix.jsx'
 import { t, tx } from '../i18n/index.js'
+import { toWav } from '../audio/towav.js'
 
 // Drafts survive navigation and reloads: one per agent, kept in this browser.
 const draftKey = (id) => `cc-draft-${id}`
@@ -37,9 +38,12 @@ function pickMime() {
   return ''
 }
 
-// Tap to record, tap to stop; audio is transcribed on your computer by whisper.cpp. That needs a
-// one-time setup, so it's checked before recording: nobody should talk for a minute into a
-// recording that can't be turned into text.
+// Tap to record, tap to stop; audio is transcribed on your computer by its speech model (Parakeet,
+// unless you pick another in Settings › Voice), sent as a 16 kHz WAV it reads as it is. The first
+// time, the model is a one-time download: the answer says so, the panel below offers it, and what
+// you said is kept and turned into text once it's here. A program to install first (whisper.cpp,
+// for a Whisper model) is checked before recording: nobody should talk for a minute into a
+// recording that can't be turned into text yet.
 function useRecorder(onText, onError, onSetup) {
   const [state, setState] = useState('idle') // idle | recording | transcribing
   const [secs, setSecs] = useState(0)
@@ -56,7 +60,7 @@ function useRecorder(onText, onError, onSetup) {
   const start = async () => {
     if (!navigator.mediaDevices?.getUserMedia) return onError(t('Microphone needs HTTPS (open the Tailscale address)'))
     const v = await api('/voice').catch(() => null) // unknown: try anyway, and say why if it fails
-    if (v && !v.ready) return onSetup(v)
+    if (v && !v.ready && v.needs !== 'model') return onSetup(v)
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       const mime = pickMime()
@@ -68,9 +72,13 @@ function useRecorder(onText, onError, onSetup) {
         const blob = new Blob(chunks, { type: mr.mimeType || 'audio/mp4' })
         if (blob.size < 2000) { setState('idle'); return onError(t('Recording too short')) }
         setState('transcribing')
+        // As a WAV the computer reads itself; one the browser can't read goes as it is (for ffmpeg).
+        const body = await toWav(blob).catch(() => blob)
         try {
-          const res = await fetch(`${BASE}/api/transcribe`, { method: 'POST', headers: { 'Content-Type': blob.type }, body: blob })
+          const res = await fetch(`${BASE}/api/transcribe`, { method: 'POST', headers: { 'Content-Type': body.type }, body })
           const data = await res.json()
+          // The speech model isn't here yet: offered in one click, and what you said waits for it.
+          if (res.status === 409 && data.code === 'needs-model') { onSetup({ ...(await api('/voice').catch(() => ({}))), ask: data.error, audio: body }); return }
           if (!res.ok) throw new Error(data.error || t('Transcription failed'))
           if (data.text) onText(data.text)
           else onError(t('No speech detected'))
@@ -114,19 +122,31 @@ function useRecorder(onText, onError, onSetup) {
   return { state, secs, level, start, stop, cancel }
 }
 
-// Shown when the mic is tapped before voice notes are set up on the computer: what's needed, one
-// tap to set it up, and progress until it's ready.
-function VoiceSetup({ initial, onClose }) {
+// Shown when voice notes need something first. The speech model: what it is and its size, in the
+// server's words, one button to download it with progress, then what you said, kept meanwhile
+// (audio), turned into text. whisper.cpp (a Whisper model picked in Settings › Voice): installed in
+// a terminal tab, with Homebrew first on a Mac that has none.
+function VoiceSetup({ initial, onText, onClose }) {
   const [v, setV] = useState(initial)
   const [started, setStarted] = useState(!!initial.downloading)
   const [err, setErr] = useState(null)
   const [brewing, setBrewing] = useState(false) // Homebrew installing, in a terminal tab
+  const [audio, setAudio] = useState(initial.audio || null) // what you said, waiting for the model
+  const sent = useRef(false)
   useEffect(() => {
-    if (v.ready) { const t = setTimeout(onClose, 5000); return () => clearTimeout(t) }
-    if ((!started && !brewing) || v.error) return
-    const t = setInterval(() => api('/voice').then(setV).catch(() => {}), 1500)
+    if (v.ready && !audio) { const t = setTimeout(onClose, 5000); return () => clearTimeout(t) }
+    if ((!started && !brewing) || v.error || v.ready) return
+    const t = setInterval(() => api('/voice').then(setV).catch(() => {}), 1000)
     return () => clearInterval(t)
-  }, [v.ready, v.error, started, brewing, onClose])
+  }, [v.ready, v.error, started, brewing, audio, onClose])
+  // The model's here: what you said, now.
+  useEffect(() => {
+    if (!v.ready || !audio || sent.current) return
+    sent.current = true
+    fetch(`${BASE}/api/transcribe`, { method: 'POST', headers: { 'Content-Type': audio.type }, body: audio })
+      .then(async (res) => { const d = await res.json(); if (!res.ok) throw new Error(d.error || t('Transcription failed')); if (d.text) onText(d.text); setAudio(null); onClose() })
+      .catch((e) => { setErr(t("Couldn't transcribe: {error}", { error: e.message })); setAudio(null) })
+  }, [v.ready, audio, onText, onClose])
   const setup = async () => {
     setErr(null)
     try { setV(await api('/voice/setup', { method: 'POST' })); setStarted(true) } catch (e) { setErr(e.message) }
@@ -135,29 +155,30 @@ function VoiceSetup({ initial, onClose }) {
     setErr(null)
     try { await api('/fix/install', { method: 'POST', body: { what: 'homebrew' } }); setBrewing(true) } catch (e) { setErr(e.message) }
   }
-  const tools = v.missing.length > 0
-  const needs = [!v.model && t('a {mb} MB speech model', { mb: v.modelMB }), tools && (v.installCommand ? t('ffmpeg and whisper-cpp from Homebrew') : t('ffmpeg and whisper.cpp'))].filter(Boolean)
-  const canSetup = !v.model || !!v.installCommand
+  const model = v.model || {}
+  const whisper = v.needs === 'whisper' || v.needs === 'brew'
   const touch = matchMedia('(pointer: coarse)').matches
   let text, actions = null
-  if (v.ready) text = t('Voice notes are ready. Tap the mic and talk.')
+  if (v.ready && audio) text = t('Turning what you said into text…')
+  else if (v.ready) text = t('Voice notes are ready. Tap the mic and talk.')
   else if (v.error) { text = t("The speech model didn't download: {error}", { error: v.error }); actions = <button className="btn small primary" onClick={setup}>{t('Try again')}</button> }
-  else if (v.downloading) text = t('Downloading the speech model… {percent}%', { percent: v.downloading.percent })
-  else if (brewing && v.installCommand) { text = t('Homebrew is in. One more step: ffmpeg and whisper-cpp.'); actions = <button className="btn small primary" onClick={() => { setBrewing(false); setup() }}>{t('Set up')}</button> }
-  else if (brewing) text = t('Installing Homebrew in a terminal tab, in the Setup space. It asks for your Mac password there.')
-  else if (started && tools && v.installCommand) text = t('Installing ffmpeg and whisper-cpp in a terminal tab, in the Setup space. If it asks for your password, answer it there.')
-  else if (v.needsBrew && (started || v.model)) { text = t('Voice notes also need ffmpeg and whisper-cpp. They come from Homebrew, which isn\'t on this Mac yet.'); actions = <button className="btn small primary" onClick={installBrew}>{t('Install Homebrew')}</button> }
-  else if (started && tools) text = t('Install ffmpeg and whisper.cpp (whisper-cli) on your computer, then tap the mic again.')
+  else if (v.downloading) text = audio ? t("Downloading {model}… {percent}%. What you said is kept, and turned into text when it's done.", { model: model.label, percent: v.downloading.percent }) : t('Downloading {model}… {percent}%', { model: model.label, percent: v.downloading.percent })
+  else if (whisper && brewing && v.installCommand) { text = t('Homebrew is in. One more step: whisper.cpp.'); actions = <button className="btn small primary" onClick={() => { setBrewing(false); setup() }}>{t('Set up')}</button> }
+  else if (whisper && brewing) text = t('Installing Homebrew in a terminal tab, in the Setup space. It asks for your Mac password there.')
+  else if (whisper && started && v.installCommand) text = t('Installing whisper.cpp in a terminal tab, in the Setup space. If it asks for your password, answer it there.')
+  else if (whisper && v.needsBrew) { text = t("{model} needs whisper.cpp, which comes from Homebrew, and Homebrew isn't on this Mac yet. Or pick Parakeet in Settings › Voice: nothing to install.", { model: model.label }); actions = <button className="btn small primary" onClick={installBrew}>{t('Install Homebrew')}</button> }
+  else if (whisper && !v.installCommand) text = t('{model} needs whisper.cpp: install whisper-cli on your computer, then tap the mic again. Or pick Parakeet in Settings › Voice: nothing to install.', { model: model.label })
+  else if (whisper) { text = t('{model} needs whisper.cpp, a free program. It installs in a minute.', { model: model.label }); actions = <button className="btn small primary" onClick={setup}>{t('Install it')}</button> }
   else {
-    const need = needs.length > 1 ? t('{first} and {second}', { first: needs[0], second: needs[1] }) : needs[0] || ''
-    text = touch ? t("Voice notes are turned into text on your computer, so your audio never leaves it. They need a one-time setup there: {needs}. Your keyboard's own mic works meanwhile.", { needs: need })
-      : t('Voice notes are turned into text on your computer, so your audio never leaves it. They need a one-time setup there: {needs}.', { needs: need })
-    actions = canSetup ? <button className="btn small primary" onClick={setup}>{t('Set up')}</button> : null
+    // The server's own words when it answered a recording; otherwise the same, from what's needed.
+    text = initial.ask || (model.label ? t('Speech to text needs a one-time download: {model}, {mb} MB. It stays on this computer, and so does what you say.', { model: model.label, mb: model.mb }) : t('Speech to text needs a one-time download.'))
+    if (touch && !audio) text = `${text} ${t("Your keyboard's own mic works meanwhile.")}`
+    actions = <button className="btn small primary" onClick={setup}><Icon name="download" size={12} /> {audio ? t('Download, then transcribe') : t('Download')}</button>
   }
   return (
     <div className="voice-setup" role="status" aria-live="polite">
       <p>{text}</p>
-      {v.downloading && <span className="vs-bar"><span style={{ width: `${v.downloading.percent}%` }} /></span>}
+      {v.downloading && !v.ready && <span className="vs-bar" role="progressbar" aria-valuenow={v.downloading.percent} aria-valuemin={0} aria-valuemax={100}><span style={{ width: `${v.downloading.percent}%` }} /></span>}
       {err && <p className="error-text small">{err}</p>}
       <div className="vs-actions">
         <button className="ghost-btn" onClick={onClose}>{v.ready || started ? t('Close') : t('Not now')}</button>
@@ -166,7 +187,6 @@ function VoiceSetup({ initial, onClose }) {
     </div>
   )
 }
-
 
 // The desktop app with the mic turned off for it in System Settings: one button to allow it.
 const micAccess = async () => ((await window.bridgeApp.mediaAccess('microphone')) === 'granted' ? 'ok' : 'denied')
@@ -414,11 +434,8 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
 
   const [voiceSetup, setVoiceSetup] = useState(null)
   const closeVoiceSetup = useCallback(() => setVoiceSetup(null), [])
-  const voice = useRecorder(
-    (t) => setDraft((d) => ({ ...d, text: d.text ? `${d.text.replace(/\s+$/, '')} ${t}` : t })),
-    (msg) => setNote(msg),
-    setVoiceSetup,
-  )
+  const addSpoken = useCallback((t) => setDraft((d) => ({ ...d, text: d.text ? `${d.text.replace(/\s+$/, '')} ${t}` : t })), [])
+  const voice = useRecorder(addSpoken, (msg) => setNote(msg), setVoiceSetup)
 
   const upload = async (fileList) => {
     for (const f of Array.from(fileList || [])) {
@@ -577,7 +594,7 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
       <SlashMenu items={slashItems} sel={slashSel} onHover={setSlashSel} onPick={pickSlash} title={slashTitle} />
       {mentionQ != null && <SlashMenu items={mentionItems} sel={mentionSel} onHover={setMentionSel} onPick={pickMention} title={/^[~/]/.test(mentionQ) ? mentionQ.replace(/[^/]*$/, '') || '~/' : mentionQ.endsWith('/') ? mentionQ : mentionQ ? t('Matching "{query}"', { query: mentionQ }) : `${cwdName || t('This folder')}/`}
         jumps={mentionJumps} mention />}
-      {voiceSetup && (voiceSetup.mic ? <MicFix onClose={closeVoiceSetup} /> : <VoiceSetup initial={voiceSetup} onClose={closeVoiceSetup} />)}
+      {voiceSetup && (voiceSetup.mic ? <MicFix onClose={closeVoiceSetup} /> : <VoiceSetup initial={voiceSetup} onText={addSpoken} onClose={closeVoiceSetup} />)}
       {note && <div className="comp-note" role="status">{note}</div>}
       <div className={`composer ${recording ? 'rec' : ''} ${dragging ? 'drop' : ''} ${manualH ? 'sized' : ''}`} {...dropProps} onPaste={onPaste}>
         <div className="comp-grip" role="separator" aria-orientation="horizontal" aria-label={t('Resize the message box')} title={manualH ? t('Drag to resize · double-click to fit the text again') : t('Drag to make the box taller')}

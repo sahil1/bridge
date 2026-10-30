@@ -343,7 +343,9 @@ async function run(job) {
     const before = lines(job.id).filter((l) => l.src === job.src && speech.spoken(l.text)).slice(-2).map((l) => memory.fix(speech.spoken(l.text))).join(' ').slice(-200)
     // The names in the files that go with it (a resume, a deck) too: fileTerms.
     const hint = [m.title, ...(m.event?.attendees || []).slice(0, 12), cfg.meetings?.vocabulary, m.fileTerms, memory.hint(200)].filter(Boolean).join(', ').slice(0, 440)
-    const r = await speech.transcribe(wav(job.pcm), { cfg: job.cfg || cfg, language: job.language || m.language || cfg.meetings?.language, prompt: [hint, before].filter(Boolean).join('. ') })
+    // An engine that takes names to listen for rather than a prompt (Parakeet) gets them one by one.
+    const words = [...(m.event?.attendees || []).slice(0, 12), ...String(cfg.meetings?.vocabulary || '').split(','), ...String(m.fileTerms || '').split(',')]
+    const r = await speech.transcribe(wav(job.pcm), { cfg: job.cfg || cfg, language: job.language || m.language || cfg.meetings?.language, prompt: [hint, before].filter(Boolean).join('. '), words })
     const text = speech.spoken(r.text)
     if (text && !/^(thank you\.?|thanks for watching!?|you)$/i.test(text)) { append(job.id, { src: job.src, t0: round(job.t0), t1: round(job.t1), text, engine: r.engine }); if (!job.retry) assistSoon(job.id) }
     if (job.retry) fs.rmSync(job.retry, { force: true })
@@ -542,9 +544,9 @@ export async function retranscribe(id, { engine, localModel, language } = {}) {
   const c = { ...cfg, meetings: { ...(cfg.meetings || {}), ...(engine ? { engine } : {}), ...(localModel ? { localModel } : {}) } }
   const st = await speech.status(c)
   if (st.engine === 'local') {
-    if (!st.local.program) throw new Error('Transcribing on this computer needs whisper.cpp. Install it in Settings › Meetings.')
     const lm = st.local.models.find((x) => x.id === st.local.model)
-    if (!lm?.have) throw new Error(`Download ${lm?.label || 'that speech model'} first, in Settings › Meetings.`)
+    if (lm?.runtime === 'whisper' && !st.local.program) throw new Error(`${lm.label} needs whisper.cpp. Install it in Settings › Voice, or pick Parakeet there.`)
+    if (!lm?.have) throw new Error(`Download ${lm?.label || 'that speech model'} first, in Settings › Voice.`)
   } else if (st.engine === 'apple') {
     if (!st.apple.available) throw new Error(`The Mac's own speech isn't available here (${st.apple.why || 'it needs macOS 26 or later'}). Pick another engine in Settings › Meetings.`)
   } else if (!st.services.find((x) => x.id === st.engine)?.ready) throw new Error('That service needs its key first, in Settings › Model providers.')

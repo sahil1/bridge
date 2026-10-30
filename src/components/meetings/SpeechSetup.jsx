@@ -45,7 +45,7 @@ function useSpeechStep(d, refresh) {
       : t('whisper.cpp turns speech into text on this computer, free and private. Install whisper-cpp with your package manager, or use a speech service.'),
     model: dl && !dl.error ? t('The speech model ({model}) is downloading: {percent}%.', { model: model.label, percent: dl.percent })
       : label ? (mb ? t('The speech model ({model}, {mb} MB) downloads once.', { model: label, mb }) : t('The speech model ({model}) downloads once.', { model: label }))
-        : mb ? t('The speech model (for whisper.cpp, {mb} MB) downloads once.', { mb }) : t('The speech model (for whisper.cpp) downloads once.'),
+        : mb ? t('The speech model ({mb} MB) downloads once.', { mb }) : t('The speech model downloads once.'),
     apple: d.apple?.why ? t("The Mac's own speech isn't available here ({why}).", { why: d.apple.why.replace(/^\w/, (c) => c.toLowerCase()) }) : t("The Mac's own speech isn't available here."),
     key: service?.label ? t('{service} needs its key, in Settings › Model providers.', { service: service.label }) : t('That service needs its key, in Settings › Model providers.'),
   }[d.needs] || t("Speech to text isn't set up yet.")
@@ -129,7 +129,7 @@ export function MeetingsSetup({ onDone }) {
   if (!d || !step) return null
   const model = d.local?.models?.find((x) => x.id === d.local.model)
   const service = d.services?.find((x) => x.id === d.engine)
-  const using = d.engine === 'apple' || d.standIn === 'apple' ? t("The Mac's own speech, on this Mac") : d.engine === 'local' ? (model ? t('whisper.cpp ({model}), on this computer', { model: model.label }) : t('whisper.cpp, on this computer')) : service?.label
+  const using = d.engine === 'apple' || d.standIn === 'apple' ? t("The Mac's own speech, on this Mac") : d.engine === 'local' ? (model ? t('{model}, on this computer', { model: model.label }) : t('A speech model, on this computer')) : service?.label
   const micOk = mic?.state === 'granted'
   const notesOk = !!models?.length
   const calOk = !!cal.data

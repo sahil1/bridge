@@ -3,6 +3,7 @@ import Icon from '../Icon.jsx'
 import { api, usePoll } from '../../api.js'
 import { useSettings, SaveNote } from './General.jsx'
 import { MemoryPanel } from '../meetings/tools.jsx'
+import { t } from '../../i18n/index.js'
 import '../meetings/meetings.css'
 
 // Settings › Meetings: which engine turns speech into text (on this computer, or a service you have
@@ -74,6 +75,7 @@ function SaveNotes({ set, pickFolder }) {
   )
 }
 const openProviders = () => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'providers' } }))
+const openVoice = () => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'voice' } }))
 
 export default function Meetings() {
   const { s, save, note } = useSettings()
@@ -82,9 +84,6 @@ export default function Meetings() {
   const [vocab, setVocab] = useState(null)
   const [instr, setInstr] = useState(null)
   const [memory, setMemory] = useState(false)
-  const [busy, setBusy] = useState(null)
-  const [err, setErr] = useState(null)
-  const [installing, setInstalling] = useState(null) // the terminal tab whisper.cpp installs in
   useEffect(() => { api('/chat/models').then((r) => setModels(r.models || [])).catch(() => setModels([])) }, [])
   const m = s?.effective?.meetings || {}
   useEffect(() => { if (s) { setVocab(m.vocabulary || ''); setInstr(m.instructions || '') } }, [s]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -93,23 +92,22 @@ export default function Meetings() {
   const set = (patch) => save({ meetings: patch }).then(() => sp.refresh())
   const mac = window.bridgeApp?.platform === 'darwin'
   const card = !['off', 'menubar'].includes(m.floatCard) || (m.floatCard === 'menubar' && !mac)
-  const act = async (name, fn) => { setBusy(name); setErr(null); try { await fn(); sp.refresh() } catch (e) { setErr(e.message) } finally { setBusy(null) } }
+  const model = d.local.models.find((x) => x.id === d.local.model)
   const pickFolder = window.bridgeApp?.pickFolder
 
   return (
     <div className="st-sections st-meet">
       <SaveNote note={note} />
-      {err && <p className="st-note bad"><Icon name="alert" size={13} /> {err}</p>}
 
       <section className="st-sec">
         <h4>Transcribe with</h4>
         <p className="muted small">Speech is turned into text as you talk, a few seconds at a time. On this computer it's free and never leaves your Mac; a service is quicker on an older computer and costs a little per hour of audio.</p>
-        {d.auto && <p className="small">{d.engine === 'apple' ? 'Using the Mac\'s own speech, since whisper.cpp isn\'t set up.' : 'Using whisper.cpp when it\'s ready, else the Mac\'s own speech.'} Pick one to keep it.</p>}
+        {d.auto && <p className="small">{d.engine === 'apple' ? t("Using the Mac's own speech until the speech model is on this computer. Pick one to keep it.") : t("Using the speech model on this computer when it's ready, else the Mac's own speech. Pick one to keep it.")}</p>}
         <div className="mt-engines" role="radiogroup" aria-label="Speech engine">
           <label className={`mt-engine ${d.engine === 'local' ? 'on' : ''}`}>
             <input type="radio" name="engine" checked={d.engine === 'local'} onChange={() => set({ engine: 'local' })} />
-            <span className="mt-engine-main"><b>On this computer</b><small>whisper.cpp, on the graphics chip. Free and private.</small></span>
-            <span className={`mt-state ${d.local.ready ? 'good' : ''}`}>{d.local.ready ? 'Ready' : d.local.program ? 'Needs a model' : 'Needs whisper.cpp'}</span>
+            <span className="mt-engine-main"><b>On this computer</b><small>{t('{model}, the speech model picked in Settings › Voice. Free and private.', { model: model?.label || 'Parakeet' })}</small></span>
+            <span className={`mt-state ${d.local.ready ? 'good' : ''}`}>{d.local.ready ? 'Ready' : d.needs === 'whisper' || d.needs === 'brew' ? t('Needs whisper.cpp') : t('Needs a download')}</span>
           </label>
           {(d.apple?.available || d.engine === 'apple') && (
             <label className={`mt-engine ${d.engine === 'apple' ? 'on' : ''}`}>
@@ -130,32 +128,12 @@ export default function Meetings() {
 
       {d.engine === 'local' && (
         <section className="st-sec">
-          <h4>Speech model</h4>
-          {!d.local.program && (
-            <div className="st-note warn">
-              <Icon name="download" size={13} /> Transcribing on this computer needs whisper.cpp, a free program.{d.standIn === 'apple' && ' Until it\'s in, the Mac\'s own speech is used.'}
-              {d.local.installCommand
-                ? <button type="button" className="btn small" disabled={busy === 'install' || !!installing} onClick={() => act('install', async () => setInstalling((await api('/speech/install', { method: 'POST' })).openId))}>{busy === 'install' || installing ? 'Installing…' : 'Install it'}</button>
-                : <span> Install Homebrew from brew.sh first, or pick a service above.</span>}
-              {installing && <span className="muted small"> Installing in a terminal tab, in the Setup space. <button type="button" className="link-btn" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: installing } }))}>Show it</button></span>}
-            </div>
-          )}
-          <p className="muted small">Bigger is more accurate and slower. Each is one download, from Hugging Face.</p>
-          <ul className="mt-models">
-            {d.local.models.map((x) => {
-              const on = d.local.model === x.id
-              return (
-                <li key={x.id} className={on ? 'on' : ''}>
-                  <span className="mt-model-main"><b>{x.label}{x.best && <span className="best-tag">best</span>}</b><small>{x.note} {x.mb >= 1000 ? `${(x.mb / 1000).toFixed(1)} GB` : `${x.mb} MB`}.</small></span>
-                  {x.downloading && !x.downloading.error ? <span className="muted small">Downloading {x.downloading.percent}%</span>
-                    : x.have ? (on ? <span className="mt-state good"><Icon name="check" size={12} /> In use</span>
-                      : <span className="mt-model-acts"><button type="button" className="btn small" onClick={() => set({ localModel: x.id })}>Use</button><button type="button" className="ghost-btn" aria-label={`Remove ${x.label}`} title="Remove the download" onClick={() => act(`rm:${x.id}`, () => api(`/speech/models/${x.id}`, { method: 'DELETE' }))}><Icon name="trash" size={13} /></button></span>)
-                      : <button type="button" className="btn small" onClick={() => act(`get:${x.id}`, async () => { await api(`/speech/models/${x.id}`, { method: 'POST' }); await set({ localModel: x.id }) })}><Icon name="download" size={12} /> {on ? 'Download' : 'Download and use'}</button>}
-                  {x.downloading?.error && <span className="error-text small">{x.downloading.error}</span>}
-                </li>
-              )
-            })}
-          </ul>
+          <h4>{t('Speech model')}</h4>
+          <p className="muted small">{model?.have
+            ? t('{model}, the one voice notes and dictation use too.', { model: model.label })
+            : d.standIn === 'apple' ? t("{model} isn't downloaded yet, so the Mac's own speech is used until it is.", { model: model?.label || 'Parakeet' })
+              : t("{model} isn't downloaded yet. It downloads when your first meeting starts, or now from Settings › Voice.", { model: model?.label || 'Parakeet' })}</p>
+          <div className="st-row"><button type="button" className="btn small" onClick={openVoice}><Icon name="mic" size={12} /> {t('Speech models')}</button></div>
         </section>
       )}
 

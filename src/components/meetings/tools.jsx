@@ -128,7 +128,7 @@ export function TranscribeAgain({ ids, onClose, onDone }) {
   const [err, setErr] = useState(null)
   useEffect(() => { api('/speech').then((d) => { setSp(d); setPick(d.engine === 'local' ? `local:${d.local.model}` : d.engine) }).catch((e) => setErr(e.message)) }, [])
   const options = sp ? [
-    ...(sp.local.program ? sp.local.models.filter((x) => x.have).map((x) => [`local:${x.id}`, x.best ? t('On this computer: {model} (best)', { model: x.label }) : t('On this computer: {model}', { model: x.label })]) : []),
+    ...sp.local.models.filter((x) => x.have && x.usable).map((x) => [`local:${x.id}`, x.best ? t('On this computer: {model} (best)', { model: x.label }) : t('On this computer: {model}', { model: x.label })]),
     ...sp.services.filter((x) => x.ready).map((x) => { const name = `${x.label}${x.model ? `, ${x.model}` : ''}`; return [x.id, x.price?.[x.model] ? t('{name} ({price} an hour)', { name, price: x.price[x.model] }) : name] }),
   ] : []
   const go = async () => {
@@ -159,7 +159,7 @@ export function TranscribeAgain({ ids, onClose, onDone }) {
             {LANGS.map(([v, l]) => <option key={v} value={v}>{t(l)}</option>)}
           </select>
         </label>
-        {sp && sp.local.program && sp.local.models.some((x) => !x.have) && <p className="muted small">{t('More speech models are in Settings › Meetings.')}</p>}
+        {sp && sp.local.models.some((x) => !x.have) && <p className="muted small">{t('More speech models are in Settings › Voice.')}</p>}
         {err && <p className="error-text small">{err}</p>}
         <div className="mt-dialog-acts"><button type="button" className="ghost-btn" onClick={onClose}>{t('Cancel')}</button><button type="button" className="btn primary small" disabled={busy || !pick} onClick={go}><Icon name="refresh" size={12} /> {t('Transcribe again')}</button></div>
       </div>

@@ -74,6 +74,28 @@ console.log(`Installing what the server uses: ${Object.keys(pkg.dependencies).jo
 run(['install', '--omit=dev', '--no-audit', '--no-fund'], OUT) // versions from package-lock.json
 fs.rmSync(path.join(OUT, 'package-lock.json'), { force: true })
 
+// sherpa-onnx, which runs Parakeet (server/asr-worker.js), comes as one package per OS and chip,
+// and npm installs only this machine's. A Mac build makes an app for each chip, so both Mac
+// packages go in, each checked against package-lock.json; after-pack.js keeps the right one in each.
+if (process.platform === 'darwin') {
+  const lock = JSON.parse(fs.readFileSync(path.join(REPO, 'package-lock.json'), 'utf8')).packages
+  const tmp = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'bridge-sherpa-'))
+  for (const arch of ['arm64', 'x64']) {
+    const name = `sherpa-onnx-darwin-${arch}`
+    const want = lock[`node_modules/${name}`]
+    const dest = path.join(OUT, 'node_modules', name)
+    if (!want || fs.existsSync(dest)) continue
+    const r = spawnSync(npm, ['pack', `${name}@${want.version}`, '--pack-destination', tmp, '--silent'], { cwd: tmp, encoding: 'utf8', shell: IS_WIN })
+    const file = path.join(tmp, String(r.stdout).trim().split('\n').pop())
+    if (r.status || !fs.existsSync(file)) { console.error(`Couldn't get ${name}@${want.version}: ${r.stderr}`); process.exit(1) }
+    const [algo, sum] = want.integrity.split('-')
+    if (require('node:crypto').createHash(algo).update(fs.readFileSync(file)).digest('base64') !== sum) { console.error(`${name}@${want.version} doesn't match package-lock.json`); process.exit(1) }
+    fs.mkdirSync(dest, { recursive: true })
+    if (spawnSync('tar', ['-xzf', file, '-C', dest, '--strip-components', '1']).status) { console.error(`Couldn't unpack ${name}`); process.exit(1) }
+  }
+  fs.rmSync(tmp, { recursive: true, force: true })
+}
+
 // node-pty ships source and every platform's binaries; keep this platform's binaries only.
 const pty = path.join(OUT, 'node_modules', 'node-pty')
 for (const d of ['deps', 'third_party', 'src', 'scripts']) fs.rmSync(path.join(pty, d), { recursive: true, force: true })

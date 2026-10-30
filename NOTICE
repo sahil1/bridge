@@ -14,3 +14,12 @@ Most logos come from Simple Icons (https://simpleicons.org, CC0).
 
 The Geist and JetBrains Mono fonts are included under the SIL Open Font License 1.1 (via
 Fontsource).
+
+Speech to text on your computer runs on sherpa-onnx (https://github.com/k2-fsa/sherpa-onnx,
+Apache License 2.0), installed with the app through npm. The speech models are not included: each
+is downloaded from Hugging Face when you ask for it, under its own license. Parakeet TDT 0.6B v3
+is by NVIDIA, under CC-BY-4.0 (https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3); Parakeet
+unified EN 0.6B is by NVIDIA, under the NVIDIA Open Model License
+(https://huggingface.co/nvidia/parakeet-unified-en-0.6b); both in the ONNX form made by the
+sherpa-onnx project. The Whisper models are by OpenAI, under the MIT License, in whisper.cpp's
+form.
