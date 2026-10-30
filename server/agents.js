@@ -166,19 +166,26 @@ export async function which(bin, PATH) {
 // arrive while a check is running share it. Qwen Code only when Show more models is on.
 let installedCache = { at: 0, list: null }
 let installedInflight = null
+let installedRound = 0 // a look started before clearInstalledCache() neither answers later callers nor is kept
 const shown = (list) => list.filter((a) => !hiddenAgent(a.kind))
 export function installed() {
   if (installedCache.list && Date.now() - installedCache.at < 60_000) return Promise.resolve(shown(installedCache.list))
-  return (installedInflight ||= findInstalled().finally(() => { installedInflight = null })).then(shown)
+  if (!installedInflight) {
+    const round = installedRound
+    const look = findInstalled(round).finally(() => { if (installedInflight === look) installedInflight = null })
+    installedInflight = look
+  }
+  return installedInflight.then(shown)
 }
-async function findInstalled() {
+async function findInstalled(round) {
   const PATH = await loginPath()
   const found = await Promise.all(AGENTS.map(async (a) => {
     for (const b of a.bin) { const p = await which(b, PATH); if (p) return { kind: a.kind, label: a.label, path: p, caps: a.caps, access: !!a.access, models: a.models || [] } }
     return null
   }))
-  installedCache = { at: Date.now(), list: found.filter(Boolean) }
-  return installedCache.list
+  const list = found.filter(Boolean)
+  if (round === installedRound) installedCache = { at: Date.now(), list }
+  return list
 }
 
 // The install command for this platform, as you'd type it in a terminal. The agent's own installer
@@ -243,4 +250,5 @@ export async function catalog() {
     caps: a.caps || {}, install: installCommand(a.kind, tools), needs: installNeeds(a.kind, tools), modelFlag: !!a.model, models: a.models || [], access: !!a.access,
   }))
 }
-export const clearInstalledCache = () => { installedCache = { at: 0, list: null } }
+// Look again (an agent was just installed): a look already under way may have missed it.
+export const clearInstalledCache = () => { installedCache = { at: 0, list: null }; installedInflight = null; installedRound++ }
