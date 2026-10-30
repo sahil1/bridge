@@ -418,7 +418,7 @@ function Chat({ agent, pending, queued = [], outbox = [], onCancelQueued, onEdit
           <div key={q.id} className="msg user queued">
             <div className="msg-text"><UserText text={q.text} paneId={agent.paneId} /></div>
             <div className="msg-time">
-              <Icon name="clock" size={11} /> {agent.chief ? t('Queued, sends when Chief of staff is free') : t('Queued, sends when the agent is free')}
+              <Icon name="clock" size={11} /> {agent.chief ? t('Queued, sends when Chief of Staff is free') : t('Queued, sends when the agent is free')}
               <button className="link" onClick={() => onCancelQueued(q.id)}>{t('Cancel')}</button>
             </div>
           </div>
@@ -501,7 +501,7 @@ export function MateEmpty({ onLaunch, launching, error, code }) {
       <div className="hero-mark"><Icon name="helm" size={30} /></div>
       <h3>{t('No chief of staff running')}</h3>
       <p>{t('Your chief of staff is the one agent you talk to. It sends each request to the agent already working on that topic, starts a new one in the right space when nothing fits, and reports back when the work is done.')}</p>
-      <button className="btn primary" data-tour="chief" onClick={onLaunch} disabled={launching}><Icon name="helm" /> {launching ? t('Launching…') : t('Start chief of staff')}</button>
+      <button className="btn primary" data-tour="chief" onClick={onLaunch} disabled={launching}><Icon name="helm" /> {launching ? t('Launching…') : t('Chief of Staff')}</button>
       {error && <p className={missing ? 'muted' : 'error-text'}>{error}</p>}
       {missing && <InstallAgentButton kind={missing} label={t('Install it')} onCheck={onLaunch} />}
     </div>
@@ -718,7 +718,7 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
     } catch (e) { setFlash(e.message) }
   }
 
-  const title = agent.chief ? t('Chief of staff') : agent.title || agent.tab || agent.workspace
+  const title = agent.chief ? t('Chief of Staff') : agent.title || agent.tab || agent.workspace
   const kindName = agent.kindLabel || agent.kind
   const where = agent.chief ? (agent.thread && !agent.thread.main ? t('{name} thread · {kind}', { name: agent.thread.name, kind: kindName }) : t('{kind} · sends work to your agents', { kind: kindName })) : `${agent.workspace}${agent.tab && !/^\d+$/.test(agent.tab) ? ` › ${agent.tab}` : ''} · ${kindName}`
   const g = places.data?.[agent.cwd]

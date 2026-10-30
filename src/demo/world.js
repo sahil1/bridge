@@ -10,7 +10,7 @@
 import { CHIEF_DIR, CSV_TREE, EDITS, code } from './repos.js'
 
 export const SPACES = [
-  { id: 'w1', label: 'Chief of staff' },
+  { id: 'w1', label: 'Chief of Staff' },
   { id: 'w2', label: 'acme-shop' },
   { id: 'w3', label: 'billing-api' },
   { id: 'w4', label: 'docs-site' },
@@ -31,7 +31,7 @@ const ago = (m) => ({ at: m })
 
 export const AGENTS = [
   {
-    paneId: 'w1:p1', tabId: 't1', workspaceId: 'w1', tab: 'Chief of staff', kind: 'claude', cwd: CHIEF_DIR, chief: true, status: 'idle',
+    paneId: 'w1:p1', tabId: 't1', workspaceId: 'w1', tab: 'Chief of Staff', kind: 'claude', cwd: CHIEF_DIR, chief: true, status: 'idle',
     script: [
       ago(96), { you: 'Morning. What needs me today?' },
       { tool: 'Read', hint: 'state/ledger.md' },

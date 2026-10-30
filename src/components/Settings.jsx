@@ -25,7 +25,7 @@ export const SECTIONS = [
   { id: 'phone', label: tx('Devices'), icon: 'phone', hint: tx('Your phone and your other computers, through your relay or Tailscale; what to notify you about') },
   { id: 'appearance', label: tx('Appearance'), icon: 'palette', hint: tx('Theme, text size, density') },
   { id: 'config', label: tx('Config file'), icon: 'braces', hint: tx('Every setting, as JSON') },
-  { id: 'about', label: tx('About & updates'), icon: 'info', hint: tx('Version, updates, the tour, reporting a problem') },
+  { id: 'about', label: tx('About & Updates'), icon: 'info', hint: tx('Version, updates, the tour, reporting a problem') },
 ]
 
 // The phone's Cloud agents (cloudOnly): only what there is on the phone alone.

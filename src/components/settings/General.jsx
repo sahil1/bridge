@@ -94,7 +94,7 @@ export default function General({ onGo, onOpenAgent }) {
       )}
 
       <section className="st-sec">
-        <h4>Chief of staff runs on</h4>
+        <h4>Chief of Staff runs on</h4>
         <p className="muted small">The agent you talk to, which hands work to the others. One with a chat view (Claude Code or Codex) works best.</p>
         <select className="st-input" value={eff.chief?.kind || 'claude'} onChange={(e) => save({ chief: { kind: e.target.value } })}>
           {installed.map((a) => <option key={a.kind} value={a.kind}>{a.label}{a.caps?.chat ? '' : ' (terminal only)'}</option>)}

@@ -6,7 +6,7 @@ import { startTour } from '../Tour.jsx'
 
 const REPO = 'https://github.com/sahil1/bridge'
 
-// Settings › About & updates: which version you have, whether there's a newer one (and updating
+// Settings › About & Updates: which version you have, whether there's a newer one (and updating
 // to it), the tour again, and what to include when you report a problem.
 export default function About() {
   return (

@@ -23,7 +23,7 @@ function demoInsights() {
       totals: { sessions: 102, hours: 73.1, messages: 1121, files: 388, projects: 5, agents: 3, waitingHours: 6.5 },
       agents,
       accounts: [{ kind: 'claude', agent: 'Claude Code', account: 'Work', sessions: 48, hours: 40.3 }, { kind: 'claude', agent: 'Claude Code', account: 'Personal', sessions: 16, hours: 11.2 }, { kind: 'codex', agent: 'Codex', account: 'Your usual login', sessions: 29, hours: 18.2 }],
-      projects: [{ name: 'acme-shop', sessions: 41, hours: 33.6, agents: ['Claude Code', 'Codex'] }, { name: 'billing-api', sessions: 27, hours: 21.9, agents: ['Claude Code', 'Codex'] }, { name: 'docs-site', sessions: 14, hours: 8.1, agents: ['Gemini CLI', 'Claude Code'] }, { name: 'Chief of staff', sessions: 12, hours: 6.2, agents: ['Claude Code'] }, { name: 'Home folder', sessions: 8, hours: 3.3, agents: ['Codex'] }],
+      projects: [{ name: 'acme-shop', sessions: 41, hours: 33.6, agents: ['Claude Code', 'Codex'] }, { name: 'billing-api', sessions: 27, hours: 21.9, agents: ['Claude Code', 'Codex'] }, { name: 'docs-site', sessions: 14, hours: 8.1, agents: ['Gemini CLI', 'Claude Code'] }, { name: 'Chief of Staff', sessions: 12, hours: 6.2, agents: ['Claude Code'] }, { name: 'Home folder', sessions: 8, hours: 3.3, agents: ['Codex'] }],
       daily,
     },
     report: {
@@ -381,7 +381,7 @@ export function createDemo({ everything = true } = {}) {
     const tabs = S.tabs.filter((x) => x.workspaceId === a.workspaceId)
     return {
       paneId: a.paneId, tabId: a.tabId, workspaceId: a.workspaceId, workspace: spaceOf(a.workspaceId)?.label || '', tab: t?.label || '',
-      kind: a.kind, status: a.status, title: a.chief ? 'Chief of staff' : t?.label || kindLabel(a.kind), cwd: a.cwd, account: accountLabel(a), accountId: a.account,
+      kind: a.kind, status: a.status, title: a.chief ? 'Chief of Staff' : t?.label || kindLabel(a.kind), cwd: a.cwd, account: accountLabel(a), accountId: a.account,
       sessionId: a.sessionId, focused: false, seq: a.seq, chief: a.chief, ...(a.chief ? { thread: { id: 'main', name: 'Main', main: true } } : {}), caps: F.CAPS[a.kind] || {}, kindLabel: kindLabel(a.kind), tabNumber: tabs.indexOf(t) + 1,
       worktree: a.worktree, muted: a.muted,
     }
@@ -877,7 +877,7 @@ export function createDemo({ everything = true } = {}) {
     const s = asks.get(a.paneId)
     if (body?.summary && s?.state !== 'ready') fail(`${from}'s handover isn't in yet`)
     const { text } = handover(a, { note: body?.note, own: body?.summary ? s.text : null })
-    const base = a.chief ? 'Chief of staff' : String(tabOf(a.tabId)?.label || kindLabel(to)).replace(/\s*\((Claude Code|Codex|Gemini CLI|OpenCode)\)$/, '')
+    const base = a.chief ? 'Chief of Staff' : String(tabOf(a.tabId)?.label || kindLabel(to)).replace(/\s*\((Claude Code|Codex|Gemini CLI|OpenCode)\)$/, '')
     const t = addTab(a.workspaceId, keep ? `${base} (${kindLabel(to)})` : base)
     S.tabs = S.tabs.filter((x) => x !== t)
     S.tabs.splice(S.tabs.findIndex((x) => x.tabId === a.tabId) + 1, 0, t) // right after it, then in its place
@@ -1034,7 +1034,7 @@ export function createDemo({ everything = true } = {}) {
     if (q.length < 2) return { results: [] }
     const results = [...S.agents.values()].map((a) => {
       const hits = a.log.filter((m) => (m.role === 'user' || m.role === 'assistant') && m.text.toLowerCase().includes(q)).slice(-3).map((m) => ({ role: m.role, text: m.text.slice(0, 300) }))
-      return hits.length && { sessionId: a.sessionId, kind: a.kind, title: tabOf(a.tabId)?.label, cwd: tilde(a.cwd), fullCwd: a.cwd, last: a.log.at(-1)?.ts, hits, paneId: a.paneId, label: a.chief ? 'Chief of staff' : tabOf(a.tabId)?.label, workspace: spaceOf(a.workspaceId)?.label }
+      return hits.length && { sessionId: a.sessionId, kind: a.kind, title: tabOf(a.tabId)?.label, cwd: tilde(a.cwd), fullCwd: a.cwd, last: a.log.at(-1)?.ts, hits, paneId: a.paneId, label: a.chief ? 'Chief of Staff' : tabOf(a.tabId)?.label, workspace: spaceOf(a.workspaceId)?.label }
     }).filter(Boolean)
     results.push(...cloud.search(q))
     return { results, total: results.length }
@@ -1128,7 +1128,7 @@ export function createDemo({ everything = true } = {}) {
   // sidebar and the switcher, are the ones its own page shows.
   const KIND = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI', opencode: 'OpenCode' }
   const summaryOf = (tabs) => {
-    const agents = AGENTS.filter((d) => !tabs || tabs.includes(d.tabId)).map((d) => ({ paneId: d.paneId, title: d.chief ? 'Chief of staff' : d.tab, status: d.status, kind: d.kind, kindLabel: KIND[d.kind] || d.kind, chief: !!d.chief }))
+    const agents = AGENTS.filter((d) => !tabs || tabs.includes(d.tabId)).map((d) => ({ paneId: d.paneId, title: d.chief ? 'Chief of Staff' : d.tab, status: d.status, kind: d.kind, kindLabel: KIND[d.kind] || d.kind, chief: !!d.chief }))
     return { counts: agents.reduce((c, a) => ({ ...c, [a.status]: (c[a.status] || 0) + 1 }), {}), agents }
   }
   const machine = (id, name, os, ago, tabs) => ({

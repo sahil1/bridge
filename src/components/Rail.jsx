@@ -52,7 +52,7 @@ const rowCwd = (r) => (r.kind === 'agent' ? r.agent.cwd : r.tab?.panes.find((p) 
 // On its own branch (a worktree Bridge AI made): { repo, branch, base }, else null.
 const rowTree = (r) => (r.kind === 'agent' ? r.agent.worktree : (r.tab?.panes.find((p) => !p.agent) || r.tab?.panes[0])?.worktree) || null
 const rowName = (r) => (r.kind === 'agent'
-  ? (r.agent.chief ? (r.agent.thread && !r.agent.thread.main ? r.agent.title : t('Chief of staff')) : r.agent.tab && !/^\d+$/.test(r.agent.tab) ? r.agent.tab : r.agent.title || t('agent'))
+  ? (r.agent.chief ? (r.agent.thread && !r.agent.thread.main ? r.agent.title : t('Chief of Staff')) : r.agent.tab && !/^\d+$/.test(r.agent.tab) ? r.agent.tab : r.agent.title || t('agent'))
   : (r.tab.label && !/^\d+$/.test(r.tab.label) ? r.tab.label : t('shell')))
 
 // own: it works on its own branch, in a worktree Bridge AI made.
@@ -266,7 +266,7 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
     return (
       <nav className="rail collapsed" aria-label={t('Workspaces')} data-tour="agents" onMouseLeave={() => setHover(null)}>
         <button className={`mini-nav ${selected === 'view:new' ? 'on' : ''}`} data-tour="new-agent" onClick={() => onNewAgent?.()} aria-label={t('New')} title={t('New')}><Icon name="edit" size={15} /></button>
-        {!fleet?.down && <button className={`mini-nav ${chiefOn ? 'on' : ''}`} onClick={goChief} disabled={launching} aria-label={t('Chief of staff')} title={t('Chief of staff')}><Icon name="helm" size={15} />{chief?.status === 'blocked' && <span className="mini-needs" />}</button>}
+        {!fleet?.down && <button className={`mini-nav ${chiefOn ? 'on' : ''}`} onClick={goChief} disabled={launching} aria-label={t('Chief of Staff')} title={t('Chief of Staff')}><Icon name="helm" size={15} />{chief?.status === 'blocked' && <span className="mini-needs" />}</button>}
         <button className={`mini-nav ${String(selected || '').startsWith('view:meeting') ? 'on' : ''}`} onClick={() => onMeetings?.()} aria-label={recording ? t('Meetings (recording)') : t('Meetings')} title={t('Meetings')}><Icon name="mic" size={15} />{recording && <span className="rec-dot mini-rec" />}</button>
         <div className="rail-mini">
           {groups.filter((g) => g.rows.length).map((g) => (
@@ -293,7 +293,7 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
         <button className={`rail-nav-btn ${selected === 'view:new' ? 'on' : ''}`} data-tour="new-agent" onClick={() => onNewAgent?.()}><Icon name="edit" size={14} /> {t('New')}</button>
         {!fleet?.down && (
           <button className={`rail-nav-btn ${chiefOn ? 'on' : ''}`} onClick={goChief} disabled={launching}>
-            <Icon name="helm" size={14} /> {launching ? t('Starting…') : t('Chief of staff')}{chief?.status === 'blocked' && <span className="rm-badge" title={t('Needs you')}>!</span>}
+            <Icon name="helm" size={14} /> {launching ? t('Starting…') : t('Chief of Staff')}{chief?.status === 'blocked' && <span className="rm-badge" title={t('Needs you')}>!</span>}
           </button>
         )}
         <div className="rail-nav-row">
@@ -474,7 +474,7 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
       {fleet && !hasMate && !fleet.down && (
         <div className="rail-foot">
           <button className="btn primary block" data-tour="chief" onClick={launch} disabled={launching}>
-            <Icon name="helm" /> {launching ? t('Launching…') : t('Start chief of staff')}
+            <Icon name="helm" /> {launching ? t('Launching…') : t('Chief of Staff')}
           </button>
           {error && <p className="error-text">{error}</p>}
         </div>

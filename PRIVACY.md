@@ -18,7 +18,7 @@ The outside requests Bridge AI makes itself are for what it shows you: the weath
 with only the coordinates you picked), market prices and news headlines (Yahoo Finance, the Federal
 Reserve and public news feeds), the speech model for voice notes when you set them up (one
 download from Hugging Face), and a check on GitHub for a newer version, which you can turn off in
-Settings › About & updates. Its fonts and icons are part of the app, so nothing is fetched to draw
+Settings › About & Updates. Its fonts and icons are part of the app, so nothing is fetched to draw
 it.
 
 How much of your plan is left is off until you turn it on (the Usage card, or Settings › General).

@@ -194,7 +194,7 @@ function WhatToSend() {
           <ul className="ph-devices">
             {muted.map((a) => (
               <li key={a.paneId}>
-                <Icon name="bell-off" size={14} /><span>{a.chief ? 'Chief of staff' : a.title || a.tab || a.workspace}</span>
+                <Icon name="bell-off" size={14} /><span>{a.chief ? 'Chief of Staff' : a.title || a.tab || a.workspace}</span>
                 <span className="muted small">{a.workspace}</span>
                 <button type="button" className="ghost-btn" onClick={() => unmute(a)}>Unmute</button>
               </li>

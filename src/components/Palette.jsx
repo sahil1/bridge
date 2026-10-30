@@ -5,7 +5,7 @@ import { api } from '../api.js'
 import { t } from '../i18n/index.js'
 
 // A chief of staff's thread other than Main goes by its topic.
-const chiefName = (a) => (a.thread && !a.thread.main ? `${t('Chief of staff')} · ${a.title}` : t('Chief of staff'))
+const chiefName = (a) => (a.thread && !a.thread.main ? `${t('Chief of Staff')} · ${a.title}` : t('Chief of Staff'))
 
 // ⌘K: jump to any agent or tab, run a routine, open a file in the current agent's
 // folder, or run an action. Fuzzy, keyboard-first; full screen on the phone.

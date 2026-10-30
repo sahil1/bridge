@@ -15,7 +15,7 @@ export const CHANNEL = `bridge-windows@${machineId || 'here'}`
 
 // What the agent is called, as in its header (without Claude's spinner glyph).
 // A chief of staff's thread other than Main goes by its topic.
-export const nameOf = (a) => (a.chief ? (a.thread && !a.thread.main ? `Chief of staff · ${a.title}` : 'Chief of staff') : String(a.title || a.tab || a.workspace || 'Agent').replace(/^[^\p{L}\p{N}]+/u, '') || 'Agent')
+export const nameOf = (a) => (a.chief ? (a.thread && !a.thread.main ? `Chief of Staff · ${a.title}` : 'Chief of Staff') : String(a.title || a.tab || a.workspace || 'Agent').replace(/^[^\p{L}\p{N}]+/u, '') || 'Agent')
 
 export const tell = (msg) => { const ch = new BroadcastChannel(CHANNEL); ch.postMessage(msg); ch.close() }
 

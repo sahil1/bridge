@@ -21,7 +21,7 @@ try {
     const { ctx, p, errors } = await page(b, kit.url, look)
     await p.waitForSelector('.rail-nav-btn', { timeout: 15000 }).catch(() => {})
     const nav = await p.locator('.rail-nav-btn').allInnerTexts()
-    ok(['New', 'Chief of staff', 'Meetings'].every((x) => nav.some((n) => n.includes(x))), `${t}: the sidebar has New, Chief of staff and Meetings`, nav)
+    ok(['New', 'Chief of Staff', 'Meetings'].every((x) => nav.some((n) => n.includes(x))), `${t}: the sidebar has New, Chief of Staff and Meetings`, nav)
     ok(await p.locator('.rail-nav-row .rail-rec').isVisible(), `${t}: and the record button`)
     await p.keyboard.press('ControlOrMeta+K')
     ok(!!(await until(async () => (await p.locator('[role="dialog"] input').count()) > 0, 4000)), `${t}: ⌘K opens the palette`)
