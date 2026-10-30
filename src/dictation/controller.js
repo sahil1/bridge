@@ -27,7 +27,9 @@ const subs = new Set()
 const set = (p) => { st = { ...st, ...p }; for (const f of subs) f() }
 export const getState = () => st
 export const subscribe = (f) => { subs.add(f); return () => subs.delete(f) }
-export const useDictation = () => useSyncExternalStore(subscribe, getState)
+// select: what a component needs of it, so one that isn't recording isn't drawn again ten times a
+// second for the level (it must give back the same value while nothing it needs has changed).
+export const useDictation = (select = (x) => x) => useSyncExternalStore(subscribe, () => select(st))
 export const active = () => st.phase !== 'idle'
 
 // The platform the keys are pressed on: the desktop app's, else this browser's.
