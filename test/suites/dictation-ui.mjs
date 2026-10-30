@@ -10,8 +10,9 @@
 //   terminal: typed without Enter. On a phone: the mic button held with a finger.
 //   Settings › Voice: the Dictation section, a new key picked by pressing it (and working), turned
 //   off (the key does nothing); in a browser, no "from other apps" options. With the desktop app
-//   simulated (window.bridgeApp): what's shown for a key held from any app, tapped (Wayland, off until
-//   turned on), not offered, and taken; changes go to the app; its key handed to the page in front.
+//   simulated (window.bridgeApp): the key from any app off until you say yes, asked once after the
+//   first words in Bridge AI (Turn on, Not now); what's shown for a key held from any app, tapped
+//   (Wayland), not offered, and taken; changes go to the app; its key handed to the page in front.
 //   The desktop app's dictation window (?dictate=1): the level while you talk, then the text, Send to
 //   the agent you last looked at or one picked, Copy, Esc, and a press from before it was ready.
 import fs from 'node:fs'
@@ -268,28 +269,63 @@ try {
   const voice = async (pg) => { await pg.locator('button[aria-label="Settings"]').first().click(); await pg.locator('.st-nav-item', { hasText: 'Voice' }).click(); const s = pg.locator('.st-dictation'); await s.waitFor({ timeout: 8000 }); await sleep(300); return s }
   {
     const d = await desktop({ mode: 'hold', via: 'bridgekeys', key: 'Alt+Space', active: true })
-    const s = await voice(d.p)
-    const bg = s.locator('label.st-check', { hasText: 'in the background' })
-    ok(await bg.count() === 1 && await bg.locator('input').isChecked() && /Hold .* in any app/.test(await bg.innerText()), 'desktop app, key held from any app: "Works while Bridge AI is in the background", on', await s.innerText())
-    ok(await s.locator('[role="radiogroup"] input').count() === 3 && await s.locator('[role="radiogroup"] input').first().isChecked(), 'with where the text goes: the agent you looked at last, at first')
+    let s = await voice(d.p)
+    let bg = s.locator('label.st-check', { hasText: 'in the background' })
+    ok(await bg.count() === 1 && !(await bg.locator('input').isChecked()) && /Hold .* in any app/.test(await bg.innerText()), 'desktop app, key held from any app: "Works while Bridge AI is in the background", off until you say yes', await s.innerText())
+    ok(await s.locator('[role="radiogroup"]').count() === 0, 'with it off, no "send what I say to"')
     ok(!/In the desktop app/.test(await s.innerText()), 'and no line about the desktop app')
+    // The key in Bridge AI: the words land, then it asks once about any app.
+    await d.p.locator('button[aria-label="Close settings"]').click()
+    await d.p.locator('.tab-main', { hasText: 'payments' }).first().click({ timeout: 20000 })
+    const dbox = d.p.locator('textarea[data-composer]').first()
+    await dbox.waitFor({ timeout: 15000 })
+    const talk = async (words) => {
+      await dbox.fill('')
+      await dbox.click()
+      said.push(words)
+      await d.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-dictate-key', { detail: { type: 'down', at: Date.now() } })))
+      await sleep(1500)
+      await d.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-dictate-key', { detail: { type: 'up', at: Date.now() } })))
+    }
+    await talk('from the desktop app')
+    ok(!!(await until(async () => (await dbox.inputValue()) === 'From the desktop app.', 8000)), 'the desktop app\'s key, while Bridge AI is in front: as if pressed in the page', await dbox.inputValue())
+    const offer = d.p.locator('.dict-offer')
+    ok(!!(await until(() => offer.isVisible(), 5000, 100)) && /Use .*Space in any app too\? Hold it anywhere/.test(await offer.innerText()), 'then it asks once: the key in any app too?', await d.p.locator('body').innerText())
+    ok(!(await d.p.evaluate(() => window.__configured.some((x) => x.background === true))), 'not turned on before you say yes')
+    await shot(d.p, `${tag}dictation-offer`)
+    await offer.locator('button', { hasText: 'Turn on' }).click()
+    ok(!!(await until(() => d.p.evaluate(() => window.__configured.at(-1)?.background === true), 5000, 100)) && (await kit.api('/settings')).effective?.dictation?.background === true, 'Turn on: kept, and the desktop app is told', await d.p.evaluate(() => window.__configured))
+    ok(await offer.count() === 0, 'and the question goes')
+    await talk('once more')
+    ok(!!(await until(async () => (await dbox.inputValue()) === 'Once more.', 8000)) && (await sleep(800), await offer.count() === 0), 'asked only once')
+    s = await voice(d.p)
+    bg = s.locator('label.st-check', { hasText: 'in the background' })
+    ok(!!(await until(() => bg.locator('input').isChecked(), 3000, 100)) && await s.locator('[role="radiogroup"] input').count() === 3 && await s.locator('[role="radiogroup"] input').first().isChecked(), 'Settings shows it on, with where the text goes: the agent you looked at last, at first', await s.innerText())
     await s.locator('[role="radiogroup"] label', { hasText: 'The chief of staff' }).click()
     ok(!!(await until(() => d.p.evaluate(() => window.__configured.at(-1)?.to === 'chief'), 5000, 100)), 'a change goes to the desktop app', await d.p.evaluate(() => window.__configured))
     await shot(d.p, `${tag}settings-voice-desktop`)
-    // Its key, heard while this window is in front, handed to the page.
-    await d.p.locator('button[aria-label="Close settings"]').click()
+    ok(real(d.errors).length === 0, 'no page errors', d.errors)
+    await d.ctx.close()
+    await kit.api('/settings', { dictation: { background: null, to: null } }, 'PATCH')
+  }
+  {
+    // Not now: kept too, and never asked again.
+    const d = await desktop({ mode: 'hold', via: 'bridgekeys', key: 'Alt+Space', active: true })
     await d.p.locator('.tab-main', { hasText: 'payments' }).first().click({ timeout: 20000 })
     const dbox = d.p.locator('textarea[data-composer]').first()
     await dbox.waitFor({ timeout: 15000 })
     await dbox.fill('')
     await dbox.click()
-    said.push('from the desktop app')
+    said.push('not this time')
     await d.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-dictate-key', { detail: { type: 'down', at: Date.now() } })))
     await sleep(1500)
     await d.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-dictate-key', { detail: { type: 'up', at: Date.now() } })))
-    ok(!!(await until(async () => (await dbox.inputValue()) === 'From the desktop app.', 8000)), 'the desktop app\'s key, while Bridge AI is in front: as if pressed in the page', await dbox.inputValue())
-    ok(real(d.errors).length === 0, 'no page errors', d.errors)
+    const offer = d.p.locator('.dict-offer')
+    ok(!!(await until(() => offer.isVisible(), 8000, 100)), 'asked again in a fresh window while it was never answered')
+    await offer.locator('button', { hasText: 'Not now' }).click()
+    ok(!!(await until(async () => (await kit.api('/settings')).effective?.dictation?.background === false, 5000, 100)) && await offer.count() === 0 && !(await d.p.evaluate(() => window.__configured.some((x) => x.background === true))), 'Not now: kept as off, and the key stays inside Bridge AI')
     await d.ctx.close()
+    await kit.api('/settings', { dictation: { background: null } }, 'PATCH')
   }
   {
     const d = await desktop({ mode: 'toggle', via: 'shortcut', asks: true, key: 'Control+Alt+Space' })

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import Icon from '../components/Icon.jsx'
 import { VoiceSetup, MicFix } from '../components/Composer.jsx'
 import { parseKey, keyLabel, isKeyDown, isKeyUp } from '../../shared/dictation/keys.js'
-import { useDictation, getState, configure, setOnScreen, press, release, finish, cancel, dismiss, retry, targetFromFocus, isPaused, box, keysPlatform, dictationKey, listeningHint } from './controller.js'
+import { useDictation, getState, configure, setOnScreen, press, release, finish, cancel, dismiss, retry, targetFromFocus, isPaused, box, keysPlatform, dictationKey, listeningHint, answerOffer } from './controller.js'
 import { t } from '../i18n/index.js'
 import './dictation.css'
 
@@ -69,10 +69,12 @@ export default function Dictation({ conf, onScreen }) {
   // A line said for a moment, then gone.
   useEffect(() => { if (!s.note || s.setup || s.retry) return; const id = setTimeout(dismiss, 6000); return () => clearTimeout(id) }, [s.note, s.setup, s.retry])
 
+  const label = keyLabel(key, keysPlatform())
+  if (s.offer && s.phase === 'idle') return <Offer s={s.offer} label={label} />
   // The message box shows its own.
   const mine = s.target?.kind === 'composer' && box(s.target.id)
   if (mine || (s.phase === 'idle' && !s.note && !s.setup)) return null
-  return <Bar s={s} label={keyLabel(key, keysPlatform())} />
+  return <Bar s={s} label={label} />
 }
 
 function Clock({ since }) {
@@ -80,6 +82,22 @@ function Clock({ since }) {
   useEffect(() => { const id = setInterval(() => tick((n) => n + 1), 500); return () => clearInterval(id) }, [])
   const secs = Math.max(0, Math.floor((Date.now() - since) / 1000))
   return <span className="rec-time">{Math.floor(secs / 60)}:{String(secs % 60).padStart(2, '0')}</span>
+}
+// Asked once, after the first words in Bridge AI: the key from any app too?
+function Offer({ s, label }) {
+  return (
+    <div className="dict-bar dict-offer" role="dialog" aria-label={t('Dictation from any app')}>
+      <div className="dict-row">
+        <Icon name="mic" size={14} />
+        <span className="dict-hint">{s.mode === 'hold'
+          ? t('Use {key} in any app too? Hold it anywhere and a small window shows what you said, to send to an agent or copy.', { key: label })
+          : t('Use {key} in any app too? Tap it anywhere to start listening and again when you\'re done; a small window shows what you said.', { key: label })}
+        {s.asks ? ` ${t('Your desktop asks once to allow the key.')}` : ''}</span>
+        <button className="comp-text-btn" onClick={() => answerOffer(false)}>{t('Not now')}</button>
+        <button className="btn small primary" onClick={() => answerOffer(true)}>{t('Turn on')}</button>
+      </div>
+    </div>
+  )
 }
 function Bar({ s, label }) {
   const listening = s.phase === 'opening' || s.phase === 'listening'

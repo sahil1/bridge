@@ -16,8 +16,7 @@
 // The answer: { mode: 'hold' | 'toggle' | null, via, asks, why }. hold: held to talk, as inside
 // Bridge AI. toggle: tapped to start listening and again to stop (the key's release can't be heard).
 // null: not offered here, and `why` says why (for diagnostics; the app just doesn't show it). asks:
-// the system asks once to allow the key when it's first set (GNOME's portal), so it's off until you
-// turn it on.
+// the system asks once to allow the key when it's first set (GNOME's portal).
 export function globalKey(m = {}) {
   if (!m.desktop) return { mode: null, why: 'Only the desktop app hears keys in other apps' }
   if (m.platform === 'darwin') {
@@ -46,6 +45,6 @@ export function globalKey(m = {}) {
   return { mode: null, why: 'Not on this system' }
 }
 
-// Whether the key works from other apps when it's never been set: on, unless the system would ask
-// about it (that waits until you turn it on).
-export const backgroundDefault = (g) => !!g?.mode && !g.asks
+// The key from other apps is off until you say yes: Alfred, Raycast and other launchers often have
+// it there. Bridge AI asks once, after your first words in it (controller.js offerAnyApp), and
+// Settings › Voice turns it on or off.

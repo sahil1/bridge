@@ -216,7 +216,7 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, tellMain }) {
     source?.stop()
     source = null
     const key = settings.key || lib.defaultKey(process.platform)
-    const background = settings.background ?? lib.backgroundDefault(g)
+    const background = settings.background === true // off until you say yes (shared/dictation/platform.js)
     status = { mode: g.mode, via: g.via || null, asks: !!g.asks, why: g.why || null, key, background, active: false, taken: null, fallback: null, error: null }
     if (settings.on === false || !background || !g.mode) return status
     const handlers = { onDown, onUp }
