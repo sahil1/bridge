@@ -12,7 +12,7 @@ import os from 'node:os'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { startKit, startModel, checks, until, browser, page, shot, IS_WIN } from '../lib/harness.mjs'
+import { startKit, startModel, checks, until, browser, page, shot, IS_WIN, IS_MAC } from '../lib/harness.mjs'
 
 const { ok, done } = checks('new-install')
 
@@ -72,7 +72,8 @@ try {
     const levels = await p.$$eval('.wiz-levels li', (l) => l.map((li) => `${li.querySelector('input').checked ? '*' : ''}${li.querySelector('b').innerText}`))
     ok(levels.join('|') === '*Just what agents need (recommended)|Everything|Later', `${t}: setup starts with how much to set up, the one with no password or permissions picked`, levels)
     ok(/^Set up Node\.js$/.test((await p.innerText('.wiz-foot .btn.primary')).trim()), `${t}: and says what Continue does`)
-    ok(/No password, nothing to allow/.test(await p.innerText('.wiz-levels li.on')) && /Asks for your password once/.test(await p.innerText('.wiz-levels li:not(.on)')), `${t}: each says whether it asks for anything`)
+    // Off a Mac, Everything installs nothing that asks (no Homebrew), so it doesn't say it will.
+    ok(/No password, nothing to allow/.test(await p.innerText('.wiz-levels li.on')) && (!IS_MAC || /Asks for your password once/.test(await p.innerText('.wiz-levels li:not(.on)'))), `${t}: each says whether it asks for anything`)
     ok(await p.isChecked('.wiz-awake input'), `${t}: keeping this computer awake for your phone is offered, ticked`)
     ok(!(await sideways(p)), `${t}: the first step: nothing wider than the screen`)
     await shot(p, `${tag}new-${phone ? 'phone' : 'desktop'}-${name}-0-how-much`)
