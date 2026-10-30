@@ -130,6 +130,10 @@ say "Installing to $DEST..."
 ditto -x -k "$TMP/bridge.zip" "$TMP/app" || fail "the download looks damaged; run the installer again"
 [ -d "$TMP/app/$APP" ] || fail "the download doesn't contain $APP"
 
+# A copy opened straight from the .dmg runs from a temporary place of macOS's (App Translocation),
+# and the update from it goes in $DEST: close it, or the new version finds it still open and quits.
+pkill -TERM -a -f "/AppTranslocation/.*/$APP/Contents/" 2>/dev/null && sleep 1 || true
+
 # Updating: close the running app and stop its server, so the new version starts fresh. Your
 # agents keep running in its terminal host, which shows as "Bridge AI terminal host" rather than
 # the app's path, so this leaves it be; the new version picks them up (or, if its host is too

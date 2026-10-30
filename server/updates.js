@@ -62,7 +62,8 @@ export async function install() {
   const at = `https://raw.githubusercontent.com/${REPO}/${tag}`
   const log = path.join(ensureDir(cacheFile('update')), 'update.log')
   const out = fs.openSync(log, 'w')
-  const env = { ...process.env, BRIDGE_VERSION: tag, BRIDGE_APP_DIR: appDir() }
+  const dir = appDir()
+  const env = { ...process.env, BRIDGE_VERSION: tag, ...(dir ? { BRIDGE_APP_DIR: dir } : {}) }
   const child = IS_WIN
     ? spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', `irm ${at}/install.ps1 | iex`], { detached: true, stdio: ['ignore', out, out], windowsHide: true, env })
     : spawn('/bin/sh', ['-c', `curl --proto '=https' -fsSL ${at}/install.sh | sh`], { detached: true, stdio: ['ignore', out, out], env })
@@ -71,8 +72,11 @@ export async function install() {
 }
 
 // The folder this app is installed in (so an update replaces it where it is, not in a new place).
-// The outermost .app: the server runs on the Helper inside it (desktop/main.js).
+// The outermost .app: the server runs on the Helper inside it (desktop/main.js). Opened straight
+// from the .dmg, or copied there other than with Finder, macOS runs it from a read-only copy of its
+// own (App Translocation), which can't be replaced: then none, and the installer puts the update in
+// Applications as for a new install.
 function appDir() {
   const m = process.execPath.match(/^(.*?)\/[^/]+\.app\/Contents\//)
-  return m ? m[1] : '/Applications'
+  return m && !m[1].includes('/AppTranslocation/') ? m[1] : null
 }
