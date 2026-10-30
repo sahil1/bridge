@@ -5,7 +5,8 @@
 # nothing went in its error logs, running the installer again updates it, and on a Mac Gatekeeper
 # lets it open as if it came from a browser. Screenshots and logs are kept with the run.
 #   After every release, weekly (GitHub's machines and the latest release can change under us), and
-#   by hand: Actions › Fresh install › Run workflow, with the installers from any branch.
+#   by hand: Actions › Fresh install › Run workflow, with the installers from any branch, and the
+#   latest release or the build from a Release run (to try it before it's published).
 name: Fresh install
 
 on:
@@ -26,11 +27,16 @@ on:
       version:
         description: Install this release (v3.5.0, say) instead of the latest
         default: ''
+      run:
+        description: Or the build from this Release run (the number in its address)
+        default: ''
   push:
     branches: [fresh-install]
 
+# actions: read, for a Release run's build.
 permissions:
   contents: read
+  actions: read
 
 defaults:
   run:
@@ -41,6 +47,7 @@ env:
   INSTALLER: https://raw.githubusercontent.com/${{ github.repository }}/${{ inputs.ref || (github.event_name == 'push' && github.sha) || 'main' }}
   # Empty: the latest release, as people get it.
   BRIDGE_VERSION: ${{ inputs.version || (github.event_name == 'release' && github.event.release.tag_name) || (github.event_name == 'workflow_run' && github.event.workflow_run.head_branch) || '' }}
+  FROM_RUN: ${{ inputs.run || (github.event_name == 'push' && '41064215824') || '' }}
   BASE: http://127.0.0.1:7420
 
 jobs:
@@ -56,9 +63,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tag="${BRIDGE_VERSION:-$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)}"
+          if [ -n "$FROM_RUN" ]; then
+            sha="$(gh run view "$FROM_RUN" --repo "$GITHUB_REPOSITORY" --json headSha --jq .headSha)"
+            tag="v$(gh api "repos/$GITHUB_REPOSITORY/contents/desktop/package.json?ref=$sha" --jq .content | base64 -d | jq -r .version)"
+            echo "Bridge AI $tag as Release run $FROM_RUN built it ($sha), with the installers from $INSTALLER"
+          else
+            tag="${BRIDGE_VERSION:-$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)}"
+            echo "Bridge AI $tag, with the installers from $INSTALLER"
+          fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "Bridge AI $tag, with the installers from $INSTALLER"
 
   mac:
     name: macOS ${{ matrix.name }}
@@ -79,9 +92,22 @@ jobs:
       TAG: ${{ needs.release.outputs.tag }}
       OUT: ${{ github.workspace }}/out
     steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        if: env.FROM_RUN
+        with:
+          name: bridge-ai-mac
+          path: ${{ runner.temp }}/build
+          run-id: ${{ env.FROM_RUN }}
+          github-token: ${{ github.token }}
+
       - name: Install with the README's one line
         run: |
           mkdir -p "$OUT"
+          # A run's build instead of the release's download: the installer's BRIDGE_ZIP.
+          if [ -n "$FROM_RUN" ]; then
+            export BRIDGE_ZIP="$RUNNER_TEMP/build/Bridge-AI-mac-$([ "$(uname -m)" = arm64 ] && echo arm64 || echo x64).zip"
+            echo "BRIDGE_ZIP=$BRIDGE_ZIP" >> "$GITHUB_ENV"
+          fi
           curl -fsSL "$INSTALLER/install.sh" | sh 2>&1 | tee "$OUT/install.log"
 
       - name: Nothing alarming in what it printed
@@ -159,7 +185,9 @@ jobs:
           # The zip as Safari saves it (quarantined) and unpacks it, carrying the quarantine over.
           dl="$RUNNER_TEMP/download"; mkdir -p "$dl"
           arch=$([ "$(uname -m)" = arm64 ] && echo arm64 || echo x64)
-          curl -fsSL -o "$dl/Bridge-AI-mac-$arch.zip" "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/Bridge-AI-mac-$arch.zip"
+          if [ -n "${BRIDGE_ZIP:-}" ]; then cp "$BRIDGE_ZIP" "$dl/"
+          else curl -fsSL -o "$dl/Bridge-AI-mac-$arch.zip" "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/Bridge-AI-mac-$arch.zip"
+          fi
           q="0083;$(printf %x "$(date +%s)");Safari;$(uuidgen)"
           xattr -w com.apple.quarantine "$q" "$dl/Bridge-AI-mac-$arch.zip"
           ditto -x -k "$dl/Bridge-AI-mac-$arch.zip" "$dl/x"
@@ -206,13 +234,24 @@ jobs:
       OUT: ${{ github.workspace }}/out
       APP: /Applications/Bridge AI.app
     steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        if: env.FROM_RUN
+        with:
+          name: bridge-ai-mac
+          path: ${{ runner.temp }}/build
+          run-id: ${{ env.FROM_RUN }}
+          github-token: ${{ github.token }}
+
       - name: Download it as a browser would
         run: |
           mkdir -p "$OUT"; cd "$RUNNER_TEMP"
           dmg="Bridge-AI-mac-${{ matrix.arch }}.dmg"
-          curl -fsSL -O "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$dmg"
-          curl -fsSL -O "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/SHA256SUMS.txt"
-          grep " $dmg\$" SHA256SUMS.txt | shasum -a 256 -c -
+          if [ -n "$FROM_RUN" ]; then cp "build/$dmg" .
+          else
+            curl -fsSL -O "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$dmg"
+            curl -fsSL -O "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/SHA256SUMS.txt"
+            grep " $dmg\$" SHA256SUMS.txt | shasum -a 256 -c -
+          fi
           xattr -w com.apple.quarantine "0083;$(printf %x "$(date +%s)");Safari;$(uuidgen)" "$dmg"
           echo "DMG=$RUNNER_TEMP/$dmg" >> "$GITHUB_ENV"
 
@@ -300,11 +339,21 @@ jobs:
       OUT: ${{ github.workspace }}/out
       DISPLAY: ':99'
     steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        if: env.FROM_RUN
+        with:
+          name: bridge-ai-linux
+          path: ${{ runner.temp }}/build
+          run-id: ${{ env.FROM_RUN }}
+          github-token: ${{ github.token }}
+
       - name: A screen for the app
         run: |
           mkdir -p "$OUT"
           (Xvfb :99 -screen 0 1600x1000x24 >/dev/null 2>&1 &)
           sleep 2
+          # A run's build instead of the release's download: the installer's BRIDGE_FILE.
+          if [ -n "$FROM_RUN" ]; then echo "BRIDGE_FILE=$RUNNER_TEMP/build/Bridge-AI-linux-amd64.deb" >> "$GITHUB_ENV"; fi
 
       - name: Install with the README's one line
         run: curl -fsSL "$INSTALLER/install.sh" | sh 2>&1 | tee "$OUT/install.log"
@@ -393,22 +442,26 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # What a desktop has already (so apt adds only what Bridge AI needs beyond it), and sudo.
           - name: Ubuntu 24.04 (a new user with sudo)
             image: ubuntu:24.04
-            prepare: apt-get -qq update && apt-get -qq install -y curl ca-certificates sudo xvfb jq iproute2 procps >/dev/null && echo 'joerg ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/joerg
+            prepare: apt-get -qq update && apt-get -qq install -y curl ca-certificates sudo xvfb jq iproute2 procps systemd dbus tzdata xdg-utils libgtk-3-0t64 libnss3 libasound2t64 libxss1 libxtst6 >/dev/null && echo 'joerg ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/joerg
             kind: deb
+            file: Bridge-AI-linux-amd64.deb
             opens: true
           # A desktop, so the app opens: what its windows need, but not FUSE 2.
           - name: Fedora (AppImage, no FUSE 2)
             image: fedora:latest
             prepare: dnf -y -q install curl findutils procps-ng iproute jq shadow-utils util-linux xorg-x11-server-Xvfb gtk3 nss alsa-lib libXScrnSaver libxshmfence mesa-libgbm libdrm at-spi2-core cups-libs
             kind: local
+            file: Bridge-AI-linux-x86_64.AppImage
             opens: true
           # Only curl, and no sudo: a server, a container, a locked-down machine.
           - name: Debian (curl only, no sudo)
             image: debian:stable-slim
             prepare: apt-get -qq update && apt-get -qq install -y curl ca-certificates >/dev/null
             kind: local
+            file: Bridge-AI-linux-x86_64.AppImage
             opens: false
     runs-on: ubuntu-22.04
     container:
@@ -422,6 +475,14 @@ jobs:
       HOMEDIR: /home/Jörg Müller # private-ok: a made-up user, to test a name with a space and an accent
       DEBIAN_FRONTEND: noninteractive
     steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        if: env.FROM_RUN
+        with:
+          name: bridge-ai-linux
+          path: /build
+          run-id: ${{ env.FROM_RUN }}
+          github-token: ${{ github.token }}
+
       - name: The machine, and its user
         run: |
           ${{ matrix.prepare }}
@@ -429,11 +490,20 @@ jobs:
           mkdir -p "$OUT"; chmod 777 "$OUT"
           command -v sudo || echo "No sudo"
           if ${{ matrix.opens }}; then (Xvfb :99 -ac -screen 0 1600x1000x24 >/dev/null 2>&1 &); sleep 2; fi
+          # A run's build instead of the release's download: the installer's BRIDGE_FILE.
+          if [ -n "$FROM_RUN" ]; then chmod -R a+rX /build; echo "BRIDGE_FILE=/build/${{ matrix.file }}" >> "$GITHUB_ENV"; fi
+
+      # TEMPORARY: main's installer first, to see what it printed before (apt and the .deb).
+      - name: Main's installer, for comparison
+        if: matrix.kind == 'deb'
+        continue-on-error: true
+        run: |
+          su joerg -s /bin/sh -c "cd && curl -fsSL 'https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/install.sh' | BRIDGE_NO_OPEN=1 BRIDGE_FILE='${BRIDGE_FILE:-}' BRIDGE_VERSION='$BRIDGE_VERSION' sh" 2>&1 | tee "$OUT/install-main.log" | grep -E '^(E|W|N): |unsandboxed|debconf|Installing|installed' || true
 
       - name: Install with the README's one line, as that user
         run: |
           d=$(${{ matrix.opens }} && echo :99 || echo)
-          su joerg -s /bin/sh -c "cd && HOME='$HOMEDIR' DISPLAY='$d' curl -fsSL '$INSTALLER/install.sh' | HOME='$HOMEDIR' DISPLAY='$d' BRIDGE_VERSION='$BRIDGE_VERSION' sh" 2>&1 | tee "$OUT/install.log"
+          su joerg -s /bin/sh -c "cd && curl -fsSL '$INSTALLER/install.sh' | DISPLAY='$d' BRIDGE_FILE='${BRIDGE_FILE:-}' BRIDGE_VERSION='$BRIDGE_VERSION' sh" 2>&1 | tee "$OUT/install.log"
 
       - name: Nothing alarming in what it printed
         run: |
@@ -483,7 +553,7 @@ jobs:
       - name: Running it again updates it in place
         run: |
           d=$(${{ matrix.opens }} && echo :99 || echo)
-          su joerg -s /bin/sh -c "cd && curl -fsSL '$INSTALLER/install.sh' | DISPLAY='$d' BRIDGE_VERSION='$BRIDGE_VERSION' sh" 2>&1 | tee "$OUT/install-again.log"
+          su joerg -s /bin/sh -c "cd && curl -fsSL '$INSTALLER/install.sh' | DISPLAY='$d' BRIDGE_FILE='${BRIDGE_FILE:-}' BRIDGE_VERSION='$BRIDGE_VERSION' sh" 2>&1 | tee "$OUT/install-again.log"
           if grep -n -E '^(E|W|N): |[Ee]rror|[Ww]arning|[Ff]ail|denied|not found|[Nn]o such|[Cc]annot|can.t|damaged' "$OUT/install-again.log"; then exit 1; fi
           if ${{ matrix.opens }}; then
             rm -f "$OUT/version.json"
@@ -523,9 +593,19 @@ jobs:
       TAG: ${{ needs.release.outputs.tag }}
       OUT: ${{ github.workspace }}\out
     steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        if: env.FROM_RUN
+        with:
+          name: bridge-ai-win
+          path: ${{ runner.temp }}/build
+          run-id: ${{ env.FROM_RUN }}
+          github-token: ${{ github.token }}
+
       - name: Install with the README's one line (scripts not allowed, as on a new PC)
         run: |
           New-Item -ItemType Directory -Force $env:OUT | Out-Null
+          # A run's build instead of the release's download: the installer's BRIDGE_EXE.
+          if ($env:FROM_RUN) { $env:BRIDGE_EXE = "$env:RUNNER_TEMP\build\Bridge-AI-win-x64.exe"; "BRIDGE_EXE=$env:BRIDGE_EXE" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV }
           # A new PC doesn't run .ps1 files (Restricted); pasting the line still works.
           & ${{ matrix.shell }} -NoProfile -ExecutionPolicy Restricted -Command "irm $env:INSTALLER/install.ps1 | iex" *>&1 | Tee-Object -FilePath "$env:OUT\install.log"
 
