@@ -4,8 +4,8 @@
 #   curl -fsSL https://raw.githubusercontent.com/sahil1/bridge/main/install.sh | sh
 #
 # macOS: downloads the app for your Mac (Apple Silicon or Intel), puts it in Applications, opens it.
-# Linux: installs the .deb on Debian and Ubuntu (asks for your password), otherwise the AppImage in
-#        ~/.local with a menu entry. (Windows: see install.ps1.)
+# Linux: installs the .deb on Debian and Ubuntu (asks for your password), otherwise (or without sudo)
+#        unpacks the AppImage into ~/.local with a menu entry. (Windows: see install.ps1.)
 # Run it again to update. Options, as environment variables:
 #   BRIDGE_VERSION=v1.24.0   a specific release instead of the latest
 #   BRIDGE_APP_DIR=~/Apps    macOS: where to put the app (default /Applications, or ~/Applications)
@@ -45,32 +45,41 @@ check_sum() {
 # ---------- Linux ----------
 install_linux() {
   [ "$(uname -m)" = x86_64 ] || fail "Bridge AI is built for 64-bit Intel/AMD Linux so far; on $(uname -m), run it from source: https://github.com/$REPO#from-source"
-  if command -v apt-get >/dev/null 2>&1 && command -v dpkg >/dev/null 2>&1; then
+  SUDO=""; [ "$(id -u)" = 0 ] || SUDO=sudo
+  # The .deb needs root: without sudo (a container, a locked-down machine), the app goes in your own
+  # folder instead, as on other distributions.
+  if command -v apt-get >/dev/null 2>&1 && command -v dpkg >/dev/null 2>&1 && { [ -z "$SUDO" ] || command -v sudo >/dev/null 2>&1; }; then
     FILE="$TMP/Bridge-AI-linux-amd64.deb"
     if [ -n "${BRIDGE_FILE:-}" ]; then cp "$BRIDGE_FILE" "$FILE"
     else say "Downloading Bridge AI..."; get --progress-bar "$(url_for Bridge-AI-linux-amd64.deb)" -o "$FILE" || fail "couldn't download the .deb"; check_sum "$FILE" Bridge-AI-linux-amd64.deb
     fi
+    # apt reads the file as its own user (_apt); else it notes it's working "unsandboxed as root".
+    chmod 755 "$TMP"; chmod 644 "$FILE"
     pkill -TERM -x bridge-ai 2>/dev/null && sleep 1 || true
-    say "Installing (this asks for your password)..."
-    SUDO=""; [ "$(id -u)" = 0 ] || SUDO=sudo
+    if [ -n "$SUDO" ]; then say "Installing (this asks for your password)..."; else say "Installing..."; fi
     $SUDO apt-get install -y "$FILE" || fail "apt couldn't install the package"
     BIN=bridge-ai
   else
-    DIR="$HOME/.local/share/bridge-ai"; BIN="$HOME/.local/bin/bridge-ai"
-    mkdir -p "$DIR" "$HOME/.local/bin" "$HOME/.local/share/applications" "$HOME/.local/share/icons/hicolor/512x512/apps"
-    if [ -n "${BRIDGE_FILE:-}" ]; then cp "$BRIDGE_FILE" "$TMP/app"
-    else say "Downloading Bridge AI..."; get --progress-bar "$(url_for Bridge-AI-linux-x86_64.AppImage)" -o "$TMP/app" || fail "couldn't download the AppImage"; check_sum "$TMP/app" Bridge-AI-linux-x86_64.AppImage
+    DIR="$HOME/.local/share/bridge-ai"; BIN="$HOME/.local/bin/bridge-ai"; NEW="$DIR/new"
+    rm -rf "$NEW"
+    mkdir -p "$NEW" "$HOME/.local/bin" "$HOME/.local/share/applications" "$HOME/.local/share/icons/hicolor/512x512/apps"
+    if [ -n "${BRIDGE_FILE:-}" ]; then cp "$BRIDGE_FILE" "$NEW/Bridge-AI.AppImage"
+    else say "Downloading Bridge AI..."; get --progress-bar "$(url_for Bridge-AI-linux-x86_64.AppImage)" -o "$NEW/Bridge-AI.AppImage" || fail "couldn't download the AppImage"; check_sum "$NEW/Bridge-AI.AppImage" Bridge-AI-linux-x86_64.AppImage
     fi
-    pkill -TERM -f "$DIR/Bridge-AI.AppImage" 2>/dev/null && sleep 1 || true
-    mv "$TMP/app" "$DIR/Bridge-AI.AppImage"; chmod +x "$DIR/Bridge-AI.AppImage"
-    ln -sf "$DIR/Bridge-AI.AppImage" "$BIN"
-    curl -fsSL "https://raw.githubusercontent.com/$REPO/main/public/icon-512.png" -o "$HOME/.local/share/icons/hicolor/512x512/apps/bridge-ai.png" 2>/dev/null || true
-    printf '[Desktop Entry]\nName=Bridge AI\nComment=Run and talk to all your AI coding agents\nExec=%s %%U\nIcon=bridge-ai\nType=Application\nCategories=Development;\nTerminal=false\n' "$DIR/Bridge-AI.AppImage" > "$HOME/.local/share/applications/bridge-ai.desktop"
+    # Unpacked, it runs without FUSE 2, which an AppImage needs and newer distributions leave out, and
+    # starts sooner. Unpacked here rather than in the temp folder, which can forbid running programs.
+    chmod +x "$NEW/Bridge-AI.AppImage"
+    (cd "$NEW" && ./Bridge-AI.AppImage --appimage-extract >/dev/null) && [ -x "$NEW/squashfs-root/bridge-ai" ] || fail "the download looks damaged; run the installer again"
+    # Updating: close the running app (up to 3.5.0, the AppImage itself), and put the new one in its place.
+    pkill -TERM -f "$DIR/(app/|Bridge-AI\.AppImage)" 2>/dev/null && sleep 1 || true
+    rm -rf "$DIR/app" "$DIR/Bridge-AI.AppImage"
+    mv "$NEW/squashfs-root" "$DIR/app"; rm -rf "$NEW"
+    ln -sf "$DIR/app/bridge-ai" "$BIN"
+    ICON="$HOME/.local/share/icons/hicolor/512x512/apps/bridge-ai.png"
+    cp "$DIR/app/bridge-ai.png" "$ICON" 2>/dev/null || curl -fsSL "https://raw.githubusercontent.com/$REPO/main/public/icon-512.png" -o "$ICON" 2>/dev/null || true
+    # Quoted: a home folder can have a space in its name.
+    printf '[Desktop Entry]\nName=Bridge AI\nComment=Run and talk to all your AI coding agents\nExec="%s" %%U\nIcon=bridge-ai\nType=Application\nCategories=Development;\nTerminal=false\n' "$DIR/app/bridge-ai" > "$HOME/.local/share/applications/bridge-ai.desktop"
     say "Installed to $DIR, with a menu entry and the command $BIN."
-    # AppImages need FUSE 2, which newer distributions leave out.
-    if ! ldconfig -p 2>/dev/null | grep -q 'libfuse\.so\.2'; then
-      say "If it doesn't open: install FUSE 2 (Ubuntu and Debian: sudo apt install libfuse2; Fedora: sudo dnf install fuse-libs)."
-    fi
   fi
   say "Bridge AI is installed."
   if [ -z "${BRIDGE_NO_OPEN:-}" ] && { [ -n "${DISPLAY:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; }; then
