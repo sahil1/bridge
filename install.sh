@@ -111,6 +111,9 @@ esac
 # An Intel shell on an Apple Silicon Mac (Rosetta) still gets the faster native app.
 if [ "$ARCH" = x64 ] && [ "$(sysctl -in hw.optional.arm64 2>/dev/null)" = 1 ]; then ARCH=arm64; KIND="Apple Silicon"; fi
 
+# Up to 3.5.0, an app opened straight from the .dmg asked for its update in the read-only copy macOS
+# ran it from (App Translocation); that goes where a new install would instead.
+case "${BRIDGE_APP_DIR:-}" in */AppTranslocation/*) BRIDGE_APP_DIR="" ;; esac
 if [ -n "${BRIDGE_APP_DIR:-}" ]; then DEST="$BRIDGE_APP_DIR"
 elif [ -w /Applications ]; then DEST=/Applications
 else DEST="$HOME/Applications"
