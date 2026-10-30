@@ -22,11 +22,13 @@ function notaryLogin() {
   return null
 }
 
-async function notarize(dmg, login) {
+// Notarized, then the ticket stapled on. submit: what goes to Apple when it isn't the file itself
+// (an app goes as a .zip of it: notarize-app.js).
+async function notarize(dmg, login, submit = dmg) {
   const name = path.basename(dmg)
   console.log(`  • notarizing ${name}`)
   // (Its own error, not the command's: that would show the sign-in.)
-  const r = await run('xcrun', ['notarytool', 'submit', dmg, ...login, '--wait', '--output-format', 'json'], { maxBuffer: 1 << 20 })
+  const r = await run('xcrun', ['notarytool', 'submit', submit, ...login, '--wait', '--output-format', 'json'], { maxBuffer: 1 << 20 })
     .then(({ stdout }) => JSON.parse(stdout), (e) => { throw new Error(`notarytool couldn't notarize ${name}: ${String(e.stdout || e.stderr || '').trim().slice(-1000)}`) })
   if (r.status !== 'Accepted') throw new Error(`Apple didn't notarize ${name} (${r.status}); see why with: xcrun notarytool log ${r.id}`)
   // Stapling fetches the ticket from Apple, whose server drops the connection now and then (error 68)
@@ -41,6 +43,8 @@ async function notarize(dmg, login) {
   }
   console.log(`::warning::${name} is notarized, but its ticket couldn't be stapled (Apple's server didn't answer); Gatekeeper will look it up online`)
 }
+exports.notaryLogin = notaryLogin
+exports.notarize = notarize
 
 exports.default = async ({ artifactPaths }) => {
   const dmgs = artifactPaths.filter((f) => f.endsWith('.dmg'))
