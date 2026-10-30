@@ -128,8 +128,9 @@ function notYet(s) {
 const WORDS = ['Claude', 'Claude Code', 'Codex', 'Gemini', 'Cursor', 'Copilot', 'GitHub', 'worktree']
 
 // Speech to text for a voice note: { text, engine }. Throws with code and status when it can't
-// (needs-model: the page offers the download).
-export async function transcribe(audio, type) {
+// (needs-model: the page offers the download). more: names Bridge AI knows (dictation.js: your
+// agents, projects and branches), listened for after the ones here.
+export async function transcribe(audio, type, { more = [] } = {}) {
   if (!audio?.length) throw Object.assign(new Error('No audio received'), { status: 400 })
   const s = await status()
   if (!s.ready) throw notYet(s)
@@ -138,7 +139,7 @@ export async function transcribe(audio, type) {
   // So tool names come out right: whisper takes a hint, Parakeet names to listen for (with the
   // words in Settings › Meetings and meeting memory). Add your own with voice.prompt.
   const prompt = cfg.voice?.prompt || 'chief of staff, Claude, Codex, Gemini, Cursor, Grok, Copilot, GitHub, worktree, PR, repo.'
-  const words = [...(cfg.voice?.prompt ? prompt.split(',') : WORDS), ...String(cfg.meetings?.vocabulary || '').split(',')]
+  const words = [...(cfg.voice?.prompt ? prompt.split(',') : WORDS), ...String(cfg.meetings?.vocabulary || '').split(','), ...more]
   const r = await speech.voice(wav, { cfg, prompt, words })
   return { text: r.text, engine: r.engine }
 }

@@ -49,7 +49,7 @@ else contextBridge.exposeInMainWorld('bridgeApp', {
   watching: (on) => ipcRenderer.invoke('bridge:watching', !!on),
   // Dictation's key from other apps (Settings › Voice), and its window (?dictate=1): what was
   // pressed before it was ready, its size, whether it's listening (Esc is held for it then), hiding,
-  // copying, and opening the agent or the setup in the main window.
+  // copying, and opening the agent in the main window.
   dictateStatus: () => ipcRenderer.invoke('bridge:dictate-status'),
   dictateConfigure: (s) => ipcRenderer.invoke('bridge:dictate-configure', s),
   hudReady: () => ipcRenderer.invoke('bridge:hud-ready'),

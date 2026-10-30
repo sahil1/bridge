@@ -134,11 +134,14 @@ export async function press(target, at = Date.now()) {
   pressAt = at
   set({ phase: 'opening', mode: 'hold', target, level: 0, since: Date.now(), note: null, setup: null, result: null, retry: false })
   words()
-  // Set up on the computer? Asked once in a while, not on every press.
+  // Something to install first (whisper.cpp, for a Whisper model)? Then the mic isn't opened: nothing
+  // could turn it into text. The speech model only to download is different: you talk now, and
+  // what you said is kept and turned into text once it's here (transcribe, below). Asked once in a
+  // while, not on every press.
   if (Date.now() - voiceOk > 10 * 60_000) {
     const v = await api('/voice').catch(() => null)
     if (seq !== id) return
-    if (v && !v.ready) { set({ phase: 'idle', setup: v }); return }
+    if (v && !v.ready && v.needs !== 'model') { set({ phase: 'idle', setup: v }); return }
     if (v?.ready) voiceOk = Date.now()
   }
   if (!navigator.mediaDevices?.getUserMedia) { set({ phase: 'idle', note: t('Microphone needs HTTPS (open the Tailscale address)') }); return }
@@ -176,13 +179,6 @@ export function cancel() {
   set({ phase: 'idle', mode: null, level: 0, note: null, setup: null })
 }
 export const dismiss = () => set({ note: null, setup: null, retry: false, result: null })
-// Setting up voice notes, from the desktop app's dictation window: in the message box on screen.
-export async function showSetup() {
-  const v = await api('/voice').catch(() => null)
-  if (!v || v.ready) return
-  const b = fallbackBox()
-  set({ phase: 'idle', target: b ? { kind: 'composer', id: b } : null, setup: v })
-}
 
 // Stop listening, turn it into text, put it where it goes.
 export async function finish() {
@@ -199,11 +195,12 @@ export async function finish() {
   lastAudio = { blob: wav(samples), target }
   await transcribe(id)
 }
-// The last recording again (after the computer couldn't turn it into text).
+// The last recording again: after the computer couldn't turn it into text, or once the speech model
+// it needed is here (the setup panel's onReady).
 export async function retry() {
   if (!lastAudio || st.phase !== 'idle') return
   const id = ++seq
-  set({ phase: 'working', target: lastAudio.target, note: null, retry: false })
+  set({ phase: 'working', target: lastAudio.target, note: null, retry: false, setup: null })
   await transcribe(id)
 }
 async function transcribe(id) {
@@ -212,6 +209,14 @@ async function transcribe(id) {
     const res = await fetch(apiUrl('/transcribe'), { method: 'POST', headers: { 'Content-Type': 'audio/wav' }, body: blob })
     const data = await res.json().catch(() => ({}))
     if (seq !== id) return
+    // Not set up yet (the speech model to download, or whisper.cpp to install): the setup panel, in
+    // the server's words, and what you said kept for when it's ready.
+    if (res.status === 409 && /^needs-/.test(data.code || '')) {
+      const v = await api('/voice').catch(() => ({}))
+      if (seq !== id) return
+      set({ phase: 'idle', mode: null, setup: { ...v, ask: data.error, audio: true } })
+      return
+    }
     if (!res.ok) throw Object.assign(new Error(data.error || t('Transcription failed')), { said: data.error })
     const w = await words()
     const text = clean(data.text, { cleanup: cfg.cleanup !== false, atFiles: cfg.atFiles !== false, sentence: target?.sentence !== false, names: w?.names, heard: w?.heard })

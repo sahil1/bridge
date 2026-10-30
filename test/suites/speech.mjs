@@ -182,6 +182,10 @@ try {
   log = sherpaLog(kit)
   ok(r.status === 200 && log.filter((l) => l.seconds != null).at(-1)?.seconds === 2, 'a 48 kHz stereo WAV is turned into 16 kHz mono first', log.at(-1))
   ok(log.filter((l) => l.load).length === 1, 'the model stays loaded between voice notes')
+  // The names dictation spells (server/dictation.js: agents, projects, branches, and the agents and
+  // models Bridge AI knows), found in the background after the first voice note.
+  const more = await until(async () => { await post(kit, wav(0.5)); const h = sherpaLog(kit).filter((l) => l.seconds != null).at(-1)?.hotwords || []; return h.includes('OpenCode') && h }, 8000, 300)
+  ok(!!more && !more.includes('main'), 'and the names dictation spells, not plain lowercase words', more)
   ok(Math.abs(log.filter((l) => l.seconds != null).at(-1)?.peak - 0.244) < 0.02, 'and sounds the same after (its level kept)', log.at(-1))
 
   r = await post(kit, Buffer.from('OggS not really a recording'), 'audio/webm;codecs=opus')

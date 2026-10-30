@@ -22,6 +22,21 @@ async function branchesOf(cwd) {
   return list
 }
 
+// The same names for the speech engine to listen for (Parakeet's hotwords, voice.js): what was
+// found last, at once, looked for again in the background when it's over a minute old, so a
+// transcription never waits for a look at the projects or their branches. Not a plain lowercase
+// word (a branch called main, a folder called billing): listening harder for those would only get
+// in the way. sources() gives { fleet, projects } (index.js).
+const nameLike = (t) => /[\p{Lu}\p{N}_-]/u.test(t) || /\s/.test(t)
+let hinted = { at: 0, terms: [], busy: false }
+export function hints(sources) {
+  if (!hinted.busy && Date.now() - hinted.at > 60_000) {
+    hinted.busy = true
+    Promise.resolve().then(sources).then(words).then((w) => { hinted = { at: Date.now(), terms: w.terms.filter(nameLike), busy: false } }, () => { hinted = { ...hinted, at: Date.now(), busy: false } })
+  }
+  return hinted.terms
+}
+
 // { terms: [...], heard: [[heard, term]] }. fleet: the server's fleet; projects: projects.list().
 export async function words({ fleet, projects = [] } = {}) {
   const terms = []
