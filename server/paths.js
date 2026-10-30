@@ -31,9 +31,12 @@ export const ensureDir = (dir) => { fs.mkdirSync(dir, { recursive: true }); retu
 // writeFileSync's (0o600 for a file with keys or tokens); without one, the file keeps the mode it
 // has. A rename onto a file another program has open (on Windows: an antivirus scan, a backup, an
 // editor) can be refused for a moment: it's tried again briefly, then written in place as before.
+// A file that's a link (to a dotfiles folder, say) stays one: the file it leads to is replaced.
 let saves = 0
 const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
-export function writeFileAtomic(file, data, { mode } = {}) {
+export function writeFileAtomic(to, data, { mode } = {}) {
+  let file = to
+  try { file = fs.realpathSync(to) } catch { /* a new file */ }
   let keep = mode
   if (keep == null) { try { keep = fs.statSync(file).mode & 0o777 } catch { /* a new file */ } }
   const tmp = `${file}.${process.pid}-${(saves++).toString(36)}.tmp`

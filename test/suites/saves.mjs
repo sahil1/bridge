@@ -44,6 +44,17 @@ try {
     ok(mode() === 0o640, 'without asking, a file keeps the permissions it had', mode().toString(8))
   }
 
+  if (IS_WIN) skip('a file that\'s a link', 'links need an administrator on Windows')
+  else {
+    const real = path.join(dir, 'kept-elsewhere.json')
+    const link = path.join(dir, 'linked.json')
+    fs.writeFileSync(real, 'before')
+    fs.symlinkSync(real, link)
+    writeFileAtomic(link, 'after')
+    ok(fs.lstatSync(link).isSymbolicLink() && fs.readFileSync(real, 'utf8') === 'after', 'a file that\'s a link stays one, and the file it leads to is saved')
+    fs.rmSync(link); fs.rmSync(real)
+  }
+
   // The disk fills up partway through: the last save is untouched.
   writeFileAtomic(file, 'last good save')
   const full = failing('writeFileSync', (n, [to]) => (typeof to === 'number' ? 'ENOSPC' : null))
