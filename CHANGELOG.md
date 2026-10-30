@@ -2,6 +2,40 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
+## 3.6.0
+
+Agents pick up where they left off after an update, a crash or a restart, your phone gets back to your computer at once, your computer stays awake for it, and setup asks for nothing.
+
+### What's new
+
+- **Unfinished work carries on.** When an update, a crash or the computer restarting stops an agent in the middle of something, Bridge AI already reopened its conversation, but then it waited for you. Now it's told why it stopped and to carry on from where it left off, starting again anything it had running in the background. An agent that had finished just reopens. Settings › General › Pick up unfinished work turns it off.
+- **Agents working when the computer shuts down come back.** At a shutdown the terminals end one by one, and Bridge AI took each agent off its list as it went, so after a restart some didn't return. Now Bridge AI hears first and keeps them all, on Windows too.
+- **Your phone gets back to your computer at once.** After the phone slept or changed networks, its connection could be gone without either side noticing, and Bridge AI on the phone waited, sometimes for good, while your computer took up to a minute and a half to notice and reconnect. Now both check the connection (the phone whenever you come back to it or the network returns) and start a new one in seconds, and a page the phone was loading as the connection dropped loads anyway. Opening Bridge AI on the phone is quicker too: the app's files come over compressed, a third of the size, and the phone's own page isn't downloaded again when nothing changed.
+- **Your computer stays awake for your phone.** Once a phone or another of your computers can reach this one, it doesn't go to sleep when you walk away, so your agents are still a tap away. The screen still turns off and locks; closing a laptop's lid can still put it to sleep. It's offered in setup and in Settings › Devices, for the relay and for Tailscale, and now works on a Mac on battery and on Windows too.
+- **Setup asks for nothing.** Its first step recommends Just what agents need: Node.js, with no password and nothing for macOS to ask. Everything (meeting and voice notes, the calendar, Mail) is one choice away and says it asks for your password and permissions. And a first start no longer makes macOS ask for your Desktop or Documents folder because a project of yours is there: those projects are listed from your agents' history until you start work in one.
+- **Mac disk images are signed and notarized by Apple,** like the app inside, so a downloaded .dmg opens without a warning even offline, and both open as "Bridge AI <version>".
+- **herdr:** long opening prompts arrive whole (herdr 0.9.4 refuses long ones on a Mac), a start herdr refuses no longer leaves an empty tab, and with a herdr older than 0.9.0 your agents run in Bridge AI itself, with a note saying why. An out-of-date herdr integration (Codex, after herdr 0.9.5) is named with the command that updates it.
+
+### Fixes
+
+- **Saved files are written whole or not at all.** Settings, accounts, devices, projects, meeting notes and the rest can no longer be left unreadable by a crash or a power cut in the middle of a save.
+- **Linux:** outside Debian and Ubuntu (Fedora, say) Bridge AI opens again instead of showing "Not Found", and installs without FUSE or sudo. On Debian or Ubuntu without sudo it installs for you alone instead of failing after the download, and an install from `curl | sh` no longer stops at a question from the system's own installer.
+- **Updating a Mac app opened straight from the disk image** puts the new version in Applications instead of failing.
+- **An agent you just installed is found.** Looking for it again while Bridge AI was still looking (slow on Windows) gave the answer from before the install, so it seemed not to be there.
+- **Windows:** the checks Bridge AI runs in the background (git, the usage reader) no longer flash a console window.
+- **Option+arrow still jumps a word** in terminals, with the newer terminal (xterm 6), which scrolls by itself now, with a thin scrollbar that shows as you scroll.
+- **Chief of Staff** is called that wherever it's named, and the button that starts it says just that. Settings › About & Updates is capitalized to match.
+
+### Security
+
+- **Electron 44.10,** with Node.js's security fixes, Brotli decompression among them (CVE-2026-111497).
+- The Docker image is on Node.js 24 LTS, and the app builds with Vite 8.
+
+### After this update
+
+- **Your computer stays awake while your phone can reach it,** where it used to be off unless you turned it on. Turn it off in Settings › Devices.
+- **macOS doesn't ask again for what you allowed.** Up to 3.4.2 every update made it ask for your folders, the mic and Calendar again, because the app's signature changed with each version. Since 3.5.0 it's signed with the same Developer ID every time, so from this update on your answers stay. A release can no longer go out signed any other way.
+
 ## 3.5.0
 
 The Mac app is signed and notarized by Apple, so it opens without a warning.
