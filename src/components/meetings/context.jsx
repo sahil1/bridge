@@ -61,13 +61,15 @@ function Row({ id, l, onChange, onMsg }) {
 // Files you got lately that look like they go with the meeting (server meetings.js recentFiles): in
 // Downloads or on the Desktop, named after someone in it or its name, a resume before an interview,
 // or anything that came while it recorded. One click links it. blocked: the folder macOS hasn't let
-// Bridge AI see yet.
+// Bridge AI see yet. ask: the folders it hasn't looked in, since on a Mac the first look brings up
+// macOS's question: Look for files (onLook) does, when you choose to.
 const ago = (iso) => {
   const m = Math.round((Date.now() - Date.parse(iso)) / 60000)
   return m < 2 ? t('just now') : m < 60 ? t('{n} min ago', { n: m }) : m < 36 * 60 ? t('{n} h ago', { n: Math.round(m / 60) }) : when(iso)
 }
-export function RecentFiles({ id, sug, onAdded, compact = false, onCheck }) {
+export function RecentFiles({ id, sug, onAdded, compact = false, onCheck, onLook }) {
   const [busy, setBusy] = useState(null)
+  const [looking, setLooking] = useState(false)
   const [err, setErr] = useState(null)
   const files = sug?.recent || []
   const add = async (f) => {
@@ -77,7 +79,9 @@ export function RecentFiles({ id, sug, onAdded, compact = false, onCheck }) {
   const why = (f) => (f.why === 'resume' ? t('A resume, {when}', { when: ago(f.at) })
     : f.why === 'during' ? t('Came in during the meeting, {when}', { when: ago(f.at) })
       : t('Has "{words}" in its name, {when}', { words: f.words.map((w) => w[0].toUpperCase() + w.slice(1)).join(' '), when: ago(f.at) }))
-  if (!files.length && !sug?.recentBlocked) return null
+  const unasked = sug?.recentAsk || []
+  const look = async () => { setLooking(true); try { await onLook?.() } finally { setLooking(false) } }
+  if (!files.length && !sug?.recentBlocked && !unasked.length) return null
   return (
     <div className={`mt-recent${compact ? ' compact' : ''}`} aria-label={t('Files that may go with it')}>
       {files.length > 0 && <b className="small">{t('Looks like it goes with this meeting')}</b>}
@@ -89,6 +93,12 @@ export function RecentFiles({ id, sug, onAdded, compact = false, onCheck }) {
           <button type="button" className="btn small" disabled={!!busy} onClick={() => add(f)}>{busy === f.path ? t('Adding…') : t('Add')}</button>
         </div>
       ))}
+      {unasked.length > 0 && onLook && (
+        <div className="mt-recent-look">
+          <button type="button" className="btn small" disabled={looking} onClick={look}><Icon name="search" size={12} /> {looking ? t('Looking…') : unasked.length > 1 ? t('Look in Downloads and on the Desktop') : unasked[0] === 'Desktop' ? t('Look on the Desktop too') : t('Look in Downloads too')}</button>
+          {!compact && <span className="muted small">{t('For files you got for this meeting, like a resume or a deck. macOS asks once whether Bridge AI may look there.')}</span>}
+        </div>
+      )}
       {!files.length && sug?.recentBlocked && !compact && <PermissionFix pane="files" folder={sug.recentBlocked} onCheck={onCheck}><p className="small">{t('To suggest files you downloaded for a meeting (a resume, a deck), Bridge AI needs to see your {folder} folder.', { folder: sug.recentBlocked })}</p></PermissionFix>}
       {err && <p className="error-text small">{err}</p>}
     </div>
@@ -101,7 +111,7 @@ function Attach({ id, onChange, onMsg }) {
   const [sug, setSug] = useState(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
-  const load = () => api(`/meetings/${encodeURIComponent(id)}/suggest`).then(setSug).catch(() => setSug({ mail: [] }))
+  const load = (ask) => api(`/meetings/${encodeURIComponent(id)}/suggest${ask === true ? '?ask=1' : ''}`).then(setSug).catch(() => setSug({ mail: [] }))
   useEffect(() => { load() }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
   const run = async (fn, said) => {
     setBusy(true); setErr(null)
@@ -132,7 +142,7 @@ function Attach({ id, onChange, onMsg }) {
           : <label className="btn small"><Icon name="paperclip" size={12} /> {t('Add files')}<input type="file" multiple hidden onChange={upload} /></label>}
         <span className="muted small">{app().pickFiles ? t('Linked where they are, and read when the notes are written. Or drop them on the meeting.') : t('A copy is kept with the meeting. Or drop them on it.')}</span>
       </div>
-      <RecentFiles id={id} sug={sug} onCheck={load} onAdded={(f) => { onChange(); onMsg({ text: t('Added {name}.', { name: f.name }) }); load() }} />
+      <RecentFiles id={id} sug={sug} onCheck={load} onLook={() => load(true)} onAdded={(f) => { onChange(); onMsg({ text: t('Added {name}.', { name: f.name }) }); load() }} />
       {mail.length > 0 && (
         <div className="mt-attach-mail">
           <b className="small">{t('From Mail')}</b>

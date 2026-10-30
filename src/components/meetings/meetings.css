@@ -521,6 +521,7 @@ button.mt-who:not(:disabled):hover { text-decoration: underline dotted; text-und
 .mt-recent-file { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-width: 0; font-size: 12.5px; }
 .mt-recent-name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; max-width: 100%; }
 .mt-recent-file .btn { margin-left: auto; }
+.mt-recent-look { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; }
 
 /* The floating card: AI Assist's newest suggestion, under the bar. */
 .fc-tip { display: grid; grid-template-columns: auto 1fr auto auto; align-items: start; gap: 6px; margin-top: 6px; padding: 6px 8px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 9%, var(--pane-2)); }

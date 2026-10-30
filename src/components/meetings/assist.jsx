@@ -51,7 +51,7 @@ export function AssistPane({ id, data, onChange, onMsg }) {
         {(on || live) && <button type="button" className="btn small" onClick={now} disabled={!!busy || data.assisting} title={t('Suggest something now, from what has been said and the files')}><Icon name="bulb" size={12} /> {busy === 'now' || data.assisting ? t('Thinking…') : t('Suggest now')}</button>}
       </div>
       {!on && !items.length && <p className="muted small mt-hint">{t('Turn it on and, while the meeting records, it suggests questions to ask and things to check: from what\'s said, the invite, the files that go with the meeting (a resume, a deck) and your notes. Each one says what it\'s based on. It uses the model that writes your notes.')}</p>}
-      {live && <RecentFiles id={id} sug={sug} compact onAdded={(f) => { onChange(); onMsg({ text: t('Added {name}. Assist and the notes read it now.', { name: f.name }) }); api(`${meeting(id)}/suggest`).then(setSug).catch(() => {}) }} />}
+      {live && <RecentFiles id={id} sug={sug} compact onLook={() => api(`${meeting(id)}/suggest?ask=1`).then(setSug).catch(() => {})} onAdded={(f) => { onChange(); onMsg({ text: t('Added {name}. Assist and the notes read it now.', { name: f.name }) }); api(`${meeting(id)}/suggest`).then(setSug).catch(() => {}) }} />}
       {data.assistError && <p className="error-text small">{t("Couldn't suggest anything: {error}", { error: data.assistError })}</p>}
       {on && !items.length && !data.assistError && <p className="muted small mt-hint">{live ? t('Suggestions appear here once there\'s something to go on. Suggest now asks straight away.') : t('Nothing was suggested.')}</p>}
       <div className="mt-assist-list">

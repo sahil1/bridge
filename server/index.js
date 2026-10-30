@@ -1150,7 +1150,7 @@ app.get('/api/meetings/:id/links/:lid/file', (req, res) => {
     res.download(l.path, l.name, { dotfiles: 'allow' })
   } catch (e) { res.status(404).json({ error: e.message }) }
 })
-app.get('/api/meetings/:id/suggest', wrap((req) => meetings.suggest(req.params.id)))
+app.get('/api/meetings/:id/suggest', wrap((req) => meetings.suggest(req.params.id, { ask: req.query.ask === '1' })))
 app.post('/api/meetings/:id/reveal', wrap((req) => { hereOnly(req, 'Show it in Finder'); return meetings.revealSaved(req.params.id) }))
 app.delete('/api/meetings/:id', wrap((req) => meetings.remove(req.params.id)))
 // The action items, on the chief of staff's task list, and the chief told once about all of them.

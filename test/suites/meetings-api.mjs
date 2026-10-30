@@ -254,7 +254,15 @@ try {
   const old = new Date(Date.now() - 40 * 86400e3)
   fs.utimesSync(path.join(dl, 'Theo Park notes old.txt'), old, old)
   const R = await kit.api('/meetings', { title: 'Interview - Theo Park', call: false })
+  // On a Mac the first look into Downloads or the Desktop brings up macOS's question, so they're
+  // looked in once you ask (Look in Downloads and on the Desktop), and from then on by themselves.
+  if (IS_MAC) {
+    const first = await kit.api(`/meetings/${R.id}/suggest`)
+    ok(!(first.recent || []).length && String(first.recentAsk) === 'Downloads,Desktop', 'on a Mac, Downloads and the Desktop aren\'t looked in until you ask (macOS would ask)', first)
+    await kit.api(`/meetings/${R.id}/suggest?ask=1`)
+  }
   const sg = await kit.api(`/meetings/${R.id}/suggest`)
+  if (IS_MAC) ok(!sg.recentAsk, 'once you have, they are, by themselves', sg)
   const names = (sg.recent || []).map((f) => f.name)
   ok(names[0] === 'Theo_Park_CV.txt' && ['name', 'title'].includes(sg.recent[0].why) && names.includes('resume (3).pdf') && names.includes('cat.jpg') && !names.includes('Theo Park notes old.txt'), 'files you got lately that look like they go with it, the best first', sg.recent)
   await kit.api(`/meetings/${R.id}/links`, { path: path.join(dl, 'Theo_Park_CV.txt') })
