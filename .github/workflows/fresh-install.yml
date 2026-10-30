@@ -1,0 +1,574 @@
+# Installs Bridge AI on brand-new machines the way the README says (the one-line installers, and the
+# Mac's .dmg) and checks that it worked: macOS on Apple Silicon and Intel, Ubuntu 24.04 and 22.04,
+# two other kinds of Linux in a container, and Windows in both PowerShells. For each: the app is
+# where the installer said, it opens, its server answers on 127.0.0.1:7420 and on nothing else,
+# nothing went in its error logs, running the installer again updates it, and on a Mac Gatekeeper
+# lets it open as if it came from a browser. Screenshots and logs are kept with the run.
+#   After every release, weekly (GitHub's machines and the latest release can change under us), and
+#   by hand: Actions › Fresh install › Run workflow, with the installers from any branch.
+name: Fresh install
+
+on:
+  release:
+    types: [published]
+  # release.yml publishes with GitHub's own token, and a release made that way starts no `release`
+  # event; this catches it instead.
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  schedule:
+    - cron: '23 7 * * 1'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: The installers from this branch, tag or commit
+        default: main
+      version:
+        description: Install this release (v3.5.0, say) instead of the latest
+        default: ''
+  push:
+    branches: [fresh-install]
+
+permissions:
+  contents: read
+
+env:
+  # Where people get the installers from (main), or the branch, tag or commit asked for.
+  INSTALLER: https://raw.githubusercontent.com/${{ github.repository }}/${{ inputs.ref || (github.event_name == 'push' && github.sha) || 'main' }}
+  # Empty: the latest release, as people get it.
+  BRIDGE_VERSION: ${{ inputs.version || (github.event_name == 'release' && github.event.release.tag_name) || (github.event_name == 'workflow_run' && github.event.workflow_run.head_branch) || '' }}
+  BASE: http://127.0.0.1:7420
+
+jobs:
+  release:
+    name: Which release
+    # After Release, only when it published one (a tag it built and that passed).
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${BRIDGE_VERSION:-$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Bridge AI $tag, with the installers from $INSTALLER"
+
+  mac:
+    name: macOS ${{ matrix.name }}
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            name: 15 (Apple Silicon)
+          - os: macos-15-intel
+            name: 15 (Intel)
+          - os: macos-26
+            name: 26 (Apple Silicon)
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    env:
+      TAG: ${{ needs.release.outputs.tag }}
+      OUT: ${{ github.workspace }}/out
+    steps:
+      - name: Install with the README's one line
+        run: |
+          mkdir -p "$OUT"
+          curl -fsSL "$INSTALLER/install.sh" | sh 2>&1 | tee "$OUT/install.log"
+
+      - name: Nothing alarming in what it printed
+        run: |
+          if grep -n -i -E 'error|warn|fail|denied|not permitted|not found|no such|cannot|can.t|damaged|usage:' "$OUT/install.log"; then exit 1; fi
+
+      - name: It's where the installer said, signed, for this Mac
+        run: |
+          dest="$(sed -n 's/^Bridge AI .*is installed in \(.*\)\.$/\1/p' "$OUT/install.log")"
+          app="$dest/Bridge AI.app"
+          test -d "$app" || { echo "Not in $dest"; exit 1; }
+          echo "APP=$app" >> "$GITHUB_ENV"
+          v="$(defaults read "$app/Contents/Info.plist" CFBundleShortVersionString)"
+          echo "Bridge AI $v in $dest"
+          [ "v$v" = "$TAG" ] || { echo "Expected $TAG"; exit 1; }
+          codesign --verify --deep --strict "$app"
+          # Anything in the app without this Mac's own code would make macOS offer to install Rosetta.
+          want=$([ "$(uname -m)" = arm64 ] && echo arm64 || echo x86_64)
+          other="$(find "$app" -type f \( -perm +111 -o -name '*.node' -o -name '*.dylib' \) -exec file {} + | grep 'Mach-O' | grep -v '(for architecture' | grep -v "$want" || true)"
+          if [ -n "$other" ]; then echo "Not built for $want:"; echo "$other"; exit 1; fi
+
+      - name: It opens and its server answers
+        run: &mac-opens |
+          for i in $(seq 1 120); do
+            if curl -fsS "$BASE/api/version" -o "$OUT/version.json" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          cat "$OUT/version.json" || { echo "No answer on $BASE after 2 minutes"; exit 1; }
+          echo
+          [ "$(jq -r .version "$OUT/version.json")" = "${TAG#v}" ] || { echo "That's not the version installed"; exit 1; }
+          pid="$(jq -r .pid "$OUT/version.json")"
+          ps -o command= -p "$pid" | grep -qF "$APP/Contents/" || { echo "The server on $BASE isn't the installed app's"; ps -o command= -p "$pid"; exit 1; }
+          pgrep -f "$APP/Contents/MacOS/Bridge AI" >/dev/null || { echo "The app isn't running"; exit 1; }
+          curl -fsS "$BASE/" | grep -q 'Bridge AI'
+          curl -fsS "$BASE/api/setup" -o "$OUT/setup.json"
+          curl -fsS "$BASE/api/config" | jq -c '{version, setupDone, simple, platform}'
+          sleep 10 # the window draws, and anything it asks macOS for shows
+          screencapture -x "$OUT/opened.png" || true
+
+      - name: It listens on this computer only
+        run: &mac-listens |
+          pids="$(pgrep -f "$APP/Contents/" | paste -sd, -)"
+          lsof -nP -a -p "$pids" -iTCP -sTCP:LISTEN | tee "$OUT/listening.txt"
+          lsof -nP -a -p "$pids" -iUDP | tee -a "$OUT/listening.txt" || true
+          if awk 'NR > 1 && $9 !~ /^(127\.0\.0\.1|\[::1\]|localhost):/' "$OUT/listening.txt" | grep -v '^COMMAND' | grep .; then
+            echo "Open to the network (a firewall or Local Network prompt on a real Mac)"; exit 1
+          fi
+
+      - name: No errors in its logs
+        run: &mac-logs |
+          ls -la ~/.bridge-ai ~/.bridge-ai/logs 2>/dev/null || true
+          bad=0
+          for f in ~/.bridge-ai/logs/*; do [ -s "$f" ] && { echo "== $f"; cat "$f"; bad=1; }; done
+          if grep -i -E 'error|fatal|exception' ~/.bridge-ai/host/host.log 2>/dev/null; then bad=1; fi
+          if ls ~/Library/Logs/DiagnosticReports 2>/dev/null | grep -i -E 'bridge|electron'; then echo "It crashed"; bad=1; fi
+          exit $bad
+
+      - name: Running it again updates it in place
+        run: |
+          curl -fsSL "$INSTALLER/install.sh" | sh 2>&1 | tee "$OUT/install-again.log"
+          if grep -n -i -E 'error|warn|fail|denied|not permitted|not found|no such|cannot|can.t|damaged|usage:' "$OUT/install-again.log"; then exit 1; fi
+          test -x "$APP/Contents/MacOS/Bridge AI"
+          rm -f "$OUT/version.json"
+
+      - name: It opens again
+        run: *mac-opens
+
+      - name: Still no errors in its logs
+        run: *mac-logs
+
+      - name: Gatekeeper accepts it as a browser download
+        run: |
+          # The zip as Safari saves it (quarantined) and unpacks it, carrying the quarantine over.
+          dl="$RUNNER_TEMP/download"; mkdir -p "$dl"
+          arch=$([ "$(uname -m)" = arm64 ] && echo arm64 || echo x64)
+          curl -fsSL -o "$dl/Bridge-AI-mac-$arch.zip" "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/Bridge-AI-mac-$arch.zip"
+          q="0083;$(printf %x "$(date +%s)");Safari;$(uuidgen)"
+          xattr -w com.apple.quarantine "$q" "$dl/Bridge-AI-mac-$arch.zip"
+          ditto -x -k "$dl/Bridge-AI-mac-$arch.zip" "$dl/x"
+          xattr -p com.apple.quarantine "$dl/x/Bridge AI.app" 2>/dev/null || xattr -w -r com.apple.quarantine "$q" "$dl/x/Bridge AI.app"
+          # And the copy the installer put in place, given the same flag.
+          xattr -w -r com.apple.quarantine "$q" "$APP"
+          bad=0
+          for app in "$dl/x/Bridge AI.app" "$APP"; do
+            echo "== $app"
+            spctl -a -vv -t exec "$app" 2>&1 | tee "$OUT/spctl.txt"
+            grep -q ': accepted' "$OUT/spctl.txt" && grep -q 'source=Notarized Developer ID' "$OUT/spctl.txt" || bad=1
+            xcrun stapler validate "$app" || bad=1
+            if command -v syspolicy_check >/dev/null; then syspolicy_check distribution "$app" || bad=1; fi
+          done
+          exit $bad
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: mac-${{ matrix.os }}
+          path: |
+            out
+            ~/.bridge-ai/logs
+            ~/.bridge-ai/host/host.log
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14
+
+  mac-dmg:
+    name: macOS .dmg (${{ matrix.arch }})
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            arch: arm64
+          - os: macos-15-intel
+            arch: x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      TAG: ${{ needs.release.outputs.tag }}
+      OUT: ${{ github.workspace }}/out
+      APP: /Applications/Bridge AI.app
+    steps:
+      - name: Download it as a browser would
+        run: |
+          mkdir -p "$OUT"; cd "$RUNNER_TEMP"
+          dmg="Bridge-AI-mac-${{ matrix.arch }}.dmg"
+          curl -fsSL -O "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$dmg"
+          curl -fsSL -O "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/SHA256SUMS.txt"
+          grep " $dmg\$" SHA256SUMS.txt | shasum -a 256 -c -
+          xattr -w com.apple.quarantine "0083;$(printf %x "$(date +%s)");Safari;$(uuidgen)" "$dmg"
+          echo "DMG=$RUNNER_TEMP/$dmg" >> "$GITHUB_ENV"
+
+      - name: The disk image is signed and notarized
+        run: |
+          bad=0
+          spctl -a -vv -t open --context context:primary-signature "$DMG" 2>&1 | tee "$OUT/spctl-dmg.txt"
+          grep -q ': accepted' "$OUT/spctl-dmg.txt" && grep -q 'source=Notarized Developer ID' "$OUT/spctl-dmg.txt" || bad=1
+          xcrun stapler validate "$DMG" || bad=1
+          exit $bad
+
+      - name: It opens with the app and a link to Applications, named alike on Intel and Apple Silicon
+        if: always() && env.DMG
+        run: |
+          hdiutil attach -nobrowse -readonly -plist "$DMG" > "$OUT/attach.plist"
+          vol="$(plutil -extract system-entities xml1 -o - "$OUT/attach.plist" | grep -o '<string>/Volumes/[^<]*</string>' | sed 's/<[^>]*>//g' | head -1)"
+          echo "VOL=$vol" >> "$GITHUB_ENV"
+          echo "Opened as: $vol"; ls -la "$vol"
+          test -d "$vol/Bridge AI.app"
+          [ "$(readlink "$vol/Applications")" = /Applications ]
+          [ "$vol" = "/Volumes/Bridge AI ${TAG#v}" ] || { echo "Expected /Volumes/Bridge AI ${TAG#v}"; exit 1; }
+
+      - name: Dragged to Applications, Gatekeeper accepts it
+        if: always() && env.VOL
+        run: |
+          # Finder's copy keeps the download's quarantine; so does ditto.
+          ditto "$VOL/Bridge AI.app" "$APP"
+          hdiutil detach "$VOL" -quiet || true
+          xattr -p com.apple.quarantine "$APP" || { echo "(no quarantine carried over; setting it as Finder would)"; xattr -w -r com.apple.quarantine "0083;$(printf %x "$(date +%s)");Safari;$(uuidgen)" "$APP"; }
+          bad=0
+          spctl -a -vv -t exec "$APP" 2>&1 | tee "$OUT/spctl.txt"
+          grep -q ': accepted' "$OUT/spctl.txt" && grep -q 'source=Notarized Developer ID' "$OUT/spctl.txt" || bad=1
+          xcrun stapler validate "$APP" || bad=1
+          if command -v syspolicy_check >/dev/null; then syspolicy_check distribution "$APP" || bad=1; fi
+          exit $bad
+
+      - name: The first open (what macOS asks)
+        if: always() && env.VOL
+        run: |
+          open "$APP"; sleep 12
+          screencapture -x "$OUT/first-open.png" || true
+          # Someone clicks Open: macOS clears the flag. Here, that's done for it.
+          killall CoreServicesUIAgent 2>/dev/null || true
+          xattr -dr com.apple.quarantine "$APP"
+          open "$APP"
+
+      - name: It opens and its server answers
+        if: always() && env.VOL
+        run: *mac-opens
+
+      - name: It listens on this computer only
+        if: always() && env.VOL
+        run: *mac-listens
+
+      - name: No errors in its logs
+        if: always() && env.VOL
+        run: *mac-logs
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: mac-dmg-${{ matrix.arch }}
+          path: |
+            out
+            ~/.bridge-ai/logs
+            ~/.bridge-ai/host/host.log
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14
+
+  linux:
+    name: ${{ matrix.os }}
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      TAG: ${{ needs.release.outputs.tag }}
+      OUT: ${{ github.workspace }}/out
+      DISPLAY: ':99'
+    steps:
+      - name: A screen for the app
+        run: |
+          mkdir -p "$OUT"
+          (Xvfb :99 -screen 0 1600x1000x24 >/dev/null 2>&1 &)
+          sleep 2
+
+      - name: Install with the README's one line
+        run: curl -fsSL "$INSTALLER/install.sh" | sh 2>&1 | tee "$OUT/install.log"
+
+      - name: Nothing alarming in what it printed
+        run: &linux-alarming |
+          if grep -n -E '^(E|W|N): |[Ee]rror|[Ww]arning|[Ff]ail|denied|not found|[Nn]o such|[Cc]annot|can.t|damaged' "$OUT"/install*.log; then exit 1; fi
+
+      - name: It's installed as a package, with a menu entry and a command
+        run: |
+          dpkg -s bridge-ai | grep -E '^(Status|Version):'
+          [ "$(dpkg-query -W -f '${Version}' bridge-ai)" = "${TAG#v}" ]
+          command -v bridge-ai
+          test -x "/opt/Bridge AI/bridge-ai"
+          test -f /usr/share/applications/bridge-ai.desktop
+          echo "APPEXE=/opt/Bridge AI/bridge-ai" >> "$GITHUB_ENV"
+
+      - name: It opens and its server answers
+        run: &linux-opens |
+          for i in $(seq 1 120); do
+            if curl -fsS "$BASE/api/version" -o "$OUT/version.json" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          cat "$OUT/version.json" || { echo "No answer on $BASE after 2 minutes"; ps aux | grep -i bridge; exit 1; }
+          echo
+          [ "$(jq -r .version "$OUT/version.json")" = "${TAG#v}" ] || { echo "That's not the version installed"; exit 1; }
+          pid="$(jq -r .pid "$OUT/version.json")"
+          readlink "/proc/$pid/exe" | grep -qF "$(dirname "$APPEXE")" || { echo "The server on $BASE isn't the installed app's"; ls -l "/proc/$pid/exe"; exit 1; }
+          curl -fsS "$BASE/" | grep -q 'Bridge AI'
+          curl -fsS "$BASE/api/setup" -o "$OUT/setup.json"
+          curl -fsS "$BASE/api/config" | jq -c '{version, setupDone, simple, platform}'
+          sleep 10 # the window draws
+          ffmpeg -loglevel error -y -f x11grab -video_size 1600x1000 -i "$DISPLAY" -frames:v 1 "$OUT/opened.png" || import -window root "$OUT/opened.png" || true
+          # The window is up (a crashed renderer leaves only the server).
+          pgrep -f -- '--type=renderer' >/dev/null || { echo "No window"; exit 1; }
+
+      - name: It listens on this computer only
+        run: &linux-listens |
+          ss -Hltunp | tee "$OUT/listening.txt" | grep -i 'bridge' || true
+          if grep -i 'bridge' "$OUT/listening.txt" | awk '{ print $5 }' | grep -v -E '^(127\.0\.0\.1|\[::1\]):'; then
+            echo "Open to the network"; exit 1
+          fi
+
+      - name: No errors in its logs
+        run: &linux-logs |
+          ls -la ~/.bridge-ai ~/.bridge-ai/logs 2>/dev/null || true
+          bad=0
+          for f in ~/.bridge-ai/logs/*; do [ -s "$f" ] && { echo "== $f"; cat "$f"; bad=1; }; done
+          if grep -i -E 'error|fatal|exception' ~/.bridge-ai/host/host.log 2>/dev/null; then bad=1; fi
+          exit $bad
+
+      - name: Running it again updates it in place
+        run: |
+          curl -fsSL "$INSTALLER/install.sh" | sh 2>&1 | tee "$OUT/install-again.log"
+          rm -f "$OUT/version.json"
+
+      - name: Nothing alarming the second time
+        run: *linux-alarming
+
+      - name: It opens again
+        run: *linux-opens
+
+      - name: Still no errors in its logs
+        run: *linux-logs
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: linux-${{ matrix.os }}
+          path: |
+            out
+            ~/.bridge-ai/logs
+            ~/.bridge-ai/host/host.log
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # Linux beyond Debian and Ubuntu, and a bare one, in containers: the installer's other path (the
+  # AppImage in ~/.local), for someone without sudo, whose name has a space and an accent.
+  linux-other:
+    name: ${{ matrix.name }}
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # A desktop, so the app opens: what its windows need, but not FUSE 2.
+          - name: Fedora (AppImage, no FUSE 2)
+            image: fedora:latest
+            prepare: dnf -y -q install curl findutils procps-ng iproute jq shadow-utils util-linux xorg-x11-server-Xvfb gtk3 nss alsa-lib libXScrnSaver libxshmfence mesa-libgbm libdrm at-spi2-core cups-libs
+            opens: true
+          # Only curl, and no sudo: a server, a container, a locked-down machine.
+          - name: Debian (curl only, no sudo)
+            image: debian:stable-slim
+            prepare: apt-get -qq update && apt-get -qq install -y curl ca-certificates >/dev/null
+            opens: false
+    runs-on: ubuntu-22.04
+    container:
+      image: ${{ matrix.image }}
+      # As on a desktop: Chromium's sandbox needs user namespaces, and more shared memory.
+      options: --security-opt seccomp=unconfined --shm-size=1g
+    timeout-minutes: 20
+    env:
+      TAG: ${{ needs.release.outputs.tag }}
+      OUT: /out
+      HOMEDIR: /home/Jörg Müller # private-ok: a made-up user, to test a name with a space and an accent
+    steps:
+      - name: The machine, and its user
+        run: |
+          ${{ matrix.prepare }}
+          useradd -m -d "$HOMEDIR" -s /bin/sh joerg
+          mkdir -p "$OUT"; chmod 777 "$OUT"
+          command -v sudo || echo "No sudo, as intended"
+          if ${{ matrix.opens }}; then (Xvfb :99 -ac -screen 0 1600x1000x24 >/dev/null 2>&1 &); sleep 2; fi
+
+      - name: Install with the README's one line, as that user
+        run: |
+          d=$(${{ matrix.opens }} && echo :99 || echo)
+          su joerg -s /bin/sh -c "cd && HOME='$HOMEDIR' DISPLAY='$d' curl -fsSL '$INSTALLER/install.sh' | HOME='$HOMEDIR' DISPLAY='$d' BRIDGE_VERSION='$BRIDGE_VERSION' sh" 2>&1 | tee "$OUT/install.log"
+
+      - name: Nothing alarming in what it printed
+        run: |
+          if grep -n -E '[Ee]rror|[Ww]arning|[Ff]ail|denied|not found|[Nn]o such|[Cc]annot|can.t|damaged' "$OUT/install.log"; then exit 1; fi
+
+      - name: It's in the user's own folder, with a menu entry and a command
+        run: |
+          ls -la "$HOMEDIR/.local/bin" "$HOMEDIR/.local/share/bridge-ai"
+          test -x "$HOMEDIR/.local/bin/bridge-ai"
+          test -f "$HOMEDIR/.local/share/applications/bridge-ai.desktop"
+          cat "$HOMEDIR/.local/share/applications/bridge-ai.desktop"
+
+      - name: It opens and its server answers
+        if: matrix.opens
+        run: |
+          for i in $(seq 1 120); do
+            if curl -fsS "$BASE/api/version" -o "$OUT/version.json" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          cat "$OUT/version.json" || { echo "No answer on $BASE after 2 minutes"; ps aux; exit 1; }
+          echo
+          [ "$(jq -r .version "$OUT/version.json")" = "${TAG#v}" ]
+          curl -fsS "$BASE/" | grep -q 'Bridge AI'
+          curl -fsS "$BASE/api/setup" -o "$OUT/setup.json"
+          sleep 10
+          pgrep -f -- '--type=renderer' >/dev/null || { echo "No window"; exit 1; }
+          ss -Hltunp | tee "$OUT/listening.txt"
+          if grep -i 'bridge' "$OUT/listening.txt" | awk '{ print $5 }' | grep -v -E '^(127\.0\.0\.1|\[::1\]):'; then echo "Open to the network"; exit 1; fi
+
+      - name: No errors in its logs
+        if: matrix.opens
+        run: |
+          ls -la "$HOMEDIR/.bridge-ai" "$HOMEDIR/.bridge-ai/logs" 2>/dev/null || true
+          bad=0
+          for f in "$HOMEDIR"/.bridge-ai/logs/*; do [ -s "$f" ] && { echo "== $f"; cat "$f"; bad=1; }; done
+          if grep -i -E 'error|fatal|exception' "$HOMEDIR/.bridge-ai/host/host.log" 2>/dev/null; then bad=1; fi
+          exit $bad
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: linux-other-${{ strategy.job-index }}
+          path: /out
+          if-no-files-found: ignore
+          retention-days: 14
+
+  windows:
+    name: Windows (${{ matrix.name }})
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shell: powershell
+            name: PowerShell 5.1
+          - shell: pwsh
+            name: PowerShell 7
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      TAG: ${{ needs.release.outputs.tag }}
+      OUT: ${{ github.workspace }}\out
+    steps:
+      - name: Install with the README's one line (scripts not allowed, as on a new PC)
+        run: |
+          New-Item -ItemType Directory -Force $env:OUT | Out-Null
+          # A new PC doesn't run .ps1 files (Restricted); pasting the line still works.
+          & ${{ matrix.shell }} -NoProfile -ExecutionPolicy Restricted -Command "irm $env:INSTALLER/install.ps1 | iex" *>&1 | Tee-Object -FilePath "$env:OUT\install.log"
+
+      - name: Nothing alarming in what it printed
+        run: &win-alarming |
+          $bad = Select-String -Path "$env:OUT\install*.log" -Pattern 'error|warn|fail|denied|not found|cannot|can.t|exception|Bridge AI install:'
+          if ($bad) { $bad; exit 1 }
+
+      - name: It's installed for this user, in the Start menu
+        run: |
+          $app = Get-ChildItem -Path (Join-Path $env:LOCALAPPDATA 'Programs') -Filter 'Bridge AI.exe' -Recurse -Depth 1 | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $app) { Write-Host "Not in $env:LOCALAPPDATA\Programs"; exit 1 }
+          $v = (Get-Item $app).VersionInfo.ProductVersion
+          Write-Host "Bridge AI $v in $app"
+          if ("v$v" -ne $env:TAG) { Write-Host "Expected $env:TAG"; exit 1 }
+          "APP=$app" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          $menu = Join-Path ([Environment]::GetFolderPath('Programs')) 'Bridge AI.lnk'
+          if (-not (Test-Path $menu)) { Get-ChildItem ([Environment]::GetFolderPath('Programs')); Write-Host "No Start menu entry"; exit 1 }
+
+      - name: It opens and its server answers
+        run: &win-opens |
+          $ver = $null
+          for ($i = 0; $i -lt 120 -and -not $ver; $i++) {
+            try { $ver = Invoke-RestMethod "$env:BASE/api/version" -TimeoutSec 2 } catch { Start-Sleep 1 }
+          }
+          if (-not $ver) { Write-Host "No answer on $env:BASE after 2 minutes"; Get-Process | Where-Object Name -like '*Bridge*'; exit 1 }
+          $ver | ConvertTo-Json -Compress
+          if ($ver.version -ne $env:TAG.TrimStart('v')) { Write-Host "That's not the version installed"; exit 1 }
+          $exe = (Get-Process -Id $ver.pid).Path
+          if ($exe -ne $env:APP) { Write-Host "The server on $env:BASE runs $exe, not the installed app"; exit 1 }
+          if (-not ((Invoke-WebRequest "$env:BASE/" -UseBasicParsing).Content -match 'Bridge AI')) { exit 1 }
+          Invoke-RestMethod "$env:BASE/api/config" | Select-Object version, setupDone, simple, platform | ConvertTo-Json -Compress
+          Invoke-WebRequest "$env:BASE/api/setup" -UseBasicParsing -OutFile "$env:OUT\setup.json"
+          Start-Sleep 10 # the window draws
+          $w = Get-Process -Name 'Bridge AI' | Where-Object MainWindowHandle -ne 0
+          if (-not $w) { Write-Host "No window"; exit 1 }
+          try {
+            Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+            $b = [Windows.Forms.SystemInformation]::VirtualScreen
+            $bmp = New-Object Drawing.Bitmap $b.Width, $b.Height
+            [Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Left, $b.Top, 0, 0, $bmp.Size)
+            $bmp.Save("$env:OUT\opened.png")
+          } catch { Write-Host "(no screenshot: $_)" }
+
+      - name: It listens on this computer only (else Windows asks to let it through the firewall)
+        run: &win-listens |
+          $ids = (Get-Process -Name 'Bridge AI').Id
+          $tcp = Get-NetTCPConnection -State Listen | Where-Object OwningProcess -in $ids
+          $udp = Get-NetUDPEndpoint | Where-Object OwningProcess -in $ids
+          $tcp | Format-Table LocalAddress, LocalPort, OwningProcess | Out-String | Tee-Object -FilePath "$env:OUT\listening.txt"
+          $udp | Format-Table LocalAddress, LocalPort, OwningProcess | Out-String | Tee-Object -Append -FilePath "$env:OUT\listening.txt"
+          $open = @($tcp) + @($udp) | Where-Object { $_ -and $_.LocalAddress -notin @('127.0.0.1', '::1') }
+          if ($open) { Write-Host "Open to the network"; exit 1 }
+
+      - name: No errors in its logs
+        run: &win-logs |
+          $data = Join-Path $HOME '.bridge-ai'
+          Get-ChildItem $data -Force -ErrorAction SilentlyContinue | Format-Table Mode, Length, Name
+          $bad = $false
+          Get-ChildItem (Join-Path $data 'logs') -File -ErrorAction SilentlyContinue | Where-Object Length -gt 0 | ForEach-Object { Write-Host "== $($_.FullName)"; Get-Content $_.FullName; $bad = $true }
+          $host_log = Join-Path $data 'host\host.log'
+          if ((Test-Path $host_log) -and (Select-String -Path $host_log -Pattern 'error|fatal|exception')) { Get-Content $host_log; $bad = $true }
+          if ($bad) { exit 1 }
+
+      - name: Running it again updates it in place
+        run: |
+          & ${{ matrix.shell }} -NoProfile -ExecutionPolicy Restricted -Command "irm $env:INSTALLER/install.ps1 | iex" *>&1 | Tee-Object -FilePath "$env:OUT\install-again.log"
+
+      - name: Nothing alarming the second time
+        run: *win-alarming
+
+      - name: It opens again
+        run: *win-opens
+
+      - name: Still no errors in its logs
+        run: *win-logs
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: windows-${{ matrix.shell }}
+          path: |
+            out
+            ~/.bridge-ai/logs
+            ~/.bridge-ai/host/host.log
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14
