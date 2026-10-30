@@ -1790,6 +1790,7 @@
   "{metric} per day, by model": "{metric} por dia, por modelo",
   "{metric} per day, last {n} weeks": "{metric} por dia, últimas {n} semanas",
   "{metric} per week, by model": "{metric} por semana, por modelo",
+  "{model} doesn't hear this language. Pick Whisper in Settings › Voice, or a speech service above.": "{model} não entende este idioma. Escolha o Whisper em Configurações › Voz, ou um serviço de fala acima.",
   "{model} isn't downloaded yet, so the Mac's own speech is used until it is.": "{model} ainda não foi baixado, então o reconhecimento de fala do próprio Mac é usado até lá.",
   "{model} isn't downloaded yet. It downloads when your first meeting starts, or now from Settings › Voice.": "{model} ainda não foi baixado. Ele é baixado quando sua primeira reunião começar, ou agora em Configurações › Voz.",
   "{model} needs whisper.cpp, a free program. It installs in a minute.": "{model} precisa do whisper.cpp, um programa gratuito. Ele instala em um minuto.",

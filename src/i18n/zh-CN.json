@@ -1790,6 +1790,7 @@
   "{metric} per day, by model": "按模型的每日 {metric}",
   "{metric} per day, last {n} weeks": "最近 {n} 周的每日 {metric}",
   "{metric} per week, by model": "按模型的每周 {metric}",
+  "{model} doesn't hear this language. Pick Whisper in Settings › Voice, or a speech service above.": "{model} 无法识别这种语言。请在“设置 › 语音”中选择 Whisper，或在上方选择语音服务。",
   "{model} isn't downloaded yet, so the Mac's own speech is used until it is.": "{model} 尚未下载，在此之前使用 Mac 自带的语音识别。",
   "{model} isn't downloaded yet. It downloads when your first meeting starts, or now from Settings › Voice.": "{model} 尚未下载。它会在你的第一场会议开始时下载，也可以现在在“设置 › 语音”中下载。",
   "{model} needs whisper.cpp, a free program. It installs in a minute.": "{model} 需要 whisper.cpp，一个免费程序，一分钟就能装好。",

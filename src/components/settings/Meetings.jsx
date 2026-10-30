@@ -143,6 +143,7 @@ export default function Meetings() {
           {LANGS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
         </select>
         <p className="muted small">An English-only model always listens for English.</p>
+        {d.engine === 'local' && Array.isArray(model?.languages) && m.language && m.language !== 'auto' && !model.languages.includes(m.language) && <p className="st-note warn small"><Icon name="info" size={13} /> {t("{model} doesn't hear this language. Pick Whisper in Settings › Voice, or a speech service above.", { model: model.label })}</p>}
       </section>
 
       <section className="st-sec">

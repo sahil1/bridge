@@ -220,7 +220,7 @@ export function fetchModel(id) {
   const files = filesOf(m)
   const d = { got: 0, total: files.reduce((n, f) => n + (f.bytes || 0), 0), error: null, stop: new AbortController() }
   downloads.set(m.id, d)
-  ;(async () => {
+  d.done = (async () => {
     let url = urlOf(m, files[0])
     try {
       fs.mkdirSync(dirOf(m), { recursive: true })
@@ -236,10 +236,12 @@ export function fetchModel(id) {
     }
   })()
 }
-export function removeModel(id) {
+// Stops its download first, if one is going (Windows won't delete a file still being written).
+export async function removeModel(id) {
   const m = MODELS.find((x) => x.id === id)
   if (!m) throw new Error('No such model')
-  downloads.get(m.id)?.stop.abort()
+  const d = downloads.get(m.id)
+  if (d) { d.stop.abort(); await d.done }
   downloads.delete(m.id)
   if (m.runtime === 'sherpa') { asr.stop(m.id); fs.rmSync(dirOf(m), { recursive: true, force: true }); return }
   if (server?.model === fileOf(m)) stopServer()

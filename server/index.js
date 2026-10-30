@@ -976,7 +976,7 @@ meetings.setHelpers({ reply: (id, msgs, o) => chatModels.reply(id, msgs, o), pic
 // Speech engines (speech.js): what Settings › Meetings shows, models to download, whisper.cpp to install.
 app.get('/api/speech', wrap(async () => ({ ...(await speech.status(cfg)), callAudio: cfg.meetings?.callAudio !== false, canRecordCall: !!meetings.tapBin(), canWatchCalls: !!calls.watchBin(), folder: meetings.folder() })))
 app.post('/api/speech/models/:id', wrap(async (req) => { speech.fetchModel(req.params.id); return speech.status(cfg) }))
-app.delete('/api/speech/models/:id', wrap(async (req) => { speech.removeModel(req.params.id); return speech.status(cfg) }))
+app.delete('/api/speech/models/:id', wrap(async (req) => { await speech.removeModel(req.params.id); return speech.status(cfg) }))
 app.post('/api/speech/install', wrap(async (req) => {
   onComputer(req)
   const s = await speech.status(cfg)

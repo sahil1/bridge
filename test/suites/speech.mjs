@@ -3,7 +3,8 @@
 // this computer, so nothing real is downloaded or loaded.
 //   Which engines and models each kind of computer is offered (macOS on both chips and versions,
 //   Windows, Windows on Arm, Linux by its glibc, Linux Arm, Docker, little memory, an addon that
-//   won't load), asked of the rules themselves, then of servers standing in for another computer:
+//   won't load), asked of the rules themselves, then of servers standing in for another computer
+//   (an old Linux, Docker on Arm, a Mac whose sherpa-onnx won't load):
 //   what isn't offered is left out of the list and said only in its diagnostics, and a pick that
 //   can't run there falls back to the portable default, saying so.
 //   The download: progress, checked against its SHA-256 (one that doesn't match is thrown away),
@@ -99,6 +100,17 @@ try {
   ok(sp.local.models.map((m) => m.id).join(',') === 'parakeet-v3,parakeet-en' && sp.local.model === 'parakeet-v3', 'Docker on Arm: Parakeet and Parakeet English, Parakeet first; no Whisper', sp.local.models.map((m) => m.id))
   ok(sp.machine.docker === true && sp.machine.arch === 'arm64' && sp.machine.sherpa?.ok === true, 'its diagnostics say what it is, and that sherpa-onnx loaded', sp.machine)
 } finally { docker.stop() }
+
+// An addon that won't load here (as sherpa-onnx's, built for macOS 14, might on macOS 13): tried in
+// a process of its own, so the server stays up; Parakeet isn't offered, and Whisper is used.
+const broken = path.join(OUT, 'kits', 'speech-broken-sherpa.cjs')
+fs.writeFileSync(broken, "throw new Error('dlopen(sherpa-onnx.node): Symbol not found: _foo (which was built for macOS 14.0)')\n")
+const nope = await startKit('speech-broken', { env: kitEnv({ BRIDGE_SHERPA: broken, BRIDGE_MACHINE: JSON.stringify({ platform: 'darwin', arch: 'arm64', os: '13.6', docker: false }) }) })
+try {
+  const sp = await nope.api('/speech')
+  ok(!sp.local.models.some((m) => /^parakeet/.test(m.id)) && sp.local.model === 'large-v3-turbo-q5_0', 'sherpa-onnx that won\'t load on this computer: no Parakeet in the list, Whisper used', sp.local.models.map((m) => m.id))
+  ok(sp.hidden.some((h) => h.id === 'parakeet-v3' && /doesn't load on this computer: dlopen\(sherpa-onnx\.node\): Symbol not found/.test(h.why)) && sp.machine.sherpa?.ok === false, 'and the diagnostics say what the loader said', sp.hidden)
+} finally { nope.stop() }
 
 // ---------- This computer, with the stand-in engine ----------
 const kit = await startKit('speech', { env: kitEnv({ BRIDGE_ASR_IDLE_MS: '2500' }), config: { meetings: { vocabulary: 'Kubernetes, OKRs' } } })

@@ -1790,6 +1790,7 @@
   "{metric} per day, by model": "モデル別、1日あたりの {metric}",
   "{metric} per day, last {n} weeks": "過去{n}週間の1日あたりの {metric}",
   "{metric} per week, by model": "モデル別、1週間あたりの {metric}",
+  "{model} doesn't hear this language. Pick Whisper in Settings › Voice, or a speech service above.": "{model} はこの言語を聞き取れません。設定 › 音声で Whisper を選ぶか、上の音声認識サービスを選んでください。",
   "{model} isn't downloaded yet, so the Mac's own speech is used until it is.": "{model} はまだダウンロードされていないため、それまでは Mac 本体の音声認識を使います。",
   "{model} isn't downloaded yet. It downloads when your first meeting starts, or now from Settings › Voice.": "{model} はまだダウンロードされていません。最初のミーティングの開始時に、または今すぐ設定 › 音声からダウンロードできます。",
   "{model} needs whisper.cpp, a free program. It installs in a minute.": "{model} には無料のプログラム whisper.cpp が必要です。1 分ほどでインストールできます。",
