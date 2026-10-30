@@ -4,7 +4,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import { dataFile } from './paths.js'
+import { dataFile, writeFileAtomic } from './paths.js'
 
 const FILE = dataFile('ideas.md')
 const today = () => new Date().toLocaleDateString('en-CA')
@@ -38,7 +38,7 @@ function format(it) {
   return `- [${it.done ? 'x' : ' '}] ${it.text}${tags} <!-- ${meta} -->`
 }
 
-function save(lines) { fs.writeFileSync(FILE, lines.join('\n')) }
+function save(lines) { writeFileAtomic(FILE, lines.join('\n')) }
 
 export function list() {
   return { items: parse().items, file: FILE }

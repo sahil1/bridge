@@ -17,7 +17,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import os from 'node:os'
 import { spawn, execFile } from 'node:child_process'
-import { DATA, ROOT, IS_MAC, IS_WIN, expand } from './paths.js'
+import { DATA, ROOT, IS_MAC, IS_WIN, expand, writeFileAtomic } from './paths.js'
 import { tool } from './fixes.js'
 import * as speech from './speech.js'
 import * as memory from './meetmemory.js'
@@ -44,8 +44,7 @@ function meta(id) {
 function saveMeta(m) {
   fs.mkdirSync(dirOf(m.id), { recursive: true })
   const f = path.join(dirOf(m.id), 'meeting.json')
-  fs.writeFileSync(`${f}.tmp`, JSON.stringify(m, null, 2))
-  fs.renameSync(`${f}.tmp`, f)
+  writeFileAtomic(f, JSON.stringify(m, null, 2))
   return m
 }
 const patchMeta = (id, p) => saveMeta({ ...meta(id), ...p })
@@ -571,7 +570,7 @@ export function setNotes(id, text, base) {
   let next = String(text || '')
   const now = readText(f)
   if (typeof base === 'string' && now !== base && now.startsWith(base)) next += now.slice(base.length)
-  fs.writeFileSync(f, next)
+  writeFileAtomic(f, next)
   resave(id, 5000)
   return { ok: true, notes: next }
 }
@@ -592,7 +591,7 @@ export function quickNote(id, text, at = null) {
   const when = Number.isFinite(Number(at)) && at !== null && Number(at) >= 0 ? Number(at) : nowIn(id, m) ?? m.seconds ?? 0
   const f = path.join(dirOf(id), 'notes.md')
   const now = readText(f)
-  fs.writeFileSync(f, `${now}${now && !now.endsWith('\n') ? '\n' : ''}- [${clock(when)}] ${t}\n`)
+  writeFileAtomic(f, `${now}${now && !now.endsWith('\n') ? '\n' : ''}- [${clock(when)}] ${t}\n`)
   resave(id, 5000)
   return { ok: true, notes: readText(f) }
 }
@@ -616,7 +615,7 @@ export function section(id, title) {
   // A heading in your notes, to write under.
   const f = path.join(dirOf(id), 'notes.md')
   const now = readText(f)
-  fs.writeFileSync(f, `${now}${now.trim() ? `${now.endsWith('\n') ? '' : '\n'}\n` : ''}## ${s.title}\n`)
+  writeFileAtomic(f, `${now}${now.trim() ? `${now.endsWith('\n') ? '' : '\n'}\n` : ''}## ${s.title}\n`)
   resave(id, 5000)
   return { ok: true, sections: list, section: s }
 }
@@ -625,7 +624,7 @@ function heading(id, from, to) {
   const f = path.join(dirOf(id), 'notes.md')
   const now = readText(f)
   const re = new RegExp(`^## ${from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[ \\t]*\\n?`, 'm')
-  if (re.test(now)) fs.writeFileSync(f, now.replace(re, to == null ? '' : `## ${to}\n`))
+  if (re.test(now)) writeFileAtomic(f, now.replace(re, to == null ? '' : `## ${to}\n`))
 }
 export function renameSection(id, i, title) {
   const m = meta(id)
@@ -679,7 +678,7 @@ export function setSpeaker(id, key, name, { all = false } = {}) {
   const keys = all ? lines(id).filter((x) => x.src === l.src && (keyOf(x) === key || !names[keyOf(x)] || names[keyOf(x)].guess)).map(keyOf) : [key]
   const back = l.src === 'them' && onlyGuest(meta(id)) // Them stays Them, not the one person invited
   for (const k of keys) { if (n && n !== who(l.src)) names[k] = { name: n }; else if (back) names[k] = { name: null }; else delete names[k] }
-  fs.writeFileSync(path.join(dirOf(id), 'speakers.json'), JSON.stringify(names, null, 2))
+  writeFileAtomic(path.join(dirOf(id), 'speakers.json'), JSON.stringify(names, null, 2))
   resave(id, 2000)
   return { ok: true, named: keys.length }
 }
@@ -744,7 +743,7 @@ export async function nameSpeakers(id, { model } = {}) {
     names[key] = { name: v, guess: true }
     n++
   }
-  fs.writeFileSync(path.join(dirOf(id), 'speakers.json'), JSON.stringify(names, null, 2))
+  writeFileAtomic(path.join(dirOf(id), 'speakers.json'), JSON.stringify(names, null, 2))
   patchMeta(id, { namedAt: new Date().toISOString(), namedModel: used })
   resave(id, 2000)
   return { ok: true, named: n, of: byN.size, model: used }
@@ -774,7 +773,7 @@ export function editLine(id, key, text) {
   const t = text == null ? null : String(text).replace(/\s+/g, ' ').trim().slice(0, 5000)
   if (t == null || t === l.text) delete edits[key]
   else edits[key] = t
-  fs.writeFileSync(path.join(dirOf(id), 'edits.json'), JSON.stringify(edits, null, 1))
+  writeFileAtomic(path.join(dirOf(id), 'edits.json'), JSON.stringify(edits, null, 1))
   resave(id, 2000)
   return { ok: true }
 }
@@ -798,14 +797,14 @@ export function replaceWords(id, find, to, { remember = false } = {}) {
       const t = l.text.replace(re, () => { changed++; return into })
       if (t !== l.text) edits[l.key] = t
     }
-    fs.writeFileSync(path.join(dirOf(id), 'edits.json'), JSON.stringify(edits, null, 1))
+    writeFileAtomic(path.join(dirOf(id), 'edits.json'), JSON.stringify(edits, null, 1))
   }
   if (remember) changed += transcript(id).filter((l) => l.fixed && wordRe(from).test(l.heard)).length
   for (const name of ['notes.md', 'summary.md']) {
     const f = path.join(dirOf(id), name)
     const t = readText(f)
     const n = t.replace(re, () => { changed++; return into })
-    if (n !== t) fs.writeFileSync(f, n)
+    if (n !== t) writeFileAtomic(f, n)
   }
   const title = m.title.replace(re, () => { changed++; return into })
   if (title !== m.title) patchMeta(id, { title })
@@ -907,7 +906,7 @@ export function removeCapture(id, cid) {
   const f = path.join(dirOf(id), 'notes.md')
   const notes = readText(f)
   const left = notes.replace(new RegExp(`\\n?!\\[[^\\]]*\\]\\(<?${c.file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}>?\\)`, 'g'), '')
-  if (left !== notes) fs.writeFileSync(f, left)
+  if (left !== notes) writeFileAtomic(f, left)
   resave(id, 3000)
   return { ok: true }
 }
@@ -1200,7 +1199,7 @@ export function summarize(id, { model, kind, language, again = false } = {}) {
       try { memory.learn(JSON.parse(block[1]), { meeting: id, known: `${m.title}\n${(m.event?.attendees || []).join('\n')}\n${notes}`, heard: transcript(id, { raw: true }).map((l) => l.text).join('\n') }) } catch { /* not JSON: nothing learned */ }
     }
     if (!out) throw new Error('The model sent back nothing')
-    fs.writeFileSync(path.join(dirOf(id), 'summary.md'), `${out}\n`)
+    writeFileAtomic(path.join(dirOf(id), 'summary.md'), `${out}\n`)
     patchMeta(id, { summarizing: false, summarizedAt: new Date().toISOString(), summaryModel: r.model, summaryNote: r.fellBack ? `${r.fellBack} couldn't be reached (${String(r.why).slice(0, 120)}), so ${r.model} wrote it.` : null, summaryTries: 0, summaryRetryAt: null })
     resave(id)
     return { summary: out, model: r.model }

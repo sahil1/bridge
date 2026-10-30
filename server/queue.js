@@ -3,13 +3,13 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import { cacheFile } from './paths.js'
+import { cacheFile, writeFileAtomic } from './paths.js'
 import { paneKey, inView, paneOfKey, adopt } from './scope.js'
 
 const FILE = cacheFile('queue.json')
 let q = {}
 try { q = JSON.parse(fs.readFileSync(FILE, 'utf8')) } catch { q = {} }
-const save = () => { fs.mkdirSync(path.dirname(FILE), { recursive: true }); fs.writeFileSync(FILE, JSON.stringify(q, null, 2)) }
+const save = () => { fs.mkdirSync(path.dirname(FILE), { recursive: true }); writeFileAtomic(FILE, JSON.stringify(q, null, 2)) }
 // Filed per herdr session (scope.js): only the session in view's messages show and go out.
 const ours = () => { if (adopt(q)) save(); return Object.keys(q).filter(inView) }
 

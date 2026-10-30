@@ -2,7 +2,7 @@
 // Quotes, ranges, symbol search and news all come from Yahoo Finance (no key).
 import fs from 'node:fs'
 import path from 'node:path'
-import { cacheFile } from './paths.js'
+import { cacheFile, writeFileAtomic } from './paths.js'
 
 const FILE = cacheFile('watchlist.json')
 const UA = 'Mozilla/5.0'
@@ -43,7 +43,7 @@ export function readWatchlist(cfg) {
 
 function writeWatchlist(symbols) {
   fs.mkdirSync(path.dirname(FILE), { recursive: true })
-  fs.writeFileSync(FILE, JSON.stringify({ symbols, updatedAt: new Date().toISOString() }, null, 2))
+  writeFileAtomic(FILE, JSON.stringify({ symbols, updatedAt: new Date().toISOString() }, null, 2))
 }
 
 // ---------- quotes ----------

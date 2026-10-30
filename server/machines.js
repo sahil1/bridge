@@ -22,7 +22,7 @@ import path from 'node:path'
 import os from 'node:os'
 import { createHash, randomBytes, webcrypto } from 'node:crypto'
 import WebSocket, { WebSocketServer } from 'ws'
-import { dataFile, ensureDir, ROOT } from './paths.js'
+import { dataFile, ensureDir, ROOT, writeFileAtomic } from './paths.js'
 import * as relay from './relay.js'
 import { phoneHello, phoneFinish, splitCode, normCode, plainFrame, readPlain, b64u, K, pack, unpack, json, utf8, CHUNK } from '../relay/web/link.js'
 
@@ -34,7 +34,7 @@ const ECDH = { name: 'ECDH', namedCurve: 'P-256' }
 
 const read = () => { try { const d = JSON.parse(fs.readFileSync(FILE, 'utf8')); return { machines: Array.isArray(d.machines) ? d.machines : [] } } catch { return { machines: [] } } }
 let conf = read()
-const save = () => { ensureDir(path.dirname(FILE)); const tmp = `${FILE}.${process.pid}.tmp`; fs.writeFileSync(tmp, JSON.stringify(conf, null, 2), { mode: 0o600 }); fs.renameSync(tmp, FILE) }
+const save = () => { ensureDir(path.dirname(FILE)); writeFileAtomic(FILE, JSON.stringify(conf, null, 2), { mode: 0o600 }) }
 const links = new Map() // machine id -> Link
 // How often a link checks it's still alive: the relay answers every ping, so one that's gone quiet
 // this long is dead though it looks open (a Mac that slept, a network that changed).

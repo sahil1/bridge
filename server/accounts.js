@@ -19,7 +19,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { execFile, spawn } from 'node:child_process'
-import { DATA, HOME, IS_WIN, dataFile, ensureDir } from './paths.js'
+import { DATA, HOME, IS_WIN, dataFile, ensureDir, writeFileAtomic } from './paths.js'
 import { adapter, installed, loginPath } from './agents.js'
 import { agentEnv, quoteCommand } from './runtime/spawn.js'
 import { paneKey, inView, paneOfKey, adopt } from './scope.js'
@@ -89,7 +89,7 @@ function load() {
 }
 function save(d) {
   ensureDir(DATA)
-  fs.writeFileSync(FILE, JSON.stringify(d, null, 2) + '\n', { mode: 0o600 })
+  writeFileAtomic(FILE, JSON.stringify(d, null, 2) + '\n', { mode: 0o600 })
   memo = { mtime: -1, d: null }
 }
 const dirOf = (a) => path.join(DIR, a.id)
@@ -227,7 +227,7 @@ function usedNow() {
 function saveUsed() {
   const s = Object.entries(used.sessions)
   if (s.length > MAX_SESSIONS) used.sessions = Object.fromEntries(s.slice(-MAX_SESSIONS))
-  try { ensureDir(DATA); fs.writeFileSync(USED, JSON.stringify(used) + '\n', { mode: 0o600 }) } catch { /* read-only disk: keep it in memory */ }
+  try { ensureDir(DATA); writeFileAtomic(USED, JSON.stringify(used) + '\n', { mode: 0o600 }) } catch { /* read-only disk: keep it in memory */ }
 }
 // A pane just started on account `id` (or moved from `from`, when herdr gives it a new id).
 export function notePane(paneId, kind, id) {

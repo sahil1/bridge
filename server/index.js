@@ -41,7 +41,7 @@ import * as herdrSessions from './runtime/herdr-sessions.js'
 import { AGENTS, installed, caps, adapter, catalog as agentCatalog, installCommand, installNeeds, installTools, clearInstalledCache, forgetLoginPath, loginPath, which } from './agents.js'
 import * as nodejs from './nodejs.js'
 import { quoteCommand } from './runtime/spawn.js'
-import { loadConfig, ROOT, DATA, CACHE, expand, ensureDir, cacheFile, IS_MAC, brewInstall } from './paths.js'
+import { loadConfig, ROOT, DATA, CACHE, expand, ensureDir, cacheFile, IS_MAC, brewInstall, writeFileAtomic } from './paths.js'
 import { prepareChief } from './chief.js'
 import { makeTasks } from './chieftasks.js'
 import { makeThreads } from './threads.js'
@@ -1774,7 +1774,7 @@ function preselectGoogleLogin() {
   try { s = JSON.parse(fs.readFileSync(file, 'utf8')) } catch (e) { if (e.code !== 'ENOENT') return } // one with comments stays as it is
   if (s.security?.auth?.selectedType || s.selectedAuthType) return
   s.security = { ...(s.security || {}), auth: { ...(s.security?.auth || {}), selectedType: 'oauth-personal' } }
-  try { ensureDir(path.dirname(file)); fs.writeFileSync(file, JSON.stringify(s, null, 2) + '\n') } catch { /* it asks instead */ }
+  try { ensureDir(path.dirname(file)); writeFileAtomic(file, JSON.stringify(s, null, 2) + '\n') } catch { /* it asks instead */ }
 }
 app.post('/api/signin/:kind', wrap(async (req) => {
   const kind = String(req.params.kind)

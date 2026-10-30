@@ -10,7 +10,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
-import { cacheFile } from './paths.js'
+import { cacheFile, writeFileAtomic } from './paths.js'
 import { readEmlx, splitQuoted, summaryText } from './mailparse.js'
 
 const MAIL = path.join(os.homedir(), 'Library', 'Mail')
@@ -84,7 +84,7 @@ function readRules() {
 }
 function writeRules(r) {
   fs.mkdirSync(path.dirname(RULES), { recursive: true })
-  fs.writeFileSync(RULES, JSON.stringify(r, null, 2))
+  writeFileAtomic(RULES, JSON.stringify(r, null, 2))
 }
 export function setRule(address, rule) {
   const a = String(address || '').toLowerCase().trim()

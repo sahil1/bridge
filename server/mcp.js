@@ -25,6 +25,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml'
 import { loginPath, adapter } from './agents.js'
+import { writeFileAtomic } from './paths.js'
 import { MCP_CATALOG } from '../src/components/settings/mcpCatalog.js'
 
 const TEST_HOME = process.env.BRIDGE_MCP_HOME ? path.resolve(process.env.BRIDGE_MCP_HOME) : null
@@ -104,9 +105,7 @@ function writeAtomic(file, text) {
     const bak = `${file}.bridge-ai.bak`
     if (!fs.existsSync(bak)) fs.copyFileSync(file, bak)
   }
-  const tmp = `${file}.bridge-ai-${process.pid}-${Date.now()}.tmp`
-  fs.writeFileSync(tmp, text, { mode })
-  fs.renameSync(tmp, file)
+  writeFileAtomic(file, text, { mode })
 }
 
 function jsonIndent(text) {

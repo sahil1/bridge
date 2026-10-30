@@ -12,7 +12,7 @@
 // at another address.
 import fs from 'node:fs'
 import { execFile } from 'node:child_process'
-import { DATA, dataFile, ensureDir, IS_WIN } from './paths.js'
+import { DATA, dataFile, ensureDir, IS_WIN, writeFileAtomic } from './paths.js'
 import { loginPath } from './agents.js'
 import { ADAPTERS } from '../shared/cloud/index.js'
 import { follow, keyView, isCloud } from '../shared/cloud/follow.js'
@@ -26,10 +26,7 @@ const AGENTS = dataFile('cloud-agents.json')
 const readJSON = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')) || d } catch { return d } }
 function writeJSON(file, value) {
   ensureDir(DATA)
-  const tmp = `${file}.${process.pid}.tmp`
-  fs.writeFileSync(tmp, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 })
-  try { fs.chmodSync(tmp, 0o600) } catch { /* Windows */ }
-  fs.renameSync(tmp, file)
+  writeFileAtomic(file, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 })
 }
 
 let keys = (() => {

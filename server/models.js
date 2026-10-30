@@ -10,7 +10,7 @@
 import fs from 'node:fs'
 import { adapter, caps } from './agents.js'
 import { modelOf } from './transcripts.js'
-import { dataFile, ensureDir, DATA } from './paths.js'
+import { dataFile, ensureDir, DATA, writeFileAtomic } from './paths.js'
 import { promptSafe } from './promptsafe.js'
 import * as queue from './queue.js'
 import * as chatModels from './chatmodels.js'
@@ -22,7 +22,7 @@ function save() {
   // The newest few hundred are plenty: older conversations fall back to your default.
   const keys = Object.keys(picked)
   if (keys.length > 400) for (const k of keys.sort((a, b) => (picked[a].at || '').localeCompare(picked[b].at || '')).slice(0, keys.length - 400)) delete picked[k]
-  try { ensureDir(DATA); fs.writeFileSync(FILE, JSON.stringify(picked, null, 2)) } catch { /* read-only disk: keep going */ }
+  try { ensureDir(DATA); writeFileAtomic(FILE, JSON.stringify(picked, null, 2)) } catch { /* read-only disk: keep going */ }
 }
 const keysOf = (a) => [a.sessionId && `${a.kind}:${a.sessionId}`, a.paneId && `pane:${a.paneId}`].filter(Boolean)
 

@@ -2,11 +2,11 @@
 // agent's message box. {{blanks}} in them are filled in each time. In <data>/prompts.json.
 import fs from 'node:fs'
 import crypto from 'node:crypto'
-import { dataFile, ensureDir, DATA } from './paths.js'
+import { dataFile, ensureDir, DATA, writeFileAtomic } from './paths.js'
 
 const FILE = dataFile('prompts.json')
 const load = () => { try { const d = JSON.parse(fs.readFileSync(FILE, 'utf8')); return Array.isArray(d) ? d : [] } catch { return [] } }
-const save = (list) => { ensureDir(DATA); fs.writeFileSync(FILE, JSON.stringify(list, null, 2) + '\n') }
+const save = (list) => { ensureDir(DATA); writeFileAtomic(FILE, JSON.stringify(list, null, 2) + '\n') }
 const clean = (s, max) => String(s || '').replace(/\0/g, '').trim().slice(0, max)
 
 export const all = () => load()

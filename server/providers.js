@@ -9,7 +9,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
-import { DATA, HOME, IS_MAC, IS_WIN, dataFile, ensureDir } from './paths.js'
+import { DATA, HOME, IS_MAC, IS_WIN, dataFile, ensureDir, writeFileAtomic } from './paths.js'
 import { AGENTS, installed as installedAgents } from './agents.js'
 import { hiddenAgent, hiddenProvider } from './labs.js'
 
@@ -287,10 +287,7 @@ function buildEnv(values) {
 
 function save(values) {
   ensureDir(DATA)
-  const tmp = `${SECRETS}.${process.pid}.tmp`
-  fs.writeFileSync(tmp, JSON.stringify(values, null, 2) + '\n', { mode: 0o600 })
-  try { fs.chmodSync(tmp, 0o600) } catch { /* Windows */ }
-  fs.renameSync(tmp, SECRETS)
+  writeFileAtomic(SECRETS, JSON.stringify(values, null, 2) + '\n', { mode: 0o600 })
   cache = { mtime: stamp(), values, env: buildEnv(values) }
 }
 

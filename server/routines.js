@@ -9,7 +9,7 @@ import os from 'node:os'
 import path from 'node:path'
 import readline from 'node:readline'
 import { execFile } from 'node:child_process'
-import { dataFile, cacheFile } from './paths.js'
+import { dataFile, cacheFile, writeFileAtomic } from './paths.js'
 
 const DEFS = dataFile('routines.json')
 const LOG = cacheFile('routines-log.json')
@@ -18,7 +18,7 @@ const expand = (p) => (p?.startsWith('~') ? path.join(os.homedir(), p.slice(1)) 
 const DAY = 864e5
 
 const readJSON = (f, fallback) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')) } catch { return fallback } }
-const writeJSON = (f, v) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(v, null, 2) + '\n') }
+const writeJSON = (f, v) => { fs.mkdirSync(path.dirname(f), { recursive: true }); writeFileAtomic(f, JSON.stringify(v, null, 2) + '\n') }
 const exists = (p) => fs.promises.access(p).then(() => true, () => false)
 
 export const readDefs = () => readJSON(DEFS, { routines: [] }).routines || []
