@@ -32,6 +32,10 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 env:
   # Where people get the installers from (main), or the branch, tag or commit asked for.
   INSTALLER: https://raw.githubusercontent.com/${{ github.repository }}/${{ inputs.ref || (github.event_name == 'push' && github.sha) || 'main' }}
@@ -95,8 +99,9 @@ jobs:
           [ "v$v" = "$TAG" ] || { echo "Expected $TAG"; exit 1; }
           codesign --verify --deep --strict "$app"
           # Anything in the app without this Mac's own code would make macOS offer to install Rosetta.
-          want=$([ "$(uname -m)" = arm64 ] && echo arm64 || echo x86_64)
-          other="$(find "$app" -type f \( -perm +111 -o -name '*.node' -o -name '*.dylib' \) -exec file {} + | grep 'Mach-O' | grep -v '(for architecture' | grep -v "$want" || true)"
+          # (node-pty carries its prebuilt code for both kinds of Mac and loads this one's.)
+          if [ "$(uname -m)" = arm64 ]; then want=arm64 skip=darwin-x64; else want=x86_64 skip=darwin-arm64; fi
+          other="$(find "$app" -type f \( -perm +111 -o -name '*.node' -o -name '*.dylib' \) -not -path "*/prebuilds/$skip/*" -exec file {} + | grep 'Mach-O' | grep -v '(for architecture' | grep -v "$want" || true)"
           if [ -n "$other" ]; then echo "Not built for $want:"; echo "$other"; exit 1; fi
 
       - name: It opens and its server answers
@@ -170,15 +175,15 @@ jobs:
           done
           exit $bad
 
+      - name: Keep its logs with the run
+        if: always()
+        run: mkdir -p "$OUT/bridge-ai" && cp -R ~/.bridge-ai/logs ~/.bridge-ai/host/host.log "$OUT/bridge-ai/" 2>/dev/null || true
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: mac-${{ matrix.os }}
-          path: |
-            out
-            ~/.bridge-ai/logs
-            ~/.bridge-ai/host/host.log
-          include-hidden-files: true
+          path: out
           if-no-files-found: ignore
           retention-days: 14
 
@@ -265,15 +270,15 @@ jobs:
         if: always() && env.VOL
         run: *mac-logs
 
+      - name: Keep its logs with the run
+        if: always()
+        run: mkdir -p "$OUT/bridge-ai" && cp -R ~/.bridge-ai/logs ~/.bridge-ai/host/host.log "$OUT/bridge-ai/" 2>/dev/null || true
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: mac-dmg-${{ matrix.arch }}
-          path: |
-            out
-            ~/.bridge-ai/logs
-            ~/.bridge-ai/host/host.log
-          include-hidden-files: true
+          path: out
           if-no-files-found: ignore
           retention-days: 14
 
@@ -306,8 +311,9 @@ jobs:
 
       - name: It's installed as a package, with a menu entry and a command
         run: |
-          dpkg -s bridge-ai | grep -E '^(Status|Version):'
-          [ "$(dpkg-query -W -f '${Version}' bridge-ai)" = "${TAG#v}" ]
+          pkg="$(dpkg -S "/opt/Bridge AI/bridge-ai" | cut -d: -f1)"
+          dpkg -s "$pkg" | grep -E '^(Package|Status|Version):'
+          [ "$(dpkg-query -W -f '${Version}' "$pkg")" = "${TAG#v}" ]
           command -v bridge-ai
           test -x "/opt/Bridge AI/bridge-ai"
           test -f /usr/share/applications/bridge-ai.desktop
@@ -361,20 +367,21 @@ jobs:
       - name: Still no errors in its logs
         run: *linux-logs
 
+      - name: Keep its logs with the run
+        if: always()
+        run: mkdir -p "$OUT/bridge-ai" && cp -R ~/.bridge-ai/logs ~/.bridge-ai/host/host.log "$OUT/bridge-ai/" 2>/dev/null || true
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: linux-${{ matrix.os }}
-          path: |
-            out
-            ~/.bridge-ai/logs
-            ~/.bridge-ai/host/host.log
-          include-hidden-files: true
+          path: out
           if-no-files-found: ignore
           retention-days: 14
 
-  # Linux beyond Debian and Ubuntu, and a bare one, in containers: the installer's other path (the
-  # AppImage in ~/.local), for someone without sudo, whose name has a space and an accent.
+  # More kinds of Linux, in containers, each as a new user whose name has a space and an accent: a
+  # plain Ubuntu (the .deb, through sudo), Fedora (the installer's other path: the AppImage in
+  # ~/.local) and a bare Debian with only curl and no sudo.
   linux-other:
     name: ${{ matrix.name }}
     needs: release
@@ -382,15 +389,22 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - name: Ubuntu 24.04 (a new user with sudo)
+            image: ubuntu:24.04
+            prepare: apt-get -qq update && apt-get -qq install -y curl ca-certificates sudo xvfb jq iproute2 procps >/dev/null && echo 'joerg ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/joerg
+            kind: deb
+            opens: true
           # A desktop, so the app opens: what its windows need, but not FUSE 2.
           - name: Fedora (AppImage, no FUSE 2)
             image: fedora:latest
             prepare: dnf -y -q install curl findutils procps-ng iproute jq shadow-utils util-linux xorg-x11-server-Xvfb gtk3 nss alsa-lib libXScrnSaver libxshmfence mesa-libgbm libdrm at-spi2-core cups-libs
+            kind: local
             opens: true
           # Only curl, and no sudo: a server, a container, a locked-down machine.
           - name: Debian (curl only, no sudo)
             image: debian:stable-slim
             prepare: apt-get -qq update && apt-get -qq install -y curl ca-certificates >/dev/null
+            kind: local
             opens: false
     runs-on: ubuntu-22.04
     container:
@@ -402,13 +416,14 @@ jobs:
       TAG: ${{ needs.release.outputs.tag }}
       OUT: /out
       HOMEDIR: /home/Jörg Müller # private-ok: a made-up user, to test a name with a space and an accent
+      DEBIAN_FRONTEND: noninteractive
     steps:
       - name: The machine, and its user
         run: |
           ${{ matrix.prepare }}
           useradd -m -d "$HOMEDIR" -s /bin/sh joerg
           mkdir -p "$OUT"; chmod 777 "$OUT"
-          command -v sudo || echo "No sudo, as intended"
+          command -v sudo || echo "No sudo"
           if ${{ matrix.opens }}; then (Xvfb :99 -ac -screen 0 1600x1000x24 >/dev/null 2>&1 &); sleep 2; fi
 
       - name: Install with the README's one line, as that user
@@ -418,14 +433,22 @@ jobs:
 
       - name: Nothing alarming in what it printed
         run: |
-          if grep -n -E '[Ee]rror|[Ww]arning|[Ff]ail|denied|not found|[Nn]o such|[Cc]annot|can.t|damaged' "$OUT/install.log"; then exit 1; fi
+          if grep -n -E '^(E|W|N): |[Ee]rror|[Ww]arning|[Ff]ail|denied|not found|[Nn]o such|[Cc]annot|can.t|damaged' "$OUT/install.log"; then exit 1; fi
 
       - name: It's in the user's own folder, with a menu entry and a command
+        if: matrix.kind == 'local'
         run: |
           ls -la "$HOMEDIR/.local/bin" "$HOMEDIR/.local/share/bridge-ai"
           test -x "$HOMEDIR/.local/bin/bridge-ai"
           test -f "$HOMEDIR/.local/share/applications/bridge-ai.desktop"
           cat "$HOMEDIR/.local/share/applications/bridge-ai.desktop"
+          ls "$HOMEDIR/.local/share/bridge-ai/app" | head -40 || true
+
+      - name: It's installed as a package
+        if: matrix.kind == 'deb'
+        run: |
+          dpkg -S "/opt/Bridge AI/bridge-ai"
+          command -v bridge-ai
 
       - name: It opens and its server answers
         if: matrix.opens
@@ -452,6 +475,21 @@ jobs:
           for f in "$HOMEDIR"/.bridge-ai/logs/*; do [ -s "$f" ] && { echo "== $f"; cat "$f"; bad=1; }; done
           if grep -i -E 'error|fatal|exception' "$HOMEDIR/.bridge-ai/host/host.log" 2>/dev/null; then bad=1; fi
           exit $bad
+
+      - name: Running it again updates it in place
+        run: |
+          d=$(${{ matrix.opens }} && echo :99 || echo)
+          su joerg -s /bin/sh -c "cd && curl -fsSL '$INSTALLER/install.sh' | DISPLAY='$d' BRIDGE_VERSION='$BRIDGE_VERSION' sh" 2>&1 | tee "$OUT/install-again.log"
+          if grep -n -E '^(E|W|N): |[Ee]rror|[Ww]arning|[Ff]ail|denied|not found|[Nn]o such|[Cc]annot|can.t|damaged' "$OUT/install-again.log"; then exit 1; fi
+          if ${{ matrix.opens }}; then
+            rm -f "$OUT/version.json"
+            for i in $(seq 1 120); do curl -fsS "$BASE/api/version" -o "$OUT/version.json" 2>/dev/null && break; sleep 1; done
+            cat "$OUT/version.json" || { echo "It didn't open again"; exit 1; }
+          fi
+
+      - name: Keep its logs with the run
+        if: always()
+        run: mkdir -p "$OUT/bridge-ai" && cp -R "$HOMEDIR/.bridge-ai/logs" "$HOMEDIR/.bridge-ai/host/host.log" "$OUT/bridge-ai/" 2>/dev/null || true
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
@@ -496,7 +534,7 @@ jobs:
         run: |
           $app = Get-ChildItem -Path (Join-Path $env:LOCALAPPDATA 'Programs') -Filter 'Bridge AI.exe' -Recurse -Depth 1 | Select-Object -First 1 -ExpandProperty FullName
           if (-not $app) { Write-Host "Not in $env:LOCALAPPDATA\Programs"; exit 1 }
-          $v = (Get-Item $app).VersionInfo.ProductVersion
+          $v = ([version](Get-Item $app).VersionInfo.ProductVersion).ToString(3)
           Write-Host "Bridge AI $v in $app"
           if ("v$v" -ne $env:TAG) { Write-Host "Expected $env:TAG"; exit 1 }
           "APP=$app" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
@@ -561,14 +599,14 @@ jobs:
       - name: Still no errors in its logs
         run: *win-logs
 
+      - name: Keep its logs with the run
+        if: always()
+        run: New-Item -ItemType Directory -Force "$env:OUT\bridge-ai" | Out-Null; Copy-Item -Recurse -ErrorAction SilentlyContinue "$HOME\.bridge-ai\logs", "$HOME\.bridge-ai\host\host.log" "$env:OUT\bridge-ai\"
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: windows-${{ matrix.shell }}
-          path: |
-            out
-            ~/.bridge-ai/logs
-            ~/.bridge-ai/host/host.log
-          include-hidden-files: true
+          path: out
           if-no-files-found: ignore
           retention-days: 14
