@@ -189,9 +189,7 @@ export default function Relay({ way, setWay, onOffer }) {
             </ul>
           )}
 
-          {st.canAwake && (
-            <label className="ph-check"><input type="checkbox" checked={st.awake} onChange={(e) => run('/relay/awake', { on: e.target.checked })} /> Keep this computer awake while it's plugged in, so your phone can always reach it</label>
-          )}
+          <KeepAwake st={st} onChange={setSt} />
           <div className={offer ? 'st-row' : undefined}>
             {offer && <button type="button" className="ghost-btn" onClick={() => { setChanging(true); setWay?.(null) }}>Change how your phone connects</button>}
             <button type="button" className="ghost-btn" onClick={() => { if (window.confirm(st.hosted ? 'Stop using Bridge AI\'s relay? Paired phones are forgotten, and this computer\'s address on the relay is removed.' : 'Stop using this relay? Paired phones are forgotten and Bridge AI signs out of Cloudflare. The relay stays on your Cloudflare account; delete it there if you like.')) run('/relay/forget') }}>Stop using the relay</button>
@@ -200,6 +198,28 @@ export default function Relay({ way, setWay, onOffer }) {
       )}
       {problem}
     </section>
+  )
+}
+
+// Keeping this computer awake while a phone can reach it (server/relay.js, holdAwake): one setting
+// for the relay's phones and for Tailscale's phone access, shown with each. st: the relay's status,
+// when the caller has it.
+export function KeepAwake({ st: given = null, onChange }) {
+  const [own, setOwn] = useState(null)
+  useEffect(() => { if (!given) api('/relay').then(setOwn).catch(() => {}) }, [given])
+  const st = given || own
+  if (viaRelay || !st?.canAwake) return null
+  const set = async (on) => {
+    try { const s = await api('/relay/awake', { method: 'POST', body: { on } }); setOwn(s); onChange?.(s) } catch { /* left as it was */ }
+  }
+  return (
+    <div className="ph-awake">
+      <label className="ph-check">
+        <input type="checkbox" checked={!!st.awake} onChange={(e) => set(e.target.checked)} /> {t('Keep this computer awake while your phone can reach it')}
+        {st.awake && st.awakeNow && <span className="st-chip good">{t('Awake now')}</span>}
+      </label>
+      <p className="muted small">{t("Walk away and your agents are still a tap away. The screen still turns off and locks. Closing a laptop's lid can still put it to sleep.")}</p>
+    </div>
   )
 }
 

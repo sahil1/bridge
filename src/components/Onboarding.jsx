@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import Icon from './Icon.jsx'
 import AgentMark from './settings/agentMark.jsx'
-import { api, settingsChanged, refetch } from '../api.js'
+import { api, settingsChanged, refetch, viaRelay } from '../api.js'
 import SignInButton, { InstallAgentButton, canSignIn } from './SignIn.jsx'
 import { SetupList, useSetupPlan, readyCount, alreadyLine } from './SetupAll.jsx'
 import { t, tx } from '../i18n/index.js'
 
-// First run, in three short steps: how much Bridge AI sets up by itself (everything it uses, in one
-// go, while you carry on; just Node.js for the agents; or later, from Settings › General), your AI
+// First run, in three short steps: how much Bridge AI sets up by itself (just Node.js for the agents,
+// which asks for no password and nothing to allow; everything it uses, in one go, while you carry on;
+// or later, from Settings › General) and whether it stays awake for your phone, your AI
 // (any plan you sign in with, what's on this computer signed in or not, with Install and Sign in
 // right there; or an API key, or a model running on this computer: any one is enough), then your
 // projects (the folders your agents already worked in, the likely ones ticked). Nothing has to be
@@ -59,11 +60,13 @@ function KeyQuick() {
   )
 }
 const STEPS = [tx('Set up'), tx('Your AI'), tx('Your projects')]
+// The recommended one asks for no password and nothing to allow: the rest waits until it's used.
 const LEVELS = [
-  ['full', tx('Everything (recommended)'), tx('Node.js, meeting notes, voice notes and your calendar, installed in one go while you carry on (the speech model is a 190 MB download), then what macOS asks you to allow.')],
-  ['basic', tx('Just what agents need'), tx('Node.js, so any agent installs in one click. Meeting notes, voice notes and the calendar set themselves up the first time you use them.')],
+  ['basic', tx('Just what agents need (recommended)'), tx('Node.js, so any agent installs in one click. No password, nothing to allow. Meeting notes, voice notes and the calendar set themselves up the first time you use them.')],
+  ['full', tx('Everything'), tx('Node.js, meeting notes, voice notes and your calendar, installed in one go while you carry on (the speech model is a 190 MB download). Asks for your password once, then for what macOS needs you to allow.')],
   ['later', tx('Later'), tx('Nothing now. Settings › General has it all in one place whenever you want it.')],
 ]
+const HAVE_NODE = tx('Node.js is already here, so there\'s nothing to install. Meeting notes, voice notes and the calendar set themselves up the first time you use them.')
 const ago = (t) => {
   const s = (Date.now() - t) / 1000
   return s < 3600 ? `${Math.max(1, Math.round(s / 60))}m` : s < 86400 ? `${Math.round(s / 3600)}h` : `${Math.round(s / 86400)}d`
@@ -77,7 +80,8 @@ export default function Onboarding({ onDone }) {
   const [found, setFound] = useState(null) // the scan for step 2
   const [picked, setPicked] = useState(null) // Set of paths
   const [chief, setChief] = useState(undefined) // the chief of staff's agent; undefined: suggested
-  const [level, setLevel] = useState('full')
+  const [level, setLevel] = useState('basic')
+  const [awake, setAwake] = useState(null) // { can, on }: keep this computer awake for your phone (server/relay.js)
   const [started, setStarted] = useState(null) // the level set going
   const setup = useSetupPlan()
   const load = () => api('/setup').then(setD).catch((e) => setErr(e.message))
@@ -85,6 +89,7 @@ export default function Onboarding({ onDone }) {
     ...x, usable: x.usable.map((a) => ({ ...a, signedIn: list.find((s) => s.kind === a.kind)?.signedIn ?? a.signedIn })),
   }))).catch(() => {})
   useEffect(() => { load() }, [])
+  useEffect(() => { if (!viaRelay) api('/relay').then((r) => setAwake({ can: !!r.canAwake, on: r.awake !== false })).catch(() => {}) }, [])
   // The scan starts at once, so step 2 is ready when you get there.
   useEffect(() => {
     api('/projects?scan=fresh').then((r) => {
@@ -132,12 +137,16 @@ export default function Onboarding({ onDone }) {
 
   // The first step: set going what was picked (nothing for Later), shown going; then your AI.
   // Already on this computer: named once, and left as it is. With Node.js here, "Just what agents
-  // need" has nothing to do, so it isn't offered; with everything here, there's nothing to choose.
+  // need" has nothing to do (it says so, and Later goes); with everything here, there's nothing to choose.
   const have = setup.plan ? setup.plan.items.filter((i) => i.state === 'done').map((i) => i.id) : []
   const allHere = !!setup.plan && have.length === setup.plan.items.length
-  const levels = LEVELS.filter(([id]) => !(id === 'basic' && have.includes('node')))
+  const nodeHere = have.includes('node')
+  const levels = LEVELS.filter(([id]) => !(id === 'later' && nodeHere))
+  const nothing = level === 'later' || (level === 'basic' && nodeHere)
   const startSetup = async () => {
-    if (started || level === 'later' || allHere) { setStarted((x) => x || 'later'); setStep(1); return }
+    // Only when it was changed: untouched, it follows the default (on once a phone can reach this computer).
+    if (awake?.can && !awake.on) api('/relay/awake', { method: 'POST', body: { on: false } }).catch(() => {})
+    if (started || nothing || allHere) { setStarted((x) => x || 'later'); setStep(1); return }
     setErr(null)
     try { await setup.run(level); setStarted(level) } catch (e) { setErr(e.message) }
   }
@@ -170,7 +179,7 @@ export default function Onboarding({ onDone }) {
               : !started ? <>
               {have.length > 0 && <p className="muted small sa-kept">{alreadyLine(have)}</p>}
               <ul className="wiz-levels" role="radiogroup" aria-label={t('How much to set up')}>
-                {levels.map(([id, label, note]) => (setup.plan && !setup.plan.mac && id === 'full' ? [id, label, tx('Node.js, meeting notes and voice notes, set up in one go while you carry on (the speech model is a 190 MB download).')] : [id, label, note])).map(([id, label, note]) => (
+                {levels.map(([id, label, note]) => (setup.plan && !setup.plan.mac && id === 'full' ? [id, label, tx('Node.js, meeting notes and voice notes, set up in one go while you carry on (the speech model is a 190 MB download).')] : id === 'basic' && nodeHere ? [id, label, HAVE_NODE] : [id, label, note])).map(([id, label, note]) => (
                   <li key={id} className={level === id ? 'on' : ''}>
                     <label><input type="radio" name="wiz-level" value={id} checked={level === id} onChange={() => setLevel(id)} /><b>{t(label)}</b><small>{t(note)}</small></label>
                   </li>
@@ -178,6 +187,13 @@ export default function Onboarding({ onDone }) {
               </ul>
               </>
               : <SetupList plan={setup.plan} reload={setup.load} only={started === 'basic' ? 'basic' : null} onRetry={() => setup.run(started).catch((e) => setErr(e.message))} />}
+            {awake?.can && !started && (
+              <label className="wiz-awake">
+                <input type="checkbox" checked={awake.on} onChange={(e) => setAwake({ ...awake, on: e.target.checked })} />
+                <b>{t('Keep this computer awake for your phone')}</b>
+                <small>{t('Once your phone is connected, this computer doesn\'t go to sleep when you walk away, so your agents are still a tap away. The screen still turns off and locks.')}</small>
+              </label>
+            )}
           </div>
         ) : !d ? <div className="wiz-body"><p className="muted">{err || t('Looking at what\'s on this computer…')}</p></div>
           : step === 1 ? (
@@ -255,7 +271,7 @@ export default function Onboarding({ onDone }) {
         )}
         <footer className="wiz-foot">
           {step === 0
-            ? <><span className="wiz-grow" /><button type="button" className="btn primary" autoFocus onClick={startSetup} disabled={busy}>{started || level === 'later' || allHere ? t('Continue') : level === 'full' ? t('Set up everything') : t('Set up Node.js')}</button></>
+            ? <><span className="wiz-grow" /><button type="button" className="btn primary" autoFocus onClick={startSetup} disabled={busy}>{started || nothing || allHere ? t('Continue') : level === 'full' ? t('Set up everything') : t('Set up Node.js')}</button></>
             : step === 1
               ? <><span className="wiz-grow" /><button type="button" className="btn primary" autoFocus onClick={() => setStep(2)} disabled={!d || busy}>{t('Continue')}</button></>
             : <>

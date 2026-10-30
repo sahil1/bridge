@@ -2255,6 +2255,8 @@ button.yg-day:hover { box-shadow: 0 0 0 1.5px var(--accent); }
 .ph-code .mono { font-size: 14px; letter-spacing: .04em; }
 .ph-check { display: flex; align-items: center; gap: 8px; font-size: 13px; flex-wrap: wrap; }
 .ph-check input[type=checkbox] { width: 15px; height: 15px; accent-color: var(--accent); }
+.ph-awake { display: flex; flex-direction: column; gap: 4px; }
+.ph-awake .muted { margin: 0 0 0 23px; }
 .ph-select { width: auto; height: 32px; }
 .ph-devices { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .ph-devices li { display: flex; align-items: center; gap: 9px; padding: 7px 10px; border-radius: 9px; border: 1px solid var(--line); flex-wrap: wrap; }
@@ -2825,6 +2827,10 @@ table.sheet tbody tr:hover td { background: var(--pane-2); }
 .wiz-levels b { font: 600 14px var(--font); }
 .wiz-levels small { color: var(--ink-3); font-size: 12.5px; }
 .wiz-levels li.on label { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.wiz-awake { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 12px 0 0; padding: 0 14px; cursor: pointer; }
+.wiz-awake input { grid-row: span 2; margin-top: 3px; accent-color: var(--accent); }
+.wiz-awake b { font: 600 13.5px var(--font); }
+.wiz-awake small { color: var(--ink-3); font-size: 12.5px; }
 .wiz-strip { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 0 22px; padding: 7px 11px; border-radius: 10px; background: var(--pane-2); font-size: 12.5px; color: var(--ink-2); }
 .wiz-foot { display: flex; align-items: center; gap: 10px; padding: 14px 18px 16px; border-top: 1px solid var(--line); }
 @media (max-width: 640px) {

@@ -62,7 +62,8 @@ const read = () => {
 }
 const write = (d) => { ensureDir(path.dirname(FILE)); const tmp = `${FILE}.${process.pid}.tmp`; fs.writeFileSync(tmp, JSON.stringify(d, null, 2), { mode: 0o600 }); fs.renameSync(tmp, FILE) }
 let conf = read()
-const save = () => write(conf)
+// Every change can change whether a phone can reach this computer, and so whether it stays awake.
+const save = () => { write(conf); holdAwake() }
 
 let base = 'http://127.0.0.1:7420' // this server, where phones' requests go
 let link = null // the WebSocket to the relay
@@ -78,6 +79,9 @@ let backoff = 2000
 let limit = null // what Bridge AI's relay last said about its limits: { why, text, until }
 let pinger = null
 let hostKey = null // { privateKey, public }
+let awakeProc = null // what keeps this computer awake, while it does (holdAwake)
+let awakeBroken = false // it couldn't (no systemd-inhibit, say): not tried again until turned on again
+let tailnet = false // Tailscale publishes this computer to your phone (phone.js)
 const conns = new Map() // phone connection id -> Conn
 let invites = [] // one-time codes for another of your devices: { id, secret, expires, uses, tries }
 const asks = new Map() // device key -> another device asking to link: { id, key, name, os, relay, at, c, n, code }
@@ -145,15 +149,16 @@ export function status() {
     devices: (conf.devices || []).map(({ id, name, kind, relay, addedAt, lastSeen }) => ({ id, name, kind: kind || 'phone', relay: relay || null, addedAt, lastSeen, connected: live.has(id) })),
     asks: [...asks.values()].filter((a) => a.code && a.at > Date.now() - ASK_MINUTES * 60000).map(({ id, name, os, relay, at, code }) => ({ id, name, os, relay, at, code })),
     pairing: pairing && pairing.expires > Date.now() && pairing.uses < PAIR_USES ? { code: pairing.code, expires: pairing.expires, link: pairing.link, qr: pairing.qr } : null,
-    awake: !!conf.awake,
-    canAwake: !IS_WIN,
+    awake: conf.awake !== false,
+    awakeNow: !!awakeProc,
+    canAwake: CAN_AWAKE,
   }
 }
 
 // ---------- the connection to the relay ----------
 export function start(serverBase) {
   base = serverBase
-  if (conf.awake) awake(true)
+  holdAwake()
   if (conf.url && conf.token) connect()
 }
 
@@ -555,24 +560,49 @@ export async function fromPhone(deviceId, body) {
 }
 
 // ---------- keeping the computer awake ----------
-let awakeProc = null
-function awake(on) {
-  if (!on) { awakeProc?.kill(); awakeProc = null; return }
-  if (awakeProc || IS_WIN) return
-  // macOS: no sleeping while on power (the display can still turn off). Linux: systemd's inhibitor.
-  awakeProc = IS_MAC
-    ? spawn('caffeinate', ['-s', '-w', String(process.pid)], { stdio: 'ignore' })
-    : spawn('systemd-inhibit', ['--what=idle:sleep', '--who=Bridge AI', '--why=Keeping your agents reachable from your phone', 'sleep', 'infinity'], { stdio: 'ignore' })
-  awakeProc.on('error', () => { awakeProc = null })
-  awakeProc.on('exit', () => { awakeProc = null })
+// While a paired phone or another of your computers can reach this one (through the relay or
+// Tailscale), it doesn't go to sleep when you walk away, so your agents stay a tap away. The screen
+// still turns off and locks. On unless you turn it off (conf.awake: false). Each way ends with this
+// server, so a crash never leaves the computer kept awake. In Docker the host decides.
+const CAN_AWAKE = !process.env.BRIDGE_DOCKER
+const reachable = () => tailnet || (!!(conf.url && conf.token) && (conf.devices || []).length > 0)
+// Windows: the system-required flag, which holds while the thread that set it runs: a hidden
+// PowerShell that waits for this server to end. Encoded, so nothing in it needs quoting.
+const winAwake = (pid) => Buffer.from([
+  '$k = Add-Type -Name Power -Namespace BridgeAI -PassThru -MemberDefinition \'[DllImport("kernel32.dll")] public static extern uint SetThreadExecutionState(uint f);\'',
+  '[void]$k::SetThreadExecutionState(2147483649)', // ES_CONTINUOUS | ES_SYSTEM_REQUIRED
+  `while (Get-Process -Id ${pid} -ErrorAction SilentlyContinue) { Start-Sleep -Seconds 30 }`,
+].join('\n'), 'utf16le').toString('base64')
+function holdAwake() {
+  if (!(CAN_AWAKE && conf.awake !== false && reachable()) || awakeBroken) { awakeProc?.kill(); awakeProc = null; return }
+  if (awakeProc) return
+  const pid = String(process.pid)
+  // macOS: -i, no idle sleep (on battery too); -s, no sleep at all while on power. Linux: systemd's
+  // inhibitor, around a wait for this server to end.
+  const p = IS_MAC ? spawn('caffeinate', ['-i', '-s', '-w', pid], { stdio: 'ignore' })
+    : IS_WIN ? spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', winAwake(pid)], { stdio: 'ignore', windowsHide: true })
+      : spawn('systemd-inhibit', ['--what=idle:sleep', '--who=Bridge AI', '--why=Keeping your agents reachable from your phone', 'tail', `--pid=${pid}`, '-f', '/dev/null'], { stdio: 'ignore' })
+  const at = Date.now()
+  awakeProc = p
+  // Gone at once (no such program, or PowerShell not allowed to load the flag): don't try on every save.
+  const gone = () => { if (awakeProc !== p) return; awakeProc = null; if (Date.now() - at < 5000) awakeBroken = true }
+  p.on('error', gone)
+  p.on('exit', gone)
 }
 process.on('exit', () => awakeProc?.kill())
 
 export function setAwake(on) {
   conf.awake = !!on
+  awakeBroken = false
   save()
-  awake(conf.awake)
   return status()
+}
+
+// Tailscale started or stopped publishing this computer to your phone (phone.js, via index.js).
+export function setTailnet(on) {
+  if (tailnet === !!on) return
+  tailnet = !!on
+  holdAwake()
 }
 
 // ---------- deploying the relay to your Cloudflare account ----------
