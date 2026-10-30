@@ -628,7 +628,7 @@ function App() {
     return (
       <div className="app narrow">
         {topbar}
-        <RuntimeNotice runtime={conf?.runtime?.name} />
+        <RuntimeNotice runtime={conf?.runtime?.name} fellBack={conf?.runtime?.fellBack} />
         <Quiet name="Link requests"><AskBanner /></Quiet>
         <main className="m-body">
           {mtab === 'mate' && (mateShown ? <Console key={mateShown.paneId} agent={mateShown} variant="mobile" queued={queuedFor(mateShown.paneId)} agents={agents} onThread={(id) => setMateId(id)} /> : <MateEmpty onLaunch={mateLaunch.launch} {...mateLaunch} />)}
@@ -805,7 +805,7 @@ function App() {
           <Icon name="panel-left" size={16} />
         </button>
       ))}
-      <RuntimeNotice runtime={conf?.runtime?.name} />
+      <RuntimeNotice runtime={conf?.runtime?.name} fellBack={conf?.runtime?.fellBack} />
       <Quiet name="Link requests"><AskBanner /></Quiet>
       <div className="views">
         <main className="cmd" hidden={view !== 'command'} ref={cmdRef}>

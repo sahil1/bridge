@@ -10,9 +10,18 @@ import * as builtin from './builtin.js'
 import { useSession } from './herdr-cli.js'
 import { stopHost } from './hostlink.js'
 
+// herdr was chosen but agents run here instead, and why (shown under the top bar), or null.
+let instead = null
+export const fellBack = () => instead
+
 export async function pickRuntime(cfg = {}) {
   const want = String(process.env.BRIDGE_RUNTIME || cfg.runtime || 'builtin').toLowerCase()
-  if (want === 'herdr') {
+  // A herdr too old for what Bridge AI asks of it would half work (screens that read empty,
+  // prompts that don't go in): run agents here until it's updated. One that isn't installed, or
+  // doesn't answer, stays chosen, and the notice says to start it.
+  const v = want === 'herdr' ? await herdr.version() : null
+  if (v?.old) instead = { from: 'herdr', version: v.version, min: herdr.MIN_VERSION, why: `herdr ${v.version} is older than ${herdr.MIN_VERSION}, the oldest Bridge AI works with` }
+  else if (want === 'herdr') {
     useSession(cfg.herdr?.session)
     // Built-in agents still running from before you switched would be out of sight: end them.
     // The saved layout stays, so switching back resumes them.
