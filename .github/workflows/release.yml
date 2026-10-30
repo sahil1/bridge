@@ -71,8 +71,16 @@ jobs:
         working-directory: desktop
         shell: bash
         timeout-minutes: 5 # seconds normally; a hung Electron fails the build instead of holding it
+        # A build machine's graphics sometimes lose the picture ("UnknownVizError"). A fresh Electron
+        # draws it fine, so it gets three tries. (Not drawn in software instead: on a Mac that leaves
+        # faint seams between the sphere's facets.)
         run: |
-          if [ "$RUNNER_OS" = Linux ]; then xvfb-run -a npx electron render-icons.js; else npx electron render-icons.js; fi
+          draw() { if [ "$RUNNER_OS" = Linux ]; then xvfb-run -a npx electron render-icons.js; else npx electron render-icons.js; fi; }
+          for try in 1 2 3; do
+            draw && exit 0
+            echo "Drawing the icon failed (try $try of 3)"
+          done
+          exit 1
 
       # Apple's notarization key (App Store Connect API), as the file electron-builder wants.
       - name: The notarization key
@@ -84,7 +92,11 @@ jobs:
 
       - name: Build the app
         working-directory: desktop
-        run: npx electron-builder --${{ matrix.platform }} --publish never
+        shell: bash
+        # One more try if it fails: the build machine's network can drop out while Apple's servers are
+        # in the middle of something, like handing back the notarization ticket to staple ("Failed to
+        # staple your application with code: 68").
+        run: npx electron-builder --${{ matrix.platform }} --publish never || { echo "The build failed; trying once more"; npx electron-builder --${{ matrix.platform }} --publish never; }
         # The Mac app is signed by desktop/sign.js with the Developer ID (BRIDGE_DEVID_P12), which Apple
         # then notarizes, so it opens with no warning; else with Bridge AI's own certificate
         # (BRIDGE_SIGN_P12), so macOS at least keeps what people allowed across updates; else ad hoc.
