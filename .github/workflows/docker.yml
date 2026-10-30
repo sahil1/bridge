@@ -2,12 +2,15 @@
 # that it starts, and pushes it to ghcr.io/sahil1/bridge.
 #   Pushing a tag v<version> (npm run release does this) pushes <version>, <major>.<minor> and
 #   latest. It runs apart from release.yml, so a problem here never holds up the desktop release.
-#   Running it by hand (Actions › Docker image › Run workflow) only builds and tests.
+#   A pull request that changes what goes into the image, or running it by hand (Actions › Docker
+#   image › Run workflow), only builds and tests, so a release isn't the first to find a broken image.
 name: Docker image
 
 on:
   push:
     tags: ['v*']
+  pull_request:
+    paths: ['Dockerfile', '.dockerignore', 'package.json', 'package-lock.json', '.github/workflows/docker.yml']
   workflow_dispatch:
 
 permissions:
