@@ -221,7 +221,7 @@ export default function Onboarding({ onDone }) {
               <KeyQuick />
               {usable.length > 0 && (
                 <p className="muted small wiz-note"><Icon name="helm" size={12} /> Your chief of staff, the one you talk to, runs on{' '}
-                  <select className="wiz-select" value={chiefKind || ''} onChange={(e) => setChief(e.target.value || null)} aria-label={t('Chief of staff')}>
+                  <select className="wiz-select" value={chiefKind || ''} onChange={(e) => setChief(e.target.value || null)} aria-label={t('Chief of Staff')}>
                     {usable.map((a) => <option key={a.kind} value={a.kind}>{a.label}</option>)}
                     <option value="">{t('nothing for now')}</option>
                   </select>.

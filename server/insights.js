@@ -306,7 +306,7 @@ async function readAll(since) {
 const placeName = (cwd) => {
   if (!cwd) return 'Unknown folder'
   const p = path.resolve(cwd)
-  if (chiefDir && p === chiefDir) return 'Chief of staff'
+  if (chiefDir && p === chiefDir) return 'Chief of Staff'
   if (p === path.join(DATA, 'chats')) return 'Chats' // plain chats, which share Bridge AI's folder for them
   if (p === HOME) return 'Home folder'
   // An agent on its own branch works in a copy in the data folder: name it for the repo.

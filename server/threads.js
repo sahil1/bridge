@@ -1,6 +1,6 @@
 // The chief of staff's threads: separate conversations with it, so a request about the launch and
 // one about the budget don't run together in one long chat. Each thread is a chief of its own, in
-// its own tab of the Chief of staff space and in the same folder, so they share the playbook, the
+// its own tab of the Chief of Staff space and in the same folder, so they share the playbook, the
 // ledger and the task list, and they can work at the same time. The first chief is Main; the
 // others are named by topic (their tab's name). The agents a thread starts or sends work to are
 // linked to it (`bridge new` and `bridge send` report them here), so its bar can show them.
@@ -12,6 +12,8 @@ import { dataFile, writeFileAtomic } from './paths.js'
 const FILE = dataFile('chief-threads.json')
 const KEEP_AGENTS = 30
 const GONE_AFTER = 3 * 60000 // a thread whose chief has been missing this long was closed
+// The Chief of Staff space and its first tab, by name: before 3.6 they were "Chief of staff".
+export const isChiefName = (s) => /^chief of staff$/i.test(String(s || ''))
 
 export function makeThreads() {
   let data = { next: 1, threads: [] } // threads: { id, session, paneId, tabId, sessionId, created, agents: [{ paneId, tabId, sessionId, at }] }
@@ -20,7 +22,7 @@ export function makeThreads() {
   const missing = new Map() // thread id -> when its chief was first missed
   let launching = 0 // a thread's chief can show up before its launch returns: don't take it for a stray one
   const ofSession = (f) => data.threads.filter((t) => (t.session || '') === (f.session || ''))
-  const nameOf = (a) => (a.tab && !/^\d+$/.test(a.tab) && a.tab !== 'Chief of staff' ? a.tab : 'Thread')
+  const nameOf = (a) => (a.tab && !/^\d+$/.test(a.tab) && !isChiefName(a.tab) ? a.tab : 'Thread')
 
   // Mark the chiefs with their thread (a.thread: { id, name, main }) and every agent with the
   // threads that handed it work (a.chiefThreads). A chief no thread knows yet (one resumed from
@@ -52,7 +54,7 @@ export function makeThreads() {
       if (!chiefs.some((a) => a.thread?.main)) {
         let main = mine.find((t) => t.id === 'main')
         if (!main) { main = { id: 'main', session: f.session || '', created: new Date().toISOString(), agents: [] }; data.threads.push(main) }
-        claim(main, free.find((a) => a.tab === 'Chief of staff') || free[0])
+        claim(main, free.find((a) => isChiefName(a.tab)) || free[0])
       }
       for (const a of chiefs.filter((x) => !x.thread)) {
         const t = { id: `t${data.next++}`, session: f.session || '', created: new Date().toISOString(), agents: [] }

@@ -169,7 +169,7 @@ export function HandoffPanel({ agent, view: first, target, anchor, onBack, onClo
       <div className="ho-head">
         <button type="button" className="win-btn ho-back" onClick={onBack} aria-label={t('Back to the menu')} title={t('Back')}><Icon name="chevron" size={14} className="flip" /></button>
         <AgentIcon kind={target.kind} size={18} name={target.label} />
-        <h4 id="ho-title">{chief ? t('Chief of staff on {name}', { name: target.label }) : t('Hand off to {name}', { name: target.label })}</h4>
+        <h4 id="ho-title">{chief ? t('Chief of Staff on {name}', { name: target.label }) : t('Hand off to {name}', { name: target.label })}</h4>
       </div>
       <p className="ho-lead">{chief
         ? t('Your chief of staff restarts on {name}. It reads its playbook, ledger and task list as usual, and starts with a summary of your recent conversation.', { name: target.label })

@@ -769,7 +769,7 @@ function App() {
                 if (e.ctrlKey && e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) { e.preventDefault(); nudgeTab(id, e.key === 'ArrowLeft' ? -1 : 1) }
               }} title={a.view ? a.title : a.shellTab ? `${a.workspace} › ${a.label}` : a.remote ? `${a.title}\n${t('On {name}', { name: a.device })}` : `${a.title}\n${a.cwd}`}>
               {a.view ? <Icon name={a.icon} size={12} className="muted" /> : a.chief ? <Icon name="helm" size={13} className="tab-ship" /> : a.shellTab ? <Icon name="terminal" size={12} className="muted" /> : <StatusDot status={a.status} size={7} />}
-              <span className="ws-tab-name">{a.chief ? (a.thread && !a.thread.main ? a.title : t('Chief of staff')) : a.title || a.tab}</span>
+              <span className="ws-tab-name">{a.chief ? (a.thread && !a.thread.main ? a.title : t('Chief of Staff')) : a.title || a.tab}</span>
               {a.remote && a.device && <span className="ws-tab-where">{a.device}</span>}
               {a.chief && <StatusDot status={a.status} size={6} />}
               <button className="ws-tab-x" aria-label={t('Close {name}', { name: a.title })} onClick={(e) => { e.stopPropagation(); closeTab(id) }}><Icon name="x" size={11} /></button>
@@ -778,7 +778,7 @@ function App() {
         })}
       </div>
       <div className="ws-tab-tools">
-        {!mate && !fleet?.down && <button className="ghost-btn" data-tour="chief" onClick={mateLaunch.launch} disabled={mateLaunch.launching}><Icon name="helm" size={12} /> {mateLaunch.launching ? t('Launching…') : t('Start chief of staff')}</button>}
+        {!mate && !fleet?.down && <button className="ghost-btn" data-tour="chief" onClick={mateLaunch.launch} disabled={mateLaunch.launching}><Icon name="helm" size={12} /> {mateLaunch.launching ? t('Launching…') : t('Chief of Staff')}</button>}
         <button className={`win-btn ${split ? 'on' : ''}`} onClick={toggleSplit} disabled={!canSplit || W.tabs.length < 2}
           title={!canSplit ? t('Not enough room to split') : W.tabs.length < 2 ? t('Open a second agent to split') : split ? t('Unsplit') : t('Split side by side')} aria-label={t('Split')}>
           <Icon name="split" size={15} />

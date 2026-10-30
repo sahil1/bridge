@@ -5,7 +5,7 @@ import { openSettings } from './SignIn.jsx'
 
 // A short walk through the real UI for someone new: the page dims, the part being explained stays
 // lit, and a card beside it says what it is. Shown once per device after setup (the phone layout
-// has its own steps) and again from Settings › About & updates or ⌘K. Each step points at an
+// has its own steps) and again from Settings › About & Updates or ⌘K. Each step points at an
 // element marked data-tour="..."; a step whose element isn't on screen is skipped.
 
 // What the status dots mean, drawn with the dots themselves.

@@ -426,7 +426,7 @@ function updateBadge(title) {
 const seen = new Map() // paneId -> { status, seq } last seen
 const live = new Map() // paneId -> Notification (kept so macOS doesn't drop the click handler)
 async function notifyFor(a) {
-  const label = a.chief ? 'Chief of staff' : a.title || a.tab || a.workspace
+  const label = a.chief ? 'Chief of Staff' : a.title || a.tab || a.workspace
   const blocked = a.status === 'blocked'
   const q = blocked ? await fetch(`${URL_BASE}/api/agents/${encodeURIComponent(a.paneId)}/question`).then((r) => r.json(), () => null).catch(() => null) : null
   const n = new Notification({

@@ -241,7 +241,7 @@ export default function FloatCard() {
         <p className="fc-line muted">{needs.length ? (needs.length === 1 ? t('{n} needs you', { n: needs.length }) : t('{n} need you', { n: needs.length })) : t('Nothing needs you')}{working ? ` · ${t('{n} working', { n: working })}` : ''}</p>
         {needs.slice(0, 3).map((a) => (
           <button type="button" key={a.paneId} className="fc-agent" onClick={() => app().floatOpen?.({ paneId: a.paneId })}>
-            <StatusDot status={a.status} size={8} /><span>{a.chief ? t('Chief of staff') : a.title || a.tab || a.workspace}</span>
+            <StatusDot status={a.status} size={8} /><span>{a.chief ? t('Chief of Staff') : a.title || a.tab || a.workspace}</span>
           </button>
         ))}
         <div className="fc-links"><button type="button" className="link-btn" onClick={() => app().floatOpen?.({ meetings: true })}>{t('Meetings')}</button></div>

@@ -338,7 +338,7 @@ export function makeHandoff({ rt, cfg, chiefDir, findAgent: findRaw, launchAgent
   // A name for the new tab: the old one's, or with the new agent's in brackets when both stay open.
   const LABELS = AGENTS.map((x) => x.label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
   function nameFor(a, to, keep) {
-    if (a.chief) return 'Chief of staff'
+    if (a.chief) return 'Chief of Staff'
     const base = nameOf(a).replace(new RegExp(`\\s*\\((${LABELS.join('|')})\\)$`), '').trim() || path.basename(a.cwd || '') || adapter(to).label
     return (keep ? `${base} (${adapter(to).label})` : base).slice(0, 60)
   }

@@ -44,7 +44,7 @@ import { quoteCommand } from './runtime/spawn.js'
 import { loadConfig, ROOT, DATA, CACHE, expand, ensureDir, cacheFile, IS_MAC, brewInstall, writeFileAtomic } from './paths.js'
 import { prepareChief } from './chief.js'
 import { makeTasks } from './chieftasks.js'
-import { makeThreads } from './threads.js'
+import { makeThreads, isChiefName } from './threads.js'
 import { providerRoutes, providerEnv, subscriptions, signedInNow } from './providers.js'
 import * as settings from './settings.js'
 import * as consult from './consult.js'
@@ -156,11 +156,13 @@ async function fleetView() {
     a.muted = notify.isMuted(a.paneId)
     if (a.accountId && a.sessionId) accounts.noteSession(a.sessionId, a.accountId)
     const generic = !a.title || a.title.toLowerCase() === a.kindLabel.toLowerCase() || /^(claude code|claude|codex|grok|cursor( agent)?|gemini)$/i.test(a.title)
-    if (a.chief) a.title = 'Chief of staff'
+    if (a.chief) a.title = 'Chief of Staff'
     // A fresh session has no title yet; the tab name (e.g. a routine's) says more than "Claude Code".
     else if (generic && a.tab && !/^\d+$/.test(a.tab)) a.title = a.tab
   }
   threads.decorate(f)
+  // Its space and first tab, made before 3.6 as "Chief of staff", show by its name now.
+  for (const x of [...(f.workspaces || []), ...(f.tabs || [])]) if (x.label === 'Chief of staff') x.label = 'Chief of Staff'
   for (const t of f.tabs || []) for (const p of t.panes || []) p.worktree = worktrees.describe(p.cwd)
   // Cloud agents you started from Bridge AI, in their own Cloud space.
   cloud.addTo(f, { isMuted: notify.isMuted })
@@ -437,27 +439,27 @@ app.post('/api/chief/launch', wrap(async () => {
   const kind = await chiefKind()
   // Next to its threads, if any are open.
   const home = f.agents.find((a) => a.chief)?.workspaceId
-  const out = await launchAgent({ kind, cwd: CHIEF_DIR, label: 'Chief of staff', workspaceId: home || null, newSpace: home ? undefined : 'Chief of staff', env: { BRIDGE_THREAD: 'main' } })
+  const out = await launchAgent({ kind, cwd: CHIEF_DIR, label: 'Chief of Staff', workspaceId: home || null, newSpace: home ? undefined : 'Chief of Staff', env: { BRIDGE_THREAD: 'main' } })
   pushFleet()
   return out
 }))
 async function chiefKind() {
-  if (!(await exists(CHIEF_DIR))) throw new Error(`Chief of staff folder not found at ${CHIEF_DIR}`)
+  if (!(await exists(CHIEF_DIR))) throw new Error(`Chief of Staff folder not found at ${CHIEF_DIR}`)
   const kind = cfg.chief?.kind || 'claude'
   if (!(await installed()).some((k) => k.kind === kind)) throw notInstalled(kind, `The chief of staff runs on ${adapter(kind).label}, which isn't installed yet.`)
   return kind
 }
-// A new thread: another chief in the same folder, in a tab of the Chief of staff space named for
+// A new thread: another chief in the same folder, in a tab of the Chief of Staff space named for
 // its topic, with a conversation of its own. The first message, if given, goes with it.
 app.post('/api/chief/threads', wrap(async (req) => {
   const name = String(req.body?.name || '').replace(/\s+/g, ' ').trim().slice(0, 40)
   if (!name) throw new Error('Give the thread a name')
   const kind = await chiefKind()
   const f = await fleetView()
-  const home = mainChief(f)?.workspaceId || f.agents.find((a) => a.chief)?.workspaceId || f.workspaces?.find((w) => w.label === 'Chief of staff')?.id
+  const home = mainChief(f)?.workspaceId || f.agents.find((a) => a.chief)?.workspaceId || f.workspaces?.find((w) => isChiefName(w.label))?.id
   const id = threads.reserve()
   try {
-    const out = await launchAgent({ kind, cwd: CHIEF_DIR, label: name, workspaceId: home || null, newSpace: home ? undefined : 'Chief of staff', prompt: String(req.body?.prompt || '').trim() || undefined, env: { BRIDGE_THREAD: id } })
+    const out = await launchAgent({ kind, cwd: CHIEF_DIR, label: name, workspaceId: home || null, newSpace: home ? undefined : 'Chief of Staff', prompt: String(req.body?.prompt || '').trim() || undefined, env: { BRIDGE_THREAD: id } })
     threads.started(id, { paneId: out.paneId, session: f.session })
     pushFleet()
     return { ...out, thread: id }
@@ -587,7 +589,7 @@ async function archiveWhere(match) {
     if (!a.sessionId || !adapter(a.kind).resume) continue
     let last = ''
     try { last = preview(a)?.text || '' } catch { /* no transcript */ }
-    archive.add({ kind: a.kind, sessionId: a.sessionId, cwd: a.cwd, label: a.chief ? 'Chief of staff' : a.tab && !/^\d+$/.test(a.tab) ? a.tab : a.title, workspace: a.workspace, preview: last })
+    archive.add({ kind: a.kind, sessionId: a.sessionId, cwd: a.cwd, label: a.chief ? 'Chief of Staff' : a.tab && !/^\d+$/.test(a.tab) ? a.tab : a.title, workspace: a.workspace, preview: last })
   }
 }
 // The Bridge-made worktrees of the panes about to close; once they have, each one no other pane
@@ -664,7 +666,7 @@ app.get('/api/search', wrap(async (req) => {
   const live = await liveBySession()
   const closed = Object.fromEntries(archive.all().map((x) => [x.sessionId, x]))
   const agents = Object.fromEntries(((await rt.fleet()).agents || []).filter((x) => x.sessionId).map((x) => [x.sessionId, x]))
-  const nameOf = (x) => (x.chief ? 'Chief of staff' : x.tab && !/^\d+$/.test(x.tab) ? x.tab : x.title || null)
+  const nameOf = (x) => (x.chief ? 'Chief of Staff' : x.tab && !/^\d+$/.test(x.tab) ? x.tab : x.title || null)
   out.results = out.results.map((r) => {
     const a = agents[r.sessionId]
     return { ...r, paneId: live[r.sessionId] || null, label: (a && nameOf(a)) || closed[r.sessionId]?.label || null, workspace: a?.workspace || closed[r.sessionId]?.workspace || null, cwd: r.cwd ? r.cwd.replace(os.homedir(), '~') : null, fullCwd: r.cwd }

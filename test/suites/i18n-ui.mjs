@@ -36,7 +36,7 @@ try {
     await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
     ok((await p.evaluate(() => document.documentElement.lang)) === l, `${l}: the page says it's in ${l}`)
     const nav = (await p.locator('.rail-nav-btn').allInnerTexts()).map((x) => x.trim())
-    ok(['New', 'Chief of staff', 'Meetings'].every((en) => nav.some((x) => x.includes(say(l, en)))), `${l}: the sidebar is in its words`, nav)
+    ok(['New', 'Chief of Staff', 'Meetings'].every((en) => nav.some((x) => x.includes(say(l, en)))), `${l}: the sidebar is in its words`, nav)
     await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'appearance' } })))
     await p.waitForSelector('.st-nav-item', { timeout: 10000 })
     const secs = (await p.locator('.st-nav-item').allInnerTexts()).map((x) => x.trim())

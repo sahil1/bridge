@@ -8,7 +8,7 @@ Say what the problem is, how to reproduce it, and what someone could do with it.
 
 ## Supported versions
 
-Only the latest release gets security fixes. Bridge AI tells you when a newer version is out and updates itself when you say so (Settings › About & updates). Running `install.sh` (or `install.ps1` on Windows) again also updates it.
+Only the latest release gets security fixes. Bridge AI tells you when a newer version is out and updates itself when you say so (Settings › About & Updates). Running `install.sh` (or `install.ps1` on Windows) again also updates it.
 
 ## How Bridge AI protects you
 
@@ -26,7 +26,7 @@ Only the latest release gets security fixes. Bridge AI tells you when a newer ve
   ```
 
 - There is no telemetry: nothing about you or your use of Bridge AI is collected or sent anywhere.
-- The outside requests Bridge AI makes itself are for what it shows you: the weather (Open-Meteo, with only the coordinates you picked), market prices and news headlines (Yahoo Finance, the Federal Reserve, and public news feeds), and a check on GitHub for a newer version (Settings › About & updates turns it off). Your agents talk to their own providers with your own sign-ins.
+- The outside requests Bridge AI makes itself are for what it shows you: the weather (Open-Meteo, with only the coordinates you picked), market prices and news headlines (Yahoo Finance, the Federal Reserve, and public news feeds), and a check on GitHub for a newer version (Settings › About & Updates turns it off). Your agents talk to their own providers with your own sign-ins.
 
 ## What it doesn't protect against
 
