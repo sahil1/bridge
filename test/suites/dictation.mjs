@@ -17,7 +17,7 @@ import { ROOT, OUT, IS_MAC, startKit, checks, until, sleep } from '../lib/harnes
 
 const { ok, skip, done } = checks('dictation')
 const keys = await import('../../shared/dictation/keys.js')
-const { globalKey, backgroundDefault } = await import('../../shared/dictation/platform.js')
+const { globalKey } = await import('../../shared/dictation/platform.js')
 const { clean, makeNames } = await import('../../shared/dictation/clean.js')
 const desk = createRequire(import.meta.url)('../../desktop/dictation.js')
 
@@ -60,7 +60,6 @@ for (const [name, m, mode, via] of table) {
 }
 ok(globalKey({ desktop: false, platform: 'linux' }).mode === null && globalKey({ desktop: false, platform: 'darwin', helper: true }).mode === null, 'Docker and a browser: inside Bridge AI only')
 ok(G({ platform: 'linux', wayland: true, session: 'GNOME', portal: true, electron: 45 }).asks && !G({ platform: 'linux', wayland: true, session: 'KDE', portal: true }).asks, 'GNOME asks once to allow the key; KDE doesn\'t')
-ok(backgroundDefault(G({ platform: 'darwin', helper: true })) && backgroundDefault(G({ platform: 'win32', hook: true })) && !backgroundDefault(G({ platform: 'linux', wayland: true, session: 'GNOME', portal: true, electron: 45 })) && !backgroundDefault({ mode: null }), 'on from the start where nothing asks; off until you turn it on where the desktop would ask')
 
 // ---------- Light cleanup ----------
 const names = makeNames(['payments-api', 'worktree', 'Claude Code', 'GitHub', 'Notes', 'main', 'Fix the login bug', 'Chief of Staff', 'gpt-5'])

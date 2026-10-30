@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import Icon from '../Icon.jsx'
 import { useSettings, SaveNote } from './General.jsx'
 import { keyLabel, keyFromEvent } from '../../../shared/dictation/keys.js'
-import { backgroundDefault } from '../../../shared/dictation/platform.js'
 import { pause, keysPlatform, dictationKey } from '../../dictation/controller.js'
 import { t, tx } from '../../i18n/index.js'
 import '../../dictation/dictation.css'
@@ -46,7 +45,7 @@ export default function Dictation() {
 
   const on = d.on !== false
   const mode = status?.mode || null
-  const background = d.background ?? backgroundDefault(status)
+  const background = d.background === true
   return (
     <section className="st-sec st-dictation">
       <h4>{t('Dictation')}</h4>

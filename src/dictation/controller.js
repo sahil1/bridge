@@ -11,18 +11,19 @@
 // the message box of the agent on screen. The desktop app's floating window (Hud.jsx) shows it
 // instead, to send or copy.
 import { useSyncExternalStore } from 'react'
-import { api, apiUrl } from '../api.js'
+import { api, apiUrl, settingsChanged } from '../api.js'
 import { startPcm, microphone, wav, RATE } from '../audio/pcm.js'
 import { clean, makeNames } from '../../shared/dictation/clean.js'
-import { defaultKey } from '../../shared/dictation/keys.js'
+import { defaultKey, keyLabel } from '../../shared/dictation/keys.js'
 import { t } from '../i18n/index.js'
 
 export const HOLD_MS = 300
 
 // phase: idle | opening (asking for the mic) | listening | working (turning it into text).
 // mode: hold | free (hands-free). note: a line to show. setup: what /voice says is missing, or
-// { mic: true }. result: { text } the last text (for the floating window).
-let st = { phase: 'idle', mode: null, target: null, level: 0, since: 0, note: null, setup: null, result: null, retry: false }
+// { mic: true }. result: { text } the last text (for the floating window). offer: the desktop app's
+// key status, while asking whether the key should work from any app too.
+let st = { phase: 'idle', mode: null, target: null, level: 0, since: 0, note: null, setup: null, result: null, retry: false, offer: null }
 const subs = new Set()
 const set = (p) => { st = { ...st, ...p }; for (const f of subs) f() }
 export const getState = () => st
@@ -132,7 +133,7 @@ export async function press(target, at = Date.now()) {
   if (target.kind === 'password') { set({ note: t("Can't dictate into a password field."), target: null }); return }
   const id = ++seq
   pressAt = at
-  set({ phase: 'opening', mode: 'hold', target, level: 0, since: Date.now(), note: null, setup: null, result: null, retry: false })
+  set({ phase: 'opening', mode: 'hold', target, level: 0, since: Date.now(), note: null, setup: null, result: null, retry: false, offer: null })
   words()
   // Something to install first (whisper.cpp, for a Whisper model)? Then the mic isn't opened: nothing
   // could turn it into text. The speech model only to download is different: you talk now, and
@@ -225,6 +226,7 @@ async function transcribe(id) {
     lastAudio = null
     set({ phase: 'idle', mode: null, result: { text, at: Date.now() } })
     if (!deliver(target, text)) set({ note: t('Nowhere to put it, so here it is: {text}', { text }) })
+    else if (target?.kind !== 'hud') offerAnyApp()
   } catch (e) {
     if (seq !== id) return
     voiceOk = 0
@@ -233,4 +235,27 @@ async function transcribe(id) {
     // What the computer said, as it said it (a speech model to download first, say).
     set({ phase: 'idle', mode: null, setup: v && !v.ready ? v : null, retry: true, note: e.said || t("Couldn't transcribe: {error}", { error: e.message }) })
   }
+}
+
+// ---------- The key from any app ----------
+// Off until you say yes (shared/dictation/platform.js). In the desktop app, where this computer lets
+// it be heard from other apps, the first words that land in Bridge AI ask once; either answer is
+// kept, and Settings › Voice changes it.
+let offered = false
+async function offerAnyApp() {
+  const app = window.bridgeApp
+  if (offered || cfg.background != null || !app?.dictateStatus) return
+  offered = true
+  const s = await app.dictateStatus().catch(() => null)
+  if (!s?.mode || st.phase !== 'idle' || st.note || st.setup) return
+  set({ offer: s })
+}
+export async function answerOffer(yes) {
+  const was = st.offer
+  set({ offer: null })
+  cfg = { ...cfg, background: yes }
+  await api('/settings', { method: 'PATCH', body: { dictation: { background: yes } } }).then(settingsChanged, () => {})
+  if (!yes || !was) return
+  const s = await window.bridgeApp?.dictateConfigure?.(cfg).catch(() => null)
+  if (s?.taken) set({ note: t('{key} is taken by another app. Pick another key in Settings › Voice.', { key: keyLabel(s.key, keysPlatform()) }) })
 }
