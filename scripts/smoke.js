@@ -88,6 +88,15 @@ try {
     if (!d.bridgeAi) throw new Error('no diagnostics')
     return `tailscale ${ph.installed ? ph.state : 'not installed'}; version ${up.current}, latest ${up.latest || up.error || '?'}`
   })
+  // sherpa-onnx's addon (Parakeet) loads in the app's own Node, in its own process, as it will
+  // for the first voice note. It's built for newer systems than some Bridge AI runs on, so it's
+  // also worth running this by hand on the oldest macOS and Linux supported.
+  await step('the speech engine loads', async () => {
+    const s = await (await get('/api/speech')).json()
+    if (!s.machine?.sherpa?.ok) throw new Error(`sherpa-onnx didn't load: ${s.machine?.sherpa?.error || JSON.stringify(s.hidden)}`)
+    if (!s.local.models.some((m) => m.id === 'parakeet-v3')) throw new Error('Parakeet isn\'t offered')
+    return `${s.machine.platform} ${s.machine.arch}${s.machine.os ? ` ${s.machine.os}` : ''}${s.machine.glibc ? `, glibc ${s.machine.glibc}` : ''}`
+  })
   await step('a terminal runs a command', async () => {
     const r = await fetch(BASE + '/api/agents/launch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'shell', cwd: os.homedir(), label: 'smoke' }) })
     const out = await r.json()

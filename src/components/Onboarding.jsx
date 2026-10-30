@@ -63,7 +63,7 @@ const STEPS = [tx('Set up'), tx('Your AI'), tx('Your projects')]
 // The recommended one asks for no password and nothing to allow: the rest waits until it's used.
 const LEVELS = [
   ['basic', tx('Just what agents need (recommended)'), tx('Node.js, so any agent installs in one click. No password, nothing to allow. Meeting notes, voice notes and the calendar set themselves up the first time you use them.')],
-  ['full', tx('Everything'), tx('Node.js, meeting notes, voice notes and your calendar, installed in one go while you carry on (the speech model is a 190 MB download). Asks for your password once, then for what macOS needs you to allow.')],
+  ['full', tx('Everything'), tx('Node.js, meeting notes, voice notes and your calendar, installed in one go while you carry on (the speech model is a 670 MB download). Asks for your password once, then for what macOS needs you to allow.')],
   ['later', tx('Later'), tx('Nothing now. Settings › General has it all in one place whenever you want it.')],
 ]
 const HAVE_NODE = tx('Node.js is already here, so there\'s nothing to install. Meeting notes, voice notes and the calendar set themselves up the first time you use them.')
@@ -179,7 +179,7 @@ export default function Onboarding({ onDone }) {
               : !started ? <>
               {have.length > 0 && <p className="muted small sa-kept">{alreadyLine(have)}</p>}
               <ul className="wiz-levels" role="radiogroup" aria-label={t('How much to set up')}>
-                {levels.map(([id, label, note]) => (setup.plan && !setup.plan.mac && id === 'full' ? [id, label, tx('Node.js, meeting notes and voice notes, set up in one go while you carry on (the speech model is a 190 MB download).')] : id === 'basic' && nodeHere ? [id, label, HAVE_NODE] : [id, label, note])).map(([id, label, note]) => (
+                {levels.map(([id, label, note]) => (setup.plan && !setup.plan.mac && id === 'full' ? [id, label, tx('Node.js, meeting notes and voice notes, set up in one go while you carry on (the speech model is a 670 MB download).')] : id === 'basic' && nodeHere ? [id, label, HAVE_NODE] : [id, label, note])).map(([id, label, note]) => (
                   <li key={id} className={level === id ? 'on' : ''}>
                     <label><input type="radio" name="wiz-level" value={id} checked={level === id} onChange={() => setLevel(id)} /><b>{t(label)}</b><small>{t(note)}</small></label>
                   </li>

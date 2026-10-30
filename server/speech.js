@@ -1,9 +1,11 @@
-// Speech to text for meeting notes, with the engine you pick: on this computer (whisper.cpp, its
-// model kept loaded by whisper-server while you record, on the Mac's graphics chip), on the Mac
-// itself (Apple's own transcriber, macOS 26 and later: native/bridgespeech, nothing to install),
-// or a service you have a key for. Picked nothing: whisper.cpp when it's ready, else the Mac's own.
-// meetings.js sends one spoken stretch at a time: a 16 kHz mono WAV of up to
-// about 25 seconds, which every engine here takes as it is.
+// Speech to text for meeting notes, voice notes and dictation, with the engine you pick: on this
+// computer (a speech model: Parakeet through sherpa-onnx, in a process of its own (asr.js), or
+// Whisper through whisper.cpp, its model kept loaded by whisper-server while you record), on the
+// Mac itself (Apple's own transcriber, macOS 26 and later: native/bridgespeech, nothing to
+// install), or, for meetings, a service you have a key for. Picked nothing: a speech model when
+// it's here, else the Mac's own. Only what can run on this computer is offered (fit() below).
+// meetings.js sends one spoken stretch at a time: a 16 kHz mono WAV of up to about 25 seconds,
+// which every engine here takes as it is; voice.js sends a voice note the same way.
 //
 // Services, by how they're called:
 //   OpenAI-style (/audio/transcriptions, one form post): OpenAI, Groq, Mistral, Together, and any
@@ -16,13 +18,17 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import net from 'node:net'
+import crypto from 'node:crypto'
 import { spawn, execFile } from 'node:child_process'
 import { DATA, ROOT, IS_MAC, brewInstall } from './paths.js'
 import { tool } from './fixes.js'
 import { providerEnv } from './providers.js'
+import { machine, freeBytes, atLeast } from './machine.js'
+import * as asr from './asr.js'
+import * as memory from './meetmemory.js'
 
 const env = () => ({ ...process.env, ...providerEnv() })
-const fatal = (msg) => Object.assign(new Error(msg), { fatal: true })
+const fatal = (msg, more) => Object.assign(new Error(msg), { fatal: true }, more)
 
 // The words in what an engine wrote, without its notes about sound that isn't words: whisper's
 // [BLANK_AUDIO], [END], [ Silence ], (keyboard clicking), (upbeat music). Nobody says anything in
@@ -33,72 +39,218 @@ export function spoken(text) {
   return !t || /^(\([^)]{0,60}\)[\s.,!?-]*)+$/.test(t) ? '' : t
 }
 
-// ---------- Models for this computer (whisper.cpp) ----------
-// BRIDGE_MODELS_URL (tests): where models are downloaded from instead, so a test never downloads one.
-const HF = process.env.BRIDGE_MODELS_URL || 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main'
+// ---------- Speech models for this computer ----------
+// Each is downloaded once from Hugging Face, at a pinned revision, file by file into the data
+// folder's models/ (Parakeet's into a folder of its own), checked against its SHA-256. runtime:
+// what runs it, sherpa-onnx (asr.js) or whisper.cpp. mb: the download. memGB: the least memory a
+// computer needs to run it. languages: what it hears ('auto': about 100, and it tells which).
+// BRIDGE_MODELS_URL (tests): where models are downloaded from instead, so a test never downloads
+// one; BRIDGE_SPEECH_MODELS (tests): a JSON file of { id: { files } } standing in for the real
+// files' names, sizes and checksums, so a test's small fake model passes the check.
+const HF = () => process.env.BRIDGE_MODELS_URL || 'https://huggingface.co'
+const EU25 = ['bg', 'hr', 'cs', 'da', 'nl', 'en', 'et', 'fi', 'fr', 'de', 'el', 'hu', 'it', 'lv', 'lt', 'mt', 'pl', 'pt', 'ro', 'sk', 'sl', 'es', 'sv', 'ru', 'uk']
+const WHISPER = { repo: 'ggerganov/whisper.cpp', rev: '5359861c739e955e79d9a303bcbc70fb988958b1' }
+const whisper = (id, file, bytes, sha256, short, o) => ({ id, runtime: 'whisper', file, short, label: `Whisper ${short.replace(/^\w/, (c) => c.toLowerCase())}`, mb: Math.round(bytes / 1e6), ...WHISPER, files: [{ name: file, bytes, sha256 }], license: 'MIT', by: 'OpenAI', ...o })
 export const MODELS = [
-  { id: 'large-v3-turbo-q5_0', file: 'ggml-large-v3-turbo-q5_0.bin', mb: 574, label: 'Large turbo', note: 'Accurate and still quick. About 100 languages.', best: true },
-  { id: 'small.en-q5_1', file: 'ggml-small.en-q5_1.bin', mb: 190, label: 'Small, English', note: 'Light and quick, English only. Voice notes use it too.' },
-  { id: 'small-q5_1', file: 'ggml-small-q5_1.bin', mb: 190, label: 'Small', note: 'Light and quick, many languages.' },
-  { id: 'base.en-q5_1', file: 'ggml-base.en-q5_1.bin', mb: 60, label: 'Base, English', note: 'The lightest that does the job, English only.' },
-  { id: 'large-v3-q5_0', file: 'ggml-large-v3-q5_0.bin', mb: 1081, label: 'Large', note: 'The most accurate, and the slowest. Many languages.' },
+  {
+    id: 'parakeet-v3', runtime: 'sherpa', label: 'Parakeet', mb: 670, memGB: 3, languages: EU25, best: true, hotwords: true,
+    note: 'Accurate and quick on any computer. English and 24 more European languages, which it tells apart itself.',
+    license: 'CC-BY-4.0', by: 'NVIDIA', repo: 'csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8', rev: '2bda32ec70b097a55adaa07d9a7173915b43cc78',
+    files: [
+      { name: 'tokens.txt', bytes: 93939, sha256: 'd58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d' },
+      { name: 'decoder.int8.onnx', bytes: 11845275, sha256: '179e50c43d1a9de79c8a24149a2f9bac6eb5981823f2a2ed88d655b24248db4e' },
+      { name: 'joiner.int8.onnx', bytes: 6355277, sha256: '3164c13fc2821009440d20fcb5fdc78bff28b4db2f8d0f0b329101719c0948b3' },
+      { name: 'encoder.int8.onnx', bytes: 652184281, sha256: 'acfc2b4456377e15d04f0243af540b7fe7c992f8d898d751cf134c3a55fd2247' },
+    ],
+  },
+  {
+    id: 'parakeet-en', runtime: 'sherpa', label: 'Parakeet, English', mb: 663, memGB: 3, languages: ['en'], hotwords: true,
+    note: 'The best at tool names and jargon (worktree, Claude Code).',
+    license: 'NVIDIA Open Model License', by: 'NVIDIA', repo: 'csukuangfj2/sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-non-streaming', rev: '8c3a10fb13408c7a7054f6898958bf1c64a8d6c7',
+    files: [
+      { name: 'tokens.txt', bytes: 8952, sha256: 'dc0b4584ab2e4ddbf888425c076c61b736e7356a015250db7d307e6f1a8188ff' },
+      { name: 'decoder.int8.onnx', bytes: 7257753, sha256: 'a5e223392c90e75f8144cdb5eb95af7625db389e39edef2bd1a9c872b3298fe6' },
+      { name: 'joiner.int8.onnx', bytes: 1735860, sha256: '869f43f7d24595c55581ad3bf249a935fb8a71389fbdaa7504b9f46f93140f8a' },
+      { name: 'encoder.int8.onnx', bytes: 654040552, sha256: '6716910b7a0833997fec7a410494c995d70124001a0e9b66d6370d6aced577e0' },
+    ],
+  },
+  whisper('large-v3-turbo-q5_0', 'ggml-large-v3-turbo-q5_0.bin', 574041195, '394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2', 'Large turbo', { memGB: 2, languages: 'auto', note: 'For the languages Parakeet doesn\'t hear. Accurate and still quick.' }),
+  whisper('small.en-q5_1', 'ggml-small.en-q5_1.bin', 190098681, 'bfdff4894dcb76bbf647d56263ea2a96645423f1669176f4844a1bf8e478ad30', 'Small, English', { memGB: 1, languages: ['en'], note: 'Light and quick.' }),
+  whisper('small-q5_1', 'ggml-small-q5_1.bin', 190085487, 'ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb', 'Small', { memGB: 1, languages: 'auto', note: 'Light and quick.' }),
+  whisper('base.en-q5_1', 'ggml-base.en-q5_1.bin', 59721011, '4baf70dd0d7c4247ba2b81fafd9c01005ac77c2f9ef064e00dcf195d0e2fdd2f', 'Base, English', { memGB: 1, languages: ['en'], note: 'The lightest that does the job.' }),
+  whisper('large-v3-q5_0', 'ggml-large-v3-q5_0.bin', 1081140203, 'd75795ecff3f83b5faa89d1900604ad8c780abd5739fae406de19f23ecd98ad1', 'Large', { memGB: 3, languages: 'auto', note: 'The most accurate Whisper, and the slowest.' }),
 ]
+// The portable default: it runs on every computer Bridge AI does (fit() says where it can't).
+export const DEFAULT = 'parakeet-v3'
 // Silero, so whisper.cpp skips what isn't speech inside a stretch (less made-up text in pauses).
-const VAD = { file: 'ggml-silero-v6.2.0.bin', url: `${process.env.BRIDGE_MODELS_URL || 'https://huggingface.co/ggml-org/whisper-vad/resolve/main'}/ggml-silero-v6.2.0.bin` }
+const VAD = { id: 'vad', runtime: 'whisper', label: 'Silero', file: 'ggml-silero-v6.2.0.bin', repo: 'ggml-org/whisper-vad', rev: '9ffd54a1e1ee413ddf265af9913beaf518d1639b', files: [{ name: 'ggml-silero-v6.2.0.bin', bytes: 885098, sha256: '2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987' }] }
+const standIns = (() => { try { return JSON.parse(fs.readFileSync(process.env.BRIDGE_SPEECH_MODELS, 'utf8')) } catch { return {} } })()
+const filesOf = (m) => standIns[m.id]?.files || m.files
 const DIR = () => path.join(DATA, 'models')
+// Where a model lives: whisper.cpp's one file in models/ (where earlier versions put it), a sherpa
+// model's files in models/<id>/.
+const dirOf = (m) => (m.runtime === 'sherpa' ? path.join(DIR(), m.id) : DIR())
 const fileOf = (m) => path.join(DIR(), m.file)
-const has = (f) => { try { return fs.statSync(f).size > 0 } catch { return false } }
-// The one picked, else one you already have, else the best.
-export function localModel(cfg) {
-  const picked = MODELS.find((m) => m.id === cfg?.meetings?.localModel)
-  if (picked) return picked
-  return MODELS.find((m) => has(fileOf(m))) || MODELS[0]
+const urlOf = (m, f) => (process.env.BRIDGE_MODELS_URL ? `${HF()}/${m.id}/${f.name}` : `${HF()}/${m.repo}/resolve/${m.rev}/${f.name}`)
+const size = (f) => { try { return fs.statSync(f).size } catch { return -1 } }
+const has = (f) => size(f) > 0
+// Downloaded: every file there at its full size (each was checked against its SHA-256 before it
+// got its name).
+export const have = (m) => filesOf(m).every((f) => { const n = size(path.join(dirOf(m), f.name)); return f.bytes ? n === f.bytes : n > 0 })
+
+// ---------- What this computer can run ----------
+// sherpa-onnx's Node addon comes built for these (npm packages sherpa-onnx-<os>-<arch>). On Linux
+// it needs glibc: 2.32 or later for x64 (built on a current Ubuntu), 2.17 for arm64 (manylinux).
+// Windows on Arm runs the x64 app, and with it the x64 addon, under emulation.
+const SHERPA = { 'darwin-arm64': {}, 'darwin-x64': {}, 'win32-x64': {}, 'win32-ia32': {}, 'win32-arm64': {}, 'linux-x64': { glibc: '2.32' }, 'linux-arm64': { glibc: '2.17' } }
+// What runs where, for this computer (m: machine()), as { ok, why }. Pure, so tests can ask it
+// about any computer. probe: whether the addon loaded here ({ ok, error }), once it's been tried;
+// whisperHere: whether whisper.cpp's programs are on this computer.
+export function fitRuntime(runtime, m, { probe = null, whisperHere = false } = {}) {
+  if (runtime === 'sherpa') {
+    const want = SHERPA[`${m.platform}-${m.arch}`]
+    if (!want) return { ok: false, why: `sherpa-onnx has no build for ${m.platform} on ${m.arch}` }
+    if (want.glibc && !m.glibc) return { ok: false, why: 'sherpa-onnx needs a Linux with glibc (this one uses another C library)' }
+    if (want.glibc && !atLeast(m.glibc, want.glibc)) return { ok: false, why: `sherpa-onnx needs glibc ${want.glibc} or later (Ubuntu 22.04, Debian 12 or newer); this Linux has ${m.glibc}` }
+    if (probe && !probe.ok) return { ok: false, why: `sherpa-onnx doesn't load on this computer: ${probe.error}` }
+    return { ok: true, why: null }
+  }
+  if (runtime === 'whisper') {
+    // The Docker image has no whisper.cpp; one installed in the container counts.
+    if (m.docker && !whisperHere) return { ok: false, why: 'whisper.cpp isn\'t in the Docker image' }
+    return { ok: true, why: null }
+  }
+  return { ok: false, why: 'Unknown speech engine' }
+}
+export function fitModel(model, m, o = {}) {
+  const r = fitRuntime(model.runtime, m, o)
+  if (!r.ok) return r
+  if (model.memGB && m.memGB && m.memGB < model.memGB) return { ok: false, why: `${model.label} needs ${model.memGB} GB of memory; this computer has ${m.memGB} GB` }
+  return r
 }
 
-const downloads = new Map() // file -> { got, total, error }
+let fitted = null // { at, m, probe, whisperHere, models: Map(id -> { ok, why }) }
+// What's offered here, worked out again at most every 10 seconds (whisper.cpp may have just been
+// installed). The addon is tried once, in a process of its own, unless the rules already say no.
+export async function fit() {
+  if (fitted && Date.now() - fitted.at < 10_000) return fitted
+  const m = await machine()
+  const whisperHere = (await Promise.all([tool('whisper-server'), tool('whisper-cli')])).some(Boolean)
+  const probe = fitRuntime('sherpa', m).ok ? await asr.probe() : null
+  const models = new Map(MODELS.map((x) => [x.id, fitModel(x, m, { probe, whisperHere })]))
+  fitted = { at: Date.now(), m, probe, whisperHere, models }
+  return fitted
+}
+const shown = (id) => !fitted || !!fitted.models.get(id)?.ok
+export const offered = () => MODELS.filter((x) => shown(x.id))
+const portable = () => offered().find((x) => x.id === DEFAULT) || offered().find((x) => x.runtime === 'whisper') || MODELS[0]
+// Ready to turn speech into text: downloaded, and what runs it is here.
+const runnable = (m) => have(m) && (m.runtime === 'sherpa' ? shown(m.id) : !!fitted?.whisperHere)
+
+// The model picked (Settings › Voice, or an older pick in Settings › Meetings), when it can run
+// here; else one already here that can run, Parakeet first; else the portable default.
+const pickedId = (cfg) => cfg?.meetings?.localModel || cfg?.speech?.model || null
+export function localModel(cfg) {
+  const picked = MODELS.find((m) => m.id === pickedId(cfg))
+  if (picked && shown(picked.id)) return picked
+  if (picked) return portable()
+  return offered().find(runnable) || portable()
+}
+// A pick that can't run on this computer (a config copied from another one): what's used instead
+// and why, so Settings says so. { from, to, why } or null.
+export function fellBack(cfg) {
+  const picked = MODELS.find((m) => m.id === pickedId(cfg))
+  if (!picked || shown(picked.id)) return null
+  const to = portable()
+  return { from: picked.id, fromLabel: picked.label, to: to.id, toLabel: to.label, why: fitted.models.get(picked.id)?.why || null }
+}
+
+// ---------- Downloads ----------
+// Resumable: a file's .part is kept when a download stops, and the next one asks for the rest. Each
+// file is checked against its SHA-256 before it gets its name; one that doesn't match is thrown away.
+const downloads = new Map() // model id -> { got, total, error, stop }
 // Why a model didn't download, in words (voice.js too): no connection says so, like Node.js's.
 export const downloadError = (e, url) => {
   const host = (() => { try { return new URL(url).host } catch { return 'the download' } })()
   return e?.name === 'TimeoutError' ? 'The download took too long. Try again.'
+    // The connection dropped part way ("terminated", a socket closed): what came is kept for next time.
+    : /^terminated$|other side closed|UND_ERR_SOCKET|ECONNRESET.*body/.test(`${e?.message} ${e?.cause?.code || ''}`) ? 'The download was cut short; try again'
     : /fetch failed|ENOTFOUND|ECONNREFUSED|ECONNRESET|EAI_AGAIN/.test(`${e?.message} ${e?.cause?.code || ''}`) ? `Can't reach ${host}. Check your internet connection and try again.`
       : e?.message || 'Download failed'
 }
-export function fetchModel(id) {
-  const m = id === 'vad' ? { file: VAD.file, url: VAD.url } : MODELS.find((x) => x.id === id)
-  if (!m) throw new Error('No such model')
-  const dest = fileOf(m)
-  if (has(dest) || (downloads.has(m.file) && !downloads.get(m.file).error)) return
-  const d = { got: 0, total: 0, error: null }
-  downloads.set(m.file, d)
+const hashOf = (file) => new Promise((resolve, reject) => {
+  const h = crypto.createHash('sha256')
+  fs.createReadStream(file).on('data', (b) => h.update(b)).on('end', () => resolve(h)).on('error', reject)
+})
+async function fetchFile(m, f, d) {
+  const dest = path.join(dirOf(m), f.name)
+  if (f.bytes ? size(dest) === f.bytes : has(dest)) { d.got += f.bytes || 0; return }
   const tmp = `${dest}.part`
-  ;(async () => {
+  let at = Math.max(0, size(tmp))
+  if (f.bytes && at > f.bytes) { fs.rmSync(tmp, { force: true }); at = 0 }
+  // What's there already counts, and goes into the checksum first.
+  let h = at ? await hashOf(tmp) : crypto.createHash('sha256')
+  d.got += at
+  if (!f.bytes || at < f.bytes) {
+    const res = await fetch(urlOf(m, f), { headers: at ? { Range: `bytes=${at}-` } : {}, signal: AbortSignal.any([d.stop.signal, AbortSignal.timeout(60 * 60 * 1000)]) })
+    if (!res.ok || !res.body) throw new Error(`Download failed (${res.status})`)
+    // Asked for the rest but sent the whole file: that file starts again.
+    if (at && res.status !== 206) { d.got -= at; at = 0; h = crypto.createHash('sha256') }
+    const out = fs.createWriteStream(tmp, { flags: at ? 'a' : 'w' })
     try {
-      fs.mkdirSync(DIR(), { recursive: true })
-      const res = await fetch(m.url || `${HF}/${m.file}`, { signal: AbortSignal.timeout(60 * 60 * 1000) })
-      if (!res.ok || !res.body) throw new Error(`Download failed (${res.status})`)
-      d.total = Number(res.headers.get('content-length')) || 0
-      const out = fs.createWriteStream(tmp)
       for await (const chunk of res.body) {
         d.got += chunk.length
+        h.update(chunk)
         if (!out.write(chunk)) await new Promise((r) => out.once('drain', r))
       }
-      await new Promise((resolve, reject) => out.end((e) => (e ? reject(e) : resolve())))
-      if (d.total && d.got !== d.total) throw new Error('The download was cut short; try again')
-      fs.renameSync(tmp, dest)
-      downloads.delete(m.file)
+    } finally { await new Promise((resolve) => out.end(resolve)) }
+    if (f.bytes && size(tmp) !== f.bytes) throw new Error('The download was cut short; try again')
+  }
+  if (f.sha256 && h.digest('hex') !== f.sha256) {
+    fs.rmSync(tmp, { force: true })
+    throw new Error(`The download of ${f.name} didn't match its checksum, so it was thrown away. Try again.`)
+  }
+  fs.renameSync(tmp, dest)
+}
+export function fetchModel(id) {
+  const m = id === 'vad' ? VAD : MODELS.find((x) => x.id === id)
+  if (!m) throw new Error('No such model')
+  if (have(m) || (downloads.has(m.id) && !downloads.get(m.id).error)) return
+  if (fitted && m.id !== 'vad' && !shown(m.id)) throw new Error(fitted.models.get(m.id)?.why || 'That model can\'t run on this computer')
+  const files = filesOf(m)
+  const d = { got: 0, total: files.reduce((n, f) => n + (f.bytes || 0), 0), error: null, stop: new AbortController() }
+  downloads.set(m.id, d)
+  d.done = (async () => {
+    let url = urlOf(m, files[0])
+    try {
+      fs.mkdirSync(dirOf(m), { recursive: true })
+      // Room for it first: what's still to come, and a little over.
+      const left = files.reduce((n, f) => (size(path.join(dirOf(m), f.name)) === f.bytes ? n : n + Math.max(0, (f.bytes || 0) - Math.max(0, size(path.join(dirOf(m), `${f.name}.part`))))), 0)
+      const free = await freeBytes(DIR())
+      if (free != null && free < left + 100e6) throw new Error(`Not enough free space: ${m.label} needs ${Math.ceil((left + 100e6) / 1e6)} MB, and there's ${Math.floor(free / 1e6)} MB free.`)
+      for (const f of files) { url = urlOf(m, f); await fetchFile(m, f, d) }
+      downloads.delete(m.id)
+      if (fitted) fitted.at = 0
     } catch (e) {
-      fs.rmSync(tmp, { force: true })
-      d.error = downloadError(e, m.url || `${HF}/${m.file}`)
+      if (d.stop.signal.aborted) { if (downloads.get(m.id) === d) downloads.delete(m.id) } else d.error = downloadError(e, url)
     }
   })()
 }
-export function removeModel(id) {
+// Stops its download first, if one is going (Windows won't delete a file still being written).
+export async function removeModel(id) {
   const m = MODELS.find((x) => x.id === id)
   if (!m) throw new Error('No such model')
+  const d = downloads.get(m.id)
+  if (d) { d.stop.abort(); await d.done }
+  downloads.delete(m.id)
+  if (m.runtime === 'sherpa') { asr.stop(m.id); fs.rmSync(dirOf(m), { recursive: true, force: true }); return }
   if (server?.model === fileOf(m)) stopServer()
   fs.rmSync(fileOf(m), { force: true })
+  fs.rmSync(`${fileOf(m)}.part`, { force: true })
 }
-const progress = (file) => { const d = downloads.get(file); return d ? { percent: d.total ? Math.floor((d.got / d.total) * 100) : 0, error: d.error } : null }
+// A download going (or stopped by a problem): { percent, error }, or null.
+export const downloading = (id) => { const d = downloads.get(id); return d ? { percent: d.total ? Math.min(100, Math.floor((d.got / d.total) * 100)) : 0, error: d.error } : null }
+const progress = downloading
 
 // ---------- whisper-server, kept while it's used ----------
 let server = null // { proc, port, model, ready, last }
@@ -144,10 +296,38 @@ const run = (bin, args, timeout = 120000) => new Promise((resolve, reject) => {
   execFile(bin, args, { timeout, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => (err ? reject(new Error((stderr || err.message).slice(-300))) : resolve(stdout)))
 })
 
-async function local(wav, { cfg, language, prompt }) {
-  const m = localModel(cfg)
+// The PCM in a 16 kHz mono 16-bit WAV (what meetings.js and voice.js send), copied so it can go to
+// another process on its own.
+export function pcmOf(wav) {
+  const b = Buffer.from(wav)
+  let at = 12
+  while (at + 8 <= b.length) {
+    const id = b.toString('ascii', at, at + 4)
+    const n = b.readUInt32LE(at + 4)
+    if (id === 'data') { const end = Math.min(b.length, at + 8 + n); const out = new Int16Array(Math.floor((end - at - 8) / 2)); for (let i = 0; i < out.length; i++) out[i] = b.readInt16LE(at + 8 + i * 2); return out }
+    at += 8 + n + (n % 2)
+  }
+  throw new Error('Not a WAV recording')
+}
+
+// Names to listen for, for an engine that takes them as words rather than a prompt (Parakeet): the
+// ones given (a meeting's people, your vocabulary), and meeting memory's. Not an email address, a
+// path or a sentence.
+const wordsOf = (words) => [...new Set([...(words || []), ...memory.hint(400).split(',')].map((w) => String(w).trim().replace(/[.,;:!?]+$/, '')).filter((w) => w.length >= 2 && w.length <= 40 && !/[@/\\]/.test(w) && w.split(' ').length <= 4))].slice(0, 80)
+
+async function local(wav, o) {
+  const { cfg, language, prompt, words, model } = o // words: names to listen for (Parakeet); prompt: whisper's
+  await fit()
+  const m = model || localModel(cfg)
+  if (m.runtime === 'sherpa') {
+    if (!have(m)) { if (o.fetch !== false) fetchModel(m.id); throw fatal(`The speech model (${m.label}, ${m.mb} MB) is still downloading. The missed parts can be transcribed again once it's here.`, { needs: 'model', model: m.id }) }
+    if (!shown(m.id)) throw fatal(fitted.models.get(m.id)?.why || `${m.label} can't run on this computer`)
+    const files = Object.fromEntries(filesOf(m).map((f) => [f.name.split('.')[0], f.name]))
+    const r = await asr.recognize({ key: m.id, dir: dirOf(m), files, hotwords: !!m.hotwords }, pcmOf(wav), { hotwords: m.hotwords ? wordsOf(words) : [] })
+    return { text: r.text, engine: m.label, ms: r.ms }
+  }
   const file = fileOf(m)
-  if (!has(file)) { fetchModel(m.id); throw fatal(`The speech model (${m.label}, ${m.mb} MB) is still downloading. The missed parts can be transcribed again once it's here.`) }
+  if (!has(file)) { if (o.fetch !== false) fetchModel(m.id); throw fatal(`The speech model (${m.label}, ${m.mb} MB) is still downloading. The missed parts can be transcribed again once it's here.`, { needs: 'model', model: m.id }) }
   if (!has(path.join(DIR(), VAD.file))) fetchModel('vad')
   const lang = m.file.includes('.en') ? 'en' : language || 'auto'
   const srv = await whisperServer(file).catch((e) => { throw fatal(e.message) })
@@ -162,16 +342,16 @@ async function local(wav, { cfg, language, prompt }) {
     srv.last = Date.now()
     const j = await r.json().catch(() => ({}))
     if (!r.ok || j.error) throw new Error(j.error || `whisper-server: HTTP ${r.status}`)
-    return { text: j.text || '', engine: `whisper.cpp ${m.label}` }
+    return { text: j.text || '', engine: `whisper.cpp ${m.short}` }
   }
   // An older whisper.cpp without the server: the command line, loading the model each time.
   const cli = await tool('whisper-cli')
-  if (!cli) throw fatal('Transcribing on this computer needs whisper.cpp. Install it in Settings › Meetings.')
+  if (!cli) throw fatal(`${m.label} needs whisper.cpp, which isn't on this computer. Install it in Settings › Meetings, or pick Parakeet in Settings › Voice.`, { needs: 'whisper' })
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-speech-'))
   try {
     fs.writeFileSync(path.join(tmp, 'in.wav'), wav)
     const out = await run(cli, ['-m', file, '-f', path.join(tmp, 'in.wav'), '-nt', '-np', '-l', lang, '-t', String(threads()), ...(prompt ? ['--prompt', prompt.slice(0, 600)] : [])])
-    return { text: out, engine: `whisper.cpp ${m.label}` }
+    return { text: out, engine: `whisper.cpp ${m.short}` }
   } finally { fs.rmSync(tmp, { recursive: true, force: true }) }
 }
 
@@ -280,54 +460,85 @@ async function service(id, wav, { cfg, language, prompt }) {
   throw fatal('Unknown speech engine')
 }
 
-// ---------- What meetings.js calls ----------
-// The engine you picked; or with none picked, whisper.cpp when it's ready, else the Mac's own when
-// it has one, else whisper.cpp (which then says what it needs). auto: that last pick, kept.
+// ---------- What meetings.js and voice.js call ----------
+// The engine you picked; or with none picked, a speech model on this computer when it's ready,
+// else the Mac's own when it has one, else a speech model (which then says what it needs). auto:
+// that last pick, kept. The Mac's own picked on a computer without it (a config from a Mac): a
+// speech model instead, and Settings says so.
 let auto = { at: 0, id: 'local' }
+// The Mac's own speech is here, but not for the language asked for (its other answers mean it isn't here at all).
+const langOnly = (mac) => !!mac.installed || /language|locale/i.test(mac.why || '')
 const picked = (cfg) => { const e = cfg?.meetings?.engine; return e && (e === 'local' || e === 'apple' || SERVICES[e]) ? e : null }
 export const engineOf = (cfg) => picked(cfg) || auto.id
-// whisper.cpp and its model, both on this computer.
-const whisperReady = async (cfg) => has(fileOf(localModel(cfg))) && (await Promise.all([tool('whisper-server'), tool('whisper-cli')])).some(Boolean)
+// The model picked for this computer, downloaded, and what runs it here.
+const localReady = async (cfg) => { await fit(); return runnable(localModel(cfg)) }
 async function pickAuto(cfg) {
   if (Date.now() - auto.at < 60_000) return auto.id
-  auto = { at: Date.now(), id: (await whisperReady(cfg)) ? 'local' : (await appleStatus(cfg?.meetings?.language)).available ? 'apple' : 'local' }
+  auto = { at: Date.now(), id: (await localReady(cfg)) ? 'local' : (await appleStatus(cfg?.meetings?.language)).available ? 'apple' : 'local' }
   return auto.id
 }
 // How many stretches at once: one on this computer (they'd share the chip), a few for a service.
 export const parallel = (cfg) => (['local', 'apple'].includes(engineOf(cfg)) ? 1 : 3)
 export async function transcribe(wav, o = {}) {
   let id = picked(o.cfg) || await pickAuto(o.cfg)
-  // whisper.cpp picked but not on this computer yet: the Mac's own speech stands in when it has your
-  // language, so a recording still turns into text instead of waiting on an install.
-  if (id === 'local' && !(await whisperReady(o.cfg)) && (await appleStatus(o.cfg?.meetings?.language)).available) id = 'apple'
+  const mac = id === 'local' || id === 'apple' ? await appleStatus(o.cfg?.meetings?.language) : null
+  if (id === 'apple' && !mac.available && !langOnly(mac)) id = 'local'
+  // A speech model picked but not on this computer yet: the Mac's own speech stands in when it has
+  // your language, so a recording still turns into text instead of waiting on a download.
+  if (id === 'local' && !(await localReady(o.cfg)) && mac.available) id = 'apple'
   return id === 'local' ? local(wav, o) : id === 'apple' ? apple(wav, o) : service(id, wav, o)
+}
+// A voice note or a dictation: on this computer only (a service is for meetings you pick it for).
+// The model picked in Settings › Voice (or the Mac's own, picked there); not downloaded yet, the
+// Mac's own speech stands in when it can; else the model says what it needs (needs: 'model').
+// Names in meeting memory come out spelled its way.
+export async function voice(wav, o = {}) {
+  const lang = o.cfg?.voice?.language || o.cfg?.meetings?.language
+  const mac = await appleStatus(lang)
+  const useMac = (o.cfg?.speech?.model === 'apple' && mac.available) || (!(await localReady(o.cfg)) && mac.available)
+  const r = useMac ? await apple(wav, { ...o, language: lang }) : await local(wav, { ...o, language: lang, fetch: false })
+  return { ...r, text: memory.fix(spoken(r.text)) }
 }
 // Ready before you record: the model there, or downloading it now.
 export async function prepare(cfg) {
   if (!picked(cfg)) await pickAuto(cfg).catch(() => {})
   if (engineOf(cfg) !== 'local') return
+  await fit()
   const m = localModel(cfg)
-  if (!has(fileOf(m))) fetchModel(m.id)
+  if (!have(m)) { try { fetchModel(m.id) } catch { /* can't run here: the transcript says why */ } }
+  if (m.runtime !== 'whisper') return
   if (!has(path.join(DIR(), VAD.file))) fetchModel('vad')
   else if (has(fileOf(m))) whisperServer(fileOf(m)).catch(() => {})
 }
 
-// Everything Settings › Meetings shows: the engines, which are ready, the models and downloads.
+// One model as Settings shows it: what it is, whether it's here, ready to run, or downloading.
+const modelInfo = (x, whisperHere) => ({
+  id: x.id, runtime: x.runtime, label: x.label, short: x.short || x.label, note: x.note, mb: x.mb, best: !!x.best, languages: x.languages, license: x.license, by: x.by,
+  have: have(x), downloading: progress(x.id), usable: x.runtime === 'sherpa' ? shown(x.id) : !!whisperHere,
+})
+// What a speech model on this computer needs before it can transcribe: null (ready), 'model' (its
+// download), 'whisper' (whisper.cpp, for a Whisper model) or 'brew' (Homebrew first, on a Mac).
+const localNeeds = (m, whisperHere, brew) => (m.runtime === 'whisper' && !whisperHere ? (brew || fitted?.m.platform !== 'darwin' ? 'whisper' : 'brew') : !have(m) ? 'model' : null)
+
+// Everything Settings › Meetings and › Voice show: the engines, which are ready, the models offered
+// on this computer and their downloads, and what isn't offered here and why (for diagnostics).
 export async function status(cfg) {
   const e = env()
+  const f = await fit()
   const [srv, cli, brew, mac] = await Promise.all([tool('whisper-server'), tool('whisper-cli'), tool('brew'), appleStatus(cfg?.meetings?.language)])
   const m = localModel(cfg)
-  const localReady = has(fileOf(m)) && !!(srv || cli)
-  if (!picked(cfg)) auto = { at: Date.now(), id: localReady ? 'local' : mac.available ? 'apple' : 'local' }
-  const engine = engineOf(cfg)
+  const localIsReady = runnable(m)
+  if (!picked(cfg)) auto = { at: Date.now(), id: localIsReady ? 'local' : mac.available ? 'apple' : 'local' }
+  let engine = engineOf(cfg)
+  // The Mac's own speech picked, on a computer without it: a speech model instead, said once.
+  const engineFellBack = engine === 'apple' && !mac.available && !langOnly(mac) ? { from: 'apple', fromLabel: 'The Mac\'s own speech', to: m.id, toLabel: m.label, why: mac.why || null } : null
+  if (engineFellBack) engine = 'local'
   const services = Object.entries(SERVICES).map(([id, s]) => ({ id, label: s.label, key: s.key, ready: s.custom ? !!e.SPEECH_BASE_URL : !!(e[s.key] || (id === 'gemini' && (e.GOOGLE_API_KEY || e.GOOGLE_GENERATIVE_AI_API_KEY))), models: s.models, model: cfg?.meetings?.serviceModel?.[id] || s.models[0] || e.SPEECH_MODEL || '', price: s.price || {}, custom: !!s.custom }))
-  // whisper.cpp picked but not here yet: the Mac's own speech stands in (transcribe() above).
-  const standIn = engine === 'local' && !localReady && mac.available ? 'apple' : null
+  // A speech model picked but not here yet: the Mac's own speech stands in (transcribe() above).
+  const standIn = engine === 'local' && !localIsReady && mac.available ? 'apple' : null
   // Ready to transcribe, and if not, what it needs (Meetings shows it before you record).
-  const ready = standIn ? true : engine === 'local' ? localReady : engine === 'apple' ? !!mac.available : !!services.find((x) => x.id === engine)?.ready
-  const needs = ready ? null
-    : engine === 'local' ? (!(srv || cli) ? (brew ? 'whisper' : 'brew') : 'model')
-      : engine === 'apple' ? 'apple' : 'key'
+  const ready = standIn ? true : engine === 'local' ? localIsReady : engine === 'apple' ? !!mac.available : !!services.find((x) => x.id === engine)?.ready
+  const needs = ready ? null : engine === 'local' ? localNeeds(m, f.whisperHere, brew) || 'model' : engine === 'apple' ? 'apple' : 'key'
   return {
     engine,
     auto: !picked(cfg),
@@ -336,16 +547,46 @@ export async function status(cfg) {
     standIn,
     apple: { available: !!mac.available, installed: !!mac.installed, locale: mac.locale || null, why: mac.available ? null : mac.why || null },
     local: {
-      ready: localReady,
+      ready: localIsReady,
+      runtime: m.runtime,
       program: srv ? 'whisper-server' : cli ? 'whisper-cli' : null,
       installCommand: !srv && !cli && brew ? brewInstall(brew, 'whisper-cpp') : null,
       model: m.id,
-      models: MODELS.map((x) => ({ ...x, have: has(fileOf(x)), downloading: progress(x.file) })),
+      default: DEFAULT,
+      models: offered().map((x) => modelInfo(x, f.whisperHere)),
       vad: has(path.join(DIR(), VAD.file)),
     },
+    // A pick that can't work here, and what's used instead (Settings says so once).
+    fellBack: fellBack(cfg) || engineFellBack,
+    // Not offered on this computer, and why: for diagnostics, not for the lists.
+    hidden: MODELS.filter((x) => !shown(x.id)).map((x) => ({ id: x.id, label: x.label, why: f.models.get(x.id)?.why || null })),
+    machine: { platform: f.m.platform, arch: f.m.arch, os: f.m.os, glibc: f.m.glibc, rosetta: f.m.rosetta, emulated: f.m.emulated, docker: f.m.docker, memGB: f.m.memGB, sherpa: f.probe },
     services,
     language: cfg?.meetings?.language || 'auto',
     mac: IS_MAC,
   }
 }
 
+// What voice notes and dictation use, and whether they're ready (the message box's mic, the
+// dictation key, Settings › Voice): engine 'local' (a speech model) or 'apple'; standIn: the Mac's
+// own speech answering until the model is here; needs: what's missing ('model', 'whisper', 'brew').
+export async function voiceStatus(cfg) {
+  const f = await fit()
+  const [brew, mac] = await Promise.all([IS_MAC ? tool('brew') : null, appleStatus(cfg?.voice?.language || cfg?.meetings?.language)])
+  const m = localModel(cfg)
+  const wantMac = cfg?.speech?.model === 'apple'
+  const needs = localNeeds(m, f.whisperHere, brew)
+  const engine = wantMac && mac.available ? 'apple' : 'local'
+  const standIn = engine === 'local' && needs && mac.available ? 'apple' : null
+  return {
+    ready: engine === 'apple' || !needs || !!standIn,
+    engine,
+    standIn,
+    needs: engine === 'apple' || standIn ? null : needs,
+    // Waiting on the model while the Mac's own stands in: it's offered, not needed.
+    could: standIn && needs === 'model' ? 'model' : null,
+    model: modelInfo(m, f.whisperHere),
+    apple: { available: !!mac.available, why: mac.available ? null : mac.why || null },
+    fellBack: fellBack(cfg) || (wantMac && !mac.available ? { from: 'apple', fromLabel: 'The Mac\'s own speech', to: m.id, toLabel: m.label, why: mac.why || null } : null),
+  }
+}
