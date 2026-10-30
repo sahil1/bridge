@@ -164,5 +164,5 @@ VERSION="$(defaults read "$DEST/$APP/Contents/Info.plist" CFBundleShortVersionSt
 say "Bridge AI ${VERSION:+$VERSION }is installed in $DEST."
 if [ -z "${BRIDGE_NO_OPEN:-}" ]; then
   open "$DEST/$APP"
-  say "Opening it now. Next time, find it in Launchpad or Spotlight, or press Option+Command+A."
+  say "Opening it now. Next time, find it in Spotlight or Applications, or press Option+Command+A."
 fi

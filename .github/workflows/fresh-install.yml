@@ -120,7 +120,8 @@ jobs:
           curl -fsS "$BASE/api/setup" -o "$OUT/setup.json"
           curl -fsS "$BASE/api/config" | jq -c '{version, setupDone, simple, platform}'
           sleep 10 # the window draws, and anything it asks macOS for shows
-          screencapture -x "$OUT/opened.png" || true
+          # (A screenshot can wait on a permission no one is there to give: 20 seconds at most.)
+          screencapture -x "$OUT/opened.png" & s=$!; (sleep 20; kill $s 2>/dev/null) >/dev/null 2>&1 & wait $s || true
 
       - name: It listens on this computer only
         run: &mac-listens |
@@ -250,11 +251,14 @@ jobs:
 
       - name: The first open (what macOS asks)
         if: always() && env.VOL
+        timeout-minutes: 3
         run: |
-          open "$APP"; sleep 12
-          screencapture -x "$OUT/first-open.png" || true
+          # `open` waits while macOS asks, so it's left to it; the screenshot shows what was asked.
+          open "$APP" >/dev/null 2>&1 & sleep 15
+          screencapture -x "$OUT/first-open.png" & s=$!; (sleep 20; kill $s 2>/dev/null) >/dev/null 2>&1 & wait $s || true
           # Someone clicks Open: macOS clears the flag. Here, that's done for it.
           killall CoreServicesUIAgent 2>/dev/null || true
+          pkill -f "$APP/Contents/" 2>/dev/null || true
           xattr -dr com.apple.quarantine "$APP"
           open "$APP"
 
