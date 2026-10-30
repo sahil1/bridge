@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import Icon, { StatusDot } from '../components/Icon.jsx'
-import { MicFix } from '../components/Composer.jsx'
+import { VoiceSetup, MicFix } from '../components/Composer.jsx'
 import { api } from '../api.js'
 import { store } from '../components/layout.jsx'
 import { keyLabel } from '../../shared/dictation/keys.js'
@@ -95,7 +95,6 @@ export default function Hud() {
     } catch (e) { setErr(e.message) }
   }
   const edit = () => { app().hudOpen?.({ paneId: target?.paneId, text }); hide() }
-  const setUp = () => { app().hudOpen?.({ setup: true }); hide() }
   const label = keyLabel(dictationKey(conf), keysPlatform())
 
   const toChip = (
@@ -147,10 +146,9 @@ export default function Hud() {
       {phase === 'note' && (
         s.setup ? (
           <div className="hud-setup">
-            {s.setup.mic ? <MicFix onClose={hide} /> : <>
-              <p>{t('Voice notes are turned into text on your computer, so your audio never leaves it. They need a one-time setup there.')}</p>
-              <div className="hud-actions"><button type="button" className="btn small" onClick={hide}>{t('Not now')}</button>{app().hudOpen && <button type="button" className="btn small primary" onClick={setUp}>{t('Set up')}</button>}</div>
-            </>}
+            {/* The first time: the speech model to download, with what you said kept and turned
+                into text here once it's in (Composer.jsx's panel, as in the message box). */}
+            {s.setup.mic ? <MicFix onClose={hide} /> : <VoiceSetup initial={s.setup} onReady={retry} onClose={hide} />}
           </div>
         ) : (
           <div className="hud-row">

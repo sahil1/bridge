@@ -121,7 +121,8 @@ try {
     ok(!!(await until(async () => /Downloading Parakeet… \d+%\. What you said is kept/.test(await panel.innerText().catch(() => '')), 10000, 100)), 'one click: it downloads, with progress, keeping what you said', await panel.innerText().catch(() => ''))
     models.slow = 0
     const box = p.locator('.composer textarea').first()
-    ok(!!(await until(async () => /Open the work tree in Claud Code\./.test(await box.inputValue()), 20000)), 'then what you said is in the message box', await box.inputValue())
+    // Tidied as dictation is (shared/dictation/clean.js): "work tree" is a name Bridge AI knows.
+    ok(!!(await until(async () => /Open the worktree in Claud Code\./.test(await box.inputValue()), 20000)), 'then what you said is in the message box, with worktree spelled as it\'s written', await box.inputValue())
     ok(models.asked.length > before && !(await panel.count()), 'and the panel is gone')
     const heard = fs.readFileSync(path.join(kit.dir, 'sherpa.log'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((l) => l.seconds != null).at(-1)
     ok(heard?.seconds >= 1 && heard.seconds < 4, 'Parakeet got the recording, as a 16 kHz WAV made in the page', heard)

@@ -201,13 +201,11 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, tellMain }) {
   ipcMain.on('bridge:hud-phase', (e, phase) => { if (fromHud(e)) holdEsc(phase === 'opening' || phase === 'listening' || phase === 'working') })
   ipcMain.handle('bridge:hud-hide', (e) => { if (fromHud(e)) hideHud(); return true })
   ipcMain.handle('bridge:hud-copy', (e, text) => { if (!fromHud(e) || typeof text !== 'string') return false; clipboard.writeText(text.slice(0, 200_000)); return true })
-  // Edit in Bridge AI: the agent's tab in the main window, the text in its message box. Set up: the
-  // main window's own setup for voice notes.
-  ipcMain.handle('bridge:hud-open', async (e, { paneId, text, setup } = {}) => {
+  // Edit in Bridge AI: the agent's tab in the main window, the text in its message box.
+  ipcMain.handle('bridge:hud-open', async (e, { paneId, text } = {}) => {
     if (!fromHud(e)) return false
     hideHud()
-    if (setup) await tellMain(`window.dispatchEvent(new CustomEvent('bridge-voice-setup'))`, true)
-    else if (typeof paneId === 'string' && paneId.length < 200 && typeof text === 'string') await tellMain(`window.dispatchEvent(new CustomEvent('bridge-dictate-text', { detail: ${JSON.stringify({ paneId, text: text.slice(0, 100_000) })} }))`, true)
+    if (typeof paneId === 'string' && paneId.length < 200 && typeof text === 'string') await tellMain(`window.dispatchEvent(new CustomEvent('bridge-dictate-text', { detail: ${JSON.stringify({ paneId, text: text.slice(0, 100_000) })} }))`, true)
     return true
   })
 

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import Icon from '../components/Icon.jsx'
 import { VoiceSetup, MicFix } from '../components/Composer.jsx'
 import { parseKey, keyLabel, isKeyDown, isKeyUp } from '../../shared/dictation/keys.js'
-import { useDictation, getState, configure, setOnScreen, press, release, finish, cancel, dismiss, retry, showSetup, targetFromFocus, isPaused, box, keysPlatform, dictationKey, listeningHint } from './controller.js'
+import { useDictation, getState, configure, setOnScreen, press, release, finish, cancel, dismiss, retry, targetFromFocus, isPaused, box, keysPlatform, dictationKey, listeningHint } from './controller.js'
 import { t } from '../i18n/index.js'
 import './dictation.css'
 
@@ -53,7 +53,7 @@ export default function Dictation({ conf, onScreen }) {
       window.removeEventListener('bridge-dictate-key', fromApp)
     }
   }, [off, key])
-  // From the floating window: Edit in Bridge (the agent's tab, the text in its box), and Set up.
+  // From the floating window: Edit in Bridge (the agent's tab, the text in its box).
   useEffect(() => {
     const edit = (e) => {
       const { paneId, text } = e.detail || {}
@@ -64,8 +64,7 @@ export default function Dictation({ conf, onScreen }) {
       setTimeout(put, 100)
     }
     window.addEventListener('bridge-dictate-text', edit)
-    window.addEventListener('bridge-voice-setup', showSetup)
-    return () => { window.removeEventListener('bridge-dictate-text', edit); window.removeEventListener('bridge-voice-setup', showSetup) }
+    return () => window.removeEventListener('bridge-dictate-text', edit)
   }, [])
   // A line said for a moment, then gone.
   useEffect(() => { if (!s.note || s.setup || s.retry) return; const id = setTimeout(dismiss, 6000); return () => clearTimeout(id) }, [s.note, s.setup, s.retry])
@@ -86,7 +85,7 @@ function Bar({ s, label }) {
   const listening = s.phase === 'opening' || s.phase === 'listening'
   return (
     <div className="dict-bar" role="status" aria-live="polite">
-      {s.setup ? (s.setup.mic ? <MicFix onClose={dismiss} /> : <VoiceSetup initial={s.setup} onClose={dismiss} />) : (
+      {s.setup ? (s.setup.mic ? <MicFix onClose={dismiss} /> : <VoiceSetup initial={s.setup} onReady={retry} onClose={dismiss} />) : (
         <div className="dict-row">
           {listening && <>
             <span className="rec-dot" />

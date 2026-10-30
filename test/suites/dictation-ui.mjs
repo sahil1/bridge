@@ -37,6 +37,23 @@ const wavOk = (w) => {
   const h = Buffer.from(w.head)
   return w.length > 44 + 16000 * 0.3 * 2 && h.toString('ascii', 0, 4) === 'RIFF' && h.toString('ascii', 8, 12) === 'WAVE' && h.readUInt16LE(20) === 1 && h.readUInt16LE(22) === 1 && h.readUInt32LE(24) === 16000 && h.readUInt16LE(34) === 16 && h.readUInt32LE(40) === w.length - 44
 }
+// The first use, with no speech model on the computer yet (server/voice.js's answers): /api/transcribe
+// says so (409, needs-model), Download starts it, /api/voice counts it up and then it's ready, and
+// the recording sent again is answered. got: each try at transcribing.
+const firstUse = async (c, got) => {
+  const model = { id: 'parakeet-v3', label: 'Parakeet', mb: 670, have: false, runtime: 'sherpa' }
+  const st = { stage: 'none', polls: 0 }
+  const voiceNow = () => (st.stage === 'ready' ? { ready: true, model: { ...model, have: true }, missing: [], downloading: null, error: null }
+    : { ready: false, needs: 'model', model, modelMB: 670, missing: [], downloading: st.stage === 'downloading' ? { percent: 40 } : null, error: null })
+  await c.route('**/api/voice', (r) => { if (st.stage === 'downloading' && ++st.polls > 2) st.stage = 'ready'; return r.fulfill({ json: voiceNow() }) })
+  await c.route('**/api/voice/setup', (r) => { st.stage = 'downloading'; return r.fulfill({ json: voiceNow() }) })
+  await c.route('**/api/transcribe', async (r) => {
+    sent.push(Date.now())
+    got.push(Date.now())
+    if (st.stage !== 'ready') return r.fulfill({ status: 409, json: { error: 'Speech to text needs a one-time download: Parakeet, 670 MB. It stays on this computer, and so does what you say.', code: 'needs-model', model } })
+    return r.fulfill({ json: { text: said.shift() ?? 'hello there' } })
+  })
+}
 // WebKit counts a request a reload cuts off (the presence ping, the live feed) as a page error.
 const real = (errors) => errors.filter((e) => !/\/api\/[\w/.-]+ due to access control checks/.test(e))
 const before = async (ctx) => {
@@ -367,6 +384,54 @@ try {
     // A press from before the window was ready: let go by now, so it listens hands-free.
     const { ctx: hc, p: h } = await hudPage(true)
     ok(!!(await until(async () => /again when you're done/.test(await h.locator('.hud').innerText().catch(() => '')), 8000, 100)), 'a press from before it was ready: it listens, hands-free', await h.locator('.hud').innerText().catch(() => ''))
+    await hc.close()
+  }
+
+  // ---------- The first use, with no speech model yet ----------
+  {
+    const got = []
+    const { ctx: fc, p: f, errors: fe } = await page(b, kit.url, { before: async (c) => { await before(c); await firstUse(c, got) } })
+    await f.locator('.tab-main', { hasText: 'payments' }).first().click({ timeout: 20000 })
+    const fbox = f.locator('textarea[data-composer]').first()
+    await fbox.waitFor({ timeout: 15000 })
+    await fbox.fill('')
+    await fbox.click()
+    said.push('kept for later')
+    const fmods = (await f.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform))) ? ['Alt'] : ['Control', 'Alt']
+    for (const m of fmods) await f.keyboard.down(m)
+    await f.keyboard.down('Space')
+    ok(!!(await until(() => f.locator('.composer.rec').count(), 5000, 100)), 'first use, no speech model yet: the mic opens all the same (only a download is missing)')
+    await sleep(1300)
+    await f.keyboard.up('Space')
+    for (const m of [...fmods].reverse()) await f.keyboard.up(m)
+    const panel = f.locator('.voice-setup').first()
+    ok(!!(await until(async () => /one-time download: Parakeet, 670 MB/.test(await panel.innerText().catch(() => '')) && await panel.locator('button', { hasText: 'Download, then transcribe' }).isVisible(), 8000, 100)), 'let go: the one-time download offered, in one click, keeping what was said', await panel.innerText().catch(() => ''))
+    await shot(f, `${tag}dictation-first-use`)
+    await panel.locator('button', { hasText: 'Download, then transcribe' }).click()
+    ok(!!(await until(async () => (await fbox.inputValue().catch(() => '')) === 'Kept for later.', 15000, 200)), 'downloaded: what was said, tidied, in the message box', await fbox.inputValue().catch(() => ''))
+    const fw = await f.evaluate(() => window.__wavs.map((x) => x.length))
+    ok(got.length === 2 && fw.length === 2 && fw[0] === fw[1] && fw[0] > 44, 'the same recording sent again, not a new one', fw)
+    ok(real(fe).length === 0, 'no page errors', fe)
+    await fc.close()
+  }
+  {
+    // The dictation window, the same way.
+    const got = []
+    const { ctx: hc, p: h } = await page(b, `${kit.url}/?dictate=1`, { store: { 'cc-ws': { tabs: [one.paneId], active: one.paneId } }, before: async (c) => {
+      await before(c)
+      await firstUse(c, got)
+      await c.addInitScript(() => { window.__hud = { phases: [], hidden: 0 }; window.bridgeApp = { platform: navigator.platform.startsWith('Mac') ? 'darwin' : 'linux', desktop: true, hudReady: async () => null, hudSize: () => {}, hudPhase: (x) => window.__hud.phases.push(x), hudHide: async () => { window.__hud.hidden++ } } })
+    } })
+    await h.waitForSelector('.hud', { timeout: 10000 })
+    said.push('from another app')
+    const key = (type) => h.evaluate((tp) => window.dispatchEvent(new CustomEvent('bridge-dictate-key', { detail: { type: tp, at: Date.now() } })), type)
+    await key('down'); await sleep(1300); await key('up')
+    const hp = h.locator('.hud .voice-setup')
+    ok(!!(await until(async () => await hp.locator('button', { hasText: 'Download, then transcribe' }).isVisible().catch(() => false), 8000, 100)), 'the dictation window, first use: the same offer', await h.locator('.hud').innerText().catch(() => ''))
+    await hp.locator('button', { hasText: 'Download, then transcribe' }).click()
+    ok(!!(await until(async () => (await h.locator('.hud-text').innerText().catch(() => '')) === 'From another app.', 15000, 200)) && await h.evaluate(() => window.__hud.hidden === 0), 'downloaded: the text there, to send or copy (the window stays)', await h.locator('.hud').innerText().catch(() => ''))
+    const hw = await h.evaluate(() => window.__wavs.map((x) => x.length))
+    ok(got.length === 2 && hw.length === 2 && hw[0] === hw[1] && hw[0] > 44, 'the same recording sent again', hw)
     await hc.close()
   }
 

@@ -952,12 +952,14 @@ app.post('/api/fix/install', wrap(async (req) => {
 // Not set up yet: 409 with what's needed in words (error), code needs-model and the model, which
 // the page offers to download, then sends the recording again.
 app.post('/api/transcribe', express.raw({ type: () => true, limit: '30mb' }), async (req, res) => {
-  try { res.json(await voice.transcribe(req.body, req.headers['content-type'])) } catch (e) {
+  try { res.json(await voice.transcribe(req.body, req.headers['content-type'], { more: dictation.hints(dictationSources) })) } catch (e) {
     res.status(e.status || 502).json({ error: e.message, ...(typeof e.code === 'string' ? { code: e.code } : {}), ...(e.model ? { model: e.model } : {}) })
   }
 })
-// Dictation: the names it spells the way they're written (dictation.js; the page tidies the text).
-app.get('/api/dictation/words', wrap(async () => dictation.words({ fleet: lastFleet || await fleetView().catch(() => null), projects: await projects.list().catch(() => []) })))
+// Dictation: the names it spells the way they're written (dictation.js; the page tidies the text),
+// which the speech engine also listens for.
+const dictationSources = async () => ({ fleet: lastFleet || await fleetView().catch(() => null), projects: await projects.list().catch(() => []) })
+app.get('/api/dictation/words', wrap(async () => dictation.words(await dictationSources())))
 
 // ---------- Meeting notes (meetings.js; speech engines in speech.js) ----------
 meetings.configure(cfg)

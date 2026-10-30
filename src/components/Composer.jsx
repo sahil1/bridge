@@ -7,7 +7,7 @@ import { Menu } from './Rail.jsx'
 import PermissionFix from './PermissionFix.jsx'
 import { t, tx } from '../i18n/index.js'
 import { keyLabel } from '../../shared/dictation/keys.js'
-import { useDictation, registerBox, box, noteBoxFocus, press, release, finish, cancel, dismiss, retry, settings, keysPlatform, dictationKey, listeningHint } from '../dictation/controller.js'
+import { useDictation, registerBox, noteBoxFocus, press, release, finish, cancel, dismiss, retry, settings, keysPlatform, dictationKey, listeningHint } from '../dictation/controller.js'
 
 // Drafts survive navigation and reloads: one per agent, kept in this browser.
 const draftKey = (id) => `cc-draft-${id}`
@@ -33,16 +33,18 @@ const saveDraft = (id, d) => {
   } catch { /* private mode */ }
 }
 
-// Shown when voice notes need something first. The speech model: what it is and its size, in the
-// server's words, one button to download it with progress, then what you said, kept meanwhile
-// (audio), turned into text. whisper.cpp (a Whisper model picked in Settings › Voice): installed in
-// a terminal tab, with Homebrew first on a Mac that has none.
-export function VoiceSetup({ initial, onText, onClose }) {
+// Shown when voice notes and dictation need something first (here, the dictation bar and the
+// desktop app's dictation window). The speech model: what it is and its size, in the server's
+// words, one button to download it with progress, then what you said, kept meanwhile
+// (initial.audio: dictation/controller.js holds it), turned into text by onReady, which sends it
+// again. whisper.cpp (a Whisper model picked in Settings › Voice): installed in a terminal tab, with
+// Homebrew first on a Mac that has none.
+export function VoiceSetup({ initial, onReady, onClose }) {
   const [v, setV] = useState(initial)
   const [started, setStarted] = useState(!!initial.downloading)
   const [err, setErr] = useState(null)
   const [brewing, setBrewing] = useState(false) // Homebrew installing, in a terminal tab
-  const [audio, setAudio] = useState(initial.audio || null) // what you said, waiting for the model
+  const audio = !!initial.audio && !!onReady // what you said, waiting for the model
   const sent = useRef(false)
   useEffect(() => {
     if (v.ready && !audio) { const t = setTimeout(onClose, 5000); return () => clearTimeout(t) }
@@ -54,10 +56,8 @@ export function VoiceSetup({ initial, onText, onClose }) {
   useEffect(() => {
     if (!v.ready || !audio || sent.current) return
     sent.current = true
-    fetch(`${BASE}/api/transcribe`, { method: 'POST', headers: { 'Content-Type': audio.type }, body: audio })
-      .then(async (res) => { const d = await res.json(); if (!res.ok) throw new Error(d.error || t('Transcription failed')); if (d.text) onText(d.text); setAudio(null); onClose() })
-      .catch((e) => { setErr(t("Couldn't transcribe: {error}", { error: e.message })); setAudio(null) })
-  }, [v.ready, audio, onText, onClose])
+    onReady()
+  }, [v.ready, audio, onReady])
   const setup = async () => {
     setErr(null)
     try { setV(await api('/voice/setup', { method: 'POST' })); setStarted(true) } catch (e) { setErr(e.message) }
@@ -365,9 +365,7 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
   const mine = dict !== QUIET
   const [voiceSetup, setVoiceSetup] = useState(null)
   const closeVoiceSetup = useCallback(() => { setVoiceSetup(null); dismiss() }, [])
-  useEffect(() => { if (mine && dict.setup) setVoiceSetup(dict.setup) }, [mine, dict.setup])
-  // What the setup panel turned into text once the model was here: in the box, as dictation does.
-  const addSpoken = useCallback((said) => box(id)?.insert(said), [id])
+  useEffect(() => { setVoiceSetup(mine && dict.setup ? dict.setup : null) }, [mine, dict.setup])
   const [dictated, setDictated] = useState(false)
   useEffect(() => { if (!dictated) return; const t = setTimeout(() => setDictated(false), 1200); return () => clearTimeout(t) }, [dictated])
   const draftRef = useRef(draft)
@@ -565,7 +563,7 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
       <SlashMenu items={slashItems} sel={slashSel} onHover={setSlashSel} onPick={pickSlash} title={slashTitle} />
       {mentionQ != null && <SlashMenu items={mentionItems} sel={mentionSel} onHover={setMentionSel} onPick={pickMention} title={/^[~/]/.test(mentionQ) ? mentionQ.replace(/[^/]*$/, '') || '~/' : mentionQ.endsWith('/') ? mentionQ : mentionQ ? t('Matching "{query}"', { query: mentionQ }) : `${cwdName || t('This folder')}/`}
         jumps={mentionJumps} mention />}
-      {voiceSetup && (voiceSetup.mic ? <MicFix onClose={closeVoiceSetup} /> : <VoiceSetup initial={voiceSetup} onText={addSpoken} onClose={closeVoiceSetup} />)}
+      {voiceSetup && (voiceSetup.mic ? <MicFix onClose={closeVoiceSetup} /> : <VoiceSetup initial={voiceSetup} onReady={retry} onClose={closeVoiceSetup} />)}
       {note && <div className="comp-note" role="status">{note}</div>}
       {dictNote && <div className="comp-note" role="status">{dictNote} {dict.retry && <button className="link-btn" onClick={retry}>{t('Try again')}</button>} <button className="link-btn" onClick={dismiss}>{t('Close')}</button></div>}
       <div ref={rootRef} className={`composer ${recording ? 'rec' : ''} ${dragging ? 'drop' : ''} ${manualH ? 'sized' : ''} ${dictated ? 'dictated' : ''}`} {...dropProps} onPaste={onPaste}>
