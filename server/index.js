@@ -1894,7 +1894,9 @@ app.get('/{*splat}', (req, res) => {
   if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'Not found' })
   res.setHeader('Cache-Control', 'no-cache')
   ownFrames(res)
-  res.sendFile(path.join(dist, 'index.html'))
+  // From its folder (root): sendFile refuses a path with a dot folder in it, like the AppImage's
+  // /tmp/.mount_… or ~/.local, and the page was a 404 there.
+  res.sendFile('index.html', { root: dist })
 })
 
 const server = http.createServer(app)
