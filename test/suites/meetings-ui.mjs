@@ -267,6 +267,58 @@ process.stdout.write('@@EV@@Pricing review (Work)\\u00a6' + d.getFullYear() + '-
   await p.locator('.menu .menu-item', { hasText: 'Delete meeting…' }).click()
   ok(await p.locator('.mt-dialog', { hasText: 'Delete this meeting?' }).isVisible().catch(() => false), 'Delete asks first on a meeting\'s own menu too')
   await p.locator('.mt-dialog button', { hasText: 'Cancel' }).click()
+
+  // ---------- A transcript cleaned up, AI Assist, and files you got for a meeting ----------
+  const openMeeting = async (title) => {
+    await p.locator('.rail-nav-btn', { hasText: 'Meetings' }).click()
+    await p.locator('.mt-places button', { hasText: 'All' }).click()
+    await p.locator('.mt-row-open', { hasText: title }).click()
+  }
+  // A line the cleanup fixed says so, with Undo; one it left out is hidden and said, and shown on request.
+  const L = await api('/meetings', { title: 'Launch review', call: false })
+  await api(`/meetings/${L.id}/stop`, {})
+  said(L.id, [['them', 1, 'We should demo bridge ay eye at the offsite.'], ['them', 6, 'Thanks for watching!'], ['you', 11, 'Good, and the phone app is ready for it too.']])
+  await api(`/meetings/${L.id}/cleanup`, {})
+  await openMeeting('Launch review')
+  const fixedLine = p.locator('.mt-transcript .mt-line', { hasText: 'demo Bridge AI at the offsite' })
+  ok(!!(await until(() => fixedLine.isVisible(), 8000)) && /cleaned up/.test(await fixedLine.innerText()), 'a line the cleanup fixed shows the fix, marked cleaned up', await p.locator('.mt-transcript').innerText().catch(() => ''))
+  ok(await p.locator('.mt-transcript .mt-line', { hasText: 'Thanks for watching' }).count() === 0 && /1 line left out by the cleanup/.test(await p.locator('.mt-transcript').innerText()), 'a line it left out is hidden, and said')
+  await p.locator('.mt-transcript button', { hasText: 'Show them' }).click()
+  const leftLine = p.locator('.mt-transcript .mt-line.dropped', { hasText: 'Thanks for watching' })
+  ok(!!(await until(() => leftLine.isVisible(), 4000)) && /left out/.test(await leftLine.innerText()), 'Show them: there, marked left out')
+  await shot(p, `${tag}meeting-cleaned`)
+  await fixedLine.hover()
+  await fixedLine.locator('button', { hasText: 'Undo' }).click()
+  ok(!!(await until(async () => (await p.locator('.mt-transcript .mt-line', { hasText: 'demo bridge ay eye' }).count()) === 1, 6000)), 'Undo puts the line back as heard')
+
+  // While a meeting records: the Assist tab, Suggest now, ✓ into your notes; and a file you got for it
+  // (on a Mac, once you ask to look: macOS asks first).
+  fs.mkdirSync(path.join(kit.home, 'Downloads'), { recursive: true })
+  fs.writeFileSync(path.join(kit.home, 'Downloads', 'Mara_Lind_Resume.pdf'), 'x')
+  const I = await api('/meetings', { title: 'Interview - Mara Lind', call: false })
+  said(I.id, [['them', 2, 'I moved our fleet to electric vans last year.']])
+  await openMeeting('Interview - Mara Lind')
+  await p.locator('.seg button[data-view="assist"]').click()
+  await p.locator('.mt-assist-on input').click() // on once the server says so
+  ok(!!(await until(async () => (await api(`/meetings/${I.id}`)).assist === true && await p.locator('.mt-assist-on input').isChecked(), 5000)), 'the Assist tab turns AI Assist on')
+  await p.locator('.mt-assist button', { hasText: 'Suggest now' }).click()
+  const tip = p.locator('.mt-assist .mt-tip.question').first()
+  ok(!!(await until(async () => (await p.locator('.mt-assist .mt-tip').count()) >= 2, 10000)) && /Ask what they hope/.test(await tip.innerText()) && /The invite/.test(await tip.innerText()), 'Suggest now: suggestions, each saying what to do and what it\'s from', { page: await p.locator('.mt-assist').innerText().catch(() => ''), server: await api(`/meetings/${I.id}`).then((x) => ({ items: x.assistItems, error: x.assistError, assist: x.assist, status: x.status })) })
+  await tip.locator('button[aria-label="Add to my notes"]').click()
+  ok(!!(await until(async () => /In your notes/.test(await tip.innerText()), 5000)) && /Ask/.test((await api(`/meetings/${I.id}`)).notes || ''), '✓ puts it in your notes')
+  const resume = p.locator('.mt-assist .mt-recent-file', { hasText: 'Mara_Lind_Resume.pdf' })
+  if (IS_MAC) {
+    const look = p.locator('.mt-assist .mt-recent-look button')
+    ok(!!(await until(() => look.isVisible(), 6000)) && await resume.count() === 0, 'on a Mac, Downloads isn\'t looked in by itself: a button to look', await p.locator('.mt-assist').innerText().catch(() => ''))
+    await look.click()
+  }
+  ok(!!(await until(() => resume.isVisible(), 8000)), 'the resume in Downloads is offered', await p.locator('.mt-assist').innerText().catch(() => ''))
+  await shot(p, `${tag}meeting-assist`)
+  await resume.locator('button', { hasText: 'Add' }).click()
+  ok(!!(await until(async () => ((await api(`/meetings/${I.id}`)).links || []).some((l) => /Mara_Lind_Resume\.pdf$/.test(l.path || '')), 5000)), 'Add links it to the meeting')
+  await api(`/meetings/${I.id}/assist`, { on: false })
+  await api(`/meetings/${I.id}/stop`, {})
+
   ok(errors.length === 0, 'no page errors', errors)
   await ctx.close()
 
