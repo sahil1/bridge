@@ -57,7 +57,9 @@ install_linux() {
     chmod 755 "$TMP"; chmod 644 "$FILE"
     pkill -TERM -x bridge-ai 2>/dev/null && sleep 1 || true
     if [ -n "$SUDO" ]; then say "Installing (this asks for your password)..."; else say "Installing..."; fi
-    $SUDO apt-get install -y "$FILE" || fail "apt couldn't install the package"
+    # Not from this script's input: run as `curl ... | sh`, that's the rest of the script, which a
+    # package's setup questions would read as answers. (sudo asks for the password on the terminal.)
+    $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y "$FILE" </dev/null || fail "apt couldn't install the package"
     BIN=bridge-ai
   else
     DIR="$HOME/.local/share/bridge-ai"; BIN="$HOME/.local/bin/bridge-ai"; NEW="$DIR/new"
