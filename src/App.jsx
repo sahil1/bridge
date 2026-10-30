@@ -29,6 +29,7 @@ import CloudHome from './components/CloudHome.jsx'
 import SessionSwitcher from './components/Sessions.jsx'
 import { MachineMenu, AskBanner, useMachines, goMachine, isRemote, remoteOf } from './components/Machines.jsx'
 import RemoteAgent from './components/RemoteAgent.jsx'
+import Dictation from './dictation/Dictation.jsx'
 import { t, tx, locale } from './i18n/index.js'
 
 const MIN_PANE = 420
@@ -534,8 +535,14 @@ function App() {
     ...paletteActions.filter((a) => ['a:appearance', 'a:theme'].includes(a.id)),
   ] : paletteActions
   const closeSettings = () => { setSettings(null); if (cloudOnly) refetch('/cloud') }
+  // The agent on screen, whose message box dictation fills when nothing else has the focus.
+  const onScreen = () => {
+    const id = wide ? W.active : mtab === 'mate' ? mateShown?.paneId : mtab === 'agents' ? mobileAgent : null
+    return id && byId[id] && !byId[id].view && !byId[id].shellTab ? id : null
+  }
   const overlays = (
     <>
+      {!cloudOnly && <Dictation conf={conf?.dictation} onScreen={onScreen} />}
       {palette && <Palette fleet={fleet} activeId={wide ? W.active : mobileAgent} onClose={() => setPalette(false)} onOpen={openAgent} onOpenFile={openFiles} actions={actions} />}
       {settings && <Settings section={settings} onClose={closeSettings} onOpenAgent={openAgent} />}
       {(fleet?.agents || []).filter((a) => a.chief && a.setup).map((a) => <FirstRunAnswers key={a.paneId} agent={a} />)}

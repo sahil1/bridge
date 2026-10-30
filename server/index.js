@@ -14,6 +14,7 @@ import * as pr from './pr.js'
 import * as office from './office.js'
 import * as accounts from './accounts.js'
 import * as voice from './voice.js'
+import * as dictation from './dictation.js'
 import * as fixes from './fixes.js'
 import * as servers from './servers.js'
 import * as archive from './archive.js'
@@ -955,6 +956,8 @@ app.post('/api/transcribe', express.raw({ type: () => true, limit: '30mb' }), as
     res.status(e.status || 502).json({ error: e.message, ...(typeof e.code === 'string' ? { code: e.code } : {}), ...(e.model ? { model: e.model } : {}) })
   }
 })
+// Dictation: the names it spells the way they're written (dictation.js; the page tidies the text).
+app.get('/api/dictation/words', wrap(async () => dictation.words({ fleet: lastFleet || await fleetView().catch(() => null), projects: await projects.list().catch(() => []) })))
 
 // ---------- Meeting notes (meetings.js; speech engines in speech.js) ----------
 meetings.configure(cfg)
@@ -1563,6 +1566,7 @@ app.get('/api/config', (req, res) => res.json({
   name: cfg.name || '', location: cfg.location?.label || null, hasMortgage: !!cfg.mortgage,
   runtime: { name: rt.name, ...rt.caps, attach: !!rt.attach, ...(rt.name === 'herdr' ? { session: herdrSession() } : { keep: cfg.keepAgents !== false }), ...(fellBack() ? { fellBack: fellBack() } : {}) }, platform: process.platform, mail: IS_MAC, calendar: IS_MAC,
   defaultAgent: cfg.defaultAgent || 'claude', chiefKind: cfg.chief?.kind || 'claude', setupDone: !!cfg.setupDone, simple: !!cfg.simple,
+  dictation: cfg.dictation || {}, // Settings › Voice › Dictation
 }))
 
 // ---------- Settings, first-run setup and plain chats ----------

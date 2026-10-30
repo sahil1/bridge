@@ -3,7 +3,9 @@
 //   built app (npm run desktop:dist)  the copy of Bridge AI inside the app, on the app's own Node,
 //                                     so the person using it needs nothing else installed
 //   from source (npm run desktop)     your clone, with `node scripts/start.js`
-const { app, BrowserWindow, Menu, Tray, shell, globalShortcut, Notification, session, nativeTheme, ipcMain, powerMonitor, screen, nativeImage, systemPreferences, dialog, desktopCapturer } = require('electron')
+const electron = require('electron')
+const { app, BrowserWindow, Menu, Tray, shell, globalShortcut, Notification, session, nativeTheme, ipcMain, powerMonitor, screen, nativeImage, systemPreferences, dialog, desktopCapturer } = electron
+const dictation = require('./dictation.js')
 
 // A picture of part of the window (the Preview tab's app), for sending to an agent. Only this
 // window, only a rectangle of it, only when the page asks.
@@ -804,4 +806,8 @@ app.whenReady().then(() => {
   createWindow()
   watchFleet()
   watchCalls()
+  // The dictation key from any app (dictation.js): the main window, an agent's own window and
+  // another device's window take it as their own when they're in front.
+  const ours = (w) => w === win || [...pops.values(), ...machineWins.values()].includes(w)
+  dictation.start({ electron, ROOT, DATA, URL_BASE, preload: path.join(__dirname, 'preload.js'), isOurs: ours, tellMain }).catch((e) => console.error('dictation:', e.message))
 })
