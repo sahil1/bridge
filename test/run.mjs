@@ -24,6 +24,7 @@ const SUITES = [
   { name: 'app-ui', build: 'dist', browser: true, covers: [/^src\//, /^index\.html$/, /^public\//, /^vite\.config\.js$/, /^server\/(index|attach|terminal|settings)\.js$/, /^server\/runtime\//] },
   { name: 'chat-background', build: 'dist', browser: true, covers: [/^server\/(subagents|logread|transcripts|usage|index)\.js$/, /^server\/runtime\//, /^src\/components\/(Subagents|Console)\.jsx$/, /^src\/styles\.css$/] },
   { name: 'no-prompts', build: null, covers: [/^server\/projects\.js$/, /^scripts\/tcc-sim\.mjs$/] },
+  { name: 'agents-found', build: null, covers: [/^server\/agents\.js$/, /^scripts\/tcc-sim\.mjs$/] },
   { name: 'resume-work', build: null, covers: [/^server\/runtime\/builtin\.js$/, /^server\/(queue|index)\.js$/, /^test\/stand-ins\/claude\.cjs$/] },
   { name: 'chat-account', build: 'dist', browser: true, covers: [/^src\/components\/(ModelChip|AccountMenu|Console|Handoff)\.jsx$/, /^src\/App\.jsx$/, /^server\/(accounts|models|handoff|index|transcripts|queue)\.js$/] },
   { name: 'accounts-ui', build: 'dist', browser: true, covers: [/^src\/components\/(AccountMenu|Usage|UsageStats|Trackers|Dock|ModelChip|AddAccount)\.jsx$/, /^src\/components\/settings\/(Providers\.jsx|providers\.css)$/, /^src\/App\.jsx$/, /^src\/styles\.css$/, /^server\/(accounts|feeds)\.js$/] },
