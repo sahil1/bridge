@@ -194,12 +194,14 @@ jobs:
           xattr -p com.apple.quarantine "$dl/x/Bridge AI.app" 2>/dev/null || xattr -w -r com.apple.quarantine "$q" "$dl/x/Bridge AI.app"
           # And the copy the installer put in place, given the same flag.
           xattr -w -r com.apple.quarantine "$q" "$APP"
+          # (stapler checks the ticket with Apple, whose server drops the connection now and then.)
+          stapled() { for i in 1 2 3 4; do xcrun stapler validate "$1" && return; sleep 15; done; return 1; }
           bad=0
           for app in "$dl/x/Bridge AI.app" "$APP"; do
             echo "== $app"
             spctl -a -vv -t exec "$app" 2>&1 | tee "$OUT/spctl.txt"
             grep -q ': accepted' "$OUT/spctl.txt" && grep -q 'source=Notarized Developer ID' "$OUT/spctl.txt" || bad=1
-            xcrun stapler validate "$app" || bad=1
+            stapled "$app" || bad=1
             if command -v syspolicy_check >/dev/null; then syspolicy_check distribution "$app" || bad=1; fi
           done
           exit $bad
@@ -257,10 +259,11 @@ jobs:
 
       - name: The disk image is signed and notarized
         run: |
+          stapled() { for i in 1 2 3 4; do xcrun stapler validate "$1" && return; sleep 15; done; return 1; }
           bad=0
           spctl -a -vv -t open --context context:primary-signature "$DMG" 2>&1 | tee "$OUT/spctl-dmg.txt"
           grep -q ': accepted' "$OUT/spctl-dmg.txt" && grep -q 'source=Notarized Developer ID' "$OUT/spctl-dmg.txt" || bad=1
-          xcrun stapler validate "$DMG" || bad=1
+          stapled "$DMG" || bad=1
           exit $bad
 
       - name: It opens with the app and a link to Applications, named alike on Intel and Apple Silicon
@@ -281,10 +284,11 @@ jobs:
           ditto "$VOL/Bridge AI.app" "$APP"
           hdiutil detach "$VOL" -quiet || true
           xattr -p com.apple.quarantine "$APP" || { echo "(no quarantine carried over; setting it as Finder would)"; xattr -w -r com.apple.quarantine "0083;$(printf %x "$(date +%s)");Safari;$(uuidgen)" "$APP"; }
+          stapled() { for i in 1 2 3 4; do xcrun stapler validate "$1" && return; sleep 15; done; return 1; }
           bad=0
           spctl -a -vv -t exec "$APP" 2>&1 | tee "$OUT/spctl.txt"
           grep -q ': accepted' "$OUT/spctl.txt" && grep -q 'source=Notarized Developer ID' "$OUT/spctl.txt" || bad=1
-          xcrun stapler validate "$APP" || bad=1
+          stapled "$APP" || bad=1
           if command -v syspolicy_check >/dev/null; then syspolicy_check distribution "$APP" || bad=1; fi
           exit $bad
 
@@ -295,11 +299,18 @@ jobs:
           # `open` waits while macOS asks, so it's left to it; the screenshot shows what was asked.
           open "$APP" >/dev/null 2>&1 & sleep 15
           screencapture -x "$OUT/first-open.png" & s=$!; (sleep 20; kill $s 2>/dev/null) >/dev/null 2>&1 & wait $s || true
-          # Someone clicks Open: macOS clears the flag. Here, that's done for it.
-          killall CoreServicesUIAgent 2>/dev/null || true
-          pkill -f "$APP/Contents/" 2>/dev/null || true
-          xattr -dr com.apple.quarantine "$APP"
-          open "$APP"
+          # Someone clicks Open (macOS then clears the flag). If this machine won't let a script press
+          # it, the dialog is closed and the flag cleared by hand; macOS's launcher can then refuse
+          # the app for a while (-10673), so it's started directly if need be.
+          if osascript -e 'tell application "System Events" to click button "Open" of window 1 of process "CoreServicesUIAgent"' 2>/dev/null; then
+            echo "Clicked Open"
+          else
+            killall CoreServicesUIAgent 2>/dev/null || true
+            xattr -dr com.apple.quarantine "$APP"
+            for i in 1 2 3 4 5 6; do sleep 5; open "$APP" 2>/dev/null && exit 0; done
+            echo "(macOS's launcher still refuses it after the dialog was closed; starting it directly)"
+            nohup "$APP/Contents/MacOS/Bridge AI" >/dev/null 2>&1 &
+          fi
 
       - name: It opens and its server answers
         if: always() && env.VOL
