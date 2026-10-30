@@ -53,6 +53,20 @@ jobs:
       - name: Browsers
         run: npx playwright-core install --with-deps chromium ${{ matrix.browser == 'both' && 'webkit' || '' }}
 
+      # The herdr test drives a real herdr (elsewhere it checks only what it can without one): a
+      # pinned release, refused unless it matches its checksum.
+      - name: herdr
+        if: runner.os == 'Linux'
+        env:
+          HERDR_URL: https://github.com/herdrdev/herdr/releases/download/v0.9.5/herdr-linux-x86_64
+          HERDR_SHA256: 14d9e8bc8b4a9e0118d77c32266f76d461f09b40342eb23752960bd89f59929d
+        run: |
+          mkdir -p "$RUNNER_TEMP/herdr"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/herdr/herdr" "$HERDR_URL"
+          echo "$HERDR_SHA256  $RUNNER_TEMP/herdr/herdr" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/herdr/herdr"
+          echo "BRIDGE_TEST_HERDR=$RUNNER_TEMP/herdr/herdr" >> "$GITHUB_ENV"
+
       - name: Tests
         run: node test/run.mjs --all --lanes 2 --browser ${{ matrix.browser }}
 

@@ -36,6 +36,7 @@ request (`.github/workflows/test.yml`), and a release is only built once they pa
 | `devices-ui` | Settings › Devices with two Bridge AIs on their own relays: Pair a device shows a QR code, the address and the code (on a phone too); the phone app, paired with both, offers to link them, asks, and opens the other to allow it with the same six digits; computers are listed under Your devices, not among phones; Fix with a device closed says it isn't there, and that it's back once it opens |
 | `mail` | The inbox from Apple Mail's own index (made up, in the server's home folder) on two Macs that keep it differently, every column or an older macOS's: both list and rank the inbox and open a message, with no "no such column". Off a Mac, the inbox says it's Mac only |
 | `demo-ui` | The demo build (`npm run demo:build`) with no server: Home, meetings, search, the archive, and what needs a computer saying so |
+| `herdr` | The herdr runtime. A herdr older than 0.9.0 (a stand-in): agents run in Bridge AI itself and the app says why. Then the real herdr, when there is one (`BRIDGE_TEST_HERDR` names it, else `herdr` on your PATH; CI downloads a release on Linux), in a home of its own: a session started from Bridge AI, a stand-in Claude Code started with a short opening prompt on its command line and a long one sent once it's up, its screen read and typed into, a start herdr refuses leaving no tab behind, a space with a herdr worktree open not closed from under it, an out-of-date herdr integration named with the command that updates it, and closing. Skipped on Windows |
 | `saves` | Saving a file whole or not at all (settings, accounts, devices and the rest): it keeps its permissions, a save that fails or is stopped dead leaves the last one readable, and a rename another program holds up is tried again, then written in place |
 
 A change to a file a test covers (listed in `run.mjs`) runs that test. A change to `test/lib`,
@@ -46,4 +47,4 @@ A change to a file a test covers (listed in `run.mjs`) runs that test. A change 
 These need a Mac and the real thing, so they're checked by hand before a release: recording the
 call's sound (`native/calltap`), speech to text on the Mac and whisper.cpp, reading the screen's
 pictures (Vision), the desktop app's own windows (the floating card's window, the menu bar), the
-herdr runtime, and real agents signing in.
+herdr runtime with real agents and a real terminal attached, and real agents signing in.
