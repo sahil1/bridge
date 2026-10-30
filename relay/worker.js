@@ -53,16 +53,20 @@ function page(req, url) {
     if (req.headers.get('Sec-Fetch-Dest') === 'document' || req.headers.get('Accept')?.includes('text/html')) return Response.redirect(`${url.origin}/`, 302)
     return new Response('Not found', { status: 404 })
   }
-  const body = f.b64 ? Uint8Array.from(atob(f.b64), (c) => c.charCodeAt(0)) : f.text
-  return new Response(body, {
-    headers: {
-      'Content-Type': TYPES[name.split('.').pop()] || 'application/octet-stream',
-      'Cache-Control': 'no-cache', // small, and must change together when the relay is updated
-      'X-Content-Type-Options': 'nosniff',
-      'Referrer-Policy': 'no-referrer',
-      ...(name === 'index.html' ? { 'Content-Security-Policy': "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; connect-src 'self' wss: ws:; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'" } : {}),
-    },
-  })
+  const headers = {
+    'Content-Type': TYPES[name.split('.').pop()] || 'application/octet-stream',
+    'Cache-Control': 'no-cache', // small, and must change together when the relay is updated
+    // ...so the phone asks each time, and the build says whether it changed: if not, nothing to
+    // download again (the page opens a little sooner, on a slow network much sooner).
+    ETag: `"${RELAY_BUILD}"`,
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'no-referrer',
+    ...(name === 'index.html' ? { 'Content-Security-Policy': "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; connect-src 'self' wss: ws:; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'" } : {}),
+  }
+  // (Cloudflare marks the tag weak, W/, when it compresses the file on the way.)
+  const has = (req.headers.get('If-None-Match') || '').split(',').some((t) => t.trim().replace(/^W\//, '') === headers.ETag)
+  if (has) return new Response(null, { status: 304, headers })
+  return new Response(f.b64 ? Uint8Array.from(atob(f.b64), (c) => c.charCodeAt(0)) : f.text, { headers })
 }
 
 async function tokenOk(header, token) {

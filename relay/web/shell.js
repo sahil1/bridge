@@ -125,10 +125,8 @@ for (const b of document.querySelectorAll('.cloud-open')) b.onclick = () => (nat
 function addComputer() {
   adding = true
   clearTimeout(retryTimer)
-  dropSession()
+  abandon()
   awayBanner(false)
-  try { ws?.close() } catch { /* closed */ }
-  ws = null
   appShown = false
   $('app').src = 'about:blank'
   linkOnly()
@@ -204,8 +202,13 @@ let session = null
 let paired = null // { device, hostKey, deviceId }
 let code = null // a pairing code from the QR code or typed in
 let waiting = null // a handshake in progress: { state, pair, resolve }
-let backoff = 1000
+// After the link drops: again at once, then less and less often (the network coming back, or Bridge
+// AI back on the screen, tries again straight away: check() below).
+const FIRST_TRY = 250
+const LAST_TRY = 10000
+let backoff = FIRST_TRY
 let retryTimer = null
+let started = false // start() has read the pairing
 let readyWaiters = []
 let appShown = false
 let relayKeeps = false // this relay keeps notes for the computer (offline.js)
@@ -297,29 +300,82 @@ offline.subscribe((done) => {
   else notice(done.length === 1 ? 'Your message was delivered.' : `${done.length} messages were delivered.`, true)
 })
 
+let heard = 0 // when the connection last brought anything
+let since = 0 // when it was opened
+let pongs = false // the relay answers a ping (one from before that doesn't can't be checked)
+let probe = null // a check of the connection under way
 function connect() {
   clearTimeout(retryTimer)
   if (adding) return
   if (ws && ws.readyState <= 1) return
-  ws = new WebSocket(`${relay.replace(/^http/, 'ws')}/_relay/link`)
-  ws.binaryType = 'arraybuffer'
+  const sock = new WebSocket(`${relay.replace(/^http/, 'ws')}/_relay/link`)
+  ws = sock
+  sock.binaryType = 'arraybuffer'
   relayKeeps = false
+  heard = since = Date.now()
+  sock.onopen = () => { heard = Date.now(); try { sock.send('ping') } catch { /* closing */ } }
   // One message at a time, in order: a response's pieces must reach the app in sequence.
-  ws.onmessage = (e) => { inbox = inbox.then(() => (typeof e.data === 'string' ? onText(JSON.parse(e.data)) : onData(e.data))).catch(fail) }
-  ws.onclose = (e) => {
-    // Bridge AI's hosted relay said to wait (a limit, or it's switched off): until then.
-    if (limited.until > Date.now()) {
-      dropSession(limited.text)
-      retryTimer = setTimeout(connect, limited.until - Date.now() + Math.random() * 3000)
-      return
-    }
-    dropSession(offlineText())
-    retryTimer = setTimeout(connect, e.code === 4001 ? 300 : backoff)
-    backoff = Math.min(backoff * 2, 30000)
-    // The relay can't be reached (no signal?): what this phone kept, after a couple of tries.
-    if (backoff >= 4000 && e.code !== 4001) { if (away) awayBanner(); else if (!appShown && paired?.hostKey) openSaved() }
+  sock.onmessage = (e) => {
+    heard = Date.now()
+    if (e.data === 'pong') { pongs = true; return } // the relay's answer to a ping
+    inbox = inbox.then(() => (ws !== sock ? null : typeof e.data === 'string' ? onText(JSON.parse(e.data)) : onData(e.data))).catch(fail)
   }
+  sock.onclose = (e) => { if (ws === sock) lost(e.code) }
 }
+
+function lost(code) {
+  // Bridge AI's hosted relay said to wait (a limit, or it's switched off): until then.
+  if (limited.until > Date.now()) {
+    dropSession(limited.text)
+    retryTimer = setTimeout(connect, limited.until - Date.now() + Math.random() * 3000)
+    return
+  }
+  dropSession(offlineText())
+  retryTimer = setTimeout(connect, code === 4001 ? 300 : backoff)
+  backoff = Math.min(backoff * 2, LAST_TRY)
+  // The relay can't be reached (no signal?): what this phone kept, after a few tries.
+  if (backoff >= 4000 && code !== 4001) { if (away) awayBanner(); else if (!appShown && paired?.hostKey) openSaved() }
+}
+
+// Done with this connection, without waiting to hear that it closed: one that died can take minutes
+// to say so.
+function abandon(msg) {
+  const sock = ws
+  ws = null
+  clearTimeout(probe)
+  probe = null
+  if (sock) {
+    sock.onopen = sock.onmessage = sock.onclose = null
+    try { sock.close() } catch { /* closed */ }
+  }
+  dropSession(msg)
+}
+function reconnect() {
+  abandon(offlineText())
+  backoff = FIRST_TRY
+  connect()
+}
+
+// Is the link still there? A connection can die without a word (the phone slept, or moved to another
+// network) and the browser may take minutes to notice, while every request waits on it. So when
+// Bridge AI is back on the screen or the network changes, every so often while it's open, and when an
+// answer is slow, this pings the relay, which answers at once. No answer: a new connection, now.
+// Back on the screen or on the network (`now`) with no connection: one straight away, not at the next try.
+const PROBE_MS = 5000
+function check(now) {
+  if (!started || adding || !relay || limited.until > Date.now()) return
+  if (!ws || ws.readyState >= 2) { if (now === true) { backoff = FIRST_TRY; connect() } return }
+  if (ws.readyState === 0) { if (Date.now() - since > PROBE_MS) reconnect(); return }
+  if (!pongs || probe) return
+  const sock = ws
+  const at = Date.now()
+  try { sock.send('ping') } catch { reconnect(); return }
+  probe = setTimeout(() => { probe = null; if (ws === sock && heard < at) reconnect() }, PROBE_MS)
+}
+addEventListener('online', () => check(true))
+addEventListener('pageshow', (e) => { if (e.persisted) check(true) })
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(true) })
+setInterval(() => { if (document.visibilityState === 'visible') check() }, 20000)
 
 // The relay's own messages: whether your computer is there, or about the notes it keeps.
 function onText(m) {
@@ -358,7 +414,7 @@ async function onData(buf) {
     let done
     try { done = await phoneFinish(state, paired.device, msg, { hostKey: paired.hostKey, pair }) } catch (e) { return refused(e.message) }
     session = done.session
-    backoff = 1000
+    backoff = FIRST_TRY
     if (!paired.hostKey) {
       paired = { device: paired.device, hostKey: done.hostKey, code, pairedAt: Date.now() }
       await pairing.set(paired)
@@ -413,7 +469,10 @@ async function refused(why) {
 function dropSession(msg) {
   session = null
   waiting = null
-  for (const [, s] of streams) { s.onError?.(msg || 'Connection lost'); s.onClose?.({ c: 1006, r: 'connection lost' }) }
+  for (const [, s] of [...streams]) {
+    if (s.onLost) s.onLost(msg || 'Connection lost')
+    else { s.onError?.(msg || 'Connection lost'); s.onClose?.({ c: 1006, r: 'connection lost' }) }
+  }
   streams.clear()
   if (msg && appShown) { if (!hostOnline && paired?.hostKey) awayBanner(); else bar(msg, !hostOnline) }
 }
@@ -431,6 +490,7 @@ function send(kind, id, body) {
 }
 
 // ---------- requests from the service worker (or the iPhone app) ----------
+const gzip = typeof DecompressionStream === 'function' // can unpack what comes compressed
 navigator.serviceWorker?.addEventListener('message', (e) => { if (e.data?.type === 'fetch') tunnel(e.data, e.ports[0]) })
 navigator.serviceWorker?.startMessages?.()
 
@@ -448,27 +508,83 @@ window.bridgeTunnel = (rid, { m, u, h, body }) => {
 window.bridgeCancel = (rid) => { cancels.get(rid)?.(); cancels.delete(rid) }
 
 async function tunnel({ m, u, h, body }, port) {
-  const id = nextId++
+  let id = 0
   let cancelled = false
   port.onmessage = (x) => { if (x.data?.cancel) { cancelled = true; streams.delete(id); send(K.CANCEL, id).catch(() => {}) } }
-  try { await ready() } catch (err) { whileAway({ m, u, body }, port, err.message).catch((e) => port.postMessage({ error: e.message })); return }
-  let keep = null // what this phone keeps of the answer, for when the computer is offline
-  streams.set(id, {
-    onHead: (head) => { if (m === 'GET') keep = offline.tap(u, head, { assets: !!native }); port.postMessage({ head }) },
-    onChunk: (c) => { keep?.chunk(c); if (!cancelled) port.postMessage({ chunk: c.buffer }, [c.buffer]) },
-    onEnd: () => { keep?.end(); port.postMessage({ end: true }) },
-    onError: (msg) => port.postMessage({ error: msg }),
-  })
-  try {
-    const b = body ? new Uint8Array(body) : null
-    await send(K.REQ, id, { m, u, h, body: !!b })
-    if (b) {
-      for (let o = 0; o < b.byteLength; o += CHUNK) await send(K.BODY, id, b.subarray(o, o + CHUNK))
-      await send(K.END, id)
+  // A read the link dropped before its answer began goes again, once, on the next link: the app
+  // waits a moment longer rather than see it fail.
+  for (let tries = m === 'GET' ? 2 : 1; tries > 0; tries--) {
+    try { await ready() } catch (err) { whileAway({ m, u, body }, port, err.message).catch((e) => port.postMessage({ error: e.message })); return }
+    if (cancelled) return
+    id = nextId++
+    if (!(await relayed(id, { m, u, h, body }, port, tries > 1, () => cancelled))) return
+  }
+}
+
+// One go at a request over the link. True when the link dropped before any of the answer came and
+// `again` says it may go again.
+function relayed(id, { m, u, h, body }, port, again, cancelled) {
+  return new Promise((resolve) => {
+    let keep = null // what this phone keeps of the answer, for when the computer is offline
+    let packed = null // the answer comes compressed: unpacked here, as it comes
+    let headed = false
+    let over = false
+    const out = {
+      chunk: (c) => { keep?.chunk(c); if (!cancelled()) port.postMessage({ chunk: c.buffer }, [c.buffer]) },
+      end: () => { keep?.end(); port.postMessage({ end: true }) },
     }
-  } catch (err) {
-    streams.delete(id)
-    port.postMessage({ error: err.message })
+    const failed = (msg, lost) => {
+      if (over) return
+      over = true
+      clearTimeout(slow)
+      streams.delete(id)
+      if (lost && again && !headed) return resolve(true)
+      packed?.stop()
+      port.postMessage({ error: msg })
+      resolve(false)
+    }
+    // No answer yet after a while: make sure the link is still there.
+    const slow = setTimeout(() => check(), 5000)
+    streams.set(id, {
+      onHead: (head) => {
+        headed = true
+        clearTimeout(slow)
+        resolve(false)
+        if (m === 'GET') keep = offline.tap(u, head, { assets: !!native })
+        port.postMessage({ head: { s: head.s, h: head.h } })
+        if (head.z === 'gzip') packed = unzip(out, (msg) => port.postMessage({ error: msg }))
+      },
+      onChunk: (c) => (packed ? packed.chunk(c) : out.chunk(c)),
+      onEnd: () => { over = true; if (packed) packed.end(); else out.end() },
+      onError: (msg) => failed(msg),
+      onLost: (msg) => failed(msg, true),
+    })
+    ;(async () => {
+      const b = body ? new Uint8Array(body) : null
+      // The app's own files (the same for everyone who has this version, nothing of yours) come
+      // compressed, if this browser can unpack them: a third of the size. Nothing else is.
+      const z = gzip && m === 'GET' && u.startsWith('/assets/') ? { z: 'gzip' } : {}
+      await send(K.REQ, id, { m, u, h, body: !!b, ...z })
+      if (b) {
+        for (let o = 0; o < b.byteLength; o += CHUNK) await send(K.BODY, id, b.subarray(o, o + CHUNK))
+        await send(K.END, id)
+      }
+    })().catch((err) => failed(err.message, !session))
+  })
+}
+
+// An answer that comes compressed (gzip), passed on unpacked and in order.
+function unzip(to, onError) {
+  const ds = new DecompressionStream('gzip')
+  const w = ds.writable.getWriter()
+  const r = ds.readable.getReader()
+  const whole = (c) => (c.byteOffset === 0 && c.byteLength === c.buffer.byteLength ? c : c.slice())
+  const read = (async () => { for (let x = await r.read(); !x.done; x = await r.read()) to.chunk(whole(x.value)) })()
+  read.catch(() => {})
+  return {
+    chunk: (c) => { w.write(c).catch(() => {}) },
+    end: () => { w.close().catch(() => {}); read.then(() => to.end(), () => onError('The answer couldn\'t be unpacked')) },
+    stop: () => { w.abort().catch(() => {}) },
   }
 }
 
@@ -623,7 +739,7 @@ function waitScreen(title, msg, retry) {
   $('retry').hidden = !retry
 }
 
-$('retry').onclick = () => { backoff = 1000; try { ws?.close() } catch { /* closed */ } connect() }
+$('retry').onclick = () => reconnect()
 $('skip').onclick = () => { for (const w of readyWaiters.splice(0)) w.ok(); showApp() }
 $('pair-form').onsubmit = async (e) => {
   e.preventDefault()
@@ -641,6 +757,7 @@ $('pair-form').onsubmit = async (e) => {
   $('pair-err').hidden = true
   code = c
   paired = null
+  started = true
   waitScreen('Pairing…', '')
   if (ws?.readyState === 1 && hostOnline) handshake().catch(fail)
   else if (ws?.readyState === 1) waitScreen('Your computer is offline', `${offlineText()} Pairing finishes as soon as it's back.`, true)
@@ -654,9 +771,9 @@ function setRelay(origin) {
   if (origin === relay) return
   relay = origin
   hostOnline = false
+  pongs = false
   native.post({ type: 'relay', url: origin })
-  try { ws?.close() } catch { /* closed */ }
-  ws = null
+  abandon()
 }
 
 async function start() {
@@ -677,6 +794,7 @@ async function start() {
     show('pair')
     return
   }
+  started = true
   if (!paired && !code) { show('pair'); connect(); return }
   waitScreen(paired ? 'Connecting to your computer…' : 'Pairing…', '')
   connect()
