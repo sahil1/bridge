@@ -201,6 +201,16 @@ try {
   const c1 = model.asked(/This transcript was made by speech to text/).length
   await kit.api(`/meetings/${K2.id}/stop`, {})
   ok(!!await until(async () => (await kit.api(`/meetings/${K2.id}`)).cleanedAt, 20000) && model.asked(/This transcript was made by speech to text/).length === c1 + 1, 'a meeting that ends is cleaned up by itself')
+  // Left as it came, it goes with the summary: with that off too (as here), the transcript isn't
+  // sent to a model by itself.
+  await kit.api('/settings', { meetings: { cleanup: null } }, 'PATCH')
+  const K3 = await kit.api('/meetings', { title: 'Third launch plan', call: false })
+  await send(K3.id, Buffer.concat([pcm(2, true), pcm(1.5), pcm(2, true), pcm(1.5), pcm(2, true), pcm(1.5)]))
+  const c2 = model.asked(/This transcript was made by speech to text/).length
+  await kit.api(`/meetings/${K3.id}/stop`, {})
+  await until(async () => (await kit.api(`/meetings/${K3.id}`)).status === 'done', 20000)
+  await sleep(2000)
+  ok(model.asked(/This transcript was made by speech to text/).length === c2 && !(await kit.api(`/meetings/${K3.id}`)).cleanedAt, 'not turned on, and with the summary not written by itself, it isn\'t cleaned up by itself either')
   await kit.api('/settings', { meetings: { cleanup: false } }, 'PATCH')
 
   // ---------- The kind of meeting, from its name ----------
