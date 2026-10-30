@@ -1,4 +1,4 @@
-// Setup's "Everything", in the browser named by BRIDGE_TEST_BROWSER, on a computer with nothing
+// Setup's "Everything" (picked over the recommended Just what agents need), in the browser named by BRIDGE_TEST_BROWSER, on a computer with nothing
 // set up: one click sets it all going (Node.js and the speech model downloaded by the server, the
 // programs installed in one terminal tab: Homebrew first, then whisper.cpp, ffmpeg and icalBuddy in
 // one go, on a Mac), the list says how each is doing while setup carries on (a download that can't
@@ -8,7 +8,8 @@
 // installer runs instead of Homebrew, and Node.js and the model have nowhere to download from, so
 // they say they didn't work.
 // Then "Just what agents need" (Node.js alone), asked for straight from the server. Then a computer
-// with Node.js and ffmpeg already: neither is offered or installed again.
+// with Node.js and ffmpeg already: neither is offered or installed again, and Just what agents need
+// says there's nothing to install.
 import fs from 'node:fs'
 import path from 'node:path'
 import { startKit, checks, until, browser, page, shot, IS_MAC } from '../lib/harness.mjs'
@@ -26,6 +27,7 @@ try {
 
   const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky' })
   await p.waitForSelector('.wiz-levels', { timeout: 15000 })
+  await p.check('input[name="wiz-level"][value="full"]')
   await p.click('.wiz-foot button:has-text("Set up everything")')
   await p.waitForSelector('.sa-list', { timeout: 10000 })
   const names = await p.$$eval('.sa-item b', (l) => l.map((x) => x.innerText))
@@ -108,7 +110,9 @@ try {
     await h.p.waitForSelector('.wiz-levels', { timeout: 15000 })
     const kept = await h.p.innerText('.wiz-body .sa-kept').catch(() => '')
     ok(/^Already set up, so left as it is: Node\.js/.test(kept), 'setup names what\'s here already, and leaves it as it is', kept)
-    ok(await h.p.locator('.wiz-levels li', { hasText: 'Just what agents need' }).count() === 0, 'with Node.js here, "Just what agents need" (Node.js) isn\'t offered')
+    ok(/Node\.js is already here, so there's nothing to install/.test(await h.p.locator('.wiz-levels li', { hasText: 'Just what agents need' }).innerText()) && await h.p.locator('.wiz-levels li', { hasText: 'Later' }).count() === 0, 'with Node.js here, "Just what agents need" says there\'s nothing to install, and Later isn\'t offered')
+    ok(/^Continue$/.test((await h.p.innerText('.wiz-foot .btn.primary')).trim()), 'so its button just carries on')
+    await h.p.check('input[name="wiz-level"][value="full"]')
     await h.p.click('.wiz-foot button:has-text("Set up everything")')
     await h.p.waitForSelector('.sa-list', { timeout: 10000 })
     const listed = await h.p.$$eval('.sa-item b', (l) => l.map((x) => x.innerText))

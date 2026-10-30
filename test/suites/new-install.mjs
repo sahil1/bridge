@@ -1,6 +1,7 @@
 // A brand-new computer, in the browser named by BRIDGE_TEST_BROWSER, on a desktop and a phone:
-// setup's first step (how much to set up: Everything, picked, Just what agents need, or Later; Later
-// here, setup-all tries Everything), then setup with nothing installed (each agent can be installed from there, or an API key used), an
+// setup's first step (how much to set up: Just what agents need, picked, as it asks for no password
+// and nothing to allow, Everything, or Later; Later here, setup-all tries Everything; and keeping the
+// computer awake for your phone, ticked), then setup with nothing installed (each agent can be installed from there, or an API key used), an
 // agent's install (the kit's stand-in installer runs, never the real one) moving its card on to
 // signing in, Node.js installed with one click from a stand-in nodejs.org, on Windows too (and a
 // download that doesn't match its checksum turned away), closing setup, Home with nothing to talk to, New agent, a chat with
@@ -69,8 +70,10 @@ try {
     const { ctx, p, errors } = await open(look, { phone })
     await p.waitForSelector('.wiz-levels', { timeout: 15000 })
     const levels = await p.$$eval('.wiz-levels li', (l) => l.map((li) => `${li.querySelector('input').checked ? '*' : ''}${li.querySelector('b').innerText}`))
-    ok(levels.join('|') === '*Everything (recommended)|Just what agents need|Later', `${t}: setup starts with how much to set up, Everything picked`, levels)
-    ok(/^Set up everything$/.test((await p.innerText('.wiz-foot .btn.primary')).trim()), `${t}: and says what Continue does`)
+    ok(levels.join('|') === '*Just what agents need (recommended)|Everything|Later', `${t}: setup starts with how much to set up, the one with no password or permissions picked`, levels)
+    ok(/^Set up Node\.js$/.test((await p.innerText('.wiz-foot .btn.primary')).trim()), `${t}: and says what Continue does`)
+    ok(/No password, nothing to allow/.test(await p.innerText('.wiz-levels li.on')) && /Asks for your password once/.test(await p.innerText('.wiz-levels li:not(.on)')), `${t}: each says whether it asks for anything`)
+    ok(await p.isChecked('.wiz-awake input'), `${t}: keeping this computer awake for your phone is offered, ticked`)
     ok(!(await sideways(p)), `${t}: the first step: nothing wider than the screen`)
     await shot(p, `${tag}new-${phone ? 'phone' : 'desktop'}-${name}-0-how-much`)
     await later(p)

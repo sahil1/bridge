@@ -1413,8 +1413,10 @@ app.post('/api/notify/answer', wrap((req) => notify.answer(req.body?.token)))
 // You're using Bridge AI on this computer: phones stay quiet meanwhile. Phones can't say this.
 app.post('/api/presence', wrap((req) => { if (fromHere(req)) notify.presence(req.body || {}); return { ok: true } }))
 
-app.get('/api/phone', wrap(() => phone.status(cfg.port)))
-app.post('/api/phone', wrap((req) => (req.body?.enabled ? phone.enable(cfg.port) : phone.disable(cfg.port))))
+// Whether Tailscale publishes this computer decides, with the relay's phones, whether it stays awake.
+const tailnetSaid = (st) => { relay.setTailnet(!!st?.enabled); return st }
+app.get('/api/phone', wrap(() => phone.status(cfg.port).then(tailnetSaid)))
+app.post('/api/phone', wrap((req) => (req.body?.enabled ? phone.enable(cfg.port) : phone.disable(cfg.port)).then(tailnetSaid)))
 // Your own relay (relay.js). Set up from the computer only: a phone using the relay can see it,
 // but can't pair more phones, remove one, or change where the relay is.
 const onComputer = (req) => { if (req.headers['x-bridge-relay']) throw Object.assign(new Error('Do this in Bridge AI on your computer'), { status: 403 }) }
@@ -1921,6 +1923,7 @@ server.listen(cfg.port, cfg.host, () => {
   subscriptions().catch(() => {})
   quota().catch(() => {})
   relay.start(`http://127.0.0.1:${cfg.port}`)
+  phone.status(cfg.port).then(tailnetSaid).catch(() => {})
   machines.start()
 })
 // Agents keep running in the terminal host unless you turned that off (Settings › General).

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import Icon from '../Icon.jsx'
 import { api, usePoll, viaRelay, relayComputers } from '../../api.js'
-import Relay from './Relay.jsx'
+import Relay, { KeepAwake } from './Relay.jsx'
 import { MachinesSettings } from '../Machines.jsx'
 import { useSettings, SaveNote } from './General.jsx'
 import { pushSupport, pushState, enablePush, disablePush, isIOS } from '../../pwa.js'
@@ -88,6 +88,7 @@ function PhoneSetup({ quiet, picked }) {
                 <button type="button" className="ghost-btn" onClick={() => navigator.clipboard?.writeText(st.url).catch(() => {})}><Icon name="copy" size={12} /> Copy link</button>
                 <button type="button" className="ghost-btn" disabled={busy} onClick={() => toggle(false)}>Turn off phone access</button>
               </div>
+              <KeepAwake />
             </div>
           </div>
         )}
