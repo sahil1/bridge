@@ -53,8 +53,6 @@ install_linux() {
     if [ -n "${BRIDGE_FILE:-}" ]; then cp "$BRIDGE_FILE" "$FILE"
     else say "Downloading Bridge AI..."; get --progress-bar "$(url_for Bridge-AI-linux-amd64.deb)" -o "$FILE" || fail "couldn't download the .deb"; check_sum "$FILE" Bridge-AI-linux-amd64.deb
     fi
-    # apt reads the file as its own user (_apt); else it notes it's working "unsandboxed as root".
-    chmod 755 "$TMP"; chmod 644 "$FILE"
     pkill -TERM -x bridge-ai 2>/dev/null && sleep 1 || true
     if [ -n "$SUDO" ]; then say "Installing (this asks for your password)..."; else say "Installing..."; fi
     # Not from this script's input: run as `curl ... | sh`, that's the rest of the script, which a

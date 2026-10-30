@@ -47,7 +47,7 @@ env:
   INSTALLER: https://raw.githubusercontent.com/${{ github.repository }}/${{ inputs.ref || (github.event_name == 'push' && github.sha) || 'main' }}
   # Empty: the latest release, as people get it.
   BRIDGE_VERSION: ${{ inputs.version || (github.event_name == 'release' && github.event.release.tag_name) || (github.event_name == 'workflow_run' && github.event.workflow_run.head_branch) || '' }}
-  FROM_RUN: ${{ inputs.run || (github.event_name == 'push' && '41064215824') || '' }}
+  FROM_RUN: ${{ inputs.run || (github.event_name == 'push' && '41067768429') || '' }}
   BASE: http://127.0.0.1:7420
 
 jobs:
@@ -492,13 +492,6 @@ jobs:
           if ${{ matrix.opens }}; then (Xvfb :99 -ac -screen 0 1600x1000x24 >/dev/null 2>&1 &); sleep 2; fi
           # A run's build instead of the release's download: the installer's BRIDGE_FILE.
           if [ -n "$FROM_RUN" ]; then chmod -R a+rX /build; echo "BRIDGE_FILE=/build/${{ matrix.file }}" >> "$GITHUB_ENV"; fi
-
-      # TEMPORARY: main's installer first, to see what it printed before (apt and the .deb).
-      - name: Main's installer, for comparison
-        if: matrix.kind == 'deb'
-        continue-on-error: true
-        run: |
-          su joerg -s /bin/sh -c "cd && curl -fsSL 'https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/install.sh' | BRIDGE_NO_OPEN=1 BRIDGE_FILE='${BRIDGE_FILE:-}' BRIDGE_VERSION='$BRIDGE_VERSION' sh" 2>&1 | tee "$OUT/install-main.log" | grep -E '^(E|W|N): |unsandboxed|debconf|Installing|installed' || true
 
       - name: Install with the README's one line, as that user
         run: |
