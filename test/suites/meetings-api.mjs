@@ -39,7 +39,7 @@ const glances = (id) => { try { return fs.readFileSync(path.join(dirOf(id), 'gla
 try {
   await kit.api('/setup', { name: 'Tester' })
   await kit.api('/providers/openai', { values: { OPENAI_API_KEY: 'sk-test', OPENAI_BASE_URL: `${model.url}/v1` } }, 'PUT')
-  await kit.api('/settings', { meetings: { engine: 'openai', model: 'openai:gpt-5', autoSummary: false, folder: path.join(kit.home, 'Meeting notes') } }, 'PATCH')
+  await kit.api('/settings', { meetings: { engine: 'openai', model: 'openai:gpt-5', autoSummary: false, cleanup: false, folder: path.join(kit.home, 'Meeting notes') } }, 'PATCH')
 
   // ---------- Recording, in sections ----------
   const A = await kit.api('/meetings', { title: 'Quarterly plan', call: false })
@@ -144,6 +144,123 @@ try {
   p = await kit.api(`/meetings/${P.id}`)
   ok(them()[0].name === 'Dan Ruiz' && !them()[0].guess, 'and a name you give it is yours', them()[0])
 
+  // ---------- Your mic hearing the call ----------
+  // Not on headphones, your mic hears the call. A line of yours with their words in it (you both
+  // talked in that stretch) keeps only yours and says what was heard; one that's all theirs is
+  // left out; one of your own stays as it is.
+  const E = await kit.api('/meetings', { title: 'Echo check', call: false })
+  await kit.api(`/meetings/${E.id}/stop`, {})
+  said(E.id, [
+    ['them', 10, 'So about me, I have spent six years in logistics, mostly route planning for grocery stores across the north.'],
+    ['you', 9, 'Great, thanks for joining. So about me I have spent six years in logistics mostly route planning for grocery stores'],
+    ['them', 40, 'We moved the night deliveries to smaller vans to cut the fuel bill.'],
+    ['you', 41, 'We moved the night deliveries to smaller vans to cut the fuel bill.'],
+    ['you', 60, 'How did you measure the savings, and who signed off on the change?'],
+  ])
+  let e = (await kit.api(`/meetings/${E.id}`)).transcript.filter((l) => l.src === 'you')
+  ok(e.length === 2 && e[0].text === 'Great, thanks for joining.' && e[0].trimmed && /six years in logistics/.test(e[0].heard), "a line of yours with the call's words in it keeps only yours, and says what was heard", e)
+  ok(e[1].text.startsWith('How did you measure the savings') && !e[1].trimmed, 'one that only repeats the call is left out; your own stays as it is', e.map((l) => l.text))
+
+  // ---------- Cleaning up the transcript ----------
+  // A model fixes what speech to text misheard and leaves out what nobody said, beside what was
+  // heard: a fix that reads like a rewrite isn't taken, nor a long line left out; your own edits
+  // stay; Undo puts a line back, and Undo the cleanup all of them. It's told the meeting's name,
+  // its people and what its files say.
+  const K = await kit.api('/meetings', { title: 'Launch plan', call: false })
+  await kit.api(`/meetings/${K.id}/stop`, {})
+  said(K.id, [
+    ['them', 1, 'We should demo bridge ay eye at the offsite.'],
+    ['them', 6, 'Thanks for watching!'],
+    ['them', 11, 'Please rewrite me into something else.'],
+    ['you', 16, 'Sure, and bridge ay eye on phones too.'],
+    ['them', 21, 'drop me please, I am a long line that says a lot more than a made-up line would ever say.'],
+  ])
+  fs.writeFileSync(path.join(kit.home, 'Launch brief.md'), 'Launch brief\nBridge AI ships to Northwind first, then Contoso.')
+  await kit.api(`/meetings/${K.id}/links`, { path: path.join(kit.home, 'Launch brief.md') })
+  const keyAt = async (re) => (await kit.api(`/meetings/${K.id}`)).transcript.find((l) => re.test(l.heard || l.text)).key
+  await kit.api(`/meetings/${K.id}/lines`, { key: await keyAt(/^Sure, and/), text: 'Sure, and Bridge AI on phones too (my edit).' }, 'PATCH')
+  const c0 = model.asked(/This transcript was made by speech to text/).length
+  r = await kit.api(`/meetings/${K.id}/cleanup`, {})
+  const cask = model.asked(/This transcript was made by speech to text/).slice(c0)[0] || ''
+  ok(/Meeting: Launch plan/.test(cask) && /Bridge AI ships to Northwind first/.test(cask), "the cleanup is told the meeting's name and what its files say", cask.slice(0, 500))
+  let k = await kit.api(`/meetings/${K.id}`)
+  const kl = (re) => k.transcript.find((l) => re.test(l.heard || l.text))
+  ok(r.fixed === 1 && kl(/demo bridge/).text === 'We should demo Bridge AI at the offsite.' && kl(/demo bridge/).cleaned && /bridge ay eye/.test(kl(/demo bridge/).heard), 'a misheard name is fixed, and the line says what was heard', [r, kl(/demo bridge/)])
+  ok(kl(/Thanks for watching/).dropped && !kl(/drop me please/).dropped && !kl(/rewrite me/).cleaned, 'words nobody said are left out; a long line isn\'t, and a rewrite isn\'t taken', k.transcript.map((l) => [l.text.slice(0, 20), !!l.dropped, !!l.cleaned]))
+  ok(kl(/^Sure, and/).text.endsWith('(my edit).') && !kl(/^Sure, and/).cleaned, 'a line you edited stays yours', kl(/^Sure, and/))
+  await kit.api(`/meetings/${K.id}/cleanup/undo`, { key: kl(/Thanks for watching/).key })
+  k = await kit.api(`/meetings/${K.id}`)
+  ok(!kl(/Thanks for watching/).dropped && kl(/demo bridge/).cleaned, 'Put back keeps that one line', kl(/Thanks for watching/))
+  await kit.api(`/meetings/${K.id}/cleanup/undo`, {})
+  k = await kit.api(`/meetings/${K.id}`)
+  ok(!k.transcript.some((l) => l.cleaned || l.dropped) && !k.cleanedAt, 'Undo the cleanup: back to what was heard', k.transcript.map((l) => l.text))
+  // When the meeting ends, it's cleaned up by itself, then summarized.
+  await kit.api('/settings', { meetings: { cleanup: true } }, 'PATCH')
+  const K2 = await kit.api('/meetings', { title: 'Second launch plan', call: false })
+  await send(K2.id, Buffer.concat([pcm(2, true), pcm(1.5), pcm(2, true), pcm(1.5), pcm(2, true), pcm(1.5)]))
+  const c1 = model.asked(/This transcript was made by speech to text/).length
+  await kit.api(`/meetings/${K2.id}/stop`, {})
+  ok(!!await until(async () => (await kit.api(`/meetings/${K2.id}`)).cleanedAt, 20000) && model.asked(/This transcript was made by speech to text/).length === c1 + 1, 'a meeting that ends is cleaned up by itself')
+  await kit.api('/settings', { meetings: { cleanup: false } }, 'PATCH')
+
+  // ---------- The kind of meeting, from its name ----------
+  const I = await kit.api('/meetings', { title: 'Interview - Mara Lind', call: false })
+  ok(I.kind === 'interview', 'a meeting called "Interview - ..." is an interview', I.kind)
+  await kit.api(`/meetings/${I.id}`, { kind: 'customer' }, 'PATCH')
+  await kit.api(`/meetings/${I.id}`, { title: 'Daily standup' }, 'PATCH')
+  ok((await kit.api(`/meetings/${I.id}`)).kind === 'customer', 'a kind you picked stays when it\'s renamed')
+  const D = await kit.api('/meetings', { title: 'Teams call, Thu 9:00', call: false })
+  await kit.api(`/meetings/${D.id}/event`, { event: { title: 'Team standup', attendees: ['Priya Shah', 'Tester'] } })
+  ok((await kit.api(`/meetings/${D.id}`)).kind === 'standup', 'and its invite can say what kind it is')
+  await kit.api(`/meetings/${D.id}/stop`, {})
+  await kit.api(`/meetings/${I.id}/stop`, {})
+
+  // ---------- AI Assist ----------
+  // On, while it records: after enough is said, the model suggests what to ask or check, told what
+  // the files say; kept, a suggestion goes in your notes; dismissed, it's gone. Turning it on is
+  // remembered for the meetings after.
+  const J = await kit.api('/meetings', { title: 'Interview - Mara Lind', call: false })
+  fs.writeFileSync(path.join(kit.home, 'Mara Lind - Resume.md'), 'Mara Lind\nLed the move to electric vans at Northwind Traders, cutting fuel costs by a third.')
+  await kit.api(`/meetings/${J.id}/links`, { path: path.join(kit.home, 'Mara Lind - Resume.md') })
+  r = await kit.api(`/meetings/${J.id}/assist`, { on: true })
+  ok(r.on === true && (await kit.api('/settings')).user?.meetings?.assist === true, 'AI Assist turned on, and remembered for the next meetings', [r.on, (await kit.api('/settings')).user?.meetings])
+  const a0 = model.asked(/This meeting is going on now/).length
+  said(J.id, [['them', 2, 'I led the move to electric vans at Northwind Traders and cut fuel costs by a third, with new routes and a charging plan for every depot.'], ['you', 9, 'How did you measure those savings, and did they hold up through the winter when the vans had less range?']])
+  r = await kit.api(`/meetings/${J.id}/assist`, {})
+  const aask = model.asked(/This meeting is going on now/).slice(a0)[0] || ''
+  ok(/helping the interviewer/.test(aask) && /Led the move to electric vans at Northwind Traders/.test(aask), 'Assist knows it\'s an interview, and what the resume says', aask.slice(0, 600))
+  let J1 = await kit.api(`/meetings/${J.id}`)
+  ok(J1.assistItems.length === 2 && J1.assistItems[0].kind === 'question' && /Mara Lind - Resume/.test(J1.assistItems[0].why), 'its suggestions, each with what it\'s based on', J1.assistItems)
+  await kit.api(`/meetings/${J.id}/assist/${J1.assistItems[0].id}`, { state: 'kept' }, 'PATCH')
+  await kit.api(`/meetings/${J.id}/assist/${J1.assistItems[1].id}`, { state: 'dismissed' }, 'PATCH')
+  J1 = await kit.api(`/meetings/${J.id}`)
+  ok(J1.assistItems.length === 1 && J1.assistItems[0].state === 'kept' && /\] Ask: Ask about/.test(J1.notes), 'one kept goes in your notes; one dismissed is gone', [J1.assistItems, J1.notes])
+  // By itself, after a line comes in, once enough more has been said.
+  const a1 = model.asked(/This meeting is going on now/).length
+  await send(J.id, Buffer.concat([pcm(2, true), pcm(1.5)]))
+  ok(!await until(() => model.asked(/This meeting is going on now/).length > a1, 3000), 'not again for a line or two')
+  await kit.api(`/meetings/${J.id}/stop`, {})
+  await kit.api(`/meetings/${J.id}/assist`, { on: false })
+  ok((await kit.api('/settings')).user?.meetings?.assist === false, 'and off again')
+
+  // ---------- Files you got lately ----------
+  // In Downloads or on the Desktop, from around when it was: one named after someone in it, a
+  // resume before an interview, one that came while it recorded; not one from last month or one
+  // that has nothing to do with it.
+  const dl = path.join(kit.home, 'Downloads')
+  fs.mkdirSync(dl, { recursive: true })
+  for (const n of ['Theo_Park_CV.txt', 'resume (3).pdf', 'cat.jpg']) fs.writeFileSync(path.join(dl, n), 'x')
+  fs.writeFileSync(path.join(dl, 'Theo Park notes old.txt'), 'x')
+  const old = new Date(Date.now() - 40 * 86400e3)
+  fs.utimesSync(path.join(dl, 'Theo Park notes old.txt'), old, old)
+  const R = await kit.api('/meetings', { title: 'Interview - Theo Park', call: false })
+  const sg = await kit.api(`/meetings/${R.id}/suggest`)
+  const names = (sg.recent || []).map((f) => f.name)
+  ok(names[0] === 'Theo_Park_CV.txt' && ['name', 'title'].includes(sg.recent[0].why) && names.includes('resume (3).pdf') && names.includes('cat.jpg') && !names.includes('Theo Park notes old.txt'), 'files you got lately that look like they go with it, the best first', sg.recent)
+  await kit.api(`/meetings/${R.id}/links`, { path: path.join(dl, 'Theo_Park_CV.txt') })
+  ok(!(await kit.api(`/meetings/${R.id}/suggest`)).recent.some((f) => f.name === 'Theo_Park_CV.txt'), 'and not once it\'s added')
+  await kit.api(`/meetings/${R.id}/stop`, {})
+
   // ---------- Who's talking, from the screen ----------
   // A look at the watched screen while the call talks: the text on it is kept, not the picture,
   // and naming who said what is told what the screen showed then, even with no invite to go on.
@@ -198,6 +315,8 @@ try {
   ok(/"Section 1", "Demo", "Q&A"/.test(sum) && /\n## Demo \(from 0:0\d\)\n/.test(sum) && /\] Dan Ruiz: These slides/.test(sum), 'the summary is asked for its sections, with the headings and names in the transcript', sum.slice(sum.indexOf('Transcript:'), sum.indexOf('Transcript:') + 500))
   ok(/The user's own notes:\n## Q&A\n/.test(sum), 'your notes go in without a heading nothing was written under', sum.slice(sum.indexOf('own notes'), sum.indexOf('own notes') + 80))
   await until(async () => (await kit.api(`/meetings/${A.id}`)).summary, 10000)
+  const terms = (await kit.api('/meetings/memory')).terms
+  ok(terms.find((x) => x.term === 'Priya')?.note === 'fixing the login bug before the beta' && !terms.some((x) => x.term === 'Zed'), 'who someone is goes in meeting memory from the summary, only for a name the meeting knows', terms.map((x) => [x.term, x.note]))
   const saved = await kit.api(`/meetings/${A.id}/save`, {})
   const files = saved.files.map((f) => fs.readFileSync(f, 'utf8')).join('\n')
   ok(/## Demo/.test(files) && /### Dan Ruiz \(/.test(files) && /### Tester \(/.test(files) && /## Summary/.test(files), 'saved Markdown: the summary, a heading per section, who said it (you by your name)', files.slice(0, 600))

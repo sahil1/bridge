@@ -29,11 +29,16 @@ export const MEETINGS_CHANNEL = 'bridge-meetings'
 // Calls are noticed on the computer the server runs on: only a window there offers to record one.
 const here = onThisComputer
 const when = () => new Date().toLocaleString(locale(), { weekday: 'short', hour: 'numeric', minute: '2-digit' })
-// A calendar event on now (or starting within ten minutes), to name a call's notes after.
-export async function eventNow() {
+// A calendar event on now (or starting within ten minutes), to name a call's notes after. With
+// two at once, the one under way and online, on the call's app (app: Teams, Zoom...) when that's
+// known, the nearer start breaking a tie.
+export async function eventNow(app) {
   const d = await api('/calendar').catch(() => null)
   const now = Date.now()
-  return (d?.events || d?.today || []).find((e) => e.start && !e.allDay && new Date(e.start).getTime() - now < 10 * 60_000 && (!e.end || new Date(e.end).getTime() > now)) || null
+  const on = (d?.events || d?.today || []).filter((e) => e.start && !e.allDay && !e.canceled && new Date(e.start).getTime() - now < 10 * 60_000 && (!e.end || new Date(e.end).getTime() > now))
+  const word = String(app || '').split(/\s+/)[0].toLowerCase()
+  const score = (e) => (new Date(e.start).getTime() <= now ? 2 : 0) + (e.online ? 1 : 0) + (word && `${e.join || ''} ${e.location || ''}`.toLowerCase().includes(word) ? 2 : 0) - Math.abs(new Date(e.start).getTime() - now) / 3_600_000
+  return on.sort((a, b) => score(b) - score(a))[0] || null
 }
 
 export function MeetingsProvider({ children }) {
@@ -162,7 +167,7 @@ export function MeetingsProvider({ children }) {
   }
   // Notes for a call that just started: named after the calendar event on now, if there is one.
   const startForCall = async (app) => {
-    const event = await eventNow()
+    const event = await eventNow(app)
     return start({ title: event?.title || `${app} call, ${when()}`, event })
   }
   // Recording now, from the sidebar: for the calendar event on now (its name and people), if there

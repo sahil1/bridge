@@ -54,7 +54,8 @@ export function add({ term, heard = [], note = '' } = {}, { source = 'you', meet
     terms.push(t)
   }
   for (const v of variants) if (!t.heard.some((h) => low(h) === low(v))) t.heard.push(v)
-  if (note && (source === 'you' || !t.note)) t.note = clean(note, 200)
+  // A note learned from a meeting fills an empty one, or replaces an older learned one: never yours.
+  if (note && (source === 'you' || !t.note || (t.source === 'learned' && t.noteBy !== 'you'))) { t.note = clean(note, 200); t.noteBy = source }
   if (source === 'you') t.source = 'you'
   if (meeting && !t.meetings.includes(meeting)) { t.meetings = [...t.meetings, meeting].slice(-50); t.seen = (t.seen || 0) + 1 }
   t.updatedAt = new Date().toISOString()
@@ -78,7 +79,7 @@ export function update(id, { term, heard, note } = {}) {
     for (const x of load()) if (x !== t) x.heard = x.heard.filter((h) => !variants.some((v) => low(v) === low(h)))
     t.heard = variants
   }
-  if (note != null) t.note = clean(note, 200)
+  if (note != null) { t.note = clean(note, 200); t.noteBy = 'you' }
   t.source = 'you'
   t.updatedAt = new Date().toISOString()
   store()
@@ -132,10 +133,12 @@ export function about(text, max = 40) {
   return `Names and terms from my meeting memory (spell them this way, and they may have been misheard as shown):\n${pick.map((t) => `- ${t.term}${t.note ? `: ${t.note}` : ''}${t.heard.length ? ` (heard as ${t.heard.slice(0, 4).map((h) => `"${h}"`).join(', ')})` : ''}`).join('\n')}`
 }
 
-// What a summary found: names (kept as learned, for the speech engine and later notes) and clear
+// What a summary found: names (kept as learned, for the speech engine and later notes), clear
 // mishearings ({ "Ack me": "Acme" }), taken only when the right spelling is one memory or the
-// meeting already knows (`known`: its title, people and your notes) and the wrong one was heard.
-export function learn({ names = [], misheard = {} } = {}, { meeting, known = '', heard = '' } = {}) {
+// meeting already knows (`known`: its title, people and your notes) and the wrong one was heard,
+// and who or what a name is ({ "Priya Shah": "Northwind's head of data" }), as a note on it for the
+// meetings after: only for a name the meeting knows, and never over a note of yours.
+export function learn({ names = [], misheard = {}, about = {} } = {}, { meeting, known = '', heard = '' } = {}) {
   let added = 0
   const k = String(known).toLowerCase(), h = String(heard).toLowerCase()
   for (const [wrong, right] of Object.entries(misheard && typeof misheard === 'object' ? misheard : {}).slice(0, 20)) {
@@ -149,6 +152,11 @@ export function learn({ names = [], misheard = {} } = {}, { meeting, known = '',
     // Proper nouns only: something capitalized or with a digit, not a sentence.
     if (name.length < 2 || name.split(' ').length > 5 || !/[\p{Lu}\p{N}]/u.test(name)) continue
     try { add({ term: name }, { source: find(name)?.source || 'learned', meeting }); added++ } catch { /* full */ }
+  }
+  for (const [n, note] of Object.entries(about && typeof about === 'object' ? about : {}).slice(0, 20)) {
+    const name = clean(n, 60), what = clean(note, 160)
+    if (name.length < 2 || what.length < 3 || !/[\p{Lu}\p{N}]/u.test(name) || !(find(name) || k.includes(low(name)) || h.includes(low(name)))) continue
+    try { add({ term: name, note: what }, { source: find(name)?.source || 'learned', meeting }) } catch { /* full */ }
   }
   return added
 }
