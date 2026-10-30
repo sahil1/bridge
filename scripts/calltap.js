@@ -3,10 +3,11 @@
 // and Intel Macs: calltap (the call's sound, native/calltap.swift), callwatch (which apps are on
 // a call, native/callwatch.swift), bridgeocr (the text on a captured screen or in a PDF linked to
 // a meeting, native/bridgeocr.swift), bridgespeech (speech to text on the Mac itself, with Apple's
-// transcriber, native/bridgespeech.swift) and bridgecal (asks macOS for your calendars,
-// native/bridgecal.swift). Needs Xcode's command line tools (xcode-select --install). Elsewhere, or
+// transcriber, native/bridgespeech.swift), bridgecal (asks macOS for your calendars,
+// native/bridgecal.swift) and bridgekeys (the dictation key held down in any app,
+// native/bridgekeys.swift). Needs Xcode's command line tools (xcode-select --install). Elsewhere, or
 // without them, meetings record your mic only, don't notice calls, and use what's on a screen or in
-// a PDF as pictures and links only. bridgespeech needs the macOS 26 SDK (Xcode 26) to build; with an
+// a PDF as pictures and links only, and the dictation key from other apps is tapped, not held. bridgespeech needs the macOS 26 SDK (Xcode 26) to build; with an
 // older one it's left out and meetings use whisper.cpp or a service.
 //   node scripts/calltap.js [out-dir] [--only name]
 import { spawnSync } from 'node:child_process'
@@ -22,7 +23,7 @@ if (process.platform !== 'darwin') { console.log('calltap: macOS only, skipped')
 fs.mkdirSync(out, { recursive: true })
 let failed = false
 // [name, oldest macOS it runs on, extra swiftc flags, optional (its build failing isn't a failure)]
-const TOOLS = [['calltap', '14.2'], ['callwatch', '14.0'], ['bridgeocr', '13.0'], ['bridgespeech', '13.0', ['-parse-as-library'], true], ['bridgecal', '13.0']]
+const TOOLS = [['calltap', '14.2'], ['callwatch', '14.0'], ['bridgeocr', '13.0'], ['bridgespeech', '13.0', ['-parse-as-library'], true], ['bridgecal', '13.0'], ['bridgekeys', '13.0']]
 for (const [name, macos, flags = [], optional = false] of TOOLS.filter(([n]) => !only || n === only)) {
   const src = path.join(ROOT, 'native', `${name}.swift`)
   const parts = []

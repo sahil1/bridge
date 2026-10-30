@@ -79,6 +79,10 @@ function Attached({ paneId }) {
     connect()
     const send = (msg) => { if (ws?.readyState === 1) ws.send(msg) }
     const typed = term.onData((d) => send(JSON.stringify({ type: 'input', data: d })))
+    // Dictation types here like a paste, without Enter (dictation/controller.js).
+    const host = hostRef.current
+    const onType = (e) => term.paste(String(e.detail || ''))
+    host.addEventListener('bridge-type', onType)
     const sized = term.onResize(({ cols, rows }) => send(JSON.stringify({ type: 'resize', cols, rows })))
     const ro = new ResizeObserver(() => { try { fit.fit() } catch { /* hidden */ } })
     ro.observe(hostRef.current)
@@ -92,6 +96,7 @@ function Attached({ paneId }) {
       stop = true
       clearTimeout(retry)
       typed.dispose(); sized.dispose(); ro.disconnect(); mo.disconnect()
+      host.removeEventListener('bridge-type', onType)
       try { ws?.close() } catch { /* closed */ }
       disposeTerm(term)
     }

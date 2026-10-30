@@ -18,6 +18,7 @@
     "afterPack": "./after-pack.js",
     "afterSign": "./notarize-app.js",
     "afterAllArtifactBuild": "./notarize-dmg.js",
+    "npmRebuild": false,
     "directories": {
       "output": "dist"
     },
@@ -25,7 +26,9 @@
       "main.js",
       "preload.js",
       "tile-preload.js",
-      "package.json"
+      "dictation.js",
+      "package.json",
+      "!node_modules/uiohook-napi/{libuiohook,src,binding.gyp}{,/**}"
     ],
     "mac": {
       "icon": "build/icon.png",
@@ -63,7 +66,11 @@
       "hardenedRuntime": true,
       "entitlements": "entitlements.mac.plist",
       "entitlementsInherit": "entitlements.mac.plist",
-      "artifactName": "Bridge-AI-mac-${arch}.${ext}"
+      "artifactName": "Bridge-AI-mac-${arch}.${ext}",
+      "files": [
+        "package.json",
+        "!node_modules/uiohook-napi{,/**}"
+      ]
     },
     "win": {
       "icon": "build/icon.png",
@@ -75,7 +82,11 @@
           ]
         }
       ],
-      "artifactName": "Bridge-AI-win-${arch}.${ext}"
+      "artifactName": "Bridge-AI-win-${arch}.${ext}",
+      "files": [
+        "package.json",
+        "!node_modules/uiohook-napi/prebuilds/{darwin,linux}-*{,/**}"
+      ]
     },
     "linux": {
       "icon": "build/icon.png",
@@ -97,7 +108,12 @@
       "executableName": "bridge-ai",
       "synopsis": "Run and talk to all your AI coding agents",
       "maintainer": "Bridge AI contributors <sahil1@users.noreply.github.com>",
-      "artifactName": "Bridge-AI-linux-${arch}.${ext}"
+      "artifactName": "Bridge-AI-linux-${arch}.${ext}",
+      "files": [
+        "package.json",
+        "!node_modules/uiohook-napi/prebuilds/{darwin,win32}-*{,/**}",
+        "!node_modules/uiohook-napi/prebuilds/linux-{arm64,loong64}{,/**}"
+      ]
     },
     "extraResources": [
       {
@@ -133,6 +149,9 @@
       "runAfterFinish": true,
       "deleteAppDataOnUninstall": false
     }
+  },
+  "dependencies": {
+    "uiohook-napi": "1.5.5"
   },
   "devDependencies": {
     "electron": "^44.10.0",
