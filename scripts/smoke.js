@@ -60,6 +60,22 @@ try {
     if (process.env.BRIDGE_SIGN_P12 && !/certificate leaf = H"/.test(shown)) throw new Error(`a certificate was given, but it's signed ${by}`)
     return by
   })
+  // Dictation's key from other apps (desktop/dictation.js): on a Mac its helper (native/bridgekeys)
+  // is in the app and answers; on Windows and Linux the keyboard hook's build for this system is.
+  await step('the dictation key can be heard from other apps', async () => {
+    if (process.platform === 'darwin') {
+      const r = spawnSync(path.join(app.root, 'native', 'bin', 'bridgekeys'), ['front'], { encoding: 'utf8', timeout: 10000 })
+      if (r.status !== 0 || !/"bundle"/.test(r.stdout)) throw new Error(`native/bin/bridgekeys front: ${r.error?.message || r.stderr || r.stdout || r.status}`)
+      return r.stdout.trim()
+    }
+    const want = `${process.platform}-x64`
+    const found = []
+    const look = (d, depth = 0) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory() && depth < 8) look(p, depth + 1); else if (e.name === 'uiohook-napi.node') found.push(p) } }
+    look(path.dirname(app.root))
+    const ours = found.find((f) => f.includes(want) && f.includes('app.asar.unpacked'))
+    if (!ours) throw new Error(`no unpacked ${want} uiohook-napi.node (found: ${found.join(', ') || 'none'})`)
+    return path.relative(path.dirname(app.root), ours)
+  })
   await step('server starts', async () => {
     for (let i = 0; i < 300; i++) {
       try { await get('/api/config'); return } catch { await new Promise((r) => setTimeout(r, 200)) }

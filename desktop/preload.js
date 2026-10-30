@@ -1,8 +1,8 @@
 // Lets the page know it's inside the desktop app (for the title bar layout), and lets it take a
 // picture of part of its own window (the Preview tab's app), lets an agent open in a window of its
 // own, says how long since you last used the computer, restarts the app, picks a folder or files in
-// Finder, says where a dropped file is, and helps you allow what macOS asks about. Nothing else is
-// exposed.
+// Finder, says where a dropped file is, helps you allow what macOS asks about, and sets up the
+// dictation key and its window. Nothing else is exposed.
 const { contextBridge, ipcRenderer, webUtils } = require('electron')
 // Another of your devices, shown through this one (/m/<id>/): its pages get windows and nothing
 // of this computer's (no Finder, files, mic, screen or floating card), as on a phone.
@@ -47,5 +47,16 @@ else contextBridge.exposeInMainWorld('bridgeApp', {
   pickFiles: () => ipcRenderer.invoke('bridge:pick-files'),
   pathOf: (file) => { try { return webUtils.getPathForFile(file) || null } catch { return null } },
   watching: (on) => ipcRenderer.invoke('bridge:watching', !!on),
+  // Dictation's key from other apps (Settings › Voice), and its window (?dictate=1): what was
+  // pressed before it was ready, its size, whether it's listening (Esc is held for it then), hiding,
+  // copying, and opening the agent or the setup in the main window.
+  dictateStatus: () => ipcRenderer.invoke('bridge:dictate-status'),
+  dictateConfigure: (s) => ipcRenderer.invoke('bridge:dictate-configure', s),
+  hudReady: () => ipcRenderer.invoke('bridge:hud-ready'),
+  hudSize: (w, h) => ipcRenderer.send('bridge:hud-size', w, h),
+  hudPhase: (phase) => ipcRenderer.send('bridge:hud-phase', String(phase)),
+  hudHide: () => ipcRenderer.invoke('bridge:hud-hide'),
+  hudCopy: (text) => ipcRenderer.invoke('bridge:hud-copy', String(text)),
+  hudOpen: (o) => ipcRenderer.invoke('bridge:hud-open', o),
 })
 window.addEventListener('DOMContentLoaded', () => document.documentElement.classList.add('in-bridge-app', `platform-${process.platform}`))

@@ -209,6 +209,10 @@ export default function Terminal({ paneId, active, focusKey, onChat, shell = fal
       if (steps.length) send(steps)
     }
     const sub = term.onData((d) => { chunks.push(d); if (!timer) timer = setTimeout(flush, 18) })
+    // Dictation types here like a paste, without Enter (dictation/controller.js).
+    const host = hostRef.current
+    const onType = (e) => term.paste(String(e.detail || ''))
+    host.addEventListener('bridge-type', onType)
     // You scrolled (the wheel, the scrollbar or the keyboard): back at the bottom, the latest
     // again; at the top, read further back.
     const scrolled = () => {
@@ -249,6 +253,7 @@ export default function Terminal({ paneId, active, focusKey, onChat, shell = fal
     mq.addEventListener('change', applyTheme)
     return () => {
       sub.dispose(); onScroll.dispose(); ro.disconnect(); mo.disconnect(); mq.removeEventListener('change', applyTheme)
+      host.removeEventListener('bridge-type', onType)
       ta?.removeEventListener('focus', onFocus); ta?.removeEventListener('blur', onBlur)
       disposeTerm(term); termRef.current = null; lastRef.current = ''
     }

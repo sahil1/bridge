@@ -7,7 +7,8 @@ import { useEffect, useRef } from 'react'
 import Console from './Console.jsx'
 import ErrorBoundary from './ErrorBoundary.jsx'
 import Icon from './Icon.jsx'
-import { useFleet, machineId, embedded } from '../api.js'
+import { useFleet, usePoll, machineId, embedded } from '../api.js'
+import Dictation from '../dictation/Dictation.jsx'
 
 // A channel for each device's windows: windows for two devices side by side can have agents with
 // the same id.
@@ -31,6 +32,7 @@ export default function Solo({ paneId }) {
   if (fleet && !fleet.down && home.current === undefined) home.current = fleet.session || ''
   const away = !!fleet && home.current !== undefined && (fleet.session || '') !== home.current
   const agent = away ? null : fleet?.agents?.find((a) => a.paneId === paneId)
+  const conf = usePoll('/config', 10 * 60 * 1000).data
 
   useEffect(() => {
     if (embedded) return
@@ -61,6 +63,7 @@ export default function Solo({ paneId }) {
 
   return (
     <div className="solo">
+      <Dictation conf={conf?.dictation} onScreen={() => paneId} />
       {!fleet ? <div className="pad"><div className="skeleton-rows"><div /><div /></div></div>
         : agent
           ? <ErrorBoundary name="This agent's view" resetKey={agent.paneId}><Console agent={agent} variant="focus" extraActions={embedded ? null : back} queued={fleet.queue?.[paneId] || []} /></ErrorBoundary>

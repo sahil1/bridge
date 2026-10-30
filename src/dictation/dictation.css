@@ -1,0 +1,49 @@
+/* Dictation (Dictation.jsx, Hud.jsx, the message box's mic button). */
+
+/* The mic button, held: no text selection, long-press menu or scrolling while it's down. */
+.comp-btn.mic-btn { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+/* What dictation just put in the box, for a moment. */
+.composer.dictated { box-shadow: 0 0 0 2px var(--accent-soft), 0 4px 16px rgb(0 0 0 / .04); transition: box-shadow .3s; }
+
+/* Listening for something other than a message box (a terminal, a search box, notes): a bar at the
+   bottom of the window. */
+.dict-bar { position: fixed; left: 50%; bottom: max(16px, env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 400; width: min(560px, calc(100vw - 32px)); padding: 8px 10px 8px 14px; border-radius: 14px; background: var(--pane); color: var(--ink); border: 1px solid var(--line-2); box-shadow: var(--shadow-lg, 0 8px 28px rgb(0 0 0 / .18)); font-size: 12.5px; }
+.dict-bar .voice-setup { border: 0; padding: 2px 0; background: transparent; }
+.dict-row { display: flex; align-items: center; gap: 10px; min-height: 30px; }
+.dict-row .rec-meter { flex: 0 1 120px; }
+.dict-hint { flex: 1; min-width: 0; color: var(--ink-2); line-height: 1.4; }
+.dict-row .send { width: 30px; height: 30px; }
+
+/* The desktop app's dictation window (?dictate=1): transparent, the card is what shows. */
+html.is-hud, html.is-hud body, html.is-hud #root { background: transparent !important; overflow: hidden; }
+.hud-root { padding: 12px; width: max-content; }
+.hud { display: grid; gap: 8px; width: 420px; max-width: calc(100vw - 24px); padding: 10px 12px; border-radius: 16px; background: var(--pane); color: var(--ink); box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 9%, transparent), 0 2px 8px rgb(0 0 0 / .16); font: 13px var(--font); user-select: none; }
+.hud-row { display: flex; align-items: center; gap: 10px; min-height: 28px; }
+.hud-row .rec-meter { flex: 1; }
+.hud-row .grow { flex: 1; }
+.hud-row .send { width: 28px; height: 28px; }
+.hud-hint { margin: 0; color: var(--ink-2); font-size: 12px; }
+.hud-text { margin: 0; max-height: 180px; overflow: auto; line-height: 1.45; user-select: text; white-space: pre-wrap; overflow-wrap: anywhere; }
+.hud-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.hud-done { margin: 0; color: var(--good); font-size: 12.5px; display: flex; align-items: center; gap: 6px; }
+.hud-note { flex: 1; min-width: 0; color: var(--ink-2); line-height: 1.4; }
+.hud-setup p { margin: 0 0 8px; color: var(--ink-2); line-height: 1.45; }
+.hud-setup .voice-setup { border: 0; padding: 0; background: transparent; }
+.hud-to { position: relative; min-width: 0; }
+.hud-to-btn { display: inline-flex; align-items: center; gap: 4px; max-width: 240px; padding: 3px 8px; border-radius: 8px; color: var(--ink-2); font-size: 12px; }
+.hud-to-btn b { color: var(--ink); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hud-to-btn:hover { background: var(--pane-3); }
+.hud-menu { position: absolute; left: 0; top: calc(100% + 4px); z-index: 5; display: grid; min-width: 220px; max-height: 220px; overflow: auto; padding: 4px; border-radius: 10px; background: var(--pane); border: 1px solid var(--line-2); box-shadow: var(--shadow-lg, 0 8px 28px rgb(0 0 0 / .18)); }
+.hud-menu button { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 7px; text-align: left; color: var(--ink); font-size: 12.5px; }
+.hud-menu button:hover, .hud-menu button.on { background: var(--pane-3); }
+.hud-menu p { margin: 6px 8px; }
+
+/* Settings › Voice › Dictation. */
+.st-dictation .st-check { display: flex; align-items: flex-start; gap: 9px; font-size: 13px; line-height: 1.45; cursor: pointer; }
+.st-dictation .st-check input { margin-top: 3px; flex: none; }
+.st-dictation .st-row > span:first-child { min-width: 120px; font-size: 13px; }
+.st-dictation .st-note { margin: 0; }
+.dict-key { font: 12.5px var(--font-mono); padding: 4px 9px; border-radius: 7px; border: 1px solid var(--line-2); background: var(--pane-2); min-width: 84px; text-align: center; }
+.st-radios { align-items: flex-start; }
+.st-choices { display: flex; flex-direction: column; gap: 5px; font-size: 13px; }
+.st-choices label { display: flex; align-items: center; gap: 7px; cursor: pointer; }
