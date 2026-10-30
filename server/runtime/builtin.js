@@ -6,14 +6,17 @@
 // from the host. Spaces and tabs are saved to the data folder; when the host is gone too (after
 // a reboot), agents that can resume a session (Claude Code, Codex) reopen where they were, and
 // the rest start fresh in the same folder. If the host can't start, terminals run in this process.
+// An agent that was in the middle of something when its terminal ended is told to carry on once
+// it's back in its conversation (carryOn, below).
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import pty from 'node-pty'
 import headless from '@xterm/headless'
 import { adapter, loginPath, newSessionId, installed } from '../agents.js'
 import { discoverSession, locate } from '../transcripts.js'
-import { dataFile, ensureDir, DATA, IS_WIN } from '../paths.js'
+import { dataFile, ensureDir, DATA, IS_WIN, ROOT } from '../paths.js'
 import { shellCommand, agentEnv, SETUP_DONE } from './spawn.js'
 import { providerEnv } from '../providers.js'
 import * as accounts from '../accounts.js'
@@ -34,6 +37,7 @@ try {
 } catch { /* Windows, or a source build */ }
 
 const STATE = dataFile('runtime.json')
+const VERSION = (() => { try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version } catch { return null } })()
 const COLS = Number(process.env.BRIDGE_COLS) || 120
 const ROWS = Number(process.env.BRIDGE_ROWS) || 40
 
@@ -60,19 +64,22 @@ const prune = () => { spaces = spaces.filter((w) => w.fresh || tabs.some((t) => 
 
 function save() {
   ensureDir(DATA)
+  // version and at: whether what ends up reopening them was an update or the computer restarting.
   const out = {
-    nextId, spaces, tabs,
-    panes: [...panes.values()].map((p) => ({ paneId: p.paneId, tabId: p.tabId, workspaceId: p.workspaceId, kind: p.kind, cwd: p.cwd, model: p.model, sessionId: p.sessionId, account: p.account, ...(p.env ? { env: p.env } : {}) })),
+    nextId, spaces, tabs, version: VERSION, at: Date.now(),
+    panes: [...panes.values()].map((p) => ({ paneId: p.paneId, tabId: p.tabId, workspaceId: p.workspaceId, kind: p.kind, cwd: p.cwd, model: p.model, sessionId: p.sessionId, account: p.account, ...(p.env ? { env: p.env } : {}), ...(p.midTask ? { midTask: true } : {}), ...(p.continuedAt ? { continuedAt: p.continuedAt } : {}) })),
   }
   try { fs.writeFileSync(STATE, JSON.stringify(out, null, 2)) } catch { /* read-only disk: keep going */ }
 }
 
 // env: extra variables for the agent (a chief of staff thread's id), kept for when it starts again.
-async function spawnPane({ paneId, tabId, workspaceId, kind, cwd, sessionId, resume, fork, opening, model, access, account, setup, env }) {
+// continuedAt: when it was last told to carry on after an interruption (carryOn).
+async function spawnPane({ paneId, tabId, workspaceId, kind, cwd, sessionId, resume, fork, opening, model, access, account, setup, env, continuedAt }) {
   const a = adapter(kind)
   const PATH = await loginPath()
   let bin = null
   let args = []
+  let reopened = false // its conversation, from its transcript
   if (kind !== 'shell') {
     bin = (await installed()).find((x) => x.kind === kind)?.path || a.bin[0]
     // Resume only a session that has a transcript (one that never got a message can't be resumed).
@@ -82,8 +89,7 @@ async function spawnPane({ paneId, tabId, workspaceId, kind, cwd, sessionId, res
       // A copy of session `fork`: Claude takes the new id we give it; Codex names its own.
       sessionId = a.sessionId === 'assign' ? newSessionId() : null
       args = a.fork(fork, sessionId || undefined)
-    } else if (hasLog) args = a.resume(sessionId)
-    else {
+    } else if (hasLog) { args = a.resume(sessionId); reopened = true } else {
       if (resume) sessionId = null
       if (a.sessionId === 'assign' && !sessionId) sessionId = newSessionId()
       args = a.start({ sessionId: a.sessionId === 'assign' ? sessionId : undefined, prompt: a.promptArg ? opening : undefined })
@@ -102,6 +108,7 @@ async function spawnPane({ paneId, tabId, workspaceId, kind, cwd, sessionId, res
     paneId, tabId, workspaceId, kind, cwd, model: model || null, sessionId: sessionId || null, account: account || null, env: env || null, proc, remote, term: null,
     title: '', status: kind === 'shell' ? null : 'idle', seq: 0, seen: true, setupPending: !!setup && !IS_WIN,
     startedAt: Date.now(), lastOutput: 0, lastInput: 0, clients: new Set(),
+    reopened, continuedAt: continuedAt || null,
   }
   await wire(p)
 
@@ -194,6 +201,26 @@ async function adopt(t, s) {
   return p
 }
 
+// An agent that was in the middle of something when its terminal ended, now back in its
+// conversation: index.js tells it to carry on (unless Settings › General says not to). Not twice in
+// ten minutes, so work that keeps taking Bridge AI down isn't sent round in circles. why: update,
+// reboot, restart (Bridge AI stopped) or host (its terminals stopped while it ran).
+let onInterrupted = null
+const interrupted = []
+function carryOn(p, why) {
+  if (!p?.reopened) return
+  if (p.continuedAt && Date.now() - p.continuedAt < 10 * 60000) { console.log(`${p.paneId} was interrupted again within ten minutes; not telling it to carry on this time`); return }
+  p.continuedAt = Date.now()
+  save()
+  if (onInterrupted) onInterrupted(p.paneId, why)
+  else interrupted.push([p.paneId, why])
+}
+// The server asks once it's ready; the ones reopened before then are handed over at once.
+export function whenInterrupted(fn) {
+  onInterrupted = fn
+  for (const [paneId, why] of interrupted.splice(0)) fn(paneId, why)
+}
+
 // Bring back the last saved layout: terminals still running in the host just as they are, and
 // the rest started again (after a reboot, say, or with Keep agents running off).
 export async function restore({ keep = true } = {}) {
@@ -204,6 +231,10 @@ export async function restore({ keep = true } = {}) {
   tabs = s.tabs || []
   nextId = s.nextId || 1
   const saved = new Map((s.panes || []).map((p) => [p.paneId, p]))
+  // Why the ones that have to start again ended: an update, the computer restarting, or Bridge AI
+  // stopping (a crash, or quitting with Keep agents running off).
+  const booted = Date.now() - os.uptime() * 1000
+  const why = s.version && VERSION && s.version !== VERSION ? 'update' : s.at && s.at < booted ? 'reboot' : 'restart'
   const l = await hostLink()
   for (const t of l ? await l.list().catch(() => []) : []) {
     // Never hand out an id the host already uses.
@@ -221,7 +252,7 @@ export async function restore({ keep = true } = {}) {
     }
   }
   for (const p of saved.values()) {
-    try { await spawnPane({ ...p, resume: true }) } catch { /* agent no longer installed */ }
+    try { const back = await spawnPane({ ...p, resume: true }); if (p.midTask) carryOn(back, why) } catch { /* agent no longer installed */ }
   }
   tabs = tabs.filter((t) => [...panes.values()].some((p) => p.tabId === t.tabId))
   prune()
@@ -250,8 +281,7 @@ async function lost() {
     const t = live.get(p.paneId)
     try {
       if (t && !t.exited) await adopt(t, p)
-      else if (!t) await spawnPane({ ...p, resume: true })
-      else panes.delete(p.paneId)
+      else if (!t) { const back = await spawnPane({ ...p, resume: true }); if (p.midTask) carryOn(back, 'host') } else panes.delete(p.paneId)
     } catch { if (panes.get(p.paneId) === p) panes.delete(p.paneId) }
   }
   tabs = tabs.filter((t) => [...panes.values()].some((p) => p.tabId === t.tabId))
@@ -293,6 +323,9 @@ function statusOf(p) {
   else if (busy) { s = 'working'; p.pastSetup = true }
   // No busy indicator to read: fall back to "output is streaming that you didn't type".
   else if (a.busyFromOutput && Date.now() - p.lastOutput < 1200 && Date.now() - p.lastInput > 1500 && Date.now() - p.startedAt > 4000) s = 'working'
+  // In the middle of something (working, or waiting on you mid-turn): kept, for carryOn after a crash.
+  const mid = s === 'working' || (s === 'blocked' && !setup)
+  if (mid !== !!p.midTask) { p.midTask = mid; save() }
   if (s === 'working' && p.status !== 'working') p.seen = false
   if (s === 'idle' && !p.seen && (p.status === 'working' || p.status === 'done')) s = 'done'
   if (s !== p.status) { p.status = s; p.seq++ }
@@ -542,6 +575,8 @@ export function setKeep(on) {
 // next server to pick up. Off (or without a host), they end now; the layout is saved, and they
 // come back next time, resuming their sessions.
 export function shutdown({ keep = keepOn } = {}) {
+  // What each is doing right now, not at the last look, so one quit mid-task carries on next time.
+  for (const p of panes.values()) { try { statusOf(p) } catch { /* no screen yet */ } }
   save()
   stopping = true
   if (link && !link.closed) { if (keep) link.detach(true); else link.quit() }
