@@ -47,7 +47,7 @@ env:
   INSTALLER: https://raw.githubusercontent.com/${{ github.repository }}/${{ inputs.ref || (github.event_name == 'push' && github.sha) || 'main' }}
   # Empty: the latest release, as people get it.
   BRIDGE_VERSION: ${{ inputs.version || (github.event_name == 'release' && github.event.release.tag_name) || (github.event_name == 'workflow_run' && github.event.workflow_run.head_branch) || '' }}
-  FROM_RUN: ${{ inputs.run || (github.event_name == 'push' && '41067768429') || '' }}
+  FROM_RUN: ${{ inputs.run || '' }}
   BASE: http://127.0.0.1:7420
 
 jobs:
