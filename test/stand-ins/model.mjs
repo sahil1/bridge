@@ -4,8 +4,12 @@
 //   Speech to text: "Service transcript <n>." for the n-th piece. For a meeting called "Tags only"
 //   (in the hint it's sent), only notes about sound for its first two: "[END]", then
 //   "(keyboard clicking) [ Silence ]", as whisper writes for a stretch with no words.
-//   Meeting notes, a part of a long meeting, who said what, and questions about meetings: fixed
-//   answers in the shape meetings.js asks for.
+//   Meeting notes, a part of a long meeting, who said what, cleaning up a transcript, AI Assist and
+//   questions about meetings: fixed answers in the shape meetings.js asks for. The cleanup fixes
+//   "bridge ay eye" to "Bridge AI", rewrites a line that says "rewrite me" (which meetings.js
+//   turns down), and leaves out "Thanks for watching" and "drop me please"; Assist suggests a
+//   question about what the files say (or the invite, without them) and a check of the last thing
+//   said.
 //   With tools, "EDIT <file>" runs a script (read it, change "hello" to "hello world", cat it).
 //   Anything else: "echo: <the last thing said>".
 //   A key of sk-bad is turned down (HTTP 401), as a provider would.
@@ -33,9 +37,25 @@ function answer(b) {
     if (asked === 'run_command') return say(`All done: ${tail.content.replace(/\n/g, ' | ')}`)
   }
   if (/Write meeting notes in Markdown/.test(last)) {
-    return say(`## Summary\n- The beta ships on November third.\n\n## Decisions\n- Ship the beta on November third.\n\n## Action items\n- [ ] You: send the updated budget to finance (Friday)\n- [ ] Priya: fix the login bug\n\n## Notes\n- Design review done.\n\n\`\`\`terms\n${JSON.stringify({ names: ['Priya'], misheard: {} })}\n\`\`\``)
+    return say(`## Summary\n- The beta ships on November third.\n\n## Decisions\n- Ship the beta on November third.\n\n## Action items\n- [ ] You: send the updated budget to finance (Friday)\n- [ ] Priya: fix the login bug\n\n## Notes\n- Design review done.\n\n\`\`\`terms\n${JSON.stringify({ names: ['Priya'], misheard: {}, about: { Priya: 'fixing the login bug before the beta', Zed: 'nobody in this meeting' } })}\n\`\`\``)
   }
   if (/This is part \d+ of \d+/.test(last)) return say(`- part ${/This is part (\d+)/.exec(last)[1]} key points`)
+  if (/This transcript was made by speech to text/.test(last)) {
+    const fix = {}, drop = []
+    for (const [, n, text] of last.matchAll(/^(\d+)\. \[[^\]]+\] [^:]+: (.*)$/gm)) {
+      if (/bridge ay eye/i.test(text)) fix[n] = text.replace(/bridge ay eye/gi, 'Bridge AI')
+      if (/rewrite me/i.test(text)) fix[n] = 'Something else entirely, said in many more words than were ever heard on this line.'
+      if (/^thanks for watching|drop me please/i.test(text)) drop.push(Number(n))
+    }
+    return say(JSON.stringify({ fix, drop }))
+  }
+  if (/This meeting is going on now/.test(last)) {
+    const file = /### ([^\n]+)\n([^\n]+)/.exec(last)
+    const lastSaid = [...last.matchAll(/^\[[^\]]+\] [^:]+: (.*)$/gm)].at(-1)?.[1]
+    const items = [{ kind: 'question', text: file ? `Ask about "${file[2].slice(0, 40)}"` : 'Ask what they hope to get out of this', why: file ? `${file[1]}` : 'The invite' }]
+    if (lastSaid) items.push({ kind: 'check', text: `Check: "${lastSaid.slice(0, 40)}"`, why: 'Just said' })
+    return say(JSON.stringify({ items }))
+  }
   // Who said what: the slides and the agenda are Dan's, the budget Priya's, the rest unknown.
   if (/Say who said each numbered Them line/.test(last)) {
     const out = {}

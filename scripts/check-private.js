@@ -100,7 +100,7 @@ const PATTERNS = [
 
 // Products and services Bridge AI names itself (calls, calendars, trackers, agents), public names
 // that turn up in meeting memory because they come up in meetings.
-const PRODUCTS = new Set(['teams', 'zoom', 'webex', 'slack', 'jira', 'confluence', 'atlassian', 'linear', 'notion', 'outlook', 'gmail', 'google', 'microsoft', 'microsoft 365', 'onedrive', 'sharepoint', 'github', 'gitlab', 'figma', 'granola', 'claude', 'codex', 'gemini', 'copilot', 'cursor', 'grok', 'deepseek', 'kimi', 'openrouter', 'antigravity', 'z.ai', 'chatgpt', 'openai', 'anthropic', 'amazon', 'aws', 'bedrock', 'amazon bedrock', 'azure', 'vertex', 'vertex ai', 'google vertex ai', 'google cloud'])
+const PRODUCTS = new Set(['teams', 'zoom', 'webex', 'slack', 'jira', 'confluence', 'atlassian', 'linear', 'notion', 'outlook', 'gmail', 'google', 'microsoft', 'microsoft 365', 'onedrive', 'sharepoint', 'github', 'gitlab', 'figma', 'granola', 'claude', 'codex', 'gemini', 'copilot', 'cursor', 'grok', 'deepseek', 'kimi', 'openrouter', 'antigravity', 'z.ai', 'chatgpt', 'openai', 'anthropic', 'amazon', 'aws', 'bedrock', 'amazon bedrock', 'azure', 'azure openai', 'vertex', 'vertex ai', 'google vertex ai', 'google cloud'])
 
 // Values that are yours, from this machine and your Bridge AI data folder.
 function personalValues() {

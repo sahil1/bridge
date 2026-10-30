@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import Icon, { StatusDot } from '../Icon.jsx'
 import { api, usePoll, useFleet } from '../../api.js'
 import { MEETINGS_CHANNEL, clock, useCallEvent, QuickNote } from './recording.jsx'
+import { KIND, setAssist, markAssist } from './assist.jsx'
 import { t, locale } from '../../i18n/index.js'
 import './meetings.css'
 
@@ -13,6 +14,8 @@ import './meetings.css'
 // instead (Settings › Meetings), a click on the bar opens and closes it. On a Mac it can move to the
 // menu bar for the meeting, out of the way of a screen you share. When a call starts: Take notes.
 // When it ends: Stop or keep recording. Otherwise (Settings › Meetings › Always): what needs you.
+// With AI Assist on, its newest suggestion shows under the bar, open or not, since you're looking
+// at the call: ✓ puts it in your notes, ✕ waves it away.
 // Drag it from anywhere that isn't a button.
 // The recording itself is in the main window; this one asks it over a BroadcastChannel, and asks
 // the desktop app (preload) to start notes for a call, to open things and to fit its size.
@@ -160,6 +163,7 @@ export default function FloatCard() {
     const end = m?.event?.end ? new Date(m.event.end) : null
     const toEnd = end ? Math.round((end.getTime() - Date.now()) / 60000) : null
     const part = m?.sections?.length ? m.sections[m.sections.length - 1].title : null
+    const tip = m?.assist ? [...(m.assistItems || [])].reverse().find((x) => x.state === 'new') : null
     open = hover || (onHover && pinned) || !!r.callEnded
     body = (
       <>
@@ -177,6 +181,14 @@ export default function FloatCard() {
             : <button type="button" className="fc-x" onClick={() => setHover((v) => !v)} aria-expanded={open} aria-label={open ? t('Show less') : t('Show more')} title={open ? t('Show less') : t('Show more')}><Icon name={open ? 'up' : 'down'} size={12} /></button>}
           {app().platform === 'darwin' && app().floatHide && <button type="button" className="fc-x" onClick={() => app().floatHide()} aria-label={t('Move to the menu bar')} title={t('Move to the menu bar, out of the way of a screen you share')}><Icon name="minimize" size={12} /></button>}
         </div>
+        {tip && (
+          <div className={`fc-tip ${tip.kind}`} role="status">
+            <span className="fc-tip-kind">{t(KIND[tip.kind] || KIND.idea)}</span>
+            <span className="fc-tip-text" title={tip.why || ''}>{tip.text}</span>
+            <button type="button" className="fc-x" onClick={() => act(() => markAssist(r.id, tip.id, 'kept'))} aria-label={t('Add to my notes')} title={t('Add to my notes')}><Icon name="check" size={12} /></button>
+            <button type="button" className="fc-x" onClick={() => act(() => markAssist(r.id, tip.id, 'dismissed'))} aria-label={t('Dismiss')} title={t('Dismiss')}><Icon name="x" size={12} /></button>
+          </div>
+        )}
         {open && (
           <div className="fc-more">
             {r.callEnded && <p className="fc-line"><b>{r.callEndedApp ? t('The {app} call ended.', { app: r.callEndedApp }) : t('The call ended.')}</b> {left != null ? t('Stopping in {time}.', { time: clock(left) }) : t('Stop recording?')}</p>}
@@ -201,6 +213,7 @@ export default function FloatCard() {
                 ? <button type="button" className="btn small" onClick={() => op('resume')}><Icon name="mic" size={12} /> {t('Resume')}</button>
                 : <button type="button" className="btn small" onClick={() => op('pause')}><Icon name="pause" size={12} /> {t('Pause')}</button>)}
               <button type="button" className="btn small" onClick={() => op('section')} title={t('Start the next part of the meeting here, like a lap. The transcript, your notes and the summary get a heading for each part.')}><Icon name="flag" size={12} /> {t('New section')}</button>
+              <button type="button" className={`btn small${m?.assist ? ' on' : ''}`} aria-pressed={!!m?.assist} onClick={() => act(() => setAssist(r.id, !m?.assist))} title={m?.assist ? t('AI Assist is on: it suggests what to ask or check next. Click to turn it off') : t('Turn on AI Assist: while it records, it suggests what to ask or check next, from what\'s said and the files')}><Icon name="bulb" size={12} /> {t('Assist')}</button>
               <button type="button" className="btn small danger-soft" onClick={() => op('stop')}><Icon name="stop" size={12} /> {t('Stop')}</button>
               {here && (screen
                 ? <>

@@ -58,6 +58,43 @@ function Row({ id, l, onChange, onMsg }) {
   )
 }
 
+// Files you got lately that look like they go with the meeting (server meetings.js recentFiles): in
+// Downloads or on the Desktop, named after someone in it or its name, a resume before an interview,
+// or anything that came while it recorded. One click links it. blocked: the folder macOS hasn't let
+// Bridge AI see yet.
+const ago = (iso) => {
+  const m = Math.round((Date.now() - Date.parse(iso)) / 60000)
+  return m < 2 ? t('just now') : m < 60 ? t('{n} min ago', { n: m }) : m < 36 * 60 ? t('{n} h ago', { n: Math.round(m / 60) }) : when(iso)
+}
+export function RecentFiles({ id, sug, onAdded, compact = false, onCheck }) {
+  const [busy, setBusy] = useState(null)
+  const [err, setErr] = useState(null)
+  const files = sug?.recent || []
+  const add = async (f) => {
+    setBusy(f.path); setErr(null)
+    try { await api(`/meetings/${encodeURIComponent(id)}/links`, { method: 'POST', body: { path: f.path } }); onAdded?.(f) } catch (e) { setErr(e.message) } finally { setBusy(null) }
+  }
+  const why = (f) => (f.why === 'resume' ? t('A resume, {when}', { when: ago(f.at) })
+    : f.why === 'during' ? t('Came in during the meeting, {when}', { when: ago(f.at) })
+      : t('Has "{words}" in its name, {when}', { words: f.words.map((w) => w[0].toUpperCase() + w.slice(1)).join(' '), when: ago(f.at) }))
+  if (!files.length && !sug?.recentBlocked) return null
+  return (
+    <div className={`mt-recent${compact ? ' compact' : ''}`} aria-label={t('Files that may go with it')}>
+      {files.length > 0 && <b className="small">{t('Looks like it goes with this meeting')}</b>}
+      {files.map((f) => (
+        <div key={f.path} className="mt-recent-file">
+          <Icon name="file" size={12} />
+          <span className="mt-recent-name" title={f.path}>{f.name}</span>
+          <span className="muted small">{f.folder} · {why(f)}</span>
+          <button type="button" className="btn small" disabled={!!busy} onClick={() => add(f)}>{busy === f.path ? t('Adding…') : t('Add')}</button>
+        </div>
+      ))}
+      {!files.length && sug?.recentBlocked && !compact && <PermissionFix pane="files" folder={sug.recentBlocked} onCheck={onCheck}><p className="small">{t('To suggest files you downloaded for a meeting (a resume, a deck), Bridge AI needs to see your {folder} folder.', { folder: sug.recentBlocked })}</p></PermissionFix>}
+      {err && <p className="error-text small">{err}</p>}
+    </div>
+  )
+}
+
 // Attach: a link or a file's path, files from a picker, and what Mail has about the meeting.
 function Attach({ id, onChange, onMsg }) {
   const [text, setText] = useState('')
@@ -95,6 +132,7 @@ function Attach({ id, onChange, onMsg }) {
           : <label className="btn small"><Icon name="paperclip" size={12} /> {t('Add files')}<input type="file" multiple hidden onChange={upload} /></label>}
         <span className="muted small">{app().pickFiles ? t('Linked where they are, and read when the notes are written. Or drop them on the meeting.') : t('A copy is kept with the meeting. Or drop them on it.')}</span>
       </div>
+      <RecentFiles id={id} sug={sug} onCheck={load} onAdded={(f) => { onChange(); onMsg({ text: t('Added {name}.', { name: f.name }) }); load() }} />
       {mail.length > 0 && (
         <div className="mt-attach-mail">
           <b className="small">{t('From Mail')}</b>

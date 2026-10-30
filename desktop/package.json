@@ -53,9 +53,9 @@
         "NSAudioCaptureUsageDescription": "Bridge AI records a call's sound for the meeting notes you start, so the transcript has both sides.",
         "NSCalendarsFullAccessUsageDescription": "Bridge AI shows your schedule in Today and names meeting notes after their event. Your events stay on this Mac.",
         "NSCalendarsUsageDescription": "Bridge AI shows your schedule in Today and names meeting notes after their event. Your events stay on this Mac.",
-        "NSDesktopFolderUsageDescription": "Bridge AI shows your projects and lets your agents work in the folders you pick.",
+        "NSDesktopFolderUsageDescription": "Bridge AI shows your projects, lets your agents work in the folders you pick, and suggests files you saved for a meeting.",
         "NSDocumentsFolderUsageDescription": "Bridge AI shows your projects, lets your agents work in the folders you pick, and saves meeting notes where you choose.",
-        "NSDownloadsFolderUsageDescription": "Bridge AI lets your agents work in the folders you pick.",
+        "NSDownloadsFolderUsageDescription": "Bridge AI lets your agents work in the folders you pick, and suggests files you downloaded for a meeting, like a resume or a deck.",
         "NSAppleEventsUsageDescription": "Bridge AI asks Finder to move a file you discard to the Trash."
       },
       "hardenedRuntime": true,
