@@ -138,6 +138,7 @@ async function createWindow() {
   // Dock icon, the shortcut or Bring back opens a new one.
   const self = win
   win.on('closed', () => { if (win === self) win = null })
+  win.on('session-end', shuttingDown) // Windows: shutting down, restarting or signing out
 
   // Links to anything but the app open in their own apps (Teams, Outlook, Mail, the browser).
   win.webContents.setWindowOpenHandler(({ url }) => { if (!isLocal(url)) openOutside(url); return { action: 'deny' } })
@@ -775,7 +776,15 @@ app.on('activate', () => { if (!win) createWindow(); else win.show() })
 app.on('window-all-closed', () => { win = null })
 app.on('will-quit', () => globalShortcut.unregisterAll())
 
+// The computer is shutting down or restarting: the server keeps the open agents, and which were in
+// the middle of something, to reopen afterwards, before their terminals end (Windows warns Bridge
+// AI's background processes of nothing; on a Mac this is earlier than they hear).
+function shuttingDown() {
+  fetch(`${URL_BASE}/api/system/stopping`, { method: 'POST', signal: AbortSignal.timeout(2000) }).catch(() => {})
+}
+
 app.whenReady().then(() => {
+  powerMonitor.on('shutdown', shuttingDown) // macOS, Linux
   // Voice notes need the mic; allow it for the app's own page only, asked by the page itself and not
   // by a frame in it (a project's app in Preview, another device's agent). Copying works in those too.
   const ASK = new Set(['media', 'display-capture', 'notifications', 'geolocation'])

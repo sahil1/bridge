@@ -156,6 +156,7 @@ function hostLink() {
     }
     link = l
     link.onLost = () => { link = null; lost().catch((e) => console.log(`Terminal host: ${e.message}`)) }
+    link.onEnding = () => systemStopping('host')
     return link
   })().finally(() => { opening = null })
   return opening
@@ -177,7 +178,8 @@ async function wire(p, from) {
   p.proc.onData((d) => { if (p.setupPending && d.includes(SETUP_DONE)) p.setupPending = false; p.term.write(d); p.lastOutput = Date.now(); for (const c of p.clients) c.onData(d) })
   p.proc.onExit(() => {
     for (const c of p.clients) c.onExit?.()
-    if (stopping || panes.get(p.paneId) !== p) return
+    if (panes.get(p.paneId) !== p) return
+    if (stopping) { p.ended = true; return } // the computer is shutting down: kept, to reopen
     panes.delete(p.paneId); tabs = tabs.filter((t) => t.tabId !== p.tabId || [...panes.values()].some((x) => x.tabId === p.tabId)); save()
   })
   panes.set(p.paneId, p)
@@ -219,6 +221,31 @@ function carryOn(p, why) {
 export function whenInterrupted(fn) {
   onInterrupted = fn
   for (const [paneId, why] of interrupted.splice(0)) fn(paneId, why)
+}
+
+// The computer is shutting down or restarting (the desktop app heard it, or the terminal host was
+// stopped from outside): the open agents, and which were mid-task, are saved now and kept as they
+// are, so their terminals ending one by one don't take them off the list to reopen. Still here a
+// minute later, it didn't shut down after all: what ended meanwhile starts again, as after a crash.
+let frozen = null
+export function systemStopping(why = 'system') {
+  if (stopping) return
+  for (const p of panes.values()) { try { statusOf(p) } catch { /* no screen yet */ } }
+  stopping = true
+  save()
+  console.log(`The computer is shutting down (${why}); keeping ${panes.size} terminal(s) to reopen`)
+  frozen = setTimeout(thaw, 60000)
+  frozen.unref?.()
+}
+function thaw() {
+  frozen = null
+  stopping = false
+  if (!link || link.closed) return lost().catch((e) => console.log(`Terminal host: ${e.message}`))
+  for (const p of [...panes.values()].filter((x) => x.ended)) {
+    panes.delete(p.paneId)
+    spawnPane({ ...p, resume: true }).then((back) => { if (p.midTask) carryOn(back, 'host') }, () => {})
+  }
+  save()
 }
 
 // Bring back the last saved layout: terminals still running in the host just as they are, and
@@ -325,7 +352,7 @@ function statusOf(p) {
   else if (a.busyFromOutput && Date.now() - p.lastOutput < 1200 && Date.now() - p.lastInput > 1500 && Date.now() - p.startedAt > 4000) s = 'working'
   // In the middle of something (working, or waiting on you mid-turn): kept, for carryOn after a crash.
   const mid = s === 'working' || (s === 'blocked' && !setup)
-  if (mid !== !!p.midTask) { p.midTask = mid; save() }
+  if (mid !== !!p.midTask && !stopping) { p.midTask = mid; save() } // stopping: as it was, not as it ends
   if (s === 'working' && p.status !== 'working') p.seen = false
   if (s === 'idle' && !p.seen && (p.status === 'working' || p.status === 'done')) s = 'done'
   if (s !== p.status) { p.status = s; p.seq++ }
@@ -575,8 +602,10 @@ export function setKeep(on) {
 // next server to pick up. Off (or without a host), they end now; the layout is saved, and they
 // come back next time, resuming their sessions.
 export function shutdown({ keep = keepOn } = {}) {
-  // What each is doing right now, not at the last look, so one quit mid-task carries on next time.
-  for (const p of panes.values()) { try { statusOf(p) } catch { /* no screen yet */ } }
+  // What each is doing right now, not at the last look, so one quit mid-task carries on next time
+  // (already kept, if the computer is shutting down).
+  if (!stopping) for (const p of panes.values()) { try { statusOf(p) } catch { /* no screen yet */ } }
+  clearTimeout(frozen)
   save()
   stopping = true
   if (link && !link.closed) { if (keep) link.detach(true); else link.quit() }

@@ -19,7 +19,7 @@
 //   list { n } -> { re: n, terms: [{ id, pid, cols, rows, title, startedAt, lastOutput, meta, exited }] }
 //   attach { n, id } -> { re: n, ok, screen, cols, rows } (its screen and scrollback), then its output
 //   keep { on }     whether terminals outlive the server (Settings › Keep agents running)
-// Events: { ev: 'data', id, d } · { ev: 'exit', id, code, signal }
+// Events: { ev: 'data', id, d } · { ev: 'exit', id, code, signal } · { ev: 'ending', why } (stopped from outside)
 // It exits by itself once it has no terminals and no server, and ends its terminals when the
 // server goes away with keep off.
 import crypto from 'node:crypto'
@@ -76,6 +76,14 @@ async function end(why) {
   if (ending) return
   ending = true
   log(`ending (${why}): ${alive().length} terminal(s)`)
+  // No newcomers: a server starting now gets a host of its own, not this one that's ending its
+  // terminals (it would end the new ones too).
+  server.close()
+  try { if (JSON.parse(fs.readFileSync(INFO, 'utf8')).pid === process.pid) fs.rmSync(INFO) } catch { /* not ours */ }
+  if (!IS_WIN) try { fs.rmSync(SOCK) } catch { /* gone */ }
+  // Stopped from outside (the computer shutting down, say): the server hears it first, so it keeps
+  // these on its list to reopen afterwards instead of taking each off as it ends.
+  if (ctl && (why === 'SIGTERM' || why === 'SIGINT')) { send(ctl, { ev: 'ending', why }); await new Promise((r) => setTimeout(r, 250)) }
   const group = (t, sig) => { try { process.kill(-t.pid, sig) } catch { /* gone, or no group */ } }
   for (const t of alive()) {
     try { t.p.kill() } catch { /* gone */ }
@@ -83,8 +91,6 @@ async function end(why) {
   }
   for (let i = 0; i < 30 && alive().length; i++) await new Promise((r) => setTimeout(r, 50))
   if (!IS_WIN) for (const t of alive()) group(t, 'SIGKILL')
-  try { if (JSON.parse(fs.readFileSync(INFO, 'utf8')).pid === process.pid) fs.rmSync(INFO) } catch { /* not ours */ }
-  if (!IS_WIN) try { fs.rmSync(SOCK) } catch { /* gone */ }
   process.exit(0)
 }
 
