@@ -23,6 +23,7 @@ import * as speech from './speech.js'
 import * as memory from './meetmemory.js'
 import * as doctext from './doctext.js'
 import { canOpen } from './files.js'
+import { mayLook, noteAsked } from './projects.js'
 
 const DIR = path.join(DATA, 'meetings')
 const RATE = 16000
@@ -1212,19 +1213,21 @@ export function openLink(id, lid, { reveal = false } = {}) {
   return new Promise((resolve) => { execFile(bin, args, { timeout: 10000 }, () => resolve({ ok: true })) })
 }
 // What may go with it, to add with a click: emails about it with files (Mail, on a Mac), and files
-// you got lately (recent).
-export async function suggest(id) {
+// you got lately (recent). ask: look in Downloads and on the Desktop even if macOS hasn't asked about
+// them yet (you pressed Look for files): see recentFiles.
+export async function suggest(id, { ask = false } = {}) {
   const m = meta(id)
   const have = m.links || []
   const [mail, recent] = await Promise.all([
     helpers.mailRelated ? helpers.mailRelated({ title: m.event?.title || m.title, start: m.startedAt }).catch(() => null) : null,
-    recentFiles(m).catch(() => ({ files: [] })),
+    recentFiles(m, { ask }).catch(() => ({ files: [] })),
   ])
   return {
     mail: (mail?.messages || []).map((x) => ({ ...x, linked: have.some((l) => l.kind === 'mail' && l.mail.id === x.id), files: x.files.map((f) => ({ ...f, linked: !!f.path && have.some((l) => l.path === f.path) })) })),
     mailReason: mail && !mail.available ? mail.reason : null,
     recent: recent.files.filter((f) => !have.some((l) => l.path === f.path)),
     recentBlocked: recent.blocked || null,
+    recentAsk: recent.ask || null,
   }
 }
 
@@ -1233,19 +1236,23 @@ export async function suggest(id) {
 // Shah - Resume.pdf"), a resume or CV before an interview, or anything that came while it recorded.
 // Only those folders' own files are looked at, each with fs.promises, so a big folder can't hold
 // the server up. blocked: the folder macOS hasn't let Bridge AI read (Privacy & Security › Files and
-// Folders).
+// Folders). On a Mac the first look into either brings up macOS's question, so it waits for you to
+// ask (Look for files, with ask) rather than come up by itself in the middle of a call: until then
+// ask lists the folders not looked in. Once asked, they're looked in by themselves.
 const PLAIN_WORDS = new Set('meeting meetings call sync with and the for re fw fwd weekly daily monthly quarterly review update chat intro interview round team catch catchup check discussion invite zoom teams meet google microsoft online new from via about our your notes'.split(' '))
 const nameWords = (s) => String(s || '').replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 3 && !/^\d+$/.test(w))
-export async function recentFiles(m) {
+export async function recentFiles(m, { ask = false } = {}) {
   const t0 = Date.parse(m.startedAt), t1 = m.endedAt ? Date.parse(m.endedAt) : Date.now()
   const people = new Set([...(m.event?.attendees || []), ...(m.people || [])].flatMap(nameWords).filter((w) => !PLAIN_WORDS.has(w)))
   const title = new Set(nameWords(`${m.title} ${m.event?.title || ''}`).filter((w) => !PLAIN_WORDS.has(w) && w.length >= 4))
   const files = []
   let blocked = null
+  const unasked = []
   for (const folder of ['Downloads', 'Desktop']) {
     const dir = path.join(os.homedir(), folder)
+    if (!ask && !mayLook(dir)) { unasked.push(folder); continue }
     let names
-    try { names = (await fs.promises.readdir(dir)).filter((n) => !n.startsWith('.') && !/\.(crdownload|part|download|tmp)$/i.test(n)).slice(0, 600) } catch (e) { if (e.code === 'EPERM' || e.code === 'EACCES') blocked ||= folder; continue }
+    try { names = (await fs.promises.readdir(dir)).filter((n) => !n.startsWith('.') && !/\.(crdownload|part|download|tmp)$/i.test(n)).slice(0, 600) } catch (e) { if (e.code === 'EPERM' || e.code === 'EACCES') blocked ||= folder; continue } finally { if (ask) noteAsked(dir) }
     for (const n of names) {
       const f = path.join(dir, n)
       let st
@@ -1260,7 +1267,7 @@ export async function recentFiles(m) {
       files.push({ path: f, name: n, folder, size: st.size, at: new Date(at).toISOString(), why, words: [...who, ...about].slice(0, 3), score: (why === 'name' ? 3 : why === 'resume' ? 2.5 : why === 'title' ? 2 : 1) + who.length + about.length * 0.5 - Math.abs(at - t0) / 86400e3 })
     }
   }
-  return { files: files.sort((a, b) => b.score - a.score).slice(0, 6).map(({ score, ...f }) => f), blocked }
+  return { files: files.sort((a, b) => b.score - a.score).slice(0, 6).map(({ score, ...f }) => f), blocked, ask: unasked.length ? unasked : null }
 }
 
 // The names and terms in the files that go with a meeting (a resume, a deck), for the speech engine

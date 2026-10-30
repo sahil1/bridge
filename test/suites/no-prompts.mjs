@@ -1,5 +1,5 @@
 // A first start asks macOS for nothing, on a Mac whose Claude Code history has a project in
-// Documents, with Documents acting like macOS's protected folder (scripts/tcc-sim.mjs: the first
+// Documents, with Documents (and Downloads and the Desktop) acting like macOS's protected folders (scripts/tcc-sim.mjs: the first
 // look into it waits, as for "Allow access to your Documents folder?"): setup's look for projects
 // answers at once and lists it without looking in; picking it keeps it so, and a restart doesn't
 // look either. Work starting there (which asks anyway, as the agent opens) lets Bridge AI look from
@@ -14,7 +14,7 @@ if (!IS_MAC) { skip('a first start on a Mac', 'Desktop and Documents are only pr
 
 const HOLD = 12000
 const kit = await startKit('no-prompts', {
-  env: ({ home }) => ({ NODE_OPTIONS: `--import ${pathToFileURL(path.join(ROOT, 'scripts', 'tcc-sim.mjs')).href}`, SIM_PROTECTED: path.join(home, 'Documents'), SIM_MS: String(HOLD) }),
+  env: ({ home }) => ({ NODE_OPTIONS: `--import ${pathToFileURL(path.join(ROOT, 'scripts', 'tcc-sim.mjs')).href}`, SIM_PROTECTED: ['Documents', 'Downloads', 'Desktop'].map((d) => path.join(home, d)).join(':'), SIM_MS: String(HOLD) }),
 })
 kit.program('claude', fs.readFileSync(path.join(TEST, 'stand-ins', 'claude.cjs'), 'utf8'))
 const shop = path.join(kit.home, 'Documents', 'shop')
@@ -34,6 +34,13 @@ try {
   const [, addMs] = await timed(() => kit.api('/projects', { paths: [shop] }))
   const [list, listMs] = await timed(() => kit.api('/projects'))
   ok(addMs < 5000 && listMs < 5000 && (list.projects || list).some?.((x) => x.path === shop), `picking it keeps it, still without a look (${addMs} ms, ${listMs} ms)`, list)
+
+  // A meeting's Files and Assist offer files you got for it, from Downloads and the Desktop: not
+  // looked for until you ask, so macOS's question can't come up in the middle of a call.
+  const meet = await kit.api('/meetings', { title: 'Interview - Theo Park', call: false })
+  const [sug, sugMs] = await timed(() => kit.api(`/meetings/${meet.id}/suggest`))
+  ok(sugMs < 5000 && String(sug.recentAsk) === 'Downloads,Desktop', `a meeting's suggested files don't look in Downloads or on the Desktop by themselves (${sugMs} ms)`, sug)
+  await kit.api(`/meetings/${meet.id}/stop`, {})
 
   await kit.restart()
   const [, again] = await timed(() => kit.api('/projects'))
