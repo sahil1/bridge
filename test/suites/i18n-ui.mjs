@@ -37,8 +37,13 @@ try {
     ok((await p.evaluate(() => document.documentElement.lang)) === l, `${l}: the page says it's in ${l}`)
     const nav = (await p.locator('.rail-nav-btn').allInnerTexts()).map((x) => x.trim())
     ok(['New', 'Chief of Staff', 'Meetings'].every((en) => nav.some((x) => x.includes(say(l, en)))), `${l}: the sidebar is in its words`, nav)
-    await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'appearance' } })))
-    await p.waitForSelector('.st-nav-item', { timeout: 10000 })
+    // Asked again until it opens: on a busy machine the first can come before the page listens.
+    const opened = await until(async () => {
+      if (await p.locator('.st-nav-item').count()) return true
+      await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'appearance' } })))
+      return p.waitForSelector('.st-nav-item', { timeout: 2500 }).then(() => true, () => false)
+    }, 20000, 0)
+    ok(!!opened, `${l}: Settings opens`)
     const secs = (await p.locator('.st-nav-item').allInnerTexts()).map((x) => x.trim())
     ok(['General', 'Devices', 'Appearance'].every((en) => secs.includes(say(l, en))), `${l}: and Settings' sections`, secs)
     ok(!!(await until(async () => (await p.locator('.appearance h4').allInnerTexts()).includes(say(l, 'Language')), 5000)), `${l}: and Appearance, with Language`)
