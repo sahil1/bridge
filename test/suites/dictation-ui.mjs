@@ -113,7 +113,7 @@ try {
   ok(wavOk(wav), 'what was said goes to the computer as a 16 kHz mono WAV', wav && Buffer.from(wav.head).toString('hex'))
   ok(!!(await until(async () => (await value()) === 'So open the worktree for payments-api and run the tests.', 8000)), 'the text in the box: fillers and the doubled word gone, names spelled right', await value())
   ok(!(await value()).includes(' '), 'the key itself typed nothing there')
-  ok(await p.evaluate(() => document.activeElement?.hasAttribute('data-composer')), 'and the box has the focus back')
+  ok(!!(await until(() => p.evaluate(() => document.activeElement?.hasAttribute('data-composer')), 3000, 100)), 'and the box has the focus back')
 
   // Tapped: hands-free until it's pressed again. At the cursor, after what's there.
   await box.fill('Note.')
@@ -318,7 +318,8 @@ try {
     await h.waitForSelector('.hud', { timeout: 10000 })
     said.push('add a retry to the webhook')
     await key(h, 'down')
-    ok(!!(await until(async () => (await h.locator('.hud .rec-meter').count()) > 0 && /payments/.test(await h.locator('.hud-to-btn').innerText().catch(() => '')), 5000, 100)), 'the dictation window: listening, for the agent you last looked at', await h.locator('.hud').innerText().catch(() => ''))
+    // Agents by their pane (a stand-in's title is its terminal's on Windows, the same for both).
+    ok(!!(await until(async () => (await h.locator('.hud .rec-meter').count()) > 0 && (await h.locator('.hud-to-btn').getAttribute('data-pane').catch(() => '')) === one.paneId, 5000, 100)), 'the dictation window: listening, for the agent you last looked at', await h.locator('.hud').innerText().catch(() => ''))
     await shot(h, `${tag}dictation-window-listening`)
     await sleep(1300)
     await key(h, 'up')
@@ -327,13 +328,15 @@ try {
     const np = prompts.length
     await h.locator('.hud button', { hasText: 'Send' }).click()
     ok(!!(await until(() => prompts.length > np, 5000, 100)) && prompts.at(-1).url.includes(encodeURIComponent(one.paneId)) && prompts.at(-1).body.text === 'Add a retry to the webhook.', 'Send: to that agent', prompts.at(-1))
-    ok(!!(await until(async () => /Sent to payments/.test(await h.locator('.hud').innerText()), 4000, 100)) && !!(await until(() => h.evaluate(() => window.__hud.hidden > 0), 4000, 100)), '"Sent to payments", then it hides')
+    const named = (a) => a.title || a.tab
+    const pay = named(await agentOf((a) => a.paneId === one.paneId))
+    ok(!!(await until(async () => (await h.locator('.hud').innerText()).includes(`Sent to ${pay}`), 4000, 100)) && !!(await until(() => h.evaluate(() => window.__hud.hidden > 0), 4000, 100)), '"Sent to" that agent, then it hides', [pay, await h.locator('.hud').innerText().catch(() => '')])
     // Another agent, picked; and Copy.
     said.push('check the invoices')
     await key(h, 'down'); await sleep(1300); await key(h, 'up')
     await until(async () => (await h.locator('.hud-text').count()) > 0, 8000, 100)
     await h.locator('.hud-to-btn').click()
-    await h.locator('.hud-menu button', { hasText: 'billing' }).click()
+    await h.locator(`.hud-menu button[data-pane="${two.paneId}"]`).click()
     await h.locator('.hud button', { hasText: 'Send' }).click()
     ok(!!(await until(() => prompts.at(-1)?.url.includes(encodeURIComponent(two.paneId)), 5000, 100)), 'To ▾: another agent picked, and sent there', prompts.at(-1))
     said.push('copy me')
