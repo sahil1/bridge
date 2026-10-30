@@ -366,7 +366,9 @@ function settle(id) {
   const m = readJSON(path.join(DIR, id, 'meeting.json'))
   if (!m || m.status !== 'transcribing' || waiting(id) || decoding.has(id)) return
   saveMeta({ ...m, status: 'done', ...(m.again ? { again: { ...m.again, done: new Date().toISOString() } } : {}) })
-  const clean = cfg.meetings?.cleanup !== false && transcript(id).filter((l) => l.text).length >= 3
+  // Cleaning up goes to the notes model too: by itself only when the summary does, unless you've
+  // turned it on (someone who keeps the transcript from a model until they ask isn't surprised).
+  const clean = (cfg.meetings?.cleanup ?? cfg.meetings?.autoSummary !== false) && transcript(id).filter((l) => l.text).length >= 3
   const sum = cfg.meetings?.autoSummary !== false
   if (!clean && !sum) return
   ;(async () => {

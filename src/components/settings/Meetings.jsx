@@ -195,12 +195,12 @@ export default function Meetings() {
           <span><b>Write the summary when a meeting ends</b> <span className="muted small">Otherwise, Summarize on the meeting when you want it.</span></span>
         </label>
         <label className="st-check">
-          <input type="checkbox" checked={m.cleanup !== false} onChange={(e) => set({ cleanup: e.target.checked })} />
+          <input type="checkbox" checked={m.cleanup ?? m.autoSummary !== false} onChange={(e) => set({ cleanup: e.target.checked })} />
           <span><b>Clean up the transcript when a meeting ends</b> <span className="muted small">The model fixes misheard words and names from what the meeting is about (its invite, files and meeting memory) and leaves out words nobody said. Each fixed line says what was heard, and Undo puts it back.</span></span>
         </label>
         <label className="st-check">
           <input type="checkbox" checked={m.assist === true} onChange={(e) => set({ assist: e.target.checked })} />
-          <span><b>AI Assist in every meeting</b> <span className="muted small">While a meeting records, the model reads along and suggests what to ask or check next, from what's said, the invite and the files that go with it. Turn it on or off for one meeting with Assist.</span></span>
+          <span><b>AI Assist in every meeting</b> <span className="muted small">While a meeting records, the model reads along and suggests what to ask or check next, from what's said, the invite and the files that go with it. Assist on a meeting turns it on or off there, and for the meetings after.</span></span>
         </label>
         <label className="st-check">
           <input type="checkbox" checked={m.nameSpeakers !== false} onChange={(e) => set({ nameSpeakers: e.target.checked })} />
