@@ -1,0 +1,138 @@
+{
+  "name": "bridge-ai-desktop",
+  "productName": "Bridge AI",
+  "version": "3.5.0",
+  "description": "Bridge AI as a desktop app for macOS, Windows and Linux",
+  "license": "Apache-2.0",
+  "author": "Bridge AI contributors",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "icons": "electron render-icons.js",
+    "dist": "node stage.js && npm run icons && electron-builder"
+  },
+  "build": {
+    "appId": "dev.bridge-ai.app",
+    "productName": "Bridge AI",
+    "afterPack": "./after-pack.js",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "tile-preload.js",
+      "package.json"
+    ],
+    "mac": {
+      "icon": "build/icon.png",
+      "category": "public.app-category.developer-tools",
+      "minimumSystemVersion": "13.0",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "identity": "-",
+      "sign": "./sign.js",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Bridge AI records voice notes and meetings you start. Audio is transcribed with the engine you pick in Settings.",
+        "NSAudioCaptureUsageDescription": "Bridge AI records a call's sound for the meeting notes you start, so the transcript has both sides.",
+        "NSCalendarsFullAccessUsageDescription": "Bridge AI shows your schedule in Today and names meeting notes after their event. Your events stay on this Mac.",
+        "NSCalendarsUsageDescription": "Bridge AI shows your schedule in Today and names meeting notes after their event. Your events stay on this Mac.",
+        "NSDesktopFolderUsageDescription": "Bridge AI shows your projects and lets your agents work in the folders you pick.",
+        "NSDocumentsFolderUsageDescription": "Bridge AI shows your projects, lets your agents work in the folders you pick, and saves meeting notes where you choose.",
+        "NSDownloadsFolderUsageDescription": "Bridge AI lets your agents work in the folders you pick.",
+        "NSAppleEventsUsageDescription": "Bridge AI asks Finder to move a file you discard to the Trash."
+      },
+      "hardenedRuntime": true,
+      "entitlements": "entitlements.mac.plist",
+      "entitlementsInherit": "entitlements.mac.plist",
+      "artifactName": "Bridge-AI-mac-${arch}.${ext}"
+    },
+    "win": {
+      "icon": "build/icon.png",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "Bridge-AI-win-${arch}.${ext}"
+    },
+    "linux": {
+      "icon": "build/icon.png",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "Development",
+      "executableName": "bridge-ai",
+      "synopsis": "Run and talk to all your AI coding agents",
+      "maintainer": "Bridge AI contributors <sahil1@users.noreply.github.com>",
+      "artifactName": "Bridge-AI-linux-${arch}.${ext}"
+    },
+    "extraResources": [
+      {
+        "from": "build/app-root",
+        "to": "app-root",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "build/app-root/node_modules",
+        "to": "app-root/node_modules",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "artifactName": "${productName}-${version}-${arch}.${ext}",
+    "electronLanguages": [
+      "en",
+      "en-GB",
+      "en-US"
+    ],
+    "dmg": {
+      "format": "ULFO",
+      "writeUpdateInfo": false
+    },
+    "compression": "normal",
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false
+    }
+  },
+  "devDependencies": {
+    "electron": "^44.9.3",
+    "electron-builder": "^26.0.0"
+  },
+  "homepage": "https://github.com/sahil1/bridge"
+}

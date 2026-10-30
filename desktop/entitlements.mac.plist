@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- What Bridge AI may do under the hardened runtime, which a Developer ID build has (sign.js), for
+     the app and everything in it: Electron's JavaScript engine compiles as it runs (allow-jit); the
+     microphone for voice notes and meetings, and the call's sound (audio-input); your calendars
+     (bridgecal); and asking Finder to move a file you discard to the Trash (apple-events). -->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
+  <key>com.apple.security.personal-information.calendars</key>
+  <true/>
+  <key>com.apple.security.automation.apple-events</key>
+  <true/>
+</dict>
+</plist>

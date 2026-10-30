@@ -1,0 +1,51 @@
+// Lets the page know it's inside the desktop app (for the title bar layout), and lets it take a
+// picture of part of its own window (the Preview tab's app), lets an agent open in a window of its
+// own, says how long since you last used the computer, restarts the app, picks a folder or files in
+// Finder, says where a dropped file is, and helps you allow what macOS asks about. Nothing else is
+// exposed.
+const { contextBridge, ipcRenderer, webUtils } = require('electron')
+// Another of your devices, shown through this one (/m/<id>/): its pages get windows and nothing
+// of this computer's (no Finder, files, mic, screen or floating card), as on a phone.
+const machine = /^\/m\/([A-Za-z0-9_-]{1,20})\//.exec(location.pathname)?.[1] || null
+const windows = {
+  // An agent in a window of its own (on this device or the one shown), and back.
+  popOut: (paneId, title) => ipcRenderer.invoke('bridge:popout', { paneId, title, machine }),
+  focusMain: () => ipcRenderer.invoke('bridge:focus-main'),
+  focusPopout: (paneId) => ipcRenderer.invoke('bridge:focus-popout', paneId),
+  // One of your devices (or this one, id null) in a window of its own.
+  openMachine: (id, agent) => ipcRenderer.invoke('bridge:open-machine', { id: id || null, agent: agent || null }),
+}
+if (machine) contextBridge.exposeInMainWorld('bridgeApp', { platform: process.platform, desktop: false, machine, ...windows })
+else contextBridge.exposeInMainWorld('bridgeApp', {
+  platform: process.platform,
+  desktop: true,
+  capture: (rect) => ipcRenderer.invoke('bridge:capture', rect),
+  ...windows,
+  // A folder picked in Finder (or the system's own dialog), for a new agent.
+  pickFolder: (start) => ipcRenderer.invoke('bridge:pick-folder', start),
+  // Seconds since you last used the computer, so your phone isn't kept quiet while you're away.
+  idle: () => ipcRenderer.invoke('bridge:idle'),
+  // After you allow something in System Settings: restart so it takes effect.
+  restart: () => ipcRenderer.invoke('bridge:restart'),
+  // Allow access: the tile with the app's icon to drag into System Settings' list, and closing it.
+  fixTile: (pane) => ipcRenderer.invoke('bridge:fix-tile', pane),
+  closeFixTile: () => ipcRenderer.invoke('bridge:fix-tile-close'),
+  // Whether macOS lets the app use the mic, and a test notification.
+  mediaAccess: (kind) => ipcRenderer.invoke('bridge:media-access', kind),
+  testNotification: () => ipcRenderer.invoke('bridge:notify-test'),
+  // Meetings: the main window says when it's recording (so closing it hides it instead), and the
+  // floating card fits its size, hides, takes notes for a call and opens things in the main window.
+  recording: (on) => ipcRenderer.invoke('bridge:recording', !!on),
+  floatSize: (w, h) => ipcRenderer.send('bridge:float-size', w, h),
+  floatHide: () => ipcRenderer.invoke('bridge:float-hide'),
+  floatStart: (o) => ipcRenderer.invoke('bridge:float-start', o),
+  floatOpen: (o) => ipcRenderer.invoke('bridge:float-open', o),
+  // The card is dragged from anywhere on it, and asks the main window to watch a screen.
+  floatMove: (x, y) => ipcRenderer.send('bridge:float-move', x, y),
+  floatWatch: () => ipcRenderer.invoke('bridge:float-watch'),
+  // A meeting's files: picked in Finder, or dropped (where each one is), and watching a screen.
+  pickFiles: () => ipcRenderer.invoke('bridge:pick-files'),
+  pathOf: (file) => { try { return webUtils.getPathForFile(file) || null } catch { return null } },
+  watching: (on) => ipcRenderer.invoke('bridge:watching', !!on),
+})
+window.addEventListener('DOMContentLoaded', () => document.documentElement.classList.add('in-bridge-app', `platform-${process.platform}`))

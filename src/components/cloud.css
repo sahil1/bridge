@@ -1,0 +1,78 @@
+/* Cloud agents: their view, their rows in the sidebar, the new agent dialog's cloud form and the
+   Cloud agents settings. Colors come from the theme's tokens, so light and dark both work. */
+
+.cloud-mark { display: inline-grid; place-items: center; border-radius: 27%; background: #715cd7; color: #fff; font-weight: 700; line-height: 1; flex: none; }
+.cloud-console .pane-icon .pv-tile, .cloud-console .pane-icon .cloud-mark { display: inline-grid; }
+.cloud-sub { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cloud-link { text-decoration: none; display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; font-size: 12px; white-space: nowrap; }
+.cloud-console .pane-extras .btn.small { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; font-size: 12px; }
+.app.narrow .cloud-console .pane-extras .btn.small span { display: none; }
+.app.narrow .cloud-console .pane-extras .btn.small { padding: 0 8px; }
+.state-tag.st-failed { color: #e34948; background: color-mix(in srgb, #e34948 12%, transparent); }
+.cloud-note { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-2); background: var(--pane-2); border: 1px solid var(--line); border-radius: 10px; padding: 7px 10px; }
+.cloud-note.warn { color: var(--needs); }
+.cloud-ask { display: flex; align-items: center; gap: 12px; padding: 0 12px 11px; }
+.cloud-ask p { margin: 0; flex: 1; min-width: 0; font-size: 13px; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.cloud-composer textarea:disabled { opacity: .55; }
+.chat-event.ev-info .ev-dot { background: var(--accent); }
+.cloud-console .tool-summary:disabled { cursor: default; opacity: 1; }
+
+/* Sidebar rows */
+.tab-path .cloud-where { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
+.tab-path .cloud-where .pv-tile, .tab-path .cloud-where .cloud-mark { flex: none; }
+.ws-cloud .ws-label { display: inline-flex; align-items: center; gap: 5px; }
+
+/* New agent › Run in the cloud */
+.na-cloud-empty { display: grid; gap: 10px; justify-items: start; padding: 14px; border: 1px dashed var(--line-2); border-radius: 12px; background: var(--pane-2); }
+.na-cloud-empty p { margin: 0; font-size: 13px; color: var(--ink-2); line-height: 1.5; }
+.na-cost { font-size: 12px; color: var(--ink-3); line-height: 1.45; }
+.na-cost.per-use { color: var(--ink-2); }
+.na-cost b { color: var(--ink); font-weight: 600; }
+.na-cloud-row > .na-field { align-content: start; }
+.na-pick { position: relative; display: grid; gap: 4px; }
+.na-pick input { width: 100%; }
+.na-pick-list { position: absolute; z-index: 30; top: calc(100% + 4px); left: 0; right: 0; max-height: 220px; overflow-y: auto; margin: 0; padding: 4px; list-style: none; background: var(--pane); border: 1px solid var(--line-2); border-radius: 10px; box-shadow: 0 8px 28px rgb(0 0 0 / .14); }
+.na-pick-list button { width: 100%; text-align: left; padding: 6px 9px; border-radius: 7px; font: 12.5px var(--font-mono); color: var(--ink); display: flex; gap: 8px; justify-content: space-between; }
+.na-pick-list button:hover, .na-pick-list button.on { background: var(--pane-3); }
+.na-pick-list small { color: var(--ink-3); font-family: var(--font); }
+.na-pick-note { font-size: 11.5px; color: var(--ink-3); }
+
+/* Settings › Model providers › Cloud agents */
+.cl-list { display: grid; gap: 10px; }
+.cl-card { border: 1px solid var(--line); border-radius: 14px; background: var(--pane); overflow: hidden; }
+.cl-card.on { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
+.cl-card.open .pv-caret { transform: rotate(180deg); }
+.cl-main { width: 100%; display: flex; align-items: center; gap: 12px; padding: 12px 14px; text-align: left; }
+.cl-text { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.cl-name { font-weight: 600; font-size: 14px; color: var(--ink); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cl-desc { font-size: 12.5px; color: var(--ink-2); line-height: 1.45; }
+.cl-cost { font-size: 12px; color: var(--ink-3); line-height: 1.45; }
+.cl-cost.per-use { color: var(--ink); background: color-mix(in srgb, var(--working) 10%, transparent); border-radius: 8px; padding: 6px 9px; margin-top: 4px; }
+.cl-body { padding: 0 14px 14px 70px; display: grid; gap: 10px; }
+.cl-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.cl-row .pv-secret { flex: 1; min-width: 200px; }
+.cl-perms { margin: 0; padding-left: 18px; font-size: 12px; color: var(--ink-2); line-height: 1.6; }
+.cl-or { font-size: 12px; color: var(--ink-3); }
+.cl-field { display: grid; gap: 5px; }
+.cl-field > span { font-size: 12px; color: var(--ink-2); }
+@media (max-width: 620px) {
+  .cl-body { padding: 0 12px 12px; }
+  .cl-main { padding: 12px; align-items: flex-start; }
+}
+/* On a phone the dialog is a full-height sheet: keep its rows at their own height, at the top. */
+.modal.new-agent { align-content: start; }
+/* Three ways to start an agent fit on a phone without their icons. */
+.app.narrow .na-mode button svg { display: none; }
+.app.narrow .na-mode button { padding: 0 6px; white-space: nowrap; }
+
+/* The phone apps' Cloud agents, with no computer (cloudOnly): the first screen, before any key,
+   and the list's New button. */
+.cl-welcome { flex: 1; min-height: 0; overflow-y: auto; display: grid; gap: 18px; align-content: start; padding: 22px max(16px, env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
+.cl-hello { display: grid; gap: 10px; justify-items: start; }
+.cl-hello h3 { margin: 4px 0 0; font-size: 19px; }
+.cl-hello p { margin: 0; color: var(--ink-2); font-size: 14px; line-height: 1.5; }
+.pv-sec.bare { border-top: 0; padding-top: 0; }
+.pv-sec.bare .pv-note { margin: 4px 2px 0; font-size: 12.5px; color: var(--ink-3); line-height: 1.5; }
+.cl-new { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 12px 0 10px; margin-left: auto; flex: none; }
+.cloud-only .board .pane-head { gap: 10px; }
+.cl-none { padding-top: 40px; }

@@ -1,0 +1,26 @@
+Bridge AI on your phone, for Bridge AI on your computer.
+
+Bridge AI runs Claude Code, Codex, Gemini CLI, Copilot, OpenCode and other coding agents on your computer and shows them in one place. This app puts that on your phone: see which agents are working, finished or waiting on you, read what they did, answer their questions and give them new work, from anywhere.
+
+You need Bridge AI running on your computer (free and open source, for macOS, Windows and Linux). The app doesn't do anything on its own.
+
+What it does
+
+- Pair with your computer by scanning the QR code from Settings › Phone & notifications, or by pasting the link from Copy link.
+- Your agents on the lock screen: while any are working or waiting on you, a notification lists them, along with the ones that finished meanwhile. An agent that starts waiting on you gets its own alert. Tap it to open that agent.
+- Several computers: pair each one and switch between them.
+- Dictate messages. The recording goes to your computer and is turned into text there.
+
+How it connects
+
+Your phone reaches your computer through your own relay, a small Cloudflare Worker that Bridge AI sets up on your own free Cloudflare account. There's no VPN to keep connected and no port to open. Everything between your phone and your computer is end-to-end encrypted: each paired phone has its own key, kept on the phone. The relay, and Cloudflare, see when and how much, never what.
+
+Privacy
+
+No account, no ads, no analytics. Nothing is sent to the developer. The app keeps the list of computers you paired and their pairing keys on this phone, and nowhere else.
+
+Bridge AI is open source under the Apache 2.0 license: github.com/sahil1/bridge
+
+Your computer has to be on, with Bridge AI running, for the app to reach it. While it's asleep, the app shows what it last saw and holds your replies until it's back. Try the demo works with no computer at all.
+
+Bridge AI is an independent project, not affiliated with or endorsed by Anthropic, OpenAI, Google, GitHub or the makers of the other tools it works with.

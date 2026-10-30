@@ -1,0 +1,38 @@
+# Bridge AI on an always-on machine. Start it with `docker compose up -d`, then:
+#   docker compose exec bridge bridge-ai relay setup   # once: your phone relay, with a Cloudflare API token
+#   docker compose exec bridge bridge-ai pair          # pair your phone (shows a QR code)
+#   docker compose exec bridge bridge-ai status
+# Update: docker compose pull && docker compose up -d. See "Run it on an always-on machine" in README.md.
+services:
+  bridge:
+    image: ghcr.io/sahil1/bridge:latest
+    # Or build it yourself from this folder, with agent CLIs baked in (see Dockerfile):
+    # build:
+    #   context: .
+    #   args:
+    #     AGENTS: "@anthropic-ai/claude-code @openai/codex opencode-ai"
+    restart: unless-stopped   # back after a crash or a reboot, and reconnects to your relay
+    hostname: bridge-server   # the name your phone shows for this machine
+    environment:
+      TZ: Etc/UTC             # your time zone, like Europe/Berlin or America/New_York
+      # BRIDGE_HOST: 0.0.0.0  # only together with the ports lines below
+    volumes:
+      - home:/home/bridge              # every agent's sign-in (~/.claude, ~/.codex, ~/.config...), git, gh and SSH settings
+      - data:/home/bridge/.bridge-ai   # Bridge AI's data folder (BRIDGE_HOME): settings, tabs, relay, paired phones
+      - code:/home/bridge/code         # your repos. Or a folder on this machine, ./code:/home/bridge/code
+                                       # (make it first with mkdir, so it's yours and not root's)
+
+    # No ports: the server has no login of its own, so anyone who can reach it can drive your
+    # agents. Your phone comes in through the relay, which this machine connects out to.
+    #
+    # To also open Bridge AI in a browser on this machine (or from your laptop through
+    # `ssh -L 7420:127.0.0.1:7420 you@this-machine`), uncomment BRIDGE_HOST above and the two
+    # lines below. The server then listens inside the container, and the 127.0.0.1 in front keeps
+    # the port on this machine only. Never publish it without the 127.0.0.1.
+    # ports:
+    #   - "127.0.0.1:7420:7420"
+
+volumes:
+  home:
+  data:
+  code:

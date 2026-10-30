@@ -1,0 +1,17 @@
+{
+  "name": "Alex",
+  "location": { "label": "Lisbon", "lat": 38.7223, "lon": -9.1393, "timezone": "Europe/Lisbon" },
+  "defaultAgent": "codex",
+  "chief": { "kind": "claude" },
+  "assistant": { "cwd": "~/notes" },
+  "mail": { "myDomains": ["example.com"] },
+  "market": { "stocks": [["AAPL", "Apple"], ["MSFT", "Microsoft"]] },
+  "mortgage": {
+    "type": "30-year fixed",
+    "rate": 6.5,
+    "balance": 400000,
+    "monthlyPI": 2530,
+    "adjustsYear": null,
+    "closingCosts": 8000
+  }
+}

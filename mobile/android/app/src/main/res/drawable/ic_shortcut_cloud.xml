@@ -1,0 +1,7 @@
+<!-- The Cloud agents shortcut's icon: a cloud on the app's blue. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp" android:height="48dp" android:viewportWidth="48" android:viewportHeight="48">
+    <path android:fillColor="#FF3B82F6" android:pathData="M24,0A24,24 0,1 1,24 48A24,24 0,1 1,24 0z" />
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M30.5,33H17.5A5.5,5.5 0,0 1,16.6 22.07A8,8 0,0 1,32.12 20.3A6.5,6.5 0,0 1,30.5 33z" />
+</vector>

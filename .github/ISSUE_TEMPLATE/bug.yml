@@ -1,0 +1,26 @@
+name: Something isn't working
+description: A bug, a crash, or something that doesn't behave the way you expected
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead. Screenshots help.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen again
+      placeholder: |
+        1. Open ...
+        2. Click ...
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Details
+      description: In Bridge AI, Settings › About & updates › Copy details, then paste here. It lists versions and your system, nothing personal.
+      render: text
+    validations:
+      required: true

@@ -1,0 +1,65 @@
+# Bridge AI's tests (test/run.mjs) on macOS, Windows and Linux: on every push to main and every pull
+# request, and before a release is built (release.yml runs this first). The app's tests run in
+# Chromium everywhere, and in WebKit (the engine of Safari and the iPhone app) on macOS too. When
+# something fails, the logs and screenshots are kept with the run for a week.
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            name: macOS
+            browser: both
+          - os: windows-latest
+            name: Windows
+            browser: chromium
+          - os: ubuntu-22.04
+            name: Linux
+            browser: chromium
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci --no-audit --no-fund
+
+      - name: Build the app and the demo
+        run: |
+          npm run build
+          npm run demo:build
+
+      - name: Browsers
+        run: npx playwright-core install --with-deps chromium ${{ matrix.browser == 'both' && 'webkit' || '' }}
+
+      - name: Tests
+        run: node test/run.mjs --all --lanes 2 --browser ${{ matrix.browser }}
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: failure()
+        with:
+          name: test-output-${{ matrix.name }}
+          path: test/.out
+          include-hidden-files: true
+          retention-days: 7

@@ -1,0 +1,4 @@
+#!/bin/sh
+# Refuse a commit message with a link to an AI session or a line crediting an AI (see
+# scripts/check-private.js). Turned on with the other hooks by `npm install`.
+exec node scripts/check-private.js --message "$1"

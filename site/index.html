@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bridge AI</title>
+<meta name="description" content="The bridge between you and your AI agents. Tell a chief of staff what you need, and your agents work in parallel, organized in spaces, in one window for every provider. Free and open source.">
+<meta property="og:title" content="Bridge AI">
+<meta property="og:description" content="The bridge between you and your AI agents. Free and open source.">
+<meta property="og:image" content="https://sahil1.github.io/bridge/poster.jpg">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="mark.svg" type="image/svg+xml">
+<style>
+  :root {
+    --bg: #f6f7f9; --pane: #ffffff; --ink: #14171c; --ink-2: #4a515c; --ink-3: #79818d;
+    --line: #e3e6ea; --accent: #1f6feb; --accent-ink: #ffffff; --soft: #eef3fd;
+    --working: #8b5cf6; --done: #2f80ed; --needs: #1f6feb;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0d0f12; --pane: #15181d; --ink: #eceef1; --ink-2: #b4bac3; --ink-3: #868e99;
+      --line: #262a31; --accent: #4c8dff; --accent-ink: #ffffff; --soft: #172235;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0d0f12; --pane: #15181d; --ink: #eceef1; --ink-2: #b4bac3; --ink-3: #868e99;
+    --line: #262a31; --accent: #4c8dff; --accent-ink: #ffffff; --soft: #172235;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code, pre { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 16px; }
+  header { display: flex; align-items: center; justify-content: space-between; padding: 20px 0; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 17px; color: var(--ink); }
+  .brand img { width: 30px; height: 30px; border-radius: 8px; }
+  .hero { text-align: center; padding: 48px 0 28px; }
+  h1 { font-size: clamp(32px, 6vw, 54px); line-height: 1.08; letter-spacing: -0.02em; margin: 0 0 16px; }
+  .lede { max-width: 640px; margin: 0 auto 28px; color: var(--ink-2); font-size: clamp(16px, 2.2vw, 19px); }
+  .ctas { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; height: 46px; padding: 0 20px; border-radius: 12px; font-weight: 600; font-size: 15px; border: 1px solid var(--line); background: var(--pane); color: var(--ink); }
+  .btn:hover { text-decoration: none; filter: brightness(1.03); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .sub { margin-top: 12px; font-size: 13.5px; color: var(--ink-3); }
+  .sub a { color: var(--ink-2); text-decoration: underline; text-underline-offset: 2px; }
+  .media { margin: 28px auto 8px; max-width: 960px; border-radius: 16px; overflow: hidden; border: 1px solid var(--line); background: var(--pane); box-shadow: 0 20px 60px rgba(10, 20, 40, .12); aspect-ratio: 16 / 9; }
+  .media video, .media img { display: block; width: 100%; height: 100%; object-fit: cover; }
+  section { padding: 44px 0; }
+  h2 { font-size: 26px; letter-spacing: -0.01em; margin: 0 0 18px; }
+  .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+  .card { background: var(--pane); border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
+  .card h3 { margin: 0 0 6px; font-size: 16px; }
+  .card p { margin: 0; color: var(--ink-2); font-size: 14.5px; }
+  .dots { display: inline-flex; gap: 6px; margin-right: 6px; vertical-align: middle; }
+  .dots i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .install { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .cmd { display: flex; align-items: center; gap: 10px; background: var(--pane); border: 1px solid var(--line); border-radius: 12px; padding: 10px 10px 10px 14px; }
+  .cmd .os { flex: none; width: 92px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+  .cmd code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; font-size: 13px; }
+  .cmd button { flex: none; height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font: inherit; font-size: 13px; cursor: pointer; }
+  .note { color: var(--ink-3); font-size: 13.5px; margin: 6px 0 0; }
+  .files { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .files a { font-size: 13.5px; border: 1px solid var(--line); background: var(--pane); border-radius: 999px; padding: 6px 12px; color: var(--ink-2); }
+  .files a:hover { color: var(--ink); text-decoration: none; }
+  footer { border-top: 1px solid var(--line); padding: 24px 0 40px; color: var(--ink-3); font-size: 13px; }
+  footer nav { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 10px; }
+  @media (max-width: 760px) {
+    .grid { grid-template-columns: 1fr; }
+    .hero { padding-top: 24px; }
+    .cmd { flex-wrap: wrap; }
+    .cmd code { flex-basis: 100%; }
+    .cmd .os { width: 100%; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <a class="brand" href="./"><img src="mark.svg" alt="">Bridge AI</a>
+    <a href="https://github.com/sahil1/bridge">GitHub</a>
+  </header>
+
+  <div class="hero">
+    <h1>The bridge between you<br>and your AI agents.</h1>
+    <p class="lede">Tell your chief of staff what you need, and your agents get to work in parallel. Spaces keep every project organized, and one window holds them all: Claude, Codex, Gemini, Copilot and cloud agents, on every computer you link. It takes your meeting notes too. Free and open source.</p>
+    <div class="ctas">
+      <a class="btn primary" id="dl" href="https://github.com/sahil1/bridge/releases/latest">Download</a>
+      <a class="btn" href="demo/">Try the demo</a>
+    </div>
+    <p class="sub"><span id="dl-lead">For macOS, Windows and Linux</span> · <a href="https://github.com/sahil1/bridge/releases/latest">All downloads</a> · <span id="ver">latest release</span></p>
+    <div class="media" id="media">
+      <video id="video" src="bridge-ai.mp4" poster="poster.jpg" controls playsinline preload="metadata"></video>
+    </div>
+  </div>
+
+  <section>
+    <h2>What it does</h2>
+    <div class="grid">
+      <div class="card"><h3>Your chief of staff</h3><p>Say what you need in plain words. It hands the work to the right agent, starts a new one when nothing fits, and tells you when it's done.</p></div>
+      <div class="card"><h3><span class="dots"><i style="background:var(--working)"></i><i style="background:var(--done)"></i><i style="background:var(--needs)"></i></span>Agents in parallel</h3><p>Many agents working at once, each on its own task, so you build and ship much faster. See at a glance which are working, done or waiting on you.</p></div>
+      <div class="card"><h3>Spaces for every project</h3><p>Group agents by project, fold away what you're not working on, and pick up right where you left off.</p></div>
+      <div class="card"><h3>One window, every provider</h3><p>Claude Code, Codex, Gemini CLI, Copilot, OpenCode and more on your computer, plus Cursor, Copilot, Jules and Claude agents in the cloud, all in one place.</p></div>
+      <div class="card"><h3>Never miss a question</h3><p>When an agent needs you, answer in one click, at your desk or on your phone. Pair it free with a Cloudflare account or Tailscale, end-to-end encrypted.</p></div>
+      <div class="card"><h3>Review and ship</h3><p>See what each agent changed, leave notes, and send the work out from the same window when it's ready.</p></div>
+      <div class="card"><h3>All your computers</h3><p>Link your other machines, Mac, Windows or Linux, and switch between them in one window, each with its own agents. A phone paired with one reaches them all.</p></div>
+      <div class="card"><h3>Meeting notes</h3><p>It notices when a call starts and offers to take notes: your mic and the call, transcribed as you talk, with what was on the shared screen. A summary with decisions and action items when it ends.</p></div>
+      <div class="card"><h3>Every account</h3><p>Several Claude or Codex accounts side by side, each named your way. Hit a limit? Carry the conversation on in another account.</p></div>
+    </div>
+  </section>
+
+  <section id="install">
+    <h2>Install</h2>
+    <div class="install">
+      <div class="cmd"><span class="os">macOS, Linux</span><code id="c1">curl -fsSL https://raw.githubusercontent.com/sahil1/bridge/main/install.sh | sh</code><button type="button" data-copy="c1">Copy</button></div>
+      <div class="cmd"><span class="os">Windows</span><code id="c2">irm https://raw.githubusercontent.com/sahil1/bridge/main/install.ps1 | iex</code><button type="button" data-copy="c2">Copy</button></div>
+    </div>
+    <p class="note">Paste it in Terminal (or PowerShell on Windows). It downloads the app, installs it and opens it. Run it again to update.</p>
+    <p class="note">Downloaded the Mac app instead? It's signed and notarized by Apple, so it opens without a warning. On Windows, SmartScreen may ask first: More info › Run anyway.</p>
+    <div class="files">
+      <a href="https://github.com/sahil1/bridge/releases/latest/download/Bridge-AI-mac-arm64.dmg">Mac, Apple Silicon (.dmg)</a>
+      <a href="https://github.com/sahil1/bridge/releases/latest/download/Bridge-AI-mac-x64.dmg">Mac, Intel (.dmg)</a>
+      <a href="https://github.com/sahil1/bridge/releases/latest/download/Bridge-AI-win-x64.exe">Windows (.exe)</a>
+      <a href="https://github.com/sahil1/bridge/releases/latest/download/Bridge-AI-linux-x86_64.AppImage">Linux (.AppImage)</a>
+      <a href="https://github.com/sahil1/bridge/releases/latest/download/Bridge-AI-linux-amd64.deb">Debian, Ubuntu (.deb)</a>
+    </div>
+  </section>
+
+  <section>
+    <h2>Yours, on your machine</h2>
+    <p class="lede" style="margin:0;text-align:left;max-width:none">Bridge AI runs on your computer. Your agents use their own sign-ins, and the project collects nothing about you: no account, no analytics, no ads. The code is all on GitHub if you'd rather read it first or run it yourself.</p>
+  </section>
+
+  <footer>
+    <nav>
+      <a href="https://github.com/sahil1/bridge">GitHub</a>
+      <a href="https://github.com/sahil1/bridge/releases">Releases</a>
+      <a href="https://github.com/sahil1/bridge/blob/main/PRIVACY.md">Privacy</a>
+      <a href="https://github.com/sahil1/bridge/blob/main/TERMS.md">Terms</a>
+      <a href="https://github.com/sahil1/bridge/blob/main/LICENSE">Apache 2.0</a>
+    </nav>
+    Bridge AI is an independent open-source project, not affiliated with or endorsed by Anthropic, OpenAI, Google, GitHub, Cursor or Cloudflare. Their names belong to them.
+  </footer>
+</div>
+<script>
+  // The right download for this computer, from the latest release (file names don't change).
+  (function () {
+    var base = 'https://github.com/sahil1/bridge/releases/latest/download/'
+    var ua = navigator.userAgent, plat = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || ''
+    var dl = document.getElementById('dl'), lead = document.getElementById('dl-lead')
+    if (/iPhone|iPad|Android/i.test(ua)) { dl.textContent = 'Get it for your computer'; dl.href = '#install' }
+    else if (/Mac/i.test(plat)) {
+      // Apple Silicon or Intel: Chrome and Edge say (architecture); Safari and Firefox don't, but the
+      // graphics chip they name does ("Apple M2" vs "Intel Iris"). Unsure: Apple Silicon, with the other a click away.
+      var mac = function (intel) {
+        dl.textContent = intel ? 'Download for Mac (Intel)' : 'Download for Mac'
+        dl.href = base + (intel ? 'Bridge-AI-mac-x64.dmg' : 'Bridge-AI-mac-arm64.dmg')
+        lead.innerHTML = intel ? 'For Intel Macs · <a href="' + base + 'Bridge-AI-mac-arm64.dmg">Apple Silicon?</a>' : 'For Apple Silicon (M1 and later) · <a href="' + base + 'Bridge-AI-mac-x64.dmg">Intel Mac?</a>'
+      }
+      var gpu = ''
+      try { var gl = document.createElement('canvas').getContext('webgl'); var ext = gl && gl.getExtension('WEBGL_debug_renderer_info'); gpu = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : '' } catch (e) { /* no WebGL */ }
+      mac(/Intel|AMD|Radeon|NVIDIA|GeForce/i.test(gpu) && !/Apple M\d/i.test(gpu))
+      if (navigator.userAgentData && navigator.userAgentData.getHighEntropyValues) {
+        navigator.userAgentData.getHighEntropyValues(['architecture']).then(function (v) { if (v.architecture) mac(v.architecture === 'x86') }).catch(function () {})
+      }
+    }
+    else if (/Win/i.test(plat)) { dl.textContent = 'Download for Windows'; dl.href = base + 'Bridge-AI-win-x64.exe'; lead.textContent = 'Windows 10 and 11, 64-bit (runs on Arm too)' }
+    else if (/Linux/i.test(plat)) {
+      var deb = /Ubuntu|Debian|Mint|Pop!_OS/i.test(ua)
+      dl.textContent = 'Download for Linux'
+      dl.href = base + (deb ? 'Bridge-AI-linux-amd64.deb' : 'Bridge-AI-linux-x86_64.AppImage')
+      lead.innerHTML = deb ? '.deb for Debian and Ubuntu · <a href="' + base + 'Bridge-AI-linux-x86_64.AppImage">AppImage?</a>' : 'AppImage · <a href="' + base + 'Bridge-AI-linux-amd64.deb">.deb for Debian, Ubuntu</a>'
+    }
+    // The version number, if GitHub answers (the page works without it).
+    fetch('https://api.github.com/repos/sahil1/bridge/releases/latest').then(function (r) { return r.ok ? r.json() : null }).then(function (j) {
+      if (j && j.tag_name) document.getElementById('ver').textContent = 'version ' + j.tag_name.replace(/^v/, '')
+    }).catch(function () {})
+    // No video yet: show the poster or nothing rather than an empty player.
+    var v = document.getElementById('video')
+    v.addEventListener('error', function () { document.getElementById('media').style.display = 'none' })
+    document.querySelectorAll('[data-copy]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var t = document.getElementById(b.getAttribute('data-copy')).textContent
+        ;(navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(function () { b.textContent = 'Copied'; setTimeout(function () { b.textContent = 'Copy' }, 1600) }).catch(function () {})
+      })
+    })
+  })()
+</script>
+</body>
+</html>

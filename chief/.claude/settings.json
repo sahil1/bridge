@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node bin/bridge:*)",
+      "Bash(bin/bridge:*)",
+      "Bash(./bin/bridge:*)",
+      "Edit(state/**)",
+      "Write(state/**)",
+      "Edit(work/**)",
+      "Write(work/**)"
+    ]
+  }
+}

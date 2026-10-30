@@ -1,0 +1,348 @@
+#!/usr/bin/env node
+// bridge: the chief of staff's view of, and hands on, the agent fleet that Bridge AI shows.
+// Talks to the local Bridge AI server. Run `node bin/bridge help` for commands.
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+// bridge.json next to this file is written by the server: its address and your name.
+const SETTINGS = (() => { try { return JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'bridge.json'), 'utf8')) } catch { return {} } })()
+const BASE = process.env.BRIDGE_URL || SETTINGS.url || 'http://127.0.0.1:7420'
+const WHO = SETTINGS.name && SETTINGS.name !== 'the user' ? `${SETTINGS.name}'s` : 'the'
+const HOME = os.homedir()
+const tilde = (p) => (p && p.startsWith(HOME) ? `~${p.slice(HOME.length)}` : p || '')
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+async function api(path, { method = 'GET', body } = {}) {
+  let res
+  try {
+    res = await fetch(`${BASE}/api${path}`, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined })
+  } catch {
+    throw new Error(`Bridge isn't reachable at ${BASE}. Is the server running?`)
+  }
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.error || `${res.status} ${res.statusText}`)
+  return data
+}
+
+const fleet = () => api('/fleet')
+const others = (f) => f.agents.filter((a) => !a.chief)
+// Which of the chief's threads this is (Bridge AI starts each with BRIDGE_THREAD set), and the
+// agent it just handed work to, so the thread shows it.
+const THREAD = process.env.BRIDGE_THREAD || null
+const link = (paneId) => api('/chief/threads/link', { method: 'POST', body: { thread: THREAD, paneId } }).catch(() => null)
+const threadNames = (f) => Object.fromEntries(f.agents.filter((a) => a.chief && a.thread?.id).map((a) => [a.thread.id, a.thread.name]))
+const where = (a) => `${a.workspace}${a.tab && !/^\d+$/.test(a.tab) ? ` › ${a.tab}` : ''}`
+const ago = (iso) => {
+  if (!iso) return ''
+  const m = Math.round((Date.now() - new Date(iso)) / 60000)
+  return m < 1 ? 'just now' : m < 60 ? `${m}m ago` : m < 1440 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 1440)}d ago`
+}
+const clip = (s, n) => { s = String(s || '').replace(/\s+/g, ' ').trim(); return s.length > n ? `${s.slice(0, n - 1)}…` : s }
+
+async function lastWords(paneId) {
+  try {
+    const t = await api(`/agents/${encodeURIComponent(paneId)}/transcript`)
+    const msgs = (t.messages || []).filter((m) => m.text && !m.text.startsWith('<'))
+    const last = msgs.at(-1)
+    const lastUser = [...msgs].reverse().find((m) => m.role === 'user')
+    return { last, lastUser }
+  } catch { return {} }
+}
+
+const cmds = {
+  async agents(args) {
+    const f = await fleet()
+    const list = others(f).filter((a) => args.includes('--all') || !a.shellTab)
+    if (!list.length) return console.log('No agents running.')
+    const names = threadNames(f)
+    const rows = await Promise.all(list.map(async (a) => ({
+      a,
+      ...(args.includes('--brief') ? {} : await lastWords(a.paneId)),
+      subs: a.caps?.subagents ? await api(`/agents/${encodeURIComponent(a.paneId)}/subagents`).catch(() => null) : null,
+    })))
+    for (const { a, last, lastUser, subs } of rows) {
+      const q = (f.queue?.[a.paneId] || []).length
+      const c = a.cloud
+      const held = c?.held || 0
+      console.log(c
+        ? `${a.paneId}  [${c.failed ? 'failed' : a.status}]${held ? ` (${held} held)` : ''}  ${where(a)}  · ${c.label} cloud agent · ${c.repo || 'no repo'}${c.branch ? ` on ${c.branch}` : ''}${c.prUrl ? ` · PR ${c.prUrl}` : ''}`
+        : `${a.paneId}  [${a.status}]${q ? ` (${q} queued)` : ''}  ${where(a)}  · ${a.kind} · ${a.worktree ? `${tilde(a.worktree.repo)} on its own branch ${a.worktree.branch}` : tilde(a.cwd)}`)
+      if (c?.ask) console.log(`    waiting on: ${clip(c.ask, 200)}`)
+      if (a.title) console.log(`    title: ${clip(a.title, 120)}`)
+      const from = (a.chiefThreads || []).map((id) => names[id]).filter(Boolean)
+      if (from.length) console.log(`    from thread${from.length > 1 ? 's' : ''}: ${from.join(', ')}`)
+      if (lastUser) console.log(`    last ask (${ago(lastUser.ts)}): ${clip(lastUser.text, 200)}`)
+      if (last && last !== lastUser) console.log(`    last reply (${ago(last.ts)}): ${clip(last.text, 300)}`)
+      const running = (subs?.items || []).filter((x) => x.status === 'running')
+      if (running.length) console.log(`    subagents running: ${running.map((x) => x.description).join('; ')}  (bridge subagents ${a.paneId})`)
+    }
+  },
+
+  async spaces() {
+    const f = await fleet()
+    for (const w of f.workspaces || []) {
+      const tabs = (f.tabs || []).filter((t) => t.workspaceId === w.id)
+      console.log(`${w.id}  ${w.label}  (${tabs.length} tab${tabs.length === 1 ? '' : 's'}: ${tabs.map((t) => t.label).join(', ')})`)
+    }
+  },
+
+  async show(args) {
+    const pane = args[0]
+    if (!pane) throw new Error('Usage: bridge show <pane> [-n 8]')
+    const n = Number(args[args.indexOf('-n') + 1]) || 8
+    const t = await api(`/agents/${encodeURIComponent(pane)}/transcript`)
+    const msgs = (t.messages || []).slice(-n * 3).filter((m) => m.text || m.tool).slice(-n)
+    for (const m of msgs) {
+      if (m.role === 'tool') console.log(`  · ${m.tool}: ${clip(m.hint, 140)}`)
+      else console.log(`\n[${m.role} · ${ago(m.ts)}]\n${m.text.length > 2500 ? `${m.text.slice(0, 2500)}\n…(cut)` : m.text}`)
+    }
+  },
+
+  async subagents(args) {
+    const pane = args[0]
+    if (!pane) throw new Error('Usage: bridge subagents <pane>')
+    const { items = [] } = await api(`/agents/${encodeURIComponent(pane)}/subagents`)
+    if (!items.length) return console.log('No subagents in the last few hours.')
+    for (const it of items) {
+      const last = it.steps.at(-1)
+      console.log(`[${it.status}] ${it.description} · ${it.tools} tool calls · started ${ago(it.startedAt)}`)
+      if (it.status === 'running' && last) console.log(`    now: ${last.kind === 'tool' ? `${last.tool} ${clip(last.hint, 140)}` : clip(last.text, 200)}`)
+      if (it.result) console.log(`    reported: ${clip(it.result, 400)}`)
+    }
+  },
+
+  async screen(args) {
+    const pane = args[0]
+    if (!pane) throw new Error('Usage: bridge screen <pane>')
+    const { ansi } = await api(`/agents/${encodeURIComponent(pane)}/screen?lines=60`)
+    // eslint-disable-next-line no-control-regex
+    const text = String(ansi || '').replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\x1b\][^\x07]*\x07/g, '')
+    console.log(text.split('\n').filter((l, i, a) => l.trim() || (a[i - 1] || '').trim()).slice(-45).join('\n'))
+  },
+
+  // Its model: what it's on, or switch it (in place for Claude Code; Codex restarts on it, same conversation).
+  async model(args) {
+    const [pane, name] = args
+    if (!pane) throw new Error('Usage: bridge model <pane> [name|default]')
+    const url = `/agents/${encodeURIComponent(pane)}/model`
+    if (!name) {
+      const m = await api(url)
+      if (!m.mode) return console.log(`${pane}: ${m.label} has no model setting.`)
+      const sw = m.switching && ['queued', 'sent', 'confirm'].includes(m.switching.state) ? ` (switching to ${m.switching.model}: ${m.switching.state})` : ''
+      return console.log(`${pane}: ${m.current || `${m.label}'s default`}${sw}${m.models.length ? `\n  choices: default, ${m.models.join(', ')}, or any model ${m.label} takes` : ''}`)
+    }
+    const r = await api(url, { method: 'POST', body: { model: name } })
+    if (r.restarted) return console.log(`Restarted it on ${name}, with the same conversation. It's now pane ${r.paneId}.`)
+    console.log(`${r.queued ? 'Queued' : 'Sent'} ${r.command} to ${pane}. Run bridge model ${pane} in a moment to see it took.`)
+  },
+
+  // Move an agent's work to another kind of agent (Claude Code to Codex, say), only when asked: it
+  // starts in the same folder with a summary of the conversation; the old one goes to Closed agents.
+  async handoff(args) {
+    const opt = (k) => { const i = args.indexOf(k); if (i < 0) return null; const v = args[i + 1]; args.splice(i, 2); return v }
+    const flag = (k) => { const i = args.indexOf(k); if (i >= 0) args.splice(i, 1); return i >= 0 }
+    const model = opt('--model'), account = opt('--account'), keep = flag('--keep')
+    const [pane, kind] = args
+    if (!pane || !kind) throw new Error('Usage: bridge handoff <pane> <kind> [--model m] [--account name] [--keep]')
+    const a = (await fleet()).agents.find((x) => x.paneId === pane)
+    if (!a) throw new Error(`No agent in pane ${pane}. Run bridge agents.`)
+    if (a.chief) throw new Error("That's you. Switching your own agent is done from the menu in your chat.")
+    let id
+    if (account) {
+      const g = (await api('/accounts')).find((x) => x.kind === kind)
+      // By its name, or "default": the one new agents start on (the starred one in Bridge AI).
+      const want = account.toLowerCase()
+      id = g?.accounts.find((x) => x.id === account || x.label.toLowerCase() === want || (want === 'default' && x.active))?.id
+      if (!id) throw new Error(`No ${kind} account called ${account}.${g ? ` Its accounts: ${g.accounts.map((x) => x.label).join(', ')}.` : ''}`)
+    }
+    const r = await api(`/agents/${encodeURIComponent(pane)}/handoff`, { method: 'POST', body: { to: kind, model: model || undefined, account: id, keep } })
+    console.log(`Handed ${pane} (${where(a)}) to ${kind}. It's now pane ${r.paneId}, in the same folder, starting from a summary of the conversation. ${r.closed ? `The ${a.kind} agent ${r.archived ? 'is in Closed agents' : 'closed'}.` : `The ${a.kind} agent stays open too.`}`)
+  },
+
+  async send(args) {
+    const [pane, ...rest] = args
+    let text = rest.join(' ')
+    if (text === '-' || (!text && !process.stdin.isTTY)) text = fs.readFileSync(0, 'utf8')
+    text = text.trim()
+    if (!pane || !text) throw new Error('Usage: bridge send <pane> "message"   (or pipe the message in with -)')
+    const f = await fleet()
+    const a = f.agents.find((x) => x.paneId === pane)
+    if (!a) throw new Error(`No agent in pane ${pane}. Run bridge agents.`)
+    if (a.chief) throw new Error("That's you.")
+    const msg = `${text}\n\n(Sent by ${WHO} chief of staff.)`
+    if (a.status === 'working' || a.status === 'blocked' || (f.queue?.[pane] || []).length) {
+      await api(`/agents/${encodeURIComponent(pane)}/queue`, { method: 'POST', body: { text: msg } })
+      console.log(`Queued for ${pane} (${where(a)}): it's ${a.status}, so Bridge delivers it when the agent is free.`)
+    } else {
+      await api(`/agents/${encodeURIComponent(pane)}/prompt`, { method: 'POST', body: { text: msg } })
+      console.log(`Sent to ${pane} (${where(a)}).`)
+    }
+    await link(pane)
+  },
+
+  async new(args) {
+    const opt = (k) => { const i = args.indexOf(k); if (i < 0) return null; const v = args[i + 1]; args.splice(i, 2); return v }
+    const flag = (k) => { const i = args.indexOf(k); if (i >= 0) args.splice(i, 1); return i >= 0 }
+    const space = opt('--space'), cwd = opt('--cwd'), name = opt('--name'), kind = opt('--kind') || undefined
+    // Own branch: a new git worktree on a new branch (--branch, or bridge/<name>) from --base.
+    const branch = opt('--branch'), base = opt('--base'), own = flag('--own-branch') || !!branch
+    let prompt = args.join(' ')
+    if (prompt === '-' || (!prompt && !process.stdin.isTTY)) prompt = fs.readFileSync(0, 'utf8')
+    if (!cwd || !prompt.trim()) throw new Error('Usage: bridge new --cwd <folder> [--space "Name"] [--name "tab name"] [--kind claude|codex|gemini|...] [--own-branch [--branch name] [--base branch]] "brief"')
+    const f = await fleet()
+    // An existing space by that name gets a new tab; otherwise a new space is made.
+    const ws = space && (f.workspaces || []).find((w) => w.label.toLowerCase() === space.toLowerCase())
+    const out = await api('/agents/launch', { method: 'POST', body: { kind, cwd, label: name || undefined, workspaceId: ws?.id, newSpace: ws ? undefined : space || undefined, prompt: `${prompt.trim()}\n\n(Started by ${WHO} chief of staff.)`, ...(own ? { ownBranch: true, branch: branch || undefined, base: base || undefined } : {}) } })
+    await link(out.paneId)
+    console.log(`Started ${kind || 'the default agent'} in ${out.paneId}${space ? ` (space "${ws ? ws.label : space}"${ws ? '' : ', new'})` : ''}, folder ${cwd}.`)
+    if (out.worktree) console.log(`It works on its own branch, ${out.worktree.branch} (from ${out.worktree.base}), in ${tilde(out.worktree.folder)}. The repo's checkout is untouched.`)
+    if (out.setupError) console.log(`The repo's setup command failed: ${out.setupError}`)
+  },
+
+  // The chief's threads: separate conversations with you, each with the agents it handed work to.
+  async threads() {
+    const f = await fleet()
+    const chiefs = f.agents.filter((a) => a.chief && a.thread)
+    if (!chiefs.length) return console.log('No threads open.')
+    for (const c of chiefs) {
+      const mine = c.thread.id && c.thread.id === (THREAD || (chiefs.length === 1 ? c.thread.id : null))
+      console.log(`${c.thread.name}  ${c.paneId}  [${c.status}]${mine ? '  <- this thread (you)' : ''}`)
+      const agents = others(f).filter((a) => c.thread.id && (a.chiefThreads || []).includes(c.thread.id))
+      for (const a of agents) console.log(`    ${a.paneId}  [${a.status}]  ${where(a)}  · ${a.kind}`)
+      if (!agents.length) console.log('    (no agents yet)')
+    }
+  },
+
+  async wait(args) {
+    const t = args.indexOf('--timeout')
+    const timeout = (t >= 0 ? Number(args.splice(t, 2)[1]) : 3600) * 1000
+    const panes = args
+    if (!panes.length) throw new Error('Usage: bridge wait <pane> [<pane>…] [--timeout seconds]')
+    const start = Date.now()
+    // A fresh message takes a moment to register as working; don't call it finished before then.
+    await sleep(8000)
+    for (;;) {
+      const f = await fleet()
+      const st = panes.map((p) => ({ p, a: f.agents.find((x) => x.paneId === p), q: (f.queue?.[p] || []).length }))
+      const busy = st.filter(({ a, q }) => a && (a.status === 'working' || q))
+      if (!busy.length || Date.now() - start > timeout) {
+        for (const { p, a } of st) {
+          if (!a) { console.log(`${p}: gone (closed)`); continue }
+          const { last } = await lastWords(p)
+          console.log(`${p} [${a.status}] ${where(a)}${last ? `\n  ${clip(last.text, 600)}` : ''}`)
+        }
+        if (busy.length) console.log(`Timed out after ${Math.round(timeout / 60000)} min with ${busy.length} still working.`)
+        return
+      }
+      await sleep(10000)
+    }
+  },
+
+  // A one-off question to another model: a second opinion, a fact check, live news.
+  async ask(args) {
+    if (!args.length || args[0] === '--list') {
+      const list = await api('/consult')
+      for (const c of list) console.log(`${c.available ? '✓' : '·'} ${c.id.padEnd(11)} ${c.label}: ${c.good}${c.available ? `  [${c.route}]` : `  (not set up: ${c.route})`}`)
+      return
+    }
+    const opt = (k) => { const i = args.indexOf(k); if (i < 0) return null; const v = args[i + 1]; args.splice(i, 2); return v }
+    const model = opt('--model'), via = opt('--via')
+    const [who, ...rest] = args
+    let prompt = rest.join(' ')
+    if (prompt === '-' || (!prompt && !process.stdin.isTTY)) prompt = fs.readFileSync(0, 'utf8')
+    if (!who || !prompt.trim()) throw new Error('Usage: bridge ask <who> "question"   (bridge ask --list shows who you can ask)')
+    const r = await api('/consult', { method: 'POST', body: { who, prompt, model, via } })
+    console.log(`[${r.who} via ${r.route}${r.model ? `, ${r.model}` : ''}, ${Math.round(r.ms / 1000)}s]\n${r.text}`)
+  },
+
+  // Your own task list (state/tasks.md), kept through Bridge AI so its Tasks panel shows the same.
+  async task(args) {
+    const [sub = 'list', ...rest] = args
+    const opt = (k) => { const i = rest.indexOf(k); if (i < 0) return undefined; const v = rest[i + 1]; rest.splice(i, 2); return v }
+    const flag = (k) => { const i = rest.indexOf(k); if (i >= 0) rest.splice(i, 1); return i >= 0 }
+    const you = SETTINGS.name && SETTINGS.name !== 'the user' ? SETTINGS.name : 'the user'
+    const tag = (t) => `[${t.status === 'waiting' ? `waiting on ${you}` : t.status}]`
+    let w = 9
+    const line = (t) => `  ${t.id.padStart(3)}  ${tag(t).padEnd(w)}  ${t.title}${t.from === 'you' ? `  (from ${you}, ${t.added})` : t.added ? `  (added ${t.added})` : ''}${t.needs ? `\n         needs: ${t.needs}` : ''}${t.link && t.status !== 'done' ? `\n         ${t.link}` : ''}`
+    const doneLine = (t) => `  ${t.id.padStart(3)}  ${t.title} (done ${t.done || '?'})${t.outcome ? `: ${clip(t.outcome, 200)}` : ''}${t.link ? `\n         ${t.link}` : ''}`
+    if (sub === 'list' || sub === '--all') {
+      const { items } = await api('/chief/tasks')
+      const open = items.filter((t) => t.status !== 'done')
+      const done = items.filter((t) => t.status === 'done')
+      const all = sub === '--all' || flag('--all')
+      w = Math.max(0, ...open.map((t) => tag(t).length))
+      console.log(open.length ? `Open:\n${open.map(line).join('\n')}` : 'Nothing open.')
+      if (done.length) console.log(`Done${all ? '' : ', latest'}:\n${done.slice(0, all ? done.length : 3).map(doneLine).join('\n')}`)
+      return
+    }
+    if (sub === 'add') {
+      const doing = flag('--doing')
+      const title = rest.join(' ').trim()
+      if (!title) throw new Error('Usage: bridge task add [--doing] "short title"')
+      const { item } = await api('/chief/tasks', { method: 'POST', body: { title, status: doing ? 'doing' : 'open' } })
+      return console.log(`Added task ${item.id}${doing ? ' (doing)' : ''}: ${item.title}`)
+    }
+    const file = opt('--file'), link = opt('--link')
+    const id = rest.shift()
+    const text = rest.join(' ').trim()
+    const set = (body) => api(`/chief/tasks/${encodeURIComponent(String(id || '').replace(/^#/, ''))}`, { method: 'PATCH', body })
+    if (!id || !['doing', 'waiting', 'wait', 'done', 'reopen'].includes(sub)) throw new Error('Usage: bridge task [list|add|doing|waiting|done|reopen] (bridge help)')
+    if (sub === 'doing') { const { item } = await set({ status: 'doing' }); return console.log(`Task ${item.id} is doing: ${item.title}`) }
+    if (sub === 'reopen') { const { item } = await set({ status: 'open' }); return console.log(`Task ${item.id} is open again: ${item.title}`) }
+    if (sub === 'waiting' || sub === 'wait') {
+      if (!text) throw new Error(`Say what you need from ${you}: bridge task waiting <id> "question"`)
+      const { item } = await set({ status: 'waiting', needs: text })
+      return console.log(`Task ${item.id} is waiting on ${you}: ${item.needs}`)
+    }
+    if (!text) throw new Error('Say what came of it: bridge task done <id> "one-line result" [--file path | --link url]')
+    // A file is saved by its full path; the server keeps ones in this folder relative to it.
+    const where = file ? path.resolve(file.replace(/^~(?=\/|$)/, HOME)) : link
+    const { item } = await set({ status: 'done', outcome: text, ...(where ? { link: where } : {}) })
+    console.log(`Task ${item.id} done: ${item.outcome}${item.link ? `\n  ${item.link}` : ''}`)
+    if (file && !fs.existsSync(where)) console.log(`Note: there's no file at ${tilde(where)}. Check the path, then run this again with the right one.`)
+  },
+
+  help() {
+    console.log(`bridge: see and direct the agents in Bridge AI.
+
+  bridge agents [--all] [--brief]   every agent: pane, status, space › tab, folder, last ask and reply
+  bridge spaces                     spaces and their tabs
+  bridge show <pane> [-n 8]         the last messages in an agent's conversation
+  bridge screen <pane>              what's on its terminal now (menus, permission prompts)
+  bridge subagents <pane>           the subagents it started: running or finished, what each is doing or reported
+  bridge send <pane> "message"      hand it work; queued if it's busy (- reads stdin)
+  bridge model <pane> [name]        the model it's on; with a name (or default), switch it (Claude Code in place,
+                                    Codex restarts on it with the same conversation)
+  bridge handoff <pane> <kind> [--model m] [--account name] [--keep]
+                                    move its work to another kind of agent (codex, claude, gemini...): it starts in
+                                    the same folder with a summary of the conversation; the old one goes to Closed agents
+  bridge new --cwd <folder> [--space "Name"] [--name "tab"] [--kind claude|codex|...] "brief"
+                                    start a new agent; an existing space name adds a tab there (- reads stdin)
+      [--own-branch [--branch name] [--base branch]]
+                                    ...on its own git branch, in its own worktree, so it can't clash with
+                                    other agents in that repo (branch default: bridge/<name>)
+  bridge wait <pane>… [--timeout s] block until those agents stop working: finished or blocked (run in the background)
+  bridge threads                    your threads with ${SETTINGS.name && SETTINGS.name !== 'the user' ? SETTINGS.name : 'the user'} (Main and the others), which one is you,
+                                    and the agents each one handed work to
+  bridge ask --list                 who you can consult (other models), and how each is reached
+  bridge ask <who> [--model m] "question"
+                                    a one-off question to another model (grok, muse, gemini, gpt, claude, perplexity, ...)
+
+  Your own tasks (standalone work you do yourself; hand-offs go in the ledger):
+  bridge task list [--all]          open tasks first, then the latest done (--all: every done one)
+  bridge task add [--doing] "title" put a task on the list (--doing: you're starting it now)
+  bridge task doing <id>            you've started it (again, once you have what you were waiting for)
+  bridge task waiting <id> "question"
+                                    it's waiting on ${SETTINGS.name && SETTINGS.name !== 'the user' ? SETTINGS.name : 'the user'}: what you need from them
+  bridge task done <id> "result" [--file path | --link url]
+                                    finished: the result in one line, and the file or link it produced
+  bridge task reopen <id>           open it again`)
+  },
+}
+
+const [cmd = 'help', ...args] = process.argv.slice(2)
+const fn = cmds[cmd]
+if (!fn) { console.error(`Unknown command: ${cmd}`); cmds.help(); process.exit(2) }
+Promise.resolve().then(() => fn(args)).catch((e) => { console.error(e.message); process.exit(1) })

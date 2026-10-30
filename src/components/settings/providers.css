@@ -1,0 +1,132 @@
+/* Settings › Providers. Uses the app's tokens so it follows light and dark mode. */
+.pv { container-type: inline-size; display: grid; gap: 4px; min-width: 0; }
+.pv-intro { margin: 0 0 6px; line-height: 1.45; }
+.pv-sec { display: grid; gap: 8px; padding: 12px 0 6px; border-top: 1px solid var(--line); min-width: 0; }
+.pv-sec h4 { margin: 0; font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.pv-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; }
+.pv-head-btn { margin-left: auto; align-self: center; }
+.pv-group { font-size: 11.5px !important; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3) !important; }
+.pv-count { margin: 6px 0 0; }
+
+/* Your agents */
+.pv-agents { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.pv-agent { display: flex; align-items: flex-start; gap: 9px; padding: 8px 10px; border-radius: var(--r-sm); background: var(--pane-2); border: 1px solid var(--line); min-width: 0; }
+.pv-agent.pv-dim { opacity: .6; }
+.pv-agent-text { display: grid; gap: 3px; min-width: 0; justify-items: start; }
+.pv-agent-name { font-size: 12.5px; font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.pv-hint { font-size: 11.5px; line-height: 1.35; color: var(--ink-3); }
+.pv-more { justify-self: start; }
+.pv-loading { display: flex; gap: 6px; }
+.pv-skel { display: block; height: 44px; flex: 1; border-radius: var(--r-sm); background: var(--pane-2); animation: pv-pulse 1.2s ease-in-out infinite alternate; }
+@keyframes pv-pulse { from { opacity: .55 } to { opacity: 1 } }
+
+/* Chips */
+.pv-chip { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 8px; border-radius: 999px; font-size: 11px; font-weight: 600; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; background: var(--pane-3); color: var(--ink-2); }
+.pv-chip::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+.pv-chip-good { color: var(--good); background: color-mix(in srgb, var(--good) 13%, transparent); }
+.pv-chip-local { color: var(--accent); background: var(--accent-soft); }
+.pv-chip-warn { color: var(--warning); background: color-mix(in srgb, var(--warning) 14%, transparent); }
+.pv-chip-off { color: var(--ink-3); }
+.pv-chip-off::before { background: transparent; box-shadow: inset 0 0 0 1.5px currentColor; }
+.pv-chip-unknown { color: var(--ink-3); }
+.pv-chip-unknown::before { background: transparent; box-shadow: inset 0 0 0 1.5px currentColor; opacity: .6; }
+
+/* Cards */
+.pv-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.pv-card { min-width: 0; border-radius: var(--r); background: var(--pane); border: 1px solid var(--line-2); transition: border-color .12s, box-shadow .12s; }
+.pv-card:hover { border-color: var(--ink-3); }
+.pv-card.open { grid-column: 1 / -1; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.pv-card-main { display: flex; align-items: flex-start; gap: 12px; width: 100%; padding: 12px; text-align: left; color: inherit; background: none; border: 0; border-radius: var(--r); cursor: pointer; font: inherit; }
+.pv-card-main:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.pv-card-text { display: grid; gap: 3px; min-width: 0; flex: 1; }
+.pv-name { font-size: 13.5px; font-weight: 650; color: var(--ink); line-height: 1.25; }
+.pv-desc { font-size: 12px; color: var(--ink-3); line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.pv-status { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; margin-top: 3px; min-width: 0; }
+.pv-sub { font-size: 11px; color: var(--ink-3); white-space: nowrap; }
+.pv-caret { flex: none; color: var(--ink-3); margin-top: 2px; transition: transform .15s; }
+.pv-card.open .pv-caret { transform: rotate(180deg); }
+.pv-skel-card { height: 92px; background: var(--pane-2); border-color: var(--line); animation: pv-pulse 1.2s ease-in-out infinite alternate; }
+
+.pv-tile { display: inline-grid; place-items: center; flex: none; box-shadow: inset 0 0 0 1px rgb(0 0 0 / .06); }
+.pv-tile svg { display: block; }
+.pv-tile-text { font-weight: 700; letter-spacing: -.02em; }
+
+/* Inline editor */
+.pv-editor { display: grid; gap: 10px; padding: 12px 0; margin: 0 12px; border-top: 1px solid var(--line); }
+.pv-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; }
+.pv-field { display: grid; gap: 4px; min-width: 0; }
+.pv-field label { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 12px; font-weight: 500; color: var(--ink-2); min-width: 0; }
+.pv-field label code, .pv-flag code { font: 10.5px var(--font-mono); color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pv-field input, .pv-secret input { width: 100%; height: 32px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--pane-2); color: var(--ink); font: 12.5px var(--font-mono); outline: none; min-width: 0; box-sizing: border-box; }
+.pv-field input:focus, .pv-secret input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.pv-field input::placeholder, .pv-secret input::placeholder { color: var(--ink-3); font-family: var(--font); }
+.pv-secret { position: relative; }
+.pv-secret input { padding-right: 34px; }
+.pv-eye { position: absolute; right: 3px; top: 3px; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 6px; color: var(--ink-3); background: none; border: 0; cursor: pointer; }
+.pv-eye:hover { color: var(--ink); background: var(--pane-3); }
+.pv-flag { grid-column: 1 / -1; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; font-size: 12.5px; color: var(--ink-2); cursor: pointer; }
+.pv-flag input { accent-color: var(--accent); width: 15px; height: 15px; margin: 0; }
+.pv-models { display: grid; gap: 4px; }
+.pv-models > div { display: flex; flex-wrap: wrap; gap: 4px; }
+.pv-models code { font: 11px var(--font-mono); padding: 2px 6px; border-radius: 6px; background: var(--pane-2); border: 1px solid var(--line); color: var(--ink-2); }
+.pv-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.pv-actions a.ghost-btn { text-decoration: none; }
+.pv-spacer { flex: 1; }
+.pv-msg { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; max-width: 100%; }
+.pv-msg.ok { color: var(--good); }
+.pv-msg.bad { color: var(--critical); }
+.pv-note { margin: 0; font-size: 11.5px; line-height: 1.45; color: var(--ink-2); }
+.pv-note b { font-weight: 600; color: var(--ink); }
+.pv-err { color: var(--critical); }
+
+@container (max-width: 640px) {
+  .pv-grid, .pv-agents { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@container (max-width: 430px) {
+  .pv-grid, .pv-agents { grid-template-columns: minmax(0, 1fr); }
+  .pv-fields { grid-template-columns: minmax(0, 1fr); }
+  .pv-spacer { flex-basis: 100%; height: 0; }
+  .pv-msg { order: -1; flex-basis: 100%; }
+}
+
+/* Accounts */
+.pv-acct-group { display: grid; gap: 6px; }
+.pv-acct-kind { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink); }
+.pv-accts { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+/* One row per account, in columns that line up down the list: name (with the star on your default),
+   sign-in, what's left; what you can do with it below. */
+.pv-accts { container-type: inline-size; }
+.pv-acct { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 6px 12px; padding: 8px 10px; border-radius: var(--r-sm); background: var(--pane-2); border: 1px solid var(--line); min-width: 0; }
+.pv-acct-name { display: grid; line-height: 1.25; font-size: 12.5px; font-weight: 600; color: var(--ink); min-width: 0; }
+.pv-acct-title { display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; row-gap: 2px; }
+.pv-acct-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pv-acct-edit { height: 20px; padding: 0 4px; margin-left: -4px; color: var(--ink-3); }
+.pv-acct-title .def-tag, .pv-acct-title .best-tag { flex: none; }
+.pv-acct-name small { font-weight: 400; font-size: 11px; }
+.pv-acct-state { min-width: 0; display: flex; }
+.pv-acct-left { display: flex; align-items: center; gap: 6px; white-space: nowrap; justify-self: end; }
+.pv-acct-acts { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.pv-acct-move { display: inline-flex; margin-left: auto; }
+.pv-acct-move .ghost-btn { height: 24px; padding: 0 5px; }
+.pv-acct-move + .pv-acct-remove { margin-left: 0; }
+.pv-acct-acts .ghost-btn { padding: 0 7px; }
+.pv-acct-remove { margin-left: auto; }
+.pv-acct-acts .btn .icon { margin-right: 4px; }
+.pv-acct-err { grid-column: 1 / -1; }
+.pv-acct-rename { grid-column: 1 / -1; }
+@container (max-width: 460px) {
+  .pv-acct { grid-template-columns: minmax(0, 1fr) auto; }
+  .pv-acct-left { grid-column: 1 / -1; justify-self: start; }
+}
+.pv-acct.on { border-color: color-mix(in srgb, var(--warning) 45%, var(--line)); }
+.pv-acct-rename { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.pv-acct-rename input { height: 28px; padding: 0 9px; border-radius: 7px; border: 1px solid var(--line-2); background: var(--pane-2); color: var(--ink); font: inherit; font-size: 12.5px; min-width: 0; width: 220px; max-width: 100%; }
+.pv-acct-autorow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 2px 2px 2px; font-size: 12.5px; }
+.pv-acct-auto-toggle { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; color: var(--ink); }
+.pv-acct-auto-toggle input { accent-color: var(--accent); margin: 0; }
+.pv-acct-more { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.pv-extra { margin-top: 10px; display: grid; gap: 2px; }
+.pv-extra .ph-check { flex-wrap: nowrap; align-items: flex-start; }
+.pv-extra .ph-check input { flex: none; margin-top: 2px; }
+.pv-extra .ph-check span { min-width: 0; }
+.pv-extra p { margin: 0 0 0 30px; }

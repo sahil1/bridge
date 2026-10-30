@@ -1,0 +1,58 @@
+# The website: site/ (the download page) plus the demo (npm run demo:build) at /demo, on GitHub
+# Pages at https://sahil1.github.io/bridge/. Rebuilt when the page or the app's UI changes on main,
+# when a release is published, or by hand. Separate from release.yml, so it can never hold up a
+# release.
+name: Website
+
+on:
+  push:
+    branches: [main]
+    paths: ['site/**', 'src/**', 'public/**', 'vite.config.js', 'package.json', '.github/workflows/pages.yml']
+  release:
+    types: [published]
+  workflow_dispatch:
+
+# Publishing to Pages is for the deploy job only: the build runs npm packages.
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+      # Only the UI is built here, so no native modules (node-pty) are compiled.
+      - run: npm ci --no-audit --no-fund --ignore-scripts
+      - run: node scripts/check-private.js
+      - run: npm run demo:build
+      - run: |
+          mkdir -p _site
+          cp -R site/. _site/
+          cp public/mark.svg _site/
+          cp -R dist-demo _site/demo
+      - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5

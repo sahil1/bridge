@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The app shortcut to Cloud agents (res/xml/shortcuts.xml). -->
+    <string name="cloud_short">Cloud agents</string>
+    <string name="cloud_long">Cloud agents on this phone</string>
+</resources>
