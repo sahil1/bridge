@@ -16,7 +16,7 @@ import pty from 'node-pty'
 import headless from '@xterm/headless'
 import { adapter, loginPath, newSessionId, installed } from '../agents.js'
 import { discoverSession, locate } from '../transcripts.js'
-import { dataFile, ensureDir, DATA, IS_WIN, ROOT } from '../paths.js'
+import { dataFile, ensureDir, DATA, IS_WIN, ROOT, writeFileAtomic } from '../paths.js'
 import { shellCommand, agentEnv, SETUP_DONE } from './spawn.js'
 import { providerEnv } from '../providers.js'
 import * as accounts from '../accounts.js'
@@ -69,7 +69,8 @@ function save() {
     nextId, spaces, tabs, version: VERSION, at: Date.now(),
     panes: [...panes.values()].map((p) => ({ paneId: p.paneId, tabId: p.tabId, workspaceId: p.workspaceId, kind: p.kind, cwd: p.cwd, model: p.model, sessionId: p.sessionId, account: p.account, ...(p.env ? { env: p.env } : {}), ...(p.midTask ? { midTask: true } : {}), ...(p.continuedAt ? { continuedAt: p.continuedAt } : {}) })),
   }
-  try { fs.writeFileSync(STATE, JSON.stringify(out, null, 2)) } catch { /* read-only disk: keep going */ }
+  // Whole or not at all: which agents to reopen, and which were mid-task, survive a crash mid-save.
+  try { writeFileAtomic(STATE, JSON.stringify(out, null, 2)) } catch { /* read-only disk: keep going */ }
 }
 
 // env: extra variables for the agent (a chief of staff thread's id), kept for when it starts again.
