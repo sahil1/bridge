@@ -10,6 +10,8 @@
 //                                           its log as it was, done working, its message box at
 //                                           the bottom under the conversation; what's typed to it
 //                                           goes in ~/claude-typed.log
+//   CLAUDE_STAND_IN=fresh claude [...]      waiting for its first message, the same way, and its
+//                                           arguments noted in ~/claude-started.log
 //   claude auth status --json | login | logout
 //                                           the sign-in of the config folder it's run for
 //                                           (CLAUDE_CONFIG_DIR, else ~/.claude): signed in until
@@ -57,6 +59,15 @@ const draw = (working, low = false) => {
 }
 if (resumed) {
   // What it's sent, written down: a Windows terminal doesn't show what a program hasn't read.
+  process.stdin.on('data', (d) => fs.appendFileSync(path.join(os.homedir(), 'claude-typed.log'), d))
+  return draw(false, true)
+}
+// CLAUDE_STAND_IN=fresh (the herdr test): a new Claude Code waiting for its first message, its
+// message box at the bottom, reading what's typed a key at a time as Claude Code does (into
+// ~/claude-typed.log), with how it was started in ~/claude-started.log.
+if (process.env.CLAUDE_STAND_IN === 'fresh') {
+  fs.appendFileSync(path.join(os.homedir(), 'claude-started.log'), JSON.stringify(args) + '\n')
+  if (process.stdin.isTTY) process.stdin.setRawMode(true)
   process.stdin.on('data', (d) => fs.appendFileSync(path.join(os.homedir(), 'claude-typed.log'), d))
   return draw(false, true)
 }
