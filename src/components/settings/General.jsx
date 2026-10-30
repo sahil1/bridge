@@ -145,6 +145,8 @@ export default function General({ onGo, onOpenAgent }) {
           <>
             <label className="ph-check small"><input type="checkbox" checked={eff.keepAgents !== false} onChange={(e) => save({ keepAgents: e.target.checked })} /> Keep agents running when Bridge AI quits</label>
             <p className="muted small">They carry on through updates and restarts, and Bridge AI picks them up as they are when it starts. Off: they stop with it, and Claude Code and Codex resume their conversations next time.</p>
+            <label className="ph-check small"><input type="checkbox" checked={eff.resumeWork !== false} onChange={(e) => save({ resumeWork: e.target.checked })} /> Pick up unfinished work after an update, a crash or a restart</label>
+            <p className="muted small">An agent stopped in the middle of something (an update that had to restart its terminal, a crash, the computer restarting) reopens its conversation and is told to carry on from where it left off. Off: it reopens and waits for you.</p>
           </>
         )}
       </section>

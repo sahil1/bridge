@@ -865,6 +865,21 @@ const pushFleet = async () => {
   } catch { /* next poll */ }
 }
 pollFleet()
+// An agent that was in the middle of something when its terminal ended (an update, a crash, the
+// computer restarting) is reopened in its conversation (runtime/builtin.js); unless Settings ›
+// General says not to, it's told to carry on as soon as it's back at its prompt.
+const CARRY_ON = {
+  update: 'Bridge AI updated while you were working on this, and your session was reopened.',
+  reboot: 'The computer restarted while you were working on this, and your session was reopened.',
+  restart: 'Bridge AI restarted while you were working on this, and your session was reopened.',
+  host: 'Bridge AI\'s terminals stopped unexpectedly while you were working on this, and your session was reopened.',
+}
+rt.whenInterrupted?.((paneId, why) => {
+  if (cfg.resumeWork === false) return
+  console.log(`${paneId} was interrupted mid-task (${why}); telling it to carry on`)
+  queue.add(paneId, `${CARRY_ON[why] || CARRY_ON.restart} Carry on from where you left off. Anything you had running in the background (subagents, shells, servers) stopped too, so start it again if you still need it.`, { now: true })
+  pushFleet()
+})
 // Nobody watching: still note now and then what each agent is doing, for Insights.
 setInterval(() => { if (!(clients.size || queue.size() || notify.active())) rt.fleet().then((f) => { if (!f.down) insights.observe(f.agents) }, () => {}) }, 30 * 1000)
 setInterval(() => { for (const c of clients) c.write(': ping\n\n') }, 25000)
