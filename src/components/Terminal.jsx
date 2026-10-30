@@ -5,6 +5,7 @@ import '@xterm/xterm/css/xterm.css'
 import Icon from './Icon.jsx'
 import { api } from '../api.js'
 import disposeTerm from '../disposeTerm.js'
+import altArrows from '../altArrows.js'
 
 // Live mirror of a herdr pane you can type into. herdr has no output stream per pane, so the
 // screen is re-read (fast while you type) and drawn at the pane's own width, so lines wrap the
@@ -135,8 +136,8 @@ export default function Terminal({ paneId, active, focusKey, onChat, shell = fal
     const cols = colsRef.current
     if (cols) {
       const cs = getComputedStyle(host)
-      const vp = term.element?.querySelector('.xterm-viewport')
-      const bar = vp ? Math.max(0, vp.offsetWidth - vp.clientWidth) : 0
+      // xterm's scrollbar lies over the right edge of the terminal (its own, not the browser's).
+      const bar = term.element?.querySelector('.xterm-scrollable-element > .scrollbar.vertical')?.offsetWidth || 0
       const room = host.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - bar - 2
       const fit = (size) => {
         size = Math.max(10, Math.min(14, Math.floor(size * 10) / 10))
@@ -190,7 +191,7 @@ export default function Terminal({ paneId, active, focusKey, onChat, shell = fal
       if (e.type !== 'keydown') return true
       if (e.metaKey) return false
       if (e.key === 'Enter' && e.shiftKey) { e.preventDefault(); send([{ keys: ['shift+enter'] }]); return false }
-      return true
+      return !altArrows(term, e)
     })
     // Keystrokes arrive one per event; a paste arrives as one long chunk.
     let chunks = []
@@ -208,8 +209,8 @@ export default function Terminal({ paneId, active, focusKey, onChat, shell = fal
       if (steps.length) send(steps)
     }
     const sub = term.onData((d) => { chunks.push(d); if (!timer) timer = setTimeout(flush, 18) })
-    // You scrolled: back at the bottom, the latest again; at the top, read further back. xterm's
-    // onScroll doesn't fire for the wheel or the scrollbar, so the viewport's own scroll event too.
+    // You scrolled (the wheel, the scrollbar or the keyboard): back at the bottom, the latest
+    // again; at the top, read further back.
     const scrolled = () => {
       if (paintingRef.current) return
       const b = term.buffer.active
@@ -230,10 +231,6 @@ export default function Terminal({ paneId, active, focusKey, onChat, shell = fal
       }
     }
     const onScroll = term.onScroll(scrolled)
-    const viewport = term.element?.querySelector('.xterm-viewport')
-    let frame = 0
-    const onViewport = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(scrolled) }
-    viewport?.addEventListener('scroll', onViewport)
     const ta = term.textarea
     const onFocus = () => setFocused(true)
     const onBlur = () => setFocused(false)
@@ -251,7 +248,7 @@ export default function Terminal({ paneId, active, focusKey, onChat, shell = fal
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
     mq.addEventListener('change', applyTheme)
     return () => {
-      sub.dispose(); onScroll.dispose(); viewport?.removeEventListener('scroll', onViewport); cancelAnimationFrame(frame); ro.disconnect(); mo.disconnect(); mq.removeEventListener('change', applyTheme)
+      sub.dispose(); onScroll.dispose(); ro.disconnect(); mo.disconnect(); mq.removeEventListener('change', applyTheme)
       ta?.removeEventListener('focus', onFocus); ta?.removeEventListener('blur', onBlur)
       disposeTerm(term); termRef.current = null; lastRef.current = ''
     }

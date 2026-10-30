@@ -5,6 +5,7 @@ import '@xterm/xterm/css/xterm.css'
 import Terminal from './Terminal.jsx'
 import { openSocket, usePoll } from '../api.js'
 import disposeTerm from '../disposeTerm.js'
+import altArrows from '../altArrows.js'
 
 // A plain terminal you type into, like a terminal app: brew upgrade, a dev server, anything you'd
 // run yourself, on whichever machine the window shows. With the built-in runtime it's attached to
@@ -46,7 +47,7 @@ function Attached({ paneId }) {
     term.open(hostRef.current)
     try { fit.fit() } catch { /* not laid out yet */ }
     // ⌘ shortcuts stay the app's (⌘K, ⌘C, ⌘V still copy and paste).
-    term.attachCustomKeyEventHandler((e) => !(e.type === 'keydown' && e.metaKey))
+    term.attachCustomKeyEventHandler((e) => !(e.type === 'keydown' && e.metaKey) && !altArrows(term, e))
 
     let ws = null
     let stop = false
