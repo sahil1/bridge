@@ -1,6 +1,6 @@
 # Installs Bridge AI on brand-new machines the way the README says (the one-line installers, and the
 # Mac's .dmg) and checks that it worked: macOS on Apple Silicon and Intel, Ubuntu 24.04 and 22.04,
-# two other kinds of Linux in a container, and Windows in both PowerShells. For each: the app is
+# three more kinds of Linux in containers, and Windows in both PowerShells. For each: the app is
 # where the installer said, it opens, its server answers on 127.0.0.1:7420 and on nothing else,
 # nothing went in its error logs, running the installer again updates it, and on a Mac Gatekeeper
 # lets it open as if it came from a browser. Screenshots and logs are kept with the run.
@@ -30,8 +30,6 @@ on:
       run:
         description: Or the build from this Release run (the number in its address)
         default: ''
-  push:
-    branches: [fresh-install]
 
 # actions: read, for a Release run's build.
 permissions:
@@ -44,7 +42,7 @@ defaults:
 
 env:
   # Where people get the installers from (main), or the branch, tag or commit asked for.
-  INSTALLER: https://raw.githubusercontent.com/${{ github.repository }}/${{ inputs.ref || (github.event_name == 'push' && github.sha) || 'main' }}
+  INSTALLER: https://raw.githubusercontent.com/${{ github.repository }}/${{ inputs.ref || 'main' }}
   # Empty: the latest release, as people get it.
   BRIDGE_VERSION: ${{ inputs.version || (github.event_name == 'release' && github.event.release.tag_name) || (github.event_name == 'workflow_run' && github.event.workflow_run.head_branch) || '' }}
   FROM_RUN: ${{ inputs.run || '' }}
