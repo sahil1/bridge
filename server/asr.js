@@ -29,11 +29,14 @@ function start() {
     me.pending.delete(m.id)
     clearTimeout(p.timer)
     me.last = Date.now()
+    // Unused for a while from now: the model's memory goes back.
+    if (!me.pending.size) { clearTimeout(me.idle); me.idle = setTimeout(() => { if (child === me && !me.pending.size) stop() }, IDLE); me.idle.unref?.() }
     if (m.error) p.reject(new Error(m.error))
     else p.resolve(m)
   })
   proc.on('error', () => {})
   proc.on('exit', (code, signal) => {
+    clearTimeout(me.idle)
     if (child === me) child = null
     // Stopped mid-request (a crash in native code, or out of memory): each request it had goes to
     // a new one, once; a second stop means it's the request, and it says so.
@@ -60,6 +63,7 @@ function send(msg, tries = 1) {
     me.pending.set(id, { resolve, reject, msg, tries, timer })
     me.model = msg.model?.key || me.model
     me.last = Date.now()
+    clearTimeout(me.idle)
     me.proc.send(full)
   })
 }
@@ -125,6 +129,4 @@ export function stop(key) {
 }
 export const loaded = () => (child && child.proc.exitCode === null ? child.model : null)
 
-// Unused for a while: the model's memory goes back.
-setInterval(() => { if (child && !child.pending.size && Date.now() - child.last > IDLE) stop() }, Math.min(60_000, IDLE)).unref?.()
 process.on('exit', () => stop())

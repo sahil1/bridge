@@ -188,7 +188,7 @@ try {
   ok(r.status === 415 && r.code === 'needs-ffmpeg' && /came as audio\/webm, which Bridge AI reads with ffmpeg, and ffmpeg isn't on this computer/.test(r.error || ''), 'compressed audio without ffmpeg: it says so plainly', r)
 
   // Unused for a moment (2.5 s in this test, minutes in the app): let go, and loaded again next time.
-  await sleep(4000)
+  await sleep(5000)
   r = await post(kit, wav(1))
   log = sherpaLog(kit)
   ok(r.status === 200 && log.filter((l) => l.load).length === 2 && log.filter((l) => l.load)[1].pid !== log.filter((l) => l.load)[0].pid, 'unused for a while, the engine lets go of the model; the next voice note loads it again', log.filter((l) => l.load))
