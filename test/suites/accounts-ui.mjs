@@ -171,6 +171,8 @@ try {
     // Its arrow points down once it's open, and stays so (a row redrawn every few seconds once
     // started the turn over each time, so it showed half turned or not at all).
     const angle = () => plan.locator('.acct-u.open .acct-u-head .caret').evaluate((x) => { const m = new DOMMatrix(getComputedStyle(x).transform); return Math.round(Math.atan2(m.b, m.a) * 180 / Math.PI) })
+    // (After its first turn: on a busy machine that can still be under way a quarter second in.)
+    await until(async () => (await angle()) === 90, 3000)
     const angles = []
     for (let i = 0; i < 8; i++) { await sleep(250); angles.push(await angle()) }
     ok(angles.every((x) => x === 90), `${t}: the open row's arrow points down, and stays so`, angles)
