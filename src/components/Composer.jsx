@@ -170,8 +170,8 @@ function VoiceSetup({ initial, onText, onClose }) {
   else if (whisper && !v.installCommand) text = t('{model} needs whisper.cpp: install whisper-cli on your computer, then tap the mic again. Or pick Parakeet in Settings › Voice: nothing to install.', { model: model.label })
   else if (whisper) { text = t('{model} needs whisper.cpp, a free program. It installs in a minute.', { model: model.label }); actions = <button className="btn small primary" onClick={setup}>{t('Install it')}</button> }
   else {
-    // The server's own words when it answered a recording; otherwise the same, from what's needed.
-    text = initial.ask || (model.label ? t('Speech to text needs a one-time download: {model}, {mb} MB. It stays on this computer, and so does what you say.', { model: model.label, mb: model.mb }) : t('Speech to text needs a one-time download.'))
+    // In your language from what's needed; else the server's own words from its answer.
+    text = model.label ? t('Speech to text needs a one-time download: {model}, {mb} MB. It stays on this computer, and so does what you say.', { model: model.label, mb: model.mb }) : initial.ask || t('Speech to text needs a one-time download.')
     if (touch && !audio) text = `${text} ${t("Your keyboard's own mic works meanwhile.")}`
     actions = <button className="btn small primary" onClick={setup}><Icon name="download" size={12} /> {audio ? t('Download, then transcribe') : t('Download')}</button>
   }
