@@ -46,22 +46,15 @@ function developerId(keychain) {
   } catch { return null }
 }
 
-module.exports = async function sign(opts) {
-  const { signAsync } = await import('@electron/osx-sign')
-  const per = opts.optionsForFile
-  // Each file's options from electron-builder (the hardened runtime, the entitlements), plus these.
-  const withEach = (extra) => (file) => ({ ...(per ? per(file) : {}), ...extra })
+// The best certificate this computer has, ready for codesign while `use` runs: use({ kind, hash, name,
+// keychain }), kind 'developer-id', 'own' (Bridge AI's self-signed one) or 'ad-hoc'. The app is
+// signed with it (below), then its disk images (notarize-dmg.js).
+async function withIdentity(use) {
   const fromEnv = given()
   const dev = fromEnv ? null : developerId()
-  if (dev) {
-    console.log(`  • signing with ${dev.name}`)
-    return signAsync({ ...opts, identity: dev.hash })
-  }
+  if (dev) return use({ kind: 'developer-id', ...dev })
   const cert = fromEnv || local()
-  if (!cert) {
-    console.log('  • signing ad hoc (no Bridge AI certificate here: node scripts/signing.js create makes one)')
-    return signAsync({ ...opts, optionsForFile: withEach({ hardenedRuntime: false }) })
-  }
+  if (!cert) return use({ kind: 'ad-hoc' })
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-sign-'))
   const keychain = path.join(tmp, 'sign.keychain-db')
   const pass = crypto.randomBytes(16).toString('hex')
@@ -77,20 +70,32 @@ module.exports = async function sign(opts) {
     security('list-keychains', '-d', 'user', '-s', keychain, ...listed)
     added = true
     const certDev = developerId(keychain)
-    if (certDev) {
-      console.log(`  • signing with ${certDev.name}`)
-      await signAsync({ ...opts, identity: certDev.hash, keychain })
-      return
-    }
+    if (certDev) return await use({ kind: 'developer-id', ...certDev, keychain })
     const hash = /\b([0-9A-F]{40})\b/.exec(security('find-identity', '-p', 'codesigning', keychain))?.[1]
     if (!hash) throw new Error('the Bridge AI certificate has no code signing identity')
-    console.log(`  • signing with the Bridge AI certificate ${hash.slice(0, 8)}…`)
-    // A self-signed certificate isn't one macOS trusts, so osx-sign is told not to check. No secure
-    // timestamp either: that's Apple's server, over the network, and nothing here needs one.
-    await signAsync({ ...opts, identity: hash, identityValidation: false, keychain, optionsForFile: withEach({ hardenedRuntime: false, timestamp: 'none' }) })
+    return await use({ kind: 'own', hash, name: `the Bridge AI certificate ${hash.slice(0, 8)}…`, keychain })
   } finally {
     if (added) try { security('list-keychains', '-d', 'user', '-s', ...listed) } catch { /* left as it was */ }
     try { security('delete-keychain', keychain) } catch { /* never made */ }
     fs.rmSync(tmp, { recursive: true, force: true })
   }
 }
+
+module.exports = async function sign(opts) {
+  const { signAsync } = await import('@electron/osx-sign')
+  const per = opts.optionsForFile
+  // Each file's options from electron-builder (the hardened runtime, the entitlements), plus these.
+  const withEach = (extra) => (file) => ({ ...(per ? per(file) : {}), ...extra })
+  return withIdentity(async ({ kind, hash, name, keychain }) => {
+    if (kind === 'ad-hoc') {
+      console.log('  • signing ad hoc (no Bridge AI certificate here: node scripts/signing.js create makes one)')
+      return signAsync({ ...opts, optionsForFile: withEach({ hardenedRuntime: false }) })
+    }
+    console.log(`  • signing with ${name}`)
+    if (kind === 'developer-id') return signAsync({ ...opts, identity: hash, ...(keychain ? { keychain } : {}) })
+    // A self-signed certificate isn't one macOS trusts, so osx-sign is told not to check. No secure
+    // timestamp either: that's Apple's server, over the network, and nothing here needs one.
+    return signAsync({ ...opts, identity: hash, identityValidation: false, keychain, optionsForFile: withEach({ hardenedRuntime: false, timestamp: 'none' }) })
+  })
+}
+module.exports.withIdentity = withIdentity

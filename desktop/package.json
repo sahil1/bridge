@@ -16,6 +16,7 @@
     "appId": "dev.bridge-ai.app",
     "productName": "Bridge AI",
     "afterPack": "./after-pack.js",
+    "afterAllArtifactBuild": "./notarize-dmg.js",
     "directories": {
       "output": "dist"
     },
@@ -119,6 +120,7 @@
       "en-US"
     ],
     "dmg": {
+      "title": "${productName} ${version}",
       "format": "ULFO",
       "writeUpdateInfo": false
     },
