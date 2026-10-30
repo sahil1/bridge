@@ -139,9 +139,14 @@ jobs:
           cat "$OUT/version.json" || { echo "No answer on $BASE after 2 minutes"; exit 1; }
           echo
           [ "$(jq -r .version "$OUT/version.json")" = "${TAG#v}" ] || { echo "That's not the version installed"; exit 1; }
-          pid="$(jq -r .pid "$OUT/version.json")"
-          ps -o command= -p "$pid" | grep -qF "$APP/Contents/" || { echo "The server on $BASE isn't the installed app's"; ps -o command= -p "$pid"; exit 1; }
-          pgrep -f "$APP/Contents/MacOS/Bridge AI" >/dev/null || { echo "The app isn't running"; exit 1; }
+          cmd="$(ps -o command= -p "$(jq -r .pid "$OUT/version.json")")"
+          case "$cmd" in
+            "$APP/Contents/"*) ;;
+            # Opened from where it was downloaded, or copied there other than with Finder.
+            */AppTranslocation/*"/Bridge AI.app/Contents/"*) echo "(macOS runs it from a temporary copy: App Translocation)" ;;
+            *) echo "The server on $BASE isn't the installed app's: $cmd"; exit 1 ;;
+          esac
+          pgrep -f "Bridge AI.app/Contents/MacOS/Bridge AI" >/dev/null || { echo "The app isn't running"; exit 1; }
           curl -fsS "$BASE/" | grep -q 'Bridge AI'
           curl -fsS "$BASE/api/setup" -o "$OUT/setup.json"
           curl -fsS "$BASE/api/config" | jq -c '{version, setupDone, simple, platform}'
@@ -151,7 +156,7 @@ jobs:
 
       - name: It listens on this computer only
         run: &mac-listens |
-          pids="$(pgrep -f "$APP/Contents/" | paste -sd, -)"
+          pids="$(pgrep -f "Bridge AI.app/Contents/" | paste -sd, -)"
           lsof -nP -a -p "$pids" -iTCP -sTCP:LISTEN | tee "$OUT/listening.txt"
           lsof -nP -a -p "$pids" -iUDP | tee -a "$OUT/listening.txt" || true
           if awk 'NR > 1 && $9 !~ /^(127\.0\.0\.1|\[::1\]|localhost):/' "$OUT/listening.txt" | grep -v '^COMMAND' | grep .; then
@@ -323,6 +328,21 @@ jobs:
       - name: No errors in its logs
         if: always() && env.VOL
         run: *mac-logs
+
+      # Copied here without Finder, the app ran from a temporary copy (App Translocation), as it does
+      # when opened straight from the .dmg. Its update (the installer, run as the app runs it: no
+      # BRIDGE_APP_DIR then) puts it in Applications, and it opens from there.
+      - name: Updating it puts it in Applications
+        if: always() && env.VOL
+        run: |
+          if [ -n "$FROM_RUN" ]; then export BRIDGE_ZIP="$RUNNER_TEMP/build/Bridge-AI-mac-${{ matrix.arch }}.zip"; fi
+          curl -fsSL "$INSTALLER/install.sh" | BRIDGE_VERSION="$TAG" sh 2>&1 | tee "$OUT/update.log"
+          if grep -n -i -E 'error|warn|fail|denied|not permitted|not found|no such|cannot|can.t|damaged|usage:' "$OUT/update.log"; then exit 1; fi
+          rm -f "$OUT/version.json"
+          for i in $(seq 1 120); do curl -fsS "$BASE/api/version" -o "$OUT/version.json" 2>/dev/null && break; sleep 1; done
+          cmd="$(ps -o command= -p "$(jq -r .pid "$OUT/version.json")")"
+          case "$cmd" in "$APP/Contents/"*) echo "Now in $APP" ;; *) echo "Still not the copy in Applications: $cmd"; exit 1 ;; esac
+          if pgrep -f "/AppTranslocation/.*/Bridge AI.app/Contents/" >/dev/null; then echo "The temporary copy is still running"; exit 1; fi
 
       - name: Keep its logs with the run
         if: always()
