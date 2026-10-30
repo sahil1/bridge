@@ -35,7 +35,7 @@ export default function Hud() {
     const [f, c] = await Promise.all([api('/fleet').catch(() => null), api('/config').catch(() => null)])
     const d = c?.dictation || conf || {}
     if (c) { setConf(d); configure(d) }
-    const list = f ? (f.agents || []).filter((a) => a.status !== 'unknown' || a.chief) : agents
+    const list = f ? f.agents || [] : agents
     setAgents(list)
     const chief = list.find((a) => a.chief && a.thread?.main) || list.find((a) => a.chief)
     const looked = list.find((a) => a.paneId === store.get('cc-ws', {})?.active)
@@ -100,13 +100,13 @@ export default function Hud() {
 
   const toChip = (
     <span className="hud-to">
-      <button type="button" className="hud-to-btn" onClick={() => setPicking((v) => !v)} aria-haspopup="menu" aria-expanded={picking}>
+      <button type="button" className="hud-to-btn" data-pane={target?.paneId || ''} onClick={() => setPicking((v) => !v)} aria-haspopup="menu" aria-expanded={picking}>
         {t('To:')} <b>{target ? nameOf(target) : t('pick an agent')}</b> <Icon name="down" size={11} />
       </button>
       {picking && (
         <div className="hud-menu" role="menu">
           {agents.map((a) => (
-            <button key={a.paneId} type="button" role="menuitem" className={a.paneId === to ? 'on' : ''} onClick={() => { setTo(a.paneId); setPicking(false) }}>
+            <button key={a.paneId} type="button" role="menuitem" data-pane={a.paneId} className={a.paneId === to ? 'on' : ''} onClick={() => { setTo(a.paneId); setPicking(false) }}>
               {a.chief ? <Icon name="helm" size={12} /> : <StatusDot status={a.status} size={7} />} <span>{nameOf(a)}</span>
             </button>
           ))}
