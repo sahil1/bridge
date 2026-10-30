@@ -72,7 +72,7 @@ export async function run(args, { timeout = 15000, json = true } = {}) {
       if (!json) return resolve(stdout)
       try {
         const parsed = JSON.parse(stdout)
-        if (parsed.error) return reject(new Error(parsed.error.message || parsed.error.code))
+        if (parsed.error) return reject(Object.assign(new Error(parsed.error.message || parsed.error.code), parsed.error.code ? { code: parsed.error.code } : {}))
         resolve(parsed.result ?? parsed)
       } catch {
         resolve(stdout)
@@ -154,6 +154,9 @@ function needLabel(label) {
 export const renameTab = (tabId, label) => run(['tab', 'rename', tabId, needLabel(label)])
 export const closeTab = (tabId) => run(['tab', 'close', tabId])
 export const renameWorkspace = (wsId, label) => run(['workspace', 'rename', wsId, needLabel(label)])
+// Not with --group: a space with herdr worktree spaces open (made with herdr's own `worktree`
+// commands) closes only with all of them, and Bridge AI shows each as a space of its own, so
+// herdr's refusal (workspace_group_close_required) goes back to say which to close first.
 export const closeWorkspace = (wsId) => run(['workspace', 'close', wsId])
 export async function renameTabOfPane(paneId, label) {
   const snap = await snapshot()
@@ -171,21 +174,34 @@ export function sendKeys(paneId, keys) {
 
 // herdr starts an agent only at a pane's interactive shell prompt. A pane that was just created is
 // still running your shell's startup (.zshrc and the like), which herdr answers with
-// agent_pane_busy, so wait for the prompt and try again rather than fail. Nothing is typed into
-// the pane until herdr accepts.
+// agent_pane_busy (on macOS also agent_start_input_failed, for a command longer than a starting
+// shell takes in one line), so wait for the prompt and try again rather than fail. Nothing is
+// typed into the pane until herdr accepts.
 const PROMPT_WAIT = 30000
-async function startAgent(name, kind, paneId, rest = []) {
+// waitIfLong: false gives up at once on a command too long for now, to try it without its prompt.
+async function startAgent(name, kind, paneId, rest = [], { waitIfLong = true } = {}) {
   const until = Date.now() + PROMPT_WAIT
   for (let wait = 400; ; wait = Math.min(Math.round(wait * 1.5), 2000)) {
     try {
       return await run(['agent', 'start', name, '--kind', kind, '--pane', paneId, '--timeout', '60000', ...rest], { timeout: 70000 })
     } catch (err) {
-      if (err.code !== 'agent_pane_busy') throw err
-      if (Date.now() + wait > until) throw new Error(`The new tab's shell didn't reach its prompt within ${PROMPT_WAIT / 1000} seconds, so the agent couldn't start there. Something in your shell's startup may be waiting; open the tab to see, then try again.`)
+      if (err.code !== 'agent_pane_busy' && !(err.code === 'agent_start_input_failed' && waitIfLong)) throw err
+      if (Date.now() + wait > until) throw Object.assign(new Error(`The new tab's shell didn't reach its prompt within ${PROMPT_WAIT / 1000} seconds, so the agent couldn't start there. Something in your shell's startup may be waiting; open the tab to see, then try again.`), { code: 'shell_not_ready' })
       await new Promise((r) => setTimeout(r, wait))
     }
   }
 }
+
+// An opening prompt for an agent that isn't taking one yet: herdr turns it away while the agent
+// starts or waits on you (a folder to trust, a sign-in), so it's tried again until it goes in,
+// for up to a quarter of an hour.
+const WAITING = new Set(['agent_blocked', 'agent_not_ready', 'agent_launch_pending'])
+function promptWhenReady(paneId, text, until = Date.now() + 15 * 60000) {
+  setTimeout(() => run(['agent', 'prompt', paneId, text]).catch((err) => {
+    if (WAITING.has(err.code) && Date.now() < until) promptWhenReady(paneId, text, until)
+  }), 3000)
+}
+const agentIn = async (paneId) => { try { return (await snapshot()).agents?.some((a) => a.pane_id === paneId) } catch { return false } }
 
 // Open a new workspace in `cwd` and start an agent of `kind` in its first pane.
 export async function launchAgent({ name, kind, cwd, label }) {
@@ -214,24 +230,59 @@ export async function launchTask({ name, kind = 'claude', cwd, label, workspaceI
     : await run(['workspace', 'create', '--cwd', cwd, '--label', label, '--no-focus', ...envArgs])
   const paneId = findPaneId(created)
   if (!paneId) throw new Error('herdr did not return a pane for the new tab')
-  // herdr only passes simple one-line prompts on the command line; longer ones are sent once the agent is up.
-  const inline = prompt && !/[\n"'`$\\]/.test(prompt) ? prompt : null
+  let inline = inlinePrompt(prompt) ? prompt : null
   try {
-    await startAgent(name, kind, paneId, ['--', ...args, ...(inline ? [inline] : [])])
+    try {
+      await startAgent(name, kind, paneId, ['--', ...args, ...(inline ? [inline] : [])], { waitIfLong: !inline })
+    } catch (err) {
+      // Refused with the prompt on its command line: without it, and the prompt follows.
+      if (!inline || !['agent_start_input_failed', 'invalid_agent_argument'].includes(err.code)) throw err
+      inline = null
+      await startAgent(name, kind, paneId, ['--', ...args])
+    }
   } catch (err) {
-    if (/not.?ready|blocked/i.test(err.message)) return { paneId, waiting: true, promptPending: !!prompt && !inline }
+    const pending = !!prompt && !inline
+    // A first launch usually stops at a trust or login prompt. The agent exists and is waiting on
+    // you, which the UI shows as "Needs you"; its opening prompt goes in once you've answered.
+    if (err.code === 'agent_not_ready' || /not.?ready|blocked/i.test(err.message)) {
+      if (pending) promptWhenReady(paneId, prompt)
+      return { paneId, waiting: true, promptPending: pending }
+    }
+    // Still busy after a minute (its first turn, on the prompt it started with): it's running.
+    if ((err.code === 'timeout' || err.killed) && await agentIn(paneId)) return { paneId }
+    // herdr refused the command, so the new tab holds a bare shell where the agent should be: close
+    // it. One where something ran (and failed), or whose shell never got to its prompt, stays to show why.
+    if (!['timeout', 'agent_start_failed', 'agent_kind_mismatch', 'shell_not_ready'].includes(err.code) && !err.killed) {
+      await (workspaceId ? run(['tab', 'close', findId(created, 'tab_id')]) : run(['workspace', 'close', findId(created, 'workspace_id')])).catch(() => {})
+    }
     throw err
   }
-  if (prompt && !inline) await run(['agent', 'prompt', paneId, prompt])
+  if (prompt && !inline) {
+    try { await run(['agent', 'prompt', paneId, prompt]) } catch (err) {
+      if (!WAITING.has(err.code)) throw err
+      promptWhenReady(paneId, prompt)
+      return { paneId, promptPending: true }
+    }
+  }
   return { paneId }
 }
 
-export function findPaneId(obj) {
+// What goes on the agent's command line: a short one-line prompt with nothing a shell would read
+// into. Anything else is sent once the agent is up. herdr types the command into the pane's
+// shell, and on macOS refuses (since 0.9.4; before, it cut it off) one longer than a shell that's
+// still starting takes in one line: 1024 bytes, with the agent's own arguments.
+const INLINE_MAX = 200
+// eslint-disable-next-line no-control-regex
+export const inlinePrompt = (p) => !!p && Buffer.byteLength(p) <= INLINE_MAX && !/[\x00-\x1f\x7f"'`$\\]/.test(p)
+
+// The first `key` (pane_id, tab_id, workspace_id) in herdr's answer, however deep.
+export function findId(obj, key) {
   if (!obj || typeof obj !== 'object') return null
-  if (typeof obj.pane_id === 'string') return obj.pane_id
+  if (typeof obj[key] === 'string') return obj[key]
   for (const v of Object.values(obj)) {
-    const found = findPaneId(v)
+    const found = findId(v, key)
     if (found) return found
   }
   return null
 }
+export const findPaneId = (obj) => findId(obj, 'pane_id')

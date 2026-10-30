@@ -35,7 +35,7 @@ import * as mentions from './mentions.js'
 import { promptSafe, draftIn } from './promptsafe.js'
 import { rewindAndSend, codexRewindAndSend, undoReply, btwAnswer } from './rewind.js'
 import { makeNews } from './news.js'
-import { pickRuntime } from './runtime/index.js'
+import { pickRuntime, fellBack } from './runtime/index.js'
 import { sessionName as herdrSession, useSession as useHerdrSession } from './runtime/herdr-cli.js'
 import * as herdrSessions from './runtime/herdr-sessions.js'
 import { AGENTS, installed, caps, adapter, catalog as agentCatalog, installCommand, installNeeds, installTools, clearInstalledCache, forgetLoginPath, loginPath, which } from './agents.js'
@@ -88,6 +88,7 @@ const threads = makeThreads()
 const mainChief = (f) => f?.agents.find((a) => a.chief && a.thread?.main) || f?.agents.find((a) => a.chief)
 // Where agents run: herdr, or Bridge AI's own terminals (see runtime/index.js).
 const rt = await pickRuntime(cfg)
+if (fellBack()) console.log(`Agents run in Bridge AI itself, not herdr: ${fellBack().why}. Update herdr (herdr update) and restart Bridge AI.`)
 
 const quota = makeQuota(cfg)
 // An account an agent is on renews its own sign-in: Usage leaves it alone (accounts.renew).
@@ -1513,7 +1514,7 @@ app.get('/api/version', (req, res) => res.json({ version: VERSION, build: BUILD,
 app.get('/api/config', (req, res) => res.json({
   version: VERSION,
   name: cfg.name || '', location: cfg.location?.label || null, hasMortgage: !!cfg.mortgage,
-  runtime: { name: rt.name, ...rt.caps, attach: !!rt.attach, ...(rt.name === 'herdr' ? { session: herdrSession() } : { keep: cfg.keepAgents !== false }) }, platform: process.platform, mail: IS_MAC, calendar: IS_MAC,
+  runtime: { name: rt.name, ...rt.caps, attach: !!rt.attach, ...(rt.name === 'herdr' ? { session: herdrSession() } : { keep: cfg.keepAgents !== false }), ...(fellBack() ? { fellBack: fellBack() } : {}) }, platform: process.platform, mail: IS_MAC, calendar: IS_MAC,
   defaultAgent: cfg.defaultAgent || 'claude', chiefKind: cfg.chief?.kind || 'claude', setupDone: !!cfg.setupDone, simple: !!cfg.simple,
 }))
 
@@ -1815,7 +1816,7 @@ app.post('/api/chats', wrap(async (req) => {
 // ---------- herdr sessions (the sidebar's session menu, Settings › Where agents run) ----------
 // needs=1: also how many agents wait on you in each running session (read from its socket).
 app.get('/api/herdr/sessions', wrap(async (req) => {
-  try { return { installed: true, ...(await herdrSessions.list({ needs: req.query.needs === '1' })) } } catch (e) { return { installed: false, sessions: [], error: e.message } }
+  try { return { installed: true, ...(await herdrSessions.list({ needs: req.query.needs === '1' })), outdated: rt.name === 'herdr' ? await rt.outdated() : [] } } catch (e) { return { installed: false, sessions: [], error: e.message } }
 }))
 const herdrOnly = () => { if (rt.name !== 'herdr') throw new Error('Agents run in Bridge AI itself, not in herdr, so there are no herdr sessions to switch') }
 // Show another session: saved as herdr.session, like the pick in Settings; the fleet, board and

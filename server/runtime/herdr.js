@@ -4,23 +4,51 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { execFileSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import * as cli from './herdr-cli.js'
 import * as sock from './herdr-socket.js'
 import { answers } from './herdr-sessions.js'
-import { adapter, newSessionId } from '../agents.js'
+import { AGENTS, adapter, newSessionId } from '../agents.js'
 import { quoteCommand, runSetup } from './spawn.js'
 import { envFor, notePane, movePane, keepPanes, accountOf, labelOf } from '../accounts.js'
 import { paneKey, inView } from '../scope.js'
-import { DATA, dataFile } from '../paths.js'
+import { DATA, dataFile, writeFileAtomic } from '../paths.js'
 
 export const name = 'herdr'
 export const caps = { liveView: true, reorder: true, splits: true }
 
-// Usable when the herdr binary is installed and a session is running.
-export function available() {
-  try { execFileSync(process.env.HERDR_BIN || 'herdr', ['--version'], { stdio: 'ignore', timeout: 3000 }) } catch { return false }
-  return !!cli.herdrSocket()
+// The oldest herdr Bridge AI works with. Before 0.9.0, reading a new agent's screen came back
+// empty until it had scrolled, a prompt could be reported sent before it was, and closing a space
+// worked differently; an older herdr would half work, so Bridge AI runs agents itself instead.
+export const MIN_VERSION = '0.9.0'
+const newer = (a, b) => { const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return true }
+// What `herdr --version` says: { version, old } (old: older than MIN_VERSION), or null when herdr
+// isn't installed or doesn't answer.
+export async function version() {
+  const bin = await cli.herdrBin()
+  const out = await new Promise((resolve) => execFile(bin, ['--version'], { timeout: 5000 }, (err, stdout) => resolve(err ? null : String(stdout))))
+  const v = out?.match(/(\d+)\.(\d+)\.(\d+)/)?.[0]
+  return v ? { version: v, old: !newer(v, MIN_VERSION) } : out == null ? null : { version: null, old: false }
+}
+// Usable when herdr is installed, new enough, and a session is running.
+export async function available() {
+  const v = await version()
+  return !!v && !v.old && !!cli.herdrSocket()
+}
+
+// herdr's integrations for agents Bridge AI starts that are out of date (`herdr integration
+// status`, which reads files and needs no session), with the command herdr gives to update each:
+// herdr 0.9.5 stopped installing Codex's turn hooks, and the old ones warn on every start.
+// Checked now and then, not on every look.
+let outdatedMemo = { at: 0, list: [] }
+export async function outdated() {
+  if (Date.now() - outdatedMemo.at < 10 * 60000) return outdatedMemo.list
+  const out = await cli.run(['integration', 'status'], { json: false, timeout: 10000 }).catch(() => '')
+  const known = new Map(AGENTS.filter((a) => a.herdr).map((a) => [a.herdr, a]))
+  const list = [...String(out).matchAll(/^([\w-]+): (?:outdated|needs repair)\b/gm)].map((m) => m[1]).filter((t) => known.has(t))
+    .map((t) => ({ target: t, label: known.get(t).label, command: `herdr integration install ${t}` }))
+  outdatedMemo = { at: Date.now(), list }
+  return list
 }
 
 // Agents that continue in another session than herdr reports (Codex after an edit).
@@ -32,7 +60,7 @@ export async function setSession(paneId, sessionId) { followed.set(paneKey(paneI
 // Whether one is working comes from the state file it keeps (chatagent.js), not from herdr.
 const OWN = dataFile('herdr-own.json')
 let own = (() => { try { return JSON.parse(fs.readFileSync(OWN, 'utf8')) } catch { return {} } })() // pane key -> { kind, sessionId, cwd }
-const saveOwn = () => { try { fs.writeFileSync(OWN, JSON.stringify(own), { mode: 0o600 }) } catch { /* read-only disk */ } }
+const saveOwn = () => { try { writeFileAtomic(OWN, JSON.stringify(own), { mode: 0o600 }) } catch { /* read-only disk */ } }
 const ownSeen = new Map() // pane key -> { status, seen }
 const ownState = (o) => { try { return fs.readFileSync(path.join(DATA, 'chat-logs', `${o.sessionId}.state`), 'utf8').trim() } catch { return 'idle' } }
 function ownAgents(snap, have) {
@@ -116,6 +144,18 @@ export async function prompt(paneId, t) {
   await sock.input(paneId, [{ keys: ['enter'] }])
   return { ok: true }
 }
+// The opening prompt of one of Bridge AI's own agents, typed in once it's up: it writes its state
+// file as it starts (chatagent.js). herdr refuses input a shell still starting can't take in one
+// line, so that's tried again too, for up to half a minute.
+async function typeWhenUp(paneId, sessionId, text) {
+  const up = path.join(DATA, 'chat-logs', `${sessionId}.state`)
+  for (let i = 0; i < 60 && own[paneKey(paneId)]; i++) {
+    await new Promise((r) => setTimeout(r, 500))
+    if (!(await fs.promises.access(up).then(() => true, () => false))) continue
+    await new Promise((r) => setTimeout(r, 400))
+    try { return await prompt(paneId, text) } catch { /* not taking input yet */ }
+  }
+}
 export async function focusAgent(paneId) {
   if (!isOwn(paneId)) return cli.focusAgent(paneId)
   const st = ownSeen.get(paneKey(paneId))
@@ -125,7 +165,17 @@ export const focusTab = (tabId) => cli.focusTab(tabId)
 export const renameTab = cli.renameTab
 export const closeTab = cli.closeTab
 export const renameWorkspace = cli.renameWorkspace
-export const closeWorkspace = cli.closeWorkspace
+// A space with herdr worktree spaces open closes only with them (herdr 0.9.0 on). Bridge AI shows
+// each as a space of its own, so closing the one you picked mustn't close the others: say which.
+export async function closeWorkspace(wsId) {
+  try { return await cli.closeWorkspace(wsId) } catch (err) {
+    if (err.code !== 'workspace_group_close_required') throw err
+    const snap = await cli.snapshot().catch(() => ({}))
+    const key = (snap.workspaces || []).find((w) => w.workspace_id === wsId)?.worktree?.repo_key
+    const others = (snap.workspaces || []).filter((w) => w.workspace_id !== wsId && key && w.worktree?.repo_key === key).map((w) => w.label)
+    throw Object.assign(new Error(`This space has herdr worktree spaces open${others.length ? ` (${others.join(', ')})` : ''}. Close those first, or close the whole group in herdr.`), { code: err.code })
+  }
+}
 export const moveWorkspace = (wsId, index) => sock.call('workspace.move', { workspace_id: wsId, insert_index: index })
 export const moveTab = (tabId, index) => sock.call('tab.move', { tab_id: tabId, insert_index: index })
 
@@ -195,10 +245,14 @@ export async function launch({ kind = 'claude', cwd, label, workspaceId, newSpac
       : await cli.run(['workspace', 'create', '--cwd', cwd, '--label', space || label, '--no-focus', ...Object.entries(env).flatMap(([k, v]) => ['--env', `${k}=${v}`])])
     const paneId = cli.findPaneId(created)
     if (!paneId) throw new Error('herdr did not return a pane for the new tab')
-    const args = a.builtin ? (resume ? a.resume(resume) : a.start({ sessionId: sid, prompt: opening })) : [...(model && a.model ? a.model(model) : []), ...(extra.length ? extra : a.start({}))]
+    // Its opening prompt rides on the command line, unless it's long or more than one line: a
+    // shell still starting can cut a long line off (macOS), so that's typed in once it's up.
+    const later = a.builtin && !resume && opening && (Buffer.byteLength(opening) > 200 || /[\r\n]/.test(opening)) ? opening : null
+    const args = a.builtin ? (resume ? a.resume(resume) : a.start({ sessionId: sid, prompt: later ? undefined : opening })) : [...(model && a.model ? a.model(model) : []), ...(extra.length ? extra : a.start({}))]
     await cli.paneSendText(paneId, quoteCommand(a.bin[0], args))
     await cli.paneSendKeys(paneId, ['enter'])
     if (a.builtin) { own[paneKey(paneId)] = { kind, sessionId: sid, cwd }; saveOwn() }
+    if (later) typeWhenUp(paneId, sid, later)
     out = a.builtin ? { paneId, sessionId: sid } : { paneId, promptPending: !!opening }
     if (opening && !a.builtin) setTimeout(() => cli.prompt(paneId, opening).catch(() => cli.paneSendText(paneId, opening).then(() => cli.paneSendKeys(paneId, ['enter'])).catch(() => {})), 6000)
   }
