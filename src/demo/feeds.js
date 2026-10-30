@@ -223,18 +223,19 @@ export function makeMeetings() {
   ]
 }
 // Settings › Meetings on the made-up computer: whisper.cpp ready, with the best model.
+// The speech models, as Settings › Voice and › Meetings show them (server/speech.js status).
+const EU25 = ['bg', 'hr', 'cs', 'da', 'nl', 'en', 'et', 'fi', 'fr', 'de', 'el', 'hu', 'it', 'lv', 'lt', 'mt', 'pl', 'pt', 'ro', 'sk', 'sl', 'es', 'sv', 'ru', 'uk']
+export const speechModels = () => [
+  { id: 'parakeet-v3', runtime: 'sherpa', label: 'Parakeet', short: 'Parakeet', mb: 670, best: true, languages: EU25, license: 'CC-BY-4.0', by: 'NVIDIA', note: 'Accurate and quick on any computer. English and 24 more European languages, which it tells apart itself.', have: true, usable: true, downloading: null },
+  { id: 'parakeet-en', runtime: 'sherpa', label: 'Parakeet, English', short: 'Parakeet, English', mb: 663, best: false, languages: ['en'], license: 'NVIDIA Open Model License', by: 'NVIDIA', note: 'The best at tool names and jargon (worktree, Claude Code).', have: false, usable: true, downloading: null },
+  { id: 'large-v3-turbo-q5_0', runtime: 'whisper', label: 'Whisper large turbo', short: 'Large turbo', mb: 574, best: false, languages: 'auto', license: 'MIT', by: 'OpenAI', note: 'For the languages Parakeet doesn\'t hear. Accurate and still quick.', have: false, usable: false, downloading: null },
+  { id: 'small.en-q5_1', runtime: 'whisper', label: 'Whisper small, English', short: 'Small, English', mb: 190, best: false, languages: ['en'], license: 'MIT', by: 'OpenAI', note: 'Light and quick.', have: false, usable: false, downloading: null },
+]
 export const speech = () => ({
-  engine: 'local', language: 'auto', callAudio: true, canRecordCall: true, folder: '~/Documents/Meeting notes',
-  local: {
-    ready: true, program: 'whisper-server', installCommand: null, model: 'large-v3-turbo-q5_0', vad: true,
-    models: [
-      { id: 'large-v3-turbo-q5_0', mb: 574, label: 'Large turbo', note: 'Accurate and still quick. About 100 languages.', best: true, have: true },
-      { id: 'small.en-q5_1', mb: 190, label: 'Small, English', note: 'Light and quick, English only. Voice notes use it too.', have: true },
-      { id: 'small-q5_1', mb: 190, label: 'Small', note: 'Light and quick, many languages.', have: false },
-      { id: 'base.en-q5_1', mb: 60, label: 'Base, English', note: 'The lightest that does the job, English only.', have: false },
-      { id: 'large-v3-q5_0', mb: 1081, label: 'Large', note: 'The most accurate, and the slowest. Many languages.', have: false },
-    ],
-  },
+  engine: 'local', auto: false, ready: true, needs: null, standIn: null, language: 'auto', callAudio: true, canRecordCall: true, folder: '~/Documents/Meeting notes',
+  apple: { available: false, installed: false, locale: null, why: null },
+  local: { ready: true, runtime: 'sherpa', program: null, installCommand: null, model: 'parakeet-v3', default: 'parakeet-v3', vad: false, models: speechModels() },
+  fellBack: null, hidden: [],
   services: [['openai', 'OpenAI', 'gpt-transcribe', '$0.27'], ['groq', 'Groq', 'whisper-large-v3-turbo', '$0.04'], ['mistral', 'Mistral (Voxtral)', 'voxtral-mini-latest', '$0.18'], ['together', 'Together AI', 'openai/whisper-large-v3', '$0.09'], ['deepgram', 'Deepgram', 'nova-3', '$0.26'], ['elevenlabs', 'ElevenLabs Scribe', 'scribe_v2', '$0.22'], ['assemblyai', 'AssemblyAI', 'default', '$0.21'], ['gemini', 'Google Gemini', 'gemini-2.5-flash', 'about $0.12']]
     .map(([id, label, model, price]) => ({ id, label, ready: false, model, models: [model], price: { [model]: price }, custom: false }))
     .concat({ id: 'custom', label: 'Another OpenAI-style service', ready: false, model: '', models: [], price: {}, custom: true }),

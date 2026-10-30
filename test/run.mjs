@@ -40,6 +40,8 @@ const SUITES = [
   { name: 'demo-ui', build: 'dist-demo', browser: true, covers: [/^src\/demo\//, /^src\/components\/meetings\//, /^src\/(App|api)\.jsx?$/, /^vite\.config\.js$/] },
   { name: 'herdr', build: null, covers: [/^server\/runtime\/(herdr[\w-]*|index)\.js$/, /^server\/(index|agents|chatagent)\.js$/] },
   { name: 'saves', build: null, covers: [/^server\/paths\.js$/] },
+  { name: 'speech', build: null, covers: [/^server\/(speech|voice|asr|asr-worker|machine|meetmemory|meetings)\.js$/, /^test\/stand-ins\/sherpa\.cjs$/] },
+  { name: 'voice-ui', build: 'dist', browser: true, covers: [/^src\/components\/settings\/(Voice|Meetings)\.jsx$/, /^src\/components\/(Composer|Settings)\.jsx$/, /^src\/audio\//, /^server\/(speech|voice|asr|asr-worker|machine|index)\.js$/, /^test\/stand-ins\/sherpa\.cjs$/] },
 ]
 // A change to these runs everything.
 const EVERYTHING = [/^test\/(lib|stand-ins)\//, /^test\/run\.mjs$/, /^package(-lock)?\.json$/]

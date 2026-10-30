@@ -10,13 +10,13 @@ import { t, tx, locale } from '../i18n/index.js'
 const ITEMS = {
   node: [tx('Node.js'), tx('So any coding agent installs in one click.')],
   homebrew: [tx('Homebrew'), tx('Brings the programs below. It asks for your password once, in a terminal tab.')],
-  meetings: [tx('Meeting notes'), tx('whisper.cpp and a speech model, so meetings are transcribed on this computer.')],
-  voice: [tx('Voice notes'), tx('ffmpeg and whisper.cpp, so what you say becomes text here.')],
+  meetings: [tx('Meeting notes'), tx('A speech model, so meetings are transcribed on this computer.')],
+  voice: [tx('Voice notes'), tx('The speech model, so what you say becomes text here.')],
   calendar: [tx('Your calendar'), tx('icalBuddy reads macOS Calendar, then Bridge AI asks to see it.')],
   mail: [tx('Mail'), tx("Full Disk Access, to read Mail's own index for the Inbox. Nothing leaves your Mac.")],
 }
 // What an item still needs, by name (the programs keep theirs).
-const PART = { whisper: 'whisper.cpp', 'whisper-cli': 'whisper.cpp', ffmpeg: 'ffmpeg', model: tx('the speech model') }
+const PART = { whisper: 'whisper.cpp', 'whisper-cli': 'whisper.cpp', model: tx('the speech model') }
 const listOf = (names) => new Intl.ListFormat(locale(), { type: 'conjunction' }).format([...new Set(names)])
 const name = (id) => t(ITEMS[id]?.[0] || id)
 // "Already set up, so left as it is": the items set up before this list first showed.

@@ -16,8 +16,10 @@ transcripts on your computer and types into them for you.
 
 The outside requests Bridge AI makes itself are for what it shows you: the weather (Open-Meteo,
 with only the coordinates you picked), market prices and news headlines (Yahoo Finance, the Federal
-Reserve and public news feeds), the speech model for voice notes when you set them up (one
-download from Hugging Face), and a check on GitHub for a newer version, which you can turn off in
+Reserve and public news feeds), speech models when you download one, the first time you use the
+mic or a meeting or from Settings › Voice (one download each from Hugging Face; what you say is
+turned into text on your computer and never sent anywhere, unless you pick a speech service for
+meetings), and a check on GitHub for a newer version, which you can turn off in
 Settings › About & Updates. Its fonts and icons are part of the app, so nothing is fetched to draw
 it.
 

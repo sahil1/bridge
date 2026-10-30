@@ -1,18 +1,18 @@
 // Setup's "Everything" (picked over the recommended Just what agents need), in the browser named by BRIDGE_TEST_BROWSER, on a computer with nothing
 // set up: one click sets it all going (Node.js and the speech model downloaded by the server, the
-// programs installed in one terminal tab: Homebrew first, then whisper.cpp, ffmpeg and icalBuddy in
-// one go, on a Mac), the list says how each is doing while setup carries on (a download that can't
+// programs installed in one terminal tab: Homebrew first, then icalBuddy, on a Mac; speech needs
+// no program, only its model), the list says how each is doing while setup carries on (a download that can't
 // get through says why; closing the terminal tab puts what it was installing back to Not set up;
 // Try again once nothing's going), closing setup shows the terminal tab where Homebrew asks for
 // your password, and Settings › General keeps the same list. Nothing real runs: the kit's stand-in
 // installer runs instead of Homebrew, and Node.js and the model have nowhere to download from, so
 // they say they didn't work.
 // Then "Just what agents need" (Node.js alone), asked for straight from the server. Then a computer
-// with Node.js and ffmpeg already: neither is offered or installed again, and Just what agents need
-// says there's nothing to install.
+// with Node.js and the speech model already: neither is offered or downloaded again, and Just what
+// agents need says there's nothing to install.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, checks, until, browser, page, shot, IS_MAC } from '../lib/harness.mjs'
+import { startKit, startSpeechModels, checks, until, browser, page, shot, IS_MAC } from '../lib/harness.mjs'
 
 const { ok, done } = checks('setup-all')
 const kit = await startKit('setup-all')
@@ -38,7 +38,7 @@ try {
   // One terminal tab for the programs, Homebrew first (none here), and its stand-in ran.
   if (IS_MAC) {
     const line = await until(() => installs().find((l) => /brew install/.test(l)), 15000)
-    ok(/Homebrew\/install/.test(line || '') && /brew install whisper-cpp ffmpeg ical-buddy$/.test(line || ''), 'the programs: one line, Homebrew then whisper.cpp, ffmpeg and icalBuddy together', line)
+    ok(/Homebrew\/install/.test(line || '') && /brew install ical-buddy$/.test(line || ''), 'the programs: one line, Homebrew then icalBuddy (speech needs no program: not whisper.cpp, not ffmpeg)', line)
     ok(/&& HOMEBREW_NO_ASK=1 brew install /.test(line || ''), 'and Homebrew doesn\'t stop to ask "Do you want to proceed?" in a tab nobody watches', line)
     ok(installs().length === 1, 'in one terminal tab', installs())
     const tabs = (await kit.api('/fleet')).tabs || []
@@ -98,36 +98,36 @@ try {
   const basic = await kit.api('/setup/run', { level: 'basic' })
   ok(basic.items.find((i) => i.id === 'node') && installs().length === n, 'Just what agents need: Node.js only, nothing else installed', installs().slice(n))
 
-  // ---------- a computer with Node.js and ffmpeg already ----------
-  // Neither is installed again or offered: named once as already set up, and Voice notes adds only
-  // what it doesn't have.
-  const had = await startKit('setup-all-have')
+  // ---------- a computer with Node.js and the speech model already ----------
+  // Neither is installed again or offered: named once as already set up.
+  const models = await startSpeechModels('setup-all')
+  const had = await startKit('setup-all-have', { env: models.env() })
   try {
     had.program('npx', '// Node.js\'s npx, already on this computer.\n')
-    had.program('ffmpeg', '// ffmpeg, already on this computer.\n')
+    fs.mkdirSync(path.join(had.data, 'models', 'parakeet-v3'), { recursive: true })
+    for (const [n, body] of Object.entries(models.files)) fs.writeFileSync(path.join(had.data, 'models', 'parakeet-v3', n), body)
     const hadInstalls = () => (fs.existsSync(path.join(had.bin, 'installs.log')) ? fs.readFileSync(path.join(had.bin, 'installs.log'), 'utf8').trim().split('\n').filter(Boolean) : [])
     const h = await page(b, had.url, { mode: 'light', theme: 'sky' })
     await h.p.waitForSelector('.wiz-levels', { timeout: 15000 })
     const kept = await h.p.innerText('.wiz-body .sa-kept').catch(() => '')
-    ok(/^Already set up, so left as it is: Node\.js/.test(kept), 'setup names what\'s here already, and leaves it as it is', kept)
+    ok(/^Already set up, so left as it is: Node\.js, Meeting notes,? (and )?Voice notes\b/.test(kept), 'setup names what\'s here already (the speech model too), and leaves it as it is', kept)
     ok(/Node\.js is already here, so there's nothing to install/.test(await h.p.locator('.wiz-levels li', { hasText: 'Just what agents need' }).innerText()) && await h.p.locator('.wiz-levels li', { hasText: 'Later' }).count() === 0, 'with Node.js here, "Just what agents need" says there\'s nothing to install, and Later isn\'t offered')
     ok(/^Continue$/.test((await h.p.innerText('.wiz-foot .btn.primary')).trim()), 'so its button just carries on')
     await h.p.check('input[name="wiz-level"][value="full"]')
     await h.p.click('.wiz-foot button:has-text("Set up everything")')
     await h.p.waitForSelector('.sa-list', { timeout: 10000 })
     const listed = await h.p.$$eval('.sa-item b', (l) => l.map((x) => x.innerText))
-    ok(!listed.includes('Node.js'), 'Node.js isn\'t listed', listed)
-    const voiceAdds = await h.p.locator('.sa-item', { hasText: 'Voice notes' }).innerText()
-    ok(/Adds only whisper\.cpp and the speech model\. The rest is already here\./.test(voiceAdds), 'Voice notes adds only what\'s missing (not ffmpeg)', voiceAdds)
+    ok(!listed.includes('Node.js') && !listed.includes('Voice notes') && !listed.includes('Meeting notes'), 'Node.js and speech aren\'t listed', listed)
     ok(!(await had.api('/tools/node')).job, 'and no Node.js is downloaded')
+    ok(!models.asked.length, 'nor the speech model', models.asked)
     if (IS_MAC) {
       const line = await until(() => hadInstalls().find((l) => /brew install/.test(l)), 15000)
-      ok(/HOMEBREW_NO_ASK=1 \S*brew install whisper-cpp ical-buddy$/.test(line || ''), 'the programs: whisper.cpp and icalBuddy, not ffmpeg, without Homebrew stopping to ask', line)
+      ok(/HOMEBREW_NO_ASK=1 \S*brew install ical-buddy$/.test(line || ''), 'the programs: icalBuddy only, without Homebrew stopping to ask', line)
     }
     await shot(h.p, `${tag}setup-all-have`)
     ok(h.errors.length === 0, 'no page errors', h.errors)
     await h.ctx.close()
-  } finally { had.stop() }
+  } finally { had.stop(); models.stop() }
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
   console.log(kit.log().slice(-1500))

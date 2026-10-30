@@ -1191,7 +1191,7 @@ export function createDemo({ everything = true } = {}) {
   on('POST', '/setup/install/:kind', () => needs('Installing an agent'))
   on('GET', '/setup', () => ({ done: true, runtime: 'builtin', platform: 'darwin', dataDir: '~/.bridge-ai', suggested: {}, agents: F.catalog(), usable: F.catalog().filter((a) => a.installed), mail: true, calendar: true }))
   on('POST', '/setup', () => ok)
-  on('GET', '/voice', () => ({ ready: true, model: true, modelMB: 190, missing: [], installCommand: null, downloading: null, error: null }))
+  on('GET', '/voice', () => ({ ready: true, engine: 'local', standIn: null, needs: null, model: F.speechModels()[0], apple: { available: false }, fellBack: null, modelMB: 670, missing: [], installCommand: null, downloading: null, error: null }))
   on('POST', '/voice/setup', () => needs('Voice notes', 'need'))
   on('POST', '/transcribe', () => needs('Voice notes', 'need'))
   on('POST', '/upload', () => needs('Attaching files'))
