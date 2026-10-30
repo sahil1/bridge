@@ -74,17 +74,35 @@ console.log(`Installing what the server uses: ${Object.keys(pkg.dependencies).jo
 run(['install', '--omit=dev', '--no-audit', '--no-fund'], OUT) // versions from package-lock.json
 fs.rmSync(path.join(OUT, 'package-lock.json'), { force: true })
 
-// sherpa-onnx, which runs Parakeet (server/asr-worker.js), comes as one package per OS and chip,
-// and npm installs only this machine's. A Mac build makes an app for each chip, so both Mac
-// packages go in, each checked against package-lock.json; after-pack.js keeps the right one in each.
+// Packages that come one per OS and chip, of which npm installs only this machine's: sherpa-onnx
+// (Parakeet, server/asr-worker.js) and ccusage (plan usage). A Mac build makes an app for each chip,
+// so both chips' packages go in, each checked against package-lock.json; after-pack.js keeps each
+// app's own. A package of that shape that isn't on this list stops the build, so a new one can't
+// slip into the Intel app with only Apple Silicon's binary.
+const PER_CHIP = ['sherpa-onnx-darwin-{arch}', '@ccusage/ccusage-darwin-{arch}']
+const ARCHS = ['arm64', 'x64']
+// Every installed package's package.json under node_modules (scoped ones and nested ones too).
+const installed = (dir) => {
+  const out = []
+  if (!fs.existsSync(dir)) return out
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (!e.isDirectory() || e.name.startsWith('.')) continue
+    const p = path.join(dir, e.name)
+    if (e.name.startsWith('@')) { out.push(...installed(p)); continue }
+    const pj = path.join(p, 'package.json')
+    if (fs.existsSync(pj)) out.push({ dir: p, pkg: JSON.parse(fs.readFileSync(pj, 'utf8')) })
+    out.push(...installed(path.join(p, 'node_modules')))
+  }
+  return out
+}
 if (process.platform === 'darwin') {
   const lock = JSON.parse(fs.readFileSync(path.join(REPO, 'package-lock.json'), 'utf8')).packages
-  const tmp = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'bridge-sherpa-'))
-  for (const arch of ['arm64', 'x64']) {
-    const name = `sherpa-onnx-darwin-${arch}`
+  const tmp = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'bridge-chips-'))
+  for (const name of PER_CHIP.flatMap((n) => ARCHS.map((arch) => n.replace('{arch}', arch)))) {
     const want = lock[`node_modules/${name}`]
-    const dest = path.join(OUT, 'node_modules', name)
-    if (!want || fs.existsSync(dest)) continue
+    const dest = path.join(OUT, 'node_modules', ...name.split('/'))
+    if (!want) { console.error(`${name} isn't in package-lock.json`); process.exit(1) }
+    if (fs.existsSync(dest)) continue
     const r = spawnSync(npm, ['pack', `${name}@${want.version}`, '--pack-destination', tmp, '--silent'], { cwd: tmp, encoding: 'utf8', shell: IS_WIN })
     const file = path.join(tmp, String(r.stdout).trim().split('\n').pop())
     if (r.status || !fs.existsSync(file)) { console.error(`Couldn't get ${name}@${want.version}: ${r.stderr}`); process.exit(1) }
@@ -94,6 +112,11 @@ if (process.platform === 'darwin') {
     if (spawnSync('tar', ['-xzf', file, '-C', dest, '--strip-components', '1']).status) { console.error(`Couldn't unpack ${name}`); process.exit(1) }
   }
   fs.rmSync(tmp, { recursive: true, force: true })
+  // Each Mac-only, one-chip package now has its other chip beside it.
+  const mac = installed(path.join(OUT, 'node_modules')).filter(({ pkg }) => pkg.os?.includes('darwin') && pkg.cpu?.length)
+  const names = new Set(mac.map(({ pkg }) => pkg.name))
+  const alone = mac.filter(({ pkg }) => pkg.cpu.length === 1 && ARCHS.includes(pkg.cpu[0]) && ARCHS.some((a) => a !== pkg.cpu[0] && !names.has(pkg.name.replace(pkg.cpu[0], a))))
+  if (alone.length) { console.error(`One chip only, so one of the Mac apps would lack it: ${alone.map(({ pkg }) => pkg.name).join(', ')}. Add it to PER_CHIP in desktop/stage.js.`); process.exit(1) }
 }
 
 // node-pty ships source and every platform's binaries; keep this platform's binaries only.
