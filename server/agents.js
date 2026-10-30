@@ -222,7 +222,7 @@ export async function installTools() {
 let prefixCache = { at: 0, key: '', ok: true }
 async function npmGlobalWritable(npm, PATH) {
   if (prefixCache.key === npm && Date.now() - prefixCache.at < 5 * 60_000) return prefixCache.ok
-  const prefix = await new Promise((resolve) => execFile(npm, ['prefix', '-g'], { timeout: 15000, env: { ...process.env, PATH } }, (err, out) => resolve(err ? '' : String(out).trim().split('\n').pop())))
+  const prefix = await new Promise((resolve) => execFile(npm, ['prefix', '-g'], { timeout: 15000, env: { ...process.env, PATH }, windowsHide: true }, (err, out) => resolve(err ? '' : String(out).trim().split('\n').pop())))
   // Where it would write: lib/node_modules and bin under the prefix (or the prefix, before they exist).
   const can = async (d) => fs.promises.access(d, fs.constants.W_OK).then(() => true, (e) => (e.code === 'ENOENT' ? null : false))
   let ok = true

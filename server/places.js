@@ -7,7 +7,7 @@ import { execFile } from 'node:child_process'
 import { gitReady } from './gitready.js'
 
 const sh = (cmd, args, opts = {}) => new Promise((resolve) => {
-  execFile(cmd, args, { timeout: 5000, maxBuffer: 4 * 1024 * 1024, ...opts }, (err, out) => resolve(err ? null : out))
+  execFile(cmd, args, { timeout: 5000, maxBuffer: 4 * 1024 * 1024, windowsHide: true, ...opts }, (err, out) => resolve(err ? null : out))
 })
 
 const gitCache = new Map()

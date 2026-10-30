@@ -18,7 +18,7 @@ const ymd = (d) => d.toLocaleDateString('en-CA')
 
 function ccusage(args) {
   return new Promise((resolve, reject) => {
-    execFile(BIN, [...args, '--json', '--offline'], { shell: IS_WIN, timeout: 120000, maxBuffer: 64 * 1024 * 1024 }, (err, stdout) => {
+    execFile(BIN, [...args, '--json', '--offline'], { shell: IS_WIN, timeout: 120000, maxBuffer: 64 * 1024 * 1024, windowsHide: true }, (err, stdout) => {
       if (err && !stdout) return reject(err)
       try { resolve(JSON.parse(stdout)) } catch (e) { reject(e) }
     })

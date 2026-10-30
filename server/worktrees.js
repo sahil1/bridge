@@ -24,7 +24,7 @@ const save = (d) => { memo = d; ensureDir(DATA); writeFileAtomic(FILE, JSON.stri
 // git, resolving { ok, out } (its output, or what went wrong) instead of throwing. It enters the
 // folder itself (-C), so a folder macOS is still asking about holds only git, not the server.
 const git = async (cwd, args, input = '') => (!(await gitReady()) ? { ok: false, out: NO_GIT } : new Promise((resolve) => {
-  const p = execFile('git', cwd ? ['-C', cwd, ...args] : args, { timeout: 60000, maxBuffer: 32 * 1024 * 1024 }, (err, stdout, stderr) => resolve({ ok: !err, out: err ? String(stderr || err.message).trim() : stdout }))
+  const p = execFile('git', cwd ? ['-C', cwd, ...args] : args, { timeout: 60000, maxBuffer: 32 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => resolve({ ok: !err, out: err ? String(stderr || err.message).trim() : stdout }))
   // git can be gone before its input is written (a folder that isn't there): that's its answer, not
   // an error to stop the server over.
   p.stdin.on('error', () => {})
