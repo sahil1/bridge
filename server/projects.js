@@ -17,6 +17,28 @@ const HOME = os.homedir()
 const CLAUDE = () => path.join(process.env.CLAUDE_CONFIG_DIR || path.join(HOME, '.claude'), 'projects')
 const CODEX = () => path.join(process.env.CODEX_HOME || path.join(HOME, '.codex'), 'sessions')
 const FILE = dataFile('projects.json')
+
+// macOS asks before anything looks into Desktop, Documents or a removable or network drive, and the
+// first look waits for your answer. A first start mustn't ask: until work has started in one of them
+// (which asks anyway, as the agent opens there), folders in it are listed from the agents' history
+// without a look. Kept in asked-folders.json; an older install, which looked already, counts as asked.
+const PROTECTED = process.platform === 'darwin' ? [path.join(HOME, 'Desktop'), path.join(HOME, 'Documents'), '/Volumes'] : []
+const rootOf = (p) => PROTECTED.find((r) => p === r || p.startsWith(r + path.sep)) || null
+const ASKED = dataFile('asked-folders.json')
+const saveAsked = () => { try { fs.mkdirSync(path.dirname(ASKED), { recursive: true }); fs.writeFileSync(ASKED, JSON.stringify([...asked])) } catch { /* read-only disk */ } }
+const asked = new Set((() => {
+  try { return JSON.parse(fs.readFileSync(ASKED, 'utf8')) } catch { /* none yet */ }
+  if (!fs.existsSync(FILE)) return []
+  try { return [...new Set(JSON.parse(fs.readFileSync(FILE, 'utf8')).projects.map((x) => rootOf(x.path)).filter(Boolean))] } catch { return [] }
+})())
+// Written at once (the main server only), so projects picked in setup don't later pass for an older install's.
+if (process.env.BRIDGE_PROJECTS_JOB !== '1' && PROTECTED.length && !fs.existsSync(ASKED)) saveAsked()
+const noteAsked = (p) => {
+  const root = rootOf(p)
+  if (!root || asked.has(root)) return
+  asked.add(root)
+  saveAsked()
+}
 const MAX_FILES = 5000 // per agent, newest first
 
 // The first `"cwd":"..."` in the first part of a log.
@@ -105,7 +127,8 @@ function codexLogs(add) {
 // project folder runs in a small helper process, and the server only waits for it so long. (Not a
 // worker thread: the server couldn't quit while one waits.) A job: { scan } reads the logs,
 // { paths } checks those folders (there, a folder, git, its name).
-function inspect({ scan: doScan = false, paths = [] }) {
+function inspect({ scan: doScan = false, paths = [], asked = [] }) {
+  const unlooked = (p) => { const root = rootOf(p); return !!root && !asked.includes(root) }
   const out = { found: null, info: {} }
   if (doScan) {
     const by = new Map()
@@ -123,6 +146,8 @@ function inspect({ scan: doScan = false, paths = [] }) {
     const month = Date.now() - 30 * 864e5
     out.found = []
     for (const e of by.values()) {
+      // Not looked at: there as far as the history says, a project if you've worked there lately.
+      if (unlooked(e.path)) { out.found.push({ ...e, git: false, remote: null, name: path.basename(e.path), suggested: e.count >= 3 && e.last >= month, unchecked: true }); continue }
       if (!fs.existsSync(e.path)) continue
       const g = gitOf(e.path)
       if (g.linked) continue
@@ -131,6 +156,7 @@ function inspect({ scan: doScan = false, paths = [] }) {
     out.found.sort((a, b) => b.last - a.last)
   }
   for (const p of paths) {
+    if (unlooked(p)) { out.info[p] = { exists: null, dir: null, git: false, linked: false, name: null }; continue }
     let st = null, gone = false
     try { st = fs.statSync(p) } catch (e) { gone = e.code === 'ENOENT' } // not allowed: still there
     const g = st?.isDirectory() ? gitOf(p) : {}
@@ -156,7 +182,7 @@ function work(job) {
     h.once('message', (r) => { done(); resolve(r) })
     h.once('error', (e) => { done(); reject(e) })
     h.once('exit', (code) => { done(); reject(new Error(`The folder check stopped (${code})`)) })
-    h.send(job)
+    h.send({ ...job, asked: [...asked] })
     h.unref()
     h.channel?.unref?.()
   })).then((r) => {
@@ -234,6 +260,7 @@ export async function used(dir) {
   await seeded()
   const p = path.resolve(expand(String(dir || '')))
   if (skip(p)) return
+  noteAsked(p)
   const have = load()
   const x = have.find((y) => y.path === p)
   if (x) x.used = Date.now()
