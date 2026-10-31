@@ -72,7 +72,7 @@ no one else can leave messages there.
 
 What Cloudflare can see, as with any site it serves: the IP addresses of your phone and computer,
 when they connect and how much they send, your relay's address, and the user agent of the browser
-or app (the Android app adds `BridgeAIApp` and its version). That's under your Cloudflare account
+or app (the iPhone and Android apps add `BridgeAIApp` and its version). That's under your Cloudflare account
 and Cloudflare's privacy policy, not the project's. The project never sees it.
 
 If you use Tailscale instead, your phone reaches your computer over your own tailnet, under
@@ -94,9 +94,13 @@ it, end to end to your computer.
   only, left out of backups, and go when you Forget that computer or it removes the phone. The
   relay's page in Safari or Chrome keeps the same in the browser, for that relay's site.
 - **The demo**: Try the demo runs inside the app on made-up data and sends nothing anywhere.
-- **Camera**: only to scan the pairing QR code. The pictures stay on the phone.
-- **Microphone**: only when you dictate a message. The recording goes end-to-end encrypted to
-  your computer, which turns it into text there.
+- **Camera**: to scan the pairing QR code, and to take a photo when you attach one to a message.
+  The scanner's pictures stay on the phone; a photo you attach goes end-to-end encrypted to your
+  computer, like the message.
+- **Microphone**: only while you dictate a message, record a voice note or take notes in a
+  meeting. The sound goes end-to-end encrypted to your computer, which turns it into text there
+  (or, for a meeting, with the speech service you picked on it). The phone asks for the microphone
+  the first time you use one of them.
 - **Lock screen**: the agents notification on Android and the Live Activity on iPhone are made on
   the phone from what your computer sends over the encrypted link.
 

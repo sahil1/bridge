@@ -10,13 +10,13 @@ import WebKit
 final class OfflineStore: NSObject, WKScriptMessageHandlerWithReply {
     private let queue = DispatchQueue(label: "dev.bridge-ai.offline")
 
-    private static let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("offline", isDirectory: true)
-    private static func hash(_ s: String) -> String { SHA256.hash(data: Data(s.utf8)).map { String(format: "%02x", $0) }.joined() }
-    private static func folder(_ relay: String) -> URL { base.appendingPathComponent(hash(relay), isDirectory: true) }
+    nonisolated private static let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("offline", isDirectory: true)
+    nonisolated private static func hash(_ s: String) -> String { SHA256.hash(data: Data(s.utf8)).map { String(format: "%02x", $0) }.joined() }
+    nonisolated private static func folder(_ relay: String) -> URL { base.appendingPathComponent(hash(relay), isDirectory: true) }
 
     static func forget(_ relay: String) { try? FileManager.default.removeItem(at: folder(relay)) }
 
-    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage, replyHandler: @escaping (Any?, String?) -> Void) {
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage, replyHandler: @escaping @MainActor @Sendable (Any?, String?) -> Void) {
         // Only the phone page itself, not Bridge AI in its frame.
         guard message.frameInfo.isMainFrame, let m = message.body as? [String: Any], let op = m["op"] as? String,
               let relay = m["relay"] as? String, !relay.isEmpty else { return replyHandler(nil, "Not allowed") }
@@ -43,7 +43,8 @@ final class OfflineStore: NSObject, WKScriptMessageHandlerWithReply {
             case "clear": try? fm.removeItem(at: dir)
             default: break
             }
-            DispatchQueue.main.async { replyHandler(out, nil) }
+            let answer = out
+            DispatchQueue.main.async { replyHandler(answer, nil) }
         }
     }
 }

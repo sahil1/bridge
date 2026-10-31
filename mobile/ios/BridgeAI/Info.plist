@@ -36,11 +36,11 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>To scan the pairing code Bridge AI shows on your computer, and to take photos for your agents.</string>
+	<string>Bridge AI uses the camera to scan the pairing code your computer shows, and to take photos you attach to messages for your agents.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>To record your meetings and dictate messages to your agents.</string>
+	<string>Bridge AI uses the microphone while you dictate a message, record a voice note or take notes in a meeting. What you say goes end-to-end encrypted to your computer, which turns it into text.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>To attach pictures to your messages.</string>
+	<string>Bridge AI uses the photos you pick to attach them to messages for your agents.</string>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>
@@ -82,14 +82,12 @@
 			<key>UIApplicationShortcutItemType</key>
 			<string>dev.bridge-ai.phone.cloud</string>
 			<key>UIApplicationShortcutItemTitle</key>
-			<string>Cloud agents</string>
+			<string>Cloud Agents</string>
 			<key>UIApplicationShortcutItemSubtitle</key>
 			<string>On this phone, with your own keys</string>
 			<key>UIApplicationShortcutItemIconSymbolName</key>
 			<string>cloud</string>
 		</dict>
 	</array>
-	<key>UIStatusBarStyle</key>
-	<string>UIStatusBarStyleLightContent</string>
 </dict>
 </plist>

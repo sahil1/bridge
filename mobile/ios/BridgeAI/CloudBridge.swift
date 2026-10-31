@@ -40,7 +40,7 @@ final class CloudBridge: NSObject, WKScriptMessageHandlerWithReply {
     static func available() -> Bool { BundledUI.has("cloud") }
 
     // ---------- Messages from the page ----------
-    func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage, replyHandler: @escaping (Any?, String?) -> Void) {
+    func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage, replyHandler: @escaping @MainActor @Sendable (Any?, String?) -> Void) {
         // Only the Cloud agents page itself, not a frame in it or any other page.
         let origin = message.frameInfo.securityOrigin
         guard message.frameInfo.isMainFrame, origin.protocol == BundledUI.scheme, origin.host == "cloud",

@@ -1,4 +1,4 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import UIKit
 
 // Scans the pairing QR code Bridge AI shows on your computer (Settings › Devices › Pair a device).
