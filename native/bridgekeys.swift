@@ -29,6 +29,13 @@
 //     {"allowed":true}
 //   bridgekeys listen-ask                     the same, asking macOS the first time ("Bridge AI would
 //                                             like to receive keystrokes from any application")
+//   bridgekeys selection [--pid <pid>]        the text selected in the app in front (edit by voice),
+//                                             asked of the app through Accessibility; ⌘C only for an
+//                                             app that can't say (then the clipboard is put back). One
+//                                             line, then exits: {"text":"…","via":"ax"|"copy"} ("" when
+//                                             nothing's selected), or {"error":"secure"},
+//                                             {"error":"accessibility"}, {"error":"moved"}. With --test,
+//                                             --text <t> is the answer and --as as for paste
 //   bridgekeys front                          the app in front (its name, bundle ID and where it is,
 //                                             for its icon in the list of dictations) and whether
 //                                             Secure Input is on (a password field has the keyboard),
@@ -209,6 +216,72 @@ func paste() -> Never {
   exit(0)
 }
 
+// ---------- The selection (edit by voice) ----------
+// The text selected in the app in front, asked of the app itself through Accessibility (its focused
+// element's selected text), which touches nothing. An app that doesn't say (some web views) gets ⌘C
+// pressed, the copy read off the clipboard and what was there put back. An app that answers that
+// nothing is selected is taken at its word: ⌘C there could copy a whole line (an editor's way with
+// nothing selected).
+func keyFor(_ letter: UInt8) -> CGKeyCode {
+  guard let source = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue(),
+        let raw = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else { return letter == UInt8(ascii: "c") ? 8 : 9 }
+  let data = Unmanaged<CFData>.fromOpaque(raw).takeUnretainedValue() as Data
+  return data.withUnsafeBytes { (bytes: UnsafeRawBufferPointer) -> CGKeyCode in
+    guard let layout = bytes.baseAddress?.assumingMemoryBound(to: UCKeyboardLayout.self) else { return letter == UInt8(ascii: "c") ? 8 : 9 }
+    let cmd = UInt32((cmdKey >> 8) & 0xFF)
+    for code in 0..<128 {
+      var dead: UInt32 = 0
+      var len = 0
+      var chars = [UniChar](repeating: 0, count: 4)
+      let r = UCKeyTranslate(layout, UInt16(code), UInt16(kUCKeyActionDown), cmd, UInt32(LMGetKbdType()), OptionBits(kUCKeyTranslateNoDeadKeysBit), &dead, 4, &len, &chars)
+      if r == noErr && len == 1 && chars[0] == UniChar(letter) { return CGKeyCode(code) }
+    }
+    return letter == UInt8(ascii: "c") ? 8 : 9
+  }
+}
+func selection() -> Never {
+  let test = args.contains("--test")
+  let pretend = option("--as")
+  if pretend == "secure" || (!test && IsSecureEventInputEnabled()) { say("{\"error\":\"secure\"}"); exit(1) }
+  if pretend == "untrusted" || (!test && !AXIsProcessTrusted()) { say("{\"error\":\"accessibility\"}"); exit(1) }
+  if !test, let want = option("--pid").flatMap({ Int32($0) }), let now = NSWorkspace.shared.frontmostApplication, now.processIdentifier != want {
+    say("{\"error\":\"moved\"}")
+    exit(1)
+  }
+  if test { say("{\"text\":\(quote(option("--text") ?? "")),\"via\":\"test\"}"); exit(0) }
+  let system = AXUIElementCreateSystemWide()
+  var focused: CFTypeRef?
+  if AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focused) == .success, let f = focused, CFGetTypeID(f) == AXUIElementGetTypeID() {
+    var value: CFTypeRef?
+    let got = AXUIElementCopyAttributeValue(f as! AXUIElement, kAXSelectedTextAttribute as CFString, &value)
+    if got == .success { say("{\"text\":\(quote((value as? String) ?? "")),\"via\":\"ax\"}"); exit(0) }
+  }
+  // ⌘C, then the clipboard as it was.
+  let pb = NSPasteboard.general
+  let saved = (pb.pasteboardItems ?? []).map { item in item.types.compactMap { t in item.data(forType: t).map { (t, $0) } } }
+  let before = pb.changeCount
+  let source = CGEventSource(stateID: .hidSystemState)
+  let c = keyFor(UInt8(ascii: "c"))
+  for (key, down) in [(CGKeyCode(0x37), true), (c, true), (c, false), (CGKeyCode(0x37), false)] {
+    let e = CGEvent(keyboardEventSource: source, virtualKey: key, keyDown: down)
+    e?.flags = key == 0x37 && !down ? [] : .maskCommand
+    e?.post(tap: .cghidEventTap)
+  }
+  pump(0.5, until: { pb.changeCount != before })
+  var text = ""
+  if pb.changeCount != before {
+    text = pb.string(forType: .string) ?? ""
+    pb.clearContents()
+    pb.writeObjects(saved.map { types in
+      let it = NSPasteboardItem()
+      for (t, d) in types { it.setData(d, forType: t) }
+      return it
+    })
+  }
+  say("{\"text\":\(quote(text)),\"via\":\"copy\"}")
+  exit(0)
+}
+
 // The tests' pasteboard: read as an app pasting would, written, let go.
 func boardTool() -> Never {
   guard args.count >= 3, option("--board") != nil, let pb = board() else { say("{\"error\":\"board\"}"); exit(2) }
@@ -242,6 +315,7 @@ if args.count >= 2 && args[1] == "front" {
   exit(0)
 }
 if args.count >= 2 && args[1] == "paste" { paste() }
+if args.count >= 2 && args[1] == "selection" { selection() }
 if args.count >= 2 && args[1] == "board" { boardTool() }
 // Listening to keys: Input Monitoring, or Accessibility (which covers it).
 func mayListen() -> Bool { CGPreflightListenEventAccess() || AXIsProcessTrusted() }

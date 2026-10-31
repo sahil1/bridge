@@ -54,3 +54,28 @@ export async function words({ fleet, projects = [] } = {}) {
   KNOWN.forEach(add)
   return { terms: [...new Set(terms)].slice(0, 3000), heard: mem.flatMap((t) => t.heard.map((h) => [h, t.term])) }
 }
+
+// ---------- Edit by voice ----------
+// Select text in another app, hold the dictation key, say what to change: the text and what you said
+// go to the model you picked in Settings › Voice (dictation.editModel), and its answer is pasted in
+// the selection's place (src/dictation/Hud.jsx). Only that model sees them: one on this computer
+// (Ollama, LM Studio) keeps them here; any other is labelled, where it's picked, as sending them out.
+// reply: chatmodels.js reply.
+const EDIT_SYSTEM = "You rewrite text as the user asks. You get the text and an instruction they said aloud, so the instruction may have speech-to-text slips. Answer with the rewritten text only: no quotes around it, no notes, no Markdown the text didn't have. Keep the text's language unless the instruction asks for another. If the instruction doesn't ask for a change to the text, answer with the text as it was."
+export const EDIT_MAX = 20000
+export async function edit({ text, instruction, model, reply }) {
+  const t = String(text || '')
+  const said = String(instruction || '').trim()
+  if (!t.trim()) throw new Error('Nothing was selected to change')
+  if (!said) throw new Error('Nothing was said about what to change')
+  if (t.length > EDIT_MAX) throw new Error('That\'s more text than edit by voice takes (20,000 characters)')
+  if (!model) throw new Error('Pick the model that rewrites it, in Settings › Voice › Dictation')
+  const r = await reply(model, [{ role: 'user', text: `Instruction: ${said.slice(0, 2000)}\n\nText:\n${t}` }], { system: EDIT_SYSTEM })
+  let out = String(r?.text || '').trim()
+  // What models put around an answer anyway: a code fence, and quotes the text didn't have.
+  const fenced = /^```[\w-]*\n([\s\S]*?)\n```$/.exec(out)
+  if (fenced) out = fenced[1].trim()
+  if (/^["“'][\s\S]*["”']$/.test(out) && !/^["“']/.test(t.trim())) out = out.slice(1, -1).trim()
+  if (!out) throw new Error('The model sent back nothing')
+  return { text: out }
+}

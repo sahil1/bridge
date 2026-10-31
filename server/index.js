@@ -1014,6 +1014,12 @@ app.get('/api/voice/speak', wrap(() => voicespeak.status()))
 app.post('/api/voice/speak', async (req, res) => {
   try { res.type('audio/wav').send(await voicespeak.speak(req.body?.text, { lang: String(req.body?.lang || 'en') })) } catch (e) { res.status(e.status || 502).json({ error: e.message }) }
 })
+// Edit by voice: the selected text rewritten as you said, by the model picked for it. Only from the
+// computer itself (the dictation window), never through the relay.
+app.post('/api/dictation/edit', wrap((req) => {
+  onComputer(req)
+  return dictation.edit({ text: req.body?.text, instruction: req.body?.instruction, model: cfg.dictation?.editModel || null, reply: (id, msgs, o) => chatModels.reply(id, msgs, o) })
+}))
 // Your dictations, kept on this computer (dictations.js): listed and searched, one whole, what
 // became of it, deleted (and put back, for Undo), all of them deleted, a recording kept and played,
 // an app's icon. An agent named by its pane only is named from the fleet.

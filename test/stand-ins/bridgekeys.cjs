@@ -8,6 +8,8 @@
 //                          and "other" (another key while it's held) on stdin
 //   listen-access, listen-ask   whether it may listen ($BRIDGEKEYS_LISTEN); listen-ask is noted in
 //                          $BRIDGEKEYS_LOG
+//   selection [--pid <pid>]  the text selected there: $BRIDGEKEYS_SELECTION ("" when unset), noted in
+//                          $BRIDGEKEYS_LOG
 //   front                  TextEdit in front (pid 4242)
 //   paste [--pid <pid>]    what it was given (its arguments and the text on stdin) noted in
 //                          $BRIDGEKEYS_LOG, nothing pressed; it answers with $BRIDGEKEYS_PASTE, or
@@ -40,6 +42,9 @@ if (cmd === 'listen-access' || cmd === 'listen-ask') {
     }
   })
   process.stdin.on('end', () => process.exit(0))
+} else if (cmd === 'selection') {
+  if (process.env.BRIDGEKEYS_LOG) fs.appendFileSync(process.env.BRIDGEKEYS_LOG, `${JSON.stringify({ args: [cmd, ...rest] })}\n`)
+  say({ text: process.env.BRIDGEKEYS_SELECTION || '', via: 'ax' })
 } else if (cmd === 'front') {
   say(FRONT)
 } else if (cmd === 'paste') {
