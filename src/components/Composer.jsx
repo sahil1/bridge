@@ -7,6 +7,7 @@ import { Menu } from './Rail.jsx'
 import PermissionFix from './PermissionFix.jsx'
 import { t, tx } from '../i18n/index.js'
 import { keyLabel } from '../../shared/dictation/keys.js'
+import { LiveWords } from '../dictation/Pill.jsx'
 import { useDictation, registerBox, noteBoxFocus, press, release, finish, cancel, dismiss, retry, settings, keysPlatform, dictationKey, listeningHint } from '../dictation/controller.js'
 
 // Drafts survive navigation and reloads: one per agent, kept in this browser.
@@ -608,7 +609,9 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
           <div className="rec-bar" role="status" aria-live="polite">
             <span className="rec-dot" />
             <span className="rec-time">{Math.floor(secs / 60)}:{String(secs % 60).padStart(2, '0')}</span>
-            <span className="rec-meter"><span style={{ transform: `scaleX(${0.08 + dict.level * 0.92})` }} /></span>
+            {/* Live words (dictation/controller.js): what's been heard so far, in place of the meter. */}
+            {dict.live ? <LiveWords text={dict.live} className="rec-live" />
+              : <span className="rec-meter"><span style={{ transform: `scaleX(${0.08 + dict.level * 0.92})` }} /></span>}
           </div>
         ) : (
           <textarea

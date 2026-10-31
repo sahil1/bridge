@@ -501,6 +501,26 @@ export async function voice(wav, o = {}) {
   const r = useMac ? await apple(wav, { ...o, language: lang }) : await local(wav, { ...o, language: lang, fetch: false })
   return { ...r, text: memory.fix(spoken(r.text)) }
 }
+// Live words while you talk (livewords.js): the speech model a dictation would use, when sherpa-onnx
+// runs it here and it's downloaded ({ model }); else why not ({ why }): the Mac's own speech or a
+// Whisper model picked, nothing here can run it, or the model isn't here yet (then the Mac's own
+// speech may stand in, and it hears a recording whole).
+export async function liveModel(cfg) {
+  if (cfg?.speech?.model === 'apple') return { why: 'apple' }
+  await fit()
+  const m = localModel(cfg)
+  if (m.runtime !== 'sherpa') return { why: 'whisper' }
+  if (!shown(m.id)) return { why: 'cant' }
+  if (!have(m)) return { why: 'model', id: m.id }
+  return { model: m }
+}
+// The words in a piece of 16 kHz PCM (an Int16Array), by that model, spelled as voice() spells them:
+// { text, ms }, ms the decoding alone (not loading the model).
+export async function decodeLive(m, pcm, words) {
+  const files = Object.fromEntries(filesOf(m).map((f) => [f.name.split('.')[0], f.name]))
+  const r = await asr.recognize({ key: m.id, dir: dirOf(m), files, hotwords: !!m.hotwords }, pcm, { hotwords: m.hotwords ? wordsOf(words) : [] })
+  return { text: memory.fix(spoken(r.text)), ms: r.decodeMs }
+}
 // Ready before you record: the model there, or downloading it now.
 export async function prepare(cfg) {
   if (!picked(cfg)) await pickAuto(cfg).catch(() => {})

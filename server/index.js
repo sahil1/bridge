@@ -16,6 +16,7 @@ import * as accounts from './accounts.js'
 import * as voice from './voice.js'
 import * as dictation from './dictation.js'
 import * as dictations from './dictations.js'
+import * as livewords from './livewords.js'
 import * as fixes from './fixes.js'
 import * as servers from './servers.js'
 import * as archive from './archive.js'
@@ -974,6 +975,13 @@ app.post('/api/transcribe', express.raw({ type: () => true, limit: '30mb' }), as
 // which the speech engine also listens for.
 const dictationSources = async () => ({ fleet: lastFleet || await fleetView().catch(() => null), projects: await projects.list().catch(() => []) })
 app.get('/api/dictation/words', wrap(async () => dictation.words(await dictationSources())))
+// Live words while you talk (livewords.js): whether they can work here, the sound as it comes (half
+// a second at a time, 16-bit PCM) with what's been heard so far back, and the dictation done.
+app.get('/api/dictation/live', wrap(() => livewords.status(cfg)))
+app.post('/api/dictation/live/:sid', express.raw({ type: () => true, limit: '4mb' }), async (req, res) => {
+  try { res.json(await livewords.feed(req.params.sid, req.body, { cfg, words: dictation.hints(dictationSources) })) } catch (e) { res.status(e.status || 502).json({ error: e.message }) }
+})
+app.delete('/api/dictation/live/:sid', wrap((req) => livewords.end(req.params.sid)))
 // Your dictations, kept on this computer (dictations.js): listed and searched, one whole, what
 // became of it, deleted (and put back, for Undo), all of them deleted, a recording kept and played,
 // an app's icon. An agent named by its pane only is named from the fleet.

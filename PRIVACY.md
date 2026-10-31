@@ -31,7 +31,9 @@ Bridge AI uses it to check the key and, when you or the chief of staff ask, to p
 that model. Both go straight from your computer to that provider.
 
 Dictation and voice notes are turned into text on your computer, and the recording isn't kept
-(unless you ask for it, below). The dictation key from other apps (Settings › Voice) is heard for
+(unless you ask for it, below). With "Show the words as you talk" (Settings › Voice, on where your
+computer keeps up), the sound goes to your computer as you talk, a moment at a time, rather than all
+at once when you let go; it's heard there the same way and goes nowhere else. The dictation key from other apps (Settings › Voice) is heard for
 that one key only: on a Mac it's registered with macOS, which tells Bridge AI when it's pressed and
 let go; on Windows and Linux a keyboard hook runs only while the key is held, and until Ctrl, Alt,
 Shift and the Windows key are let go too (a few seconds at most), to hear them let go, and ignores
