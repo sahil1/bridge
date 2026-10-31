@@ -139,7 +139,7 @@ function Markdown({ text, pane, filePath, onOpenPath }) {
     })
     el.querySelectorAll('a').forEach((a) => { if (/^https?:/.test(a.getAttribute('href') || '')) { a.target = '_blank'; a.rel = 'noreferrer' } })
     // Mermaid in it opens as a whiteboard.
-    if (FileDrawing) addMermaidButtons(el, (filePath.split('/').pop() || '').replace(/\.(md|markdown)$/i, ''))
+    if (FileDrawing) addMermaidButtons(el, (filePath.split(/[\\/]/).pop() || '').replace(/\.(md|markdown)$/i, ''))
   }, [html, pane, filePath])
   const onClick = (e) => {
     const a = e.target.closest('a')
