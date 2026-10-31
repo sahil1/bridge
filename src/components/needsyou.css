@@ -1,5 +1,7 @@
 /* The needs-you inbox (NeedsYou.jsx): a panel under the top bar's chip, the whole screen on a phone. */
-.needs-chip.quiet { color: var(--ink-2); background: var(--pane-2); }
+/* Nothing waits, only finished work: quiet, like the bar's other chips (tinted themes too). */
+.needs-chip.quiet, :root[data-chrome] .needs-chip.quiet { color: var(--ink-2); background: var(--pane); box-shadow: inset 0 0 0 1px var(--line); }
+:root[data-chrome] .needs-chip.quiet .sdot { background: transparent; box-shadow: inset 0 0 0 2px var(--done); }
 .ny-panel {
   position: fixed; z-index: 80; top: 50px; right: 12px; width: 460px; max-width: calc(100vw - 24px); max-height: calc(100vh - 66px);
   display: flex; flex-direction: column; border-radius: 14px; background: var(--root-pane, var(--pane)); color: var(--root-ink, var(--ink));
