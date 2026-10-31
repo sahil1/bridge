@@ -3,6 +3,8 @@ import Icon from '../Icon.jsx'
 import { api } from '../../api.js'
 import { useSettings } from './General.jsx'
 import { startTour } from '../Tour.jsx'
+import { withApp, installUpdate } from '../UpdateChip.jsx'
+import { appVersion } from '../../permissions.js'
 import { t } from '../../i18n/index.js'
 
 const REPO = 'https://github.com/sahil1/bridge'
@@ -31,13 +33,16 @@ export function useUpdates(force = false) {
 }
 
 function Updates() {
-  const [u, load] = useUpdates()
+  const [raw, load] = useUpdates()
+  // The desktop app this window is in counts too (UpdateChip.jsx withApp).
+  const u = withApp(raw)
+  const app = appVersion()
   const { s, save } = useSettings()
   const [state, setState] = useState(null) // checking | installing | { error }
   const check = async () => { setState('checking'); await load(true); setState(null) }
   const install = async () => {
     setState('installing')
-    try { await api('/updates/install', { method: 'POST' }) } catch (e) { setState({ error: e.message }) }
+    try { await installUpdate(u) } catch (e) { setState({ error: e.message }) }
   }
   const auto = s ? s.effective.updates?.check !== false : true
 
@@ -47,7 +52,8 @@ function Updates() {
       {!u ? <div className="skeleton-rows"><div /></div> : (
         <>
           <div className="st-row">
-            <span className="ab-version">Bridge AI {u.current}</span>
+            <span className="ab-version">Bridge AI {raw?.current || u.current}</span>
+            {app && raw?.current && app !== raw.current && <span className="muted small">{t('the desktop app is {version}', { version: app })}</span>}
             {u.disabled ? <span className="muted small">Update checks are off</span>
               : u.error && !u.latest ? <span className="muted small">Couldn't check for updates ({u.error})</span>
               : u.available ? <span className="st-chip warn"><Icon name="download" size={11} /> {u.latest} is available</span>
@@ -55,10 +61,11 @@ function Updates() {
               : <span className="st-chip good"><Icon name="check" size={11} /> Up to date</span>}
           </div>
           {u.held && <p className="muted small">{t('Bridge AI {latest} needs macOS {macos} or later, and this Mac has macOS {have}, so Bridge AI stays on {current}, which keeps working. Update macOS in System Settings › General › Software Update to get newer versions.', { latest: u.held.latest, macos: u.held.macos, have: u.held.have, current: u.current })}</p>}
+          {u.failed && state !== 'installing' && <p className="st-note bad"><Icon name="alert" size={13} /> {t('The last update didn\'t go through: {why}', { why: u.failed.line || t('the installer stopped') })}</p>}
           {u.available && (
             state === 'installing'
               ? <p className="st-note ok"><Icon name="refresh" size={13} /> Updating to {u.latest}. Bridge AI closes and reopens by itself in a few seconds; your agents carry on where they were.</p>
-              : u.how === 'app'
+              : u.how === 'app' || u.forApp
                 ? <div className="st-row"><button type="button" className="btn primary" onClick={install}><Icon name="download" size={14} /> Update to {u.latest}</button><a className="small" href={u.url} target="_blank" rel="noreferrer">What's new</a></div>
                 : <div className="ab-cmd"><p className="muted small">{u.how === 'source' ? 'You run Bridge AI from a clone; update it in a terminal, in that folder:' : u.how === 'docker' ? 'Bridge AI runs in Docker; update it on that device, in the folder with docker-compose.yml:' : 'Update from a terminal (it asks for your password to install the package):'}</p><code>{u.command}</code><div className="st-row"><button type="button" className="ghost-btn" onClick={() => navigator.clipboard?.writeText(u.command).catch(() => {})}><Icon name="copy" size={12} /> Copy</button><a className="small" href={u.url} target="_blank" rel="noreferrer">What's new</a></div></div>
           )}

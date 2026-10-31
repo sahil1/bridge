@@ -398,7 +398,7 @@ try {
     await choice.click({ timeout: 5000 }).catch(() => {})
     ok(!!(await until(() => d.p.evaluate(() => window.__configured.at(-1)?.to === 'paste' && window.__asked === 1), 5000, 100)) && (await kit.api('/settings')).effective?.dictation?.to === 'paste', 'picked: kept, the desktop app told, and Accessibility asked for right then')
     const card = s.locator('.dict-paste-access')
-    ok(!!(await until(() => card.isVisible(), 3000, 100)) && /needs Accessibility/.test(await card.innerText()) && /Accessibility, turn on Bridge AI/.test(await card.innerText()), 'until it\'s on: why it\'s needed, and where to turn it on', await card.innerText().catch(() => ''))
+    ok(!!(await until(() => card.isVisible(), 3000, 100)) && /needs Accessibility/.test(await card.innerText()) && !!(await until(async () => /turn on Bridge AI/.test(await card.innerText()), 3000, 100)), 'until it\'s on: why it\'s needed, and what to do while macOS asks (turn on Bridge AI)', await card.innerText().catch(() => ''))
     await shot(d.p, `${tag}settings-paste-access`)
     await card.locator('button', { hasText: 'Allow access' }).click({ timeout: 5000 }).catch(() => {})
     ok(!!(await until(() => d.p.evaluate(() => window.__asked === 2), 3000, 100)), 'Allow access asks again (System Settings, for when macOS\'s question was closed)')
@@ -618,6 +618,38 @@ try {
     await h.locator('.hud button', { hasText: 'Copy' }).click({ timeout: 5000 }).catch(() => {})
     const noOffer = !!(await until(async () => /Copied/.test(await hudText(h)), 3000, 100)) && await h.locator('.hud-offer').count() === 0
     ok(chip && why && noOffer, 'no Accessibility yet: not even tried; while you talk, the agent to send it to as before, then the text to copy with one line, pasting needs Accessibility (and Copy asks nothing more: it\'s picked already)', { chip, why, noOffer, shown })
+    await hc.close()
+  }
+  {
+    // No Accessibility yet, then Allow it from the card: macOS asked; turned on (noticed with no click),
+    // Paste pastes what's waiting. window.__allowed: what macOS says now.
+    const { ctx: hc, p: h } = await page(b, `${kit.url}/?dictate=1`, { store: { 'cc-ws': { tabs: [one.paneId], active: one.paneId } }, before: async (c) => {
+      await before(c)
+      await c.addInitScript((st) => {
+        window.__hud = { pasted: [], asked: 0, hidden: 0 }
+        window.__allowed = false
+        const now = () => ({ ...st, paste: { ...st.paste, allowed: window.__allowed } })
+        window.bridgeApp = {
+          platform: 'darwin', desktop: true,
+          hudReady: async () => null, hudSize: () => {}, hudPhase: () => {}, hudHide: async () => { window.__hud.hidden++ }, hudCopy: async () => {}, hudOpen: async () => {},
+          dictateStatus: async () => now(), dictateConfigure: async () => now(),
+          hudPaste: async (x) => { window.__hud.pasted.push(x); return { pasted: true, read: true, restored: true } },
+          pasteAccess: async () => (window.__allowed ? 'ok' : 'denied'), pasteAsk: async () => { window.__hud.asked++; return 'asked' },
+        }
+      }, MAC(false))
+    } })
+    await h.waitForSelector('.hud', { timeout: 10000 })
+    await talk(h, 'allow me then paste', 'TextEdit')
+    const allow = h.locator('.hud-why button', { hasText: 'Allow it' })
+    ok(!!(await until(() => allow.isVisible(), 8000, 100)) && await h.evaluate(() => window.__hud.pasted.length) === 0, 'no Accessibility yet: the card says so, with Allow it right there', await hudText(h))
+    await allow.click()
+    ok(!!(await until(() => h.evaluate(() => window.__hud.asked === 1), 3000, 100)), 'Allow it: macOS is asked, from the card')
+    await h.evaluate(() => { window.__allowed = true })
+    const paste = h.locator('.hud-actions button', { hasText: /^Paste$/ })
+    ok(!!(await until(async () => /Accessibility is on\. Click where you were typing, then Paste/.test(await hudText(h)) && await paste.isVisible(), 6000, 200)), 'turned on in System Settings: noticed with no click, and Paste offered for what\'s waiting', await hudText(h))
+    await shot(h, `${tag}dictation-window-allowed`)
+    await paste.click()
+    ok(!!(await until(() => h.evaluate(() => window.__hud.pasted.at(-1) === 'Allow me then paste.'), 4000, 100)) && !!(await until(async () => /Pasted into TextEdit/.test(await hudText(h)), 4000, 100)), 'Paste: what you said is pasted where you were typing', [await h.evaluate(() => window.__hud.pasted), await hudText(h)])
     await hc.close()
   }
   await kit.api('/settings', { dictation: { to: null } }, 'PATCH')

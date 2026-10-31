@@ -16,8 +16,8 @@
 //   go through it but for the pill; each kept with the app it was said in and what became of it; a
 //   password field's not kept. Light and dark.
 //   Dictations: in the sidebar once there's one, by day with each one's app icon or agent, search,
-//   one open whole (and as it was heard), Copy, Paste again (the desktop app simulated), Send to an
-//   agent, Delete and Undo; on a phone in the Meetings tab, with no Paste again. Settings › Voice:
+//   one open whole (and as it was heard), Copy, Paste again (the desktop app simulated; with no
+//   Accessibility yet, the way to allow it there, then pasted), Send to an agent, Delete and Undo; on a phone in the Meetings tab, with no Paste again. Settings › Voice:
 //   history off (nothing kept, and the view says so), 30 days, the recordings, Delete all.
 import fs from 'node:fs'
 import path from 'node:path'
@@ -325,6 +325,8 @@ try {
   const view = (opts = {}) => page(b, kit.url, { ...opts, before: async (ctx) => {
     await before(ctx)
     await ctx.route(/\/api\/agents\/[^/]+\/(prompt|queue)$/, async (route) => { asked.push({ url: route.request().url(), body: route.request().postDataJSON() }); await route.fulfill({ json: { ok: true } }) })
+    // What the server says about permissions, when a check needs a Mac's answer wherever it runs.
+    if (opts.fix) await ctx.route(/\/api\/fix(\?|$)/, (r) => r.fulfill({ json: opts.fix }))
     if (!opts.phone) {
       await ctx.addInitScript(() => {
         window.__repaste = []
@@ -377,6 +379,31 @@ try {
     await p.locator('.dc-toast button', { hasText: 'Undo' }).click()
     ok(!!(await until(async () => (await v.locator('.dc-row', { hasText: 'Check the invoices light' }).count()) === 1, 5000, 100)), 'Undo: back')
     ok(real(errors).length === 0, 'no page errors', errors)
+    await ctx.close()
+  }
+  {
+    // Paste again with no Accessibility yet: the way to allow it, there (macOS asked right away), and
+    // once it's on (noticed with no click), pasted. A Mac's answers stood in (window.__allowed).
+    const { ctx, p } = await view({ store: { 'cc-rail-dictations': true }, fix: { mac: true, win: false, app: { name: 'Bridge AI', desktop: true }, panes: {}, restart: [], tools: {}, canReset: true, desktop: null, asked: null } })
+    await p.evaluate(() => {
+      window.__allowed = false
+      window.__asked = 0
+      Object.assign(window.bridgeApp, { platform: 'darwin',
+        dictateRepaste: async (o) => { window.__repaste.push(o); return window.__allowed ? { pasted: true } : { error: 'accessibility' } },
+        pasteAccess: async () => (window.__allowed ? 'ok' : 'denied'), pasteAsk: async () => { window.__asked++; return 'asked' },
+      })
+    })
+    await p.locator('.rail-nav-btn', { hasText: 'Dictations' }).click()
+    const v = p.locator('.dc-view')
+    await v.waitFor({ timeout: 10000 })
+    const sl = v.locator('.dc-row', { hasText: 'Check the invoices light' }).first()
+    await sl.locator('.dc-head').click()
+    await sl.locator('button', { hasText: 'Paste again in Slack' }).click()
+    const card = sl.locator('.perm-fix[data-pane="accessibility"]')
+    ok(!!(await until(async () => await card.isVisible() && /Pasting needs Accessibility/.test(await card.innerText()), 4000, 100)) && !!(await until(() => p.evaluate(() => window.__asked === 1), 3000, 100)), 'Paste again with no Accessibility yet: the way to allow it, right there, and macOS asked', await sl.innerText().catch(() => ''))
+    const n = await p.evaluate(() => window.__repaste.length)
+    await p.evaluate(() => { window.__allowed = true })
+    ok(!!(await until(async () => (await card.count()) === 0 && await p.evaluate((k) => window.__repaste.length > k, n) && /Pasted into Slack/.test(await p.locator('.dc-toast').innerText().catch(() => '')), 8000, 200)), 'turned on: noticed with no click, and pasted into Slack', await p.evaluate(() => window.__repaste))
     await ctx.close()
   }
   {

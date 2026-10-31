@@ -12,6 +12,7 @@ import Meetings from './settings/Meetings.jsx'
 import Voice from './settings/Voice.jsx'
 import CloudKeys from './settings/CloudKeys.jsx'
 import ErrorBoundary from './ErrorBoundary.jsx'
+import { SettingsAt } from './settings/where.js'
 import { cloudOnly } from '../api.js'
 import { t, tx } from '../i18n/index.js'
 
@@ -38,10 +39,10 @@ const PHONE = [
 
 // "accounts" and "cloud" open Model providers at its Accounts or Cloud agents list; "machines"
 // opens Devices at your devices (they were two sections, and linking machines needs the
-// relay set up on the phone one).
+// relay set up on the phone one); "permissions" opens General at its Permissions.
 export default function Settings({ section = 'general', onClose, onOpenAgent }) {
   const sections = cloudOnly ? PHONE : SECTIONS
-  const to = cloudOnly ? (section === 'appearance' ? 'appearance' : 'cloud') : section === 'accounts' || section === 'cloud' ? 'providers' : section === 'machines' ? 'phone' : section
+  const to = cloudOnly ? (section === 'appearance' ? 'appearance' : 'cloud') : section === 'accounts' || section === 'cloud' ? 'providers' : section === 'machines' ? 'phone' : section === 'permissions' ? 'general' : section
   const [at, setAt] = useState(sections.some((s) => s.id === to) ? to : sections[0].id)
   useEffect(() => { if (sections.some((s) => s.id === to)) setAt(to) }, [to]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
@@ -72,8 +73,9 @@ export default function Settings({ section = 'general', onClose, onOpenAgent }) 
             <button type="button" className="win-btn" onClick={onClose} aria-label={t('Close settings')}><Icon name="x" size={14} /></button>
           </header>
           <div className="st-scroll">
+            <SettingsAt.Provider value={at}>
             <ErrorBoundary key={at} name={t(cur.label)} resetKey={at}>
-            {at === 'general' && <General onGo={go} onOpenAgent={(id) => { onOpenAgent?.(id); onClose() }} />}
+            {at === 'general' && <General onGo={go} focus={section === 'permissions' ? 'permissions' : null} onOpenAgent={(id) => { onOpenAgent?.(id); onClose() }} />}
             {at === 'agents' && <Agents onOpenAgent={(id) => { onOpenAgent?.(id); onClose() }} />}
             {at === 'providers' && <Providers focus={section === 'accounts' || section === 'cloud' ? section : null} onOpenAgent={(id) => { onOpenAgent?.(id); onClose() }} />}
             {at === 'voice' && <Voice />}
@@ -85,6 +87,7 @@ export default function Settings({ section = 'general', onClose, onOpenAgent }) 
             {at === 'about' && <About />}
             {at === 'cloud' && <CloudKeys focus="cloud" bare />}
             </ErrorBoundary>
+            </SettingsAt.Provider>
           </div>
         </section>
       </div>

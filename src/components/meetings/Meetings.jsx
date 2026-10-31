@@ -121,7 +121,9 @@ export function MeetingsHome({ onOpen }) {
   const hits = useSearch(q, place === ':archived')
   const [memory, setMemory] = useState(false)
   const list = all.filter((x) => (place === ':archived' ? x.archived : !x.archived && (!place || x.folder === place))).filter((x) => !q.trim() || !hits || hits.results.has(x.id))
-  const go = async (o) => { setErr(null); try { const id = await m.start(o); onOpen?.(id) } catch (e) { setErr(e) } }
+  // What was asked for last, to carry on once the mic is allowed (MicFix).
+  const last = useRef(null)
+  const go = async (o) => { setErr(null); last.current = o; try { const id = await m.start(o); onOpen?.(id) } catch (e) { setErr(e) } }
   const groups = byDay(list)
   const selection = useSelection(list)
   const { sel, toggle } = selection
@@ -152,7 +154,7 @@ export function MeetingsHome({ onOpen }) {
           <button type="button" className="btn small primary" onClick={() => go({ title: next.title, event: next })}>{t('Take notes')}</button>
         </div>
       )}
-      {err && (err.code === 'mic' ? <MicFix stale={err.stale} onClose={() => setErr(null)} /> : <p className="error-text small" role="alert">{err.message}</p>)}
+      {err && (err.code === 'mic' ? <MicFix stale={err.stale} onClose={() => setErr(null)} onAllowed={() => go(last.current || {})} /> : <p className="error-text small" role="alert">{err.message}</p>)}
       {error && !data && <p className="error-text small">{error}</p>}
       {data && !all.length && !first && (
         <div className="mt-empty">

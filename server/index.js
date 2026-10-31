@@ -842,7 +842,10 @@ app.get('/api/events', (req, res) => {
   res.flushHeaders()
   clients.add(res)
   if (lastFleet) res.write(`event: fleet\ndata: ${JSON.stringify(lastFleet)}\n\n`)
-  req.on('close', () => clients.delete(res))
+  // The desktop app's own feed (desktop/main.js says so): it also hears when another of your devices
+  // asks this computer to allow something (fixes.js askHere).
+  const off = req.headers['x-bridge-desktop'] && !req.headers['x-bridge-relay'] ? fixes.onAsk((a) => res.write(`event: fix-ask\ndata: ${JSON.stringify(a)}\n\n`)) : null
+  req.on('close', () => { clients.delete(res); off?.() })
 })
 // A switch to another herdr session: a fleet read before it is dropped, not shown or announced.
 let fleetGen = 0
@@ -952,10 +955,22 @@ app.post('/api/voice/setup', wrap(async () => {
   return { ...s, openId }
 }))
 // ---------- What macOS asks you to allow (fixes.js) ----------
-app.get('/api/fix', wrap(() => fixes.status()))
+// device: this computer's name, for "Allow it on <name>" when it's shown on another device or a phone.
+app.get('/api/fix', wrap(async () => ({ ...(await fixes.status()), device: relay.thisName() })))
+app.get('/api/fix/list', wrap(() => fixes.list({ callSound: !!meetings.tapBin() })))
 app.get('/api/fix/check', wrap((req) => fixes.check(String(req.query.pane || ''), { folder: String(req.query.folder || '') })))
 app.post('/api/fix/claim', wrap((req) => fixes.claim(String(req.body?.pane || ''))))
 app.post('/api/fix/settings', wrap((req) => { onComputer(req); return fixes.openSettings(String(req.body?.pane || '')) }))
+app.post('/api/fix/reset', wrap((req) => { onComputer(req); return fixes.reset(String(req.body?.pane || ''), { folder: String(req.body?.folder || '') }) }))
+// What the desktop app on this computer is allowed (desktop/main.js, now and then).
+app.post('/api/fix/desktop', wrap((req) => { onComputer(req); return fixes.appReport(req.body || {}) }))
+// Another of your devices, or your phone, asking this computer to show macOS's question: the one
+// thing about permissions they may ask for. Who asked is the device the request came through.
+app.post('/api/fix/ask-here', wrap((req) => {
+  const d = relay.deviceOf(req.headers['x-bridge-relay'])
+  return fixes.askHere(String(req.body?.pane || ''), { folder: String(req.body?.folder || ''), from: d?.name || null })
+}))
+app.post('/api/fix/ask-here/done', wrap((req) => { onComputer(req); return fixes.askedDone() }))
 app.post('/api/fix/app', wrap((req) => { onComputer(req); return fixes.openApp(String(req.body?.app || '')) }))
 app.post('/api/fix/reveal', wrap((req) => { onComputer(req); return fixes.reveal() }))
 // Only the fixed commands in fixes.js, never one from the request.
@@ -1597,7 +1612,7 @@ app.get('/api/diagnostics', wrap(async () => {
 }))
 
 app.get('/api/updates', wrap((req) => updates.status({ force: req.query.refresh === '1', disabled: cfg.updates?.check === false })))
-app.post('/api/updates/install', wrap(() => updates.install()))
+app.post('/api/updates/install', wrap((req) => updates.install({ app: req.body?.app === true })))
 
 // Which server this is, so the desktop app can tell when one left over from an older build (or
 // another copy of the app) is still running, and replace it with its own.

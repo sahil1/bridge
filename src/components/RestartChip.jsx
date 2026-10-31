@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import Icon from './Icon.jsx'
 import { viaRelay } from '../api.js'
 import { useFix } from './PermissionFix.jsx'
+import { keepReturn } from '../permissions.js'
 import { t } from '../i18n/index.js'
 
 // The top bar's Restart to apply: something you allowed in System Settings (Full Disk Access, say)
@@ -40,7 +41,8 @@ export default function RestartChip({ fleet, runtime, keep, line = false }) {
   const working = (fleet?.agents || []).filter((a) => a.status === 'working').length
   const canRestart = !viaRelay && !!window.bridgeApp?.restart
   const desktopServer = !!data?.app?.desktop
-  const restart = async () => { setBusy(true); try { await window.bridgeApp.restart() } catch { setBusy(false) } }
+  // Where a permission was asked for, to come back to after (src/permissions.js).
+  const restart = async () => { setBusy(true); keepReturn(); try { await window.bridgeApp.restart() } catch { setBusy(false) } }
   const cmd = 'npm run stop && npm start'
   return (
     <div className="update-wrap" ref={ref}>
