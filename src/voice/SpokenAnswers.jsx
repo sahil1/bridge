@@ -31,12 +31,12 @@ export default function SpokenAnswers() {
       {list.length > 0 && (
         <>
           <div className="st-row"><span>{t('Voice')}</span>
-            <select value={current?.name || ''} onChange={(e) => pick({ voice: e.target.value })} aria-label={t('Voice')}>
+            <select className="st-input" value={current?.name || ''} onChange={(e) => pick({ voice: e.target.value })} aria-label={t('Voice')}>
               {list.map((v) => <option key={v.name} value={v.name}>{v.name}{v.lang ? ` (${v.lang})` : ''}</option>)}
             </select>
           </div>
           <div className="st-row"><span>{t('Speed')}</span>
-            <select value={String(Number(p.rate) || 1)} onChange={(e) => pick({ rate: Number(e.target.value) })} aria-label={t('Speed')}>
+            <select className="st-input" value={String(Number(p.rate) || 1)} onChange={(e) => pick({ rate: Number(e.target.value) })} aria-label={t('Speed')}>
               {RATES.map(([r, l]) => <option key={r} value={String(r)}>{l}</option>)}
             </select>
             <button type="button" className="btn small" onClick={() => say(t('Two agents need you. The payments agent is asking whether to run the migration.'))}><Icon name="play" size={12} /> {t('Test')}</button>

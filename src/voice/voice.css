@@ -10,4 +10,5 @@
 .app.narrow .ask-line { white-space: normal; line-height: 1.35; }
 
 /* Settings › Voice › Spoken Answers. */
-.st-voice-out select { min-width: 220px; max-width: 100%; }
+.st-voice-out .st-row > span:first-child { min-width: 120px; font-size: 13px; }
+.st-voice-out select.st-input { width: auto; min-width: 200px; max-width: 100%; }
