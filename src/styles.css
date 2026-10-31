@@ -1420,6 +1420,18 @@ kbd { font: 11px var(--font-mono); padding: 1px 5px; border-radius: 4px; backgro
 .rt-notice > svg { color: var(--warning); flex: none; }
 .rt-notice > span { flex: 1; min-width: 200px; }
 .perm-fix a, .rt-notice a { color: var(--accent); text-underline-offset: 2px; }
+.perm-update { display: grid; gap: 8px; justify-items: start; }
+.perm-update > p { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
+/* Settings › General › Permissions: one row each, its name and what for, whether it's on, one button. */
+.perm-list { display: grid; border: 1px solid var(--line); border-radius: 10px; background: var(--pane); }
+.perm-row { display: grid; gap: 6px; padding: 10px 12px; min-width: 0; }
+.perm-row + .perm-row { border-top: 1px solid var(--line); }
+.perm-row-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; min-width: 0; }
+.perm-row-what { display: grid; gap: 1px; flex: 1 1 220px; min-width: 0; }
+.perm-row-what b { font-size: 13px; font-weight: 600; color: var(--ink); }
+.perm-row-more { display: grid; gap: 6px; justify-items: start; }
+.perm-row-more p { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); max-width: 46em; }
+.perm-row-more p.muted { color: var(--ink-3); font-size: 12px; }
 .signin { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
 .signin .error-text, .signin .inst-log { flex-basis: 100%; }
 .prov-signin { padding: 0 12px 10px 44px; }
@@ -2288,6 +2300,9 @@ button.yg-day:hover { box-shadow: 0 0 0 1.5px var(--accent); }
 .ab-cmd code { display: block; padding: 8px 10px; border-radius: 8px; background: var(--pane-2); border: 1px solid var(--line); font: 12.5px var(--font-mono); word-break: break-all; }
 .ab-diag { margin: 0; max-height: 220px; }
 .update-chip { color: var(--accent); font-weight: 600; }
+/* Out for a few days and still not installed: said more plainly. */
+.update-chip.loud { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.update-chip.loud:hover { color: var(--on-accent); filter: brightness(1.05); }
 .update-wrap { position: relative; }
 .update-pop { position: absolute; right: 0; top: calc(100% + 8px); z-index: 60; width: min(340px, calc(100vw - 24px)); display: grid; gap: 8px; padding: 14px 16px; border-radius: 12px; background: var(--pane); border: 1px solid var(--line-2); box-shadow: var(--shadow-lg); animation: fade-in .1s ease; }
 .update-pop p { margin: 0; }

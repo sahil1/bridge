@@ -256,8 +256,9 @@ const BUNDLE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/
 // isOurs(win): one of the app's own windows, where the key goes to the page.
 // askAccess(pane): the Allow access tile (main.js); trusted(e): an IPC call from the app's own page.
 // openApp(bundle): brings that app to the front (Paste again; the tests stand in for it).
+// perms: the app's permissions (permissions.js), which ask for Accessibility the same way everywhere.
 const openBundle = (bundle) => new Promise((resolve) => execFile('open', ['-b', bundle], { timeout: 5000 }, () => resolve()))
-function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, tellMain, askAccess, trusted = () => true, openApp = openBundle }) {
+function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, tellMain, askAccess, trusted = () => true, openApp = openBundle, perms = null }) {
   const { BrowserWindow, globalShortcut, screen, ipcMain, clipboard, systemPreferences, shell } = electron
   const IS_MAC = process.platform === 'darwin'
   let lib = null
@@ -390,11 +391,13 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, tellMain, askA
   // (turned off) and asks in a window of its own, whose Open System Settings goes to that list; after
   // that (Allow access again), the list itself. The tile says what to do there, and goes once it's on.
   let askedMac = false
-  ipcMain.handle('bridge:paste-ask', (e) => {
+  ipcMain.handle('bridge:paste-ask', async (e) => {
     if (!trusted(e)) return null
     const p = pasteStatus()
     if (!p.can) return 'no'
     if (p.allowed) return 'ok'
+    const r = p.asks === 'accessibility' && perms ? await perms.ask('accessibility') : null
+    if (r) return r === 'ok' ? 'ok' : 'asked'
     if (!askedMac) { askedMac = true; systemPreferences.isTrustedAccessibilityClient(true) } else shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility').catch(() => {})
     askAccess?.('accessibility')
     return 'asked'

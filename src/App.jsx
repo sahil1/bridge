@@ -14,7 +14,7 @@ import { openLink } from './pwa.js'
 import NewAgent from './components/NewAgent.jsx'
 import AddAccount from './components/AddAccount.jsx'
 import History from './components/History.jsx'
-import UpdateChip from './components/UpdateChip.jsx'
+import UpdateChip, { withApp } from './components/UpdateChip.jsx'
 import RestartChip from './components/RestartChip.jsx'
 import SetupChip from './components/SetupChip.jsx'
 import TopNotes, { useUpdateNote } from './components/TopNotes.jsx'
@@ -27,6 +27,7 @@ import { NextMeetingChip } from './components/Agenda.jsx'
 import { TodayTabs, TodayBody, openToday } from './components/Dock.jsx'
 import { Handle, usePersisted, useMedia, useHotkey, useWidth, useShared, store } from './components/layout.jsx'
 import { api, useFleet, usePoll, relayActivity, cloudOnly, refetch, viaRelay } from './api.js'
+import { takeReturn } from './permissions.js'
 import CloudHome from './components/CloudHome.jsx'
 import SessionSwitcher from './components/Sessions.jsx'
 import { MachineMenu, AskBanner, useMachines, goMachine, isRemote, remoteOf } from './components/Machines.jsx'
@@ -198,7 +199,9 @@ function App() {
   const [cmdRef, cmdW] = useWidth()
   const [rowRef, rowW] = useWidth()
   const quota = usePoll('/quota', 5 * 60 * 1000)
-  const update = usePoll('/updates', 6 * 60 * 60 * 1000)
+  const updates = usePoll('/updates', 6 * 60 * 60 * 1000)
+  // The desktop app this window is in counts too: it can be behind the server it shows.
+  const update = { ...updates, data: withApp(updates.data) }
   const upNote = useUpdateNote(update.data)
   const prevStatus = useRef({})
   useRuntimeTheme()
@@ -385,6 +388,16 @@ function App() {
     const on = (e) => setSettings(e.detail?.section || 'general')
     window.addEventListener('bridge-open-settings', on)
     return () => window.removeEventListener('bridge-open-settings', on)
+  }, [])
+  // Back from a restart to apply a permission: Settings where it was asked for, to see it's on (the
+  // agent you had open comes back by itself).
+  useEffect(() => { const r = takeReturn(); if (r?.section) setSettings(r.section) }, [])
+  // Restart to apply, asked for in Settings: the top bar's Restart to apply decides it (with what it
+  // means for agents at work), so Settings steps aside for it rather than covering it.
+  useEffect(() => {
+    const on = () => setSettings(null)
+    window.addEventListener('bridge-restart', on)
+    return () => window.removeEventListener('bridge-restart', on)
   }, [])
   useEffect(() => {
     const on = (e) => setAddAcct(e.detail || {})

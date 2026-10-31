@@ -1,8 +1,9 @@
 // Lets the page know it's inside the desktop app (for the title bar layout), and lets it take a
 // picture of part of its own window (the Preview tab's app), lets an agent open in a window of its
 // own, says how long since you last used the computer, restarts the app, picks a folder or files in
-// Finder, says where a dropped file is, helps you allow what macOS asks about, and sets up the
-// dictation key and its window. Nothing else is exposed.
+// Finder, says where a dropped file is, helps you allow what macOS asks about (asking it, seeing
+// it, and forgetting an answer that doesn't take), and sets up the dictation key and its window.
+// Nothing else is exposed.
 const { contextBridge, ipcRenderer, webUtils } = require('electron')
 // Another of your devices, shown through this one (/m/<id>/): its pages get windows and nothing
 // of this computer's (no Finder, files, mic, screen or floating card), as on a phone.
@@ -27,6 +28,17 @@ else contextBridge.exposeInMainWorld('bridgeApp', {
   idle: () => ipcRenderer.invoke('bridge:idle'),
   // After you allow something in System Settings: restart so it takes effect.
   restart: () => ipcRenderer.invoke('bridge:restart'),
+  // What the app itself asks the system for (desktop/permissions.js): the microphone, Accessibility,
+  // notifications. Its question first, else System Settings and the tile; whether it's on, without
+  // asking; and an answer that doesn't take, forgotten and asked again.
+  permission: {
+    kinds: () => ipcRenderer.invoke('bridge:perm', { op: 'kinds' }),
+    status: (kind) => ipcRenderer.invoke('bridge:perm', { op: 'status', kind }),
+    ask: (kind) => ipcRenderer.invoke('bridge:perm', { op: 'ask', kind }),
+    open: (kind) => ipcRenderer.invoke('bridge:perm', { op: 'open', kind }),
+    reset: (kind) => ipcRenderer.invoke('bridge:perm', { op: 'reset', kind }),
+    canReset: (kind) => ipcRenderer.invoke('bridge:perm', { op: 'can-reset', kind }),
+  },
   // Allow access: the tile with the app's icon to drag into System Settings' list, and closing it.
   fixTile: (pane) => ipcRenderer.invoke('bridge:fix-tile', pane),
   closeFixTile: () => ipcRenderer.invoke('bridge:fix-tile-close'),

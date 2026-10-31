@@ -8,23 +8,29 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
-import { IS_MAC, HOME, ROOT, brewInstall } from './paths.js'
+import { IS_MAC, IS_WIN, HOME, ROOT, brewInstall } from './paths.js'
 import { loginPath, which } from './agents.js'
 
 const DRYRUN = process.env.BRIDGE_FIX_DRYRUN === '1'
 const SECURITY = 'x-apple.systempreferences:com.apple.preference.security'
+const FOLDERS = ['Desktop', 'Documents', 'Downloads']
 // restart: what you allow there reaches Bridge AI only once it restarts. add: the list has a +
 // button and takes a drag, so you add the app yourself; elsewhere the app is listed once it asked.
+// tcc: what macOS files the answer under (tccutil's names), for Reset and ask again. app: the desktop
+// app itself asks for it and sees it (desktop/permissions.js); this server only knows what the app
+// last said (appReport).
 const PANES = {
-  'full-disk': { url: `${SECURITY}?Privacy_AllFiles`, label: 'Full Disk Access', restart: true, add: true },
-  calendars: { url: `${SECURITY}?Privacy_Calendars`, label: 'Calendars' },
-  files: { url: `${SECURITY}?Privacy_FilesAndFolders`, label: 'Files & Folders', restart: true },
-  automation: { url: `${SECURITY}?Privacy_Automation`, label: 'Automation' },
-  microphone: { url: `${SECURITY}?Privacy_Microphone`, label: 'Microphone' },
+  'full-disk': { url: `${SECURITY}?Privacy_AllFiles`, label: 'Full Disk Access', restart: true, add: true, tcc: ['SystemPolicyAllFiles'] },
+  calendars: { url: `${SECURITY}?Privacy_Calendars`, label: 'Calendars', tcc: ['Calendar'] },
+  files: { url: `${SECURITY}?Privacy_FilesAndFolders`, label: 'Files & Folders', restart: true, tcc: FOLDERS.map((f) => `SystemPolicy${f}Folder`) },
+  automation: { url: `${SECURITY}?Privacy_Automation`, label: 'Automation', tcc: ['AppleEvents'] },
+  microphone: { url: `${SECURITY}?Privacy_Microphone`, label: 'Microphone', tcc: ['Microphone'], app: true },
+  // Pasting what you dictate where you're typing (desktop/dictation.js): pressing ⌘V there.
+  accessibility: { url: `${SECURITY}?Privacy_Accessibility`, label: 'Accessibility', tcc: ['Accessibility', 'PostEvent'], app: true },
   // A call's sound for meeting notes (System Audio Recording Only, in the same list as screen recording).
-  audio: { url: `${SECURITY}?Privacy_ScreenCapture`, label: 'Screen & System Audio Recording' },
+  audio: { url: `${SECURITY}?Privacy_ScreenCapture`, label: 'Screen & System Audio Recording', tcc: ['AudioCapture', 'ScreenCapture'] },
   // With the app's bundle id it opens on Bridge AI's own page.
-  notifications: { url: 'x-apple.systempreferences:com.apple.Notifications-Settings.extension', label: 'Notifications', perApp: true },
+  notifications: { url: 'x-apple.systempreferences:com.apple.Notifications-Settings.extension', label: 'Notifications', perApp: true, app: true },
   'internet-accounts': { url: 'x-apple.systempreferences:com.apple.Internet-Accounts-Settings.extension', label: 'Internet Accounts' },
 }
 // Apps a button may open (Mail, to let it sync the first time).
@@ -40,10 +46,12 @@ export function app() {
   return { name: TERMINALS[process.env.TERM_PROGRAM] || null, bundle: null, desktop: false }
 }
 
-// The bundle id, from the app's Info.plist (Notifications opens on the app's page with it).
+// The bundle id, from the app's Info.plist (Notifications opens on the app's page with it, and
+// Reset and ask again forgets this app's answers by it). BRIDGE_FIX_BUNDLE_ID: the tests' stand-in.
 let idMemo
 function bundleId() {
   const a = app()
+  if (DRYRUN && process.env.BRIDGE_FIX_BUNDLE_ID) return Promise.resolve(process.env.BRIDGE_FIX_BUNDLE_ID)
   if (!IS_MAC || !a.bundle) return Promise.resolve(null)
   idMemo ||= new Promise((resolve) => {
     execFile('/usr/bin/plutil', ['-extract', 'CFBundleIdentifier', 'raw', '-o', '-', path.join(a.bundle, 'Contents', 'Info.plist')], { timeout: 5000 }, (err, out) => resolve(err ? null : String(out).trim() || null))
@@ -68,13 +76,20 @@ export const noteRestart = (keys = []) => { settingsPending.clear(); for (const 
 export async function status() {
   const brew = IS_MAC ? !!(await tool('brew')) : false
   return {
-    mac: IS_MAC, app: app(), dryRun: DRYRUN,
+    mac: IS_MAC, win: IS_WIN, app: app(), dryRun: DRYRUN,
     panes: Object.fromEntries(Object.entries(PANES).map(([k, v]) => [k, v.label])),
     restart: [
       ...[...pending].map((k) => ({ pane: k, label: PANES[k].label })),
       ...(settingsPending.size ? [{ pane: 'settings', label: [...settingsPending].join(', '), settings: true }] : []),
     ],
     tools: { brew },
+    // Reset and ask again: macOS's answers are this app's to forget only when the server is the app's
+    // own (from a terminal, they're the terminal's).
+    canReset: IS_MAC && !!(await bundleId()),
+    // The desktop app on this computer, when it's one that can be told to ask (another device asking,
+    // askHere) and says what it's allowed (appReport): its version, and whether it's listening now.
+    desktop: fromApp || listeners.size ? { version: fromApp?.version || null, listening: listeners.size > 0 } : null,
+    asked: asked && Date.now() - asked.at < ASK_FOR ? asked : null,
   }
 }
 
@@ -93,13 +108,131 @@ export async function openSettings(pane) {
   // first (macOS shows "Bridge AI would like full access to your calendars"), and open the list only
   // if you'd said no before. Two minutes to answer.
   if (pane === 'calendars' && (!DRYRUN || process.env.BRIDGE_CALASK)) {
-    const asked = await askCalendars()
-    if (asked === 'restricted') throw new Error('A profile on this Mac doesn\'t let apps see your calendars. Ask whoever manages it.')
-    if (asked === 'granted') return { ok: true, state: 'ok' }
-    if (!asked && !DRYRUN && (await calendarAccess({ wait: 60000 })) === 'ok') return { ok: true, state: 'ok' }
+    const said = await askCalendars()
+    if (said === 'restricted') throw new Error('A profile on this Mac doesn\'t let apps see your calendars. Ask whoever manages it.')
+    if (said === 'granted') return { ok: true, state: 'ok' }
+    if (!said && !DRYRUN && (await calendarAccess({ wait: 60000 })) === 'ok') return { ok: true, state: 'ok' }
   }
+  // Automation the same way: a harmless question to Finder, which macOS asks you about the first
+  // time ("Bridge AI wants access to control Finder"). Said yes: nothing to open.
+  if (pane === 'automation' && (await askAutomation()) === 'ok') return { ok: true, state: 'ok' }
   const id = p.perApp ? await bundleId() : null
   return open([id ? `${p.url}?id=${encodeURIComponent(id)}` : p.url])
+}
+
+// Finder asked for its name: 'ok', 'denied' (-1743: turned off, or said no) or 'unknown' (anything
+// else). Only ever when you click Allow, or after (the answer's settled then, so nothing's asked).
+// BRIDGE_OSASCRIPT: the tests' stand-in.
+let automationSaid = null
+function askAutomation() {
+  if (DRYRUN && !process.env.BRIDGE_OSASCRIPT) return Promise.resolve('unknown')
+  return new Promise((resolve) => {
+    execFile(process.env.BRIDGE_OSASCRIPT || 'osascript', ['-e', 'tell application "Finder" to get name'], { timeout: 130000 }, (err, _out, errOut) => {
+      automationSaid = !err ? 'ok' : /-1743|not authori[sz]ed/i.test(`${err.message}\n${errOut}`) ? 'denied' : 'unknown'
+      resolve(automationSaid)
+    })
+  })
+}
+
+// ---------- Reset and ask again ----------
+// macOS keeps an answer for each app (TCC) with the app's signature. One kept from a build signed
+// differently (up to 3.4.2 the app was signed ad hoc), or one that's gone wrong, can show as on in
+// System Settings and still block Bridge AI. tccutil forgets this app's answer, for this one thing
+// only, without a password; the next ask is macOS's own question again.
+// BRIDGE_TCCUTIL: the tests' stand-in (in dry runs, without it, nothing runs).
+export async function reset(pane, { folder } = {}) {
+  if (!IS_MAC) throw new Error('This is a macOS setting')
+  const p = PANES[pane]
+  if (!p?.tcc) throw new Error('Nothing to reset for this')
+  const id = await bundleId()
+  if (!id) throw new Error('Bridge AI can reset this only for its own app. In System Settings, remove the app from the list with −, then allow it again.')
+  const services = pane === 'files' && FOLDERS.includes(folder) ? [`SystemPolicy${folder}Folder`] : p.tcc
+  const bin = process.env.BRIDGE_TCCUTIL || (DRYRUN ? null : '/usr/bin/tccutil')
+  for (const s of services) {
+    if (!bin) { console.log(`[fix dry-run] tccutil reset ${s} ${id}`); continue }
+    // A service an older macOS doesn't know (AudioCapture before 14.2) just says so.
+    await new Promise((resolve) => execFile(bin, ['reset', s, id], { timeout: 10000 }, () => resolve()))
+  }
+  pending.delete(pane)
+  if (pane === 'automation') automationSaid = null
+  if (p.app && fromApp) delete fromApp.states[pane]
+  return { pane, reset: services }
+}
+
+// ---------- What the desktop app says ----------
+// The microphone, Accessibility and notifications are the app's own to ask for and see (it's the
+// process macOS, or Windows, asks about). It tells this server what it's allowed now and then, so another of your
+// devices or your phone can see it too.
+let fromApp = null // { version, at, states: { microphone: 'ok', ... } }
+const STATES = new Set(['ok', 'ask', 'denied', 'restricted', 'restart', 'unknown'])
+export function appReport({ version, states } = {}) {
+  const ok = Object.fromEntries(Object.entries(states && typeof states === 'object' ? states : {}).filter(([k, v]) => PANES[k]?.app && STATES.has(v)))
+  fromApp = { version: /^\d+\.\d+\.\d+$/.test(String(version)) ? String(version) : null, at: Date.now(), states: ok }
+  return { ok: true }
+}
+const appSaid = (pane) => (fromApp && Date.now() - fromApp.at < 3 * 60 * 1000 ? fromApp.states[pane] ?? null : null)
+
+// ---------- Asked from another device ----------
+// A permission belongs to the computer it's for: from your phone, or another computer showing this
+// one, Bridge AI here is asked to show macOS's question (desktop/main.js hears it on its feed of
+// events, brings its window forward at Settings › General › Permissions and asks). The person
+// still answers it here. Kept a while, so this computer's Settings shows who asked.
+const ASK_FOR = 10 * 60 * 1000
+let asked = null // { pane, folder, from, at }
+const listeners = new Set() // the desktop app's own feed (/api/events from the app)
+export const onAsk = (fn) => { listeners.add(fn); return () => listeners.delete(fn) }
+export function askHere(pane, { folder, from } = {}) {
+  if (!PANES[pane] || pane === 'internet-accounts') throw new Error('No such settings page')
+  if (!IS_MAC && !IS_WIN) throw new Error('Nothing to allow on this computer')
+  // The same ask again straight away (a double tap) doesn't bring the window forward twice.
+  if (asked?.pane === pane && Date.now() - asked.at < 10000) return { told: listeners.size > 0 }
+  asked = { pane, folder: FOLDERS.includes(folder) ? folder : null, from: String(from || '').slice(0, 60) || null, at: Date.now() }
+  for (const fn of listeners) { try { fn(asked) } catch { /* that feed is gone */ } }
+  return { told: listeners.size > 0 }
+}
+export const askedDone = () => { asked = null; return { ok: true } }
+
+// ---------- Everything this computer may be asked to allow ----------
+// Which, from what this computer is: os mac, win or linux (Docker is Linux); desktop, the desktop app
+// is here (its own: the mic, notifications); paste, pasting where you're typing can work (the app
+// says Accessibility applies); callSound, a call's sound can be recorded (native/calltap); trash,
+// macOS has /usr/bin/trash (15 and later), so the Trash doesn't go through Finder (Automation).
+export function rowsFor({ os, desktop = false, paste = false, callSound = false, trash = false }) {
+  if (os === 'win') return desktop ? ['microphone', 'notifications'] : []
+  if (os !== 'mac') return []
+  return [
+    ...(desktop ? ['microphone'] : []),
+    ...(desktop && paste ? ['accessibility'] : []),
+    'calendars', 'full-disk', 'files',
+    ...(callSound ? ['audio'] : []),
+    ...(trash ? [] : ['automation']),
+    ...(desktop ? ['notifications'] : []),
+  ]
+}
+// Settings › General › Permissions: each one Bridge AI may use here, whether it's on, and what for
+// (the page says). Only what applies to this computer: nothing on Linux or in Docker (nothing asks
+// there), the desktop app's own only with the desktop app. Looking never asks macOS anything: the
+// folders' answers aren't looked at (a look at Desktop is what asks), Automation only once it's asked.
+// callSound: whether a call's sound can be recorded here (the server knows: native/calltap).
+export async function list({ callSound = false } = {}) {
+  const rows = rowsFor({
+    os: IS_MAC ? 'mac' : IS_WIN ? 'win' : 'linux',
+    desktop: app().desktop || !!fromApp,
+    paste: !!fromApp?.states.accessibility,
+    callSound,
+    trash: IS_MAC && await fs.promises.access('/usr/bin/trash').then(() => true, () => false),
+  })
+  const items = []
+  for (const pane of rows) {
+    const p = PANES[pane]
+    let state = 'unknown'
+    if (p.app) state = appSaid(pane) || 'unknown'
+    else if (pane === 'calendars' || pane === 'full-disk') state = (await check(pane).catch(() => ({ state: 'unknown' }))).state
+    else if (pane === 'automation') state = automationSaid || 'unknown'
+    else if (pending.has(pane)) state = 'restart'
+    items.push({ pane, label: p.label, state, restart: !!p.restart, app: !!p.app })
+  }
+  return { items }
 }
 
 export function openApp(which) {
@@ -131,7 +264,6 @@ export function reveal() {
 // ptyhost.js) unless Keep agents running is off. By the same rule, each agent is a program of its
 // own: one started after you allow access gets it, and one that already asked and was refused
 // keeps that answer until it's restarted (closed and resumed).
-const FOLDERS = ['Desktop', 'Documents', 'Downloads']
 function target(pane, folder) {
   if (pane === 'full-disk') return path.join(HOME, 'Library', 'Mail')
   if (pane === 'files') return path.join(HOME, FOLDERS.includes(folder) ? folder : 'Desktop')
@@ -181,9 +313,14 @@ export async function calendarAccess({ wait = 20000 } = {}) {
 export async function check(pane, { folder } = {}) {
   const p = PANES[pane]
   if (!p) throw new Error('No such settings page')
+  // Windows asks about the microphone too (its privacy settings), which only the app can see.
+  if (IS_WIN && p.app) return { pane, state: appSaid(pane) || 'unknown', restart: false }
   if (!IS_MAC) return { pane, state: 'ok' }
   let state = 'unknown'
-  if (pane === 'calendars') {
+  if (p.app) state = appSaid(pane) || 'unknown'
+  // Once it's been asked (Allow), Finder's answer is settled: asking again asks you nothing.
+  else if (pane === 'automation') state = automationSaid ? await askAutomation() : 'unknown'
+  else if (pane === 'calendars') {
     state = await calendarAccess()
     if (state === 'missing') state = 'unknown'
   } else {
