@@ -99,16 +99,20 @@ try {
     ok(!!(await until(async () => /^Ship the fix/.test(await box.inputValue()), 10000, 100)), `${mode}: let go: the finished text, as before`, await box.inputValue())
     ok(sent.length >= 2, `${mode}: the sound went to the computer as it came`, sent.length)
     // Inside Bridge AI elsewhere (a search box): the pill shows them.
+    // The message box takes the keyboard back as the words land: then ⌘K, and the key only once
+    // its search box has it (else the words would be for the message box again).
+    await sleep(400)
     await p.keyboard.press('ControlOrMeta+K')
     await p.locator('[role="dialog"] input').first().waitFor({ timeout: 5000 })
+    await until(() => p.evaluate(() => document.activeElement?.closest?.('[role="dialog"]') != null && document.activeElement.tagName === 'INPUT'), 5000, 50)
     await down()
     const inPill = await until(async () => { const x = await p.locator('.dict-dock .dp-live').innerText().catch(() => ''); return /^ship the/.test(x) && x }, 8000, 100)
     ok(!!inPill, `${mode}: the pill: the words as you talk, under the level and the time`, inPill)
-    const pb = await p.locator('.dict-dock .dp').boundingBox()
+    const pb = await p.locator('.dict-dock .dp').boundingBox({ timeout: 3000 }).catch(() => null)
     ok(pb && pb.width <= 420 && pb.height <= 70, `${mode}: and the pill stays small`, pb)
     await sleep(900)
-    const r = await p.locator('.dict-dock .dp').boundingBox()
-    await shot(p, `${tag}live-words-pill-${mode}`, { clip: { x: Math.round(r.x + r.width / 2 - 260), y: Math.round(r.y - 30), width: 520, height: Math.round(r.height + 50) } })
+    const r = await p.locator('.dict-dock .dp').boundingBox({ timeout: 3000 }).catch(() => null)
+    if (r) await shot(p, `${tag}live-words-pill-${mode}`, { clip: { x: Math.round(r.x + r.width / 2 - 260), y: Math.round(r.y - 30), width: 520, height: Math.round(r.height + 50) } })
     await up()
     await p.keyboard.press('Escape')
     ok(real(errors).length === 0, `${mode}: no page errors`, errors)
