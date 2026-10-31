@@ -4,9 +4,10 @@ import WebKit
 // Answers everything the page asks of bridge-app://app. The phone page's own files come from the
 // app; everything else is Bridge AI on your computer, so it's handed to the page (bridgeTunnel in
 // relay/web/shell.js), which sends it over the encrypted link and passes the answer back in pieces
-// (answer() below). It does what the service worker (relay/web/sw.js) does in Safari.
+// (answer() below). It does what the service worker (relay/web/sw.js) does in Safari. A file shown
+// over the app (FileViewer) is asked for here too, and goes through the same page.
 final class Tunnel: NSObject, WKURLSchemeHandler {
-    weak var web: WKWebView?
+    weak var web: WKWebView? // the app's own, with the phone page in it
     private var tasks: [Int: Pending] = [:]
     private var next = 1
 
@@ -38,6 +39,7 @@ final class Tunnel: NSObject, WKURLSchemeHandler {
         }
         if path.hasPrefix("/_relay/") { return reply(task, status: 404, type: "text/plain", body: Data()) }
 
+        guard let page = web else { return reply(task, status: 503, type: "text/plain; charset=utf-8", body: Data("The app isn't ready yet".utf8)) }
         let id = next
         next += 1
         tasks[id] = Pending(task)
@@ -51,7 +53,7 @@ final class Tunnel: NSObject, WKURLSchemeHandler {
         ]
         if let body, !body.isEmpty { payload["body"] = body.base64EncodedString() }
         guard let json = try? JSONSerialization.data(withJSONObject: payload), let arg = String(data: json, encoding: .utf8) else { return }
-        webView.evaluateJavaScript("window.bridgeTunnel(\(id), \(arg))") { [weak self] _, error in
+        page.evaluateJavaScript("window.bridgeTunnel(\(id), \(arg))") { [weak self] _, error in
             if error != nil { self?.answer(["id": id, "error": "The app isn't ready yet"]) }
         }
     }
@@ -59,7 +61,7 @@ final class Tunnel: NSObject, WKURLSchemeHandler {
     func webView(_ webView: WKWebView, stop task: WKURLSchemeTask) {
         guard let id = tasks.first(where: { $0.value.task === task })?.key else { return }
         tasks[id] = nil
-        webView.evaluateJavaScript("window.bridgeCancel && window.bridgeCancel(\(id))")
+        web?.evaluateJavaScript("window.bridgeCancel && window.bridgeCancel(\(id))")
     }
 
     // A piece of an answer from the page: { id, head: { s, h } } | { id, chunk } | { id, end } | { id, error }.

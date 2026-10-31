@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+The iPhone app's privacy manifest. No tracking, and no data collected: everything goes to your own
+computer through your own relay, or with Cloud agents straight to the provider you picked, with
+your key (see mobile/README.md, "App Store privacy", and PRIVACY.md).
+
+Required reason APIs in the app's own code: UserDefaults, for which computer is showing (and, in
+debug builds, the launch arguments for testing). CA92.1: read and written by the app itself only.
+The widget extension uses none. Keep this in step with test/suites/ios-app.mjs, which checks it.
+-->
+<plist version="1.0">
+<dict>
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

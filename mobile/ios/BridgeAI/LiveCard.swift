@@ -3,7 +3,9 @@ import Foundation
 
 // Starts, updates and ends the lock screen card from what the page says ({ type: 'activity' }).
 // The app can only update it while it runs: once it's in the background iOS stops it within
-// seconds, so the card says how old it is ("as of 2:16") rather than looking current.
+// seconds, so the card says how old it is ("as of 2:16") rather than looking current. All of it
+// on the main thread, where the page's messages and the scene's changes come.
+@MainActor
 enum LiveCard {
     static func show(_ m: [String: Any]) {
         guard ActivityAuthorizationInfo().areActivitiesEnabled, let state = parse(m) else { return }

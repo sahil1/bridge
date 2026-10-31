@@ -10,7 +10,8 @@ import WebKit
 final class WebViewController: UIViewController, WKScriptMessageHandler, WKUIDelegate, WKNavigationDelegate {
     static let scheme = "bridge-app"
     private static let shell = URL(string: "bridge-app://app/_relay/shell")!
-    private static let background = UIColor(red: 11 / 255, green: 13 / 255, blue: 17 / 255, alpha: 1)
+    // The launch screen's colour, light or dark as the phone is, until the page draws its own.
+    private static let background = UIColor(named: "LaunchBackground") ?? UIColor(red: 11 / 255, green: 13 / 255, blue: 17 / 255, alpha: 1)
 
     private var web: WKWebView!
     private let tunnel = Tunnel()
@@ -66,6 +67,7 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKUIDel
 
     private func load(fragment: String?) {
         showingBundled = false
+        UIApplication.shared.isIdleTimerDisabled = false // a meeting recording in the page before ends with it
         let ucc = web.configuration.userContentController
         ucc.removeAllUserScripts()
         ucc.removeScriptMessageHandler(forName: CloudBridge.name, contentWorld: .page)
@@ -74,6 +76,12 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKUIDel
         ucc.addUserScript(WKUserScript(source: """
             window.bridgeNative = { platform: 'ios', relay: \(Self.js(relay)), pairing: \(Self.js(pairing)), computers: \(Self.js(listed())), bundled: \(Self.js(["demo", "cloud"].filter(BundledUI.has))), post: (m) => window.webkit.messageHandlers.bridge.postMessage(m) }
             """, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        // Bridge AI itself, from your computer, is a frame in the page. It tells the app from Safari by
+        // a bridgeNative of its own, and says through it when a meeting is recording (the only message
+        // the app takes from a frame).
+        ucc.addUserScript(WKUserScript(source: """
+            if (window !== window.top && location.protocol === '\(Self.scheme):' && !window.bridgeNative) window.bridgeNative = { platform: 'ios', post: (m) => window.webkit.messageHandlers.bridge.postMessage(m) }
+            """, injectionTime: .atDocumentStart, forMainFrameOnly: false))
         // Bodies that are Blobs (a photo, a voice note) don't reach an app's own handler, so send
         // their bytes instead.
         ucc.addUserScript(WKUserScript(source: """
@@ -91,6 +99,7 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKUIDel
     private func openBundled(_ name: String) {
         guard BundledUI.has(name) else { return }
         showingBundled = true
+        UIApplication.shared.isIdleTimerDisabled = false
         let ucc = web.configuration.userContentController
         ucc.removeAllUserScripts()
         ucc.removeScriptMessageHandler(forName: CloudBridge.name, contentWorld: .page)
@@ -116,11 +125,13 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKUIDel
 
     // ---------- messages from the page ----------
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard let m = message.body as? [String: Any], let type = m["type"] as? String else { return }
+        guard let m = message.body as? [String: Any], let type = m["type"] as? String, message.webView === web else { return }
         // Only the app's own page, not a frame in it (an HTML file shown in Files, say): a frame could
         // otherwise forget the pairing, move the app to another relay or answer the app's requests.
+        // Bridge AI's frame can only say a meeting is recording.
         let origin = message.frameInfo.securityOrigin
-        guard type == "log" || (message.frameInfo.isMainFrame && [Self.scheme, BundledUI.scheme].contains(origin.protocol)) else { return }
+        let page = message.frameInfo.isMainFrame && [Self.scheme, BundledUI.scheme].contains(origin.protocol)
+        guard type == "log" || page || (type == "recording" && origin.protocol == Self.scheme) else { return }
         // A bundled UI can only go back to the start.
         if showingBundled && type != "home" && type != "log" { return }
         switch type {
@@ -205,7 +216,7 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKUIDel
             guard let self, let text else { return }
             if !self.usePairingLink(text) { self.alert("That isn't a Bridge AI pairing code. On your computer, open Settings › Devices and click Pair a device.") }
         }
-        present(scanner, animated: true)
+        top.present(scanner, animated: true)
     }
 
     // A pairing link: https://<your relay>/#pair=<code>. The relay is remembered; the page pairs.
@@ -228,7 +239,7 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKUIDel
     }
 
     // ---------- links, dialogs, camera and microphone ----------
-    func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+    func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
         // Web links open in Safari; the app and its frames stay here.
         if let url = action.request.url, ["http", "https", "mailto", "tel"].contains(url.scheme ?? ""), action.targetFrame?.isMainFrame != false {
             UIApplication.shared.open(url)
@@ -237,44 +248,62 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKUIDel
         decisionHandler(.allow)
     }
 
+    // A new tab or window. A web page opens in Safari. A file from your computer (a picture, a PDF, a
+    // meeting's file: "Open in a new tab") opens in a tab of its own in Safari, through the page's link;
+    // here it's shown over the app (FileViewer), through the same link.
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-        if let url = action.request.url, url.scheme == "http" || url.scheme == "https" { UIApplication.shared.open(url) }
+        guard let url = action.request.url else { return nil }
+        if url.scheme == "http" || url.scheme == "https" { UIApplication.shared.open(url) }
+        else if webView === web, !showingBundled, FileViewer.shows(url) { top.present(FileViewer.sheet(url, tunnel: tunnel), animated: true) }
         return nil
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        UIApplication.shared.isIdleTimerDisabled = false
         webView.reload()
     }
 
-    func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
-        let a = UIAlertController(title: nil, message: message, preferredStyle: .alert)
-        a.addAction(UIAlertAction(title: "OK", style: .default) { _ in completionHandler() })
-        present(a, animated: true)
+    // Dialogs go over whatever is showing (the scanner, a file), or they'd never be answered.
+    private var top: UIViewController {
+        var c: UIViewController = self
+        while let p = c.presentedViewController, !p.isBeingDismissed { c = p }
+        return c
     }
 
-    func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
+    func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping @MainActor @Sendable () -> Void) {
+        let a = UIAlertController(title: nil, message: message, preferredStyle: .alert)
+        a.addAction(UIAlertAction(title: "OK", style: .default) { _ in completionHandler() })
+        top.present(a, animated: true)
+    }
+
+    func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping @MainActor @Sendable (Bool) -> Void) {
         let a = UIAlertController(title: nil, message: message, preferredStyle: .alert)
         a.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in completionHandler(false) })
         a.addAction(UIAlertAction(title: "OK", style: .default) { _ in completionHandler(true) })
-        present(a, animated: true)
+        top.present(a, animated: true)
     }
 
-    func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String, defaultText: String?, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (String?) -> Void) {
+    func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String, defaultText: String?, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping @MainActor @Sendable (String?) -> Void) {
         let a = UIAlertController(title: nil, message: prompt, preferredStyle: .alert)
         a.addTextField { $0.text = defaultText }
         a.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in completionHandler(nil) })
-        a.addAction(UIAlertAction(title: "OK", style: .default) { _ in completionHandler(a.textFields?.first?.text) })
-        present(a, animated: true)
+        a.addAction(UIAlertAction(title: "OK", style: .default) { [weak a] _ in completionHandler(a?.textFields?.first?.text) })
+        top.present(a, animated: true)
     }
 
-    func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin, initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType, decisionHandler: @escaping (WKPermissionDecision) -> Void) {
-        decisionHandler(origin.protocol == Self.scheme ? .grant : .prompt)
+    // The microphone, for dictation, voice notes and meetings: the phone page and Bridge AI in it, from
+    // your computer. iOS asks once itself, the first time one of them is used (Info.plist says why),
+    // so WebKit doesn't ask again on top. The bundled UIs never record (the demo stands in for the
+    // mic), so they can't start the question.
+    func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin, initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType, decisionHandler: @escaping @MainActor @Sendable (WKPermissionDecision) -> Void) {
+        let ours = webView === web && !showingBundled && origin.protocol == Self.scheme && frame.securityOrigin.protocol == Self.scheme
+        decisionHandler(ours ? .grant : .deny)
     }
 
     private func alert(_ text: String) {
         let a = UIAlertController(title: nil, message: text, preferredStyle: .alert)
         a.addAction(UIAlertAction(title: "OK", style: .default))
-        present(a, animated: true)
+        top.present(a, animated: true)
     }
 }
 

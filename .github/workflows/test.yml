@@ -1,7 +1,8 @@
 # Bridge AI's tests (test/run.mjs) on macOS, Windows and Linux: on every push to main and every pull
 # request, and before a release is built (release.yml runs this first). The app's tests run in
-# Chromium everywhere, and in WebKit (the engine of Safari and the iPhone app) on macOS too. When
-# something fails, the logs and screenshots are kept with the run for a week.
+# Chromium everywhere, and in WebKit (the engine of Safari and the iPhone app) on macOS too, where
+# the iPhone app is also built for the Simulator. When something fails, the logs and screenshots are
+# kept with the run for a week.
 name: Tests
 
 on:
@@ -69,6 +70,38 @@ jobs:
 
       - name: Tests
         run: node test/run.mjs --all --lanes 2 --browser ${{ matrix.browser }}
+
+      # The iPhone app (mobile/ios), built for the iPhone Simulator as it ships (Release), with no
+      # signing, so a change to it or to what it carries (the phone page, the demo, Cloud agents)
+      # can't break it unseen. Run even when a test failed. With the newest Xcode here (the App Store
+      # takes Xcode 26 or later), a Swift warning fails it, and XcodeGen is a pinned release, refused
+      # unless it matches its checksum. The demo and Cloud agents are built first, so the app's own
+      # build finds them current.
+      - name: iPhone app
+        if: runner.os == 'macOS' && !cancelled()
+        shell: bash
+        env:
+          XCODEGEN_URL: https://github.com/yonaskolb/XcodeGen/releases/download/2.46.0/xcodegen.zip
+          XCODEGEN_SHA256: 4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806
+        run: |
+          x=$(ls -d /Applications/Xcode_2[6-9]*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$x" ]; then export DEVELOPER_DIR="$x/Contents/Developer"; fi
+          xcodebuild -version
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/xcodegen.zip" "$XCODEGEN_URL"
+          echo "$XCODEGEN_SHA256  $RUNNER_TEMP/xcodegen.zip" | shasum -a 256 -c -
+          unzip -q -o "$RUNNER_TEMP/xcodegen.zip" -d "$RUNNER_TEMP/xcodegen"
+          out="$GITHUB_WORKSPACE/mobile/ios/build/bundled"
+          npm run --silent demo:build -- --outDir "$out/demo" --logLevel warn
+          npm run --silent cloud:build -- --outDir "$out/cloud" --logLevel warn
+          cd mobile/ios
+          "$RUNNER_TEMP/xcodegen/xcodegen/bin/xcodegen" generate
+          xcodebuild -quiet -project BridgeAI.xcodeproj -scheme BridgeAI -configuration Release \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/ios" \
+            CODE_SIGNING_ALLOWED=NO SWIFT_TREAT_WARNINGS_AS_ERRORS=YES build
+          app="$RUNNER_TEMP/ios/Build/Products/Release-iphonesimulator/Bridge AI.app"
+          for f in PrivacyInfo.xcprivacy demo/index.html cloud/index.html cloud/providers.json web/index.html PlugIns/Widgets.appex/Widgets; do
+            [ -e "$app/$f" ] || { echo "::error::The iPhone app has no $f"; exit 1; }
+          done
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
