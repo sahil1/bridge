@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
+import { api, refetch } from '../../api.js'
+import { RECENT, ANY } from '../dictations/shared.jsx'
 import Icon from '../Icon.jsx'
 import { useSettings, SaveNote } from './General.jsx'
 import { useRecheck } from '../PermissionFix.jsx'
@@ -16,7 +18,12 @@ import '../../dictation/dictation.css'
 // (shared/dictation/platform.js pasteInto). On a Mac it needs Accessibility, asked for the moment you
 // pick it (macOS's own question, then the Allow access tile beside System Settings), and until it's
 // on, the dictation window shows what you said to copy, as before.
+//
+// History: each dictation kept on this computer (Dictations, under Meetings), on until you turn it
+// off, for always or less; the recordings only if you ask; Delete all, after asking.
 const TO = [['last', tx('The agent I looked at last')], ['chief', tx('The chief of staff')], ['ask', tx('Ask each time')]]
+// How long dictations are kept (server/dictations.js): always unless you pick less.
+const KEEP = [['30d', tx('30 days')], ['1y', tx('1 year')], ['always', tx('Always')]]
 const PASTE = ['paste', tx('Where I\'m typing (paste it)')]
 
 export default function Dictation() {
@@ -69,6 +76,7 @@ export default function Dictation() {
   // whenever you come back to the window.
   const needsAccess = pasting && paste?.asks === 'accessibility' && !paste.allowed
   useRecheck(checkPaste, asked ? 2500 : 0, needsAccess)
+  const [cleared, setCleared] = useState(null)
   if (!s) return <div className="skeleton-rows"><div /><div /></div>
 
   const pickTo = async (v) => {
@@ -76,6 +84,7 @@ export default function Dictation() {
     if (v === 'paste' && paste?.asks === 'accessibility' && !paste.allowed) await askPaste()
   }
   return (
+    <>
     <section className="st-sec st-dictation">
       <h4>{t('Dictation')}</h4>
       <SaveNote note={note} />
@@ -132,6 +141,39 @@ export default function Dictation() {
         </>
       )}
       <p className="muted small"><Icon name="laptop" size={12} /> {t('Your voice is turned into text on this computer. Nothing is sent anywhere.')}</p>
+    </section>
+    <History d={d} set={set} cleared={cleared} onClear={async () => {
+      if (!window.confirm(`${t('Delete every dictation kept on this computer?')}\n\n${t('Their words, their recordings and the apps\' icons go. This can\'t be undone.')}`)) return
+      try { await api('/dictations', { method: 'DELETE' }); setCleared(t('Deleted.')); refetch(RECENT); refetch(ANY) } catch (e) { setCleared(e.message) }
+    }} />
+    </>
+  )
+}
+
+// Keep a history: on or off, for how long, the recordings too, and Delete all.
+function History({ d, set, cleared, onClear }) {
+  const on = d.history !== false
+  const keep = KEEP.some(([v]) => v === d.keepFor) ? d.keepFor : 'always'
+  return (
+    <section className="st-sec st-dict-history">
+      <h4>{t('Dictation History')}</h4>
+      <label className="st-check"><input type="checkbox" checked={on} onChange={(e) => set({ history: e.target.checked })} />
+        <span><b>{t('Keep a history of what you dictate')}</b> <span className="muted small">{t('In Dictations, under Meetings: what you said, when, and where it went (the app or the agent), to find, copy or send again. Only on this computer.')}</span></span></label>
+      {on && (
+        <>
+          <div className="st-row st-radios" role="radiogroup" aria-label={t('Keep them for')}><span>{t('Keep them for')}</span>
+            <span className="st-choices st-choices-row">{KEEP.map(([v, l]) => (
+              <label key={v}><input type="radio" name="dict-keep" checked={keep === v} onChange={() => set({ keepFor: v })} /> {t(l)}</label>
+            ))}</span>
+          </div>
+          <label className="st-check"><input type="checkbox" checked={d.keepAudio === true} onChange={(e) => set({ keepAudio: e.target.checked })} />
+            <span><b>{t('Keep the recordings too')}</b> <span className="muted small">{t('To play back what you said. About 2 MB for each minute you talk.')}</span></span></label>
+        </>
+      )}
+      <div className="st-row">
+        <button type="button" className="btn small danger-soft" onClick={onClear}><Icon name="trash" size={12} /> {t('Delete all dictations…')}</button>
+        {cleared && <span className="muted small" role="status">{cleared}</span>}
+      </div>
     </section>
   )
 }

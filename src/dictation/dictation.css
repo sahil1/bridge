@@ -5,49 +5,83 @@
 /* What dictation just put in the box, for a moment. */
 .composer.dictated { box-shadow: 0 0 0 2px var(--accent-soft), 0 4px 16px rgb(0 0 0 / .04); transition: box-shadow .3s; }
 
-/* Listening for something other than a message box (a terminal, a search box, notes): a bar at the
-   bottom of the window. */
-.dict-bar { position: fixed; left: 50%; bottom: max(16px, env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 400; width: min(560px, calc(100vw - 32px)); padding: 8px 10px 8px 14px; border-radius: 14px; background: var(--pane); color: var(--ink); border: 1px solid var(--line-2); box-shadow: var(--shadow-lg, 0 8px 28px rgb(0 0 0 / .18)); font-size: 12.5px; }
-.dict-bar .voice-setup { border: 0; padding: 2px 0; background: transparent; }
-.dict-row { display: flex; align-items: center; gap: 10px; min-height: 30px; }
-.dict-row .rec-meter { flex: 0 1 120px; }
-.dict-hint { flex: 1; min-width: 0; color: var(--ink-2); line-height: 1.4; }
-.dict-row .send { width: 30px; height: 30px; }
+/* The pill (Pill.jsx), from another app and inside Bridge AI: the meeting card's look (its hairline
+   ring, small shadow and rounding). The box (.dp) eases to the size of what's in it (.dp-in), which
+   lays out at its own size, anchored to the top and the middle (.dp-up: the bottom), so the pill
+   grows into the card and back without anything jumping. */
+.dp { position: relative; overflow: hidden; flex: none; border-radius: 18px; background: var(--pane); color: var(--ink); box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 9%, transparent), 0 2px 8px rgb(0 0 0 / .16); font: 13px var(--font); user-select: none;
+  transition: width .22s cubic-bezier(.2, .8, .2, 1), height .22s cubic-bezier(.2, .8, .2, 1), border-radius .22s; animation: dp-in .18s ease-out; }
+.dp.card { border-radius: 16px; }
+.dp-in { position: absolute; top: 0; left: 50%; width: max-content; transform: translateX(-50%); }
+.dp-up .dp-in { top: auto; bottom: 0; }
+.dp-up { animation-name: dp-in-up; }
+@keyframes dp-in { from { opacity: 0; transform: translateY(-5px) scale(.97); } }
+@keyframes dp-in-up { from { opacity: 0; transform: translateY(5px) scale(.97); } }
+.dp-row { display: flex; align-items: center; gap: 9px; min-height: 36px; padding: 0 5px 0 14px; white-space: nowrap; }
+.dp-row .rec-dot { width: 8px; height: 8px; }
+/* The level: thin bars, the newest on the right, each easing to its height. */
+.dp-wave { display: inline-flex; align-items: center; gap: 2px; height: 18px; }
+.dp-wave i { width: 2.5px; height: 18px; border-radius: 2px; background: color-mix(in srgb, var(--ink) 62%, transparent); transform: scaleY(.14); transition: transform .12s linear; }
+.dp-wave.busy i { animation: dp-rock 1.2s ease-in-out infinite; animation-delay: calc(var(--i) * -70ms); }
+@keyframes dp-rock { 0%, 100% { transform: scaleY(.16); } 50% { transform: scaleY(.46); } }
+.dp-time { font: 600 12.5px var(--font-mono); font-variant-numeric: tabular-nums; min-width: 30px; }
+.dp-to { display: inline-flex; align-items: center; gap: 3px; min-width: 0; max-width: 190px; color: var(--ink-2); font-size: 12.5px; }
+.dp-to > span, span.dp-to { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+button.dp-to { padding: 3px 6px; margin: 0 -6px; border-radius: 8px; }
+button.dp-to:hover { background: var(--pane-2); color: var(--ink); }
+.dp-acts { display: inline-flex; align-items: center; gap: 3px; margin-left: 1px; }
+.dp-x, .dp-ok { flex: none; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; color: var(--ink-3); }
+.dp-x:hover { background: var(--pane-2); color: var(--ink); }
+.dp-ok { background: var(--ink); color: var(--pane); }
+.dp-ok:hover:not(:disabled) { background: var(--accent); color: #fff; }
+.dp-ok:disabled { opacity: .35; }
+.dp-what { max-width: 330px; padding: 7px 12px 7px 0; color: var(--ink-2); line-height: 1.35; white-space: normal; }
+.dp-working .dp-what, .dp-done .dp-what { color: var(--ink); }
+.dp-tick { flex: none; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--good); color: #fff; }
+.dp-done.warn .dp-tick { background: var(--ink-3); }
+/* Grown into a card: the words, what to do with them, or a note. */
+.dp-card { display: grid; gap: 8px; width: 380px; max-width: calc(100vw - 32px); padding: 10px 12px; }
+@media (prefers-reduced-motion: reduce) { .dp { transition: none; animation: none; } .dp-wave i { transition: none; } .dp-wave.busy i { animation: none; } }
 
-/* The desktop app's dictation window (?dictate=1): transparent, the card is what shows. */
+/* Inside Bridge AI, for something other than a message box (a terminal, a search box, notes): the
+   pill at the bottom of the window, in the middle. */
+.dict-dock { position: fixed; left: 0; right: 0; bottom: max(16px, env(safe-area-inset-bottom)); z-index: 400; display: flex; justify-content: center; pointer-events: none; }
+.dict-dock > .dp { pointer-events: auto; box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 9%, transparent), var(--shadow-lg, 0 8px 28px rgb(0 0 0 / .18)); }
+.dict-dock .voice-setup { border: 0; padding: 2px 0; background: transparent; }
+.dict-row { display: flex; align-items: center; gap: 10px; min-height: 30px; font-size: 12.5px; }
+.dict-acts { justify-content: flex-end; }
+.dict-hint { flex: 1; min-width: 0; color: var(--ink-2); line-height: 1.4; }
+
+/* The desktop app's dictation window (?dictate=1): transparent, the pill is what shows, in the
+   middle at the top (the window sits just under the menu bar). */
 html.is-hud, html.is-hud body, html.is-hud #root { background: transparent !important; overflow: hidden; }
-.hud-root { padding: 12px; width: max-content; }
-.hud { display: grid; gap: 8px; width: 420px; max-width: calc(100vw - 24px); padding: 10px 12px; border-radius: 16px; background: var(--pane); color: var(--ink); box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 9%, transparent), 0 2px 8px rgb(0 0 0 / .16); font: 13px var(--font); user-select: none; }
+.hud-root { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px; transition: opacity .14s; }
+.hud-root.leaving { opacity: 0; }
 .hud-row { display: flex; align-items: center; gap: 10px; min-height: 28px; }
-.hud-row .rec-meter { flex: 1; }
 .hud-row .grow { flex: 1; }
-.hud-row .send { width: 28px; height: 28px; }
-.hud-hint { margin: 0; color: var(--ink-2); font-size: 12px; }
-.hud-text { margin: 0; max-height: 180px; overflow: auto; line-height: 1.45; user-select: text; white-space: pre-wrap; overflow-wrap: anywhere; }
+.hud-text { margin: 0; max-height: 132px; overflow: auto; line-height: 1.45; user-select: text; white-space: pre-wrap; overflow-wrap: anywhere; }
 .hud-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .hud-done { margin: 0; color: var(--good); font-size: 12.5px; display: flex; align-items: center; gap: 6px; }
-.hud-note { flex: 1; min-width: 0; color: var(--ink-2); line-height: 1.4; }
+.hud-note { flex: 1; min-width: 0; color: var(--ink-2); line-height: 1.4; white-space: normal; }
 .hud-setup p { margin: 0 0 8px; color: var(--ink-2); line-height: 1.45; }
 .hud-setup .voice-setup { border: 0; padding: 0; background: transparent; }
-.hud-to { position: relative; min-width: 0; }
-.hud-to-btn { display: inline-flex; align-items: center; gap: 4px; max-width: 240px; padding: 3px 8px; border-radius: 8px; color: var(--ink-2); font-size: 12px; }
-.hud-to-btn b { color: var(--ink); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hud-to-btn:hover { background: var(--pane-3); }
-.hud-menu { position: absolute; left: 0; top: calc(100% + 4px); z-index: 5; display: grid; min-width: 220px; max-height: 220px; overflow: auto; padding: 4px; border-radius: 10px; background: var(--pane); border: 1px solid var(--line-2); box-shadow: var(--shadow-lg, 0 8px 28px rgb(0 0 0 / .18)); }
+.hud-menu { display: grid; width: 240px; max-height: 220px; overflow: auto; padding: 4px; border-radius: 12px; background: var(--pane); box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 9%, transparent), 0 2px 8px rgb(0 0 0 / .16); animation: dp-in .14s ease-out; }
 .hud-menu button { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 7px; text-align: left; color: var(--ink); font-size: 12.5px; }
 .hud-menu button:hover, .hud-menu button.on { background: var(--pane-3); }
 .hud-menu p { margin: 6px 8px; }
-/* Pasted where you're typing: the app it goes into, why it wasn't, and the offer after a Copy. */
-.hud-into { min-width: 0; max-width: 240px; padding: 3px 8px; color: var(--ink-2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Why it wasn't pasted, and the offer after a Copy. */
 .hud-why { margin: 0; color: var(--ink-2); display: flex; align-items: center; gap: 6px; line-height: 1.4; }
 .hud-offer { border-top: 1px solid var(--line); padding-top: 8px; }
 
 /* Settings › Voice › Dictation. */
-.st-dictation .st-check { display: flex; align-items: flex-start; gap: 9px; font-size: 13px; line-height: 1.45; cursor: pointer; }
-.st-dictation .st-check input { margin-top: 3px; flex: none; }
-.st-dictation .st-row > span:first-child { min-width: 120px; font-size: 13px; }
+.st-dictation .st-check, .st-dict-history .st-check { display: flex; align-items: flex-start; gap: 9px; font-size: 13px; line-height: 1.45; cursor: pointer; }
+.st-dictation .st-check input, .st-dict-history .st-check input { margin-top: 3px; flex: none; }
+.st-dictation .st-row > span:first-child, .st-dict-history .st-row > span:first-child { min-width: 120px; font-size: 13px; }
 .st-dictation .st-note { margin: 0; }
 .dict-key { font: 12.5px var(--font-mono); padding: 4px 9px; border-radius: 7px; border: 1px solid var(--line-2); background: var(--pane-2); min-width: 84px; text-align: center; }
 .st-radios { align-items: flex-start; }
 .st-choices { display: flex; flex-direction: column; gap: 5px; font-size: 13px; }
 .st-choices label { display: flex; align-items: center; gap: 7px; cursor: pointer; }
+/* Settings › Voice › Dictation History. */
+.st-dict-history { gap: 10px; }
+.st-choices.st-choices-row { flex-direction: row; flex-wrap: wrap; gap: 6px 16px; }

@@ -6,6 +6,8 @@ import { api, usePoll, fmtRelative, openInTerminal } from '../api.js'
 import { CloudMark, linkOf, whereOf } from './cloudBits.jsx'
 import SessionSwitcher from './Sessions.jsx'
 import RailMeetings from './meetings/RailMeetings.jsx'
+import RailDictations from './dictations/RailDictations.jsx'
+import { ANY as ANY_DICTATION } from './dictations/shared.jsx'
 import { RailMachines } from './Machines.jsx'
 import { Quiet } from './ErrorBoundary.jsx'
 import { openMeeting, useMeetings } from './meetings/recording.jsx'
@@ -127,12 +129,15 @@ function HoverCard({ row, rect, git, preview }) {
 }
 
 // New (Home: start something) and Meetings sit above the spaces; a red dot while a meeting records.
-export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpen, onOpenInHerdr, onOpenFiles, onNewAgent, onNewTerminal, onHistory, onMeetings, recording }) {
+export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpen, onOpenInHerdr, onOpenFiles, onNewAgent, onNewTerminal, onHistory, onMeetings, onDictations, recording }) {
   const [launching, setLaunching] = useState(false)
   const [error, setError] = useState(null)
   const [closedWs, setClosedWs] = usePersisted('cc-rail-closed', {})
   // Meetings, listed under their row like a space's tabs: open once you go to Meetings.
   const [meetingsOpen, setMeetingsOpen] = usePersisted('cc-rail-meetings', false)
+  // Dictations, under Meetings, once there's one kept (or it's open): its latest listed the same way.
+  const [dictOpen, setDictOpen] = usePersisted('cc-rail-dictations', false)
+  const anyDictation = usePoll(ANY_DICTATION, 60000).data?.total > 0 || selected === 'view:dictations'
   const [menu, setMenu] = useState(null) // row id or `ws:<id>`
   const [renaming, setRenaming] = useState(null) // { kind: 'tab'|'ws', id }
   const [hover, setHover] = useState(null) // { row, rect }
@@ -279,6 +284,7 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
         <button className={`mini-nav ${selected === 'view:new' ? 'on' : ''}`} data-tour="new-agent" onClick={() => onNewAgent?.()} aria-label={t('New')} title={t('New')}><Icon name="edit" size={15} /></button>
         {!fleet?.down && <button className={`mini-nav ${chiefOn ? 'on' : ''}`} data-tour="chief" onClick={goChief} disabled={launching} aria-label={t('Chief of Staff')} title={`${t('Chief of Staff')}\n${chiefWhat}`}><Icon name="helm" size={15} />{(chief?.status === 'blocked' || threads.some((a) => a.status === 'blocked')) && <span className="mini-needs" />}</button>}
         <button className={`mini-nav ${String(selected || '').startsWith('view:meeting') ? 'on' : ''}`} onClick={() => onMeetings?.()} aria-label={recording ? t('Meetings (recording)') : t('Meetings')} title={t('Meetings')}><Icon name="mic" size={15} />{recording && <span className="rec-dot mini-rec" />}</button>
+        {anyDictation && <button className={`mini-nav ${selected === 'view:dictations' ? 'on' : ''}`} onClick={() => onDictations?.()} aria-label={t('Dictations')} title={t('Dictations')}><Icon name="wave" size={15} /></button>}
         <div className="rail-mini">
           {groups.filter((g) => rowsOf(g).length).map((g) => (
             <div key={g.id} className="mini-ws">
@@ -354,6 +360,13 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
           </Dialog>
         )}
         {meetingsOpen && <Quiet name="Meetings list"><RailMeetings selected={selected} onOpen={openMeeting} /></Quiet>}
+        {anyDictation && (
+          <div className="rail-nav-row">
+            <button className={`rail-nav-btn ${selected === 'view:dictations' ? 'on' : ''}`} onClick={() => { setDictOpen(true); onDictations?.() }}><Icon name="wave" size={14} /> {t('Dictations')}</button>
+            <button className="rail-nav-fold" onClick={() => setDictOpen(!dictOpen)} aria-expanded={dictOpen} aria-label={dictOpen ? t('Hide the dictations list') : t('Show the dictations list')} title={dictOpen ? t('Hide the list') : t('Show the list')}><Icon name="down" size={12} className={dictOpen ? '' : 'rot-up'} /></button>
+          </div>
+        )}
+        {anyDictation && dictOpen && <Quiet name="Dictations list"><RailDictations /></Quiet>}
         <Quiet name="Devices"><RailMachines /></Quiet>
       </div>
       <div className="rail-head">
