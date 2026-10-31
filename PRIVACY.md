@@ -21,7 +21,8 @@ mic or a meeting or from Settings › Voice (one download each from Hugging Face
 turned into text on your computer and never sent anywhere, unless you pick a speech service for
 meetings), and a check on GitHub for a newer version, which you can turn off in
 Settings › About & Updates. Its fonts and icons are part of the app, so nothing is fetched to draw
-it.
+it. On Windows and Linux, the desktop app's spell check gets the dictionaries for your languages
+once, from Google, as Chrome does; nothing you type goes with them (a Mac uses its own).
 
 How much of your plan is left is off until you turn it on (the Usage card, or Settings › General).
 Then Bridge AI asks each agent's own provider, with the sign-in that agent uses on your computer,
