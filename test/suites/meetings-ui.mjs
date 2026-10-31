@@ -1,4 +1,6 @@
-// Meetings in the app, on any platform: Record now in the sidebar, New section in the recording
+// Meetings in the app, on any platform: Record now in the sidebar, My notes in view while it records
+// (beside the transcript, and a big box on a phone), the summary first once it ends with Send action
+// items to Chief of Staff under its action items, New section in the recording
 // bar, the top bar's menu and the floating card (with Pause there), naming who said a line, the
 // right-click menu, folders, the archive and deleting after a warning. The floating card following
 // dark mode while it's open, its frame, and its warning when the call has no sound. The mic set for the room
@@ -97,6 +99,15 @@ process.stdout.write('@@EV@@Pricing review (Work)\\u00a6' + d.getFullYear() + '-
     if (IS_MAC) ok(rec1?.title === 'Pricing review' && rec1.event?.attendees?.length === 3 && /Priya Shah, Dan Ruiz, Tester/.test(await p.locator('.mt-people').innerText().catch(() => '')), 'named after the calendar event on now, with its people', rec1 && { t: rec1.title, e: rec1.event })
     else skip('named after the calendar event on now', 'the calendar is macOS Calendar')
     ok(!!(await until(async () => (await p.locator('.ws-tab, .tab-row').filter({ hasText: rec1?.title || '' }).count()) > 0, 5000)), 'its tab has its name straight away')
+    // While it records: My notes beside the transcript, the cursor in it, and what it's for.
+    const box = p.locator('.mt-cols.pinned .mt-mynotes .mt-mine')
+    const sideBySide = async () => { const a = await box.boundingBox(), t = await p.locator('.mt-cols.pinned .mt-transcript').boundingBox(); return !!a && !!t && a.x + a.width <= t.x && a.height > 300 }
+    ok(!!(await until(() => box.isVisible(), 8000)) && await sideBySide(), 'while it records, My notes is beside the transcript, the height of the page', await p.locator('.mt-cols').getAttribute('class').catch(() => null))
+    ok(!!(await until(() => p.evaluate(() => !!document.activeElement?.classList.contains('mt-mine')), 4000)), 'with the cursor in it, ready to write', await p.evaluate(() => document.activeElement?.outerHTML?.slice(0, 120)))
+    ok(/^What you write here(, the slides it sees)? and the meeting's files shape the summary\.$/.test(await p.locator('.mt-mynotes .mt-shapes').innerText().catch(() => '')) && (await p.locator('.seg button[data-view="mine"]').count()) === 0, 'it says what shapes the summary, and needs no tab of its own while it records', await p.locator('.mt-mynotes').innerText().catch(() => ''))
+    await p.keyboard.type('tiers ok?')
+    ok(!!(await until(async () => /tiers ok\?/.test((await api(`/meetings/${rec1.id}`)).notes || ''), 5000)), 'what you type there goes in your notes')
+    await shot(p, `${tag}recording-notes`)
     // In a room: no call on this computer, so the mic hears everyone around the table.
     const mics = () => p.evaluate(() => window.__mics.filter((a) => a && typeof a === 'object'))
     const first = (await mics()).at(-1)
@@ -291,6 +302,36 @@ process.stdout.write('@@EV@@Pricing review (Work)\\u00a6' + d.getFullYear() + '-
   await fixedLine.locator('button', { hasText: 'Undo' }).click()
   ok(!!(await until(async () => (await p.locator('.mt-transcript .mt-line', { hasText: 'demo bridge ay eye' }).count()) === 1, 6000)), 'Undo puts the line back as heard')
 
+  // ---------- Your notes while it records, then the summary and its action items ----------
+  // A meeting recording (elsewhere): My notes stays in view beside what's picked. Once it ends, the
+  // page leads with the summary, not what was picked while it recorded. Under the summary's action
+  // items, Send action items to Chief of Staff, saying what it does; the header has no helm icon of
+  // its own, and ⋯ says the same. Chief of Staff isn't running here, so they wait on its task list.
+  const U = await api('/meetings', { title: 'Budget sync', call: false })
+  said(U.id, [['you', 1, 'Let us look at the budget.'], ['them', 5, 'The beta ships on the third.']])
+  await openMeeting('Budget sync')
+  const notesBox = p.locator('.mt-cols.pinned .mt-mynotes .mt-mine')
+  ok(!!(await until(() => notesBox.isVisible(), 8000)), 'a meeting recording in another window: My notes in view too')
+  await p.locator('.seg button[data-view="assist"]').click()
+  ok(await notesBox.isVisible() && await p.locator('.mt-cols.pinned .mt-assist').isVisible(), 'Assist picked: beside your notes, not instead of them')
+  await p.locator('.seg button[data-view="transcript"]').click()
+  await api(`/meetings/${U.id}/stop`, {})
+  await until(async () => (await api(`/meetings/${U.id}`)).status === 'done', 10000)
+  await api(`/meetings/${U.id}/summary`, {})
+  ok(!!(await until(async () => (await p.locator('.seg button[data-view="summary"][aria-selected="true"]').count()) === 1 && (await p.locator('.mt-summary').count()) > 0, 15000)), 'once it ends, the page leads with the summary again', await p.locator('.seg button[aria-selected="true"]').getAttribute('data-view').catch(() => null))
+  ok((await p.locator('.seg button[data-view="mine"]').count()) === 1 && (await p.locator('.mt-cols.pinned').count()) === 0, 'and My notes is a view of its own again')
+  ok((await p.locator('.pane-head button[aria-label="To the chief"]').count()) === 0, 'the header has no helm icon of its own')
+  const chiefRow = p.locator('.mt-chief')
+  const order = await p.evaluate(() => [...document.querySelectorAll('.mt-summary h2, .mt-chief')].map((e) => (e.classList.contains('mt-chief') ? 'chief' : e.textContent.trim().toLowerCase())))
+  ok(order.join('|') === 'summary|decisions|action items|chief|notes', 'Send action items to Chief of Staff is right under the action items', order)
+  ok((await chiefRow.locator('button').innerText({ timeout: 5000 }).catch(() => '')).trim() === 'Send action items to Chief of Staff' && /Chief of Staff tracks them on its task list and follows up/.test(await chiefRow.innerText({ timeout: 5000 }).catch(() => '')), 'labelled, with a line on what Chief of Staff does with them', await chiefRow.innerText().catch(() => ''))
+  await p.locator('button[aria-label="More actions"]').click()
+  ok((await p.locator('.menu .menu-item', { hasText: 'Send action items to Chief of Staff' }).count()) === 1, 'the ⋯ menu says the same', await p.locator('.menu .menu-item').allInnerTexts())
+  await p.keyboard.press('Escape')
+  await chiefRow.locator('button').click({ timeout: 5000 }).catch(() => {})
+  ok(!!(await until(async () => /^2 action items are on Chief of Staff's task list\./.test(await p.locator('.mt-msg').innerText({ timeout: 1000 })) && /Sent to Chief of Staff on /.test(await chiefRow.innerText({ timeout: 1000 })), 8000)) && (await api(`/meetings/${U.id}`)).chief?.n === 2, 'sent: on its task list, and the meeting says when', [await p.locator('.mt-msg').innerText({ timeout: 1000 }).catch(() => ''), await chiefRow.innerText({ timeout: 1000 }).catch(() => '')])
+  await shot(p, `${tag}meeting-chief`)
+
   // While a meeting records: the Assist tab, Suggest now, ✓ into your notes; and a file you got for it
   // (on a Mac, once you ask to look: macOS asks first).
   fs.mkdirSync(path.join(kit.home, 'Downloads'), { recursive: true })
@@ -321,6 +362,30 @@ process.stdout.write('@@EV@@Pricing review (Work)\\u00a6' + d.getFullYear() + '-
 
   ok(errors.length === 0, 'no page errors', errors)
   await ctx.close()
+
+  // ---------- On a phone, while it records: a big My notes box, one tap away ----------
+  // On the screen with the meeting, labelled; not focused by itself (the keyboard would cover the
+  // meeting), and typed in after one tap; 16px, so iOS doesn't zoom into it; nothing wider than the phone.
+  const N = await api('/meetings', { title: 'Phone notes', call: false })
+  for (const [w, h] of [[375, 812], [430, 932]]) {
+    const ph = await page(b, kit.url, { phone: true })
+    await ph.p.setViewportSize({ width: w, height: h })
+    await ph.p.waitForSelector('.tabbar button', { timeout: 15000 })
+    await ph.p.locator('.tabbar button', { hasText: 'Meetings' }).click()
+    await ph.p.locator('.m-meetings .mt-row-open', { hasText: 'Phone notes' }).click()
+    const nb = ph.p.locator('.m-meetings .mt-mynotes.pinned .mt-mine')
+    await until(() => nb.isVisible(), 8000)
+    const r = await nb.boundingBox({ timeout: 3000 }).catch(() => null)
+    const look = await nb.evaluate((el) => ({ font: getComputedStyle(el).fontSize, label: el.closest('.mt-mynotes').querySelector('.mt-mynotes-name')?.innerText.trim(), focused: document.activeElement === el, wider: document.documentElement.scrollWidth - window.innerWidth }), null, { timeout: 3000 }).catch(() => ({}))
+    ok(!!r && r.y + r.height <= h && r.height >= 120 && r.width >= w - 60 && look.label === 'My notes' && look.font === '16px', `${w}px: a big My notes box on the screen while it records`, { r, look })
+    ok(!look.focused && look.wider <= 1, `${w}px: not focused by itself, and nothing wider than the phone`, look)
+    await nb.tap({ timeout: 3000 }).catch(() => {})
+    ok(!!(await until(() => nb.evaluate((el) => document.activeElement === el, null, { timeout: 1000 }), 3000)), `${w}px: one tap and you're writing`)
+    await shot(ph.p, `${tag}phone-notes-${w}`)
+    ok(ph.errors.length === 0, `${w}px: no page errors`, ph.errors)
+    await ph.ctx.close()
+  }
+  await api(`/meetings/${N.id}/stop`, {})
 
   // ---------- Dark ----------
   const d = await page(b, kit.url, { mode: 'dark', theme: 'midnight', store: { 'cc-rail-meetings': true, 'cc-rail-meeting-folders': { Planning: true } } })

@@ -1011,6 +1011,7 @@ app.post('/api/meetings/bulk', wrap(async (req) => {
     const added = items.slice(0, 60).map(({ m, t }) => ({ m, task: chiefTasks.add(t.slice(0, 300), { from: 'meeting', link: m.saved || null }) }))
     const by = new Map()
     for (const { m, task } of added) { if (!by.has(m.id)) by.set(m.id, { m, tasks: [] }); by.get(m.id).tasks.push(task) }
+    for (const { m, tasks } of by.values()) meetings.toChief(m.id, tasks.length)
     const text = ['From my meetings, these action items are on your task list:', ...[...by.values()].flatMap(({ m, tasks }) => [`"${m.title}" (${new Date(m.startedAt).toDateString()}):`, ...tasks.map((t) => `- ${t.id}: ${t.title}`)]), '', 'Take the ones that are mine to hand off: start or brief the right agent for each, and keep the tasks current with `node bin/bridge task`. For the ones that belong to other people, draft the follow-up for me to send; don\'t message anyone yourself.'].join('\n')
     return { ...out, added: added.length, ...(await tellChief(text)) }
   }
@@ -1173,6 +1174,7 @@ app.post('/api/meetings/:id/chief', wrap(async (req) => {
   const items = (Array.isArray(req.body?.items) ? req.body.items : meetings.actions(req.params.id)).map((x) => String(x).trim()).filter(Boolean).slice(0, 30)
   if (!items.length) throw new Error('No action items in the summary')
   const added = items.map((t) => chiefTasks.add(t.slice(0, 300), { from: 'meeting', link: m.saved || null }))
+  meetings.toChief(m.id, added.length)
   const text = [`From my meeting "${m.title}" (${new Date(m.startedAt).toDateString()}), these action items are on your task list:`, ...added.map((t) => `- ${t.id}: ${t.title}`), '', 'Take the ones that are mine to hand off: start or brief the right agent for each, and keep the tasks current with `node bin/bridge task`. For the ones that belong to other people, draft the follow-up for me to send; don\'t message anyone yourself.'].join('\n')
   return { added: added.length, ...(await tellChief(text)) }
 }))

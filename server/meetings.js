@@ -170,14 +170,17 @@ function bySection(said, sections = []) {
   return out
 }
 // As text for a model or a file: "[12:04] You: ...", runs of one speaker joined, and a heading
-// where each section starts.
-export function transcriptText(id) {
+// where each section starts. marks: more lines for a model at their times ({ t, text }), such as a
+// note you wrote then or the screen changing, so they're read with what was being said.
+export function transcriptText(id, marks = []) {
+  const said = transcript(id).filter((x) => x.text)
+  const all = marks.length ? [...said, ...marks.map((x) => ({ t0: x.t, t1: x.t, mark: x.text }))].sort((a, b) => a.t0 - b.t0) : said
   const out = []
-  for (const l of bySection(transcript(id).filter((x) => x.text), meta(id).sections)) {
+  for (const l of bySection(all, meta(id).sections)) {
     const last = out[out.length - 1]
-    if (!l.head && last && !last.head && last.src === l.src && speaker(last) === speaker(l) && l.t0 - last.t1 < 4) { last.text += ` ${l.text}`; last.t1 = l.t1 } else out.push({ ...l })
+    if (!l.head && !l.mark && last && !last.head && !last.mark && last.src === l.src && speaker(last) === speaker(l) && l.t0 - last.t1 < 4) { last.text += ` ${l.text}`; last.t1 = l.t1 } else out.push({ ...l })
   }
-  return out.map((l) => (l.head ? `\n## ${l.head.title} (from ${clock(l.head.t)})\n` : `[${clock(l.t0)}] ${speaker(l)}: ${l.text}`)).join('\n').trim()
+  return out.map((l) => (l.head ? `\n## ${l.head.title} (from ${clock(l.head.t)})\n` : l.mark ? `[${clock(l.t0)}] ${l.mark}` : `[${clock(l.t0)}] ${speaker(l)}: ${l.text}`)).join('\n').trim()
 }
 // Your notes without the section headings nothing was written under (New section adds one each
 // time, for you to write under), for a model or a file.
@@ -398,8 +401,15 @@ export function kindOf(title) {
         : /\bbrainstorm/i.test(s) ? 'brainstorm' : 'general'
 }
 const guessKind = (m, title) => (m.kindPicked || (m.kind && m.kind !== 'general') ? {} : { kind: kindOf(title) })
+// What's kept of the calendar event a meeting is for: its name, time, people and what its invite
+// says (calendar.js's agenda), for the summary and AI Assist.
+const eventOf = (e) => ({
+  title: clean(e.title, 200), start: e.start || null, end: e.end || null,
+  attendees: [].concat(e.attendees || []).map((x) => clean(x, 80)).filter(Boolean).slice(0, 50),
+  agenda: clean(e.agenda, 2000) || null,
+})
 
-// event: the calendar event it's for ({ title, start, end, attendees }), when there's one.
+// event: the calendar event it's for ({ title, start, end, attendees, agenda }), when there's one.
 // kind: the kind of meeting (KINDS), for the summary; else the kind its name says. The call's sound
 // is recorded too unless it's turned off (Settings › Meetings) or this one asks not to. AI Assist is
 // on when you have it on for every meeting.
@@ -407,7 +417,7 @@ export function start({ title, event, language, kind, call = true, callApps = []
   const id = `${new Date().toISOString().slice(0, 10)}-${crypto.randomBytes(3).toString('hex')}`
   const name = String(title || event?.title || 'Meeting').slice(0, 200)
   saveMeta({
-    id, title: name, event: event ? { title: event.title, start: event.start, end: event.end, attendees: (event.attendees || []).slice(0, 50) } : null,
+    id, title: name, event: event ? eventOf(event) : null,
     links: inviteLinks(event),
     startedAt: new Date().toISOString(), endedAt: null, status: 'recording', language: language || null, kind: KINDS[kind] ? kind : kindOf(`${name} ${event?.title || ''}`), ...(KINDS[kind] ? { kindPicked: true } : {}), seconds: 0, call: 'off',
     callApps: [...new Set([].concat(callApps || []).map(String))].slice(0, 5),
@@ -939,7 +949,7 @@ export function uncleanLine(id, key) {
 export function setEvent(id, event) {
   const m = meta(id)
   if (!event?.title) throw new Error('No event')
-  const ev = { title: clean(event.title, 200), start: event.start || null, end: event.end || null, attendees: [].concat(event.attendees || []).map((x) => clean(x, 80)).filter(Boolean).slice(0, 50) }
+  const ev = eventOf(event)
   const plain = /^(Meeting|.+ call), /.test(m.title) || m.title === 'Meeting'
   const have = new Set((m.links || []).map((l) => l.url || l.path))
   const p = patchMeta(id, { event: ev, namedAt: null, ...(plain ? { title: ev.title } : {}), ...guessKind(m, `${plain ? ev.title : m.title} ${ev.title}`), links: [...(m.links || []), ...inviteLinks(event).filter((l) => !have.has(l.url || l.path))] })
@@ -1305,12 +1315,19 @@ function readTerms(id) {
   }, 300))
 }
 
-// The words on the screen and in the files and emails, for the model: by time for the screen;
+// The words read on a picture, on one line.
+const wordsOn = (c, n) => String(c.text || '').replace(/\s*\n\s*/g, ' / ').trim().slice(0, n)
+const shotLine = (c) => `[${clock(c.t)}]${c.note ? ` (${c.note})` : ''} ${wordsOn(c, 1500)}`
+// The words on the screen and in the files and emails, for the model: by time for the screen and
+// the pictures you added (but not the ones your notes show: notesFor puts those where they are);
 // each file read now from where it is, up to room characters in all.
-async function extras(id, m, room) {
+async function extras(id, m, room, { shown = new Set() } = {}) {
   const out = []
-  const shots = (m.captures || []).filter((c) => c.text || c.note).map((c) => `[${clock(c.t)}]${c.note ? ` (${c.note})` : ''} ${String(c.text || '').replace(/\s*\n\s*/g, ' / ').slice(0, 1500)}`)
+  const caps = (m.captures || []).filter((c) => c.text || c.note)
+  const shots = caps.filter((c) => c.kind !== 'paste').map(shotLine)
   if (shots.length) out.push(`What was on the screen during the meeting (the words on pictures taken of it, by time in the meeting):\n${shots.join('\n')}`)
+  const added = caps.filter((c) => c.kind === 'paste' && !shown.has(c.file)).map(shotLine)
+  if (added.length) out.push(`Pictures the user added to the meeting (the words on them, by time in the meeting):\n${added.join('\n')}`)
   const parts = []
   const each = Math.max(2000, Math.floor(room / Math.max(1, (m.links || []).length)))
   for (const l of m.links || []) {
@@ -1325,6 +1342,36 @@ async function extras(id, m, room) {
   if (parts.length) out.push(`Files, links and emails that go with this meeting:\n${parts.join('\n\n')}`)
   const text = out.join('\n\n')
   return text.length > room ? `${text.slice(0, room)}\n(cut short)` : text
+}
+
+// Your notes for a model, and what goes with them. A picture pasted in them reads as what it shows
+// (its name, its note and the words on it), where you put it: { text, shown: its files }.
+const PICTURE_IN_NOTES = /!\[([^\]]*)\]\(<?(captures\/[^)\s>]+)>?\)/g
+function notesFor(notes, captures = []) {
+  const shown = new Set()
+  const text = String(notes || '').replace(PICTURE_IN_NOTES, (all, name, file) => {
+    const c = captures.find((x) => x.file === file)
+    if (c) shown.add(file)
+    const words = c ? wordsOn(c, 600) : ''
+    return `[A picture${name ? ` ("${name}")` : ''}${c?.note ? `: ${c.note}` : ''}${words ? `. The words on it: ${words}` : ''}]`
+  })
+  return { text, shown }
+}
+// The notes you wrote at a time in the meeting ("- [12:04] ...", from a quick note, a note on a line
+// of the transcript or a suggestion kept): { t, text }.
+const STAMPED = /^\s*[-*]\s*\[((?:\d+:)?\d{1,2}:\d{2})\]\s+(.+)$/
+const stampedIn = (notes) => String(notes || '').split('\n').map((x) => STAMPED.exec(x)).filter(Boolean)
+  .map((x) => ({ t: x[1].split(':').map(Number).reduce((a, b) => a * 60 + b, 0), text: x[2].trim() }))
+// Where they go in the transcript for a model, with the screen changing (a new slide: the first
+// words on it, which are mostly its title), so each is read with what was being said then.
+function marksFor(notes, captures = []) {
+  return [
+    ...stampedIn(notes).map((n) => ({ t: n.t, text: `(You wrote a note here: "${n.text.replace(PICTURE_IN_NOTES, '').trim()}")` })),
+    ...captures.filter((c) => c.kind !== 'paste' && (c.text || c.note)).map((c) => {
+      const w = wordsOn(c, 400)
+      return { t: c.t, text: `(The screen showed${c.note ? ` ${c.note}` : ''}${w ? `: "${w.length > 140 ? `${w.slice(0, 140)}…` : w}"` : ''})` }
+    }),
+  ]
 }
 
 // ---------- Summary, questions, saving ----------
@@ -1371,9 +1418,9 @@ const SUMMARY_RULES = [
   '## Summary: 3 to 6 bullets, the outcome first.',
   '## Decisions: what was decided, one bullet each.',
   '## Action items: a checklist, "- [ ] Who: what (when, if said)". Use "You" for the person who recorded the meeting and "Them" or the name used in the meeting for others.',
-  '## Notes: the key points by topic, as short bullets. When the user wrote their own notes, keep their words and headings, and add detail under them from the transcript.',
+  '## Notes: the key points by topic, as short bullets. When the user wrote their own notes, they are its outline: keep their words and headings, and add detail under each from the transcript, the screen and the files.',
   '## Open questions: anything left unanswered.',
-  'Only use what is in the transcript and notes. Do not invent names, numbers or dates. Plain words, no filler, no em-dashes.',
+  'Only use what is in the transcript, the user\'s notes, the screen, the files and the invite. Do not invent names, numbers or dates. Plain words, no filler, no em-dashes.',
   'In the transcript, "You" is the person who recorded it (their microphone) and "Them" is everyone on the call.',
   'Speech to text mishears names. Write names the way the meeting memory, the title, the people invited or the user\'s notes spell them.',
   'When there are words from the screen or files and emails that go with the meeting, use them for names, numbers and what was being shown, and say when a point is from a slide or a document. The meeting comes first: don\'t summarize the files on their own.',
@@ -1428,12 +1475,20 @@ export function summarize(id, { model, kind, language, again = false } = {}) {
     if (cfg.meetings?.nameSpeakers !== false && !m.namedAt && !onlyGuest(m) && transcript(id).some((l) => l.src === 'them' && l.text)) {
       await nameSpeakers(id, { model: use }).catch(() => patchMeta(id, { namedAt: new Date().toISOString() }))
     }
-    const text = transcriptText(id)
-    const notes = filled(readText(path.join(dirOf(id), 'notes.md')), m.sections)
-    if (!text && !notes && !(m.captures || []).some((c) => c.text)) throw new Error('Nothing was transcribed yet')
+    // A picture still being read (one captured or pasted just before the end) is waited for, a little.
+    if ((meta(id).captures || []).some((c) => c.read === 'reading')) await Promise.race([reading, new Promise((r) => setTimeout(r, 20_000))])
+    const caps = meta(id).captures || []
+    // Your notes are what the summary is built on: as they are, with the pictures in them as what
+    // they show, and each one you wrote at a time also in the transcript at that time, with the
+    // screen changing, so it's read with what was said and shown then.
+    const mine = filled(readText(path.join(dirOf(id), 'notes.md')), m.sections)
+    const { text: notes, shown } = notesFor(mine, caps)
+    const text = transcriptText(id, marksFor(mine, caps))
+    if (!text && !notes && !caps.some((c) => c.text)) throw new Error('Nothing was transcribed yet')
     const parts0 = (m.sections || []).length > 1 ? m.sections : null
     const named = transcript(id).some((l) => l.name)
-    const about = [`Meeting: ${m.title}`, m.event?.attendees?.length ? `Invited: ${m.event.attendees.join(', ')}` : '', `Date: ${new Date(m.startedAt).toDateString()}`].filter(Boolean).join('\n')
+    const ev = m.event || {}
+    const about = [`Meeting: ${m.title}`, ev.title && ev.title !== m.title ? `Calendar event: ${ev.title}` : '', ev.attendees?.length ? `Invited: ${ev.attendees.join(', ')}` : '', ev.agenda ? `The invite says: ${ev.agenda}` : '', `Date: ${new Date(m.startedAt).toDateString()}`].filter(Boolean).join('\n')
     const mem = memory.about(`${m.title}\n${notes}\n${text}`)
     let body = text
     let used = use
@@ -1449,10 +1504,15 @@ export function summarize(id, { model, kind, language, again = false } = {}) {
       }
       body = `(The transcript was long, so here are the key points of each part, in order.)\n\n${got.join('\n\n')}`
     }
-    const more = await extras(id, m, Math.min(80_000, Math.floor(size / 4)))
+    const more = await extras(id, { ...m, captures: caps }, Math.min(80_000, Math.floor(size / 4)), { shown })
+    const backbone = notes ? [
+      '',
+      'The user\'s own notes below are the backbone of yours. Every point in them goes in, in their words, under their headings and in their order, with what the meeting said, showed or decided about it added under it. A note with a time ("- [12:04] ...") was written at that point of the meeting, and it\'s in the transcript there too: read it with what was said and shown around it.',
+      'Last, add "## From your notes": one bullet for each of their points you expanded, in their words, then in a few words what you added and where it came from (the transcript at a time, a slide, a file or the invite).',
+    ].join('\n') : ''
     const split = parts0 ? `\nThe person recording split the meeting into sections, each starting with a "## <name> (from m:ss)" heading in the transcript: ${parts0.map((x) => `"${x.title}"`).join(', ')}. Under ## Notes, give each section its own "### <name>" heading, in that order, with its points under it. Summary, Decisions and Action items are for the whole meeting; say which section one came from when that helps.` : ''
     const whoSaid = named ? '\nSome Them lines carry a name instead of "Them": who said it, named by the user or worked out from the meeting. Use those names for who said or agreed to what.' : ''
-    const prompt = [about, mem ? `\n${mem}` : '', '', k.ask, '', SUMMARY_RULES, split, whoSaid, lang ? `\nWrite the notes in ${lang}.` : '', cfg.meetings?.instructions ? `\nAlso: ${cfg.meetings.instructions}` : '', notes ? `\nThe user's own notes:\n${notes}` : '', more ? `\n${more}` : '', `\nTranscript:\n${body}`].join('\n')
+    const prompt = [about, mem ? `\n${mem}` : '', '', k.ask, '', SUMMARY_RULES, split, whoSaid, lang ? `\nWrite the notes in ${lang}.` : '', cfg.meetings?.instructions ? `\nAlso: ${cfg.meetings.instructions}` : '', backbone, notes ? `\nThe user's own notes:\n${notes}` : '', more ? `\n${more}` : '', `\nTranscript:\n${body}`].join('\n')
     const r = await replyAny(used, [{ role: 'user', text: prompt }], { system: 'You take accurate, useful meeting notes.' })
     let out = String(r.text || '').trim()
     // The names it found go to meeting memory; the block isn't part of the notes.
@@ -1463,7 +1523,16 @@ export function summarize(id, { model, kind, language, again = false } = {}) {
     }
     if (!out) throw new Error('The model sent back nothing')
     writeFileAtomic(path.join(dirOf(id), 'summary.md'), `${out}\n`)
-    patchMeta(id, { summarizing: false, summarizedAt: new Date().toISOString(), summaryModel: r.model, summaryNote: r.fellBack ? `${r.fellBack} couldn't be reached (${String(r.why).slice(0, 120)}), so ${r.model} wrote it.` : null, summaryTries: 0, summaryRetryAt: null })
+    // What it was written from, for the page to say: your points, the pictures read, the files and
+    // links, and whether the invite said anything.
+    const from = {
+      notes: mine.split('\n').filter((l) => l.trim() && !/^\s*#/.test(l) && !/^\s*!\[[^\]]*\]\([^)]*\)\s*$/.test(l)).length,
+      screen: caps.filter((c) => c.kind !== 'paste' && (c.text || c.note)).length,
+      pictures: caps.filter((c) => c.kind === 'paste' && (c.text || c.note)).length,
+      files: (m.links || []).length,
+      invite: !!(ev.attendees?.length || ev.agenda),
+    }
+    patchMeta(id, { summarizing: false, summarizedAt: new Date().toISOString(), summaryModel: r.model, summaryNote: r.fellBack ? `${r.fellBack} couldn't be reached (${String(r.why).slice(0, 120)}), so ${r.model} wrote it.` : null, summaryTries: 0, summaryRetryAt: null, summaryFrom: from })
     resave(id)
     return { summary: out, model: r.model }
   })().catch((e) => { try { patchMeta(id, { summarizing: false, summaryError: e.message, summaryTried: e.tried || null }); tryLater(id, e) } catch { /* gone */ } throw e }).finally(() => summarizing.delete(id))
@@ -1479,12 +1548,12 @@ export async function ask(id, question, { model } = {}) {
   const use = model || m.summaryModelPick || cfg.meetings?.model || await helpers.pickModel()
   if (!use) throw noModel()
   const text = transcriptText(id)
-  const notes = readText(path.join(dirOf(id), 'notes.md')).trim()
+  const { text: notes, shown } = notesFor(readText(path.join(dirOf(id), 'notes.md')).trim(), m.captures || [])
   const summary = readText(path.join(dirOf(id), 'summary.md')).trim()
   const size = budget(use)
   const context = text.length > size ? `${summary}\n\n(Transcript, the end of it:)\n${text.slice(-size)}` : text
   const mem = memory.about(`${m.title}\n${notes}\n${context}`)
-  const more = await extras(id, m, Math.min(60_000, Math.floor(size / 4)))
+  const more = await extras(id, m, Math.min(60_000, Math.floor(size / 4)), { shown })
   const r = await replyAny(use, [{ role: 'user', text: `Meeting: ${m.title}, ${new Date(m.startedAt).toDateString()}\n${mem ? `\n${mem}\n` : ''}${notes ? `\nMy notes:\n${notes}\n` : ''}${more ? `\n${more}\n` : ''}\nTranscript ("You" is me, "Them" the others):\n${context}\n\nQuestion: ${q}\n\nAnswer from the meeting only, briefly. When asked to write something (a follow-up email, an update), write it ready to send, from what was said. Say so if it wasn't covered.` }], { system: 'You answer questions about a meeting from its transcript. Be accurate and brief.' })
   return { answer: String(r.text || '').trim(), model: r.model, note: r.fellBack ? `${r.fellBack} couldn't be reached, so ${r.model} answered.` : null }
 }
@@ -1544,12 +1613,12 @@ export function assist(id, { now = false, model } = {}) {
     const end = m.event?.end ? Math.round((Date.parse(m.event.end) - Date.now()) / 60000) : null
     const text = said.map((l) => `[${clock(l.t0)}] ${speaker(l)}: ${l.text}`).join('\n')
     const recent = text.length > 14_000 ? `(earlier lines left out)\n${text.slice(-14_000)}` : text
-    const notes = filled(readText(path.join(dirOf(id), 'notes.md')), m.sections)
-    const more = await extras(id, { ...m, captures: (m.captures || []).slice(-6) }, 24_000)
+    const { text: notes, shown } = notesFor(filled(readText(path.join(dirOf(id), 'notes.md')), m.sections), m.captures || [])
+    const more = await extras(id, { ...m, captures: (m.captures || []).slice(-6) }, 24_000, { shown })
     const mem = memory.about(`${m.title}\n${people.join('\n')}\n${recent.slice(-4000)}`, 12)
     const before = a.items.slice(-12).map((x) => `- ${x.text}${x.state === 'dismissed' ? ' (not useful)' : ''}`).join('\n')
     const ask = [
-      `Meeting: ${m.title}`, people.length ? `Invited, besides You: ${people.join(', ')}` : '', me ? `"You" is ${me}, who you're helping.` : '"You" is the person you\'re helping.',
+      `Meeting: ${m.title}`, people.length ? `Invited, besides You: ${people.join(', ')}` : '', m.event?.agenda ? `The invite says: ${m.event.agenda}` : '', me ? `"You" is ${me}, who you're helping.` : '"You" is the person you\'re helping.',
       `It's ${clock(secs)} in${end != null ? (end >= 0 ? `, with ${end} minutes left` : `, ${-end} minutes past its end`) : ''}.`,
       more ? `\n${more}` : '', notes ? `\nYour notes so far:\n${notes}` : '',
       mem ? `\nBackground from earlier meetings (it may be out of date; use it only when today's meeting clearly touches it, and say so in "why"):\n${mem}` : '',
@@ -1712,14 +1781,15 @@ export async function askAll(question, { ids, model } = {}) {
   return { answer: String(r.text || '').trim(), model: r.model, sources, note: r.fellBack ? `${r.fellBack} couldn't be reached, so ${r.model} answered.` : null }
 }
 
-// The action items from the summary: "- [ ] Who: what".
+// The action items from the summary: "- [ ] Who: what", under ## Action items, or under the first
+// heading with a checklist when the notes are in another language.
 export function actions(id) {
-  const s = readText(path.join(dirOf(id), 'summary.md'))
-  const at = s.search(/^##\s*Action items/im)
-  if (at < 0) return []
-  const section = s.slice(at).split(/\n(?=##\s)/)[0]
-  return [...section.matchAll(/^\s*[-*]\s*\[ \]\s*(.+)$/gm)].map((x) => x[1].trim())
+  const parts = readText(path.join(dirOf(id), 'summary.md')).split(/\n(?=##\s)/)
+  const section = parts.find((x) => /^\s*##\s*Action items/i.test(x)) || parts.find((x) => /^\s*##\s/.test(x) && /^\s*[-*]\s*\[ \]/m.test(x))
+  return section ? [...section.matchAll(/^\s*[-*]\s*\[ \]\s*(.+)$/gm)].map((x) => x[1].trim()) : []
 }
+// The action items handed to the Chief of Staff (n of them), for the page to say so.
+export const toChief = (id, n) => patchMeta(id, { chief: { at: new Date().toISOString(), n } })
 
 // As notes in your notes folder, laid out the way Granola's sync and its Obsidian plugin do it (and
 // so a vault with Granola or Meetily notes gets these beside them). Settings › Meetings › Save

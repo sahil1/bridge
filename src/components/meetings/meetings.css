@@ -528,3 +528,34 @@ button.mt-who:not(:disabled):hover { text-decoration: underline dotted; text-und
 .fc-tip-text { font-size: 12.5px; line-height: 1.35; color: var(--ink); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .fc-tip .fc-x { width: 20px; height: 20px; }
 .fc-acts .btn.on { color: var(--accent); }
+
+/* While it records: your notes, always in view, beside what's picked on a wide screen and above it
+   on a phone, with their name and what they're for over them. */
+.mt-mynotes.pinned { grid-template-rows: auto auto minmax(0, 1fr) auto; }
+.mt-mynotes.pinned .mt-mine { min-height: 180px; height: auto; align-self: stretch; resize: none; }
+.mt-mynotes-name { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font-size: 13.5px; color: var(--ink); cursor: text; }
+.mt-mynotes-name > svg { flex: none; color: var(--accent); }
+.mt-mynotes-name small { font-size: 11.5px; font-weight: 400; }
+.mt-shapes { margin: -4px 0 0; }
+@media (max-width: 760px) {
+  /* As tall as your notes and at least 300px of what's under them; the page scrolls for the rest. */
+  .mt-cols.pinned { grid-template-rows: auto minmax(300px, 1fr); gap: 14px; min-height: auto; }
+  .mt-mynotes.pinned { grid-template-rows: none; min-height: auto; overflow: visible; }
+  .mt-mynotes.pinned .mt-mine { min-height: 132px; height: 132px; resize: vertical; }
+  .mt-mynotes-name { font-size: 15px; }
+}
+.app.narrow .mt-mine { font-size: 16px; } /* stops iOS zooming into the box */
+/* AI Assist's switch keeps its room on a phone: what it's doing wraps under it. */
+.mt-assist > .mt-phead { display: flex; flex-wrap: wrap; }
+.mt-assist-on { flex: none; }
+
+/* Under the summary's action items: sending them to the Chief of Staff, and what it does with them. */
+.mt-chief { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin: 0 0 4px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--pane-2); }
+.mt-chief .btn { flex: none; }
+.mt-chief > span { flex: 1 1 220px; min-width: 0; }
+/* What the summary was written from, each opening where it is. */
+.mt-from { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; margin: 4px 4px 0; }
+.mt-from-chip { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--line-2); background: var(--pane); color: var(--ink-2); font: 500 11.5px var(--font); }
+button.mt-from-chip { cursor: pointer; }
+button.mt-from-chip:hover { color: var(--ink); border-color: color-mix(in srgb, var(--accent) 40%, var(--line-2)); }
+.mt-from-chip.mine { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, var(--line-2)); background: color-mix(in srgb, var(--accent) 8%, var(--pane)); }

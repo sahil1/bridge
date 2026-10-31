@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import Icon from '../Icon.jsx'
 import { api, refetch } from '../../api.js'
 import { TranscribeAgain } from './tools.jsx'
-import { ConfirmDelete, FolderPick, foldersOf } from './actions.jsx'
+import { ConfirmDelete, FolderPick, foldersOf, chiefSaid } from './actions.jsx'
 import { t, locale } from '../../i18n/index.js'
 
 // Lists of meetings, in the sidebar and on the Meetings page: grouped by day, and several picked at
@@ -43,10 +43,6 @@ export function useSelection(list) {
   return { sel, toggle, clear: () => setPicked(new Set()), all: () => setPicked(new Set(ids)) }
 }
 
-function chiefSaid(n, queued) {
-  if (queued) return n === 1 ? t("{n} action item sent to the chief of staff (after what it's doing now).", { n }) : t("{n} action items sent to the chief of staff (after what it's doing now).", { n })
-  return n === 1 ? t('{n} action item sent to the chief of staff.', { n }) : t('{n} action items sent to the chief of staff.', { n })
-}
 function said(action, r) {
   const n = r.done.length
   const ok = {
@@ -55,7 +51,7 @@ function said(action, r) {
     unarchive: n === 1 ? t('{n} meeting back in the list.', { n }) : t('{n} meetings back in the list.', { n }),
     save: n === 1 ? t('Saved {n} meeting to your notes folder.', { n }) : t('Saved {n} meetings to your notes folder.', { n }),
     summarize: n === 1 ? t('Writing {n} summary again.', { n }) : t('Writing {n} summaries again.', { n }),
-    chief: chiefSaid(r.added || 0, r.queued),
+    chief: chiefSaid(r),
   }[action]
   const f = r.failed?.length
   const bad = f ? ` ${f === 1 ? t("{n} meeting couldn't: {error}", { n: f, error: r.failed[0].error }) : t("{n} meetings couldn't: {error}", { n: f, error: r.failed[0].error })}` : ''
@@ -94,7 +90,7 @@ export function BulkBar({ selection, compact = false, onDeleted, list = [] }) {
       {n > 0 && <>
         <b className="mt-bulk-n">{t('{n} picked', { n })}</b>
         {btn('save', 'download', t('Save as notes'))}
-        {btn('chief', 'helm', t('To the chief'))}
+        {btn('chief', 'helm', t('Send action items to Chief of Staff'))}
         {btn('summarize', 'sparkle', t('Summarize again'))}
         <button type="button" className={compact ? 'ghost-btn' : 'btn small'} onClick={() => setAgain(true)} disabled={!!busy || !n} title={t('Transcribe again')} aria-label={t('Transcribe again')}><Icon name="refresh" size={12} />{!compact && ` ${t('Transcribe again')}`}</button>
         <button type="button" className={compact ? 'ghost-btn' : 'btn small'} onClick={() => setDialog('folder')} disabled={!!busy || !n} title={t('Move to a folder')} aria-label={t('Move to a folder')}><Icon name="folder" size={12} />{!compact && ` ${t('Folder')}`}</button>
