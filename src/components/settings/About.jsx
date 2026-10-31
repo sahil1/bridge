@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import Icon from '../Icon.jsx'
+import UsageCounts from './UsageCounts.jsx'
 import { api } from '../../api.js'
 import { useSettings } from './General.jsx'
 import { startTour } from '../Tour.jsx'
 import { withApp, installUpdate } from '../UpdateChip.jsx'
 import { appVersion } from '../../permissions.js'
 import { t } from '../../i18n/index.js'
-import UsageCounts from './UsageCounts.jsx'
 
 const REPO = 'https://github.com/sahil1/bridge'
 
