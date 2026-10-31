@@ -237,7 +237,7 @@ function Line({ l, id, me, onSaved, onError, onWho }) {
   return (
     <div className={`mt-line ${l.src}${l.edited ? ' edited' : ''}${l.dropped ? ' dropped' : ''}`}>
       <button type="button" className={`mt-who${l.name ? ' named' : ''}${l.guess ? ' guess' : ''}`} disabled={!l.key || !onWho} onClick={(e) => onWho?.(e, l)}
-        title={l.name ? (l.guess ? t('{name}: worked out from the meeting. Click to change', { name: l.name }) : t('{name}. Click to change', { name: l.name })) : t('Who said it? Click to name them')}>{l.name || (l.src === 'them' ? t('Them') : me || t('You'))}</button>
+        title={l.name ? (l.byVoice ? t('{name}: known by their voice. Click to change', { name: l.name }) : l.guess ? t('{name}: worked out from the meeting. Click to change', { name: l.name }) : t('{name}. Click to change', { name: l.name })) : l.voice && !l.me ? t('Speaker {n}, told apart by voice. Click to name them, once for all their lines', { n: l.voice }) : t('Who said it? Click to name them')}>{l.name || (l.me ? me || t('You') : l.voice ? t('Speaker {n}', { n: l.voice }) : l.src === 'them' ? t('Them') : me || t('You'))}</button>
       <span className="mt-t">{clock(l.t0)}</span>
       {l.key && edit == null && (
         <span className="mt-line-acts">
@@ -411,6 +411,16 @@ export function MeetingPage({ id, onBack }) {
   const sent = useRef({})
   const focused = useRef(null) // the meeting whose notes got the cursor as it recorded
   const wasRecording = useRef(false)
+  // Voices in a room: whether they can be told apart here, and Who spoke's answer once it's done.
+  const { data: vst } = usePoll(data && !(data.transcript || []).some((l) => l.src === 'them' && l.text) ? '/meetings/voices' : null, 60_000)
+  const told = useRef(null) // when Who spoke was asked: the voices' time before
+  useEffect(() => {
+    if (!told.current || !data || data.voicesWork) return
+    if ((data.voices?.at || null) === told.current.at) return
+    told.current = null
+    const n = data.voices?.speakers || 0
+    setMsg({ text: n >= 2 ? t('Told {n} voices apart. Click Speaker on a line to name them, once for all their lines.', { n }) : t('Only one voice was heard clearly, so the lines stay as they are.') })
+  }, [data?.voicesWork, data?.voices?.at]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { setNotes(null); setTitle(null); setWhen(null); setPeople(null); setView(null); setOpts(null); setSel(null); setMenu(false); setWhoAt(null); setNaming(null); known.current = null; sent.current = {} }, [id])
   // While it records, your notes are in view whatever else is (pinned); after, it leads with the
@@ -501,6 +511,18 @@ export function MeetingPage({ id, onBack }) {
     await api(`/meetings/${encodeURIComponent(id)}/speakers`, { method: 'PATCH', body: { key: l.key, name } })
     const others = lines.filter((x) => x.src === 'them' && x.key !== l.key && !x.name).length
     setMsg(name && l.src === 'them' && others ? { text: t('{name} said that.', { name }), act: { label: t('{name} said all {n} lines from the call', { name, n: others + 1 }), run: () => act('who', async () => { const r = await api(`/meetings/${encodeURIComponent(id)}/speakers`, { method: 'PATCH', body: { key: l.key, name, all: true } }); setMsg({ text: t('{name} said {n} lines.', { name, n: r.named }) }) }) } } : null)
+  })
+  // In a room: a voice named once names every line of theirs (null: back to Speaker n).
+  const nameVoice = (n, who) => act('who', async () => {
+    await api(`/meetings/${encodeURIComponent(id)}/voices/${n}`, { method: 'PATCH', body: who })
+    const k = lines.filter((x) => x.voice === n).length
+    setMsg({ text: who.me ? t('That was you: {n} lines.', { n: k }) : who.name ? t('{name} said {n} lines.', { name: who.name, n: k }) : t('Back to Speaker {n}.', { n }) })
+  })
+  // Who spoke, in a room: the voices told apart (the model downloaded first, once), then named.
+  const tellVoices = () => act('who', async () => {
+    told.current = { at: data.voices?.at || null }
+    const r = await api(`/meetings/${encodeURIComponent(id)}/voices`, { method: 'POST' })
+    setMsg({ text: r.working?.state === 'downloading' ? t("Downloading the voice model ({mb} MB, once), then telling the voices apart. It all stays on this computer.", { mb: vst?.mb || 30 }) : t('Telling the voices apart, on this computer…') })
   })
   const nameAll = () => act('who', async () => {
     setMsg({ text: t('Working out who said each line from the call…') })
@@ -598,15 +620,32 @@ export function MeetingPage({ id, onBack }) {
     return out.join('\n').trim()
   }
   const heard = lines.some((l) => l.src === 'them' && l.text)
+  // A room: your mic only. Its voices can be told apart where that runs (vst.offered).
+  const room = !heard && lines.some((l) => l.src === 'you' && l.text)
+  const voiced = room && data.voices?.speakers >= 2
+  const canTell = room && done && !!vst?.offered
+  const working = data.voicesWork
   const names = [...new Set([...(data.event?.attendees || []), ...lines.map((l) => l.name).filter(Boolean)])]
-  const whoItems = (l) => [
+  const voiceItems = (l) => [
+    ...names.filter((x) => x !== l.name && x !== data.me).slice(0, 12).map((x) => ({ icon: 'users', label: x, run: () => nameVoice(l.voice, { name: x }) })),
+    !l.me && { icon: 'mic', label: t("That's me"), run: () => nameVoice(l.voice, { me: true }) },
+    { icon: 'edit', label: t('Someone else…'), run: () => setNaming({ l, name: '', voice: l.voice }) },
+    'sep',
+    { icon: 'edit', label: t('Only this line…'), run: () => setNaming({ l, name: '' }) },
+    (l.name || l.me) && { icon: 'undo', label: t('Back to Speaker {n}', { n: l.voice }), run: () => nameVoice(l.voice, { name: null }) },
+    'sep',
+    { icon: 'sparkle', label: t('Work out who each voice is'), run: nameAll },
+  ]
+  const whoItems = (l) => (l.voice ? voiceItems(l) : [
     ...names.filter((x) => x !== l.name).slice(0, 12).map((x) => ({ icon: 'users', label: x, run: () => nameLine(l, x) })),
     { icon: 'edit', label: t('Someone else…'), run: () => setNaming({ l, name: '' }) },
     l.name && 'sep',
     l.name && { icon: 'undo', label: l.src === 'them' ? t('Back to Them') : t('Back to You'), run: () => nameLine(l, null) },
     heard && 'sep',
     heard && { icon: 'sparkle', label: t('Work out who said each line'), run: nameAll },
-  ]
+    canTell && !voiced && 'sep',
+    canTell && !voiced && { icon: 'users', label: t('Tell the voices apart'), run: tellVoices },
+  ])
   const state = data.status === 'recording' ? ['rec', t('Recording')] : data.status === 'paused' ? ['paused', t('Paused')]
     : again ? ['working', data.progress != null ? t('Transcribing {n}%', { n: data.progress }) : t('Transcribing')] : data.status === 'transcribing' || data.waiting ? ['working', t('Finishing')] : data.cleaning ? ['working', t('Cleaning up')] : data.summarizing ? ['working', t('Writing notes')]
       : data.summaryError ? ['blocked', t('Notes later')] : ['done', t('Done')]
@@ -670,6 +709,7 @@ export function MeetingPage({ id, onBack }) {
           data.pending > 0 && { icon: 'refresh', label: t('Transcribe the missed parts again'), run: () => act('retry', () => api(`/meetings/${encodeURIComponent(id)}/retry`, { method: 'POST' })) },
           { icon: 'book', label: t('Meeting memory'), run: () => setDialog('memory') },
           heard && { icon: 'users', label: t('Work out who said each line'), run: nameAll },
+          canTell && { icon: 'users', label: voiced ? t('Work out who each voice is') : t('Tell the voices apart'), run: voiced ? nameAll : tellVoices },
           '-',
           { icon: 'folder', label: data.folder ? t('In "{folder}": move…', { folder: data.folder }) : t('Move to a folder…'), run: () => setDialog('folder') },
           !live && data.status !== 'recording' && data.status !== 'paused' && (data.archived
@@ -687,6 +727,7 @@ export function MeetingPage({ id, onBack }) {
         <span className="muted small">{again ? (data.progress != null ? t('Transcribing again: {n}%', { n: data.progress }) : t('Transcribing again…')) : lines.length ? `${lines.length === 1 ? t('{n} line', { n: lines.length }) : t('{n} lines', { n: lines.length })}${shots.length ? `, ${shots.length === 1 ? t('{n} picture', { n: shots.length }) : t('{n} pictures', { n: shots.length })}` : ''}` : t('Transcript')}</span>
         <span className="mt-grow" />
         {heard && <button type="button" className="ghost-btn" onClick={nameAll} disabled={busy === 'who'} aria-label={t('Who spoke')} title={t('Work out who said each line from the call: from names said, the screen and who was invited. Or click Them on a line to name them yourself.')}><Icon name="users" size={12} /><span className="lbl"> {t('Who spoke')}</span></button>}
+        {canTell && <button type="button" className="ghost-btn mt-voices-btn" onClick={voiced ? nameAll : tellVoices} disabled={busy === 'who' || !!working} aria-label={t('Who spoke')} title={voiced ? t('Work out who each voice is: from names said and who was invited. Or click Speaker on a line to name them yourself.') : t('Tell the voices in the room apart, on this computer, then work out who each one is.')}><Icon name="users" size={12} /><span className="lbl"> {t('Who spoke')}</span></button>}
         {lines.length > 0 && <button type="button" className="ghost-btn" onClick={() => setFix({ from: '' })} aria-label={t('Fix a word')} title={t('Fix a misheard word or name everywhere in this meeting')}><Icon name="edit" size={12} /><span className="lbl"> {t('Fix a word')}</span></button>}
         {done && <button type="button" className="ghost-btn" onClick={() => setDialog('again')} aria-label={t('Transcribe again')} title={t('Transcribe it again from the recording')}><Icon name="refresh" size={12} /><span className="lbl"> {t('Transcribe again')}</span></button>}
         {lines.length > 0 && <button type="button" className="ghost-btn" onClick={() => copy(said(), t('Copied the transcript.'))} aria-label={t('Copy the transcript')} title={t('Copy the transcript')}><Icon name="copy" size={12} /><span className="lbl"> {t('Copy')}</span></button>}
@@ -702,6 +743,8 @@ export function MeetingPage({ id, onBack }) {
             ? <Picture key={`pic-${x.c.id}`} id={id} c={x.c} onOpen={() => openPic(x.c)} onChange={refresh} onError={(t) => setMsg({ error: true, text: t })} />
             : <div key={`note-${x.i}`} className="mt-mark"><Icon name="edit" size={11} /><span className="mt-t">{clock(x.n.t)}</span><span>{x.n.text}</span></div>))}
         {data.waiting > 0 && lines.length > 0 && !again && <p className="muted small mt-hint">{live ? '…' : t('Finishing the transcript ({n} left)…', { n: data.waiting })}</p>}
+        {working && !working.error && <p className="mt-working muted small mt-voices-work" role="status"><span className="aa-spin" /> {working.state === 'downloading' ? t('Downloading the voice model, once: {n}%', { n: working.percent || 0 }) : t('Telling the voices apart: {n}%', { n: working.percent || 0 })}</p>}
+        {working?.error && <p className="muted small mt-hint" role="status">{t("The voices weren't told apart: {error}", { error: working.error })} <button type="button" className="link-btn" onClick={tellVoices}>{t('Try again')}</button></p>}
         {data.cleaning && <p className="mt-working muted small"><span className="aa-spin" /> {t('Cleaning up the transcript…')}</p>}
         {!data.cleaning && data.cleanError && done && <p className="muted small mt-hint">{t("The transcript wasn't cleaned up: {error}", { error: data.cleanError })} <button type="button" className="link-btn" onClick={cleanUp}>{t('Try again')}</button></p>}
         {done && !again && light && <p className="muted small mt-hint">{t('Transcribed with {engine}, a light speech model that mishears names and jargon more often. Large turbo hears them better.', { engine: light })} <button type="button" className="link-btn" onClick={() => setDialog('again')}>{t('Transcribe again')}</button></p>}
@@ -815,7 +858,7 @@ export function MeetingPage({ id, onBack }) {
         {evMenu && <AtMenu x={evMenu.x} y={evMenu.y} onClose={() => setEvMenu(null)} items={(events || []).map((ev) => ({ icon: 'calendar', label: `${ev.title} · ${timeOf(ev.start)}${ev.attendees?.length ? ` · ${t('{n} people', { n: ev.attendees.length })}` : ''}`, run: () => takeEvent(ev) }))} />}
         {naming && (
           <Dialog title={t('Who said it?')} onClose={() => setNaming(null)}>
-            <form className="mt-fix" onSubmit={(e) => { e.preventDefault(); if (naming.name.trim()) { nameLine(naming.l, naming.name.trim()); setNaming(null) } }}>
+            <form className="mt-fix" onSubmit={(e) => { e.preventDefault(); if (naming.name.trim()) { if (naming.voice) nameVoice(naming.voice, { name: naming.name.trim() }); else nameLine(naming.l, naming.name.trim()); setNaming(null) } }}>
               <p className="muted small mt-quote">"{naming.l.text.length > 160 ? `${naming.l.text.slice(0, 160)}…` : naming.l.text}"</p>
               <label><span>{t('Name')}</span><input value={naming.name} onChange={(e) => setNaming({ ...naming, name: e.target.value })} autoFocus maxLength={80} placeholder={t('Their name')} aria-label={t('Their name')} /></label>
               <div className="mt-dialog-acts"><button type="button" className="ghost-btn" onClick={() => setNaming(null)}>{t('Cancel')}</button><button type="submit" className="btn primary small" disabled={!naming.name.trim()}>{t('Name them')}</button></div>

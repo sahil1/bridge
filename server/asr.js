@@ -83,6 +83,11 @@ export async function recognize(model, pcm, { hotwords = [] } = {}) {
   return { text: texts.join(' ').replace(/\s+/g, ' ').trim(), ms }
 }
 
+// How a voice sounds (voices.js): { v: Float32Array, ms } for 16 kHz mono PCM, from the speaker
+// model (voice: { key, file }) in the same process as speech to text; v is null when the sound is
+// too short to say. Its model is small (30 MB) and stays loaded with the process.
+export const embed = (voice, pcm, { threads: n = 1 } = {}) => send({ type: 'embed', voice, pcm, threads: n })
+
 const MAX = 60 * 16000
 export function split(pcm) {
   const out = []

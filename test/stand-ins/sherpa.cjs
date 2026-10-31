@@ -41,4 +41,34 @@ class OfflineRecognizer {
   }
 }
 
-module.exports = { OfflineRecognizer }
+// The speaker model (voices.js): a voice is how high it is. A tone's pitch, from how often the
+// sound crosses zero, as eight numbers peaking at its hundred hertz (220 Hz and 440 Hz come out
+// far apart, two tones at 220 Hz the same). Loading checks the model's file is there; each request
+// is logged as { embed: seconds, hz }.
+class VoiceStream {
+  constructor() { this.parts = [] }
+  acceptWaveform({ samples, sampleRate }) {
+    if (sampleRate !== 16000) throw new Error(`stand-in: wants 16 kHz, got ${sampleRate}`)
+    this.parts.push(Float32Array.from(samples))
+  }
+  inputFinished() { this.finished = true }
+}
+class SpeakerEmbeddingExtractor {
+  constructor(config) {
+    if (!fs.existsSync(config.model)) throw new Error(`stand-in: no such file ${config.model}`)
+    this.dim = 8
+    log({ loadVoices: path.basename(config.model), threads: config.numThreads })
+  }
+  createStream() { return new VoiceStream() }
+  isReady(stream) { return stream.parts.reduce((n, p) => n + p.length, 0) >= 4000 }
+  compute(stream) {
+    const all = Float32Array.from(stream.parts.flatMap((p) => [...p]))
+    let crossings = 0
+    for (let i = 1; i < all.length; i++) if ((all[i - 1] < 0) !== (all[i] < 0) && Math.abs(all[i]) + Math.abs(all[i - 1]) > 0.01) crossings++
+    const hz = (crossings / 2) / (all.length / 16000)
+    log({ embed: Math.round((all.length / 16000) * 100) / 100, hz: Math.round(hz) })
+    return Float32Array.from({ length: 8 }, (_, i) => Math.exp(-(((hz - 100 * (i + 1)) / 60) ** 2)) + 0.01)
+  }
+}
+
+module.exports = { OfflineRecognizer, SpeakerEmbeddingExtractor }

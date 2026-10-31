@@ -44,6 +44,7 @@ const SUITES = [
   { name: 'herdr', build: null, covers: [/^server\/runtime\/(herdr[\w-]*|index)\.js$/, /^server\/(index|agents|chatagent)\.js$/] },
   { name: 'saves', build: null, covers: [/^server\/paths\.js$/] },
   { name: 'desktop-menu', build: null, covers: [/^desktop\/(contextmenu|main)\.js$/, /^desktop\/package\.json$/] },
+  { name: 'room-voices', build: null, covers: [/^server\/(voices|speech|asr|asr-worker|machine|meetings)\.js$/, /^test\/stand-ins\/(sherpa\.cjs|model\.mjs)$/] },
   { name: 'speech', build: null, covers: [/^server\/(speech|voice|asr|asr-worker|machine|meetmemory|meetings)\.js$/, /^test\/stand-ins\/sherpa\.cjs$/] },
   { name: 'voice-ui', build: 'dist', browser: true, covers: [/^src\/components\/settings\/(Voice|Meetings)\.jsx$/, /^src\/components\/(Composer|Settings)\.jsx$/, /^src\/audio\//, /^server\/(speech|voice|asr|asr-worker|machine|index)\.js$/, /^test\/stand-ins\/sherpa\.cjs$/] },
   { name: 'dictation', build: null, covers: [/^shared\/dictation\//, /^desktop\/(dictation|preload)\.js$/, /^desktop\/package(-lock)?\.json$/, /^install\.sh$/, /^native\/bridgekeys\.swift$/, /^scripts\/calltap\.js$/, /^server\/(dictation|meetmemory|index)\.js$/] },

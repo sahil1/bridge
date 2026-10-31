@@ -30,6 +30,13 @@ through quota-axi. If you add an API key for a model provider (Settings › Mode
 Bridge AI uses it to check the key and, when you or the chief of staff ask, to put a question to
 that model. Both go straight from your computer to that provider.
 
+Who said what in a room (a meeting with your mic only) is worked out on your computer by a small
+voice model you download from Hugging Face the first time you ask for it. What it works out from
+each line stays in that meeting's folder and goes with it when it's deleted. If you turn on Remember
+voices you name (Settings › Meetings, off to start with), the voices you name are kept as a few hundred
+numbers each, with the name you gave, in `~/.bridge-ai/meetings/voices.json`, readable by you only;
+they're never sent anywhere, not to your other devices either, and Forget voices deletes them.
+
 Dictation and voice notes are turned into text on your computer, and the recording isn't kept
 (unless you ask for it, below). The dictation key from other apps (Settings › Voice) is heard for
 that one key only: on a Mac it's registered with macOS, which tells Bridge AI when it's pressed and

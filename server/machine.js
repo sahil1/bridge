@@ -20,7 +20,7 @@ let found = null
 async function detect() {
   const platform = process.platform
   const arch = process.arch
-  const m = { platform, arch, os: null, glibc: null, rosetta: false, emulated: false, docker: false, memGB: Math.round(os.totalmem() / 1e8) / 10 }
+  const m = { platform, arch, os: null, glibc: null, rosetta: false, emulated: false, docker: false, memGB: Math.round(os.totalmem() / 1e8) / 10, cores: os.cpus().length }
   if (platform === 'darwin') {
     m.os = (await out('sw_vers', ['-productVersion'])) || fromDarwin(os.release())
     // The Intel build on an Apple Silicon Mac: its x64 code runs under Rosetta.
