@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState } from 
 import Icon from '../Icon.jsx'
 import { api, usePoll, BASE, onThisComputer, refetch } from '../../api.js'
 import { record, microphone } from './recorder.js'
+import { micRefused, micBlocked } from '../../audio/pcm.js'
 import { watch as watchShare, sendPicture, sendGlance } from './screen.js'
 import { t, locale } from '../../i18n/index.js'
 import './meetings.css'
@@ -72,11 +73,10 @@ export function MeetingsProvider({ children }) {
     let mic
     room.current = inRoom()
     try { mic = await microphone(undefined, { room: room.current }) } catch (e) {
-      if (e.name === 'NotAllowedError' && window.bridgeApp?.mediaAccess) {
-        const s = await window.bridgeApp.mediaAccess('microphone').catch(() => null)
-        if (s === 'denied' || s === 'restricted') throw Object.assign(new Error(t('macOS is blocking the microphone for Bridge AI.')), { code: 'mic' })
-      }
-      throw new Error(e.name === 'NotAllowedError' ? t('The microphone is blocked. Allow it for Bridge AI, then try again.') : e.message)
+      // In the desktop app on a Mac: the way to allow it (or reset it) there (Meetings.jsx shows it).
+      const fix = await micRefused(e)
+      if (fix) throw Object.assign(new Error(t('macOS is blocking the microphone for Bridge AI.')), { code: 'mic', stale: fix.stale })
+      throw new Error(e.name === 'NotAllowedError' ? micBlocked() : e.message)
     }
     // The call's sound is recorded by the server (on a Mac); this page records your mic.
     const m = await api('/meetings', { method: 'POST', body: { title: title || `Meeting, ${when()}`, event, kind } })

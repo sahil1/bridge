@@ -12,7 +12,7 @@
 // instead, to send or copy.
 import { useSyncExternalStore } from 'react'
 import { api, apiUrl, settingsChanged } from '../api.js'
-import { startPcm, microphone, wav, RATE } from '../audio/pcm.js'
+import { startPcm, microphone, wav, RATE, micRefused, micBlocked } from '../audio/pcm.js'
 import { clean, makeNames } from '../../shared/dictation/clean.js'
 import { defaultKey, keyLabel } from '../../shared/dictation/keys.js'
 import { t } from '../i18n/index.js'
@@ -156,12 +156,11 @@ export async function press(target, at = Date.now()) {
     navigator.vibrate?.(15)
   } catch (e) {
     if (seq !== id) return
-    // In the desktop app, macOS's own answer: when it says no, offer to allow it there.
-    if (e.name === 'NotAllowedError' && window.bridgeApp?.mediaAccess) {
-      const s = await window.bridgeApp.mediaAccess('microphone').catch(() => null)
-      if (s === 'denied' || s === 'restricted') { set({ phase: 'idle', setup: { mic: true } }); return }
-    }
-    set({ phase: 'idle', note: e.name === 'NotAllowedError' ? t('The microphone is blocked. Allow it for this page in your browser\'s site settings.') : e.message })
+    // In the desktop app on a Mac: what macOS says, with the way to allow it (or reset it) there.
+    const fix = await micRefused(e)
+    if (seq !== id) return
+    if (fix) { set({ phase: 'idle', setup: fix }); return }
+    set({ phase: 'idle', note: e.name === 'NotAllowedError' ? micBlocked() : e.message })
   }
 }
 

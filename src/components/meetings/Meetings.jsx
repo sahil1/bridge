@@ -14,6 +14,7 @@ import { Menu as AtMenu } from '../FileExtras.jsx'
 import { FilesPane, linkFiles } from './context.jsx'
 import { AssistPane, setAssist } from './assist.jsx'
 import PermissionFix from '../PermissionFix.jsx'
+import { MicFix } from '../Composer.jsx'
 import { sendPicture, pictureUrl } from './screen.js'
 import './meetings.css'
 import SpeechSetup, { MeetingsSetup } from './SpeechSetup.jsx'
@@ -151,7 +152,7 @@ export function MeetingsHome({ onOpen }) {
           <button type="button" className="btn small primary" onClick={() => go({ title: next.title, event: next })}>{t('Take notes')}</button>
         </div>
       )}
-      {err && <p className="error-text small" role="alert">{err.message}</p>}
+      {err && (err.code === 'mic' ? <MicFix stale={err.stale} onClose={() => setErr(null)} /> : <p className="error-text small" role="alert">{err.message}</p>)}
       {error && !data && <p className="error-text small">{error}</p>}
       {data && !all.length && !first && (
         <div className="mt-empty">
