@@ -55,6 +55,9 @@ class MainActivity : Activity() {
     private var web: PageView? = null
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private var pendingPermission: PermissionRequest? = null
+    // A video shown full screen: WebView hands over its view, shown over the page until it's closed.
+    private var fullView: View? = null
+    private var fullDone: WebChromeClient.CustomViewCallback? = null
 
     private val prefs by lazy { getSharedPreferences("bridge", MODE_PRIVATE) }
     // The computer showing now, by its relay.
@@ -348,6 +351,12 @@ class MainActivity : Activity() {
                     return runCatching { startActivityForResult(params.createIntent(), FILES) }.isSuccess.also { if (!it) fileCallback = null }
                 }
 
+                // A video's full-screen button (WebView shows nothing without this). It turns with
+                // the phone, as the app does.
+                override fun onShowCustomView(view: View, callback: WebChromeClient.CustomViewCallback) = showFull(view, callback)
+
+                override fun onHideCustomView() = leaveFull()
+
                 // The microphone, for dictating messages.
                 override fun onPermissionRequest(request: PermissionRequest) {
                     if (Uri.parse(relay ?: "").host != request.origin.host) return request.deny()
@@ -469,15 +478,35 @@ class MainActivity : Activity() {
     // the page has somewhere to go back to; otherwise it's Android's own. A bundled UI goes back
     // to the start screen last.
     private fun back() {
+        if (fullView != null) return leaveFull()
         val w = web
         if (w != null && w.canGoBack()) w.goBack() else if (showingBundled) leaveBundled()
+    }
+
+    // A video's full screen, over everything until it's closed.
+    private fun showFull(view: View, callback: WebChromeClient.CustomViewCallback) {
+        if (fullView != null) return callback.onCustomViewHidden()
+        fullView = view
+        fullDone = callback
+        (window.decorView as ViewGroup).addView(view, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        updateBack()
+    }
+
+    // Out of it (Back, or its own button).
+    private fun leaveFull() {
+        fullView?.let { (window.decorView as ViewGroup).removeView(it) }
+        fullView = null
+        val done = fullDone
+        fullDone = null
+        done?.onCustomViewHidden()
+        updateBack()
     }
     private val pageBack: Any? = if (Build.VERSION.SDK_INT >= 33) OnBackInvokedCallback { back() } else null
     private var backTaken = false
 
     private fun updateBack() {
         if (Build.VERSION.SDK_INT < 33) return
-        val take = web?.canGoBack() == true || showingBundled
+        val take = fullView != null || web?.canGoBack() == true || showingBundled
         if (take == backTaken) return
         backTaken = take
         val cb = pageBack as OnBackInvokedCallback
@@ -489,7 +518,7 @@ class MainActivity : Activity() {
     @Deprecated("Android 12 and older")
     @SuppressLint("GestureBackNavigation")
     override fun onBackPressed() {
-        if (web?.canGoBack() == true || showingBundled) back() else super.onBackPressed()
+        if (fullView != null || web?.canGoBack() == true || showingBundled) back() else super.onBackPressed()
     }
 
     // Cloud agents in front: the background check leaves it to the page.
