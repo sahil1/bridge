@@ -48,7 +48,7 @@ On Debian and Ubuntu it installs the `.deb` (it asks for your password); elsewhe
 
 - **macOS**: quit Bridge AI and move it from Applications to the Trash.
 - **Windows**: Settings › Apps › Installed apps › Bridge AI › Uninstall.
-- **Linux**: `sudo apt remove bridge-ai-desktop` where it came as a `.deb` (Debian, Ubuntu); otherwise delete `~/.local/share/bridge-ai`, `~/.local/bin/bridge-ai` and `~/.local/share/applications/bridge-ai.desktop`.
+- **Linux**: `sudo apt remove bridge-ai-desktop` where it came as a `.deb` (Debian, Ubuntu); otherwise delete `~/.local/share/bridge-ai`, `~/.local/bin/bridge-ai` and the menu entry, `~/.local/share/applications/dev.bridge-ai.app.desktop` (`bridge-ai.desktop` if it was installed before 3.7.1).
 
 Your settings, meeting notes and the rest stay in `~/.bridge-ai` in case you install it again; delete that folder to remove them too.
 
