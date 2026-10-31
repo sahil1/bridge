@@ -77,6 +77,7 @@ import { makeModels, forLaunch } from './models.js'
 import { makeHandoff } from './handoff.js'
 import * as asks from './asks.js'
 import * as needsYou from './needsyou.js'
+import * as agentMap from './agentmap.js'
 
 ensureDir(DATA)
 // Meetings, transcripts, settings and keys: for you only, not other people with an account on this
@@ -153,6 +154,8 @@ cloud.routes(app, { pushFleet: () => pushFleet() })
 
 // ---------- Fleet ----------
 
+// When each agent started and since when it's in its state, for the agent map (agentmap.js).
+const runs = agentMap.make({ rt, cfg })
 async function fleetView() {
   const f = await rt.fleet()
   delete f.panes
@@ -875,6 +878,7 @@ async function pollFleet() {
         lastFleet = f
         insights.observe(f.agents)
         counts.most('agents.peak', f.agents.length)
+        runs.observe(f.agents)
         // Another session's agents are new to the notifications, not news (see notify.forget).
         if (f.session !== notifiedSession) { notifiedSession = f.session; notify.forget() }
         if (!f.down) notify.onFleet(f, cfg)
@@ -913,7 +917,7 @@ rt.whenInterrupted?.((paneId, why) => {
   pushFleet()
 })
 // Nobody watching: still note now and then what each agent is doing, for Insights.
-setInterval(() => { if (!(clients.size || queue.size() || notify.active())) rt.fleet().then((f) => { if (!f.down) insights.observe(f.agents) }, () => {}) }, 30 * 1000)
+setInterval(() => { if (!(clients.size || queue.size() || notify.active())) rt.fleet().then((f) => { if (!f.down) { insights.observe(f.agents); runs.observe(f.agents) } }, () => {}) }, 30 * 1000)
 setInterval(() => { for (const c of clients) c.write(': ping\n\n') }, 25000)
 // Cloud agents are checked on their own, gently; finished ones only while someone's watching.
 cloud.start({ watched: () => clients.size > 0 || notify.active() })
@@ -1597,13 +1601,23 @@ app.post('/api/machines/asks/:id', wrap((req) => { relay.answerAsk(req.params.id
 // An ask reaches your phones too, so you can allow it from there.
 relay.whenAsked((a) => notify.send({ kind: 'machine', title: `${a.name} asks to link`, body: `Allow it in Bridge AI if both devices show ${a.code}.`, url: '/#settings/machines', tag: `machine-ask-${a.id}` }).catch(() => {}))
 relay.whenPaired((d) => notify.send({ kind: 'machine', title: `${d.name} is paired`, body: 'If that wasn\'t you, remove it in Settings › Devices.', url: '/#settings/machines', tag: `paired-${d.id}` }).catch(() => {}))
-// What this device tells the others: its agents, for their sidebars, and what waits on you here,
-// for their needs-you inboxes.
+// What this device tells the others: its agents, for their sidebars and agent maps (agentmap.js),
+// and what waits on you here, for their needs-you inboxes.
 machines.useSummary(async () => {
   const f = await fleetView()
   const needs = await waiting.items().catch(() => [])
-  return { runtime: rt.name, counts: f.counts, agents: f.agents.slice(0, 40).map((a) => ({ paneId: a.paneId, title: a.title, status: a.status, kind: a.kind, kindLabel: a.kindLabel, chief: !!a.chief })), needs }
+  return { runtime: rt.name, counts: f.counts, agents: await runs.agents(f, { cloudSaid: cloud.previews() }), needs }
 })
+// The agent map: every computer's agents, this one's from here and the others' from what each last
+// said (asked again while you're looking), and a computer that's offline with what it said last.
+app.get('/api/agent-map', wrap(async (req) => {
+  await machines.fresh({ maxAge: req.query.live ? 4000 : 10000 })
+  const f = await fleetView()
+  const here = { id: null, name: relay.thisName(), os: machines.OS, version: VERSION, runtime: rt.name, here: true, online: true, at: new Date().toISOString(), agents: f.down ? [] : await runs.agents(f, { cloudSaid: cloud.previews() }) }
+  const linked = machines.list().filter((m) => m.state === 'linked')
+    .map((m) => ({ id: m.id, name: m.name, os: m.os, version: m.version, runtime: m.about?.runtime || null, online: !!m.online, lastSeen: m.lastSeen, at: m.at, agents: Array.isArray(m.agents) ? m.agents : [] }))
+  return { devices: [here, ...linked] }
+}))
 
 // ---------- What needs you (needsyou.js) ----------
 // The inbox: this device's items and your other devices' (from what each last said, asked again
