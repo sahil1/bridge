@@ -3,6 +3,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { loadConfig } from './server/paths.js'
 import { ADAPTERS } from './shared/cloud/index.js'
+import whiteboardAssets from './scripts/whiteboard-assets.js'
 
 // Dev mode (npm start -- dev): this serves the UI with hot reload on the API port + 1 and passes
 // /api, WebSockets included, to the server.
@@ -46,7 +47,7 @@ function standalone(entry) {
 export default defineConfig(({ mode }) => {
   const entry = STANDALONE[mode]
   return {
-    plugins: [react(), entry && standalone(entry)],
+    plugins: [react(), entry && standalone(entry), whiteboardAssets()],
     // Relative paths everywhere: the same page also opens at /m/<id>/, another of your machines
     // shown through this one (server/machines.js), and then loads that machine's own files.
     base: './',

@@ -304,6 +304,44 @@ const cmds = {
     if (file && !fs.existsSync(where)) console.log(`Note: there's no file at ${tilde(where)}. Check the path, then run this again with the right one.`)
   },
 
+  // Whiteboards in Bridge AI: list them, read one as words, make one or hand one a new version. A
+  // diagram goes in as Mermaid, draw.io or an Excalidraw file; Bridge AI turns it into shapes the
+  // next time the board is opened, or straight away when it's open.
+  async board(args) {
+    const [sub = 'list', ...rest] = args
+    const opt = (k) => { const i = rest.indexOf(k); if (i < 0) return undefined; const v = rest[i + 1]; rest.splice(i, 2); return v }
+    const flag = (k) => { const i = rest.indexOf(k); if (i >= 0) rest.splice(i, 1); return i >= 0 }
+    const id = (name) => encodeURIComponent(name)
+    if (sub === 'list') {
+      const { boards, folder } = await api('/boards')
+      if (!boards.length) return console.log(`No whiteboards yet (they're kept in ${tilde(folder)}).`)
+      for (const b of boards) console.log(`${b.title}  (edited ${ago(new Date(b.mtime).toISOString())})`)
+      return console.log(`\nIn ${tilde(folder)}, one .excalidraw file each.`)
+    }
+    if (sub === 'show') {
+      const name = rest.join(' ').trim()
+      if (!name) throw new Error('Usage: bridge board show "Name"')
+      return console.log((await api(`/boards/${id(name)}/text`)).text)
+    }
+    if (sub !== 'new' && sub !== 'update') throw new Error('Usage: bridge board [list|show|new|update] (bridge help)')
+    const file = opt('--file')
+    const add = flag('--add')
+    const stdin = flag('-')
+    const name = rest.join(' ').trim()
+    if (!name) throw new Error(`Usage: bridge board ${sub} "Name" [--file diagram.mmd|.drawio|.excalidraw | - (stdin)]${sub === 'update' ? ' [--add]' : ''}`)
+    const text = stdin || file === '-' ? fs.readFileSync(0, 'utf8') : file ? fs.readFileSync(path.resolve(file.replace(/^~(?=\/|$)/, HOME)), 'utf8') : ''
+    const kind = /\.excalidraw(\.json)?$/i.test(file || '') || /^\s*\{/.test(text) ? 'excalidraw' : /\.(drawio|dio|xml)$/i.test(file || '') || /^\s*</.test(text) ? 'drawio' : 'mermaid'
+    const source = text.trim() ? { kind, text } : undefined
+    const who = WHO === 'the' ? 'The user' : WHO.replace(/'s$/, '')
+    if (sub === 'new') {
+      const b = await api('/boards', { method: 'POST', body: { title: name, source } })
+      return console.log(`Made the whiteboard "${b.id}"${source ? ` from ${kind === 'drawio' ? 'draw.io' : kind === 'excalidraw' ? 'an Excalidraw file' : 'Mermaid'}` : ''}. ${who} finds it in Bridge AI › Whiteboards.`)
+    }
+    if (!source) throw new Error('Give the new version: --file diagram.mmd, or - and the diagram on stdin')
+    const b = await api(`/boards/${id(name)}/update`, { method: 'POST', body: { source, mode: add ? 'add' : 'replace' } })
+    console.log(add ? `Added to "${b.id}", beside what's there.` : `"${b.id}" has the new version. While it's open, undo on the board brings back the one before.`)
+  },
+
   help() {
     console.log(`bridge: see and direct the agents in Bridge AI.
 
@@ -338,7 +376,16 @@ const cmds = {
                                     it's waiting on ${SETTINGS.name && SETTINGS.name !== 'the user' ? SETTINGS.name : 'the user'}: what you need from them
   bridge task done <id> "result" [--file path | --link url]
                                     finished: the result in one line, and the file or link it produced
-  bridge task reopen <id>           open it again`)
+  bridge task reopen <id>           open it again
+
+  Whiteboards (drawings in Bridge AI › Whiteboards, to move and edit by hand):
+  bridge board list                 every whiteboard, latest first
+  bridge board show "Name"          what's on one, in words: each shape, arrow and note
+  bridge board new "Name" [--file diagram.mmd|.drawio|.excalidraw | - (stdin)]
+                                    make one, empty or from a diagram (Mermaid's flowchart, sequenceDiagram and
+                                    classDiagram become shapes)
+  bridge board update "Name" (--file f | -) [--add]
+                                    a new version in place of what's there (--add: beside it)`)
   },
 }
 
