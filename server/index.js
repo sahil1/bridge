@@ -17,6 +17,7 @@ import * as voice from './voice.js'
 import * as dictation from './dictation.js'
 import * as dictations from './dictations.js'
 import * as livewords from './livewords.js'
+import * as voicespeak from './voicespeak.js'
 import * as fixes from './fixes.js'
 import * as servers from './servers.js'
 import * as archive from './archive.js'
@@ -982,6 +983,11 @@ app.post('/api/dictation/live/:sid', express.raw({ type: () => true, limit: '4mb
   try { res.json(await livewords.feed(req.params.sid, req.body, { cfg, words: dictation.hints(dictationSources) })) } catch (e) { res.status(e.status || 502).json({ error: e.message }) }
 })
 app.delete('/api/dictation/live/:sid', wrap((req) => livewords.end(req.params.sid)))
+// Answers read aloud where the device has no voice of its own (voicespeak.js): eSpeak NG here.
+app.get('/api/voice/speak', wrap(() => voicespeak.status()))
+app.post('/api/voice/speak', async (req, res) => {
+  try { res.type('audio/wav').send(await voicespeak.speak(req.body?.text, { lang: String(req.body?.lang || 'en') })) } catch (e) { res.status(e.status || 502).json({ error: e.message }) }
+})
 // Your dictations, kept on this computer (dictations.js): listed and searched, one whole, what
 // became of it, deleted (and put back, for Undo), all of them deleted, a recording kept and played,
 // an app's icon. An agent named by its pane only is named from the fleet.

@@ -17,6 +17,7 @@ import CloudConsole from './CloudConsole.jsx'
 import { PaneHeader } from './layout.jsx'
 import { tildePath, Menu } from './Rail.jsx'
 import { api, usePoll, useLive, fmtTime, openInTerminal, useOutbox, relayOutbox, BASE } from '../api.js'
+import AskOutLoud from '../voice/AskOutLoud.jsx'
 import { t, tx } from '../i18n/index.js'
 
 const KEYS = [
@@ -839,6 +840,8 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
                 <div className="btw-a">{btw.a ? <RichText text={btw.a} /> : <span className="muted"><Icon name="refresh" size={11} className="spin" /> {t('Thinking…')}</span>}</div>
               </div>
             )}
+            {/* The Chief of Staff: ask it out loud, and hear the answer (voice/AskOutLoud.jsx). */}
+            {agent.chief && view === 'chat' && <AskOutLoud agent={agent} onSend={send} />}
             <Composer id={agent.paneId} placeholder={agent.chief ? t('Tell your chief of staff what you need…') : t('Message {name}…', { name: title })}
               onSend={send} keysOpen={keysOpen} onToggleKeys={() => setKeysOpen(!keysOpen)}
               busy={isWorking(agent)} typeAhead={!!agent.caps?.typeAhead}

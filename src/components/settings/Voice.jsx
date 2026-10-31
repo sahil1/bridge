@@ -3,13 +3,15 @@ import Icon from '../Icon.jsx'
 import { api, usePoll, viaRelay } from '../../api.js'
 import { useSettings, SaveNote } from './General.jsx'
 import Dictation from './Dictation.jsx'
+import SpokenAnswers from '../../voice/SpokenAnswers.jsx'
 import { t } from '../../i18n/index.js'
 import '../meetings/meetings.css'
 
 // Settings › Voice: the speech models this computer can run (the ones it can't aren't listed), the
 // one voice notes, dictation and meetings use, and their downloads. Parakeet first; Whisper, for the
 // languages Parakeet doesn't hear, folded away until it's wanted. Server: speech.js (status, and
-// what this computer can run), voice.js. Then dictation's own settings (Dictation.jsx).
+// what this computer can run), voice.js. Then dictation's own settings (Dictation.jsx), and the
+// voice that reads the Chief of Staff's answers aloud (voice/SpokenAnswers.jsx).
 const size = (mb) => (mb >= 1000 ? t('{n} GB', { n: (mb / 1000).toFixed(1) }) : t('{n} MB', { n: mb }))
 const heard = (l) => (l === 'auto' ? t('about 100 languages') : l?.length === 1 ? t('English only') : t('{n} languages', { n: l?.length || 0 }))
 
@@ -101,6 +103,7 @@ export default function Voice() {
         {d.hidden?.length > 0 && <p className="muted small">{t('More speech models are offered on other computers.')}</p>}
       </section>
       <Dictation />
+      <SpokenAnswers />
     </div>
   )
 }

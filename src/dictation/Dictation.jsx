@@ -86,7 +86,7 @@ export default function Dictation({ conf, onScreen }) {
   const mine = s.target?.kind === 'composer' && box(s.target.id)
   if (mine || (s.phase === 'idle' && !s.note && !s.setup && !done)) return null
   const listening = s.phase === 'opening' || s.phase === 'listening'
-  const to = <span className="dp-to">{s.target?.kind === 'terminal' ? t('Into the terminal') : t('Where you\'re typing')}</span>
+  const to = <span className="dp-to">{s.target?.kind === 'ask' ? t('To {name}', { name: t('Chief of Staff') }) : s.target?.kind === 'terminal' ? t('Into the terminal') : t('Where you\'re typing')}</span>
   if (listening) return <Dock><Listening s={s} to={to} hint={listeningHint(s.mode, label)} onCancel={cancel} onStop={finish} /></Dock>
   if (s.phase === 'working') return <Dock><Working s={s} /></Dock>
   if (done && !s.note && !s.setup) return <Dock><Done text={done} /></Dock>
