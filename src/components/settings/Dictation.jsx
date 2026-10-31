@@ -19,6 +19,9 @@ import '../../dictation/dictation.css'
 // pick it (macOS's own question, then the Allow access tile beside System Settings), and until it's
 // on, the dictation window shows what you said to copy, as before.
 //
+// Live words: the words shown as you talk, where the speech model and this computer allow it
+// (server/livewords.js), on unless you turn them off.
+//
 // History: each dictation kept on this computer (Dictations, under Meetings), on until you turn it
 // off, for always or less; the recordings only if you ask; Delete all, after asking.
 const TO = [['last', tx('The agent I looked at last')], ['chief', tx('The chief of staff')], ['ask', tx('Ask each time')]]
@@ -44,6 +47,10 @@ export default function Dictation() {
     if (r === 'ok') checkPaste()
   }
   useEffect(() => { app?.dictateStatus?.().then(setStatus, () => {}) }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  // Live words: whether they can work on this computer (server/livewords.js), asked again after a
+  // change here (a new speech model, say).
+  const [live, setLive] = useState(null) // { can, why, off }
+  useEffect(() => { api('/dictation/live').then(setLive, () => setLive(null)) }, [s?.effective?.dictation?.liveWords, s?.effective?.speech?.model]) // eslint-disable-line react-hooks/exhaustive-deps
   const plat = keysPlatform()
   const d = s?.effective?.dictation || {}
   const key = dictationKey(d)
@@ -137,6 +144,13 @@ export default function Dictation() {
             <span><b>{t('Light cleanup')}</b> <span className="muted small">{t('Drops "um" and "uh" and words said twice, starts with a capital and ends with a full stop, and spells the names of your agents, projects, branches and meeting memory the way they\'re written. No AI model, nothing sent anywhere.')}</span></span></label>
           <label className="st-check"><input type="checkbox" checked={d.atFiles !== false} onChange={(e) => set({ atFiles: e.target.checked })} />
             <span><b>{t('Mention files by saying them')}</b> <span className="muted small">{t('"at payments dot ts" becomes @payments.ts in the message box.')}</span></span></label>
+          {/* Shown where a speech model sherpa-onnx runs is picked (Parakeet): hidden with Whisper or
+              the Mac's own speech, which hear a recording whole. Too slow here: said once. */}
+          {live && ['off', 'model', null].includes(live.why) && (
+            <label className="st-check"><input type="checkbox" checked={d.liveWords !== false} onChange={(e) => set({ liveWords: e.target.checked })} />
+              <span><b>{t('Show the words as you talk')}</b> <span className="muted small">{t('While it listens, and under a meeting\'s transcript while someone is talking. Heard on this computer as you go; the finished text is the same as before.')}</span></span></label>
+          )}
+          {live?.why === 'slow' && d.liveWords !== false && <p className="st-note"><Icon name="info" size={13} /> {t('This computer turns speech into text too slowly to show the words as you talk, so they come when you let go.')}</p>}
           {!app?.desktop && !touch && <p className="muted small">{t('In the desktop app, the key works from other apps too.')}</p>}
         </>
       )}

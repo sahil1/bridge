@@ -202,7 +202,9 @@ export default function FloatCard() {
               {talked.share != null && <span className="fc-share" title={t("Who's talked, of everything said so far")}><b>{t('You {n}%', { n: talked.share })}</b><i style={{ '--you': `${talked.share}%` }} /><b>{t('Call {n}%', { n: 100 - talked.share })}</b></span>}
             </div>
             <div className="fc-said">
-              {recent.length ? recent.map((l) => <p key={`${l.src}:${l.t0}`} className={`fc-said-line ${l.src}`}><b>{l.name || (l.src === 'them' ? t('Them') : m?.me || t('You'))}</b> {l.text}</p>) : <p className="muted">{paused ? t('Paused.') : t('Listening…')}</p>}
+              {recent.length ? recent.map((l) => <p key={`${l.src}:${l.t0}`} className={`fc-said-line ${l.src}`}><b>{l.name || (l.src === 'them' ? t('Them') : m?.me || t('You'))}</b> {l.text}</p>) : !m?.partial && <p className="muted">{paused ? t('Paused.') : t('Listening…')}</p>}
+              {/* Live words: what someone is still saying, before its line is in. */}
+              {!paused && ['you', 'them'].filter((src) => m?.partial?.[src]?.text).map((src) => <p key={`so-far-${src}`} className={`fc-said-line ${src} so-far`}><b>{src === 'them' ? t('Them') : m?.me || t('You')}</b> {m.partial[src].cut ? '… ' : ''}{m.partial[src].text}</p>)}
             </div>
             <p className="fc-info muted">
               {[part, toEnd != null && (toEnd >= 0 ? t('Ends {time}, in {n} min', { time: end.toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' }), n: toEnd }) : t('{n} min past its end', { n: -toEnd })), m?.event?.attendees?.length ? t('{n} invited', { n: m.event.attendees.length }) : null, said.length === 1 ? t('{n} line', { n: said.length }) : t('{n} lines', { n: said.length }), notes ? (notes === 1 ? t('{n} note', { n: notes }) : t('{n} notes', { n: notes })) : null, shots ? (shots === 1 ? t('{n} picture', { n: shots }) : t('{n} pictures', { n: shots })) : null].filter(Boolean).join(' · ')}
