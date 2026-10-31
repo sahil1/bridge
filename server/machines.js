@@ -24,7 +24,7 @@ import { createHash, randomBytes, webcrypto } from 'node:crypto'
 import WebSocket, { WebSocketServer } from 'ws'
 import { dataFile, ensureDir, ROOT, writeFileAtomic } from './paths.js'
 import * as relay from './relay.js'
-import { phoneHello, phoneFinish, splitCode, normCode, plainFrame, readPlain, b64u, K, pack, unpack, json, utf8, CHUNK } from '../relay/web/link.js'
+import { phoneHello, phoneFinish, splitCode, normCode, plainFrame, readPlain, b64u, K, pack, unpack, json, utf8, CHUNK, WINDOW, more, granter } from '../relay/web/link.js'
 
 const FILE = dataFile('machines.json')
 const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version
@@ -296,16 +296,18 @@ class Link {
   }
 
   // A request to that device: handlers get { s, h }, then pieces, then the end (or an error).
-  request({ m, u, h, body }, handlers) {
+  // w: how much of the answer may be on its way at once; more(n) once n of it has been taken in.
+  request({ m, u, h, body, w }, handlers) {
     const id = this.next++
     this.streams.set(id, handlers)
-    const started = this.send(K.REQ, id, { m, u, h, body: !!body })
+    const started = this.send(K.REQ, id, { m, u, h, body: !!body, ...(w ? { w } : {}) })
     return {
       id,
       started,
       write: (chunk) => (async () => { for (let o = 0; o < chunk.byteLength; o += CHUNK) await this.send(K.BODY, id, chunk.subarray(o, o + CHUNK)) })(),
       end: () => this.send(K.END, id),
       cancel: () => { if (this.streams.delete(id)) this.send(K.CANCEL, id).catch(() => {}) },
+      more: (n) => { if (this.streams.has(id)) this.send(K.MORE, id, more(n)).catch(() => {}) },
     }
   }
 
@@ -622,8 +624,9 @@ setInterval(() => {
 }, 60000).unref()
 
 // ---------- /m/<id>/...: that device's Bridge AI, through here ----------
-const PASS = new Set(['content-type', 'accept', 'accept-language', 'range', 'if-none-match', 'if-modified-since', 'cache-control', 'last-event-id'])
-const HOP = new Set(['connection', 'keep-alive', 'transfer-encoding', 'content-length', 'content-encoding', 'set-cookie'])
+const PASS = new Set(['content-type', 'accept', 'accept-language', 'range', 'if-range', 'if-none-match', 'if-modified-since', 'cache-control', 'last-event-id'])
+// (Its length comes only when the answer comes as it is: a download's progress, a video's player.)
+const HOP = new Set(['connection', 'keep-alive', 'transfer-encoding', 'content-encoding', 'set-cookie'])
 const MPATH = /^\/m\/([A-Za-z0-9_-]{1,20})(\/.*)?$/
 const offlinePage = (name, why) => `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${name}</title>
 <style>body{font:15px system-ui,sans-serif;display:grid;place-items:center;min-height:90vh;margin:0;background:#f4f5f7;color:#222}@media(prefers-color-scheme:dark){body{background:#111317;color:#e6e6e6}a{color:#8ab4ff}}div{max-width:420px;padding:24px;text-align:center}</style>
@@ -646,7 +649,12 @@ export async function proxy(req, res) {
   h.push(['x-bridge-machine', relay.thisName()])
   const hasBody = !['GET', 'HEAD'].includes(req.method)
   let done = false
-  const r = l.request({ m: req.method, u, h, body: hasBody }, {
+  // The answer comes as fast as the browser takes it (a video's player reads ahead only so far, then
+  // waits): what's written here and not yet taken is given back only once it drains, so a big
+  // file never piles up in this server's memory.
+  const grant = granter((n) => r.more(n))
+  let unread = 0
+  const r = l.request({ m: req.method, u, h, body: hasBody, w: WINDOW }, {
     onHead: ({ s, h: hs }) => {
       res.status(s)
       for (const [k, v] of hs || []) {
@@ -655,7 +663,11 @@ export async function proxy(req, res) {
         res.setHeader(k, k.toLowerCase() === 'location' && String(v).startsWith('/') ? `/m/${m.id}${v}` : v)
       }
     },
-    onChunk: (c) => res.write(c),
+    onChunk: (c) => {
+      if (res.write(c)) return grant(c.byteLength)
+      if (!unread) res.once('drain', () => { const n = unread; unread = 0; grant(n) })
+      unread += c.byteLength
+    },
     onEnd: () => { done = true; res.end() },
     onError: (msg) => { done = true; if (!res.headersSent) res.status(502).json({ error: msg }); else res.destroy() },
   })

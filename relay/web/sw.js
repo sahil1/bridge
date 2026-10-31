@@ -57,29 +57,51 @@ async function tunnel(req, url) {
   const body = req.method === 'GET' || req.method === 'HEAD' ? null : await req.arrayBuffer()
   const { port1, port2 } = new MessageChannel()
   return new Promise((resolve) => {
-    let ctrl
     let answered = false
+    // The answer goes to its reader only as fast as the reader takes it (a video's player stops
+    // reading once it has enough), and the page hears each piece taken ({ ack }), so your
+    // computer sends no more than that: a long video never piles up here.
+    const queue = []
+    let ended = false
+    let failed = null
+    let wake = null
     const stream = new ReadableStream({
-      start(c) { ctrl = c },
-      cancel() { port1.postMessage({ cancel: true }); port1.close() },
-    })
+      pull(c) {
+        return new Promise((done) => {
+          const next = () => {
+            if (queue.length) {
+              const b = queue.shift()
+              c.enqueue(b)
+              port1.postMessage({ ack: b.byteLength })
+            } else if (failed) c.error(failed)
+            else if (ended) { c.close(); port1.close() }
+            else return (wake = next)
+            done()
+          }
+          next()
+        })
+      },
+      cancel() { queue.length = 0; port1.postMessage({ cancel: true }); port1.close() },
+    }, { highWaterMark: 0 })
+    const poke = () => { const w = wake; wake = null; w?.() }
     port1.onmessage = (e) => {
       const m = e.data
       if (m.head) {
         answered = true
         resolve(new Response(NO_BODY.has(m.head.s) || req.method === 'HEAD' ? null : stream, { status: m.head.s, headers: m.head.h }))
       } else if (m.chunk) {
-        try { ctrl.enqueue(new Uint8Array(m.chunk)) } catch { /* reader went away */ }
+        queue.push(new Uint8Array(m.chunk))
+        poke()
       } else if (m.end) {
-        try { ctrl.close() } catch { /* already closed */ }
-        port1.close()
+        ended = true
+        poke()
       } else if (m.error) {
         if (!answered) resolve(offline(req, m.error))
-        else try { ctrl.error(new Error(m.error)) } catch { /* closed */ }
+        else { failed = new Error(m.error); poke() }
         port1.close()
       }
     }
-    s.postMessage({ type: 'fetch', m: req.method, u: url.pathname + url.search, h: [...req.headers], body }, body ? [port2, body] : [port2])
+    s.postMessage({ type: 'fetch', m: req.method, u: url.pathname + url.search, h: [...req.headers], body, acks: true }, body ? [port2, body] : [port2])
   })
 }
 

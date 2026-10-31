@@ -12,7 +12,7 @@
 //
 // With your computer offline, it shows Bridge AI from what the phone kept (offline.js) under a
 // banner saying so, and messages you send wait for the computer (in the relay, sealed for it).
-import { phoneHello, phoneFinish, newKey, splitCode, normCode, formatCode, plainFrame, readPlain, K, pack, unpack, json, text, utf8, CHUNK } from './link.js'
+import { phoneHello, phoneFinish, newKey, splitCode, normCode, formatCode, plainFrame, readPlain, K, pack, unpack, json, text, utf8, CHUNK, WINDOW, more, granter } from './link.js'
 import * as offline from './offline.js'
 
 const $ = (id) => document.getElementById(id)
@@ -590,34 +590,130 @@ window.bridgeTunnel = (rid, { m, u, h, body }) => {
     postMessage: (x) => native.post({ type: 'res', id: rid, ...(x.chunk ? { chunk: b64(new Uint8Array(x.chunk)) } : x) }),
     set onmessage(fn) { cancels.set(rid, () => fn({ data: { cancel: true } })) },
   }
-  tunnel({ m, u, h, body: body ? unb64(body).buffer : null }, port)
+  const req = { m, u, h: h || [], body: body ? unb64(body).buffer : null }
+  ;(async () => { if (!(await fromBlocks(req, port))) tunnel(req, port) })()
 }
 window.bridgeCancel = (rid) => { cancels.get(rid)?.(); cancels.delete(rid) }
 
-async function tunnel({ m, u, h, body }, port) {
+// The iPhone app's videos and sounds. WebKit asks the app for one a few kilobytes at a time (each
+// frame of a video on its own), and each would be a trip to your computer and back, hundreds a
+// minute. So a part of a file it asks for is read here a block at a time (and the next block ahead
+// of time), and the small asks are answered from the blocks. A few are kept, for a little while.
+const BLOCK = 1024 * 1024
+const KEPT_BLOCKS = 8
+const BLOCK_SECONDS = 30
+const blocks = new Map() // `${u} ${i}` -> { at, p: Promise<{ head, body, total, tag }> }, oldest first
+const header = (h, name) => (h || []).find(([k]) => String(k).toLowerCase() === name)?.[1] || ''
+// A block, read in here: { head, body }. Anything but the part asked for (the whole file, from a
+// computer that doesn't answer in parts) is stopped at once, not read in.
+const fetchAll = (req) => new Promise((resolve, reject) => {
+  let head = null
+  let stop = null
+  let n = 0
+  const parts = []
+  const no = (why) => { stop?.({ data: { cancel: true } }); reject(new Error(why)) }
+  tunnel(req, {
+    postMessage: (x) => {
+      if (x.head) { head = x.head; if (head.s !== 206) no('not in parts') }
+      else if (x.chunk) { parts.push(new Uint8Array(x.chunk)); n += x.chunk.byteLength; if (n > BLOCK) no('too much') }
+      else if (x.end) {
+        const body = new Uint8Array(n)
+        let o = 0
+        for (const p of parts) { body.set(p, o); o += p.byteLength }
+        resolve({ head, body })
+      } else if (x.error) reject(new Error(x.error))
+    },
+    set onmessage(fn) { stop = fn },
+  })
+})
+function block({ u, h }, i) {
+  const key = `${u} ${i}`
+  const had = blocks.get(key)
+  blocks.delete(key)
+  if (had && Date.now() - had.at < BLOCK_SECONDS * 1000) { blocks.set(key, had); return had.p }
+  const asks = h.filter(([k]) => !/^(range|if-range)$/i.test(k)).concat([['Range', `bytes=${i * BLOCK}-${(i + 1) * BLOCK - 1}`]])
+  const p = fetchAll({ m: 'GET', u, h: asks }).then(({ head, body }) => {
+    const cr = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(header(head?.h, 'content-range'))
+    if (head?.s !== 206 || !cr || Number(cr[1]) !== i * BLOCK) throw new Error('not in parts')
+    return { head, body, total: Number(cr[3]), tag: header(head.h, 'etag') }
+  })
+  blocks.set(key, { at: Date.now(), p })
+  p.catch(() => { if (blocks.get(key)?.p === p) blocks.delete(key) })
+  while (blocks.size > KEPT_BLOCKS) blocks.delete(blocks.keys().next().value)
+  return p
+}
+// True when it answered; false for anything it doesn't take (no range, one open to the end, a big
+// one, a file that doesn't come in parts), which goes over the link as it is.
+async function fromBlocks(req, port) {
+  const r = req.m === 'GET' && /^bytes=(\d+)-(\d+)$/.exec(header(req.h, 'range'))
+  if (!r) return false
+  const a = Number(r[1])
+  if (Number(r[2]) < a || Number(r[2]) - a >= 2 * BLOCK) return false
+  let cancelled = false
+  port.onmessage = (x) => { if (x.data?.cancel) cancelled = true }
+  let parts
+  try {
+    const first = await block(req, Math.floor(a / BLOCK))
+    if (a >= first.total) return false // past the end: the computer says so
+    const b = Math.min(Number(r[2]), first.total - 1)
+    const last = Math.floor(b / BLOCK)
+    parts = [first]
+    for (let i = Math.floor(a / BLOCK) + 1; i <= last; i++) parts.push(await block(req, i))
+    // The file changed while it was being read: start over from the computer.
+    if (parts.some((x) => x.tag !== first.tag || x.total !== first.total)) { for (const k of [...blocks.keys()]) if (k.startsWith(`${req.u} `)) blocks.delete(k); return false }
+    if (cancelled) return true
+    const out = new Uint8Array(b - a + 1)
+    let o = 0
+    for (const [k, x] of parts.entries()) {
+      const from = k === 0 ? a % BLOCK : 0
+      const piece = x.body.subarray(from, Math.min(x.body.byteLength, from + out.byteLength - o))
+      out.set(piece, o)
+      o += piece.byteLength
+    }
+    const keep = ['content-type', 'etag', 'last-modified', 'cache-control'].map((n) => [n, header(first.head.h, n)]).filter(([, v]) => v)
+    port.postMessage({ head: { s: 206, h: [...keep, ['accept-ranges', 'bytes'], ['content-range', `bytes ${a}-${b}/${first.total}`], ['content-length', String(out.byteLength)]] } })
+    port.postMessage({ chunk: out.buffer }, [out.buffer])
+    port.postMessage({ end: true })
+    // The next block, before it's asked for.
+    if ((last + 1) * BLOCK < first.total) block(req, last + 1).catch(() => {})
+    return true
+  } catch {
+    return false
+  }
+}
+
+// `acks`: the reader says how much of the answer it has taken in ({ ack: n }, the service worker
+// does), and only that much more is asked of the computer. Without it (the iPhone app, which
+// hands each piece straight to WebKit), what came is given back as it comes.
+async function tunnel({ m, u, h, body, acks }, port) {
   let id = 0
   let cancelled = false
-  port.onmessage = (x) => { if (x.data?.cancel) { cancelled = true; streams.delete(id); send(K.CANCEL, id).catch(() => {}) } }
+  port.onmessage = (x) => {
+    if (x.data?.cancel) { cancelled = true; streams.delete(id); send(K.CANCEL, id).catch(() => {}) }
+    else if (x.data?.ack) streams.get(id)?.onAck?.(x.data.ack)
+  }
   // A read the link dropped before its answer began goes again, once, on the next link: the app
   // waits a moment longer rather than see it fail.
   for (let tries = m === 'GET' ? 2 : 1; tries > 0; tries--) {
     try { await ready() } catch (err) { whileAway({ m, u, body }, port, err.message).catch((e) => port.postMessage({ error: e.message })); return }
     if (cancelled) return
     id = nextId++
-    if (!(await relayed(id, { m, u, h, body }, port, tries > 1, () => cancelled))) return
+    if (!(await relayed(id, { m, u, h, body }, port, tries > 1, () => cancelled, !!acks))) return
   }
 }
 
 // One go at a request over the link. True when the link dropped before any of the answer came and
 // `again` says it may go again.
-function relayed(id, { m, u, h, body }, port, again, cancelled) {
+function relayed(id, { m, u, h, body }, port, again, cancelled, acks) {
   return new Promise((resolve) => {
     let keep = null // what this phone keeps of the answer, for when the computer is offline
     let packed = null // the answer comes compressed: unpacked here, as it comes
     let headed = false
     let over = false
+    // What the reader took in goes back to the computer, so no more than WINDOW is ever on its way.
+    const grant = granter((n) => { if (streams.has(id)) send(K.MORE, id, more(n)).catch(() => {}) })
     const out = {
-      chunk: (c) => { keep?.chunk(c); if (!cancelled()) port.postMessage({ chunk: c.buffer }, [c.buffer]) },
+      chunk: (c) => { keep?.chunk(c); const n = c.byteLength; if (!cancelled()) port.postMessage({ chunk: c.buffer }, [c.buffer]); if (!acks && !z.z) grant(n) },
       end: () => { keep?.end(); port.postMessage({ end: true }) },
     }
     const failed = (msg, lost) => {
@@ -645,12 +741,14 @@ function relayed(id, { m, u, h, body }, port, again, cancelled) {
       onEnd: () => { over = true; if (packed) packed.end(); else out.end() },
       onError: (msg) => failed(msg),
       onLost: (msg) => failed(msg, true),
+      onAck: (n) => { if (!z.z) grant(n) },
     })
+    // The app's own files (the same for everyone who has this version, nothing of yours) come
+    // compressed, if this browser can unpack them: a third of the size. Nothing else is. They're
+    // small, and come whole; anything else comes WINDOW at a time.
+    const z = gzip && m === 'GET' && u.startsWith('/assets/') ? { z: 'gzip' } : { w: WINDOW }
     ;(async () => {
       const b = body ? new Uint8Array(body) : null
-      // The app's own files (the same for everyone who has this version, nothing of yours) come
-      // compressed, if this browser can unpack them: a third of the size. Nothing else is.
-      const z = gzip && m === 'GET' && u.startsWith('/assets/') ? { z: 'gzip' } : {}
       await send(K.REQ, id, { m, u, h, body: !!b, ...z })
       if (b) {
         for (let o = 0; o < b.byteLength; o += CHUNK) await send(K.BODY, id, b.subarray(o, o + CHUNK))

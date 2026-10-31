@@ -188,8 +188,22 @@ export async function openNote(me, from, note, dir) {
 
 // ---------- what goes inside: requests, responses and sockets ----------
 // [kind][stream id, 4 bytes][body]. JSON bodies for headers; raw bytes for content.
-export const K = { REQ: 1, BODY: 2, END: 3, HEAD: 4, ERR: 5, CANCEL: 6, WS_OPEN: 7, WS_MSG: 8, WS_CLOSE: 9, WS_OPENED: 10, PING: 11, PONG: 12 }
+export const K = { REQ: 1, BODY: 2, END: 3, HEAD: 4, ERR: 5, CANCEL: 6, WS_OPEN: 7, WS_MSG: 8, WS_CLOSE: 9, WS_OPENED: 10, PING: 11, PONG: 12, MORE: 13 }
 export const CHUNK = 192 * 1024
+// An answer comes no faster than whoever asked takes it in (a video that's paused, a download to a
+// slow disk), so a big one never piles up in memory on the way. A request says how much may be on
+// its way at once (w: WINDOW); as the asker's reader takes it in, the asker gives that much back
+// (MORE, with 4 bytes: how much). An end that doesn't know MORE leaves w out, or ignores it, and
+// answers come as fast as they can, as before.
+export const WINDOW = 512 * 1024
+export const GRANT = 128 * 1024
+export const more = (n) => { const b = new Uint8Array(4); new DataView(b.buffer).setUint32(0, n); return b }
+export const moreOf = (body) => (body.byteLength >= 4 ? new DataView(body.buffer, body.byteOffset, 4).getUint32(0) : 0)
+// The asker's side: counts what its reader took in and gives it back GRANT at a time.
+export function granter(give) {
+  let owed = 0
+  return (n) => { owed += n; if (owed >= GRANT) { give(owed); owed = 0 } }
+}
 export function pack(kind, id, body) {
   const b = body == null ? new Uint8Array(0) : body instanceof Uint8Array ? body : body instanceof ArrayBuffer ? new Uint8Array(body) : enc.encode(JSON.stringify(body))
   const out = new Uint8Array(5 + b.byteLength)

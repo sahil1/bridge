@@ -37,7 +37,7 @@ import { dataFile, ensureDir, ROOT, IS_MAC, IS_WIN, nodeShimDir } from './paths.
 import { hostedBase } from './hosted.js'
 import { loginPath, which } from './agents.js'
 import { bundle } from '../relay/build.js'
-import { computerWelcome, newPairCode, splitCode, formatCode, plainFrame, readPlain, b64u, boxId, K, pack, unpack, json, utf8, CHUNK } from '../relay/web/link.js'
+import { computerWelcome, newPairCode, splitCode, formatCode, plainFrame, readPlain, b64u, boxId, K, pack, unpack, json, utf8, CHUNK, moreOf } from '../relay/web/link.js'
 import * as inbox from './inbox.js'
 
 const FILE = dataFile('relay.json')
@@ -268,6 +268,14 @@ const toRelay = (op, id, payload) => {
 const toRelayText = (obj) => { if (link?.readyState === 1) link.send(JSON.stringify(obj)) }
 // Big answers (a picture, a PDF) go out in pieces; wait while the connection is backed up.
 const drained = async () => { while (link && link.bufferedAmount > 4 * 1024 * 1024) await new Promise((r) => setTimeout(r, 20)) }
+// The rest of a long answer (a video, a download) waits for the connection to be nearly clear
+// before each piece, so what else the phone asks meanwhile (a chat, a terminal) goes ahead of it
+// rather than behind megabytes of it.
+const BULK = 256 * 1024
+const clear = async (conn) => { while (link && link.bufferedAmount > BULK && conn.session) await new Promise((r) => setTimeout(r, 10)) }
+// An answer whose reader stopped taking it in (a video left paused) is let go after this long, so a
+// phone that went away without a word doesn't keep a file open here for good.
+const IDLE_MS = Number(process.env.BRIDGE_LINK_IDLE_MS) || 10 * 60000
 
 // ---------- one phone ----------
 const DROP = new Set(['host', 'connection', 'origin', 'referer', 'cookie', 'content-length', 'accept-encoding', 'upgrade', 'keep-alive', 'transfer-encoding'])
@@ -320,6 +328,7 @@ class Conn {
     if (kind === K.BODY) { this.streams.get(id)?.body?.push(Buffer.from(body)); return }
     if (kind === K.END) { const s = this.streams.get(id); if (s?.run) s.run(); return }
     if (kind === K.CANCEL) { this.streams.get(id)?.abort?.abort(); this.streams.delete(id); return }
+    if (kind === K.MORE) { this.streams.get(id)?.more?.(moreOf(body)); return }
     if (kind === K.WS_OPEN) return this.socket(id, json(body))
     if (kind === K.WS_MSG) { const s = this.streams.get(id)?.ws; if (s?.readyState === 1) s.send(body[0] === 1 ? Buffer.from(body.subarray(1)).toString('utf8') : Buffer.from(body.subarray(1))); return }
     if (kind === K.WS_CLOSE) { const s = this.streams.get(id); this.streams.delete(id); try { s?.ws?.close() } catch { /* closed */ } }
@@ -388,12 +397,27 @@ class Conn {
   }
 
   // A request from the phone, run against this server.
-  request(sid, { m, u, h, body, z }) {
+  request(sid, { m, u, h, body, z, w }) {
     const target = new URL(String(u || '/'), base)
     if (target.origin !== new URL(base).origin) return this.send(K.ERR, sid, utf8('Not allowed'))
     const abort = new AbortController()
     const s = { abort, body: body ? [] : null }
     this.streams.set(sid, s)
+    // How much of the answer may be on its way (w, then MORE as the phone takes it in). The file is
+    // read only as it goes, so none of it waits here in memory either.
+    let credit = Number(w) > 0 ? Number(w) : Infinity
+    let wake = null
+    s.more = (n) => { credit += n; wake?.() }
+    abort.signal.addEventListener('abort', () => wake?.())
+    const room = async () => {
+      while (credit <= 0 && !abort.signal.aborted) {
+        const idle = setTimeout(() => { s.idle = true; abort.abort() }, IDLE_MS)
+        await new Promise((r) => { wake = r })
+        clearTimeout(idle)
+        wake = null
+      }
+      return credit
+    }
     s.run = async () => {
       try {
         // Its own x-bridge-relay goes, in any capitals: fetch would join it to the real one below.
@@ -405,17 +429,30 @@ class Conn {
         // the relay sees how big each record is, and compressed, the size of something of yours
         // would say a little about what's in it.
         const zip = z === 'gzip' && (m || 'GET') === 'GET' && target.pathname.startsWith('/assets/') && res.status === 200 && !!res.body && !res.headers.get('content-encoding') && PACKS.test(res.headers.get('content-type') || '')
-        await this.send(K.HEAD, sid, { s: res.status, h: [...res.headers].filter(([k]) => !DROP_BACK.has(k)), ...(zip ? { z: 'gzip' } : {}) })
+        // Its length too when it goes as it is: a download's progress, and a video's player, know
+        // how much is coming.
+        const whole = !zip && !res.headers.get('content-encoding')
+        await this.send(K.HEAD, sid, { s: res.status, h: [...res.headers].filter(([k]) => !DROP_BACK.has(k) || (k === 'content-length' && whole)), ...(zip ? { z: 'gzip' } : {}) })
         if (res.body) {
+          let sent = 0
           for await (const chunk of zip ? pipeline(Readable.fromWeb(res.body), zlib.createGzip(), () => {}) : res.body) {
             if (abort.signal.aborted) break
-            for (let o = 0; o < chunk.byteLength; o += CHUNK) await this.send(K.BODY, sid, chunk.subarray(o, o + CHUNK))
+            for (let o = 0; o < chunk.byteLength && !abort.signal.aborted;) {
+              const n = Math.min(CHUNK, chunk.byteLength - o, await room())
+              if (abort.signal.aborted) break
+              credit -= n
+              if (sent > BULK) await clear(this)
+              await this.send(K.BODY, sid, chunk.subarray(o, o + n))
+              o += n
+              sent += n
+            }
           }
         }
         if (!abort.signal.aborted) await this.send(K.END, sid)
       } catch (e) {
         if (!abort.signal.aborted) await this.send(K.ERR, sid, utf8(e.message))
       }
+      if (s.idle) await this.send(K.ERR, sid, utf8('Stopped waiting for this to be read')).catch(() => {})
       this.streams.delete(sid)
     }
     if (!body) s.run()
