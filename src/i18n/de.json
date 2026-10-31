@@ -23,6 +23,7 @@
   "A call started": "Ein Anruf hat begonnen",
   "A copy is kept with the meeting. Or drop them on it.": "Eine Kopie wird beim Meeting gespeichert. Oder zieh sie darauf.",
   "A copy on a new branch, so it can't clash with other agents.": "Eine Kopie auf einem neuen Branch, damit er anderen Agenten nicht in die Quere kommt.",
+  "A key was still held down, so it wasn't pasted. Let go of the keys once you've said it.": "Eine Taste war noch gedrückt, deshalb wurde nichts eingefügt. Lass die Tasten los, sobald du fertig gesprochen hast.",
   "A link or a file's path": "Ein Link oder ein Dateipfad",
   "A model name": "Ein Modellname",
   "A model name, like claude-sonnet-5-5": "Ein Modellname, z. B. claude-sonnet-5-5",

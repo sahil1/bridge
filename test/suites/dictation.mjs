@@ -8,7 +8,8 @@
 // hook at all. Pasting where you're typing: where it can work (simulated per system and desktop),
 // telling a terminal on X11, Windows' and X11's paste with a stand-in clipboard and hook (the text on
 // the clipboard as Ctrl+V is pressed, what was there put back unless something was copied meanwhile,
-// Ctrl+Shift+V in a terminal), the Mac helper's answers, wtype; and the desktop app's side with a Mac
+// Ctrl+Shift+V in a terminal, Ctrl+V only once Ctrl, Alt and Shift are let go, and not at all while one
+// stays down), the Mac helper's answers, wtype; and the desktop app's side with a Mac
 // simulated (stand-in Electron and helper): nothing asked at start, Accessibility looked up without
 // asking, asked once when picked, then System Settings; the dictation window's text pasted into the
 // app the key was pressed in, refused without Accessibility or with the setting off. On a Mac:
@@ -225,6 +226,50 @@ const fakeClipboard = (init = {}) => {
   ok(taps[0] === '29,42' && empty.readText() === '', 'a terminal: Ctrl+Shift+V; a clipboard that was empty is empty again', taps)
   const kept = fakeClipboard({ text: 'kept' })
   ok((await desk.keyPaste({ text: 'x', clipboard: kept, hook: null })).error === 'failed' && kept.readText() === 'kept', 'no keyboard hook: nothing pasted, the clipboard untouched')
+}
+{
+  // Windows/X11: Ctrl+V waits until no modifier is held (the key's own Ctrl and Alt, still down after
+  // its Space was let go, or Shift pressed meanwhile), and isn't pressed at all if one stays down.
+  const gs = fakeShortcuts()
+  const hook = Object.assign(fakeHook(), { taps: [] })
+  hook.keyTap = (k, mods) => hook.taps.push(mods.join())
+  const src = desk.hookSource({ accel: 'Control+Alt+Space', codes: hk, globalShortcut: gs, hook, modOf: keys.hookMod, linger: 400, onDown: () => {}, onUp: () => {} })
+  const ready = (ms) => () => src.modsUp?.(ms) ?? true
+  gs.on.get('Control+Alt+Space')()
+  hook.emit('keyup', { keycode: 0x39 }) // Space let go first
+  const listening = hook.running
+  const cb = fakeClipboard({ text: 'old' })
+  const pasting = desk.keyPaste({ text: 'Dictated.', clipboard: cb, hook, wait: 10, ready: ready(1500) })
+  await sleep(60)
+  const early = [hook.taps.length, cb.readText()]
+  hook.emit('keyup', { keycode: 0x1d }) // Ctrl
+  await sleep(40)
+  const mid = hook.taps.length
+  hook.emit('keyup', { keycode: 0x38 }) // Alt
+  const r = await pasting
+  ok(listening && early.join() === '0,old' && mid === 0 && hook.taps.join('|') === '29' && r.pasted && !hook.running, 'Windows/X11: Ctrl and Alt still down after the key\'s let-go: Ctrl+V waits (the clipboard untouched) until both are up, then the hook stops listening', { listening, early, mid, taps: hook.taps, r })
+  gs.on.get('Control+Alt+Space')()
+  hook.emit('keyup', { keycode: 0x39 })
+  hook.emit('keydown', { keycode: 0x2a }) // Shift, pressed meanwhile
+  hook.emit('keyup', { keycode: 0x1d }); hook.emit('keyup', { keycode: 0x38 })
+  const more = desk.keyPaste({ text: 'Dictated.', clipboard: fakeClipboard(), hook, wait: 10, ready: ready(1500) })
+  await sleep(60)
+  const beforeShift = hook.taps.length
+  hook.emit('keyup', { keycode: 0x2a })
+  ok(beforeShift === 1 && (await more).pasted && hook.taps.length === 2, 'a modifier pressed meanwhile (Shift) is waited for too', { beforeShift, taps: hook.taps })
+  gs.on.get('Control+Alt+Space')()
+  hook.emit('keyup', { keycode: 0x39 })
+  hook.emit('keyup', { keycode: 0x38 }) // Ctrl stays down
+  const cb2 = fakeClipboard({ text: 'kept' })
+  const t0 = Date.now()
+  const r2 = await desk.keyPaste({ text: 'Dictated.', clipboard: cb2, hook, wait: 10, ready: ready(300) })
+  ok(r2.error === 'held' && hook.taps.length === 2 && cb2.readText() === 'kept' && Date.now() - t0 >= 250 && !hook.running, 'still held after the wait: not pasted (held), the clipboard untouched, no key let go for you, and the hook stops listening', { r2, taps: hook.taps })
+  gs.on.get('Control+Alt+Space')()
+  hook.emit('keyup', { keycode: 0x39 })
+  const lingering = hook.running
+  await sleep(500)
+  ok(lingering && !hook.running, 'a modifier never heard let go: the hook stops listening anyway, a moment after the key\'s let-go', { lingering, running: hook.running })
+  src.stop()
 }
 {
   const calls = []

@@ -23,6 +23,7 @@
   "A call started": "通話が始まりました",
   "A copy is kept with the meeting. Or drop them on it.": "コピーがミーティングと一緒に保存されます。ミーティングにドロップしても追加できます。",
   "A copy on a new branch, so it can't clash with other agents.": "新しいブランチ上のコピーなので、ほかのエージェントと競合しません。",
+  "A key was still held down, so it wasn't pasted. Let go of the keys once you've said it.": "キーが押されたままだったため、貼り付けませんでした。話し終えたらキーを離してください。",
   "A link or a file's path": "リンクまたはファイルのパス",
   "A model name": "モデル名",
   "A model name, like claude-sonnet-5-5": "モデル名（例：claude-sonnet-5-5）",

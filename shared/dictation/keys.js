@@ -90,6 +90,10 @@ const HOOK_CODE = {
   ';': 0x27, '=': 0x0d, ',': 0x33, '-': 0x0c, '.': 0x34, '/': 0x35, '`': 0x29, '[': 0x1a, '\\': 0x2b, ']': 0x1b, "'": 0x28,
 }
 const HOOK_MODS = { ctrl: [0x1d, 0x0e1d], alt: [0x38, 0x0e38], shift: [0x2a, 0x36], meta: [0x0e5b, 0x0e5c] }
+// Which modifier a hook code is (either side), or null: the desktop app waits for them all to be let
+// go before it pastes.
+const MOD_OF_HOOK = Object.fromEntries(Object.entries(HOOK_MODS).flatMap(([m, codes]) => codes.map((c) => [c, m])))
+export const hookMod = (code) => MOD_OF_HOOK[code] || null
 export function hookKey(accel, platform) {
   const k = parseKey(accel, platform)
   if (!k || HOOK_CODE[k.key] == null) return null

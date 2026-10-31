@@ -8,8 +8,8 @@
 //   a Mac          native/bridgekeys (Carbon's hotkeys): pressed and let go, no prompt
 //   Windows, X11   Electron's globalShortcut for the press (it keeps the key from the app in front,
 //                  and fails when another app has it), and uiohook-napi's keyboard hook for the
-//                  let-go, started at the press and stopped at the let-go, so nothing watches the
-//                  keyboard the rest of the time. Never on a Mac, where it asks for Accessibility.
+//                  let-go, started at the press and stopped once the key and its modifiers (Ctrl,
+//                  Alt, Shift, Win) are let go, so nothing watches the keyboard the rest of the time. Never on a Mac, where it asks for Accessibility.
 //   Wayland        globalShortcut through the desktop's portal: a press only, so a tap starts
 //                  listening and the next stops it (GNOME asks once; sway has no portal: none)
 // With one of Bridge AI's windows in front, the key goes to that page (as if pressed there);
@@ -62,25 +62,54 @@ function helperSource({ bin, code, mods, onDown, onUp, onState, onExit, spawnFn 
 // globalShortcut for the press, the hook for the let-go. codes: shared/dictation/keys.js hookKey().
 // X11 repeats a held key as a let-go and a press at the same moment, so a let-go only counts once
 // no press follows it within `settle` ms.
-function hookSource({ accel, codes, globalShortcut, hook, onDown, onUp, settle = 0, now = Date.now }) {
+//
+// modOf(code) (keys.js hookMod) names a modifier key: the hook then also follows Ctrl, Alt, Shift and
+// Win/Super, and keeps listening after the let-go until they're up too (`linger` ms at most), since
+// a paste pressed while one is still held would land as Ctrl+Alt+V. modsUp(ms): whether none is held,
+// waiting up to `ms` for the last to be let go. Only modifiers count; other keys aren't looked at.
+function hookSource({ accel, codes, globalShortcut, hook, onDown, onUp, settle = 0, now = Date.now, modOf = null, linger = 10000 }) {
   let down = false
   let last = 0
   let watching = false
   let pending = null
+  const held = new Set() // modifiers held down now: ctrl, alt, shift, meta
+  let waiters = []
+  let lingering = null
   const part = (c) => c === codes.key || codes.mods.includes(c)
-  const end = () => { pending = null; down = false; unwatch(); onUp(now()) }
-  const keyup = (e) => {
-    if (!down || !part(e.keycode)) return
-    clearTimeout(pending)
-    if (settle) pending = setTimeout(end, settle); else end()
+  const modsDone = () => {
+    if (held.size) return
+    for (const w of waiters) w(true)
+    waiters = []
+    if (!down && !pending) unwatch()
   }
-  const keydown = (e) => { if (pending && e.keycode === codes.key) { clearTimeout(pending); pending = null } }
+  const end = () => {
+    pending = null
+    down = false
+    // The key let go with a modifier still down (Space first, say): listening on until it's up too.
+    if (modOf && held.size) { clearTimeout(lingering); lingering = setTimeout(() => { if (!down) unwatch() }, linger) } else unwatch()
+    onUp(now())
+  }
+  const keyup = (e) => {
+    const m = modOf?.(e.keycode)
+    if (m) held.delete(m)
+    if (down && part(e.keycode)) {
+      clearTimeout(pending)
+      if (settle) pending = setTimeout(() => { end(); modsDone() }, settle); else end()
+    }
+    if (m && !down && !pending) modsDone()
+  }
+  const keydown = (e) => {
+    const m = modOf?.(e.keycode)
+    if (m) held.add(m)
+    if (pending && e.keycode === codes.key) { clearTimeout(pending); pending = null }
+  }
   const watch = () => {
     if (watching) return true
     try { hook.on('keyup', keyup); hook.on('keydown', keydown); hook.start(); watching = true } catch { hook.off?.('keyup', keyup); hook.off?.('keydown', keydown) }
     return watching
   }
   function unwatch() {
+    clearTimeout(lingering)
     if (!watching) return
     watching = false
     hook.off('keyup', keyup)
@@ -94,11 +123,26 @@ function hookSource({ accel, codes, globalShortcut, hook, onDown, onUp, settle =
     if (down) end()
     down = true
     last = t
+    // Pressed, so its modifiers are down (globalShortcut only fires for exactly those).
+    held.clear()
+    if (modOf) for (const c of codes.mods) { const m = modOf(c); if (m) held.add(m) }
     onDown(t)
     // No hook: the let-go can't be heard, so it's a tap (the page keeps listening until the next).
-    if (!watch()) { down = false; onUp(t) }
+    if (!watch()) { down = false; held.clear(); onUp(t) }
   })
-  return { ok, stop() { clearTimeout(pending); unwatch(); if (ok) globalShortcut.unregister(accel) } }
+  return {
+    ok,
+    modsUp(ms = 1500) {
+      if (!held.size) return Promise.resolve(true)
+      if (!watching && !watch()) return Promise.resolve(true) // nothing to hear them with
+      return new Promise((resolve) => {
+        const done = (v) => { clearTimeout(timer); resolve(v) }
+        const timer = setTimeout(() => { waiters = waiters.filter((w) => w !== done); if (!down) unwatch(); resolve(false) }, ms)
+        waiters.push(done)
+      })
+    },
+    stop() { clearTimeout(pending); for (const w of waiters) w(false); waiters = []; unwatch(); if (ok) globalShortcut.unregister(accel) },
+  }
 }
 
 // globalShortcut alone: each press is a tap (down and up at once).
@@ -109,7 +153,8 @@ function shortcutSource({ accel, globalShortcut, onDown, onUp, now = Date.now })
 
 // ---------- Pasting where you're typing ----------
 // Each answers { pasted: true, read, restored } or { error }: secure (a password field), accessibility
-// (not allowed yet), moved (another app in front now), focus (one of Bridge AI's windows is), failed.
+// (not allowed yet), moved (another app in front now), focus (one of Bridge AI's windows is), held (a
+// modifier still held down), failed.
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 // A Mac: native/bridgekeys paste, the text on its stdin. pid: the app in front when the key was pressed.
@@ -146,8 +191,12 @@ function savedClipboard(c) {
   return s
 }
 const putBack = (c, s) => { if (Object.keys(s).length) c.write(s); else c.clear() }
-async function keyPaste({ text, clipboard, hook, terminal = false, wait = 600 }) {
+// ready(): whether no modifier is held (hookSource's modsUp), waited for first: Ctrl+V pressed while
+// you still hold Alt would be Ctrl+Alt+V. Still held, nothing's pasted (held), rather than pretending
+// to let go of a key you're holding.
+async function keyPaste({ text, clipboard, hook, terminal = false, wait = 600, ready = null }) {
   if (!hook?.keyTap) return { error: 'failed' }
+  if (ready && !(await ready())) return { error: 'held' }
   const saved = savedClipboard(clipboard)
   clipboard.writeText(text)
   try { hook.keyTap(KEY.V, terminal ? [KEY.Ctrl, KEY.Shift] : [KEY.Ctrl]) } catch { putBack(clipboard, saved); return { error: 'failed' } }
@@ -305,7 +354,8 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, tellMain, askA
     if (BrowserWindow.getFocusedWindow()) return { error: 'focus' }
     if (p.via === 'wtype') return typeIn({ text })
     const terminal = process.platform === 'linux' && lib.isTerminal(await activeClass())
-    return keyPaste({ text, clipboard, hook: loadHook(), terminal })
+    const keys = source
+    return keyPaste({ text, clipboard, hook: loadHook(), terminal, ready: keys?.modsUp ? () => keys.modsUp(1500) : null })
   }
   ipcMain.handle('bridge:hud-paste', (e, text) => (fromHud(e) && typeof text === 'string' && text ? pasteHere(text.slice(0, 100_000)) : { error: 'off' }))
   ipcMain.handle('bridge:paste-access', (e) => (trusted(e) ? (pasteStatus().allowed ? 'ok' : 'denied') : null))
@@ -360,7 +410,7 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, tellMain, askA
       return status
     }
     const accel = key
-    if (g.via === 'uiohook') source = hookSource({ accel, codes: lib.hookKey(key, process.platform), globalShortcut, hook: loadHook(), settle: process.platform === 'linux' ? 40 : 0, ...handlers })
+    if (g.via === 'uiohook') source = hookSource({ accel, codes: lib.hookKey(key, process.platform), globalShortcut, hook: loadHook(), settle: process.platform === 'linux' ? 40 : 0, modOf: lib.hookMod, ...handlers })
     else source = shortcutSource({ accel, globalShortcut, ...handlers })
     if (source.ok) status.active = true
     else { source = null; status.taken = 'app' }
