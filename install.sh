@@ -103,11 +103,22 @@ esac
 
 # ---------- macOS ----------
 
-# From 3.4.0 the app needs macOS 13 (Ventura) or later, as its Electron does (BRIDGE_VERSION, for an
-# older release, skips this).
+# The app needs macOS 14 (Sonoma) or later. 3.7.1 is the last version that opens on macOS 13
+# (Ventura): there, it's what's installed, and an update from it to a newer version stops before
+# anything changes, saying why. BRIDGE_VERSION, for an older release, skips the rest.
+LAST13=v3.7.1
 MACOS="$(sw_vers -productVersion 2>/dev/null || echo 0)"
-if [ -z "${BRIDGE_VERSION:-}" ] && ! [ "${BRIDGE_MACOS:-${MACOS%%.*}}" -ge 13 ] 2>/dev/null; then
-  fail "Bridge AI needs macOS 13 (Ventura) or later, and this Mac has macOS $MACOS. Update macOS in System Settings › General › Software Update, then run this again."
+MAJOR="${BRIDGE_MACOS:-${MACOS%%.*}}"
+# Whether version $1 (v3.8.0 or 3.8.0) is later than $2.
+later() { awk -v a="${1#v}" -v b="${2#v}" 'BEGIN { split(a, x, "."); split(b, y, "."); for (i = 1; i <= 3; i++) if (x[i] + 0 != y[i] + 0) exit !(x[i] + 0 > y[i] + 0); exit 1 }'; }
+if [ "$MAJOR" = 13 ] && { [ -z "${BRIDGE_VERSION:-}" ] || later "$BRIDGE_VERSION" "$LAST13"; }; then
+  if [ -n "${BRIDGE_VERSION:-}" ]; then WANTED="Bridge AI ${BRIDGE_VERSION#v}"; else WANTED="The newest Bridge AI"; fi
+  NEEDS="$WANTED needs macOS 14 (Sonoma) or later, and this Mac has macOS $MACOS."
+  say "$NEEDS"
+  BRIDGE_VERSION="$LAST13"
+fi
+if [ -z "${BRIDGE_VERSION:-}" ] && ! [ "$MAJOR" -ge 14 ] 2>/dev/null; then
+  fail "Bridge AI needs macOS 14 (Sonoma) or later, and this Mac has macOS $MACOS. Update macOS in System Settings › General › Software Update, then run this again."
 fi
 
 case "$(uname -m)" in
@@ -124,6 +135,20 @@ case "${BRIDGE_APP_DIR:-}" in */AppTranslocation/*) BRIDGE_APP_DIR="" ;; esac
 if [ -n "${BRIDGE_APP_DIR:-}" ]; then DEST="$BRIDGE_APP_DIR"
 elif [ -w /Applications ]; then DEST=/Applications
 else DEST="$HOME/Applications"
+fi
+
+# On macOS 13, 3.7.1 in place of a version the Mac can't open. When it's already there (its Update
+# ran this, or the installer was run again), nothing changes: said here, and in a window of macOS's
+# own when there's no terminal to say it in (the app's Update).
+if [ -n "${NEEDS:-}" ]; then
+  HAVE="$(defaults read "$DEST/$APP/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null || echo '')"
+  if [ -n "$HAVE" ] && ! later "$LAST13" "$HAVE"; then
+    STAYS="Bridge AI $HAVE, the last version for macOS 13, stays as it is and keeps working. Newer versions come with macOS 14 or later (System Settings › General › Software Update)."
+    say "$STAYS"
+    [ -t 1 ] || osascript -e 'on run argv' -e 'display alert (item 1 of argv) message (item 2 of argv)' -e 'end run' "$NEEDS" "$STAYS" >/dev/null 2>&1 || true
+    exit 0
+  fi
+  say "Installing Bridge AI ${LAST13#v}, the last version for macOS 13."
 fi
 mkdir -p "$DEST"
 

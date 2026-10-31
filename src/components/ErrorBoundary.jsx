@@ -133,7 +133,7 @@ function CrashScreen({ name, error, stack, onRetry }) {
             ? (upd.how === 'app'
               ? <button type="button" className="btn primary" onClick={install} disabled={installing}>{installing ? t("Updating… Bridge AI restarts when it's done") : t('Update to {version}', { version: upd.latest })}</button>
               : <span className="small">{t('{version} is out. Update from a terminal:', { version: upd.latest })} <code>{upd.command}</code></span>)
-            : <span className="muted small">{upd.latest ? t("You're on the latest version ({version}).", { version: upd.current }) : t('No newer version was found.')} {t('Copy details below and send them, and it can be fixed.')}</span>)}
+            : <span className="muted small">{upd.held ? t('Bridge AI {version} needs macOS {macos}, so this Mac stays on {current}.', { version: upd.latest, macos: upd.held.macos, current: upd.current }) : upd.latest ? t("You're on the latest version ({version}).", { version: upd.current }) : t('No newer version was found.')} {t('Copy details below and send them, and it can be fixed.')}</span>)}
         </div>
         <details className="crash-more">
           <summary>{t('Details')}{ver ? ` · Bridge AI ${ver}` : ''}</summary>

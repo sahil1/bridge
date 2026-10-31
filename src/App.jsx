@@ -600,7 +600,7 @@ function App() {
             <Quiet name="Setting up"><SetupChip /></Quiet>
             <Quiet name="Next meeting"><NextMeetingChip onClick={() => showCard('calendar')} /></Quiet>
             <Quiet name="Usage"><ProviderChip quota={quota.data} primary={primary} onClick={() => showCard('gauge')} onAddAccount={(kind) => setAddAcct({ kind })} /></Quiet>
-            {update.data?.available && <Quiet name="Update"><UpdateChip u={update.data} onDetails={() => setSettings('about')} /></Quiet>}
+            {(update.data?.available || (update.data?.held && upNote.line)) && <Quiet name="Update"><UpdateChip u={update.data} onDetails={() => setSettings('about')} onDone={upNote.hide} /></Quiet>}
             <Quiet name="Restart"><RestartChip fleet={fleet} runtime={conf?.runtime?.name} keep={!!conf?.runtime?.keep} /></Quiet>
             <Quiet name="Weather"><WeatherChip onClick={() => showCard('sun')} /></Quiet>
             <Quiet name="Clock"><Clock /></Quiet>

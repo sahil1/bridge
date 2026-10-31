@@ -3,8 +3,9 @@ import Icon from './Icon.jsx'
 import { api } from '../api.js'
 import { t } from '../i18n/index.js'
 
-// The top bar's Update button: what's new and Update now, without going to Settings.
-export default function UpdateChip({ u, onDetails }) {
+// The top bar's Update button: what's new and Update now, without going to Settings. A version this
+// Mac's macOS can't open (u.held) is said once instead, until OK.
+export default function UpdateChip({ u, onDetails, onDone }) {
   const [open, setOpen] = useState(false)
   const [state, setState] = useState(null) // installing | { error }
   const ref = useRef(null)
@@ -28,6 +29,20 @@ export default function UpdateChip({ u, onDetails }) {
     const [, label = '', text = l.slice(2)] = l.slice(2).match(/^\*\*(.+?):?\*\*:?\s*(.*)$/) || []
     return { label, text: text.replace(/[`*]/g, '').split(/(?<=\.)\s/)[0] }
   })
+  if (u.held) return (
+    <div className="update-wrap" ref={ref}>
+      <button className="top-chip" onClick={() => setOpen((o) => !o)} aria-expanded={open} title={t('Bridge AI {version} needs macOS {macos}', { version: u.latest, macos: u.held.macos })}>
+        <Icon name="info" size={13} /><span className="hide-sm">{t('Newer version')}</span>
+      </button>
+      {open && (
+        <div className="update-pop" role="dialog" aria-label={t('Newer version')}>
+          <div className="update-head"><b>Bridge AI {u.latest}</b><span className="muted small">{t('you have {version}', { version: u.current })}</span></div>
+          <p className="small">{t('It needs macOS {macos} or later, and this Mac has macOS {have}. Bridge AI {current} keeps working as it is; update macOS to get newer versions.', { macos: u.held.macos, have: u.held.have, current: u.current })}</p>
+          <div className="update-acts"><button type="button" className="btn small primary" onClick={() => { setOpen(false); onDone?.() }}>{t('OK')}</button><a className="small" href={u.url} target="_blank" rel="noreferrer">{t("What's new")}</a></div>
+        </div>
+      )}
+    </div>
+  )
   return (
     <div className="update-wrap" ref={ref}>
       <button className="top-chip update-chip" onClick={() => setOpen((o) => !o)} aria-expanded={open} title={t('Bridge AI {latest} is available (you have {current})', { latest: u.latest, current: u.current })}>

@@ -23,7 +23,7 @@ if (process.platform !== 'darwin') { console.log('calltap: macOS only, skipped')
 fs.mkdirSync(out, { recursive: true })
 let failed = false
 // [name, oldest macOS it runs on, extra swiftc flags, optional (its build failing isn't a failure)]
-const TOOLS = [['calltap', '14.2'], ['callwatch', '14.0'], ['bridgeocr', '13.0'], ['bridgespeech', '13.0', ['-parse-as-library'], true], ['bridgecal', '13.0'], ['bridgekeys', '13.0']]
+const TOOLS = [['calltap', '14.2'], ['callwatch', '14.0'], ['bridgeocr', '14.0'], ['bridgespeech', '14.0', ['-parse-as-library'], true], ['bridgecal', '14.0'], ['bridgekeys', '14.0']]
 for (const [name, macos, flags = [], optional = false] of TOOLS.filter(([n]) => !only || n === only)) {
   const src = path.join(ROOT, 'native', `${name}.swift`)
   const parts = []

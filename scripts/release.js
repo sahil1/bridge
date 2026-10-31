@@ -23,11 +23,16 @@ const version = read('package.json')
 const tag = `v${version}`
 if (read('desktop/package.json') !== version) fail(`desktop/package.json is ${read('desktop/package.json')} but package.json is ${version}; set both`)
 
+// The notes end with the oldest macOS the Mac app opens on, in words and as a line GitHub doesn't
+// show, which the update check reads (server/updates.js), so a Mac that can't open this version
+// isn't offered it.
 function notesFor(v) {
   const log = fs.readFileSync(path.join(ROOT, 'CHANGELOG.md'), 'utf8')
   const m = log.match(new RegExp(`^## ${v.replace(/\./g, '\\.')}\\s*\\n([\\s\\S]*?)(?=^## |(?![\\s\\S]))`, 'm'))
   if (!m || !m[1].trim()) fail(`CHANGELOG.md has no section "## ${v}"`)
-  return `${m[1].trim().replace(/^### /gm, '## ')}\n\nChecksums (SHA-256) are in \`SHA256SUMS.txt\`.\n`
+  const mac = JSON.parse(fs.readFileSync(path.join(ROOT, 'desktop', 'package.json'), 'utf8')).build?.mac?.minimumSystemVersion
+  if (!/^\d+(\.\d+)*$/.test(mac || '')) fail('desktop/package.json has no build.mac.minimumSystemVersion')
+  return `${m[1].trim().replace(/^### /gm, '## ')}\n\nThe Mac app needs macOS ${mac.replace(/\.0$/, '')} or later. Checksums (SHA-256) are in \`SHA256SUMS.txt\`.\n\n<!-- macOS ${mac} or later -->\n`
 }
 
 // CI: write the notes, after checking the tag that started the build matches package.json.

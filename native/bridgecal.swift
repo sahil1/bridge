@@ -1,4 +1,4 @@
-// bridgecal: your calendars, through macOS's own calendar store (EventKit). macOS 13 or later.
+// bridgecal: your calendars, through macOS's own calendar store (EventKit). macOS 14 or later.
 //   bridgecal          asks for access the way an app has to now ("Bridge AI would like full access
 //                      to your calendars"), which also puts Bridge AI in System Settings › Privacy &
 //                      Security › Calendars, a list with no + to add it. Prints one word: granted,
@@ -12,7 +12,7 @@
 //                      without notes, link and attendees (the year view). Without full access it
 //                      prints the status word instead and exits 3.
 // The reading used to be icalBuddy's; on current macOS it sees no calendars even with full access.
-//   swiftc -O -target arm64-apple-macos13.0 native/bridgecal.swift -o native/bin/bridgecal
+//   swiftc -O -target arm64-apple-macos14.0 native/bridgecal.swift -o native/bin/bridgecal
 import EventKit
 import Foundation
 
@@ -90,10 +90,6 @@ default: break // not asked yet, or write-only: ask for full access
 let store = EKEventStore()
 let answered = DispatchSemaphore(value: 0)
 var granted = false
-if #available(macOS 14.0, *) {
-  store.requestFullAccessToEvents { ok, _ in granted = ok; answered.signal() }
-} else {
-  store.requestAccess(to: .event) { ok, _ in granted = ok; answered.signal() }
-}
+store.requestFullAccessToEvents { ok, _ in granted = ok; answered.signal() }
 _ = answered.wait(timeout: .now() + 120)
 done(granted ? "granted" : "denied")
