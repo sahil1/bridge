@@ -261,7 +261,7 @@ try {
   n = heardNow()
   await hold(900)
   await sleep(500)
-  ok(heardNow() === n && (await p.locator('.composer.rec, .dict-bar').count()) === 0, 'turned off: the key does nothing')
+  ok(heardNow() === n && (await p.locator('.composer.rec, .dict-dock').count()) === 0, 'turned off: the key does nothing')
   await kit.api('/settings', { dictation: { on: null } }, 'PATCH')
   ok(real(errors).length === 0, 'no page errors', errors)
   await ctx.close()
@@ -502,7 +502,7 @@ try {
     said.push('add a retry to the webhook')
     await key(h, 'down')
     // Agents by their pane (a stand-in's title is its terminal's on Windows, the same for both).
-    ok(!!(await until(async () => (await h.locator('.hud .rec-meter').count()) > 0 && (await h.locator('.hud-to-btn').getAttribute('data-pane').catch(() => '')) === one.paneId, 5000, 100)), 'the dictation window: listening, for the agent you last looked at', await h.locator('.hud').innerText().catch(() => ''))
+    ok(!!(await until(async () => (await h.locator('.hud .dp-listening .dp-wave').count()) > 0 && (await h.locator('.hud-to-btn').getAttribute('data-pane').catch(() => '')) === one.paneId, 5000, 100)), 'the dictation window: listening, for the agent you last looked at', await h.locator('.hud').innerText().catch(() => ''))
     await shot(h, `${tag}dictation-window-listening`)
     await sleep(1300)
     await key(h, 'up')
@@ -539,7 +539,7 @@ try {
     said.push('who is this for')
     await key(h, 'down'); await sleep(1300); await key(h, 'up')
     await until(async () => (await h.locator('.hud-text').count()) > 0, 8000, 100)
-    ok(/pick an agent/.test(await h.locator('.hud-to-btn').innerText()) && await h.locator('.hud button', { hasText: 'Send' }).isDisabled(), 'Ask each time: "pick an agent", and Send waits for one', await h.locator('.hud').innerText())
+    ok(/Pick an agent/.test(await h.locator('.hud-to-btn').innerText()) && await h.locator('.hud button', { hasText: 'Send' }).isDisabled(), 'Ask each time: "pick an agent", and Send waits for one', await h.locator('.hud').innerText())
     await kit.api('/settings', { dictation: { to: null } }, 'PATCH')
     const phases = await h.evaluate(() => window.__hud.phases)
     ok(phases.includes('listening') && phases.includes('result'), 'it tells the desktop app when it listens (Esc is held then) and when it\'s done', phases)
@@ -549,7 +549,7 @@ try {
   {
     // A press from before the window was ready: let go by now, so it listens hands-free.
     const { ctx: hc, p: h } = await hudPage(true)
-    ok(!!(await until(async () => /again when you're done/.test(await h.locator('.hud').innerText().catch(() => '')), 8000, 100)), 'a press from before it was ready: it listens, hands-free', await h.locator('.hud').innerText().catch(() => ''))
+    ok(!!(await until(async () => /again when you're done/.test(await h.locator('.hud .dp-listening').getAttribute('aria-label').catch(() => '')), 8000, 100)), 'a press from before it was ready: it listens, hands-free', await h.locator('.hud').innerText().catch(() => ''))
     await hc.close()
   }
 

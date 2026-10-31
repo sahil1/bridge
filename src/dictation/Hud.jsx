@@ -4,21 +4,27 @@ import { VoiceSetup, MicFix } from '../components/Composer.jsx'
 import { api, settingsChanged } from '../api.js'
 import { store } from '../components/layout.jsx'
 import { keyLabel } from '../../shared/dictation/keys.js'
-import { useDictation, configure, press, release, finish, cancel, dismiss, retry, keysPlatform, dictationKey } from './controller.js'
+import { useDictation, configure, press, release, finish, cancel, dismiss, retry, keysPlatform, dictationKey, amend, forget } from './controller.js'
+import { Morph, Listening, Working, Done } from './Pill.jsx'
 import { t } from '../i18n/index.js'
 import './dictation.css'
 
 // The desktop app's dictation window (?dictate=1, desktop/dictation.js): it shows over whatever app
-// you're in when you press the dictation key there, without taking the keyboard from it. While you
-// talk: the level and who it's for. Then the text, to Send to that agent (the one you last looked at
-// in Bridge AI, or the chief of staff: Settings › Voice), to another (To ▾), to Copy, or to finish
-// in Bridge AI. With "Where I'm typing" picked in Settings › Voice, the desktop app pastes it into the
-// app you were in instead (hudPaste), and this says so; when it can't (no Accessibility yet on a Mac,
-// a password field, another app in front by then), the text stays here to copy or send, with one
-// line saying why. After a Copy, it asks once whether to paste for you next time.
+// you're in when you press the dictation key there, without taking the keyboard from it, as a small
+// pill just under the menu bar (Pill.jsx): the level, how long, and where the words go. Then
+// "Transcribing…", and with "Where I'm typing" picked in Settings › Voice, "Pasted into Slack" for a
+// moment, and it's gone. Otherwise the pill grows into a card with the words, to Send to the agent
+// (the one you last looked at in Bridge AI, or the chief of staff: Settings › Voice), to another (To
+// ▾), to Copy, or to finish in Bridge AI. When pasting can't be done (no Accessibility yet on a Mac,
+// a password field, another app in front by then) the words stay there to copy or send, with one
+// line saying why. After a Copy, it asks once whether to paste for you next time. Each dictation is
+// kept with the app it was said in, and amended with what became of it (controller.js keep).
 // The desktop app tells it when the key goes down and up (bridge-dictate-key events, as in the main
-// window); a press from before it was ready comes from hudReady().
+// window); a press from before it was ready comes from hudReady(). The window keeps its width and
+// top, and grows down to fit (hudSize); on a Mac and Windows, clicks go through it except on the
+// pill (hudPointer).
 const app = () => window.bridgeApp || {}
+const WIDTH = 420
 const nameOf = (a) => (a.chief ? t('Chief of Staff') : a.title || a.tab || a.workspace || a.paneId)
 const pasteKey = () => (keysPlatform() === 'darwin' ? '⌘V' : 'Ctrl+V')
 // Why it wasn't pasted (desktop/dictation.js's answers).
@@ -47,12 +53,18 @@ export default function Hud() {
   const [pasting, setPasting] = useState(false)
   const [why, setWhy] = useState(null) // why it wasn't pasted
   const [offer, setOffer] = useState(false) // paste it next time?
-  const card = useRef(null)
+  const [shown, setShown] = useState(0) // each press, so the pill comes in afresh
+  const [leaving, setLeaving] = useState(false)
+  const [room, setRoom] = useState(48) // the card's height at most, while it eases
+  const menu = useRef(null)
   const timer = useRef(null)
+  const going = useRef(null)
   // This press's words, straight from the key: not after a download or Try again, when you've long
   // moved on and pasting would land wherever you are now.
   const fresh = useRef(false)
   const pasted = useRef(0) // the result last pasted (its time), so it's pasted once
+  // Each press: what an earlier one was still doing (a Send on its way) doesn't touch this one.
+  const press0 = useRef(0)
 
   const loadStatus = () => app().dictateStatus?.().then((x) => { if (x) setSt(x) }, () => {})
   // Who it's for when it opens: the setting's choice (read again each time: it may have changed in
@@ -72,39 +84,56 @@ export default function Hud() {
     api('/config').then((c) => { const d = c.dictation || {}; setConf(d); configure(d) }).catch(() => setConf({}))
     loadStatus()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
-  // The key, from the desktop app (or a test). app: the app in front, when the desktop app knows it.
+  // The key, from the desktop app (or a test). app, bundle: the app in front, when the desktop app
+  // knows it.
   useEffect(() => {
-    const begin = (at, name) => {
-      clearTimeout(timer.current); setDone(null); setErr(null); setPicking(false); setWhy(null); setOffer(false); setPasting(false)
+    const begin = (at, name, bundle) => {
+      clearTimeout(timer.current); clearTimeout(going.current); setLeaving(false)
+      setDone(null); setErr(null); setPicking(false); setWhy(null); setOffer(false); setPasting(false)
       setInto(name || null)
+      setShown((n) => n + 1)
+      press0.current++
       fresh.current = true
-      press({ kind: 'hud' }, at); pickTarget(); loadStatus()
+      press({ kind: 'hud', app: name || bundle ? { name: name || '', bundle: bundle || '' } : null }, at); pickTarget(); loadStatus()
     }
     const on = (e) => {
       const d = e.detail || {}
-      if (d.type === 'down') begin(d.at, d.app)
+      if (d.type === 'down') begin(d.at, d.app, d.bundle)
       else if (d.type === 'up') release(d.at)
       else if (d.type === 'cancel') { cancel(); hide() }
     }
     window.addEventListener('bridge-dictate-key', on)
-    app().hudReady?.().then((p) => { if (p?.down) { begin(p.down, p.app); if (p.up) release(p.up) } }).catch(() => {})
+    app().hudReady?.().then((p) => { if (p?.down) { begin(p.down, p.app, p.bundle); if (p.up) release(p.up) } }).catch(() => {})
     return () => window.removeEventListener('bridge-dictate-key', on)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (s.setup || s.note) fresh.current = false }, [s.setup, s.note])
-  // The desktop app holds Esc for us while we listen (and lets it go after), and fits the window.
+  // The desktop app holds Esc for us while we listen (and lets it go after).
   const phase = s.phase !== 'idle' ? s.phase : s.result ? 'result' : s.note || s.setup ? 'note' : 'idle'
   useEffect(() => { app().hudPhase?.(phase) }, [phase])
+  // The window fits the pill: its width stays, it grows down from its top, so nothing in it moves;
+  // ahead of the pill as it grows, after it as it shrinks (room: the most it takes meanwhile).
   useLayoutEffect(() => {
-    const el = card.current
-    if (!el || !app().hudSize) return
-    const fit = () => { const r = el.getBoundingClientRect(); app().hudSize(Math.ceil(r.width) + 24, Math.ceil(r.height) + 24) }
-    fit()
-    const ro = new ResizeObserver(fit)
-    ro.observe(el)
-    return () => ro.disconnect()
+    app().hudSize?.(WIDTH, Math.ceil(12 + room + (picking && menu.current ? 6 + menu.current.offsetHeight : 0) + 16))
+  }, [room, picking, agents.length])
+  // Clicks go through the window except on the pill (and the agents' list): the desktop app is told
+  // when the pointer comes onto it and leaves (on a Mac and Windows; elsewhere the window is the pill).
+  useEffect(() => {
+    if (!app().hudPointer) return
+    let over = false
+    const say = (v) => { if (v !== over) { over = v; app().hudPointer(v) } }
+    const move = (e) => say(!!e.target?.closest?.('.hud, .hud-menu'))
+    const out = () => say(false)
+    document.addEventListener('mousemove', move)
+    document.documentElement.addEventListener('mouseleave', out)
+    return () => { document.removeEventListener('mousemove', move); document.documentElement.removeEventListener('mouseleave', out) }
   }, [])
 
-  const hide = () => { setPicking(false); setOffer(false); dismiss(); app().hudHide?.() }
+  // Gone: it fades, then the window hides.
+  const hide = () => {
+    clearTimeout(going.current)
+    setLeaving(true)
+    going.current = setTimeout(() => { setPicking(false); setOffer(false); setLeaving(false); dismiss(); app().hudHide?.() }, 140)
+  }
   const later = (ms) => { clearTimeout(timer.current); timer.current = setTimeout(() => { setDone(null); hide() }, ms) }
   const target = agents.find((a) => a.paneId === to) || null
   const text = s.result?.text || ''
@@ -121,30 +150,44 @@ export default function Hud() {
     if (!pasteOn || !now) return
     if (!st.paste.allowed) { setWhy('accessibility'); return }
     setPasting(true)
+    const g = press0.current
     app().hudPaste(r.text).then((x) => {
+      if (x?.pasted) amend(r, { how: 'pasted' })
+      // Said into a password field, most likely: not kept.
+      else if (x?.error === 'secure') forget(r)
+      if (g !== press0.current) return
       setPasting(false)
       if (x?.pasted) {
         // Nothing took it (no text field there): it's on the clipboard to paste by hand.
         if (x.read === false) { setDone(t('Nothing took it there, so it\'s on the clipboard: press {key} to paste it.', { key: pasteKey() })); later(3500) }
         else { setDone(into ? t('Pasted into {app}', { app: into }) : t('Pasted')); later(900) }
       } else setWhy(WHY[x?.error] ? x.error : x?.error === 'off' ? null : 'failed')
-    }, () => { setPasting(false); setWhy('failed') })
+    }, () => { if (g === press0.current) { setPasting(false); setWhy('failed') } })
   }, [s.result?.at]) // eslint-disable-line react-hooks/exhaustive-deps
+  const agentOf = (a) => ({ id: a.paneId, name: nameOf(a), ...(a.chief ? { chief: true } : {}) })
   const send = async () => {
     if (!target || !text) return
     setErr(null)
+    const g = press0.current
     try {
       const pid = encodeURIComponent(target.paneId)
       // As the message box does: a working agent that can't take a message now gets it when it's free.
+      const r = s.result
       await api(`/agents/${pid}/${target.status === 'working' && !target.caps?.typeAhead ? 'queue' : 'prompt'}`, { method: 'POST', body: { text } })
+      amend(r, { how: 'sent', agent: agentOf(target) })
+      if (g !== press0.current) return
       setDone(t('Sent to {name}', { name: nameOf(target) }))
       later(1200)
-    } catch (e) { setErr(e.message) }
+    } catch (e) { if (g === press0.current) setErr(e.message) }
   }
   const copy = async () => {
+    const g = press0.current
+    const r = s.result
     try {
       if (app().hudCopy) await app().hudCopy(text)
       else await navigator.clipboard.writeText(text)
+      amend(r, { how: 'copied' })
+      if (g !== press0.current) return
       setDone(keysPlatform() === 'darwin' ? t('Copied. Press ⌘V to paste it.') : t('Copied. Press Ctrl+V to paste it.'))
       // Asked once: paste it for you next time? (Only where this computer can.)
       if (canPaste && conf?.to !== 'paste' && !conf?.offeredPaste) { setOffer(true); later(15000) } else later(2200)
@@ -167,20 +210,78 @@ export default function Hud() {
       later(6000)
     } else { setDone(t('From next time, it\'s pasted where you\'re typing.')); later(2500) }
   }
-  const edit = () => { app().hudOpen?.({ paneId: target?.paneId, text }); hide() }
+  const edit = () => { if (target) amend(s.result, { how: 'typed', agent: agentOf(target) }); app().hudOpen?.({ paneId: target?.paneId, text }); hide() }
   const label = keyLabel(dictationKey(conf), keysPlatform())
   // Pasting where you're typing, allowed: no agent to pick while it listens.
   const intoApp = pasteOn && st?.paste?.allowed && !why
 
   const toChip = intoApp ? (
-    <span className="hud-into" title={t('Pasted where you\'re typing')}>{into ? t('Into {app}', { app: into }) : t('Where you\'re typing')}</span>
+    <span className="dp-to hud-into" title={t('Pasted where you\'re typing')}>{into ? t('Into {app}', { app: into }) : t('Where you\'re typing')}</span>
   ) : (
-    <span className="hud-to">
-      <button type="button" className="hud-to-btn" data-pane={target?.paneId || ''} onClick={() => setPicking((v) => !v)} aria-haspopup="menu" aria-expanded={picking}>
-        {t('To:')} <b>{target ? nameOf(target) : t('pick an agent')}</b> <Icon name="down" size={11} />
-      </button>
-      {picking && (
-        <div className="hud-menu" role="menu">
+    <button type="button" className="dp-to hud-to-btn" data-pane={target?.paneId || ''} onClick={() => setPicking((v) => !v)} aria-haspopup="menu" aria-expanded={picking}>
+      <span>{target ? t('To {name}', { name: nameOf(target) }) : t('Pick an agent')}</span> <Icon name="down" size={11} />
+    </button>
+  )
+  // What shows: the pill while it listens, transcribes, pastes, or says what became of the words;
+  // the card for the words to send or copy, a note, or the speech model to download.
+  const listening = s.phase === 'opening' || s.phase === 'listening'
+  const autoPaste = !!s.result && pasteOn && !!st?.paste?.allowed && !why && (pasting || (fresh.current && pasted.current !== s.result.at))
+  const view = listening ? 'listening' : s.phase === 'working' ? 'working' : s.result && autoPaste && !done ? 'pasting'
+    : done && !offer && !err ? 'done' : s.result ? 'card' : s.note || s.setup ? 'note' : 'idle'
+  const card = view === 'card' || view === 'note'
+  const hint = s.mode === 'free' ? t('Listening… press {key} again when you\'re done', { key: label }) : t('Let go to finish · Esc cancels')
+  return (
+    // Between presses there's nothing to show: the window is hidden, and when it's shown for the
+    // next press, nothing from the last one flashes up first.
+    <div className={`hud-root${leaving || view === 'idle' ? ' leaving' : ''}`}>
+      <Morph key={shown} className={`hud${card ? ' card' : ''}`} role="dialog" aria-label={t('Dictation')} onSize={(z) => setRoom(z.h)}>
+        {view === 'listening' && <Listening s={s} to={toChip} hint={hint} onCancel={() => { cancel(); hide() }} onStop={finish} />}
+        {view === 'working' && <Working s={s} />}
+        {view === 'pasting' && <Working s={s} text={into ? t('Pasting into {app}…', { app: into }) : t('Pasting…')} />}
+        {view === 'done' && <Done text={done} />}
+        {view === 'card' && (
+          <div className="dp-card">
+            <div className="hud-row">{toChip}<span className="grow" /><button type="button" className="dp-x" onClick={hide} aria-label={t('Close')} title={t('Close')}><Icon name="x" size={12} /></button></div>
+            <p className="hud-text">{text}</p>
+            {err && <p className="error-text small">{err}</p>}
+            {why && <p className="hud-why small" role="status"><Icon name="info" size={12} /> {WHY[why]()}</p>}
+            {done ? <p className="hud-done" role="status"><Icon name="check" size={12} /> {done}</p> : (
+              <div className="hud-actions">
+                {app().hudOpen && <button type="button" className="btn small" onClick={edit} disabled={!target}>{t('Edit in Bridge AI')}</button>}
+                <button type="button" className="btn small" onClick={copy}>{t('Copy')}</button>
+                <button type="button" className="btn small primary" onClick={send} disabled={!target}>{t('Send')}</button>
+              </div>
+            )}
+            {offer && (
+              <div className="hud-row hud-offer" role="group" aria-label={t('Paste it for you next time?')}>
+                <span className="hud-note">{t('Paste it for you next time?')}{st?.paste?.asks === 'accessibility' && !st.paste.allowed ? ` ${t('macOS asks once to allow it.')}` : ''}</span>
+                <button type="button" className="comp-text-btn" onClick={() => answer(false)}>{t('Not now')}</button>
+                <button type="button" className="btn small primary" onClick={() => answer(true)}>{t('Paste it')}</button>
+              </div>
+            )}
+          </div>
+        )}
+        {view === 'note' && (
+          <div className="dp-card">
+            {s.setup ? (
+              <div className="hud-setup">
+                {/* The first time: the speech model to download, with what you said kept and turned
+                    into text here once it's in (Composer.jsx's panel, as in the message box). */}
+                {s.setup.mic ? <MicFix stale={s.setup.stale} onClose={hide} /> : <VoiceSetup initial={s.setup} onReady={retry} onClose={hide} />}
+              </div>
+            ) : (
+              <div className="hud-row">
+                <span className="hud-note">{s.note}</span>
+                {s.retry && <button type="button" className="btn small" onClick={retry}>{t('Try again')}</button>}
+                <button type="button" className="dp-x" onClick={hide} aria-label={t('Close')} title={t('Close')}><Icon name="x" size={12} /></button>
+              </div>
+            )}
+          </div>
+        )}
+        {view === 'idle' && <div className="dp-row"><span className="dp-what">{t('Hold {key} in any app and talk.', { key: label })}</span></div>}
+      </Morph>
+      {picking && !intoApp && (
+        <div className="hud-menu" role="menu" ref={menu}>
           {agents.map((a) => (
             <button key={a.paneId} type="button" role="menuitem" data-pane={a.paneId} className={a.paneId === to ? 'on' : ''} onClick={() => { setTo(a.paneId); setPicking(false) }}>
               {a.chief ? <Icon name="helm" size={12} /> : <StatusDot status={a.status} size={7} />} <span>{nameOf(a)}</span>
@@ -189,62 +290,6 @@ export default function Hud() {
           {!agents.length && <p className="muted small">{t('No agents are running.')}</p>}
         </div>
       )}
-    </span>
-  )
-  const listening = s.phase === 'opening' || s.phase === 'listening'
-  return (
-    <div className="hud-root">
-    <div className="hud" ref={card} role="dialog" aria-label={t('Dictation')}>
-      {listening && (
-        <div className="hud-row">
-          <span className="rec-dot" />
-          <span className="rec-meter"><span style={{ transform: `scaleX(${0.08 + s.level * 0.92})` }} /></span>
-          {toChip}
-          <button type="button" className="win-btn" onClick={() => { cancel(); hide() }} aria-label={t('Cancel')} title={t('Cancel (Esc)')}><Icon name="x" size={12} /></button>
-          {s.mode === 'free' && s.phase === 'listening' && <button type="button" className="send rec-stop" onClick={finish} aria-label={t('Stop and transcribe')} title={t('Stop and transcribe')}><Icon name="check" size={14} /></button>}
-        </div>
-      )}
-      {listening && <p className="hud-hint">{s.mode === 'free' ? t('Listening… press {key} again when you\'re done', { key: label }) : t('Let go to finish · Esc cancels')}</p>}
-      {s.phase === 'working' && <p className="hud-hint"><Icon name="refresh" size={12} className="spin" /> {t('Transcribing on your computer…')}</p>}
-      {phase === 'result' && (
-        <>
-          <div className="hud-row">{toChip}<span className="grow" /><button type="button" className="win-btn" onClick={hide} aria-label={t('Close')} title={t('Close')}><Icon name="x" size={12} /></button></div>
-          <p className="hud-text">{text}</p>
-          {err && <p className="error-text small">{err}</p>}
-          {why && <p className="hud-why small" role="status"><Icon name="info" size={12} /> {WHY[why]()}</p>}
-          {pasting ? <p className="hud-hint"><Icon name="refresh" size={12} className="spin" /> {t('Pasting…')}</p> : done ? <p className="hud-done" role="status"><Icon name="check" size={12} /> {done}</p> : (
-            <div className="hud-actions">
-              {app().hudOpen && <button type="button" className="btn small" onClick={edit} disabled={!target}>{t('Edit in Bridge AI')}</button>}
-              <button type="button" className="btn small" onClick={copy}>{t('Copy')}</button>
-              <button type="button" className="btn small primary" onClick={send} disabled={!target}>{t('Send')}</button>
-            </div>
-          )}
-          {offer && (
-            <div className="hud-row hud-offer" role="group" aria-label={t('Paste it for you next time?')}>
-              <span className="hud-note">{t('Paste it for you next time?')}{st?.paste?.asks === 'accessibility' && !st.paste.allowed ? ` ${t('macOS asks once to allow it.')}` : ''}</span>
-              <button type="button" className="comp-text-btn" onClick={() => answer(false)}>{t('Not now')}</button>
-              <button type="button" className="btn small primary" onClick={() => answer(true)}>{t('Paste it')}</button>
-            </div>
-          )}
-        </>
-      )}
-      {phase === 'note' && (
-        s.setup ? (
-          <div className="hud-setup">
-            {/* The first time: the speech model to download, with what you said kept and turned
-                into text here once it's in (Composer.jsx's panel, as in the message box). */}
-            {s.setup.mic ? <MicFix stale={s.setup.stale} onClose={hide} /> : <VoiceSetup initial={s.setup} onReady={retry} onClose={hide} />}
-          </div>
-        ) : (
-          <div className="hud-row">
-            <span className="hud-note">{s.note}</span>
-            {s.retry && <button type="button" className="btn small" onClick={retry}>{t('Try again')}</button>}
-            <button type="button" className="win-btn" onClick={hide} aria-label={t('Close')} title={t('Close')}><Icon name="x" size={12} /></button>
-          </div>
-        )
-      )}
-      {phase === 'idle' && <p className="hud-hint">{t('Hold {key} in any app and talk.', { key: label })}</p>}
-    </div>
     </div>
   )
 }

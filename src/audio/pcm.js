@@ -1,7 +1,8 @@
 // Sound from the mic as 16 kHz mono 16-bit PCM, made in the page by a small audio worklet: what the
 // speech engines on the computer take as it is, so nothing needs converting there (no ffmpeg).
 // Meetings (meetings/recorder.js) send it to the server a second at a time; dictation and voice
-// notes (dictation/controller.js) keep it until you stop and send it once, as a WAV file.
+// notes (dictation/controller.js) keep it until you stop and send it once, as a WAV file (and, for
+// live words, send it as it comes too).
 //
 // The audio context runs at 16 kHz where the browser can (it resamples); where it can't (Firefox
 // won't join a mic to a context at another rate), it runs at the mic's own rate and the worklet
@@ -85,7 +86,8 @@ export const microphone = async () => {
 }
 
 // Records a stream until stop() (the samples, an Int16Array) or cancel(). onLevel(0..1) for a meter.
-export async function startPcm(stream, { onLevel } = {}) {
+// onPcm(samples): each piece as it comes, every `every` ms (live words: dictation/controller.js).
+export async function startPcm(stream, { onLevel, onPcm, every = 0 } = {}) {
   let ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: RATE })
   let input
   try {
@@ -101,16 +103,18 @@ export async function startPcm(stream, { onLevel } = {}) {
   let flushed = null
   node.port.onmessage = (e) => {
     if (e.data.level != null) onLevel?.(e.data.level)
-    else if (e.data.pcm) chunks.push(new Int16Array(e.data.pcm))
+    else if (e.data.pcm) { const c = new Int16Array(e.data.pcm); chunks.push(c); onPcm?.(c) }
     else if (e.data.flushed) flushed?.()
   }
   input.connect(node)
   if (ctx.state !== 'running') ctx.resume().catch(() => {})
   const started = performance.now()
+  const tick = every ? setInterval(() => node.port.postMessage('flush'), every) : null
   let done = false
   const end = () => {
     if (done) return
     done = true
+    clearInterval(tick)
     try { input.disconnect() } catch { /* gone */ }
     stream.getTracks().forEach((t) => t.stop())
     ctx.close().catch(() => {})

@@ -4,6 +4,7 @@ import { VoiceSetup, MicFix } from '../components/Composer.jsx'
 import { parseKey, keyLabel, isKeyDown, isKeyUp } from '../../shared/dictation/keys.js'
 import { useDictation, getState, configure, setOnScreen, press, release, finish, cancel, dismiss, retry, targetFromFocus, isPaused, box, keysPlatform, dictationKey, listeningHint, answerOffer } from './controller.js'
 import { t } from '../i18n/index.js'
+import { Morph, Listening, Working, Done } from './Pill.jsx'
 import './dictation.css'
 
 // The dictation key inside Bridge AI (App.jsx and an agent's own window): held, it listens until
@@ -13,8 +14,9 @@ import './dictation.css'
 // the key to the page as bridge-dictate-key events instead. The key never reaches the field or
 // terminal it's pressed in (no non-breaking space, no Meta-Space to an agent).
 //
-// While it listens: the message box it's for shows its own bar (Composer.jsx); anywhere else, a
-// small bar at the bottom of the window. conf: /api/config's dictation; onScreen: the agent shown.
+// While it listens: the message box it's for shows its own bar (Composer.jsx); anywhere else (a
+// terminal, a search box, a meeting's notes), the pill at the bottom of the window (Pill.jsx), as
+// the dictation window shows over other apps. conf: /api/config's dictation; onScreen: the agent shown.
 export default function Dictation({ conf, onScreen }) {
   const s = useDictation()
   const seen = useRef(onScreen)
@@ -68,57 +70,60 @@ export default function Dictation({ conf, onScreen }) {
   }, [])
   // A line said for a moment, then gone.
   useEffect(() => { if (!s.note || s.setup || s.retry) return; const id = setTimeout(dismiss, 6000); return () => clearTimeout(id) }, [s.note, s.setup, s.retry])
+  // Typed into a terminal or another box: said for a moment in the pill, then it's gone. Worked out
+  // as the words arrive (not a moment after), so the pill goes straight from Transcribing… to this.
+  const last = useRef(null)
+  if (s.phase !== 'idle' && s.target) last.current = s.target
+  const [over, setOver] = useState(0) // the words (their time) said for long enough
+  useEffect(() => { const at = s.result?.at; if (!at) return; const id = setTimeout(() => setOver(at), 1300); return () => clearTimeout(id) }, [s.result?.at])
+  const k = last.current?.kind
+  const done = s.phase === 'idle' && s.result && over !== s.result.at && !s.note && !s.setup && (k === 'terminal' || k === 'field')
+    ? (k === 'terminal' ? t('Typed into the terminal') : t('Added where you were typing')) : null
 
   const label = keyLabel(key, keysPlatform())
-  if (s.offer && s.phase === 'idle') return <Offer s={s.offer} label={label} />
+  if (s.offer && s.phase === 'idle') return <Dock card><Offer s={s.offer} label={label} /></Dock>
   // The message box shows its own.
   const mine = s.target?.kind === 'composer' && box(s.target.id)
-  if (mine || (s.phase === 'idle' && !s.note && !s.setup)) return null
-  return <Bar s={s} label={label} />
+  if (mine || (s.phase === 'idle' && !s.note && !s.setup && !done)) return null
+  const listening = s.phase === 'opening' || s.phase === 'listening'
+  const to = <span className="dp-to">{s.target?.kind === 'terminal' ? t('Into the terminal') : t('Where you\'re typing')}</span>
+  if (listening) return <Dock><Listening s={s} to={to} hint={listeningHint(s.mode, label)} onCancel={cancel} onStop={finish} /></Dock>
+  if (s.phase === 'working') return <Dock><Working s={s} /></Dock>
+  if (done && !s.note && !s.setup) return <Dock><Done text={done} /></Dock>
+  return <Dock card><Note s={s} /></Dock>
 }
 
-function Clock({ since }) {
-  const [, tick] = useState(0)
-  useEffect(() => { const id = setInterval(() => tick((n) => n + 1), 500); return () => clearInterval(id) }, [])
-  const secs = Math.max(0, Math.floor((Date.now() - since) / 1000))
-  return <span className="rec-time">{Math.floor(secs / 60)}:{String(secs % 60).padStart(2, '0')}</span>
+// At the bottom of the window, in the middle: the pill, growing up into a card when there's more.
+function Dock({ card = false, children }) {
+  return <div className="dict-dock"><Morph anchor="bottom" className={`dict-pill${card ? ' card' : ''}`}>{children}</Morph></div>
 }
 // Asked once, after the first words in Bridge AI: the key from any app too?
 function Offer({ s, label }) {
   return (
-    <div className="dict-bar dict-offer" role="dialog" aria-label={t('Dictation from any app')}>
+    <div className="dp-card dict-offer" role="dialog" aria-label={t('Dictation from any app')}>
       <div className="dict-row">
         <Icon name="mic" size={14} />
         <span className="dict-hint">{s.mode === 'hold'
           ? t('Use {key} in any app too? Hold it anywhere and a small window shows what you said, to send to an agent or copy.', { key: label })
           : t('Use {key} in any app too? Tap it anywhere to start listening and again when you\'re done; a small window shows what you said.', { key: label })}
         {s.asks ? ` ${t('Your desktop asks once to allow the key.')}` : ''}</span>
+      </div>
+      <div className="dict-row dict-acts">
         <button className="comp-text-btn" onClick={() => answerOffer(false)}>{t('Not now')}</button>
         <button className="btn small primary" onClick={() => answerOffer(true)}>{t('Turn on')}</button>
       </div>
     </div>
   )
 }
-function Bar({ s, label }) {
-  const listening = s.phase === 'opening' || s.phase === 'listening'
+// Something to say (a note, Try again), or something to do first (the speech model, the mic).
+function Note({ s }) {
   return (
-    <div className="dict-bar" role="status" aria-live="polite">
+    <div className="dp-card dict-note">
       {s.setup ? (s.setup.mic ? <MicFix stale={s.setup.stale} onClose={dismiss} /> : <VoiceSetup initial={s.setup} onReady={retry} onClose={dismiss} />) : (
         <div className="dict-row">
-          {listening && <>
-            <span className="rec-dot" />
-            <Clock since={s.since} />
-            <span className="rec-meter"><span style={{ transform: `scaleX(${0.08 + s.level * 0.92})` }} /></span>
-            <span className="dict-hint">{listeningHint(s.mode, label)}</span>
-            <button className="comp-text-btn" onClick={cancel}>{t('Cancel')}</button>
-            <button className="send rec-stop" onClick={finish} aria-label={t('Stop and transcribe')} title={t('Stop and transcribe')}><Icon name="check" size={15} /></button>
-          </>}
-          {s.phase === 'working' && <span className="dict-hint"><Icon name="refresh" size={13} className="spin" /> {t('Transcribing on your computer…')}</span>}
-          {s.phase === 'idle' && s.note && <>
-            <span className="dict-hint">{s.note}</span>
-            {s.retry && <button className="btn small" onClick={retry}>{t('Try again')}</button>}
-            <button className="win-btn" onClick={dismiss} aria-label={t('Close')} title={t('Close')}><Icon name="x" size={12} /></button>
-          </>}
+          <span className="dict-hint">{s.note}</span>
+          {s.retry && <button className="btn small" onClick={retry}>{t('Try again')}</button>}
+          <button className="dp-x" onClick={dismiss} aria-label={t('Close')} title={t('Close')}><Icon name="x" size={12} /></button>
         </div>
       )}
     </div>

@@ -90,6 +90,8 @@
 .mt-line.them .mt-who { color: #8e4ec6; }
 .mt-t { font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; padding-top: 2px; }
 .mt-text { grid-column: 1 / -1; color: var(--ink); }
+/* Live words: what someone is still saying, quieter than the lines that are in. */
+.mt-so-far .mt-text, .fc-said-line.so-far { color: var(--ink-2); }
 .mt-hint { margin: 6px 0; }
 
 .mt-ask { display: grid; gap: 8px; border-top: 1px solid var(--line); padding-top: 10px; }

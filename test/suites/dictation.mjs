@@ -14,7 +14,10 @@
 // stays down), the Mac helper's answers, wtype; and the desktop app's side with a Mac
 // simulated (stand-in Electron and helper): nothing asked at start, Accessibility looked up without
 // asking, asked once when picked, then System Settings; the dictation window's text pasted into the
-// app the key was pressed in, refused without Accessibility or with the setting off. On a Mac:
+// app the key was pressed in, refused without Accessibility or with the setting off; the window in the
+// middle at the top, growing down and back with its top kept, clicks going through it but for the
+// pill; the app's icon kept for the list of dictations (not with history off); Paste again from that
+// list, into the app it was said in. On a Mac:
 // native/bridgekeys builds for both chips, says what's in front, sets a key and prints its presses
 // (made through its stdin, no real key), says when macOS has the key, and pastes into a pasteboard of
 // the test's own (never a key pressed, never your clipboard): what was there back once it's read,
@@ -380,18 +383,26 @@ else {
   let hud = null
   class Win {
     static getFocusedWindow() { return null }
-    constructor() { hud = this; this.shown = false; this.webContents = { setWindowOpenHandler() {}, on() {}, isDestroyed: () => false, executeJavaScript: async () => {} } }
-    setAlwaysOnTop() {} setVisibleOnAllWorkspaces() {} setContentProtection() {} on() {} loadURL() {} setBounds() {}
+    constructor(o) { hud = this; this.shown = false; this.made = o; this.bounds = { x: o.x, y: o.y, width: o.width, height: o.height }; this.through = []; this.told = []; this.webContents = { setWindowOpenHandler() {}, on() {}, isDestroyed: () => false, executeJavaScript: async (js) => { this.told.push(js) } } }
+    setAlwaysOnTop() {} setVisibleOnAllWorkspaces() {} setContentProtection() {} on() {} loadURL() {}
+    setBounds(b) { this.bounds = { ...b } }
+    getBounds() { return { ...this.bounds } }
+    setIgnoreMouseEvents(on, o) { this.through.push([on, !!o?.forward]) }
     once(ev, fn) { if (ev === 'ready-to-show') fn() }
     showInactive() { this.shown = true }
     hide() { this.shown = false }
     isVisible() { return this.shown }
     isDestroyed() { return false }
     isFocused() { return false }
-    getContentSize() { return [444, 92] }
+    getContentSize() { return [this.bounds.width, this.bounds.height] }
   }
+  // The icon of the app the key was pressed in, as macOS would give it; and Bridge AI stepping back.
+  const thumbs = []
+  let hidden = 0
   const electron = {
     BrowserWindow: Win, globalShortcut: fakeShortcuts(), clipboard: fakeClipboard(),
+    nativeImage: { createThumbnailFromPath: async (p) => { thumbs.push(p); return { isEmpty: () => false, toPNG: () => Buffer.from('png of TextEdit') } } },
+    app: { hide: () => { hidden++ } },
     screen: { getCursorScreenPoint: () => ({ x: 0, y: 0 }), getDisplayNearestPoint: () => ({ workArea: { x: 0, y: 0, width: 1440, height: 900 } }) },
     ipcMain: { handle: (n, fn) => { handlers[n] = fn }, on: (n, fn) => { handlers[n] = fn } },
     systemPreferences: { isTrustedAccessibilityClient: (prompt) => { if (prompt) asked.push(prompt); return allowed } },
@@ -402,8 +413,9 @@ else {
   Object.assign(process.env, { BRIDGE_KEYS: helper, BRIDGEKEYS_PRESS: '1', BRIDGEKEYS_LOG: log })
   Object.defineProperty(process, 'platform', { ...platform, value: 'darwin' })
   const me = { own: true }
+  const brought = []
   try {
-    await desk.start({ electron, ROOT, DATA: data, URL_BASE: 'http://127.0.0.1:9', preload: '', isOurs: () => false, tellMain: async () => {}, askAccess: (pane) => tiles.push(pane), trusted: (e) => e.own === true })
+    await desk.start({ electron, ROOT, DATA: data, URL_BASE: 'http://127.0.0.1:9', preload: '', isOurs: () => false, tellMain: async () => {}, askAccess: (pane) => tiles.push(pane), trusted: (e) => e.own === true, openApp: async (b) => { brought.push(b) } })
   } finally {
     Object.defineProperty(process, 'platform', platform)
   }
@@ -418,7 +430,20 @@ else {
     await until(() => hud?.shown, 5000, 50)
     const from = { sender: hud?.webContents }
     const first = await call('bridge:hud-ready', from)
-    ok(!!hud?.shown && first?.down > 0 && first.app === 'TextEdit', 'the key pressed in another app: the dictation window, told it was TextEdit', first)
+    ok(!!hud?.shown && first?.down > 0 && first.app === 'TextEdit' && first.bundle === 'com.apple.TextEdit', 'the key pressed in another app: the dictation window, told it was TextEdit (and its bundle ID, for the history)', first)
+    // The pill's window: in the middle at the top, under the menu bar, clicks going through it.
+    ok(hud.made.width === 420 && hud.made.x === 510 && hud.made.y === 2 && JSON.stringify(hud.through[0]) === '[true,true]', 'the dictation window: in the middle at the top of the screen, clicks going through it', { made: { x: hud.made.x, y: hud.made.y, width: hud.made.width }, through: hud.through })
+    call('bridge:hud-size', from, 420, 260)
+    const grown = hud.getBounds()
+    call('bridge:hud-size', from, 999, 80)
+    const shrunk = hud.getBounds()
+    ok(grown.x === 510 && grown.y === 2 && grown.width === 420 && grown.height === 260 && shrunk.x === 510 && shrunk.y === 2 && shrunk.width === 420 && shrunk.height === 80, 'it grows down and back, keeping its top, its middle and its width', { grown, shrunk })
+    call('bridge:hud-pointer', from, true)
+    call('bridge:hud-pointer', from, false)
+    call('bridge:hud-pointer', me, true)
+    ok(JSON.stringify(hud.through.slice(-2)) === '[[false,true],[true,true]]', 'the pointer on the pill: clicks are the window\'s, and go through again once it leaves (only the window itself can say so)', hud.through)
+    const iconFile = path.join(data, 'dictations', 'icons', 'com.apple.TextEdit.png')
+    ok(!!(await until(() => fs.existsSync(iconFile), 3000, 50)) && fs.readFileSync(iconFile, 'utf8') === 'png of TextEdit' && thumbs[0] === '/System/Applications/TextEdit.app', 'the app\'s icon, asked of macOS and kept in the data folder for the list of dictations', thumbs)
     ok((await call('bridge:hud-paste', from, 'Hello there.'))?.error === 'accessibility' && !pasted().length, 'without Accessibility: not pasted, nothing sent to the helper')
     allowed = true
     ok(await call('bridge:paste-access', me) === 'ok' && (await call('bridge:dictate-status', me))?.paste?.allowed && await call('bridge:paste-ask', me) === 'ok' && asked.length === 1, 'turned on in System Settings: allowed, and nothing more is asked')
@@ -426,8 +451,25 @@ else {
     const p = pasted().at(-1)
     ok(r?.pasted && p?.text === 'Hello there.' && p.args.join(' ') === '--pid 4242', 'the text pasted by the helper, into the app the key was pressed in (TextEdit\'s pid)', { r, p })
     ok((await call('bridge:hud-paste', me, 'not from the window'))?.error === 'off' && pasted().length === 1, 'only the dictation window can ask for a paste')
+    // Paste again, from the list of dictations: into the app it was said in.
+    ok((await call('bridge:dictate-repaste', { own: false }, { text: 'Again.', bundle: 'com.apple.TextEdit' }))?.error === 'off' && !brought.length, 'Paste again: only from the app\'s own page')
+    const again = await call('bridge:dictate-repaste', me, { text: 'Again.', bundle: 'com.apple.TextEdit' })
+    ok(again?.pasted && brought.join() === 'com.apple.TextEdit' && pasted().at(-1)?.text === 'Again.' && pasted().at(-1).args.join(' ') === '--pid 4242', 'Paste again: that app brought to the front, then the words pasted into it', { again, brought, last: pasted().at(-1) })
+    const unknown = await call('bridge:dictate-repaste', me, { text: 'Where I was.' })
+    ok(unknown?.pasted && hidden === 1 && brought.length === 1, 'with no app known: Bridge AI steps back, and it goes where you were before', { unknown, hidden })
+    allowed = false
+    ok((await call('bridge:dictate-repaste', me, { text: 'Not allowed.' }))?.error === 'accessibility' && pasted().length === 3, 'not without Accessibility')
+    allowed = true
     await call('bridge:dictate-configure', me, { background: true, to: 'last' })
-    ok((await call('bridge:hud-paste', from, 'Hello again.'))?.error === 'off' && pasted().length === 1, 'with the text going to an agent instead: nothing pasted')
+    ok((await call('bridge:hud-paste', from, 'Hello again.'))?.error === 'off' && pasted().length === 3, 'with the text going to an agent instead: nothing pasted')
+    // History off: no icon kept (the stand-in helper presses the key again as it starts).
+    fs.rmSync(iconFile, { force: true })
+    thumbs.length = 0
+    const told = hud.told.length
+    await call('bridge:dictate-configure', me, { background: true, to: 'last', history: false })
+    await until(() => hud.told.slice(told).some((js) => js.includes('"type":"down"')), 3000, 50)
+    await sleep(500)
+    ok(hud.told.slice(told).some((js) => js.includes('"bundle":"com.apple.TextEdit"')) && !fs.existsSync(iconFile) && !thumbs.length, 'with history off: the key pressed in TextEdit again, and no icon kept', hud.told.slice(told))
   } catch (e) {
     ok(false, `the desktop app pasting crashed: ${e.stack}`)
   } finally {

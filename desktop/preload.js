@@ -64,5 +64,9 @@ else contextBridge.exposeInMainWorld('bridgeApp', {
   hudHide: () => ipcRenderer.invoke('bridge:hud-hide'),
   hudCopy: (text) => ipcRenderer.invoke('bridge:hud-copy', String(text)),
   hudOpen: (o) => ipcRenderer.invoke('bridge:hud-open', o),
+  // The pointer on its pill (clicks go through the rest of its window), and Paste again from the
+  // list of your dictations.
+  hudPointer: (on) => ipcRenderer.send('bridge:hud-pointer', !!on),
+  dictateRepaste: (o) => ipcRenderer.invoke('bridge:dictate-repaste', o),
 })
 window.addEventListener('DOMContentLoaded', () => document.documentElement.classList.add('in-bridge-app', `platform-${process.platform}`))

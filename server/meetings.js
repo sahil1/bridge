@@ -20,6 +20,7 @@ import { spawn, execFile } from 'node:child_process'
 import { DATA, ROOT, IS_MAC, IS_WIN, expand, writeFileAtomic } from './paths.js'
 import { tool } from './fixes.js'
 import * as speech from './speech.js'
+import * as livewords from './livewords.js'
 import * as memory from './meetmemory.js'
 import * as doctext from './doctext.js'
 import { canOpen } from './files.js'
@@ -351,6 +352,9 @@ async function run(job) {
     const r = await speech.transcribe(wav(job.pcm), { cfg: job.cfg || cfg, language: job.language || m.language || cfg.meetings?.language, prompt: [hint, before].filter(Boolean).join('. '), words })
     const text = speech.spoken(r.text)
     if (text && !/^(thank you\.?|thanks for watching!?|you)$/i.test(text)) { append(job.id, { src: job.src, t0: round(job.t0), t1: round(job.t1), text, engine: r.engine }); if (!job.retry) assistSoon(job.id) }
+    // Its line is in: the words heard so far for it go.
+    const so = live.get(job.id)?.sources[job.src]
+    if (so) { so.lineTo = Math.max(so.lineTo || 0, round(job.t1)); if (so.partial && so.partial.t0 <= so.lineTo) so.partial = null }
     if (job.retry) fs.rmSync(job.retry, { force: true })
   } catch (e) {
     job.tries = (job.tries || 0) + 1
@@ -438,7 +442,7 @@ export async function audio(id, src, buf, seq) {
   if (!l) live.set(id, (l = { sources: {} }))
   let s = l.sources[src]
   if (!s) {
-    s = l.sources[src] = { seq: -1, samples: 0, out: null, finder: new Finder((st) => enqueue({ id, src, ...st })) }
+    s = l.sources[src] = { seq: -1, samples: 0, out: null, finder: new Finder((st) => enqueue({ id, src, ...st })), partial: null }
     s.out = writer(id, src)
   }
   if (seq != null && Number(seq) <= s.seq) return { status: m.status, dup: true }
@@ -447,6 +451,7 @@ export async function audio(id, src, buf, seq) {
   const samples = new Int16Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + even))
   s.finder.push(samples)
   if (s.finder.frames.length && s.finder.voiced >= 5) { s.talkingAt = Date.now(); s.stretch = s.finder.frames[0].t }
+  hearSoFar(id, s)
   s.samples += samples.length
   let peak = 0
   for (let i = 0; i < samples.length; i += 8) { const v = Math.abs(samples[i]); if (v > peak) peak = v }
@@ -456,6 +461,34 @@ export async function audio(id, src, buf, seq) {
   const seconds = Math.max(...Object.values(l.sources).map((x) => x.samples)) / RATE
   if (seconds - (m.seconds || 0) >= 5) patchMeta(id, { seconds: Math.round(seconds) })
   return { status: 'recording' }
+}
+
+// Live words (livewords.js): the stretch someone is still saying, heard every second and a half
+// while nothing else is being transcribed and the engine is on this computer, so its words show
+// under the transcript before the stretch ends (its last 12 seconds in a long one). They go once
+// the stretch's own line is in. Not with a speech service, which is sent only the stretches.
+const SO_FAR_MS = 1500
+function hearSoFar(id, s) {
+  const f = s.finder.frames
+  if (!f.length || s.finder.voiced < 10 || s.hearing || Date.now() - (s.heardAt || 0) < SO_FAR_MS || running.length || queue.length) return
+  if (speech.engineOf(cfg) !== 'local') return
+  s.hearing = true
+  s.heardAt = Date.now()
+  const last = f.slice(-400)
+  const pcm = new Int16Array(last.length * FRAME)
+  last.forEach((p, i) => pcm.set(p.f, i * FRAME))
+  const t0 = round(f[0].t / RATE)
+  livewords.stretch(pcm, { cfg }).then((text) => {
+    // Unless its line came in meanwhile: its words so far.
+    if ((s.lineTo || 0) <= t0) s.partial = text ? { t0, text, cut: last.length < f.length } : null
+  }, () => {}).finally(() => { s.hearing = false })
+}
+// What's being said now, per source, for the transcript: { you: { t0, text, cut }, them: … }.
+const soFar = (id) => {
+  const l = live.get(id)
+  if (!l) return null
+  const out = Object.fromEntries(Object.entries(l.sources).filter(([, x]) => x.partial).map(([k, x]) => [k, x.partial]))
+  return Object.keys(out).length ? out : null
 }
 
 // Real sound, about -60 dB and up: a call's sound macOS hasn't let Bridge AI hear isn't always
@@ -623,7 +656,7 @@ export function get(id) {
   const links = (m.links || []).map((l) => (l.kind === 'file' ? { ...l, exists: fs.existsSync(l.path), readable: doctext.readable(l.path) } : l))
   const help = assistOf(id)
   // me: your name (Settings › General), for your lines.
-  return { ...m, links, captures: m.captures || [], canRead: !!doctext.ocrBin(), me: String(cfg.name || '').trim() || null, levels, callQuiet: quiet, transcript: transcript(id, { dropped: true }), notes: readText(path.join(d, 'notes.md')), summary: readText(path.join(d, 'summary.md')), waiting: waiting(id), pending: pending.length, saved: m.saved || null, progress, assistItems: help.items.filter((x) => x.state !== 'dismissed').slice(-20), assistError: help.error || null, assisting: assisting.has(id) }
+  return { ...m, links, captures: m.captures || [], canRead: !!doctext.ocrBin(), me: String(cfg.name || '').trim() || null, levels, callQuiet: quiet, partial: soFar(id), transcript: transcript(id, { dropped: true }), notes: readText(path.join(d, 'notes.md')), summary: readText(path.join(d, 'summary.md')), waiting: waiting(id), pending: pending.length, saved: m.saved || null, progress, assistItems: help.items.filter((x) => x.state !== 'dismissed').slice(-20), assistError: help.error || null, assisting: assisting.has(id) }
 }
 
 export function setKind(id, kind) { return patchMeta(id, { kind: KINDS[kind] ? kind : 'general', kindPicked: true }) }

@@ -30,16 +30,29 @@ through quota-axi. If you add an API key for a model provider (Settings › Mode
 Bridge AI uses it to check the key and, when you or the chief of staff ask, to put a question to
 that model. Both go straight from your computer to that provider.
 
-Dictation and voice notes are turned into text on your computer, and the recording isn't kept. The
-dictation key from other apps (Settings › Voice) is heard for that one key only: on a Mac it's
-registered with macOS, which tells Bridge AI when it's pressed and let go; on Windows and Linux a
-keyboard hook runs only while the key is held, and until Ctrl, Alt, Shift and the Windows key are
-let go too (a few seconds at most), to hear them let go, and ignores every other key.
+Dictation and voice notes are turned into text on your computer, and the recording isn't kept
+(unless you ask for it, below). With "Show the words as you talk" (Settings › Voice, on where your
+computer keeps up), the sound goes to your computer as you talk, a moment at a time, rather than all
+at once when you let go; it's heard there the same way and goes nowhere else. The dictation key from other apps (Settings › Voice) is heard for
+that one key only: on a Mac it's registered with macOS, which tells Bridge AI when it's pressed and
+let go; on Windows and Linux a keyboard hook runs only while the key is held, and until Ctrl, Alt,
+Shift and the Windows key are let go too (a few seconds at most), to hear them let go, and ignores
+every other key.
 Nothing is pasted into other apps unless you pick "Where I'm typing" there. Then, after you let go
 of the key, the text is put on the clipboard for a moment (marked so clipboard managers skip it on a
 Mac), ⌘V or Ctrl+V is pressed in the app you were in, and what you had copied is put back; on
 Wayland it's typed in by wtype instead. On a Mac pressing ⌘V needs Accessibility, which you're asked
 for when you pick it, and Bridge AI uses it for that paste only.
+
+What you dictate is kept on your computer, in `~/.bridge-ai/dictations`, so you can find it again
+under Dictations: the words as they were put in and as they were heard, when, for how long, and
+where they went (the name and bundle ID of the app you were in, and its icon; or the agent; and
+whether they were pasted, sent, typed or copied). It's kept for always unless you pick 30 days or a
+year, and never leaves your computer (a paired phone shows it end-to-end encrypted, as it shows
+everything else). The recording itself is only kept if you turn on "Keep the recordings too".
+Settings › Voice › Dictation turns the history off (then nothing new is kept) and deletes all of it;
+deleting one deletes it from the disk, not just from the list. A dictation refused because a
+password field had the keyboard isn't kept.
 
 If you run Bridge AI on a server or in Docker, all of this applies to that machine instead of your
 computer.

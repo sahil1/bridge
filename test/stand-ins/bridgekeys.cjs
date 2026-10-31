@@ -3,13 +3,15 @@
 // clipboard touched:
 //   hotkey <code> <mods>   the key set at once; with $BRIDGEKEYS_PRESS, pressed in TextEdit (pid 4242)
 //                          a moment later and let go after; "press" and "release" on stdin too
+//   front                  TextEdit in front (pid 4242)
 //   paste [--pid <pid>]    what it was given (its arguments and the text on stdin) noted in
 //                          $BRIDGEKEYS_LOG, nothing pressed; it answers with $BRIDGEKEYS_PASTE, or
 //                          as a paste the app in front read
 const fs = require('node:fs')
 const [cmd, ...rest] = process.argv.slice(2)
 const say = (o) => process.stdout.write(`${JSON.stringify(o)}\n`)
-const down = () => say({ down: Date.now(), app: 'TextEdit', bundle: 'com.apple.TextEdit', pid: 4242, secure: false })
+const FRONT = { app: 'TextEdit', bundle: 'com.apple.TextEdit', path: '/System/Applications/TextEdit.app', pid: 4242, secure: false }
+const down = () => say({ down: Date.now(), ...FRONT })
 const up = () => say({ up: Date.now() })
 if (cmd === 'hotkey') {
   say({ ready: true })
@@ -25,6 +27,8 @@ if (cmd === 'hotkey') {
     }
   })
   process.stdin.on('end', () => process.exit(0))
+} else if (cmd === 'front') {
+  say(FRONT)
 } else if (cmd === 'paste') {
   let text = ''
   process.stdin.on('data', (d) => { text += d })

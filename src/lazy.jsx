@@ -1,7 +1,8 @@
 import { lazy, Suspense, useState } from 'react'
 
 // Views that aren't on the first screen load on demand, so the app opens faster: the terminal
-// (xterm), the file viewer (highlighter, markdown), Settings, onboarding, calendar, usage stats and meetings.
+// (xterm), the file viewer (highlighter, markdown), Settings, onboarding, calendar, usage stats,
+// meetings and dictations.
 // preloadViews() fetches them all once the app is idle, so opening one later is still instant.
 // Each export is a drop-in for the component it wraps.
 const LOADERS = {
@@ -16,6 +17,7 @@ const LOADERS = {
   CalendarView: () => import('./components/CalendarView.jsx'),
   UsageStats: () => import('./components/UsageStats.jsx'),
   Meetings: () => import('./components/meetings/Meetings.jsx'),
+  Dictations: () => import('./components/dictations/Dictations.jsx'),
 }
 
 // Once a view's code is loaded (by preloadViews, or the first time it's opened) it renders
@@ -38,6 +40,7 @@ function wrap(load, name = 'default') {
 export const Settings = wrap(LOADERS.Settings)
 export const MeetingsHome = wrap(LOADERS.Meetings, 'MeetingsHome')
 export const MeetingPage = wrap(LOADERS.Meetings, 'MeetingPage')
+export const Dictations = wrap(LOADERS.Dictations)
 export const Onboarding = wrap(LOADERS.Onboarding)
 export const HerdrView = wrap(LOADERS.HerdrView)
 export const Terminals = wrap(LOADERS.Terminals)
