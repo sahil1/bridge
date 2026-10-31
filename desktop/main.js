@@ -303,6 +303,8 @@ const TILE_STEPS = {
   accessibility: { text: `Turn on ${APP_NAME} in the list above` },
   // A call's sound for meeting notes: listed once a recording has asked.
   audio: { text: `Under System Audio Recording Only, turn on ${APP_NAME}` },
+  // Fn or the right ⌥ as the dictation key (dictation.js): listed already, by macOS's own question.
+  'input-monitoring': { text: `Turn on ${APP_NAME} in the list above` },
 }
 let tile = null // { win, pane, timer, poll, icon }
 function closeTile() {
@@ -314,7 +316,7 @@ function closeTile() {
 // Access on yet? The server answers for the folders it reads; the app asks macOS for the mic and
 // Accessibility (without asking you).
 async function tileDone(pane) {
-  if (perms.kinds().includes(pane)) { const s = perms.status(pane); if (s === 'ok') reportPerms(); return s === 'ok' }
+  if (perms.kinds().includes(pane)) { const s = await perms.status(pane); if (s === 'ok') reportPerms(); return s === 'ok' }
   try {
     const r = await fetch(`${URL_BASE}/api/fix/check?pane=${encodeURIComponent(pane)}`, { signal: AbortSignal.timeout(20000) })
     const d = r.ok ? await r.json() : null
@@ -395,14 +397,21 @@ const perms = permissions.create({
   bundleId: () => (BUNDLE ? bundleId() : null),
   showTile: (kind) => showTile(kind),
   paste: () => canPaste,
+  lone: () => loneKey,
+  // Whether macOS lets the app listen to keys, asked of native/bridgekeys (it can only look, or ask).
+  listen: IS_MAC ? { access: () => listenAsk('listen-access'), ask: () => listenAsk('listen-ask') } : null,
   onChange: () => reportPerms(),
 })
-let canPaste = false // pasting where you're typing can work here (dictation.js says, once it's started)
+let canPaste = false // pasting where you're typing can work here (dictation.js says, each time the key is set)
+let loneKey = false // a lone key (Fn, the right ⌥) is the dictation key, so Input Monitoring is asked about
+const listenAsk = (cmd) => new Promise((resolve) => execFile(process.env.BRIDGE_KEYS || path.join(ROOT, 'native', 'bin', 'bridgekeys'), [cmd], { timeout: 10000 }, (err, out) => {
+  try { resolve(!!JSON.parse(String(out).trim().split('\n').pop()).allowed) } catch { resolve(false) }
+}))
 ipcMain.handle('bridge:perm', async (e, { op, kind } = {}) => {
   if (!fromApp(e)) return null
   if (op === 'kinds') return perms.kinds()
   if (typeof kind !== 'string' || !perms.kinds().includes(kind)) return null
-  const r = op === 'status' ? perms.status(kind)
+  const r = op === 'status' ? await perms.status(kind)
     : op === 'ask' ? await perms.ask(kind)
       : op === 'reset' ? await perms.reset(kind)
         : op === 'open' ? await perms.open(kind)
@@ -414,9 +423,9 @@ ipcMain.handle('bridge:perm', async (e, { op, kind } = {}) => {
 // phone and your other devices can see it (server/fixes.js appReport) and the server knows this app
 // listens for "allow it here" from them.
 let reported = { body: '', at: 0 }
-function reportPerms() {
+async function reportPerms() {
   let body
-  try { body = JSON.stringify({ version: app.getVersion(), states: perms.all() }) } catch { return }
+  try { body = JSON.stringify({ version: app.getVersion(), states: await perms.all() }) } catch { return }
   if (body === reported.body && Date.now() - reported.at < 60000) return
   reported = { body, at: Date.now() }
   fetch(`${URL_BASE}/api/fix/desktop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, signal: AbortSignal.timeout(5000) }).catch(() => { reported.at = 0 })
@@ -898,8 +907,11 @@ app.whenReady().then(() => {
   // The dictation key from any app (dictation.js): the main window, an agent's own window and
   // another device's window take it as their own when they're in front.
   const ours = (w) => w === win || [...pops.values(), ...machineWins.values()].includes(w)
-  dictation.start({ electron, ROOT, DATA, URL_BASE, preload: path.join(__dirname, 'preload.js'), isOurs: ours, tellMain, askAccess: showTile, trusted: fromApp, perms })
-    .then((v) => { canPaste = !!v?.paste?.can; reportPerms() }, (e) => console.error('dictation:', e.message))
+  // Each time the key is set: whether pasting can work and whether a lone key is picked, which is
+  // what Accessibility and Input Monitoring are asked for.
+  const onStatus = (v) => { canPaste = !!v?.paste?.can; loneKey = !!v?.lone && /^(Fn|RightAlt)$/.test(v.key || ''); reportPerms() }
+  dictation.start({ electron, ROOT, DATA, URL_BASE, preload: path.join(__dirname, 'preload.js'), isOurs: ours, tellMain, askAccess: showTile, trusted: fromApp, perms, onStatus })
+    .catch((e) => console.error('dictation:', e.message))
   // What the app is allowed: told once a minute (the server forgets it after three), and whenever you
   // come back to one of its windows (System Settings is where it changes).
   setInterval(reportPerms, 60000)

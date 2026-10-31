@@ -90,6 +90,34 @@ try {
     const linux = mac({ platform: 'linux' })
     ok(!linux.p.kinds().length && linux.p.status('microphone') === null && await linux.p.ask('microphone') === null, 'Linux: nothing to allow')
   }
+  {
+    // Input Monitoring (Fn or the right ⌥ as the dictation key): only once one is picked; looked up
+    // through the helper without asking, macOS's own question once, then System Settings; Accessibility
+    // covers it too.
+    let listening = false
+    let trusted = false
+    const log = []
+    const sys = { getMediaAccessStatus: () => 'granted', isTrustedAccessibilityClient: () => trusted }
+    const mk = (lone) => create({
+      platform: 'darwin', systemPreferences: sys, bundleId: () => 'dev.bridge-ai.app', lone: () => lone,
+      listen: { access: async () => listening, ask: async () => { log.push('listen-ask'); return listening } },
+      openExternal: async (u) => { log.push(`open ${u}`) }, showTile: async (k) => { log.push(`tile ${k}`) }, tccutil: async (args) => { log.push(`tccutil ${args.join(' ')}`) },
+    })
+    ok(!mk(false).kinds().includes('input-monitoring') && mk(true).kinds().includes('input-monitoring'), 'Input Monitoring only once Fn or the right ⌥ is the key')
+    const p = mk(true)
+    const before = await p.status('input-monitoring')
+    const first = await p.ask('input-monitoring')
+    const second = await p.ask('input-monitoring')
+    ok(before === 'ask' && first === 'asked' && log[0] === 'listen-ask' && log[1] === 'tile input-monitoring' && second === 'opened' && log.includes('open x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent'), 'Input Monitoring: macOS asked the first time (with the tile), its page after', log)
+    listening = true
+    ok(await p.status('input-monitoring') === 'ok' && (await p.all())['input-monitoring'] === 'ok', 'allowed: noticed without asking, and told the server')
+    listening = false
+    log.length = 0
+    await p.reset('input-monitoring')
+    ok(log[0] === 'tccutil reset ListenEvent dev.bridge-ai.app' && log[1] === 'listen-ask', 'Reset and ask again: its answer forgotten, and asked again', log)
+    trusted = true
+    ok(await mk(true).status('input-monitoring') === 'ok', 'Accessibility on (pasting where you\'re typing): nothing more to allow')
+  }
 } catch (e) { ok(false, `the desktop app's side: ${e.message}`) }
 
 // ---------- Which permissions each kind of computer lists (server/fixes.js) ----------
@@ -98,6 +126,7 @@ try {
   const { rowsFor } = await import(pathToFileURL(path.join(ROOT, 'server', 'fixes.js')).href)
   const mac = rowsFor({ os: 'mac', desktop: true, paste: true, callSound: true, trash: false })
   ok(mac.join() === 'microphone,accessibility,calendars,full-disk,files,audio,automation,notifications', 'a Mac with the desktop app: everything it may ask for', mac)
+  ok(rowsFor({ os: 'mac', desktop: true, listen: true }).includes('input-monitoring') && !rowsFor({ os: 'mac', desktop: true }).includes('input-monitoring') && !rowsFor({ os: 'win', desktop: true, listen: true }).includes('input-monitoring'), 'Input Monitoring listed only on a Mac with Fn or the right ⌥ as the key')
   ok(!rowsFor({ os: 'mac', desktop: true, trash: true }).includes('automation') && !rowsFor({ os: 'mac', desktop: true }).includes('audio') && !rowsFor({ os: 'mac', desktop: true }).includes('accessibility'), 'macOS 15 (its own trash): no Automation; no call\'s sound recorder: no Screen & System Audio; no pasting: no Accessibility')
   const term = rowsFor({ os: 'mac', desktop: false, trash: true })
   ok(term.join() === 'calendars,full-disk,files', 'a Mac running Bridge AI from a terminal: only what the server reads (the app\'s own aren\'t there)', term)

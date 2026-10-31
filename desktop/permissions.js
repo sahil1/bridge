@@ -1,5 +1,6 @@
 // What the operating system asks Bridge AI about, from the app's own side: the ones only the app can
-// ask for and see, because it's the process macOS (or Windows) asks about. main.js hands them to the
+// ask for and see, because it's the process macOS (or Windows) asks about (the microphone,
+// Accessibility, Input Monitoring for a lone dictation key, notifications). main.js hands them to the
 // page as bridgeApp.permission (preload.js), and the page shows them all one way
 // (src/permissions.js, src/components/PermissionFix.jsx). The rest (Calendars, Full Disk Access, the
 // folders, Automation) are the server's: it's the one reading them (server/fixes.js).
@@ -18,24 +19,31 @@ const SECURITY = 'x-apple.systempreferences:com.apple.preference.security'
 const MAC_PANE = {
   microphone: `${SECURITY}?Privacy_Microphone`,
   accessibility: `${SECURITY}?Privacy_Accessibility`,
+  'input-monitoring': `${SECURITY}?Privacy_ListenEvent`,
   notifications: 'x-apple.systempreferences:com.apple.Notifications-Settings.extension',
 }
 const WIN_PANE = { microphone: 'ms-settings:privacy-microphone', notifications: 'ms-settings:notifications' }
 // What macOS files each under (tccutil's names). Accessibility's ⌘V is also PostEvent, which the
 // helper that pastes looks at (native/bridgekeys.swift).
-const TCC = { microphone: ['Microphone'], accessibility: ['Accessibility', 'PostEvent'] }
+const TCC = { microphone: ['Microphone'], accessibility: ['Accessibility', 'PostEvent'], 'input-monitoring': ['ListenEvent'] }
 
 // platform: process.platform. systemPreferences: Electron's. openExternal(url): opens System Settings
 // (or Windows Settings). tccutil(args): runs /usr/bin/tccutil. bundleId(): this app's, or null (from
 // source it's Electron's, whose answers aren't Bridge AI's to forget). showTile(kind): the tile beside
 // System Settings. paste(): whether pasting where you're typing can work here (dictation.js), which
-// is all Accessibility is for. onChange(): something may have changed (main.js tells the server).
-function create({ platform = process.platform, systemPreferences, openExternal, tccutil, bundleId = () => null, showTile = async () => false, paste = () => false, onChange = () => {} }) {
+// is all Accessibility is for. lone(): a lone dictation key (Fn, the right ⌥) is picked, which is all
+// Input Monitoring is for; listen: { access(), ask() } (native/bridgekeys listen-access and listen-ask:
+// whether macOS lets the app listen to keys, and asking it). onChange(): something may have changed
+// (main.js tells the server).
+function create({ platform = process.platform, systemPreferences, openExternal, tccutil, bundleId = () => null, showTile = async () => false, paste = () => false, lone = () => false, listen = null, onChange = () => {} }) {
   const MAC = platform === 'darwin'
   const WIN = platform === 'win32'
-  // macOS shows its Accessibility question once per run at most; after that, its page.
+  // macOS shows its Accessibility (and Input Monitoring) question once per run at most; after that, its page.
   let askedAx = false
-  const kinds = () => (MAC ? ['microphone', ...(paste() ? ['accessibility'] : []), 'notifications'] : WIN ? ['microphone', 'notifications'] : [])
+  let askedListen = false
+  const kinds = () => (MAC ? ['microphone', ...(paste() ? ['accessibility'] : []), ...(lone() && listen ? ['input-monitoring'] : []), 'notifications'] : WIN ? ['microphone', 'notifications'] : [])
+  // Listening to keys is allowed with Input Monitoring, or Accessibility, which covers it.
+  const listening = async () => systemPreferences.isTrustedAccessibilityClient(false) || !!(await listen.access().catch(() => false))
   const media = () => {
     const s = systemPreferences.getMediaAccessStatus('microphone')
     return s === 'granted' ? 'ok' : s === 'not-determined' ? 'ask' : s === 'restricted' ? 'restricted' : 'denied'
@@ -44,6 +52,7 @@ function create({ platform = process.platform, systemPreferences, openExternal, 
     if (!kinds().includes(kind)) return null
     if (kind === 'microphone') return media()
     if (kind === 'accessibility') return systemPreferences.isTrustedAccessibilityClient(false) ? 'ok' : askedAx ? 'denied' : 'ask'
+    if (kind === 'input-monitoring') return listening().then((on) => (on ? 'ok' : askedListen ? 'denied' : 'ask'))
     return 'unknown' // notifications: neither system says whether they're on
   }
   // Its page of System Settings (Windows Settings), and on a Mac the tile beside it.
@@ -60,13 +69,21 @@ function create({ platform = process.platform, systemPreferences, openExternal, 
   // 'ok', 'asked' (the system's question is up: it answers there), 'opened' (System Settings),
   // 'restricted' (a profile on this computer decides), or null (nothing to allow here).
   async function ask(kind) {
-    const s = status(kind)
+    const s = await status(kind)
     if (s == null || s === 'ok' || s === 'restricted') return s
     if (kind === 'microphone' && MAC && s === 'ask') {
       await systemPreferences.askForMediaAccess('microphone').catch(() => false)
       onChange()
       // Turned down just now: that's the answer, said so; Allow again goes to System Settings.
       return media()
+    }
+    if (kind === 'input-monitoring' && !askedListen) {
+      askedListen = true
+      // macOS lists Bridge AI under Input Monitoring and asks in a window of its own ("would like to
+      // receive keystrokes"), whose Open System Settings goes to that list.
+      if (await listen.ask().catch(() => false)) { onChange(); return 'ok' }
+      await showTile(kind)
+      return 'asked'
     }
     if (kind === 'accessibility' && !askedAx) {
       askedAx = true
@@ -84,10 +101,11 @@ function create({ platform = process.platform, systemPreferences, openExternal, 
     // A service an older macOS doesn't know just says so; the rest are still forgotten.
     for (const s of TCC[kind]) await Promise.resolve(tccutil(['reset', s, id])).catch(() => {})
     if (kind === 'accessibility') askedAx = false
+    if (kind === 'input-monitoring') askedListen = false
     onChange()
     return ask(kind)
   }
-  const all = () => Object.fromEntries(kinds().map((k) => [k, status(k)]))
+  const all = async () => Object.fromEntries(await Promise.all(kinds().map(async (k) => [k, await status(k)])))
   return { kinds, status, ask, reset, open, all, canReset: (kind) => MAC && !!bundleId() && !!TCC[kind] }
 }
 

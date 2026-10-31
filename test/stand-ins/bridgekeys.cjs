@@ -3,6 +3,11 @@
 // clipboard touched:
 //   hotkey <code> <mods>   the key set at once; with $BRIDGEKEYS_PRESS, pressed in TextEdit (pid 4242)
 //                          a moment later and let go after; "press" and "release" on stdin too
+//   modifier fn|ralt       one key on its own: set at once, unless $BRIDGEKEYS_LISTEN is "no" (macOS
+//                          not letting it listen: {"error":"input-monitoring"}); "press", "release"
+//                          and "other" (another key while it's held) on stdin
+//   listen-access, listen-ask   whether it may listen ($BRIDGEKEYS_LISTEN); listen-ask is noted in
+//                          $BRIDGEKEYS_LOG
 //   front                  TextEdit in front (pid 4242)
 //   paste [--pid <pid>]    what it was given (its arguments and the text on stdin) noted in
 //                          $BRIDGEKEYS_LOG, nothing pressed; it answers with $BRIDGEKEYS_PASTE, or
@@ -13,7 +18,14 @@ const say = (o) => process.stdout.write(`${JSON.stringify(o)}\n`)
 const FRONT = { app: 'TextEdit', bundle: 'com.apple.TextEdit', path: '/System/Applications/TextEdit.app', pid: 4242, secure: false }
 const down = () => say({ down: Date.now(), ...FRONT })
 const up = () => say({ up: Date.now() })
-if (cmd === 'hotkey') {
+const listen = () => process.env.BRIDGEKEYS_LISTEN !== 'no'
+if (cmd === 'listen-access' || cmd === 'listen-ask') {
+  if (cmd === 'listen-ask' && process.env.BRIDGEKEYS_LOG) fs.appendFileSync(process.env.BRIDGEKEYS_LOG, `${JSON.stringify({ args: [cmd] })}\n`)
+  say({ allowed: listen() })
+} else if (cmd === 'modifier' && !listen()) {
+  say({ error: 'input-monitoring' })
+  process.exit(1)
+} else if (cmd === 'hotkey' || cmd === 'modifier') {
   say({ ready: true })
   if (process.env.BRIDGEKEYS_PRESS) { setTimeout(down, 150); setTimeout(up, 700) }
   let buf = ''
@@ -24,6 +36,7 @@ if (cmd === 'hotkey') {
       buf = buf.slice(i + 1)
       if (line === 'press') down()
       else if (line === 'release') up()
+      else if (line === 'other') say({ cancel: Date.now() })
     }
   })
   process.stdin.on('end', () => process.exit(0))

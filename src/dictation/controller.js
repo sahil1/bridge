@@ -40,7 +40,10 @@ export const active = () => st.phase !== 'idle'
 
 // The platform the keys are pressed on: the desktop app's, else this browser's.
 export const keysPlatform = () => window.bridgeApp?.platform || (/Mac|iPhone|iPad/.test(navigator.platform) ? 'darwin' : /Win/.test(navigator.platform) ? 'win32' : 'linux')
-export const dictationKey = (c) => c?.key || defaultKey(keysPlatform())
+// Fn never reaches a page: only the desktop app on a Mac hears it (with the key from other apps on),
+// and tells the page. Anywhere else the usual key works instead.
+const fnHeard = (c) => !!window.bridgeApp?.desktop && keysPlatform() === 'darwin' && c.background === true
+export const dictationKey = (c) => (c?.key && (c.key !== 'Fn' || fnHeard(c)) ? c.key : defaultKey(keysPlatform()))
 // What a bar says while it listens, held or hands-free.
 export const listeningHint = (mode, label) => (mode === 'free' ? t("Listening… press {key} or Enter when you're done", { key: label }) : t('Talking… let go to add it · Esc cancels'))
 

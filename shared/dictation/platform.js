@@ -56,6 +56,23 @@ export function globalKey(m = {}) {
 // it there. Bridge AI asks once, after your first words in it (controller.js offerAnyApp), and
 // Settings › Voice turns it on or off.
 
+// One key on its own as the key (Settings › Voice, opt-in; keys.js LONE), where this computer can hear
+// it from other apps:
+//   a Mac          Fn (🌐) and the right ⌥, through bridgekeys' listen-only event tap, which needs
+//                  Input Monitoring (or Accessibility, which covers it): asked when you pick one
+//   Windows, X11   the right Alt, through uiohook-napi's hook (no prompt). It's AltGr on many
+//                  keyboards, so it's never the default, and a character typed with it cancels
+//   elsewhere      none: Wayland would need /dev/input, and Docker, a browser and the phone have no
+//                  key from other apps
+// The answer: { keys, asks }. asks: 'input-monitoring' (a Mac).
+export function loneKeys(m = {}) {
+  const key = globalKey(m)
+  if (key.mode !== 'hold') return { keys: [], asks: null }
+  if (m.platform === 'darwin' && key.via === 'bridgekeys') return { keys: ['Fn', 'RightAlt'], asks: 'input-monitoring' }
+  if ((m.platform === 'win32' || m.platform === 'linux') && key.via === 'uiohook') return { keys: ['RightAlt'], asks: null }
+  return { keys: [], asks: null }
+}
+
 // Pasting what you said where you're typing in the other app ("Where I'm typing", Settings › Voice;
 // off until you pick it). It's the clipboard and the paste keys pressed for you, so it needs the key
 // from other apps first, and what this system lets one app press in another:

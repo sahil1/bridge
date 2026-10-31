@@ -12,6 +12,23 @@
 //     {"error":"failed","status":n}           and then, each time the key goes down and up:
 //     {"down":<ms since 1970>,"app":"Safari","bundle":"com.apple.Safari","path":"/Applications/Safari.app","pid":123,"secure":false}
 //     {"up":<ms>}
+//   bridgekeys modifier fn|ralt               one key on its own held to talk instead: Fn (🌐) or the
+//                                             right ⌥. A listen-only event tap, which macOS allows with
+//                                             Input Monitoring (or Accessibility, which covers
+//                                             listening too); it never asks, it only looks
+//                                             (CGPreflightListenEventAccess), so it's never what makes
+//                                             macOS ask. One line when it's set: {"ready":true} or
+//                                             {"error":"input-monitoring"}, then {"down":…} and {"up":…}
+//                                             as for hotkey, and {"cancel":<ms>} when another key is
+//                                             pressed while it's held (Fn+F5, ⌥ typing a character):
+//                                             not dictation after all. The key still does what it does
+//                                             in the app in front (a listen-only tap can't keep it), so
+//                                             for Fn, "Press 🌐 key to" is best set to Do Nothing.
+//   bridgekeys listen-access                  whether macOS lets this app listen to keys (Input
+//                                             Monitoring or Accessibility), without asking:
+//     {"allowed":true}
+//   bridgekeys listen-ask                     the same, asking macOS the first time ("Bridge AI would
+//                                             like to receive keystrokes from any application")
 //   bridgekeys front                          the app in front (its name, bundle ID and where it is,
 //                                             for its icon in the list of dictations) and whether
 //                                             Secure Input is on (a password field has the keyboard),
@@ -226,12 +243,84 @@ if args.count >= 2 && args[1] == "front" {
 }
 if args.count >= 2 && args[1] == "paste" { paste() }
 if args.count >= 2 && args[1] == "board" { boardTool() }
+// Listening to keys: Input Monitoring, or Accessibility (which covers it).
+func mayListen() -> Bool { CGPreflightListenEventAccess() || AXIsProcessTrusted() }
+if args.count >= 2 && args[1] == "listen-access" { say("{\"allowed\":\(mayListen())}"); exit(0) }
+if args.count >= 2 && args[1] == "listen-ask" { say("{\"allowed\":\(CGRequestListenEventAccess() || mayListen())}"); exit(0) }
+signal(SIGPIPE, SIG_DFL) // stdout closed: Bridge AI has gone, so do we
+
+// ---------- One key on its own: Fn or the right ⌥ ----------
+let kFn: Int64 = 63 // kVK_Function
+let kRightOption: Int64 = 61 // kVK_RightOption
+var loneCode: Int64 = kFn
+var loneHeld = false
+var loneTap: CFMachPort?
+// Is it down? Fn has a flag of its own; the right ⌥ is the device bit for that side (NX_DEVICERALTKEYMASK).
+func loneDown(_ flags: CGEventFlags) -> Bool { loneCode == kFn ? flags.contains(.maskSecondaryFn) : flags.rawValue & 0x40 != 0 }
+func loneEvent(_ what: String) {
+  if what == "down" {
+    if loneHeld { return }
+    loneHeld = true
+    say("{\"down\":\(now()),\(front())}")
+  } else if what == "up" {
+    if !loneHeld { return }
+    loneHeld = false
+    say("{\"up\":\(now())}")
+  } else if loneHeld {
+    loneHeld = false
+    say("{\"cancel\":\(now())}")
+  }
+}
+func loneKey(_ which: String) -> Never {
+  loneCode = which == "ralt" ? kRightOption : kFn
+  let app = NSApplication.shared
+  app.setActivationPolicy(.prohibited)
+  if !mayListen() { say("{\"error\":\"input-monitoring\"}"); exit(1) }
+  let mask = (1 << CGEventType.flagsChanged.rawValue) | (1 << CGEventType.keyDown.rawValue)
+  let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .listenOnly, eventsOfInterest: CGEventMask(mask), callback: { _, type, event, _ in
+    if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+      if let t = loneTap { CGEvent.tapEnable(tap: t, enable: true) }
+      return Unmanaged.passUnretained(event)
+    }
+    if type == .flagsChanged {
+      let code = event.getIntegerValueField(.keyboardEventKeycode)
+      if code == loneCode {
+        // On its own: with ⌘, ⌃, ⇧ or the other of the two held, it's a shortcut, not this.
+        let others: CGEventFlags = loneCode == kFn ? [.maskCommand, .maskControl, .maskShift, .maskAlternate] : [.maskCommand, .maskControl, .maskShift, .maskSecondaryFn]
+        if loneDown(event.flags) { if event.flags.intersection(others).isEmpty { loneEvent("down") } } else { loneEvent("up") }
+      } else if loneHeld { loneEvent("cancel") }
+    } else if type == .keyDown && loneHeld {
+      loneEvent("cancel")
+    }
+    return Unmanaged.passUnretained(event)
+  }, userInfo: nil)
+  guard let tap else { say("{\"error\":\"input-monitoring\"}"); exit(1) }
+  loneTap = tap
+  CFRunLoopAddSource(CFRunLoopGetMain(), CFMachPortCreateRunLoopSource(nil, tap, 0), .commonModes)
+  CGEvent.tapEnable(tap: tap, enable: true)
+  say("{\"ready\":true}")
+  // "press", "release" and "other" on stdin, as the key itself (the tests' way in).
+  Thread {
+    while let line = readLine() {
+      let cmd = line.trimmingCharacters(in: .whitespaces)
+      DispatchQueue.main.async { loneEvent(cmd == "press" ? "down" : cmd == "release" ? "up" : "cancel") }
+    }
+    exit(0) // stdin closed
+  }.start()
+  let parent = getppid()
+  let watch = DispatchSource.makeTimerSource(queue: .main)
+  watch.schedule(deadline: .now() + 1, repeating: 1)
+  watch.setEventHandler { if getppid() != parent { exit(0) } }
+  watch.resume()
+  app.run()
+  exit(0)
+}
+if args.count >= 3 && args[1] == "modifier" { loneKey(args[2]) }
+
 guard args.count >= 4, args[1] == "hotkey", let code = UInt32(args[2]), let mods = UInt32(args[3]) else {
-  FileHandle.standardError.write("usage: bridgekeys hotkey <keycode> <modifiers> | bridgekeys front | bridgekeys paste [--pid <pid>]\n".data(using: .utf8)!)
+  FileHandle.standardError.write("usage: bridgekeys hotkey <keycode> <modifiers> | bridgekeys modifier fn|ralt | bridgekeys listen-access | bridgekeys listen-ask | bridgekeys front | bridgekeys paste [--pid <pid>]\n".data(using: .utf8)!)
   exit(2)
 }
-
-signal(SIGPIPE, SIG_DFL) // stdout closed: Bridge AI has gone, so do we
 // An app with no Dock icon or menu, so the key's events reach it.
 let app = NSApplication.shared
 app.setActivationPolicy(.prohibited)

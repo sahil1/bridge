@@ -133,7 +133,7 @@ export default function PermissionFix({ pane, folder, onCheck, stale = false, ro
   let doing = null
   if (here && !settled && !p.update) {
     if (step === 'asking') {
-      doing = <p className="muted small">{pane === 'accessibility' ? t('macOS is asking: choose Open System Settings, then turn on {name}.', { name: who })
+      doing = <p className="muted small">{pane === 'accessibility' || pane === 'input-monitoring' ? t('macOS is asking: choose Open System Settings, then turn on {name}.', { name: who })
         : pane === 'calendars' ? t('macOS is asking: choose Allow Full Access in its window (it can be behind this one).')
           : t('macOS is asking: choose Allow in its window (it can be behind this one).')}</p>
     } else if (step === 'tested') {
