@@ -176,6 +176,9 @@ try {
     return r.length === 2 && r.some((i) => i.paneId === six.paneId) && r.some((i) => i.paneId === five.paneId)
   }, 40000, 500)), 'two asking for permission: one on each device')
   const d = await page(b, a.url, { mode: 'dark', theme: 'midnight' })
+  const bg = () => d.p.evaluate(() => getComputedStyle(document.querySelector('.top-right .needs-chip')).backgroundColor)
+  await d.p.locator('.top-right .needs-chip:not(.quiet)').waitFor({ timeout: 20000 })
+  const urgentBg = await bg()
   await d.p.locator('.top-right .needs-chip').click({ timeout: 20000 })
   const dp = d.p.locator('.ny-panel')
   const batch = dp.locator('.ny-batch')
@@ -185,6 +188,11 @@ try {
   await shot(d.p, `${tag}needs-you-batch-dark`)
   await batch.locator('button.primary', { hasText: 'Yes to all' }).click()
   ok(!!(await until(() => answers(a).some((x) => x.command === 'git push' && x.key === '1') && answers(c).some((x) => x.command === 'npm run seed' && x.key === '1'), 20000)), 'and answers each on its own device', { studio: answers(a), desk: answers(c) })
+  // Nothing waits now, only finished work: the chip says so quietly, in a tinted theme too.
+  await d.p.keyboard.press('Escape')
+  ok(!!(await until(async () => /to review/.test(await d.p.locator('.top-right .needs-chip.quiet').innerText().catch(() => '')), 20000)), 'with nothing waiting, the chip says how much there is to review', await d.p.locator('.top-right').innerText().catch(() => ''))
+  const quietBg = await bg()
+  ok(quietBg !== urgentBg, 'quietly: not in the colour of something waiting on you', { urgentBg, quietBg })
   await d.ctx.close()
 
   // ---------- a phone ----------
