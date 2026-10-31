@@ -155,6 +155,23 @@ export async function startKit(name, { env = {}, config = {}, node = process.exe
   return { port, url, dir, home, data, bin, api, program, restart, stop: () => stopTree(server.pid), log: () => fs.readFileSync(path.join(dir, 'server.log'), 'utf8') }
 }
 
+// A Mac with or without Apple's command line developer tools, whatever this one has: a stand-in
+// xcode-select (stand-ins/xcode-select.cjs) in a kit's bin folder, put there before its server
+// starts (startKit's env function), as the server asks it once and keeps a yes. installDevTools: they
+// arrive (a folder with a git, where the stand-in says they are).
+export function installDevTools(bin) {
+  const dev = path.join(bin, 'devtools')
+  fs.mkdirSync(path.join(dev, 'usr', 'bin'), { recursive: true })
+  fs.writeFileSync(path.join(dev, 'usr', 'bin', 'git'), '#!/bin/sh\n', { mode: 0o755 })
+  fs.writeFileSync(path.join(bin, 'devtools.txt'), dev)
+}
+export function devToolsStandIn(bin, { tools = false } = {}) {
+  const js = path.join(bin, 'xcode-select.cjs')
+  fs.copyFileSync(path.join(TEST, 'stand-ins', 'xcode-select.cjs'), js)
+  fs.writeFileSync(path.join(bin, 'xcode-select'), `#!/bin/sh\nexec "${process.execPath}" "${js}" "$@"\n`, { mode: 0o755 })
+  if (tools) installDevTools(bin)
+}
+
 // A relay on this computer (stand-ins/relay.mjs: the real relay, run in Node), for pairing and
 // linking devices with nothing leaving the machine. relayFile: what a kit's relay.json needs to use
 // it. freeze/thaw/drop: what a sleeping Mac or a changed network does to its connections.

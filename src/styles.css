@@ -2832,6 +2832,19 @@ table.sheet tbody tr:hover td { background: var(--pane-2); }
 .wiz-awake b { font: 600 13.5px var(--font); }
 .wiz-awake small { color: var(--ink-3); font-size: 12.5px; }
 .wiz-strip { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 0 22px; padding: 7px 11px; border-radius: 10px; background: var(--pane-2); font-size: 12.5px; color: var(--ink-2); }
+.wiz-you { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; color: var(--ink); }
+/* What setup's terminal tab is waiting for you to do (SetupAll.jsx), with that terminal in place. */
+.sa-you { display: grid; gap: 8px; margin: 4px 0 2px; padding: 10px 12px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--needs) 45%, var(--line)); background: color-mix(in srgb, var(--needs) 6%, var(--pane)); }
+.sa-you-say { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 7px; margin: 0; font-size: 13px; }
+.sa-you-say b { color: var(--needs); font-weight: 600; }
+.sa-you-dot { flex: none; align-self: center; width: 8px; height: 8px; border-radius: 50%; background: var(--needs); box-shadow: 0 0 0 3px color-mix(in srgb, var(--needs) 22%, transparent); }
+.sa-term { height: 150px; display: flex; border-radius: 9px; overflow: hidden; background: var(--term-bg); }
+.sa-term .live-term .terminal-host { padding: 8px 10px 2px; }
+.node-install.waiting .btn[disabled] { opacity: .85; cursor: progress; }
+/* The top bar's "Setting up · 3 of 6" (SetupChip.jsx). */
+.setup-chip .aa-spin { width: 12px; height: 12px; margin: 0; }
+.setup-chip.you { color: var(--ink); }
+.app.narrow .setup-chip-word { max-width: 34vw; overflow: hidden; text-overflow: ellipsis; }
 .wiz-foot { display: flex; align-items: center; gap: 10px; padding: 14px 18px 16px; border-top: 1px solid var(--line); }
 @media (max-width: 640px) {
   .wiz { max-height: 94vh; border-radius: 14px; }

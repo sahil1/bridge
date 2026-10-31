@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import Icon from './Icon.jsx'
 import { api, viaRelay, usePoll } from '../api.js'
 import { useRecheck } from './PermissionFix.jsx'
+import { t } from '../i18n/index.js'
 
 // Sign in to an agent from wherever it's asked for: its own login, in a terminal tab you can watch;
 // the browser opens on this computer. Claude Code and Codex sign in per account (Settings ›
@@ -38,9 +39,10 @@ export default function SignInButton({ kind, label = 'Sign in', account, onCheck
 
 // Node.js, for what needs it on a computer that has none (server/nodejs.js): one button that
 // installs the official version from nodejs.org just for Bridge AI, how it's going, then onDone.
-// Where it can't (Windows), where to get it.
+// Where it can't (Windows), where to get it. forAgent: on an agent's card, whose own Install waits
+// for it, so while it's going (setup started it, or you did) that's what the button says.
 const NODE_PAGE = 'https://nodejs.org/en/download'
-export function InstallNode({ onDone, why }) {
+export function InstallNode({ onDone, why, forAgent = false }) {
   const [st, setSt] = useState(null)
   const [err, setErr] = useState(null)
   const going = !!st?.job && !st.job.error
@@ -69,6 +71,16 @@ export function InstallNode({ onDone, why }) {
     )
   }
   const j = st?.job
+  if (forAgent && going) {
+    return (
+      <span className="signin node-install waiting">
+        <button type="button" className="btn small primary" disabled>
+          <Icon name="refresh" size={12} className="spin" /> {j.step === 'download' ? t('Install · waiting for Node.js {n}%', { n: j.percent || 0 }) : t('Install · waiting for Node.js')}
+        </button>
+        <span className="muted small">{t('Node.js is installing for it now. This becomes Install by itself when it\'s done.')}</span>
+      </span>
+    )
+  }
   return (
     <span className="signin node-install">
       <button type="button" className="btn small primary" disabled={going || !st} onClick={go}>
@@ -94,7 +106,7 @@ export function InstallAgentButton({ kind, label = 'Install', onCheck, needs, sh
   }
   const show = () => window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: state.openId } }))
   const need = needs || (state?.code === 'needs:node' ? 'Node.js' : null)
-  if (need) return <InstallNode why="It needs Node.js first." onDone={() => { setState(null); onCheck?.() }} />
+  if (need) return <InstallNode why="It needs Node.js first." forAgent onDone={() => { setState(null); onCheck?.() }} />
   // eslint-disable-next-line no-control-regex
   const tail = String(screen?.ansi || '').replace(/\x1b\][^\x07]*\x07/g, '').replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\r/g, '').split('\n').map((l) => l.trimEnd()).filter(Boolean).slice(-3)
   return (

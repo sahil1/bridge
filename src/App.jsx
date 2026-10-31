@@ -16,6 +16,7 @@ import AddAccount from './components/AddAccount.jsx'
 import History from './components/History.jsx'
 import UpdateChip from './components/UpdateChip.jsx'
 import RestartChip from './components/RestartChip.jsx'
+import SetupChip from './components/SetupChip.jsx'
 import RuntimeNotice from './components/RuntimeNotice.jsx'
 import AccountMenu, { listed, setDefault, lapsed, asList, nameOf as accountName } from './components/AccountMenu.jsx'
 import { CHANNEL, nameOf, popOut, tell } from './components/Solo.jsx'
@@ -587,6 +588,7 @@ function App() {
         )}
         {!cloudOnly && (
           <>
+            <Quiet name="Setting up"><SetupChip /></Quiet>
             <Quiet name="Next meeting"><NextMeetingChip onClick={() => showCard('calendar')} /></Quiet>
             <Quiet name="Usage"><ProviderChip quota={quota.data} primary={primary} onClick={() => showCard('gauge')} onAddAccount={(kind) => setAddAcct({ kind })} /></Quiet>
             {update.data?.available && <Quiet name="Update"><UpdateChip u={update.data} onDetails={() => setSettings('about')} /></Quiet>}

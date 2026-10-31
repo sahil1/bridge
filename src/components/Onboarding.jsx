@@ -3,12 +3,14 @@ import Icon from './Icon.jsx'
 import AgentMark from './settings/agentMark.jsx'
 import { api, settingsChanged, refetch, viaRelay } from '../api.js'
 import SignInButton, { InstallAgentButton, canSignIn } from './SignIn.jsx'
-import { SetupList, useSetupPlan, readyCount, alreadyLine } from './SetupAll.jsx'
+import { SetupList, useSetupPlan, alreadyLine } from './SetupAll.jsx'
+import { runProgress } from '../setupPlan.js'
 import { t, tx } from '../i18n/index.js'
 
 // First run, in three short steps: how much Bridge AI sets up by itself (just Node.js for the agents,
-// which asks for no password and nothing to allow; everything it uses, in one go, while you carry on;
-// or later, from Settings › General) and whether it stays awake for your phone, your AI
+// which asks for no password and nothing to allow; everything it uses, in the background while you
+// carry on, with what needs you said where you are; or later, from Settings › General) and whether
+// it stays awake for your phone, your AI
 // (any plan you sign in with, what's on this computer signed in or not, with Install and Sign in
 // right there; or an API key, or a model running on this computer: any one is enough), then your
 // projects (the folders your agents already worked in, the likely ones ticked). Nothing has to be
@@ -63,10 +65,25 @@ const STEPS = [tx('Set up'), tx('Your AI'), tx('Your projects')]
 // The recommended one asks for no password and nothing to allow: the rest waits until it's used.
 const LEVELS = [
   ['basic', tx('Just what agents need (recommended)'), tx('Node.js, so any agent installs in one click. No password, nothing to allow. Meeting notes, voice notes and the calendar set themselves up the first time you use them.')],
-  ['full', tx('Everything'), tx('Node.js, meeting notes, voice notes and your calendar, installed in one go while you carry on (the speech model is a 670 MB download). Asks for your password once, then for what macOS needs you to allow.')],
+  ['full', tx('Everything'), tx('Node.js, meeting notes, voice notes and your calendar, set up in the background while you carry on (the speech model is a 670 MB download). Asks for your password once, then for what macOS needs you to allow.')],
   ['later', tx('Later'), tx('Nothing now. Settings › General has it all in one place whenever you want it.')],
 ]
 const HAVE_NODE = tx('Node.js is already here, so there\'s nothing to install. Meeting notes, voice notes and the calendar set themselves up the first time you use them.')
+// Everything, as it is on this computer: off a Mac, nothing asks; on a Mac without Apple's developer
+// tools they come too (with the password); with them and nothing for Homebrew to bring, no password.
+const FULL = {
+  other: tx('Node.js, meeting notes and voice notes, set up in the background while you carry on (the speech model is a 670 MB download).'),
+  devtools: tx('Node.js, Apple\'s developer tools, meeting notes, voice notes and your calendar, set up in the background while you carry on (the speech model is a 670 MB download, the developer tools about 1 GB). Asks for your Mac\'s password once, then for what macOS needs you to allow.'),
+  nopassword: tx('Node.js, meeting notes, voice notes and your calendar, set up in the background while you carry on (the speech model is a 670 MB download). Then asks for what macOS needs you to allow.'),
+}
+const fullNote = (plan, note) => {
+  if (!plan) return note
+  if (!plan.mac) return FULL.other
+  const left = (id) => plan.items.some((i) => i.id === id && i.state !== 'done')
+  return left('devtools') ? FULL.devtools : left('homebrew') ? note : FULL.nopassword
+}
+// What the Set up Bridge AI tab is waiting for, as a link back to it in setup's first step.
+const WAITS = { password: tx('Type your Mac\'s password'), terminal: tx('See the Set up Bridge AI tab'), window: tx('Click Install in macOS\'s window') }
 const ago = (t) => {
   const s = (Date.now() - t) / 1000
   return s < 3600 ? `${Math.max(1, Math.round(s / 60))}m` : s < 86400 ? `${Math.round(s / 3600)}h` : `${Math.round(s / 86400)}d`
@@ -129,9 +146,10 @@ export default function Onboarding({ onDone }) {
       // Always saved, an empty list too, so a later start doesn't fill it in for you.
       await api('/projects', { method: 'POST', body: { paths: importing && picked ? [...picked] : [] } }).then(() => refetch('/projects')).catch(() => {})
       if (chiefKind) api('/chief/launch', { method: 'POST' }).catch(() => {})
-      // Homebrew asks for your password in its terminal tab: shown once setup is done.
-      const brewing = setup.plan?.running && setup.plan.items.some((i) => i.id === 'homebrew' && i.state === 'running')
-      onDone(brewing ? setup.plan.openId : undefined)
+      // The Set up Bridge AI tab still waiting for your password (or a key): shown once setup is
+      // done. Otherwise it carries on in the background, and the top bar says how far it is.
+      const waiting = ['password', 'terminal'].includes(setup.plan?.needsYou)
+      onDone(waiting ? setup.plan.openId : undefined)
     } catch (e) { setErr(e.message); setBusy(false) }
   }
 
@@ -153,6 +171,7 @@ export default function Onboarding({ onDone }) {
 
   const shown = found || []
   const n = picked?.size || 0
+  const progress = runProgress(setup.plan)
   return (
     <div className="onb wiz-back">
       <div className="wiz" role="dialog" aria-modal="true" aria-label={t('Set up Bridge AI')}>
@@ -179,7 +198,7 @@ export default function Onboarding({ onDone }) {
               : !started ? <>
               {have.length > 0 && <p className="muted small sa-kept">{alreadyLine(have)}</p>}
               <ul className="wiz-levels" role="radiogroup" aria-label={t('How much to set up')}>
-                {levels.map(([id, label, note]) => (setup.plan && !setup.plan.mac && id === 'full' ? [id, label, tx('Node.js, meeting notes and voice notes, set up in one go while you carry on (the speech model is a 670 MB download).')] : id === 'basic' && nodeHere ? [id, label, HAVE_NODE] : [id, label, note])).map(([id, label, note]) => (
+                {levels.map(([id, label, note]) => (id === 'full' ? [id, label, fullNote(setup.plan, note)] : id === 'basic' && nodeHere ? [id, label, HAVE_NODE] : [id, label, note])).map(([id, label, note]) => (
                   <li key={id} className={level === id ? 'on' : ''}>
                     <label><input type="radio" name="wiz-level" value={id} checked={level === id} onChange={() => setLevel(id)} /><b>{t(label)}</b><small>{t(note)}</small></label>
                   </li>
@@ -263,10 +282,11 @@ export default function Onboarding({ onDone }) {
           )}
 
         {err && <p className="error-text wiz-err">{err}</p>}
-        {step > 0 && started && started !== 'later' && setup.plan && (
+        {step > 0 && started && started !== 'later' && progress.total > 0 && (
           <p className="wiz-strip" aria-live="polite">
             {setup.plan.running ? <span className="aa-spin" /> : <Icon name="check" size={12} />}
-            {setup.plan.running ? t('Setting up in the background: {n} of {total} ready', { n: readyCount(setup.plan), total: setup.plan.items.length }) : t('Set up: {n} of {total} ready. The rest is in Settings › General.', { n: readyCount(setup.plan), total: setup.plan.items.length })}
+            {setup.plan.running ? t('Setting up in the background: {n} of {total} ready', { n: progress.ready, total: progress.total }) : t('Set up: {n} of {total} ready. The rest is in Settings › General.', { n: progress.ready, total: progress.total })}
+            {WAITS[setup.plan.needsYou] && <span className="wiz-you"><span className="sa-you-dot" aria-hidden="true" /><b>{t('Needs you')}</b> <button type="button" className="link-btn small" onClick={() => setStep(0)}>{t(WAITS[setup.plan.needsYou])}</button></span>}
           </p>
         )}
         <footer className="wiz-foot">
