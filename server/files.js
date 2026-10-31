@@ -12,8 +12,13 @@ import { gitReady, NO_GIT } from './gitready.js'
 
 const HIDDEN = new Set(['.git', 'node_modules', '.DS_Store', '__pycache__', '.venv', 'venv', '.next', 'dist', '.cache', '.turbo'])
 const MAX_TEXT = 1024 * 1024
-const IMAGE = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' }
+const IMAGE = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.avif': 'image/avif', '.bmp': 'image/bmp', '.heic': 'image/heic', '.heif': 'image/heif', '.tif': 'image/tiff', '.tiff': 'image/tiff' }
 const PDF = { '.pdf': 'application/pdf' }
+// Videos and sounds play in the viewer (the browser's own player, asking for the parts it needs as
+// you watch). Whether this browser can play one is up to it: the viewer says so when it can't.
+const VIDEO = { '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm', '.mkv': 'video/x-matroska', '.ogv': 'video/ogg', '.avi': 'video/x-msvideo', '.3gp': 'video/3gpp' }
+const AUDIO = { '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.wav': 'audio/wav', '.flac': 'audio/flac', '.ogg': 'audio/ogg', '.oga': 'audio/ogg', '.opus': 'audio/ogg', '.weba': 'audio/webm', '.aif': 'audio/aiff', '.aiff': 'audio/aiff', '.caf': 'audio/x-caf' }
+export const typeOf = (name) => { const ext = path.extname(String(name)).toLowerCase(); return IMAGE[ext] || PDF[ext] || VIDEO[ext] || AUDIO[ext] || null }
 
 export async function safePath(root, rel = '') {
   const realRoot = await fsp.realpath(root)
@@ -50,8 +55,10 @@ export async function readFile(root, rel) {
   if (st.isDirectory()) throw new Error('Is a folder')
   const ext = path.extname(real).toLowerCase()
   const base = { path: r, name: path.basename(real), ext, size: st.size, mtime: st.mtimeMs }
-  if (IMAGE[ext]) return { ...base, kind: 'image' }
+  if (IMAGE[ext]) return { ...base, kind: 'image', type: IMAGE[ext] }
   if (PDF[ext]) return { ...base, kind: 'pdf' }
+  if (VIDEO[ext]) return { ...base, kind: 'video', type: VIDEO[ext] }
+  if (AUDIO[ext]) return { ...base, kind: 'audio', type: AUDIO[ext] }
   if (OFFICE[ext]) return { ...base, kind: 'office', office: OFFICE[ext] }
   const fh = await fsp.open(real, 'r')
   const len = Math.min(st.size, MAX_TEXT)
@@ -80,10 +87,12 @@ export async function writeFile(root, rel, text, { mtime, force = false } = {}) 
   return readFile(root, rel)
 }
 
+// A file as it is, for the viewer's picture, PDF or player, or to download. Served by the route in
+// parts when asked (Range), straight from disk, so a long video starts at once and seeks anywhere.
 export async function rawFile(root, rel) {
   const { real } = await safePath(root, rel)
   const ext = path.extname(real).toLowerCase()
-  return { file: real, type: IMAGE[ext] || PDF[ext] || 'application/octet-stream' }
+  return { file: real, name: path.basename(real), type: typeOf(real) || 'application/octet-stream', media: !!(VIDEO[ext] || AUDIO[ext]) }
 }
 
 // An HTML page and the files next to it (styles, scripts, images), served by path so the page's
