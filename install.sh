@@ -77,8 +77,15 @@ install_linux() {
     ln -sf "$DIR/app/bridge-ai" "$BIN"
     ICON="$HOME/.local/share/icons/hicolor/512x512/apps/bridge-ai.png"
     cp "$DIR/app/bridge-ai.png" "$ICON" 2>/dev/null || curl -fsSL "https://raw.githubusercontent.com/$REPO/main/public/icon-512.png" -o "$ICON" 2>/dev/null || true
+    # The menu entry is named as the one inside the app: its ID (desktopName), which the desktop matches
+    # the app's windows to, and which GNOME lets have a keyboard shortcut only when a menu entry has
+    # that name. That's dev.bridge-ai.app.desktop, or bridge-ai.desktop for an older version
+    # (BRIDGE_VERSION). The other name goes, so an update doesn't leave two entries.
+    ENTRY=bridge-ai.desktop
+    for f in "$DIR/app"/*.desktop; do if [ -f "$f" ]; then ENTRY="${f##*/}"; break; fi; done
+    rm -f "$HOME/.local/share/applications/bridge-ai.desktop" "$HOME/.local/share/applications/dev.bridge-ai.app.desktop"
     # Quoted: a home folder can have a space in its name.
-    printf '[Desktop Entry]\nName=Bridge AI\nComment=Run and talk to all your AI coding agents\nExec="%s" %%U\nIcon=bridge-ai\nType=Application\nCategories=Development;\nTerminal=false\n' "$DIR/app/bridge-ai" > "$HOME/.local/share/applications/bridge-ai.desktop"
+    printf '[Desktop Entry]\nName=Bridge AI\nComment=Run and talk to all your AI coding agents\nExec="%s" %%U\nIcon=bridge-ai\nType=Application\nCategories=Development;\nTerminal=false\nStartupWMClass=%s\n' "$DIR/app/bridge-ai" "${ENTRY%.desktop}" > "$HOME/.local/share/applications/$ENTRY"
     say "Installed to $DIR, with a menu entry and the command $BIN."
   fi
   say "Bridge AI is installed."

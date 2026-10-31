@@ -6,6 +6,7 @@
   "license": "Apache-2.0",
   "author": "Bridge AI contributors",
   "main": "main.js",
+  "desktopName": "dev.bridge-ai.app.desktop",
   "private": true,
   "scripts": {
     "start": "electron .",
@@ -106,6 +107,7 @@
       ],
       "category": "Development",
       "executableName": "bridge-ai",
+      "syncDesktopName": true,
       "synopsis": "Run and talk to all your AI coding agents",
       "maintainer": "Bridge AI contributors <sahil1@users.noreply.github.com>",
       "artifactName": "Bridge-AI-linux-${arch}.${ext}",
