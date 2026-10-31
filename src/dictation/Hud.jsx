@@ -29,6 +29,8 @@ const WHY = {
   secure: () => t('Secure input is on (a password field, or Secure Keyboard Entry), so it wasn\'t pasted.'),
   moved: () => t('Another app is in front now, so it wasn\'t pasted.'),
   focus: () => t('Bridge AI was in front, so it wasn\'t pasted.'),
+  // Windows and Linux: Ctrl+V pressed with Alt still down would be another shortcut.
+  held: () => t('A key was still held down, so it wasn\'t pasted. Let go of the keys once you\'ve said it.'),
   failed: () => t('Couldn\'t paste it there.'),
 }
 

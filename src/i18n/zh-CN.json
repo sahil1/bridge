@@ -23,6 +23,7 @@
   "A call started": "通话已开始",
   "A copy is kept with the meeting. Or drop them on it.": "会议中会保存一份副本。也可以直接拖到会议上。",
   "A copy on a new branch, so it can't clash with other agents.": "在新分支上的副本，不会与其他智能体冲突。",
+  "A key was still held down, so it wasn't pasted. Let go of the keys once you've said it.": "还有按键没有松开，所以没有粘贴。说完后请松开按键。",
   "A link or a file's path": "链接或文件路径",
   "A model name": "模型名称",
   "A model name, like claude-sonnet-5-5": "模型名称，例如 claude-sonnet-5-5",

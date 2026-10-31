@@ -23,6 +23,7 @@
   "A call started": "एक कॉल शुरू हुई",
   "A copy is kept with the meeting. Or drop them on it.": "एक कॉपी मीटिंग के साथ रखी जाती है। या उन्हें मीटिंग पर छोड़ें।",
   "A copy on a new branch, so it can't clash with other agents.": "नई ब्रांच पर एक कॉपी, ताकि दूसरे एजेंट से टकराव न हो।",
+  "A key was still held down, so it wasn't pasted. Let go of the keys once you've said it.": "कोई की अभी भी दबी हुई थी, इसलिए पेस्ट नहीं हुआ। बोल लेने के बाद कीज़ छोड़ दें।",
   "A link or a file's path": "लिंक या फ़ाइल का पाथ",
   "A model name": "मॉडल का नाम",
   "A model name, like claude-sonnet-5-5": "मॉडल का नाम, जैसे claude-sonnet-5-5",

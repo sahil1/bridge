@@ -19,7 +19,7 @@
 //   work (a Mac, Windows) and hidden where it can't (GNOME on Wayland, a Mac without its helper),
 //   Accessibility asked for when it's picked on a Mac and a card until it's on, said once when it was
 //   picked on a computer where it can't work; the dictation window saying which app the text goes
-//   into, then "Pasted"; refused (a password field) and not yet allowed (the text to copy, with why);
+//   into, then "Pasted"; refused (a password field, a key still held) and not yet allowed (the text to copy, with why);
 //   asked once after a Copy (Paste it picks it and asks for Accessibility; Not now is kept).
 import fs from 'node:fs'
 import path from 'node:path'
@@ -538,6 +538,14 @@ try {
     await talk(h, 'my secret words', 'Safari')
     ok(!!(await until(async () => (await h.locator('.hud-text').innerText().catch(() => '')) === 'My secret words.' && /Secure input is on/.test(await hudText(h)), 8000, 100)) && await h.locator('.hud button', { hasText: 'Copy' }).isVisible() && await h.evaluate(() => window.__hud.hidden === 0), 'refused (a password field): the text stays to copy or send, and it says why', await hudText(h))
     await shot(h, `${tag}dictation-window-not-pasted`)
+    await hc.close()
+  }
+  {
+    // Windows or Linux, a key still held down when the text came: not pasted, the text kept, and why.
+    const { ctx: hc, p: h } = await pasteHud({ ...HELD, paste: { can: true, via: 'keytap', asks: null, allowed: true } }, { error: 'held' })
+    await h.waitForSelector('.hud', { timeout: 10000 })
+    await talk(h, 'keys still down')
+    ok(!!(await until(async () => (await h.locator('.hud-text').innerText().catch(() => '')) === 'Keys still down.' && /still held down, so it wasn't pasted\. Let go of the keys/.test(await hudText(h)), 8000, 100)) && await h.locator('.hud button', { hasText: 'Copy' }).isVisible() && await h.evaluate(() => window.__hud.pasted.length === 1 && window.__hud.hidden === 0), 'a key still held down when it came (Windows, Linux): not pasted, the text kept to copy or send, and it says to let go of the keys', await hudText(h))
     await hc.close()
   }
   {
