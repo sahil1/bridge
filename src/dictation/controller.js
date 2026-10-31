@@ -63,6 +63,9 @@ export function registerBox(id, box) { boxes.set(id, box); return () => { if (bo
 export const noteBoxFocus = (id) => { lastBox = id }
 export const setOnScreen = (fn) => { onScreen = fn || (() => null) }
 export const box = (id) => boxes.get(id) || null
+// Asking the Chief of Staff out loud (voice/AskOutLoud.jsx): its own way to take the words.
+const asks = new Map()
+export function registerAsk(id, fn) { asks.set(id, fn); return () => { if (asks.get(id) === fn) asks.delete(id) } }
 function fallbackBox() {
   const a = onScreen()
   if (a && boxes.get(a)?.visible()) return a
@@ -102,6 +105,7 @@ function typeInto(el, text, sel) {
 }
 function deliver(target, text) {
   if (!target || target.kind === 'hud') return true
+  if (target.kind === 'ask') { const f = asks.get(target.id); if (f) f(text); return !!f }
   if (target.kind === 'composer' && boxes.get(target.id)) { boxes.get(target.id).insert(text, target.caret); return true }
   // Typed into the terminal, without Enter (Terminal.jsx and LiveShell.jsx listen for this).
   if (target.kind === 'terminal' && target.el?.isConnected) { target.el.dispatchEvent(new CustomEvent('bridge-type', { detail: text })); return true }
@@ -308,7 +312,7 @@ const kept = new Map() // the words' time (result.at) -> its id, once kept (a pr
 function keep(at, target, put, said, blob) {
   if (cfg.history === false) return
   const body = { ...said, how: null }
-  if (target?.kind === 'hud') { if (target.app) body.app = target.app } else {
+  if (target?.kind === 'ask') { if (put) { body.how = 'sent'; body.agent = { id: target.id, chief: true } } } else if (target?.kind === 'hud') { if (target.app) body.app = target.app } else {
     // Put nowhere (what it was for had gone): kept all the same, as said in Bridge AI.
     if (put) body.how = 'typed'
     if (put && target.kind === 'composer') body.agent = { id: target.id }
