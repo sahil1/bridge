@@ -2,6 +2,19 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
+## 3.7.1
+
+Dictation's key works from other apps on GNOME now, and the desktop app is on Electron 45.
+
+### What's new
+
+- **Dictation from any app on GNOME.** On GNOME 48 or later with Wayland, the dictation key works in other apps too, once you say yes: tap it to start listening and tap it again to stop (Wayland doesn't tell an app when a key is let go). GNOME asks once to allow it. It needs Bridge AI's menu entry, which the `.deb` and the installer put in place, so with an AppImage opened as it is the key stays inside Bridge AI.
+- **The desktop app is on Electron 45.1** (Chromium 156, Node.js 24.22).
+
+### Fixes
+
+- **Linux: Bridge AI's menu entry is matched to its windows.** The app's ID is now `dev.bridge-ai.app`, the same as on a Mac and Windows, and its menu entry is named for it (`dev.bridge-ai.app.desktop`) and says which windows are its own. An update replaces the old `bridge-ai.desktop` rather than adding a second entry; if you had Bridge AI pinned to the dock, pin it again once.
+
 ## 3.7.0
 
 Talk to your agents: hold a key, say it, and let go. Your words are turned into text on your computer by Parakeet, a speech model that runs wherever Bridge AI does, and can go straight into any app. Setup carries on in the background, and the microphone works again on Macs that updated from 3.4.
