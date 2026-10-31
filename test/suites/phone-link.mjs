@@ -10,6 +10,11 @@
 //   offline, then back: at once (the phone waited up to 30 s for its next try)
 //   a connection that dies without a word: back once the app is on the screen again (it never was)
 //   the computer's connection dies without a word: back in under 40 s (it took 50 to 100)
+// Then the phone app (stood in for: the window.bridgeNative the iPhone app gives the page) paired with
+// this computer and a second one, and this one away: offline, or its relay not answering. The start
+// screen says so in a few seconds, with the other computer a tap away, what it last sent, Cloud
+// Agents and the demo (it opened what it last sent instead, or waited on "Connecting…" for good).
+// And the page in a browser, with its relay not answering: it says so (it waited for good).
 import fs from 'node:fs'
 import path from 'node:path'
 import { startKit, startRelay, checks, until, browser, sleep, shot } from '../lib/harness.mjs'
@@ -20,8 +25,11 @@ const RTT = 2 * (NET.ms + NET.host)
 const say = (...a) => console.log(...a)
 
 const { b, which } = await browser()
+const tag = which === 'webkit' ? 'webkit-' : ''
 let kit = null
 let relay = null
+let kit2 = null
+let relay2 = null
 try {
   relay = await startRelay('phone-link')
   kit = await startKit('phone-link', { env: ({ data }) => { fs.writeFileSync(path.join(data, 'relay.json'), JSON.stringify(relay.relayFile)); return {} } })
@@ -185,6 +193,122 @@ try {
   // (WebKit reports an answer the dropped link cut short, which the app is told of, as a page error.)
   const errs = errors.filter((e) => !(which === 'webkit' && /^Error: (Reconnecting to your computer|Connection lost)/.test(e)))
   ok(errs.length === 0, 'no page errors', errs)
+
+  // ---------- two computers, and the one showing away ----------
+  await test('net')
+  relay2 = await startRelay('phone-link-2')
+  kit2 = await startKit('phone-link-2', { env: ({ data }) => { fs.writeFileSync(path.join(data, 'relay.json'), JSON.stringify(relay2.relayFile)); return {} } })
+  await kit2.api('/setup', { name: 'Tester' })
+  ok(!!(await until(async () => (await kit2.api('/relay')).online, 20000)), 'a second computer connects to a relay of its own')
+  // The iPhone app, stood in for: what it gives the page, and what the page asks of it. Bridge AI in
+  // the page's frame isn't needed here (and nothing would carry its requests): a stand-in page.
+  const phoneApp = async (cfg) => {
+    const c = await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: which === 'chromium', hasTouch: true, deviceScaleFactor: 2 })
+    await c.addInitScript((cfg) => {
+      if (window !== window.top) return
+      window.__posts = []
+      window.bridgeNative = { platform: 'ios', bundled: ['demo', 'cloud'], ...cfg, post: (m) => window.__posts.push(m) }
+    }, cfg)
+    await c.route('**/*', (r) => (r.request().isNavigationRequest() && r.request().frame().parentFrame() ? r.fulfill({ contentType: 'text/html', body: '<p>Bridge AI</p>' }) : r.continue()))
+    return { c, p: await c.newPage() }
+  }
+  // Paired, as the app does it: the page hands it the pairing to keep.
+  const pairApp = async (rel, k) => {
+    const a = await phoneApp({ relay: rel.url, pairing: null, computers: [] })
+    await a.p.goto(`${rel.url}/#pair=${(await k.api('/relay/pair', {})).pairing.code}`)
+    const kept = await until(() => a.p.evaluate(() => window.__posts.find((m) => m.type === 'keep' && m.pairing?.hostKey)?.pairing), 20000, 200)
+    await a.c.close()
+    return kept
+  }
+  const pair1 = await pairApp(relay, kit)
+  const pair2 = await pairApp(relay2, kit2)
+  ok(!!pair1 && !!pair2, 'the app pairs with both')
+  const computers = [{ relay: relay.url, name: 'Studio' }, { relay: relay2.url, name: 'Desk' }]
+  const look = (pg) => pg.evaluate(() => {
+    const shown = (sel) => { const el = document.querySelector(sel); return !!el && !el.hidden }
+    return { wait: shown('#wait'), app: shown('#app'), away: shown('#away'), more: shown('#away-more'), title: document.getElementById('wait-title')?.textContent, saved: shown('#saved-open'), others: [...document.querySelectorAll('#wait .others button')].map((x) => x.firstChild?.textContent), states: [...document.querySelectorAll('#wait .others button')].map((x) => x.textContent), cloud: shown('#wait .cloud-try'), demo: shown('#wait .demo-try') }
+  })
+  // How long until the start screen's title says `re`, and what it shows then.
+  const saysIn = async (pg, re, t0, ms = 15000) => {
+    const got = await until(async () => { const l = await look(pg); return l.wait && re.test(l.title) ? l : null }, ms, 100)
+    return { ms: got ? Date.now() - t0 : null, l: got || await look(pg) }
+  }
+
+  // Studio offline, with what it last sent kept on the phone.
+  kit.stop()
+  ok(!!(await until(async () => (await test('state')).computers === 0, 15000)), 'Studio goes offline (its relay stays up)')
+  const ph = await phoneApp({ relay: relay.url, pairing: pair1, computers })
+  await ph.p.goto(`${relay.url}/manifest.webmanifest`)
+  await ph.p.evaluate(() => new Promise((ok, no) => {
+    const r = indexedDB.open('bridge-relay', 1)
+    r.onupgradeneeded = () => r.result.createObjectStore('kv')
+    r.onsuccess = () => { const t = r.result.transaction('kv', 'readwrite'); const s = t.objectStore('kv'); s.put({ s: 200, h: [['content-type', 'text/html']], at: Date.now(), t: '<p>Bridge AI</p>' }, 'offline:saved:/'); s.put({ '/': [16, Date.now()] }, 'offline:index'); t.oncomplete = ok; t.onerror = no }
+    r.onerror = no
+  }))
+  t0 = Date.now()
+  await ph.p.goto(`${relay.url}/`)
+  const off = await saysIn(ph.p, /^Studio is offline/, t0)
+  say(`the app, Studio offline: ${off.ms} ms`, off.l)
+  ok(off.ms != null && off.ms < 4000 && !off.l.app, `the app opening on Studio, offline: the start screen says so in ${s(off.ms)} (limit 4 s), rather than opening what it last sent`, off.l)
+  const offers = await until(async () => { const l = await look(ph.p); return l.others.includes('Desk') && l.saved && l.cloud && l.demo ? l : null }, 2000, 100)
+  ok(!!offers, 'with Desk a tap away, what Studio last sent, Cloud Agents and the demo', await look(ph.p))
+  await shot(ph.p, `${tag}phone-computer-offline`)
+  await ph.p.locator('#saved-open').click({ timeout: 3000 }).catch(() => {})
+  const savedOpen = await until(async () => { const l = await look(ph.p); return l.app && l.away && l.more ? l : null }, 5000, 100)
+  ok(!!savedOpen, 'Open what it last sent: Bridge AI from what Studio last sent, under a banner with a way back', await look(ph.p))
+  await ph.p.locator('#away-more').click({ timeout: 3000 }).catch(() => {})
+  const back = await look(ph.p)
+  ok(back.wait && !back.app && !back.away && back.others.includes('Desk'), 'Start screen: back to it, with Desk', back)
+  await ph.p.locator('#wait .others button', { hasText: 'Desk' }).click({ timeout: 3000 }).catch(() => {})
+  ok((await ph.p.evaluate(() => window.__posts)).some((m) => m.type === 'switch' && m.url === relay2.url), 'Desk: the app switches to it')
+
+  // On Desk, which is on: what Bridge AI's menu asks of the page (bridgeRelay).
+  const dk = await phoneApp({ relay: relay2.url, pairing: pair2, computers })
+  await dk.p.goto(`${relay2.url}/`)
+  ok(!!(await until(async () => (await look(dk.p)).app, 15000, 100)), 'the app on Desk: Bridge AI opens')
+  const listed = await until(() => dk.p.evaluate(() => new Promise((ok) => {
+    const l = () => window.bridgeRelay.computers.list()
+    const studio = () => l().find((c) => c.name === 'Studio')
+    if (studio().online != null) return ok(l())
+    const stop = window.bridgeRelay.computers.subscribe(() => { if (studio().online != null) { stop(); ok(l()) } })
+    setTimeout(() => ok(null), 8000)
+  })), 10000, 200)
+  const desk = listed?.find((c) => c.name === 'Desk')
+  const studio = listed?.find((c) => c.name === 'Studio')
+  ok(desk?.current && desk.online === true && studio?.online === false && studio.lastSeen > 0, 'bridgeRelay.computers.list(): Desk is the one showing and online; Studio offline, with when it was last seen (subscribe hears it)', listed)
+  await dk.p.evaluate(() => window.bridgeRelay.start())
+  const st = await until(async () => { const l = await look(dk.p); return l.wait && /^Connected to Desk/.test(l.title) && l.states.some((x) => /^Studio · offline/.test(x)) ? l : null }, 5000, 100)
+  ok(!!st && st.cloud && st.demo && await dk.p.locator('#app-open').isVisible(), 'bridgeRelay.start(): the start screen over Bridge AI, with Back to Desk, Studio (offline), Cloud Agents and the demo', st || await look(dk.p))
+  await shot(dk.p, `${tag}phone-start-screen`)
+  await dk.p.locator('#app-open').click({ timeout: 3000 }).catch(() => {})
+  ok((await look(dk.p)).app, 'Back to Desk: Bridge AI again')
+  await dk.p.evaluate(() => window.bridgeRelay.openCloud())
+  ok((await dk.p.evaluate(() => window.__posts)).some((m) => m.type === 'open' && m.name === 'cloud'), 'bridgeRelay.openCloud(): the app opens Cloud Agents')
+  ok(await p.evaluate(() => window.bridgeRelay.openCloud === null && window.bridgeRelay.start === null && window.bridgeRelay.computers === null), 'in a browser, which has neither, the page offers no Cloud Agents or start screen to Bridge AI')
+  await dk.c.close()
+
+  // Studio's relay not answering (it takes the connection, then nothing gets through).
+  await test('freeze')
+  t0 = Date.now()
+  await ph.p.goto(`${relay.url}/`)
+  const frozen = await saysIn(ph.p, /^Can't reach Studio/, t0)
+  say(`the app, Studio's relay not answering: ${frozen.ms} ms`, frozen.l)
+  ok(frozen.ms != null && frozen.ms < 7000 && frozen.l.others.includes('Desk') && frozen.l.cloud, `the app opening on Studio, its relay not answering: the start screen says so in ${s(frozen.ms)} (limit 7 s), with Desk and Cloud Agents, instead of "Connecting…"`, frozen.l)
+  await ph.c.close()
+
+  // The page in a browser (Safari), paired with Studio alone, its relay not answering: what it
+  // last sent, under a banner saying so.
+  t0 = Date.now()
+  await p.reload({ waitUntil: 'commit' })
+  const safari = await until(async () => {
+    const l = await look(p)
+    const awayTitle = await p.locator('#away-title').innerText().catch(() => '')
+    return (l.app && l.away && /Can't reach/.test(awayTitle)) || (l.wait && /^Can't reach/.test(l.title)) ? { ...l, awayTitle } : null
+  }, 15000, 100)
+  const safariMs = safari ? Date.now() - t0 : null
+  say(`the browser, its relay not answering: ${safariMs} ms`, safari)
+  ok(safariMs != null && safariMs < 9000, `in a browser, the relay not answering: it says so in ${s(safariMs)} (limit 9 s), instead of "Connecting…"`, safari || await look(p))
+  await test('thaw')
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
   if (kit) console.log(kit.log().slice(-1500))
@@ -192,5 +316,7 @@ try {
   await b.close()
   kit?.stop()
   relay?.stop()
+  kit2?.stop()
+  relay2?.stop()
 }
 process.exit(done().fail ? 1 : 0)

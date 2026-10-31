@@ -30,12 +30,15 @@
     p { margin: 8px 0; color: var(--muted); }
     form { display: grid; gap: 10px; margin-top: 18px; }
     input { height: 46px; border-radius: 10px; border: 1px solid var(--line); background: transparent; color: var(--fg); font: 600 17px ui-monospace, Menlo, monospace; text-align: center; letter-spacing: 1px; padding: 0 10px; text-transform: uppercase; }
-    button { height: 44px; border-radius: 10px; border: 0; background: var(--accent); color: #fff; font: 600 15px inherit; padding: 0 18px; }
+    button { height: 44px; border-radius: 10px; border: 0; background: var(--accent); color: #fff; font: inherit; font-size: 15px; font-weight: 600; padding: 0 18px; }
     button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); }
     .err { color: var(--bad); }
     .others { display: grid; gap: 8px; margin-top: 22px; }
     .others .small, .try .small { font-size: 14px; margin: 0; }
+    .others .state { color: var(--muted); font-weight: 400; }
     .try { display: grid; gap: 8px; margin-top: 22px; }
+    .legal { margin-top: 26px; font-size: 13px; }
+    .legal a { color: var(--muted); }
     ol { text-align: left; color: var(--muted); padding-left: 20px; }
     #bar { position: fixed; z-index: 2; left: 50%; transform: translateX(-50%); top: calc(env(safe-area-inset-top) + 8px); max-width: calc(100% - 24px); padding: 8px 14px; border-radius: 999px; background: #1d2129ee; color: #e6e8ec; font-size: 13px; box-shadow: 0 4px 18px #0006; display: flex; gap: 10px; align-items: center; }
     #bar[hidden] { display: none; }
@@ -48,8 +51,11 @@
     #away .dot { width: 8px; height: 8px; margin-top: 5px; border-radius: 50%; background: #ef4444; flex: none; }
     #away b { font-weight: 600; }
     #away span { color: var(--muted); }
-    .away #app, .away.insets-inside #app { top: var(--away, 0px); height: calc(100% - var(--away, 0px) - env(safe-area-inset-bottom)); }
-    .away.insets-inside #app { height: calc(100% - var(--away, 0px)); }
+    #away > div { flex: 1; }
+    #away button { height: 30px; padding: 0 12px; font-size: 13px; border-radius: 8px; background: transparent; color: var(--fg); border: 1px solid var(--line); flex: none; }
+    .away #app { top: var(--away, 0px); height: calc(100% - var(--away, 0px) - env(safe-area-inset-bottom)); }
+    /* Bridge AI keeps clear of the notch itself here: that part of it goes under the banner. */
+    .away.insets-inside #app { top: calc(var(--away, 0px) - env(safe-area-inset-top)); height: calc(100% - var(--away, 0px) + env(safe-area-inset-top)); }
     [hidden] { display: none !important; }
   </style>
 </head>
@@ -58,7 +64,7 @@
     <div>
       <img src="/icon-512.png" alt="" />
       <h1>Pair with your computer</h1>
-      <p>Bridge AI runs on your computer. On it, open <b>Settings › Phone &amp; notifications</b>, click <b>Pair a phone</b>, and scan the code with this phone's camera. <span id="pair-how">Or type the code here:</span></p>
+      <p>Bridge AI runs on your computer. On it, open <b>Settings › Devices</b>, click <b>Pair a device</b>, and scan the code with this phone's camera. <span id="pair-how">Or type the code here:</span></p>
       <form id="pair-form">
         <button id="scan" type="button" hidden>Scan the QR code</button>
         <input id="code" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABCD-EFGH-JKMN-PQRS-TVWX" aria-label="Pairing code or link" />
@@ -66,14 +72,15 @@
       </form>
       <p id="pair-err" class="err" hidden></p>
       <div class="others" hidden></div>
-      <div id="demo" class="try" hidden>
+      <div class="try demo-try" hidden>
         <p class="small">No computer to pair yet?</p>
-        <button id="demo-open" class="ghost" type="button">Try the demo</button>
+        <button class="ghost demo-open" type="button">Try the demo</button>
       </div>
       <div class="try cloud-try" hidden>
         <p class="small">Or run agents on Cursor, Copilot, Jules or Claude from this phone, with your own key:</p>
-        <button class="ghost cloud-open" type="button">Cloud agents</button>
+        <button class="ghost cloud-open" type="button">Cloud Agents</button>
       </div>
+      <p class="legal"><a href="https://github.com/sahil1/bridge/blob/main/PRIVACY.md" target="_blank" rel="noreferrer">Privacy</a></p>
     </div>
   </section>
 
@@ -82,11 +89,18 @@
       <img src="/icon-512.png" alt="" />
       <h1 id="wait-title">Connecting to your computer…</h1>
       <p id="wait-text"></p>
-      <p><button id="retry" class="ghost" type="button" hidden>Try again</button></p>
       <div class="others" hidden></div>
+      <div class="try">
+        <button id="app-open" type="button" hidden>Back</button>
+        <button id="saved-open" class="ghost" type="button" hidden>Open what it last sent</button>
+        <button id="retry" class="ghost" type="button" hidden>Try again</button>
+      </div>
       <div class="try cloud-try" hidden>
         <p class="small">Cloud agents run with no computer, from this phone:</p>
-        <button class="ghost cloud-open" type="button">Cloud agents</button>
+        <button class="ghost cloud-open" type="button">Cloud Agents</button>
+      </div>
+      <div class="try demo-try" hidden>
+        <button class="ghost demo-open" type="button">Try the demo</button>
       </div>
     </div>
   </section>
@@ -104,7 +118,7 @@
     </div>
   </section>
 
-  <div id="away" role="status" hidden><span class="dot"></span><div><b id="away-title"></b> <span id="away-text"></span></div></div>
+  <div id="away" role="status" hidden><span class="dot"></span><div><b id="away-title"></b> <span id="away-text"></span></div><button id="away-more" type="button" hidden>Start screen</button></div>
   <div id="bar" role="status" hidden><span class="dot"></span><span id="bar-text"></span></div>
   <iframe id="app" title="Bridge AI" hidden allow="clipboard-read; clipboard-write; microphone; fullscreen"></iframe>
   <script type="module" src="/shell.js"></script>

@@ -16,7 +16,9 @@ import { phoneHello, phoneFinish, newKey, splitCode, normCode, formatCode, plain
 import * as offline from './offline.js'
 
 const $ = (id) => document.getElementById(id)
-const show = (id) => { for (const s of ['pair', 'wait', 'home']) $(s).hidden = s !== id; if (id) $('app').hidden = true; if (id) { listOthers(); offerDemo() } }
+// A start screen in front of Bridge AI (or Bridge AI, with null). Bridge AI stays loaded behind it,
+// so its banner goes with it, and comes back with it (showApp).
+const show = (id) => { for (const s of ['pair', 'wait', 'home']) $(s).hidden = s !== id; if (id) { $('app').hidden = true; $('away').hidden = true; bar(null); listOthers(); offerDemo() } }
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
 // The iPhone app; the Android app opens this page as it is, and says so in its user agent.
 const native = window.bridgeNative || null
@@ -93,6 +95,8 @@ let adding = false // pairing another computer: the link to this one rests meanw
 const computerName = (c) => c.name || new URL(c.relay).hostname.split('.')[0]
 // With several computers, say which one.
 const thisComputer = () => { const list = apps ? apps.list() : []; const c = list.length > 1 && list.find((x) => x.relay === relay); return c ? computerName(c) : 'Your computer' }
+// The computers the apps are paired with besides this one.
+const others = () => (apps ? apps.list().filter((c) => c.relay !== relay) : [])
 
 function listOthers() {
   for (const box of document.querySelectorAll('.others')) {
@@ -100,26 +104,60 @@ function listOthers() {
     box.hidden = !list.length
     box.replaceChildren(...(list.length ? [Object.assign(document.createElement('p'), { className: 'small', textContent: adding ? 'Or go back to:' : 'Your other computers:' })] : []), ...list.map((c) => {
       const b = Object.assign(document.createElement('button'), { type: 'button', className: 'ghost', textContent: computerName(c) })
+      const st = c.relay === relay ? null : otherState(c.relay)
+      if (st?.online != null) b.append(Object.assign(document.createElement('span'), { className: 'state', textContent: st.online ? ' · online' : ` · offline${st.lastSeen ? ` since ${when(st.lastSeen)}` : ''}` }))
       b.onclick = () => (c.relay === relay ? location.reload() : apps.open(c.relay))
       return b
     }))
   }
 }
 
-// The iPhone app's demo, bundled in it: Bridge AI on made-up agents, for before the first pairing.
-function offerDemo() {
-  $('demo').hidden = !native?.bundled?.includes('demo') || adding || !!apps?.list().length
-  offerCloud()
+// ---------- whether the other computers are on ----------
+// A computer's relay says whether it's there as soon as a phone connects, before any pairing, so a
+// connection closed as soon as it says tells the start screen (and Bridge AI's menu, through
+// bridgeRelay.computers) which of your other computers are on: { online: true | false | null (its
+// relay can't be reached), lastSeen }. Asked once a minute at most for each, only while something
+// shows them.
+const others$ = new Map() // relay -> { online, lastSeen, at, asking }
+const othersSubs = new Set()
+function otherState(r) {
+  const was = others$.get(r)
+  if (!was || (!was.asking && Date.now() - was.at > 60000)) askOther(r, was)
+  return was || null
 }
-$('demo-open').onclick = () => native.post({ type: 'open', name: 'demo' })
+function askOther(r, was) {
+  others$.set(r, { ...was, asking: true, at: Date.now() })
+  let sock = null
+  let over = false
+  const done = (st) => {
+    if (over) return
+    over = true
+    clearTimeout(timer)
+    if (sock) { sock.onopen = sock.onmessage = sock.onclose = null; try { sock.close() } catch { /* closed */ } }
+    others$.set(r, { online: st.online, lastSeen: st.lastSeen ?? was?.lastSeen ?? null, at: Date.now() })
+    listOthers()
+    for (const f of othersSubs) try { f() } catch { /* theirs */ }
+  }
+  const timer = setTimeout(() => done({ online: null }), 6000)
+  try { sock = new WebSocket(`${r.replace(/^http/, 'ws')}/_relay/link`) } catch { return done({ online: null }) }
+  sock.onmessage = (e) => {
+    if (typeof e.data !== 'string' || e.data === 'pong') return
+    try { const m = JSON.parse(e.data); if ('host' in m) done({ online: !!m.host, lastSeen: m.seen || null }) } catch { /* not that */ }
+  }
+  sock.onclose = () => done({ online: null })
+}
 
-// Cloud agents, bundled in the apps: agents in the cloud with keys kept on this phone, paired or
-// not, so on the pairing and waiting screens alike (the Android app says what it has).
+// The demo and Cloud agents, bundled in the apps (the Android app says what it has): the demo is
+// Bridge AI on made-up agents; Cloud agents runs agents in the cloud with keys kept on this phone.
+// Both on the pairing and waiting screens alike, paired or not, whatever your computers are doing.
 const bundledUis = native?.bundled || (() => { try { return JSON.parse(window.bridgeAndroid?.bundled?.() || '[]') } catch { return [] } })()
-function offerCloud() {
+function offerDemo() {
+  for (const el of document.querySelectorAll('.demo-try')) el.hidden = !bundledUis.includes('demo') || adding
   for (const el of document.querySelectorAll('.cloud-try')) el.hidden = !bundledUis.includes('cloud') || adding
 }
-for (const b of document.querySelectorAll('.cloud-open')) b.onclick = () => (native ? native.post({ type: 'open', name: 'cloud' }) : window.bridgeAndroid.openBundled('cloud'))
+const openBundled = (name) => (native ? native.post({ type: 'open', name }) : window.bridgeAndroid.openBundled(name))
+for (const b of document.querySelectorAll('.demo-open')) b.onclick = () => openBundled('demo')
+for (const b of document.querySelectorAll('.cloud-open')) b.onclick = () => openBundled('cloud')
 
 // Pair another computer: the pairing screen, for a link (a code alone doesn't say which relay).
 function addComputer() {
@@ -233,7 +271,7 @@ let limited = { until: 0 }
 function onLimit(m) {
   const until = Math.min(Math.max(Number(m.until) || 0, Date.now() + 3000), Date.now() + 26 * 3600000)
   const text = m.why === 'day'
-    ? `The hosted relay's daily limit for this computer is used up. It resets at ${when(until)}. For no limits, put the relay on your own Cloudflare account (Settings › Phone & notifications, on the computer).`
+    ? `The hosted relay's daily limit for this computer is used up. It resets at ${when(until)}. For no limits, put the relay on your own Cloudflare account (Settings › Devices, on the computer).`
     : String(m.text || 'Bridge AI\'s relay can\'t take this right now.').slice(0, 300)
   limited = { why: m.why, text, until }
   if (appShown) bar(text, true)
@@ -262,15 +300,18 @@ const when = (t) => new Date(t).toLocaleString([], new Date(t).toDateString() ==
 function awayBanner(on = true) {
   away = on
   document.body.classList.toggle('away', on)
-  $('away').hidden = !on
+  $('away').hidden = !on || $('app').hidden // over Bridge AI only, not a start screen
   try { $('app').contentDocument.documentElement.classList.toggle('bridge-saved', on) } catch { /* not loaded */ }
   if (!on) return
   bar(null)
-  const relayDown = ws?.readyState !== 1
+  const relayDown = ws?.readyState !== 1 || !heardStatus
   $('away-title').textContent = relayDown ? 'Can\'t reach your relay right now.' : `${thisComputer()} is offline${hostSeen ? ` since ${when(hostSeen)}` : ''}.`
   $('away-text').textContent = `Showing what it last sent. Messages you send ${relayKeeps && !relayDown ? 'go out when it\'s back' : 'wait on this phone until it\'s back'}.`
+  // The way to your other computers, Cloud Agents and the demo, in the apps.
+  $('away-more').hidden = !others().length && !bundledUis.length
   document.body.style.setProperty('--away', `${$('away').offsetHeight}px`)
 }
+$('away-more').onclick = () => whyWaiting()
 // Open Bridge AI from what this phone kept, if it kept it.
 async function openSaved() {
   if (!paired?.hostKey || adding || !(await offline.hasCopy())) return false
@@ -313,6 +354,7 @@ function connect() {
   sock.binaryType = 'arraybuffer'
   relayKeeps = false
   heard = since = Date.now()
+  heardStatus = false
   sock.onopen = () => { heard = Date.now(); try { sock.send('ping') } catch { /* closing */ } }
   // One message at a time, in order: a response's pieces must reach the app in sequence.
   sock.onmessage = (e) => {
@@ -333,8 +375,9 @@ function lost(code) {
   dropSession(offlineText())
   retryTimer = setTimeout(connect, code === 4001 ? 300 : backoff)
   backoff = Math.min(backoff * 2, LAST_TRY)
-  // The relay can't be reached (no signal?): what this phone kept, after a few tries.
-  if (backoff >= 4000 && code !== 4001) { if (away) awayBanner(); else if (!appShown && paired?.hostKey) openSaved() }
+  // The relay can't be reached (no signal?), after a few tries: what this phone kept, or the
+  // start screen saying so.
+  if (backoff >= 4000 && code !== 4001) { if (away) awayBanner(); else if (!appShown && paired?.hostKey) notThere() }
 }
 
 // Done with this connection, without waiting to hear that it closed: one that died can take minutes
@@ -388,13 +431,57 @@ function onText(m) {
 async function onStatus(st) {
   hostOnline = !!st.host
   hostSeen = st.seen || hostSeen
+  heardStatus = true
   if (!st.host) {
     dropSession(offlineText()) // with Bridge AI showing, the banner
-    if (!appShown && !(await openSaved())) waitScreen(`${thisComputer()} is offline`, `${offlineText()} Bridge AI connects as soon as it's back on and Bridge AI is running.`, true)
+    if (!appShown) await notThere()
+    else if (!$('wait').hidden) whyWaiting() // on the start screen from the banner
     return
   }
   await handshake()
 }
+
+// ---------- when the computer isn't there ----------
+// Opening Bridge AI, this computer is offline, its relay can't be reached, or it doesn't answer. The
+// start screen says which within a few seconds, never just "Connecting…", with your other computers
+// (in the apps), what this phone kept of it, Cloud Agents and the demo, and keeps trying meanwhile:
+// once it's back, Bridge AI opens. With no other computer to go to, what it last sent opens by itself
+// instead, under a banner whose Start screen leads here.
+let heardStatus = false // the relay has said whether the computer is there, on this connection
+const STUCK_MS = 5000
+let stuckTimer = null
+function watchStart() {
+  clearTimeout(stuckTimer)
+  stuckTimer = setTimeout(() => {
+    if (appShown || session || adding || !$('pair').hidden || limited.until > Date.now()) return
+    if (heardStatus && !hostOnline) return // said so already (onStatus)
+    if (heardStatus || !paired?.hostKey) whyWaiting()
+    else notThere()
+  }, STUCK_MS)
+}
+async function notThere() {
+  if (others().length || !(await openSaved())) whyWaiting()
+}
+function whyWaiting() {
+  const name = thisComputer()
+  const it = name === 'Your computer' ? 'your computer' : name
+  if (heardStatus && !hostOnline) waitScreen(`${name} is offline`, `${hostSeen ? `Offline since ${when(hostSeen)}. ` : ''}It opens here as soon as it's back on, with Bridge AI running.`, true)
+  else if (heardStatus) waitScreen(`${name} isn't answering`, 'It\'s online, but hasn\'t answered yet. Bridge AI keeps trying.', true)
+  else waitScreen(`Can't reach ${it}`, 'Its relay doesn\'t answer: check this phone\'s connection. Bridge AI keeps trying.', true)
+}
+$('saved-open').onclick = () => openSaved()
+
+// The start screen on request (Bridge AI's menu, bridgeRelay.start): with this computer there, a
+// way back to it; without, why not.
+function startScreen() {
+  if (!session) return whyWaiting()
+  const name = thisComputer()
+  const it = name === 'Your computer' ? 'your computer' : name
+  waitScreen(`Connected to ${it}`, '', false)
+  $('app-open').textContent = `Back to ${it}`
+  $('app-open').hidden = false
+}
+$('app-open').onclick = () => showApp()
 
 async function handshake() {
   if (!paired && !code) return show('pair')
@@ -474,7 +561,7 @@ function dropSession(msg) {
     else { s.onError?.(msg || 'Connection lost'); s.onClose?.({ c: 1006, r: 'connection lost' }) }
   }
   streams.clear()
-  if (msg && appShown) { if (!hostOnline && paired?.hostKey) awayBanner(); else bar(msg, !hostOnline) }
+  if (msg && appShown && !$('app').hidden) { if (!hostOnline && paired?.hostKey) awayBanner(); else bar(msg, !hostOnline) }
 }
 
 function fail(e) { console.error(e); try { ws?.close(4002, 'error') } catch { /* closed */ } }
@@ -683,9 +770,16 @@ window.bridgeRelay = {
   unpair: async () => { await pairing.del(); await offline.clear(); location.reload() },
   // What this phone sent while the computer was offline, and how each is doing (offline.js).
   outbox: { list: offline.list, subscribe: offline.subscribe, dismiss: offline.dismiss },
-  // The computers this app is paired with ({ relay, name, current }), for Bridge AI's Settings.
+  // The computers this app is paired with ({ relay, name, current, online, lastSeen }), for Bridge
+  // AI's Settings and its menu. online: true or false, or null while it isn't known (an answer comes
+  // in a few seconds: subscribe(fn) hears of it, and returns the way to stop).
   computers: apps && {
-    list: () => apps.list().map((c) => ({ ...c, name: computerName(c), current: c.relay === relay })),
+    list: () => apps.list().map((c) => {
+      const here = c.relay === relay
+      const st = here ? { online: session ? true : heardStatus ? hostOnline : null, lastSeen: hostSeen } : otherState(c.relay)
+      return { ...c, name: computerName(c), current: here, online: st?.online ?? null, lastSeen: st?.lastSeen ?? null }
+    }),
+    subscribe: (fn) => { othersSubs.add(fn); return () => othersSubs.delete(fn) },
     open: (r) => apps.open(r),
     add: () => addComputer(),
     // Forget a computer on this phone. This one is told too, so it stops listing this phone.
@@ -698,13 +792,19 @@ window.bridgeRelay = {
       apps.forget(r)
     },
   },
+  // The apps' own start screen, over Bridge AI: your computers, Cloud Agents and the demo.
+  start: apps || bundledUis.length ? () => startScreen() : null,
+  // Cloud Agents, bundled in the apps (not in a browser).
+  openCloud: bundledUis.includes('cloud') ? () => openBundled('cloud') : null,
 }
 
 // ---------- the app ----------
 function showApp() {
   show(null)
+  clearTimeout(stuckTimer)
   const f = $('app')
   f.hidden = false
+  if (away) awayBanner() // back from a start screen to what it last sent
   if (appShown) return
   appShown = true
   f.src = openOnLoad ? `/?agent=${encodeURIComponent(openOnLoad)}` : `/${location.search}`
@@ -737,9 +837,13 @@ function waitScreen(title, msg, retry) {
   $('wait-title').textContent = title
   $('wait-text').textContent = msg || ''
   $('retry').hidden = !retry
+  $('app-open').hidden = true
+  // What this phone kept of it, while it isn't there.
+  $('saved-open').hidden = true
+  if (retry && paired?.hostKey && !adding) offline.hasCopy().then((has) => { $('saved-open').hidden = !has || $('wait').hidden }, () => {})
 }
 
-$('retry').onclick = () => reconnect()
+$('retry').onclick = () => { if (!appShown) watchStart(); reconnect() }
 $('skip').onclick = () => { for (const w of readyWaiters.splice(0)) w.ok(); showApp() }
 $('pair-form').onsubmit = async (e) => {
   e.preventDefault()
@@ -759,6 +863,7 @@ $('pair-form').onsubmit = async (e) => {
   paired = null
   started = true
   waitScreen('Pairing…', '')
+  watchStart()
   if (ws?.readyState === 1 && hostOnline) handshake().catch(fail)
   else if (ws?.readyState === 1) waitScreen('Your computer is offline', `${offlineText()} Pairing finishes as soon as it's back.`, true)
   else connect()
@@ -796,7 +901,9 @@ async function start() {
   }
   started = true
   if (!paired && !code) { show('pair'); connect(); return }
-  waitScreen(paired ? 'Connecting to your computer…' : 'Pairing…', '')
+  const name = thisComputer()
+  waitScreen(paired ? `Connecting to ${name === 'Your computer' ? 'your computer' : name}…` : 'Pairing…', '')
+  watchStart()
   connect()
 }
 start().catch((e) => waitScreen('Something went wrong', e.message, true))
