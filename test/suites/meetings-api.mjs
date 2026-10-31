@@ -1,5 +1,6 @@
 // Meetings on the server, on any platform: a recording made of a tone (speech to the level check)
-// transcribed by the stand-in speech service; sections; who said what; folders and the archive;
+// transcribed by the stand-in speech service; sections; who said what; what the summary is written
+// from (your notes, the screen, the files, the invite); folders and the archive;
 // search and questions; saved Markdown; looks at the screen while the call talks (read by a
 // stand-in for native/bridgeocr, which isn't run on Windows). The calendar is macOS Calendar, and
 // the call's sound is recorded on a Mac (a stand-in for native/calltap there), so their parts are
@@ -325,6 +326,48 @@ try {
     ok(S1.captures.length === 4 && fs.readdirSync(path.join(dirOf(S.id), 'captures')).length === 4 && S1.captures[0].read === 'done' && /Quarterly plan 1/.test(S1.captures[0].text), 'and nothing is left of the ones left out', { captures: S1.captures.length, files: fs.readdirSync(path.join(dirOf(S.id), 'captures')).length })
     await kit.api(`/meetings/${S.id}/stop`, {})
   }
+
+  // ---------- What the summary is written from ----------
+  // Your notes are its backbone, and it ends saying which of your points it expanded. A note written
+  // at a time in the meeting is in the transcript at that time too, with the screen changing there
+  // (the first words on it: a slide's title); a picture pasted in your notes is the words on it,
+  // where you put it; the meeting's files and what the invite says go with it. What it was written
+  // from is kept for the page. The words on pictures are read by a stand-in, not on Windows.
+  const W = await kit.api('/meetings', { title: 'Pricing review', call: false, event: { title: 'Pricing review', attendees: ['Priya Shah', 'Tester'], agenda: 'Agree the enterprise tiers before the launch' } })
+  const picture = async (kind, t, text) => {
+    if (!IS_WIN) fs.writeFileSync(path.join(kit.bin, 'ocr.txt'), text)
+    const c = await fetch(`${kit.url}/api/meetings/${W.id}/captures?kind=${kind}&t=${t}`, { method: 'POST', headers: { 'content-type': 'image/png' }, body: PNG }).then((x) => x.json())
+    if (!IS_WIN) await until(async () => (await kit.api(`/meetings/${W.id}`)).captures.find((x) => x.id === c.id)?.read === 'done', 10000)
+    return c
+  }
+  await picture('screen', 1, 'Enterprise tiers\nStarter $10\nTeam $25')
+  const pasted = await picture('paste', 20, 'Discount table\nannual 15%')
+  await kit.api(`/meetings/${W.id}/notes`, { text: `## Pricing\n- tiers ok?\n![Discount table](${pasted.file})\n` }, 'PUT')
+  await kit.api(`/meetings/${W.id}/note`, { text: 'annual = 15% off', at: 32 })
+  fs.writeFileSync(path.join(kit.home, 'Pricing brief.md'), 'Pricing brief\nEnterprise starts at 50 seats.')
+  await kit.api(`/meetings/${W.id}/links`, { path: path.join(kit.home, 'Pricing brief.md') })
+  await kit.api(`/meetings/${W.id}/stop`, {})
+  await until(async () => (await kit.api(`/meetings/${W.id}`)).status === 'done', 10000)
+  said(W.id, [['them', 2, 'Here are the three tiers on this slide.'], ['you', 30, 'What about annual plans?'], ['them', 40, 'Fifteen percent off for annual.']])
+  const w0 = model.asked(/Write meeting notes in Markdown/).length
+  await kit.api(`/meetings/${W.id}/summary`, {})
+  const wsum = (await until(() => model.asked(/Write meeting notes in Markdown/).slice(w0)[0], 15000)) || ''
+  const wpart = (from, to) => wsum.slice(wsum.indexOf(from), to ? wsum.indexOf(to) : undefined)
+  ok(/The user's own notes below are the backbone/.test(wsum) && /add "## From your notes": one bullet for each of their points you expanded/.test(wsum), 'your notes are the backbone of the summary, and it says which of your points it expanded', wpart('own notes below', 'Transcript:'))
+  ok(/\n\[0:30\] You: What about annual plans\?\n\[0:32\] \(You wrote a note here: "annual = 15% off"\)\n\[0:40\] /.test(wsum), 'a note written at a time in the meeting is in the transcript at that time', wpart('Transcript:'))
+  ok(/The user's own notes:\n## Pricing\n- tiers ok\?\n\[A picture \("Discount table"\)(\. The words on it: Discount table \/ annual 15%)?\]\n/.test(wsum) && (IS_WIN || /The words on it: Discount table \/ annual 15%\]/.test(wsum)), 'a picture in your notes is what it shows, where you put it', wpart("The user's own notes:", 'Transcript:'))
+  if (IS_WIN) skip('the screen changing, in the transcript at its time', 'the words on pictures aren\'t read on Windows')
+  else ok(/\n\[0:01\] \(The screen showed: "Enterprise tiers \/ Starter \$10 \/ Team \$25"\)\n\[0:02\] /.test(wsum) && /What was on the screen during the meeting[^\n]*\n\[0:01\] Enterprise tiers/.test(wsum) && !/Pictures the user added/.test(wsum), 'the screen changing is in the transcript at its time (a slide\'s first words), and in full with the screen\'s words', wpart('What was on the screen', 'Transcript:'))
+  ok(/^The invite says: Agree the enterprise tiers before the launch$/m.test(wsum), 'what the invite says goes with it', wsum.slice(0, 300))
+  const wm = await until(async () => { const m = await kit.api(`/meetings/${W.id}`); return !m.summarizing && m.summaryFrom && m }, 10000)
+  const from = wm?.summaryFrom || {}
+  ok(/### Pricing brief\.md\nPricing brief\nEnterprise starts at 50 seats\./.test(wsum) && from.notes === 2 && from.files === 1 && from.invite === true && from.screen === (IS_WIN ? 0 : 1) && from.pictures === (IS_WIN ? 0 : 1), "the meeting's files go with it, and what it was written from is kept for the page", { from, files: wpart('Files, links and emails', 'Transcript:') })
+  // Notes written in another language: the action items are under the first heading with a
+  // checklist. Sent to the Chief of Staff (not running here: on its task list), and the meeting says so.
+  fs.writeFileSync(path.join(dirOf(W.id), 'summary.md'), '## Zusammenfassung\n- Preise stehen.\n\n## Aufgaben\n- [ ] Du: die Preise an Priya senden\n- [ ] Priya: Rabatt prüfen\n')
+  r = await kit.api(`/meetings/${W.id}/chief`, {}).catch((e) => ({ error: e.message }))
+  const sentTo = (await kit.api(`/meetings/${W.id}`)).chief
+  ok(r.added === 2 && r.sent === false && sentTo?.n === 2 && Date.now() - Date.parse(sentTo.at) < 60000, 'the action items of notes in another language go to the Chief of Staff, and the meeting keeps that they did', [r, sentTo])
 
   // ---------- The summary and the saved notes ----------
   const n1 = model.asked(/Write meeting notes in Markdown/).length

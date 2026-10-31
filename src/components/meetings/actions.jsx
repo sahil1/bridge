@@ -15,6 +15,13 @@ const live = (x) => x.status === 'recording' || x.status === 'paused'
 const tilde = (p) => String(p || '').replace(/^\/Users\/[^/]+/, '~')
 // The folders in use, by name.
 export const foldersOf = (list) => [...new Set((list || []).map((x) => x.folder).filter(Boolean))].sort((a, b) => a.localeCompare(b))
+// What became of action items sent to the Chief of Staff (the server's answer: added, and sent and
+// queued when it's running), the same wherever they were sent from.
+export function chiefSaid({ added: n = 0, sent, queued }) {
+  if (!sent) return n === 1 ? t("{n} action item is on Chief of Staff's task list. Start Chief of Staff and it picks it up.", { n }) : t("{n} action items are on Chief of Staff's task list. Start Chief of Staff and it picks them up.", { n })
+  if (queued) return n === 1 ? t("{n} action item sent to Chief of Staff (after what it's doing now).", { n }) : t("{n} action items sent to Chief of Staff (after what it's doing now).", { n })
+  return n === 1 ? t('{n} action item sent to Chief of Staff.', { n }) : t('{n} action items sent to Chief of Staff.', { n })
+}
 
 // Delete one meeting or several, after saying what goes. Archive instead keeps them, out of the way.
 export function ConfirmDelete({ items, onClose, onDone }) {
@@ -107,7 +114,7 @@ export function useMeetingMenu({ list, onOpen, onGone }) {
     { icon: 'doc', label: t('Open'), run: () => onOpen(m.id) },
     { icon: 'download', label: t('Save as Markdown'), run: () => run(async () => { const r = await api(`/meetings/${id(m)}/save`, { method: 'POST' }); refetch('/meetings'); say(t('Saved to {file}', { file: tilde(r.file) })) }) },
     m.saved && onThisComputer() && { icon: 'folder-open', label: t('Show saved notes in Finder'), run: () => run(() => api(`/meetings/${id(m)}/reveal`, { method: 'POST' })) },
-    m.hasSummary && { icon: 'helm', label: t('Action items to the chief'), run: () => run(async () => { const r = await api(`/meetings/${id(m)}/chief`, { method: 'POST' }); const n = r.added; say(r.sent ? (n === 1 ? t('{n} action item sent to the chief of staff.', { n }) : t('{n} action items sent to the chief of staff.', { n })) : n === 1 ? t("{n} action item on the chief's task list.", { n }) : t("{n} action items on the chief's task list.", { n })) }) },
+    m.hasSummary && { icon: 'helm', label: t('Send action items to Chief of Staff'), run: () => run(async () => { const r = await api(`/meetings/${id(m)}/chief`, { method: 'POST' }); refetch('/meetings'); say(chiefSaid(r)) }) },
     'sep',
     { icon: 'edit', label: t('Fix a word everywhere'), run: () => setDialog({ kind: 'fix', items: [m] }) },
     m.status === 'done' && { icon: 'refresh', label: t('Transcribe again…'), run: () => setDialog({ kind: 'again', items: [m] }) },
