@@ -17,6 +17,7 @@ import History from './components/History.jsx'
 import UpdateChip from './components/UpdateChip.jsx'
 import RestartChip from './components/RestartChip.jsx'
 import SetupChip from './components/SetupChip.jsx'
+import TopNotes, { useUpdateNote } from './components/TopNotes.jsx'
 import RuntimeNotice from './components/RuntimeNotice.jsx'
 import AccountMenu, { listed, setDefault, lapsed, asList, nameOf as accountName } from './components/AccountMenu.jsx'
 import { CHANNEL, nameOf, popOut, tell } from './components/Solo.jsx'
@@ -197,6 +198,7 @@ function App() {
   const [rowRef, rowW] = useWidth()
   const quota = usePoll('/quota', 5 * 60 * 1000)
   const update = usePoll('/updates', 6 * 60 * 60 * 1000)
+  const upNote = useUpdateNote(update.data)
   const prevStatus = useRef({})
   useRuntimeTheme()
 
@@ -514,7 +516,8 @@ function App() {
     { id: 'a:add-account', label: t('Add another account…'), icon: 'plus', keywords: 'account second work personal sign in login claude codex both two', run: () => setAddAcct({}) },
     { id: 'a:mcp', label: t('MCP Servers'), icon: 'tool', keywords: 'tools mcp github playwright', run: () => setSettings('mcp') },
     { id: 'a:config', label: t('Edit config file'), icon: 'braces', keywords: 'json config.json settings', run: () => setSettings('config') },
-    { id: 'a:mate', label: t('Go to chief of staff'), icon: 'helm', keywords: 'chief staff dispatch route', run: () => (mate ? openAgent(mate.paneId) : mateLaunch.launch()) },
+    // The chief of staff's one place in ⌘K (its Main thread isn't listed again among the agents).
+    { id: 'a:mate', label: t('Chief of Staff'), sub: t('Hands work to the right agent'), status: mate?.status, icon: 'helm', keywords: 'chief staff dispatch route go to open start', run: () => (mate ? openAgent(mate.paneId) : mateLaunch.launch()) },
     wide && liveView && { id: 'a:view', label: view === 'herdr' ? t('Switch to Bridge view') : t('Switch to Herdr view'), icon: 'layers', hint: view === 'herdr' ? 'Alt 1' : 'Alt 2', run: () => setView(view === 'herdr' ? 'command' : 'herdr') },
     wide && { id: 'a:rail', label: L.railOpen ? t('Collapse sidebar') : t('Expand sidebar'), icon: 'panel-left', run: () => set({ railOpen: !L.railOpen }) },
     { id: 'a:appearance', label: t('Appearance…'), icon: 'palette', keywords: 'theme color colour dark light mode font text size density compact sidebar slack', run: () => setSettings('appearance') },
@@ -558,13 +561,19 @@ function App() {
     </>
   )
 
-  // railBtn: the sidebar's collapse and expand, at the top left on a wide screen.
+  // railBtn: the sidebar's collapse and expand, at the top left on a wide screen. On a phone the bar
+  // keeps to what needs you now: an agent waiting, a recording, search and Settings. Usage, the
+  // next meeting and the weather are in the Today tab (the phone shows the time itself); setup, a
+  // restart to apply and an update are a line under the bar (TopNotes). An update you haven't looked
+  // at yet puts a dot on Settings, which then opens at About & Updates.
+  const setDot = !wide && !cloudOnly && upNote.dot
   const topbarFor = (railBtn = null) => (
+    <>
     <header className="topbar">
       <div className="top-left">
       <img className="mark" src={`${import.meta.env.BASE_URL}mark.svg`} alt="Bridge AI" width="24" height="24" />
       {railBtn}
-      {!cloudOnly && <Quiet name="Devices menu"><MachineMenu /></Quiet>}
+      {!cloudOnly && <Quiet name="Devices menu"><MachineMenu phone={!wide} /></Quiet>}
       {wide && liveView && (
         <nav className="view-tabs" role="tablist" aria-label={t('View')}>
           <button role="tab" aria-selected={view === 'command'} className={view === 'command' ? 'on' : ''} onClick={() => setView('command')} title="Alt+1">
@@ -577,16 +586,16 @@ function App() {
       )}
       </div>
       <button className="search-btn" data-tour="search" onClick={() => setPalette(true)} aria-label={t('Search and commands')} title={t('Search and commands (⌘K)')}>
-        <Icon name="search" size={15} /> <span className="hide-sm">{t('Search agents, files and commands')}</span> <kbd className="hide-touch">⌘K</kbd>
+        <Icon name="search" size={wide ? 15 : 18} /> <span className="hide-sm">{t('Search agents, files and commands')}</span> <kbd className="hide-touch">⌘K</kbd>
       </button>
       <div className="top-right">
         <Quiet name="Recording"><RecordingPill /></Quiet>
         {needsYou.length > 0 && (
-          <button className="needs-chip" onClick={() => openAgent(needsYou[0].paneId)}>
+          <button className="needs-chip" onClick={() => openAgent(needsYou[0].paneId)} aria-label={needsYou.length === 1 ? t('{n} needs you', { n: needsYou.length }) : t('{n} need you', { n: needsYou.length })}>
             <StatusDot status="blocked" size={8} /> {needsYou.length}<span className="needs-word"> {needsYou.length === 1 ? t('needs you') : t('need you')}</span>
           </button>
         )}
-        {!cloudOnly && (
+        {!cloudOnly && wide && (
           <>
             <Quiet name="Setting up"><SetupChip /></Quiet>
             <Quiet name="Next meeting"><NextMeetingChip onClick={() => showCard('calendar')} /></Quiet>
@@ -597,12 +606,16 @@ function App() {
             <Quiet name="Clock"><Clock /></Quiet>
           </>
         )}
-        {toStart && <button className="win-btn" onClick={toStart} aria-label={t('Your computer')} title={t('Back to the start: pair or open a computer')}><Icon name="laptop" size={15} /></button>}
-        <button className="win-btn" data-tour="settings" onClick={() => setSettings('general')} aria-label={t('Settings')} title={t('Settings (⌘,)')}>
-          <Icon name="settings" size={15} />
+        {toStart && <button className="win-btn" onClick={toStart} aria-label={t('Your computer')} title={t('Back to the start: pair or open a computer')}><Icon name="laptop" size={wide ? 15 : 18} /></button>}
+        <button className="win-btn settings-btn" data-tour="settings" onClick={() => { if (setDot) { upNote.seen(); setSettings('about') } else setSettings('general') }} aria-label={t('Settings')}
+          title={setDot ? t('Bridge AI {latest} is available (you have {current})', { latest: update.data.latest, current: update.data.current }) : t('Settings (⌘,)')}>
+          <Icon name="settings" size={wide ? 15 : 18} />
+          {setDot && <span className="top-dot" aria-hidden="true" />}
         </button>
       </div>
     </header>
+    {!wide && !cloudOnly && <TopNotes update={update.data} onUpdate={() => setSettings('about')} fleet={fleet} conf={conf} />}
+    </>
   )
   const topbar = topbarFor()
 
@@ -787,7 +800,6 @@ function App() {
         })}
       </div>
       <div className="ws-tab-tools">
-        {!mate && !fleet?.down && <button className="ghost-btn" data-tour="chief" onClick={mateLaunch.launch} disabled={mateLaunch.launching}><Icon name="helm" size={12} /> {mateLaunch.launching ? t('Launching…') : t('Chief of Staff')}</button>}
         <button className={`win-btn ${split ? 'on' : ''}`} onClick={toggleSplit} disabled={!canSplit || W.tabs.length < 2}
           title={!canSplit ? t('Not enough room to split') : W.tabs.length < 2 ? t('Open a second agent to split') : split ? t('Unsplit') : t('Split side by side')} aria-label={t('Split')}>
           <Icon name="split" size={15} />

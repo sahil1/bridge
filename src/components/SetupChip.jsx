@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { StatusDot } from './Icon.jsx'
+import Icon, { StatusDot } from './Icon.jsx'
 import { openSettings } from './SignIn.jsx'
 import { api } from '../api.js'
 import { useSetupPlan, publish, runProgress } from '../setupPlan.js'
@@ -10,11 +10,12 @@ import { t } from '../i18n/index.js'
 // all done. When something needs you (your Mac's password in the Set up Bridge AI tab, or what's
 // left to allow or try again once nothing's going), it says so, and one click goes there: the tab
 // for the password, else Settings › General's Set up list. What's left once nothing's going stops
-// showing once you've been to the list; it's all still there.
+// showing once you've been to the list; it's all still there. line: on a phone, a line under the top
+// bar (TopNotes.jsx) instead of a chip in it.
 const SEEN = 'cc-setup-seen'
 const remembered = () => { try { return localStorage.getItem(SEEN) } catch { return null } }
 
-export default function SetupChip() {
+export default function SetupChip({ line = false }) {
   const [looked, setLooked] = useState(false)
   const [seen, setSeen] = useState(remembered)
   // Asked once when the app opens (a run may be going from before a reload; without one the server
@@ -48,9 +49,10 @@ export default function SetupChip() {
         : needs ? t('Some of setup is left for you: see Settings › General.')
           : t('Bridge AI is setting up what it uses, in the background. Settings › General shows each part.')
   return (
-    <button type="button" className={`top-chip setup-chip${needs ? ' you' : ''}`} onClick={open} title={title} aria-label={label}>
+    <button type="button" className={`${line ? 'top-note' : 'top-chip'} setup-chip${needs ? ' you' : ''}`} onClick={open} title={title} aria-label={label}>
       {needs ? <StatusDot status="blocked" size={8} /> : <span className="aa-spin" aria-hidden="true" />}
       <span className="setup-chip-word">{label}</span>
+      {line && <Icon name="chevron" size={13} className="top-note-go" />}
     </button>
   )
 }

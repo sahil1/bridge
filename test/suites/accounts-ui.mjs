@@ -192,36 +192,16 @@ try {
     await ctx.close()
   }
 
-  // On a phone: the top bar's chip and its menu fit the screen, Today's Usage card has the rows
-  // with Sign in on Work Secondary's, and the agent's message box says the account it's on.
+  // On a phone: usage isn't in the top bar (it keeps to what needs you now), it's Today's Usage
+  // card, with the rows and Sign in on Work Secondary's; and the agent's message box says the
+  // account it's on.
   for (const look of [{ mode: 'light', theme: 'sky' }, { mode: 'dark', theme: 'midnight' }]) {
     const t = `phone ${look.theme}`
     const { ctx, p, errors } = await page(b, kit.url, { ...look, phone: true, before: fake })
     const W = 390
-    const chip = p.locator('.usage-chip').first()
-    await chip.waitFor({ timeout: 15000 })
-    const cb = await chip.boundingBox()
-    ok(cb && cb.x >= 0 && cb.x + cb.width <= W + 1 && /Personal/.test(await chip.innerText()), `${t}: the top bar's chip fits, with its account`, { cb, text: await chip.innerText() })
-    await chip.click()
-    const menu = p.locator('.acct-pop.top')
-    await menu.waitFor({ timeout: 5000 })
-    ok(await solid(p, '.acct-pop.top'), `${t}: its menu is solid`)
-    const mb = await menu.boundingBox()
-    ok(mb && mb.x >= 0 && mb.x + mb.width <= W + 1, `${t}: its menu fits the screen`, mb)
-    ok(/Same account as Personal/.test(await menu.innerText()) && /24%\s*wk/.test(await menu.innerText()), `${t}: with both windows and the same-account offer`)
-    const ws = menu.locator('.acct-row', { hasText: 'Work Secondary' }).locator('.acct-act', { hasText: 'Sign in' })
-    const wb = await ws.boundingBox().catch(() => null)
-    ok(!!wb && wb.x + wb.width <= W - 12, `${t}: and Sign in on Work Secondary's row, on the screen`, wb)
-    const whyLine = menu.locator('.acct-row', { hasText: 'Work Secondary' }).locator('.acct-desc')
-    ok(await whyLine.isVisible() && (await whyLine.evaluate((x) => x.scrollWidth - x.clientWidth)) <= 1, `${t}: with why in a few words under its name, whole`, await whyLine.innerText().catch(() => ''))
-    // "66% 5h", not "66%5h": the window's name apart from its number, and no bar crowding the names.
-    const gap = await menu.locator('.acct-win').first().evaluate((x) => x.querySelector('small').getBoundingClientRect().left - x.querySelector('b').getBoundingClientRect().right)
-    ok(gap >= 1.5, `${t}: each number apart from its window's name`, gap)
-    ok(!(await menu.locator('.acct-left .u-bar').evaluateAll((xs) => xs.filter((x) => x.offsetParent).length)), `${t}: the numbers without the bar`)
-    const nameW = await menu.locator('.acct-item .acct-name').evaluateAll((xs) => xs.map((x) => x.scrollWidth - x.clientWidth))
-    ok(nameW.every((d) => d <= 1), `${t}: every account's name shows whole`, nameW)
-    await shot(p, `${tag}accounts-menu-${look.theme}-phone`)
-    await p.keyboard.press('Escape')
+    await p.waitForSelector('.tabbar button', { timeout: 15000 })
+    await p.waitForTimeout(1500)
+    ok(await p.locator('.topbar .usage-chip').count() === 0, `${t}: usage isn't in the top bar`)
     await p.locator('.tabbar button', { hasText: 'Today' }).click()
     const card = p.locator('.usage-card').first()
     ok(!!(await until(() => card.isVisible(), 10000)), `${t}: Today has the Usage card`)

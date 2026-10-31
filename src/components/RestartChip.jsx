@@ -7,8 +7,9 @@ import { t } from '../i18n/index.js'
 // The top bar's Restart to apply: something you allowed in System Settings (Full Disk Access, say)
 // reaches Bridge AI only after it restarts. It stays until then, so you restart when it suits you.
 // From a phone it shows, but the restart happens on the computer. Agents keep running through it
-// (keep: in the terminal host), unless Keep agents running is off.
-export default function RestartChip({ fleet, runtime, keep }) {
+// (keep: in the terminal host), unless Keep agents running is off. line: on a phone, a line under the
+// top bar (TopNotes.jsx) that says what it's for.
+export default function RestartChip({ fleet, runtime, keep, line = false }) {
   const { data } = useFix()
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -43,9 +44,15 @@ export default function RestartChip({ fleet, runtime, keep }) {
   const cmd = 'npm run stop && npm start'
   return (
     <div className="update-wrap" ref={ref}>
-      <button className="top-chip update-chip" onClick={() => setOpen((o) => !o)} aria-expanded={open} title={t('{what}. Restart Bridge AI to apply it.', { what: sentence })}>
-        <Icon name="refresh" size={13} /><span className="hide-sm">{t('Restart to apply')}</span>
-      </button>
+      {line ? (
+        <button type="button" className="top-note restart-note" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+          <Icon name="refresh" size={14} /><span className="top-note-text">{t('{what}. Restart Bridge AI to apply it.', { what: sentence })}</span><Icon name="chevron" size={13} className="top-note-go" />
+        </button>
+      ) : (
+        <button className="top-chip update-chip" onClick={() => setOpen((o) => !o)} aria-expanded={open} title={t('{what}. Restart Bridge AI to apply it.', { what: sentence })}>
+          <Icon name="refresh" size={13} /><span className="hide-sm">{t('Restart to apply')}</span>
+        </button>
+      )}
       {open && (
         <div className="update-pop" role="dialog" aria-label={t('Restart to apply')}>
           <div className="update-head"><b>{t('Restart to apply')}</b></div>

@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import Icon, { StatusDot } from './Icon.jsx'
-import { api, hostApi, machineId, relayComputers } from '../api.js'
+import { api, hostApi, machineId, relayComputers, phoneApp } from '../api.js'
 import { t, tx, locale } from '../i18n/index.js'
 
 // Your other devices (server/machines.js): Macs, Windows and Linux computers running Bridge AI,
@@ -71,7 +71,13 @@ const counts = (c) => {
 }
 
 // ---------- the top bar ----------
-export function MachineMenu() {
+// On a phone it's also the way around the phone itself. In the iPhone and Android apps: the other
+// computers the phone is paired with, each opened through its own relay (with whether it's online
+// when this computer knows it: they're linked), and On this phone, the app's Cloud Agents and its
+// start screen. In a browser there's neither (the relay's page is one computer's, and Cloud Agents
+// keep their keys in the app), so it's your devices alone, as on a computer.
+const bare = (u) => String(u || '').replace(/\/+$/, '')
+export function MachineMenu({ phone = false }) {
   const { data } = useMachines()
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
@@ -83,38 +89,53 @@ export function MachineMenu() {
     document.addEventListener('keydown', key)
     return () => { document.removeEventListener('mousedown', down); document.removeEventListener('keydown', key) }
   }, [open])
+  const app = phone ? phoneApp : null
   const linked = (data?.machines || []).filter((m) => m.state === 'linked')
-  if (!data || (!linked.length && !machineId)) return null
+  if (!data || (!linked.length && !machineId && !app)) return null
   const cur = machineId ? linked.find((m) => m.id === machineId) : null
   const needs = linked.filter((m) => m.id !== machineId).reduce((n, m) => n + (m.counts?.blocked || 0), 0)
+  // The computers this phone is paired with, besides the one it's connected to.
+  const paired = app ? (relayComputers.list?.() || []).filter((c) => !c.current && bare(c.relay) !== bare(data.here.relay)) : []
+  const pairedTo = (m) => paired.find((c) => bare(c.relay) === bare(m.relay))
   const pick = (id, own) => { setOpen(false); if (own || id !== machineId) goMachine(id, { own }) }
-  const row = (id, name, sub, on, here) => (
-    <div key={id || 'here'} className={`mc-row ${here ? 'on' : ''}`}>
-      <button type="button" role="menuitem" className="mc-item" onClick={() => pick(id)}>
-        <span className={`mc-dot ${on ? 'on' : ''}`} />
+  const go = (m) => { const c = pairedTo(m); if (c && m.id !== machineId) { setOpen(false); relayComputers.open(c.relay) } else pick(m.id) }
+  const row = (key, name, sub, on, here, onClick, id) => (
+    <div key={key} className={`mc-row ${here ? 'on' : ''}`}>
+      <button type="button" role="menuitem" className="mc-item" onClick={onClick}>
+        <span className={`mc-dot ${on === true ? 'on' : on == null ? 'unknown' : ''}`} />
         <span className="mc-text"><b>{name}</b><small>{sub}</small></span>
         {here && <Icon name="check" size={13} />}
       </button>
-      {!here && window.bridgeApp?.openMachine && <button type="button" className="win-btn" onClick={() => pick(id, true)} aria-label={t('Open {name} in a window of its own', { name })} title={t('In a window of its own')}><Icon name="popout" size={13} /></button>}
+      {!here && id && window.bridgeApp?.openMachine && <button type="button" className="win-btn" onClick={() => pick(id, true)} aria-label={t('Open {name} in a window of its own', { name })} title={t('In a window of its own')}><Icon name="popout" size={13} /></button>}
     </div>
   )
+  const close = (fn) => () => { setOpen(false); fn() }
   return (
     <div className="mc-wrap" ref={ref}>
       <button type="button" className={`mc-chip ${machineId ? 'remote' : ''}`} onClick={() => setOpen(!open)} aria-haspopup="menu" aria-expanded={open} title={t('Your devices')}>
-        <Icon name="laptop" size={13} />
+        <Icon name="laptop" size={phone ? 16 : 13} />
         <span className="mc-name">{cur ? cur.name : data.here.name}</span>
         {needs > 0 && <span className="mc-needs" title={needs === 1 ? t('{n} on your other devices needs you', { n: needs }) : t('{n} on your other devices need you', { n: needs })}>{needs}</span>}
         <Icon name="down" size={11} />
       </button>
       {open && (
-        <div className="menu left mc-menu" role="menu" aria-label={t('Your devices')}>
+        <div className={`menu left mc-menu ${phone ? 'phone' : ''}`} role="menu" aria-label={t('Your devices')}>
           <div className="mc-head">{t('Your devices')}</div>
-          {row(null, data.here.name, `${OS_LABEL[data.here.os] || ''}${machineId ? '' : ` · ${t('this one')}`}`, true, !machineId)}
-          {linked.map((m) => row(m.id, m.name, [OS_LABEL[m.os], m.online ? counts(m.counts) || t('Online') : m.lastSeen ? t('Offline, seen {when}', { when: ago(m.lastSeen) }) : t('Offline')].filter(Boolean).join(' · '), m.online, m.id === machineId))}
+          {row('here', data.here.name, `${OS_LABEL[data.here.os] || ''}${machineId ? '' : ` · ${t('this one')}`}`, true, !machineId, () => pick(null))}
+          {linked.map((m) => row(m.id, m.name, [OS_LABEL[m.os], m.online ? counts(m.counts) || t('Online') : m.lastSeen ? t('Offline, seen {when}', { when: ago(m.lastSeen) }) : t('Offline')].filter(Boolean).join(' · '), m.online, m.id === machineId, () => go(m), m.id))}
+          {paired.filter((c) => !linked.some((m) => bare(m.relay) === bare(c.relay))).map((c) => row(c.relay, c.name, t('Paired on this phone'), null, false, close(() => relayComputers.open(c.relay))))}
           <div className="menu-sep" />
-          <button type="button" role="menuitem" className="menu-item" onClick={() => { setOpen(false); window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'machines' } })) }}>
+          <button type="button" role="menuitem" className="menu-item" onClick={close(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'machines' } })))}>
             <Icon name="link" size={13} /> {t('Link a device…')}
           </button>
+          {app && (
+            <>
+              <div className="menu-sep" />
+              <div className="mc-head">{t('On this phone')}</div>
+              {app.cloud && <button type="button" role="menuitem" className="menu-item" onClick={close(app.cloud)}><Icon name="cloud" size={13} /> {t('Cloud Agents')}</button>}
+              <button type="button" role="menuitem" className="menu-item" onClick={close(app.start)} title={t('Back to the start: pair or open a computer')}><Icon name="phone" size={13} /> {t('Start screen')}</button>
+            </>
+          )}
         </div>
       )}
     </div>
