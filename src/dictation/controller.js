@@ -20,10 +20,13 @@ import { t } from '../i18n/index.js'
 export const HOLD_MS = 300
 
 // phase: idle | opening (asking for the mic) | listening | working (turning it into text).
-// mode: hold | free (hands-free). note: a line to show. setup: what /voice says is missing, or
+// mode: hold | free (hands-free). level: how loud now (0 to 1); levels: the last few, oldest first,
+// for the pill's moving bars (Pill.jsx). note: a line to show. setup: what /voice says is missing, or
 // { mic: true }. result: { text } the last text (for the floating window). offer: the desktop app's
 // key status, while asking whether the key should work from any app too.
-let st = { phase: 'idle', mode: null, target: null, level: 0, since: 0, note: null, setup: null, result: null, retry: false, offer: null }
+export const LEVELS = 18
+const QUIET = Array(LEVELS).fill(0)
+let st = { phase: 'idle', mode: null, target: null, level: 0, levels: QUIET, since: 0, note: null, setup: null, result: null, retry: false, offer: null }
 const subs = new Set()
 const set = (p) => { st = { ...st, ...p }; for (const f of subs) f() }
 export const getState = () => st
@@ -39,7 +42,8 @@ export const dictationKey = (c) => c?.key || defaultKey(keysPlatform())
 // What a bar says while it listens, held or hands-free.
 export const listeningHint = (mode, label) => (mode === 'free' ? t("Listening… press {key} or Enter when you're done", { key: label }) : t('Talking… let go to add it · Esc cancels'))
 
-// Settings › Voice › Dictation, from /api/config: { on, key, cleanup, atFiles, to, background }.
+// Settings › Voice › Dictation, from /api/config: { on, key, cleanup, atFiles, to, background,
+// history, keepFor, keepAudio }.
 let cfg = {}
 export const configure = (c) => { cfg = c || {} }
 export const settings = () => cfg
@@ -133,7 +137,7 @@ export async function press(target, at = Date.now()) {
   if (target.kind === 'password') { set({ note: t("Can't dictate into a password field."), target: null }); return }
   const id = ++seq
   pressAt = at
-  set({ phase: 'opening', mode: 'hold', target, level: 0, since: Date.now(), note: null, setup: null, result: null, retry: false, offer: null })
+  set({ phase: 'opening', mode: 'hold', target, level: 0, levels: QUIET, since: Date.now(), note: null, setup: null, result: null, retry: false, offer: null })
   words()
   // Something to install first (whisper.cpp, for a Whisper model)? Then the mic isn't opened: nothing
   // could turn it into text. The speech model only to download is different: you talk now, and
@@ -149,7 +153,7 @@ export async function press(target, at = Date.now()) {
   try {
     const stream = await microphone()
     if (seq !== id) { stream.getTracks().forEach((x) => x.stop()); return }
-    const pcm = await startPcm(stream, { onLevel: (level) => { if (seq === id) set({ level }) } })
+    const pcm = await startPcm(stream, { onLevel: (level) => { if (seq === id) set({ level, levels: [...st.levels.slice(1 - LEVELS), level] }) } })
     if (seq !== id) { pcm.cancel(); return }
     rec = { pcm, id }
     set({ phase: 'listening', since: Date.now() })
@@ -223,8 +227,11 @@ async function transcribe(id) {
     if (seq !== id) return
     if (!text) { set({ phase: 'idle', note: t('No speech detected') }); return }
     lastAudio = null
-    set({ phase: 'idle', mode: null, result: { text, at: Date.now() } })
-    if (!deliver(target, text)) set({ note: t('Nowhere to put it, so here it is: {text}', { text }) })
+    const at = Date.now()
+    set({ phase: 'idle', mode: null, result: { text, at } })
+    const put = deliver(target, text)
+    keep(at, target, put, { text, raw: data.text, ms: Math.round(((blob.size - 44) / 2 / RATE) * 1000) }, blob)
+    if (!put) set({ note: t('Nowhere to put it, so here it is: {text}', { text }) })
     else if (target?.kind !== 'hud') offerAnyApp()
   } catch (e) {
     if (seq !== id) return
@@ -234,6 +241,41 @@ async function transcribe(id) {
     // What the computer said, as it said it (a speech model to download first, say).
     set({ phase: 'idle', mode: null, setup: v && !v.ready ? v : null, retry: true, note: e.said || t("Couldn't transcribe: {error}", { error: e.message }) })
   }
+}
+
+// ---------- Kept (Settings › Voice › Dictation History; server/dictations.js) ----------
+// Each dictation, with where it went: typed into a message box (its agent), a terminal or another
+// box in Bridge AI. The dictation window's are kept as soon as they're heard, with the app they
+// were said in, and amended once pasted, sent or copied (amend). With history off, nothing's sent
+// to be kept; the recording only with "Keep the recordings too".
+const kept = new Map() // the words' time (result.at) -> its id, once kept (a promise)
+function keep(at, target, put, said, blob) {
+  if (cfg.history === false) return
+  const body = { ...said, how: null }
+  if (target?.kind === 'hud') { if (target.app) body.app = target.app } else {
+    // Put nowhere (what it was for had gone): kept all the same, as said in Bridge AI.
+    if (put) body.how = 'typed'
+    if (put && target.kind === 'composer') body.agent = { id: target.id }
+    else body.place = target?.kind === 'terminal' ? 'terminal' : 'field'
+  }
+  const p = api('/dictations', { method: 'POST', body }).then(async (r) => {
+    if (!r?.kept) return null
+    if (cfg.keepAudio === true && blob) await fetch(apiUrl(`/dictations/${encodeURIComponent(r.id)}/audio`), { method: 'POST', headers: { 'Content-Type': 'audio/wav' }, body: blob }).catch(() => {})
+    return r.id
+  }, () => null)
+  kept.set(at, p)
+  for (const k of kept.keys()) if (kept.size > 8) kept.delete(k)
+}
+// What became of the words (result: s.result): { how, agent }.
+export async function amend(result, patch) {
+  const id = await kept.get(result?.at)
+  if (id) await api(`/dictations/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch }).catch(() => {})
+}
+// Not kept after all: what was said into a password field.
+export async function forget(result) {
+  const id = await kept.get(result?.at)
+  kept.delete(result?.at)
+  if (id) await api(`/dictations/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {})
 }
 
 // ---------- The key from any app ----------

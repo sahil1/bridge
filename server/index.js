@@ -15,6 +15,7 @@ import * as office from './office.js'
 import * as accounts from './accounts.js'
 import * as voice from './voice.js'
 import * as dictation from './dictation.js'
+import * as dictations from './dictations.js'
 import * as fixes from './fixes.js'
 import * as servers from './servers.js'
 import * as archive from './archive.js'
@@ -973,6 +974,29 @@ app.post('/api/transcribe', express.raw({ type: () => true, limit: '30mb' }), as
 // which the speech engine also listens for.
 const dictationSources = async () => ({ fleet: lastFleet || await fleetView().catch(() => null), projects: await projects.list().catch(() => []) })
 app.get('/api/dictation/words', wrap(async () => dictation.words(await dictationSources())))
+// Your dictations, kept on this computer (dictations.js): listed and searched, one whole, what
+// became of it, deleted (and put back, for Undo), all of them deleted, a recording kept and played,
+// an app's icon. An agent named by its pane only is named from the fleet.
+dictations.configure(cfg, { agent: (id) => { const a = lastFleet?.agents?.find((x) => x.paneId === id); return a ? { name: a.chief ? 'Chief of Staff' : a.title || a.tab || a.workspace || '', chief: !!a.chief } : null } })
+const said = (fn) => async (req, res) => { try { res.json(await fn(req)) } catch (e) { res.status(e.status || 502).json({ error: e.message }) } }
+app.get('/api/dictations', said((req) => dictations.list({ q: String(req.query.q || ''), before: req.query.before || null, limit: req.query.limit })))
+app.post('/api/dictations', said((req) => (req.body?.restore ? dictations.add(req.body.restore, { restore: true }) : dictations.add(req.body || {}))))
+app.delete('/api/dictations', said(() => dictations.clear()))
+app.get('/api/dictations/icons/:bundle', async (req, res) => {
+  const f = dictations.iconFile(req.params.bundle)
+  if (!f || !(await exists(f))) return res.status(404).end()
+  res.set('Cache-Control', 'private, max-age=86400').sendFile(f, { dotfiles: 'allow' })
+})
+app.get('/api/dictations/:id', said((req) => dictations.get(req.params.id)))
+app.patch('/api/dictations/:id', said((req) => dictations.update(req.params.id, req.body || {})))
+app.delete('/api/dictations/:id', said((req) => dictations.remove(req.params.id)))
+app.post('/api/dictations/:id/audio', express.raw({ type: () => true, limit: '60mb' }), said((req) => dictations.saveAudio(req.params.id, req.body)))
+app.get('/api/dictations/:id/audio', async (req, res) => {
+  try { res.type('audio/wav').sendFile(await dictations.audioFile(req.params.id), { dotfiles: 'allow' }) } catch (e) { res.status(e.status || 502).json({ error: e.message }) }
+})
+// Older than you keep them for: taken out a few minutes after the start, and every six hours.
+setTimeout(() => dictations.tidy().catch(() => {}), 3 * 60 * 1000).unref()
+setInterval(() => dictations.tidy().catch(() => {}), 6 * 60 * 60 * 1000).unref()
 
 // ---------- Meeting notes (meetings.js; speech engines in speech.js) ----------
 meetings.configure(cfg)

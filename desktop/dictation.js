@@ -248,11 +248,16 @@ async function activeClass(runFn = run) {
   return runFn('xprop', ['-id', id, 'WM_CLASS'])
 }
 
+// A bundle ID as macOS has them (com.tinyspeck.slackmacgap): a file's name in the data folder.
+const BUNDLE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/
+
 // ---------- The app's side ----------
 // electron: the module; ROOT: Bridge AI's code (shared/, native/bin); DATA: its data folder;
 // isOurs(win): one of the app's own windows, where the key goes to the page.
 // askAccess(pane): the Allow access tile (main.js); trusted(e): an IPC call from the app's own page.
-function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, tellMain, askAccess, trusted = () => true }) {
+// openApp(bundle): brings that app to the front (Paste again; the tests stand in for it).
+const openBundle = (bundle) => new Promise((resolve) => execFile('open', ['-b', bundle], { timeout: 5000 }, () => resolve()))
+function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, tellMain, askAccess, trusted = () => true, openApp = openBundle }) {
   const { BrowserWindow, globalShortcut, screen, ipcMain, clipboard, systemPreferences, shell } = electron
   const IS_MAC = process.platform === 'darwin'
   let lib = null
@@ -273,17 +278,19 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, tellMain, askA
 
   const say = (wc, detail) => { if (wc && !wc.isDestroyed()) wc.executeJavaScript(`window.dispatchEvent(new CustomEvent('bridge-dictate-key', { detail: ${JSON.stringify(detail)} }))`).catch(() => {}) }
   const toHud = (detail) => {
-    if (!ready) { if (detail.type === 'down') pending = { down: detail.at, up: null, app: detail.app || null }; else if (detail.type === 'up' && pending) pending.up = detail.at; return }
+    if (!ready) { if (detail.type === 'down') pending = { down: detail.at, up: null, app: detail.app || null, bundle: detail.bundle || null }; else if (detail.type === 'up' && pending) pending.up = detail.at; return }
     say(hud?.webContents, detail)
   }
-  // info: what the Mac's helper says was in front ({ app, pid, secure }).
+  // info: what the Mac's helper says was in front ({ app, bundle, path, pid, secure }).
   function onDown(at, info) {
     const w = BrowserWindow.getFocusedWindow()
     if (w && w !== hud && isOurs(w)) { route = w.webContents; say(route, { type: 'down', at }); return }
     route = 'hud'
-    front = Number.isInteger(info?.pid) ? { app: typeof info.app === 'string' ? info.app.slice(0, 80) : '', pid: info.pid } : null
+    const bundle = typeof info?.bundle === 'string' && BUNDLE.test(info.bundle) ? info.bundle : ''
+    front = Number.isInteger(info?.pid) ? { app: typeof info.app === 'string' ? info.app.slice(0, 80) : '', bundle, pid: info.pid } : null
     showHud()
-    toHud({ type: 'down', at, ...(front?.app ? { app: front.app } : {}) })
+    toHud({ type: 'down', at, ...(front?.app ? { app: front.app } : {}), ...(bundle ? { bundle } : {}) })
+    if (bundle) keepIcon(bundle, info.path).catch(() => {})
   }
   function onUp(at) {
     if (route === 'hud') toHud({ type: 'up', at })
@@ -291,10 +298,16 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, tellMain, askA
   }
 
   // ---------- The dictation window ----------
-  const SIZE = { w: 444, h: 92 }
+  // A pill in the middle at the top of the screen you're on, just under the menu bar (and a Mac's
+  // notch), as MacWhisper puts its own: the boxes you type into are mostly low in their window (a
+  // chat's, an agent's), and the top is where macOS shows the mic is on. It keeps its width and its
+  // top, and grows down to fit what it shows, so nothing in it moves; on a Mac and Windows clicks go
+  // through it except on the pill itself (the page says when the pointer is on it).
+  const SIZE = { w: 420, h: 60 }
+  const CLICK_THROUGH = IS_MAC || process.platform === 'win32'
   function place(w = SIZE.w, h = SIZE.h) {
     const a = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea
-    return { x: Math.round(a.x + (a.width - w) / 2), y: Math.round(a.y + a.height - h - 48), width: w, height: h }
+    return { x: Math.round(a.x + (a.width - w) / 2), y: Math.round(a.y + 2), width: w, height: h }
   }
   function showHud() {
     if (!hud || hud.isDestroyed()) {
@@ -306,8 +319,10 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, tellMain, askA
         ...(IS_MAC ? { focusable: false } : {}),
         webPreferences: { preload, contextIsolation: true, sandbox: true },
       })
+      // Over the others, on every desktop and over full-screen apps, as the meeting card is.
       hud.setAlwaysOnTop(true, 'floating')
       hud.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+      if (CLICK_THROUGH) hud.setIgnoreMouseEvents?.(true, { forward: true })
       // Not in pictures of the screen (a screen you share on a call).
       hud.setContentProtection(true)
       hud.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
@@ -317,8 +332,9 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, tellMain, askA
       hud.loadURL(`${URL_BASE}/?dictate=1`)
       return
     }
-    const [w, h] = hud.getContentSize()
-    hud.setBounds(place(w, h))
+    const [, h] = hud.getContentSize()
+    hud.setBounds(place(SIZE.w, h))
+    if (CLICK_THROUGH) hud.setIgnoreMouseEvents?.(true, { forward: true })
     if (!hud.isVisible()) hud.showInactive()
   }
   const hideHud = () => { holdEsc(false); if (hud && !hud.isDestroyed() && hud.isVisible()) hud.hide() }
@@ -331,13 +347,15 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, tellMain, askA
   const fromHud = (e) => !!hud && !hud.isDestroyed() && e.sender === hud.webContents
   ipcMain.handle('bridge:hud-ready', (e) => { if (!fromHud(e)) return null; ready = true; const p = pending; pending = null; return p })
   ipcMain.on('bridge:hud-size', (e, w, h) => {
-    if (!fromHud(e) || !Number.isFinite(w) || !Number.isFinite(h)) return
-    const nw = Math.max(200, Math.min(640, Math.round(w))), nh = Math.max(48, Math.min(520, Math.round(h)))
+    if (!fromHud(e) || !Number.isFinite(h)) return
+    const nh = Math.max(48, Math.min(560, Math.round(h)))
     const b = hud.getBounds()
-    if (b.width === nw && b.height === nh) return
-    // It grows upward, keeping its bottom and its middle where they were.
-    hud.setBounds({ x: Math.round(b.x + (b.width - nw) / 2), y: b.y + b.height - nh, width: nw, height: nh })
+    if (b.height === nh) return
+    // It grows down, keeping its top, its middle and its width where they were.
+    hud.setBounds({ x: b.x, y: b.y, width: b.width, height: nh })
   })
+  // The pointer on the pill: clicks are the window's; off it, they go through to what's beneath.
+  ipcMain.on('bridge:hud-pointer', (e, on) => { if (fromHud(e) && CLICK_THROUGH) hud.setIgnoreMouseEvents?.(!on, { forward: true }) })
   ipcMain.on('bridge:hud-phase', (e, phase) => { if (fromHud(e)) holdEsc(phase === 'opening' || phase === 'listening' || phase === 'working') })
   ipcMain.handle('bridge:hud-hide', (e) => { if (fromHud(e)) hideHud(); return true })
   ipcMain.handle('bridge:hud-copy', (e, text) => { if (!fromHud(e) || typeof text !== 'string') return false; clipboard.writeText(text.slice(0, 200_000)); return true })
@@ -381,6 +399,57 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, tellMain, askA
     askAccess?.('accessibility')
     return 'asked'
   })
+
+  // Paste again (Dictations, in the main window): the words pasted into the app they were said in
+  // (by its bundle ID, on a Mac), or else into the one you were in before Bridge AI. Bridge AI steps
+  // aside first, then they're pasted as the dictation window pastes them. Only from the app's own page.
+  async function frontNow(bundle, ms = 1500) {
+    const end = Date.now() + ms
+    while (Date.now() < end) {
+      let j = null
+      try { j = JSON.parse(String(await run(helperBin(), ['front']) || '').trim()) } catch { /* not yet */ }
+      if (j && Number.isInteger(j.pid) && j.pid !== process.pid && (!bundle || j.bundle === bundle)) return j
+      await sleep(100)
+    }
+    return null
+  }
+  ipcMain.handle('bridge:dictate-repaste', async (e, { text, bundle } = {}) => {
+    if (!trusted(e) || typeof text !== 'string' || !text) return { error: 'off' }
+    const p = pasteStatus()
+    if (!p.can) return { error: 'off' }
+    if (!p.allowed) return { error: 'accessibility' }
+    const words = text.slice(0, 100_000)
+    if (p.via === 'bridgekeys') {
+      const which = typeof bundle === 'string' && BUNDLE.test(bundle) ? bundle : null
+      if (which) await openApp(which); else electron.app?.hide?.()
+      const now = await frontNow(which)
+      return now ? helperPaste({ bin: helperBin(), text: words, pid: now.pid }) : { error: 'moved' }
+    }
+    // Windows and Linux: Bridge AI's window steps aside, and the app beneath it gets the keys.
+    BrowserWindow.getFocusedWindow()?.minimize()
+    await sleep(350)
+    if (BrowserWindow.getFocusedWindow()) return { error: 'focus' }
+    if (p.via === 'wtype') return typeIn({ text: words })
+    const terminal = process.platform === 'linux' && lib.isTerminal(await activeClass())
+    return keyPaste({ text: words, clipboard, hook: loadHook(), terminal })
+  })
+
+  // The icon of the app the key was pressed in, for the list of your dictations (Dictations): asked
+  // of macOS once per app and kept in the data folder (dictations/icons/<bundle ID>.png), where the
+  // server hands it to the page, a phone's too. Not with history off; again after Delete all.
+  async function keepIcon(bundle, appPath) {
+    if (!IS_MAC || settings.history === false || typeof appPath !== 'string' || !/\.app\/?$/.test(appPath)) return
+    const file = path.join(DATA, 'dictations', 'icons', `${bundle}.png`)
+    if (await fs.promises.access(file).then(() => true, () => false)) return
+    let img = null
+    try { img = await electron.nativeImage?.createThumbnailFromPath?.(appPath, { width: 64, height: 64 }) } catch { /* below */ }
+    if (!img || img.isEmpty()) img = await electron.app?.getFileIcon?.(appPath, { size: 'normal' }).catch(() => null)
+    if (!img || img.isEmpty()) return
+    await fs.promises.mkdir(path.dirname(file), { recursive: true })
+    const tmp = `${file}.${process.pid}.tmp`
+    await fs.promises.writeFile(tmp, img.toPNG())
+    await fs.promises.rename(tmp, file)
+  }
 
   // Edit in Bridge AI: the agent's tab in the main window, the text in its message box.
   ipcMain.handle('bridge:hud-open', async (e, { paneId, text } = {}) => {

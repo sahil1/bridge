@@ -10,11 +10,13 @@
 //     {"ready":true}                          or {"error":"taken","by":"macOS"} (one of macOS's own
 //                                             shortcuts, turned on in System Settings › Keyboard), or
 //     {"error":"failed","status":n}           and then, each time the key goes down and up:
-//     {"down":<ms since 1970>,"app":"Safari","bundle":"com.apple.Safari","pid":123,"secure":false}
+//     {"down":<ms since 1970>,"app":"Safari","bundle":"com.apple.Safari","path":"/Applications/Safari.app","pid":123,"secure":false}
 //     {"up":<ms>}
-//   bridgekeys front                          the app in front and whether Secure Input is on (a
-//                                             password field has the keyboard), then exits:
-//     {"app":"Safari","bundle":"com.apple.Safari","pid":123,"secure":false}
+//   bridgekeys front                          the app in front (its name, bundle ID and where it is,
+//                                             for its icon in the list of dictations) and whether
+//                                             Secure Input is on (a password field has the keyboard),
+//                                             then exits:
+//     {"app":"Safari","bundle":"com.apple.Safari","path":"/Applications/Safari.app","pid":123,"secure":false}
 //   bridgekeys paste [--pid <pid>]            the text on stdin, pasted where you're typing in the
 //                                             app in front (Settings › Voice › "Where I'm typing"):
 //                                             put on the clipboard, ⌘V pressed, and what was on the
@@ -60,7 +62,7 @@ func say(_ line: String) {
 func now() -> Int64 { Int64(Date().timeIntervalSince1970 * 1000) }
 func front() -> String {
   let a = NSWorkspace.shared.frontmostApplication
-  return "\"app\":\(quote(a?.localizedName ?? "")),\"bundle\":\(quote(a?.bundleIdentifier ?? "")),\"pid\":\(a?.processIdentifier ?? -1),\"secure\":\(IsSecureEventInputEnabled())"
+  return "\"app\":\(quote(a?.localizedName ?? "")),\"bundle\":\(quote(a?.bundleIdentifier ?? "")),\"path\":\(quote(a?.bundleURL?.path ?? "")),\"pid\":\(a?.processIdentifier ?? -1),\"secure\":\(IsSecureEventInputEnabled())"
 }
 // One of macOS's own shortcuts that's turned on (Spotlight's ⌘Space, the input sources' ⌃Space…).
 let MODS: UInt32 = 0x1F00 // cmd, shift, caps lock, option, control

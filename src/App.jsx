@@ -6,7 +6,7 @@ import Rail from './components/Rail.jsx'
 import Board from './components/Board.jsx'
 import Dock from './components/Dock.jsx'
 import Console, { MateEmpty, showChat } from './components/Console.jsx'
-import { Settings, Onboarding, HerdrView, Terminals, ShellTab, MeetingsHome, MeetingPage, preloadViews } from './lazy.jsx'
+import { Settings, Onboarding, HerdrView, Terminals, ShellTab, MeetingsHome, MeetingPage, Dictations, preloadViews } from './lazy.jsx'
 import Home from './components/Home.jsx'
 import { FirstRunAnswers } from './components/FirstRun.jsx'
 import { MeetingsProvider, RecordingPill, CallPrompt, useMeetings } from './components/meetings/recording.jsx'
@@ -151,8 +151,9 @@ function WeatherChip({ onClick }) {
   )
 }
 
-// Views that open in tabs beside the agents: Home (start something new), Meetings, and a meeting.
-const VIEWS = { 'view:new': { title: tx('New'), icon: 'plus' }, 'view:meetings': { title: tx('Meetings'), icon: 'mic' } }
+// Views that open in tabs beside the agents: Home (start something new), Meetings, a meeting, and
+// Dictations.
+const VIEWS = { 'view:new': { title: tx('New'), icon: 'plus' }, 'view:meetings': { title: tx('Meetings'), icon: 'mic' }, 'view:dictations': { title: tx('Dictations'), icon: 'wave' } }
 const isView = (id) => typeof id === 'string' && id.startsWith('view:')
 
 // The recording of a meeting lives above everything else, so it goes on while you move around.
@@ -295,8 +296,8 @@ function App() {
       const a = byId[paneId]
       // On the phone's Cloud agents, Back (Android's) closes the agent first.
       if (cloudOnly && paneId !== mobileAgent) { if (window.history.state?.agent) window.history.replaceState({ agent: paneId }, ''); else window.history.pushState({ agent: paneId }, '') }
-      // Meetings, and a meeting, open in the phone's own Meetings tab.
-      if (typeof paneId === 'string' && paneId.startsWith('view:meeting')) { setMtab('meetings'); setMobileMeeting(paneId === 'view:meetings' ? null : paneId); return }
+      // Meetings, a meeting and Dictations open in the phone's own Meetings tab.
+      if (typeof paneId === 'string' && (paneId.startsWith('view:meeting') || paneId === 'view:dictations')) { setMtab('meetings'); setMobileMeeting(paneId === 'view:meetings' ? null : paneId); return }
       if (a?.chief) { setMtab('mate'); setMobileAgent(null); setMateId(paneId) } else { setMtab('agents'); setMobileAgent(paneId) }
       return
     }
@@ -355,6 +356,12 @@ function App() {
     }
     window.addEventListener('bridge-open-meeting', on)
     return () => window.removeEventListener('bridge-open-meeting', on)
+  }, [])
+  // Dictations, from the sidebar's list (with one to open) or anywhere else.
+  useEffect(() => {
+    const on = () => openAgentRef.current?.('view:dictations')
+    window.addEventListener('bridge-open-dictations', on)
+    return () => window.removeEventListener('bridge-open-dictations', on)
   }, [])
   // Agents open in a window of their own: their tab here says so, with Show and Bring back.
   const [popped, setPopped] = useState(() => new Set())
@@ -506,6 +513,7 @@ function App() {
     { id: 'a:new', label: t('New agent with all the options…'), icon: 'bot', keywords: 'launch start claude codex gemini copilot opencode project dialog compare account', run: () => setNewAgent({ mode: 'project' }) },
     { id: 'a:record', label: t('Record a meeting'), icon: 'mic', keywords: 'meeting notes transcript record call granola minutes', run: () => meetings?.start().catch(() => openAgent('view:meetings')) },
     { id: 'a:meetings', label: t('Meetings'), icon: 'mic', keywords: 'meeting notes transcripts summaries', run: () => openAgent('view:meetings') },
+    { id: 'a:dictations', label: t('Dictations'), icon: 'wave', keywords: 'dictation history voice said typed pasted wispr macwhisper', run: () => openAgent('view:dictations') },
     { id: 'a:history', label: t('Search history and closed agents…'), icon: 'clock', keywords: 'search find transcript conversation closed archived resume old past', run: () => setHistory(true) },
     { id: 'a:cloud', label: t('New cloud agent…'), icon: 'cloud', keywords: 'cursor copilot jules claude managed remote github repo pull request', run: () => setNewAgent({ mode: 'cloud' }) },
     { id: 'a:chat', label: t('New chat…'), icon: 'chat', keywords: 'plain vanilla talk ask claude codex gemini assistant', run: () => setNewAgent({ mode: 'chat' }) },
@@ -624,6 +632,7 @@ function App() {
     <ErrorBoundary key={id} name="This view" resetKey={id}>
       {id === 'view:new' ? <Home fleet={fleet} onLaunched={fromHome} onMore={(init) => setNewAgent(init)} />
         : id === 'view:meetings' ? <section className="pane view-pane"><MeetingsHome onOpen={(mid) => openAgent(`view:meeting:${mid}`, wide ? { replace: 'view:meetings' } : {})} /></section>
+          : id === 'view:dictations' ? <section className="pane view-pane"><Dictations /></section>
           : <section className="pane view-pane"><MeetingPage id={id.slice(13)} onBack={onBack || (() => openAgent('view:meetings', { replace: id }))} /></section>}
     </ErrorBoundary>
   )
@@ -660,7 +669,18 @@ function App() {
               : <Console agent={mAgent} variant="mobile" onBack={() => setMobileAgent(null)} queued={queuedFor(mAgent.paneId)} />
             : <><SessionSwitcher fleet={fleet} phone /><Board fleet={fleet} compact onOpen={openAgent}
               action={<span className="m-acts"><button className="btn small" onClick={openNew} aria-label={t('Start something new')}><Icon name="plus" size={12} /> {t('New')}</button></span>} /></>)}
-          {mtab === 'meetings' && <div className="m-view m-meetings">{viewFor(mobileMeeting || 'view:meetings', { onBack: () => setMobileMeeting(null) })}</div>}
+          {mtab === 'meetings' && (
+            <div className="m-view m-meetings">
+              {/* Meetings or Dictations: what you've said, either way. */}
+              {(!mobileMeeting || mobileMeeting === 'view:dictations') && (
+                <div className="m-seg" role="tablist" aria-label={t('Meetings or dictations')}>
+                  <button type="button" role="tab" aria-selected={!mobileMeeting} className={!mobileMeeting ? 'on' : ''} onClick={() => setMobileMeeting(null)}>{t('Meetings')}</button>
+                  <button type="button" role="tab" aria-selected={mobileMeeting === 'view:dictations'} className={mobileMeeting === 'view:dictations' ? 'on' : ''} onClick={() => setMobileMeeting('view:dictations')}>{t('Dictations')}</button>
+                </div>
+              )}
+              {viewFor(mobileMeeting || 'view:meetings', { onBack: () => setMobileMeeting(null) })}
+            </div>
+          )}
           {mtab === 'herdr' && <Terminals key={fleet?.session || ''} onChat={(id) => openAgent(id)} />}
           {mtab === 'today' && (
             <div className="m-today">
@@ -833,7 +853,7 @@ function App() {
           <div className="slot rail-slot" style={{ width: railOpen ? L.railW : 52 }}>
             <Rail fleet={fleet} live={live} collapsed={!railOpen} onToggle={() => set({ railOpen: !L.railOpen })}
               selected={W.active} onOpen={openAgent} onOpenInHerdr={openInHerdr} onOpenFiles={openFiles} onNewAgent={(init) => (init ? setNewAgent(init) : openNew())} onNewTerminal={newTerminal} onHistory={() => setHistory(true)}
-              onMeetings={() => openAgent('view:meetings')} recording={!!meetings?.rec} />
+              onMeetings={() => openAgent('view:meetings')} onDictations={() => openAgent('view:dictations')} recording={!!meetings?.rec} />
           </div>
           {railOpen && <Handle axis="x" size={L.railW} min={180} max={380} onSize={(v) => set({ railW: v })} onToggle={() => set({ railOpen: false })} label={t('Resize sidebar')} />}
 
