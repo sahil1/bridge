@@ -5,7 +5,7 @@ import { useRecheck } from './PermissionFix.jsx'
 
 // Sign in to an agent from wherever it's asked for: its own login, in a terminal tab you can watch;
 // the browser opens on this computer. Claude Code and Codex sign in per account (Settings ›
-// Accounts); the others with a login (agents.js) once. The rest: Settings › Model providers, which
+// Accounts); the others with a login (agents.js) once. The rest: Settings › Model Providers, which
 // says how. onCheck runs while the sign-in is going and when you come back to the window, so what
 // asked for it recovers by itself.
 const OWN_LOGIN = new Set(['claude', 'codex'])

@@ -20,19 +20,19 @@ import { t, tx } from '../i18n/index.js'
 export const SECTIONS = [
   { id: 'general', label: tx('General'), icon: 'home', hint: tx('Name, default agent and model, location') },
   { id: 'agents', label: tx('Agents'), icon: 'bot', hint: tx('Installed agents and sign-in') },
-  { id: 'providers', label: tx('Model providers'), icon: 'layers', hint: tx('API keys, clouds, local models, cloud agents') },
+  { id: 'providers', label: tx('Model Providers'), icon: 'layers', hint: tx('API keys, clouds, local models, cloud agents') },
   { id: 'voice', label: tx('Voice'), icon: 'mic', hint: tx('Speech to text on this computer, and dictation') },
   { id: 'meetings', label: tx('Meetings'), icon: 'mic', hint: tx('How meetings are transcribed and summarized') },
-  { id: 'mcp', label: tx('MCP servers'), icon: 'tool', hint: tx('Tools your agents can use') },
+  { id: 'mcp', label: tx('MCP Servers'), icon: 'tool', hint: tx('Tools your agents can use') },
   { id: 'phone', label: tx('Devices'), icon: 'phone', hint: tx('Your phone and your other computers, through your relay or Tailscale; what to notify you about') },
   { id: 'appearance', label: tx('Appearance'), icon: 'palette', hint: tx('Theme, text size, density') },
-  { id: 'config', label: tx('Config file'), icon: 'braces', hint: tx('Every setting, as JSON') },
+  { id: 'config', label: tx('Config File'), icon: 'braces', hint: tx('Every setting, as JSON') },
   { id: 'about', label: tx('About & Updates'), icon: 'info', hint: tx('Version, updates, the tour, reporting a problem') },
 ]
 
 // The phone's Cloud agents (cloudOnly): only what there is on the phone alone.
 const PHONE = [
-  { id: 'cloud', label: tx('Cloud agents'), icon: 'cloud', hint: tx('Your keys for Cursor, GitHub Copilot, Jules and Claude') },
+  { id: 'cloud', label: tx('Cloud Agents'), icon: 'cloud', hint: tx('Your keys for Cursor, GitHub Copilot, Jules and Claude') },
   { id: 'appearance', label: tx('Appearance'), icon: 'palette', hint: tx('Theme, text size, density') },
 ]
 

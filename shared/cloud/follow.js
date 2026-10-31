@@ -53,7 +53,7 @@ export function apply(t, fresh) {
 }
 
 export function follow({ tasks: initial = [], client, saved, save = () => {}, place = {} }) {
-  const where = { keys: 'in Bridge AI', settings: 'Settings › Model providers', ...place }
+  const where = { keys: 'in Bridge AI', settings: 'Settings › Model Providers', ...place }
   let tasks = initial.filter((t) => ADAPTERS[t?.provider] && t.id)
   const has = (id) => !!(ADAPTERS[id] && saved(id))
   let onChange = () => {}

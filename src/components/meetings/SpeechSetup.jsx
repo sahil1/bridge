@@ -47,7 +47,7 @@ function useSpeechStep(d, refresh) {
       : label ? (mb ? t('The speech model ({model}, {mb} MB) downloads once.', { model: label, mb }) : t('The speech model ({model}) downloads once.', { model: label }))
         : mb ? t('The speech model ({mb} MB) downloads once.', { mb }) : t('The speech model downloads once.'),
     apple: d.apple?.why ? t("The Mac's own speech isn't available here ({why}).", { why: d.apple.why.replace(/^\w/, (c) => c.toLowerCase()) }) : t("The Mac's own speech isn't available here."),
-    key: service?.label ? t('{service} needs its key, in Settings › Model providers.', { service: service.label }) : t('That service needs its key, in Settings › Model providers.'),
+    key: service?.label ? t('{service} needs its key, in Settings › Model Providers.', { service: service.label }) : t('That service needs its key, in Settings › Model Providers.'),
   }[d.needs] || t("Speech to text isn't set up yet.")
   const here = !viaRelay
   const actions = (
@@ -152,7 +152,7 @@ export function MeetingsSetup({ onDone }) {
           </Step>
         )}
         <Step ok={notesOk} title={t('Writing the notes')} detail={models == null ? t('Looking…') : notesOk ? t('The summary, decisions and action items, by your sign-in or key. Pick which in Settings › Meetings.') : t('The summary needs a model: sign in to an agent like Claude Code, or add a key.')}>
-          {models && !notesOk && <span className="mt-step-acts"><button type="button" className="btn small primary" onClick={() => settings('providers')}>{t('Model providers')}</button></span>}
+          {models && !notesOk && <span className="mt-step-acts"><button type="button" className="btn small primary" onClick={() => settings('providers')}>{t('Model Providers')}</button></span>}
         </Step>
         {d.mac && (
           <Step ok={calOk} optional title={t('Your calendar')} detail={calOk ? t('Notes are named after the meeting, with who was invited.') : t('To name notes after the meeting, and offer Take notes for the one about to start.')}>

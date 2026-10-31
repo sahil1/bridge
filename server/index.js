@@ -126,7 +126,7 @@ const exists = (p) => fs.promises.access(p).then(() => true, () => false)
 
 // Start an agent with your default model for that kind (Settings › General).
 const modelFor = (kind) => cfg.agents?.[kind]?.model || null
-// And with your default account for that kind (the star, in Usage and Settings › Model providers),
+// And with your default account for that kind (the star, in Usage and Settings › Model Providers),
 // unless one is picked or the conversation it resumes or forks was on one that's still listed.
 // Auto, either way, is the account with the most left right now.
 // A model picked from the message box can be 'default': the agent's own, with no model given.

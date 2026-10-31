@@ -24,7 +24,7 @@ const STARTERS = [
 // An API key instead of a plan: the providers people most often have one for.
 const KEYS = [['anthropic', 'Anthropic (Claude)', 'ANTHROPIC_API_KEY'], ['openai', 'OpenAI', 'OPENAI_API_KEY'], ['gemini', 'Google Gemini', 'GEMINI_API_KEY'], ['openrouter', 'OpenRouter', 'OPENROUTER_API_KEY'], ['xai', 'xAI (Grok)', 'XAI_API_KEY'], ['mistral', 'Mistral', 'MISTRAL_API_KEY']]
 
-// A key pasted here, saved as in Settings › Model providers, and checked with the provider.
+// A key pasted here, saved as in Settings › Model Providers, and checked with the provider.
 function KeyQuick() {
   const [id, setId] = useState(KEYS[0][0])
   const [key, setKey] = useState('')

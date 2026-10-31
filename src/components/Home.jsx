@@ -83,7 +83,7 @@ export default function Home({ fleet, onLaunched, onMore, autoFocus = true }) {
     e?.preventDefault()
     const prompt = text.trim()
     if (!prompt || busy) return
-    if (kind === 'chat' && !model) { setErr(t('Add an API key or start a local model first (Settings › Model providers).')); return }
+    if (kind === 'chat' && !model) { setErr(t('Add an API key or start a local model first (Settings › Model Providers).')); return }
     setBusy(true); setErr(null)
     try {
       const out = project

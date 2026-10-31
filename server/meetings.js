@@ -549,7 +549,7 @@ export async function retranscribe(id, { engine, localModel, language } = {}) {
     if (!lm?.have) throw new Error(`Download ${lm?.label || 'that speech model'} first, in Settings › Voice.`)
   } else if (st.engine === 'apple') {
     if (!st.apple.available) throw new Error(`The Mac's own speech isn't available here (${st.apple.why || 'it needs macOS 26 or later'}). Pick another engine in Settings › Meetings.`)
-  } else if (!st.services.find((x) => x.id === st.engine)?.ready) throw new Error('That service needs its key first, in Settings › Model providers.')
+  } else if (!st.services.find((x) => x.id === st.engine)?.ready) throw new Error('That service needs its key first, in Settings › Model Providers.')
   const old = path.join(d, 'transcript.jsonl')
   if (fs.existsSync(old)) fs.renameSync(old, path.join(d, `transcript-${Date.now()}.jsonl`))
   fs.rmSync(path.join(d, 'pending'), { recursive: true, force: true })
@@ -1354,7 +1354,7 @@ async function replyAny(use, msgs, o) {
     throw first
   }
 }
-const noModel = () => Object.assign(new Error('No model to write with. Sign in to an agent, or add an API key or a local model in Settings › Model providers.'), { code: 'no_model' })
+const noModel = () => Object.assign(new Error('No model to write with. Sign in to an agent, or add an API key or a local model in Settings › Model Providers.'), { code: 'no_model' })
 
 // What to make of a meeting. General fits most; the others change what to look for.
 export const KINDS = {

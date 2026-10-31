@@ -381,7 +381,7 @@ async function apple(wav, { language }) {
 }
 
 // ---------- Services ----------
-// key: the setting it uses (saved in Settings › Model providers). price: per hour of audio, list
+// key: the setting it uses (saved in Settings › Model Providers). price: per hour of audio, list
 // price in October 2026, to help pick; the service's own page is what counts.
 export const SERVICES = {
   openai: { label: 'OpenAI', key: 'OPENAI_API_KEY', base: (e) => (e.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, ''), models: ['gpt-transcribe', 'gpt-4o-mini-transcribe', 'whisper-1'], price: { 'gpt-transcribe': '$0.27', 'gpt-4o-mini-transcribe': '$0.18', 'whisper-1': '$0.36' }, style: 'openai' },
@@ -397,7 +397,7 @@ export const SERVICES = {
 
 async function answer(r, label) {
   const j = await r.json().catch(() => ({}))
-  if (r.status === 401 || r.status === 403) throw fatal(`${label} turned the key down (${r.status}). Check it in Settings › Model providers.`)
+  if (r.status === 401 || r.status === 403) throw fatal(`${label} turned the key down (${r.status}). Check it in Settings › Model Providers.`)
   if (!r.ok) throw new Error(`${label}: ${j.error?.message || j.error || j.message || j.detail?.message || j.err_msg || `HTTP ${r.status}`}`.slice(0, 300))
   return j
 }
@@ -406,13 +406,13 @@ async function service(id, wav, { cfg, language, prompt }) {
   const s = SERVICES[id]
   const e = env()
   const key = e[s.key] || (id === 'gemini' && (e.GOOGLE_API_KEY || e.GOOGLE_GENERATIVE_AI_API_KEY))
-  if (!key && !s.custom) throw fatal(`No ${s.label} key saved. Add one in Settings › Model providers, or pick another engine in Settings › Meetings.`)
+  if (!key && !s.custom) throw fatal(`No ${s.label} key saved. Add one in Settings › Model Providers, or pick another engine in Settings › Meetings.`)
   const model = cfg?.meetings?.serviceModel?.[id] || (s.custom ? e.SPEECH_MODEL : s.models[0])
   const lang = language && language !== 'auto' ? language : null
   const timeout = AbortSignal.timeout(120_000)
   if (s.style === 'openai') {
     const base = s.base(e)
-    if (!base) throw fatal('Give the service\'s address in Settings › Model providers › Another speech service.')
+    if (!base) throw fatal('Give the service\'s address in Settings › Model Providers › Another speech service.')
     const form = new FormData()
     form.append('file', new Blob([wav], { type: 'audio/wav' }), 'speech.wav')
     form.append('model', model || 'whisper-1')

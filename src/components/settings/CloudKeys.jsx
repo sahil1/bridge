@@ -1,4 +1,4 @@
-// Settings › Model providers › Cloud agents: a key for each provider that runs agents in its own
+// Settings › Model Providers › Cloud Agents: a key for each provider that runs agents in its own
 // cloud (Cursor, GitHub Copilot, Jules, Claude Managed Agents). Add, test and remove; the server
 // keeps them in the data folder and only ever says whether one is saved and its last 4 characters.
 // In the phone apps' Cloud agents (cloudOnly) the app keeps them instead, and says no more.
@@ -129,7 +129,7 @@ export default function CloudKeys({ focus, bare = false, onChange }) {
     <section className={`pv-sec ${bare ? 'bare' : ''}`} id="pv-cloud" ref={ref}>
       {!bare && (
         <div className="pv-head">
-          <h4>Cloud agents</h4>
+          <h4>Cloud Agents</h4>
           <span className="muted small">Agents that run on the provider's computers, on a repo it hosts. Start one from {cloudOnly ? 'New cloud agent' : 'New agent › In the cloud'}.</span>
         </div>
       )}

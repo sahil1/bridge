@@ -16,7 +16,7 @@ export function cloudApi(f, { keys, mute }) {
   const on = (method, pattern, fn) => routes.push([method, new RegExp(`^${pattern.replace(/:(\w+)/g, '(?<$1>[^/]+)')}$`), fn])
   const known = (id) => (ADAPTERS[id] ? id : fail('Unknown provider', 404))
 
-  // Settings › Cloud agents
+  // Settings › Cloud Agents
   on('GET', '/cloud', () => f.providers())
   on('GET', '/cloud/gh', () => ({ signedIn: false }))
   on('POST', '/cloud/keys/copilot/gh', () => fail('Do this in Bridge AI on your computer', 403))

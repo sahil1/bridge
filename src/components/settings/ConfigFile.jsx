@@ -26,7 +26,7 @@ export default function ConfigFile() {
         <code className="st-path" title={s.file}>{s.file}</code>
         <button type="button" className="ghost-btn" onClick={() => navigator.clipboard?.writeText(s.file).catch(() => {})}><Icon name="copy" size={12} /> Copy path</button>
       </div>
-      <p className="muted small">Only what you set goes here; everything else comes from the defaults. Most changes apply right away; {s.restartKeys.join(', ')} apply after a restart. API keys don't belong here: add them under Model providers.</p>
+      <p className="muted small">Only what you set goes here; everything else comes from the defaults. Most changes apply right away; {s.restartKeys.join(', ')} apply after a restart. API keys don't belong here: add them under Model Providers.</p>
       <textarea className="st-code" value={text} onChange={(e) => { setText(e.target.value); setNote(null) }} spellCheck={false} rows={16} aria-label="config.json" />
       <div className="st-row between">
         <span className={parseError ? 'error-text' : 'muted small'}>{parseError ? `Not valid yet: ${parseError}` : dirty ? 'Valid JSON, not saved' : 'Saved'}</span>
