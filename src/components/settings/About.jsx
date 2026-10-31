@@ -6,6 +6,7 @@ import { startTour } from '../Tour.jsx'
 import { withApp, installUpdate } from '../UpdateChip.jsx'
 import { appVersion } from '../../permissions.js'
 import { t } from '../../i18n/index.js'
+import UsageCounts from './UsageCounts.jsx'
 
 const REPO = 'https://github.com/sahil1/bridge'
 
@@ -21,6 +22,7 @@ export default function About() {
         <div className="st-row"><button type="button" className="btn" onClick={startTour}><Icon name="sparkle" size={14} /> Take the tour</button></div>
       </section>
       <Report />
+      <UsageCounts />
     </div>
   )
 }
