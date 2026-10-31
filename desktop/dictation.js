@@ -222,10 +222,11 @@ async function hasPortal() {
   return out == null ? null : out.includes('org.freedesktop.portal.GlobalShortcuts')
 }
 // Whether a menu entry with the app's ID is installed (desktopName in package.json, which Electron
-// hands on as CHROME_DESKTOP), where the desktop looks for them: true, false, or null (no ID).
+// hands on as CHROME_DESKTOP), where the desktop looks for them: true, false, or null (no ID). The
+// folders' list is split as PATH is (by ':' on Linux), so the tests' folders work on Windows too.
 function hasEntry(name = process.env.CHROME_DESKTOP, env = process.env, home = os.homedir()) {
   if (!name) return null
-  const dirs = [env.XDG_DATA_HOME || path.join(home, '.local', 'share'), ...(env.XDG_DATA_DIRS || '/usr/local/share:/usr/share').split(':')]
+  const dirs = [env.XDG_DATA_HOME || path.join(home, '.local', 'share'), ...(env.XDG_DATA_DIRS || ['/usr/local/share', '/usr/share'].join(path.delimiter)).split(path.delimiter)]
   return dirs.some((d) => d && fs.existsSync(path.join(d, 'applications', name)))
 }
 function loadHook() {
