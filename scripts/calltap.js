@@ -4,7 +4,7 @@
 // a call, native/callwatch.swift), bridgeocr (the text on a captured screen or in a PDF linked to
 // a meeting, native/bridgeocr.swift), bridgespeech (speech to text on the Mac itself, with Apple's
 // transcriber, native/bridgespeech.swift), bridgecal (asks macOS for your calendars,
-// native/bridgecal.swift) and bridgekeys (the dictation key held down in any app,
+// native/bridgecal.swift) and bridgekeys (the dictation key held down in any app, and pasting what you said there,
 // native/bridgekeys.swift). Needs Xcode's command line tools (xcode-select --install). Elsewhere, or
 // without them, meetings record your mic only, don't notice calls, and use what's on a screen or in
 // a PDF as pictures and links only, and the dictation key from other apps is tapped, not held. bridgespeech needs the macOS 26 SDK (Xcode 26) to build; with an

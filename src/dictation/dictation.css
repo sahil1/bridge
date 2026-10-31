@@ -37,6 +37,10 @@ html.is-hud, html.is-hud body, html.is-hud #root { background: transparent !impo
 .hud-menu button { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 7px; text-align: left; color: var(--ink); font-size: 12.5px; }
 .hud-menu button:hover, .hud-menu button.on { background: var(--pane-3); }
 .hud-menu p { margin: 6px 8px; }
+/* Pasted where you're typing: the app it goes into, why it wasn't, and the offer after a Copy. */
+.hud-into { min-width: 0; max-width: 240px; padding: 3px 8px; color: var(--ink-2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hud-why { margin: 0; color: var(--ink-2); display: flex; align-items: center; gap: 6px; line-height: 1.4; }
+.hud-offer { border-top: 1px solid var(--line); padding-top: 8px; }
 
 /* Settings › Voice › Dictation. */
 .st-dictation .st-check { display: flex; align-items: flex-start; gap: 9px; font-size: 13px; line-height: 1.45; cursor: pointer; }

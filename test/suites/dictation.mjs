@@ -5,19 +5,29 @@
 // (fillers, doubled words, capitals, the full stop, names spelled the way they're written, files
 // said aloud), and how the desktop app hears the key (desktop/dictation.js) with a stand-in keyboard
 // hook and globalShortcut: held, tapped, a key repeating, X11's repeats, another app having it, no
-// hook at all. On a Mac: native/bridgekeys builds for both chips, says what's in front, sets a key
-// and prints its presses (made through its stdin, no real key), and says when macOS has the key.
+// hook at all. Pasting where you're typing: where it can work (simulated per system and desktop),
+// telling a terminal on X11, Windows' and X11's paste with a stand-in clipboard and hook (the text on
+// the clipboard as Ctrl+V is pressed, what was there put back unless something was copied meanwhile,
+// Ctrl+Shift+V in a terminal), the Mac helper's answers, wtype; and the desktop app's side with a Mac
+// simulated (stand-in Electron and helper): nothing asked at start, Accessibility looked up without
+// asking, asked once when picked, then System Settings; the dictation window's text pasted into the
+// app the key was pressed in, refused without Accessibility or with the setting off. On a Mac:
+// native/bridgekeys builds for both chips, says what's in front, sets a key and prints its presses
+// (made through its stdin, no real key), says when macOS has the key, and pastes into a pasteboard of
+// the test's own (never a key pressed, never your clipboard): what was there back once it's read,
+// every item and type; not when something was copied meanwhile; the text left when nothing read it;
+// a password field or no Accessibility refused before touching anything.
 // Then the server's names for it (/api/dictation/words) and its settings in /api/config.
 import fs from 'node:fs'
 import path from 'node:path'
 import { EventEmitter } from 'node:events'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { ROOT, OUT, IS_MAC, startKit, checks, until, sleep } from '../lib/harness.mjs'
+import { ROOT, OUT, TEST, IS_MAC, IS_WIN, startKit, checks, until, sleep } from '../lib/harness.mjs'
 
 const { ok, skip, done } = checks('dictation')
 const keys = await import('../../shared/dictation/keys.js')
-const { globalKey } = await import('../../shared/dictation/platform.js')
+const { globalKey, pasteInto, isTerminal } = await import('../../shared/dictation/platform.js')
 const { clean, makeNames } = await import('../../shared/dictation/clean.js')
 const desk = createRequire(import.meta.url)('../../desktop/dictation.js')
 
@@ -60,6 +70,32 @@ for (const [name, m, mode, via] of table) {
 }
 ok(globalKey({ desktop: false, platform: 'linux' }).mode === null && globalKey({ desktop: false, platform: 'darwin', helper: true }).mode === null, 'Docker and a browser: inside Bridge AI only')
 ok(G({ platform: 'linux', wayland: true, session: 'GNOME', portal: true, electron: 45 }).asks && !G({ platform: 'linux', wayland: true, session: 'KDE', portal: true }).asks, 'GNOME asks once to allow the key; KDE doesn\'t')
+
+// ---------- Where pasting where you're typing works ----------
+const P = (m) => pasteInto({ desktop: true, electron: 44, ...m })
+const pastes = [
+  ['macOS, Apple silicon', { platform: 'darwin', arch: 'arm64', helper: true }, 'bridgekeys', 'accessibility'],
+  ['macOS, Intel', { platform: 'darwin', arch: 'x64', helper: true }, 'bridgekeys', 'accessibility'],
+  ['macOS built without Xcode\'s tools', { platform: 'darwin', arch: 'arm64', helper: false }, null],
+  ['Windows x64', { platform: 'win32', arch: 'x64', hook: true }, 'keytap', null],
+  ['Windows with the hook not loading', { platform: 'win32', arch: 'x64', hook: false }, null],
+  ['Linux x64, X11', { platform: 'linux', arch: 'x64', hook: true }, 'keytap', null],
+  ['Linux x64, X11, without libXtst', { platform: 'linux', arch: 'x64', hook: false }, null],
+  ['Linux Arm, X11', { platform: 'linux', arch: 'arm64', hook: false }, null],
+  ['Wayland, Hyprland, with wtype', { platform: 'linux', arch: 'x64', wayland: true, session: 'Hyprland', portal: true, wtype: true }, 'wtype', null],
+  ['Wayland, Hyprland, without wtype', { platform: 'linux', arch: 'x64', wayland: true, session: 'Hyprland', portal: true, wtype: false }, null],
+  ['Wayland, GNOME (Electron 45), wtype installed', { platform: 'linux', arch: 'x64', wayland: true, session: 'ubuntu:GNOME', portal: true, electron: 45, wtype: true }, null],
+  ['Wayland, KDE, wtype installed', { platform: 'linux', arch: 'x64', wayland: true, session: 'KDE', portal: true, wtype: true }, null],
+  ['Wayland, sway (no key from other apps)', { platform: 'linux', arch: 'x64', wayland: true, session: 'sway', portal: false, wtype: true }, null],
+]
+for (const [name, m, via, asks] of pastes) {
+  const p = P(m)
+  ok(via ? p.can && p.via === via && p.asks === asks : !p.can && !!p.why, `${name}: ${via ? `pasted where you're typing (${via}${asks ? `, asks for ${asks} when picked` : ', nothing to allow'})` : 'no pasting (hidden)'}`, p)
+}
+const away = [pasteInto({ desktop: false, platform: 'darwin', helper: true }), pasteInto({ desktop: false, platform: 'linux', hook: true })]
+ok(away.every((p) => !p.can && /desktop app/.test(p.why || '')), 'Docker, a browser and a phone: no pasting into other apps (only the desktop app hears the key there)', away)
+ok(P({ platform: 'win32', hook: true }).limit === 'admin' && !P({ platform: 'darwin', helper: true }).limit, 'Windows says it can\'t paste into an app running as administrator')
+ok(['WM_CLASS(STRING) = "gnome-terminal-server", "Gnome-terminal"', '"konsole", "konsole"', '"kitty", "kitty"', '"Alacritty", "Alacritty"', '"xfce4-terminal", "Xfce4-terminal"', '"org.wezfurlong.wezterm", "org.wezfurlong.wezterm"', '"tilix", "Tilix"'].every(isTerminal) && !['"Navigator", "firefox"', '"code", "Code"', '"slack", "Slack"', '"gedit", "Gedit"', null].some(isTerminal), 'X11: a terminal told by its window\'s class')
 
 // ---------- Light cleanup ----------
 const names = makeNames(['payments-api', 'worktree', 'Claude Code', 'GitHub', 'Notes', 'main', 'Fix the login bug', 'Chief of Staff', 'gpt-5'])
@@ -159,6 +195,143 @@ const fakeHook = ({ fails = false } = {}) => {
   ok(child.stdin.written === 'press\n', 'and a press made through its stdin')
 }
 
+// ---------- How the desktop app pastes ----------
+// A clipboard like Electron's: text, HTML, RTF and a picture.
+const fakeClipboard = (init = {}) => {
+  const c = { s: { ...init } }
+  c.readText = () => c.s.text || ''
+  c.readHTML = () => c.s.html || ''
+  c.readRTF = () => c.s.rtf || ''
+  c.readImage = () => ({ isEmpty: () => !c.s.image, id: c.s.image })
+  c.writeText = (text) => { c.s = { text } }
+  c.write = (o) => { c.s = { ...o, image: o.image?.id } }
+  c.clear = () => { c.s = {} }
+  return c
+}
+{
+  const cb = fakeClipboard({ text: 'what you had copied', html: '<b>what you had copied</b>', image: 'logo.png' })
+  const taps = []
+  const r = await desk.keyPaste({ text: 'Dictated.', clipboard: cb, hook: { keyTap: (k, mods) => taps.push({ k, mods, on: cb.readText() }) }, wait: 30 })
+  ok(taps.length === 1 && taps[0].k === 47 && taps[0].mods.join() === '29' && taps[0].on === 'Dictated.', 'Windows/X11: the text on the clipboard as Ctrl+V is pressed', taps)
+  ok(r.pasted && r.restored && cb.readText() === 'what you had copied' && cb.readHTML() === '<b>what you had copied</b>' && cb.s.image === 'logo.png', 'then what was there put back: its text, formatting and picture', cb.s)
+}
+{
+  const cb = fakeClipboard({ text: 'old' })
+  const r = await desk.keyPaste({ text: 'Dictated.', clipboard: cb, hook: { keyTap: () => setTimeout(() => cb.writeText('copied meanwhile'), 5) }, wait: 40 })
+  ok(r.pasted && !r.restored && cb.readText() === 'copied meanwhile', 'something copied meanwhile stays', cb.s)
+  const empty = fakeClipboard()
+  const taps = []
+  await desk.keyPaste({ text: 'git status', clipboard: empty, hook: { keyTap: (k, mods) => taps.push(mods.join()) }, terminal: true, wait: 10 })
+  ok(taps[0] === '29,42' && empty.readText() === '', 'a terminal: Ctrl+Shift+V; a clipboard that was empty is empty again', taps)
+  const kept = fakeClipboard({ text: 'kept' })
+  ok((await desk.keyPaste({ text: 'x', clipboard: kept, hook: null })).error === 'failed' && kept.readText() === 'kept', 'no keyboard hook: nothing pasted, the clipboard untouched')
+}
+{
+  const calls = []
+  const cls = await desk.activeClass(async (cmd, args) => { calls.push(`${cmd} ${args.join(' ')}`); return args[0] === '-root' ? '_NET_ACTIVE_WINDOW(WINDOW): window id # 0x3a00007\n' : 'WM_CLASS(STRING) = "kitty", "kitty"\n' })
+  const none = await desk.activeClass(async () => null)
+  ok(isTerminal(cls) && calls[1] === 'xprop -id 0x3a00007 WM_CLASS' && none === null, 'X11: the window in front asked of xprop (not known without it: Ctrl+V)', calls)
+  let got = null
+  const typed = await desk.typeIn({ text: 'Hello.', execFn: (cmd, args, o, cb) => { got = [cmd, ...args]; cb(null) } })
+  ok(typed.pasted && got.join(' ') === 'wtype -- Hello.', 'Wayland: typed in by wtype', got)
+}
+{
+  // The Mac's helper: its arguments, the text on its stdin, its one line back.
+  const child = (out, code = 0) => {
+    const c = new EventEmitter()
+    c.stdout = new EventEmitter()
+    c.stdin = Object.assign(new EventEmitter(), { got: null, end(s) { this.got = s; setTimeout(() => { c.stdout.emit('data', Buffer.from(out)); c.emit('exit', code) }, 5) } })
+    c.kill = () => {}
+    return c
+  }
+  let last = null
+  const run = (out, code, pid) => desk.helperPaste({ bin: 'bridgekeys', text: 'Hi there.', pid, spawnFn: (bin, args) => { last = { args, c: child(out, code) }; return last.c } })
+  const r = await run('{"pasted":true,"read":true,"restored":true}\n', 0, 321)
+  ok(r.pasted && r.restored && last?.args.join(' ') === 'paste --pid 321' && last.c.stdin.got === 'Hi there.', 'a Mac: bridgekeys paste, told the app the key was pressed in, the text on its stdin', last?.args)
+  ok((await run('{"error":"secure"}\n', 1)).error === 'secure' && last?.args.join(' ') === 'paste', 'a password field: said so')
+  const moved = await run('{"error":"moved","app":"Safari","pid":9}\n', 1, 5)
+  ok(moved.error === 'moved' && moved.app === 'Safari', 'another app in front by then: said so, with which', moved)
+  ok((await run('nonsense', 1)).error === 'failed', 'anything else: it failed')
+}
+// The desktop app's side, with a Mac simulated (Electron and the helper stood in for, so it runs on
+// any computer): what Settings is told, the Accessibility question, and the dictation window's paste.
+if (IS_WIN) skip('the desktop app pasting, a Mac simulated', 'its stand-in helper is a shell script')
+else {
+  const bin = path.join(OUT, 'bin-dictation-paste')
+  fs.rmSync(bin, { recursive: true, force: true })
+  fs.mkdirSync(bin, { recursive: true })
+  const helper = path.join(bin, 'bridgekeys')
+  fs.writeFileSync(helper, `#!/bin/sh\nexec "${process.execPath}" "${path.join(TEST, 'stand-ins', 'bridgekeys.cjs')}" "$@"\n`, { mode: 0o755 })
+  const data = path.join(bin, 'data')
+  fs.mkdirSync(data)
+  fs.writeFileSync(path.join(data, 'config.json'), JSON.stringify({ dictation: { background: true, to: 'paste' } }))
+  const log = path.join(bin, 'pasted.log')
+  const pasted = () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : [])
+  const handlers = {}
+  const call = (name, ...a) => handlers[name]?.(...a)
+  const asked = []
+  const opened = []
+  const tiles = []
+  let allowed = false
+  let hud = null
+  class Win {
+    static getFocusedWindow() { return null }
+    constructor() { hud = this; this.shown = false; this.webContents = { setWindowOpenHandler() {}, on() {}, isDestroyed: () => false, executeJavaScript: async () => {} } }
+    setAlwaysOnTop() {} setVisibleOnAllWorkspaces() {} setContentProtection() {} on() {} loadURL() {} setBounds() {}
+    once(ev, fn) { if (ev === 'ready-to-show') fn() }
+    showInactive() { this.shown = true }
+    hide() { this.shown = false }
+    isVisible() { return this.shown }
+    isDestroyed() { return false }
+    isFocused() { return false }
+    getContentSize() { return [444, 92] }
+  }
+  const electron = {
+    BrowserWindow: Win, globalShortcut: fakeShortcuts(), clipboard: fakeClipboard(),
+    screen: { getCursorScreenPoint: () => ({ x: 0, y: 0 }), getDisplayNearestPoint: () => ({ workArea: { x: 0, y: 0, width: 1440, height: 900 } }) },
+    ipcMain: { handle: (n, fn) => { handlers[n] = fn }, on: (n, fn) => { handlers[n] = fn } },
+    systemPreferences: { isTrustedAccessibilityClient: (prompt) => { if (prompt) asked.push(prompt); return allowed } },
+    shell: { openExternal: async (u) => { opened.push(u) } },
+  }
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform')
+  const env = { BRIDGE_KEYS: process.env.BRIDGE_KEYS, BRIDGEKEYS_PRESS: process.env.BRIDGEKEYS_PRESS, BRIDGEKEYS_LOG: process.env.BRIDGEKEYS_LOG }
+  Object.assign(process.env, { BRIDGE_KEYS: helper, BRIDGEKEYS_PRESS: '1', BRIDGEKEYS_LOG: log })
+  Object.defineProperty(process, 'platform', { ...platform, value: 'darwin' })
+  const me = { own: true }
+  try {
+    await desk.start({ electron, ROOT, DATA: data, URL_BASE: 'http://127.0.0.1:9', preload: '', isOurs: () => false, tellMain: async () => {}, askAccess: (pane) => tiles.push(pane), trusted: (e) => e.own === true })
+  } finally {
+    Object.defineProperty(process, 'platform', platform)
+  }
+  try {
+    const st = await call('bridge:dictate-status', me)
+    ok(st.paste?.can && st.paste.via === 'bridgekeys' && st.paste.asks === 'accessibility' && st.paste.allowed === false && !asked.length && !tiles.length, 'a Mac (simulated): pasting can work and needs Accessibility, and nothing was asked when the app started', st.paste)
+    ok(await call('bridge:paste-access', me) === 'denied' && !asked.length, 'whether it\'s allowed is looked up without asking')
+    ok(await call('bridge:paste-ask', { own: false }) === null && !asked.length, 'a page that isn\'t the app\'s own can\'t make it ask')
+    ok(await call('bridge:paste-ask', me) === 'asked' && asked.length === 1 && tiles.join() === 'accessibility' && !opened.length, 'picked: macOS asks (it lists Bridge AI under Accessibility), and the tile says what to do', { asked, tiles, opened })
+    ok(await call('bridge:paste-ask', me) === 'asked' && asked.length === 1 && /Privacy_Accessibility$/.test(opened[0] || ''), 'Allow access again: System Settings at Accessibility, without macOS asking again', opened)
+    // The key, pressed in TextEdit (the stand-in helper presses it): the dictation window, told which app.
+    await until(() => hud?.shown, 5000, 50)
+    const from = { sender: hud?.webContents }
+    const first = await call('bridge:hud-ready', from)
+    ok(!!hud?.shown && first?.down > 0 && first.app === 'TextEdit', 'the key pressed in another app: the dictation window, told it was TextEdit', first)
+    ok((await call('bridge:hud-paste', from, 'Hello there.'))?.error === 'accessibility' && !pasted().length, 'without Accessibility: not pasted, nothing sent to the helper')
+    allowed = true
+    ok(await call('bridge:paste-access', me) === 'ok' && (await call('bridge:dictate-status', me))?.paste?.allowed && await call('bridge:paste-ask', me) === 'ok' && asked.length === 1, 'turned on in System Settings: allowed, and nothing more is asked')
+    const r = await call('bridge:hud-paste', from, 'Hello there.')
+    const p = pasted().at(-1)
+    ok(r?.pasted && p?.text === 'Hello there.' && p.args.join(' ') === '--pid 4242', 'the text pasted by the helper, into the app the key was pressed in (TextEdit\'s pid)', { r, p })
+    ok((await call('bridge:hud-paste', me, 'not from the window'))?.error === 'off' && pasted().length === 1, 'only the dictation window can ask for a paste')
+    await call('bridge:dictate-configure', me, { background: true, to: 'last' })
+    ok((await call('bridge:hud-paste', from, 'Hello again.'))?.error === 'off' && pasted().length === 1, 'with the text going to an agent instead: nothing pasted')
+  } catch (e) {
+    ok(false, `the desktop app pasting crashed: ${e.stack}`)
+  } finally {
+    await handlers['bridge:dictate-configure']?.(me, { background: false })
+    for (const [k, v] of Object.entries(env)) { if (v == null) delete process.env[k]; else process.env[k] = v }
+  }
+}
+
 // ---------- native/bridgekeys (a Mac) ----------
 if (!IS_MAC) skip('native/bridgekeys', 'macOS only')
 else if (spawnSync('swiftc', ['--version']).status !== 0 && !process.env.CI) skip('native/bridgekeys', 'no swiftc here (Xcode\'s command line tools)')
@@ -192,6 +365,53 @@ else {
     else ok(/^\{"error":"taken","by":"macOS"\}/.test(spot.stdout.trim()) && spot.status === 1, 'a key macOS has (Spotlight\'s ⌘Space): taken, by macOS', spot.stdout)
     const bad = spawnSync(helper, ['hotkey', 'x'], { encoding: 'utf8', timeout: 5000 })
     ok(bad.status === 2, 'and nonsense is turned away')
+
+    // Pasting, into a pasteboard of the test's own: --test presses nothing and says where it would
+    // have, then waits for something to read it (here, bridgekeys board read, as an app pasting does).
+    const B = `dev.bridge-ai.test.${process.pid}`
+    const board = (cmd, input = '') => { const r = spawnSync(helper, ['board', cmd, '--board', B], { input, encoding: 'utf8', timeout: 10000 }); try { return JSON.parse(r.stdout.trim()) } catch { return { out: r.stdout, status: r.status } } }
+    const paste = (text, extra = [], onPosted) => new Promise((resolve) => {
+      const p = spawn(helper, ['paste', '--test', '--board', B, ...extra], { stdio: ['pipe', 'pipe', 'ignore'] })
+      const lines = []
+      let buf = ''
+      p.stdout.on('data', (d) => {
+        buf += d
+        for (let i = buf.indexOf('\n'); i >= 0; i = buf.indexOf('\n')) {
+          let l = null
+          try { l = JSON.parse(buf.slice(0, i)) } catch { /* not a line of ours */ }
+          buf = buf.slice(i + 1)
+          if (l) lines.push(l)
+          if (l?.posted) onPosted?.()
+        }
+      })
+      p.on('exit', (code) => resolve({ code, lines, last: lines.at(-1) }))
+      p.stdin.end(text)
+    })
+    try {
+      board('write', 'what you had copied')
+      const before = board('read')
+      let during = null
+      const r = await paste('Dictated text.', ['--wait', '5000'], () => { during = board('read') })
+      ok(Number.isInteger(r.lines[0]?.key) && r.lines[0].key >= 0 && r.lines[0].key < 128, 'bridgekeys paste: ⌘V with the key that types V in this keyboard layout (not pressed in a test)', r.lines[0])
+      ok(during?.text === 'Dictated text.' && during.types.includes('org.nspasteboard.TransientType'), 'while it pastes, the text is what the app in front reads, marked for clipboard managers to skip', during)
+      const after = board('read')
+      ok(r.code === 0 && r.last?.pasted && r.last.read && r.last.restored && after.text === before.text && after.items === 2 && after.types.includes('dev.bridge-ai.test.extra'), 'read: what was there before put back, every item and every type', { r: r.last, before, after })
+      const meanwhile = await paste('Second.', ['--wait', '5000', '--settle', '1500'], () => { board('read'); board('write', 'copied meanwhile') })
+      ok(meanwhile.last?.read && !meanwhile.last.restored && board('read').text.startsWith('copied meanwhile'), 'something copied meanwhile stays', meanwhile.last)
+      const unread = await paste('Nobody took this.', ['--wait', '300'])
+      const left = board('read')
+      ok(unread.last?.pasted && !unread.last.read && !unread.last.restored && left.text === 'Nobody took this.' && !left.types.includes('org.nspasteboard.TransientType'), 'nothing read it: the text stays on the clipboard, to paste by hand', { r: unread.last, left })
+      board('write', 'kept')
+      const was = board('read').change
+      const secure = await paste('x', ['--as', 'secure'])
+      const untrusted = await paste('x', ['--as', 'untrusted'])
+      const moved = await paste('x', ['--as', 'moved'])
+      ok(secure.code === 1 && secure.last?.error === 'secure' && untrusted.last?.error === 'accessibility' && moved.last?.error === 'moved' && typeof moved.last.app === 'string' && board('read').change === was, 'a password field, no Accessibility, another app in front: refused, the clipboard untouched', [secure.last, untrusted.last, moved.last])
+      const general = spawnSync(helper, ['board', 'read', '--board', 'Apple CFPasteboard general'], { encoding: 'utf8', timeout: 5000 })
+      ok(general.status === 2 && /"board"/.test(general.stdout), 'the test commands won\'t touch any pasteboard but a test\'s own', general.stdout)
+    } finally {
+      board('free')
+    }
   }
 }
 

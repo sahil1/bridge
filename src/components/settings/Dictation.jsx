@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import Icon from '../Icon.jsx'
 import { useSettings, SaveNote } from './General.jsx'
+import { useRecheck } from '../PermissionFix.jsx'
 import { keyLabel, keyFromEvent } from '../../../shared/dictation/keys.js'
 import { pause, keysPlatform, dictationKey } from '../../dictation/controller.js'
 import { t, tx } from '../../i18n/index.js'
@@ -10,13 +11,31 @@ import '../../dictation/dictation.css'
 // other apps too (the desktop app, where this computer lets it: desktop/dictation.js says how), where
 // the text goes from there, and the light cleanup. Saved as `dictation` in config.json; the desktop
 // app is told at once.
+//
+// "Where I'm typing" pastes it into the app you were in, and is offered only where this computer can
+// (shared/dictation/platform.js pasteInto). On a Mac it needs Accessibility, asked for the moment you
+// pick it (macOS's own question, then the Allow access tile beside System Settings), and until it's
+// on, the dictation window shows what you said to copy, as before.
 const TO = [['last', tx('The agent I looked at last')], ['chief', tx('The chief of staff')], ['ask', tx('Ask each time')]]
+const PASTE = ['paste', tx('Where I\'m typing (paste it)')]
 
 export default function Dictation() {
   const { s, save, note } = useSettings()
   const app = window.bridgeApp
-  const [status, setStatus] = useState(null) // the desktop app's: { mode, key, label, background, taken, fallback, error, asks, why }
+  const [status, setStatus] = useState(null) // the desktop app's: { mode, key, label, background, taken, fallback, error, asks, why, paste }
   const [picking, setPicking] = useState(false)
+  const [asked, setAsked] = useState(false) // Accessibility asked for, here
+  // Accessibility on yet? Asked of the desktop app, which asks macOS without asking you.
+  const checkPaste = useCallback(async () => {
+    if ((await app?.pasteAccess?.().catch(() => null)) !== 'ok') return
+    const st = await app.dictateStatus().catch(() => null)
+    if (st) setStatus(st)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  const askPaste = async () => {
+    const r = await app?.pasteAsk?.().catch(() => null)
+    setAsked(true)
+    if (r === 'ok') checkPaste()
+  }
   useEffect(() => { app?.dictateStatus?.().then(setStatus, () => {}) }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const plat = keysPlatform()
   const d = s?.effective?.dictation || {}
@@ -41,11 +60,21 @@ export default function Dictation() {
     window.addEventListener('keydown', down, true)
     return () => { window.removeEventListener('keydown', down, true); pause(false) }
   }, [picking]) // eslint-disable-line react-hooks/exhaustive-deps
-  if (!s) return <div className="skeleton-rows"><div /><div /></div>
-
   const on = d.on !== false
   const mode = status?.mode || null
   const background = d.background === true
+  const paste = status?.paste?.can ? status.paste : null
+  const pasting = on && !!mode && background && d.to === 'paste'
+  // Picked, on a Mac without Accessibility yet: looked at again every few seconds once asked for, and
+  // whenever you come back to the window.
+  const needsAccess = pasting && paste?.asks === 'accessibility' && !paste.allowed
+  useRecheck(checkPaste, asked ? 2500 : 0, needsAccess)
+  if (!s) return <div className="skeleton-rows"><div /><div /></div>
+
+  const pickTo = async (v) => {
+    await set({ to: v })
+    if (v === 'paste' && paste?.asks === 'accessibility' && !paste.allowed) await askPaste()
+  }
   return (
     <section className="st-sec st-dictation">
       <h4>{t('Dictation')}</h4>
@@ -74,11 +103,27 @@ export default function Dictation() {
           {status && !mode && d.background === true && <p className="st-note"><Icon name="info" size={13} /> {t('From other apps, the key can\'t be heard on this computer, so it works inside Bridge AI only.')}</p>}
           {mode && background && (
             <div className="st-row st-radios" role="radiogroup" aria-label={t('Send what I say to')}><span>{t('Send what I say to')}</span>
-              <span className="st-choices">{TO.map(([v, l]) => (
-                <label key={v}><input type="radio" name="dict-to" checked={(d.to || 'last') === v} onChange={() => set({ to: v })} /> {t(l)}</label>
+              <span className="st-choices">{(paste ? [...TO, PASTE] : TO).map(([v, l]) => (
+                <label key={v}><input type="radio" name="dict-to" checked={(d.to === 'paste' && !paste ? 'last' : d.to || 'last') === v} onChange={() => pickTo(v)} /> {t(l)}</label>
               ))}</span>
             </div>
           )}
+          {needsAccess && (
+            <div className="perm-fix dict-paste-access">
+              <p className="small">{t('Pasting needs Accessibility, so Bridge AI can press ⌘V in the app you\'re typing in. Until it\'s on, the small window shows what you said, to copy.')}</p>
+              <div className="perm-acts">
+                <button type="button" className="btn small primary" onClick={askPaste}><Icon name="check" size={12} /> {t('Allow access')}</button>
+                <button type="button" className="ghost-btn" onClick={checkPaste}><Icon name="refresh" size={12} /> {t('Check again')}</button>
+              </div>
+              {asked && <p className="muted small">{t('In System Settings › Privacy & Security › Accessibility, turn on Bridge AI.')}</p>}
+            </div>
+          )}
+          {/* wtype (Wayland) types it in, with no clipboard to put back. */}
+          {pasting && paste && !needsAccess && paste.via !== 'wtype' && <p className="muted small">{paste.limit === 'admin'
+            ? t('What you had copied is put back after. It can\'t paste into an app running as administrator.')
+            : t('What you had copied is put back after.')}</p>}
+          {/* Picked on another computer, and pasting can't work on this one: said once here. */}
+          {pasting && status && !paste && <p className="st-note"><Icon name="info" size={13} /> {t('Pasting where you\'re typing can\'t work on this computer, so what you say goes to the agent you looked at last.')}</p>}
           <label className="st-check"><input type="checkbox" checked={d.cleanup !== false} onChange={(e) => set({ cleanup: e.target.checked })} />
             <span><b>{t('Light cleanup')}</b> <span className="muted small">{t('Drops "um" and "uh" and words said twice, starts with a capital and ends with a full stop, and spells the names of your agents, projects, branches and meeting memory the way they\'re written. No AI model, nothing sent anywhere.')}</span></span></label>
           <label className="st-check"><input type="checkbox" checked={d.atFiles !== false} onChange={(e) => set({ atFiles: e.target.checked })} />

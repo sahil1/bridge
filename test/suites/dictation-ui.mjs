@@ -15,6 +15,12 @@
 //   (Wayland), not offered, and taken; changes go to the app; its key handed to the page in front.
 //   The desktop app's dictation window (?dictate=1): the level while you talk, then the text, Send to
 //   the agent you last looked at or one picked, Copy, Esc, and a press from before it was ready.
+//   Pasting where you're typing, the desktop app simulated: "Where I'm typing" offered where it can
+//   work (a Mac, Windows) and hidden where it can't (GNOME on Wayland, a Mac without its helper),
+//   Accessibility asked for when it's picked on a Mac and a card until it's on, said once when it was
+//   picked on a computer where it can't work; the dictation window saying which app the text goes
+//   into, then "Pasted"; refused (a password field) and not yet allowed (the text to copy, with why);
+//   asked once after a Copy (Paste it picks it and asks for Accessibility; Not now is kept).
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -351,6 +357,74 @@ try {
     await d.ctx.close()
   }
 
+  // ---------- Pasting where you're typing: Settings ----------
+  // The desktop app simulated with what it says about pasting here; its Accessibility answer turns to
+  // yes when the test says it's been turned on (window.__allowed). Nothing real is asked.
+  const pasteApp = (status) => page(b, kit.url, { before: async (c) => {
+    await before(c)
+    await c.addInitScript((st) => {
+      window.__configured = []
+      window.__asked = 0
+      window.__allowed = false
+      const now = () => ({ ...st, paste: st.paste && { ...st.paste, allowed: !!st.paste.allowed || window.__allowed } })
+      window.bridgeApp = {
+        platform: st.platform || (navigator.platform.startsWith('Mac') ? 'darwin' : 'linux'), desktop: true,
+        dictateStatus: async () => now(), dictateConfigure: async (x) => { window.__configured.push(x); return now() },
+        pasteAccess: async () => (now().paste?.allowed ? 'ok' : 'denied'), pasteAsk: async () => { window.__asked++; return now().paste?.allowed ? 'ok' : 'asked' },
+      }
+    }, status)
+  } })
+  const HELD = { mode: 'hold', via: 'bridgekeys', key: 'Alt+Space', active: true }
+  const choices = (s) => s.locator('[role="radiogroup"] input').count()
+  await kit.api('/settings', { dictation: { background: true } }, 'PATCH')
+  // Where it can't work: hidden, not shown broken.
+  const hidden = []
+  for (const [name, status] of [
+    ['Wayland on GNOME', { mode: 'toggle', via: 'shortcut', asks: true, key: 'Control+Alt+Space', paste: { can: false, why: 'GNOME and KDE don\'t let one app type into another' } }],
+    ['a Mac built without its helper', { mode: 'toggle', via: 'shortcut', key: 'Alt+Space', paste: { can: false, why: 'native/bin/bridgekeys isn\'t in this build' } }],
+  ]) {
+    const d = await pasteApp(status)
+    const s = await voice(d.p)
+    hidden.push([name, await choices(s) === 3 && !/Where I'm typing/.test(await s.innerText())])
+    await d.ctx.close()
+  }
+  {
+    const d = await pasteApp({ ...HELD, platform: 'darwin', paste: { can: true, via: 'bridgekeys', asks: 'accessibility', allowed: false } })
+    const s = await voice(d.p)
+    const choice = s.locator('[role="radiogroup"] label', { hasText: 'Where I\'m typing' })
+    ok(await choice.count() === 1 && await choices(s) === 4 && await d.p.evaluate(() => window.__asked) === 0 && await s.locator('.dict-paste-access').count() === 0 && hidden.every(([, h]) => h), 'a Mac: "Where I\'m typing (paste it)" offered among where the text goes, nothing asked before it\'s picked; hidden where it can\'t work (GNOME on Wayland, a Mac without its helper)', [await s.innerText(), hidden])
+    await choice.click({ timeout: 5000 }).catch(() => {})
+    ok(!!(await until(() => d.p.evaluate(() => window.__configured.at(-1)?.to === 'paste' && window.__asked === 1), 5000, 100)) && (await kit.api('/settings')).effective?.dictation?.to === 'paste', 'picked: kept, the desktop app told, and Accessibility asked for right then')
+    const card = s.locator('.dict-paste-access')
+    ok(!!(await until(() => card.isVisible(), 3000, 100)) && /needs Accessibility/.test(await card.innerText()) && /Accessibility, turn on Bridge AI/.test(await card.innerText()), 'until it\'s on: why it\'s needed, and where to turn it on', await card.innerText().catch(() => ''))
+    await shot(d.p, `${tag}settings-paste-access`)
+    await card.locator('button', { hasText: 'Allow access' }).click({ timeout: 5000 }).catch(() => {})
+    ok(!!(await until(() => d.p.evaluate(() => window.__asked === 2), 3000, 100)), 'Allow access asks again (System Settings, for when macOS\'s question was closed)')
+    await d.p.evaluate(() => { window.__allowed = true })
+    await card.locator('button', { hasText: 'Check again' }).click({ timeout: 5000 }).catch(() => {})
+    ok(!!(await until(async () => (await card.count()) === 0, 4000, 100)) && /put back after/.test(await s.innerText()) && real(d.errors).length === 0, 'turned on: the card goes, and it says what you had copied comes back (no page errors)', [await s.innerText(), d.errors])
+    await d.ctx.close()
+  }
+  await kit.api('/settings', { dictation: { to: null } }, 'PATCH')
+  {
+    const d = await pasteApp({ mode: 'hold', via: 'uiohook', key: 'Control+Alt+Space', active: true, platform: 'win32', paste: { can: true, via: 'keytap', asks: null, limit: 'admin', allowed: true } })
+    const s = await voice(d.p)
+    await s.locator('[role="radiogroup"] label', { hasText: 'Where I\'m typing' }).click({ timeout: 5000 }).catch(() => {})
+    ok(!!(await until(() => d.p.evaluate(() => window.__configured.at(-1)?.to === 'paste'), 5000, 100)) && await d.p.evaluate(() => window.__asked) === 0 && await s.locator('.dict-paste-access').count() === 0, 'Windows: picked, with nothing to allow')
+    ok(/running as administrator/.test(await s.innerText()), 'and it says it can\'t paste into an app running as administrator', await s.innerText())
+    await d.ctx.close()
+  }
+  await kit.api('/settings', { dictation: { to: null } }, 'PATCH')
+  {
+    // Picked on another computer, and pasting can't work on this one.
+    await kit.api('/settings', { dictation: { to: 'paste' } }, 'PATCH')
+    const d = await pasteApp({ ...HELD, paste: { can: false, why: 'GNOME and KDE don\'t let one app type into another' } })
+    const s = await voice(d.p)
+    ok(/can't work on this computer, so what you say goes to the agent you looked at last/.test(await s.innerText()) && await s.locator('[role="radiogroup"] input').first().isChecked(), 'picked where pasting can\'t work: it says so once, and the agent you looked at last is what\'s used', await s.innerText())
+    await d.ctx.close()
+  }
+  await kit.api('/settings', { dictation: { to: null, background: null } }, 'PATCH')
+
   // ---------- The dictation window (?dictate=1) ----------
   const hudPage = (pending = null) => page(b, `${kit.url}/?dictate=1`, { store: { 'cc-ws': { tabs: [one.paneId], active: one.paneId } }, before: async (c) => {
     await before(c)
@@ -422,6 +496,114 @@ try {
     ok(!!(await until(async () => /again when you're done/.test(await h.locator('.hud').innerText().catch(() => '')), 8000, 100)), 'a press from before it was ready: it listens, hands-free', await h.locator('.hud').innerText().catch(() => ''))
     await hc.close()
   }
+
+  // ---------- The dictation window, pasting where you're typing ----------
+  // The desktop app simulated: what it says about pasting, and its answer to a paste.
+  const pasteHud = (status, answer) => page(b, `${kit.url}/?dictate=1`, { store: { 'cc-ws': { tabs: [one.paneId], active: one.paneId } }, before: async (c) => {
+    await before(c)
+    await c.addInitScript(([st, ans]) => {
+      window.__hud = { phases: [], copied: [], hidden: 0, pasted: [], asked: 0, configured: [] }
+      window.bridgeApp = {
+        platform: navigator.platform.startsWith('Mac') ? 'darwin' : 'linux', desktop: true,
+        hudReady: async () => null, hudSize: () => {}, hudPhase: (x) => window.__hud.phases.push(x), hudHide: async () => { window.__hud.hidden++ },
+        hudCopy: async (x) => { window.__hud.copied.push(x) }, hudOpen: async () => {},
+        dictateStatus: async () => st, dictateConfigure: async (x) => { window.__hud.configured.push(x); return st },
+        hudPaste: async (x) => { window.__hud.pasted.push(x); return ans }, pasteAsk: async () => { window.__hud.asked++; return 'asked' },
+      }
+    }, [status, answer])
+  } })
+  const MAC = (allowed) => ({ ...HELD, background: true, paste: { can: true, via: 'bridgekeys', asks: 'accessibility', allowed } })
+  const press = (pg, type, extra = {}) => pg.evaluate(([tp, x]) => window.dispatchEvent(new CustomEvent('bridge-dictate-key', { detail: { type: tp, at: Date.now(), ...x } })), [type, extra])
+  const talk = async (pg, words, app) => { said.push(words); await press(pg, 'down', app ? { app } : {}); await sleep(1300); await press(pg, 'up') }
+  const hudText = (pg) => pg.locator('.hud').innerText().catch(() => '')
+  await kit.api('/settings', { dictation: { to: 'paste' } }, 'PATCH')
+  {
+    const { ctx: hc, p: h, errors: he } = await pasteHud(MAC(true), { pasted: true, read: true, restored: true })
+    await h.waitForSelector('.hud', { timeout: 10000 })
+    const np = prompts.length
+    said.push('paste this in')
+    await press(h, 'down', { app: 'TextEdit' })
+    ok(!!(await until(async () => /Into TextEdit/.test(await hudText(h)) && (await h.locator('.hud-to-btn').count()) === 0, 5000, 100)), 'Where I\'m typing: while you talk, it says the text goes into the app you\'re in, with no agent to pick', await hudText(h))
+    await shot(h, `${tag}dictation-window-into`)
+    await sleep(1300)
+    await press(h, 'up')
+    ok(!!(await until(() => h.evaluate(() => window.__hud.pasted.at(-1) === 'Paste this in.'), 8000, 100)), 'let go: the text handed to the desktop app to paste', await h.evaluate(() => window.__hud.pasted))
+    ok(!!(await until(async () => /Pasted into TextEdit/.test(await hudText(h)), 4000, 100)) && !!(await until(() => h.evaluate(() => window.__hud.hidden > 0), 4000, 100)) && prompts.length === np && await h.evaluate(() => window.__hud.copied.length) === 0 && real(he).length === 0, '"Pasted into TextEdit", then it hides; it went nowhere else (no agent, no Copy), with no page errors', [await hudText(h), he])
+    await hc.close()
+  }
+  {
+    // Refused (a password field had the keyboard): the text stays, to copy or send, and why.
+    const { ctx: hc, p: h } = await pasteHud(MAC(true), { error: 'secure' })
+    await h.waitForSelector('.hud', { timeout: 10000 })
+    await talk(h, 'my secret words', 'Safari')
+    ok(!!(await until(async () => (await h.locator('.hud-text').innerText().catch(() => '')) === 'My secret words.' && /Secure input is on/.test(await hudText(h)), 8000, 100)) && await h.locator('.hud button', { hasText: 'Copy' }).isVisible() && await h.evaluate(() => window.__hud.hidden === 0), 'refused (a password field): the text stays to copy or send, and it says why', await hudText(h))
+    await shot(h, `${tag}dictation-window-not-pasted`)
+    await hc.close()
+  }
+  {
+    // No Accessibility yet: not even tried; the window as before, and one line saying why.
+    const { ctx: hc, p: h } = await pasteHud(MAC(false), { pasted: true })
+    await h.waitForSelector('.hud', { timeout: 10000 })
+    said.push('not allowed yet')
+    await press(h, 'down', { app: 'TextEdit' })
+    const chip = !!(await until(async () => (await h.locator('.hud-to-btn').count()) === 1, 5000, 100))
+    await sleep(1300)
+    await press(h, 'up')
+    const why = !!(await until(async () => /Pasting needs Accessibility/.test(await hudText(h)) && (await h.locator('.hud-text').innerText().catch(() => '')) === 'Not allowed yet.', 8000, 100)) && await h.evaluate(() => window.__hud.pasted.length) === 0 && await h.locator('.hud button', { hasText: 'Copy' }).isVisible()
+    const shown = await hudText(h)
+    await h.locator('.hud button', { hasText: 'Copy' }).click({ timeout: 5000 }).catch(() => {})
+    const noOffer = !!(await until(async () => /Copied/.test(await hudText(h)), 3000, 100)) && await h.locator('.hud-offer').count() === 0
+    ok(chip && why && noOffer, 'no Accessibility yet: not even tried; while you talk, the agent to send it to as before, then the text to copy with one line, pasting needs Accessibility (and Copy asks nothing more: it\'s picked already)', { chip, why, noOffer, shown })
+    await hc.close()
+  }
+  await kit.api('/settings', { dictation: { to: null } }, 'PATCH')
+  // Where pasting can't work, Copy offers nothing more.
+  let neverHere = false
+  {
+    const { ctx: hc, p: h } = await pasteHud({ mode: 'toggle', via: 'shortcut', key: 'Control+Alt+Space', paste: { can: false } }, { pasted: true })
+    await h.waitForSelector('.hud', { timeout: 10000 })
+    await talk(h, 'nothing to offer')
+    await until(async () => (await h.locator('.hud-text').count()) > 0, 8000, 100)
+    await h.locator('.hud button', { hasText: 'Copy' }).click({ timeout: 5000 }).catch(() => {})
+    neverHere = !!(await until(async () => /Copied/.test(await hudText(h)), 3000, 100)) && (await sleep(400), await h.locator('.hud-offer').count() === 0)
+    await hc.close()
+  }
+  {
+    // After a Copy, asked once: paste it for you next time? Yes picks it, and a Mac asks for Accessibility.
+    const { ctx: hc, p: h } = await pasteHud(MAC(false), { pasted: true })
+    await h.waitForSelector('.hud', { timeout: 10000 })
+    await talk(h, 'copy me please')
+    await until(async () => (await h.locator('.hud-text').innerText().catch(() => '')) === 'Copy me please.', 8000, 100)
+    const quiet = await h.evaluate(() => window.__hud.pasted.length) === 0 && !/Pasting needs/.test(await hudText(h))
+    await h.locator('.hud button', { hasText: 'Copy' }).click({ timeout: 5000 }).catch(() => {})
+    const offer = h.locator('.hud-offer')
+    ok(!!(await until(() => offer.isVisible(), 3000, 100)) && /Paste it for you next time\?/.test(await offer.innerText()) && /macOS asks once/.test(await offer.innerText()) && quiet && neverHere, 'the text going to an agent, Copy: then asked once, paste it for you next time? (macOS asks once to allow it); nothing pasted before, and never asked where pasting can\'t work', { text: await hudText(h), quiet, neverHere })
+    await shot(h, `${tag}dictation-window-paste-offer`)
+    await offer.locator('button', { hasText: 'Paste it' }).click({ timeout: 5000 }).catch(() => {})
+    ok(!!(await until(async () => { const d = (await kit.api('/settings')).effective?.dictation || {}; return d.to === 'paste' && d.offeredPaste === true }, 5000, 100)) && !!(await until(() => h.evaluate(() => window.__hud.asked === 1 && window.__hud.configured.at(-1)?.to === 'paste'), 3000, 100)), 'Paste it: picked and kept, the desktop app told, and Accessibility asked for', await h.evaluate(() => window.__hud))
+    ok(/pastes from next time/.test(await hudText(h)) && await h.evaluate(() => window.__hud.pasted.length) === 0, 'it says it pastes from next time (what\'s here isn\'t pasted now)', await hudText(h))
+    await hc.close()
+  }
+  await kit.api('/settings', { dictation: { to: null, offeredPaste: null } }, 'PATCH')
+  {
+    // Not now: kept, and never asked again.
+    const { ctx: hc, p: h } = await pasteHud({ ...HELD, paste: { can: true, via: 'keytap', asks: null, allowed: true } }, { pasted: true })
+    await h.waitForSelector('.hud', { timeout: 10000 })
+    await talk(h, 'not now thanks')
+    await until(async () => (await h.locator('.hud-text').count()) > 0, 8000, 100)
+    await h.locator('.hud button', { hasText: 'Copy' }).click({ timeout: 5000 }).catch(() => {})
+    const offer = h.locator('.hud-offer')
+    ok(!!(await until(() => offer.isVisible(), 3000, 100)) && !/macOS asks/.test(await offer.innerText()), 'asked where there\'s nothing to allow too, without the line about macOS')
+    await offer.locator('button', { hasText: 'Not now' }).click({ timeout: 5000 }).catch(() => {})
+    const kept = !!(await until(async () => { const d = (await kit.api('/settings')).effective?.dictation || {}; return d.offeredPaste === true && d.to == null }, 5000, 100)) && await h.evaluate(() => window.__hud.asked) === 0
+    await talk(h, 'and again')
+    await until(async () => (await h.locator('.hud-text').innerText().catch(() => '')) === 'And again.', 8000, 100)
+    await h.locator('.hud button', { hasText: 'Copy' }).click({ timeout: 5000 }).catch(() => {})
+    const never = !!(await until(async () => /Copied/.test(await hudText(h)), 3000, 100)) && (await sleep(400), await offer.count() === 0)
+    ok(kept && never, 'Not now: kept (the text still goes to the agent), and never asked again', { kept, never })
+    await hc.close()
+  }
+  await kit.api('/settings', { dictation: { offeredPaste: null } }, 'PATCH')
 
   // ---------- The first use, with no speech model yet ----------
   {
