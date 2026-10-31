@@ -510,6 +510,46 @@ try {
   }
   await kit.api('/settings', { dictation: { key: null, background: null } }, 'PATCH')
 
+  // ---------- Edit by voice: Settings ----------
+  // The desktop app simulated: a Mac where it can work (or Windows, where it can't yet), Accessibility
+  // on or not; the models you can use stood in for (one on this computer, one with a key).
+  const editApp = (st) => page(b, kit.url, { before: async (c) => {
+    await before(c)
+    await c.route(/\/api\/chat\/models(\?|$)/, (r) => r.fulfill({ json: { models: [{ id: 'ollama:llama3', label: 'llama3', provider: 'Ollama', via: 'local' }, { id: 'openai:gpt-5', label: 'gpt-5', provider: 'OpenAI', via: 'key' }] } }))
+    await c.route(/\/api\/fix(\?|$)/, (r) => r.fulfill({ json: { mac: st.platform === 'darwin', win: st.platform === 'win32', app: { name: 'Bridge AI', desktop: true }, panes: {}, restart: [], tools: {}, canReset: true, desktop: null, asked: null } }))
+    await c.addInitScript((s0) => {
+      window.__ed = { configured: [], asked: 0 }
+      window.bridgeApp = {
+        platform: s0.platform, desktop: true,
+        dictateStatus: async () => s0, dictateConfigure: async (x) => { window.__ed.configured.push(x); return s0 },
+        pasteAccess: async () => (s0.paste.allowed ? 'ok' : 'denied'), pasteAsk: async () => { window.__ed.asked++; return 'asked' },
+        fixTile: async () => true, closeFixTile: async () => true,
+      }
+    }, st)
+  } })
+  await kit.api('/settings', { dictation: { background: true, to: null, edit: null, editModel: null } }, 'PATCH')
+  {
+    const d = await editApp({ ...HELD, platform: 'darwin', background: true, paste: { can: true, via: 'bridgekeys', asks: 'accessibility', allowed: false }, edit: { can: true, via: 'bridgekeys', asks: 'accessibility', on: false } })
+    const s = await voice(d.p)
+    const box = s.locator('.dict-edit input')
+    ok(await box.count() === 1 && !(await box.isChecked()) && await s.locator('.dict-edit-model').count() === 0, 'a Mac: Edit by voice offered, off until it\'s turned on', await s.innerText())
+    await box.click()
+    const sel = s.locator('.dict-edit-model select')
+    ok(!!(await until(() => sel.isVisible(), 4000, 100)) && (await kit.api('/settings')).effective?.dictation?.edit === true && !!(await until(() => d.p.evaluate(() => window.__ed.asked === 1), 3000, 100)), 'turned on: kept, the model to rewrite with asked for, and Accessibility asked for right then', await s.innerText())
+    ok(/llama3 · on this computer/.test(await sel.innerText()) && /gpt-5 · text leaves this computer/.test(await sel.innerText()), 'each model says whether the text stays on this computer', await sel.innerText())
+    await sel.selectOption('openai:gpt-5')
+    ok(!!(await until(async () => /What you select and what you say go to OpenAI/.test(await s.innerText()), 4000, 100)) && (await kit.api('/settings')).effective?.dictation?.editModel === 'openai:gpt-5', 'one that sends it out: said so, plainly', await s.innerText())
+    await sel.selectOption('ollama:llama3')
+    ok(!!(await until(async () => /Rewritten on this computer\. Nothing is sent anywhere/.test(await s.innerText()), 4000, 100)) && !/go to OpenAI/.test(await s.innerText()), 'one on this computer: said so')
+    await shot(d.p, `${tag}settings-edit-by-voice`)
+    await d.ctx.close()
+    const w = await editApp({ mode: 'hold', via: 'uiohook', key: 'Control+Alt+Space', active: true, platform: 'win32', background: true, paste: { can: true, via: 'keytap', asks: null, allowed: true }, edit: { can: false, why: 'UI Automation' } })
+    const ws = await voice(w.p)
+    ok(await ws.locator('.dict-edit').count() === 0, 'Windows (not yet): not offered')
+    await w.ctx.close()
+  }
+  await kit.api('/settings', { dictation: { edit: null, editModel: null, background: null } }, 'PATCH')
+
   // ---------- The mic turned down in the desktop app on a Mac ----------
   // macOS is asked before the mic opens; when it still turns it down while listing Bridge AI as
   // allowed (an answer from a version signed differently), Reset and ask again, not the browser's
@@ -734,6 +774,36 @@ try {
     await paste.click()
     ok(!!(await until(() => h.evaluate(() => window.__hud.pasted.at(-1) === 'Allow me then paste.'), 4000, 100)) && !!(await until(async () => /Pasted into TextEdit/.test(await hudText(h)), 4000, 100)), 'Paste: what you said is pasted where you were typing', [await h.evaluate(() => window.__hud.pasted), await hudText(h)])
     await hc.close()
+  }
+  {
+    // Edit by voice: with text selected in TextEdit, what you said is how to change it. The rewrite
+    // (stood in for) is pasted in its place; with nothing selected, the words go as they would.
+    const edits = []
+    const mk = (selection) => page(b, `${kit.url}/?dictate=1`, { store: { 'cc-ws': { tabs: [one.paneId], active: one.paneId } }, before: async (c) => {
+      await before(c)
+      await c.route(/\/api\/dictation\/edit$/, async (r) => { edits.push(r.request().postDataJSON()); await r.fulfill({ json: { text: 'The draft, shorter.' } }) })
+      await c.addInitScript(([st, sel]) => {
+        window.__hud = { pasted: [], hidden: 0 }
+        window.bridgeApp = {
+          platform: 'darwin', desktop: true,
+          hudReady: async () => null, hudSize: () => {}, hudPhase: () => {}, hudHide: async () => { window.__hud.hidden++ }, hudCopy: async () => {}, hudOpen: async () => {},
+          dictateStatus: async () => st, dictateConfigure: async () => st,
+          hudPaste: async (x) => { window.__hud.pasted.push(x); return { pasted: true, read: true, restored: true } },
+          hudSelection: async () => ({ text: sel }),
+        }
+      }, [{ ...MAC(true), edit: { can: true, on: true } }, selection])
+    } })
+    const { ctx: hc, p: h } = await mk('teh draft of the plan')
+    await h.waitForSelector('.hud', { timeout: 10000 })
+    await talk(h, 'make this shorter', 'TextEdit')
+    ok(!!(await until(() => h.evaluate(() => window.__hud.pasted.length === 1), 8000, 100)) && edits.length === 1 && edits[0].text === 'teh draft of the plan' && edits[0].instruction === 'Make this shorter.' && await h.evaluate(() => window.__hud.pasted[0]) === 'The draft, shorter.', 'text selected: it and what you said go to be rewritten, and the rewrite is pasted in its place', { edits, pasted: await h.evaluate(() => window.__hud.pasted) })
+    ok(!!(await until(async () => /Changed in TextEdit/.test(await hudText(h)), 4000, 100)), '"Changed in TextEdit"', await hudText(h))
+    await hc.close()
+    const { ctx: nc, p: n } = await mk('')
+    await n.waitForSelector('.hud', { timeout: 10000 })
+    await talk(n, 'just these words', 'TextEdit')
+    ok(!!(await until(() => n.evaluate(() => window.__hud.pasted.at(-1) === 'Just these words.'), 8000, 100)) && edits.length === 1, 'nothing selected: your words pasted as they\'d have been, nothing sent to be rewritten', await n.evaluate(() => window.__hud.pasted))
+    await nc.close()
   }
   await kit.api('/settings', { dictation: { to: null } }, 'PATCH')
   // Where pasting can't work, Copy offers nothing more.

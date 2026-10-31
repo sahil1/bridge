@@ -24,6 +24,10 @@ import '../../dictation/dictation.css'
 // Live words: the words shown as you talk, where the speech model and this computer allow it
 // (server/livewords.js), on unless you turn them off.
 //
+// Edit by voice (a Mac, where pasting works: shared/dictation/platform.js editByVoice): off until you
+// turn it on, then the model that rewrites the selection is picked here, said to keep the text on this
+// computer or to send it out; Accessibility, if it isn't on yet, asked then.
+//
 // History: each dictation kept on this computer (Dictations, under Meetings), on until you turn it
 // off, for always or less; the recordings only if you ask; Delete all, after asking.
 const TO = [['last', tx('The agent I looked at last')], ['chief', tx('The chief of staff')], ['ask', tx('Ask each time')]]
@@ -40,6 +44,7 @@ export default function Dictation() {
   const [picking, setPicking] = useState(false)
   const [asking, setAsking] = useState(0) // "Where I'm typing" just picked: Accessibility asked for then
   const [askListen, setAskListen] = useState(0) // Fn or the right ⌥ just picked: Input Monitoring asked for then
+  const [askEdit, setAskEdit] = useState(0) // Edit by voice just turned on: Accessibility asked for then
   // Accessibility turned on: the desktop app's status again, so pasting is on.
   const refresh = useCallback(async () => {
     const st = await app?.dictateStatus?.().catch(() => null)
@@ -147,6 +152,16 @@ export default function Dictation() {
               </PermissionFix>
             </div>
           )}
+          {mode && background && status?.edit?.can && (
+            <>
+              <label className="st-check dict-edit"><input type="checkbox" checked={d.edit === true} onChange={async (e) => { const on = e.target.checked; await set({ edit: on }); if (on && !status.paste?.allowed) setAskEdit((n) => n + 1) }} />
+                <span><b>{t('Edit by voice')}</b> <span className="muted small">{t('With text selected in another app, hold {key} and say what to change ("make this shorter", "in Spanish"): the model you pick rewrites it, and it\'s put back in its place.', { key: label })}</span></span></label>
+              {d.edit === true && <EditModel value={d.editModel || null} onPick={(m) => set({ editModel: m })} />}
+              {d.edit === true && !needsAccess && status.edit.asks === 'accessibility' && !status.paste?.allowed && (
+                <PermissionFix pane="accessibility" ask={askEdit} onCheck={refresh}><p className="small">{t('Reading what you selected, and putting the new text in its place, need Accessibility.')}</p></PermissionFix>
+              )}
+            </>
+          )}
           {/* wtype (Wayland) types it in, with no clipboard to put back. */}
           {pasting && paste && !needsAccess && paste.via !== 'wtype' && <p className="muted small">{paste.limit === 'admin'
             ? t('What you had copied is put back after. It can\'t paste into an app running as administrator.')
@@ -203,5 +218,27 @@ function History({ d, set, cleared, onClear }) {
         {cleared && <span className="muted small" role="status">{cleared}</span>}
       </div>
     </section>
+  )
+}
+
+// The model edit by voice rewrites with (dictation.editModel), from the ones you can use: one on this
+// computer (Ollama, LM Studio) keeps what you select here; any other is said to send it out.
+function EditModel({ value, onPick }) {
+  const [models, setModels] = useState(null)
+  useEffect(() => { api('/chat/models').then((r) => setModels(r.models || []), () => setModels([])) }, [])
+  if (!models) return null
+  if (!models.length) return <p className="muted small">{t('No model to rewrite with yet: add one in Settings › Model Providers (Ollama or LM Studio keep the text on this computer).')}</p>
+  const cur = models.find((m) => m.id === value)
+  return (
+    <>
+      <div className="st-row dict-edit-model"><span>{t('Rewritten by')}</span>
+        <select value={value || ''} onChange={(e) => onPick(e.target.value || null)} aria-label={t('Rewritten by')}>
+          <option value="">{t('Pick a model')}</option>
+          {models.map((m) => <option key={m.id} value={m.id}>{`${m.label} · ${m.via === 'local' ? t('on this computer') : t('text leaves this computer')}`}</option>)}
+        </select>
+      </div>
+      {cur && cur.via !== 'local' && <p className="st-note warn"><Icon name="alert" size={13} /> {t('What you select and what you say go to {provider}.', { provider: cur.provider })}</p>}
+      {cur?.via === 'local' && <p className="muted small"><Icon name="laptop" size={12} /> {t('Rewritten on this computer. Nothing is sent anywhere.')}</p>}
+    </>
   )
 }
