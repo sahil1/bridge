@@ -559,3 +559,58 @@ button.mt-who:not(:disabled):hover { text-decoration: underline dotted; text-und
 button.mt-from-chip { cursor: pointer; }
 button.mt-from-chip:hover { color: var(--ink); border-color: color-mix(in srgb, var(--accent) 40%, var(--line-2)); }
 .mt-from-chip.mine { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, var(--line-2)); background: color-mix(in srgb, var(--accent) 8%, var(--pane)); }
+/* Action items turned into work (work.jsx): each with Start an agent and To Chief of Staff, and
+   what became of it under it. */
+.mt-items-head { padding-bottom: 0; }
+.mt-items { display: grid; gap: 2px; margin: 0 0 6px; padding: 0; list-style: none; }
+.mt-item { display: flex; align-items: flex-start; gap: 8px; padding: 6px 8px; border-radius: 10px; }
+.mt-item:hover { background: var(--pane-2); }
+.mt-item-tick { flex: none; margin: 4px 0 0; accent-color: var(--accent); }
+.mt-item-main { display: grid; gap: 4px; flex: 1; min-width: 0; }
+.mt-item-text { font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.mt-item-text p { margin: 0; }
+.mt-item.done .mt-item-text { color: var(--ink-3); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--ink-3) 60%, transparent); }
+.mt-item-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.mt-item-acts .btn.lead { border-color: color-mix(in srgb, var(--accent) 45%, var(--line-2)); background: color-mix(in srgb, var(--accent) 10%, var(--pane)); color: var(--ink); }
+.mt-item-went, .mt-since-went { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 12px; color: var(--ink-2); }
+.mt-went { display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 100%; }
+.mt-went > span { min-width: 0; overflow-wrap: anywhere; }
+.mt-went.pr { color: var(--ink-2); text-decoration: none; padding: 0 7px; height: 20px; border-radius: 999px; border: 1px solid var(--line-2); }
+.mt-went.pr:hover { color: var(--ink); border-color: color-mix(in srgb, var(--accent) 40%, var(--line-2)); }
+.mt-went.pr.pr-merged { color: #8e4ec6; border-color: color-mix(in srgb, #8e4ec6 40%, var(--line-2)); }
+.mt-went.agent[data-status="blocked"], .mt-went.chief[data-status="waiting"] { color: var(--warning); }
+.mt-state-ico { flex: none; color: var(--ink-3); }
+[data-state="done"] > .mt-state-ico { color: var(--good); }
+[data-state="needs"] > .mt-state-ico { color: var(--warning); }
+[data-state="working"] > .mt-state-ico { color: var(--accent); }
+/* Start an agent: the project (and why), the agent, its own branch, what it's told. */
+.mt-start { display: grid; gap: 8px; padding: 10px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line-2)); background: var(--pane); }
+.mt-start-row { display: grid; grid-template-columns: 70px minmax(0, 1fr); align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-2); }
+.mt-start select, .mt-start-dir { min-width: 0; height: 30px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--pane); color: var(--ink); font: 13px var(--font); }
+.mt-start-why { margin: -2px 0 0 78px; overflow-wrap: anywhere; }
+.mt-start-own { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-2); }
+.mt-start-own code { font: 11.5px var(--mono, ui-monospace, monospace); padding: 1px 5px; border-radius: 5px; background: var(--pane-2); overflow-wrap: anywhere; }
+.mt-start-told summary { cursor: pointer; color: var(--ink-2); }
+.mt-start-told textarea { width: 100%; margin-top: 6px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--pane-2); color: var(--ink); font: 12.5px/1.5 var(--font); resize: vertical; box-sizing: border-box; }
+.mt-start-acts { display: flex; gap: 6px; align-items: center; }
+/* Since last time: one line, each item under it once opened. */
+.mt-since { border-radius: 12px; border: 1px solid var(--line-2); background: var(--pane-2); }
+.mt-since-head { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 6px 12px; border: 0; background: none; color: var(--ink); font: 13px var(--font); text-align: left; cursor: pointer; }
+.mt-since-head > svg:first-child { color: var(--accent); flex: none; }
+.mt-since-head b { flex: none; }
+.mt-since-line { flex: 1; min-width: 0; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mt-since-head .rot { transform: rotate(90deg); }
+.mt-since-body { display: grid; gap: 6px; padding: 0 12px 10px; }
+.mt-since-body p { margin: 0; }
+.mt-since-body ul { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.mt-since-item { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; }
+.mt-since-item > svg { margin-top: 4px; }
+.mt-since-item > div { display: grid; gap: 2px; min-width: 0; }
+.mt-since-text { overflow-wrap: anywhere; }
+.mt-since-item[data-state="done"] .mt-since-text { color: var(--ink-3); }
+.mt-since-next { margin-top: -4px; }
+@media (max-width: 760px) {
+  .mt-start-row { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .mt-start-why { margin-left: 0; }
+  .mt-since-line { white-space: normal; }
+}
