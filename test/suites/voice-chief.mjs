@@ -2,7 +2,7 @@
 // the answer. A stand-in Claude Code runs the Chief of Staff, speech to text is stood in for
 // (/api/transcribe answers what was said), and so is the Chief of Staff's answer (its transcript),
 // and the device's voices (speechSynthesis: one on the device, one Chrome would fetch from the
-// internet). eSpeak NG on the computer is a stand-in program that writes a WAV.
+// internet). eSpeak NG on the computer is a stand-in script that writes a WAV (BRIDGE_ESPEAK).
 //   Ask out loud above the Chief of Staff's message box: held, the pill says "To Chief of Staff";
 //   let go, what was said goes to it marked "(Asked out loud)"; once it's answered, the answer is
 //   read aloud for the ear (no Markdown, pane ids or links' addresses) by the device's own voice,
@@ -17,7 +17,7 @@ import path from 'node:path'
 import { startKit, checks, until, sleep, browser, page, shot, noServiceWorker, TEST } from '../lib/harness.mjs'
 
 const { ok, done } = checks('voice-chief')
-const kit = await startKit('voice-chief', { env: { CLAUDE_STAND_IN: 'fresh' } })
+const kit = await startKit('voice-chief', { env: ({ bin }) => ({ CLAUDE_STAND_IN: 'fresh', BRIDGE_ESPEAK: path.join(bin, 'espeak-ng.cjs') }) })
 kit.program('claude', fs.readFileSync(path.join(TEST, 'stand-ins', 'claude.cjs'), 'utf8'))
 // eSpeak NG: its arguments noted, a WAV (a tenth of a second of quiet) on its stdout.
 kit.program('espeak-ng', `const fs = require('node:fs'); const path = require('node:path')
