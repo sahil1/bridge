@@ -437,8 +437,11 @@ process.exit(1)`)
   const site = path.join(kit.home, 'code', 'website')
   for (const d of [repo, site]) fs.mkdirSync(d, { recursive: true })
   const inRepo = (...a) => spawnSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', '-c', 'init.defaultBranch=main', ...a], { cwd: repo, encoding: 'utf8' })
-  const hasGit = inRepo('init', '-q').status === 0 && inRepo('commit', '-q', '--allow-empty', '-m', 'start').status === 0 && inRepo('remote', 'add', 'origin', 'https://github.com/example/payments-api.git').status === 0
+  const madeRepo = inRepo('init', '-q').status === 0 && inRepo('commit', '-q', '--allow-empty', '-m', 'start').status === 0 && inRepo('remote', 'add', 'origin', 'https://github.com/example/payments-api.git').status === 0
   await kit.api('/projects', { paths: [site, repo] })
+  // Whether the server can use git here (the test's own PATH can have a git its server's doesn't,
+  // as on Windows): without it, the agent starts in the project itself, with no branch of its own.
+  const hasGit = madeRepo && !!(await tryApi(`/repo?dir=${encodeURIComponent(repo)}`)).repo
   const PS = await kit.api('/meetings', { title: 'Weekly payments sync', call: false, event: { title: 'Weekly payments sync', attendees: ['Priya Shah', 'Mia Chen', 'Ola Berg', 'Tester'] } })
   await kit.api(`/meetings/${PS.id}/stop`, {})
   await kit.api(`/meetings/${PS.id}`, { startedAt: new Date(Date.now() - 7 * 86400e3).toISOString() }, 'PATCH')
@@ -453,19 +456,19 @@ process.exit(1)`)
   ok(prep.label === 'Fix the retry on the Stripe webhook', 'a short name from its first words', prep.label)
   const webPrep = await tryApi(`/meetings/${PS.id}/work/${copyIt.key}`)
   ok(webPrep.projects?.[0]?.path === site, 'another item: the project it names', webPrep.projects)
-  if (!hasGit) skip('an agent started on an action item, on its own branch', 'no git here')
-  else {
-    const started = await tryApi(`/meetings/${PS.id}/work/${fixIt.key}/agent`, { cwd: repo, kind: 'claude' }).catch((e) => ({ error: e.message }))
-    ok(!!started.paneId && /^bridge\/fix-the-retry-on-the-stripe-webhook/.test(started.worktree?.branch || '') && /payments-api$/.test(started.agent?.projectName || ''), 'Start an agent: in the project, on a branch of its own', started)
+  if (!hasGit) skip('the agent on a branch of its own, and its pull request', 'the server has no git here')
+  {
+    const started = await tryApi(`/meetings/${PS.id}/work/${fixIt.key}/agent`, { cwd: repo, kind: 'claude', own: hasGit }).catch((e) => ({ error: e.message }))
+    ok(!!started.paneId && (!hasGit || /^bridge\/fix-the-retry-on-the-stripe-webhook/.test(started.worktree?.branch || '')) && /payments-api$/.test(started.agent?.projectName || ''), 'Start an agent: in the project, on a branch of its own', started)
     const fleet = await until(async () => { const f = await kit.api('/fleet'); return f.agents.some((a) => a.paneId === started.paneId) && f }, 15000)
     const ag = fleet?.agents.find((a) => a.paneId === started.paneId)
     const space = fleet?.workspaces.find((x) => x.id === ag?.workspaceId)
-    ok(ag?.worktree?.branch === started.worktree?.branch && space?.label === 'Weekly payments sync', 'in a space named after the meeting', { ag, space })
+    ok((!hasGit || ag?.worktree?.branch === started.worktree?.branch) && space?.label === 'Weekly payments sync', 'in a space named after the meeting', { ag, space })
     // What it was told: its first message, in the stand-in's session log (its terminal can take a
     // while to start, and the stand-in writes its log over a moment).
     const projects = path.join(kit.home, '.claude', 'projects')
     const told = await until(() => {
-      for (const d of fs.existsSync(projects) ? fs.readdirSync(projects).filter((x) => x.includes('fix-the-retry')) : []) {
+      for (const d of fs.existsSync(projects) ? fs.readdirSync(projects).filter((x) => x.includes(hasGit ? 'fix-the-retry' : 'payments-api')) : []) {
         for (const f of fs.readdirSync(path.join(projects, d)).filter((x) => x.endsWith('.jsonl'))) {
           const first = fs.readFileSync(path.join(projects, d, f), 'utf8').split('\n').map((l) => { try { return JSON.parse(l) } catch { return null } }).find((e) => e?.type === 'user')
           if (first) return String(first.message.content)
@@ -474,9 +477,9 @@ process.exit(1)`)
       return null
     }, 60000, 1000)
     ok(!!told && told.includes('> You: fix the retry on the Stripe webhook in payments-api') && told.includes('What was said about it'), "it's told the item and what was said about it", told)
-    w = await until(async () => { const x = await tryApi(`/meetings/${PS.id}/work`); return x.items?.[0]?.agent?.pr && x }, 15000)
+    w = await until(async () => { const x = await tryApi(`/meetings/${PS.id}/work`); return x.items?.[0]?.agent && (!hasGit || x.items[0].agent.pr) && x }, 15000)
     const a0 = w?.items?.[0]
-    ok(a0?.agent?.live && a0.agent.branch === started.worktree.branch && a0.agent.pr?.number === 212 && a0.agent.pr.checks?.pass === 1 && a0.state === 'review', 'what became of it: the agent, its branch and its pull request (checks pass)', a0)
+    ok(a0?.agent?.live && (hasGit ? a0.agent.branch === started.worktree.branch && a0.agent.pr?.number === 212 && a0.agent.pr.checks?.pass === 1 && a0.state === 'review' : !a0.agent.branch), 'what became of it: the agent, its branch and its pull request (checks pass)', a0)
   }
   // To Chief of Staff, one item: on its task list, and the item says so; its task's state and outcome show.
   r = await tryApi(`/meetings/${PS.id}/chief`, { items: [docIt.text] })
@@ -490,14 +493,14 @@ process.exit(1)`)
   ok(w.items?.[1]?.state === 'done' && w.items?.[1]?.chief.outcome === 'Drafted the email to Acme', 'and done, with what it did', w.items?.[1])
   // Send action items to Chief of Staff: only the ones not handed on yet.
   r = await tryApi(`/meetings/${PS.id}/chief`, {})
-  ok(r.added === (hasGit ? 1 : 2), 'Send action items to Chief of Staff sends only the ones not handed on yet', r)
+  ok(r.added === 1, 'Send action items to Chief of Staff sends only the ones not handed on yet', r)
   await tryApi(`/meetings/${PS.id}/work/${copyIt.key}/done`, { done: true })
   w = await tryApi(`/meetings/${PS.id}/work`)
   ok(w.items?.[2]?.done && w.items?.[2]?.state === 'done', 'ticked done by hand', w.items?.[2])
   // A summary written again in other words keeps what became of each item.
   fs.writeFileSync(path.join(dirOf(PS.id), 'summary.md'), '## Action items\n- [ ] You: fix the retry on the Stripe webhook in payments-api, with a backoff\n- [ ] Priya: send the pricing doc to Acme\n- [ ] Dan: review the website copy\n')
   w = await tryApi(`/meetings/${PS.id}/work`)
-  ok(w.items?.[2]?.done && (!hasGit || w.items?.[0]?.agent?.branch), 'a summary written again keeps what became of its items', (w.items || []).map((x) => [x.text, x.state]))
+  ok(w.items?.[2]?.done && !!w.items?.[0]?.agent?.paneId, 'a summary written again keeps what became of its items', (w.items || []).map((x) => [x.text, x.state]))
   fs.writeFileSync(path.join(dirOf(PS.id), 'summary.md'), '## Summary\n- Webhook retries and pricing.\n\n## Decisions\n- Retry with a backoff, at most five times.\n\n## Action items\n- [ ] You: fix the retry on the Stripe webhook in payments-api\n- [ ] Priya: send the pricing doc to Acme\n- [ ] Dan: review the website copy\n')
 
   // Since last time. The next one in the series (its name, without the date): the last one's items.
