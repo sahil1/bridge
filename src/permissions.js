@@ -26,6 +26,7 @@ import { tx } from './i18n/index.js'
 export const KINDS = {
   microphone: { label: tx('Microphone'), why: tx('Voice notes, dictation and meeting notes.'), app: true, reset: true, win: true },
   accessibility: { label: tx('Accessibility'), why: tx('Pasting what you dictate where you\'re typing.'), app: true, reset: true },
+  'input-monitoring': { label: tx('Input Monitoring'), why: tx('Fn or the right ⌥ held as the dictation key, from other apps.'), app: true, reset: true },
   calendars: { label: tx('Calendars'), why: tx('Your schedule in Today, and meeting notes named after their event.'), reset: true },
   'full-disk': { label: tx('Full Disk Access'), why: tx('Reading Mail, for your inbox and for meeting notes.'), reset: true, restart: true },
   files: { label: tx('Files & Folders'), why: tx('Agents working in your Desktop, Documents or Downloads folder.'), reset: true, restart: true },

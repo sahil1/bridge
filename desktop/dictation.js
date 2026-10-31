@@ -32,9 +32,11 @@ const { pathToFileURL } = require('node:url')
 // ---------- What hears the key ----------
 // Each: { ok, stop() }, calling onDown(at, info) and onUp(at). at: when, in ms since 1970.
 
-// native/bridgekeys hotkey <code> <mods>. onState({ ready } | { error, by, status }) once it's set.
-function helperSource({ bin, code, mods, onDown, onUp, onState, onExit, spawnFn = spawn }) {
-  const p = spawnFn(bin, ['hotkey', String(code), String(mods)], { stdio: ['pipe', 'pipe', 'ignore'] })
+// native/bridgekeys hotkey <code> <mods>, or with lone, bridgekeys modifier fn|ralt (one key on its
+// own, which can also be cancelled: another key pressed while it's held). onState({ ready } |
+// { error, by, status }) once it's set.
+function helperSource({ bin, code, mods, lone = null, onDown, onUp, onCancel, onState, onExit, spawnFn = spawn }) {
+  const p = spawnFn(bin, lone ? ['modifier', lone] : ['hotkey', String(code), String(mods)], { stdio: ['pipe', 'pipe', 'ignore'] })
   let buf = ''
   let told = false
   p.stdout.on('data', (d) => {
@@ -46,6 +48,7 @@ function helperSource({ bin, code, mods, onDown, onUp, onState, onExit, spawnFn 
       try { j = JSON.parse(line) } catch { continue }
       if (j.ready || j.error) { told = true; onState?.(j) } else if (j.down) onDown(j.down, j)
       else if (j.up) onUp(j.up)
+      else if (j.cancel) onCancel?.(j.cancel)
     }
   })
   p.on('error', () => { if (!told) { told = true; onState?.({ error: 'failed' }) } })
@@ -144,6 +147,25 @@ function hookSource({ accel, codes, globalShortcut, hook, onDown, onUp, settle =
     },
     stop() { clearTimeout(pending); for (const w of waiters) w(false); waiters = []; unwatch(); if (ok) globalShortcut.unregister(accel) },
   }
+}
+
+// One key on its own (the right Alt), heard by the hook for as long as it's the key: down when it
+// goes down, up when it's let go, and cancelled when another key goes down while it's held (AltGr
+// typing a character, on many keyboards). The hook looks at that key and whether another went down,
+// and keeps nothing. code: uiohook-napi's for it (keys.js hookKey).
+const L_CTRL = 0x1d // Windows' AltGr is a left Ctrl just before the right Alt: not another key
+function loneHookSource({ code, hook, onDown, onUp, onCancel, now = Date.now }) {
+  let held = false
+  const keydown = (e) => {
+    if (e.keycode === code) { if (!held) { held = true; onDown(now()) } return }
+    if (held && e.keycode !== L_CTRL) { held = false; onCancel?.(now()) }
+  }
+  const keyup = (e) => { if (e.keycode === code && held) { held = false; onUp(now()) } }
+  try { hook.on('keydown', keydown); hook.on('keyup', keyup); hook.start() } catch {
+    hook?.off?.('keydown', keydown); hook?.off?.('keyup', keyup)
+    return { ok: false, stop() {} }
+  }
+  return { ok: true, stop() { hook.off('keydown', keydown); hook.off('keyup', keyup); try { hook.stop() } catch { /* stopped */ } } }
 }
 
 // globalShortcut alone: each press is a tap (down and up at once).
@@ -257,8 +279,10 @@ const BUNDLE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/
 // askAccess(pane): the Allow access tile (main.js); trusted(e): an IPC call from the app's own page.
 // openApp(bundle): brings that app to the front (Paste again; the tests stand in for it).
 // perms: the app's permissions (permissions.js), which ask for Accessibility the same way everywhere.
+// onStatus(view): what Settings is told, each time the key is set (main.js keeps what it needs).
+// fnUsage(): what macOS does when 🌐 is pressed (System Settings › Keyboard), for the Fn key's note.
 const openBundle = (bundle) => new Promise((resolve) => execFile('open', ['-b', bundle], { timeout: 5000 }, () => resolve()))
-function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, tellMain, askAccess, trusted = () => true, openApp = openBundle, perms = null }) {
+function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, tellMain, askAccess, trusted = () => true, openApp = openBundle, perms = null, onStatus = null, fnUsage = readFnUsage }) {
   const { BrowserWindow, globalShortcut, screen, ipcMain, clipboard, systemPreferences, shell } = electron
   const IS_MAC = process.platform === 'darwin'
   let lib = null
@@ -270,6 +294,7 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, tellMain, askA
   let status = { mode: null }
   let settings = {}
   let route = null // where the key's press went: a page's webContents, or 'hud'
+  let heardByPage = false // the key is one the page hears itself even from here (the right Alt)
   let hud = null
   let pending = null // a press from before the dictation window's page was ready
   let ready = false
@@ -279,12 +304,19 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, tellMain, askA
 
   const say = (wc, detail) => { if (wc && !wc.isDestroyed()) wc.executeJavaScript(`window.dispatchEvent(new CustomEvent('bridge-dictate-key', { detail: ${JSON.stringify(detail)} }))`).catch(() => {}) }
   const toHud = (detail) => {
-    if (!ready) { if (detail.type === 'down') pending = { down: detail.at, up: null, app: detail.app || null, bundle: detail.bundle || null }; else if (detail.type === 'up' && pending) pending.up = detail.at; return }
+    if (!ready) {
+      if (detail.type === 'down') pending = { down: detail.at, up: null, app: detail.app || null, bundle: detail.bundle || null }
+      else if (detail.type === 'up' && pending) pending.up = detail.at
+      else if (detail.type === 'cancel') { pending = null; hideHud() }
+      return
+    }
     say(hud?.webContents, detail)
   }
   // info: what the Mac's helper says was in front ({ app, bundle, path, pid, secure }).
   function onDown(at, info) {
     const w = BrowserWindow.getFocusedWindow()
+    // The right Alt as the key reaches the page in front too (a lone key isn't kept from it): it hears it itself.
+    if (w && w !== hud && isOurs(w) && heardByPage) { route = null; return }
     if (w && w !== hud && isOurs(w)) { route = w.webContents; say(route, { type: 'down', at }); return }
     route = 'hud'
     const bundle = typeof info?.bundle === 'string' && BUNDLE.test(info.bundle) ? info.bundle : ''
@@ -295,7 +327,12 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, tellMain, askA
   }
   function onUp(at) {
     if (route === 'hud') toHud({ type: 'up', at })
-    else say(route, { type: 'up', at })
+    else if (route) say(route, { type: 'up', at })
+  }
+  // A lone key with another pressed while it was held: not dictation after all.
+  function onCancel() {
+    if (route === 'hud') toHud({ type: 'cancel' })
+    else if (route) say(route, { type: 'cancel' })
   }
 
   // ---------- The dictation window ----------
@@ -468,11 +505,40 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, tellMain, askA
     const gen = ++applying
     source?.stop()
     source = null
-    const key = settings.key || lib.defaultKey(process.platform)
+    let key = settings.key || lib.defaultKey(facts.platform)
     const background = settings.background === true // off until you say yes (shared/dictation/platform.js)
-    status = { mode: g.mode, via: g.via || null, asks: !!g.asks, why: g.why || null, key, background, active: false, taken: null, fallback: null, error: null }
+    // One key on its own (Fn, the right ⌥): what can be heard here, and whether it needs a permission
+    // first (needs: 'input-monitoring', until a Mac lets Bridge AI listen; the usual key works meanwhile).
+    const lone = lib.loneKeys(facts)
+    status = { mode: g.mode, via: g.via || null, asks: !!g.asks, why: g.why || null, key, background, active: false, taken: null, fallback: null, error: null, lone: lone.keys.length ? lone : null, needs: null, fnUsage: null }
+    // A lone key picked on another computer, which this one can't hear from other apps: the usual one, said once.
+    if (lib.isLone(key) && !lone.keys.includes(key)) { status.loneFallback = key; key = lib.defaultKey(facts.platform) }
+    if (key === 'Fn') status.fnUsage = await fnUsage().catch(() => null)
     if (settings.on === false || !background || !g.mode) return status
-    const handlers = { onDown, onUp }
+    const handlers = { onDown, onUp, onCancel }
+    heardByPage = key === 'RightAlt'
+    if (g.via === 'bridgekeys' && lib.isLone(key)) {
+      const r = await new Promise((resolve) => {
+        const timer = setTimeout(() => resolve({ ready: true }), 3000)
+        const s = helperSource({ bin: helperBin(), lone: lib.macLone(key), ...handlers, onState: (j) => { clearTimeout(timer); resolve(j) }, onExit: () => { if (source === s) { source = null; status.active = false } } })
+        source = s
+      })
+      if (gen !== applying) return status
+      if (r.ready) { status.active = true; return status }
+      source?.stop()
+      source = null
+      if (r.error === 'input-monitoring') status.needs = 'input-monitoring'
+      else status.error = r.error || 'failed'
+      key = lib.defaultKey(facts.platform)
+      status.fallback = key
+      heardByPage = false
+    }
+    if (g.via === 'uiohook' && lib.isLone(key)) {
+      source = loneHookSource({ code: lib.hookKey(key, process.platform).key, hook: loadHook(), ...handlers })
+      if (source.ok) status.active = true
+      else { source = null; status.error = 'failed' }
+      return status
+    }
     if (g.via === 'bridgekeys') {
       const tryKey = (k) => new Promise((resolve) => {
         const mk = lib.macKey(k)
@@ -484,7 +550,7 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, tellMain, askA
       })
       let r = await tryKey(key)
       // macOS 15 for a while turned down hotkeys with only ⌥ (it says "failed"): ⌃⌥Space then.
-      if (r.error === 'failed' && !settings.key && gen === applying) { r = await tryKey('Control+Alt+Space'); if (r.ready) status.fallback = 'Control+Alt+Space' }
+      if (r.error === 'failed' && (!settings.key || status.fallback) && gen === applying) { r = await tryKey('Control+Alt+Space'); if (r.ready) status.fallback = 'Control+Alt+Space' }
       if (gen !== applying) return status // settings changed meanwhile: that one's in charge
       if (r.ready) status.active = true
       else { source?.stop(); source = null; if (r.error === 'taken') status.taken = r.by || 'app'; else status.error = r.error || 'failed' }
@@ -504,7 +570,7 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, tellMain, askA
   ipcMain.handle('bridge:dictate-configure', async (e, s) => {
     if (!s || typeof s !== 'object') return view()
     settings = { ...s }
-    if (lib) await apply()
+    if (lib) { await apply(); onStatus?.(view()) }
     return view()
   })
 
@@ -526,9 +592,19 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, tellMain, askA
     pz = lib.pasteInto(facts)
     settings = readSettings()
     await apply()
+    onStatus?.(view())
     return view()
   })()
 }
 
+// What macOS does when 🌐 is pressed (System Settings › Keyboard › "Press 🌐 key to"): none (Do
+// Nothing), input (change the input source), emoji, dictation; null when it isn't said. Read without
+// asking anything.
+const FN_USAGE = ['none', 'input', 'emoji', 'dictation']
+function readFnUsage() {
+  if (process.platform !== 'darwin') return Promise.resolve(null)
+  return new Promise((resolve) => execFile('defaults', ['read', 'com.apple.HIToolbox', 'AppleFnUsageType'], { timeout: 3000 }, (err, out) => resolve(err ? null : FN_USAGE[Number(String(out).trim())] || null)))
+}
+
 // The helper goes with the app (it watches for that), and the shortcuts with will-quit (main.js).
-module.exports = { start, helperSource, hookSource, shortcutSource, helperPaste, keyPaste, typeIn, activeClass, hasEntry }
+module.exports = { start, helperSource, hookSource, loneHookSource, shortcutSource, helperPaste, keyPaste, typeIn, activeClass, hasEntry }

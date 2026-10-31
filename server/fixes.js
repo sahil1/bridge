@@ -27,6 +27,10 @@ const PANES = {
   microphone: { url: `${SECURITY}?Privacy_Microphone`, label: 'Microphone', tcc: ['Microphone'], app: true },
   // Pasting what you dictate where you're typing (desktop/dictation.js): pressing ⌘V there.
   accessibility: { url: `${SECURITY}?Privacy_Accessibility`, label: 'Accessibility', tcc: ['Accessibility', 'PostEvent'], app: true },
+  // Fn or the right ⌥ held as the dictation key (desktop/dictation.js): hearing it from other apps.
+  'input-monitoring': { url: `${SECURITY}?Privacy_ListenEvent`, label: 'Input Monitoring', tcc: ['ListenEvent'], app: true },
+  // "Press 🌐 key to" (Do Nothing, for Fn as the dictation key).
+  keyboard: { url: 'x-apple.systempreferences:com.apple.Keyboard-Settings.extension', label: 'Keyboard' },
   // A call's sound for meeting notes (System Audio Recording Only, in the same list as screen recording).
   audio: { url: `${SECURITY}?Privacy_ScreenCapture`, label: 'Screen & System Audio Recording', tcc: ['AudioCapture', 'ScreenCapture'] },
   // With the app's bundle id it opens on Bridge AI's own page.
@@ -182,7 +186,7 @@ let asked = null // { pane, folder, from, at }
 const listeners = new Set() // the desktop app's own feed (/api/events from the app)
 export const onAsk = (fn) => { listeners.add(fn); return () => listeners.delete(fn) }
 export function askHere(pane, { folder, from } = {}) {
-  if (!PANES[pane] || pane === 'internet-accounts') throw new Error('No such settings page')
+  if (!PANES[pane] || pane === 'internet-accounts' || pane === 'keyboard') throw new Error('No such settings page')
   if (!IS_MAC && !IS_WIN) throw new Error('Nothing to allow on this computer')
   // The same ask again straight away (a double tap) doesn't bring the window forward twice.
   if (asked?.pane === pane && Date.now() - asked.at < 10000) return { told: listeners.size > 0 }
@@ -195,14 +199,16 @@ export const askedDone = () => { asked = null; return { ok: true } }
 // ---------- Everything this computer may be asked to allow ----------
 // Which, from what this computer is: os mac, win or linux (Docker is Linux); desktop, the desktop app
 // is here (its own: the mic, notifications); paste, pasting where you're typing can work (the app
-// says Accessibility applies); callSound, a call's sound can be recorded (native/calltap); trash,
+// says Accessibility applies); listen, a lone dictation key is picked (the app says Input Monitoring
+// applies); callSound, a call's sound can be recorded (native/calltap); trash,
 // macOS has /usr/bin/trash (15 and later), so the Trash doesn't go through Finder (Automation).
-export function rowsFor({ os, desktop = false, paste = false, callSound = false, trash = false }) {
+export function rowsFor({ os, desktop = false, paste = false, listen = false, callSound = false, trash = false }) {
   if (os === 'win') return desktop ? ['microphone', 'notifications'] : []
   if (os !== 'mac') return []
   return [
     ...(desktop ? ['microphone'] : []),
     ...(desktop && paste ? ['accessibility'] : []),
+    ...(desktop && listen ? ['input-monitoring'] : []),
     'calendars', 'full-disk', 'files',
     ...(callSound ? ['audio'] : []),
     ...(trash ? [] : ['automation']),
@@ -219,6 +225,7 @@ export async function list({ callSound = false } = {}) {
     os: IS_MAC ? 'mac' : IS_WIN ? 'win' : 'linux',
     desktop: app().desktop || !!fromApp,
     paste: !!fromApp?.states.accessibility,
+    listen: !!fromApp?.states['input-monitoring'],
     callSound,
     trash: IS_MAC && await fs.promises.access('/usr/bin/trash').then(() => true, () => false),
   })

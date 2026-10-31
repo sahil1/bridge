@@ -22,9 +22,20 @@ export function domCode(key) {
 const KEY_OF_CODE = Object.fromEntries(Object.entries(PUNCT).map(([k, v]) => [v, k]))
 const keyOfCode = (code) => (code === 'Space' ? 'Space' : /^Key[A-Z]$/.test(code) ? code.slice(3) : /^Digit[0-9]$/.test(code) ? code.slice(5) : /^F([1-9]|1[0-9]|2[0-4])$/.test(code) ? code : KEY_OF_CODE[code] || null)
 
+// Or one key on its own, held to talk (Settings › Voice, opt-in): Fn (🌐) on a Mac, or the right
+// ⌥ / Right Alt. The desktop app hears them from other apps where platform.js loneKeys says (a Mac
+// asks for Input Monitoring). Inside Bridge AI the page hears the right Alt itself (AltRight); Fn
+// never reaches a page, so the desktop app tells the page about it, as it does from other apps.
+const LONE = { Fn: { dom: null, hook: null, mac: 'fn' }, RightAlt: { dom: 'AltRight', hook: 0x0e38, mac: 'ralt' } }
+export const isLone = (accel) => typeof accel === 'string' && Object.hasOwn(LONE, accel)
+// What bridgekeys modifier listens for: fn or ralt.
+export const macLone = (accel) => (isLone(accel) ? LONE[accel].mac : null)
+
 // "Control+Alt+Space" -> { key: 'Space', ctrl: true, alt: true, meta: false, shift: false }, or null
-// for something that isn't a key and modifiers. CommandOrControl is ⌘ on a Mac, Ctrl elsewhere.
+// for something that isn't a key and modifiers. CommandOrControl is ⌘ on a Mac, Ctrl elsewhere. A
+// lone key -> { key: 'Fn', lone: true } (and no modifiers).
 export function parseKey(accel, platform) {
+  if (isLone(accel)) return { key: accel, lone: true, ctrl: false, alt: false, meta: false, shift: false }
   if (typeof accel !== 'string' || !accel.trim() || accel.length > 60) return null
   const k = { key: null, ctrl: false, alt: false, meta: false, shift: false }
   for (const raw of accel.split('+').map((s) => s.trim())) {
@@ -46,20 +57,22 @@ export function parseKey(accel, platform) {
 // Back to an accelerator, in one order (Control, Alt, Shift, Command or Super, the key).
 export function keyString(k, platform) {
   if (!k?.key) return null
+  if (k.lone) return k.key
   return [k.ctrl && 'Control', k.alt && 'Alt', k.shift && 'Shift', k.meta && (platform === 'darwin' ? 'Command' : 'Super'), k.key].filter(Boolean).join('+')
 }
 // How it's shown: ⌃⌥⇧⌘Space on a Mac, Ctrl+Alt+Shift+Win+Space elsewhere.
 export function keyLabel(accel, platform) {
   const k = typeof accel === 'string' ? parseKey(accel, platform) : accel
   if (!k) return String(accel || '')
+  if (k.lone) return k.key === 'Fn' ? (platform === 'darwin' ? '🌐 Fn' : 'Fn') : platform === 'darwin' ? 'Right ⌥' : 'Right Alt'
   if (platform === 'darwin') return `${k.ctrl ? '⌃' : ''}${k.alt ? '⌥' : ''}${k.shift ? '⇧' : ''}${k.meta ? '⌘' : ''}${k.key}`
   return [k.ctrl && 'Ctrl', k.alt && 'Alt', k.shift && 'Shift', k.meta && (platform === 'win32' ? 'Win' : 'Super'), k.key].filter(Boolean).join('+')
 }
 
 // A key event in the page: is it the key going down, exactly (no other modifier)?
-export const isKeyDown = (e, k) => !!k && e.code === domCode(k.key) && !!e.altKey === k.alt && !!e.ctrlKey === k.ctrl && !!e.metaKey === k.meta && !!e.shiftKey === k.shift
+export const isKeyDown = (e, k) => (k?.lone ? !!LONE[k.key].dom && e.code === LONE[k.key].dom : !!k && e.code === domCode(k.key) && !!e.altKey === k.alt && !!e.ctrlKey === k.ctrl && !!e.metaKey === k.meta && !!e.shiftKey === k.shift)
 // ...or any part of it let go (the key, or one of its modifiers first).
-export const isKeyUp = (e, k) => !!k && (e.code === domCode(k.key) || (k.alt && /^Alt/.test(e.code)) || (k.ctrl && /^Control/.test(e.code)) || (k.meta && /^(Meta|OS)/.test(e.code)) || (k.shift && /^Shift/.test(e.code)))
+export const isKeyUp = (e, k) => (k?.lone ? !!LONE[k.key].dom && e.code === LONE[k.key].dom : !!k && (e.code === domCode(k.key) || (k.alt && /^Alt/.test(e.code)) || (k.ctrl && /^Control/.test(e.code)) || (k.meta && /^(Meta|OS)/.test(e.code)) || (k.shift && /^Shift/.test(e.code))))
 // The key someone pressed to pick a new one (Settings): an accelerator, or null while it's only
 // modifiers, or for a key that can't be one.
 export function keyFromEvent(e, platform) {
@@ -96,6 +109,7 @@ const MOD_OF_HOOK = Object.fromEntries(Object.entries(HOOK_MODS).flatMap(([m, co
 export const hookMod = (code) => MOD_OF_HOOK[code] || null
 export function hookKey(accel, platform) {
   const k = parseKey(accel, platform)
+  if (k?.lone) return LONE[k.key].hook ? { key: LONE[k.key].hook, mods: [], lone: true } : null
   if (!k || HOOK_CODE[k.key] == null) return null
   return { key: HOOK_CODE[k.key], mods: ['ctrl', 'alt', 'shift', 'meta'].filter((m) => k[m]).flatMap((m) => HOOK_MODS[m]) }
 }
