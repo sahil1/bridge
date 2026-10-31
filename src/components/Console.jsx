@@ -501,7 +501,7 @@ export function MateEmpty({ onLaunch, launching, error, code }) {
       <div className="hero-mark"><Icon name="helm" size={30} /></div>
       <h3>{t('No chief of staff running')}</h3>
       <p>{t('Your chief of staff is the one agent you talk to. It sends each request to the agent already working on that topic, starts a new one in the right space when nothing fits, and reports back when the work is done.')}</p>
-      <button className="btn primary" data-tour="chief" onClick={onLaunch} disabled={launching}><Icon name="helm" /> {launching ? t('Launching…') : t('Chief of Staff')}</button>
+      <button className="btn primary" onClick={onLaunch} disabled={launching}><Icon name="helm" /> {launching ? t('Launching…') : t('Start Chief of Staff')}</button>
       {error && <p className={missing ? 'muted' : 'error-text'}>{error}</p>}
       {missing && <InstallAgentButton kind={missing} label={t('Install it')} onCheck={onLaunch} />}
     </div>
@@ -744,7 +744,7 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
   )
 
   return (
-    <section className={`pane console v-${variant} ${minimized ? 'is-min' : ''}`} aria-label={t('{name} console', { name: title })} data-tour={agent.chief ? 'chief' : undefined}>
+    <section className={`pane console v-${variant} ${minimized ? 'is-min' : ''}`} aria-label={t('{name} console', { name: title })}>
       <PaneHeader icon={agent.chief ? 'helm' : 'bot'} title={title} subtitle={subtitle} {...controls}
         leading={onBack && <button className="win-btn back" onClick={onBack} aria-label={t('Back')}><Icon name="chevron" size={16} className="flip" /></button>}>
         <span className={`state-tag st-${agent.status}`}><StatusDot status={agent.status} size={7} />{{ blocked: t('Needs you'), done: t('Done'), working: t('Working'), idle: t('Idle') }[agent.status] || t('Unknown')}</span>

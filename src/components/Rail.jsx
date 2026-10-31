@@ -165,10 +165,20 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
     if (groups.every((g) => g.id in pos)) groups = [...groups].sort((a, b) => pos[a.id] - pos[b.id]).map((g, i) => ({ ...g, number: i + 1 }))
   }
   useEffect(() => { setPending(null) }, [fleet])
-  const hasMate = fleet?.agents?.some((a) => a.chief)
-  // The chief of staff, a click away at the top like New and Meetings (its Main thread, or starts one).
+  // The chief of staff has one place: its row at the top, like New and Meetings, which opens its Main
+  // thread or starts it (and ⌘K). Its other threads are listed under that row, so its own space
+  // isn't listed again with the others (unless something else is in it). The row says what it does
+  // until you've opened it from there once.
   const chief = fleet?.agents?.find((a) => a.chief && a.thread?.main) || fleet?.agents?.find((a) => a.chief)
-  const chiefOn = !!selected && !!fleet?.agents?.some((a) => a.chief && a.paneId === selected)
+  const chiefOn = !!chief && selected === chief.paneId
+  const threads = (fleet?.agents || []).filter((a) => a.chief && a !== chief)
+    .sort((x, y) => (Number(String(x.thread?.id || '').replace(/^t/, '')) || 1e9) - (Number(String(y.thread?.id || '').replace(/^t/, '')) || 1e9))
+  const [chiefKnown, setChiefKnown] = usePersisted('cc-chief-known', false)
+  const chiefWhat = t('Tell it what you need. It sends the work to the right agent, starts new ones when nothing fits, and tells you when they finish.')
+  const isChiefRow = (r) => r.kind === 'agent' && !!r.agent.chief
+  // A space's rows, less the chief's; a space that held only the chief's isn't listed.
+  const rowsOf = (g) => g.rows.filter((r) => !isChiefRow(r))
+  const listed = (g) => !g.rows.length || g.rows.some((r) => !isChiefRow(r))
   const places = usePoll('/places', 15000)
   const previews = usePoll('/previews', 10000, { enabled: collapsed })
   const git = (cwd) => places.data?.[cwd] || null
@@ -182,7 +192,8 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
     setError(null)
     try { onOpen((await api('/chief/launch', { method: 'POST' })).paneId) } catch (e) { setError(e.message) } finally { setLaunching(false) }
   }
-  const goChief = () => (chief ? onOpen(chief.paneId) : launch())
+  const goChief = () => { setChiefKnown(true); if (chief) onOpen(chief.paneId); else launch() }
+  const chiefTab = chief && (fleet?.tabs || []).find((x) => x.tabId === chief.tabId)
   const allClosed = groups.length > 0 && groups.every((g) => closedWs[g.id])
   const setAll = (closed) => setClosedWs(closed ? Object.fromEntries(groups.map((g) => [g.id, true])) : {})
   const toggleWs = (id) => setClosedWs((c) => { const n = { ...c }; if (n[id]) delete n[id]; else n[id] = true; return n })
@@ -266,14 +277,14 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
     return (
       <nav className="rail collapsed" aria-label={t('Workspaces')} data-tour="agents" onMouseLeave={() => setHover(null)}>
         <button className={`mini-nav ${selected === 'view:new' ? 'on' : ''}`} data-tour="new-agent" onClick={() => onNewAgent?.()} aria-label={t('New')} title={t('New')}><Icon name="edit" size={15} /></button>
-        {!fleet?.down && <button className={`mini-nav ${chiefOn ? 'on' : ''}`} onClick={goChief} disabled={launching} aria-label={t('Chief of Staff')} title={t('Chief of Staff')}><Icon name="helm" size={15} />{chief?.status === 'blocked' && <span className="mini-needs" />}</button>}
+        {!fleet?.down && <button className={`mini-nav ${chiefOn ? 'on' : ''}`} data-tour="chief" onClick={goChief} disabled={launching} aria-label={t('Chief of Staff')} title={`${t('Chief of Staff')}\n${chiefWhat}`}><Icon name="helm" size={15} />{(chief?.status === 'blocked' || threads.some((a) => a.status === 'blocked')) && <span className="mini-needs" />}</button>}
         <button className={`mini-nav ${String(selected || '').startsWith('view:meeting') ? 'on' : ''}`} onClick={() => onMeetings?.()} aria-label={recording ? t('Meetings (recording)') : t('Meetings')} title={t('Meetings')}><Icon name="mic" size={15} />{recording && <span className="rec-dot mini-rec" />}</button>
         <div className="rail-mini">
-          {groups.filter((g) => g.rows.length).map((g) => (
+          {groups.filter((g) => rowsOf(g).length).map((g) => (
             <div key={g.id} className="mini-ws">
               <span className="mini-num" title={g.label}>{g.number}</span>
-              {g.rows.map((r) => (
-                <button key={r.id} className={`mini-agent ${selected === r.id ? 'on' : ''}`} data-tour={r.agent?.chief ? 'chief' : undefined} onClick={() => onOpen(r.id)} aria-label={rowName(r)}
+              {rowsOf(g).map((r) => (
+                <button key={r.id} className={`mini-agent ${selected === r.id ? 'on' : ''}`} onClick={() => onOpen(r.id)} aria-label={rowName(r)}
                   onMouseEnter={(e) => setHover({ row: r, rect: e.currentTarget.getBoundingClientRect() })} onFocus={(e) => setHover({ row: r, rect: e.currentTarget.getBoundingClientRect() })} onBlur={() => setHover(null)}>
                   {r.kind === 'agent' ? <StatusDot status={r.agent.status} size={9} /> : <Icon name="terminal" size={11} />}
                 </button>
@@ -292,9 +303,37 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
       <div className="rail-nav">
         <button className={`rail-nav-btn ${selected === 'view:new' ? 'on' : ''}`} data-tour="new-agent" onClick={() => onNewAgent?.()}><Icon name="edit" size={14} /> {t('New')}</button>
         {!fleet?.down && (
-          <button className={`rail-nav-btn ${chiefOn ? 'on' : ''}`} onClick={goChief} disabled={launching}>
-            <Icon name="helm" size={14} /> {launching ? t('Starting…') : t('Chief of Staff')}{chief?.status === 'blocked' && <span className="rm-badge" title={t('Needs you')}>!</span>}
-          </button>
+          <div className="rail-nav-row rail-chief-row">
+            <button className={`rail-nav-btn rail-chief ${chiefOn ? 'on' : ''}${chiefKnown ? '' : ' fresh'}`} data-tour="chief" onClick={goChief} disabled={launching} title={chiefWhat}>
+              <Icon name="helm" size={14} />
+              <span className="rail-chief-text">
+                <span>{launching ? t('Starting…') : t('Chief of Staff')}</span>
+                {!chiefKnown && <small>{t('Hands work to the right agent')}</small>}
+              </span>
+              {chief?.status === 'blocked' && <span className="rm-badge" title={t('Needs you')}>!</span>}
+            </button>
+            {chief && <button className="rail-nav-fold" onClick={() => setMenu(menu === 'chief' ? null : 'chief')} aria-label={t('{name} actions', { name: t('Chief of Staff') })} title={t('More')}><Icon name="more" size={13} /></button>}
+            {menu === 'chief' && chief && (
+              <Menu onClose={() => setMenu(null)} items={[
+                { icon: 'folder', label: t('Browse folder'), run: () => onOpenFiles?.(chief.paneId) },
+                onOpenInHerdr && { icon: 'external', label: t('Open in Herdr view'), run: () => onOpenInHerdr(chief.paneId) },
+                { icon: chief.muted ? 'bell' : 'bell-off', label: chief.muted ? t('Unmute notifications') : t('Mute notifications'),
+                  run: () => act(() => api(`/agents/${encodeURIComponent(chief.paneId)}/mute`, { method: 'POST', body: { muted: !chief.muted } }), chief.muted ? t('Notifications back on') : t('Muted until you unmute it')) },
+                chiefTab && '-',
+                chiefTab && { icon: 'x', label: t('Close tab…'), danger: true, run: () => closeTab(chiefTab) },
+              ]} />
+            )}
+          </div>
+        )}
+        {error && <p className="error-text small rail-rec-err" role="alert">{error}</p>}
+        {threads.length > 0 && (
+          <div className="rail-threads" aria-label={t('Threads')}>
+            {threads.map((a) => (
+              <button key={a.paneId} type="button" className={`rm-row${selected === a.paneId ? ' on' : ''}`} onClick={() => onOpen(a.paneId)} title={a.title}>
+                <StatusDot status={a.status} size={7} /><span className="rm-title">{a.title}</span>
+              </button>
+            ))}
+          </div>
         )}
         <div className="rail-nav-row">
           <button className={`rail-nav-btn ${String(selected || '').startsWith('view:meeting') ? 'on' : ''}`} onClick={() => { setMeetingsOpen(true); onMeetings?.() }}><Icon name="mic" size={14} /> {t('Meetings')}{recording && <span className="rec-dot" aria-label={t('recording')} />}</button>
@@ -339,9 +378,10 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
             <InlineRename value="" onDone={createSpace} />
           </div>
         )}
-        {groups.map((g) => {
+        {groups.filter(listed).map((g) => {
           const closed = !!closedWs[g.id]
-          const needs = g.agents.filter((a) => a.status === 'blocked').length
+          const rows = rowsOf(g)
+          const needs = g.agents.filter((a) => a.status === 'blocked' && !a.chief).length
           return (
             <section key={g.id} className={`ws ${closed ? 'is-closed' : ''} ${drag?.kind === 'tab' && over?.id === `into:${g.id}` && drag.ws !== g.id ? 'drop-into' : ''} ${drag?.kind === 'ws' && drag.id === g.id ? 'dragging' : ''} ${drag?.kind === 'ws' && over?.id === g.id ? (over.after ? 'drop-after' : 'drop-before') : ''}`}
               onDragOver={(e) => {
@@ -363,7 +403,7 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
                 if (drag?.kind !== 'ws') return
                 e.preventDefault(); const idx = groups.findIndex((x) => x.id === g.id); moveWs(drag.id, idx + (over?.after ? 1 : 0)); endDrag()
               }}>
-              <div className={`ws-row ${g.rows.length ? '' : 'empty'} ${g.cloud ? 'ws-cloud' : ''}`} draggable={!renaming && !g.cloud}
+              <div className={`ws-row ${rows.length ? '' : 'empty'} ${g.cloud ? 'ws-cloud' : ''}`} draggable={!renaming && !g.cloud}
                 onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', g.label); setDrag({ kind: 'ws', id: g.id }) }} onDragEnd={endDrag}
                 title={t('Drag to reorder')}>
                 <button className="ws-fold" onClick={() => toggleWs(g.id)} aria-expanded={!closed} aria-label={closed ? t('Expand {name}', { name: g.label }) : t('Collapse {name}', { name: g.label })} title={closed ? t('Expand') : t('Collapse')}>
@@ -375,7 +415,7 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
                   ? <InlineRename value={g.label} onDone={rename} />
                   : <span className="ws-label" onDoubleClick={() => !g.cloud && setRenaming({ kind: 'ws', id: g.id })} title={g.cloud ? t("Agents running in a provider's cloud") : g.label}>{g.cloud && <Icon name="cloud" size={12} />}{g.label}</span>}
                 {g.crew && <span className="crew-tag">{t('crew')}</span>}
-                {closed && <span className="ws-count" title={`${g.rows.length === 1 ? t('{n} tab', { n: g.rows.length }) : t('{n} tabs', { n: g.rows.length })}${needs ? `, ${needs === 1 ? t('{n} needs you', { n: needs }) : t('{n} need you', { n: needs })}` : ''}`}>{needs ? <b className="needs">{needs}</b> : g.rows.length}</span>}
+                {closed && <span className="ws-count" title={`${rows.length === 1 ? t('{n} tab', { n: rows.length }) : t('{n} tabs', { n: rows.length })}${needs ? `, ${needs === 1 ? t('{n} needs you', { n: needs }) : t('{n} need you', { n: needs })}` : ''}`}>{needs ? <b className="needs">{needs}</b> : rows.length}</span>}
                 <span className="ws-acts">
                   <button className="tab-act" onClick={() => onNewAgent?.(g.cloud ? { mode: 'cloud' } : { workspaceId: g.id, cwd: rowCwd(g.rows[0] || {}) })} aria-label={g.cloud ? t('New cloud agent') : t('New agent in {name}', { name: g.label })} title={g.cloud ? t('New cloud agent') : t('New agent here')}><Icon name="plus" size={12} /></button>
                   <button className="tab-act" onClick={() => setMenu(menu === `ws:${g.id}` ? null : `ws:${g.id}`)} aria-label={t('{name} actions', { name: g.label })} title={t('More')}><Icon name="more" size={13} /></button>
@@ -393,13 +433,13 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
                   ]} />
                 )}
               </div>
-              {!closed && g.rows.map((r) => {
+              {!closed && rows.map((r) => {
                 const cwd = rowCwd(r)
                 const tab = r.tab
                 const isRen = renaming?.kind === 'tab' && tab && renaming.id === tab.tabId
                 return (
                   <div key={r.id} className={`tab-row ${r.kind === 'shell' ? 'shell' : ''} ${selected === r.id ? 'on' : ''} ${drag?.kind === 'tab' && tab && drag.id === tab.tabId ? 'dragging' : ''} ${drag?.kind === 'tab' && over?.id === r.id ? (over.after ? 'drop-after' : 'drop-before') : ''}`}
-                    draggable={!!tab && !isRen} data-tour={r.agent?.chief ? 'chief' : undefined}
+                    draggable={!!tab && !isRen}
                     onDragStart={(e) => { if (!tab) return; e.stopPropagation(); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', rowName(r)); setDrag({ kind: 'tab', id: tab.tabId, ws: g.id, name: rowName(r), rowId: r.id }) }}
                     onDragEnd={endDrag}
                     onDragOver={(e) => { if (drag?.kind !== 'tab' || !tab) return; e.preventDefault(); e.stopPropagation(); setOver(dropOn(e, r.id)) }}
@@ -471,14 +511,6 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
         )}
       </div>
       {flash && <div className="rail-flash" role="status">{flash}</div>}
-      {fleet && !hasMate && !fleet.down && (
-        <div className="rail-foot">
-          <button className="btn primary block" data-tour="chief" onClick={launch} disabled={launching}>
-            <Icon name="helm" /> {launching ? t('Launching…') : t('Chief of Staff')}
-          </button>
-          {error && <p className="error-text">{error}</p>}
-        </div>
-      )}
     </nav>
   )
 }

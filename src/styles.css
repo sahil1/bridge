@@ -2929,3 +2929,67 @@ table.sheet tbody tr:hover td { background: var(--pane-2); }
 @container (max-width: 560px) { .comp-wide { display: none; } .comp-narrow { display: inline-flex; } }
 .menu.left { left: 0; right: auto; }
 .menu.up { top: auto; bottom: calc(100% + 6px); }
+
+/* ---------- The phone's top bar (App.jsx) and the line under it (TopNotes.jsx) ----------
+   What needs you now (a recording, an agent waiting), then search and Settings at the right edge:
+   each a 40px target, nothing clipped. .top-right's children join the bar's own row, so their order
+   is set here; the devices menu gives way first (its name, then the mark, on the smallest phones). */
+.app.narrow .topbar { height: calc(52px + var(--safe-top)); gap: 4px; padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(6px, env(safe-area-inset-right)); }
+.app.narrow .top-left { flex: 0 1 auto; min-width: 0; gap: 6px; margin-right: auto; }
+.app.narrow .top-right { display: contents; overflow: visible; }
+.app.narrow .topbar > .search-btn { order: 1; margin-left: 0; }
+.app.narrow .top-right > .win-btn { order: 2; }
+.app.narrow .topbar :is(.search-btn, .win-btn) { flex: none; width: 40px; height: 40px; padding: 0; border: 0; border-radius: 10px; background: none; box-shadow: none; color: var(--ink-2); }
+.app.narrow .topbar :is(.search-btn, .win-btn):active { background: var(--pane-3); }
+.app.narrow .needs-chip { flex: none; height: 40px; min-width: 44px; justify-content: center; padding: 0 13px; }
+.app.narrow .topbar .rec-wrap { flex: none; }
+.app.narrow .topbar .rec-pill { height: 40px; padding: 0 12px; border-radius: 12px; box-shadow: none; }
+.app.narrow .mc-wrap { display: flex; min-width: 40px; }
+.app.narrow .mc-chip { height: 40px; min-width: 40px; max-width: 100%; padding: 0 10px; border-radius: 10px; justify-content: center; }
+.app.narrow .mc-chip > .icon:last-child { display: none; } /* its caret */
+.app.narrow .mc-name { max-width: 30vw; }
+@media (max-width: 359px) { .app.narrow .mc-name, .app.narrow .topbar .mark { display: none; } }
+.settings-btn { position: relative; }
+.top-dot { position: absolute; top: 9px; right: 9px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--pane); }
+/* One line at a time, the first there is: setup, a restart to apply, then an update. */
+.top-notes { display: none; }
+.app.narrow .top-notes { display: block; position: relative; flex: none; border-bottom: 1px solid var(--line); background: var(--pane); }
+.app.narrow .top-notes:empty { display: none; }
+.app.narrow .top-notes > * ~ * { display: none; }
+.top-note { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 40px; padding: 0 max(12px, env(safe-area-inset-right)) 0 max(14px, env(safe-area-inset-left)); color: var(--ink); font: 500 13px var(--font); text-align: left; }
+.top-note:active { background: var(--pane-2); }
+.top-note > .icon:first-child { flex: none; color: var(--accent); }
+.top-note-text, .app.narrow .top-note .setup-chip-word { flex: 1; min-width: 0; max-width: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.top-note-go { flex: none; color: var(--ink-3); }
+.top-note-row { display: flex; align-items: center; }
+.top-note-row .top-note { flex: 1; min-width: 0; padding-right: 4px; }
+.top-note-x { flex: none; width: 40px; height: 40px; margin-right: max(6px, env(safe-area-inset-right)); }
+.top-notes .update-wrap { position: static; }
+.app.narrow .top-notes .update-pop { position: absolute; top: calc(100% + 6px); left: max(12px, env(safe-area-inset-left)); right: max(12px, env(safe-area-inset-right)); width: auto; }
+.app.narrow .update-pop, .app.narrow .acct-pop.top { top: calc(52px + var(--safe-top) + 6px); }
+
+/* The sidebar's meetings as they pile up (RailMeetings.jsx): each day of the last week folds, and
+   older ones are under Earlier, by week and by month, each folding too. */
+.rm-fold { display: flex; align-items: center; gap: 5px; min-width: 0; height: 24px; padding: 0 8px 0 4px; border-radius: 7px; text-align: left; color: var(--ink-3); }
+.rm-fold:hover { background: var(--pane); color: var(--ink); }
+.rm-fold .caret { flex: none; }
+.rm-fold .rm-time { font: 500 11px var(--font); letter-spacing: 0; text-transform: none; }
+.rm-day-head { margin: 5px 0 1px 8px; font: 600 10.5px var(--font); letter-spacing: .05em; text-transform: uppercase; }
+.rm-span-head { margin: 1px 0 1px 18px; font: 500 12px var(--font); color: var(--ink-2); }
+.rm-span .rm-row { margin-left: 26px; }
+
+/* The chief of staff's row at the top of the sidebar (Rail.jsx): what it does under its name until
+   you've opened it from there once, its ⋯ menu, and its other threads under it. */
+.rail-chief-row { position: relative; }
+.rail-chief-text { display: grid; flex: 1; min-width: 0; line-height: 1.25; }
+.rail-chief-text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font: 400 11px var(--font); }
+.rail-nav-btn.rail-chief.fresh { height: auto; min-height: 30px; padding-top: 5px; padding-bottom: 5px; }
+.rail-chief-row .rail-nav-fold { opacity: 0; }
+.rail-chief-row:hover .rail-nav-fold, .rail-chief-row .rail-nav-fold:focus-visible { opacity: 1; }
+.rail-threads { display: grid; }
+
+/* The phone's devices menu (Machines.jsx): under the bar, the screen's width, rows big enough to tap;
+   your devices, then what's on the phone itself. */
+.app.narrow .mc-menu.phone { position: fixed; top: calc(52px + var(--safe-top) + 6px); left: max(12px, env(safe-area-inset-left)); right: max(12px, env(safe-area-inset-right)); width: auto; max-width: none; max-height: calc(100dvh - 52px - var(--safe-top) - 90px); overflow-y: auto; }
+.mc-menu.phone .mc-item, .mc-menu.phone .menu-item { min-height: 44px; }
+.mc-dot.unknown { background: transparent; box-shadow: inset 0 0 0 1.5px var(--line-2); }

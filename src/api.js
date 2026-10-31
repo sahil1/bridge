@@ -9,6 +9,23 @@ export const viaRelay = !!relayPage
 export const embedded = (() => { try { return window.self !== window.top && !relayPage } catch { return true } })()
 // In the iPhone or Android app: the computers it's paired with ({ list, open, add, forget }).
 export const relayComputers = relayPage?.computers || null
+// ...and the app's own screens, from inside a computer's page: its start screen (pair or open a
+// computer) and its Cloud agents. The relay page offers them when it can (bridgeRelay.start and
+// .openCloud); until then, the same as its own screens do: the pairing screen's list of computers
+// (computers.add), and asking the app for Cloud agents (the iPhone app hears the relay page, the
+// frame above this one; Android's bridge is in every frame), when the app has them. null in a
+// browser, which has neither.
+export const phoneApp = (() => {
+  if (!relayComputers) return null
+  let native = null
+  try { native = window.parent.bridgeNative?.post ? window.parent.bridgeNative : null } catch { /* not ours */ }
+  const android = typeof window.bridgeAndroid?.openBundled === 'function' ? window.bridgeAndroid : null
+  let bundled = []
+  try { bundled = native?.bundled || JSON.parse(android?.bundled?.() || '[]') } catch { /* none */ }
+  const cloud = typeof relayPage.openCloud === 'function' ? () => relayPage.openCloud()
+    : !bundled.includes('cloud') ? null : native ? () => native.post({ type: 'open', name: 'cloud' }) : android ? () => android.openBundled('cloud') : null
+  return { start: typeof relayPage.start === 'function' ? () => relayPage.start() : () => relayComputers.add(), cloud }
+})()
 // ...which shows the agents at work on the phone's lock screen (older relay pages can't).
 export const relayActivity = relayPage?.activity || null
 // What the phone sent while your computer was offline, and how each is doing ({ list, subscribe, dismiss }).

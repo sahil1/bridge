@@ -17,7 +17,9 @@ const legend = (
   </span>
 )
 
-const CHIEF = { at: 'chief', title: 'Your chief of staff', body: 'Tell it what you need in plain words. It hands the work to the right agent, starts a new one when nothing fits, and tells you when it\'s done.' }
+// The chief of staff's one place: its row at the top of the sidebar (and ⌘K), or the phone's Chief tab.
+const CHIEF = { at: 'chief', title: 'Your Chief of Staff', body: 'Always here, at the top of the sidebar, and in ⌘K. Tell it what you need in plain words: it hands the work to the right agent, starts a new one when nothing fits, and tells you when it\'s done.' }
+const CHIEF_PHONE = { ...CHIEF, body: 'Its own tab. Tell it what you need in plain words: it hands the work to the right agent, starts a new one when nothing fits, and tells you when it\'s done.' }
 
 // at: the data-tour name to point at. last: always shown (mid-screen if its element isn't there),
 // with the first-action button. link: a second button that ends the tour and opens that part of
@@ -42,7 +44,7 @@ const STEPS = {
   ],
   phone: [
     { at: 'agents', title: 'Your agents', body: <>Every agent you run and what it's doing: {legend} The badge counts the ones waiting on you.</> },
-    CHIEF,
+    CHIEF_PHONE,
     { at: 'views', title: 'Chat or terminal', body: 'Switch between the conversation, the agent\'s live terminal, its files and its changes.' },
     { at: 'settings', title: 'Get notified', body: 'In Settings › Devices, turn on notifications to hear when an agent needs you or finishes.' },
     { at: 'search', title: 'Your turn', body: 'Search finds any agent, file or command. It\'s also where you start a new agent.', last: true },

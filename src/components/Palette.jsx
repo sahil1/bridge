@@ -56,7 +56,10 @@ export default function Palette({ fleet, activeId, onClose, onOpen, onOpenFile, 
   const items = useMemo(() => {
     const ql = q.trim().toLowerCase()
     const out = []
+    // The chief of staff's Main thread is the Chief of Staff action; its other threads are agents here.
+    const main = (fleet?.agents || []).find((a) => a.chief && a.thread?.main)
     for (const a of fleet?.agents || []) {
+      if (a === main && actions.some((x) => x.id === 'a:mate')) continue
       const label = a.chief ? chiefName(a) : a.title || a.tab
       out.push({ id: a.paneId, group: t('Agents'), label, sub: `${a.workspace} › ${a.tab} · ${tildePath(a.cwd)}`, status: a.status, text: `${label} ${a.workspace} ${a.tab} ${a.cwd}`, run: () => onOpen(a.paneId) })
     }
