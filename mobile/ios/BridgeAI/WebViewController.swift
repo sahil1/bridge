@@ -128,10 +128,10 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKUIDel
         guard let m = message.body as? [String: Any], let type = m["type"] as? String, message.webView === web else { return }
         // Only the app's own page, not a frame in it (an HTML file shown in Files, say): a frame could
         // otherwise forget the pairing, move the app to another relay or answer the app's requests.
-        // Bridge AI's frame can only say a meeting is recording.
+        // Bridge AI's frame can only say a meeting is recording, and save one of the computer's files.
         let origin = message.frameInfo.securityOrigin
         let page = message.frameInfo.isMainFrame && [Self.scheme, BundledUI.scheme].contains(origin.protocol)
-        guard type == "log" || page || (type == "recording" && origin.protocol == Self.scheme) else { return }
+        guard type == "log" || page || ((type == "recording" || type == "save") && origin.protocol == Self.scheme) else { return }
         // A bundled UI can only go back to the start.
         if showingBundled && type != "home" && type != "log" { return }
         switch type {
@@ -147,11 +147,54 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKUIDel
         case "activity": if let state = m["state"] as? [String: Any] { LiveCard.show(state) }
         // A meeting recording: the screen stays on, since a locked iPhone stops the page's microphone.
         case "recording": UIApplication.shared.isIdleTimerDisabled = (m["on"] as? Bool) ?? false
+        case "save": save(m, from: message.frameInfo)
         #if DEBUG
         case "log": NSLog("[page] %@", m["text"] as? String ?? "")
         #endif
         default: break
         }
+    }
+
+    // Save to Files…: one of your computer's files (only Bridge AI's own: /api/... there, or on
+    // another of your devices through it), saved on the iPhone through the link, then the share
+    // sheet: Save to Files, AirDrop, another app. How far it's got goes back to the page that asked.
+    private var saves: [String: Int] = [:] // the page's id -> the tunnel's
+    private func save(_ m: [String: Any], from frame: WKFrameInfo) {
+        if let stop = m["cancel"] as? String {
+            if let t = saves.removeValue(forKey: stop) { tunnel.cancelSave(t) }
+            return
+        }
+        guard let id = m["id"] as? String, saves[id] == nil, let s = m["url"] as? String, let url = URL(string: s), FileViewer.shows(url) else { return }
+        let name = (m["name"] as? String).map { String($0.prefix(200)) } ?? url.lastPathComponent
+        let tell: ([String: Any]) -> Void = { [weak self] detail in
+            var d = detail
+            d["id"] = id
+            guard let json = try? JSONSerialization.data(withJSONObject: d), let arg = String(data: json, encoding: .utf8) else { return }
+            self?.web.evaluateJavaScript("window.dispatchEvent(new CustomEvent('bridge-save', { detail: \(arg) }))", in: frame, in: .page)
+        }
+        saves[id] = tunnel.save(url, name: name, progress: { got, total in tell(["got": got, "total": total]) }) { [weak self] result in
+            self?.saves[id] = nil
+            switch result {
+            case .success(let file):
+                tell(["done": true])
+                self?.share(file)
+            case .failure(let error):
+                tell(["error": error.localizedDescription])
+            }
+        }
+    }
+
+    private func share(_ file: URL) {
+        let sheet = UIActivityViewController(activityItems: [file], applicationActivities: nil)
+        // Saving to Photos would ask for access to them; Save to Files and the rest ask for nothing.
+        sheet.excludedActivityTypes = [.saveToCameraRoll]
+        sheet.completionWithItemsHandler = { _, _, _, _ in try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+        if let pop = sheet.popoverPresentationController {
+            pop.sourceView = view
+            pop.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 0, height: 0)
+            pop.permittedArrowDirections = []
+        }
+        top.present(sheet, animated: true)
     }
 
     // Cloud agents, from the Home Screen quick action.
