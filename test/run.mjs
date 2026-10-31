@@ -32,6 +32,7 @@ const SUITES = [
   { name: 'accounts-ui', build: 'dist', browser: true, covers: [/^src\/components\/(AccountMenu|Usage|UsageStats|Trackers|Dock|ModelChip|AddAccount)\.jsx$/, /^src\/components\/settings\/(Providers\.jsx|providers\.css)$/, /^src\/App\.jsx$/, /^src\/styles\.css$/, /^server\/(accounts|feeds)\.js$/] },
   { name: 'i18n-ui', build: 'dist', browser: true, covers: [/^src\//, /^scripts\/i18n\.js$/] },
   { name: 'needs-you', build: 'dist', browser: true, covers: [/^server\/(needsyou|notify|machines|index)\.js$/, /^src\/components\/(NeedsYou|Question|Machines)\.jsx$/, /^src\/components\/(needsyou\.css|questionParse\.js)$/, /^src\/(App\.jsx|pwa\.js)$/, /^test\/stand-ins\/claude\.cjs$/] },
+  { name: 'agent-map', build: 'dist', browser: true, covers: [/^server\/(agentmap|machines|needsyou|subagents|index)\.js$/, /^shared\/cloud\/follow\.js$/, /^src\/components\/(AgentMap|Machines|Board)\.jsx$/, /^src\/components\/agentmap\.css$/, /^src\/App\.jsx$/, /^test\/stand-ins\/claude\.cjs$/] },
   { name: 'devices-ui', build: 'dist', browser: true, covers: [/^src\/components\/(Machines|OnboardingPhone)\.jsx$/, /^src\/components\/settings\/(Relay|Phone)\.jsx$/, /^server\/(machines|relay)\.js$/, /^test\/stand-ins\/relay\.mjs$/] },
   { name: 'phone-link', build: 'dist', browser: true, covers: [/^relay\//, /^server\/relay\.js$/, /^test\/stand-ins\/relay\.mjs$/] },
   { name: 'mail', build: null, covers: [/^server\/(mail|mailparse)\.js$/] },

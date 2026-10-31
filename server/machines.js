@@ -22,7 +22,7 @@ import path from 'node:path'
 import os from 'node:os'
 import { createHash, randomBytes, webcrypto } from 'node:crypto'
 import WebSocket, { WebSocketServer } from 'ws'
-import { dataFile, ensureDir, ROOT, writeFileAtomic } from './paths.js'
+import { cacheFile, dataFile, ensureDir, ROOT, writeFileAtomic } from './paths.js'
 import * as relay from './relay.js'
 import { phoneHello, phoneFinish, splitCode, normCode, plainFrame, readPlain, b64u, K, pack, unpack, json, utf8, CHUNK, WINDOW, more, granter } from '../relay/web/link.js'
 
@@ -354,7 +354,20 @@ const linkOf = (m) => {
 }
 
 // ---------- the list ----------
+// What each device last said (its agents, what waits on you there), kept in the cache folder too,
+// so one that's offline still shows it after this one restarts, with when it said it.
+const SEEN = cacheFile('machines-seen.json')
 const kept = new Map() // machine id -> its last summary
+try { for (const [id, s] of Object.entries(JSON.parse(fs.readFileSync(SEEN, 'utf8')))) if (s && typeof s === 'object') kept.set(id, s) } catch { /* none yet */ }
+let seenTimer = null
+const keep = (id, s) => {
+  kept.set(id, s)
+  clearTimeout(seenTimer)
+  seenTimer = setTimeout(() => {
+    try { ensureDir(path.dirname(SEEN)); writeFileAtomic(SEEN, JSON.stringify(Object.fromEntries([...kept].filter(([k]) => byId(k))))) } catch { /* next time */ }
+  }, 2000)
+  seenTimer.unref?.()
+}
 export function list() {
   return conf.machines.map((m) => {
     const l = links.get(m.id)
@@ -611,7 +624,7 @@ async function refreshNow(m) {
   const l = links.get(m.id)
   if (!l?.session) return
   const s = await l.call('GET', '/api/machines/summary', undefined, 12000)
-  kept.set(m.id, { name: s.name, os: s.os, version: s.version, counts: s.counts || {}, agents: (s.agents || []).slice(0, 40), needs: Array.isArray(s.needs) ? s.needs.slice(0, 60) : null, about: s.about || null, systemName: s.systemName || null, at: Date.now() })
+  keep(m.id, { name: s.name, os: s.os, version: s.version, counts: s.counts || {}, agents: Array.isArray(s.agents) ? s.agents.slice(0, 40) : [], needs: Array.isArray(s.needs) ? s.needs.slice(0, 60) : null, about: s.about || null, systemName: s.systemName || null, at: Date.now() })
   if (s.name && s.name !== m.name) { m.name = String(s.name).slice(0, 60); save() }
   if (s.os !== m.os || s.version !== m.version) { m.os = s.os; m.version = s.version; save() }
 }

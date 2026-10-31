@@ -1,0 +1,58 @@
+/* The agent map (AgentMap.jsx): a lane per computer, and one for the cloud. */
+.am { height: 100%; min-height: 0; overflow-y: auto; padding: 18px 20px 28px; background: var(--pane); color: var(--ink); overscroll-behavior: contain; }
+.am.phone { padding: 12px 12px 24px; }
+.am-head { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 14px; margin-bottom: 14px; }
+.am-title { flex: 1 1 260px; min-width: 0; }
+.am-title h2 { margin: 0; display: flex; align-items: center; gap: 8px; font-size: 17px; font-weight: 650; }
+.am-title p { margin: 2px 0 0; font-size: 12.5px; }
+.am-search { flex: 0 1 260px; min-width: 0; height: 30px; }
+.am.phone .am-search { flex: 1 1 100%; }
+.am-filters { flex: 1 1 100%; }
+.am-err { margin: 8px 0; }
+.am-lanes { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; align-items: start; }
+.am.phone .am-lanes { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.am-lane { min-width: 0; border-radius: 13px; border: 1px solid var(--line); background: var(--pane-2); padding: 10px 10px 8px; }
+.am-lane.off { background: color-mix(in srgb, var(--pane-2) 60%, var(--pane)); border-style: dashed; }
+.am-lane.cloud { background: color-mix(in srgb, var(--accent) 4%, var(--pane-2)); }
+.am-lane-head { display: flex; align-items: center; gap: 8px; padding: 2px 2px 6px; }
+.am-lane-name { flex: 1; min-width: 0; display: grid; }
+.am-lane-name b { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.am-lane-name small { font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.am-lane-count { min-width: 22px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--pane-3); color: var(--ink-2); font-size: 11.5px; font-weight: 650; display: inline-grid; place-items: center; }
+.am-said { margin: 0 2px 6px; font-size: 11.5px; color: var(--ink-3); }
+.am-none { margin: 8px 4px 6px; font-size: 12.5px; }
+.am-group { margin-top: 6px; }
+.am-group h4 { display: flex; align-items: center; gap: 5px; margin: 8px 4px 4px; font-size: 11px; font-weight: 650; letter-spacing: .03em; text-transform: uppercase; color: var(--ink-3); min-width: 0; }
+.am-group h4 span:first-of-type { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.am-row { border-radius: 9px; background: var(--pane); border: 1px solid var(--line); margin-bottom: 5px; min-width: 0; transition: box-shadow .2s; }
+.am-row.s-blocked { border-color: color-mix(in srgb, var(--needs) 45%, transparent); }
+.am-row.hl { box-shadow: 0 0 0 2px var(--accent); }
+.am-main { display: grid; gap: 2px; width: 100%; padding: 7px 9px; text-align: left; border-radius: 9px; min-width: 0; color: inherit; }
+.am-main:hover:not(:disabled) { background: var(--pane-3); }
+.am-main:disabled { cursor: default; opacity: .7; }
+.am-l1 { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.am-name { flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.am-run { flex: none; display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.am-doing { display: flex; align-items: center; gap: 5px; min-width: 0; font-size: 12px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.am-doing.tool { font-family: var(--font-mono); font-size: 11.5px; color: var(--working); }
+.am-doing svg { flex: none; }
+.am-cut { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.am-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; font-size: 11px; color: var(--ink-3); min-width: 0; }
+.am-state { font-weight: 600; color: var(--ink-2); }
+.am-state.s-blocked { color: var(--needs); }
+.am-state.s-working { color: var(--working); }
+.am-state.s-done { color: var(--done); }
+.am-model { font-family: var(--font-mono); font-size: 10.5px; }
+.am-branch { display: inline-flex; align-items: center; gap: 3px; font-family: var(--font-mono); font-size: 10.5px; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.am-from { font-style: italic; }
+.am-link { display: flex; align-items: center; gap: 4px; margin: -2px 9px 6px; font-size: 11px; color: var(--accent); text-align: left; }
+.am-subs { list-style: none; margin: 0 9px 7px 22px; padding: 0 0 0 9px; border-left: 2px solid color-mix(in srgb, var(--working) 35%, transparent); display: grid; gap: 2px; }
+.am-subs li { display: flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--ink-2); min-width: 0; }
+.am-subs li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.am-subs li b { font-weight: 600; font-size: 10.5px; color: var(--working); }
+.am-handed { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin: -1px 4px 7px 14px; font-size: 11px; }
+.am-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 180px; padding: 2px 7px; border-radius: 6px; background: var(--pane-3); color: var(--ink-2); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.am-chip:hover { color: var(--ink); }
+/* The sidebar's Devices: the map, beside its fold arrow. */
+.rmc-map { flex: none; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 7px; color: var(--ink-3); }
+.rmc-map:hover { background: var(--pane); color: var(--ink); }
