@@ -398,7 +398,12 @@ jobs:
           [ "$(dpkg-query -W -f '${Version}' "$pkg")" = "${TAG#v}" ]
           command -v bridge-ai
           test -x "/opt/Bridge AI/bridge-ai"
-          test -f /usr/share/applications/bridge-ai.desktop
+          # Its menu entry, named for the app's ID (desktopName) when it has one: GNOME matches its
+          # windows, and allows its dictation key, by that name.
+          entry="$(dpkg -L "$pkg" | grep -E '^/usr/share/applications/[^/]+\.desktop$')"
+          test -f "$entry" && cat "$entry"
+          id="$(grep -a -o -m1 '"desktopName": *"[^"]*"' "/opt/Bridge AI/resources/app.asar" | sed 's/.*"\([^"]*\)"$/\1/' || true)"
+          if [ -n "$id" ]; then [ "$(basename "$entry")" = "$id" ] || { echo "The menu entry isn't named $id"; exit 1; }; fi
           echo "APPEXE=/opt/Bridge AI/bridge-ai" >> "$GITHUB_ENV"
 
       - name: It opens and its server answers
@@ -536,8 +541,11 @@ jobs:
         run: |
           ls -la "$HOMEDIR/.local/bin" "$HOMEDIR/.local/share/bridge-ai"
           test -x "$HOMEDIR/.local/bin/bridge-ai"
-          test -f "$HOMEDIR/.local/share/applications/bridge-ai.desktop"
-          cat "$HOMEDIR/.local/share/applications/bridge-ai.desktop"
+          # One menu entry, named as the one inside the app (its ID, by which GNOME matches its windows
+          # and allows its dictation key).
+          entry="$(ls "$HOMEDIR/.local/share/applications")"
+          [ "$(printf '%s\n' "$entry" | wc -l)" = 1 ] && test -f "$HOMEDIR/.local/share/bridge-ai/app/$entry"
+          cat "$HOMEDIR/.local/share/applications/$entry"
           ls "$HOMEDIR/.local/share/bridge-ai/app" | head -40 || true
 
       - name: It's installed as a package

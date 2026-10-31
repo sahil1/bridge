@@ -10,6 +10,7 @@
 //   wayland             a Wayland session (XDG_SESSION_TYPE), where one app can't hear another's keys
 //   session             XDG_CURRENT_DESKTOP (GNOME, KDE, Hyprland, sway…)
 //   portal              the desktop has the GlobalShortcuts portal (D-Bus), true, false or null
+//   entry               a menu entry (.desktop file) with the app's ID is installed, true, false or null
 //   electron            Electron's major version
 //   helper              native/bridgekeys is in this build (a Mac)
 //   hook                uiohook-napi loads here (Windows, X11)
@@ -34,10 +35,15 @@ export function globalKey(m = {}) {
     if (m.wayland) {
       // An app can't hear another's keys on Wayland: only the desktop's GlobalShortcuts portal, which
       // says when the key is pressed (not when it's let go). sway and other wlroots desktops have none;
-      // GNOME's (48 and later) answers Electron only from 45 on.
+      // GNOME's (48 and later) answers Electron only from 45 on (the app's own; a copy run from source
+      // can have an older one), and GNOME 50 only an app whose ID (desktopName) names an installed
+      // menu entry: the .deb's or the installer's, which a copy run from source or an AppImage opened
+      // as it is doesn't have.
+      const gnome = /gnome/i.test(m.session || '')
       if (!m.portal) return { mode: null, why: 'This Wayland desktop has no GlobalShortcuts portal' }
-      if (/gnome/i.test(m.session || '') && Number(m.electron) < 45) return { mode: null, why: 'GNOME\'s shortcuts portal needs Electron 45 or later' }
-      return { mode: 'toggle', via: 'shortcut', asks: /gnome/i.test(m.session || ''), why: 'On Wayland the key can\'t be heard let go in another app' }
+      if (gnome && Number(m.electron) < 45) return { mode: null, why: 'GNOME\'s shortcuts portal needs Electron 45 or later' }
+      if (gnome && m.entry === false) return { mode: null, why: 'GNOME\'s shortcuts portal turns down an app with no menu entry of its own (install it with install.sh or the .deb)' }
+      return { mode: 'toggle', via: 'shortcut', asks: gnome, why: 'On Wayland the key can\'t be heard let go in another app' }
     }
     // X11. uiohook-napi's Linux Arm build is really an x64 one, so there it doesn't load.
     if (m.hook) return { mode: 'hold', via: 'uiohook' }
