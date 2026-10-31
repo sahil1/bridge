@@ -44,6 +44,14 @@ curl -fsSL https://raw.githubusercontent.com/sahil1/bridge/main/install.sh | sh
 
 On Debian and Ubuntu it installs the `.deb` (it asks for your password); elsewhere, or without sudo, it unpacks the AppImage into `~/.local/share/bridge-ai` (no FUSE needed) with a menu entry and a `bridge-ai` command. 64-bit Intel/AMD only for now. Both files are also on the [Releases](https://github.com/sahil1/bridge/releases/latest) page.
 
+### Removing it
+
+- **macOS**: quit Bridge AI and move it from Applications to the Trash.
+- **Windows**: Settings › Apps › Installed apps › Bridge AI › Uninstall.
+- **Linux**: `sudo apt remove bridge-ai-desktop` where it came as a `.deb` (Debian, Ubuntu); otherwise delete `~/.local/share/bridge-ai`, `~/.local/bin/bridge-ai` and `~/.local/share/applications/bridge-ai.desktop`.
+
+Your settings, meeting notes and the rest stay in `~/.bridge-ai` in case you install it again; delete that folder to remove them too.
+
 ### From source
 
 You need [Node.js](https://nodejs.org) 20 or newer and at least one agent CLI installed (for example [Claude Code](https://docs.claude.com/en/docs/claude-code) or [Codex](https://github.com/openai/codex)).

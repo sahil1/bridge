@@ -2,6 +2,40 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
+## 3.7.0
+
+Talk to your agents: hold a key, say it, and let go. Your words are turned into text on your computer by Parakeet, a speech model that runs wherever Bridge AI does, and can go straight into any app. Setup carries on in the background, and the microphone works again on Macs that updated from 3.4.
+
+### What's new
+
+- **Talk to your agents.** Hold ⌥Space (Ctrl+Alt+Space on Windows and Linux), talk, and let go: the words are where you were typing, in an agent's message box, the Chief of Staff, a meeting's notes, a search box, or an agent's terminal (typed there without Enter). Tap the key instead to keep listening until you press it again or Enter; Esc throws it away. The mic button in the message box works the same way, held or clicked, and on your phone you hold it with a finger. Settings › Voice changes the key.
+- **From any app, if you want it.** In the desktop app, after your first words in Bridge AI, it asks once whether the key should work in other apps too. Say yes, and holding it anywhere brings up a small window with what you said, to send to the agent you last looked at, the Chief of Staff or any agent, or to copy. On Linux with Wayland the key is tapped rather than held (KDE, Hyprland), and it isn't offered where the desktop can't pass it on (sway, and GNOME for now).
+- **Words come out tidy.** No "um" or words said twice, a capital and a full stop (not in a terminal or a search box), and the names of your agents, projects, branches and meeting memory spelled the way they're written. Say "at payments dot ts" for a mention of that file. No AI model, nothing sent anywhere; Settings › Voice turns each off.
+- **Parakeet turns speech into text on your computer.** Voice notes, dictation and meetings now use NVIDIA's Parakeet (25 European languages): more accurate than the Whisper models before, quick on the processor alone, and the same on Macs with either chip, Windows, Linux and the Docker image, which had no speech to text before. Nothing to install (no Homebrew, ffmpeg or whisper.cpp), only a one-time 670 MB download that stays on your computer. The first time you use the mic, Bridge AI offers it and turns what you already said into text once it's in.
+- **Settings › Voice** lists the speech models this computer can run, each with its size and languages, to download, use or remove: Parakeet, Parakeet English (best with words like worktree and Claude Code), and Whisper for other languages. Meetings use the same one, and setup's Everything downloads it instead of installing whisper.cpp and ffmpeg.
+- **Paste it where you're typing.** From another app, dictation can put your words where your cursor is: pick Where I'm typing (paste it) in Settings › Voice. On a Mac, macOS asks for Accessibility when you pick it; Windows and Linux ask nothing. It never pastes into a password field, puts back what you had copied, and when it can't paste (another app came to the front, a key was still held) the words wait in the dictation window to send or copy.
+- **Setup carries on in the background.** Everything starts Node.js first, and the agents' Install buttons show it coming, while the rest installs behind you. A small Setting up in the top bar shows how far along it is and when something needs you: your password, or something macOS wants you to allow. On a Mac without Apple's developer tools, Everything installs them too (about 1 GB), under the same one password, so git works for your agents without macOS stopping to ask. The calendar now uses Bridge AI's own calendar helper, so Homebrew is installed only if you pick a Whisper model.
+- **Spelling suggestions in the desktop app.** Right-click an underlined word in a message box for suggestions and Add to Dictionary, as well as Cut, Copy and Paste.
+- **Your notes beside the meeting as it records.** While a meeting records, My notes sits beside the live transcript (or Assist), ready to type in; on a phone it's a big box under the recording bar. What you write, the slides it sees and the meeting's files shape the summary: your notes are its backbone, in your words and under your headings, notes with a time are placed where they were said, and a Written from row shows what went in. When the meeting ends it opens on the Summary.
+- **Send action items to Chief of Staff** is a labelled button under the action items, saying what happens: Chief of Staff keeps them on its task list and follows up. It replaces an unexplained icon in the meeting's header.
+- **A calm top bar on your phone.** It keeps what you need right now (a recording, what needs you, search, Settings), and nothing is cut off any more. Setup, Restart to apply and a new version show as one line under it, and usage, the next meeting and the weather are in Today.
+- **Your other computers, from your phone.** The devices menu at the top left lists your computers, with which are online, one tap to switch; in the iPhone and Android apps it also has Cloud Agents and the start screen.
+- **Your phone when a computer is away.** The phone's start screen no longer waits on a computer that's offline. Within a few seconds it says whether the computer is offline, can't be reached or isn't answering, keeps trying, and lists your other computers (with which are online), what the computer last sent you, Cloud Agents and Try the demo. Your relay is updated with Bridge AI, so this reaches your phone's browser with this update.
+- **The sidebar keeps up as meetings pile up.** Each of the last few days folds, and older meetings fold under Earlier by week and month. The one recording and the one open always show.
+- **Chief of Staff in one place:** its row in the sidebar (and ⌘K), with a line saying what it does, instead of three buttons across the window.
+
+### Fixes
+
+- **The microphone on a Mac that updated from 3.4.** macOS doesn't carry over what you allowed for versions signed before 3.5.0, and could go on listing Bridge AI as allowed while blocking the mic, and the message box said to allow it in your browser's settings. Bridge AI now asks macOS itself the first time, and when an old answer still blocks the mic it says so, with Reset and ask again.
+- **Meetings:** the invite's agenda reaches the summary and Assist (it was dropped when a meeting started), and action items are found when the summary is written in another language.
+- **Plan usage on Intel Macs.** The Intel app carried only Apple Silicon's usage reader, so plan usage didn't show. Each Mac app now has its own.
+- **Settings' names are in Title Case,** like About & Updates: Model Providers, MCP Servers, Config File and Cloud Agents.
+
+### After this update
+
+- **A Whisper model you already use stays in use** for voice notes and meetings. Pick Parakeet in Settings › Voice when you like.
+- **The dictation key works inside Bridge AI** until you say yes to it working in other apps.
+
 ## 3.6.0
 
 AI Assist in your meetings and a transcript that cleans itself up, agents that pick up where they left off after an update, a crash or a restart, a phone that gets back to your computer at once, and setup that asks for nothing.
