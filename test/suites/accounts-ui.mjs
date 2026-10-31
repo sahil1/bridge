@@ -106,7 +106,9 @@ try {
     // on it keeps working), so Sign in is there, the why in its tooltip, not a paragraph an account.
     const rowOf = (name) => menu.locator('.acct-row', { has: p.locator('.acct-item .acct-name', { hasText: new RegExp(`^${name}`) }) }).first()
     const signIn = rowOf('Work Secondary').locator('.acct-act', { hasText: /^Sign in$/ })
-    ok(await signIn.isVisible() && /^In use: sign in to see its usage$/.test((await row('Work Secondary').locator('.acct-desc').innerText()).trim()), `${t}: Sign in is right on Work Secondary's row (its saved sign-in ran out), and a few words under its name say why, for a phone too`, await rowOf('Work Secondary').innerText())
+    // A busy machine (Windows in CI) fills in the ran-out sign-in a moment after the menu opens.
+    const lapsed = await until(async () => (await signIn.isVisible()) && /^In use: sign in to see its usage$/.test((await row('Work Secondary').locator('.acct-desc').innerText()).trim()), 6000, 150)
+    ok(!!lapsed, `${t}: Sign in is right on Work Secondary's row (its saved sign-in ran out), and a few words under its name say why, for a phone too`, await rowOf('Work Secondary').innerText())
     ok(/An agent is using it, so it still works/.test(await signIn.getAttribute('title')) && !/An agent is using it|Sign in to .* again|It signs in again/.test(await menu.innerText()), `${t}: why is in its tooltip, not a paragraph in the menu`, await menu.innerText())
     const sb = await signIn.boundingBox(), nb = await row('Work Secondary').locator('.acct-name').boundingBox()
     ok(sb && nb && Math.abs((sb.y + sb.height / 2) - (nb.y + nb.height / 2)) < 12, `${t}: on the same line as its name`, { sb, nb })
