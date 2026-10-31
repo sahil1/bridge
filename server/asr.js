@@ -68,19 +68,22 @@ function send(msg, tries = 1) {
   })
 }
 
-// Speech to text: { text, ms } for 16 kHz mono 16-bit PCM. model: { key, dir, files: { encoder,
-// decoder, joiner, tokens }, hotwords }. A long recording is cut into pieces of a minute or less,
-// each at its quietest moment near the end, so memory stays small and nothing is cut mid-word.
+// Speech to text: { text, ms, decodeMs } for 16 kHz mono 16-bit PCM (ms with loading the model,
+// decodeMs without). model: { key, dir, files: { encoder, decoder, joiner, tokens }, hotwords }. A
+// long recording is cut into pieces of a minute or less, each at its quietest moment near the end,
+// so memory stays small and nothing is cut mid-word.
 export async function recognize(model, pcm, { hotwords = [] } = {}) {
   const parts = split(pcm)
   const texts = []
   let ms = 0
+  let decodeMs = 0
   for (const p of parts) {
     const r = await send({ model, pcm: p, hotwords, threads: threads() })
     if (r.text) texts.push(r.text)
     ms += r.ms + (r.loadMs || 0)
+    decodeMs += r.ms
   }
-  return { text: texts.join(' ').replace(/\s+/g, ' ').trim(), ms }
+  return { text: texts.join(' ').replace(/\s+/g, ' ').trim(), ms, decodeMs }
 }
 
 // How a voice sounds (voices.js): { v: Float32Array, ms } for 16 kHz mono PCM, from the speaker

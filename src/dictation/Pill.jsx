@@ -4,7 +4,8 @@ import { t } from '../i18n/index.js'
 
 // The pill dictation shows while it listens, from another app (Hud.jsx, the desktop app's window
 // under the menu bar) and inside Bridge AI (Dictation.jsx, at the bottom of the window): the level
-// as a line of bars moving right to left, how long, where the words go, ✕ (Esc) and ✓. Then
+// as a line of bars moving right to left, how long, where the words go, ✕ (Esc) and ✓, and the
+// words as they're heard where live words work (controller.js). Then
 // "Transcribing…", then what became of the words for a moment, and it's gone. Where there's more
 // to show (the words to send or copy, why they weren't pasted, the speech model to download), it
 // grows into a card, and back. The meeting card's look: its red dot, its rounding, its hairline
@@ -62,25 +63,42 @@ export function Clock({ since }) {
 // hint: what the key does now, said to screen readers and on hover.
 export function Listening({ s, to, hint, onCancel, onStop }) {
   return (
-    <div className="dp-row dp-listening" role="status" aria-label={hint} title={hint}>
-      <span className="rec-dot" aria-hidden="true" />
-      <Wave levels={s.levels} />
-      <Clock since={s.since} />
-      {to}
-      <span className="dp-acts">
-        <button type="button" className="dp-x" onClick={onCancel} aria-label={t('Cancel')} title={t('Cancel (Esc)')}><Icon name="x" size={13} /></button>
-        <button type="button" className="dp-ok" onClick={onStop} disabled={s.phase !== 'listening'} aria-label={t('Stop and transcribe')} title={t('Stop and transcribe')}><Icon name="check" size={13} /></button>
-      </span>
+    <div className={`dp-listening${s.live ? ' has-live' : ''}`} role="status" aria-label={hint} title={hint}>
+      <div className="dp-row">
+        <span className="rec-dot" aria-hidden="true" />
+        <Wave levels={s.levels} />
+        <Clock since={s.since} />
+        {to}
+        <span className="dp-acts">
+          <button type="button" className="dp-x" onClick={onCancel} aria-label={t('Cancel')} title={t('Cancel (Esc)')}><Icon name="x" size={13} /></button>
+          <button type="button" className="dp-ok" onClick={onStop} disabled={s.phase !== 'listening'} aria-label={t('Stop and transcribe')} title={t('Stop and transcribe')}><Icon name="check" size={13} /></button>
+        </span>
+      </div>
+      <LiveWords text={s.live} />
     </div>
   )
 }
 
-// Turning it into text (or pasting it): the bars rocking gently, and what it's doing.
+// Live words: what's been heard so far, from the left; once they don't fit, the newest stay in
+// sight and the older ones fade off the left. As wide as what it's in, never wider.
+export function LiveWords({ text, className = 'dp-live' }) {
+  const el = useRef(null)
+  const [over, setOver] = useState(false)
+  useLayoutEffect(() => { const e = el.current; if (e) setOver(e.scrollWidth > e.clientWidth + 1) }, [text])
+  if (!text) return null
+  return <div ref={el} className={`${className}${over ? ' over' : ''}`} aria-live="off" title={text}><span>{text}</span></div>
+}
+
+// Turning it into text (or pasting it): the bars rocking gently, and what it's doing; the words
+// heard so far stay up meanwhile.
 export function Working({ s, text }) {
   return (
-    <div className="dp-row dp-working" role="status">
-      <Wave levels={s.levels} busy />
-      <span className="dp-what">{text || t('Transcribing…')}</span>
+    <div className={`dp-working${s.live ? ' has-live' : ''}`} role="status">
+      <div className="dp-row">
+        <Wave levels={s.levels} busy />
+        <span className="dp-what">{text || t('Transcribing…')}</span>
+      </div>
+      <LiveWords text={s.live} />
     </div>
   )
 }

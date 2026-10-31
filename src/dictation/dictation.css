@@ -2,6 +2,8 @@
 
 /* The mic button, held: no text selection, long-press menu or scrolling while it's down. */
 .comp-btn.mic-btn { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+/* The message box's recording bar: the words heard so far in place of the meter (live words). */
+.rec-live { flex: 1; width: 0; min-width: 0; font-size: 13px; }
 /* What dictation just put in the box, for a moment. */
 .composer.dictated { box-shadow: 0 0 0 2px var(--accent-soft), 0 4px 16px rgb(0 0 0 / .04); transition: box-shadow .3s; }
 
@@ -37,6 +39,17 @@ button.dp-to:hover { background: var(--pane-2); color: var(--ink); }
 .dp-ok:disabled { opacity: .35; }
 .dp-what { max-width: 330px; padding: 7px 12px 7px 0; color: var(--ink-2); line-height: 1.35; white-space: normal; }
 .dp-working .dp-what, .dp-done .dp-what { color: var(--ink); }
+/* Live words: a line under the row, as wide as the pill (it never widens it), the newest words at the
+   right and the older ones fading off the left. The pill makes a little more room while there are. */
+.has-live > .dp-row { min-width: 330px; }
+.has-live .dp-acts { margin-left: auto; }
+/* Laid out right to left so that, once it overflows, it's the start that's cut off; the words read
+   left to right all the same. */
+.dp-live, .rec-live { direction: rtl; text-align: left; overflow: hidden; white-space: nowrap; color: var(--ink); }
+.dp-live > span, .rec-live > span { direction: ltr; unicode-bidi: isolate; }
+.dp-live.over, .rec-live.over { -webkit-mask-image: linear-gradient(to right, transparent 0, #000 28px); mask-image: linear-gradient(to right, transparent 0, #000 28px); }
+.dp-live { width: 0; min-width: 100%; padding: 0 14px 9px; margin-top: -3px; font-size: 13px; line-height: 1.35; box-sizing: border-box; }
+.dp-working .dp-live { color: var(--ink-2); }
 .dp-tick { flex: none; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--good); color: #fff; }
 .dp-done.warn .dp-tick { background: var(--ink-3); }
 /* Grown into a card: the words, what to do with them, or a note. */

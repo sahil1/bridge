@@ -51,6 +51,7 @@ const SUITES = [
   { name: 'dictation-ui', build: 'dist', browser: true, covers: [/^src\/(dictation|audio)\//, /^shared\/dictation\//, /^src\/components\/(Composer|Terminal|LiveShell|Settings|Solo)\.jsx$/, /^src\/components\/settings\/(Voice|Dictation)\.jsx$/, /^src\/(App|main|api)\.jsx?$/, /^server\/(dictation|index)\.js$/] },
   { name: 'remote-files', build: 'dist', browser: true, covers: [/^src\/components\/(Files|FileMedia|FileExtras)\.jsx$/, /^server\/(files|machines|relay|index)\.js$/, /^relay\/web\//, /^test\/fixtures\//] },
   { name: 'dictation-history', build: 'dist', browser: true, covers: [/^src\/dictation\//, /^src\/components\/dictations\//, /^src\/components\/settings\/Dictation\.jsx$/, /^src\/components\/Rail\.jsx$/, /^src\/(App|lazy)\.jsx$/, /^server\/(dictations|index)\.js$/] },
+  { name: 'live-words', build: 'dist', browser: true, covers: [/^server\/(livewords|speech|asr|asr-worker|meetings)\.js$/, /^src\/dictation\//, /^src\/audio\//, /^src\/components\/(Composer)\.jsx$/, /^src\/components\/meetings\/(Meetings|FloatCard)\.jsx$/, /^src\/components\/settings\/Dictation\.jsx$/, /^test\/stand-ins\/sherpa\.cjs$/] },
   { name: 'ios-app', build: null, covers: [/^mobile\/ios\//, /^relay\/web\/index\.html$/, /^PRIVACY\.md$/, /^src\/components\/Settings\.jsx$/, /^src\/components\/settings\/Relay\.jsx$/] },
 ]
 // A change to these runs everything.

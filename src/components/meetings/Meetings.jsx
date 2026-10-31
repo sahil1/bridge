@@ -734,7 +734,7 @@ export function MeetingPage({ id, onBack }) {
         {beside && <button type="button" className="ghost-btn mt-thide" onClick={() => { setSplit(false); setSel(null) }} aria-label={t('Hide the transcript')} title={t('Hide the transcript (the view gets the room)')}><Icon name="panel-right" size={14} /></button>}
       </div>
       <div className="mt-lines" ref={listRef} onMouseUp={picked} onTouchEnd={picked} onScroll={(e) => { const el = e.currentTarget; pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40; setSel(null) }}>
-        {!lines.length && <p className="muted small mt-hint">{recording ? t('The transcript appears here as people talk, a few seconds behind.') : data.waiting || again ? t('Transcribing…') : t('Nothing was transcribed.')}{done && !lines.length && <> <button type="button" className="link-btn" onClick={() => setDialog('again')}>{t('Transcribe it again')}</button></>}</p>}
+        {!lines.length && !(recording && data.partial) && <p className="muted small mt-hint">{recording ? t('The transcript appears here as people talk, a few seconds behind.') : data.waiting || again ? t('Transcribing…') : t('Nothing was transcribed.')}{done && !lines.length && <> <button type="button" className="link-btn" onClick={() => setDialog('again')}>{t('Transcribe it again')}</button></>}</p>}
         {timeline.map((x, i) => (x.k === 'line'
           ? <Line key={x.l.key || `${x.l.t0}-${x.l.src}-${i}`} l={x.l} id={id} me={data.me} onSaved={refresh} onError={(t) => setMsg({ error: true, text: t })} onWho={(e, l) => setWhoAt({ x: e.clientX, y: e.clientY, l })} />
           : x.k === 'sec'
@@ -742,6 +742,14 @@ export function MeetingPage({ id, onBack }) {
           : x.k === 'pic'
             ? <Picture key={`pic-${x.c.id}`} id={id} c={x.c} onOpen={() => openPic(x.c)} onChange={refresh} onError={(t) => setMsg({ error: true, text: t })} />
             : <div key={`note-${x.i}`} className="mt-mark"><Icon name="edit" size={11} /><span className="mt-t">{clock(x.n.t)}</span><span>{x.n.text}</span></div>))}
+        {/* Live words (server/livewords.js): what someone is still saying, before its line is in. */}
+        {recording && ['you', 'them'].filter((src) => data.partial?.[src]?.text).map((src) => (
+          <div key={`so-far-${src}`} className={`mt-line mt-so-far ${src}`} aria-live="off">
+            <span className="mt-who">{src === 'them' ? t('Them') : data.me || t('You')}</span>
+            <span className="mt-t">{clock(data.partial[src].t0)}</span>
+            <span className="mt-text">{data.partial[src].cut ? '… ' : ''}{data.partial[src].text}</span>
+          </div>
+        ))}
         {data.waiting > 0 && lines.length > 0 && !again && <p className="muted small mt-hint">{live ? '…' : t('Finishing the transcript ({n} left)…', { n: data.waiting })}</p>}
         {working && !working.error && <p className="mt-working muted small mt-voices-work" role="status"><span className="aa-spin" /> {working.state === 'downloading' ? t('Downloading the voice model, once: {n}%', { n: working.percent || 0 }) : t('Telling the voices apart: {n}%', { n: working.percent || 0 })}</p>}
         {working?.error && <p className="muted small mt-hint" role="status">{t("The voices weren't told apart: {error}", { error: working.error })} <button type="button" className="link-btn" onClick={tellVoices}>{t('Try again')}</button></p>}
