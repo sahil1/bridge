@@ -56,7 +56,7 @@ export default function Agents({ onOpenAgent }) {
       {consult && consult.length > 0 && (
         <section className="st-consult">
           <h4>Your chief of staff can consult</h4>
-          <p className="muted small">One-off questions to other models for second opinions, live news or long documents (<code>bridge ask</code>). Most use the subscriptions you're already signed in with; others need a key under Model providers.</p>
+          <p className="muted small">One-off questions to other models for second opinions, live news or long documents (<code>bridge ask</code>). Most use the subscriptions you're already signed in with; others need a key under Model Providers.</p>
           <div className="st-consult-list">
             {consult.map((c) => (
               <span key={c.id} className={`st-consult-chip ${c.available ? 'on' : ''}`} title={`${c.good}\n${c.available ? `Via ${c.route}` : `To set up: ${c.route}`}`}>

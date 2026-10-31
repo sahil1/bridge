@@ -4,7 +4,7 @@
 // Two ways to reach a model, tried in this order:
 //   1. The agent's own CLI in one-shot mode (claude -p, codex exec, grok -p, ...). This uses the
 //      subscription you're already signed in with, so there's nothing to set up.
-//   2. The provider's API with a key you saved in Settings › Model providers (or in your
+//   2. The provider's API with a key you saved in Settings › Model Providers (or in your
 //      environment). Every one here speaks the OpenAI chat format except Anthropic.
 // Questions run in an empty folder, read-only where the CLI allows it, so a consult never
 // touches your projects.
@@ -95,7 +95,7 @@ export async function options() {
       const a = API[c.api]
       if (a.local ? local : keyFor(a)) return { ...c, available: true, via: 'api', route: a.local ? `${a.label}: ${local}` : `${a.label} key` }
     }
-    const need = [c.cli && (have.has(c.cli) ? `sign in to ${adapter(c.cli).label}` : `install ${adapter(c.cli).label}`), c.api && (API[c.api].local ? 'run Ollama' : `add your ${API[c.api].label} key in Settings › Model providers`)].filter(Boolean).join(' or ')
+    const need = [c.cli && (have.has(c.cli) ? `sign in to ${adapter(c.cli).label}` : `install ${adapter(c.cli).label}`), c.api && (API[c.api].local ? 'run Ollama' : `add your ${API[c.api].label} key in Settings › Model Providers`)].filter(Boolean).join(' or ')
     return { ...c, available: false, via: null, route: need }
   })
 }

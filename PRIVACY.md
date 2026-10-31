@@ -25,7 +25,7 @@ it.
 
 How much of your plan is left is off until you turn it on (the Usage card, or Settings › General).
 Then Bridge AI asks each agent's own provider, with the sign-in that agent uses on your computer,
-through quota-axi. If you add an API key for a model provider (Settings › Model providers),
+through quota-axi. If you add an API key for a model provider (Settings › Model Providers),
 Bridge AI uses it to check the key and, when you or the chief of staff ask, to put a question to
 that model. Both go straight from your computer to that provider.
 
@@ -75,7 +75,7 @@ Tailscale's privacy policy.
 ## The phone apps
 
 The iPhone and Android apps show Bridge AI from your computer, through your relay. They have no
-account. Apart from Cloud agents (below), they send nothing anywhere but to your relay and, through
+account. Apart from Cloud Agents (below), they send nothing anywhere but to your relay and, through
 it, end to end to your computer.
 
 - **What they keep**: the list of computers you paired and each one's pairing (the phone's key),
@@ -94,9 +94,9 @@ it, end to end to your computer.
 - **Lock screen**: the agents notification on Android and the Live Activity on iPhone are made on
   the phone from what your computer sends over the encrypted link.
 
-### Cloud agents on the phone
+### Cloud Agents on the phone
 
-Cloud agents in the phone apps runs agents on Cursor, GitHub Copilot, Jules or Claude with no
+Cloud Agents in the phone apps runs agents on Cursor, GitHub Copilot, Jules or Claude with no
 computer, with keys you add on the phone.
 
 - **Your keys** stay on the phone. iPhone keeps them in the Keychain, on this device only, so they

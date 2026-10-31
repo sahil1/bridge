@@ -225,7 +225,7 @@ try {
   // ---------- Model providers: a key the provider turns down, then a good one ----------
   {
     const { ctx, p, errors } = await open(LOOKS[1][1])
-    // Settings › Model providers, asked for again until it's open: on a slow machine the app may not
+    // Settings › Model Providers, asked for again until it's open: on a slow machine the app may not
     // be listening yet the first time.
     await p.waitForSelector('.rail-nav-btn', { timeout: 30000 }).catch(() => {})
     await until(async () => {

@@ -24,7 +24,7 @@ assets (`https://appassets.androidplatform.net/assets/demo/`), iPhone from `brid
 nothing built is committed. Other bundled UIs can be added the same way: a name in
 `bundledUis` (Android) and in `project.yml` (iPhone).
 
-## Cloud agents
+## Cloud Agents
 
 The start screen, paired or not, also offers **Cloud agents**: agents on Cursor, GitHub Copilot,
 Jules or Claude, run and followed from the phone with no computer. So does a long press on the app

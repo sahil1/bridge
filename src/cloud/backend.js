@@ -10,7 +10,7 @@ import { cloudApi, NOT_CLOUD } from '../standalone/cloud.js'
 import { call, appFetch, standIn } from './native.js'
 
 const fail = (msg, status = 400) => { throw Object.assign(new Error(msg), { status }) }
-const PLACE = { keys: 'on this phone', settings: 'Settings › Cloud agents' }
+const PLACE = { keys: 'on this phone', settings: 'Settings › Cloud Agents' }
 const PROVIDERS = Object.keys(ADAPTERS)
 
 // What's kept for one provider: its agents (without what's only for now) and what its adapter remembers.

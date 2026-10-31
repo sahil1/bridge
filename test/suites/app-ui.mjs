@@ -1,11 +1,12 @@
 // The app as a whole, on any platform and in the browser named by BRIDGE_TEST_BROWSER (Chromium,
 // or WebKit, the engine of Safari and the iPhone app): it loads in a light colour theme, a dark one
 // and at phone width without page errors or sideways scrolling; the sidebar, ⌘K and Settings
-// open; and a New terminal runs a command typed into it. And when the whole window breaks (a crash
-// made on cue): a brief one just after it opened gone by itself; one that stays, tried again twice,
-// then the way back in the middle of the window with a newer version offered straight away, Copy
-// details, the crash written down on the computer, Reset this window's layout first when it happens
-// again after a reload, and the app back after it, on a desktop and a phone.
+// open (its section names in Title Case); and a New terminal runs a command typed into it. And
+// when the whole window breaks (a crash made on cue): a brief one just after it opened gone by
+// itself; one that stays, tried again twice, then the way back in the middle of the window with a
+// newer version offered straight away, Copy details, the crash written down on the computer, Reset
+// this window's layout first when it happens again after a reload, and the app back after it, on a
+// desktop and a phone.
 import fs from 'node:fs'
 import path from 'node:path'
 import { startKit, checks, until, browser, page, shot, solid, noServiceWorker, IS_WIN } from '../lib/harness.mjs'
@@ -35,6 +36,9 @@ try {
     // Devices: one tab for the relay, the phone, your other devices and notifications.
     const navs = (await p.locator('.st-nav-item').allInnerTexts()).map((x) => x.trim())
     ok(navs.filter((x) => x === 'Devices').length === 1 && !navs.some((x) => /machines|Phone & notifications/i.test(x)), `${t}: Devices is one tab`, navs)
+    // Names are in Title Case (Model Providers, About & Updates, Chief of Staff), short joining words aside.
+    const titled = (x) => x.split(/\s+/).every((w, i) => (i > 0 && /^(a|an|and|as|at|by|for|in|of|on|or|the|to|&)$/.test(w)) || !/^\p{Ll}/u.test(w))
+    ok(navs.length > 5 && navs.every(titled), `${t}: Settings' section names are in Title Case`, navs)
     await p.locator('.st-nav-item', { hasText: 'Devices' }).click()
     const heads = await until(async () => { const h = (await p.locator('.st-body h4').allInnerTexts()).map((x) => x.trim()); return h.includes('Your devices') && h }, 6000)
     const at = (re) => (heads || []).findIndex((h) => re.test(h))

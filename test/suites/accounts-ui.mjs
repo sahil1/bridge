@@ -302,7 +302,7 @@ try {
     const refused = await kit.api('/accounts/active/claude', { id: 'claude-default' }).then(() => null, (e) => e.message)
     ok(/off the list/.test(refused || ''), `${t}: it can't be made default while it's off the list`, refused)
 
-    // Settings › Model providers › Accounts: shows it again.
+    // Settings › Model Providers › Accounts: shows it again.
     await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'accounts' } })))
     const sec = p.locator('#pv-accounts')
     await sec.waitFor({ timeout: 15000 })

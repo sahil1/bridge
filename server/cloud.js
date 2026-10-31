@@ -133,7 +133,7 @@ export function routes(app, { pushFleet = () => {} } = {}) {
     return cloud.agentRoute(req.params.pane, req.method, what, req.body)
   }))
 
-  // Settings › Model providers › Cloud agents.
+  // Settings › Model Providers › Cloud Agents.
   app.get('/api/cloud', wrap(() => cloud.providers()))
   const known404 = (req) => { if (!ADAPTERS[req.params.provider]) throw Object.assign(new Error('Unknown provider'), { status: 404 }); return req.params.provider }
   // { key } and, for Claude, { github } (a token) or { github: 'copilot' } (the one saved for Copilot).

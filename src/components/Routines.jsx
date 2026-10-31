@@ -262,7 +262,7 @@ export function Insights() {
           : (
             <div className="ins-actions">
               <p className="muted small">{t('To get a write-up, sign in to an agent or add an API key for any provider.')}</p>
-              <button className="btn" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'providers' } }))}><Icon name="layers" size={12} /> {t('Model providers')}</button>
+              <button className="btn" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'providers' } }))}><Icon name="layers" size={12} /> {t('Model Providers')}</button>
             </div>
           )
       )}

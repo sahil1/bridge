@@ -47,7 +47,7 @@ export function call(op, args = {}) {
       android.postMessage(JSON.stringify({ id, op, ...args }))
     })
   }
-  return Promise.reject(new Error('Cloud agents on this phone need the Bridge AI app'))
+  return Promise.reject(new Error('Cloud Agents on this phone need the Bridge AI app'))
 }
 
 // The adapters put the key in a header (shared/cloud). Here they're given a stand-in that says

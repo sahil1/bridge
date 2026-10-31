@@ -224,7 +224,7 @@ export default function AddAccount({ initial = {}, onClose, onStart, onOpenAgent
             </label>
             <div className="aa-suggest">
               {SUGGEST.filter((s) => !taken.has(s.toLowerCase())).slice(0, 3).map((s) => <button type="button" key={s} className="fchip" onClick={() => setLabel(s)}>{s}</button>)}
-              {group && <span className="muted small">You have: {group.accounts.map((a) => (a.isDefault && a.named !== false ? `${a.label} (your usual login)` : nameOf(a))).join(', ')}. Rename any of them in Settings › Model providers.</span>}
+              {group && <span className="muted small">You have: {group.accounts.map((a) => (a.isDefault && a.named !== false ? `${a.label} (your usual login)` : nameOf(a))).join(', ')}. Rename any of them in Settings › Model Providers.</span>}
             </div>
             {err && <p className="error-text" role="alert">{err}</p>}
             <footer className="modal-foot">

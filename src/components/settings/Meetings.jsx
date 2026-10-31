@@ -119,7 +119,7 @@ export default function Meetings() {
           {d.services.map((x) => (
             <label key={x.id} className={`mt-engine ${d.engine === x.id ? 'on' : ''}`}>
               <input type="radio" name="engine" checked={d.engine === x.id} onChange={() => set({ engine: x.id })} />
-              <span className="mt-engine-main"><b>{x.label}</b><small>{x.custom ? 'Its address, key and model, in Settings › Model providers' : `${x.model}${x.price[x.model] ? `, ${x.price[x.model]} an hour` : ''}`}</small></span>
+              <span className="mt-engine-main"><b>{x.label}</b><small>{x.custom ? 'Its address, key and model, in Settings › Model Providers' : `${x.model}${x.price[x.model] ? `, ${x.price[x.model]} an hour` : ''}`}</small></span>
               {x.ready ? <span className="mt-state good">Key saved</span> : <button type="button" className="link-btn" onClick={(e) => { e.preventDefault(); openProviders() }}>{x.custom ? 'Set it up' : 'Add a key'}</button>}
             </label>
           ))}

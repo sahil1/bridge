@@ -37,7 +37,7 @@
 .na-pick-list small { color: var(--ink-3); font-family: var(--font); }
 .na-pick-note { font-size: 11.5px; color: var(--ink-3); }
 
-/* Settings › Model providers › Cloud agents */
+/* Settings › Model Providers › Cloud Agents */
 .cl-list { display: grid; gap: 10px; }
 .cl-card { border: 1px solid var(--line); border-radius: 14px; background: var(--pane); overflow: hidden; }
 .cl-card.on { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }

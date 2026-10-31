@@ -412,7 +412,7 @@ export function rename(id, label) {
 export function setActive(kind, id) {
   if (!KINDS[kind]) throw new Error(`Accounts aren't supported for ${kind} yet`)
   const d = load()
-  if (id !== 'auto' && !listed(kind, id, d)) throw new Error(id === defaultId(kind) ? 'Your usual login is off the list. Show it again first (Settings › Model providers › Accounts).' : 'No such account')
+  if (id !== 'auto' && !listed(kind, id, d)) throw new Error(id === defaultId(kind) ? 'Your usual login is off the list. Show it again first (Settings › Model Providers › Accounts).' : 'No such account')
   d.active[kind] = id
   save(d)
   return { kind, active: id }
@@ -440,7 +440,7 @@ export async function logout(id) {
 }
 
 // Back on the list: your usual login, after Remove took it off.
-// The order you put a kind's accounts in (Settings › Model providers): every list follows it.
+// The order you put a kind's accounts in (Settings › Model Providers): every list follows it.
 export function reorder(kind, ids) {
   if (!KINDS[kind]) throw new Error(`Accounts aren't supported for ${kind} yet`)
   const d = load()
