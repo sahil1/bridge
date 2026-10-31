@@ -33,7 +33,11 @@ Dictation and voice notes are turned into text on your computer, and the recordi
 dictation key from other apps (Settings › Voice) is heard for that one key only: on a Mac it's
 registered with macOS, which tells Bridge AI when it's pressed and let go; on Windows and Linux a
 keyboard hook runs only while the key is held, to hear it let go, and ignores every other key.
-Nothing is pasted into other apps.
+Nothing is pasted into other apps unless you pick "Where I'm typing" there. Then, after you let go
+of the key, the text is put on the clipboard for a moment (marked so clipboard managers skip it on a
+Mac), ⌘V or Ctrl+V is pressed in the app you were in, and what you had copied is put back; on
+Wayland it's typed in by wtype instead. On a Mac pressing ⌘V needs Accessibility, which you're asked
+for when you pick it, and Bridge AI uses it for that paste only.
 
 If you run Bridge AI on a server or in Docker, all of this applies to that machine instead of your
 computer.

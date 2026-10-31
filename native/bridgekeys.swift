@@ -15,11 +15,35 @@
 //   bridgekeys front                          the app in front and whether Secure Input is on (a
 //                                             password field has the keyboard), then exits:
 //     {"app":"Safari","bundle":"com.apple.Safari","pid":123,"secure":false}
+//   bridgekeys paste [--pid <pid>]            the text on stdin, pasted where you're typing in the
+//                                             app in front (Settings › Voice › "Where I'm typing"):
+//                                             put on the clipboard, ⌘V pressed, and what was on the
+//                                             clipboard put back once that app has read it. --pid: the
+//                                             app that was in front when the key was pressed; if
+//                                             another is now, nothing's pasted. One line, then exits:
+//     {"pasted":true,"read":true,"restored":true}   read: the app took it; restored: what you had
+//                                             copied is back (not when something else was copied
+//                                             meanwhile, or when nothing read it: then the text stays
+//                                             on the clipboard, to paste by hand), or
+//     {"error":"secure"}                      Secure Input is on (a password field): nothing done
+//     {"error":"accessibility"}               Bridge AI isn't allowed to press keys (Accessibility)
+//     {"error":"moved","app":…}               another app is in front now
+//
+// Pressing ⌘V needs Accessibility. macOS counts it to the app that started this helper (Bridge AI,
+// whose helper this is: the "responsible" process), so that's the app the person turns on in System
+// Settings; this never asks, it only looks (CGPreflightPostEventAccess), and refuses without it.
 //
 // Another app's own hotkey on the same key isn't something macOS tells anyone. A held key doesn't
 // repeat here. With hotkey, a line "press" or "release" on stdin goes through the same handler as the
 // key itself (how the tests check it without a real key press). It exits when stdin closes or the
 // process that started it goes.
+//
+// For the tests, which never press a key or touch your clipboard: paste --test --board <name> uses a
+// pasteboard of its own (named dev.bridge-ai.test.…) and, instead of pressing ⌘V, prints
+// {"posted":true,"key":9} (the key it would press) and waits for something to read it; --as secure,
+// untrusted or moved acts as if that were so. bridgekeys board read|write|free --board <name> reads
+// that pasteboard as an app pasting would, writes text to it (two items, one with a second type, to
+// check every item and type comes back) and lets it go.
 //   swiftc -O -target arm64-apple-macos13.0 native/bridgekeys.swift -o native/bin/bridgekeys
 import AppKit
 import Carbon
@@ -51,12 +75,157 @@ func macOSHas(_ code: UInt32, _ mods: UInt32) -> Bool {
 }
 
 let args = CommandLine.arguments
+func option(_ name: String) -> String? {
+  guard let i = args.firstIndex(of: name), i + 1 < args.count else { return nil }
+  return args[i + 1]
+}
+
+// ---------- Paste where you're typing ----------
+// The clipboard (or, for the tests, a pasteboard of their own: never another name).
+func board() -> NSPasteboard? {
+  guard let name = option("--board") else { return .general }
+  return name.hasPrefix("dev.bridge-ai.test.") ? NSPasteboard(name: NSPasteboard.Name(name)) : nil
+}
+// Clipboard managers leave alone what's marked this way (nspasteboard.org): the text is there for a
+// moment, not something you copied.
+let TRANSIENT = NSPasteboard.PasteboardType("org.nspasteboard.TransientType")
+
+// The text, handed over only when an app asks for it: that's how we know the app in front has read it.
+final class Promised: NSObject, NSPasteboardItemDataProvider {
+  let text: String
+  var reads = 0
+  init(_ text: String) { self.text = text }
+  func pasteboard(_ pasteboard: NSPasteboard?, item: NSPasteboardItem, provideDataForType type: NSPasteboard.PasteboardType) {
+    reads += 1
+    item.setString(text, forType: type)
+  }
+}
+
+// The key that types "v" with ⌘ held, in the keyboard layout in use: apps match ⌘V by the letter, and
+// on Dvorak, say, the letter isn't where it is on QWERTY. 9 (QWERTY's, and AZERTY's and QWERTZ's) when
+// no key types it (a Russian or Greek layout, where apps take ⌘V at QWERTY's place).
+func keyForV() -> CGKeyCode {
+  guard let source = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue(),
+        let raw = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else { return 9 }
+  let data = Unmanaged<CFData>.fromOpaque(raw).takeUnretainedValue() as Data
+  return data.withUnsafeBytes { (bytes: UnsafeRawBufferPointer) -> CGKeyCode in
+    guard let layout = bytes.baseAddress?.assumingMemoryBound(to: UCKeyboardLayout.self) else { return 9 }
+    let cmd = UInt32((cmdKey >> 8) & 0xFF)
+    for code in 0..<128 {
+      var dead: UInt32 = 0
+      var len = 0
+      var chars = [UniChar](repeating: 0, count: 4)
+      let r = UCKeyTranslate(layout, UInt16(code), UInt16(kUCKeyActionDown), cmd, UInt32(LMGetKbdType()), OptionBits(kUCKeyTranslateNoDeadKeysBit), &dead, 4, &len, &chars)
+      if r == noErr && len == 1 && chars[0] == UniChar(UInt8(ascii: "v")) { return CGKeyCode(code) }
+    }
+    return 9
+  }
+}
+
+// ⌘ down, V down and up, ⌘ up, as a keyboard would: some apps only take ⌘V with the ⌘ key's own events.
+func pressPaste(_ v: CGKeyCode) {
+  let source = CGEventSource(stateID: .hidSystemState)
+  let cmd: CGKeyCode = 0x37
+  for (key, down) in [(cmd, true), (v, true), (v, false), (cmd, false)] {
+    let e = CGEvent(keyboardEventSource: source, virtualKey: key, keyDown: down)
+    e?.flags = key == cmd && !down ? [] : .maskCommand
+    e?.post(tap: .cghidEventTap)
+  }
+}
+
+// Answer apps asking for the text (the promise above) for up to `seconds`, or until `done`.
+func pump(_ seconds: Double, until done: () -> Bool = { false }) {
+  let end = Date().addingTimeInterval(seconds)
+  while !done() && Date() < end { RunLoop.current.run(mode: .default, before: min(end, Date().addingTimeInterval(0.02))) }
+}
+
+func paste() -> Never {
+  let test = args.contains("--test")
+  let pretend = option("--as")
+  guard let pb = board(), !test || option("--board") != nil else { say("{\"error\":\"board\"}"); exit(2) }
+  let text = String(decoding: FileHandle.standardInput.readDataToEndOfFile(), as: UTF8.self)
+  if text.isEmpty { say("{\"error\":\"empty\"}"); exit(1) }
+  // A password field has the keyboard: pasting there is never what you meant.
+  if pretend == "secure" || (!test && IsSecureEventInputEnabled()) { say("{\"error\":\"secure\"}"); exit(1) }
+  // Only looks: pressing a key without Accessibility would make macOS ask.
+  if pretend == "untrusted" || (!test && !CGPreflightPostEventAccess()) { say("{\"error\":\"accessibility\"}"); exit(1) }
+  if pretend == "moved" { say("{\"error\":\"moved\",\(front())}"); exit(1) }
+  if !test, let want = option("--pid").flatMap({ Int32($0) }), let now = NSWorkspace.shared.frontmostApplication, now.processIdentifier != want {
+    say("{\"error\":\"moved\",\(front())}")
+    exit(1)
+  }
+  // What's there now, every item and every type of each, to put back.
+  let saved = (pb.pasteboardItems ?? []).map { item in item.types.compactMap { t in item.data(forType: t).map { (t, $0) } } }
+  let promised = Promised(text)
+  let item = NSPasteboardItem()
+  item.setDataProvider(promised, forTypes: [.string])
+  item.setData(Data(), forType: TRANSIENT)
+  pb.clearContents()
+  pb.writeObjects([item])
+  let ours = pb.changeCount
+  let v = keyForV()
+  if test { say("{\"posted\":true,\"key\":\(v)}") } else { pressPaste(v) }
+  pump((Double(option("--wait") ?? "") ?? 2000) / 1000, until: { promised.reads > 0 })
+  let read = promised.reads > 0
+  // It may ask again (for another type, or a second look) a moment later.
+  if read { pump((Double(option("--settle") ?? "") ?? 250) / 1000) }
+  var restored = false
+  // Only while the clipboard is still ours: something copied meanwhile stays.
+  if pb.changeCount == ours {
+    pb.clearContents()
+    if read {
+      pb.writeObjects(saved.map { types in
+        let it = NSPasteboardItem()
+        for (t, d) in types { it.setData(d, forType: t) }
+        return it
+      })
+      restored = true
+    } else {
+      // Nothing read it (no text field there, or an app slow to answer): the text stays, to paste by
+      // hand. Put back now, what you had copied would be what a slow app pastes.
+      pb.setString(text, forType: .string)
+    }
+  }
+  say("{\"pasted\":true,\"read\":\(read),\"restored\":\(restored)}")
+  exit(0)
+}
+
+// The tests' pasteboard: read as an app pasting would, written, let go.
+func boardTool() -> Never {
+  guard args.count >= 3, option("--board") != nil, let pb = board() else { say("{\"error\":\"board\"}"); exit(2) }
+  switch args[2] {
+  case "read":
+    let text = pb.string(forType: .string) ?? ""
+    let types = (pb.pasteboardItems ?? []).flatMap { $0.types.map { $0.rawValue } }
+    let list = types.map { quote($0) }.joined(separator: ",")
+    say("{\"text\":\(quote(text)),\"items\":\(pb.pasteboardItems?.count ?? 0),\"types\":[\(list)],\"change\":\(pb.changeCount)}")
+  case "write":
+    let text = String(decoding: FileHandle.standardInput.readDataToEndOfFile(), as: UTF8.self)
+    let first = NSPasteboardItem()
+    first.setString(text, forType: .string)
+    first.setData(Data("extra".utf8), forType: NSPasteboard.PasteboardType("dev.bridge-ai.test.extra"))
+    let second = NSPasteboardItem()
+    second.setString("second item", forType: .string)
+    pb.clearContents()
+    pb.writeObjects([first, second])
+    say("{\"change\":\(pb.changeCount)}")
+  case "free":
+    pb.releaseGlobally()
+    say("{\"ok\":true}")
+  default:
+    exit(2)
+  }
+  exit(0)
+}
+
 if args.count >= 2 && args[1] == "front" {
   say("{\(front())}")
   exit(0)
 }
+if args.count >= 2 && args[1] == "paste" { paste() }
+if args.count >= 2 && args[1] == "board" { boardTool() }
 guard args.count >= 4, args[1] == "hotkey", let code = UInt32(args[2]), let mods = UInt32(args[3]) else {
-  FileHandle.standardError.write("usage: bridgekeys hotkey <keycode> <modifiers> | bridgekeys front\n".data(using: .utf8)!)
+  FileHandle.standardError.write("usage: bridgekeys hotkey <keycode> <modifiers> | bridgekeys front | bridgekeys paste [--pid <pid>]\n".data(using: .utf8)!)
   exit(2)
 }
 

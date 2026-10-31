@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import Icon, { StatusDot } from '../components/Icon.jsx'
 import { VoiceSetup, MicFix } from '../components/Composer.jsx'
-import { api } from '../api.js'
+import { api, settingsChanged } from '../api.js'
 import { store } from '../components/layout.jsx'
 import { keyLabel } from '../../shared/dictation/keys.js'
 import { useDictation, configure, press, release, finish, cancel, dismiss, retry, keysPlatform, dictationKey } from './controller.js'
@@ -12,23 +12,47 @@ import './dictation.css'
 // you're in when you press the dictation key there, without taking the keyboard from it. While you
 // talk: the level and who it's for. Then the text, to Send to that agent (the one you last looked at
 // in Bridge AI, or the chief of staff: Settings › Voice), to another (To ▾), to Copy, or to finish
-// in Bridge AI. Nothing is typed into the other app (that's for later, and needs a permission).
+// in Bridge AI. With "Where I'm typing" picked in Settings › Voice, the desktop app pastes it into the
+// app you were in instead (hudPaste), and this says so; when it can't (no Accessibility yet on a Mac,
+// a password field, another app in front by then), the text stays here to copy or send, with one
+// line saying why. After a Copy, it asks once whether to paste for you next time.
 // The desktop app tells it when the key goes down and up (bridge-dictate-key events, as in the main
 // window); a press from before it was ready comes from hudReady().
 const app = () => window.bridgeApp || {}
 const nameOf = (a) => (a.chief ? t('Chief of Staff') : a.title || a.tab || a.workspace || a.paneId)
+const pasteKey = () => (keysPlatform() === 'darwin' ? '⌘V' : 'Ctrl+V')
+// Why it wasn't pasted (desktop/dictation.js's answers).
+const WHY = {
+  accessibility: () => t('Pasting needs Accessibility: turn it on in Settings › Voice.'),
+  // macOS's Secure Input: a password field has the keyboard, or an app turned it on for itself
+  // (Terminal's Secure Keyboard Entry), which covers every app while it's on.
+  secure: () => t('Secure input is on (a password field, or Secure Keyboard Entry), so it wasn\'t pasted.'),
+  moved: () => t('Another app is in front now, so it wasn\'t pasted.'),
+  focus: () => t('Bridge AI was in front, so it wasn\'t pasted.'),
+  failed: () => t('Couldn\'t paste it there.'),
+}
 
 export default function Hud() {
   const s = useDictation()
   const [conf, setConf] = useState(null)
+  const [st, setSt] = useState(null) // the desktop app's status: { paste: { can, allowed, asks, … } }
   const [agents, setAgents] = useState([])
   const [to, setTo] = useState(undefined) // a pane id, or null for "pick one"
   const [picking, setPicking] = useState(false)
   const [done, setDone] = useState(null) // what was done with the text, said for a moment
   const [err, setErr] = useState(null)
+  const [into, setInto] = useState(null) // the app it's pasted into, by name (a Mac)
+  const [pasting, setPasting] = useState(false)
+  const [why, setWhy] = useState(null) // why it wasn't pasted
+  const [offer, setOffer] = useState(false) // paste it next time?
   const card = useRef(null)
   const timer = useRef(null)
+  // This press's words, straight from the key: not after a download or Try again, when you've long
+  // moved on and pasting would land wherever you are now.
+  const fresh = useRef(false)
+  const pasted = useRef(0) // the result last pasted (its time), so it's pasted once
 
+  const loadStatus = () => app().dictateStatus?.().then((x) => { if (x) setSt(x) }, () => {})
   // Who it's for when it opens: the setting's choice (read again each time: it may have changed in
   // Settings since this window opened), among the agents running now.
   const pickTarget = async () => {
@@ -44,20 +68,27 @@ export default function Hud() {
   useEffect(() => {
     document.title = t('Dictation')
     api('/config').then((c) => { const d = c.dictation || {}; setConf(d); configure(d) }).catch(() => setConf({}))
-  }, [])
-  // The key, from the desktop app (or a test).
+    loadStatus()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  // The key, from the desktop app (or a test). app: the app in front, when the desktop app knows it.
   useEffect(() => {
-    const begin = (at) => { clearTimeout(timer.current); setDone(null); setErr(null); setPicking(false); press({ kind: 'hud' }, at); pickTarget() }
+    const begin = (at, name) => {
+      clearTimeout(timer.current); setDone(null); setErr(null); setPicking(false); setWhy(null); setOffer(false); setPasting(false)
+      setInto(name || null)
+      fresh.current = true
+      press({ kind: 'hud' }, at); pickTarget(); loadStatus()
+    }
     const on = (e) => {
       const d = e.detail || {}
-      if (d.type === 'down') begin(d.at)
+      if (d.type === 'down') begin(d.at, d.app)
       else if (d.type === 'up') release(d.at)
       else if (d.type === 'cancel') { cancel(); hide() }
     }
     window.addEventListener('bridge-dictate-key', on)
-    app().hudReady?.().then((p) => { if (p?.down) { begin(p.down); if (p.up) release(p.up) } }).catch(() => {})
+    app().hudReady?.().then((p) => { if (p?.down) { begin(p.down, p.app); if (p.up) release(p.up) } }).catch(() => {})
     return () => window.removeEventListener('bridge-dictate-key', on)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (s.setup || s.note) fresh.current = false }, [s.setup, s.note])
   // The desktop app holds Esc for us while we listen (and lets it go after), and fits the window.
   const phase = s.phase !== 'idle' ? s.phase : s.result ? 'result' : s.note || s.setup ? 'note' : 'idle'
   useEffect(() => { app().hudPhase?.(phase) }, [phase])
@@ -71,10 +102,32 @@ export default function Hud() {
     return () => ro.disconnect()
   }, [])
 
-  const hide = () => { setPicking(false); dismiss(); app().hudHide?.() }
+  const hide = () => { setPicking(false); setOffer(false); dismiss(); app().hudHide?.() }
   const later = (ms) => { clearTimeout(timer.current); timer.current = setTimeout(() => { setDone(null); hide() }, ms) }
   const target = agents.find((a) => a.paneId === to) || null
   const text = s.result?.text || ''
+  const canPaste = !!st?.paste?.can && !!app().hudPaste
+  const pasteOn = conf?.to === 'paste' && canPaste
+  // Where I'm typing: the text, as soon as it's here, pasted by the desktop app. Decided once, when
+  // it arrives (picking "Paste it" afterwards doesn't paste what's already here).
+  useEffect(() => {
+    const r = s.result
+    if (!r?.text || pasted.current === r.at) return
+    pasted.current = r.at
+    const now = fresh.current
+    fresh.current = false
+    if (!pasteOn || !now) return
+    if (!st.paste.allowed) { setWhy('accessibility'); return }
+    setPasting(true)
+    app().hudPaste(r.text).then((x) => {
+      setPasting(false)
+      if (x?.pasted) {
+        // Nothing took it (no text field there): it's on the clipboard to paste by hand.
+        if (x.read === false) { setDone(t('Nothing took it there, so it\'s on the clipboard: press {key} to paste it.', { key: pasteKey() })); later(3500) }
+        else { setDone(into ? t('Pasted into {app}', { app: into }) : t('Pasted')); later(900) }
+      } else setWhy(WHY[x?.error] ? x.error : x?.error === 'off' ? null : 'failed')
+    }, () => { setPasting(false); setWhy('failed') })
+  }, [s.result?.at]) // eslint-disable-line react-hooks/exhaustive-deps
   const send = async () => {
     if (!target || !text) return
     setErr(null)
@@ -91,13 +144,35 @@ export default function Hud() {
       if (app().hudCopy) await app().hudCopy(text)
       else await navigator.clipboard.writeText(text)
       setDone(keysPlatform() === 'darwin' ? t('Copied. Press ⌘V to paste it.') : t('Copied. Press Ctrl+V to paste it.'))
-      later(2200)
+      // Asked once: paste it for you next time? (Only where this computer can.)
+      if (canPaste && conf?.to !== 'paste' && !conf?.offeredPaste) { setOffer(true); later(15000) } else later(2200)
     } catch (e) { setErr(e.message) }
+  }
+  const answer = async (yes) => {
+    setOffer(false)
+    const patch = yes ? { to: 'paste', offeredPaste: true } : { offeredPaste: true }
+    const next = { ...(conf || {}), ...patch }
+    setConf(next)
+    configure(next)
+    await api('/settings', { method: 'PATCH', body: { dictation: patch } }).then(settingsChanged, () => {})
+    if (!yes) { later(400); return }
+    const now = await app().dictateConfigure?.(next).catch(() => null)
+    if (now) setSt(now)
+    // A Mac: macOS asks now (Accessibility), with the tile beside System Settings.
+    if (now?.paste?.asks === 'accessibility' && !now.paste.allowed) {
+      await app().pasteAsk?.().catch(() => null)
+      setDone(t('Turn on Bridge AI under Accessibility when macOS asks, and it pastes from next time.'))
+      later(6000)
+    } else { setDone(t('From next time, it\'s pasted where you\'re typing.')); later(2500) }
   }
   const edit = () => { app().hudOpen?.({ paneId: target?.paneId, text }); hide() }
   const label = keyLabel(dictationKey(conf), keysPlatform())
+  // Pasting where you're typing, allowed: no agent to pick while it listens.
+  const intoApp = pasteOn && st?.paste?.allowed && !why
 
-  const toChip = (
+  const toChip = intoApp ? (
+    <span className="hud-into" title={t('Pasted where you\'re typing')}>{into ? t('Into {app}', { app: into }) : t('Where you\'re typing')}</span>
+  ) : (
     <span className="hud-to">
       <button type="button" className="hud-to-btn" data-pane={target?.paneId || ''} onClick={() => setPicking((v) => !v)} aria-haspopup="menu" aria-expanded={picking}>
         {t('To:')} <b>{target ? nameOf(target) : t('pick an agent')}</b> <Icon name="down" size={11} />
@@ -134,11 +209,19 @@ export default function Hud() {
           <div className="hud-row">{toChip}<span className="grow" /><button type="button" className="win-btn" onClick={hide} aria-label={t('Close')} title={t('Close')}><Icon name="x" size={12} /></button></div>
           <p className="hud-text">{text}</p>
           {err && <p className="error-text small">{err}</p>}
-          {done ? <p className="hud-done" role="status"><Icon name="check" size={12} /> {done}</p> : (
+          {why && <p className="hud-why small" role="status"><Icon name="info" size={12} /> {WHY[why]()}</p>}
+          {pasting ? <p className="hud-hint"><Icon name="refresh" size={12} className="spin" /> {t('Pasting…')}</p> : done ? <p className="hud-done" role="status"><Icon name="check" size={12} /> {done}</p> : (
             <div className="hud-actions">
               {app().hudOpen && <button type="button" className="btn small" onClick={edit} disabled={!target}>{t('Edit in Bridge AI')}</button>}
               <button type="button" className="btn small" onClick={copy}>{t('Copy')}</button>
               <button type="button" className="btn small primary" onClick={send} disabled={!target}>{t('Send')}</button>
+            </div>
+          )}
+          {offer && (
+            <div className="hud-row hud-offer" role="group" aria-label={t('Paste it for you next time?')}>
+              <span className="hud-note">{t('Paste it for you next time?')}{st?.paste?.asks === 'accessibility' && !st.paste.allowed ? ` ${t('macOS asks once to allow it.')}` : ''}</span>
+              <button type="button" className="comp-text-btn" onClick={() => answer(false)}>{t('Not now')}</button>
+              <button type="button" className="btn small primary" onClick={() => answer(true)}>{t('Paste it')}</button>
             </div>
           )}
         </>

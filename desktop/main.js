@@ -295,6 +295,8 @@ const TILE_STEPS = {
   microphone: { text: `Turn on ${APP_NAME} in the list above` },
   automation: { text: `Under ${APP_NAME}, turn on Finder` },
   notifications: { text: `Turn on Allow notifications for ${APP_NAME}` },
+  // Dictation's "Where I'm typing" (dictation.js): listed already, by macOS's own question.
+  accessibility: { text: `Turn on ${APP_NAME} in the list above` },
 }
 let tile = null // { win, pane, timer, poll, icon }
 function closeTile() {
@@ -303,9 +305,11 @@ function closeTile() {
   if (!tile.win.isDestroyed()) tile.win.close()
   tile = null
 }
-// Access on yet? The server answers for the folders it reads; the app asks macOS for the mic.
+// Access on yet? The server answers for the folders it reads; the app asks macOS for the mic and
+// Accessibility (without asking you).
 async function tileDone(pane) {
   if (pane === 'microphone') return systemPreferences.getMediaAccessStatus('microphone') === 'granted'
+  if (pane === 'accessibility') return systemPreferences.isTrustedAccessibilityClient(false)
   try {
     const r = await fetch(`${URL_BASE}/api/fix/check?pane=${encodeURIComponent(pane)}`, { signal: AbortSignal.timeout(20000) })
     const d = r.ok ? await r.json() : null
@@ -809,5 +813,5 @@ app.whenReady().then(() => {
   // The dictation key from any app (dictation.js): the main window, an agent's own window and
   // another device's window take it as their own when they're in front.
   const ours = (w) => w === win || [...pops.values(), ...machineWins.values()].includes(w)
-  dictation.start({ electron, ROOT, DATA, URL_BASE, preload: path.join(__dirname, 'preload.js'), isOurs: ours, tellMain }).catch((e) => console.error('dictation:', e.message))
+  dictation.start({ electron, ROOT, DATA, URL_BASE, preload: path.join(__dirname, 'preload.js'), isOurs: ours, tellMain, askAccess: showTile, trusted: fromApp }).catch((e) => console.error('dictation:', e.message))
 })

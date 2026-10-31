@@ -49,8 +49,12 @@ else contextBridge.exposeInMainWorld('bridgeApp', {
   watching: (on) => ipcRenderer.invoke('bridge:watching', !!on),
   // Dictation's key from other apps (Settings › Voice), and its window (?dictate=1): what was
   // pressed before it was ready, its size, whether it's listening (Esc is held for it then), hiding,
-  // copying, and opening the agent in the main window.
+  // copying, and opening the agent in the main window. Pasting where you're typing in another app:
+  // the text pasted there, whether it's allowed (a Mac's Accessibility), and asking for it.
   dictateStatus: () => ipcRenderer.invoke('bridge:dictate-status'),
+  hudPaste: (text) => ipcRenderer.invoke('bridge:hud-paste', String(text)),
+  pasteAccess: () => ipcRenderer.invoke('bridge:paste-access'),
+  pasteAsk: () => ipcRenderer.invoke('bridge:paste-ask'),
   dictateConfigure: (s) => ipcRenderer.invoke('bridge:dictate-configure', s),
   hudReady: () => ipcRenderer.invoke('bridge:hud-ready'),
   hudSize: (w, h) => ipcRenderer.send('bridge:hud-size', w, h),
