@@ -10,7 +10,7 @@ import { t, tx, locale } from '../i18n/index.js'
 // each one is, whichever machine the page shows.
 
 const OS_LABEL = { mac: 'Mac', windows: 'Windows', linux: 'Linux' }
-const ago = (iso) => {
+export const ago = (iso) => {
   if (!iso) return ''
   const s = (Date.now() - new Date(iso).getTime()) / 1000
   return s < 90 ? t('just now') : s < 3600 ? t('{n} min ago', { n: Math.round(s / 60) }) : s < 86400 ? t('{n} h ago', { n: Math.round(s / 3600) }) : new Date(iso).toLocaleDateString(locale(), { month: 'short', day: 'numeric' })

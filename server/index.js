@@ -76,6 +76,7 @@ import * as cloud from './cloud.js'
 import { makeModels, forLaunch } from './models.js'
 import { makeHandoff } from './handoff.js'
 import * as asks from './asks.js'
+import * as needsYou from './needsyou.js'
 
 ensureDir(DATA)
 // Meetings, transcripts, settings and keys: for you only, not other people with an account on this
@@ -1596,11 +1597,38 @@ app.post('/api/machines/asks/:id', wrap((req) => { relay.answerAsk(req.params.id
 // An ask reaches your phones too, so you can allow it from there.
 relay.whenAsked((a) => notify.send({ kind: 'machine', title: `${a.name} asks to link`, body: `Allow it in Bridge AI if both devices show ${a.code}.`, url: '/#settings/machines', tag: `machine-ask-${a.id}` }).catch(() => {}))
 relay.whenPaired((d) => notify.send({ kind: 'machine', title: `${d.name} is paired`, body: 'If that wasn\'t you, remove it in Settings › Devices.', url: '/#settings/machines', tag: `paired-${d.id}` }).catch(() => {}))
-// What this device tells the others: its agents, for their sidebars.
+// What this device tells the others: its agents, for their sidebars, and what waits on you here,
+// for their needs-you inboxes.
 machines.useSummary(async () => {
   const f = await fleetView()
-  return { runtime: rt.name, counts: f.counts, agents: f.agents.slice(0, 40).map((a) => ({ paneId: a.paneId, title: a.title, status: a.status, kind: a.kind, kindLabel: a.kindLabel, chief: !!a.chief })) }
+  const needs = await waiting.items().catch(() => [])
+  return { runtime: rt.name, counts: f.counts, agents: f.agents.slice(0, 40).map((a) => ({ paneId: a.paneId, title: a.title, status: a.status, kind: a.kind, kindLabel: a.kindLabel, chief: !!a.chief })), needs }
 })
+
+// ---------- What needs you (needsyou.js) ----------
+// The inbox: this device's items and your other devices' (from what each last said, asked again
+// while you're looking). Each is answered on its own device: an item here with the routes below, one
+// elsewhere with the same routes at /m/<id>/ (machines.js), which reach that device.
+const waiting = needsYou.make({ rt, fleet: fleetView })
+app.get('/api/needs-you', wrap(async (req) => {
+  const fresh = String(req.query.fresh || '')
+  await machines.fresh(fresh ? { only: fresh, maxAge: 0, wait: 4000 } : { maxAge: req.query.live ? 2500 : 6000 })
+  const name = relay.thisName()
+  const here = (await waiting.items()).map((i) => ({ ...i, machine: null, device: name, online: true }))
+  const linked = machines.list().filter((m) => m.state === 'linked')
+  const there = linked.flatMap((m) => (Array.isArray(m.needs) ? m.needs : needsYou.fromAgents(m.agents))
+    .map((i) => ({ ...i, machine: m.id, device: m.name, online: !!m.online, asOf: m.at, old: !Array.isArray(m.needs) })))
+  return {
+    items: needsYou.order([...here, ...there]),
+    devices: [{ id: null, name, online: true }, ...linked.map((m) => ({ id: m.id, name: m.name, online: !!m.online, lastSeen: m.lastSeen, at: m.at }))],
+  }
+}))
+app.post('/api/needs-you/answer', wrap(async (req) => {
+  const r = await waiting.answer(req.body || {})
+  if (r.ok) pushFleet()
+  return r
+}))
+app.post('/api/needs-you/clear', wrap((req) => waiting.clear(req.body?.id)))
 app.post('/api/relay/deploy', wrap((req) => { onComputer(req); return relay.deploy({ method: req.body?.method, token: req.body?.token, account: req.body?.account }) }))
 app.post('/api/relay/update', wrap((req) => { onComputer(req); return relay.update() }))
 app.post('/api/relay/pair', wrap((req) => { onComputer(req); return req.body?.stop ? relay.stopPairing() : relay.pair() }))

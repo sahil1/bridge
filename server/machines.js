@@ -364,6 +364,8 @@ export function list() {
       state: m.state, online: !!l?.session, lastSeen: m.lastSeen || null, addedAt: m.addedAt,
       code: m.state === 'asking' ? m.ask?.code || null : null, error: m.state === 'linked' && l?.session ? null : l?.error || null,
       counts: s?.counts || {}, agents: s?.agents || [],
+      // What waits on you there (null from a Bridge AI too old to say), and when it last said.
+      needs: s?.needs || null, at: s?.at ? new Date(s.at).toISOString() : null,
       about: s?.about || null, systemName: s?.systemName || null, safety: safety(m.hostKey),
     }
   })
@@ -600,15 +602,30 @@ export const summary = async () => {
   const s = await getSummary()
   return { ...here(), ...s, about: { ...(await about()), runtime: s.runtime || null } }
 }
-async function refresh(m) {
+const asking = new Map() // machine id -> its summary on the way, so a burst of asks makes one call
+function refresh(m) {
+  if (!asking.has(m.id)) asking.set(m.id, refreshNow(m).finally(() => asking.delete(m.id)))
+  return asking.get(m.id)
+}
+async function refreshNow(m) {
   const l = links.get(m.id)
   if (!l?.session) return
   const s = await l.call('GET', '/api/machines/summary', undefined, 12000)
-  kept.set(m.id, { name: s.name, os: s.os, version: s.version, counts: s.counts || {}, agents: (s.agents || []).slice(0, 40), about: s.about || null, systemName: s.systemName || null, at: Date.now() })
+  kept.set(m.id, { name: s.name, os: s.os, version: s.version, counts: s.counts || {}, agents: (s.agents || []).slice(0, 40), needs: Array.isArray(s.needs) ? s.needs.slice(0, 60) : null, about: s.about || null, systemName: s.systemName || null, at: Date.now() })
   if (s.name && s.name !== m.name) { m.name = String(s.name).slice(0, 60); save() }
   if (s.os !== m.os || s.version !== m.version) { m.os = s.os; m.version = s.version; save() }
 }
 setInterval(() => { for (const m of conf.machines) if (m.state === 'linked') refresh(m).catch(() => {}) }, 15000).unref()
+// Fresher news while you're looking (the needs-you inbox): each device online whose last word is
+// older than maxAge (or only the one named, after you answered something there) is asked again,
+// waiting at most `wait` for the answers so a slow device doesn't hold up the rest.
+export async function fresh({ only = null, maxAge = 6000, wait = 1500 } = {}) {
+  const due = conf.machines.filter((m) => m.state === 'linked' && links.get(m.id)?.session && (!only || m.id === only) && Date.now() - (kept.get(m.id)?.at || 0) > maxAge)
+  if (!due.length) return
+  let t
+  await Promise.race([Promise.allSettled(due.map((m) => refresh(m))), new Promise((r) => { t = setTimeout(r, wait) })])
+  clearTimeout(t)
+}
 
 // ---------- start ----------
 export function start() {

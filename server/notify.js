@@ -124,7 +124,13 @@ function buttons(a, q) {
   const claims = { p: a.paneId, s: a.seq, h: q.id, i: crypto.randomBytes(9).toString('base64url'), x: Date.now() + TOKEN_MS }
   return q.simple.map((o, j) => ({ action: `a${j}`, title: o.title, token: token({ ...claims, k: o.n }) }))
 }
-const linkTo = (paneId) => `/?agent=${encodeURIComponent(paneId)}&ask=1`
+// The app opens its needs-you inbox at that agent's question (older apps open the agent).
+export const linkTo = (paneId) => `/?agent=${encodeURIComponent(paneId)}&ask=1&inbox=1`
+// What else waits on you, under a needs-you notification's question.
+export function alsoWaiting(agents, a) {
+  const more = (agents || []).filter((x) => x !== a && x.paneId !== a.paneId && x.status === 'blocked' && !isMuted(x.paneId)).length
+  return more ? `\n${more === 1 ? '1 more waits on you' : `${more} more wait on you`}` : ''
+}
 
 // A button was pressed: type that answer if the same question is still waiting, else say why
 // (and where to open the app instead).
@@ -137,16 +143,23 @@ export async function answer(t) {
   if (c.x < now) return { ok: false, why: 'expired', url }
   if (used.has(c.i)) return { ok: false, why: 'used', url }
   used.set(c.i, c.x)
-  const a = (await rt.fleet()).agents.find((x) => x.paneId === c.p)
-  if (!a || a.status !== 'blocked' || a.seq !== c.s) return { ok: false, why: 'changed', url }
-  const q = question(await rt.read(c.p, 60))
-  const pick = q?.id === c.h && q.simple?.find((o) => o.n === c.k)
-  if (!pick) return { ok: false, why: 'changed', url }
-  await rt.input(c.p, pick.steps || [{ keys: [c.k] }])
+  return { ...(await pick(c.p, { seq: c.s, qid: c.h, n: c.k })), url }
+}
+
+// Type one of a question's simple answers (n), if the agent is still waiting on that same question
+// (qid, and seq: the wait it was asked in). The needs-you inbox answers this way too (needsyou.js).
+export async function pick(paneId, { seq, qid, n }) {
+  if (!rt) return { ok: false, why: 'changed' }
+  const a = (await rt.fleet()).agents.find((x) => x.paneId === paneId)
+  if (!a || a.status !== 'blocked' || (seq != null && a.seq !== seq)) return { ok: false, why: 'changed' }
+  const q = question(await rt.read(paneId, 60))
+  const o = q?.id === qid && q.simple?.find((x) => x.n === n)
+  if (!o) return { ok: false, why: 'changed' }
+  await rt.input(paneId, o.steps || [{ keys: [n] }])
   // Still asking the same thing a moment later: the keys didn't take. Over to the app.
   await new Promise((r) => setTimeout(r, 800))
-  if (question(await rt.read(c.p, 60))?.id === c.h) return { ok: false, why: 'not-taken', url }
-  return { ok: true, answered: pick.title, url }
+  if (question(await rt.read(paneId, 60))?.id === qid) return { ok: false, why: 'not-taken' }
+  return { ok: true, answered: o.title }
 }
 
 // ---------- Agents ----------
@@ -167,8 +180,10 @@ export function onFleet(fleet, cfg = {}) {
     const label = a.chief ? (a.thread && !a.thread.main ? `Chief of Staff · ${a.thread.name}` : 'Chief of Staff') : a.title || a.tab || a.workspace || 'An agent'
     const where = a.cloud ? [`${a.cloud.label} cloud`, a.cloud.repo].filter(Boolean).join(' · ') : [a.workspace, a.tab && a.tab !== label ? a.tab : null].filter(Boolean).join(' › ')
     if (a.status === 'blocked' && want.needsYou !== false) {
-      // Say what it's asking, so you know whether it can wait.
-      asking(a).then((q) => send({ kind: 'needs-you', title: `${label} needs you`, body: q?.text || where || 'Open Bridge AI to answer', paneId: a.paneId, url: linkTo(a.paneId), tag: `agent-${a.paneId}`, actions: want.actions === false ? [] : buttons(a, q), ...reach(cfg) })).catch(() => {})
+      // Say what it's asking, so you know whether it can wait, and what else waits (the inbox it
+      // opens has them all).
+      const also = alsoWaiting(fleet.agents, a)
+      asking(a).then((q) => send({ kind: 'needs-you', title: `${label} needs you`, body: `${q?.text || where || 'Open Bridge AI to answer'}${also}`, paneId: a.paneId, url: linkTo(a.paneId), tag: `agent-${a.paneId}`, actions: want.actions === false ? [] : buttons(a, q), ...reach(cfg) })).catch(() => {})
     } else if (a.status === 'done' && want.finished !== false) {
       send({ kind: 'finished', title: `${label} ${a.cloud?.failed ? 'failed' : 'finished'}`, body: where || 'Open Bridge AI to see the result', paneId: a.paneId, url: `/?agent=${encodeURIComponent(a.paneId)}`, tag: `agent-${a.paneId}`, ...reach(cfg) })
     }
