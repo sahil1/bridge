@@ -1,6 +1,7 @@
 // The demo build (dist-demo: npm run demo:build), served as files with no server behind it, the way
 // Try the demo and the website show it: Home, Meetings with its made-up meetings, search, folders and
-// the archive (kept in the tab), and what needs a computer saying so instead of failing.
+// the archive (kept in the tab), what needs a computer saying so instead of failing, and the
+// needs-you inbox with the made-up agent that waits on you, answered from its own card.
 import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -41,6 +42,15 @@ try {
   await p.click('.mt-row:has-text("Checkout launch sync")')
   ok(!!(await until(async () => /Ship the new checkout on Thursday/.test(await p.innerText('.mt-summary')), 5000)), 'a meeting shows its summary')
   await shot(p, `${tag}demo-meeting`)
+  // The needs-you inbox: the agent waiting on you, on the Studio Mac, with its question's own card.
+  await p.locator('.top-right .needs-chip').click()
+  const ask = p.locator('.ny-panel .ny-item.t-question')
+  await ask.first().waitFor({ timeout: 5000 }).catch(() => {})
+  ok(await ask.count() === 1 && /Studio Mac/.test(await ask.innerText()), 'the needs-you inbox lists the agent waiting on you, on the Studio Mac', await p.locator('.ny-panel').innerText().catch(() => ''))
+  await ask.locator('button', { hasText: 'Answer here…' }).click()
+  ok(!!(await until(async () => (await ask.locator('.qcard .q-opt').count()) > 1, 6000)), 'Answer here… shows its question with the choices it has')
+  await shot(p, `${tag}demo-needs-you`)
+  await p.keyboard.press('Escape')
   ok(errors.length === 0, 'no page errors', errors)
   await ctx.close()
 } catch (e) {
