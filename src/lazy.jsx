@@ -52,6 +52,13 @@ export const PreviewView = wrap(LOADERS.Preview)
 export const CalendarView = wrap(LOADERS.CalendarView)
 export const UsageStats = wrap(LOADERS.UsageStats)
 
+// Whiteboards load only when one is opened, never ahead (Excalidraw is the biggest part of the app),
+// and aren't in the demo or the phone apps' Cloud agents.
+const whiteboard = import.meta.env.MODE !== 'demo' && import.meta.env.MODE !== 'cloud' ? () => import('./components/whiteboard/Whiteboard.jsx') : null
+export const WhiteboardsHome = whiteboard && wrap(whiteboard, 'WhiteboardsHome')
+export const WhiteboardPage = whiteboard && wrap(whiteboard, 'WhiteboardPage')
+export const FileDrawing = whiteboard && wrap(whiteboard, 'FileDrawing')
+
 let preloaded = false
 export function preloadViews() {
   if (preloaded) return

@@ -56,6 +56,7 @@ import * as consult from './consult.js'
 import * as insights from './insights.js'
 import * as chatModels from './chatmodels.js'
 import * as meetings from './meetings.js'
+import * as boards from './boards.js'
 import * as labs from './labs.js'
 import * as meetMemory from './meetmemory.js'
 import * as speech from './speech.js'
@@ -114,7 +115,9 @@ app.use('/m', (req, res) => machines.proxy(req, res))
 // Saving a file from the viewer can send more than the usual 1 MB.
 const jsonSmall = express.json({ limit: '1mb' })
 const jsonFile = express.json({ limit: '6mb' })
-app.use((req, res, next) => (req.method === 'PUT' && /^\/api\/agents\/[^/]+\/file$/.test(req.path) ? jsonFile : jsonSmall)(req, res, next))
+// And a whiteboard, with the pictures pasted into it (boards.js).
+const jsonBoard = express.json({ limit: '45mb' })
+app.use((req, res, next) => (req.method === 'PUT' && /^\/api\/agents\/[^/]+\/file$/.test(req.path) ? jsonFile : /^\/api\/boards(\/|$)/.test(req.path) ? jsonBoard : jsonSmall)(req, res, next))
 
 const wrap = (fn) => async (req, res) => {
   try {
@@ -2058,6 +2061,11 @@ app.post('/api/consult', wrap((req) => consult.ask({ ...(req.body || {}), env: u
 // ---------- Providers and MCP servers (settings) ----------
 providerRoutes(app, { cfg, installed })
 mcpRoutes(app, { cfg, installed })
+
+// ---------- Whiteboards (boards.js) ----------
+// Drawn with the model picked there, else the one meeting notes use.
+boards.setHelpers({ reply: (id, msgs, o) => chatModels.reply(id, msgs, o), pickModel: pickMeetingModel, models: () => chatModels.models(), agentWork: async (pane) => transcript(await findAgent(pane)) })
+boards.routes(app, { wrap, onComputer })
 
 // ---------- Static UI ----------
 
