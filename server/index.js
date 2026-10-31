@@ -313,12 +313,22 @@ app.get('/api/agents/:pane/pr', wrap(async (req) => pr.status(await rootOf(req.p
 app.post('/api/agents/:pane/pr/draft', wrap(async (req) => pr.draft(await rootOf(req.params.pane), { base: req.body?.base })))
 app.post('/api/agents/:pane/pr', wrap(async (req) => pr.create(await rootOf(req.params.pane), req.body || {})))
 app.get('/api/agents/:pane/diff', wrap(async (req) => files.gitDiff(await rootOf(req.params.pane), String(req.query.path || ''))))
+// A file in the agent's folder as it is: in parts when asked (Range: a video's player asks for the
+// part it's at, and a seek is one more ask), read from disk as it goes. ?download=1 saves it.
 app.get('/api/agents/:pane/raw', async (req, res) => {
   try {
-    const { file, type } = await files.rawFile(await rootOf(req.params.pane), String(req.query.path || ''))
-    // SVG can carry script; serve it sandboxed.
-    res.set({ 'Content-Type': type, 'Content-Security-Policy': "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox", 'X-Content-Type-Options': 'nosniff' })
-    res.sendFile(file, { dotfiles: 'allow' }) // a file under .github/ or the like (the path is already checked)
+    const { file, name, type, media } = await files.rawFile(await rootOf(req.params.pane), String(req.query.path || ''))
+    // SVG can carry script; serve it sandboxed. A video or a sound can't, and opened on its own (in a
+    // new tab) its player asks for it again, in parts: not from a sandbox, which this server turns
+    // away as another site.
+    res.set({ 'Content-Type': type, 'Content-Security-Policy': media ? "default-src 'none'; media-src 'self'" : "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox", 'X-Content-Type-Options': 'nosniff' })
+    if (req.query.download === '1') res.attachment(name)
+    res.sendFile(file, { dotfiles: 'allow' }, (err) => { // a file under .github/ or the like (the path is already checked)
+      if (!err || res.headersSent) return
+      // A part past its end: 416, saying how long it is.
+      if (err.status === 416) return res.status(416).set(err.headers || {}).json({ error: 'That part of the file isn\'t there' })
+      res.status(404).json({ error: err.code === 'EISDIR' ? 'Is a folder' : 'Not found' })
+    })
   } catch (err) {
     res.status(404).json({ error: err.message })
   }

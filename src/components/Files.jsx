@@ -23,7 +23,8 @@ import { Handle, usePersisted, useWidth } from './layout.jsx'
 import { api, usePoll, BASE } from '../api.js'
 import PermissionFix, { InstallFix, protectedFolder } from './PermissionFix.jsx'
 import { OfficeView, Menu, menuItems, NameDialog, fileOp, onComputer } from './FileExtras.jsx'
-import { locale } from '../i18n/index.js'
+import { MediaView, PictureView, OtherFile, useSave, canSave, saveLabel } from './FileMedia.jsx'
+import { locale, t } from '../i18n/index.js'
 
 Object.entries({ javascript, typescript, python, json, bash, css, xml, markdown, yaml, sql, go, rust, java, ini, diff: diffLang, dockerfile })
   .forEach(([n, l]) => hljs.registerLanguage(n, l))
@@ -296,7 +297,8 @@ function Viewer({ pane, filePath, onOpenPath, onBack, onMenu, ver }) {
             <Icon name={copied ? 'check' : 'copy'} size={13} />
           </button>
           {!dirty && <button className="win-btn" title="Reload" aria-label="Reload" onClick={() => { load(); setFrameKey((k) => k + 1) }}><Icon name="refresh" size={13} /></button>}
-          {(f?.kind === 'image' || f?.kind === 'pdf' || isHtml) && <a className="win-btn" href={isHtml ? site : raw} target="_blank" rel="noreferrer" title="Open in new tab" aria-label="Open in new tab"><Icon name="external" size={13} /></a>}
+          {f && !['binary', 'video', 'audio'].includes(f.kind) && canSave && <SaveButton f={f} src={raw} />}
+          {(f?.kind === 'image' || f?.kind === 'pdf' || f?.kind === 'video' || f?.kind === 'audio' || isHtml) && <a className="win-btn" href={isHtml ? site : raw} target="_blank" rel="noreferrer" title="Open in new tab" aria-label="Open in new tab"><Icon name="external" size={13} /></a>}
           {f?.kind === 'office' && onComputer && <button className="btn small" onClick={() => fileOp(pane, 'open', filePath).catch((e) => setSaveMsg({ text: e.message }))} title="Open it in the app that usually opens it"><Icon name="external" size={12} /> Open in app</button>}
           {onMenu && <button className="win-btn" title="More" aria-label="More actions for this file" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); onMenu({ path: filePath, name: crumbs.at(-1), dir: false }, { clientX: r.right - 200, clientY: r.bottom + 4 }) }}><Icon name="more" size={14} /></button>}
         </div>
@@ -330,12 +332,26 @@ function Viewer({ pane, filePath, onOpenPath, onBack, onMenu, ver }) {
           ? <HtmlView pane={pane} filePath={f.path} text={dirty ? draft : undefined} reload={frameKey} />
           : <Code text={text} ext={f.ext.slice(1) || f.name.toLowerCase()} />)}
         {f?.truncated && <p className="muted small pad">Showing the first 1 MB, so this file can't be edited here.</p>}
-        {f?.kind === 'image' && <div className="img-view"><img src={raw} alt={f.name} /></div>}
+        {f?.kind === 'image' && <PictureView f={f} src={raw} />}
         {f?.kind === 'pdf' && <iframe className="pdf-view" src={raw} title={f.name} />}
+        {(f?.kind === 'video' || f?.kind === 'audio') && <MediaView f={f} src={raw} />}
         {f?.kind === 'office' && <OfficeView pane={pane} f={f} />}
-        {f?.kind === 'binary' && <div className="viewer-empty"><Icon name="file" size={22} /><p>Binary file, {fmtSize(f.size)}</p></div>}
+        {f?.kind === 'binary' && <OtherFile f={f} src={raw} />}
       </div>
     </div>
+  )
+}
+
+// The head's download button: the file saved on this device, its progress in the button's title.
+function SaveButton({ f, src }) {
+  const { state, start, cancel } = useSave(f, src)
+  const busy = state && state.got != null && !state.done && !state.error
+  const pct = busy && state.total ? Math.round((state.got / state.total) * 100) : 0
+  const label = busy ? t('Downloading, {pct}%. Click to stop.', { pct }) : state?.error || saveLabel()
+  return (
+    <button className={`win-btn ${busy ? 'saving' : ''}`} onClick={busy ? cancel : start} title={label} aria-label={label} style={busy ? { '--pct': `${pct}%` } : undefined}>
+      <Icon name={state?.done ? 'check' : 'download'} size={13} />
+    </button>
   )
 }
 
