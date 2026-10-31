@@ -24,6 +24,7 @@
 // uiohook-napi comes built for each system (Node-API, so any Electron loads it): the app's build
 // doesn't rebuild it (package.json, npmRebuild) and keeps only the system's own (its files lists).
 const fs = require('node:fs')
+const os = require('node:os')
 const path = require('node:path')
 const { spawn, execFile } = require('node:child_process')
 const { pathToFileURL } = require('node:url')
@@ -219,6 +220,13 @@ async function hasPortal() {
   const out = await run('gdbus', ['introspect', '--session', '--dest', dest[0], '--object-path', dest[1]])
     ?? await run('busctl', ['--user', 'introspect', dest[0], dest[1]])
   return out == null ? null : out.includes('org.freedesktop.portal.GlobalShortcuts')
+}
+// Whether a menu entry with the app's ID is installed (desktopName in package.json, which Electron
+// hands on as CHROME_DESKTOP), where the desktop looks for them: true, false, or null (no ID).
+function hasEntry(name = process.env.CHROME_DESKTOP, env = process.env, home = os.homedir()) {
+  if (!name) return null
+  const dirs = [env.XDG_DATA_HOME || path.join(home, '.local', 'share'), ...(env.XDG_DATA_DIRS || '/usr/local/share:/usr/share').split(':')]
+  return dirs.some((d) => d && fs.existsSync(path.join(d, 'applications', name)))
 }
 function loadHook() {
   try { return require('uiohook-napi').uIOhook } catch { return null }
@@ -437,7 +445,7 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, tellMain, askA
     if (process.platform === 'linux') {
       facts.wayland = String(process.env.XDG_SESSION_TYPE || '').toLowerCase() === 'wayland'
       facts.session = process.env.XDG_CURRENT_DESKTOP || ''
-      if (facts.wayland) [facts.portal, facts.wtype] = await Promise.all([hasPortal(), onPath('wtype')])
+      if (facts.wayland) { [facts.portal, facts.wtype] = await Promise.all([hasPortal(), onPath('wtype')]); facts.entry = hasEntry() }
     }
     // Only loaded where it's used: never on a Mac (it asks for Accessibility there) or on Wayland.
     if (process.platform === 'win32' || (process.platform === 'linux' && !facts.wayland)) facts.hook = !!loadHook()
@@ -450,4 +458,4 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, tellMain, askA
 }
 
 // The helper goes with the app (it watches for that), and the shortcuts with will-quit (main.js).
-module.exports = { start, helperSource, hookSource, shortcutSource, helperPaste, keyPaste, typeIn, activeClass }
+module.exports = { start, helperSource, hookSource, shortcutSource, helperPaste, keyPaste, typeIn, activeClass, hasEntry }

@@ -1,7 +1,9 @@
 // Dictation's parts that need no browser, on any platform: the key (its default on each system,
 // what it's called, macOS's and the keyboard hook's codes for it, matching it in the page), where the
 // key works from other apps on each kind of machine (simulated: a Mac with and without the helper,
-// Windows, X11, Wayland on GNOME, KDE and sway, Linux Arm, Docker and a browser), the light cleanup
+// Windows, X11, Wayland on GNOME, KDE and sway, Linux Arm, Docker and a browser), what GNOME needs of
+// the desktop app (its Electron, an application ID GNOME accepts, a menu entry of that name, which
+// install.sh puts in place), the light cleanup
 // (fillers, doubled words, capitals, the full stop, names spelled the way they're written, files
 // said aloud), and how the desktop app hears the key (desktop/dictation.js) with a stand-in keyboard
 // hook and globalShortcut: held, tapped, a key repeating, X11's repeats, another app having it, no
@@ -47,7 +49,10 @@ ok(keys.isKeyUp(ev({ code: 'AltLeft' }), k) && keys.isKeyUp(ev({ code: 'Space' }
 ok(keys.keyFromEvent({ code: 'KeyD', ctrlKey: true, altKey: true }, 'win32') === 'Control+Alt+D' && keys.keyFromEvent({ code: 'Space', altKey: true }, 'darwin') === 'Alt+Space' && keys.keyFromEvent({ code: 'AltLeft', altKey: true }, 'darwin') === null && keys.keyFromEvent({ code: 'KeyD' }, 'darwin') === null, 'a new key picked from what\'s pressed (not modifiers alone, not a bare letter)')
 
 // ---------- Where the key works from other apps ----------
-const G = (m) => globalKey({ desktop: true, electron: 44, ...m })
+// The Electron the desktop app is built with, as its lockfile has it.
+const desktopPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'desktop', 'package.json'), 'utf8'))
+const ELECTRON = Number(JSON.parse(fs.readFileSync(path.join(ROOT, 'desktop', 'package-lock.json'), 'utf8')).packages['node_modules/electron'].version.split('.')[0])
+const G = (m) => globalKey({ desktop: true, electron: ELECTRON, ...m })
 const table = [
   ['macOS, Apple silicon, with the helper', { platform: 'darwin', arch: 'arm64', helper: true }, 'hold', 'bridgekeys'],
   ['macOS, Intel, with the helper', { platform: 'darwin', arch: 'x64', helper: true }, 'hold', 'bridgekeys'],
@@ -58,8 +63,10 @@ const table = [
   ['Linux x64, X11', { platform: 'linux', arch: 'x64', hook: true }, 'hold', 'uiohook'],
   ['Linux x64, X11, without libXtst', { platform: 'linux', arch: 'x64', hook: false }, 'toggle', 'shortcut'],
   ['Linux Arm, X11 (from source; the hook\'s Arm build is x64)', { platform: 'linux', arch: 'arm64', hook: false }, 'toggle', 'shortcut'],
-  ['Wayland, GNOME, Electron 44', { platform: 'linux', arch: 'x64', wayland: true, session: 'ubuntu:GNOME', portal: true }, null],
-  ['Wayland, GNOME, Electron 45', { platform: 'linux', arch: 'x64', wayland: true, session: 'GNOME', portal: true, electron: 45 }, 'toggle', 'shortcut'],
+  ['Wayland, GNOME, installed (its menu entry there)', { platform: 'linux', arch: 'x64', wayland: true, session: 'ubuntu:GNOME', portal: true, entry: true }, 'toggle', 'shortcut'],
+  ['Wayland, GNOME, menu entry unknown', { platform: 'linux', arch: 'x64', wayland: true, session: 'GNOME', portal: true, entry: null }, 'toggle', 'shortcut'],
+  ['Wayland, GNOME, run from source with Electron 44', { platform: 'linux', arch: 'x64', wayland: true, session: 'ubuntu:GNOME', portal: true, entry: true, electron: 44 }, null],
+  ['Wayland, GNOME, no menu entry of its own (from source, or the AppImage opened as it is)', { platform: 'linux', arch: 'x64', wayland: true, session: 'ubuntu:GNOME', portal: true, entry: false }, null],
   ['Wayland, KDE', { platform: 'linux', arch: 'x64', wayland: true, session: 'KDE', portal: true }, 'toggle', 'shortcut'],
   ['Wayland, Hyprland', { platform: 'linux', arch: 'x64', wayland: true, session: 'Hyprland', portal: true }, 'toggle', 'shortcut'],
   ['Wayland, sway (no portal)', { platform: 'linux', arch: 'x64', wayland: true, session: 'sway', portal: false }, null],
@@ -70,7 +77,59 @@ for (const [name, m, mode, via] of table) {
   ok(g.mode === mode && (!mode || g.via === via), `${name}: ${mode ? `${mode === 'hold' ? 'held' : 'tapped'} from any app (${via})` : 'not from other apps (hidden)'}`, g)
 }
 ok(globalKey({ desktop: false, platform: 'linux' }).mode === null && globalKey({ desktop: false, platform: 'darwin', helper: true }).mode === null, 'Docker and a browser: inside Bridge AI only')
-ok(G({ platform: 'linux', wayland: true, session: 'GNOME', portal: true, electron: 45 }).asks && !G({ platform: 'linux', wayland: true, session: 'KDE', portal: true }).asks, 'GNOME asks once to allow the key; KDE doesn\'t')
+ok(G({ platform: 'linux', wayland: true, session: 'GNOME', portal: true, entry: true }).asks && !G({ platform: 'linux', wayland: true, session: 'KDE', portal: true }).asks, 'GNOME asks once to allow the key; KDE doesn\'t')
+ok(ELECTRON >= 45, `the desktop app's Electron (${ELECTRON}) is one GNOME's shortcuts portal answers (45 or later)`)
+
+// GNOME 50 only lets an app have a key when its ID (desktopName, which Electron hands on) is a valid
+// application ID that names an installed menu entry: reverse-DNS, as GLib's g_application_id_is_valid
+// has it. The .deb's entry takes that name (linux.syncDesktopName), and so does the installer's.
+const appId = /^(.+)\.desktop$/.exec(desktopPkg.desktopName || '')?.[1] || ''
+ok(appId.length <= 255 && /^[A-Za-z_-][\w-]*(\.[A-Za-z_-][\w-]*)+$/.test(appId) && desktopPkg.build?.linux?.syncDesktopName === true, 'the desktop app has an application ID GNOME accepts (desktopName), and the .deb\'s menu entry is named for it', { desktopName: desktopPkg.desktopName, syncDesktopName: desktopPkg.build?.linux?.syncDesktopName })
+{
+  // Where the desktop app looks for its menu entry (desktop/dictation.js), with a home of its own.
+  const xdg = path.join(OUT, 'dictation-xdg')
+  fs.rmSync(xdg, { recursive: true, force: true })
+  fs.mkdirSync(path.join(xdg, 'home', '.local', 'share', 'applications'), { recursive: true })
+  fs.mkdirSync(path.join(xdg, 'usr', 'share', 'applications'), { recursive: true })
+  const env = { XDG_DATA_DIRS: path.join(xdg, 'usr', 'share') }
+  const found = (where) => { fs.writeFileSync(path.join(xdg, ...where, 'applications', desktopPkg.desktopName), '[Desktop Entry]\n'); const r = desk.hasEntry?.(desktopPkg.desktopName, env, path.join(xdg, 'home')); fs.rmSync(path.join(xdg, ...where, 'applications', desktopPkg.desktopName)); return r }
+  ok(typeof desk.hasEntry === 'function' && desk.hasEntry(desktopPkg.desktopName, env, path.join(xdg, 'home')) === false && found(['home', '.local', 'share']) === true && found(['usr', 'share']) === true && desk.hasEntry('', env, xdg) === null, 'the desktop app finds its menu entry in ~/.local/share or the system\'s, and knows when there\'s none')
+}
+
+// install.sh on Linux without apt (the AppImage, unpacked into ~/.local), run with a stand-in AppImage
+// and only the few programs it needs (so never apt or sudo), as if on a Linux x64 machine: the menu
+// entry takes the name of the one the app comes with, its ID, and an older entry goes; an older
+// version's (bridge-ai.desktop) keeps that name.
+if (process.platform === 'win32') skip('install.sh names the menu entry for the app', 'not on Windows (install.ps1 has no menu entry to name)')
+else {
+  const dir = path.join(OUT, 'dictation-install')
+  fs.rmSync(dir, { recursive: true, force: true })
+  const bin = path.join(dir, 'bin')
+  fs.mkdirSync(bin, { recursive: true })
+  for (const t of ['mktemp', 'id', 'rm', 'mkdir', 'cp', 'chmod', 'mv', 'ln']) {
+    const at = ['/bin', '/usr/bin'].map((d) => path.join(d, t)).find((f) => fs.existsSync(f))
+    if (at) fs.symlinkSync(at, path.join(bin, t))
+  }
+  fs.writeFileSync(path.join(bin, 'uname'), '#!/bin/sh\ncase "$1" in -m) echo x86_64 ;; *) echo Linux ;; esac\n', { mode: 0o755 })
+  const install = (entry, name) => {
+    const home = path.join(dir, name)
+    const apps = path.join(home, '.local', 'share', 'applications')
+    fs.mkdirSync(apps, { recursive: true })
+    fs.writeFileSync(path.join(apps, 'bridge-ai.desktop'), '[Desktop Entry]\nName=Bridge AI\n') // from an earlier install
+    // What an AppImage unpacks to (--appimage-extract): the app, its icon and its own menu entry.
+    const image = path.join(dir, `${name}.AppImage`)
+    fs.writeFileSync(image, `#!/bin/sh\n[ "$1" = --appimage-extract ] || exit 1\nmkdir -p squashfs-root\nprintf '#!/bin/sh\\n' > squashfs-root/bridge-ai\nchmod +x squashfs-root/bridge-ai\n: > squashfs-root/bridge-ai.png\nprintf '[Desktop Entry]\\nName=Bridge AI\\n' > 'squashfs-root/${entry}'\n`, { mode: 0o755 })
+    const r = spawnSync('/bin/sh', [path.join(ROOT, 'install.sh')], { encoding: 'utf8', timeout: 30000, env: { PATH: bin, HOME: home, TMPDIR: dir, BRIDGE_FILE: image, BRIDGE_NO_OPEN: '1' } })
+    const files = fs.existsSync(apps) ? fs.readdirSync(apps) : []
+    const text = files.length === 1 ? fs.readFileSync(path.join(apps, files[0]), 'utf8') : ''
+    return { status: r.status, out: `${r.stdout}${r.stderr}`.slice(-600), files, text, home }
+  }
+  const now = install(desktopPkg.desktopName, 'now')
+  ok(now.status === 0 && now.files.join() === desktopPkg.desktopName && now.text.includes(`StartupWMClass=${appId}\n`) && now.text.includes(`Exec="${path.join(now.home, '.local', 'share', 'bridge-ai', 'app', 'bridge-ai')}" %U`), `install.sh: the menu entry is the app's own (${desktopPkg.desktopName}), matched to its windows, and the earlier one is gone`, now)
+  ok(desk.hasEntry?.(desktopPkg.desktopName, {}, now.home) === true, 'and the desktop app finds it there, so GNOME\'s key is offered')
+  const older = install('bridge-ai.desktop', 'older')
+  ok(older.status === 0 && older.files.join() === 'bridge-ai.desktop' && older.text.includes('StartupWMClass=bridge-ai\n'), 'install.sh: an older version, without an ID of its own, keeps bridge-ai.desktop', older)
+}
 
 // ---------- Where pasting where you're typing works ----------
 const P = (m) => pasteInto({ desktop: true, electron: 44, ...m })
