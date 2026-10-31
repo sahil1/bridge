@@ -1139,6 +1139,26 @@ export function createDemo({ everything = true } = {}) {
   const HERE = { name: 'MacBook Pro', os: 'mac', version, relay: 'https://bridge-macbook.example.workers.dev' }
   on('GET', '/machines', () => ({ here: HERE, machines: MACHINES, asks: [], canBeLinked: true }))
   on('GET', '/machines/summary', () => ({ ...HERE, ...summaryOf(FRESH.tabs) }))
+  // The needs-you inbox (server/needsyou.js): what waits on you on this made-up computer. Its
+  // questions are answered from their own card, read from the screen as for real.
+  const cleared = new Set()
+  const base = (p) => String(p || '').split('/').filter(Boolean).pop() || null
+  on('GET', '/needs-you', () => {
+    const items = fleet().agents.filter((a) => (a.status === 'blocked' || a.status === 'done') && !cleared.has(`${a.paneId}@${a.seq}`)).map((a) => {
+      const d = S.agents.get(a.paneId)
+      const agent = { title: a.title, kind: a.kind, kindLabel: a.kindLabel, chief: !!a.chief, project: a.cloud ? base(a.cloud.repo) : a.chief ? null : base(a.worktree?.repo || a.cwd), branch: a.cloud?.branch || a.worktree?.branch || null, account: a.account || null, cloud: a.cloud?.label || null }
+      // The Studio Mac (?m=studio) is the busy one, shown through this one.
+      const head = { id: `${a.paneId}@${a.seq}`, paneId: a.paneId, seq: a.seq, agent, since: iso(d?.since || Date.now()), machine: all ? 'studio' : null, device: all ? 'Studio Mac' : HERE.name, online: true }
+      if (a.status === 'blocked') {
+        if (a.cloud) return { ...head, type: a.cloud.canApprove ? 'permission' : 'question', text: a.cloud.ask, answers: a.cloud.canApprove ? [{ n: 'approve', title: a.cloud.approveLabel || 'Approve' }] : null }
+        return { ...head, type: 'question', text: d?.question?.text || null, qid: 'screen', answers: null }
+      }
+      if (a.cloud?.failed) return { ...head, type: 'failed', text: a.cloud.error || null }
+      return { ...head, type: 'review', text: (d ? preview(d)?.text : cloud.previews()[a.paneId]?.text) || null, pr: a.cloud?.prUrl || null }
+    })
+    return { items, devices: [{ id: null, name: HERE.name, online: true }, ...(all ? [{ id: 'studio', name: 'Studio Mac', online: true }] : [])] }
+  })
+  on('POST', '/needs-you/clear', ({ body }) => { cleared.add(String(body?.id || '')); return ok })
   on('POST', '/machines', () => needs('Linking a device'))
   on('POST', '/machines/ask', () => needs('Linking a device'))
   on('POST', '/machines/invite', () => needs('A link for another device'))
