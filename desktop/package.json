@@ -27,6 +27,7 @@
       "preload.js",
       "tile-preload.js",
       "dictation.js",
+      "contextmenu.js",
       "package.json",
       "!node_modules/uiohook-napi/{libuiohook,src,binding.gyp}{,/**}"
     ],

@@ -6,6 +6,7 @@
 const electron = require('electron')
 const { app, BrowserWindow, Menu, Tray, shell, globalShortcut, Notification, session, nativeTheme, ipcMain, powerMonitor, screen, nativeImage, systemPreferences, dialog, desktopCapturer } = electron
 const dictation = require('./dictation.js')
+const contextMenu = require('./contextmenu.js')
 
 // A picture of part of the window (the Preview tab's app), for sending to an agent. Only this
 // window, only a rectangle of it, only when the page asks.
@@ -805,6 +806,8 @@ app.whenReady().then(() => {
     if (!ownPage(req.frame?.url || '')) return cb({})
     desktopCapturer.getSources({ types: ['screen'] }).then((s) => cb(s[0] ? { video: s[0] } : {}), () => cb({}))
   }, { useSystemPicker: true })
+  // Right-click: spelling suggestions, Cut, Copy and Paste, in every window from here on.
+  contextMenu.attach({ app, Menu, clipboard: electron.clipboard, session })
   buildMenu()
   globalShortcut.register(SHORTCUT, toggleWindow)
   createWindow()
