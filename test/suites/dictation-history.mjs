@@ -69,13 +69,14 @@ try {
   const agentOf = async (pred) => ((await kit.api('/fleet')).agents || []).find(pred)
   const pay = await until(() => agentOf((a) => a.paneId === one.paneId), 30000, 500)
   ok(!!pay, 'a stand-in agent, payments')
-  const payName = pay?.title || pay?.tab
+  // On Windows a stand-in's name is its terminal's title, which changes as it runs: an agent is told
+  // by its pane, and its name only checked to be there.
 
   // ---------- Kept, read back, changed ----------
   const a = await kit.api('/dictations', { text: 'Add a retry to the webhook.', raw: 'um add a retry to the the webhook', ms: 2400, how: 'typed', agent: { id: one.paneId } })
   let l = await list()
   const got = l.items.find((x) => x.id === a.id)
-  ok(a.kept && got?.text === 'Add a retry to the webhook.' && got.raw === 'um add a retry to the the webhook' && got.ms === 2400 && got.how === 'typed' && got.agent?.name === payName, 'kept: the words as put in and as heard, how long, and the agent (named from its pane)', got)
+  ok(a.kept && got?.text === 'Add a retry to the webhook.' && got.raw === 'um add a retry to the the webhook' && got.ms === 2400 && got.how === 'typed' && got.agent?.id === one.paneId && !!got.agent.name, 'kept: the words as put in and as heard, how long, and the agent (named from its pane)', got)
   const files = fs.existsSync(DIR) ? fs.readdirSync(DIR) : []
   ok(files.includes(`${month()}.jsonl`) && fileText().trim().split('\n').length === 1, 'in the data folder, dictations/<month>.jsonl, a line for it', files)
   await kit.api(`/dictations/${a.id}`, { how: 'sent' }, 'PATCH')
@@ -177,6 +178,8 @@ try {
     await p.keyboard.press('ControlOrMeta+K')
     const search = p.locator('[role="dialog"] input').first()
     await search.waitFor({ timeout: 5000 })
+    // The search box has the keyboard before the key goes down (else the words would be for the agent on screen).
+    await until(() => p.evaluate(() => document.activeElement?.closest?.('[role="dialog"]') != null && document.activeElement.tagName === 'INPUT'), 5000, 50)
     said.push('payments retry')
     slow = 1500
     for (const m of MODS) await p.keyboard.down(m)
@@ -225,7 +228,7 @@ try {
     for (const m of [...MODS].reverse()) await p.keyboard.up(m)
     await until(async () => (await box.inputValue()) === 'Ship the fix.', 8000)
     const kept = await until(async () => (await list()).items.find((x) => x.text === 'Ship the fix.'), 5000, 200)
-    ok(!!own && noPill && kept?.agent?.id === one.paneId && kept.agent.name === payName && kept.how === 'typed', 'the message box: its own recording bar (no pill), and kept with its agent', kept)
+    ok(!!own && noPill && kept?.agent?.id === one.paneId && !!kept.agent.name && kept.how === 'typed', 'the message box: its own recording bar (no pill), and kept with its agent', kept)
     await ctx.close()
   }
 
@@ -255,7 +258,7 @@ try {
     said.push(`check the invoices ${mode}`)
     slow = 1200
     await key(p, 'down', SLACK)
-    ok(!!(await until(async () => (await p.locator('.hud .dp-listening .dp-wave').count()) > 0 && (await p.locator('.hud-to-btn').innerText().catch(() => '')).includes(`To ${payName}`), 5000, 100)), `${mode}: from another app, the same pill: "To" the agent you looked at last`, await hud.innerText().catch(() => ''))
+    ok(!!(await until(async () => (await p.locator('.hud .dp-listening .dp-wave').count()) > 0 && (await p.locator('.hud-to-btn').getAttribute('data-pane').catch(() => '')) === one.paneId && /^To \S/.test(await p.locator('.hud-to-btn').innerText().catch(() => '')), 5000, 100)), `${mode}: from another app, the same pill: "To" the agent you looked at last`, [await p.locator('.hud-to-btn').getAttribute('data-pane').catch(() => ''), await hud.innerText().catch(() => '')])
     await sleep(900)
     const pillBox = await hud.boundingBox()
     await p.evaluate(() => { document.querySelector('.hud').dataset.same = '1' })
