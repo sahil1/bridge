@@ -8,7 +8,6 @@ const { app, BrowserWindow, Menu, Tray, shell, globalShortcut, Notification, ses
 const dictation = require('./dictation.js')
 const contextMenu = require('./contextmenu.js')
 const permissions = require('./permissions.js')
-const crashes = require('./crashes.js')
 
 // A picture of part of the window (the Preview tab's app), for sending to an agent. Only this
 // window, only a rectangle of it, only when the page asks.
@@ -23,6 +22,7 @@ const { execFile } = require('node:child_process')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
+const crashes = require('./crashes.js')
 
 // Where Bridge AI's code is: inside the app when built, the repo next to this folder from source.
 // BRIDGE_ROOT overrides both (a built app running your clone, say).
