@@ -3,6 +3,7 @@ import Icon from '../Icon.jsx'
 import { api } from '../../api.js'
 import { useSettings } from './General.jsx'
 import { startTour } from '../Tour.jsx'
+import { t } from '../../i18n/index.js'
 
 const REPO = 'https://github.com/sahil1/bridge'
 
@@ -50,8 +51,10 @@ function Updates() {
             {u.disabled ? <span className="muted small">Update checks are off</span>
               : u.error && !u.latest ? <span className="muted small">Couldn't check for updates ({u.error})</span>
               : u.available ? <span className="st-chip warn"><Icon name="download" size={11} /> {u.latest} is available</span>
+              : u.held ? <span className="st-chip good"><Icon name="check" size={11} /> {t('Up to date for this Mac')}</span>
               : <span className="st-chip good"><Icon name="check" size={11} /> Up to date</span>}
           </div>
+          {u.held && <p className="muted small">{t('Bridge AI {latest} needs macOS {macos} or later, and this Mac has macOS {have}, so Bridge AI stays on {current}, which keeps working. Update macOS in System Settings › General › Software Update to get newer versions.', { latest: u.held.latest, macos: u.held.macos, have: u.held.have, current: u.current })}</p>}
           {u.available && (
             state === 'installing'
               ? <p className="st-note ok"><Icon name="refresh" size={13} /> Updating to {u.latest}. Bridge AI closes and reopens by itself in a few seconds; your agents carry on where they were.</p>

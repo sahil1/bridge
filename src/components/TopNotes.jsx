@@ -12,12 +12,13 @@ import { t } from '../i18n/index.js'
 // be put away; until you've been there, Settings has a dot and opens there too.
 
 // What's been done about an update on this device: "3.7.0:hidden" (put away) or "3.7.0:seen"
-// (About & Updates opened for it). A newer version shows again.
+// (About & Updates opened for it). A newer version shows again. One this Mac's macOS can't open
+// (held) is said the same way, once.
 const NOTE = 'cc-update-note'
 export function useUpdateNote(u) {
   const [note, setNote] = useShared(NOTE, '')
   const [v, state] = String(note || '').split(':')
-  const fresh = !!u?.available && !!u.latest
+  const fresh = (!!u?.available || !!u?.held) && !!u.latest
   const mine = fresh && v === u.latest
   return {
     line: fresh && !mine,
@@ -35,9 +36,13 @@ export default function TopNotes({ update, onUpdate, fleet, conf }) {
       <Quiet name="Restart"><RestartChip line fleet={fleet} runtime={conf?.runtime?.name} keep={!!conf?.runtime?.keep} /></Quiet>
       {note.line && (
         <div className="top-note-row">
-          <button type="button" className="top-note update-note" onClick={() => { note.seen(); onUpdate() }} title={t('Bridge AI {latest} is available (you have {current})', { latest: update.latest, current: update.current })}>
-            <Icon name="download" size={14} /><span className="top-note-text">{t('Bridge AI {version} is available', { version: update.latest })}</span><Icon name="chevron" size={13} className="top-note-go" />
-          </button>
+          {update.held
+            ? <button type="button" className="top-note update-note" onClick={() => { note.seen(); onUpdate() }}>
+              <Icon name="info" size={14} /><span className="top-note-text">{t('Bridge AI {version} needs macOS {macos}', { version: update.latest, macos: update.held.macos })}</span><Icon name="chevron" size={13} className="top-note-go" />
+            </button>
+            : <button type="button" className="top-note update-note" onClick={() => { note.seen(); onUpdate() }} title={t('Bridge AI {latest} is available (you have {current})', { latest: update.latest, current: update.current })}>
+              <Icon name="download" size={14} /><span className="top-note-text">{t('Bridge AI {version} is available', { version: update.latest })}</span><Icon name="chevron" size={13} className="top-note-go" />
+            </button>}
           <button type="button" className="win-btn top-note-x" onClick={note.hide} aria-label={t('Not now')} title={t('Not now')}><Icon name="x" size={14} /></button>
         </div>
       )}

@@ -33,9 +33,9 @@ const parakeet = speech.MODELS.find((m) => m.id === 'parakeet-v3')
 const whisper = speech.MODELS.find((m) => m.id === 'small.en-q5_1')
 const fit = (m, o, model = parakeet) => speech.fitModel(model, { memGB: 16, ...m }, o)
 const COMPUTERS = [
-  ['macOS 13 on Apple Silicon', { platform: 'darwin', arch: 'arm64', os: '13.6' }, true],
+  ['macOS 14 on Apple Silicon', { platform: 'darwin', arch: 'arm64', os: '14.6' }, true],
   ['macOS 26 on Apple Silicon', { platform: 'darwin', arch: 'arm64', os: '26.1' }, true],
-  ['an Intel Mac on macOS 13', { platform: 'darwin', arch: 'x64', os: '13.7' }, true],
+  ['an Intel Mac on macOS 14', { platform: 'darwin', arch: 'x64', os: '14.7' }, true],
   ['the Intel build under Rosetta', { platform: 'darwin', arch: 'x64', os: '15.4', rosetta: true }, true],
   ['Windows x64', { platform: 'win32', arch: 'x64', os: '10.0.22631' }, true],
   ['Windows on Arm, the x64 app emulated', { platform: 'win32', arch: 'x64', os: '10.0.26100', emulated: true }, true],
@@ -101,11 +101,11 @@ try {
   ok(sp.machine.docker === true && sp.machine.arch === 'arm64' && sp.machine.sherpa?.ok === true, 'its diagnostics say what it is, and that sherpa-onnx loaded', sp.machine)
 } finally { docker.stop() }
 
-// An addon that won't load here (as sherpa-onnx's, built for macOS 14, might on macOS 13): tried in
+// An addon that won't load here (as sherpa-onnx's, built for macOS 15 on Intel, might on macOS 14): tried in
 // a process of its own, so the server stays up; Parakeet isn't offered, and Whisper is used.
 const broken = path.join(OUT, 'kits', 'speech-broken-sherpa.cjs')
-fs.writeFileSync(broken, "throw new Error('dlopen(sherpa-onnx.node): Symbol not found: _foo (which was built for macOS 14.0)')\n")
-const nope = await startKit('speech-broken', { env: kitEnv({ BRIDGE_SHERPA: broken, BRIDGE_MACHINE: JSON.stringify({ platform: 'darwin', arch: 'arm64', os: '13.6', docker: false }) }) })
+fs.writeFileSync(broken, "throw new Error('dlopen(sherpa-onnx.node): Symbol not found: _foo (which was built for macOS 15.0)')\n")
+const nope = await startKit('speech-broken', { env: kitEnv({ BRIDGE_SHERPA: broken, BRIDGE_MACHINE: JSON.stringify({ platform: 'darwin', arch: 'x64', os: '14.7', docker: false }) }) })
 try {
   const sp = await nope.api('/speech')
   ok(!sp.local.models.some((m) => /^parakeet/.test(m.id)) && sp.local.model === 'large-v3-turbo-q5_0', 'sherpa-onnx that won\'t load on this computer: no Parakeet in the list, Whisper used', sp.local.models.map((m) => m.id))

@@ -559,6 +559,7 @@ async function checkForUpdates() {
   try { u = await fetch(`${URL_BASE}/api/updates?refresh=1`, { signal: AbortSignal.timeout(20000) }).then((r) => r.json()) } catch (e) { return say({ type: 'warning', message: 'Couldn\'t check for an update', detail: `${APP_NAME} isn't answering yet (${e.message}). Try again in a minute.` }) }
   if (u.error) return say({ type: 'warning', message: 'Couldn\'t check for an update', detail: u.error })
   if (u.disabled) return say({ message: 'Checking for updates is turned off', detail: 'Turn it on in Settings › About.' })
+  if (u.held) return say({ message: `${APP_NAME} ${u.held.latest} needs macOS ${u.held.macos} or later`, detail: `This Mac has macOS ${u.held.have}, so ${APP_NAME} stays on ${u.current}, which keeps working. Update macOS in System Settings › General › Software Update to get newer versions.` })
   if (!u.available) return say({ message: `You're on the latest version (${u.current})` })
   if (u.how !== 'app') return say({ message: `${APP_NAME} ${u.latest} is out`, detail: u.command ? `Update from a terminal:\n${u.command}` : '' })
   const { response } = await say({ message: `${APP_NAME} ${u.latest} is out`, detail: `You have ${u.current}. ${APP_NAME} restarts when the update is in.`, buttons: ['Update now', 'Later'], defaultId: 0, cancelId: 1 })

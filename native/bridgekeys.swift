@@ -44,7 +44,7 @@
 // untrusted or moved acts as if that were so. bridgekeys board read|write|free --board <name> reads
 // that pasteboard as an app pasting would, writes text to it (two items, one with a second type, to
 // check every item and type comes back) and lets it go.
-//   swiftc -O -target arm64-apple-macos13.0 native/bridgekeys.swift -o native/bin/bridgekeys
+//   swiftc -O -target arm64-apple-macos14.0 native/bridgekeys.swift -o native/bin/bridgekeys
 import AppKit
 import Carbon
 

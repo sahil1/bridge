@@ -101,7 +101,9 @@ export const have = (m) => filesOf(m).every((f) => { const n = size(path.join(di
 // ---------- What this computer can run ----------
 // sherpa-onnx's Node addon comes built for these (npm packages sherpa-onnx-<os>-<arch>). On Linux
 // it needs glibc: 2.32 or later for x64 (built on a current Ubuntu), 2.17 for arm64 (manylinux).
-// Windows on Arm runs the x64 app, and with it the x64 addon, under emulation.
+// Windows on Arm runs the x64 app, and with it the x64 addon, under emulation. On a Mac the addon
+// says macOS 14 (Apple Silicon, as Bridge AI) and 15 (Intel): whether it loads on an Intel Mac with
+// macOS 14 is what trying it (asr.probe) finds out.
 const SHERPA = { 'darwin-arm64': {}, 'darwin-x64': {}, 'win32-x64': {}, 'win32-ia32': {}, 'win32-arm64': {}, 'linux-x64': { glibc: '2.32' }, 'linux-arm64': { glibc: '2.17' } }
 // What runs where, for this computer (m: machine()), as { ok, why }. Pure, so tests can ask it
 // about any computer. probe: whether the addon loaded here ({ ok, error }), once it's been tried;
