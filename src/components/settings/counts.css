@@ -1,0 +1,6 @@
+/* Settings › About & Updates › Usage counts (UsageCounts.jsx). */
+.counts-doc { display: grid; gap: 6px; }
+.counts-doc p { margin: 0; }
+.counts-doc pre { max-height: 320px; overflow: auto; margin: 0; }
+.counts-list { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 3px; color: var(--ink-2); }
+.counts-list code { font: 11.5px var(--font-mono); color: var(--ink); }
