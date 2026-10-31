@@ -4,24 +4,28 @@
 // computer awake for your phone, ticked), then setup with nothing installed (each agent can be installed from there, or an API key used), an
 // agent's install (the kit's stand-in installer runs, never the real one) moving its card on to
 // signing in, Node.js installed with one click from a stand-in nodejs.org, on Windows too (and a
-// download that doesn't match its checksum turned away), closing setup, Home with nothing to talk to, New agent, a chat with
-// any model once a key is in, and a key the provider turns down.
+// download that doesn't match its checksum turned away), the recommended Just what agents need
+// itself (on a Mac without Apple's developer tools, simulated: still no password, no terminal,
+// nothing to allow, never the developer tools; Node.js's progress on the Install of an agent that
+// waits for it, and in the top bar once setup is closed, until it's in), closing setup, Home with
+// nothing to talk to, New agent, a chat with any model once a key is in, and a key the provider
+// turns down.
 import fs from 'node:fs'
 import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { startKit, startModel, checks, until, browser, page, shot, IS_WIN, IS_MAC } from '../lib/harness.mjs'
+import { startKit, startModel, checks, until, browser, page, shot, IS_WIN, IS_MAC, devToolsStandIn } from '../lib/harness.mjs'
 
 const { ok, done } = checks('new-install')
 
 // A stand-in nodejs.org: one long-term-support release, built for this computer, as nodejs.org
 // packs it: a .tar.gz with bin/node on macOS and Linux, whose "node" only says its version; a .zip
 // with node.exe at its top on Windows, a copy of the Node.js running this test (so that's the
-// version). bad: the checksum it publishes is wrong.
+// version). bad: the checksum it publishes is wrong. slow: the download takes about sixteen seconds.
 const NODE_V = IS_WIN ? process.version : 'v22.99.0'
-const dist = { bad: false }
+const dist = { bad: false, slow: false }
 const OSN = { darwin: 'darwin', linux: 'linux', win32: 'win' }[process.platform]
 const tarName = `node-${NODE_V}-${OSN}-${process.arch}.${IS_WIN ? 'zip' : 'tar.gz'}`
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-node-'))
@@ -45,6 +49,13 @@ const nodeOrg = http.createServer((req, res) => {
   const send = (type, body) => { res.writeHead(200, { 'content-type': type, 'content-length': Buffer.byteLength(body) }); res.end(body) }
   if (req.url === '/index.json') return send('application/json', JSON.stringify([{ version: NODE_V, lts: 'Test', files: ['osx-arm64-tar', 'osx-x64-tar', 'linux-x64', 'linux-arm64', 'win-x64-zip', 'win-arm64-zip'] }]))
   if (req.url === `/${NODE_V}/SHASUMS256.txt`) return send('text/plain', `${dist.bad ? '0'.repeat(64) : crypto.createHash('sha256').update(tarball).digest('hex')}  ${tarName}\n`)
+  if (req.url === `/${NODE_V}/${tarName}` && dist.slow) {
+    res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': tarball.length })
+    const step = Math.ceil(tarball.length / 40)
+    let at = 0
+    const more = () => { res.write(tarball.subarray(at, at + step)); at += step; if (at < tarball.length) setTimeout(more, 400); else res.end() }
+    return more()
+  }
   if (req.url === `/${NODE_V}/${tarName}`) return send('application/octet-stream', tarball)
   res.writeHead(404).end()
 }).listen(0, '127.0.0.1')
@@ -130,7 +141,7 @@ try {
     await gem.locator('button', { hasText: 'Install Node.js' }).click({ timeout: 8000 })
     const node = await until(async () => { const s = await kit.api('/tools/node'); return s.have && !s.job && s }, 90000)
     ok(node?.ours === NODE_V, 'Install Node.js: it\'s installed in Bridge AI\'s own folder, and found', node || (await kit.api('/tools/node')))
-    ok(!!(await until(async () => /^Install\b(?! Node)/.test((await gem.locator('.signin').innerText().catch(() => '')).trim()), 12000)), 'and the agent\'s card moves on to installing it', await gem.innerText())
+    ok(!!(await until(async () => /^Install\b(?! Node)(?! ·)/.test((await gem.locator('.signin').innerText().catch(() => '')).trim()), 12000)), 'and the agent\'s card moves on to installing it', await gem.innerText())
     await shot(p, `${tag}new-desktop-2b-node`)
     // Then the agent, through npm: with Bridge AI's own download cache (npm's shared one can hold
     // files you can't change), and, where npm's global folder needs an administrator, into ~/.local.
@@ -144,6 +155,50 @@ try {
     ok(errors.length === 0, 'Node.js: no page errors', errors)
     await ctx.close()
     await uninstall('gemini')
+  }
+
+  // ---------- The recommended path, Just what agents need: Node.js, and nothing that asks ----------
+  // On a Mac without Apple's developer tools too: they're for Everything, never this. Node.js's
+  // download (slow here) shows where it's needed: the Install of an agent that waits for it, and,
+  // once setup is closed, the top bar, until it's in.
+  {
+    dist.slow = true
+    const k = await startKit('new-install-basic', { env: ({ bin }) => { if (IS_MAC) devToolsStandIn(bin); return { BRIDGE_NODE_DIST: `http://127.0.0.1:${nodeOrg.address().port}`, ...(IS_WIN ? { BRIDGE_PATH: '' } : {}) } } })
+    const { ctx, p, errors } = await page(b, k.url, LOOKS[1][1])
+    try {
+      await p.waitForSelector('.wiz-levels', { timeout: 15000 })
+      ok(await p.isChecked('input[name="wiz-level"][value="basic"]'), 'recommended: Just what agents need is picked')
+      await p.click('.wiz-foot button:has-text("Set up Node.js")')
+      await p.waitForSelector('.sa-list', { timeout: 10000 })
+      const listed = await p.$$eval('.sa-item b', (l) => l.map((x) => x.innerText))
+      ok(listed.join('|') === 'Node.js', 'it sets up Node.js alone (never the developer tools, even on a Mac without them)', listed)
+      const plan = await k.api('/setup/plan')
+      ok(plan.run?.ids.join('|') === 'node' && !plan.needsYou && !plan.openId, 'nothing waiting for you, no terminal', plan.run)
+      if (IS_MAC) ok(plan.items.some((i) => i.id === 'devtools' && i.state === 'todo'), 'though Everything would offer the developer tools here', plan.items.map((i) => i.id))
+      const row = await until(async () => { const x = await p.locator('.sa-item', { hasText: 'Node.js' }).innerText(); return /Downloading \d+%/.test(x) && x }, 15000)
+      ok(!!row, 'Node.js says how far its download is', row || (await p.locator('.sa-item', { hasText: 'Node.js' }).innerText()))
+      await p.click('.wiz-foot button:has-text("Continue")')
+      await p.waitForSelector('.wiz-agents li', { timeout: 15000 })
+      const gem = p.locator('.wiz-agents li', { hasText: 'Gemini CLI' })
+      const waits = await until(async () => { const x = (await gem.locator('.signin').innerText().catch(() => '')).replace(/\s+/g, ' '); return /Install · waiting for Node\.js( \d+%)?/.test(x) && x }, 15000)
+      ok(!!waits, 'an agent that needs Node.js: its Install says it\'s waiting for Node.js, with how far it is', waits || (await gem.innerText()))
+      ok(await gem.locator('button[disabled]', { hasText: 'waiting for Node.js' }).count() === 1, 'and can\'t be pressed until then')
+      ok(/^Install$/.test((await p.locator('.wiz-agents li', { hasText: 'Claude Code' }).locator('button').first().innerText()).trim()), 'one that doesn\'t need it can be installed straight away')
+      await shot(p, `${tag}new-basic-waiting-for-node`)
+      await p.click('.wiz-foot button:has-text("Continue")')
+      await p.waitForSelector('.wiz-foot .btn.primary:not([disabled])', { timeout: 15000 })
+      await p.click('.wiz-foot .btn.primary')
+      ok(!!(await until(async () => !(await p.$('.wiz')), 10000)), 'setup closed while Node.js still downloads')
+      const chip = await until(async () => { const x = await p.innerText('.setup-chip', { timeout: 1000 }).catch(() => ''); return /^Setting up · 0 of 1$/.test(x) && x }, 10000)
+      ok(!!chip, 'the top bar says it\'s still setting up: 0 of 1', await p.innerText('.setup-chip', { timeout: 1000 }).catch(() => ''))
+      await shot(p, `${tag}new-basic-top-bar`)
+      ok(!!(await until(async () => { const s = await k.api('/tools/node'); return s.have && !s.job }, 60000)), 'Node.js arrives')
+      ok(!!chip && !!(await until(async () => !(await p.$('.setup-chip')), 15000)), 'and the top bar\'s Setting up goes by itself')
+      // Nothing that asks: no terminal, no password, no installer, nothing of macOS's opened.
+      ok(!((await k.api('/fleet')).tabs || []).some((x) => x.label === 'Set up Bridge AI') && !fs.existsSync(path.join(k.bin, 'installs.log')) && !fs.existsSync(path.join(k.bin, 'passwords.log')), 'it never opened a terminal, ran an installer or asked for a password')
+      ok(!/\[fix dry-run\]/.test(k.log()) && !fs.existsSync(path.join(k.bin, 'xcode-select.log')), 'nor opened System Settings, or macOS\'s window for the developer tools', k.log().split('\n').filter((l) => /dry-run|xcode/.test(l)))
+      ok(errors.length === 0, 'Just what agents need: no page errors', errors)
+    } finally { await ctx.close(); k.stop(); dist.slow = false }
   }
 
   // ---------- Setup closed with its X: the guesses are kept, Home, nothing in the way ----------

@@ -14,13 +14,19 @@ export const NO_GIT = 'Git needs Apple\'s command line developer tools, which ar
 let memo = { at: 0, ok: null, pending: null }
 const exists = (p) => fs.promises.access(p, fs.constants.X_OK).then(() => true, () => false)
 
+// Apple's developer tools themselves: xcode-select only says where they are (it never offers to
+// install them, unlike the programs they bring), and that folder has a real git.
+async function tools() {
+  const dev = await new Promise((resolve) => execFile('xcode-select', ['-p'], { timeout: 5000 }, (err, out) => resolve(err ? null : String(out).trim())))
+  return !!dev && exists(path.join(dev, 'usr', 'bin', 'git'))
+}
+
 async function look() {
   for (const dir of String(process.env.PATH || '').split(path.delimiter)) {
     if (!dir || dir === '/usr/bin') continue
     if (await exists(path.join(dir, 'git'))) return true
   }
-  const dev = await new Promise((resolve) => execFile('xcode-select', ['-p'], { timeout: 5000 }, (err, out) => resolve(err ? null : String(out).trim())))
-  return !!dev && exists(path.join(dev, 'usr', 'bin', 'git'))
+  return tools()
 }
 
 export function gitReady() {
@@ -28,4 +34,20 @@ export function gitReady() {
   if (memo.ok || (memo.ok === false && Date.now() - memo.at < 15_000)) return Promise.resolve(memo.ok)
   memo.pending ||= look().then((ok) => { memo = { at: Date.now(), ok, pending: null }; return ok }, () => { memo.pending = null; return true })
   return memo.pending
+}
+
+// Whether this Mac has Apple's command line developer tools (setup's Everything offers them when it
+// hasn't), whatever other git it has: they also bring what agents build with (clang, make), whose
+// stand-ins pop up the same dialog. Elsewhere there's nothing to install. A "no" is asked again
+// after 5 seconds, so setup sees them arrive.
+let toolsMemo = { at: 0, ok: null, pending: null }
+export function devTools() {
+  if (!IS_MAC) return Promise.resolve(true)
+  if (toolsMemo.ok || (toolsMemo.ok === false && Date.now() - toolsMemo.at < 5_000)) return Promise.resolve(toolsMemo.ok)
+  toolsMemo.pending ||= tools().then((ok) => {
+    toolsMemo = { at: Date.now(), ok, pending: null }
+    if (ok && memo.ok === false) memo = { at: 0, ok: null, pending: null } // git can run now too
+    return ok
+  }, () => { toolsMemo.pending = null; return true })
+  return toolsMemo.pending
 }

@@ -41,6 +41,7 @@ import { sessionName as herdrSession, useSession as useHerdrSession } from './ru
 import * as herdrSessions from './runtime/herdr-sessions.js'
 import { AGENTS, installed, caps, adapter, catalog as agentCatalog, installCommand, installNeeds, installTools, clearInstalledCache, forgetLoginPath, loginPath, which } from './agents.js'
 import * as nodejs from './nodejs.js'
+import { devTools } from './gitready.js'
 import { quoteCommand } from './runtime/spawn.js'
 import { loadConfig, ROOT, DATA, CACHE, expand, ensureDir, cacheFile, IS_MAC, brewInstall, writeFileAtomic } from './paths.js'
 import { prepareChief } from './chief.js'
@@ -919,15 +920,17 @@ async function typeLine(paneId, line, { fresh = true } = {}) {
 // installer: that program runs instead, told what would have (in base64, so no shell acts on it).
 const installLine = (command) => (process.env.BRIDGE_INSTALL_STANDIN ? quoteCommand(process.env.BRIDGE_INSTALL_STANDIN, [Buffer.from(command).toString('base64')]) : command)
 // done: the tab closes itself once that says it all worked (one that failed stays, to read why).
-async function setupTab(label, command, done) {
+// openSetupTab gives its shell's pane too (setup shows it in place, to type a password into).
+async function openSetupTab(label, command, done, hours = 1) {
   const f = await rt.fleet()
   const ws = f.workspaces.find((w) => w.label === 'Setup')
   const out = await rt.launch({ kind: 'shell', cwd: os.homedir(), label, workspaceId: ws?.id, newSpace: ws ? undefined : 'Setup' })
   await typeLine(out.paneId, installLine(command))
-  if (done) closeWhenDone(out.paneId, done, Date.now() + 60 * 60 * 1000)
+  if (done) closeWhenDone(out.paneId, done, Date.now() + hours * 60 * 60 * 1000)
   pushFleet()
-  return openIdOf(out.paneId)
+  return { openId: await openIdOf(out.paneId), paneId: out.paneId }
 }
+const setupTab = async (label, command, done) => (await openSetupTab(label, command, done)).openId
 // One-time setup, the first time you use the mic: the speech model's download (progress in
 // /api/voice), and for a Whisper model whisper.cpp too, in a terminal tab you can watch.
 app.post('/api/voice/setup', wrap(async () => {
@@ -1684,85 +1687,149 @@ app.post('/api/setup/install/:kind', wrap(async (req) => {
 
 // ---------- Everything at once (setup's "Set up everything", Settings › General) ----------
 // What's left to set up on this computer, each with whether it's done: Node.js (for the agents that
-// come through npm), Homebrew and what it brings (icalBuddy for the calendar, and whisper.cpp when a
-// Whisper model is picked), the speech model, and what macOS asks you to allow
-// (your calendars, Mail). Run: the downloads happen here, the programs install in one terminal tab
-// you can watch (with one password for Homebrew, if it isn't here yet), and what macOS asks about
-// is left for you to allow, one button each. basic: Node.js alone, what agents need.
-let setupRun = null // { level, at, fetched: Set (downloads), term: Set (in the terminal tab), openId }
+// come through npm), on a Mac without them Apple's command line developer tools (so git runs
+// without macOS stopping to ask), Homebrew and what it brings (icalBuddy for the calendar where
+// Bridge AI has no calendar helper of its own, and whisper.cpp when a Whisper model is picked), the
+// speech model, and what macOS asks you to allow (your calendars, Mail). Run: Node.js first, as
+// installing an agent waits for it; then the speech model's download here, and the programs in one
+// terminal tab you can watch (scripts/setup-mac.sh: your Mac's password once, at its start, when
+// the developer tools or Homebrew need it); what macOS asks about is left for you to allow, one
+// button each. basic: Node.js alone, what agents need, which asks for nothing.
+// Each run remembers what it set out to do (ids), for the top bar's "Setting up · 3 of 6".
+let setupRun = null // { level, at, ids, fetched: Map (download -> when), queued: Set (after Node.js), term: Set (in the terminal tab), openId, paneId }
+let devtoolsWereMissing = false // so the list keeps them, as Ready, once they're installed
 const SETUP_PKGS = { whisper: 'whisper-cpp', ical: 'ical-buddy' }
+const SETUP_MAC = path.join(ROOT, 'scripts', 'setup-mac.sh')
 const setupTabOpen = async () => !!setupRun?.openId && ((await rt.fleet().catch(() => null))?.tabs || []).some((t) => `tab:${t.tabId}` === setupRun.openId)
+// What the Set up Bridge AI tab says: that it stopped (setup-mac.sh's last words when something
+// didn't work), that it's waiting for you (sudo's password prompt, or a key to press), or that
+// macOS's own window for the developer tools is open.
+// eslint-disable-next-line no-control-regex
+const ESC = /\x1b\][^\x07]*\x07|\x1b\[[0-9;?]*[A-Za-z]/g
+const tabSays = (ansi) => {
+  const lines = String(ansi || '').replace(ESC, '').replace(/\r/g, '').split('\n').map((l) => l.trimEnd()).filter(Boolean)
+  const last = lines[lines.length - 1] || ''
+  return {
+    stopped: lines.some((l) => /^Setup stopped before the end\b/.test(l)),
+    asks: /password[^\n]*:$/i.test(last) ? 'password' : /press (any key|return|enter)\b/i.test(last) ? 'terminal' : null,
+    window: lines.some((l) => /install requested for command line developer tools|Click Install in the window macOS opened/i.test(l)),
+  }
+}
+// Node.js's install is going: what downloads next waits until it's done (a minute at most), so the
+// agents' Install buttons don't share the line with a 670 MB model.
+const afterNode = (fn) => {
+  const until = Date.now() + 60_000
+  const tick = () => { const j = nodejs.progress(); if (!j || j.error || Date.now() > until) fn(); else setTimeout(tick, 1000).unref?.() }
+  tick()
+}
 async function setupPlan() {
-  const [node, sp, vo, brew, ical, tabOpen] = await Promise.all([nodeStatus(), speech.status(cfg), voice.status(), IS_MAC ? fixes.tool('brew') : null, IS_MAC ? fixes.tool('icalBuddy') : null, setupTabOpen()])
-  const [cal, disk] = IS_MAC ? await Promise.all([ical ? fixes.check('calendars').catch(() => null) : null, fixes.check('full-disk').catch(() => null)]) : []
+  const [node, sp, vo, brew, ical, dev, tabOpen] = await Promise.all([nodeStatus(), speech.status(cfg), voice.status(), IS_MAC ? fixes.tool('brew') : null, IS_MAC ? fixes.tool('icalBuddy') : null, devTools(), setupTabOpen()])
+  if (!dev) devtoolsWereMissing = true
+  // The calendar through Bridge AI's own helper (native/bridgecal.swift) when it has one: then it
+  // needs no icalBuddy (which can't see calendars on current macOS anyway), only your yes.
+  const calHelper = IS_MAC && !!fixes.calBin()
+  const needIcal = IS_MAC && !calHelper && !ical
+  const [cal, disk] = IS_MAC ? await Promise.all([!needIcal ? fixes.check('calendars').catch(() => null) : null, fixes.check('full-disk').catch(() => null)]) : []
+  const said = tabOpen && setupRun.paneId ? tabSays(await rt.read(setupRun.paneId, 80).catch(() => '')) : null
   const meetingModel = speech.localModel(cfg)
   const meetModel = sp.local.models.find((m) => m.id === meetingModel.id)
-  // Going: a download that's downloading (or just asked for), or a program while its terminal tab is
-  // open. Close the tab and what it didn't install is back to not set up, to try again.
+  // Going: a download that's downloading (or just asked for, or waiting for Node.js), or a program
+  // while its terminal tab is open and hasn't stopped. Close the tab and what it didn't install is
+  // back to not set up, to try again; a tab that stopped says so.
   const fetching = { voice: !!vo.downloading, meetings: !!(meetModel?.downloading && !meetModel.downloading.error) }
-  const going = (id) => !!setupRun && ((setupRun.term.has(id) && tabOpen) || (setupRun.fetched.has(id) && (fetching[id] || Date.now() - setupRun.at < 5000)))
-  const state = (done, id, error) => (done ? 'done' : error ? 'failed' : going(id) ? 'running' : 'todo')
+  const termGoing = (id) => setupRun.term.has(id) && tabOpen && !said?.stopped
+  const going = (id) => !!fetching[id] || (!!setupRun && (termGoing(id) || setupRun.queued.has(id) || (setupRun.fetched.has(id) && Date.now() - setupRun.fetched.get(id) < 5000)))
+  const stopped = (id) => (setupRun?.term.has(id) && tabOpen && said?.stopped ? 'It stopped before the end. The Set up Bridge AI tab says why.' : null)
+  const state = (done, id, error) => (done ? 'done' : error || stopped(id) ? 'failed' : going(id) ? 'running' : 'todo')
+  const after = (id) => (setupRun?.queued.has(id) ? 'node' : null)
   // Only what's missing is ever installed: a Node.js, program or model already on this computer is
   // used as it is (Bridge AI's own Node.js goes in its own folder, beside any other). parts: all an
   // item takes, needs: those still missing.
-  const items = [{ id: 'node', state: node.have || node.ours ? 'done' : node.job && !node.job.error ? 'running' : state(false, 'node', node.job?.error), error: node.job?.error || null, basic: true, canRun: node.canInstall }]
+  const items = [{ id: 'node', state: node.have || node.ours ? 'done' : node.job && !node.job.error ? 'running' : state(false, 'node', node.job?.error), error: node.job?.error || null, basic: true, canRun: node.canInstall, downloading: node.job && !node.job.error && node.job.step === 'download' ? { percent: node.job.percent } : null }]
+  // Apple's developer tools: only on a Mac without them (and kept, as Ready, once they're in).
+  if (IS_MAC && (!dev || devtoolsWereMissing)) items.push({ id: 'devtools', state: state(dev, 'devtools'), error: stopped('devtools') })
   // Meeting notes: ready (macOS's own speech, a service, or a speech model here), else what's
   // missing: the model, and whisper.cpp for a Whisper one. Voice notes the same, without services.
   const whisperFor = (w, needs) => (w === 'whisper' || w === 'brew' ? [needs] : [])
   const meetNeeds = sp.ready ? [] : [...whisperFor(sp.needs, 'whisper'), ...(!meetModel?.have ? ['model'] : [])]
   const voNeeds = vo.ready ? [] : [...whisperFor(vo.needs, 'whisper-cli'), ...(!vo.model.have ? ['model'] : [])]
   // Homebrew: when it's here, or something it brings isn't.
-  if (IS_MAC && (brew || meetNeeds.includes('whisper') || voNeeds.includes('whisper-cli') || !ical)) items.push({ id: 'homebrew', state: state(!!brew, 'homebrew') })
-  items.push({ id: 'meetings', state: state(sp.ready, 'meetings', meetModel?.downloading?.error), error: meetModel?.downloading?.error || null, parts: meetingModel.runtime === 'whisper' ? ['whisper', 'model'] : ['model'], needs: meetNeeds, engine: sp.engine, model: meetingModel.id, downloading: meetModel?.downloading && !meetModel.downloading.error ? meetModel.downloading : null, canRun: IS_MAC || !meetNeeds.includes('whisper') })
-  items.push({ id: 'voice', state: state(vo.ready, 'voice', vo.error), error: vo.error || null, parts: vo.model.runtime === 'whisper' ? ['whisper-cli', 'model'] : ['model'], needs: voNeeds, model: vo.model.id, mb: vo.model.mb, downloading: vo.downloading, canRun: IS_MAC || !voNeeds.includes('whisper-cli') })
+  if (IS_MAC && (brew || meetNeeds.includes('whisper') || voNeeds.includes('whisper-cli') || needIcal)) items.push({ id: 'homebrew', state: state(!!brew, 'homebrew'), error: stopped('homebrew') })
+  items.push({ id: 'meetings', state: state(sp.ready, 'meetings', meetModel?.downloading?.error), error: meetModel?.downloading?.error || stopped('meetings'), parts: meetingModel.runtime === 'whisper' ? ['whisper', 'model'] : ['model'], needs: meetNeeds, engine: sp.engine, model: meetingModel.id, downloading: meetModel?.downloading && !meetModel.downloading.error ? meetModel.downloading : null, after: after('meetings'), canRun: IS_MAC || !meetNeeds.includes('whisper') })
+  items.push({ id: 'voice', state: state(vo.ready, 'voice', vo.error), error: vo.error || stopped('voice'), parts: vo.model.runtime === 'whisper' ? ['whisper-cli', 'model'] : ['model'], needs: voNeeds, model: vo.model.id, mb: vo.model.mb, downloading: vo.downloading, after: after('voice'), canRun: IS_MAC || !voNeeds.includes('whisper-cli') })
   if (IS_MAC) {
-    items.push({ id: 'calendar', state: !ical ? state(false, 'calendar') : cal?.state === 'ok' ? 'done' : 'allow', pane: 'calendars' })
+    items.push({ id: 'calendar', state: needIcal ? state(false, 'calendar') : cal?.state === 'ok' ? 'done' : 'allow', error: stopped('calendar'), pane: 'calendars', via: calHelper ? null : 'icalBuddy' })
     items.push({ id: 'mail', state: disk?.state === 'ok' ? 'done' : disk?.state === 'restart' ? 'restart' : 'allow', pane: 'full-disk' })
   }
-  return { mac: IS_MAC, items, running: items.some((i) => i.state === 'running'), openId: tabOpen ? setupRun.openId : null, level: setupRun?.level || null }
+  // What's waiting for you in the terminal tab right now: your password, a key, or macOS's window
+  // for the developer tools (until they're in).
+  const needsYou = !said || said.stopped ? null : said.asks || (said.window && !dev ? 'window' : null)
+  return {
+    mac: IS_MAC, items, running: items.some((i) => i.state === 'running'), needsYou,
+    openId: tabOpen ? setupRun.openId : null, paneId: tabOpen ? setupRun.paneId || null : null,
+    level: setupRun?.level || null, run: setupRun ? { level: setupRun.level, at: setupRun.at, ids: setupRun.ids } : null,
+  }
 }
-app.get('/api/setup/plan', wrap(setupPlan))
+// ifRun: only while a run is going or left something (the top bar asks this when the app opens).
+app.get('/api/setup/plan', wrap((req) => (req.query.ifRun && !setupRun ? { run: null } : setupPlan())))
 app.post('/api/setup/run', wrap(async (req) => {
   onComputer(req)
   const level = req.body?.level === 'basic' ? 'basic' : 'full'
   const plan = await setupPlan()
   const todo = (id) => plan.items.find((x) => x.id === id && !['done', 'running', 'allow', 'restart'].includes(x.state))
-  const fetched = new Set()
-  const term = new Set()
+  // What this run sets out to do: everything not done yet (what's yours to allow too), or for
+  // basic, Node.js.
+  const ids = plan.items.filter((i) => (level === 'full' || i.basic) && i.state !== 'done' && i.canRun !== false).map((i) => i.id)
+  // A model still waiting for Node.js from a run before: this one waits with it.
+  const waiting = setupRun?.queued.size ? setupRun : null
+  const run = { level, at: Date.now(), ids, fetched: waiting?.fetched || new Map(), queued: waiting?.queued || new Set(), term: new Set(), openId: null, paneId: null }
+  // Node.js first: installing an agent in setup's next step waits for it.
   if (todo('node') && nodejs.canInstall) nodejs.install(() => { forgetLoginPath(); clearInstalledCache(); pushFleet() })
-  let openId = null
   if (level === 'full') {
     const meet = todo('meetings')
     const vo = todo('voice')
-    // The speech model, once: voice notes and meeting notes share it when it's the same one.
+    // The speech model, once, after Node.js: voice notes and meeting notes share it when it's the same one.
     const fetch = (id) => { try { speech.fetchModel(id) } catch { /* can't run here: the item says so */ } }
-    if (vo?.needs.includes('model')) { fetch(vo.model); fetched.add('voice') }
+    const models = []
+    if (vo?.needs.includes('model')) { models.push(vo.model); run.queued.add('voice') }
     if (meet?.needs.includes('model')) {
-      fetch(meet.model)
-      if (speech.localModel(cfg).runtime === 'whisper') fetch('vad')
-      fetched.add('meetings')
+      models.push(meet.model)
+      if (speech.localModel(cfg).runtime === 'whisper') models.push('vad')
+      run.queued.add('meetings')
     }
-    // The programs, in one terminal tab (macOS: with Homebrew, installed first when it isn't here).
+    if (models.length) {
+      afterNode(() => {
+        for (const id of new Set(models)) fetch(id)
+        for (const id of run.queued) run.fetched.set(id, Date.now())
+        run.queued.clear()
+      })
+    }
+    // The programs, in one terminal tab (macOS): the developer tools, Homebrew when what it
+    // brings is needed and it isn't here (its installer brings the developer tools itself), then
+    // what it brings. Your Mac's password, once, at its start, when the tools or Homebrew need it.
     if (IS_MAC) {
+      const dev = todo('devtools')
       const pkgs = new Set()
       if (meet?.needs.includes('whisper') || vo?.needs.includes('whisper-cli')) pkgs.add(SETUP_PKGS.whisper)
       if (todo('calendar')) pkgs.add(SETUP_PKGS.ical)
-      if (pkgs.size) {
-        const brew = await fixes.tool('brew')
-        const list = [...pkgs].join(' ')
-        const line = brew ? brewInstall(brew, list)
-          : `${fixes.HOMEBREW} && eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)" && ${brewInstall('brew', list)}`
-        if (!brew) term.add('homebrew')
-        if (pkgs.has(SETUP_PKGS.whisper)) { if (meet) term.add('meetings'); if (vo) term.add('voice') }
-        if (pkgs.has(SETUP_PKGS.ical)) term.add('calendar')
+      if (dev || pkgs.size) {
+        const brew = pkgs.size ? await fixes.tool('brew') : null
+        const homebrew = pkgs.size > 0 && !brew
+        const line = !dev && !homebrew ? brewInstall(brew, [...pkgs].join(' '))
+          : quoteCommand('/bin/bash', [SETUP_MAC, ...(dev ? ['devtools'] : []), ...(homebrew ? ['homebrew'] : []), ...(brew ? [`brew=${brew}`] : []), ...pkgs])
+        if (dev) run.term.add('devtools')
+        if (homebrew) run.term.add('homebrew')
+        if (pkgs.has(SETUP_PKGS.whisper)) { if (meet) run.term.add('meetings'); if (vo) run.term.add('voice') }
+        if (pkgs.has(SETUP_PKGS.ical)) run.term.add('calendar')
         const names = { [SETUP_PKGS.whisper]: 'whisper-cli', [SETUP_PKGS.ical]: 'icalBuddy' }
-        openId = await setupTab('Set up Bridge AI', line, async () => (await Promise.all([...pkgs].map((p) => fixes.tool(names[p])))).every(Boolean))
+        const done = async () => (!dev || await devTools()) && (await Promise.all([...pkgs].map((p) => fixes.tool(names[p])))).every(Boolean)
+        Object.assign(run, await openSetupTab('Set up Bridge AI', line, done, dev ? 3 : 1))
       }
     }
   }
   // A second go keeps the tab of the first while it's still open.
-  if (!openId && setupRun?.openId && await setupTabOpen()) { openId = setupRun.openId; for (const id of setupRun.term) term.add(id) }
-  setupRun = { level, at: Date.now(), fetched, term, openId }
+  if (!run.openId && setupRun?.openId && await setupTabOpen()) { Object.assign(run, { openId: setupRun.openId, paneId: setupRun.paneId }); for (const id of setupRun.term) run.term.add(id) }
+  setupRun = run
   return setupPlan()
 }))
 
