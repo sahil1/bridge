@@ -16,7 +16,7 @@
 // could be heard. The server times the meeting by the sound it gets, so that stretch is left out,
 // as a pause is.
 import { BASE } from '../../api.js'
-import { RATE, addWorklet } from '../../audio/pcm.js'
+import { RATE, addWorklet, askMic } from '../../audio/pcm.js'
 
 // streams: { you: MediaStream, them?: MediaStream }. onLevel({ you, them }) for the meters;
 // onTrouble(message | null) when pieces aren't getting through, and when they are again;
@@ -134,6 +134,7 @@ export async function record(meetingId, streams, { onLevel, onTrouble, reopen = 
 // call's sound your mic picks up from the speakers. In a room (room: no call on this computer),
 // without: that handling keeps the one voice close to the mic and drops the rest as noise, and in
 // a room the rest are the people around the table.
-export function microphone(deviceId, { room = false } = {}) {
+export async function microphone(deviceId, { room = false } = {}) {
+  await askMic()
   return navigator.mediaDevices.getUserMedia({ audio: { deviceId: deviceId ? { exact: deviceId } : undefined, channelCount: 1, echoCancellation: !room, noiseSuppression: !room, autoGainControl: true } })
 }

@@ -287,6 +287,8 @@ ipcMain.handle('bridge:restart', (e) => {
 // screen, above it: the app's icon, which you drag into the list (a real file drag of the app),
 // and what to do there. It closes when access is detected, when you close it, or after 5 minutes.
 const BUNDLE = IS_MAC ? /^(.*?\.app)\//.exec(process.execPath)?.[1] || null : null
+// This app's bundle ID, as macOS files its permissions under (from its own Info.plist).
+const bundleId = () => { try { return /<key>CFBundleIdentifier<\/key>\s*<string>([^<]+)<\/string>/.exec(fs.readFileSync(path.join(BUNDLE, 'Contents', 'Info.plist'), 'utf8'))?.[1] || null } catch { return null } }
 const APP_NAME = BUNDLE ? path.basename(BUNDLE, '.app') : 'Bridge AI'
 const TILE_STEPS = {
   'full-disk': { drag: true, text: `Drag ${APP_NAME} into the list above, then turn it on` },
@@ -380,6 +382,23 @@ ipcMain.on('bridge:tile-drag', (e) => {
 ipcMain.on('bridge:tile-close', (e) => { if (tile && e.sender === tile.win.webContents) closeTile() })
 // Whether macOS lets the app use the mic: granted, denied, restricted or not-determined.
 ipcMain.handle('bridge:media-access', (e, kind) => (fromApp(e) && kind === 'microphone' && IS_MAC ? systemPreferences.getMediaAccessStatus('microphone') : null))
+// The mic, asked of macOS before the page opens it (src/audio/pcm.js askMic): the first time, macOS
+// asks its own question, where opening the mic alone can be turned down with no question at all.
+ipcMain.handle('bridge:media-ask', async (e, kind) => {
+  if (!fromApp(e) || kind !== 'microphone' || !IS_MAC) return null
+  if (systemPreferences.getMediaAccessStatus('microphone') === 'not-determined') await systemPreferences.askForMediaAccess('microphone').catch(() => false)
+  return systemPreferences.getMediaAccessStatus('microphone')
+})
+// macOS's answer about the mic forgotten (tccutil, for this app only), then asked again. For an
+// answer kept from a version signed differently (up to 3.4.2), which can show as allowed in System
+// Settings and still block the mic.
+ipcMain.handle('bridge:media-reset', async (e, kind) => {
+  if (!fromApp(e) || kind !== 'microphone' || !IS_MAC) return null
+  const id = bundleId()
+  if (id) await new Promise((resolve) => execFile('/usr/bin/tccutil', ['reset', 'Microphone', id], { timeout: 10000 }, () => resolve()))
+  await systemPreferences.askForMediaAccess('microphone').catch(() => false)
+  return systemPreferences.getMediaAccessStatus('microphone')
+})
 // A notification to see whether macOS shows them (it doesn't say when they're turned off).
 ipcMain.handle('bridge:notify-test', (e) => {
   if (!fromApp(e) || !Notification.isSupported()) return false

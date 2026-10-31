@@ -103,7 +103,7 @@ function Bar({ s, label }) {
   const listening = s.phase === 'opening' || s.phase === 'listening'
   return (
     <div className="dict-bar" role="status" aria-live="polite">
-      {s.setup ? (s.setup.mic ? <MicFix onClose={dismiss} /> : <VoiceSetup initial={s.setup} onReady={retry} onClose={dismiss} />) : (
+      {s.setup ? (s.setup.mic ? <MicFix stale={s.setup.stale} onClose={dismiss} /> : <VoiceSetup initial={s.setup} onReady={retry} onClose={dismiss} />) : (
         <div className="dict-row">
           {listening && <>
             <span className="rec-dot" />

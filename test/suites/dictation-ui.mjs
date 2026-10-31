@@ -15,6 +15,8 @@
 //   (Wayland), not offered, and taken; changes go to the app; its key handed to the page in front.
 //   The desktop app's dictation window (?dictate=1): the level while you talk, then the text, Send to
 //   the agent you last looked at or one picked, Copy, Esc, and a press from before it was ready.
+//   The mic turned down in the desktop app on a Mac: macOS asked first, Reset and ask again when it
+//   lists Bridge AI as allowed and blocks it anyway, the way to allow it when it says no.
 //   Pasting where you're typing, the desktop app simulated: "Where I'm typing" offered where it can
 //   work (a Mac, Windows) and hidden where it can't (GNOME on Wayland, a Mac without its helper),
 //   Accessibility asked for when it's picked on a Mac and a card until it's on, said once when it was
@@ -424,6 +426,60 @@ try {
     await d.ctx.close()
   }
   await kit.api('/settings', { dictation: { to: null, background: null } }, 'PATCH')
+
+  // ---------- The mic turned down in the desktop app on a Mac ----------
+  // macOS is asked before the mic opens; when it still turns it down while listing Bridge AI as
+  // allowed (an answer from a version signed differently), Reset and ask again, not the browser's
+  // site settings. macOS saying no outright: the way to allow it in System Settings.
+  const macMic = async (status) => page(b, kit.url, { before: async (c) => {
+    await before(c)
+    await c.addInitScript((st) => {
+      window.__mic = { order: [], status: st, blocked: true }
+      const real = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices)
+      navigator.mediaDevices.getUserMedia = async (x) => {
+        window.__mic.order.push('open')
+        if (window.__mic.blocked) throw new DOMException('Permission denied', 'NotAllowedError')
+        return real(x)
+      }
+      window.bridgeApp = {
+        platform: 'darwin', desktop: true, dictateStatus: async () => ({ mode: null }), dictateConfigure: async () => ({ mode: null }),
+        askMedia: async () => { window.__mic.order.push('ask'); return window.__mic.status },
+        mediaAccess: async () => window.__mic.status,
+        resetMedia: async () => { window.__mic.order.push('reset'); window.__mic.blocked = false; window.__mic.status = 'granted'; return 'granted' },
+      }
+    }, status)
+  } })
+  {
+    const d = await macMic('granted')
+    await d.p.locator('.tab-main', { hasText: 'payments' }).first().click({ timeout: 20000 })
+    const mbox = d.p.locator('textarea[data-composer]').first()
+    await mbox.waitFor({ timeout: 15000 })
+    await mbox.click()
+    await d.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-dictate-key', { detail: { type: 'down', at: Date.now() } })))
+    const fix = d.p.locator('.voice-setup', { hasText: 'earlier version' })
+    ok(!!(await until(() => fix.isVisible(), 8000, 100)), 'macOS lists Bridge AI as allowed and blocks the mic: it says why, with Reset and ask again', await d.p.locator('body').innerText())
+    ok(!/site settings/.test(await d.p.locator('body').innerText()), 'not the browser\'s site settings')
+    ok((await d.p.evaluate(() => window.__mic.order.slice(0, 2).join(','))) === 'ask,open', 'macOS is asked before the mic is opened', await d.p.evaluate(() => window.__mic.order))
+    await shot(d.p, `${tag}mic-reset`)
+    await fix.locator('button', { hasText: 'Reset and ask again' }).click()
+    ok(!!(await until(() => d.p.locator('.voice-setup', { hasText: 'The microphone is on' }).isVisible(), 5000, 100)) && (await d.p.evaluate(() => window.__mic.order.includes('reset'))), 'Reset and ask again: macOS asked again, and the mic is on')
+    ok(real(d.errors).length === 0, 'no page errors', d.errors)
+    await d.ctx.close()
+  }
+  // System Settings' way in is asked of the server (PermissionFix), which is the Mac itself in the
+  // desktop app: only where these tests run on one.
+  if (process.platform !== 'darwin') skip('macOS says no: the way to allow it in System Settings (the server here isn\'t a Mac)')
+  else {
+    const d = await macMic('denied')
+    await d.p.locator('.tab-main', { hasText: 'payments' }).first().click({ timeout: 20000 })
+    const mbox = d.p.locator('textarea[data-composer]').first()
+    await mbox.waitFor({ timeout: 15000 })
+    await mbox.click()
+    await d.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-dictate-key', { detail: { type: 'down', at: Date.now() } })))
+    const fix = d.p.locator('.voice-setup')
+    ok(!!(await until(async () => (await fix.count()) > 0 && /needs the microphone/.test(await fix.first().innerText()), 8000, 100)) && !/earlier version/.test(await fix.first().innerText()), 'macOS says no: the way to allow it in System Settings, no reset', await d.p.locator('body').innerText())
+    await d.ctx.close()
+  }
 
   // ---------- The dictation window (?dictate=1) ----------
   const hudPage = (pending = null) => page(b, `${kit.url}/?dictate=1`, { store: { 'cc-ws': { tabs: [one.paneId], active: one.paneId } }, before: async (c) => {

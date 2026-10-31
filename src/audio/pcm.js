@@ -7,6 +7,8 @@
 // won't join a mic to a context at another rate), it runs at the mic's own rate and the worklet
 // brings it down to 16 kHz itself.
 
+import { t } from '../i18n/index.js'
+
 export const RATE = 16000
 
 // Posts { pcm } about once a second (an ArrayBuffer of Int16 samples), { level } (the loudest since
@@ -61,8 +63,26 @@ export async function addWorklet(ctx) {
   try { await ctx.audioWorklet.addModule(url) } finally { URL.revokeObjectURL(url) }
 }
 
+// In the desktop app on a Mac, macOS is asked first (desktop/main.js): its own question the first
+// time, rather than the mic turned down with no question. Elsewhere, nothing to ask.
+export const askMic = () => window.bridgeApp?.askMedia?.('microphone').catch(() => null) ?? Promise.resolve(null)
+
+// Why the mic was turned down, when the desktop app can help: { mic: true, stale } for MicFix
+// (Composer.jsx), stale when macOS says Bridge AI is allowed and blocks it all the same (an answer
+// from a version signed differently). null in a browser or off a Mac: the browser's own setting.
+export async function micRefused(e) {
+  if (e?.name !== 'NotAllowedError' || !window.bridgeApp?.mediaAccess) return null
+  const s = await window.bridgeApp.mediaAccess('microphone').catch(() => null)
+  return s == null ? null : { mic: true, stale: s === 'granted' }
+}
+// What to say when the mic was turned down and there's nothing to fix here.
+export const micBlocked = () => (window.bridgeApp ? t('The microphone is blocked. Allow it for Bridge AI, then try again.') : t('The microphone is blocked. Allow it for this page in your browser\'s site settings.'))
+
 // The mic for dictation: one voice, close to it, with the browser's echo and noise handling.
-export const microphone = () => navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } })
+export const microphone = async () => {
+  await askMic()
+  return navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } })
+}
 
 // Records a stream until stop() (the samples, an Int16Array) or cancel(). onLevel(0..1) for a meter.
 export async function startPcm(stream, { onLevel } = {}) {

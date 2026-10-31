@@ -32,6 +32,8 @@ else contextBridge.exposeInMainWorld('bridgeApp', {
   closeFixTile: () => ipcRenderer.invoke('bridge:fix-tile-close'),
   // Whether macOS lets the app use the mic, and a test notification.
   mediaAccess: (kind) => ipcRenderer.invoke('bridge:media-access', kind),
+  askMedia: (kind) => ipcRenderer.invoke('bridge:media-ask', kind),
+  resetMedia: (kind) => ipcRenderer.invoke('bridge:media-reset', kind),
   testNotification: () => ipcRenderer.invoke('bridge:notify-test'),
   // Meetings: the main window says when it's recording (so closing it hides it instead), and the
   // floating card fits its size, hides, takes notes for a call and opens things in the main window.

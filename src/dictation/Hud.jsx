@@ -233,7 +233,7 @@ export default function Hud() {
           <div className="hud-setup">
             {/* The first time: the speech model to download, with what you said kept and turned
                 into text here once it's in (Composer.jsx's panel, as in the message box). */}
-            {s.setup.mic ? <MicFix onClose={hide} /> : <VoiceSetup initial={s.setup} onReady={retry} onClose={hide} />}
+            {s.setup.mic ? <MicFix stale={s.setup.stale} onClose={hide} /> : <VoiceSetup initial={s.setup} onReady={retry} onClose={hide} />}
           </div>
         ) : (
           <div className="hud-row">
