@@ -21,7 +21,7 @@ import path from 'node:path'
 import http from 'node:http'
 import crypto from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { startKit, startModel, checks, until, sleep, freePort, OUT, IS_MAC } from '../lib/harness.mjs'
+import { startKit, startModel, checks, until, sleep, freePort, OUT, IS_MAC, IS_WIN } from '../lib/harness.mjs'
 
 const { ok, skip, done } = checks('room-voices')
 const RATE = 16000
@@ -155,7 +155,7 @@ try {
   await tryApi(kit, `/meetings/${R1.id}/voices/2`, { name: 'Dan Ruiz' }, 'PATCH')
   await tryApi(kit, `/meetings/${R1.id}/voices/1`, { me: true }, 'PATCH')
   const known = (() => { try { return JSON.parse(fs.readFileSync(path.join(kit.data, 'meetings', 'voices.json'), 'utf8')) } catch { return { voices: [] } } })()
-  ok(known.voices.length === 2 && known.voices.some((k) => k.name === 'Dan Ruiz') && known.voices.some((k) => k.me) && (fs.statSync(path.join(kit.data, 'meetings', 'voices.json'), { throwIfNoEntry: false })?.mode & 0o077) === 0, 'on: the two named voices are kept, readable by you only', known.voices.map((k) => [k.name, k.me]))
+  ok(known.voices.length === 2 && known.voices.some((k) => k.name === 'Dan Ruiz') && known.voices.some((k) => k.me) && (IS_WIN || (fs.statSync(path.join(kit.data, 'meetings', 'voices.json'), { throwIfNoEntry: false })?.mode & 0o077) === 0), 'on: the two named voices are kept, readable by you only (on Windows, in your own folder)', known.voices.map((k) => [k.name, k.me]))
   ok((await tryApi(kit, '/meetings/voices')).known === 2, 'and Settings says how many')
 
   // The next one, while it records: each line's speaker as it comes, and the known voices named.
