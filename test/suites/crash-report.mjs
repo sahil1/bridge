@@ -19,6 +19,7 @@ import path from 'node:path'
 import http from 'node:http'
 import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
 import { ROOT, OUT, startKit, checks, until, browser, page, shot, freePort } from '../lib/harness.mjs'
 
 const { ok, done } = checks('crash-report')
@@ -109,7 +110,7 @@ const tailnet = ['studio', 'tail1234', 'ts', 'net'].join('.')
 const crashed = path.join(OUT, `crash-report-crashed-${LANE}`)
 fs.rmSync(crashed, { recursive: true, force: true })
 fs.mkdirSync(crashed, { recursive: true })
-const boom = `import(${JSON.stringify(path.join(ROOT, 'server', 'crashes.js'))}).then((c) => { c.watch('9.9.9'); setTimeout(() => { throw new Error('Cannot read ${HOME}/code/acme-billing/package.json for ${email}') }, 10) })`
+const boom = `import(${JSON.stringify(pathToFileURL(path.join(ROOT, 'server', 'crashes.js')).href)}).then((c) => { c.watch('9.9.9'); setTimeout(() => { throw new Error('Cannot read ${HOME}/code/acme-billing/package.json for ${email}') }, 10) })`
 const r = spawnSync(process.execPath, ['--input-type=module', '-e', boom], { env: { PATH: process.env.PATH, BRIDGE_HOME: crashed }, encoding: 'utf8', timeout: 20000 })
 const kept = (() => { try { return JSON.parse(fs.readFileSync(path.join(crashed, 'cache', 'crash.json'), 'utf8')) } catch { return null } })()
 ok(r.status === 1 && kept?.kind === 'server' && kept.version === '9.9.9' && /Cannot read/.test(kept.message) && /at Timeout/.test(kept.stack), 'an error nothing caught: written down, and the server still stops (exit code 1)', { status: r.status, kept, err: r.stderr.slice(-300) })
