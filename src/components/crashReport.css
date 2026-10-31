@@ -1,0 +1,19 @@
+/* Report on GitHub (CrashReport.jsx): over the crash screen too, which covers the whole window. */
+.crash-report-back { z-index: 1100; padding-top: 8vh; }
+.crash-report { width: min(640px, 100%); max-height: 86vh; text-align: left; }
+.crash-report .modal-head .win-btn { margin-left: auto; }
+.crash-report p { margin: 0; line-height: 1.5; }
+.cr-field { display: grid; gap: 5px; font-size: 12.5px; color: var(--ink-2); font-weight: 550; }
+.cr-field input, .cr-field textarea { width: 100%; box-sizing: border-box; padding: 7px 9px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--pane-2); color: var(--ink); font: inherit; font-size: 13px; font-weight: 400; resize: vertical; }
+.cr-field .cr-details { font: 11.5px var(--font-mono); line-height: 1.45; white-space: pre; overflow-wrap: normal; overflow-x: auto; }
+.crash-report .modal-foot { flex-wrap: wrap; }
+.cr-long { display: flex; gap: 7px; align-items: flex-start; padding: 8px 11px; border-radius: 9px; background: var(--pane-2); border: 1px solid var(--line); font-size: 12.5px; }
+.cr-long svg { flex: none; margin-top: 2px; }
+.crash-report .cr-open { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; }
+
+/* After a crash Bridge AI came back from: a card in the corner, once. */
+.crash-notice { position: fixed; right: 16px; bottom: 16px; z-index: 90; width: min(420px, calc(100vw - 32px)); box-sizing: border-box; display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; padding: 12px 14px; border-radius: 12px; background: var(--pane); border: 1px solid var(--line-2); box-shadow: var(--shadow-lg); color: var(--ink); animation: fade-in .15s ease; }
+.crash-notice > svg { margin-top: 2px; color: var(--warning); }
+.crash-notice-text { display: grid; gap: 3px; font-size: 13px; line-height: 1.4; }
+.crash-notice-acts { grid-column: 2; display: flex; gap: 8px; flex-wrap: wrap; }
+.app.narrow .crash-notice { left: 12px; right: 12px; width: auto; bottom: calc(76px + env(safe-area-inset-bottom)); }

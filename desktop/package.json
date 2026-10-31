@@ -30,6 +30,7 @@
       "dictation.js",
       "contextmenu.js",
       "permissions.js",
+      "crashes.js",
       "package.json",
       "!node_modules/uiohook-napi/{libuiohook,src,binding.gyp}{,/**}"
     ],

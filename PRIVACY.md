@@ -24,6 +24,12 @@ Updates, and, only if you turn on usage counts, a weekly report to the project (
 it. On Windows and Linux, the desktop app's spell check gets the dictionaries for your languages
 once, from Google, as Chrome does; nothing you type goes with them (a Mac uses its own).
 
+When something in Bridge AI crashes, it keeps a note of it on your computer (in `~/.bridge-ai`; the
+desktop app also keeps what its server printed, in `logs/server.log`) and offers **Report on
+GitHub**. That shows you the whole issue it would fill in, with names, folders, emails and keys taken
+out, for you to read and change; it reaches GitHub only if you open it there and send it yourself,
+under GitHub's terms. Bridge AI sends nothing on its own.
+
 How much of your plan is left is off until you turn it on (the Usage card, or Settings › General).
 Then Bridge AI asks each agent's own provider, with the sign-in that agent uses on your computer,
 through quota-axi. If you add an API key for a model provider (Settings › Model Providers),

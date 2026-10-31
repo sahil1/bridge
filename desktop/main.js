@@ -8,6 +8,7 @@ const { app, BrowserWindow, Menu, Tray, shell, globalShortcut, Notification, ses
 const dictation = require('./dictation.js')
 const contextMenu = require('./contextmenu.js')
 const permissions = require('./permissions.js')
+const crashes = require('./crashes.js')
 
 // A picture of part of the window (the Preview tab's app), for sending to an agent. Only this
 // window, only a rectangle of it, only when the page asks.
@@ -55,6 +56,7 @@ let startedServer = false
 // A meeting recording in the window: closing it hides it instead, so the recording goes on.
 let recording = false
 let quitting = false
+let reopened = 0 // when the window was last opened again after its page went away
 
 // Apps opened from the Dock or a launcher get a bare PATH; ask a login shell for the user's real
 // one (node and the agent CLIs live there). Windows apps get the full PATH already.
@@ -94,12 +96,18 @@ async function startServer() {
     ? [NODE_BIN, [path.join(ROOT, 'server', 'index.js')]]
     : [process.platform === 'win32' ? 'node.exe' : 'node', ['scripts/start.js', ...(DEV ? ['dev'] : [])]]
   if (BUNDLED) env.ELECTRON_RUN_AS_NODE = '1'
-  const child = require('node:child_process').spawn(cmd, args, { cwd: ROOT, env, detached: true, stdio: 'ignore', windowsHide: true })
+  // What it prints goes in logs/server.log, for a crash report's last lines.
+  const log = crashes.serverLog(DATA)
+  const child = require('node:child_process').spawn(cmd, args, { cwd: ROOT, env, detached: true, stdio: ['ignore', log, log], windowsHide: true })
+  if (typeof log === 'number') try { fs.closeSync(log) } catch { /* the server has its own copy */ }
   // Same pid file as `npm start`, so `npm run stop` and "Quit and Stop Agents" both find it.
   if (BUNDLED) try { fs.mkdirSync(path.dirname(PID), { recursive: true }); fs.writeFileSync(PID, String(child.pid)) } catch { /* not fatal */ }
+  // Ended without being asked to, while this app runs: written down, to offer a report once it's back.
+  child.on('exit', (code, signal) => { if (!stoppingServer) crashes.note(crashes.fromServerExit(code, signal), { base: URL_BASE, data: DATA, version: app.getVersion() }).catch(() => {}) })
   child.unref()
   startedServer = true
 }
+let stoppingServer = false
 
 function loadBounds() {
   try { return JSON.parse(fs.readFileSync(STATE, 'utf8')) } catch { return { width: 1500, height: 960 } }
@@ -149,6 +157,14 @@ async function createWindow() {
   win.webContents.on('will-navigate', (e, url) => { if (!isLocal(url) && !url.startsWith('data:')) { e.preventDefault(); openOutside(url) } })
   win.webContents.on('page-title-updated', (e, title) => { e.preventDefault(); updateBadge(title) })
   win.webContents.on('did-fail-load', (_e, code) => { if (code !== -3) setTimeout(connect, 1500) })
+  // The page went away (a crash, out of memory): written down, and opened again, which then offers
+  // to report it. At most once a minute, so a page that can't stay up doesn't go round and round.
+  win.webContents.on('render-process-gone', (_e, d) => {
+    const c = crashes.fromWindowGone(d)
+    if (!c || quitting) return
+    crashes.note(c, { base: URL_BASE, data: DATA, version: app.getVersion() }).catch(() => {})
+    if (Date.now() - reopened > 60000) { reopened = Date.now(); setTimeout(() => { if (self && !self.isDestroyed()) self.webContents.reload() }, 1000) }
+  })
 
   await connect()
 }
@@ -580,6 +596,7 @@ async function watchFleet() {
 // Quitting leaves the server (and your agents) running. This stops the server; agents keep
 // running in the terminal host unless Keep agents running is off (Settings › General).
 function stopServer() {
+  stoppingServer = true
   try { const pid = Number(fs.readFileSync(PID, 'utf8')); if (pid) process.kill(pid, 'SIGTERM') } catch { /* not running */ }
   try { fs.rmSync(PID) } catch { /* fine */ }
 }
@@ -869,6 +886,8 @@ ipcMain.handle('bridge:float-open', async (e, { meeting, meetings, paneId } = {}
 ipcMain.handle('bridge:recording', (e, on) => { if (fromApp(e) && e.sender === win?.webContents) recording = !!on; return true })
 
 app.on('before-quit', () => { quitting = true })
+// The graphics process went away (Chromium starts it again): written down, to offer a report.
+app.on('child-process-gone', (_e, d) => { if (!quitting) crashes.note(crashes.fromChildGone(d), { base: URL_BASE, data: DATA, version: app.getVersion() }).catch(() => {}) })
 app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus() } })
 app.on('activate', () => { if (!win) createWindow(); else win.show() })
 app.on('window-all-closed', () => { win = null })
