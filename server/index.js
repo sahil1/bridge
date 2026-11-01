@@ -70,6 +70,7 @@ import * as push from './push.js'
 import * as phone from './phone.js'
 import * as relay from './relay.js'
 import * as machines from './machines.js'
+import * as counts from './counts.js'
 import * as updates from './updates.js'
 import * as cloud from './cloud.js'
 import { makeModels, forLaunch } from './models.js'
@@ -142,7 +143,7 @@ const launchAgent = (o) => {
   const kind = o.kind || cfg.defaultAgent || 'claude'
   const picked = o.account === 'auto' || accounts.has(kind, o.account) ? o.account : accounts.accountOf(kind, null, o.resume || o.fork)
   return rt.launch({ ...o, model: o.model === 'default' ? null : o.model || modelFor(kind), account: accounts.resolve(kind, picked) || accounts.activeId(kind) })
-    .then((out) => { insights.noteLaunch(out?.paneId, o.prompt); return out })
+    .then((out) => { insights.noteLaunch(out?.paneId, o.prompt); if (kind !== 'shell') counts.started(kind); return out })
 }
 
 // Cloud agents (cloud.js) answer the agent routes below for their own panes, so they go first.
@@ -318,7 +319,7 @@ app.post('/api/agents/:pane/push', wrap(async (req) => files.push(await rootOf(r
 // The branch's pull request (cached; gh goes over the network), a drafted title and body, and opening one.
 app.get('/api/agents/:pane/pr', wrap(async (req) => pr.status(await rootOf(req.params.pane), { refresh: req.query.refresh === '1' })))
 app.post('/api/agents/:pane/pr/draft', wrap(async (req) => pr.draft(await rootOf(req.params.pane), { base: req.body?.base })))
-app.post('/api/agents/:pane/pr', wrap(async (req) => pr.create(await rootOf(req.params.pane), req.body || {})))
+app.post('/api/agents/:pane/pr', wrap(async (req) => { const out = await pr.create(await rootOf(req.params.pane), req.body || {}); counts.add('prs.opened'); return out }))
 app.get('/api/agents/:pane/diff', wrap(async (req) => files.gitDiff(await rootOf(req.params.pane), String(req.query.path || ''))))
 // A file in the agent's folder as it is: in parts when asked (Range: a video's player asks for the
 // part it's at, and a seek is one more ask), read from disk as it goes. ?download=1 saves it.
@@ -459,6 +460,7 @@ app.post('/api/chief/launch', wrap(async () => {
   // Next to its threads, if any are open.
   const home = f.agents.find((a) => a.chief)?.workspaceId
   const out = await launchAgent({ kind, cwd: CHIEF_DIR, label: 'Chief of Staff', workspaceId: home || null, newSpace: home ? undefined : 'Chief of Staff', env: { BRIDGE_THREAD: 'main' } })
+  counts.add('chief.started')
   pushFleet()
   return out
 }))
@@ -480,6 +482,7 @@ app.post('/api/chief/threads', wrap(async (req) => {
   try {
     const out = await launchAgent({ kind, cwd: CHIEF_DIR, label: name, workspaceId: home || null, newSpace: home ? undefined : 'Chief of Staff', prompt: String(req.body?.prompt || '').trim() || undefined, env: { BRIDGE_THREAD: id } })
     threads.started(id, { paneId: out.paneId, session: f.session })
+    counts.add('chief.threads')
     pushFleet()
     return { ...out, thread: id }
   } finally { threads.release() }
@@ -591,7 +594,7 @@ async function launchFrom(body) {
   // New space: the workspace takes the space name and its first tab the agent's name.
   if (kind !== 'shell' && dir !== path.join(DATA, 'chats')) projects.used(dir).catch(() => {})
   const out = await start({ kind, label: name, workspaceId: space ? null : workspaceId || null, newSpace: space || (workspaceId ? undefined : name), prompt: String(prompt || '').trim() || undefined, account: account ? String(account) : undefined, ...chatEnv }, own)
-  if (own) out.worktree = { branch: own.branch, base: own.base, folder: own.folder, copied: own.copied }
+  if (own) { out.worktree = { branch: own.branch, base: own.base, folder: own.folder, copied: own.copied }; counts.add('agents.ownBranch') }
   // Compare: the same first message to a second kind of agent, in the same space (with a branch of its own too).
   if (alsoKind && alsoKind !== kind && String(prompt || '').trim() && (await installed()).some((k) => k.kind === alsoKind)) {
     const ws = ((await rt.fleet()).panes || []).find((p) => p.paneId === out.paneId)?.workspaceId
@@ -599,6 +602,7 @@ async function launchFrom(body) {
       const two = `${name} (${adapter(alsoKind).label})`.slice(0, 60)
       const own2 = ownBranch ? await worktrees.create(dir, { base, label: two }) : null
       out.alsoPaneId = (await start({ kind: alsoKind, label: two, workspaceId: ws || null, newSpace: ws ? undefined : space || name, prompt: String(prompt).trim() }, own2)).paneId
+      counts.add('agents.compared')
     } catch (e) { out.alsoError = e.message }
   }
   pushFleet()
@@ -815,6 +819,7 @@ app.get('/api/chief/tasks', wrap(() => chiefTasks.list()))
 app.post('/api/chief/tasks', wrap(async (req) => {
   const send = !!req.body?.send
   const item = chiefTasks.add(req.body?.title, { status: req.body?.status, link: req.body?.link, from: send ? 'you' : null })
+  counts.add('chief.tasks')
   if (!send) return { item }
   return { item, ...(await tellChief(`Task ${item.id} from my Tasks panel: ${item.title}\n\n(It's on your task list as ${item.id}. Keep it current with \`node bin/bridge task\`.)`)) }
 }))
@@ -870,6 +875,7 @@ async function pollFleet() {
         const key = JSON.stringify([f.session, f.down, f.agents.map((a) => [a.paneId, a.status, a.title, a.seq, a.muted, a.asking?.count, a.asking?.working, a.chiefThreads]), f.tabs.map((t) => [t.tabId, t.label, t.panes.map((p) => [p.paneId, p.cwd, p.rect?.width, p.rect?.height, p.rect?.x, p.rect?.y])]), f.workspaces.map((w) => w.label), f.queue])
         lastFleet = f
         insights.observe(f.agents)
+        counts.most('agents.peak', f.agents.length)
         // Another session's agents are new to the notifications, not news (see notify.forget).
         if (f.session !== notifiedSession) { notifiedSession = f.session; notify.forget() }
         if (!f.down) notify.onFleet(f, cfg)
@@ -990,7 +996,7 @@ app.post('/api/fix/install', wrap(async (req) => {
 // Not set up yet: 409 with what's needed in words (error), code needs-model and the model, which
 // the page offers to download, then sends the recording again.
 app.post('/api/transcribe', express.raw({ type: () => true, limit: '30mb' }), async (req, res) => {
-  try { res.json(await voice.transcribe(req.body, req.headers['content-type'], { more: dictation.hints(dictationSources) })) } catch (e) {
+  try { res.json(await voice.transcribe(req.body, req.headers['content-type'], { more: dictation.hints(dictationSources) })); counts.add('voice.transcribed') } catch (e) {
     res.status(e.status || 502).json({ error: e.message, ...(typeof e.code === 'string' ? { code: e.code } : {}), ...(e.model ? { model: e.model } : {}) })
   }
 })
@@ -1066,7 +1072,7 @@ app.post('/api/speech/install', wrap(async (req) => {
 }))
 // The list without each meeting's pictures and files (counts only): they can be long.
 app.get('/api/meetings', wrap(() => ({ meetings: meetings.list().map(({ captures, links, ...m }) => ({ ...m, pictures: captures?.length || 0, files: links?.length || 0 })), folder: meetings.folder(), kinds: Object.entries(meetings.KINDS).map(([id, k]) => ({ id, label: k.label })) })))
-app.post('/api/meetings', wrap((req) => { prompt = null; return meetings.start({ ...(req.body || {}), callApps: calls.now().calls.map((c) => c.app) }) }))
+app.post('/api/meetings', wrap(async (req) => { prompt = null; const m = await meetings.start({ ...(req.body || {}), callApps: calls.now().calls.map((c) => c.app) }); counts.add('meetings.recorded'); return m }))
 // Several at once, from the list: delete, save as notes, write the summary again, archive, put in a
 // folder, or the action items of all of them to the chief in one go. A meeting still recording is
 // left alone.
@@ -1636,6 +1642,20 @@ app.get('/api/diagnostics', wrap(async () => {
   }
 }))
 
+// Usage counts (counts.js): only if you turn them on, and what would be sent, exactly.
+counts.configure(cfg, {
+  about: () => ({
+    app: VERSION, os: { darwin: 'mac', win32: 'windows' }[process.platform] || 'linux', arch: process.arch,
+    install: process.versions.electron ? 'desktop' : process.env.BRIDGE_DOCKER ? 'docker' : 'source',
+    layout: cfg.simple ? 'simple' : 'everything', runtime: rt.name, phone: relay.status().devices.some((d) => d.kind === 'phone') ? 'paired' : 'none',
+  }),
+  save: (p) => afterChange(settings.patch(p)),
+})
+app.get('/api/counts', wrap(() => counts.status()))
+app.post('/api/counts', wrap((req) => counts.setShare(!!req.body?.share)))
+app.get('/api/counts/preview', wrap(() => counts.preview()))
+app.get('/api/counts/sent/:week', wrap((req) => counts.sentReport(req.params.week)))
+
 app.get('/api/updates', wrap((req) => updates.status({ force: req.query.refresh === '1', disabled: cfg.updates?.check === false })))
 app.post('/api/updates/install', wrap((req) => updates.install({ app: req.body?.app === true })))
 
@@ -1647,6 +1667,7 @@ const BUILD = (() => { try { return JSON.parse(fs.readFileSync(path.join(ROOT, '
 const UI_ERRORS = path.join(DATA, 'logs', 'ui-errors.log')
 app.post('/api/ui-error', wrap(async (req) => {
   const b = req.body || {}
+  counts.add('errors.window')
   const line = `${new Date().toISOString()} ${VERSION} [${String(b.where || 'view').slice(0, 60)}] ${String(b.message || '').slice(0, 500)} (${String(b.url || '').slice(0, 200)})\n${String(b.stack || '').slice(0, 6000)}\n\n`
   await fs.promises.mkdir(path.dirname(UI_ERRORS), { recursive: true })
   const size = await fs.promises.stat(UI_ERRORS).then((s) => s.size, () => 0)
@@ -1726,6 +1747,7 @@ app.post('/api/setup', wrap(async (req) => {
   if (b.location === null || (b.location && typeof b.location.lat === 'number')) p.location = b.location && { label: String(b.location.label || 'Here').slice(0, 60), lat: b.location.lat, lon: b.location.lon, timezone: b.location.timezone || TZ }
   if (b.defaultAgent) p.defaultAgent = String(b.defaultAgent)
   if (b.chiefKind) p.chief = { kind: String(b.chiefKind) }
+  counts.add(p.simple ? 'setup.simple' : 'setup.everything')
   return afterChange(settings.patch(p))
 }))
 // The id the UI opens a shell tab by (shell tabs are opened as tabs, not panes).
@@ -2138,6 +2160,7 @@ server.listen(cfg.port, cfg.host, () => {
   relay.start(`http://127.0.0.1:${cfg.port}`)
   phone.status(cfg.port).then(tailnetSaid).catch(() => {})
   machines.start()
+  counts.start()
 })
 // Agents keep running in the terminal host unless you turned that off (Settings › General).
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { rt.shutdown?.({ keep: cfg.keepAgents !== false }); process.exit(0) })

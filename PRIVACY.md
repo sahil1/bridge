@@ -2,8 +2,8 @@
 
 Bridge AI is an open-source app (https://github.com/sahil1/bridge) made of three parts: the app on
 your computer, a relay on your own Cloudflare account, and the phone apps for iPhone and Android.
-None of them sends anything to the project or its author. There is no server run by the project,
-no account, no analytics, no ads and no crash reporting.
+None of them sends anything to the project or its author unless you turn on usage counts (below),
+which are off unless you do. There is no account, no ads and no crash reporting.
 
 Last updated: October 2026.
 
@@ -19,8 +19,8 @@ with only the coordinates you picked), market prices and news headlines (Yahoo F
 Reserve and public news feeds), speech models when you download one, the first time you use the
 mic or a meeting or from Settings › Voice (one download each from Hugging Face; what you say is
 turned into text on your computer and never sent anywhere, unless you pick a speech service for
-meetings), and a check on GitHub for a newer version, which you can turn off in
-Settings › About & Updates. Its fonts and icons are part of the app, so nothing is fetched to draw
+meetings), a check on GitHub for a newer version, which you can turn off in Settings › About &
+Updates, and, only if you turn on usage counts, a weekly report to the project (below). Its fonts and icons are part of the app, so nothing is fetched to draw
 it. On Windows and Linux, the desktop app's spell check gets the dictionaries for your languages
 once, from Google, as Chrome does; nothing you type goes with them (a Mac uses its own).
 
@@ -65,6 +65,32 @@ password field had the keyboard isn't kept.
 
 If you run Bridge AI on a server or in Docker, all of this applies to that machine instead of your
 computer.
+
+## Usage counts (off unless you turn them on)
+
+Bridge AI can count which of its features you use each week (for example, how many agents you
+started, by kind, and how many meetings you recorded), as numbers in ranges ("2-5"), and send them
+to the project once a week, to help decide what to build. It does this only if you turn on **Share
+anonymous usage counts** in Settings › About & Updates. It's off unless you do, setup never asks,
+and while it's off nothing is counted at all. It's offered only once the project has a server to
+receive them (`endpoint` in `shared/telemetry-schema.json`, empty for now), and `DO_NOT_TRACK=1` or
+`BRIDGE_TELEMETRY=0` in the environment keeps it off.
+
+While it's on, the counts are kept on your computer, in `~/.bridge-ai/telemetry`, a week at a time.
+Once a week is over, its report goes to that server: Bridge AI's version, your operating system and
+chip, how it's installed, its layout, whether a phone is paired, how long it's been on your computer
+and on how many days of the week it was used (in ranges), and the counts. It has no name, no ID for
+you or your computer (a random number new with each report lets the server count a report once),
+no file, folder, project, repo or branch names, nothing you typed or said, nothing from your agents,
+no email addresses and no exact times. The full list of what can be counted is
+`shared/telemetry-schema.json` in the repo; adding to it is a public change. **See exactly what
+would be sent** shows the next report as it would go, and a copy of each report sent is kept in
+`~/.bridge-ai/telemetry/sent`.
+
+The server sees your IP address when a report arrives, as any website does, and isn't meant to store
+it. Because reports carry no ID, one already sent can't be found again to delete. Turning sharing off
+stops it at once and forgets what was counted and not yet sent, and if the project stops collecting,
+Bridge AI turns sharing off and says so.
 
 When you add a key for a cloud agent (Cursor, GitHub Copilot, Jules or Claude), Bridge AI on your
 computer talks to that provider with your key: to list your repos, start the agents you ask for,
