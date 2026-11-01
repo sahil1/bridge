@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import Icon, { StatusDot } from './components/Icon.jsx'
 import { useAppearance } from './appearance.js'
 import ErrorBoundary, { Quiet } from './components/ErrorBoundary.jsx'
+import { CrashNotice } from './components/CrashReport.jsx'
 import Rail from './components/Rail.jsx'
 import Board from './components/Board.jsx'
 import Dock from './components/Dock.jsx'
@@ -586,6 +587,7 @@ function App() {
       {settings && <Settings section={settings} onClose={closeSettings} onOpenAgent={openAgent} />}
       {(fleet?.agents || []).filter((a) => a.chief && a.setup).map((a) => <FirstRunAnswers key={a.paneId} agent={a} />)}
       <CallPrompt />
+      {!cloudOnly && <Quiet name="Crash notice"><CrashNotice /></Quiet>}
       {onboarding && <Onboarding onDone={(pane) => { setOnboarding(false); confPoll.refresh(); if (pane) setTimeout(() => openAgent(pane), 800); else openAgent('view:new') }} />}
       {newAgent && <NewAgent fleet={fleet} initial={newAgent} onClose={() => setNewAgent(null)} onLaunched={onLaunched} onAddAccount={(kind) => setAddAcct({ kind })} onCloudSettings={() => { setNewAgent(null); setSettings('cloud') }} />}
       {history && <History onClose={() => setHistory(false)} onOpen={(id, fresh) => (fresh ? setTimeout(() => openAgent(id), 1200) : openAgent(id))} />}

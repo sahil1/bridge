@@ -19,6 +19,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { SECRETS, GENERIC_USER, HOME_PATH, ALLOW_EMAIL, EMAIL, TAILNET, GENERIC_TAILNET } from '../shared/private.js'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const args = process.argv.slice(2)
@@ -80,22 +81,13 @@ const PRIVATE_FILES = [
 const TEMPLATES = { 'chief/state/ledger.md': /\{\{name\}\}/, 'chief/state/playbook.md': /\{\{name\}\}/, 'chief/state/tasks.md': /\{\{name\}\}/, 'chief/INSTRUCTIONS.md': /\{\{name\}\}[\s\S]*\{\{playbook\}\}/ }
 
 // ---------- Text that is personal ----------
-const ALLOW_EMAIL = /(noreply|no-reply)@|@(users\.noreply\.github\.com|example\.(com|org)|anthropic\.com|openai\.com)$|^git@github\.com$/i
-// (bridge: the user inside the Docker image, whose home is /home/bridge)
-const GENERIC_USER = new Set(['you', 'me', 'user', 'username', 'name', 'runner', 'example', 'shared', 'public', 'yourname', 'your-name', '<you>', 'jane', 'john', 'alice', 'bob', 'admin', 'default', 'bridge'])
+// Keys, home folders, emails and Tailscale names, the same ones a crash report takes out
+// (shared/private.js).
 const PATTERNS = [
-  ['an Anthropic key', /sk-ant-[A-Za-z0-9_-]{20,}/],
-  ['an OpenAI-style key', /\bsk-(proj-|svcacct-)?[A-Za-z0-9_-]{32,}/],
-  ['a GitHub token', /\b(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{30,}|\bgithub_pat_[A-Za-z0-9_]{40,}/],
-  ['an AWS access key', /\b(AKIA|ASIA)[A-Z0-9]{16}\b/],
-  ['a Google API key', /\bAIza[0-9A-Za-z_-]{35}\b/],
-  ['a Slack token', /\bxox[abprs]-[A-Za-z0-9-]{10,}/],
-  ['a private key', /-----BEGIN [A-Z ]*PRIVATE KEY-----/],
-  ['a JSON web token', /\beyJ[A-Za-z0-9_-]{15,}\.eyJ[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{10,}/],
-  ['a web-push private key', /"privateKey"\s*:\s*"[A-Za-z0-9_-]{40,}"/],
-  ['your Tailscale machine name', /\b[a-z0-9-]+\.[a-z0-9-]+\.ts\.net\b/i, (m) => !/^(your|my|machine|device|name|example)[.-]/i.test(m)],
-  ['a home-folder path', /(?:\/Users\/|\/home\/|[A-Za-z]:\\\\?Users\\\\?)([A-Za-z0-9._-]+)/, (m, g) => !GENERIC_USER.has(g.toLowerCase())],
-  ['an email address', /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b/, (m) => !ALLOW_EMAIL.test(m)],
+  ...SECRETS,
+  ['your Tailscale machine name', TAILNET, (m) => !GENERIC_TAILNET.test(m)],
+  ['a home-folder path', HOME_PATH, (m, g) => !GENERIC_USER.has(g.toLowerCase())],
+  ['an email address', EMAIL, (m) => !ALLOW_EMAIL.test(m)],
 ]
 
 // Products and services Bridge AI names itself (calls, calendars, trackers, agents), public names

@@ -1,13 +1,15 @@
 import { Component, useEffect, useState } from 'react'
 import { api } from '../api.js'
 import { t } from '../i18n/index.js'
+import { ReportButton } from './CrashReport.jsx'
 
 // One broken view shouldn't blank the whole app: show what failed, in place, with a way out. full:
 // the whole window broke (the boundary around the app), so the way out is in the middle of the
 // window, with more ways to get going again. quiet: a small extra (a top-bar chip, your devices in
 // the sidebar) that steps aside when it breaks, and tries again by itself a little later, while the
 // rest of the window carries on. Every crash is written down on your computer
-// (<data>/logs/ui-errors.log) and Copy details gives what's needed to fix it.
+// (<data>/logs/ui-errors.log), Copy details gives what's needed to fix it, and Report on GitHub
+// fills in an issue with it, to read and change before sending it there (CrashReport.jsx).
 export default class ErrorBoundary extends Component {
   constructor(props) { super(props); this.state = { error: null, stack: '' }; this.tries = 0 }
   static getDerivedStateFromError(error) { return { error } }
@@ -41,6 +43,7 @@ export default class ErrorBoundary extends Component {
           <button className="btn" onClick={retry}>{t('Try again')}</button>
           <button className="ghost-btn" onClick={() => location.reload()}>{t('Reload')}</button>
           <CopyDetails error={error} stack={stack} where={this.props.name} />
+          <ReportButton where={this.props.name} error={error} stack={stack} />
         </div>
       </div>
     )
@@ -140,7 +143,7 @@ function CrashScreen({ name, error, stack, onRetry }) {
           <pre>{stack || String(error?.stack || '')}</pre>
           <p className="muted small">{t('Also kept on your computer, in {path}.', { path: '~/.bridge-ai/logs/ui-errors.log' })}</p>
         </details>
-        <div className="crash-acts"><CopyDetails error={error} stack={stack} where={name} version={ver} /></div>
+        <div className="crash-acts"><CopyDetails error={error} stack={stack} where={name} version={ver} /><ReportButton where={name} error={error} stack={stack} version={ver} /></div>
       </div>
     </div>
   )

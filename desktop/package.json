@@ -25,6 +25,7 @@
     },
     "files": [
       "main.js",
+      "crashes.js",
       "preload.js",
       "tile-preload.js",
       "dictation.js",
