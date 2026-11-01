@@ -2,9 +2,9 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
-## 3.8.1
+## 3.8.2
 
-One inbox for everything waiting on you, a map of what's running on each of your computers, meetings that turn into work, dictation you can keep, edit and talk back to, whiteboards that draw what you describe, and another computer's videos playing here.
+One inbox for everything waiting on you, a map of what's running on each of your computers, meetings that turn into work, dictation you can keep, edit and talk back to, whiteboards that draw what you describe, and another computer's videos and files, played here or copied over. (3.8.0 and 3.8.1 never went out: their builds stopped at checks before anything was published.)
 
 ### What's new
 
@@ -20,11 +20,14 @@ One inbox for everything waiting on you, a map of what's running on each of your
 - **Fn or the right ⌥ on its own** as the dictation key (Right Alt on Windows and on Linux with X11).
 - **Whiteboards.** Draw by hand, or describe a flowchart, an architecture or a sequence (or draw it from a meeting, a project or an agent's chat) and get shapes you can move and edit; **Change it** edits them by description. Diagram files your agents write (Mermaid, `.excalidraw`, `.drawio`) open as boards, and Chief of Staff can make them too.
 - **Another computer's videos, here.** A video or a sound on another of your computers plays in the file viewer as it arrives, seeking included, from a computer or your phone; PDFs and pictures show, anything else downloads (Save to Files on the iPhone). A big file no longer holds up everything else on the link.
+- **Files between your computers and your phone.** **Copy to this computer** or **Send to…** another of your computers, from Files, the viewer or by dragging between devices: it goes over the same encrypted link, carries on after a dropped connection, is checked against the original before it takes its name, and never replaces a file (a name that's taken gets a number). **Places** adds folders you pick, beside your agents' folders. From a phone, **Send files from this device** puts photos and videos on a computer.
 - **Permissions that just work.** Bridge AI asks macOS's own question first, notices by itself when you've allowed something, and carries on what you were doing. A permission left over from an old version gets **Reset and ask again**. Settings › General › Permissions lists them all.
 - **Report a crash on GitHub.** After a crash, read the whole report (with nothing personal in it), change what you like, and open it as a GitHub issue. Bridge AI sends nothing by itself.
 
 ### Fixes
 
+- **Whiteboards** leave Excalidraw's own online services (and their key) out of the app; Bridge AI never used them.
+- **Try the demo** on an iPhone: its top strip fits, so Pair a computer is always there.
 - **Updates:** the update offer goes by the desktop app's own version, a failed update says why with Try again, and after a few days the chip says "Update to x".
 - **Windows:** agents are told apart by their tab's name in Needs you and the Agent Map (they all shared the shell's title before).
 
