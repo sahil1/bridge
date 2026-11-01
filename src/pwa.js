@@ -12,13 +12,15 @@ export function registerServiceWorker() {
   navigator.serviceWorker.addEventListener('message', (e) => { if (e.data?.type === 'open') openLink(e.data.url) })
 }
 
-// ?agent=<pane> opens that agent (&ask=1: at its Chat, where its question card is); ?card=<id>
-// shows a Today card. Used by notifications.
+// ?agent=<pane> opens that agent (&ask=1: at its Chat, where its question card is; &inbox=1: the
+// needs-you inbox instead, at that agent's question); ?card=<id> shows a Today card. Used by
+// notifications.
 export function openLink(href = location.href) {
   const url = new URL(href, location.origin)
   const agent = url.searchParams.get('agent')
   const card = url.searchParams.get('card')
-  if (agent) window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: agent, view: url.searchParams.get('ask') ? 'chat' : undefined } }))
+  if (agent && url.searchParams.get('inbox')) window.dispatchEvent(new CustomEvent('bridge-needs-you', { detail: { paneId: agent } }))
+  else if (agent) window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: agent, view: url.searchParams.get('ask') ? 'chat' : undefined } }))
   if (card) window.dispatchEvent(new CustomEvent('bridge-open-card', { detail: { id: card } }))
   if (agent || card) history.replaceState(null, '', url.pathname)
 }

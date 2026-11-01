@@ -13,6 +13,10 @@
 //                                           goes in ~/claude-typed.log
 //   CLAUDE_STAND_IN=fresh claude [...]      waiting for its first message, the same way, and its
 //                                           arguments noted in ~/claude-started.log
+//   claude --session-id <id> "ask <command>"  asks for permission to run <command> (npm run deploy
+//                                           if none), the way Claude Code does: 1 or 2 goes ahead,
+//                                           3 or Esc doesn't; the key is noted in ~/claude-answers.log
+//                                           (with the command), then it works a moment and is done
 //   claude auth status --json | login | logout
 //                                           the sign-in of the config folder it's run for
 //                                           (CLAUDE_CONFIG_DIR, else ~/.claude): signed in until
@@ -89,7 +93,24 @@ const padding = (mb) => { const line = JSON.stringify({ type: 'api-request-blob'
 
 // Its screen first, so its footer is up before the log is done.
 const limited = /limit$/.test(message)
-draw(message !== 'idle' && message !== 'table' && message !== 'diagram' && !limited)
+const asks = /^ask\b/.test(message) ? message.slice(3).trim() || 'npm run deploy' : null
+if (asks) {
+  // A permission prompt under its rule, as Claude Code draws one, until a key answers it.
+  process.stdout.write(['✻ Brewed for 8s', '', rule, ' Bash command', '', `   ${asks}`, '   Run what it asked for', '', ' Do you want to proceed?',
+    ' ❯ 1. Yes', `   2. Yes, and don't ask again for ${asks.split(' ')[0]} commands`, '   3. No, and tell Claude what to do differently (esc)', ''].join('\r\n'))
+  if (process.stdin.isTTY) process.stdin.setRawMode(true)
+  let answered = false
+  process.stdin.on('data', (d) => {
+    const k = String(d)
+    if (answered || !/^[123\x1b]/.test(k)) return
+    answered = true
+    fs.appendFileSync(path.join(os.homedir(), 'claude-answers.log'), JSON.stringify({ key: k[0] === '\x1b' ? 'esc' : k[0], command: asks }) + '\n')
+    const go = k[0] === '1' || k[0] === '2'
+    process.stdout.write(`\x1b[2J\x1b[H${go ? `⏺ Bash(${asks})` : '⏺ Stopped: you said no'}\r\n\r\n✻ Deploying… (2s · esc to interrupt)\r\n`)
+    setTimeout(() => process.stdout.write(`\x1b[2J\x1b[H${go ? `Ran ${asks}. Everything is up.` : 'Stopped, as you asked.'}\r\n\r\n✻ Brewed for 9s\r\n${rule}\r\n❯ \x1b[7m \x1b[27m\r\n${rule}\r\n`), 2500)
+  })
+  setInterval(() => {}, 1 << 30)
+} else draw(message !== 'idle' && message !== 'table' && message !== 'diagram' && !limited)
 
 // Then the shells' output and the subagent's own files, so the log's last notice is the last thing written.
 fs.writeFileSync(path.join(tasks, 'bsh0.output'), 'ready on :5173\n')

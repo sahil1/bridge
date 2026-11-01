@@ -21,7 +21,9 @@ import './dictation.css'
 // line saying why. No Accessibility yet: Allow it asks macOS from there, and once it's on (noticed by
 // itself), Paste pastes what's waiting where you were typing. After a Copy, it asks once whether to
 // paste for you next time. Each dictation is kept with the app it was said in, and amended with what
-// became of it (controller.js keep).
+// became of it (controller.js keep). Edit by voice (Settings › Voice, a Mac): with text selected where
+// you were typing, what you said is how to change it; the model picked for it rewrites the text and
+// it's pasted in its place.
 // The desktop app tells it when the key goes down and up (bridge-dictate-key events, as in the main
 // window); a press from before it was ready comes from hudReady(). The window keeps its width and
 // top, and grows down to fit (hudSize); on a Mac and Windows, clicks go through it except on the
@@ -61,6 +63,8 @@ export default function Hud() {
   const [room, setRoom] = useState(48) // the card's height at most, while it eases
   const menu = useRef(null)
   const [allowed, setAllowed] = useState(false) // Accessibility turned on while the words waited here
+  const [editing, setEditing] = useState(false) // edit by voice: the selection being read and rewritten
+  const [edited, setEdited] = useState(null) // ...and what it was rewritten as
   const timer = useRef(null)
   const going = useRef(null)
   // This press's words, straight from the key: not after a download or Try again, when you've long
@@ -93,7 +97,7 @@ export default function Hud() {
   useEffect(() => {
     const begin = (at, name, bundle) => {
       clearTimeout(timer.current); clearTimeout(going.current); setLeaving(false)
-      setDone(null); setErr(null); setPicking(false); setWhy(null); setOffer(false); setPasting(false); setAllowed(false)
+      setDone(null); setErr(null); setPicking(false); setWhy(null); setOffer(false); setPasting(false); setAllowed(false); setEditing(false); setEdited(null)
       setInto(name || null)
       setShown((n) => n + 1)
       press0.current++
@@ -140,7 +144,7 @@ export default function Hud() {
   }
   const later = (ms) => { clearTimeout(timer.current); timer.current = setTimeout(() => { setDone(null); hide() }, ms) }
   const target = agents.find((a) => a.paneId === to) || null
-  const text = s.result?.text || ''
+  const text = edited ?? (s.result?.text || '')
   const canPaste = !!st?.paste?.can && !!app().hudPaste
   const pasteOn = conf?.to === 'paste' && canPaste
   // Where I'm typing: the text, as soon as it's here, pasted by the desktop app. Decided once, when
@@ -151,11 +155,31 @@ export default function Hud() {
     pasted.current = r.at
     const now = fresh.current
     fresh.current = false
+    if (now && st?.edit?.on && app().hudSelection) { setEditing(true); editOr(r); return }
     if (!pasteOn || !now) return
     if (!st.paste.allowed) { setWhy('accessibility'); return }
     pasteIt(r)
   }, [s.result?.at]) // eslint-disable-line react-hooks/exhaustive-deps
-  function pasteIt(r) {
+  // Edit by voice: what was selected when the key was let go (the desktop app read it), rewritten as
+  // you said and pasted in its place. Nothing selected: your words, as they'd have gone.
+  async function editOr(r) {
+    const g = press0.current
+    const sel = await app().hudSelection().catch(() => null)
+    if (g !== press0.current) return
+    if (!sel?.text?.trim()) {
+      setEditing(false)
+      if (pasteOn) { if (!st.paste.allowed) setWhy('accessibility'); else pasteIt(r) }
+      return
+    }
+    try {
+      const x = await api('/dictation/edit', { method: 'POST', body: { text: sel.text, instruction: r.text } })
+      if (g !== press0.current) return
+      setEdited(x.text)
+      setEditing(false)
+      pasteIt({ ...r, text: x.text }, true)
+    } catch (e) { if (g === press0.current) { setEditing(false); setErr(e.message) } }
+  }
+  function pasteIt(r, change = false) {
     setPasting(true)
     setWhy(null)
     const g = press0.current
@@ -168,6 +192,7 @@ export default function Hud() {
       if (x?.pasted) {
         // Nothing took it (no text field there): it's on the clipboard to paste by hand.
         if (x.read === false) { setDone(t('Nothing took it there, so it\'s on the clipboard: press {key} to paste it.', { key: pasteKey() })); later(3500) }
+        else if (change) { setDone(into ? t('Changed in {app}', { app: into }) : t('Changed')); later(1200) }
         else { setDone(into ? t('Pasted into {app}', { app: into }) : t('Pasted')); later(900) }
       } else setWhy(WHY[x?.error] ? x.error : x?.error === 'off' ? null : 'failed')
     }, () => { if (g === press0.current) { setPasting(false); setWhy('failed') } })
@@ -243,8 +268,8 @@ export default function Hud() {
   // What shows: the pill while it listens, transcribes, pastes, or says what became of the words;
   // the card for the words to send or copy, a note, or the speech model to download.
   const listening = s.phase === 'opening' || s.phase === 'listening'
-  const autoPaste = !!s.result && pasteOn && !!st?.paste?.allowed && !why && (pasting || (fresh.current && pasted.current !== s.result.at))
-  const view = listening ? 'listening' : s.phase === 'working' ? 'working' : s.result && autoPaste && !done ? 'pasting'
+  const autoPaste = !!s.result && (pasteOn || edited != null) && !!st?.paste?.allowed && !why && (pasting || (fresh.current && pasted.current !== s.result.at))
+  const view = listening ? 'listening' : s.phase === 'working' ? 'working' : s.result && (editing || (autoPaste && !done)) ? 'pasting'
     : done && !offer && !err ? 'done' : s.result ? 'card' : s.note || s.setup ? 'note' : 'idle'
   const card = view === 'card' || view === 'note'
   const hint = s.mode === 'free' ? t('Listening… press {key} again when you\'re done', { key: label }) : t('Let go to finish · Esc cancels')
@@ -255,7 +280,7 @@ export default function Hud() {
       <Morph key={shown} className={`hud${card ? ' card' : ''}`} role="dialog" aria-label={t('Dictation')} onSize={(z) => setRoom(z.h)}>
         {view === 'listening' && <Listening s={s} to={toChip} hint={hint} onCancel={() => { cancel(); hide() }} onStop={finish} />}
         {view === 'working' && <Working s={s} />}
-        {view === 'pasting' && <Working s={s} text={into ? t('Pasting into {app}…', { app: into }) : t('Pasting…')} />}
+        {view === 'pasting' && <Working s={s} text={editing ? t('Changing what you selected…') : into ? t('Pasting into {app}…', { app: into }) : t('Pasting…')} />}
         {view === 'done' && <Done text={done} />}
         {view === 'card' && (
           <div className="dp-card">

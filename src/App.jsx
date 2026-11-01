@@ -27,11 +27,13 @@ import Tour from './components/Tour.jsx'
 import { NextMeetingChip } from './components/Agenda.jsx'
 import { TodayTabs, TodayBody, openToday } from './components/Dock.jsx'
 import { Handle, usePersisted, useMedia, useHotkey, useWidth, useShared, store } from './components/layout.jsx'
-import { api, useFleet, usePoll, relayActivity, cloudOnly, refetch, viaRelay } from './api.js'
+import { api, useFleet, usePoll, relayActivity, cloudOnly, refetch, viaRelay, machineId } from './api.js'
 import { takeReturn } from './permissions.js'
 import CloudHome from './components/CloudHome.jsx'
 import SessionSwitcher from './components/Sessions.jsx'
-import { MachineMenu, AskBanner, useMachines, goMachine, isRemote, remoteOf } from './components/Machines.jsx'
+import { MachineMenu, AskBanner, useMachines, goMachine, isRemote, remoteOf, openRemote } from './components/Machines.jsx'
+import { useNeedsYou, NeedsYouChip, NeedsYouPanel, waitingOn } from './components/NeedsYou.jsx'
+import AgentMap from './components/AgentMap.jsx'
 import RemoteAgent from './components/RemoteAgent.jsx'
 import Dictation from './dictation/Dictation.jsx'
 import { t, tx, locale } from './i18n/index.js'
@@ -154,8 +156,8 @@ function WeatherChip({ onClick }) {
 }
 
 // Views that open in tabs beside the agents: Home (start something new), Meetings, a meeting,
-// Dictations, Whiteboards and a whiteboard.
-const VIEWS = { 'view:new': { title: tx('New'), icon: 'plus' }, 'view:meetings': { title: tx('Meetings'), icon: 'mic' }, 'view:dictations': { title: tx('Dictations'), icon: 'wave' }, 'view:whiteboards': { title: tx('Whiteboards'), icon: 'shapes' } }
+// Dictations, Whiteboards and a whiteboard, and the agent map (what runs on which of your computers).
+const VIEWS = { 'view:new': { title: tx('New'), icon: 'plus' }, 'view:meetings': { title: tx('Meetings'), icon: 'mic' }, 'view:dictations': { title: tx('Dictations'), icon: 'wave' }, 'view:whiteboards': { title: tx('Whiteboards'), icon: 'shapes' }, 'view:map': { title: tx('Agent Map'), icon: 'grid' } }
 // A whiteboard's tab is named as the board is (its id).
 const BOARD = 'view:whiteboard:'
 const isView = (id) => typeof id === 'string' && id.startsWith('view:')
@@ -232,13 +234,21 @@ function App() {
     const d = r.machine ? devices?.machines?.find((m) => m.id === r.machine) : null
     const live = d?.agents?.find((x) => x.paneId === r.pane)
     const info = remoteInfo[id] || {}
-    return { paneId: id, remote: r, title: live?.title || info.title || t('Agent'), device: d?.name || info.device || '', kind: live?.kind || info.kind, status: live?.status || (d && !d.online ? 'unknown' : info.status || 'unknown') }
+    // name: what that device's sidebar calls it (its tab's name; older devices send only a title).
+    return { paneId: id, remote: r, title: live?.name || live?.title || info.title || t('Agent'), device: d?.name || info.device || '', kind: live?.kind || info.kind, status: live?.status || (d && !d.online ? 'unknown' : info.status || 'unknown') }
   })
   const byId = Object.fromEntries([...shellTabs, ...agents, ...views, ...remotes].map((a) => [a.paneId, a]))
   // The chief of staff: Main, of its threads (each thread is a chief of its own).
   const mate = agents.find((a) => a.chief && a.thread?.main) || agents.find((a) => a.chief)
   const mateShown = byId[mateId]?.chief ? byId[mateId] : mate
   const needsYou = agents.filter((a) => a.status === 'blocked')
+  // The needs-you inbox: what waits on you on every device (NeedsYou.jsx). The chip counts this
+  // window's agents waiting from its live feed, and the other devices' from the inbox. inbox: null
+  // when closed, else { focus }.
+  const [inbox, setInbox] = useState(null)
+  const ny = useNeedsYou({ fleet, open: !!inbox, on: !cloudOnly })
+  const waiting = waitingOn(ny.data, { here: needsYou.length, shown: machineId || null })
+  const toReview = (ny.data?.items || []).filter((i) => (i.type === 'review' || i.type === 'failed') && i.online).length
 
   // herdr sessions each have their own agents (and number panes alike), so each keeps its own open
   // tabs, and a switch announces nothing: the last session's agents only left the view.
@@ -268,7 +278,6 @@ function App() {
   }, [fleet]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    document.title = needsYou.length ? `(${needsYou.length}) Bridge AI` : 'Bridge AI'
     for (const a of agents) {
       const before = prevStatus.current[a.paneId]
       // In the Mac app, Bridge itself posts these (so they work while the window is hidden).
@@ -286,6 +295,17 @@ function App() {
       prevStatus.current[a.paneId] = a.status
     }
   }, [fleet]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The window's title counts what waits on you, on every device.
+  useEffect(() => { document.title = waiting ? `(${waiting}) Bridge AI` : 'Bridge AI' }, [waiting])
+  // A notification about an agent that needs you (pwa.js openLink, ?inbox=1): the inbox, at it.
+  useEffect(() => {
+    if (cloudOnly) return
+    // The agent is the sending computer's: the one this page comes from.
+    const on = (e) => setInbox({ focus: e.detail?.paneId ? { paneId: e.detail.paneId, machine: e.detail.machine || null } : null })
+    window.addEventListener('bridge-needs-you', on)
+    return () => window.removeEventListener('bridge-needs-you', on)
+  }, [])
 
   // In the phone apps: the agents at work, for the lock screen.
   useEffect(() => {
@@ -320,6 +340,19 @@ function App() {
     })
     setL((l) => (l.max ? { ...l, max: null } : l))
   }, [wide, fleet, mobileAgent]) // eslint-disable-line react-hooks/exhaustive-deps
+  // An agent wherever it runs (the needs-you inbox, the agent map): here, on the device this window
+  // shows; on the device this page comes from while it shows another; or in a tab here for one
+  // elsewhere. chat: at its Chat, where a question's card is.
+  const openOn = (machine, paneId, { device, title, kind, chat = false } = {}) => {
+    if ((machine || null) === (machineId || null)) { if (chat) showChat(paneId); openAgent(paneId) }
+    else if (!machine) goMachine(null, { agent: paneId })
+    else openRemote({ id: machine, name: device }, { paneId, title, kind })
+  }
+  const openItem = (it) => { setInbox(null); openOn(it.machine, it.paneId, { device: it.device, title: it.agent?.title, kind: it.agent?.kind, chat: true }) }
+  // The map opens full size on a computer (Esc, or its own button, puts the rest back).
+  const openMap = () => { openAgent('view:map'); if (wide) set({ max: W.split && W.group === 'side' ? 'side' : 'main' }) }
+  const openMapRef = useRef(null)
+  openMapRef.current = openMap
   useEffect(() => {
     if (!cloudOnly) return
     const back = () => setMobileAgent(null)
@@ -348,6 +381,7 @@ function App() {
         if (!id) { setMtab('mate'); return }
       }
       if (!id) return
+      if (id === 'view:map') { openMapRef.current?.(); return }
       // From a "needs you" notification: at its Chat, where the question card is.
       if (e.detail.view === 'chat') showChat(id)
       openAgentRef.current?.(id, { replace: e.detail.replace || null })
@@ -542,6 +576,8 @@ function App() {
     { id: 'a:meetings', label: t('Meetings'), icon: 'mic', keywords: 'meeting notes transcripts summaries', run: () => openAgent('view:meetings') },
     { id: 'a:dictations', label: t('Dictations'), icon: 'wave', keywords: 'dictation history voice said typed pasted wispr macwhisper', run: () => openAgent('view:dictations') },
     WhiteboardsHome && { id: 'a:boards', label: t('Whiteboards'), icon: 'shapes', keywords: 'whiteboard board excalidraw draw sketch diagram flowchart architecture sequence org chart mermaid drawio canvas', run: () => openAgent('view:whiteboards') },
+    { id: 'a:map', label: t('Agent Map'), icon: 'grid', keywords: 'what is running where devices computers machines all agents overview cloud subagents', run: openMap },
+    { id: 'a:needs', label: t('Needs you'), icon: 'bell', keywords: 'inbox waiting approve allow permission questions answer review finished failed devices', run: () => setInbox({}) },
     { id: 'a:history', label: t('Search history and closed agents…'), icon: 'clock', keywords: 'search find transcript conversation closed archived resume old past', run: () => setHistory(true) },
     { id: 'a:cloud', label: t('New cloud agent…'), icon: 'cloud', keywords: 'cursor copilot jules claude managed remote github repo pull request', run: () => setNewAgent({ mode: 'cloud' }) },
     { id: 'a:chat', label: t('New chat…'), icon: 'chat', keywords: 'plain vanilla talk ask claude codex gemini assistant', run: () => setNewAgent({ mode: 'chat' }) },
@@ -588,6 +624,7 @@ function App() {
       {(fleet?.agents || []).filter((a) => a.chief && a.setup).map((a) => <FirstRunAnswers key={a.paneId} agent={a} />)}
       <CallPrompt />
       {!cloudOnly && <Quiet name="Crash notice"><CrashNotice /></Quiet>}
+      {inbox && !cloudOnly && <NeedsYouPanel data={ny.data} refresh={ny.refresh} phone={!wide} focus={inbox.focus} onClose={() => setInbox(null)} onOpen={openItem} />}
       {onboarding && <Onboarding onDone={(pane) => { setOnboarding(false); confPoll.refresh(); if (pane) setTimeout(() => openAgent(pane), 800); else openAgent('view:new') }} />}
       {newAgent && <NewAgent fleet={fleet} initial={newAgent} onClose={() => setNewAgent(null)} onLaunched={onLaunched} onAddAccount={(kind) => setAddAcct({ kind })} onCloudSettings={() => { setNewAgent(null); setSettings('cloud') }} />}
       {history && <History onClose={() => setHistory(false)} onOpen={(id, fresh) => (fresh ? setTimeout(() => openAgent(id), 1200) : openAgent(id))} />}
@@ -627,11 +664,13 @@ function App() {
       </button>
       <div className="top-right">
         <Quiet name="Recording"><RecordingPill /></Quiet>
-        {needsYou.length > 0 && (
-          <button className="needs-chip" onClick={() => openAgent(needsYou[0].paneId)} aria-label={needsYou.length === 1 ? t('{n} needs you', { n: needsYou.length }) : t('{n} need you', { n: needsYou.length })}>
-            <StatusDot status="blocked" size={8} /> {needsYou.length}<span className="needs-word"> {needsYou.length === 1 ? t('needs you') : t('need you')}</span>
-          </button>
-        )}
+        {cloudOnly
+          ? needsYou.length > 0 && (
+            <button className="needs-chip" onClick={() => openAgent(needsYou[0].paneId)} aria-label={needsYou.length === 1 ? t('{n} needs you', { n: needsYou.length }) : t('{n} need you', { n: needsYou.length })}>
+              <StatusDot status="blocked" size={8} /> {needsYou.length}<span className="needs-word"> {needsYou.length === 1 ? t('needs you') : t('need you')}</span>
+            </button>
+          )
+          : <NeedsYouChip count={waiting} review={wide ? toReview : 0} open={!!inbox} onClick={() => setInbox(inbox ? null : {})} />}
         {!cloudOnly && wide && (
           <>
             <Quiet name="Setting up"><SetupChip /></Quiet>
@@ -660,6 +699,8 @@ function App() {
   const viewFor = (id, { onBack } = {}) => (
     <ErrorBoundary key={id} name="This view" resetKey={id}>
       {id === 'view:new' ? <Home fleet={fleet} onLaunched={fromHome} onMore={(init) => setNewAgent(init)} />
+        : id === 'view:map' ? <section className="pane view-pane"><AgentMap phone={!wide} onOpen={(d, a) => openOn(d.id, a.paneId, { device: d.name, title: a.name || a.title, kind: a.kind })}
+          controls={wide ? { maximized: !!L.max, onMaximize: () => set({ max: L.max ? null : 'main' }) } : null} /></section>
         : id === 'view:meetings' ? <section className="pane view-pane"><MeetingsHome onOpen={(mid) => openAgent(`view:meeting:${mid}`, wide ? { replace: 'view:meetings' } : {})} /></section>
           : id === 'view:dictations' ? <section className="pane view-pane"><Dictations /></section>
             : id === 'view:whiteboards' && WhiteboardsHome ? <section className="pane view-pane"><WhiteboardsHome onOpen={(bid) => openAgent(`${BOARD}${bid}`, wide ? { replace: 'view:whiteboards' } : {})} /></section>
@@ -699,7 +740,7 @@ function App() {
               ? <div className="m-view">{!mAgent.paneId.startsWith('view:meeting:') && <button type="button" className="ghost-btn m-view-back" onClick={() => setMobileAgent(null)}><Icon name="back" size={14} /> {t('Agents')}</button>}{viewFor(mAgent.paneId, { onBack: () => openAgent('view:meetings') })}</div>
               : <Console agent={mAgent} variant="mobile" onBack={() => setMobileAgent(null)} queued={queuedFor(mAgent.paneId)} />
             : <><SessionSwitcher fleet={fleet} phone /><Board fleet={fleet} compact onOpen={openAgent}
-              action={<span className="m-acts"><button className="btn small" onClick={openNew} aria-label={t('Start something new')}><Icon name="plus" size={12} /> {t('New')}</button></span>} /></>)}
+              action={<span className="m-acts"><button className="btn small" onClick={openMap} aria-label={t('Agent Map')} title={t("What's running on each of your computers")}><Icon name="grid" size={12} /> {t('Map')}</button><button className="btn small" onClick={openNew} aria-label={t('Start something new')}><Icon name="plus" size={12} /> {t('New')}</button></span>} /></>)}
           {mtab === 'meetings' && (
             <div className="m-view m-meetings">
               {/* Meetings or Dictations: what you've said, either way. */}
@@ -725,7 +766,7 @@ function App() {
             <button key={id} className={mtab === id ? 'on' : ''} data-tour={{ mate: 'chief', agents: 'agents', meetings: 'meetings' }[id]} onClick={() => { setMtab(id); if (id === 'agents' && mtab === 'agents') setMobileAgent(null); if (id === 'meetings' && mtab === 'meetings') setMobileMeeting(null) }} aria-current={mtab === id}>
               <span className="tab-icon">
                 <Icon name={icon} size={20} />
-                {id === 'agents' && needsYou.length > 0 && <span className="badge">{needsYou.length}</span>}
+                {id === 'agents' && waiting > 0 && <span className="badge">{waiting}</span>}
                 {id === 'meetings' && meetings?.rec && <span className="badge rec" role="img" aria-label={t('Recording')} />}
               </span>
               <span>{label}</span>
@@ -860,7 +901,7 @@ function App() {
   )
 
   const boardEl = (
-    <Board fleet={fleet} selected={W.active} onOpen={openAgent} onOpenInHerdr={openInHerdr}
+    <Board fleet={fleet} selected={W.active} onOpen={openAgent} onOpenInHerdr={openInHerdr} onMap={openMap}
       minimized={L.boardMin && L.max !== 'board'} maximized={L.max === 'board'}
       onMinimize={() => set({ boardMin: !L.boardMin, max: null })} onMaximize={() => set({ max: L.max === 'board' ? null : 'board', boardMin: false })} />
   )
