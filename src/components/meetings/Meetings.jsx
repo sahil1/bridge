@@ -18,6 +18,7 @@ import { MicFix } from '../Composer.jsx'
 import { sendPicture, pictureUrl } from './screen.js'
 import './meetings.css'
 import SpeechSetup, { MeetingsSetup } from './SpeechSetup.jsx'
+import { ActionItems, SinceLastTime } from './work.jsx'
 
 // The meeting pages: the list of meetings, and one meeting with your notes beside its transcript, the
 // summary, questions about it, and its action items for the Chief of Staff. The recording itself is
@@ -154,6 +155,7 @@ export function MeetingsHome({ onOpen }) {
           <button type="button" className="btn small primary" onClick={() => go({ title: next.title, event: next })}>{t('Take notes')}</button>
         </div>
       )}
+      {next && !m?.rec && <SinceLastTime className="mt-since-next" path={`/meetings/since?${new URLSearchParams({ title: next.title || '', people: (next.attendees || []).join(','), start: next.start || '' })}`} onOpen={onOpen} />}
       {err && (err.code === 'mic' ? <MicFix stale={err.stale} onClose={() => setErr(null)} onAllowed={() => go(last.current || {})} /> : <p className="error-text small" role="alert">{err.message}</p>)}
       {error && !data && <p className="error-text small">{error}</p>}
       {data && !all.length && !first && (
@@ -327,15 +329,18 @@ function Picture({ id, c, onOpen, onChange, onError }) {
 
 const modelName = (models, id) => models?.find((x) => x.id === id)?.label || id
 
-// The summary up to the end of its action items, and the rest, so Send action items to Chief of
-// Staff goes right under them: under ## Action items, or the first heading with a checklist when the
-// notes are in another language (as the server finds them). n: how many there are.
+// The summary split around its action items, so each item gets its own Start an agent and To Chief
+// of Staff, and Send action items to Chief of Staff goes right under them: under ## Action items, or
+// the first heading with a checklist when the notes are in another language (as the server finds
+// them). head: before them; heading: theirs; items: the section as written; tail: after. n: how many.
 function atActions(summary) {
   const parts = String(summary || '').split(/\n(?=##\s)/)
   let i = parts.findIndex((x) => /^\s*##\s*Action items/i.test(x))
-  if (i < 0) i = parts.findIndex((x) => /^\s*##\s/.test(x) && /^\s*[-*]\s*\[ \]/m.test(x))
+  if (i < 0) i = parts.findIndex((x) => /^\s*##\s/.test(x) && /^\s*[-*]\s*\[[ xX]\]/m.test(x))
   const n = i < 0 ? 0 : (parts[i].match(/^\s*[-*]\s*\[ \]/gm) || []).length
-  return n ? { head: parts.slice(0, i + 1).join('\n'), tail: parts.slice(i + 1).join('\n'), n } : null
+  if (!n) return null
+  const [heading, ...body] = parts[i].replace(/^\s+/, '').split('\n')
+  return { head: parts.slice(0, i).join('\n'), heading, items: body.join('\n'), tail: parts.slice(i + 1).join('\n'), n }
 }
 
 // What a summary was written from (the server's summaryFrom), each opening where it is.
@@ -501,7 +506,7 @@ export function MeetingPage({ id, onBack }) {
     try { const r = await fn(); refresh(); return r } catch (e) { setMsg({ error: true, text: e.message }) } finally { setBusy(null) }
   }
   const summarize = () => act('summary', () => api(`/meetings/${encodeURIComponent(id)}/summary`, { method: 'POST', body: { kind: opts?.kind, model: opts?.model || undefined, language: opts?.language } }).then(() => setView('summary')))
-  const toChief = () => act('chief', async () => { const r = await api(`/meetings/${encodeURIComponent(id)}/chief`, { method: 'POST' }); setMsg({ text: chiefSaid(r) }) })
+  const toChief = () => act('chief', async () => { const r = await api(`/meetings/${encodeURIComponent(id)}/chief`, { method: 'POST' }); setMsg({ text: chiefSaid(r) }); refetch(`/meetings/${encodeURIComponent(id)}/work`) })
   const save = () => act('save', async () => { const r = await api(`/meetings/${encodeURIComponent(id)}/save`, { method: 'POST' }); setMsg({ text: r.files?.length > 1 ? t('Saved to {path} and its transcript', { path: tilde(r.file) }) : t('Saved to {path}', { path: tilde(r.file) }) }) })
   const reveal = () => act('reveal', () => api(`/meetings/${encodeURIComponent(id)}/reveal`, { method: 'POST' }))
   const copy = async (text, done) => { try { await navigator.clipboard.writeText(text); setMsg({ text: done }) } catch { setMsg({ error: true, text: t("Couldn't copy") }) } }
@@ -806,12 +811,13 @@ export function MeetingPage({ id, onBack }) {
       </div>
       {data.summary ? (todo ? (
         <>
-          <div className="mt-summary md" dangerouslySetInnerHTML={{ __html: md(todo.head) }} />
+          {todo.head.trim() && <div className="mt-summary md" dangerouslySetInnerHTML={{ __html: md(todo.head) }} />}
+          <ActionItems id={id} heading={todo.heading} fallback={todo.items} onMsg={setMsg} />
           <div className="mt-chief" role="group" aria-label={t('Chief of Staff')}>
             <button type="button" className="btn small" onClick={toChief} disabled={busy === 'chief'}><Icon name="helm" size={13} /> {data.chief ? t('Send again') : t('Send action items to Chief of Staff')}</button>
             <span className="muted small">{data.chief
               ? t('Sent to Chief of Staff on {when}. It tracks them on its task list and follows up.', { when: new Date(data.chief.at).toLocaleString(locale(), { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) })
-              : t('Chief of Staff tracks them on its task list and follows up: it hands yours to an agent and drafts follow-ups for the rest.')}</span>
+              : t('Chief of Staff tracks them on its task list and follows up: it hands yours to an agent and drafts follow-ups for the rest.')}{!data.chief && ` ${t("Ones already handed on aren't sent again.")}`}</span>
           </div>
           {todo.tail.trim() && <div className="mt-summary md" dangerouslySetInnerHTML={{ __html: md(todo.tail) }} />}
         </>
@@ -844,6 +850,7 @@ export function MeetingPage({ id, onBack }) {
       {head}
       <div className={`mt-page${dropping ? ' dropping' : ''}`} onDragOver={(e) => { if ([...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); setDropping(true) } }} onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDropping(false) }} onDrop={onDrop}>
         <RecordingBar id={id} data={data} onAssist={(on) => { refresh(); if (on) setView('assist') }} />
+        {(recording || Date.now() - Date.parse(data.startedAt) < 36 * 3600e3) && <SinceLastTime path={`/meetings/${encodeURIComponent(id)}/since`} onOpen={(mid) => window.dispatchEvent(new CustomEvent('bridge-open-meeting', { detail: { id: mid } }))} />}
         {(data.status === 'recording' || data.status === 'paused') && <SpeechSetup recording />}
         {!live && (data.status === 'recording' || data.status === 'paused') && <p className="muted small">{t('This meeting is recording in another window.')}</p>}
         {msg && <p className={`small mt-msg ${msg.error ? 'error-text' : 'muted'}`} role="status">{msg.text}{msg.act && <> <button type="button" className="link-btn" onClick={msg.act.run}>{msg.act.label}</button></>}</p>}

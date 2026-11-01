@@ -74,12 +74,14 @@ function checks(list) {
   return c
 }
 
-// The pull request for the branch you're on. A minute's cache while it's open (checks move),
-// a few minutes otherwise; opening one from here clears it.
+// The pull request for the branch you're on (or the one named: an agent's branch whose worktree is
+// gone, from a meeting's action items). A minute's cache while it's open (checks move), a few
+// minutes otherwise; opening one from here clears it.
 const prs = new Map() // `${repo}\n${branch}` -> { at, ttl, data }
 const inflight = new Map()
-export async function status(root, { refresh = false } = {}) {
+export async function status(root, { refresh = false, branch = null } = {}) {
   const r = await repoInfo(root)
+  if (r && branch) r.branch = String(branch)
   if (!r?.branch || !r.remote) return { github: false, gh: false }
   const bin = await ghPath()
   if (!r.github || !bin) return { github: r.github, gh: !!bin }

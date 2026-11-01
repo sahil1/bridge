@@ -2,12 +2,14 @@
 // transcribed by the stand-in speech service; sections; who said what; what the summary is written
 // from (your notes, the screen, the files, the invite); folders and the archive;
 // search and questions; saved Markdown; looks at the screen while the call talks (read by a
-// stand-in for native/bridgeocr, which isn't run on Windows). The calendar is macOS Calendar, and
+// stand-in for native/bridgeocr, which isn't run on Windows); action items turned into agents and
+// Chief of Staff's tasks, and since last time. The calendar is macOS Calendar, and
 // the call's sound is recorded on a Mac (a stand-in for native/calltap there), so their parts are
 // Mac-only.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, startModel, checks, until, sleep, IS_MAC, IS_WIN } from '../lib/harness.mjs'
+import { spawnSync } from 'node:child_process'
+import { startKit, startModel, checks, until, sleep, TEST, IS_MAC, IS_WIN } from '../lib/harness.mjs'
 
 const { ok, skip, done } = checks('meetings-api')
 // The text on a picture: ocr.txt beside it, and what it was asked to read goes in ocr.log.
@@ -415,6 +417,128 @@ try {
   await kit.api(`/meetings/${C.id}/stop`, {})
   ok((await kit.api('/meetings/bulk', { ids: [B.id], action: 'unarchive' })).done.length === 1, 'out of the archive again')
   ok((await kit.api('/meetings/bulk', { ids: [C.id], action: 'delete' })).done.length === 1 && !(await kit.api('/meetings')).meetings.some((x) => x.id === C.id), 'deleted')
+
+  // ---------- Action items into work ----------
+  // A project in git with a GitHub remote (nothing reached: gh is a stand-in that knows one pull
+  // request), a stand-in Claude Code, and a meeting about the project. Each action item: the project
+  // it names first (and why), what an agent would be told (the item, what was said about it, what was
+  // decided), started on its own branch in a space named after the meeting; one to Chief of Staff
+  // (its task's state shows), one ticked done. Then the next meeting in the series, one with the same
+  // people, one with the same customer, and an event about to start: what happened since last time.
+  kit.program('claude', fs.readFileSync(path.join(TEST, 'stand-ins', 'claude.cjs'), 'utf8'))
+  await kit.api('/agents/catalog') // looked for again
+  kit.program('gh', `const a = process.argv.slice(2)
+if (a[0] === 'repo') { console.log('main'); process.exit(0) }
+if (a[0] === 'pr' && a[1] === 'view') { console.log(JSON.stringify({ number: 212, state: 'OPEN', url: 'https://github.com/example/payments-api/pull/212', title: 'Retry the webhook', isDraft: false, statusCheckRollup: [{ status: 'COMPLETED', conclusion: 'SUCCESS' }] })); process.exit(0) }
+process.exit(1)`)
+  // Each call answers, a refusal as { error }, so every check below says what it found.
+  const tryApi = (p, body, method) => kit.api(p, body, method).catch((e) => ({ error: e.message }))
+  const repo = path.join(kit.home, 'code', 'payments-api')
+  const site = path.join(kit.home, 'code', 'website')
+  for (const d of [repo, site]) fs.mkdirSync(d, { recursive: true })
+  const inRepo = (...a) => spawnSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', '-c', 'init.defaultBranch=main', ...a], { cwd: repo, encoding: 'utf8' })
+  const madeRepo = inRepo('init', '-q').status === 0 && inRepo('commit', '-q', '--allow-empty', '-m', 'start').status === 0 && inRepo('remote', 'add', 'origin', 'https://github.com/example/payments-api.git').status === 0
+  await kit.api('/projects', { paths: [site, repo] })
+  // Whether the server can use git here (the test's own PATH can have a git its server's doesn't,
+  // as on Windows): without it, the agent starts in the project itself, with no branch of its own.
+  const hasGit = madeRepo && !!(await tryApi(`/repo?dir=${encodeURIComponent(repo)}`)).repo
+  const PS = await kit.api('/meetings', { title: 'Weekly payments sync', call: false, event: { title: 'Weekly payments sync', attendees: ['Priya Shah', 'Mia Chen', 'Ola Berg', 'Tester'] } })
+  await kit.api(`/meetings/${PS.id}/stop`, {})
+  await kit.api(`/meetings/${PS.id}`, { startedAt: new Date(Date.now() - 7 * 86400e3).toISOString() }, 'PATCH')
+  said(PS.id, [['them', 2, 'The Stripe webhook in payments-api retries forever when it gets a 500.'], ['you', 6, 'I can fix the retry this week, with a backoff.'], ['them', 10, 'Great. Also the pricing doc for Acme is ready to send.'], ['you', 14, 'And the website copy needs a look.']])
+  fs.writeFileSync(path.join(dirOf(PS.id), 'summary.md'), '## Summary\n- Webhook retries and pricing.\n\n## Decisions\n- Retry with a backoff, at most five times.\n\n## Action items\n- [ ] You: fix the retry on the Stripe webhook in payments-api\n- [ ] Priya: send the pricing doc to Acme\n- [ ] Dan: review the website copy\n')
+  let w = await tryApi(`/meetings/${PS.id}/work`)
+  ok(w.items?.length === 3 && w.items?.every((x) => x.state === 'open' && !x.agent && !x.chief) && w.items?.[0]?.yours && !w.items?.[1]?.yours, 'its action items, none handed on yet, the first one yours', w)
+  const [fixIt = {}, docIt = {}, copyIt = {}] = w.items || []
+  const prep = await tryApi(`/meetings/${PS.id}/work/${fixIt.key}`)
+  ok(prep.projects?.[0]?.path === repo && prep.projects?.[0].why.includes('item') && prep.projects?.[0].why.some((x) => /^said/.test(x)), 'the project it names comes first, saying why (named in the item, said in the meeting)', prep.projects)
+  ok(String(prep.prompt).includes('"Weekly payments sync"') && String(prep.prompt).includes('with Priya Shah, Mia Chen, Ola Berg') && String(prep.prompt).includes('> You: fix the retry on the Stripe webhook in payments-api') && /\[0:02\] Them: The Stripe webhook/.test(prep.prompt) && /\[0:06\] Tester: I can fix the retry/.test(prep.prompt) && /What the meeting decided:\n- Retry with a backoff/.test(prep.prompt), 'what it would be told: the meeting, the item, what was said about it and what was decided', prep.prompt)
+  ok(prep.label === 'Fix the retry on the Stripe webhook', 'a short name from its first words', prep.label)
+  const webPrep = await tryApi(`/meetings/${PS.id}/work/${copyIt.key}`)
+  ok(webPrep.projects?.[0]?.path === site, 'another item: the project it names', webPrep.projects)
+  if (!hasGit) skip('the agent on a branch of its own, and its pull request', 'the server has no git here')
+  {
+    const started = await tryApi(`/meetings/${PS.id}/work/${fixIt.key}/agent`, { cwd: repo, kind: 'claude', own: hasGit }).catch((e) => ({ error: e.message }))
+    ok(!!started.paneId && (!hasGit || /^bridge\/fix-the-retry-on-the-stripe-webhook/.test(started.worktree?.branch || '')) && /payments-api$/.test(started.agent?.projectName || ''), 'Start an agent: in the project, on a branch of its own', started)
+    const fleet = await until(async () => { const f = await kit.api('/fleet'); return f.agents.some((a) => a.paneId === started.paneId) && f }, 15000)
+    const ag = fleet?.agents.find((a) => a.paneId === started.paneId)
+    const space = fleet?.workspaces.find((x) => x.id === ag?.workspaceId)
+    ok((!hasGit || ag?.worktree?.branch === started.worktree?.branch) && space?.label === 'Weekly payments sync', 'in a space named after the meeting', { ag, space })
+    // What it was told: its first message, in the stand-in's session log (its terminal can take a
+    // while to start, and the stand-in writes its log over a moment).
+    const projects = path.join(kit.home, '.claude', 'projects')
+    const told = await until(() => {
+      for (const d of fs.existsSync(projects) ? fs.readdirSync(projects).filter((x) => x.includes(hasGit ? 'fix-the-retry' : 'payments-api')) : []) {
+        for (const f of fs.readdirSync(path.join(projects, d)).filter((x) => x.endsWith('.jsonl'))) {
+          const first = fs.readFileSync(path.join(projects, d, f), 'utf8').split('\n').map((l) => { try { return JSON.parse(l) } catch { return null } }).find((e) => e?.type === 'user')
+          if (first) return String(first.message.content)
+        }
+      }
+      return null
+    }, 60000, 1000)
+    ok(!!told && told.includes('> You: fix the retry on the Stripe webhook in payments-api') && told.includes('What was said about it'), "it's told the item and what was said about it", told)
+    w = await until(async () => { const x = await tryApi(`/meetings/${PS.id}/work`); return x.items?.[0]?.agent && (!hasGit || x.items[0].agent.pr) && x }, 15000)
+    const a0 = w?.items?.[0]
+    ok(a0?.agent?.live && (hasGit ? a0.agent.branch === started.worktree.branch && a0.agent.pr?.number === 212 && a0.agent.pr.checks?.pass === 1 && a0.state === 'review' : !a0.agent.branch), 'what became of it: the agent, its branch and its pull request (checks pass)', a0)
+  }
+  // To Chief of Staff, one item: on its task list, and the item says so; its task's state and outcome show.
+  r = await tryApi(`/meetings/${PS.id}/chief`, { items: [docIt.text] })
+  w = await tryApi(`/meetings/${PS.id}/work`)
+  const task = ((await tryApi('/chief/tasks')).items || []).find((x) => /send the pricing doc to Acme/.test(x.title))
+  ok(r.added === 1 && w.items?.[1]?.chief?.task === task?.id && w.items?.[1]?.chief.status === 'open' && !w.items?.[2]?.chief, 'To Chief of Staff: one item on its task list, and the item keeps its task', { r, item: w.items?.[1], task })
+  await tryApi(`/chief/tasks/${task?.id}`, { status: 'waiting', needs: 'Which pricing tier?' }, 'PATCH')
+  ok((await tryApi(`/meetings/${PS.id}/work`)).items?.[1]?.state === 'needs', 'Chief of Staff waiting on you: it needs you')
+  await tryApi(`/chief/tasks/${task?.id}`, { status: 'done', outcome: 'Drafted the email to Acme' }, 'PATCH')
+  w = await tryApi(`/meetings/${PS.id}/work`)
+  ok(w.items?.[1]?.state === 'done' && w.items?.[1]?.chief.outcome === 'Drafted the email to Acme', 'and done, with what it did', w.items?.[1])
+  // Send action items to Chief of Staff: only the ones not handed on yet.
+  r = await tryApi(`/meetings/${PS.id}/chief`, {})
+  ok(r.added === 1, 'Send action items to Chief of Staff sends only the ones not handed on yet', r)
+  await tryApi(`/meetings/${PS.id}/work/${copyIt.key}/done`, { done: true })
+  w = await tryApi(`/meetings/${PS.id}/work`)
+  ok(w.items?.[2]?.done && w.items?.[2]?.state === 'done', 'ticked done by hand', w.items?.[2])
+  // A summary written again in other words keeps what became of each item.
+  fs.writeFileSync(path.join(dirOf(PS.id), 'summary.md'), '## Action items\n- [ ] You: fix the retry on the Stripe webhook in payments-api, with a backoff\n- [ ] Priya: send the pricing doc to Acme\n- [ ] Dan: review the website copy\n')
+  w = await tryApi(`/meetings/${PS.id}/work`)
+  ok(w.items?.[2]?.done && !!w.items?.[0]?.agent?.paneId, 'a summary written again keeps what became of its items', (w.items || []).map((x) => [x.text, x.state]))
+  fs.writeFileSync(path.join(dirOf(PS.id), 'summary.md'), '## Summary\n- Webhook retries and pricing.\n\n## Decisions\n- Retry with a backoff, at most five times.\n\n## Action items\n- [ ] You: fix the retry on the Stripe webhook in payments-api\n- [ ] Priya: send the pricing doc to Acme\n- [ ] Dan: review the website copy\n')
+
+  // Since last time. The next one in the series (its name, without the date): the last one's items.
+  const P2 = await kit.api('/meetings', { title: 'Weekly payments sync (Nov 7)', call: false })
+  let since = await tryApi(`/meetings/${P2.id}/since`)
+  ok(since.last?.id === PS.id && since.last.why === 'series' && since.counts?.all === 3 && since.counts?.done === 2 && since.counts?.prs === (hasGit ? 1 : 0), 'the next in the series: what became of the last one\'s items (2 of 3 done, a pull request open)', since)
+  await kit.api(`/meetings/${P2.id}/stop`, {})
+  // The same people, whatever it's called.
+  const Q = await kit.api('/meetings', { title: 'Roadmap review', call: false, event: { title: 'Roadmap review', attendees: ['Ola Berg', 'priya.shah@example.com', 'Mia Chen'] } })
+  since = await tryApi(`/meetings/${Q.id}/since`)
+  ok(since.last?.id === PS.id && since.last.why === 'people', 'the same people, another name: since the last meeting with them', since.last)
+  await kit.api(`/meetings/${Q.id}/stop`, {})
+  // The same customer: an email domain both share, or a customer in meeting memory.
+  const N1 = await kit.api('/meetings', { title: 'Onboarding call', call: false, event: { title: 'Onboarding call', attendees: ['sam@example.org', 'Tester'] } })
+  await kit.api(`/meetings/${N1.id}/stop`, {})
+  await kit.api(`/meetings/${N1.id}`, { startedAt: new Date(Date.now() - 2 * 86400e3).toISOString() }, 'PATCH')
+  fs.writeFileSync(path.join(dirOf(N1.id), 'summary.md'), '## Action items\n- [ ] You: send Northwind the API keys\n')
+  since = await tryApi(`/meetings/since?${new URLSearchParams({ title: 'Kickoff', people: 'jo@example.org, Tester' })}`)
+  ok(since.last?.id === N1.id && since.last.why === 'customer' && since.last.customer === 'example.org' && since.items?.[0]?.state === 'open', 'an event with someone else from the same customer (their email): since the last one with them', since)
+  await kit.api('/meetings/memory', { term: 'Acme', note: 'customer, buys the enterprise plan' })
+  const A1 = await kit.api('/meetings', { title: 'Acme pricing', call: false })
+  await kit.api(`/meetings/${A1.id}/stop`, {})
+  await kit.api(`/meetings/${A1.id}`, { startedAt: new Date(Date.now() - 3 * 86400e3).toISOString() }, 'PATCH')
+  fs.writeFileSync(path.join(dirOf(A1.id), 'summary.md'), '## Action items\n- [ ] You: send Acme the quote\n')
+  since = await tryApi(`/meetings/since?${new URLSearchParams({ title: 'Acme renewal', people: 'Lee Wong' })}`)
+  ok(since.last?.id === A1.id && since.last.why === 'customer', 'an event named after a customer in meeting memory: since the last meeting about them', since.last)
+  // Your own organisation's domain (most meetings have someone from it) isn't a customer.
+  for (const who of ['lee@example.com', 'kai@example.com']) {
+    const x = await kit.api('/meetings', { title: `Chat with ${who.split('@')[0]}`, call: false, event: { title: 'Chat', attendees: [who, 'Tester'] } })
+    await kit.api(`/meetings/${x.id}/stop`, {})
+    fs.writeFileSync(path.join(dirOf(x.id), 'summary.md'), '## Action items\n- [ ] You: share the notes\n')
+  }
+  since = await tryApi(`/meetings/since?${new URLSearchParams({ title: 'Planning poker', people: 'ana@example.com' })}`)
+  ok(since.last === null, 'a colleague from your own organisation (its domain in most meetings) isn\'t taken for a customer', since.last)
+  since = await tryApi(`/meetings/since?${new URLSearchParams({ title: 'Weekly payments sync', people: 'Priya Shah, Mia Chen' })}`)
+  ok(since.last?.id === PS.id, 'an event about to start in the series: since its last one (not one without a summary yet)', since.last)
+  since = await tryApi(`/meetings/since?${new URLSearchParams({ title: 'Meeting', people: '' })}`)
+  ok(since.last === null, 'a meeting with only a plain name and nobody listed follows on from nothing', since)
 
   // ---------- The calendar (macOS Calendar, through icalBuddy) ----------
   if (IS_MAC) {

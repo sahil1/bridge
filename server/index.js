@@ -60,6 +60,7 @@ import * as boards from './boards.js'
 import * as labs from './labs.js'
 import * as meetMemory from './meetmemory.js'
 import * as voices from './voices.js'
+import * as meetWork from './meetwork.js'
 import * as speech from './speech.js'
 import * as projects from './projects.js'
 import * as calls from './calls.js'
@@ -569,8 +570,11 @@ app.get('/api/repo', wrap(async (req) => {
   try { dir = await places.resolveDir(req.query.dir) } catch { return { repo: null } }
   return worktrees.info(dir, { branch: req.query.branch, label: req.query.label })
 }))
-app.post('/api/agents/launch', wrap(async (req) => {
-  const { kind = cfg.defaultAgent || 'claude', cwd, workspaceId, newSpace, label, prompt, account, alsoKind, ownBranch, branch, base, setup, remember, model, access } = req.body || {}
+app.post('/api/agents/launch', wrap((req) => launchFrom(req.body || {})))
+// New agent's choices (also a meeting's action item, meetwork.js): which agent, in which folder,
+// where in the sidebar, on its own branch or not, and its first message.
+async function launchFrom(body) {
+  const { kind = cfg.defaultAgent || 'claude', cwd, workspaceId, newSpace, label, prompt, account, alsoKind, ownBranch, branch, base, setup, remember, model, access } = body
   if (kind !== 'shell' && kind !== 'chat' && !(await installed()).some((k) => k.kind === kind)) throw notInstalled(kind)
   // Any model, on the one picked, and allowed what the access chip says.
   const chatEnv = kind === 'chat' ? { env: { ...(typeof model === 'string' && model.trim() ? { BRIDGE_CHAT_MODEL: model.trim().slice(0, 200) } : {}), ...(['edits', 'full'].includes(access) ? { BRIDGE_CHAT_ACCESS: access } : {}) } } : {}
@@ -600,7 +604,7 @@ app.post('/api/agents/launch', wrap(async (req) => {
   }
   pushFleet()
   return out
-}))
+}
 app.post('/api/tabs/:tab/rename', wrap(async (req) => { await rt.renameTab(req.params.tab, String(req.body?.label || '').trim()); pushFleet(); return { ok: true } }))
 // Closing ends the terminal; the conversation is kept in "Closed agents" to find and resume.
 async function archiveWhere(match) {
@@ -1051,6 +1055,9 @@ const meetingModels = async () => {
   return [...l].sort((a, b) => (b.id === 'cli:claude') - (a.id === 'cli:claude') || VIA_ORDER.indexOf(a.via) - VIA_ORDER.indexOf(b.via)).map((m) => m.id)
 }
 meetings.setHelpers({ reply: (id, msgs, o) => chatModels.reply(id, msgs, o), pickModel: pickMeetingModel, models: meetingModels, mailRelated: (o) => mail.related(o), mailMessage: (id) => mail.message(id) })
+// A meeting's action items as agents and Chief of Staff's tasks (meetwork.js).
+meetWork.configure(cfg)
+meetWork.setHelpers({ fleet: () => (lastFleet ? Promise.resolve(lastFleet) : fleetView()), projects: () => projects.list(), tasks: () => chiefTasks.list(), pr: (dir, branch) => pr.status(dir, { branch }), tree: (folder) => worktrees.describe(folder), kindLabel: (k) => adapter(k).label || k, launch: (body) => launchFrom(body) })
 // Speech engines (speech.js): what Settings › Meetings shows, models to download, whisper.cpp to install.
 app.get('/api/speech', wrap(async () => ({ ...(await speech.status(cfg)), callAudio: cfg.meetings?.callAudio !== false, canRecordCall: !!meetings.tapBin(), canWatchCalls: !!calls.watchBin(), folder: meetings.folder(), voices: await voices.status() })))
 app.post('/api/speech/models/:id', wrap(async (req) => { speech.fetchModel(req.params.id); return speech.status(cfg) }))
@@ -1075,13 +1082,13 @@ app.post('/api/meetings/bulk', wrap(async (req) => {
   if (action === 'chief') {
     const items = []
     for (const id of ids) {
-      try { const m = meetings.get(id); for (const t of meetings.actions(id)) items.push({ m, t }); out.done.push(id) } catch (e) { out.failed.push({ id, error: e.message }) }
+      try { const m = meetings.get(id); const fresh = meetWork.unsent(id); for (const t of fresh.length ? fresh : meetings.actions(id)) items.push({ m, t }); out.done.push(id) } catch (e) { out.failed.push({ id, error: e.message }) }
     }
     if (!items.length) throw new Error('No action items in those summaries')
-    const added = items.slice(0, 60).map(({ m, t }) => ({ m, task: chiefTasks.add(t.slice(0, 300), { from: 'meeting', link: m.saved || null }) }))
+    const added = items.slice(0, 60).map(({ m, t }) => ({ m, t, task: chiefTasks.add(t.slice(0, 300), { from: 'meeting', link: m.saved || null }) }))
     const by = new Map()
-    for (const { m, task } of added) { if (!by.has(m.id)) by.set(m.id, { m, tasks: [] }); by.get(m.id).tasks.push(task) }
-    for (const { m, tasks } of by.values()) meetings.toChief(m.id, tasks.length)
+    for (const { m, t, task } of added) { if (!by.has(m.id)) by.set(m.id, { m, tasks: [], pairs: [] }); by.get(m.id).tasks.push(task); by.get(m.id).pairs.push({ text: t, task }) }
+    for (const { m, tasks, pairs } of by.values()) { meetings.toChief(m.id, tasks.length); meetWork.sentToChief(m.id, pairs) }
     const text = ['From my meetings, these action items are on your task list:', ...[...by.values()].flatMap(({ m, tasks }) => [`"${m.title}" (${new Date(m.startedAt).toDateString()}):`, ...tasks.map((t) => `- ${t.id}: ${t.title}`)]), '', 'Take the ones that are mine to hand off: start or brief the right agent for each, and keep the tasks current with `node bin/bridge task`. For the ones that belong to other people, draft the follow-up for me to send; don\'t message anyone yourself.'].join('\n')
     return { ...out, added: added.length, ...(await tellChief(text)) }
   }
@@ -1104,6 +1111,9 @@ app.post('/api/meetings/bulk', wrap(async (req) => {
 app.get('/api/meetings/voices', wrap(() => voices.status()))
 app.post('/api/meetings/voices/forget', wrap(() => voices.forget()))
 app.post('/api/meetings/voices/download', wrap(async () => { if (!(await voices.status()).offered) throw new Error((await voices.status()).why || 'Telling voices apart can\'t run on this computer'); speech.fetchModel(speech.VOICE.id); return voices.status() }))
+// What happened since the last meeting in a series, with the same people or the same customer:
+// for a calendar event about to start (title, people), before there's a meeting for it.
+app.get('/api/meetings/since', wrap((req) => meetWork.since({ title: String(req.query.title || '').slice(0, 200), attendees: [].concat(req.query.people || []).flatMap((x) => String(x).split(',')).map((x) => x.trim()).filter(Boolean).slice(0, 50), start: String(req.query.start || '') || null })))
 // Search every meeting's words, and ask about several at once (the picked ones, or the likely ones).
 app.get('/api/meetings/search', wrap((req) => meetings.search(String(req.query.q || '').slice(0, 200), { archived: req.query.archived === '1' })))
 app.post('/api/meetings/ask', wrap((req) => meetings.askAll(String(req.body?.question || '').slice(0, 2000), { ids: [].concat(req.body?.ids || []).slice(0, 50), model: req.body?.model })))
@@ -1252,16 +1262,28 @@ app.get('/api/meetings/:id/links/:lid/file', (req, res) => {
     res.download(l.path, l.name, { dotfiles: 'allow' })
   } catch (e) { res.status(404).json({ error: e.message }) }
 })
+// Its action items and what became of each (meetwork.js): start an agent on one (what it would be
+// told and the projects it's likely about first), tick one done, and since the last meeting it
+// follows on from.
+app.get('/api/meetings/:id/work', wrap((req) => meetWork.work(req.params.id)))
+app.get('/api/meetings/:id/work/:key', wrap((req) => meetWork.prepare(req.params.id, req.params.key)))
+app.post('/api/meetings/:id/work/:key/agent', wrap((req) => meetWork.start(req.params.id, req.params.key, { cwd: req.body?.cwd, kind: req.body?.kind, own: req.body?.own !== false, prompt: req.body?.prompt, label: req.body?.label })))
+app.post('/api/meetings/:id/work/:key/done', wrap((req) => meetWork.tick(req.params.id, req.params.key, req.body?.done !== false)))
+app.get('/api/meetings/:id/since', wrap((req) => meetWork.since(meetings.get(req.params.id))))
 app.get('/api/meetings/:id/suggest', wrap((req) => meetings.suggest(req.params.id, { ask: req.query.ask === '1' })))
 app.post('/api/meetings/:id/reveal', wrap((req) => { hereOnly(req, 'Show it in Finder'); return meetings.revealSaved(req.params.id) }))
 app.delete('/api/meetings/:id', wrap((req) => meetings.remove(req.params.id)))
-// The action items, on the chief of staff's task list, and the chief told once about all of them.
+// The action items (all of them, or the ones given), on the chief of staff's task list, and the
+// chief told once about all of them. Each item keeps its task, to show what became of it.
 app.post('/api/meetings/:id/chief', wrap(async (req) => {
   const m = meetings.get(req.params.id)
-  const items = (Array.isArray(req.body?.items) ? req.body.items : meetings.actions(req.params.id)).map((x) => String(x).trim()).filter(Boolean).slice(0, 30)
+  // All of them: the ones that haven't gone anywhere yet (Send again: all).
+  const fresh = Array.isArray(req.body?.items) ? null : meetWork.unsent(m.id)
+  const items = (Array.isArray(req.body?.items) ? req.body.items : fresh.length ? fresh : meetings.actions(req.params.id)).map((x) => String(x).trim()).filter(Boolean).slice(0, 30)
   if (!items.length) throw new Error('No action items in the summary')
   const added = items.map((t) => chiefTasks.add(t.slice(0, 300), { from: 'meeting', link: m.saved || null }))
-  meetings.toChief(m.id, added.length)
+  if (!Array.isArray(req.body?.items)) meetings.toChief(m.id, added.length)
+  meetWork.sentToChief(m.id, items.map((text, i) => ({ text, task: added[i] })))
   const text = [`From my meeting "${m.title}" (${new Date(m.startedAt).toDateString()}), these action items are on your task list:`, ...added.map((t) => `- ${t.id}: ${t.title}`), '', 'Take the ones that are mine to hand off: start or brief the right agent for each, and keep the tasks current with `node bin/bridge task`. For the ones that belong to other people, draft the follow-up for me to send; don\'t message anyone yourself.'].join('\n')
   return { added: added.length, ...(await tellChief(text)) }
 }))
