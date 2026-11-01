@@ -14,6 +14,7 @@
     "desktop:dev": "node scripts/desktop.js dev",
     "desktop:dist": "node scripts/desktop.js dist",
     "mobile:ios": "cd mobile/ios && xcodegen generate && open BridgeAI.xcodeproj",
+    "mobile:ios:release": "node scripts/ios-release.js",
     "mobile:android": "open -a \"Android Studio\" mobile/android",
     "mobile:android:release": "cd mobile/android && JAVA_HOME=\"${JAVA_HOME:-/Applications/Android Studio.app/Contents/jbr/Contents/Home}\" ANDROID_HOME=\"${ANDROID_HOME:-$HOME/Library/Android/sdk}\" ./gradlew bundleRelease && echo \"Google Play bundle: mobile/android/app/build/outputs/bundle/release/app-release.aab\"",
     "icons:brands": "node scripts/brand-icons.js",

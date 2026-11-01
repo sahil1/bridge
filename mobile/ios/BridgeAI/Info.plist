@@ -35,6 +35,8 @@
 	<true/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSCameraUsageDescription</key>
 	<string>Bridge AI uses the camera to scan the pairing code your computer shows, and to take photos you attach to messages for your agents.</string>
 	<key>NSMicrophoneUsageDescription</key>

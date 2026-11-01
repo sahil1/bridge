@@ -19,6 +19,14 @@
 @media (max-width: 380px) {
   .demo-long { display: none; }
 }
+/* In the phone apps, Pair a computer is the only way back to the start screen, so it always fits:
+   the link to the website gets shorter on a phone, and goes on one narrower than the largest. */
+@media (max-width: 520px) {
+  .demo-bar.in-app .demo-long { display: none; }
+}
+@media (max-width: 430px) {
+  .demo-bar.in-app a { display: none; }
+}
 /* The app's top bar already keeps clear of the notch (--safe-top); it keeps clear of the strip too. */
 body.demo-on { --safe-top: calc(env(safe-area-inset-top, 0px) + var(--demo-bar)); }
 /* In the demo, the only errors are notes that something needs the real thing: say them calmly. */

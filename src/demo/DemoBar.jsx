@@ -39,7 +39,7 @@ export default function DemoBar({ machine }) {
   return (
     <>
       <MachineNote />
-      <div className="demo-bar" role="note">
+      <div className={`demo-bar${toStart ? ' in-app' : ''}`} role="note">
         <span className="demo-tag">Demo</span>
         <span className="demo-what">{machine === 'studio' ? 'Made-up agents and data, on the Studio Mac' : 'Made-up agents and data. This Mac is a new install'}</span>
         <button type="button" className="demo-switch" onClick={() => goMachine(machine === 'studio' ? null : 'studio')}>{machine === 'studio' ? '‹ The new install' : 'See everything ›'}</button>
