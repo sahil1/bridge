@@ -73,6 +73,7 @@ import * as relay from './relay.js'
 import * as machines from './machines.js'
 import * as counts from './counts.js'
 import * as updates from './updates.js'
+import * as crashes from './crashes.js'
 import * as cloud from './cloud.js'
 import { makeModels, forLaunch } from './models.js'
 import { makeHandoff } from './handoff.js'
@@ -86,6 +87,7 @@ ensureDir(CACHE)
 const cfg = loadConfig()
 labs.configure(cfg) // more models (Qwen, DeepSeek, Kimi, GLM): hidden unless cfg.moreModels
 const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version
+crashes.watch(VERSION) // an error nothing catches is written down as the server stops, to report later
 let TZ = cfg.location?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone
 // The chief of staff: one agent, started in its own folder in the data dir, that routes work to the others.
 const CHIEF_DIR = expand(cfg.chief?.path) || prepareChief(cfg)
@@ -1696,6 +1698,29 @@ app.post('/api/ui-error', wrap(async (req) => {
   await fs.promises.appendFile(UI_ERRORS, line)
   return { ok: true }
 }))
+// Report a crash on GitHub: the crash waiting to be reported (the server's, or the desktop app's
+// window), and the issue's text, with what's personal taken out, for the person to read, change
+// and send from GitHub themselves (shared/crashreport.js). Bridge AI sends nothing.
+app.get('/api/crashes', wrap(() => crashes.pending()))
+app.post('/api/crashes', wrap((req) => crashes.record(req.body, VERSION)))
+app.post('/api/crashes/dismiss', wrap(() => crashes.dismiss()))
+app.post('/api/crashes/report', wrap(async (req) => crashes.report(req.body, { version: VERSION, settings: crashSettings(), names: await personalNames() })))
+// The settings that change how Bridge AI runs, none of them about you.
+const crashSettings = () => ({
+  runtime: rt.name, keepAgents: cfg.keepAgents !== false, layout: cfg.simple ? 'simple' : 'everything',
+  defaultAgent: cfg.defaultAgent || 'claude', chief: cfg.chief?.kind || 'claude', updateChecks: cfg.updates?.check !== false,
+  port: cfg.port === 7420 ? 'default' : 'changed', reachable: /^(127\.0\.0\.1|localhost|::1)$/.test(cfg.host) ? 'this computer only' : 'from the network',
+})
+// What a crash report takes out by name: yours and your place's, this computer's and your other
+// devices', and your projects' (by name and folder, and the spaces open now).
+async function personalNames() {
+  const out = [[cfg.name, '<name>'], [cfg.location?.label, '<place>'], [os.hostname().replace(/\.local$/, ''), '<computer>'], [relay.thisName(), '<computer>']]
+  try { out.push([os.userInfo().username, '<user>']) } catch { /* no user */ }
+  for (const m of machines.list()) out.push([m.name, '<computer>'], [m.systemName, '<computer>'])
+  for (const p of await projects.list().catch(() => [])) out.push([p.name, '<project>'], [path.basename(p.path), '<project>'])
+  for (const w of lastFleet?.workspaces || []) out.push([w.label, '<project>'])
+  return out
+}
 app.get('/api/version', (req, res) => res.json({ version: VERSION, build: BUILD, bundled: !!process.versions.electron, pid: process.pid }))
 
 app.get('/api/config', (req, res) => res.json({
