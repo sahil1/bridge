@@ -15,6 +15,12 @@ Most logos come from Simple Icons (https://simpleicons.org, CC0).
 The Geist and JetBrains Mono fonts are included under the SIL Open Font License 1.1 (via
 Fontsource).
 
+Whiteboards are drawn with Excalidraw (https://github.com/excalidraw/excalidraw, MIT License),
+which turns Mermaid into shapes with mermaid-to-excalidraw (MIT) and Mermaid
+(https://github.com/mermaid-js/mermaid, MIT). Excalidraw's fonts are included as it ships them:
+Excalifont, Virgil, Nunito, Lilita One, Assistant, Cascadia Code and Liberation Sans under the SIL
+Open Font License 1.1, and Comic Shanns under the MIT License.
+
 Speech to text on your computer runs on sherpa-onnx (https://github.com/k2-fsa/sherpa-onnx,
 Apache License 2.0), installed with the app through npm. The speech models are not included: each
 is downloaded from Hugging Face when you ask for it, under its own license. Parakeet TDT 0.6B v3

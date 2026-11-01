@@ -100,27 +100,19 @@ export function VoiceSetup({ initial, onReady, onClose }) {
   )
 }
 
-// The desktop app with the mic turned off for it in System Settings: one button to allow it.
-const micAccess = async () => ((await window.bridgeApp.mediaAccess('microphone')) === 'granted' ? 'ok' : 'denied')
+// The desktop app with the mic turned off for it: one button to allow it (PermissionFix asks macOS
+// first, notices when it's on, and offers Reset and ask again when it's stuck).
 // stale: macOS lists Bridge AI as allowed and blocks the mic all the same, an answer kept from a
-// version signed differently (up to 3.4.2). Reset forgets it (desktop/main.js) and macOS asks again.
-export function MicFix({ onClose, stale = false }) {
+// version signed differently (up to 3.4.2): Reset and ask again straight away. onAllowed: what was
+// waiting for the mic (a meeting's recording) carries on.
+export function MicFix({ onClose, stale = false, onAllowed }) {
   const [ok, setOk] = useState(false)
-  const [reset, setReset] = useState(stale ? 'offer' : null) // offer | going | null
-  const again = async () => {
-    setReset('going')
-    const s = await window.bridgeApp?.resetMedia?.('microphone').catch(() => null)
-    if (s === 'granted') setOk(true)
-    setReset(null)
-  }
   return (
     <div className="voice-setup" role="status" aria-live="polite">
       {ok ? <p>{t('The microphone is on. Tap the mic and talk.')}</p>
-        : reset ? <>
-          <p>{t('macOS shows Bridge AI as allowed to use the microphone, but that answer is from an earlier version of the app and still blocks it. Reset it, then choose Allow when macOS asks.')}</p>
-          <div className="vs-actions"><button className="btn small primary" onClick={again} disabled={reset === 'going'}>{reset === 'going' ? t('Asking macOS…') : t('Reset and ask again')}</button></div>
-        </>
-        : <PermissionFix pane="microphone" probe={micAccess} onCheck={() => setOk(true)}><p>{t('Bridge AI needs the microphone for voice notes, dictation and meetings. What you say is turned into text on this computer.')}</p></PermissionFix>}
+        : <PermissionFix pane="microphone" stale={stale} onCheck={() => { setOk(true); onAllowed?.() }}><p>{stale
+          ? t('macOS shows Bridge AI as allowed to use the microphone, but that answer is from an earlier version of the app and still blocks it. Reset it, then choose Allow when macOS asks.')
+          : t('Bridge AI needs the microphone for voice notes, dictation and meetings. What you say is turned into text on this computer.')}</p></PermissionFix>}
       <div className="vs-actions"><button className="ghost-btn" onClick={onClose}>{ok ? t('Close') : t('Not now')}</button></div>
     </div>
   )

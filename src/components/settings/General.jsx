@@ -7,8 +7,10 @@ import { t } from '../../i18n/index.js'
 import { api, settingsChanged, refetch } from '../../api.js'
 import { askRestart, useRecheck } from '../PermissionFix.jsx'
 import SetupAll from '../SetupAll.jsx'
+import Permissions from './Permissions.jsx'
 
-// Settings › General: who you are, which agent and model to use by default, where you are.
+// Settings › General: who you are, which agent and model to use by default, where you are, and what
+// Bridge AI is allowed on this computer (Permissions).
 export function useSettings() {
   const [s, setS] = useState(null)
   const [note, setNote] = useState(null)
@@ -38,12 +40,14 @@ export function SaveNote({ note }) {
   return <p className="st-note ok"><Icon name="check" size={13} /> Saved</p>
 }
 
-export default function General({ onGo, onOpenAgent }) {
+export default function General({ onGo, onOpenAgent, focus = null }) {
   const { s, save, note } = useSettings()
   const [agents, setAgents] = useState(null)
   const [name, setName] = useState('')
   useEffect(() => { api('/agents/catalog').then(setAgents).catch(() => setAgents([])) }, [])
   useEffect(() => { if (s) setName(s.effective.name || '') }, [s])
+  // Opened at Permissions (another device asked for one, or a restart came back to it).
+  useEffect(() => { if (s && focus === 'permissions') setTimeout(() => document.getElementById('permissions')?.scrollIntoView({ block: 'start' }), 50) }, [!!s, focus])
   if (!s) return <div className="skeleton-rows"><div /><div /><div /></div>
 
   const eff = s.effective
@@ -116,6 +120,8 @@ export default function General({ onGo, onOpenAgent }) {
         <p className="muted small">For the weather and the morning brief. Only the coordinates you pick are saved, on this computer.</p>
         <LocationPicker value={eff.location} onChange={(loc) => save({ location: loc })} />
       </section>
+
+      <Permissions />
 
       <section className="st-sec">
         <h4>Plan usage</h4>

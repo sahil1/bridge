@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import Icon, { StatusDot } from '../components/Icon.jsx'
 import { VoiceSetup, MicFix } from '../components/Composer.jsx'
 import { api, settingsChanged } from '../api.js'
+import { useRecheck } from '../permissions.js'
 import { store } from '../components/layout.jsx'
 import { keyLabel } from '../../shared/dictation/keys.js'
 import { useDictation, configure, press, release, finish, cancel, dismiss, retry, keysPlatform, dictationKey, amend, forget } from './controller.js'
@@ -17,8 +18,10 @@ import './dictation.css'
 // (the one you last looked at in Bridge AI, or the chief of staff: Settings › Voice), to another (To
 // ▾), to Copy, or to finish in Bridge AI. When pasting can't be done (no Accessibility yet on a Mac,
 // a password field, another app in front by then) the words stay there to copy or send, with one
-// line saying why. After a Copy, it asks once whether to paste for you next time. Each dictation is
-// kept with the app it was said in, and amended with what became of it (controller.js keep).
+// line saying why. No Accessibility yet: Allow it asks macOS from there, and once it's on (noticed by
+// itself), Paste pastes what's waiting where you were typing. After a Copy, it asks once whether to
+// paste for you next time. Each dictation is kept with the app it was said in, and amended with what
+// became of it (controller.js keep).
 // The desktop app tells it when the key goes down and up (bridge-dictate-key events, as in the main
 // window); a press from before it was ready comes from hudReady(). The window keeps its width and
 // top, and grows down to fit (hudSize); on a Mac and Windows, clicks go through it except on the
@@ -29,7 +32,7 @@ const nameOf = (a) => (a.chief ? t('Chief of Staff') : a.title || a.tab || a.wor
 const pasteKey = () => (keysPlatform() === 'darwin' ? '⌘V' : 'Ctrl+V')
 // Why it wasn't pasted (desktop/dictation.js's answers).
 const WHY = {
-  accessibility: () => t('Pasting needs Accessibility: turn it on in Settings › Voice.'),
+  accessibility: () => t('Pasting needs Accessibility.'),
   // macOS's Secure Input: a password field has the keyboard, or an app turned it on for itself
   // (Terminal's Secure Keyboard Entry), which covers every app while it's on.
   secure: () => t('Secure input is on (a password field, or Secure Keyboard Entry), so it wasn\'t pasted.'),
@@ -57,6 +60,7 @@ export default function Hud() {
   const [leaving, setLeaving] = useState(false)
   const [room, setRoom] = useState(48) // the card's height at most, while it eases
   const menu = useRef(null)
+  const [allowed, setAllowed] = useState(false) // Accessibility turned on while the words waited here
   const timer = useRef(null)
   const going = useRef(null)
   // This press's words, straight from the key: not after a download or Try again, when you've long
@@ -89,7 +93,7 @@ export default function Hud() {
   useEffect(() => {
     const begin = (at, name, bundle) => {
       clearTimeout(timer.current); clearTimeout(going.current); setLeaving(false)
-      setDone(null); setErr(null); setPicking(false); setWhy(null); setOffer(false); setPasting(false)
+      setDone(null); setErr(null); setPicking(false); setWhy(null); setOffer(false); setPasting(false); setAllowed(false)
       setInto(name || null)
       setShown((n) => n + 1)
       press0.current++
@@ -149,7 +153,11 @@ export default function Hud() {
     fresh.current = false
     if (!pasteOn || !now) return
     if (!st.paste.allowed) { setWhy('accessibility'); return }
+    pasteIt(r)
+  }, [s.result?.at]) // eslint-disable-line react-hooks/exhaustive-deps
+  function pasteIt(r) {
     setPasting(true)
+    setWhy(null)
     const g = press0.current
     app().hudPaste(r.text).then((x) => {
       if (x?.pasted) amend(r, { how: 'pasted' })
@@ -163,7 +171,17 @@ export default function Hud() {
         else { setDone(into ? t('Pasted into {app}', { app: into }) : t('Pasted')); later(900) }
       } else setWhy(WHY[x?.error] ? x.error : x?.error === 'off' ? null : 'failed')
     }, () => { if (g === press0.current) { setPasting(false); setWhy('failed') } })
-  }, [s.result?.at]) // eslint-disable-line react-hooks/exhaustive-deps
+  }
+  // Waiting for Accessibility: Allow it asks macOS (its question, then System Settings with the tile:
+  // desktop/permissions.js), and it's looked at every few seconds, so what you said is pasted once
+  // you're back where you were typing.
+  const askAccess = () => (app().permission?.ask ? app().permission.ask('accessibility') : app().pasteAsk?.())?.catch?.(() => null)
+  useRecheck(async () => {
+    if ((await app().pasteAccess?.().catch(() => null)) !== 'ok') return
+    setWhy(null)
+    setAllowed(true)
+    loadStatus()
+  }, 2500, why === 'accessibility')
   const agentOf = (a) => ({ id: a.paneId, name: nameOf(a), ...(a.chief ? { chief: true } : {}) })
   const send = async () => {
     if (!target || !text) return
@@ -205,7 +223,7 @@ export default function Hud() {
     if (now) setSt(now)
     // A Mac: macOS asks now (Accessibility), with the tile beside System Settings.
     if (now?.paste?.asks === 'accessibility' && !now.paste.allowed) {
-      await app().pasteAsk?.().catch(() => null)
+      await askAccess()
       setDone(t('Turn on Bridge AI under Accessibility when macOS asks, and it pastes from next time.'))
       later(6000)
     } else { setDone(t('From next time, it\'s pasted where you\'re typing.')); later(2500) }
@@ -244,12 +262,15 @@ export default function Hud() {
             <div className="hud-row">{toChip}<span className="grow" /><button type="button" className="dp-x" onClick={hide} aria-label={t('Close')} title={t('Close')}><Icon name="x" size={12} /></button></div>
             <p className="hud-text">{text}</p>
             {err && <p className="error-text small">{err}</p>}
-            {why && <p className="hud-why small" role="status"><Icon name="info" size={12} /> {WHY[why]()}</p>}
+            {why && <p className="hud-why small" role="status"><Icon name="info" size={12} /> {WHY[why]()}{why === 'accessibility' && (app().permission || app().pasteAsk) ? <> <button type="button" className="link-btn" onClick={askAccess}>{t('Allow it')}</button></> : null}</p>}
+            {allowed && !done && <p className="hud-why small" role="status"><Icon name="check" size={12} /> {t('Accessibility is on. Click where you were typing, then Paste.')}</p>}
             {done ? <p className="hud-done" role="status"><Icon name="check" size={12} /> {done}</p> : (
               <div className="hud-actions">
                 {app().hudOpen && <button type="button" className="btn small" onClick={edit} disabled={!target}>{t('Edit in Bridge AI')}</button>}
                 <button type="button" className="btn small" onClick={copy}>{t('Copy')}</button>
-                <button type="button" className="btn small primary" onClick={send} disabled={!target}>{t('Send')}</button>
+                {allowed
+                  ? <button type="button" className="btn small primary" onClick={() => { setAllowed(false); pasteIt(s.result) }}>{t('Paste')}</button>
+                  : <button type="button" className="btn small primary" onClick={send} disabled={!target}>{t('Send')}</button>}
               </div>
             )}
             {offer && (

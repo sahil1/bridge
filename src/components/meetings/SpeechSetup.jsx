@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import Icon from '../Icon.jsx'
 import { api, usePoll, viaRelay } from '../../api.js'
 import PermissionFix, { useRecheck } from '../PermissionFix.jsx'
+import { appSide } from '../../permissions.js'
 import { CalendarSetup } from '../Agenda.jsx'
 import { t } from '../../i18n/index.js'
 
@@ -89,16 +90,18 @@ export default function SpeechSetup({ recording = false }) {
 }
 
 // The mic, in the desktop app on a Mac: allowed, not asked yet, or turned off in System Settings.
-const micAccess = async () => ((await window.bridgeApp.mediaAccess('microphone')) === 'granted' ? 'ok' : 'denied')
 function useMic() {
   const can = !!window.bridgeApp?.mediaAccess && window.bridgeApp.platform === 'darwin'
   const [state, setState] = useState(null)
   const check = useCallback(async () => { if (can) setState(await window.bridgeApp.mediaAccess('microphone').catch(() => null)) }, [can])
   useEffect(() => { check() }, [check])
   useRecheck(check, 0, can)
-  // macOS asks the first time the mic is used: open it for a moment, so it asks now.
+  // macOS's own question, asked by the app (desktop/permissions.js); an app too old to ask opens the
+  // mic for a moment, which asks the first time.
   const allow = async () => {
-    try { const s = await navigator.mediaDevices.getUserMedia({ audio: true }); s.getTracks().forEach((t) => t.stop()) } catch { /* turned down: the step says how to allow it */ }
+    const side = appSide('microphone')
+    if (side?.ask) await side.ask().catch(() => null)
+    else try { const s = await navigator.mediaDevices.getUserMedia({ audio: true }); s.getTracks().forEach((t) => t.stop()) } catch { /* turned down: the step says how to allow it */ }
     check()
   }
   return can ? { state, check, allow } : null
@@ -148,7 +151,7 @@ export function MeetingsSetup({ onDone }) {
         {mic && (
           <Step ok={micOk} title={t('Your mic')} detail={d.canRecordCall ? t("And the call's sound, so the transcript knows who said what. macOS asks once to allow System Audio Recording, the first time you record a call.") : t('It hears a call on your speakers too.')}>
             {mic.state === 'not-determined' && <span className="mt-step-acts"><button type="button" className="btn small primary" onClick={mic.allow}>{t('Allow the mic')}</button></span>}
-            {(mic.state === 'denied' || mic.state === 'restricted') && <PermissionFix pane="microphone" probe={micAccess} onCheck={mic.check}><p className="small">{t('The mic is turned off for Bridge AI in System Settings.')}</p></PermissionFix>}
+            {(mic.state === 'denied' || mic.state === 'restricted') && <PermissionFix pane="microphone" onCheck={mic.check}><p className="small">{t('The mic is turned off for Bridge AI in System Settings.')}</p></PermissionFix>}
           </Step>
         )}
         <Step ok={notesOk} title={t('Writing the notes')} detail={models == null ? t('Looking…') : notesOk ? t('The summary, decisions and action items, by your sign-in or key. Pick which in Settings › Meetings.') : t('The summary needs a model: sign in to an agent like Claude Code, or add a key.')}>

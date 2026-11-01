@@ -1,0 +1,14 @@
+/* Ask out loud (AskOutLoud.jsx): a slim row above the Chief of Staff's message box. */
+.ask-bar { display: flex; align-items: center; gap: 10px; width: 100%; max-width: min(1040px, max(860px, 74%)); min-width: 0; margin: 0 auto 8px; }
+.ask-btn { flex: none; display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 13px 0 11px; border-radius: 999px; border: 1px solid var(--line-2); background: var(--pane); color: var(--ink); font: 500 12.5px var(--font); touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.ask-btn:hover { background: var(--pane-2); }
+.ask-btn.on { border-color: color-mix(in srgb, var(--critical) 45%, var(--line-2)); background: color-mix(in srgb, var(--critical) 9%, var(--pane)); color: var(--critical); }
+.ask-line { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--ink-3); }
+.ask-line.error { color: var(--ink-2); }
+.ask-act { flex: none; }
+.app.narrow .ask-btn { height: 40px; padding: 0 16px 0 14px; font-size: 14px; }
+.app.narrow .ask-line { white-space: normal; line-height: 1.35; }
+
+/* Settings › Voice › Spoken Answers. */
+.st-voice-out .st-row > span:first-child { min-width: 120px; font-size: 13px; }
+.st-voice-out select.st-input { width: auto; min-width: 200px; max-width: 100%; }

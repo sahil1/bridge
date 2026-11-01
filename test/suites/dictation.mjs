@@ -33,7 +33,7 @@ import { ROOT, OUT, TEST, IS_MAC, IS_WIN, startKit, checks, until, sleep } from 
 
 const { ok, skip, done } = checks('dictation')
 const keys = await import('../../shared/dictation/keys.js')
-const { globalKey, pasteInto, isTerminal } = await import('../../shared/dictation/platform.js')
+const { globalKey, pasteInto, loneKeys, isTerminal } = await import('../../shared/dictation/platform.js')
 const { clean, makeNames } = await import('../../shared/dictation/clean.js')
 const desk = createRequire(import.meta.url)('../../desktop/dictation.js')
 
@@ -180,6 +180,50 @@ for (const [said, want, what] of cases) ok(C(said) === want, `cleanup: ${what}`,
 ok(C('git status', { sentence: false }) === 'git status' && C('payments', { sentence: false }) === 'payments', 'a terminal or a search box gets no capital or full stop')
 ok(C('um look at payments dot ts', { cleanup: false, atFiles: false }) === 'um look at payments dot ts', 'with cleanup and file mentions off, it\'s as said')
 ok(C('tell strike about it', { heard: [['strike', 'Stripe']] }) === 'Tell Stripe about it.', 'meeting memory\'s "heard as" pairs')
+
+// ---------- One key on its own: Fn or the right ⌥ ----------
+{
+  const fn = keys.parseKey('Fn', 'darwin')
+  const ra = keys.parseKey('RightAlt', 'win32')
+  ok(fn?.lone && ra?.lone && keys.keyString(fn) === 'Fn' && keys.keyLabel('Fn', 'darwin') === '🌐 Fn' && keys.keyLabel('RightAlt', 'darwin') === 'Right ⌥' && keys.keyLabel('RightAlt', 'linux') === 'Right Alt', 'Fn and the right ⌥ as keys of their own: named 🌐 Fn, Right ⌥ (a Mac) and Right Alt')
+  ok(keys.isKeyDown({ code: 'AltRight', altKey: true }, ra) && keys.isKeyUp({ code: 'AltRight' }, ra) && !keys.isKeyDown({ code: 'AltLeft', altKey: true }, ra) && !keys.isKeyDown({ code: 'Fn' }, fn), 'in the page: the right Alt is its own key (not the left one); Fn never reaches a page')
+  ok(keys.macLone('Fn') === 'fn' && keys.macLone('RightAlt') === 'ralt' && keys.macKey('Fn') === null && keys.hookKey('RightAlt', 'win32')?.key === 0x0e38 && keys.hookKey('Fn', 'win32') === null, 'what hears them: bridgekeys modifier fn|ralt on a Mac, the hook\'s right Alt elsewhere; Fn has no hook code')
+  const mac = { platform: 'darwin', arch: 'arm64', desktop: true, helper: true }
+  const seen = {
+    mac: loneKeys(mac),
+    macNoHelper: loneKeys({ ...mac, helper: false }),
+    win: loneKeys({ platform: 'win32', arch: 'x64', desktop: true, hook: true }),
+    x11: loneKeys({ platform: 'linux', arch: 'x64', desktop: true, hook: true }),
+    wayland: loneKeys({ platform: 'linux', arch: 'x64', desktop: true, wayland: true, session: 'GNOME', portal: true, electron: 45, entry: true }),
+    docker: loneKeys({ platform: 'linux', arch: 'x64', desktop: false }),
+  }
+  ok(seen.mac.keys.join() === 'Fn,RightAlt' && seen.mac.asks === 'input-monitoring' && !seen.macNoHelper.keys.length && seen.win.keys.join() === 'RightAlt' && !seen.win.asks && seen.x11.keys.join() === 'RightAlt' && !seen.wayland.keys.length && !seen.docker.keys.length, 'where one key on its own is offered: Fn and Right ⌥ on a Mac (Input Monitoring), Right Alt on Windows and X11 (no prompt), none on Wayland, without the helper, in Docker or a browser', seen)
+  // The hook, for the right Alt: down, up, a repeat, AltGr's left Ctrl, and a character typed with it.
+  const hook = new EventEmitter()
+  hook.start = () => { hook.running = true }
+  hook.stop = () => { hook.running = false }
+  const got = []
+  const src = desk.loneHookSource({ code: 0x0e38, hook, onDown: () => got.push('down'), onUp: () => got.push('up'), onCancel: () => got.push('cancel') })
+  const k = (type, keycode) => hook.emit(type, { keycode })
+  k('keydown', 0x1d); k('keydown', 0x0e38); k('keydown', 0x0e38); k('keyup', 0x0e38)
+  k('keydown', 0x0e38); k('keydown', 0x1d); k('keydown', 0x12); k('keyup', 0x0e38)
+  k('keydown', 0x12)
+  ok(src.ok && hook.running && got.join() === 'down,up,down,cancel', 'the right Alt held and let go (its repeats and AltGr\'s left Ctrl aside); a character typed with it cancels; keys without it are nothing to it', got)
+  src.stop()
+  const broken = new EventEmitter()
+  broken.start = () => { throw new Error('no display') }
+  ok(!desk.loneHookSource({ code: 0x0e38, hook: broken, onDown: () => {}, onUp: () => {} }).ok && !broken.listenerCount('keydown'), 'no hook: it says it can\'t, and leaves nothing listening')
+  // The Mac's helper, for a lone key: bridgekeys modifier fn, and its cancel.
+  const child = new EventEmitter()
+  child.stdout = new EventEmitter()
+  child.stdin = { on() {}, write() {}, end() {} }
+  child.kill = () => {}
+  const args = []
+  const told = []
+  desk.helperSource({ bin: 'bridgekeys', lone: 'fn', spawnFn: (b, a) => { args.push(a.join(' ')); return child }, onState: (j) => told.push(j.ready ? 'ready' : j.error), onDown: () => told.push('down'), onUp: () => told.push('up'), onCancel: () => told.push('cancel') })
+  child.stdout.emit('data', '{"ready":true}\n{"down":1,"app":"Notes"}\n{"cancel":2}\n{"down":3}\n{"up":4}\n')
+  ok(args.join() === 'modifier fn' && told.join() === 'ready,down,cancel,down,up', 'the Mac: bridgekeys modifier fn, its presses, let-goes and cancels', { args, told })
+}
 
 // ---------- How the desktop app hears the key ----------
 const fakeShortcuts = (taken = []) => {
@@ -409,13 +453,13 @@ else {
     shell: { openExternal: async (u) => { opened.push(u) } },
   }
   const platform = Object.getOwnPropertyDescriptor(process, 'platform')
-  const env = { BRIDGE_KEYS: process.env.BRIDGE_KEYS, BRIDGEKEYS_PRESS: process.env.BRIDGEKEYS_PRESS, BRIDGEKEYS_LOG: process.env.BRIDGEKEYS_LOG }
+  const env = { BRIDGE_KEYS: process.env.BRIDGE_KEYS, BRIDGEKEYS_PRESS: process.env.BRIDGEKEYS_PRESS, BRIDGEKEYS_LOG: process.env.BRIDGEKEYS_LOG, BRIDGEKEYS_LISTEN: process.env.BRIDGEKEYS_LISTEN }
   Object.assign(process.env, { BRIDGE_KEYS: helper, BRIDGEKEYS_PRESS: '1', BRIDGEKEYS_LOG: log })
   Object.defineProperty(process, 'platform', { ...platform, value: 'darwin' })
   const me = { own: true }
   const brought = []
   try {
-    await desk.start({ electron, ROOT, DATA: data, URL_BASE: 'http://127.0.0.1:9', preload: '', isOurs: () => false, tellMain: async () => {}, askAccess: (pane) => tiles.push(pane), trusted: (e) => e.own === true, openApp: async (b) => { brought.push(b) } })
+    await desk.start({ electron, ROOT, DATA: data, URL_BASE: 'http://127.0.0.1:9', preload: '', isOurs: () => false, tellMain: async () => {}, askAccess: (pane) => tiles.push(pane), trusted: (e) => e.own === true, openApp: async (b) => { brought.push(b) }, fnUsage: async () => 'emoji' })
   } finally {
     Object.defineProperty(process, 'platform', platform)
   }
@@ -470,6 +514,15 @@ else {
     await until(() => hud.told.slice(told).some((js) => js.includes('"type":"down"')), 3000, 50)
     await sleep(500)
     ok(hud.told.slice(told).some((js) => js.includes('"bundle":"com.apple.TextEdit"')) && !fs.existsSync(iconFile) && !thumbs.length, 'with history off: the key pressed in TextEdit again, and no icon kept', hud.told.slice(told))
+    // Fn as the key: a Mac not letting Bridge AI listen to keys yet says Input Monitoring is needed,
+    // and ⌥Space works from other apps meanwhile; allowed, Fn is the key, pressed in TextEdit.
+    process.env.BRIDGEKEYS_LISTEN = 'no'
+    const waits = await call('bridge:dictate-configure', me, { background: true, to: 'last', key: 'Fn' })
+    ok(waits.lone?.keys?.join() === 'Fn,RightAlt' && waits.lone.asks === 'input-monitoring' && waits.needs === 'input-monitoring' && waits.active && waits.fallback === 'Alt+Space' && waits.fnUsage === 'emoji', 'Fn picked, with no Input Monitoring yet: it says it\'s needed, ⌥Space works meanwhile, and what 🌐 does now (for the note)', waits)
+    process.env.BRIDGEKEYS_LISTEN = 'yes'
+    const told2 = hud.told.length
+    const fnOn = await call('bridge:dictate-configure', me, { background: true, to: 'last', key: 'Fn' })
+    ok(fnOn.active && !fnOn.needs && !fnOn.fallback && !!(await until(() => hud.told.slice(told2).some((js) => js.includes('"type":"down"')), 3000, 50)), 'allowed: Fn is the key, and held in TextEdit it opens the dictation window', fnOn)
   } catch (e) {
     ok(false, `the desktop app pasting crashed: ${e.stack}`)
   } finally {
@@ -493,6 +546,16 @@ else {
     let j = null
     try { j = JSON.parse(front.stdout.trim()) } catch { /* below */ }
     ok(front.status === 0 && j && typeof j.app === 'string' && typeof j.bundle === 'string' && Number.isInteger(j.pid) && typeof j.secure === 'boolean', 'bridgekeys front: the app in front and Secure Input, as JSON', front.stdout)
+    // Whether it may listen to keys (Fn as the key): looked up, never asked. Without it, modifier says
+    // so before trying (a tap tried without it is what makes macOS ask).
+    const access = spawnSync(helper, ['listen-access'], { encoding: 'utf8', timeout: 10000 })
+    let a = null
+    try { a = JSON.parse(access.stdout.trim()) } catch { /* below */ }
+    ok(access.status === 0 && typeof a?.allowed === 'boolean', 'bridgekeys listen-access: whether it may listen, as JSON, without asking', access.stdout)
+    if (a && !a.allowed) {
+      const lone = spawnSync(helper, ['modifier', 'fn'], { encoding: 'utf8', timeout: 10000, input: '' })
+      ok(lone.status === 1 && lone.stdout.trim() === '{"error":"input-monitoring"}', 'bridgekeys modifier fn, not allowed to listen: it says Input Monitoring is needed, and tries nothing', lone.stdout)
+    } else skip('bridgekeys modifier fn, not allowed to listen', 'this Mac lets the tests listen to keys')
     // ⌃⌥⇧F13: nobody's key. Presses made through stdin go through the key's own handler.
     const lines = []
     let state = null
