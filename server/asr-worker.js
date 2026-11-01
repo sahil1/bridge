@@ -5,6 +5,8 @@
 //   { type: 'probe' } -> { type: 'probe', ok, error }: whether the addon loads on this computer.
 //   { id, model: { key, dir, files, hotwords }, pcm: Int16Array, hotwords: [], threads }
 //     -> { id, text, ms, loadMs } or { id, error }
+//   { id, type: 'embed', voice: { key, file }, pcm: Int16Array, threads }
+//     -> { id, v: Float32Array or null (too short), ms }: how the voice sounds, for voices.js
 // BRIDGE_SHERPA (tests): a module to load instead of sherpa-onnx-node, with the same API.
 import fs from 'node:fs'
 import path from 'node:path'
@@ -73,11 +75,29 @@ async function decode({ model, pcm, hotwords, threads }) {
   return { text: String(out?.text || '').trim(), ms: Date.now() - t0, loadMs }
 }
 
+// The speaker model (voices.js), loaded the first time and kept beside the recognizer.
+let voices = null // { file, ex }
+async function embed({ voice, pcm, threads }) {
+  if (!sherpa) throw new Error(`sherpa-onnx doesn't load here: ${why(loadError)}`)
+  if (voices?.file !== voice.file) {
+    if (!fs.existsSync(voice.file)) throw new Error('The voice model isn\'t downloaded')
+    voices = { file: voice.file, ex: new sherpa.SpeakerEmbeddingExtractor({ model: voice.file, numThreads: threads || 1, provider: 'cpu', debug: 0 }) }
+  }
+  const t0 = Date.now()
+  const samples = new Float32Array(pcm.length)
+  for (let i = 0; i < pcm.length; i++) samples[i] = pcm[i] / 32768
+  const stream = voices.ex.createStream()
+  stream.acceptWaveform({ sampleRate: 16000, samples })
+  stream.inputFinished()
+  if (!voices.ex.isReady(stream)) return { v: null, ms: Date.now() - t0 }
+  return { v: Float32Array.from(voices.ex.compute(stream, false)), ms: Date.now() - t0 }
+}
+
 let chain = Promise.resolve()
 process.on('message', (msg) => {
   if (msg?.type === 'probe') { process.send({ type: 'probe', ok: !!sherpa, error: sherpa ? null : why(loadError) }); return }
   if (msg?.type === 'unload') { loaded = null; return }
-  chain = chain.then(() => decode(msg).then(
+  chain = chain.then(() => (msg?.type === 'embed' ? embed(msg) : decode(msg)).then(
     (r) => process.send({ id: msg.id, ...r }),
     (e) => process.send({ id: msg.id, error: why(e) }),
   ))

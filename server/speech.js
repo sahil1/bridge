@@ -82,14 +82,24 @@ export const MODELS = [
 ]
 // The portable default: it runs on every computer Bridge AI does (fit() says where it can't).
 export const DEFAULT = 'parakeet-v3'
+// Telling voices apart in a room (voices.js): 3D-Speaker's ERes2Net speaker model, trained on
+// VoxCeleb, in the ONNX form the sherpa-onnx project made. Not speech to text, so not in the list
+// above; downloaded the first time you ask Who spoke on a meeting recorded in a room. Of the
+// models of that size we tried on the same voices, it kept different people furthest apart (CAM++
+// from the same project barely told them apart in this form).
+export const VOICE = {
+  id: 'voices', runtime: 'sherpa', label: 'ERes2Net', mb: 26, memGB: 2, license: 'Apache-2.0', by: '3D-Speaker (Alibaba)',
+  repo: 'csukuangfj/speaker-embedding-models', rev: '0743f301363dec56491a490f6d6cbc9d67f9a3bf',
+  files: [{ name: '3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx', bytes: 26485263, sha256: 'c59158379255ad66e161679cca6af8d52d51e389e3224ab7d7a7baae295c2db5' }],
+}
 // Silero, so whisper.cpp skips what isn't speech inside a stretch (less made-up text in pauses).
 const VAD = { id: 'vad', runtime: 'whisper', label: 'Silero', file: 'ggml-silero-v6.2.0.bin', repo: 'ggml-org/whisper-vad', rev: '9ffd54a1e1ee413ddf265af9913beaf518d1639b', files: [{ name: 'ggml-silero-v6.2.0.bin', bytes: 885098, sha256: '2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987' }] }
 const standIns = (() => { try { return JSON.parse(fs.readFileSync(process.env.BRIDGE_SPEECH_MODELS, 'utf8')) } catch { return {} } })()
-const filesOf = (m) => standIns[m.id]?.files || m.files
+export const filesOf = (m) => standIns[m.id]?.files || m.files
 const DIR = () => path.join(DATA, 'models')
 // Where a model lives: whisper.cpp's one file in models/ (where earlier versions put it), a sherpa
 // model's files in models/<id>/.
-const dirOf = (m) => (m.runtime === 'sherpa' ? path.join(DIR(), m.id) : DIR())
+export const dirOf = (m) => (m.runtime === 'sherpa' ? path.join(DIR(), m.id) : DIR())
 const fileOf = (m) => path.join(DIR(), m.file)
 const urlOf = (m, f) => (process.env.BRIDGE_MODELS_URL ? `${HF()}/${m.id}/${f.name}` : `${HF()}/${m.repo}/resolve/${m.rev}/${f.name}`)
 const size = (f) => { try { return fs.statSync(f).size } catch { return -1 } }
@@ -215,10 +225,10 @@ async function fetchFile(m, f, d) {
   fs.renameSync(tmp, dest)
 }
 export function fetchModel(id) {
-  const m = id === 'vad' ? VAD : MODELS.find((x) => x.id === id)
+  const m = id === 'vad' ? VAD : id === VOICE.id ? VOICE : MODELS.find((x) => x.id === id)
   if (!m) throw new Error('No such model')
   if (have(m) || (downloads.has(m.id) && !downloads.get(m.id).error)) return
-  if (fitted && m.id !== 'vad' && !shown(m.id)) throw new Error(fitted.models.get(m.id)?.why || 'That model can\'t run on this computer')
+  if (fitted && m.id !== 'vad' && m.id !== VOICE.id && !shown(m.id)) throw new Error(fitted.models.get(m.id)?.why || 'That model can\'t run on this computer')
   const files = filesOf(m)
   const d = { got: 0, total: files.reduce((n, f) => n + (f.bytes || 0), 0), error: null, stop: new AbortController() }
   downloads.set(m.id, d)
@@ -240,7 +250,7 @@ export function fetchModel(id) {
 }
 // Stops its download first, if one is going (Windows won't delete a file still being written).
 export async function removeModel(id) {
-  const m = MODELS.find((x) => x.id === id)
+  const m = id === VOICE.id ? VOICE : MODELS.find((x) => x.id === id)
   if (!m) throw new Error('No such model')
   const d = downloads.get(m.id)
   if (d) { d.stop.abort(); await d.done }
@@ -253,6 +263,8 @@ export async function removeModel(id) {
 // A download going (or stopped by a problem): { percent, error }, or null.
 export const downloading = (id) => { const d = downloads.get(id); return d ? { percent: d.total ? Math.min(100, Math.floor((d.got / d.total) * 100)) : 0, error: d.error } : null }
 const progress = downloading
+// Once a download going now has ended, either way.
+export const downloaded = (id) => downloads.get(id)?.done || Promise.resolve()
 
 // ---------- whisper-server, kept while it's used ----------
 let server = null // { proc, port, model, ready, last }

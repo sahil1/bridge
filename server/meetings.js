@@ -22,6 +22,7 @@ import { tool } from './fixes.js'
 import * as speech from './speech.js'
 import * as livewords from './livewords.js'
 import * as memory from './meetmemory.js'
+import * as voices from './voices.js'
 import * as doctext from './doctext.js'
 import { canOpen } from './files.js'
 import { mayLook, noteAsked } from './projects.js'
@@ -141,11 +142,20 @@ export function transcript(id, { raw = false, clean = true, dropped = false } = 
   const drop = new Set(c?.drop || [])
   let one = null
   try { one = onlyGuest(meta(id)) } catch { /* gone */ }
+  // In a room (your mic only), each of your lines' voice (voices.js): Speaker n, or the name given
+  // to that voice, or you. A name you gave the line itself comes first.
+  const room = voices.of(id)
+  const voiceOf = (l, k) => {
+    const n = l.src === 'you' && room?.speakers >= 2 ? room.line?.[k] : null
+    if (!n) return {}
+    const v = room.names?.[n]
+    return v?.me ? { voice: n, me: true } : v?.name ? { voice: n, name: v.name, guess: !!v.guess, ...(v.byVoice ? { byVoice: true } : {}) } : { voice: n }
+  }
   const out = []
   for (const l of kept) {
     const k = keyOf(l)
     const s = names[k]
-    const n = s ? (s.name ? { name: s.name, guess: !!s.guess } : {}) : one && l.src === 'them' ? { name: one, guess: true } : {}
+    const n = { ...voiceOf(l, k), ...(s ? (s.name ? { name: s.name, guess: !!s.guess, me: false } : {}) : one && l.src === 'them' ? { name: one, guess: true } : {}) }
     const heard = l.heard ?? l.text
     if (edits[k] != null) { out.push({ ...l, key: k, ...n, text: edits[k], edited: true, heard }); continue }
     if (drop.has(k)) { if (dropped) out.push({ ...l, key: k, ...n, dropped: true, heard }); continue }
@@ -157,7 +167,8 @@ export function transcript(id, { raw = false, clean = true, dropped = false } = 
 }
 const clock = (s) => { const t = Math.max(0, Math.round(s)); const h = Math.floor(t / 3600); const m = Math.floor((t % 3600) / 60); const ss = String(t % 60).padStart(2, '0'); return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}` }
 export const who = (src) => (src === 'them' ? 'Them' : 'You')
-const speaker = (l, label = who) => l.name || label(l.src)
+// Who said a line: a name, else a voice in a room (Speaker 2), else You or Them.
+const speaker = (l, label = who) => l.name || (l.voice && !l.me ? `Speaker ${l.voice}` : label(l.src))
 // The lines with a heading where each section starts: [{ head: section }, line, line, ...]. A
 // section with nothing said in it still gets its heading.
 function bySection(said, sections = []) {
@@ -351,7 +362,13 @@ async function run(job) {
     const words = [...(m.event?.attendees || []).slice(0, 12), ...String(cfg.meetings?.vocabulary || '').split(','), ...String(m.fileTerms || '').split(',')]
     const r = await speech.transcribe(wav(job.pcm), { cfg: job.cfg || cfg, language: job.language || m.language || cfg.meetings?.language, prompt: [hint, before].filter(Boolean).join('. '), words })
     const text = speech.spoken(r.text)
-    if (text && !/^(thank you\.?|thanks for watching!?|you)$/i.test(text)) { append(job.id, { src: job.src, t0: round(job.t0), t1: round(job.t1), text, engine: r.engine }); if (!job.retry) assistSoon(job.id) }
+    if (text && !/^(thank you\.?|thanks for watching!?|you)$/i.test(text)) {
+      const line = { src: job.src, t0: round(job.t0), t1: round(job.t1), text, engine: r.engine }
+      append(job.id, line)
+      if (!job.retry) assistSoon(job.id)
+      // In a room, whose voice it was, while it records (voices.js decides whether it can).
+      if (job.src === 'you' && !job.retry) voices.heard(job.id, line, job.pcm, lines(job.id)).catch(() => {})
+    }
     // Its line is in: the words heard so far for it go.
     const so = live.get(job.id)?.sources[job.src]
     if (so) { so.lineTo = Math.max(so.lineTo || 0, round(job.t1)); if (so.partial && so.partial.t0 <= so.lineTo) so.partial = null }
@@ -379,8 +396,12 @@ function settle(id) {
   // turned it on (someone who keeps the transcript from a model until they ask isn't surprised).
   const clean = (cfg.meetings?.cleanup ?? cfg.meetings?.autoSummary !== false) && transcript(id).filter((l) => l.text).length >= 3
   const sum = cfg.meetings?.autoSummary !== false
-  if (!clean && !sum) return
+  // In a room, the voices told apart first (the lines heard while it recorded are done already),
+  // so the summary can say who said what.
+  const room = voices.wanted(lines(id))
+  if (!clean && !sum && !room) return
   ;(async () => {
+    if (room) await voices.tell(id, lines(id)).then(() => voices.wait(id)).catch(() => {})
     if (clean) await cleanup(id).catch(() => {})
     if (sum && transcriptText(id)) await summarize(id).catch(() => {})
   })()
@@ -597,6 +618,7 @@ export async function retranscribe(id, { engine, localModel, language } = {}) {
   if (fs.existsSync(old)) fs.renameSync(old, path.join(d, `transcript-${Date.now()}.jsonl`))
   fs.rmSync(path.join(d, 'pending'), { recursive: true, force: true })
   fs.rmSync(path.join(d, 'cleaned.json'), { force: true }) // it was of the lines heard before
+  for (const f of ['voices.json', 'voices.jsonl']) fs.rmSync(path.join(d, f), { force: true })
   const sources = [...new Set(files.map((f) => f.split('-')[1].split('.')[0]))]
   decoding.set(id, { done: 0, total: Math.max(1, (m.seconds || 0) * sources.length) })
   saveMeta({ ...m, status: 'transcribing', error: null, cleanedAt: null, again: { engine: st.engine, model: st.engine === 'local' ? st.local.model : null, language: language || null, at: new Date().toISOString(), done: null } })
@@ -656,7 +678,9 @@ export function get(id) {
   const links = (m.links || []).map((l) => (l.kind === 'file' ? { ...l, exists: fs.existsSync(l.path), readable: doctext.readable(l.path) } : l))
   const help = assistOf(id)
   // me: your name (Settings › General), for your lines.
-  return { ...m, links, captures: m.captures || [], canRead: !!doctext.ocrBin(), me: String(cfg.name || '').trim() || null, levels, callQuiet: quiet, partial: soFar(id), transcript: transcript(id, { dropped: true }), notes: readText(path.join(d, 'notes.md')), summary: readText(path.join(d, 'summary.md')), waiting: waiting(id), pending: pending.length, saved: m.saved || null, progress, assistItems: help.items.filter((x) => x.state !== 'dismissed').slice(-20), assistError: help.error || null, assisting: assisting.has(id) }
+  // In a room: how many voices, and telling them apart while it's going (the model downloading).
+  const room = voices.of(id)
+  return { ...m, voices: room ? { speakers: room.speakers, names: room.names || {}, at: room.at } : null, voicesWork: voices.working(id), links, captures: m.captures || [], canRead: !!doctext.ocrBin(), me: String(cfg.name || '').trim() || null, levels, callQuiet: quiet, partial: soFar(id), transcript: transcript(id, { dropped: true }), notes: readText(path.join(d, 'notes.md')), summary: readText(path.join(d, 'summary.md')), waiting: waiting(id), pending: pending.length, saved: m.saved || null, progress, assistItems: help.items.filter((x) => x.state !== 'dismissed').slice(-20), assistError: help.error || null, assisting: assisting.has(id) }
 }
 
 export function setKind(id, kind) { return patchMeta(id, { kind: KINDS[kind] ? kind : 'general', kindPicked: true }) }
@@ -840,6 +864,7 @@ export async function nameSpeakers(id, { model } = {}) {
   const m = meta(id)
   const use = model || m.summaryModelPick || cfg.meetings?.model || await helpers.pickModel()
   if (!use) throw noModel()
+  if (voices.of(id)?.speakers >= 2 && !transcript(id).some((l) => l.src === 'them' && l.text)) return nameVoices(id, use)
   const said = transcript(id).filter((l) => l.text)
   if (!said.some((l) => l.src === 'them')) throw new Error('Nobody on the call was heard in this meeting')
   const me = String(cfg.name || '').trim()
@@ -882,6 +907,47 @@ export async function nameSpeakers(id, { model } = {}) {
   patchMeta(id, { namedAt: new Date().toISOString(), namedModel: used })
   resave(id, 2000)
   return { ok: true, named: n, of: byN.size, model: used }
+}
+
+// In a room, the same for its voices: each Speaker n named from what's said ("Thanks, Priya"), who
+// was invited, and which of them is you. A voice you named yourself is left as it is; one it can't
+// place stays Speaker n.
+async function nameVoices(id, use) {
+  const m = meta(id)
+  const said = transcript(id).filter((l) => l.text)
+  const room = voices.of(id)
+  const me = String(cfg.name || '').trim()
+  const people = guests(m)
+  const rows = said.map((l) => `[${clock(l.t0)}] ${l.voice ? `Speaker ${l.voice}` : me || 'You'}: ${l.text}`)
+  const mem = memory.about(`${m.title}\n${people.join('\n')}\n${said.map((l) => l.text).join('\n')}`)
+  const ask = [`Meeting: ${m.title}`, people.length ? `Invited, besides the person recording: ${people.join(', ')}` : 'There is no list of who was invited, but the meeting\'s name may say who it was with.', me ? `The person recording it is ${me}.` : '', mem ? `\n${mem}` : '', '',
+    `This meeting was in a room with one microphone, and the voices were told apart by how they sound: Speaker 1 to Speaker ${room.speakers}. Say who each speaker is, from what was said (names used, introductions, a question put to someone and their answer), who was invited and the meeting's name. One of them is usually the person recording it: say "me" for that one.`,
+    'Use names the way they were invited or said. When you can\'t tell, use null: a wrong name is worse than none.',
+    'Answer with one JSON object and nothing else, from speaker number to name, like {"1": "me", "2": "Priya Shah", "3": null}.'].filter((x) => x !== null).join('\n')
+  const got = {}
+  let used = use
+  for (const part of pieces(rows.join('\n'), budget(use) - ask.length - 2000)) {
+    const r = await replyAny(used, [{ role: 'user', text: `${ask}\n\nTranscript:\n${part}` }], { system: 'You work out who said what in a meeting transcript. You are careful and say null when unsure.' })
+    used = r.model
+    const j = /\{[\s\S]*\}/.exec(String(r.text || ''))
+    try { for (const [k, v] of Object.entries(JSON.parse(j ? j[0] : '{}'))) if (got[k] == null) got[k] = v } catch { /* not JSON: nothing from this part */ }
+  }
+  let n = 0
+  const taken = new Set(Object.values(room.names || {}).filter((x) => !x.guess).map((x) => (x.me ? ':me' : x.name)))
+  for (const [num, name] of Object.entries(got)) {
+    const s = Number(num)
+    const was = room.names?.[s]
+    if (!(s >= 1 && s <= room.speakers) || (was && !was.guess && !was.byVoice) || typeof name !== 'string') continue
+    const v = clean(name, 80)
+    const isMe = /^(me|you|myself)$/i.test(v) || (me && sameName(v, me))
+    if (!v || /^(null|unknown|speaker \d+)$/i.test(v) || taken.has(isMe ? ':me' : v)) continue
+    await voices.name(id, s, isMe ? { me: true, guess: true } : { name: v, guess: true })
+    taken.add(isMe ? ':me' : v)
+    n++
+  }
+  patchMeta(id, { namedAt: new Date().toISOString(), namedModel: used })
+  resave(id, 2000)
+  return { ok: true, named: n, of: room.speakers, voices: true, model: used }
 }
 
 // ---------- Cleaning up the transcript ----------
@@ -1505,7 +1571,7 @@ export function summarize(id, { model, kind, language, again = false } = {}) {
     // Who said what on the call, worked out once before the first summary (Settings › Meetings can
     // turn it off): from who was invited, names said ("Hi, Priya"), the meeting's name and the screen.
     // The summary can then say who's doing what. With one other person invited, it's them.
-    if (cfg.meetings?.nameSpeakers !== false && !m.namedAt && !onlyGuest(m) && transcript(id).some((l) => l.src === 'them' && l.text)) {
+    if (cfg.meetings?.nameSpeakers !== false && !m.namedAt && ((!onlyGuest(m) && transcript(id).some((l) => l.src === 'them' && l.text)) || voices.of(id)?.speakers >= 2)) {
       await nameSpeakers(id, { model: use }).catch(() => patchMeta(id, { namedAt: new Date().toISOString() }))
     }
     // A picture still being read (one captured or pasted just before the end) is waited for, a little.

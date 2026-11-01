@@ -59,6 +59,7 @@ import * as meetings from './meetings.js'
 import * as boards from './boards.js'
 import * as labs from './labs.js'
 import * as meetMemory from './meetmemory.js'
+import * as voices from './voices.js'
 import * as meetWork from './meetwork.js'
 import * as speech from './speech.js'
 import * as projects from './projects.js'
@@ -1055,6 +1056,9 @@ setInterval(() => dictations.tidy().catch(() => {}), 6 * 60 * 60 * 1000).unref()
 
 // ---------- Meeting notes (meetings.js; speech engines in speech.js) ----------
 meetings.configure(cfg)
+voices.configure(cfg)
+// Used once, Who spoke in a room turns telling voices apart on for the meetings after.
+voices.setSaver(async (p) => afterChange(settings.patch({ meetings: p })))
 meetings.recover()
 if (cfg.setupDone) projects.upgrading()
 // The model notes are written with when you haven't picked one: your Claude sign-in first (no key
@@ -1074,7 +1078,7 @@ meetings.setHelpers({ reply: (id, msgs, o) => chatModels.reply(id, msgs, o), pic
 meetWork.configure(cfg)
 meetWork.setHelpers({ fleet: () => (lastFleet ? Promise.resolve(lastFleet) : fleetView()), projects: () => projects.list(), tasks: () => chiefTasks.list(), pr: (dir, branch) => pr.status(dir, { branch }), tree: (folder) => worktrees.describe(folder), kindLabel: (k) => adapter(k).label || k, launch: (body) => launchFrom(body) })
 // Speech engines (speech.js): what Settings › Meetings shows, models to download, whisper.cpp to install.
-app.get('/api/speech', wrap(async () => ({ ...(await speech.status(cfg)), callAudio: cfg.meetings?.callAudio !== false, canRecordCall: !!meetings.tapBin(), canWatchCalls: !!calls.watchBin(), folder: meetings.folder() })))
+app.get('/api/speech', wrap(async () => ({ ...(await speech.status(cfg)), callAudio: cfg.meetings?.callAudio !== false, canRecordCall: !!meetings.tapBin(), canWatchCalls: !!calls.watchBin(), folder: meetings.folder(), voices: await voices.status() })))
 app.post('/api/speech/models/:id', wrap(async (req) => { speech.fetchModel(req.params.id); return speech.status(cfg) }))
 app.delete('/api/speech/models/:id', wrap(async (req) => { await speech.removeModel(req.params.id); return speech.status(cfg) }))
 app.post('/api/speech/install', wrap(async (req) => {
@@ -1121,6 +1125,11 @@ app.post('/api/meetings/bulk', wrap(async (req) => {
   }
   return out
 }))
+// Voices in a room (voices.js): whether it's offered here, the model, what's remembered; Forget
+// voices; Download (Settings › Meetings).
+app.get('/api/meetings/voices', wrap(() => voices.status()))
+app.post('/api/meetings/voices/forget', wrap(() => voices.forget()))
+app.post('/api/meetings/voices/download', wrap(async () => { if (!(await voices.status()).offered) throw new Error((await voices.status()).why || 'Telling voices apart can\'t run on this computer'); speech.fetchModel(speech.VOICE.id); return voices.status() }))
 // What happened since the last meeting in a series, with the same people or the same customer:
 // for a calendar event about to start (title, people), before there's a meeting for it.
 app.get('/api/meetings/since', wrap((req) => meetWork.since({ title: String(req.query.title || '').slice(0, 200), attendees: [].concat(req.query.people || []).flatMap((x) => String(x).split(',')).map((x) => x.trim()).filter(Boolean).slice(0, 50), start: String(req.query.start || '') || null })))
@@ -1187,6 +1196,18 @@ app.delete('/api/meetings/:id/sections/:i', wrap((req) => meetings.removeSection
 // Who said a line (by you), or every line on the call worked out by a model.
 app.patch('/api/meetings/:id/speakers', wrap((req) => meetings.setSpeaker(req.params.id, String(req.body?.key || ''), req.body?.name ?? null, { all: !!req.body?.all })))
 app.post('/api/meetings/:id/speakers', wrap((req) => meetings.nameSpeakers(req.params.id, { model: req.body?.model })))
+// In a room: tell the voices apart (the model downloaded first if it isn't here; the meeting says
+// how far it's got), then, as for a call, the notes model names them unless that's turned off.
+// Naming a voice names every line of theirs.
+app.post('/api/meetings/:id/voices', wrap(async (req) => {
+  const id = req.params.id
+  const m = meetings.get(id)
+  if (['recording', 'paused', 'transcribing'].includes(m.status)) throw new Error('Once it has stopped and every line is in, the voices can be told apart.')
+  const r = await voices.tell(id, m.transcript.filter((l) => !l.dropped))
+  voices.wait(id).then((v) => { if (v?.speakers >= 2 && cfg.meetings?.nameSpeakers !== false) meetings.nameSpeakers(id).catch(() => {}) }, () => {})
+  return r
+}))
+app.patch('/api/meetings/:id/voices/:n', wrap((req) => voices.name(req.params.id, Number(req.params.n), { name: req.body?.name ?? null, me: !!req.body?.me })))
 // The transcript cleaned up by a model (it happens by itself when a meeting ends), and back to as
 // heard: one line (key), or all of it.
 app.post('/api/meetings/:id/cleanup', wrap((req) => meetings.cleanup(req.params.id, { model: req.body?.model })))

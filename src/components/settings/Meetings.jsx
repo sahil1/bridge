@@ -74,6 +74,30 @@ function SaveNotes({ set, pickFolder }) {
     </>
   )
 }
+// Voices in a room (server/voices.js), only where it can run: told apart by the voice model, and,
+// if you want, remembered by voice once named. Turning it on downloads the model (30 MB) with its
+// progress here; otherwise it waits for the first Who spoke on a meeting.
+function RoomVoices({ v, m, set, refresh }) {
+  const [msg, setMsg] = useState(null)
+  const on = (yes) => set({ roomVoices: yes }).then(() => { if (yes && !v.have) return api('/meetings/voices/download', { method: 'POST' }).then(refresh) }).catch((e) => setMsg(e.message))
+  const forget = () => api('/meetings/voices/forget', { method: 'POST' }).then(() => { setMsg(t('Forgotten.')); refresh() }).catch((e) => setMsg(e.message))
+  return (
+    <section className="st-sec st-voices">
+      <h4>{t('Voices in a room')}</h4>
+      <label className="st-check">
+        <input type="checkbox" checked={m.roomVoices === true} onChange={(e) => on(e.target.checked)} />
+        <span><b>{t('Tell voices apart in a room')}</b> <span className="muted small">{t('With your mic only (no call), each line says Speaker 1, Speaker 2 and so on, by voice, worked out on this computer. Name a speaker once and all their lines take the name.')} {t('It uses a small voice model ({model}, {mb} MB, {license}), downloaded the first time.', { model: v.label, mb: v.mb, license: v.license })} {v.live ? '' : t('On this computer it runs once a meeting ends, so the transcript keeps up while it records.')}</span></span>
+      </label>
+      {v.downloading && <p className={`small ${v.downloading.error ? 'error-text' : 'muted'}`} role="status">{v.downloading.error || t('Downloading the voice model: {n}%', { n: v.downloading.percent })}</p>}
+      <label className="st-check">
+        <input type="checkbox" checked={m.rememberVoices === true} onChange={(e) => set({ rememberVoices: e.target.checked })} />
+        <span><b>{t('Remember voices you name')}</b> <span className="muted small">{t("Then someone you've named is named by their voice in the next meeting. What's kept is a few hundred numbers for how each voice sounds, with their name, on this computer only, and never sent anywhere.")}</span></span>
+      </label>
+      {v.known > 0 && <div className="st-row"><button type="button" className="btn small" onClick={forget}><Icon name="trash" size={12} /> {v.known === 1 ? t('Forget {n} voice', { n: v.known }) : t('Forget {n} voices', { n: v.known })}</button></div>}
+      {msg && <p className="muted small" role="status">{msg}</p>}
+    </section>
+  )
+}
 const openProviders = () => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'providers' } }))
 const openVoice = () => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'voice' } }))
 
@@ -183,11 +207,13 @@ export default function Meetings() {
         </label>
         <label className="st-check">
           <input type="checkbox" checked={m.nameSpeakers !== false} onChange={(e) => set({ nameSpeakers: e.target.checked })} />
-          <span><b>Name who spoke on the call</b> <span className="muted small">Before the first summary, the model works out who said each of Them's lines from names said, the invite and the screen. On a Mac, a watched screen is read while the call talks, and those pictures aren't kept. With one other person invited, it's them.</span></span>
+          <span><b>Name who spoke on the call</b> <span className="muted small">Before the first summary, the model works out who said each of Them's lines from names said, the invite and the screen. On a Mac, a watched screen is read while the call talks, and those pictures aren't kept. With one other person invited, it's them. In a room, the voices told apart are named the same way.</span></span>
         </label>
         <p className="muted small">Your own instructions for every summary, if you like:</p>
         <textarea className="st-input" rows={2} value={instr ?? ''} onChange={(e) => setInstr(e.target.value)} onBlur={() => instr !== (m.instructions || '') && set({ instructions: instr.trim() })} placeholder="e.g. Keep it under ten bullets. Note any numbers mentioned." />
       </section>
+
+      {d.voices?.offered && <RoomVoices v={d.voices} m={m} set={set} refresh={() => sp.refresh()} />}
 
       <section className="st-sec">
         <h4>Calls</h4>

@@ -4,7 +4,8 @@
 //   Speech to text: "Service transcript <n>." for the n-th piece. For a meeting called "Tags only"
 //   (in the hint it's sent), only notes about sound for its first two: "[END]", then
 //   "(keyboard clicking) [ Silence ]", as whisper writes for a stretch with no words.
-//   Meeting notes, a part of a long meeting, who said what, cleaning up a transcript, AI Assist and
+//   Meeting notes, a part of a long meeting, who said what (on a call, or the voices in a room: the
+//   first is the one recording, the second the first one invited), cleaning up a transcript, AI Assist and
 //   questions about meetings: fixed answers in the shape meetings.js asks for. The cleanup fixes
 //   "bridge ay eye" to "Bridge AI", rewrites a line that says "rewrite me" (which meetings.js
 //   turns down), and leaves out "Thanks for watching" and "drop me please"; Assist suggests a
@@ -68,6 +69,11 @@ function answer(b) {
     const out = {}
     for (const [, n, t] of last.matchAll(/^(\d+)\. \[[^\]]+\] Them: (.*)$/gm)) out[n] = /slides|agenda/i.test(t) ? 'Dan Ruiz' : /budget/i.test(t) ? 'Priya Shah' : null
     return say(`Here you go:\n${JSON.stringify(out)}`)
+  }
+  // Who each voice in a room is: Speaker 1 is the one recording, Speaker 2 the first one invited.
+  if (/Say who each speaker is/.test(last)) {
+    const invited = (/^Invited, besides the person recording: (.+)$/m.exec(last)?.[1] || '').split(', ').filter(Boolean)
+    return say(JSON.stringify({ 1: 'me', 2: invited[0] || null }))
   }
   if (/Answer from these meetings only/.test(last)) {
     const got = [...last.matchAll(/^\[(\d+)\] "([^"]+)"/gm)].map((x) => x[2])

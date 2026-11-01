@@ -10,6 +10,8 @@
 // mic; in WebKit (BRIDGE_TEST_BROWSER=webkit) the parts that record are skipped, since it has none.
 // The meeting named after the calendar event on now is Mac-only (macOS Calendar). Watching a
 // screen (a canvas, as the picker's answer) and the looks at it while someone on the call talks.
+// Who said what in a room: Speaker 1 and 2, named once from who was invited or you; Who spoke and
+// Settings' Voices in a room, and neither where voices can't be told apart.
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -434,8 +436,77 @@ process.exit(1)`)
   await api(`/meetings/${I.id}/assist`, { on: false })
   await api(`/meetings/${I.id}/stop`, {})
 
+  // ---------- Who said what in a room ----------
+  // A meeting with your mic only, its voices told apart (voices.json, as voices.js writes it): each
+  // line says Speaker 1 or 2; clicking one offers who was invited and you, and names every line of
+  // that voice at once. Who spoke is there on a room meeting; where the voices can't be told apart
+  // it isn't. Settings › Meetings has Voices in a room. With no way to download the voice model
+  // (nothing is reached here), Who spoke says why, with Try again.
+  const V = await api('/meetings', { title: 'Design review', call: false, event: { title: 'Design review', attendees: ['Priya Shah', 'Dan Ruiz', 'Tester'] } })
+  await api(`/meetings/${V.id}/stop`, {})
+  said(V.id, [['you', 1, 'Let us look at the new onboarding.'], ['you', 5, 'The first screen asks too much.'], ['you', 9, 'Agreed, we can cut two fields.'], ['you', 13, 'I will mock it up by Friday.']])
+  await until(async () => (await api(`/meetings/${V.id}`)).status === 'done', 8000)
+  fs.writeFileSync(path.join(kit.data, 'meetings', V.id, 'voices.json'), JSON.stringify({ speakers: 2, line: { 'you:1': 1, 'you:5': 2, 'you:9': 1, 'you:13': 2 }, names: {}, at: new Date().toISOString(), model: 'voices' }))
+  await openMeeting('Design review')
+  await p.locator('.seg button[data-view="transcript"]').click({ timeout: 5000 }).catch(() => {})
+  const roomWhos = () => p.locator('.mt-transcript .mt-line .mt-who').allInnerTexts().catch(() => [])
+  ok(!!(await until(async () => (await roomWhos()).join('|') === 'Speaker 1|Speaker 2|Speaker 1|Speaker 2', 8000)), 'a room meeting: each line says which voice, Speaker 1 or 2', await roomWhos())
+  const whoSpokeShown = await p.locator('.mt-transcript .mt-voices-btn').isVisible().catch(() => false)
+  ok(whoSpokeShown, 'and Who spoke is there for it')
+  await p.locator('.mt-transcript .mt-line .mt-who', { hasText: 'Speaker 2' }).first().click({ timeout: 5000 }).catch(() => {})
+  await p.waitForSelector('.ctx-menu', { timeout: 4000 }).catch(() => {})
+  const voiceMenu = await p.locator('.menu .menu-item, .ctx-menu .menu-item, .ctx-menu button').allInnerTexts().catch(() => [])
+  ok(['Priya Shah', 'Dan Ruiz', "That's me", 'Someone else…', 'Only this line…', 'Work out who each voice is'].every((x) => voiceMenu.some((y) => y.includes(x))) && !voiceMenu.some((y) => y.trim() === 'Tester'), 'clicking Speaker 2: who was invited, you, someone else, only this line, or the notes model', voiceMenu)
+  await solid(p, '.ctx-menu')
+  await shot(p, `${tag}room-speaker-menu`)
+  await p.locator('.menu .menu-item, .ctx-menu .menu-item, .ctx-menu button', { hasText: 'Priya Shah' }).first().click({ timeout: 5000 }).catch(() => {})
+  ok(!!(await until(async () => (await roomWhos()).join('|') === 'Speaker 1|Priya Shah|Speaker 1|Priya Shah', 8000)), 'named once: every line of that voice', await roomWhos())
+  ok(/Priya Shah said 2 lines\./.test(await p.locator('.mt-msg').innerText({ timeout: 2000 }).catch(() => '')), 'and it says how many', await p.locator('.mt-msg').innerText().catch(() => ''))
+  await p.locator('.mt-transcript .mt-line .mt-who', { hasText: 'Speaker 1' }).first().click({ timeout: 5000 }).catch(() => {})
+  await p.waitForSelector('.ctx-menu', { timeout: 4000 }).catch(() => {})
+  await p.locator('.menu .menu-item, .ctx-menu .menu-item, .ctx-menu button', { hasText: "That's me" }).first().click({ timeout: 5000 }).catch(() => {})
+  ok(!!(await until(async () => (await roomWhos()).join('|') === 'Tester|Priya Shah|Tester|Priya Shah', 8000)), "That's me: your lines, by your name", await roomWhos())
+  await shot(p, `${tag}room-speakers`)
+  // Who spoke on a room meeting not told apart yet: the voice model can't be downloaded here.
+  const V2 = await api('/meetings', { title: 'Hallway chat', call: false })
+  await api(`/meetings/${V2.id}/stop`, {})
+  said(V2.id, [['you', 1, 'Quick one about the launch.'], ['you', 5, 'Sure, what is up?']])
+  await until(async () => (await api(`/meetings/${V2.id}`)).status === 'done', 8000)
+  await openMeeting('Hallway chat')
+  await p.locator('.seg button[data-view="transcript"]').click({ timeout: 5000 }).catch(() => {})
+  await p.locator('.mt-transcript .mt-voices-btn').click({ timeout: 5000 }).catch(() => {})
+  const failed = p.locator('.mt-transcript .mt-hint', { hasText: "The voices weren't told apart" })
+  ok(!!(await until(() => failed.isVisible(), 10000)) && await failed.locator('button', { hasText: 'Try again' }).isVisible(), 'Who spoke with no way to download the voice model: it says why, with Try again', await p.locator('.mt-transcript').innerText({ timeout: 1000 }).catch(() => ''))
+  // Settings › Meetings: Voices in a room.
+  await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'meetings' } })))
+  const sec = p.locator('.st-voices')
+  const sectionShown = !!(await until(() => sec.isVisible(), 8000)) && /Tell voices apart in a room/.test(await sec.innerText()) && /Remember voices you name/.test(await sec.innerText()) && /ERes2Net, 26 MB, Apache-2\.0/.test(await sec.innerText())
+  ok(sectionShown, 'Settings › Meetings: Voices in a room, with the model it uses and remembering voices', await sec.innerText().catch(() => ''))
+  await sec.scrollIntoViewIfNeeded().catch(() => {})
+  await shot(p, `${tag}settings-room-voices`)
+  await p.keyboard.press('Escape')
+
   ok(errors.length === 0, 'no page errors', errors)
   await ctx.close()
+
+  // Where voices can't be told apart (the server says so): no Who spoke on a room meeting, and no
+  // Voices in a room in Settings.
+  let askedVoices = 0
+  const nv = await page(b, kit.url, { store: { 'cc-rail-meetings': true }, before: async (c) => {
+    await noServiceWorker(c)
+    await c.route(/\/api\/meetings\/voices(\?|$)/, (r) => { askedVoices++; return r.fulfill({ json: { offered: false, why: 'sherpa-onnx needs glibc 2.32 or later', live: false, have: false } }) })
+    await c.route(/\/api\/speech(\?|$)/, async (r) => { const res = await r.fetch(); const j = await res.json(); await r.fulfill({ response: res, json: { ...j, voices: { offered: false } } }) })
+  } })
+  await nv.p.waitForSelector('.rail-nav-row', { timeout: 15000 }).catch(() => {})
+  await until(async () => { await nv.p.evaluate((id) => window.dispatchEvent(new CustomEvent('bridge-open-meeting', { detail: { id } })), V2.id); return nv.p.locator('.mt-title').isVisible() }, 10000, 1000)
+  await nv.p.locator('.seg button[data-view="transcript"]').click({ timeout: 5000 }).catch(() => {})
+  await until(async () => (await nv.p.locator('.mt-transcript .mt-line').count()) === 2, 8000)
+  await sleep(1500)
+  ok(whoSpokeShown && askedVoices > 0 && (await nv.p.locator('.mt-transcript .mt-voices-btn').count()) === 0 && (await nv.p.locator('.mt-transcript .mt-line').count()) === 2, "where the voices can't be told apart (the server says so), a room meeting has no Who spoke", { askedVoices, text: await nv.p.locator('.mt-transcript').innerText().catch(() => '') })
+  await nv.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'meetings' } })))
+  await nv.p.waitForSelector('.st-meet', { timeout: 8000 }).catch(() => {})
+  ok(sectionShown && (await nv.p.locator('.st-voices').count()) === 0 && (await nv.p.locator('.st-meet').count()) === 1 && nv.errors.length === 0, 'nor Voices in a room in Settings › Meetings (and no page errors)', nv.errors)
+  await nv.ctx.close()
 
   // ---------- On a phone, while it records: a big My notes box, one tap away ----------
   // On the screen with the meeting, labelled; not focused by itself (the keyboard would cover the
