@@ -28,12 +28,15 @@ for (const name of SYNC) {
   if (orig.native) wrapped.native = function (p, ...rest) { if (hit(p)) freeze(`${name}.native`, p); return orig.native.call(this, p, ...rest) }
   fs[name] = wrapped
 }
-const ASYNC = ['readdir', 'stat', 'lstat', 'readFile', 'realpath', 'opendir', 'access', 'writeFile', 'appendFile', 'mkdir', 'readlink', 'open', 'rm', 'rmdir', 'rename', 'copyFile', 'cp', 'unlink', 'utimes']
+const ASYNC = ['readdir', 'stat', 'lstat', 'readFile', 'realpath', 'opendir', 'access', 'writeFile', 'appendFile', 'mkdir', 'readlink', 'open', 'rm', 'rmdir', 'rename', 'copyFile', 'cp', 'unlink', 'utimes', 'statfs', 'link', 'truncate']
+// SIM_LOG=1: each of these logged too ("[tcc-sim] HELD <call>(<path>)"), so a test can tell that
+// nothing looked into a folder at all, not only that nothing froze.
+const held = (call, p) => { if (process.env.SIM_LOG) console.error(`[tcc-sim] HELD ${call}(${pathOf(p)})`) }
 for (const name of ASYNC) {
   const orig = fs.promises[name]
-  if (orig) fs.promises[name] = async function (p, ...rest) { if (hit(p)) await hold(); return orig.call(this, p, ...rest) }
+  if (orig) fs.promises[name] = async function (p, ...rest) { if (hit(p)) { held(name, p); await hold() } return orig.call(this, p, ...rest) }
   const cb = fs[name]
-  if (cb) fs[name] = function (p, ...rest) { if (!hit(p)) return cb.call(this, p, ...rest); setTimeout(() => cb.call(this, p, ...rest), MS) }
+  if (cb) fs[name] = function (p, ...rest) { if (!hit(p)) return cb.call(this, p, ...rest); held(name, p); setTimeout(() => cb.call(this, p, ...rest), MS) }
 }
 // A program started synchronously in a protected folder blocks the server until it ends.
 for (const name of ['execFileSync', 'execSync', 'spawnSync']) {
