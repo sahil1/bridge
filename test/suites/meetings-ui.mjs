@@ -2,7 +2,8 @@
 // (beside the transcript, and a big box on a phone), the summary first once it ends with Send action
 // items to Chief of Staff under its action items, New section in the recording
 // bar, the top bar's menu and the floating card (with Pause there), naming who said a line, the
-// right-click menu, folders, the archive and deleting after a warning. The floating card following
+// right-click menu, folders, the archive and deleting after a warning. Action items into work: Start
+// an agent and To Chief of Staff on each, what became of them, and since last time. The floating card following
 // dark mode while it's open, its frame, and its warning when the call has no sound. The mic set for the room
 // (no echo or noise handling, which drops the people around the table) with no call on the
 // computer, and for a call while one is on. In Chromium with its fake
@@ -11,7 +12,8 @@
 // screen (a canvas, as the picker's answer) and the looks at it while someone on the call talks.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, startModel, checks, until, sleep, browser, page, shot, solid, noServiceWorker, IS_MAC } from '../lib/harness.mjs'
+import { spawnSync } from 'node:child_process'
+import { startKit, startModel, checks, until, sleep, browser, page, shot, solid, noServiceWorker, TEST, IS_MAC } from '../lib/harness.mjs'
 
 const { ok, skip, done } = checks('meetings-ui')
 const kit = await startKit('meetings-ui')
@@ -331,6 +333,78 @@ process.stdout.write('@@EV@@Pricing review (Work)\\u00a6' + d.getFullYear() + '-
   await chiefRow.locator('button').click({ timeout: 5000 }).catch(() => {})
   ok(!!(await until(async () => /^2 action items are on Chief of Staff's task list\./.test(await p.locator('.mt-msg').innerText({ timeout: 1000 })) && /Sent to Chief of Staff on /.test(await chiefRow.innerText({ timeout: 1000 })), 8000)) && (await api(`/meetings/${U.id}`)).chief?.n === 2, 'sent: on its task list, and the meeting says when', [await p.locator('.mt-msg').innerText({ timeout: 1000 }).catch(() => ''), await chiefRow.innerText({ timeout: 1000 }).catch(() => '')])
   await shot(p, `${tag}meeting-chief`)
+  ok(!!(await until(async () => (await p.locator('.mt-item .mt-went.chief').count()) === 2, 8000)) && /On Chief of Staff's task list/.test(await p.locator('.mt-item').first().innerText({ timeout: 1000 }).catch(() => '')), 'and each item says where it went', await p.locator('.mt-items').innerText().catch(() => ''))
+
+  // ---------- Action items into work ----------
+  // A project in git (gh a stand-in that knows one pull request), a stand-in Claude Code, and last
+  // week's meeting about it. Each item has Start an agent and To Chief of Staff (the one that leads
+  // fits the item); Start an agent picks the project the item names, says why, shows the branch and
+  // what it will be told, and starts it in one more click; what became of each shows under it.
+  kit.program('claude', fs.readFileSync(path.join(TEST, 'stand-ins', 'claude.cjs'), 'utf8'))
+  await api('/agents/catalog')
+  kit.program('gh', `const a = process.argv.slice(2)
+if (a[0] === 'repo') { console.log('main'); process.exit(0) }
+if (a[0] === 'pr' && a[1] === 'view') { console.log(JSON.stringify({ number: 212, state: 'OPEN', url: 'https://github.com/example/payments-api/pull/212', title: 'Retry the webhook', isDraft: false, statusCheckRollup: [{ status: 'COMPLETED', conclusion: 'SUCCESS' }] })); process.exit(0) }
+process.exit(1)`)
+  const repo = path.join(kit.home, 'code', 'payments-api')
+  fs.mkdirSync(repo, { recursive: true })
+  const inRepo = (...a) => spawnSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', '-c', 'init.defaultBranch=main', ...a], { cwd: repo, encoding: 'utf8' })
+  const madeRepo = inRepo('init', '-q').status === 0 && inRepo('commit', '-q', '--allow-empty', '-m', 'start').status === 0 && inRepo('remote', 'add', 'origin', 'https://github.com/example/payments-api.git').status === 0
+  await api('/projects', { paths: [repo] })
+  // Whether the server can use git here (on Windows the test's PATH has a git its server's doesn't).
+  const hasGit = madeRepo && !!(await api(`/repo?dir=${encodeURIComponent(repo)}`).catch(() => ({}))).repo
+  const W = await api('/meetings', { title: 'Weekly payments sync', call: false, event: { title: 'Weekly payments sync', attendees: ['Mia Chen', 'Ola Berg', 'Tester'] } })
+  await api(`/meetings/${W.id}/stop`, {})
+  await api(`/meetings/${W.id}`, { startedAt: new Date(Date.now() - 7 * 86400e3).toISOString() }, 'PATCH')
+  said(W.id, [['them', 2, 'The Stripe webhook in payments-api retries forever when it gets a 500.'], ['you', 6, 'I can fix the retry this week, with a backoff.']])
+  fs.writeFileSync(path.join(kit.data, 'meetings', W.id, 'summary.md'), '## Summary\n- Webhook retries and pricing.\n\n## Decisions\n- Retry with a backoff.\n\n## Action items\n- [ ] You: fix the retry on the Stripe webhook in payments-api\n- [ ] Mia: send the pricing doc to Acme\n- [ ] Ola: book the offsite venue\n')
+  await openMeeting('Weekly payments sync')
+  const item = (i) => p.locator('.mt-items .mt-item').nth(i)
+  ok(!!(await until(async () => (await p.locator('.mt-items .mt-item').count()) === 3, 8000)), 'each action item on a line of its own', await p.locator('.mt-notes').innerText().catch(() => ''))
+  const leads = await p.evaluate(() => [...document.querySelectorAll('.mt-items .mt-item')].map((li) => [...li.querySelectorAll('.mt-item-acts .btn')].map((b) => `${b.textContent.trim()}${b.classList.contains('lead') ? '*' : ''}`).join('|')))
+  ok(leads[0] === 'Start an agent*|To Chief of Staff' && leads[2] === 'Start an agent|To Chief of Staff*', 'each with Start an agent and To Chief of Staff, one click each; code leads with the agent, the rest with Chief of Staff', leads)
+  await item(0).locator('button', { hasText: 'Start an agent' }).click({ timeout: 5000 }).catch(() => {})
+  const panel = item(0).locator('.mt-start')
+  ok(!!(await until(async () => (await panel.locator('select[aria-label="Project"]').inputValue().catch(() => '')) === repo, 8000)), 'Start an agent: the project it names, picked', await panel.innerText().catch(() => ''))
+  ok(/Named in this item/.test(await panel.locator('.mt-start-why').innerText().catch(() => '')), 'saying why', await panel.innerText().catch(() => ''))
+  if (hasGit) ok(!!(await until(async () => /bridge\/fix-the-retry-on-the-stripe-webhook/.test(await panel.locator('.mt-start-own').innerText().catch(() => '')) && await panel.locator('.mt-start-own input').isChecked(), 8000)), 'on its own branch, named', await panel.innerText().catch(() => ''))
+  else skip('on its own branch', 'the server has no git here')
+  await panel.locator('summary', { hasText: 'What it will be told' }).click({ timeout: 5000 }).catch(() => {})
+  ok(/fix the retry on the Stripe webhook/.test(await panel.locator('textarea').inputValue().catch(() => '')) && /What was said about it/.test(await panel.locator('textarea').inputValue().catch(() => '')), 'what it will be told, yours to change', await panel.locator('textarea').inputValue().catch(() => ''))
+  await shot(p, `${tag}meeting-start-agent`)
+  await panel.locator('button', { hasText: 'Start' }).first().click({ timeout: 5000 }).catch(() => {})
+  ok(!!(await until(async () => /^Started Fix the retry on the Stripe webhook in .*payments-api\. Open$/.test((await p.locator('.mt-msg').innerText({ timeout: 1000 })).trim()), 15000)), 'started, with Open', await p.locator('.mt-msg').innerText().catch(() => ''))
+  const went0 = item(0).locator('.mt-item-went')
+  ok(!!(await until(async () => /Claude Code in .*payments-api/.test(await went0.innerText({ timeout: 1000 })) && (!hasGit || /PR #212 · open · checks pass/.test(await went0.innerText({ timeout: 1000 }))), 20000)), 'what became of it, under it: the agent, and its pull request', await went0.innerText().catch(() => ''))
+  await item(1).locator('button', { hasText: 'To Chief of Staff' }).click({ timeout: 5000 }).catch(() => {})
+  ok(!!(await until(async () => /On Chief of Staff's task list/.test(await item(1).innerText({ timeout: 1000 })), 8000)), 'To Chief of Staff: on its task list, and the item says so', await item(1).innerText().catch(() => ''))
+  await item(2).locator('.mt-item-tick').check({ timeout: 5000 }).catch(() => {})
+  ok(!!(await until(async () => /\bdone\b/.test(await item(2).getAttribute('class', { timeout: 1000 }).catch(() => '')), 8000)), 'ticked done', await item(2).getAttribute('class', { timeout: 1000 }).catch(() => ''))
+  await shot(p, `${tag}meeting-items`)
+  // Open: the agent it started.
+  await item(0).locator('.mt-went.agent button', { hasText: 'Open' }).click({ timeout: 5000 }).catch(() => {})
+  ok(!!(await until(async () => (await p.locator('.tab-row .tab.on, .ws-tab.on, [role="tab"][aria-selected="true"]').filter({ hasText: 'Fix the retry' }).count()) > 0 || /Fix the retry/.test(await p.locator('.pane-head').first().innerText({ timeout: 500 }).catch(() => '')), 8000)), 'Open goes to the agent', await p.locator('.pane-head').first().innerText().catch(() => ''))
+
+  // Since last time: the next one in the series, recording, says what became of last week's items.
+  const W2 = await api('/meetings', { title: 'Weekly payments sync (Nov 7)', call: false, event: { title: 'Weekly payments sync', attendees: ['Mia Chen', 'Ola Berg', 'Tester'] } })
+  await p.evaluate((id) => window.dispatchEvent(new CustomEvent('bridge-open-meeting', { detail: { id } })), W2.id)
+  const sinceBox = p.locator('.mt-page .mt-since')
+  ok(!!(await until(async () => /Since last time/.test(await sinceBox.innerText({ timeout: 1000 })) && /1 of 3 done/.test(await sinceBox.innerText({ timeout: 1000 })) && (!hasGit || /1 pull request open/.test(await sinceBox.innerText({ timeout: 1000 }))), 15000)), 'the next one in the series: since last time, in a line', await sinceBox.innerText().catch(() => ''))
+  await sinceBox.locator('.mt-since-head').click({ timeout: 5000 }).catch(() => {})
+  ok((await sinceBox.locator('.mt-since-item').count()) === 3 && /On Chief of Staff's task list/.test(await sinceBox.innerText({ timeout: 1000 }).catch(() => '')) && /ticked done/.test(await sinceBox.innerText({ timeout: 1000 }).catch(() => '')), 'opened: each item and where it went', await sinceBox.innerText().catch(() => ''))
+  await shot(p, `${tag}meeting-since`)
+  await api(`/meetings/${W2.id}/stop`, {})
+  // Before it starts: the calendar's event on now (Pricing review, on a Mac) says it on its Take notes card.
+  if (IS_MAC) {
+    const PR = await api('/meetings', { title: 'Pricing review', call: false, event: { title: 'Pricing review', attendees: ['Priya Shah', 'Dan Ruiz', 'Tester'] } })
+    await api(`/meetings/${PR.id}/stop`, {})
+    await api(`/meetings/${PR.id}`, { startedAt: new Date(Date.now() - 3 * 86400e3).toISOString() }, 'PATCH')
+    fs.writeFileSync(path.join(kit.data, 'meetings', PR.id, 'summary.md'), '## Action items\n- [ ] You: send Acme the new tiers\n- [ ] Priya: check the discount\n')
+    await p.locator('.rail-nav-btn', { hasText: 'Meetings' }).click({ timeout: 5000 }).catch(() => {})
+    const nextSince = p.locator('.mt-since-next')
+    ok(!!(await until(async () => await p.locator('.mt-next', { hasText: 'Pricing review' }).isVisible() && /Since last time\s*0 of 2 done/.test(await nextSince.innerText({ timeout: 1000 })), 45000)), 'the event about to start: since last time, under its Take notes', await p.locator('.mt-home').innerText().catch(() => ''))
+    await shot(p, `${tag}meetings-next-since`, { clip: { x: 0, y: 0, width: 1440, height: 420 } })
+  } else skip('since last time on the Take notes card', 'the calendar is macOS Calendar')
 
   // While a meeting records: the Assist tab, Suggest now, ✓ into your notes; and a file you got for it
   // (on a Mac, once you ask to look: macOS asks first).
@@ -339,23 +413,23 @@ process.stdout.write('@@EV@@Pricing review (Work)\\u00a6' + d.getFullYear() + '-
   const I = await api('/meetings', { title: 'Interview - Mara Lind', call: false })
   said(I.id, [['them', 2, 'I moved our fleet to electric vans last year.']])
   await openMeeting('Interview - Mara Lind')
-  await p.locator('.seg button[data-view="assist"]').click()
-  await p.locator('.mt-assist-on input').click() // on once the server says so
+  await p.locator('.seg button[data-view="assist"]').click({ timeout: 5000 }).catch(() => {})
+  await p.locator('.mt-assist-on input').click({ timeout: 5000 }).catch(() => {}) // on once the server says so
   ok(!!(await until(async () => (await api(`/meetings/${I.id}`)).assist === true && await p.locator('.mt-assist-on input').isChecked(), 5000)), 'the Assist tab turns AI Assist on')
-  await p.locator('.mt-assist button', { hasText: 'Suggest now' }).click()
+  await p.locator('.mt-assist button', { hasText: 'Suggest now' }).click({ timeout: 5000 }).catch(() => {})
   const tip = p.locator('.mt-assist .mt-tip.question').first()
-  ok(!!(await until(async () => (await p.locator('.mt-assist .mt-tip').count()) >= 2, 10000)) && /Ask what they hope/.test(await tip.innerText()) && /The invite/.test(await tip.innerText()), 'Suggest now: suggestions, each saying what to do and what it\'s from', { page: await p.locator('.mt-assist').innerText().catch(() => ''), server: await api(`/meetings/${I.id}`).then((x) => ({ items: x.assistItems, error: x.assistError, assist: x.assist, status: x.status })) })
-  await tip.locator('button[aria-label="Add to my notes"]').click()
-  ok(!!(await until(async () => /In your notes/.test(await tip.innerText()), 5000)) && /Ask/.test((await api(`/meetings/${I.id}`)).notes || ''), '✓ puts it in your notes')
+  ok(!!(await until(async () => (await p.locator('.mt-assist .mt-tip').count()) >= 2, 10000)) && /Ask what they hope/.test(await tip.innerText({ timeout: 1000 }).catch(() => '')) && /The invite/.test(await tip.innerText({ timeout: 1000 }).catch(() => '')), 'Suggest now: suggestions, each saying what to do and what it\'s from', { page: await p.locator('.mt-assist').innerText().catch(() => ''), server: await api(`/meetings/${I.id}`).then((x) => ({ items: x.assistItems, error: x.assistError, assist: x.assist, status: x.status })) })
+  await tip.locator('button[aria-label="Add to my notes"]').click({ timeout: 5000 }).catch(() => {})
+  ok(!!(await until(async () => /In your notes/.test(await tip.innerText({ timeout: 1000 }).catch(() => '')), 5000)) && /Ask/.test((await api(`/meetings/${I.id}`)).notes || ''), '✓ puts it in your notes')
   const resume = p.locator('.mt-assist .mt-recent-file', { hasText: 'Mara_Lind_Resume.pdf' })
   if (IS_MAC) {
     const look = p.locator('.mt-assist .mt-recent-look button')
     ok(!!(await until(() => look.isVisible(), 6000)) && await resume.count() === 0, 'on a Mac, Downloads isn\'t looked in by itself: a button to look', await p.locator('.mt-assist').innerText().catch(() => ''))
-    await look.click()
+    await look.click({ timeout: 5000 }).catch(() => {})
   }
   ok(!!(await until(() => resume.isVisible(), 8000)), 'the resume in Downloads is offered', await p.locator('.mt-assist').innerText().catch(() => ''))
   await shot(p, `${tag}meeting-assist`)
-  await resume.locator('button', { hasText: 'Add' }).click()
+  await resume.locator('button', { hasText: 'Add' }).click({ timeout: 5000 }).catch(() => {})
   ok(!!(await until(async () => ((await api(`/meetings/${I.id}`)).links || []).some((l) => /Mara_Lind_Resume\.pdf$/.test(l.path || '')), 5000)), 'Add links it to the meeting')
   await api(`/meetings/${I.id}/assist`, { on: false })
   await api(`/meetings/${I.id}/stop`, {})
@@ -386,6 +460,23 @@ process.stdout.write('@@EV@@Pricing review (Work)\\u00a6' + d.getFullYear() + '-
     await ph.ctx.close()
   }
   await api(`/meetings/${N.id}/stop`, {})
+
+  // ---------- On a phone: the action items and Start an agent fit ----------
+  const ph = await page(b, kit.url, { phone: true })
+  await ph.p.waitForSelector('.tabbar button', { timeout: 15000 })
+  await ph.p.locator('.tabbar button', { hasText: 'Meetings' }).click({ timeout: 5000 }).catch(() => {})
+  await ph.p.locator('.m-meetings .mt-row-open', { hasText: 'Weekly payments sync' }).filter({ hasNotText: 'Nov 7' }).first().click({ timeout: 5000 }).catch(() => {})
+  const phItem = ph.p.locator('.mt-items .mt-item').nth(2)
+  await until(() => phItem.isVisible(), 8000)
+  await ph.p.locator('.mt-items .mt-item').nth(2).locator('.mt-item-tick').uncheck({ timeout: 5000 }).catch(() => {})
+  await until(async () => (await phItem.locator('button', { hasText: 'Start an agent' }).count()) === 1, 8000)
+  await phItem.locator('button', { hasText: 'Start an agent' }).click({ timeout: 5000 }).catch(() => {})
+  await until(() => phItem.locator('.mt-start select').first().isVisible(), 8000)
+  const fit = await ph.p.evaluate(() => { const r = document.querySelector('.mt-start')?.getBoundingClientRect(); return { right: r ? r.right : 999, wider: document.documentElement.scrollWidth - window.innerWidth } })
+  ok(fit.right <= 390 && fit.wider <= 1, 'on a phone, the items and Start an agent fit the screen', fit)
+  await shot(ph.p, `${tag}phone-start-agent`)
+  ok(ph.errors.length === 0, 'phone: no page errors', ph.errors)
+  await ph.ctx.close()
 
   // ---------- Dark ----------
   const d = await page(b, kit.url, { mode: 'dark', theme: 'midnight', store: { 'cc-rail-meetings': true, 'cc-rail-meeting-folders': { Planning: true } } })

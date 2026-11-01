@@ -606,6 +606,18 @@ export function createDemo({ everything = true } = {}) {
     S.meetings = S.meetings.filter((m) => !ids.includes(m.id))
     return { action: 'delete', done: ids, failed: [] }
   })
+  // A meeting's action items, none handed on yet: starting an agent or ticking one needs a computer.
+  on('GET', '/meetings/since', () => ({ last: null }))
+  on('GET', '/meetings/:id/since', () => ({ last: null }))
+  on('GET', '/meetings/:id/work', ({ p }) => {
+    const m = S.meetings.find((x) => x.id === p.id) || fail('No such meeting', 404)
+    const part = String(m.summary || '').split(/\n(?=##\s)/).find((x) => /^\s*##\s*Action items/i.test(x)) || ''
+    const items = [...part.matchAll(/^\s*[-*]\s*\[([ xX])\]\s*(.+)$/gm)].map((x, n) => ({ key: `demo${n}`, text: x[2].trim(), who: null, yours: /^you:/i.test(x[2].trim()), ticked: x[1] !== ' ', done: null, agent: null, chief: null, state: x[1] !== ' ' ? 'done' : 'open' }))
+    return { items, counts: { all: items.length, done: items.filter((x) => x.ticked).length, needs: 0, working: 0, review: 0, open: items.filter((x) => !x.ticked).length, prs: 0, agents: 0, chief: 0 } }
+  })
+  on('GET', '/meetings/:id/work/:key', () => needs('Starting an agent from a meeting'))
+  on('POST', '/meetings/:id/work/:key/agent', () => needs('Starting an agent from a meeting'))
+  on('POST', '/meetings/:id/work/:key/done', () => needs('Ticking an action item'))
   on('GET', '/meetings/:id', ({ p }) => S.meetings.find((m) => m.id === p.id) || fail('No such meeting', 404))
   on('POST', '/meetings', () => needs('Recording a meeting'))
   on('PUT', '/meetings/:id/notes', () => ok)

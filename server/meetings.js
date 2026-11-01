@@ -820,7 +820,7 @@ export function setSpeaker(id, key, name, { all = false } = {}) {
 // One person written two ways: "Priya Shah", "priya.shah", "shah.priya2", "priya.s" or "priya" (an
 // address, as a calendar lists someone without a name). "Priya Patel" is someone else.
 const nameParts = (s) => String(s).toLowerCase().replace(/\d+/g, '').split(/[\s.@_-]+/).filter(Boolean)
-const sameName = (a, b) => {
+export const sameName = (a, b) => {
   const x = nameParts(a), y = nameParts(b)
   if (!x.length || !y.length) return false
   if ([...x].sort().join(' ') === [...y].sort().join(' ')) return true
@@ -1823,6 +1823,16 @@ export function actions(id) {
 }
 // The action items handed to the Chief of Staff (n of them), for the page to say so.
 export const toChief = (id, n) => patchMeta(id, { chief: { at: new Date().toISOString(), n } })
+// What became of each action item (meetwork.js), by its key: the item as it read, the agent started
+// on it, its task on Chief of Staff's list, and whether you ticked it. A field set to null goes.
+export function setWork(id, key, patch) {
+  const m = meta(id)
+  const k = String(key || '')
+  if (!/^[\w-]{4,40}$/.test(k)) throw new Error('No such action item')
+  const was = { ...(m.work?.[k] || {}) }
+  for (const [f, v] of Object.entries(patch || {})) { if (v == null) delete was[f]; else was[f] = v }
+  return saveMeta({ ...m, work: { ...(m.work || {}), [k]: was } }).work[k]
+}
 
 // As notes in your notes folder, laid out the way Granola's sync and its Obsidian plugin do it (and
 // so a vault with Granola or Meetily notes gets these beside them). Settings › Meetings › Save
