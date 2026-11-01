@@ -452,7 +452,7 @@ process.exit(1)`)
   const [fixIt = {}, docIt = {}, copyIt = {}] = w.items || []
   const prep = await tryApi(`/meetings/${PS.id}/work/${fixIt.key}`)
   ok(prep.projects?.[0]?.path === repo && prep.projects?.[0].why.includes('item') && prep.projects?.[0].why.some((x) => /^said/.test(x)), 'the project it names comes first, saying why (named in the item, said in the meeting)', prep.projects)
-  ok(String(prep.prompt).includes('"Weekly payments sync"') && String(prep.prompt).includes('with Priya Shah, Mia Chen, Ola Berg') && String(prep.prompt).includes('> You: fix the retry on the Stripe webhook in payments-api') && /\[0:02\] Them: The Stripe webhook/.test(prep.prompt) && /\[0:06\] Tester: I can fix the retry/.test(prep.prompt) && /What the meeting decided:\n- Retry with a backoff/.test(prep.prompt), 'what it would be told: the meeting, the item, what was said about it and what was decided', prep.prompt)
+  ok(String(prep.prompt).includes('“Weekly payments sync”') && String(prep.prompt).includes('with Priya Shah, Mia Chen, Ola Berg') && String(prep.prompt).includes('> You: fix the retry on the Stripe webhook in payments-api') && /\[0:02\] Them: The Stripe webhook/.test(prep.prompt) && /\[0:06\] Tester: I can fix the retry/.test(prep.prompt) && /What the meeting decided:\n- Retry with a backoff/.test(prep.prompt), 'what it would be told: the meeting, the item, what was said about it and what was decided', prep.prompt)
   ok(prep.label === 'Fix the retry on the Stripe webhook', 'a short name from its first words', prep.label)
   const webPrep = await tryApi(`/meetings/${PS.id}/work/${copyIt.key}`)
   ok(webPrep.projects?.[0]?.path === site, 'another item: the project it names', webPrep.projects)

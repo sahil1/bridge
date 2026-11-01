@@ -140,13 +140,21 @@ export function brief(m, item, { lines = [], summary = '' } = {}) {
   const ex = excerpt(lines, item, me)
   const decided = sectionOf(summary, /^\s*##\s*Decisions/i).slice(0, 1500)
   return [
-    `This comes from my meeting "${m.title}" on ${when}${people.length ? ` with ${people.slice(0, 8).join(', ')}` : ''}. One of its action items is for you:`,
+    `This comes from my meeting “${m.title}” on ${when}${people.length ? ` with ${people.slice(0, 8).join(', ')}` : ''}. One of its action items is for you:`,
     `> ${plain(item.text)}`,
     ex && `What was said about it (from the transcript; speech to text can mishear names):\n${ex}`,
     decided && `What the meeting decided:\n${decided}`,
     m.saved && `The meeting's notes, if you need more: ${m.saved}`,
     'Work on it here. If what\'s wanted isn\'t clear enough to start, ask me first. When you\'re done, say what you changed.',
   ].filter(Boolean).join('\n\n')
+}
+// The first message goes on the agent's command line. On Windows that passes through cmd for an
+// agent npm installed (claude.cmd), which ends it at a line break and at a straight double quote,
+// so there it goes as one line, its quotes curly.
+export function forCommandLine(text, win = process.platform === 'win32') {
+  if (!win) return text
+  let open = true
+  return text.replace(/"/g, () => ((open = !open) ? '”' : '“')).replace(/\s*\n+\s*/g, ' · ').replace(/%/g, ' percent')
 }
 // A short name for the agent's tab and branch: the item's first words, without who it's for.
 export const labelOf = (item) => {
@@ -184,7 +192,7 @@ export async function start(id, key, { cwd, kind, own = true, prompt, label } = 
   const space = String(m.title || 'Meeting').slice(0, 60)
   const ws = (fleet?.workspaces || []).find((w) => w.label === space)
   const name = String(label || prep.label).trim().slice(0, 60) || prep.label
-  const text = String(prompt || '').trim() || prep.prompt
+  const text = forCommandLine(String(prompt || '').trim() || prep.prompt)
   const out = await helpers.launch({ kind, cwd, label: name, prompt: text, ownBranch: own !== false, ...(ws ? { workspaceId: ws.id } : { newSpace: space }) })
   const project = (await helpers.projects().catch(() => [])).find((p) => p.path === path.resolve(String(cwd).replace(/^~(?=$|\/)/, process.env.HOME || ''))) || null
   const agent = {
