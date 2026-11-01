@@ -31,6 +31,8 @@ for (const [k, v] of Object.entries(was)) { if (v === undefined) delete process.
   const perm = ny.itemOf(agent({}), { q: yesNo })
   ok(perm?.type === 'permission' && perm.text === 'Do you want to proceed?' && perm.about === 'npm run deploy' && perm.answers.map((a) => a.title).join() === 'Yes,No' && perm.qid === 'q1', 'a permission prompt: what it asks, what it would run, and Yes and No', perm)
   ok(perm.agent.project === 'billing-api' && perm.agent.title === 'Fix rounding' && perm.id === `${perm.paneId}@3`, 'with its agent and project, as one wait of that agent', perm.agent)
+  const win = ny.itemOf(agent({ title: 'Administrator: C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', tab: 'Fix rounding' }), { q: yesNo })
+  ok(win.agent.title === 'Fix rounding' && ny.itemOf(agent({ tab: '2' }), { q: yesNo }).agent.title === 'Fix rounding', "called by its tab's name, as the sidebar does (on Windows the terminal's title is the shell's), else its title", win.agent.title)
   const tree = ny.itemOf(agent({ cwd: '/data/worktrees/x1', worktree: { repo: '/home/me/code/shop', branch: 'fix/cart' } }), { q: yesNo })
   ok(tree.agent.project === 'shop' && tree.agent.branch === 'fix/cart', 'an agent on its own branch: the repo it belongs to, and its branch', tree.agent)
   const pick = ny.itemOf(agent({}), { q: { text: 'Which database should I use?', id: 'q2', simple: null } })

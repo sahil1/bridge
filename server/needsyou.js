@@ -23,8 +23,10 @@ const LIMIT = /\b(hit your (session|weekly|usage|5-hour) limit|usage limit reach
 const base = (p) => String(p || '').split(/[\\/]/).filter(Boolean).pop() || ''
 const clip = (s, n) => { const t = String(s || '').replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t }
 
-// What the inbox calls an agent, and the project it works on.
-export const nameOf = (a) => (a.chief ? (a.thread && !a.thread.main ? `Chief of Staff · ${a.thread.name}` : 'Chief of Staff') : a.title || a.tab || a.kindLabel || 'Agent')
+// What the inbox calls an agent: its tab's name, as the sidebar does (on Windows its terminal's
+// title can be the shell's, the same for every agent), else its title; and the project it works on.
+export const nameOf = (a) => (a.chief ? (a.thread && !a.thread.main ? `Chief of Staff · ${a.thread.name}` : 'Chief of Staff')
+  : (a.tab && !/^\d+$/.test(a.tab) ? a.tab : null) || a.title || a.kindLabel || 'Agent')
 export function projectOf(a) {
   if (a.cloud) return a.cloud.repo ? base(a.cloud.repo) : null
   if (a.chief || a.plainChat) return null
