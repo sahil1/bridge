@@ -2,6 +2,37 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
+## 3.8.0
+
+One inbox for everything waiting on you, a map of what's running on each of your computers, meetings that turn into work, dictation you can keep, edit and talk back to, whiteboards that draw what you describe, and another computer's videos playing here.
+
+### What's new
+
+- **Needs you, in one place.** Everything waiting on you across this computer, your other computers and Cloud Agents: questions and permission prompts (Yes, No, or the agent's own answers), failed runs and finished work to review, answered right there. The top bar's needs-you chip, ⌘K and the phone notification open it.
+- **Agent Map: what's running where.** Each of your computers (and Cloud Agents) with its agents grouped by project: working, waiting or done, for how long, what it's doing, its model and account, and which Chief of Staff thread handed it the work. Offline computers show what they last said. One click opens any agent, wherever it runs. From the devices menu, the sidebar, the Agents board, ⌘K, and the phone's Agents tab.
+- **Meetings turn into work.** Each action item can **Start an agent** in the project it's about (picked for you, with why), told what was said, or go **To Chief of Staff**; under it you see what came of it: the agent working, its pull request, or the Chief's task. A meeting in a series shows what happened since the last one.
+- **Who said what in a room.** When several people share one mic, their lines are told apart by voice on your computer (Speaker 1, 2…) and you name each voice once. Remembering voices for next time is off unless you turn it on, and stays on this computer. The voice model (26 MB) downloads the first time you use it.
+- **Your dictations, kept.** Every dictation is listed under **Dictations** in the sidebar, by day, with the app it went into: search them, copy, paste again, or send one to an agent. Settings › Voice › Dictation History says how long they're kept, or turns it off.
+- **A calm recording pill.** While dictation listens, a small pill shows the level, the time and where the words go, then "Pasted into Slack" and it's gone. From other apps it sits at the top of the screen.
+- **The words as you talk.** While you dictate or a meeting records, the words appear as they're said; the final text is still the whole recording, at full accuracy. A computer too slow for it turns it off by itself.
+- **Edit by voice** (Mac). Select text in any app, hold the key and say what to change ("make this shorter"): the model you pick rewrites it in place.
+- **Ask Chief of Staff out loud.** Hold **Ask out loud** above its message box and hear a short answer, read in your device's own voice.
+- **Fn or the right ⌥ on its own** as the dictation key (Right Alt on Windows and on Linux with X11).
+- **Whiteboards.** Draw by hand, or describe a flowchart, an architecture or a sequence (or draw it from a meeting, a project or an agent's chat) and get shapes you can move and edit; **Change it** edits them by description. Diagram files your agents write (Mermaid, `.excalidraw`, `.drawio`) open as boards, and Chief of Staff can make them too.
+- **Another computer's videos, here.** A video or a sound on another of your computers plays in the file viewer as it arrives, seeking included, from a computer or your phone; PDFs and pictures show, anything else downloads (Save to Files on the iPhone). A big file no longer holds up everything else on the link.
+- **Permissions that just work.** Bridge AI asks macOS's own question first, notices by itself when you've allowed something, and carries on what you were doing. A permission left over from an old version gets **Reset and ask again**. Settings › General › Permissions lists them all.
+- **Report a crash on GitHub.** After a crash, read the whole report (with nothing personal in it), change what you like, and open it as a GitHub issue. Bridge AI sends nothing by itself.
+
+### Fixes
+
+- **Updates:** the update offer goes by the desktop app's own version, a failed update says why with Try again, and after a few days the chip says "Update to x".
+- **Windows:** agents are told apart by their tab's name in Needs you and the Agent Map (they all shared the shell's title before).
+
+### After this update
+
+- **The Mac app needs macOS 14 or later.** A Mac on macOS 13 stays on 3.7.1 and isn't offered a version it can't open.
+- **Dictation history is on.** Turn it off in Settings › Voice › Dictation History; recordings aren't kept unless you ask.
+
 ## 3.7.1
 
 Dictation's key works from other apps on GNOME now, and the desktop app is on Electron 45.
