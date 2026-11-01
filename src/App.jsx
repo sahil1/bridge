@@ -367,6 +367,7 @@ function App() {
   const wsRef = useRef(W)
   wsRef.current = W
   openAgentRef.current = openAgent
+  const openFilesRef = useRef(null)
   useEffect(() => {
     // "chief" (the home-screen shortcut) means whichever agent is the chief of staff.
     const on = (e) => {
@@ -382,7 +383,9 @@ function App() {
       }
       if (!id) return
       if (id === 'view:map') { openMapRef.current?.(); return }
-      // From a "needs you" notification: at its Chat, where the question card is.
+      // From a "needs you" notification: at its Chat, where the question card is. From a finished
+      // one about a video it made: its Files, at the video.
+      if (e.detail.view === 'files') return openFilesRef.current?.(id, e.detail.path || undefined)
       if (e.detail.view === 'chat') showChat(id)
       openAgentRef.current?.(id, { replace: e.detail.replace || null })
     }
@@ -511,6 +514,7 @@ function App() {
     openAgent(id)
     setTimeout(() => window.dispatchEvent(new CustomEvent('cc-set-view', { detail: { paneId: id, view: 'files', path: filePath } })), 60)
   }
+  openFilesRef.current = openFiles
   // A compare launch opens the second agent beside the first.
   const onLaunched = (out) => { setNewAgent(null); if (out?.paneId) setTimeout(() => { openAgent(out.paneId); if (out.alsoPaneId) openAgent(out.alsoPaneId, { toSide: true }) }, 1200) }
   // Started from Home: the agent takes Home's tab, as the thread takes the new-thread page in T3.

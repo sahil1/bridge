@@ -24,6 +24,7 @@ import { api, usePoll, BASE } from '../api.js'
 import PermissionFix, { InstallFix, protectedFolder } from './PermissionFix.jsx'
 import { OfficeView, Menu, menuItems, NameDialog, fileOp, onComputer } from './FileExtras.jsx'
 import { MediaView, PictureView, OtherFile, useSave, canSave, saveLabel } from './FileMedia.jsx'
+import { SendDialog, UploadSheet, TransferStrip, PlacesMenu, usePlaces, canCopyHere, copyHereLabel, canAddPlace, canDrag, dragData, dropOk, onDrop } from './Transfers.jsx'
 import { locale, t } from '../i18n/index.js'
 import { FileDrawing } from '../lazy.jsx'
 import { isDiagramFile, addMermaidButtons } from './whiteboard/links.js'
@@ -46,13 +47,21 @@ const FILE_ICON = { md: 'doc', json: 'braces', js: 'code', jsx: 'code', ts: 'cod
 const iconFor = (name) => FILE_ICON[name.split('.').pop().toLowerCase()] || 'file'
 
 // ---------- tree ----------
-function TreeNode({ pane, entry, depth, selected, onOpen, expanded, toggle, showHidden, ver, onMenu }) {
+function TreeNode({ pane, entry, depth, selected, onOpen, expanded, toggle, showHidden, ver, onMenu, onDropIn }) {
   const open = expanded.has(entry.path)
   const { data } = usePoll(entry.dir && open ? `/agents/${enc(pane)}/files?path=${enc(entry.path)}${showHidden ? '&hidden=1' : ''}&v=${ver}` : null, 15000)
+  // Dragged onto another device's Files, it's copied there; a folder takes what's dropped on it.
+  const [over, setOver] = useState(false)
+  const drops = entry.dir && onDropIn ? {
+    onDragOver: (e) => { if (dropOk(e)) { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'copy'; setOver(true) } },
+    onDragLeave: () => setOver(false),
+    onDrop: (e) => { e.preventDefault(); e.stopPropagation(); setOver(false); onDropIn(e, entry.path) },
+  } : {}
   return (
     <>
-      <button className={`tree-row ${selected === entry.path ? 'on' : ''}`} style={{ paddingLeft: 8 + depth * 14 }}
+      <button className={`tree-row ${selected === entry.path ? 'on' : ''} ${over ? 'drop-on' : ''}`} style={{ paddingLeft: 8 + depth * 14 }}
         onClick={() => (entry.dir ? toggle(entry.path) : onOpen(entry.path))} title={entry.path}
+        draggable={canDrag} onDragStart={canDrag ? (e) => dragData(e, entry, pane) : undefined} {...drops}
         onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onMenu(entry, e) }}>
         {entry.dir
           ? <Icon name="chevron" size={11} className={`tree-caret ${open ? 'rot90' : ''}`} />
@@ -61,7 +70,7 @@ function TreeNode({ pane, entry, depth, selected, onOpen, expanded, toggle, show
         <span className="tree-name">{entry.name}</span>
       </button>
       {entry.dir && open && (data?.entries || []).map((e) => (
-        <TreeNode key={e.path} pane={pane} entry={e} depth={depth + 1} selected={selected} onOpen={onOpen} expanded={expanded} toggle={toggle} showHidden={showHidden} ver={ver} onMenu={onMenu} />
+        <TreeNode key={e.path} pane={pane} entry={e} depth={depth + 1} selected={selected} onOpen={onOpen} expanded={expanded} toggle={toggle} showHidden={showHidden} ver={ver} onMenu={onMenu} onDropIn={onDropIn} />
       ))}
     </>
   )
@@ -194,7 +203,7 @@ function Editor({ value, onChange, onSave }) {
   return <textarea className="file-editor" value={value} onChange={(e) => onChange(e.target.value)} onKeyDown={onKey} spellCheck={false} autoFocus aria-label="File text" />
 }
 
-function Viewer({ pane, filePath, onOpenPath, onBack, onMenu, ver }) {
+function Viewer({ pane, filePath, onOpenPath, onBack, onMenu, ver, onCopyHere }) {
   const [state, setState] = useState({ loading: true })
   const [mode, setMode] = usePersisted('cc-md-mode', 'preview')
   const [copied, setCopied] = useState(false)
@@ -314,6 +323,7 @@ function Viewer({ pane, filePath, onOpenPath, onBack, onMenu, ver }) {
           {!dirty && <button className="win-btn" title="Reload" aria-label="Reload" onClick={() => { load(); setFrameKey((k) => k + 1) }}><Icon name="refresh" size={13} /></button>}
           {f && !['binary', 'video', 'audio'].includes(f.kind) && canSave && <SaveButton f={f} src={raw} />}
           {(f?.kind === 'image' || f?.kind === 'pdf' || f?.kind === 'video' || f?.kind === 'audio' || isHtml) && <a className="win-btn" href={isHtml ? site : raw} target="_blank" rel="noreferrer" title="Open in new tab" aria-label="Open in new tab"><Icon name="external" size={13} /></a>}
+          {f && onCopyHere && <button className="ghost-btn small copy-here" onClick={() => onCopyHere({ path: filePath, name: f.name, dir: false, size: f.size })} title={copyHereLabel()} aria-label={copyHereLabel()}><Icon name="download" size={12} /><span>{copyHereLabel()}</span></button>}
           {f?.kind === 'office' && onComputer && <button className="btn small" onClick={() => fileOp(pane, 'open', filePath).catch((e) => setSaveMsg({ text: e.message }))} title="Open it in the app that usually opens it"><Icon name="external" size={12} /> Open in app</button>}
           {onMenu && <button className="win-btn" title="More" aria-label="More actions for this file" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); onMenu({ path: filePath, name: crumbs.at(-1), dir: false }, { clientX: r.right - 200, clientY: r.bottom + 4 }) }}><Icon name="more" size={14} /></button>}
         </div>
@@ -373,7 +383,15 @@ function SaveButton({ f, src }) {
 
 // ---------- Files view ----------
 export function FilesView({ agent, openPath, onConsumed, onMention }) {
-  const pane = agent.paneId
+  // The agent's folder, or one of this computer's Places (a folder you picked): place:<id> works
+  // as a pane does, with that folder as its root.
+  const { places, refresh: refreshPlaces } = usePlaces()
+  const [placeId, setPlaceId] = useState(null)
+  const place = places.find((p) => p.id === placeId) || null
+  const pane = place ? `place:${place.id}` : agent.paneId
+  const cwd = place ? place.path : agent.cwd
+  useEffect(() => { setPlaceId(null) }, [agent.paneId])
+  const [placesAt, setPlacesAt] = useState(null)
   const [treeW, setTreeW] = usePersisted('cc-tree-w', 250)
   const [showHidden, setShowHidden] = usePersisted('cc-show-hidden', false)
   const [selected, setSelected] = useState(null)
@@ -381,7 +399,14 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
   const [quick, setQuick] = useState(false)
   const [ver, setVer] = useState(0)
   const root = usePoll(`/agents/${enc(pane)}/files?v=${ver}${showHidden ? '&hidden=1' : ''}`, 15000)
-  const rootName = agent.cwd.split(/[\\/]/).pop()
+  const rootName = cwd.split(/[\\/]/).pop()
+  // Send to… shows once another device is linked; Copy to this computer, on another device's files.
+  const linked = (usePoll('/machines', 30000).data?.machines || []).some((m) => m.state === 'linked')
+  const [send, setSend] = useState(null) // { src, here }
+  const [picked, setPicked] = useState(null) // files picked on this device, to send
+  const [dropAt, setDropAt] = useState(false)
+  const pickRef = useRef(null)
+  const pickFor = useRef('')
   const [menu, setMenu] = useState(null) // { x, y, entry }
   const [dialog, setDialog] = useState(null)
   const [toast, setToast] = useState(null)
@@ -409,13 +434,13 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
   useEffect(() => { setSelected(null); setExpanded(new Set()) }, [pane])
 
   // The menu's actions. Paths are relative to the agent's folder ('' is the folder itself).
-  const sep = agent.cwd.includes('\\') && !agent.cwd.includes('/') ? '\\' : '/'
+  const sep = cwd.includes('\\') && !cwd.includes('/') ? '\\' : '/'
   const act = async (op, e) => {
     const refresh = () => setVer((v) => v + 1)
     const moved = (from, to) => setSelected((s) => (s === from ? to : s?.startsWith(`${from}/`) ? (to ? to + s.slice(from.length) : null) : s))
     try {
       if (op === 'copyPath' || op === 'copyRel') {
-        const text = op === 'copyRel' ? e.path : e.path ? `${agent.cwd}${sep}${e.path.split('/').join(sep)}` : agent.cwd
+        const text = op === 'copyRel' ? e.path : e.path ? `${cwd}${sep}${e.path.split('/').join(sep)}` : cwd
         await navigator.clipboard.writeText(text)
         return say('Path copied')
       }
@@ -436,6 +461,8 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
         moved(e.path, null); refresh()
         return say(`${e.name} moved to the Trash`)
       }
+      if (op === 'send' || op === 'copyHere') return setSend({ src: { pane, path: e.path, name: e.path ? e.name : rootName, dir: !!e.dir, size: e.size ?? null }, here: op === 'copyHere' })
+      if (op === 'upload') { pickFor.current = e.path; pickRef.current?.click(); return }
       if (op === 'duplicate') {
         const r = await fileOp(pane, 'duplicate', e.path)
         refresh()
@@ -444,6 +471,15 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
       }
       await fileOp(pane, op, e.path) // reveal, open
     } catch (x) { if (x.code === 'automation') setAutomation(true); else say(x.message) }
+  }
+  // Dropped on Files: from another device's Files (copied here), or files from the desktop (sent).
+  const onDropIn = useCallback((e, dir) => {
+    onDrop(e, { pane, dir, device: null }).then((r) => { if (r) say(t('Copying it here. It shows below as it goes.')) }).catch((x) => say(x.message))
+  }, [pane]) // eslint-disable-line react-hooks/exhaustive-deps
+  const rootDrops = {
+    onDragOver: (e) => { if (dropOk(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; setDropAt(true) } },
+    onDragLeave: (e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDropAt(false) },
+    onDrop: (e) => { e.preventDefault(); setDropAt(false); onDropIn(e, '') },
   }
   // A path ending in / is a folder: shown open in the tree.
   useEffect(() => { if (openPath) { open(openPath.replace(/\/$/, ''), openPath.endsWith('/')); onConsumed?.() } }, [openPath]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -457,36 +493,46 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
     <div className={`files-view ${narrow ? 'narrow' : ''}`} ref={boxRef}>
       <aside className="tree" style={narrow ? undefined : { width: treeW }} hidden={narrow && !!selected}>
         <div className="tree-head">
-          <span className="tree-root" title={agent.cwd}><Icon name="folder" size={13} /> {rootName}</span>
+          {places.length > 0 || canAddPlace
+            ? <button className="tree-root tree-root-pick" title={cwd} aria-haspopup="menu" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setPlacesAt({ x: r.left, y: r.bottom + 4 }) }}><Icon name={place ? 'pin' : 'folder'} size={13} /> <span>{rootName}</span><Icon name="chevron" size={10} className="rot90" /></button>
+            : <span className="tree-root" title={cwd}><Icon name="folder" size={13} /> {rootName}</span>}
           <button className="win-btn" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); onMenu({ path: '', name: rootName, dir: true }, { clientX: r.left, clientY: r.bottom + 4 }) }} title="New file or folder" aria-label="New file or folder"><Icon name="plus" size={13} /></button>
+          <button className="win-btn" onClick={() => { pickFor.current = ''; pickRef.current?.click() }} title={t('Send files from this device')} aria-label={t('Send files from this device')}><Icon name="upload" size={13} /></button>
+          <input ref={pickRef} type="file" multiple hidden onChange={(e) => { const l = [...(e.target.files || [])]; e.target.value = ''; if (l.length) setPicked({ list: l, dir: pickFor.current }) }} data-testid="send-files" />
           <button className="win-btn" onClick={() => setQuick(true)} title="Go to file (⌘P)" aria-label="Go to file"><Icon name="search" size={13} /></button>
           <button className={`win-btn ${showHidden ? 'on' : ''}`} onClick={() => setShowHidden(!showHidden)} title={showHidden ? 'Hide dotfiles' : 'Show dotfiles'} aria-label="Toggle hidden files"><Icon name={showHidden ? 'eye' : 'eye-off'} size={13} /></button>
           <button className="win-btn" onClick={() => setExpanded(new Set())} title="Collapse all" aria-label="Collapse all"><Icon name="shrink" size={13} /></button>
         </div>
-        <div className="tree-scroll" onContextMenu={(e) => { e.preventDefault(); onMenu({ path: '', name: rootName, dir: true }, e) }}>
-          {root.error && root.errorCode === 'EPERM' && protectedFolder(agent.cwd)
-            ? <div className="pad"><PermissionFix pane="files" folder={protectedFolder(agent.cwd)} onCheck={() => root.refresh()}><p>This project is in your {protectedFolder(agent.cwd)} folder, and macOS hasn't let Bridge AI in yet.</p></PermissionFix></div>
+        <div className={`tree-scroll ${dropAt ? 'drop-on' : ''}`} onContextMenu={(e) => { e.preventDefault(); onMenu({ path: '', name: rootName, dir: true }, e) }} {...rootDrops}>
+          {root.error && root.errorCode === 'EPERM' && protectedFolder(cwd)
+            ? <div className="pad"><PermissionFix pane="files" folder={protectedFolder(cwd)} onCheck={() => root.refresh()}><p>This project is in your {protectedFolder(cwd)} folder, and macOS hasn't let Bridge AI in yet.</p></PermissionFix></div>
             : root.error && <p className="error-text pad">{root.error}</p>}
           {(root.data?.entries || []).map((e) => (
-            <TreeNode key={e.path} pane={pane} entry={e} depth={0} selected={selected} onOpen={open} expanded={expanded} toggle={toggle} showHidden={showHidden} ver={ver} onMenu={onMenu} />
+            <TreeNode key={e.path} pane={pane} entry={e} depth={0} selected={selected} onOpen={open} expanded={expanded} toggle={toggle} showHidden={showHidden} ver={ver} onMenu={onMenu} onDropIn={onDropIn} />
           ))}
         </div>
+        <TransferStrip />
         {toast && <div className="tree-toast" role="status">{toast}</div>}
         {automation && <div className="pad"><PermissionFix pane="automation" onCheck={() => setAutomation(false)}><p>Moving to the Trash goes through Finder on this Mac, and macOS asks you to allow that once.</p></PermissionFix></div>}
       </aside>
       {!narrow && <Handle axis="x" size={treeW} min={160} max={520} onSize={setTreeW} label="Resize file tree" />}
       <section className="viewer-wrap" hidden={narrow && !selected}>
         {selected
-          ? <Viewer key={selected} pane={pane} filePath={selected} onOpenPath={open} onBack={narrow ? () => setSelected(null) : undefined} onMenu={onMenu} ver={ver} />
+          ? <Viewer key={`${pane}\n${selected}`} pane={pane} filePath={selected} onOpenPath={open} onBack={narrow ? () => setSelected(null) : undefined} onMenu={onMenu} ver={ver}
+              onCopyHere={canCopyHere ? (src) => setSend({ src: { pane, ...src }, here: true }) : null} />
           : (
             <div className="viewer-empty">
               <Icon name="folder-open" size={26} />
               <p>Pick a file, or press <kbd>⌘</kbd> <kbd>P</kbd> to jump to one.</p>
-              <p className="muted small mono">{agent.cwd.replace(/^\/Users\/[^/]+/, '~')}</p>
+              <p className="muted small mono">{cwd.replace(/^\/Users\/[^/]+/, '~')}</p>
             </div>
           )}
       </section>
-      {menu && <Menu x={menu.x} y={menu.y} items={menuItems(menu.entry, act, { onMention })} onClose={closeMenu} />}
+      {menu && <Menu x={menu.x} y={menu.y} items={menuItems(menu.entry, act, { onMention: place ? null : onMention, send: linked, copyHere: canCopyHere ? copyHereLabel() : null })} onClose={closeMenu} />}
+      {placesAt && <PlacesMenu x={placesAt.x} y={placesAt.y} agentName={agent.cwd.split(/[\\/]/).pop()} agentPath={agent.cwd.replace(/^\/Users\/[^/]+/, '~')} current={placeId} places={places}
+        onPick={setPlaceId} onAdded={(p, gone) => { refreshPlaces(); if (p) setPlaceId(p.id); if (gone && gone.id === placeId) setPlaceId(null) }} onClose={() => setPlacesAt(null)} />}
+      {send && <SendDialog src={send.src} here={send.here} onClose={() => setSend(null)} />}
+      {picked && <UploadSheet list={picked.list} folder={{ v: place ? `place:${place.id}` : `pane:${agent.paneId}`, dir: picked.dir, label: rootName }} onClose={() => setPicked(null)} />}
       {dialog && <NameDialog title={dialog.title} initial={dialog.initial} action={dialog.action} onSubmit={dialog.submit} onClose={() => setDialog(null)} />}
       {quick && <div className="qo-backdrop" onClick={(e) => { if (e.target === e.currentTarget) setQuick(false) }}><QuickOpen pane={pane} onPick={open} onClose={() => setQuick(false)} /></div>}
     </div>

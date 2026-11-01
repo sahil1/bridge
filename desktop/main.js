@@ -270,11 +270,14 @@ ipcMain.handle('bridge:open-machine', (e, { id = null, agent = null } = {}) => {
   w.on('closed', () => { if (machineWins.get(key) === w) machineWins.delete(key) })
   return true
 })
-// A folder for a new agent, picked in Finder rather than typed. Its path, or null if you cancel.
-ipcMain.handle('bridge:pick-folder', async (e, start) => {
+// A folder for a new agent, or one to add to Files' Places, picked in Finder rather than typed: on
+// a Mac, picking it there is what lets Bridge AI into it, so macOS usually asks nothing more. Its
+// path, or null if you cancel.
+ipcMain.handle('bridge:pick-folder', async (e, start, o) => {
   if (!fromApp(e)) return null
   const owner = BrowserWindow.fromWebContents(e.sender) || win
-  const r = await dialog.showOpenDialog(owner, { title: 'Choose a folder for the agent', buttonLabel: 'Choose', properties: ['openDirectory', 'createDirectory'], ...(typeof start === 'string' && start.length < 4096 ? { defaultPath: start } : {}) })
+  const place = !!o?.place
+  const r = await dialog.showOpenDialog(owner, { title: place ? 'Add a place to Files' : 'Choose a folder for the agent', buttonLabel: place ? 'Add' : 'Choose', properties: ['openDirectory', ...(place ? [] : ['createDirectory'])], ...(typeof start === 'string' && start.length < 4096 ? { defaultPath: start } : {}) })
   return r.canceled ? null : r.filePaths[0] || null
 })
 // Files to link to a meeting, where they are (meetings read them when they write the notes).

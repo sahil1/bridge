@@ -1,0 +1,47 @@
+/* Copies between your devices and from your phone, in Files (Transfers.jsx). */
+/* The root of the tree: the agent's folder or a place, picked from a short menu. */
+.tree-root-pick { padding: 3px 6px 3px 4px; margin-left: -4px; border-radius: 6px; color: var(--ink); }
+.tree-root-pick:hover { background: var(--pane-3); }
+.tree-root-pick > span { overflow: hidden; text-overflow: ellipsis; }
+.tree-root-pick .rot90 { color: var(--ink-3); flex: none; }
+.places-menu { width: 260px; max-width: calc(100vw - 16px); }
+.places-menu button span { display: grid; min-width: 0; }
+.places-menu button small { font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+.places-menu button:hover small, .places-menu button:focus-visible small { color: inherit; opacity: .8; }
+.places-head { padding: 6px 10px 2px; font-size: 10.5px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-3); }
+.places-item { display: flex; align-items: center; min-width: 0; }
+.places-item > button:first-child { flex: 1; min-width: 0; }
+.places-menu .places-item .places-x { flex: none; width: 26px; height: 26px; padding: 0; justify-content: center; }
+.places-typed { display: flex; gap: 6px; padding: 6px; flex-wrap: wrap; }
+.places-typed .input { flex: 1; min-width: 0; height: 30px; }
+.places-err { margin: 4px 10px 6px; white-space: normal; }
+
+/* Something dragged over Files, from another device or the desktop. */
+.tree-row.drop-on, .tree-scroll.drop-on { background: var(--accent-soft); box-shadow: inset 0 0 0 1.5px var(--accent); border-radius: 6px; }
+
+/* At the foot of the tree: each copy, how far it's got and where it landed. */
+.xfer-strip { flex: none; max-height: 42%; overflow-y: auto; border-top: 1px solid var(--line); padding: 4px 8px 6px; background: var(--pane-2); }
+.xfer-strip ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.xfer-row { display: flex; align-items: flex-start; gap: 8px; padding: 6px 4px; min-width: 0; font-size: 12.5px; }
+.xfer-row > svg { flex: none; margin-top: 2px; color: var(--ink-3); }
+.xfer-row.s-done > svg { color: var(--good); }
+.xfer-row.s-failed > svg { color: var(--critical); }
+.xfer-main { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.xfer-name { font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.xfer-sub { color: var(--ink-3); overflow-wrap: anywhere; }
+.xfer-row.s-failed .xfer-sub { color: var(--critical); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.xfer-bar { height: 4px; margin-top: 2px; }
+.xfer-acts { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.xfer-acts .win-btn { width: 22px; height: 22px; }
+.xfer-clear { display: block; margin: 0 0 0 auto; }
+
+/* Send to…, Copy to this computer, and files sent from this device. */
+.xfer-dialog .xfer-what { margin: -8px 0 0; overflow-wrap: anywhere; }
+.xfer-dialog .na-field .muted { line-height: 1.4; }
+.xfer-note { display: flex; gap: 7px; align-items: flex-start; margin: 0; padding: 8px 10px; border-radius: 9px; background: var(--pane-2); color: var(--ink-2); line-height: 1.45; }
+.xfer-note svg { flex: none; margin-top: 2px; }
+.xfer-move { display: flex; align-items: center; gap: 7px; color: var(--ink-2); }
+
+/* The viewer's Copy to this computer: its words when there's room, the icon on a phone. */
+.copy-here { white-space: nowrap; }
+.files-view.narrow .copy-here span { display: none; }

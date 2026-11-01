@@ -1,10 +1,13 @@
 // Folder facts for the UI: git branch and uncommitted count per working directory,
-// directory completion for the "new agent" folder picker, and installed agent CLIs.
+// directory completion for the "new agent" folder picker, installed agent CLIs, and the folders you
+// picked for Files (Places).
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
 import { gitReady } from './gitready.js'
+import { dataFile, ensureDir, writeFileAtomic } from './paths.js'
 
 const sh = (cmd, args, opts = {}) => new Promise((resolve) => {
   execFile(cmd, args, { timeout: 5000, maxBuffer: 4 * 1024 * 1024, windowsHide: true, ...opts }, (err, out) => resolve(err ? null : out))
@@ -63,4 +66,46 @@ export const resolveDir = async (p) => {
   if (st?.code === 'EPERM') throw Object.assign(new Error(`macOS hasn't let Bridge AI into ${p}`), { code: 'EPERM' })
   if (!st?.isDirectory?.()) throw new Error(`Folder not found: ${p}`)
   return full
+}
+
+// ---------- Places: folders you picked, in Files ----------
+// Folders outside any agent's that you added to Files, with the system's folder picker in the
+// desktop app (or, in a browser on this computer, from its folders as you type them). On a Mac,
+// picking a folder there is your say-so, so macOS usually asks nothing more. Nothing in your folders
+// is read until you add one, and then only that one, when you open it. Kept in
+// ~/.bridge-ai/places.json: each one's path and name, and nothing about what's in it.
+const PICKED = dataFile('places.json')
+let picked = null
+const loadPicked = () => (picked ||= (() => {
+  try { const d = JSON.parse(fs.readFileSync(PICKED, 'utf8')); return Array.isArray(d.places) ? d.places.filter((x) => x?.id && x.path) : [] } catch { return [] }
+})())
+const savePicked = () => { ensureDir(path.dirname(PICKED)); writeFileAtomic(PICKED, JSON.stringify({ places: picked }, null, 2), { mode: 0o600 }) }
+const tilde = (p) => (p === HOME || p.startsWith(HOME + path.sep) ? `~${p.slice(HOME.length)}` : p)
+const shown = (x) => ({ id: x.id, name: x.name, path: tilde(x.path), addedAt: x.addedAt })
+export const pickedPlaces = () => loadPicked().map(shown)
+export const placeOf = (id) => loadPicked().find((x) => x.id === id) || null
+// A folder you picked, or one inside it: Bridge AI may look there without macOS asking again.
+export const inPicked = (p) => { const r = path.resolve(p); return loadPicked().some((x) => r === x.path || r.startsWith(x.path + path.sep)) }
+
+// A folder you picked: its full path (as the picker gave it), looked at once to see it's a folder.
+export async function addPlace(p) {
+  const full = path.resolve(expand(String(p || '').trim()))
+  if (!String(p || '').trim() || full === path.parse(full).root) throw new Error('Pick a folder')
+  const st = await fs.promises.stat(full).catch((e) => e)
+  if (st?.code === 'EPERM' || st?.code === 'EACCES') throw Object.assign(new Error(`macOS hasn't let Bridge AI into ${tilde(full)}`), { code: 'EPERM' })
+  if (!st?.isDirectory?.()) throw new Error(`Folder not found: ${tilde(full)}`)
+  const list = loadPicked()
+  const had = list.find((x) => x.path === full)
+  if (had) return { place: shown(had), places: pickedPlaces() }
+  if (list.length >= 30) throw new Error('Files keeps 30 places at most. Take one out first.')
+  const place = { id: randomBytes(4).toString('hex'), path: full, name: path.basename(full) || full, addedAt: new Date().toISOString() }
+  picked = [...list, place]
+  savePicked()
+  return { place: shown(place), places: pickedPlaces() }
+}
+// Taken out of Files: forgotten here, the folder itself untouched.
+export function removePlace(id) {
+  picked = loadPicked().filter((x) => x.id !== id)
+  savePicked()
+  return { places: pickedPlaces() }
 }
