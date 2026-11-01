@@ -159,10 +159,12 @@ try {
   ok(/billing-api/i.test(deskText) && /docs/i.test(deskText) && /Working for/.test(deskText) && /Done/.test(deskText) && /Opus 5\.5/.test(deskText), "Desk's lane: its agents by project, each with its state and for how long, and its model", deskText)
   ok(/Look for rounding/.test(deskText), 'and the subagent at work under its agent')
   const chiefHand = view.locator('.am-lane', { hasText: 'Studio' }).locator('.am-handed')
-  ok(/Checkout copy/.test(await chiefHand.innerText().catch(() => '')), 'the Chief of Staff says who it handed work to', await view.locator('.am-lane', { hasText: 'Studio' }).innerText())
-  ok(/Chief of Staff/.test(await view.locator('.am-row', { hasText: 'Checkout copy' }).locator('.am-link').innerText().catch(() => '')), 'and that agent, who handed it its work')
+  // A busy machine (Windows in CI) fills the hand-offs in a moment after the lanes show.
+  ok(!!(await until(async () => /Checkout copy/.test(await chiefHand.innerText().catch(() => '')), 15000, 200)), 'the Chief of Staff says who it handed work to', await view.locator('.am-lane', { hasText: 'Studio' }).innerText())
+  ok(!!(await until(async () => /Chief of Staff/.test(await view.locator('.am-row', { hasText: 'Checkout copy' }).locator('.am-link').innerText().catch(() => '')), 15000, 200)), 'and that agent, who handed it its work')
   await shot(s.p, `${tag}agent-map-three`)
   // One click: Desk's agent, in a tab here.
+  await desk.locator('.am-row', { hasText: 'Fix rounding' }).locator('.am-main').waitFor({ timeout: 20000 })
   await desk.locator('.am-row', { hasText: 'Fix rounding' }).locator('.am-main').click()
   ok(!!(await until(async () => /Fix rounding/.test(await s.p.locator('.ws-tab.main').innerText().catch(() => '')) && /Desk/.test(await s.p.locator('.ws-tab.main').innerText().catch(() => '')), 15000)), "one click opens Desk's agent in a tab here", await s.p.locator('.ws-tabs').innerText().catch(() => ''))
   // The sidebar's devices and the agents board open it too, full size; its button puts the rest back.
