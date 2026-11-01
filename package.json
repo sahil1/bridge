@@ -17,6 +17,7 @@
     "mobile:ios:release": "node scripts/ios-release.js",
     "mobile:android": "open -a \"Android Studio\" mobile/android",
     "mobile:android:release": "cd mobile/android && JAVA_HOME=\"${JAVA_HOME:-/Applications/Android Studio.app/Contents/jbr/Contents/Home}\" ANDROID_HOME=\"${ANDROID_HOME:-$HOME/Library/Android/sdk}\" ./gradlew bundleRelease && echo \"Google Play bundle: mobile/android/app/build/outputs/bundle/release/app-release.aab\"",
+    "android:key": "bash scripts/android-key.sh",
     "icons:brands": "node scripts/brand-icons.js",
     "release": "node scripts/release.js",
     "calltap": "node scripts/calltap.js",

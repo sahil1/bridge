@@ -25,6 +25,8 @@ Only the latest release gets security fixes. Bridge AI tells you when a newer ve
   gh attestation verify Bridge-AI-mac-arm64.dmg --repo sahil1/bridge
   ```
 
+- The Android app (`Bridge-AI-android.apk`) is signed with the project's release key, the same for every version. Android installs an update over it only when it's signed with that key, so an APK from anyone else can't replace yours.
+
 - There is no telemetry unless you turn on usage counts (off unless you do; see [PRIVACY.md](PRIVACY.md#usage-counts-off-unless-you-turn-them-on)): weekly counts of which features you used, in ranges, with no ID and nothing you typed.
 - The outside requests Bridge AI makes itself are for what it shows you: the weather (Open-Meteo, with only the coordinates you picked), market prices and news headlines (Yahoo Finance, the Federal Reserve, and public news feeds), and a check on GitHub for a newer version (Settings › About & Updates turns it off). With usage counts turned on, one more: a weekly report to the project's server, the `endpoint` in `shared/telemetry-schema.json` (none is set yet, so it isn't offered). Your agents talk to their own providers with your own sign-ins.
 

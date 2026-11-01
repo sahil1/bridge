@@ -2,11 +2,11 @@ Bridge AI on your phone, for Bridge AI on your computer.
 
 Bridge AI runs Claude Code, Codex, Gemini CLI, Copilot, OpenCode and other coding agents on your computer and shows them in one place. This app puts that on your phone: see which agents are working, finished or waiting on you, read what they did, answer their questions and give them new work, from anywhere.
 
-You need Bridge AI running on your computer (free and open source, for macOS, Windows and Linux). The app doesn't do anything on its own.
+For your own agents you need Bridge AI running on your computer (free and open source, for macOS, Windows and Linux). With no computer, Try the demo shows the whole app on made-up agents, and Cloud agents runs agents on Cursor, GitHub Copilot, Jules or Claude with your own key from that provider.
 
 What it does
 
-- Pair with your computer by scanning the QR code from Settings › Phone & notifications, or by pasting the link from Copy link.
+- Pair with your computer by scanning the QR code from Settings › Devices › Pair a device, or by pasting the link from Copy link.
 - Your agents on the lock screen: while any are working or waiting on you, a notification lists them, along with the ones that finished meanwhile. An agent that starts waiting on you gets its own alert. Tap it to open that agent.
 - Several computers: pair each one and switch between them.
 - Dictate messages. The recording goes to your computer and is turned into text there.
@@ -17,7 +17,7 @@ Your phone reaches your computer through your own relay, a small Cloudflare Work
 
 Privacy
 
-No account, no ads, no analytics. Nothing is sent to the developer. The app keeps the list of computers you paired and their pairing keys on this phone, and nowhere else.
+No account, no ads, no analytics. Nothing is sent to the developer. The app keeps the list of computers you paired and their pairing keys on this phone, and nowhere else. A Cloud agents key stays on the phone, encrypted, and goes only to the provider it's for.
 
 Bridge AI is open source under the Apache 2.0 license: github.com/sahil1/bridge
 

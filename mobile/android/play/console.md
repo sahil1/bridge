@@ -7,7 +7,7 @@ The answers for each Play Console form, true to the code as of 2.3.0. The steps 
 
 - **App name**: Bridge AI
 - **Short description**: [short-description.txt](short-description.txt) (77 of 80 characters)
-- **Full description**: [full-description.txt](full-description.txt) (about 1,800 of 4,000)
+- **Full description**: [full-description.txt](full-description.txt) (about 2,300 of 4,000)
 - **App icon**: [icon-512.png](icon-512.png) (512 x 512, full square; Play rounds the corners)
 - **Feature graphic**: [feature-graphic.png](feature-graphic.png) (1024 x 500). Sources: `icon.svg`
   and `feature-graphic.svg`, made from `public/mark.svg`.
@@ -43,8 +43,8 @@ sign-in. Real use pairs with Bridge AI on the user's computer, by QR code. Instr
 >
 > In real use, Bridge AI is the phone app for Bridge AI, a free, open-source desktop app (macOS,
 > Windows, Linux) that runs AI coding agents on the user's own computer. The phone app pairs with
-> that computer by QR code: in Bridge AI on the computer, Settings > Phone & notifications > Pair a
-> phone. Then it shows the agents running there, and lists the ones at work on the lock screen.
+> that computer by QR code: in Bridge AI on the computer, Settings > Devices > Pair a device. Then
+> it shows the agents running there, and lists the ones at work on the lock screen.
 >
 > A video of pairing and the lock-screen notification: <link to an unlisted YouTube video>
 >

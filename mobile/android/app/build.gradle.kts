@@ -16,7 +16,8 @@ val appVersionCode = Regex("""^(\d+)\.(\d+)\.(\d+)""").find(appVersion)!!.destru
 
 // The upload key for Google Play stays out of the repo: its keystore and passwords come from
 // ~/.gradle/gradle.properties or environment variables of the same names (mobile/android/PLAY.md).
-// Without them, release builds are unsigned.
+// Without them, release builds are unsigned: that's how CI builds the APK on the website, then
+// signs it with the release key itself (.github/workflows/android.yml).
 val uploadNames = listOf("BRIDGE_UPLOAD_STORE_FILE", "BRIDGE_UPLOAD_STORE_PASSWORD", "BRIDGE_UPLOAD_KEY_ALIAS", "BRIDGE_UPLOAD_KEY_PASSWORD")
 val upload = uploadNames.associateWith { providers.gradleProperty(it).orElse(providers.environmentVariable(it)).orNull?.takeIf(String::isNotBlank) }
 val uploadMissing = upload.filterValues { it == null }.keys

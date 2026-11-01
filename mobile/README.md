@@ -136,7 +136,10 @@ so for 15 minutes, then goes. An agent that starts waiting on you also gets its 
   an emulator. From the command line, with Android Studio's Java:
   `cd mobile/android && JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" ./gradlew assembleDebug`.
   `npm run mobile:android:release` makes the signed bundle for Google Play; publishing it is in
-  [android/PLAY.md](android/PLAY.md).
+  [android/PLAY.md](android/PLAY.md). The APK anyone can download is made by CI (below). CI also
+  builds the debug APK and a release APK on every push and pull request
+  (`.github/workflows/android.yml`, from `test.yml`); the debug one is kept with the run for a week,
+  to try on a phone with `adb install`.
 
 The iPhone app keeps its pairing in the Keychain (iOS apps can't store the phone's key in
 IndexedDB the way Safari does), so it needs to be signed, even on the simulator. A debug build made
@@ -171,6 +174,40 @@ None of this is in release builds: on iPhone it's behind `#if DEBUG`; on Android
 Notifications from your computer aren't in the apps yet: they need Apple's and Google's push
 services. The relay's page added to the Home Screen has them today. Android's Cloud agents
 notifications are made on the phone.
+
+## The Android APK
+
+Each release has `Bridge-AI-android.apk`, the Android app for anyone to install without Google Play.
+The download page shows its button once the latest release has it (it asks GitHub), and the README
+links it. Installing a newer one over it updates it, keeping its pairings.
+
+- **Built** by `.github/workflows/android.yml`, which `release.yml` runs next to the desktop builds:
+  `assembleRelease` unsigned, then signed by apksigner in a step of its own (v2 and v3 signatures),
+  so the key never reaches Gradle or npm. Then it's checked (`apksigner verify --print-certs`:
+  signed by the release key and no other; `dev.bridgeai.phone` at the release's version; the demo
+  and Cloud agents inside) and published like the other files: a line in `SHA256SUMS.txt` and a
+  build attestation.
+- **The release key**: `npm run android:key` makes it once on a Mac (`scripts/android-key.sh`): RSA
+  4096, in a self-signed certificate valid 30 years, in
+  `~/Library/Application Support/Bridge AI Release/android-release.p12`, its password in the login
+  Keychain ("Bridge AI Android release key"), and the three repo secrets CI signs with
+  (`BRIDGE_ANDROID_P12`, `BRIDGE_ANDROID_PASSWORD`, `BRIDGE_ANDROID_ALIAS`). It prints the
+  certificate's SHA-256. It refuses to make a second key: Android takes an update only when it's
+  signed with the same key as the app on the phone, so a new key means everyone uninstalls (and
+  pairs again). Back up the file and its password together, in a password manager and offline.
+  `npm run android:key -- --secrets` sets the secrets again from the key you have;
+  `-- --dry-run` makes a throwaway key in a temporary folder and touches neither.
+- **Without the key**, a release goes out without the APK: the Android job says so in the run and
+  the desktop release isn't held up (nor when the Android build fails). **Actions › Android APK for
+  a release › Run workflow**, with the release's tag (`.github/workflows/android-apk.yml`), builds
+  it from that tag and adds it to the release, with its checksum line and attestation. That's also
+  how 3.8.0, out before the APK was, gets it.
+- **Android developer verification**: since September 30, 2026, a certified Android phone in
+  Brazil, Indonesia, Singapore or Thailand installs an app from outside Google Play normally only
+  when a verified developer has registered it, and from 2027 everywhere; an unregistered one needs
+  Android's advanced flow or adb. To register: an account in the Android Developer Console
+  (identity verification), then the package `dev.bridgeai.phone` with an APK signed by the release
+  key. With a Google Play account, the Play Console registers it instead (`android/PLAY.md`).
 
 ## Releasing to the App Store
 
