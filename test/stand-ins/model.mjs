@@ -11,6 +11,8 @@
 //   turns down), and leaves out "Thanks for watching" and "drop me please"; Assist suggests a
 //   question about what the files say (or the invite, without them) and a check of the last thing
 //   said.
+//   Edit by voice ("Instruction: … Text: …"): the text with "teh" spelled right and its first letter a
+//   capital, in quotes and a code fence (which Bridge AI takes off).
 //   With tools, "EDIT <file>" runs a script (read it, change "hello" to "hello world", cat it).
 //   Whiteboards' "Draw this": a flowchart in Mermaid (Start, Tests pass?, Ship, Fix), broken the
 //   first time when asked for "broken"; "Change it": Start renamed Begin, Ship coloured red, a Cache
@@ -40,6 +42,8 @@ function answer(b) {
     if (asked === 'edit_file') return call(`x${m.length}`, 'run_command', { command: `cat ${file}` })
     if (asked === 'run_command') return say(`All done: ${tail.content.replace(/\n/g, ' | ')}`)
   }
+  const edit = /^Instruction: [\s\S]*?\n\nText:\n([\s\S]*)$/.exec(last)
+  if (edit) { const t = edit[1].replace(/\bteh\b/g, 'the'); return say('```\n"' + t.charAt(0).toUpperCase() + t.slice(1) + '"\n```') }
   if (/Write meeting notes in Markdown/.test(last)) {
     return say(`## Summary\n- The beta ships on November third.\n\n## Decisions\n- Ship the beta on November third.\n\n## Action items\n- [ ] You: send the updated budget to finance (Friday)\n- [ ] Priya: fix the login bug\n\n## Notes\n- Design review done.\n\n\`\`\`terms\n${JSON.stringify({ names: ['Priya'], misheard: {}, about: { Priya: 'fixing the login bug before the beta', Zed: 'nobody in this meeting' } })}\n\`\`\``)
   }

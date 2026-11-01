@@ -289,6 +289,8 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, tellMain, askA
   let facts = null
   let g = { mode: null }
   let pz = { can: false } // pasteInto: whether pasting where you're typing can work here
+  let ev = { can: false } // editByVoice: whether edit by voice can work here
+  let sel = null // the selection read when the key was let go (edit by voice): a promise of { text } | { error }
   let front = null // the app in front when the key was pressed there (a Mac: { app, pid })
   let source = null
   let status = { mode: null }
@@ -326,6 +328,9 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, tellMain, askA
     if (bundle) keepIcon(bundle, info.path).catch(() => {})
   }
   function onUp(at) {
+    // Edit by voice: what's selected in the app you were in, read now (the dictation window never
+    // takes the keyboard, so it's still selected); the window asks for it once it has your words.
+    sel = route === 'hud' && editOn() ? readSelection(front?.pid) : null
     if (route === 'hud') toHud({ type: 'up', at })
     else if (route) say(route, { type: 'up', at })
   }
@@ -422,6 +427,20 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, tellMain, askA
     const keys = source
     return keyPaste({ text, clipboard, hook: loadHook(), terminal, ready: keys?.modsUp ? () => keys.modsUp(1500) : null })
   }
+  // ---------- Edit by voice ----------
+  // On only when picked (Settings › Voice) and where this computer can (platform.js editByVoice), and
+  // only with Accessibility (the selection is asked of the app through it).
+  const editOn = () => settings.edit === true && !!ev.can && pasteStatus().allowed
+  function readSelection(pid) {
+    return new Promise((resolve) => {
+      execFile(helperBin(), ['selection', ...(Number.isInteger(pid) && pid > 0 ? ['--pid', String(pid)] : [])], { timeout: 5000, maxBuffer: 1024 * 1024 }, (_err, out) => {
+        let j = null
+        try { j = JSON.parse(String(out || '').trim().split('\n').pop()) } catch { /* below */ }
+        resolve(j && typeof j.text === 'string' ? { text: j.text.slice(0, 20000) } : { error: j?.error || 'failed' })
+      })
+    })
+  }
+  ipcMain.handle('bridge:hud-selection', async (e) => (fromHud(e) && sel ? sel : null))
   ipcMain.handle('bridge:hud-paste', (e, text) => (fromHud(e) && typeof text === 'string' && text ? pasteHere(text.slice(0, 100_000)) : { error: 'off' }))
   ipcMain.handle('bridge:paste-access', (e) => (trusted(e) ? (pasteStatus().allowed ? 'ok' : 'denied') : null))
   // Picking "Where I'm typing" on a Mac: the first time, macOS lists Bridge AI under Accessibility
@@ -565,7 +584,7 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, tellMain, askA
   }
 
   // What Settings and the dictation window are told: the key's status, and pasting's.
-  const view = () => ({ ...status, paste: pasteStatus() })
+  const view = () => ({ ...status, paste: pasteStatus(), edit: { ...ev, on: editOn() } })
   ipcMain.handle('bridge:dictate-status', () => view())
   ipcMain.handle('bridge:dictate-configure', async (e, s) => {
     if (!s || typeof s !== 'object') return view()
@@ -590,6 +609,7 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, tellMain, askA
     if (process.platform === 'win32' || (process.platform === 'linux' && !facts.wayland)) facts.hook = !!loadHook()
     g = lib.globalKey(facts)
     pz = lib.pasteInto(facts)
+    ev = lib.editByVoice(facts)
     settings = readSettings()
     await apply()
     onStatus?.(view())

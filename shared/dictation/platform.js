@@ -111,6 +111,22 @@ export function pasteInto(m = {}) {
   return { can: false, why: 'Not on this system' }
 }
 
+// Edit by voice (Settings › Voice, opt-in): select text in another app, hold the key and say what to
+// change ("make this shorter"); the model you pick rewrites it and it's pasted in its place. So it
+// needs pasting first, and a way to read the selection that doesn't copy a whole line when nothing's
+// selected (an editor's Ctrl+C does):
+//   a Mac          the app is asked for its selected text through Accessibility (bridgekeys
+//                  selection), which pasting already needs
+//   elsewhere      not yet: Windows would need UI Automation and X11 AT-SPI to ask the app, and
+//                  Wayland lets no app read another's selection
+// The answer: { can, via, asks, why }.
+export function editByVoice(m = {}) {
+  const p = pasteInto(m)
+  if (!p.can) return { can: false, why: p.why }
+  if (m.platform === 'darwin') return { can: true, via: 'bridgekeys', asks: 'accessibility' }
+  return { can: false, why: m.platform === 'win32' ? 'Reading another app\'s selection needs UI Automation, not built yet' : 'Reading another app\'s selection needs AT-SPI, not built yet' }
+}
+
 // A terminal, by the class X11 gives its window (xprop's WM_CLASS): terminals paste with
 // Ctrl+Shift+V, since Ctrl+V is a key the program in them reads. xterm and urxvt have no paste key
 // for the clipboard at all.

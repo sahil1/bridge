@@ -1,6 +1,9 @@
 // The demo build (dist-demo: npm run demo:build), served as files with no server behind it, the way
 // Try the demo and the website show it: Home, Meetings with its made-up meetings, search, folders and
-// the archive (kept in the tab), and what needs a computer saying so instead of failing.
+// the archive (kept in the tab), what needs a computer saying so instead of failing, and the
+// needs-you inbox with the made-up agent that waits on you, answered from its own card, and the agent
+// map with the made-up computers: the busy Studio Mac's agents by project, and the Linux workstation
+// offline with what it last said.
 import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -41,6 +44,26 @@ try {
   await p.click('.mt-row:has-text("Checkout launch sync")')
   ok(!!(await until(async () => /Ship the new checkout on Thursday/.test(await p.innerText('.mt-summary')), 5000)), 'a meeting shows its summary')
   await shot(p, `${tag}demo-meeting`)
+  // The needs-you inbox: the agent waiting on you, on the Studio Mac, with its question's own card.
+  await p.locator('.top-right .needs-chip').click()
+  const ask = p.locator('.ny-panel .ny-item.t-question')
+  await ask.first().waitFor({ timeout: 5000 }).catch(() => {})
+  ok(await ask.count() === 1 && /Studio Mac/.test(await ask.innerText()), 'the needs-you inbox lists the agent waiting on you, on the Studio Mac', await p.locator('.ny-panel').innerText().catch(() => ''))
+  await ask.locator('button', { hasText: 'Answer here…' }).click()
+  ok(!!(await until(async () => (await ask.locator('.qcard .q-opt').count()) > 1, 6000)), 'Answer here… shows its question with the choices it has')
+  await shot(p, `${tag}demo-needs-you`)
+  await p.keyboard.press('Escape')
+  // The agent map, from ⌘K.
+  await p.keyboard.press('ControlOrMeta+K')
+  await p.locator('.pal-input input').fill('agent map')
+  await p.waitForTimeout(300)
+  await p.keyboard.press('Enter')
+  const studio = p.locator('.am-lane:not(.cloud)', { hasText: 'Studio Mac' })
+  await studio.waitFor({ timeout: 6000 }).catch(() => {})
+  ok(/acme-shop/i.test(await studio.innerText().catch(() => '')) && await studio.locator('.am-row').count() >= 5, "the agent map shows the Studio Mac's agents by project", await p.locator('.am').innerText().catch(() => ''))
+  const linux = p.locator('.am-lane.off', { hasText: 'Linux workstation' })
+  ok(/Offline · as of/.test(await linux.innerText().catch(() => '')) && /Nightly import/.test(await linux.innerText().catch(() => '')), 'and the Linux workstation offline, with what it last said')
+  await shot(p, `${tag}demo-agent-map`)
   ok(errors.length === 0, 'no page errors', errors)
   await ctx.close()
 } catch (e) {

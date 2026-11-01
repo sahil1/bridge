@@ -1151,6 +1151,55 @@ export function createDemo({ everything = true } = {}) {
   const HERE = { name: 'MacBook Pro', os: 'mac', version, relay: 'https://bridge-macbook.example.workers.dev' }
   on('GET', '/machines', () => ({ here: HERE, machines: MACHINES, asks: [], canBeLinked: true }))
   on('GET', '/machines/summary', () => ({ ...HERE, ...summaryOf(FRESH.tabs) }))
+  // The needs-you inbox (server/needsyou.js): what waits on you on this made-up computer. Its
+  // questions are answered from their own card, read from the screen as for real.
+  const cleared = new Set()
+  const base = (p) => String(p || '').split('/').filter(Boolean).pop() || null
+  on('GET', '/needs-you', () => {
+    const items = fleet().agents.filter((a) => (a.status === 'blocked' || a.status === 'done') && !cleared.has(`${a.paneId}@${a.seq}`)).map((a) => {
+      const d = S.agents.get(a.paneId)
+      const agent = { title: a.title, kind: a.kind, kindLabel: a.kindLabel, chief: !!a.chief, project: a.cloud ? base(a.cloud.repo) : a.chief ? null : base(a.worktree?.repo || a.cwd), branch: a.cloud?.branch || a.worktree?.branch || null, account: a.account || null, cloud: a.cloud?.label || null }
+      // The Studio Mac (?m=studio) is the busy one, shown through this one.
+      const head = { id: `${a.paneId}@${a.seq}`, paneId: a.paneId, seq: a.seq, agent, since: iso(d?.since || Date.now()), machine: all ? 'studio' : null, device: all ? 'Studio Mac' : HERE.name, online: true }
+      if (a.status === 'blocked') {
+        if (a.cloud) return { ...head, type: a.cloud.canApprove ? 'permission' : 'question', text: a.cloud.ask, answers: a.cloud.canApprove ? [{ n: 'approve', title: a.cloud.approveLabel || 'Approve' }] : null }
+        return { ...head, type: 'question', text: d?.question?.text || null, qid: 'screen', answers: null }
+      }
+      if (a.cloud?.failed) return { ...head, type: 'failed', text: a.cloud.error || null }
+      return { ...head, type: 'review', text: (d ? preview(d)?.text : cloud.previews()[a.paneId]?.text) || null, pr: a.cloud?.prUrl || null }
+    })
+    return { items, devices: [{ id: null, name: HERE.name, online: true }, ...(all ? [{ id: 'studio', name: 'Studio Mac', online: true }] : [])] }
+  })
+  on('POST', '/needs-you/clear', ({ body }) => { cleared.add(String(body?.id || '')); return ok })
+  // The agent map (server/agentmap.js): this computer's agents as they run here, the Studio Mac's,
+  // and what the Linux workstation said before it went offline.
+  on('GET', '/agent-map', () => {
+    const f = fleet()
+    const chief = f.agents.find((a) => a.chief)
+    const mine = f.agents.map((a) => {
+      const d = S.agents.get(a.paneId)
+      const p = d ? preview(d) : cloud.previews()[a.paneId]
+      const began = iso(d?.since || Date.now())
+      return {
+        paneId: a.paneId, title: a.title, name: a.title, status: a.status, kind: a.kind, kindLabel: a.kindLabel, chief: !!a.chief, thread: a.thread || null,
+        from: d?.reportTo && d.reportTo === chief?.paneId ? ['Main'] : [], project: a.cloud ? base(a.cloud.repo) : a.chief ? null : base(a.worktree?.repo || a.cwd),
+        branch: a.cloud?.branch || a.worktree?.branch || null, workspace: a.workspace, model: d?.model || null, account: a.account || null, chat: false,
+        cloud: a.cloud ? { label: a.cloud.label, repo: a.cloud.repo, prUrl: a.cloud.prUrl, state: a.cloud.state, failed: !!a.cloud.failed } : null,
+        asking: d?.question?.text || a.cloud?.ask || null, doing: p ? { text: p.text || null, tool: a.status === 'working' ? p.tool : null } : null, subagents: null, since: began, statusSince: began,
+      }
+    })
+    const ago = (m) => iso(Date.now() - m * 6e4)
+    const linux = [
+      { paneId: 'lx1', title: 'Nightly import', name: 'Nightly import', status: 'idle', kind: 'codex', kindLabel: KIND.codex, project: 'data-pipeline', model: 'gpt-5-codex', doing: { text: 'Imported 1.2M rows; the report is in reports/2026-10-30.md' }, since: ago(300), statusSince: ago(25) },
+      { paneId: 'lx2', title: 'GPU benchmarks', name: 'GPU benchmarks', status: 'working', kind: 'claude', kindLabel: KIND.claude, project: 'bench', model: 'claude-sonnet-4-5', doing: { tool: 'Bash: python bench.py --all' }, since: ago(80), statusSince: ago(40) },
+    ]
+    return {
+      devices: [
+        { id: null, name: HERE.name, os: 'mac', here: true, online: true, at: iso(), agents: all ? [] : mine },
+        ...MACHINES.map((m) => ({ id: m.id, name: m.name, os: m.os, online: m.online, lastSeen: m.lastSeen, at: m.online ? iso() : m.lastSeen, agents: m.id === 'studio' ? (all ? mine : m.agents) : m.id === 'linux' ? linux : [] })),
+      ],
+    }
+  })
   on('POST', '/machines', () => needs('Linking a device'))
   on('POST', '/machines/ask', () => needs('Linking a device'))
   on('POST', '/machines/invite', () => needs('A link for another device'))

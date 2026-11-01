@@ -61,6 +61,12 @@ of the key, the text is put on the clipboard for a moment (marked so clipboard m
 Mac), ⌘V or Ctrl+V is pressed in the app you were in, and what you had copied is put back; on
 Wayland it's typed in by wtype instead. On a Mac pressing ⌘V needs Accessibility, which you're asked
 for when you pick it, and Bridge AI uses it for that paste only.
+Edit by voice (a Mac, off until you turn it on) reads the text you have selected in that app as you
+let go of the key, through Accessibility (asking the app for its selection; ⌘C only in an app that
+can't say, with what you had copied put back). That text and what you said go to the model you pick
+for it: one on your computer (Ollama, LM Studio) keeps them there; any other gets them, and Settings
+says so where you pick it. With nothing selected, nothing is sent anywhere, and with it off, nothing
+is read.
 
 When you ask the Chief of Staff out loud, what you said goes to it as any message you type does,
 and its answer is read to you by a voice on the device you're using (its own voices, never one

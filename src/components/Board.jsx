@@ -46,7 +46,8 @@ function Tile({ a, p, selected, onOpen, onOpenInHerdr, onOpenSide }) {
 
 // title, icon, action (in the header), empty (instead of the plain note) and tally (what each is
 // doing rather than how many run, as agents in the cloud end): the phone's Cloud agents.
-export default function Board({ fleet, selected, onOpen, onOpenInHerdr, minimized, maximized, onMinimize, onMaximize, compact, title = t('Agents'), icon = 'grid', action = null, empty = null, tally = false }) {
+// onMap: the agent map, with every computer's agents (AgentMap.jsx).
+export default function Board({ fleet, selected, onOpen, onOpenInHerdr, onMap, minimized, maximized, onMinimize, onMaximize, compact, title = t('Agents'), icon = 'grid', action = null, empty = null, tally = false }) {
   const [filter, setFilter] = usePersisted('cc-board-filter', 'all')
   const previews = usePoll('/previews', 5000, { enabled: !minimized })
   const all = (fleet?.agents || []).filter((a) => !a.chief)
@@ -72,6 +73,7 @@ export default function Board({ fleet, selected, onOpen, onOpenInHerdr, minimize
             })}
           </div>
         )}
+        {onMap && !compact && <button type="button" className="ghost-btn board-map" onClick={onMap} title={t("What's running on each of your computers")}><Icon name="grid" size={12} /> {t('Map')}</button>}
         {action}
       </PaneHeader>
       {/* A phone: every state at a glance, all five in one row that fits, each a filter. */}

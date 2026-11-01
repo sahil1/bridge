@@ -29,11 +29,11 @@ import path from 'node:path'
 import { EventEmitter } from 'node:events'
 import { spawn, spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { ROOT, OUT, TEST, IS_MAC, IS_WIN, startKit, checks, until, sleep } from '../lib/harness.mjs'
+import { ROOT, OUT, TEST, IS_MAC, IS_WIN, startKit, startModel, checks, until, sleep } from '../lib/harness.mjs'
 
 const { ok, skip, done } = checks('dictation')
 const keys = await import('../../shared/dictation/keys.js')
-const { globalKey, pasteInto, loneKeys, isTerminal } = await import('../../shared/dictation/platform.js')
+const { globalKey, pasteInto, loneKeys, editByVoice, isTerminal } = await import('../../shared/dictation/platform.js')
 const { clean, makeNames } = await import('../../shared/dictation/clean.js')
 const desk = createRequire(import.meta.url)('../../desktop/dictation.js')
 
@@ -223,6 +223,19 @@ ok(C('tell strike about it', { heard: [['strike', 'Stripe']] }) === 'Tell Stripe
   desk.helperSource({ bin: 'bridgekeys', lone: 'fn', spawnFn: (b, a) => { args.push(a.join(' ')); return child }, onState: (j) => told.push(j.ready ? 'ready' : j.error), onDown: () => told.push('down'), onUp: () => told.push('up'), onCancel: () => told.push('cancel') })
   child.stdout.emit('data', '{"ready":true}\n{"down":1,"app":"Notes"}\n{"cancel":2}\n{"down":3}\n{"up":4}\n')
   ok(args.join() === 'modifier fn' && told.join() === 'ready,down,cancel,down,up', 'the Mac: bridgekeys modifier fn, its presses, let-goes and cancels', { args, told })
+}
+
+// ---------- Edit by voice: where it's offered ----------
+{
+  const seen = {
+    mac: editByVoice({ platform: 'darwin', arch: 'arm64', desktop: true, helper: true }),
+    macNoHelper: editByVoice({ platform: 'darwin', arch: 'x64', desktop: true, helper: false }),
+    win: editByVoice({ platform: 'win32', arch: 'x64', desktop: true, hook: true }),
+    x11: editByVoice({ platform: 'linux', arch: 'x64', desktop: true, hook: true }),
+    wayland: editByVoice({ platform: 'linux', arch: 'x64', desktop: true, wayland: true, session: 'Hyprland', portal: true, wtype: true }),
+    browser: editByVoice({ platform: 'darwin', arch: 'arm64', desktop: false }),
+  }
+  ok(seen.mac.can && seen.mac.asks === 'accessibility' && !seen.macNoHelper.can && !seen.win.can && /UI Automation/.test(seen.win.why) && !seen.x11.can && /AT-SPI/.test(seen.x11.why) && !seen.wayland.can && !seen.browser.can, 'edit by voice: a Mac with its helper (Accessibility); not yet on Windows or X11 (no way to ask an app for its selection), not on Wayland, without the helper or in a browser', seen)
 }
 
 // ---------- How the desktop app hears the key ----------
@@ -506,6 +519,16 @@ else {
     allowed = true
     await call('bridge:dictate-configure', me, { background: true, to: 'last' })
     ok((await call('bridge:hud-paste', from, 'Hello again.'))?.error === 'off' && pasted().length === 3, 'with the text going to an agent instead: nothing pasted')
+    // Edit by voice on: the selection in TextEdit read as the key's let go, for the dictation window.
+    ok(!(await call('bridge:dictate-status', me)).edit?.on && (await call('bridge:dictate-status', me)).edit?.can, 'edit by voice: offered on a Mac, off until it\'s turned on')
+    process.env.BRIDGEKEYS_SELECTION = 'teh draft'
+    const toldE = hud.told.length
+    const ed = await call('bridge:dictate-configure', me, { background: true, to: 'last', edit: true })
+    await until(() => hud.told.slice(toldE).some((js) => js.includes('"type":"up"')), 3000, 50)
+    const got = await call('bridge:hud-selection', from)
+    ok(ed.edit?.on && got?.text === 'teh draft' && pasted().some((x) => x.args.join(' ') === 'selection --pid 4242') && (await call('bridge:hud-selection', me)) === null, 'turned on: as the key\'s let go in TextEdit, what\'s selected there is read (asked of TextEdit, by its pid), for the dictation window only', { ed: ed.edit, got })
+    delete process.env.BRIDGEKEYS_SELECTION
+    await call('bridge:dictate-configure', me, { background: true, to: 'last' })
     // History off: no icon kept (the stand-in helper presses the key again as it starts).
     fs.rmSync(iconFile, { force: true })
     thumbs.length = 0
@@ -546,6 +569,10 @@ else {
     let j = null
     try { j = JSON.parse(front.stdout.trim()) } catch { /* below */ }
     ok(front.status === 0 && j && typeof j.app === 'string' && typeof j.bundle === 'string' && Number.isInteger(j.pid) && typeof j.secure === 'boolean', 'bridgekeys front: the app in front and Secure Input, as JSON', front.stdout)
+    // The selection (edit by voice), in its test mode: nothing asked of an app, no key pressed.
+    const sel = spawnSync(helper, ['selection', '--test', '--text', 'teh "draft"'], { encoding: 'utf8', timeout: 10000 })
+    const no = spawnSync(helper, ['selection', '--test', '--as', 'untrusted'], { encoding: 'utf8', timeout: 10000 })
+    ok(sel.stdout.trim() === '{"text":"teh \\"draft\\"","via":"test"}' && no.status === 1 && no.stdout.trim() === '{"error":"accessibility"}', 'bridgekeys selection: the text as JSON; without Accessibility, refused before asking the app anything', [sel.stdout, no.stdout])
     // Whether it may listen to keys (Fn as the key): looked up, never asked. Without it, modifier says
     // so before trying (a tap tried without it is what makes macOS ask).
     const access = spawnSync(helper, ['listen-access'], { encoding: 'utf8', timeout: 10000 })
@@ -626,6 +653,7 @@ else {
 
 // ---------- The server: the names to spell, and the settings ----------
 const kit = await startKit('dictation')
+const model = await startModel('dictation')
 try {
   await kit.api('/setup', { name: 'Tester' })
   await kit.api('/meetings/memory', { term: 'Northwind', heard: ['north wind'] })
@@ -636,10 +664,24 @@ try {
   await kit.api('/settings', { dictation: { key: 'Control+Alt+D', cleanup: false } }, 'PATCH')
   const c = (await kit.api('/config')).dictation
   ok(c.key === 'Control+Alt+D' && c.cleanup === false, 'Settings › Voice saves them, and pages read them from /api/config', c)
+  // Edit by voice: the selection rewritten by the model picked for it (a stand-in model), and only that.
+  const none = await kit.api('/dictation/edit', { text: 'teh draft', instruction: 'fix the spelling' }).catch((e) => e.message)
+  ok(/Pick the model/.test(none), 'edit by voice with no model picked: it says to pick one, and nothing\'s sent anywhere', none)
+  await kit.api('/providers/openai', { values: { OPENAI_API_KEY: 'sk-test', OPENAI_BASE_URL: `${model.url}/v1` } }, 'PUT')
+  const pick = ((await kit.api('/chat/models')).models || []).find((m) => m.id.startsWith('openai:'))
+  await kit.api('/settings', { dictation: { editModel: pick?.id } }, 'PATCH')
+  const r = await kit.api('/dictation/edit', { text: 'teh draft', instruction: 'fix the spelling' })
+  const asked = model.asked(/^Instruction: fix the spelling\n\nText:\nteh draft$/)
+  ok(r.text === 'The draft' && asked.length === 1, 'picked: the selection and what was said go to that model, and its answer comes back without the quotes and code fence it put around it', { r, asked: model.asked().slice(-1) })
+  const relay = await fetch(`${kit.url}/api/dictation/edit`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-bridge-relay': 'phone' }, body: JSON.stringify({ text: 'a', instruction: 'b' }) })
+  ok(!relay.ok && model.asked(/^Instruction: b/).length === 0, 'never through the relay: only the computer\'s own dictation window asks', relay.status)
+  const big = await kit.api('/dictation/edit', { text: 'x'.repeat(20001), instruction: 'shorter' }).catch((e) => e.message)
+  ok(/20,000 characters/.test(big), 'more than 20,000 characters: said so, not sent', big)
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
   console.log(kit.log().slice(-1500))
 } finally {
   kit.stop()
+  model.stop()
 }
 process.exit(done().fail ? 1 : 0)

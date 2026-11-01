@@ -10,12 +10,14 @@ import { t, tx, locale } from '../i18n/index.js'
 // each one is, whichever machine the page shows.
 
 const OS_LABEL = { mac: 'Mac', windows: 'Windows', linux: 'Linux' }
-const ago = (iso) => {
+export const ago = (iso) => {
   if (!iso) return ''
   const s = (Date.now() - new Date(iso).getTime()) / 1000
   return s < 90 ? t('just now') : s < 3600 ? t('{n} min ago', { n: Math.round(s / 60) }) : s < 86400 ? t('{n} h ago', { n: Math.round(s / 3600) }) : new Date(iso).toLocaleDateString(locale(), { month: 'short', day: 'numeric' })
 }
 export const machinesChanged = () => window.dispatchEvent(new Event('bridge-machines'))
+// The agent map: what's running on each of your computers (AgentMap.jsx, a view in App.jsx).
+export const openMap = () => window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: 'view:map' } }))
 
 // Your devices, as the device this page comes from knows them. on: whether to look at all.
 export function useMachines(ms = 10000, on = true) {
@@ -125,6 +127,9 @@ export function MachineMenu({ phone = false }) {
           {linked.map((m) => row(m.id, m.name, [OS_LABEL[m.os], m.online ? counts(m.counts) || t('Online') : m.lastSeen ? t('Offline, seen {when}', { when: ago(m.lastSeen) }) : t('Offline')].filter(Boolean).join(' · '), m.online, m.id === machineId, () => go(m), m.id))}
           {paired.filter((c) => !linked.some((m) => bare(m.relay) === bare(c.relay))).map((c) => row(c.relay, c.name, t('Paired on this phone'), null, false, close(() => relayComputers.open(c.relay))))}
           <div className="menu-sep" />
+          <button type="button" role="menuitem" className="menu-item" onClick={close(openMap)}>
+            <Icon name="grid" size={13} /> {t("What's running where")}
+          </button>
           <button type="button" role="menuitem" className="menu-item" onClick={close(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'machines' } })))}>
             <Icon name="link" size={13} /> {t('Link a device…')}
           </button>
@@ -168,6 +173,7 @@ export function RailMachines() {
         <button type="button" className="rail-nav-btn" onClick={() => fold(!open)}>
           <Icon name="laptop" size={14} /> {t('Devices')}{needs > 0 && <span className="rm-badge" title={needs === 1 ? t('{n} needs you', { n: needs }) : t('{n} need you', { n: needs })}>{needs}</span>}
         </button>
+        <button type="button" className="rmc-map" onClick={openMap} aria-label={t('Agent Map')} title={t("What's running on each of your computers")}><Icon name="grid" size={12} /></button>
         <button type="button" className="rail-nav-fold" onClick={() => fold(!open)} aria-expanded={open} aria-label={open ? t('Hide your devices') : t('Show your devices')}>
           <Icon name="down" size={12} className={open ? '' : 'rot-up'} />
         </button>
@@ -186,9 +192,9 @@ export function RailMachines() {
               {m.online && <button type="button" className="rmc-win" onClick={() => goMachine(m.id, { own: true })} aria-label={t('Open {name} in a window of its own', { name: m.name })} title={t('Open {name} in a window of its own, beside this one', { name: m.name })}><Icon name="popout" size={12} /></button>}
             </div>
             {m.online && agents.map((a) => (
-              <button type="button" key={a.paneId} className="rmc-agent" onClick={() => openRemote(m, a)} title={t('{title} · {kind} on {name}. Opens in a tab here', { title: a.title, kind: a.kindLabel || a.kind, name: m.name })}>
+              <button type="button" key={a.paneId} className="rmc-agent" onClick={() => openRemote(m, { ...a, title: a.name || a.title })} title={t('{title} · {kind} on {name}. Opens in a tab here', { title: a.name || a.title, kind: a.kindLabel || a.kind, name: m.name })}>
                 <StatusDot status={a.status} size={7} />
-                <span className="rmc-title">{a.title}</span>
+                <span className="rmc-title">{a.name || a.title}</span>
               </button>
             ))}
             {m.online && total > agents.length && <button type="button" className="rmc-more link-btn small" onClick={() => goMachine(m.id)}>{t('All {n} agents', { n: total })}</button>}
@@ -283,7 +289,7 @@ function LinkOffer() {
 
 // ---------- a device's details ----------
 const RUNTIME = { herdr: 'herdr', builtin: tx("Bridge AI's own terminals") }
-const onFor = (s) => (s >= 86400 ? (Math.floor(s / 86400) === 1 ? t('{n} day', { n: 1 }) : t('{n} days', { n: Math.floor(s / 86400) }))
+export const onFor = (s) => (s >= 86400 ? (Math.floor(s / 86400) === 1 ? t('{n} day', { n: 1 }) : t('{n} days', { n: Math.floor(s / 86400) }))
   : s >= 3600 ? (Math.floor(s / 3600) === 1 ? t('{n} hour', { n: 1 }) : t('{n} hours', { n: Math.floor(s / 3600) }))
     : t('{n} min', { n: Math.max(1, Math.round(s / 60)) }))
 // What's known about a device (its system, chip, memory, versions, relay, security code), and its

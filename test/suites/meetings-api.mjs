@@ -543,7 +543,7 @@ process.exit(1)`)
   // ---------- The calendar (macOS Calendar, through icalBuddy) ----------
   if (IS_MAC) {
     kit.program('icalBuddy', `const d = new Date(), p = (n) => String(n).padStart(2, '0'), hm = (t) => p(t.getHours()) + ':' + p(t.getMinutes())
-process.stdout.write('@@EV@@Pricing review (Work)\\u00a6' + d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' at ' + hm(new Date(d - 6e5)) + ' - ' + hm(new Date(+d + 3e6)) + '\\u00a6attendees: Priya Shah, Dan Ruiz, Tester\\n')`)
+process.stdout.write('@@EV@@Pricing review (Work)\\u00a6' + d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' at ' + hm(new Date(Math.max(d - 6e5, new Date(d).setHours(0, 0, 0, 0)))) + ' - ' + hm(new Date(Math.min(+d + 3e6, new Date(d).setHours(23, 59, 0, 0)))) + '\\u00a6attendees: Priya Shah, Dan Ruiz, Tester\\n')`)
     const ev = await kit.api(`/meetings/${B.id}/events`)
     ok(ev.events?.[0]?.title === 'Pricing review' && ev.events[0].attendees.length === 3, 'the calendar event around when it was recorded, with its people', ev)
   } else skip('the calendar event around a meeting', 'the calendar is macOS Calendar')

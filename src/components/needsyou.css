@@ -1,0 +1,57 @@
+/* The needs-you inbox (NeedsYou.jsx): a panel under the top bar's chip, the whole screen on a phone. */
+/* Nothing waits, only finished work: quiet, like the bar's other chips (tinted themes too). */
+.needs-chip.quiet, :root[data-chrome] .needs-chip.quiet { color: var(--ink-2); background: var(--pane); box-shadow: inset 0 0 0 1px var(--line); }
+:root[data-chrome] .needs-chip.quiet .sdot { background: transparent; box-shadow: inset 0 0 0 2px var(--done); }
+.ny-panel {
+  position: fixed; z-index: 80; top: 50px; right: 12px; width: 460px; max-width: calc(100vw - 24px); max-height: calc(100vh - 66px);
+  display: flex; flex-direction: column; border-radius: 14px; background: var(--root-pane, var(--pane)); color: var(--root-ink, var(--ink));
+  border: 1px solid var(--line-2); box-shadow: 0 18px 48px rgb(0 0 0 / .18), 0 2px 8px rgb(0 0 0 / .08); overflow: hidden;
+}
+.ny-panel.phone { inset: 0; top: 0; right: 0; width: auto; max-width: none; max-height: none; border-radius: 0; border: 0; box-shadow: none; padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+.ny-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px 8px 16px; border-bottom: 1px solid var(--line); flex: none; }
+.ny-panel.phone .ny-head { padding: 8px 12px; min-height: 52px; }
+.ny-head h2 { margin: 0; font-size: 15px; font-weight: 650; display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+.ny-count { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--needs); color: #fff; font-size: 11.5px; font-weight: 700; display: inline-grid; place-items: center; }
+.ny-grow { flex: 1; min-width: 0; }
+.ny-sort { display: flex; gap: 2px; }
+.ny-devices { padding: 8px 12px 0; flex: none; flex-wrap: wrap; }
+.ny-devices .fchip { gap: 6px; }
+.ny-batch { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 10px 12px 0; padding: 8px 10px; border-radius: 10px; background: var(--accent-soft); font-size: 12.5px; flex: none; }
+.ny-batch > span { flex: 1; min-width: 160px; }
+.ny-note { margin: 8px 12px 0; padding: 7px 10px; border-radius: 8px; background: var(--pane-2); font-size: 12.5px; color: var(--ink-2); flex: none; }
+.ny-list { overflow-y: auto; padding: 6px 10px 12px; flex: 1; min-height: 0; overscroll-behavior: contain; }
+.ny-group h3 { display: flex; align-items: center; gap: 6px; margin: 10px 4px 6px; font-size: 11px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3); }
+.ny-item { margin: 0 0 8px; padding: 10px 12px; border-radius: 11px; border: 1px solid var(--line); background: var(--pane-2); min-width: 0; }
+.ny-item.t-permission, .ny-item.t-question { border-color: color-mix(in srgb, var(--needs) 40%, transparent); background: color-mix(in srgb, var(--needs) 5%, var(--pane-2)); }
+.ny-item.t-failed { border-color: color-mix(in srgb, var(--critical) 40%, transparent); }
+.ny-item.focus { box-shadow: 0 0 0 2px var(--accent); }
+.ny-item.off { opacity: .62; }
+.ny-top { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--ink-3); min-width: 0; }
+.ny-kind { font-weight: 650; color: var(--ink-2); }
+.t-permission .ny-kind, .t-question .ny-kind { color: var(--needs); }
+.t-failed .ny-kind { color: var(--critical); }
+.ny-device { display: inline-flex; align-items: center; gap: 4px; max-width: 45%; padding: 1px 7px; border-radius: 6px; background: var(--pane-3); color: var(--ink-2); font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ny-device.here { background: transparent; box-shadow: inset 0 0 0 1px var(--line-2); }
+.ny-off { font-weight: 500; color: var(--ink-3); }
+.ny-text { margin: 6px 0 0; font-size: 13.5px; line-height: 1.45; font-weight: 550; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.ny-text.said { font-weight: 450; color: var(--ink-2); }
+.ny-about { display: block; margin-top: 5px; padding: 5px 8px; border-radius: 7px; background: var(--term-bg); color: var(--term-fg); font: 12px/1.45 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 5.8em; overflow: hidden; }
+.ny-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; margin-top: 7px; font-size: 12px; color: var(--ink-2); min-width: 0; }
+.ny-agent { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; color: var(--ink); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ny-branch { display: inline-flex; align-items: center; gap: 3px; font-family: var(--font-mono); font-size: 11px; }
+.ny-acts { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+.ny-acts .ghost-btn.strong { color: var(--accent); font-weight: 600; }
+.ny-acts a.ghost-btn { text-decoration: none; }
+.ny-reply { display: flex; gap: 6px; margin-top: 8px; }
+.ny-reply input { flex: 1; min-width: 0; height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--pane); color: inherit; font: inherit; font-size: 13px; }
+.ny-live { margin-top: 8px; }
+.ny-live .qcard { margin: 0; }
+.ny-empty { display: grid; justify-items: center; gap: 4px; padding: 36px 20px; text-align: center; color: var(--good); }
+.ny-empty p { margin: 4px 0 0; color: var(--ink); font-weight: 600; }
+.ny-empty small { max-width: 300px; }
+.ny-panel.phone .ny-item { padding: 12px; }
+.ny-panel.phone .ny-acts .btn.small, .ny-panel.phone .ny-acts .ghost-btn { min-height: 36px; }
+@media (max-width: 420px) {
+  .ny-head h2 { font-size: 14px; }
+  .ny-device { max-width: 52%; }
+}

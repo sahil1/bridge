@@ -179,6 +179,7 @@ export function follow({ tasks: initial = [], client, saved, save = () => {}, pl
           error: t.error || healthOf(t.provider).error || null, held: (t.held || []).length,
           canSend: !!c?.send, canStop: !!c?.stop, holds: !!i.holdWhileWorking,
           canApprove: !!c?.approve && t.status === 'blocked' && !!t.approveLabel, approveLabel: t.approveLabel || null,
+          startedAt: t.createdAt || null,
         },
       }
     })
