@@ -24,6 +24,14 @@ import { spawnSync } from 'node:child_process'
 import { startKit, startModel, checks, until, sleep, browser, page, shot, ROOT, TEST } from '../lib/harness.mjs'
 
 const { ok, done } = checks('whiteboard')
+
+// The built app passes the check the release runs before packaging it: Excalidraw's own service
+// settings (excalidraw.com, its Firebase key) are left out of the build, source maps too.
+{
+  const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'check-private.js'), '--dir', path.join(ROOT, 'dist')], { encoding: 'utf8' })
+  const leftIn = fs.readdirSync(path.join(ROOT, 'dist', 'assets'), { withFileTypes: true }).filter((d) => d.isFile()).map((d) => d.name).filter((f) => /AIza[0-9A-Za-z_-]{30,}|oss-collab\.excalidraw\.com|json\.excalidraw\.com/.test(fs.readFileSync(path.join(ROOT, 'dist', 'assets', f), 'utf8')))
+  ok(r.status === 0 && leftIn.length === 0, 'the built app has nothing personal or third-party in it: no Excalidraw service key or address, in the code or its source maps', `${r.stdout}${r.stderr}${leftIn.join(', ')}`)
+}
 const kit = await startKit('whiteboard')
 const model = await startModel('whiteboard')
 kit.program('claude', fs.readFileSync(path.join(TEST, 'stand-ins', 'claude.cjs'), 'utf8'))
