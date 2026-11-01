@@ -31,7 +31,7 @@ try {
   await api('/settings', { meetings: { engine: 'openai', model: 'openai:gpt-5', autoSummary: false } }, 'PATCH')
   // On a Mac, a calendar with an event on now (icalBuddy's output, as calendar.js asks for it).
   if (IS_MAC) kit.program('icalBuddy', `const d = new Date(), p = (n) => String(n).padStart(2, '0'), hm = (t) => p(t.getHours()) + ':' + p(t.getMinutes())
-process.stdout.write('@@EV@@Pricing review (Work)\\u00a6' + d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' at ' + hm(new Date(d - 6e5)) + ' - ' + hm(new Date(+d + 3e6)) + '\\u00a6attendees: Priya Shah, Dan Ruiz, Tester\\n')`)
+process.stdout.write('@@EV@@Pricing review (Work)\\u00a6' + d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' at ' + hm(new Date(Math.max(d - 6e5, new Date(d).setHours(0, 0, 0, 0)))) + ' - ' + hm(new Date(Math.min(+d + 3e6, new Date(d).setHours(23, 59, 0, 0)))) + '\\u00a6attendees: Priya Shah, Dan Ruiz, Tester\\n')`)
 
   // A meeting from before, in three sections, with the call's lines named.
   const A = await api('/meetings', { title: 'Quarterly plan', call: false, event: { title: 'Planning', attendees: ['Priya Shah', 'Dan Ruiz', 'Tester'] } })
