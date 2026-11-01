@@ -19,7 +19,8 @@ import { ROOT, OUT, IS_WIN, IS_MAC, checks } from '../lib/harness.mjs'
 
 const { ok, skip, done } = checks('android-key')
 const SCRIPT = path.join(ROOT, 'scripts', 'android-key.sh')
-const read = (...p) => { try { return fs.readFileSync(path.join(ROOT, ...p), 'utf8') } catch { return '' } }
+// Line ends as written, whatever git checked out (CRLF on Windows).
+const read = (...p) => { try { return fs.readFileSync(path.join(ROOT, ...p), 'utf8').replace(/\r\n/g, '\n') } catch { return '' } }
 const SERVICE = 'Bridge AI Android release key'
 const SECRETS = ['BRIDGE_ANDROID_P12', 'BRIDGE_ANDROID_PASSWORD', 'BRIDGE_ANDROID_ALIAS']
 const mode = (f) => fs.statSync(f).mode & 0o777

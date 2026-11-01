@@ -118,9 +118,11 @@ try {
 }
 
 // ---------- One name everywhere ----------
-const page = fs.readFileSync(path.join(SITE, 'index.html'), 'utf8')
-const android = fs.existsSync(path.join(ROOT, '.github', 'workflows', 'android.yml')) ? fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'android.yml'), 'utf8') : ''
-const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8')
+// Line ends as written, whatever git checked out (CRLF on Windows).
+const read = (...p) => { try { return fs.readFileSync(path.join(ROOT, ...p), 'utf8').replace(/\r\n/g, '\n') } catch { return '' } }
+const page = read('site', 'index.html')
+const android = read('.github', 'workflows', 'android.yml')
+const readme = read('README.md')
 const install = readme.split('\n## Install\n')[1]?.split('\n## ')[0] || ''
 ok(page.includes(`href="${APK}"`) && /--out Bridge-AI-android\.apk/.test(android) && /name: bridge-ai-android\n\s+path: Bridge-AI-android\.apk/.test(android), 'the page links the file the build makes and publishes (android.yml)')
 const section = install.split('\n### Android\n')[1]?.split('\n### ')[0] || ''
