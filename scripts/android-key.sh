@@ -148,6 +148,7 @@ say "Back it up now: the file and its password together in your password manager
 say "offline. Keychain Access shows the password (search for \"$SERVICE\"). If the key is lost,"
 say "phones with Bridge AI can't update to a new APK: they'd uninstall it and pair again."
 say ""
-say "Each release from now on has Bridge-AI-android.apk. For one already out (3.8.0), once"
-say ".github/workflows/android-apk.yml is on main:"
-say "  gh workflow run android-apk.yml --repo $REPO -f tag=v3.8.0"
+version=$(sed -n 's/^  "version": "\([^"]*\)",$/\1/p' "$(dirname "$0")/../package.json" 2>/dev/null)
+say "Each release from now on has Bridge-AI-android.apk. To add it to one that came out without it"
+say "(this checkout's version is ${version:-unknown}), once .github/workflows/android-apk.yml is on main:"
+say "  gh workflow run android-apk.yml --repo $REPO -f tag=v${version:-<version>}"

@@ -3,7 +3,7 @@
 // app: its button links Bridge-AI-android.apk from the latest release, with the three steps to
 // install it, that it isn't on Google Play yet, that a newer APK installs over it, and where its
 // SHA-256 is; shown only once the latest release has the APK, so never a link to a file that isn't
-// there (3.8.0 before it's added, or GitHub not answering). On an Android phone the main button
+// there (a release from before it, or GitHub not answering). On an Android phone the main button
 // downloads it. At phone width nothing scrolls sideways, and the box is dark in dark mode. The file
 // name is the one the build makes (android.yml) and the README links.
 import http from 'node:http'
@@ -22,7 +22,7 @@ const desktop = ['Bridge-AI-mac-arm64.dmg', 'Bridge-AI-mac-x64.dmg', 'Bridge-AI-
 const asset = (name) => ({ name, browser_download_url: `https://github.com/sahil1/bridge/releases/download/v0/${name}` })
 const RELEASES = {
   withApk: { status: 200, body: { tag_name: 'v3.9.0', assets: [...desktop, 'Bridge-AI-android.apk'].map(asset) } },
-  withoutApk: { status: 200, body: { tag_name: 'v3.8.0', assets: desktop.map(asset) } },
+  withoutApk: { status: 200, body: { tag_name: 'v3.8.1', assets: desktop.map(asset) } },
   limited: { status: 403, body: { message: 'API rate limit exceeded' } },
 }
 
@@ -103,7 +103,7 @@ try {
     await ctx.close()
   }
 
-  // ---------- Not yet (3.8.0 before it's added), or GitHub not answering ----------
+  // ---------- Not yet (a release from before it), or GitHub not answering ----------
   for (const [release, what] of [['withoutApk', 'with no APK in the latest release'], ['limited', 'when GitHub doesn\'t answer']]) {
     const { ctx, p, errors, asked } = await open(release)
     ok(await there(p, '#android') && !(await shown(p, '#android')) && (await apkLinks(p)).length === 0, `${what}, the Android box stays hidden and nothing links to the APK`, await apkLinks(p))
