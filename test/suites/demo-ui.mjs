@@ -66,6 +66,21 @@ try {
   await shot(p, `${tag}demo-agent-map`)
   ok(errors.length === 0, 'no page errors', errors)
   await ctx.close()
+
+  // Try the demo in the phone apps (a bridgeNative to post to, as the iPhone app gives it): the
+  // strip's Pair a computer, the only way back to the start screen, is whole on the screen of every
+  // iPhone the app runs on, from the smallest to the largest; the largest keeps the website's link.
+  for (const width of [375, 402, 440]) {
+    const app = await page(b, `http://127.0.0.1:${port}/`, { width, height: 874, before: (c) => c.addInitScript(() => { window.bridgeNative = { platform: 'ios', post() {} } }) })
+    const pair = app.p.locator('.demo-bar button', { hasText: 'Pair a computer' })
+    await pair.waitFor({ timeout: 6000 }).catch(() => {})
+    const box = await pair.boundingBox().catch(() => null)
+    const link = await app.p.locator('.demo-bar a').isVisible().catch(() => false)
+    ok(!!box && box.x >= 0 && box.x + box.width <= width, `in the phone apps, ${width} points wide: the demo strip's Pair a computer is all on the screen`, box)
+    if (width === 440) ok(link, 'and on the largest iPhone, the link to get Bridge AI is there too')
+    if (width === 402) await shot(app.p, `${tag}demo-strip-iphone`)
+    await app.ctx.close()
+  }
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
 } finally {

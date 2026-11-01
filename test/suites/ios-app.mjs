@@ -3,10 +3,14 @@
 // Privacy), and gives an approved reason for each kind of required reason API the app's own code
 // uses, and the widget's; iOS's question for the microphone says what it's for (dictation, voice
 // notes, meetings) and so does PRIVACY.md; the start screen links to the privacy policy; and its
-// pairing steps name a Settings section and a button the computer has. The app itself is built for
-// the iPhone Simulator in CI (.github/workflows/test.yml), where Xcode is.
+// pairing steps name a Settings section and a button the computer has. And what sends it to the App
+// Store (npm run mobile:ios:release, scripts/ios-release.js): export compliance answered in
+// Info.plist, both targets signed by the team, the upload's options, a build number that only goes up,
+// and an App Store Connect API key in place of an Xcode sign-in. The app itself is built for the iPhone
+// Simulator in CI (.github/workflows/test.yml), where Xcode is.
 import fs from 'node:fs'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { checks, ROOT } from '../lib/harness.mjs'
 
 const { ok, done } = checks('ios-app')
@@ -87,6 +91,50 @@ try {
   const sections = [...read(ROOT, 'src', 'components', 'Settings.jsx').matchAll(/label: tx\('([^']+)'\)/g)].map((x) => x[1])
   ok(!!section && sections.includes(section.replace(/&amp;/g, '&')), `its pairing steps name a Settings section the computer has (${section})`, sections)
   ok(!!button && read(ROOT, 'src', 'components', 'settings', 'Relay.jsx').includes(`t('${button}')`), `and the button there (${button})`)
+
+  // ---------- Sending it to the App Store (npm run mobile:ios:release) ----------
+  // Export compliance answered once, in Info.plist: the app uses only iOS's own encryption
+  // (mobile/README.md › Export compliance), so App Store Connect doesn't ask at each upload.
+  ok(info.ITSAppUsesNonExemptEncryption === false, 'Info.plist answers export compliance: ITSAppUsesNonExemptEncryption is false (only the encryption within iOS)', info.ITSAppUsesNonExemptEncryption)
+  const rel = exists(ROOT, 'scripts', 'ios-release.js') ? await import(pathToFileURL(path.join(ROOT, 'scripts', 'ios-release.js')).href) : null
+  ok(!!rel, 'scripts/ios-release.js is there, and loads without running (it only runs as a command)')
+  const pkg = JSON.parse(read(ROOT, 'package.json'))
+  ok(pkg.scripts['mobile:ios:release'] === 'node scripts/ios-release.js', 'npm run mobile:ios:release runs it', pkg.scripts['mobile:ios:release'])
+  // Without the script, a stand-in whose answers fail each check below, rather than skip them.
+  const R = rel || { project: () => ({ version: '', targets: {} }), exportOptions: () => '<plist version="1.0"><dict/></plist>', commands: () => ({ archive: [], upload: [] }), buildNumber: () => '', apiKey: () => undefined, xcodeTeams: () => [], XCODEGEN: {} }
+  // Both targets signed by the project's team, with Xcode making the certificates and profiles.
+  const { version, targets } = R.project(read(IOS, 'project.yml'))
+  ok(Object.keys(targets).sort().join() === 'BridgeAI,Widgets' && Object.values(targets).every((t) => /^[A-Z0-9]{10}$/.test(t.team) && t.team === targets.BridgeAI?.team && t.style === 'Automatic'),
+    `project.yml gives the app and the widget the same team (${targets.BridgeAI?.team}), with Automatic signing`, targets)
+  ok(version === read(IOS, 'project.yml').match(/MARKETING_VERSION: "([\d.]+)"/)?.[1], `and the release reads its version (${version})`)
+  // Uploaded to App Store Connect, signed by that team.
+  const opts = plist(R.exportOptions(targets.BridgeAI?.team))
+  ok(opts.method === 'app-store-connect' && opts.destination === 'upload' && opts.teamID === targets.BridgeAI?.team && opts.signingStyle === 'automatic' && opts.manageAppVersionAndBuildNumber === false,
+    'its ExportOptions.plist uploads to App Store Connect (method app-store-connect, destination upload), signed by the team, automatically, with the build number it set', opts)
+  const c = R.commands({ build: '20261101.143005', archive: '/a.xcarchive', options: '/o.plist', exportPath: '/up' })
+  ok(c.archive[0] === 'archive' && c.archive.includes('-allowProvisioningUpdates') && c.archive.join(' ').includes('-destination generic/platform=iOS') && c.archive.includes('-configuration') && c.archive.includes('CURRENT_PROJECT_VERSION=20261101.143005') && !c.archive.includes('CODE_SIGNING_ALLOWED=NO'),
+    'it archives Release for any iPhone, with the build number, letting Xcode make what signing needs', c.archive)
+  ok(c.upload[0] === '-exportArchive' && c.upload.includes('-allowProvisioningUpdates') && c.upload[c.upload.indexOf('-exportOptionsPlist') + 1] === '/o.plist', 'and uploads the archive with those options', c.upload)
+  const u = R.commands({ build: '1.1', archive: '/a', options: '/o', exportPath: '/up', unsigned: true })
+  ok(u.archive.includes('CODE_SIGNING_ALLOWED=NO') && !u.archive.includes('-allowProvisioningUpdates'), '--unsigned archives with no signing and no Apple account, to see it builds', u.archive)
+  // Each upload's build number is higher than the last: later is higher, a second later, the
+  // next day, the next year; all digits and dots, at most three numbers, as Apple takes.
+  const times = ['2026-11-01T09:05:00Z', '2026-11-01T09:05:01Z', '2026-11-01T23:59:59Z', '2026-11-02T00:00:00Z', '2026-12-31T23:59:59Z', '2027-01-01T00:00:00Z']
+  const nums = times.map((t) => R.buildNumber(new Date(t)))
+  const higher = (a, b) => { const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (y[i] || 0) > (x[i] || 0); return false }
+  ok(nums.every((n) => /^\d+(\.\d+){0,2}$/.test(n) && n.length <= 18) && nums.slice(1).every((n, i) => higher(nums[i], n)), 'each build number is higher than the one before, even a second later or across a new day or year', nums)
+  // An App Store Connect API key in place of the Xcode sign-in: all three parts or a clear refusal.
+  const p8 = path.join(ROOT, 'package.json') // a file that exists, standing in for the .p8
+  const key = R.apiKey({ ASC_KEY_ID: 'ABC123DEFG', ASC_ISSUER_ID: '00000000-1111-2222-3333-444444444444', ASC_KEY_PATH: p8 })
+  const partial = R.apiKey({ ASC_KEY_ID: 'ABC123DEFG' })
+  ok(R.apiKey({}) === null && key?.args?.join(' ') === `-authenticationKeyPath ${p8} -authenticationKeyID ABC123DEFG -authenticationKeyIssuerID 00000000-1111-2222-3333-444444444444` && /ASC_ISSUER_ID/.test(partial?.error || ''),
+    'with ASC_KEY_ID, ASC_ISSUER_ID and ASC_KEY_PATH it signs in with that API key; with none, as Xcode\'s account; with part of one, it says what\'s missing', { key, partial })
+  const k = R.commands({ build: '1', archive: '/a', options: '/o', exportPath: '/up', auth: key?.args })
+  ok(['archive', 'upload'].every((s) => c[s] && k[s].join(' ').includes((key?.args || ['no key']).join(' '))), 'and passes the key to both steps')
+  ok(R.xcodeTeams({ 'A-1': [{ teamID: 'K6QK66LQDM', teamName: 'T', isFreeProvisioningTeam: false }], 'B-2': [{ teamID: 'X', teamName: 'P', isFreeProvisioningTeam: true }] }).map((t) => `${t.teamID}:${t.free}`).join() === 'K6QK66LQDM:false,X:true', 'it reads which teams the Apple accounts in Xcode are on, and which are free (Personal Team)')
+  // XcodeGen, fetched when there's none: the release CI builds with, checked by the same checksum.
+  const ci = read(ROOT, '.github', 'workflows', 'test.yml')
+  ok(ci.includes(`XCODEGEN_URL: ${R.XCODEGEN.url}`) && ci.includes(`XCODEGEN_SHA256: ${R.XCODEGEN.sha256}`), 'the XcodeGen it fetches is the release CI pins, with the same checksum', R.XCODEGEN)
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
 }

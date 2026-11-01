@@ -123,10 +123,11 @@ so for 15 minutes, then goes. An agent that starts waiting on you also gets its 
 ## Building
 
 - iPhone: needs Xcode (26 or later: the App Store takes nothing older) and XcodeGen
-  (`brew install xcodegen`). `npm run mobile:ios` makes the Xcode project and opens it; choose your
-  team under Signing & Capabilities, for both targets (BridgeAI and Widgets), to run it on your phone.
-  The project is made again each time, so the team is chosen again too. For the Simulator with no
-  signing, from `mobile/ios`:
+  (`brew install xcodegen`). `npm run mobile:ios` makes the Xcode project and opens it, signed by the
+  project's team (`DEVELOPMENT_TEAM` in `ios/project.yml`, both targets). To run it on your phone with
+  an account of your own, choose your team under Signing & Capabilities for both targets (BridgeAI and
+  Widgets), and a bundle ID of your own; the project is made again each time, so they're chosen again
+  too. For the Simulator with no signing, from `mobile/ios`:
   `xcodegen generate && xcodebuild -project BridgeAI.xcodeproj -scheme BridgeAI -sdk iphonesimulator
   -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build`. CI builds it that
   way (Release) on every push and pull request (`.github/workflows/test.yml`), with Swift warnings
@@ -173,45 +174,92 @@ notifications are made on the phone.
 
 ## Releasing to the App Store
 
-What's in the repo: the version (`MARKETING_VERSION` in `ios/project.yml`, set with each release,
-and the build number `CURRENT_PROJECT_VERSION`), the privacy manifest (`BridgeAI/PrivacyInfo.xcprivacy`:
-no tracking, no data collected, and the reason for the one required reason API the app's code uses,
-UserDefaults; the widget uses none), iOS's reasons for the camera, microphone and photos
-(`Info.plist`), the app icon (1024 px, no transparency), the launch screen (light or dark as the
-phone is), iPhone and iPad, and the widget extension for the Live Activity. What only the owner of
-the Apple Developer account can do, in order:
+What's in the repo: the version (`MARKETING_VERSION` in `ios/project.yml`, set with each release),
+the team that signs both targets (`DEVELOPMENT_TEAM`, the Apple Developer team that signs the Mac
+app), with Automatic signing, the privacy manifest (`BridgeAI/PrivacyInfo.xcprivacy`: no tracking,
+no data collected, and the reason for the one required reason API the app's code uses, UserDefaults;
+the widget uses none), export compliance answered in `Info.plist` (below), iOS's reasons for the
+camera, microphone and photos, the app icon (1024 px, no transparency), the launch screen (light or
+dark as the phone is), iPhone and iPad, the widget extension for the Live Activity, and one command
+that archives the app and uploads it.
 
-1. **Apple Developer Program** membership, and its team.
-2. **Identifiers** (Certificates, Identifiers & Profiles): the app `dev.bridge-ai.phone` and the
-   widget extension `dev.bridge-ai.phone.widgets`. No capabilities to add: Live Activities need only
-   Info.plist's `NSSupportsLiveActivities`, and the Keychain needs no entitlement.
-3. **Signing**: the team for both targets in Xcode, Automatic signing; Xcode makes the App Store
-   profiles for both when it uploads.
-4. **The App Store Connect record**: a new iOS app with the bundle ID `dev.bridge-ai.phone`, a name
-   (Bridge AI, if it's free), primary language English, a SKU, category Developer Tools (Productivity
-   second). Price: free. Trader status for the EU (Digital Services Act) on the account.
-5. **App Privacy**: Data Not Collected (below), the privacy policy URL
+### Once, by the owner of the Apple Developer account
+
+1. **Xcode › Settings › Accounts**: sign in with the account's Apple ID (+ › Apple Account).
+   `npm run mobile:ios:release -- --check` says whether an account on the team is there.
+2. **App Store Connect › Apps › + › New App**: iOS, the name (Bridge AI, if it's free), English
+   (U.S.), the bundle ID `dev.bridge-ai.phone`, a SKU, Full Access. If the bundle ID isn't in the list
+   yet, register it from the link under it (an explicit App ID, no capabilities: Live Activities need
+   only Info.plist's `NSSupportsLiveActivities`, and the Keychain needs no entitlement). Xcode
+   registers the widget's, `dev.bridge-ai.phone.widgets`, itself. Category Developer Tools
+   (Productivity second), free, and the trader status for the EU (Digital Services Act) on the
+   account.
+
+### Each release: `npm run mobile:ios:release`
+
+From the repo, after `npm ci`. In order, it:
+
+- checks Xcode (26 or later, with the iOS platform; `DEVELOPER_DIR` if set, else the selected one,
+  else `/Applications/Xcode.app`, never changing which is selected) and that an Apple account on the
+  team is signed in to Xcode (a paid membership, not a Personal Team), and says what to do if not;
+- gets XcodeGen when there's none on the `PATH`: the release CI pins, checked against its checksum,
+  into `ios/build/tools`;
+- builds the demo and Cloud Agents into the app, and makes the Xcode project;
+- sets the build number to the time in UTC, as the date and the time of day (`20261101.143005`), so
+  each upload is higher than the last, even of the same version;
+- archives it (Release, any iPhone or iPad) with `-allowProvisioningUpdates`, into Xcode's own
+  archives, so it's in Window › Organizer too;
+- uploads it with `xcodebuild -exportArchive` and an `ExportOptions.plist` (method
+  `app-store-connect`, destination `upload`, the team, automatic signing, the build number as set);
+- says where to look next. Logs are in `ios/build/release/`.
+
+Xcode makes what signing needs: an Apple Development certificate and profile for the archive, then
+Apple's cloud-managed distribution certificate and the App Store profiles for both targets. The first
+time, macOS may ask whether `codesign` can use the new key in your keychain: your Mac password, then
+Always Allow. Xcode can't make a development profile for a team with no device registered: if it says
+so, connect your iPhone to the Mac once and run it again. An upload fails until the App Store Connect
+record exists (above), and once a version is approved, a new upload needs a higher
+`MARKETING_VERSION`; the script says which.
+
+`--check` only checks. `--unsigned` archives with no signing and no Apple account and stops, to see
+that the archive builds; nothing is signed or uploaded.
+
+**With an App Store Connect API key** instead of an Apple ID in Xcode (for uploads from another Mac,
+or with no one signed in): App Store Connect › Users and Access › Integrations › App Store Connect API
+› Team Keys, a key with Admin access (making the distribution certificate needs it), downloaded once
+as `AuthKey_<id>.p8`. Then:
+
+```
+ASC_KEY_ID=<key id> ASC_ISSUER_ID=<issuer id> ASC_KEY_PATH=/path/to/AuthKey_<id>.p8 npm run mobile:ios:release
+```
+
+`ASC_KEY_PATH` can be left out when the key is in `~/.appstoreconnect/private_keys/`. Part of a key
+(one of the three missing) is refused, not ignored. Keep the `.p8` out of every repo.
+
+### Then, in App Store Connect
+
+1. **TestFlight first**: internal testers (no review), on a real iPhone: pairing by QR code,
+   dictation held on the mic button (iOS asks for the mic then, once), a voice note, a meeting with
+   the screen kept on, a file opened in a new tab, the Live Activity, two computers with one off,
+   Cloud Agents with a real key.
+2. **The version page**: its number the same as `MARKETING_VERSION`; the screenshots; the build;
+   App Review's notes (below) and a short video of pairing.
+3. **App Privacy**: Data Not Collected (below), the privacy policy URL
    `https://github.com/sahil1/bridge/blob/main/PRIVACY.md` (also linked on the app's first screen and
    in Settings › About & Updates), a support URL (`https://github.com/sahil1/bridge/issues`) and the
    marketing URL (`https://sahil1.github.io/bridge/`).
-6. **Age rating**: the questionnaire, answered for what the app is (a developer tool; it shows what
+4. **Age rating**: the questionnaire, answered for what the app is (a developer tool; it shows what
    your own agents write, and opens web links in Safari, not in the app).
-7. **Export compliance** (below): the answers, then `ITSAppUsesNonExemptEncryption` in `Info.plist`
-   so they aren't asked for each upload.
-8. **Screenshots**: App Store Connect wants iPhone 6.3" (1206 × 2622 or 1179 × 2556; iPhone 17,
-   17 Pro) and, since the app runs on iPad, iPad 13" (2064 × 2752 or 2048 × 2732); 6.9"
-   (1320 × 2868) is accepted and scaled down. The Simulator's iPhone 17, iPhone 18 Pro Max and iPad
-   Pro 13-inch take them at exactly those sizes (`xcrun simctl io booted screenshot`, after
-   `xcrun simctl status_bar booted override --time 9:41`). From April 2027 an app built with the
-   iOS 27.1 SDK or later also needs iPhone Duo pictures.
-9. **Archive and upload**: Product › Archive (Any iOS Device), Distribute App › App Store Connect.
-   Each upload of the same version needs a higher build number: let the upload raise it, or raise
-   `CURRENT_PROJECT_VERSION`.
-10. **TestFlight first**: internal testers (no review), on a real iPhone: pairing by QR code,
-    dictation held on the mic button (iOS asks for the mic then, once), a voice note, a meeting with
-    the screen kept on, a file opened in a new tab, the Live Activity, two computers with one off,
-    Cloud Agents with a real key. Then external testers (a short beta review), then **Submit for
-    Review** with the notes below.
+5. **Submit for Review**.
+
+**Screenshots**: App Store Connect requires iPhone 6.3" (1206 × 2622 or 1179 × 2556) and, since the
+app runs on iPad, iPad 13" (2064 × 2752 or 2048 × 2732); 6.9" (1320 × 2868) is optional. Up to ten
+each, PNG or JPEG with no alpha channel. The Simulator's iPhone 17 Pro, iPhone 17 Pro Max and iPad
+Pro 13-inch take them at exactly those sizes (`xcrun simctl io booted screenshot`, after
+`xcrun simctl status_bar booted override --time 9:41`); a debug build opens the demo with
+`-open demo` (Building, above). Simulator pictures have an alpha channel: flatten them first. From
+April 2027 an app built with the iOS 27.1 SDK or later also needs iPhone Duo pictures, and Xcode 27.2
+builds with the iOS 27.2 SDK.
 
 ### Export compliance
 
@@ -225,18 +273,18 @@ system" needs no documentation; "an industry standard algorithm, not provided wi
 operating system" needs the French declaration, only for the App Store in France; proprietary
 algorithms need a CCATS too.
 
-The choice:
+The answer taken: **exempt**, as the facts above support. `Info.plist` says so
+(`<key>ITSAppUsesNonExemptEncryption</key><false/>`), so App Store Connect doesn't ask at each upload
+and no documentation is needed, in France or anywhere. Where App Store Connect asks anyway: the app
+uses encryption, and only the encryption within Apple's operating system ("None of the algorithms
+mentioned above" for proprietary or other standard ones). Apple's page notes a year-end
+self-classification report to the US government may be needed for exempt encryption; check the
+current EAR rules for mass-market software (5D992.c).
 
-- **Exempt** (what the facts above support): in App Store Connect, encryption is used, limited to
-  what's in Apple's operating system; then `<key>ITSAppUsesNonExemptEncryption</key><false/>` in
-  `Info.plist`. Apple's page notes a year-end self-classification report to the US government may be
-  needed for exempt encryption; check the current EAR rules for mass-market software (5D992.c).
-- **Not exempt**, read strictly (the app sets up its own encrypted channel, even with iOS's
-  algorithms): standard algorithms, the French declaration (or no App Store in France), then
-  `ITSAppUsesNonExemptEncryption` true and `ITSEncryptionExportComplianceCode` with the code Apple
-  gives.
-
-Until one is chosen the key stays out, and App Store Connect asks at each upload.
+Were it read strictly instead (the app sets up its own encrypted channel, even with iOS's
+algorithms), the answer would be standard algorithms, the French declaration (or no App Store in
+France), `ITSAppUsesNonExemptEncryption` true and `ITSEncryptionExportComplianceCode` with the code
+Apple gives.
 
 ### Notes for App Review
 
@@ -247,8 +295,9 @@ Until one is chosen the key stays out, and App Store Connect asks at each upload
 > to buy.
 >
 > To review it without a computer: on the first screen, tap **Try the demo**. It's the whole of
-> Bridge AI on made-up agents, run inside the app with no network. "Pair a computer" or Back returns
-> to the first screen. **Cloud Agents** (first screen, or a long press on the app icon) runs agents
+> Bridge AI on made-up agents, run inside the app with no network; **See everything** in its strip
+> at the top shows a computer with a busy day. "Pair a computer" in the strip, or Back on Android,
+> returns to the first screen. **Cloud Agents** (first screen, or a long press on the app icon) runs agents
 > on Cursor, GitHub Copilot, Jules or Claude with the user's own API key, kept in the Keychain and
 > sent only to that provider; the demo has made-up cloud agents to look at without a key.
 >
