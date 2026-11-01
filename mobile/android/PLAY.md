@@ -6,6 +6,11 @@ release builds are shrunk with R8 and signed with your upload key from outside t
 screenshots and every Play Console answer are in [play/](play) ([play/console.md](play/console.md)).
 The privacy policy is [PRIVACY.md](../../PRIVACY.md).
 
+The app is already out as an APK on each release (`Bridge-AI-android.apk`, signed by CI with the
+release key from `npm run android:key`; [../README.md](../README.md#the-android-apk)). Play has to
+sign it with **that same key**, so the people who installed the APK can update from Play and back
+without uninstalling: step 2 says how, and it's chosen at the first upload.
+
 What only you can do, in order:
 
 ## 1. The developer account
@@ -20,18 +25,49 @@ At https://play.google.com/console/signup. Two kinds:
   (free from Dun & Bradstreet, up to 30 days to get), the organization's website and phone.
 
 Android's developer verification (2026 and 2027) needs nothing more: an account that finished Play's
-identity check counts as verified, and Play registers its apps.
+identity check counts as verified, and Play registers its apps. Register the APK from the website
+there too (Play Console registers apps outside Play), unless the Android Developer Console already
+has it.
 
-## 2. The upload key
+## 2. The keys
 
-You sign each bundle with this key; Google re-signs the app for phones with its own key (Play App
-Signing). Make it once, outside the repo:
+Two keys, kept apart:
+
+- **The app signing key** is what phones check: an update installs only when it's signed with the
+  same key as the app already there. It's the **release key** that signs the APK on the website
+  (`~/Library/Application Support/Bridge AI Release/android-release.p12`, alias `bridge-ai`, its
+  password in the login Keychain as "Bridge AI Android release key"). Google signs what Play
+  delivers with it (Play App Signing), so you give Play a copy, once, before the first upload. It
+  can never change for the people who have the app, so it's the one to never lose.
+- **The upload key** is only for Play: you sign each bundle with it, Google checks that, then
+  re-signs the app with the app signing key. It can be reset if it's ever lost or leaked.
+
+Giving Play the release key: in Play Console, at the first release (or Test and release › App
+integrity › Play app signing), choose to use your own key, by **Export and upload a key from Java
+keystore** (the wording may differ a little). Play gives you its PEPK tool and an encryption key,
+and the command to run; with Android Studio's Java it's close to:
+
+```sh
+"/Applications/Android Studio.app/Contents/jbr/Contents/Home/bin/java" -jar pepk.jar \
+  --keystore="$HOME/Library/Application Support/Bridge AI Release/android-release.p12" --alias=bridge-ai \
+  --output=bridge-ai-signing-key.zip --include-cert --rsa-aes-encryption --encryption-key-path=encryption_public_key.pem
+```
+
+The password it asks for: `security find-generic-password -s "Bridge AI Android release key" -a bridge-ai -w`.
+Upload the zip, then the upload key's certificate (below) when Play asks for one, and delete the
+zip. **Don't accept the key Google offers to make**: Play's app would then be signed differently
+from the website's, and nobody could move between them without uninstalling and pairing again.
+
+The upload key: make it once, outside the repo:
 
 ```sh
 mkdir -p ~/.android-keys && cd ~/.android-keys
 "/Applications/Android Studio.app/Contents/jbr/Contents/Home/bin/keytool" -genkeypair -v \
   -keystore bridge-upload.jks -alias upload -keyalg RSA -keysize 4096 -validity 10000 -dname "CN=Bridge AI"
 chmod 600 bridge-upload.jks
+# Its certificate, for Play Console:
+"/Applications/Android Studio.app/Contents/jbr/Contents/Home/bin/keytool" -export -rfc \
+  -keystore bridge-upload.jks -alias upload -file upload_certificate.pem
 ```
 
 Use a long random password from your password manager (the same one for the store and the key is
@@ -49,8 +85,9 @@ BRIDGE_UPLOAD_KEY_ALIAS=upload
 BRIDGE_UPLOAD_KEY_PASSWORD=<the password>
 ```
 
-Environment variables with the same names work too (for CI). Without them the build still works
-but says it's unsigned, and Play won't take it.
+Environment variables with the same names work too. Without them the build still works but says
+it's unsigned, and Play won't take it. (CI's APK doesn't use these: it's built unsigned and signed
+with the release key afterwards, `.github/workflows/android.yml`.)
 
 ## 3. Build
 
@@ -79,8 +116,9 @@ you do:
 
 1. Make a Google Group for testers (or use an email list).
 2. Play Console › Closed testing: create a track, add the group as testers,
-   create a release and upload the AAB. The first upload asks you to accept Play App Signing: accept
-   the Google-generated key. Add release notes and send it for review (hours to a few days).
+   create a release and upload the AAB. The first upload asks about Play App Signing: use your own
+   key, the release key (step 2), not the one Google offers to make. Add release notes and send it
+   for review (hours to a few days).
 3. Send testers the opt-in link from the track's Testers tab. On their phone they open it with the
    Google account in the group, accept, and install from Play. They need an Android phone; having
    Bridge AI on a computer makes their feedback useful but isn't needed to count.
@@ -110,12 +148,19 @@ reports in Android vitals). The listing goes live once the review passes.
 3. Play Console › Production › Create release, upload the AAB, paste the phone parts of the
    changelog as release notes (500 characters), roll out.
 
+The APK on the website comes with the release by itself. It and Play's app have the same version
+code and the same signing key, so a phone takes either as an update of the other.
+
 Each August Google raises the minimum target (expect API 37 by August 2027). Before then, raise
 `compileSdk` and `targetSdk` in `app/build.gradle.kts`, read Android's behavior changes for that
 version, and test on an emulator.
 
 ## Risks
 
+- **Play App Signing with Google's key.** If the first upload ever takes the key Google makes, the
+  app on Play and the APK on the website are different apps to Android: installing one over the
+  other fails, and moving means uninstalling and pairing again. The key is picked at the first
+  upload (changing it later is a key upgrade, which doesn't reach every phone), so do step 2 first.
 - **App access.** Reviewers can't pair without Bridge AI on a computer, and pairing codes last 15
   minutes, so there's no lasting login to give them. Instead, **Try the demo** on the start screen
   opens the whole app on made-up agents, bundled in it (`npm run demo:build`, built into the app's

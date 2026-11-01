@@ -1,6 +1,8 @@
 # Runs the tests on macOS, Windows and Linux (test.yml), then builds the desktop app on each,
 # smoke-tests each build, and publishes a GitHub release with all of them. Nothing is built when a
-# test fails.
+# test fails. The Android app (android.yml) is built alongside and goes in when it's built and
+# signed; without the release key, or when its build fails, the release goes out without it (the
+# run says why), and android-apk.yml adds it afterwards.
 #   Pushing a tag v<version> (npm run release does this) builds and publishes that release.
 #   Running it by hand (Actions › Release › Run workflow) only builds and tests; the installers
 #   are attached to the run so you can try them.
@@ -140,10 +142,21 @@ jobs:
             desktop/dist/Bridge-AI-*.AppImage
             desktop/dist/Bridge-AI-*.deb
 
+  # Signed with the release key (scripts/android-key.sh sets these three secrets).
+  android:
+    name: Android
+    needs: test
+    uses: ./.github/workflows/android.yml
+    secrets:
+      BRIDGE_ANDROID_P12: ${{ secrets.BRIDGE_ANDROID_P12 }}
+      BRIDGE_ANDROID_PASSWORD: ${{ secrets.BRIDGE_ANDROID_PASSWORD }}
+      BRIDGE_ANDROID_ALIAS: ${{ secrets.BRIDGE_ANDROID_ALIAS }}
+
   release:
     name: Publish the release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    # Waits for the Android app, but only the desktop builds decide: the APK never holds a release up.
+    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v') && needs.build.result == 'success' }}
+    needs: [build, android]
     runs-on: ubuntu-latest
     # Writes the release, and signs where each download was built (GitHub's build provenance:
     # gh attestation verify <file> --repo sahil1/bridge).
@@ -163,7 +176,7 @@ jobs:
 
       - name: Notes and checksums
         run: |
-          node scripts/release.js --notes notes.md
+          node scripts/release.js --notes notes.md $([ -f out/Bridge-AI-android.apk ] && echo --android)
           cd out && sha256sum Bridge-AI-* > SHA256SUMS.txt && cat SHA256SUMS.txt
 
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2

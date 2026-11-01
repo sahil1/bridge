@@ -1,0 +1,175 @@
+# The Android app (mobile/android) as an APK anyone can install: Bridge-AI-android.apk.
+#   release.yml calls this for each release, signed with the release key: three secrets that
+#   `npm run android:key` sets once (scripts/android-key.sh). Without them it says so, builds
+#   nothing, and the release goes out without the APK.
+#   android-apk.yml calls it to add the APK to a release that came out without one.
+#   test.yml calls it on each push and pull request with a throwaway key made the same way
+#   (android-key.sh --dry-run): the debug APK, and the release APK shrunk and signed as it ships,
+#   so a change that breaks the build or its signing shows up before a release.
+# Gradle builds the APK unsigned, and apksigner signs it in a step of its own afterwards (v2 and
+# v3 signatures), so the key never reaches Gradle or npm. Then it's checked: signed by that key
+# and no other, the version the tag says, the bundled UIs inside.
+name: Android app
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: What to build (a release's tag); empty for the commit that called this
+        type: string
+        default: ''
+      throwaway-key:
+        description: Sign with a key made for the run, as a check, when there's no release key
+        type: boolean
+        default: false
+    secrets:
+      BRIDGE_ANDROID_P12:
+        required: false
+      BRIDGE_ANDROID_PASSWORD:
+        required: false
+      BRIDGE_ANDROID_ALIAS:
+        required: false
+    outputs:
+      signed-with:
+        description: release, throwaway, or empty when nothing was built
+        value: ${{ jobs.apk.outputs.signed-with }}
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    name: Android app
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      signed-with: ${{ steps.key.outputs.kind }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Check for personal data
+        run: node scripts/check-private.js
+
+      # The release key, a throwaway one, or neither (said plainly, and the rest is skipped).
+      - name: The signing key
+        id: key
+        shell: bash
+        env:
+          P12: ${{ secrets.BRIDGE_ANDROID_P12 }}
+          PASSWORD: ${{ secrets.BRIDGE_ANDROID_PASSWORD }}
+          ALIAS: ${{ secrets.BRIDGE_ANDROID_ALIAS }}
+          THROWAWAY: ${{ inputs.throwaway-key }}
+        run: |
+          key="$RUNNER_TEMP/android-key"
+          mkdir -p -m 700 "$key"
+          if [ -n "$P12" ] && [ -n "$PASSWORD" ] && [ -n "$ALIAS" ]; then
+            printf '%s' "$P12" | base64 -d > "$key/android-release.p12" || { echo "::error::BRIDGE_ANDROID_P12 isn't a keystore in base64. Set it again: npm run android:key -- --secrets"; exit 1; }
+            BRIDGE_KEY_PASS="$PASSWORD" openssl pkcs12 -in "$key/android-release.p12" -noout -passin env:BRIDGE_KEY_PASS 2>/dev/null ||
+              { echo "::error::BRIDGE_ANDROID_PASSWORD doesn't open BRIDGE_ANDROID_P12. Set them again: npm run android:key -- --secrets"; exit 1; }
+            echo "kind=release" >> "$GITHUB_OUTPUT"
+          elif [ "$THROWAWAY" = true ]; then
+            bash scripts/android-key.sh --dry-run --out "$key"
+            echo "kind=throwaway" >> "$GITHUB_OUTPUT"
+          else
+            missing=
+            [ -n "$P12" ] || missing="$missing BRIDGE_ANDROID_P12"
+            [ -n "$PASSWORD" ] || missing="$missing BRIDGE_ANDROID_PASSWORD"
+            [ -n "$ALIAS" ] || missing="$missing BRIDGE_ANDROID_ALIAS"
+            msg="There's no Android release key on this repo (${missing# } not set), so no Bridge-AI-android.apk is built; everything else goes on as usual. To add the APK: run npm run android:key on your Mac, then Actions › Android APK for a release › Run workflow, with this release's tag."
+            echo "::warning title=No Android APK::$msg"
+            printf '### No Android APK\n\n%s\n' "$msg" >> "$GITHUB_STEP_SUMMARY"
+            echo "kind=" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Only the UIs bundled in the app are built (by Gradle, with npm), so no native modules.
+      - name: Install
+        if: steps.key.outputs.kind
+        run: npm ci --no-audit --no-fund --ignore-scripts
+
+      # Unsigned on purpose (Gradle's warning that Google Play won't take it is expected): it's
+      # signed in the next step. The bundled UIs (the demo, Cloud agents) are built by Gradle,
+      # through the shell named here (app/build.gradle.kts).
+      - name: Build
+        if: steps.key.outputs.kind
+        working-directory: mobile/android
+        env:
+          SHELL: /bin/bash
+        run: ./gradlew --no-daemon --stacktrace assembleRelease ${{ steps.key.outputs.kind == 'throwaway' && 'assembleDebug' || '' }}
+
+      - name: Sign
+        if: steps.key.outputs.kind
+        shell: bash
+        env:
+          KIND: ${{ steps.key.outputs.kind }}
+          PASSWORD: ${{ secrets.BRIDGE_ANDROID_PASSWORD }}
+          ALIAS: ${{ secrets.BRIDGE_ANDROID_ALIAS }}
+        run: |
+          key="$RUNNER_TEMP/android-key"
+          if [ "$KIND" = throwaway ]; then pass="file:$key/password.txt"; ALIAS=bridge-ai; else pass=env:PASSWORD; fi
+          bt=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          echo "Build tools $(basename "$bt")"
+          "$bt/zipalign" -f 4 mobile/android/app/build/outputs/apk/release/app-release-unsigned.apk "$RUNNER_TEMP/aligned.apk"
+          "$bt/apksigner" sign --ks "$key/android-release.p12" --ks-type PKCS12 --ks-key-alias "$ALIAS" --ks-pass "$pass" \
+            --v1-signing-enabled false --v2-signing-enabled true --v3-signing-enabled true --v4-signing-enabled false \
+            --out Bridge-AI-android.apk "$RUNNER_TEMP/aligned.apk"
+          # The certificate it should be signed with, for the check below; then the key goes.
+          if [ "$KIND" = throwaway ]; then BRIDGE_KEY_PASS=$(cat "$key/password.txt"); else BRIDGE_KEY_PASS=$PASSWORD; fi
+          BRIDGE_KEY_PASS="$BRIDGE_KEY_PASS" openssl pkcs12 -in "$key/android-release.p12" -nokeys -clcerts -passin env:BRIDGE_KEY_PASS |
+            openssl x509 -noout -fingerprint -sha256 | sed 's/^[^=]*=//; s/://g' | tr 'A-F' 'a-f' > "$RUNNER_TEMP/want-cert.txt"
+          rm -rf "$key"
+
+      - name: Check it
+        if: steps.key.outputs.kind
+        shell: bash
+        env:
+          REF: ${{ inputs.ref }}
+          KIND: ${{ steps.key.outputs.kind }}
+        run: |
+          fail() { echo "::error::$*"; exit 1; }
+          bt=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          apk=Bridge-AI-android.apk
+          v=$("$bt/apksigner" verify --verbose --print-certs "$apk") || { echo "$v"; fail "apksigner doesn't verify $apk"; }
+          echo "$v"
+          grep -q 'Verified using v2 scheme (APK Signature Scheme v2): true' <<<"$v" || fail "$apk has no v2 signature"
+          grep -q 'Verified using v3 scheme (APK Signature Scheme v3): true' <<<"$v" || fail "$apk has no v3 signature"
+          [ "$(grep -c '^Signer #[0-9]* certificate SHA-256 digest:' <<<"$v")" = 1 ] || fail "$apk should have exactly one signer"
+          got=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' <<<"$v")
+          [ "$got" = "$(cat "$RUNNER_TEMP/want-cert.txt")" ] || fail "$apk is signed with $got, not the key it was given"
+          version=$(node -p "require('./package.json').version")
+          [ -z "$REF" ] || [ "$REF" = "v$version" ] || fail "$REF has version $version in its package.json"
+          badging=$("$bt/aapt2" dump badging "$apk")
+          head -1 <<<"$badging"
+          grep -q "^package: name='dev.bridgeai.phone' .*versionName='$version'" <<<"$badging" || fail "$apk isn't dev.bridgeai.phone $version"
+          for f in assets/demo/index.html assets/cloud/index.html assets/cloud/providers.json; do
+            unzip -l "$apk" "$f" > /dev/null || fail "$apk has no $f"
+          done
+          if [ -f mobile/android/app/build/outputs/apk/debug/app-debug.apk ]; then
+            "$bt/apksigner" verify mobile/android/app/build/outputs/apk/debug/app-debug.apk || fail "the debug APK doesn't verify"
+          fi
+          sha256sum "$apk"
+          printf '### Android app\n\n`%s`, %s, signed with the %s key (certificate SHA-256 `%s`)\n' "$apk" "$version" "$KIND" "$got" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.key.outputs.kind == 'release'
+        with:
+          name: bridge-ai-android
+          path: Bridge-AI-android.apk
+          if-no-files-found: error
+
+      # A check's debug build, to try a pull request on a phone (adb install). Never the
+      # throwaway-signed one: it isn't any release's.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.key.outputs.kind == 'throwaway'
+        with:
+          name: bridge-ai-android-debug
+          path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7

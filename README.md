@@ -6,7 +6,7 @@ Bridge AI runs on your device. Your agents use their own logins; Bridge AI only 
 
 [![Bridge AI 3.0 in under a minute, with sound](site/poster.jpg)](https://sahil1.github.io/bridge/)
 
-**[Download](https://sahil1.github.io/bridge/)** for macOS, Windows or Linux (the page offers the one for your computer, Apple Silicon or Intel) · **[Try the demo](https://sahil1.github.io/bridge/demo/)** in your browser, with made-up agents · [All releases](https://github.com/sahil1/bridge/releases/latest)
+**[Download](https://sahil1.github.io/bridge/)** for macOS, Windows or Linux (the page offers the one for your computer, Apple Silicon or Intel), and the [Android app](#android) · **[Try the demo](https://sahil1.github.io/bridge/demo/)** in your browser, with made-up agents · [All releases](https://github.com/sahil1/bridge/releases/latest)
 
 ## Install
 
@@ -44,11 +44,22 @@ curl -fsSL https://raw.githubusercontent.com/sahil1/bridge/main/install.sh | sh
 
 On Debian and Ubuntu it installs the `.deb` (it asks for your password); elsewhere, or without sudo, it unpacks the AppImage into `~/.local/share/bridge-ai` (no FUSE needed) with a menu entry and a `bridge-ai` command. 64-bit Intel/AMD only for now. Both files are also on the [Releases](https://github.com/sahil1/bridge/releases/latest) page.
 
+### Android
+
+The phone app, for Bridge AI on your computer: on your phone, download [`Bridge-AI-android.apk`](https://github.com/sahil1/bridge/releases/latest/download/Bridge-AI-android.apk), then:
+
+1. Allow installs from your browser or Files: when Android says it can't install apps from this source, tap **Settings** and turn on **Allow from this source**.
+2. Open `Bridge-AI-android.apk` and tap **Install**.
+3. Open Bridge AI and scan the QR code from your computer: **Settings › Devices › Pair a device**.
+
+It isn't on Google Play yet. To update, install a newer APK over it; your computers stay paired. Its SHA-256 is in the release's `SHA256SUMS.txt`, and it has a build attestation like every release file ([SECURITY.md](SECURITY.md)). With no computer yet, it has Try the demo and Cloud Agents. More in [mobile/](mobile).
+
 ### Removing it
 
 - **macOS**: quit Bridge AI and move it from Applications to the Trash.
 - **Windows**: Settings › Apps › Installed apps › Bridge AI › Uninstall.
 - **Linux**: `sudo apt remove bridge-ai-desktop` where it came as a `.deb` (Debian, Ubuntu); otherwise delete `~/.local/share/bridge-ai`, `~/.local/bin/bridge-ai` and the menu entry, `~/.local/share/applications/dev.bridge-ai.app.desktop` (`bridge-ai.desktop` if it was installed before 3.7.1).
+- **Android**: touch and hold Bridge AI, then **App info › Uninstall**.
 
 Your settings, meeting notes and the rest stay in `~/.bridge-ai` in case you install it again; delete that folder to remove them too.
 
@@ -360,20 +371,22 @@ To publish a release:
 2. Commit, merge to `main`, and check out `main`.
 3. `npm run release`.
 
-`npm run release` checks that `main` has your code, the changelog has that version, and the tag is new, then pushes the tag `v<version>`. GitHub Actions ([release.yml](.github/workflows/release.yml)) builds the app on macOS, Windows and Linux, starts each build and checks it works (`scripts/smoke.js`), and publishes the release with every installer, checksums, and the changelog section as notes. It takes about 15 minutes; if any platform fails, nothing is published. Try `npm run release -- --dry-run` first.
+`npm run release` checks that `main` has your code, the changelog has that version, and the tag is new, then pushes the tag `v<version>`. GitHub Actions ([release.yml](.github/workflows/release.yml)) builds the app on macOS, Windows and Linux, starts each build and checks it works (`scripts/smoke.js`), and publishes the release with every installer, checksums, and the changelog section as notes. It takes about 15 minutes; if any desktop platform fails, nothing is published. Try `npm run release -- --dry-run` first.
+
+The Android app is built alongside ([android.yml](.github/workflows/android.yml)) and signed with the release key, which `npm run android:key` makes once on a Mac (`scripts/android-key.sh`: the key in `~/Library/Application Support/Bridge AI Release`, its password in the login keychain, and three repo secrets, `BRIDGE_ANDROID_P12`, `BRIDGE_ANDROID_PASSWORD` and `BRIDGE_ANDROID_ALIAS`). It never holds a release up: without the key, or if its build fails, the release goes out without `Bridge-AI-android.apk` and the run says why; then Actions › Android APK for a release › Run workflow, with the release's tag, adds it. Never make a second key: Android updates an app only with one signed by the same key, so phones would have to uninstall it.
 
 You can also run the builds without releasing: Actions › Release › Run workflow. The installers are attached to the run.
 
 ## On your phone
 
-Bridge AI works on your phone as an app on the Home Screen, with notifications when an agent needs you or finishes. It's the same app, served by your computer, so you don't need an app store; there are also iPhone and Android apps ([mobile/](mobile)) that add a lock-screen card and a demo. There are two ways to reach your computer; both are optional, and Bridge AI works the same on the computer without either.
+Bridge AI works on your phone as an app on the Home Screen, with notifications when an agent needs you or finishes. It's the same app, served by your computer, so you don't need an app store; there are also iPhone and Android apps ([mobile/](mobile)) that add a lock-screen card and a demo (the Android one is [a download](#android)). There are two ways to reach your computer; both are optional, and Bridge AI works the same on the computer without either.
 
 ### From anywhere, through your own relay
 
 A small relay ([relay/](relay)) runs on your own free Cloudflare account. Bridge AI keeps one outgoing connection to it, and your phone reaches your computer through it. There's no VPN to keep connected, nothing to install on the phone, and no port opened on the computer.
 
 1. In Bridge AI, open **Settings › Devices** and click **Sign in with Cloudflare** (or use an API token made with Cloudflare's "Edit Cloudflare Workers" template). Bridge AI deploys the relay to your account. Its sign-in is kept apart from any other Cloudflare tools you use. Signing in this way needs Node.js; on a computer without it, **Install Node.js** puts the official version from nodejs.org in Bridge AI's own folder, with no password, and signs you in right after.
-2. Click **Pair a phone** and scan the QR code with the phone's camera (or open the relay's address and type the code).
+2. Click **Pair a device** and scan the QR code with the phone's camera (or open the relay's address and type the code).
 3. Add it to the Home Screen: iPhone, Share › **Add to Home Screen**; Android, ⋮ › **Install app**. Open it from there, and type the code again if it asks.
 4. In Bridge AI on the phone, go to **Settings › Devices** and click **Turn on notifications**.
 

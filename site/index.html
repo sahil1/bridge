@@ -68,6 +68,13 @@
   .files { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
   .files a { font-size: 13.5px; border: 1px solid var(--line); background: var(--pane); border-radius: 999px; padding: 6px 12px; color: var(--ink-2); }
   .files a:hover { color: var(--ink); text-decoration: none; }
+  .phone { margin-top: 28px; background: var(--pane); border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
+  .phone[hidden] { display: none; }
+  .phone-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .phone h3 { margin: 0; font-size: 16px; }
+  .phone ol { margin: 12px 0 0; padding-left: 22px; color: var(--ink-2); font-size: 14.5px; }
+  .phone li + li { margin-top: 4px; }
+  .phone code { font-size: 13px; }
   footer { border-top: 1px solid var(--line); padding: 24px 0 40px; color: var(--ink-3); font-size: 13px; }
   footer nav { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 10px; }
   @media (max-width: 760px) {
@@ -129,6 +136,19 @@
       <a href="https://github.com/sahil1/bridge/releases/latest/download/Bridge-AI-linux-x86_64.AppImage">Linux (.AppImage)</a>
       <a href="https://github.com/sahil1/bridge/releases/latest/download/Bridge-AI-linux-amd64.deb">Debian, Ubuntu (.deb)</a>
     </div>
+    <!-- Shown once the latest release has the APK (the script below asks GitHub), so it never links to a file that isn't there. -->
+    <div class="phone" id="android" hidden>
+      <div class="phone-head">
+        <h3>On your Android phone</h3>
+        <a class="btn" id="apk" href="https://github.com/sahil1/bridge/releases/latest/download/Bridge-AI-android.apk">Download for Android (.apk)</a>
+      </div>
+      <ol>
+        <li>Allow installs from your browser or Files: when Android says it can't install apps from this source, tap Settings and turn on Allow from this source.</li>
+        <li>Open <code>Bridge-AI-android.apk</code> and tap Install.</li>
+        <li>Open Bridge AI and scan the QR code from your computer: Settings › Devices › Pair a device.</li>
+      </ol>
+      <p class="note">It isn't on Google Play yet. To update, install a newer APK over it; your computers stay paired. Its SHA-256 is in the release's <a href="https://github.com/sahil1/bridge/releases/latest/download/SHA256SUMS.txt">SHA256SUMS.txt</a>. With no computer yet, it has Try the demo and Cloud Agents.</p>
+    </div>
   </section>
 
   <section>
@@ -176,9 +196,17 @@
       dl.href = base + (deb ? 'Bridge-AI-linux-amd64.deb' : 'Bridge-AI-linux-x86_64.AppImage')
       lead.innerHTML = deb ? '.deb for Debian and Ubuntu · <a href="' + base + 'Bridge-AI-linux-x86_64.AppImage">AppImage?</a>' : 'AppImage · <a href="' + base + 'Bridge-AI-linux-amd64.deb">.deb for Debian, Ubuntu</a>'
     }
-    // The version number, if GitHub answers (the page works without it).
+    // The version number, if GitHub answers (the page works without it), and the Android app once
+    // the latest release has it: until GitHub says so, nothing links to it.
     fetch('https://api.github.com/repos/sahil1/bridge/releases/latest').then(function (r) { return r.ok ? r.json() : null }).then(function (j) {
       if (j && j.tag_name) document.getElementById('ver').textContent = 'version ' + j.tag_name.replace(/^v/, '')
+      var apk = document.getElementById('apk')
+      if (!j || !j.assets || !j.assets.some(function (a) { return a && a.name === 'Bridge-AI-android.apk' })) return
+      document.getElementById('android').hidden = false
+      if (/Android/i.test(ua)) {
+        dl.textContent = 'Download for Android'; dl.href = apk.href
+        lead.innerHTML = 'The phone app, for Bridge AI on your computer · <a href="#install">How to install it</a>'
+      }
     }).catch(function () {})
     // No video yet: show the poster or nothing rather than an empty player.
     var v = document.getElementById('video')

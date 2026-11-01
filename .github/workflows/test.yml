@@ -1,8 +1,8 @@
 # Bridge AI's tests (test/run.mjs) on macOS, Windows and Linux: on every push to main and every pull
 # request, and before a release is built (release.yml runs this first). The app's tests run in
 # Chromium everywhere, and in WebKit (the engine of Safari and the iPhone app) on macOS too, where
-# the iPhone app is also built for the Simulator. When something fails, the logs and screenshots are
-# kept with the run for a week.
+# the iPhone app is also built for the Simulator; the Android app is built on Linux. When something
+# fails, the logs and screenshots are kept with the run for a week.
 name: Tests
 
 on:
@@ -110,3 +110,13 @@ jobs:
           path: test/.out
           include-hidden-files: true
           retention-days: 7
+
+  # The Android app (mobile/android), built as it ships, with a key made for the run
+  # (android-key.sh --dry-run): the debug APK, and the release APK shrunk by R8 and signed as a
+  # release's is, so a change that breaks either shows up here. Not when release.yml runs these
+  # tests for a tag: it builds the real one itself, and nothing here may hold up a desktop release.
+  android:
+    if: github.ref_type != 'tag'
+    uses: ./.github/workflows/android.yml
+    with:
+      throwaway-key: true
