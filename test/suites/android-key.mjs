@@ -169,6 +169,8 @@ else {
       ok(by.BRIDGE_ANDROID_PASSWORD?.value === item?.pw && by.BRIDGE_ANDROID_ALIAS?.value === 'bridge-ai', 'BRIDGE_ANDROID_PASSWORD its password, BRIDGE_ANDROID_ALIAS bridge-ai')
       ok(sets.length === 3 && sets.every((x) => x.body === undefined), 'each sent to gh on its standard input, not its command line')
       ok(!!kr.fingerprint && real.stdout.includes(kr.fingerprint) && /Back it up/.test(real.stdout) && /password manager/.test(real.stdout), 'it shows the certificate\'s SHA-256 and says to back up the file and its password', real.stdout)
+      const version = JSON.parse(read('package.json')).version
+      ok(real.stdout.includes(`gh workflow run android-apk.yml --repo sahil1/bridge -f tag=v${version}`), 'and how to add the APK to a release already out, this checkout\'s', real.stdout.slice(-300))
       ok(!!item?.pw && !text.includes(item.pw), 'and never shows the password')
 
       const kept = sha(t.key)

@@ -1,17 +1,17 @@
-# Adds the Android app to a release that came out without it: 3.8.0 (out before the APK was), or
+# Adds the Android app to a release that came out without it: 3.8.1 (out before the APK was), or
 # one published while the release key wasn't set up or the Android build failed. Builds
 # Bridge-AI-android.apk from that release's tag, signed with the release key (android.yml), signs
 # where it was built (an attestation, as release.yml does), and uploads it to the release with its
 # line in SHA256SUMS.txt. Run again, it replaces the APK and its line.
 #   Actions › Android APK for a release › Run workflow, or
-#   gh workflow run android-apk.yml --repo sahil1/bridge -f tag=v3.8.0
+#   gh workflow run android-apk.yml --repo sahil1/bridge -f tag=v3.8.1
 name: Android APK for a release
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: The release's tag, like v3.8.0
+        description: The release's tag, like v3.8.1
         required: true
         type: string
 
@@ -32,7 +32,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
         run: |
-          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::\"$TAG\" isn't a release's tag (like v3.8.0)"; exit 1; }
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::\"$TAG\" isn't a release's tag (like v3.8.1)"; exit 1; }
           state=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,assets --jq '"draft=\(.isDraft) sums=\(any(.assets[]; .name == "SHA256SUMS.txt"))"') ||
             { echo "::error::There's no release $TAG"; exit 1; }
           [ "$state" = "draft=false sums=true" ] || { echo "::error::$TAG is a draft, or has no SHA256SUMS.txt ($state)"; exit 1; }

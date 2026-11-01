@@ -201,7 +201,7 @@ links it. Installing a newer one over it updates it, keeping its pairings.
   the desktop release isn't held up (nor when the Android build fails). **Actions › Android APK for
   a release › Run workflow**, with the release's tag (`.github/workflows/android-apk.yml`), builds
   it from that tag and adds it to the release, with its checksum line and attestation. That's also
-  how 3.8.0, out before the APK was, gets it.
+  how 3.8.1, out before the APK was, gets it.
 - **Android developer verification**: since September 30, 2026, a certified Android phone in
   Brazil, Indonesia, Singapore or Thailand installs an app from outside Google Play normally only
   when a verified developer has registered it, and from 2027 everywhere; an unregistered one needs
