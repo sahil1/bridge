@@ -62,7 +62,10 @@ for (const [what, m, release, want] of RULES) {
 }
 
 // ---------- The server, with GitHub's releases stood in for ----------
-const body = `${notes}`
+// The notes as GitHub would send them. A long release's notes are cut at 4,000 characters in the
+// app, so the stand-in's are the start and the part this test is about: the macOS line and after.
+const tailAt = notes.indexOf('The Mac app needs macOS')
+const body = tailAt > 1000 ? `${notes.slice(0, 600).trimEnd()}\n\n${notes.slice(tailAt)}` : notes
 // /same/...: a release the same version as this server (run from a clone), for the desktop app's own update.
 const current = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version
 const srv = http.createServer((req, res) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ tag_name: req.url.startsWith('/same/') ? `v${current}` : 'v99.0.0', html_url: 'https://github.com/sahil1/bridge/releases/tag/v99.0.0', body })) })

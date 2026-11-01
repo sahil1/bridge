@@ -2,7 +2,7 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
-## 3.8.0
+## 3.8.1
 
 One inbox for everything waiting on you, a map of what's running on each of your computers, meetings that turn into work, dictation you can keep, edit and talk back to, whiteboards that draw what you describe, and another computer's videos playing here.
 
