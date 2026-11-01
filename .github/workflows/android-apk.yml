@@ -1,5 +1,5 @@
-# Adds the Android app to a release that came out without it: 3.8.1 (out before the APK was), or
-# one published while the release key wasn't set up or the Android build failed. Builds
+# Adds the Android app to a release that came out without it: one from before the APK, or one
+# published while the release key wasn't set up or the Android build failed. Builds
 # Bridge-AI-android.apk from that release's tag, signed with the release key (android.yml), signs
 # where it was built (an attestation, as release.yml does), and uploads it to the release with its
 # line in SHA256SUMS.txt. Run again, it replaces the APK and its line.
