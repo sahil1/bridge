@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import Icon from '../Icon.jsx'
+import UsageCounts from './UsageCounts.jsx'
 import { api } from '../../api.js'
 import { useSettings } from './General.jsx'
 import { startTour } from '../Tour.jsx'
@@ -21,6 +22,7 @@ export default function About() {
         <div className="st-row"><button type="button" className="btn" onClick={startTour}><Icon name="sparkle" size={14} /> Take the tour</button></div>
       </section>
       <Report />
+      <UsageCounts />
     </div>
   )
 }
