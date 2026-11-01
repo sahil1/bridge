@@ -6,6 +6,7 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
+import { Worker } from 'node:worker_threads'
 import { OFFICE } from './office.js'
 import { loginPath } from './agents.js'
 import { gitReady, NO_GIT } from './gitready.js'
@@ -93,6 +94,74 @@ export async function rawFile(root, rel) {
   const { real } = await safePath(root, rel)
   const ext = path.extname(real).toLowerCase()
   return { file: real, name: path.basename(real), type: typeOf(real) || 'application/octet-stream', media: !!(VIDEO[ext] || AUDIO[ext]) }
+}
+
+// ---------- Copying to another of your devices (transfers.js) ----------
+// A file or a folder to copy, as a list: each file in it (its path inside, with /, its size and
+// time) and each folder (so an empty one comes too). A link inside is left out (it can lead
+// anywhere) and counted, and so are the system's own leftovers (.DS_Store, Thumbs.db).
+const LEFTOVERS = new Set(['.DS_Store', 'Thumbs.db', 'desktop.ini'])
+export const MAX_COPY = 10000
+export async function copyList(root, rel) {
+  const { real } = await safePath(root, rel)
+  const st = await fsp.stat(real)
+  const name = path.basename(real)
+  if (!st.isDirectory()) return { name, dir: false, files: [{ rel: '', size: st.size, mtime: st.mtimeMs }], dirs: [], total: st.size, links: 0 }
+  const files = []
+  const dirs = []
+  let links = 0
+  const walk = async (dir, pre, depth) => {
+    if (depth > 64) throw new Error('That folder goes too deep to copy from here')
+    const ents = (await fsp.readdir(dir, { withFileTypes: true })).filter((e) => !LEFTOVERS.has(e.name))
+    const inside = (e) => (pre ? `${pre}/${e.name}` : e.name)
+    links += ents.filter((e) => e.isSymbolicLink()).length
+    const found = await Promise.all(ents.filter((e) => e.isFile()).map(async (e) => {
+      const s = await fsp.stat(path.join(dir, e.name)).catch(() => null)
+      return s && { rel: inside(e), size: s.size, mtime: s.mtimeMs }
+    }))
+    files.push(...found.filter(Boolean))
+    if (files.length > MAX_COPY) throw Object.assign(new Error(`${name} has more than ${MAX_COPY.toLocaleString('en')} files, too many to copy from here. Zip it first and copy that.`), { status: 413 })
+    for (const e of ents.filter((x) => x.isDirectory())) { dirs.push(inside(e)); await walk(path.join(dir, e.name), inside(e), depth + 1) }
+  }
+  await walk(real, '', 0)
+  return { name, dir: true, files, dirs, total: files.reduce((n, f) => n + f.size, 0), links }
+}
+
+// A file's SHA-256, worked out off the server's main thread (a worker reads it as it goes), and
+// kept while the file doesn't change: what a copy is checked against where it lands.
+const HASHER = `
+const { parentPort, workerData } = require('node:worker_threads')
+const h = require('node:crypto').createHash('sha256')
+require('node:fs').createReadStream(workerData.file, { highWaterMark: 1 << 20 })
+  .on('data', (c) => h.update(c))
+  .on('end', () => parentPort.postMessage({ sha: h.digest('hex') }))
+  .on('error', (e) => parentPort.postMessage({ error: e.message, code: e.code }))
+`
+let hashing = 0
+const hashQueue = []
+export async function hashFile(file) {
+  // Two at a time: each reads a whole file.
+  if (hashing >= 2) await new Promise((r) => hashQueue.push(r))
+  hashing++
+  try {
+    return await new Promise((resolve, reject) => {
+      const w = new Worker(HASHER, { eval: true, workerData: { file } })
+      w.once('message', (m) => { w.terminate(); if (m.error) reject(Object.assign(new Error(m.error), { code: m.code })); else resolve(m.sha) })
+      w.once('error', reject)
+    })
+  } finally { hashing--; hashQueue.shift()?.() }
+}
+const hashes = new Map() // real path -> { size, mtime, sha }
+export async function sha256Of(root, rel) {
+  const { real } = await safePath(root, rel)
+  const st = await fsp.stat(real)
+  if (st.isDirectory()) throw new Error('Is a folder')
+  const hit = hashes.get(real)
+  if (hit && hit.size === st.size && hit.mtime === st.mtimeMs) return { sha256: hit.sha, size: st.size, mtime: st.mtimeMs }
+  const sha = await hashFile(real)
+  hashes.set(real, { size: st.size, mtime: st.mtimeMs, sha })
+  if (hashes.size > 500) hashes.delete(hashes.keys().next().value)
+  return { sha256: sha, size: st.size, mtime: st.mtimeMs }
 }
 
 // An HTML page and the files next to it (styles, scripts, images), served by path so the page's

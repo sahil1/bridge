@@ -82,6 +82,12 @@ Settings › Voice › Dictation turns the history off (then nothing new is kept
 deleting one deletes it from the disk, not just from the list. A dictation refused because a
 password field had the keyboard isn't kept.
 
+Files shows your agents' folders, and only the other folders you add to it yourself (Places, with
+the folder picker); it keeps each place's path in `~/.bridge-ai/places.json`, not what's in it, and
+looks in none of them until you open it. A file you copy to another of your computers, or send from
+your phone, goes end-to-end encrypted over the same link as everything else (the relay sees only
+how much goes), and lands only in the folder you pick on the computer it goes to.
+
 If you run Bridge AI on a server or in Docker, all of this applies to that machine instead of your
 computer.
 

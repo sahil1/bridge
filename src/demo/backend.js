@@ -1151,6 +1151,10 @@ export function createDemo({ everything = true } = {}) {
   const HERE = { name: 'MacBook Pro', os: 'mac', version, relay: 'https://bridge-macbook.example.workers.dev' }
   on('GET', '/machines', () => ({ here: HERE, machines: MACHINES, asks: [], canBeLinked: true }))
   on('GET', '/machines/summary', () => ({ ...HERE, ...summaryOf(FRESH.tabs) }))
+  // Files between your computers, and Places: none here, and copying needs the real thing.
+  on('GET', '/transfers', () => ({ jobs: [], incoming: [] }))
+  on('GET', '/places', () => ({ places: [] }))
+  on('GET', '/transfers/plan', () => needs('Copying files between your computers'))
   // The needs-you inbox (server/needsyou.js): what waits on you on this made-up computer. Its
   // questions are answered from their own card, read from the screen as for real.
   const cleared = new Set()

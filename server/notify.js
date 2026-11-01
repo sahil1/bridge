@@ -19,6 +19,10 @@ export const use = (channel) => { channels.add(channel); return channel }
 export const active = () => [...channels].some((c) => c.ready())
 let rt = null // the runtime, to read an agent's screen and answer it
 export const useRuntime = (r) => { rt = r }
+// A video or a sound a finished agent's last words name, in its folder (index.js): its notification
+// opens it in Files, where it plays.
+let lastFile = () => null
+export const useLastFile = (fn) => { lastFile = fn }
 
 export async function send(note) {
   const ready = [...channels].filter((c) => c.ready())
@@ -185,7 +189,8 @@ export function onFleet(fleet, cfg = {}) {
       const also = alsoWaiting(fleet.agents, a)
       asking(a).then((q) => send({ kind: 'needs-you', title: `${label} needs you`, body: `${q?.text || where || 'Open Bridge AI to answer'}${also}`, paneId: a.paneId, url: linkTo(a.paneId), tag: `agent-${a.paneId}`, actions: want.actions === false ? [] : buttons(a, q), ...reach(cfg) })).catch(() => {})
     } else if (a.status === 'done' && want.finished !== false) {
-      send({ kind: 'finished', title: `${label} ${a.cloud?.failed ? 'failed' : 'finished'}`, body: where || 'Open Bridge AI to see the result', paneId: a.paneId, url: `/?agent=${encodeURIComponent(a.paneId)}`, tag: `agent-${a.paneId}`, ...reach(cfg) })
+      const file = a.cloud ? null : lastFile(a)
+      send({ kind: 'finished', title: `${label} ${a.cloud?.failed ? 'failed' : 'finished'}`, body: file ? `${where ? `${where} · ` : ''}${path.basename(file)}, ready to watch` : where || 'Open Bridge AI to see the result', paneId: a.paneId, url: `/?agent=${encodeURIComponent(a.paneId)}${file ? `&file=${encodeURIComponent(file)}` : ''}`, tag: `agent-${a.paneId}`, ...reach(cfg) })
     }
   }
   primed = true

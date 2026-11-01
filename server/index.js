@@ -71,6 +71,8 @@ import * as push from './push.js'
 import * as phone from './phone.js'
 import * as relay from './relay.js'
 import * as machines from './machines.js'
+import * as transfers from './transfers.js'
+import { mediaNamed } from '../shared/media.js'
 import * as counts from './counts.js'
 import * as updates from './updates.js'
 import * as crashes from './crashes.js'
@@ -297,8 +299,14 @@ app.get('/api/previews', wrap(async () => {
 }))
 
 // ---------- Files + git (read-only, scoped to the agent's folder) ----------
-// Any pane works here (agents and plain shells); the root is that pane's folder.
+// Any pane works here (agents and plain shells); the root is that pane's folder. A place you
+// added to Files (place:<id>) works the same way, its folder the root.
 const rootOf = async (pane) => {
+  if (String(pane).startsWith('place:')) {
+    const pl = places.placeOf(String(pane).slice(6))
+    if (!pl) throw new Error('That place isn\'t in Files any more')
+    return pl.path
+  }
   const p = ((await rt.fleet()).panes || []).find((x) => x.paneId === pane)
   if (!p) throw new Error(`No pane ${pane}`)
   return p.cwd
@@ -391,6 +399,75 @@ app.get('/api/agents/:pane/site/*rest', async (req, res) => {
     res.status(404).json({ error: err.message })
   }
 })
+
+// ---------- Copies between your devices, and from your phone (transfers.js) ----------
+// Each answers with its status and, when it can, what the app can do about it (code: ask, space,
+// hash, update...).
+const tx = (fn) => async (req, res) => {
+  try { res.json(await fn(req, res)) } catch (e) { res.status(e.status >= 400 && e.status < 600 ? e.status : 502).json({ error: e.message, ...(typeof e.code === 'string' ? { code: e.code } : {}), ...(e.missing ? { missing: true } : {}) }) }
+}
+// Who's sending: another of your devices, a paired phone (through the relay), or this computer.
+const sender = (req) => {
+  const id = req.headers['x-bridge-relay']
+  if (!id) return fromHere(req) ? { kind: 'here', id: 'here', here: true } : { kind: 'browser', id: 'browser' }
+  const d = relay.deviceOf(id)
+  return { kind: d?.kind === 'computer' ? 'machine' : 'phone', id: String(id), name: d?.name || null }
+}
+transfers.use({
+  rootOf,
+  agents: async () => (await fleetView()).agents.filter((a) => a.cwd && !a.plainChat && !a.chief).map((a) => ({ paneId: a.paneId, title: a.title || a.tab || null, cwd: a.cwd })),
+})
+// What's to be copied, for its sending: each file in it (with its size) and each folder. Its SHA-256,
+// worked out off the main thread, to check a copy of it against.
+const missing = (e) => (/Not found|Outside the agent folder/.test(e.message) ? Object.assign(e, { status: 404, missing: true }) : e)
+app.get('/api/agents/:pane/tree', tx(async (req) => files.copyList(await rootOf(req.params.pane), String(req.query.path || '')).catch((e) => { throw missing(e) })))
+app.get('/api/agents/:pane/hash', tx(async (req) => files.sha256Of(await rootOf(req.params.pane), String(req.query.path || '')).catch((e) => { throw missing(e) })))
+// Places in Files: added only here, from the folder you picked (the desktop app's folder picker,
+// or one of this computer's folders typed in a browser on it).
+app.get('/api/places', tx(() => ({ places: places.pickedPlaces() })))
+app.post('/api/places', tx((req) => { hereOnly(req, 'Add a place'); return places.addPlace(req.body?.path) }))
+app.delete('/api/places/:id', tx((req) => places.removePlace(req.params.id)))
+// The copies this computer runs, and the ones others are making to it.
+app.get('/api/transfers', tx(() => transfers.list()))
+app.post('/api/transfers', tx((req) => transfers.start(req.body || {}, { here: fromHere(req) })))
+app.post('/api/transfers/clear', tx(() => transfers.clear()))
+app.post('/api/transfers/:id/stop', tx((req) => transfers.stop(req.params.id)))
+app.post('/api/transfers/:id/retry', tx((req) => transfers.retry(req.params.id)))
+app.post('/api/transfers/:id/reveal', tx((req) => { hereOnly(req, 'Show it in Finder'); return transfers.reveal(req.params.id) }))
+// Where a copy can go here (another of your devices asks, for its dialog).
+app.get('/api/transfers/here', tx(() => transfers.destinations()))
+// For the dialog: where it can go (here, or on the device it's sent to), how big it is, and
+// whether it goes through Bridge AI's relay (so much a day). to: it's sent there; from: it's
+// copied here from there.
+const remoteJson = async (id, u) => {
+  const r = await machines.exchange(id, { u })
+  const j = await r.json()
+  if (r.status === 404 && j?.error === 'Not found' && !j.missing) throw Object.assign(new Error('Update Bridge AI on that device to copy files with it.'), { status: 409, code: 'update' })
+  if (r.status >= 400) throw Object.assign(new Error(j?.error || `It answered ${r.status}`), { status: r.status })
+  return j
+}
+app.get('/api/transfers/plan', tx(async (req) => {
+  const to = req.query.to ? String(req.query.to) : null
+  const from = req.query.from ? String(req.query.from) : null
+  const m = to || from ? machines.list().find((x) => x.id === (to || from) && x.state === 'linked') : null
+  if ((to || from) && !m) throw Object.assign(new Error('That device isn\'t linked to this one'), { status: 404 })
+  const pane = req.query.pane ? String(req.query.pane) : null
+  const p = String(req.query.path || '')
+  const [what, destinations] = await Promise.all([
+    pane ? (from ? remoteJson(from, `/api/agents/${encodeURIComponent(pane)}/tree?path=${encodeURIComponent(p)}`) : files.copyList(await rootOf(pane), p)) : null,
+    to ? remoteJson(to, '/api/transfers/here') : transfers.destinations(),
+  ])
+  // A phone's copy to this computer goes through this computer's relay; a copy with another device,
+  // through that one's.
+  const hosted = m ? machines.viaHosted(m.id) : !!req.headers['x-bridge-relay'] && relay.status().hosted
+  return { device: m ? m.name : relay.thisName(), hosted, here: !to && fromHere(req), destinations, what: what && { name: what.name, dir: what.dir, total: what.total, count: what.files.length, links: what.links || 0 } }
+}))
+// The other end of a copy: it starts (or carries on), its pieces, each file checked, and it's done.
+app.post('/api/transfers/in', tx((req) => transfers.begin(req.body || {}, sender(req))))
+app.put('/api/transfers/in/:id/:i', express.raw({ type: () => true, limit: '9mb' }), tx((req) => transfers.piece(req.params.id, req.params.i, Number(req.query.at), Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0), req.headers['x-sha256'] || null)))
+app.post('/api/transfers/in/:id/:i/done', tx((req) => transfers.fileDone(req.params.id, req.params.i, req.body?.sha256 || null)))
+app.post('/api/transfers/in/:id/done', tx((req) => transfers.finish(req.params.id)))
+app.delete('/api/transfers/in/:id', tx((req) => transfers.drop(req.params.id, sender(req))))
 
 // ---------- Dev servers (the Preview tab) ----------
 // The web servers running from the agent's folder, and the project's own ways to start one.
@@ -1561,6 +1638,8 @@ app.get('/api/brief', wrap(async (req) => {
 // ---------- Notifications, phone, updates ----------
 notify.use(push.channel)
 notify.useRuntime(rt)
+// A finished agent whose last words name a video or a sound in its folder: its notification opens it.
+notify.useLastFile((a) => { try { return mediaNamed(preview(a)?.text || '', a.cwd) } catch { return null } })
 // This computer itself, not a phone (through the relay, or Tailscale's name for it).
 const fromHere = (req) => !req.headers['x-bridge-relay'] && /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i.test(req.headers.host || '')
 // Quotas: checked every 10 minutes while a notification channel is on.
@@ -2254,6 +2333,7 @@ server.listen(cfg.port, cfg.host, () => {
   relay.start(`http://127.0.0.1:${cfg.port}`)
   phone.status(cfg.port).then(tailnetSaid).catch(() => {})
   machines.start()
+  transfers.resume() // copies that were going carry on
   counts.start()
 })
 // Agents keep running in the terminal host unless you turned that off (Settings › General).

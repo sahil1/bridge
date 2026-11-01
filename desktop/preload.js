@@ -22,8 +22,9 @@ else contextBridge.exposeInMainWorld('bridgeApp', {
   desktop: true,
   capture: (rect) => ipcRenderer.invoke('bridge:capture', rect),
   ...windows,
-  // A folder picked in Finder (or the system's own dialog), for a new agent.
-  pickFolder: (start) => ipcRenderer.invoke('bridge:pick-folder', start),
+  // A folder picked in Finder (or the system's own dialog), for a new agent, or as a place in Files
+  // ({ place: true }).
+  pickFolder: (start, o) => ipcRenderer.invoke('bridge:pick-folder', start, { place: !!o?.place }),
   // Seconds since you last used the computer, so your phone isn't kept quiet while you're away.
   idle: () => ipcRenderer.invoke('bridge:idle'),
   // After you allow something in System Settings: restart so it takes effect.

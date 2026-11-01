@@ -5,6 +5,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import Icon from './Icon.jsx'
 import { api, BASE } from '../api.js'
+import { t } from '../i18n/index.js'
 
 const enc = encodeURIComponent
 const LOOPBACK = /^(localhost|127\.0\.0\.1|\[::1\])$/
@@ -136,17 +137,23 @@ export function Menu({ x, y, items, onClose }) {
 }
 
 // What the menu offers for a file or folder. `act(op, entry)` does it.
-export function menuItems(entry, act, { onMention } = {}) {
+// send: another device is linked, so it can be sent there; copyHere: its label, when this is another
+// device's file in a computer's window (Copy to this computer).
+export function menuItems(entry, act, { onMention, send = false, copyHere = null } = {}) {
   const dir = !!entry.dir
   const root = entry.path === ''
   return [
     dir && { label: 'New file…', icon: 'file', run: () => act('newFile', entry) },
     dir && { label: 'New folder…', icon: 'folder', run: () => act('newFolder', entry) },
+    dir && { label: t('Send files from this device…'), icon: 'upload', run: () => act('upload', entry) },
     dir && 'sep',
     !dir && onComputer && OPENABLE.test(entry.name) && { label: 'Open in its app', icon: 'external', run: () => act('open', entry) },
     onComputer && { label: REVEAL, icon: 'folder-open', run: () => act('reveal', entry) },
     onMention && !root && { label: 'Mention to the agent', icon: 'chat', run: () => onMention(entry.path) },
     'sep',
+    copyHere && { label: copyHere, icon: 'download', run: () => act('copyHere', entry) },
+    send && { label: t('Send to…'), icon: 'send', run: () => act('send', entry) },
+    (copyHere || send) && 'sep',
     { label: 'Copy path', icon: 'copy', run: () => act('copyPath', entry) },
     !root && { label: 'Copy relative path', icon: 'copy', run: () => act('copyRel', entry) },
     !root && 'sep',

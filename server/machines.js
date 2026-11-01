@@ -24,6 +24,7 @@ import { createHash, randomBytes, webcrypto } from 'node:crypto'
 import WebSocket, { WebSocketServer } from 'ws'
 import { cacheFile, dataFile, ensureDir, ROOT, writeFileAtomic } from './paths.js'
 import * as relay from './relay.js'
+import { hostedBase } from './hosted.js'
 import { phoneHello, phoneFinish, splitCode, normCode, plainFrame, readPlain, b64u, K, pack, unpack, json, utf8, CHUNK, WINDOW, more, granter } from '../relay/web/link.js'
 
 const FILE = dataFile('machines.json')
@@ -295,6 +296,13 @@ class Link {
     return p
   }
 
+  // A file going to that device waits for the connection to be nearly clear before each piece, so
+  // a chat or a terminal on it goes ahead rather than behind megabytes of the file.
+  async clear() {
+    const session = this.session
+    while (this.session === session && this.ws && this.ws.bufferedAmount > 256 * 1024) await new Promise((r) => setTimeout(r, 10))
+  }
+
   // A request to that device: handlers get { s, h }, then pieces, then the end (or an error).
   // w: how much of the answer may be on its way at once; more(n) once n of it has been taken in.
   request({ m, u, h, body, w }, handlers) {
@@ -304,7 +312,7 @@ class Link {
     return {
       id,
       started,
-      write: (chunk) => (async () => { for (let o = 0; o < chunk.byteLength; o += CHUNK) await this.send(K.BODY, id, chunk.subarray(o, o + CHUNK)) })(),
+      write: (chunk, { bulk = false } = {}) => (async () => { for (let o = 0; o < chunk.byteLength; o += CHUNK) { if (bulk) await this.clear(); await this.send(K.BODY, id, chunk.subarray(o, o + CHUNK)) } })(),
       end: () => this.send(K.END, id),
       cancel: () => { if (this.streams.delete(id)) this.send(K.CANCEL, id).catch(() => {}) },
       more: (n) => { if (this.streams.has(id)) this.send(K.MORE, id, more(n)).catch(() => {}) },
@@ -638,6 +646,52 @@ export async function fresh({ only = null, maxAge = 6000, wait = 1500 } = {}) {
   let t
   await Promise.race([Promise.allSettled(due.map((m) => refresh(m))), new Promise((r) => { t = setTimeout(r, wait) })])
   clearTimeout(t)
+}
+
+// ---------- a file to or from that device (transfers.js) ----------
+// A request to that device whose answer is read as it comes: next() is its next piece (null at its
+// end), and no more than `window` of it is on its way at once, as for a video (took(n) once n of it
+// has been written where it goes). body: what goes with it, sent as the connection clears.
+export async function exchange(id, { method = 'GET', u, headers = [], body = null, window = WINDOW, ms = 20000 }) {
+  const m = byId(id)
+  if (!m || m.state !== 'linked') throw Object.assign(new Error('That device isn\'t linked to this one any more'), { status: 404 })
+  const l = linkOf(m)
+  await l.ready(ms)
+  return new Promise((resolve, reject) => {
+    const parts = []
+    let ended = false
+    let failed = null
+    let wake = null
+    const nudge = () => { const w = wake; wake = null; w?.() }
+    const grant = granter((n) => r.more(n))
+    const t = setTimeout(() => { r.cancel(); reject(new Error(`${m.name} didn't answer`)) }, ms)
+    const next = async () => {
+      while (!parts.length && !ended && !failed) await new Promise((ok) => { wake = ok })
+      if (parts.length) return parts.shift()
+      if (failed) throw failed
+      return null
+    }
+    const r = l.request({ m: method, u, h: [...headers, ['x-bridge-machine', relay.thisName()]], body: !!body, w: window }, {
+      onHead: ({ s, h: hs }) => {
+        clearTimeout(t)
+        const header = (k) => (hs || []).find(([x]) => x.toLowerCase() === k)?.[1] ?? null
+        const json = async () => { const all = []; for (let c = await next(); c; c = await next()) { all.push(c); grant(c.byteLength) } try { return JSON.parse(Buffer.concat(all).toString('utf8')) } catch { return {} } }
+        resolve({ status: s, header, next, took: (n) => grant(n), cancel: () => r.cancel(), json })
+      },
+      onChunk: (c) => { parts.push(c); nudge() },
+      onEnd: () => { ended = true; nudge() },
+      onError: (msg) => { clearTimeout(t); failed = new Error(msg); reject(failed); nudge() },
+    })
+    r.started.then(async () => { if (body) { await r.write(body, { bulk: true }); await r.end() } }).catch((e) => { clearTimeout(t); failed = e; reject(e); nudge() })
+  })
+}
+// Whether the link to that device goes through Bridge AI's hosted relay, which carries so much a
+// day for each computer (relay/HOSTED.md): a big copy says so first.
+export function viaHosted(id) {
+  const base = hostedBase()
+  const r = byId(id)?.relay
+  if (!base || !r) return false
+  try { const H = new URL(base).host; const h = new URL(r).host; return h === H || h.endsWith(`.${H}`) } catch { return false }
 }
 
 // ---------- start ----------
