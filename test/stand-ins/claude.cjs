@@ -5,7 +5,8 @@
 //                                           only the footer shows its subagents; "idle" draws
 //                                           it done working; "limit" and "weekly limit" end it
 //                                           at a usage limit (the 5-hour one carries on by itself);
-//                                           "table" ends it with a reply holding a wide table
+//                                           "table" ends it with a reply holding a wide table,
+//                                           "diagram" with one holding a Mermaid flowchart
 //   claude --resume <id> [...]              the same conversation again (on another account, say):
 //                                           its log as it was, done working, its message box at
 //                                           the bottom under the conversation; what's typed to it
@@ -88,7 +89,7 @@ const padding = (mb) => { const line = JSON.stringify({ type: 'api-request-blob'
 
 // Its screen first, so its footer is up before the log is done.
 const limited = /limit$/.test(message)
-draw(message !== 'idle' && message !== 'table' && !limited)
+draw(message !== 'idle' && message !== 'table' && message !== 'diagram' && !limited)
 
 // Then the shells' output and the subagent's own files, so the log's last notice is the last thing written.
 fs.writeFileSync(path.join(tasks, 'bsh0.output'), 'ready on :5173\n')
@@ -133,6 +134,8 @@ notice(6, '<task-id>bsh2</task-id>\n<tool-use-id>toolu_S2</tool-use-id>\n<status
 notice(5, '<task-id>bmon1</task-id>\n<summary>Monitor event: "Watch the deploy"</summary>\n<event>deploy 1 of 3 healthy\ndeploy 2 of 3 healthy</event>')
 // A reply with a table as wide as a real one, too wide for a phone.
 if (message === 'table') use(0, [{ type: 'text', text: 'Where each ticket stands:\n\n| Ticket | What changed | Who reviews it | Status |\n|---|---|---|---|\n| PLT-12) | The billing export rounds each line before it adds them up, so totals match the invoices | Priya Shah | Done |\n| PLT-15 | Refunds keep their original currency through the whole export | Dan Ruiz | In review |' }])
+// A reply with a diagram in it, and the file it's also in.
+if (message === 'diagram') use(0, [{ type: 'text', text: 'Here is the checkout flow, also in `flow.mmd`:\n\n```mermaid\nflowchart LR\n  Cart --> Pay[Payment] --> Done\n```' }])
 // A usage limit, as Claude Code logs one: the error, then whether it carries on by itself at the reset.
 if (limited) {
   const weekly = message === 'weekly limit'

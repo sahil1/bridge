@@ -6,7 +6,7 @@ import Rail from './components/Rail.jsx'
 import Board from './components/Board.jsx'
 import Dock from './components/Dock.jsx'
 import Console, { MateEmpty, showChat } from './components/Console.jsx'
-import { Settings, Onboarding, HerdrView, Terminals, ShellTab, MeetingsHome, MeetingPage, Dictations, preloadViews } from './lazy.jsx'
+import { Settings, Onboarding, HerdrView, Terminals, ShellTab, MeetingsHome, MeetingPage, Dictations, WhiteboardsHome, WhiteboardPage, preloadViews } from './lazy.jsx'
 import Home from './components/Home.jsx'
 import { FirstRunAnswers } from './components/FirstRun.jsx'
 import { MeetingsProvider, RecordingPill, CallPrompt, useMeetings } from './components/meetings/recording.jsx'
@@ -14,7 +14,7 @@ import { openLink } from './pwa.js'
 import NewAgent from './components/NewAgent.jsx'
 import AddAccount from './components/AddAccount.jsx'
 import History from './components/History.jsx'
-import UpdateChip from './components/UpdateChip.jsx'
+import UpdateChip, { withApp } from './components/UpdateChip.jsx'
 import RestartChip from './components/RestartChip.jsx'
 import SetupChip from './components/SetupChip.jsx'
 import TopNotes, { useUpdateNote } from './components/TopNotes.jsx'
@@ -27,6 +27,7 @@ import { NextMeetingChip } from './components/Agenda.jsx'
 import { TodayTabs, TodayBody, openToday } from './components/Dock.jsx'
 import { Handle, usePersisted, useMedia, useHotkey, useWidth, useShared, store } from './components/layout.jsx'
 import { api, useFleet, usePoll, relayActivity, cloudOnly, refetch, viaRelay } from './api.js'
+import { takeReturn } from './permissions.js'
 import CloudHome from './components/CloudHome.jsx'
 import SessionSwitcher from './components/Sessions.jsx'
 import { MachineMenu, AskBanner, useMachines, goMachine, isRemote, remoteOf } from './components/Machines.jsx'
@@ -151,9 +152,11 @@ function WeatherChip({ onClick }) {
   )
 }
 
-// Views that open in tabs beside the agents: Home (start something new), Meetings, a meeting, and
-// Dictations.
-const VIEWS = { 'view:new': { title: tx('New'), icon: 'plus' }, 'view:meetings': { title: tx('Meetings'), icon: 'mic' }, 'view:dictations': { title: tx('Dictations'), icon: 'wave' } }
+// Views that open in tabs beside the agents: Home (start something new), Meetings, a meeting,
+// Dictations, Whiteboards and a whiteboard.
+const VIEWS = { 'view:new': { title: tx('New'), icon: 'plus' }, 'view:meetings': { title: tx('Meetings'), icon: 'mic' }, 'view:dictations': { title: tx('Dictations'), icon: 'wave' }, 'view:whiteboards': { title: tx('Whiteboards'), icon: 'shapes' } }
+// A whiteboard's tab is named as the board is (its id).
+const BOARD = 'view:whiteboard:'
 const isView = (id) => typeof id === 'string' && id.startsWith('view:')
 
 // The recording of a meeting lives above everything else, so it goes on while you move around.
@@ -198,7 +201,9 @@ function App() {
   const [cmdRef, cmdW] = useWidth()
   const [rowRef, rowW] = useWidth()
   const quota = usePoll('/quota', 5 * 60 * 1000)
-  const update = usePoll('/updates', 6 * 60 * 60 * 1000)
+  const updates = usePoll('/updates', 6 * 60 * 60 * 1000)
+  // The desktop app this window is in counts too: it can be behind the server it shows.
+  const update = { ...updates, data: withApp(updates.data) }
   const upNote = useUpdateNote(update.data)
   const prevStatus = useRef({})
   useRuntimeTheme()
@@ -213,6 +218,7 @@ function App() {
   const meetingList = usePoll(meetingTabs ? '/meetings' : null, 20 * 1000).data?.meetings || []
   const views = [...new Set([...W.tabs, mobileAgent].filter(isView))].map((id) => {
     const m = id.startsWith('view:meeting:') ? meetingList.find((x) => x.id === id.slice(13)) : null
+    if (id.startsWith(BOARD)) return { paneId: id, view: true, title: id.slice(BOARD.length), icon: 'shapes' }
     return { paneId: id, view: true, title: VIEWS[id] ? t(VIEWS[id].title) : m?.title || t('Meeting'), icon: VIEWS[id]?.icon || 'mic' }
   })
   // Agents on your other devices, in tabs here: named from what each device last said about them
@@ -363,6 +369,16 @@ function App() {
     window.addEventListener('bridge-open-dictations', on)
     return () => window.removeEventListener('bridge-open-dictations', on)
   }, [])
+  // A whiteboard opened from anywhere (the list, a chat's Mermaid, a renamed board taking its tab).
+  useEffect(() => {
+    const on = (e) => {
+      const d = e.detail || {}
+      if (d.id) openAgentRef.current?.(`${BOARD}${d.id}`, { replace: d.replace || (wsRef.current?.tabs.includes('view:whiteboards') ? 'view:whiteboards' : null) })
+      else if (d.list) openAgentRef.current?.('view:whiteboards', { replace: d.replace || null })
+    }
+    window.addEventListener('bridge-open-board', on)
+    return () => window.removeEventListener('bridge-open-board', on)
+  }, [])
   // Agents open in a window of their own: their tab here says so, with Show and Bring back.
   const [popped, setPopped] = useState(() => new Set())
   useEffect(() => {
@@ -385,6 +401,16 @@ function App() {
     const on = (e) => setSettings(e.detail?.section || 'general')
     window.addEventListener('bridge-open-settings', on)
     return () => window.removeEventListener('bridge-open-settings', on)
+  }, [])
+  // Back from a restart to apply a permission: Settings where it was asked for, to see it's on (the
+  // agent you had open comes back by itself).
+  useEffect(() => { const r = takeReturn(); if (r?.section) setSettings(r.section) }, [])
+  // Restart to apply, asked for in Settings: the top bar's Restart to apply decides it (with what it
+  // means for agents at work), so Settings steps aside for it rather than covering it.
+  useEffect(() => {
+    const on = () => setSettings(null)
+    window.addEventListener('bridge-restart', on)
+    return () => window.removeEventListener('bridge-restart', on)
   }, [])
   useEffect(() => {
     const on = (e) => setAddAcct(e.detail || {})
@@ -479,7 +505,7 @@ function App() {
   useHotkey(useCallback((e) => (e.metaKey || e.ctrlKey) && e.key === ',', []), () => setSettings((v) => (v ? null : 'general')))
   useHotkey(useCallback((e) => (e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'f', []), () => setHistory((v) => !v))
   useHotkey(useCallback((e) => e.altKey && (e.code === 'Digit1' || e.code === 'Digit2'), []), (e) => setView(e.code === 'Digit1' ? 'command' : 'herdr'))
-  useHotkey(useCallback((e) => e.key === 'Escape' && !e.target.closest?.('.xterm, textarea, input, .quick-open, .tour'), []), () => set({ max: null }))
+  useHotkey(useCallback((e) => e.key === 'Escape' && !e.target.closest?.('.xterm, textarea, input, .quick-open, .tour, .excalidraw'), []), () => set({ max: null }))
 
   // The tour: once per device after setup (the phone layout has its own), and again on request.
   // It waits while anything else is open on top, and starts from the beginning after.
@@ -514,6 +540,7 @@ function App() {
     { id: 'a:record', label: t('Record a meeting'), icon: 'mic', keywords: 'meeting notes transcript record call granola minutes', run: () => meetings?.start().catch(() => openAgent('view:meetings')) },
     { id: 'a:meetings', label: t('Meetings'), icon: 'mic', keywords: 'meeting notes transcripts summaries', run: () => openAgent('view:meetings') },
     { id: 'a:dictations', label: t('Dictations'), icon: 'wave', keywords: 'dictation history voice said typed pasted wispr macwhisper', run: () => openAgent('view:dictations') },
+    WhiteboardsHome && { id: 'a:boards', label: t('Whiteboards'), icon: 'shapes', keywords: 'whiteboard board excalidraw draw sketch diagram flowchart architecture sequence org chart mermaid drawio canvas', run: () => openAgent('view:whiteboards') },
     { id: 'a:history', label: t('Search history and closed agents…'), icon: 'clock', keywords: 'search find transcript conversation closed archived resume old past', run: () => setHistory(true) },
     { id: 'a:cloud', label: t('New cloud agent…'), icon: 'cloud', keywords: 'cursor copilot jules claude managed remote github repo pull request', run: () => setNewAgent({ mode: 'cloud' }) },
     { id: 'a:chat', label: t('New chat…'), icon: 'chat', keywords: 'plain vanilla talk ask claude codex gemini assistant', run: () => setNewAgent({ mode: 'chat' }) },
@@ -633,7 +660,9 @@ function App() {
       {id === 'view:new' ? <Home fleet={fleet} onLaunched={fromHome} onMore={(init) => setNewAgent(init)} />
         : id === 'view:meetings' ? <section className="pane view-pane"><MeetingsHome onOpen={(mid) => openAgent(`view:meeting:${mid}`, wide ? { replace: 'view:meetings' } : {})} /></section>
           : id === 'view:dictations' ? <section className="pane view-pane"><Dictations /></section>
-          : <section className="pane view-pane"><MeetingPage id={id.slice(13)} onBack={onBack || (() => openAgent('view:meetings', { replace: id }))} /></section>}
+            : id === 'view:whiteboards' && WhiteboardsHome ? <section className="pane view-pane"><WhiteboardsHome onOpen={(bid) => openAgent(`${BOARD}${bid}`, wide ? { replace: 'view:whiteboards' } : {})} /></section>
+              : id.startsWith(BOARD) && WhiteboardPage ? <section className="pane view-pane"><WhiteboardPage id={id.slice(BOARD.length)} onBack={() => openAgent('view:whiteboards', { replace: id })} /></section>
+                : <section className="pane view-pane"><MeetingPage id={id.slice(13)} onBack={onBack || (() => openAgent('view:meetings', { replace: id }))} /></section>}
     </ErrorBoundary>
   )
   // ---------- Phone ----------

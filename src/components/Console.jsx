@@ -17,7 +17,9 @@ import CloudConsole from './CloudConsole.jsx'
 import { PaneHeader } from './layout.jsx'
 import { tildePath, Menu } from './Rail.jsx'
 import { api, usePoll, useLive, fmtTime, openInTerminal, useOutbox, relayOutbox, BASE } from '../api.js'
+import AskOutLoud from '../voice/AskOutLoud.jsx'
 import { t, tx } from '../i18n/index.js'
+import { whiteboards, isMermaid, boardFromMermaid } from './whiteboard/links.js'
 
 const KEYS = [
   ['1', '1'], ['2', '2'], ['3', '3'], ['enter', '⏎ Enter'], ['esc', 'Esc'],
@@ -91,8 +93,14 @@ function Prose({ text }) {
 function RichText({ text }) {
   const parts = text.split(/```[^\n]*\n?/)
   return parts.map((part, i) =>
-    i % 2 === 1 ? <pre key={i} className="code">{part.replace(/\n$/, '')}</pre> : <Prose key={i} text={part} />,
+    i % 2 === 1 ? <Fragment key={i}><pre className="code">{part.replace(/\n$/, '')}</pre>{whiteboards && isMermaid(part) && <MermaidBoard text={part} />}</Fragment> : <Prose key={i} text={part} />,
   )
+}
+
+// A diagram in Mermaid, opened as a whiteboard of shapes to move and edit.
+function MermaidBoard({ text }) {
+  const [busy, setBusy] = useState(false)
+  return <button type="button" className="btn small wb-open-mermaid" disabled={busy} onClick={() => { setBusy(true); boardFromMermaid(text, t('Diagram from a chat')).catch((e) => window.alert(e.message)).finally(() => setBusy(false)) }}><Icon name="shapes" size={12} /> {t('Open as a whiteboard')}</button>
 }
 
 function groupMessages(messages) {
@@ -839,6 +847,8 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
                 <div className="btw-a">{btw.a ? <RichText text={btw.a} /> : <span className="muted"><Icon name="refresh" size={11} className="spin" /> {t('Thinking…')}</span>}</div>
               </div>
             )}
+            {/* The Chief of Staff: ask it out loud, and hear the answer (voice/AskOutLoud.jsx). */}
+            {agent.chief && view === 'chat' && <AskOutLoud agent={agent} onSend={send} />}
             <Composer id={agent.paneId} placeholder={agent.chief ? t('Tell your chief of staff what you need…') : t('Message {name}…', { name: title })}
               onSend={send} keysOpen={keysOpen} onToggleKeys={() => setKeysOpen(!keysOpen)}
               busy={isWorking(agent)} typeAhead={!!agent.caps?.typeAhead}

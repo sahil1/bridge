@@ -10,6 +10,8 @@
 // it, saying why; the app's own Update to a newer version, with 3.7.1 already there, stops before
 // touching anything and says so in a window of macOS's own; an older version asked for by name is
 // installed as asked; macOS 14 gets the newest; macOS 12 is told it needs 14. Not on Windows (no sh).
+// The desktop app's own update (its version behind a server run from a clone, which is as new as the
+// release) is held back the same way: not offered on the 13.6 Mac, said once with the app's version.
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -51,16 +53,25 @@ for (const [what, m, release, want] of RULES) {
   const got = typeof up.heldBack === 'function' ? up.heldBack(release, m) : 'no rule'
   ok(JSON.stringify(got) === JSON.stringify(want), `${what}: ${want ? `not offered ${release.latest} (needs macOS ${want.macos})` : 'offered as usual'}`, got)
 }
+// The desktop app's own update: the release's macOS minimum, whatever version the server is.
+{
+  const same = { latest: '1.0.0', minMac: '14.0' }
+  const mac13 = { platform: 'darwin', arch: 'arm64', os: '13.6' }
+  const got = [up.below?.(same, mac13), up.below?.(same, { ...mac13, os: '14.6' }), up.below?.(same, { platform: 'win32', arch: 'x64', os: '10.0.22631' }), up.below?.({ latest: '1.0.0', minMac: null }, mac13)]
+  ok(JSON.stringify(got) === JSON.stringify([{ latest: '1.0.0', macos: '14', have: '13.6' }, null, null, null]), 'the desktop app\'s own update: a Mac on 13.6 isn\'t offered a release that needs 14, even one no newer than the server; 14.6, Windows and a release that says nothing are', got)
+}
 
 // ---------- The server, with GitHub's releases stood in for ----------
 const body = `${notes}`
-const srv = http.createServer((req, res) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ tag_name: 'v99.0.0', html_url: 'https://github.com/sahil1/bridge/releases/tag/v99.0.0', body })) })
+// /same/...: a release the same version as this server (run from a clone), for the desktop app's own update.
+const current = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version
+const srv = http.createServer((req, res) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ tag_name: req.url.startsWith('/same/') ? `v${current}` : 'v99.0.0', html_url: 'https://github.com/sahil1/bridge/releases/tag/v99.0.0', body })) })
 const port = await freePort()
 await new Promise((r) => srv.listen(port, '127.0.0.1', r))
 const API = `http://127.0.0.1:${port}/repos/sahil1/bridge/releases/latest`
 const kits = []
-const kitOn = async (name, version) => {
-  const k = await startKit(`updates-${name}`, { env: { BRIDGE_RELEASES_API: API, BRIDGE_MACHINE: JSON.stringify({ platform: 'darwin', arch: 'arm64', os: version, docker: false }) } })
+const kitOn = async (name, version, api = API) => {
+  const k = await startKit(`updates-${name}`, { env: { BRIDGE_RELEASES_API: api, BRIDGE_MACHINE: JSON.stringify({ platform: 'darwin', arch: 'arm64', os: version, docker: false }) } })
   kits.push(k)
   await k.api('/setup', { name: 'Tester' })
   return k
@@ -77,6 +88,27 @@ try {
   const newer = await kitOn('mac14', '14.6')
   const n = await newer.api('/updates?refresh=1')
   ok(n.available === true && !n.held, 'a Mac on 14.6: offered as usual', n)
+  // The desktop app behind a server run from a clone, on the 13.6 Mac: the newest release is this
+  // server's own version, so the server isn't held back, but the app (1.0.0) is.
+  const clone = await kitOn('mac13same', '13.6', `http://127.0.0.1:${port}/same/repos/sahil1/bridge/releases/latest`)
+  const c = await clone.api('/updates?refresh=1')
+  ok(c.latest === current && !c.held && !c.available && c.below?.macos === '14' && c.below?.have === '13.6' && c.appUpdate === false, 'a clone\'s server on 13.6: nothing newer for it, and the app\'s own update held back (needs macOS 14)', c)
+  {
+    const { ctx, p, errors } = await page(b, clone.url, { mode: 'light', theme: 'sky', before: async (cx) => {
+      await cx.addInitScript(() => {
+        const ua = `${navigator.userAgent} BridgeAI/1.0.0`
+        Object.defineProperty(Navigator.prototype, 'userAgent', { get: () => ua, configurable: true })
+        window.bridgeApp = { platform: 'darwin', desktop: true }
+      })
+    } })
+    const chip = p.locator('.topbar .top-chip', { hasText: 'Newer version' })
+    const shown = await chip.waitFor({ timeout: 15000 }).then(() => true, () => false)
+    await chip.click({ timeout: 3000 }).catch(() => {})
+    const said = await until(async () => { const x = await p.locator('.update-pop').innerText().catch(() => ''); return /you have 1\.0\.0/.test(x) && /macOS 14 or later/.test(x) && x }, 5000)
+    ok(shown && !!said && await p.locator('.topbar .update-chip').count() === 0 && await p.locator('.update-pop button', { hasText: /Update/ }).count() === 0, 'the desktop app 1.0.0 behind it: not offered the update, said once that it needs macOS 14', await p.locator('.update-pop').innerText().catch(() => ''))
+    ok(cut(errors).length === 0, 'and no page errors', errors)
+    await ctx.close()
+  }
 
   // ---------- In the app, on the 13.6 Mac ----------
   {

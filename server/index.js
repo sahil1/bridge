@@ -17,6 +17,7 @@ import * as voice from './voice.js'
 import * as dictation from './dictation.js'
 import * as dictations from './dictations.js'
 import * as livewords from './livewords.js'
+import * as voicespeak from './voicespeak.js'
 import * as fixes from './fixes.js'
 import * as servers from './servers.js'
 import * as archive from './archive.js'
@@ -55,6 +56,7 @@ import * as consult from './consult.js'
 import * as insights from './insights.js'
 import * as chatModels from './chatmodels.js'
 import * as meetings from './meetings.js'
+import * as boards from './boards.js'
 import * as labs from './labs.js'
 import * as meetMemory from './meetmemory.js'
 import * as meetWork from './meetwork.js'
@@ -114,7 +116,9 @@ app.use('/m', (req, res) => machines.proxy(req, res))
 // Saving a file from the viewer can send more than the usual 1 MB.
 const jsonSmall = express.json({ limit: '1mb' })
 const jsonFile = express.json({ limit: '6mb' })
-app.use((req, res, next) => (req.method === 'PUT' && /^\/api\/agents\/[^/]+\/file$/.test(req.path) ? jsonFile : jsonSmall)(req, res, next))
+// And a whiteboard, with the pictures pasted into it (boards.js).
+const jsonBoard = express.json({ limit: '45mb' })
+app.use((req, res, next) => (req.method === 'PUT' && /^\/api\/agents\/[^/]+\/file$/.test(req.path) ? jsonFile : /^\/api\/boards(\/|$)/.test(req.path) ? jsonBoard : jsonSmall)(req, res, next))
 
 const wrap = (fn) => async (req, res) => {
   try {
@@ -845,7 +849,10 @@ app.get('/api/events', (req, res) => {
   res.flushHeaders()
   clients.add(res)
   if (lastFleet) res.write(`event: fleet\ndata: ${JSON.stringify(lastFleet)}\n\n`)
-  req.on('close', () => clients.delete(res))
+  // The desktop app's own feed (desktop/main.js says so): it also hears when another of your devices
+  // asks this computer to allow something (fixes.js askHere).
+  const off = req.headers['x-bridge-desktop'] && !req.headers['x-bridge-relay'] ? fixes.onAsk((a) => res.write(`event: fix-ask\ndata: ${JSON.stringify(a)}\n\n`)) : null
+  req.on('close', () => { clients.delete(res); off?.() })
 })
 // A switch to another herdr session: a fleet read before it is dropped, not shown or announced.
 let fleetGen = 0
@@ -955,10 +962,22 @@ app.post('/api/voice/setup', wrap(async () => {
   return { ...s, openId }
 }))
 // ---------- What macOS asks you to allow (fixes.js) ----------
-app.get('/api/fix', wrap(() => fixes.status()))
+// device: this computer's name, for "Allow it on <name>" when it's shown on another device or a phone.
+app.get('/api/fix', wrap(async () => ({ ...(await fixes.status()), device: relay.thisName() })))
+app.get('/api/fix/list', wrap(() => fixes.list({ callSound: !!meetings.tapBin() })))
 app.get('/api/fix/check', wrap((req) => fixes.check(String(req.query.pane || ''), { folder: String(req.query.folder || '') })))
 app.post('/api/fix/claim', wrap((req) => fixes.claim(String(req.body?.pane || ''))))
 app.post('/api/fix/settings', wrap((req) => { onComputer(req); return fixes.openSettings(String(req.body?.pane || '')) }))
+app.post('/api/fix/reset', wrap((req) => { onComputer(req); return fixes.reset(String(req.body?.pane || ''), { folder: String(req.body?.folder || '') }) }))
+// What the desktop app on this computer is allowed (desktop/main.js, now and then).
+app.post('/api/fix/desktop', wrap((req) => { onComputer(req); return fixes.appReport(req.body || {}) }))
+// Another of your devices, or your phone, asking this computer to show macOS's question: the one
+// thing about permissions they may ask for. Who asked is the device the request came through.
+app.post('/api/fix/ask-here', wrap((req) => {
+  const d = relay.deviceOf(req.headers['x-bridge-relay'])
+  return fixes.askHere(String(req.body?.pane || ''), { folder: String(req.body?.folder || ''), from: d?.name || null })
+}))
+app.post('/api/fix/ask-here/done', wrap((req) => { onComputer(req); return fixes.askedDone() }))
 app.post('/api/fix/app', wrap((req) => { onComputer(req); return fixes.openApp(String(req.body?.app || '')) }))
 app.post('/api/fix/reveal', wrap((req) => { onComputer(req); return fixes.reveal() }))
 // Only the fixed commands in fixes.js, never one from the request.
@@ -986,6 +1005,11 @@ app.post('/api/dictation/live/:sid', express.raw({ type: () => true, limit: '4mb
   try { res.json(await livewords.feed(req.params.sid, req.body, { cfg, words: dictation.hints(dictationSources) })) } catch (e) { res.status(e.status || 502).json({ error: e.message }) }
 })
 app.delete('/api/dictation/live/:sid', wrap((req) => livewords.end(req.params.sid)))
+// Answers read aloud where the device has no voice of its own (voicespeak.js): eSpeak NG here.
+app.get('/api/voice/speak', wrap(() => voicespeak.status()))
+app.post('/api/voice/speak', async (req, res) => {
+  try { res.type('audio/wav').send(await voicespeak.speak(req.body?.text, { lang: String(req.body?.lang || 'en') })) } catch (e) { res.status(e.status || 502).json({ error: e.message }) }
+})
 // Your dictations, kept on this computer (dictations.js): listed and searched, one whole, what
 // became of it, deleted (and put back, for Undo), all of them deleted, a recording kept and played,
 // an app's icon. An agent named by its pane only is named from the fleet.
@@ -1613,7 +1637,7 @@ app.get('/api/diagnostics', wrap(async () => {
 }))
 
 app.get('/api/updates', wrap((req) => updates.status({ force: req.query.refresh === '1', disabled: cfg.updates?.check === false })))
-app.post('/api/updates/install', wrap(() => updates.install()))
+app.post('/api/updates/install', wrap((req) => updates.install({ app: req.body?.app === true })))
 
 // Which server this is, so the desktop app can tell when one left over from an older build (or
 // another copy of the app) is still running, and replace it with its own.
@@ -2059,6 +2083,11 @@ app.post('/api/consult', wrap((req) => consult.ask({ ...(req.body || {}), env: u
 // ---------- Providers and MCP servers (settings) ----------
 providerRoutes(app, { cfg, installed })
 mcpRoutes(app, { cfg, installed })
+
+// ---------- Whiteboards (boards.js) ----------
+// Drawn with the model picked there, else the one meeting notes use.
+boards.setHelpers({ reply: (id, msgs, o) => chatModels.reply(id, msgs, o), pickModel: pickMeetingModel, models: () => chatModels.models(), agentWork: async (pane) => transcript(await findAgent(pane)) })
+boards.routes(app, { wrap, onComputer })
 
 // ---------- Static UI ----------
 

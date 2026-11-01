@@ -25,6 +25,8 @@ import PermissionFix, { InstallFix, protectedFolder } from './PermissionFix.jsx'
 import { OfficeView, Menu, menuItems, NameDialog, fileOp, onComputer } from './FileExtras.jsx'
 import { MediaView, PictureView, OtherFile, useSave, canSave, saveLabel } from './FileMedia.jsx'
 import { locale, t } from '../i18n/index.js'
+import { FileDrawing } from '../lazy.jsx'
+import { isDiagramFile, addMermaidButtons } from './whiteboard/links.js'
 
 Object.entries({ javascript, typescript, python, json, bash, css, xml, markdown, yaml, sql, go, rust, java, ini, diff: diffLang, dockerfile })
   .forEach(([n, l]) => hljs.registerLanguage(n, l))
@@ -136,6 +138,8 @@ function Markdown({ text, pane, filePath, onOpenPath }) {
       if (src && !/^(https?:|data:|\/api\/|\/m\/)/.test(src)) img.src = `${BASE}/api/agents/${enc(pane)}/raw?path=${enc(normalize(`${dir}/${src}`))}`
     })
     el.querySelectorAll('a').forEach((a) => { if (/^https?:/.test(a.getAttribute('href') || '')) { a.target = '_blank'; a.rel = 'noreferrer' } })
+    // Mermaid in it opens as a whiteboard.
+    if (FileDrawing) addMermaidButtons(el, (filePath.split(/[\\/]/).pop() || '').replace(/\.(md|markdown)$/i, ''))
   }, [html, pane, filePath])
   const onClick = (e) => {
     const a = e.target.closest('a')
@@ -210,13 +214,16 @@ function Viewer({ pane, filePath, onOpenPath, onBack, onMenu, ver }) {
   const raw = `${BASE}/api/agents/${enc(pane)}/raw?path=${enc(filePath)}`
   const isMd = f?.kind === 'text' && f.ext === '.md'
   const isHtml = f?.kind === 'text' && /^\.html?$/.test(f.ext)
+  // A diagram (.excalidraw, Mermaid, draw.io) is drawn as a whiteboard, its text a click away.
+  const isDrawing = !!FileDrawing && f?.kind === 'text' && isDiagramFile(f.name)
+  const [drawMode, setDrawMode] = usePersisted('cc-drawing-mode', 'drawing')
   const canEdit = f?.kind === 'text' && !f.truncated
   const dirty = draft != null && f?.kind === 'text' && draft !== f.text
   // Preview or Source is remembered for every file; Edit only for this one (with a draft, it
   // reopens in Edit).
   const [editOn, setEditOn] = useState(() => drafts.has(key))
   const editing = canEdit && editOn
-  const shown = editing ? 'edit' : (isMd || isHtml) ? (mode === 'edit' ? 'preview' : mode) : 'source'
+  const shown = editing ? 'edit' : isDrawing ? (drawMode === 'source' ? 'source' : 'drawing') : (isMd || isHtml) ? (mode === 'edit' ? 'preview' : mode) : 'source'
   // Preview and Source show your unsaved edits too, so on a narrow screen you can flip to check them.
   const text = dirty ? draft : f?.text
   const site = siteUrl(pane, filePath)
@@ -247,7 +254,8 @@ function Viewer({ pane, filePath, onOpenPath, onBack, onMenu, ver }) {
     if (m === 'edit') return startEdit()
     if (!dirty) setDraft(null)
     setEditOn(false)
-    setMode(m)
+    if (isDrawing) setDrawMode(m)
+    else setMode(m)
   }
   // Unsaved edits: ask before the page closes.
   useEffect(() => {
@@ -278,9 +286,16 @@ function Viewer({ pane, filePath, onOpenPath, onBack, onMenu, ver }) {
           {f && !editing && !dirty && <span className="muted small file-meta">{fmtSize(f.size)} · {new Date(f.mtime).toLocaleString(locale(), { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>}
           {canEdit && (
             <div className="seg small-seg">
+              {isDrawing && <button className={shown === 'drawing' ? 'on' : ''} onClick={() => pick('drawing')}>{t('Drawing')}</button>}
               {(isMd || isHtml) && <button className={shown === 'preview' ? 'on' : ''} onClick={() => pick('preview')}>Preview</button>}
-              <button className={shown === 'source' ? 'on' : ''} onClick={() => pick('source')}>{isMd || isHtml ? 'Source' : 'View'}</button>
+              <button className={shown === 'source' ? 'on' : ''} onClick={() => pick('source')}>{isMd || isHtml || isDrawing ? 'Source' : 'View'}</button>
               <button className={shown === 'edit' ? 'on' : ''} onClick={() => pick('edit')}>Edit</button>
+            </div>
+          )}
+          {!canEdit && isDrawing && (
+            <div className="seg small-seg">
+              <button className={shown === 'drawing' ? 'on' : ''} onClick={() => setDrawMode('drawing')}>{t('Drawing')}</button>
+              <button className={shown === 'source' ? 'on' : ''} onClick={() => setDrawMode('source')}>Source</button>
             </div>
           )}
           {!canEdit && (isMd || isHtml) && (
@@ -316,10 +331,11 @@ function Viewer({ pane, filePath, onOpenPath, onBack, onMenu, ver }) {
           <button className="btn small" onClick={() => save(true)}>Overwrite with mine</button>
         </div>
       )}
-      <div className={`viewer-body ${editing ? 'editing' : ''} ${split ? 'split' : ''}`}>
+      <div className={`viewer-body ${editing ? 'editing' : ''} ${split ? 'split' : ''} ${shown === 'drawing' ? 'drawing' : ''}`}>
         {state.loading && <div className="pad"><div className="skeleton-rows"><div /><div /><div /></div></div>}
         {state.error && <div className="viewer-empty"><Icon name="alert" size={22} /><p>{state.error}</p></div>}
-        {f?.kind === 'text' && (shown === 'edit'
+        {f?.kind === 'text' && shown === 'drawing' && <FileDrawing key={`${pane}\n${f.path}`} pane={pane} f={f} onSaved={(nf) => setState({ f: nf })} onOpenPath={onOpenPath} />}
+        {f?.kind === 'text' && shown !== 'drawing' && (shown === 'edit'
           ? <>
               <Editor value={draft ?? f.text} onChange={setDraft} onSave={() => save()} />
               {split && <div className="edit-preview">{isMd
@@ -331,7 +347,7 @@ function Viewer({ pane, filePath, onOpenPath, onBack, onMenu, ver }) {
           : shown === 'preview' && isHtml
           ? <HtmlView pane={pane} filePath={f.path} text={dirty ? draft : undefined} reload={frameKey} />
           : <Code text={text} ext={f.ext.slice(1) || f.name.toLowerCase()} />)}
-        {f?.truncated && <p className="muted small pad">Showing the first 1 MB, so this file can't be edited here.</p>}
+        {f?.truncated && shown !== 'drawing' && <p className="muted small pad">Showing the first 1 MB, so this file can't be edited here.</p>}
         {f?.kind === 'image' && <PictureView f={f} src={raw} />}
         {f?.kind === 'pdf' && <iframe className="pdf-view" src={raw} title={f.name} />}
         {(f?.kind === 'video' || f?.kind === 'audio') && <MediaView f={f} src={raw} />}

@@ -398,7 +398,7 @@ try {
     await choice.click({ timeout: 5000 }).catch(() => {})
     ok(!!(await until(() => d.p.evaluate(() => window.__configured.at(-1)?.to === 'paste' && window.__asked === 1), 5000, 100)) && (await kit.api('/settings')).effective?.dictation?.to === 'paste', 'picked: kept, the desktop app told, and Accessibility asked for right then')
     const card = s.locator('.dict-paste-access')
-    ok(!!(await until(() => card.isVisible(), 3000, 100)) && /needs Accessibility/.test(await card.innerText()) && /Accessibility, turn on Bridge AI/.test(await card.innerText()), 'until it\'s on: why it\'s needed, and where to turn it on', await card.innerText().catch(() => ''))
+    ok(!!(await until(() => card.isVisible(), 3000, 100)) && /needs Accessibility/.test(await card.innerText()) && !!(await until(async () => /turn on Bridge AI/.test(await card.innerText()), 3000, 100)), 'until it\'s on: why it\'s needed, and what to do while macOS asks (turn on Bridge AI)', await card.innerText().catch(() => ''))
     await shot(d.p, `${tag}settings-paste-access`)
     await card.locator('button', { hasText: 'Allow access' }).click({ timeout: 5000 }).catch(() => {})
     ok(!!(await until(() => d.p.evaluate(() => window.__asked === 2), 3000, 100)), 'Allow access asks again (System Settings, for when macOS\'s question was closed)')
@@ -426,6 +426,89 @@ try {
     await d.ctx.close()
   }
   await kit.api('/settings', { dictation: { to: null, background: null } }, 'PATCH')
+
+  // ---------- One key on its own: Fn or the right ⌥ ----------
+  // The desktop app simulated: which lone keys this computer offers, and on a Mac whether it may
+  // listen to keys (window.__listen). Input Monitoring is asked through the permission flow.
+  const loneApp = (st) => page(b, kit.url, { before: async (c) => {
+    await before(c)
+    await c.route(/\/api\/fix(\?|$)/, (r) => r.fulfill({ json: { mac: st.platform === 'darwin', win: st.platform === 'win32', app: { name: 'Bridge AI', desktop: true }, panes: {}, restart: [], tools: {}, canReset: true, desktop: null, asked: null } }))
+    await c.addInitScript((s0) => {
+      window.__lone = { configured: [], asked: [] }
+      window.__listen = false
+      const now = (x = {}) => {
+        const key = x.key || null
+        const lone = /^(Fn|RightAlt)$/.test(key || '')
+        const needs = lone && s0.lone?.asks && !window.__listen ? 'input-monitoring' : null
+        return { ...s0, key: key || s0.key, needs, fallback: needs ? s0.key : null }
+      }
+      let last = {}
+      window.bridgeApp = {
+        platform: s0.platform, desktop: true,
+        dictateStatus: async () => now(last), dictateConfigure: async (x) => { last = x; window.__lone.configured.push(x); return now(x) },
+        permission: {
+          kinds: async () => ['microphone', 'input-monitoring'], status: async (k) => (k === 'input-monitoring' ? (window.__listen ? 'ok' : 'ask') : 'ok'),
+          ask: async (k) => { window.__lone.asked.push(k); return 'asked' }, open: async () => 'opened', reset: async () => 'asked', canReset: async () => true,
+        },
+        fixTile: async () => true, closeFixTile: async () => true,
+      }
+    }, st)
+  } })
+  await kit.api('/settings', { dictation: { background: true, key: null } }, 'PATCH')
+  const loneRow = (s) => s.locator('.dict-lone button')
+  {
+    const d = await loneApp({ ...HELD, platform: 'darwin', background: true, lone: { keys: ['Fn', 'RightAlt'], asks: 'input-monitoring' }, fnUsage: 'emoji' })
+    const s = await voice(d.p)
+    ok((await loneRow(s).allInnerTexts()).join() === '🌐 Fn,Right ⌥', 'a Mac: Or hold one key, with 🌐 Fn and Right ⌥', await s.innerText())
+    await loneRow(s).filter({ hasText: 'Fn' }).click()
+    const card = s.locator('.perm-fix[data-pane="input-monitoring"]')
+    ok(!!(await until(async () => await card.isVisible() && /needs Input Monitoring/.test(await card.innerText()) && /works there/.test(await card.innerText()), 5000, 100)) && !!(await until(() => d.p.evaluate(() => window.__lone.asked.includes('input-monitoring')), 3000, 100)) && (await kit.api('/settings')).effective?.dictation?.key === 'Fn', 'Fn picked: kept, Input Monitoring asked for right then (macOS\'s question), and ⌥Space works meanwhile', await s.innerText())
+    ok(/also shows emoji when 🌐 is pressed/.test(await s.innerText()), 'and since 🌐 shows emoji on this Mac, it says to set it to Do Nothing', await s.innerText())
+    await shot(d.p, `${tag}settings-fn-key`)
+    await d.p.evaluate(() => { window.__listen = true })
+    ok(!!(await until(async () => (await card.count()) === 0, 8000, 200)) && await d.p.evaluate(() => window.__lone.configured.at(-1)?.key === 'Fn'), 'allowed in System Settings: noticed with no click, and the desktop app set to Fn again')
+    await d.ctx.close()
+  }
+  await kit.api('/settings', { dictation: { key: null } }, 'PATCH')
+  {
+    const d = await loneApp({ mode: 'hold', via: 'uiohook', key: 'Control+Alt+Space', active: true, platform: 'win32', background: true, lone: { keys: ['RightAlt'], asks: null } })
+    const s = await voice(d.p)
+    ok((await loneRow(s).allInnerTexts()).join() === 'Right Alt', 'Windows and X11: Right Alt only', await s.innerText())
+    await loneRow(s).first().click()
+    ok(!!(await until(async () => /AltGr on many keyboards/.test(await s.innerText()), 4000, 100)) && await s.locator('.perm-fix[data-pane="input-monitoring"]').count() === 0, 'picked: nothing to allow, and it says a character typed with AltGr cancels', await s.innerText())
+    await d.ctx.close()
+    const w = await loneApp({ mode: 'toggle', via: 'shortcut', key: 'Control+Alt+Space', active: true, platform: 'linux', background: true, lone: null })
+    const ws = await voice(w.p)
+    ok(await loneRow(ws).count() === 0, 'Wayland (and anywhere the key can only be tapped): no lone key offered')
+    await w.ctx.close()
+  }
+  {
+    // Inside Bridge AI, the right Alt as the key (from Settings): held in the message box it listens;
+    // a character typed with it (AltGr) cancels, and nothing is sent.
+    await kit.api('/settings', { dictation: { key: 'RightAlt' } }, 'PATCH')
+    const { ctx: lc, p: lp } = await page(b, kit.url, { before })
+    await lp.locator('.tab-main', { hasText: 'payments' }).first().click({ timeout: 20000 })
+    const lbox = lp.locator('textarea[data-composer]').first()
+    await lbox.waitFor({ timeout: 15000 })
+    await lbox.click()
+    const n0 = sent.length
+    await lp.keyboard.down('AltRight')
+    const rec = !!(await until(async () => (await lp.locator('.composer.rec .rec-bar').count()) > 0, 5000, 100))
+    await sleep(400)
+    await lp.keyboard.down('KeyE')
+    await lp.keyboard.up('KeyE')
+    await lp.keyboard.up('AltRight')
+    const gone = !!(await until(async () => (await lp.locator('.composer.rec').count()) === 0, 4000, 100))
+    await sleep(800)
+    ok(rec && gone && sent.length === n0, 'the right Alt held in the message box: it listens; a key typed with it (AltGr): cancelled, nothing sent', { rec, gone, sent: sent.length - n0 })
+    said.push('right alt works')
+    await lp.keyboard.down('AltRight')
+    await sleep(1300)
+    await lp.keyboard.up('AltRight')
+    ok(!!(await until(async () => /Right alt works\./.test(await lbox.inputValue().catch(() => '')), 8000, 100)), 'held and let go: the words in the box', await lbox.inputValue().catch(() => ''))
+    await lc.close()
+  }
+  await kit.api('/settings', { dictation: { key: null, background: null } }, 'PATCH')
 
   // ---------- The mic turned down in the desktop app on a Mac ----------
   // macOS is asked before the mic opens; when it still turns it down while listing Bridge AI as
@@ -618,6 +701,38 @@ try {
     await h.locator('.hud button', { hasText: 'Copy' }).click({ timeout: 5000 }).catch(() => {})
     const noOffer = !!(await until(async () => /Copied/.test(await hudText(h)), 3000, 100)) && await h.locator('.hud-offer').count() === 0
     ok(chip && why && noOffer, 'no Accessibility yet: not even tried; while you talk, the agent to send it to as before, then the text to copy with one line, pasting needs Accessibility (and Copy asks nothing more: it\'s picked already)', { chip, why, noOffer, shown })
+    await hc.close()
+  }
+  {
+    // No Accessibility yet, then Allow it from the card: macOS asked; turned on (noticed with no click),
+    // Paste pastes what's waiting. window.__allowed: what macOS says now.
+    const { ctx: hc, p: h } = await page(b, `${kit.url}/?dictate=1`, { store: { 'cc-ws': { tabs: [one.paneId], active: one.paneId } }, before: async (c) => {
+      await before(c)
+      await c.addInitScript((st) => {
+        window.__hud = { pasted: [], asked: 0, hidden: 0 }
+        window.__allowed = false
+        const now = () => ({ ...st, paste: { ...st.paste, allowed: window.__allowed } })
+        window.bridgeApp = {
+          platform: 'darwin', desktop: true,
+          hudReady: async () => null, hudSize: () => {}, hudPhase: () => {}, hudHide: async () => { window.__hud.hidden++ }, hudCopy: async () => {}, hudOpen: async () => {},
+          dictateStatus: async () => now(), dictateConfigure: async () => now(),
+          hudPaste: async (x) => { window.__hud.pasted.push(x); return { pasted: true, read: true, restored: true } },
+          pasteAccess: async () => (window.__allowed ? 'ok' : 'denied'), pasteAsk: async () => { window.__hud.asked++; return 'asked' },
+        }
+      }, MAC(false))
+    } })
+    await h.waitForSelector('.hud', { timeout: 10000 })
+    await talk(h, 'allow me then paste', 'TextEdit')
+    const allow = h.locator('.hud-why button', { hasText: 'Allow it' })
+    ok(!!(await until(() => allow.isVisible(), 8000, 100)) && await h.evaluate(() => window.__hud.pasted.length) === 0, 'no Accessibility yet: the card says so, with Allow it right there', await hudText(h))
+    await allow.click()
+    ok(!!(await until(() => h.evaluate(() => window.__hud.asked === 1), 3000, 100)), 'Allow it: macOS is asked, from the card')
+    await h.evaluate(() => { window.__allowed = true })
+    const paste = h.locator('.hud-actions button', { hasText: /^Paste$/ })
+    ok(!!(await until(async () => /Accessibility is on\. Click where you were typing, then Paste/.test(await hudText(h)) && await paste.isVisible(), 6000, 200)), 'turned on in System Settings: noticed with no click, and Paste offered for what\'s waiting', await hudText(h))
+    await shot(h, `${tag}dictation-window-allowed`)
+    await paste.click()
+    ok(!!(await until(() => h.evaluate(() => window.__hud.pasted.at(-1) === 'Allow me then paste.'), 4000, 100)) && !!(await until(async () => /Pasted into TextEdit/.test(await hudText(h)), 4000, 100)), 'Paste: what you said is pasted where you were typing', [await h.evaluate(() => window.__hud.pasted), await hudText(h)])
     await hc.close()
   }
   await kit.api('/settings', { dictation: { to: null } }, 'PATCH')

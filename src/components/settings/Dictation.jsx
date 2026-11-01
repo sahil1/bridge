@@ -3,7 +3,7 @@ import { api, refetch } from '../../api.js'
 import { RECENT, ANY } from '../dictations/shared.jsx'
 import Icon from '../Icon.jsx'
 import { useSettings, SaveNote } from './General.jsx'
-import { useRecheck } from '../PermissionFix.jsx'
+import PermissionFix, { UpdateApp } from '../PermissionFix.jsx'
 import { keyLabel, keyFromEvent } from '../../../shared/dictation/keys.js'
 import { pause, keysPlatform, dictationKey } from '../../dictation/controller.js'
 import { t, tx } from '../../i18n/index.js'
@@ -16,8 +16,10 @@ import '../../dictation/dictation.css'
 //
 // "Where I'm typing" pastes it into the app you were in, and is offered only where this computer can
 // (shared/dictation/platform.js pasteInto). On a Mac it needs Accessibility, asked for the moment you
-// pick it (macOS's own question, then the Allow access tile beside System Settings), and until it's
-// on, the dictation window shows what you said to copy, as before.
+// pick it (macOS's own question, then the Allow access tile beside System Settings: PermissionFix,
+// which notices when it's on and offers Reset and ask again when it doesn't take), and until it's
+// on, the dictation window shows what you said to copy, as before. A desktop app too old to say
+// any of this (before 3.7) is told to update, rather than leaving the options out unsaid.
 //
 // Live words: the words shown as you talk, where the speech model and this computer allow it
 // (server/livewords.js), on unless you turn them off.
@@ -28,24 +30,21 @@ const TO = [['last', tx('The agent I looked at last')], ['chief', tx('The chief 
 // How long dictations are kept (server/dictations.js): always unless you pick less.
 const KEEP = [['30d', tx('30 days')], ['1y', tx('1 year')], ['always', tx('Always')]]
 const PASTE = ['paste', tx('Where I\'m typing (paste it)')]
+// What macOS does when 🌐 is pressed, unless it's set to Do Nothing (desktop/dictation.js readFnUsage).
+const FN_DOES = { input: tx('changes the input source'), emoji: tx('shows emoji'), dictation: tx('starts its own dictation') }
 
 export default function Dictation() {
   const { s, save, note } = useSettings()
   const app = window.bridgeApp
   const [status, setStatus] = useState(null) // the desktop app's: { mode, key, label, background, taken, fallback, error, asks, why, paste }
   const [picking, setPicking] = useState(false)
-  const [asked, setAsked] = useState(false) // Accessibility asked for, here
-  // Accessibility on yet? Asked of the desktop app, which asks macOS without asking you.
-  const checkPaste = useCallback(async () => {
-    if ((await app?.pasteAccess?.().catch(() => null)) !== 'ok') return
-    const st = await app.dictateStatus().catch(() => null)
+  const [asking, setAsking] = useState(0) // "Where I'm typing" just picked: Accessibility asked for then
+  const [askListen, setAskListen] = useState(0) // Fn or the right ⌥ just picked: Input Monitoring asked for then
+  // Accessibility turned on: the desktop app's status again, so pasting is on.
+  const refresh = useCallback(async () => {
+    const st = await app?.dictateStatus?.().catch(() => null)
     if (st) setStatus(st)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
-  const askPaste = async () => {
-    const r = await app?.pasteAsk?.().catch(() => null)
-    setAsked(true)
-    if (r === 'ok') checkPaste()
-  }
   useEffect(() => { app?.dictateStatus?.().then(setStatus, () => {}) }, []) // eslint-disable-line react-hooks/exhaustive-deps
   // Live words: whether they can work on this computer (server/livewords.js), asked again after a
   // change here (a new speech model, say).
@@ -79,16 +78,14 @@ export default function Dictation() {
   const background = d.background === true
   const paste = status?.paste?.can ? status.paste : null
   const pasting = on && !!mode && background && d.to === 'paste'
-  // Picked, on a Mac without Accessibility yet: looked at again every few seconds once asked for, and
-  // whenever you come back to the window.
+  // Picked, on a Mac without Accessibility yet: the card asks, and notices by itself when it's on.
   const needsAccess = pasting && paste?.asks === 'accessibility' && !paste.allowed
-  useRecheck(checkPaste, asked ? 2500 : 0, needsAccess)
   const [cleared, setCleared] = useState(null)
   if (!s) return <div className="skeleton-rows"><div /><div /></div>
 
   const pickTo = async (v) => {
     await set({ to: v })
-    if (v === 'paste' && paste?.asks === 'accessibility' && !paste.allowed) await askPaste()
+    if (v === 'paste' && paste?.asks === 'accessibility' && !paste.allowed) setAsking((n) => n + 1)
   }
   return (
     <>
@@ -107,7 +104,7 @@ export default function Dictation() {
             </div>
           )}
           {status?.taken && <p className="st-note warn"><Icon name="alert" size={13} /> {status.taken === 'macOS' ? t('{key} is one of macOS\'s own shortcuts. Pick another key, or turn that one off in System Settings › Keyboard › Keyboard Shortcuts.', { key: label }) : t('{key} is taken by another app. Pick another key.', { key: label })}</p>}
-          {status?.fallback && <p className="st-note"><Icon name="info" size={13} /> {t('This Mac didn\'t take {key} from other apps, so {other} works there instead.', { key: label, other: keyLabel(status.fallback, plat) })}</p>}
+          {status?.fallback && !status.needs && <p className="st-note"><Icon name="info" size={13} /> {t('This Mac didn\'t take {key} from other apps, so {other} works there instead.', { key: label, other: keyLabel(status.fallback, plat) })}</p>}
           {mode && (
             <label className="st-check"><input type="checkbox" checked={background} onChange={(e) => set({ background: e.target.checked })} />
               <span><b>{t('Works while Bridge AI is in the background')}</b> <span className="muted small">{mode === 'hold'
@@ -115,6 +112,25 @@ export default function Dictation() {
                 : t('Tap {key} in any app to start listening, and again when you\'re done: a small window shows what you said, to send to an agent or copy.', { key: label })}
               {status?.asks ? ` ${t('Your desktop asks once to allow the key.')}` : ''}</span></span></label>
           )}
+          {/* One key on its own, from other apps (shared/dictation/platform.js loneKeys): Fn or the
+              right ⌥ on a Mac (Input Monitoring, asked when picked), Right Alt on Windows and X11. */}
+          {mode && background && !touch && status?.lone?.keys?.length > 0 && (
+            <div className="st-row dict-lone"><span>{t('Or hold one key')}</span>
+              {status.lone.keys.map((k) => (
+                <button key={k} type="button" className={`btn small${d.key === k ? ' primary' : ''}`} aria-pressed={d.key === k} onClick={async () => { await set({ key: k }); if (status.lone.asks) setAskListen((n) => n + 1) }}>{keyLabel(k, plat)}</button>
+              ))}
+            </div>
+          )}
+          {status?.needs === 'input-monitoring' && (
+            <PermissionFix pane="input-monitoring" ask={askListen} onCheck={async () => { const st = await app?.dictateConfigure?.(d).catch(() => null); if (st) setStatus(st) }}>
+              <p className="small">{t('Holding {key} in other apps needs Input Monitoring, so Bridge AI can hear it. Until it\'s on, {other} works there.', { key: keyLabel(d.key, plat), other: keyLabel(status.fallback || dictationKey({}), plat) })}</p>
+            </PermissionFix>
+          )}
+          {d.key === 'Fn' && FN_DOES[status?.fnUsage] && (
+            <p className="st-note"><Icon name="info" size={13} /> {t('macOS also {does} when 🌐 is pressed. In System Settings › Keyboard, set "Press 🌐 key to" to Do Nothing.', { does: t(FN_DOES[status.fnUsage]) })} <button type="button" className="link-btn" onClick={() => api('/fix/settings', { method: 'POST', body: { pane: 'keyboard' } }).catch(() => {})}>{t('Open Keyboard settings')}</button></p>
+          )}
+          {d.key === 'RightAlt' && plat !== 'darwin' && status?.lone && <p className="muted small">{t('Right Alt is AltGr on many keyboards: a character typed with it cancels dictation.')}</p>}
+          {status?.loneFallback && <p className="st-note"><Icon name="info" size={13} /> {t('{key} can\'t be heard from other apps on this computer, so {other} works there instead.', { key: keyLabel(status.loneFallback, plat), other: keyLabel(dictationKey({}), plat) })}</p>}
           {/* A setting from another computer that can't work on this one: said once here. */}
           {status && !mode && d.background === true && <p className="st-note"><Icon name="info" size={13} /> {t('From other apps, the key can\'t be heard on this computer, so it works inside Bridge AI only.')}</p>}
           {mode && background && (
@@ -125,13 +141,10 @@ export default function Dictation() {
             </div>
           )}
           {needsAccess && (
-            <div className="perm-fix dict-paste-access">
-              <p className="small">{t('Pasting needs Accessibility, so Bridge AI can press ⌘V in the app you\'re typing in. Until it\'s on, the small window shows what you said, to copy.')}</p>
-              <div className="perm-acts">
-                <button type="button" className="btn small primary" onClick={askPaste}><Icon name="check" size={12} /> {t('Allow access')}</button>
-                <button type="button" className="ghost-btn" onClick={checkPaste}><Icon name="refresh" size={12} /> {t('Check again')}</button>
-              </div>
-              {asked && <p className="muted small">{t('In System Settings › Privacy & Security › Accessibility, turn on Bridge AI.')}</p>}
+            <div className="dict-paste-access">
+              <PermissionFix pane="accessibility" ask={asking} onCheck={refresh}>
+                <p className="small">{t('Pasting needs Accessibility, so Bridge AI can press ⌘V in the app you\'re typing in. Until it\'s on, the small window shows what you said, to copy.')}</p>
+              </PermissionFix>
             </div>
           )}
           {/* wtype (Wayland) types it in, with no clipboard to put back. */}
@@ -152,6 +165,7 @@ export default function Dictation() {
           )}
           {live?.why === 'slow' && d.liveWords !== false && <p className="st-note"><Icon name="info" size={13} /> {t('This computer turns speech into text too slowly to show the words as you talk, so they come when you let go.')}</p>}
           {!app?.desktop && !touch && <p className="muted small">{t('In the desktop app, the key works from other apps too.')}</p>}
+          {app?.desktop && !app.dictateStatus && !touch && <UpdateApp why={t('The key from other apps needs a newer Bridge AI desktop app.')} />}
         </>
       )}
       <p className="muted small"><Icon name="laptop" size={12} /> {t('Your voice is turned into text on this computer. Nothing is sent anywhere.')}</p>

@@ -28,18 +28,23 @@ export default function Dictation({ conf, onScreen }) {
   useEffect(() => {
     if (off) return
     const k = parseKey(key, keysPlatform())
+    // A lone key (the right Alt) isn't kept from the page: it's AltGr on many keyboards, and another
+    // key pressed while it's held (a character typed with it) cancels instead.
+    let held = false
     const down = (e) => {
       if (isKeyDown(e, k)) {
-        e.preventDefault(); e.stopPropagation()
+        if (!k.lone) { e.preventDefault(); e.stopPropagation() }
+        held = true
         if (!e.repeat && !isPaused()) press(targetFromFocus())
         return
       }
+      if (k?.lone && held && e.code !== 'ControlLeft') { held = false; if (getState().phase !== 'idle') cancel(); return }
       const now = getState()
       if (now.phase === 'idle') return
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancel() }
       else if (e.key === 'Enter' && now.mode === 'free' && now.phase === 'listening') { e.preventDefault(); e.stopPropagation(); finish() }
     }
-    const up = (e) => { if (getState().phase !== 'idle' && isKeyUp(e, k)) { e.preventDefault(); release() } }
+    const up = (e) => { if (isKeyUp(e, k)) held = false; if (getState().phase !== 'idle' && isKeyUp(e, k)) { e.preventDefault(); release() } }
     // Let go while in another window: as if let go here.
     const blur = () => release()
     // From the desktop app (its key, heard while this window is in front), or a test.
@@ -86,7 +91,7 @@ export default function Dictation({ conf, onScreen }) {
   const mine = s.target?.kind === 'composer' && box(s.target.id)
   if (mine || (s.phase === 'idle' && !s.note && !s.setup && !done)) return null
   const listening = s.phase === 'opening' || s.phase === 'listening'
-  const to = <span className="dp-to">{s.target?.kind === 'terminal' ? t('Into the terminal') : t('Where you\'re typing')}</span>
+  const to = <span className="dp-to">{s.target?.kind === 'ask' ? t('To {name}', { name: t('Chief of Staff') }) : s.target?.kind === 'terminal' ? t('Into the terminal') : t('Where you\'re typing')}</span>
   if (listening) return <Dock><Listening s={s} to={to} hint={listeningHint(s.mode, label)} onCancel={cancel} onStop={finish} /></Dock>
   if (s.phase === 'working') return <Dock><Working s={s} /></Dock>
   if (done && !s.note && !s.setup) return <Dock><Done text={done} /></Dock>

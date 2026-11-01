@@ -1,0 +1,73 @@
+/* Whiteboards: the list, one board, and a diagram file drawn in Files. Excalidraw brings its own
+   styles (loaded with it); these place it and Bridge AI's parts around it. */
+.wb-view { display: grid; grid-template-rows: auto auto auto minmax(0, 1fr); grid-template-columns: minmax(0, 1fr); height: 100%; min-height: 0; min-width: 0; background: var(--pane); }
+.wb-view > .pane-head { grid-row: 1; }
+.wb-view .pane-titles h2 { padding-left: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-view .pane-extras { display: flex; align-items: center; gap: 6px; }
+.wb-body { position: relative; grid-row: 4; min-height: 0; min-width: 0; overflow: hidden; }
+.wb-canvas { position: absolute; inset: 0; }
+.wb-canvas .excalidraw { --ui-font: var(--font); }
+/* Excalidraw's library (shapes kept to reuse) isn't kept anywhere yet, so it isn't offered. */
+.wb-canvas .excalidraw .default-sidebar-trigger { display: none; }
+.wb-wait { position: absolute; inset: 0; display: grid; place-items: center; padding: 16px; text-align: center; }
+.wb-state { display: inline-flex; align-items: center; gap: 4px; }
+.wb-state.bad { color: var(--critical); max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-err { grid-row: 3; margin: 6px 14px 0; }
+.wb-conflict { grid-row: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 12px 0; padding: 8px 10px; border-radius: var(--r-sm); background: color-mix(in srgb, var(--warning) 12%, var(--pane)); color: var(--ink); font-size: 12.5px; }
+.wb-conflict > span { flex: 1; min-width: 180px; }
+.wb-grow { flex: 1; }
+
+/* Draw this / Change it: over the board, at the right; across the top on a phone. */
+.wb-draw-wrap { position: absolute; z-index: 6; top: 64px; right: 12px; width: min(380px, calc(100% - 24px)); }
+.wb-draw { display: grid; gap: 8px; padding: 10px; border-radius: 12px; background: var(--pane); border: 1px solid var(--line-2); box-shadow: var(--shadow-lg); color: var(--ink); }
+.wb-draw-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.wb-draw textarea, .wb-ask textarea { width: 100%; resize: vertical; min-height: 54px; padding: 8px 10px; border-radius: 9px; border: 1px solid var(--line-2); background: var(--pane-2); color: var(--ink); font: inherit; font-size: 13px; line-height: 1.45; }
+.wb-draw textarea:focus, .wb-ask textarea:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+.wb-draw-opts { display: grid; gap: 6px; }
+.wb-kinds { display: flex; flex-wrap: wrap; gap: 4px; }
+.wb-kinds .chip { cursor: pointer; border: 1px solid transparent; }
+.wb-kinds .chip.on { background: var(--accent-soft); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+.wb-from { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.wb-from select, .wb-model { max-width: 100%; min-width: 0; height: 26px; padding: 0 6px; border-radius: 7px; border: 1px solid var(--line-2); background: var(--pane-2); color: var(--ink); font: inherit; font-size: 12px; }
+.wb-from select:last-child { flex: 1; }
+.wb-draw-foot, .wb-ask-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.wb-model { max-width: 220px; }
+.wb-model-one { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-privacy, .wb-note, .wb-scope { margin: 0; line-height: 1.4; }
+.wb-draw .error-text { margin: 0; }
+.wb-draw.compact textarea { min-height: 44px; }
+
+/* The list */
+.wb-home { grid-row: 4; height: auto; min-height: 0; overflow: auto; padding: 22px clamp(14px, 3vw, 32px) 28px; display: grid; align-content: start; gap: 14px; max-width: 980px; width: 100%; margin: 0 auto; }
+.wb-ask { display: grid; gap: 8px; padding: 14px; border-radius: var(--r); border: 1px solid var(--line-2); background: var(--pane-2); }
+.wb-ask h1 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -.01em; }
+.wb-ask p { margin: 0; }
+.wb-empty { display: grid; justify-items: center; gap: 4px; padding: 32px 16px; text-align: center; border-radius: 14px; border: 1px dashed var(--line-2); color: var(--ink-2); }
+.wb-empty p { margin: 0; max-width: 520px; }
+.wb-empty > svg { color: var(--ink-3); margin-bottom: 6px; }
+.wb-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+.wb-card { display: grid; gap: 4px; width: 100%; padding: 8px; border-radius: 12px; border: 1px solid var(--line); background: var(--pane); text-align: left; color: var(--ink); }
+.wb-card:hover, .wb-card:focus-visible { border-color: var(--line-2); box-shadow: var(--shadow); }
+.wb-thumb { display: grid; place-items: center; aspect-ratio: 16 / 10; border-radius: 8px; background: #fff; overflow: hidden; color: var(--ink-3); }
+.wb-thumb img { width: 100%; height: 100%; object-fit: contain; }
+.wb-grid.dark .wb-thumb { background: #121212; }
+/* The pictures are drawn light; in a dark theme they're turned dark as Excalidraw does its canvas. */
+.wb-grid.dark .wb-thumb img { filter: invert(93%) hue-rotate(180deg); }
+.wb-card-title { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* A diagram file in Files */
+.viewer-body.drawing { display: flex; overflow: hidden; }
+.wb-file { flex: 1; min-width: 0; display: grid; grid-template-rows: auto auto auto minmax(0, 1fr); }
+.wb-file > .wb-body { grid-row: 4; }
+.wb-file-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+.wb-file-bar .btn.on { background: var(--accent-soft); color: var(--accent); }
+.wb-file .wb-conflict { grid-row: 2; }
+.wb-file .wb-err { grid-row: 3; }
+.wb-file .wb-draw-wrap { top: 56px; }
+
+@media (max-width: 700px) {
+  .wb-draw-wrap { top: 8px; left: 8px; right: 8px; width: auto; }
+  .wb-home { padding: 14px 12px 22px; }
+  .wb-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+  .wb-model { max-width: 160px; }
+}

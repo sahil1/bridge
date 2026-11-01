@@ -7,6 +7,7 @@ const electron = require('electron')
 const { app, BrowserWindow, Menu, Tray, shell, globalShortcut, Notification, session, nativeTheme, ipcMain, powerMonitor, screen, nativeImage, systemPreferences, dialog, desktopCapturer } = electron
 const dictation = require('./dictation.js')
 const contextMenu = require('./contextmenu.js')
+const permissions = require('./permissions.js')
 
 // A picture of part of the window (the Preview tab's app), for sending to an agent. Only this
 // window, only a rectangle of it, only when the page asks.
@@ -300,6 +301,10 @@ const TILE_STEPS = {
   notifications: { text: `Turn on Allow notifications for ${APP_NAME}` },
   // Dictation's "Where I'm typing" (dictation.js): listed already, by macOS's own question.
   accessibility: { text: `Turn on ${APP_NAME} in the list above` },
+  // A call's sound for meeting notes: listed once a recording has asked.
+  audio: { text: `Under System Audio Recording Only, turn on ${APP_NAME}` },
+  // Fn or the right ⌥ as the dictation key (dictation.js): listed already, by macOS's own question.
+  'input-monitoring': { text: `Turn on ${APP_NAME} in the list above` },
 }
 let tile = null // { win, pane, timer, poll, icon }
 function closeTile() {
@@ -311,8 +316,7 @@ function closeTile() {
 // Access on yet? The server answers for the folders it reads; the app asks macOS for the mic and
 // Accessibility (without asking you).
 async function tileDone(pane) {
-  if (pane === 'microphone') return systemPreferences.getMediaAccessStatus('microphone') === 'granted'
-  if (pane === 'accessibility') return systemPreferences.isTrustedAccessibilityClient(false)
+  if (perms.kinds().includes(pane)) { const s = await perms.status(pane); if (s === 'ok') reportPerms(); return s === 'ok' }
   try {
     const r = await fetch(`${URL_BASE}/api/fix/check?pane=${encodeURIComponent(pane)}`, { signal: AbortSignal.timeout(20000) })
     const d = r.ok ? await r.json() : null
@@ -381,6 +385,58 @@ ipcMain.on('bridge:tile-drag', (e) => {
   e.sender.startDrag({ file: BUNDLE, icon: tile.icon })
 })
 ipcMain.on('bridge:tile-close', (e) => { if (tile && e.sender === tile.win.webContents) closeTile() })
+// ---------- Permissions the app itself asks for (permissions.js) ----------
+// The microphone, Accessibility (pasting where you're typing) and notifications: macOS's own question
+// first, System Settings and the tile when it has none to ask, and Reset and ask again for an answer
+// that shows as on and doesn't take. The page decides when (src/permissions.js); only the app's own
+// pages may ask, never another device's shown here (its permissions are that computer's).
+const perms = permissions.create({
+  systemPreferences,
+  openExternal: (u) => shell.openExternal(u),
+  tccutil: (args) => new Promise((resolve) => execFile('/usr/bin/tccutil', args, { timeout: 10000 }, () => resolve())),
+  bundleId: () => (BUNDLE ? bundleId() : null),
+  showTile: (kind) => showTile(kind),
+  paste: () => canPaste,
+  lone: () => loneKey,
+  // Whether macOS lets the app listen to keys, asked of native/bridgekeys (it can only look, or ask).
+  listen: IS_MAC ? { access: () => listenAsk('listen-access'), ask: () => listenAsk('listen-ask') } : null,
+  onChange: () => reportPerms(),
+})
+let canPaste = false // pasting where you're typing can work here (dictation.js says, each time the key is set)
+let loneKey = false // a lone key (Fn, the right ⌥) is the dictation key, so Input Monitoring is asked about
+const listenAsk = (cmd) => new Promise((resolve) => execFile(process.env.BRIDGE_KEYS || path.join(ROOT, 'native', 'bin', 'bridgekeys'), [cmd], { timeout: 10000 }, (err, out) => {
+  try { resolve(!!JSON.parse(String(out).trim().split('\n').pop()).allowed) } catch { resolve(false) }
+}))
+ipcMain.handle('bridge:perm', async (e, { op, kind } = {}) => {
+  if (!fromApp(e)) return null
+  if (op === 'kinds') return perms.kinds()
+  if (typeof kind !== 'string' || !perms.kinds().includes(kind)) return null
+  const r = op === 'status' ? await perms.status(kind)
+    : op === 'ask' ? await perms.ask(kind)
+      : op === 'reset' ? await perms.reset(kind)
+        : op === 'open' ? await perms.open(kind)
+          : op === 'can-reset' ? perms.canReset(kind) : null
+  reportPerms()
+  return r
+})
+// What the app is allowed, told to the server now and then and when it may have changed, so your
+// phone and your other devices can see it (server/fixes.js appReport) and the server knows this app
+// listens for "allow it here" from them.
+let reported = { body: '', at: 0 }
+async function reportPerms() {
+  let body
+  try { body = JSON.stringify({ version: app.getVersion(), states: await perms.all() }) } catch { return }
+  if (body === reported.body && Date.now() - reported.at < 60000) return
+  reported = { body, at: Date.now() }
+  fetch(`${URL_BASE}/api/fix/desktop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, signal: AbortSignal.timeout(5000) }).catch(() => { reported.at = 0 })
+}
+// Another of your devices (or your phone) asked this computer to allow something (server/fixes.js
+// askHere): the main window comes forward at Settings › General › Permissions, which asks.
+function onFixAsk(a) {
+  if (!a || typeof a.pane !== 'string') return
+  const ask = { pane: a.pane, folder: typeof a.folder === 'string' ? a.folder : null, from: typeof a.from === 'string' ? a.from : null, at: Date.now() }
+  tellMain(`window.__bridgePermAsk = ${JSON.stringify(ask)}; window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'permissions' } })); window.dispatchEvent(new CustomEvent('bridge-permission-ask'))`, true).catch(() => {})
+}
 // Whether macOS lets the app use the mic: granted, denied, restricted or not-determined.
 ipcMain.handle('bridge:media-access', (e, kind) => (fromApp(e) && kind === 'microphone' && IS_MAC ? systemPreferences.getMediaAccessStatus('microphone') : null))
 // The mic, asked of macOS before the page opens it (src/audio/pcm.js askMic): the first time, macOS
@@ -388,6 +444,7 @@ ipcMain.handle('bridge:media-access', (e, kind) => (fromApp(e) && kind === 'micr
 ipcMain.handle('bridge:media-ask', async (e, kind) => {
   if (!fromApp(e) || kind !== 'microphone' || !IS_MAC) return null
   if (systemPreferences.getMediaAccessStatus('microphone') === 'not-determined') await systemPreferences.askForMediaAccess('microphone').catch(() => false)
+  reportPerms()
   return systemPreferences.getMediaAccessStatus('microphone')
 })
 // macOS's answer about the mic forgotten (tccutil, for this app only), then asked again. For an
@@ -398,6 +455,7 @@ ipcMain.handle('bridge:media-reset', async (e, kind) => {
   const id = bundleId()
   if (id) await new Promise((resolve) => execFile('/usr/bin/tccutil', ['reset', 'Microphone', id], { timeout: 10000 }, () => resolve()))
   await systemPreferences.askForMediaAccess('microphone').catch(() => false)
+  reportPerms()
   return systemPreferences.getMediaAccessStatus('microphone')
 })
 // A notification to see whether macOS shows them (it doesn't say when they're turned off).
@@ -496,7 +554,9 @@ function onFleet(f) {
 async function watchFleet() {
   for (;;) {
     try {
-      const res = await fetch(`${URL_BASE}/api/events`, { headers: { Accept: 'text/event-stream' } })
+      // x-bridge-desktop: this is the app's own feed, which also hears "allow it here" (onFixAsk).
+      const res = await fetch(`${URL_BASE}/api/events`, { headers: { Accept: 'text/event-stream', 'x-bridge-desktop': app.getVersion() } })
+      reportPerms()
       if (!res.ok || !res.body) throw new Error(String(res.status))
       const dec = new TextDecoder()
       let buf = ''
@@ -506,9 +566,10 @@ async function watchFleet() {
         while ((i = buf.indexOf('\n\n')) >= 0) {
           const block = buf.slice(0, i)
           buf = buf.slice(i + 2)
-          if (!/^event: fleet$/m.test(block)) continue
+          const fleet = /^event: fleet$/m.test(block)
+          if (!fleet && !/^event: fix-ask$/m.test(block)) continue
           const data = block.split('\n').filter((l) => l.startsWith('data: ')).map((l) => l.slice(6)).join('\n')
-          try { onFleet(JSON.parse(data)) } catch { /* partial or bad frame */ }
+          try { if (fleet) onFleet(JSON.parse(data)); else onFixAsk(JSON.parse(data)) } catch { /* partial or bad frame */ }
         }
       }
     } catch { /* server down or restarting; retry */ }
@@ -559,14 +620,24 @@ async function checkForUpdates() {
   try { u = await fetch(`${URL_BASE}/api/updates?refresh=1`, { signal: AbortSignal.timeout(20000) }).then((r) => r.json()) } catch (e) { return say({ type: 'warning', message: 'Couldn\'t check for an update', detail: `${APP_NAME} isn't answering yet (${e.message}). Try again in a minute.` }) }
   if (u.error) return say({ type: 'warning', message: 'Couldn\'t check for an update', detail: u.error })
   if (u.disabled) return say({ message: 'Checking for updates is turned off', detail: 'Turn it on in Settings › About.' })
-  if (u.held) return say({ message: `${APP_NAME} ${u.held.latest} needs macOS ${u.held.macos} or later`, detail: `This Mac has macOS ${u.held.have}, so ${APP_NAME} stays on ${u.current}, which keeps working. Update macOS in System Settings › General › Software Update to get newer versions.` })
-  if (!u.available) return say({ message: `You're on the latest version (${u.current})` })
-  if (u.how !== 'app') return say({ message: `${APP_NAME} ${u.latest} is out`, detail: u.command ? `Update from a terminal:\n${u.command}` : '' })
-  const { response } = await say({ message: `${APP_NAME} ${u.latest} is out`, detail: `You have ${u.current}. ${APP_NAME} restarts when the update is in.`, buttons: ['Update now', 'Later'], defaultId: 0, cancelId: 1 })
+  // This app can be behind the server it shows: one run from your clone (npm start) is as new as the
+  // clone, and the app around it only updates when asked. The app's own version counts too, and so
+  // does the newest release's macOS minimum: a Mac that can't open it isn't offered it.
+  const mine = app.getVersion()
+  const appBehind = !!u.latest && newer(u.latest, mine)
+  const held = u.held || (appBehind ? u.below : null)
+  if (held) return say({ message: `${APP_NAME} ${held.latest} needs macOS ${held.macos} or later`, detail: `This Mac has macOS ${held.have}, so ${APP_NAME} stays on ${u.held ? u.current : mine}, which keeps working. Update macOS in System Settings › General › Software Update to get newer versions.` })
+  if (!u.available && !appBehind) return say({ message: `You're on the latest version (${u.current})` })
+  const forApp = !u.available && appBehind
+  if (u.how !== 'app' && !(forApp && u.appUpdate)) return say({ message: `${APP_NAME} ${u.latest} is out`, detail: u.command ? `Update from a terminal:\n${u.command}` : '' })
+  const { response } = await say({ message: `${APP_NAME} ${u.latest} is out`, detail: `You have ${forApp ? mine : u.current}. ${APP_NAME} restarts when the update is in.`, buttons: ['Update now', 'Later'], defaultId: 0, cancelId: 1 })
   if (response !== 0) return
-  const r = await fetch(`${URL_BASE}/api/updates/install`, { method: 'POST', signal: AbortSignal.timeout(30000) }).then((x) => x.json(), (e) => ({ error: e.message }))
+  const r = await fetch(`${URL_BASE}/api/updates/install`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ app: forApp }), signal: AbortSignal.timeout(30000) }).then((x) => x.json(), (e) => ({ error: e.message }))
   if (r?.error) say({ type: 'warning', message: 'Couldn\'t update', detail: r.error })
 }
+// 1.24.0 < 1.24.1 < 2.0.0, as server/updates.js compares them.
+const parts = (v) => String(v).replace(/^v/, '').split('-')[0].split('.').map((n) => Number(n) || 0)
+const newer = (a, b) => { const x = parts(a); const y = parts(b); for (let i = 0; i < 3; i++) { if (x[i] !== y[i]) return x[i] > y[i] } return false }
 // What the window remembers about its layout (open tabs, panel sizes, what's expanded), forgotten,
 // as the crash screen's Reset this window's layout does: for a window that can't show that screen.
 const resetLayout = () => win?.webContents.executeJavaScript(`(() => { const keep = new Set(['cc-appearance', 'cc-theme', 'cc-toured', 'cc-lang']); try { for (const k of Object.keys(localStorage)) if (k.startsWith('cc-') && !keep.has(k)) localStorage.removeItem(k) } catch {} location.reload() })()`).catch(() => {})
@@ -836,5 +907,13 @@ app.whenReady().then(() => {
   // The dictation key from any app (dictation.js): the main window, an agent's own window and
   // another device's window take it as their own when they're in front.
   const ours = (w) => w === win || [...pops.values(), ...machineWins.values()].includes(w)
-  dictation.start({ electron, ROOT, DATA, URL_BASE, preload: path.join(__dirname, 'preload.js'), isOurs: ours, tellMain, askAccess: showTile, trusted: fromApp }).catch((e) => console.error('dictation:', e.message))
+  // Each time the key is set: whether pasting can work and whether a lone key is picked, which is
+  // what Accessibility and Input Monitoring are asked for.
+  const onStatus = (v) => { canPaste = !!v?.paste?.can; loneKey = !!v?.lone && /^(Fn|RightAlt)$/.test(v.key || ''); reportPerms() }
+  dictation.start({ electron, ROOT, DATA, URL_BASE, preload: path.join(__dirname, 'preload.js'), isOurs: ours, tellMain, askAccess: showTile, trusted: fromApp, perms, onStatus })
+    .catch((e) => console.error('dictation:', e.message))
+  // What the app is allowed: told once a minute (the server forgets it after three), and whenever you
+  // come back to one of its windows (System Settings is where it changes).
+  setInterval(reportPerms, 60000)
+  app.on('browser-window-focus', () => reportPerms())
 })

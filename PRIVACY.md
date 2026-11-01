@@ -37,12 +37,21 @@ at once when you let go; it's heard there the same way and goes nowhere else. Th
 that one key only: on a Mac it's registered with macOS, which tells Bridge AI when it's pressed and
 let go; on Windows and Linux a keyboard hook runs only while the key is held, and until Ctrl, Alt,
 Shift and the Windows key are let go too (a few seconds at most), to hear them let go, and ignores
-every other key.
+every other key. If you pick one key on its own instead (Fn or the right ⌥ on a Mac, Right Alt on
+Windows and Linux), it can't be registered that way, so Bridge AI listens to the keyboard while
+that's your key: on a Mac with a listen-only event tap (macOS asks to allow Input Monitoring), on
+Windows and Linux with the keyboard hook. It looks for that key going down and up, and only notes
+that some other key was pressed while it's held (which cancels); it never records which key, or
+anything you type.
 Nothing is pasted into other apps unless you pick "Where I'm typing" there. Then, after you let go
 of the key, the text is put on the clipboard for a moment (marked so clipboard managers skip it on a
 Mac), ⌘V or Ctrl+V is pressed in the app you were in, and what you had copied is put back; on
 Wayland it's typed in by wtype instead. On a Mac pressing ⌘V needs Accessibility, which you're asked
 for when you pick it, and Bridge AI uses it for that paste only.
+
+When you ask the Chief of Staff out loud, what you said goes to it as any message you type does,
+and its answer is read to you by a voice on the device you're using (its own voices, never one
+fetched from the internet), or, on a device with none, by eSpeak NG on your computer.
 
 What you dictate is kept on your computer, in `~/.bridge-ai/dictations`, so you can find it again
 under Dictations: the words as they were put in and as they were heard, when, for how long, and

@@ -11,6 +11,9 @@
 //   question about what the files say (or the invite, without them) and a check of the last thing
 //   said.
 //   With tools, "EDIT <file>" runs a script (read it, change "hello" to "hello world", cat it).
+//   Whiteboards' "Draw this": a flowchart in Mermaid (Start, Tests pass?, Ship, Fix), broken the
+//   first time when asked for "broken"; "Change it": Start renamed Begin, Ship coloured red, a Cache
+//   box beside the first shape with an arrow to it.
 //   Anything else: "echo: <the last thing said>".
 //   A key of sk-bad is turned down (HTTP 401), as a provider would.
 import http from 'node:http'
@@ -69,6 +72,17 @@ function answer(b) {
     return say(`From ${got.length} meetings (${got.join('; ')}): the beta ships on November third [1].${steered}`)
   }
   if (/Answer from the meeting only/.test(last)) return say(/November/i.test(last) && /when/i.test(last) ? 'The beta ships on November third.' : 'That wasn\'t covered in the meeting.')
+  if (/^Draw this as a diagram:/.test(last)) {
+    if (/broken/i.test(last) && !/didn't draw/.test(last)) return say('```mermaid\nflowchart TD\n  A[Start --> B{{\n```')
+    return say('Here it is:\n```mermaid\nflowchart TD\n  A[Start] --> B{Tests pass?}\n  B -->|yes| C[Ship]\n  B -->|no| D[Fix]\n  D --> B\n```')
+  }
+  if (/^Change this diagram:/.test(last)) {
+    const scene = JSON.parse(/as JSON:\n(\{.*\})\n/.exec(last)?.[1] || '{}')
+    const id = (text) => (scene.shapes || []).find((s) => s.text === text)?.id
+    const first = scene.shapes?.[0]?.id
+    const ops = { update: [id('Start') && { id: id('Start'), text: 'Begin' }, id('Ship') && { id: id('Ship'), fill: '#ffc9c9' }].filter(Boolean), add: first ? [{ ref: 'n1', shape: 'rectangle', text: 'Cache', near: first, side: 'right' }] : [], connect: first ? [{ from: first, to: 'n1', text: 'reads' }] : [] }
+    return say(`\`\`\`json\n${JSON.stringify(ops)}\n\`\`\``)
+  }
   return say(`echo: ${last} (${m.length} messages, ${b.model}, tools: ${b.tools ? b.tools.length : 0})`)
 }
 

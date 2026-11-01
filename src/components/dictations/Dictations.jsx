@@ -5,6 +5,7 @@ import { api, apiUrl, usePoll, refetch } from '../../api.js'
 import { keyLabel } from '../../../shared/dictation/keys.js'
 import { keysPlatform, dictationKey, settings as dictationSettings } from '../../dictation/controller.js'
 import { RECENT, ANY, byDay, timeOf, length, whereOf, Glyph, takeWanted } from './shared.jsx'
+import PermissionFix from '../PermissionFix.jsx'
 import { t } from '../../i18n/index.js'
 import './dictations.css'
 
@@ -17,7 +18,6 @@ import './dictations.css'
 const app = () => window.bridgeApp || {}
 const nameOf = (a) => (a.chief ? t('Chief of Staff') : a.title || a.tab || a.workspace || a.paneId)
 const WHY = {
-  accessibility: () => t('Pasting needs Accessibility: turn it on in Settings › Voice.'),
   secure: () => t('Secure input is on (a password field, or Secure Keyboard Entry), so it wasn\'t pasted.'),
   moved: () => t('That app didn\'t come to the front, so it wasn\'t pasted.'),
   focus: () => t('Bridge AI was in front, so it wasn\'t pasted.'),
@@ -114,6 +114,9 @@ function Row({ r, open, onToggle, onDelete, paste, onMsg }) {
   const [picking, setPicking] = useState(false)
   const [heard, setHeard] = useState(false)
   const [busy, setBusy] = useState(false)
+  // Paste again with no Accessibility yet: the way to allow it, right here, and then it's pasted.
+  // stale: macOS says it's on and the paste was refused anyway, so Reset and ask again first.
+  const [access, setAccess] = useState(null) // null | 'off' | 'stale'
   // The agents running now, asked for when the list of them opens.
   const [agents, setAgents] = useState([])
   const pick = () => {
@@ -128,6 +131,7 @@ function Row({ r, open, onToggle, onDelete, paste, onMsg }) {
     try {
       const x = await app().dictateRepaste({ text: r.text, bundle: r.app?.bundle || null })
       if (x?.pasted) onMsg({ text: r.app?.name ? t('Pasted into {app}', { app: r.app.name }) : t('Pasted') })
+      else if (x?.error === 'accessibility') setAccess((await app().pasteAccess?.().catch(() => null)) === 'ok' ? 'stale' : 'off')
       else onMsg({ text: (WHY[x?.error] || (() => t('Couldn\'t paste it there.')))(), error: true })
     } catch (e) { onMsg({ text: e.message, error: true }) } finally { setBusy(false) }
   }
@@ -153,6 +157,7 @@ function Row({ r, open, onToggle, onDelete, paste, onMsg }) {
         <div className="dc-body">
           <p className="dc-full">{heard && r.raw ? r.raw : r.text}</p>
           {r.raw && <button type="button" className="link-btn small dc-heard" onClick={() => setHeard((v) => !v)}>{heard ? t('Show it as it was put in') : t('Show it as it was heard, before the cleanup')}</button>}
+          {access && <PermissionFix pane="accessibility" stale={access === 'stale'} ask={access === 'off' ? 1 : 0} onCheck={() => { setAccess(null); again() }}><p className="small">{t('Pasting needs Accessibility.')}</p></PermissionFix>}
           {r.audio && <audio className="dc-audio" controls preload="none" src={apiUrl(`/dictations/${encodeURIComponent(r.id)}/audio`)} />}
           <div className="dc-acts">
             <button type="button" className="btn small" onClick={copy}><Icon name="copy" size={12} /> {t('Copy')}</button>
