@@ -1,8 +1,8 @@
 # Bridge AI's tests (test/run.mjs) on macOS, Windows and Linux: on every push to main and every pull
 # request, and before a release is built (release.yml runs this first). The app's tests run in
-# Chromium everywhere, and in WebKit (the engine of Safari and the iPhone app) on macOS too, where
-# the iPhone app is also built for the Simulator; the Android app is built on Linux. When something
-# fails, the logs and screenshots are kept with the run for a week.
+# Chromium everywhere, and in WebKit (the engine of Safari and the iPhone app) on macOS too. Beside
+# them, the iPhone app is built for the Simulator on macOS and the Android app on Linux. When
+# something fails, the logs and screenshots are kept with the run for a week.
 name: Tests
 
 on:
@@ -32,7 +32,8 @@ jobs:
             name: Linux
             browser: chromium
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    # macOS runs every suite in both browsers: about 25 minutes, and growing.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -71,14 +72,38 @@ jobs:
       - name: Tests
         run: node test/run.mjs --all --lanes 2 --browser ${{ matrix.browser }}
 
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: test-output-${{ matrix.name }}
+          path: test/.out
+          include-hidden-files: true
+          retention-days: 7
+
+  # The iPhone app, beside the tests rather than after them.
+  ios:
+    name: iPhone app
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci --no-audit --no-fund
+
       # The iPhone app (mobile/ios), built for the iPhone Simulator as it ships (Release), with no
       # signing, so a change to it or to what it carries (the phone page, the demo, Cloud agents)
-      # can't break it unseen. Run even when a test failed. With the newest Xcode here (the App Store
-      # takes Xcode 26 or later), a Swift warning fails it, and XcodeGen is a pinned release, refused
-      # unless it matches its checksum. The demo and Cloud agents are built first, so the app's own
-      # build finds them current.
+      # can't break it unseen. With the newest Xcode here (the App Store takes Xcode 26 or later), a
+      # Swift warning fails it, and XcodeGen is a pinned release, refused unless it matches its
+      # checksum. The demo and Cloud agents are built first, so the app's own build finds them current.
       - name: iPhone app
-        if: runner.os == 'macOS' && !cancelled()
         shell: bash
         env:
           XCODEGEN_URL: https://github.com/yonaskolb/XcodeGen/releases/download/2.46.0/xcodegen.zip
@@ -102,14 +127,6 @@ jobs:
           for f in PrivacyInfo.xcprivacy demo/index.html cloud/index.html cloud/providers.json web/index.html PlugIns/Widgets.appex/Widgets; do
             [ -e "$app/$f" ] || { echo "::error::The iPhone app has no $f"; exit 1; }
           done
-
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: failure()
-        with:
-          name: test-output-${{ matrix.name }}
-          path: test/.out
-          include-hidden-files: true
-          retention-days: 7
 
   # The Android app (mobile/android), built as it ships, with a key made for the run
   # (android-key.sh --dry-run): the debug APK, and the release APK shrunk by R8 and signed as a
