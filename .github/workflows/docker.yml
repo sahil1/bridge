@@ -21,6 +21,8 @@ jobs:
   image:
     name: Build and push
     runs-on: ubuntu-latest
+    # It takes about ten minutes. A stall fails here rather than at GitHub's six hours.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

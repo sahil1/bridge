@@ -12,9 +12,19 @@
 # go in your home folder volume, so they survive image updates and can update themselves.
 
 # Node.js 24, an LTS, by digest: a tag can be pointed at another image, a digest can't. Dependabot
-# moves both FROM lines on together when the image gets fixes (.github/dependabot.yml).
+# moves the FROM lines on together when the image gets fixes (.github/dependabot.yml).
 
-# ---------- Build: dependencies (node-pty is compiled here, for this CPU) and the UI ----------
+# ---------- The UI: the same files for every CPU, so it's built once, on the building machine's
+# own CPU. Built under emulation for arm64 it took minutes and could stall for hours. ----------
+FROM --platform=$BUILDPLATFORM node:24-bookworm-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c AS ui
+WORKDIR /app
+COPY package.json package-lock.json .npmrc ./
+# No install scripts: they compile node-pty, which only the server needs.
+RUN npm ci --no-audit --no-fund --ignore-scripts
+COPY . .
+RUN npm run build
+
+# ---------- Build: the server's dependencies (node-pty is compiled here, for this CPU) ----------
 FROM node:24-bookworm-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c AS build
 RUN apt-get update \
  && apt-get install -y --no-install-recommends python3 make g++ git ca-certificates \
@@ -22,9 +32,9 @@ RUN apt-get update \
 WORKDIR /app
 COPY package.json package-lock.json .npmrc ./
 COPY scripts/install-hooks.js scripts/
-RUN npm ci --no-audit --no-fund
+RUN npm ci --omit=dev --no-audit --no-fund
 COPY . .
-RUN npm run build && npm prune --omit=dev --no-audit --no-fund
+COPY --from=ui /app/dist dist
 
 # ---------- Run ----------
 FROM node:24-bookworm-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c
