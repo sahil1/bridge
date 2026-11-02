@@ -19,7 +19,10 @@ with only the coordinates you picked), market prices and news headlines (Yahoo F
 Reserve and public news feeds), speech models when you download one, the first time you use the
 mic or a meeting or from Settings › Voice (one download each from Hugging Face; what you say is
 turned into text on your computer and never sent anywhere, unless you pick a speech service for
-meetings), a check on GitHub for a newer version, which you can turn off in Settings › About &
+meetings), the local model (Gemma 4 E2B, 2.8 GB) only when you click Download for it in Settings ›
+Model Providers (one download from Hugging Face; what you give it is read on your computer by
+llama.cpp, which runs there and answers only Bridge AI, and is never sent anywhere), a check on
+GitHub for a newer version, which you can turn off in Settings › About &
 Updates, and, only if you turn on usage counts, a weekly report to the project (below). Its fonts and icons are part of the app, so nothing is fetched to draw
 it. On Windows and Linux, the desktop app's spell check gets the dictionaries for your languages
 once, from Google, as Chrome does; nothing you type goes with them (a Mac uses its own).
@@ -64,8 +67,8 @@ for when you pick it, and Bridge AI uses it for that paste only.
 Edit by voice (a Mac, off until you turn it on) reads the text you have selected in that app as you
 let go of the key, through Accessibility (asking the app for its selection; ⌘C only in an app that
 can't say, with what you had copied put back). That text and what you said go to the model you pick
-for it: one on your computer (Ollama, LM Studio) keeps them there; any other gets them, and Settings
-says so where you pick it. With nothing selected, nothing is sent anywhere, and with it off, nothing
+for it: one on your computer (the local model built in, which it uses when you haven't picked one,
+Ollama, LM Studio) keeps them there; any other gets them, and Settings says so where you pick it. With nothing selected, nothing is sent anywhere, and with it off, nothing
 is read.
 
 When you ask the Chief of Staff out loud, what you said goes to it as any message you type does,

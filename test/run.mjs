@@ -49,6 +49,7 @@ const SUITES = [
   { name: 'saves', build: null, covers: [/^server\/paths\.js$/] },
   { name: 'desktop-menu', build: null, covers: [/^desktop\/(contextmenu|main)\.js$/, /^desktop\/package\.json$/] },
   { name: 'room-voices', build: null, covers: [/^server\/(voices|speech|asr|asr-worker|machine|meetings)\.js$/, /^test\/stand-ins\/(sherpa\.cjs|model\.mjs)$/] },
+  { name: 'builtin-model', build: 'dist', browser: true, covers: [/^server\/(llm|chatmodels|consult|meetings|machine|index)\.js$/, /^src\/components\/settings\/(Providers|Dictation)\.jsx$/, /^scripts\/llama\.js$/, /^test\/stand-ins\/llama-server\.mjs$/] },
   { name: 'local-models', build: null, covers: [/^server\/(chatmodels|consult|meetings|insights|pr|providers|index)\.js$/, /^test\/stand-ins\/local-model\.mjs$/] },
   { name: 'speech', build: null, covers: [/^server\/(speech|voice|asr|asr-worker|machine|meetmemory|meetings)\.js$/, /^test\/stand-ins\/sherpa\.cjs$/] },
   { name: 'voice-ui', build: 'dist', browser: true, covers: [/^src\/components\/settings\/(Voice|Meetings)\.jsx$/, /^src\/components\/(Composer|Settings)\.jsx$/, /^src\/audio\//, /^server\/(speech|voice|asr|asr-worker|machine|index)\.js$/, /^test\/stand-ins\/sherpa\.cjs$/] },

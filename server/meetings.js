@@ -1491,7 +1491,7 @@ export const setHelpers = (h) => { helpers = { ...helpers, ...h } }
 // A prompt too long for the model isn't passed on either: it goes again in smaller pieces (inPieces).
 const RETRY_MS = Number(process.env.BRIDGE_MODEL_RETRY_MS || 3000)
 const passing = (e) => /ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|EPIPE|socket hang up|fetch failed|network|connection|overloaded|rate.?limit|too many requests|timed? ?out|\b(429|500|502|503|504|529)\b/i.test(String(e?.message || e))
-const isLocal = (id) => /^(ollama|lmstudio):/.test(String(id || ''))
+const isLocal = (id) => /^(ollama|lmstudio|bridge):/.test(String(id || ''))
 async function replyAny(use, msgs, o) {
   const once = async (id) => {
     for (let i = 0; ; i++) {

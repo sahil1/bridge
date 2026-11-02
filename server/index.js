@@ -55,6 +55,7 @@ import * as settings from './settings.js'
 import * as consult from './consult.js'
 import * as insights from './insights.js'
 import * as chatModels from './chatmodels.js'
+import * as llm from './llm.js'
 import * as meetings from './meetings.js'
 import * as boards from './boards.js'
 import * as labs from './labs.js'
@@ -1103,9 +1104,11 @@ app.post('/api/voice/speak', async (req, res) => {
 })
 // Edit by voice: the selected text rewritten as you said, by the model picked for it. Only from the
 // computer itself (the dictation window), never through the relay.
-app.post('/api/dictation/edit', wrap((req) => {
+// None picked: the local model built in, once it's downloaded (the text stays on this computer).
+app.post('/api/dictation/edit', wrap(async (req) => {
   onComputer(req)
-  return dictation.edit({ text: req.body?.text, instruction: req.body?.instruction, model: cfg.dictation?.editModel || null, reply: (id, msgs, o) => chatModels.reply(id, msgs, o) })
+  const model = cfg.dictation?.editModel || ((await llm.ready().catch(() => false)) ? llm.ID : null)
+  return dictation.edit({ text: req.body?.text, instruction: req.body?.instruction, model, reply: (id, msgs, o) => chatModels.reply(id, msgs, o) })
 }))
 // Your dictations, kept on this computer (dictations.js): listed and searched, one whole, what
 // became of it, deleted (and put back, for Undo), all of them deleted, a recording kept and played,
@@ -1139,17 +1142,13 @@ voices.setSaver(async (p) => afterChange(settings.patch({ meetings: p })))
 meetings.recover()
 if (cfg.setupDone) projects.upgrading()
 // The model notes are written with when you haven't picked one: your Claude sign-in first (no key
-// needed), then another sign-in, a key, your cloud, a model on this computer.
+// needed), then another sign-in, a key, your cloud, a model on this computer (your own Ollama's or
+// LM Studio's before the local model built in, which is only there once you've downloaded it).
 const VIA_ORDER = ['sign-in', 'key', 'cloud', 'local']
-const pickMeetingModel = async () => {
-  const l = await chatModels.models().catch(() => [])
-  return (l.find((m) => m.id === 'cli:claude') || [...l].sort((a, b) => VIA_ORDER.indexOf(a.via) - VIA_ORDER.indexOf(b.via))[0])?.id || null
-}
+const rank = (m) => (m.id === 'cli:claude' ? -1 : VIA_ORDER.indexOf(m.via) + (m.builtin ? 0.5 : 0))
+const pickMeetingModel = async () => [...await chatModels.models().catch(() => [])].sort((a, b) => rank(a) - rank(b))[0]?.id || null
 // The models to fall back on when the one picked can't be reached, in the same order.
-const meetingModels = async () => {
-  const l = await chatModels.models().catch(() => [])
-  return [...l].sort((a, b) => (b.id === 'cli:claude') - (a.id === 'cli:claude') || VIA_ORDER.indexOf(a.via) - VIA_ORDER.indexOf(b.via)).map((m) => m.id)
-}
+const meetingModels = async () => [...await chatModels.models().catch(() => [])].sort((a, b) => rank(a) - rank(b)).map((m) => m.id)
 meetings.setHelpers({
   reply: (id, msgs, o) => chatModels.reply(id, msgs, o), pickModel: pickMeetingModel, models: meetingModels, mailRelated: (o) => mail.related(o), mailMessage: (id) => mail.message(id),
   // How much a model on this computer takes at a time, and how long it takes here.
@@ -2284,6 +2283,11 @@ app.post('/api/consult', wrap((req) => consult.ask({ ...(req.body || {}), env: u
 // The models on this computer (Ollama, LM Studio), for Settings › Model Providers: how much each
 // takes at a time, and the one Bridge AI's jobs that stay here use (localModel).
 app.get('/api/local-models', wrap(() => chatModels.localModels(cfg.localModel)))
+// The local model built in (llm.js): whether it's offered here and why not, downloaded, downloading,
+// loaded. The download starts only from Settings' Download, never by itself; Remove stops it first.
+app.get('/api/llm', wrap(() => llm.status()))
+app.post('/api/llm/download', wrap(async () => { await llm.fetchModel(); return llm.status() }))
+app.delete('/api/llm', wrap(async () => { await llm.removeModel(); return llm.status() }))
 providerRoutes(app, { cfg, installed })
 mcpRoutes(app, { cfg, installed })
 

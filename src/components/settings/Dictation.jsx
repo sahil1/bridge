@@ -222,19 +222,21 @@ function History({ d, set, cleared, onClear }) {
 }
 
 // The model edit by voice rewrites with (dictation.editModel), from the ones you can use: one on this
-// computer (Ollama, LM Studio) keeps what you select here; any other is said to send it out.
+// computer (the local model built in, Ollama, LM Studio) keeps what you select here; any other is said
+// to send it out. None picked: the local model built in, once it's downloaded (server/index.js).
 function EditModel({ value, onPick }) {
   const [models, setModels] = useState(null)
   useEffect(() => { api('/chat/models').then((r) => setModels(r.models || []), () => setModels([])) }, [])
   if (!models) return null
-  if (!models.length) return <p className="muted small">{t('No model to rewrite with yet: add one in Settings › Model Providers (Ollama or LM Studio keep the text on this computer).')}</p>
-  const cur = models.find((m) => m.id === value)
+  if (!models.length) return <p className="muted small">{t('No model to rewrite with yet: download the local model, or add one, in Settings › Model Providers. The local model, Ollama and LM Studio keep the text on this computer.')}</p>
+  const builtin = models.find((m) => m.builtin)
+  const cur = models.find((m) => m.id === value) || (!value ? builtin : null)
   return (
     <>
       <div className="st-row dict-edit-model"><span>{t('Rewritten by')}</span>
         <select value={value || ''} onChange={(e) => onPick(e.target.value || null)} aria-label={t('Rewritten by')}>
-          <option value="">{t('Pick a model')}</option>
-          {models.map((m) => <option key={m.id} value={m.id}>{`${m.label} · ${m.via === 'local' ? t('on this computer') : t('text leaves this computer')}`}</option>)}
+          <option value="">{builtin ? t('{model}, on this computer (the default)', { model: builtin.label }) : t('Pick a model')}</option>
+          {models.filter((m) => !(m.builtin && !value)).map((m) => <option key={m.id} value={m.id}>{`${m.label} · ${m.via === 'local' ? t('on this computer') : t('text leaves this computer')}`}</option>)}
         </select>
       </div>
       {cur && cur.via !== 'local' && <p className="st-note warn"><Icon name="alert" size={13} /> {t('What you select and what you say go to {provider}.', { provider: cur.provider })}</p>}

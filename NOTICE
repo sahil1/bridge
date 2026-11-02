@@ -31,3 +31,10 @@ sherpa-onnx project. The Whisper models are by OpenAI, under the MIT License, in
 form. Telling voices apart in a room uses ERes2Net, by Alibaba's 3D-Speaker project, under the
 Apache License 2.0 (https://www.modelscope.cn/models/iic/speech_eres2net_sv_en_voxceleb_16k), in the
 ONNX form made by the sherpa-onnx project, downloaded when you first ask for it.
+
+The local model runs on llama.cpp's llama-server (https://github.com/ggml-org/llama.cpp, MIT License,
+Copyright (c) 2023-2026 The ggml authors), whose release builds come with the desktop app, with
+their licences beside them (and LLVM's OpenMP runtime on Windows, under its own licence, included
+there). The model is not included: Gemma 4 E2B, by Google, under the Apache License 2.0
+(https://huggingface.co/google/gemma-4-E2B-it), in the GGUF form made by the llama.cpp project
+(https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF), is downloaded from Hugging Face when you ask for it.
