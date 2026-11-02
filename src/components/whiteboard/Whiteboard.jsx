@@ -88,7 +88,8 @@ async function exportBoard(X, ex, { kind, name, dark, only }) {
   if (kind === 'svg') blob = new Blob([(await X.exportToSvg(o)).outerHTML], { type: 'image/svg+xml' })
   else if (kind === 'pdf') {
     const { svgToPdf } = await import('./pdf.js')
-    blob = await svgToPdf(await X.exportToSvg({ ...o, appState: { ...o.appState, exportWithDarkMode: false } }), { dark, name, png })
+    // The PDF writes its words in its own fonts (pdf.js), so the SVG needn't carry the board's.
+    blob = await svgToPdf(await X.exportToSvg({ ...o, appState: { ...o.appState, exportWithDarkMode: false }, skipInliningFonts: true }), { dark, name, png })
   } else blob = await png()
   download(blob, `${name}.${kind}`)
 }
