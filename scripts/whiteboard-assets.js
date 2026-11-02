@@ -53,11 +53,25 @@ function workerPieces() {
   } catch { return [] }
 }
 
+// jsPDF (a whiteboard's PDF, src/components/whiteboard/pdf.js) can also turn HTML (html2canvas)
+// and SVG pictures (canvg) into a PDF, which Bridge AI doesn't ask of it (svg2pdf.js draws the
+// SVG): 350 KB of files the build would carry and never load. Resolved before Vite's own resolving.
+const unused = {
+  name: 'bridge-whiteboard-unused',
+  enforce: 'pre',
+  resolveId(id, importer) {
+    return (id === 'html2canvas' || id === 'canvg') && /[\\/]jspdf[\\/]/.test(importer || '') ? `\0bridge-unused-${id}` : null
+  },
+  load(id) {
+    return id.startsWith('\0bridge-unused-') ? `export default function unused() { throw new Error('${id.slice(15)} is left out of Bridge AI') }` : null
+  },
+}
+
 export default function whiteboardAssets() {
   let used = false
   let pointed = 0
   let blanked = 0
-  return {
+  return [unused, {
     name: 'bridge-whiteboard-assets',
     config() {
       const pieces = workerPieces()
@@ -112,5 +126,5 @@ export default function whiteboardAssets() {
         fs.createReadStream(file).pipe(res)
       })
     },
-  }
+  }]
 }

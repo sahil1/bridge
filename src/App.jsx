@@ -418,11 +418,16 @@ function App() {
     return () => window.removeEventListener('bridge-open-dictations', on)
   }, [])
   // A whiteboard opened from anywhere (the list, a chat's Mermaid, a renamed board taking its tab).
+  // One renamed in the list keeps its tab, if it has one open, under the new name.
   useEffect(() => {
     const on = (e) => {
       const d = e.detail || {}
       if (d.id) openAgentRef.current?.(`${BOARD}${d.id}`, { replace: d.replace || (wsRef.current?.tabs.includes('view:whiteboards') ? 'view:whiteboards' : null) })
       else if (d.list) openAgentRef.current?.('view:whiteboards', { replace: d.replace || null })
+      else if (d.renamed) {
+        const from = `${BOARD}${d.renamed.from}`, to = `${BOARD}${d.renamed.to}`
+        setW((w) => (!w.tabs.includes(from) || w.tabs.includes(to) ? w : { ...w, tabs: w.tabs.map((x) => (x === from ? to : x)), active: w.active === from ? to : w.active, side: w.side === from ? to : w.side }))
+      }
     }
     window.addEventListener('bridge-open-board', on)
     return () => window.removeEventListener('bridge-open-board', on)

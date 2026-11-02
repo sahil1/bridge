@@ -3,6 +3,8 @@ import { useAppearance, isDark } from '../../appearance.js'
 import { useMedia } from '../layout.jsx'
 import { currentLang, t } from '../../i18n/index.js'
 import { loadExcalidraw } from './excalidraw.js'
+import { toolDefaults, clearBackground } from './look.js'
+import { holdTogether } from './holders.js'
 
 // Excalidraw's own languages, for the ones Bridge AI is in.
 const LANG = { de: 'de-DE', es: 'es-ES', fr: 'fr-FR', hi: 'hi-IN', ja: 'ja-JP', 'pt-BR': 'pt-BR', 'zh-CN': 'zh-CN' }
@@ -20,16 +22,24 @@ export const useDarkMode = () => {
   return look.mode === 'system' ? system : isDark(look.mode)
 }
 
-// The drawing area. initial: what to draw first ({ elements, appState, files }, or a promise of it).
-// onApi(api, X): Excalidraw's handle and module, once it's up. onSave: ⌘S, as the board saves by
-// itself anyway. welcome: the line on an empty board.
-export default function Canvas({ initial, onApi, onChange, onSave, viewOnly = false, name, welcome, children }) {
+// The drawing area: Excalidraw (MIT) in Bridge AI's look. Its tools stay (the toolbar, the shape's
+// colours, zoom and undo); its menu, welcome screen and library are Bridge AI's instead (the
+// header's menus, the empty board's own hint, the Shapes panel), its colours and font are the
+// app's, and its own links and Mermaid importer are left out (whiteboard.css). Excalidraw is
+// credited in the whiteboard's settings, in Settings › About & Updates and in NOTICE.
+//   Web pages embedded in a board (validateEmbeddable) are turned off: a YouTube or Figma link
+// pasted in stays a link, so a board never loads anything from the internet.
+//   initial: what to draw first ({ elements, appState, files }). look: 'clean' or 'sketch', what
+//   shapes drawn by hand start as. onApi(api, X): Excalidraw's handle and module, once it's up.
+//   onSave: ⌘S, as the board saves by itself anyway.
+export default function Canvas({ initial, onApi, onChange, onSave, viewOnly = false, name, look = 'clean', children }) {
   const [X, setX] = useState(null)
   const [err, setErr] = useState(null)
   const dark = useDarkMode()
   const box = useRef(null)
   const save = useRef(onSave)
   save.current = onSave
+  const [api, setApi] = useState(null)
   useEffect(() => { loadExcalidraw().then(setX, (e) => setErr(e.message)) }, [])
   useEffect(() => {
     const el = box.current
@@ -41,39 +51,31 @@ export default function Canvas({ initial, onApi, onChange, onSave, viewOnly = fa
     el.addEventListener('keydown', on, true)
     return () => el.removeEventListener('keydown', on, true)
   }, [X])
+  // Containers and icons carry what's in them.
+  useEffect(() => (api && !viewOnly ? holdTogether(api) : undefined), [api, viewOnly])
+  // A new look picked: what's drawn next starts in it.
+  useEffect(() => { if (api) api.updateScene({ appState: toolDefaults(look) }) }, [api, look])
   if (err) return <div className="wb-canvas wb-wait" role="alert"><p className="error-text small">{t("The whiteboard couldn't load: {error}", { error: err })}</p></div>
   if (!X) return <div className="wb-canvas wb-wait" aria-busy="true"><span className="muted small">{t('Opening the whiteboard…')}</span></div>
-  const { Excalidraw, MainMenu, WelcomeScreen } = X
+  const { Excalidraw, MainMenu } = X
+  const start = initial ? { ...initial, appState: { ...toolDefaults(look), objectsSnapModeEnabled: true, ...clearBackground(initial.appState) } } : initial
   return (
-    <div className="wb-canvas" ref={box}>
+    <div className={`wb-canvas look-${look}`} ref={box}>
       <Excalidraw
-        initialData={initial}
-        excalidrawAPI={(api) => onApi?.(api, X)}
+        initialData={start}
+        excalidrawAPI={(a) => { setApi(a); onApi?.(a, X) }}
         onChange={onChange}
         theme={dark ? 'dark' : 'light'}
         langCode={LANG[currentLang()] || 'en'}
         viewModeEnabled={viewOnly}
         name={name}
         aiEnabled={false}
+        validateEmbeddable={false}
         handleKeyboardGlobally={false}
-        UIOptions={{ canvasActions: { loadScene: false, saveToActiveFile: false, toggleTheme: null, export: { saveFileToDisk: true }, saveAsImage: true, clearCanvas: !viewOnly, changeViewBackgroundColor: !viewOnly } }}
+        UIOptions={{ canvasActions: { loadScene: false, saveToActiveFile: false, toggleTheme: null, export: false, saveAsImage: false, clearCanvas: false, changeViewBackgroundColor: false }, tools: { image: true } }}
       >
-        <MainMenu>
-          <MainMenu.DefaultItems.SaveAsImage />
-          <MainMenu.DefaultItems.Export />
-          {!viewOnly && <MainMenu.DefaultItems.ClearCanvas />}
-          <MainMenu.Separator />
-          {!viewOnly && <MainMenu.DefaultItems.ChangeCanvasBackground />}
-          <MainMenu.DefaultItems.Help />
-        </MainMenu>
-        <WelcomeScreen>
-          <WelcomeScreen.Hints.MenuHint />
-          <WelcomeScreen.Hints.ToolbarHint />
-          <WelcomeScreen.Hints.HelpHint />
-          <WelcomeScreen.Center>
-            <WelcomeScreen.Center.Heading>{welcome || t('Draw with the tools above, or describe a diagram with Draw this.')}</WelcomeScreen.Center.Heading>
-          </WelcomeScreen.Center>
-        </WelcomeScreen>
+        {/* Its menu's few useful parts are in the header's menus; this keeps its own out. */}
+        <MainMenu><MainMenu.DefaultItems.Help /></MainMenu>
         {children}
       </Excalidraw>
     </div>

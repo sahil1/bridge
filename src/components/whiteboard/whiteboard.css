@@ -4,11 +4,57 @@
 .wb-view > .pane-head { grid-row: 1; }
 .wb-view .pane-titles h2 { padding-left: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wb-view .pane-extras { display: flex; align-items: center; gap: 6px; }
-.wb-body { position: relative; grid-row: 4; min-height: 0; min-width: 0; overflow: hidden; }
-.wb-canvas { position: absolute; inset: 0; }
-.wb-canvas .excalidraw { --ui-font: var(--font); }
-/* Excalidraw's library (shapes kept to reuse) isn't kept anywhere yet, so it isn't offered. */
-.wb-canvas .excalidraw .default-sidebar-trigger { display: none; }
+.wb-body { position: relative; grid-row: 4; min-height: 0; min-width: 0; overflow: hidden; display: grid; grid-template-columns: minmax(0, 1fr); }
+.wb-body.with-shapes { grid-template-columns: 228px minmax(0, 1fr); }
+.wb-stage { position: relative; min-width: 0; min-height: 0; }
+.wb-canvas { position: absolute; inset: 0; background: var(--pane); }
+/* Excalidraw in Bridge AI's colours, font and corners, in either theme (the app's own colours
+   follow the theme, so one rule does both; it outweighs Excalidraw's dark rule). Its dialogs (Help)
+   open outside the board, at the end of the page, so they're named too. */
+.wb-canvas .excalidraw.excalidraw, .excalidraw.excalidraw.excalidraw-modal-container {
+  --ui-font: var(--font);
+  --color-primary: var(--accent);
+  --color-primary-darker: color-mix(in srgb, var(--accent) 86%, #000);
+  --color-primary-darkest: color-mix(in srgb, var(--accent) 72%, #000);
+  --color-primary-hover: color-mix(in srgb, var(--accent) 88%, #000);
+  --color-primary-light: color-mix(in srgb, var(--accent) 14%, var(--pane));
+  --color-primary-light-darker: color-mix(in srgb, var(--accent) 22%, var(--pane));
+  --color-brand-hover: color-mix(in srgb, var(--accent) 88%, #000);
+  --color-brand-active: color-mix(in srgb, var(--accent) 76%, #000);
+  --color-selection: var(--accent);
+  --color-surface-primary-container: color-mix(in srgb, var(--accent) 14%, var(--pane));
+  --island-bg-color: var(--pane);
+  --popup-bg-color: var(--pane);
+  --sidebar-bg-color: var(--pane);
+  --default-bg-color: var(--pane);
+  --input-bg-color: var(--pane-2);
+  --input-hover-bg-color: var(--pane-2);
+  --color-surface-lowest: var(--pane);
+  --color-surface-low: var(--pane-2);
+  --color-surface-mid: var(--pane-2);
+  --color-surface-high: color-mix(in srgb, var(--ink) 7%, var(--pane));
+  --color-on-surface: var(--ink);
+  --text-primary-color: var(--ink);
+  --icon-fill-color: var(--ink);
+  --default-border-color: var(--line-2);
+  --sidebar-border-color: var(--line-2);
+  --color-border-outline-variant: var(--line-2);
+  --border-radius-md: 7px;
+  --border-radius-lg: 10px;
+  --shadow-island: 0 1px 2px rgba(16, 24, 40, .06), 0 4px 14px rgba(16, 24, 40, .08);
+}
+.wb-canvas .excalidraw .Island { border: 1px solid var(--line); }
+/* Excalidraw's own menu and library aren't offered: the header's menus and the Shapes panel are
+   Bridge AI's in their place (and its right-click menu's Add to library with them). Its own links
+   (its docs, blog and YouTube, at the top of Help), its web embeds (turned off, Canvas.jsx) and its
+   Mermaid importer (Draw this, and Mermaid from chats and files, do that here) are left out of its
+   menus. The tools keep their shortcuts in their tooltips, not as numbers on each. */
+.wb-canvas .excalidraw .main-menu-trigger, .wb-canvas .excalidraw .default-sidebar-trigger,
+.wb-canvas .excalidraw li[data-testid="addToLibrary"],
+.excalidraw.excalidraw-modal-container .HelpDialog__header,
+.wb-canvas .excalidraw .App-toolbar__extra-tools-dropdown [data-testid="toolbar-embeddable"],
+.wb-canvas .excalidraw .App-toolbar__extra-tools-dropdown .dropdown-menu-container > div[style],
+.wb-canvas .excalidraw .ToolIcon__keybinding { display: none; }
 .wb-wait { position: absolute; inset: 0; display: grid; place-items: center; padding: 16px; text-align: center; }
 .wb-state { display: inline-flex; align-items: center; gap: 4px; }
 .wb-state.bad { color: var(--critical); max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -34,6 +80,74 @@
 .wb-model { max-width: 220px; }
 .wb-model-one { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wb-privacy, .wb-note, .wb-scope { margin: 0; line-height: 1.4; }
+.wb-refine { display: inline-flex; align-items: center; gap: 4px; }
+.wb-refine select { height: 26px; padding: 0 4px; border-radius: 7px; border: 1px solid var(--line-2); background: var(--pane-2); color: var(--ink); font: inherit; font-size: 12px; }
+
+/* Refine's rounds: progress, cost, the versions to step through, and what each changed. */
+.wb-rounds { display: grid; gap: 6px; padding: 8px; border-radius: 9px; background: var(--pane-2); border: 1px solid var(--line); }
+.wb-rounds-head { display: flex; align-items: baseline; gap: 8px; justify-content: space-between; }
+.wb-cost { white-space: nowrap; }
+.wb-found { margin: 0; }
+.wb-versions { display: flex; flex-wrap: wrap; gap: 4px; }
+.wb-versions .chip { cursor: pointer; border: 1px solid transparent; }
+.wb-versions .chip.on { background: var(--accent-soft); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+.wb-why p { margin: 0 0 4px; }
+.wb-why ul { margin: 0; padding-left: 16px; display: grid; gap: 2px; }
+.wb-put { justify-self: start; }
+
+/* The board's name: click to change it, in the header and the list. */
+.wb-name { all: unset; display: inline-flex; align-items: center; gap: 6px; max-width: 100%; cursor: text; border-radius: 6px; padding: 1px 4px; margin-left: -4px; }
+.wb-name > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-name svg { flex: none; opacity: 0; color: var(--ink-3); transition: opacity .12s; }
+.wb-name:hover, .wb-name:focus-visible { background: var(--pane-2); }
+.wb-name:hover svg, .wb-name:focus-visible svg { opacity: 1; }
+.wb-name-edit { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+.wb-name-input { min-width: 0; width: 100%; max-width: 360px; font: inherit; font-weight: inherit; color: var(--ink); padding: 1px 6px; margin-left: -6px; border-radius: 6px; border: 1px solid var(--accent); background: var(--pane); outline: 2px solid var(--accent-soft); }
+.wb-view .pane-head .btn.on, .wb-view .pane-head .win-btn.on { background: var(--accent-soft); color: var(--accent); }
+.menu-title { padding: 6px 10px 2px; }
+.wb-export-opts { display: grid; gap: 6px; padding: 6px 10px 8px; }
+.wb-export-opts label { display: flex; align-items: center; gap: 6px; }
+
+/* The Shapes panel: beside the board on a computer, over it on a phone. */
+.wb-shapes-wrap { min-height: 0; min-width: 0; display: flex; border-right: 1px solid var(--line); background: var(--pane); }
+.wb-shapes { display: flex; flex-direction: column; width: 100%; min-height: 0; }
+.wb-shapes-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 8px 4px 12px; }
+.wb-shapes-search { display: flex; align-items: center; gap: 6px; margin: 0 8px 6px; padding: 0 8px; height: 28px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--pane-2); color: var(--ink-3); }
+.wb-shapes-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; font-size: 12.5px; }
+.wb-shapes-list { flex: 1; min-height: 0; overflow: auto; padding: 0 6px 8px; }
+.wb-shapes-list > p { padding: 8px 6px; margin: 0; }
+.wb-shapes-title { all: unset; display: flex; align-items: center; gap: 6px; width: calc(100% - 12px); padding: 8px 6px 4px; font-size: 11.5px; font-weight: 600; color: var(--ink-2); cursor: pointer; text-transform: uppercase; letter-spacing: .03em; }
+.wb-shapes-title > span { flex: 1; }
+.wb-shapes-title .open { transform: rotate(90deg); }
+.wb-shapes-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; }
+.wb-shape { display: grid; justify-items: center; gap: 3px; padding: 6px 2px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--ink); cursor: grab; font-size: 10.5px; line-height: 1.2; text-align: center; }
+.wb-shape:hover, .wb-shape:focus-visible { background: var(--pane-2); border-color: var(--line); }
+.wb-shape > span:last-child { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
+.wb-shape-pic { display: grid; place-items: center; width: 30px; height: 30px; color: var(--ink-2); }
+.wb-shapes-foot { margin: 0; padding: 6px 12px 10px; border-top: 1px solid var(--line); line-height: 1.35; }
+
+/* An empty board's hint, in the middle, over the canvas. */
+.wb-empty-board { position: absolute; z-index: 3; top: 50%; left: 50%; transform: translate(-50%, -50%); display: grid; justify-items: center; gap: 6px; width: min(380px, calc(100% - 32px)); padding: 18px; text-align: center; pointer-events: none; }
+.wb-empty-board p { margin: 0; }
+.wb-empty-board > p:first-child { font-weight: 600; }
+.wb-empty-board .wb-ask-row { justify-content: center; margin-top: 4px; pointer-events: auto; }
+
+/* Whiteboard Settings, where Draw this goes. */
+.wb-settings { display: grid; gap: 8px; max-height: calc(100vh - 220px); overflow: auto; padding: 10px 12px; border-radius: 12px; background: var(--pane); border: 1px solid var(--line-2); box-shadow: var(--shadow-lg); color: var(--ink); }
+.wb-settings h5 { margin: 6px 0 0; font-size: 12px; font-weight: 600; color: var(--ink-2); }
+.wb-settings p { margin: 0; line-height: 1.4; }
+.wb-look { justify-self: start; }
+.wb-summary { padding: 6px 8px; border-radius: 8px; background: var(--pane-2); }
+.wb-prefs { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.wb-pref-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.wb-pref-row > span:first-child { min-width: 64px; }
+.wb-pref-row select, .wb-pref-add { height: 26px; max-width: 170px; padding: 0 4px; border-radius: 7px; border: 1px solid var(--line-2); background: var(--pane-2); color: var(--ink); font: inherit; font-size: 12px; }
+.wb-pref-add { justify-self: start; max-width: 100%; }
+.wb-evidence { margin: 2px 0 4px 70px; padding-left: 14px; display: grid; gap: 2px; }
+.wb-notes { display: grid; gap: 4px; }
+.wb-notes textarea { width: 100%; resize: vertical; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--pane-2); color: var(--ink); font: inherit; font-size: 12.5px; }
+.wb-settings > .btn { justify-self: start; }
+.wb-credit { padding-top: 6px; border-top: 1px solid var(--line); }
 .wb-draw .error-text { margin: 0; }
 .wb-draw.compact textarea { min-height: 44px; }
 
@@ -46,9 +160,11 @@
 .wb-empty p { margin: 0; max-width: 520px; }
 .wb-empty > svg { color: var(--ink-3); margin-bottom: 6px; }
 .wb-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
-.wb-card { display: grid; gap: 4px; width: 100%; padding: 8px; border-radius: 12px; border: 1px solid var(--line); background: var(--pane); text-align: left; color: var(--ink); }
-.wb-card:hover, .wb-card:focus-visible { border-color: var(--line-2); box-shadow: var(--shadow); }
-.wb-thumb { display: grid; place-items: center; aspect-ratio: 16 / 10; border-radius: 8px; background: #fff; overflow: hidden; color: var(--ink-3); }
+.wb-card { display: grid; gap: 4px; width: 100%; min-width: 0; padding: 8px; border-radius: 12px; border: 1px solid var(--line); background: var(--pane); text-align: left; color: var(--ink); }
+.wb-card:hover, .wb-card:focus-within { border-color: var(--line-2); box-shadow: var(--shadow); }
+.wb-thumb { display: grid; place-items: center; width: 100%; padding: 0; border: 0; cursor: pointer; aspect-ratio: 16 / 10; border-radius: 8px; background: #fff; overflow: hidden; color: var(--ink-3); }
+.wb-card-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.wb-card-row .wb-card-title { flex: 1; min-width: 0; }
 .wb-thumb img { width: 100%; height: 100%; object-fit: contain; }
 .wb-grid.dark .wb-thumb { background: #121212; }
 /* The pictures are drawn light; in a dark theme they're turned dark as Excalidraw does its canvas. */
@@ -67,6 +183,8 @@
 
 @media (max-width: 700px) {
   .wb-draw-wrap { top: 8px; left: 8px; right: 8px; width: auto; }
+  .wb-shapes-wrap { position: absolute; z-index: 7; left: 0; top: 0; bottom: 0; width: min(270px, 86%); box-shadow: var(--shadow-lg); }
+  .wb-settings { max-height: calc(100vh - 160px); }
   .wb-home { padding: 14px 12px 22px; }
   .wb-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
   .wb-model { max-width: 160px; }
