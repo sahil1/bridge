@@ -175,7 +175,7 @@ try {
     const via = (await line.isVisible().catch(() => false)) ? line : p.locator('.topbar button[aria-label="Settings"]')
     ok(more.setup === false || await dot.isVisible().catch(() => false), `${t}: with the update's line behind setup's, Settings has a dot`)
     await via.tap({ timeout: 3000 }).catch(() => {})
-    ok(!!(await until(async () => /About & Updates/.test(await p.locator('.st-nav-item.on').innerText().catch(() => '')) && /3\.7\.0/.test(await p.locator('.st-body').innerText().catch(() => '')), 6000)), `${t}: one tap opens About & Updates, with 3.7.0`)
+    ok(!!(await until(async () => /About & Updates/.test(await p.locator('.st-bar h3').innerText().catch(() => '')) && /3\.7\.0/.test(await p.locator('.modal.settings .st-scroll').innerText().catch(() => '')), 6000)), `${t}: one tap opens About & Updates, with 3.7.0`)
     await p.locator('button[aria-label="Close settings"]').click().catch(() => {})
     ok(!!(await until(async () => !(await dot.count()) && !(await line.count()), 4000)), `${t}: seen, the dot and the line go`)
     if (recording) for (const m of (await kit.api('/meetings')).meetings.filter((x) => x.status === 'recording')) await kit.api(`/meetings/${m.id}/stop`, {}).catch(() => {})

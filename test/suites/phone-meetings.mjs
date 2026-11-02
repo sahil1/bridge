@@ -16,7 +16,7 @@
 // standing in for its mic.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, startModel, checks, until, sleep, browser, page, shot } from '../lib/harness.mjs'
+import { startKit, startModel, checks, until, sleep, browser, page, shot, phoneFaults } from '../lib/harness.mjs'
 
 const { ok, skip, done } = checks('phone-meetings')
 const kit = await startKit('phone-meetings')
@@ -141,49 +141,8 @@ try {
     if (!window.MediaDevices) return
     MediaDevices.prototype.getUserMedia = async () => { const ac = new AudioContext(); const o = ac.createOscillator(); const d = ac.createMediaStreamDestination(); o.connect(d); o.start(); return d.stream }
   }
-  // What's wrong on the phone's screen, within its tab (or the dialog or menu over it). Only what's on
-  // the screen counts: each thing's box, clipped by every box it's in that clips.
-  const faults = (p) => p.evaluate(() => {
-    const W = innerWidth, H = innerHeight
-    const out = { wider: document.documentElement.scrollWidth - W, past: [], sideways: [], cut: [], small: [], covered: [], zooms: [] }
-    const shown = (e) => {
-      const r = e.getBoundingClientRect()
-      if (r.width < 1 || r.height < 1 || (e.closest('details:not([open])') && !e.closest('summary'))) return null
-      const c = getComputedStyle(e)
-      if (c.visibility !== 'visible' || +c.opacity === 0) return null
-      let { left, top, right, bottom } = r
-      for (let x = e.parentElement; x && x !== document.documentElement; x = x.parentElement) {
-        const cx = getComputedStyle(x)
-        if (+cx.opacity === 0) return null
-        if (cx.overflowX !== 'visible' || cx.overflowY !== 'visible') { const q = x.getBoundingClientRect(); left = Math.max(left, q.left); top = Math.max(top, q.top); right = Math.min(right, q.right); bottom = Math.min(bottom, q.bottom) }
-      }
-      left = Math.max(left, 0); top = Math.max(top, 0); right = Math.min(right, W); bottom = Math.min(bottom, H)
-      return right - left >= 1 && bottom - top >= 1 ? { left, top, right, bottom } : null
-    }
-    const name = (e) => `${(e.getAttribute('aria-label') || e.innerText || e.value || e.placeholder || e.tagName).trim().replace(/\s+/g, ' ').slice(0, 40)} <${e.tagName.toLowerCase()}.${String(e.className).split(' ')[0]}>`
-    const scope = document.querySelector('.mt-dialog-back, .modal-back, .ctx-menu, .menu') || document.querySelector('.m-body')
-    const taps = [...scope.querySelectorAll('button, a[href], input:not([type=hidden]), select, textarea, summary, [role=tab]')].filter((e) => !(e.matches('input[type=checkbox], input[type=radio]') && e.closest('label')))
-    taps.push(...scope.querySelectorAll('label:has(input[type=checkbox]), label:has(input[type=radio])'))
-    for (const e of taps) {
-      const s = shown(e)
-      if (!s) continue
-      const r = e.getBoundingClientRect()
-      if (Math.round(r.height) < 40 || Math.round(r.width) < 40) out.small.push(`${name(e)} ${Math.round(r.width)}x${Math.round(r.height)}`)
-      const at = document.elementFromPoint((s.left + s.right) / 2, (s.top + s.bottom) / 2)
-      if (at && at !== e && !e.contains(at) && !at.contains(e)) out.covered.push(`${name(e)} under ${name(at)}`)
-      if (e.matches('input:not([type=checkbox], [type=radio]), select, textarea') && parseFloat(getComputedStyle(e).fontSize) < 16) out.zooms.push(`${name(e)} ${getComputedStyle(e).fontSize}`)
-    }
-    for (const e of scope.querySelectorAll('*')) {
-      const s = shown(e)
-      if (!s) continue
-      const c = getComputedStyle(e)
-      const r = e.getBoundingClientRect()
-      if (r.right > W + 1 && !e.children.length && s.right >= W - 1) out.past.push(`${name(e)} ${Math.round(r.left)}..${Math.round(r.right)}`)
-      if (/(auto|scroll)/.test(c.overflowX) && e.scrollWidth > e.clientWidth + 1 && !/^(INPUT|TEXTAREA|SELECT)$/.test(e.tagName)) out.sideways.push(name(e))
-      if (c.textOverflow === 'ellipsis' && e.scrollWidth > e.clientWidth + 1) out.cut.push(name(e))
-    }
-    return Object.fromEntries(Object.entries(out).filter(([k, v]) => (k === 'wider' ? v > 1 : v.length)))
-  })
+  // What's wrong on the phone's screen, within its tab (or the dialog or menu over it).
+  const faults = (p) => phoneFaults(p, '.mt-dialog-back, .modal-back, .ctx-menu, .menu', '.m-body')
   const box = (p, sel) => p.locator(sel).first().evaluate((e) => { const r = e.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, h: r.height, w: r.width } }).catch(() => null)
   for (const [w, look] of [[375, { mode: 'light', theme: 'sky' }], [430, { mode: 'dark', theme: 'midnight' }]]) {
     const at = `${w}px ${look.mode}`
