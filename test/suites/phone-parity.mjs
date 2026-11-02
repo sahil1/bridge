@@ -82,10 +82,12 @@ const PATHS = {
 }
 
 // ---------- every desktop place is listed ----------
-const app = fs.readFileSync(path.join(ROOT, 'src', 'App.jsx'), 'utf8')
+// Read with \n line ends, as a Windows checkout may have them \r\n.
+const source = (...p) => fs.readFileSync(path.join(ROOT, ...p), 'utf8').replace(/\r\n/g, '\n')
+const app = source('src', 'App.jsx')
 const views = Object.keys(Function(`return ${/const VIEWS = (\{[^\n]*\})\n/.exec(app)?.[1].replace(/tx\(('[^']*')\)/g, '$1') || '{}'}`)())
 const actions = [...app.matchAll(/\{ id: '(a:[\w-]+)'/g)].map((m) => m[1])
-const settings = fs.readFileSync(path.join(ROOT, 'src', 'components', 'Settings.jsx'), 'utf8')
+const settings = source('src', 'components', 'Settings.jsx')
 const sections = [...(/export const SECTIONS = \[([\s\S]*?)\n\]/.exec(settings)?.[1] || '').matchAll(/\{ id: '([\w-]+)'/g)].map((m) => `settings:${m[1]}`)
 ok(views.length >= 5 && views.includes('view:whiteboards'), 'the desktop\'s views are read from App.jsx', views)
 ok(actions.length >= 30 && actions.includes('a:boards'), 'and ⌘K\'s actions', actions.length)
