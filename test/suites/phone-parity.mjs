@@ -188,8 +188,10 @@ try {
     ok(!!(await until(() => ph.p.locator('.wb-home').isVisible(), 8000)), `${width}: and its Back goes to the list`)
     await ph.p.locator('.tabbar button', { hasText: 'More' }).click()
     ok(!!(await until(() => ph.p.locator('.m-more-row').first().isVisible(), 4000)), `${width}: More again goes back to its list`)
-    // (Going from one path to the next cuts off the page's requests, which WebKit reports as errors.)
-    ok(!ph.errors.filter((e) => !/\/api\/\S+ due to access control checks/.test(e)).length, `${width}: no page errors`, ph.errors)
+    // (Going from one path to the next loads the page again, cutting off its requests and any part of
+    // the app still loading, which WebKit reports as errors. A part that can't load at all fails the
+    // path's own check above.)
+    ok(!ph.errors.filter((e) => !/\/api\/\S+ due to access control checks|^TypeError: Importing a module script failed\.$/.test(e)).length, `${width}: no page errors`, ph.errors)
     await ph.ctx.close()
   }
 
