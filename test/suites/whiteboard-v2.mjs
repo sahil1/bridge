@@ -181,11 +181,18 @@ try {
   }
   const toList = () => opened({ list: true }, () => p.locator('.wb-home').isVisible())
   const canvasBox = async () => p.locator('.wb-canvas').boundingBox()
+  // A board's drawing area up and the size of the room it has (Excalidraw sizes its canvas a moment
+  // after it shows), so where a test points is where Excalidraw thinks it is.
+  const canvasReady = async () => {
+    await p.waitForSelector('.excalidraw canvas', { timeout: 60000 })
+    const fits = () => p.evaluate(() => { const c = document.querySelector('.wb-canvas'); const e = c?.querySelector('canvas.excalidraw__canvas.interactive'); return !!e && Math.abs(e.clientWidth - c.clientWidth) <= 1 && Math.abs(e.clientHeight - c.clientHeight) <= 1 })
+    if (!await until(fits, 15000, 100)) throw new Error('the board\'s drawing area never took its size')
+  }
   // A board opened by its name, up and drawn (Excalidraw's code can take a while to load the first
   // time on a busy machine).
   const openBoard = async (name) => {
     await opened({ id: name }, async () => (await p.locator('.wb-view .pane-titles .wb-name', { hasText: name }).count()) > 0)
-    await p.waitForSelector('.excalidraw canvas', { timeout: 60000 })
+    await canvasReady()
   }
   // What a menu item downloads; when nothing comes, the page's own error line says why.
   const download = async (item) => {
@@ -196,11 +203,31 @@ try {
     return dl
   }
   const saved = () => until(async () => (await p.locator('.wb-state').innerText().catch(() => '')) === 'Saved', 8000)
+  // Excalidraw takes the pointer's moves once a frame, and of several that come before a frame it
+  // takes the first and drops the rest: a burst of moves on a busy machine (frames late) left a drag
+  // short, a box too small to pick anything, an arrow ending early. A hand's moves come a frame
+  // apart, so a drag here goes the same way: down, a step a frame, then up.
+  const frame = () => p.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))))
+  const drag = async (from, ...through) => {
+    await p.mouse.move(from[0], from[1]); await frame()
+    await p.mouse.down(); await frame()
+    let at = from
+    for (const to of through) {
+      for (let i = 1; i <= 6; i++) { await p.mouse.move(at[0] + ((to[0] - at[0]) * i) / 6, at[1] + ((to[1] - at[1]) * i) / 6); await frame() }
+      at = to
+    }
+    await p.mouse.up(); await frame()
+  }
+  // A drawing tool picked, and on before the pointer goes down with it.
+  const tool = async (name) => {
+    await p.locator(`[data-testid="toolbar-${name}"]`).click({ force: true })
+    if (!await until(() => p.locator(`input[data-testid="toolbar-${name}"]:checked`).count(), 5000)) throw new Error(`the ${name} tool didn't come on`)
+  }
 
   await part('the clean look', async () => {
     await toList()
     await p.getByRole('button', { name: 'New whiteboard' }).click()
-    await p.waitForSelector('.excalidraw canvas', { timeout: 60000 })
+    await canvasReady()
     ok(await until(() => p.locator('.wb-empty-board').isVisible(), 5000), 'an empty board says what can be done on it, in Bridge AI\'s words')
     ok(!(await p.locator('.excalidraw .main-menu-trigger').isVisible().catch(() => false)) && !(await p.locator('.welcome-screen-center, .welcome-screen-decor').count()), 'Excalidraw\'s own menu and welcome screen aren\'t there')
     const colours = await p.evaluate(() => {
@@ -208,17 +235,20 @@ try {
       return { primary: getComputedStyle(x).getPropertyValue('--color-primary').trim(), accent: getComputedStyle(document.documentElement).getPropertyValue('--accent').trim(), font: getComputedStyle(x).getPropertyValue('--ui-font').trim(), bg: getComputedStyle(document.querySelector('.wb-canvas')).backgroundColor, pane: getComputedStyle(document.querySelector('.wb-view')).backgroundColor }
     })
     ok(colours.primary && colours.primary === colours.accent && /Geist/.test(colours.font) && colours.bg === colours.pane, 'the board\'s tools are in Bridge AI\'s accent and font, on the pane\'s own colour', colours)
-    await p.locator('[data-testid="toolbar-rectangle"]').click({ force: true })
     const box = await canvasBox()
     const cx = box.x + box.width / 2, cy = box.y + box.height / 2
-    await p.mouse.move(cx - 100, cy - 40); await p.mouse.down(); await p.mouse.move(cx + 20, cy + 40, { steps: 5 }); await p.mouse.up()
-    await p.locator('[data-testid="toolbar-rectangle"]').click({ force: true })
-    await p.mouse.move(cx + 200, cy - 40); await p.mouse.down(); await p.mouse.move(cx + 320, cy + 40, { steps: 5 }); await p.mouse.up()
+    await tool('rectangle')
+    await drag([cx - 100, cy - 40], [cx + 20, cy + 40])
+    await tool('rectangle')
+    await drag([cx + 200, cy - 40], [cx + 320, cy + 40])
     // An arrow drawn by hand from one to the other.
-    await p.locator('[data-testid="toolbar-arrow"]').click({ force: true })
-    await p.mouse.move(cx - 40, cy); await p.mouse.down(); await p.mouse.move(cx + 110, cy + 30, { steps: 4 }); await p.mouse.move(cx + 260, cy, { steps: 6 }); await p.mouse.up()
+    await tool('arrow')
+    await drag([cx - 40, cy], [cx + 110, cy + 30], [cx + 260, cy])
     await p.keyboard.press('Escape')
-    const j = await until(() => { const x = readBoard('Untitled'); return live(x).filter((e) => e.type === 'rectangle').length === 2 && live(x).some((e) => e.type === 'arrow') && x }, 10000)
+    // The drawing as saved once it's done: a save made while the arrow was still being drawn has it
+    // joined at one end only.
+    const done = (x) => live(x).filter((e) => e.type === 'rectangle').length === 2 && live(x).some((e) => e.type === 'arrow' && e.startBinding && e.endBinding)
+    const j = (await until(() => { const x = readBoard('Untitled'); return done(x) && x }, 15000)) || readBoard('Untitled')
     const rects = live(j).filter((e) => e.type === 'rectangle')
     ok(rects.length === 2 && rects.every((e) => e.roughness === 0 && e.strokeWidth === 1), 'a shape drawn by hand has straight lines (no roughness), thin', rects.map((e) => [e.roughness, e.strokeWidth]))
     ok(j?.appState?.viewBackgroundColor === 'transparent', 'and the board has no background of its own', j?.appState?.viewBackgroundColor)
@@ -294,14 +324,12 @@ try {
     const box = await canvasBox()
     const cx = box.x + box.width / 2, cy = box.y + box.height / 2
     await p.keyboard.press('Escape')
-    await p.mouse.move(cx - vpc.width / 2 + 30, cy - vpc.height / 2 + 12); await p.mouse.down(); await p.mouse.move(cx - vpc.width / 2 + 180, cy - vpc.height / 2 + 92, { steps: 8 }); await p.mouse.up()
-    const after = await until(() => { const x = readBoard('Holders'); const v = live(x).find((e) => e.id === vpc.id); return v && Math.abs(v.x - vpc.x - 150) < 3 && x }, 8000)
+    await drag([cx - vpc.width / 2 + 30, cy - vpc.height / 2 + 12], [cx - vpc.width / 2 + 180, cy - vpc.height / 2 + 92])
+    const after = await until(() => { const x = readBoard('Holders'); const v = live(x).find((e) => e.id === vpc.id); return v && Math.abs(v.x - vpc.x - 150) < 3 && x }, 15000)
     const moved = (e0) => { const e = live(after).find((x) => x.id === e0.id); return e && [Math.round(e.x - e0.x), Math.round(e.y - e0.y)] }
     ok(after && moved(vpc)?.join() === '150,80' && moved(node)?.join() === '150,80' && moved(pic)?.join() === '150,80', 'dragging a container moves what\'s inside it with it', after && [moved(vpc), moved(node), moved(pic)])
-    // The icon dragged by its picture: the node goes with it, the container stays. (A moment first,
-    // for the last drag's picking to settle on a busy machine.)
-    await sleep(500)
-    await p.mouse.move(cx + 150, cy + 80 - 20); await p.mouse.down(); await p.mouse.move(cx + 150, cy + 80 + 30, { steps: 6 }); await p.mouse.up()
+    // The icon dragged by its picture: the node goes with it, the container stays.
+    await drag([cx + 150, cy + 80 - 20], [cx + 150, cy + 80 + 30])
     // (It may snap a few pixels to line up with the container's middle.)
     const after2 = (await until(() => { const x = readBoard('Holders'); const n = live(x).find((e) => e.id === node.id); return n && n.y - node.y > 110 && x }, 15000)) || readBoard('Holders')
     const moved2 = (e0) => { const e = live(after2).find((x) => x.id === e0.id); return e && [Math.round(e.x - e0.x), Math.round(e.y - e0.y)] }
@@ -434,14 +462,17 @@ try {
     await api('/boards', { title: 'Picked', source: { kind: 'excalidraw', text: JSON.stringify({ type: 'excalidraw', version: 2, elements: [word('k', 'Kept words', 0), word('l', 'Left out words', 400)], appState: {}, files: {} }) } })
     try {
       await openBoard('Picked')
-      await sleep(800)
-      // The two words are drawn in the middle of the board, 400 apart: a box dragged round the first.
+      // The two words are drawn in the middle of the board, 400 apart: a box dragged round the first,
+      // from the left of the board to just short of its middle.
       const box = await canvasBox()
       const cx = box.x + box.width / 2, cy = box.y + box.height / 2
-      await p.mouse.move(cx - 340, cy - 70); await p.mouse.down(); await p.mouse.move(cx - 90, cy + 70, { steps: 6 }); await p.mouse.up()
+      await drag([box.x + 24, cy - 70], [cx - 30, cy + 70])
       await shot(p, `${tag}whiteboard-v2-picked`)
       await p.getByRole('button', { name: 'Export' }).click()
-      await p.getByLabel('Only what’s selected').check()
+      // Only what's selected can be ticked once the board says something is.
+      const only = p.getByLabel('Only what’s selected')
+      if (!await until(() => only.isEnabled(), 10000)) throw new Error('nothing was picked by the box dragged round the first words')
+      await only.check()
       const dl = await download('Export as PDF')
       const out = path.join(kit.dir, 'picked.pdf')
       await dl.saveAs(out)
