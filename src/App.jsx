@@ -34,6 +34,7 @@ import SessionSwitcher from './components/Sessions.jsx'
 import { MachineMenu, AskBanner, useMachines, goMachine, isRemote, remoteOf, openRemote } from './components/Machines.jsx'
 import { useNeedsYou, NeedsYouChip, NeedsYouPanel, waitingOn } from './components/NeedsYou.jsx'
 import AgentMap from './components/AgentMap.jsx'
+import More from './components/More.jsx'
 import RemoteAgent from './components/RemoteAgent.jsx'
 import Dictation from './dictation/Dictation.jsx'
 import { t, tx, locale } from './i18n/index.js'
@@ -194,6 +195,10 @@ function App() {
   const [mtab, setMtab] = usePersisted('cc-mtab', 'mate')
   const [mobileAgent, setMobileAgent] = useState(null)
   const [mobileMeeting, setMobileMeeting] = useState(null) // the meeting open in the phone's Meetings tab
+  // What the phone's More tab shows: its list (null), Terminals ('terminals'), or a view (Whiteboards,
+  // a whiteboard, the agent map, Dictations). Terminals had a tab of its own until 3.8.3.
+  const [moreView, setMoreView] = useState(() => (mtab === 'herdr' ? 'terminals' : null))
+  useEffect(() => { if (mtab === 'herdr') setMtab('more') }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const [mateId, setMateId] = useState(null) // the phone's Chief tab: which thread it shows
   const [palette, setPalette] = useState(false)
   const [newAgent, setNewAgent] = useState(null) // null = closed, {} = open with defaults
@@ -323,8 +328,10 @@ function App() {
       const a = byId[paneId]
       // On the phone's Cloud agents, Back (Android's) closes the agent first.
       if (cloudOnly && paneId !== mobileAgent) { if (window.history.state?.agent) window.history.replaceState({ agent: paneId }, ''); else window.history.pushState({ agent: paneId }, '') }
-      // Meetings, a meeting and Dictations open in the phone's own Meetings tab.
+      // Meetings, a meeting and Dictations open in the phone's own Meetings tab; Whiteboards and a
+      // whiteboard in its More tab.
       if (typeof paneId === 'string' && (paneId.startsWith('view:meeting') || paneId === 'view:dictations')) { setMtab('meetings'); setMobileMeeting(paneId === 'view:meetings' ? null : paneId); return }
+      if (typeof paneId === 'string' && paneId.startsWith('view:whiteboard')) { setMtab('more'); setMoreView(paneId); return }
       if (a?.chief) { setMtab('mate'); setMobileAgent(null); setMateId(paneId) } else { setMtab('agents'); setMobileAgent(paneId) }
       return
     }
@@ -482,7 +489,7 @@ function App() {
   const openInHerdr = !liveView && wide ? undefined : async (id) => {
     const url = id.startsWith('tab:') ? `/tabs/${encodeURIComponent(id.slice(4))}/focus` : `/agents/${encodeURIComponent(id)}/focus`
     try { await api(url, { method: 'POST' }) } catch { /* still switch */ }
-    if (!wide) { setMtab('herdr'); return }
+    if (!wide) { setMtab('more'); setMoreView('terminals'); return }
     setView('herdr')
   }
 
@@ -731,7 +738,17 @@ function App() {
   }
   if (!wide) {
     const mAgent = byId[mobileAgent]
-    const tabs = [['mate', 'helm', t('Chief')], ['agents', 'grid', t('Agents')], ['meetings', 'mic', t('Meetings')], ['herdr', 'terminal', t('Terminals')], ['today', 'today', t('Today')]]
+    // Five tabs, the last one More: every other place the desktop opens from its sidebar and ⌘K.
+    const tabs = [['mate', 'helm', t('Chief')], ['agents', 'grid', t('Agents')], ['meetings', 'mic', t('Meetings')], ['today', 'today', t('Today')], ['more', 'more', t('More')]]
+    const moreRows = [
+      WhiteboardsHome && { id: 'whiteboards', icon: 'shapes', label: t('Whiteboards'), hint: t('Draw by hand, or describe a diagram'), run: () => setMoreView('view:whiteboards') },
+      { id: 'terminals', icon: 'terminal', label: t('Terminals'), hint: t("Every agent's terminal, live"), run: () => setMoreView('terminals') },
+      { id: 'map', icon: 'grid', label: t('Agent Map'), hint: t("What's running on each of your computers"), run: () => setMoreView('view:map') },
+      { id: 'dictations', icon: 'wave', label: t('Dictations'), hint: t("Everything you've dictated"), run: () => setMoreView('view:dictations') },
+      { id: 'needs', icon: 'bell', label: t('Needs you'), hint: t("What's waiting on you, on every device"), count: waiting, run: () => setInbox({}) },
+      { id: 'history', icon: 'clock', label: t('History'), hint: t('Every conversation, and closed agents'), run: () => setHistory(true) },
+      { id: 'settings', icon: 'settings', label: t('Settings'), hint: t('Devices, voice, appearance and more'), run: () => setSettings('general') },
+    ].filter(Boolean)
     return (
       <div className="app narrow">
         {topbar}
@@ -757,7 +774,15 @@ function App() {
               {viewFor(mobileMeeting || 'view:meetings', { onBack: () => setMobileMeeting(null) })}
             </div>
           )}
-          {mtab === 'herdr' && <Terminals key={fleet?.session || ''} onChat={(id) => openAgent(id)} />}
+          {mtab === 'more' && (moreView
+            ? (
+              <div className="m-view m-more-view">
+                {/* A whiteboard has its own way back, to the list of them. */}
+                {!moreView.startsWith(BOARD) && <button type="button" className="ghost-btn m-view-back" onClick={() => setMoreView(null)}><Icon name="back" size={14} /> {t('More')}</button>}
+                {moreView === 'terminals' ? <Terminals key={fleet?.session || ''} onChat={(id) => openAgent(id)} /> : viewFor(moreView)}
+              </div>
+            )
+            : <More rows={moreRows} />)}
           {mtab === 'today' && (
             <div className="m-today">
               <TodayTabs tab={todayTab} setTab={setTodayTab} compact />
@@ -767,7 +792,7 @@ function App() {
         </main>
         <nav className="tabbar" aria-label={t('Sections')}>
           {tabs.map(([id, icon, label]) => (
-            <button key={id} className={mtab === id ? 'on' : ''} data-tour={{ mate: 'chief', agents: 'agents', meetings: 'meetings' }[id]} onClick={() => { setMtab(id); if (id === 'agents' && mtab === 'agents') setMobileAgent(null); if (id === 'meetings' && mtab === 'meetings') setMobileMeeting(null) }} aria-current={mtab === id}>
+            <button key={id} className={mtab === id ? 'on' : ''} data-tour={{ mate: 'chief', agents: 'agents', meetings: 'meetings' }[id]} onClick={() => { setMtab(id); if (id === 'agents' && mtab === 'agents') setMobileAgent(null); if (id === 'meetings' && mtab === 'meetings') setMobileMeeting(null); if (id === 'more' && mtab === 'more') setMoreView(null) }} aria-current={mtab === id}>
               <span className="tab-icon">
                 <Icon name={icon} size={20} />
                 {id === 'agents' && waiting > 0 && <span className="badge">{waiting}</span>}

@@ -2807,6 +2807,23 @@ table.sheet tbody tr:hover td { background: var(--pane-2); }
 .m-view-back { justify-self: start; margin: 6px 8px 0; }
 .m-acts { display: inline-flex; gap: 6px; }
 
+/* The phone's More tab (More.jsx): one row per place, each a whole thumb's width and height. */
+.m-more-list { list-style: none; margin: 0; padding: 0; display: grid; border-radius: 12px; background: var(--pane); border: 1px solid var(--line); overflow: hidden; }
+.m-more-list li + li { border-top: 1px solid var(--line); }
+.m-more-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 56px; padding: 9px 14px; text-align: left; color: var(--ink); }
+.m-more-row:active { background: var(--pane-2); }
+.m-more-ico { flex: none; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 9px; background: var(--accent-soft); color: var(--accent); }
+.m-more-text { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.m-more-text b { font-size: 15px; font-weight: 600; }
+.m-more-text span { font-size: 12.5px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-more-count { position: static; flex: none; }
+/* A place opened from More fills the tab under Back to the list, a whole 40px target (a whiteboard
+   has its own way back, so it's alone there). */
+.m-view.m-more-view { display: flex; flex-direction: column; }
+.m-more-view > :last-child { flex: 1; min-height: 0; }
+.m-more-view > .pane { border-radius: 0; border-width: 1px 0 0; box-shadow: none; }
+.m-more-view > .m-view-back { flex: none; align-self: flex-start; min-height: 40px; }
+
 /* First run (Onboarding.jsx): a dialog in two steps, like T3 Code's. */
 .wiz-back { place-items: center; padding: 4vh 16px; }
 .wiz { width: min(760px, 100%); max-height: min(760px, 92vh); min-height: min(560px, 92vh); display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto auto; border-radius: 18px; background: var(--pane); border: 1px solid var(--line-2); box-shadow: 0 30px 80px rgb(0 0 0 / .25); overflow: hidden; text-align: left; }
@@ -2997,6 +3014,12 @@ table.sheet tbody tr:hover td { background: var(--pane-2); }
 .top-note-text, .app.narrow .top-note .setup-chip-word { flex: 1; min-width: 0; max-width: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .top-note-go { flex: none; color: var(--ink-3); }
 .top-note-row { display: flex; align-items: center; }
+/* This page is out of date (src/fresh.js): Reload, said as a button at the end of the line. */
+.top-note-act { flex: none; padding: 5px 11px; border-radius: 999px; background: var(--accent); color: var(--on-accent, #fff); font-weight: 600; font-size: 12.5px; }
+/* The phone app is too old: two lines rather than cut off, it says where to get the new one. */
+.top-note.wrap { padding-top: 8px; padding-bottom: 8px; color: var(--ink); text-decoration: none; }
+.top-note.wrap .top-note-text { white-space: normal; line-height: 1.35; }
+.fresh-chip b { color: var(--accent); font-weight: 600; }
 .top-note-row .top-note { flex: 1; min-width: 0; padding-right: 4px; }
 .top-note-x { flex: none; width: 40px; height: 40px; margin-right: max(6px, env(safe-area-inset-right)); }
 .top-notes .update-wrap { position: static; }

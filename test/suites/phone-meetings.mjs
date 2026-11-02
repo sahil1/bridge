@@ -35,7 +35,7 @@ try {
     const { ctx, p, errors } = await page(b, kit.url, { ...look, phone: true, before: (c) => c.addInitScript(phoneHooks) })
     await p.waitForSelector('.tabbar button', { timeout: 15000 })
     const tabs = (await p.locator('.tabbar button').allInnerTexts()).map((x) => x.trim())
-    ok(tabs.join('|') === 'Chief|Agents|Meetings|Terminals|Today', `${t}: Meetings is a tab of its own`, tabs)
+    ok(tabs.join('|') === 'Chief|Agents|Meetings|Today|More', `${t}: Meetings is a tab of its own`, tabs)
     await p.locator('.tabbar button', { hasText: 'Agents' }).click()
     ok((await p.locator('.m-acts button', { hasText: 'Meetings' }).count()) === 0, `${t}: and no longer a button inside Agents`)
     await p.locator('.tabbar button', { hasText: 'Meetings' }).click()
