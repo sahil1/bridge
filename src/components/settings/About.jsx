@@ -99,7 +99,9 @@ function Report() {
         <a className="btn" href={issue} target="_blank" rel="noreferrer"><Icon name="external" size={13} /> Report a problem</a>
         <a className="ghost-btn" href={`${REPO}/issues/new?template=feature.yml`} target="_blank" rel="noreferrer">Suggest an idea</a>
       </div>
-      <p className="muted small">Free and open source under the Apache License 2.0, as is, with no warranty. Not affiliated with Anthropic, OpenAI, Google, GitHub or the other companies whose tools it works with. <a href={`${REPO}/blob/main/TERMS.md`} target="_blank" rel="noreferrer">Terms</a> · <a href={`${REPO}/blob/main/PRIVACY.md`} target="_blank" rel="noreferrer">Privacy</a> · <a href={`${REPO}/blob/main/LICENSE`} target="_blank" rel="noreferrer">License</a></p>
+      <p className="muted small">Free and open source under the Apache License 2.0, as is, with no warranty. Not affiliated with Anthropic, OpenAI, Google, GitHub or the other companies whose tools it works with. <a href={`${REPO}/blob/main/TERMS.md`} target="_blank" rel="noreferrer">Terms</a> · <a href={`${REPO}/blob/main/PRIVACY.md`} target="_blank" rel="noreferrer">Privacy</a> · <a href={`${REPO}/blob/main/LICENSE`} target="_blank" rel="noreferrer">License</a> · <a href={`${REPO}/blob/main/NOTICE`} target="_blank" rel="noreferrer">{t('Notices')}</a></p>
+      {/* The open-source parts Bridge AI is built with are in NOTICE; the one you see most is named. */}
+      <p className="muted small">{t('Whiteboards are drawn with Excalidraw (MIT License).')} <a href="https://github.com/excalidraw/excalidraw" target="_blank" rel="noreferrer">github.com/excalidraw/excalidraw</a></p>
     </section>
   )
 }

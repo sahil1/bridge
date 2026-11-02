@@ -5,16 +5,36 @@
 //   class diagrams become shapes; other kinds come in as one picture.
 //   draw.io (.drawio): its boxes, ellipses, diamonds, words and arrows, where they were, with their
 //   colours; each page beside the last.
-//   "Change it": what a model says to change (update, add, connect, remove), carried out on the
-//   shapes already there, so the rest stays where you put it.
+//   A diagram spec (a model's "Draw this", an agent's .json): drawn by spec.js.
+//   "Change it": what a model says to change (update, add, connect, remove, lay out again), carried
+//   out on the shapes already there, so the rest stays where you put it.
+// Everything comes out in the board's look (look.js): clean, or hand-drawn.
 import { loadMermaid } from './excalidraw.js'
+import { restyle, lookOf, INK } from './look.js'
+import { sides } from './layout.js'
+import { fromSpec } from './spec.js'
+import { makeItem } from './shapes/make.js'
+import { ITEMS, itemFor } from '../../../shared/whiteboard/catalog.js'
 
 // ---------- Mermaid ----------
-export async function fromMermaid(X, text) {
+// In the clean look its arrows between two shapes turn at right angles, as a model's do; the
+// board routes them once they're on it (layout.js reroute).
+export async function fromMermaid(X, text, look = 'clean') {
   const { parseMermaidToExcalidraw } = await loadMermaid()
   // Strict, as Mermaid is by default: no scripts, links or HTML from a diagram an agent wrote.
-  const { elements, files } = await parseMermaidToExcalidraw(String(text).trim(), { securityLevel: 'strict', themeVariables: { fontSize: '20px' } })
-  const out = X.convertToExcalidrawElements(elements, { regenerateIds: true })
+  const { elements, files } = await parseMermaidToExcalidraw(String(text).trim(), { securityLevel: 'strict', themeVariables: { fontSize: look === 'sketch' ? '20px' : '16px' } })
+  let out = restyle(X, X.convertToExcalidrawElements(elements, { regenerateIds: true }), look)
+  const l = lookOf(look)
+  if (l.arrowType === 'elbow') {
+    const byId = new Map(out.map((e) => [e.id, e]))
+    out = out.map((e) => {
+      const a = byId.get(e.startBinding?.elementId), b = byId.get(e.endBinding?.elementId)
+      if (e.type !== 'arrow' || !a || !b || a.id === b.id) return e.type === 'text' && e.strokeColor === '#1e1e1e' ? X.newElementWith(e, { strokeColor: INK }) : e
+      const [fa, fb] = sides(a, b, 'TB')
+      const last = e.points[e.points.length - 1]
+      return X.newElementWith(e, { elbowed: true, roundness: null, points: [[0, 0], last], endArrowhead: l.arrowhead, startBinding: { ...e.startBinding, fixedPoint: fa }, endBinding: { ...e.endBinding, fixedPoint: fb } })
+    })
+  }
   return { elements: out, files: files || {}, picture: out.length > 0 && out.every((e) => e.type === 'image') }
 }
 
@@ -156,15 +176,16 @@ export async function fromDrawio(X, xml) {
 
 // ---------- A file or a hand-over, into what to draw ----------
 // .excalidraw: as it is. Mermaid and draw.io: turned into shapes. { elements, files, appState? }
-export async function fromText(X, text, kind) {
+export async function fromText(X, text, kind, look = 'clean') {
   if (kind === 'excalidraw') {
     let j
     try { j = JSON.parse(text) } catch { throw new Error('This isn\'t a drawing Bridge AI can open (not JSON)') }
     if (!Array.isArray(j?.elements)) throw new Error('This isn\'t a drawing Bridge AI can open')
     return { elements: j.elements, files: j.files || {}, appState: j.appState || {} }
   }
-  if (kind === 'drawio') return fromDrawio(X, text)
-  if (kind === 'mermaid') return fromMermaid(X, text)
+  if (kind === 'drawio') { const d = await fromDrawio(X, text); return { ...d, elements: restyle(X, d.elements, look) } }
+  if (kind === 'mermaid') return fromMermaid(X, text, look)
+  if (kind === 'spec') return fromSpec(X, JSON.parse(text), { look })
   throw new Error('Not a diagram')
 }
 // What a file is, from its name: an Excalidraw drawing, Mermaid or draw.io.
@@ -173,9 +194,9 @@ export const kindOfFile = (name) => {
   return /\.excalidraw(\.json)?$/.test(n) ? 'excalidraw' : /\.(mmd|mermaid)$/.test(n) ? 'mermaid' : /\.(drawio|dio)(\.xml)?$/.test(n) ? 'drawio' : null
 }
 // What an agent or the chief of staff handed over (boards.js: bridge.pending).
-export async function fromPending(X, p) {
+export async function fromPending(X, p, look = 'clean') {
   if (p.kind === 'excalidraw') return { elements: p.elements || [], files: p.files || {} }
-  return fromText(X, p.text || '', p.kind)
+  return fromText(X, p.text || '', p.kind, look)
 }
 
 // ---------- Placing new shapes ----------
@@ -202,10 +223,11 @@ export function describe(elements, only = null) {
   const l = live(elements)
   const byId = new Map(l.map((e) => [e.id, e]))
   const textOf = (e) => String(((e.boundElements || []).map((b) => byId.get(b.id)).find((x) => x?.type === 'text')?.originalText) ?? e.name ?? '').trim()
-  const pick = only?.size ? l.filter((e) => only.has(e.id) || (e.containerId && only.has(e.containerId))) : l
+  const pick = (only?.size ? l.filter((e) => only.has(e.id) || (e.containerId && only.has(e.containerId))) : l).filter((e) => !e.customData?.bridge?.icon)
   const hex = (c) => (c && c !== 'transparent' ? c : undefined)
+  const kindOf = (e) => { const it = ITEMS.get(e.customData?.bridge?.item); return it?.kind === 'container' ? 'container' : it?.kind === 'icon' ? 'icon' : e.type }
   return {
-    shapes: pick.filter((e) => SHAPES.has(e.type)).map((e) => ({ id: e.id, shape: e.type, text: textOf(e), x: Math.round(e.x), y: Math.round(e.y), w: Math.round(e.width), h: Math.round(e.height), fill: hex(e.backgroundColor), stroke: e.strokeColor !== '#1e1e1e' ? e.strokeColor : undefined })),
+    shapes: pick.filter((e) => SHAPES.has(e.type)).map((e) => ({ id: e.id, shape: kindOf(e), ...(ITEMS.has(e.customData?.bridge?.item) && kindOf(e) !== e.type ? { item: e.customData.bridge.item } : {}), text: textOf(e), x: Math.round(e.x), y: Math.round(e.y), w: Math.round(e.width), h: Math.round(e.height), fill: hex(e.backgroundColor), stroke: e.strokeColor !== '#1e1e1e' && e.strokeColor !== 'transparent' ? e.strokeColor : undefined })),
     arrows: pick.filter((e) => e.type === 'arrow' || e.type === 'line').map((e) => ({ id: e.id, from: e.startBinding?.elementId || null, to: e.endBinding?.elementId || null, text: textOf(e) })),
     texts: pick.filter((e) => e.type === 'text' && !e.containerId).map((e) => ({ id: e.id, text: String(e.originalText ?? e.text ?? '').trim(), x: Math.round(e.x), y: Math.round(e.y) })),
   }
@@ -226,7 +248,8 @@ function edge(e, toward) {
 const middle = (e) => ({ x: e.x + e.width / 2, y: e.y + e.height / 2 })
 
 // The board's elements with the changes made: { elements, touched } (the ids to select after).
-export function applyOps(X, elements, ops) {
+export function applyOps(X, elements, ops, look = 'clean') {
+  const l = lookOf(look)
   let els = [...elements]
   const index = () => new Map(els.map((e, i) => [e.id, i]))
   let at = index()
@@ -243,10 +266,11 @@ export function applyOps(X, elements, ops) {
     const old = textIn(e)
     if (old) put(X.newElementWith(old, { isDeleted: true }))
     if (!text) { put(X.newElementWith(e, { boundElements: (e.boundElements || []).filter((b) => b.id !== old?.id) })); return }
-    if (e.type === 'text') { put(X.newElementWith(e, { isDeleted: true })); const [t] = X.convertToExcalidrawElements([{ type: 'text', x: e.x, y: e.y, text, fontSize: e.fontSize, strokeColor: e.strokeColor }]); put(t); touched.add(t.id); return }
+    if (e.type === 'text') { put(X.newElementWith(e, { isDeleted: true })); const [t] = X.convertToExcalidrawElements([{ type: 'text', x: e.x, y: e.y, text, fontSize: e.fontSize, fontFamily: e.fontFamily, strokeColor: e.strokeColor }]); put(t); touched.add(t.id); return }
+    const was = old ? { fontFamily: old.fontFamily, fontSize: old.fontSize, strokeColor: old.strokeColor, textAlign: old.textAlign, verticalAlign: old.verticalAlign } : { fontFamily: l.font, fontSize: l.fontSize - 2, strokeColor: INK }
     const made = X.convertToExcalidrawElements([e.type === 'arrow' || e.type === 'line'
-      ? { type: 'arrow', id: e.id, x: e.x, y: e.y, points: e.points, label: { text } }
-      : { type: e.type, id: e.id, x: e.x, y: e.y, width: e.width, height: e.height, label: { text } }], { regenerateIds: false })
+      ? { type: 'arrow', id: e.id, x: e.x, y: e.y, points: e.points, label: { text, ...was } }
+      : { type: e.type, id: e.id, x: e.x, y: e.y, width: e.width, height: e.height, label: { text, ...was } }], { regenerateIds: false })
     const box = made.find((m) => m.id === e.id)
     const t = made.find((m) => m.type === 'text')
     if (!t) return
@@ -279,8 +303,9 @@ export function applyOps(X, elements, ops) {
     touched.add(e.id)
   }
   for (const a of ops.add || []) {
+    const item = !SIZE[a?.shape] ? itemFor(a?.shape) : null
     const type = SIZE[a?.shape] ? a.shape : 'rectangle'
-    const [w, h] = SIZE[type]
+    const [w, h] = item?.kind === 'icon' ? [120, 112] : item?.kind === 'container' ? [420, 260] : SIZE[type]
     const near = find(a.near)
     const all = live(els)
     const b = bounds(X, all)
@@ -295,20 +320,24 @@ export function applyOps(X, elements, ops) {
       if (near && (a.side === 'above' || a.side === 'below')) x += w + 40
       else y += h + 40
     }
-    const made = X.convertToExcalidrawElements([{ type, x, y, width: w, height: h, ...(HEX.test(a.fill || '') ? { backgroundColor: a.fill, fillStyle: 'solid' } : {}), ...(a.text ? { label: { text: String(a.text) } } : {}) }])
+    const made = item && item.kind !== 'shape' && item.kind !== 'text'
+      ? makeItem(X, item, { x: x + w / 2, y: y + h / 2, label: a.text ? String(a.text) : item.name, look }).elements
+      : X.convertToExcalidrawElements([{ type, x, y, width: w, height: h, roughness: l.roughness, strokeWidth: l.strokeWidth, strokeColor: INK, roundness: type === 'rectangle' ? { type: 3 } : null, ...(HEX.test(a.fill || '') ? { backgroundColor: a.fill, fillStyle: 'solid' } : {}), ...(a.text ? { label: { text: String(a.text), fontFamily: l.font, fontSize: l.fontSize - 2, strokeColor: INK } } : {}) }])
     made.forEach(put)
-    const box = made.find((m) => m.type === type)
+    const box = made.find((m) => m.type === type && m.customData?.bridge?.holder !== 'lane') || made.find((m) => m.type === 'rectangle')
     if (box) { if (a.ref) refs.set(String(a.ref), box); touched.add(box.id) }
   }
   for (const c of ops.connect || []) {
     const s = find(c?.from), t = find(c?.to)
     if (!s || !t || s.id === t.id) continue
-    const p = edge(s, middle(t)), q = edge(t, middle(s))
-    const made = X.convertToExcalidrawElements([{ type: 'arrow', x: p.x, y: p.y, points: [[0, 0], [q.x - p.x, q.y - p.y]], ...(c.text ? { label: { text: String(c.text) } } : {}) }])
+    const elbow = l.arrowType === 'elbow'
+    const [fs, ft] = sides(s, t, 'LR')
+    const p = elbow ? { x: s.x + fs[0] * s.width, y: s.y + fs[1] * s.height } : edge(s, middle(t)), q = elbow ? { x: t.x + ft[0] * t.width, y: t.y + ft[1] * t.height } : edge(t, middle(s))
+    const made = X.convertToExcalidrawElements([{ type: 'arrow', x: p.x, y: p.y, points: [[0, 0], [q.x - p.x, q.y - p.y]], elbowed: elbow, roughness: l.roughness, strokeWidth: l.strokeWidth, strokeColor: '#475569', endArrowhead: l.arrowhead, ...(c.text ? { label: { text: String(c.text), fontFamily: l.font, fontSize: 13, strokeColor: '#334155' } } : {}) }])
     const arrow = made.find((m) => m.type === 'arrow')
     if (!arrow) continue
     made.filter((m) => m !== arrow).forEach(put)
-    put(X.newElementWith(arrow, { startBinding: { elementId: s.id, focus: 0, gap: 6 }, endBinding: { elementId: t.id, focus: 0, gap: 6 } }))
+    put(X.newElementWith(arrow, { startBinding: { elementId: s.id, focus: 0, gap: 6, ...(elbow ? { fixedPoint: fs } : {}) }, endBinding: { elementId: t.id, focus: 0, gap: 6, ...(elbow ? { fixedPoint: ft } : {}) } }))
     for (const end of [s, t]) { const now = get(end.id); put(X.newElementWith(now, { boundElements: [...(now.boundElements || []), { type: 'arrow', id: arrow.id }] })) }
     touched.add(arrow.id)
   }

@@ -15,11 +15,21 @@ Most logos come from Simple Icons (https://simpleicons.org, CC0).
 The Geist and JetBrains Mono fonts are included under the SIL Open Font License 1.1 (via
 Fontsource).
 
-Whiteboards are drawn with Excalidraw (https://github.com/excalidraw/excalidraw, MIT License),
-which turns Mermaid into shapes with mermaid-to-excalidraw (MIT) and Mermaid
+Whiteboards are drawn with Excalidraw (https://github.com/excalidraw/excalidraw, MIT License), which
+turns Mermaid into shapes with mermaid-to-excalidraw (MIT) and Mermaid
 (https://github.com/mermaid-js/mermaid, MIT). Excalidraw's fonts are included as it ships them:
 Excalifont, Virgil, Nunito, Lilita One, Assistant, Cascadia Code and Liberation Sans under the SIL
-Open Font License 1.1, and Comic Shanns under the MIT License.
+Open Font License 1.1, and Comic Shanns under the MIT License. Diagrams are laid out with dagre
+(https://github.com/dagrejs/dagre, MIT, in the dagre-d3-es form Mermaid uses, MIT, with lodash-es,
+MIT) and saved as PDF with jsPDF (https://github.com/parallax/jsPDF, MIT) and svg2pdf.js
+(https://github.com/yWorks/svg2pdf.js, MIT), with what they use: fflate, fast-png, iobuffer, cssesc,
+svgpath, specificity, font-family-papandreou and @babel/runtime (MIT) and pako (MIT and zlib
+licenses). The whiteboard's shape icons are from Tabler Icons (https://tabler.io/icons, MIT License,
+Copyright (c) 2020-2026 Paweł Kuna); the AWS, Azure and Google Cloud sets draw those same icons in
+each cloud's colours. AWS's, Microsoft's and Google's own architecture icons are not included: each
+is offered by its owner for drawing diagrams and documents, not for passing on inside other software
+(Microsoft's terms say so outright). AWS, Amazon Web Services, Microsoft Azure and Google Cloud are
+trademarks of their owners, named only to say which services the shapes stand for.
 
 Speech to text on your computer runs on sherpa-onnx (https://github.com/k2-fsa/sherpa-onnx,
 Apache License 2.0), installed with the app through npm. The speech models are not included: each

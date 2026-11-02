@@ -305,8 +305,9 @@ const cmds = {
   },
 
   // Whiteboards in Bridge AI: list them, read one as words, make one or hand one a new version. A
-  // diagram goes in as Mermaid, draw.io or an Excalidraw file; Bridge AI turns it into shapes the
-  // next time the board is opened, or straight away when it's open.
+  // diagram goes in as Mermaid, draw.io, a diagram spec (JSON with nodes, edges and groups, using
+  // the shapes `bridge board shapes` lists) or an Excalidraw file; Bridge AI turns it into shapes
+  // the next time the board is opened, or straight away when it's open.
   async board(args) {
     const [sub = 'list', ...rest] = args
     const opt = (k) => { const i = rest.indexOf(k); if (i < 0) return undefined; const v = rest[i + 1]; rest.splice(i, 2); return v }
@@ -323,19 +324,21 @@ const cmds = {
       if (!name) throw new Error('Usage: bridge board show "Name"')
       return console.log((await api(`/boards/${id(name)}/text`)).text)
     }
-    if (sub !== 'new' && sub !== 'update') throw new Error('Usage: bridge board [list|show|new|update] (bridge help)')
+    if (sub === 'shapes') return console.log((await api('/boards/shapes')).text)
+    if (sub !== 'new' && sub !== 'update') throw new Error('Usage: bridge board [list|show|shapes|new|update] (bridge help)')
     const file = opt('--file')
     const add = flag('--add')
     const stdin = flag('-')
     const name = rest.join(' ').trim()
-    if (!name) throw new Error(`Usage: bridge board ${sub} "Name" [--file diagram.mmd|.drawio|.excalidraw | - (stdin)]${sub === 'update' ? ' [--add]' : ''}`)
+    if (!name) throw new Error(`Usage: bridge board ${sub} "Name" [--file diagram.mmd|.json|.drawio|.excalidraw | - (stdin)]${sub === 'update' ? ' [--add]' : ''}`)
     const text = stdin || file === '-' ? fs.readFileSync(0, 'utf8') : file ? fs.readFileSync(path.resolve(file.replace(/^~(?=\/|$)/, HOME)), 'utf8') : ''
-    const kind = /\.excalidraw(\.json)?$/i.test(file || '') || /^\s*\{/.test(text) ? 'excalidraw' : /\.(drawio|dio|xml)$/i.test(file || '') || /^\s*</.test(text) ? 'drawio' : 'mermaid'
+    const spec = /^\s*\{/.test(text) && /"nodes"\s*:/.test(text) && !/"elements"\s*:/.test(text)
+    const kind = spec ? 'spec' : /\.excalidraw(\.json)?$/i.test(file || '') || /^\s*\{/.test(text) ? 'excalidraw' : /\.(drawio|dio|xml)$/i.test(file || '') || /^\s*</.test(text) ? 'drawio' : 'mermaid'
     const source = text.trim() ? { kind, text } : undefined
     const who = WHO === 'the' ? 'The user' : WHO.replace(/'s$/, '')
     if (sub === 'new') {
       const b = await api('/boards', { method: 'POST', body: { title: name, source } })
-      return console.log(`Made the whiteboard "${b.id}"${source ? ` from ${kind === 'drawio' ? 'draw.io' : kind === 'excalidraw' ? 'an Excalidraw file' : 'Mermaid'}` : ''}. ${who} finds it in Bridge AI › Whiteboards.`)
+      return console.log(`Made the whiteboard "${b.id}"${source ? ` from ${kind === 'drawio' ? 'draw.io' : kind === 'excalidraw' ? 'an Excalidraw file' : kind === 'spec' ? 'a diagram spec' : 'Mermaid'}` : ''}. ${who} finds it in Bridge AI › Whiteboards.`)
     }
     if (!source) throw new Error('Give the new version: --file diagram.mmd, or - and the diagram on stdin')
     const b = await api(`/boards/${id(name)}/update`, { method: 'POST', body: { source, mode: add ? 'add' : 'replace' } })
@@ -381,9 +384,13 @@ const cmds = {
   Whiteboards (drawings in Bridge AI › Whiteboards, to move and edit by hand):
   bridge board list                 every whiteboard, latest first
   bridge board show "Name"          what's on one, in words: each shape, arrow and note
-  bridge board new "Name" [--file diagram.mmd|.drawio|.excalidraw | - (stdin)]
+  bridge board new "Name" [--file diagram.mmd|.json|.drawio|.excalidraw | - (stdin)]
                                     make one, empty or from a diagram (Mermaid's flowchart, sequenceDiagram and
-                                    classDiagram become shapes)
+                                    classDiagram become shapes). For architecture and network diagrams, with
+                                    icons and containers, a spec: {"direction":"LR","groups":[{"id":"vpc",
+                                    "label":"VPC","kind":"vpc"}],"nodes":[{"id":"lb","label":"Load balancer",
+                                    "shape":"aws.elb","group":"vpc"}],"edges":[{"from":"lb","to":"app"}]}
+  bridge board shapes               the shapes and container kinds a spec can use
   bridge board update "Name" (--file f | -) [--add]
                                     a new version in place of what's there (--add: beside it)`)
   },
