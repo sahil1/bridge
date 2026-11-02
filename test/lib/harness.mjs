@@ -212,6 +212,24 @@ export async function startModel(name) {
   return { port, url, asked, heard, stop: () => stopTree(p.pid) }
 }
 
+// A stand-in Ollama or LM Studio (stand-ins/local-model.mjs) on a port of its own, serving the models
+// listed ([{ name, context, loaded, thinks, params }]). set(list): other models from now on. sent():
+// each chat request it had, oldest first, as its log has it ({ path, model, num_ctx, think, format,
+// response_format, truncate, tokens, cut, thought, user, ... }).
+export async function startLocalModel(name, kind, list) {
+  const port = await freePort()
+  const base = path.join(OUT, 'kits', `${name}-${kind}-${port}`)
+  fs.mkdirSync(path.dirname(base), { recursive: true })
+  fs.rmSync(`${base}.log`, { force: true })
+  const set = (l) => fs.writeFileSync(`${base}.json`, JSON.stringify(l))
+  set(list)
+  const p = spawn(process.execPath, [path.join(TEST, 'stand-ins', 'local-model.mjs'), String(port), `${base}.log`, kind, `${base}.json`], { stdio: 'ignore' })
+  const url = `http://127.0.0.1:${port}`
+  if (!await until(async () => (await fetch(`${url}${kind === 'lmstudio' ? '/v1/models' : '/api/tags'}`)).ok, 15000, 200)) throw new Error(`the stand-in ${kind} didn't start`)
+  const sent = () => (fs.existsSync(`${base}.log`) ? fs.readFileSync(`${base}.log`, 'utf8') : '').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean)
+  return { port, url, set, sent, stop: () => stopTree(p.pid) }
+}
+
 // The browser (Playwright's Chromium unless BRIDGE_TEST_BROWSER says webkit), with a fake mic.
 export async function browser() {
   const pw = await import('playwright-core')

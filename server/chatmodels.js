@@ -281,9 +281,13 @@ function openaiMessages(messages, system) {
   }
   return out
 }
-// A thinking model's reasoning, when it comes back in the answer itself (<think>…</think> first, as
-// Qwen and DeepSeek's open models write it, or a <think> never closed: all of it was reasoning).
-export const unthink = (s) => String(s || '').replace(/^\s*<(think|thinking)>[\s\S]*?(<\/\1>|$)/i, '').trim()
+// A thinking model's reasoning, when it comes back in the answer itself: <think>…</think> blocks, as
+// Qwen and DeepSeek's open models write them; reasoning that ends in </think> with no <think> before
+// it (the chat template put that in the prompt); or a <think> never closed (all of it was reasoning).
+export const unthink = (s) => String(s || '')
+  .replace(/^(?:(?!<(?:think|thinking)>)[\s\S])*?<\/(think|thinking)>/i, '')
+  .replace(/<(think|thinking)>[\s\S]*?(<\/\1>|$)/gi, '')
+  .trim()
 
 // json: a JSON schema the answer is held to (response_format), for providers that take one. One that
 // turns it down gets the question again without it, as plain text.
