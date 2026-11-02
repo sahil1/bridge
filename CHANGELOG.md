@@ -2,6 +2,35 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
+## 3.9.0
+
+A model that runs on your computer with one download, local models that read a whole meeting, whiteboards for architecture and network diagrams that look over their own drawing, and a phone that keeps up with the desktop.
+
+### What's new
+
+- **A model on this computer, one download.** Settings › Model Providers › Run locally has **Local model on this computer**: Gemma 4 E2B by Google (2.8 GB, Apache-2.0), for rewriting text, edit by voice, questions about a meeting and notes for short ones. Nothing downloads until you click **Download**; then it's in every model list. Bridge AI still prefers Claude and your other models, and picks it by itself only for edit by voice with no model chosen, or when there's no other model. It runs with llama.cpp on the GPU where there is one, on a Mac, Windows or Linux computer with 8 GB of memory or more, and nothing it reads leaves the computer.
+- **Ollama and LM Studio read the whole meeting.** Ollama used to keep only the start and end of a long meeting without saying so; Bridge AI now asks it for a context that fits, splits long meetings into parts the model reads whole ("it read the meeting in 3 parts"), and says when a model is too small for meeting notes. Thinking is off for Bridge AI's own jobs (a chat can still think), and an answer that should be JSON is asked for once more when it doesn't parse.
+- **"local" is the model you picked.** The Chief of Staff, Insights and pull requests use the local model picked in Settings › Model Providers (Ollama's or LM Studio's), which now lists each model on this computer: how much it reads at a time, whether it thinks, how fast it's been, and whether it's big enough for meeting notes.
+- **Whiteboards look like Bridge AI.** Clean thin lines, the app's font and colours, arrows that turn at right angles and snap to shapes, in light and dark. Hand-drawn is still there in Whiteboard Settings.
+- **Architecture and network diagrams.** A searchable **Shapes** panel: routers, switches, firewalls, load balancers, servers, databases, queues, caches, CDNs and more; containers for regions, VPCs, subnets, clusters and swimlanes; and AWS, Azure and Google Cloud sets. A container carries what's in it when you drag it, connectors take labels, and **Auto-layout** lines up the board or the selection. Describe "a 3-tier web app on AWS" and Draw this answers with these shapes.
+- **Refine.** After the first draft the model looks over its own drawing (overlaps, crossing arrows, missing labels, uneven gaps) and improves it, up to 5 rounds (2 unless you change it), each a version you can pick, with what it changed and why.
+- **Whiteboards learn what you like.** What you change after a model draws (direction, colours, names, spacing, the icons you use) is kept on this computer and goes into every drawing's prompt. Whiteboard Settings shows it in words; change it, add notes, or Forget.
+- **Export as PDF**, beside PNG and SVG, with real text, of the whole board or only what's selected. **Rename** a board by clicking its name.
+- **Draw this, Change it and Refine on Ollama and LM Studio**, sent only as much as the model reads at a time, and with a picture of the board for a model that can see.
+- **Every place, on the phone.** The phone's tabs are Chief, Agents, Meetings, Today and **More**, which has Whiteboards, Terminals, Agent Map, Dictations, Needs you, History and Settings. Whiteboards open on the phone, with Draw this.
+- **Meetings fit a phone.** The name and time are no longer cut off, a finished meeting is one page, every button and tick is a whole target, the transcript's buttons show once you tap a line, and nothing sits under the notch or the Home indicator.
+- **The phone gets the new version.** After your computer updates, a phone that kept Bridge AI open loads the new version by itself at a quiet moment (never in the middle of a recording or dictation), or says **Bridge AI on your computer was updated** with Reload.
+
+### Fixes
+
+- **Whiteboards** made elsewhere with a web page or video embedded load nothing from the internet.
+- **An older phone app** says when the page needs a newer one, with where to get it.
+
+### After this update
+
+- **Terminals moved into More** on the phone; each agent's own chat is still in Agents.
+- **Boards are drawn clean.** Pick Hand-drawn in Whiteboard Settings for the old look.
+
 ## 3.8.2
 
 One inbox for everything waiting on you, a map of what's running on each of your computers, meetings that turn into work, dictation you can keep, edit and talk back to, whiteboards that draw what you describe, and another computer's videos and files, played here or copied over. (3.8.0 and 3.8.1 never went out: their builds stopped at checks before anything was published.)
