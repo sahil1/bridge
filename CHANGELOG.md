@@ -2,9 +2,9 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
-## 3.9.0
+## 3.9.1
 
-A model that runs on your computer with one download, local models that read a whole meeting, whiteboards for architecture and network diagrams that look over their own drawing, and a phone that keeps up with the desktop.
+A model that runs on your computer with one download, local models that read a whole meeting, whiteboards for architecture and network diagrams that look over their own drawing, and a phone that keeps up with the desktop. (3.9.0 never went out: its Mac build stopped at a check before anything was published.)
 
 ### What's new
 
@@ -19,6 +19,8 @@ A model that runs on your computer with one download, local models that read a w
 - **Draw this, Change it and Refine on Ollama and LM Studio**, sent only as much as the model reads at a time, and with a picture of the board for a model that can see.
 - **Every place, on the phone.** The phone's tabs are Chief, Agents, Meetings, Today and **More**, which has Whiteboards, Terminals, Agent Map, Dictations, Needs you, History and Settings. Whiteboards open on the phone, with Draw this.
 - **Meetings fit a phone.** The name and time are no longer cut off, a finished meeting is one page, every button and tick is a whole target, the transcript's buttons show once you tap a line, and nothing sits under the notch or the Home indicator.
+- **Settings on a phone** is a list of its sections, each opening full screen with **‹ Settings** to go back.
+- **The message box on a phone**: +, the mic, the model and send, each a whole target, with the model's full name; while an agent works, Working, Stop and Send now sit on a line above it.
 - **The phone gets the new version.** After your computer updates, a phone that kept Bridge AI open loads the new version by itself at a quiet moment (never in the middle of a recording or dictation), or says **Bridge AI on your computer was updated** with Reload.
 
 ### Fixes
