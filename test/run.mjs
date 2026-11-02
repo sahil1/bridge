@@ -94,11 +94,13 @@ else if (named.length) {
   if (!pick.length) { console.log('No test covers these changes. node test/run.mjs --all runs every test.'); process.exit(0) }
 }
 
-// The app's build, when its source is newer (or it isn't there).
+// The app's build, when its source is newer (or it isn't there). The source includes what the build
+// reads outside src (shared/, the whiteboard's build step) and the packages installed: a build made
+// before `npm ci` can be missing a package, which Vite reports and still writes a page for.
 const newest = (dirs) => { let t = 0; const walk = (p) => { let st; try { st = fs.statSync(p) } catch { return } if (st.isDirectory()) { for (const f of fs.readdirSync(p)) walk(path.join(p, f)) } else t = Math.max(t, st.mtimeMs) }; for (const d of dirs) walk(path.join(ROOT, d)); return t }
 for (const out of [...new Set(pick.map((s) => s.build).filter(Boolean))]) {
   const built = (() => { try { return fs.statSync(path.join(ROOT, out, 'index.html')).mtimeMs } catch { return 0 } })()
-  if (newest(['src', 'public', 'index.html', 'vite.config.js']) > built) {
+  if (newest(['src', 'public', 'shared', 'index.html', 'vite.config.js', 'scripts/whiteboard-assets.js', 'package-lock.json', 'node_modules/.package-lock.json']) > built) {
     console.log(`Building ${out} (the source is newer)…`)
     const r = spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['run', out === 'dist' ? 'build' : 'demo:build'], { cwd: ROOT, stdio: 'ignore', shell: process.platform === 'win32' })
     if (r.status !== 0) { console.error(`npm run ${out === 'dist' ? 'build' : 'demo:build'} failed`); process.exit(1) }
