@@ -73,9 +73,32 @@ export function freePort() {
   })
 }
 
-// Stops a process and everything it started.
-export function stopTree(pid) {
+// Windows: every process under pid, as taskkill /T finds them, while they still have it as parent.
+function startedBy(pid) {
+  const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId)" }'], { encoding: 'utf8', windowsHide: true })
+  const kids = new Map()
+  for (const line of (r.stdout || '').split(/\r?\n/)) {
+    const [p, parent] = line.trim().split(/\s+/).map(Number)
+    if (p && p !== parent) kids.set(parent, [...(kids.get(parent) || []), p])
+  }
+  const all = new Set()
+  const walk = (p) => { for (const k of kids.get(p) || []) if (!all.has(k)) { all.add(k); walk(k) } }
+  walk(pid)
+  return [...all]
+}
+
+// Stops a process and everything it started. itselfFirst: the process, then what it started, as a
+// server quitting goes before its agents (macOS and Linux: a server's SIGTERM keeps its list of
+// agents to reopen). Windows' taskkill /T stops them all at once instead, so a server could see an
+// agent's terminal end before it does, and take the agent off its list.
+export function stopTree(pid, { itselfFirst = false } = {}) {
   if (!pid) return
+  if (IS_WIN && itselfFirst) {
+    const rest = startedBy(pid)
+    spawnSync('taskkill', ['/pid', String(pid), '/F'], { stdio: 'ignore' })
+    if (rest.length) spawnSync('taskkill', ['/F', '/T', ...rest.flatMap((p) => ['/pid', String(p)])], { stdio: 'ignore' })
+    return
+  }
   if (IS_WIN) { spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' }); return }
   const kids = (p) => { const r = spawnSync('pgrep', ['-P', String(p)], { encoding: 'utf8' }); return (r.stdout || '').split('\n').filter(Boolean).map(Number) }
   const all = []
@@ -140,7 +163,7 @@ export async function startKit(name, { env = {}, config = {}, node = process.exe
   const restart = async () => {
     const was = server
     const gone = new Promise((r) => (was.exitCode != null ? r() : was.once('exit', r)))
-    stopTree(was.pid)
+    stopTree(was.pid, { itselfFirst: true })
     await gone
     await until(async () => !(await fetch(`${url}/api/config`).then(() => true, () => false)), 10000, 100)
     await run()
