@@ -13,4 +13,5 @@ ideas.md
 .vite/
 relay/dist/
 native/bin/
+native/llama/
 test/.out/

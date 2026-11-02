@@ -318,6 +318,67 @@ function Editor({ p, labels, installedSet, onSaved }) {
   )
 }
 
+// The local model built into Bridge AI (server/llm.js): Gemma 4 E2B, run by llama.cpp that came with
+// the app. Shown only where it can run (8 GB of memory or more, a llama.cpp build that loads here);
+// downloaded only when Download is clicked, with its progress; then Remove. Once it's here, it's in
+// every model list, and Bridge AI uses it by itself only for edit by voice or when there's nothing else.
+function BuiltinModel({ onChange }) {
+  const [s, setS] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+  const load = useCallback(() => api('/llm').then((x) => { setS(x); return x }, () => { setS(null); return null }), [])
+  useEffect(() => { load() }, [load])
+  const going = !!s?.downloading && !s.downloading.error
+  // While it downloads: its progress, each second, and the model lists told once it's here.
+  useEffect(() => {
+    if (!going) return undefined
+    const id = setInterval(async () => { const x = await load(); if (x?.have) { settingsChanged(); onChange?.() } }, 1000)
+    return () => clearInterval(id)
+  }, [going, load, onChange])
+  if (!s?.offered) return null
+  const act = async (fn) => {
+    setBusy(true); setErr(null)
+    try { setS(await fn()); settingsChanged(); onChange?.() } catch (e) { setErr(e.message) } finally { setBusy(false) }
+  }
+  const gb = (s.model.mb / 1000).toFixed(1)
+  const dl = s.downloading
+  return (
+    <div className="pv-builtin" data-builtin-model>
+      <div className="pv-builtin-head">
+        <span className="pv-builtin-icon" aria-hidden="true"><Icon name="laptop" size={16} /></span>
+        <span className="pv-builtin-name">
+          <b>{t('Local model on this computer')}</b>
+          <span className="muted small">{t('{model} by {by}, {size} GB, {license}', { model: s.model.label, by: s.model.by, size: gb, license: s.model.license })}</span>
+        </span>
+        <span className="pv-builtin-acts">
+          {going ? (
+            <>
+              <span className="muted small">{t('Downloading {n}%', { n: dl.percent })}</span>
+              <button type="button" className="ghost-btn" disabled={busy} onClick={() => act(() => api('/llm', { method: 'DELETE' }))}>{t('Cancel')}</button>
+            </>
+          ) : s.have ? (
+            <>
+              <span className="mt-state good"><Icon name="check" size={12} /> {t('Ready')}</span>
+              <button type="button" className="btn small danger-soft" disabled={busy} onClick={() => act(() => api('/llm', { method: 'DELETE' }))}><Icon name="trash" size={12} /> {t('Remove')}</button>
+            </>
+          ) : (
+            <button type="button" className="btn small primary" disabled={busy} onClick={() => act(() => api('/llm/download', { method: 'POST' }))}>
+              <Icon name="download" size={12} /> {dl?.error ? t('Try again') : t('Download ({size} GB)', { size: gb })}
+            </button>
+          )}
+        </span>
+      </div>
+      {going && <span className="vs-bar" role="progressbar" aria-valuenow={dl.percent} aria-valuemin={0} aria-valuemax={100} aria-label={t('Downloading {model}', { model: s.model.label })}><span style={{ width: `${dl.percent}%` }} /></span>}
+      <p className="muted small">{t('Free, private and works offline. Good at rewriting text, edit by voice, questions about a meeting and notes for short meetings; weaker than your cloud model at long meetings and diagrams.')}</p>
+      <p className="muted small">{s.have
+        ? t('In every model list, marked on this computer. Bridge AI picks it by itself only for edit by voice, or when there\'s no other model: Claude and your other models come first.')
+        : t('Downloaded once from Hugging Face, only when you click Download. What you give it never leaves this computer.')}</p>
+      {dl?.error && <p className="pv-note pv-err">{dl.error}</p>}
+      {err && <p className="pv-note pv-err">{err}</p>}
+    </div>
+  )
+}
+
 // The models on this computer (Ollama, LM Studio): how much each reads at a time, which can't take
 // meeting notes, and the one the Chief of Staff, Insights and pull requests use when a question
 // must stay here (server/chatmodels.js localModels). Hidden while none is running.
@@ -345,7 +406,7 @@ function LocalModels({ stamp }) {
       </label>
       {d.pick && d.using && d.using !== d.pick && <p className="pv-note pv-local-warn">{t("{name} isn't running, so {other} answers for now.", { name: name(d.pick), other: name(d.using) })}</p>}
       <ul className="pv-local-list">
-        {d.models.map((m) => (
+        {d.models.filter((m) => !m.builtin).map((m) => (
           <li key={m.id}>
             <code>{m.label}</code>
             <span className="muted small">{[t('{n} tokens at a time', { n: kTokens(m.context) }), m.billions ? `${m.billions}B` : null, m.thinks ? t("thinks, but not for Bridge AI's own jobs") : null, m.speed?.write ? t('writes {n} tokens a second here', { n: m.speed.write }) : null].filter(Boolean).join(' · ')}</span>
@@ -396,6 +457,7 @@ export default function Providers({ focus }) {
   useEffect(() => { loadProviders(); loadSubs() }, [loadProviders, loadSubs])
   // More models (server/labs.js): off to start with.
   const [more, setMore] = useState(null)
+  const [localStamp, setLocalStamp] = useState(0) // the local model built in came or went
   useEffect(() => { api('/settings').then((s) => setMore(s.effective?.moreModels === true)).catch(() => {}) }, [])
   const showMore = async (on) => {
     setMore(on)
@@ -430,6 +492,7 @@ export default function Providers({ focus }) {
             return (
               <section key={g.id} className="pv-sec">
                 <h4 className="pv-group">{g.name}</h4>
+                {g.id === 'local' && <BuiltinModel onChange={() => setLocalStamp((n) => n + 1)} />}
                 <div className="pv-grid">
                   {items.map((p) => (
                     <Card key={p.id} p={p} open={open === p.id} onToggle={() => setOpen((o) => (o === p.id ? null : p.id))}>
@@ -437,7 +500,7 @@ export default function Providers({ focus }) {
                     </Card>
                   ))}
                 </div>
-                {g.id === 'local' && <LocalModels stamp={items.filter((p) => p.status === 'connected').map((p) => p.id).join()} />}
+                {g.id === 'local' && <LocalModels stamp={`${items.filter((p) => p.status === 'connected').map((p) => p.id).join()}:${localStamp}`} />}
                 {g.id === 'labs' && more != null && (
                   <div className="pv-extra">
                     <label className="ph-check small"><input type="checkbox" checked={more} onChange={(e) => showMore(e.target.checked)} /><span>Show more models (Qwen Code, DeepSeek, Kimi, GLM)</span></label>

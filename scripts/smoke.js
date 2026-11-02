@@ -113,6 +113,13 @@ try {
     if (!s.local.models.some((m) => m.id === 'parakeet-v3')) throw new Error('Parakeet isn\'t offered')
     return `${s.machine.platform} ${s.machine.arch}${s.machine.os ? ` ${s.machine.os}` : ''}${s.machine.glibc ? `, glibc ${s.machine.glibc}` : ''}`
   })
+  // The local model's runtime (llama.cpp's llama-server, scripts/llama.js) is in the app for this
+  // computer, signed with it on a Mac, and loads: its device list, as the app asks it (no model).
+  await step('the local model\'s runtime loads', async () => {
+    const s = await (await get('/api/llm')).json()
+    if (!s.runtime?.ok) throw new Error(s.runtime?.why || 'no answer')
+    return `${s.gpu ? `GPU: ${s.gpu}` : 'processor only'}; ${s.offered ? 'offered' : s.why}`
+  })
   await step('a terminal runs a command', async () => {
     const r = await fetch(BASE + '/api/agents/launch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'shell', cwd: os.homedir(), label: 'smoke' }) })
     const out = await r.json()

@@ -45,6 +45,12 @@ for (const f of fs.readdirSync(path.join(OUT, 'dist', 'assets'))) if (f.endsWith
 // tools; without it, meetings record the mic only.
 if (process.platform === 'darwin') spawnSync(process.execPath, [path.join(REPO, 'scripts', 'calltap.js'), path.join(OUT, 'native', 'bin')], { stdio: 'inherit' })
 
+// The local model's runtime (server/llm.js): llama.cpp's llama-server, the pinned build for each chip
+// this app is made for (both on a Mac; x64 and Arm on Windows; x64 on Linux), fetched now and checked
+// against its SHA-256 (scripts/llama.js). Never downloaded by the app itself; signed with it on a Mac.
+const llama = spawnSync(process.execPath, [path.join(REPO, 'scripts', 'llama.js'), path.join(OUT, 'native', 'llama'), '--app'], { stdio: 'inherit' })
+if (llama.status) process.exit(llama.status)
+
 // Nothing personal goes in the app: check what's about to be packaged.
 const check = spawnSync(process.execPath, [path.join(REPO, 'scripts', 'check-private.js'), '--dir', OUT], { stdio: 'inherit' })
 if (check.status) process.exit(check.status)

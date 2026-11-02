@@ -4,7 +4,8 @@
 //     subscription works with nothing more to set up;
 //   an API key saved in Settings › Model Providers (or in your environment), clouds included
 //     (Azure OpenAI, AWS Bedrock, Google Vertex AI);
-//   a model server on this computer (Ollama, LM Studio).
+//   a model server on this computer (Ollama, LM Studio), or the local model built into Bridge AI
+//     (llm.js), once you've downloaded it.
 // A model is named "<route>:<model>": "cli:gemini", "openai:gpt-5", "ollama:llama3.2". Any model
 // the provider has can be used by name, not only the ones listed.
 //
@@ -26,6 +27,7 @@ import { installed, adapter, loginPath } from './agents.js'
 import { providerEnv, subscriptions, keysStamp } from './providers.js'
 import { moreOn, hiddenModel, OFF } from './labs.js'
 import { machine } from './machine.js'
+import * as llm from './llm.js'
 
 const TIMEOUT = 5 * 60 * 1000
 const until = (signal, ms = TIMEOUT) => (AbortSignal.any && signal ? AbortSignal.any([signal, AbortSignal.timeout(ms)]) : signal || AbortSignal.timeout(ms)) // any(): Node 20+
@@ -55,7 +57,7 @@ const MORE = {
 }
 const LMSTUDIO = () => trim(env().LM_STUDIO_BASE_URL || 'http://127.0.0.1:1234/v1')
 const OLLAMA = () => { const h = env().OLLAMA_HOST || 'http://127.0.0.1:11434'; return trim(/^https?:\/\//.test(h) ? h : `http://${h}`) }
-const PROVIDER = { anthropic: 'Anthropic', openai: 'OpenAI', xai: 'xAI', meta: 'Meta', gemini: 'Google', perplexity: 'Perplexity', openrouter: 'OpenRouter', deepseek: 'DeepSeek', mistral: 'Mistral', groq: 'Groq', azure: 'Azure OpenAI', bedrock: 'AWS Bedrock', vertex: 'Google Vertex AI', ollama: 'Ollama, on this computer', lmstudio: 'LM Studio, on this computer' }
+const PROVIDER = { anthropic: 'Anthropic', openai: 'OpenAI', xai: 'xAI', meta: 'Meta', gemini: 'Google', perplexity: 'Perplexity', openrouter: 'OpenRouter', deepseek: 'DeepSeek', mistral: 'Mistral', groq: 'Groq', azure: 'Azure OpenAI', bedrock: 'AWS Bedrock', vertex: 'Google Vertex AI', ollama: 'Ollama, on this computer', lmstudio: 'LM Studio, on this computer', bridge: 'Bridge AI, on this computer' }
 // What a CLI's one-shot answer comes from, said the way people know it.
 const VIA = { claude: 'Claude', codex: 'ChatGPT', gemini: 'Gemini', grok: 'Grok', cursor: 'Cursor', copilot: 'GitHub Copilot', opencode: 'OpenCode', qwen: 'Qwen' }
 
@@ -209,7 +211,7 @@ let cache = { at: 0, list: null, keys: 0 }
 // Kept a minute, or until a key is saved or removed. The more models (labs.js) only when they're
 // on, wherever they're served.
 export async function models({ fresh = false } = {}) {
-  if (!fresh && cache.list && cache.keys === keysStamp() && cache.more === moreOn() && Date.now() - cache.at < 60 * 1000) return cache.list
+  if (!fresh && cache.list && cache.keys === keysStamp() && cache.more === moreOn() && cache.llm === llm.listStamp() && Date.now() - cache.at < 60 * 1000) return cache.list
   const out = []
   const have = new Set((await installed().catch(() => [])).map((a) => a.kind))
   const signedOut = new Set((await subscriptions().catch(() => [])).filter((s) => s.signedIn === false).map((s) => s.kind))
@@ -233,8 +235,10 @@ export async function models({ fresh = false } = {}) {
     getJSON(`${LMSTUDIO()}/models`, {}, 1200).then((j) => (j.data || []).map((m) => m.id).filter((x) => x && !NOT_CHAT.test(x)).map((x) => ({ id: `lmstudio:${x}`, label: x, provider: PROVIDER.lmstudio, via: 'local' }))).catch(() => []),
   ])
   for (const l of lists) out.push(...l)
+  // The local model built in, last: only once it's downloaded (nothing is tried before that).
+  if (await llm.ready().catch(() => false)) out.push({ id: llm.ID, label: llm.MODELS[0].label, provider: PROVIDER.bridge, via: 'local', builtin: true })
   const list = out.filter((m) => !hiddenModel(m.id))
-  cache = { at: Date.now(), list, keys: keysStamp(), more: moreOn() }
+  cache = { at: Date.now(), list, keys: keysStamp(), more: moreOn(), llm: llm.listStamp() }
   return list
 }
 
@@ -291,14 +295,17 @@ export const unthink = (s) => String(s || '')
 
 // json: a JSON schema the answer is held to (response_format), for providers that take one. One that
 // turns it down gets the question again without it, as plain text.
-async function openaiStyle(who, url, headers, model, messages, { signal, tools, system, json, strict = false, ms }) {
-  const body = { model, messages: openaiMessages(messages, system) }
+// extra: more of the request, for one server's own fields (llama-server's chat_template_kwargs).
+// onStats: told how fast it read and wrote, when the server says (llama-server's timings).
+async function openaiStyle(who, url, headers, model, messages, { signal, tools, system, json, strict = false, ms, extra, onStats }) {
+  const body = { model, messages: openaiMessages(messages, system), ...extra }
   if (tools?.length) body.tools = tools.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters } }))
   if (json) body.response_format = { type: 'json_schema', json_schema: { name: 'answer', ...(strict ? { strict: true } : {}), schema: json } }
   const r = await fetch(url, { method: 'POST', signal: until(signal, ms), headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) })
   const j = await r.json().catch(() => ({}))
-  if (!r.ok && json && (r.status === 400 || r.status === 422)) return openaiStyle(who, url, headers, model, messages, { signal, tools, system, ms })
-  if (!r.ok) throw failed(who, r.status, j)
+  if (!r.ok && json && (r.status === 400 || r.status === 422) && !tooLongSaid(j)) return openaiStyle(who, url, headers, model, messages, { signal, tools, system, ms, extra, onStats })
+  if (!r.ok) throw Object.assign(failed(who, r.status, j), { body: j })
+  if (j.timings && onStats) onStats(j.timings)
   const msg = j.choices?.[0]?.message || {}
   let text = unthink(msg.content)
   if (Array.isArray(j.citations) && j.citations.length) text += `\n\nSources:\n${j.citations.map((u, i) => `[${i + 1}] ${u}`).join('\n')}`
@@ -370,7 +377,7 @@ async function converse(model, messages, { signal, tools, system }) {
 // rather than cut a one-off job's prompt, and says so when a job can't fit. Models that think
 // before they answer (Qwen3.5 and others) are asked not to for Bridge AI's own jobs, which would
 // otherwise wait on minutes of reasoning nobody reads; a chat leaves that to the model.
-export const isLocal = (id) => /^(ollama|lmstudio):/.test(String(id || ''))
+export const isLocal = (id) => /^(ollama|lmstudio|bridge):/.test(String(id || ''))
 const LMS_ROOT = () => LMSTUDIO().replace(/\/v1$/, '')
 // LM Studio picks a model's context when it loads it (4,096 tokens unless you set more for that
 // model), and its API can't change it per request: until it's loaded, Bridge AI plans for that.
@@ -418,9 +425,19 @@ export async function localInfo(id, { fresh = false } = {}) {
   const was = infos.get(id)
   if (!fresh && was && Date.now() - was.at < 2 * 60 * 1000) return was.value
   const [route, ...rest] = String(id).split(':')
+  if (route === 'bridge') return bridgeInfo()
   const value = await (route === 'ollama' ? ollamaInfo : lmsInfo)(rest.join(':')).catch(() => null)
   infos.set(id, { at: Date.now(), value })
   return value
+}
+// The local model built in: what it reads at a time on this computer, whether it's loaded now, and
+// whether it has a GPU here (Metal on Apple Silicon, Vulkan where llama.cpp found one). Its speed is
+// guessed from its 2.3 billion effective parameters until it's been used.
+async function bridgeInfo() {
+  const f = await llm.fit()
+  const m = f.machine
+  const gpu = f.gpu ? true : m.platform === 'darwin' ? m.arch === 'arm64' : m.docker ? false : null
+  return { max: llm.MODELS[0].context, loaded: llm.loaded() ? await llm.context() : null, thinks: false, canStop: true, vision: false, billions: 2.3, gpu }
 }
 // How many tokens one request to a model on this computer can hold (null for any other model):
 // Ollama's, as much as the model takes up to what this computer's memory holds (or more, when it's
@@ -429,6 +446,7 @@ export async function contextOf(id) {
   if (!isLocal(id)) return null
   const i = await localInfo(id)
   if (String(id).startsWith('lmstudio:')) return i?.loaded || Math.min(i?.max || LMS_UNLOADED, LMS_UNLOADED)
+  if (String(id).startsWith('bridge:')) return llm.context()
   return Math.max(Math.min(i?.max || 8192, ceiling((await machine()).memGB)), i?.loaded || 0)
 }
 // The context to ask Ollama for: the one it's running with when that's enough (a new size reloads
@@ -438,7 +456,8 @@ const fmtK = (n) => (n >= 1024 ? `${Math.round(n / 1024)}K` : String(n))
 function tooLong(id, ctx, need) {
   const [route, ...rest] = String(id).split(':')
   const how = route === 'lmstudio' ? 'Load it with a longer context in LM Studio (the model\'s Context Length), or pick another model.' : 'Pick a model with a longer context, or one on a computer with more memory.'
-  return Object.assign(new Error(`${rest.join(':')} takes ${fmtK(ctx)} tokens at a time, and this needs about ${fmtK(need)}. ${how}`), { code: 'too_long', context: ctx, need })
+  const name = route === 'bridge' ? llm.MODELS[0].label : rest.join(':')
+  return Object.assign(new Error(`${name} takes ${fmtK(ctx)} tokens at a time, and this needs about ${fmtK(need)}. ${how}`), { code: 'too_long', context: ctx, need })
 }
 const tooLongSaid = (j) => /context (length|size|window)|exceeds the available context|longer than the context|too many tokens|n_ctx/i.test(JSON.stringify(j?.error || j?.message || ''))
 
@@ -547,16 +566,38 @@ async function lmsChat(model, messages, o) {
   }
 }
 
+// The local model built in (llm.js): llama-server's OpenAI-style API with its key, started if it isn't
+// running, thinking off unless a chat lets it (chat_template_kwargs, as Gemma's and Qwen's templates
+// read it), and how fast it read and wrote noted from its timings.
+async function builtinChat(messages, o) {
+  const id = llm.ID
+  const cap = await llm.context()
+  const text = allText(messages, o.system, o.tools)
+  const need = tokensOf(text) + ANSWER
+  if (messages.length === 1 && need > cap * 1.15) throw tooLong(id, cap, need)
+  const ms = await callTime(id, text, 800)
+  try {
+    return await llm.use(({ url, key }) => openaiStyle('The local model', `${url}/v1/chat/completions`, bearer(key), 'bridge', messages, {
+      ...o, ms, extra: { chat_template_kwargs: { enable_thinking: !!o.think } },
+      onStats: (t) => measured(id, t.prompt_n > 200 ? t.prompt_per_second : null, t.predicted_n > 50 ? t.predicted_per_second : null),
+    }))
+  } catch (e) {
+    if (tooLongSaid(e.body)) throw tooLong(id, cap, need)
+    throw e
+  }
+}
+
 // The model on this computer for Bridge AI's jobs that must stay here (the Chief of Staff's "local",
 // Insights, pull request descriptions): the one picked in Settings › Model Providers, else one
 // that's running already (no wait for it to load), else the first. { id, label, provider, picked,
 // missing }: missing, a pick that isn't there now (Ollama or LM Studio closed, the model removed).
+// The local model built in comes after your own Ollama's and LM Studio's.
 export async function localModel(pick) {
-  const list = (await models()).filter((m) => m.via === 'local')
+  const list = (await models()).filter((m) => m.via === 'local').sort((a, b) => !!a.builtin - !!b.builtin)
   const hit = pick && list.find((m) => m.id === pick)
   if (hit) return { ...hit, picked: true, missing: null }
   let best = null
-  for (const m of list) if ((await localInfo(m.id))?.loaded) { best = m; break }
+  for (const m of list) if (!m.builtin && (await localInfo(m.id))?.loaded) { best = m; break }
   best ||= list[0]
   return best ? { ...best, picked: false, missing: pick || null } : null
 }
@@ -567,7 +608,7 @@ export async function localModels(pick) {
   const out = await Promise.all(list.map(async (x) => {
     const i = await localInfo(x.id, { fresh: true })
     const e = await estimate(x.id, '', 0)
-    return { id: x.id, label: x.label, provider: x.provider, context: await contextOf(x.id), max: i?.max ?? null, loaded: i?.loaded ?? null, thinks: !!i?.thinks, billions: i?.billions ?? null, speed: speeds.get(x.id) || null, gpu: e?.gpu ?? null }
+    return { id: x.id, label: x.label, provider: x.provider, builtin: !!x.builtin, context: await contextOf(x.id), max: i?.max ?? null, loaded: i?.loaded ?? null, thinks: !!i?.thinks, billions: i?.billions ?? null, speed: speeds.get(x.id) || null, gpu: e?.gpu ?? null }
   }))
   const using = await localModel(pick).catch(() => null)
   return { models: out, pick: pick || null, using: using?.id || null, smallest: SMALLEST }
@@ -599,6 +640,7 @@ export async function reply(id, messages, { signal, tools, system = SYSTEM, json
   }
   if (route === 'ollama') return ollamaChat(model, messages, o)
   if (route === 'lmstudio') return lmsChat(model, messages, o)
+  if (route === 'bridge') return builtinChat(messages, o)
   if (MORE[route]) {
     const key = env()[MORE[route].key]
     if (!key) throw new Error(`No ${MORE[route].label} key saved. Add one in Settings › Model Providers.`)

@@ -47,7 +47,8 @@ export const API = {
   mistral: { label: 'Mistral API', base: 'https://api.mistral.ai/v1', key: 'MISTRAL_API_KEY', model: 'mistral-large-latest' },
   groq: { label: 'Groq API', base: 'https://api.groq.com/openai/v1', key: 'GROQ_API_KEY', model: 'llama-3.3-70b-versatile' },
   // A model on this computer, through chatmodels.js: Ollama at the address set in Settings › Model
-  // Providers (or OLLAMA_HOST), or LM Studio, and the model picked there (localModel).
+  // Providers (or OLLAMA_HOST), LM Studio, or the local model built in once it's downloaded (after
+  // your own), and the model picked there (localModel).
   local: { label: 'Local model', local: true, model: null },
 }
 
@@ -82,7 +83,7 @@ export const configure = (c) => { conf = c || {} }
 const chat = () => import('./chatmodels.js')
 // A model asked for by name: "ollama:qwen3.5:4b" or "lmstudio:…" as chatmodels.js names them, or
 // an Ollama model's own name (what "consult": { "models": { "ollama": … } } used to hold).
-const localId = (m) => (!m ? null : /^(ollama|lmstudio):/.test(m) ? m : `ollama:${m}`)
+const localId = (m) => (!m ? null : /^(ollama|lmstudio|bridge):/.test(m) ? m : `ollama:${m}`)
 // The model on this computer a consult would use now: { id, label, provider, picked, missing }.
 export async function localModel(model) {
   const want = localId(model || conf.localModel || conf.consult?.models?.local || conf.consult?.models?.ollama)
@@ -106,7 +107,7 @@ export async function options() {
       const a = API[c.api]
       if (a.local ? local : keyFor(a)) return { ...c, available: true, via: 'api', route: a.local ? localRoute(local) : `${a.label} key`, ...(a.local ? { model: local.id } : {}) }
     }
-    const need = [c.cli && (have.has(c.cli) ? `sign in to ${adapter(c.cli).label}` : `install ${adapter(c.cli).label}`), c.api && (API[c.api].local ? 'run Ollama or LM Studio' : `add your ${API[c.api].label} key in Settings › Model Providers`)].filter(Boolean).join(' or ')
+    const need = [c.cli && (have.has(c.cli) ? `sign in to ${adapter(c.cli).label}` : `install ${adapter(c.cli).label}`), c.api && (API[c.api].local ? 'run Ollama or LM Studio, or download the local model in Settings › Model Providers' : `add your ${API[c.api].label} key in Settings › Model Providers`)].filter(Boolean).join(' or ')
     return { ...c, available: false, via: null, route: need }
   })
 }
@@ -150,7 +151,7 @@ async function runApi(id, prompt, model) {
   const a = API[id]
   if (a.local) {
     const m = await localModel(model)
-    if (!m) throw new Error('No model is running on this computer. Start Ollama or LM Studio, or pick another consultant.')
+    if (!m) throw new Error('No model is running on this computer. Start Ollama or LM Studio, download the local model in Settings › Model Providers, or pick another consultant.')
     const r = await (await chat()).reply(m.id, [{ role: 'user', text: prompt }], { system: 'You answer a one-off question directly and accurately. Say so when you are not sure.' })
     return { text: r.text, model: m.id, route: localRoute(m) }
   }
