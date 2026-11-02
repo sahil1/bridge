@@ -139,6 +139,10 @@ try {
   await a.restart()
   const offAgain = await until(async () => (await laneOf(a, 'Laptop'))?.agents?.some((x) => x.name === 'Meeting notes'), 20000)
   ok(!!offAgain, 'and still, after Studio restarts')
+  // Its own agents come back too (reopened, resuming their sessions): on a busy machine (Windows in
+  // CI) a while after the other computers' lanes do.
+  const backHere = await until(async () => { const d = (await mapOf(a)).find((x) => x.here); return d?.agents.find((x) => x.name === 'Checkout copy')?.from?.join() === 'Main' && d.agents.some((x) => x.chief) ? d : null }, 40000, 500)
+  ok(!!backHere, "Studio's own agents are back after it restarts, with who handed each its work", (await mapOf(a)).find((x) => x.here)?.agents.map((x) => [x.name, x.from]))
   await until(async () => (await laneOf(a, 'Desk'))?.online, 30000)
 
   // ---------- in the app ----------
@@ -160,7 +164,7 @@ try {
   ok(/Look for rounding/.test(deskText), 'and the subagent at work under its agent')
   const chiefHand = view.locator('.am-lane', { hasText: 'Studio' }).locator('.am-handed')
   // A busy machine (Windows in CI) fills the hand-offs in a moment after the lanes show.
-  ok(!!(await until(async () => /Checkout copy/.test(await chiefHand.innerText().catch(() => '')), 15000, 200)), 'the Chief of Staff says who it handed work to', await view.locator('.am-lane', { hasText: 'Studio' }).innerText())
+  ok(!!(await until(async () => /Checkout copy/.test(await chiefHand.innerText().catch(() => '')), 20000, 200)), 'the Chief of Staff says who it handed work to', await view.locator('.am-lane', { hasText: 'Studio' }).innerText())
   ok(!!(await until(async () => /Chief of Staff/.test(await view.locator('.am-row', { hasText: 'Checkout copy' }).locator('.am-link').innerText().catch(() => '')), 15000, 200)), 'and that agent, who handed it its work')
   await shot(s.p, `${tag}agent-map-three`)
   // One click: Desk's agent, in a tab here.
