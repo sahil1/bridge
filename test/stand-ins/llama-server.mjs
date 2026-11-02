@@ -2,7 +2,9 @@
 // BRIDGE_LLAMA_SERVER). It takes llama-server's arguments and answers as it does where Bridge AI
 // depends on it, and notes each start and request in BRIDGE_LLAMA_LOG as a line of JSON.
 //   --list-devices   its devices (a Metal GPU), or with BRIDGE_LLAMA_FAIL=load, fails as a build
-//                    whose libraries don't load would
+//                    whose libraries don't load would; with BRIDGE_LLAMA_FAIL=slow-once, the first
+//                    takes 30 s (a file beside the log remembers), as a slow Mac compiling
+//                    llama.cpp's GPU shaders the first time can
 //   -m <file> --host <h> --port <p> -c <n> ...   serves, with the key from LLAMA_API_KEY (as the
 //                    real one reads it): /health (loading for a moment, then ok), /props, and
 //                    /v1/chat/completions, which turns away a request without the key (401). A
@@ -22,6 +24,7 @@ if (args.includes('--version')) { console.log('version: 0.8.0 (build 11960, stan
 if (args.includes('--list-devices')) {
   log({ probe: true })
   if (process.env.BRIDGE_LLAMA_FAIL === 'load') { console.error('dyld: Library not loaded: @rpath/libggml-metal.0.dylib (stand-in)'); process.exit(1) }
+  if (process.env.BRIDGE_LLAMA_FAIL === 'slow-once' && LOG && !fs.existsSync(`${LOG}.slow`)) { fs.writeFileSync(`${LOG}.slow`, ''); await new Promise((r) => setTimeout(r, 30000)) }
   console.log('Available devices:\n  MTL0: Apple M4 (16384 MiB, 16000 MiB free)\n  BLAS: Accelerate (0 MiB, 0 MiB free)')
   process.exit(0)
 }
