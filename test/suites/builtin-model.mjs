@@ -133,6 +133,18 @@ for (const [what, more, why] of [
   } finally { k.stop() }
 }
 
+// A build whose first device list takes longer than it's given (a slow Mac compiling llama.cpp's GPU
+// shaders the first time): not offered for now, and asked again the next time.
+{
+  const k = await startKit('builtin-slow-probe', { env: kitEnv({ BRIDGE_LLAMA_FAIL: 'slow-once', BRIDGE_LLAMA_PROBE_MS: '1500' }) })
+  try {
+    const first = await k.api('/llm')
+    ok(first.offered === false && /doesn't load on this computer: it took more than 2 seconds to start/.test(first.why || ''), 'a build that takes longer to start than it\'s given: not offered for now, saying why', first)
+    const later = await until(async () => { const s = await k.api('/llm'); return s.offered ? s : null }, 20000, 500)
+    ok(!!later && llamaLog(k).filter((x) => x.probe).length === 2, 'and asked again the next time: offered once it answers in time, and remembered', { later, probes: llamaLog(k).filter((x) => x.probe).length })
+  } finally { k.stop() }
+}
+
 // ---------- This computer ----------
 const kit = await startKit('builtin', { env: kitEnv(), config: { meetings: { autoSummary: false, cleanup: false, nameSpeakers: false } } })
 let ollama = null

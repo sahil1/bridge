@@ -89,13 +89,17 @@ export function fitModel(mod, m, o = {}) {
 }
 
 // Whether a build loads, and the processors and GPUs it can use, asked of it once (its device list;
-// no model is loaded): { ok, error, devices }.
+// no model is loaded): { ok, error, devices }. A Mac build's first device list also compiles
+// llama.cpp's GPU shaders, which macOS keeps after: 5 seconds on an M4, longer on a slower or
+// virtual Mac. So it has two minutes, and one that took longer is asked again the next time.
+const PROBE_MS = Number(process.env.BRIDGE_LLAMA_PROBE_MS) || 2 * 60_000
 const probes = new Map() // bin -> Promise
 function probe(bin) {
   if (!probes.has(bin)) {
     probes.set(bin, new Promise((resolve) => {
       const [cmd, args, more] = command(bin, ['--list-devices'])
-      execFile(cmd, args, { cwd: path.dirname(bin), env: { ...envFor(bin), ...more }, timeout: 20_000, windowsHide: true }, (err, out = '', errOut = '') => {
+      execFile(cmd, args, { cwd: path.dirname(bin), env: { ...envFor(bin), ...more }, timeout: PROBE_MS, windowsHide: true }, (err, out = '', errOut = '') => {
+        if (err?.killed) { probes.delete(bin); return resolve({ ok: false, error: `it took more than ${Math.round(PROBE_MS / 1000)} seconds to start`, devices: [] }) }
         const text = `${out}\n${errOut}`
         const devices = [...text.matchAll(/^\s+([A-Za-z]+\d+): (.+?) \((\d+) MiB/gm)].map((x) => ({ id: x[1], name: x[2], mb: Number(x[3]) }))
         if (err) resolve({ ok: false, error: (text.trim().split('\n').filter(Boolean).pop() || err.message).slice(0, 200), devices: [] })
