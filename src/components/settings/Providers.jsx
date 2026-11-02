@@ -318,6 +318,47 @@ function Editor({ p, labels, installedSet, onSaved }) {
   )
 }
 
+// The models on this computer (Ollama, LM Studio): how much each reads at a time, which can't take
+// meeting notes, and the one the Chief of Staff, Insights and pull requests use when a question
+// must stay here (server/chatmodels.js localModels). Hidden while none is running.
+const kTokens = (n) => (n >= 1024 ? `${Math.round(n / 1024)}K` : String(n || 0))
+function LocalModels({ stamp }) {
+  const [d, setD] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const load = useCallback(() => api('/local-models').then(setD).catch(() => setD(null)), [])
+  useEffect(() => { load() }, [load, stamp])
+  if (!d?.models?.length) return null
+  const pick = async (v) => {
+    setBusy(true)
+    try { await api('/settings', { method: 'PATCH', body: { localModel: v || null } }); settingsChanged(); await load() } finally { setBusy(false) }
+  }
+  const name = (id) => d.models.find((m) => m.id === id)?.label || String(id || '').replace(/^\w+:/, '')
+  return (
+    <div className="pv-local" data-local-models>
+      <label className="pv-local-pick">
+        <span>{t('Model on this computer for the Chief of Staff, Insights and pull requests')}</span>
+        <select className="st-input" value={d.pick || ''} onChange={(e) => pick(e.target.value)} disabled={busy}>
+          <option value="">{t('Any (one already running first)')}</option>
+          {d.pick && !d.models.some((m) => m.id === d.pick) && <option value={d.pick}>{name(d.pick)}</option>}
+          {d.models.map((m) => <option key={m.id} value={m.id}>{`${m.label} · ${m.provider}`}</option>)}
+        </select>
+      </label>
+      {d.pick && d.using && d.using !== d.pick && <p className="pv-note pv-local-warn">{t("{name} isn't running, so {other} answers for now.", { name: name(d.pick), other: name(d.using) })}</p>}
+      <ul className="pv-local-list">
+        {d.models.map((m) => (
+          <li key={m.id}>
+            <code>{m.label}</code>
+            <span className="muted small">{[t('{n} tokens at a time', { n: kTokens(m.context) }), m.billions ? `${m.billions}B` : null, m.thinks ? t("thinks, but not for Bridge AI's own jobs") : null, m.speed?.write ? t('writes {n} tokens a second here', { n: m.speed.write }) : null].filter(Boolean).join(' · ')}</span>
+            {m.context < d.smallest && <span className="pv-local-warn small">{/^lmstudio:/.test(m.id) ? t('Too small for meeting notes: load it with {n} or more in LM Studio', { n: kTokens(d.smallest) }) : t('Too small for meeting notes')}</span>}
+            {m.gpu === false && m.billions >= 7 && <span className="pv-local-warn small">{t('No GPU for it here, so long jobs take minutes: a smaller model (2 to 4B) is much quicker')}</span>}
+          </li>
+        ))}
+      </ul>
+      <p className="pv-note">{t('What these models read stays on this computer.')}</p>
+    </div>
+  )
+}
+
 function Card({ p, open, onToggle, children }) {
   const c = providerChip(p)
   return (
@@ -396,6 +437,7 @@ export default function Providers({ focus }) {
                     </Card>
                   ))}
                 </div>
+                {g.id === 'local' && <LocalModels stamp={items.filter((p) => p.status === 'connected').map((p) => p.id).join()} />}
                 {g.id === 'labs' && more != null && (
                   <div className="pv-extra">
                     <label className="ph-check small"><input type="checkbox" checked={more} onChange={(e) => showMore(e.target.checked)} /><span>Show more models (Qwen Code, DeepSeek, Kimi, GLM)</span></label>

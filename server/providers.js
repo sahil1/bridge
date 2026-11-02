@@ -12,6 +12,7 @@ import { execFile } from 'node:child_process'
 import { DATA, HOME, IS_MAC, IS_WIN, dataFile, ensureDir, writeFileAtomic } from './paths.js'
 import { AGENTS, installed as installedAgents } from './agents.js'
 import { hiddenAgent, hiddenProvider } from './labs.js'
+import { machine } from './machine.js'
 
 // ---------- Catalog ----------
 // fields: env vars the provider uses. type 'secret' (masked), 'text' (plain setting) or 'flag'
@@ -322,6 +323,14 @@ const fingerprint = (p) => crypto.createHash('sha256').update(JSON.stringify(fie
 // Providers a chat can talk to (chatmodels.js): New chat › Any model.
 const CHAT = new Set(['anthropic', 'openai', 'gemini', 'xai', 'meta', 'perplexity', 'openrouter', 'deepseek', 'mistral', 'groq', 'moonshot', 'together', 'fireworks', 'cerebras', 'ollama', 'lmstudio'])
 
+// LM Studio has no build for Intel Macs: there its card stays (for one running on another computer,
+// at the address set) but offers no download.
+async function noBuildHere(p) {
+  if (p.id !== 'lmstudio') return false
+  const m = await machine()
+  return m.platform === 'darwin' && m.arch === 'x64' && !m.rosetta
+}
+
 async function statusOf(p) {
   const saved = load().values
   const fields = p.fields.map((f) => {
@@ -334,7 +343,7 @@ async function statusOf(p) {
     return out
   })
   const base = {
-    id: p.id, name: p.name, group: p.group, description: p.description, keyUrl: p.keyUrl, agents: p.agents?.filter((k) => !hiddenAgent(k)),
+    id: p.id, name: p.name, group: p.group, description: p.description, keyUrl: await noBuildHere(p) ? null : p.keyUrl, agents: p.agents?.filter((k) => !hiddenAgent(k)),
     testable: !!(p.test || p.local), local: !!p.local, fields, chat: CHAT.has(p.id),
   }
   if (p.local) {

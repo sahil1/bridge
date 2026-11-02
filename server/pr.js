@@ -149,7 +149,9 @@ export async function draft(root, { base } = {}) {
   const diff = (await git(r.top, ['diff', '--no-color', '-U2', `${ref}...HEAD`]) || '').slice(0, 30000)
   const list = commits.map((c) => `- ${c.subject}${c.body ? `\n  ${uncredit(c.body).replace(/\n/g, '\n  ')}` : ''}`).join('\n')
   const prompt = `${PROMPT}\n\nBranch ${r.branch} into ${b}.\n\nCommits (newest first):\n${list}\n\nFiles:\n${stat}\n\nDiff:\n${diff}`
-  const label = `${avail.find((o) => o.id === pick[0])?.label || pick[0]}${pick[1] ? ` (${pick[1]})` : ''}`
+  const o = avail.find((x) => x.id === pick[0])
+  // A model on this computer by its name ("Local model, qwen3.5:4b (Ollama, on this computer)").
+  const label = pick[0] === 'local' && o?.route ? `${o.label}, ${o.route}` : `${o?.label || pick[0]}${pick[1] ? ` (${pick[1]})` : ''}`
   try {
     const a = await consult.ask({ who: pick[0], prompt, model: pick[1], via: pick[0] === 'local' ? 'api' : 'cli' })
     const lines = String(a.text || '').trim().replace(/^```\w*\n([\s\S]*?)\n```$/, '$1').split('\n')

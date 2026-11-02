@@ -1150,7 +1150,11 @@ const meetingModels = async () => {
   const l = await chatModels.models().catch(() => [])
   return [...l].sort((a, b) => (b.id === 'cli:claude') - (a.id === 'cli:claude') || VIA_ORDER.indexOf(a.via) - VIA_ORDER.indexOf(b.via)).map((m) => m.id)
 }
-meetings.setHelpers({ reply: (id, msgs, o) => chatModels.reply(id, msgs, o), pickModel: pickMeetingModel, models: meetingModels, mailRelated: (o) => mail.related(o), mailMessage: (id) => mail.message(id) })
+meetings.setHelpers({
+  reply: (id, msgs, o) => chatModels.reply(id, msgs, o), pickModel: pickMeetingModel, models: meetingModels, mailRelated: (o) => mail.related(o), mailMessage: (id) => mail.message(id),
+  // How much a model on this computer takes at a time, and how long it takes here.
+  context: (id) => chatModels.contextOf(id), tokens: chatModels.tokensOf, estimate: (id, text, out) => chatModels.estimate(id, text, out),
+})
 // A meeting's action items as agents and Chief of Staff's tasks (meetwork.js).
 meetWork.configure(cfg)
 meetWork.setHelpers({ fleet: () => (lastFleet ? Promise.resolve(lastFleet) : fleetView()), projects: () => projects.list(), tasks: () => chiefTasks.list(), pr: (dir, branch) => pr.status(dir, { branch }), tree: (folder) => worktrees.describe(folder), kindLabel: (k) => adapter(k).label || k, launch: (body) => launchFrom(body) })
@@ -2272,10 +2276,14 @@ app.post('/api/panes/:pane/terminal', wrap(async (req) => {
 }))
 
 // ---------- Consult another model (second opinions, live news, long documents) ----------
+consult.configure(cfg) // the model on this computer picked in Settings › Model Providers (localModel)
 app.get('/api/consult', wrap(() => consult.options()))
 app.post('/api/consult', wrap((req) => consult.ask({ ...(req.body || {}), env: undefined }, cfg)))
 
 // ---------- Providers and MCP servers (settings) ----------
+// The models on this computer (Ollama, LM Studio), for Settings › Model Providers: how much each
+// takes at a time, and the one Bridge AI's jobs that stay here use (localModel).
+app.get('/api/local-models', wrap(() => chatModels.localModels(cfg.localModel)))
 providerRoutes(app, { cfg, installed })
 mcpRoutes(app, { cfg, installed })
 
