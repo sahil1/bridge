@@ -1685,7 +1685,7 @@ export function summarize(id, { model, kind, language, again = false } = {}) {
     // model on this computer, the files give way first when there isn't room for both.
     let files = more
     if (local && files && size - head(files).length < size / 3) files = ''
-    const room = Math.max(1000, size - head(files).length - 20)
+    const room = local ? Math.max(1000, size - head(files).length - 20) : size
     let body = text
     let used = use
     let parts = 1

@@ -9,7 +9,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { startKit, startModel, checks, until, sleep, TEST, IS_MAC, IS_WIN } from '../lib/harness.mjs'
+import { startKit, startModel, startLocalModel, checks, until, sleep, TEST, IS_MAC, IS_WIN } from '../lib/harness.mjs'
 
 const { ok, skip, done } = checks('meetings-api')
 // The text on a picture: ocr.txt beside it, and what it was asked to read goes in ocr.log.
@@ -395,6 +395,29 @@ try {
   const revealed = (d, name) => d.includes('-R') || d.some((a) => /^\/select,/.test(a)) || (d[0] === 'xdg-open' && !String(d[1] || '').endsWith(name))
   ok(!revealed(opened, 'notes.txt') && /notes\.txt$/.test(opened.at(-1) || ''), 'Open opens a document sent to the meeting', opened)
   ok(revealed(shown, 'run-me.command'), 'but a file that could run something is shown in its folder instead', shown)
+
+  // ---------- Notes by a model on this computer ----------
+  // A stand-in Ollama (stand-ins/local-model.mjs) whose model takes 8,192 tokens, and which, like
+  // Ollama, cuts a longer prompt without a word: an hour's meeting goes in pieces that each fit the
+  // context it's asked for, every line in exactly one, and the notes say it was read in parts.
+  const local = await startLocalModel('meetings-api', 'ollama', [{ name: 'llama3.2:3b', context: 8192, loaded: null, params: '3.2B' }])
+  try {
+    await kit.api('/providers/ollama', { values: { OLLAMA_HOST: local.url } }, 'PUT')
+    const L = await kit.api('/meetings', { title: 'Long planning call', call: false })
+    await kit.api(`/meetings/${L.id}/stop`, {})
+    await until(async () => (await kit.api(`/meetings/${L.id}`)).status === 'done', 15000)
+    const N = 160
+    said(L.id, Array.from({ length: N }, (_, i) => ['you', 10 + i * 20, `Line ${i + 1}: we went through the rollout plan for the new billing system, region by region, and agreed who checks each step before it goes live.`]))
+    await kit.api(`/meetings/${L.id}/summary`, { model: 'ollama:llama3.2:3b' })
+    const lm = await until(async () => { const m = await kit.api(`/meetings/${L.id}`); return !m.summarizing && (m.summary || m.summaryError) && m }, 30000)
+    const reqs = local.sent()
+    const parts = reqs.filter((x) => /This is part \d+ of \d+/.test(x.user))
+    ok(reqs.length >= 3 && reqs.every((x) => x.path === '/api/chat' && x.num_ctx && x.num_ctx <= 8192 && x.tokens <= x.num_ctx && !x.cut), 'notes by a model on this computer: each request fits the context it asks Ollama for, within what the model takes, so nothing is cut', reqs.map((x) => ({ path: x.path, num_ctx: x.num_ctx, tokens: x.tokens, cut: x.cut })))
+    const seen = parts.flatMap((x) => x.read || [])
+    ok(parts.length >= 2 && seen.length === N && new Set(seen).size === N, `the meeting goes in ${parts.length} pieces, and the model reads every line, each in exactly one of them`, { parts: parts.length, lines: seen.length, distinct: new Set(seen).size })
+    ok(/Notes on this computer/.test(lm?.summary || '') && lm.summaryModel === 'ollama:llama3.2:3b', 'and the notes are written by it', { summary: lm?.summary, error: lm?.summaryError })
+    ok(/llama3\.2:3b takes 8192 tokens at a time, so it read the meeting in \d+ parts/.test(lm?.summaryNote || ''), 'saying it read the meeting in parts, as its context is short', lm?.summaryNote)
+  } finally { local.stop() }
 
   // ---------- Folders and the archive ----------
   const B = await kit.api('/meetings', { title: 'Vendor call', call: false })
