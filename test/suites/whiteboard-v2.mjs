@@ -174,13 +174,17 @@ try {
   }
   const { ctx, p, errors } = await page(b, kit.url, { store: { 'cc-board-refine': 3, 'cc-board-model': 'openai:gpt-5' }, before: async (c) => watch(c) })
   await p.waitForSelector('.rail-nav', { timeout: 30000 })
-  const toList = async () => { await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-board', { detail: { list: true } }))); await p.waitForSelector('.wb-home', { timeout: 20000 }) }
+  // The list or a board opened the way the app's links do. The app listens once it's up, which can be
+  // a moment after its sidebar shows: an open asked before that is lost, so it's asked again.
+  const opened = async (detail, there) => {
+    if (!await until(async () => { if (await there()) return true; await p.evaluate((d) => window.dispatchEvent(new CustomEvent('bridge-open-board', { detail: d })), detail); return there() }, 60000, 1000)) throw new Error(`couldn't open ${JSON.stringify(detail)}`)
+  }
+  const toList = () => opened({ list: true }, () => p.locator('.wb-home').isVisible())
   const canvasBox = async () => p.locator('.wb-canvas').boundingBox()
   // A board opened by its name, up and drawn (Excalidraw's code can take a while to load the first
   // time on a busy machine).
   const openBoard = async (name) => {
-    await p.evaluate((id) => window.dispatchEvent(new CustomEvent('bridge-open-board', { detail: { id } })), name)
-    await until(() => p.locator('.wb-view .pane-titles .wb-name', { hasText: name }).count(), 15000)
+    await opened({ id: name }, async () => (await p.locator('.wb-view .pane-titles .wb-name', { hasText: name }).count()) > 0)
     await p.waitForSelector('.excalidraw canvas', { timeout: 60000 })
   }
   // What a menu item downloads; when nothing comes, the page's own error line says why.
@@ -244,14 +248,10 @@ try {
     // A board with a YouTube video embedded in it (made on excalidraw.com, say): nothing is loaded.
     const embed = { id: 'yt', type: 'embeddable', x: 0, y: 0, width: 560, height: 315, angle: 0, strokeColor: '#1f2733', backgroundColor: 'transparent', fillStyle: 'solid', strokeWidth: 1, strokeStyle: 'solid', roughness: 0, opacity: 100, groupIds: [], frameId: null, roundness: null, seed: 1, version: 1, versionNonce: 1, isDeleted: false, boundElements: null, updated: 1, link: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', locked: false }
     await api('/boards', { title: 'Embedded', source: { kind: 'excalidraw', text: JSON.stringify({ type: 'excalidraw', version: 2, elements: [embed], appState: {}, files: {} }) } })
-    await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-board', { detail: { id: 'Embedded' } })))
-    await until(() => p.locator('.wb-view .pane-titles .wb-name', { hasText: 'Embedded' }).count(), 8000)
-    await p.waitForSelector('.excalidraw canvas', { timeout: 30000 })
+    await openBoard('Embedded')
     await sleep(2500)
     ok(!elsewhere.some((u) => /youtube|ytimg|google/.test(u)) && !(await p.locator('iframe[src*="youtube"]').count()), 'a web page embedded in a board isn\'t loaded: a board never reaches the internet', elsewhere)
-    await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-board', { detail: { id: 'Untitled' } })))
-    await until(() => p.locator('.wb-view .pane-titles .wb-name', { hasText: 'Untitled' }).count(), 8000)
-    await p.waitForSelector('.excalidraw canvas', { timeout: 30000 })
+    await openBoard('Untitled')
     await api('/boards/Embedded', null, 'DELETE')
   })
 
@@ -279,9 +279,8 @@ try {
 
   await part('shapes and containers', async () => {
     await api('/boards', { title: 'Holders' })
-    await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-board', { detail: { id: 'Holders' } })))
+    await openBoard('Holders')
     await p.waitForSelector('.wb-shapes', { timeout: 30000 })
-    await p.waitForSelector('.excalidraw canvas', { timeout: 30000 })
     await p.locator('.wb-shapes-search input').fill('balancer')
     ok(await until(() => p.locator('.wb-shape', { hasText: 'Load balancer' }).count(), 3000) && !(await p.locator('.wb-shape', { hasText: 'Router' }).count()), 'the Shapes panel finds a shape by what it\'s called')
     await p.locator('.wb-shapes-search input').fill('')
@@ -318,9 +317,7 @@ try {
     const els = [r('A', 700, 400), r('B', 0, 0), r('C', 300, 700), r('D', 900, 0), a('ab', 'A', 'B'), a('bc', 'B', 'C'), a('ad', 'A', 'D')]
     for (const e of els) if (e.type === 'rectangle') e.boundElements = els.filter((x) => x.type === 'arrow' && (x.startBinding.elementId === e.id || x.endBinding.elementId === e.id)).map((x) => ({ type: 'arrow', id: x.id }))
     await api('/boards', { title: 'Messy', source: { kind: 'excalidraw', text: JSON.stringify({ type: 'excalidraw', version: 2, elements: els, appState: {}, files: {} }) } })
-    await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-board', { detail: { id: 'Messy' } })))
-    await p.waitForSelector('.excalidraw canvas', { timeout: 30000 })
-    await until(() => p.locator('.wb-view .pane-titles .wb-name', { hasText: 'Messy' }).count(), 8000)
+    await openBoard('Messy')
     const lay = async (dir) => { await p.getByRole('button', { name: 'Auto-layout' }).click(); await p.getByRole('menuitem', { name: dir }).click() }
     const check = (j, across) => {
       const at = Object.fromEntries(live(j).filter((e) => e.type === 'rectangle').map((e) => [e.id, e]))
