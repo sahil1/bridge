@@ -165,7 +165,9 @@ jobs:
         run: &mac-logs |
           ls -la ~/.bridge-ai ~/.bridge-ai/logs 2>/dev/null || true
           bad=0
-          for f in ~/.bridge-ai/logs/*; do [ -s "$f" ] && { echo "== $f"; cat "$f"; bad=1; }; done
+          # logs/server.log is what the server printed, kept for a crash report: only an error or a crash in it
+          # counts. Any other log with something in it does.
+          for f in ~/.bridge-ai/logs/*; do [ -s "$f" ] || continue; echo "== $f"; cat "$f"; case "$f" in */server.log) grep -q -i -E 'error|fatal|exception|crash' "$f" && bad=1;; *) bad=1;; esac; done
           if grep -i -E 'error|fatal|exception' ~/.bridge-ai/host/host.log 2>/dev/null; then bad=1; fi
           if ls ~/Library/Logs/DiagnosticReports 2>/dev/null | grep -i -E 'bridge|electron'; then echo "It crashed"; bad=1; fi
           exit $bad
@@ -436,7 +438,9 @@ jobs:
         run: &linux-logs |
           ls -la ~/.bridge-ai ~/.bridge-ai/logs 2>/dev/null || true
           bad=0
-          for f in ~/.bridge-ai/logs/*; do [ -s "$f" ] && { echo "== $f"; cat "$f"; bad=1; }; done
+          # logs/server.log is what the server printed, kept for a crash report: only an error or a crash in it
+          # counts. Any other log with something in it does.
+          for f in ~/.bridge-ai/logs/*; do [ -s "$f" ] || continue; echo "== $f"; cat "$f"; case "$f" in */server.log) grep -q -i -E 'error|fatal|exception|crash' "$f" && bad=1;; *) bad=1;; esac; done
           if grep -i -E 'error|fatal|exception' ~/.bridge-ai/host/host.log 2>/dev/null; then bad=1; fi
           exit $bad
 
@@ -576,7 +580,9 @@ jobs:
         run: |
           ls -la "$HOMEDIR/.bridge-ai" "$HOMEDIR/.bridge-ai/logs" 2>/dev/null || true
           bad=0
-          for f in "$HOMEDIR"/.bridge-ai/logs/*; do [ -s "$f" ] && { echo "== $f"; cat "$f"; bad=1; }; done
+          # logs/server.log is what the server printed, kept for a crash report: only an error or a crash in it
+          # counts. Any other log with something in it does.
+          for f in "$HOMEDIR"/.bridge-ai/logs/*; do [ -s "$f" ] || continue; echo "== $f"; cat "$f"; case "$f" in */server.log) grep -q -i -E 'error|fatal|exception|crash' "$f" && bad=1;; *) bad=1;; esac; done
           if grep -i -E 'error|fatal|exception' "$HOMEDIR/.bridge-ai/host/host.log" 2>/dev/null; then bad=1; fi
           exit $bad
 
@@ -695,7 +701,8 @@ jobs:
           $data = Join-Path $HOME '.bridge-ai'
           Get-ChildItem $data -Force -ErrorAction SilentlyContinue | Format-Table Mode, Length, Name
           $bad = $false
-          Get-ChildItem (Join-Path $data 'logs') -File -ErrorAction SilentlyContinue | Where-Object Length -gt 0 | ForEach-Object { Write-Host "== $($_.FullName)"; Get-Content $_.FullName; $bad = $true }
+          # logs\server.log is what the server printed, kept for a crash report: only an error or a crash in it counts.
+          Get-ChildItem (Join-Path $data 'logs') -File -ErrorAction SilentlyContinue | Where-Object Length -gt 0 | ForEach-Object { Write-Host "== $($_.FullName)"; Get-Content $_.FullName; if ($_.Name -ne 'server.log' -or (Select-String -Path $_.FullName -Pattern 'error|fatal|exception|crash' -Quiet)) { $bad = $true } }
           $host_log = Join-Path $data 'host\host.log'
           if ((Test-Path $host_log) -and (Select-String -Path $host_log -Pattern 'error|fatal|exception')) { Get-Content $host_log; $bad = $true }
           if ($bad) { exit 1 }
