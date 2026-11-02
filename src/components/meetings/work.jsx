@@ -158,7 +158,7 @@ export function ActionItems({ id, heading, fallback, onMsg }) {
             const code = CODE.test(x.text)
             return (
               <li key={x.key} className={`mt-item${done ? ' done' : ''}`} data-state={x.state} data-key={x.key}>
-                <input type="checkbox" className="mt-item-tick" checked={ticked} disabled={busy === x.key || (x.ticked && !x.done)} onChange={(e) => tick(x, e.target.checked)} aria-label={t('Done: {item}', { item: x.text })} />
+                <label className="mt-tick-hit"><input type="checkbox" className="mt-item-tick" checked={ticked} disabled={busy === x.key || (x.ticked && !x.done)} onChange={(e) => tick(x, e.target.checked)} aria-label={t('Done: {item}', { item: x.text })} /></label>
                 <div className="mt-item-main">
                   <div className="mt-item-text md" dangerouslySetInnerHTML={{ __html: md(x.text) }} />
                   {went && <div className="mt-item-went"><WentTo x={x} /></div>}
