@@ -1851,7 +1851,21 @@ async function personalNames() {
   for (const w of lastFleet?.workspaces || []) out.push([w.label, '<project>'])
   return out
 }
-app.get('/api/version', (req, res) => res.json({ version: VERSION, build: BUILD, bundled: !!process.versions.electron, pid: process.pid }))
+// ui: the UI this server hands out now, by its entry file (dist/index.html's script, whose name
+// carries a hash of the build). A page that loaded another one is out of date, which a phone that
+// kept Bridge AI open through an update notices and acts on (src/fresh.js, relay/web/shell.js).
+// Read again at most every 2 s, so a build made while the server runs counts too.
+// (The tests serve a copy of the UI they change, as an update would: BRIDGE_UI_DIR.)
+const UI_DIR = process.env.BRIDGE_UI_DIR ? path.resolve(process.env.BRIDGE_UI_DIR) : path.join(ROOT, 'dist')
+const uiNow = { at: 0, id: null }
+const entryOf = (html) => { const m = /<script\b[^>]*\btype="module"[^>]*\bsrc="([^"]+)"/.exec(html || ''); return m ? m[1].split('/').pop() : null }
+async function servedUi() {
+  if (Date.now() - uiNow.at < 2000) return uiNow.id
+  const html = await fs.promises.readFile(path.join(UI_DIR, 'index.html'), 'utf8').catch(() => '')
+  Object.assign(uiNow, { at: Date.now(), id: entryOf(html) })
+  return uiNow.id
+}
+app.get('/api/version', async (req, res) => res.json({ version: VERSION, build: BUILD, bundled: !!process.versions.electron, pid: process.pid, ui: await servedUi(), computer: relay.thisName() }))
 
 app.get('/api/config', (req, res) => res.json({
   version: VERSION,
@@ -2298,7 +2312,7 @@ boards.routes(app, { wrap, onComputer })
 
 // ---------- Static UI ----------
 
-const dist = path.join(ROOT, 'dist')
+const dist = UI_DIR
 // The page can't be put in a frame by another site (under its own buttons, to click for you). Not
 // through the relay: there the phone page frames it, and the iPhone app from an address of its own.
 const ownFrames = (res) => { if (!res.req?.headers['x-bridge-relay']) res.set({ 'Content-Security-Policy': "frame-ancestors 'self'", 'X-Content-Type-Options': 'nosniff' }) }

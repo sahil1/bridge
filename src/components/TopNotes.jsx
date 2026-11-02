@@ -3,6 +3,8 @@ import { Quiet } from './ErrorBoundary.jsx'
 import SetupChip from './SetupChip.jsx'
 import RestartChip from './RestartChip.jsx'
 import { useShared } from './layout.jsx'
+import { usePoll } from '../api.js'
+import { ANDROID_PAGE } from '../fresh.js'
 import { t } from '../i18n/index.js'
 
 // A phone's top bar keeps to what needs you now (an agent waiting, a recording, search, Settings).
@@ -10,6 +12,9 @@ import { t } from '../i18n/index.js'
 // line under it instead, the most pressing first: setup, then the restart, then the update. Each
 // is the same as the desktop's chip, one tap away. The update's line opens About & Updates, and can
 // be put away; until you've been there, Settings has a dot and opens there too.
+// Above them all: this page is out of date, the computer having updated while it was open (fresh,
+// from useFresh in src/fresh.js), with Reload; then the phone app itself being older than this page
+// needs (app, from oldApp there), with where to get the new one.
 
 // What's been done about an update on this device: "3.7.0:hidden" (put away) or "3.7.0:seen"
 // (About & Updates opened for it). A newer version shows again. One this Mac's macOS can't open
@@ -28,10 +33,36 @@ export function useUpdateNote(u) {
   }
 }
 
-export default function TopNotes({ update, onUpdate, fleet, conf }) {
+// The computer's name, for saying which Bridge AI.
+const computerOf = (v) => v?.computer || null
+const APP_HIDE = 'cc-app-note' // the app version asked for when that line was put away
+
+export default function TopNotes({ update, onUpdate, fleet, conf, fresh, app }) {
   const note = useUpdateNote(update)
+  const [appHidden, setAppHidden] = useShared(APP_HIDE, '')
+  const showApp = !!app && appHidden !== app.need
+  const name = computerOf(usePoll(showApp ? '/version' : null, 60 * 60 * 1000).data) || fresh?.stale?.computer
   return (
     <div className="top-notes">
+      {fresh?.stale && (
+        <button type="button" className="top-note fresh-note" onClick={fresh.reload}>
+          <Icon name="refresh" size={14} />
+          <span className="top-note-text">{fresh.stale.computer ? t('Bridge AI on {computer} was updated', { computer: fresh.stale.computer }) : t('Bridge AI on your computer was updated')}</span>
+          <span className="top-note-act">{t('Reload')}</span>
+        </button>
+      )}
+      {showApp && (
+        <div className="top-note-row app-note">
+          {app.platform === 'android'
+            ? <a className="top-note wrap" href={ANDROID_PAGE} target="_blank" rel="noopener noreferrer">
+              <Icon name="download" size={14} /><span className="top-note-text">{t('This Android app is older than Bridge AI on {computer} needs ({need} or later). Get the new one from the website.', { computer: name || t('your computer'), need: app.need })}</span><Icon name="external" size={13} className="top-note-go" />
+            </a>
+            : <div className="top-note wrap" role="status">
+              <Icon name="download" size={14} /><span className="top-note-text">{t('This iPhone app is older than Bridge AI on {computer} needs ({need} or later). Update it from the App Store, or TestFlight if you test it.', { computer: name || t('your computer'), need: app.need })}</span>
+            </div>}
+          <button type="button" className="win-btn top-note-x" onClick={() => setAppHidden(app.need)} aria-label={t('Not now')} title={t('Not now')}><Icon name="x" size={14} /></button>
+        </div>
+      )}
       <Quiet name="Setting up"><SetupChip line /></Quiet>
       <Quiet name="Restart"><RestartChip line fleet={fleet} runtime={conf?.runtime?.name} keep={!!conf?.runtime?.keep} /></Quiet>
       {note.line && (
@@ -47,5 +78,16 @@ export default function TopNotes({ update, onUpdate, fleet, conf }) {
         </div>
       )}
     </div>
+  )
+}
+
+// The same news on a wide screen: a chip in the top bar, with Reload.
+export function FreshChip({ fresh }) {
+  if (!fresh?.stale) return null
+  const what = fresh.stale.computer ? t('Bridge AI on {computer} was updated', { computer: fresh.stale.computer }) : t('Bridge AI on your computer was updated')
+  return (
+    <button type="button" className="top-chip fresh-chip" onClick={fresh.reload} title={`${what}. ${t('Reload to use the new version.')}`}>
+      <Icon name="refresh" size={13} /><span className="hide-sm">{t('Updated')}</span><b>{t('Reload')}</b>
+    </button>
   )
 }

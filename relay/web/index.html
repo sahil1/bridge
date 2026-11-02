@@ -46,6 +46,11 @@
     #bar .dot { width: 8px; height: 8px; border-radius: 50%; background: #f59e0b; flex: none; }
     #bar.off .dot { background: #ef4444; }
     #bar.ok .dot { background: #22c55e; }
+    /* Bridge AI on the computer was updated (shell.js fresh()): Reload, a whole 40px target. */
+    #bar.go { width: max-content; padding: 4px 4px 4px 14px; }
+    #bar.go .dot { background: var(--accent); }
+    #bar-go { min-height: 40px; padding: 0 16px; border: 0; border-radius: 999px; background: var(--accent); color: #fff; font: 600 13px -apple-system, system-ui, sans-serif; flex: none; }
+    #bar-go[hidden] { display: none; }
     /* Your computer is offline: what it last sent, under this. */
     #away { position: fixed; z-index: 2; top: 0; left: 0; right: 0; display: flex; gap: 10px; align-items: flex-start; padding: calc(env(safe-area-inset-top) + 9px) max(14px, env(safe-area-inset-right)) 9px max(14px, env(safe-area-inset-left)); background: var(--away-bg); border-bottom: 1px solid var(--line); font-size: 13px; line-height: 1.4; }
     #away .dot { width: 8px; height: 8px; margin-top: 5px; border-radius: 50%; background: #ef4444; flex: none; }
@@ -119,7 +124,7 @@
   </section>
 
   <div id="away" role="status" hidden><span class="dot"></span><div><b id="away-title"></b> <span id="away-text"></span></div><button id="away-more" type="button" hidden>Start screen</button></div>
-  <div id="bar" role="status" hidden><span class="dot"></span><span id="bar-text"></span></div>
+  <div id="bar" role="status" hidden><span class="dot"></span><span id="bar-text"></span><button id="bar-go" type="button" hidden>Reload</button></div>
   <iframe id="app" title="Bridge AI" hidden allow="clipboard-read; clipboard-write; microphone; fullscreen"></iframe>
   <script type="module" src="/shell.js"></script>
 </body>

@@ -12,6 +12,10 @@
 //
 // With your computer offline, it shows Bridge AI from what the phone kept (offline.js) under a
 // banner saying so, and messages you send wait for the computer (in the relay, sealed for it).
+//
+// When Bridge AI on your computer is updated while this page is open, Bridge AI in the frame loads
+// its new version by itself (src/fresh.js); one from before that can't, and this page does it for
+// it (fresh() below).
 import { phoneHello, phoneFinish, newKey, splitCode, normCode, formatCode, plainFrame, readPlain, K, pack, unpack, json, text, utf8, CHUNK, WINDOW, more, granter } from './link.js'
 import * as offline from './offline.js'
 
@@ -282,8 +286,9 @@ function bar(msg, off) {
   clearTimeout(barTimer)
   $('bar').hidden = !msg
   $('bar').classList.toggle('off', !!off)
-  $('bar').classList.remove('ok', 'brief')
+  $('bar').classList.remove('ok', 'brief', 'go')
   $('bar-text').textContent = msg || ''
+  $('bar-go').hidden = true
 }
 // A moment's news (what became of a message), unless something lasting is showing.
 let barTimer = null
@@ -326,6 +331,8 @@ function backOnline() {
     try { $('app').contentWindow.dispatchEvent(new Event('bridge-settings')) } catch { /* not loaded */ }
   }
   offline.online().catch(() => {})
+  // A new link: the computer may have started again on a new version (an update ends that way).
+  fresh().catch(() => {})
 }
 const clip = (s) => (s.length > 40 ? `${s.slice(0, 40)}…` : s)
 offline.use({
@@ -799,7 +806,7 @@ async function whileAway({ m, u, body }, port, why) {
   answer(503, { error: 'That needs your computer, and it\'s offline right now.', offline: true })
 }
 
-// A request of this page's own over the link (the outbox's): { status, json }.
+// A request of this page's own over the link (the outbox's, and fresh()'s): { status, json, text }.
 function call(m, u, body) {
   return new Promise((resolve, reject) => {
     if (!session) return reject(new Error(offlineText()))
@@ -811,8 +818,9 @@ function call(m, u, body) {
       onChunk: (c) => parts.push(c),
       onEnd: () => {
         let j = null
-        try { j = JSON.parse(parts.map((c) => text(c)).join('')) } catch { /* not JSON */ }
-        resolve({ status: head?.s || 0, json: j })
+        const all = parts.map((c) => text(c)).join('')
+        try { j = JSON.parse(all) } catch { /* not JSON */ }
+        resolve({ status: head?.s || 0, json: j, text: all })
       },
       onError: (msg) => reject(new Error(msg)),
     })
@@ -894,7 +902,75 @@ window.bridgeRelay = {
   start: apps || bundledUis.length ? () => startScreen() : null,
   // Cloud Agents, bundled in the apps (not in a browser).
   openCloud: bundledUis.includes('cloud') ? () => openBundled('cloud') : null,
+  // Bridge AI's new version, once the computer has one (src/fresh.js).
+  reload: () => { reloadApp().catch(() => reloadFrame()) },
 }
+
+// ---------- Bridge AI on the computer updated ----------
+// The page Bridge AI is made of names its built code by a hash of it (assets/index-<hash>.js), so
+// two pages with different names are different versions. Bridge AI in the frame from 3.8.3 on
+// compares its own with the computer's and loads the new one by itself (src/fresh.js,
+// window.bridgeFresh); this asks it to look whenever the link is new or the page is back on the
+// screen. One from before (what the phone kept of an older version, or an older computer that has
+// since updated) can't, so this compares for it and loads the new one when nothing's going on in it.
+// Otherwise the bar says so, with Reload.
+const entryOf = (doc) => {
+  for (const sc of doc?.querySelectorAll?.('script[type="module"][src]') || []) { const m = /\/assets\/([^/]+\.js)$/.exec(new URL(sc.getAttribute('src'), location.href).pathname); if (m) return m[1] }
+  return null
+}
+const frameWin = () => { try { const w = $('app').contentWindow; return w?.document?.readyState === 'complete' ? w : null } catch { return null } }
+// Nothing under way in it: no recording, no field being typed in, no dialog.
+function frameQuiet(w) {
+  const el = w.document.activeElement
+  const typing = el && el !== w.document.body && (el.isContentEditable || (/^(TEXTAREA|INPUT)$/.test(el.tagName) && !!el.value))
+  return !typing && !w.document.querySelector('.rec-pill, [role="dialog"], [aria-modal="true"]')
+}
+let stale = false // the frame is out of date, and was busy when that was found
+async function fresh() {
+  if (!appShown || !session || $('app').hidden) return
+  const w = frameWin()
+  if (!w) return
+  if (typeof w.bridgeFresh?.check === 'function') return w.bridgeFresh.check()
+  const mine = entryOf(w.document)
+  if (!mine) return
+  const r = await call('GET', '/', null).catch(() => null)
+  const theirs = r?.status === 200 ? entryOf(new DOMParser().parseFromString(r.text || '', 'text/html')) : null
+  if (!theirs || theirs === mine || frameWin() !== w) return
+  if (frameQuiet(w)) return reloadFrame()
+  stale = true
+  const j = await call('GET', '/api/relay', null).catch(() => null)
+  const name = j?.json?.computer || (thisComputer() === 'Your computer' ? 'your computer' : thisComputer())
+  if (!stale || !appShown) return
+  bar(`Bridge AI on ${name} was updated`)
+  $('bar').classList.add('go')
+  $('bar-go').hidden = false
+}
+function reloadFrame() {
+  stale = false
+  if (!$('bar-go').hidden) bar(null)
+  const f = $('app')
+  try { f.contentWindow.location.reload() } catch { f.src = f.src } // eslint-disable-line no-self-assign
+}
+// Bridge AI's own Reload (src/fresh.js), and this bar's: the frame again, or the whole page when the
+// computer updated the relay too (it does that after updating itself: server/relay.js), so this
+// page's own files are new as well. The iPhone app brings its own copy of this page.
+let relayBuild = null // the relay's build when this page opened
+async function reloadApp() {
+  if (!native && relayBuild) {
+    const now = await fetch('/_relay/health', { cache: 'no-store' }).then((r) => r.json()).then((j) => j.build || null, () => null)
+    if (now && now !== relayBuild) return location.reload()
+  }
+  reloadFrame()
+}
+$('bar-go').onclick = () => reloadApp()
+// Back on the screen with the link still there (else the new link asks): has it changed meanwhile?
+// Out of date and busy before: now's the time, if it's quiet.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || !session) return
+  const w = frameWin()
+  if (stale && w && !w.bridgeFresh && frameQuiet(w)) reloadFrame()
+  else fresh().catch(() => {})
+})
 
 // ---------- the app ----------
 function showApp() {
@@ -985,6 +1061,7 @@ async function start() {
     if (!('serviceWorker' in navigator)) { waitScreen('This browser can\'t run Bridge AI', 'Use Safari on iPhone or Chrome on Android.'); return }
     await navigator.serviceWorker.register('/sw.js', { scope: '/' })
     await navigator.serviceWorker.ready
+    fetch('/_relay/health', { cache: 'no-store' }).then((r) => r.json()).then((j) => { relayBuild = j.build || null }, () => {})
   }
   paired = (await pairing.get()) || null
   offline.tidy().catch(() => {})

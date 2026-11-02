@@ -18,7 +18,8 @@ import History from './components/History.jsx'
 import UpdateChip, { withApp } from './components/UpdateChip.jsx'
 import RestartChip from './components/RestartChip.jsx'
 import SetupChip from './components/SetupChip.jsx'
-import TopNotes, { useUpdateNote } from './components/TopNotes.jsx'
+import TopNotes, { useUpdateNote, FreshChip } from './components/TopNotes.jsx'
+import { useFresh, oldApp } from './fresh.js'
 import RuntimeNotice from './components/RuntimeNotice.jsx'
 import AccountMenu, { listed, setDefault, lapsed, asList, nameOf as accountName } from './components/AccountMenu.jsx'
 import { CHANNEL, nameOf, popOut, tell } from './components/Solo.jsx'
@@ -72,6 +73,8 @@ function Clock() {
 }
 
 const NAMES = { claude: 'Claude', codex: 'Codex', cursor: 'Cursor', grok: 'Grok' }
+// The iPhone or Android app this page is in, when it's older than this page needs (src/fresh.js).
+const appTooOld = oldApp()
 
 // The phone apps' way back to their start screen, from the phone's Cloud agents (cloudOnly).
 const toStart = !cloudOnly ? null : window.bridgeAndroid?.home ? () => window.bridgeAndroid.home()
@@ -547,6 +550,9 @@ function App() {
 
   const mateLaunch = useLaunchMate(openAgent)
   const meetings = useMeetings()
+  // The computer updated while this page was open: the new one loads by itself when nothing's under
+  // way, or a line under the top bar says so with Reload (src/fresh.js).
+  const fresh = useFresh({ hold: !!meetings?.rec })
   useHotkey(useCallback((e) => (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k', []), () => setPalette((p) => !p))
   useHotkey(useCallback((e) => (e.metaKey || e.ctrlKey) && e.key === ',', []), () => setSettings((v) => (v ? null : 'general')))
   useHotkey(useCallback((e) => (e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'f', []), () => setHistory((v) => !v))
@@ -684,6 +690,7 @@ function App() {
           : <NeedsYouChip count={waiting} review={wide ? toReview : 0} open={!!inbox} onClick={() => setInbox(inbox ? null : {})} />}
         {!cloudOnly && wide && (
           <>
+            <Quiet name="Updated"><FreshChip fresh={fresh} /></Quiet>
             <Quiet name="Setting up"><SetupChip /></Quiet>
             <Quiet name="Next meeting"><NextMeetingChip onClick={() => showCard('calendar')} /></Quiet>
             <Quiet name="Usage"><ProviderChip quota={quota.data} primary={primary} onClick={() => showCard('gauge')} onAddAccount={(kind) => setAddAcct({ kind })} /></Quiet>
@@ -701,7 +708,7 @@ function App() {
         </button>
       </div>
     </header>
-    {!wide && !cloudOnly && <TopNotes update={update.data} onUpdate={() => setSettings('about')} fleet={fleet} conf={conf} />}
+    {!wide && !cloudOnly && <TopNotes update={update.data} onUpdate={() => setSettings('about')} fleet={fleet} conf={conf} fresh={fresh} app={appTooOld} />}
     </>
   )
   const topbar = topbarFor()
