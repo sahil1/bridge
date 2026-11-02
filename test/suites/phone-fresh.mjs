@@ -81,10 +81,14 @@ try {
   const v1 = update()
   await settle()
   let before = loads
+  // Counted once the reload's own load event has come: the new page's entry file is in its DOM as
+  // soon as the page is read, and on a busy machine its load event can come a second after that.
+  const reloaded = ph.p.waitForEvent('load', { timeout: 15000 }).then(() => true, () => false)
   await screen(ph.p, true)
-  ok(!!(await until(async () => (await entryOf(ph.p)) === v1, 10000)), 'back on the screen after the computer updated, the phone loads the new version by itself', await entryOf(ph.p))
-  ok(loads === before + 1, 'once', { loads, before })
+  ok(await reloaded && (await entryOf(ph.p)) === v1, 'back on the screen after the computer updated, the phone loads the new version by itself', await entryOf(ph.p))
   await ph.p.waitForSelector('.tabbar button', { timeout: 20000 })
+  await until(() => ph.p.evaluate(() => typeof window.bridgeFresh?.check === 'function'), 10000)
+  ok(loads === before + 1, 'once', { loads, before })
   ok(!(await ph.p.locator('.fresh-note').count()), 'and says nothing about it')
 
   // In the middle of something (just tapped a tab): it says so, with Reload.
