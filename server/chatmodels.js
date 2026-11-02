@@ -11,8 +11,10 @@
 //
 // The conversation goes in as [{ role: 'user'|'assistant'|'tool', text, calls?, id?, name?, error? }]:
 // an assistant turn may call tools (calls: [{ id, name, args }]) and each call's result comes back
-// as a 'tool' turn. reply() turns that into each provider's own shape (OpenAI-style, Anthropic,
-// Bedrock's Converse) and returns { text, calls }. A sign-in's one-shot mode has no tools.
+// as a 'tool' turn. A user turn may carry pictures (images: ['data:image/png;base64,…']) for a model
+// that can see them (canSee); other models get the words only. reply() turns that into each
+// provider's own shape (OpenAI-style, Anthropic, Bedrock's Converse) and returns { text, calls }. A
+// sign-in's one-shot mode has no tools.
 // Request shapes from each provider's docs: platform.claude.com (tool use), developers.openai.com
 // (function calling), docs.cohere.com/docs/compatibility-api, docs.z.ai, huggingface.co/docs/
 // inference-providers, learn.microsoft.com (Azure OpenAI v1), docs.aws.amazon.com/bedrock (Converse,
@@ -275,11 +277,30 @@ const failed = (who, status, body) => {
 }
 const parseArgs = (s) => { if (s && typeof s === 'object') return s; try { return JSON.parse(s || '{}') } catch { return { _unparsed: String(s || '') } } }
 
+// ---------- Pictures ----------
+const pictures = (m) => (m.role === 'user' && Array.isArray(m.images) ? m.images.filter((u) => /^data:image\/(png|jpeg|webp);base64,/.test(u)) : [])
+// Whether a model can look at a picture. A model on this computer says so itself (Ollama's
+// capabilities, LM Studio's), asked once; others are known by name. A sign-in's one-shot mode takes
+// words only, and so does the local model built in (it runs without Gemma's picture part).
+const SEES = /claude|gpt-4o|gpt-4\.1|gpt-5|\bo[34]\b|o[34]-|gemini|grok-(2-vision|4)|pixtral|llava|vision|[-_.]vl\b|vl[-:]|qwen[\d.]*-?vl|gemma-?3|minicpm-v|moondream|llama-?4|mistral-(small|medium)-3|nova-(pro|lite|premier)|glm-4\.\dv/i
+const seeing = new Map()
+export async function canSee(id) {
+  const [route, ...rest] = String(id || '').split(':')
+  const model = rest.join(':')
+  if (!model || route === 'cli' || route === 'bridge') return false
+  if (seeing.has(id)) return seeing.get(id)
+  let yes = SEES.test(model)
+  if (route === 'ollama' || route === 'lmstudio') yes = await localInfo(id).then((i) => i?.vision ?? yes).catch(() => yes)
+  seeing.set(id, yes)
+  return yes
+}
+
 // ---------- Each provider's shape ----------
 function openaiMessages(messages, system) {
   const out = [{ role: 'system', content: system }]
   for (const m of messages) {
     if (m.role === 'tool') out.push({ role: 'tool', tool_call_id: m.id, content: m.text || '' })
+    else if (pictures(m).length) out.push({ role: 'user', content: [{ type: 'text', text: m.text || '' }, ...pictures(m).map((url) => ({ type: 'image_url', image_url: { url } }))] })
     else if (m.role === 'assistant' && m.calls?.length) out.push({ role: 'assistant', content: m.text || null, tool_calls: m.calls.map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: JSON.stringify(c.args || {}) } })) })
     else out.push({ role: m.role, content: m.text || '' })
   }
@@ -324,7 +345,10 @@ function anthropicMessages(messages) {
     else if (m.role === 'assistant') {
       if (m.text) add('assistant', { type: 'text', text: m.text })
       for (const c of m.calls || []) add('assistant', { type: 'tool_use', id: c.id, name: c.name, input: c.args || {} })
-    } else if (m.text) add('user', { type: 'text', text: m.text })
+    } else {
+      for (const url of pictures(m)) add('user', { type: 'image', source: { type: 'base64', media_type: url.slice(5, url.indexOf(';')), data: url.slice(url.indexOf(',') + 1) } })
+      if (m.text) add('user', { type: 'text', text: m.text })
+    }
   }
   for (const m of out) if (m.role === 'user') m.content.sort((a, b) => (a.type === 'tool_result' ? 0 : 1) - (b.type === 'tool_result' ? 0 : 1))
   return out
@@ -350,7 +374,10 @@ function converseMessages(messages) {
     else if (m.role === 'assistant') {
       if (m.text) add('assistant', { text: m.text })
       for (const c of m.calls || []) add('assistant', { toolUse: { toolUseId: c.id, name: c.name, input: c.args || {} } })
-    } else if (m.text) add('user', { text: m.text })
+    } else {
+      for (const url of pictures(m)) add('user', { image: { format: url.slice(11, url.indexOf(';')), source: { bytes: url.slice(url.indexOf(',') + 1) } } })
+      if (m.text) add('user', { text: m.text })
+    }
   }
   for (const m of out) if (m.role === 'user') m.content.sort((a, b) => (a.toolResult ? 0 : 1) - (b.toolResult ? 0 : 1))
   return out
@@ -498,13 +525,13 @@ async function callTime(id, text, out) {
 }
 const allText = (messages, system, tools) => `${system || ''}\n${messages.map((m) => `${m.text || ''}${m.calls ? JSON.stringify(m.calls) : ''}`).join('\n')}${tools?.length ? JSON.stringify(tools) : ''}`
 
-// Ollama's own chat API: the context set, thinking off, the schema as `format`.
+// Ollama's own chat API: the context set, thinking off, the schema as `format`, pictures as `images`.
 function ollamaMessages(messages, system) {
   const out = [{ role: 'system', content: system }]
   for (const m of messages) {
     if (m.role === 'tool') out.push({ role: 'tool', content: m.text || '', tool_name: m.name })
     else if (m.role === 'assistant' && m.calls?.length) out.push({ role: 'assistant', content: m.text || '', tool_calls: m.calls.map((c) => ({ function: { name: c.name, arguments: c.args || {} } })) })
-    else out.push({ role: m.role, content: m.text || '' })
+    else out.push({ role: m.role, content: m.text || '', ...(pictures(m).length ? { images: pictures(m).map((u) => u.slice(u.indexOf(',') + 1)) } : {}) })
   }
   return out
 }
@@ -547,7 +574,7 @@ async function lmsChat(model, messages, o) {
   const one = messages.length === 1
   if (one && need > cap * 1.15) throw tooLong(id, cap, need)
   const ms = await callTime(id, text, 800)
-  if (one && !o.think && !o.json && !o.tools?.length && i?.canStop) {
+  if (one && !o.think && !o.json && !o.tools?.length && !pictures(messages[0]).length && i?.canStop) {
     const r = await fetch(`${LMS_ROOT()}/api/v1/chat`, { method: 'POST', signal: until(o.signal, ms), headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model, system_prompt: o.system, input: messages[0].text || '', reasoning: 'off', stream: false, store: false }) }).catch((e) => { if (e.name === 'AbortError' || e.name === 'TimeoutError') throw e; return null })
     const j = r ? await r.json().catch(() => ({})) : {}
     if (r?.ok) {
