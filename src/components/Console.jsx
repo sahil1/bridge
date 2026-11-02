@@ -858,7 +858,7 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
               filesUrl={`/agents/${encodeURIComponent(agent.paneId)}/mentions`}
               historyUrl={agent.caps?.chat ? `/agents/${encodeURIComponent(agent.paneId)}/transcript` : null}
               tools={<ModelChip agent={agent} account={account} onNote={setFlash} onSent={() => { mirrored.current = ''; syncMirror() }} />}
-              onInteractive={() => { setView('terminal'); setTermFocus(Date.now()) }} />
+              onInteractive={() => { setView('terminal'); setTermFocus(Date.now()) }} phone={variant === 'mobile'} />
           </div>
         </>
       )}

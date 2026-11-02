@@ -236,8 +236,11 @@ function SavedPrompts({ current, onPick, onClose }) {
   )
 }
 
-// tools: more controls for the tools row (the agent's model chip).
-export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKeys, busy: agentBusy = false, typeAhead = false, prefill = null, editing = null, onEditChange, onDraft, mirroring = false, onStop, queuedCount = 0, commandsUrl, filesUrl, onInteractive, historyUrl, tools = null }) {
+// tools: more controls for the tools row (the agent's model chip). phone: the phone's layout, where
+// the row under what you write is +, the mic, the model and send, each a whole 40px target, and
+// what the agent is doing (Working, Stop, Send now) and what the box is doing (uploading,
+// transcribing) are a line over the box, so the row never runs out of room.
+export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKeys, busy: agentBusy = false, typeAhead = false, prefill = null, editing = null, onEditChange, onDraft, mirroring = false, onStop, queuedCount = 0, commandsUrl, filesUrl, onInteractive, historyUrl, tools = null, phone = false }) {
   const [draft, setDraft] = useState(() => loadDraft(id))
   const [note, setNote] = useState(null)
   const [uploading, setUploading] = useState(0)
@@ -555,6 +558,8 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
   const attachNums = numbered(draft.files)
   const attachPics = draft.files.filter((f) => f.image && f.preview).map((f) => ({ path: f.path, src: f.preview, name: attachNums.count > 1 ? t('Image {n} · {name}', { n: attachNums.of(f), name: f.name }) : f.name }))
   const status = busy ? t('Transcribing on your computer…') : uploading ? (uploading > 1 ? t('Uploading {n} files…', { n: uploading }) : t('Uploading {n} file…', { n: uploading })) : null
+  const stopBtn = onStop && <button className="stop-btn" onClick={onStop} title={t('Interrupt the agent (sends Esc)')} aria-label={t('Stop the agent')}><Icon name="stop" size={phone ? 13 : 11} /> {t('Stop')}</button>
+  const nowBtn = <button className="now-btn" onClick={() => send(true)} title={t('Stop what the agent is doing and send this now')}>{t('Send now')}</button>
 
   return (
     <div className="composer-stack">
@@ -572,6 +577,16 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
       {voiceSetup && (voiceSetup.mic ? <MicFix stale={voiceSetup.stale} onClose={closeVoiceSetup} /> : <VoiceSetup initial={voiceSetup} onReady={retry} onClose={closeVoiceSetup} />)}
       {note && <div className="comp-note" role="status">{note}</div>}
       {dictNote && <div className="comp-note" role="status">{dictNote} {dict.retry && <button className="link-btn" onClick={retry}>{t('Try again')}</button>} <button className="link-btn" onClick={dismiss}>{t('Close')}</button></div>}
+      {phone && (agentBusy || status) && (
+        <div className="comp-busy">
+          <span className="comp-busy-text" role="status">
+            {status && <span>{status}</span>}
+            {agentBusy && <span className="comp-busy-work"><span className="comp-busy-dot" aria-hidden="true" />{t('Working')}{queuedCount ? ` · ${t('{n} queued', { n: queuedCount })}` : ''}</span>}
+          </span>
+          {agentBusy && canSend && !recording && nowBtn}
+          {agentBusy && stopBtn}
+        </div>
+      )}
       <div ref={rootRef} className={`composer ${recording ? 'rec' : ''} ${dragging ? 'drop' : ''} ${manualH ? 'sized' : ''} ${dictated ? 'dictated' : ''}`} {...dropProps} onPaste={onPaste}>
         <div className="comp-grip" role="separator" aria-orientation="horizontal" aria-label={t('Resize the message box')} title={manualH ? t('Drag to resize · double-click to fit the text again') : t('Drag to make the box taller')}
           onPointerDown={onGripDown} onPointerMove={onGripMove} onPointerUp={onGripUp} onPointerCancel={onGripUp} onDoubleClick={() => setManualH(null)}
@@ -649,13 +664,15 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
               </button>
               {tools}
               <input ref={fileRef} type="file" multiple hidden onChange={(e) => { upload(e.target.files); e.target.value = '' }} />
+              {phone ? <span className="comp-hint" /> : <>
               <span className={`comp-hint ${status ? 'status' : ''}`}>{status || (agentBusy
                 // typeAhead: the agent takes messages while it works, like typing in its terminal.
                 ? <span className="busy-hint">{t('Working')}{queuedCount ? ` · ${t('{n} queued', { n: queuedCount })}` : ''}<span className="hide-touch"> · <kbd>⏎</kbd> {typeAhead ? t('send (it picks it up next)') : t('queue')} · <kbd>{/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl'}⏎</kbd> {t('interrupt and send')}</span></span>
                 : mirroring ? <span className="hide-touch">{t("Shows in the agent's input line above as you type")} · <kbd>⏎</kbd> {t('send')}</span>
                 : <span className="hide-touch"><kbd>⏎</kbd> {t('send')} · <kbd>⇧⏎</kbd> {t('new line')}</span>)}</span>
-              {agentBusy && onStop && <button className="stop-btn" onClick={onStop} title={t('Interrupt the agent (sends Esc)')} aria-label={t('Stop the agent')}><Icon name="stop" size={11} /> {t('Stop')}</button>}
-              {agentBusy && canSend && <button className="now-btn" onClick={() => send(true)} title={t('Stop what the agent is doing and send this now')}>{t('Send now')}</button>}
+              {agentBusy && stopBtn}
+              {agentBusy && canSend && nowBtn}
+              </>}
               <button className={`send ${agentBusy && !typeAhead ? 'queue' : ''}`} onClick={() => send(false)} disabled={!canSend} aria-label={editing ? t('Send edit') : agentBusy && !typeAhead ? t('Queue message') : t('Send')}
                 title={agentBusy ? (typeAhead ? t('Send: the agent picks it up after its current step (/btw asks a side question)') : t('Queue: sends when the agent is free')) : t('Send')}>
                 <Icon name={agentBusy && !typeAhead ? 'clock' : 'send'} size={15} />
