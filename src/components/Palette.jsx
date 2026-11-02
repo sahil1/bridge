@@ -113,7 +113,7 @@ export default function Palette({ fleet, activeId, onClose, onOpen, onOpenFile, 
             const head = it.group !== lastGroup ? <div className="pal-group" key={`g-${it.group}`}>{it.group}</div> : null
             lastGroup = it.group
             return [head, (
-              <button key={it.id} role="option" aria-selected={i === sel} className={`pal-item ${i === sel ? 'on' : ''}`} onMouseMove={() => setSel(i)} onClick={() => run(it)}>
+              <button key={it.id} data-id={it.id} role="option" aria-selected={i === sel} className={`pal-item ${i === sel ? 'on' : ''}`} onMouseMove={() => setSel(i)} onClick={() => run(it)}>
                 <span className="pal-ico">{it.status ? <StatusDot status={it.status} size={8} /> : <Icon name={it.icon || 'command'} size={13} />}</span>
                 <span className="pal-text"><b>{it.label}</b>{it.sub && <span>{it.sub}</span>}</span>
                 {it.hint && <kbd>{it.hint}</kbd>}
