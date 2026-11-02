@@ -203,11 +203,12 @@ export async function startModel(name) {
   const url = `http://127.0.0.1:${port}`
   if (!await until(async () => (await fetch(`${url}/v1/models`)).ok, 15000, 200)) throw new Error('the stand-in model didn\'t start')
   // What was asked of it: the user's words in each chat request, oldest first (a picture sent
-  // with them reads as [image]). requests(): each request as it came ({ model, messages, format }).
+  // with them reads as [image]). requests(): each request as it came ({ model, messages, format },
+  // and path: '/api/chat' for one to Ollama's own API).
   const requests = () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : '').split('\n').filter(Boolean)
     .map((l) => { try { return JSON.parse(l) } catch { return null } }).filter((x) => x?.messages)
   const words = (c) => (typeof c === 'string' ? c : Array.isArray(c) ? c.map((p) => p.text ?? (p.image_url ? '[image]' : '')).join('\n') : '')
-  const asked = (re) => requests().map((x) => x.messages.filter((m) => m.role === 'user').map((m) => words(m.content)).join('\n')).filter((t) => !re || re.test(t))
+  const asked = (re) => requests().map((x) => x.messages.filter((m) => m.role === 'user').map((m) => `${words(m.content)}${m.images?.length ? '\n[image]' : ''}`).join('\n')).filter((t) => !re || re.test(t))
   // What it was sent to transcribe: { stt: n, bytes, prompt } each, oldest first.
   const heard = () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : '').split('\n').filter(Boolean)
     .map((l) => { try { return JSON.parse(l) } catch { return null } }).filter((x) => x?.stt)
