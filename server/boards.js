@@ -283,8 +283,8 @@ async function isLocal(id) {
 }
 // How much of a meeting, a project or an agent's work goes with a request, as a share of what a
 // cloud model gets: for a model on this computer, what's left of what it reads at a time (its
-// context, 4,096 tokens unless its server says more) once the instructions (about 1,000 tokens) and
-// room for its answer (2,048) are taken out, at about three characters a token.
+// context, as chatmodels.js tells it; 4,096 tokens if it can't) once the instructions (about 1,000
+// tokens) and room for its answer (2,048) are taken out, at about three characters a token.
 async function shareFor(id) {
   if (!(await isLocal(id))) return { small: false, n: 1 }
   const ctx = Number(await Promise.resolve().then(() => helpers.contextOf?.(id)).catch(() => null)) || 4096
