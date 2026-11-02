@@ -6,8 +6,9 @@
 //   with it; "Draw this" for an architecture comes back as a spec with icons and containers, asked
 //   in a JSON shape; a model on Ollama or LM Studio is listed as on this computer, asked in plain
 //   words first and again (held to the JSON shape) when its answer can't be drawn, sent only what
-//   fits of a long meeting, and asked whether it can see; the chief of staff hands over a spec and
-//   lists the shapes; a preference kept, sent in the next prompt, and forgotten.
+//   fits of a long meeting, and asked whether it can see (one that can is sent the board's picture in
+//   Ollama's own chat); the chief of staff hands over a spec and lists the shapes; a preference kept,
+//   sent in the next prompt, and forgotten. The build the app runs from carries its PDF code.
 //   The app, in Chromium or WebKit: the clean look by default (straight lines, the pane's own
 //   background, Bridge AI's accent, right-angled arrows joined to shapes) with Excalidraw's menu,
 //   welcome screen, shortcut numbers, own links, web embeds and Mermaid importer gone, and
@@ -86,10 +87,10 @@ try {
     const before = model.requests().length
     const r = await api('/boards/draw', { prompt: 'a local web app', kind: 'architecture', model: 'ollama:llama3.1:8b' })
     const sent = model.requests().slice(before)
-    ok(q?.via === 'local' && r.spec?.nodes?.length > 2 && r.calls === 2 && sent.length === 2 && sent.every((x) => x.model === 'llama3.1:8b') && !sent[0].format && sent[1].format === 'json_schema', 'a model on Ollama (on this computer) draws: asked in plain words first (small models write worse held to a shape), and an answer that can\'t be drawn goes back to it, held to the JSON shape', { local: q, calls: r.calls, sent: sent.map((x) => [x.model, x.format]) })
+    ok(q?.via === 'local' && r.spec?.nodes?.length > 2 && r.calls === 2 && sent.length === 2 && sent.every((x) => x.model === 'llama3.1:8b' && x.path === '/api/chat') && !sent[0].format && sent[1].format === 'json_schema', 'a model on Ollama (on this computer) draws, through Ollama\'s own chat: asked in plain words first (small models write worse held to a shape), and an answer that can\'t be drawn goes back to it, held to the JSON shape', { local: q, calls: r.calls, sent: sent.map((x) => [x.path, x.model, x.format]) })
     ok(/That answer can't be drawn: It had no nodes/.test(JSON.stringify(sent[1]?.messages)), 'saying why', sent[1]?.messages?.slice(-1))
-    // A long meeting: a cloud model gets much of it, a model on this computer only what fits in the
-    // 4,096 tokens Ollama reads at a time, with room left for the instructions and the answer.
+    // A long meeting: a cloud model gets much of it, a model on this computer only what fits in what
+    // it reads at a time (the context Bridge AI says it has), with room left for the answer.
     const m = await api('/meetings', { title: 'Infra review', call: false })
     await api(`/meetings/${m.id}/stop`, {})
     const line = (i) => `${JSON.stringify({ src: 'them', t0: i, t1: i + 1, text: `Point ${i}: the queue in front of the billing service drops messages when the cache restarts.`, engine: 'test' })}\n`
@@ -100,7 +101,8 @@ try {
       return (model.requests()[n]?.messages || []).map((x) => (typeof x.content === 'string' ? x.content : '')).join('\n').length
     }
     const cloud = await sizeOf('openai:gpt-5'), local = await sizeOf('ollama:llama3.1:8b')
-    ok(cloud > 25000 && local > 1000 && local < 4096 * 3.2 - 2048 * 3, 'a model on this computer is sent only as much of a long meeting as fits what it reads at a time', { cloud, local })
+    const context = (await api('/local-models')).models?.find((x) => x.id === 'ollama:llama3.1:8b')?.context
+    ok(context > 0 && cloud > 25000 && local > 1000 && local < cloud * 0.8 && local / 3.2 + 2048 <= context, 'a model on this computer is sent only as much of a long meeting as fits what it reads at a time, with room for its answer, and less than a cloud model', { cloud, local, context })
     // "Change it" on a model on this computer: plain words first, its steps back.
     const n1 = model.requests().length
     const ch = await api('/boards/change', { prompt: 'call Start Begin', scene: { shapes: [{ id: 'a1', shape: 'rectangle', text: 'Start' }], arrows: [], texts: [] }, model: 'ollama:llama3.1:8b' })
@@ -115,6 +117,15 @@ try {
     ok(lms?.via === 'local' && r2.spec?.nodes?.length > 2 && sent2.length === 2 && sent2.every((x) => x.model === 'gpt-5') && !sent2[0].format && sent2[1].format === 'json_schema', 'a model in LM Studio is offered as on this computer and draws the same way', { lms, calls: r2.calls, error: r2.error, sent: sent2.map((x) => [x.model, x.format]) })
     ok((await api(`/boards/sees?model=${enc('ollama:llama3.2-vision:11b')}`)).sees === true && (await api(`/boards/sees?model=${enc('ollama:llama3.1:8b')}`)).sees === false, 'whether a model on Ollama can look at a picture is asked of Ollama itself', null)
     ok((await api(`/boards/sees?model=${enc('openai:gpt-5')}`)).sees === true && (await api(`/boards/sees?model=${enc('cli:claude')}`)).sees === false, 'and a cloud model is known by name; a sign-in\'s one-shot mode takes words only')
+    // A round of Refine on a model on Ollama that can see: the board's picture goes to Ollama's own
+    // chat the way Ollama takes one, as base64 in the message's images.
+    const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+    const n3 = model.requests().length
+    const rv = await api('/boards/review', { mode: 'draw', prompt: 'a web app', kind: 'architecture', model: 'ollama:llama3.2-vision:11b', image: PNG, issues: ['Arrows with no label: Load balancer to App.'],
+      spec: { direction: 'LR', groups: [], nodes: [{ id: 'lb', label: 'Load balancer', shape: 'load-balancer' }, { id: 'app', label: 'App', shape: 'server' }], edges: [{ from: 'lb', to: 'app' }] } }).catch((e) => ({ error: e.message }))
+    const sent3 = model.requests().slice(n3)
+    const asked3 = sent3[0]?.messages?.find((x) => x.role === 'user')
+    ok(rv.saw === 'picture' && rv.spec?.edges?.[0]?.label === 'HTTP' && sent3.length === 1 && sent3[0].path === '/api/chat' && sent3[0].model === 'llama3.2-vision:11b' && asked3?.images?.length === 1 && asked3.images[0] === PNG.split(',')[1] && /A picture of it as drawn/.test(asked3.content), 'a round of Refine on a model on Ollama that can see sends the board\'s picture to Ollama\'s own chat, in the message\'s images, and its answer is drawn', { rv, sent: sent3.map((x) => [x.path, x.model, x.messages?.map((m) => [m.role, m.images?.length || 0])]) })
   })
 
   await part('the chief of staff', async () => {
@@ -141,6 +152,15 @@ try {
   })
 
   // ---------- The app ----------
+  // The build the app runs from carries the PDF code: one made before `npm ci` can't find jsPDF, says
+  // so, and still writes a page whose Export as PDF can't load it (test/run.mjs builds again then).
+  await part('the build', async () => {
+    const assets = path.join(ROOT, 'dist', 'assets')
+    const js = fs.readdirSync(assets).filter((f) => f.endsWith('.js'))
+    const bare = js.filter((f) => /import\(\s*[`'"](jspdf|svg2pdf\.js)[`'"]\s*\)/.test(fs.readFileSync(path.join(assets, f), 'utf8')))
+    ok(js.some((f) => /^jspdf\./.test(f)) && js.some((f) => /^svg2pdf\./.test(f)) && !bare.length, 'the app\'s build has its PDF code in it, not just a name it couldn\'t find', { bare, pdf: js.filter((f) => /pdf/i.test(f)) })
+  })
+
   const elsewhere = []
   const pdfCode = []
   const host = new URL(kit.url).host
@@ -156,12 +176,27 @@ try {
   await p.waitForSelector('.rail-nav', { timeout: 30000 })
   const toList = async () => { await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-board', { detail: { list: true } }))); await p.waitForSelector('.wb-home', { timeout: 20000 }) }
   const canvasBox = async () => p.locator('.wb-canvas').boundingBox()
+  // A board opened by its name, up and drawn (Excalidraw's code can take a while to load the first
+  // time on a busy machine).
+  const openBoard = async (name) => {
+    await p.evaluate((id) => window.dispatchEvent(new CustomEvent('bridge-open-board', { detail: { id } })), name)
+    await until(() => p.locator('.wb-view .pane-titles .wb-name', { hasText: name }).count(), 15000)
+    await p.waitForSelector('.excalidraw canvas', { timeout: 60000 })
+  }
+  // What a menu item downloads; when nothing comes, the page's own error line says why.
+  const download = async (item) => {
+    const got = p.waitForEvent('download', { timeout: 60000 }).catch(() => null)
+    await p.getByRole('menuitem', { name: item }).click()
+    const dl = await got
+    if (!dl) throw new Error(`${item} downloaded nothing: ${await p.locator('.wb-err').innerText().catch(() => 'no error shown')}`)
+    return dl
+  }
   const saved = () => until(async () => (await p.locator('.wb-state').innerText().catch(() => '')) === 'Saved', 8000)
 
   await part('the clean look', async () => {
     await toList()
     await p.getByRole('button', { name: 'New whiteboard' }).click()
-    await p.waitForSelector('.excalidraw canvas', { timeout: 30000 })
+    await p.waitForSelector('.excalidraw canvas', { timeout: 60000 })
     ok(await until(() => p.locator('.wb-empty-board').isVisible(), 5000), 'an empty board says what can be done on it, in Bridge AI\'s words')
     ok(!(await p.locator('.excalidraw .main-menu-trigger').isVisible().catch(() => false)) && !(await p.locator('.welcome-screen-center, .welcome-screen-decor').count()), 'Excalidraw\'s own menu and welcome screen aren\'t there')
     const colours = await p.evaluate(() => {
@@ -264,10 +299,12 @@ try {
     const after = await until(() => { const x = readBoard('Holders'); const v = live(x).find((e) => e.id === vpc.id); return v && Math.abs(v.x - vpc.x - 150) < 3 && x }, 8000)
     const moved = (e0) => { const e = live(after).find((x) => x.id === e0.id); return e && [Math.round(e.x - e0.x), Math.round(e.y - e0.y)] }
     ok(after && moved(vpc)?.join() === '150,80' && moved(node)?.join() === '150,80' && moved(pic)?.join() === '150,80', 'dragging a container moves what\'s inside it with it', after && [moved(vpc), moved(node), moved(pic)])
-    // The icon dragged by its picture: the node goes with it, the container stays.
+    // The icon dragged by its picture: the node goes with it, the container stays. (A moment first,
+    // for the last drag's picking to settle on a busy machine.)
+    await sleep(500)
     await p.mouse.move(cx + 150, cy + 80 - 20); await p.mouse.down(); await p.mouse.move(cx + 150, cy + 80 + 30, { steps: 6 }); await p.mouse.up()
     // (It may snap a few pixels to line up with the container's middle.)
-    const after2 = (await until(() => { const x = readBoard('Holders'); const n = live(x).find((e) => e.id === node.id); return n && n.y - node.y > 110 && x }, 8000)) || readBoard('Holders')
+    const after2 = (await until(() => { const x = readBoard('Holders'); const n = live(x).find((e) => e.id === node.id); return n && n.y - node.y > 110 && x }, 15000)) || readBoard('Holders')
     const moved2 = (e0) => { const e = live(after2).find((x) => x.id === e0.id); return e && [Math.round(e.x - e0.x), Math.round(e.y - e0.y)] }
     const down = moved2(node)?.[1]
     ok(after2 && down > 115 && down < 145 && moved2(pic)?.join() === moved2(node)?.join() && moved2(vpc)?.join() === '150,80', 'dragging an icon by its picture (the container it\'s in still picked) moves its node and name with it, and not the container around it', after2 && [moved2(vpc), moved2(node), moved2(pic)])
@@ -340,7 +377,7 @@ try {
     const early = pdfCode.length
     await p.locator('.wb-draw .win-btn[aria-label="Close"]').click().catch(() => {})
     await p.getByRole('button', { name: 'Export' }).click()
-    const [dl] = await Promise.all([p.waitForEvent('download'), p.getByRole('menuitem', { name: 'Export as PDF' }).click()])
+    const dl = await download('Export as PDF')
     const out = path.join(kit.dir, 'board.pdf')
     await dl.saveAs(out)
     const buf = fs.readFileSync(out)
@@ -351,7 +388,7 @@ try {
     ok(!early && pdfCode.length > 0, 'its code loaded only then, not with the board', { early, pdfCode })
     await p.getByRole('button', { name: 'Export' }).click()
     await p.getByRole('radio', { name: 'Dark' }).click()
-    const [dark] = await Promise.all([p.waitForEvent('download'), p.getByRole('menuitem', { name: 'Export as PDF' }).click()])
+    const dark = await download('Export as PDF')
     const out2 = path.join(kit.dir, 'board-dark.pdf')
     await dark.saveAs(out2)
     const w2 = pdfWords(fs.readFileSync(out2))
@@ -398,30 +435,33 @@ try {
   await part('PDF of what\'s selected', async () => {
     const word = (id, text, x) => ({ id, type: 'text', x, y: 0, width: text.length * 10, height: 25, angle: 0, strokeColor: '#1f2733', backgroundColor: 'transparent', fillStyle: 'solid', strokeWidth: 1, strokeStyle: 'solid', roughness: 0, opacity: 100, groupIds: [], frameId: null, roundness: null, seed: 1, version: 1, versionNonce: 1, isDeleted: false, boundElements: null, updated: 1, link: null, locked: false, text, originalText: text, fontSize: 20, fontFamily: 6, textAlign: 'left', verticalAlign: 'top', containerId: null, autoResize: true, lineHeight: 1.25 })
     await api('/boards', { title: 'Picked', source: { kind: 'excalidraw', text: JSON.stringify({ type: 'excalidraw', version: 2, elements: [word('k', 'Kept words', 0), word('l', 'Left out words', 400)], appState: {}, files: {} }) } })
-    await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-board', { detail: { id: 'Picked' } })))
-    await until(() => p.locator('.wb-view .pane-titles .wb-name', { hasText: 'Picked' }).count(), 8000)
-    await p.waitForSelector('.excalidraw canvas', { timeout: 30000 })
-    await sleep(800)
-    // The two words are drawn in the middle of the board, 400 apart: a box dragged round the first.
-    const box = await canvasBox()
-    const cx = box.x + box.width / 2, cy = box.y + box.height / 2
-    await p.mouse.move(cx - 340, cy - 70); await p.mouse.down(); await p.mouse.move(cx - 90, cy + 70, { steps: 6 }); await p.mouse.up()
-    await shot(p, `${tag}whiteboard-v2-picked`)
-    await p.getByRole('button', { name: 'Export' }).click()
-    await p.getByLabel('Only what’s selected').check()
-    const [dl] = await Promise.all([p.waitForEvent('download'), p.getByRole('menuitem', { name: 'Export as PDF' }).click()])
-    const out = path.join(kit.dir, 'picked.pdf')
-    await dl.saveAs(out)
-    const words = pdfWords(fs.readFileSync(out))
-    ok(words.startsWith('%PDF-') && /\(Kept words\)/.test(words) && !/Left out/.test(words), 'with Only what’s selected, the PDF has only the selection in it', words.match(/\([^)]{2,30}\) Tj/g))
-    await p.evaluate((b) => window.dispatchEvent(new CustomEvent('bridge-open-board', { detail: { id: b } })), board)
-    await until(() => p.locator('.wb-view .pane-titles .wb-name', { hasText: board }).count(), 8000)
-    await p.waitForSelector('.excalidraw canvas', { timeout: 30000 })
-    await api('/boards/Picked', null, 'DELETE').catch(() => {})
+    try {
+      await openBoard('Picked')
+      await sleep(800)
+      // The two words are drawn in the middle of the board, 400 apart: a box dragged round the first.
+      const box = await canvasBox()
+      const cx = box.x + box.width / 2, cy = box.y + box.height / 2
+      await p.mouse.move(cx - 340, cy - 70); await p.mouse.down(); await p.mouse.move(cx - 90, cy + 70, { steps: 6 }); await p.mouse.up()
+      await shot(p, `${tag}whiteboard-v2-picked`)
+      await p.getByRole('button', { name: 'Export' }).click()
+      await p.getByLabel('Only what’s selected').check()
+      const dl = await download('Export as PDF')
+      const out = path.join(kit.dir, 'picked.pdf')
+      await dl.saveAs(out)
+      const words = pdfWords(fs.readFileSync(out))
+      ok(words.startsWith('%PDF-') && /\(Kept words\)/.test(words) && !/Left out/.test(words), 'with Only what’s selected, the PDF has only the selection in it', words.match(/\([^)]{2,30}\) Tj/g))
+    } finally {
+      // Back to the drawn board whatever happened here, for the parts after this one.
+      await p.keyboard.press('Escape').catch(() => {})
+      await openBoard(board).catch(() => {})
+      await api('/boards/Picked', null, 'DELETE').catch(() => {})
+    }
   })
 
   await part('versions from another time', async () => {
     // The board opened again (after other boards): its last Refine is still there to pick from.
+    await openBoard(board)
+    if (await p.locator('.wb-draw').count()) await p.locator('.wb-draw .win-btn[aria-label="Close"]').click()
     await p.getByRole('button', { name: 'Draw this' }).first().click()
     const head = p.locator('.wb-rounds-head', { hasText: 'Last Refine' })
     ok(await until(() => head.count(), 5000) && (await p.locator('.wb-versions .chip').allInnerTexts()).join('|') === 'Draft|Round 1|Round 2' && /4 calls/.test(await head.innerText()), 'opened again later, Draw this shows the board\'s last Refine, its versions and what it cost', await p.locator('.wb-draw').innerText().catch(() => ''))

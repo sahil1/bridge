@@ -23,7 +23,9 @@
 //   {"ok":true} once every arrow has one. "Change it": Start renamed Begin, Ship coloured red, a
 //   Cache box beside the first shape with an arrow to it; its review says ok.
 //   Ollama's own API (a model server on this computer, when OLLAMA_HOST points here): its models
-//   (llama3.1:8b, and llama3.2-vision:11b, which can see) and what each can do.
+//   (llama3.1:8b, and llama3.2-vision:11b, which can see), what each can do, none running, and
+//   /api/chat answering as Ollama does (its message, pictures as base64 in `images`) with the same
+//   answers as above, logged with path '/api/chat'.
 //   Anything else: "echo: <the last thing said>".
 //   A key of sk-bad is turned down (HTTP 401), as a provider would.
 import http from 'node:http'
@@ -139,7 +141,15 @@ http.createServer((req, res) => {
     if (req.method === 'GET' && req.url === '/api/tags') return j(200, { models: [{ name: 'llama3.1:8b' }, { name: 'llama3.2-vision:11b' }] })
     if (req.method === 'POST' && req.url === '/api/show') {
       const name = JSON.parse(String(body) || '{}').model || ''
-      return j(200, { capabilities: /vision/.test(name) ? ['completion', 'vision'] : ['completion', 'tools'] })
+      return j(200, { capabilities: /vision/.test(name) ? ['completion', 'vision'] : ['completion', 'tools'], details: { parameter_size: /11b/.test(name) ? '10.7B' : '8.0B' } })
+    }
+    if (req.method === 'GET' && req.url === '/api/ps') return j(200, { models: [] })
+    if (req.method === 'POST' && req.url === '/api/chat') {
+      const b = JSON.parse(String(body) || '{}')
+      log({ path: '/api/chat', model: b.model, tools: (b.tools || []).map((t) => t.function.name), messages: b.messages, num_ctx: b.options?.num_ctx, ...(b.format ? { format: typeof b.format === 'object' ? 'json_schema' : b.format } : {}) })
+      const a = answer(b).choices[0].message
+      const calls = (a.tool_calls || []).map((c) => ({ function: { name: c.function.name, arguments: JSON.parse(c.function.arguments || '{}') } }))
+      return setTimeout(() => j(200, { model: b.model, created_at: new Date().toISOString(), message: { role: 'assistant', content: a.content || '', ...(calls.length ? { tool_calls: calls } : {}) }, done: true, done_reason: 'stop' }), 300)
     }
     if (req.method === 'POST' && req.url === '/v1/audio/transcriptions') {
       const n = ++pieces
