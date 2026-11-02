@@ -887,12 +887,12 @@ export async function nameSpeakers(id, { model } = {}) {
     'Answer with one JSON object and nothing else, from line number to name, like {"1": "Priya Shah", "2": null}.'].join('\n')
   const got = {}
   let used = use
-  for (const part of pieces(rows.join('\n'), budget(use) - ask.length - 2000)) {
-    const r = await replyAny(used, [{ role: 'user', text: `${ask}\n\nTranscript:\n${part}` }], { system: 'You work out who said what in a meeting transcript. You are careful and say null when unsure.' })
+  await roomy(use, 'working out who said what')
+  await inPieces(rows.join('\n'), (await budget(use, rows.join('\n'))) - ask.length - 2000, async (part) => {
+    const r = await jsonReply(used, [{ role: 'user', text: `${ask}\n\nTranscript:\n${part}` }], { system: 'You work out who said what in a meeting transcript. You are careful and say null when unsure.' }, { schema: NAMES_SCHEMA, check: namesOk })
     used = r.model
-    const j = /\{[\s\S]*\}/.exec(String(r.text || ''))
-    try { Object.assign(got, JSON.parse(j ? j[0] : '{}')) } catch { /* not JSON: nothing from this part */ }
-  }
+    Object.assign(got, r.value || {}) // not JSON: nothing from this part
+  })
   const names = namesOf(id)
   for (const [k, v] of Object.entries(names)) if (v.guess) delete names[k]
   let n = 0
@@ -926,12 +926,12 @@ async function nameVoices(id, use) {
     'Answer with one JSON object and nothing else, from speaker number to name, like {"1": "me", "2": "Priya Shah", "3": null}.'].filter((x) => x !== null).join('\n')
   const got = {}
   let used = use
-  for (const part of pieces(rows.join('\n'), budget(use) - ask.length - 2000)) {
-    const r = await replyAny(used, [{ role: 'user', text: `${ask}\n\nTranscript:\n${part}` }], { system: 'You work out who said what in a meeting transcript. You are careful and say null when unsure.' })
+  await roomy(use, 'working out who said what')
+  await inPieces(rows.join('\n'), (await budget(use, rows.join('\n'))) - ask.length - 2000, async (part) => {
+    const r = await jsonReply(used, [{ role: 'user', text: `${ask}\n\nTranscript:\n${part}` }], { system: 'You work out who said what in a meeting transcript. You are careful and say null when unsure.' }, { schema: NAMES_SCHEMA, check: namesOk })
     used = r.model
-    const j = /\{[\s\S]*\}/.exec(String(r.text || ''))
-    try { for (const [k, v] of Object.entries(JSON.parse(j ? j[0] : '{}'))) if (got[k] == null) got[k] = v } catch { /* not JSON: nothing from this part */ }
-  }
+    for (const [k, v] of Object.entries(r.value || {})) if (got[k] == null) got[k] = v // not JSON: nothing from this part
+  })
   let n = 0
   const taken = new Set(Object.values(room.names || {}).filter((x) => !x.guess).map((x) => (x.me ? ':me' : x.name)))
   for (const [num, name] of Object.entries(got)) {
@@ -1003,12 +1003,17 @@ export function cleanup(id, { model } = {}) {
     ].filter((x) => x !== '').join('\n')
     const got = { fix: {}, drop: [] }
     let used = use
-    for (const part of pieces(rows.join('\n'), Math.max(8000, Math.min(60_000, budget(use) - ask.length - 2000)))) {
-      const r = await replyAny(used, [{ role: 'user', text: `${ask}\n\nTranscript:\n${part}` }], { system: 'You correct speech-to-text transcripts. You change only what was clearly misheard, and say so with JSON.' })
+    // Its answer is whole lines, so a model on this computer keeps a third of its context for it.
+    await roomy(use, 'cleaning up the transcript')
+    const ctx = await contextOf(use)
+    const room = (await budget(use, rows.join('\n'), { answer: ctx ? Math.floor(ctx / 3) : undefined })) - ask.length - 2000
+    await inPieces(rows.join('\n'), ctx ? Math.min(60_000, room) : Math.max(8000, Math.min(60_000, room)), async (part) => {
+      const r = await jsonReply(used, [{ role: 'user', text: `${ask}\n\nTranscript:\n${part}` }], { system: 'You correct speech-to-text transcripts. You change only what was clearly misheard, and say so with JSON.' }, { schema: CLEANUP_SCHEMA, check: cleanupOk })
       used = r.model
-      const j = /\{[\s\S]*\}/.exec(String(r.text || ''))
-      try { const o = JSON.parse(j ? j[0] : '{}'); Object.assign(got.fix, o.fix && typeof o.fix === 'object' ? o.fix : {}); got.drop.push(...[].concat(o.drop || [])) } catch { /* not JSON: nothing from this part */ }
-    }
+      if (!r.value) return // not JSON: nothing from this part
+      Object.assign(got.fix, r.value.fix && typeof r.value.fix === 'object' ? r.value.fix : {})
+      got.drop.push(...[].concat(r.value.drop || []))
+    })
     const out = { fix: {}, drop: [], model: used, at: new Date().toISOString() }
     for (const [num, text] of Object.entries(got.fix)) {
       const l = byN.get(Number(num))
@@ -1481,20 +1486,25 @@ export const setHelpers = (h) => { helpers = { ...helpers, ...h } }
 
 // A model call that a dropped connection doesn't end: the same model again (twice, a few seconds
 // apart, when it looks like the network or a busy service), then up to three of the other models
-// you have. The answer says which model wrote it. Only when none can is it an error.
+// you have. The answer says which model wrote it. Only when none can is it an error. A model on
+// this computer is only ever followed by another on this computer: what you kept here stays here.
+// A prompt too long for the model isn't passed on either: it goes again in smaller pieces (inPieces).
 const RETRY_MS = Number(process.env.BRIDGE_MODEL_RETRY_MS || 3000)
 const passing = (e) => /ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|EPIPE|socket hang up|fetch failed|network|connection|overloaded|rate.?limit|too many requests|timed? ?out|\b(429|500|502|503|504|529)\b/i.test(String(e?.message || e))
+const isLocal = (id) => /^(ollama|lmstudio):/.test(String(id || ''))
 async function replyAny(use, msgs, o) {
   const once = async (id) => {
     for (let i = 0; ; i++) {
       try { return { ...(await helpers.reply(id, msgs, o)), model: id } } catch (e) {
-        if (i >= 2 || !passing(e)) throw e
+        // A model on this computer that ran out of time was working, not cut off: no second go.
+        if (i >= 2 || !passing(e) || e.code === 'too_long' || (isLocal(id) && /Timeout|Abort/.test(e.name))) throw e
         await new Promise((r) => setTimeout(r, RETRY_MS * (i + 1)))
       }
     }
   }
   try { return await once(use) } catch (first) {
-    const others = ((await helpers.models?.().catch(() => [])) || []).filter((id) => id !== use).slice(0, 3)
+    if (first.code === 'too_long') throw first
+    const others = ((await helpers.models?.().catch(() => [])) || []).filter((id) => id !== use && (!isLocal(use) || isLocal(id))).slice(0, 3)
     for (const id of others) { try { return { ...(await once(id)), fellBack: use, why: first.message } } catch { /* next */ } }
     first.tried = [use, ...others]
     throw first
@@ -1512,6 +1522,11 @@ export const KINDS = {
   brainstorm: { label: 'Brainstorm', ask: 'This is a brainstorm. Group the ideas by theme, note which ones got support, and what was parked.' },
 }
 
+// A small model on this computer copies a prompt's examples into its answer (the example company
+// went into meeting memory as if it had been in the meeting), so it gets placeholders instead.
+const TERMS_EXAMPLE = '```terms\n{"names": ["Acme", "Northwind Traders"], "misheard": {"Ack me": "Acme"}, "about": {"Priya Shah": "head of data at Northwind, the main contact there"}}\n```'
+const TERMS_SHAPE = '```terms\n{"names": ["<a name said in this meeting>"], "misheard": {"<the name as transcribed>": "<as it should be>"}, "about": {"<a name>": "<who or what it is>"}}\n```'
+const summaryRules = (local) => SUMMARY_RULES.replace(TERMS_EXAMPLE, local ? TERMS_SHAPE : TERMS_EXAMPLE)
 const SUMMARY_RULES = [
   'Write meeting notes in Markdown with these sections, leaving out any that would be empty:',
   '## Summary: 3 to 6 bullets, the outcome first.',
@@ -1523,13 +1538,78 @@ const SUMMARY_RULES = [
   'In the transcript, "You" is the person who recorded it (their microphone) and "Them" is everyone on the call.',
   'Speech to text mishears names. Write names the way the meeting memory, the title, the people invited or the user\'s notes spell them.',
   'When there are words from the screen or files and emails that go with the meeting, use them for names, numbers and what was being shown, and say when a point is from a slide or a document. The meeting comes first: don\'t summarize the files on their own.',
-  'After the notes, add one fenced block for Bridge AI (it is removed from the notes), like this:\n```terms\n{"names": ["Acme", "Northwind Traders"], "misheard": {"Ack me": "Acme"}, "about": {"Priya Shah": "head of data at Northwind, the main contact there"}}\n```\n"names": the proper nouns in this meeting (people, companies, products, places, acronyms), spelled as they should be. "misheard": only clear speech-to-text mistakes of a name, as transcribed: as it should be. "about": who or what a name is, in a few words, only when this meeting makes it clear (a person\'s role and company and how they relate to the person who recorded it; what a product or project is), for the meetings after. Empty when there are none.',
+  `After the notes, add one fenced block for Bridge AI (it is removed from the notes), like this:\n${TERMS_EXAMPLE}\n"names": the proper nouns in this meeting (people, companies, products, places, acronyms), spelled as they should be. "misheard": only clear speech-to-text mistakes of a name, as transcribed: as it should be. "about": who or what a name is, in a few words, only when this meeting makes it clear (a person\'s role and company and how they relate to the person who recorded it; what a product or project is), for the meetings after. Empty when there are none.`,
 ].join('\n')
 export const SUMMARY_LANGS = { auto: null, en: 'English', es: 'Spanish', fr: 'French', de: 'German', it: 'Italian', pt: 'Portuguese', nl: 'Dutch', hi: 'Hindi', zh: 'Chinese', ja: 'Japanese', ko: 'Korean', ar: 'Arabic' }
 
-// About 4 characters a token. A model on this computer gets smaller pieces: many have a short
-// context, and each piece is summarized first, then the pieces together.
-const budget = (model) => (/^(ollama|lmstudio):/.test(model) ? 24_000 : 300_000)
+// How much text one request can hold, in characters like sample's. A cloud model takes 300,000 (more
+// than any meeting). A model on this computer takes what its context holds (chatmodels.js reads it
+// from Ollama or LM Studio) less the room for its answer (answer, in tokens, or a quarter of it up
+// to 2,048), so a long meeting goes in pieces that each arrive whole. Below 8,192 tokens there's no
+// room to write notes well, and that's said (too_small) rather than tried.
+const SMALLEST = 8192
+const tokensOf = (s) => (helpers.tokens ? helpers.tokens(s) : Math.ceil(String(s || '').length / 3.2))
+const contextOf = async (model) => (isLocal(model) ? (await helpers.context?.(model).catch(() => null)) || 4096 : null)
+async function budget(model, sample = '', { answer } = {}) {
+  const ctx = await contextOf(model)
+  if (!ctx) return 300_000
+  const room = ctx - (answer ?? Math.min(2048, Math.floor(ctx / 4)))
+  const per = sample ? sample.length / Math.max(1, tokensOf(sample)) : 3.2
+  return Math.max(0, Math.floor(room * per))
+}
+async function roomy(model, what) {
+  const ctx = await contextOf(model)
+  if (!ctx || ctx >= SMALLEST) return
+  const name = String(model).replace(/^\w+:/, '')
+  const how = /^lmstudio:/.test(model) ? `LM Studio has it loaded with ${ctx} tokens: give it ${SMALLEST} or more in LM Studio (the model's Context Length), or pick another model.` : `Pick a model that takes ${SMALLEST} or more.`
+  throw Object.assign(new Error(`${name} takes ${ctx} tokens at a time, too few for ${what}. ${how}`), { code: 'too_small' })
+}
+// Each piece of text in turn, fn(piece, i, n). A piece the model turns down as too long for it (the
+// count of tokens is an estimate) goes again as two halves.
+async function inPieces(text, size, fn) {
+  const queue = pieces(text, Math.max(500, size))
+  for (let i = 0; i < queue.length; i++) {
+    try { await fn(queue[i], i, queue.length) } catch (e) {
+      const halves = e.code === 'too_long' && queue[i].length >= 1500 ? pieces(queue[i], Math.ceil(queue[i].length / 2)) : []
+      if (halves.length < 2) throw e
+      queue.splice(i, 1, ...halves)
+      i--
+    }
+  }
+}
+// JSON from a model, checked (check: the shape it must have). Asked in plain words first, as
+// before, and once more held to a JSON schema (schema) when the answer doesn't parse. schemaFirst:
+// a model on this computer is held to the schema from the start, then asked in plain words, for
+// answers where small models break the JSON otherwise (AI Assist). For the transcript cleanup it's
+// the other way round: held to a schema from the start, they send fragments instead of whole lines.
+// { ...the reply, value }, value null when neither answer was usable.
+const parsed = (text, check) => {
+  const j = /\{[\s\S]*\}/.exec(String(text || ''))
+  try { const v = JSON.parse(j ? j[0] : ''); return v && typeof v === 'object' && check(v) ? v : null } catch { return null }
+}
+async function jsonReply(use, msgs, o, { schema, check, schemaFirst = false }) {
+  const first = schemaFirst && isLocal(use)
+  const r = await replyAny(use, msgs, first ? { ...o, json: schema } : o)
+  const v = parsed(r.text, check)
+  if (v) return { ...r, value: v }
+  const again = await replyAny(r.model, msgs, first ? o : { ...o, json: schema }).catch((e) => { if (e.code === 'too_long') throw e; return null })
+  const w = again && parsed(again.text, check)
+  return w ? { ...again, value: w } : { ...r, value: null }
+}
+// Where notes being written on this computer have got to, for the page: step of steps, and about
+// how many seconds are left (eta) when the time can be told: from how fast the model has been here,
+// or for this kind of computer. Elsewhere the page only says it's writing.
+async function progress(id, use, step, of, text) {
+  if (!isLocal(use)) return
+  const e = await helpers.estimate?.(use, text, 700).catch(() => null)
+  patchMeta(id, { summaryProgress: { step, of, eta: e?.sure ? e.seconds * (of - step + 1) : null, cpu: e?.gpu === false } })
+}
+const NAMES_SCHEMA = { type: 'object', additionalProperties: { type: ['string', 'null'] } }
+const namesOk = (v) => !Array.isArray(v) && Object.values(v).every((x) => x === null || typeof x === 'string')
+const CLEANUP_SCHEMA = { type: 'object', properties: { fix: { type: 'object', additionalProperties: { type: 'string' } }, drop: { type: 'array', items: { type: 'integer' } } }, required: ['fix', 'drop'] }
+const cleanupOk = (v) => (v.fix == null || (typeof v.fix === 'object' && !Array.isArray(v.fix))) && (v.drop == null || Array.isArray(v.drop)) && (v.fix != null || v.drop != null)
+const ASSIST_SCHEMA = { type: 'object', properties: { items: { type: 'array', maxItems: 3, items: { type: 'object', properties: { kind: { type: 'string', enum: ['question', 'point', 'check', 'idea'] }, text: { type: 'string' }, why: { type: 'string' } }, required: ['kind', 'text', 'why'] } } }, required: ['items'] }
+const assistOk = (v) => Array.isArray(v.items)
 function pieces(text, size) {
   const out = []
   let cur = ''
@@ -1549,7 +1629,7 @@ function tryLater(id, e) {
   let m
   try { m = meta(id) } catch { return }
   const tries = (m.summaryTries || 0) + 1
-  if (e.code === 'no_model' || tries > 6 || /Nothing was transcribed/.test(e.message)) return patchMeta(id, { summaryRetryAt: null })
+  if (e.code === 'no_model' || e.code === 'too_small' || e.code === 'too_long' || tries > 6 || /Nothing was transcribed/.test(e.message)) return patchMeta(id, { summaryRetryAt: null })
   const at = Date.now() + LATER_MS
   patchMeta(id, { summaryTries: tries, summaryRetryAt: new Date(at).toISOString() })
   clearTimeout(later.get(id))
@@ -1589,20 +1669,9 @@ export function summarize(id, { model, kind, language, again = false } = {}) {
     const ev = m.event || {}
     const about = [`Meeting: ${m.title}`, ev.title && ev.title !== m.title ? `Calendar event: ${ev.title}` : '', ev.attendees?.length ? `Invited: ${ev.attendees.join(', ')}` : '', ev.agenda ? `The invite says: ${ev.agenda}` : '', `Date: ${new Date(m.startedAt).toDateString()}`].filter(Boolean).join('\n')
     const mem = memory.about(`${m.title}\n${notes}\n${text}`)
-    let body = text
-    let used = use
-    const size = budget(use)
-    if (text.length > size) {
-      // Long meeting: the main points of each part, in order, then the notes from those.
-      const parts = pieces(text, size)
-      const got = []
-      for (const [i, part] of parts.entries()) {
-        const r = await replyAny(used, [{ role: 'user', text: `${about}\n\nThis is part ${i + 1} of ${parts.length} of a meeting transcript. List its key points, decisions, action items (who and what) and open questions as short bullets. Only what is said.${parts0 ? ' Keep its section headings (## ...), with the points from each under it.' : ''}${mem ? `\n\n${mem}` : ''}\n\n${part}` }], { system: 'You take accurate meeting notes.' })
-        used = r.model
-        got.push(`### Part ${i + 1}\n${r.text}`)
-      }
-      body = `(The transcript was long, so here are the key points of each part, in order.)\n\n${got.join('\n\n')}`
-    }
+    const local = isLocal(use)
+    if (local) await roomy(use, 'meeting notes')
+    const size = await budget(use, text || notes)
     const more = await extras(id, { ...m, captures: caps }, Math.min(80_000, Math.floor(size / 4)), { shown })
     const backbone = notes ? [
       '',
@@ -1611,7 +1680,41 @@ export function summarize(id, { model, kind, language, again = false } = {}) {
     ].join('\n') : ''
     const split = parts0 ? `\nThe person recording split the meeting into sections, each starting with a "## <name> (from m:ss)" heading in the transcript: ${parts0.map((x) => `"${x.title}"`).join(', ')}. Under ## Notes, give each section its own "### <name>" heading, in that order, with its points under it. Summary, Decisions and Action items are for the whole meeting; say which section one came from when that helps.` : ''
     const whoSaid = named ? '\nSome Them lines carry a name instead of "Them": who said it, named by the user or worked out from the meeting. Use those names for who said or agreed to what.' : ''
-    const prompt = [about, mem ? `\n${mem}` : '', '', k.ask, '', SUMMARY_RULES, split, whoSaid, lang ? `\nWrite the notes in ${lang}.` : '', cfg.meetings?.instructions ? `\nAlso: ${cfg.meetings.instructions}` : '', backbone, notes ? `\nThe user's own notes:\n${notes}` : '', more ? `\n${more}` : '', `\nTranscript:\n${body}`].join('\n')
+    const head = (files) => [about, mem ? `\n${mem}` : '', '', k.ask, '', summaryRules(local), split, whoSaid, lang ? `\nWrite the notes in ${lang}.` : '', cfg.meetings?.instructions ? `\nAlso: ${cfg.meetings.instructions}` : '', backbone, notes ? `\nThe user's own notes:\n${notes}` : '', files ? `\n${files}` : ''].join('\n')
+    // What's left for the transcript once the instructions, your notes and the files are in: on a
+    // model on this computer, the files give way first when there isn't room for both.
+    let files = more
+    if (local && files && size - head(files).length < size / 3) files = ''
+    const room = Math.max(1000, size - head(files).length - 20)
+    let body = text
+    let used = use
+    let parts = 1
+    const t0 = Date.now()
+    if (text.length > room) {
+      // Long meeting: the main points of each part, in order, then the notes from those.
+      const partAsk = (i, n) => `${about}\n\nThis is part ${i + 1} of ${n} of a meeting transcript. List its key points, decisions, action items (who and what) and open questions as short bullets. Only what is said.${parts0 ? ' Keep its section headings (## ...), with the points from each under it.' : ''}${mem ? `\n\n${mem}` : ''}\n\n`
+      let got = []
+      await inPieces(text, size - partAsk(99, 99).length, async (part, i, n) => {
+        await progress(id, used, i + 1, n + 1, `${partAsk(i, n)}${part}`)
+        const r = await replyAny(used, [{ role: 'user', text: `${partAsk(i, n)}${part}` }], { system: 'You take accurate meeting notes.' })
+        used = r.model
+        got.push(r.text)
+      })
+      parts = got.length
+      // On a small context even the parts' points may not fit together: merged a few at a time, until they do.
+      for (let round = 0; got.length > 1 && got.map((g, i) => `### Part ${i + 1}\n${g}`).join('\n\n').length > room && round < 3; round++) {
+        const merged = []
+        await inPieces(got.map((g, i) => `### Part ${i + 1}\n${g}`).join('\n\n'), size - 600, async (chunk) => {
+          const r = await replyAny(used, [{ role: 'user', text: `${about}\n\nThese are the key points of consecutive parts of one meeting, in order. Merge them into one list of its key points, decisions, action items (who and what) and open questions, as short bullets, in order. Keep every name, number and date. Only what is there.\n\n${chunk}` }], { system: 'You take accurate meeting notes.' })
+          used = r.model
+          merged.push(r.text)
+        })
+        got = merged
+      }
+      body = `(The transcript was long, so here are the key points of each part, in order.)\n\n${got.map((g, i) => `### Part ${i + 1}\n${g}`).join('\n\n')}`
+    }
+    const prompt = `${head(files)}\n\nTranscript:\n${body}`
+    await progress(id, used, parts > 1 ? parts + 1 : 1, parts > 1 ? parts + 1 : 1, prompt)
     const r = await replyAny(used, [{ role: 'user', text: prompt }], { system: 'You take accurate, useful meeting notes.' })
     let out = String(r.text || '').trim()
     // The names it found go to meeting memory; the block isn't part of the notes.
@@ -1631,10 +1734,19 @@ export function summarize(id, { model, kind, language, again = false } = {}) {
       files: (m.links || []).length,
       invite: !!(ev.attendees?.length || ev.agenda),
     }
-    patchMeta(id, { summarizing: false, summarizedAt: new Date().toISOString(), summaryModel: r.model, summaryNote: r.fellBack ? `${r.fellBack} couldn't be reached (${String(r.why).slice(0, 120)}), so ${r.model} wrote it.` : null, summaryTries: 0, summaryRetryAt: null, summaryFrom: from })
+    // Said under the notes: another model stepped in; a model on this computer read it in parts
+    // (its context is short); or took minutes, when a smaller one would be quicker.
+    const said = [r.fellBack ? `${r.fellBack} couldn't be reached (${String(r.why).slice(0, 120)}), so ${r.model} wrote it.` : '']
+    if (isLocal(r.model) && parts > 1) said.push(`${r.model} takes ${await contextOf(r.model)} tokens at a time, so it read the meeting in ${parts} parts.`)
+    const took = (Date.now() - t0) / 1000
+    if (isLocal(r.model) && took > 150) {
+      const e = await helpers.estimate?.(r.model, '', 0).catch(() => null)
+      if ((e?.billions || 0) >= 7) said.push(`It took ${Math.round(took / 60)} minutes on this computer${e.gpu === false ? '\'s processor' : ''}. A smaller model (2 to 4B, like Gemma 4 E2B or Qwen3.5 4B) would write them sooner.`)
+    }
+    patchMeta(id, { summarizing: false, summaryProgress: null, summarizedAt: new Date().toISOString(), summaryModel: r.model, summaryNote: said.filter(Boolean).join(' ') || null, summaryTries: 0, summaryRetryAt: null, summaryFrom: from })
     resave(id)
-    return { summary: out, model: r.model }
-  })().catch((e) => { try { patchMeta(id, { summarizing: false, summaryError: e.message, summaryTried: e.tried || null }); tryLater(id, e) } catch { /* gone */ } throw e }).finally(() => summarizing.delete(id))
+    return { summary: out, model: r.model, parts }
+  })().catch((e) => { try { patchMeta(id, { summarizing: false, summaryProgress: null, summaryError: e.message, summaryTried: e.tried || null }); tryLater(id, e) } catch { /* gone */ } throw e }).finally(() => summarizing.delete(id))
   summarizing.set(id, p)
   return p
 }
@@ -1649,10 +1761,13 @@ export async function ask(id, question, { model } = {}) {
   const text = transcriptText(id)
   const { text: notes, shown } = notesFor(readText(path.join(dirOf(id), 'notes.md')).trim(), m.captures || [])
   const summary = readText(path.join(dirOf(id), 'summary.md')).trim()
-  const size = budget(use)
-  const context = text.length > size ? `${summary}\n\n(Transcript, the end of it:)\n${text.slice(-size)}` : text
-  const mem = memory.about(`${m.title}\n${notes}\n${context}`)
+  await roomy(use, 'questions about a meeting')
+  const size = await budget(use, text)
   const more = await extras(id, m, Math.min(60_000, Math.floor(size / 4)), { shown })
+  // On a model on this computer the summary, your notes and the files come out of the same room.
+  const left = isLocal(use) ? Math.max(1000, size - summary.length - notes.length - more.length - q.length - 2000) : size
+  const context = text.length > left ? `${summary}\n\n(Transcript, the end of it:)\n${text.slice(-left)}` : text
+  const mem = memory.about(`${m.title}\n${notes}\n${context}`)
   const r = await replyAny(use, [{ role: 'user', text: `Meeting: ${m.title}, ${new Date(m.startedAt).toDateString()}\n${mem ? `\n${mem}\n` : ''}${notes ? `\nMy notes:\n${notes}\n` : ''}${more ? `\n${more}\n` : ''}\nTranscript ("You" is me, "Them" the others):\n${context}\n\nQuestion: ${q}\n\nAnswer from the meeting only, briefly. When asked to write something (a follow-up email, an update), write it ready to send, from what was said. Say so if it wasn't covered.` }], { system: 'You answer questions about a meeting from its transcript. Be accurate and brief.' })
   return { answer: String(r.text || '').trim(), model: r.model, note: r.fellBack ? `${r.fellBack} couldn't be reached, so ${r.model} answered.` : null }
 }
@@ -1711,9 +1826,15 @@ export function assist(id, { now = false, model } = {}) {
     const secs = nowIn(id, m) ?? m.seconds ?? 0
     const end = m.event?.end ? Math.round((Date.parse(m.event.end) - Date.now()) / 60000) : null
     const text = said.map((l) => `[${clock(l.t0)}] ${speaker(l)}: ${l.text}`).join('\n')
-    const recent = text.length > 14_000 ? `(earlier lines left out)\n${text.slice(-14_000)}` : text
+    // A model on this computer: the files and the latest lines within what its context holds, and
+    // no examples to copy (it's held to a schema instead).
+    const local = isLocal(use)
+    try { await roomy(use, 'AI Assist') } catch (e) { writeFileAtomic(assistFile(id), JSON.stringify({ ...a, at: new Date().toISOString(), error: e.message }, null, 1)); throw e }
+    const size = local ? await budget(use, text, { answer: 1024 }) : null
     const { text: notes, shown } = notesFor(filled(readText(path.join(dirOf(id), 'notes.md')), m.sections), m.captures || [])
-    const more = await extras(id, { ...m, captures: (m.captures || []).slice(-6) }, 24_000, { shown })
+    const more = await extras(id, { ...m, captures: (m.captures || []).slice(-6) }, local ? Math.min(24_000, Math.floor(size / 4)) : 24_000, { shown })
+    const keep = local ? Math.max(1500, Math.min(14_000, size - more.length - notes.length - 4000)) : 14_000
+    const recent = text.length > keep ? `(earlier lines left out)\n${text.slice(-keep)}` : text
     const mem = memory.about(`${m.title}\n${people.join('\n')}\n${recent.slice(-4000)}`, 12)
     const before = a.items.slice(-12).map((x) => `- ${x.text}${x.state === 'dismissed' ? ' (not useful)' : ''}`).join('\n')
     const ask = [
@@ -1724,15 +1845,13 @@ export function assist(id, { now = false, model } = {}) {
       before ? `\nSuggested already (don't repeat these or anything already covered):\n${before}` : '',
       '', `This meeting is going on now. ${ASSIST_KINDS[m.kind] || ASSIST_KINDS.general}`,
       'At most three suggestions, each a sentence or two to read at a glance mid-conversation. Fewer is better, and none is right when nothing stands out.',
-      'Base each one on something specific: what was just said, the invite, a file or the notes, and say which in "why", briefly ("Resume: moved the fleet to electric vans at Northwind", "At 12:04 they said the launch slipped a month"). Never make up facts.',
+      `Base each one on something specific: what was just said, the invite, a file or the notes, and say which in "why", briefly${local ? ' (the file or the time, and what it says)' : ' ("Resume: moved the fleet to electric vans at Northwind", "At 12:04 they said the launch slipped a month")'}. Never make up facts.`,
       'kind: "question" (to ask), "point" (to raise or say), "check" (a claim or number that doesn\'t add up, or worth checking), "idea".',
       'Answer with one JSON object and nothing else: {"items": [{"kind": "question", "text": "...", "why": "..."}]}, or {"items": []}.',
     ].filter((x) => x !== '').join('\n')
     try {
-      const r = await replyAny(use, [{ role: 'user', text: `${ask}\n\nTranscript so far:\n${recent || '(nothing yet)'}` }], { system: 'You quietly help someone during a live meeting with a few sharp, specific suggestions. You are brief and never make things up.' })
-      const j = /\{[\s\S]*\}/.exec(String(r.text || ''))
-      let items = []
-      try { items = [].concat(JSON.parse(j ? j[0] : '{}').items || []) } catch { /* not JSON: nothing this time */ }
+      const r = await jsonReply(use, [{ role: 'user', text: `${ask}\n\nTranscript so far:\n${recent || '(nothing yet)'}` }], { system: 'You quietly help someone during a live meeting with a few sharp, specific suggestions. You are brief and never make things up.' }, { schema: ASSIST_SCHEMA, check: assistOk, schemaFirst: true })
+      const items = [].concat(r.value?.items || []) // not JSON: nothing this time
       const was = new Set(a.items.map((x) => x.text.toLowerCase()))
       const add = items.filter((x) => x && typeof x.text === 'string' && x.text.trim() && !was.has(x.text.trim().toLowerCase())).slice(0, 3)
         .map((x) => ({ id: crypto.randomBytes(4).toString('hex'), t: Math.round(secs), kind: KIND_WORD[x.kind] ? x.kind : 'idea', text: clean(x.text, 300), why: clean(x.why, 200), state: 'new', model: r.model }))
@@ -1856,7 +1975,8 @@ export async function askAll(question, { ids, model } = {}) {
     pool = pool.map((m, i) => ({ m, s: score(m), i })).sort((a, b) => b.s - a.s || a.i - b.i).map((x) => x.m)
   }
   if (!pool.length) throw new Error(ids?.length ? 'Those meetings are gone' : 'No meetings from then')
-  const room = budget(use)
+  await roomy(use, 'questions about meetings')
+  const room = (await budget(use)) - (isLocal(use) ? q.length + 1500 : 0)
   const parts = []
   const sources = []
   let used = 0

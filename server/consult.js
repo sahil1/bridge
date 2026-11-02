@@ -46,7 +46,9 @@ export const API = {
   deepseek: { label: 'DeepSeek API', base: 'https://api.deepseek.com/v1', key: 'DEEPSEEK_API_KEY', model: 'deepseek-chat' },
   mistral: { label: 'Mistral API', base: 'https://api.mistral.ai/v1', key: 'MISTRAL_API_KEY', model: 'mistral-large-latest' },
   groq: { label: 'Groq API', base: 'https://api.groq.com/openai/v1', key: 'GROQ_API_KEY', model: 'llama-3.3-70b-versatile' },
-  ollama: { label: 'Ollama (local)', base: 'http://127.0.0.1:11434/v1', local: true, model: null },
+  // A model on this computer, through chatmodels.js: Ollama at the address set in Settings › Model
+  // Providers (or OLLAMA_HOST), or LM Studio, and the model picked there (localModel).
+  local: { label: 'Local model', local: true, model: null },
 }
 
 // Who you can ask, by the name you'd use, with the routes to try in order and what each is good at.
@@ -65,7 +67,7 @@ export const CONSULTANTS = [
   { id: 'mistral', label: 'Mistral', api: 'mistral', good: 'a European model; multilingual' },
   { id: 'groq', label: 'Groq', api: 'groq', good: 'very fast answers from open models' },
   { id: 'openrouter', label: 'OpenRouter', api: 'openrouter', good: 'any model by name (pass --model vendor/model)' },
-  { id: 'local', label: 'Local model (Ollama)', api: 'ollama', good: 'private questions that must not leave this computer' },
+  { id: 'local', label: 'Local model', api: 'local', good: 'private questions that must not leave this computer' },
 ]
 
 export const keyFor = (api) => {
@@ -73,12 +75,21 @@ export const keyFor = (api) => {
   return env[api.key] || (api.alt && env[api.alt]) || null
 }
 
-export async function ollamaModel() {
-  try {
-    const r = await fetch('http://127.0.0.1:11434/api/tags', { signal: AbortSignal.timeout(1200) })
-    return (await r.json()).models?.[0]?.name || null
-  } catch { return null }
+// Your settings (index.js), for the model on this computer picked in Settings › Model Providers.
+let conf = {}
+export const configure = (c) => { conf = c || {} }
+// chatmodels.js imports this file, so it's loaded when first needed.
+const chat = () => import('./chatmodels.js')
+// A model asked for by name: "ollama:qwen3.5:4b" or "lmstudio:…" as chatmodels.js names them, or
+// an Ollama model's own name (what "consult": { "models": { "ollama": … } } used to hold).
+const localId = (m) => (!m ? null : /^(ollama|lmstudio):/.test(m) ? m : `ollama:${m}`)
+// The model on this computer a consult would use now: { id, label, provider, picked, missing }.
+export async function localModel(model) {
+  const want = localId(model || conf.localModel || conf.consult?.models?.local || conf.consult?.models?.ollama)
+  return (await chat()).localModel(want).catch(() => null)
 }
+// How it reads: "qwen3.5:4b (Ollama, on this computer)", and why it isn't the one picked.
+const localRoute = (m) => `${m.label} (${m.provider})${m.missing ? `; ${m.missing.replace(/^\w+:/, '')} isn't running` : ''}`
 
 // Qwen and DeepSeek only when Show more models is on (labs.js).
 const hiddenConsultant = (c) => (c.cli && hiddenAgent(c.cli)) || (c.api && hiddenProvider(c.api))
@@ -87,15 +98,15 @@ const hiddenConsultant = (c) => (c.cli && hiddenAgent(c.cli)) || (c.api && hidde
 export async function options() {
   const have = new Set((await installed()).map((a) => a.kind))
   const signedOut = new Set((await subscriptions().catch(() => [])).filter((s) => s.signedIn === false).map((s) => s.kind))
-  const local = await ollamaModel()
+  const local = await localModel()
   return CONSULTANTS.filter((c) => !hiddenConsultant(c)).map((c) => {
     const cliReady = c.cli && have.has(c.cli) && CLI[c.cli] && !signedOut.has(c.cli)
     if (cliReady) return { ...c, available: true, via: 'cli', route: `${adapter(c.cli).label} CLI, your subscription or sign-in` }
     if (c.api) {
       const a = API[c.api]
-      if (a.local ? local : keyFor(a)) return { ...c, available: true, via: 'api', route: a.local ? `${a.label}: ${local}` : `${a.label} key` }
+      if (a.local ? local : keyFor(a)) return { ...c, available: true, via: 'api', route: a.local ? localRoute(local) : `${a.label} key`, ...(a.local ? { model: local.id } : {}) }
     }
-    const need = [c.cli && (have.has(c.cli) ? `sign in to ${adapter(c.cli).label}` : `install ${adapter(c.cli).label}`), c.api && (API[c.api].local ? 'run Ollama' : `add your ${API[c.api].label} key in Settings › Model Providers`)].filter(Boolean).join(' or ')
+    const need = [c.cli && (have.has(c.cli) ? `sign in to ${adapter(c.cli).label}` : `install ${adapter(c.cli).label}`), c.api && (API[c.api].local ? 'run Ollama or LM Studio' : `add your ${API[c.api].label} key in Settings › Model Providers`)].filter(Boolean).join(' or ')
     return { ...c, available: false, via: null, route: need }
   })
 }
@@ -137,8 +148,14 @@ export function runCli(kind, prompt, model, extraEnv = {}, signal) {
 
 async function runApi(id, prompt, model) {
   const a = API[id]
-  const key = a.local ? null : keyFor(a)
-  const m = model || a.model || (a.local ? await ollamaModel() : null)
+  if (a.local) {
+    const m = await localModel(model)
+    if (!m) throw new Error('No model is running on this computer. Start Ollama or LM Studio, or pick another consultant.')
+    const r = await (await chat()).reply(m.id, [{ role: 'user', text: prompt }], { system: 'You answer a one-off question directly and accurately. Say so when you are not sure.' })
+    return { text: r.text, model: m.id, route: localRoute(m) }
+  }
+  const key = keyFor(a)
+  const m = model || a.model
   if (!m) throw new Error(`No model to use for ${a.label}`)
   if (a.anthropic) {
     const r = await fetch('https://api.anthropic.com/v1/messages', {
@@ -181,7 +198,7 @@ export async function ask({ who, prompt, model, via, env }, cfg = {}) {
   }
   if (c.api && (via === 'api' || opt.via === 'api' || !c.cli)) {
     const r = await runApi(c.api, q, model || cfg.consult?.models?.[c.api])
-    return { who: c.id, via: 'api', route: API[c.api].label, model: r.model, text: r.text, ms: Date.now() - started }
+    return { who: c.id, via: 'api', route: r.route || API[c.api].label, model: r.model, text: r.text, ms: Date.now() - started }
   }
   throw new Error(`${c.label} isn't available: ${opt.route}`)
 }

@@ -25,9 +25,10 @@ import { API, CLI, keyFor, runCli } from './consult.js'
 import { installed, adapter, loginPath } from './agents.js'
 import { providerEnv, subscriptions, keysStamp } from './providers.js'
 import { moreOn, hiddenModel, OFF } from './labs.js'
+import { machine } from './machine.js'
 
 const TIMEOUT = 5 * 60 * 1000
-const until = (signal) => (AbortSignal.any && signal ? AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT)]) : signal || AbortSignal.timeout(TIMEOUT)) // any(): Node 20+
+const until = (signal, ms = TIMEOUT) => (AbortSignal.any && signal ? AbortSignal.any([signal, AbortSignal.timeout(ms)]) : signal || AbortSignal.timeout(ms)) // any(): Node 20+
 const env = () => ({ ...process.env, ...providerEnv() })
 const trim = (u) => String(u || '').replace(/\/+$/, '')
 
@@ -63,8 +64,15 @@ const getJSON = async (url, headers = {}, ms = 2500) => {
   if (!r.ok) throw new Error(`HTTP ${r.status}`)
   return r.json()
 }
+const postJSON = async (url, body, ms = 2500) => {
+  const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(ms) })
+  if (!r.ok) throw new Error(`HTTP ${r.status}`)
+  return r.json()
+}
 // Not chat models, in an OpenAI-style model list.
 const NOT_CHAT = /embed|whisper|tts|dall-e|audio|realtime|moderation|image|transcri|search|davinci|babbage|rerank|guard|vision-preview/i
+// Ollama's embedding models (nomic-embed-text, all-minilm, bge-m3) are BERT-family: they can't chat.
+const ollamaChats = (m) => !NOT_CHAT.test(m.name) && !/bert$/i.test(m.details?.family || '')
 
 // ---------- Clouds ----------
 // Azure OpenAI: your deployments, named in Settings (a key alone can't list them).
@@ -221,7 +229,7 @@ export async function models({ fresh = false } = {}) {
     ...Object.entries(MORE).filter(([, m]) => e[m.key]).map(([id, m]) => (m.fixed ? Promise.resolve(m.fixed) : (m.list || ((k) => getJSON(`${m.base()}/models`, { authorization: `Bearer ${k}` }).then((j) => (j.data || []).map((x) => x.id))))(e[m.key]).catch(() => m.fallback || []))
       .then((ids) => ids.filter((x) => x && !NOT_CHAT.test(x)).slice(0, 30).map((x) => ({ id: `${id}:${x}`, label: x, provider: m.label, via: 'key' })))),
     awsReady() ? bedrockModels().then((l) => l.map((m) => ({ id: `bedrock:${m.id}`, label: m.label, provider: PROVIDER.bedrock, via: 'cloud' }))).catch(() => []) : [],
-    getJSON(`${OLLAMA()}/api/tags`, {}, 1200).then((j) => (j.models || []).map((m) => ({ id: `ollama:${m.name}`, label: m.name, provider: PROVIDER.ollama, via: 'local' }))).catch(() => []),
+    getJSON(`${OLLAMA()}/api/tags`, {}, 1200).then((j) => (j.models || []).filter(ollamaChats).map((m) => ({ id: `ollama:${m.name}`, label: m.name, provider: PROVIDER.ollama, via: 'local' }))).catch(() => []),
     getJSON(`${LMSTUDIO()}/models`, {}, 1200).then((j) => (j.data || []).map((m) => m.id).filter((x) => x && !NOT_CHAT.test(x)).map((x) => ({ id: `lmstudio:${x}`, label: x, provider: PROVIDER.lmstudio, via: 'local' }))).catch(() => []),
   ])
   for (const l of lists) out.push(...l)
@@ -273,17 +281,25 @@ function openaiMessages(messages, system) {
   }
   return out
 }
-async function openaiStyle(who, url, headers, model, messages, { signal, tools, system }) {
+// A thinking model's reasoning, when it comes back in the answer itself (<think>…</think> first, as
+// Qwen and DeepSeek's open models write it, or a <think> never closed: all of it was reasoning).
+export const unthink = (s) => String(s || '').replace(/^\s*<(think|thinking)>[\s\S]*?(<\/\1>|$)/i, '').trim()
+
+// json: a JSON schema the answer is held to (response_format), for providers that take one. One that
+// turns it down gets the question again without it, as plain text.
+async function openaiStyle(who, url, headers, model, messages, { signal, tools, system, json, strict = false, ms }) {
   const body = { model, messages: openaiMessages(messages, system) }
   if (tools?.length) body.tools = tools.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters } }))
-  const r = await fetch(url, { method: 'POST', signal: until(signal), headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) })
+  if (json) body.response_format = { type: 'json_schema', json_schema: { name: 'answer', ...(strict ? { strict: true } : {}), schema: json } }
+  const r = await fetch(url, { method: 'POST', signal: until(signal, ms), headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) })
   const j = await r.json().catch(() => ({}))
+  if (!r.ok && json && (r.status === 400 || r.status === 422)) return openaiStyle(who, url, headers, model, messages, { signal, tools, system, ms })
   if (!r.ok) throw failed(who, r.status, j)
   const msg = j.choices?.[0]?.message || {}
-  let text = String(msg.content || '').trim()
+  let text = unthink(msg.content)
   if (Array.isArray(j.citations) && j.citations.length) text += `\n\nSources:\n${j.citations.map((u, i) => `[${i + 1}] ${u}`).join('\n')}`
   const calls = (msg.tool_calls || []).filter((c) => c.function?.name).map((c, i) => ({ id: c.id || `call_${Date.now().toString(36)}_${i}`, name: c.function.name, args: parseArgs(c.function.arguments) }))
-  if (!text && !calls.length) throw new Error(`${who} sent back an empty answer`)
+  if (!text && !calls.length) throw new Error(msg.content || msg.reasoning_content || msg.reasoning ? `${who} only thought, and sent back no answer` : `${who} sent back an empty answer`)
   return { text, calls }
 }
 const bearer = (k) => (k ? { authorization: `Bearer ${k}` } : {})
@@ -339,13 +355,233 @@ async function converse(model, messages, { signal, tools, system }) {
   return { text, calls }
 }
 
+// ---------- Models on this computer ----------
+// Ollama and LM Studio run a model with a context (how much it reads at a time) that is often far
+// smaller than what the model takes: Ollama's is 4,096 tokens on most computers, and its
+// OpenAI-style API can't be asked for more. A prompt longer than that loses its start without a
+// word (Ollama keeps the first four tokens and the last half of the context, and answers as if
+// that was all). So Bridge AI reads what each model takes (Ollama's /api/show, LM Studio's model
+// list), talks to Ollama through its own API with a context that fits each request
+// (options.num_ctx, in a few steps, as each new size reloads the model), tells Ollama to refuse
+// rather than cut a one-off job's prompt, and says so when a job can't fit. Models that think
+// before they answer (Qwen3.5 and others) are asked not to for Bridge AI's own jobs, which would
+// otherwise wait on minutes of reasoning nobody reads; a chat leaves that to the model.
+export const isLocal = (id) => /^(ollama|lmstudio):/.test(String(id || ''))
+const LMS_ROOT = () => LMSTUDIO().replace(/\/v1$/, '')
+// LM Studio picks a model's context when it loads it (4,096 tokens unless you set more for that
+// model), and its API can't change it per request: until it's loaded, Bridge AI plans for that.
+const LMS_UNLOADED = 4096
+// The room left for the answer.
+export const ANSWER = 2048
+// About 3.2 characters a token in English with timestamps (a little under what tokenizers give, so
+// a piece never comes out too big), and about one a character in Chinese, Japanese and Korean.
+export function tokensOf(s) {
+  const t = String(s || '')
+  const wide = (t.match(/[　-鿿가-힯豈-﫿＀-￯]/g) || []).length
+  return Math.ceil((t.length - wide) / 3.2 + wide * 1.2)
+}
+// The most context to ask Ollama for, from this computer's memory: a long one takes memory of its
+// own on top of the model's (a 32K context, about 2 to 4 GB for a 4 to 8B model).
+const ceiling = (memGB) => (memGB >= 48 ? 65536 : memGB >= 24 ? 32768 : memGB >= 12 ? 16384 : 8192)
+const STEPS = [8192, 16384, 32768, 65536, 131072, 262144]
+const billions = (s) => { const m = /([\d.]+)\s*([BM])\b/i.exec(String(s || '')); return m ? Number(m[1]) / (m[2].toUpperCase() === 'M' ? 1000 : 1) : null }
+
+async function ollamaInfo(model) {
+  const [show, ps] = await Promise.all([postJSON(`${OLLAMA()}/api/show`, { model }), getJSON(`${OLLAMA()}/api/ps`, {}, 1500).catch(() => ({}))])
+  const mi = show.model_info || {}
+  const max = Number(mi[`${mi['general.architecture']}.context_length`] ?? Object.entries(mi).find(([k]) => /\.context_length$/.test(k))?.[1]) || null
+  const run = (ps.models || []).find((m) => m.name === model || m.model === model)
+  const caps = show.capabilities || []
+  return { max, loaded: Number(run?.context_length) || null, thinks: caps.includes('thinking'), vision: caps.includes('vision'), billions: billions(show.details?.parameter_size), gpu: run && run.size_vram != null ? Number(run.size_vram) > 0 : null }
+}
+async function lmsInfo(model) {
+  const j = await getJSON(`${LMS_ROOT()}/api/v1/models`, {}, 2000).catch(() => null)
+  const m = (j?.models || []).find((x) => x.key === model || (x.loaded_instances || []).some((i) => i.id === model))
+  if (m) {
+    const inst = (m.loaded_instances || []).find((i) => i.id === model) || m.loaded_instances?.[0]
+    const r = m.capabilities?.reasoning
+    return { max: Number(m.max_context_length) || null, loaded: Number(inst?.config?.context_length) || null, thinks: !!r, canStop: (r?.allowed_options || []).includes('off'), vision: !!m.capabilities?.vision, billions: billions(m.params_string), gpu: null }
+  }
+  // An older LM Studio: only its first REST API, which may not say the context it loaded.
+  const v0 = await getJSON(`${LMS_ROOT()}/api/v0/models/${encodeURIComponent(model)}`, {}, 2000)
+  return { max: Number(v0.max_context_length) || null, loaded: Number(v0.loaded_context_length) || null, thinks: false, vision: v0.type === 'vlm', billions: null, gpu: null }
+}
+const infos = new Map() // id -> { at, value }
+// What a model on this computer takes: { max, loaded, thinks, canStop, vision, billions, gpu }, or
+// null when its server doesn't say. Kept two minutes.
+export async function localInfo(id, { fresh = false } = {}) {
+  if (!isLocal(id)) return null
+  const was = infos.get(id)
+  if (!fresh && was && Date.now() - was.at < 2 * 60 * 1000) return was.value
+  const [route, ...rest] = String(id).split(':')
+  const value = await (route === 'ollama' ? ollamaInfo : lmsInfo)(rest.join(':')).catch(() => null)
+  infos.set(id, { at: Date.now(), value })
+  return value
+}
+// How many tokens one request to a model on this computer can hold (null for any other model):
+// Ollama's, as much as the model takes up to what this computer's memory holds (or more, when it's
+// already running with more); LM Studio's, the context it loaded the model with.
+export async function contextOf(id) {
+  if (!isLocal(id)) return null
+  const i = await localInfo(id)
+  if (String(id).startsWith('lmstudio:')) return i?.loaded || Math.min(i?.max || LMS_UNLOADED, LMS_UNLOADED)
+  return Math.max(Math.min(i?.max || 8192, ceiling((await machine()).memGB)), i?.loaded || 0)
+}
+// The context to ask Ollama for: the one it's running with when that's enough (a new size reloads
+// the model), else the next step up, within the most it takes.
+const ctxFor = (need, i, cap) => (i?.loaded && i.loaded >= need ? i.loaded : Math.min(cap, STEPS.find((s) => s >= need) || cap))
+const fmtK = (n) => (n >= 1024 ? `${Math.round(n / 1024)}K` : String(n))
+function tooLong(id, ctx, need) {
+  const [route, ...rest] = String(id).split(':')
+  const how = route === 'lmstudio' ? 'Load it with a longer context in LM Studio (the model\'s Context Length), or pick another model.' : 'Pick a model with a longer context, or one on a computer with more memory.'
+  return Object.assign(new Error(`${rest.join(':')} takes ${fmtK(ctx)} tokens at a time, and this needs about ${fmtK(need)}. ${how}`), { code: 'too_long', context: ctx, need })
+}
+const tooLongSaid = (j) => /context (length|size|window)|exceeds the available context|longer than the context|too many tokens|n_ctx/i.test(JSON.stringify(j?.error || j?.message || ''))
+
+// How fast a model on this computer is here: measured once it's been used (Ollama and LM Studio say
+// how fast they read and wrote), else a guess for this kind of computer, for a 4B model: Apple
+// Silicon's GPU, or a processor alone (an Intel Mac; Ollama runs on its processor only). Elsewhere,
+// whether there's a GPU it can use shows once a model is running.
+const speeds = new Map() // id -> { read, write } tokens a second
+function measured(id, read, write) {
+  const was = speeds.get(id)
+  const mix = (a, b) => (a && b ? Math.round((a + b) / 2) : Math.round(a || b || 0) || null)
+  speeds.set(id, { read: mix(was?.read, read), write: mix(was?.write, write) })
+}
+async function pace(id) {
+  const m = await machine()
+  const i = await localInfo(id)
+  const appleGpu = m.platform === 'darwin' && (m.arch === 'arm64' || m.rosetta)
+  const gpu = i?.gpu ?? (m.platform === 'darwin' ? appleGpu : m.docker ? false : null)
+  const s = speeds.get(id)
+  if (s?.read && s?.write) return { ...s, measured: true, gpu }
+  const scale = Math.max(1, (i?.billions || 4) / 4)
+  const guess = gpu ? { read: 300, write: 25 } : { read: 40, write: 8 }
+  return { read: Math.round(guess.read / scale), write: Math.round(guess.write / scale), measured: false, gpu, sure: gpu != null }
+}
+// How long a request of text (and an answer of about out tokens) takes on this model here, in
+// seconds: { seconds, measured, gpu, sure, billions }. sure: false when it's only a guess.
+export async function estimate(id, text, out = 800) {
+  if (!isLocal(id)) return null
+  const p = await pace(id)
+  const i = await localInfo(id)
+  return { seconds: Math.round(3 + tokensOf(text) / p.read + out / p.write), measured: p.measured, gpu: p.gpu, sure: p.measured || p.sure, billions: i?.billions || null }
+}
+// Long enough for this computer: a processor alone can take many minutes over a long prompt, so the
+// usual five minutes would end work that was going fine. Up to 45.
+async function callTime(id, text, out) {
+  const e = await estimate(id, text, out)
+  return Math.min(45 * 60, Math.max(TIMEOUT / 1000, e.seconds * 3 + 60)) * 1000
+}
+const allText = (messages, system, tools) => `${system || ''}\n${messages.map((m) => `${m.text || ''}${m.calls ? JSON.stringify(m.calls) : ''}`).join('\n')}${tools?.length ? JSON.stringify(tools) : ''}`
+
+// Ollama's own chat API: the context set, thinking off, the schema as `format`.
+function ollamaMessages(messages, system) {
+  const out = [{ role: 'system', content: system }]
+  for (const m of messages) {
+    if (m.role === 'tool') out.push({ role: 'tool', content: m.text || '', tool_name: m.name })
+    else if (m.role === 'assistant' && m.calls?.length) out.push({ role: 'assistant', content: m.text || '', tool_calls: m.calls.map((c) => ({ function: { name: c.name, arguments: c.args || {} } })) })
+    else out.push({ role: m.role, content: m.text || '' })
+  }
+  return out
+}
+async function ollamaChat(model, messages, o) {
+  const id = `ollama:${model}`
+  const [i, cap] = [await localInfo(id), await contextOf(id)]
+  const text = allText(messages, o.system, o.tools)
+  const need = tokensOf(text) + ANSWER
+  // One message is one of Bridge AI's jobs (notes, a question): all of it or nothing. A chat may lose
+  // its oldest turns, as Ollama does, to keep going.
+  const one = messages.length === 1
+  if (one && need > cap * 1.15) throw tooLong(id, cap, need)
+  const body = { model, messages: ollamaMessages(messages, o.system), stream: false, options: { num_ctx: ctxFor(need, i, cap) } }
+  if (one) body.truncate = false
+  // Turning thinking off is safe on a model that doesn't think (only asking one to think is refused).
+  if (!o.think && i?.thinks !== false) body.think = false
+  if (o.json) body.format = o.json
+  if (o.tools?.length) body.tools = o.tools.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters } }))
+  const r = await fetch(`${OLLAMA()}/api/chat`, { method: 'POST', signal: until(o.signal, await callTime(id, text, 800)), headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+  const j = await r.json().catch(() => ({}))
+  // Something at that address that speaks only the OpenAI-style API (a proxy, another server).
+  if (r.status === 404 && !/model/i.test(String(j.error || ''))) return openaiStyle('Ollama', `${OLLAMA()}/v1/chat/completions`, {}, model, messages, o)
+  if (!r.ok && tooLongSaid(j)) throw tooLong(id, body.options.num_ctx, need)
+  if (!r.ok) throw failed('Ollama', r.status, j)
+  if (j.prompt_eval_count > 200 || j.eval_count > 50) measured(id, j.prompt_eval_count > 200 && j.prompt_eval_duration ? j.prompt_eval_count / (j.prompt_eval_duration / 1e9) : null, j.eval_count > 50 && j.eval_duration ? j.eval_count / (j.eval_duration / 1e9) : null)
+  const msg = j.message || {}
+  const out = unthink(msg.content)
+  const calls = (msg.tool_calls || []).filter((c) => c.function?.name).map((c, n) => ({ id: c.id || `call_${Date.now().toString(36)}_${n}`, name: c.function.name, args: parseArgs(c.function.arguments) }))
+  if (!out && !calls.length) throw new Error(msg.thinking || msg.content ? `${model} only thought, and sent back no answer` : 'Ollama sent back an empty answer')
+  return { text: out, calls }
+}
+
+// LM Studio: its OpenAI-style API (tools, a schema held to with `strict`), or for a plain one-off
+// job on a model that thinks, its own chat API, the only one that can turn thinking off.
+async function lmsChat(model, messages, o) {
+  const id = `lmstudio:${model}`
+  const [i, cap] = [await localInfo(id), await contextOf(id)]
+  const text = allText(messages, o.system, o.tools)
+  const need = tokensOf(text) + ANSWER
+  const one = messages.length === 1
+  if (one && need > cap * 1.15) throw tooLong(id, cap, need)
+  const ms = await callTime(id, text, 800)
+  if (one && !o.think && !o.json && !o.tools?.length && i?.canStop) {
+    const r = await fetch(`${LMS_ROOT()}/api/v1/chat`, { method: 'POST', signal: until(o.signal, ms), headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model, system_prompt: o.system, input: messages[0].text || '', reasoning: 'off', stream: false, store: false }) }).catch((e) => { if (e.name === 'AbortError' || e.name === 'TimeoutError') throw e; return null })
+    const j = r ? await r.json().catch(() => ({})) : {}
+    if (r?.ok) {
+      const s = j.stats || {}
+      measured(id, s.input_tokens > 200 && s.time_to_first_token_seconds ? s.input_tokens / s.time_to_first_token_seconds : null, s.total_output_tokens > 50 ? s.tokens_per_second : null)
+      const out = unthink((j.output || []).filter((x) => x.type === 'message').map((x) => x.content).join('\n'))
+      if (out) return { text: out, calls: [] }
+      throw new Error(`${model} sent back an empty answer`)
+    }
+    if (r && tooLongSaid(j)) throw tooLong(id, cap, need)
+    // Anything else (an LM Studio without that API, a setting it turns down): the OpenAI-style API.
+  }
+  try { return await openaiStyle('LM Studio', `${LMSTUDIO()}/chat/completions`, {}, model, messages, { ...o, strict: true, ms }) } catch (e) {
+    if (/context|n_ctx|too many tokens/i.test(e.message)) throw tooLong(id, cap, need)
+    throw e
+  }
+}
+
+// The model on this computer for Bridge AI's jobs that must stay here (the Chief of Staff's "local",
+// Insights, pull request descriptions): the one picked in Settings › Model Providers, else one
+// that's running already (no wait for it to load), else the first. { id, label, provider, picked,
+// missing }: missing, a pick that isn't there now (Ollama or LM Studio closed, the model removed).
+export async function localModel(pick) {
+  const list = (await models()).filter((m) => m.via === 'local')
+  const hit = pick && list.find((m) => m.id === pick)
+  if (hit) return { ...hit, picked: true, missing: null }
+  let best = null
+  for (const m of list) if ((await localInfo(m.id))?.loaded) { best = m; break }
+  best ||= list[0]
+  return best ? { ...best, picked: false, missing: pick || null } : null
+}
+// Every model on this computer as Settings › Model Providers shows it: how much each takes at a time,
+// whether it thinks, how big it is and how fast it's been here, and the one Bridge AI's jobs use.
+export async function localModels(pick) {
+  const list = (await models({ fresh: true })).filter((m) => m.via === 'local')
+  const out = await Promise.all(list.map(async (x) => {
+    const i = await localInfo(x.id, { fresh: true })
+    const e = await estimate(x.id, '', 0)
+    return { id: x.id, label: x.label, provider: x.provider, context: await contextOf(x.id), max: i?.max ?? null, loaded: i?.loaded ?? null, thinks: !!i?.thinks, billions: i?.billions ?? null, speed: speeds.get(x.id) || null, gpu: e?.gpu ?? null }
+  }))
+  const using = await localModel(pick).catch(() => null)
+  return { models: out, pick: pick || null, using: using?.id || null, smallest: SMALLEST }
+}
+// Below this, meeting notes can't be written well: the instructions and the room for the answer
+// alone take a quarter of it (meetings.js).
+export const SMALLEST = 8192
+
 // ---------- A reply ----------
 // The model's next turn: { text, calls }. tools: [{ name, description, parameters }] (JSON Schema).
-export async function reply(id, messages, { signal, tools, system = SYSTEM } = {}) {
+// json: a JSON Schema to hold the answer to, where the provider takes one (Ollama's format, LM
+// Studio's and OpenAI-style APIs' response_format); others answer in plain text, as asked.
+// think: let a model that thinks before answering do so (a chat); Bridge AI's own jobs don't wait.
+export async function reply(id, messages, { signal, tools, system = SYSTEM, json = null, think = false } = {}) {
   if (hiddenModel(id)) throw new Error(OFF)
   const [route, ...rest] = String(id || '').split(':')
   const model = rest.join(':')
-  const o = { signal, tools: canUseTools(id) ? tools : null, system }
+  const o = { signal, tools: canUseTools(id) ? tools : null, system, json, think }
   if (route === 'cli') {
     if (!CLI[model]) throw new Error(`Can't chat through ${model}`)
     const text = String(await runCli(model, asTranscript(messages, system), null, {}, signal)).trim()
@@ -357,8 +593,8 @@ export async function reply(id, messages, { signal, tools, system = SYSTEM } = {
     if (!key) throw new Error('No Anthropic key saved. Add one in Settings › Model Providers.')
     return anthropicStyle('Anthropic', 'https://api.anthropic.com/v1/messages', { 'x-api-key': key, 'anthropic-version': '2023-06-01' }, { model }, messages, o)
   }
-  if (route === 'ollama') return openaiStyle('Ollama', `${OLLAMA()}/v1/chat/completions`, {}, model, messages, o)
-  if (route === 'lmstudio') return openaiStyle('LM Studio', `${LMSTUDIO()}/chat/completions`, {}, model, messages, o)
+  if (route === 'ollama') return ollamaChat(model, messages, o)
+  if (route === 'lmstudio') return lmsChat(model, messages, o)
   if (MORE[route]) {
     const key = env()[MORE[route].key]
     if (!key) throw new Error(`No ${MORE[route].label} key saved. Add one in Settings › Model Providers.`)

@@ -24,6 +24,15 @@ import { ActionItems, SinceLastTime } from './work.jsx'
 // summary, questions about it, and its action items for the Chief of Staff. The recording itself is
 // kept by recording.jsx, so it goes on while you look at anything else.
 
+// Notes being written by a model on this computer: which part it's on, and about how long is left
+// when that can be told (server/meetings.js progress).
+function writingText(p) {
+  if (!p) return t('Writing the summary…')
+  const step = p.of > 1 ? t('Writing the summary on this computer, part {step} of {of}…', { step: p.step, of: p.of }) : t('Writing the summary on this computer…')
+  if (!p.eta) return step
+  return `${step} ${p.eta < 90 ? t('About a minute left.') : t('About {n} minutes left.', { n: Math.round(p.eta / 60) })}`
+}
+
 function Meter({ level = 0, label }) {
   const bars = 5
   const on = Math.min(bars, Math.round(Math.sqrt(level) * bars * 1.4))
@@ -830,7 +839,7 @@ export function MeetingPage({ id, onBack }) {
           {shots.map((c) => <button key={c.id} type="button" className="mt-thumb" onClick={() => openPic(c)} title={c.note || t('The screen at {time}', { time: clock(c.t) })}><img src={pictureUrl(id, c)} alt="" loading="lazy" /><small>{clock(c.t)}{c.note ? ` · ${c.note}` : ''}</small></button>)}
         </div>
       )}
-      {data.summarizing && <p className="mt-working muted small"><span className="aa-spin" /> {t('Writing the summary…')}</p>}
+      {data.summarizing && <p className="mt-working muted small"><span className="aa-spin" /> {writingText(data.summaryProgress)}</p>}
       {data.summaryError && !data.summarizing && (
         <div className="mt-sumerr" role="status">
           <p className="small"><b>{!data.summaryTried?.length ? t("The summary couldn't be written:") : data.summaryTried.length === 1 ? t("The summary couldn't be written with {model}:", { model: modelName(models, data.summaryTried[0]) }) : data.summaryTried.length === 2 ? t("The summary couldn't be written with {model} or the {n} other model you have:", { model: modelName(models, data.summaryTried[0]), n: data.summaryTried.length - 1 }) : t("The summary couldn't be written with {model} or the {n} other models you have:", { model: modelName(models, data.summaryTried[0]), n: data.summaryTried.length - 1 })}</b> {data.summaryError}</p>
