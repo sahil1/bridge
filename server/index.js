@@ -2307,10 +2307,10 @@ mcpRoutes(app, { cfg, installed })
 
 // ---------- Whiteboards (boards.js) ----------
 // Drawn with the model picked there, else the one meeting notes use. contextOf: how much a model on
-// this computer reads at a time, where chatmodels.js can tell; otherwise boards.js plans for little.
+// this computer reads at a time (chatmodels.js).
 boards.setHelpers({
   reply: (id, msgs, o) => chatModels.reply(id, msgs, o), pickModel: pickMeetingModel, models: () => chatModels.models(), canSee: (id) => chatModels.canSee(id),
-  contextOf: async (id) => (typeof chatModels.contextOf === 'function' ? chatModels.contextOf(id) : null), agentWork: async (pane) => transcript(await findAgent(pane)),
+  contextOf: (id) => chatModels.contextOf(id), agentWork: async (pane) => transcript(await findAgent(pane)),
 })
 boards.routes(app, { wrap, onComputer })
 
