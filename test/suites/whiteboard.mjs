@@ -106,7 +106,7 @@ try {
   ok(/^flowchart TD/.test(dm.mermaid) && dm.model === 'openai:gpt-5', '"Draw this" answers with Mermaid, from the model meeting notes use', dm)
   ok(model.asked(/the refund flow/).some((q) => /Payments sync/.test(q) && /Refunds go through the ledger first/.test(q)), 'the meeting goes with it', model.asked(/refund/))
   await api('/boards/draw', { prompt: 'its parts', kind: 'architecture', from: { project: proj } })
-  ok(model.asked(/its parts/).some((q) => /The project shop/.test(q) && /A web shop: a cart/.test(q) && /subgraph/.test(q)), 'a project goes as its files and README, and the kind asked for is said', model.asked(/its parts/))
+  ok(model.asked(/its parts/).some((q) => /The project shop/.test(q) && /A web shop: a cart/.test(q) && /architecture diagram/.test(q)), 'a project goes as its files and README, and the kind asked for is said', model.asked(/its parts/))
   const notMine = await fetch(`${kit.url}/api/boards/draw`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt: 'x', from: { project: kit.data } }) })
   ok(notMine.status === 502 && /Pick one of your projects/.test((await notMine.json()).error), 'a folder that isn\'t one of your projects isn\'t read', notMine.status)
 
@@ -334,7 +334,7 @@ try {
   await ph.p.locator('.wb-card', { hasText: board }).click()
   await ph.p.waitForSelector('.excalidraw canvas', { timeout: 30000 })
   ok(await until(() => ph.p.locator('.excalidraw.excalidraw--mobile').count(), 5000), 'a board opens with Excalidraw\'s phone tools')
-  await ph.p.locator('.wb-view .pane-extras button[aria-pressed]').click()
+  await ph.p.locator('.wb-view .pane-extras button[aria-label="Draw this"]').click()
   await ph.p.waitForSelector('.wb-draw textarea')
   ok(await fits(ph.p), 'and it and Draw this fit the screen')
   await shot(ph.p, `${tag}whiteboard-phone-board`)

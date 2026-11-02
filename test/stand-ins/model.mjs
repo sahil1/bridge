@@ -15,8 +15,15 @@
 //   capital, in quotes and a code fence (which Bridge AI takes off).
 //   With tools, "EDIT <file>" runs a script (read it, change "hello" to "hello world", cat it).
 //   Whiteboards' "Draw this": a flowchart in Mermaid (Start, Tests pass?, Ship, Fix), broken the
-//   first time when asked for "broken"; "Change it": Start renamed Begin, Ship coloured red, a Cache
-//   box beside the first shape with an arrow to it.
+//   first time when asked for "broken"; for "AWS" or "3-tier", a diagram spec (users, a load
+//   balancer, two app servers in private subnets and RDS, in a region and a VPC) with two arrows
+//   left without labels; for "office network", a network spec laid out top to bottom. A local
+//   model asked for "local" answers wrong the first time (no nodes), right when told why.
+//   Refine ("You drew a diagram for"): labels the first arrow without a label, saying so, and says
+//   {"ok":true} once every arrow has one. "Change it": Start renamed Begin, Ship coloured red, a
+//   Cache box beside the first shape with an arrow to it; its review says ok.
+//   Ollama's own API (a model server on this computer, when OLLAMA_HOST points here): its models
+//   (llama3.1:8b, and llama3.2-vision:11b, which can see) and what each can do.
 //   Anything else: "echo: <the last thing said>".
 //   A key of sk-bad is turned down (HTTP 401), as a provider would.
 import http from 'node:http'
@@ -29,9 +36,32 @@ const say = (content) => ({ choices: [{ message: { role: 'assistant', content } 
 let pieces = 0
 let tagged = 0
 
+// The words of a message (a message with a picture is a list of parts).
+const words = (c) => (typeof c === 'string' ? c : Array.isArray(c) ? c.map((p) => p.text || '').join('\n') : '')
+const ARCH = { direction: 'LR', groups: [{ id: 'aws', label: 'AWS us-east-1', kind: 'region' }, { id: 'vpc', label: 'VPC', kind: 'vpc', parent: 'aws' }, { id: 'pub', label: 'Public subnet', kind: 'subnet', parent: 'vpc' }, { id: 'privA', label: 'Private subnet A', kind: 'subnet', parent: 'vpc' }, { id: 'privB', label: 'Private subnet B', kind: 'subnet', parent: 'vpc' }],
+  nodes: [{ id: 'users', label: 'Users', shape: 'users' }, { id: 'lb', label: 'Load balancer', shape: 'aws.elb', group: 'pub' }, { id: 'app1', label: 'App server 1', shape: 'aws.ec2', group: 'privA' }, { id: 'app2', label: 'App server 2', shape: 'aws.ec2', group: 'privB' }, { id: 'db', label: 'RDS', shape: 'aws.rds', group: 'privB' }],
+  edges: [{ from: 'users', to: 'lb', label: 'HTTPS' }, { from: 'lb', to: 'app1' }, { from: 'lb', to: 'app2' }, { from: 'app1', to: 'db', label: 'SQL' }, { from: 'app2', to: 'db', label: 'SQL' }] }
+const NET = { direction: 'TB', groups: [{ id: 'lan', label: 'Office LAN', kind: 'vpc' }], nodes: [{ id: 'inet', label: 'Internet', shape: 'internet' }, { id: 'fw', label: 'Firewall', shape: 'firewall' }, { id: 'sw', label: 'Switch', shape: 'switch', group: 'lan' }, { id: 'srv', label: 'File server', shape: 'server', group: 'lan' }, { id: 'pc', label: 'Desktops', shape: 'client', group: 'lan' }],
+  edges: [{ from: 'inet', to: 'fw', label: 'WAN' }, { from: 'fw', to: 'sw', label: '1 Gbps' }, { from: 'sw', to: 'srv', label: 'LAN' }, { from: 'sw', to: 'pc', label: 'LAN' }] }
+
 function answer(b) {
   const m = b.messages || []
-  const last = [...m].reverse().find((x) => x.role === 'user')?.content || ''
+  const last = words([...m].reverse().find((x) => x.role === 'user')?.content)
+  const first = words(m.find((x) => x.role === 'user')?.content)
+  if (/^Draw this as a diagram:/.test(first) && /Answer with JSON only, in this shape \(an example\)/.test(first)) {
+    if (/\blocal\b/i.test(first) && m.filter((x) => x.role === 'user').length === 1) return say('{"nodes": "a load balancer and a server"}')
+    if (/aws|3-tier|\blocal\b/i.test(first)) return say(`\`\`\`json\n${JSON.stringify(ARCH)}\n\`\`\``)
+    if (/office network/i.test(first)) return say(JSON.stringify(NET))
+  }
+  if (/^You drew a diagram for:/.test(first)) {
+    const spec = JSON.parse(/Your diagram, as JSON:\n(\{.*\})\n/.exec(first)?.[1] || '{}')
+    const bare = (spec.edges || []).find((e) => !e.label)
+    if (!bare) return say('{"ok":true}')
+    bare.label = 'HTTP'
+    const name = (id) => spec.nodes.find((n) => n.id === id)?.label || id
+    return say(JSON.stringify({ ok: false, ...spec, changes: [`Labelled the arrow from ${name(bare.from)} to ${name(bare.to)} with HTTP, so it says what goes along it.`] }))
+  }
+  if (/^You changed this diagram as asked:/.test(first)) return say('{"ok":true}')
   const tail = m.at(-1)
   const file = /EDIT (\S+)/.exec(last)?.[1]
   if (b.tools && file && tail.role === 'user') return call(`r${m.length}`, 'read_file', { path: file })
@@ -105,6 +135,12 @@ http.createServer((req, res) => {
     // A key it turns down, as a provider does: sk-bad.
     if (/sk-bad/.test(req.headers.authorization || '')) return j(401, { error: { message: 'Incorrect API key provided.' } })
     if (req.method === 'GET' && req.url === '/v1/models') return j(200, { data: [{ id: 'gpt-5' }] })
+    // Ollama's own API: its models, and what one can do (llama3.2-vision can see).
+    if (req.method === 'GET' && req.url === '/api/tags') return j(200, { models: [{ name: 'llama3.1:8b' }, { name: 'llama3.2-vision:11b' }] })
+    if (req.method === 'POST' && req.url === '/api/show') {
+      const name = JSON.parse(String(body) || '{}').model || ''
+      return j(200, { capabilities: /vision/.test(name) ? ['completion', 'vision'] : ['completion', 'tools'] })
+    }
     if (req.method === 'POST' && req.url === '/v1/audio/transcriptions') {
       const n = ++pieces
       const prompt = /name="prompt"\r\n\r\n([\s\S]*?)\r\n--/.exec(body.toString('latin1'))?.[1] || ''
@@ -114,7 +150,7 @@ http.createServer((req, res) => {
     }
     if (req.method === 'POST' && req.url === '/v1/chat/completions') {
       const b = JSON.parse(String(body) || '{}')
-      log({ model: b.model, tools: (b.tools || []).map((t) => t.function.name), messages: b.messages })
+      log({ model: b.model, tools: (b.tools || []).map((t) => t.function.name), messages: b.messages, ...(b.response_format ? { format: b.response_format.type } : {}) })
       return setTimeout(() => j(200, answer(b)), 300)
     }
     j(404, { error: { message: 'not found' } })
