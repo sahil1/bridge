@@ -122,6 +122,7 @@ export function MeetingsHome({ onOpen }) {
   const [q, setQ] = useState('')
   const [err, setErr] = useState(null)
   const next = useNextEvent()
+  const narrow = useMedia('(max-width: 560px)') // a phone: the search box's shorter hint fits
   // Which meetings: every one that isn't archived, one folder's, or the archived ones.
   const [place, setPlace] = useState('') // '' | a folder's name | ':archived'
   const all = data?.meetings || []
@@ -185,7 +186,7 @@ export function MeetingsHome({ onOpen }) {
           {archivedN > 0 && <button type="button" role="tab" aria-selected={place === ':archived'} className={place === ':archived' ? 'on' : ''} onClick={() => setPlace(':archived')} title={t('Left out of search and of questions about your meetings')}><Icon name="archive" size={12} /> {t('Archived')} · {archivedN}</button>}
         </div>
       )}
-      {all.length > 0 && <input className="mt-search" type="search" placeholder={place === ':archived' ? t('Search the archive') : t('Search what was said, your notes and summaries')} value={q} onChange={(e) => setQ(e.target.value)} aria-label={t('Search meetings')} />}
+      {all.length > 0 && <input className="mt-search" type="search" placeholder={place === ':archived' ? t('Search the archive') : narrow ? t('Search meetings') : t('Search what was said, your notes and summaries')} value={q} onChange={(e) => setQ(e.target.value)} aria-label={t('Search meetings')} />}
       {q.trim() && hits?.q === q && !list.length && <p className="muted small">{t('Nothing matches "{q}".', { q: q.trim() })}</p>}
       {list.length > 1 && (
         <div className="mt-pickbar muted small">
@@ -200,7 +201,7 @@ export function MeetingsHome({ onOpen }) {
             const hit = q.trim() && hits?.results.get(x.id)
             return (
               <div key={x.id} className={`mt-row${sel.has(x.id) ? ' picked' : ''}`}>
-                <input type="checkbox" className="mt-pick" checked={sel.has(x.id)} onChange={(e) => toggle(x.id, { range: e.nativeEvent.shiftKey })} aria-label={t('Pick {title}', { title: x.title })} />
+                <label className="mt-tick-hit"><input type="checkbox" className="mt-pick" checked={sel.has(x.id)} onChange={(e) => toggle(x.id, { range: e.nativeEvent.shiftKey })} aria-label={t('Pick {title}', { title: x.title })} /></label>
                 <button type="button" className="mt-row-open" onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey) { toggle(x.id, { range: e.shiftKey }); return } onOpen?.(x.id) }} onContextMenu={(e) => menu.open(e, x)}>
                   <span className="mt-row-main">
                     <b>{hit?.where === 'title' ? <Marked text={x.title} terms={hits.terms} /> : x.title}</b>
@@ -236,6 +237,8 @@ const markOf = (l) => (l.edited ? [tx('edited'), tx('Heard: {text}')]
 function Line({ l, id, me, onSaved, onError, onWho }) {
   const [edit, setEdit] = useState(null)
   const [note, setNote] = useState(null) // a note at this line's time, while it's written
+  // Tapped (a phone, where nothing hovers): its Add a note and Edit show, until it's tapped again.
+  const [open, setOpen] = useState(false)
   const put = async (text) => {
     try { await api(`/meetings/${encodeURIComponent(id)}/lines`, { method: 'PATCH', body: { key: l.key, text } }); setEdit(null); onSaved() } catch (e) { onError(e.message) }
   }
@@ -248,7 +251,7 @@ function Line({ l, id, me, onSaved, onError, onWho }) {
     try { await api(`/meetings/${encodeURIComponent(id)}/note`, { method: 'POST', body: { text: note, at: l.t0 } }); setNote(null); onSaved() } catch (e) { onError(e.message) }
   }
   return (
-    <div className={`mt-line ${l.src}${l.edited ? ' edited' : ''}${l.dropped ? ' dropped' : ''}`}>
+    <div className={`mt-line ${l.src}${l.edited ? ' edited' : ''}${l.dropped ? ' dropped' : ''}${open ? ' open' : ''}`} onClick={(e) => { if (l.key && !e.target.closest('button, input, textarea, a') && !window.getSelection()?.toString()) setOpen((o) => !o) }}>
       <button type="button" className={`mt-who${l.name ? ' named' : ''}${l.guess ? ' guess' : ''}`} disabled={!l.key || !onWho} onClick={(e) => onWho?.(e, l)}
         title={l.name ? (l.byVoice ? t('{name}: known by their voice. Click to change', { name: l.name }) : l.guess ? t('{name}: worked out from the meeting. Click to change', { name: l.name }) : t('{name}. Click to change', { name: l.name })) : l.voice && !l.me ? t('Speaker {n}, told apart by voice. Click to name them, once for all their lines', { n: l.voice }) : t('Who said it? Click to name them')}>{l.name || (l.me ? me || t('You') : l.voice ? t('Speaker {n}', { n: l.voice }) : l.src === 'them' ? t('Them') : me || t('You'))}</button>
       <span className="mt-t">{clock(l.t0)}</span>
@@ -338,6 +341,19 @@ function Picture({ id, c, onOpen, onChange, onError }) {
 
 const modelName = (models, id) => models?.find((x) => x.id === id)?.label || id
 
+// A menu's choices as a list in a dialog, each a whole row to tap (a phone): the same items as
+// the menu ({ icon, label, run } or 'sep').
+function PickSheet({ title, items, onClose }) {
+  return (
+    <Dialog title={title} onClose={onClose}>
+      <div className="mt-pick-list" role="menu" aria-label={title}>
+        {items.filter(Boolean).map((it, i) => (it === 'sep' ? <div key={i} className="mt-pick-sep" role="separator" />
+          : <button key={i} type="button" role="menuitem" className={`mt-pick-opt${it.danger ? ' danger' : ''}`} onClick={() => { onClose(); it.run() }}><Icon name={it.icon || 'dot'} size={16} /><span>{it.label}</span></button>))}
+      </div>
+    </Dialog>
+  )
+}
+
 // The summary split around its action items, so each item gets its own Start an agent and To Chief
 // of Staff, and Send action items to Chief of Staff goes right under them: under ## Action items, or
 // the first heading with a checklist when the notes are in another language (as the server finds
@@ -390,8 +406,14 @@ export function MeetingPage({ id, onBack }) {
   const { data, refresh } = usePoll(`/meetings/${encodeURIComponent(id)}`, live ? 1500 : 4000)
   const { data: list } = usePoll('/meetings', 60_000)
   const models = useChatModels()
-  const wide = useMedia('(min-width: 761px)')
+  // The phone layout (App.jsx): the header keeps to the name and the views, and when it was, who
+  // was there and where it's saved go at the top of the page, scrolling with it. One column, even
+  // on a phone on its side, which has the width for two but not the height.
+  const phone = !useMedia('(min-width: 900px)')
+  const wide = useMedia('(min-width: 761px)') && !phone
   const touch = useMedia('(pointer: coarse)')
+  // A touch screen or a narrow one: who said a line is picked from a list, not a small menu.
+  const sheet = touch || !wide
   const [view, setView] = useState(null) // summary | assist | mine | transcript | files
   const [showLeft, setShowLeft] = useState(false) // the lines the cleanup left out, shown
   const [calWhy, setCalWhy] = useState(null) // why the calendar couldn't be read: calendarAccess, ...
@@ -668,37 +690,40 @@ export function MeetingPage({ id, onBack }) {
   const who = data.event?.attendees || []
   const savedDir = data.saved ? tilde(data.saved.replace(/\/[^/]+$/, '')) : null
 
+  // When it was, who was there and where it's saved: under the name on a wide screen, at the top of
+  // the page on a phone.
+  const meta = (
+    <>
+      {when != null
+        ? <input className="mt-inline" type="datetime-local" value={when} autoFocus onChange={(e) => setWhen(e.target.value)} onBlur={saveWhen} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setWhen(null) }} aria-label={t('When the meeting was')} />
+        : <button type="button" className="sub-where mt-when" onClick={() => setWhen(localInput(data.startedAt))} title={t('When it was. Click to change')}>
+          {new Date(data.startedAt).toLocaleString(locale(), { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}{done || data.seconds ? ` · ${clock(data.seconds || 0)}` : ''}
+        </button>}
+      {people != null
+        ? <input className="mt-inline mt-people-in" value={people} autoFocus placeholder={t('Names, with commas')} onChange={(e) => setPeople(e.target.value)} onBlur={savePeople} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setPeople(null) }} aria-label={t('Who was there')} />
+        : <button type="button" className="path-chip mt-people" onClick={() => setPeople(who.join(', '))} title={who.length ? `${who.join(', ')}\n${t('Click to change')}` : t('Who was there? Click to add them')}><Icon name="users" size={10} /> <span>{who.length ? `${who.slice(0, 3).join(', ')}${who.length > 3 ? ` +${who.length - 3}` : ''}` : t('Add people')}</span></button>}
+      {people == null && !who.length && calWhy === 'calendarAccess' && (
+        <button type="button" className="path-chip mt-fromcal warn" onClick={() => setDialog('calendar')} title={t("Bridge AI isn't allowed to see your calendars, so it couldn't take this meeting's name and people from its invite. Click to allow it.")}>
+          <Icon name="calendar" size={10} /> <span>{t('Allow calendar')}</span>
+        </button>
+      )}
+      {people == null && !who.length && events?.length > 0 && (
+        <button type="button" className="path-chip mt-fromcal" onClick={(e) => (events.length === 1 ? takeEvent(events[0]) : setEvMenu({ x: e.clientX, y: e.clientY }))} disabled={busy === 'event'}
+          title={events.length === 1 ? t('Take the people and name from "{title}" in your calendar', { title: events[0].title }) : t('Pick the calendar event it was, for its people and name')}>
+          <Icon name="calendar" size={10} /> <span>{events.length === 1 ? t('From "{title}"', { title: events[0].title }) : t('From the calendar')}</span>
+        </button>
+      )}
+      <button type="button" className="path-chip mt-saved" onClick={() => (data.saved ? (here() ? reveal() : setMsg({ text: tilde(data.saved) })) : save())}
+        onContextMenu={(e) => { if (!data.saved) return; e.preventDefault(); navigator.clipboard?.writeText(data.saved); setMsg({ text: t('Path copied') }) }}
+        title={data.saved ? `${(data.savedFiles || [data.saved]).map(tilde).join('\n')}\n${t('Click to show in Finder; right-click to copy')}` : t('Not saved to your notes folder yet. Click to save it')}>
+        <Icon name="folder" size={10} /> <span>{savedDir || t('Not saved yet')}</span>
+      </button>
+    </>
+  )
   const head = (
     <PaneHeader icon="mic" title={<input className="mt-title" value={title ?? data.title} onChange={(e) => setTitle(e.target.value)} onBlur={saveTitle} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') { setTitle(null); e.currentTarget.blur() } }} aria-label={t('Meeting title')} title={t('Click to rename')} />}
       leading={onBack && <><button type="button" className="win-btn back" onClick={onBack} aria-label={t('All meetings')} title={t('All meetings')}><Icon name="chevron" size={16} className="flip" /></button><span className="pane-icon"><Icon name="mic" size={15} /></span></>}
-      subtitle={(
-        <>
-          {when != null
-            ? <input className="mt-inline" type="datetime-local" value={when} autoFocus onChange={(e) => setWhen(e.target.value)} onBlur={saveWhen} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setWhen(null) }} aria-label={t('When the meeting was')} />
-            : <button type="button" className="sub-where mt-when" onClick={() => setWhen(localInput(data.startedAt))} title={t('When it was. Click to change')}>
-              {new Date(data.startedAt).toLocaleString(locale(), { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}{done || data.seconds ? ` · ${clock(data.seconds || 0)}` : ''}
-            </button>}
-          {people != null
-            ? <input className="mt-inline mt-people-in" value={people} autoFocus placeholder={t('Names, with commas')} onChange={(e) => setPeople(e.target.value)} onBlur={savePeople} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setPeople(null) }} aria-label={t('Who was there')} />
-            : <button type="button" className="path-chip mt-people" onClick={() => setPeople(who.join(', '))} title={who.length ? `${who.join(', ')}\n${t('Click to change')}` : t('Who was there? Click to add them')}><Icon name="users" size={10} /> <span>{who.length ? `${who.slice(0, 3).join(', ')}${who.length > 3 ? ` +${who.length - 3}` : ''}` : t('Add people')}</span></button>}
-          {people == null && !who.length && calWhy === 'calendarAccess' && (
-            <button type="button" className="path-chip mt-fromcal warn" onClick={() => setDialog('calendar')} title={t("Bridge AI isn't allowed to see your calendars, so it couldn't take this meeting's name and people from its invite. Click to allow it.")}>
-              <Icon name="calendar" size={10} /> <span>{t('Allow calendar')}</span>
-            </button>
-          )}
-          {people == null && !who.length && events?.length > 0 && (
-            <button type="button" className="path-chip mt-fromcal" onClick={(e) => (events.length === 1 ? takeEvent(events[0]) : setEvMenu({ x: e.clientX, y: e.clientY }))} disabled={busy === 'event'}
-              title={events.length === 1 ? t('Take the people and name from "{title}" in your calendar', { title: events[0].title }) : t('Pick the calendar event it was, for its people and name')}>
-              <Icon name="calendar" size={10} /> <span>{events.length === 1 ? t('From "{title}"', { title: events[0].title }) : t('From the calendar')}</span>
-            </button>
-          )}
-          <button type="button" className="path-chip mt-saved" onClick={() => (data.saved ? (here() ? reveal() : setMsg({ text: tilde(data.saved) })) : save())}
-            onContextMenu={(e) => { if (!data.saved) return; e.preventDefault(); navigator.clipboard?.writeText(data.saved); setMsg({ text: t('Path copied') }) }}
-            title={data.saved ? `${(data.savedFiles || [data.saved]).map(tilde).join('\n')}\n${t('Click to show in Finder; right-click to copy')}` : t('Not saved to your notes folder yet. Click to save it')}>
-            <Icon name="folder" size={10} /> <span>{savedDir || t('Not saved yet')}</span>
-          </button>
-        </>
-      )}>
+      subtitle={phone ? null : meta}>
       <span className={`state-tag mt-state st-${state[0]}`}>{state[0] === 'rec' ? <span className="rec-dot" aria-hidden="true" /> : <StatusDot status={state[0] === 'paused' ? 'idle' : state[0]} size={7} />}{state[1]}</span>
       {data.archived && <button type="button" className="state-tag mt-state mt-archived" onClick={() => archive(false)} title={t('Archived: left out of search and of questions about your meetings. Click to take it out of the archive.')}><Icon name="archive" size={11} /> {t('Archived')}</button>}
       <div className="seg" role="tablist" aria-label={t('Show')}>
@@ -858,6 +883,7 @@ export function MeetingPage({ id, onBack }) {
     <div className="mt-view">
       {head}
       <div className={`mt-page${dropping ? ' dropping' : ''}`} onDragOver={(e) => { if ([...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); setDropping(true) } }} onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDropping(false) }} onDrop={onDrop}>
+        {phone && <div className="mt-meta">{meta}</div>}
         <RecordingBar id={id} data={data} onAssist={(on) => { refresh(); if (on) setView('assist') }} />
         {(recording || Date.now() - Date.parse(data.startedAt) < 36 * 3600e3) && <SinceLastTime path={`/meetings/${encodeURIComponent(id)}/since`} onOpen={(mid) => window.dispatchEvent(new CustomEvent('bridge-open-meeting', { detail: { id: mid } }))} />}
         {(data.status === 'recording' || data.status === 'paused') && <SpeechSetup recording />}
@@ -880,8 +906,13 @@ export function MeetingPage({ id, onBack }) {
         )}
         {dialog === 'delete' && <ConfirmDelete items={[data]} onClose={() => setDialog(null)} onDone={(action) => { if (action === 'delete') onBack?.(); else { refresh(); setMsg({ text: t("Archived. It's under Archived in the list, and left out of search.") }) } }} />}
         {dialog === 'folder' && <FolderPick items={[data]} folders={foldersOf(list?.meetings)} onClose={() => setDialog(null)} onDone={(t) => { setMsg({ text: t }); refresh() }} />}
-        {whoAt && <AtMenu x={whoAt.x} y={whoAt.y} items={whoItems(whoAt.l)} onClose={() => setWhoAt(null)} />}
-        {evMenu && <AtMenu x={evMenu.x} y={evMenu.y} onClose={() => setEvMenu(null)} items={(events || []).map((ev) => ({ icon: 'calendar', label: `${ev.title} · ${timeOf(ev.start)}${ev.attendees?.length ? ` · ${t('{n} people', { n: ev.attendees.length })}` : ''}`, run: () => takeEvent(ev) }))} />}
+        {whoAt && (sheet
+          ? <PickSheet title={t('Who said it?')} items={whoItems(whoAt.l)} onClose={() => setWhoAt(null)} />
+          : <AtMenu x={whoAt.x} y={whoAt.y} items={whoItems(whoAt.l)} onClose={() => setWhoAt(null)} />)}
+        {evMenu && (() => {
+          const items = (events || []).map((ev) => ({ icon: 'calendar', label: `${ev.title} · ${timeOf(ev.start)}${ev.attendees?.length ? ` · ${t('{n} people', { n: ev.attendees.length })}` : ''}`, run: () => takeEvent(ev) }))
+          return sheet ? <PickSheet title={t('From the calendar')} items={items} onClose={() => setEvMenu(null)} /> : <AtMenu x={evMenu.x} y={evMenu.y} onClose={() => setEvMenu(null)} items={items} />
+        })()}
         {naming && (
           <Dialog title={t('Who said it?')} onClose={() => setNaming(null)}>
             <form className="mt-fix" onSubmit={(e) => { e.preventDefault(); if (naming.name.trim()) { if (naming.voice) nameVoice(naming.voice, { name: naming.name.trim() }); else nameLine(naming.l, naming.name.trim()); setNaming(null) } }}>

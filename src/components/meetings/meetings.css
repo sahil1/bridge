@@ -616,3 +616,161 @@ button.mt-from-chip:hover { color: var(--ink); border-color: color-mix(in srgb, 
   .mt-start-why { margin-left: 0; }
   .mt-since-line { white-space: normal; }
 }
+
+/* ============ On a phone (the phone layout, .app.narrow) ============
+   Every meeting screen: each thing you tap a whole 40px target, fields at 16px (iOS zooms into a
+   smaller one), one scroll for the page instead of a box scrolling inside it, and clear of the
+   notch and the rounded corners when the phone is on its side. */
+/* A meeting fills the Meetings tab: without Meetings | Dictations over it, it's the only row. */
+.m-meetings > .pane:only-child { grid-row: 1 / -1; }
+.app.narrow .mt-home, .app.narrow .mt-page { padding-left: max(14px, env(safe-area-inset-left)); padding-right: max(14px, env(safe-area-inset-right)); }
+.app.narrow .mt-page { padding-top: 10px; }
+.app.narrow .m-meetings > .m-seg button { height: 40px; }
+
+/* The header: Back, the name, its state and ⋯ on one row, then the views as a row of their own (an
+   icon over each name), not squeezed beside the name. When it was, who was there and where it's
+   saved are at the top of the page instead (.mt-meta), so the header leaves the page its room. */
+.app.narrow .mt-view .pane-head { flex-wrap: wrap; height: auto; min-height: 52px; gap: 4px 6px; padding: 6px max(6px, env(safe-area-inset-right)) 6px max(6px, env(safe-area-inset-left)); }
+.app.narrow .mt-view .pane-title { flex: 1 1 0; min-width: 0; gap: 4px; }
+.app.narrow .mt-view .pane-extras { display: contents; }
+.app.narrow .mt-view .pane-head .win-btn, .app.narrow .mt-view .pane-head .menu-anchor > .win-btn { width: 40px; height: 40px; flex: none; }
+.app.narrow .mt-view .pane-head .win-btn.back { margin-right: -4px; }
+.app.narrow .mt-view .pane-head .pane-icon { display: none; }
+.app.narrow .mt-view .pane-titles { flex: 1; gap: 0; }
+.app.narrow .mt-view .pane-titles h2 { padding-left: 0; }
+.app.narrow .mt-view .pane-titles .mt-title { field-sizing: fixed; width: 100%; height: 40px; margin-left: 0; font-size: 16px; }
+.app.narrow .mt-view .pane-sub .path-chip { display: none; } /* the list's notes folder: it opens on the computer, not here */
+.app.narrow .mt-view .pane-head > .state-tag { align-self: center; }
+/* When, who and where it's saved, under the header: each a whole target, wrapping rather than cut
+   off. Tapped, each changes in place as it does on the computer. */
+.mt-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0 2px; margin: 0 0 0 -8px; color: var(--ink-3); font-size: 13px; }
+.mt-meta > button, .mt-meta > .path-chip { display: inline-flex; align-items: center; gap: 6px; height: auto; min-height: 40px; max-width: 100%; margin: 0; padding: 4px 8px; border-radius: 8px; color: var(--ink-2); font: 13px var(--font); text-align: left; }
+.mt-meta > button:active { background: var(--pane-2); }
+.mt-meta > button > span, .mt-meta > button.path-chip > span { min-width: 0; overflow: visible; overflow-wrap: anywhere; white-space: normal; }
+.mt-meta > button > svg { flex: none; }
+.mt-meta > .mt-fromcal { color: var(--accent); }
+.mt-meta > .warn { color: var(--warning); }
+.mt-meta > .mt-inline { flex: 1 1 100%; width: auto; min-width: 0; height: 40px; margin: 0 0 0 8px; font-size: 16px; }
+.app.narrow .mt-view .pane-head .seg { order: 5; flex: 1 0 100%; display: flex; padding: 3px; border-radius: 11px; }
+.app.narrow .mt-view .pane-head .seg button { flex: 1 1 0; min-width: 0; flex-direction: column; justify-content: center; gap: 1px; height: 44px; padding: 0 2px; border-radius: 8px; }
+.app.narrow .mt-view .pane-head .seg button span { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; line-height: 1.2; }
+/* A phone on its side has the width but not the height: the views go beside the name. */
+@media (orientation: landscape) and (max-height: 520px) {
+  .app.narrow .mt-view .pane-head .seg { order: 0; flex: none; }
+  .app.narrow .mt-view .pane-head .seg button { flex: none; flex-direction: row; gap: 6px; height: 40px; padding: 0 12px; }
+  .app.narrow .mt-view .pane-head .seg button span { font-size: 12.5px; }
+}
+/* The list's header: the count under the name, Memory and Start recording whole beside it. */
+.app.narrow .mt-view .pane-head:not(:has(.mt-title)) { padding-left: max(14px, env(safe-area-inset-left)); padding-right: max(10px, env(safe-area-inset-right)); }
+.app.narrow .mt-view .pane-head:not(:has(.mt-title)) .pane-titles h2 { padding-left: 0; font-size: 16px; }
+.app.narrow .mt-view .pane-head:not(:has(.mt-title)) .pane-sub { margin-left: 0; }
+.app.narrow .mt-view .pane-head .btn.small { height: 40px; padding: 0 11px; font-size: 13px; }
+
+/* Buttons, menus, chips and fields: whole targets. */
+.app.narrow .mt-view :is(.btn.small, .mt-tool, .mt-places button, .mt-suggest .chip, .mt-a-foot .chip, .mt-from-chip) { height: auto; min-height: 40px; }
+.app.narrow .mt-view .btn.small { padding: 0 12px; font-size: 13px; }
+.app.narrow .mt-view .ghost-btn { min-height: 40px; min-width: 40px; justify-content: center; }
+.app.narrow .mt-view .menu .menu-item { height: 40px; font-size: 14px; }
+/* A link in a line of text: a 40px target that keeps the line's height (the room above and below
+   reaches over the lines around it, which aren't tapped). */
+.app.narrow .mt-view .link-btn { display: inline-block; min-height: 40px; padding: 11px 0; margin: -11px 0; line-height: 18px; vertical-align: baseline; }
+.app.narrow .mt-view .mt-start-told summary { padding: 11px 0; line-height: 18px; }
+.app.narrow .mt-view .mt-places button { padding: 0 14px; font-size: 13.5px; }
+.app.narrow .mt-view .mt-suggest .chip { padding: 0 12px; font-size: 13px; }
+.app.narrow .mt-view .mt-from-chip { padding: 0 12px; font-size: 12.5px; }
+.app.narrow .mt-view :is(.mt-search, .mt-askbox input, .mt-start select, .mt-start-dir, .mt-tool select, .mt-sec input, .mt-line-note, .mt-pic input, .mt-attach-row input) { height: 40px; font-size: 16px; }
+.app.narrow .mt-view :is(.mt-line-edit textarea, .mt-start-told textarea) { font-size: 16px; }
+.app.narrow .mt-view .mt-askbox { padding: 2px 2px 2px 12px; }
+.app.narrow .mt-view .mt-askbox .ghost-btn { width: 40px; }
+/* Ticks: the box as it was, the place you can tap around it 40px. */
+.mt-tick-hit { display: inline-grid; place-items: center; flex: none; cursor: pointer; }
+.app.narrow .mt-view .mt-tick-hit { width: 40px; height: 40px; margin: -8px -6px -8px -10px; }
+.app.narrow .mt-view .mt-tick-hit > input { width: 20px; height: 20px; margin: 0; }
+.app.narrow .mt-view .mt-row { padding-left: 4px; }
+/* A meeting's name in the list wraps rather than being cut off. */
+.app.narrow .mt-view .mt-row-main b { white-space: normal; overflow-wrap: anywhere; }
+.app.narrow .mt-view .mt-assist-on { min-height: 40px; }
+.app.narrow .mt-view .mt-assist-on input { width: 20px; height: 20px; }
+.app.narrow .mt-view .mt-pickbar { margin: 4px 0; line-height: 1.45; }
+
+/* The summary's tools: Regenerate and the three choices two to a row, Copy beside them. */
+.app.narrow .mt-view .mt-phead.mt-toolbar { grid-template-columns: minmax(0, 1fr) auto; grid-auto-flow: row; }
+.app.narrow .mt-view .mt-phead.mt-toolbar > .mt-grow { display: none; }
+.app.narrow .mt-view .mt-tools { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); justify-self: stretch; gap: 2px; padding: 3px; border-radius: 11px; }
+@media (min-width: 640px) { .app.narrow .mt-view .mt-tools { grid-template-columns: repeat(4, minmax(0, 1fr)); } } /* on its side: one row */
+.app.narrow .mt-view .mt-tool { justify-content: center; min-width: 0; min-height: 44px; padding: 0 8px; font-size: 13.5px; }
+/* Each choice fills its place, its name small over what's picked, so the whole place opens it. */
+.app.narrow .mt-view label.mt-tool { position: relative; padding: 0; }
+.app.narrow .mt-view label.mt-tool small { display: block; position: absolute; top: 5px; left: 10px; right: 10px; overflow: hidden; text-overflow: ellipsis; font-size: 10.5px; line-height: 1.2; pointer-events: none; }
+.app.narrow .mt-view .mt-tool select { field-sizing: fixed; width: 100%; min-width: 0; max-width: none; height: 44px; padding: 14px 8px 0; font-size: 16px; }
+.app.narrow .mt-view .mt-phead > .ghost-btn { align-self: start; }
+.app.narrow .mt-view .mt-phead.mt-toolbar > .ghost-btn { width: 40px; padding: 0; font-size: 0; gap: 0; }
+/* An action item's Start an agent and To Chief of Staff side by side, the same width, with Copy. */
+.app.narrow .mt-view .mt-item { padding: 6px 4px; }
+.app.narrow .mt-view .mt-item-acts { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 40px; gap: 6px; }
+.app.narrow .mt-view .mt-item-acts .btn.small { justify-content: center; padding: 4px 8px; white-space: normal; text-align: center; line-height: 1.2; }
+.app.narrow .mt-view .mt-item-acts .btn.small svg { flex: none; }
+@media (max-width: 400px) { .app.narrow .mt-view .mt-item-acts .btn.small svg { display: none; } } /* the words fit on one line */
+
+/* The recording bar: how long and how loud on top, its buttons whole under it. */
+.app.narrow .mt-view .mt-recbar { gap: 8px; padding: 10px 12px; }
+.app.narrow .mt-view .mt-recbar .btn.small { flex: 1 1 auto; justify-content: center; }
+
+/* A line of the transcript: who said it and its two buttons are whole targets that keep the line
+   as compact as it was (the extra room reaches over the line's own words, which aren't tapped). */
+.app.narrow .mt-view button.mt-who { min-height: 40px; min-width: 40px; margin: -10px 0; padding: 10px 6px 10px 0; }
+.app.narrow .mt-view .mt-line-acts .ghost-btn { width: 40px; height: 40px; min-height: 40px; margin: -10px 0; padding: 0; }
+/* Nothing hovers on a phone: they show once the line is tapped (Line in Meetings.jsx), and can't be
+   hit while they're hidden. */
+.app.narrow .mt-view .mt-line:not(.open, :focus-within) .mt-line-acts { visibility: hidden; }
+.app.narrow .mt-view .mt-line.open { background: var(--pane-2); }
+.app.narrow .mt-view .mt-line.open .mt-line-acts { opacity: 1; }
+/* AI Assist's suggestions: what kind, when and its two buttons over the words, which get the width. */
+.app.narrow .mt-view .mt-tip { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "kind time acts" "text text text"; align-items: center; row-gap: 0; padding: 2px 4px 10px 12px; }
+.app.narrow .mt-view .mt-tip-kind { grid-area: kind; padding-top: 0; }
+.app.narrow .mt-view .mt-tip .mt-t { grid-area: time; padding-top: 0; }
+.app.narrow .mt-view .mt-tip > :last-child { grid-area: acts; }
+.app.narrow .mt-view .mt-tip-text { grid-area: text; padding-right: 8px; font-size: 14.5px; }
+.app.narrow .mt-view .mt-sec { min-height: 40px; padding-top: 0; padding-bottom: 0; }
+.app.narrow .mt-view .mt-sec-name { align-self: stretch; }
+.app.narrow .mt-view .mt-sec .ghost-btn, .app.narrow .mt-view .mt-tip-acts .ghost-btn { height: 40px; }
+.app.narrow .mt-view .mt-sec:not(:hover, :focus-within) .ghost-btn { visibility: hidden; }
+.app.narrow .mt-view .mt-thead .ghost-btn { width: 40px; padding: 0; }
+
+/* One column, as on a narrow screen, also on a phone on its side (Meetings.jsx doesn't split it). */
+.app.narrow .mt-cols, .app.narrow .mt-cols.sized { grid-template-columns: minmax(0, 1fr); }
+.app.narrow .mt-transcript { border-left: 0; padding-left: 0; }
+.app.narrow .mt-cols.pinned { grid-template-rows: auto minmax(300px, 1fr); gap: 14px; min-height: auto; }
+.app.narrow .mt-mynotes.pinned { grid-template-rows: none; min-height: auto; overflow: visible; }
+.app.narrow .mt-mynotes.pinned .mt-mine { min-height: 132px; height: 132px; resize: vertical; }
+.app.narrow .mt-mynotes-name { font-size: 15px; }
+.app.narrow .mt-start-row { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+.app.narrow .mt-start-why { margin-left: 0; }
+
+/* After the meeting: the summary, your notes and the transcript flow down one page with Ask
+   under them, rather than each scrolling in a box above an Ask that never moves. (While it
+   records, your notes stay on top and the transcript follows along in its own place.) */
+.app.narrow .mt-page > .mt-cols:not(.pinned) { flex: none; }
+.app.narrow .mt-cols:not(.pinned) > .mt-notes { overflow: visible; }
+.app.narrow .mt-cols:not(.pinned) .mt-lines { overflow: visible; max-height: none; }
+
+/* What floats over the list: the bar for meetings you picked, and a call starting or ending. */
+.app.narrow .mt-view .mt-bulk { gap: 6px; padding: 8px 10px; }
+.app.narrow .mt-view .mt-bulk-x { width: 40px; }
+.app.narrow .call-prompt { top: calc(52px + var(--safe-top, 0px) + 8px); width: auto; left: max(12px, env(safe-area-inset-left)); right: max(12px, env(safe-area-inset-right)); max-width: none; transform: none; animation: none; }
+.app.narrow .call-prompt :is(.btn.small, .ghost-btn) { height: 40px; min-width: 40px; padding: 0 14px; font-size: 13px; }
+
+/* Dialogs and the sheet for who said a line: on <body>, so by the phone's width. */
+@media (max-width: 899px) {
+  .mt-dialog-back { padding: max(16px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); }
+  .mt-dialog > header .ghost-btn, .mt-dialog .ghost-btn, .mt-dialog .btn.small { min-height: 40px; min-width: 40px; justify-content: center; font-size: 13px; }
+  .mt-dialog :is(input:not([type="checkbox"], [type="radio"]), select, textarea) { font-size: 16px; }
+  .mt-dialog input:not([type="checkbox"], [type="radio"]), .mt-dialog select { min-height: 40px; }
+  .mt-dialog :is(.mt-folder-opt, .mt-pick-opt) { min-height: 44px; }
+}
+/* Who said it, on a touch screen: a list to pick from instead of a small menu at the finger. */
+.mt-pick-list { display: grid; gap: 2px; margin: 0 -6px; }
+.mt-pick-opt { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 10px; border-radius: 10px; color: var(--ink); font: 15px var(--font); text-align: left; }
+.mt-pick-opt:active, .mt-pick-opt:focus-visible { background: var(--pane-3); outline: none; }
+.mt-pick-opt svg { flex: none; color: var(--ink-3); }
+.mt-pick-sep { height: 1px; margin: 4px 10px; background: var(--line); }
