@@ -289,6 +289,53 @@ export async function page(b, url, { mode = 'light', theme = 'sky', width = 1440
 // through one, so a test that stands in for an API with ctx.route needs this (in its before).
 export const noServiceWorker = (ctx) => ctx.addInitScript(() => { try { delete Navigator.prototype.serviceWorker } catch { /* none */ } })
 export const shot = (p, name, o = {}) => { fs.mkdirSync(path.join(OUT, 'shots'), { recursive: true }); return p.screenshot({ path: path.join(OUT, 'shots', `${name}.png`), ...o }) }
+// What's wrong on a phone's screen, within the first of scopes (CSS selectors) that's there: the
+// page wider than the screen; something past its edge, scrolling sideways or cut off (…); a button,
+// link, tick or field smaller than a whole 40 px target, or covered by something else; a field under
+// 16 px (iOS zooms into it). Only what's on the screen counts: each thing's box, clipped by every box
+// it's in that clips. {} when there's nothing.
+export const phoneFaults = (p, ...scopes) => p.evaluate((scopes) => {
+  const W = innerWidth, H = innerHeight
+  const out = { wider: document.documentElement.scrollWidth - W, past: [], sideways: [], cut: [], small: [], covered: [], zooms: [] }
+  const shown = (e) => {
+    const r = e.getBoundingClientRect()
+    if (r.width < 1 || r.height < 1 || (e.closest('details:not([open])') && !e.closest('summary'))) return null
+    const c = getComputedStyle(e)
+    if (c.visibility !== 'visible' || +c.opacity === 0) return null
+    let { left, top, right, bottom } = r
+    for (let x = e.parentElement; x && x !== document.documentElement; x = x.parentElement) {
+      const cx = getComputedStyle(x)
+      if (+cx.opacity === 0) return null
+      if (cx.overflowX !== 'visible' || cx.overflowY !== 'visible') { const q = x.getBoundingClientRect(); left = Math.max(left, q.left); top = Math.max(top, q.top); right = Math.min(right, q.right); bottom = Math.min(bottom, q.bottom) }
+    }
+    left = Math.max(left, 0); top = Math.max(top, 0); right = Math.min(right, W); bottom = Math.min(bottom, H)
+    return right - left >= 1 && bottom - top >= 1 ? { left, top, right, bottom } : null
+  }
+  const name = (e) => `${(e.getAttribute('aria-label') || e.innerText || e.value || e.placeholder || e.tagName).trim().replace(/\s+/g, ' ').slice(0, 40)} <${e.tagName.toLowerCase()}.${String(e.className).split(' ')[0]}>`
+  const scope = scopes.map((s) => document.querySelector(s)).find(Boolean)
+  if (!scope) return { scope: `none of ${scopes.join(' or ')}` }
+  const taps = [...scope.querySelectorAll('button, a[href], input:not([type=hidden]), select, textarea, summary, [role=tab]')].filter((e) => !(e.matches('input[type=checkbox], input[type=radio]') && e.closest('label')))
+  taps.push(...scope.querySelectorAll('label:has(input[type=checkbox]), label:has(input[type=radio])'))
+  for (const e of taps) {
+    const s = shown(e)
+    if (!s) continue
+    const r = e.getBoundingClientRect()
+    if (Math.round(r.height) < 40 || Math.round(r.width) < 40) out.small.push(`${name(e)} ${Math.round(r.width)}x${Math.round(r.height)}`)
+    const at = document.elementFromPoint((s.left + s.right) / 2, (s.top + s.bottom) / 2)
+    if (at && at !== e && !e.contains(at) && !at.contains(e)) out.covered.push(`${name(e)} under ${name(at)}`)
+    if (e.matches('input:not([type=checkbox], [type=radio]), select, textarea') && parseFloat(getComputedStyle(e).fontSize) < 16) out.zooms.push(`${name(e)} ${getComputedStyle(e).fontSize}`)
+  }
+  for (const e of scope.querySelectorAll('*')) {
+    const s = shown(e)
+    if (!s) continue
+    const c = getComputedStyle(e)
+    const r = e.getBoundingClientRect()
+    if (r.right > W + 1 && !e.children.length && s.right >= W - 1) out.past.push(`${name(e)} ${Math.round(r.left)}..${Math.round(r.right)}`)
+    if (/(auto|scroll)/.test(c.overflowX) && e.scrollWidth > e.clientWidth + 1 && !/^(INPUT|TEXTAREA|SELECT)$/.test(e.tagName)) out.sideways.push(name(e))
+    if (c.textOverflow === 'ellipsis' && e.scrollWidth > e.clientWidth + 1) out.cut.push(name(e))
+  }
+  return Object.fromEntries(Object.entries(out).filter(([k, v]) => (k === 'wider' ? v > 1 : v.length)))
+}, scopes)
 // A menu or pop-up is solid (not see-through over a coloured sidebar), once it's done fading in.
 // Opaque and fully shown. A menu fades in (.1s), which can start late on a busy machine (a CI Mac
 // running three lanes), so it's given up to 2 s to get there rather than one look at 250 ms.

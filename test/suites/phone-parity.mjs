@@ -7,12 +7,19 @@
 // the place opens. Then Whiteboards on the phone: the list, a board opened from it (with its own way
 // back), and Draw this; a phone that had the old Terminals tab open gets Terminals in More.
 //
+// Then Settings, as a phone's settings: it opens at the list of every section (a whole row each,
+// with its icon and what's in it), a section opens full width under ‹ Settings and its name, with
+// one close for the whole of Settings, and ‹ Settings goes back to the list. Opened at a section
+// (a link to it, ⌘K, a link from inside Settings, even to the section it opened at), it lands there
+// with ‹ Settings. Nothing wider than the phone, cut off or smaller than a 40 px target. On a
+// desktop it's as it was: General, with the sections down the left.
+//
 // A path is what's tapped, from the tab bar: a tab (Chief, Agents, Meetings, Today, More), then the
 // buttons in it by name. "Search › x" types x in the top bar's search, which must offer it (for
-// actions rather than places); "Settings › x" is the top bar's Settings at its section x.
+// actions rather than places); "Settings › x" is the top bar's Settings, then its section x.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, checks, until, browser, page, shot, ROOT } from '../lib/harness.mjs'
+import { startKit, checks, until, browser, page, shot, phoneFaults, ROOT } from '../lib/harness.mjs'
 
 const { ok, done } = checks('phone-parity')
 
@@ -89,6 +96,8 @@ const views = Object.keys(Function(`return ${/const VIEWS = (\{[^\n]*\})\n/.exec
 const actions = [...app.matchAll(/\{ id: '(a:[\w-]+)'/g)].map((m) => m[1])
 const settings = source('src', 'components', 'Settings.jsx')
 const sections = [...(/export const SECTIONS = \[([\s\S]*?)\n\]/.exec(settings)?.[1] || '').matchAll(/\{ id: '([\w-]+)'/g)].map((m) => `settings:${m[1]}`)
+// Each section's name and what's in it, as the phone's list of them shows them.
+const named = [...(/export const SECTIONS = \[([\s\S]*?)\n\]/.exec(settings)?.[1] || '').matchAll(/label: tx\('([^']+)'\), icon: '[\w-]+', hint: tx\('([^']+)'\)/g)].map((m) => ({ name: m[1], hint: m[2] }))
 ok(views.length >= 5 && views.includes('view:whiteboards'), 'the desktop\'s views are read from App.jsx', views)
 ok(actions.length >= 30 && actions.includes('a:boards'), 'and ⌘K\'s actions', actions.length)
 ok(sections.length >= 8, 'and Settings\' sections', sections)
@@ -120,11 +129,19 @@ try {
   await desk.p.waitForSelector('.pal-item', { timeout: 5000 })
   const shown = await desk.p.evaluate(() => [...document.querySelectorAll('.pal-item[data-id^="a:"]')].map((e) => e.dataset.id))
   ok(shown.length >= 20 && !missing(shown).length, 'and every action ⌘K offers on the desktop', missing(shown))
+  await desk.p.keyboard.press('Escape')
+  // Settings on the desktop, to see it's as it was: General, with the sections down the left.
+  await desk.p.locator('.settings-btn').click()
+  await desk.p.locator('.modal.settings .st-nav').waitFor({ timeout: 8000 })
+  const deskSettings = await desk.p.evaluate(() => ({ title: document.querySelector('.st-head h3')?.innerText.trim(), nav: [...document.querySelectorAll('.st-nav .st-nav-item')].map((e) => e.innerText.trim()), bar: !!document.querySelector('.st-bar, .st-back, .st-list') }))
+  await desk.p.keyboard.press('Escape')
   ok(!desk.errors.length, 'no page errors on the desktop', desk.errors)
   await desk.ctx.close()
 
   // ---------- each path, followed on a phone ----------
   const TABS = ['Chief', 'Agents', 'Meetings', 'Today', 'More']
+  // Settings showing a section on a phone: its name over it, with ‹ Settings beside.
+  const at = (p, name, ms) => until(async () => (await p.locator('.st-bar h3').innerText().catch(() => '')).trim() === name && p.locator('.st-bar .st-back').isVisible(), ms)
   const follow = async (p, route) => {
     const [first, ...rest] = route.split(' › ')
     if (first === 'Search') {
@@ -134,10 +151,10 @@ try {
     }
     if (first === 'Settings') {
       await p.locator('.settings-btn').click()
-      const chip = p.locator('.st-nav-item', { hasText: rest[0] })
-      if (!(await chip.first().waitFor({ timeout: 4000 }).then(() => true, () => false))) return `Settings has no "${rest[0]}"`
-      await chip.first().click()
-      return (await until(async () => (await p.locator('.st-head h3').innerText()).trim() === rest[0], 4000)) ? null : `Settings doesn't open at "${rest[0]}"`
+      const row = p.locator('.modal.settings .st-list').getByText(rest[0], { exact: true })
+      if (!(await row.first().waitFor({ timeout: 4000 }).then(() => true, () => false))) return `Settings lists no "${rest[0]}"`
+      await row.first().click()
+      return (await at(p, rest[0], 4000)) ? null : `Settings doesn't open at "${rest[0]}" with ‹ Settings`
     }
     if (!TABS.includes(first)) return `"${first}" isn't a tab`
     await p.locator('.tabbar button', { hasText: first }).click()
@@ -164,6 +181,76 @@ try {
       if (r.shows && !(await ph.p.locator(r.shows).first().waitFor({ timeout: 8000 }).then(() => true, () => false))) bad.push(`${r.phone}: ${r.shows} doesn't show`)
     }
     ok(!bad.length, `${width}: every path is there on the phone and opens its place (${routes.length} of them)`, bad)
+
+    // ---------- Settings, as a phone's settings ----------
+    await ph.p.goto(kit.url)
+    await ph.p.waitForSelector('.tabbar button', { timeout: 20000 })
+    await ph.p.locator('.tabbar button', { hasText: 'More' }).click()
+    await ph.p.locator('.m-more-row', { hasText: 'Settings' }).click()
+    await ph.p.locator('.modal.settings .st-list-row').first().waitFor({ timeout: 8000 }).catch(() => {})
+    const sheet = () => ph.p.evaluate(() => {
+      const m = document.querySelector('.modal.settings')
+      const r = m?.getBoundingClientRect()
+      return {
+        title: document.querySelector('.st-bar h3')?.innerText.trim() || null,
+        back: document.querySelector('.st-bar .st-back')?.innerText.trim() || null,
+        closes: m ? m.querySelectorAll('[aria-label="Close settings"]').length : 0,
+        tabs: !!m?.querySelector('.st-nav-item'),
+        full: !!r && Math.round(r.left) === 0 && Math.round(r.width) === innerWidth,
+        lede: m?.querySelector('.st-lede')?.innerText.trim() || null,
+        rows: [...(m?.querySelectorAll('.st-list-row') || [])].map((e) => { const b = e.getBoundingClientRect(); return { name: e.querySelector('b')?.innerText.trim(), hint: e.querySelector('.m-more-text > span')?.innerText.trim(), icon: !!e.querySelector('.m-more-ico svg'), h: Math.round(b.height), inside: b.left >= 0 && b.right <= innerWidth } }),
+      }
+    })
+    const list = await sheet()
+    const listed = list.rows.length === named.length && named.every((s, i) => list.rows[i].name === s.name && list.rows[i].hint === s.hint)
+    const desktopAsBefore = deskSettings.title === 'General' && deskSettings.nav.join('|') === named.map((s) => s.name).join('|') && !deskSettings.bar
+    ok(listed && list.rows.every((x) => x.icon && x.h >= 44 && x.inside) && list.title === 'Settings' && !list.back && list.closes === 1 && !list.tabs && list.full && desktopAsBefore,
+      `${width}: Settings opens at the list of its sections in Title Case, a whole row each (44 px or more) with its icon and what's in it, under Settings and its one close, rather than a strip of tabs (on a desktop: General, with the sections down the left, as before)`, { list, named, deskSettings })
+    let f = await phoneFaults(ph.p, '.modal.settings')
+    ok(!Object.keys(f).length, `${width}: the list fits the phone (nothing wider, past its edge, sideways or cut off; each target 40 px and uncovered)`, f)
+    await shot(ph.p, `${tag}phone-settings-${width}`)
+    // (Each tap gives up after a moment, so a missing control fails its own check below.)
+    const tap = (l) => l.click({ timeout: 4000 }).catch(() => {})
+    await tap(ph.p.locator('.modal.settings .st-list').getByText('Voice', { exact: true }))
+    await at(ph.p, 'Voice', 4000)
+    const voice = await sheet()
+    ok(voice.title === 'Voice' && voice.back === 'Settings' && voice.closes === 1 && !voice.rows.length && !voice.tabs && voice.full && voice.lede === named.find((s) => s.name === 'Voice')?.hint,
+      `${width}: a section opens full width, its name over it with ‹ Settings beside and the same one close, and what's in it at the top`, voice)
+    f = await phoneFaults(ph.p, '.modal.settings .st-bar')
+    ok(!Object.keys(f).length, `${width}: its bar fits the phone (‹ Settings, the name and the close, each a whole target, nothing cut off)`, f)
+    await shot(ph.p, `${tag}phone-settings-voice-${width}`)
+    await tap(ph.p.locator('.st-bar .st-back'))
+    const backed = await sheet()
+    await tap(ph.p.locator('.modal.settings [aria-label="Close settings"]'))
+    const closed = !!(await until(async () => !(await ph.p.locator('.modal.settings').count()), 4000))
+    ok(backed.title === 'Settings' && backed.rows.length === named.length && !backed.back && closed, `${width}: ‹ Settings goes back to the list, and its close closes the whole of Settings`, { backed, closed })
+    await ph.p.keyboard.press('Escape')
+
+    // Opened at a section: there, with ‹ Settings back to the list. A link to it (from Meetings, the
+    // tour, a fix), ⌘K, a link from inside Settings, and a link to the section it opened at.
+    const deep = [['voice', 'Voice'], ['accounts', 'Model Providers'], ['machines', 'Devices'], ['permissions', 'General'], ['about', 'About & Updates']]
+    const missed = []
+    const open = (section) => ph.p.evaluate((section) => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section } })), section)
+    for (const [section, name] of deep) {
+      await open(section)
+      if (!(await at(ph.p, name, 4000))) { missed.push(`${section}: ${JSON.stringify(await sheet())}`); continue }
+      // Back to the list, then a link to the same section again: there again.
+      await tap(ph.p.locator('.st-bar .st-back'))
+      await open(section)
+      if (!(await at(ph.p, name, 4000))) missed.push(`${section}, again from the list: ${JSON.stringify(await sheet())}`)
+      // A link from inside Settings, to another section.
+      await open('mcp')
+      if (!(await at(ph.p, 'MCP Servers', 4000))) missed.push(`${section}, then a link to MCP Servers: ${JSON.stringify(await sheet())}`)
+      await tap(ph.p.locator('.modal.settings [aria-label="Close settings"]'))
+      await until(async () => !(await ph.p.locator('.modal.settings').count()), 4000)
+    }
+    await ph.p.keyboard.press('Escape')
+    await tap(ph.p.locator('.search-btn'))
+    await ph.p.locator('.palette input').fill('Model Providers', { timeout: 4000 }).catch(() => {})
+    await tap(ph.p.locator('.pal-item[data-id="a:providers"]'))
+    if (!(await at(ph.p, 'Model Providers', 4000))) missed.push(`⌘K's Model Providers: ${JSON.stringify(await sheet())}`)
+    ok(!missed.length, `${width}: Settings opened at a section lands on it with ‹ Settings (a link to it, again from the list, a link from inside Settings, ⌘K)`, missed)
+    await shot(ph.p, `${tag}phone-settings-providers-${width}`)
 
     // The More tab: a whole thumb-sized row each, nothing cut off or wider than the phone.
     await ph.p.goto(kit.url)

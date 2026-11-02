@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Icon from './Icon.jsx'
+import { useMedia } from './layout.jsx'
 import Appearance from './Appearance.jsx'
 import General from './settings/General.jsx'
 import Agents from './settings/Agents.jsx'
@@ -17,7 +18,8 @@ import { cloudOnly } from '../api.js'
 import { t, tx } from '../i18n/index.js'
 
 // One Settings window, Slack style: sections down the left, one scrolling panel on the right.
-// On a phone the sections become a row of chips above the panel.
+// On a phone it's a phone's settings: the list of sections, each opening full width under a bar
+// with ‹ Settings (back to the list), its name, and the one close.
 export const SECTIONS = [
   { id: 'general', label: tx('General'), icon: 'home', hint: tx('Name, default agent and model, location') },
   { id: 'agents', label: tx('Agents'), icon: 'bot', hint: tx('Installed agents and sign-in') },
@@ -37,21 +39,98 @@ const PHONE = [
   { id: 'appearance', label: tx('Appearance'), icon: 'palette', hint: tx('Theme, text size, density') },
 ]
 
+// section: where Settings opens. "all" is Settings itself: the list on a phone, General on a wider
+// screen. A section's id opens it (on a phone with ‹ Settings back to the list), and so do these:
 // "accounts" and "cloud" open Model providers at its Accounts or Cloud agents list; "machines"
 // opens Devices at your devices (they were two sections, and linking machines needs the
 // relay set up on the phone one); "permissions" opens General at its Permissions.
-export default function Settings({ section = 'general', onClose, onOpenAgent }) {
+const LEADS = { accounts: 'providers', cloud: 'providers', machines: 'phone', permissions: 'general' }
+const sectionFor = (section, sections) => {
+  const to = cloudOnly ? (section === 'all' ? null : section === 'appearance' ? 'appearance' : 'cloud') : LEADS[section] || section
+  return sections.some((s) => s.id === to) ? to : null
+}
+
+export default function Settings({ section = 'all', onClose, onOpenAgent }) {
   const sections = cloudOnly ? PHONE : SECTIONS
-  const to = cloudOnly ? (section === 'appearance' ? 'appearance' : 'cloud') : section === 'accounts' || section === 'cloud' ? 'providers' : section === 'machines' ? 'phone' : section === 'permissions' ? 'general' : section
-  const [at, setAt] = useState(sections.some((s) => s.id === to) ? to : sections[0].id)
-  useEffect(() => { if (sections.some((s) => s.id === to)) setAt(to) }, [to]) // eslint-disable-line react-hooks/exhaustive-deps
+  const phone = useMedia('(max-width: 760px)')
+  const to = sectionFor(section, sections)
+  const [at, setAt] = useState(to || sections[0].id)
+  const [list, setList] = useState(!to) // on a phone: the list of sections, rather than one of them
+  const go = (id) => { setAt(id); setList(false) }
+  useEffect(() => { if (to) go(to) }, [to]) // eslint-disable-line react-hooks/exhaustive-deps
+  // A link to a section from inside Settings (Meetings' Model Providers), even to the one it opened at.
+  useEffect(() => {
+    const on = (e) => { const s = sectionFor(e.detail?.section, sections); if (s) go(s) }
+    window.addEventListener('bridge-open-settings', on)
+    return () => window.removeEventListener('bridge-open-settings', on)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape' && !e.target.closest?.('textarea, input')) onClose() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
   const cur = sections.find((s) => s.id === at)
-  const go = (id) => setAt(id)
+  const showList = phone && list
+  // From the list to a section and back, the focus goes along: to ‹ Settings, then to the row left.
+  const sheet = useRef(null)
+  const was = useRef(showList)
+  useEffect(() => {
+    if (was.current === showList) return
+    was.current = showList
+    sheet.current?.querySelector(showList ? `.st-list-row[data-id="${at}"]` : '.st-back')?.focus()
+  }, [showList]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const body = (
+    <SettingsAt.Provider value={at}>
+    <ErrorBoundary key={at} name={t(cur.label)} resetKey={at}>
+    {at === 'general' && <General onGo={go} focus={section === 'permissions' ? 'permissions' : null} onOpenAgent={(id) => { onOpenAgent?.(id); onClose() }} />}
+    {at === 'agents' && <Agents onOpenAgent={(id) => { onOpenAgent?.(id); onClose() }} />}
+    {at === 'providers' && <Providers focus={section === 'accounts' || section === 'cloud' ? section : null} onOpenAgent={(id) => { onOpenAgent?.(id); onClose() }} />}
+    {at === 'voice' && <Voice />}
+    {at === 'meetings' && <Meetings />}
+    {at === 'mcp' && <Mcp />}
+    {at === 'appearance' && <Appearance />}
+    {at === 'config' && <ConfigFile />}
+    {at === 'phone' && <Phone focus={section === 'machines' ? 'machines' : null} />}
+    {at === 'about' && <About />}
+    {at === 'cloud' && <CloudKeys focus="cloud" bare />}
+    </ErrorBoundary>
+    </SettingsAt.Provider>
+  )
+
+  if (phone) {
+    return (
+      <div className="modal-backdrop settings-backdrop phone">
+        <div className="modal settings phone" role="dialog" aria-label={t('Settings')} ref={sheet}>
+          <header className="st-bar">
+            {showList ? <span /> : <button type="button" className="st-back" onClick={() => setList(true)} aria-label={t('Back to Settings')}><Icon name="back" size={18} /><span>{t('Settings')}</span></button>}
+            <h3>{showList ? t('Settings') : t(cur.label)}</h3>
+            <button type="button" className="win-btn st-close" onClick={onClose} aria-label={t('Close settings')}><Icon name="x" size={18} /></button>
+          </header>
+          {showList ? (
+            <nav className="st-scroll st-list" aria-label={t('Settings sections')}>
+              <ul className="m-more-list">
+                {sections.map((s) => (
+                  <li key={s.id}>
+                    <button type="button" className="m-more-row st-list-row" data-id={s.id} onClick={() => go(s.id)}>
+                      <span className="m-more-ico"><Icon name={s.icon} size={17} /></span>
+                      <span className="m-more-text"><b>{t(s.label)}</b>{s.hint && <span>{t(s.hint)}</span>}</span>
+                      <Icon name="chevron" size={13} className="muted" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </nav>
+          ) : (
+            <div className="st-scroll" key={at}>
+              {cur.hint && <p className="muted small st-lede">{t(cur.hint)}</p>}
+              {body}
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="modal-backdrop settings-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
@@ -73,21 +152,7 @@ export default function Settings({ section = 'general', onClose, onOpenAgent }) 
             <button type="button" className="win-btn" onClick={onClose} aria-label={t('Close settings')}><Icon name="x" size={14} /></button>
           </header>
           <div className="st-scroll">
-            <SettingsAt.Provider value={at}>
-            <ErrorBoundary key={at} name={t(cur.label)} resetKey={at}>
-            {at === 'general' && <General onGo={go} focus={section === 'permissions' ? 'permissions' : null} onOpenAgent={(id) => { onOpenAgent?.(id); onClose() }} />}
-            {at === 'agents' && <Agents onOpenAgent={(id) => { onOpenAgent?.(id); onClose() }} />}
-            {at === 'providers' && <Providers focus={section === 'accounts' || section === 'cloud' ? section : null} onOpenAgent={(id) => { onOpenAgent?.(id); onClose() }} />}
-            {at === 'voice' && <Voice />}
-            {at === 'meetings' && <Meetings />}
-            {at === 'mcp' && <Mcp />}
-            {at === 'appearance' && <Appearance />}
-            {at === 'config' && <ConfigFile />}
-            {at === 'phone' && <Phone focus={section === 'machines' ? 'machines' : null} />}
-            {at === 'about' && <About />}
-            {at === 'cloud' && <CloudKeys focus="cloud" bare />}
-            </ErrorBoundary>
-            </SettingsAt.Provider>
+            {body}
           </div>
         </section>
       </div>

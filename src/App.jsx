@@ -190,7 +190,7 @@ function App() {
   const [look, saveLook] = useAppearance()
   const theme = look.mode
   const setTheme = (mode) => saveLook({ mode })
-  const [settings, setSettings] = useState(null) // null = closed, else the section to show
+  const [settings, setSettings] = useState(null) // null = closed, else where it opens: 'all' (Settings itself) or a section
   const [L, setL] = usePersisted('cc-layout', LAYOUT)
   const [W, setW] = usePersisted('cc-ws', WS)
   const [primary] = useShared('cc-primary', 'claude')
@@ -451,7 +451,7 @@ function App() {
   const showCardRef = useRef(null)
   // Any part of the app can open a section of Settings (a fix that lives there).
   useEffect(() => {
-    const on = (e) => setSettings(e.detail?.section || 'general')
+    const on = (e) => setSettings(e.detail?.section || 'all')
     window.addEventListener('bridge-open-settings', on)
     return () => window.removeEventListener('bridge-open-settings', on)
   }, [])
@@ -559,7 +559,7 @@ function App() {
   // way, or a line under the top bar says so with Reload (src/fresh.js).
   const fresh = useFresh({ hold: !!meetings?.rec })
   useHotkey(useCallback((e) => (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k', []), () => setPalette((p) => !p))
-  useHotkey(useCallback((e) => (e.metaKey || e.ctrlKey) && e.key === ',', []), () => setSettings((v) => (v ? null : 'general')))
+  useHotkey(useCallback((e) => (e.metaKey || e.ctrlKey) && e.key === ',', []), () => setSettings((v) => (v ? null : 'all')))
   useHotkey(useCallback((e) => (e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'f', []), () => setHistory((v) => !v))
   useHotkey(useCallback((e) => e.altKey && (e.code === 'Digit1' || e.code === 'Digit2'), []), (e) => setView(e.code === 'Digit1' ? 'command' : 'herdr'))
   useHotkey(useCallback((e) => e.key === 'Escape' && !e.target.closest?.('.xterm, textarea, input, .quick-open, .tour, .excalidraw'), []), () => set({ max: null }))
@@ -604,7 +604,7 @@ function App() {
     { id: 'a:cloud', label: t('New cloud agent…'), icon: 'cloud', keywords: 'cursor copilot jules claude managed remote github repo pull request', run: () => setNewAgent({ mode: 'cloud' }) },
     { id: 'a:chat', label: t('New chat…'), icon: 'chat', keywords: 'plain vanilla talk ask claude codex gemini assistant', run: () => setNewAgent({ mode: 'chat' }) },
     !cloudOnly && newTerminal && { id: 'a:terminal', label: t('New terminal'), icon: 'terminal', keywords: 'shell command line console bash zsh brew npm run type commands', run: () => newTerminal() },
-    { id: 'a:settings', label: t('Settings…'), icon: 'settings', hint: '⌘,', keywords: 'preferences name default agent model location runtime', run: () => setSettings('general') },
+    { id: 'a:settings', label: t('Settings…'), icon: 'settings', hint: '⌘,', keywords: 'preferences name default agent model location runtime', run: () => setSettings('all') },
     { id: 'a:providers', label: t('Model Providers'), icon: 'layers', keywords: 'api key openai anthropic gemini openrouter bedrock vertex ollama lm studio', run: () => setSettings('providers') },
     { id: 'a:accounts', label: t('Accounts…'), icon: 'users', keywords: 'account switch work personal sign in login claude codex auto', run: () => setSettings('accounts') },
     { id: 'a:add-account', label: t('Add another account…'), icon: 'plus', keywords: 'account second work personal sign in login claude codex both two', run: () => setAddAcct({}) },
@@ -706,7 +706,7 @@ function App() {
           </>
         )}
         {toStart && <button className="win-btn" onClick={toStart} aria-label={t('Your computer')} title={t('Back to the start: pair or open a computer')}><Icon name="laptop" size={wide ? 15 : 18} /></button>}
-        <button className="win-btn settings-btn" data-tour="settings" onClick={() => { if (setDot) { upNote.seen(); setSettings('about') } else setSettings('general') }} aria-label={t('Settings')}
+        <button className="win-btn settings-btn" data-tour="settings" onClick={() => { if (setDot) { upNote.seen(); setSettings('about') } else setSettings('all') }} aria-label={t('Settings')}
           title={setDot ? t('Bridge AI {latest} is available (you have {current})', { latest: update.data.latest, current: update.data.current }) : t('Settings (⌘,)')}>
           <Icon name="settings" size={wide ? 15 : 18} />
           {setDot && <span className="top-dot" aria-hidden="true" />}
@@ -759,7 +759,7 @@ function App() {
       { id: 'dictations', icon: 'wave', label: t('Dictations'), hint: t("Everything you've dictated"), run: () => setMoreView('view:dictations') },
       { id: 'needs', icon: 'bell', label: t('Needs you'), hint: t("What's waiting on you, on every device"), count: waiting, run: () => setInbox({}) },
       { id: 'history', icon: 'clock', label: t('History'), hint: t('Every conversation, and closed agents'), run: () => setHistory(true) },
-      { id: 'settings', icon: 'settings', label: t('Settings'), hint: t('Devices, voice, appearance and more'), run: () => setSettings('general') },
+      { id: 'settings', icon: 'settings', label: t('Settings'), hint: t('Devices, voice, appearance and more'), run: () => setSettings('all') },
     ].filter(Boolean)
     return (
       <div className="app narrow">
