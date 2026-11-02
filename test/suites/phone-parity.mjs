@@ -181,7 +181,7 @@ try {
     await ph.p.locator('.wb-card', { hasText: board }).click()
     ok(!!(await until(() => ph.p.locator('.excalidraw canvas').count(), 30000)), `${width}: a board opens from the list, in More`)
     ok((await ph.p.locator('.tabbar button.on').innerText()).trim() === 'More' && !(await ph.p.locator('.m-more-view > .m-view-back').count()), `${width}: still in More, with the board's own way back only`)
-    await ph.p.locator('.wb-view .pane-extras button[aria-pressed]').click()
+    await ph.p.locator('.wb-view .pane-extras button[aria-label="Draw this"]').click()
     ok(!!(await until(() => ph.p.locator('.wb-draw textarea').isVisible(), 8000)), `${width}: Draw this opens on the board`)
     await shot(ph.p, `${tag}phone-board-${width}`)
     await ph.p.locator('.wb-view button[aria-label="All whiteboards"]').click()
