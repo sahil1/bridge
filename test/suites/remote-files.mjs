@@ -266,10 +266,18 @@ try {
   }
 
   // ---------- the viewer ----------
-  // On a page: open the agent's Files at a file.
+  // On a page: open the agent's Files at a file, asked again each second until it shows (sent before
+  // the page was listening, as a slower browser can be, the ask is lost; so is opening the agent).
   const openAt = async (frame, name) => {
-    await frame.evaluate(({ pane, name }) => window.dispatchEvent(new CustomEvent('cc-set-view', { detail: { paneId: pane, view: 'files', path: name } })), { pane, name })
-    return frame.locator('.viewer .crumbs b', { hasText: name }).first().waitFor({ timeout: 15000 }).then(() => true, () => false)
+    const shown = frame.locator('.viewer .crumbs b', { hasText: name }).first()
+    for (let i = 0; i < 15; i++) {
+      await frame.evaluate(({ pane, name, again }) => {
+        if (again) window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: pane } }))
+        window.dispatchEvent(new CustomEvent('cc-set-view', { detail: { paneId: pane, view: 'files', path: name } }))
+      }, { pane, name, again: i > 0 })
+      if (await shown.waitFor({ timeout: 1000 }).then(() => true, () => false)) return true
+    }
+    return false
   }
   const viewer = async (frame, label, prefix) => {
     const where = `${label}: `
