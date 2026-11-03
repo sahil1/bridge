@@ -4,11 +4,12 @@ import { api, usePoll } from '../../api.js'
 import { useSettings, SaveNote } from './General.jsx'
 import { MemoryPanel } from '../meetings/tools.jsx'
 import { t } from '../../i18n/index.js'
+import { MEETING_KEYS } from '../../../shared/mentions.js'
 import '../meetings/meetings.css'
 
 // Settings › Meetings: which engine turns speech into text (on this computer, or a service you have
 // a key for), the language, recording the call's sound, the model that writes the notes, and where
-// they're saved. Server: speech.js, meetings.js.
+// they're saved, and the key that mentions a meeting in a message. Server: speech.js, meetings.js.
 const LANGS = [['auto', 'Detect it'], ['en', 'English'], ['es', 'Spanish'], ['fr', 'French'], ['de', 'German'], ['it', 'Italian'], ['pt', 'Portuguese'], ['nl', 'Dutch'], ['hi', 'Hindi'], ['zh', 'Chinese'], ['ja', 'Japanese'], ['ko', 'Korean'], ['ar', 'Arabic'], ['ru', 'Russian'], ['pl', 'Polish'], ['tr', 'Turkish'], ['sv', 'Swedish'], ['uk', 'Ukrainian']]
 const home = (p) => String(p || '').replace(/^\/Users\/[^/]+/, '~')
 const WHAT = [['both', 'The summary and the transcript, two linked notes'], ['one', 'One note with everything'], ['summary', 'The summary only'], ['transcript', 'The transcript only']]
@@ -214,6 +215,16 @@ export default function Meetings() {
       </section>
 
       {d.voices?.offered && <RoomVoices v={d.voices} m={m} set={set} refresh={() => sp.refresh()} />}
+
+      <section className="st-sec">
+        <h4>{t('Mention a Meeting')}</h4>
+        <div className="st-row"><span>{t('In a message, with')}</span>
+          <select className="st-input" value={MEETING_KEYS.includes(m.mentionKey) ? m.mentionKey : '@'} onChange={(e) => set({ mentionKey: e.target.value === '@' ? null : e.target.value })} aria-label={t('The key that mentions a meeting')}>
+            {MEETING_KEYS.map((k) => <option key={k} value={k}>{k === '@' ? t('@, with the files') : k}</option>)}
+          </select>
+        </div>
+        <p className="muted small">{t('In an agent\'s message box, type it and a few words of the meeting\'s name, and pick it: the agent gets the meeting as a file to read, with its summary and action items, your notes and the transcript.')}</p>
+      </section>
 
       <section className="st-sec">
         <h4>Calls</h4>

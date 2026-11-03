@@ -384,6 +384,23 @@ try {
   const files = saved.files.map((f) => fs.readFileSync(f, 'utf8')).join('\n')
   ok(/## Demo/.test(files) && /### Dan Ruiz \(/.test(files) && /### Tester \(/.test(files) && /## Summary/.test(files), 'saved Markdown: the summary, a heading per section, who said it (you by your name)', files.slice(0, 600))
 
+  // A meeting mentioned in a message: found by every word of its name, the latest first with none;
+  // and as one file for the agent, named for it, beside the meeting.
+  const found = (await kit.api('/meetings/mentions?q=quarterly PLAN')).meetings
+  ok(found.length === 1 && found[0].id === A.id && found[0].hasSummary, 'a meeting to mention is found by the words of its name, any case', found)
+  ok((await kit.api('/meetings/mentions?q=quarterly%20budget')).meetings.length === 0, 'every word has to be in it')
+  const latest = (await kit.api('/meetings/mentions')).meetings
+  ok(latest.length >= 2 && latest.every((x, i) => !i || latest[i - 1].startedAt >= x.startedAt), 'with nothing typed, the latest first', latest.map((x) => x.title))
+  const ref = await kit.api(`/meetings/${A.id}/for-agents`, {})
+  const refText = fs.readFileSync(ref.path, 'utf8')
+  ok(path.basename(ref.path) === 'Quarterly plan.md' && ref.path.startsWith(path.join(kit.data, 'meetings', A.id)) && /^# Quarterly plan\n/.test(refText) && /## Summary/.test(refText) && /## Transcript/.test(refText) && /\] Dan Ruiz: These slides/.test(refText) && /## Demo \(from 0:0\d\)/.test(refText), 'mentioned: the meeting as one file for the agent, named for it, beside the meeting, with its summary and the transcript in sections', refText.slice(0, 300))
+  ok((await kit.api('/config')).meetingKey === '@', 'the meeting key is @ to begin with')
+  await kit.api('/settings', { meetings: { mentionKey: '#' } }, 'PATCH')
+  ok((await kit.api('/config')).meetingKey === '#', 'and the one picked in Settings › Meetings')
+  await kit.api('/settings', { meetings: { mentionKey: 'x' } }, 'PATCH')
+  ok((await kit.api('/config')).meetingKey === '@', 'one the app doesn\'t offer is @')
+  await kit.api('/settings', { meetings: { mentionKey: null } }, 'PATCH')
+
   // Open on a file sent to the meeting: a document opens, one that could run something (a .command)
   // is shown in Finder instead (tests open nothing: the command comes back).
   const sendFile = (name) => fetch(`${kit.url}/api/meetings/${A.id}/files?name=${encodeURIComponent(name)}`, { method: 'POST', body: 'echo hi' }).then((r) => r.json())
