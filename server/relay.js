@@ -309,7 +309,9 @@ class Conn {
     this.timer = setTimeout(() => { if (!this.session) this.close() }, HELLO_SECONDS * 1000)
   }
 
-  receive(buf) { this.q = this.q.then(() => this.handle(buf)).catch((e) => { console.error('relay:', e.message); this.close() }) }
+  // Anything that goes wrong ends this connection (the phone or device connects again), and says
+  // whose it was: a record that didn't open is one missing or changed on the way.
+  receive(buf) { this.q = this.q.then(() => this.handle(buf)).catch((e) => { console.error(`relay: ${this.device ? `${this.device.name} (${this.device.kind || 'phone'})` : 'a connection'}: ${e.message}; closed it`); this.close() }) }
 
   close() { toRelay(OP.CLOSE, this.id); this.end(); conns.delete(this.id) }
 
