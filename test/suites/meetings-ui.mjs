@@ -387,6 +387,34 @@ process.exit(1)`)
   await item(0).locator('.mt-went.agent button', { hasText: 'Open' }).click({ timeout: 5000 }).catch(() => {})
   ok(!!(await until(async () => (await p.locator('.tab-row .tab.on, .ws-tab.on, [role="tab"][aria-selected="true"]').filter({ hasText: 'Fix the retry' }).count()) > 0 || /Fix the retry/.test(await p.locator('.pane-head').first().innerText({ timeout: 500 }).catch(() => '')), 8000)), 'Open goes to the agent', await p.locator('.pane-head').first().innerText().catch(() => ''))
 
+  // ---------- A meeting mentioned in the agent's message box ----------
+  // @ and words of its name: the meeting, beside any files found; picked, @ and the file the agent
+  // reads, with the meeting in it. With another key picked in Settings › Meetings: only meetings.
+  const box = p.locator('.composer-stack textarea:visible').first()
+  const menuText = () => p.locator('.mention-menu').innerText({ timeout: 1000 }).catch(() => '')
+  await box.click({ timeout: 5000 }).catch(() => {})
+  await box.fill('')
+  await box.pressSequentially('see @weekly', { delay: 20 })
+  const meetRow = p.locator('.mention-menu .slash-item', { hasText: 'Weekly payments sync' }).first()
+  ok(await meetRow.waitFor({ timeout: 8000 }).then(() => true, () => false) && /meeting/i.test(await meetRow.innerText().catch(() => '')), 'typing @ and words of a meeting\'s name in an agent\'s message box: the meeting, marked as one', await menuText())
+  await box.press('Enter')
+  const val = await until(async () => { const v = await box.inputValue(); return /@"[^"]*Weekly payments sync\.md" $/.test(v) ? v : null }, 8000, 100)
+  ok(!!val && /^see @"/.test(val), 'picked: @ and the file the agent reads, in place of what was typed', val || await box.inputValue())
+  const refPath = val && /@"([^"]+)"/.exec(val)[1]
+  const refText = refPath && fs.existsSync(refPath) ? fs.readFileSync(refPath, 'utf8') : ''
+  ok(/^# Weekly payments sync\n/.test(refText) && /Attendees: Mia Chen, Ola Berg, Tester/.test(refText) && /## Summary/.test(refText) && /Retry with a backoff/.test(refText) && /## Transcript/.test(refText) && /Stripe webhook in payments-api retries forever/.test(refText), 'the file: when and who, the summary and action items, and the transcript', refText.slice(0, 400))
+  await api('/settings', { meetings: { mentionKey: '#' } }, 'PATCH')
+  await p.evaluate(() => window.dispatchEvent(new Event('bridge-settings')))
+  await box.fill('')
+  await box.pressSequentially('#', { delay: 20 })
+  ok(!!(await until(async () => { const x = await menuText(); return /Latest meetings/.test(x) && /Weekly payments sync/.test(x) }, 8000, 150)), 'with # picked in Settings › Meetings: # alone lists the latest meetings', await menuText())
+  await box.fill('')
+  await box.pressSequentially('see @weekly', { delay: 20 })
+  await p.waitForTimeout(600)
+  ok(!/Weekly payments sync/.test(await menuText()), 'and @ is for files only', await menuText())
+  await box.fill('')
+  await api('/settings', { meetings: { mentionKey: null } }, 'PATCH')
+
   // Since last time: the next one in the series, recording, says what became of last week's items.
   const W2 = await api('/meetings', { title: 'Weekly payments sync (Nov 7)', call: false, event: { title: 'Weekly payments sync', attendees: ['Mia Chen', 'Ola Berg', 'Tester'] } })
   await p.evaluate((id) => window.dispatchEvent(new CustomEvent('bridge-open-meeting', { detail: { id } })), W2.id)

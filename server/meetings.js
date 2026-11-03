@@ -2066,6 +2066,42 @@ function fill(pattern, m, { dir = false } = {}) {
   const out = String(pattern || '').replace(/\{(\w+)\}/g, (x, k) => (k in v ? String(v[k]) : x))
   return dir ? out.split(/[\\/]+/).map((p) => fileSafe(p).replace(/^\.+$/, '_')).filter((p) => p && p !== 'Untitled').join(path.sep) : fileSafe(out)
 }
+// ---------- A meeting mentioned in a message ----------
+// The meetings that match what's typed after the meeting key (@, or the one picked in Settings ›
+// Meetings) in the message box: every word in the title, newest first; with nothing typed, the
+// latest ones that aren't archived.
+export function mentionable(q = '', n = 8) {
+  const words = String(q || '').toLowerCase().split(/\s+/).filter(Boolean).slice(0, 8)
+  const hit = (m) => words.every((w) => String(m.title || '').toLowerCase().includes(w))
+  return list().filter((m) => (words.length ? hit(m) : !m.archived)).slice(0, n)
+    .map((m) => ({ id: m.id, title: m.title, startedAt: m.startedAt, seconds: m.seconds || 0, status: m.status, hasSummary: !!m.hasSummary, people: (m.event?.attendees || []).length }))
+}
+// The meeting as one file for an agent to read (Claude Code reads @path): when, who, its summary and
+// action items, your notes and the transcript. Written fresh each time it's mentioned, beside the
+// meeting, named for it (so the agent shows its name); a recording so far as it's got.
+export function forAgents(id) {
+  const m = meta(id)
+  const at = new Date(m.startedAt)
+  const when = `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`
+  const who = m.event?.attendees?.length ? `Attendees: ${m.event.attendees.join(', ')}` : ''
+  const summary = readText(path.join(dirOf(id), 'summary.md')).trim()
+  const notes = filled(readText(path.join(dirOf(id), 'notes.md')), m.sections).trim()
+  const said = transcriptText(id)
+  const text = [
+    `# ${m.title}`,
+    [`Meeting on ${when}, ${clock(m.seconds || 0)} long${m.status === 'recording' || m.status === 'paused' ? ' (still recording: this is as far as it has got)' : ''}.`, who].filter(Boolean).join('\n'),
+    summary ? `## Summary\n\n${summary.replace(/^#\s.*\n+/, '')}` : '',
+    notes ? `## My notes\n\n${notes}` : '',
+    said ? `## Transcript\n\n${said}` : '',
+  ].filter(Boolean).join('\n\n')
+  const dir = path.join(dirOf(id), 'for-agents')
+  fs.mkdirSync(dir, { recursive: true })
+  for (const f of fs.readdirSync(dir)) fs.rmSync(path.join(dir, f), { force: true }) // one file, under the meeting's name as it is now
+  const file = path.join(dir, `${fileSafe(m.title)}.md`)
+  fs.writeFileSync(file, `${text}\n`)
+  return { path: file, title: m.title }
+}
+
 // Where a meeting's notes go with Settings as they are.
 export function target(m, o = saving()) {
   const note = o.what === 'transcript' ? null : path.join(o.folder, fill(o.noteSub, m, { dir: true }), `${fill(o.noteName, m)}.md`)

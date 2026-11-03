@@ -36,6 +36,7 @@ import { makeMail, setRule } from './mail.js'
 import { makeMacro } from './macro.js'
 import * as slash from './commands.js'
 import * as mentions from './mentions.js'
+import { MEETING_KEYS } from '../shared/mentions.js'
 import { promptSafe, draftIn } from './promptsafe.js'
 import { rewindAndSend, codexRewindAndSend, undoReply, btwAnswer } from './rewind.js'
 import { makeNews } from './news.js'
@@ -1253,6 +1254,10 @@ app.get('/api/calls', wrap(() => {
 }))
 app.post('/api/calls/dismiss', wrap(() => { prompt = null; return { ok: true } }))
 syncCalls()
+// Meetings to mention in a message, and one as a file for an agent to read (the message box's
+// meeting key, @ unless Settings › Meetings says another).
+app.get('/api/meetings/mentions', wrap((req) => ({ meetings: meetings.mentionable(req.query.q) })))
+app.post('/api/meetings/:id/for-agents', wrap((req) => meetings.forAgents(req.params.id)))
 app.get('/api/meetings/:id', wrap((req) => meetings.get(req.params.id)))
 app.post('/api/meetings/:id/audio', express.raw({ type: () => true, limit: '4mb' }), wrap((req) => meetings.audio(req.params.id, String(req.query.src || ''), req.body, req.query.seq)))
 app.post('/api/meetings/:id/pause', wrap((req) => meetings.pause(req.params.id)))
@@ -1874,6 +1879,7 @@ app.get('/api/config', (req, res) => res.json({
   defaultAgent: cfg.defaultAgent || 'claude', chiefKind: cfg.chief?.kind || 'claude', setupDone: !!cfg.setupDone, simple: !!cfg.simple,
   dictation: cfg.dictation || {}, // Settings › Voice › Dictation
   alertSounds: cfg.alertSounds !== false, // the speaker in the top bar
+  meetingKey: MEETING_KEYS.includes(cfg.meetings?.mentionKey) ? cfg.meetings.mentionKey : '@', // Settings › Meetings
 }))
 // The speaker in the top bar: notifications (this computer's, a browser's, your phones') come with a
 // sound, or without one; they still come. Your other devices are told too, unless one of them is
