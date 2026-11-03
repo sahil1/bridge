@@ -753,6 +753,17 @@ kbd { font: 11px var(--font-mono); padding: 1px 5px; border-radius: 4px; backgro
 .tree-name { overflow: hidden; text-overflow: ellipsis; }
 .viewer-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .viewer { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* Files' open files, a tab each above the one in front (FilesView). */
+.file-tabs { flex: none; display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; padding: 4px 6px 0; border-bottom: 1px solid var(--line); background: var(--pane-2); }
+.file-tabs::-webkit-scrollbar { display: none; }
+.file-tab { flex: none; display: inline-flex; align-items: center; max-width: 220px; height: 30px; border-radius: 8px 8px 0 0; color: var(--ink-3); }
+.file-tab:hover { color: var(--ink-2); }
+.file-tab.on { background: var(--pane); color: var(--ink); box-shadow: inset 0 -2px 0 var(--accent); }
+.file-tab-name { display: inline-flex; align-items: center; gap: 6px; min-width: 0; height: 100%; padding: 0 2px 0 10px; color: inherit; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.file-tab-x { flex: none; display: grid; place-items: center; width: 22px; height: 22px; margin-right: 4px; border-radius: 6px; color: inherit; opacity: .55; }
+.file-tab-x:hover { opacity: 1; background: var(--pane-3); }
+.files-view.narrow .file-tab { height: 40px; }
+.files-view.narrow .file-tab-x { width: 40px; height: 40px; margin-right: 0; }
 .viewer-head { flex: none; display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 8px 0 14px; border-bottom: 1px solid var(--line); }
 .crumbs { display: flex; align-items: center; gap: 2px; min-width: 0; overflow: hidden; white-space: nowrap; font-size: 12.5px; color: var(--ink-3); flex: 1; }
 .crumb { display: inline-flex; align-items: center; gap: 2px; }

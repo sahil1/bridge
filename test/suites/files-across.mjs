@@ -16,6 +16,8 @@
 //   device's Files, the copy's progress and where it landed (Show in Finder), Places in Files, and
 //   on a phone (390 wide) photos and videos sent from it into the project, with their progress and
 //   nothing wider than the screen;
+//   Files on another device keeps several files open, a tab each, and where you were (the files open,
+//   the one in front) when you leave Files and come back, and after a reload;
 //   a notification about a video an agent made opens it in Files, where it plays.
 import fs from 'node:fs'
 import path from 'node:path'
@@ -265,6 +267,27 @@ try {
 
   // Laptop's own Files, with Studio's agent in a tab beside it: a file dragged from Studio's Files
   // into Laptop's is copied here.
+  await part('several files open, and where you were kept', async () => {
+    const tabNames = () => pg.locator('.file-tabs .file-tab-name').allInnerTexts().then((x) => x.map((n) => n.trim()), () => [])
+    const front = () => pg.locator('.file-tab.on .file-tab-name').innerText().then((n) => n.trim(), () => null)
+    const shows = (f) => pg.evaluate((f) => [...document.querySelectorAll('.viewer .crumbs b')].some((b) => b.textContent.includes(f)), f)
+    await filesAt(pg, pane, 'clip.mp4')
+    await pg.locator('.tree-row', { hasText: 'final.mp4' }).first().click()
+    ok(!!(await until(async () => (await tabNames()).join() === 'clip.mp4,final.mp4' && (await front()) === 'final.mp4' && await shows('final.mp4'), 10000, 150)), 'another file opens in a tab of its own, beside the one open, and in front', await tabNames())
+    await pg.locator('.file-tab-name', { hasText: 'clip.mp4' }).click()
+    ok(!!(await until(async () => (await front()) === 'clip.mp4' && await shows('clip.mp4'), 10000, 150)), 'a tab brings its file back to the front')
+    // Out of Files and back: the same files open, the same one in front (it started from the top).
+    await pg.evaluate((p) => window.dispatchEvent(new CustomEvent('cc-set-view', { detail: { paneId: p, view: 'chat' } })), pane)
+    await sleep(600)
+    await filesAt(pg, pane, null)
+    ok(!!(await until(async () => (await tabNames()).join() === 'clip.mp4,final.mp4' && (await front()) === 'clip.mp4' && await shows('clip.mp4'), 10000, 150)), 'out of Files and back: the same files open, the same one in front', await tabNames())
+    await pg.reload()
+    await filesAt(pg, pane, null)
+    ok(!!(await until(async () => (await tabNames()).join() === 'clip.mp4,final.mp4' && await shows('clip.mp4'), 15000, 150)), 'and after a reload', await tabNames())
+    await shot(pg, `${tag}files-across-tabs`)
+    await pg.locator('.file-tab', { hasText: 'clip.mp4' }).locator('.file-tab-x').click()
+    ok(!!(await until(async () => !(await pg.locator('.file-tabs').count()) && await shows('final.mp4'), 10000, 150)), 'closing a tab brings the one beside it to the front (one left: no tabs to show)')
+  })
   await part('a file dragged in from another device', async () => {
     await pg.goto(`${lap.url}/`)
     await filesAt(pg, lpane, null)
