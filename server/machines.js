@@ -97,10 +97,14 @@ class Link {
     ws.on('open', () => {
       clearInterval(this.pinger)
       this.heard = Date.now()
-      // Gone quiet: start over, rather than wait on a dead connection until Bridge AI restarts.
+      // Gone quiet: start over, rather than wait on a dead connection until Bridge AI restarts. The
+      // relay answers its pings, so the device itself is asked too (PING, once it says it answers):
+      // one whose network went without a word can look connected to its relay for a while.
       this.pinger = setInterval(() => {
-        if (Date.now() - this.heard > QUIET_MS) { this.error = `Lost the connection to ${this.m.name}. Connecting again…`; return ws.terminate() }
+        const now = Date.now()
+        if (now - this.heard > QUIET_MS || (this.session && this.answers && now - this.fromIt > QUIET_MS)) { this.error = `Lost the connection to ${this.m.name}. Connecting again…`; return ws.terminate() }
         try { ws.send('ping') } catch { /* closing */ }
+        if (this.session && this.answers && now - this.fromIt >= PING_MS) this.send(K.PING, 0).catch(() => {})
       }, PING_MS)
     })
     ws.on('message', (data, isBinary) => {
@@ -108,7 +112,7 @@ class Link {
       this.q = this.q.then(() => (isBinary ? this.onData(data) : this.onText(String(data)))).catch((e) => { this.error = e.message; try { ws.close() } catch { /* closed */ } })
     })
     ws.on('error', (e) => { this.error = `Can't reach its relay: ${e.message}` })
-    ws.on('close', () => {
+    ws.on('close', (code) => {
       if (this.ws !== ws) return
       clearInterval(this.pinger)
       clearTimeout(this.helloTimer)
@@ -116,8 +120,9 @@ class Link {
       this.hostOnline = false
       this.drop(`${this.m.name} is offline`)
       if (this.stopped) return
-      // Asking: look again every few seconds, so it links as soon as you allow it.
-      const wait = this.m.state === 'asking' ? 5000 : this.backoff
+      // Asking: look again every few seconds, so it links as soon as you allow it. That device just
+      // connected to its relay again (back on the network, say): at once.
+      const wait = code === 4001 ? 300 : this.m.state === 'asking' ? 5000 : this.backoff
       this.backoff = Math.min(this.backoff * 2, 60000)
       this.timer = setTimeout(() => { this.timer = null; this.connect() }, wait)
     })
@@ -191,6 +196,8 @@ class Link {
       this.code = null
       save()
       this.session = done.session
+      this.answers = msg.ping === 1 // it answers PING
+      this.fromIt = Date.now()
       this.error = null
       this.backoff = 2000
       for (const w of this.waiters.splice(0)) w.ok()
@@ -201,7 +208,9 @@ class Link {
     }
     if (!this.session) return
     const { kind, id, body } = unpack(await this.session.open(buf))
+    this.fromIt = Date.now()
     if (kind === K.PING) return this.send(K.PONG, 0)
+    if (kind === K.PONG) return
     const s = this.streams.get(id)
     if (!s) return
     if (kind === K.HEAD) s.onHead?.(json(body))

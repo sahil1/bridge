@@ -65,7 +65,18 @@ within a few seconds (offline since when, its relay not answering, or it not ans
 "Connecting…", and lists your other computers with whether each is on (their relays say, before any
 pairing), what that computer last sent, Cloud Agents and Try the demo, while it keeps trying: once
 the computer is back, Bridge AI opens. With no other computer, what it last sent opens by itself,
-under a banner whose Start screen button leads there. Bridge AI's own menu gets the same from the
+under a banner whose Start screen button leads there.
+
+A computer that drops off the network while you're using it (Wi-Fi off, a lid closed on the move)
+can look connected to its relay for a while, as nothing tells the relay it went. So the page asks
+the computer itself, through the link, whenever it has heard nothing from it for 6 seconds or a
+request has had no word back for 3: no answer in 4 more, and the banner says it isn't answering, with
+what it last sent and **Open** your other computer that's on (else Start screen), while it keeps
+trying. Its relay lets it go once it has been quiet for 40 seconds, and the banner then says since
+when it's been offline. A computer on an older Bridge AI doesn't answer that question; it says
+whether it does when the link opens, and the page only asks those that do.
+
+Bridge AI's own menu gets the same from the
 page (`relay/web/shell.js`): `bridgeRelay.start()` shows the start screen, `bridgeRelay.openCloud()`
 opens Cloud Agents (both null where they don't exist, in a browser), and
 `bridgeRelay.computers.list()` gives each computer's `online` (true, false, or null while it isn't

@@ -56,8 +56,11 @@
     #away .dot { width: 8px; height: 8px; margin-top: 5px; border-radius: 50%; background: #ef4444; flex: none; }
     #away b { font-weight: 600; }
     #away span { color: var(--muted); }
-    #away > div { flex: 1; }
+    #away { flex-wrap: wrap; }
+    #away > div { flex: 1 1 160px; }
+    #away .btns { display: flex; gap: 8px; margin-left: auto; }
     #away button { height: 30px; padding: 0 12px; font-size: 13px; border-radius: 8px; background: transparent; color: var(--fg); border: 1px solid var(--line); flex: none; }
+    #away button.go { background: var(--accent); border-color: var(--accent); color: #fff; }
     .away #app { top: var(--away, 0px); height: calc(100% - var(--away, 0px) - env(safe-area-inset-bottom)); }
     /* Bridge AI keeps clear of the notch itself here: that part of it goes under the banner. */
     .away.insets-inside #app { top: calc(var(--away, 0px) - env(safe-area-inset-top)); height: calc(100% - var(--away, 0px) + env(safe-area-inset-top)); }
@@ -123,7 +126,7 @@
     </div>
   </section>
 
-  <div id="away" role="status" hidden><span class="dot"></span><div><b id="away-title"></b> <span id="away-text"></span></div><button id="away-more" type="button" hidden>Start screen</button></div>
+  <div id="away" role="status" hidden><span class="dot"></span><div><b id="away-title"></b> <span id="away-text"></span></div><span class="btns"><button id="away-open" class="go" type="button" hidden></button><button id="away-more" type="button" hidden>Start screen</button></span></div>
   <div id="bar" role="status" hidden><span class="dot"></span><span id="bar-text"></span><button id="bar-go" type="button" hidden>Reload</button></div>
   <iframe id="app" title="Bridge AI" hidden allow="clipboard-read; clipboard-write; microphone; fullscreen"></iframe>
   <script type="module" src="/shell.js"></script>
