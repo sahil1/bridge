@@ -16,6 +16,7 @@ A computer that drops off the network is noticed in seconds, with another of you
 
 ### Fixes
 
+- **Switching to another computer that went quiet**, from the devices menu or in a window, no longer waits up to a minute and a half: the first thing you ask that gets no answer checks the link, and within seconds it connects again and what you asked comes. The phone coming back from the background no longer cuts its own link to your computer either (it sent with the old connection's keys on the new one).
 - **Another computer in a window of its own** no longer shows an error as its page, or stays white, when the link between your computers drops as it opens: what was on its way is asked for again once the link is back. When that computer isn't reachable, the window says so and opens it by itself as soon as it's back.
 
 ### After this update

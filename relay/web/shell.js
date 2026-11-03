@@ -368,6 +368,10 @@ function connect() {
   clearTimeout(retryTimer)
   if (adding) return
   if (ws && ws.readyState <= 1) return
+  // One still closing (it hadn't said so: an iPhone back from the background) is let go first, with
+  // its session: kept, what was sealed for it went out on the new connection, which the computer
+  // couldn't open, so it ended that one too.
+  if (ws) abandon()
   const sock = new WebSocket(`${relay.replace(/^http/, 'ws')}/_relay/link`)
   ws = sock
   sock.binaryType = 'arraybuffer'

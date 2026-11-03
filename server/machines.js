@@ -42,6 +42,8 @@ const links = new Map() // machine id -> Link
 const PING_MS = Number(process.env.BRIDGE_LINK_PING_MS) || 30000
 const QUIET_MS = PING_MS * 2.5
 const HELLO_MS = Math.min(15000, QUIET_MS)
+const SLOW_MS = 3000 // a request with no word back this long: is that device still there?
+const ANSWER_MS = 4000 // no answer to that this long: the link starts over
 const byId = (id) => conf.machines.find((m) => m.id === id) || null
 const byRelay = (r) => conf.machines.find((m) => m.relay === r) || null
 
@@ -91,6 +93,9 @@ class Link {
   connect() {
     clearTimeout(this.timer)
     if (this.stopped || (this.ws && this.ws.readyState <= 1)) return
+    // One still closing is let go first, with its session (sealed for it, a record on the new
+    // connection wouldn't open there).
+    if (this.ws) { const old = this.ws; this.ws = null; try { old.terminate() } catch { /* closed */ } this.drop('Connecting again') }
     const ws = new WebSocket(`${this.m.relay.replace(/^http/, 'ws')}/_relay/link`, { handshakeTimeout: 15000 })
     this.ws = ws
     this.heard = Date.now()
@@ -278,6 +283,8 @@ class Link {
     this.session = null
     this.waiting = null
     clearTimeout(this.helloTimer)
+    clearTimeout(this.probing)
+    this.probing = null
     for (const s of this.streams.values()) { s.onError?.(msg || 'Connection lost'); s.onClose?.({ c: 1006, r: 'connection lost' }) }
     this.streams.clear()
   }
@@ -312,10 +319,28 @@ class Link {
     while (this.session === session && this.ws && this.ws.bufferedAmount > 256 * 1024) await new Promise((r) => setTimeout(r, 10))
   }
 
+  // A request with no word back for a while: is that device still there? The link can look open
+  // long after it went (its relay answers the pings), and what you clicked waited until the next
+  // check, up to 75 s. It's asked at once (PING, or its relay where it can't answer that); nothing
+  // back, and the link starts over, which a page of it is asked again on (proxy).
+  probe() {
+    const ws = this.ws
+    if (!this.session || !ws || this.probing) return
+    const at = Date.now()
+    this.probing = setTimeout(() => {
+      this.probing = null
+      if (this.ws === ws && (this.answers ? this.fromIt : this.heard) < at) { this.error = `${this.m.name} didn't answer. Connecting again…`; ws.terminate() }
+    }, ANSWER_MS)
+    if (this.answers) this.send(K.PING, 0).catch(() => {})
+    else try { ws.send('ping') } catch { /* closing */ }
+  }
+
   // A request to that device: handlers get { s, h }, then pieces, then the end (or an error).
   // w: how much of the answer may be on its way at once; more(n) once n of it has been taken in.
-  request({ m, u, h, body, w }, handlers) {
+  request({ m, u, h, body, w }, given) {
     const id = this.next++
+    const slow = setTimeout(() => this.probe(), SLOW_MS)
+    const handlers = { ...given, onHead: (x) => { clearTimeout(slow); given.onHead?.(x) }, onError: (x) => { clearTimeout(slow); given.onError?.(x) } }
     this.streams.set(id, handlers)
     const started = this.send(K.REQ, id, { m, u, h, body: !!body, ...(w ? { w } : {}) })
     return {
@@ -323,7 +348,7 @@ class Link {
       started,
       write: (chunk, { bulk = false } = {}) => (async () => { for (let o = 0; o < chunk.byteLength; o += CHUNK) { if (bulk) await this.clear(); await this.send(K.BODY, id, chunk.subarray(o, o + CHUNK)) } })(),
       end: () => this.send(K.END, id),
-      cancel: () => { if (this.streams.delete(id)) this.send(K.CANCEL, id).catch(() => {}) },
+      cancel: () => { clearTimeout(slow); if (this.streams.delete(id)) this.send(K.CANCEL, id).catch(() => {}) },
       more: (n) => { if (this.streams.has(id)) this.send(K.MORE, id, more(n)).catch(() => {}) },
     }
   }

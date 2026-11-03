@@ -16,9 +16,10 @@ const { ok, done } = checks('devices')
 const QUIET = 1500 * 2.5 // BRIDGE_LINK_PING_MS below: a quiet link is started over after this
 const relays = []
 const kits = []
-const kitWith = async (name, rel) => {
+// fast: links checked every 1.5 s (so a quiet one is seen quickly); without, as in the app (30 s).
+const kitWith = async (name, rel, { fast = true } = {}) => {
   const k = await startKit(`devices-${name.toLowerCase()}`, {
-    env: ({ data }) => { fs.writeFileSync(path.join(data, 'relay.json'), JSON.stringify(rel.relayFile)); return { BRIDGE_COMPUTER_NAME: name, BRIDGE_LINK_PING_MS: '1500' } },
+    env: ({ data }) => { fs.writeFileSync(path.join(data, 'relay.json'), JSON.stringify(rel.relayFile)); return { BRIDGE_COMPUTER_NAME: name, ...(fast ? { BRIDGE_LINK_PING_MS: '1500' } : {}) } },
   })
   kits.push(k)
   return k
@@ -86,6 +87,24 @@ try {
   const backOn = await until(async () => (await other(b, 'Studio'))?.online === true, 30000, 200)
   const relinkedIn = backOn ? Date.now() - t0 : null
   ok(relinkedIn != null && relinkedIn < 12000, `back on the network: linked again in ${relinkedIn} ms (limit 12 s)`, await other(b, 'Studio'))
+
+  // ---------- a link that dies without a word, then something's asked of it ----------
+  // Desk checks its links as the app does (every 30 s). Its link to Studio goes dead without a word
+  // (its relay hears nothing either way): what you click there is answered within seconds, on a new
+  // link, rather than waiting on the dead one until its next check (up to 75 s).
+  const rd = await startRelay('devices-desk')
+  relays.push(rd)
+  const desk = await kitWith('Desk', rd, { fast: false })
+  ok(!!(await until(async () => (await desk.api('/relay')).online, 20000)), 'Desk, which checks its links every 30 s, is on its relay')
+  await desk.api('/machines', { link: (await a.api('/relay/pair', {})).pairing.link })
+  ok(!!(await online(desk, 'Studio')), 'and linked with Studio')
+  const studioOnDesk = await other(desk, 'Studio')
+  await fetch(`${ra.url}/_test/silence`, { method: 'POST' }) // Studio's relay: the devices' connections to it go dead
+  ok((await other(desk, 'Studio'))?.online === true, 'Studio still looks online to Desk')
+  t0 = Date.now()
+  const late = await fetch(`${desk.url}/m/${studioOnDesk.id}/api/version`).then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) }), (e) => ({ error: e.message }))
+  const lateIn = Date.now() - t0
+  ok(late.status === 200 && !!late.json?.version && lateIn < 20000, `something asked of Studio on the dead link is answered in ${lateIn} ms, on a new one (limit 20 s; it waited for the next check)`, late)
 
   // ---------- a new link that doesn't work, for a device that's linked ----------
   // (Pasted while Studio is closed, so it's tried as Studio comes back; it used to stop the link
