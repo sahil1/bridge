@@ -1,8 +1,8 @@
 {
   "about": "Usage counts: everything Bridge AI can count and send, if you turn on Share anonymous usage counts (off unless you do). server/counts.js counts only the names here, and a test fails if the code counts any other. Adding one is a change to this file, in public.",
   "schema": 1,
-  "endpoint": "",
-  "endpointAbout": "Where a week's report goes (HTTPS POST, JSON). Empty: the project has no server for it yet, so sharing isn't offered.",
+  "endpoint": "https://counts.boldbridge.ai/v1/week",
+  "endpointAbout": "Where a week's report goes (HTTPS POST, JSON): the project's usage counts server, counts/worker.js in this repo, which keeps only weekly totals. Empty: there's nowhere to send them, so sharing isn't offered.",
   "buckets": ["0", "1", "2-5", "6-20", "21-100", "100+"],
   "report": {
     "schema": "this file's schema number",

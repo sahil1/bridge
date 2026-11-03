@@ -5,7 +5,7 @@ your computer, a relay on your own Cloudflare account, and the phone apps for iP
 None of them sends anything to the project or its author unless you turn on usage counts (below),
 which are off unless you do. There is no account, no ads and no crash reporting.
 
-Last updated: October 2026.
+Last updated: November 2026.
 
 ## On your computer
 
@@ -100,12 +100,12 @@ Bridge AI can count which of its features you use each week (for example, how ma
 started, by kind, and how many meetings you recorded), as numbers in ranges ("2-5"), and send them
 to the project once a week, to help decide what to build. It does this only if you turn on **Share
 anonymous usage counts** in Settings › About & Updates. It's off unless you do, setup never asks,
-and while it's off nothing is counted at all. It's offered only once the project has a server to
-receive them (`endpoint` in `shared/telemetry-schema.json`, empty for now), and `DO_NOT_TRACK=1` or
-`BRIDGE_TELEMETRY=0` in the environment keeps it off.
+and while it's off nothing is counted at all. Reports go to the project's server,
+`counts.boldbridge.ai`, run on Cloudflare; its code is [counts/worker.js](counts/worker.js) in this
+repo. `DO_NOT_TRACK=1` or `BRIDGE_TELEMETRY=0` in the environment keeps it off.
 
 While it's on, the counts are kept on your computer, in `~/.bridge-ai/telemetry`, a week at a time.
-Once a week is over, its report goes to that server: Bridge AI's version, your operating system and
+Once a week is over, its report goes to the server: Bridge AI's version, your operating system and
 chip, how it's installed, its layout, whether a phone is paired, how long it's been on your computer
 and on how many days of the week it was used (in ranges), and the counts. It has no name, no ID for
 you or your computer (a random number new with each report lets the server count a report once),
@@ -115,8 +115,11 @@ no email addresses and no exact times. The full list of what can be counted is
 would be sent** shows the next report as it would go, and a copy of each report sent is kept in
 `~/.bridge-ai/telemetry/sent`.
 
-The server sees your IP address when a report arrives, as any website does, and isn't meant to store
-it. Because reports carry no ID, one already sent can't be found again to delete. Turning sharing off
+The server sees your IP address when a report arrives, as any website does; it doesn't read or
+store it, and its logs are off. It keeps only weekly totals: how many reports said each thing (a
+version, a system, a count's range), never a report as it came, and each report's random number for
+ten weeks, so one sent twice counts once. Because reports carry no ID, one already sent can't be
+found again to delete. Turning sharing off
 stops it at once and forgets what was counted and not yet sent, and if the project stops collecting,
 Bridge AI turns sharing off and says so.
 
@@ -127,6 +130,15 @@ only by you, and isn't given to the agents Bridge AI starts there. Your code and
 with it are under that provider's terms. If you give Claude a GitHub token, it goes to Anthropic
 with each task so the agent can reach your repo. "Use my GitHub CLI sign-in" reads the GitHub CLI's
 token once, when you click it.
+
+## The website
+
+The website, [boldbridge.ai](https://boldbridge.ai), is served by Cloudflare. It counts visits with
+Cloudflare Web Analytics, which uses no cookies and keeps nothing that identifies you. Its download
+buttons count each download: which file, the day, and the page or site the click came from (as your
+browser tells it), never your IP address; then they hand you the file from GitHub, under GitHub's
+terms. The page asks GitHub for the latest version number, so your browser contacts GitHub as well.
+Bridge AI itself (the app) doesn't use the website, except to open it when you click a link to it.
 
 ## Your relay
 

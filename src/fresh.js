@@ -132,7 +132,7 @@ export function useFresh({ hold = false } = {}) {
 // (3.8.0). Raise the version here when this page starts using something only a newer app has.
 export const APP_NEEDS = { ios: '3.8.0', android: '3.5.0' }
 // The website's page for the Android app (it isn't on Google Play yet).
-export const ANDROID_PAGE = 'https://sahil1.github.io/bridge/#android'
+export const ANDROID_PAGE = 'https://boldbridge.ai/#android'
 
 const parts = (v) => String(v).split('.').map((n) => parseInt(n, 10) || 0)
 export const older = (a, b) => { const x = parts(a), y = parts(b); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); return false }
