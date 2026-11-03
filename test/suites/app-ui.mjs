@@ -277,7 +277,7 @@ try {
       const shows = (s) => { const el = bar.querySelector(s); return !!el && el.getClientRects().length > 0 && el.getBoundingClientRect().right <= innerWidth + 0.5 }
       return { over: bar.scrollWidth - bar.clientWidth, steps: [...bar.classList].filter((c) => c.startsWith('fit-')).length, needs: shows('.needs-chip'), sound: shows('.sound-btn'), settings: shows('button[aria-label="Settings"]'), clock: shows('.clock') }
     })
-    ok(fit.over <= 1 && fit.steps > 0 && fit.needs && fit.sound && fit.settings && !fit.clock, 'a 1000 px window: nothing runs off it, the clock gives way first, and needs you, the speaker and Settings stay', fit)
+    ok(fit.over <= 0 && fit.steps > 0 && fit.needs && fit.sound && fit.settings && !fit.clock, 'a 1000 px window: nothing runs off it, the clock gives way first, and needs you, the speaker and Settings stay', fit)
     await shot(p, `${tag}top-bar-1000`)
     // The speaker: notifications without a sound, kept on the computer, and back.
     const speaker = p.locator('.topbar .sound-btn')
