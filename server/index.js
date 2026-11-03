@@ -1873,6 +1873,16 @@ app.get('/api/config', (req, res) => res.json({
   runtime: { name: rt.name, ...rt.caps, attach: !!rt.attach, ...(rt.name === 'herdr' ? { session: herdrSession() } : { keep: cfg.keepAgents !== false }), ...(fellBack() ? { fellBack: fellBack() } : {}) }, platform: process.platform, mail: IS_MAC, calendar: IS_MAC,
   defaultAgent: cfg.defaultAgent || 'claude', chiefKind: cfg.chief?.kind || 'claude', setupDone: !!cfg.setupDone, simple: !!cfg.simple,
   dictation: cfg.dictation || {}, // Settings › Voice › Dictation
+  alertSounds: cfg.alertSounds !== false, // the speaker in the top bar
+}))
+// The speaker in the top bar: notifications (this computer's, a browser's, your phones') come with a
+// sound, or without one; they still come. Your other devices are told too, unless one of them is
+// the one telling (here).
+app.post('/api/alerts/sound', wrap((req) => {
+  const on = req.body?.on !== false
+  afterChange(settings.patch({ alertSounds: on ? null : false }))
+  if (!req.body?.here) machines.soundsEverywhere(on).catch(() => {})
+  return { on }
 }))
 
 // ---------- Settings, first-run setup and plain chats ----------

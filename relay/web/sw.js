@@ -129,6 +129,7 @@ self.addEventListener('push', (e) => {
       data: { url: n.url || '/', actions },
       ...(actions.length ? { actions: actions.map(({ action, title }) => ({ action, title })) } : {}),
       requireInteraction: n.kind === 'needs-you',
+      silent: !!n.silent, // Bridge AI's sounds are off
     })
   })())
 })

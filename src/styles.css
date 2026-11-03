@@ -2240,6 +2240,17 @@ button.yg-day:hover { box-shadow: 0 0 0 1.5px var(--accent); }
 @media (max-width: 2100px) {
   .app.wide .wx-open .hide-sm, .app.wide .usage-chip .usage-name { display: none; }
 }
+/* The chips giving way when they don't all fit (useFit in App.jsx), a step at a time. */
+.app.wide .topbar.fit-1 .clock { display: none; }
+.app.wide .topbar.fit-2 .usage-chip :is(.usage-new, .usage-acct, .chip-sep) { display: none; }
+.app.wide .topbar.fit-3 .wx-chip { display: none; }
+.app.wide .topbar.fit-4 .meet-chip :is(.meet-title, small) { display: none; }
+.app.wide .topbar.fit-5 .meet-chip { display: none; }
+.app.wide .topbar.fit-6 :is(.acct-wrap, .usage-chip) { display: none; }
+.app.wide .topbar.fit-7 .needs-word { display: none; }
+.app.wide .topbar.fit-8 .rec-name { display: none; }
+/* The speaker, muted: in the warning colour, so it shows. */
+.sound-btn.off { color: var(--warn, #d97706); }
 /* Phone: the logo and the search button keep their size; the chips give way first. */
 .app.narrow .top-left, .app.narrow .search-btn { flex: none; }
 .app.narrow .top-right { min-width: 0; overflow: hidden; }

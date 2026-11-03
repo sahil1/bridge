@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import SoundButton from './components/SoundButton.jsx'
 import Icon, { StatusDot } from './components/Icon.jsx'
 import { useAppearance } from './appearance.js'
 import ErrorBoundary, { Quiet } from './components/ErrorBoundary.jsx'
@@ -159,6 +160,35 @@ function WeatherChip({ onClick }) {
   )
 }
 
+// The top bar's chips give way when they don't all fit (a laptop's screen, a busy day), least needed
+// first and a step at a time: the clock, usage's account and weekly figure, the weather, the
+// meeting's title, the meeting, the rest of usage, and what's waiting and the recording down to their
+// numbers. What each says is a click away anyway (Today's cards, the calendar). Search, the speaker
+// and Settings always stay. Each step is a class on the bar (fit-1 to fit-8, styles.css), tried again
+// whenever the bar changes size or what's in it changes.
+const FIT_STEPS = 8
+function useFit() {
+  const stop = useRef(null)
+  return useCallback((bar) => {
+    stop.current?.()
+    stop.current = null
+    if (!bar || typeof ResizeObserver !== 'function') return
+    let frame = 0
+    const fit = () => {
+      frame = 0
+      for (let i = 1; i <= FIT_STEPS; i++) bar.classList.remove(`fit-${i}`)
+      for (let i = 1; i <= FIT_STEPS && bar.scrollWidth > bar.clientWidth + 1; i++) bar.classList.add(`fit-${i}`)
+    }
+    const soon = () => { if (!frame) frame = requestAnimationFrame(fit) }
+    fit()
+    const size = new ResizeObserver(soon)
+    size.observe(bar)
+    const words = new MutationObserver(soon)
+    words.observe(bar, { childList: true, subtree: true, characterData: true })
+    stop.current = () => { cancelAnimationFrame(frame); size.disconnect(); words.disconnect() }
+  }, [])
+}
+
 // Views that open in tabs beside the agents: Home (start something new), Meetings, a meeting,
 // Dictations, Whiteboards and a whiteboard, and the agent map (what runs on which of your computers).
 const VIEWS = { 'view:new': { title: tx('New'), icon: 'plus' }, 'view:meetings': { title: tx('Meetings'), icon: 'mic' }, 'view:dictations': { title: tx('Dictations'), icon: 'wave' }, 'view:whiteboards': { title: tx('Whiteboards'), icon: 'shapes' }, 'view:map': { title: tx('Agent Map'), icon: 'grid' } }
@@ -293,7 +323,7 @@ function App() {
         'Notification' in window && Notification.permission === 'granted') {
         const name = a.title || a.workspace
         const show = (q) => {
-          const n = new Notification(a.status === 'blocked' ? (q?.text ? t('{name} needs you', { name }) : t('Agent needs you')) : t('Agent finished'), { body: q?.text || name, tag: a.paneId })
+          const n = new Notification(a.status === 'blocked' ? (q?.text ? t('{name} needs you', { name }) : t('Agent needs you')) : t('Agent finished'), { body: q?.text || name, tag: a.paneId, silent: conf?.alertSounds === false })
           n.onclick = () => { window.focus(); if (a.status === 'blocked') showChat(a.paneId); openAgentRef.current?.(a.paneId); n.close() }
         }
         // Say what it's asking.
@@ -663,9 +693,10 @@ function App() {
   // restart to apply and an update are a line under the bar (TopNotes). An update you haven't looked
   // at yet puts a dot on Settings, which then opens at About & Updates.
   const setDot = !wide && !cloudOnly && upNote.dot
+  const fitBar = useFit()
   const topbarFor = (railBtn = null) => (
     <>
-    <header className="topbar">
+    <header className="topbar" ref={wide ? fitBar : null}>
       <div className="top-left">
       <img className="mark" src={`${import.meta.env.BASE_URL}mark.svg`} alt="Bridge AI" width="24" height="24" />
       {railBtn}
@@ -697,7 +728,7 @@ function App() {
           <>
             <Quiet name="Updated"><FreshChip fresh={fresh} /></Quiet>
             <Quiet name="Setting up"><SetupChip /></Quiet>
-            <Quiet name="Next meeting"><NextMeetingChip onClick={() => showCard('calendar')} /></Quiet>
+            <Quiet name="Next meeting"><NextMeetingChip onClick={() => showCard('calendar')} recording={meetings?.rec?.title || null} /></Quiet>
             <Quiet name="Usage"><ProviderChip quota={quota.data} primary={primary} onClick={() => showCard('gauge')} onAddAccount={(kind) => setAddAcct({ kind })} /></Quiet>
             {(update.data?.available || (update.data?.held && upNote.line)) && <Quiet name="Update"><UpdateChip u={update.data} onDetails={() => setSettings('about')} onDone={upNote.hide} /></Quiet>}
             <Quiet name="Restart"><RestartChip fleet={fleet} runtime={conf?.runtime?.name} keep={!!conf?.runtime?.keep} /></Quiet>
@@ -706,6 +737,7 @@ function App() {
           </>
         )}
         {toStart && <button className="win-btn" onClick={toStart} aria-label={t('Your computer')} title={t('Back to the start: pair or open a computer')}><Icon name="laptop" size={wide ? 15 : 18} /></button>}
+        {!cloudOnly && <Quiet name="Sounds"><SoundButton conf={conf} size={wide ? 15 : 18} /></Quiet>}
         <button className="win-btn settings-btn" data-tour="settings" onClick={() => { if (setDot) { upNote.seen(); setSettings('about') } else setSettings('all') }} aria-label={t('Settings')}
           title={setDot ? t('Bridge AI {latest} is available (you have {current})', { latest: update.data.latest, current: update.data.current }) : t('Settings (⌘,)')}>
           <Icon name="settings" size={wide ? 15 : 18} />

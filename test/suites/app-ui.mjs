@@ -261,8 +261,32 @@ try {
   {
     const { ctx, p } = await page(b, kit.url, { mode: 'light', theme: 'sky', width: 1600, before: busy() })
     await until(async () => (await p.locator('.topbar .usage-chip').count()) > 0, 10000)
-    const got = await p.evaluate(() => ['.needs-chip', '.setup-chip', '.meet-chip', '.usage-chip', '.update-chip', '.wx-chip', '.clock', 'button[aria-label="Settings"]'].filter((s) => document.querySelector(`.topbar ${s}`)))
-    ok(got.length === 8 && !(await p.locator('.top-notes').count()), 'desktop: the top bar still has needs you, setup, the next meeting, usage, the update, the weather, the clock and Settings', got)
+    const got = await p.evaluate(() => ['.needs-chip', '.setup-chip', '.meet-chip', '.usage-chip', '.update-chip', '.wx-chip', '.clock', '.sound-btn', 'button[aria-label="Settings"]'].filter((s) => document.querySelector(`.topbar ${s}`)))
+    ok(got.length === 9 && !(await p.locator('.top-notes').count()), 'desktop: the top bar still has needs you, setup, the next meeting, usage, the update, the weather, the clock, the speaker and Settings', got)
+    await ctx.close()
+  }
+
+  // A laptop's window with as much going on: the chips give way, least needed first, and nothing
+  // runs off the window (Settings was off it).
+  {
+    const { ctx, p } = await page(b, kit.url, { mode: 'light', theme: 'sky', width: 1000, before: busy() })
+    await until(async () => (await p.locator('.topbar .needs-chip').count()) > 0 && (await p.locator('.topbar .meet-chip, .topbar .usage-chip').count()) > 0, 10000)
+    await p.waitForTimeout(800)
+    const fit = await p.evaluate(() => {
+      const bar = document.querySelector('.topbar')
+      const shows = (s) => { const el = bar.querySelector(s); return !!el && el.getClientRects().length > 0 && el.getBoundingClientRect().right <= innerWidth + 0.5 }
+      return { over: bar.scrollWidth - bar.clientWidth, steps: [...bar.classList].filter((c) => c.startsWith('fit-')).length, needs: shows('.needs-chip'), sound: shows('.sound-btn'), settings: shows('button[aria-label="Settings"]'), clock: shows('.clock') }
+    })
+    ok(fit.over <= 1 && fit.steps > 0 && fit.needs && fit.sound && fit.settings && !fit.clock, 'a 1000 px window: nothing runs off it, the clock gives way first, and needs you, the speaker and Settings stay', fit)
+    await shot(p, `${tag}top-bar-1000`)
+    // The speaker: notifications without a sound, kept on the computer, and back.
+    const speaker = p.locator('.topbar .sound-btn')
+    ok((await speaker.getAttribute('aria-pressed')) === 'false' && (await kit.api('/config')).alertSounds === true, 'the speaker: notifications make a sound to begin with')
+    await speaker.click()
+    ok(!!(await until(async () => (await kit.api('/config')).alertSounds === false && (await speaker.getAttribute('aria-pressed')) === 'true', 5000)), 'a click mutes them, kept on the computer', await kit.api('/config').then((c) => c.alertSounds))
+    ok(/still come, without a sound/.test(await speaker.getAttribute('title')), 'and it says they still come, without a sound', await speaker.getAttribute('title'))
+    await speaker.click()
+    ok(!!(await until(async () => (await kit.api('/config')).alertSounds === true && (await speaker.getAttribute('aria-pressed')) === 'false', 5000)), 'and another turns sounds back on')
     await ctx.close()
   }
 
