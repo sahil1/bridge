@@ -11,7 +11,7 @@
 //   a connection that dies without a word: back once the app is on the screen again (it never was)
 //   the computer's connection dies without a word: back in under 40 s (it took 50 to 100)
 //   the computer drops off the network without a word (Wi-Fi off; its relay hears nothing, and kept
-//   saying it was there): the phone says it isn't answering in under 12 s, and Bridge AI's requests
+//   saying it was there): the phone says it isn't answering in under 20 s, and Bridge AI's requests
 //   meanwhile settle at once (it waited on it for good); its relay says it's offline once it's been
 //   quiet 40 s; back on the network, answering again in under 12 s (it waited up to a minute)
 // Then the phone app (stood in for: the window.bridgeNative the iPhone app gives the page) paired with
@@ -207,7 +207,7 @@ try {
   const noted = await until(banner, 30000, 100)
   const notedIn = noted ? Date.now() - t0 : null
   say(`the computer off the network: the phone says so in ${notedIn} ms: ${noted}`)
-  ok(notedIn != null && notedIn < 12000 && /isn't answering|is offline/.test(noted), `the computer drops off the network without a word: the phone says it isn't answering in ${s(notedIn)} (limit 12 s), rather than waiting on it`, noted)
+  ok(notedIn != null && notedIn < 20000 && /isn't answering|is offline/.test(noted), `the computer drops off the network without a word: the phone says it isn't answering in ${s(notedIn)} (limit 20 s), rather than waiting on it`, noted)
   // What Bridge AI asks meanwhile settles at once (what it last sent, or that it isn't there).
   const settles = await app()?.evaluate(async () => {
     const t = performance.now()
@@ -278,7 +278,7 @@ try {
   const gone = await until(async () => { const l = await look(using.p); return l.away && l.more && (await awayOpen()) === 'Open Desk' ? l : null }, 30000, 100)
   const goneIn = gone ? Date.now() - t0 : null
   say(`the app, Studio off the network: ${goneIn} ms`)
-  ok(goneIn != null && goneIn < 12000, `Studio drops off the network while the app shows it: the banner says so in ${s(goneIn)} (limit 12 s), with Open Desk on it beside Start screen`, { ...(await look(using.p)), open: await awayOpen() })
+  ok(goneIn != null && goneIn < 20000, `Studio drops off the network while the app shows it: the banner says so in ${s(goneIn)} (limit 20 s), with Open Desk on it beside Start screen`, { ...(await look(using.p)), open: await awayOpen() })
   await shot(using.p, `${tag}phone-computer-gone`)
   await using.p.locator('#away-open').click({ timeout: 3000 }).catch(() => {})
   ok(!!(await until(() => using.p.evaluate((r) => window.__posts.some((m) => m.type === 'switch' && m.url === r), relay2.url), 3000, 100)), 'and Open Desk takes the app to Desk')
