@@ -10,7 +10,7 @@ import path from 'node:path'
 import { createHash, randomBytes } from 'node:crypto'
 import WebSocket from 'ws'
 import { newKey, rawPublic, phoneHello, plainFrame, readPlain } from '../../relay/web/link.js'
-import { startKit, startRelay, checks, until } from '../lib/harness.mjs'
+import { startKit, startRelay, checks, until, sleep } from '../lib/harness.mjs'
 
 const { ok, done } = checks('devices')
 const QUIET = 1500 * 2.5 // BRIDGE_LINK_PING_MS below: a quiet link is started over after this
@@ -59,6 +59,21 @@ try {
   // ---------- one that drops ----------
   await ra.drop()
   ok(!!(await online(b, 'Studio')), 'a dropped connection comes back by itself')
+
+  // ---------- Studio drops off the network without a word (Wi-Fi off, a lid closed on the move) ----------
+  // Its relay hears nothing either way, and kept saying it was there: Laptop asks Studio itself.
+  const ctl = (r, what) => fetch(`${r.url}/_test/${what}`, { method: 'POST' }).then((x) => x.json())
+  let t0 = Date.now()
+  await ctl(ra, 'away')
+  const lost = await until(async () => (await other(b, 'Studio'))?.online === false, 60000, 200)
+  const lostIn = lost ? Date.now() - t0 : null
+  ok(lostIn != null && lostIn < QUIET * 2 + 5000, `Studio drops off the network without a word: Laptop sees it offline in ${lostIn} ms (limit ${QUIET * 2 + 5000})`, await other(b, 'Studio'))
+  await sleep(45000) // its relay lets it go too, once it's been quiet 40 s
+  t0 = Date.now()
+  await ctl(ra, 'back')
+  const backOn = await until(async () => (await other(b, 'Studio'))?.online === true, 30000, 200)
+  const relinkedIn = backOn ? Date.now() - t0 : null
+  ok(relinkedIn != null && relinkedIn < 12000, `back on the network: linked again in ${relinkedIn} ms (limit 12 s)`, await other(b, 'Studio'))
 
   // ---------- a new link that doesn't work, for a device that's linked ----------
   // (Pasted while Studio is closed, so it's tried as Studio comes back; it used to stop the link

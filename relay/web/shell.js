@@ -140,6 +140,7 @@ function askOther(r, was) {
     if (sock) { sock.onopen = sock.onmessage = sock.onclose = null; try { sock.close() } catch { /* closed */ } }
     others$.set(r, { online: st.online, lastSeen: st.lastSeen ?? was?.lastSeen ?? null, at: Date.now() })
     listOthers()
+    if (away) awayMore()
     for (const f of othersSubs) try { f() } catch { /* theirs */ }
   }
   const timer = setTimeout(() => done({ online: null }), 6000)
@@ -267,7 +268,7 @@ const ready = (ms = away ? 0 : 15000) => (session ? Promise.resolve() : ws?.read
 }))
 let hostSeen = null
 let hostOnline = false
-const offlineText = () => (hostOnline ? 'Reconnecting to your computer…' : hostSeen ? `Your computer is offline (since ${new Date(hostSeen).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}).` : 'Your computer isn\'t connected to the relay right now.')
+const offlineText = () => (silent ? 'Your computer isn\'t answering right now.' : hostOnline ? 'Reconnecting to your computer…' : hostSeen ? `Your computer is offline (since ${new Date(hostSeen).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}).` : 'Your computer isn\'t connected to the relay right now.')
 
 // Bridge AI's hosted relay turned this phone away for now: its daily limit for your computer, too
 // much at once, or it's switched off. Until then, no trying again.
@@ -310,13 +311,23 @@ function awayBanner(on = true) {
   if (!on) return
   bar(null)
   const relayDown = ws?.readyState !== 1 || !heardStatus
-  $('away-title').textContent = relayDown ? 'Can\'t reach your relay right now.' : `${thisComputer()} is offline${hostSeen ? ` since ${when(hostSeen)}` : ''}.`
-  $('away-text').textContent = `Showing what it last sent. Messages you send ${relayKeeps && !relayDown ? 'go out when it\'s back' : 'wait on this phone until it\'s back'}.`
+  $('away-title').textContent = silent ? `${thisComputer()} isn't answering.` : relayDown ? 'Can\'t reach your relay right now.' : `${thisComputer()} is offline${hostSeen ? ` since ${when(hostSeen)}` : ''}.`
+  $('away-text').textContent = `Showing what it last sent. Messages you send ${relayKeeps && !relayDown && !silent ? 'go out when it\'s back' : 'wait on this phone until it\'s back'}.`
   // The way to your other computers, Cloud Agents and the demo, in the apps.
   $('away-more').hidden = !others().length && !bundledUis.length
-  document.body.style.setProperty('--away', `${$('away').offsetHeight}px`)
+  awayMore()
 }
 $('away-more').onclick = () => whyWaiting()
+// ...and, with another of your computers on, a button straight to it.
+function awayMore() {
+  const on = others().find((c) => otherState(c.relay)?.online)
+  $('away-open').hidden = !on
+  if (on) {
+    $('away-open').textContent = `Open ${computerName(on)}`
+    $('away-open').onclick = () => apps.open(on.relay)
+  }
+  document.body.style.setProperty('--away', `${$('away').offsetHeight}px`)
+}
 // Open Bridge AI from what this phone kept, if it kept it.
 async function openSaved() {
   if (!paired?.hostKey || adding || !(await offline.hasCopy())) return false
@@ -424,8 +435,51 @@ function check(now) {
 }
 addEventListener('online', () => check(true))
 addEventListener('pageshow', (e) => { if (e.persisted) check(true) })
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(true) })
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { check(true); if (Date.now() - fromComputer > 2000) askComputer() } })
 setInterval(() => { if (document.visibilityState === 'visible') check() }, 20000)
+
+// Is the computer itself still there? The relay answers the pings above, but a computer whose network
+// went without a word (Wi-Fi off, a lid closed on the move) can look connected to its relay for a
+// while, and everything asked of it waited. So the phone asks the computer, through the link (PING):
+// when it's heard nothing from it for a while with Bridge AI on the screen, or something asked has
+// had no word back. No answer while the relay still answers: it isn't answering (the banner, with
+// your other computers a tap away), and the phone keeps trying. No answer from the relay either: this
+// phone's own connection went, and it's only replaced. A computer from before this doesn't answer
+// PING, and its welcome says so.
+const IDLE_ASK_MS = 6000 // nothing from the computer this long: ask
+const SLOW_MS = 3000 // something asked of it with no word back this long: ask now
+const ANSWER_MS = 4000 // no answer this long: it isn't there
+const HELLO_MS = 8000 // no welcome this long: ask the relay again
+let answers = false // the computer answers PING
+let fromComputer = 0 // when it last sent anything on this link
+let unanswered = 0 // when something went to it with nothing back since
+let asked = null // a PING out: its timer
+let askedAt = 0
+let silent = false // it stopped answering, though its relay may not know yet
+let helloTimer = null
+function heardComputer() {
+  fromComputer = Date.now()
+  unanswered = 0
+  clearTimeout(asked)
+  asked = null
+}
+function askComputer() {
+  if (!session || !answers || asked) return
+  askedAt = Date.now()
+  asked = setTimeout(notAnswering, ANSWER_MS)
+  send(K.PING, 0).catch(() => {})
+  if (pongs) try { ws.send('ping') } catch { /* closing */ }
+}
+function notAnswering() {
+  asked = null
+  silent = !pongs || heard > askedAt
+  reconnect()
+}
+setInterval(() => {
+  if (!session || !answers || asked || document.visibilityState !== 'visible') return
+  const now = Date.now()
+  if (now - fromComputer > IDLE_ASK_MS || (unanswered && now - unanswered > SLOW_MS)) askComputer()
+}, 1000)
 
 // The relay's own messages: whether your computer is there, or about the notes it keeps.
 function onText(m) {
@@ -440,6 +494,7 @@ async function onStatus(st) {
   hostSeen = st.seen || hostSeen
   heardStatus = true
   if (!st.host) {
+    silent = false
     dropSession(offlineText()) // with Bridge AI showing, the banner
     if (!appShown) await notThere()
     else if (!$('wait').hidden) whyWaiting() // on the start screen from the banner
@@ -497,6 +552,17 @@ async function handshake() {
   const state = await phoneHello(paired.device, pair, deviceName())
   waiting = { state, pair }
   ws.send(plainFrame(state.hello))
+  // No welcome: the computer isn't answering, though its relay says it's there. A new connection
+  // in a moment asks the relay again (which lets go of a computer that's gone quiet).
+  clearTimeout(helloTimer)
+  const sock = ws
+  helloTimer = setTimeout(() => {
+    if (ws !== sock || !waiting) return
+    silent = true
+    abandon(offlineText())
+    retryTimer = setTimeout(connect, backoff)
+    backoff = Math.min(backoff * 2, LAST_TRY)
+  }, HELLO_MS)
 }
 
 async function onData(buf) {
@@ -507,7 +573,11 @@ async function onData(buf) {
     if (msg?.t === 'refuse') return refused(msg.why)
     let done
     try { done = await phoneFinish(state, paired.device, msg, { hostKey: paired.hostKey, pair }) } catch (e) { return refused(e.message) }
+    clearTimeout(helloTimer)
     session = done.session
+    answers = msg.ping === 1
+    silent = false
+    heardComputer()
     backoff = FIRST_TRY
     if (!paired.hostKey) {
       paired = { device: paired.device, hostKey: done.hostKey, code, pairedAt: Date.now() }
@@ -527,7 +597,9 @@ async function onData(buf) {
   let plain
   try { plain = await session.open(buf) } catch { ws.close(4002, 'bad record'); return }
   const { kind, id, body } = unpack(plain)
+  heardComputer()
   if (kind === K.PING) return send(K.PONG, 0)
+  if (kind === K.PONG) return
   const s = streams.get(id)
   if (!s) return
   if (kind === K.HEAD) s.onHead?.(json(body))
@@ -568,7 +640,9 @@ function dropSession(msg) {
     else { s.onError?.(msg || 'Connection lost'); s.onClose?.({ c: 1006, r: 'connection lost' }) }
   }
   streams.clear()
-  if (msg && appShown && !$('app').hidden) { if (!hostOnline && paired?.hostKey) awayBanner(); else bar(msg, !hostOnline) }
+  clearTimeout(asked)
+  asked = null
+  if (msg && appShown && !$('app').hidden) { if ((!hostOnline || silent) && paired?.hostKey) awayBanner(); else bar(msg, !hostOnline) }
 }
 
 function fail(e) { console.error(e); try { ws?.close(4002, 'error') } catch { /* closed */ } }
@@ -578,6 +652,7 @@ let outbox = Promise.resolve()
 function send(kind, id, body) {
   const s = session
   if (!s) return Promise.reject(new Error(offlineText()))
+  if (!unanswered && kind !== K.PONG && kind !== K.PING && kind !== K.MORE && kind !== K.CANCEL) unanswered = Date.now()
   const p = outbox.then(async () => { const rec = await s.seal(pack(kind, id, body)); if (session === s) ws.send(rec) })
   outbox = p.catch(() => {})
   return p
@@ -1051,6 +1126,7 @@ function setRelay(origin) {
   relay = origin
   hostOnline = false
   pongs = false
+  silent = false
   native.post({ type: 'relay', url: origin })
   abandon()
 }

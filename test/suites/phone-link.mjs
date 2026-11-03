@@ -10,9 +10,14 @@
 //   offline, then back: at once (the phone waited up to 30 s for its next try)
 //   a connection that dies without a word: back once the app is on the screen again (it never was)
 //   the computer's connection dies without a word: back in under 40 s (it took 50 to 100)
+//   the computer drops off the network without a word (Wi-Fi off; its relay hears nothing, and kept
+//   saying it was there): the phone says it isn't answering in under 12 s, and Bridge AI's requests
+//   meanwhile settle at once (it waited on it for good); its relay says it's offline once it's been
+//   quiet 40 s; back on the network, answering again in under 12 s (it waited up to a minute)
 // Then the phone app (stood in for: the window.bridgeNative the iPhone app gives the page) paired with
-// this computer and a second one, and this one away: offline, or its relay not answering. The start
-// screen says so in a few seconds, with the other computer a tap away, what it last sent, Cloud
+// this computer and a second one. This one drops off the network while the app shows it: the banner
+// says so, with Open (the other) on it. And this one away: offline, or its relay not answering. The
+// start screen says so in a few seconds, with the other computer a tap away, what it last sent, Cloud
 // Agents and the demo (it opened what it last sent instead, or waited on "Connecting…" for good).
 // And the page in a browser, with its relay not answering: it says so (it waited for good).
 import fs from 'node:fs'
@@ -60,11 +65,12 @@ try {
     }), 30000, 50)
     return at ? Math.round(at - t0) : null
   }
-  // A request from the app, through the link: whether it was answered (within `ms`).
+  // A request from the app, through the link: whether it was answered (within `ms`). Each asks an
+  // address of its own, so what the phone kept of the computer (offline.js) can't answer it.
   const asks = (u = '/api/version', ms = 4000) => app()?.evaluate(async ({ u, ms }) => {
     const c = new AbortController()
     const t = setTimeout(() => c.abort(), ms)
-    try { return (await fetch(u, { signal: c.signal })).ok } catch { return false } finally { clearTimeout(t) }
+    try { return (await fetch(`${u}${u.includes('?') ? '&' : '?'}probe=${Math.random()}`, { signal: c.signal })).ok } catch { return false } finally { clearTimeout(t) }
   }, { u, ms }).catch(() => false)
   const backIn = async (limit) => { const t0 = Date.now(); const back = await until(() => asks(), limit, 50); return back ? Date.now() - t0 : null }
   const s = (ms) => (ms == null ? 'never' : `${(ms / 1000).toFixed(1)} s`)
@@ -190,8 +196,35 @@ try {
   say(`the computer's silent drop: ${host} ms`)
   ok(host != null && host < 40000, `the computer's connection died without a word: the phone reaches it again in ${s(host)} (limit 40 s)`, host)
 
+  // ---------- the computer drops off the network without a word (Wi-Fi off, a lid closed on the move) ----------
+  // Its connection stays open at the relay, which hears nothing either way: the relay kept saying it
+  // was there, and the phone waited on it.
+  await sleep(1500)
+  const banner = () => p.evaluate(() => (document.getElementById('away')?.hidden === false ? document.getElementById('away-title').textContent : null))
+  ok(!!(await until(async () => !(await banner()) && await asks(), 20000, 200)), 'before it goes: answering, with no banner', await banner())
+  t0 = Date.now()
+  await test('away')
+  const noted = await until(banner, 30000, 100)
+  const notedIn = noted ? Date.now() - t0 : null
+  say(`the computer off the network: the phone says so in ${notedIn} ms: ${noted}`)
+  ok(notedIn != null && notedIn < 12000 && /isn't answering|is offline/.test(noted), `the computer drops off the network without a word: the phone says it isn't answering in ${s(notedIn)} (limit 12 s), rather than waiting on it`, noted)
+  // What Bridge AI asks meanwhile settles at once (what it last sent, or that it isn't there).
+  const settles = await app()?.evaluate(async () => {
+    const t = performance.now()
+    await Promise.race([fetch('/api/fleet').then((r) => r.arrayBuffer()).catch(() => null), new Promise((r) => setTimeout(r, 20000))])
+    return Math.round(performance.now() - t)
+  }).catch(() => null)
+  ok(settles != null && settles < 3000, `and what Bridge AI asks of it meanwhile settles in ${settles} ms (limit 3 s), not left waiting`, settles)
+  const offline = await until(async () => /is offline since/.test((await banner()) || ''), 70000, 500)
+  ok(offline, 'once its relay has heard nothing from it for 40 s, the phone says it\'s offline, and since when', await banner())
+  await test('back')
+  const backOn = await backIn(30000)
+  say(`back on the network: ${backOn} ms`)
+  ok(backOn != null && backOn < 12000, `back on the network: answering again in ${s(backOn)} (limit 12 s; it waited up to a minute between tries)`, backOn)
+  ok(!!(await until(async () => !(await banner()), 5000, 100)), 'and the banner is gone', await banner())
+
   // (WebKit reports an answer the dropped link cut short, which the app is told of, as a page error.)
-  const errs = errors.filter((e) => !(which === 'webkit' && /^Error: (Reconnecting to your computer|Connection lost)/.test(e)))
+  const errs = errors.filter((e) => !(which === 'webkit' && /^Error: (Reconnecting to your computer|Connection lost|Your computer)/.test(e)))
   ok(errs.length === 0, 'no page errors', errs)
 
   // ---------- two computers, and the one showing away ----------
@@ -233,6 +266,29 @@ try {
     const got = await until(async () => { const l = await look(pg); return l.wait && re.test(l.title) ? l : null }, ms, 100)
     return { ms: got ? Date.now() - t0 : null, l: got || await look(pg) }
   }
+
+  // Studio drops off the network without a word while the app shows it: the banner says so, with Desk
+  // a tap away (the app waited on Studio for good, and Desk was only on the start screen).
+  const using = await phoneApp({ relay: relay.url, pairing: pair1, computers })
+  await using.p.goto(`${relay.url}/`)
+  ok(!!(await until(async () => (await look(using.p)).app, 15000, 100)), 'the app opens Studio')
+  const awayOpen = () => using.p.evaluate(() => { const b = document.getElementById('away-open'); return b && !b.hidden ? b.textContent : '' })
+  t0 = Date.now()
+  await test('away')
+  const gone = await until(async () => { const l = await look(using.p); return l.away && l.more && (await awayOpen()) === 'Open Desk' ? l : null }, 30000, 100)
+  const goneIn = gone ? Date.now() - t0 : null
+  say(`the app, Studio off the network: ${goneIn} ms`)
+  ok(goneIn != null && goneIn < 12000, `Studio drops off the network while the app shows it: the banner says so in ${s(goneIn)} (limit 12 s), with Open Desk on it beside Start screen`, { ...(await look(using.p)), open: await awayOpen() })
+  await shot(using.p, `${tag}phone-computer-gone`)
+  await using.p.locator('#away-open').click({ timeout: 3000 }).catch(() => {})
+  ok(!!(await until(() => using.p.evaluate((r) => window.__posts.some((m) => m.type === 'switch' && m.url === r), relay2.url), 3000, 100)), 'and Open Desk takes the app to Desk')
+  await using.c.close()
+  await test('back')
+  // (Back on its relay: a phone opening it gets it.)
+  const probe = await phoneApp({ relay: relay.url, pairing: pair1, computers })
+  await probe.p.goto(`${relay.url}/`)
+  ok(!!(await until(async () => { const l = await look(probe.p); return l.app && !l.away }, 20000, 200)), 'Studio is back once its network is, and the app opens it', await look(probe.p))
+  await probe.c.close()
 
   // Studio offline, with what it last sent kept on the phone.
   kit.stop()

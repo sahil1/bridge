@@ -12,6 +12,11 @@
 //   POST /_test/silence  the phones' connections go dead without a word (a phone that slept, a
 //                        network that dropped them): nothing more gets through them, new ones work.
 //                        ?who=host: the computer's
+//   POST /_test/away     the computer drops off the network without a word (Wi-Fi off, a lid closed
+//                        mid-move): its connection goes dead and stays open here (the relay never
+//                        hears it end, even when the computer gives up on it), and it can't connect
+//                        again until POST /_test/back. Then, as a real network does, a connection the
+//                        computer still has carries on, and one it closed meanwhile is heard closing
 //   POST /_test/count    start counting again
 //   GET  /_test/state    how many computers and phones are connected, the phones' messages each way
 //                        (up, down and their bytes) and the bytes of the page's files (page)
@@ -74,6 +79,7 @@ const sockets = new Set()
 const ctx = {
   storage,
   setWebSocketAutoResponse(pair) { this.auto = pair },
+  getWebSocketAutoResponseTimestamp(ws) { return ws.autoAt ? new Date(ws.autoAt) : null },
   blockConcurrencyWhile: (fn) => fn(),
   acceptWebSocket(ws, tags) { ws.tags = tags; sockets.add(ws) },
   getWebSockets(tag) { return [...sockets].filter((w) => w.readyState === 1 && (!tag || w.tags.includes(tag))) },
@@ -84,6 +90,7 @@ const hub = new worker.Hub(ctx, {})
 const env = { HOST_TOKEN: token, HUB: { idFromName: () => 'hub', get: () => hub } }
 
 let frozen = false
+let away = false // the computer has no network (POST /_test/away)
 // The network between the relay and each end (POST /_test/net), and what went over it.
 const net = { ms: 0, host: 0, kbps: 0 }
 const sent = { up: 0, down: 0, upBytes: 0, downBytes: 0, page: 0 }
@@ -131,6 +138,18 @@ const server = http.createServer(async (req, res) => {
       const host = new URL(req.url, 'http://x').searchParams.get('who') === 'host'
       for (const w of sockets) if (isHost(w) === host) w.dead = true
     }
+    else if (what === 'away') { away = true; for (const w of sockets) if (isHost(w)) w.dead = w.vanished = true }
+    else if (what === 'back') {
+      away = false
+      for (const w of [...sockets]) {
+        if (!w.vanished) continue
+        w.dead = w.vanished = false
+        if (w.closedAs === undefined) continue
+        const was = w.readyState
+        w.readyState = 3
+        if (was !== 3 || sockets.has(w)) hub.webSocketClose(w, w.closedAs).catch(() => {}).finally(() => sockets.delete(w))
+      }
+    }
     else if (what === 'count') Object.assign(sent, { up: 0, down: 0, upBytes: 0, downBytes: 0, page: 0 })
     else if (what === 'drop') for (const w of sockets) try { w.real?.terminate() } catch { /* gone */ }
     res.setHeader('content-type', 'application/json')
@@ -146,6 +165,8 @@ const server = http.createServer(async (req, res) => {
 })
 
 server.on('upgrade', async (req, socket, head) => {
+  // A computer with no network doesn't get here.
+  if (away && req.url.startsWith('/_relay/host')) return socket.destroy()
   // Connecting takes a trip there and back.
   await later((req.url.startsWith('/_relay/host') ? net.host : net.ms) * 2)
   const r = await worker.default.fetch(request(req), env)
@@ -162,12 +183,13 @@ server.on('upgrade', async (req, socket, head) => {
       const msg = isBinary ? new Uint8Array(data).buffer : text
       wire(size(msg), () => {
         if (frozen || end.dead || end.readyState !== 1) return
-        if (text != null && ctx.auto && text === ctx.auto.req) return end.send(ctx.auto.res) // a keepalive, answered here
+        if (text != null && ctx.auto && text === ctx.auto.req) { end.autoAt = Date.now(); return end.send(ctx.auto.res) } // a keepalive, answered here
         count(end, 'up', msg)
         hub.webSocketMessage(end, msg).catch((e) => console.error('relay stand-in:', e.message))
       })
     })
     real.on('close', (c) => {
+      if (end.vanished) { end.closedAs = c; return } // the computer let go of it, but nothing reached the relay to say so
       const was = end.readyState
       end.readyState = 3
       if (was !== 3 || sockets.has(end)) hub.webSocketClose(end, c).catch(() => {}).finally(() => sockets.delete(end))

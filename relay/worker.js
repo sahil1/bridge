@@ -24,6 +24,12 @@ const OP = { DATA: 1, OPEN: 2, CLOSE: 3, OK: 4 }
 const Q = { DAYS: 7, NOTE: 64 * 1024, PER_BOX: 50, BOX_BYTES: 512 * 1024, BOXES: 16, RECEIPTS: 100 }
 const ID = /^[\w-]{22}$/ // a note's id, or a box
 const DAY = 24 * 3600 * 1000
+// A computer that's gone quiet. Its connection can stay open for minutes after its network went (a
+// Mac whose Wi-Fi dropped says nothing, and Cloudflare hears nothing either way), and meanwhile phones
+// were told it was here and waited on it. It pings every 15 s (answered without waking the Hub, which
+// keeps the time) and anything else it sends counts too: nothing for this long, and it's let go and
+// phones hear it's offline, since it was last heard.
+const QUIET_MS = 40 * 1000
 
 export default {
   async fetch(req, env) {
@@ -287,6 +293,7 @@ export class Hub {
       for (const old of this.ctx.getWebSockets('host')) try { old.close(4000, 'replaced') } catch { /* gone */ }
       for (const ph of this.ctx.getWebSockets('phone')) try { ph.close(4001, 'computer reconnected') } catch { /* gone */ }
       this.ctx.acceptWebSocket(server, ['host'])
+      server.serializeAttachment({ at: Date.now() })
       await this.ctx.storage.put('seen', null)
       if (this.lim) await this.hostIn(server, req)
     } else {
@@ -302,7 +309,7 @@ export class Hub {
       const id = crypto.getRandomValues(new Uint32Array(1))[0]
       this.ctx.acceptWebSocket(server, ['phone', `p${id}`])
       server.serializeAttachment({ id, at: Date.now() })
-      const h = this.host()
+      const h = await this.live()
       // q: this relay keeps notes (older pages ignore it).
       server.send(JSON.stringify({ host: !!h, seen: (await this.ctx.storage.get('seen')) || null, q: 1 }))
       if (h) h.send(frame(OP.OPEN, id))
@@ -312,6 +319,7 @@ export class Hub {
 
   async webSocketMessage(ws, msg) {
     if (this.lim && !(await this.meter(ws, msg))) return
+    if (this.ctx.getTags(ws).includes('host')) this.heardFrom(ws)
     if (typeof msg === 'string') return this.text(ws, msg) // keepalives are answered before here
     if (this.ctx.getTags(ws).includes('host')) {
       const b = new Uint8Array(msg)
@@ -323,9 +331,42 @@ export class Hub {
       else if (b[0] === OP.CLOSE) try { ph.close(4003, 'closed by the computer') } catch { /* gone */ }
       return
     }
-    const h = this.host()
+    const h = await this.live()
     const { id } = ws.deserializeAttachment() || {}
     if (h && id != null) h.send(frame(OP.DATA, id, msg))
+    // Nowhere to go (the computer went, or went quiet): the phone hears so, rather than wait.
+    else if (!h) ws.send(JSON.stringify({ host: false, seen: (await this.ctx.storage.get('seen')) || null }))
+  }
+
+  // When the computer was last heard on this connection: its last ping, what else it sent, or when
+  // it connected. null where the runtime can't say when it last pinged: then it's never quiet.
+  heard(w) {
+    if (typeof this.ctx.getWebSocketAutoResponseTimestamp !== 'function') return null
+    const a = w.deserializeAttachment() || {}
+    return Math.max(this.ctx.getWebSocketAutoResponseTimestamp(w)?.getTime() || 0, a.heard || 0, a.at || 0)
+  }
+
+  // Something from the computer (kept on its connection every few seconds at most).
+  heardFrom(w) {
+    const a = w.deserializeAttachment() || {}
+    if (Date.now() - (a.heard || 0) > 5000) w.serializeAttachment({ ...a, heard: Date.now() })
+  }
+
+  // The computer's connection, unless it's gone quiet: then it's let go, and phones hear it's offline.
+  async live() {
+    const h = this.host()
+    const at = h && this.heard(h)
+    if (!at || Date.now() - at < QUIET_MS) return h
+    h.serializeAttachment({ ...h.deserializeAttachment(), quiet: true })
+    try { h.close(4006, 'quiet') } catch { /* gone */ }
+    await this.offline(at)
+    return this.host()
+  }
+
+  // The computer's gone: phones hear so, and since when.
+  async offline(seen) {
+    await this.ctx.storage.put('seen', seen)
+    for (const ph of this.ctx.getWebSockets('phone')) try { ph.send(JSON.stringify({ host: false, seen })) } catch { /* gone */ }
   }
 
   async webSocketClose(ws, code) {
@@ -341,10 +382,9 @@ export class Hub {
     try { ws.close(code === 1005 || code === 1006 ? 1000 : code, 'bye') } catch { /* already closed */ }
     if (this.lim && !this.meta) return // removed (hosted): nothing to keep
     if (this.ctx.getTags(ws).includes('host')) {
-      if (this.host(ws)) return // a newer connection took over
-      const seen = Date.now()
-      await this.ctx.storage.put('seen', seen)
-      for (const ph of this.ctx.getWebSockets('phone')) try { ph.send(JSON.stringify({ host: false, seen })) } catch { /* gone */ }
+      // A newer connection took over, or this one was let go as quiet (phones heard then).
+      if (this.host(ws) || ws.deserializeAttachment()?.quiet) return
+      await this.offline(Date.now())
       return
     }
     const { id } = ws.deserializeAttachment() || {}

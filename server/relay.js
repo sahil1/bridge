@@ -79,6 +79,13 @@ let pairing = null // { id, secret, code, expires, uses, tries }
 let retry = null
 const FIRST_TRY = 500 // after the connection drops: soon, then less and less often
 let backoff = FIRST_TRY
+// ...but while it can't get through at all (no network here, as on a Mac off Wi-Fi), every few
+// seconds, so it's back as soon as the network is rather than up to a minute later: nothing reached
+// the relay, so trying costs it nothing. On Bridge AI's relay, only when there's surely no network
+// (no name lookup, no route), so a relay that's down isn't asked by every computer at once.
+const OFF_NET_TRY = 5000
+const NO_NET = /ENOTFOUND|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|ENETDOWN|EADDRNOTAVAIL/
+let failed = null // how the last try failed: { code } when nothing answered, { status } when the relay did
 let limit = null // what Bridge AI's relay last said about its limits: { why, text, until }
 let pinger = null
 let hostKey = null // { privateKey, public }
@@ -172,6 +179,7 @@ function connect() {
   // (Bridge AI's relay hears which version this is, for its counts: HOSTED.md.)
   const ws = new WebSocket(`${conf.url.replace(/^http/, 'ws').replace(/\/$/, '')}/_relay/host`, { headers: { Authorization: `Bearer ${conf.token}`, ...(conf.hosted ? { 'X-Bridge-Version': VERSION } : {}) }, handshakeTimeout: 15000 })
   link = ws
+  failed = null
   let heard = Date.now() // when the relay last sent anything
   let asked = 0 // when the last ping went out
   ws.on('open', () => {
@@ -214,6 +222,7 @@ function connect() {
     }
   })
   ws.on('unexpected-response', (req, res) => {
+    failed = { status: res.statusCode }
     if (conf.hosted && (res.statusCode === 403 || res.statusCode === 404)) {
       // Removed there (forgotten, or unused for months): no use asking every minute.
       lastError = 'Bridge AI\'s relay doesn\'t know this computer any more (it removes computers it hasn\'t seen for 90 days). Set it up again here; phones then pair again.'
@@ -221,7 +230,10 @@ function connect() {
     } else lastError = res.statusCode === 403 ? 'The relay didn\'t accept this computer. Deploy it again from here.' : `The relay answered ${res.statusCode}`
     res.resume()
   })
-  ws.on('error', (e) => { if (!lastError || online) lastError = `Can't reach the relay: ${e.message}` })
+  ws.on('error', (e) => {
+    failed ||= { code: `${e.code || ''} ${e.message || ''}` }
+    if (!lastError || online) lastError = `Can't reach the relay: ${e.message}`
+  })
   ws.on('close', () => {
     if (link !== ws) return
     online = false
@@ -232,7 +244,8 @@ function connect() {
     if (!conf.url || !conf.token) return
     // Bridge AI's relay said to wait (it's switched off, or doesn't know this computer): until then.
     const wait = conf.hosted && limit?.until > Date.now() && limit.why !== 'day' ? limit.until - Date.now() + Math.random() * 60000 : 0
-    retry = setTimeout(connect, Math.max(backoff, wait))
+    const offNet = !wait && failed?.code && (!conf.hosted || NO_NET.test(failed.code))
+    retry = setTimeout(connect, offNet ? Math.min(backoff, OFF_NET_TRY) + Math.random() * 500 : Math.max(backoff, wait))
     backoff = Math.min(backoff * 2, 60000)
   })
 }
@@ -324,6 +337,8 @@ class Conn {
     if (!this.session) return this.hello(buf)
     const { kind, id, body } = unpack(await this.session.open(buf))
     if (this.told) this.proven()
+    // The phone asking whether this computer is still there (its relay can't always tell).
+    if (kind === K.PING) return this.send(K.PONG, id)
     if (kind === K.REQ) return this.request(id, json(body))
     if (kind === K.BODY) { this.streams.get(id)?.body?.push(Buffer.from(body)); return }
     if (kind === K.END) { const s = this.streams.get(id); if (s?.run) s.run(); return }
@@ -373,7 +388,8 @@ class Conn {
     // What it says about itself (its name, that it's a computer, where it's reached) is kept once its
     // first sealed message proves it holds its key: anyone who saw the key (its relay) could send this.
     this.told = { name: typeof msg.name === 'string' ? msg.name.trim().slice(0, 80) : null, kind: msg.kind, relay: msg.relay }
-    toRelay(OP.DATA, this.id, plainFrame({ ...r.welcome, device: device.id }))
+    // ping: this computer answers PING (a phone checks it's still there with it).
+    toRelay(OP.DATA, this.id, plainFrame({ ...r.welcome, device: device.id, ping: 1 }))
     this.session = r.session
     clearTimeout(this.timer)
     toRelay(OP.OK, this.id) // tells the relay this one is yours, so it's never the one dropped
