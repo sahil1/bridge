@@ -2,6 +2,22 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
+## 3.9.2
+
+A computer that drops off the network is noticed in seconds, with another of yours a tap away; a top bar that fits a laptop's window; and a speaker to turn notification sounds off.
+
+### What's new
+
+- **A computer that drops off the network is noticed in seconds.** When a Mac's Wi-Fi went, or its lid closed on the move, nothing told its relay, and the phone waited on it: no word, and everything you tapped hung. Now the phone asks the computer itself. Within about 10 seconds a banner says it isn't answering, shows what it last sent, and has **Open** for another of your computers that's on, beside Start screen. Once it's been quiet for 40 seconds, its relay says it's offline, and since when. Your linked computers notice each other the same way.
+- **Back as soon as the network is.** A computer with no network tries its relay again every few seconds, not up to a minute apart, and your other computers link to it again as soon as it's back.
+- **A speaker in the top bar** turns notification sounds off on all your devices: the Mac app's, a browser's and your phone's. Notifications still come, without a sound. Click it again to turn sounds back on.
+- **A top bar that fits.** With a lot going on, its chips give way a step at a time (the clock, then usage's details, the weather, the meeting, the rest of usage), so Settings is never pushed off a laptop's window. The meeting you're recording no longer shows twice.
+
+### After this update
+
+- **Update Bridge AI on each of your computers.** One on an older version can't answer the phone's question, so the phone notices it's gone only when its relay does.
+- **The iPhone app** gets the phone's side of this with its next App Store version. Until then, its relay already says when a computer has gone quiet.
+
 ## 3.9.1
 
 A model that runs on your computer with one download, local models that read a whole meeting, whiteboards for architecture and network diagrams that look over their own drawing, and a phone that keeps up with the desktop. (3.9.0 never went out: its Mac build stopped at a check before anything was published.)
