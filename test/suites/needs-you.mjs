@@ -62,6 +62,16 @@ for (const [k, v] of Object.entries(was)) { if (v === undefined) delete process.
   // A needs-you notification: it opens the inbox at its agent, and says what else waits.
   ok(new URL(notify.linkTo('w1:p3'), 'http://x').searchParams.get('inbox') === '1' && new URL(notify.linkTo('w1:p3'), 'http://x').searchParams.get('agent') === 'w1:p3', "a needs-you notification's link opens the inbox at its agent (and the agent, in an app too old for the inbox)", notify.linkTo('w1:p3'))
   const fleet = [agent({ paneId: 'x1' }), agent({ paneId: 'x2' }), agent({ paneId: 'x3', status: 'working' }), agent({ paneId: 'x4' })]
+  // Bridge AI's sounds off (the speaker in the top bar): its notifications say so, and each device
+  // shows them without a sound; on again, they have one.
+  const heard = []
+  notify.use({ name: 'test', ready: () => true, send: (n) => { heard.push(n); return {} } })
+  notify.onFleet({ agents: [agent({ paneId: 's1', status: 'working' }), agent({ paneId: 's2', status: 'working' })] }, {})
+  notify.onFleet({ agents: [agent({ paneId: 's1', status: 'done' }), agent({ paneId: 's2', status: 'working' })] }, { alertSounds: false })
+  notify.onFleet({ agents: [agent({ paneId: 's1', status: 'done' }), agent({ paneId: 's2', status: 'done' })] }, {})
+  await new Promise((r) => setTimeout(r, 50))
+  const quiet = heard.find((n) => n.paneId === 's1'), loud = heard.find((n) => n.paneId === 's2')
+  ok(quiet?.silent === true && loud && !loud.silent, 'with sounds off, a notification goes out marked silent; with them on, it isn\'t', heard.map((n) => [n.paneId, n.silent]))
   ok(notify.alsoWaiting(fleet, fleet[0]) === '\n2 more wait on you' && notify.alsoWaiting(fleet.slice(0, 2), fleet[0]) === '\n1 more waits on you' && notify.alsoWaiting(fleet.slice(0, 1), fleet[0]) === '', 'and it says how many more wait on you', [notify.alsoWaiting(fleet, fleet[0])])
 }
 

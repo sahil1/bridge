@@ -45,7 +45,9 @@ export function presence({ id, focused, input, idle }) {
   else fronts.delete(String(id))
 }
 export const atComputer = () => Date.now() - lastInput < AWAY || [...fronts.values()].some((t) => Date.now() - t < 75000)
-const reach = (cfg) => (cfg.notify?.phoneAtComputer || !atComputer() ? {} : { onlyHere: true })
+// How a note reaches you: only on this computer while you're at it, and without a sound while
+// Bridge AI's sounds are off (the speaker in the top bar).
+const reach = (cfg) => ({ ...(cfg.notify?.phoneAtComputer || !atComputer() ? {} : { onlyHere: true }), ...(cfg.alertSounds === false ? { silent: true } : {}) })
 
 // ---------- Muted agents ----------
 // Muted from an agent's ⋯ menu, by pane (filed per herdr session, see scope.js), until you unmute it.

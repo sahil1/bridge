@@ -59,7 +59,7 @@ export const channel = {
   async send(note) {
     const d = state()
     const opts = { vapidDetails: { subject: 'https://github.com/sahil1/bridge', publicKey: d.keys.publicKey, privateKey: d.keys.privateKey }, TTL: 60 * 60, urgency: note.kind === 'needs-you' ? 'high' : 'normal', topic: (note.tag || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 32) || undefined }
-    const payload = JSON.stringify({ title: note.title, body: note.body, url: note.url || '/', tag: note.tag, kind: note.kind, actions: note.actions?.length ? note.actions : undefined })
+    const payload = JSON.stringify({ title: note.title, body: note.body, url: note.url || '/', tag: note.tag, kind: note.kind, actions: note.actions?.length ? note.actions : undefined, silent: note.silent || undefined })
     let sent = 0
     const gone = []
     await Promise.all(d.devices.filter((dev) => !note.onlyHere || isHere(dev)).map(async (dev) => {

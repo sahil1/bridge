@@ -443,6 +443,13 @@ export async function rename(id, name) {
   return list().find((x) => x.id === m.id)
 }
 
+// Bridge AI's sounds on or off (the speaker in the top bar, on any of your devices) on the others
+// too, those online: each is told once, and doesn't pass it on. One offline, or on a Bridge AI from
+// before the speaker, keeps its own.
+export async function soundsEverywhere(on) {
+  await Promise.all(conf.machines.filter((m) => m.state === 'linked' && links.get(m.id)?.session).map((m) => links.get(m.id).call('POST', '/api/alerts/sound', { on, here: true }, 8000).catch(() => {})))
+}
+
 // A pairing link (https://<relay>/#pair=XXXX-…), or its address and code typed in (with or without
 // https://, the code with or without its dashes), or an address alone to ask.
 export function parseLink(text) {

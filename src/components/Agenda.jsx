@@ -190,13 +190,14 @@ export function Agenda() {
   )
 }
 
-// Top-bar chip: the meeting you're in, or the next one with a countdown.
-export function NextMeetingChip({ onClick }) {
+// Top-bar chip: the meeting you're in, or the next one with a countdown. The one recording
+// (`recording`, its title) is in the recording's own pill already: then the next one, if any.
+export function NextMeetingChip({ onClick, recording = null }) {
   const { data } = useCalendar()
   const now = useNow()
   if (!data) return null
   const today = split(data.today, now)
-  const cur = today.current[0]
+  const cur = today.current.find((e) => e.title !== recording)
   const next = today.upcoming[0]
   if (!cur && !next) return null
   const soon = next && new Date(next.start) - now < 10 * 6e4

@@ -532,11 +532,13 @@ async function notifyFor(a) {
   const label = a.chief ? 'Chief of Staff' : a.title || a.tab || a.workspace
   const blocked = a.status === 'blocked'
   const q = blocked ? await fetch(`${URL_BASE}/api/agents/${encodeURIComponent(a.paneId)}/question`).then((r) => r.json(), () => null).catch(() => null) : null
+  // Bridge AI's sounds off (the speaker in the top bar): it still shows, quietly.
+  const quiet = await fetch(`${URL_BASE}/api/config`).then((r) => r.json()).then((c) => c.alertSounds === false, () => false).catch(() => false)
   const n = new Notification({
     title: blocked ? (q?.text ? `${label} needs you` : 'Needs you') : 'Finished',
     subtitle: `${a.workspace}${a.tab && a.tab !== label ? ` › ${a.tab}` : ''}`,
     body: q?.text || label,
-    silent: !blocked,
+    silent: !blocked || quiet,
   })
   n.on('click', () => {
     if (!win) return

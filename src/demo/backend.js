@@ -526,7 +526,8 @@ export function createDemo({ everything = true } = {}) {
   const on = (method, pattern, fn) => routes.push([method, new RegExp(`^${pattern.replace(/:(\w+)/g, '(?<$1>[^/]+)')}$`), fn])
 
   on('GET', '/fleet', () => fleet())
-  on('GET', '/config', () => ({ version, name: S.cfg.name || '', location: S.cfg.location?.label || null, hasMortgage: false, runtime: { name: 'builtin', liveView: false, reorder: true, splits: false }, platform: 'darwin', mail: true, calendar: true, defaultAgent: S.cfg.defaultAgent || 'claude', chiefKind: S.cfg.chief?.kind || 'claude', setupDone: true, simple: !!S.cfg.simple }))
+  on('GET', '/config', () => ({ version, name: S.cfg.name || '', location: S.cfg.location?.label || null, hasMortgage: false, runtime: { name: 'builtin', liveView: false, reorder: true, splits: false }, platform: 'darwin', mail: true, calendar: true, defaultAgent: S.cfg.defaultAgent || 'claude', chiefKind: S.cfg.chief?.kind || 'claude', setupDone: true, simple: !!S.cfg.simple, alertSounds: S.cfg.alertSounds !== false }))
+  on('POST', '/alerts/sound', ({ body }) => { S.cfg.alertSounds = body?.on !== false; return { on: S.cfg.alertSounds } })
   on('GET', '/runtime-theme', () => ({}))
   on('GET', '/version', () => ({ version, build: 'demo', bundled: false }))
   on('GET', '/previews', () => ({ ...Object.fromEntries([...S.agents.values()].map((a) => [a.paneId, preview(a)])), ...cloud.previews() }))
