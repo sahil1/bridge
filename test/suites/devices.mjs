@@ -60,6 +60,18 @@ try {
   await ra.drop()
   ok(!!(await online(b, 'Studio')), 'a dropped connection comes back by itself')
 
+  // ---------- one that drops while something of Studio's is on its way ----------
+  // Asked again once the link is back: a window opened then showed the error as its page, or
+  // stayed white for want of its code.
+  const net = (r, q = '') => fetch(`${r.url}/_test/net${q}`, { method: 'POST' })
+  await net(ra, '?ms=400')
+  const inFlight = fetch(`${b.url}/m/${studio.id}/api/version`).then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) }))
+  await sleep(200)
+  await ra.drop()
+  const got = await inFlight
+  await net(ra)
+  ok(got.status === 200 && !!got.json?.version, 'something of Studio\'s asked for as its link drops is asked again once it\'s back, and comes', got)
+
   // ---------- Studio drops off the network without a word (Wi-Fi off, a lid closed on the move) ----------
   // Its relay hears nothing either way, and kept saying it was there: Laptop asks Studio itself.
   const ctl = (r, what) => fetch(`${r.url}/_test/${what}`, { method: 'POST' }).then((x) => x.json())
@@ -80,6 +92,10 @@ try {
   // for good, until Bridge AI was restarted.)
   a.stop()
   ok(!!(await until(async () => (await other(b, 'Studio'))?.online === false, 15000, 200)), 'Studio quit: Laptop sees it offline')
+  // Its page meanwhile, in a window: that it isn't reachable, trying again by itself (not the error as the page).
+  const away = await fetch(`${b.url}/m/${studio.id}/`, { headers: { accept: 'text/html' } })
+  const awayHtml = await away.text()
+  ok(away.status === 503 && /Studio isn't reachable/.test(awayHtml) && /http-equiv="refresh"/.test(awayHtml) && /Trying again/.test(awayHtml), 'a page of Studio\'s while it\'s away says it isn\'t reachable, and tries again by itself', { status: away.status, html: awayHtml.slice(0, 300) })
   const pasted = b.api('/machines', { link: `${ra.url}/#pair=AAAA-BBBB-CCCC-DDDD-EEEE` }).then((r) => r, (e) => ({ error: e.message }))
   await a.restart()
   const bogus = await pasted

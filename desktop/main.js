@@ -248,7 +248,9 @@ ipcMain.handle('bridge:open-machine', (e, { id = null, agent = null } = {}) => {
   const key = id || ''
   const page = `${URL_BASE}${id ? `/m/${id}` : ''}/${agent ? `?agent=${encodeURIComponent(agent)}` : ''}`
   const have = machineWins.get(key)
-  if (have && !have.isDestroyed()) { if (agent) have.loadURL(page); have.show(); have.focus(); return true }
+  // Open already: brought to the front, and opened again if what it shows is an error (its device
+  // wasn't reachable then), rather than left on it.
+  if (have && !have.isDestroyed()) { if (agent || have.bridgeFailed) have.loadURL(page); have.show(); have.focus(); return true }
   const at = win && !win.isDestroyed() ? win.getBounds() : null
   const was = deviceBounds()[key]
   const w = new BrowserWindow({
@@ -265,6 +267,10 @@ ipcMain.handle('bridge:open-machine', (e, { id = null, agent = null } = {}) => {
   w.webContents.on('will-navigate', (ev, url) => { if (!isLocal(url)) { ev.preventDefault(); openOutside(url) } })
   if (was?.maximized) w.maximize()
   for (const ev of ['resize', 'move', 'close']) w.on(ev, () => saveDeviceBounds(key, w))
+  // Whether it shows an error: an answer that isn't the page (that device wasn't reachable), or one
+  // that didn't load at all, which is tried again in a moment, as the main window does.
+  w.webContents.on('did-navigate', (_e, _url, code) => { w.bridgeFailed = code >= 400 })
+  w.webContents.on('did-fail-load', (_e, code, _d, _u, main) => { if (!main || code === -3) return; w.bridgeFailed = true; setTimeout(() => { if (!w.isDestroyed()) w.loadURL(page) }, 2000) })
   w.loadURL(page)
   machineWins.set(key, w)
   w.on('closed', () => { if (machineWins.get(key) === w) machineWins.delete(key) })
