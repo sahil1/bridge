@@ -362,6 +362,7 @@ offline.subscribe((done) => {
 let heard = 0 // when the connection last brought anything
 let since = 0 // when it was opened
 let pongs = false // the relay answers a ping (one from before that doesn't can't be checked)
+let pongAt = 0 // when it last did
 let probe = null // a check of the connection under way
 function connect() {
   clearTimeout(retryTimer)
@@ -377,7 +378,7 @@ function connect() {
   // One message at a time, in order: a response's pieces must reach the app in sequence.
   sock.onmessage = (e) => {
     heard = Date.now()
-    if (e.data === 'pong') { pongs = true; return } // the relay's answer to a ping
+    if (e.data === 'pong') { pongs = true; pongAt = Date.now(); return } // the relay's answer to a ping
     inbox = inbox.then(() => (ws !== sock ? null : typeof e.data === 'string' ? onText(JSON.parse(e.data)) : onData(e.data))).catch(fail)
   }
   sock.onclose = (e) => { if (ws === sock) lost(e.code) }
@@ -449,7 +450,7 @@ setInterval(() => { if (document.visibilityState === 'visible') check() }, 20000
 const IDLE_ASK_MS = 6000 // nothing from the computer this long: ask
 const SLOW_MS = 3000 // something asked of it with no word back this long: ask now
 const ANSWER_MS = 4000 // no answer this long: it isn't there
-const HELLO_MS = 8000 // no welcome this long: ask the relay again
+const HELLO_MS = 5000 // no welcome this long, on a connection its relay just answered: ask the relay again
 let answers = false // the computer answers PING
 let fromComputer = 0 // when it last sent anything on this link
 let unanswered = 0 // when something went to it with nothing back since
@@ -472,7 +473,7 @@ function askComputer() {
 }
 function notAnswering() {
   asked = null
-  silent = !pongs || heard > askedAt
+  silent = !pongs || pongAt >= askedAt
   reconnect()
 }
 setInterval(() => {
