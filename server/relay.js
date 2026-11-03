@@ -176,6 +176,8 @@ function connect() {
   clearTimeout(retry)
   if (!conf.url || !conf.token) return
   if (link && link.readyState <= 1) return
+  // One still closing is let go first, with its phones' sessions.
+  if (link) { const old = link; link = null; clearInterval(pinger); try { old.terminate() } catch { /* closed */ } for (const c of conns.values()) c.end(); conns.clear() }
   // (Bridge AI's relay hears which version this is, for its counts: HOSTED.md.)
   const ws = new WebSocket(`${conf.url.replace(/^http/, 'ws').replace(/\/$/, '')}/_relay/host`, { headers: { Authorization: `Bearer ${conf.token}`, ...(conf.hosted ? { 'X-Bridge-Version': VERSION } : {}) }, handshakeTimeout: 15000 })
   link = ws
