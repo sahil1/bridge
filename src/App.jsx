@@ -177,7 +177,7 @@ function useFit() {
     const fit = () => {
       frame = 0
       for (let i = 1; i <= FIT_STEPS; i++) bar.classList.remove(`fit-${i}`)
-      for (let i = 1; i <= FIT_STEPS && bar.scrollWidth > bar.clientWidth + 1; i++) bar.classList.add(`fit-${i}`)
+      for (let i = 1; i <= FIT_STEPS && bar.scrollWidth > bar.clientWidth; i++) bar.classList.add(`fit-${i}`)
     }
     const soon = () => { if (!frame) frame = requestAnimationFrame(fit) }
     fit()
