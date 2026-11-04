@@ -121,6 +121,7 @@ const AGENT_MARKS = {
   claude: { si: siClaude, tile: 'brand' },
   codex: MARKS.openai,
   gemini: MARKS.gemini,
+  agy: MARKS.gemini,
   grok: MARKS.xai,
   cursor: { si: siCursor, tile: 'ink' },
   copilot: { si: siGithubcopilot, tile: 'ink' },
