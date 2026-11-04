@@ -121,6 +121,11 @@ try {
   ok(!!(await until(() => fs.readFileSync(path.join(dir, 'notes.md'), 'utf8').includes('Edited here.'), 8000)) && /^# Notes/.test(fs.readFileSync(path.join(dir, 'notes.md'), 'utf8')), 'typed and saved: still Markdown, with the change', fs.readFileSync(path.join(dir, 'notes.md'), 'utf8'))
   await p.locator('button[aria-label="Versions"]').click()
   ok(!!(await until(async () => (await p.locator('.sd-versions li').count()) >= 5, 5000)) && /You/.test(await p.locator('.sd-versions li').first().innerText()), 'Versions: yours on top, the agent\'s and the others under it', await p.locator('.sd-versions').innerText().catch(() => ''))
+  // Compare: an older version against the file as it is now.
+  await p.locator('.sd-versions li').nth(1).locator('button', { hasText: 'Compare' }).click()
+  ok(!!(await until(async () => (await p.locator('.sd-diff .add').count()) > 0 && /Edited here/.test(await p.locator('.sd-diff .add').allInnerTexts().then((x) => x.join(' ')).catch(() => '')), 8000)), "Compare: what's new since that version, marked", { text: await p.locator('.sd-compare').innerText().catch(() => ''), errors: w.errors })
+  await shot(p, `${tag}studio-compare`)
+  await p.locator('.sd-compare button[aria-label="Close"]').click()
   await shot(p, `${tag}studio-doc`)
   // A change from outside while it's open, with nothing unsaved: shown at once.
   await sleep(50)
@@ -154,6 +159,16 @@ try {
   await code.fill('<!doctype html><title>Dash</title><h1 id="h">Revenue</h1>')
   ok(!!(await until(async () => /Revenue/.test(await p.locator('.sd-page-view').getAttribute('srcdoc').catch(() => '')), 5000)), 'a page is drawn as you type it')
   ok(w.errors.length === 0, 'no page errors', w.errors)
+  // On a phone: Studio from More, a file open, nothing wider than the screen.
+  const ph = await page(b, kit.url, { phone: true })
+  pages.push(ph)
+  await ph.p.locator('nav.tabbar button', { hasText: 'More' }).first().click({ timeout: 20000 })
+  await ph.p.locator('button, .m-more-row', { hasText: 'Studio' }).first().click({ timeout: 10000 })
+  await ph.p.waitForSelector('.sd-home', { timeout: 15000 })
+  await ph.p.locator('.sd-recent-open', { hasText: 'notes.md' }).first().click()
+  ok(!!(await until(async () => /Notes/.test(await ph.p.locator('.sd-page .ProseMirror').innerText().catch(() => '')), 15000)), 'on a phone: Studio in More, a document opened')
+  ok(await ph.p.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'and nothing wider than the screen')
+  await shot(ph.p, `${tag}studio-phone`)
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
   console.log(kit.log().slice(-1500))

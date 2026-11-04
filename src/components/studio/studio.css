@@ -93,6 +93,14 @@
 .sd-v-who b { font-weight: 550; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sd-v-acts { display: flex; gap: 8px; font-size: 12px; }
 
+/* Compare: a version against the file as it is now */
+.sd-compare { display: grid; grid-template-rows: auto minmax(0, 1fr); width: min(920px, 100%); max-height: min(80vh, 900px); border-radius: 14px; background: var(--pane); box-shadow: 0 0 0 1px var(--line), 0 18px 50px rgb(0 0 0 / .28); overflow: hidden; }
+.sd-diff { margin: 0; padding: 10px 0; overflow: auto; font: 12.5px/1.55 var(--font-mono); font-variant-ligatures: none; white-space: pre-wrap; word-break: break-word; }
+.sd-diff span { display: block; padding: 0 14px; }
+.sd-diff .del { background: color-mix(in srgb, #e5484d 16%, transparent); }
+.sd-diff .add { background: color-mix(in srgb, #30a46c 16%, transparent); }
+.sd-diff .fold { color: var(--ink-3); font-style: italic; }
+
 /* Ask an agent */
 .sd-modal { position: fixed; inset: 0; z-index: 150; display: grid; place-items: center; padding: 16px; background: rgb(0 0 0 / .32); }
 .sd-ask { display: grid; gap: 10px; width: min(560px, 100%); padding: 16px 18px; border-radius: 14px; background: var(--pane); box-shadow: 0 0 0 1px var(--line), 0 18px 50px rgb(0 0 0 / .28); }

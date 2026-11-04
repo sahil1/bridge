@@ -5,6 +5,7 @@ import { PaneHeader } from '../layout.jsx'
 import { t, tx, locale } from '../../i18n/index.js'
 import { openFile, bytesOf, rawUrl, versionUrl, saveFile, changedSince, restoreVersion, base64, extOf } from './files.js'
 import { useDesignPacks, PacksSection, packFor } from './packs.jsx'
+import { lineDiff, textFor, comparable } from './diff.js'
 import './studio.css'
 
 // Studio: documents, sheets, decks, PDFs and pages, like Meetings and Whiteboards a place of its own.
@@ -239,7 +240,7 @@ export function StudioPage({ root, path: rel, onBack, onOpen }) {
           {!meta || !data ? <p className="muted small sd-loading">{t('Opening…')}</p>
             : <Suspense fallback={<p className="muted small sd-loading">{t('Opening…')}</p>}><Editor key={gen} file={{ ...meta, root, path: rel }} data={data} onDirty={setDirty} handle={handle} pack={packFor(packs.list, meta)} onOpen={onOpen} /></Suspense>}
         </div>
-        {panel === 'versions' && meta && <Versions f={f} versions={meta.versions} onRestore={restore} onClose={() => setPanel(null)} />}
+        {panel === 'versions' && meta && <Versions f={f} ext={meta.ext} versions={meta.versions} onRestore={restore} onClose={() => setPanel(null)} />}
       </div>
       {ask && <AskAgent f={f} meta={meta} selection={ask.selection} onClose={() => setAsk(null)} onSent={(name) => { setAsk(null); setNote({ text: t('Sent to {name}. Studio shows the change once it saves the file.', { name }) }) }} />}
     </div>
@@ -247,8 +248,9 @@ export function StudioPage({ root, path: rel, onBack, onOpen }) {
 }
 const BackBtn = ({ onBack }) => <><button type="button" className="win-btn back" onClick={onBack} aria-label={t('Studio')} title={t('Studio')}><Icon name="chevron" size={16} className="flip" /></button><span className="pane-icon"><Icon name="layers" size={15} /></span></>
 
-function Versions({ f, versions, onRestore, onClose }) {
-  return (
+function Versions({ f, ext, versions, onRestore, onClose }) {
+  const [compare, setCompare] = useState(null) // the version compared with the file as it is
+  return (<>
     <aside className="sd-panel" aria-label={t('Versions')}>
       <div className="sd-panel-head"><b>{t('Versions')}</b><span className="muted small">{t('{n} kept', { n: versions.length })}</span><span className="sd-grow" /><button type="button" className="win-btn" onClick={onClose} aria-label={t('Close')}><Icon name="x" size={13} /></button></div>
       <ol className="sd-versions">
@@ -256,6 +258,7 @@ function Versions({ f, versions, onRestore, onClose }) {
           <li key={v.id} className={i === 0 ? 'now' : ''}>
             <span className="sd-v-who"><b>{v.by === 'agent' && v.name ? v.name : t(WHO[v.by] || v.by)}</b><small className="muted">{when(v.at)} · {sizeOf(v.size)}</small></span>
             {i === 0 ? <small className="muted">{t('Now')}</small> : <span className="sd-v-acts">
+              {comparable(ext) && <button type="button" className="link-btn" onClick={() => setCompare(v)}>{t('Compare')}</button>}
               <a className="link-btn" href={versionUrl(f, v.id)} target="_blank" rel="noreferrer">{t('Open')}</a>
               <button type="button" className="link-btn" onClick={() => onRestore(v.id)}>{t('Put back')}</button>
             </span>}
@@ -263,6 +266,43 @@ function Versions({ f, versions, onRestore, onClose }) {
         ))}
       </ol>
     </aside>
+    {compare && <Compare f={f} ext={ext} v={compare} onClose={() => setCompare(null)} />}
+  </>)
+}
+
+// What changed from a version to the file as it is now, line by line (a Word file by its text):
+// what's gone in red, what's new in green, long stretches the same folded away.
+function Compare({ f, ext, v, onClose }) {
+  const [rows, setRows] = useState(null)
+  const [err, setErr] = useState(null)
+  useEffect(() => {
+    let on = true
+    Promise.all([bytesOf(versionUrl(f, v.id)), bytesOf(rawUrl(f))]).then(([a, b]) => Promise.all([textFor(ext, a), textFor(ext, b)]))
+      .then(([a, b]) => on && setRows(lineDiff(a, b)), (e) => on && setErr(e.message))
+    return () => { on = false }
+  }, [f, ext, v.id])
+  const shown = []
+  if (rows) {
+    for (let i = 0; i < rows.length; i++) {
+      if (rows[i].t !== ' ') { shown.push(rows[i]); continue }
+      let j = i
+      while (j < rows.length && rows[j].t === ' ') j++
+      const run = rows.slice(i, j)
+      if (run.length > 6) shown.push(...(i ? run.slice(0, 2) : []), { fold: run.length - (i ? 2 : 0) - (j < rows.length ? 2 : 0) }, ...(j < rows.length ? run.slice(-2) : []))
+      else shown.push(...run)
+      i = j - 1
+    }
+  }
+  const changes = rows ? rows.filter((r) => r.t !== ' ').length : 0
+  return (
+    <div className="sd-modal" role="dialog" aria-label={t('Compare')} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="sd-compare">
+        <div className="sd-panel-head"><b>{t('From {when} to now', { when: when(v.at) })}</b><span className="muted small">{rows ? (changes ? t('{n} lines changed', { n: changes }) : t('No changes')) : ''}</span><span className="sd-grow" /><button type="button" className="win-btn" onClick={onClose} aria-label={t('Close')}><Icon name="x" size={13} /></button></div>
+        {err && <p className="error-text small sd-err">{err}</p>}
+        {!rows && !err && <p className="muted small sd-loading">{t('Opening…')}</p>}
+        {rows && <pre className="sd-diff">{shown.map((r, i) => (r.fold ? <span key={i} className="fold">{t('… {n} lines the same', { n: r.fold })}{'\n'}</span> : <span key={i} className={r.t === '-' ? 'del' : r.t === '+' ? 'add' : ''}>{r.t === ' ' ? '  ' : `${r.t} `}{r.line}{'\n'}</span>))}</pre>}
+      </div>
+    </div>
   )
 }
 
