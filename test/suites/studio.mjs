@@ -26,6 +26,11 @@ const pages = []
 try {
   await api('/setup', { name: 'Tester' })
   await api('/agents/catalog')
+  // A trial feature: off to start with, its routes refused and nothing leading to it, until it's
+  // turned on (Settings › About & Updates › Trial Features, checked on the page below).
+  ok((await api('/config')).trials?.studio === false && /trial feature/.test((await err('/studio/recent'))?.message || ''), 'Studio is a trial feature, off to start with: its routes say how to turn it on', (await api('/config')).trials)
+  await api('/settings', { trials: { studio: true } }, 'PATCH')
+  ok((await api('/config')).trials?.studio === true && Array.isArray((await api('/studio/recent')).files), 'turned on, it answers')
   // ---------- The files ----------
   const dir = path.join(kit.home, 'Work', 'q4')
   fs.mkdirSync(dir, { recursive: true })
@@ -107,6 +112,21 @@ try {
   pages.push(w)
   const p = w.p
   await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
+  // Settings › About & Updates: Studio's switch under Trial Features, and every button there one
+  // size. Off, Studio leaves the sidebar; on, it's back.
+  await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'about' } })))
+  const trial = p.locator('.st-check', { hasText: 'Studio' }).locator('input')
+  await trial.waitFor({ timeout: 15000 })
+  ok(await trial.isChecked(), 'Settings › About & Updates › Trial Features: Studio, on')
+  const sizes = await p.locator('.st-sections .st-sec .btn').evaluateAll((bs) => [...new Set(bs.map((x) => Math.round(x.getBoundingClientRect().height)))])
+  ok(sizes.length === 1, `every button on About & Updates is one size (${sizes.join(', ')} px)`, sizes)
+  await shot(p, `${tag}studio-trial`)
+  const inRail = () => p.locator('.rail-nav-btn', { hasText: 'Studio' }).count()
+  await trial.uncheck()
+  ok(!!(await until(async () => (await inRail()) === 0, 8000)), 'turned off: Studio leaves the sidebar')
+  await trial.check()
+  ok(!!(await until(async () => (await inRail()) > 0, 8000)), 'turned on again: it is back')
+  await p.locator('button[aria-label="Close settings"]').click()
   // Studio's home, from the rail (clicked again until it shows: WebKit can take a click before the
   // app is listening).
   const home = () => until(async () => { await p.locator('.rail-nav-btn', { hasText: 'Studio' }).click(); return p.locator('.sd-home').waitFor({ timeout: 1500 }).then(() => true, () => false) }, 20000, 300)

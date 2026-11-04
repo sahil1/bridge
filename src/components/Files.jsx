@@ -28,6 +28,7 @@ import { SendDialog, UploadSheet, TransferStrip, PlacesMenu, usePlaces, canCopyH
 import { locale, t } from '../i18n/index.js'
 import { FileDrawing } from '../lazy.jsx'
 import { isDiagramFile, addMermaidButtons, whiteboards as studioHere } from './whiteboard/links.js'
+import { useTrial } from '../trials.js'
 // The kinds of file Studio opens (server/studio.js).
 const STUDIO_OPENS = /\.(docx|md|markdown|txt|xlsx|xlsm|csv|tsv|pptx|pdf|html?)$/i
 
@@ -206,6 +207,7 @@ function Editor({ value, onChange, onSave }) {
 }
 
 function Viewer({ pane, filePath, onOpenPath, onBack, onMenu, ver, onCopyHere }) {
+  const studio = useTrial('studio') // a trial feature (src/trials.js)
   const [state, setState] = useState({ loading: true })
   const [mode, setMode] = usePersisted('cc-md-mode', 'preview')
   const [copied, setCopied] = useState(false)
@@ -327,7 +329,7 @@ function Viewer({ pane, filePath, onOpenPath, onBack, onMenu, ver, onCopyHere })
           {(f?.kind === 'image' || f?.kind === 'pdf' || f?.kind === 'video' || f?.kind === 'audio' || isHtml) && <a className="win-btn" href={isHtml ? site : raw} target="_blank" rel="noreferrer" title="Open in new tab" aria-label="Open in new tab"><Icon name="external" size={13} /></a>}
           {f && onCopyHere && <button className="ghost-btn small copy-here" onClick={() => onCopyHere({ path: filePath, name: f.name, dir: false, size: f.size })} title={copyHereLabel()} aria-label={copyHereLabel()}><Icon name="download" size={12} /><span>{copyHereLabel()}</span></button>}
           {/* Studio edits Word, Excel, PowerPoint, Markdown, CSV, HTML and PDF files, with versions and Ask an agent. */}
-          {f && studioHere && STUDIO_OPENS.test(filePath) && <button className="btn small" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root: pane, path: filePath } }))} title={t('Edit it in Studio, with every version kept and your agents to change it')}><Icon name="layers" size={12} /> {t('Open in Studio')}</button>}
+          {f && studioHere && studio && STUDIO_OPENS.test(filePath) && <button className="btn small" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root: pane, path: filePath } }))} title={t('Edit it in Studio, with every version kept and your agents to change it')}><Icon name="layers" size={12} /> {t('Open in Studio')}</button>}
           {f?.kind === 'office' && onComputer && <button className="btn small" onClick={() => fileOp(pane, 'open', filePath).catch((e) => setSaveMsg({ text: e.message }))} title="Open it in the app that usually opens it"><Icon name="external" size={12} /> Open in app</button>}
           {onMenu && <button className="win-btn" title="More" aria-label="More actions for this file" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); onMenu({ path: filePath, name: crumbs.at(-1), dir: false }, { clientX: r.right - 200, clientY: r.bottom + 4 }) }}><Icon name="more" size={14} /></button>}
         </div>

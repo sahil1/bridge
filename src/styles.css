@@ -133,6 +133,8 @@ kbd { font: 11px var(--font-mono); padding: 1px 5px; border-radius: 4px; backgro
 .btn.primary:hover { filter: brightness(1.08); }
 .btn.block { width: 100%; }
 .btn:disabled { opacity: .5; cursor: default; }
+/* A link that looks like a button reads like one: the button's ink, not the link's blue. */
+a.btn:not(.primary), a.btn:not(.primary):visited { color: var(--ink); text-decoration: none; }
 .link { color: var(--accent); font-size: 12px; margin-left: auto; font-weight: 500; }
 .win-btn {
   display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 7px; color: var(--ink-3);
@@ -3128,3 +3130,8 @@ table.sheet tbody tr:hover td { background: var(--pane-2); }
 .app.narrow .mc-menu.phone { position: fixed; top: calc(52px + var(--safe-top) + 6px); left: max(12px, env(safe-area-inset-left)); right: max(12px, env(safe-area-inset-right)); width: auto; max-width: none; max-height: calc(100dvh - 52px - var(--safe-top) - 90px); overflow-y: auto; }
 .mc-menu.phone .mc-item, .mc-menu.phone .menu-item { min-height: 44px; }
 .mc-dot.unknown { background: transparent; box-shadow: inset 0 0 0 1.5px var(--line-2); }
+
+/* A trial feature's tab while it's off (App.jsx TrialOff). */
+.trial-off { display: grid; justify-items: center; align-content: center; gap: 8px; height: 100%; min-height: 240px; padding: 24px 16px; text-align: center; color: var(--ink-2); }
+.trial-off b { color: var(--ink); font-size: 14px; }
+.trial-off p { margin: 0; max-width: 360px; }

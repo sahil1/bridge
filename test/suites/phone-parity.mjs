@@ -109,7 +109,7 @@ for (const [what, ids] of [['view', views], ['⌘K action', actions], ['Settings
   ok(!missing(ids).length, `every desktop ${what} has a way in on a phone, or says why not (add it to PATHS here)`, missing(ids))
 }
 
-const kit = await startKit('phone-parity')
+const kit = await startKit('phone-parity', { config: { trials: { studio: true } } }) // Studio, a trial feature, on: its ways in are checked too
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
 try {
