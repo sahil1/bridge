@@ -804,7 +804,7 @@ function setTray(c, instead) {
   const items = r
     ? [
       { label: `${paused ? 'Paused' : 'Recording'}: ${title(r.title || 'Meeting')}`, enabled: false },
-      ...(r.callEnded ? [{ label: r.endWhy === 'quiet' ? 'Nobody has said anything for a while' : r.callEndedApp ? `The ${r.callEndedApp} call ended` : 'The call ended', enabled: false }, { label: 'Keep recording', click: () => meetingOp('keep', r.id) }] : []),
+      ...(r.callEnded ? [{ label: r.endWhy === 'over' ? "Its time is up, and it's gone quiet" : r.endWhy === 'quiet' ? 'Nobody has said anything for a while' : r.callEndedApp ? `The ${r.callEndedApp} call ended` : 'The call ended', enabled: false }, { label: 'Keep recording', click: () => meetingOp('keep', r.id) }] : []),
       paused ? { label: 'Resume', click: () => meetingOp('resume', r.id) } : { label: 'Pause', click: () => meetingOp('pause', r.id) },
       { label: 'Stop', click: () => meetingOp('stop', r.id) },
       { type: 'separator' },

@@ -368,8 +368,9 @@ export function useCallEvent(at, app) {
   return ev
 }
 
-// Why a recording seems to be over: its call ended, or nobody's said anything for a while.
-export const endedWords = (r) => (r.endWhy === 'quiet' ? t('Nobody has said anything for a while.') : r.callEndedApp ? t('The {app} call ended.', { app: r.callEndedApp }) : t('The call ended.'))
+// Why a recording seems to be over: its call ended, its time on the calendar is up and it's gone
+// quiet, or nobody's said anything for a long while.
+export const endedWords = (r) => (r.endWhy === 'over' ? t("Its time on your calendar is up, and it's gone quiet.") : r.endWhy === 'quiet' ? t('Nobody has said anything for a while.') : r.callEndedApp ? t('The {app} call ended.', { app: r.callEndedApp }) : t('The call ended.'))
 
 // When a call starts with nothing recording ("Zoom call started. Take notes?") and when the call a
 // meeting was on ends ("Stop recording?"), at the top of the window. The floating card asks too.
@@ -385,7 +386,7 @@ export function CallPrompt() {
   if (r?.callEnded && m.rec?.id === r.id) {
     const left = r.stopsAt ? Math.max(0, Math.round((new Date(r.stopsAt).getTime() - Date.now()) / 1000)) : null
     return (
-      <div className="call-prompt" role="alertdialog" aria-label={r.endWhy === 'quiet' ? t('It went quiet') : t('The call ended')}>
+      <div className="call-prompt" role="alertdialog" aria-label={r.endWhy === 'over' || r.endWhy === 'quiet' ? t('It went quiet') : t('The call ended')}>
         <span className="rec-dot" aria-hidden="true" />
         <span className="call-prompt-main"><b>{endedWords(r)}</b><small>{left != null ? t('Stop recording? It stops by itself in {time}.', { time: clock(left) }) : t('Stop recording?')}</small></span>
         <button type="button" className="btn small primary" disabled={busy} onClick={() => act(() => m.stop())}><Icon name="stop" size={12} /> {t('Stop')}</button>
