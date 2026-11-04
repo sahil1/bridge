@@ -65,6 +65,8 @@ const draw = (working, low = false) => {
   ].join('\r\n'))
   setInterval(() => {}, 1 << 30)
 }
+// CLAUDE_STAND_IN_TYPED=1: whatever it's started as, what's typed to it goes in ~/claude-typed.log too.
+if (process.env.CLAUDE_STAND_IN_TYPED === '1' && !resumed && process.env.CLAUDE_STAND_IN !== 'fresh') process.stdin.on('data', (d) => fs.appendFileSync(path.join(os.homedir(), 'claude-typed.log'), d))
 if (resumed) {
   // What it's sent, written down: a Windows terminal doesn't show what a program hasn't read.
   process.stdin.on('data', (d) => fs.appendFileSync(path.join(os.homedir(), 'claude-typed.log'), d))
