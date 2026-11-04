@@ -2283,3 +2283,36 @@ function resave(id, ms = 0) {
 }
 // Why a save didn't work: macOS not letting Bridge AI into the folder, a disk full.
 const savingError = (e) => (e?.code === 'EPERM' || e?.code === 'EACCES' ? `Bridge AI isn't allowed to write to ${folder().replace(os.homedir(), '~')}.${IS_MAC ? ' Allow it in System Settings › Privacy & Security › Files and Folders, or pick' : ' Pick'} another folder in Settings › Meetings.` : String(e?.message || e).slice(0, 300))
+
+// ---------- A deck from a meeting ----------
+// Make a deck: a short Marp deck (Markdown slides, MIT), written by the notes model from the
+// meeting's summary, your notes and its sections, in Studio's own folder (<data>/studio/files), to
+// open there, present, change by asking an agent, and send as PowerPoint. Its title slide, what it
+// was about, what was decided, the action items with who has them, and speaker notes from what was
+// said.
+export async function deck(id, { model } = {}) {
+  const m = meta(id)
+  const use = model || m.summaryModelPick || cfg.meetings?.model || await helpers.pickModel()
+  if (!use) throw noModel()
+  const summary = readText(path.join(dirOf(id), 'summary.md')).trim()
+  const notes = filled(readText(path.join(dirOf(id), 'notes.md')), m.sections).trim()
+  const said = summary ? '' : transcriptText(id).slice(0, 30_000)
+  if (!summary && !notes && !said) throw new Error('This meeting has nothing to make a deck from yet')
+  const people = (m.event?.attendees || []).join(', ')
+  const ask = [
+    `Meeting: ${m.title}, ${new Date(m.startedAt).toDateString()}${people ? `, with ${people}` : ''}`,
+    summary ? `\nIts notes:\n${summary}` : '', notes ? `\nMy own notes:\n${notes}` : '', said ? `\nThe transcript:\n${said}` : '',
+    '\nWrite a slide deck of this meeting, in Marp Markdown: a front matter block (---, marp: true, paginate: true, ---), then slides separated by lines of ---.',
+    'A title slide (the meeting\'s name, its date); 4 to 8 slides, each a "# " heading with 3 to 5 short bullets; a slide of what was decided; a slide of the action items with who has each. Under each slide, its speaker notes in an HTML comment (<!-- ... -->), from what was said. Only what the meeting covered. Answer with the deck and nothing else.',
+  ].filter(Boolean).join('\n')
+  const r = await replyAny(use, [{ role: 'user', text: ask }], { system: 'You turn meeting notes into clear, short slide decks in Marp Markdown.' })
+  let md = String(r.text || '').trim().replace(/^```(?:markdown|md)?\s*\n([\s\S]*?)\n```$/, '$1').trim()
+  if (!/^---\s*\n[\s\S]*?\bmarp:\s*true\b/.test(md)) md = `---\nmarp: true\npaginate: true\n---\n\n${md.replace(/^---\s*\n[\s\S]*?\n---\s*\n/, '')}`
+  const dir = path.join(DATA, 'studio', 'files')
+  fs.mkdirSync(dir, { recursive: true })
+  const stem = fileSafe(`${m.title} deck`)
+  let name = `${stem}.md`
+  for (let n = 2; fs.existsSync(path.join(dir, name)); n++) name = `${stem} ${n}.md`
+  fs.writeFileSync(path.join(dir, name), `${md}\n`, { flag: 'wx' })
+  return { root: 'studio', path: name, model: r.model }
+}

@@ -57,6 +57,8 @@ function useFolders() {
       out.push({ root: a.paneId, label: `${a.workspace}${a.tab && !/^\d+$/.test(a.tab) ? ` › ${a.tab}` : ''}`, path: a.cwd })
     }
     for (const p of pl?.places || []) out.push({ root: `place:${p.id}`, label: p.name, path: p.path })
+    // Studio's own folder, on this computer, for a file with nowhere else to go.
+    out.push({ root: 'studio', label: t("Studio's own folder"), path: '~/.bridge-ai/studio/files' })
     return out
   }, [fleet, pl])
 }
@@ -99,7 +101,7 @@ export function StudioHome({ onOpen }) {
             </button>
           ))}
         </div>
-        {!folders.length && <p className="muted small">{t('Start an agent in a folder, or add a place in Files, to make a file there.')}</p>}
+        {folders.length === 1 && <p className="muted small">{t('Start an agent in a folder, or add a place in Files, to make a file there; until then, they go in Studio\'s own folder.')}</p>}
         {making && (
           <form className="sd-new-form" onSubmit={make}>
             <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={t(making.label)} aria-label={t('Name')} maxLength={100} />

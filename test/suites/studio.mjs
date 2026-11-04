@@ -9,12 +9,13 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
-import { startKit, checks, until, sleep, browser, page, shot, TEST, ROOT } from '../lib/harness.mjs'
+import { startKit, startModel, checks, until, sleep, browser, page, shot, TEST, ROOT } from '../lib/harness.mjs'
 
 const require = createRequire(path.join(ROOT, 'package.json'))
 const { ok, done } = checks('studio')
 const kit = await startKit('studio', { env: { CLAUDE_STAND_IN_TYPED: '1' } })
 kit.program('claude', fs.readFileSync(path.join(TEST, 'stand-ins', 'claude.cjs'), 'utf8'))
+const model = await startModel('studio')
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
 const api = kit.api
@@ -88,6 +89,17 @@ try {
   packs = await api(`/studio/packs/${packs.packs.find((p) => p.name === 'Light').id}`, null, 'DELETE')
   ok(packs.packs.length === 1 && packs.packs[0].isDefault, 'deleted: the one left is the default', packs.packs)
   ok((await api('/studio/recent')).files.some((f) => f.path === 'notes.md' && f.root === root), 'what you opened is in Recent')
+  // A deck from a meeting: written by the notes model from its summary, in Studio's own folder.
+  await api('/providers/openai', { values: { OPENAI_API_KEY: 'sk-test', OPENAI_BASE_URL: `${model.url}/v1` } }, 'PUT')
+  await api('/settings', { meetings: { model: 'openai:gpt-5', autoSummary: false } }, 'PATCH')
+  const mt = await api('/meetings', { title: 'Pricing review', call: false })
+  await api(`/meetings/${mt.id}/stop`, {})
+  fs.writeFileSync(path.join(kit.data, 'meetings', mt.id, 'summary.md'), '## Summary\nWe agreed the pricing page ships in November.\n')
+  const dk = await api(`/meetings/${mt.id}/deck`, {})
+  const deckFile = path.join(kit.data, 'studio', 'files', dk.path || 'none')
+  ok(dk.root === 'studio' && /^Pricing review deck\.md$/.test(dk.path) && /^---\nmarp: true/.test(fs.readFileSync(deckFile, 'utf8')) && /# Pricing review/.test(fs.readFileSync(deckFile, 'utf8')), 'Make a deck: a Marp deck of the meeting in Studio\'s own folder', dk)
+  ok(model.asked(/Write a slide deck of this meeting/).some((x) => /pricing page ships in November/.test(x)), 'written from its summary', model.asked(/Write a slide deck/).slice(-1)[0]?.slice(0, 300))
+  ok((await api(`/studio/open?root=studio&path=${encodeURIComponent(dk.path)}`)).kind === 'deck', 'and it opens in Studio as a deck')
 
   // ---------- The page ----------
   const w = await page(b, kit.url, { width: 1400, height: 900 })
@@ -148,6 +160,6 @@ try {
 } finally {
   for (const w of pages) await w.ctx.close().catch(() => {})
   await b.close()
-  kit.stop()
+  kit.stop(); model.stop()
 }
 process.exit(done().fail ? 1 : 0)
