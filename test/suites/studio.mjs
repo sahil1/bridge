@@ -30,7 +30,8 @@ try {
   const dir = path.join(kit.home, 'Work', 'q4')
   fs.mkdirSync(dir, { recursive: true })
   const { Document, Packer, Paragraph, HeadingLevel, TextRun } = require('docx')
-  fs.writeFileSync(path.join(dir, 'plan.docx'), await Packer.toBuffer(new Document({ sections: [{ children: [new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun('Q4 plan')] }), new Paragraph({ children: [new TextRun({ text: 'Ship the pricing page by November.', bold: true })] })] }] })))
+  // In its own look: Arial 12pt, its headings Georgia in dark red.
+  fs.writeFileSync(path.join(dir, 'plan.docx'), await Packer.toBuffer(new Document({ styles: { default: { document: { run: { font: 'Arial', size: 24 } }, heading1: { run: { font: 'Georgia', color: 'C00000', size: 36, bold: true } } } }, sections: [{ children: [new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun('Q4 plan')] }), new Paragraph({ children: [new TextRun({ text: 'Ship the pricing page by November.', bold: true })] })] }] })))
   const ExcelJS = require('exceljs')
   const wb = new ExcelJS.Workbook()
   const ws = wb.addWorksheet('Budget')
@@ -106,8 +107,10 @@ try {
   pages.push(w)
   const p = w.p
   await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
-  await p.locator('.rail-nav-btn', { hasText: 'Studio' }).click()
-  await p.waitForSelector('.sd-home', { timeout: 15000 })
+  // Studio's home, from the rail (clicked again until it shows: WebKit can take a click before the
+  // app is listening).
+  const home = () => until(async () => { await p.locator('.rail-nav-btn', { hasText: 'Studio' }).click(); return p.locator('.sd-home').waitFor({ timeout: 1500 }).then(() => true, () => false) }, 20000, 300)
+  ok(!!(await home()), "Studio opens from the rail")
   ok(await p.locator('.sd-new-btn').count() === 5 && await p.locator('.sd-recent li', { hasText: 'notes.md' }).count() > 0, "Studio's home: New (document, Markdown, sheet, deck, page) and Recent")
   await shot(p, `${tag}studio-home`)
   // A Markdown file, edited and saved.
@@ -141,6 +144,22 @@ try {
   const open = async (name) => p.evaluate(({ root, name }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: name } })), { root, name })
   await open('plan.docx')
   ok(!!(await until(async () => /Q4 plan/.test(await p.locator('.sd-page .ProseMirror').innerText().catch(() => '')) && /Ship the pricing page/.test(await p.locator('.sd-page .ProseMirror').innerText().catch(() => '')), 20000)), 'a Word file opens with its heading and text')
+  const h1 = await p.locator('.sd-page.word h1').first().evaluate((e) => { const c = getComputedStyle(e), b = getComputedStyle(e.closest('.sd-page')); return { color: c.color, font: c.fontFamily, size: c.fontSize, body: b.fontFamily, paper: b.backgroundColor } })
+  ok(h1.color === 'rgb(192, 0, 0)' && /Georgia/.test(h1.font) && h1.size === '24px' && /Arial/.test(h1.body) && h1.paper === 'rgb(255, 255, 255)', 'in its own look: its fonts, sizes and colours, on white paper', h1)
+  await shot(p, `${tag}studio-word`)
+  // Saved here: the same look in the file (docx would have put its own in).
+  const docText = p.locator('.sd-page .ProseMirror')
+  await docText.click()
+  await p.keyboard.press(process.platform === 'darwin' ? 'Meta+End' : 'Control+End')
+  await p.keyboard.type(' Agreed.')
+  await p.locator('.pane-head button', { hasText: 'Save' }).click()
+  const said = await p.locator('.sd-conflict[role="alertdialog"]').innerText({ timeout: 5000 }).catch(() => '')
+  ok(/fonts and colours/.test(said), "a Word file's first save here says what's kept", said)
+  await p.locator('.sd-conflict[role="alertdialog"] button', { hasText: 'Save' }).click()
+  const JSZip = require('jszip')
+  const stylesOf = async (file) => { try { return await (await JSZip.loadAsync(fs.readFileSync(file))).file('word/styles.xml').async('string') } catch { return '' } }
+  const kept = await until(async () => { const x = await stylesOf(path.join(dir, 'plan.docx')); return /Agreed/.test(await (await JSZip.loadAsync(fs.readFileSync(path.join(dir, 'plan.docx')))).file('word/document.xml').async('string')) && x }, 10000)
+  ok(!!kept && /w:ascii="Georgia"/.test(kept) && /w:val="C00000"/.test(kept) && /w:ascii="Arial"/.test(kept) && /w:sz w:val="36"/.test(kept) && !/2E74B5/.test(kept.split('Heading1')[1]?.split('</w:style>')[0] || ''), 'saved: the change, in the same fonts, sizes and colours', kept && kept.slice(0, 300))
   // A sheet.
   await open('budget.xlsx')
   ok(!!(await until(async () => (await p.locator('.sd-univer canvas').count()) > 0, 30000)), 'an Excel file opens in the sheet')
@@ -168,7 +187,7 @@ try {
   await p.locator('.pane-head button', { hasText: 'Ask an agent' }).click()
   const picked = await p.locator('.sd-ask-sel').innerText({ timeout: 5000 }).catch(() => '')
   ok(/B2 on Budget/.test(picked) && /120/.test(picked), 'Ask an agent on a sheet: the cells picked, where they are, and their values', picked)
-  ok(await p.locator('.sd-ask-to select').inputValue() === agent.paneId, 'and it goes to the agent at work there unless you pick another', await p.locator('.sd-ask-to select').inputValue())
+  ok(!!(await until(async () => (await p.locator('.sd-ask-to select').inputValue()) === agent.paneId, 5000)), 'and it goes to the agent at work there unless you pick another', await p.locator('.sd-ask-to select').inputValue())
   await shot(p, `${tag}studio-sheet-ask`)
   await p.locator('.sd-ask button', { hasText: 'Cancel' }).click()
   ok(looks <= 2 && reqs.length <= 15, `and asks the server little: whether the file changed ${looks} time${looks === 1 ? '' : 's'} in 10 s, ${reqs.length} requests in all (at most 90 a minute, as everywhere)`, [...new Set(reqs)])
@@ -196,6 +215,21 @@ try {
   ok(!!(await until(async () => /#0a7d4f!important/.test(await drawn()), 5000)), 'a deck that names its pack (any case, quoted or not) is drawn in it')
   await p.locator('.sd-deck-md').fill('---\nmarp: true\npack: Nowhere\n---\n\n# Pitch\n')
   ok(!!(await until(async () => /#ff8800!important/.test(await drawn()) && (await p.locator('.sd-toolbar', { hasText: 'No pack "Nowhere"' }).count()) > 0, 5000)), "a pack you don't have: your default, and it says so")
+  // New, in your default pack's look (Bold: Georgia headings in orange; its near-white text isn't
+  // used on a white Word page).
+  const make = async (label, name) => {
+    await home()
+    await p.locator('.sd-new-btn', { hasText: label }).first().click()
+    await p.locator('.sd-new-form input').fill(name)
+    await p.locator('.sd-new-form select').selectOption(root)
+    await p.locator('.sd-new-form button', { hasText: 'Make it' }).click()
+  }
+  await make('Document', 'Brief')
+  const brief = await until(async () => fs.existsSync(path.join(dir, 'Brief.docx')) && stylesOf(path.join(dir, 'Brief.docx')), 10000)
+  ok(!!brief && /w:ascii="Georgia"/.test(brief) && /w:val="FF8800"/.test(brief) && /w:ascii="Inter"/.test(brief) && !/EEEEEE/.test(brief), "a new document: your design pack's fonts and accent, and a text colour that reads on white", brief && brief.slice(0, 300))
+  await make('Page', 'Pulse')
+  const pulse = await until(() => fs.existsSync(path.join(dir, 'Pulse.html')) && fs.readFileSync(path.join(dir, 'Pulse.html'), 'utf8'), 10000)
+  ok(!!pulse && /--accent: #ff8800/.test(pulse) && /--bg: #101418/.test(pulse) && /font-family: 'Georgia'/.test(pulse) && /<h1>Pulse<\/h1>/.test(pulse), "a new page: your design pack's colours as CSS variables, and its fonts", pulse)
   // A page, drawn as it's typed.
   await open('dash.html')
   const code = p.locator('.sd-code')

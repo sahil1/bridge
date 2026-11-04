@@ -4,8 +4,9 @@ import { api, usePoll, useFleet } from '../../api.js'
 import { PaneHeader } from '../layout.jsx'
 import { t, tx, locale } from '../../i18n/index.js'
 import { openFile, bytesOf, rawUrl, versionUrl, saveFile, changedSince, restoreVersion, base64, extOf } from './files.js'
-import { useDesignPacks, PacksSection } from './packs.jsx'
+import { useDesignPacks, PacksSection, packFor } from './packs.jsx'
 import { lineDiff, textFor, comparable } from './diff.js'
+import { fontCss } from './look.js'
 import './studio.css'
 
 // Studio: documents, sheets, decks, PDFs and pages, like Meetings and Whiteboards a place of its own.
@@ -36,13 +37,28 @@ const NEW = [
   { kind: 'deck', ext: '.md', deck: true, label: tx('Deck'), hint: tx('Slides in Markdown, to present or send as PowerPoint') },
   { kind: 'page', ext: '.html', label: tx('Page'), hint: tx('An HTML page, like an artifact') },
 ]
-async function startOf(n, title) {
+// A new file starts in your default design pack's look, where it has one: a Word file's fonts and
+// colours, a page's (as CSS variables an agent keeps using, and its logo). A deck follows the
+// pack by itself.
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+async function startOf(n, title, pack) {
   if (n.deck) return { text: (await import('./pptx.js')).blankDeck(title) }
   if (n.ext === '.md') return { text: `# ${title}\n\n` }
-  if (n.ext === '.html') return { text: `<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n<title>${title}</title>\n<style>\n  body { font: 16px/1.5 system-ui, sans-serif; max-width: 760px; margin: 3rem auto; padding: 0 1rem; }\n</style>\n</head>\n<body>\n<h1>${title}</h1>\n</body>\n</html>\n` }
-  if (n.ext === '.docx') return { data: base64(await (await import('./docx.js')).docxOf({ content: [{ type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: title }] }, { type: 'paragraph' }] })) }
+  if (n.ext === '.html') return { text: pageOf(title, pack) }
+  if (n.ext === '.docx') {
+    const [{ docxOf }, { lookOfPack }] = await Promise.all([import('./docx.js'), import('./look.js')])
+    return { data: base64(await docxOf({ content: [{ type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: title }] }, { type: 'paragraph' }] }, lookOfPack(pack))) }
+  }
   if (n.ext === '.xlsx') { const x = await import('./xlsx.js'); return { data: base64(await x.bytesOf(x.blankWorkbook(title).data, '.xlsx')) } }
   return { text: '' }
+}
+function pageOf(title, pack) {
+  const c = pack?.colors || {}, f = pack?.fonts || {}
+  const vars = pack ? `  :root { --bg: ${c.background || '#ffffff'}; --text: ${c.text || '#1f2328'}; --accent: ${c.accent || '#2a78d6'}; }\n` : ''
+  const body = pack ? `font: 16px/1.5 ${f.body ? fontCss(f.body, 'system-ui, sans-serif') : 'system-ui, sans-serif'}; background: var(--bg); color: var(--text);` : 'font: 16px/1.5 system-ui, sans-serif;'
+  const heads = pack ? `  h1, h2, h3 {${f.heading ? ` font-family: ${fontCss(f.heading)};` : ''} color: var(--accent); }\n  .logo { height: 36px; }\n` : ''
+  const logo = pack?.logo ? `<img class="logo" src="${pack.logo}" alt="">\n` : ''
+  return `<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n<title>${esc(title)}</title>\n<style>\n${vars}  body { ${body} max-width: 760px; margin: 3rem auto; padding: 0 1rem; }\n${heads}</style>\n</head>\n<body>\n${logo}<h1>${esc(title)}</h1>\n</body>\n</html>\n`
 }
 
 // Where a new file can go: the folders your agents work in, and the places you added to Files.
@@ -81,7 +97,7 @@ export function StudioHome({ onOpen }) {
       const n = making
       const title = name.trim() || t(n.label)
       const file = `${title}${n.deck ? '.md' : n.ext}`
-      const r = await api('/studio/new', { method: 'POST', body: { root: where, dir: '', name: file, ...(await startOf(n, title)) } })
+      const r = await api('/studio/new', { method: 'POST', body: { root: where, dir: '', name: file, ...(await startOf(n, title, packFor(packs.list))) } })
       setMaking(null); setName('')
       onOpen({ root: where, path: r.path })
     } catch (x) { setErr(x.message) } finally { setBusy(false) }
@@ -140,7 +156,7 @@ export function StudioHome({ onOpen }) {
 // Saved with ⌘S or Save, only over the version you loaded; a change from an agent or another app
 // while it's open is shown at once when you've changed nothing, and offered when you have.
 const WHO = { you: tx('You'), agent: tx('An agent'), outside: tx('Changed outside Studio'), restored: tx('Put back'), opened: tx('When it was first opened here') }
-const RISKY = { '.docx': tx('Saving here keeps its text, headings, lists, tables and pictures. Word\'s own layout (headers, footers, comments, tracked changes, page setup) isn\'t kept; the file as it was stays in its versions, and Ask an agent changes it in place.'), '.xlsx': tx('Saving here keeps its values, formulas, formats, merged cells and every sheet. Charts, pivot tables and comments aren\'t kept; the file as it was stays in its versions, and Ask an agent changes it in place.') }
+const RISKY = { '.docx': tx('Saving here keeps its text, headings, lists, tables, pictures, fonts and colours. Word\'s own layout (headers, footers, comments, tracked changes, page setup) isn\'t kept; the file as it was stays in its versions, and Ask an agent changes it in place.'), '.xlsx': tx('Saving here keeps its values, formulas, formats, merged cells and every sheet. Charts, pivot tables and comments aren\'t kept; the file as it was stays in its versions, and Ask an agent changes it in place.') }
 
 export function StudioPage({ root, path: rel, onBack, onOpen }) {
   const f = useMemo(() => ({ root, path: rel }), [root, rel])
@@ -330,6 +346,7 @@ function AskAgent({ f, meta, selection, onClose, onSent }) {
   const [busy, setBusy] = useState(false)
   const send = async (e) => {
     e.preventDefault()
+    if (!fleet || busy || !text.trim()) return // who's there hasn't come yet: not sent to a new agent by mistake
     setBusy(true); setErr(null)
     try {
       const r = await api('/studio/ask', { method: 'POST', body: { ...f, kind: meta?.kind, instruction: text, selection: selection?.text || null, where: selection?.where || null, ...(to !== 'new' ? { pane: to } : {}) } })
@@ -349,7 +366,7 @@ function AskAgent({ f, meta, selection, onClose, onSent }) {
           </select>
         </label>
         {err && <p className="error-text small">{err}</p>}
-        <div className="sd-ask-acts"><button type="submit" className="btn small primary" disabled={busy || !text.trim()}><Icon name="send" size={12} /> {busy ? t('Sending…') : t('Send')}</button><button type="button" className="ghost-btn" onClick={onClose}>{t('Cancel')}</button></div>
+        <div className="sd-ask-acts"><button type="submit" className="btn small primary" disabled={busy || !text.trim() || !fleet}><Icon name="send" size={12} /> {busy ? t('Sending…') : t('Send')}</button><button type="button" className="ghost-btn" onClick={onClose}>{t('Cancel')}</button></div>
       </form>
     </div>
   )

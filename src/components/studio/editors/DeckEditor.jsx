@@ -6,6 +6,7 @@ import { t } from '../../../i18n/index.js'
 import { textOf, base64 } from '../files.js'
 import { pptxOf, slidesOf, deckFromOutline } from '../pptx.js'
 import { packFor, packNamed, withPack } from '../packs.jsx'
+import { fontCss } from '../look.js'
 
 // A deck. A Markdown deck (Marp's format, MIT: slides between lines of ---) is written on the left
 // and drawn on the right as you type, presented full screen, and exported as a PowerPoint whose
@@ -22,7 +23,7 @@ export default function DeckEditor({ file, data, onDirty, handle, readOnly = fal
 }
 
 // The design pack over Marp's own theme (whose rules are more specific, hence !important).
-const css = (pack) => (pack ? `section{${pack.colors?.background ? `background:${pack.colors.background}!important;` : ''}${pack.colors?.text ? `color:${pack.colors.text}!important;` : ''}${pack.fonts?.body ? `font-family:'${pack.fonts.body}',sans-serif!important;` : ''}} section h1,section h2,section h3{${pack.colors?.accent ? `color:${pack.colors.accent}!important;` : ''}${pack.fonts?.heading ? `font-family:'${pack.fonts.heading}',sans-serif!important;` : ''}}` : '')
+const css = (pack) => (pack ? `section{${pack.colors?.background ? `background:${pack.colors.background}!important;` : ''}${pack.colors?.text ? `color:${pack.colors.text}!important;` : ''}${pack.fonts?.body ? `font-family:${fontCss(pack.fonts.body)}!important;` : ''}} section h1,section h2,section h3{${pack.colors?.accent ? `color:${pack.colors.accent}!important;` : ''}${pack.fonts?.heading ? `font-family:${fontCss(pack.fonts.heading)}!important;` : ''}}` : '')
 function frame(html, style, one = null) {
   return `<!doctype html><meta charset="utf-8"><style>${style}
 html,body{margin:0;background:#8a8f99}

@@ -8,21 +8,23 @@ import Icon from '../../Icon.jsx'
 import { t } from '../../../i18n/index.js'
 import { textOf } from '../files.js'
 import { docxOf } from '../docx.js'
+import { lookOf, lookCss, lookColours } from '../look.js'
 
 // A document: Markdown as Markdown (it's saved as Markdown, as written), a Word file read into
 // headings, paragraphs, lists, tables and pictures (mammoth) and saved back as a Word file. A plain
-// text file is edited as it is. handle: save() gives the bytes to write, selection() what's picked,
-// for Ask an agent, and the heading it's under.
+// text file is edited as it is, and a Word file keeps its fonts, sizes and colours (look.js), shown
+// here as they are. handle: save() gives the bytes to write, selection() what's picked, for Ask an
+// agent, and the heading it's under.
 export default function DocEditor({ file, data, onDirty, handle, readOnly = false }) {
   const md = file.ext === '.md' || file.ext === '.markdown'
   const plain = file.ext === '.txt'
-  const [start, setStart] = useState(null) // { content, notes }
+  const [start, setStart] = useState(null) // { content, notes, look }
   useEffect(() => {
     let on = true
     if (md || plain) setStart({ content: textOf(data), notes: [] })
     else {
-      import('mammoth/mammoth.browser.js').then((m) => (m.default || m).convertToHtml({ arrayBuffer: data }))
-        .then((r) => on && setStart({ content: r.value, notes: (r.messages || []).filter((x) => x.type === 'warning') }), (e) => on && setStart({ error: e.message }))
+      Promise.all([import('mammoth/mammoth.browser.js').then((m) => (m.default || m).convertToHtml({ arrayBuffer: data })), lookOf(data)])
+        .then(([r, look]) => on && setStart({ content: r.value, notes: (r.messages || []).filter((x) => x.type === 'warning'), look }), (e) => on && setStart({ error: e.message }))
     }
     return () => { on = false }
   }, [data]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -56,7 +58,7 @@ function Rich({ file, start, md, onDirty, handle, readOnly }) {
   }, [start])
   useEffect(() => { editor?.setEditable(!readOnly) }, [editor, readOnly])
   handle.current = {
-    save: async () => (md ? editor.storage.markdown.getMarkdown() : docxOf(editor.getJSON())),
+    save: async () => (md ? editor.storage.markdown.getMarkdown() : docxOf(editor.getJSON(), start.look)),
     // What's picked, and the heading it's under ("under Pricing"), so the agent finds the place.
     selection: () => {
       if (!editor) return null
@@ -85,8 +87,8 @@ function Rich({ file, start, md, onDirty, handle, readOnly }) {
           {btn(t('Undo'), <Icon name="undo" size={13} />, () => c().undo().run(), false)}
         </div>
       )}
-      {start.notes?.length > 0 && <p className="muted small sd-note">{t('Some of this Word file\'s formatting isn\'t shown here ({n} parts). Saving keeps its text, headings, lists, tables and pictures; the file as it was stays in its versions.', { n: start.notes.length })}</p>}
-      <EditorContent editor={editor} className={`sd-page${file.ext === '.docx' ? ' word' : ''}`} />
+      {start.notes?.length > 0 && <p className="muted small sd-note">{t('Some of this Word file\'s formatting isn\'t shown here ({n} parts). Saving keeps its text, headings, lists, tables, pictures, fonts and colours; the file as it was stays in its versions.', { n: start.notes.length })}</p>}
+      <EditorContent editor={editor} className={`sd-page${file.ext === '.docx' ? ' word' : ''}${lookColours(start.look) ? ' paper' : ''}`} style={lookCss(start.look)} />
     </div>
   )
 }
