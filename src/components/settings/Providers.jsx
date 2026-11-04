@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, refetch, settingsChanged } from '../../api.js'
 import Icon from '../Icon.jsx'
-import { AllowKeychain, Left, nameOf, makeDefault, removeAccount, signOut, DefaultTag, weekResets } from '../AccountMenu.jsx'
+import { AllowKeychain, Left, nameOf, makeDefault, removeAccount, signOut, DefaultTag, weekResets, slotsOf } from '../AccountMenu.jsx'
 import { t } from '../../i18n/index.js'
 import { addAccount } from '../AddAccount.jsx'
 import ProviderIcon, { AgentIcon } from './ProviderIcon.jsx'
@@ -83,7 +83,7 @@ function AutoRow({ k, onChange }) {
 // Sign in (again), Sign out, Remove, and move it up or down the list (every list of accounts
 // follows this order). auto: Auto is on (its pick gets the auto tag, no row the star). only: the
 // one listed, which stays. onMove(-1 | 1): up or down; null at that end.
-function AccountRow({ a, kind, auto, only, onChange, onUp, onDown }) {
+function AccountRow({ a, kind, auto, only, slots, onChange, onUp, onDown }) {
   const [busy, setBusy] = useState(null)
   const [err, setErr] = useState(null)
   const [renaming, setRenaming] = useState(false)
@@ -121,7 +121,7 @@ function AccountRow({ a, kind, auto, only, onChange, onUp, onDown }) {
             {under && <small className="muted">{under}</small>}
           </span>}
       <span className="pv-acct-state"><Chip tone={chip.tone}>{chip.text}</Chip></span>
-      <span className="pv-acct-left">{a.signedIn !== false && <Left a={a} />}</span>
+      <span className="pv-acct-left">{a.signedIn !== false && <Left a={a} slots={slots} />}</span>
       <span className="pv-acct-acts">
         {!isDefault && <button type="button" className="btn small" onClick={() => act('default')} disabled={!!busy} title={t('New agents start on {name}', { name: shown })}><Icon name="star" size={11} />{t('Make default')}</button>}
         <button type="button" className="btn small" onClick={() => act('login')} disabled={!!busy} title={t("Runs the agent's own sign-in for this account, in a terminal tab you can follow")}>
@@ -190,7 +190,7 @@ function AccountsSection({ focus, ready }) {
           <div className="pv-acct-kind"><AgentIcon kind={k.kind} size={20} name={k.label} /><b>{k.label}</b></div>
           {k.accounts.length > 1 && <AutoRow k={k} onChange={() => load(true)} />}
           <ul className="pv-accts">
-            {k.accounts.map((a, i) => <AccountRow key={a.id} a={a} kind={k.kind} auto={k.setting === 'auto' && k.accounts.length > 1} only={k.accounts.length < 2} onChange={() => load(true)}
+            {k.accounts.map((a, i) => <AccountRow key={a.id} a={a} slots={slotsOf(k.accounts)} kind={k.kind} auto={k.setting === 'auto' && k.accounts.length > 1} only={k.accounts.length < 2} onChange={() => load(true)}
               onUp={i > 0 ? () => move(k, i, -1) : null} onDown={i < k.accounts.length - 1 ? () => move(k, i, 1) : null} />)}
           </ul>
           <div className="pv-acct-more">
