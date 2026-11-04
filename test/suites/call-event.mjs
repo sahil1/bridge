@@ -50,14 +50,31 @@ const pcm = (seconds, say) => { const b = Buffer.alloc(Math.round(seconds * 1600
 const callwatch = (bin) => {
   fs.writeFileSync(path.join(bin, 'callwatch.cjs'), `const fs = require('node:fs'), path = require('node:path')
 const read = () => { try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'callwatch.json'), 'utf8')) } catch { return {} } }
+// Screen Recording as callwatch.json says ({ screen: true }); a look at the call's window, a PNG.
+const say = (o) => { process.stdout.write(JSON.stringify(o) + '\\n'); process.exit(0) }
+if (process.argv[2] === 'screen-ask') { fs.writeFileSync(path.join(__dirname, 'screen-asked'), ''); say({ allowed: !!read().screen }) }
+if (process.argv[2] === 'screen') say({ allowed: !!read().screen })
+if (process.argv[2] === 'shot') {
+  if (!read().screen) say({ error: 'not-allowed' })
+  fs.writeFileSync(process.argv[3], Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(120)]))
+  fs.appendFileSync(path.join(__dirname, 'shots.log'), process.argv.slice(4).join(' ') + '\\n')
+  say({ ok: true })
+}
 if (process.argv[2] === 'windows') { process.stdout.write(JSON.stringify({ by: 'accessibility', windows: (read().titles || []).map((title) => ({ bundle: 'com.microsoft.teams2', title })) }) + '\\n'); process.exit(0) }
 let last = ''
 setInterval(() => { const line = JSON.stringify({ input: (read().input || []).map((bundle, i) => ({ pid: 100 + i, bundle })) }); if (line !== last) { last = line; process.stdout.write(line + '\\n') } }, 150)`)
   fs.writeFileSync(path.join(bin, 'callwatch'), `#!/bin/sh\nexec "${process.execPath}" "${path.join(bin, 'callwatch.cjs')}" "$@"\n`, { mode: 0o755 })
   return path.join(bin, 'callwatch')
 }
+// The text on a picture: ocr.txt beside it (a stand-in for native/bridgeocr).
+const ocr = (bin) => {
+  fs.writeFileSync(path.join(bin, 'ocr.cjs'), `const fs = require('node:fs'), path = require('node:path')
+try { process.stdout.write(fs.readFileSync(path.join(__dirname, 'ocr.txt'), 'utf8')) } catch { /* nothing on it */ }`)
+  fs.writeFileSync(path.join(bin, 'bridgeocr'), `#!/bin/sh\nexec "${process.execPath}" "${path.join(bin, 'ocr.cjs')}" "$@"\n`, { mode: 0o755 })
+  return path.join(bin, 'bridgeocr')
+}
 const kit = await startKit('call-event', {
-  env: ({ bin }) => ({ BRIDGE_CALL_START_MS: '300', BRIDGE_CALL_END_MS: '600', BRIDGE_QUIET_OVER_MS: '1500', BRIDGE_QUIET_END_MS: '4000', BRIDGE_QUIET_REMIND_MS: '1500', BRIDGE_QUIET_LONG_MS: '4000', BRIDGE_QUIET_CHECK_MS: '300', BRIDGE_AUTO_STOP_MS: '2000', ...(IS_WIN ? {} : { BRIDGE_CALLWATCH: callwatch(bin) }) }),
+  env: ({ bin }) => ({ BRIDGE_SCREEN_RECHECK_MS: '300', ...(IS_WIN ? {} : { BRIDGE_OCR: ocr(bin) }), BRIDGE_CALL_START_MS: '300', BRIDGE_CALL_END_MS: '600', BRIDGE_QUIET_OVER_MS: '1500', BRIDGE_QUIET_END_MS: '4000', BRIDGE_QUIET_REMIND_MS: '1500', BRIDGE_QUIET_LONG_MS: '4000', BRIDGE_QUIET_CHECK_MS: '300', BRIDGE_AUTO_STOP_MS: '2000', ...(IS_WIN ? {} : { BRIDGE_CALLWATCH: callwatch(bin) }) }),
 })
 const model = await startModel('call-event')
 const browsers = []
@@ -122,6 +139,29 @@ try {
     await p.locator('.menu-item, .at-item, [role="menuitem"]', { hasText: 'Pricing sync' }).first().click()
     ok(!!(await until(async () => (await api(`/meetings/${m3.id}`)).title === 'Pricing sync' && (await p.locator('.mt-title').inputValue()) === 'Pricing sync', 8000)), 'picking Pricing sync names it that, on the page too', (await api(`/meetings/${m3.id}`)).title)
     await p.context().close()
+  }
+
+  // ---------- Names from the call's window, with nobody picking a screen ----------
+  if (!IS_MAC) skip("looks at the call's window by itself", "the call's sound is recorded on a Mac")
+  else {
+    const shots = () => { try { return fs.readFileSync(path.join(kit.bin, 'shots.log'), 'utf8').split('\n').filter(Boolean) } catch { return [] } }
+    fs.writeFileSync(path.join(kit.bin, 'ocr.txt'), 'Talking: Dan Ruiz')
+    call({ input: ['com.microsoft.teams2'] })
+    await until(async () => (await api('/calls')).calls.some((c) => c.app === 'Teams'), 8000)
+    ok((await api('/calls/screen')).allowed === false, "Screen Recording not allowed yet: the app can say so, to ask")
+    const askedNow = await api('/calls/screen', {})
+    ok(askedNow.allowed === false && fs.existsSync(path.join(kit.bin, 'screen-asked')), "Allow asks macOS (its own window), and says it isn't on yet", askedNow)
+    const L = await api('/meetings', { title: 'Pricing sync' })
+    fs.writeFileSync(path.join(kit.bin, 'calltap.json'), JSON.stringify({ level: 3000 }))
+    await sleep(3000)
+    ok(!shots().length, 'not allowed: no look at the call, someone talking or not', shots())
+    call({ input: ['com.microsoft.teams2'], screen: true })
+    const got = await until(async () => { try { return fs.readFileSync(path.join(kit.data, 'meetings', L.id, 'glances.jsonl'), 'utf8').includes('Dan Ruiz') } catch { return false } }, 15000)
+    ok(!!got && shots()[0] === 'com.microsoft.teams2 com.microsoft.teams', "allowed: as someone on the call talks, a look at Teams' window by itself, its names read and kept as words", shots())
+    fs.writeFileSync(path.join(kit.bin, 'calltap.json'), JSON.stringify({ level: 0 }))
+    await api(`/meetings/${L.id}/stop`, {})
+    call({})
+    await until(async () => !(await api('/calls')).calls.length, 8000)
   }
 
   // ---------- Quiet: the meeting seems over ----------

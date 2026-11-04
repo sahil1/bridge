@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import Icon from '../Icon.jsx'
-import { api, usePoll } from '../../api.js'
+import { api, usePoll, onThisComputer } from '../../api.js'
 import { useSettings, SaveNote } from './General.jsx'
 import { MemoryPanel } from '../meetings/tools.jsx'
 import { t } from '../../i18n/index.js'
@@ -75,6 +75,25 @@ function SaveNotes({ set, pickFolder }) {
     </>
   )
 }
+// Names from the call's window: Screen Recording, with why, and Allow (macOS asks once; after that
+// it's turned on in System Settings). Only on the computer it's for, where it can be asked.
+function ScreenNames() {
+  const here = onThisComputer()
+  const { data, refresh } = usePoll(here ? '/calls/screen' : null, 10_000)
+  const [asked, setAsked] = useState(false)
+  if (!here || data?.allowed == null) return null
+  return (
+    <div className="st-row st-screen-names">
+      <span><b>{t('Names from the call')}</b> <span className="muted small">{data.allowed
+        ? t("Screen Recording is on: as people talk, Bridge AI reads the names your call shows, to put them on the transcript. Only the words are kept, never the picture.")
+        : asked ? t('Turn on Bridge AI under System Settings › Privacy & Security › Screen & System Audio Recording, in Screen Recording.')
+          : t('Screen Recording lets Bridge AI read the names your call shows as people talk, to put them on the transcript. Only the words are kept, never the picture.')}</span></span>
+      {!data.allowed && (asked
+        ? <button type="button" className="btn small" onClick={() => api('/fix/settings', { method: 'POST', body: { pane: 'audio' } }).catch(() => {})}>{t('Open it')}</button>
+        : <button type="button" className="btn small" onClick={async () => { setAsked(true); await api('/calls/screen', { method: 'POST' }).catch(() => {}); refresh() }}>{t('Allow')}</button>)}
+    </div>
+  )
+}
 // Voices in a room (server/voices.js), only where it can run: told apart by the voice model, and,
 // if you want, remembered by voice once named. Turning it on downloads the model (30 MB) with its
 // progress here; otherwise it waits for the first Who spoke on a meeting.
@@ -84,11 +103,20 @@ function RoomVoices({ v, m, set, refresh }) {
   const forget = () => api('/meetings/voices/forget', { method: 'POST' }).then(() => { setMsg(t('Forgotten.')); refresh() }).catch((e) => setMsg(e.message))
   return (
     <section className="st-sec st-voices">
-      <h4>{t('Voices in a room')}</h4>
+      <h4>{t('Who Spoke')}</h4>
       <label className="st-check">
         <input type="checkbox" checked={m.roomVoices === true} onChange={(e) => on(e.target.checked)} />
         <span><b>{t('Tell voices apart in a room')}</b> <span className="muted small">{t('With your mic only (no call), each line says Speaker 1, Speaker 2 and so on, by voice, worked out on this computer. Name a speaker once and all their lines take the name.')} {t('It uses a small voice model ({model}, {mb} MB, {license}), downloaded the first time.', { model: v.label, mb: v.mb, license: v.license })} {v.live ? '' : t('On this computer it runs once a meeting ends, so the transcript keeps up while it records.')}</span></span>
       </label>
+      <label className="st-check">
+        <input type="checkbox" checked={m.callVoices !== false} onChange={(e) => set({ callVoices: e.target.checked })} />
+        <span><b>{t('Tell voices apart on a call')}</b> <span className="muted small">{t("The call's sound is one for everyone on it, so each voice is told apart the same way, once the call ends, and named from what's said, who was invited and the names the call showed. By itself, on this computer: the model downloads after the first call with more than one other person.")}</span></span>
+      </label>
+      <label className="st-check">
+        <input type="checkbox" checked={m.learnVoice !== false} onChange={(e) => set({ learnVoice: e.target.checked })} />
+        <span><b>{t('Learn my voice')}</b> <span className="muted small">{t("From your mic on calls, where every line is yours, so a meeting in a room knows which voice is you without your naming it. It's a few hundred numbers for how your voice sounds, on this computer only.")} {v.mine ? t('Learned.') : ''}</span></span>
+      </label>
+      <ScreenNames />
       {v.downloading && <p className={`small ${v.downloading.error ? 'error-text' : 'muted'}`} role="status">{v.downloading.error || t('Downloading the voice model: {n}%', { n: v.downloading.percent })}</p>}
       <label className="st-check">
         <input type="checkbox" checked={m.rememberVoices === true} onChange={(e) => set({ rememberVoices: e.target.checked })} />

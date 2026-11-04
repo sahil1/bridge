@@ -4,6 +4,7 @@
 // and has to let go of it for a few more to count as ended (a blip isn't the end).
 import { spawn, execFile } from 'node:child_process'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import readline from 'node:readline'
 import { ROOT, IS_MAC } from './paths.js'
@@ -124,6 +125,40 @@ export function windowTitles(app) {
       resolve(titles)
     })
   })
+}
+
+// Screen Recording, which lets Bridge AI look at the call's window as people talk and read the
+// names it shows (who's talking, captions), to put names on the transcript. screen(): whether
+// macOS allows it, never asking (null off a Mac, or with no callwatch). screenAsk(): the same,
+// asking macOS the first time (its own window), for Allow on a meeting.
+const once = (args, ms = 5000) => new Promise((resolve) => {
+  const bin = watchBin()
+  if (!bin) return resolve(null)
+  execFile(bin, args, { timeout: ms, maxBuffer: 64 * 1024 }, (err, out) => {
+    try { resolve(JSON.parse(String(out || '').trim().split('\n')[0])) } catch { resolve(null) }
+  })
+})
+let screenSaid = { at: 0, allowed: null }
+const SCREEN_RECHECK_MS = Number(process.env.BRIDGE_SCREEN_RECHECK_MS || 30_000)
+export async function screen() {
+  if (Date.now() - screenSaid.at < SCREEN_RECHECK_MS) return screenSaid.allowed
+  const r = await once(['screen'])
+  screenSaid = { at: Date.now(), allowed: typeof r?.allowed === 'boolean' ? r.allowed : null }
+  return screenSaid.allowed
+}
+export async function screenAsk() {
+  const r = await once(['screen-ask'], 60_000)
+  screenSaid = { at: Date.now(), allowed: typeof r?.allowed === 'boolean' ? r.allowed : null }
+  return screenSaid.allowed
+}
+// A picture of the call app's window, as a PNG buffer, or null (not allowed, no window on screen).
+export async function shot(app) {
+  const ids = APPS.filter(([, a]) => a === app).map(([id]) => id)
+  if (!ids.length || !watchBin()) return null
+  const file = path.join(os.tmpdir(), `bridge-call-${process.pid}-${Date.now()}.png`)
+  const r = await once(['shot', file, ...ids], 10_000)
+  if (r?.error === 'not-allowed') screenSaid = { at: Date.now(), allowed: false }
+  try { return r?.ok ? await fs.promises.readFile(file) : null } catch { return null } finally { fs.promises.rm(file, { force: true }).catch(() => {}) }
 }
 
 // What's going on now: { watching, calls: [{ app, since, browser }] }.

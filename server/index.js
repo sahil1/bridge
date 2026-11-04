@@ -1161,6 +1161,8 @@ meetings.setHelpers({
   reply: (id, msgs, o) => chatModels.reply(id, msgs, o), pickModel: pickMeetingModel, models: meetingModels, mailRelated: (o) => mail.related(o), mailMessage: (id) => mail.message(id),
   // How much a model on this computer takes at a time, and how long it takes here.
   context: (id) => chatModels.contextOf(id), tokens: chatModels.tokensOf, estimate: (id, text, out) => chatModels.estimate(id, text, out),
+  // A look at the call's window, when Screen Recording allows it (calls.js).
+  canLook: () => calls.screen(), look: (app) => calls.shot(app),
 })
 // A meeting's action items as agents and Chief of Staff's tasks (meetwork.js).
 meetWork.configure(cfg)
@@ -1260,6 +1262,10 @@ app.get('/api/calls', wrap(() => {
   }
 }))
 app.post('/api/calls/dismiss', wrap(() => { prompt = null; return { ok: true } }))
+// Screen Recording, for the names a call shows as people talk: whether it's allowed, and Allow
+// (macOS's own window the first time; after that, System Settings is where it's turned on).
+app.get('/api/calls/screen', wrap(async () => ({ allowed: await calls.screen() })))
+app.post('/api/calls/screen', wrap(async (req) => { hereOnly(req, 'Allow Screen Recording'); return { allowed: await calls.screenAsk() } }))
 // The calendar event to take notes for (callevent.js): the one the call on app is for (or the call
 // on now), by its window's title, a Join in Bridge AI or when it started; with no call, the one
 // under way. others: the rest that were on, for the meeting's page to offer instead.
