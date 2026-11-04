@@ -66,6 +66,7 @@ import * as meetWork from './meetwork.js'
 import * as speech from './speech.js'
 import * as projects from './projects.js'
 import * as calls from './calls.js'
+import * as callEvent from './callevent.js'
 import { terminals, openAttach, openCommand } from './terminal.js'
 import { mcpRoutes } from './mcp.js'
 import * as notify from './notify.js'
@@ -162,6 +163,11 @@ cloud.routes(app, { pushFleet: () => pushFleet() })
 
 // When each agent started and since when it's in its state, for the agent map (agentmap.js).
 const runs = agentMap.make({ rt, cfg })
+// Tabs you renamed: their agents go by that name everywhere (the header, the tabs, notifications),
+// over the title an agent gives its own session ("✳ Fix the login page").
+const NAMED_TABS = path.join(DATA, 'named-tabs.json')
+const namedTabs = new Set((() => { try { return JSON.parse(fs.readFileSync(NAMED_TABS, 'utf8')) } catch { return [] } })())
+const nameTab = (tabId) => { namedTabs.add(String(tabId)); try { writeFileAtomic(NAMED_TABS, JSON.stringify([...namedTabs].slice(-500))) } catch { /* named until a restart */ } }
 async function fleetView() {
   const f = await rt.fleet()
   delete f.panes
@@ -180,6 +186,7 @@ async function fleetView() {
     if (a.chief) a.title = 'Chief of Staff'
     // A fresh session has no title yet; the tab name (e.g. a routine's) says more than "Claude Code".
     else if (generic && a.tab && !/^\d+$/.test(a.tab)) a.title = a.tab
+    if (!a.chief && a.tab && namedTabs.has(String(a.tabId))) { a.ownTitle = a.title; a.title = a.tab; a.named = true }
   }
   threads.decorate(f)
   // Its space and first tab, made before 3.6 as "Chief of staff", show by its name now.
@@ -694,7 +701,7 @@ async function launchFrom(body) {
   pushFleet()
   return out
 }
-app.post('/api/tabs/:tab/rename', wrap(async (req) => { await rt.renameTab(req.params.tab, String(req.body?.label || '').trim()); pushFleet(); return { ok: true } }))
+app.post('/api/tabs/:tab/rename', wrap(async (req) => { await rt.renameTab(req.params.tab, String(req.body?.label || '').trim()); nameTab(req.params.tab); pushFleet(); return { ok: true } }))
 // Closing ends the terminal; the conversation is kept in "Closed agents" to find and resume.
 async function archiveWhere(match) {
   for (const a of (await rt.fleet()).agents.filter(match)) {
@@ -1249,10 +1256,21 @@ app.get('/api/calls', wrap(() => {
   return {
     ...calls.now(), detect: cfg.meetings?.detect !== false, float: cfg.meetings?.floatCard || 'meetings', floatHover: cfg.meetings?.floatHover !== false,
     prompt: rec ? null : prompt,
-    recording: rec && { id: rec.id, title: rec.title, status: rec.status, startedAt: rec.startedAt, seconds: Math.round(meetings.elapsed(rec.id) || 0), talking: meetings.talking(rec.id), callApps: rec.callApps || [], callEnded: rec.callEnded || null, callEndedApp: rec.callEndedApp || null, stopsAt: rec.stopsAt || null, callQuiet: meetings.callQuiet(rec.id) },
+    recording: rec && { id: rec.id, title: rec.title, status: rec.status, startedAt: rec.startedAt, seconds: Math.round(meetings.elapsed(rec.id) || 0), talking: meetings.talking(rec.id), callApps: rec.callApps || [], callEnded: rec.callEnded || null, callEndedApp: rec.callEndedApp || null, endWhy: rec.endWhy || (rec.callEnded ? 'call' : null), stopsAt: rec.stopsAt || null, callQuiet: meetings.callQuiet(rec.id) },
   }
 }))
 app.post('/api/calls/dismiss', wrap(() => { prompt = null; return { ok: true } }))
+// The calendar event to take notes for (callevent.js): the one the call on app is for (or the call
+// on now), by its window's title, a Join in Bridge AI or when it started; with no call, the one
+// under way. others: the rest that were on, for the meeting's page to offer instead.
+app.get('/api/calls/event', wrap(async (req) => {
+  const d = await calendar().catch(() => null)
+  const events = [...(d?.today || []), ...(d?.tomorrow || [])]
+  const want = String(req.query.app || '').slice(0, 40)
+  const on = calls.now().calls
+  const call = (want && on.find((c) => c.app === want)) || (!want && on.sort((a, b) => b.since.localeCompare(a.since))[0]) || (want ? { app: want, browser: calls.BROWSERS.has(want) } : null)
+  return callEvent.pick(events, { call, titles: call?.since ? await calls.windowTitles(call.app) : [] })
+}))
 syncCalls()
 // Meetings to mention in a message, and one as a file for an agent to read (the message box's
 // meeting key, @ unless Settings › Meetings says another).
@@ -1447,6 +1465,8 @@ app.get('/api/quota', wrap((req) => quota(req.query.refresh === '1')))
 app.post('/api/quota/allow/:id', wrap((req) => quota.allow(req.params.id)))
 app.get('/api/weather', wrap(() => weather()))
 app.get('/api/calendar', wrap((req) => calendar(req.query.refresh === '1')))
+// Join clicked on an event, on any of your devices: the call that starts next is likely for it.
+app.post('/api/calendar/joined', wrap((req) => callEvent.noteJoin(req.body?.id)))
 app.get('/api/mail', wrap((req) => mail(req.query.refresh === '1')))
 app.get('/api/mail/message/:id', wrap((req) => mail.message(req.params.id)))
 app.post('/api/mail/rules', wrap((req) => { const r = setRule(req.body?.address, req.body?.rule); mail.invalidate(); return r }))

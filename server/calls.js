@@ -2,7 +2,7 @@
 // so meeting notes can offer to start when a call does and to stop when it ends, like Granola.
 // A call app has to keep the mic for a few seconds to count (a quick device check isn't a call),
 // and has to let go of it for a few more to count as ended (a blip isn't the end).
-import { spawn } from 'node:child_process'
+import { spawn, execFile } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import readline from 'node:readline'
@@ -104,6 +104,27 @@ export function stop() {
   timers.clear(); using.clear(); calls.clear(); gone.clear()
 }
 process.once('exit', () => { if (proc) try { proc.kill('SIGTERM') } catch { /* gone */ } })
+
+// The titles of a call app's windows, which say which meeting it is (Teams names the meeting in its
+// window's title; a browser, the tab in front): when macOS already lets Bridge AI read them, through
+// Accessibility (which dictation's typing uses) or Screen Recording. It never asks. [] when it can't,
+// or off a Mac. Kept a few seconds, as each window asks.
+const seenTitles = new Map() // app -> { at, titles }
+export function windowTitles(app) {
+  const bin = watchBin()
+  const ids = APPS.filter(([, a]) => a === app).map(([id]) => id)
+  if (!bin || !ids.length) return Promise.resolve([])
+  const was = seenTitles.get(app)
+  if (was && Date.now() - was.at < 5000) return Promise.resolve(was.titles)
+  return new Promise((resolve) => {
+    execFile(bin, ['windows', ...ids], { timeout: 3000, maxBuffer: 256 * 1024 }, (err, out) => {
+      let titles = []
+      try { titles = (JSON.parse(String(out || '').trim().split('\n')[0]).windows || []).map((w) => String(w.title || '').slice(0, 300)).filter(Boolean).slice(0, 20) } catch { /* an older callwatch, or none */ }
+      seenTitles.set(app, { at: Date.now(), titles })
+      resolve(titles)
+    })
+  })
+}
 
 // What's going on now: { watching, calls: [{ app, since, browser }] }.
 export function now() {

@@ -797,14 +797,14 @@ function setTray(c, instead) {
   const paused = r?.status === 'paused'
   trayAt = { c, at: Date.now(), base: was && (paused || (s < was && was - s < 8)) ? was : s }
   trayTitle()
-  const key = JSON.stringify([r?.id, r?.title, paused, r?.callEnded, c.prompt?.app, c.prompt?.at, instead])
+  const key = JSON.stringify([r?.id, r?.title, paused, r?.callEnded, r?.endWhy, c.prompt?.app, c.prompt?.at, instead])
   if (key === trayMenu) return
   trayMenu = key
   const title = (t) => (t.length > 48 ? `${t.slice(0, 47)}…` : t)
   const items = r
     ? [
       { label: `${paused ? 'Paused' : 'Recording'}: ${title(r.title || 'Meeting')}`, enabled: false },
-      ...(r.callEnded ? [{ label: `The ${r.callEndedApp || 'call'} call ended`, enabled: false }, { label: 'Keep recording', click: () => meetingOp('keep', r.id) }] : []),
+      ...(r.callEnded ? [{ label: r.endWhy === 'quiet' ? 'Nobody has said anything for a while' : r.callEndedApp ? `The ${r.callEndedApp} call ended` : 'The call ended', enabled: false }, { label: 'Keep recording', click: () => meetingOp('keep', r.id) }] : []),
       paused ? { label: 'Resume', click: () => meetingOp('resume', r.id) } : { label: 'Pause', click: () => meetingOp('pause', r.id) },
       { label: 'Stop', click: () => meetingOp('stop', r.id) },
       { type: 'separator' },

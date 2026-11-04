@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import Icon, { StatusDot } from '../Icon.jsx'
 import { api, usePoll, useFleet } from '../../api.js'
-import { MEETINGS_CHANNEL, clock, useCallEvent, QuickNote } from './recording.jsx'
+import { MEETINGS_CHANNEL, clock, useCallEvent, QuickNote, endedWords } from './recording.jsx'
 import { KIND, setAssist, markAssist } from './assist.jsx'
 import { t, locale } from '../../i18n/index.js'
 import './meetings.css'
@@ -72,7 +72,7 @@ export default function FloatCard() {
   // above the bar. In a browser tab the page doesn't move.
   const up = !!app().floatSize && window.screenY + window.outerHeight / 2 > (window.screen.availTop || 0) + window.screen.availHeight / 2
   const { data: m } = usePoll(r ? `/meetings/${encodeURIComponent(r.id)}` : null, hover || pinned ? 1500 : 4000)
-  const ev = useCallEvent(!r && c?.prompt ? c.prompt.at : null)
+  const ev = useCallEvent(!r && c?.prompt ? c.prompt.at : null, c?.prompt?.app)
 
   useEffect(() => {
     const ch = new BroadcastChannel(MEETINGS_CHANNEL)
@@ -191,7 +191,7 @@ export default function FloatCard() {
         )}
         {open && (
           <div className="fc-more">
-            {r.callEnded && <p className="fc-line"><b>{r.callEndedApp ? t('The {app} call ended.', { app: r.callEndedApp }) : t('The call ended.')}</b> {left != null ? t('Stopping in {time}.', { time: clock(left) }) : t('Stop recording?')}</p>}
+            {r.callEnded && <p className="fc-line"><b>{endedWords(r)}</b> {left != null ? t('Stopping in {time}.', { time: clock(left) }) : t('Stop recording?')}</p>}
             {r.callQuiet && !paused && <p className="fc-line fc-quiet" role="status"><b>{t('No sound from the call.')}</b> {t('If people are talking, allow Bridge AI under System Settings › Privacy & Security › Screen & System Audio Recording, in System Audio Recording Only.')} <button type="button" className="link-btn" onClick={allowCall}>{t('Open it')}</button></p>}
             <div className="fc-viz">
               <div className="fc-row">
