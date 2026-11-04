@@ -848,6 +848,7 @@
   "It reads and changes files in this folder and runs commands. It asks you before it changes a file or runs anything.": "Il lit et modifie les fichiers de ce dossier et lance des commandes. Il vous demande avant de modifier un fichier ou de lancer quoi que ce soit.",
   "It signs in again in a terminal tab on your computer": "Il se reconnecte dans un onglet de terminal sur votre ordinateur",
   "It stays in its tab, next to {name}.": "Il reste dans son onglet, à côté de {name}.",
+  "It stopped at its usage limit. Another account can pick it up now, where it stopped.": "Il s’est arrêté à sa limite d’utilisation. Un autre compte peut reprendre maintenant, là où il s’est arrêté.",
   "It stopped loading: the connection to the computer dropped.": "Le chargement s’est arrêté : la connexion avec l’ordinateur a été coupée.",
   "It unlinked this device": "Il a dissocié cet appareil",
   "It uses a small voice model ({model}, {mb} MB, {license}), downloaded the first time.": "Il utilise un petit modèle de voix ({model}, {mb} Mo, {license}), téléchargé la première fois.",

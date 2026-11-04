@@ -848,6 +848,7 @@
   "It reads and changes files in this folder and runs commands. It asks you before it changes a file or runs anything.": "它会读取和修改此文件夹中的文件并运行命令。修改文件或运行任何东西前都会先问你。",
   "It signs in again in a terminal tab on your computer": "将在你电脑上的终端标签页中重新登录",
   "It stays in its tab, next to {name}.": "它会留在自己的标签页中，就在 {name} 旁边。",
+  "It stopped at its usage limit. Another account can pick it up now, where it stopped.": "它已达到使用上限而停止。另一个账号现在可以从停下的地方接着做。",
   "It stopped loading: the connection to the computer dropped.": "已停止加载：与电脑的连接断开了。",
   "It unlinked this device": "对方已取消与此设备的关联",
   "It uses a small voice model ({model}, {mb} MB, {license}), downloaded the first time.": "它使用一个小型声音模型（{model}，{mb} MB，{license}），首次使用时下载。",

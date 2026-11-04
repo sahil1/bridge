@@ -5,6 +5,8 @@
 //                                           only the footer shows its subagents; "idle" draws
 //                                           it done working; "limit" and "weekly limit" end it
 //                                           at a usage limit (the 5-hour one carries on by itself);
+//                                           "stuck weekly limit" logs the weekly one with its
+//                                           working line still on screen, as Claude Code can leave it;
 //                                           "table" ends it with a reply holding a wide table,
 //                                           "diagram" with one holding a Mermaid flowchart
 //   claude --resume <id> [...]              the same conversation again (on another account, say):
@@ -96,6 +98,7 @@ const padding = (mb) => { const line = JSON.stringify({ type: 'api-request-blob'
 
 // Its screen first, so its footer is up before the log is done.
 const limited = /limit$/.test(message)
+const stuck = message === 'stuck weekly limit'
 const asks = /^ask\b/.test(message) ? message.slice(3).trim() || 'npm run deploy' : null
 if (asks) {
   // A permission prompt under its rule, as Claude Code draws one, until a key answers it.
@@ -113,7 +116,7 @@ if (asks) {
     setTimeout(() => process.stdout.write(`\x1b[2J\x1b[H${go ? `Ran ${asks}. Everything is up.` : 'Stopped, as you asked.'}\r\n\r\n✻ Brewed for 9s\r\n${rule}\r\n❯ \x1b[7m \x1b[27m\r\n${rule}\r\n`), 2500)
   })
   setInterval(() => {}, 1 << 30)
-} else draw(message !== 'idle' && message !== 'table' && message !== 'diagram' && !limited)
+} else draw((message !== 'idle' && message !== 'table' && message !== 'diagram' && !limited) || stuck)
 
 // Then the shells' output and the subagent's own files, so the log's last notice is the last thing written.
 fs.writeFileSync(path.join(tasks, 'bsh0.output'), 'ready on :5173\n')
@@ -162,7 +165,7 @@ if (message === 'table') use(0, [{ type: 'text', text: 'Where each ticket stands
 if (message === 'diagram') use(0, [{ type: 'text', text: 'Here is the checkout flow, also in `flow.mmd`:\n\n```mermaid\nflowchart LR\n  Cart --> Pay[Payment] --> Done\n```' }])
 // A usage limit, as Claude Code logs one: the error, then whether it carries on by itself at the reset.
 if (limited) {
-  const weekly = message === 'weekly limit'
+  const weekly = /weekly limit$/.test(message)
   w({ type: 'assistant', timestamp: at(0), error: 'rate_limit', isApiErrorMessage: true, apiErrorStatus: 429, message: { role: 'assistant', content: [{ type: 'text', text: weekly ? 'You\'ve hit your weekly limit · resets Oct 29 at 5am (America/Los_Angeles)' : 'You\'ve hit your session limit · resets 3:10am (America/Los_Angeles)' }] } })
   if (!weekly) w({ type: 'system', subtype: 'informational', timestamp: at(0), content: 'Usage limit reached · continuing automatically at 3:10am · esc to cancel' })
 }

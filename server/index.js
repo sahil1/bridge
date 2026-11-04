@@ -843,7 +843,10 @@ app.post('/api/agents/:pane/continue', wrap(async (req) => {
   const id = String(req.body?.account || '')
   if (!accounts.supports(a.kind) || !adapter(a.kind).resume || !a.sessionId) throw new Error(`Continuing on another account isn't available for ${adapter(a.kind).label}${a.sessionId ? '' : ' until it has a conversation'}`)
   if (!accounts.has(a.kind, id)) throw new Error('No such account')
-  if (a.status === 'working') throw new Error('The agent is working. Wait for it to finish, or press Esc, then try again.')
+  // Stopped at its usage limit, it's done for now, though its screen can still show it busy (Claude
+  // Code's working line stays up after "You've hit your weekly limit"): that's when it's wanted.
+  const atLimit = () => { try { return !!transcript(a, 1).limit } catch { return false } }
+  if (a.status === 'working' && !atLimit()) throw new Error('The agent is working. Wait for it to finish, or press Esc, then try again.')
   if (((await rt.fleet()).panes || []).some((p) => p.tabId === a.tabId && p.paneId !== a.paneId)) throw new Error('This tab has other panes. Close them first.')
   const name = a.tab && !/^\d+$/.test(a.tab) ? a.tab : a.title || adapter(a.kind).label
   // Kept in Closed agents until it's back, so a failed restart loses nothing.

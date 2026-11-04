@@ -848,6 +848,7 @@
   "It reads and changes files in this folder and runs commands. It asks you before it changes a file or runs anything.": "यह इस फ़ोल्डर की फ़ाइलें पढ़ता और बदलता है और कमांड चलाता है। फ़ाइल बदलने या कुछ भी चलाने से पहले यह आपसे पूछता है।",
   "It signs in again in a terminal tab on your computer": "यह आपके कंप्यूटर पर एक टर्मिनल टैब में फिर से साइन इन करता है",
   "It stays in its tab, next to {name}.": "यह {name} के बगल में, अपने टैब में रहता है।",
+  "It stopped at its usage limit. Another account can pick it up now, where it stopped.": "यह अपनी उपयोग सीमा पर रुक गया। कोई दूसरा खाता अब वहीं से इसे आगे बढ़ा सकता है, जहाँ यह रुका था।",
   "It stopped loading: the connection to the computer dropped.": "लोड होना रुक गया: कंप्यूटर से कनेक्शन टूट गया।",
   "It unlinked this device": "इसने इस डिवाइस को अनलिंक कर दिया",
   "It uses a small voice model ({model}, {mb} MB, {license}), downloaded the first time.": "इसके लिए एक छोटा आवाज़ का मॉडल ({model}, {mb} MB, {license}) पहली बार डाउनलोड होता है।",

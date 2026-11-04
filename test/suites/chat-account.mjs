@@ -97,6 +97,24 @@ try {
   const typed = () => { try { return fs.readFileSync(path.join(kit.home, 'claude-typed.log'), 'utf8') } catch { return '' } }
   const told = onWork && await until(() => /Continue from where you stopped\./.test(typed()), 30000, 1000)
   ok(!!told, 'and it is told to carry on from where it stopped', onWork && { typed: typed(), queued: ((await kit.api('/fleet')).queue || {})[onWork.paneId], status: (await agentOf((a) => a.paneId === onWork.paneId))?.status })
+  // Stopped at its weekly limit with its working line still on screen (Claude Code can leave it up):
+  // it isn't working, so Chat says it hit its limit, and the account menu moves it to Work.
+  {
+    const s = await kit.api('/agents/launch', { kind: 'claude', cwd: dir, label: 'Billing stuck', newSpace: 'Billing stuck', prompt: 'stuck weekly limit' })
+    const stuck = await until(() => agentOf((a) => a.paneId === s.paneId && a.sessionId && a.status === 'working'), 60000, 1000)
+    ok(!!stuck, 'an agent at its weekly limit, its screen still showing it working', await agentOf((a) => a.paneId === s.paneId))
+    await p.locator('.tab-main', { hasText: 'Billing stuck' }).first().click({ timeout: 20000 })
+    ok(!!(await until(async () => /weekly limit/.test(await card.innerText().catch(() => '')), 15000)) && (await p.locator('.chat-live, .live-activity').count()) === 0, 'Chat says it hit its weekly limit, not that it is working', await p.locator('.console-body').innerText().catch(() => ''))
+    await p.locator('.model-chip').first().click()
+    const m = p.locator('.model-pop')
+    await m.waitFor({ timeout: 5000 }).catch(() => {})
+    const said = await m.innerText().catch(() => '')
+    const toWork = m.locator('.acct-item', { hasText: 'Work' })
+    ok(/stopped at its usage limit/.test(said) && !/It's working/.test(said) && !(await toWork.isDisabled()), 'the account menu: another account can pick it up now', said)
+    await toWork.click()
+    const moved = await until(() => agentOf((a) => a.sessionId === stuck.sessionId && a.paneId !== stuck.paneId && a.accountId === work.id), 30000, 500)
+    ok(!!moved, 'and it goes on on Work', ((await kit.api('/fleet')).agents || []).map((a) => ({ pane: a.paneId, session: a.sessionId, account: a.accountId })))
+  }
   ok(errors.length === 0, 'usage limit: no page errors', errors)
   await ctx.close()
 

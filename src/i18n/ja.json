@@ -848,6 +848,7 @@
   "It reads and changes files in this folder and runs commands. It asks you before it changes a file or runs anything.": "このフォルダー内のファイルを読み書きし、コマンドを実行します。ファイルを変更したり何かを実行したりする前に確認します。",
   "It signs in again in a terminal tab on your computer": "コンピューターのターミナルタブで再度サインインします",
   "It stays in its tab, next to {name}.": "そのタブに残り、{name} の隣に並びます。",
+  "It stopped at its usage limit. Another account can pick it up now, where it stopped.": "使用上限で止まりました。別のアカウントで、止まったところから今すぐ続けられます。",
   "It stopped loading: the connection to the computer dropped.": "読み込みが止まりました。コンピューターとの接続が切れました。",
   "It unlinked this device": "このデバイスとのリンクが解除されました",
   "It uses a small voice model ({model}, {mb} MB, {license}), downloaded the first time.": "小さな声のモデル（{model}、{mb} MB、{license}）を初回にダウンロードして使います。",

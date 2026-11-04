@@ -24,6 +24,7 @@ Quicker with two windows open, notes named after the right meeting when two are 
 - **Your accounts by their names, and limits that say what's left.** An agent still on Claude Code's own login after you took it off the list goes by the account it's signed in as (Personal, say), or its email, not "Your usual login". Each limit now reads "75% wk left", and the numbers line up down the list. A plan with no 5-hour window leaves that place empty, and the top bar shows its week once rather than twice. Under each name is when its tightest window starts again.
 - **Add a provider from Usage**: another Claude Code or Codex account, another agent's plan (Cursor, Copilot, Gemini), an API key, or a model on this computer.
 - **Agents go by the name you give them.** Rename a tab, or double-click an agent's name in its header (or ⋯ › Rename), and that's its name in the header, the tabs and notifications, over the title Claude Code gives its session ("✳ ..."). It stays after Bridge AI opens again.
+- **An agent stopped at its usage limit can move to another account**, even when its screen still shows it working. Claude Code can leave its working line up after "You've hit your weekly limit". Bridge AI then counted the agent as busy, so the account menu wouldn't switch it and its chat showed it working instead of the limit. Now the chat says it hit its limit and when that resets, and the account menu moves it to your other account, which carries on from where it stopped.
 
 ## 3.9.2
 

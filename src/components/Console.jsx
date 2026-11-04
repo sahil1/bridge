@@ -302,8 +302,11 @@ function LiveActivity({ paneId }) {
   )
 }
 
-function Chat({ agent, pending, queued = [], outbox = [], onCancelQueued, onEdit, onUndo, editingText, onOpenTerminal, accounts }) {
+function Chat({ agent, pending, queued = [], outbox = [], onCancelQueued, onEdit, onUndo, editingText, onOpenTerminal, accounts, onLimit }) {
   const { data, error } = useLive(`/agents/${encodeURIComponent(agent.paneId)}/transcript`)
+  // Stopped at its limit, for the account menu (its other accounts can pick it up now).
+  const stopped = !!data?.limit
+  useEffect(() => { onLimit?.(stopped); return () => onLimit?.(false) }, [stopped]) // eslint-disable-line react-hooks/exhaustive-deps
   const scrollRef = useRef(null)
   const stick = useRef(true)
   // Older messages, loaded on request: Chat starts with the end of the agent's log, which after
@@ -419,8 +422,9 @@ function Chat({ agent, pending, queued = [], outbox = [], onCancelQueued, onEdit
             </div>
           </div>
         ))}
-        {data?.limit && !isWorking(agent) && <LimitCard agent={agent} limit={data.limit} accounts={accounts} />}
-        {isWorking(agent) && <LiveActivity paneId={agent.paneId} />}
+        {/* Stopped at its limit: said so, though its screen may still show it working. */}
+        {data?.limit && <LimitCard agent={agent} limit={data.limit} accounts={accounts} />}
+        {isWorking(agent) && !data?.limit && <LiveActivity paneId={agent.paneId} />}
         {firstRun}
         {queued.map((q) => (
           <div key={q.id} className="msg user queued">
@@ -550,6 +554,7 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
   }
   const [pending, setPending] = useState([])
   const [flash, setFlash] = useState(null)
+  const [atLimit, setAtLimit] = useState(false) // stopped at its usage limit (its chat says, from its log)
   const [btw, setBtw] = useState(null) // a /btw side question and its answer
   // Editing a sent message: it goes into the message box; sending it rewinds the agent to just
   // before it. { original, back, undoFiles }, and prefill puts the text in the box.
@@ -752,7 +757,7 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
   // On your usual login after you took it off the list, and not one you listed: still the one
   // ticked, above the listed ones, by who it's signed in as.
   const listWith = accts.some((x) => x.id === curId) ? accts : [usual || { id: curId, label: curAcct || t('Your usual login'), isDefault: true, named: false, usable: false, status: 'pending', signedIn: true, windows: [] }, ...accts]
-  const account = (onAccount || usual?.sameAs || others.length > 0) ? { label: curAcct || t('Your usual login'), current: curId, list: others.length ? listWith : [], onContinue: continueOn } : null
+  const account = (onAccount || usual?.sameAs || others.length > 0) ? { label: curAcct || t('Your usual login'), current: curId, list: others.length ? listWith : [], atLimit, onContinue: (x) => continueOn(x, atLimit ? { nudge: true } : {}) } : null
   const subtitle = (
     <>
       <span className="sub-where">{where}</span>
@@ -818,7 +823,7 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
             <PathCtx.Provider value={openFromChat}>
               {view === 'chat' && <Chat agent={agent} pending={pending} queued={queued} outbox={outbox} onCancelQueued={cancelQueued} onEdit={agent.caps?.rewind ? (t) => { setEditTarget({ ...t, undoFiles: false, canUndoFiles: agent.kind === 'claude' }); setPrefill({ text: t.original, n: Date.now() }) } : null}
                 onUndo={agent.caps?.undo ? undoReply : null} editingText={editTarget?.original} onOpenTerminal={() => setView('terminal')}
-                accounts={movable && quota.data ? { others, onContinue: (x) => continueOn(x, { nudge: true }) } : null} />}
+                accounts={movable && quota.data ? { others, onContinue: (x) => continueOn(x, { nudge: true }) } : null} onLimit={setAtLimit} />}
             </PathCtx.Provider>
             <div className="term-wrap" hidden={view !== 'terminal'}><Terminal paneId={agent.paneId} active={view === 'terminal'} focusKey={termFocus} onChat={() => setView('chat')} /></div>
             {view === 'files' && <FilesView agent={agent} openPath={openPath} onConsumed={() => setOpenPath(null)} onMention={(p) => setPrefill({ text: /\s/.test(p) ? `@"${p}" ` : `@${p} `, add: true, append: true, n: Date.now() })} />}
