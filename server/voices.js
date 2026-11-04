@@ -1,5 +1,6 @@
-// Who said what in a room. With your mic alone (no call's sound, so every line is "You"), the
-// people around the table are told apart by their voices, on this computer: each line of the
+// Who said what, by voice. In a room (your mic alone, so every line is "You"), the people around
+// the table; on a call, the people on it (its sound is one for everyone, so every line of theirs is
+// "Them"). They're told apart by their voices, on this computer: each line of the
 // transcript gets a speaker embedding (a few hundred numbers for how a voice sounds) from a small
 // model, 3D-Speaker's ERes2Net, run by sherpa-onnx in the speech engine's own process (asr.js), and
 // lines that sound alike are grouped as Speaker 1, Speaker 2... You name a speaker once, from who
@@ -13,9 +14,15 @@
 //
 // Kept in each meeting's folder: voices.jsonl (a line's embedding, as it's worked out) and
 // voices.json ({ line: { key: speaker }, names: { speaker: { name, guess, me } }, speakers, at }).
-// Remembering voices for next time is yours to turn on (Settings › Meetings, off to start with):
-// then a speaker you name is kept as one embedding with their name in <data>/meetings/voices.json,
-// on this computer only, and Forget voices removes them all.
+// Remembering other people's voices for next time is yours to turn on (Settings › Meetings, off to
+// start with): then a speaker you name is kept as one embedding with their name in
+// <data>/meetings/voices.json, on this computer only, and Forget voices removes them all. Your own
+// voice is learned by itself (unless that's turned off), from your mic on calls, where every line
+// on it is yours, so a room knows which voice is you.
+//
+// On a call, the voices are told apart once it ends, by themselves when the model is here (or it
+// downloads, once, after a call with more than one other person), and while it records where the
+// computer can spare the cores.
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -134,15 +141,23 @@ const save = (id, v) => writeFileAtomic(fileOf(id), JSON.stringify(v, null, 2))
 const keyOf = (l) => `${l.src}:${l.t0}`
 // A room: your mic only, and nobody heard from a call.
 export const isRoom = (lines) => lines.some((l) => l.src === 'you' && l.text) && !lines.some((l) => l.src === 'them' && l.text)
-// Told apart by itself once it ends: a room, with the model here and it turned on (or used once).
-export const wanted = (lines) => cfg.meetings?.roomVoices === true && speech.have(speech.VOICE) && isRoom(lines)
+// The side whose voices are told apart: your mic's in a room, the call's on a call.
+export const sideOf = (lines) => (lines.some((l) => l.src === 'them' && l.text) ? 'them' : 'you')
+const callsOn = () => cfg.meetings?.callVoices !== false
+// Told apart by itself once it ends: a room, with the model here and it turned on (or used once);
+// a call, unless that's turned off, with the model here, or with more than one other person on it
+// (guests: how many were invited besides you, null when nobody knows), when it downloads first.
+export const wanted = (lines, { guests = null } = {}) => (isRoom(lines)
+  ? cfg.meetings?.roomVoices === true && speech.have(speech.VOICE)
+  : sideOf(lines) === 'them' && callsOn() && (speech.have(speech.VOICE) || guests == null || guests >= 2))
 
 // The lines grouped again (after each new one while it records, or all at once after), with the
 // names given before kept by speaker, and a speaker you named in another meeting known again by
 // voice when remembering is on.
 function regroup(id, lines) {
   const embs = embeddings(id)
-  const items = lines.filter((l) => l.src === 'you' && embs.get(keyOf(l))?.v).map((l) => ({ key: keyOf(l), v: embs.get(keyOf(l)).v, s: embs.get(keyOf(l)).s, t0: l.t0 }))
+  const src = sideOf(lines)
+  const items = lines.filter((l) => l.src === src && embs.get(keyOf(l))?.v).map((l) => ({ key: keyOf(l), v: embs.get(keyOf(l)).v, s: embs.get(keyOf(l)).s, t0: l.t0 }))
   const g = group(items)
   const was = of(id) || {}
   // A speaker keeps the name it had: the old speaker most of its lines were.
@@ -153,31 +168,35 @@ function regroup(id, lines) {
     const old = Object.entries(votes).sort((a, b) => b[1] - a[1])[0]?.[0]
     if (old && was.names?.[old] && !Object.values(names).includes(was.names[old])) names[n] = was.names[old]
   }
-  if (cfg.meetings?.rememberVoices === true) {
-    const known = readJSON(KNOWN(), { voices: [] }).voices
-    for (const [n, c] of Object.entries(g.centroids)) {
-      if (names[n]) continue
-      let best = null
-      for (const k of known) { const s = cos(dec(k.v), c); if (s >= SAME_KNOWN && (!best || s > best.s)) best = { k, s } }
-      if (best && !Object.values(names).some((x) => x.name === best.k.name || (x.me && best.k.me))) names[n] = best.k.me ? { me: true, byVoice: true } : { name: best.k.name, guess: true, byVoice: true }
-    }
+  // Voices known from before: yours (learned from calls), in a room, and the people you named once
+  // when remembering is on. Your voice isn't looked for on a call: you're on the mic.
+  const known = readJSON(KNOWN(), { voices: [] }).voices.filter((k) => (k.me ? src === 'you' && cfg.meetings?.learnVoice !== false : cfg.meetings?.rememberVoices === true))
+  for (const [n, c] of Object.entries(g.centroids)) {
+    if (names[n]) continue
+    let best = null
+    for (const k of known) { const s = cos(dec(k.v), c); if (s >= SAME_KNOWN && (!best || s > best.s)) best = { k, s } }
+    if (best && !Object.values(names).some((x) => x.name === best.k.name || (x.me && best.k.me))) names[n] = best.k.me ? { me: true, byVoice: true } : { name: best.k.name, guess: true, byVoice: true }
   }
-  const out = { speakers: g.speakers, line: g.line, names, at: new Date().toISOString(), model: speech.VOICE.id }
+  const out = { src, speakers: g.speakers, line: g.line, names, at: new Date().toISOString(), model: speech.VOICE.id }
   save(id, out)
   return out
 }
 
 // ---------- While it records ----------
-// One line just transcribed, in a room meeting, on a computer that can spare the cores, once the
-// model is here and you've turned it on (or used it once): its voice, and the speakers again.
+// One line just transcribed, on a computer that can spare the cores, once the model is here: in a
+// room, once you've turned it on (or used it once); on a call, the call's lines, unless that's off.
+// Its voice, and the speakers again.
 const chains = new Map() // id -> promise: one meeting's lines in order
 export async function heard(id, line, pcm, lines) {
-  if (cfg.meetings?.roomVoices !== true || !speech.have(speech.VOICE)) return
-  if (!isRoom(lines) || !(await fit()).ok || !fitted.live) return
+  if (!speech.have(speech.VOICE)) return
+  const all = lines.concat(line)
+  const room = isRoom(all)
+  if (room ? cfg.meetings?.roomVoices !== true : !callsOn() || line.src !== 'them') return
+  if (!(await fit()).ok || !fitted.live) return
   const run = (chains.get(id) || Promise.resolve()).then(async () => {
     const v = await embed(pcm).catch(() => null)
     keep(id, keyOf(line), v, pcm.length / RATE)
-    regroup(id, lines.concat(line))
+    regroup(id, all)
   }).catch(() => {})
   chains.set(id, run)
   return run
@@ -196,9 +215,9 @@ export const working = (id) => {
 const partOf = (f) => Number(/-(\d+)\.\w+$/.exec(f)?.[1] || 1)
 // The lines' sound from the recording (audio-you.ogg or .wav, and its later parts), read once,
 // in order, a line at a time: what's kept in memory is never much more than the line being heard.
-async function fromRecording(id, todo, onLine) {
+async function fromRecording(id, todo, onLine, src = 'you') {
   const d = dirOf(id)
-  const files = (await fs.promises.readdir(d)).filter((f) => /^audio-you(-\d+)?\.(ogg|wav)$/.test(f)).sort((a, b) => partOf(a) - partOf(b))
+  const files = (await fs.promises.readdir(d)).filter((f) => new RegExp(`^audio-${src}(-\\d+)?\\.(ogg|wav)$`).test(f)).sort((a, b) => partOf(a) - partOf(b))
   if (!files.length) throw new Error('This meeting has no recording to hear the voices in')
   const ff = files.some((f) => f.endsWith('.ogg')) ? await tool('ffmpeg') : null
   if (files.some((f) => f.endsWith('.ogg')) && !ff) throw new Error('Telling voices apart in this recording needs ffmpeg, which reads it. Install it with Homebrew: brew install ffmpeg')
@@ -242,7 +261,7 @@ export async function tell(id, lines) {
   if (work.has(id) && !work.get(id).error) return { working: working(id) }
   const f = await fit()
   if (!f.ok) throw new Error(f.why || 'Telling voices apart can\'t run on this computer')
-  if (!isRoom(lines)) throw new Error('This meeting has the call\'s sound, so it already says who was on the call (Them). Telling voices apart is for a room with your mic only.')
+  const src = sideOf(lines)
   const w = { state: speech.have(speech.VOICE) ? 'listening' : 'downloading', percent: 0, error: null }
   work.set(id, w)
   w.done = (async () => {
@@ -253,13 +272,13 @@ export async function tell(id, lines) {
         if (!speech.have(speech.VOICE)) throw new Error(speech.downloading(speech.VOICE.id)?.error || 'The voice model didn\'t download. Try again.')
         w.state = 'listening'
       }
-      // Used once, so room meetings from now on get their speakers by themselves (Settings ›
-      // Meetings turns it off).
-      if (cfg.meetings?.roomVoices == null) await setting({ roomVoices: true })
+      // Used once in a room, so room meetings from now on get their speakers by themselves
+      // (Settings › Meetings turns it off).
+      if (src === 'you' && cfg.meetings?.roomVoices == null) await setting({ roomVoices: true })
       const done = embeddings(id)
-      const todo = lines.filter((l) => l.src === 'you' && l.text && !done.has(keyOf(l)))
+      const todo = lines.filter((l) => l.src === src && l.text && !done.has(keyOf(l)))
       let n = 0
-      if (todo.length) await fromRecording(id, todo, async (l, pcm) => { keep(id, keyOf(l), pcm.length >= RATE / 2 ? await embed(pcm).catch(() => null) : null, pcm.length / RATE); w.percent = Math.round((++n / todo.length) * 100) })
+      if (todo.length) await fromRecording(id, todo, async (l, pcm) => { keep(id, keyOf(l), pcm.length >= RATE / 2 ? await embed(pcm).catch(() => null) : null, pcm.length / RATE); w.percent = Math.round((++n / todo.length) * 100) }, src)
       return regroup(id, lines)
     } catch (e) { w.error = e.message; throw e } finally { if (!w.error) work.delete(id); else setTimeout(() => { if (work.get(id) === w) work.delete(id) }, 60_000).unref?.() }
   })()
@@ -281,22 +300,47 @@ export async function name(id, n, { name: who = null, me = false, guess = false 
   else if (clean) names[n] = guess ? { name: clean, guess: true } : { name: clean }
   else delete names[n]
   save(id, { ...v, names })
-  if (cfg.meetings?.rememberVoices === true && !guess && (me || clean)) remember(id, Number(n), me ? { me: true } : { name: clean })
+  if (!guess && (me ? cfg.meetings?.learnVoice !== false || cfg.meetings?.rememberVoices === true : clean && cfg.meetings?.rememberVoices === true)) remember(id, Number(n), me ? { me: true } : { name: clean })
   return { ok: true, names }
 }
+const mean = (vs) => norm(vs.reduce((acc, v) => { for (let i = 0; i < acc.length; i++) acc[i] += v[i]; return acc }, new Float32Array(vs[0].length)))
 // Kept by voice: the speaker's lines' embeddings averaged with what's known of them already.
 function remember(id, n, who) {
   const v = of(id)
   const embs = embeddings(id)
   const mine = Object.entries(v.line || {}).filter(([, m]) => m === n).map(([k]) => embs.get(k)).filter((x) => x?.v && x.s >= LONG)
-  if (!mine.length) return
-  const c = norm(mine.reduce((acc, x) => { for (let i = 0; i < acc.length; i++) acc[i] += x.v[i]; return acc }, new Float32Array(mine[0].v.length)))
+  if (mine.length) keepKnown(id, who, mean(mine.map((x) => x.v)))
+}
+function keepKnown(id, who, c) {
   const all = readJSON(KNOWN(), { voices: [] }).voices.filter((k) => (who.me ? !k.me : k.name !== who.name))
   const was = readJSON(KNOWN(), { voices: [] }).voices.find((k) => (who.me ? k.me : k.name === who.name))
   const v2 = was ? norm(Float32Array.from(c, (x, i) => x + dec(was.v)[i])) : c
   all.push({ ...(who.me ? { me: true, name: null } : { name: who.name }), v: enc(v2), meetings: [...new Set([...(was?.meetings || []), id])].slice(-20), at: new Date().toISOString() })
   fs.mkdirSync(DIR, { recursive: true })
   writeFileAtomic(KNOWN(), JSON.stringify({ model: speech.VOICE.id, voices: all }, null, 2), { mode: 0o600 })
+}
+
+// ---------- Your voice ----------
+// Learned from your mic on a call, once it ends, with the model here: every line on your mic is
+// yours (the call's sound is apart), so your longest lines are heard again and averaged with what's
+// known of you. Kept as you in voices.json, on this computer only (Settings › Meetings turns it
+// off; Forget voices removes it), so a room knows which of its voices is you, with nobody naming it.
+// Lines that don't sound like the rest (someone beside you, the call through your speakers) are
+// left out. lines: the meeting's transcript, with your mic's echoes of the call taken out.
+const MINE = 12
+export async function learnMe(id, lines) {
+  if (cfg.meetings?.learnVoice === false || !speech.have(speech.VOICE) || sideOf(lines) !== 'them') return null
+  if (!(await fit()).ok) return null
+  const mine = lines.filter((l) => l.src === 'you' && l.text && l.t1 - l.t0 >= 2 * LONG).sort((a, b) => (b.t1 - b.t0) - (a.t1 - a.t0)).slice(0, MINE).sort((a, b) => a.t0 - b.t0)
+  if (mine.length < 3) return null
+  const vs = []
+  await fromRecording(id, mine, async (l, pcm) => { const v = pcm.length >= RATE ? await embed(pcm).catch(() => null) : null; if (v) vs.push(v) }, 'you')
+  if (vs.length < 3) return null
+  const c = mean(vs)
+  const alike = vs.filter((v) => cos(v, c) >= SAME)
+  if (alike.length < 3) return null
+  keepKnown(id, { me: true }, mean(alike))
+  return { ok: true, lines: alike.length }
 }
 export const known = () => readJSON(KNOWN(), { voices: [] }).voices.map((k) => ({ name: k.name || null, me: !!k.me, meetings: (k.meetings || []).length, at: k.at }))
 export function forget() { fs.rmSync(KNOWN(), { force: true }); return { ok: true } }
@@ -307,5 +351,5 @@ let setting = async () => {}
 export const setSaver = (fn) => { setting = fn }
 export async function status() {
   const f = await fit()
-  return { offered: f.ok, why: f.why, live: f.live, have: speech.have(speech.VOICE), mb: speech.VOICE.mb, license: speech.VOICE.license, by: speech.VOICE.by, label: speech.VOICE.label, downloading: speech.downloading(speech.VOICE.id), on: cfg.meetings?.roomVoices === true, remember: cfg.meetings?.rememberVoices === true, known: known().length }
+  return { offered: f.ok, why: f.why, live: f.live, have: speech.have(speech.VOICE), mb: speech.VOICE.mb, license: speech.VOICE.license, by: speech.VOICE.by, label: speech.VOICE.label, downloading: speech.downloading(speech.VOICE.id), on: cfg.meetings?.roomVoices === true, calls: callsOn(), learn: cfg.meetings?.learnVoice !== false, mine: known().some((k) => k.me), remember: cfg.meetings?.rememberVoices === true, known: known().length }
 }

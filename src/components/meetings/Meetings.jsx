@@ -46,6 +46,32 @@ function Meter({ level = 0, label }) {
 
 const span = (ms) => (ms < 90_000 ? t('{n} seconds', { n: Math.max(1, Math.round(ms / 1000)) }) : t('{n} minutes', { n: Math.round(ms / 60_000) }))
 
+// Names for who's talking on a call, with nothing for you to do: Screen Recording lets Bridge AI
+// look at the call's window as people talk and read the names it shows. Asked for here, the first
+// time a call records, saying why; Allow shows macOS's own window, then where to turn it on. Not
+// now hides it on this device.
+const ASKED_SCREEN = 'cc-asked-screen'
+function AskScreen() {
+  const here = onThisComputer()
+  const { data, refresh } = usePoll(here ? '/calls/screen' : null, 10_000)
+  const [gone, setGone] = useState(() => { try { return localStorage.getItem(ASKED_SCREEN) === '1' } catch { return false } })
+  const [asked, setAsked] = useState(false)
+  if (!here || gone || data?.allowed !== false) return null
+  const allow = async () => { setAsked(true); await api('/calls/screen', { method: 'POST' }).catch(() => {}); refresh() }
+  const later = () => { setGone(true); try { localStorage.setItem(ASKED_SCREEN, '1') } catch { /* asks again next time */ } }
+  return (
+    <p className="mt-ask-screen small" role="status">
+      <Icon name="users" size={12} /> <span><b>{t("Names for who's talking.")}</b> {asked
+        ? t('Turn on Bridge AI under System Settings › Privacy & Security › Screen & System Audio Recording, in Screen Recording.')
+        : t('Screen Recording lets Bridge AI read the names your call shows as people talk, to put them on the transcript. Only the words are kept, never the picture.')}</span>
+      {asked
+        ? <button type="button" className="link-btn" onClick={() => api('/fix/settings', { method: 'POST', body: { pane: 'audio' } }).catch(() => {})}>{t('Open it')}</button>
+        : <button type="button" className="btn small" onClick={allow}>{t('Allow')}</button>}
+      <button type="button" className="ghost-btn" onClick={later}>{t('Not now')}</button>
+    </p>
+  )
+}
+
 // The controls while this meeting records. The call's level comes from the server (data.levels).
 // Assist turns AI Assist on or off (onAssist: then shows it).
 function RecordingBar({ id, data, onAssist }) {
@@ -77,6 +103,7 @@ function RecordingBar({ id, data, onAssist }) {
       {r.missed > 0 && <p className="mt-trouble small mt-missed" role="status">{phone ? t('Not recorded: {time}, while the phone was locked or another app was in front. It carried on after.', { time: span(r.missed) }) : t('Not recorded: {time}, while the computer was asleep or the mic was taken. It carried on after.', { time: span(r.missed) })}</p>}
       {phone && !r.missed && <p className="mt-hint-call muted small">{t('Keep Bridge AI in front while it records: a phone stops the mic of an app in the background.')}</p>}
       {data?.callError && <p className="mt-trouble small" role="status">{data.callError} {t('Your mic still records.')}</p>}
+      {call === 'on' && !m.screen && <AskScreen />}
       {call === 'on' && data?.callQuiet && <p className="mt-hint-call muted small" role="status">{t('No sound from the call yet. If one is playing and this stays quiet, allow Bridge AI under System Settings › Privacy & Security › Screen & System Audio Recording, in System Audio Recording Only.')} <button type="button" className="link-btn" onClick={() => api('/fix/settings', { method: 'POST', body: { pane: 'audio' } }).catch(() => {})}>{t('Open it')}</button></p>}
     </div>
   )
@@ -88,6 +115,31 @@ function RecordingBar({ id, data, onAssist }) {
 function useNextEvent() {
   const { data } = usePoll('/calls/event', 30_000)
   return data?.event || null
+}
+
+// Who spoke how much: each speaker's share of the time anyone talked, from the transcript's lines
+// (who said each, as named or told apart by voice), longest first. With fewer than two, nothing.
+const lineWho = (l, me) => l.name || (l.me ? me || t('You') : l.voice ? t('Speaker {n}', { n: l.voice }) : l.src === 'them' ? t('Them') : me || t('You'))
+export function talkTime(lines, me) {
+  const by = new Map()
+  for (const l of lines) if (l.text && l.t1 > l.t0) { const k = lineWho(l, me); by.set(k, (by.get(k) || 0) + (l.t1 - l.t0)) }
+  const all = [...by.values()].reduce((a, b) => a + b, 0)
+  return all ? [...by].map(([who, s]) => ({ who, s, pct: Math.round((s / all) * 100) })).sort((a, b) => b.s - a.s) : []
+}
+function TalkTime({ lines, me }) {
+  const rows = talkTime(lines, me)
+  if (rows.length < 2) return null
+  const top = rows.slice(0, 6)
+  const rest = rows.slice(6).reduce((a, r) => a + r.pct, 0)
+  return (
+    <div className="mt-talk" role="img" aria-label={t('Who spoke how much: {list}', { list: rows.map((r) => `${r.who} ${r.pct}%`).join(', ') })}>
+      <div className="mt-talk-bar">{top.map((r, i) => <i key={r.who} className={`c${i}`} style={{ flexGrow: r.s }} title={t('{who}: {pct}%, {time}', { who: r.who, pct: r.pct, time: clock(r.s) })} />)}</div>
+      <div className="mt-talk-keys">
+        {top.map((r, i) => <span key={r.who}><i className={`c${i}`} />{r.who} <b>{r.pct}%</b></span>)}
+        {rest > 0 && <span className="muted">{t('{n} more', { n: rows.length - 6 })} <b>{rest}%</b></span>}
+      </div>
+    </div>
+  )
 }
 
 // Search: the words in a found meeting's line, marked.
@@ -449,7 +501,7 @@ export function MeetingPage({ id, onBack }) {
   const focused = useRef(null) // the meeting whose notes got the cursor as it recorded
   const wasRecording = useRef(false)
   // Voices in a room: whether they can be told apart here, and Who spoke's answer once it's done.
-  const { data: vst } = usePoll(data && !(data.transcript || []).some((l) => l.src === 'them' && l.text) ? '/meetings/voices' : null, 60_000)
+  const { data: vst } = usePoll(data ? '/meetings/voices' : null, 60_000)
   const told = useRef(null) // when Who spoke was asked: the voices' time before
   useEffect(() => {
     if (!told.current || !data || data.voicesWork) return
@@ -662,15 +714,17 @@ export function MeetingPage({ id, onBack }) {
     return out.join('\n').trim()
   }
   const heard = lines.some((l) => l.src === 'them' && l.text)
-  // A room: your mic only. Its voices can be told apart where that runs (vst.offered).
+  // A room: your mic only. Its voices can be told apart where that runs (vst.offered), and on a
+  // call the voices on it (onCall: you're on your mic, so none of them is you).
   const room = !heard && lines.some((l) => l.src === 'you' && l.text)
-  const voiced = room && data.voices?.speakers >= 2
-  const canTell = room && done && !!vst?.offered
+  const onCall = heard && data.voices?.src === 'them'
+  const voiced = (room || heard) && data.voices?.speakers >= 2
+  const canTell = (room || heard) && done && !!vst?.offered
   const working = data.voicesWork
   const names = [...new Set([...(data.event?.attendees || []), ...lines.map((l) => l.name).filter(Boolean)])]
   const voiceItems = (l) => [
     ...names.filter((x) => x !== l.name && x !== data.me).slice(0, 12).map((x) => ({ icon: 'users', label: x, run: () => nameVoice(l.voice, { name: x }) })),
-    !l.me && { icon: 'mic', label: t("That's me"), run: () => nameVoice(l.voice, { me: true }) },
+    !l.me && !onCall && { icon: 'mic', label: t("That's me"), run: () => nameVoice(l.voice, { me: true }) },
     { icon: 'edit', label: t('Someone else…'), run: () => setNaming({ l, name: '', voice: l.voice }) },
     'sep',
     { icon: 'edit', label: t('Only this line…'), run: () => setNaming({ l, name: '' }) },
@@ -779,12 +833,13 @@ export function MeetingPage({ id, onBack }) {
         <span className="muted small">{again ? (data.progress != null ? t('Transcribing again: {n}%', { n: data.progress }) : t('Transcribing again…')) : lines.length ? `${lines.length === 1 ? t('{n} line', { n: lines.length }) : t('{n} lines', { n: lines.length })}${shots.length ? `, ${shots.length === 1 ? t('{n} picture', { n: shots.length }) : t('{n} pictures', { n: shots.length })}` : ''}` : t('Transcript')}</span>
         <span className="mt-grow" />
         {heard && <button type="button" className="ghost-btn" onClick={nameAll} disabled={busy === 'who'} aria-label={t('Who spoke')} title={t('Work out who said each line from the call: from names said, the screen and who was invited. Or click Them on a line to name them yourself.')}><Icon name="users" size={12} /><span className="lbl"> {t('Who spoke')}</span></button>}
-        {canTell && <button type="button" className="ghost-btn mt-voices-btn" onClick={voiced ? nameAll : tellVoices} disabled={busy === 'who' || !!working} aria-label={t('Who spoke')} title={voiced ? t('Work out who each voice is: from names said and who was invited. Or click Speaker on a line to name them yourself.') : t('Tell the voices in the room apart, on this computer, then work out who each one is.')}><Icon name="users" size={12} /><span className="lbl"> {t('Who spoke')}</span></button>}
+        {canTell && <button type="button" className="ghost-btn mt-voices-btn" onClick={voiced ? nameAll : tellVoices} disabled={busy === 'who' || !!working} aria-label={t('Who spoke')} title={voiced ? t('Work out who each voice is: from names said and who was invited. Or click Speaker on a line to name them yourself.') : heard ? t('Tell the voices on the call apart, on this computer, then work out who each one is.') : t('Tell the voices in the room apart, on this computer, then work out who each one is.')}><Icon name="users" size={12} /><span className="lbl"> {t('Who spoke')}</span></button>}
         {lines.length > 0 && <button type="button" className="ghost-btn" onClick={() => setFix({ from: '' })} aria-label={t('Fix a word')} title={t('Fix a misheard word or name everywhere in this meeting')}><Icon name="edit" size={12} /><span className="lbl"> {t('Fix a word')}</span></button>}
         {done && <button type="button" className="ghost-btn" onClick={() => setDialog('again')} aria-label={t('Transcribe again')} title={t('Transcribe it again from the recording')}><Icon name="refresh" size={12} /><span className="lbl"> {t('Transcribe again')}</span></button>}
         {lines.length > 0 && <button type="button" className="ghost-btn" onClick={() => copy(said(), t('Copied the transcript.'))} aria-label={t('Copy the transcript')} title={t('Copy the transcript')}><Icon name="copy" size={12} /><span className="lbl"> {t('Copy')}</span></button>}
         {beside && <button type="button" className="ghost-btn mt-thide" onClick={() => { setSplit(false); setSel(null) }} aria-label={t('Hide the transcript')} title={t('Hide the transcript (the view gets the room)')}><Icon name="panel-right" size={14} /></button>}
       </div>
+      <TalkTime lines={lines} me={data.me} />
       <div className="mt-lines" ref={listRef} onMouseUp={picked} onTouchEnd={picked} onScroll={(e) => { const el = e.currentTarget; pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40; setSel(null) }}>
         {!lines.length && !(recording && data.partial) && <p className="muted small mt-hint">{recording ? t('The transcript appears here as people talk, a few seconds behind.') : data.waiting || again ? t('Transcribing…') : t('Nothing was transcribed.')}{done && !lines.length && <> <button type="button" className="link-btn" onClick={() => setDialog('again')}>{t('Transcribe it again')}</button></>}</p>}
         {timeline.map((x, i) => (x.k === 'line'

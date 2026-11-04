@@ -202,7 +202,7 @@ export default function FloatCard() {
               {talked.share != null && <span className="fc-share" title={t("Who's talked, of everything said so far")}><b>{t('You {n}%', { n: talked.share })}</b><i style={{ '--you': `${talked.share}%` }} /><b>{t('Call {n}%', { n: 100 - talked.share })}</b></span>}
             </div>
             <div className="fc-said">
-              {recent.length ? recent.map((l) => <p key={`${l.src}:${l.t0}`} className={`fc-said-line ${l.src}`}><b>{l.name || (l.src === 'them' ? t('Them') : m?.me || t('You'))}</b> {l.text}</p>) : !m?.partial && <p className="muted">{paused ? t('Paused.') : t('Listening…')}</p>}
+              {recent.length ? recent.map((l) => <p key={`${l.src}:${l.t0}`} className={`fc-said-line ${l.src}`}><b>{l.name || (l.me ? m?.me || t('You') : l.voice ? t('Speaker {n}', { n: l.voice }) : l.src === 'them' ? t('Them') : m?.me || t('You'))}</b> {l.text}</p>) : !m?.partial && <p className="muted">{paused ? t('Paused.') : t('Listening…')}</p>}
               {/* Live words: what someone is still saying, before its line is in. */}
               {!paused && ['you', 'them'].filter((src) => m?.partial?.[src]?.text).map((src) => <p key={`so-far-${src}`} className={`fc-said-line ${src} so-far`}><b>{src === 'them' ? t('Them') : m?.me || t('You')}</b> {m.partial[src].cut ? '… ' : ''}{m.partial[src].text}</p>)}
             </div>
@@ -220,6 +220,8 @@ export default function FloatCard() {
               {here && (screen
                 ? <>
                   <button type="button" className="btn small" onClick={() => chan.current?.postMessage({ type: 'op', op: 'capture' })} title={t("Keep what's on {name} now", { name: screen.label })}><Icon name="camera" size={12} /> {t('Capture')}{screen.kept ? ` · ${screen.kept}` : ''}</button>
+                  {/* Sharing a screen: the card out of its way, said in words, not only the small button up top. */}
+                  {app().platform === 'darwin' && app().floatHide && <button type="button" className="btn small" onClick={() => app().floatHide()} title={t('Move to the menu bar, out of the way of a screen you share')}><Icon name="minimize" size={12} /> {t('To the menu bar')}</button>}
                   <button type="button" className="btn small" onClick={() => chan.current?.postMessage({ type: 'op', op: 'unwatch' })} title={t('Watching {name}. Click to stop.', { name: screen.label })}><Icon name="eye-off" size={12} /> {t('Stop watching the screen')}</button>
                 </>
                 : live.canWatch && app().floatWatch && <button type="button" className="btn small" onClick={() => app().floatWatch()} title={t('Pick the window or screen being shared. A picture is kept each time it changes.')}><Icon name="screen" size={12} /> {t('Watch screen')}</button>)}

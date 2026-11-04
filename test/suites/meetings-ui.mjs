@@ -269,6 +269,9 @@ process.stdout.write('@@EV@@Pricing review (Work)\\u00a6' + d.getFullYear() + '-
   const whos = all.filter((x) => x !== 'Tester')
   ok(whos.join('|') === 'Dan Ruiz|Dan Ruiz|Priya Shah', 'the call\'s lines say who said them', whos)
   ok(all.filter((x) => x === 'Tester').length === 2 && !all.includes('You'), 'and yours, your name (Settings › General)', all)
+  // Who spoke how much: each one's share of the time anyone talked, the most first.
+  const talk = (await p.locator('.mt-talk-keys').innerText().catch(() => '')).replace(/\s+/g, ' ')
+  ok(/Tester \d+%/.test(talk) && /Dan Ruiz \d+%/.test(talk) && /Priya Shah \d+%/.test(talk) && /^Tester 40% Dan Ruiz 40% Priya Shah 20%$/.test(talk.trim()), 'above the transcript: who spoke how much', talk)
   await p.locator('.mt-transcript .mt-who', { hasText: 'Dan Ruiz' }).first().click()
   await p.waitForSelector('.ctx-menu', { timeout: 4000 }).catch(() => {})
   const wi = await p.locator('.ctx-menu button').allInnerTexts()
