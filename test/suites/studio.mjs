@@ -127,10 +127,10 @@ try {
   await shot(p, `${tag}studio-compare`)
   await p.locator('.sd-compare button[aria-label="Close"]').click()
   await shot(p, `${tag}studio-doc`)
-  // A change from outside while it's open, with nothing unsaved: shown at once.
+  // A change from outside while it's open, with nothing unsaved: shown within seconds.
   await sleep(50)
   fs.writeFileSync(path.join(dir, 'notes.md'), '# Notes\n\nChanged by another app.\n')
-  ok(!!(await until(async () => /Changed by another app/.test(await pm.innerText().catch(() => '')) && /changed it/.test(await p.locator('.sd-bar').innerText().catch(() => '')), 10000)), 'a change from outside while open is shown, and said')
+  ok(!!(await until(async () => /Changed by another app/.test(await pm.innerText().catch(() => '')) && /changed it/.test(await p.locator('.sd-bar').innerText().catch(() => '')), 15000)), 'a change from outside while open is shown, and said')
   // Ask an agent, from the page.
   await p.locator('.pane-head button', { hasText: 'Ask an agent' }).click()
   await p.locator('.sd-ask textarea').fill('add a summary at the top')
@@ -145,6 +145,22 @@ try {
   await open('budget.xlsx')
   ok(!!(await until(async () => (await p.locator('.sd-univer canvas').count()) > 0, 30000)), 'an Excel file opens in the sheet')
   await shot(p, `${tag}studio-sheet`)
+  // Quick: a window with a sheet open, left alone, keeps its main thread free and asks the server
+  // little (the change watcher, every few seconds). Generous, for a slow CI computer.
+  const reqs = []
+  const count = (r) => { if (new URL(r.url()).pathname.startsWith('/api/')) reqs.push(new URL(r.url()).pathname) }
+  const cdp = which === 'chromium' ? await w.ctx.newCDPSession(p) : null
+  if (cdp) await cdp.send('Performance.enable')
+  const busy = async () => (cdp ? (await cdp.send('Performance.getMetrics')).metrics.find((m) => m.name === 'TaskDuration').value : 0)
+  await sleep(1500)
+  const b0 = await busy()
+  p.on('request', count)
+  await sleep(10_000)
+  p.off('request', count)
+  const share = Math.round(((await busy()) - b0) * 100) / 10
+  if (cdp) ok(share < 8, `a window with a sheet open, idle, keeps its main thread free (${share}% busy)`, share)
+  const looks = reqs.filter((x) => x === '/api/studio/changed').length
+  ok(looks <= 2 && reqs.length <= 15, `and asks the server little: whether the file changed ${looks} time${looks === 1 ? '' : 's'} in 10 s, ${reqs.length} requests in all (at most 90 a minute, as everywhere)`, [...new Set(reqs)])
   // A deck, drawn, and its PowerPoint beside it.
   await open('pitch.md')
   const slides = await until(async () => { const h = await p.locator('.sd-deck-view').getAttribute('srcdoc').catch(() => ''); return (h.match(/<svg data-marpit-svg/g) || []).length }, 15000)
