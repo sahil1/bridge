@@ -4,7 +4,7 @@ Each version's section here becomes its GitHub release notes (`npm run release`)
 
 ## 3.9.3
 
-Notes named after the right meeting when two are on, names for who's talking on a call, meetings that end by themselves once they're over and save as they end, and agents that go by the name you give them.
+Quicker with two windows open, notes named after the right meeting when two are on, names for who's talking on a call, meetings that end by themselves once they're over and save as they end, and agents that go by the name you give them.
 
 ### What's new
 
@@ -12,6 +12,8 @@ Notes named after the right meeting when two are on, names for who's talking on 
 - **Another meeting?** A meeting named after one event while another was on says so beside its people. Pick the other, and its name, people and invite's files take the first one's place.
 - **A meeting that's over ends by itself, and one that runs over doesn't.** As when its call ends: once its time on the calendar is up and nobody's said anything for a minute and a half, the floating card comes up to ask whether to stop; after 5 minutes of quiet, it stops 2 minutes later. While its time lasts, quiet changes nothing. With no calendar time to go by, it asks after 10 minutes of quiet, and stops after 30. Someone talking again takes the question back. For a meeting in a room, and for a call whose app keeps the mic once it's over.
 - **Saved as it ends.** With "Save every meeting there by itself" on, a meeting is saved to your notes folder as soon as its transcript is in, and again with its summary. Before, one whose summary wasn't written (no model, or it failed) stayed "Not saved yet". A folder Bridge AI can't write to now says so on the meeting, with why, and Save tries again.
+- **Quicker with two windows open.** A terminal is now drawn by the GPU, not row by row as page elements: a terminal printing fast takes half as much of its window's time on a Mac's GPU (7% of a core, from 15%). With herdr, everything that asks for your agents at the same moment (each window's lists, notifications, the queue) shares one read of herdr, where before each ran herdr itself, twice. And a window looks at your devices once, not once for every part of it that shows them. Bridge AI now measures itself too (how long the server was held up, its CPU, its slowest requests), and the tests fail when two busy windows go over budget.
+- **Each window says which computer it shows.** With another computer linked, a window's title ends with its name ("Bridge AI · Studio"), so the Dock's and the Window menu's lists tell two windows apart.
 - **Names for who's talking, with nothing for you to do.** On a call, the voices on it are now told apart by themselves once it ends, the same way a room's are: Speaker 1, 2, 3, named from what's said, who was invited and the names the call showed. Once Screen Recording is allowed, Bridge AI looks at the call's window by itself as people talk and reads the names it shows, with no Watch a screen. The meeting asks the first time, saying why: it keeps only the words, never the picture. All of it happens on this computer.
 - **It learns your voice.** From your mic on calls, where every line is yours, so a meeting in a room knows which voice is you without your naming it. It's a few hundred numbers on this computer only. Settings › Meetings › Who Spoke turns it off, and Forget voices removes it.
 - **Who spoke how much**, above each meeting's transcript.
