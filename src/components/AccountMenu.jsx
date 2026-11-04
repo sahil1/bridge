@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import Icon from './Icon.jsx'
 import { api, refetch, viaRelay, useFleet } from '../api.js'
-import { t, locale } from '../i18n/index.js'
+import { t, tx, locale } from '../i18n/index.js'
 
 // The account switcher, like a model picker: Auto, then each agent's accounts with how much of
 // its usage window is left. In the top bar a pick is the account new agents of that kind start
@@ -33,13 +33,20 @@ export const several = (groups) => (groups || []).some(asList)
 // (the top bar's agent), so its account and Add another account show before there's a second.
 export const listed = (groups, also) => (groups || []).filter((g) => asList(g) || g.accounts[0]?.usable || g.kind === also)
 
-// What's left: the tighter of the 5-hour and weekly windows (quota-axi's figure, which Auto
-// compares), and which window that is.
+// The windows a plan's usage is counted in, shortest first, by quota-axi's kinds: the 5-hour one
+// (Claude and Codex; not every plan has one any more), a day, the week, a month. Each says how
+// much of it is left.
+const WINDOWS = [
+  { kind: 'session', win: '5h', left: tx('5h left'), of: tx('{pct}% of the 5-hour window left') },
+  { kind: 'daily', win: 'day', left: tx('day left'), of: tx('{pct}% of the day left') },
+  { kind: 'weekly', win: 'wk', left: tx('wk left'), of: tx('{pct}% of the week left') },
+  { kind: 'monthly', win: 'mo', left: tx('mo left'), of: tx('{pct}% of the month left') },
+]
+// What's left: the tightest window (quota-axi's figure, which Auto compares), and which it is.
 export function leftOf(a) {
   if (!a?.usable || a.percentRemaining == null) return null
-  const tight = (a.windows || []).filter((w) => (w.kind === 'session' || w.kind === 'weekly') && w.percentRemaining != null)
-    .sort((x, y) => x.percentRemaining - y.percentRemaining)[0]
-  return { pct: a.percentRemaining, win: tight?.kind === 'weekly' ? 'wk' : '5h' }
+  const tight = windowsOf(a).reduce((m, w) => (!m || w.pct < m.pct ? w : m), null)
+  return { pct: a.percentRemaining, win: tight?.win || '5h' }
 }
 export const level = (v) => (v == null ? 'unknown' : v < 10 ? 'critical' : v < 30 ? 'warning' : 'good')
 // Its saved sign-in ran out (quota-axi: "Claude access token expired"): its usage can't be read
@@ -55,36 +62,53 @@ export function statusText(a, off, inUse) {
   if (off || (a.status === 'pending' && a.signedIn)) return a.signedIn ? t('signed in') : ''
   return a.status === 'pending' ? t('checking…') : a.status === 'error' ? t("couldn't read") : t('no data')
 }
-// Each window in words, for a tooltip.
-const windowsText = (a) => (a.windows || []).filter((w) => w.kind === 'session' || w.kind === 'weekly')
-  .map((w) => (w.kind === 'session' ? t('{pct}% of the 5-hour window left', { pct: String(w.percentRemaining) }) : t('{pct}% of the week left', { pct: String(w.percentRemaining) }))).join(', ')
+// Each window in words, for a tooltip, with when it starts again.
+const windowsText = (a) => windowsOf(a).map((w) => [t(w.of, { pct: String(w.pct) }), w.resetsAt && resetWords(w)].filter(Boolean).join(', ')).join(' · ')
 
-// Both windows (the 5-hour one is often the one that stops you), the bar for the tighter.
-export function Left({ a, off, inUse }) {
+// What's left of each window, as "75% wk left", the bar for the tightest. slots: the windows any of
+// the accounts beside it has (slotsOf), so each window's numbers line up down a list, and an
+// account without one (a plan with no 5-hour window) leaves its place empty.
+export function Left({ a, off, inUse, slots }) {
   const ws = windowsOf(a)
   if (!ws.length) return <span className="acct-left muted">{statusText(a, off, inUse)}</span>
   const tight = ws.reduce((m, w) => (w.pct < m.pct ? w : m))
+  const cells = slots?.length ? slots : ws.map((w) => w.win)
   return (
     <span className="acct-left" title={windowsText(a)}>
       <span className="u-bar"><span className={`u-fill f-${level(tight.pct)}`} style={{ width: `${Math.max(3, tight.pct)}%` }} /></span>
-      {ws.map((w) => <span key={w.win} className="acct-win"><b className={`t-${level(w.pct)}`}>{w.pct}%</b><small>{w.win}</small></span>)}
+      {cells.map((win) => {
+        const w = ws.find((x) => x.win === win)
+        return w ? <span key={win} className="acct-win"><b className={`t-${level(w.pct)}`}>{w.pct}%</b><small>{t(w.left)}</small></span> : <span key={win} className="acct-win none" aria-hidden="true" />
+      })}
     </span>
   )
 }
-// Each window with a reading, the 5-hour one first: { win: '5h' | 'wk', pct, resetsAt }.
+// Each window with a reading, shortest first: { win: '5h' | 'day' | 'wk' | 'mo', pct, resetsAt, left, of }.
 export function windowsOf(a) {
   if (!a?.usable) return []
-  return [['session', '5h'], ['weekly', 'wk']].map(([kind, win]) => {
-    const w = (a.windows || []).find((x) => x.kind === kind && x.percentRemaining != null)
-    return w && { win, pct: w.percentRemaining, resetsAt: w.resetsAt || null }
+  return WINDOWS.map((k) => {
+    const w = (a.windows || []).find((x) => x.kind === k.kind && x.percentRemaining != null)
+    return w && { ...k, pct: w.percentRemaining, resetsAt: w.resetsAt || null }
   }).filter(Boolean)
 }
-// When its week starts again: "Week resets Sat 2:00 PM", or in hours when that's soon.
-export function weekResets(a) {
-  const w = windowsOf(a).find((x) => x.win === 'wk')
-  const h = w?.resetsAt ? (new Date(w.resetsAt) - Date.now()) / 3600e3 : NaN
+// The windows any of these accounts has, shortest first: the places in each row's Left.
+export const slotsOf = (accounts) => WINDOWS.map((k) => k.win).filter((win) => (accounts || []).some((a) => windowsOf(a).some((w) => w.win === win)))
+// When a window starts again: "Week resets Sat 2:00 PM", or in hours when that's soon.
+function resetWords(w) {
+  const h = w.resetsAt ? (new Date(w.resetsAt) - Date.now()) / 3600e3 : NaN
   if (!(h > 0)) return null
-  return h < 1 ? t('Week resets in {n} min', { n: Math.max(1, Math.round(h * 60)) }) : h < 20 ? t('Week resets in {n} h', { n: Math.round(h) }) : t('Week resets {when}', { when: new Date(w.resetsAt).toLocaleString(locale(), { weekday: 'short', hour: 'numeric', minute: '2-digit' }) })
+  const when = new Date(w.resetsAt).toLocaleString(locale(), { weekday: 'short', hour: 'numeric', minute: '2-digit' })
+  if (w.win === 'wk') return h < 1 ? t('Week resets in {n} min', { n: Math.max(1, Math.round(h * 60)) }) : h < 20 ? t('Week resets in {n} h', { n: Math.round(h) }) : t('Week resets {when}', { when })
+  if (w.win === '5h') return h < 1 ? t('5-hour window resets in {n} min', { n: Math.max(1, Math.round(h * 60)) }) : t('5-hour window resets in {n} h', { n: Math.round(h) })
+  return h < 20 ? t('Resets in {n} h', { n: Math.max(1, Math.round(h)) }) : t('Resets {when}', { when })
+}
+// When the window that's tightest starts again (the week's, unless another has less left), for
+// under an account's name.
+export function weekResets(a) {
+  const ws = windowsOf(a)
+  if (!ws.length) return null
+  const tight = ws.reduce((m, w) => (w.pct < m.pct ? w : m))
+  return resetWords(tight.pct < 50 ? tight : ws.find((w) => w.win === 'wk') || tight)
 }
 // Accounts of one agent signed in as the same account (who quota-axi says each is): what Claude
 // Code's /login does to your usual login, which it switches. Lists of two or more.
@@ -261,7 +285,7 @@ export default function AccountMenu({ groups, value, onPick, onAdd, extra = [], 
                     <AcctName a={a}>{auto && <span className="best-tag" title={t('Auto starts new agents here now: it has the most left')}>{t('auto')}</span>}</AcctName>
                     {sub ? <span className="acct-desc">{sub}</span> : null}
                   </span>
-                  {!needs && <Left a={a} off={off} inUse={inUse} />}
+                  {!needs && <Left a={a} off={off} inUse={inUse} slots={slotsOf(g.accounts)} />}
                 </button>
                 {canSet && (
                   <button type="button" data-item role="menuitem" className="link-btn acct-set" onClick={() => pick(g.kind, a.id)} disabled={busy} aria-label={t('Set {name} as default', { name: nameOf(a) })} title={t('New {agent} agents start on {name}', { agent: kindName(g.kind), name: nameOf(a) })}>

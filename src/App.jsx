@@ -108,14 +108,17 @@ function ProviderChip({ quota, primary, onClick, onAddAccount }) {
     )
   } else {
     if (!p) return null
-    const sess = p.windows.find((w) => w.kind === 'session') || p.windows[0]
+    // The 5-hour window and the week. A plan with no 5-hour window shows its week once, and one
+    // with neither its first window.
     const week = p.windows.find((w) => w.kind === 'weekly')
+    const sess = p.windows.find((w) => w.kind === 'session') || p.windows.find((w) => w.kind !== 'weekly' && w.kind !== 'credits') || (week ? null : p.windows[0])
+    const ring = [sess, week].filter((w) => w?.percentRemaining != null).reduce((m, w) => (!m || w.percentRemaining < m.percentRemaining ? w : m), null)
     const lv = (v) => (v == null ? 'unknown' : v < 10 ? 'critical' : v < 30 ? 'warning' : 'good')
     const name = act ? t('{agent} ({name}, where new agents start)', { agent: NAMES[primary] || primary, name: accountName(act) }) : NAMES[primary] || primary
     chip = (
       <button className="top-chip usage-chip" data-tour="usage" {...opens}
         title={`${t('{name} usage', { name })}${sess ? ` · ${sess.kind === 'session' ? t('{n}% left this 5-hour window', { n: sess.percentRemaining }) : t('{n}% left this {window}', { n: sess.percentRemaining, window: sess.label })}` : ''}${week ? ` · ${t('{n}% left this week', { n: week.percentRemaining })}` : ''} · ${menu ? t('click for accounts and usage') : t('click for details')}`}>
-        <span className={`mini-ring r-${lv(sess?.percentRemaining)}`} style={{ '--p': sess?.percentRemaining ?? 0 }} />
+        <span className={`mini-ring r-${lv(ring?.percentRemaining)}`} style={{ '--p': ring?.percentRemaining ?? 0 }} />
         <b className="usage-name">{NAMES[primary] || primary}</b>
         {/* Where new agents start, not the account an agent in view is on (that's in its message box). */}
         {act && <span className="usage-new">{t('New:')}</span>}
@@ -123,7 +126,7 @@ function ProviderChip({ quota, primary, onClick, onAddAccount }) {
         {p.usable ? (
           <>
             {sess && <span>{sess.percentRemaining}%<small> {sess.kind === 'session' ? t('5h') : sess.label}</small></span>}
-            {week && <span className="chip-sep">{week.percentRemaining}%<small> {t('wk')}</small></span>}
+            {week && <span className={sess ? 'chip-sep' : undefined}>{week.percentRemaining}%<small> {t('wk')}</small></span>}
           </>
         ) : <span className="muted">{p.allow ? t('allow') : lapsed(p) || p.status === 'auth_required' || p.notSetUp || p.signedIn === false ? t('sign in') : p.status === 'pending' ? '…' : t('no data')}</span>}
         {caret}

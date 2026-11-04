@@ -336,8 +336,20 @@ export function groups() {
   return Object.keys(KINDS).map((kind) => {
     const { setting, pick, active } = choice(kind, d)
     // With who quota-axi says it is, as the quota feed gives for your usual login (Usage masks it).
-    return { kind, label: adapter(kind).label, setting, pick, usualHidden: hiddenUsual(kind, d), accounts: rowsOf(kind, d).map((a) => ({ ...view(a, active), account: readings.get(a.id)?.account || null })) }
+    const accounts = rowsOf(kind, d).map((a) => ({ ...view(a, active), account: readings.get(a.id)?.account || null }))
+    return { kind, label: adapter(kind).label, setting, pick, usualHidden: hiddenUsual(kind, d), accounts, ...(hiddenUsual(kind, d) ? { usual: usualView(kind, d, accounts) } : {}) }
   })
+}
+// Your usual login while it's off the list, for an agent still on it (one started before, or in
+// the terminal): its name and who it's signed in as, and sameAs, the listed account it is when
+// that one is signed in as the same (Claude Code's /login switches your usual login to it), so
+// the agent shows that account's name rather than "Your usual login".
+const whoKey = (x) => (x?.email ? `${String(x.email).toLowerCase()}|${x.organization || ''}` : null)
+function usualView(kind, d, listed) {
+  const id = defaultId(kind)
+  const account = readings.get(id)?.account || null
+  const k = whoKey(account)
+  return { ...view({ id, kind, label: defaultName(kind, d), isDefault: true, named: !!cleanLabel(d.names?.[kind]) }, null), account, sameAs: (k && listed.find((a) => whoKey(a.account) === k)?.id) || null }
 }
 
 export async function list({ refresh = false } = {}) {

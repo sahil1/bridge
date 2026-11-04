@@ -3,7 +3,7 @@ import Icon from './Icon.jsx'
 import { AgentIcon } from './settings/ProviderIcon.jsx'
 import { api, usePoll } from '../api.js'
 import { HandoffSection, HandoffPanel, useHandoff, useHandedNote } from './Handoff.jsx'
-import { AcctName, Left, nameOf } from './AccountMenu.jsx'
+import { AcctName, Left, nameOf, slotsOf } from './AccountMenu.jsx'
 import { t, tx } from '../i18n/index.js'
 
 // Why a message is held (server/promptsafe.js says it in English), in your language.
@@ -246,7 +246,7 @@ function ModelMenu({ data, agent, anchor, onPick, onClose, account = null, onAcc
               title={on ? t('This conversation is on {account}', { account: nameOf(a) }) : t('Continue this conversation on {account}', { account: nameOf(a) })}>
               <span className="acct-check">{on && <Icon name="check" size={13} />}</span>
               <span className="acct-main"><AcctName a={a} /></span>
-              <Left a={a} />
+              <Left a={a} slots={slotsOf(account.list)} />
             </button>
           )
         })}

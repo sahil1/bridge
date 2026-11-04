@@ -99,6 +99,36 @@ try {
   ok(!!told, 'and it is told to carry on from where it stopped', onWork && { typed: typed(), queued: ((await kit.api('/fleet')).queue || {})[onWork.paneId], status: (await agentOf((a) => a.paneId === onWork.paneId))?.status })
   ok(errors.length === 0, 'usage limit: no page errors', errors)
   await ctx.close()
+
+  // Your usual login taken off the list while an agent is still on it: the agent goes by the
+  // account it's signed in as when that's one you listed (Work here), else by its email, never
+  // "Your usual login". The quota feed's answer is laid over, as plan usage reads real accounts.
+  {
+    const usualOn = await kit.api('/agents/launch', { kind: 'claude', cwd: dir, label: 'Usual', newSpace: 'Usual', prompt: 'idle', account: 'claude-default' })
+    await until(() => agentOf((a) => a.paneId === usualOn.paneId && a.sessionId && a.status !== 'working' && a.status !== 'unknown'), 60000, 1000)
+    const chipFor = async (same) => {
+      const { ctx: c2, p: p2 } = await page(b, kit.url, { before: async (c) => {
+        await c.route(/\/api\/quota(\?|$)/, async (route) => {
+          const r = await route.fetch()
+          const j = await r.json()
+          const g = (j.accounts || []).find((x) => x.kind === 'claude')
+          if (g) { g.usualHidden = true; g.accounts = g.accounts.filter((a) => a.id !== 'claude-default'); g.usual = { id: 'claude-default', label: 'Your usual login', isDefault: true, named: false, usable: false, status: 'pending', windows: [], signedIn: true, account: { email: 'pat.lee@example.com', organization: null }, sameAs: same } }
+          await route.fulfill({ response: r, json: j })
+        })
+      } })
+      await p2.locator('.tab-main', { hasText: 'Usual' }).first().click({ timeout: 20000 })
+      const acct = () => p2.locator('.model-chip .mc-acct').first().innerText().then((x) => x.trim(), () => '')
+      const want = same ? (x) => x === 'Work' : (x) => /^pa•••@example\.com$/.test(x)
+      await until(async () => want(await acct()), 15000)
+      const got = await acct()
+      await c2.close()
+      return got
+    }
+    const asWork = await chipFor(work.id)
+    ok(asWork === 'Work', "your usual login off the list, signed in as Work: the agent's chip says Work", asWork)
+    const asNone = await chipFor(null)
+    ok(/^pa•••@example\.com$/.test(asNone), 'signed in as none you listed: who it is, its email mostly hidden', asNone)
+  }
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
   console.log(kit.log().slice(-1500))

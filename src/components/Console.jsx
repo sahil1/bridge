@@ -567,10 +567,16 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
   // Continue on another account: Claude Code and Codex, once there's a conversation to resume.
   const movable = (agent?.kind === 'claude' || agent?.kind === 'codex') && !!agent?.sessionId
   const quota = usePoll('/quota', 5 * 60 * 1000, { enabled: movable })
-  const accts = quota.data?.accounts?.find((g) => g.kind === agent?.kind)?.accounts || []
-  // Not the one it's on (one started outside Bridge AI is taken to be on your usual login, which
-  // may be off the list, and then every listed one is another).
-  const others = movable ? accts.filter((x) => x.id !== (agent.accountId || `${agent.kind}-default`)) : []
+  const grp = quota.data?.accounts?.find((g) => g.kind === agent?.kind)
+  const accts = grp?.accounts || []
+  // The account it's on. One started outside Bridge AI is taken to be on your usual login; when
+  // that's off the list but signed in as one you listed (Personal, say), it's that one.
+  const onId = agent ? agent.accountId || `${agent.kind}-default` : null
+  const usual = grp?.usual?.id === onId && !accts.some((x) => x.id === onId) ? grp.usual : null
+  const curId = usual?.sameAs || onId
+  // Not the one it's on (with your usual login off the list and no other it's the same as, every
+  // listed one is another).
+  const others = movable ? accts.filter((x) => x.id !== curId) : []
   // The account it's on, in the header, when it isn't your usual login (as in the sidebar).
   const onAccount = agent?.account || null
   // The sidebar's "Browse folder" asks an open agent to switch views.
@@ -742,11 +748,11 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
   const g = places.data?.[agent.cwd]
   // The account it's on, in the message box's model chip, whose menu continues the conversation on
   // another one: there when there's another to go to, or it isn't on your usual login.
-  const curId = agent.accountId || `${agent.kind}-default`
-  const curAcct = onAccount || nameOf(accts.find((x) => x.id === curId)) || null
-  // On your usual login after you took it off the list: still the one ticked, above the listed ones.
-  const listWith = accts.some((x) => x.id === curId) ? accts : [{ id: curId, label: curAcct || t('Your usual login'), usable: false, status: 'pending', signedIn: true, windows: [] }, ...accts]
-  const account = (onAccount || others.length > 0) ? { label: curAcct || t('Your usual login'), current: curId, list: others.length ? listWith : [], onContinue: continueOn } : null
+  const curAcct = onAccount || nameOf(accts.find((x) => x.id === curId) || usual) || null
+  // On your usual login after you took it off the list, and not one you listed: still the one
+  // ticked, above the listed ones, by who it's signed in as.
+  const listWith = accts.some((x) => x.id === curId) ? accts : [usual || { id: curId, label: curAcct || t('Your usual login'), isDefault: true, named: false, usable: false, status: 'pending', signedIn: true, windows: [] }, ...accts]
+  const account = (onAccount || usual?.sameAs || others.length > 0) ? { label: curAcct || t('Your usual login'), current: curId, list: others.length ? listWith : [], onContinue: continueOn } : null
   const subtitle = (
     <>
       <span className="sub-where">{where}</span>
