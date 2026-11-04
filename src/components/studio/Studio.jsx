@@ -6,7 +6,7 @@ import { t, tx, locale } from '../../i18n/index.js'
 import { openFile, bytesOf, rawUrl, versionUrl, saveFile, changedSince, restoreVersion, base64, extOf } from './files.js'
 import { useDesignPacks, PacksSection, packFor } from './packs.jsx'
 import { lineDiff, textFor, comparable } from './diff.js'
-import { fontCss } from './look.js'
+import { fontCss, lookOfPack } from './look.js'
 import './studio.css'
 
 // Studio: documents, sheets, decks, PDFs and pages, like Meetings and Whiteboards a place of its own.
@@ -46,7 +46,7 @@ async function startOf(n, title, pack) {
   if (n.ext === '.md') return { text: `# ${title}\n\n` }
   if (n.ext === '.html') return { text: pageOf(title, pack) }
   if (n.ext === '.docx') {
-    const [{ docxOf }, { lookOfPack }] = await Promise.all([import('./docx.js'), import('./look.js')])
+    const { docxOf } = await import('./docx.js')
     return { data: base64(await docxOf({ content: [{ type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: title }] }, { type: 'paragraph' }] }, lookOfPack(pack))) }
   }
   if (n.ext === '.xlsx') { const x = await import('./xlsx.js'); return { data: base64(await x.bytesOf(x.blankWorkbook(title).data, '.xlsx')) } }
