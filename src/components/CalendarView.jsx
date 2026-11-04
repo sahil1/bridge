@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import Icon from './Icon.jsx'
 import { usePersisted, useWidth } from './layout.jsx'
 import { api, usePoll } from '../api.js'
-import { CalendarSetup } from './Agenda.jsx'
+import { CalendarSetup, joined } from './Agenda.jsx'
 import { locale } from '../i18n/index.js'
 
 // Day / week / month / year views over the Mac's Calendar (Exchange plus personal calendars).
@@ -126,7 +126,7 @@ function EventDetail({ e, onClose, onOpenAgent }) {
       </p>
       {(e.calendar || e.location) && <p className="muted small">{[e.calendar, e.location].filter(Boolean).join(' · ')}</p>}
       <div className="cal-detail-actions">
-        {e.join && <a className="join-btn strong" href={e.join} target="_blank" rel="noreferrer"><Icon name="video" size={12} /> Join</a>}
+        {e.join && <a className="join-btn strong" href={e.join} target="_blank" rel="noreferrer" onClick={() => joined(e)}><Icon name="video" size={12} /> Join</a>}
         <button className="btn small" onClick={prep} disabled={busy}><Icon name="sparkle" size={12} /> {busy ? 'Starting…' : 'Prep with agent'}</button>
       </div>
       {msg && <p className="small muted">{msg}</p>}

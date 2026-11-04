@@ -561,6 +561,7 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
   const [keysOpen, setKeysOpen] = useState(false)
   const [termFocus, setTermFocus] = useState(0)
   const [menu, setMenu] = useState(false)
+  const [renaming, setRenaming] = useState(false)
   const outbox = useOutbox(agent?.paneId)
   const places = usePoll('/places', 15000)
   // Continue on another account: Claude Code and Codex, once there's a conversation to resume.
@@ -728,7 +729,16 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
 
   const title = agent.chief ? t('Chief of Staff') : agent.title || agent.tab || agent.workspace
   const kindName = agent.kindLabel || agent.kind
-  const where = agent.chief ? (agent.thread && !agent.thread.main ? t('{name} thread · {kind}', { name: agent.thread.name, kind: kindName }) : t('{kind} · sends work to your agents', { kind: kindName })) : `${agent.workspace}${agent.tab && !/^\d+$/.test(agent.tab) ? ` › ${agent.tab}` : ''} · ${kindName}`
+  // Named by you (Rename): the name is its title, so the tab's name isn't said twice.
+  const where = agent.chief ? (agent.thread && !agent.thread.main ? t('{name} thread · {kind}', { name: agent.thread.name, kind: kindName }) : t('{kind} · sends work to your agents', { kind: kindName })) : `${agent.workspace}${agent.tab && !agent.named && !/^\d+$/.test(agent.tab) ? ` › ${agent.tab}` : ''} · ${kindName}`
+  // Rename: the name it goes by everywhere, over the title the agent gives its own session.
+  const canRename = !agent.chief && !!agent.tabId
+  const rename = async (label) => {
+    setRenaming(false)
+    if (!label) return
+    try { await api(`/tabs/${encodeURIComponent(agent.tabId)}/rename`, { method: 'POST', body: { label } }) } catch (e) { setFlash(e.message) }
+  }
+  const shown = renaming ? <NameInput value={title} onDone={rename} /> : canRename ? <span className="console-title" onDoubleClick={() => setRenaming(true)} title={agent.ownTitle && agent.ownTitle !== title ? t('{title}\nDouble-click to rename', { title: agent.ownTitle }) : t('Double-click to rename')}>{title}</span> : title
   const g = places.data?.[agent.cwd]
   // The account it's on, in the message box's model chip, whose menu continues the conversation on
   // another one: there when there's another to go to, or it isn't on your usual login.
@@ -753,7 +763,7 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
 
   return (
     <section className={`pane console v-${variant} ${minimized ? 'is-min' : ''}`} aria-label={t('{name} console', { name: title })}>
-      <PaneHeader icon={agent.chief ? 'helm' : 'bot'} title={title} subtitle={subtitle} {...controls}
+      <PaneHeader icon={agent.chief ? 'helm' : 'bot'} title={shown} subtitle={subtitle} {...controls}
         leading={onBack && <button className="win-btn back" onClick={onBack} aria-label={t('Back')}><Icon name="chevron" size={16} className="flip" /></button>}>
         <span className={`state-tag st-${agent.status}`}><StatusDot status={agent.status} size={7} />{{ blocked: t('Needs you'), done: t('Done'), working: t('Working'), idle: t('Idle') }[agent.status] || t('Unknown')}</span>
         {agent.muted && <span className="muted-tag" role="img" title={t('Notifications muted (⋯ to unmute)')} aria-label={t('Notifications muted')}><Icon name="bell-off" size={13} /></span>}
@@ -785,6 +795,7 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
             {menu && <Menu onClose={() => setMenu(false)} items={[
               variant === 'mobile' && canFork && { icon: 'split', label: t('Fork this conversation'), run: fork },
               variant === 'mobile' && { icon: 'terminal', label: t('Open in the computer\'s terminal app'), run: inTerminal },
+              canRename && { icon: 'edit', label: t('Rename…'), run: () => setRenaming(true) },
               agent.muted
                 ? { icon: 'bell', label: t('Unmute notifications'), run: () => mute(false) }
                 : { icon: 'bell-off', label: t('Mute notifications'), run: () => mute(true) },
@@ -863,5 +874,15 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
         </>
       )}
     </section>
+  )
+}
+
+// The agent's name, typed over in its header: Enter keeps it, Escape or clicking away doesn't.
+function NameInput({ value, onDone }) {
+  const [v, setV] = useState(value)
+  return (
+    <input className="console-rename" autoFocus value={v} onChange={(e) => setV(e.target.value)} onFocus={(e) => e.target.select()}
+      onKeyDown={(e) => { if (e.key === 'Enter') onDone(v.trim() && v.trim() !== value ? v.trim() : null); if (e.key === 'Escape') onDone(null) }}
+      onBlur={() => onDone(null)} aria-label={t('New name')} />
   )
 }

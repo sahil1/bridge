@@ -30,16 +30,13 @@ export const MEETINGS_CHANNEL = 'bridge-meetings'
 // Calls are noticed on the computer the server runs on: only a window there offers to record one.
 const here = onThisComputer
 const when = () => new Date().toLocaleString(locale(), { weekday: 'short', hour: 'numeric', minute: '2-digit' })
-// A calendar event on now (or starting within ten minutes), to name a call's notes after. With
-// two at once, the one under way and online, on the call's app (app: Teams, Zoom...) when that's
-// known, the nearer start breaking a tie.
+// The calendar event to name a call's notes after (app: the call's, Teams or Zoom), as the computer
+// works it out (server callevent.js): the one the call's window names, the one you clicked Join on,
+// else the one starting nearest to when the call did; with no call, the one under way. null when
+// there's none, or no calendar.
 export async function eventNow(app) {
-  const d = await api('/calendar').catch(() => null)
-  const now = Date.now()
-  const on = (d?.events || d?.today || []).filter((e) => e.start && !e.allDay && !e.canceled && new Date(e.start).getTime() - now < 10 * 60_000 && (!e.end || new Date(e.end).getTime() > now))
-  const word = String(app || '').split(/\s+/)[0].toLowerCase()
-  const score = (e) => (new Date(e.start).getTime() <= now ? 2 : 0) + (e.online ? 1 : 0) + (word && `${e.join || ''} ${e.location || ''}`.toLowerCase().includes(word) ? 2 : 0) - Math.abs(new Date(e.start).getTime() - now) / 3_600_000
-  return on.sort((a, b) => score(b) - score(a))[0] || null
+  const d = await api(`/calls/event${app ? `?app=${encodeURIComponent(app)}` : ''}`).catch(() => null)
+  return d?.event || null
 }
 
 export function MeetingsProvider({ children }) {
@@ -357,18 +354,22 @@ export function ScreenButton({ m, small = true }) {
   )
 }
 
-// The calendar event on now, for a call that started at `at` (named in the prompt).
-export function useCallEvent(at) {
+// The calendar event a call on app that started at `at` is for (named in the prompt), the one
+// Take notes names it after.
+export function useCallEvent(at, app) {
   const [ev, setEv] = useState(null)
   useEffect(() => {
     setEv(null)
     if (!at) return
     let on = true
-    eventNow().then((e) => on && setEv(e)).catch(() => {})
+    eventNow(app).then((e) => on && setEv(e)).catch(() => {})
     return () => { on = false }
-  }, [at])
+  }, [at, app])
   return ev
 }
+
+// Why a recording seems to be over: its call ended, or nobody's said anything for a while.
+export const endedWords = (r) => (r.endWhy === 'quiet' ? t('Nobody has said anything for a while.') : r.callEndedApp ? t('The {app} call ended.', { app: r.callEndedApp }) : t('The call ended.'))
 
 // When a call starts with nothing recording ("Zoom call started. Take notes?") and when the call a
 // meeting was on ends ("Stop recording?"), at the top of the window. The floating card asks too.
@@ -377,16 +378,16 @@ export function CallPrompt() {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
   const c = m?.calls
-  const ev = useCallEvent(c?.prompt && !m?.rec ? c.prompt.at : null)
+  const ev = useCallEvent(c?.prompt && !m?.rec ? c.prompt.at : null, c?.prompt?.app)
   if (!c) return null
   const r = c.recording
   const act = async (fn) => { setBusy(true); setErr(null); try { await fn() } catch (e) { setErr(e.message) } finally { setBusy(false); m.refreshCalls() } }
   if (r?.callEnded && m.rec?.id === r.id) {
     const left = r.stopsAt ? Math.max(0, Math.round((new Date(r.stopsAt).getTime() - Date.now()) / 1000)) : null
     return (
-      <div className="call-prompt" role="alertdialog" aria-label={t('The call ended')}>
+      <div className="call-prompt" role="alertdialog" aria-label={r.endWhy === 'quiet' ? t('It went quiet') : t('The call ended')}>
         <span className="rec-dot" aria-hidden="true" />
-        <span className="call-prompt-main"><b>{r.callEndedApp ? t('The {app} call ended.', { app: r.callEndedApp }) : t('The call ended.')}</b><small>{left != null ? t('Stop recording? It stops by itself in {time}.', { time: clock(left) }) : t('Stop recording?')}</small></span>
+        <span className="call-prompt-main"><b>{endedWords(r)}</b><small>{left != null ? t('Stop recording? It stops by itself in {time}.', { time: clock(left) }) : t('Stop recording?')}</small></span>
         <button type="button" className="btn small primary" disabled={busy} onClick={() => act(() => m.stop())}><Icon name="stop" size={12} /> {t('Stop')}</button>
         <button type="button" className="btn small" disabled={busy} onClick={() => act(() => api(`/meetings/${r.id}/keep`, { method: 'POST' }))}>{t('Keep recording')}</button>
         {err && <span className="error-text small">{err}</span>}

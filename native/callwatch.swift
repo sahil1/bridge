@@ -7,7 +7,18 @@
 //   {"input":[{"pid":123,"bundle":"us.zoom.xos"}]}
 // Checks twice a second (a handful of property reads). Exits on SIGTERM, when stdout closes, or
 // when the process that started it goes.
+//
+//   callwatch windows <bundle id>...   the titles of those apps' windows, once, which say which
+//                                      meeting a call is (Teams names it in its window's title, a
+//                                      browser the tab in front). Only when macOS already lets
+//                                      Bridge AI read them, through Accessibility, else Screen
+//                                      Recording: it never asks. One line, then it exits:
+//     {"by":"accessibility","windows":[{"bundle":"com.microsoft.teams2","title":"Weekly sync | Microsoft Teams"}]}
+//     {"by":null,"windows":[]}         when it isn't allowed to read them
+//
 //   swiftc -O -target arm64-apple-macos14.0 native/callwatch.swift -o native/bin/callwatch
+import AppKit
+import ApplicationServices
 import CoreAudio
 import Foundation
 
@@ -53,7 +64,43 @@ func quote(_ s: String) -> String {
   return String(arr.dropFirst().dropLast())
 }
 
+func windowTitles(_ bundles: [String]) -> (by: String?, windows: [(bundle: String, title: String)]) {
+  let apps = bundles.flatMap { NSRunningApplication.runningApplications(withBundleIdentifier: $0) }
+  var out: [(bundle: String, title: String)] = []
+  if AXIsProcessTrusted() {
+    for app in apps {
+      let el = AXUIElementCreateApplication(app.processIdentifier)
+      AXUIElementSetMessagingTimeout(el, 1.0) // an app that's stuck doesn't hold us up
+      var value: CFTypeRef?
+      guard AXUIElementCopyAttributeValue(el, kAXWindowsAttribute as CFString, &value) == .success, let windows = value as? [AXUIElement] else { continue }
+      for w in windows {
+        var title: CFTypeRef?
+        if AXUIElementCopyAttributeValue(w, kAXTitleAttribute as CFString, &title) == .success, let s = title as? String, !s.isEmpty { out.append((app.bundleIdentifier ?? "", s)) }
+      }
+    }
+    return ("accessibility", out)
+  }
+  if CGPreflightScreenCaptureAccess() {
+    var bundleOfPid: [pid_t: String] = [:]
+    for app in apps { bundleOfPid[app.processIdentifier] = app.bundleIdentifier ?? "" }
+    let list = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+    for w in list {
+      guard let pid = w[kCGWindowOwnerPID as String] as? pid_t, let b = bundleOfPid[pid], (w[kCGWindowLayer as String] as? Int) == 0,
+            let s = w[kCGWindowName as String] as? String, !s.isEmpty else { continue }
+      out.append((b, s))
+    }
+    return ("screen", out)
+  }
+  return (nil, [])
+}
+
 signal(SIGPIPE, SIG_DFL) // stdout closed: the server has gone, so do we
+let args = CommandLine.arguments.dropFirst()
+if args.first == "windows" {
+  let (by, windows) = windowTitles(Array(args.dropFirst()))
+  print("{\"by\":\(by.map(quote) ?? "null"),\"windows\":[" + windows.map { "{\"bundle\":\(quote($0.bundle)),\"title\":\(quote($0.title))}" }.joined(separator: ",") + "]}")
+  exit(0)
+}
 let parent = getppid()
 var last = ""
 while true {

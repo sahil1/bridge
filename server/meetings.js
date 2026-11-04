@@ -399,11 +399,14 @@ function settle(id) {
   // In a room, the voices told apart first (the lines heard while it recorded are done already),
   // so the summary can say who said what.
   const room = voices.wanted(lines(id))
-  if (!clean && !sum && !room) return
+  if (!clean && !sum && !room) { resave(id); return }
   ;(async () => {
     if (room) await voices.tell(id, lines(id)).then(() => voices.wait(id)).catch(() => {})
     if (clean) await cleanup(id).catch(() => {})
     if (sum && transcriptText(id)) await summarize(id).catch(() => {})
+    // Saved by itself (Settings › Meetings) with its summary, or without one when it couldn't be
+    // written: the transcript and your notes, and the summary once it is.
+    resave(id)
   })()
 }
 
@@ -528,7 +531,7 @@ export function callQuiet(id) {
 }
 
 export function pause(id) { return patchMeta(id, { status: meta(id).status === 'recording' ? 'paused' : meta(id).status }) }
-export function resume(id) { return patchMeta(id, { status: meta(id).status === 'paused' ? 'recording' : meta(id).status }) }
+export function resume(id) { return patchMeta(id, meta(id).status === 'paused' ? { status: 'recording', keptAt: new Date().toISOString() } : {}) }
 
 export async function stop(id) {
   const m = meta(id)
@@ -554,27 +557,54 @@ const recordingNow = () => list().filter((m) => m.status === 'recording' || m.st
 export function callStarted(app) {
   for (const m of recordingNow()) {
     clearTimeout(stopping.get(m.id)); stopping.delete(m.id)
-    patchMeta(m.id, { callApps: [...new Set([...(m.callApps || []), app])], callEnded: null, callEndedApp: null })
+    patchMeta(m.id, { callApps: [...new Set([...(m.callApps || []), app])], callEnded: null, callEndedApp: null, endWhy: null, stopsAt: null })
   }
 }
 // still: the apps on a call now. A meeting on two (Zoom, and Meet in a browser) ends with the last.
 export function callEnded(app, still = []) {
-  for (const m of recordingNow().filter((x) => (x.callApps || []).includes(app) && !x.callApps.some((a) => still.includes(a)))) {
-    patchMeta(m.id, { callEnded: new Date().toISOString(), callEndedApp: app, stopsAt: cfg.meetings?.autoStop !== false ? new Date(Date.now() + AUTO_STOP_MS).toISOString() : null })
-    if (cfg.meetings?.autoStop === false) continue
-    clearTimeout(stopping.get(m.id))
-    stopping.set(m.id, setTimeout(() => {
-      stopping.delete(m.id)
-      const x = meta(m.id)
-      if (x.callEnded && (x.status === 'recording' || x.status === 'paused')) stop(m.id).catch(() => {})
-    }, AUTO_STOP_MS))
-  }
+  for (const m of recordingNow().filter((x) => (x.callApps || []).includes(app) && !x.callApps.some((a) => still.includes(a)))) ending(m.id, { app, why: 'call' })
 }
-// "Keep recording": the call ended, but the meeting goes on.
+// The meeting seems to be over (why: its call ended, or it went quiet): the app asks whether to
+// stop, and it stops by itself AUTO_STOP_MS later unless that's turned off.
+function ending(id, { app = null, why }) {
+  patchMeta(id, { callEnded: new Date().toISOString(), callEndedApp: app, endWhy: why, stopsAt: cfg.meetings?.autoStop !== false ? new Date(Date.now() + AUTO_STOP_MS).toISOString() : null })
+  if (cfg.meetings?.autoStop === false) return
+  clearTimeout(stopping.get(id))
+  stopping.set(id, setTimeout(() => {
+    stopping.delete(id)
+    const x = meta(id)
+    if (x.callEnded && (x.status === 'recording' || x.status === 'paused')) stop(id).catch(() => {})
+  }, AUTO_STOP_MS))
+}
+// "Keep recording": the call ended or it went quiet, but the meeting goes on. Quiet again from now
+// counts afresh.
 export function keep(id) {
   clearTimeout(stopping.get(id)); stopping.delete(id)
-  return patchMeta(id, { callEnded: null, callEndedApp: null, stopsAt: null })
+  return patchMeta(id, { callEnded: null, callEndedApp: null, endWhy: null, stopsAt: null, keptAt: new Date().toISOString() })
 }
+// A meeting that's gone quiet ends too, as Granola's do, for a meeting in a room and for a call
+// whose app keeps the mic once it's over: nobody heard, on your mic or the call, for QUIET_END_MS
+// after something was said (or since Keep recording or Resume), or for QUIET_OVER_MS once its
+// calendar event's time is up. Someone talking again before it stops takes the question back.
+const QUIET_END_MS = Number(process.env.BRIDGE_QUIET_END_MS || 5 * 60_000)
+const QUIET_OVER_MS = Number(process.env.BRIDGE_QUIET_OVER_MS || 90_000)
+export function checkQuiet(now = Date.now()) {
+  for (const m of recordingNow()) {
+    const l = live.get(m.id)
+    if (m.status !== 'recording' || !l) continue
+    const said = Math.max(0, ...Object.values(l.sources).map((s) => s.talkingAt || 0))
+    if (m.callEnded) {
+      if (m.endWhy === 'quiet' && said > Date.parse(m.callEnded)) { clearTimeout(stopping.get(m.id)); stopping.delete(m.id); patchMeta(m.id, { callEnded: null, callEndedApp: null, endWhy: null, stopsAt: null }) }
+      continue
+    }
+    // On a call whose sound isn't heard (macOS not letting Bridge AI hear it yet), quiet says nothing.
+    if (!said || cfg.meetings?.quietEnd === false || (m.call === 'on' && !l.sources.them?.heard)) continue
+    const quiet = now - Math.max(said, Date.parse(m.keptAt || 0) || 0)
+    const over = m.event?.end && now > Date.parse(m.event.end)
+    if (quiet >= QUIET_END_MS || (over && quiet >= QUIET_OVER_MS)) ending(m.id, { why: 'quiet' })
+  }
+}
+setInterval(() => { try { checkQuiet() } catch { /* a meeting gone */ } }, Number(process.env.BRIDGE_QUIET_CHECK_MS || 10_000)).unref?.()
 
 // A recording left open when the app closed: what was transcribed stays; it's marked stopped.
 export function recover() {
@@ -1047,16 +1077,18 @@ export function uncleanLine(id, key) {
   return { ok: true }
 }
 
-// The calendar event a meeting was for, picked afterwards (when it was recorded without one): its
-// people, its time and its links. The name too, while it's still the one it started with. Who said
-// what is worked out again with its people, at the next summary.
+// The calendar event a meeting was for, picked afterwards (when it was recorded without one, or
+// with another that was on then): its people, its time and its links, in place of the other's. The
+// name too, while it's still the one it started with or the other event's. Who said what is worked
+// out again with its people, at the next summary.
 export function setEvent(id, event) {
   const m = meta(id)
   if (!event?.title) throw new Error('No event')
   const ev = eventOf(event)
-  const plain = /^(Meeting|.+ call), /.test(m.title) || m.title === 'Meeting'
-  const have = new Set((m.links || []).map((l) => l.url || l.path))
-  const p = patchMeta(id, { event: ev, namedAt: null, ...(plain ? { title: ev.title } : {}), ...guessKind(m, `${plain ? ev.title : m.title} ${ev.title}`), links: [...(m.links || []), ...inviteLinks(event).filter((l) => !have.has(l.url || l.path))] })
+  const plain = /^(Meeting|.+ call), /.test(m.title) || m.title === 'Meeting' || (!!m.event?.title && m.title === m.event.title)
+  const kept = (m.links || []).filter((l) => !(m.event && l.from === 'invite'))
+  const have = new Set(kept.map((l) => l.url || l.path))
+  const p = patchMeta(id, { event: ev, namedAt: null, ...(plain ? { title: ev.title } : {}), ...(m.event && !m.kindPicked ? { kind: kindOf(`${plain ? ev.title : m.title} ${ev.title}`) } : guessKind(m, `${plain ? ev.title : m.title} ${ev.title}`)), links: [...kept, ...inviteLinks(event).filter((l) => !have.has(l.url || l.path))] })
   resave(id, 1000)
   return p
 }
@@ -2110,7 +2142,15 @@ export function target(m, o = saving()) {
 }
 // auto: a save by itself (Keep saved notes up to date), which leaves alone a note you've changed
 // in your notes app since it was saved. Save, asked for, writes it as Bridge AI has it.
-export async function save(id, { auto = false } = {}) {
+// One that can't be written says why on the meeting, until a save works.
+export async function save(id, opts = {}) {
+  try { return await writeNotes(id, opts) } catch (e) {
+    const why = savingError(e)
+    try { patchMeta(id, { saveError: why }) } catch { /* gone */ }
+    throw new Error(why)
+  }
+}
+async function writeNotes(id, { auto = false } = {}) {
   const m = meta(id)
   const o = saving()
   const { note, transcript: tfile } = target(m, o)
@@ -2162,7 +2202,7 @@ export async function save(id, { auto = false } = {}) {
     const text = await fs.promises.readFile(old, 'utf8').catch(() => null)
     if (text != null && (m.savedHashes?.[old] ? m.savedHashes[old] === hash(text) : text.startsWith('---') && text.includes(`\nmeeting_id: ${m.id}\n`))) await fs.promises.rm(old, { force: true }).catch(() => {})
   }
-  patchMeta(id, { saved: note || tfile, savedFiles: now, savedHashes: hashes })
+  patchMeta(id, { saved: note || tfile, savedFiles: now, savedHashes: hashes, saveError: null })
   return { file: note || tfile, files: now }
 }
 // Meetings saved before, somewhere Settings wouldn't put them now (a folder or pattern changed).
@@ -2180,9 +2220,11 @@ const resaving = new Map()
 function resave(id, ms = 0) {
   let m
   try { m = meta(id) } catch { return }
-  if (!m.saved && !(cfg.meetings?.autoSave && m.summarizedAt)) return
+  if (!m.saved && !(cfg.meetings?.autoSave && (m.summarizedAt || (m.status === 'done' && !m.summarizing)))) return
   // "Keep saved notes up to date" off: a meeting saved once isn't written again by itself.
   if (m.saved && cfg.meetings?.keepSaved === false) return
   clearTimeout(resaving.get(id))
   resaving.set(id, setTimeout(() => { resaving.delete(id); save(id, { auto: true }).catch(() => {}) }, ms))
 }
+// Why a save didn't work: macOS not letting Bridge AI into the folder, a disk full.
+const savingError = (e) => (e?.code === 'EPERM' || e?.code === 'EACCES' ? `Bridge AI isn't allowed to write to ${folder().replace(os.homedir(), '~')}.${IS_MAC ? ' Allow it in System Settings › Privacy & Security › Files and Folders, or pick' : ' Pick'} another folder in Settings › Meetings.` : String(e?.message || e).slice(0, 300))

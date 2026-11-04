@@ -2,6 +2,18 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
+## 3.9.3
+
+Notes named after the right meeting when two are on, meetings that end by themselves when they go quiet and save as they end, and agents that go by the name you give them.
+
+### What's new
+
+- **The right meeting, when two are on.** Joining the next Teams call a few minutes early, while the last meeting's time isn't up, named the notes after the one ending. Now it's the meeting that starts nearest to when the call began, not to when you pressed record. When macOS already lets Bridge AI read windows (Accessibility, which dictation's typing uses, or Screen Recording), the meeting Teams names in its window wins, and so does a Meet tab's code. Join in Bridge AI's calendar says which one too. Bridge AI never asks for anything new for this.
+- **Another meeting?** A meeting named after one event while another was on says so beside its people. Pick the other, and its name, people and invite's files take the first one's place.
+- **A meeting that goes quiet ends by itself.** As when its call ends: nobody heard for 5 minutes, or for a minute and a half once its time on the calendar is up, and it asks whether to stop, then stops 2 minutes later. Someone talking again takes the question back. For a meeting in a room, and for a call whose app keeps the mic once it's over.
+- **Saved as it ends.** With "Save every meeting there by itself" on, a meeting is saved to your notes folder as soon as its transcript is in, and again with its summary. Before, one whose summary wasn't written (no model, or it failed) stayed "Not saved yet". A folder Bridge AI can't write to now says so on the meeting, with why, and Save tries again.
+- **Agents go by the name you give them.** Rename a tab, or double-click an agent's name in its header (or ⋯ › Rename), and that's its name in the header, the tabs and notifications, over the title Claude Code gives its session ("✳ ..."). It stays after Bridge AI opens again.
+
 ## 3.9.2
 
 A computer that drops off the network is noticed in seconds, with another of yours a tap away; meetings you can mention to an agent; several files open in Files; a top bar that fits a laptop's window; and a speaker to turn notification sounds off.

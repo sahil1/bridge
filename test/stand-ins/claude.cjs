@@ -17,6 +17,8 @@
 //                                           if none), the way Claude Code does: 1 or 2 goes ahead,
 //                                           3 or Esc doesn't; the key is noted in ~/claude-answers.log
 //                                           (with the command), then it works a moment and is done
+//   claude --session-id <id> "title <words>"  names its session in the terminal's title, as Claude
+//                                           Code does ("✳ <words>")
 //   claude auth status --json | login | logout
 //                                           the sign-in of the config folder it's run for
 //                                           (CLAUDE_CONFIG_DIR, else ~/.claude): signed in until
@@ -44,6 +46,7 @@ const message = args.find((a, i) => !a.startsWith('--') && !WITH_VALUE.has(args[
 const resumed = opt('--resume')
 const id = opt('--session-id') || resumed
 const screenOnly = message === 'screen only'
+if (message.startsWith('title ')) process.stdout.write(`\x1b]0;✳ ${message.slice(6)}\x07`)
 const rule = '─'.repeat(60)
 // Its screen, as Claude Code draws it: working, with its footer, or done. low: at the bottom, as
 // under a conversation it resumed.

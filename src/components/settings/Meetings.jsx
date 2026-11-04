@@ -264,7 +264,7 @@ export default function Meetings() {
         <SaveNotes set={set} pickFolder={pickFolder} />
         <label className="st-check">
           <input type="checkbox" checked={!!m.autoSave} onChange={(e) => set({ autoSave: e.target.checked, ...(m.folder ? {} : { folder: d.folder }) })} />
-          <span><b>Save every meeting there by itself</b> <span className="muted small">Once its summary is written.</span></span>
+          <span><b>Save every meeting there by itself</b> <span className="muted small">As it ends, and again with its summary once that's written.</span></span>
         </label>
       </section>
     </div>

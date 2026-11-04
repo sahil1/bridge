@@ -83,12 +83,11 @@ function RecordingBar({ id, data, onAssist }) {
 }
 
 
-// A calendar event happening now or starting within 10 minutes, to take notes for.
+// A calendar event happening now or starting within 10 minutes, to take notes for: on a call, the
+// one it's for (eventNow).
 function useNextEvent() {
-  const { data } = usePoll('/calendar', 60_000)
-  const events = data?.events || data?.today || []
-  const now = Date.now()
-  return events.find((e) => e.start && !e.allDay && new Date(e.start).getTime() - now < 10 * 60_000 && (!e.end || new Date(e.end).getTime() > now)) || null
+  const { data } = usePoll('/calls/event', 30_000)
+  return data?.event || null
 }
 
 // Search: the words in a found meeting's line, marked.
@@ -433,7 +432,7 @@ export function MeetingPage({ id, onBack }) {
   const [whoAt, setWhoAt] = useState(null) // { x, y, l }: the menu for who said a line
   const [naming, setNaming] = useState(null) // { l, name }: a name typed for a line
   const [events, setEvents] = useState(null) // calendar events around when it was recorded
-  const [evMenu, setEvMenu] = useState(null) // { x, y }
+  const [evMenu, setEvMenu] = useState(null) // { x, y, others }
   const [tw, setTw] = usePersisted('cc-mt-transcript-w', 0) // the transcript's width, once dragged
   const [big, setBig] = useState(null) // the picture shown full size (an index in pics)
   const [dropping, setDropping] = useState(false)
@@ -480,16 +479,21 @@ export function MeetingPage({ id, onBack }) {
     el.setSelectionRange(el.value.length, el.value.length)
   }, [isRecording, wide, touch, id, data?.notes != null]) // eslint-disable-line react-hooks/exhaustive-deps
   // Recorded without the calendar event it was for: the events around then, to take its people from.
+  // Named after one while another was on too (back to back, or double-booked): the others, to say
+  // it was one of those instead.
   const noPeople = !!data && !(data.event?.attendees || []).length
+  const ofEvent = data?.event?.title ? `${data.event.title}|${data.event.start || ''}` : null
   // When the calendar can't be read (Bridge AI isn't allowed to yet), that's said, with Allow access.
   useEffect(() => {
     setEvents(null)
     setCalWhy(null)
-    if (!noPeople) return
+    if (!noPeople && !ofEvent) return
     let on = true
     api(`/meetings/${encodeURIComponent(id)}/events`).then((r) => on && setEvents(r.events || [])).catch((e) => { if (on) { setEvents([]); setCalWhy(e.code || null) } })
     return () => { on = false }
-  }, [id, noPeople, calAgain])
+  }, [id, noPeople, ofEvent, calAgain])
+  const t0 = data ? Date.parse(data.startedAt) : 0
+  const otherEvents = ofEvent ? (events || []).filter((ev) => `${ev.title}|${ev.start}` !== ofEvent && Date.parse(ev.start) - 10 * 60_000 <= t0 && Date.parse(ev.end) > t0) : []
   useEffect(() => { if (data && !opts) setOpts({ language: data.summaryLanguage || 'auto', model: data.summaryModelPick || '', kind: data.kind || 'general' }) }, [data, opts])
   // Notes added somewhere else (the floating card, the top bar) come in: as they are when you
   // haven't typed since, else added to the end of what you're writing.
@@ -713,10 +717,17 @@ export function MeetingPage({ id, onBack }) {
           <Icon name="calendar" size={10} /> <span>{events.length === 1 ? t('From "{title}"', { title: events[0].title }) : t('From the calendar')}</span>
         </button>
       )}
-      <button type="button" className="path-chip mt-saved" onClick={() => (data.saved ? (here() ? reveal() : setMsg({ text: tilde(data.saved) })) : save())}
+      {people == null && otherEvents.length > 0 && (
+        <button type="button" className="path-chip mt-otherev" onClick={(e) => setEvMenu({ x: e.clientX, y: e.clientY, others: true })} disabled={busy === 'event'}
+          title={t('"{title}" was on then too. Click if this was that meeting instead, for its name and people', { title: otherEvents[0].title })}>
+          <Icon name="calendar" size={10} /> <span>{t('Another meeting?')}</span>
+        </button>
+      )}
+      {/* Saving by itself didn't work (the folder can't be written): why, and Save to try again. */}
+      <button type="button" className={`path-chip mt-saved${data.saveError ? ' warn' : ''}`} onClick={() => (data.saved && !data.saveError ? (here() ? reveal() : setMsg({ text: tilde(data.saved) })) : save())}
         onContextMenu={(e) => { if (!data.saved) return; e.preventDefault(); navigator.clipboard?.writeText(data.saved); setMsg({ text: t('Path copied') }) }}
-        title={data.saved ? `${(data.savedFiles || [data.saved]).map(tilde).join('\n')}\n${t('Click to show in Finder; right-click to copy')}` : t('Not saved to your notes folder yet. Click to save it')}>
-        <Icon name="folder" size={10} /> <span>{savedDir || t('Not saved yet')}</span>
+        title={data.saveError ? `${t("Couldn't save it to your notes folder:")} ${data.saveError}\n${t('Click to try again')}` : data.saved ? `${(data.savedFiles || [data.saved]).map(tilde).join('\n')}\n${t('Click to show in Finder; right-click to copy')}` : t('Not saved to your notes folder yet. Click to save it')}>
+        <Icon name="folder" size={10} /> <span>{data.saveError ? t("Couldn't save") : savedDir || t('Not saved yet')}</span>
       </button>
     </>
   )
@@ -910,8 +921,8 @@ export function MeetingPage({ id, onBack }) {
           ? <PickSheet title={t('Who said it?')} items={whoItems(whoAt.l)} onClose={() => setWhoAt(null)} />
           : <AtMenu x={whoAt.x} y={whoAt.y} items={whoItems(whoAt.l)} onClose={() => setWhoAt(null)} />)}
         {evMenu && (() => {
-          const items = (events || []).map((ev) => ({ icon: 'calendar', label: `${ev.title} · ${timeOf(ev.start)}${ev.attendees?.length ? ` · ${t('{n} people', { n: ev.attendees.length })}` : ''}`, run: () => takeEvent(ev) }))
-          return sheet ? <PickSheet title={t('From the calendar')} items={items} onClose={() => setEvMenu(null)} /> : <AtMenu x={evMenu.x} y={evMenu.y} onClose={() => setEvMenu(null)} items={items} />
+          const items = (evMenu.others ? otherEvents : events || []).map((ev) => ({ icon: 'calendar', label: `${ev.title} · ${timeOf(ev.start)}${ev.attendees?.length ? ` · ${t('{n} people', { n: ev.attendees.length })}` : ''}`, run: () => takeEvent(ev) }))
+          return sheet ? <PickSheet title={evMenu.others ? t('Which meeting was it?') : t('From the calendar')} items={items} onClose={() => setEvMenu(null)} /> : <AtMenu x={evMenu.x} y={evMenu.y} onClose={() => setEvMenu(null)} items={items} />
         })()}
         {naming && (
           <Dialog title={t('Who said it?')} onClose={() => setNaming(null)}>
