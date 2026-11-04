@@ -287,6 +287,7 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
         <button className={`mini-nav ${String(selected || '').startsWith('view:meeting') ? 'on' : ''}`} onClick={() => onMeetings?.()} aria-label={recording ? t('Meetings (recording)') : t('Meetings')} title={t('Meetings')}><Icon name="mic" size={15} />{recording && <span className="rec-dot mini-rec" />}</button>
         {anyDictation && <button className={`mini-nav ${selected === 'view:dictations' ? 'on' : ''}`} onClick={() => onDictations?.()} aria-label={t('Dictations')} title={t('Dictations')}><Icon name="wave" size={15} /></button>}
         {whiteboards && <button className={`mini-nav ${String(selected || '').startsWith('view:whiteboard') ? 'on' : ''}`} onClick={() => onOpen('view:whiteboards')} aria-label={t('Whiteboards')} title={t('Whiteboards')}><Icon name="shapes" size={15} /></button>}
+        {whiteboards && <button className={`mini-nav ${String(selected || '').startsWith('view:studio') ? 'on' : ''}`} onClick={() => onOpen('view:studio')} aria-label={t('Studio')} title={t('Studio')}><Icon name="layers" size={15} /></button>}
         <div className="rail-mini">
           {groups.filter((g) => rowsOf(g).length).map((g) => (
             <div key={g.id} className="mini-ws">
@@ -372,6 +373,11 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
         {whiteboards && (
           <div className="rail-nav-row">
             <button className={`rail-nav-btn ${String(selected || '').startsWith('view:whiteboard') ? 'on' : ''}`} onClick={() => onOpen('view:whiteboards')}><Icon name="shapes" size={14} /> {t('Whiteboards')}</button>
+          </div>
+        )}
+        {whiteboards && (
+          <div className="rail-nav-row">
+            <button className={`rail-nav-btn ${String(selected || '').startsWith('view:studio') ? 'on' : ''}`} onClick={() => onOpen('view:studio')}><Icon name="layers" size={14} /> {t('Studio')}</button>
           </div>
         )}
         <Quiet name="Devices"><RailMachines /></Quiet>
