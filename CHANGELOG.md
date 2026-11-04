@@ -4,7 +4,7 @@ Each version's section here becomes its GitHub release notes (`npm run release`)
 
 ## 3.9.2
 
-A computer that drops off the network is noticed in seconds, with another of yours a tap away; a top bar that fits a laptop's window; and a speaker to turn notification sounds off.
+A computer that drops off the network is noticed in seconds, with another of yours a tap away; meetings you can mention to an agent; several files open in Files; a top bar that fits a laptop's window; and a speaker to turn notification sounds off.
 
 ### What's new
 
@@ -12,6 +12,7 @@ A computer that drops off the network is noticed in seconds, with another of you
 - **Back as soon as the network is.** A computer with no network tries its relay again every few seconds, not up to a minute apart, and your other computers link to it again as soon as it's back.
 - **A speaker in the top bar** turns notification sounds off on all your devices: the Mac app's, a browser's and your phone's. Notifications still come, without a sound. Click it again to turn sounds back on.
 - **A top bar that fits.** With a lot going on, its chips give way a step at a time (the clock, then usage's details, the weather, the meeting, the rest of usage), so Settings is never pushed off a laptop's window. The meeting you're recording no longer shows twice.
+- **Mention a meeting to an agent.** In an agent's message box, type @ and a word of a meeting's name, and pick it: the agent gets the meeting to read, with its summary and action items, your notes and the transcript. Settings › Meetings › Mention a Meeting changes the key (# lists only meetings, the latest first).
 - **Several files open in Files**, a tab each above the file: click one to bring it back, × to close it. Each agent's Files remembers where you were (the folders open, the files open, the one in front, the place picked) when you leave and come back, or reload, on this computer and when you look at another one.
 
 ### Fixes
