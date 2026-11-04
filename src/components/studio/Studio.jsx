@@ -172,17 +172,27 @@ export function StudioPage({ root, path: rel, onBack, onOpen }) {
     return m
   }, [f])
   useEffect(() => { setMeta(null); setData(null); setErr(null); load().catch((e) => setErr(e.message)) }, [load])
-  // Changed on disk (an agent asked, another app): looked at every few seconds while it's in view.
+  // Changed on disk (an agent asked, another app): looked at while it's in view, every few seconds
+  // while an agent's working on it (asked, or it changed it in the last two minutes), else every
+  // ten, and at once when you come back to the window (from editing it in Word, say).
+  const quick = useRef(0) // until when
+  const lastLook = useRef(0)
   useEffect(() => {
-    const id = setInterval(async () => {
+    const look = async () => {
       const m = metaRef.current
       if (!m || document.hidden) return
+      if (Date.now() > quick.current && Date.now() - lastLook.current < 10_000) return
+      lastLook.current = Date.now()
       const r = await changedSince(f, m.mtime).catch(() => null)
       if (!r?.changed) return
+      if (r.by === 'agent') quick.current = Math.max(quick.current, Date.now() + 120_000)
       const who = r.by === 'agent' ? (r.name || t('An agent')) : t('Another app')
       if (!dirtyRef.current) { await load().catch(() => {}); setNote({ text: t('{who} changed it: this is its new version.', { who }) }) } else { setMeta((x) => ({ ...x, versions: r.versions })); setConflict({ who, mtime: r.mtime }) }
-    }, 2500)
-    return () => clearInterval(id)
+    }
+    const back = () => { lastLook.current = 0; look() }
+    const id = setInterval(look, 2500)
+    window.addEventListener('focus', back)
+    return () => { clearInterval(id); window.removeEventListener('focus', back) }
   }, [f, load])
   const save = useCallback(async ({ force = false, ok = false } = {}) => {
     if (!handle.current || !meta) return
@@ -242,7 +252,7 @@ export function StudioPage({ root, path: rel, onBack, onOpen }) {
         </div>
         {panel === 'versions' && meta && <Versions f={f} ext={meta.ext} versions={meta.versions} onRestore={restore} onClose={() => setPanel(null)} />}
       </div>
-      {ask && <AskAgent f={f} meta={meta} selection={ask.selection} onClose={() => setAsk(null)} onSent={(name) => { setAsk(null); setNote({ text: t('Sent to {name}. Studio shows the change once it saves the file.', { name }) }) }} />}
+      {ask && <AskAgent f={f} meta={meta} selection={ask.selection} onClose={() => setAsk(null)} onSent={(name) => { setAsk(null); quick.current = Date.now() + 15 * 60_000; setNote({ text: t('Sent to {name}. Studio shows the change once it saves the file.', { name }) }) }} />}
     </div>
   )
 }
