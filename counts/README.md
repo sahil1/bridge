@@ -1,7 +1,8 @@
-# Bridge AI's usage counts server
+# Bridge AI's usage counts and crash report server
 
 For whoever runs it. Everyone else can ignore this file: Bridge AI sends nothing here unless you turn
-on **Share anonymous usage counts** (Settings › About & Updates; off unless you do).
+on **Share anonymous usage counts** or **Send crash reports by themselves** (Settings › About &
+Updates; each off unless you do), or click **Send to Bold Bridge** on a crash's report.
 
 [worker.js](worker.js) is a Cloudflare Worker at `https://counts.boldbridge.ai`, run once by the
 project. Each Bridge AI with sharing on sends it one report per week, once the week is over
@@ -20,8 +21,8 @@ project. Each Bridge AI with sharing on sends it one report per week, once the w
   added. Bridge AI tries a week for up to eight weeks, so ten covers every retry.
 - **Keeps only weekly totals**, in D1:
   - `reports`: one row per week and combination of answers (version, OS, chip, how it's installed,
-    layout, runtime, phone paired, how long installed, days used), with `n`, how many reports
-    said exactly that.
+    layout, runtime, phone paired, how long installed, days used, time in use and time running,
+    each a range), with `n`, how many reports said exactly that.
   - `counts`: one row per week, counter, range, OS and how long installed, with `n`.
   - `seen`: the nonces of the last ten weeks, with the day each arrived.
 
@@ -34,6 +35,27 @@ older than ten weeks go.
 Anyone can post a report, so the totals are as good as what's sent: a determined person could add
 made-up weeks. That's the cost of having no IDs. A Cloudflare rate limiting rule on the zone
 (below) keeps one network from adding many.
+
+## Crash reports
+
+The same Worker answers at `https://crashes.boldbridge.ai` (`POST /v1/report`, JSON, as
+`crashReports` in [shared/telemetry-schema.json](../shared/telemetry-schema.json) describes it):
+
+- **Checked**: a kind of crash it knows (`ui`, `server`, `window`, `gpu`), a title and details, at
+  most 32 KB; the version and system as for counts (`other` when unknown).
+- **Stripped again**: the computer already took out names, folders, emails and keys; the server runs
+  the same code ([shared/crashreport.js](../shared/crashreport.js)) over the title, what the person
+  wrote and the details, without the names only the computer knows.
+- **Grouped**: a fingerprint of the kind, the error's first line and the first frames of the stack,
+  with line numbers and other numbers taken out, so the same crash in another version or another
+  place in a file is one group.
+- **Kept 90 days** in `crash_reports` (id, day, version, system, kind, fingerprint, title, what,
+  details), then deleted by the daily cron. No IP, no ID for the sender.
+- **At most `CRASHES_PER_DAY` a day** (1,000): past that, 429, and Bridge AI lets the report go.
+- **`CRASHES_OFF`** answers every report `{ stop: true, why }`, as `COUNTS_OFF` does for the counts:
+  Bridge AI turns crash reports off and shows why.
+
+The admin view (the project's planning repo, `admin/`) lists them by group.
 
 ## The kill switch
 
@@ -49,13 +71,13 @@ boldbridge.ai already a zone on that account:
 
 1. **The database**: `npx wrangler@4.149.0 d1 create bridge-counts`, then put the `database_id` it
    prints into [wrangler.toml](wrangler.toml).
-2. **Deploy**: `npx wrangler@4.149.0 deploy -c counts/wrangler.toml`. The custom domain makes the
-   DNS record and certificate for `counts.boldbridge.ai` itself.
+2. **Deploy**: `npx wrangler@4.149.0 deploy -c counts/wrangler.toml`. The custom domains make the
+   DNS records and certificates for `counts.boldbridge.ai` and `crashes.boldbridge.ai` themselves.
 3. **Check it**: `https://counts.boldbridge.ai/` shows what it is, and
    `curl -s -X POST https://counts.boldbridge.ai/v1/week -H 'content-type: application/json' -d '{}'`
    answers `{"ok":false,"error":"No schema number"}`.
-4. **Optional, against floods**: Security › WAF › Rate limiting rules, one rule for hostname
-   `counts.boldbridge.ai`: 20 requests per 10 seconds from one IP, then block for 10 seconds
+4. **Optional, against floods**: Security › WAF › Rate limiting rules, one rule for hostnames
+   `counts.boldbridge.ai` and `crashes.boldbridge.ai`: 20 requests per 10 seconds from one IP, then block for 10 seconds
    (Cloudflare applies it; the Worker never sees the IP).
 5. **Ship it**: the `endpoint` in shared/telemetry-schema.json is already this address, so the next
    release offers sharing. Releases made before it don't.

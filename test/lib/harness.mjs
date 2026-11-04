@@ -131,6 +131,8 @@ export async function startKit(name, { env = {}, config = {}, node = process.exe
   const PATH = [bin, ...systemPath()].join(path.delimiter)
   const base = {
     PATH, BRIDGE_PATH: PATH, HOME: home, BRIDGE_HOME: data, BRIDGE_PORT: String(port), BRIDGE_RUNTIME: 'builtin',
+    // No crash server unless a test gives one, so no test can reach the project's.
+    BRIDGE_CRASHES_URL: '',
     BRIDGE_FIX_DRYRUN: '1', LANG: 'en_US.UTF-8', TMPDIR: os.tmpdir(), USER: os.userInfo().username,
     BRIDGE_SUMMARY_RETRY_MS: '4000', BRIDGE_MODEL_RETRY_MS: '200',
     // No test ever runs a real installer or downloads Node.js: a stand-in installer runs instead

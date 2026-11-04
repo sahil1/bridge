@@ -2,8 +2,9 @@
 
 Bridge AI is an open-source app (https://github.com/sahil1/bridge) made of three parts: the app on
 your computer, a relay on your own Cloudflare account, and the phone apps for iPhone and Android.
-None of them sends anything to the project or its author unless you turn on usage counts (below),
-which are off unless you do. There is no account, no ads and no crash reporting.
+None of them sends anything to the project or its author unless you turn on usage counts or crash
+reports (below), each off unless you do, or send a crash's report yourself. There is no account and
+no ads.
 
 Last updated: November 2026.
 
@@ -31,7 +32,8 @@ When something in Bridge AI crashes, it keeps a note of it on your computer (in 
 desktop app also keeps what its server printed, in `logs/server.log`) and offers **Report on
 GitHub**. That shows you the whole issue it would fill in, with names, folders, emails and keys taken
 out, for you to read and change; it reaches GitHub only if you open it there and send it yourself,
-under GitHub's terms. Bridge AI sends nothing on its own.
+under GitHub's terms. Bridge AI sends nothing on its own,
+unless you turn on crash reports (below).
 
 How much of your plan is left is off until you turn it on (the Usage card, or Settings › General).
 Then Bridge AI asks each agent's own provider, with the sign-in that agent uses on your computer,
@@ -106,11 +108,14 @@ repo. `DO_NOT_TRACK=1` or `BRIDGE_TELEMETRY=0` in the environment keeps it off.
 
 While it's on, the counts are kept on your computer, in `~/.bridge-ai/telemetry`, a week at a time.
 Once a week is over, its report goes to the server: Bridge AI's version, your operating system and
-chip, how it's installed, its layout, whether a phone is paired, how long it's been on your computer
-and on how many days of the week it was used (in ranges), and the counts. It has no name, no ID for
+chip, how it's installed, its layout, whether a phone is paired, how long it's been on your computer,
+on how many days of the week it was used, how long it was in use (a window of it in front on that computer,
+with you typing, clicking, scrolling or touching it in the last two minutes; phones aren't counted) and how long it was running, in
+ranges ("1-5 hours"), and the counts, crashes among them (how many times its server, window or
+graphics stopped). It has no name, no ID for
 you or your computer (a random number new with each report lets the server count a report once),
 no file, folder, project, repo or branch names, nothing you typed or said, nothing from your agents,
-no email addresses and no exact times. The full list of what can be counted is
+no email addresses and no exact times or minutes. The full list of what can be counted is
 `shared/telemetry-schema.json` in the repo; adding to it is a public change. **See exactly what
 would be sent** shows the next report as it would go, and a copy of each report sent is kept in
 `~/.bridge-ai/telemetry/sent`.
@@ -130,6 +135,26 @@ only by you, and isn't given to the agents Bridge AI starts there. Your code and
 with it are under that provider's terms. If you give Claude a GitHub token, it goes to Anthropic
 with each task so the agent can reach your repo. "Use my GitHub CLI sign-in" reads the GitHub CLI's
 token once, when you click it.
+
+## Crash reports (off unless you turn them on)
+
+When something in Bridge AI crashes, its report (the same text **Report on GitHub** shows you: what
+crashed, the error and where in Bridge AI's code, its version, your system, the settings that change
+how it runs, and the last lines of its log, with your name, your projects' and computers' names,
+folders, emails, keys and network addresses taken out on your computer) can go to the project, to
+help fix it. That happens only if you turn on **Send crash reports by themselves** in Settings ›
+About & Updates, or click **Send to Bold Bridge** on a crash's report after reading and changing it
+as you like. It's off unless you do, and setup never asks. With it on, at most five go in a day, and
+the same crash once. `DO_NOT_TRACK=1` or `BRIDGE_TELEMETRY=0` keeps it off, and there's nothing to
+send to while the project has no crash server.
+
+Reports go to `crashes.boldbridge.ai`, the same server as the usage counts
+([counts/worker.js](counts/worker.js)), which takes out what it can again (emails, keys, home
+folders, addresses), keeps each report for 90 days with the day it arrived, and groups reports of the
+same crash. It doesn't read or store your IP address, and its logs are off. A report has no ID for
+you or your computer, so one already sent can't be found again to delete. A copy of each report sent
+is kept in `~/.bridge-ai/telemetry/crashes`, and Settings lists them. If the project stops
+collecting, Bridge AI turns crash reports off and says so.
 
 ## The website
 

@@ -34,11 +34,12 @@ const NAMES = new Set(Object.keys(SCHEMA.counters))
   const { AGENTS, CHAT } = await import('../../server/agents.js')
   const kinds = [...AGENTS, CHAT].map((a) => a.kind)
   ok(kinds.every((k) => NAMES.has(`agents.started.${k}`)), 'and every kind of agent has its own counter (a new one is added to the list in public)', kinds.filter((k) => !NAMES.has(`agents.started.${k}`)))
-  ok(SCHEMA.buckets.join() === '0,1,2-5,6-20,21-100,100+' && Object.keys(SCHEMA.report).join() === 'schema,week,app,os,arch,install,layout,runtime,phone,installAge,daysActive,counts,nonce', 'the list says what a report has, field by field, and its ranges')
+  ok(SCHEMA.buckets.join() === '0,1,2-5,6-20,21-100,100+' && Object.keys(SCHEMA.report).join() === 'schema,week,app,os,arch,install,layout,runtime,phone,installAge,daysActive,activeTime,openTime,counts,nonce' && SCHEMA.timeRanges.join() === '0,under 1 hour,1-5 hours,5-10 hours,10-20 hours,20-40 hours,40+ hours', 'the list says what a report has, field by field, and its ranges (counts, and time in use and open)')
 }
 process.env.BRIDGE_HOME = path.join(os.tmpdir(), `bridge-counts-rules-${process.pid}`)
 const c = await import('../../server/counts.js')
 ok([0, 1, 2, 5, 6, 20, 21, 100, 101, 5000].map(c.bucket).join() === '0,1,2-5,2-5,6-20,6-20,21-100,21-100,100+,100+', 'counts go in ranges: 0, 1, 2-5, 6-20, 21-100, 100+')
+ok([0, 1, 59, 60, 299, 300, 599, 600, 1199, 1200, 2399, 2400, 9000].map(c.timeRange).join() === SCHEMA.timeRanges.flatMap((r, i) => (i ? [r, r] : [r])).join(), 'time goes in ranges: 0, under 1 hour, 1-5, 5-10, 10-20, 20-40, 40+ hours')
 ok(c.weekOf(new Date(2026, 9, 31)) === '2026-W44' && c.weekOf(new Date(2026, 0, 1)) === '2026-W01' && c.weekOf(new Date(2027, 0, 1)) === '2026-W53' && c.weekOf(new Date(2026, 10, 2)) === '2026-W45', 'weeks are ISO weeks (Monday to Sunday, the year their Thursday is in)')
 
 // ---------- The project's endpoint, stood in for ----------
@@ -81,7 +82,7 @@ try {
   ok(d0.available === false && d0.refused === 'DO_NOT_TRACK' && await dnt.api('/counts', { share: true }).then(() => false, () => true), 'DO_NOT_TRACK=1: off, and it can\'t be turned on', d0)
 
   // Off, as it starts.
-  const k = await kitWith('on', { BRIDGE_COUNTS_URL: URL_, BRIDGE_COUNTS_NOW: day(2) }, { name: 'Priya Raman' })
+  const k = await kitWith('on', { BRIDGE_COUNTS_URL: URL_, BRIDGE_COUNTS_NOW: day(2), BRIDGE_COUNTS_MINUTE_MS: '200' }, { name: 'Priya Raman' })
   k.program('claude', fs.readFileSync(path.join(TEST, 'stand-ins', 'claude.cjs'), 'utf8'))
   await k.api('/setup', { name: 'Priya Raman' })
   const s0 = await k.api('/counts')
@@ -91,15 +92,20 @@ try {
   const p0 = await k.api('/counts/preview')
   ok(weekFiles(k.data).length === 0 && !fs.existsSync(path.join(k.data, 'telemetry')), 'off: agents, errors and a task count for nothing, and nothing is written down', fs.existsSync(path.join(k.data, 'telemetry')) && fs.readdirSync(path.join(k.data, 'telemetry')))
   ok(got.length === 0, 'and nothing is sent', got)
+  const idle = await k.api('/counts/active', {})
+  ok(idle.counted === false && p0.report.activeTime === '0' && p0.report.openTime === '0', 'off: no time in use or open is counted either', { idle, active: p0.report.activeTime, open: p0.report.openTime })
   ok(p0.share === false && JSON.stringify(p0.report.counts) === '{}' && p0.report.daysActive === 0 && p0.report.nonce === '(new for each report)' && p0.report.app && p0.report.os, 'what would be sent: a week with no counts, what it says about this computer and nothing else', p0)
 
   // On.
   const s1 = await k.api('/counts', { share: true })
   ok(s1.share === true, 'turned on')
   await use(k, 2)
+  const a1 = await k.api('/counts/active', {})
+  const a2 = await k.api('/counts/active', {})
   await new Promise((r) => setTimeout(r, 600))
   const p1 = await k.api('/counts/preview')
   const r1 = p1.report
+  ok(a1.counted === true && a2.counted === false && r1.activeTime === 'under 1 hour' && r1.openTime === 'under 1 hour', 'on: a minute in use is counted once however many windows say so, and the minutes it runs are counted, each sent as a range', { a1, a2, active: r1.activeTime, open: r1.openTime })
   ok(p1.share && p1.goes === 'after this week' && r1.counts['agents.started.claude'] === '2-5' && r1.counts['errors.window'] === '2-5' && r1.counts['chief.tasks'] === '1' && r1.daysActive === 1 && r1.installAge === 'week 1', 'on: what would be sent is this week so far, in ranges (agents started, errors, a task)', p1)
   ok(got.length === 0 && weekFiles(k.data).length === 1, 'kept on this computer until the week is over', { got, files: weekFiles(k.data) })
   const gone = async (kit) => { kit.stop(); await until(async () => !(await fetch(`${kit.url}/api/config`).then(() => true, () => false)), 10000, 100) }

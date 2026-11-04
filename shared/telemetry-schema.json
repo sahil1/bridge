@@ -1,9 +1,16 @@
 {
-  "about": "Usage counts: everything Bridge AI can count and send, if you turn on Share anonymous usage counts (off unless you do). server/counts.js counts only the names here, and a test fails if the code counts any other. Adding one is a change to this file, in public.",
+  "about": "Usage counts and crash reports: everything Bridge AI can count and send, if you turn on Share anonymous usage counts or Send crash reports (each off unless you do). server/counts.js counts only the names here, and a test fails if the code counts any other; server/crashes.js sends only the report described under crashReports. Adding to either is a change to this file, in public.",
   "schema": 1,
   "endpoint": "https://counts.boldbridge.ai/v1/week",
   "endpointAbout": "Where a week's report goes (HTTPS POST, JSON): the project's usage counts server, counts/worker.js in this repo, which keeps only weekly totals. Empty: there's nowhere to send them, so sharing isn't offered.",
-  "buckets": ["0", "1", "2-5", "6-20", "21-100", "100+"],
+  "buckets": [
+    "0",
+    "1",
+    "2-5",
+    "6-20",
+    "21-100",
+    "100+"
+  ],
   "report": {
     "schema": "this file's schema number",
     "week": "the ISO week counted, e.g. 2026-W44",
@@ -16,6 +23,8 @@
     "phone": "paired or none",
     "installAge": "how long Bridge AI has been on this computer: week 1, 2-4 weeks, 5-12 weeks or 13+ weeks",
     "daysActive": "on how many days of the week something was counted, 0 to 7",
+    "activeTime": "how long Bridge AI was in use that week (a window of it in front on this computer, with you typing, clicking, scrolling or touching it in the last two minutes; not phones), as one of timeRanges",
+    "openTime": "how long Bridge AI was running that week, used or not, as one of timeRanges",
     "counts": "each counter below that isn't 0, as a bucket",
     "nonce": "random, new for each report, so a report sent twice is counted once; it says nothing about you or this computer"
   },
@@ -46,6 +55,33 @@
     "meetings.recorded": "Meetings recorded",
     "setup.simple": "Setup finished with the simple layout",
     "setup.everything": "Setup finished with everything shown",
-    "errors.window": "Times a part of the window broke and showed its error"
+    "errors.window": "Times a part of the window broke and showed its error",
+    "crashes.server": "Times Bridge AI's server stopped by itself",
+    "crashes.window": "Times the desktop app's window stopped (its renderer went away)",
+    "crashes.gpu": "Times the desktop app's graphics process stopped"
+  },
+  "timeRanges": [
+    "0",
+    "under 1 hour",
+    "1-5 hours",
+    "5-10 hours",
+    "10-20 hours",
+    "20-40 hours",
+    "40+ hours"
+  ],
+  "crashReports": {
+    "about": "If you turn on Send crash reports (off unless you do), or click Send to Bold Bridge on a crash's report, Bridge AI sends that report: the same text Report on GitHub shows, with names, folders, emails and keys taken out on your computer, and taken out again on the server.",
+    "endpoint": "https://crashes.boldbridge.ai/v1/report",
+    "report": {
+      "schema": "this file's schema number",
+      "kind": "what crashed: ui (a part of the window), server, window (the desktop app's renderer) or gpu",
+      "app": "Bridge AI's version",
+      "os": "mac, windows or linux",
+      "arch": "arm64 or x64",
+      "install": "desktop, source or docker",
+      "title": "the report's title, as Report on GitHub shows it",
+      "what": "what happened, and what you wrote about what you were doing, when you send one yourself",
+      "details": "its details: what crashed, the error and where in Bridge AI's code, the settings that change how it runs, and the last lines of its log, as Report on GitHub shows them"
+    }
   }
 }

@@ -9,6 +9,7 @@ import './styles.css'
 import { apply } from './appearance.js'
 import { loadLang } from './i18n/index.js'
 import { registerServiceWorker, reportPresence } from './pwa.js'
+import { countActiveTime } from './activeTime.js'
 
 apply()
 // ?window=<pane>: one agent in a window of its own. ?float=1: the desktop app's floating card.
@@ -19,7 +20,7 @@ const hud = new URLSearchParams(location.search).get('dictate') === '1'
 if (float) document.documentElement.classList.add('is-float')
 if (hud) document.documentElement.classList.add('is-hud')
 registerServiceWorker()
-if (!float && !hud) reportPresence()
+if (!float && !hud) { reportPresence(); countActiveTime() }
 
 // A crash on cue, for the tests of the crash screen: a saved value no version of the app writes.
 // "brief": only in the window's first 2.5 seconds, as when its server is still starting.

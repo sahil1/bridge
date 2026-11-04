@@ -8,8 +8,12 @@ compatibility_date = "2025-06-01"
 workers_dev = false
 preview_urls = false
 
-# Its own name, so anyone who'd rather block it can block just this.
-routes = [{ pattern = "counts.boldbridge.ai", custom_domain = true }]
+# Its own names, so anyone who'd rather block one can block just that: the weekly counts, and
+# crash reports.
+routes = [
+  { pattern = "counts.boldbridge.ai", custom_domain = true },
+  { pattern = "crashes.boldbridge.ai", custom_domain = true },
+]
 
 # Weekly totals and the nonces of the last ten weeks; the Worker makes the tables itself.
 [[d1_databases]]
@@ -17,7 +21,7 @@ binding = "DB"
 database_name = "bridge-counts"
 database_id = "00000000-0000-0000-0000-000000000000"
 
-# Once a day: nonces older than ten weeks go.
+# Once a day: nonces older than ten weeks go, and crash reports older than 90 days.
 [triggers]
 crons = ["17 4 * * *"]
 
@@ -25,6 +29,9 @@ crons = ["17 4 * * *"]
 # The kill switch: "1" (or a sentence of your own, shown in Bridge AI's Settings) answers every
 # report "stop", and Bridge AI turns sharing off.
 COUNTS_OFF = "0"
+# The same for crash reports, and how many it takes in a day (past that, they're turned away).
+CRASHES_OFF = "0"
+CRASHES_PER_DAY = "1000"
 
 # No logs: nothing about a request (its IP address included) is kept by the Worker.
 [observability]

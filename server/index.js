@@ -1808,6 +1808,9 @@ app.get('/api/counts', wrap(() => counts.status()))
 app.post('/api/counts', wrap((req) => counts.setShare(!!req.body?.share)))
 app.get('/api/counts/preview', wrap(() => counts.preview()))
 app.get('/api/counts/sent/:week', wrap((req) => counts.sentReport(req.params.week)))
+// A minute of Bridge AI in use, from a window of it (src/activeTime.js): counted only while sharing
+// is on, once a minute however many windows say so.
+app.post('/api/counts/active', wrap(() => counts.activity()))
 
 app.get('/api/updates', wrap((req) => updates.status({ force: req.query.refresh === '1', disabled: cfg.updates?.check === false })))
 app.post('/api/updates/install', wrap((req) => updates.install({ app: req.body?.app === true })))
@@ -1821,6 +1824,7 @@ const UI_ERRORS = path.join(DATA, 'logs', 'ui-errors.log')
 app.post('/api/ui-error', wrap(async (req) => {
   const b = req.body || {}
   counts.add('errors.window')
+  crashes.auto({ kind: 'ui', where: b.where, message: b.message, stack: b.stack }).catch(() => {})
   const line = `${new Date().toISOString()} ${VERSION} [${String(b.where || 'view').slice(0, 60)}] ${String(b.message || '').slice(0, 500)} (${String(b.url || '').slice(0, 200)})\n${String(b.stack || '').slice(0, 6000)}\n\n`
   await fs.promises.mkdir(path.dirname(UI_ERRORS), { recursive: true })
   const size = await fs.promises.stat(UI_ERRORS).then((s) => s.size, () => 0)
@@ -1830,7 +1834,8 @@ app.post('/api/ui-error', wrap(async (req) => {
 }))
 // Report a crash on GitHub: the crash waiting to be reported (the server's, or the desktop app's
 // window), and the issue's text, with what's personal taken out, for the person to read, change
-// and send from GitHub themselves (shared/crashreport.js). Bridge AI sends nothing.
+// and send from GitHub themselves (shared/crashreport.js). Bridge AI sends nothing, unless crash
+// reports are on (sent by themselves) or the person clicks Send to Bold Bridge (below).
 app.get('/api/crashes', wrap(() => crashes.pending()))
 app.post('/api/crashes', wrap((req) => crashes.record(req.body, VERSION)))
 app.post('/api/crashes/dismiss', wrap(() => crashes.dismiss()))
@@ -1851,6 +1856,19 @@ async function personalNames() {
   for (const w of lastFleet?.workspaces || []) out.push([w.label, '<project>'])
   return out
 }
+// Crash reports to the project (crashes.js): off unless turned on, or one at a time with Send to
+// Bold Bridge, as the person left its text.
+crashes.configure(cfg, {
+  about: async () => ({ version: VERSION, settings: crashSettings(), names: await personalNames() }),
+  save: (p) => afterChange(settings.patch(p)),
+})
+app.get('/api/crashes/sending', wrap(() => crashes.sending()))
+app.post('/api/crashes/sending', wrap((req) => crashes.setSending(!!req.body?.send)))
+app.get('/api/crashes/sent/:id', wrap((req) => crashes.sentReport(req.params.id)))
+app.post('/api/crashes/send', wrap((req) => {
+  const b = req.body || {}
+  return crashes.send({ title: String(b.title || ''), what: String(b.what || ''), details: String(b.details || '') }, b.kind === 'last' ? (b.crashKind || 'server') : 'ui')
+}))
 // ui: the UI this server hands out now, by its entry file (dist/index.html's script, whose name
 // carries a hash of the build). A page that loaded another one is out of date, which a phone that
 // kept Bridge AI open through an update notices and acts on (src/fresh.js, relay/web/shell.js).
@@ -2375,6 +2393,7 @@ server.listen(cfg.port, cfg.host, () => {
   machines.start()
   transfers.resume() // copies that were going carry on
   counts.start()
+  crashes.started().catch(() => {})
 })
 // Agents keep running in the terminal host unless you turned that off (Settings › General).
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { rt.shutdown?.({ keep: cfg.keepAgents !== false }); process.exit(0) })

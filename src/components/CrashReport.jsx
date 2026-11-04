@@ -6,7 +6,10 @@ import { reportText, scrub, issueLink } from '../../shared/crashreport.js'
 import './crashReport.css'
 
 // Report a crash on GitHub: the issue Bridge AI would file, shown in full to read and change, then
-// opened on GitHub's new-issue page for the person to send there, or not. Bridge AI sends nothing.
+// opened on GitHub's new-issue page for the person to send there, or not. Or Send to Bold Bridge:
+// that same text, as they left it, to the project's crash server (only when there is one, and
+// DO_NOT_TRACK isn't set), with a way to send them by themselves from then on. Nothing goes
+// anywhere until they click.
 // The server writes the text, with names, folders, emails and keys taken out (server/crashes.js);
 // when the server can't answer, the page writes it from what it has, taking out what it can.
 // crash: { kind: 'ui', where, message, stack } from the crash screen, or { kind: 'last' } for the
@@ -14,6 +17,9 @@ import './crashReport.css'
 export default function CrashReport({ crash, onClose, onSent }) {
   const [r, setR] = useState(null) // { title, what, details }
   const [copied, setCopied] = useState(false)
+  const [server, setServer] = useState(null) // the crash server's state (/api/crashes/sending)
+  const [sent, setSent] = useState(null) // null | 'sending' | 'sent' | an error
+  useEffect(() => { api('/crashes/sending').then(setServer, () => setServer(null)) }, [])
   useEffect(() => {
     api('/crashes/report', { method: 'POST', body: { ...crash, language: navigator.language } })
       .then((x) => setR({ title: x.title, what: x.what, details: x.details }))
@@ -35,21 +41,29 @@ export default function CrashReport({ crash, onClose, onSent }) {
       <div className="modal crash-report" role="dialog" aria-modal="true" aria-labelledby="cr-title">
         <header className="modal-head">
           <Icon name="flag" size={15} />
-          <h3 id="cr-title">{t('Report on GitHub')}</h3>
+          <h3 id="cr-title">{server?.available ? t('Report this crash') : t('Report on GitHub')}</h3>
           <button type="button" className="win-btn" onClick={onClose} aria-label={t('Close')}><Icon name="x" size={14} /></button>
         </header>
-        <p className="muted small">{t('This is the issue that opens on GitHub, all of it. Read it and change anything you like: nothing is sent until you send it there yourself. Names, folders, emails and keys are taken out.')}</p>
+        <p className="muted small">{server?.available ? t('This is the whole report. Read it and change anything you like, then send it to Bold Bridge or open it on GitHub: nothing is sent until you click. Names, folders, emails and keys are taken out.') : t('This is the issue that opens on GitHub, all of it. Read it and change anything you like: nothing is sent until you send it there yourself. Names, folders, emails and keys are taken out.')}</p>
         {!r ? <div className="skeleton-rows"><div /><div /><div /></div> : (
           <>
             <label className="cr-field"><span>{t('Title')}</span><input value={r.title} onChange={set('title')} /></label>
             <label className="cr-field"><span>{t('What happened')}</span><textarea rows={3} value={r.what} onChange={set('what')} /></label>
             <label className="cr-field"><span>{t('Details')}</span><textarea className="cr-details" rows={10} value={r.details} onChange={set('details')} spellCheck={false} /></label>
             {!link.fits && <p className="cr-long"><Icon name="info" size={13} /><span>{t('This is too long for a link to GitHub, so Open on GitHub copies the details first: paste them into Details there.')}</span></p>}
+            {sent === 'sent' && (
+              <p className="cr-long cr-sent" role="status"><Icon name="check" size={13} /><span>{t('Sent to Bold Bridge. Thank you.')}</span>
+                {!server?.send && <button type="button" className="link-btn small" onClick={() => api('/crashes/sending', { method: 'POST', body: { send: true } }).then(setServer, () => {})}>{t('Send them by themselves from now on')}</button>}
+                {server?.send && <span className="muted small">{t('Crash reports now go by themselves (Settings › About & Updates).')}</span>}
+              </p>
+            )}
+            {sent && sent !== 'sent' && sent !== 'sending' && <p className="cr-long bad" role="alert"><Icon name="alert" size={13} /><span>{sent}</span></p>}
           </>
         )}
         <footer className="modal-foot">
           <button type="button" className="ghost-btn" disabled={!r} onClick={() => copy(`${r.title}\n\n${r.what}\n\n${r.details}`)}><Icon name={copied ? 'check' : 'copy'} size={12} /> {copied ? t('Copied') : t('Copy')}</button>
           <button type="button" className="ghost-btn" onClick={onClose}>{t('Cancel')}</button>
+          {r && server?.available && sent !== 'sent' && <button type="button" className="btn cr-send" disabled={sent === 'sending'} onClick={() => { setSent('sending'); api('/crashes/send', { method: 'POST', body: { ...r, kind: crash.kind, crashKind: crash.crashKind } }).then(() => { setSent('sent'); onSent?.() }, (e) => setSent(e.message || t('Couldn\'t send it'))) }}><Icon name="send" size={13} /> {sent === 'sending' ? t('Sending…') : t('Send to Bold Bridge')}</button>}
           {r && <a className="btn primary cr-open" href={link.url} target="_blank" rel="noreferrer" onClick={() => { if (!link.fits) navigator.clipboard?.writeText(r.details).catch(() => {}); onSent?.() }}><Icon name="external" size={13} /> {t('Open on GitHub')}</a>}
         </footer>
       </div>
@@ -88,7 +102,7 @@ export function CrashNotice() {
           <Icon name="alert" size={15} />
           <div className="crash-notice-text">
             <b>{SAID[c.kind]()}</b>
-            <span className="muted small">{t('Reporting it on GitHub helps get it fixed. You see the whole report first, and nothing is sent by itself.')}</span>
+            <span className="muted small">{c.sent ? t('Its report went to Bold Bridge by itself (Settings › About & Updates). Reporting it on GitHub too lets you follow the fix.') : t('Reporting it on GitHub helps get it fixed. You see the whole report first, and nothing is sent by itself.')}</span>
           </div>
           <div className="crash-notice-acts">
             <button type="button" className="btn small" onClick={() => setOpen(true)}><Icon name="flag" size={12} /> {t('Report on GitHub')}</button>
@@ -96,7 +110,7 @@ export function CrashNotice() {
           </div>
         </div>
       )}
-      {open && <CrashReport crash={{ kind: 'last', version: c.version }} onClose={() => setOpen(false)} onSent={dismiss} />}
+      {open && <CrashReport crash={{ kind: 'last', crashKind: c.kind, version: c.version }} onClose={() => setOpen(false)} onSent={dismiss} />}
     </>
   )
 }

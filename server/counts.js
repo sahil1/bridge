@@ -8,6 +8,11 @@
 // agent wrote, an email, a host, an account, an exact time, or an ID for you or this computer: its
 // nonce is new for each report, so the same install can't be followed from one week to the next.
 // DO_NOT_TRACK=1 or BRIDGE_TELEMETRY=0 keeps it off, and with no endpoint set it isn't offered.
+//
+// Time, too, a week at a time: how long Bridge AI was in use (a window of it in front, with someone
+// typing, clicking or talking to it in the last two minutes: the window says so once a minute,
+// activity()) and how long it was running at all, each sent as a range ("1-5 hours"), never as
+// minutes or times of day.
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
@@ -22,6 +27,11 @@ const endpoint = () => (process.env.BRIDGE_COUNTS_URL ?? SCHEMA.endpoint ?? '').
 // Someone who said no to all of it, for every program on this computer.
 const refused = () => (process.env.DO_NOT_TRACK === '1' || process.env.BRIDGE_TELEMETRY === '0' ? (process.env.DO_NOT_TRACK === '1' ? 'DO_NOT_TRACK' : 'BRIDGE_TELEMETRY=0') : null)
 
+// "1-5 hours": how a week's minutes are sent.
+export function timeRange(min) {
+  const h = (min || 0) / 60
+  return !(min > 0) ? '0' : h < 1 ? 'under 1 hour' : h < 5 ? '1-5 hours' : h < 10 ? '5-10 hours' : h < 20 ? '10-20 hours' : h < 40 ? '20-40 hours' : '40+ hours'
+}
 // "2-5": how a count is sent.
 export function bucket(n) {
   if (!(n > 0)) return '0'
@@ -47,7 +57,7 @@ export function configure(c, { about, save } = {}) { cfg = c; if (about) context
 const sharing = () => !!(cfg?.counts?.share && endpoint() && !refused())
 
 // This week's counts, in memory and written down a few seconds after they change.
-let week = null // { week, counts: { name: n }, days: [1..7], nonce, installAge, about }
+let week = null // { week, counts: { name: n }, days: [1..7], active, open (minutes), nonce, installAge, about }
 let writing = null
 const fileOf = (w) => path.join(DIR, `${w}.json`)
 let loading = null // two counts at once wait for the same week
@@ -64,10 +74,12 @@ function current() {
 }
 // A week with nothing counted yet. What it says about this install is taken when it starts and
 // with each count, so the report sent after the week is the one shown during it.
-const fresh = async (w) => ({ week: w, counts: {}, days: [], nonce: crypto.randomBytes(12).toString('hex'), installAge: await installAge(), about: await context() })
-// A week with nothing counted isn't written down, so it's never sent.
+const fresh = async (w) => ({ week: w, counts: {}, days: [], active: 0, open: 0, nonce: crypto.randomBytes(12).toString('hex'), installAge: await installAge(), about: await context() })
+// A week with nothing in it isn't written down. One that was only open, never used, is kept while
+// the week goes on (it may be used yet) but isn't sent (send()).
+const used = (w) => !!(Object.keys(w.counts).length || w.active > 0)
 async function flush() {
-  if (!week || !Object.keys(week.counts).length) return
+  if (!week || !(used(week) || week.open > 0)) return
   await fs.promises.mkdir(DIR, { recursive: true })
   await fs.promises.writeFile(fileOf(week.week), JSON.stringify(week))
 }
@@ -109,6 +121,8 @@ export function report(w) {
     app: c.app, os: c.os, arch: c.arch, install: c.install, layout: c.layout, runtime: c.runtime, phone: c.phone,
     installAge: w.installAge || null,
     daysActive: w.days.length,
+    activeTime: timeRange(w.active),
+    openTime: timeRange(w.open),
     counts: Object.fromEntries(Object.entries(w.counts).filter(([k, n]) => NAMES.has(k) && n > 0).sort(([a], [b]) => a.localeCompare(b)).map(([k, n]) => [k, bucket(n)])),
     nonce: w.nonce,
   }
@@ -137,7 +151,7 @@ export async function preview() {
   if (!sharing()) return { share: false, week: weekOf(), report: report({ ...(await fresh(weekOf())), nonce: '(new for each report)' }) }
   const waiting = (await pending())[0]
   const w = waiting ? JSON.parse(await fs.promises.readFile(fileOf(waiting), 'utf8')) : await current()
-  return { share: true, week: w.week, report: report(w), goes: waiting ? 'next' : 'after this week', empty: !Object.keys(w.counts).length }
+  return { share: true, week: w.week, report: report(w), goes: waiting ? 'next' : 'after this week', empty: !used(w) }
 }
 export async function sentReport(w) {
   if (!/^\d{4}-W\d\d$/.test(String(w))) throw new Error('No such week')
@@ -171,7 +185,7 @@ export async function send() {
   for (const w of await pending()) {
     const file = fileOf(w)
     const kept = await fs.promises.readFile(file, 'utf8').then(JSON.parse, () => null)
-    if (!kept) { await fs.promises.rm(file, { force: true }); continue }
+    if (!kept || !used({ counts: {}, ...kept })) { await fs.promises.rm(file, { force: true }); continue }
     const body = report(kept)
     let r
     try {
@@ -192,11 +206,38 @@ async function setShareOffQuietly() {
   for (const f of await fs.promises.readdir(DIR).catch(() => [])) if (/^\d{4}-W\d\d\.json$/.test(f)) await fs.promises.rm(path.join(DIR, f), { force: true })
 }
 
-// Looks for a week to send a minute after the server starts, then every six hours.
+// A minute of Bridge AI in use, said by a window of it (POST /api/counts/active): counted once a
+// minute, however many windows and phones say so.
+let lastActive = -1
+export async function activity() {
+  if (!sharing()) return { counted: false }
+  const minute = Math.floor(now() / 60000)
+  if (minute === lastActive) return { counted: false }
+  lastActive = minute
+  const w = await current()
+  w.active = (w.active || 0) + 1
+  today(w)
+  later()
+  return { counted: true }
+}
+// A minute of Bridge AI running, once a minute (BRIDGE_COUNTS_MINUTE_MS: the tests' minute). A
+// computer asleep doesn't run the timer, so the time it slept isn't counted.
+const MINUTE_MS = Number(process.env.BRIDGE_COUNTS_MINUTE_MS || 60000)
+let ticks = 0
+async function running() {
+  if (!sharing()) return
+  const w = await current()
+  w.open = (w.open || 0) + 1
+  if (++ticks % 10 === 0) later() // written down every ten minutes, and as the server stops
+}
+
+// Looks for a week to send a minute after the server starts, then every six hours; and counts the
+// minutes it runs.
 export function start() {
   const tick = () => send().catch(() => {})
   setTimeout(tick, Number(process.env.BRIDGE_COUNTS_FIRST_MS || 60000)).unref?.()
   setInterval(tick, 6 * 3600 * 1000).unref?.()
+  setInterval(() => running().catch(() => {}), MINUTE_MS).unref?.()
 }
 // Stopping: this week's counts are written down first (the server's last moment, so at once).
-process.on('exit', () => { if (week && sharing() && Object.keys(week.counts).length) try { fs.mkdirSync(DIR, { recursive: true }); fs.writeFileSync(fileOf(week.week), JSON.stringify(week)) } catch { /* next time */ } })
+process.on('exit', () => { if (week && sharing() && (used(week) || week.open > 0)) try { fs.mkdirSync(DIR, { recursive: true }); fs.writeFileSync(fileOf(week.week), JSON.stringify(week)) } catch { /* next time */ } })

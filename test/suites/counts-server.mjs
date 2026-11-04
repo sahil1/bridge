@@ -8,6 +8,12 @@
 // as it came). The kill switch answers "stop", and Bridge AI turns sharing off and shows the
 // reason. Once a day, nonces older than ten weeks go. And the public list, wrangler.toml and
 // PRIVACY.md say where it is: counts.boldbridge.ai, with the Worker's logs off.
+//
+// Time in use and time open are kept as their ranges. Crash reports, at crashes.boldbridge.ai: one
+// made by Bridge AI's own send() is kept with what's personal stripped again on the server, grouped
+// with the same crash elsewhere (line numbers and numbers don't split a group) and apart from a
+// different one; what isn't a crash report is turned away; the day's ceiling, the kill switch (the
+// app turns crash reports off and keeps the reason) and 90 days' keeping.
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -39,7 +45,7 @@ function d1() {
     },
   }
 }
-const rows = (db, table) => db.sql.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all().map((r) => ({ ...r }))
+const rows = (db, table) => { try { return db.sql.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all().map((r) => ({ ...r })) } catch (e) { if (/no such table/.test(e.message)) return []; throw e } }
 const everything = (db) => JSON.stringify(['seen', 'reports', 'counts'].map((t) => { try { return rows(db, t) } catch { return [] } }))
 const post = (env, body, headers = {}) => worker.fetch(new Request('https://counts.boldbridge.ai/v1/week', { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: typeof body === 'string' ? body : JSON.stringify(body) }), env)
 const answer = async (res) => ({ status: res.status, body: await res.json().catch(() => null) })
@@ -179,7 +185,87 @@ try {
     await c.send()
     ok(settings.counts?.share === false && settings.counts?.stopped === 'Paused for now.', 'when the server answers "stop", Bridge AI turns sharing off and keeps the reason to show', settings.counts)
     srv.close()
-    fs.rmSync(home, { recursive: true, force: true })
+  }
+  // ---------- Time in use and open ----------
+  {
+    const db = d1()
+    await post({ DB: db }, report({ activeTime: '5-10 hours', openTime: '40+ hours' }))
+    await post({ DB: db }, report({ nonce: nonce(2), activeTime: 'three days', openTime: undefined }))
+    const r = rows(db, 'reports').map((x) => [x.active_time, x.open_time])
+    ok(JSON.stringify(r) === JSON.stringify([['5-10 hours', '40+ hours'], ['other', 'unknown']]), 'time in use and time open are kept as their ranges; anything else as "other" or "unknown"', r)
+  }
+
+  // ---------- Crash reports ----------
+  const crashPost = (env, body, host = 'crashes.boldbridge.ai') => worker.fetch(new Request(`https://${host}/v1/report`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: typeof body === 'string' ? body : JSON.stringify(body) }), env)
+  const crash = (over = {}) => ({ schema: 1, kind: 'server', app: '3.9.2', os: 'mac', arch: 'arm64', install: 'desktop', title: 'The server stopped: Cannot read properties of undefined (reading \'id\')', details: "Bridge AI: 3.9.2 (desktop app)\nSystem: darwin 15.1 arm64\nWhat crashed: the server\n\nError: Cannot read properties of undefined (reading 'id')\n\nTypeError: Cannot read properties of undefined (reading 'id')\n    at relink (<app>/server/machines.js:412:19)\n    at Hub.onMessage (<app>/server/relay.js:88:7)", ...over })
+  {
+    const db = d1()
+    const env = { DB: db }
+    const page = await (await worker.fetch(new Request('https://crashes.boldbridge.ai/'), env)).text()
+    ok(/crash report server/.test(page) && /90 days/.test(page) && /PRIVACY\.md/.test(page), 'crashes.boldbridge.ai says what it is, how long it keeps reports, and the privacy policy')
+    const a = await answer(await crashPost(env, crash()))
+    ok(a.status === 200 && a.body?.ok === true, 'a crash report is taken', a)
+    // Made of parts, as the other tests do, so the repo's own check doesn't take them for real ones.
+    const mail = ['priya.raman', 'gmail.com'].join('@')
+    const key = ['sk', 'ant', 'api03', 'abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH'].join('-')
+    const file = ['', 'Users', 'priya', 'secret-project', 'x.js'].join('/')
+    const typed = await answer(await crashPost(env, crash({ what: `I was pairing my phone. Mail me at ${mail}, key ${key}`, details: `${crash().details}\n\nLast lines of server.log:\nopened ${file}\nfrom 203.0.113.77` })))
+    const kept = rows(db, 'crash_reports')
+    ok(typed.status === 200 && kept.length === 2 && !/priya|gmail\.com|sk-ant|secret-project|203\.0\.113\.77/i.test(JSON.stringify(kept)), 'what\'s personal that got into one is stripped again on the server: emails, keys, home folders, addresses', kept[1])
+    ok(kept[0].kind === 'server' && kept[0].app === '3.9.2' && /machines\.js/.test(kept[0].details) && kept[0].day === new Date().toISOString().slice(0, 10) && Object.keys(kept[0]).join() === 'id,day,app,os,arch,install,kind,fingerprint,title,what,details', 'and kept with its kind, version, system and day, and nothing about who sent it', Object.keys(kept[0]))
+    const moved = await answer(await crashPost(env, crash({ app: '3.9.3', details: crash().details.replace('412:19', '430:5').replace('88:7', '91:2') })))
+    const other = await answer(await crashPost(env, crash({ title: 'The server stopped: EADDRINUSE', details: 'Error: listen EADDRINUSE: address already in use 127.0.0.1:7420\n    at Server.setupListenHandle (node:net:1817:16)' })))
+    const groups = [...new Set(rows(db, 'crash_reports').map((x) => x.fingerprint))]
+    ok(moved.body?.ok && other.body?.ok && groups.length === 2 && rows(db, 'crash_reports').filter((x) => x.fingerprint === groups[0]).length === 3 && rows(db, 'crash_reports')[3].fingerprint !== groups[0], 'the same crash in another version (its line numbers moved) is in the same group; a different one is apart', groups)
+    for (const [what, body, status] of [['not a kind of crash', crash({ kind: 'oops' }), 400], ['no details', crash({ details: '' }), 400], ['not JSON', 'crash!', 400], ['too big', crash({ details: 'x'.repeat(40000) }), 413]]) {
+      const r = await answer(await crashPost(env, body))
+      ok(r.status === status, `${what}: turned away (${status})`, r)
+    }
+    const onCounts = await crashPost(env, crash(), 'counts.boldbridge.ai')
+    const weekOnCrashes = await worker.fetch(new Request('https://crashes.boldbridge.ai/v1/week', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(report()) }), env)
+    ok(onCounts.status === 404 && weekOnCrashes.status === 404, 'each address takes only its own: counts at counts., crash reports at crashes.', [onCounts.status, weekOnCrashes.status])
+    const capped = await answer(await crashPost({ DB: db, CRASHES_PER_DAY: '4' }, crash()))
+    ok(capped.status === 429, 'past the day\'s ceiling, reports are turned away (429)', capped)
+    const stop = await answer(await crashPost({ DB: db, CRASHES_OFF: 'Paused for a move.' }, crash()))
+    ok(stop.body?.stop === true && stop.body.why === 'Paused for a move.', 'CRASHES_OFF: every report is answered "stop", with the reason', stop)
+    db.sql.prepare('UPDATE crash_reports SET day = ? WHERE rowid = 1').run('2020-01-01')
+    await worker.scheduled({}, { DB: db })
+    ok(rows(db, 'crash_reports').length === 3, 'once a day, crash reports older than 90 days go')
+  }
+
+  // ---------- Bridge AI's own crash report, end to end ----------
+  {
+    const db = d1()
+    const env = { DB: db }
+    const port = await freePort()
+    const srv = http.createServer(async (req, res) => {
+      const chunks = []
+      for await (const c of req) chunks.push(c)
+      const r = await worker.fetch(new Request(`https://crashes.boldbridge.ai${req.url}`, { method: req.method, headers: { 'content-type': req.headers['content-type'] || '' }, body: req.method === 'POST' ? Buffer.concat(chunks) : undefined }), env)
+      res.writeHead(r.status, Object.fromEntries(r.headers))
+      res.end(Buffer.from(await r.arrayBuffer()))
+    }).listen(port, '127.0.0.1')
+    process.env.BRIDGE_CRASHES_URL = `http://127.0.0.1:${port}/v1/report`
+    const home = process.env.BRIDGE_HOME
+    fs.mkdirSync(home, { recursive: true })
+    const cr = await import('../../server/crashes.js')
+    let settings = { crashReports: { send: false } }
+    cr.configure(settings, { about: async () => ({ version: '3.9.2', settings: { runtime: 'builtin' }, names: [['Priya Raman', '<name>'], ['acme-checkout', '<project>']] }), save: (p) => { settings = { ...settings, ...p }; cr.configure(settings) } })
+    ok((await cr.auto({ kind: 'ui', where: 'Files', message: 'boom', stack: 'Error: boom' })).sent === false && rows(db, 'crash_reports').length === 0, 'with Send crash reports off, a crash sends nothing by itself')
+    const out = await cr.send({ title: 'The window hit an error: x is undefined', what: 'Priya Raman was opening acme-checkout', details: 'Error: x is undefined\n    at Files (<app>/src/components/Files.jsx:10:2)' }, 'ui')
+    const kept = rows(db, 'crash_reports')
+    ok(out.sent && kept.length === 1 && kept[0].kind === 'ui' && /<name> was opening <project>/.test(kept[0].what) && !/Priya|acme-checkout/.test(JSON.stringify(kept)), 'Send to Bold Bridge sends the report as the person left it, with their names taken out on the computer', kept[0])
+    const copy = await cr.sentReport(out.id)
+    ok(copy.report.title === kept[0].title && copy.byItself === false && (await cr.sending()).sent.length === 1, 'and keeps a copy of exactly what went, listed in Settings', copy)
+    settings = { crashReports: { send: true } }
+    cr.configure(settings)
+    const a1 = await cr.auto({ kind: 'ui', where: 'Board', message: 'y is null', stack: 'TypeError: y is null\n    at Board (<app>/src/components/whiteboard/Board.jsx:5:5)' })
+    const a2 = await cr.auto({ kind: 'ui', where: 'Board', message: 'y is null', stack: 'TypeError: y is null\n    at Board (<app>/src/components/whiteboard/Board.jsx:5:5)' })
+    ok(a1.sent && !a2.sent && rows(db, 'crash_reports').length === 2, 'with it on, a crash sends itself, and the same crash only once a day', [a1, a2])
+    env.CRASHES_OFF = 'Paused for a move.'
+    await cr.auto({ kind: 'ui', where: 'Mail', message: 'z', stack: 'Error: z' })
+    ok(settings.crashReports?.send === false && settings.crashReports?.stopped === 'Paused for a move.', 'when the server answers "stop", Bridge AI turns crash reports off and keeps the reason to show', settings.crashReports)
+    srv.close()
   }
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)

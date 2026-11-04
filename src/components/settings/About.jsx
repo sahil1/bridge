@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import Icon from '../Icon.jsx'
 import UsageCounts from './UsageCounts.jsx'
+import CrashReports from './CrashReports.jsx'
 import { api } from '../../api.js'
 import { useSettings } from './General.jsx'
 import { startTour } from '../Tour.jsx'
@@ -23,6 +24,7 @@ export default function About() {
       </section>
       <Report />
       <UsageCounts />
+      <CrashReports />
     </div>
   )
 }

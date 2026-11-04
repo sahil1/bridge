@@ -17,3 +17,5 @@
 .crash-notice-text { display: grid; gap: 3px; font-size: 13px; line-height: 1.4; }
 .crash-notice-acts { grid-column: 2; display: flex; gap: 8px; flex-wrap: wrap; }
 .app.narrow .crash-notice { left: 12px; right: 12px; width: auto; bottom: calc(76px + env(safe-area-inset-bottom)); }
+.cr-sent { flex-wrap: wrap; align-items: center; }
+.cr-long.bad { color: var(--bad, #c0392b); }
