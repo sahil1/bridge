@@ -361,6 +361,29 @@ try {
     ok(!!file && d.suggestedFilename() === 'pattern.bin' && sha(fs.readFileSync(file)) === sha(files['pattern.bin']), 'Download to this device: the browser\'s own download, the whole file under its name', d?.suggestedFilename())
   }
 
+  // Studio, in Laptop's window, on a file in Studio's agent's folder: opened, typed in and saved
+  // there, with what it was kept as a version there, all through the link.
+  fs.writeFileSync(path.join(work, 'draft.md'), '# Draft\n\nFrom the studio.\n')
+  const doc = lp.locator('.sd-page .ProseMirror')
+  const shown = await until(async () => {
+    await lp.evaluate((detail) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail })), { root: pane, path: 'draft.md' })
+    return /From the studio/.test(await doc.innerText({ timeout: 1500 }).catch(() => ''))
+  }, 20000, 500)
+  ok(!!shown, "Studio on Laptop opens a file on Studio's computer")
+  if (shown) {
+    await doc.click()
+    await lp.keyboard.press(process.platform === 'darwin' ? 'Meta+End' : 'Control+End')
+    await lp.keyboard.type(' Edited on the laptop.')
+    await lp.locator('.pane-head button', { hasText: 'Save' }).click()
+    const there = await until(() => /Edited on the laptop\./.test(fs.readFileSync(path.join(work, 'draft.md'), 'utf8')), 10000)
+    ok(!!there && /^# Draft/.test(fs.readFileSync(path.join(work, 'draft.md'), 'utf8')), 'typed and saved on Laptop: the file on Studio changes, still Markdown', fs.readFileSync(path.join(work, 'draft.md'), 'utf8'))
+    const vs = await fetch(`${M}/api/studio/versions?root=${enc(pane)}&path=draft.md`).then((r) => r.json())
+    const first = vs.versions?.find((v) => v.by === 'opened')
+    const was = first && await fetch(`${M}/api/studio/version?root=${enc(pane)}&path=draft.md&id=${enc(first.id)}`).then((r) => r.text())
+    ok(vs.versions?.[0]?.by === 'you' && was === '# Draft\n\nFrom the studio.\n', 'and what it was is a version on Studio, read back through the link', vs.versions)
+    await shot(lp, `${tag}remote-files-studio`)
+  }
+
   // Open in new tab: the video on its own, playing (its player asks for it again, in parts).
   const tab = await desk.newPage()
   await tab.goto(raw(M, 'clip.mp4'))
