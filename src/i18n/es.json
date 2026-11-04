@@ -1903,6 +1903,7 @@
   "The language the notes are written in": "El idioma en que se escriben las notas",
   "The last update didn't go through: {why}": "La última actualización no se completó: {why}",
   "The mic is turned off for Bridge AI in System Settings.": "El micrófono está desactivado para Bridge AI en Ajustes del Sistema.",
+  "The microphone didn't start. If macOS is asking about it, answer there; otherwise check System Settings › Privacy & Security › Microphone, then try again.": "El micrófono no se ha iniciado. Si macOS está preguntando por él, responde allí; si no, revisa Ajustes del Sistema › Privacidad y seguridad › Micrófono y vuelve a intentarlo.",
   "The microphone is blocked. Allow it for Bridge AI, then try again.": "El micrófono está bloqueado. Permítelo para Bridge AI y vuelve a intentarlo.",
   "The microphone is blocked. Allow it for this page in your browser's site settings.": "El micrófono está bloqueado. Permítelo para esta página en la configuración del sitio de tu navegador.",
   "The microphone is on. Tap the mic and talk.": "El micrófono está activado. Toca el micrófono y habla.",

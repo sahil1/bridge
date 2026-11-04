@@ -242,8 +242,9 @@ export default function FloatCard() {
         <div className="fc-head">{grip}<Icon name="mic" size={14} className="fc-accent" /><b className="fc-title">{what}</b>{hide}</div>
         <p className="fc-line muted">{ev ? <>Take notes for <b>{ev.title}</b>?</> : t('Take notes?')} {t('Your mic and the call, transcribed as you go.')}</p>
         <div className="fc-acts">
-          <button type="button" className="btn small primary" disabled={busy} onClick={() => act(() => app().floatStart?.({ app: c.prompt.app }))}><Icon name="mic" size={12} /> {t('Take notes')}</button>
-          <button type="button" className="ghost-btn" disabled={busy} onClick={() => act(() => api('/calls/dismiss', { method: 'POST' }))}>{t('Not now')}</button>
+          <button type="button" className="btn small primary" disabled={busy} onClick={() => act(() => app().floatStart?.({ app: c.prompt.app }))}><Icon name="mic" size={12} /> {busy ? t('Starting…') : t('Take notes')}</button>
+          {/* Not now always works, even while Take notes is still starting. */}
+          <button type="button" className="ghost-btn" onClick={() => { setErr(null); api('/calls/dismiss', { method: 'POST' }).catch(() => {}).finally(refresh) }}>{t('Not now')}</button>
         </div>
       </>
     )

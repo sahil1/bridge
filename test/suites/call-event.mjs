@@ -164,6 +164,28 @@ try {
     await until(async () => !(await api('/calls')).calls.length, 8000)
   }
 
+  // ---------- A call's prompt never hangs ----------
+  // Take notes with a mic that never answers: it says it's starting, and Not now still closes it,
+  // at once.
+  if (IS_WIN) skip("a call's prompt closes while Take notes is starting", 'calls are noticed on a Mac')
+  else {
+    const { b } = await browser()
+    browsers.push(b)
+    const { p, ctx } = await page(b, kit.url, { before: async (c) => { await c.addInitScript(() => { if (navigator.mediaDevices) navigator.mediaDevices.getUserMedia = () => new Promise(() => {}) }) } })
+    await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
+    call({ input: ['com.microsoft.teams2'] })
+    const prompt = p.locator('.call-prompt', { hasText: 'Teams call started' })
+    ok(!!(await until(() => prompt.isVisible(), 15000)), 'a Teams call started: the prompt asks to take notes')
+    await prompt.locator('button', { hasText: 'Take notes' }).click()
+    ok(!!(await until(async () => /Starting/.test(await prompt.innerText().catch(() => '')), 5000)), 'Take notes says it is starting', await prompt.innerText().catch(() => ''))
+    await prompt.locator('button', { hasText: 'Not now' }).click()
+    ok(!!(await until(async () => !(await prompt.count()), 1500, 100)), 'Not now closes it at once, though the mic never answered')
+    ok(!!(await until(async () => (await api('/calls')).prompt == null, 5000)), "and the computer stops asking", (await api('/calls')).prompt)
+    await ctx.close()
+    call({})
+    await until(async () => !(await api('/calls')).calls.length, 8000)
+  }
+
   // ---------- Quiet: the meeting seems over ----------
   // While its calendar time lasts, quiet says nothing: a meeting that runs over isn't ended.
   const hour = 3600e3

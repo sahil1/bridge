@@ -1903,6 +1903,7 @@
   "The language the notes are written in": "笔记使用的语言",
   "The last update didn't go through: {why}": "上次更新没有完成：{why}",
   "The mic is turned off for Bridge AI in System Settings.": "系统设置中已关闭 Bridge AI 的麦克风权限。",
+  "The microphone didn't start. If macOS is asking about it, answer there; otherwise check System Settings › Privacy & Security › Microphone, then try again.": "麦克风没有启动。如果 macOS 正在询问，请在那里回答；否则请检查“系统设置 › 隐私与安全性 › 麦克风”，然后再试一次。",
   "The microphone is blocked. Allow it for Bridge AI, then try again.": "麦克风已被阻止。请允许 Bridge AI 使用麦克风，然后重试。",
   "The microphone is blocked. Allow it for this page in your browser's site settings.": "麦克风已被阻止。请在浏览器的网站设置中允许此页面使用麦克风。",
   "The microphone is on. Tap the mic and talk.": "麦克风已开启。点一下麦克风即可说话。",
