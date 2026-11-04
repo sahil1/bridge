@@ -343,7 +343,7 @@ app.put('/api/studio/file', express.raw({ type: () => true, limit: '80mb' }), as
 app.get('/api/studio/changed', wrap(async (req) => { const q = sq(req); return studio.changed(await rootOf(q.root), q.path, req.query.since) }))
 app.get('/api/studio/versions', wrap(async (req) => { const q = sq(req); return studio.versions(await rootOf(q.root), q.path) }))
 app.get('/api/studio/version', async (req, res) => {
-  try { const q = sq(req); const { file, name } = await studio.versionFile(await rootOf(q.root), q.path, String(req.query.id || '')); res.type(path.extname(file)); res.set('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(name)}`); res.sendFile(file) } catch (e) { res.status(e.status || 404).json({ error: e.message }) }
+  try { const q = sq(req); const { file, name } = await studio.versionFile(await rootOf(q.root), q.path, String(req.query.id || '')); res.type(path.extname(file)); res.set('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(name)}`); res.sendFile(file, { dotfiles: 'allow' }) } catch (e) { res.status(e.status || 404).json({ error: e.message }) }
 })
 app.post('/api/studio/restore', wrap(async (req) => { const q = sq(req); return studio.restore(await rootOf(q.root), q.path, String(req.body?.id || '')) }))
 app.post('/api/studio/new', express.json({ limit: '30mb' }), wrap(async (req) => {
