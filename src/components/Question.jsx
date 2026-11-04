@@ -26,6 +26,23 @@ function pickKeys(q, o) {
 
 export { parseScreen }
 
+// What the question is about, as the agent shows it above the question (the command it'd run, the
+// file it'd write, the edit it'd make): the first lines, and the rest on Show all. An edit's
+// removed and added lines are coloured as in a diff.
+const SHOWN = 14
+function Context({ text }) {
+  const [all, setAll] = useState(false)
+  const lines = text.split('\n')
+  const kind = (l) => (/^\s*\d+\s+-(\s|$)|^-(\s|$)/.test(l) ? 'del' : /^\s*\d+\s+\+(\s|$)|^\+(\s|$)/.test(l) ? 'add' : '')
+  const shown = all ? lines : lines.slice(0, SHOWN)
+  return (
+    <div className="q-context">
+      <pre>{shown.map((l, i) => <span key={i} className={kind(l)}>{l || ' '}{'\n'}</span>)}</pre>
+      {lines.length > SHOWN && <button type="button" className="link-btn" onClick={() => setAll(!all)}>{all ? t('Show less') : t('Show all {n} lines', { n: lines.length })}</button>}
+    </div>
+  )
+}
+
 export default function Question({ q, send, busy }) {
   const [text, setText] = useState('')
   if (q.kind === 'review') {
@@ -50,6 +67,7 @@ export default function Question({ q, send, busy }) {
   return (
     <div className="qcard">
       <Tabs tabs={q.tabs} send={send} />
+      {q.context && <Context text={q.context} />}
       {(q.title || asked(q)) && <div className="q-title">{q.title || asked(q)}</div>}
       <div className={`q-options ${q.multi ? 'multi' : ''}`}>
         {q.options.map((o) => (

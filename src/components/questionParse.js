@@ -9,6 +9,28 @@ const OPTION = /^\s*(?:[❯›>]\s*)?(\d+)\.\s+(.*)$/
 // arrows: the row with the pointer, the rows level with its text, and the hint under them.
 const POINTER = /^(\s*)[❯›]\s+(\S.*)$/
 const HINT = /Enter to (confirm|select)|Esc to (cancel|go back|exit)|to navigate/i
+const DASH = /^\s*[╌┄┈]{8,}\s*$/
+// What a menu is about: what's drawn above its question in the panel it starts in, from the
+// panel's top rule down. A permission prompt's command ("Bash command" and what it'd run), the
+// file it'd write or the edit it'd make (between dashed rules, with line numbers), as on the
+// screen, so you needn't open the terminal to see what you're saying yes to. The question itself
+// and blank lines at either end left out; up to MAX_CONTEXT lines from the bottom. null when
+// there's nothing above the question.
+const MAX_CONTEXT = 400
+function contextOf(lines, start) {
+  let top = -1
+  for (let i = start - 1; i >= Math.max(0, start - MAX_CONTEXT); i--) if (RULE.test(lines[i]) || /^\s*[╭┌]/.test(lines[i])) { top = i; break }
+  if (top < 0) return null
+  const out = lines.slice(top + 1, start).map((l) => (DASH.test(l) ? '' : l.replace(/^(\s*)[│┃]\s?/, '$1').replace(/\s*[│┃]\s*$/, '').replace(/\s+$/, '')))
+  // The question ("Do you want to create plan.md?"): the card shows it as its title.
+  for (let i = out.length - 1; i >= 0 && i >= out.length - 4; i--) if (/\?\s*$/.test(out[i])) { out.splice(i); break }
+  while (out.length && !out[0].trim()) out.shift()
+  while (out.length && !out.at(-1).trim()) out.pop()
+  if (!out.length) return null
+  // Common indent off, so the text sits at the left of the card.
+  const pad = Math.min(...out.filter((l) => l.trim()).map((l) => l.length - l.trimStart().length))
+  return out.map((l) => l.slice(pad)).join('\n')
+}
 
 function arrowMenu(lines) {
   let c = -1
@@ -35,7 +57,7 @@ function arrowMenu(lines) {
   if (options.length < 2 || !below || !HINT.test(below)) return null
   const ask = []
   for (let i = start - 1; i >= Math.max(0, start - 12) && !EDGE.test(lines[i]); i--) { const l = lines[i].replace(/[│┃]/g, '').trim(); if (l) ask.unshift(l) }
-  return { start, q: { kind: 'menu', arrows: true, at: options.findIndex((o) => o.selected), tabs: [], title: '', ask, multi: false, options, other: null, chat: null } }
+  return { start, q: { kind: 'menu', arrows: true, at: options.findIndex((o) => o.selected), tabs: [], title: '', ask, context: contextOf(lines, start), multi: false, options, other: null, chat: null } }
 }
 
 export function parseScreen(ansi) {
@@ -104,6 +126,7 @@ export function parseScreen(ansi) {
     tabs,
     title: title.slice(-3).join(' '),
     ask,
+    context: tabRow >= 0 ? null : contextOf(lines, start),
     multi,
     options: options.filter((o) => o !== other && o !== chat),
     other,
