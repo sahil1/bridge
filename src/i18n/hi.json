@@ -1903,6 +1903,7 @@
   "The language the notes are written in": "वह भाषा जिसमें नोट्स लिखे जाते हैं",
   "The last update didn't go through: {why}": "पिछला अपडेट पूरा नहीं हुआ: {why}",
   "The mic is turned off for Bridge AI in System Settings.": "System Settings में Bridge AI के लिए माइक बंद है।",
+  "The microphone didn't start. If macOS is asking about it, answer there; otherwise check System Settings › Privacy & Security › Microphone, then try again.": "माइक्रोफ़ोन शुरू नहीं हुआ। अगर macOS इसके बारे में पूछ रहा है, तो वहाँ जवाब दें; नहीं तो सिस्टम सेटिंग्स › गोपनीयता और सुरक्षा › माइक्रोफ़ोन देखें, फिर दोबारा कोशिश करें।",
   "The microphone is blocked. Allow it for Bridge AI, then try again.": "माइक्रोफ़ोन ब्लॉक है। Bridge AI के लिए इसकी अनुमति दें, फिर से कोशिश करें।",
   "The microphone is blocked. Allow it for this page in your browser's site settings.": "माइक्रोफ़ोन ब्लॉक है। अपने ब्राउज़र की साइट सेटिंग्स में इस पेज के लिए इसकी अनुमति दें।",
   "The microphone is on. Tap the mic and talk.": "माइक्रोफ़ोन चालू है। माइक टैप करें और बोलें।",

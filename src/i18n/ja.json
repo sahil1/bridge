@@ -1903,6 +1903,7 @@
   "The language the notes are written in": "メモを書く言語",
   "The last update didn't go through: {why}": "前回のアップデートは完了しませんでした：{why}",
   "The mic is turned off for Bridge AI in System Settings.": "システム設定で Bridge AI のマイクがオフになっています。",
+  "The microphone didn't start. If macOS is asking about it, answer there; otherwise check System Settings › Privacy & Security › Microphone, then try again.": "マイクが起動しませんでした。macOS が確認を求めている場合はそこで答えてください。そうでなければ、システム設定 › プライバシーとセキュリティ › マイク を確認してから、もう一度お試しください。",
   "The microphone is blocked. Allow it for Bridge AI, then try again.": "マイクがブロックされています。Bridge AI に許可してから、もう一度お試しください。",
   "The microphone is blocked. Allow it for this page in your browser's site settings.": "マイクがブロックされています。ブラウザーのサイト設定で、このページにマイクを許可してください。",
   "The microphone is on. Tap the mic and talk.": "マイクがオンになりました。マイクをタップして話してください。",
