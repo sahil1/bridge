@@ -57,7 +57,7 @@ setInterval(() => { const line = JSON.stringify({ input: (read().input || []).ma
   return path.join(bin, 'callwatch')
 }
 const kit = await startKit('call-event', {
-  env: ({ bin }) => ({ BRIDGE_CALL_START_MS: '300', BRIDGE_CALL_END_MS: '600', BRIDGE_QUIET_END_MS: '2500', BRIDGE_QUIET_OVER_MS: '2500', BRIDGE_QUIET_CHECK_MS: '300', BRIDGE_AUTO_STOP_MS: '2500', ...(IS_WIN ? {} : { BRIDGE_CALLWATCH: callwatch(bin) }) }),
+  env: ({ bin }) => ({ BRIDGE_CALL_START_MS: '300', BRIDGE_CALL_END_MS: '600', BRIDGE_QUIET_OVER_MS: '1500', BRIDGE_QUIET_END_MS: '4000', BRIDGE_QUIET_REMIND_MS: '1500', BRIDGE_QUIET_LONG_MS: '4000', BRIDGE_QUIET_CHECK_MS: '300', BRIDGE_AUTO_STOP_MS: '2000', ...(IS_WIN ? {} : { BRIDGE_CALLWATCH: callwatch(bin) }) }),
 })
 const model = await startModel('call-event')
 const browsers = []
@@ -125,15 +125,35 @@ try {
   }
 
   // ---------- Quiet: the meeting seems over ----------
-  const Q = await api('/meetings', { title: 'Whiteboard session', call: false })
-  await send(Q.id, Buffer.concat([pcm(2, true), pcm(0.5)]))
-  let rec = await until(async () => { const c = await api('/calls'); return c.recording?.endWhy === 'quiet' && c.recording }, 12000)
-  ok(!!rec && !!rec.callEnded && !!rec.stopsAt, 'nobody heard for a while: it asks whether to stop, and when it will', rec)
-  await send(Q.id, Buffer.concat([pcm(2, true), pcm(0.3)]))
+  // While its calendar time lasts, quiet says nothing: a meeting that runs over isn't ended.
+  const hour = 3600e3
+  const ev = (from, to) => ({ title: 'Planning', start: new Date(Date.now() + from).toISOString(), end: new Date(Date.now() + to).toISOString(), attendees: ['Priya Shah'] })
+  const during = await api('/meetings', { title: 'Planning', event: ev(-hour, hour), call: false })
+  await send(during.id, Buffer.concat([pcm(2, true), pcm(0.5)]))
+  await sleep(5000)
+  let rec = (await api('/calls')).recording
+  ok(rec?.id === during.id && !rec.callEnded && (await api(`/meetings/${during.id}`)).status === 'recording', 'quiet while its calendar time lasts: nothing asked, still recording', rec)
+  await api(`/meetings/${during.id}/stop`, {})
+  // Its time up: quiet a little brings the card up to ask, and doesn't stop it; quiet a while longer
+  // and it stops by itself. Talking again takes the question back.
+  const past = await api('/meetings', { title: 'Retro', event: ev(-hour, -60e3), call: false })
+  await send(past.id, Buffer.concat([pcm(2, true), pcm(0.5)]))
+  rec = await until(async () => { const c = await api('/calls'); return c.recording?.endWhy === 'over' && c.recording }, 8000)
+  ok(!!rec && !!rec.callEnded && !rec.stopsAt, 'its time up and quiet a little: it asks, with nothing stopping it yet', rec)
+  await send(past.id, Buffer.concat([pcm(2, true), pcm(0.3)]))
   rec = await until(async () => { const c = await api('/calls'); return c.recording && !c.recording.callEnded && c.recording }, 6000)
   ok(!!rec, 'someone talking again takes the question back', rec)
-  const stopped = await until(async () => { const x = await api(`/meetings/${Q.id}`); return x.status !== 'recording' && x }, 15000)
-  ok(!!stopped, 'quiet on, it stops by itself', stopped && stopped.status)
+  rec = await until(async () => { const c = await api('/calls'); return c.recording?.stopsAt && c.recording }, 10000)
+  ok(!!rec && rec.endWhy === 'over', 'quiet a while longer past its time: now it says when it stops by itself', rec)
+  let stopped = await until(async () => { const x = await api(`/meetings/${past.id}`); return x.status !== 'recording' && x }, 10000)
+  ok(!!stopped, 'and it stops', stopped && stopped.status)
+  // No calendar time: it asks after a while, and stops after longer.
+  const Q = await api('/meetings', { title: 'Whiteboard session', call: false })
+  await send(Q.id, Buffer.concat([pcm(2, true), pcm(0.5)]))
+  rec = await until(async () => { const c = await api('/calls'); return c.recording?.endWhy === 'quiet' && c.recording }, 8000)
+  ok(!!rec && !rec.stopsAt, 'with no calendar time, quiet a while: it asks, and only asks', rec)
+  stopped = await until(async () => { const x = await api(`/meetings/${Q.id}`); return x.status !== 'recording' && x }, 15000)
+  ok(!!stopped, 'quiet much longer, it stops by itself', stopped && stopped.status)
 
   // ---------- Saved as it ends ----------
   await api('/settings', { meetings: { autoSave: true } }, 'PATCH')

@@ -564,12 +564,15 @@ export function callStarted(app) {
 export function callEnded(app, still = []) {
   for (const m of recordingNow().filter((x) => (x.callApps || []).includes(app) && !x.callApps.some((a) => still.includes(a)))) ending(m.id, { app, why: 'call' })
 }
-// The meeting seems to be over (why: its call ended, or it went quiet): the app asks whether to
-// stop, and it stops by itself AUTO_STOP_MS later unless that's turned off.
-function ending(id, { app = null, why }) {
-  patchMeta(id, { callEnded: new Date().toISOString(), callEndedApp: app, endWhy: why, stopsAt: cfg.meetings?.autoStop !== false ? new Date(Date.now() + AUTO_STOP_MS).toISOString() : null })
-  if (cfg.meetings?.autoStop === false) return
-  clearTimeout(stopping.get(id))
+// The meeting seems to be over (why: its call ended; over, its calendar time is up and it's gone
+// quiet; or quiet, nobody heard for a long while): the app asks whether to stop, with the floating
+// card up. stops: it also stops by itself AUTO_STOP_MS later (unless that's turned off); without,
+// it only asks.
+function ending(id, { app = null, why, stops = true }) {
+  const auto = stops && cfg.meetings?.autoStop !== false
+  patchMeta(id, { callEnded: new Date().toISOString(), callEndedApp: app, endWhy: why, stopsAt: auto ? new Date(Date.now() + AUTO_STOP_MS).toISOString() : null })
+  clearTimeout(stopping.get(id)); stopping.delete(id)
+  if (!auto) return
   stopping.set(id, setTimeout(() => {
     stopping.delete(id)
     const x = meta(id)
@@ -582,26 +585,35 @@ export function keep(id) {
   clearTimeout(stopping.get(id)); stopping.delete(id)
   return patchMeta(id, { callEnded: null, callEndedApp: null, endWhy: null, stopsAt: null, keptAt: new Date().toISOString() })
 }
-// A meeting that's gone quiet ends too, as Granola's do, for a meeting in a room and for a call
-// whose app keeps the mic once it's over: nobody heard, on your mic or the call, for QUIET_END_MS
-// after something was said (or since Keep recording or Resume), or for QUIET_OVER_MS once its
-// calendar event's time is up. Someone talking again before it stops takes the question back.
-const QUIET_END_MS = Number(process.env.BRIDGE_QUIET_END_MS || 5 * 60_000)
+// A meeting that's over ends too, as Granola's do, without ending one that runs over: while its
+// calendar time lasts, quiet says nothing. Once its time is up, nobody heard (on your mic or the
+// call) for QUIET_OVER_MS brings the card up to ask, and for QUIET_END_MS it stops by itself. With
+// no calendar time to go by, it asks after QUIET_REMIND_MS of quiet and stops after QUIET_LONG_MS.
+// Quiet counts from the last thing said (or Keep recording, or Resume), and someone talking again
+// takes the question back. For a meeting in a room, and a call whose app keeps the mic once it's over.
 const QUIET_OVER_MS = Number(process.env.BRIDGE_QUIET_OVER_MS || 90_000)
+const QUIET_END_MS = Number(process.env.BRIDGE_QUIET_END_MS || 5 * 60_000)
+const QUIET_REMIND_MS = Number(process.env.BRIDGE_QUIET_REMIND_MS || 10 * 60_000)
+const QUIET_LONG_MS = Number(process.env.BRIDGE_QUIET_LONG_MS || 30 * 60_000)
 export function checkQuiet(now = Date.now()) {
   for (const m of recordingNow()) {
     const l = live.get(m.id)
     if (m.status !== 'recording' || !l) continue
     const said = Math.max(0, ...Object.values(l.sources).map((s) => s.talkingAt || 0))
-    if (m.callEnded) {
-      if (m.endWhy === 'quiet' && said > Date.parse(m.callEnded)) { clearTimeout(stopping.get(m.id)); stopping.delete(m.id); patchMeta(m.id, { callEnded: null, callEndedApp: null, endWhy: null, stopsAt: null }) }
+    if (m.callEnded && m.endWhy !== 'call' && said > Date.parse(m.callEnded)) {
+      clearTimeout(stopping.get(m.id)); stopping.delete(m.id)
+      patchMeta(m.id, { callEnded: null, callEndedApp: null, endWhy: null, stopsAt: null })
       continue
     }
     // On a call whose sound isn't heard (macOS not letting Bridge AI hear it yet), quiet says nothing.
     if (!said || cfg.meetings?.quietEnd === false || (m.call === 'on' && !l.sources.them?.heard)) continue
+    if (m.callEnded && (m.endWhy === 'call' || m.stopsAt)) continue
+    const end = m.event?.end ? Date.parse(m.event.end) : null
+    if (end && now <= end) continue
     const quiet = now - Math.max(said, Date.parse(m.keptAt || 0) || 0)
-    const over = m.event?.end && now > Date.parse(m.event.end)
-    if (quiet >= QUIET_END_MS || (over && quiet >= QUIET_OVER_MS)) ending(m.id, { why: 'quiet' })
+    const why = end ? 'over' : 'quiet'
+    if (quiet >= (end ? QUIET_END_MS : QUIET_LONG_MS)) ending(m.id, { why })
+    else if (!m.callEnded && quiet >= (end ? QUIET_OVER_MS : QUIET_REMIND_MS)) ending(m.id, { why, stops: false })
   }
 }
 setInterval(() => { try { checkQuiet() } catch { /* a meeting gone */ } }, Number(process.env.BRIDGE_QUIET_CHECK_MS || 10_000)).unref?.()

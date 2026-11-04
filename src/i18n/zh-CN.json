@@ -859,6 +859,7 @@
   "Its own language": "会议原语言",
   "Its sign-in expired.": "登录已过期。",
   "Its sign-in has expired, so its usage can't be read. Sign in again, or start an agent on this account: it renews the sign-in when it runs.": "它的登录已过期，因此无法读取用量。请重新登录，或用此账号启动一个智能体：运行时会自动续期登录。",
+  "Its time on your calendar is up, and it's gone quiet.": "日历上的时间已到，而且安静下来了。",
   "Its words can't be read for the notes, but it's linked.": "无法读取其中的文字用于笔记，但已关联。",
   "Japanese": "日语",
   "Join": "加入",

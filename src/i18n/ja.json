@@ -859,6 +859,7 @@
   "Its own language": "ミーティングと同じ言語",
   "Its sign-in expired.": "サインインの有効期限が切れました。",
   "Its sign-in has expired, so its usage can't be read. Sign in again, or start an agent on this account: it renews the sign-in when it runs.": "サインインの有効期限が切れているため、使用量を読み取れません。再度サインインするか、このアカウントでエージェントを開始してください。実行時にサインインが更新されます。",
+  "Its time on your calendar is up, and it's gone quiet.": "カレンダーの時間が過ぎ、静かになりました。",
   "Its words can't be read for the notes, but it's linked.": "メモ用に中の文字を読み取ることはできませんが、リンクはされています。",
   "Japanese": "日本語",
   "Join": "参加",
