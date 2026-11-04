@@ -318,6 +318,8 @@ app.get('/api/previews', wrap(async () => {
 // Any pane works here (agents and plain shells); the root is that pane's folder. A place you
 // added to Files (place:<id>) works the same way, its folder the root.
 const rootOf = async (pane) => {
+  // Studio's own folder: decks made from meetings, and new files with no folder of yours to go in.
+  if (pane === 'studio') { const d = path.join(DATA, 'studio', 'files'); fs.mkdirSync(d, { recursive: true }); return d }
   if (String(pane).startsWith('place:')) {
     const pl = places.placeOf(String(pane).slice(6))
     if (!pl) throw new Error('That place isn\'t in Files any more')
@@ -1277,6 +1279,8 @@ app.get('/api/meetings/since', wrap((req) => meetWork.since({ title: String(req.
 app.get('/api/meetings/search', wrap((req) => meetings.search(String(req.query.q || '').slice(0, 200), { archived: req.query.archived === '1' })))
 app.post('/api/meetings/ask', wrap((req) => meetings.askAll(String(req.body?.question || '').slice(0, 2000), { ids: [].concat(req.body?.ids || []).slice(0, 50), model: req.body?.model })))
 app.post('/api/meetings/:id/keep', wrap((req) => meetings.keep(req.params.id)))
+// Make a deck from a meeting, in Studio's own folder, to open in Studio.
+app.post('/api/meetings/:id/deck', wrap((req) => meetings.deck(req.params.id, { model: req.body?.model })))
 // Meeting memory (meetmemory.js): the names and terms in your meetings, yours to edit.
 app.get('/api/meetings/memory', wrap(() => ({ terms: meetMemory.list() })))
 app.post('/api/meetings/memory', wrap((req) => meetMemory.add({ term: req.body?.term, heard: req.body?.heard, note: req.body?.note })))
