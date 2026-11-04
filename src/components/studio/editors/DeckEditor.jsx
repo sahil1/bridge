@@ -5,18 +5,20 @@ import { api, BASE } from '../../../api.js'
 import { t } from '../../../i18n/index.js'
 import { textOf, base64 } from '../files.js'
 import { pptxOf, slidesOf, deckFromOutline } from '../pptx.js'
+import { packFor, packNamed, withPack } from '../packs.jsx'
 
 // A deck. A Markdown deck (Marp's format, MIT: slides between lines of ---) is written on the left
 // and drawn on the right as you type, presented full screen, and exported as a PowerPoint whose
 // titles, bullets and notes are text you can edit there, beside the deck in its folder. A
 // PowerPoint file is shown as its slides (LibreOffice's PDF where it's installed, else their text)
 // and can become a Markdown deck to edit here; Ask an agent changes the PowerPoint itself.
-// pack: the design pack the deck uses (colours, fonts), if any.
+// packs: the design packs; the deck uses the one its front matter names (pack: Board), else the
+// default, and Look picks one (it writes that line).
 const marp = new Marp({ html: false, inlineSVG: true, script: false, math: false })
 
-export default function DeckEditor({ file, data, onDirty, handle, readOnly = false, pack = null, onOpen }) {
+export default function DeckEditor({ file, data, onDirty, handle, readOnly = false, packs = [], onOpen }) {
   if (file.ext === '.pptx') return <Pptx file={file} onOpen={onOpen} />
-  return <MarkdownDeck file={file} text={textOf(data)} onDirty={onDirty} handle={handle} readOnly={readOnly} pack={pack} onOpen={onOpen} />
+  return <MarkdownDeck file={file} text={textOf(data)} onDirty={onDirty} handle={handle} readOnly={readOnly} packs={packs} onOpen={onOpen} />
 }
 
 // The design pack over Marp's own theme (whose rules are more specific, hence !important).
@@ -31,7 +33,7 @@ ${one != null ? `.marpit{padding:0}.marpit>svg{display:none;width:100vw;height:1
 </style>${html}`
 }
 
-function MarkdownDeck({ file, text, onDirty, handle, readOnly, pack, onOpen }) {
+function MarkdownDeck({ file, text, onDirty, handle, readOnly, packs, onOpen }) {
   const [md, setMd] = useState(text)
   const [present, setPresent] = useState(null) // the slide shown full screen
   const [busy, setBusy] = useState(null)
@@ -39,7 +41,10 @@ function MarkdownDeck({ file, text, onDirty, handle, readOnly, pack, onOpen }) {
   const view = useRef(null)
   useEffect(() => { setMd(text) }, [text])
   const out = useMemo(() => { try { return marp.render(md) } catch (e) { return { html: `<p>${String(e.message)}</p>`, css: '', comments: [] } } }, [md])
+  const named = packNamed(md)
+  const pack = packFor(packs, { pack: named })
   const style = `${out.css}${css(pack)}`
+  const look = (id) => { const p = packs.find((x) => x.id === id); setMd(withPack(md, p && !p.isDefault ? p.name : null)); onDirty(true) }
   const count = (out.html.match(/<svg data-marpit-svg/g) || []).length
   handle.current = {
     save: async () => md,
@@ -72,6 +77,14 @@ function MarkdownDeck({ file, text, onDirty, handle, readOnly, pack, onOpen }) {
       <div className="sd-toolbar" role="toolbar" aria-label={t('Deck')}>
         <span className="muted small">{count === 1 ? t('1 slide') : t('{n} slides', { n: count })}</span>
         <span className="sd-grow" />
+        {packs.length > 1 && !readOnly && (
+          <label className="sd-look small">{t('Look')}
+            <select value={pack?.id || ''} onChange={(e) => look(e.target.value)}>
+              {packs.map((p) => <option key={p.id} value={p.id}>{p.isDefault ? t('{name} (your default)', { name: p.name }) : p.name}</option>)}
+            </select>
+          </label>
+        )}
+        {named && !packs.some((p) => p.name.toLowerCase() === named.toLowerCase()) && <span className="muted small" title={t('This deck names a design pack you don\'t have, so it uses your default.')}>{t('No pack "{name}"', { name: named })}</span>}
         <button type="button" className="btn small" onClick={() => setPresent(0)} disabled={!count}><Icon name="play" size={12} /> {t('Present')}</button>
         <button type="button" className="btn small" onClick={toPptx} disabled={!count || busy === 'pptx'}><Icon name="download" size={12} /> {busy === 'pptx' ? t('Making it…') : t('PowerPoint')}</button>
         <button type="button" className="btn small" onClick={print} disabled={!count}><Icon name="doc" size={12} /> {t('PDF')}</button>
