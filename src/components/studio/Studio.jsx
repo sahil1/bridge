@@ -322,7 +322,9 @@ function AskAgent({ f, meta, selection, onClose, onSent }) {
   const { fleet } = useFleet()
   const here = fleet?.agents?.find((a) => a.paneId === f.root)
   const agents = (fleet?.agents || []).filter((a) => !a.chief && !a.plainChat && !a.cloudOnly && a.kind !== 'chat' && (!here || a.cwd === here.cwd))
-  const [to, setTo] = useState(here && here.kind !== 'chat' ? here.paneId : agents[0]?.paneId || 'new')
+  // Who it goes to: the one you pick, else the file's own agent, else the first (once they've come).
+  const [pick, setTo] = useState(null)
+  const to = pick ?? (here && here.kind !== 'chat' ? here.paneId : agents[0]?.paneId || 'new')
   const [text, setText] = useState('')
   const [err, setErr] = useState(null)
   const [busy, setBusy] = useState(false)

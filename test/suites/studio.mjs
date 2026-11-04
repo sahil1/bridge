@@ -160,6 +160,17 @@ try {
   const share = Math.round(((await busy()) - b0) * 100) / 10
   if (cdp) ok(share < 8, `a window with a sheet open, idle, keeps its main thread free (${share}% busy)`, share)
   const looks = reqs.filter((x) => x === '/api/studio/changed').length
+  // Ask an agent on the cells picked: B2 (Hosting's cost), clicked in the sheet's drawing (its
+  // row numbers 46 wide, its column letters 20 high, columns 88 by rows 24).
+  const grid = await p.locator('.sd-univer canvas').evaluateAll((cs) => cs.map((c) => c.getBoundingClientRect()).map((r) => ({ x: r.x, y: r.y, a: r.width * r.height })).sort((a, b) => b.a - a.a)[0])
+  await p.mouse.click(grid.x + 46 + 88 + 44, grid.y + 20 + 24 + 12)
+  await sleep(300)
+  await p.locator('.pane-head button', { hasText: 'Ask an agent' }).click()
+  const picked = await p.locator('.sd-ask-sel').innerText({ timeout: 5000 }).catch(() => '')
+  ok(/B2 on Budget/.test(picked) && /120/.test(picked), 'Ask an agent on a sheet: the cells picked, where they are, and their values', picked)
+  ok(await p.locator('.sd-ask-to select').inputValue() === agent.paneId, 'and it goes to the agent at work there unless you pick another', await p.locator('.sd-ask-to select').inputValue())
+  await shot(p, `${tag}studio-sheet-ask`)
+  await p.locator('.sd-ask button', { hasText: 'Cancel' }).click()
   ok(looks <= 2 && reqs.length <= 15, `and asks the server little: whether the file changed ${looks} time${looks === 1 ? '' : 's'} in 10 s, ${reqs.length} requests in all (at most 90 a minute, as everywhere)`, [...new Set(reqs)])
   // A deck, drawn, and its PowerPoint beside it.
   await open('pitch.md')
