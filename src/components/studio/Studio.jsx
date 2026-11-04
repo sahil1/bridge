@@ -4,7 +4,7 @@ import { api, usePoll, useFleet } from '../../api.js'
 import { PaneHeader } from '../layout.jsx'
 import { t, tx, locale } from '../../i18n/index.js'
 import { openFile, bytesOf, rawUrl, versionUrl, saveFile, changedSince, restoreVersion, base64, extOf } from './files.js'
-import { useDesignPacks, PacksSection, packFor } from './packs.jsx'
+import { useDesignPacks, PacksSection } from './packs.jsx'
 import { lineDiff, textFor, comparable } from './diff.js'
 import './studio.css'
 
@@ -238,7 +238,7 @@ export function StudioPage({ root, path: rel, onBack, onOpen }) {
       <div className={`sd-body${panel ? ' with-panel' : ''}`}>
         <div className="sd-editor">
           {!meta || !data ? <p className="muted small sd-loading">{t('Opening…')}</p>
-            : <Suspense fallback={<p className="muted small sd-loading">{t('Opening…')}</p>}><Editor key={gen} file={{ ...meta, root, path: rel }} data={data} onDirty={setDirty} handle={handle} pack={packFor(packs.list, meta)} onOpen={onOpen} /></Suspense>}
+            : <Suspense fallback={<p className="muted small sd-loading">{t('Opening…')}</p>}><Editor key={gen} file={{ ...meta, root, path: rel }} data={data} onDirty={setDirty} handle={handle} packs={packs.list} onOpen={onOpen} /></Suspense>}
         </div>
         {panel === 'versions' && meta && <Versions f={f} ext={meta.ext} versions={meta.versions} onRestore={restore} onClose={() => setPanel(null)} />}
       </div>

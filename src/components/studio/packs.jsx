@@ -17,6 +17,27 @@ export function packFor(list, meta) {
   return named || list.find((p) => p.isDefault) || null
 }
 
+// A deck's front matter: the lines between a --- at the very top and the next ---.
+const FRONT = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(\r?\n|$)/
+// The pack a deck names (pack: Board), or null.
+export function packNamed(md) {
+  const v = FRONT.exec(md)?.[1].match(/^pack:[ \t]*(.+?)[ \t]*$/m)?.[1]
+  return v ? v.replace(/^(["'])(.*)\1$/, '$2') : null
+}
+// The deck with its pack line set to name, or taken out (null: the default). Front matter is
+// started when there's none.
+export function withPack(md, name) {
+  const line = name ? `pack: ${/[:#]|^\s|\s$/.test(name) ? JSON.stringify(name) : name}` : null
+  const m = FRONT.exec(md)
+  if (!m) return line ? `---\n${line}\n---\n\n${md}` : md
+  const lines = m[1].split(/\r?\n/).filter((l) => !/^pack:/.test(l))
+  if (line) lines.push(line)
+  const body = md.slice(m[0].length)
+  // Nothing left in it: no front matter at all.
+  if (!lines.some((l) => l.trim())) return body.replace(/^\r?\n/, '')
+  return `---\n${lines.join('\n')}\n---\n${body}`
+}
+
 const FONTS = ['Inter', 'Helvetica Neue', 'Georgia', 'Avenir Next', 'Source Sans Pro', 'Merriweather', 'IBM Plex Sans', 'Menlo']
 const BLANK = { name: '', colors: { background: '#ffffff', text: '#1f2328', accent: '#2a78d6' }, fonts: { heading: 'Inter', body: 'Inter' }, logo: null }
 
