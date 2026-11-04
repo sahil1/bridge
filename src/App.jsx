@@ -337,8 +337,11 @@ function App() {
     }
   }, [fleet]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // The window's title counts what waits on you, on every device.
-  useEffect(() => { document.title = waiting ? `(${waiting}) Bridge AI` : 'Bridge AI' }, [waiting])
+  // The window's title counts what waits on you, on every device, and with other computers linked,
+  // says which one this window shows: the Dock and the Window menu list each window by it.
+  const { data: macs } = useMachines(60_000, !cloudOnly)
+  const shownName = !macs?.machines?.length ? null : machineId ? macs.machines.find((x) => x.id === machineId)?.name : macs.here?.name
+  useEffect(() => { document.title = `${waiting ? `(${waiting}) ` : ''}Bridge AI${shownName ? ` · ${shownName}` : ''}` }, [waiting, shownName])
   // A notification about an agent that needs you (pwa.js openLink, ?inbox=1): the inbox, at it.
   useEffect(() => {
     if (cloudOnly) return

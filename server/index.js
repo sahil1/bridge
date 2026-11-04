@@ -67,6 +67,7 @@ import * as speech from './speech.js'
 import * as projects from './projects.js'
 import * as calls from './calls.js'
 import * as callEvent from './callevent.js'
+import * as perf from './perf.js'
 import { terminals, openAttach, openCommand } from './terminal.js'
 import { mcpRoutes } from './mcp.js'
 import * as notify from './notify.js'
@@ -122,6 +123,8 @@ const news = makeNews(cfg)
 const guard = makeGuard(cfg, { tailnetOwner: phone.tailnetOwner })
 const app = express()
 app.use(guard.http)
+// Each request timed, for how Bridge AI itself is doing (perf.js).
+app.use(perf.timing)
 // Your other devices' Bridge AI, through this one (machines.js), before anything reads the body.
 app.use('/m', (req, res) => machines.proxy(req, res))
 // Saving a file from the viewer can send more than the usual 1 MB.
@@ -209,6 +212,9 @@ async function findAgent(paneId) {
 }
 
 app.get('/api/fleet', wrap(fleetView))
+// How Bridge AI is doing: its CPU, how long its event loop was held up, the slowest requests
+// (perf.js). reset=1: count afresh from now.
+app.get('/api/perf', wrap((req) => perf.snapshot({ reset: req.query.reset === '1' })))
 
 // Pane geometry (columns) for the terminal mirror, refreshed at most every few seconds.
 let geo = { at: 0, cols: {} }

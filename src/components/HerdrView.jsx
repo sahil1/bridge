@@ -6,6 +6,7 @@ import '@xterm/xterm/css/xterm.css'
 import Icon from './Icon.jsx'
 import { usePersisted } from './layout.jsx'
 import disposeTerm from '../disposeTerm.js'
+import gpu from '../termGpu.js'
 import altArrows from '../altArrows.js'
 import { openSocket } from '../api.js'
 
@@ -67,6 +68,7 @@ export default function HerdrView({ active, onViewHotkey, session: want }) {
     term.loadAddon(new Unicode11Addon())
     term.unicode.activeVersion = '11'
     term.open(hostRef.current)
+    gpu(term)
     // Alt+1 / Alt+2 switch views even while the terminal has focus.
     term.attachCustomKeyEventHandler((e) => {
       if (e.type === 'keydown' && e.altKey && (e.code === 'Digit1' || e.code === 'Digit2')) { onViewHotkey?.(e.code === 'Digit1' ? 'command' : 'herdr'); return false }

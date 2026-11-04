@@ -155,7 +155,9 @@ async function createWindow() {
   // Links to anything but the app open in their own apps (Teams, Outlook, Mail, the browser).
   win.webContents.setWindowOpenHandler(({ url }) => { if (!isLocal(url)) openOutside(url); return { action: 'deny' } })
   win.webContents.on('will-navigate', (e, url) => { if (!isLocal(url) && !url.startsWith('data:')) { e.preventDefault(); openOutside(url) } })
-  win.webContents.on('page-title-updated', (e, title) => { e.preventDefault(); updateBadge(title) })
+  // Its title as the page says it (what waits on you, and which computer it is, for the Dock's and
+  // the Window menu's list of windows); the count also goes on the Dock's badge.
+  win.webContents.on('page-title-updated', (e, title) => { e.preventDefault(); win?.setTitle(title); updateBadge(title) })
   win.webContents.on('did-fail-load', (_e, code) => { if (code !== -3) setTimeout(connect, 1500) })
   // The page went away (a crash, out of memory): written down, and opened again, which then offers
   // to report it. At most once a minute, so a page that can't stay up doesn't go round and round.
