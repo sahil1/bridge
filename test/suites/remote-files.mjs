@@ -62,7 +62,7 @@ try {
   const rb = await startRelay('remote-files-laptop')
   relays.push(ra, rb)
   const kitWith = async (name, rel) => {
-    const k = await startKit(`remote-files-${name.toLowerCase()}`, { env: ({ data }) => { fs.writeFileSync(path.join(data, 'relay.json'), JSON.stringify(rel.relayFile)); return { BRIDGE_COMPUTER_NAME: name } } })
+    const k = await startKit(`remote-files-${name.toLowerCase()}`, { config: { trials: { studio: true } }, env: ({ data }) => { fs.writeFileSync(path.join(data, 'relay.json'), JSON.stringify(rel.relayFile)); return { BRIDGE_COMPUTER_NAME: name } } })
     kits.push(k)
     await k.api('/setup', { name: 'Tester' })
     return k

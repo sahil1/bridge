@@ -19,6 +19,7 @@ import { sendPicture, pictureUrl } from './screen.js'
 import './meetings.css'
 import SpeechSetup, { MeetingsSetup } from './SpeechSetup.jsx'
 import { ActionItems, SinceLastTime } from './work.jsx'
+import { useTrial } from '../../trials.js'
 
 // The meeting pages: the list of meetings, and one meeting with your notes beside its transcript, the
 // summary, questions about it, and its action items for the Chief of Staff. The recording itself is
@@ -452,6 +453,7 @@ const tilde = (p) => String(p || '').replace(/^\/Users\/[^/]+/, '~')
 const localInput = (iso) => { const d = new Date(iso); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16) }
 
 export function MeetingPage({ id, onBack }) {
+  const studio = useTrial('studio') // Make a deck writes one into Studio, a trial feature (src/trials.js)
   const m = useMeetings()
   const live = m?.rec?.id === id
   const { data, refresh } = usePoll(`/meetings/${encodeURIComponent(id)}`, live ? 1500 : 4000)
@@ -815,7 +817,7 @@ export function MeetingPage({ id, onBack }) {
           { icon: 'download', label: t('Save as Markdown'), run: save },
           data.saved && here() && { icon: 'folder-open', label: t('Show saved notes in Finder'), run: reveal },
           atActions(data.summary) && { icon: 'helm', label: t('Send action items to Chief of Staff'), run: toChief },
-          done && (data.summary || lines.length > 0) && { icon: 'screen', label: t('Make a deck'), run: makeDeck },
+          studio && done && (data.summary || lines.length > 0) && { icon: 'screen', label: t('Make a deck'), run: makeDeck },
           '-',
           { icon: 'edit', label: t('Fix a word everywhere'), run: () => setFix({ from: '' }) },
           done && { icon: 'refresh', label: t('Transcribe again…'), run: () => setDialog('again') },

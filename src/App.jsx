@@ -198,6 +198,18 @@ const VIEWS = { 'view:new': { title: tx('New'), icon: 'plus' }, 'view:meetings':
 // A whiteboard's tab is named as the board is (its id).
 const BOARD = 'view:whiteboard:'
 // A Studio file's tab: its root (an agent's pane, or place:<id>) and path, each encoded.
+// A trial feature's tab, left open from before it was turned off (or opened on another computer
+// where it's on): says so, with the way to turn it on.
+function TrialOff({ name }) {
+  return (
+    <div className="trial-off" role="status">
+      <Icon name="layers" size={20} />
+      <b>{t('{name} is a trial feature, off here.', { name })}</b>
+      <p className="muted small">{t('Turn it on in Settings › About & Updates › Trial Features.')}</p>
+      <button type="button" className="btn small" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'about' } }))}>{t('Open Settings')}</button>
+    </div>
+  )
+}
 const STUDIO = 'view:studio:'
 const studioId = (f) => `${STUDIO}${encodeURIComponent(f.root)}:${encodeURIComponent(f.path)}`
 const studioOf = (id) => { const [r, p] = id.slice(STUDIO.length).split(':'); return { root: decodeURIComponent(r || ''), path: decodeURIComponent(p || '') } }
@@ -216,6 +228,10 @@ function App() {
   // The live herdr view exists only when herdr is the runtime (see server/runtime).
   const confPoll = usePoll('/config', 10 * 60 * 1000)
   const conf = confPoll.data
+  // Studio is a trial feature (src/trials.js): out of sight until it's turned on.
+  const studioOn = conf?.trials?.studio === true
+  const studioOnRef = useRef(studioOn)
+  studioOnRef.current = studioOn
   // Onboarding stays up from the first sign that setup is needed until you close it, so its last
   // screen (how Bridge AI works) isn't swept away the moment setup is saved.
   const [onboarding, setOnboarding] = useState(false)
@@ -476,6 +492,7 @@ function App() {
   // A file opened in Studio from anywhere (Files, a chat's link), or Studio itself.
   useEffect(() => {
     const on = (e) => {
+      if (!studioOnRef.current) return
       const d = e.detail || {}
       if (d.root && d.path) openAgentRef.current?.(studioId(d), { replace: wsRef.current?.tabs.includes('view:studio') ? 'view:studio' : null })
       else openAgentRef.current?.('view:studio')
@@ -648,7 +665,7 @@ function App() {
     { id: 'a:record', label: t('Record a meeting'), icon: 'mic', keywords: 'meeting notes transcript record call granola minutes', run: () => meetings?.start().catch(() => openAgent('view:meetings')) },
     { id: 'a:meetings', label: t('Meetings'), icon: 'mic', keywords: 'meeting notes transcripts summaries', run: () => openAgent('view:meetings') },
     { id: 'a:dictations', label: t('Dictations'), icon: 'wave', keywords: 'dictation history voice said typed pasted wispr macwhisper', run: () => openAgent('view:dictations') },
-    StudioHome && { id: 'a:studio', label: t('Studio'), icon: 'layers', keywords: 'studio document word docx sheet excel xlsx spreadsheet deck slides powerpoint pptx pdf page html artifact markdown design pack', run: () => openAgent('view:studio') },
+    StudioHome && studioOn && { id: 'a:studio', label: t('Studio'), icon: 'layers', keywords: 'studio document word docx sheet excel xlsx spreadsheet deck slides powerpoint pptx pdf page html artifact markdown design pack', run: () => openAgent('view:studio') },
     WhiteboardsHome && { id: 'a:boards', label: t('Whiteboards'), icon: 'shapes', keywords: 'whiteboard board excalidraw draw sketch diagram flowchart architecture sequence org chart mermaid drawio canvas', run: () => openAgent('view:whiteboards') },
     { id: 'a:map', label: t('Agent Map'), icon: 'grid', keywords: 'what is running where devices computers machines all agents overview cloud subagents', run: openMap },
     { id: 'a:needs', label: t('Needs you'), icon: 'bell', keywords: 'inbox waiting approve allow permission questions answer review finished failed devices', run: () => setInbox({}) },
@@ -782,6 +799,7 @@ function App() {
           : id === 'view:dictations' ? <section className="pane view-pane"><Dictations /></section>
             : id === 'view:whiteboards' && WhiteboardsHome ? <section className="pane view-pane"><WhiteboardsHome onOpen={(bid) => openAgent(`${BOARD}${bid}`, wide ? { replace: 'view:whiteboards' } : {})} /></section>
               : id.startsWith(BOARD) && WhiteboardPage ? <section className="pane view-pane"><WhiteboardPage id={id.slice(BOARD.length)} onBack={() => openAgent('view:whiteboards', { replace: id })} /></section>
+                : id.startsWith('view:studio') && !studioOn ? <section className="pane view-pane"><TrialOff name={t('Studio')} /></section>
                 : id === 'view:studio' && StudioHome ? <section className="pane view-pane"><StudioHome onOpen={(f) => openAgent(studioId(f), wide ? { replace: 'view:studio' } : {})} /></section>
                   : id.startsWith(STUDIO) && StudioPage ? <section className="pane view-pane"><StudioPage {...studioOf(id)} onBack={() => openAgent('view:studio', { replace: id })} onOpen={(f) => openAgent(studioId(f))} /></section>
                 : <section className="pane view-pane"><MeetingPage id={id.slice(13)} onBack={onBack || (() => openAgent('view:meetings', { replace: id }))} /></section>}
@@ -810,7 +828,7 @@ function App() {
     const tabs = [['mate', 'helm', t('Chief')], ['agents', 'grid', t('Agents')], ['meetings', 'mic', t('Meetings')], ['today', 'today', t('Today')], ['more', 'more', t('More')]]
     const moreRows = [
       WhiteboardsHome && { id: 'whiteboards', icon: 'shapes', label: t('Whiteboards'), hint: t('Draw by hand, or describe a diagram'), run: () => setMoreView('view:whiteboards') },
-      StudioHome && { id: 'studio', icon: 'layers', label: t('Studio'), hint: t('Documents, sheets, decks and pages'), run: () => setMoreView('view:studio') },
+      StudioHome && studioOn && { id: 'studio', icon: 'layers', label: t('Studio'), hint: t('Documents, sheets, decks and pages'), run: () => setMoreView('view:studio') },
       { id: 'terminals', icon: 'terminal', label: t('Terminals'), hint: t("Every agent's terminal, live"), run: () => setMoreView('terminals') },
       { id: 'map', icon: 'grid', label: t('Agent Map'), hint: t("What's running on each of your computers"), run: () => setMoreView('view:map') },
       { id: 'dictations', icon: 'wave', label: t('Dictations'), hint: t("Everything you've dictated"), run: () => setMoreView('view:dictations') },

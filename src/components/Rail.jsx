@@ -14,6 +14,7 @@ import { openMeeting, useMeetings } from './meetings/recording.jsx'
 import { Dialog } from './meetings/tools.jsx'
 import { whiteboards } from './whiteboard/links.js'
 import { t, tx } from '../i18n/index.js'
+import { useTrial } from '../trials.js'
 
 // Mirrors herdr's sidebar: numbered workspaces, each with its tabs. Spaces fold,
 // every row shows the folder it works in, and a ⋯ menu covers rename/close/copy.
@@ -131,6 +132,7 @@ function HoverCard({ row, rect, git, preview }) {
 
 // New (Home: start something) and Meetings sit above the spaces; a red dot while a meeting records.
 export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpen, onOpenInHerdr, onOpenFiles, onNewAgent, onNewTerminal, onHistory, onMeetings, onDictations, recording }) {
+  const studio = useTrial('studio') // a trial feature (src/trials.js)
   const [launching, setLaunching] = useState(false)
   const [error, setError] = useState(null)
   const [closedWs, setClosedWs] = usePersisted('cc-rail-closed', {})
@@ -287,7 +289,7 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
         <button className={`mini-nav ${String(selected || '').startsWith('view:meeting') ? 'on' : ''}`} onClick={() => onMeetings?.()} aria-label={recording ? t('Meetings (recording)') : t('Meetings')} title={t('Meetings')}><Icon name="mic" size={15} />{recording && <span className="rec-dot mini-rec" />}</button>
         {anyDictation && <button className={`mini-nav ${selected === 'view:dictations' ? 'on' : ''}`} onClick={() => onDictations?.()} aria-label={t('Dictations')} title={t('Dictations')}><Icon name="wave" size={15} /></button>}
         {whiteboards && <button className={`mini-nav ${String(selected || '').startsWith('view:whiteboard') ? 'on' : ''}`} onClick={() => onOpen('view:whiteboards')} aria-label={t('Whiteboards')} title={t('Whiteboards')}><Icon name="shapes" size={15} /></button>}
-        {whiteboards && <button className={`mini-nav ${String(selected || '').startsWith('view:studio') ? 'on' : ''}`} onClick={() => onOpen('view:studio')} aria-label={t('Studio')} title={t('Studio')}><Icon name="layers" size={15} /></button>}
+        {whiteboards && studio && <button className={`mini-nav ${String(selected || '').startsWith('view:studio') ? 'on' : ''}`} onClick={() => onOpen('view:studio')} aria-label={t('Studio')} title={t('Studio')}><Icon name="layers" size={15} /></button>}
         <div className="rail-mini">
           {groups.filter((g) => rowsOf(g).length).map((g) => (
             <div key={g.id} className="mini-ws">
@@ -375,7 +377,7 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
             <button className={`rail-nav-btn ${String(selected || '').startsWith('view:whiteboard') ? 'on' : ''}`} onClick={() => onOpen('view:whiteboards')}><Icon name="shapes" size={14} /> {t('Whiteboards')}</button>
           </div>
         )}
-        {whiteboards && (
+        {whiteboards && studio && (
           <div className="rail-nav-row">
             <button className={`rail-nav-btn ${String(selected || '').startsWith('view:studio') ? 'on' : ''}`} onClick={() => onOpen('view:studio')}><Icon name="layers" size={14} /> {t('Studio')}</button>
           </div>

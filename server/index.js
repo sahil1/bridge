@@ -329,9 +329,17 @@ const rootOf = async (pane) => {
   if (!p) throw new Error(`No pane ${pane}`)
   return p.cwd
 }
+// ---------- Trial features ----------
+// Still being finished, so hidden until turned on in Settings › About & Updates › Trial Features
+// (trials: { studio: true } in the config; src/trials.js). Their routes answer only then.
+const TRIALS = ['studio']
+const trialOn = (id) => cfg.trials?.[id] === true
+const trialOff = (id, label) => (req, res, next) => (trialOn(id) ? next() : res.status(404).json({ error: `${label} is a trial feature. Turn it on in Settings › About & Updates › Trial Features.`, trial: id }))
+
 // ---------- Studio (studio.js) ----------
 // Its files are named as Files names them: root (an agent's pane, or place:<id>) and a path in it.
 // Ask an agent sends the change to the agent you pick (pane), or starts one in the file's folder.
+app.use('/api/studio', trialOff('studio', 'Studio'))
 const sq = (req) => ({ root: String(req.query.root || req.body?.root || ''), path: String(req.query.path || req.body?.path || '') })
 app.get('/api/studio/recent', wrap(async () => ({ files: await studio.recentFiles() })))
 app.delete('/api/studio/recent', wrap((req) => { const q = sq(req); return studio.forget(q.root, q.path) }))
@@ -1280,7 +1288,7 @@ app.get('/api/meetings/search', wrap((req) => meetings.search(String(req.query.q
 app.post('/api/meetings/ask', wrap((req) => meetings.askAll(String(req.body?.question || '').slice(0, 2000), { ids: [].concat(req.body?.ids || []).slice(0, 50), model: req.body?.model })))
 app.post('/api/meetings/:id/keep', wrap((req) => meetings.keep(req.params.id)))
 // Make a deck from a meeting, in Studio's own folder, to open in Studio.
-app.post('/api/meetings/:id/deck', wrap((req) => meetings.deck(req.params.id, { model: req.body?.model })))
+app.post('/api/meetings/:id/deck', trialOff('studio', 'Studio'), wrap((req) => meetings.deck(req.params.id, { model: req.body?.model })))
 // Meeting memory (meetmemory.js): the names and terms in your meetings, yours to edit.
 app.get('/api/meetings/memory', wrap(() => ({ terms: meetMemory.list() })))
 app.post('/api/meetings/memory', wrap((req) => meetMemory.add({ term: req.body?.term, heard: req.body?.heard, note: req.body?.note })))
@@ -1960,6 +1968,7 @@ app.get('/api/config', (req, res) => res.json({
   dictation: cfg.dictation || {}, // Settings › Voice › Dictation
   alertSounds: cfg.alertSounds !== false, // the speaker in the top bar
   meetingKey: MEETING_KEYS.includes(cfg.meetings?.mentionKey) ? cfg.meetings.mentionKey : '@', // Settings › Meetings
+  trials: Object.fromEntries(TRIALS.map((id) => [id, trialOn(id)])), // Settings › About & Updates › Trial Features
 }))
 // The speaker in the top bar: notifications (this computer's, a browser's, your phones') come with a
 // sound, or without one; they still come. Your other devices are told too, unless one of them is
