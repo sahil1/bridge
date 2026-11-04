@@ -636,13 +636,13 @@ export const shapesText = () => `${shapesFor(SETS.map((s) => s.id))}\nContainer 
 // ---------- Routes ----------
 // wrap: index.js's (JSON back, an error's words with a 502). onComputer: turns down what only makes
 // sense on the computer itself (opening its folder) when it comes through the relay.
-export function routes(app, { wrap, onComputer }) {
+export function routes(app, { wrap, onComputer, counted }) {
   const fail = (res, e) => res.status(e.status || 502).json({ error: e.message, ...(e.conflict ? { conflict: true } : {}), ...(typeof e.code === 'string' ? { code: e.code } : {}) })
   const route = (fn) => async (req, res) => { try { res.json(await fn(req, res)) } catch (e) { fail(res, e) } }
   app.get('/api/boards', wrap(() => list()))
   app.post('/api/boards', route((req) => create(req.body || {})))
   app.get('/api/boards/models', wrap(() => models()))
-  app.post('/api/boards/draw', route((req) => draw(req.body || {})))
+  app.post('/api/boards/draw', route((req) => { counted?.('whiteboards.drawn'); return draw(req.body || {}) }))
   app.post('/api/boards/change', route((req) => change(req.body || {})))
   app.post('/api/boards/review', route((req) => review(req.body || {})))
   app.get('/api/boards/shapes', wrap(() => ({ text: shapesText() })))

@@ -46,8 +46,9 @@ products Bridge AI works with.
 
 ## Privacy
 
-The project collects nothing about you. What stays on your devices and what goes to the services
-you use is in [PRIVACY.md](PRIVACY.md).
+The project collects nothing that identifies you. The app on your computer sends it anonymous usage
+stats and crash reports unless you turn them off (Settings › About & Updates). What stays on your
+devices, what goes to the project and what goes to the services you use is in [PRIVACY.md](PRIVACY.md).
 
 ## Changes and contact
 

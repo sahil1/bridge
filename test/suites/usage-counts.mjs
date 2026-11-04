@@ -34,7 +34,7 @@ const NAMES = new Set(Object.keys(SCHEMA.counters))
   const { AGENTS, CHAT } = await import('../../server/agents.js')
   const kinds = [...AGENTS, CHAT].map((a) => a.kind)
   ok(kinds.every((k) => NAMES.has(`agents.started.${k}`)), 'and every kind of agent has its own counter (a new one is added to the list in public)', kinds.filter((k) => !NAMES.has(`agents.started.${k}`)))
-  ok(SCHEMA.buckets.join() === '0,1,2-5,6-20,21-100,100+' && Object.keys(SCHEMA.report).join() === 'schema,week,app,os,arch,install,layout,runtime,phone,installAge,daysActive,activeTime,openTime,counts,nonce' && SCHEMA.timeRanges.join() === '0,under 1 hour,1-5 hours,5-10 hours,10-20 hours,20-40 hours,40+ hours', 'the list says what a report has, field by field, and its ranges (counts, and time in use and open)')
+  ok(SCHEMA.buckets.join() === '0,1,2-5,6-20,21-100,100+' && Object.keys(SCHEMA.report).join() === 'schema,week,app,os,osVersion,arch,chip,memory,cores,install,layout,runtime,phone,phones,computers,installAge,daysActive,activeTime,openTime,features,agents,counts,nonce' && kinds.filter((k) => k !== 'chat').every((k) => SCHEMA.agents.includes(k)) && SCHEMA.timeRanges.join() === '0,under 1 hour,1-5 hours,5-10 hours,10-20 hours,20-40 hours,40+ hours', 'the list says what a report has, field by field, and its ranges (counts, and time in use and open)')
 }
 process.env.BRIDGE_HOME = path.join(os.tmpdir(), `bridge-counts-rules-${process.pid}`)
 const c = await import('../../server/counts.js')
@@ -81,12 +81,29 @@ try {
   const d0 = await dnt.api('/counts')
   ok(d0.available === false && d0.refused === 'DO_NOT_TRACK' && await dnt.api('/counts', { share: true }).then(() => false, () => true), 'DO_NOT_TRACK=1: off, and it can\'t be turned on', d0)
 
-  // Off, as it starts.
-  const k = await kitWith('on', { BRIDGE_COUNTS_URL: URL_, BRIDGE_COUNTS_NOW: day(2), BRIDGE_COUNTS_MINUTE_MS: '200' }, { name: 'Priya Raman' })
+  // On unless turned off: a new install shares, and says so once.
+  {
+    const fresh = await kitWith('default', { BRIDGE_COUNTS_URL: URL_ })
+    const f0 = await fresh.api('/counts')
+    ok(f0.available && f0.share === true && f0.notice === true, 'on unless turned off: a new install shares usage stats, and the card that says so is due', f0)
+    const f1 = await fresh.api('/counts/noticed', {})
+    ok(f1.notice === false && f1.share === true, 'once seen, the card isn\'t shown again', f1)
+    const pf = (await fresh.api('/counts/preview')).report
+    const allowed = (k, v) => SCHEMA.values[k].includes(v)
+    ok(/^macOS \d+\.\d+$|^Windows 1[01]|^[A-Z][a-z]+/.test(pf.osVersion) && typeof pf.chip === 'string' && pf.chip.length > 1 && allowed('memory', pf.memory) && allowed('cores', pf.cores) && allowed('phones', pf.phones) && allowed('computers', pf.computers), 'a report says the system\'s version, the chip\'s family, memory and cores (ranges), and the phones and other computers linked', { osVersion: pf.osVersion, chip: pf.chip, memory: pf.memory, cores: pf.cores, phones: pf.phones, computers: pf.computers })
+    ok(Object.entries(pf.features).every(([k, v]) => SCHEMA.features[k]?.values.includes(v)) && pf.features.updateChecks === 'on' && pf.features.relay === 'none' && Array.isArray(pf.agents), 'the features on, each one of the list\'s values, and the agents installed', { features: pf.features, agents: pf.agents })
+    await fresh.api('/counts/window', { language: 'de', appearance: 'dark', theme: 'ocean', secret: ['', 'Users', 'priya'].join('/') })
+    const pw = (await fresh.api('/counts/preview')).report.features
+    ok(pw.language === 'de' && pw.appearance === 'dark' && pw.theme === 'ocean' && !JSON.stringify(pw).includes('priya'), 'a window says its language and look, and nothing else it might send is kept', pw)
+    fresh.stop()
+  }
+
+  // Turned off: nothing at all.
+  const k = await kitWith('on', { BRIDGE_COUNTS_URL: URL_, BRIDGE_COUNTS_NOW: day(2), BRIDGE_COUNTS_MINUTE_MS: '200' }, { name: 'Priya Raman', counts: { share: false } })
   k.program('claude', fs.readFileSync(path.join(TEST, 'stand-ins', 'claude.cjs'), 'utf8'))
   await k.api('/setup', { name: 'Priya Raman' })
   const s0 = await k.api('/counts')
-  ok(s0.available === true && s0.share === false && s0.to === `127.0.0.1:${port}` && s0.sent.length === 0, 'with an endpoint: offered, and off', s0)
+  ok(s0.available === true && s0.share === false && s0.notice === false && s0.to === `127.0.0.1:${port}` && s0.sent.length === 0, 'turned off: offered, off, and no card', s0)
   await use(k, 1)
   await new Promise((r) => setTimeout(r, 900))
   const p0 = await k.api('/counts/preview')
@@ -118,6 +135,9 @@ try {
   const sent = went ? JSON.parse(got[0].body) : null
   ok(went && got[0].method === 'POST' && got[0].path === '/v1/week' && /application\/json/.test(got[0].type) && !got[0].cookie, 'once the week is over: one POST of JSON to the endpoint, no cookies', got)
   ok(JSON.stringify(sent) === JSON.stringify(r1), 'and it is exactly what What would be sent showed', { sent, shown: r1 })
+  const dayGot = await until(() => got.find((g) => g.path === '/v1/day'), 5000)
+  const dr = dayGot ? JSON.parse(dayGot.body) : null
+  ok(!!dr && Object.keys(dr).join() === Object.keys(SCHEMA.dayReport.report).join() && dr.app && dr.crashed === false && /^[0-9a-f]{24}$/.test(dr.nonce) && dr.day < new Date(day(9)).toISOString().slice(0, 10), 'and a day\'s report for a day it ran: its version, the system, how often it started, whether it crashed', dr)
   const all = JSON.stringify(sent)
   const personal = ['Priya', 'acme', 'Fix ', k.home, os.homedir(), os.userInfo().username, os.hostname().replace(/\.local$/, '')].filter((v) => v && all.includes(v))
   ok(!!sent && Object.keys(sent).join() === Object.keys(SCHEMA.report).join() && Object.keys(sent.counts).every((n) => NAMES.has(n)) && Object.values(sent.counts).every((v) => SCHEMA.buckets.includes(v)) && personal.length === 0, 'nothing personal in it: the fields on the list, counts on the list in ranges, no name, path, project, user or computer', { personal, sent })
@@ -146,6 +166,29 @@ try {
   const before = weekFiles(k.data).length
   await later.api('/counts', { share: false })
   ok(before === 1 && weekFiles(k.data).length === 0 && (await later.api('/counts/preview')).share === false, 'turned off: what was counted and not sent is forgotten', { before, after: weekFiles(k.data) })
+
+  // ---------- In the app: the card that says it's on ----------
+  {
+    const crashSrv = `http://127.0.0.1:${port}/v1/report`
+    const kc = await kitWith('card', { BRIDGE_COUNTS_URL: URL_, BRIDGE_CRASHES_URL: crashSrv }, { name: 'Priya Raman' })
+    await kc.api('/setup', { name: 'Priya Raman' })
+    const { ctx, p } = await page(b, kc.url)
+    const card = p.locator('.stats-notice')
+    const said = await until(async () => /sends anonymous usage stats and crash reports/.test(await card.innerText().catch(() => '')), 15000)
+    const text = await card.innerText().catch(() => '')
+    ok(said && /Never your code, what you type or say/.test(text) && /no ID for you or this computer/.test(text), 'after setup, a card says usage stats and crash reports are on, what goes and what never does', text)
+    await shot(p, `${tag}usage-stats-card`)
+    await card.locator('button', { hasText: 'Turn off' }).click()
+    const offNow = await until(async () => (await kc.api('/counts')).share === false && (await kc.api('/crashes/sending')).send === false, 8000)
+    ok(offNow && await until(async () => (await card.count()) === 0, 5000), 'Turn off turns both off, in one click, and the card goes', { counts: await kc.api('/counts'), crashes: await kc.api('/crashes/sending') })
+    await ctx.close()
+    const { ctx: c2, p: p2 } = await page(b, kc.url)
+    await p2.locator('.topbar .search-btn').waitFor({ timeout: 15000 }).catch(() => {})
+    await p2.waitForTimeout(1500)
+    ok((await p2.locator('.stats-notice').count()) === 0, 'and it doesn\'t come back')
+    await c2.close()
+    kc.stop()
+  }
 
   // ---------- In the app: Settings › About & Updates ----------
   const about = async (kit, name) => {

@@ -1,8 +1,8 @@
 # Bridge AI's usage counts and crash report server
 
-For whoever runs it. Everyone else can ignore this file: Bridge AI sends nothing here unless you turn
-on **Share anonymous usage counts** or **Send crash reports by themselves** (Settings › About &
-Updates; each off unless you do), or click **Send to Bold Bridge** on a crash's report.
+For whoever runs it. Everyone else can ignore this file. Bridge AI sends usage stats and crash
+reports here unless they're turned off (Settings › About & Updates, or `DO_NOT_TRACK=1`), and a
+crash's report when someone clicks **Send to Bold Bridge**.
 
 [worker.js](worker.js) is a Cloudflare Worker at `https://counts.boldbridge.ai`, run once by the
 project. Each Bridge AI with sharing on sends it one report per week, once the week is over
@@ -35,6 +35,24 @@ older than ten weeks go.
 Anyone can post a report, so the totals are as good as what's sent: a determined person could add
 made-up weeks. That's the cost of having no IDs. A Cloudflare rate limiting rule on the zone
 (below) keeps one network from adding many.
+
+## The rest of a week's report, and a day's
+
+- **Each other answer kept on its own** in `dims` (week, dim, value, n): the OS's version, the chip's
+  family, memory, cores, phones paired, other computers linked, each feature's value
+  (`feature.<name>`) and each agent installed (`agent`). Answers aren't kept together, so a rare
+  combination can't stand out. A value that isn't on the public list is dropped (features, agents)
+  or kept as `other`.
+- **A day's report** (`POST /v1/day`): `daily` (day, version, OS, how it's installed, crashed,
+  starts, n) and `daily_updates` (day, version, the version it came from, n): installs on each
+  version each day, crash-free days, and adoption of each release. Counted once by its nonce, as
+  the week's.
+
+## Changed from the admin view
+
+The `settings` table, which the admin view (the planning repo's `admin/`) writes, is read each minute
+over wrangler.toml's vars: `countsOff` and `crashesOff` (the kill switches: "1" or a sentence),
+`crashesPerDay`, and `crashDays` (how long crash reports are kept).
 
 ## Crash reports
 

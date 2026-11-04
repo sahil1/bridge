@@ -1,5 +1,5 @@
 {
-  "about": "Usage counts and crash reports: everything Bridge AI can count and send, if you turn on Share anonymous usage counts or Send crash reports (each off unless you do). server/counts.js counts only the names here, and a test fails if the code counts any other; server/crashes.js sends only the report described under crashReports. Adding to either is a change to this file, in public.",
+  "about": "Usage stats and crash reports: everything Bridge AI can count and send. Both are on unless you turn them off (Settings › About & Updates), DO_NOT_TRACK=1 or BRIDGE_TELEMETRY=0 keeps them off, and the first time they're on a card says so. server/counts.js sends only the names and values here, and a test fails if the code counts any other; server/crashes.js sends only the report described under crashReports. Adding to either is a change to this file, in public.",
   "schema": 1,
   "endpoint": "https://counts.boldbridge.ai/v1/week",
   "endpointAbout": "Where a week's report goes (HTTPS POST, JSON): the project's usage counts server, counts/worker.js in this repo, which keeps only weekly totals. Empty: there's nowhere to send them, so sharing isn't offered.",
@@ -16,15 +16,23 @@
     "week": "the ISO week counted, e.g. 2026-W44",
     "app": "Bridge AI's version",
     "os": "mac, windows or linux",
+    "osVersion": "the OS's version: macOS 15.1, Windows 11 (26100), Ubuntu 24.04 (letters, numbers, spaces, dots, brackets; 40 at most)",
     "arch": "arm64 or x64",
+    "chip": "the chip's family, never the exact part: Apple M2 Pro, Intel Core i7, Intel Core Ultra 7, AMD Ryzen 7, Qualcomm Snapdragon, or 'other'",
+    "memory": "memory, as one of values.memory",
+    "cores": "CPU cores, as one of values.cores",
     "install": "desktop (the app), source (a clone) or docker",
     "layout": "simple or everything",
     "runtime": "builtin or herdr",
     "phone": "paired or none",
+    "phones": "phones paired with this computer, as one of values.phones",
+    "computers": "other computers linked to this one, as one of values.computers",
     "installAge": "how long Bridge AI has been on this computer: week 1, 2-4 weeks, 5-12 weeks or 13+ weeks",
     "daysActive": "on how many days of the week something was counted, 0 to 7",
     "activeTime": "how long Bridge AI was in use that week (a window of it in front on this computer, with you typing, clicking, scrolling or touching it in the last two minutes; not phones), as one of timeRanges",
     "openTime": "how long Bridge AI was running that week, used or not, as one of timeRanges",
+    "features": "the features on, each as one of its values under features (only those)",
+    "agents": "the coding agents installed on this computer, each one of agents",
     "counts": "each counter below that isn't 0, as a bucket",
     "nonce": "random, new for each report, so a report sent twice is counted once; it says nothing about you or this computer"
   },
@@ -58,7 +66,12 @@
     "errors.window": "Times a part of the window broke and showed its error",
     "crashes.server": "Times Bridge AI's server stopped by itself",
     "crashes.window": "Times the desktop app's window stopped (its renderer went away)",
-    "crashes.gpu": "Times the desktop app's graphics process stopped"
+    "crashes.gpu": "Times the desktop app's graphics process stopped",
+    "files.sent": "Files sent to another of your computers",
+    "insights.run": "Insights asked for",
+    "dictations.saved": "Dictations saved",
+    "meetings.toAgents": "A meeting's action item handed to an agent",
+    "whiteboards.drawn": "Whiteboards drawn by a model"
   },
   "timeRanges": [
     "0",
@@ -82,6 +95,237 @@
       "title": "the report's title, as Report on GitHub shows it",
       "what": "what happened, and what you wrote about what you were doing, when you send one yourself",
       "details": "its details: what crashed, the error and where in Bridge AI's code, the settings that change how it runs, and the last lines of its log, as Report on GitHub shows them"
+    }
+  },
+  "values": {
+    "memory": [
+      "under 8 GB",
+      "8-15 GB",
+      "16-31 GB",
+      "32-63 GB",
+      "64+ GB"
+    ],
+    "cores": [
+      "1-4",
+      "5-8",
+      "9-12",
+      "13-16",
+      "17+"
+    ],
+    "phones": [
+      "0",
+      "1",
+      "2",
+      "3+"
+    ],
+    "computers": [
+      "0",
+      "1",
+      "2",
+      "3",
+      "4+"
+    ]
+  },
+  "agents": [
+    "claude",
+    "codex",
+    "gemini",
+    "grok",
+    "cursor",
+    "copilot",
+    "opencode",
+    "amp",
+    "qwen",
+    "aider",
+    "goose",
+    "muse",
+    "crush"
+  ],
+  "features": {
+    "chief": {
+      "about": "the agent the Chief of Staff runs on",
+      "values": [
+        "claude",
+        "codex",
+        "gemini",
+        "grok",
+        "cursor",
+        "copilot",
+        "opencode",
+        "amp",
+        "qwen",
+        "aider",
+        "goose",
+        "muse",
+        "crush",
+        "chat"
+      ]
+    },
+    "defaultAgent": {
+      "about": "the agent New agent starts by default",
+      "values": [
+        "claude",
+        "codex",
+        "gemini",
+        "grok",
+        "cursor",
+        "copilot",
+        "opencode",
+        "amp",
+        "qwen",
+        "aider",
+        "goose",
+        "muse",
+        "crush",
+        "chat"
+      ]
+    },
+    "planUsage": {
+      "about": "how much of your plan is left, read from your agents' providers",
+      "values": [
+        "on",
+        "off"
+      ]
+    },
+    "updateChecks": {
+      "about": "checking GitHub for a newer version",
+      "values": [
+        "on",
+        "off"
+      ]
+    },
+    "meetingsDetect": {
+      "about": "noticing when a call starts",
+      "values": [
+        "on",
+        "off"
+      ]
+    },
+    "callAudio": {
+      "about": "recording the call's audio in meeting notes",
+      "values": [
+        "on",
+        "off"
+      ]
+    },
+    "nameSpeakers": {
+      "about": "naming who spoke in a meeting",
+      "values": [
+        "on",
+        "off"
+      ]
+    },
+    "editByVoice": {
+      "about": "edit by voice (a model to edit with)",
+      "values": [
+        "on",
+        "off"
+      ]
+    },
+    "localModel": {
+      "about": "the local model built in, downloaded",
+      "values": [
+        "on",
+        "off"
+      ]
+    },
+    "speech": {
+      "about": "where speech is turned into text: on this computer, Apple's, or a service",
+      "values": [
+        "local",
+        "apple",
+        "service"
+      ]
+    },
+    "keepAgents": {
+      "about": "agents kept running when Bridge AI closes",
+      "values": [
+        "on",
+        "off"
+      ]
+    },
+    "resumeWork": {
+      "about": "picking up agents' work after a restart",
+      "values": [
+        "on",
+        "off"
+      ]
+    },
+    "alertSounds": {
+      "about": "notification sounds",
+      "values": [
+        "on",
+        "off"
+      ]
+    },
+    "relay": {
+      "about": "the relay phones reach this computer through: your own, Bridge AI's, or none",
+      "values": [
+        "own",
+        "hosted",
+        "none"
+      ]
+    },
+    "location": {
+      "about": "a place set for the weather (only whether one is, never which)",
+      "values": [
+        "on",
+        "off"
+      ]
+    },
+    "language": {
+      "about": "the window's language",
+      "values": [
+        "en",
+        "de",
+        "es",
+        "fr",
+        "hi",
+        "ja",
+        "pt-BR",
+        "zh-CN"
+      ]
+    },
+    "appearance": {
+      "about": "light, dark or matching the computer",
+      "values": [
+        "light",
+        "dark",
+        "system"
+      ]
+    },
+    "theme": {
+      "about": "the window's theme",
+      "values": [
+        "bridge",
+        "aubergine",
+        "midnight",
+        "ocean",
+        "forest",
+        "indigo",
+        "berry",
+        "ember",
+        "graphite",
+        "sand",
+        "mint",
+        "sky",
+        "custom"
+      ]
+    }
+  },
+  "dayReport": {
+    "about": "Sent the day after each day Bridge AI ran, to the same server (/v1/day): which version it ran, the one it updated from that day if it did, the OS and how it's installed, how many times it started, and whether it crashed. With no ID, so each version's adoption and crash-free days can be counted, never followed.",
+    "report": {
+      "schema": "this file's schema number",
+      "day": "the day, on the computer's calendar, e.g. 2026-11-04",
+      "app": "Bridge AI's version at the end of the day",
+      "from": "the version it updated from that day, or null",
+      "os": "mac, windows or linux",
+      "arch": "arm64 or x64",
+      "install": "desktop, source or docker",
+      "starts": "how many times it started, as one of buckets",
+      "crashed": "true if its server, window or graphics stopped by itself that day",
+      "nonce": "random, new for each report"
     }
   }
 }

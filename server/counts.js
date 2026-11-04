@@ -1,18 +1,24 @@
-// Usage counts: which of Bridge AI's features get used, as numbers, only if you turn on Share
-// anonymous usage counts (Settings › About & Updates; off unless you do, and never asked at setup).
-// While it's on, the names on the public list (shared/telemetry-schema.json) are counted on this
-// computer, a week at a time (<data>/telemetry/<week>.json); once a week is over its report goes to
-// the project's endpoint, in ranges ("2-5"), and a copy of what went stays in telemetry/sent.
-// While it's off, nothing is counted and nothing is sent, and turning it off forgets what wasn't
-// sent yet. A report never has a name, a path, a repo or branch, a prompt, a transcript, what an
-// agent wrote, an email, a host, an account, an exact time, or an ID for you or this computer: its
-// nonce is new for each report, so the same install can't be followed from one week to the next.
-// DO_NOT_TRACK=1 or BRIDGE_TELEMETRY=0 keeps it off, and with no endpoint set it isn't offered.
+// Usage stats: which of Bridge AI's features are on and get used, how long it's used, the computer
+// it runs on, and whether it crashed, as numbers in ranges, sent to the project to see what to build
+// and fix. On unless you turn it off (Settings › About & Updates, Share anonymous usage stats), and
+// said once, in a card, the first time it's on. DO_NOT_TRACK=1 or BRIDGE_TELEMETRY=0 keeps it off,
+// and with no endpoint set it isn't offered. Turning it off stops it at once and forgets what wasn't
+// sent yet.
 //
-// Time, too, a week at a time: how long Bridge AI was in use (a window of it in front, with someone
-// typing, clicking or talking to it in the last two minutes: the window says so once a minute,
-// activity()) and how long it was running at all, each sent as a range ("1-5 hours"), never as
-// minutes or times of day.
+// Two reports, each only the names and values on the public list (shared/telemetry-schema.json):
+// - a week's (<data>/telemetry/<week>.json), sent once the week is over: the install (version,
+//   system and its version, chip, memory, cores, how it's installed, other computers linked and
+//   phones paired, as counts), the features it has on, the agents installed, the counts of what was
+//   used, days used, and time in use and running (a window of it in front, with someone typing,
+//   clicking or touching it in the last two minutes: the window says so once a minute; and how long
+//   it ran at all), each as a range ("1-5 hours"), never minutes or times of day.
+// - a day's (<data>/telemetry/days/<day>.json), sent the next day: the version that day (and the
+//   one before it, the day it updated), the OS and how it's installed, how many times it started,
+//   and whether it crashed, so each version's adoption and crash-free days can be seen.
+// A copy of each report sent stays in telemetry/sent. Neither ever has a name, a path, a repo or
+// branch, a prompt, a transcript, what an agent wrote, an email, a host, an account, an exact time,
+// or an ID for you or this computer: each report's nonce is new, so the same install can't be
+// followed from one report to the next.
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
@@ -50,11 +56,11 @@ export function weekOf(d = now()) {
   return `${t.getFullYear()}-W${String(n).padStart(2, '0')}`
 }
 
-let cfg = null // the server's settings: counts.share, counts.stopped
+let cfg = null // the server's settings: counts.share (on unless false), counts.stopped, counts.noticed
 let context = async () => ({}) // what the report says about this install (index.js)
 let saveSettings = () => {} // (patch) => saved
 export function configure(c, { about, save } = {}) { cfg = c; if (about) context = about; if (save) saveSettings = save }
-const sharing = () => !!(cfg?.counts?.share && endpoint() && !refused())
+const sharing = () => !!(cfg && cfg.counts?.share !== false && endpoint() && !refused())
 
 // This week's counts, in memory and written down a few seconds after they change.
 let week = null // { week, counts: { name: n }, days: [1..7], active, open (minutes), nonce, installAge, about }
@@ -118,15 +124,32 @@ export function report(w) {
   return {
     schema: SCHEMA.schema,
     week: w.week,
-    app: c.app, os: c.os, arch: c.arch, install: c.install, layout: c.layout, runtime: c.runtime, phone: c.phone,
+    app: c.app, os: c.os, osVersion: c.osVersion, arch: c.arch, chip: c.chip, memory: c.memory, cores: c.cores,
+    install: c.install, layout: c.layout, runtime: c.runtime, phone: c.phone, phones: c.phones, computers: c.computers,
     installAge: w.installAge || null,
     daysActive: w.days.length,
     activeTime: timeRange(w.active),
     openTime: timeRange(w.open),
+    features: features({ ...(c.features || {}), ...(w.window || {}) }),
+    agents: (c.agents || []).filter((k) => AGENT_KINDS.has(k)).sort(),
     counts: Object.fromEntries(Object.entries(w.counts).filter(([k, n]) => NAMES.has(k) && n > 0).sort(([a], [b]) => a.localeCompare(b)).map(([k, n]) => [k, bucket(n)])),
     nonce: w.nonce,
   }
 }
+// Only the features on the public list, each with one of its values.
+const FEATURES = SCHEMA.features || {}
+const AGENT_KINDS = new Set(SCHEMA.agents || [])
+const features = (f) => Object.fromEntries(Object.keys(FEATURES).sort().filter((k) => FEATURES[k].values.includes(f[k])).map((k) => [k, f[k]]))
+// What a window of Bridge AI says about itself, once as it opens: its language and its look.
+export async function windowSaid(b = {}) {
+  if (!sharing()) return { counted: false }
+  const w = await current()
+  w.window = features({ language: b.language, appearance: b.appearance, theme: b.theme })
+  later()
+  return { counted: true }
+}
+// The card that says it's on, shown once.
+export function noticed() { saveSettings({ counts: { noticed: new Date().toISOString().slice(0, 10) } }); return status() }
 
 // What Settings shows: whether sharing is offered here and on, where reports go, what can be
 // counted, and the reports sent.
@@ -138,6 +161,7 @@ export async function status() {
     available: !!to && !refused(),
     refused: refused(),
     share: sharing(),
+    notice: sharing() && !cfg?.counts?.noticed,
     to,
     stopped: cfg?.counts?.stopped || null,
     counters: SCHEMA.counters,
@@ -161,11 +185,14 @@ export async function sentReport(w) {
 // Turned on, or off. Off forgets what was counted and not sent yet.
 export async function setShare(on) {
   if (on && (!endpoint() || refused())) throw new Error(refused() ? `Usage counts are off on this computer (${refused()})` : 'There\'s nowhere to send usage counts yet')
-  saveSettings({ counts: { share: !!on, stopped: null } })
+  saveSettings({ counts: { share: !!on, stopped: null, noticed: cfg?.counts?.noticed || new Date().toISOString().slice(0, 10) } })
   if (!on) {
     clearTimeout(writing)
     week = null
+    day = null
     for (const f of await fs.promises.readdir(DIR).catch(() => [])) if (/^\d{4}-W\d\d\.json$/.test(f)) await fs.promises.rm(path.join(DIR, f), { force: true })
+    await fs.promises.rm(DAYS, { recursive: true, force: true })
+    await fs.promises.rm(LAST, { force: true })
   }
   return status()
 }
@@ -199,11 +226,75 @@ export async function send() {
     await fs.promises.rm(file, { force: true })
     out.push(w)
   }
-  return { sent: out }
+  return { sent: out, days: sharing() ? await sendDays() : [] }
 }
 async function setShareOffQuietly() {
   week = null
+  day = null
   for (const f of await fs.promises.readdir(DIR).catch(() => [])) if (/^\d{4}-W\d\d\.json$/.test(f)) await fs.promises.rm(path.join(DIR, f), { force: true })
+  await fs.promises.rm(DAYS, { recursive: true, force: true })
+}
+
+// ---------- A day's report ----------
+const DAYS = path.join(DIR, 'days')
+const LAST = path.join(DIR, 'version.json') // the version this computer ran last, to tell an update
+// The day a moment is in, on this computer's calendar: '2026-11-04'.
+export const dayOf = (d = now()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+let day = null // { day, app, from, starts, crashed, nonce, about }
+const sys = (c) => ({ os: c.os, arch: c.arch, install: c.install })
+async function currentDay() {
+  const d = dayOf()
+  if (day?.day !== d) {
+    const kept = await fs.promises.readFile(path.join(DAYS, `${d}.json`), 'utf8').then(JSON.parse, () => null)
+    if (kept?.day === d) day = kept
+    else {
+      const last = await fs.promises.readFile(LAST, 'utf8').then(JSON.parse, () => null)
+      day = { day: d, app: last?.app || null, from: null, starts: 0, crashed: false, nonce: crypto.randomBytes(12).toString('hex'), about: {} }
+    }
+  }
+  // The version now; an update during the day keeps the one it came from.
+  const about = await context()
+  if (about.app && about.app !== day.app) { if (day.app) day.from ||= day.app; day.app = about.app }
+  day.about = sys(about)
+  return day
+}
+async function writeDay() {
+  if (!day) return
+  await fs.promises.mkdir(DAYS, { recursive: true })
+  await fs.promises.writeFile(path.join(DAYS, `${day.day}.json`), JSON.stringify(day))
+  if (day.app) await fs.promises.writeFile(LAST, JSON.stringify({ app: day.app }))
+}
+// Bridge AI started, or crashed: written down on today's.
+export async function launched() { if (!sharing()) return; const d = await currentDay(); d.starts++; await writeDay() }
+export async function crashed() { if (!sharing()) return; const d = await currentDay(); d.crashed = true; await writeDay() }
+// A day's report, exactly as it's sent.
+export function dayReport(d) {
+  const c = d.about || {}
+  return { schema: SCHEMA.schema, day: d.day, app: d.app, from: d.from || null, os: c.os, arch: c.arch, install: c.install, starts: bucket(d.starts), crashed: !!d.crashed, nonce: d.nonce }
+}
+const dayEndpoint = () => { try { return new URL('/v1/day', endpoint()).href } catch { return null } }
+// Each day that's over goes, once; one that can't is tried again, and forgotten after two weeks.
+async function sendDays() {
+  const today = dayOf()
+  const out = []
+  for (const f of (await fs.promises.readdir(DAYS).catch(() => [])).filter((x) => /^\d{4}-\d\d-\d\d\.json$/.test(x)).sort()) {
+    const d = f.slice(0, -5)
+    if (d >= today) continue
+    const file = path.join(DAYS, f)
+    const kept = await fs.promises.readFile(file, 'utf8').then(JSON.parse, () => null)
+    if (!kept?.app) { await fs.promises.rm(file, { force: true }); continue }
+    const body = dayReport(kept)
+    let r
+    try { r = await fetch(dayEndpoint(), { method: 'POST', headers: { 'content-type': 'application/json', 'user-agent': 'bridge-ai' }, body: JSON.stringify(body), signal: AbortSignal.timeout(10000) }) } catch { break }
+    const said = await r.json().catch(() => ({}))
+    if (said?.stop) { saveSettings({ counts: { share: false, stopped: String(said.why || 'The project stopped collecting usage stats.').slice(0, 300) } }); await setShareOffQuietly(); break }
+    if (!r.ok) { if (d < dayOf(new Date(now() - 14 * 864e5))) await fs.promises.rm(file, { force: true }); break }
+    await fs.promises.mkdir(path.join(SENT, 'days'), { recursive: true })
+    await fs.promises.writeFile(path.join(SENT, 'days', f), JSON.stringify(body, null, 2))
+    await fs.promises.rm(file, { force: true })
+    out.push(d)
+  }
+  return out
 }
 
 // A minute of Bridge AI in use, said by a window of it (POST /api/counts/active): counted once a
@@ -229,11 +320,14 @@ async function running() {
   const w = await current()
   w.open = (w.open || 0) + 1
   if (++ticks % 10 === 0) later() // written down every ten minutes, and as the server stops
+  // A server that runs past midnight has a day's report for each day it ran.
+  if (day?.day !== dayOf()) { await currentDay(); await writeDay() }
 }
 
 // Looks for a week to send a minute after the server starts, then every six hours; and counts the
 // minutes it runs.
 export function start() {
+  launched().catch(() => {})
   const tick = () => send().catch(() => {})
   setTimeout(tick, Number(process.env.BRIDGE_COUNTS_FIRST_MS || 60000)).unref?.()
   setInterval(tick, 6 * 3600 * 1000).unref?.()

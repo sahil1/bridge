@@ -4,7 +4,7 @@ import { api } from '../../api.js'
 import { t } from '../../i18n/index.js'
 import './counts.css'
 
-// Settings › About & Updates › Crash reports (server/crashes.js): off unless you turn it on, and
+// Settings › About & Updates › Crash reports (server/crashes.js): on unless you turn it off, and
 // shown only where it can work (the project has a crash server, and DO_NOT_TRACK isn't set). On, a
 // crash's report goes to the project by itself: the same text Report on GitHub shows, with names,
 // folders, emails and keys taken out. Each report sent can be read here, as it went.
@@ -32,7 +32,7 @@ export default function CrashReports() {
       {s.refused ? <p className="muted small">{t('Off on this computer: {setting} is set.', { setting: s.refused })}</p> : (
         <>
           <label className="ph-check"><input type="checkbox" checked={!!s.send} disabled={busy} onChange={toggle} /> {t('Send crash reports by themselves')}</label>
-          <p className="muted small">{t('When something in Bridge AI crashes, its report goes to {host}: what crashed, the error and where in Bridge AI\'s code, the version, your system and the last lines of its log, the same text Report on GitHub shows. Names, folders, emails and keys are taken out first. Kept for 90 days, with no ID for you or this computer. Off unless you turn it on.', { host: s.to })}</p>
+          <p className="muted small">{t('When something in Bridge AI crashes, its report goes to {host}: what crashed, the error and where in Bridge AI\'s code, the version, your system and the last lines of its log, the same text Report on GitHub shows. Names, folders, emails and keys are taken out first. Kept for 90 days, with no ID for you or this computer. On unless you turn it off.', { host: s.to })}</p>
           {s.stopped && <p className="st-note"><Icon name="info" size={13} /><span>{t('The project asked Bridge AI to stop sending crash reports: {why}', { why: s.stopped })}</span></p>}
           {s.sent?.length > 0 && (
             <div className="st-row">
