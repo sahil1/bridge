@@ -1,6 +1,6 @@
-// Bridge AI's usage counts server (counts.boldbridge.ai): a Cloudflare Worker, run once by the
-// project, where a week's report goes from each Bridge AI that has Share anonymous usage counts
-// turned on (server/counts.js; off unless someone turns it on).
+// Bridge AI's usage stats server (counts.boldbridge.ai): a Cloudflare Worker, run once by the
+// project, where a week's report (and a day's, /v1/day) goes from each Bridge AI that has Share
+// anonymous usage counts on (server/counts.js; on unless someone turns it off).
 //
 // A report is checked against the public list (shared/telemetry-schema.json): a name that isn't on
 // it, or a value that isn't one of its ranges, is dropped, never kept. What's kept is only totals
@@ -37,7 +37,7 @@ const ONE_OF = {
 }
 const MAX_BYTES = 16 * 1024
 const KEEP_NONCES_DAYS = 70 // Bridge AI gives up on a week after eight
-const KEEP_CRASHES_DAYS = 90
+const KEEP_CRASHES_DAYS = 90 // unless the admin view says otherwise (settings, crashDays)
 const DAY = 24 * 3600 * 1000
 
 // The tables, made the first time they're needed (so a new database needs nothing run by hand).
@@ -49,6 +49,15 @@ export const TABLES = [
     PRIMARY KEY (week, app, os, arch, install, layout, runtime, phone, install_age, days_active, active_time, open_time))`,
   `CREATE TABLE IF NOT EXISTS counts (week TEXT NOT NULL, name TEXT NOT NULL, bucket TEXT NOT NULL, os TEXT NOT NULL,
     install_age TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (week, name, bucket, os, install_age))`,
+  // Each other answer a week's report gives (system version, chip, memory, cores, phones, computers,
+  // each feature, each agent installed), as its own total: never the answers together.
+  'CREATE TABLE IF NOT EXISTS dims (week TEXT NOT NULL, dim TEXT NOT NULL, value TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (week, dim, value))',
+  // A day's reports: installs that ran each version that day, by system and whether they crashed,
+  // and the updates that day, from which version.
+  'CREATE TABLE IF NOT EXISTS daily (day TEXT NOT NULL, app TEXT NOT NULL, os TEXT NOT NULL, install TEXT NOT NULL, crashed INTEGER NOT NULL, starts TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (day, app, os, install, crashed, starts))',
+  'CREATE TABLE IF NOT EXISTS daily_updates (day TEXT NOT NULL, app TEXT NOT NULL, from_app TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (day, app, from_app))',
+  // What the admin view can change without a deploy: countsOff, crashesOff, crashesPerDay, crashDays.
+  'CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)',
   `CREATE TABLE IF NOT EXISTS crash_reports (id TEXT PRIMARY KEY, day TEXT NOT NULL, app TEXT NOT NULL, os TEXT NOT NULL,
     arch TEXT NOT NULL, install TEXT NOT NULL, kind TEXT NOT NULL, fingerprint TEXT NOT NULL, title TEXT NOT NULL,
     what TEXT NOT NULL, details TEXT NOT NULL)`,
@@ -61,7 +70,19 @@ function tables(db) {
 }
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } })
-const off = (env) => { const v = String(env.COUNTS_OFF ?? '0').trim(); return v && v !== '0' ? (v === '1' ? 'Bridge AI\'s project has stopped collecting usage counts.' : v.slice(0, 300)) : null }
+// The admin view's settings (the settings table), over wrangler.toml's vars; read again each minute
+// (SETTINGS_CACHE_MS: the tests').
+let kept = { at: 0, db: null, v: {} }
+export async function settingsOf(env) {
+  if (!env.DB) return {}
+  if (kept.db === env.DB && Date.now() - kept.at < Number(env.SETTINGS_CACHE_MS ?? 60000)) return kept.v
+  await tables(env.DB)
+  const rows = (await env.DB.prepare('SELECT key, value FROM settings').all()).results || []
+  kept = { at: Date.now(), db: env.DB, v: Object.fromEntries(rows.map((r) => [r.key, r.value])) }
+  return kept.v
+}
+const stopped = (v, what) => { v = String(v ?? '0').trim(); return v && v !== '0' ? (v === '1' ? `Bridge AI's project has stopped collecting ${what}.` : v.slice(0, 300)) : null }
+const off = async (env) => stopped((await settingsOf(env)).countsOff ?? env.COUNTS_OFF, 'usage stats')
 
 // The ISO week a moment is in, in UTC: '2026-W45'.
 export function weekOf(t) {
@@ -91,11 +112,29 @@ export function check(r, now = new Date()) {
     if (NAMES.has(k) && BUCKETS.has(v)) counts[k] = v
     else dropped++
   }
-  return { week: r.week, nonce: r.nonce, about, counts, dropped }
+  // The rest, each kept as its own total (dims).
+  const dims = []
+  for (const k of ['memory', 'cores', 'phones', 'computers']) if (r[k] != null) dims.push([k, VALUES[k]?.includes(r[k]) ? r[k] : 'other'])
+  if (r.osVersion != null) dims.push(['osVersion', textOf(r.osVersion)])
+  if (r.chip != null) dims.push(['chip', textOf(r.chip)])
+  for (const [k, v] of Object.entries(r.features && typeof r.features === 'object' && !Array.isArray(r.features) ? r.features : {})) {
+    if (FEATURES[k]?.values?.includes(v)) dims.push([`feature.${k}`, v])
+    else dropped++
+  }
+  for (const k of new Set(Array.isArray(r.agents) ? r.agents : [])) {
+    if (AGENTS.has(k)) dims.push(['agent', k])
+    else dropped++
+  }
+  return { week: r.week, nonce: r.nonce, about, counts, dims, dropped }
 }
+// A system's version or a chip's family, as the app writes them, or "other".
+const textOf = (v) => (typeof v === 'string' && /^[A-Za-z][\w .,()+-]{0,39}$/.test(v) ? v : 'other')
+const VALUES = SCHEMA.values || {}
+const FEATURES = SCHEMA.features || {}
+const AGENTS = new Set(SCHEMA.agents || [])
 
 async function take(req, env) {
-  const stop = off(env)
+  const stop = await off(env)
   if (stop) return json({ ok: false, stop: true, why: stop })
   if (!/^application\/json\b/i.test(req.headers.get('content-type') || '')) return json({ ok: false, error: 'Send JSON' }, 415)
   const text = await req.text()
@@ -116,13 +155,51 @@ async function take(req, env) {
       .bind(r.week, a.app, a.os, a.arch, a.install, a.layout, a.runtime, a.phone, a.installAge, a.daysActive, a.activeTime, a.openTime),
     ...Object.entries(r.counts).map(([name, bucket]) => db.prepare(`INSERT INTO counts (week, name, bucket, os, install_age, n)
       VALUES (?, ?, ?, ?, ?, 1) ON CONFLICT DO UPDATE SET n = n + 1`).bind(r.week, name, bucket, a.os, a.installAge)),
+    ...r.dims.map(([dim, value]) => db.prepare('INSERT INTO dims (week, dim, value, n) VALUES (?, ?, ?, 1) ON CONFLICT DO UPDATE SET n = n + 1').bind(r.week, dim, value)),
   ])
   return json({ ok: true, ...(r.dropped ? { dropped: r.dropped } : {}) })
 }
 
+// ---------- A day's report ----------
+const DAY_RE = /^\d{4}-\d\d-\d\d$/
+export function checkDay(r, now = new Date()) {
+  if (!r || typeof r !== 'object' || Array.isArray(r)) return { error: 'Not a report' }
+  if (!Number.isInteger(r.schema) || r.schema < 1) return { error: 'No schema number' }
+  if (typeof r.nonce !== 'string' || !/^[0-9a-f]{16,64}$/.test(r.nonce)) return { error: 'No nonce' }
+  if (typeof r.day !== 'string' || !DAY_RE.test(r.day) || Number.isNaN(Date.parse(r.day))) return { error: 'No day' }
+  // A day that's over, from the last two weeks (a day either side for the sender's time zone).
+  if (r.day > new Date(+now + DAY).toISOString().slice(0, 10) || r.day < new Date(+now - 15 * DAY).toISOString().slice(0, 10)) return { error: 'Not a recent day' }
+  const version = (v) => (typeof v === 'string' && /^\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(v) ? v : 'other')
+  return {
+    day: r.day, nonce: r.nonce, app: version(r.app), from: r.from == null ? null : version(r.from),
+    os: ONE_OF.os.includes(r.os) ? r.os : 'other', install: ONE_OF.install.includes(r.install) ? r.install : 'other',
+    crashed: r.crashed === true ? 1 : 0, starts: BUCKETS.has(r.starts) ? r.starts : 'other',
+  }
+}
+async function takeDay(req, env) {
+  const stop = await off(env)
+  if (stop) return json({ ok: false, stop: true, why: stop })
+  if (!/^application\/json\b/i.test(req.headers.get('content-type') || '')) return json({ ok: false, error: 'Send JSON' }, 415)
+  const text = await req.text()
+  if (text.length > 4096) return json({ ok: false, error: 'Too big' }, 413)
+  let body
+  try { body = JSON.parse(text) } catch { return json({ ok: false, error: 'Not JSON' }, 400) }
+  const r = checkDay(body)
+  if (r.error) return json({ ok: false, error: r.error }, 400)
+  const db = env.DB
+  await tables(db)
+  const first = await db.prepare('INSERT OR IGNORE INTO seen (nonce, day) VALUES (?, ?)').bind(r.nonce, new Date().toISOString().slice(0, 10)).run()
+  if (!first.meta?.changes) return json({ ok: true, duplicate: true })
+  await db.batch([
+    db.prepare('INSERT INTO daily (day, app, os, install, crashed, starts, n) VALUES (?, ?, ?, ?, ?, ?, 1) ON CONFLICT DO UPDATE SET n = n + 1').bind(r.day, r.app, r.os, r.install, r.crashed, r.starts),
+    ...(r.from && r.from !== r.app ? [db.prepare('INSERT INTO daily_updates (day, app, from_app, n) VALUES (?, ?, ?, 1) ON CONFLICT DO UPDATE SET n = n + 1').bind(r.day, r.app, r.from)] : []),
+  ])
+  return json({ ok: true })
+}
+
 // ---------- Crash reports ----------
 const KINDS = ['ui', 'server', 'window', 'gpu']
-const offCrashes = (env) => { const v = String(env.CRASHES_OFF ?? '0').trim(); return v && v !== '0' ? (v === '1' ? 'Bridge AI\'s project has stopped collecting crash reports.' : v.slice(0, 300)) : null }
+const offCrashes = async (env) => stopped((await settingsOf(env)).crashesOff ?? env.CRASHES_OFF, 'crash reports')
 const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('')
 // What a crash is, whoever had it: its kind, the error's first line with numbers and names taken
 // out, and the first frames of its stack in Bridge AI's own code, without line numbers. Reports
@@ -149,7 +226,7 @@ export function checkCrash(r) {
   }
 }
 async function takeCrash(req, env) {
-  const stop = offCrashes(env)
+  const stop = await offCrashes(env)
   if (stop) return json({ ok: false, stop: true, why: stop })
   if (!/^application\/json\b/i.test(req.headers.get('content-type') || '')) return json({ ok: false, error: 'Send JSON' }, 415)
   const text = await req.text()
@@ -162,7 +239,7 @@ async function takeCrash(req, env) {
   await tables(db)
   const day = new Date().toISOString().slice(0, 10)
   // A ceiling a day, so a flood can't fill the database; Bridge AI lets a report go when it's hit.
-  const cap = Number(env.CRASHES_PER_DAY || 1000)
+  const cap = Number((await settingsOf(env)).crashesPerDay ?? env.CRASHES_PER_DAY ?? 1000)
   const today = (await db.prepare('SELECT COUNT(*) AS n FROM crash_reports WHERE day = ?').bind(day).first())?.n || 0
   if (today >= cap) return json({ ok: false, error: 'Enough reports for today' }, 429)
   const id = hex(crypto.getRandomValues(new Uint8Array(8)))
@@ -172,48 +249,35 @@ async function takeCrash(req, env) {
   return json({ ok: true })
 }
 
-const CRASH_PAGE = (stop) => `Bridge AI's crash report server.
-
-If you turn on Send crash reports in Bridge AI (Settings > About & Updates; off unless you do), or
-click Send to Bold Bridge on a crash's report, that report comes here: the same text Report on
-GitHub shows, with names, folders, emails and keys taken out. Each is kept for 90 days, with no ID
-for you or your computer, and IP addresses aren't stored.
-${stop ? `\nIt isn't collecting anything now: ${stop}\n` : ''}
-What a report has: https://github.com/sahil1/bridge/blob/main/shared/telemetry-schema.json
-This server's code: https://github.com/sahil1/bridge/tree/main/counts
-Privacy: https://github.com/sahil1/bridge/blob/main/PRIVACY.md
-`
-
-const PAGE = (stop) => `Bridge AI's usage counts server.
-
-If you turn on Share anonymous usage counts in Bridge AI (Settings > About & Updates; off unless you
-do), it sends a week's counts here once the week is over: numbers in ranges, with no name and no ID
-for you or your computer. Only weekly totals are kept, and IP addresses aren't stored.
-${stop ? `\nIt isn't collecting anything now: ${stop}\n` : ''}
-What can be counted: https://github.com/sahil1/bridge/blob/main/shared/telemetry-schema.json
-This server's code: https://github.com/sahil1/bridge/tree/main/counts
-Privacy: https://github.com/sahil1/bridge/blob/main/PRIVACY.md
-`
+// Nothing is read from here: these addresses only take reports. Anyone who opens one in a browser
+// goes to what the privacy policy says about it (its headings' anchors, as GitHub makes them).
+const PRIVACY = {
+  counts: 'https://boldbridge.ai/privacy#usage-stats-on-unless-you-turn-them-off',
+  crashes: 'https://boldbridge.ai/privacy#crash-reports-on-unless-you-turn-them-off',
+}
+const away = (to) => new Response(null, { status: 301, headers: { location: to, 'cache-control': 'public, max-age=3600' } })
 
 export default {
   async fetch(req, env) {
     const { pathname, hostname } = new URL(req.url)
     if (hostname.startsWith('crashes.')) {
       if (pathname === '/v1/report') return req.method === 'POST' ? takeCrash(req, env) : json({ ok: false, error: 'POST a report' }, 405)
-      if (pathname === '/' && (req.method === 'GET' || req.method === 'HEAD')) return new Response(CRASH_PAGE(offCrashes(env)), { headers: { 'content-type': 'text/plain; charset=utf-8' } })
+      if (pathname === '/' && (req.method === 'GET' || req.method === 'HEAD')) return away(PRIVACY.crashes)
       return new Response('Not found\n', { status: 404 })
     }
     if (pathname === '/v1/week') {
       if (req.method !== 'POST') return json({ ok: false, error: 'POST a report' }, 405)
       return take(req, env)
     }
-    if (pathname === '/' && (req.method === 'GET' || req.method === 'HEAD')) return new Response(PAGE(off(env)), { headers: { 'content-type': 'text/plain; charset=utf-8' } })
+    if (pathname === '/v1/day') return req.method === 'POST' ? takeDay(req, env) : json({ ok: false, error: 'POST a report' }, 405)
+    if (pathname === '/' && (req.method === 'GET' || req.method === 'HEAD')) return away(PRIVACY.counts)
     return new Response('Not found\n', { status: 404 })
   },
   // Once a day: nonces past ten weeks go, and crash reports past 90 days.
   async scheduled(_event, env) {
     await tables(env.DB)
     await env.DB.prepare('DELETE FROM seen WHERE day < ?').bind(new Date(Date.now() - KEEP_NONCES_DAYS * DAY).toISOString().slice(0, 10)).run()
-    await env.DB.prepare('DELETE FROM crash_reports WHERE day < ?').bind(new Date(Date.now() - KEEP_CRASHES_DAYS * DAY).toISOString().slice(0, 10)).run()
+    const days = Math.max(1, Number((await settingsOf(env)).crashDays ?? KEEP_CRASHES_DAYS) || KEEP_CRASHES_DAYS)
+    await env.DB.prepare('DELETE FROM crash_reports WHERE day < ?').bind(new Date(Date.now() - days * DAY).toISOString().slice(0, 10)).run()
   },
 }

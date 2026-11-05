@@ -4,6 +4,7 @@ import Icon, { StatusDot } from './components/Icon.jsx'
 import { useAppearance } from './appearance.js'
 import ErrorBoundary, { Quiet } from './components/ErrorBoundary.jsx'
 import { CrashNotice } from './components/CrashReport.jsx'
+import StatsNotice from './components/StatsNotice.jsx'
 import Rail from './components/Rail.jsx'
 import Board from './components/Board.jsx'
 import Dock from './components/Dock.jsx'
@@ -715,6 +716,7 @@ function App() {
       {(fleet?.agents || []).filter((a) => a.chief && a.setup).map((a) => <FirstRunAnswers key={a.paneId} agent={a} />)}
       <CallPrompt />
       {!cloudOnly && <Quiet name="Crash notice"><CrashNotice /></Quiet>}
+      {!cloudOnly && conf?.setupDone && !onboarding && <Quiet name="Stats notice"><StatsNotice /></Quiet>}
       {inbox && !cloudOnly && <NeedsYouPanel data={ny.data} refresh={ny.refresh} phone={!wide} focus={inbox.focus} onClose={() => setInbox(null)} onOpen={openItem} />}
       {onboarding && <Onboarding onDone={(pane) => { setOnboarding(false); confPoll.refresh(); if (pane) setTimeout(() => openAgent(pane), 800); else openAgent('view:new') }} />}
       {newAgent && <NewAgent fleet={fleet} initial={newAgent} onClose={() => setNewAgent(null)} onLaunched={onLaunched} onAddAccount={(kind) => setAddAcct({ kind })} onCloudSettings={() => { setNewAgent(null); setSettings('cloud') }} />}

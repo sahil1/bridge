@@ -1,6 +1,7 @@
 // Crashes, so one can be reported on GitHub (shared/crashreport.js), by the person, from text they
-// read first; and, only if they turn on Send crash reports (or click Send to Bold Bridge on one),
-// sent to the project's crash server as that same text (shared/telemetry-schema.json, crashReports).
+// read first; and sent to the project's crash server as that same text, by itself unless Send crash
+// reports is turned off, or when they click Send to Bold Bridge on one (shared/telemetry-schema.json,
+// crashReports).
 // Each crash is counted too, in the usage counts, when those are on.
 //   The server's own: an error nothing caught, written down as the server stops (watch).
 //   The desktop app's window or graphics process going away: the app says so (POST /api/crashes).
@@ -50,6 +51,7 @@ export async function record(b = {}, version) {
   await fs.promises.mkdir(path.dirname(FILE), { recursive: true })
   await fs.promises.writeFile(FILE, JSON.stringify(last))
   counts.add(`crashes.${b.kind}`)
+  counts.crashed().catch(() => {})
   await auto({ kind: 'last' })
   return pending()
 }
@@ -105,7 +107,7 @@ let cfg = null // the server's settings: crashReports.send, crashReports.stopped
 let context = async () => ({}) // { version, settings, names } for report()
 let saveSettings = () => {}
 export function configure(c, { about, save } = {}) { cfg = c; if (about) context = about; if (save) saveSettings = save }
-const on = () => !!(cfg?.crashReports?.send && endpoint() && !refused())
+const on = () => !!(cfg && cfg.crashReports?.send !== false && endpoint() && !refused())
 const hostOf = (u) => { try { return new URL(u).host } catch { return null } }
 
 async function sentList() {
@@ -170,7 +172,15 @@ export async function send(text, kind, { byItself = false } = {}) {
 // window that broke ({ kind: 'ui', where, message, stack }). Never more than PER_DAY a day, or the
 // same crash twice in a day; a failure to send is let go (Report on GitHub still has it).
 const today = () => new Date().toISOString().slice(0, 10)
-export async function auto(b) {
+// One at a time, so two crashes at once can't both pass the check for the same crash (the first
+// one's copy is written before the second looks).
+let autoQueue = Promise.resolve()
+export function auto(b) {
+  const run = autoQueue.then(() => autoNow(b))
+  autoQueue = run.catch(() => {})
+  return run
+}
+async function autoNow(b) {
   if (!on()) return { sent: false }
   try {
     const ctx = await context()
@@ -196,5 +206,6 @@ export async function started() {
   last = { ...c, counted: true }
   await fs.promises.writeFile(FILE, JSON.stringify(last)).catch(() => {})
   counts.add('crashes.server')
+  counts.crashed().catch(() => {})
   if (!c.sent) await auto({ kind: 'last' })
 }

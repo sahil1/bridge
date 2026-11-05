@@ -2,7 +2,7 @@
 
 **The bridge between you and your AI agents.** Tell a chief of staff what you need and it hands the work to the right agent, while your agents (Claude Code, Codex, Antigravity CLI, Gemini CLI, Copilot, OpenCode and others, plus cloud agents) work in parallel. Spaces keep every project organized, and one window holds every provider, on your computer and your phone.
 
-Bridge AI runs on your device. Your agents use their own logins; Bridge AI only reads their screens and transcripts and types into them for you. Nothing is sent anywhere else.
+Bridge AI runs on your device. Your agents use their own logins; Bridge AI only reads their screens and transcripts and types into them for you. Nothing else is sent anywhere, apart from anonymous usage stats and crash reports to the project, which you can turn off ([PRIVACY.md](PRIVACY.md)).
 
 [![Bridge AI 3.0 in under a minute, with sound](site/poster.jpg)](https://boldbridge.ai/)
 
@@ -498,4 +498,4 @@ Testing these without changing anything on your Mac: `BRIDGE_FIX_DRYRUN=1` makes
 
 [Apache-2.0](LICENSE). See [NOTICE](NOTICE).
 
-Bridge AI is provided as is, with no warranty, and you're responsible for what your agents do and for following the terms of the services you connect ([TERMS.md](TERMS.md)). It's an independent project, not affiliated with or endorsed by Anthropic, OpenAI, Google, GitHub, Cursor, Cloudflare or any other company whose tools it works with; their names and logos belong to them. The project collects nothing about you, unless you turn on anonymous usage counts, which are off unless you do ([PRIVACY.md](PRIVACY.md)).
+Bridge AI is provided as is, with no warranty, and you're responsible for what your agents do and for following the terms of the services you connect ([TERMS.md](TERMS.md)). It's an independent project, not affiliated with or endorsed by Anthropic, OpenAI, Google, GitHub, Cursor, Cloudflare or any other company whose tools it works with; their names and logos belong to them. The project collects nothing that identifies you: the app sends it anonymous usage stats and crash reports, on unless you turn them off in Settings › About & Updates ([PRIVACY.md](PRIVACY.md)).

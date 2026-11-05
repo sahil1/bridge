@@ -76,6 +76,8 @@ import * as push from './push.js'
 import * as phone from './phone.js'
 import * as relay from './relay.js'
 import * as machines from './machines.js'
+import { machine } from './machine.js'
+import { osVersion, chipOf, memoryRange, coreRange } from './system.js'
 import * as transfers from './transfers.js'
 import { mediaNamed } from '../shared/media.js'
 import * as counts from './counts.js'
@@ -498,7 +500,7 @@ app.post('/api/places', tx((req) => { hereOnly(req, 'Add a place'); return place
 app.delete('/api/places/:id', tx((req) => places.removePlace(req.params.id)))
 // The copies this computer runs, and the ones others are making to it.
 app.get('/api/transfers', tx(() => transfers.list()))
-app.post('/api/transfers', tx((req) => transfers.start(req.body || {}, { here: fromHere(req) })))
+app.post('/api/transfers', tx((req) => { counts.add('files.sent'); return transfers.start(req.body || {}, { here: fromHere(req) }) }))
 app.post('/api/transfers/clear', tx(() => transfers.clear()))
 app.post('/api/transfers/:id/stop', tx((req) => transfers.stop(req.params.id)))
 app.post('/api/transfers/:id/retry', tx((req) => transfers.retry(req.params.id)))
@@ -943,7 +945,7 @@ app.get('/api/insights', wrap(async (req) => {
   const file = await routines.insightsFile()
   return insights.view({ claudeReport: file ? { generatedAt: fs.statSync(file).mtime.toISOString() } : null })
 }))
-app.post('/api/insights/run', wrap((req) => insights.run(String(req.body?.who || ''))))
+app.post('/api/insights/run', wrap((req) => { counts.add('insights.run'); return insights.run(String(req.body?.who || '')) }))
 app.get('/api/insights/report', async (req, res) => {
   const file = await routines.insightsFile()
   if (!file) return res.status(404).json({ error: 'No insights report yet; run /insights in Claude Code' })
@@ -1187,7 +1189,7 @@ app.post('/api/dictation/edit', wrap(async (req) => {
 dictations.configure(cfg, { agent: (id) => { const a = lastFleet?.agents?.find((x) => x.paneId === id); return a ? { name: a.chief ? 'Chief of Staff' : a.title || a.tab || a.workspace || '', chief: !!a.chief } : null } })
 const said = (fn) => async (req, res) => { try { res.json(await fn(req)) } catch (e) { res.status(e.status || 502).json({ error: e.message }) } }
 app.get('/api/dictations', said((req) => dictations.list({ q: String(req.query.q || ''), before: req.query.before || null, limit: req.query.limit })))
-app.post('/api/dictations', said((req) => (req.body?.restore ? dictations.add(req.body.restore, { restore: true }) : dictations.add(req.body || {}))))
+app.post('/api/dictations', said((req) => (req.body?.restore ? dictations.add(req.body.restore, { restore: true }) : (counts.add('dictations.saved'), dictations.add(req.body || {})))))
 app.delete('/api/dictations', said(() => dictations.clear()))
 app.get('/api/dictations/icons/:bundle', async (req, res) => {
   const f = dictations.iconFile(req.params.bundle)
@@ -1460,7 +1462,7 @@ app.get('/api/meetings/:id/links/:lid/file', (req, res) => {
 // follows on from.
 app.get('/api/meetings/:id/work', wrap((req) => meetWork.work(req.params.id)))
 app.get('/api/meetings/:id/work/:key', wrap((req) => meetWork.prepare(req.params.id, req.params.key)))
-app.post('/api/meetings/:id/work/:key/agent', wrap((req) => meetWork.start(req.params.id, req.params.key, { cwd: req.body?.cwd, kind: req.body?.kind, own: req.body?.own !== false, prompt: req.body?.prompt, label: req.body?.label })))
+app.post('/api/meetings/:id/work/:key/agent', wrap((req) => { counts.add('meetings.toAgents'); return meetWork.start(req.params.id, req.params.key, { cwd: req.body?.cwd, kind: req.body?.kind, own: req.body?.own !== false, prompt: req.body?.prompt, label: req.body?.label }) }))
 app.post('/api/meetings/:id/work/:key/done', wrap((req) => meetWork.tick(req.params.id, req.params.key, req.body?.done !== false)))
 app.get('/api/meetings/:id/since', wrap((req) => meetWork.since(meetings.get(req.params.id))))
 app.get('/api/meetings/:id/suggest', wrap((req) => meetings.suggest(req.params.id, { ask: req.query.ask === '1' })))
@@ -1891,16 +1893,37 @@ app.get('/api/diagnostics', wrap(async () => {
   }
 }))
 
-// Usage counts (counts.js): only if you turn them on, and what would be sent, exactly.
+// Usage stats (counts.js): on unless you turn them off, and what would be sent, exactly. What a
+// report says about this computer and its setup, each as one of the public list's values.
 counts.configure(cfg, {
-  about: () => ({
-    app: VERSION, os: { darwin: 'mac', win32: 'windows' }[process.platform] || 'linux', arch: process.arch,
-    install: process.versions.electron ? 'desktop' : process.env.BRIDGE_DOCKER ? 'docker' : 'source',
-    layout: cfg.simple ? 'simple' : 'everything', runtime: rt.name, phone: relay.status().devices.some((d) => d.kind === 'phone') ? 'paired' : 'none',
-  }),
+  about: async () => {
+    const m = await machine().catch(() => ({}))
+    const phones = relay.status().devices.filter((d) => d.kind === 'phone').length
+    const onOff = (v) => (v ? 'on' : 'off')
+    return {
+      app: VERSION, os: { darwin: 'mac', win32: 'windows' }[process.platform] || 'linux', osVersion: await osVersion(m), arch: process.arch,
+      chip: chipOf(os.cpus()[0]?.model, process.arch), memory: memoryRange(os.totalmem() / 2 ** 30), cores: coreRange(os.cpus().length),
+      install: process.versions.electron ? 'desktop' : process.env.BRIDGE_DOCKER ? 'docker' : 'source',
+      layout: cfg.simple ? 'simple' : 'everything', runtime: rt.name, phone: phones ? 'paired' : 'none',
+      phones: phones >= 3 ? '3+' : String(phones), computers: ((n) => (n >= 4 ? '4+' : String(n)))(machines.list().length),
+      agents: (await installed().catch(() => [])).map((a) => a.kind),
+      features: {
+        chief: cfg.chief?.kind || 'claude', defaultAgent: cfg.defaultAgent || 'claude', planUsage: onOff(cfg.quota?.read),
+        updateChecks: onOff(cfg.updates?.check !== false), meetingsDetect: onOff(cfg.meetings?.detect !== false),
+        callAudio: onOff(cfg.meetings?.callAudio !== false), nameSpeakers: onOff(cfg.meetings?.nameSpeakers !== false),
+        editByVoice: onOff(!!cfg.dictation?.editModel || (await llm.ready().catch(() => false))), localModel: onOff(await llm.ready().catch(() => false)),
+        speech: ['local', 'apple'].includes(speech.engineOf(cfg)) ? speech.engineOf(cfg) : 'service',
+        keepAgents: onOff(cfg.keepAgents !== false), resumeWork: onOff(cfg.resumeWork !== false), alertSounds: onOff(cfg.alertSounds !== false),
+        relay: relay.status().method === 'hosted' ? 'hosted' : relay.status().configured ? 'own' : 'none', location: onOff(!!cfg.location),
+      },
+    }
+  },
   save: (p) => afterChange(settings.patch(p)),
 })
 app.get('/api/counts', wrap(() => counts.status()))
+app.post('/api/counts/noticed', wrap(() => counts.noticed()))
+// What a window says about itself as it opens (src/activeTime.js): its language and its look.
+app.post('/api/counts/window', wrap((req) => (fromHere(req) ? counts.windowSaid(req.body || {}) : { counted: false })))
 app.post('/api/counts', wrap((req) => counts.setShare(!!req.body?.share)))
 app.get('/api/counts/preview', wrap(() => counts.preview()))
 app.get('/api/counts/sent/:week', wrap((req) => counts.sentReport(req.params.week)))
@@ -2438,7 +2461,7 @@ boards.setHelpers({
   reply: (id, msgs, o) => chatModels.reply(id, msgs, o), pickModel: pickMeetingModel, models: () => chatModels.models(), canSee: (id) => chatModels.canSee(id),
   contextOf: (id) => chatModels.contextOf(id), agentWork: async (pane) => transcript(await findAgent(pane)),
 })
-boards.routes(app, { wrap, onComputer })
+boards.routes(app, { wrap, onComputer, counted: (name) => counts.add(name) })
 
 // ---------- Static UI ----------
 

@@ -61,10 +61,12 @@ try {
   ok(SCHEMA.endpoint === 'https://counts.boldbridge.ai/v1/week', 'the public list sends reports to https://counts.boldbridge.ai/v1/week', SCHEMA.endpoint)
   ok(/pattern = "counts\.boldbridge\.ai", custom_domain = true/.test(toml) && /\[observability\]\nenabled = false/.test(toml) && /binding = "DB"/.test(toml), 'wrangler.toml puts it on counts.boldbridge.ai, with its D1 database and the Worker\'s logs off')
   const privacy = read('PRIVACY.md')
-  ok(/counts\.boldbridge\.ai/.test(privacy) && /weekly totals/.test(privacy) && /counts\/worker\.js/.test(privacy), 'PRIVACY.md names the server, says only weekly totals are kept, and where its code is')
+  ok(/counts\.boldbridge\.ai/.test(privacy) && /keeps only totals/.test(privacy) && /counts\/worker\.js/.test(privacy), 'PRIVACY.md names the server, says only totals are kept, and where its code is')
   const page = await worker.fetch(new Request('https://counts.boldbridge.ai/'), {})
-  const pageText = await page.text()
-  ok(page.status === 200 && /usage counts/.test(pageText) && /telemetry-schema\.json/.test(pageText) && /PRIVACY\.md/.test(pageText), 'its own address shows what it is, what can be counted and the privacy policy', pageText.slice(0, 200))
+  ok(page.status === 301 && page.headers.get('location') === 'https://boldbridge.ai/privacy#usage-stats-on-unless-you-turn-them-off' && !(await page.text()), 'its own address shows nothing: it sends a browser to the privacy policy\'s Usage stats', page.headers.get('location'))
+  const privacyHeads = [...privacy.matchAll(/^## (.+)$/gm)].map((m) => m[1].toLowerCase().replace(/[^\w\- ]/g, '').replace(/ /g, '-'))
+  ok(privacyHeads.includes('usage-stats-on-unless-you-turn-them-off') && privacyHeads.includes('crash-reports-on-unless-you-turn-them-off'), 'and both addresses\' anchors are headings in PRIVACY.md', privacyHeads)
+  ok((await worker.fetch(new Request('https://counts.boldbridge.ai/v1/stats'), {})).status === 404 && (await worker.fetch(new Request('https://counts.boldbridge.ai/v1/week'), {})).status === 405, 'nothing can be read back: no other path, and a GET of /v1/week is refused')
 
   // ---------- A report, kept as totals ----------
   {
@@ -136,8 +138,6 @@ try {
     ok(stop.body?.stop === true && /stopped collecting/.test(stop.body.why) && everything(db) === '[[],[],[]]', 'COUNTS_OFF=1: every report is answered "stop", with nothing kept', stop)
     const said = await answer(await post({ DB: db, COUNTS_OFF: 'Paused while we move to a new database.' }, report()))
     ok(said.body?.why === 'Paused while we move to a new database.', 'COUNTS_OFF with a sentence of its own: that sentence is the reason', said)
-    const page = await (await worker.fetch(new Request('https://counts.boldbridge.ai/'), { COUNTS_OFF: '1' })).text()
-    ok(/isn't collecting anything now/.test(page), 'and its page says it isn\'t collecting', page)
   }
 
   // ---------- Once a day ----------
@@ -169,9 +169,9 @@ try {
     delete process.env.BRIDGE_TELEMETRY
     const c = await import('../../server/counts.js')
     let settings = { counts: { share: true } }
-    c.configure(settings, { about: async () => ({ app: '3.9.2', os: 'linux', arch: 'x64', install: 'docker', layout: 'everything', runtime: 'builtin', phone: 'none' }), save: (patch) => { settings = { ...settings, ...patch }; c.configure(settings) } })
+    c.configure(settings, { about: async () => ({ app: '3.9.2', os: 'linux', osVersion: 'Ubuntu 24.04', arch: 'x64', chip: 'AMD Ryzen 7', memory: '32-63 GB', cores: '9-12', install: 'docker', layout: 'everything', runtime: 'builtin', phone: 'none', phones: '0', computers: '2', agents: ['claude', 'codex', 'not-an-agent'], features: { chief: 'claude', relay: 'own', planUsage: 'on', secretPath: ['', 'home', 'x'].join('/') } }), save: (patch) => { settings = { ...settings, ...patch }; c.configure(settings) } })
     // A week that's over, as Bridge AI writes it down.
-    const kept = { week: lastWeek, counts: { 'agents.started.codex': 3, 'voice.transcribed': 40 }, days: [1, 2, 5], nonce: 'b'.repeat(24), installAge: '13+ weeks', about: { app: '3.9.2', os: 'linux', arch: 'x64', install: 'docker', layout: 'everything', runtime: 'builtin', phone: 'none' } }
+    const kept = { week: lastWeek, counts: { 'agents.started.codex': 3, 'voice.transcribed': 40 }, days: [1, 2, 5], nonce: 'b'.repeat(24), installAge: '13+ weeks', about: { app: '3.9.2', os: 'linux', osVersion: 'Ubuntu 24.04', arch: 'x64', chip: 'AMD Ryzen 7', memory: '32-63 GB', cores: '9-12', install: 'docker', layout: 'everything', runtime: 'builtin', phone: 'none', phones: '0', computers: '2', agents: ['claude', 'codex', 'not-an-agent'], features: { chief: 'claude', relay: 'own', planUsage: 'on', secretPath: ['', 'home', 'x'].join('/') } } }
     fs.mkdirSync(path.join(home, 'telemetry'), { recursive: true })
     fs.writeFileSync(path.join(home, 'telemetry', `${lastWeek}.json`), JSON.stringify(kept))
     const sent = await c.send()
@@ -179,6 +179,17 @@ try {
     const cs = rows(db, 'counts')
     ok(sent.sent.join() === lastWeek && fs.existsSync(path.join(home, 'telemetry', 'sent', `${lastWeek}.json`)), 'Bridge AI\'s own send() delivers a week that\'s over, and keeps its copy of what went', sent)
     ok(r.length === 1 && r[0].os === 'linux' && r[0].install === 'docker' && r[0].install_age === '13+ weeks' && r[0].days_active === 3 && cs.find((x) => x.name === 'agents.started.codex')?.bucket === '2-5' && cs.find((x) => x.name === 'voice.transcribed')?.bucket === '21-100', 'and the server keeps it as totals, in the same ranges the app showed', { r, cs })
+    const dims = Object.fromEntries(rows(db, 'dims').map((x) => [`${x.dim}=${x.value}`, x.n]))
+    ok(dims['osVersion=Ubuntu 24.04'] === 1 && dims['chip=AMD Ryzen 7'] === 1 && dims['memory=32-63 GB'] === 1 && dims['cores=9-12'] === 1 && dims['computers=2'] === 1 && dims['phones=0'] === 1 && dims['agent=claude'] === 1 && dims['agent=codex'] === 1 && dims['feature.relay=own'] === 1 && dims['feature.planUsage=on'] === 1, 'the system\'s version, chip, memory, cores, linked computers, phones, agents installed and features on are each kept as their own total', dims)
+    ok(!Object.keys(dims).some((k) => /not-an-agent|secretPath|home/.test(k)), 'and what isn\'t on the public list never leaves the computer', Object.keys(dims))
+    // A day that's over: its version, the one it updated from, and that it crashed.
+    const yesterday = c.dayOf(new Date(Date.now() - 864e5))
+    fs.mkdirSync(path.join(home, 'telemetry', 'days'), { recursive: true })
+    fs.writeFileSync(path.join(home, 'telemetry', 'days', `${yesterday}.json`), JSON.stringify({ day: yesterday, app: '3.9.2', from: '3.9.1', starts: 3, crashed: true, nonce: 'd'.repeat(24), about: { os: 'linux', arch: 'x64', install: 'docker' } }))
+    const sentDays = await c.send()
+    const daily = rows(db, 'daily')
+    const updates = rows(db, 'daily_updates')
+    ok(sentDays.days.join() === yesterday && daily.length === 1 && daily[0].app === '3.9.2' && daily[0].crashed === 1 && daily[0].starts === '2-5' && updates[0]?.from_app === '3.9.1' && fs.existsSync(path.join(home, 'telemetry', 'sent', 'days', `${yesterday}.json`)), 'a day\'s report: the version it ran, the update that day, how often it started and that it crashed, with a copy kept', { sentDays, daily, updates })
     // The project stops collecting: the app turns sharing off and says why.
     env.COUNTS_OFF = 'Paused for now.'
     fs.writeFileSync(path.join(home, 'telemetry', `${weekOf(new Date(+now - 14 * 864e5))}.json`), JSON.stringify({ ...kept, week: weekOf(new Date(+now - 14 * 864e5)), nonce: 'c'.repeat(24) }))
@@ -186,6 +197,38 @@ try {
     ok(settings.counts?.share === false && settings.counts?.stopped === 'Paused for now.', 'when the server answers "stop", Bridge AI turns sharing off and keeps the reason to show', settings.counts)
     srv.close()
   }
+  // ---------- A day's reports ----------
+  {
+    const db = d1()
+    const env = { DB: db }
+    const dayPost = (body) => worker.fetch(new Request('https://counts.boldbridge.ai/v1/day', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }), env)
+    const y = new Date(Date.now() - 864e5).toISOString().slice(0, 10)
+    const day = (over = {}) => ({ schema: 1, day: y, app: '3.9.2', from: null, os: 'mac', arch: 'arm64', install: 'desktop', starts: '1', crashed: false, nonce: nonce(40), ...over })
+    for (const [i, over] of [[0, {}], [1, { crashed: true }], [2, { from: '3.9.1' }], [3, { app: '3.9.1', os: 'windows' }]]) await dayPost(day({ ...over, nonce: nonce(40 + i) }))
+    await dayPost(day({ nonce: nonce(40) }))
+    const d = rows(db, 'daily')
+    const n = (f) => d.filter(f).reduce((a, x) => a + x.n, 0)
+    ok(n((x) => x.app === '3.9.2') === 3 && n((x) => x.app === '3.9.2' && x.crashed === 1) === 1 && n((x) => x.app === '3.9.1') === 1 && rows(db, 'daily_updates')[0]?.from_app === '3.9.1', 'day reports: installs on each version, how many crashed, and updates from which version; one sent twice counts once', d)
+    for (const [what, body] of [['a day long ago', day({ day: '2020-01-01', nonce: nonce(50) })], ['not a day', day({ day: 'yesterday', nonce: nonce(51) })], ['no nonce', day({ nonce: undefined })]]) {
+      const a = await answer(await dayPost(body))
+      ok(a.status === 400, `${what}: turned away`, a)
+    }
+  }
+
+  // ---------- What the admin view can change ----------
+  {
+    const db = d1()
+    const env = { DB: db, SETTINGS_CACHE_MS: '0', COUNTS_OFF: '0', CRASHES_PER_DAY: '1000' }
+    await post(env, report())
+    db.sql.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('countsOff', 'Moving house.')
+    const s1 = await answer(await post(env, report({ nonce: nonce(60) })))
+    ok(s1.body?.stop === true && s1.body.why === 'Moving house.', 'a kill switch set from the admin view (the settings table) works without a deploy', s1)
+    db.sql.prepare('UPDATE settings SET value = ? WHERE key = ?').run('0', 'countsOff')
+    db.sql.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('crashesPerDay', '0')
+    const c1 = await answer(await worker.fetch(new Request('https://crashes.boldbridge.ai/v1/report', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ schema: 1, kind: 'ui', title: 'x', details: 'Error: x' }) }), env))
+    ok((await answer(await post(env, report({ nonce: nonce(61) })))).body?.ok === true && c1.status === 429, 'and so does the daily ceiling for crash reports', c1)
+  }
+
   // ---------- Time in use and open ----------
   {
     const db = d1()
@@ -201,8 +244,9 @@ try {
   {
     const db = d1()
     const env = { DB: db }
-    const page = await (await worker.fetch(new Request('https://crashes.boldbridge.ai/'), env)).text()
-    ok(/crash report server/.test(page) && /90 days/.test(page) && /PRIVACY\.md/.test(page), 'crashes.boldbridge.ai says what it is, how long it keeps reports, and the privacy policy')
+    const page = await worker.fetch(new Request('https://crashes.boldbridge.ai/'), env)
+    ok(page.status === 301 && page.headers.get('location') === 'https://boldbridge.ai/privacy#crash-reports-on-unless-you-turn-them-off', 'crashes.boldbridge.ai shows nothing: it sends a browser to the privacy policy\'s Crash reports', page.headers.get('location'))
+    ok((await worker.fetch(new Request('https://crashes.boldbridge.ai/v1/reports'), env)).status === 404 && (await worker.fetch(new Request('https://crashes.boldbridge.ai/v1/report'), env)).status === 405, 'and no crash report can be read back from it')
     const a = await answer(await crashPost(env, crash()))
     ok(a.status === 200 && a.body?.ok === true, 'a crash report is taken', a)
     // Made of parts, as the other tests do, so the repo's own check doesn't take them for real ones.
@@ -259,9 +303,10 @@ try {
     ok(copy.report.title === kept[0].title && copy.byItself === false && (await cr.sending()).sent.length === 1, 'and keeps a copy of exactly what went, listed in Settings', copy)
     settings = { crashReports: { send: true } }
     cr.configure(settings)
-    const a1 = await cr.auto({ kind: 'ui', where: 'Board', message: 'y is null', stack: 'TypeError: y is null\n    at Board (<app>/src/components/whiteboard/Board.jsx:5:5)' })
-    const a2 = await cr.auto({ kind: 'ui', where: 'Board', message: 'y is null', stack: 'TypeError: y is null\n    at Board (<app>/src/components/whiteboard/Board.jsx:5:5)' })
-    ok(a1.sent && !a2.sent && rows(db, 'crash_reports').length === 2, 'with it on, a crash sends itself, and the same crash only once a day', [a1, a2])
+    // Two of the same crash at the same moment (a slow computer): still sent once.
+    const same = { kind: 'ui', where: 'Board', message: 'y is null', stack: 'TypeError: y is null\n    at Board (<app>/src/components/whiteboard/Board.jsx:5:5)' }
+    const [a1, a2] = await Promise.all([cr.auto(same), cr.auto(same)])
+    ok(a1.sent && !a2.sent && rows(db, 'crash_reports').length === 2, 'with it on, a crash sends itself, and the same crash only once a day, even two at the same moment', [a1, a2])
     env.CRASHES_OFF = 'Paused for a move.'
     await cr.auto({ kind: 'ui', where: 'Mail', message: 'z', stack: 'Error: z' })
     ok(settings.crashReports?.send === false && settings.crashReports?.stopped === 'Paused for a move.', 'when the server answers "stop", Bridge AI turns crash reports off and keeps the reason to show', settings.crashReports)
