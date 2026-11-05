@@ -26,6 +26,7 @@ import * as voices from './voices.js'
 import * as doctext from './doctext.js'
 import { canOpen } from './files.js'
 import { mayLook, noteAsked } from './projects.js'
+import { isLimit } from './consult.js'
 
 const DIR = path.join(DATA, 'meetings')
 const RATE = 16000
@@ -626,6 +627,18 @@ setInterval(() => { try { checkQuiet() } catch { /* a meeting gone */ } }, Numbe
 export function recover() {
   for (const m of list()) {
     if (m.status === 'recording' || m.status === 'paused' || m.status === 'transcribing') saveMeta({ ...m, status: 'done', endedAt: m.endedAt || m.startedAt })
+    // Notes that are only a model's "You've hit your weekly limit" (saved as the notes before 3.9.3,
+    // when a command line's limit message passed for its answer): set aside (summary-limit.md) and
+    // written again, as a summary that couldn't be.
+    const sum = path.join(DIR, m.id, 'summary.md')
+    try {
+      const text = fs.statSync(sum).size < 600 ? fs.readFileSync(sum, 'utf8').trim() : ''
+      if (text && isLimit(text)) {
+        fs.renameSync(sum, path.join(DIR, m.id, 'summary-limit.md'))
+        m.summaryRetryAt = new Date(Date.now() + 5_000).toISOString()
+        saveMeta({ ...meta(m.id), summaryError: `The notes weren't written: ${text.split('\n')[0].slice(0, 200)}`, summaryRetryAt: m.summaryRetryAt })
+      }
+    } catch { /* no notes yet */ }
     // A summary that was waiting to be tried again still is.
     if (m.summaryRetryAt && !fs.existsSync(path.join(DIR, m.id, 'summary.md'))) {
       later.set(m.id, setTimeout(() => { later.delete(m.id); summarize(m.id, { again: true }).catch(() => {}) }, Math.max(5000, Date.parse(m.summaryRetryAt) - Date.now())))
@@ -726,7 +739,7 @@ export function get(id) {
   // me: your name (Settings › General), for your lines.
   // In a room: how many voices, and telling them apart while it's going (the model downloading).
   const room = voices.of(id)
-  return { ...m, voices: room ? { src: room.src || 'you', speakers: room.speakers, names: room.names || {}, at: room.at } : null, voicesWork: voices.working(id), links, captures: m.captures || [], canRead: !!doctext.ocrBin(), me: String(cfg.name || '').trim() || null, levels, callQuiet: quiet, partial: soFar(id), transcript: transcript(id, { dropped: true }), notes: readText(path.join(d, 'notes.md')), summary: readText(path.join(d, 'summary.md')), waiting: waiting(id), pending: pending.length, saved: m.saved || null, progress, assistItems: help.items.filter((x) => x.state !== 'dismissed').slice(-20), assistError: help.error || null, assisting: assisting.has(id) }
+  return { ...m, voices: room ? { src: room.src || 'you', speakers: room.speakers, names: room.names || {}, at: room.at } : null, voicesWork: voices.working(id), links, captures: m.captures || [], canRead: !!doctext.ocrBin(), me: String(cfg.name || '').trim() || null, levels, callQuiet: quiet, partial: soFar(id), transcript: transcript(id, { dropped: true }), notes: readText(path.join(d, 'notes.md')), summary: readText(path.join(d, 'summary.md')), waiting: waiting(id), pending: pending.length, saved: m.saved || null, progress, assistItems: help.items.filter((x) => x.state !== 'dismissed').slice(-20), assistError: help.error || null, assistAt: help.at || null, assisting: assisting.has(id) }
 }
 
 export function setKind(id, kind) { return patchMeta(id, { kind: KINDS[kind] ? kind : 'general', kindPicked: true }) }
@@ -1584,7 +1597,8 @@ async function replyAny(use, msgs, o) {
     for (let i = 0; ; i++) {
       try { return { ...(await helpers.reply(id, msgs, o)), model: id } } catch (e) {
         // A model on this computer that ran out of time was working, not cut off: no second go.
-        if (i >= 2 || !passing(e) || e.code === 'too_long' || (isLocal(id) && /Timeout|Abort/.test(e.name))) throw e
+        // At its usage limit (on every account it has): not something a few seconds fix.
+        if (i >= 2 || !passing(e) || e.code === 'too_long' || e.code === 'limit' || (isLocal(id) && /Timeout|Abort/.test(e.name))) throw e
         await new Promise((r) => setTimeout(r, RETRY_MS * (i + 1)))
       }
     }
@@ -1811,6 +1825,7 @@ export function summarize(id, { model, kind, language, again = false } = {}) {
       try { memory.learn(JSON.parse(block[1]), { meeting: id, known: `${m.title}\n${(m.event?.attendees || []).join('\n')}\n${notes}`, heard: transcript(id, { raw: true }).map((l) => l.text).join('\n') }) } catch { /* not JSON: nothing learned */ }
     }
     if (!out) throw new Error('The model sent back nothing')
+    if (isLimit(out)) throw Object.assign(new Error(`${r.model} is at its usage limit: ${out.split('\n')[0].slice(0, 200)}`), { code: 'limit' })
     writeFileAtomic(path.join(dirOf(id), 'summary.md'), `${out}\n`)
     // What it was written from, for the page to say: your points, the pictures read, the files and
     // links, and whether the invite said anything.
@@ -1938,11 +1953,14 @@ export function assist(id, { now = false, model } = {}) {
     ].filter((x) => x !== '').join('\n')
     try {
       const r = await jsonReply(use, [{ role: 'user', text: `${ask}\n\nTranscript so far:\n${recent || '(nothing yet)'}` }], { system: 'You quietly help someone during a live meeting with a few sharp, specific suggestions. You are brief and never make things up.' }, { schema: ASSIST_SCHEMA, check: assistOk, schemaFirst: true })
-      const items = [].concat(r.value?.items || []) // not JSON: nothing this time
+      const items = [].concat(r.value?.items || [])
       const was = new Set(a.items.map((x) => x.text.toLowerCase()))
       const add = items.filter((x) => x && typeof x.text === 'string' && x.text.trim() && !was.has(x.text.trim().toLowerCase())).slice(0, 3)
         .map((x) => ({ id: crypto.randomBytes(4).toString('hex'), t: Math.round(secs), kind: KIND_WORD[x.kind] ? x.kind : 'idea', text: clean(x.text, 300), why: clean(x.why, 200), state: 'new', model: r.model }))
-      const out = { items: [...a.items, ...add].slice(-60), at: new Date().toISOString(), upTo: said.length ? said[said.length - 1].t1 : 0, error: null }
+      // An answer it can't read (not the JSON asked for, twice): said, so it never looks as if it
+      // read along and found nothing. It looks again with the next lines.
+      const error = r.value ? null : `${r.model} answered, but not in a form Assist can read. It tries again in a minute.`
+      const out = { items: [...a.items, ...add].slice(-60), at: new Date().toISOString(), upTo: said.length ? said[said.length - 1].t1 : 0, error, looks: (a.looks || 0) + 1 }
       writeFileAtomic(assistFile(id), JSON.stringify(out, null, 1))
       return out
     } catch (e) {

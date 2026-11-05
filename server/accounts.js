@@ -171,6 +171,17 @@ function choice(kind, d) {
 }
 
 // ---------- Used by the runtime ----------
+// For a one-off run of an agent's command line (a meeting's notes, AI Assist, a second opinion):
+// the accounts to try in turn, the one new agents start on first, then the others listed, leaving
+// out any its last reading says is out of usage (all of them, if every one is).
+export function forRun(kind) {
+  if (!KINDS[kind]) return [null]
+  const d = load()
+  const first = choice(kind, d).active
+  const ids = [first, ...rowsOf(kind, d).map((a) => a.id).filter((id) => id !== first)]
+  const room = ids.filter((id) => { const r = readings.get(id); return !(r?.usable && r.percentRemaining === 0) })
+  return room.length ? room : ids
+}
 // Which account a new agent of this kind starts with.
 export function activeId(kind) {
   return KINDS[kind] ? choice(kind, load()).active : null

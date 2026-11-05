@@ -21,6 +21,12 @@
 //                                           (with the command), then it works a moment and is done
 //   claude --session-id <id> "title <words>"  names its session in the terminal's title, as Claude
 //                                           Code does ("✳ <words>")
+//   claude -p <prompt>                      answers once and exits, as Claude Code's print mode does,
+//                                           on the config folder it's run for: AI Assist's ask gets one
+//                                           suggestion as JSON, anything else meeting notes. With
+//                                           stand-in-limit in that folder, it answers as Claude Code
+//                                           does at its weekly limit instead (and exits 1). Each run is
+//                                           noted in ~/claude-print.log (the folder, and how it began)
 //   claude auth status --json | login | logout
 //                                           the sign-in of the config folder it's run for
 //                                           (CLAUDE_CONFIG_DIR, else ~/.claude): signed in until
@@ -41,6 +47,16 @@ if (args[0] === 'auth') {
   const signedIn = !fs.existsSync(out)
   console.log(JSON.stringify({ loggedIn: signedIn, authMethod: signedIn ? 'claude.ai' : 'none', subscriptionType: signedIn ? 'max' : null }))
   process.exit(signedIn ? 0 : 1)
+}
+if (args[0] === '-p') {
+  const dir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude')
+  const prompt = String(args[1] || '')
+  const limited = fs.existsSync(path.join(dir, 'stand-in-limit'))
+  fs.appendFileSync(path.join(os.homedir(), 'claude-print.log'), JSON.stringify({ dir: process.env.CLAUDE_CONFIG_DIR || null, limited, began: prompt.slice(0, 80) }) + '\n')
+  if (limited) { process.stdout.write('You\'ve hit your weekly limit · resets 4am (America/Los_Angeles)\n'); process.exit(1) }
+  if (/This meeting is going on now/.test(prompt)) process.stdout.write(JSON.stringify({ items: [{ kind: 'question', text: 'Ask how they measured the savings.', why: 'At 0:02 they said fuel costs fell by a third.' }] }) + '\n')
+  else process.stdout.write('## Summary\n- The stand-in\'s notes of the meeting.\n')
+  process.exit(0)
 }
 const WITH_VALUE = new Set(['--session-id', '--resume', '--model', '--permission-mode'])
 const opt = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : null }
