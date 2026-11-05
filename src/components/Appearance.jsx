@@ -1,6 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Icon from './Icon.jsx'
+import { useMedia } from './layout.jsx'
 import { THEMES, TEXT_SIZES, FONTS, DEFAULTS, useAppearance, resolve, isDark, validHex, luminance, themeString, parseThemeString } from '../appearance.js'
+import { PINS, usePins, setPin } from '../pins.js'
+import { cloudOnly } from '../api.js'
 import { t, tx, LANGS, chosen, setLang } from '../i18n/index.js'
 
 // Preferences › Appearance, laid out like Slack's: color mode, theme, then text and layout.
@@ -69,9 +72,31 @@ function ColorField({ label, value, onChange }) {
   )
 }
 
-// The Appearance panel; Settings shows it as one of its sections.
-export default function Appearance() {
+// In the Top Bar: the Status menu's pins (src/pins.js) as one list, so they're found outside the
+// menu too. Only where there's the desktop's top bar: a phone's keeps to what needs you now.
+function TopBarPins({ focus }) {
+  const pins = usePins()
+  const ref = useRef(null)
+  useEffect(() => { if (focus) ref.current?.scrollIntoView({ block: 'start' }) }, [focus])
+  return (
+    <section className="ap-sec" id="st-topbar" ref={ref}>
+      <h4>{t('In the Top Bar')}</h4>
+      <p className="muted small">{t('What shows in the top bar beside what needs you, search and the next meeting. Each is in the Status menu too, with a pin that does the same. On a smaller window they become icons first, then move into Status.')}</p>
+      <div className="ap-pins">
+        {PINS.map((x) => (
+          <label key={x.id} className="st-check"><input type="checkbox" role="switch" checked={!!pins[x.id]} onChange={(e) => setPin(x.id, e.target.checked)} />
+            <span><b>{t(x.label)}</b> <span className="muted small">{t(x.hint)}</span></span></label>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+// The Appearance panel; Settings shows it as one of its sections. focus: 'topbar' starts at In the
+// Top Bar (from the Status menu).
+export default function Appearance({ focus = null }) {
   const [a, save] = useAppearance()
+  const bar = useMedia('(min-width: 900px)') && !cloudOnly // the desktop's top bar (App.jsx's wide)
   const [paste, setPaste] = useState('')
   const [copied, setCopied] = useState(false)
   const dark = isDark(a.mode)
@@ -147,6 +172,8 @@ export default function Appearance() {
             <Seg label={t('Font')} value={a.font} options={FONTS} onChange={(v) => save({ font: v })} />
           </div>
         </section>
+
+        {bar && <TopBarPins focus={focus === 'topbar'} />}
 
         <section className="ap-sec ap-rows">
           <div className="ap-row">

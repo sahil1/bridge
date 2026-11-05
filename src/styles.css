@@ -707,7 +707,6 @@ a.btn:not(.primary), a.btn:not(.primary):visited { color: var(--ink); text-decor
 .mini-ring { --p: 0; width: 14px; height: 14px; border-radius: 50%; flex: none; background: conic-gradient(var(--c, var(--good)) calc(var(--p) * 1%), var(--pane-3) 0); -webkit-mask: radial-gradient(circle, transparent 3.5px, #000 4px); mask: radial-gradient(circle, transparent 3.5px, #000 4px); }
 .mini-ring.r-good { --c: var(--good); } .mini-ring.r-warning { --c: var(--warning); } .mini-ring.r-critical { --c: var(--critical); } .mini-ring.r-unknown { --c: var(--idle); }
 .quota-chip { display: none; }
-@media (max-width: 1250px) { .hide-sm { display: none; } }
 .app.narrow .top-chip { height: 30px; padding: 0 9px; box-shadow: none; }
 .app.narrow .top-chip .chip-sep { display: none; }
 
@@ -2083,6 +2082,8 @@ button.yg-day:hover { box-shadow: 0 0 0 1.5px var(--accent); }
 .ap-paste input { width: 190px; height: 28px; padding: 0 9px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--pane-2); color: var(--ink); font: 12px var(--font-mono); outline: none; }
 .ap-paste input:focus { border-color: var(--accent); }
 .ap-rows { gap: 14px; }
+/* In the Top Bar: the Status menu's pins, one switch each (Appearance.jsx). */
+.ap-pins { display: grid; gap: 8px; }
 .ap-row { display: flex; align-items: center; gap: 16px; }
 .ap-row > div:first-child { flex: 1; min-width: 0; }
 .ap-row p { margin: 2px 0 0; }
@@ -2265,16 +2266,28 @@ button.yg-day:hover { box-shadow: 0 0 0 1.5px var(--accent); }
 .app.wide .search-btn.s-short .s-short { display: inline; }
 .app.wide .search-btn.s-none { justify-content: space-between; }
 .app.wide .search-btn kbd { margin-left: 0; }
-/* The steps the bar gives way in (useFit in App.jsx), least needed first. */
-.app.wide .topbar.fit-1 .x-setup, .app.wide .topbar.fit-2 .x-restart, .app.wide .topbar.fit-3 .x-update, .app.wide .topbar.fit-4 .x-fresh { display: none; }
-.app.wide .topbar.fit-5 .meet-chip :is(.meet-title, small) { display: none; }
-.app.wide .topbar.fit-6 .status-word { display: none; }
-.app.wide .topbar.fit-7 .view-tabs .vt-word { display: none; }
-.app.wide .topbar.fit-8 .rec-name { display: none; }
-.app.wide .topbar.fit-9 .needs-word { display: none; }
-.app.wide .topbar.fit-10 .meet-chip { display: none; }
-.app.wide .topbar.fit-11 .mc-chip .mc-name { display: none; }
-.app.wide .topbar.fit-12 { --search-min: 84px; }
+/* What's pinned to the bar (src/pins.js), beside its three places. A chip's words (pin-word) and a
+   long value (pin-long, with pin-short in its place where it has one) are what go first. The
+   clock is its time alone, as it was before the Status menu. */
+.pin-short { display: none; }
+.app.wide .top-x .clock { padding: 0 2px; white-space: nowrap; }
+.app.wide .top-x .wx-chip .icon { color: var(--ink-3); }
+.app.wide .top-x .usage-acct { max-width: none; }
+/* The steps the bar gives way in (useFit in App.jsx), least needed first: the pinned chips' words,
+   their long values, other words, then the pinned chips one at a time, and the rest. */
+.app.wide .topbar.fit-1 .top-x .pin-word { display: none; }
+.app.wide .topbar.fit-2 .top-x .pin-long { display: none; }
+.app.wide .topbar.fit-2 .top-x .pin-short { display: inline; }
+.app.wide .topbar.fit-3 .meet-chip :is(.meet-title, small) { display: none; }
+.app.wide .topbar.fit-4 .status-word { display: none; }
+.app.wide .topbar.fit-5 .view-tabs .vt-word { display: none; }
+.app.wide .topbar.fit-6 .x-setup, .app.wide .topbar.fit-7 .x-sounds, .app.wide .topbar.fit-8 .x-clock, .app.wide .topbar.fit-9 .x-restart,
+.app.wide .topbar.fit-10 .x-usage, .app.wide .topbar.fit-11 .x-weather, .app.wide .topbar.fit-12 .x-update, .app.wide .topbar.fit-13 .x-fresh { display: none; }
+.app.wide .topbar.fit-14 .rec-name { display: none; }
+.app.wide .topbar.fit-15 .needs-word { display: none; }
+.app.wide .topbar.fit-16 .meet-chip { display: none; }
+.app.wide .topbar.fit-17 .mc-chip .mc-name { display: none; }
+.app.wide .topbar.fit-18 { --search-min: 84px; }
 /* The speaker, muted: in the warning colour, so it shows. */
 .sound-btn.off { color: var(--warn, #d97706); }
 /* Phone: the logo and the search button keep their size; the chips give way first. */

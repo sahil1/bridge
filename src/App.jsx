@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import SoundButton from './components/SoundButton.jsx'
-import StatusMenu from './components/StatusMenu.jsx'
+import StatusMenu, { UsageChip, WeatherChip, ClockChip } from './components/StatusMenu.jsx'
 import Icon, { StatusDot } from './components/Icon.jsx'
 import { useAppearance } from './appearance.js'
+import { usePins } from './pins.js'
 import ErrorBoundary, { Quiet } from './components/ErrorBoundary.jsx'
 import { CrashNotice } from './components/CrashReport.jsx'
 import StatsNotice from './components/StatsNotice.jsx'
@@ -79,20 +80,26 @@ const toStart = !cloudOnly ? null : window.bridgeAndroid?.home ? () => window.br
 // The top bar never squeezes, cuts off or wraps what's in it. It has three places that are always
 // there: which computer, search, and what's happening now (what needs you, a recording or the
 // meeting on now, the next meeting); usage, setup, updates, a restart to apply, sounds, the weather
-// and the clock are in the Status menu (StatusMenu.jsx). The news among those (Updated, setup, the
-// update, a restart) shows in the bar too while there's room. When it doesn't all fit (a laptop's
-// screen, a busy day), the bar gives way a step at a time, least needed first: setup's progress, a
-// restart to apply, the update and Updated (each then counted on the Status button, and still in its
-// menu), the next meeting's title, the word Status, the Bridge and Herdr tabs' words, the
-// recording's title, the words after what's waiting, the next meeting (in the Status menu too), the
-// computer's name, and last the search's width. Each step is a class on the bar (fit-1 to fit-12,
-// styles.css). The search's words are picked after: whole, shorter, or none, never cut off.
+// and the clock are in the Status menu (StatusMenu.jsx), and each of those that's pinned
+// (src/pins.js: all but sounds, unless you change it) shows in the bar too while there's room. When
+// it doesn't all fit (a laptop's screen, a busy day), the bar gives way a step at a time, least
+// needed first: the pinned chips' words (Update, Restart to apply, usage's names), so each is its
+// icon and value; then their long values (usage's two figures become the ring's one, setup's how
+// far goes); the next meeting's title; the word Status; the Bridge and Herdr tabs' words; then the
+// pinned chips themselves, one at a time: setup, sounds, the clock, a restart to apply, usage, the
+// weather, the update and Updated (the news among them then counted on the Status button; all of
+// them still in its menu); the recording's title, the words after what's waiting, the next meeting
+// (in the Status menu too), the computer's name, and last the search's width. Each step is a class
+// on the bar (fit-1 to fit-18, styles.css). The search's words are picked after: whole, shorter, or
+// none, never cut off.
 //
 // It's tried again whenever anything in the bar changes size, not only the bar: text that grows
 // while the bar stays the same (a font arriving after the first try, a font or text size picked in
 // Appearance) once left chips past the window's edge until something else in the bar changed.
-const FIT_STEPS = 12
-const FOLDS = '.top-x' // the bar's news chips, counted on the Status button while out of the bar
+const FIT_STEPS = 18
+// The bar's pinned news chips, counted on the Status button while out of the bar. Unpinned ones
+// aren't counted: you chose to see them in Status alone.
+const FOLDS = '.top-x[data-fold]'
 function useFit(onFold) {
   const stop = useRef(null)
   const told = useRef(onFold)
@@ -656,6 +663,7 @@ function App() {
     wide && liveView && { id: 'a:view', label: view === 'herdr' ? t('Switch to Bridge view') : t('Switch to Herdr view'), icon: 'layers', hint: view === 'herdr' ? 'Alt 1' : 'Alt 2', run: () => setView(view === 'herdr' ? 'command' : 'herdr') },
     wide && { id: 'a:rail', label: L.railOpen ? t('Collapse sidebar') : t('Expand sidebar'), icon: 'panel-left', run: () => set({ railOpen: !L.railOpen }) },
     { id: 'a:appearance', label: t('Appearance…'), icon: 'palette', keywords: 'theme color colour dark light mode font text size density compact sidebar slack', run: () => setSettings('appearance') },
+    wide && { id: 'a:topbar', label: t("Choose what's in the top bar…"), icon: 'pin', keywords: 'pin unpin top bar status menu weather temperature clock time usage update restart setup sounds', run: () => setSettings('topbar') },
     { id: 'a:theme', label: nextTheme === 'dark' ? t('Color mode: switch to dark') : nextTheme === 'light' ? t('Color mode: switch to light') : t('Color mode: switch to system'), icon: theme === 'dark' ? 'sun' : 'moon', keywords: 'dark light mode', run: () => setTheme(nextTheme) },
     { id: 'a:ideas', label: t('Add an idea'), icon: 'bulb', keywords: 'backlog todo', run: () => { showCard('bulb'); setTimeout(() => document.querySelector('.idea-add input')?.focus(), 250) } },
     { id: 'a:cal', label: t('Open calendar'), icon: 'calendar', keywords: 'week month year schedule meetings', run: () => showToday('calendar') },
@@ -705,9 +713,10 @@ function App() {
   // restart to apply and an update are a line under the bar (TopNotes). An update you haven't looked
   // at yet puts a dot on Settings, which then opens at About & Updates.
   const setDot = !wide && !cloudOnly && upNote.dot
-  const [folded, setFolded] = useState('') // the news chips out of the bar for want of room: 'setup,update'
+  const [folded, setFolded] = useState('') // the pinned news chips out of the bar for want of room: 'setup,update'
   const fitBar = useFit(setFolded)
   const foldedList = folded ? folded.split(',') : []
+  const pins = usePins() // what's in the desktop's bar besides its three places (src/pins.js)
   const topbarFor = (railBtn = null) => (
     <>
     <header className="topbar" ref={wide ? fitBar : null}>
@@ -741,15 +750,20 @@ function App() {
         {!cloudOnly && wide && (
           <>
             <Quiet name="Next meeting"><NextMeetingChip onClick={() => showCard('calendar')} recording={meetings?.rec?.title || null} /></Quiet>
-            {/* The news chips: in the bar while there's room, and in the Status menu always. */}
+            {/* What's pinned: in the bar while there's room, and in the Status menu always. The news
+                (data-fold) is counted on the Status button while it has no room. */}
             <div className="top-extras">
-              <div className="top-x x-fresh" data-fold="fresh"><Quiet name="Updated"><FreshChip fresh={fresh} /></Quiet></div>
-              <div className="top-x x-setup" data-fold="setup"><Quiet name="Setting up"><SetupChip /></Quiet></div>
-              <div className="top-x x-update" data-fold="update">{(update.data?.available || (update.data?.held && upNote.line)) && <Quiet name="Update"><UpdateChip u={update.data} onDetails={() => setSettings('about')} onDone={upNote.hide} /></Quiet>}</div>
-              <div className="top-x x-restart" data-fold="restart"><Quiet name="Restart"><RestartChip fleet={fleet} runtime={conf?.runtime?.name} keep={!!conf?.runtime?.keep} /></Quiet></div>
+              {pins.update && <div className="top-x x-fresh" data-fold="fresh"><Quiet name="Updated"><FreshChip fresh={fresh} /></Quiet></div>}
+              {pins.setup && <div className="top-x x-setup" data-fold="setup"><Quiet name="Setting up"><SetupChip /></Quiet></div>}
+              {pins.update && <div className="top-x x-update" data-fold="update">{(update.data?.available || (update.data?.held && upNote.line)) && <Quiet name="Update"><UpdateChip u={update.data} onDetails={() => setSettings('about')} onDone={upNote.hide} /></Quiet>}</div>}
+              {pins.restart && <div className="top-x x-restart" data-fold="restart"><Quiet name="Restart"><RestartChip fleet={fleet} runtime={conf?.runtime?.name} keep={!!conf?.runtime?.keep} /></Quiet></div>}
+              {pins.usage && <div className="top-x x-usage"><Quiet name="Usage"><UsageChip quota={quota.data} primary={primary} onUsage={() => showCard('gauge')} onAddAccount={(kind) => setAddAcct({ kind })} /></Quiet></div>}
+              {pins.weather && <div className="top-x x-weather"><Quiet name="Weather"><WeatherChip onClick={() => showCard('sun')} /></Quiet></div>}
+              {pins.clock && <div className="top-x x-clock"><Quiet name="Clock"><ClockChip /></Quiet></div>}
+              {pins.sounds && <div className="top-x x-sounds"><Quiet name="Sounds"><SoundButton conf={conf} /></Quiet></div>}
             </div>
-            <Quiet name="Status"><StatusMenu quota={quota.data} primary={primary} update={update.data} upNote={upNote} fresh={fresh} fleet={fleet} conf={conf} folded={foldedList.length} restartFolded={foldedList.includes('restart')}
-              recording={meetings?.rec?.title || null} onUsage={() => showCard('gauge')} onAddAccount={(kind) => setAddAcct({ kind })} onWeather={() => showCard('sun')} onCalendar={() => showCard('calendar')} onUpdateDetails={() => setSettings('about')} /></Quiet>
+            <Quiet name="Status"><StatusMenu quota={quota.data} primary={primary} update={update.data} upNote={upNote} fresh={fresh} fleet={fleet} conf={conf} folded={foldedList.length} restartFolded={!pins.restart || foldedList.includes('restart')}
+              recording={meetings?.rec?.title || null} onUsage={() => showCard('gauge')} onAddAccount={(kind) => setAddAcct({ kind })} onWeather={() => showCard('sun')} onCalendar={() => showCard('calendar')} onUpdateDetails={() => setSettings('about')} onPins={() => setSettings('topbar')} /></Quiet>
           </>
         )}
         {toStart && <button className="win-btn" onClick={toStart} aria-label={t('Your computer')} title={t('Back to the start: pair or open a computer')}><Icon name="laptop" size={wide ? 15 : 18} /></button>}

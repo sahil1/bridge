@@ -43,8 +43,9 @@ const PHONE = [
 // screen. A section's id opens it (on a phone with ‹ Settings back to the list), and so do these:
 // "accounts" and "cloud" open Model providers at its Accounts or Cloud agents list; "machines"
 // opens Devices at your devices (they were two sections, and linking machines needs the
-// relay set up on the phone one); "permissions" opens General at its Permissions.
-const LEADS = { accounts: 'providers', cloud: 'providers', machines: 'phone', permissions: 'general' }
+// relay set up on the phone one); "permissions" opens General at its Permissions; "topbar" opens
+// Appearance at In the Top Bar (from the Status menu).
+const LEADS = { accounts: 'providers', cloud: 'providers', machines: 'phone', permissions: 'general', topbar: 'appearance' }
 const sectionFor = (section, sections) => {
   const to = cloudOnly ? (section === 'all' ? null : section === 'appearance' ? 'appearance' : 'cloud') : LEADS[section] || section
   return sections.some((s) => s.id === to) ? to : null
@@ -89,7 +90,7 @@ export default function Settings({ section = 'all', onClose, onOpenAgent }) {
     {at === 'voice' && <Voice />}
     {at === 'meetings' && <Meetings />}
     {at === 'mcp' && <Mcp />}
-    {at === 'appearance' && <Appearance />}
+    {at === 'appearance' && <Appearance focus={section === 'topbar' ? 'topbar' : null} />}
     {at === 'config' && <ConfigFile />}
     {at === 'phone' && <Phone focus={section === 'machines' ? 'machines' : null} />}
     {at === 'about' && <About />}

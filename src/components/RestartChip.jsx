@@ -53,7 +53,7 @@ export default function RestartChip({ fleet, runtime, keep, line = false, startO
         </button>
       ) : (
         <button className="top-chip update-chip" onClick={() => setOpen((o) => !o)} aria-expanded={open} title={t('{what}. Restart Bridge AI to apply it.', { what: sentence })}>
-          <Icon name="refresh" size={13} /><span className="hide-sm">{t('Restart to apply')}</span>
+          <Icon name="refresh" size={13} /><span className="pin-word">{t('Restart to apply')}</span>
         </button>
       )}
       {open && (

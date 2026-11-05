@@ -51,7 +51,9 @@ export default function SetupChip({ line = false }) {
   return (
     <button type="button" className={`${line ? 'top-note' : 'top-chip'} setup-chip${needs ? ' you' : ''}`} onClick={open} title={title} aria-label={label}>
       {needs ? <StatusDot status="blocked" size={8} /> : <span className="aa-spin" aria-hidden="true" />}
-      <span className="setup-chip-word">{label}</span>
+      {/* In the top bar, as it gives way (useFit in App.jsx): the words go, then how far it is. */}
+      {line ? <span className="setup-chip-word">{label}</span>
+        : <span className="setup-chip-word pin-long"><span className="pin-word">{needs ? t('Setup needs you') : t('Setting up')} · </span>{t('{n} of {total}', { n: ready, total })}</span>}
       {line && <Icon name="chevron" size={13} className="top-note-go" />}
     </button>
   )

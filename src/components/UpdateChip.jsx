@@ -55,7 +55,7 @@ export default function UpdateChip({ u, onDetails, onDone, row = false }) {
       {row
         ? <button type="button" className="status-row" onClick={() => setOpen((o) => !o)} aria-expanded={open}><Icon name="info" size={14} /><span className="status-row-text">{t('Bridge AI {version} needs macOS {macos}', { version: u.latest, macos: u.held.macos })}</span><Icon name="chevron" size={13} className="status-go" /></button>
         : <button className="top-chip" onClick={() => setOpen((o) => !o)} aria-expanded={open} title={t('Bridge AI {version} needs macOS {macos}', { version: u.latest, macos: u.held.macos })}>
-          <Icon name="info" size={13} /><span className="hide-sm">{t('Newer version')}</span>
+          <Icon name="info" size={13} /><span className="pin-word">{t('Newer version')}</span>
         </button>}
       {open && (
         <div className="update-pop" role="dialog" aria-label={t('Newer version')}>
@@ -71,7 +71,7 @@ export default function UpdateChip({ u, onDetails, onDone, row = false }) {
       {row
         ? <button type="button" className="status-row update-row" onClick={() => setOpen((o) => !o)} aria-expanded={open} title={t('Bridge AI {latest} is available (you have {current})', { latest: u.latest, current: u.current })}><Icon name="download" size={14} /><span className="status-row-text">{t('Bridge AI {version} is available', { version: u.latest })}</span><Icon name="chevron" size={13} className="status-go" /></button>
         : <button className={`top-chip update-chip${loud ? ' loud' : ''}`} onClick={() => setOpen((o) => !o)} aria-expanded={open} title={t('Bridge AI {latest} is available (you have {current})', { latest: u.latest, current: u.current })}>
-          <Icon name="download" size={13} /><span className={loud ? '' : 'hide-sm'}>{loud ? t('Update to {version}', { version: u.latest }) : t('Update')}</span>
+          <Icon name="download" size={13} /><span className={loud ? 'pin-long' : 'pin-word'}>{loud ? t('Update to {version}', { version: u.latest }) : t('Update')}</span>
         </button>}
       {open && (
         <div className="update-pop" role="dialog" aria-label={t('Update Bridge AI')}>
