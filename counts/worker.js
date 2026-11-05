@@ -260,7 +260,10 @@ const away = (to) => new Response(null, { status: 301, headers: { location: to, 
 export default {
   async fetch(req, env) {
     const { pathname, hostname } = new URL(req.url)
-    if (hostname.startsWith('crashes.')) {
+    // At the project's names each takes only its own (counts., crashes.), so either can be blocked
+    // alone. At any other (a fork's one name, or workers.dev), both are there.
+    const neither = !hostname.startsWith('counts.') && !hostname.startsWith('crashes.')
+    if (hostname.startsWith('crashes.') || (neither && pathname === '/v1/report')) {
       if (pathname === '/v1/report') return req.method === 'POST' ? takeCrash(req, env) : json({ ok: false, error: 'POST a report' }, 405)
       if (pathname === '/' && (req.method === 'GET' || req.method === 'HEAD')) return away(PRIVACY.crashes)
       return new Response('Not found\n', { status: 404 })

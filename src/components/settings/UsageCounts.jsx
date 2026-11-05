@@ -15,6 +15,8 @@ export default function UsageCounts() {
   const [open, setOpen] = useState(null) // 'preview' | a week sent
   const [doc, setDoc] = useState(null)
   useEffect(() => { api('/counts').then(setS, () => setS(null)) }, [])
+  // (An address set for them that isn't one is said, rather than the section just not showing.)
+  if (s?.problem) return <section className="st-sec"><h4>{t('Usage counts')}</h4><p className="st-note bad"><Icon name="alert" size={13} /> {t('Usage counts and crash reports can\'t be sent: {why}', { why: s.problem })}</p></section>
   if (!s || (!s.available && !s.refused)) return null
   const show = async (what) => {
     if (open === what) { setOpen(null); return }
