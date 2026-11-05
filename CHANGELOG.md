@@ -4,7 +4,7 @@ Each version's section here becomes its GitHub release notes (`npm run release`)
 
 ## 3.10.1
 
-The top bar shows what you pin; meeting dropdowns that open in a smaller window; AI Assist with room to read, how often it suggests, and a sort.
+The top bar shows what you pin; meeting dropdowns that open in a smaller window; AI Assist with room to read, how often it suggests, and a sort; the floating card whole with Assist on; and no warning about a call's sound in a room.
 
 ### What's new
 
@@ -13,6 +13,8 @@ The top bar shows what you pin; meeting dropdowns that open in a smaller window;
 - **AI Assist keeps room to read.** On a short meeting panel (a smaller window, a banner, the Agents panel under it), your notes and Assist were squeezed to a sliver and its suggestions scrolled inside it. They keep their room, and the page scrolls instead.
 - **How often AI Assist suggests**: Low, Medium or High, a slider on Assist while it records, and in Settings › Meetings, for every meeting. Low looks every few minutes and says one thing, only when something stands out; Medium is as before, about once a minute; High about every 30 seconds. A change while it records counts at once.
 - **Sort Assist's suggestions** newest first, oldest first or by kind (questions to ask first).
+- **The floating card fits the screen with AI Assist on.** Open, with Assist's suggestion under the bar, the card was taller than its window could be, and its bottom was cut off. The window now grows to the screen's height, and what's under the bar scrolls past that, with the bar and the suggestion always in view.
+- **A meeting in a room isn't a silent call.** On a Mac every meeting records what the computer plays too, in case a call starts. In a room nothing plays, so after half a minute it kept warning to allow Bridge AI in System Settings, and a quiet room meeting never ended by itself. Both now wait for a call to be on (an app like Teams, Zoom or a browser using the mic).
 - **One Who spoke** on a transcript with the other side in it, where there were two.
 - **No card about usage stats.** Usage stats and crash reports are as they were (on unless turned off); the card that said so is gone. Their switches are in Settings › About & Updates, and what's sent is in PRIVACY.md.
 
