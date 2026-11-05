@@ -13,7 +13,11 @@
 // crash written down when its server isn't answering. In the app: the card after a crash, Report on
 // GitHub showing the whole issue to change before anything is sent (nothing reaches GitHub until
 // the link is followed), the crash screen's Report on GitHub over it, too long for a link, and on a
-// phone.
+// phone. With no crash server (the tests' default) nothing more shows. With one (stood in for): Send
+// to Bold Bridge on a crash's report sends that report as shown, with nothing personal, and offers
+// to send them by themselves from then on; on, a crash sends itself, once; Settings › About &
+// Updates has the switch and each report sent, as it went; DO_NOT_TRACK keeps it off. Each crash is
+// counted in the usage counts too.
 import fs from 'node:fs'
 import path from 'node:path'
 import http from 'node:http'
@@ -236,6 +240,71 @@ try {
     ok(said && fits, 'phone: the card says the window stopped and was opened again, and fits', await p.locator('body').innerText().catch(() => ''))
     await shot(p, `${tag}crash-report-phone`)
     await ctx.close()
+  }
+  // ---------- Send to Bold Bridge (a crash server, stood in for) ----------
+  {
+    ok(!(await kit.api('/crashes/sending')).available, 'with no crash server, crash reports aren\'t offered')
+    const got = []
+    const port = await freePort()
+    const srv = http.createServer((req, res) => {
+      let body = ''
+      req.on('data', (c) => { body += c })
+      req.on('end', () => { got.push({ path: req.url, type: req.headers['content-type'], body }); res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"ok":true}') })
+    }).listen(port, '127.0.0.1')
+    const send = await startKit('crash-report-send', { config: { name: 'Priya Raman' }, env: { BRIDGE_CRASHES_URL: `http://127.0.0.1:${port}/v1/report` } })
+    kits.push(send)
+    await send.api('/setup', { name: 'Priya Raman' })
+    fs.mkdirSync(path.join(send.home, 'code', 'acme-billing'), { recursive: true })
+    await send.api('/projects', { paths: [path.join(send.home, 'code', 'acme-billing')] }).catch(() => {})
+    const s0 = await send.api('/crashes/sending')
+    ok(s0.available && !s0.send && s0.to === `127.0.0.1:${port}` && s0.sent.length === 0, 'with a crash server: offered, and off', s0)
+    await send.api('/ui-error', { where: 'Files', message: 'off: nothing goes', stack: '' })
+    await new Promise((r) => setTimeout(r, 800))
+    ok(got.length === 0, 'off, a crash sends nothing by itself', got)
+    const { ctx, p, errors } = await page(b, send.url, { before: watchGithub })
+    await p.locator('.topbar .search-btn').waitFor({ timeout: 15000 }).catch(() => {})
+    await p.evaluate(() => localStorage.setItem('cc-test-crash', '1'))
+    await p.reload()
+    await until(async () => (await p.locator('.crash-card').count()) > 0 && (await p.locator('.crash-card.retrying').count()) === 0, 15000)
+    await p.locator('.crash-card button', { hasText: 'Report on GitHub' }).click().catch(() => {})
+    const dlg = p.locator('.crash-report')
+    const sendBtn = dlg.locator('button.cr-send')
+    ok(await until(() => sendBtn.isVisible(), 8000) && /send it to Bold Bridge or open it on GitHub/.test(await dlg.innerText()), 'the report has Send to Bold Bridge beside Open on GitHub, and says nothing goes until you click')
+    await dlg.locator('textarea').first().fill('The window hit an error. What I was doing: opening acme-billing as Priya Raman')
+    await sendBtn.click()
+    ok(await until(() => got.length === 1, 8000), 'Send to Bold Bridge sends it, once', got.length)
+    const r1 = got[0] ? JSON.parse(got[0].body) : {}
+    ok(got[0]?.path === '/v1/report' && /application\/json/.test(got[0]?.type || '') && r1.kind === 'ui' && /A crash made by a test/.test(r1.title) && /What crashed: the window hit an error/.test(r1.details) && Object.keys(r1).join() === 'schema,kind,app,os,arch,install,title,what,details', 'as the report it showed, with the fields the public list names', r1)
+    ok(!/Priya|acme-billing/.test(got[0]?.body || '') && /<name>/.test(r1.what) && /<project>/.test(r1.what), 'with what the person typed in, and their names taken out of it again', r1.what)
+    const sentNote = dlg.locator('.cr-sent')
+    ok(await until(async () => /Sent to Bold Bridge/.test(await sentNote.innerText().catch(() => '')), 5000), 'it says it was sent')
+    await sentNote.locator('button', { hasText: 'Send them by themselves from now on' }).click()
+    ok(await until(async () => (await send.api('/crashes/sending')).send === true, 5000), 'Send them by themselves from now on turns crash reports on')
+    await shot(p, `${tag}crash-report-sent`)
+    await ctx.close()
+    await send.api('/ui-error', { where: 'Board', message: 'TypeError: y is null', stack: 'TypeError: y is null\n    at Board (/x.js:1:1)' })
+    await send.api('/ui-error', { where: 'Board', message: 'TypeError: y is null', stack: 'TypeError: y is null\n    at Board (/x.js:1:1)' })
+    ok(await until(() => got.length === 2, 8000) && (await new Promise((r) => setTimeout(r, 800)), got.length === 2) && /y is null/.test(got[1]?.body || ''), 'on: a crash sends itself, and the same crash only once', got.length)
+    // Settings › About & Updates.
+    const { ctx: c2, p: p2 } = await page(b, send.url)
+    await p2.locator('.topbar .search-btn').waitFor({ timeout: 15000 }).catch(() => {})
+    await p2.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'about' } })))
+    await until(async () => /Crash reports/.test(await p2.locator('.st-body').innerText().catch(() => '')), 8000)
+    const box = p2.locator('label', { hasText: 'Send crash reports by themselves' }).locator('input')
+    const text = await p2.locator('.st-body').innerText().catch(() => '')
+    ok(await box.isChecked().catch(() => false) && /Kept for 90 days/.test(text) && new RegExp(`127\\.0\\.0\\.1:${port}`).test(text), 'Settings › About & Updates: Crash reports, on, saying where they go and for how long', text.slice(-700))
+    await p2.locator('.st-sec:has(h4:text("Crash reports")) .link-btn').first().click()
+    const doc = await until(async () => { const x = await p2.locator('.st-sec:has(h4:text("Crash reports")) .counts-doc').innerText().catch(() => ''); return /"kind": "ui"/.test(x) && x }, 5000)
+    ok(!!doc && /y is null/.test(doc), 'each report sent can be read there, as it went', doc)
+    await box.click()
+    ok(await until(async () => (await send.api('/crashes/sending')).send === false, 5000), 'and turned off there')
+    await c2.close()
+    ok(errors.filter((e) => !/A crash made by a test|due to access control checks/.test(e)).length === 0, 'no other page errors', errors)
+    const dnt = await startKit('crash-report-dnt', { env: { BRIDGE_CRASHES_URL: `http://127.0.0.1:${port}/v1/report`, DO_NOT_TRACK: '1' } })
+    kits.push(dnt)
+    const d0 = await dnt.api('/crashes/sending')
+    ok(!d0.available && d0.refused === 'DO_NOT_TRACK' && await dnt.api('/crashes/sending', { send: true }).then(() => false, () => true) && await dnt.api('/crashes/send', { title: 'x', details: 'y' }).then(() => false, () => true), 'DO_NOT_TRACK: off, it can\'t be turned on, and nothing can be sent', d0)
+    srv.close()
   }
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
