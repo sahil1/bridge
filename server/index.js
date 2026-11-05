@@ -68,6 +68,7 @@ import * as projects from './projects.js'
 import * as calls from './calls.js'
 import * as callEvent from './callevent.js'
 import * as perf from './perf.js'
+import * as studio from './studio.js'
 import { terminals, openAttach, openCommand } from './terminal.js'
 import { mcpRoutes } from './mcp.js'
 import * as notify from './notify.js'
@@ -317,6 +318,8 @@ app.get('/api/previews', wrap(async () => {
 // Any pane works here (agents and plain shells); the root is that pane's folder. A place you
 // added to Files (place:<id>) works the same way, its folder the root.
 const rootOf = async (pane) => {
+  // Studio's own folder: decks made from meetings, and new files with no folder of yours to go in.
+  if (pane === 'studio') { const d = path.join(DATA, 'studio', 'files'); fs.mkdirSync(d, { recursive: true }); return d }
   if (String(pane).startsWith('place:')) {
     const pl = places.placeOf(String(pane).slice(6))
     if (!pl) throw new Error('That place isn\'t in Files any more')
@@ -326,6 +329,57 @@ const rootOf = async (pane) => {
   if (!p) throw new Error(`No pane ${pane}`)
   return p.cwd
 }
+// ---------- Trial features ----------
+// Still being finished, so hidden until turned on in Settings › About & Updates › Trial Features
+// (trials: { studio: true } in the config; src/trials.js). Their routes answer only then.
+const TRIALS = ['studio']
+const trialOn = (id) => cfg.trials?.[id] === true
+const trialOff = (id, label) => (req, res, next) => (trialOn(id) ? next() : res.status(404).json({ error: `${label} is a trial feature. Turn it on in Settings › About & Updates › Trial Features.`, trial: id }))
+
+// ---------- Studio (studio.js) ----------
+// Its files are named as Files names them: root (an agent's pane, or place:<id>) and a path in it.
+// Ask an agent sends the change to the agent you pick (pane), or starts one in the file's folder.
+app.use('/api/studio', trialOff('studio', 'Studio'))
+const sq = (req) => ({ root: String(req.query.root || req.body?.root || ''), path: String(req.query.path || req.body?.path || '') })
+app.get('/api/studio/recent', wrap(async () => ({ files: await studio.recentFiles() })))
+app.delete('/api/studio/recent', wrap((req) => { const q = sq(req); return studio.forget(q.root, q.path) }))
+app.get('/api/studio/open', wrap(async (req) => { const q = sq(req); return studio.open(await rootOf(q.root), q.path, { rootId: q.root, label: String(req.query.where || '') || null }) }))
+// A save over a change made meanwhile is a 409, so the page offers theirs or yours.
+app.put('/api/studio/file', express.raw({ type: () => true, limit: '80mb' }), async (req, res) => {
+  try { const q = sq(req); res.json(await studio.save(await rootOf(q.root), q.path, req.body, { mtime: req.query.mtime, force: req.query.force === '1' })) } catch (e) { res.status(e.conflict ? 409 : 502).json({ error: e.message, ...(e.conflict ? { conflict: true } : {}) }) }
+})
+app.get('/api/studio/changed', wrap(async (req) => { const q = sq(req); return studio.changed(await rootOf(q.root), q.path, req.query.since) }))
+app.get('/api/studio/versions', wrap(async (req) => { const q = sq(req); return studio.versions(await rootOf(q.root), q.path) }))
+app.get('/api/studio/version', async (req, res) => {
+  try { const q = sq(req); const { file, name } = await studio.versionFile(await rootOf(q.root), q.path, String(req.query.id || '')); res.type(path.extname(file)); res.set('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(name)}`); res.sendFile(file, { dotfiles: 'allow' }) } catch (e) { res.status(e.status || 404).json({ error: e.message }) }
+})
+app.post('/api/studio/restore', wrap(async (req) => { const q = sq(req); return studio.restore(await rootOf(q.root), q.path, String(req.body?.id || '')) }))
+app.post('/api/studio/new', express.json({ limit: '30mb' }), wrap(async (req) => {
+  const q = sq(req)
+  return studio.create(await rootOf(q.root), String(req.body?.dir || ''), String(req.body?.name || ''), req.body?.data ? Buffer.from(String(req.body.data), 'base64') : Buffer.from(String(req.body?.text || '')))
+}))
+app.get('/api/studio/packs', wrap(async () => ({ packs: await studio.packs() })))
+app.post('/api/studio/packs', express.json({ limit: '1mb' }), wrap((req) => studio.savePack(req.body || {})))
+app.delete('/api/studio/packs/:id', wrap((req) => studio.removePack(req.params.id)))
+app.post('/api/studio/ask', wrap(async (req) => {
+  const q = sq(req)
+  const root = await rootOf(q.root)
+  const text = studio.askText({ rel: q.path, kind: String(req.body?.kind || ''), instruction: req.body?.instruction, selection: req.body?.selection, where: req.body?.where })
+  if (!String(req.body?.instruction || '').trim()) throw new Error('Say what to change')
+  const pane = String(req.body?.pane || '')
+  if (pane) {
+    const a = await findAgent(pane)
+    queue.add(pane, text)
+    pushFleet()
+    const name = (a.tab && !/^\d+$/.test(a.tab) ? a.tab : a.title) || adapter(a.kind).label
+    await studio.noteAsk(root, q.path, name)
+    return { paneId: pane, name }
+  }
+  const kind = String(req.body?.agent || cfg.defaultAgent || 'claude')
+  const out = await launchFrom({ kind, cwd: root, label: `Studio · ${path.basename(q.path)}`.slice(0, 60), prompt: text })
+  await studio.noteAsk(root, q.path, adapter(kind).label)
+  return { ...out, name: adapter(kind).label }
+}))
 app.get('/api/agents/:pane/files', wrap(async (req) => files.listDir(await rootOf(req.params.pane), String(req.query.path || ''), { showHidden: req.query.hidden === '1' })))
 app.get('/api/agents/:pane/file', wrap(async (req) => files.readFile(await rootOf(req.params.pane), String(req.query.path || ''))))
 app.put('/api/agents/:pane/file', async (req, res) => {
@@ -1236,6 +1290,8 @@ app.get('/api/meetings/since', wrap((req) => meetWork.since({ title: String(req.
 app.get('/api/meetings/search', wrap((req) => meetings.search(String(req.query.q || '').slice(0, 200), { archived: req.query.archived === '1' })))
 app.post('/api/meetings/ask', wrap((req) => meetings.askAll(String(req.body?.question || '').slice(0, 2000), { ids: [].concat(req.body?.ids || []).slice(0, 50), model: req.body?.model })))
 app.post('/api/meetings/:id/keep', wrap((req) => meetings.keep(req.params.id)))
+// Make a deck from a meeting, in Studio's own folder, to open in Studio.
+app.post('/api/meetings/:id/deck', trialOff('studio', 'Studio'), wrap((req) => meetings.deck(req.params.id, { model: req.body?.model })))
 // Meeting memory (meetmemory.js): the names and terms in your meetings, yours to edit.
 app.get('/api/meetings/memory', wrap(() => ({ terms: meetMemory.list() })))
 app.post('/api/meetings/memory', wrap((req) => meetMemory.add({ term: req.body?.term, heard: req.body?.heard, note: req.body?.note })))
@@ -1915,6 +1971,7 @@ app.get('/api/config', (req, res) => res.json({
   dictation: cfg.dictation || {}, // Settings › Voice › Dictation
   alertSounds: cfg.alertSounds !== false, // the speaker in the top bar
   meetingKey: MEETING_KEYS.includes(cfg.meetings?.mentionKey) ? cfg.meetings.mentionKey : '@', // Settings › Meetings
+  trials: Object.fromEntries(TRIALS.map((id) => [id, trialOn(id)])), // Settings › About & Updates › Trial Features
 }))
 // The speaker in the top bar: notifications (this computer's, a browser's, your phones') come with a
 // sound, or without one; they still come. Your other devices are told too, unless one of them is

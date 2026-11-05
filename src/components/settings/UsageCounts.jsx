@@ -35,7 +35,7 @@ export default function UsageCounts() {
           <p className="muted small">{t('Once a week: which features you used and how often, as numbers in ranges, sent to {host}. No names, paths, prompts or anything you typed or said, and no ID for you or this computer. Off unless you turn it on; turning it off stops it at once and forgets what wasn\'t sent.', { host: s.to })}</p>
           {s.stopped && <p className="st-note"><Icon name="info" size={13} /><span>{t('The project asked Bridge AI to stop sharing: {why}', { why: s.stopped })}</span></p>}
           <div className="st-row">
-            <button type="button" className="ghost-btn" aria-expanded={open === 'preview'} onClick={() => show('preview')}><Icon name="eye" size={12} /> {t('See exactly what would be sent')}</button>
+            <button type="button" className="btn small" aria-expanded={open === 'preview'} onClick={() => show('preview')}><Icon name="eye" size={13} /> {t('See exactly what would be sent')}</button>
             {s.sent?.length > 0 && <span className="muted small">{t('Sent:')}</span>}
             {(s.sent || []).slice(0, 8).map((w) => <button key={w} type="button" className="link-btn small" aria-expanded={open === w} onClick={() => show(w)}>{w}</button>)}
           </div>

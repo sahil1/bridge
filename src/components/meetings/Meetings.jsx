@@ -19,6 +19,7 @@ import { sendPicture, pictureUrl } from './screen.js'
 import './meetings.css'
 import SpeechSetup, { MeetingsSetup } from './SpeechSetup.jsx'
 import { ActionItems, SinceLastTime } from './work.jsx'
+import { useTrial } from '../../trials.js'
 
 // The meeting pages: the list of meetings, and one meeting with your notes beside its transcript, the
 // summary, questions about it, and its action items for the Chief of Staff. The recording itself is
@@ -452,6 +453,7 @@ const tilde = (p) => String(p || '').replace(/^\/Users\/[^/]+/, '~')
 const localInput = (iso) => { const d = new Date(iso); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16) }
 
 export function MeetingPage({ id, onBack }) {
+  const studio = useTrial('studio') // Make a deck writes one into Studio, a trial feature (src/trials.js)
   const m = useMeetings()
   const live = m?.rec?.id === id
   const { data, refresh } = usePoll(`/meetings/${encodeURIComponent(id)}`, live ? 1500 : 4000)
@@ -629,6 +631,14 @@ export function MeetingPage({ id, onBack }) {
     setMsg({ text: r.fixed || r.dropped ? t('Fixed {n} lines and left out {left}. Each says what was heard; Undo puts one back.', { n: r.fixed, left: r.dropped }) : t('Nothing needed fixing.') })
   })
   const uncleanAll = () => act('clean', async () => { await api(`/meetings/${encodeURIComponent(id)}/cleanup/undo`, { method: 'POST', body: {} }); setMsg({ text: t('The transcript is back to what was heard.') }) })
+  // A deck of it, written by the notes model, opened in Studio (its own folder) to present, change
+  // or send as PowerPoint.
+  const makeDeck = () => act('deck', async () => {
+    setMsg({ text: t('Writing a deck of this meeting…') })
+    const r = await api(`/meetings/${encodeURIComponent(id)}/deck`, { method: 'POST' })
+    setMsg(null)
+    window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root: r.root, path: r.path } }))
+  })
   const takeEvent = (ev) => act('event', async () => { await api(`/meetings/${encodeURIComponent(id)}/event`, { method: 'POST', body: { event: ev } }); setMsg({ text: ev.attendees?.length ? t('Took the {n} people invited to "{title}" from your calendar.', { n: ev.attendees.length, title: ev.title }) : t('Took the details of "{title}" from your calendar.', { title: ev.title }) }) })
   // Words picked in the transcript: a Fix button by them.
   const picked = () => setTimeout(() => {
@@ -807,6 +817,7 @@ export function MeetingPage({ id, onBack }) {
           { icon: 'download', label: t('Save as Markdown'), run: save },
           data.saved && here() && { icon: 'folder-open', label: t('Show saved notes in Finder'), run: reveal },
           atActions(data.summary) && { icon: 'helm', label: t('Send action items to Chief of Staff'), run: toChief },
+          studio && done && (data.summary || lines.length > 0) && { icon: 'screen', label: t('Make a deck'), run: makeDeck },
           '-',
           { icon: 'edit', label: t('Fix a word everywhere'), run: () => setFix({ from: '' }) },
           done && { icon: 'refresh', label: t('Transcribe again…'), run: () => setDialog('again') },

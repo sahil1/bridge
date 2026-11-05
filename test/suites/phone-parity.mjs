@@ -29,6 +29,7 @@ const PATHS = {
   'view:meetings': { phone: 'Meetings', shows: '.m-meetings' },
   'view:dictations': { phone: 'Meetings › Dictations', shows: '.dc-home, .dc-empty, .dc-body' },
   'view:whiteboards': { phone: 'More › Whiteboards', shows: '.wb-home' },
+  'view:studio': { phone: 'More › Studio', shows: '.sd-home' },
   'view:map': { phone: 'Agents › Map', shows: '.am' },
   // ⌘K's actions (App.jsx paletteActions).
   'a:home': { phone: 'Agents › New', shows: '.home-title' },
@@ -37,6 +38,7 @@ const PATHS = {
   'a:meetings': { phone: 'Meetings', shows: '.m-meetings' },
   'a:dictations': { phone: 'More › Dictations', shows: '.dc-home, .dc-empty, .dc-body' },
   'a:boards': { phone: 'More › Whiteboards', shows: '.wb-home' },
+  'a:studio': { phone: 'More › Studio', shows: '.sd-home' },
   'a:map': { phone: 'More › Agent Map', shows: '.am' },
   'a:needs': { phone: 'More › Needs you', shows: '.ny-panel' },
   'a:history': { phone: 'More › History', shows: '.modal.history' },
@@ -81,6 +83,7 @@ const PATHS = {
   'rail:Record a meeting now': { phone: 'Meetings', shows: '.m-meetings button:has-text("Start recording")' },
   'rail:Dictations': { phone: 'Meetings › Dictations', shows: '.dc-home, .dc-empty, .dc-body' },
   'rail:Whiteboards': { phone: 'More › Whiteboards', shows: '.wb-home' },
+  'rail:Studio': { phone: 'More › Studio', shows: '.sd-home' },
   'rail:New space': { phone: 'Search › New agent with all the options' },
   'rail:New terminal': { phone: 'Search › New terminal' },
   'rail:History': { phone: 'More › History', shows: '.modal.history' },
@@ -106,7 +109,7 @@ for (const [what, ids] of [['view', views], ['⌘K action', actions], ['Settings
   ok(!missing(ids).length, `every desktop ${what} has a way in on a phone, or says why not (add it to PATHS here)`, missing(ids))
 }
 
-const kit = await startKit('phone-parity')
+const kit = await startKit('phone-parity', { config: { trials: { studio: true } } }) // Studio, a trial feature, on: its ways in are checked too
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
 try {

@@ -166,12 +166,13 @@ try {
 
   // ---------- A call's prompt never hangs ----------
   // Take notes with a mic that never answers: it says it's starting, and Not now still closes it,
-  // at once.
+  // at once. The mic is stood in for on MediaDevices itself too: on a CI Mac, WebKit's real one ran
+  // and refused at once, so the one on navigator.mediaDevices alone wasn't always the one called.
   if (IS_WIN) skip("a call's prompt closes while Take notes is starting", 'calls are noticed on a Mac')
   else {
     const { b } = await browser()
     browsers.push(b)
-    const { p, ctx } = await page(b, kit.url, { before: async (c) => { await c.addInitScript(() => { if (navigator.mediaDevices) navigator.mediaDevices.getUserMedia = () => new Promise(() => {}) }) } })
+    const { p, ctx } = await page(b, kit.url, { before: async (c) => { await c.addInitScript(() => { const never = () => new Promise(() => {}); if (window.MediaDevices) MediaDevices.prototype.getUserMedia = never; if (navigator.mediaDevices) navigator.mediaDevices.getUserMedia = never }) } })
     await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
     call({ input: ['com.microsoft.teams2'] })
     const prompt = p.locator('.call-prompt', { hasText: 'Teams call started' })
