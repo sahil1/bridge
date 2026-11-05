@@ -3,7 +3,7 @@ import Icon from './Icon.jsx'
 import { AgentIcon } from './settings/ProviderIcon.jsx'
 import { api, usePoll } from '../api.js'
 import { HandoffSection, HandoffPanel, useHandoff, useHandedNote } from './Handoff.jsx'
-import { AcctName, Left, nameOf } from './AccountMenu.jsx'
+import { AcctName, Left, nameOf, slotsOf } from './AccountMenu.jsx'
 import { t, tx } from '../i18n/index.js'
 
 // Why a message is held (server/promptsafe.js says it in English), in your language.
@@ -238,15 +238,17 @@ function ModelMenu({ data, agent, anchor, onPick, onClose, account = null, onAcc
       {account && <>
         {(switches || data.mode === 'fixed') && <div className="acct-sep" role="separator" />}
         <div className="acct-sec" aria-hidden="true">{t('{agent} account', { agent: data.label })}</div>
-        {agent.status === 'working' && <p className="model-note">{t("It's working. Another account can pick it up once it's done (or press Stop).")}</p>}
+        {/* Stopped at its limit, it's done for now, though its screen can still show it working. */}
+        {agent.status === 'working' && !account.atLimit && <p className="model-note">{t("It's working. Another account can pick it up once it's done (or press Stop).")}</p>}
+        {account.atLimit && <p className="model-note">{t('It stopped at its usage limit. Another account can pick it up now, where it stopped.')}</p>}
         {account.list.map((a) => {
           const on = a.id === account.current
           return (
-            <button type="button" key={a.id} data-item role="menuitemradio" aria-checked={on} className="acct-item" disabled={on || agent.status === 'working'} onClick={() => onAccount(a)}
+            <button type="button" key={a.id} data-item role="menuitemradio" aria-checked={on} className="acct-item" disabled={on || (agent.status === 'working' && !account.atLimit)} onClick={() => onAccount(a)}
               title={on ? t('This conversation is on {account}', { account: nameOf(a) }) : t('Continue this conversation on {account}', { account: nameOf(a) })}>
               <span className="acct-check">{on && <Icon name="check" size={13} />}</span>
               <span className="acct-main"><AcctName a={a} /></span>
-              <Left a={a} />
+              <Left a={a} slots={slotsOf(account.list)} />
             </button>
           )
         })}

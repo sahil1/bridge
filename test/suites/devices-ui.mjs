@@ -122,6 +122,12 @@ try {
   ok((await ask.innerText()).includes(digits), 'Studio shows Desk asking, with the same six digits')
   await ask.locator('button', { hasText: 'Allow' }).click()
   ok(!!(await until(async () => (await other(c, 'Studio'))?.online && (await other(a, 'Desk'))?.online, 40000, 300)), 'allowed: Studio and Desk are linked, both ways')
+  // Linked, each window says which computer it shows (the Dock and the Window menu list them by it).
+  {
+    const w = await page(b, a.url, { mode: 'light', theme: 'sky' })
+    ok(!!(await until(async () => / · Studio$/.test(await w.p.title()), 15000)), "with another computer linked, the window's title says it's Studio", await w.p.title())
+    await w.ctx.close()
+  }
   ok(!!(await until(async () => !(await app.locator('.ask-banner').count()), 15000)), 'and the phone stops offering')
 
   // ---------- the sidebar's Devices: the arrow says whether it's open ----------

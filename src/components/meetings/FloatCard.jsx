@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import Icon, { StatusDot } from '../Icon.jsx'
 import { api, usePoll, useFleet } from '../../api.js'
-import { MEETINGS_CHANNEL, clock, useCallEvent, QuickNote } from './recording.jsx'
+import { MEETINGS_CHANNEL, clock, useCallEvent, QuickNote, endedWords } from './recording.jsx'
 import { KIND, setAssist, markAssist } from './assist.jsx'
 import { t, locale } from '../../i18n/index.js'
 import './meetings.css'
@@ -72,7 +72,7 @@ export default function FloatCard() {
   // above the bar. In a browser tab the page doesn't move.
   const up = !!app().floatSize && window.screenY + window.outerHeight / 2 > (window.screen.availTop || 0) + window.screen.availHeight / 2
   const { data: m } = usePoll(r ? `/meetings/${encodeURIComponent(r.id)}` : null, hover || pinned ? 1500 : 4000)
-  const ev = useCallEvent(!r && c?.prompt ? c.prompt.at : null)
+  const ev = useCallEvent(!r && c?.prompt ? c.prompt.at : null, c?.prompt?.app)
 
   useEffect(() => {
     const ch = new BroadcastChannel(MEETINGS_CHANNEL)
@@ -191,7 +191,7 @@ export default function FloatCard() {
         )}
         {open && (
           <div className="fc-more">
-            {r.callEnded && <p className="fc-line"><b>{r.callEndedApp ? t('The {app} call ended.', { app: r.callEndedApp }) : t('The call ended.')}</b> {left != null ? t('Stopping in {time}.', { time: clock(left) }) : t('Stop recording?')}</p>}
+            {r.callEnded && <p className="fc-line"><b>{endedWords(r)}</b> {left != null ? t('Stopping in {time}.', { time: clock(left) }) : t('Stop recording?')}</p>}
             {r.callQuiet && !paused && <p className="fc-line fc-quiet" role="status"><b>{t('No sound from the call.')}</b> {t('If people are talking, allow Bridge AI under System Settings › Privacy & Security › Screen & System Audio Recording, in System Audio Recording Only.')} <button type="button" className="link-btn" onClick={allowCall}>{t('Open it')}</button></p>}
             <div className="fc-viz">
               <div className="fc-row">
@@ -202,7 +202,7 @@ export default function FloatCard() {
               {talked.share != null && <span className="fc-share" title={t("Who's talked, of everything said so far")}><b>{t('You {n}%', { n: talked.share })}</b><i style={{ '--you': `${talked.share}%` }} /><b>{t('Call {n}%', { n: 100 - talked.share })}</b></span>}
             </div>
             <div className="fc-said">
-              {recent.length ? recent.map((l) => <p key={`${l.src}:${l.t0}`} className={`fc-said-line ${l.src}`}><b>{l.name || (l.src === 'them' ? t('Them') : m?.me || t('You'))}</b> {l.text}</p>) : !m?.partial && <p className="muted">{paused ? t('Paused.') : t('Listening…')}</p>}
+              {recent.length ? recent.map((l) => <p key={`${l.src}:${l.t0}`} className={`fc-said-line ${l.src}`}><b>{l.name || (l.me ? m?.me || t('You') : l.voice ? t('Speaker {n}', { n: l.voice }) : l.src === 'them' ? t('Them') : m?.me || t('You'))}</b> {l.text}</p>) : !m?.partial && <p className="muted">{paused ? t('Paused.') : t('Listening…')}</p>}
               {/* Live words: what someone is still saying, before its line is in. */}
               {!paused && ['you', 'them'].filter((src) => m?.partial?.[src]?.text).map((src) => <p key={`so-far-${src}`} className={`fc-said-line ${src} so-far`}><b>{src === 'them' ? t('Them') : m?.me || t('You')}</b> {m.partial[src].cut ? '… ' : ''}{m.partial[src].text}</p>)}
             </div>
@@ -220,6 +220,8 @@ export default function FloatCard() {
               {here && (screen
                 ? <>
                   <button type="button" className="btn small" onClick={() => chan.current?.postMessage({ type: 'op', op: 'capture' })} title={t("Keep what's on {name} now", { name: screen.label })}><Icon name="camera" size={12} /> {t('Capture')}{screen.kept ? ` · ${screen.kept}` : ''}</button>
+                  {/* Sharing a screen: the card out of its way, said in words, not only the small button up top. */}
+                  {app().platform === 'darwin' && app().floatHide && <button type="button" className="btn small" onClick={() => app().floatHide()} title={t('Move to the menu bar, out of the way of a screen you share')}><Icon name="minimize" size={12} /> {t('To the menu bar')}</button>}
                   <button type="button" className="btn small" onClick={() => chan.current?.postMessage({ type: 'op', op: 'unwatch' })} title={t('Watching {name}. Click to stop.', { name: screen.label })}><Icon name="eye-off" size={12} /> {t('Stop watching the screen')}</button>
                 </>
                 : live.canWatch && app().floatWatch && <button type="button" className="btn small" onClick={() => app().floatWatch()} title={t('Pick the window or screen being shared. A picture is kept each time it changes.')}><Icon name="screen" size={12} /> {t('Watch screen')}</button>)}
@@ -240,8 +242,9 @@ export default function FloatCard() {
         <div className="fc-head">{grip}<Icon name="mic" size={14} className="fc-accent" /><b className="fc-title">{what}</b>{hide}</div>
         <p className="fc-line muted">{ev ? <>Take notes for <b>{ev.title}</b>?</> : t('Take notes?')} {t('Your mic and the call, transcribed as you go.')}</p>
         <div className="fc-acts">
-          <button type="button" className="btn small primary" disabled={busy} onClick={() => act(() => app().floatStart?.({ app: c.prompt.app }))}><Icon name="mic" size={12} /> {t('Take notes')}</button>
-          <button type="button" className="ghost-btn" disabled={busy} onClick={() => act(() => api('/calls/dismiss', { method: 'POST' }))}>{t('Not now')}</button>
+          <button type="button" className="btn small primary" disabled={busy} onClick={() => act(() => app().floatStart?.({ app: c.prompt.app }))}><Icon name="mic" size={12} /> {busy ? t('Starting…') : t('Take notes')}</button>
+          {/* Not now always works, even while Take notes is still starting. */}
+          <button type="button" className="ghost-btn" onClick={() => { setErr(null); api('/calls/dismiss', { method: 'POST' }).catch(() => {}).finally(refresh) }}>{t('Not now')}</button>
         </div>
       </>
     )

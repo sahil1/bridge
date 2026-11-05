@@ -171,6 +171,17 @@ function choice(kind, d) {
 }
 
 // ---------- Used by the runtime ----------
+// For a one-off run of an agent's command line (a meeting's notes, AI Assist, a second opinion):
+// the accounts to try in turn, the one new agents start on first, then the others listed, leaving
+// out any its last reading says is out of usage (all of them, if every one is).
+export function forRun(kind) {
+  if (!KINDS[kind]) return [null]
+  const d = load()
+  const first = choice(kind, d).active
+  const ids = [first, ...rowsOf(kind, d).map((a) => a.id).filter((id) => id !== first)]
+  const room = ids.filter((id) => { const r = readings.get(id); return !(r?.usable && r.percentRemaining === 0) })
+  return room.length ? room : ids
+}
 // Which account a new agent of this kind starts with.
 export function activeId(kind) {
   return KINDS[kind] ? choice(kind, load()).active : null
@@ -336,8 +347,20 @@ export function groups() {
   return Object.keys(KINDS).map((kind) => {
     const { setting, pick, active } = choice(kind, d)
     // With who quota-axi says it is, as the quota feed gives for your usual login (Usage masks it).
-    return { kind, label: adapter(kind).label, setting, pick, usualHidden: hiddenUsual(kind, d), accounts: rowsOf(kind, d).map((a) => ({ ...view(a, active), account: readings.get(a.id)?.account || null })) }
+    const accounts = rowsOf(kind, d).map((a) => ({ ...view(a, active), account: readings.get(a.id)?.account || null }))
+    return { kind, label: adapter(kind).label, setting, pick, usualHidden: hiddenUsual(kind, d), accounts, ...(hiddenUsual(kind, d) ? { usual: usualView(kind, d, accounts) } : {}) }
   })
+}
+// Your usual login while it's off the list, for an agent still on it (one started before, or in
+// the terminal): its name and who it's signed in as, and sameAs, the listed account it is when
+// that one is signed in as the same (Claude Code's /login switches your usual login to it), so
+// the agent shows that account's name rather than "Your usual login".
+const whoKey = (x) => (x?.email ? `${String(x.email).toLowerCase()}|${x.organization || ''}` : null)
+function usualView(kind, d, listed) {
+  const id = defaultId(kind)
+  const account = readings.get(id)?.account || null
+  const k = whoKey(account)
+  return { ...view({ id, kind, label: defaultName(kind, d), isDefault: true, named: !!cleanLabel(d.names?.[kind]) }, null), account, sameAs: (k && listed.find((a) => whoKey(a.account) === k)?.id) || null }
 }
 
 export async function list({ refresh = false } = {}) {

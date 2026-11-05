@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Icon from './Icon.jsx'
-import { api, BASE } from '../api.js'
+import { api, BASE, usePoll } from '../api.js'
 import { usePersisted } from './layout.jsx'
 import Lightbox from './Lightbox.jsx'
 import { Menu } from './Rail.jsx'
 import PermissionFix from './PermissionFix.jsx'
-import { t, tx } from '../i18n/index.js'
+import { t, tx, locale } from '../i18n/index.js'
 import { keyLabel } from '../../shared/dictation/keys.js'
 import { LiveWords } from '../dictation/Pill.jsx'
 import { useDictation, registerBox, noteBoxFocus, press, release, finish, cancel, dismiss, retry, settings, keysPlatform, dictationKey, listeningHint } from '../dictation/controller.js'
@@ -139,6 +139,24 @@ function useMentions(url, query) {
     return () => { live = false; clearTimeout(t) }
   }, [url, query])
   return { items, cwd }
+}
+// Meetings to mention, found as you type after the meeting key (Settings › Meetings), on the
+// computer the agent runs on (its own, where the file it reads will be).
+function useMeetingMentions(query) {
+  const [items, setItems] = useState(null)
+  useEffect(() => {
+    if (query == null) { setItems(null); return }
+    let live = true
+    const t = setTimeout(() => { api(`/meetings/mentions?q=${encodeURIComponent(query)}`).then((d) => { if (live) setItems(d.meetings || []) }).catch(() => { if (live) setItems([]) }) }, query ? 120 : 0)
+    return () => { live = false; clearTimeout(t) }
+  }, [query])
+  return items
+}
+const meetingWhen = (m) => {
+  const at = new Date(m.startedAt).toLocaleString(locale(), { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+  const s = Math.round(m.seconds || 0)
+  const long = s >= 3600 ? `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min` : `${Math.max(1, Math.round(s / 60))} min`
+  return m.status === 'recording' || m.status === 'paused' ? `${at} · ${t('recording')}` : `${at} · ${long}`
 }
 // Claude reads @path; a path with spaces needs quotes.
 const mentionText = (p) => (/\s/.test(p) ? `@"${p}"` : `@${p}`)
@@ -514,7 +532,32 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
   const isJump = (f) => f.place || (f.label === '..' && mentionQ === '')
   const mentionItems = mentionQ != null && found ? found.filter((f) => !isJump(f)).map(toItem) : []
   const mentionJumps = mentionQ != null && found ? found.filter(isJump).map(toItem) : []
+  // Meetings, mentioned with the meeting key (Settings › Meetings): with @, a few beside the files
+  // found for what's typed; with another key, only meetings, the latest first. A meeting goes in as
+  // @ and the file the agent reads (forAgents on the server): its summary, your notes, the transcript.
+  const meetKey = usePoll('/config', 10 * 60 * 1000).data?.meetingKey || '@'
+  const keyAt = meetKey !== '@' && filesUrl && !slashItems.length ? new RegExp(`(^|\\s)${meetKey.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')}([^\\s]*)$`).exec(before) : null
+  const keyStart = keyAt ? keyAt.index + keyAt[1].length : -1
+  const meetQ = meetKey !== '@' ? (keyAt && mentionOff !== keyStart ? keyAt[2] : null) : mentionQ && !/[/~."\\]/.test(mentionQ) ? mentionQ : null
+  const meetFound = useMeetingMentions(meetQ)
+  const meetItems = (meetQ != null && meetFound ? meetFound : []).slice(0, keyAt ? 8 : 4).map((m) => ({ key: `meeting:${m.id}`, label: m.title, description: meetingWhen(m), badge: t('meeting'), meeting: m }))
+  const atItems = keyAt ? meetItems : [...mentionItems, ...meetItems]
+  const menuOpen = keyAt ? meetQ != null : mentionQ != null
+  const menuStart = keyAt ? keyStart : atStart
+  useEffect(() => { setMentionSel(0) }, [meetQ])
+  const pickMeeting = async (it) => {
+    const from = menuStart
+    const to = caret
+    let ref
+    try { ref = await api(`/meetings/${encodeURIComponent(it.meeting.id)}/for-agents`, { method: 'POST' }) } catch (e) { setNote(e.message); return }
+    const ins = `${mentionText(ref.path)} `
+    setDraft((d) => ({ ...d, text: d.text.slice(0, from) + ins + d.text.slice(to) }))
+    const pos = from + ins.length
+    setCaret(pos)
+    requestAnimationFrame(() => { const el = taRef.current; if (el) { el.focus(); el.setSelectionRange(pos, pos) } })
+  }
   const pickMention = (it) => {
+    if (it.meeting) { pickMeeting(it); return }
     const p = it.file.path
     const end = caret
     const ins = it.file.dir ? `@${/\s/.test(p) ? `"${p}` : p}` : `${mentionText(p)} `
@@ -529,11 +572,11 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
 
   const onKeyDown = (e) => {
     if (editing && e.key === 'Escape') { e.preventDefault(); endEdit(true); return }
-    if (mentionItems.length || mentionJumps.length) {
-      if (e.key === 'ArrowDown') { e.preventDefault(); setMentionSel((i) => Math.min(i + 1, mentionItems.length - 1)); return }
+    if (menuOpen && (atItems.length || (!keyAt && mentionJumps.length))) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setMentionSel((i) => Math.min(i + 1, atItems.length - 1)); return }
       if (e.key === 'ArrowUp') { e.preventDefault(); setMentionSel((i) => Math.max(i - 1, 0)); return }
-      if (((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') && mentionItems[mentionSel]) { e.preventDefault(); pickMention(mentionItems[mentionSel]); return }
-      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setMentionOff(atStart); return }
+      if (((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') && atItems[mentionSel]) { e.preventDefault(); pickMention(atItems[mentionSel]); return }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setMentionOff(menuStart); return }
     }
     if (slashItems.length) {
       if (e.key === 'ArrowDown') { e.preventDefault(); setSlashSel((i) => Math.min(i + 1, slashItems.length - 1)); return }
@@ -572,8 +615,9 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
         </div>
       )}
       <SlashMenu items={slashItems} sel={slashSel} onHover={setSlashSel} onPick={pickSlash} title={slashTitle} />
-      {mentionQ != null && <SlashMenu items={mentionItems} sel={mentionSel} onHover={setMentionSel} onPick={pickMention} title={/^[~/]/.test(mentionQ) ? mentionQ.replace(/[^/]*$/, '') || '~/' : mentionQ.endsWith('/') ? mentionQ : mentionQ ? t('Matching "{query}"', { query: mentionQ }) : `${cwdName || t('This folder')}/`}
-        jumps={mentionJumps} mention />}
+      {menuOpen && <SlashMenu items={atItems} sel={mentionSel} onHover={setMentionSel} onPick={pickMention}
+        title={keyAt ? (meetQ ? t('Meetings matching "{query}"', { query: meetQ }) : t('Latest meetings')) : /^[~/]/.test(mentionQ) ? mentionQ.replace(/[^/]*$/, '') || '~/' : mentionQ.endsWith('/') ? mentionQ : mentionQ ? t('Matching "{query}"', { query: mentionQ }) : `${cwdName || t('This folder')}/`}
+        jumps={keyAt ? [] : mentionJumps} mention />}
       {voiceSetup && (voiceSetup.mic ? <MicFix stale={voiceSetup.stale} onClose={closeVoiceSetup} /> : <VoiceSetup initial={voiceSetup} onReady={retry} onClose={closeVoiceSetup} />)}
       {note && <div className="comp-note" role="status">{note}</div>}
       {dictNote && <div className="comp-note" role="status">{dictNote} {dict.retry && <button className="link-btn" onClick={retry}>{t('Try again')}</button>} <button className="link-btn" onClick={dismiss}>{t('Close')}</button></div>}

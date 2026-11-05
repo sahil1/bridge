@@ -176,6 +176,8 @@ function connect() {
   clearTimeout(retry)
   if (!conf.url || !conf.token) return
   if (link && link.readyState <= 1) return
+  // One still closing is let go first, with its phones' sessions.
+  if (link) { const old = link; link = null; clearInterval(pinger); try { old.terminate() } catch { /* closed */ } for (const c of conns.values()) c.end(); conns.clear() }
   // (Bridge AI's relay hears which version this is, for its counts: HOSTED.md.)
   const ws = new WebSocket(`${conf.url.replace(/^http/, 'ws').replace(/\/$/, '')}/_relay/host`, { headers: { Authorization: `Bearer ${conf.token}`, ...(conf.hosted ? { 'X-Bridge-Version': VERSION } : {}) }, handshakeTimeout: 15000 })
   link = ws
@@ -309,7 +311,9 @@ class Conn {
     this.timer = setTimeout(() => { if (!this.session) this.close() }, HELLO_SECONDS * 1000)
   }
 
-  receive(buf) { this.q = this.q.then(() => this.handle(buf)).catch((e) => { console.error('relay:', e.message); this.close() }) }
+  // Anything that goes wrong ends this connection (the phone or device connects again), and says
+  // whose it was: a record that didn't open is one missing or changed on the way.
+  receive(buf) { this.q = this.q.then(() => this.handle(buf)).catch((e) => { console.error(`relay: ${this.device ? `${this.device.name} (${this.device.kind || 'phone'})` : 'a connection'}: ${e.message}; closed it`); this.close() }) }
 
   close() { toRelay(OP.CLOSE, this.id); this.end(); conns.delete(this.id) }
 

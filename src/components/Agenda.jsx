@@ -80,9 +80,11 @@ function split(events, now) {
   }
 }
 
+// Join, which also tells the computer which meeting the call that starts next is for.
+export const joined = (e) => api('/calendar/joined', { method: 'POST', body: { id: e.id } }).catch(() => {})
 function JoinBtn({ e, strong }) {
   if (!e.join) return null
-  return <a className={`join-btn ${strong ? 'strong' : ''}`} href={e.join} target="_blank" rel="noreferrer" onClick={(x) => x.stopPropagation()}><Icon name="video" size={12} /> {t('Join')}</a>
+  return <a className={`join-btn ${strong ? 'strong' : ''}`} href={e.join} target="_blank" rel="noreferrer" onClick={(x) => { x.stopPropagation(); joined(e) }}><Icon name="video" size={12} /> {t('Join')}</a>
 }
 
 function EventRow({ e, now, past }) {

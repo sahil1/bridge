@@ -2,8 +2,9 @@ import { useState } from 'react'
 import Icon from './Icon.jsx'
 import { usePersisted, useShared, useWidth } from './layout.jsx'
 import { api, usePoll, fmtTime, settingsChanged, refetch, useFleet } from '../api.js'
-import SignInButton from './SignIn.jsx'
-import { AllowKeychain, level, statusText, lapsed, Left, weekResets, sameAs, sameText, usingIt, nameOf, asList, makeDefault, removeAccount, removeTwin, signOut, DefaultTag, maskEmail } from './AccountMenu.jsx'
+import SignInButton, { openSettings } from './SignIn.jsx'
+import { Menu } from './Rail.jsx'
+import { AllowKeychain, level, statusText, lapsed, Left, weekResets, slotsOf, sameAs, sameText, usingIt, nameOf, asList, makeDefault, removeAccount, removeTwin, signOut, DefaultTag, maskEmail } from './AccountMenu.jsx'
 import { addAccount } from './AddAccount.jsx'
 import { t, tx, locale, midSentence } from '../i18n/index.js'
 
@@ -253,8 +254,10 @@ function TopBarPick({ on, onClick }) {
 // ---------- several accounts ----------
 // Every account's share of one window, kept apart: what's left in each (an empty one stays
 // empty, not averaged away), their total in windows, and the soonest reset.
+// An account whose plan has no such window (no 5-hour one) isn't part of it; one not read is, as
+// not read.
 function combine(accounts, kind) {
-  const parts = accounts.map((a) => {
+  const parts = accounts.filter((a) => !a.usable || a.windows.some((x) => x.kind === kind)).map((a) => {
     const w = a.usable ? a.windows.find((x) => x.kind === kind) : null
     return { id: a.id, label: a.label, pct: w?.percentRemaining ?? null, resetsAt: w?.resetsAt || null }
   })
@@ -288,7 +291,7 @@ function SegBar({ parts }) {
 // (Make default, Sign in again, Sign out, Remove). The row shows both windows and when the week
 // resets; Sign in is on the row, not inside it. auto: Auto is on (its pick gets the auto tag, and
 // no row the star). only: the one account listed, which can't be removed.
-function AccountUsage({ a, auto, open, onToggle, inUse, only }) {
+function AccountUsage({ a, auto, open, onToggle, inUse, only, slots }) {
   const [reveal, setReveal] = usePersisted('cc-usage-reveal', false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
@@ -312,7 +315,7 @@ function AccountUsage({ a, auto, open, onToggle, inUse, only }) {
           </span>
           {reset && <small className="acct-u-reset">{reset}</small>}
         </span>
-        {a.usable && main ? <Left a={a} /> : <span className="prov-status">{statusText(a, false, inUse)}</span>}
+        {a.usable && main ? <Left a={a} slots={slots} /> : <span className="prov-status">{statusText(a, false, inUse)}</span>}
         <Icon name="chevron" size={12} className={`caret ${open ? 'rot90' : ''}`} />
       </button>
       {!a.allow && !a.usable && a.signedIn === false && <div className="acct-u-signin"><SignInButton kind={kind} account={a.id} onCheck={() => refetch('/quota')} /></div>}
@@ -358,6 +361,8 @@ function AccountsRow({ g, open, onToggle, isPrimary, onMakePrimary }) {
   const [busy, setBusy] = useState(false)
   const sess = combine(g.accounts, 'session')
   const week = combine(g.accounts, 'weekly')
+  // The windows every account has: the week, when some plan has no 5-hour window.
+  const head = sess.n && sess.n >= week.n ? sess : week.n ? week : sess
   const several = g.accounts.length > 1
   const auto = g.setting === 'auto' && several
   const { fleet } = useFleet()
@@ -373,10 +378,11 @@ function AccountsRow({ g, open, onToggle, isPrimary, onMakePrimary }) {
           <b>{nice(g.kind)}</b>
           <span className="grp-count">{several ? t('{n} accounts', { n: g.accounts.length }) : nameOf(g.accounts[0])}</span>
         </span>
-        {sess.n ? (
-          <span className="prov-meter" title={combinedText(sess, '5h window')}>
-            <SegBar parts={sess.parts} />
-            <span className="prov-pct">{fmtSum(sess.sum)}<small className="muted">/{sess.n}</small></span>
+        {/* The 5-hour windows together, or the weeks' for plans that have none. */}
+        {head.n ? (
+          <span className="prov-meter" title={combinedText(head, head === sess ? '5h window' : 'weekly window')}>
+            <SegBar parts={head.parts} />
+            <span className="prov-pct">{fmtSum(head.sum)}<small className="muted">/{head.n} {head === sess ? t('5h left') : t('wk left')}</small></span>
           </span>
         ) : <span className="prov-status">{t('no data')}</span>}
         <Icon name="chevron" size={12} className={`caret ${open ? 'rot90' : ''}`} />
@@ -404,7 +410,7 @@ function AccountsRow({ g, open, onToggle, isPrimary, onMakePrimary }) {
           ) })}
           {err && <p className="error-text small" role="alert">{err}</p>}
           <ul className="acct-us">
-            {g.accounts.map((a) => <AccountUsage key={a.id} a={a} auto={auto} only={!several} inUse={usingIt(fleet, a.id)} open={openAcct === a.id} onToggle={() => setOpenAcct(openAcct === a.id ? null : a.id)} />)}
+            {g.accounts.map((a) => <AccountUsage key={a.id} a={a} slots={slotsOf(g.accounts)} auto={auto} only={!several} inUse={usingIt(fleet, a.id)} open={openAcct === a.id} onToggle={() => setOpenAcct(openAcct === a.id ? null : a.id)} />)}
           </ul>
           <button type="button" className="ghost-btn acct-add" onClick={() => addAccount(g.kind)}><Icon name="plus" size={12} /> {t('Add another {agent} account', { agent: nice(g.kind) })}</button>
           {(g.kind === 'claude' || g.kind === 'codex') && <Activity provider={g.kind} note={t('Cost and tokens are for all your {agent} accounts together: they share one history.', { agent: nice(g.kind) })} />}
@@ -436,7 +442,28 @@ export default function Usage({ data, error }) {
           return g ? <AccountsRow key={id} g={g} {...row} /> : <ProviderRow key={id} p={providers.find((p) => p.provider === id)} {...row} />
         })}
       </ul>
+      {data && <AddProvider kinds={(data.accounts || []).map((g) => g.kind)} />}
     </div>
+  )
+}
+
+// Add a provider from here, not only from Settings: another account for an agent that can have
+// several (Claude Code, Codex), an agent's own plan to sign in to (Cursor, Copilot, Gemini...),
+// an API key, or a local model (both in Settings › Model Providers).
+function AddProvider({ kinds }) {
+  const [open, setOpen] = useState(false)
+  const items = [
+    ...kinds.map((k) => ({ icon: 'users', label: t('Another {agent} account', { agent: nice(k) }), run: () => addAccount(k) })),
+    kinds.length > 0 && '-',
+    { icon: 'bot', label: t("Another agent's plan (Cursor, Copilot, Gemini…)"), run: () => openSettings('providers') },
+    { icon: 'unlock', label: t('An API key (OpenAI, OpenRouter, Gemini…)'), run: () => openSettings('providers') },
+    { icon: 'laptop', label: t('A model on this computer (Ollama, LM Studio…)'), run: () => openSettings('providers') },
+  ]
+  return (
+    <span className="menu-anchor usage-add">
+      <button type="button" className="ghost-btn" onClick={() => setOpen(!open)} aria-expanded={open}><Icon name="plus" size={12} /> {t('Add a provider')}</button>
+      {open && <Menu align="left" onClose={() => setOpen(false)} items={items} />}
+    </span>
   )
 }
 

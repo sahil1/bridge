@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import Icon from '../Icon.jsx'
-import { api } from '../../api.js'
+import { api, fmtTime } from '../../api.js'
 import { clock } from './recording.jsx'
 import { RecentFiles } from './context.jsx'
 import { t, tx } from '../../i18n/index.js'
@@ -11,6 +11,8 @@ import { t, tx } from '../../i18n/index.js'
 // based on. Keep one and it goes in your notes; dismiss the rest. Suggest now asks straight away,
 // before anyone has talked too: questions from the resume, say. While it records, files you got
 // lately that look like they go with the meeting are offered here too, so Assist can read them.
+// It says when it last looked, so a quiet stretch never looks like it stopped: "Looked at 2:14 PM:
+// nothing stood out yet".
 
 export const KIND = { question: tx('Ask'), point: tx('Raise'), check: tx('Check'), idea: tx('Idea') }
 const meeting = (id) => `/meetings/${encodeURIComponent(id)}`
@@ -46,14 +48,14 @@ export function AssistPane({ id, data, onChange, onMsg }) {
           <input type="checkbox" checked={on} onChange={toggle} disabled={busy === 'on'} />
           <b>{t('AI Assist')}</b>
         </label>
-        <span className="muted small">{on ? (data.assisting ? t('Reading along…') : live ? t('Suggests as the meeting goes, about once a minute') : t('On for this meeting')) : t('Off')}</span>
+        <span className="muted small">{on ? (data.assisting ? t('Reading along…') : live ? (data.assistAt ? t('Looked at {time}. It looks again about once a minute.', { time: fmtTime(data.assistAt) }) : t('It looks once there\'s something to go on, about once a minute.')) : t('On for this meeting')) : t('Off')}</span>
         <span className="mt-grow" />
         {(on || live) && <button type="button" className="btn small" onClick={now} disabled={!!busy || data.assisting} title={t('Suggest something now, from what has been said and the files')}><Icon name="bulb" size={12} /> {busy === 'now' || data.assisting ? t('Thinking…') : t('Suggest now')}</button>}
       </div>
       {!on && !items.length && <p className="muted small mt-hint">{t('Turn it on and, while the meeting records, it suggests questions to ask and things to check: from what\'s said, the invite, the files that go with the meeting (a resume, a deck) and your notes. Each one says what it\'s based on. It uses the model that writes your notes.')}</p>}
       {live && <RecentFiles id={id} sug={sug} compact onLook={() => api(`${meeting(id)}/suggest?ask=1`).then(setSug).catch(() => {})} onAdded={(f) => { onChange(); onMsg({ text: t('Added {name}. Assist and the notes read it now.', { name: f.name }) }); api(`${meeting(id)}/suggest`).then(setSug).catch(() => {}) }} />}
       {data.assistError && <p className="error-text small">{t("Couldn't suggest anything: {error}", { error: data.assistError })}</p>}
-      {on && !items.length && !data.assistError && <p className="muted small mt-hint">{live ? t('Suggestions appear here once there\'s something to go on. Suggest now asks straight away.') : t('Nothing was suggested.')}</p>}
+      {on && !items.length && !data.assistError && <p className="muted small mt-hint">{live ? (data.assistAt ? t('Nothing stood out yet. Suggest now asks straight away.') : t('Suggestions appear here once there\'s something to go on. Suggest now asks straight away.')) : t('Nothing was suggested.')}</p>}
       <div className="mt-assist-list">
         {items.map((x) => (
           <div key={x.id} className={`mt-tip ${x.kind}${x.state === 'kept' ? ' kept' : ''}`}>

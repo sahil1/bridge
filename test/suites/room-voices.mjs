@@ -11,8 +11,9 @@
 //   once names all their lines, in the saved notes too. While the next one records, its lines get
 //   their speakers as they come; on a computer with two cores, once it ends instead. Remembering
 //   voices: nothing kept until it's on, then a named voice known again by itself next time, and
-//   Forget voices. A download that fails its checksum is said, and Try again works. A meeting with
-//   the call's sound isn't one for this.
+//   Forget voices. A download that fails its checksum is said, and Try again works. A call: the
+//   voices on it told apart by themselves and named from who was invited, and your voice learned
+//   from your mic on it, so the next room knows which voice is you.
 // BRIDGE_REAL_VOICES=1: also the real thing, once, by hand (macOS): the real ERes2Net model downloaded
 // from Hugging Face (kept in test/.out/real-models for next time) and run by the real sherpa-onnx
 // on two voices made with `say`.
@@ -166,13 +167,30 @@ try {
   await kit.api(`/meetings/${R2.id}/stop`, {})
   ok((await tryApi(kit, '/meetings/voices/forget', {})).ok && !fs.existsSync(path.join(kit.data, 'meetings', 'voices.json')) && (await tryApi(kit, '/meetings/voices')).known === 0, 'Forget voices: none kept')
 
-  // A meeting with the call's sound says who's on the call already.
-  const C = await kit.api('/meetings', { title: 'Call', call: false })
+  // A call: the voices on it told apart by themselves once it ends (two people invited besides
+  // you), named from who was invited, and your voice learned from your mic, so a room knows you.
+  // Priya at 300 Hz and Dan at 500 on the call; you at 220 on your mic, as in the rooms before.
+  const callTurns = Buffer.concat([1, 2, 1, 2].flatMap((w) => [tone(2.5, w === 1 ? 300 : 500), tone(1.6)]))
+  // After the call's lines, so none of yours is taken for the call heard by your mic.
+  const mine = Buffer.concat([tone(22), ...[0, 0, 0, 0].flatMap(() => [tone(3.6, 220), tone(1.6)])])
+  const C = await kit.api('/meetings', { title: 'Pricing call', call: false, event: { title: 'Pricing call', attendees: ['Priya Shah', 'Dan Ruiz', 'Tester'] } })
+  for (const [src, buf] of [['them', callTurns], ['you', mine]]) { let q = 0; for (let o = 0; o < buf.length; o += RATE * 2) await fetch(`${kit.url}/api/meetings/${C.id}/audio?src=${src}&seq=${q++}`, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: buf.subarray(o, o + RATE * 2) }) }
   await kit.api(`/meetings/${C.id}/stop`, {})
-  await until(async () => (await kit.api(`/meetings/${C.id}`)).status === 'done', 10000)
-  fs.appendFileSync(path.join(kit.data, 'meetings', C.id, 'transcript.jsonl'), `${JSON.stringify({ src: 'them', t0: 1, t1: 3, text: 'Hello from the call.' })}\n${JSON.stringify({ src: 'you', t0: 4, t1: 6, text: 'Hi.' })}\n`)
-  r = await tryApi(kit, `/meetings/${C.id}/voices`, {})
-  ok(/call's sound/.test(r.error || ''), 'a meeting with the call\'s sound isn\'t told apart by voice', r)
+  const told = await until(async () => { const m = await kit.api(`/meetings/${C.id}`); const them = m.transcript.filter((l) => l.src === 'them' && l.text); return m.voices?.src === 'them' && them.length === 4 && them.map((l) => l.voice).join() === '1,2,1,2' && m }, 30000)
+  ok(!!told, "a call: the voices on it told apart by themselves once it ends, Speaker 1, 2, 1, 2", (await kit.api(`/meetings/${C.id}`)).transcript.map((l) => [l.src, l.voice]))
+  ok(!!told && told.transcript.filter((l) => l.src === 'you' && l.text).every((l) => !l.voice), 'your lines stay yours: only the call is told apart')
+  await kit.api(`/meetings/${C.id}/speakers`, {})
+  const named = await until(async () => { const tr = (await kit.api(`/meetings/${C.id}`)).transcript.filter((l) => l.src === 'them' && l.text); return tr.every((l) => (l.voice === 1 ? l.name === 'Priya Shah' : l.name === 'Dan Ruiz')) && tr }, 10000)
+  ok(!!named, 'and named once a voice, from who was invited: every line of theirs', (await kit.api(`/meetings/${C.id}`)).transcript.map((l) => [l.voice, l.name]))
+  st = await tryApi(kit, '/meetings/voices')
+  ok(st.mine === true && st.learn === true && st.calls === true, 'your voice is learned from your mic on the call, by itself', st)
+  // A room after, with you (220 Hz) and someone else (440 Hz).
+  const R4 = await record(kit, 'Whiteboard', [1, 2, 1, 2])
+  const knownMe = await until(async () => { const tr = (await kit.api(`/meetings/${R4.id}`)).transcript.filter((l) => l.text); return tr.length === 4 && tr.filter((_, i) => i % 2 === 0).every((l) => l.me && l.byVoice) && tr.filter((_, i) => i % 2 === 1).every((l) => !l.me) && tr }, 30000)
+  ok(!!knownMe, 'a room after: your lines are yours, known by your voice, with nobody naming it', await kit.api(`/meetings/${R4.id}`).then((m) => ({ lines: m.transcript.map((l) => [l.voice, l.me, l.byVoice]), voices: m.voices, work: m.voicesWork, status: m.status })))
+  await kit.api('/settings', { meetings: { learnVoice: false } }, 'PATCH')
+  ok((await tryApi(kit, '/meetings/voices')).learn === false, 'Learn my voice can be turned off')
+  await kit.api('/settings', { meetings: { learnVoice: true } }, 'PATCH')
 
   // Two cores: not while it records, once it ends. And a download that fails its checksum.
   const slow = await startKit('room-voices-slow', { env: env({ BRIDGE_MACHINE: JSON.stringify({ cores: 2, memGB: 4 }) }) })

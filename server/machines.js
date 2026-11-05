@@ -42,6 +42,8 @@ const links = new Map() // machine id -> Link
 const PING_MS = Number(process.env.BRIDGE_LINK_PING_MS) || 30000
 const QUIET_MS = PING_MS * 2.5
 const HELLO_MS = Math.min(15000, QUIET_MS)
+const SLOW_MS = 3000 // a request with no word back this long: is that device still there?
+const ANSWER_MS = 4000 // no answer to that this long: the link starts over
 const byId = (id) => conf.machines.find((m) => m.id === id) || null
 const byRelay = (r) => conf.machines.find((m) => m.relay === r) || null
 
@@ -91,6 +93,9 @@ class Link {
   connect() {
     clearTimeout(this.timer)
     if (this.stopped || (this.ws && this.ws.readyState <= 1)) return
+    // One still closing is let go first, with its session (sealed for it, a record on the new
+    // connection wouldn't open there).
+    if (this.ws) { const old = this.ws; this.ws = null; try { old.terminate() } catch { /* closed */ } this.drop('Connecting again') }
     const ws = new WebSocket(`${this.m.relay.replace(/^http/, 'ws')}/_relay/link`, { handshakeTimeout: 15000 })
     this.ws = ws
     this.heard = Date.now()
@@ -278,6 +283,8 @@ class Link {
     this.session = null
     this.waiting = null
     clearTimeout(this.helloTimer)
+    clearTimeout(this.probing)
+    this.probing = null
     for (const s of this.streams.values()) { s.onError?.(msg || 'Connection lost'); s.onClose?.({ c: 1006, r: 'connection lost' }) }
     this.streams.clear()
   }
@@ -312,10 +319,28 @@ class Link {
     while (this.session === session && this.ws && this.ws.bufferedAmount > 256 * 1024) await new Promise((r) => setTimeout(r, 10))
   }
 
+  // A request with no word back for a while: is that device still there? The link can look open
+  // long after it went (its relay answers the pings), and what you clicked waited until the next
+  // check, up to 75 s. It's asked at once (PING, or its relay where it can't answer that); nothing
+  // back, and the link starts over, which a page of it is asked again on (proxy).
+  probe() {
+    const ws = this.ws
+    if (!this.session || !ws || this.probing) return
+    const at = Date.now()
+    this.probing = setTimeout(() => {
+      this.probing = null
+      if (this.ws === ws && (this.answers ? this.fromIt : this.heard) < at) { this.error = `${this.m.name} didn't answer. Connecting again…`; ws.terminate() }
+    }, ANSWER_MS)
+    if (this.answers) this.send(K.PING, 0).catch(() => {})
+    else try { ws.send('ping') } catch { /* closing */ }
+  }
+
   // A request to that device: handlers get { s, h }, then pieces, then the end (or an error).
   // w: how much of the answer may be on its way at once; more(n) once n of it has been taken in.
-  request({ m, u, h, body, w }, handlers) {
+  request({ m, u, h, body, w }, given) {
     const id = this.next++
+    const slow = setTimeout(() => this.probe(), SLOW_MS)
+    const handlers = { ...given, onHead: (x) => { clearTimeout(slow); given.onHead?.(x) }, onError: (x) => { clearTimeout(slow); given.onError?.(x) } }
     this.streams.set(id, handlers)
     const started = this.send(K.REQ, id, { m, u, h, body: !!body, ...(w ? { w } : {}) })
     return {
@@ -323,7 +348,7 @@ class Link {
       started,
       write: (chunk, { bulk = false } = {}) => (async () => { for (let o = 0; o < chunk.byteLength; o += CHUNK) { if (bulk) await this.clear(); await this.send(K.BODY, id, chunk.subarray(o, o + CHUNK)) } })(),
       end: () => this.send(K.END, id),
-      cancel: () => { if (this.streams.delete(id)) this.send(K.CANCEL, id).catch(() => {}) },
+      cancel: () => { clearTimeout(slow); if (this.streams.delete(id)) this.send(K.CANCEL, id).catch(() => {}) },
       more: (n) => { if (this.streams.has(id)) this.send(K.MORE, id, more(n)).catch(() => {}) },
     }
   }
@@ -728,9 +753,12 @@ const PASS = new Set(['content-type', 'accept', 'accept-language', 'range', 'if-
 // (Its length comes only when the answer comes as it is: a download's progress, a video's player.)
 const HOP = new Set(['connection', 'keep-alive', 'transfer-encoding', 'content-encoding', 'set-cookie'])
 const MPATH = /^\/m\/([A-Za-z0-9_-]{1,20})(\/.*)?$/
-const offlinePage = (name, why) => `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${name}</title>
-<style>body{font:15px system-ui,sans-serif;display:grid;place-items:center;min-height:90vh;margin:0;background:#f4f5f7;color:#222}@media(prefers-color-scheme:dark){body{background:#111317;color:#e6e6e6}a{color:#8ab4ff}}div{max-width:420px;padding:24px;text-align:center}</style>
-<div><h2>${name} isn't reachable</h2><p>${why}</p><p><a href="/">Back to this device</a></p></div>`
+// A page of that device while it isn't reachable: it says so, and tries again every few seconds
+// by itself, so the window opens it as soon as the device is back (it used to sit there, or show
+// the error as the page).
+const offlinePage = (name, why) => `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="5"><title>${name}</title>
+<style>body{font:15px system-ui,sans-serif;display:grid;place-items:center;min-height:90vh;margin:0;background:#f4f5f7;color:#222}@media(prefers-color-scheme:dark){body{background:#111317;color:#e6e6e6}a{color:#8ab4ff}}div{max-width:420px;padding:24px;text-align:center}p.muted{opacity:.65;font-size:13px}</style>
+<div><h2>${name} isn't reachable</h2><p>${why}</p><p class="muted">Trying again every few seconds.</p><p><a href="/">Back to this device</a></p></div>`
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
 
 export async function proxy(req, res) {
@@ -741,44 +769,64 @@ export async function proxy(req, res) {
   // Not on behalf of another device: one hop only.
   if (relay.isMachine(req.headers['x-bridge-relay'])) return res.status(403).json({ error: 'Not through another device' })
   const l = linkOf(m)
-  try { await l.ready(page ? 20000 : 12000) } catch (e) {
-    return page ? res.status(503).type('html').send(offlinePage(esc(m.name), esc(e.message))) : res.status(503).json({ error: e.message, offline: true })
-  }
+  const away = (why) => (page ? res.status(503).type('html').send(offlinePage(esc(m.name), esc(why))) : res.status(503).json({ error: why, offline: true }))
+  try { await l.ready(page ? 20000 : 12000) } catch (e) { return away(e.message) }
   const u = hit[2] || '/'
   const h = Object.entries(req.headers).filter(([k]) => PASS.has(k)).map(([k, v]) => [k, String(v)])
   h.push(['x-bridge-machine', relay.thisName()])
   const hasBody = !['GET', 'HEAD'].includes(req.method)
   let done = false
+  let r = null
   // The answer comes as fast as the browser takes it (a video's player reads ahead only so far, then
   // waits): what's written here and not yet taken is given back only once it drains, so a big
   // file never piles up in this server's memory.
-  const grant = granter((n) => r.more(n))
+  const grant = granter((n) => r?.more(n))
   let unread = 0
-  const r = l.request({ m: req.method, u, h, body: hasBody, w: WINDOW }, {
-    onHead: ({ s, h: hs }) => {
-      res.status(s)
-      for (const [k, v] of hs || []) {
-        if (HOP.has(k.toLowerCase())) continue
-        // Its own paths, as they are here.
-        res.setHeader(k, k.toLowerCase() === 'location' && String(v).startsWith('/') ? `/m/${m.id}${v}` : v)
-      }
-    },
-    onChunk: (c) => {
-      if (res.write(c)) return grant(c.byteLength)
-      if (!unread) res.once('drain', () => { const n = unread; unread = 0; grant(n) })
-      unread += c.byteLength
-    },
-    onEnd: () => { done = true; res.end() },
-    onError: (msg) => { done = true; if (!res.headersSent) res.status(502).json({ error: msg }); else res.destroy() },
-  })
-  res.on('close', () => { if (!done) r.cancel() })
+  // A GET whose answer hadn't begun when the link dropped (that device reconnecting) is asked again
+  // once the link is back, rather than failing the page, or one of its files, with it: a window
+  // opened then showed the error as its page, or stayed white for want of its code.
+  let again = hasBody ? 0 : 1
+  let tries = 0
+  const failed = (msg, at = tries) => {
+    if (done || at !== tries) return // this try failed already (the link's drop and its start both say so)
+    tries++
+    if (!res.headersSent && again-- > 0) { l.ready(10000).then(ask, (e) => { if (!done) { done = true; away(e.message) } }); return }
+    done = true
+    if (res.headersSent) res.destroy()
+    else if (page) away(msg)
+    else res.status(502).json({ error: msg })
+  }
+  const ask = () => {
+    if (done) return
+    const at = tries
+    r = l.request({ m: req.method, u, h, body: hasBody, w: WINDOW }, {
+      onHead: ({ s, h: hs }) => {
+        res.status(s)
+        for (const [k, v] of hs || []) {
+          if (HOP.has(k.toLowerCase())) continue
+          // Its own paths, as they are here.
+          res.setHeader(k, k.toLowerCase() === 'location' && String(v).startsWith('/') ? `/m/${m.id}${v}` : v)
+        }
+      },
+      onChunk: (c) => {
+        if (res.write(c)) return grant(c.byteLength)
+        if (!unread) res.once('drain', () => { const n = unread; unread = 0; grant(n) })
+        unread += c.byteLength
+      },
+      onEnd: () => { done = true; res.end() },
+      onError: (msg) => failed(msg, at),
+    })
+    r.started.catch((e) => failed(e.message, at))
+    return r
+  }
+  ask()
+  res.on('close', () => { if (!done) { done = true; r?.cancel() } })
+  if (!hasBody) return
   try {
     await r.started
-    if (hasBody) {
-      for await (const chunk of req) await r.write(new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength))
-      await r.end()
-    }
-  } catch (e) { if (!done) { done = true; if (!res.headersSent) res.status(502).json({ error: e.message }); else res.destroy() } }
+    for await (const chunk of req) await r.write(new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength))
+    await r.end()
+  } catch (e) { failed(e.message) }
 }
 
 // A WebSocket to /m/<id>/... (a live terminal there).

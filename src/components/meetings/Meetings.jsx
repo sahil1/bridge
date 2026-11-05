@@ -19,6 +19,7 @@ import { sendPicture, pictureUrl } from './screen.js'
 import './meetings.css'
 import SpeechSetup, { MeetingsSetup } from './SpeechSetup.jsx'
 import { ActionItems, SinceLastTime } from './work.jsx'
+import { useTrial } from '../../trials.js'
 
 // The meeting pages: the list of meetings, and one meeting with your notes beside its transcript, the
 // summary, questions about it, and its action items for the Chief of Staff. The recording itself is
@@ -45,6 +46,32 @@ function Meter({ level = 0, label }) {
 }
 
 const span = (ms) => (ms < 90_000 ? t('{n} seconds', { n: Math.max(1, Math.round(ms / 1000)) }) : t('{n} minutes', { n: Math.round(ms / 60_000) }))
+
+// Names for who's talking on a call, with nothing for you to do: Screen Recording lets Bridge AI
+// look at the call's window as people talk and read the names it shows. Asked for here, the first
+// time a call records, saying why; Allow shows macOS's own window, then where to turn it on. Not
+// now hides it on this device.
+const ASKED_SCREEN = 'cc-asked-screen'
+function AskScreen() {
+  const here = onThisComputer()
+  const { data, refresh } = usePoll(here ? '/calls/screen' : null, 10_000)
+  const [gone, setGone] = useState(() => { try { return localStorage.getItem(ASKED_SCREEN) === '1' } catch { return false } })
+  const [asked, setAsked] = useState(false)
+  if (!here || gone || data?.allowed !== false) return null
+  const allow = async () => { setAsked(true); await api('/calls/screen', { method: 'POST' }).catch(() => {}); refresh() }
+  const later = () => { setGone(true); try { localStorage.setItem(ASKED_SCREEN, '1') } catch { /* asks again next time */ } }
+  return (
+    <p className="mt-ask-screen small" role="status">
+      <Icon name="users" size={12} /> <span><b>{t("Names for who's talking.")}</b> {asked
+        ? t('Turn on Bridge AI under System Settings › Privacy & Security › Screen & System Audio Recording, in Screen Recording.')
+        : t('Screen Recording lets Bridge AI read the names your call shows as people talk, to put them on the transcript. Only the words are kept, never the picture.')}</span>
+      {asked
+        ? <button type="button" className="link-btn" onClick={() => api('/fix/settings', { method: 'POST', body: { pane: 'audio' } }).catch(() => {})}>{t('Open it')}</button>
+        : <button type="button" className="btn small" onClick={allow}>{t('Allow')}</button>}
+      <button type="button" className="ghost-btn" onClick={later}>{t('Not now')}</button>
+    </p>
+  )
+}
 
 // The controls while this meeting records. The call's level comes from the server (data.levels).
 // Assist turns AI Assist on or off (onAssist: then shows it).
@@ -77,18 +104,43 @@ function RecordingBar({ id, data, onAssist }) {
       {r.missed > 0 && <p className="mt-trouble small mt-missed" role="status">{phone ? t('Not recorded: {time}, while the phone was locked or another app was in front. It carried on after.', { time: span(r.missed) }) : t('Not recorded: {time}, while the computer was asleep or the mic was taken. It carried on after.', { time: span(r.missed) })}</p>}
       {phone && !r.missed && <p className="mt-hint-call muted small">{t('Keep Bridge AI in front while it records: a phone stops the mic of an app in the background.')}</p>}
       {data?.callError && <p className="mt-trouble small" role="status">{data.callError} {t('Your mic still records.')}</p>}
+      {call === 'on' && !m.screen && <AskScreen />}
       {call === 'on' && data?.callQuiet && <p className="mt-hint-call muted small" role="status">{t('No sound from the call yet. If one is playing and this stays quiet, allow Bridge AI under System Settings › Privacy & Security › Screen & System Audio Recording, in System Audio Recording Only.')} <button type="button" className="link-btn" onClick={() => api('/fix/settings', { method: 'POST', body: { pane: 'audio' } }).catch(() => {})}>{t('Open it')}</button></p>}
     </div>
   )
 }
 
 
-// A calendar event happening now or starting within 10 minutes, to take notes for.
+// A calendar event happening now or starting within 10 minutes, to take notes for: on a call, the
+// one it's for (eventNow).
 function useNextEvent() {
-  const { data } = usePoll('/calendar', 60_000)
-  const events = data?.events || data?.today || []
-  const now = Date.now()
-  return events.find((e) => e.start && !e.allDay && new Date(e.start).getTime() - now < 10 * 60_000 && (!e.end || new Date(e.end).getTime() > now)) || null
+  const { data } = usePoll('/calls/event', 30_000)
+  return data?.event || null
+}
+
+// Who spoke how much: each speaker's share of the time anyone talked, from the transcript's lines
+// (who said each, as named or told apart by voice), longest first. With fewer than two, nothing.
+const lineWho = (l, me) => l.name || (l.me ? me || t('You') : l.voice ? t('Speaker {n}', { n: l.voice }) : l.src === 'them' ? t('Them') : me || t('You'))
+export function talkTime(lines, me) {
+  const by = new Map()
+  for (const l of lines) if (l.text && l.t1 > l.t0) { const k = lineWho(l, me); by.set(k, (by.get(k) || 0) + (l.t1 - l.t0)) }
+  const all = [...by.values()].reduce((a, b) => a + b, 0)
+  return all ? [...by].map(([who, s]) => ({ who, s, pct: Math.round((s / all) * 100) })).sort((a, b) => b.s - a.s) : []
+}
+function TalkTime({ lines, me }) {
+  const rows = talkTime(lines, me)
+  if (rows.length < 2) return null
+  const top = rows.slice(0, 6)
+  const rest = rows.slice(6).reduce((a, r) => a + r.pct, 0)
+  return (
+    <div className="mt-talk" role="img" aria-label={t('Who spoke how much: {list}', { list: rows.map((r) => `${r.who} ${r.pct}%`).join(', ') })}>
+      <div className="mt-talk-bar">{top.map((r, i) => <i key={r.who} className={`c${i}`} style={{ flexGrow: r.s }} title={t('{who}: {pct}%, {time}', { who: r.who, pct: r.pct, time: clock(r.s) })} />)}</div>
+      <div className="mt-talk-keys">
+        {top.map((r, i) => <span key={r.who}><i className={`c${i}`} />{r.who} <b>{r.pct}%</b></span>)}
+        {rest > 0 && <span className="muted">{t('{n} more', { n: rows.length - 6 })} <b>{rest}%</b></span>}
+      </div>
+    </div>
+  )
 }
 
 // Search: the words in a found meeting's line, marked.
@@ -401,6 +453,7 @@ const tilde = (p) => String(p || '').replace(/^\/Users\/[^/]+/, '~')
 const localInput = (iso) => { const d = new Date(iso); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16) }
 
 export function MeetingPage({ id, onBack }) {
+  const studio = useTrial('studio') // Make a deck writes one into Studio, a trial feature (src/trials.js)
   const m = useMeetings()
   const live = m?.rec?.id === id
   const { data, refresh } = usePoll(`/meetings/${encodeURIComponent(id)}`, live ? 1500 : 4000)
@@ -433,7 +486,7 @@ export function MeetingPage({ id, onBack }) {
   const [whoAt, setWhoAt] = useState(null) // { x, y, l }: the menu for who said a line
   const [naming, setNaming] = useState(null) // { l, name }: a name typed for a line
   const [events, setEvents] = useState(null) // calendar events around when it was recorded
-  const [evMenu, setEvMenu] = useState(null) // { x, y }
+  const [evMenu, setEvMenu] = useState(null) // { x, y, others }
   const [tw, setTw] = usePersisted('cc-mt-transcript-w', 0) // the transcript's width, once dragged
   const [big, setBig] = useState(null) // the picture shown full size (an index in pics)
   const [dropping, setDropping] = useState(false)
@@ -450,7 +503,7 @@ export function MeetingPage({ id, onBack }) {
   const focused = useRef(null) // the meeting whose notes got the cursor as it recorded
   const wasRecording = useRef(false)
   // Voices in a room: whether they can be told apart here, and Who spoke's answer once it's done.
-  const { data: vst } = usePoll(data && !(data.transcript || []).some((l) => l.src === 'them' && l.text) ? '/meetings/voices' : null, 60_000)
+  const { data: vst } = usePoll(data ? '/meetings/voices' : null, 60_000)
   const told = useRef(null) // when Who spoke was asked: the voices' time before
   useEffect(() => {
     if (!told.current || !data || data.voicesWork) return
@@ -480,16 +533,21 @@ export function MeetingPage({ id, onBack }) {
     el.setSelectionRange(el.value.length, el.value.length)
   }, [isRecording, wide, touch, id, data?.notes != null]) // eslint-disable-line react-hooks/exhaustive-deps
   // Recorded without the calendar event it was for: the events around then, to take its people from.
+  // Named after one while another was on too (back to back, or double-booked): the others, to say
+  // it was one of those instead.
   const noPeople = !!data && !(data.event?.attendees || []).length
+  const ofEvent = data?.event?.title ? `${data.event.title}|${data.event.start || ''}` : null
   // When the calendar can't be read (Bridge AI isn't allowed to yet), that's said, with Allow access.
   useEffect(() => {
     setEvents(null)
     setCalWhy(null)
-    if (!noPeople) return
+    if (!noPeople && !ofEvent) return
     let on = true
     api(`/meetings/${encodeURIComponent(id)}/events`).then((r) => on && setEvents(r.events || [])).catch((e) => { if (on) { setEvents([]); setCalWhy(e.code || null) } })
     return () => { on = false }
-  }, [id, noPeople, calAgain])
+  }, [id, noPeople, ofEvent, calAgain])
+  const t0 = data ? Date.parse(data.startedAt) : 0
+  const otherEvents = ofEvent ? (events || []).filter((ev) => `${ev.title}|${ev.start}` !== ofEvent && Date.parse(ev.start) - 10 * 60_000 <= t0 && Date.parse(ev.end) > t0) : []
   useEffect(() => { if (data && !opts) setOpts({ language: data.summaryLanguage || 'auto', model: data.summaryModelPick || '', kind: data.kind || 'general' }) }, [data, opts])
   // Notes added somewhere else (the floating card, the top bar) come in: as they are when you
   // haven't typed since, else added to the end of what you're writing.
@@ -573,6 +631,14 @@ export function MeetingPage({ id, onBack }) {
     setMsg({ text: r.fixed || r.dropped ? t('Fixed {n} lines and left out {left}. Each says what was heard; Undo puts one back.', { n: r.fixed, left: r.dropped }) : t('Nothing needed fixing.') })
   })
   const uncleanAll = () => act('clean', async () => { await api(`/meetings/${encodeURIComponent(id)}/cleanup/undo`, { method: 'POST', body: {} }); setMsg({ text: t('The transcript is back to what was heard.') }) })
+  // A deck of it, written by the notes model, opened in Studio (its own folder) to present, change
+  // or send as PowerPoint.
+  const makeDeck = () => act('deck', async () => {
+    setMsg({ text: t('Writing a deck of this meeting…') })
+    const r = await api(`/meetings/${encodeURIComponent(id)}/deck`, { method: 'POST' })
+    setMsg(null)
+    window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root: r.root, path: r.path } }))
+  })
   const takeEvent = (ev) => act('event', async () => { await api(`/meetings/${encodeURIComponent(id)}/event`, { method: 'POST', body: { event: ev } }); setMsg({ text: ev.attendees?.length ? t('Took the {n} people invited to "{title}" from your calendar.', { n: ev.attendees.length, title: ev.title }) : t('Took the details of "{title}" from your calendar.', { title: ev.title }) }) })
   // Words picked in the transcript: a Fix button by them.
   const picked = () => setTimeout(() => {
@@ -658,15 +724,17 @@ export function MeetingPage({ id, onBack }) {
     return out.join('\n').trim()
   }
   const heard = lines.some((l) => l.src === 'them' && l.text)
-  // A room: your mic only. Its voices can be told apart where that runs (vst.offered).
+  // A room: your mic only. Its voices can be told apart where that runs (vst.offered), and on a
+  // call the voices on it (onCall: you're on your mic, so none of them is you).
   const room = !heard && lines.some((l) => l.src === 'you' && l.text)
-  const voiced = room && data.voices?.speakers >= 2
-  const canTell = room && done && !!vst?.offered
+  const onCall = heard && data.voices?.src === 'them'
+  const voiced = (room || heard) && data.voices?.speakers >= 2
+  const canTell = (room || heard) && done && !!vst?.offered
   const working = data.voicesWork
   const names = [...new Set([...(data.event?.attendees || []), ...lines.map((l) => l.name).filter(Boolean)])]
   const voiceItems = (l) => [
     ...names.filter((x) => x !== l.name && x !== data.me).slice(0, 12).map((x) => ({ icon: 'users', label: x, run: () => nameVoice(l.voice, { name: x }) })),
-    !l.me && { icon: 'mic', label: t("That's me"), run: () => nameVoice(l.voice, { me: true }) },
+    !l.me && !onCall && { icon: 'mic', label: t("That's me"), run: () => nameVoice(l.voice, { me: true }) },
     { icon: 'edit', label: t('Someone else…'), run: () => setNaming({ l, name: '', voice: l.voice }) },
     'sep',
     { icon: 'edit', label: t('Only this line…'), run: () => setNaming({ l, name: '' }) },
@@ -713,10 +781,17 @@ export function MeetingPage({ id, onBack }) {
           <Icon name="calendar" size={10} /> <span>{events.length === 1 ? t('From "{title}"', { title: events[0].title }) : t('From the calendar')}</span>
         </button>
       )}
-      <button type="button" className="path-chip mt-saved" onClick={() => (data.saved ? (here() ? reveal() : setMsg({ text: tilde(data.saved) })) : save())}
+      {people == null && otherEvents.length > 0 && (
+        <button type="button" className="path-chip mt-otherev" onClick={(e) => setEvMenu({ x: e.clientX, y: e.clientY, others: true })} disabled={busy === 'event'}
+          title={t('"{title}" was on then too. Click if this was that meeting instead, for its name and people', { title: otherEvents[0].title })}>
+          <Icon name="calendar" size={10} /> <span>{t('Another meeting?')}</span>
+        </button>
+      )}
+      {/* Saving by itself didn't work (the folder can't be written): why, and Save to try again. */}
+      <button type="button" className={`path-chip mt-saved${data.saveError ? ' warn' : ''}`} onClick={() => (data.saved && !data.saveError ? (here() ? reveal() : setMsg({ text: tilde(data.saved) })) : save())}
         onContextMenu={(e) => { if (!data.saved) return; e.preventDefault(); navigator.clipboard?.writeText(data.saved); setMsg({ text: t('Path copied') }) }}
-        title={data.saved ? `${(data.savedFiles || [data.saved]).map(tilde).join('\n')}\n${t('Click to show in Finder; right-click to copy')}` : t('Not saved to your notes folder yet. Click to save it')}>
-        <Icon name="folder" size={10} /> <span>{savedDir || t('Not saved yet')}</span>
+        title={data.saveError ? `${t("Couldn't save it to your notes folder:")} ${data.saveError}\n${t('Click to try again')}` : data.saved ? `${(data.savedFiles || [data.saved]).map(tilde).join('\n')}\n${t('Click to show in Finder; right-click to copy')}` : t('Not saved to your notes folder yet. Click to save it')}>
+        <Icon name="folder" size={10} /> <span>{data.saveError ? t("Couldn't save") : savedDir || t('Not saved yet')}</span>
       </button>
     </>
   )
@@ -742,6 +817,7 @@ export function MeetingPage({ id, onBack }) {
           { icon: 'download', label: t('Save as Markdown'), run: save },
           data.saved && here() && { icon: 'folder-open', label: t('Show saved notes in Finder'), run: reveal },
           atActions(data.summary) && { icon: 'helm', label: t('Send action items to Chief of Staff'), run: toChief },
+          studio && done && (data.summary || lines.length > 0) && { icon: 'screen', label: t('Make a deck'), run: makeDeck },
           '-',
           { icon: 'edit', label: t('Fix a word everywhere'), run: () => setFix({ from: '' }) },
           done && { icon: 'refresh', label: t('Transcribe again…'), run: () => setDialog('again') },
@@ -768,12 +844,13 @@ export function MeetingPage({ id, onBack }) {
         <span className="muted small">{again ? (data.progress != null ? t('Transcribing again: {n}%', { n: data.progress }) : t('Transcribing again…')) : lines.length ? `${lines.length === 1 ? t('{n} line', { n: lines.length }) : t('{n} lines', { n: lines.length })}${shots.length ? `, ${shots.length === 1 ? t('{n} picture', { n: shots.length }) : t('{n} pictures', { n: shots.length })}` : ''}` : t('Transcript')}</span>
         <span className="mt-grow" />
         {heard && <button type="button" className="ghost-btn" onClick={nameAll} disabled={busy === 'who'} aria-label={t('Who spoke')} title={t('Work out who said each line from the call: from names said, the screen and who was invited. Or click Them on a line to name them yourself.')}><Icon name="users" size={12} /><span className="lbl"> {t('Who spoke')}</span></button>}
-        {canTell && <button type="button" className="ghost-btn mt-voices-btn" onClick={voiced ? nameAll : tellVoices} disabled={busy === 'who' || !!working} aria-label={t('Who spoke')} title={voiced ? t('Work out who each voice is: from names said and who was invited. Or click Speaker on a line to name them yourself.') : t('Tell the voices in the room apart, on this computer, then work out who each one is.')}><Icon name="users" size={12} /><span className="lbl"> {t('Who spoke')}</span></button>}
+        {canTell && <button type="button" className="ghost-btn mt-voices-btn" onClick={voiced ? nameAll : tellVoices} disabled={busy === 'who' || !!working} aria-label={t('Who spoke')} title={voiced ? t('Work out who each voice is: from names said and who was invited. Or click Speaker on a line to name them yourself.') : heard ? t('Tell the voices on the call apart, on this computer, then work out who each one is.') : t('Tell the voices in the room apart, on this computer, then work out who each one is.')}><Icon name="users" size={12} /><span className="lbl"> {t('Who spoke')}</span></button>}
         {lines.length > 0 && <button type="button" className="ghost-btn" onClick={() => setFix({ from: '' })} aria-label={t('Fix a word')} title={t('Fix a misheard word or name everywhere in this meeting')}><Icon name="edit" size={12} /><span className="lbl"> {t('Fix a word')}</span></button>}
         {done && <button type="button" className="ghost-btn" onClick={() => setDialog('again')} aria-label={t('Transcribe again')} title={t('Transcribe it again from the recording')}><Icon name="refresh" size={12} /><span className="lbl"> {t('Transcribe again')}</span></button>}
         {lines.length > 0 && <button type="button" className="ghost-btn" onClick={() => copy(said(), t('Copied the transcript.'))} aria-label={t('Copy the transcript')} title={t('Copy the transcript')}><Icon name="copy" size={12} /><span className="lbl"> {t('Copy')}</span></button>}
         {beside && <button type="button" className="ghost-btn mt-thide" onClick={() => { setSplit(false); setSel(null) }} aria-label={t('Hide the transcript')} title={t('Hide the transcript (the view gets the room)')}><Icon name="panel-right" size={14} /></button>}
       </div>
+      <TalkTime lines={lines} me={data.me} />
       <div className="mt-lines" ref={listRef} onMouseUp={picked} onTouchEnd={picked} onScroll={(e) => { const el = e.currentTarget; pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40; setSel(null) }}>
         {!lines.length && !(recording && data.partial) && <p className="muted small mt-hint">{recording ? t('The transcript appears here as people talk, a few seconds behind.') : data.waiting || again ? t('Transcribing…') : t('Nothing was transcribed.')}{done && !lines.length && <> <button type="button" className="link-btn" onClick={() => setDialog('again')}>{t('Transcribe it again')}</button></>}</p>}
         {timeline.map((x, i) => (x.k === 'line'
@@ -910,8 +987,8 @@ export function MeetingPage({ id, onBack }) {
           ? <PickSheet title={t('Who said it?')} items={whoItems(whoAt.l)} onClose={() => setWhoAt(null)} />
           : <AtMenu x={whoAt.x} y={whoAt.y} items={whoItems(whoAt.l)} onClose={() => setWhoAt(null)} />)}
         {evMenu && (() => {
-          const items = (events || []).map((ev) => ({ icon: 'calendar', label: `${ev.title} · ${timeOf(ev.start)}${ev.attendees?.length ? ` · ${t('{n} people', { n: ev.attendees.length })}` : ''}`, run: () => takeEvent(ev) }))
-          return sheet ? <PickSheet title={t('From the calendar')} items={items} onClose={() => setEvMenu(null)} /> : <AtMenu x={evMenu.x} y={evMenu.y} onClose={() => setEvMenu(null)} items={items} />
+          const items = (evMenu.others ? otherEvents : events || []).map((ev) => ({ icon: 'calendar', label: `${ev.title} · ${timeOf(ev.start)}${ev.attendees?.length ? ` · ${t('{n} people', { n: ev.attendees.length })}` : ''}`, run: () => takeEvent(ev) }))
+          return sheet ? <PickSheet title={evMenu.others ? t('Which meeting was it?') : t('From the calendar')} items={items} onClose={() => setEvMenu(null)} /> : <AtMenu x={evMenu.x} y={evMenu.y} onClose={() => setEvMenu(null)} items={items} />
         })()}
         {naming && (
           <Dialog title={t('Who said it?')} onClose={() => setNaming(null)}>

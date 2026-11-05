@@ -17,6 +17,7 @@ import { providerEnv, subscriptions } from './providers.js'
 import { dataFile, ensureDir, IS_WIN } from './paths.js'
 import { agentEnv } from './runtime/spawn.js'
 import { hiddenAgent, hiddenProvider, hiddenModel, OFF } from './labs.js'
+import * as accounts from './accounts.js'
 
 const DIR = () => ensureDir(dataFile('consult'))
 const TIMEOUT = 4 * 60 * 1000
@@ -126,7 +127,31 @@ export function launch(bin, args, opts, done) {
 }
 
 // signal: stop it (a chat's Esc).
-export function runCli(kind, prompt, model, extraEnv = {}, signal) {
+// What a command line says instead of answering when its plan's usage is used up: Claude Code's
+// "You've hit your weekly limit · resets 4am (America/Los_Angeles)", "Claude AI usage limit
+// reached", Codex's "You've reached your usage limit". Short, and said first.
+const LIMIT = /\b(hit your [\w -]{0,20}limit|usage limit reached|reached your usage limit|rate limit reached|out of (extra )?(usage|credits))\b/i
+export const isLimit = (text) => String(text || '').length < 600 && LIMIT.test(String(text || '').slice(0, 300))
+
+// An agent's command line, run once for an answer (`claude -p`, `codex exec`): on the account new
+// agents start on, and when that one is at its usage limit, on your next account of that kind
+// with room, so a meeting's notes and AI Assist carry on. Every account out: an error that says
+// so (code 'limit'), never the limit's message passed on as the answer. extraEnv given (a
+// consultant's own settings): as it says, on that alone.
+export async function runCli(kind, prompt, model, extraEnv = {}, signal) {
+  const ids = Object.keys(extraEnv).length || !accounts.supports(kind) ? [null] : accounts.forRun(kind)
+  let last = null
+  for (const id of ids) {
+    try { return await runOnce(kind, prompt, model, { ...(id ? accounts.envFor(kind, id) : {}), ...extraEnv }, signal) } catch (e) {
+      if (e.code !== 'limit') throw e
+      last = e
+    }
+  }
+  if (ids.length > 1) throw Object.assign(new Error(`${adapter(kind).label} is at its usage limit on all ${ids.length} of your accounts (${last.said})`), { code: 'limit', said: last.said })
+  throw last
+}
+
+function runOnce(kind, prompt, model, extraEnv = {}, signal) {
   return new Promise(async (resolve, reject) => {
     const bin = (await installed()).find((a) => a.kind === kind)?.path
     if (!bin) return reject(new Error(`${adapter(kind).label} isn't installed`))
@@ -140,6 +165,8 @@ export function runCli(kind, prompt, model, extraEnv = {}, signal) {
       // It failed and said why in its answer ("API Error: Connection dropped (ECONNRESET)"): an
       // error, not an answer, so callers can try again or use another model.
       if (err && /^(API Error|Error)\b/i.test(text) && text.length < 1000) return reject(new Error(`${adapter(kind).label}: ${text.split('\n')[0].slice(0, 300)}`))
+      // At its usage limit: what it said is why it didn't answer, not the answer.
+      if (isLimit(text)) { const said = text.split('\n')[0].trim().slice(0, 200); return reject(Object.assign(new Error(`${adapter(kind).label} is at its usage limit: ${said}`), { code: 'limit', said })) }
       resolve(text)
     })
     child.stdin?.on('error', () => {}) // a CLI that's already gone
