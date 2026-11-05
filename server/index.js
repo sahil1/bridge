@@ -9,6 +9,8 @@ import { attachHandler } from './attach.js'
 import { makeGuard } from './guard.js'
 import { usage } from './usage.js'
 import { usageStats } from './usagestats.js'
+import { everywhere } from './usageall.js'
+import * as usagelog from './usagelog.js'
 import * as files from './files.js'
 import * as pr from './pr.js'
 import * as office from './office.js'
@@ -335,7 +337,7 @@ const rootOf = async (pane) => {
 // ---------- Trial features ----------
 // Still being finished, so hidden until turned on in Settings › About & Updates › Trial Features
 // (trials: { studio: true } in the config; src/trials.js). Their routes answer only then.
-const TRIALS = ['studio', 'meeting-insights']
+const TRIALS = ['studio', 'usage-everywhere', 'meeting-insights']
 const trialOn = (id) => cfg.trials?.[id] === true
 const trialOff = (id, label) => (req, res, next) => (trialOn(id) ? next() : res.status(404).json({ error: `${label} is a trial feature. Turn it on in Settings › About & Updates › Trial Features.`, trial: id }))
 
@@ -1205,7 +1207,9 @@ app.get('/api/dictations/:id/audio', async (req, res) => {
   try { res.type('audio/wav').sendFile(await dictations.audioFile(req.params.id), { dotfiles: 'allow' }) } catch (e) { res.status(e.status || 502).json({ error: e.message }) }
 })
 // Older than you keep them for: taken out a few minutes after the start, and every six hours.
+// The usage log's old months too (it also does so itself as a new month starts).
 setTimeout(() => dictations.tidy().catch(() => {}), 3 * 60 * 1000).unref()
+setTimeout(() => usagelog.tidy().catch(() => {}), 5 * 1000).unref()
 setInterval(() => dictations.tidy().catch(() => {}), 6 * 60 * 60 * 1000).unref()
 
 // ---------- Meeting notes (meetings.js; speech engines in speech.js) ----------
@@ -1628,6 +1632,9 @@ app.post('/api/calendar/prep', wrap(async (req) => {
   ].filter(Boolean).join('\n')
   return launchInSpace('Meetings', `Prep: ${e.title}`, prompt)
 }))
+// Every provider's tokens in one view (usageall.js), a trial feature. What it reads is noted
+// whether it's on or not (usagelog.js), so it has the days before it was turned on.
+app.get('/api/usage-everywhere', trialOff('usage-everywhere', 'Usage across every provider'), wrap((req) => everywhere({ days: req.query.days, force: !!req.query.refresh })))
 app.get('/api/usage/:provider/stats', wrap((req) => usageStats(req.params.provider, { force: !!req.query.refresh })))
 app.get('/api/usage/:provider', wrap((req) => usage(req.params.provider)))
 app.get('/api/market', wrap((req) => market(req.query.refresh === '1')))
@@ -2451,7 +2458,7 @@ app.post('/api/panes/:pane/terminal', wrap(async (req) => {
 // ---------- Consult another model (second opinions, live news, long documents) ----------
 consult.configure(cfg) // the model on this computer picked in Settings › Model Providers (localModel)
 app.get('/api/consult', wrap(() => consult.options()))
-app.post('/api/consult', wrap((req) => consult.ask({ ...(req.body || {}), env: undefined }, cfg)))
+app.post('/api/consult', wrap((req) => consult.ask({ ...(req.body || {}), env: undefined, feature: 'consult' }, cfg)))
 
 // ---------- Providers and MCP servers (settings) ----------
 // The models on this computer (Ollama, LM Studio), for Settings › Model Providers: how much each

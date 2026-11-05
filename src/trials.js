@@ -8,6 +8,7 @@ import { tx } from './i18n/index.js'
 // then (server/index.js TRIALS).
 export const TRIALS = [
   { id: 'studio', label: tx('Studio'), hint: tx('Documents, sheets, decks, PDFs and pages from any of your folders and computers, edited here or by your agents, with every version kept.') },
+  { id: 'usage-everywhere', label: tx('Usage Across Every Provider'), hint: tx('In Today › Usage: the tokens each provider and model used, by day and by what in Bridge AI used them, with the cost where an API key has a price and the time a model took on this computer. It stays on this computer.') },
   { id: 'meeting-insights', label: tx('Meeting Insights'), hint: tx('Your meetings added up by week and kind (how many, how long, your share of the talk), and the people you meet, worked out on this computer.') },
 ]
 

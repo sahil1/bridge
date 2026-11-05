@@ -34,6 +34,7 @@ const SUITES = [
   { name: 'agents-found', build: null, covers: [/^server\/agents\.js$/, /^scripts\/tcc-sim\.mjs$/] },
   { name: 'resume-work', build: null, covers: [/^server\/runtime\/builtin\.js$/, /^server\/(queue|index)\.js$/, /^test\/stand-ins\/claude\.cjs$/] },
   { name: 'chat-account', build: 'dist', browser: true, covers: [/^src\/components\/(ModelChip|AccountMenu|Console|Handoff)\.jsx$/, /^src\/App\.jsx$/, /^server\/(accounts|models|handoff|index|transcripts|queue)\.js$/] },
+  { name: 'usage-everywhere', build: 'dist', browser: true, covers: [/^server\/(usagelog|usageall|agenttokens|prices|otherlogs|usagestats|chatmodels|consult|meetings|boards|dictation|insights|pr|chatagent|llm)\.js$/, /^src\/components\/(UsageEverywhere|UsageStats|Usage|Trackers)\.jsx$/, /^src\/trials\.js$/, /^test\/stand-ins\/(claude\.cjs|local-model\.mjs|llama-server\.mjs)$/] },
   { name: 'accounts-ui', build: 'dist', browser: true, covers: [/^src\/components\/(AccountMenu|Usage|UsageStats|Trackers|Dock|ModelChip|AddAccount)\.jsx$/, /^src\/components\/settings\/(Providers\.jsx|providers\.css)$/, /^src\/App\.jsx$/, /^src\/styles\.css$/, /^server\/(accounts|feeds)\.js$/] },
   { name: 'i18n-ui', build: 'dist', browser: true, covers: [/^src\//, /^scripts\/i18n\.js$/] },
   { name: 'needs-you', build: 'dist', browser: true, covers: [/^server\/(needsyou|notify|machines|index)\.js$/, /^src\/components\/(NeedsYou|Question|Machines)\.jsx$/, /^src\/components\/(needsyou\.css|questionParse\.js)$/, /^src\/(App\.jsx|pwa\.js)$/, /^test\/stand-ins\/claude\.cjs$/] },

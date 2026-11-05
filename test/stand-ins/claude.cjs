@@ -25,8 +25,12 @@
 //                                           on the config folder it's run for: AI Assist's ask gets one
 //                                           suggestion as JSON, anything else meeting notes. With
 //                                           stand-in-limit in that folder, it answers as Claude Code
-//                                           does at its weekly limit instead (and exits 1). Each run is
-//                                           noted in ~/claude-print.log (the folder, and how it began)
+//                                           does at its weekly limit instead (and exits 1). With
+//                                           --output-format json, the answer is Claude Code's result
+//                                           object: result, usage (12 in, 300 written to the cache,
+//                                           2,000 read from it, 150 out) and modelUsage by model
+//                                           (claude-opus-5-5). Each run is noted in ~/claude-print.log
+//                                           (the folder, how it began, and whether it was asked for JSON)
 //   claude auth status --json | login | logout
 //                                           the sign-in of the config folder it's run for
 //                                           (CLAUDE_CONFIG_DIR, else ~/.claude): signed in until
@@ -48,14 +52,22 @@ if (args[0] === 'auth') {
   console.log(JSON.stringify({ loggedIn: signedIn, authMethod: signedIn ? 'claude.ai' : 'none', subscriptionType: signedIn ? 'max' : null }))
   process.exit(signedIn ? 0 : 1)
 }
-if (args[0] === '-p') {
+if (args.includes('-p')) {
   const dir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude')
-  const prompt = String(args[1] || '')
+  const prompt = String(args[args.indexOf('-p') + 1] || '')
   const limited = fs.existsSync(path.join(dir, 'stand-in-limit'))
-  fs.appendFileSync(path.join(os.homedir(), 'claude-print.log'), JSON.stringify({ dir: process.env.CLAUDE_CONFIG_DIR || null, limited, began: prompt.slice(0, 80) }) + '\n')
-  if (limited) { process.stdout.write('You\'ve hit your weekly limit · resets 4am (America/Los_Angeles)\n'); process.exit(1) }
-  if (/This meeting is going on now/.test(prompt)) process.stdout.write(JSON.stringify({ items: [{ kind: 'question', text: 'Ask how they measured the savings.', why: 'At 0:02 they said fuel costs fell by a third.' }] }) + '\n')
-  else process.stdout.write('## Summary\n- The stand-in\'s notes of the meeting.\n')
+  const json = args.includes('--output-format') && args[args.indexOf('--output-format') + 1] === 'json'
+  fs.appendFileSync(path.join(os.homedir(), 'claude-print.log'), JSON.stringify({ dir: process.env.CLAUDE_CONFIG_DIR || null, limited, began: prompt.slice(0, 80), json }) + '\n')
+  // Its answer, as print mode writes it: the text, or with --output-format json its result object.
+  const say = (text, isError = false) => {
+    if (!json) return process.stdout.write(`${text}\n`)
+    const usage = { input_tokens: 12, cache_creation_input_tokens: 300, cache_read_input_tokens: 2000, output_tokens: 150, service_tier: 'standard' }
+    process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', is_error: isError, duration_ms: 1200, duration_api_ms: 1100, num_turns: 1, result: text, session_id: 'print-0001', total_cost_usd: 0.0123, usage,
+      modelUsage: { 'claude-opus-5-5': { inputTokens: 12, outputTokens: 150, cacheReadInputTokens: 2000, cacheCreationInputTokens: 300, webSearchRequests: 0, costUSD: 0.0123, contextWindow: 1000000 } } }) + '\n')
+  }
+  if (limited) { say('You\'ve hit your weekly limit · resets 4am (America/Los_Angeles)', true); process.exit(1) }
+  if (/This meeting is going on now/.test(prompt)) say(JSON.stringify({ items: [{ kind: 'question', text: 'Ask how they measured the savings.', why: 'At 0:02 they said fuel costs fell by a third.' }] }))
+  else say('## Summary\n- The stand-in\'s notes of the meeting.')
   process.exit(0)
 }
 const WITH_VALUE = new Set(['--session-id', '--resume', '--model', '--permission-mode'])

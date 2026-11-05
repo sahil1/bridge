@@ -1861,6 +1861,23 @@ button.yg-day:hover { box-shadow: 0 0 0 1.5px var(--accent); }
 .us-cols-read { position: absolute; top: 0; right: 0; font-size: 11px; color: var(--ink-2); }
 .us-src { margin: 0; }
 .us-ell { overflow: hidden; text-overflow: ellipsis; }
+/* Every provider in one view (UsageEverywhere.jsx, a trial feature) */
+.ue .us-tiles { margin-bottom: 10px; }
+.ue-grid { margin-top: 10px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }
+.ue-part { min-width: 0; }
+.ue-part h5 { margin: 0 0 6px; font-size: 12px; font-weight: 600; color: var(--ink-2); }
+.ue .us-row { grid-template-columns: minmax(0, 2.2fr) minmax(24px, 1fr) 46px 48px; gap: 8px; }
+.ue .us-row-name > .us-ell { flex: 0 1 auto; min-width: 2.5em; }
+.ue .us-row-name small { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ue-via { flex: none; color: var(--ink-3); }
+.ue-why { margin: 0 6px 4px; color: var(--ink-3); display: flex; gap: 5px; align-items: baseline; overflow-wrap: anywhere; min-width: 0; }
+.ue-why svg { flex: none; }
+.ue-brief { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.ue-brief p { margin: 0; }
+.ue-brief-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.ue-brief-list li { display: flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; }
+.ue-brief-list .num { margin-left: auto; }
+.ue-brief .ghost-btn { align-self: flex-start; }
 .crash { margin: 16px; padding: 14px 16px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--pane); display: flex; flex-direction: column; gap: 8px; max-width: 640px; }
 .crash code { font: 12px var(--font-mono); color: var(--ink-2); white-space: pre-wrap; word-break: break-word; }
 .crash-actions { display: flex; gap: 8px; flex-wrap: wrap; }
