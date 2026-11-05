@@ -8,6 +8,7 @@ import { tx } from './i18n/index.js'
 // then (server/index.js TRIALS).
 export const TRIALS = [
   { id: 'studio', label: tx('Studio'), hint: tx('Documents, sheets, decks, PDFs and pages from any of your folders and computers, edited here or by your agents, with every version kept.') },
+  { id: 'home', label: tx('Home'), hint: tx('Where Bridge AI opens: what needs you on every computer, answered right there, then what\'s ready to look at and what\'s coming up, with Everything a click away.') },
 ]
 
 // Whether a trial is on, from the config every part of the app shares (it's asked again when

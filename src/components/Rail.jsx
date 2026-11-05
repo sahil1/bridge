@@ -131,8 +131,10 @@ function HoverCard({ row, rect, git, preview }) {
 }
 
 // New (Home: start something) and Meetings sit above the spaces; a red dot while a meeting records.
-export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpen, onOpenInHerdr, onOpenFiles, onNewAgent, onNewTerminal, onHistory, onMeetings, onDictations, recording }) {
+// With Home on (a trial feature), Home is the first row, with what needs you on every device (needs).
+export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpen, onOpenInHerdr, onOpenFiles, onNewAgent, onNewTerminal, onHistory, onMeetings, onDictations, recording, needs = 0 }) {
   const studio = useTrial('studio') // a trial feature (src/trials.js)
+  const home = useTrial('home')
   const [launching, setLaunching] = useState(false)
   const [error, setError] = useState(null)
   const [closedWs, setClosedWs] = usePersisted('cc-rail-closed', {})
@@ -284,6 +286,7 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
   if (collapsed) {
     return (
       <nav className="rail collapsed" aria-label={t('Workspaces')} data-tour="agents" onMouseLeave={() => setHover(null)}>
+        {home && <button className={`mini-nav ${selected === 'view:home' ? 'on' : ''}`} onClick={() => onOpen('view:home')} aria-label={needs ? t('Home ({n} need you)', { n: needs }) : t('Home')} title={t('Home')}><Icon name="home" size={15} />{needs > 0 && <span className="mini-needs" />}</button>}
         <button className={`mini-nav ${selected === 'view:new' ? 'on' : ''}`} data-tour="new-agent" onClick={() => onNewAgent?.()} aria-label={t('New')} title={t('New')}><Icon name="edit" size={15} /></button>
         {!fleet?.down && <button className={`mini-nav ${chiefOn ? 'on' : ''}`} data-tour="chief" onClick={goChief} disabled={launching} aria-label={t('Chief of Staff')} title={`${t('Chief of Staff')}\n${chiefWhat}`}><Icon name="helm" size={15} />{(chief?.status === 'blocked' || threads.some((a) => a.status === 'blocked')) && <span className="mini-needs" />}</button>}
         <button className={`mini-nav ${String(selected || '').startsWith('view:meeting') ? 'on' : ''}`} onClick={() => onMeetings?.()} aria-label={recording ? t('Meetings (recording)') : t('Meetings')} title={t('Meetings')}><Icon name="mic" size={15} />{recording && <span className="rec-dot mini-rec" />}</button>
@@ -312,6 +315,7 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
   return (
     <nav className="rail" aria-label={t('Workspaces')} data-tour="agents">
       <div className="rail-nav">
+        {home && <button className={`rail-nav-btn rail-home ${selected === 'view:home' || selected === 'view:everything' ? 'on' : ''}`} onClick={() => onOpen('view:home')}><Icon name="home" size={14} /> {t('Home')}{needs > 0 && <span className="mc-needs" aria-label={needs === 1 ? t('{n} needs you', { n: needs }) : t('{n} need you', { n: needs })}>{needs}</span>}</button>}
         <button className={`rail-nav-btn ${selected === 'view:new' ? 'on' : ''}`} data-tour="new-agent" onClick={() => onNewAgent?.()}><Icon name="edit" size={14} /> {t('New')}</button>
         {!fleet?.down && (
           <div className="rail-nav-row rail-chief-row">

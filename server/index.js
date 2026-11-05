@@ -89,6 +89,7 @@ import { makeHandoff } from './handoff.js'
 import * as asks from './asks.js'
 import * as needsYou from './needsyou.js'
 import * as agentMap from './agentmap.js'
+import * as home from './home.js'
 
 ensureDir(DATA)
 // Meetings, transcripts, settings and keys: for you only, not other people with an account on this
@@ -334,7 +335,7 @@ const rootOf = async (pane) => {
 // ---------- Trial features ----------
 // Still being finished, so hidden until turned on in Settings › About & Updates › Trial Features
 // (trials: { studio: true } in the config; src/trials.js). Their routes answer only then.
-const TRIALS = ['studio']
+const TRIALS = ['studio', 'home']
 const trialOn = (id) => cfg.trials?.[id] === true
 const trialOff = (id, label) => (req, res, next) => (trialOn(id) ? next() : res.status(404).json({ error: `${label} is a trial feature. Turn it on in Settings › About & Updates › Trial Features.`, trial: id }))
 
@@ -1002,6 +1003,17 @@ async function tellChief(text) {
   }
 }
 app.patch('/api/chief/tasks/:id', wrap((req) => ({ item: chiefTasks.update(req.params.id, req.body || {}) })))
+// Your answer to a task that waits on you (Home): to the chief of staff, now or after what it's doing.
+// Not running, it says so rather than leave the answer nowhere.
+app.post('/api/chief/tasks/:id/reply', wrap(async (req) => {
+  const text = String(req.body?.text || '').trim().slice(0, 4000)
+  if (!text) throw new Error('Say what to tell the chief of staff')
+  const it = chiefTasks.list().items.find((x) => x.id === String(req.params.id))
+  if (!it) throw Object.assign(new Error(`No task ${req.params.id} on the list`), { status: 404 })
+  const r = await tellChief(`About task ${it.id}, "${it.title}"${it.needs ? `, which waits on me for: ${it.needs}` : ''}\n\n${text}\n\n(Keep the task current with \`node bin/bridge task\`.)`)
+  if (!r.sent) throw Object.assign(new Error(r.error || 'The chief of staff isn\'t running. Start it, then send this again.'), { code: 'chief_off' })
+  return { ok: true, ...r }
+}))
 
 // Server-sent events: push the fleet whenever any agent changes state.
 const clients = new Set()
@@ -1804,7 +1816,7 @@ app.post('/api/machines/name', wrap((req) => {
 app.post('/api/machines/:id/name', wrap((req) => { notByMachine(req); return machines.rename(req.params.id, req.body?.name) }))
 // Fix: where the connection to that device stops, starting it over on the way.
 app.post('/api/machines/:id/check', wrap((req) => { notByMachine(req); return machines.check(req.params.id) }))
-app.get('/api/machines/summary', wrap(() => machines.summary()))
+app.get('/api/machines/summary', wrap((req) => machines.summary({ home: req.query.home === '1' })))
 app.post('/api/machines', wrap((req) => {
   const via = ['back', 'intro'].includes(req.body?.via) && viaMachine(req) ? req.body.via : 'you'
   return machines.add({ link: req.body?.link, name: req.body?.name, via })
@@ -1826,11 +1838,13 @@ relay.whenAsked((a) => notify.send({ kind: 'machine', title: `${a.name} asks to 
 relay.whenPaired((d) => notify.send({ kind: 'machine', title: `${d.name} is paired`, body: 'If that wasn\'t you, remove it in Settings › Devices.', url: '/#settings/machines', tag: `paired-${d.id}` }).catch(() => {}))
 // What this device tells the others: its agents, for their sidebars and agent maps (agentmap.js),
 // and what waits on you here, for their needs-you inboxes.
-machines.useSummary(async () => {
+// With Home asked for (a device with Home on asks), everything Home lists from here too (home.js).
+machines.useSummary(async ({ home: withHome = false } = {}) => {
   const f = await fleetView()
   const needs = await waiting.items().catch(() => [])
-  return { runtime: rt.name, counts: f.counts, agents: await runs.agents(f, { cloudSaid: cloud.previews() }), needs }
+  return { runtime: rt.name, counts: f.counts, agents: await runs.agents(f, { cloudSaid: cloud.previews() }), needs, ...(withHome ? { home: await homeList.items().catch(() => null) } : {}) }
 })
+machines.askHome(() => trialOn('home'))
 // The agent map: every computer's agents, this one's from here and the others' from what each last
 // said (asked again while you're looking), and a computer that's offline with what it said last.
 app.get('/api/agent-map', wrap(async (req) => {
@@ -1866,6 +1880,28 @@ app.post('/api/needs-you/answer', wrap(async (req) => {
   return r
 }))
 app.post('/api/needs-you/clear', wrap((req) => waiting.clear(req.body?.id)))
+
+// ---------- Home (home.js), a trial feature ----------
+// What needs you, what's ready to look at and what's coming up, on this device and your others (from
+// what each last said, asked again while you're looking), each answered on its own device as in
+// Needs you. A device that sends only what needs you (an older Bridge AI, or Home's list not come
+// yet) says so (partial), so Home can say why its meetings and tasks aren't there.
+const homeList = home.make({ waiting, tasks: chiefTasks, meetings, unsent: (id) => meetWork.unsent(id), boards, chief: async () => mainChief(await fleetView())?.paneId || null })
+app.get('/api/home', trialOff('home', 'Home'), wrap(async (req) => {
+  await machines.fresh({ maxAge: req.query.live ? 2500 : 8000 })
+  const name = relay.thisName()
+  const mine = (await homeList.items()).map((i) => ({ ...i, machine: null, device: name, online: true }))
+  const linked = machines.list().filter((m) => m.state === 'linked')
+  const there = linked.flatMap((m) => {
+    const own = Array.isArray(m.home)
+    const from = own ? m.home : (Array.isArray(m.needs) ? m.needs : needsYou.fromAgents(m.agents)).map(home.fromNeeds)
+    return from.map((i) => ({ ...i, machine: m.id, device: m.name, online: !!m.online, asOf: m.at, old: !own && !Array.isArray(m.needs) }))
+  })
+  return {
+    items: [...mine, ...there],
+    devices: [{ id: null, name, os: machines.OS, online: true, here: true }, ...linked.map((m) => ({ id: m.id, name: m.name, os: m.os, online: !!m.online, lastSeen: m.lastSeen, at: m.at, partial: !Array.isArray(m.home) }))],
+  }
+}))
 app.post('/api/relay/deploy', wrap((req) => { onComputer(req); return relay.deploy({ method: req.body?.method, token: req.body?.token, account: req.body?.account }) }))
 app.post('/api/relay/update', wrap((req) => { onComputer(req); return relay.update() }))
 app.post('/api/relay/pair', wrap((req) => { onComputer(req); return req.body?.stop ? relay.stopPairing() : relay.pair() }))
@@ -2455,6 +2491,16 @@ providerRoutes(app, { cfg, installed })
 mcpRoutes(app, { cfg, installed })
 
 // ---------- Whiteboards (boards.js) ----------
+// Home: a whiteboard you opened, saved, made or renamed here is yours as it is; one an agent drew or
+// changed since is news there (home.js).
+app.use('/api/boards', (req, res, next) => {
+  const one = /^\/([^/]+)$/.exec(req.path)
+  if ((one && ['GET', 'PUT', 'PATCH'].includes(req.method)) || (req.method === 'POST' && req.path === '/' && !req.body?.source)) {
+    const json = res.json.bind(res)
+    res.json = (b) => { if (res.statusCode < 400) homeList.looked('board', b?.id || (one && decodeURIComponent(one[1]))); return json(b) }
+  }
+  next()
+})
 // Drawn with the model picked there, else the one meeting notes use. contextOf: how much a model on
 // this computer reads at a time (chatmodels.js).
 boards.setHelpers({

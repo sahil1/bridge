@@ -238,6 +238,7 @@ a.btn:not(.primary), a.btn:not(.primary):visited { color: var(--ink); text-decor
 .rail-nav-btn { display: flex; align-items: center; gap: 9px; height: 30px; padding: 0 9px; border-radius: 8px; color: var(--ink-2); font: 500 13px var(--font); text-align: left; }
 .rail-nav-btn:hover { background: var(--pane); color: var(--ink); }
 .rail-nav-btn.on { background: var(--pane); color: var(--ink); box-shadow: 0 0 0 1px var(--line); }
+.rail-home .mc-needs { margin-left: auto; }
 .rail-nav-btn .rec-dot { margin-left: auto; width: 7px; height: 7px; }
 .mini-nav { position: relative; display: grid; place-items: center; width: 32px; height: 30px; border-radius: 8px; color: var(--ink-3); }
 .mini-nav:hover, .mini-nav.on { background: var(--pane); color: var(--ink); }

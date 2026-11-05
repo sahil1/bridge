@@ -1,0 +1,76 @@
+/* Home (NeedsHome.jsx): what needs you, then ready to look at and coming up, side by side when
+   there's room. Its needs-you cards are the inbox's (needsyou.css). */
+.hm, .ey { height: 100%; min-height: 0; overflow-y: auto; overscroll-behavior: contain; background: var(--pane); color: var(--ink); }
+.hm { container-type: inline-size; padding: 22px 28px 32px; }
+.hm.phone, .ey.phone { padding: 14px 12px 28px; }
+.hm > *, .ey > * { max-width: 1180px; margin-left: auto; margin-right: auto; }
+.hm-head, .ey-head { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 10px 16px; margin-bottom: 12px; }
+.hm-title { flex: 1 1 260px; min-width: 0; }
+.hm-title h2 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -.02em; }
+.hm-title p { margin: 3px 0 0; font-size: 13px; }
+.hm.phone .hm-title h2, .ey.phone .hm-title h2 { font-size: 19px; }
+.hm-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.hm-device { height: 28px; max-width: 220px; padding: 0 6px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--pane); color: var(--ink); font: 500 12.5px var(--font); }
+.hm-every { gap: 4px; }
+.hm-kinds { margin-bottom: 10px; flex-wrap: wrap; overflow: visible; }
+.hm-err, .hm-partial { margin: 0 0 10px; }
+.hm .ny-note { margin: 0 0 10px; }
+.hm-sec { min-width: 0; margin-top: 10px; }
+.hm-sec h3 { display: flex; align-items: baseline; gap: 8px; margin: 6px 2px 8px; font-size: 14px; font-weight: 650; }
+.hm-sec h3 .muted { font-weight: 450; font-size: 12.5px; }
+.hm-sec .ny-item { margin-bottom: 8px; background: var(--pane); box-shadow: var(--shadow); }
+.hm-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 18px; margin-top: 8px; }
+@container (max-width: 760px) { .hm-cols { grid-template-columns: minmax(0, 1fr); } }
+.hm-empty { display: flex; align-items: center; gap: 8px; padding: 14px 14px; border-radius: 11px; border: 1px dashed var(--line-2); color: var(--good); font-size: 13px; }
+.hm-empty span { color: var(--ink-2); }
+.hm-none { margin: 4px 2px 10px; }
+.hm-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; padding: 10px 12px; border-radius: 11px; border: 1px solid var(--line); background: var(--pane); box-shadow: var(--shadow); min-width: 0; }
+.hm-row.off { opacity: .62; }
+.hm-row > .sdot { flex: none; }
+.hm-ico { flex: none; display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 7px; background: var(--pane-3); color: var(--ink-2); }
+.hm-row-main { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.hm-row-title { font-size: 13.5px; font-weight: 600; overflow-wrap: anywhere; }
+.hm-row-sub { font-size: 12.5px; color: var(--ink-3); overflow-wrap: anywhere; display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: center; }
+.hm-dev { display: inline-flex; align-items: center; gap: 3px; padding: 0 6px; border-radius: 6px; background: var(--pane-3); color: var(--ink-2); font-size: 11.5px; }
+.hm-row-acts { flex: none; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.hm-row-acts a.btn { text-decoration: none; display: inline-flex; align-items: center; gap: 5px; }
+.hm-links { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.hm-links a { color: var(--accent); text-decoration: none; }
+.hm-links a:hover { text-decoration: underline; }
+/* A phone: rows stack their buttons under them, and every control is a whole 40 px target. */
+.hm.phone .hm-row { flex-wrap: wrap; }
+.hm.phone .hm-row-acts { flex: 1 1 100%; justify-content: flex-start; }
+.hm.phone :is(.btn.small, .ghost-btn, .fchip, .link-btn), .ey.phone :is(.btn.small, .ghost-btn, .fchip, .link-btn) { min-height: 40px; min-width: 40px; }
+.hm.phone .hm-links a { display: inline-flex; align-items: center; min-height: 40px; }
+.hm.phone .hm-tools { flex: 1 1 100%; flex-wrap: nowrap; }
+.hm.phone .hm-device { flex: 1; min-width: 0; max-width: none; height: 40px; font-size: 16px; }
+.hm.phone .hm-every { flex: none; }
+.hm.phone .ny-reply input { height: 40px; font-size: 16px; }
+.hm.phone .ny-reply .btn { min-height: 40px; }
+
+/* Everything: a lane per computer (or per kind), as the Agent Map has them. */
+.ey { padding: 18px 20px 28px; }
+.ey-seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--pane-2); border: 1px solid var(--line); }
+.ey-seg button { height: 28px; padding: 0 12px; border-radius: 7px; color: var(--ink-2); font: 500 12.5px var(--font); }
+.ey-seg button.on { background: var(--pane); color: var(--accent); box-shadow: var(--shadow); }
+.ey-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; margin-bottom: 12px; }
+.ey-filters .chips { flex-wrap: wrap; overflow: visible; }
+.ey-mine { margin: 0; font-size: 12.5px; }
+.ey-lanes { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; align-items: start; }
+.ey.phone .ey-lanes { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.ey-lane { min-width: 0; border-radius: 13px; border: 1px solid var(--line); background: var(--pane-2); padding: 10px 10px 8px; }
+.ey-lane.off { opacity: .8; }
+.ey-lane-head { display: flex; align-items: center; gap: 8px; padding: 2px 2px 6px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+.ey-group h4 { display: flex; align-items: center; gap: 6px; margin: 10px 4px 4px; font-size: 11px; font-weight: 650; letter-spacing: .03em; text-transform: uppercase; color: var(--ink-3); }
+.ey-item { display: flex; align-items: flex-start; gap: 9px; width: 100%; padding: 7px 8px; border-radius: 9px; text-align: left; color: var(--ink); min-width: 0; }
+.ey-item:hover:not(:disabled) { background: var(--pane-3); }
+.ey-item.needs { background: color-mix(in srgb, var(--needs) 8%, transparent); }
+.ey-item:disabled { cursor: default; opacity: .7; }
+.ey-item > .sdot { margin-top: 5px; flex: none; }
+.ey-text { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.ey-text b { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.ey-text small { font-size: 12px; color: var(--ink-3); overflow-wrap: anywhere; }
+.ey.phone .ey-item { min-height: 44px; }
+.ey.phone .ey-seg button { height: 40px; }
+.ey.phone .ey-mine { min-height: 40px; display: inline-flex; align-items: center; gap: 8px; }
+.ey .m-view-back { margin-right: auto; }
