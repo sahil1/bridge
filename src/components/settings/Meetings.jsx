@@ -234,6 +234,14 @@ export default function Meetings() {
           <input type="checkbox" checked={m.assist === true} onChange={(e) => set({ assist: e.target.checked })} />
           <span><b>AI Assist in every meeting</b> <span className="muted small">While a meeting records, the model reads along and suggests what to ask or check next, from what's said, the invite and the files that go with it. Assist on a meeting turns it on or off there, and for the meetings after.</span></span>
         </label>
+        <label className="st-row" title="The slider on Assist, while a meeting records, changes it too">
+          <span>How often AI Assist suggests something</span>
+          <select className="st-input" value={['low', 'high'].includes(m.assistLevel) ? m.assistLevel : 'medium'} onChange={(e) => set({ assistLevel: e.target.value })} aria-label="How often AI Assist suggests something">
+            <option value="low">Low: one thing, every few minutes, only when something stands out</option>
+            <option value="medium">Medium: up to three, about once a minute</option>
+            <option value="high">High: up to three, about every 30 seconds</option>
+          </select>
+        </label>
         <label className="st-check">
           <input type="checkbox" checked={m.nameSpeakers !== false} onChange={(e) => set({ nameSpeakers: e.target.checked })} />
           <span><b>Name who spoke on the call</b> <span className="muted small">Before the first summary, the model works out who said each of Them's lines from names said, the invite and the screen. On a Mac, a watched screen is read while the call talks, and those pictures aren't kept. With one other person invited, it's them. In a room, the voices told apart are named the same way.</span></span>

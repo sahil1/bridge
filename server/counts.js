@@ -88,7 +88,7 @@ export function weekOf(d = now()) {
   return `${t.getFullYear()}-W${String(n).padStart(2, '0')}`
 }
 
-let cfg = null // the server's settings: counts.share (on unless false), counts.stopped, counts.noticed
+let cfg = null // the server's settings: counts.share (on unless false), counts.stopped
 let context = async () => ({}) // what the report says about this install (index.js)
 let saveSettings = () => {} // (patch) => saved
 export function configure(c, { about, save } = {}) { cfg = c; if (about) context = about; if (save) saveSettings = save }
@@ -180,9 +180,6 @@ export async function windowSaid(b = {}) {
   later()
   return { counted: true }
 }
-// The card that says it's on, shown once.
-export function noticed() { saveSettings({ counts: { noticed: new Date().toISOString().slice(0, 10) } }); return status() }
-
 // What Settings shows: whether sharing is offered here and on, where reports go, what can be
 // counted, and the reports sent.
 export async function status() {
@@ -194,7 +191,6 @@ export async function status() {
     refused: refused(),
     problem: refused() ? null : where().problem, // the address set for them isn't one
     share: sharing(),
-    notice: sharing() && !cfg?.counts?.noticed,
     to,
     stopped: cfg?.counts?.stopped || null,
     counters: SCHEMA.counters,
@@ -218,7 +214,7 @@ export async function sentReport(w) {
 // Turned on, or off. Off forgets what was counted and not sent yet.
 export async function setShare(on) {
   if (on && (!endpoint() || refused())) throw new Error(refused() ? `Usage counts are off on this computer (${refused()})` : 'There\'s nowhere to send usage counts yet')
-  saveSettings({ counts: { share: !!on, stopped: null, noticed: cfg?.counts?.noticed || new Date().toISOString().slice(0, 10) } })
+  saveSettings({ counts: { share: !!on, stopped: null } })
   if (!on) {
     clearTimeout(writing)
     week = null

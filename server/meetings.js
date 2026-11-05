@@ -739,7 +739,7 @@ export function get(id) {
   // me: your name (Settings › General), for your lines.
   // In a room: how many voices, and telling them apart while it's going (the model downloading).
   const room = voices.of(id)
-  return { ...m, voices: room ? { src: room.src || 'you', speakers: room.speakers, names: room.names || {}, at: room.at } : null, voicesWork: voices.working(id), links, captures: m.captures || [], canRead: !!doctext.ocrBin(), me: String(cfg.name || '').trim() || null, levels, callQuiet: quiet, partial: soFar(id), transcript: transcript(id, { dropped: true }), notes: readText(path.join(d, 'notes.md')), summary: readText(path.join(d, 'summary.md')), waiting: waiting(id), pending: pending.length, saved: m.saved || null, progress, assistItems: help.items.filter((x) => x.state !== 'dismissed').slice(-20), assistError: help.error || null, assistAt: help.at || null, assisting: assisting.has(id) }
+  return { ...m, voices: room ? { src: room.src || 'you', speakers: room.speakers, names: room.names || {}, at: room.at } : null, voicesWork: voices.working(id), links, captures: m.captures || [], canRead: !!doctext.ocrBin(), me: String(cfg.name || '').trim() || null, levels, callQuiet: quiet, partial: soFar(id), transcript: transcript(id, { dropped: true }), notes: readText(path.join(d, 'notes.md')), summary: readText(path.join(d, 'summary.md')), waiting: waiting(id), pending: pending.length, saved: m.saved || null, progress, assistItems: help.items.filter((x) => x.state !== 'dismissed').slice(-20), assistError: help.error || null, assistAt: help.at || null, assisting: assisting.has(id), assistLevel: assistLevel() }
 }
 
 export function setKind(id, kind) { return patchMeta(id, { kind: KINDS[kind] ? kind : 'general', kindPicked: true }) }
@@ -1882,10 +1882,14 @@ export async function ask(id, question, { model } = {}) {
 // candidate's resume, the deck) and your notes. Each says what it's based on, so you can tell a
 // good one at a glance. Meeting memory is only background, used when today's meeting touches it.
 // It's asked after a new line comes in, at most every ASSIST_MS and only once enough more has been
-// said; Suggest now asks straight away. Kept in assist.json: { items: [{ id, t, kind, text, why,
+// said (both by the level you pick: ASSIST_LEVELS); Suggest now asks straight away. Kept in assist.json: { items: [{ id, t, kind, text, why,
 // state: new | kept | dismissed }], at, upTo, error }.
 const ASSIST_MS = Number(process.env.BRIDGE_ASSIST_MS || 60_000)
-const ASSIST_WORDS = 40 // said since it last looked
+// How often it looks and how much it says, by the level picked in Settings › Meetings or on Assist
+// while it records: every (times ASSIST_MS), once this many words were said since it last looked,
+// at most this many suggestions. Low says one thing, and only when something clearly stands out.
+export const ASSIST_LEVELS = { low: { every: 3, words: 120, most: 1 }, medium: { every: 1, words: 40, most: 3 }, high: { every: 0.5, words: 20, most: 3 } }
+export const assistLevel = () => (ASSIST_LEVELS[cfg.meetings?.assistLevel] ? cfg.meetings.assistLevel : 'medium')
 const ASSIST_KINDS = {
   interview: 'You\'re helping the interviewer. Compare what the candidate says with their resume and the role (from the invite and the files). Suggest probing follow-ups: the specifics behind a claim (numbers, their own part versus the team\'s, how they measured it, trade-offs, what went wrong), a gap or a mismatch with the resume, an important part of the resume or the role not covered yet, and, when time is short, what\'s left (their questions, next steps).',
   customer: 'You\'re helping on a call with a customer or prospect. Suggest discovery questions not asked yet (goals, pains, budget, timing, who decides), an objection worth answering, and a next step to pin down.',
@@ -1905,13 +1909,19 @@ function assistSoon(id) {
   try { m = meta(id) } catch { return }
   if (!m.assist || m.status !== 'recording' || assisting.has(id) || assistLater.has(id)) return
   const a = assistOf(id)
-  const wait = Math.max(0, ASSIST_MS - (Date.now() - Date.parse(a.at || 0)))
+  const wait = Math.max(0, ASSIST_MS * ASSIST_LEVELS[assistLevel()].every - (Date.now() - Date.parse(a.at || 0)))
   assistLater.set(id, setTimeout(() => { assistLater.delete(id); assist(id).catch(() => {}) }, wait))
 }
 export function setAssist(id, on) {
   const m = patchMeta(id, { assist: !!on })
   if (on) assistSoon(id)
   return { on: !!m.assist, ...assistOf(id) }
+}
+// A new level while it records: its next look moves to match.
+export function assistLevelChanged(id) {
+  clearTimeout(assistLater.get(id))
+  assistLater.delete(id)
+  assistSoon(id)
 }
 // now: Suggest now (whatever was said since). Resolves with assist.json as it is then.
 export function assist(id, { now = false, model } = {}) {
@@ -1921,7 +1931,8 @@ export function assist(id, { now = false, model } = {}) {
     const a = assistOf(id)
     const said = transcript(id).filter((l) => l.text)
     const fresh = said.filter((l) => l.t1 > (a.upTo || 0))
-    if (!now && fresh.reduce((n, l) => n + tokens(l.text).length, 0) < ASSIST_WORDS) return a
+    const lv = ASSIST_LEVELS[assistLevel()]
+    if (!now && fresh.reduce((n, l) => n + tokens(l.text).length, 0) < lv.words) return a
     if (!said.length && !now) return a
     const use = model || cfg.meetings?.assistModel || m.summaryModelPick || cfg.meetings?.model || await helpers.pickModel()
     if (!use) throw noModel()
@@ -1948,7 +1959,7 @@ export function assist(id, { now = false, model } = {}) {
       mem ? `\nBackground from earlier meetings (it may be out of date; use it only when today's meeting clearly touches it, and say so in "why"):\n${mem}` : '',
       before ? `\nSuggested already (don't repeat these or anything already covered):\n${before}` : '',
       '', `This meeting is going on now. ${ASSIST_KINDS[m.kind] || ASSIST_KINDS.general}`,
-      'At most three suggestions, each a sentence or two to read at a glance mid-conversation. Fewer is better, and none is right when nothing stands out.',
+      lv.most === 1 ? 'At most one suggestion, a sentence or two to read at a glance mid-conversation, and only when something clearly stands out. None is usually right.' : 'At most three suggestions, each a sentence or two to read at a glance mid-conversation. Fewer is better, and none is right when nothing stands out.',
       `Base each one on something specific: what was just said, the invite, a file or the notes, and say which in "why", briefly${local ? ' (the file or the time, and what it says)' : ' ("Resume: moved the fleet to electric vans at Northwind", "At 12:04 they said the launch slipped a month")'}. Never make up facts.`,
       'kind: "question" (to ask), "point" (to raise or say), "check" (a claim or number that doesn\'t add up, or worth checking), "idea".',
       'Answer with one JSON object and nothing else: {"items": [{"kind": "question", "text": "...", "why": "..."}]}, or {"items": []}.',
@@ -1957,7 +1968,7 @@ export function assist(id, { now = false, model } = {}) {
       const r = await jsonReply(use, [{ role: 'user', text: `${ask}\n\nTranscript so far:\n${recent || '(nothing yet)'}` }], { system: 'You quietly help someone during a live meeting with a few sharp, specific suggestions. You are brief and never make things up.', feature: 'assist' }, { schema: ASSIST_SCHEMA, check: assistOk, schemaFirst: true })
       const items = [].concat(r.value?.items || [])
       const was = new Set(a.items.map((x) => x.text.toLowerCase()))
-      const add = items.filter((x) => x && typeof x.text === 'string' && x.text.trim() && !was.has(x.text.trim().toLowerCase())).slice(0, 3)
+      const add = items.filter((x) => x && typeof x.text === 'string' && x.text.trim() && !was.has(x.text.trim().toLowerCase())).slice(0, lv.most)
         .map((x) => ({ id: crypto.randomBytes(4).toString('hex'), t: Math.round(secs), kind: KIND_WORD[x.kind] ? x.kind : 'idea', text: clean(x.text, 300), why: clean(x.why, 200), state: 'new', model: r.model }))
       // An answer it can't read (not the JSON asked for, twice): said, so it never looks as if it
       // read along and found nothing. It looks again with the next lines.

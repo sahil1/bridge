@@ -48,7 +48,10 @@
 
 .mt-page { display: flex; flex-direction: column; gap: 8px; height: 100%; }
 .mt-page > * { flex: none; }
-.mt-page > .mt-cols { flex: 1 1 auto; }
+/* The columns keep room to read in (Assist's suggestions, the transcript): when the meeting's panel
+   is short (a small window, a banner, the Agents panel under it), the page scrolls instead of
+   squeezing them to a sliver. */
+.mt-page > .mt-cols { flex: 1 1 auto; min-height: 240px; }
 .mt-msg { margin: -2px 0 0; }
 .mt-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; min-height: 30px; }
 .mt-loading { padding: 20px; }
@@ -73,7 +76,10 @@
 /* One column each, never wider than its panel: a screenshot or a long name in it shrinks or wraps
    instead of pushing the panel (and on a phone, the page) wider than the screen. */
 .mt-notes, .mt-transcript { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 8px; min-height: 0; min-width: 0; }
-.mt-notes { overflow: auto; }
+/* Each row as tall as what's in it. A column that scrolls has no room to spare, and then a grid
+   sizes a row to its item's min-height: the summary's tools, wrapped onto two lines, kept one
+   line's height, and the summary under them covered the second (its dropdowns couldn't be opened). */
+.mt-notes { overflow: auto; grid-auto-rows: max-content; }
 .mt-mine { min-height: 260px; height: 100%; resize: vertical; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--pane); color: var(--ink); font: 14px/1.6 var(--font); outline: none; }
 .mt-mine:focus { border-color: color-mix(in srgb, var(--accent) 50%, var(--line-2)); }
 .mt-summary { padding: 4px 4px 8px; font-size: 14px; line-height: 1.6; }
@@ -513,6 +519,13 @@ button.mt-who:not(:disabled):hover { text-decoration: underline dotted; text-und
 .mt-assist { display: grid; gap: 10px; align-content: start; }
 .mt-assist-on { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
 .mt-assist-list { display: grid; gap: 6px; }
+/* How often (Low, Medium, High) and the sort, on a row under Assist's header. */
+.mt-assist-opts { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; }
+.mt-assist-level, .mt-assist-sort { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.mt-assist-level small, .mt-assist-sort small { color: var(--ink-3); font-size: 11.5px; }
+.mt-assist-level input { width: 96px; accent-color: var(--accent); }
+.mt-assist-level b { min-width: 52px; font-weight: 550; }
+.mt-assist-sort select { height: 26px; border: 1px solid var(--line); border-radius: 7px; background: var(--pane); color: var(--ink); font: 500 12.5px var(--font); padding: 0 6px; }
 .mt-tip { display: grid; grid-template-columns: auto 1fr auto auto; align-items: start; gap: 4px 10px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--pane-2); }
 .mt-tip.kept { opacity: .7; }
 .mt-tip-kind, .fc-tip-kind { font-size: 10.5px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--accent); padding-top: 2px; }

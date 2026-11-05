@@ -132,8 +132,7 @@ reports of its own, on its own Cloudflare account, with this same Worker and the
    offered then, as when there's no server.
 4. **Say so in your privacy policy**: where the reports go and who runs it.
 
-Whatever the address, people keep the same controls: the card after setup says they're on, with
-Turn off right there; Settings › About & Updates names the address, shows exactly what would be
+Whatever the address, people keep the same controls: Settings › About & Updates names the address, shows exactly what would be
 sent and turns each off in one click; and `DO_NOT_TRACK=1` or `BRIDGE_TELEMETRY=0` keeps both off.
 What can be sent is still the public list ([shared/telemetry-schema.json](../shared/telemetry-schema.json));
 a fork that adds to it deploys its Worker again, or the Worker drops the new names.
