@@ -19,10 +19,3 @@
 .app.narrow .crash-notice { left: 12px; right: 12px; width: auto; bottom: calc(76px + env(safe-area-inset-bottom)); }
 .cr-sent { flex-wrap: wrap; align-items: center; }
 .cr-long.bad { color: var(--bad, #c0392b); }
-/* Usage stats are on (StatsNotice.jsx): the same card, above a crash's if both show. */
-.stats-notice { position: fixed; right: 16px; bottom: 16px; z-index: 89; width: min(420px, calc(100vw - 32px)); box-sizing: border-box; display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; padding: 12px 14px; border-radius: 12px; background: var(--pane); border: 1px solid var(--line-2); box-shadow: var(--shadow-lg); color: var(--ink); animation: fade-in .15s ease; }
-.stats-notice > svg { margin-top: 2px; color: var(--accent); }
-.stats-notice-text { display: grid; gap: 3px; font-size: 13px; line-height: 1.4; }
-.stats-notice-acts { grid-column: 2; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-.app.narrow .stats-notice { left: 12px; right: 12px; width: auto; bottom: calc(76px + env(safe-area-inset-bottom)); }
-body:has(.crash-notice) .stats-notice { bottom: 170px; }

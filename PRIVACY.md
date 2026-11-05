@@ -107,8 +107,7 @@ computer.
 
 Bridge AI on your computer sends the project anonymous usage stats, to see what to build and fix
 and which versions are out there. They're on unless you turn them off: **Share anonymous usage
-counts** in Settings › About & Updates. The first time they're on, a card says so, with **Turn off**
-right there (it turns crash reports off too). `DO_NOT_TRACK=1` or `BRIDGE_TELEMETRY=0` in the
+counts** in Settings › About & Updates, beside **Send crash reports by themselves**. `DO_NOT_TRACK=1` or `BRIDGE_TELEMETRY=0` in the
 environment keeps them off, and turning them off stops them at once and forgets what was counted
 and not yet sent. The phone apps and the relay send nothing of the kind.
 
@@ -160,7 +159,7 @@ crashed, the error and where in Bridge AI's code, its version, your system, the 
 how it runs, and the last lines of its log, with your name, your projects' and computers' names,
 folders, emails, keys and network addresses taken out on your computer) can go to the project, to
 help fix it. That happens by itself unless you turn off **Send crash reports by themselves** in
-Settings › About & Updates (or Turn off on the card that says they're on), and when you click **Send
+Settings › About & Updates, and when you click **Send
 to Bold Bridge** on a crash's report after reading and changing it as you like. By themselves, at
 most five go in a day, and the same crash once. `DO_NOT_TRACK=1` or `BRIDGE_TELEMETRY=0` keeps it off, and there's nothing to
 send to while the project has no crash server.

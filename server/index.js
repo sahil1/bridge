@@ -1453,9 +1453,17 @@ app.patch('/api/meetings/:id/voices/:n', wrap((req) => voices.name(req.params.id
 // heard: one line (key), or all of it.
 app.post('/api/meetings/:id/cleanup', wrap((req) => meetings.cleanup(req.params.id, { model: req.body?.model })))
 app.post('/api/meetings/:id/cleanup/undo', wrap((req) => meetings.uncleanLine(req.params.id, req.body?.key == null ? null : String(req.body.key))))
-// AI Assist while it records: on or off (and so for the meetings after), Suggest now, and a
-// suggestion kept (into your notes) or dismissed.
+// AI Assist while it records: on or off (and so for the meetings after), how often it suggests
+// (low, medium or high, for every meeting), Suggest now, and a suggestion kept (into your notes) or
+// dismissed.
 app.post('/api/meetings/:id/assist', wrap(async (req) => {
+  if (req.body?.level != null) {
+    const level = String(req.body.level)
+    if (!meetings.ASSIST_LEVELS[level]) throw new Error('How often Assist suggests is low, medium or high')
+    afterChange(settings.patch({ meetings: { assistLevel: level } }))
+    meetings.assistLevelChanged(req.params.id)
+    return { level: meetings.assistLevel() }
+  }
   if (typeof req.body?.on === 'boolean') {
     const r = meetings.setAssist(req.params.id, req.body.on)
     afterChange(settings.patch({ meetings: { assist: req.body.on } }))
@@ -2013,7 +2021,6 @@ counts.configure(cfg, {
   save: (p) => afterChange(settings.patch(p)),
 })
 app.get('/api/counts', wrap(() => counts.status()))
-app.post('/api/counts/noticed', wrap(() => counts.noticed()))
 // What a window says about itself as it opens (src/activeTime.js): its language and its look.
 app.post('/api/counts/window', wrap((req) => (fromHere(req) ? counts.windowSaid(req.body || {}) : { counted: false })))
 app.post('/api/counts', wrap((req) => counts.setShare(!!req.body?.share)))

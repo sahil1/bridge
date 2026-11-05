@@ -248,6 +248,20 @@ try {
   await kit.api(`/meetings/${J.id}/assist/${J1.assistItems[1].id}`, { state: 'dismissed' }, 'PATCH')
   J1 = await kit.api(`/meetings/${J.id}`)
   ok(J1.assistItems.length === 1 && J1.assistItems[0].state === 'kept' && /\] Ask: Ask about/.test(J1.notes), 'one kept goes in your notes; one dismissed is gone', [J1.assistItems, J1.notes])
+  // How often: low, medium or high, for every meeting; a level it doesn't know is refused. Low says
+  // one thing at most, and only when something clearly stands out.
+  r = await kit.api(`/meetings/${J.id}/assist`, { level: 'low' })
+  ok(r.level === 'low' && (await kit.api('/settings')).user?.meetings?.assistLevel === 'low' && (await kit.api(`/meetings/${J.id}`)).assistLevel === 'low', 'Assist set to low, for every meeting', [r, (await kit.api('/settings')).user?.meetings])
+  ok(await kit.api(`/meetings/${J.id}/assist`, { level: 'loud' }).then(() => false, (e) => /low, medium or high/.test(e.message)), 'a level it doesn\'t know is refused')
+  const SC = await kit.api('/meetings', { title: 'Supplier call', call: false })
+  said(SC.id, [['them', 2, 'The new depot opens in March if the permits come through, and the vans arrive the week after.']])
+  const a3 = model.asked(/This meeting is going on now/).length
+  await kit.api(`/meetings/${SC.id}/assist`, {})
+  const lowAsk = model.asked(/This meeting is going on now/).slice(a3)[0] || ''
+  const lowItems = (await kit.api(`/meetings/${SC.id}`)).assistItems
+  ok(/At most one suggestion/.test(lowAsk) && lowItems.length === 1, 'low: one suggestion at most, of the two the model had', lowItems)
+  await kit.api(`/meetings/${SC.id}/stop`, {})
+  await kit.api(`/meetings/${J.id}/assist`, { level: 'medium' })
   // By itself, after a line comes in, once enough more has been said.
   const a1 = model.asked(/This meeting is going on now/).length
   await send(J.id, Buffer.concat([pcm(2, true), pcm(1.5)]))
