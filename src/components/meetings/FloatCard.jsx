@@ -268,7 +268,7 @@ export default function FloatCard() {
   }
   return (
     <div className="float-root">
-      <div ref={card} className={`float-card${r && !open ? ' slim' : ''}${up ? ' up' : ''}${dragging ? ' dragging' : ''}`} onMouseEnter={enter} onMouseLeave={out} onFocus={enter} onBlur={out}
+      <div ref={card} className={`float-card${r && !open ? ' slim' : ''}${up ? ' up' : ''}${dragging ? ' dragging' : ''}`} style={{ '--fc-more-max': `${Math.max(220, (window.screen?.availHeight || 900) - 180)}px` }} onMouseEnter={enter} onMouseLeave={out} onFocus={enter} onBlur={out}
         onPointerDown={down} onPointerMove={move} onPointerUp={release} onPointerCancel={release}>
         {body}
         {err && <p className="error-text small fc-line">{err}</p>}

@@ -210,6 +210,9 @@ html.is-float, html.is-float body, html.is-float #root { background: transparent
    move: it opens below, or above when the card sits low on the screen (and grows upward). */
 .float-card.slim { gap: 0; border-radius: 12px; }
 .float-card.up .fc-more { order: -1; }
+/* Open, it fits on the screen: the bar and AI Assist's suggestion stay, and what's under them
+   scrolls past the screen's height (--fc-more-max, from FloatCard.jsx). */
+.float-card .fc-more { max-height: var(--fc-more-max, 560px); overflow-y: auto; overscroll-behavior: contain; grid-auto-rows: max-content; }
 .fc-grip { flex: none; display: grid; place-items: center; width: 16px; height: 22px; margin-left: -4px; border-radius: 5px; color: var(--ink-3); cursor: grab; }
 .fc-grip:hover { background: var(--pane-2); color: var(--ink-2); }
 .fc-more { display: grid; gap: 8px; }

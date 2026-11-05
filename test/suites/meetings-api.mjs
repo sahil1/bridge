@@ -70,17 +70,17 @@ try {
 
   // ---------- The call's sound, silent ----------
   // Until Bridge AI may hear the call (System Audio Recording), macOS gives silence, or a few steps
-  // off it: that's said, on the meeting and on the floating card, and not once the call is heard.
+  // off it: on a call that's said (call-event). A meeting in a room records what the computer plays
+  // too, in case a call starts; nothing playing there is no call, and isn't said to be silent.
   if (!IS_MAC) skip('a silent call is said to be silent', "the call's sound is recorded on a Mac")
   else {
     const tap = (level) => fs.writeFileSync(path.join(kit.bin, 'calltap.json'), JSON.stringify({ level }))
     tap(3)
     const C = await kit.api('/meetings', { title: 'Call check' })
     ok(C.call === 'on', "(the meeting records the call's sound, from the stand-in)", C.call)
-    ok(!!(await until(async () => (await kit.api(`/meetings/${C.id}`)).callQuiet, 10000)), 'a call only a few steps off silence is said to be silent')
-    ok((await kit.api('/calls')).recording?.callQuiet === true, 'and the floating card is told')
+    await sleep(4000) // past BRIDGE_CALL_QUIET_MS
+    ok((await kit.api(`/meetings/${C.id}`)).callQuiet === false && (await kit.api('/calls')).recording?.callQuiet === false, 'a meeting in a room (no call app has the mic), nothing playing: not said to be silent, on the meeting or the floating card')
     tap(4000)
-    ok(!!(await until(async () => (await kit.api(`/meetings/${C.id}`)).callQuiet === false, 10000)), 'once the call is heard, not any more')
     const talk = await until(async () => { const t = (await kit.api('/calls')).recording?.talking; return typeof t === 'number' && { t } }, 10000)
     ok(!!talk, 'someone on the call talking is told to the page, which looks at the screen then', talk)
     tap(0)
