@@ -172,7 +172,15 @@ export async function send(text, kind, { byItself = false } = {}) {
 // window that broke ({ kind: 'ui', where, message, stack }). Never more than PER_DAY a day, or the
 // same crash twice in a day; a failure to send is let go (Report on GitHub still has it).
 const today = () => new Date().toISOString().slice(0, 10)
-export async function auto(b) {
+// One at a time, so two crashes at once can't both pass the check for the same crash (the first
+// one's copy is written before the second looks).
+let autoQueue = Promise.resolve()
+export function auto(b) {
+  const run = autoQueue.then(() => autoNow(b))
+  autoQueue = run.catch(() => {})
+  return run
+}
+async function autoNow(b) {
   if (!on()) return { sent: false }
   try {
     const ctx = await context()

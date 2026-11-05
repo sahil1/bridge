@@ -117,6 +117,8 @@ try {
   await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'about' } })))
   const trial = p.locator('.st-check', { hasText: 'Studio' }).locator('input')
   await trial.waitFor({ timeout: 15000 })
+  // The switch is off and disabled until the settings have come (a slow computer shows that first).
+  await until(async () => !(await trial.isDisabled()), 10000)
   ok(await trial.isChecked(), 'Settings › About & Updates › Trial Features: Studio, on')
   const sizes = await p.locator('.st-sections .st-sec .btn').evaluateAll((bs) => [...new Set(bs.map((x) => Math.round(x.getBoundingClientRect().height)))])
   ok(sizes.length === 1, `every button on About & Updates is one size (${sizes.join(', ')} px)`, sizes)

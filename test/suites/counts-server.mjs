@@ -302,9 +302,10 @@ try {
     ok(copy.report.title === kept[0].title && copy.byItself === false && (await cr.sending()).sent.length === 1, 'and keeps a copy of exactly what went, listed in Settings', copy)
     settings = { crashReports: { send: true } }
     cr.configure(settings)
-    const a1 = await cr.auto({ kind: 'ui', where: 'Board', message: 'y is null', stack: 'TypeError: y is null\n    at Board (<app>/src/components/whiteboard/Board.jsx:5:5)' })
-    const a2 = await cr.auto({ kind: 'ui', where: 'Board', message: 'y is null', stack: 'TypeError: y is null\n    at Board (<app>/src/components/whiteboard/Board.jsx:5:5)' })
-    ok(a1.sent && !a2.sent && rows(db, 'crash_reports').length === 2, 'with it on, a crash sends itself, and the same crash only once a day', [a1, a2])
+    // Two of the same crash at the same moment (a slow computer): still sent once.
+    const same = { kind: 'ui', where: 'Board', message: 'y is null', stack: 'TypeError: y is null\n    at Board (<app>/src/components/whiteboard/Board.jsx:5:5)' }
+    const [a1, a2] = await Promise.all([cr.auto(same), cr.auto(same)])
+    ok(a1.sent && !a2.sent && rows(db, 'crash_reports').length === 2, 'with it on, a crash sends itself, and the same crash only once a day, even two at the same moment', [a1, a2])
     env.CRASHES_OFF = 'Paused for a move.'
     await cr.auto({ kind: 'ui', where: 'Mail', message: 'z', stack: 'Error: z' })
     ok(settings.crashReports?.send === false && settings.crashReports?.stopped === 'Paused for a move.', 'when the server answers "stop", Bridge AI turns crash reports off and keeps the reason to show', settings.crashReports)
