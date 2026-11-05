@@ -62,6 +62,7 @@ const PATHS = {
   'a:view': { none: 'The live Herdr view needs a wide screen; a phone has every terminal in More › Terminals' },
   'a:rail': { none: 'The sidebar is the desktop\'s; on a phone its rows are the tabs and More' },
   'a:appearance': { phone: 'Settings › Appearance' },
+  'a:topbar': { none: 'What\'s pinned to the desktop\'s top bar; a phone\'s bar keeps to what needs you now, the rest in Today and a line under it' },
   'a:theme': { phone: 'Search › Color mode' },
   'a:ideas': { phone: 'Search › Add an idea' },
   'a:cal': { phone: 'Today › Calendar' },

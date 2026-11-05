@@ -92,7 +92,7 @@ export function FreshChip({ fresh, row = false }) {
   )
   return (
     <button type="button" className="top-chip fresh-chip" onClick={fresh.reload} title={`${what}. ${t('Reload to use the new version.')}`}>
-      <Icon name="refresh" size={13} /><span className="hide-sm">{t('Updated')}</span><b>{t('Reload')}</b>
+      <Icon name="refresh" size={13} /><span className="pin-word">{t('Updated')}</span><b>{t('Reload')}</b>
     </button>
   )
 }

@@ -6,8 +6,8 @@ import { machineId } from '../api.js'
 // Saved in this browser (or the app), for each device apart: a window showing another of your
 // devices (/m/<id>/) keeps its own open tabs and layout, so windows for two devices side by side
 // don't overwrite each other's (agents on two devices can even have the same id). Whether you've
-// seen the tour, the look you picked and °F or °C are the same for all.
-const SHARED = new Set(['cc-toured', 'cc-appearance', 'cc-theme', 'cc-unit'])
+// seen the tour, the look you picked, °F or °C and what's pinned to the top bar are the same for all.
+const SHARED = new Set(['cc-toured', 'cc-appearance', 'cc-theme', 'cc-unit', 'cc-pins'])
 const keyOf = (k) => (machineId && !SHARED.has(k) ? `${k}@${machineId}` : k)
 export const store = {
   get(k, d) { try { const v = localStorage.getItem(keyOf(k)); return v == null ? d : JSON.parse(v) } catch { return d } },
