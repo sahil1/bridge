@@ -52,6 +52,7 @@ button.dp-to:hover { background: var(--pane-2); color: var(--ink); }
 .dp-working .dp-live { color: var(--ink-2); }
 .dp-tick { flex: none; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--good); color: #fff; }
 .dp-done.warn .dp-tick { background: var(--ink-3); }
+.dp-done .dp-what .dp-note { display: block; color: var(--ink-2); font-size: 12px; }
 /* Grown into a card: the words, what to do with them, or a note. */
 .dp-card { display: grid; gap: 8px; width: 380px; max-width: calc(100vw - 32px); padding: 10px 12px; }
 @media (prefers-reduced-motion: reduce) { .dp { transition: none; animation: none; } .dp-wave i { transition: none; } .dp-wave.busy i { animation: none; } }
@@ -85,12 +86,18 @@ html.is-hud, html.is-hud body, html.is-hud #root { background: transparent !impo
 /* Why it wasn't pasted, and the offer after a Copy. */
 .hud-why { margin: 0; color: var(--ink-2); display: flex; align-items: center; gap: 6px; line-height: 1.4; }
 .hud-offer { border-top: 1px solid var(--line); padding-top: 8px; }
+/* Tidy what I say: what tidied it (or why not), and with no model yet, the local model to download. */
+.hud-tidied .link-btn { font-size: inherit; }
+.tidy-needs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.tidy-needs p { margin: 0; flex: 1 1 220px; color: var(--ink-2); line-height: 1.4; }
+.hud-tidy { border-top: 1px solid var(--line); padding-top: 8px; }
 
 /* Settings › Voice › Dictation. */
 .st-dictation .st-check, .st-dict-history .st-check { display: flex; align-items: flex-start; gap: 9px; font-size: 13px; line-height: 1.45; cursor: pointer; }
 .st-dictation .st-check input, .st-dict-history .st-check input { margin-top: 3px; flex: none; }
 .st-dictation .st-row > span:first-child, .st-dict-history .st-row > span:first-child { min-width: 120px; font-size: 13px; }
 .st-dictation .st-note { margin: 0; }
+.dict-tidy { display: grid; gap: 8px; }
 .dict-key { font: 12.5px var(--font-mono); padding: 4px 9px; border-radius: 7px; border: 1px solid var(--line-2); background: var(--pane-2); min-width: 84px; text-align: center; }
 .st-radios { align-items: flex-start; }
 .st-choices { display: flex; flex-direction: column; gap: 5px; font-size: 13px; }

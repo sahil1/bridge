@@ -26,6 +26,7 @@
 .dc-body { display: grid; gap: 8px; padding: 0 12px 12px 49px; }
 .dc-full { margin: 0; line-height: 1.5; font-size: 13.5px; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 .dc-heard { justify-self: start; }
+.dc-tidied { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
 .dc-audio { width: min(100%, 360px); height: 32px; }
 .dc-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .dc-acts .grow { flex: 1; }

@@ -8,6 +8,7 @@ import { tx } from './i18n/index.js'
 // then (server/index.js TRIALS).
 export const TRIALS = [
   { id: 'studio', label: tx('Studio'), hint: tx('Documents, sheets, decks, PDFs and pages from any of your folders and computers, edited here or by your agents, with every version kept.') },
+  { id: 'dictation-cleanup', label: tx('Tidy what I say'), hint: tx('Dictation from other apps tidied by a model before it\'s pasted: fillers and false starts out, punctuation fixed, your words kept. Turned on in Settings › Voice › Dictation.') },
 ]
 
 // Whether a trial is on, from the config every part of the app shares (it's asked again when
