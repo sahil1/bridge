@@ -278,12 +278,21 @@ function codexMessages(entries) {
 // The usage limit it's stopped at, if it is, from its log: Claude Code's "You've hit your weekly
 // limit · resets Oct 29 at 5am (America/Los_Angeles)", and whether it carries on by itself at the
 // reset ("Usage limit reached · continuing automatically at 3:10am", which it does for the 5-hour
-// limit, not for one more than a day away). Over once it has replied since.
+// limit, not for one more than a day away). Over once it has replied since, or been asked again (a
+// message from you, a background task's notice), which it answers or meets the limit again.
 // { text, window, resets, auto, at }, or null.
 const textOfEntry = (e) => { const c = e.message?.content; return typeof c === 'string' ? c : Array.isArray(c) ? c.map((b) => b.text || '').join('') : '' }
+const askedAgain = (e) => {
+  if (e.type !== 'user' || e.isMeta || e.isSidechain) return false
+  const c = e.message?.content
+  const text = typeof c === 'string' ? c : Array.isArray(c) ? c.filter((b) => b.type === 'text').map((b) => b.text || '').join('') : ''
+  if (/^\s*<(command-|local-command|system-reminder)/.test(text)) return false // /usage, /model: not a turn
+  return !!text.trim() || (Array.isArray(c) && c.some((b) => b.type === 'image'))
+}
 function claudeLimit(kept, entries) {
   for (let i = kept.length - 1; i >= 0; i--) {
     const e = kept[i]
+    if (askedAgain(e)) return null
     if (e.type !== 'assistant') continue
     if (e.error !== 'rate_limit') { if (!e.isApiErrorMessage) return null; continue }
     const text = textOfEntry(e).split('\n')[0].trim()
