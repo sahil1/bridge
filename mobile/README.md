@@ -295,7 +295,7 @@ ASC_KEY_ID=<key id> ASC_ISSUER_ID=<issuer id> ASC_KEY_PATH=/path/to/AuthKey_<id>
 3. **App Privacy**: Data Not Collected (below), the privacy policy URL
    `https://github.com/sahil1/bridge/blob/main/PRIVACY.md` (also linked on the app's first screen and
    in Settings › About & Updates), a support URL (`https://github.com/sahil1/bridge/issues`) and the
-   marketing URL (`https://sahil1.github.io/bridge/`).
+   marketing URL (`https://boldbridge.ai/`).
 4. **Age rating**: the questionnaire, answered for what the app is (a developer tool; it shows what
    your own agents write, and opens web links in Safari, not in the app).
 5. **Submit for Review**.
@@ -349,7 +349,7 @@ Apple gives.
 > on Cursor, GitHub Copilot, Jules or Claude with the user's own API key, kept in the Keychain and
 > sent only to that provider; the demo has made-up cloud agents to look at without a key.
 >
-> To pair a real computer: install Bridge AI from https://sahil1.github.io/bridge/, open
+> To pair a real computer: install Bridge AI from https://boldbridge.ai/, open
 > Settings › Devices › Pair a device, and scan the QR code. A video of that is attached.
 >
 > Permissions are asked when first used, never at launch: the camera when you tap Scan the QR code

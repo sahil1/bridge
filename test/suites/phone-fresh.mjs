@@ -198,7 +198,7 @@ try {
   await old.ctx.close()
   const droid = await inApp(ANDROID('3.4.0'))
   const link = droid.p.locator('.app-note a')
-  ok(!!(await until(() => link.isVisible(), 5000)) && (await link.getAttribute('href')) === 'https://sahil1.github.io/bridge/#android' && (await link.getAttribute('target')) === '_blank', 'an older Android app: a link to the website\'s APK, opened outside the app')
+  ok(!!(await until(() => link.isVisible(), 5000)) && (await link.getAttribute('href')) === 'https://boldbridge.ai/#android' && (await link.getAttribute('target')) === '_blank', 'an older Android app: a link to the website\'s APK, opened outside the app')
   ok(/Android app is older than Bridge AI on Studio Mac needs/.test(await link.innerText()), 'saying why', await link.innerText())
   await shot(droid.p, `${tag}phone-fresh-old-android-app`)
   await droid.ctx.close()

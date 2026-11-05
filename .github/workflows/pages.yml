@@ -1,18 +1,15 @@
-# The website: site/ (the download page) plus the demo (npm run demo:build) at /demo, on GitHub
-# Pages at https://sahil1.github.io/bridge/. Rebuilt when the page or the app's UI changes on main,
-# when a release is published, or by hand. Separate from release.yml, so it can never hold up a
-# release.
+# The old address, https://sahil1.github.io/bridge/: Bridge AI's website moved to
+# https://boldbridge.ai (built and deployed from the project's planning repo), so GitHub Pages now
+# serves only site/: pages that send every old link there (index.html, demo/, and 404.html for the
+# rest), plus the README's poster. Published when site/ changes on main, or by hand.
 name: Website
 
 on:
   push:
     branches: [main]
-    paths: ['site/**', 'src/**', 'public/**', 'vite.config.js', 'package.json', '.github/workflows/pages.yml']
-  release:
-    types: [published]
+    paths: ['site/**', '.github/workflows/pages.yml']
   workflow_dispatch:
 
-# Publishing to Pages is for the deploy job only: the build runs npm packages.
 permissions:
   contents: read
 
@@ -27,22 +24,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 22
-          cache: npm
-      # Only the UI is built here, so no native modules (node-pty) are compiled.
-      - run: npm ci --no-audit --no-fund --ignore-scripts
-      - run: node scripts/check-private.js
-      - run: npm run demo:build
-      - run: |
-          mkdir -p _site
-          cp -R site/. _site/
-          cp public/mark.svg _site/
-          cp -R dist-demo _site/demo
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
-          path: _site
+          path: site
 
   deploy:
     needs: build

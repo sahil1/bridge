@@ -4,9 +4,9 @@
 
 Bridge AI runs on your device. Your agents use their own logins; Bridge AI only reads their screens and transcripts and types into them for you. Nothing is sent anywhere else.
 
-[![Bridge AI 3.0 in under a minute, with sound](site/poster.jpg)](https://sahil1.github.io/bridge/)
+[![Bridge AI 3.0 in under a minute, with sound](site/poster.jpg)](https://boldbridge.ai/)
 
-**[Download](https://sahil1.github.io/bridge/)** for macOS, Windows or Linux (the page offers the one for your computer, Apple Silicon or Intel), and the [Android app](#android) · **[Try the demo](https://sahil1.github.io/bridge/demo/)** in your browser, with made-up agents · [All releases](https://github.com/sahil1/bridge/releases/latest)
+**[Download](https://boldbridge.ai/)** for macOS, Windows or Linux (the page offers the one for your computer, Apple Silicon or Intel), and the [Android app](#android) · **[Try the demo](https://boldbridge.ai/demo/)** in your browser, with made-up agents · [All releases](https://github.com/sahil1/bridge/releases/latest)
 
 ## Install
 
@@ -498,4 +498,4 @@ Testing these without changing anything on your Mac: `BRIDGE_FIX_DRYRUN=1` makes
 
 [Apache-2.0](LICENSE). See [NOTICE](NOTICE).
 
-Bridge AI is provided as is, with no warranty, and you're responsible for what your agents do and for following the terms of the services you connect ([TERMS.md](TERMS.md)). It's an independent project, not affiliated with or endorsed by Anthropic, OpenAI, Google, GitHub, Cursor, Cloudflare or any other company whose tools it works with; their names and logos belong to them. The project collects nothing about you ([PRIVACY.md](PRIVACY.md)).
+Bridge AI is provided as is, with no warranty, and you're responsible for what your agents do and for following the terms of the services you connect ([TERMS.md](TERMS.md)). It's an independent project, not affiliated with or endorsed by Anthropic, OpenAI, Google, GitHub, Cursor, Cloudflare or any other company whose tools it works with; their names and logos belong to them. The project collects nothing about you, unless you turn on anonymous usage counts, which are off unless you do ([PRIVACY.md](PRIVACY.md)).

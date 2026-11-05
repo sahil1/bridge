@@ -1,0 +1,31 @@
+# Bridge AI's usage counts server (README.md). From the repo, signed in to the project's Cloudflare
+# account (npx wrangler@4.149.0 login):
+#   npx wrangler@4.149.0 d1 create bridge-counts     (once; put its database_id below)
+#   npx wrangler@4.149.0 deploy -c counts/wrangler.toml
+name = "bridge-counts"
+main = "worker.js"
+compatibility_date = "2025-06-01"
+workers_dev = false
+preview_urls = false
+
+# Its own name, so anyone who'd rather block it can block just this.
+routes = [{ pattern = "counts.boldbridge.ai", custom_domain = true }]
+
+# Weekly totals and the nonces of the last ten weeks; the Worker makes the tables itself.
+[[d1_databases]]
+binding = "DB"
+database_name = "bridge-counts"
+database_id = "d104581b-fc64-45fd-b349-f7177f9bff71"
+
+# Once a day: nonces older than ten weeks go.
+[triggers]
+crons = ["17 4 * * *"]
+
+[vars]
+# The kill switch: "1" (or a sentence of your own, shown in Bridge AI's Settings) answers every
+# report "stop", and Bridge AI turns sharing off.
+COUNTS_OFF = "0"
+
+# No logs: nothing about a request (its IP address included) is kept by the Worker.
+[observability]
+enabled = false

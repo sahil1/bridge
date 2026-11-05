@@ -73,6 +73,7 @@ const SUITES = [
   { name: 'ios-app', build: null, covers: [/^mobile\/ios\//, /^scripts\/ios-release\.js$/, /^relay\/web\/index\.html$/, /^PRIVACY\.md$/, /^src\/components\/Settings\.jsx$/, /^src\/components\/settings\/Relay\.jsx$/] },
   { name: 'android-key', build: null, covers: [/^scripts\/(android-key\.sh|release\.js)$/, /^\.github\/workflows\/(android|android-apk|release|test)\.yml$/, /^mobile\/android\/(PLAY\.md|play\/)/, /^src\/components\/settings\/Relay\.jsx$/] },
   { name: 'site', build: null, browser: true, covers: [/^site\//, /^\.github\/workflows\/android\.yml$/, /^README\.md$/] },
+  { name: 'counts-server', build: null, covers: [/^counts\//, /^shared\/telemetry-schema\.json$/, /^server\/counts\.js$/, /^PRIVACY\.md$/] },
 ]
 // A change to these runs everything.
 const EVERYTHING = [/^test\/(lib|stand-ins)\//, /^test\/run\.mjs$/, /^package(-lock)?\.json$/]
