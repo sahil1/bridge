@@ -1,7 +1,7 @@
 // Your dictations, kept (Settings › Voice › Dictation History): what you said with the
 // dictation key, inside Bridge AI or in another app, so it's never lost in an app that didn't take
 // it. Each one: when and how long, the text as it was put in and as it was heard (before the light
-// cleanup), where it went (the app you were in, by name and bundle ID; an agent or the Chief of
+// cleanup), and with Tidy what I say, what you said before the model tidied it; where it went (the app you were in, by name and bundle ID; an agent or the Chief of
 // Staff; a terminal; a box in Bridge AI) and whether it was pasted, sent, typed or copied. The
 // recording itself only with "Keep the recordings too" (off until you turn it on).
 //
@@ -125,7 +125,7 @@ export async function list({ q = '', before = null, limit = 200 } = {}) {
   const words = String(q || '').toLowerCase().split(/\s+/).filter(Boolean).slice(0, 12)
   const until = before ? new Date(before).getTime() : Infinity
   const all = [...map.values()].filter((r) => new Date(r.at).getTime() >= from).sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
-  const hits = words.length ? all.filter((r) => { const hay = `${r.text}\n${r.raw || ''}\n${r.app?.name || ''}\n${r.agent?.name || ''}`.toLowerCase(); return words.every((w) => hay.includes(w)) }) : all
+  const hits = words.length ? all.filter((r) => { const hay = `${r.text}\n${r.said || ''}\n${r.raw || ''}\n${r.app?.name || ''}\n${r.agent?.name || ''}`.toLowerCase(); return words.every((w) => hay.includes(w)) }) : all
   const page = hits.filter((r) => new Date(r.at).getTime() < until)
   const n = Math.max(1, Math.min(500, Number(limit) || 200))
   if (all.length < map.size) tidy().catch(() => {})
@@ -142,18 +142,21 @@ export async function get(id) {
   return r
 }
 
-// A new one, from the page that heard it: { text, raw, ms, at, how, app, agent, place }. Nothing is
-// kept with history off ({ kept: false }). restore: one deleted a moment ago, put back as it was
-// (Undo), with its id and time (and its recording, kept in memory meanwhile).
+// A new one, from the page that heard it: { text, raw, said, tidiedBy, ms, at, how, app, agent,
+// place }. Nothing is kept with history off ({ kept: false }). restore: one deleted a moment ago,
+// put back as it was (Undo), with its id and time (and its recording, kept in memory meanwhile).
 export async function add(body = {}, { restore = false } = {}) {
   if (!keeping() && !restore) return { kept: false }
   const text = str(body.text, 100_000)
   if (!text || !text.trim()) throw Object.assign(new Error('Nothing was said'), { status: 400 })
   const at = restore && !Number.isNaN(new Date(body.at).getTime()) ? new Date(body.at).toISOString() : new Date().toISOString()
   const id = restore && ID.test(String(body.id || '')) ? body.id : `${Date.now().toString(36)}${crypto.randomBytes(5).toString('hex')}`
-  // What was heard, when the cleanup changed it.
+  // What was heard, when the cleanup changed it; and what you said before a model tidied it (Tidy
+  // what I say), with the model's name.
   const raw = str(body.raw, 100_000)
-  const rec = { id, at, ms: Math.max(0, Math.min(3_600_000, Math.round(Number(body.ms) || 0))), text, ...(raw && raw !== text ? { raw } : {}), ...clip(body) }
+  const said = str(body.said, 100_000)
+  const tidied = said && said.trim() && said !== text ? { said, ...(str(body.tidiedBy, 120) ? { tidiedBy: str(body.tidiedBy, 120) } : {}) } : {}
+  const rec = { id, at, ms: Math.max(0, Math.min(3_600_000, Math.round(Number(body.ms) || 0))), text, ...(raw && raw !== text ? { raw } : {}), ...tidied, ...clip(body) }
   if (!('how' in rec)) rec.how = null
   const back = restore ? undo.get(id) : null
   if (!back?.audio) delete rec.audio

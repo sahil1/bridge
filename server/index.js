@@ -334,7 +334,7 @@ const rootOf = async (pane) => {
 // ---------- Trial features ----------
 // Still being finished, so hidden until turned on in Settings › About & Updates › Trial Features
 // (trials: { studio: true } in the config; src/trials.js). Their routes answer only then.
-const TRIALS = ['studio']
+const TRIALS = ['studio', 'dictation-cleanup']
 const trialOn = (id) => cfg.trials?.[id] === true
 const trialOff = (id, label) => (req, res, next) => (trialOn(id) ? next() : res.status(404).json({ error: `${label} is a trial feature. Turn it on in Settings › About & Updates › Trial Features.`, trial: id }))
 
@@ -1183,6 +1183,44 @@ app.post('/api/dictation/edit', wrap(async (req) => {
   const model = cfg.dictation?.editModel || ((await llm.ready().catch(() => false)) ? llm.ID : null)
   return dictation.edit({ text: req.body?.text, instruction: req.body?.instruction, model, reply: (id, msgs, o) => chatModels.reply(id, msgs, o) })
 }))
+// Tidy what I say (dictation.js tidy; a trial: dictation-cleanup): what you said from another app,
+// tidied before the dictation window pastes it, by the model picked for it. None picked: the local
+// model built in once it's downloaded, else a model of yours on this computer (Ollama, LM Studio),
+// never one that sends the words out unless you pick it. GET: which that is, or what's needed (the
+// local model, one click, where it can run here). warm: the local model started while you talk.
+// A slow answer, an error or one that isn't what you said comes back as an error with its code,
+// and the page pastes your words as you said them.
+app.use('/api/dictation/tidy', trialOff('dictation-cleanup', 'Tidy what I say'))
+const tidyAuto = async () => ((await llm.ready().catch(() => false)) ? llm.ID : (await chatModels.localModel(cfg.localModel).catch(() => null))?.id || null)
+const tidyModel = async () => cfg.dictation?.tidyModel || tidyAuto()
+const tidyLabel = (id) => (id === llm.ID ? llm.MODELS[0].label : String(id).split(':').slice(1).join(':') || String(id))
+const tidyLocal = async () => { const s = await llm.status(); return { offered: s.offered, why: s.why, have: s.have, downloading: s.downloading, mb: s.model.mb, label: s.model.label } }
+// model: the one it uses now ({ id, label, provider, via, missing: not there now }), or null;
+// auto: the one it uses with none picked.
+app.get('/api/dictation/tidy', wrap(async () => {
+  const list = await chatModels.models().catch(() => [])
+  const about = (id) => { if (!id) return null; const d = list.find((x) => x.id === id); return { id, label: d?.label || tidyLabel(id), provider: d?.provider || null, via: d?.via || null, missing: !d } }
+  const auto = await tidyAuto()
+  return { model: about(cfg.dictation?.tidyModel || auto), auto: about(auto), local: await tidyLocal() }
+}))
+app.post('/api/dictation/tidy/warm', wrap(async () => {
+  const model = await tidyModel()
+  if (model !== llm.ID || !(await llm.warm())) return { warming: false }
+  // Its instructions read once as it loads, so the first words to tidy don't wait for that either.
+  dictation.tidy({ text: 'Okay.', model, reply: (id, msgs, o) => chatModels.reply(id, msgs, o), ms: 60_000 }).catch(() => {})
+  return { warming: true }
+}))
+app.post('/api/dictation/tidy', async (req, res) => {
+  try {
+    const model = await tidyModel()
+    if (!model) return res.status(409).json({ error: 'There\'s no model to tidy with yet', code: 'no-model', local: await tidyLocal() })
+    const into = typeof req.body?.app === 'string' ? req.body.app.slice(0, 80) : null
+    // The local model still loading (started as the key went down, after a while unused): 2 s more.
+    const more = model === llm.ID && llm.loading() ? 2000 : 0
+    const out = await dictation.tidy({ text: req.body?.text, app: into, model, reply: (id, msgs, o) => chatModels.reply(id, msgs, o), more })
+    res.json({ ...out, model, by: tidyLabel(model) })
+  } catch (e) { res.status(e.status || 502).json({ error: e.message, code: e.code || 'failed' }) }
+})
 // Your dictations, kept on this computer (dictations.js): listed and searched, one whole, what
 // became of it, deleted (and put back, for Undo), all of them deleted, a recording kept and played,
 // an app's icon. An agent named by its pane only is named from the fleet.
@@ -2009,7 +2047,8 @@ app.get('/api/config', (req, res) => res.json({
   name: cfg.name || '', location: cfg.location?.label || null, hasMortgage: !!cfg.mortgage,
   runtime: { name: rt.name, ...rt.caps, attach: !!rt.attach, ...(rt.name === 'herdr' ? { session: herdrSession() } : { keep: cfg.keepAgents !== false }), ...(fellBack() ? { fellBack: fellBack() } : {}) }, platform: process.platform, mail: IS_MAC, calendar: IS_MAC,
   defaultAgent: cfg.defaultAgent || 'claude', chiefKind: cfg.chief?.kind || 'claude', setupDone: !!cfg.setupDone, simple: !!cfg.simple,
-  dictation: cfg.dictation || {}, // Settings › Voice › Dictation
+  // Settings › Voice › Dictation; Tidy what I say only while its trial is on.
+  dictation: trialOn('dictation-cleanup') ? cfg.dictation || {} : { ...(cfg.dictation || {}), tidy: false },
   alertSounds: cfg.alertSounds !== false, // the speaker in the top bar
   meetingKey: MEETING_KEYS.includes(cfg.meetings?.mentionKey) ? cfg.meetings.mentionKey : '@', // Settings › Meetings
   trials: Object.fromEntries(TRIALS.map((id) => [id, trialOn(id)])), // Settings › About & Updates › Trial Features
