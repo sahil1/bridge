@@ -64,7 +64,8 @@ try {
   ok(/counts\.boldbridge\.ai/.test(privacy) && /keeps only totals/.test(privacy) && /counts\/worker\.js/.test(privacy), 'PRIVACY.md names the server, says only totals are kept, and where its code is')
   const page = await worker.fetch(new Request('https://counts.boldbridge.ai/'), {})
   const pageText = await page.text()
-  ok(page.status === 200 && /usage counts/.test(pageText) && /telemetry-schema\.json/.test(pageText) && /PRIVACY\.md/.test(pageText), 'its own address shows what it is, what can be counted and the privacy policy', pageText.slice(0, 200))
+  ok(page.status === 200 && /usage stats server/.test(pageText) && /telemetry-schema\.json/.test(pageText) && /boldbridge\.ai\/privacy/.test(pageText), 'its own address shows what it is, what can be counted and the privacy policy', pageText.slice(0, 200))
+  ok(/unless you turn off/.test(pageText) && !/off unless/.test(pageText), 'and says the stats are on unless turned off, as the app does', pageText.slice(0, 300))
 
   // ---------- A report, kept as totals ----------
   {
@@ -245,7 +246,8 @@ try {
     const db = d1()
     const env = { DB: db }
     const page = await (await worker.fetch(new Request('https://crashes.boldbridge.ai/'), env)).text()
-    ok(/crash report server/.test(page) && /90 days/.test(page) && /PRIVACY\.md/.test(page), 'crashes.boldbridge.ai says what it is, how long it keeps reports, and the privacy policy')
+    ok(/crash report server/.test(page) && /90 days/.test(page) && /boldbridge\.ai\/privacy/.test(page), 'crashes.boldbridge.ai says what it is, how long it keeps reports, and the privacy policy')
+    ok(/unless you turn off/.test(page) && !/off unless/.test(page), 'and says crash reports go unless turned off, as the app does', page)
     const a = await answer(await crashPost(env, crash()))
     ok(a.status === 200 && a.body?.ok === true, 'a crash report is taken', a)
     // Made of parts, as the other tests do, so the repo's own check doesn't take them for real ones.

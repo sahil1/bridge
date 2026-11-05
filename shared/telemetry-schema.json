@@ -84,7 +84,7 @@
     "40+ hours"
   ],
   "crashReports": {
-    "about": "If you turn on Send crash reports (off unless you do), or click Send to Bold Bridge on a crash's report, Bridge AI sends that report: the same text Report on GitHub shows, with names, folders, emails and keys taken out on your computer, and taken out again on the server.",
+    "about": "Unless you turn off Send crash reports by themselves (at most five a day, the same crash once), and when you click Send to Bold Bridge on a crash's report, Bridge AI sends that report: the same text Report on GitHub shows, with names, folders, emails and keys taken out on your computer, and taken out again on the server.",
     "endpoint": "https://crashes.boldbridge.ai/v1/report",
     "report": {
       "schema": "this file's schema number",

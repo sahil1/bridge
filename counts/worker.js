@@ -1,6 +1,6 @@
-// Bridge AI's usage counts server (counts.boldbridge.ai): a Cloudflare Worker, run once by the
-// project, where a week's report goes from each Bridge AI that has Share anonymous usage counts
-// turned on (server/counts.js; off unless someone turns it on).
+// Bridge AI's usage stats server (counts.boldbridge.ai): a Cloudflare Worker, run once by the
+// project, where a week's report (and a day's, /v1/day) goes from each Bridge AI that has Share
+// anonymous usage counts on (server/counts.js; on unless someone turns it off).
 //
 // A report is checked against the public list (shared/telemetry-schema.json): a name that isn't on
 // it, or a value that isn't one of its ranges, is dropped, never kept. What's kept is only totals
@@ -251,25 +251,28 @@ async function takeCrash(req, env) {
 
 const CRASH_PAGE = (stop) => `Bridge AI's crash report server.
 
-If you turn on Send crash reports in Bridge AI (Settings > About & Updates; off unless you do), or
-click Send to Bold Bridge on a crash's report, that report comes here: the same text Report on
-GitHub shows, with names, folders, emails and keys taken out. Each is kept for 90 days, with no ID
-for you or your computer, and IP addresses aren't stored.
+When something in Bridge AI crashes, its report comes here unless you turn off Send crash reports
+by themselves (Settings > About & Updates; at most five a day, the same crash once), and when you
+click Send to Bold Bridge on a crash's report: the same text Report on GitHub shows, with names,
+folders, emails and keys taken out. Each is kept for 90 days, with no ID for you or your computer,
+and IP addresses aren't stored. DO_NOT_TRACK=1 or BRIDGE_TELEMETRY=0 keeps it off.
 ${stop ? `\nIt isn't collecting anything now: ${stop}\n` : ''}
 What a report has: https://github.com/sahil1/bridge/blob/main/shared/telemetry-schema.json
 This server's code: https://github.com/sahil1/bridge/tree/main/counts
-Privacy: https://github.com/sahil1/bridge/blob/main/PRIVACY.md
+Privacy: https://boldbridge.ai/privacy
 `
 
-const PAGE = (stop) => `Bridge AI's usage counts server.
+const PAGE = (stop) => `Bridge AI's usage stats server.
 
-If you turn on Share anonymous usage counts in Bridge AI (Settings > About & Updates; off unless you
-do), it sends a week's counts here once the week is over: numbers in ranges, with no name and no ID
-for you or your computer. Only weekly totals are kept, and IP addresses aren't stored.
+Bridge AI sends anonymous usage stats here unless you turn off Share anonymous usage counts
+(Settings > About & Updates): once a week, the week's counts as numbers in ranges, and once a day,
+the version it ran and whether something crashed. Neither has a name or an ID for you or your
+computer. Only totals are kept, and IP addresses aren't stored. DO_NOT_TRACK=1 or
+BRIDGE_TELEMETRY=0 keeps them off.
 ${stop ? `\nIt isn't collecting anything now: ${stop}\n` : ''}
-What can be counted: https://github.com/sahil1/bridge/blob/main/shared/telemetry-schema.json
+What can be sent: https://github.com/sahil1/bridge/blob/main/shared/telemetry-schema.json
 This server's code: https://github.com/sahil1/bridge/tree/main/counts
-Privacy: https://github.com/sahil1/bridge/blob/main/PRIVACY.md
+Privacy: https://boldbridge.ai/privacy
 `
 
 export default {
