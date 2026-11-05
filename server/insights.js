@@ -497,7 +497,7 @@ export async function run(who) {
     try {
       let r = null
       for (let tries = 0; !r && tries < 2; tries++) {
-        const out = await consult.ask({ who: w.id, prompt: ASK(digest(s)), via: w.via, env })
+        const out = await consult.ask({ who: w.id, prompt: ASK(digest(s)), via: w.via, env, feature: 'insights' })
         try { r = parseReport(out.text) } catch { if (tries) throw new Error(`${w.label} didn't answer with a report. Try again, or pick another agent to write it.`) }
       }
       writeJSON(REPORT(), { ...r, generatedAt: new Date().toISOString(), by: w.label, who: w.id, from: s.value.from, to: s.value.to, sessions: s.value.totals.sessions })

@@ -9,6 +9,8 @@ import { attachHandler } from './attach.js'
 import { makeGuard } from './guard.js'
 import { usage } from './usage.js'
 import { usageStats } from './usagestats.js'
+import { everywhere } from './usageall.js'
+import * as usagelog from './usagelog.js'
 import * as files from './files.js'
 import * as pr from './pr.js'
 import * as office from './office.js'
@@ -63,6 +65,7 @@ import * as labs from './labs.js'
 import * as meetMemory from './meetmemory.js'
 import * as voices from './voices.js'
 import * as meetWork from './meetwork.js'
+import * as meetInsights from './meetinsights.js'
 import * as speech from './speech.js'
 import * as projects from './projects.js'
 import * as calls from './calls.js'
@@ -334,7 +337,7 @@ const rootOf = async (pane) => {
 // ---------- Trial features ----------
 // Still being finished, so hidden until turned on in Settings › About & Updates › Trial Features
 // (trials: { studio: true } in the config; src/trials.js). Their routes answer only then.
-const TRIALS = ['studio', 'dictation-cleanup']
+const TRIALS = ['studio', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights']
 const trialOn = (id) => cfg.trials?.[id] === true
 const trialOff = (id, label) => (req, res, next) => (trialOn(id) ? next() : res.status(404).json({ error: `${label} is a trial feature. Turn it on in Settings › About & Updates › Trial Features.`, trial: id }))
 
@@ -1207,7 +1210,7 @@ app.post('/api/dictation/tidy/warm', wrap(async () => {
   const model = await tidyModel()
   if (model !== llm.ID || !(await llm.warm())) return { warming: false }
   // Its instructions read once as it loads, so the first words to tidy don't wait for that either.
-  dictation.tidy({ text: 'Okay.', model, reply: (id, msgs, o) => chatModels.reply(id, msgs, o), ms: 60_000 }).catch(() => {})
+  dictation.tidy({ text: 'Okay.', model, reply: (id, msgs, o) => chatModels.reply(id, msgs, { ...o, feature: 'dictation' }), ms: 60_000 }).catch(() => {})
   return { warming: true }
 }))
 app.post('/api/dictation/tidy', async (req, res) => {
@@ -1217,7 +1220,7 @@ app.post('/api/dictation/tidy', async (req, res) => {
     const into = typeof req.body?.app === 'string' ? req.body.app.slice(0, 80) : null
     // The local model still loading (started as the key went down, after a while unused): 2 s more.
     const more = model === llm.ID && llm.loading() ? 2000 : 0
-    const out = await dictation.tidy({ text: req.body?.text, app: into, model, reply: (id, msgs, o) => chatModels.reply(id, msgs, o), more })
+    const out = await dictation.tidy({ text: req.body?.text, app: into, model, reply: (id, msgs, o) => chatModels.reply(id, msgs, { ...o, feature: 'dictation' }), more })
     res.json({ ...out, model, by: tidyLabel(model) })
   } catch (e) { res.status(e.status || 502).json({ error: e.message, code: e.code || 'failed' }) }
 })
@@ -1242,7 +1245,9 @@ app.get('/api/dictations/:id/audio', async (req, res) => {
   try { res.type('audio/wav').sendFile(await dictations.audioFile(req.params.id), { dotfiles: 'allow' }) } catch (e) { res.status(e.status || 502).json({ error: e.message }) }
 })
 // Older than you keep them for: taken out a few minutes after the start, and every six hours.
+// The usage log's old months too (it also does so itself as a new month starts).
 setTimeout(() => dictations.tidy().catch(() => {}), 3 * 60 * 1000).unref()
+setTimeout(() => usagelog.tidy().catch(() => {}), 5 * 1000).unref()
 setInterval(() => dictations.tidy().catch(() => {}), 6 * 60 * 60 * 1000).unref()
 
 // ---------- Meeting notes (meetings.js; speech engines in speech.js) ----------
@@ -1323,6 +1328,16 @@ app.post('/api/meetings/bulk', wrap(async (req) => {
 app.get('/api/meetings/voices', wrap(() => voices.status()))
 app.post('/api/meetings/voices/forget', wrap(() => voices.forget()))
 app.post('/api/meetings/voices/download', wrap(async () => { if (!(await voices.status()).offered) throw new Error((await voices.status()).why || 'Telling voices apart can\'t run on this computer'); speech.fetchModel(speech.VOICE.id); return voices.status() }))
+// Meeting Insights and the people you meet (meetinsights.js), a trial feature: your meetings added
+// up by week and kind, and everyone you've met, with merging and splitting people by hand.
+meetInsights.configure(cfg)
+meetInsights.setHelpers({ calendar: (from, to) => calendar.range(from, to) })
+app.use(['/api/meetings/insights', '/api/meetings/people'], trialOff('meeting-insights', 'Meeting Insights'))
+app.get('/api/meetings/insights', wrap((req) => meetInsights.insights({ days: req.query.days === 'all' ? 'all' : Number(req.query.days) || 90, kind: String(req.query.kind || 'all') })))
+app.get('/api/meetings/people', wrap(() => meetInsights.list()))
+app.post('/api/meetings/people/merge', wrap((req) => meetInsights.mergePeople(String(req.body?.a || ''), String(req.body?.b || ''))))
+app.post('/api/meetings/people/split', wrap((req) => meetInsights.splitPerson(String(req.body?.id || ''), String(req.body?.key || ''))))
+app.get('/api/meetings/people/:pid', wrap((req) => meetInsights.person(String(req.params.pid))))
 // What happened since the last meeting in a series, with the same people or the same customer:
 // for a calendar event about to start (title, people), before there's a meeting for it.
 app.get('/api/meetings/since', wrap((req) => meetWork.since({ title: String(req.query.title || '').slice(0, 200), attendees: [].concat(req.query.people || []).flatMap((x) => String(x).split(',')).map((x) => x.trim()).filter(Boolean).slice(0, 50), start: String(req.query.start || '') || null })))
@@ -1655,6 +1670,9 @@ app.post('/api/calendar/prep', wrap(async (req) => {
   ].filter(Boolean).join('\n')
   return launchInSpace('Meetings', `Prep: ${e.title}`, prompt)
 }))
+// Every provider's tokens in one view (usageall.js), a trial feature. What it reads is noted
+// whether it's on or not (usagelog.js), so it has the days before it was turned on.
+app.get('/api/usage-everywhere', trialOff('usage-everywhere', 'Usage across every provider'), wrap((req) => everywhere({ days: req.query.days, force: !!req.query.refresh })))
 app.get('/api/usage/:provider/stats', wrap((req) => usageStats(req.params.provider, { force: !!req.query.refresh })))
 app.get('/api/usage/:provider', wrap((req) => usage(req.params.provider)))
 app.get('/api/market', wrap((req) => market(req.query.refresh === '1')))
@@ -2479,7 +2497,7 @@ app.post('/api/panes/:pane/terminal', wrap(async (req) => {
 // ---------- Consult another model (second opinions, live news, long documents) ----------
 consult.configure(cfg) // the model on this computer picked in Settings › Model Providers (localModel)
 app.get('/api/consult', wrap(() => consult.options()))
-app.post('/api/consult', wrap((req) => consult.ask({ ...(req.body || {}), env: undefined }, cfg)))
+app.post('/api/consult', wrap((req) => consult.ask({ ...(req.body || {}), env: undefined, feature: 'consult' }, cfg)))
 
 // ---------- Providers and MCP servers (settings) ----------
 // The models on this computer (Ollama, LM Studio), for Settings › Model Providers: how much each

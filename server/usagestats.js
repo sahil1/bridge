@@ -73,6 +73,9 @@ async function byAccount(kinds, force) {
   return rows
 }
 
+// One agent's history alone (the usage view across providers, usageall.js), kept as the Stats view's.
+export const history = (provider, { force = false } = {}) => one(provider, force)
+
 export async function usageStats(provider = 'all', { force = false } = {}) {
   if (provider === 'all') return combined(force)
   if (!['claude', 'codex'].includes(provider)) return { supported: false }

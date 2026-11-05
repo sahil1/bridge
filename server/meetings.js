@@ -1592,7 +1592,9 @@ export const setHelpers = (h) => { helpers = { ...helpers, ...h } }
 const RETRY_MS = Number(process.env.BRIDGE_MODEL_RETRY_MS || 3000)
 const passing = (e) => /ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|EPIPE|socket hang up|fetch failed|network|connection|overloaded|rate.?limit|too many requests|timed? ?out|\b(429|500|502|503|504|529)\b/i.test(String(e?.message || e))
 const isLocal = (id) => /^(ollama|lmstudio|bridge):/.test(String(id || ''))
-async function replyAny(use, msgs, o) {
+// o.feature: what's noted with what each answer took (usagelog.js): meeting notes unless said.
+async function replyAny(use, msgs, o0) {
+  const o = { feature: 'meetings', ...o0 }
   const once = async (id) => {
     for (let i = 0; ; i++) {
       try { return { ...(await helpers.reply(id, msgs, o)), model: id } } catch (e) {
@@ -1952,7 +1954,7 @@ export function assist(id, { now = false, model } = {}) {
       'Answer with one JSON object and nothing else: {"items": [{"kind": "question", "text": "...", "why": "..."}]}, or {"items": []}.',
     ].filter((x) => x !== '').join('\n')
     try {
-      const r = await jsonReply(use, [{ role: 'user', text: `${ask}\n\nTranscript so far:\n${recent || '(nothing yet)'}` }], { system: 'You quietly help someone during a live meeting with a few sharp, specific suggestions. You are brief and never make things up.' }, { schema: ASSIST_SCHEMA, check: assistOk, schemaFirst: true })
+      const r = await jsonReply(use, [{ role: 'user', text: `${ask}\n\nTranscript so far:\n${recent || '(nothing yet)'}` }], { system: 'You quietly help someone during a live meeting with a few sharp, specific suggestions. You are brief and never make things up.', feature: 'assist' }, { schema: ASSIST_SCHEMA, check: assistOk, schemaFirst: true })
       const items = [].concat(r.value?.items || [])
       const was = new Set(a.items.map((x) => x.text.toLowerCase()))
       const add = items.filter((x) => x && typeof x.text === 'string' && x.text.trim() && !was.has(x.text.trim().toLowerCase())).slice(0, 3)

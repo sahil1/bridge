@@ -24,9 +24,16 @@ meetings), the local model (Gemma 4 E2B, 2.8 GB) only when you click Download fo
 Model Providers (one download from Hugging Face; what you give it is read on your computer by
 llama.cpp, which runs there and answers only Bridge AI, and is never sent anywhere), a check on
 GitHub for a newer version, which you can turn off in Settings › About &
-Updates, and, unless you turn them off, usage stats and crash reports to the project (below). Its fonts and icons are part of the app, so nothing is fetched to draw
+Updates (and, when you choose to update, the new version from GitHub), and, unless you turn them off, usage stats and crash reports to the project (below). Its fonts and icons are part of the app, so nothing is fetched to draw
 it. On Windows and Linux, the desktop app's spell check gets the dictionaries for your languages
 once, from Google, as Chrome does; nothing you type goes with them (a Mac uses its own).
+
+When you install something from Bridge AI, it comes from where it's published, under that
+publisher's terms: Node.js from nodejs.org, a coding agent from its maker's own installer or from
+npm, Homebrew from GitHub, and on a Mac, Apple's developer tools from Apple. Links in Bridge AI (where
+to get a key, a provider's documentation, a pull request, a stock's quote) open in your browser;
+Bridge AI doesn't fetch them itself. Claude Code's own /insights report, which Bridge AI shows as
+Claude Code wrote it, may load its fonts from Google Fonts in that view.
 
 When something in Bridge AI crashes, it keeps a note of it on your computer (in `~/.bridge-ai`; the
 desktop app also keeps what its server printed, in `logs/server.log`) and offers **Report on
