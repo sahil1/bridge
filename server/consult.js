@@ -53,8 +53,9 @@ const flagRefused = (kind, stderr) => /unknown option|unexpected argument|unreco
 function readRun(kind, stdout, fromFile) {
   const out = String(stdout || '')
   if (kind === 'claude') {
+    // One line of JSON, after anything else it printed first; none (plain text): an older version.
     let j = null
-    try { j = JSON.parse(out.trim()) } catch { /* plain text: an older version, or another program */ }
+    try { j = JSON.parse(out.trim().split('\n').reverse().find((l) => /^\{.*"type":\s*"result"/.test(l.trim())) || '') } catch { /* not its result */ }
     if (!j || j.type !== 'result') return { text: fromFile ?? out, usage: null }
     const per = Object.entries(j.modelUsage || {})
     const sum = (k) => per.reduce((s, [, m]) => s + (Number(m[k]) || 0), 0)

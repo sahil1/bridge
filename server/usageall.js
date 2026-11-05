@@ -73,13 +73,13 @@ export async function everywhere({ days = 30, force = false } = {}) {
     if (l.route === 'cli') {
       const s = agent(l.model)
       if (!counted) s.uncounted++
-      const model = l.served ? modelName(l.served) : ''
+      let model = l.served ? modelName(l.served) : ''
       // What the agent's own logs have of it, moved to its feature (the biggest model that day when
-      // the run didn't say which).
+      // the run didn't say which, as Codex's doesn't).
       if (counted) {
         const mine = [...own.values()].filter((r) => r[1] === s.id && r[0] === date && r[4] > 0)
         const hit = mine.find((r) => r[2] === model) || mine.sort((a, b) => b[4] - a[4])[0]
-        if (hit) hit[4] -= Math.min(hit[4], tok)
+        if (hit) { hit[4] -= Math.min(hit[4], tok); model ||= hit[2] }
       }
       rows.push([date, s.id, model, l.feature, tok, l.in, l.out, null, null, 1])
       continue

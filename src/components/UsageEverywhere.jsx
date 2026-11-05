@@ -53,7 +53,8 @@ function summarize(data, pick) {
   const colorOf = (id) => SERIES[rank.indexOf(id)] || 'var(--series-other)'
   const dates = []
   for (let d = new Date(`${data.from}T12:00`); d.toLocaleDateString('en-CA') <= data.to; d = new Date(d.getTime() + 864e5)) dates.push(d.toLocaleDateString('en-CA'))
-  return { total, sources: order(sources), models: order(models).filter((m) => m.tokens || m.answers), features: order(features), days: dates.map((date) => ({ date, by: days.get(date) || {} })), colorOf }
+  const listed = [...data.sources].sort((a, b) => rank.indexOf(a.id) - rank.indexOf(b.id))
+  return { total, listed, sources: order(sources), models: order(models).filter((m) => m.tokens || m.answers), features: order(features), days: dates.map((date) => ({ date, by: days.get(date) || {} })), colorOf }
 }
 
 // Why a provider's numbers are missing or partial, in its words.
@@ -140,7 +141,7 @@ export default function UsageEverywhere() {
             <div className="ue-part">
               <h5>{t('By provider')}</h5>
               <ul className="us-list">
-                {data.sources.map((s) => {
+                {view.listed.map((s) => {
                   const x = view.sources.find((v) => v.k === s.id) || { tokens: 0, cost: 0, seconds: 0, answers: 0 }
                   const notes = notesFor(s)
                   return (
