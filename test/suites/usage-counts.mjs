@@ -191,13 +191,16 @@ try {
   }
 
   // ---------- In the app: Settings › About & Updates ----------
-  const about = async (kit, name) => {
+  // Settings › About & Updates, once what it shows has come: want, what that kit should show (the
+  // Usage counts section loads by itself, after the rest, so a slow computer shows it later).
+  const about = async (kit, want) => {
     const { ctx, p } = await page(b, kit.url)
     await p.locator('.topbar .search-btn').waitFor({ timeout: 15000 }).catch(() => {})
     await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'about' } })))
     await until(async () => /Report a problem/.test(await p.locator('.st-body').innerText().catch(() => '')), 8000)
-    await p.waitForTimeout(800)
-    return { ctx, p, text: await p.locator('.st-body').innerText().catch(() => ''), name }
+    if (want) await until(async () => want.test(await p.locator('.st-body').innerText().catch(() => '')), 10000)
+    else await p.waitForTimeout(1500)
+    return { ctx, p, text: await p.locator('.st-body').innerText().catch(() => '') }
   }
   {
     const { ctx, text } = await about(none)
@@ -205,12 +208,12 @@ try {
     await ctx.close()
   }
   {
-    const { ctx, text } = await about(dnt)
+    const { ctx, text } = await about(dnt, /Off on this computer/)
     ok(/Usage counts/.test(text) && /Off on this computer: DO_NOT_TRACK is set\./.test(text) && !/Share anonymous usage counts/.test(text), 'DO_NOT_TRACK: a line saying it\'s off, and no switch', text.slice(-400))
     await ctx.close()
   }
   {
-    const { ctx, p, text } = await about(later)
+    const { ctx, p, text } = await about(later, /Share anonymous usage counts/)
     const box = p.locator('label', { hasText: 'Share anonymous usage counts' }).locator('input')
     ok(/Usage counts/.test(text) && await box.count() === 1 && !(await box.isChecked()), 'with an endpoint: the switch, off', text.slice(-600))
     await p.locator('button', { hasText: 'See exactly what would be sent' }).click()
