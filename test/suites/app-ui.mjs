@@ -104,6 +104,7 @@ try {
   // An agent waiting on you, in the fleet the page is given (the live feed is turned away, so it stays).
   const waiting = (f) => ({ ...f, workspaces: [...(f.workspaces || []), { id: 'w-wait', label: 'acme-shop' }], tabs: [...(f.tabs || []), { tabId: 't-wait', workspaceId: 'w-wait', label: 'checkout', panes: [{ paneId: 'p-wait', agent: true, cwd: kit.home }] }],
     agents: [...(f.agents || []), { paneId: 'p-wait', tabId: 't-wait', workspaceId: 'w-wait', workspace: 'acme-shop', tab: 'checkout', title: 'Fix login redirect', kind: 'claude', status: 'blocked', cwd: kit.home }] })
+  const LONG_NAME = 'Design Team MacBook Pro 16-inch (2)'
   const busy = ({ setup = true, restart = true } = {}) => async (c) => {
     await noServiceWorker(c)
     await c.route(/\/api\/updates(\?|$)/, (r) => r.fulfill({ json: fakes.updates }))
@@ -112,7 +113,8 @@ try {
     await c.route(/\/api\/calendar(\?|$)/, (r) => r.fulfill({ json: fakes.calendar }))
     await c.route(/\/api\/weather(\?|$)/, (r) => r.fulfill({ json: fakes.weather }))
     await c.route(/\/api\/quota(\?|$)/, (r) => r.fulfill({ json: fakes.quota }))
-    await c.route(/\/api\/machines(\?|$)/, async (r) => { const real = await (await r.fetch()).json(); await r.fulfill({ json: { ...real, machines: [...real.machines, fakes.device] } }) })
+    // This computer has a long name (as a work computer often does), so every run sees the same bar.
+    await c.route(/\/api\/machines(\?|$)/, async (r) => { const real = await (await r.fetch()).json(); await r.fulfill({ json: { ...real, here: { ...real.here, name: LONG_NAME }, machines: [...real.machines, fakes.device] } }) })
     await c.route(/\/api\/fleet(\?|$)/, async (r) => r.fulfill({ json: waiting(await (await r.fetch()).json()) }))
     await c.route(/\/api\/events(\?|$)/, (r) => r.abort())
   }
@@ -291,6 +293,9 @@ try {
       const r = e.getBoundingClientRect()
       if (r.width < 1) continue
       if (r.right > br.right + 0.5 || r.left < br.left - 0.5) out.past.push(name(e))
+      // The computer's name is the one thing that may end in "…": its chip stops at 220px, and the
+      // whole name is there on hover.
+      if (e.matches('.mc-chip .mc-name') && e.title === e.textContent) continue
       if (e.clientWidth && e.scrollWidth > e.clientWidth + 1) out.squeezed.push(`${name(e)} ${e.scrollWidth}>${e.clientWidth}`)
     }
     const walk = document.createTreeWalker(bar, NodeFilter.SHOW_TEXT)
@@ -304,6 +309,7 @@ try {
     const shows = (s) => { const e = bar.querySelector(s); return !!e && e.getClientRects().length > 0 }
     out.has = { setup: shows('.x-setup .setup-chip'), restart: shows('.x-restart .update-chip'), update: shows('.x-update .update-chip'), meeting: shows('.meet-chip'), needs: shows('.needs-chip'), search: shows('.search-btn'), devices: shows('.mc-chip'), status: shows('.status-btn'), settings: shows('button[aria-label="Settings"]') }
     out.count = Number(bar.querySelector('.status-count')?.textContent || 0)
+    out.name = bar.querySelector('.mc-chip .mc-name')?.title
     out.fit = [...bar.classList].filter((c) => c.startsWith('fit-')).length
     return out
   })
@@ -322,6 +328,7 @@ try {
     const bar = await deskBar(p)
     ok(bar.over <= 0 && !bar.past.length, `${t}: nothing runs past the bar`, { over: bar.over, past: bar.past })
     ok(!bar.squeezed.length && !bar.broken.length, `${t}: nothing narrower than what it says, nothing on two lines`, { squeezed: bar.squeezed, broken: bar.broken })
+    ok(bar.name === LONG_NAME, `${t}: a long computer name is whole on hover`, { name: bar.name })
     ok(bar.has.needs && bar.has.search && bar.has.devices && bar.has.status && bar.has.settings, `${t}: what needs you, search, the computer, Status and Settings are always there`, bar.has)
     const folded = ['setup', 'restart', 'update'].filter((k) => !bar.has[k])
     ok(bar.count === folded.length, `${t}: the Status button counts the news that left the bar (${folded.join(', ') || 'none'})`, { count: bar.count, has: bar.has })
