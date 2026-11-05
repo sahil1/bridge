@@ -74,11 +74,11 @@ boldbridge.ai): every name under it belongs to the relay.
   npx wrangler@4.149.0 login
   node relay/build.js relay/dist/worker.js
   npx wrangler@4.149.0 deploy -c relay/wrangler.hosted.toml
-  openssl rand -base64 32 | npx wrangler@4.149.0 secret put STATS_TOKEN -c relay/wrangler.hosted.toml
+  openssl rand -base64 32    # the STATS_TOKEN: keep it in a password manager
+  npx wrangler@4.149.0 secret put STATS_TOKEN -c relay/wrangler.hosted.toml    # paste it
   ```
 
-  Keep the STATS_TOKEN somewhere safe (a password manager): it reads `/_relay/stats`. `PLAN_TOKEN`
-  waits until there's a paid plan (Plans).
+  The STATS_TOKEN reads `/_relay/stats`. `PLAN_TOKEN` waits until there's a paid plan (Plans).
 - [ ] **A billing alert** (Notifications › Add › Usage-based billing), so a surprise shows early.
 - [ ] **Check it**: `https://<domain>/` shows the page, `https://<domain>/_relay/health` answers
   `{"ok":true,...}`, `https://abc.<domain>/` is a 404, and
