@@ -24,6 +24,7 @@ const SUITES = [
   { name: 'meetings-limit', build: null, covers: [/^server\/(meetings|consult|accounts|chatmodels)\.js$/, /^test\/stand-ins\/claude\.cjs$/] },
   { name: 'perf', build: 'dist', browser: true, covers: [/^src\//, /^server\//, /^desktop\//] },
   { name: 'call-event', build: 'dist', browser: true, covers: [/^server\/(callevent|calls|calendar|meetings|index)\.js$/, /^src\/components\/(Console|Agenda|CalendarView)\.jsx$/, /^src\/components\/meetings\/(Meetings|recording|FloatCard)\.jsx$/, /^server\/runtime\/builtin\.js$/, /^native\/callwatch\.swift$/, /^test\/stand-ins\/claude\.cjs$/] },
+  { name: 'meeting-insights', build: 'dist', browser: true, covers: [/^server\/(meetinsights|meetings|meetwork|meetmemory|voices|calendar|index)\.js$/, /^src\/components\/meetings\/(insights|Meetings)\.jsx$/, /^src\/components\/meetings\/meetings\.css$/, /^src\/(trials|App)\.jsx?$/] },
   { name: 'meetings-ui', build: 'dist', browser: true, covers: [/^src\/components\/meetings\//, /^src\/components\/(Rail|Icon|FileExtras|layout)\.jsx$/, /^src\/(api|App|appearance)\.jsx?$/, /^server\/(meetings|meetwork|calendar|calls|index)\.js$/] },
   { name: 'rail-ui', build: 'dist', browser: true, covers: [/^src\/components\/(Rail|Palette|Tour|Console)\.jsx$/, /^src\/components\/meetings\/(RailMeetings|bulk)\.jsx$/, /^src\/App\.jsx$/, /^src\/styles\.css$/, /^server\/(meetings|threads)\.js$/] },
   { name: 'app-ui', build: 'dist', browser: true, covers: [/^src\//, /^index\.html$/, /^public\//, /^vite\.config\.js$/, /^server\/(index|attach|terminal|settings)\.js$/, /^server\/runtime\//] },
@@ -74,7 +75,9 @@ const SUITES = [
   { name: 'ios-app', build: null, covers: [/^mobile\/ios\//, /^scripts\/ios-release\.js$/, /^relay\/web\/index\.html$/, /^PRIVACY\.md$/, /^src\/components\/Settings\.jsx$/, /^src\/components\/settings\/Relay\.jsx$/] },
   { name: 'android-key', build: null, covers: [/^scripts\/(android-key\.sh|release\.js)$/, /^\.github\/workflows\/(android|android-apk|release|test)\.yml$/, /^mobile\/android\/(PLAY\.md|play\/)/, /^src\/components\/settings\/Relay\.jsx$/] },
   { name: 'site', build: null, browser: true, covers: [/^site\//, /^\.github\/workflows\/android\.yml$/, /^README\.md$/] },
-  { name: 'counts-server', build: null, covers: [/^counts\//, /^shared\/(telemetry-schema\.json|crashreport\.js|private\.js)$/, /^server\/(counts|crashes)\.js$/, /^PRIVACY\.md$/] },
+  { name: 'counts-server', build: null, covers: [/^counts\//, /^shared\/(telemetry-schema\.json|crashreport\.js|private\.js)$/, /^server\/(counts|crashes)\.js$/, /^PRIVACY\.md$/, /^src\/components\/settings\/UsageCounts\.jsx$/] },
+  { name: 'relay-hosted', build: null, covers: [/^relay\/(worker|build)\.js$/, /^relay\/(HOSTED\.md|wrangler\.hosted\.toml)$/, /^server\/hosted\.js$/, /^(PRIVACY|TERMS)\.md$/] },
+  { name: 'privacy-hosts', build: null, covers: [/^server\//, /^desktop\//, /^shared\//, /^PRIVACY\.md$/] },
 ]
 // A change to these runs everything.
 const EVERYTHING = [/^test\/(lib|stand-ins)\//, /^test\/run\.mjs$/, /^package(-lock)?\.json$/]

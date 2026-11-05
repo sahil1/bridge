@@ -96,9 +96,9 @@ export async function report(b = {}, { version, settings = {}, names = [] } = {}
 }
 
 // ---------- Sending crash reports (off unless turned on) ----------
-// The crash server, from the public list; BRIDGE_CRASHES_URL (tests) stands in for it.
-const SCHEMA = counts.SCHEMA.crashReports || {}
-const endpoint = () => (process.env.BRIDGE_CRASHES_URL ?? SCHEMA.endpoint ?? '').trim()
+// The crash server: the usage counts server's, wherever that's set (counts.where: the public list's,
+// or a fork's or a company's own); BRIDGE_CRASHES_URL (tests) stands in for it.
+const endpoint = () => counts.where(cfg).crashes
 const refused = () => (process.env.DO_NOT_TRACK === '1' ? 'DO_NOT_TRACK' : process.env.BRIDGE_TELEMETRY === '0' ? 'BRIDGE_TELEMETRY=0' : null)
 const SENT = path.join(DATA, 'telemetry', 'crashes')
 // Sent by themselves at most this many a day, and the same crash once a day.

@@ -28,8 +28,40 @@ export const SCHEMA = JSON.parse(fs.readFileSync(path.join(ROOT, 'shared', 'tele
 const NAMES = new Set(Object.keys(SCHEMA.counters))
 const DIR = dataFile('telemetry')
 const SENT = path.join(DIR, 'sent')
-// BRIDGE_COUNTS_URL (tests, or the project's own trial): where reports go instead of the schema's.
-const endpoint = () => (process.env.BRIDGE_COUNTS_URL ?? SCHEMA.endpoint ?? '').trim()
+// Where usage stats and crash reports go: one setting, for a fork or a company that runs the counts
+// server (counts/) on its own Cloudflare (counts/README.md, CONTRIBUTING.md › Running your own). The
+// first there is of:
+//   BRIDGE_STATS_URL in the environment;
+//   "stats": { "url": "https://…" } in the settings (config.json; in config.example.json, a build's own);
+//   the public list's endpoints (shared/telemetry-schema.json): the project's server.
+// It's the counts server's address: a week's report goes to <url>/v1/week, a day's to <url>/v1/day,
+// and crash reports to <url>/v1/report, or at a counts. name, to the same server's crashes. name
+// (as counts/wrangler.toml puts them). Empty: nothing goes anywhere, and neither is offered. https
+// only, but for this computer. However it's set, Settings › About & Updates says where they go, and
+// turning them off is one click. BRIDGE_COUNTS_URL and BRIDGE_CRASHES_URL (the tests) set one
+// report's address each, over all of it.
+export function where(c = cfg) {
+  const fromEnv = process.env.BRIDGE_STATS_URL
+  const [from, raw] = fromEnv != null ? ['BRIDGE_STATS_URL', fromEnv] : typeof c?.stats?.url === 'string' ? ['The stats.url setting', c.stats.url] : [null, null]
+  let week = SCHEMA.endpoint || ''
+  let crashes = SCHEMA.crashReports?.endpoint || ''
+  let problem = null
+  if (from) {
+    const base = raw.trim().replace(/\/+$/, '').replace(/\/v1\/(week|day|report)$/, '')
+    let u = null
+    try { u = base ? new URL(base) : null } catch { /* not a link */ }
+    week = crashes = ''
+    if (base && !(u?.protocol === 'https:' || (u?.protocol === 'http:' && /^(localhost|127\.0\.0\.1)$/.test(u.hostname)))) problem = `${from} isn't an https address (${raw.trim().slice(0, 80)}), so usage stats and crash reports go nowhere.`
+    else if (base) {
+      week = `${base}/v1/week`
+      crashes = u.hostname.startsWith('counts.') ? `${u.protocol}//crashes.${u.host.slice('counts.'.length)}${u.pathname.replace(/\/$/, '')}/v1/report` : `${base}/v1/report`
+    }
+  }
+  if (process.env.BRIDGE_COUNTS_URL != null) week = process.env.BRIDGE_COUNTS_URL.trim()
+  if (process.env.BRIDGE_CRASHES_URL != null) crashes = process.env.BRIDGE_CRASHES_URL.trim()
+  return { week, crashes, from: from || 'build', problem }
+}
+const endpoint = () => where().week
 // Someone who said no to all of it, for every program on this computer.
 const refused = () => (process.env.DO_NOT_TRACK === '1' || process.env.BRIDGE_TELEMETRY === '0' ? (process.env.DO_NOT_TRACK === '1' ? 'DO_NOT_TRACK' : 'BRIDGE_TELEMETRY=0') : null)
 
@@ -160,6 +192,7 @@ export async function status() {
   return {
     available: !!to && !refused(),
     refused: refused(),
+    problem: refused() ? null : where().problem, // the address set for them isn't one
     share: sharing(),
     notice: sharing() && !cfg?.counts?.noticed,
     to,
@@ -272,7 +305,7 @@ export function dayReport(d) {
   const c = d.about || {}
   return { schema: SCHEMA.schema, day: d.day, app: d.app, from: d.from || null, os: c.os, arch: c.arch, install: c.install, starts: bucket(d.starts), crashed: !!d.crashed, nonce: d.nonce }
 }
-const dayEndpoint = () => { try { return new URL('/v1/day', endpoint()).href } catch { return null } }
+const dayEndpoint = () => { const w = endpoint(); try { return /\/v1\/week$/.test(w) ? w.replace(/\/v1\/week$/, '/v1/day') : new URL('/v1/day', w).href } catch { return null } }
 // Each day that's over goes, once; one that can't is tried again, and forgotten after two weeks.
 async function sendDays() {
   const today = dayOf()

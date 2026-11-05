@@ -62,6 +62,22 @@ Write the app in English and wrap what people see in `t()` from `src/i18n/index.
 - **A new language:** the same two commands with its code (`ko`, `it`, `zh-TW`). The pack's file is all it takes: Settings › Appearance lists it, named in its own words, and Match this computer picks it.
 - **Keeping them tidy:** `node scripts/i18n.js check` shows how far each pack has got and fails on a broken placeholder. `node scripts/i18n.js prune` takes out strings the app no longer uses.
 
+## Running your own
+
+The servers Bridge AI talks to are optional and in this repo, so a fork or a company can run its
+own on its own Cloudflare account:
+
+- **Usage stats and crash reports**: deploy [counts/](counts/README.md#running-your-own), then set
+  `"stats": { "url": "https://counts.<your domain>" }` in `config.example.json` (your build's
+  default), in `~/.bridge-ai/config.json` (one computer), or as `BRIDGE_STATS_URL`. `"url": ""` sends
+  nothing. People still see what would be sent and turn it off in one click.
+- **The relay**: anyone can put one on their own Cloudflare account from Settings › Devices. One
+  for many computers is [relay/HOSTED.md](relay/HOSTED.md), switched on by `HOSTED_URL` in
+  `server/hosted.js`.
+- **The privacy policy**: `npm test -- privacy-hosts` fails when the code contacts a host PRIVACY.md
+  doesn't cover, so a new one goes in PRIVACY.md (by name, or under a category it states) in the
+  same change.
+
 ## Before you open a pull request
 
 - `npm run build` passes, and `npm test` (the tests for what you changed; `test/README.md` says what each covers). CI runs every test on macOS, Windows and Linux.

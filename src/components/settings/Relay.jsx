@@ -145,7 +145,13 @@ export default function Relay({ way, setWay, onOffer }) {
     )
   }
 
-  const limitText = st.limit?.why === 'day' ? `The hosted relay's daily limit for this computer is used up. It resets at ${new Date(st.limit.until).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' })}. For no limits, put the relay on your own Cloudflare account.` : st.limit?.why === 'off' ? st.limit.text : null
+  // What Bridge AI's relay said last: today's limit reached, a phone turned away for now, or it's
+  // switched off ('gone' has its own way back, below).
+  const limitText = st.limit?.why === 'day' ? `The hosted relay's daily limit for this computer is used up. It resets at ${new Date(st.limit.until).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' })}. For no limits, put the relay on your own Cloudflare account.` : st.limit && st.limit.why !== 'gone' ? st.limit.text : null
+  // ...and the plan this computer is on there, with its daily allowance.
+  const plan = st.hosted && st.plan?.dayMessages != null && st.plan?.dayMB != null ? st.plan : null
+  const planVars = plan && { plan: plan.plan, messages: plan.dayMessages.toLocaleString(locale()), mb: plan.dayMB.toLocaleString(locale()), time: new Date(plan.resets || Date.UTC(2000, 0, 1)).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' }) }
+  const planText = plan && (plan.plan === 'free' ? t('Free plan: up to {messages} messages or {mb} MB a day through the relay, starting again each day at {time}.', planVars) : t('{plan} plan: up to {messages} messages or {mb} MB a day through the relay, starting again each day at {time}.', planVars))
   // Phones (and a browser) paired here. Your other computers connect the same way, but they're
   // under Your devices, where unlinking one tells it too (removing it here left it half linked).
   const phones = (st.devices || []).filter((d) => d.kind !== 'computer')
@@ -165,6 +171,7 @@ export default function Relay({ way, setWay, onOffer }) {
             <code className="small">{st.url.replace(/^https:\/\//, '')}</code>
             {st.account && <span className="muted small">on {st.account}</span>}
           </div>
+          {planText && <p className="muted small">{planText}</p>}
           {st.busy && <p className="st-note"><Icon name="refresh" size={13} className="spin" /> {st.busy}</p>}
           {limitText && <p className="st-note warn"><Icon name="alert" size={13} /> {limitText} {st.limit.why === 'day' && <button type="button" className="link-btn" onClick={() => { setChanging(true); setWay?.('cloudflare') }}>Use your own Cloudflare</button>}</p>}
           {st.limit?.why === 'gone' && !busy && <div className="st-row"><button type="button" className="btn primary" onClick={useHosted}><Icon name="refresh" size={13} /> Set up Bridge AI's relay again</button><span className="muted small">Phones you paired pair again afterwards.</span></div>}

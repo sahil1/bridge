@@ -231,6 +231,8 @@ function App() {
   const conf = confPoll.data
   // Studio is a trial feature (src/trials.js): out of sight until it's turned on.
   const studioOn = conf?.trials?.studio === true
+  // Meeting Insights and People, tabs of Meetings (a trial feature): ⌘K opens Meetings at either.
+  const insightsOn = conf?.trials?.['meeting-insights'] === true
   const studioOnRef = useRef(studioOn)
   studioOnRef.current = studioOn
   // Onboarding stays up from the first sign that setup is needed until you close it, so its last
@@ -660,11 +662,14 @@ function App() {
   const [tabDrag, setTabDrag] = useState(null) // { id, over, after }
 
   const nextTheme = { system: 'dark', dark: 'light', light: 'system' }[theme]
+  const meetingsTab = (tab) => { store.set('cc-meet-tab', tab); window.dispatchEvent(new CustomEvent('bridge-meetings-tab', { detail: { tab } })); openAgent('view:meetings') }
   const paletteActions = [
     { id: 'a:home', label: t('New…'), icon: 'plus', keywords: 'new thread start build project agent chat what should we build', run: openNew },
     { id: 'a:new', label: t('New agent with all the options…'), icon: 'bot', keywords: 'launch start claude codex gemini copilot opencode project dialog compare account', run: () => setNewAgent({ mode: 'project' }) },
     { id: 'a:record', label: t('Record a meeting'), icon: 'mic', keywords: 'meeting notes transcript record call granola minutes', run: () => meetings?.start().catch(() => openAgent('view:meetings')) },
     { id: 'a:meetings', label: t('Meetings'), icon: 'mic', keywords: 'meeting notes transcripts summaries', run: () => openAgent('view:meetings') },
+    insightsOn && { id: 'a:insights', label: t('Meeting Insights'), icon: 'trend', keywords: 'meetings stats hours talk time share words week kind', run: () => meetingsTab('insights') },
+    insightsOn && { id: 'a:people', label: t('People You Meet'), icon: 'users', keywords: 'people attendees contacts who met meetings together', run: () => meetingsTab('people') },
     { id: 'a:dictations', label: t('Dictations'), icon: 'wave', keywords: 'dictation history voice said typed pasted wispr macwhisper', run: () => openAgent('view:dictations') },
     StudioHome && studioOn && { id: 'a:studio', label: t('Studio'), icon: 'layers', keywords: 'studio document word docx sheet excel xlsx spreadsheet deck slides powerpoint pptx pdf page html artifact markdown design pack', run: () => openAgent('view:studio') },
     WhiteboardsHome && { id: 'a:boards', label: t('Whiteboards'), icon: 'shapes', keywords: 'whiteboard board excalidraw draw sketch diagram flowchart architecture sequence org chart mermaid drawio canvas', run: () => openAgent('view:whiteboards') },

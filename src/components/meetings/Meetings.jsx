@@ -20,6 +20,7 @@ import './meetings.css'
 import SpeechSetup, { MeetingsSetup } from './SpeechSetup.jsx'
 import { ActionItems, SinceLastTime } from './work.jsx'
 import { useTrial } from '../../trials.js'
+import { InsightsView, PeopleView } from './insights.jsx'
 
 // The meeting pages: the list of meetings, and one meeting with your notes beside its transcript, the
 // summary, questions about it, and its action items for the Chief of Staff. The recording itself is
@@ -165,6 +166,7 @@ function useSearch(q, archived = false) {
 }
 
 const SETUP = 'cc-meet-setup'
+const HOME_TABS = [['list', 'mic', tx('Meetings')], ['insights', 'trend', tx('Insights')], ['people', 'users', tx('People')]]
 const ASK_ALL = [tx('What did I agree to do this week?'), tx("What's still open from this week?"), tx('Write my weekly update from these meetings')]
 const ASK_ONE = [tx('Draft a follow-up email'), tx('What did I agree to do?'), tx("What's still open?")]
 
@@ -183,6 +185,17 @@ export function MeetingsHome({ onOpen }) {
   useEffect(() => { if (data && place && (place === ':archived' ? !archivedN : !folders.includes(place))) setPlace('') }, [data, place, archivedN, folders.join('|')]) // eslint-disable-line react-hooks/exhaustive-deps
   const hits = useSearch(q, place === ':archived')
   const [memory, setMemory] = useState(false)
+  // Insights and People beside the list (a trial feature, insights.jsx). ⌘K opens either, through
+  // the tab kept here and bridge-meetings-tab for a list already open.
+  const insightsOn = useTrial('meeting-insights')
+  const [tabKept, setTab] = usePersisted('cc-meet-tab', 'list')
+  const tab = insightsOn && ['insights', 'people'].includes(tabKept) ? tabKept : 'list'
+  const [person, setPerson] = useState(null)
+  useEffect(() => {
+    const on = (e) => { setTab(e.detail?.tab || 'list'); setPerson(e.detail?.person || null) }
+    window.addEventListener('bridge-meetings-tab', on)
+    return () => window.removeEventListener('bridge-meetings-tab', on)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const list = all.filter((x) => (place === ':archived' ? x.archived : !x.archived && (!place || x.folder === place))).filter((x) => !q.trim() || !hits || hits.results.has(x.id))
   // What was asked for last, to carry on once the mic is allowed (MicFix).
   const last = useRef(null)
@@ -204,11 +217,21 @@ export function MeetingsHome({ onOpen }) {
           {data?.folder && <button type="button" className="path-chip" onClick={() => api('/meetings/folder/open', { method: 'POST' }).catch((e) => setErr(e))} onContextMenu={(e) => { e.preventDefault(); navigator.clipboard?.writeText(data.folder) }} title={`${t('Where notes are saved: {path}', { path: data.folder })}\n${t('Click to open it; right-click to copy')}`}><Icon name="folder" size={10} /> <span>{data.folder.replace(/^\/Users\/[^/]+/, '~')}</span></button>}
         </>
       )}>
+        {insightsOn && (
+          <div className="seg" role="tablist" aria-label={t('Show')}>
+            {HOME_TABS.map(([v, icon, label]) => (
+              <button key={v} type="button" role="tab" data-view={v} aria-selected={tab === v} className={tab === v ? 'on' : ''} onClick={() => { setTab(v); setPerson(null) }}><Icon name={icon} size={14} /><span>{t(label)}</span></button>
+            ))}
+          </div>
+        )}
         <button type="button" className="btn small" onClick={() => setMemory(true)} title={t("The names and terms in your meetings: how they're spelled, how they get misheard, who they are")}><Icon name="book" size={13} /> {t('Memory')}</button>
         {!m?.rec && <button type="button" className="btn small primary" onClick={() => go({})}><Icon name="mic" size={13} /> {t('Start recording')}</button>}
       </PaneHeader>
     <div className="mt-home">
       {memory && <MemoryPanel onClose={() => setMemory(false)} />}
+      {tab === 'insights' && <InsightsView onPerson={(pid) => { setTab('people'); setPerson(pid) }} />}
+      {tab === 'people' && <PeopleView onOpen={onOpen} person={person} setPerson={setPerson} />}
+      {tab === 'list' && <>
       {first ? <MeetingsSetup onDone={doneSetup} /> : <SpeechSetup recording={!!m?.rec} />}
       {next && !m?.rec && (
         <div className="mt-next">
@@ -272,6 +295,7 @@ export function MeetingsHome({ onOpen }) {
       <BulkBar selection={selection} list={all} />
       {menu.msg && <p className={`small ${menu.msg.error ? 'error-text' : 'muted'}`} role="status">{menu.msg.text}</p>}
       {menu.node}
+      </>}
     </div>
     </div>
   )

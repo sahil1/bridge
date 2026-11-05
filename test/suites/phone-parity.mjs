@@ -36,6 +36,8 @@ const PATHS = {
   'a:new': { phone: 'Agents › New › More options', shows: '.modal.new-agent' },
   'a:record': { phone: 'Meetings', shows: '.m-meetings button:has-text("Start recording")' },
   'a:meetings': { phone: 'Meetings', shows: '.m-meetings' },
+  'a:insights': { phone: 'Meetings › Insights', shows: '.m-meetings :is(.mi, .mi-empty)' },
+  'a:people': { phone: 'Meetings › People', shows: '.m-meetings .mi-people' },
   'a:dictations': { phone: 'More › Dictations', shows: '.dc-home, .dc-empty, .dc-body' },
   'a:boards': { phone: 'More › Whiteboards', shows: '.wb-home' },
   'a:studio': { phone: 'More › Studio', shows: '.sd-home' },
@@ -109,7 +111,7 @@ for (const [what, ids] of [['view', views], ['⌘K action', actions], ['Settings
   ok(!missing(ids).length, `every desktop ${what} has a way in on a phone, or says why not (add it to PATHS here)`, missing(ids))
 }
 
-const kit = await startKit('phone-parity', { config: { trials: { studio: true } } }) // Studio, a trial feature, on: its ways in are checked too
+const kit = await startKit('phone-parity', { config: { trials: { studio: true, 'meeting-insights': true } } }) // the trial features on: their ways in are checked too
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
 try {

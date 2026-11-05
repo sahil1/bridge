@@ -2,7 +2,7 @@
   "about": "Usage stats and crash reports: everything Bridge AI can count and send. Both are on unless you turn them off (Settings › About & Updates), DO_NOT_TRACK=1 or BRIDGE_TELEMETRY=0 keeps them off, and the first time they're on a card says so. server/counts.js sends only the names and values here, and a test fails if the code counts any other; server/crashes.js sends only the report described under crashReports. Adding to either is a change to this file, in public.",
   "schema": 1,
   "endpoint": "https://counts.boldbridge.ai/v1/week",
-  "endpointAbout": "Where a week's report goes (HTTPS POST, JSON): the project's usage counts server, counts/worker.js in this repo, which keeps only weekly totals. Empty: there's nowhere to send them, so sharing isn't offered.",
+  "endpointAbout": "Where a week's report goes (HTTPS POST, JSON): the project's usage counts server, counts/worker.js in this repo, which keeps only weekly totals. Empty: there's nowhere to send them, so sharing isn't offered. A fork or a company sends them, and crash reports, to its own server instead with one setting, stats.url (counts/README.md, Running your own).",
   "buckets": [
     "0",
     "1",

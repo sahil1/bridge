@@ -14,6 +14,11 @@
 // with the same crash elsewhere (line numbers and numbers don't split a group) and apart from a
 // different one; what isn't a crash report is turned away; the day's ceiling, the kill switch (the
 // app turns crash reports off and keeps the reason) and 90 days' keeping.
+//
+// Running your own: one setting (stats.url, or BRIDGE_STATS_URL) says where all of it goes, the
+// public list's address by default; an empty one sends nothing and one that isn't https says why. A
+// fork's server at one name of its own (workers.dev) gets the week's, the day's and crash reports
+// from the app's own send(), Settings names it, and turning them off is still one click.
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -311,6 +316,84 @@ try {
     await cr.auto({ kind: 'ui', where: 'Mail', message: 'z', stack: 'Error: z' })
     ok(settings.crashReports?.send === false && settings.crashReports?.stopped === 'Paused for a move.', 'when the server answers "stop", Bridge AI turns crash reports off and keeps the reason to show', settings.crashReports)
     srv.close()
+  }
+
+  // ---------- Running your own: where reports go ----------
+  // One setting, stats.url (config.json, config.example.json for a build) or BRIDGE_STATS_URL, says
+  // which counts server gets the week's, the day's and crash reports; the public list's is the default.
+  {
+    delete process.env.BRIDGE_COUNTS_URL
+    delete process.env.BRIDGE_CRASHES_URL
+    delete process.env.BRIDGE_STATS_URL
+    const c = await import('../../server/counts.js')
+    const cr = await import('../../server/crashes.js')
+    const w = (url) => c.where(url === undefined ? {} : { stats: { url } })
+    const own = w()
+    ok(own.week === SCHEMA.endpoint && own.crashes === SCHEMA.crashReports.endpoint && own.from === 'build', 'with nothing set, reports go where the public list says: the project\'s server', own)
+    const fork = w('https://counts.example.org')
+    ok(fork.week === 'https://counts.example.org/v1/week' && fork.crashes === 'https://crashes.example.org/v1/report', 'stats.url at a counts. name: the week\'s report there, crash reports at the same server\'s crashes. name', fork)
+    const one = w('https://stats.example.org/bridge/')
+    ok(one.week === 'https://stats.example.org/bridge/v1/week' && one.crashes === 'https://stats.example.org/bridge/v1/report', 'at any other address, both under it', one)
+    ok(w('https://counts.example.org/v1/week').week === 'https://counts.example.org/v1/week', 'and an address given with its /v1/week is taken as the server\'s')
+    const none = w('')
+    ok(none.week === '' && none.crashes === '' && !none.problem, 'an empty one turns sending off for everyone it applies to (a build\'s config.example.json, a company\'s config)', none)
+    const plain = w('http://counts.example.org')
+    ok(plain.week === '' && /isn't an https address/.test(plain.problem || ''), 'an address that isn\'t https goes nowhere, and says why', plain)
+    process.env.BRIDGE_STATS_URL = 'https://counts.example.net'
+    ok(w('https://counts.example.org').week === 'https://counts.example.net/v1/week' && w().from === 'BRIDGE_STATS_URL', 'BRIDGE_STATS_URL in the environment over the setting', w().week)
+    delete process.env.BRIDGE_STATS_URL
+
+    // End to end: a fork's server on one name of its own (workers.dev), the week's, the day's and a
+    // crash report all reaching it, Settings saying where, and turning it off still one click.
+    const db = d1()
+    const env = { DB: db }
+    const port = await freePort()
+    const hosts = []
+    const srv = http.createServer(async (req, res) => {
+      const chunks = []
+      for await (const ch of req) chunks.push(ch)
+      const r = await worker.fetch(new Request(`https://bridge-counts.a-fork.workers.dev${req.url}`, { method: req.method, headers: { 'content-type': req.headers['content-type'] || '' }, body: req.method === 'POST' ? Buffer.concat(chunks) : undefined }), env)
+      hosts.push(`${req.method} ${req.url} ${r.status}`)
+      res.writeHead(r.status, Object.fromEntries(r.headers))
+      res.end(Buffer.from(await r.arrayBuffer()))
+    }).listen(port, '127.0.0.1')
+    const home = process.env.BRIDGE_HOME
+    let settings = { counts: { share: true }, crashReports: { send: true }, stats: { url: `http://127.0.0.1:${port}/` } }
+    const save = (p) => { settings = { ...settings, ...p }; c.configure(settings); cr.configure(settings) }
+    c.configure(settings, { save })
+    cr.configure(settings, { save })
+    const st = await c.status()
+    const cst = await cr.sending()
+    ok(st.available && st.to === `127.0.0.1:${port}` && cst.available && cst.to === `127.0.0.1:${port}`, 'Settings says reports go to the address set, for usage stats and crash reports alike', { to: st.to, crashes: cst.to })
+    const week = weekOf(new Date(+now - 21 * 864e5))
+    fs.writeFileSync(path.join(home, 'telemetry', `${week}.json`), JSON.stringify({ week, counts: { 'agents.started.claude': 2 }, days: [2], nonce: 'e'.repeat(24), installAge: 'week 1', about: { app: '3.9.2', os: 'mac', arch: 'arm64', install: 'desktop', layout: 'simple', runtime: 'builtin', phone: 'none' } }))
+    const yesterday = c.dayOf(new Date(Date.now() - 864e5))
+    fs.mkdirSync(path.join(home, 'telemetry', 'days'), { recursive: true })
+    fs.writeFileSync(path.join(home, 'telemetry', 'days', `${yesterday}.json`), JSON.stringify({ day: yesterday, app: '3.9.2', from: null, starts: 1, crashed: false, nonce: 'f'.repeat(24), about: { os: 'mac', arch: 'arm64', install: 'desktop' } }))
+    const sent = await c.send()
+    const crash = await cr.send({ title: 'The window hit an error: q is null', details: 'TypeError: q is null\n    at Files (<app>/src/components/Files.jsx:3:1)' }, 'ui')
+    ok(sent.sent.includes(week) && sent.days.includes(yesterday) && crash.sent && rows(db, 'reports').some((x) => x.week === week) && rows(db, 'daily').length === 1 && rows(db, 'crash_reports').length === 1, 'a week\'s report, a day\'s and a crash report all reach the fork\'s server, at one name of its own', hosts)
+    ok(hosts.includes('POST /v1/week 200') && hosts.includes('POST /v1/day 200') && hosts.includes('POST /v1/report 200'), 'at /v1/week, /v1/day and /v1/report', hosts)
+    const offed = await c.setShare(false)
+    const crOff = await cr.setSending(false)
+    ok(offed.share === false && crOff.send === false && offed.to === `127.0.0.1:${port}`, 'and turning them off is the same one click, whatever the address', { offed: offed.share, crOff: crOff.send })
+    process.env.DO_NOT_TRACK = '1'
+    ok(!(await c.status()).available && (await c.status()).refused === 'DO_NOT_TRACK', 'DO_NOT_TRACK still keeps it off with a server of one\'s own')
+    delete process.env.DO_NOT_TRACK
+    settings = { ...settings, stats: { url: 'counts.example.org' } }
+    c.configure(settings)
+    const bad = await c.status()
+    ok(!bad.available && /isn't an https address/.test(bad.problem || ''), 'a stats.url that isn\'t an address: Settings says so, rather than the section just going', bad.problem)
+    srv.close()
+    const page = read('src', 'components', 'settings', 'UsageCounts.jsx')
+    ok(/s\?\.problem/.test(page) && /can\\'t be sent: \{why\}/.test(page), 'and Settings shows it')
+  }
+  // The counts server at a fork's one name takes crash reports too; the project's names stay apart.
+  {
+    const db = d1()
+    const r = await answer(await worker.fetch(new Request('https://bridge-counts.a-fork.workers.dev/v1/report', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ schema: 1, kind: 'ui', title: 'x', details: 'Error: x' }) }), { DB: db }))
+    const onCounts = await worker.fetch(new Request('https://counts.boldbridge.ai/v1/report', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }), { DB: db })
+    ok(r.status === 200 && rows(db, 'crash_reports').length === 1 && onCounts.status === 404, 'at one name of its own (workers.dev, a fork\'s) the counts server takes crash reports too; at counts. it still doesn\'t', [r.status, onCounts.status])
   }
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)

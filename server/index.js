@@ -65,6 +65,7 @@ import * as labs from './labs.js'
 import * as meetMemory from './meetmemory.js'
 import * as voices from './voices.js'
 import * as meetWork from './meetwork.js'
+import * as meetInsights from './meetinsights.js'
 import * as speech from './speech.js'
 import * as projects from './projects.js'
 import * as calls from './calls.js'
@@ -336,7 +337,7 @@ const rootOf = async (pane) => {
 // ---------- Trial features ----------
 // Still being finished, so hidden until turned on in Settings › About & Updates › Trial Features
 // (trials: { studio: true } in the config; src/trials.js). Their routes answer only then.
-const TRIALS = ['studio', 'usage-everywhere']
+const TRIALS = ['studio', 'usage-everywhere', 'meeting-insights']
 const trialOn = (id) => cfg.trials?.[id] === true
 const trialOff = (id, label) => (req, res, next) => (trialOn(id) ? next() : res.status(404).json({ error: `${label} is a trial feature. Turn it on in Settings › About & Updates › Trial Features.`, trial: id }))
 
@@ -1289,6 +1290,16 @@ app.post('/api/meetings/bulk', wrap(async (req) => {
 app.get('/api/meetings/voices', wrap(() => voices.status()))
 app.post('/api/meetings/voices/forget', wrap(() => voices.forget()))
 app.post('/api/meetings/voices/download', wrap(async () => { if (!(await voices.status()).offered) throw new Error((await voices.status()).why || 'Telling voices apart can\'t run on this computer'); speech.fetchModel(speech.VOICE.id); return voices.status() }))
+// Meeting Insights and the people you meet (meetinsights.js), a trial feature: your meetings added
+// up by week and kind, and everyone you've met, with merging and splitting people by hand.
+meetInsights.configure(cfg)
+meetInsights.setHelpers({ calendar: (from, to) => calendar.range(from, to) })
+app.use(['/api/meetings/insights', '/api/meetings/people'], trialOff('meeting-insights', 'Meeting Insights'))
+app.get('/api/meetings/insights', wrap((req) => meetInsights.insights({ days: req.query.days === 'all' ? 'all' : Number(req.query.days) || 90, kind: String(req.query.kind || 'all') })))
+app.get('/api/meetings/people', wrap(() => meetInsights.list()))
+app.post('/api/meetings/people/merge', wrap((req) => meetInsights.mergePeople(String(req.body?.a || ''), String(req.body?.b || ''))))
+app.post('/api/meetings/people/split', wrap((req) => meetInsights.splitPerson(String(req.body?.id || ''), String(req.body?.key || ''))))
+app.get('/api/meetings/people/:pid', wrap((req) => meetInsights.person(String(req.params.pid))))
 // What happened since the last meeting in a series, with the same people or the same customer:
 // for a calendar event about to start (title, people), before there's a meeting for it.
 app.get('/api/meetings/since', wrap((req) => meetWork.since({ title: String(req.query.title || '').slice(0, 200), attendees: [].concat(req.query.people || []).flatMap((x) => String(x).split(',')).map((x) => x.trim()).filter(Boolean).slice(0, 50), start: String(req.query.start || '') || null })))
