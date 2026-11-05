@@ -654,6 +654,32 @@ process.exit(1)`)
   ok(!!(await until(async () => (await card.evaluate(() => document.documentElement.getAttribute('data-theme'))) === 'dark' && (await bg()) < 200, 5000)), 'switched to dark in the main window: the open card follows', { theme: await card.evaluate(() => document.documentElement.getAttribute('data-theme')), bg: await bg() })
   await sleep(400) // its buttons' colours fade over
   await shot(card, `${tag}float-quiet-dark`)
+  // Open, with AI Assist's suggestion under the bar, on a short screen: the card asks for no more
+  // than the screen's height, and what's under the bar scrolls, down to its last button.
+  await api(`/meetings/${A.id}/assist`, { on: true })
+  fs.writeFileSync(path.join(kit.data, 'meetings', A.id, 'assist.json'), JSON.stringify({ items: [{ id: 'fc1', t: 30, kind: 'question', text: 'Ask who signs off on the pilot budget, and by when they need the numbers.', why: 'Just said', state: 'new' }], at: new Date().toISOString(), upTo: 0, error: null }))
+  const tall = await fl.ctx.newPage()
+  tall.on('pageerror', (e) => fl.errors.push(`short card: ${e.message}`))
+  await tall.addInitScript(() => { Object.defineProperty(screen, 'availHeight', { get: () => 400 }); window.__heights = []; window.bridgeApp = { floatSize: (w, h) => window.__heights.push(h) } })
+  await tall.setViewportSize({ width: 360, height: 900 })
+  await tall.goto(`${kit.url}/?float=1`)
+  await tall.waitForSelector('.float-card .fc-tip', { timeout: 10000 }).catch(() => {})
+  await tall.hover('.float-card .fc-head')
+  await tall.waitForSelector('.float-card .fc-more', { timeout: 5000 }).catch(() => {})
+  await sleep(500)
+  const fits = await tall.evaluate(async () => {
+    const more = document.querySelector('.float-card .fc-more')
+    const card = document.querySelector('.float-card').getBoundingClientRect()
+    if (!more) return { more: false }
+    const scrolls = more.scrollHeight > more.clientHeight + 1
+    more.scrollTop = more.scrollHeight
+    await new Promise((r) => setTimeout(r, 100))
+    const last = [...more.querySelectorAll('button')].pop()?.getBoundingClientRect()
+    const box = more.getBoundingClientRect()
+    return { more: true, scrolls, card: Math.round(card.height), asked: Math.max(...window.__heights), lastShown: !!last && last.bottom <= box.bottom + 1 && last.top >= box.top - 1, tip: !!document.querySelector('.float-card .fc-tip') }
+  })
+  ok(fits.more && fits.tip && fits.scrolls && fits.lastShown && fits.card + 24 <= 400 && fits.asked <= 400, 'open with AI Assist on a short screen: the card fits it, and what\'s under the bar scrolls to its last button', fits)
+  await api(`/meetings/${A.id}/assist`, { on: false })
   ok(fl.errors.length === 0, 'card: no page errors', fl.errors)
   await fl.ctx.close()
 } catch (e) {

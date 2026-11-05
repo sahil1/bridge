@@ -529,10 +529,14 @@ const QUIET_AFTER = Number(process.env.BRIDGE_CALL_QUIET_MS) || 30_000
 // Someone on the call is talking now, while it records: the stretch of speech in its sound (where it
 // started, a new number when someone starts again), or null.
 export const talking = (id) => { const s = live.get(id)?.sources.them; return s && Date.now() - (s.talkingAt || 0) < 2000 ? s.stretch : null }
+// On a call now: an app calls happen in (Teams, Zoom, a browser…) had the mic when it started or
+// since, and its call hasn't ended. A meeting in a room records what the computer plays too, in case
+// a call starts, but nothing playing there isn't a call macOS won't let Bridge AI hear.
+const onCall = (m) => (m.callApps || []).length > 0 && !m.callEnded
 export function callQuiet(id) {
   const l = live.get(id)
   const m = readJSON(path.join(DIR, id, 'meeting.json'))
-  return !!l && !!m && m.call === 'on' && Date.now() - Date.parse(m.startedAt) > QUIET_AFTER && !l.sources.them?.heard
+  return !!l && !!m && m.call === 'on' && onCall(m) && Date.now() - Date.parse(m.startedAt) > QUIET_AFTER && !l.sources.them?.heard
 }
 
 export function pause(id) { return patchMeta(id, { status: meta(id).status === 'recording' ? 'paused' : meta(id).status }) }
@@ -611,7 +615,7 @@ export function checkQuiet(now = Date.now()) {
       continue
     }
     // On a call whose sound isn't heard (macOS not letting Bridge AI hear it yet), quiet says nothing.
-    if (!said || cfg.meetings?.quietEnd === false || (m.call === 'on' && !l.sources.them?.heard)) continue
+    if (!said || cfg.meetings?.quietEnd === false || (m.call === 'on' && onCall(m) && !l.sources.them?.heard)) continue
     if (m.callEnded && (m.endWhy === 'call' || m.stopsAt)) continue
     const end = m.event?.end ? Date.parse(m.event.end) : null
     if (end && now <= end) continue
