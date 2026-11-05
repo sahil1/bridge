@@ -17,7 +17,7 @@
 // Everything fit the phone with every control a whole 40 px target.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, startRelay, checks, until, sleep, browser, page, shot, phoneFaults, noServiceWorker, OUT, TEST } from '../lib/harness.mjs'
+import { startKit, startRelay, checks, until, sleep, browser, page, shot, phoneFaults, noServiceWorker, changeAnswer, OUT, TEST } from '../lib/harness.mjs'
 
 const { ok, done } = checks('home')
 
@@ -144,7 +144,7 @@ try {
   const desk = async (c2) => {
     await noServiceWorker(c2)
     await c2.route(/\/api\/calendar(\?|$)/, (r) => r.fulfill({ json: cal }))
-    await c2.route(/\/api\/config(\?|$)/, async (r) => { const real = await (await r.fetch()).json(); await r.fulfill({ json: { ...real, calendar: true } }) })
+    await changeAnswer(c2, /\/api\/config(\?|$)/, (real) => ({ ...real, calendar: true }))
   }
   {
     const { ctx, p, errors } = await page(b, a.url, { mode: 'light', theme: 'sky', width: 1440, before: desk })

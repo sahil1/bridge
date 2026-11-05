@@ -19,7 +19,7 @@
 // your devices alone.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, checks, until, browser, page, shot, solid, noServiceWorker, IS_WIN } from '../lib/harness.mjs'
+import { startKit, checks, until, browser, page, shot, solid, noServiceWorker, changeAnswer, IS_WIN } from '../lib/harness.mjs'
 
 const { ok, done } = checks('app-ui')
 const kit = await startKit('app-ui')
@@ -109,13 +109,13 @@ try {
     await noServiceWorker(c)
     await c.route(/\/api\/updates(\?|$)/, (r) => r.fulfill({ json: fakes.updates }))
     await c.route(/\/api\/setup\/plan(\?|$)/, (r) => r.fulfill({ json: setup ? fakes.plan : { running: false, needsYou: null, run: null, items: [] } }))
-    await c.route(/\/api\/fix(\?|$)/, async (r) => { const real = await (await r.fetch()).json().catch(() => ({})); await r.fulfill({ json: { ...real, restart: restart ? [{ label: 'Full Disk Access' }] : [] } }) })
+    await changeAnswer(c, /\/api\/fix(\?|$)/, (real) => ({ ...real, restart: restart ? [{ label: 'Full Disk Access' }] : [] }), { orElse: {} })
     await c.route(/\/api\/calendar(\?|$)/, (r) => r.fulfill({ json: fakes.calendar }))
     await c.route(/\/api\/weather(\?|$)/, (r) => r.fulfill({ json: fakes.weather }))
     await c.route(/\/api\/quota(\?|$)/, (r) => r.fulfill({ json: fakes.quota }))
     // This computer has a long name (as a work computer often does), so every run sees the same bar.
-    await c.route(/\/api\/machines(\?|$)/, async (r) => { const real = await (await r.fetch()).json(); await r.fulfill({ json: { ...real, here: { ...real.here, name: LONG_NAME }, machines: [...real.machines, fakes.device] } }) })
-    await c.route(/\/api\/fleet(\?|$)/, async (r) => r.fulfill({ json: waiting(await (await r.fetch()).json()) }))
+    await changeAnswer(c, /\/api\/machines(\?|$)/, (real) => ({ ...real, here: { ...real.here, name: LONG_NAME }, machines: [...real.machines, fakes.device] }))
+    await changeAnswer(c, /\/api\/fleet(\?|$)/, waiting)
     await c.route(/\/api\/events(\?|$)/, (r) => r.abort())
   }
   // Every control in the bar: whole, on screen, on top where you'd tap it, and big enough to tap.
@@ -202,7 +202,7 @@ try {
     { id: 'test-studio', name: 'Studio Mac', relay: studio, os: 'mac', version: '3.6.0', state: 'linked', online: true, lastSeen: new Date().toISOString(), addedAt: new Date().toISOString(), code: null, error: null, counts: { blocked: 1 }, agents: [] },
     { id: 'test-win', name: 'Windows PC', relay: 'https://win-relay.example.com', os: 'windows', version: '3.6.0', state: 'linked', online: false, lastSeen: new Date(Date.now() - 3 * 36e5).toISOString(), addedAt: new Date().toISOString(), code: null, error: null, counts: null, agents: [] },
   ].concat(real.machines || [])
-  const withDevices = async (c) => { await noServiceWorker(c); await c.route(/\/api\/machines(\?|$)/, async (r) => { const real = await (await r.fetch()).json(); await r.fulfill({ json: { ...real, machines: linkedTo(real) } }) }) }
+  const withDevices = async (c) => { await noServiceWorker(c); await changeAnswer(c, /\/api\/machines(\?|$)/, (real) => ({ ...real, machines: linkedTo(real) })) }
   {
     // The phone app's page: Bridge AI inside it, the computers the phone is paired with, and the app
     // itself (what it's asked, as the relay page's own screens ask it).
@@ -278,7 +278,7 @@ try {
     await c.addInitScript(() => document.addEventListener('DOMContentLoaded', () => document.documentElement.classList.add('in-bridge-app', 'platform-darwin')))
     await c.route(/\/api\/calendar(\?|$)/, (r) => r.fulfill({ json: deskFakes.calendar }))
     await c.route(/\/api\/quota(\?|$)/, (r) => r.fulfill({ json: deskFakes.quota }))
-    await c.route(/\/api\/config(\?|$)/, async (r) => { const real = await (await r.fetch()).json(); await r.fulfill({ json: { ...real, runtime: { ...real.runtime, liveView: true } } }) })
+    await changeAnswer(c, /\/api\/config(\?|$)/, (real) => ({ ...real, runtime: { ...real.runtime, liveView: true } }))
   }
   // What's wrong with the bar: past its edge, narrower than what it says, a line of words broken in
   // two; and what's in it, as each news chip and the meeting are there or not.
