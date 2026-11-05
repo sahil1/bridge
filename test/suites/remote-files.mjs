@@ -377,7 +377,9 @@ try {
     await lp.locator('.pane-head button', { hasText: 'Save' }).click()
     const there = await until(() => /Edited on the laptop\./.test(fs.readFileSync(path.join(work, 'draft.md'), 'utf8')), 10000)
     ok(!!there && /^# Draft/.test(fs.readFileSync(path.join(work, 'draft.md'), 'utf8')), 'typed and saved on Laptop: the file on Studio changes, still Markdown', fs.readFileSync(path.join(work, 'draft.md'), 'utf8'))
-    const vs = await fetch(`${M}/api/studio/versions?root=${enc(pane)}&path=draft.md`).then((r) => r.json())
+    // The save is kept as your version just after the file is written, so that's waited for too.
+    const versions = () => fetch(`${M}/api/studio/versions?root=${enc(pane)}&path=draft.md`).then((r) => r.json())
+    const vs = (await until(async () => { const v = await versions(); return v.versions?.[0]?.by === 'you' && v }, 10000)) || await versions()
     const first = vs.versions?.find((v) => v.by === 'opened')
     const was = first && await fetch(`${M}/api/studio/version?root=${enc(pane)}&path=draft.md&id=${enc(first.id)}`).then((r) => r.text())
     ok(vs.versions?.[0]?.by === 'you' && was === '# Draft\n\nFrom the studio.\n', 'and what it was is a version on Studio, read back through the link', vs.versions)

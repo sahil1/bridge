@@ -145,7 +145,9 @@ try {
   await p.locator('.pane-head button', { hasText: 'Save' }).click()
   ok(!!(await until(() => fs.readFileSync(path.join(dir, 'notes.md'), 'utf8').includes('Edited here.'), 8000)) && /^# Notes/.test(fs.readFileSync(path.join(dir, 'notes.md'), 'utf8')), 'typed and saved: still Markdown, with the change', fs.readFileSync(path.join(dir, 'notes.md'), 'utf8'))
   await p.locator('button[aria-label="Versions"]').click()
-  ok(!!(await until(async () => (await p.locator('.sd-versions li').count()) >= 5, 5000)) && /You/.test(await p.locator('.sd-versions li').first().innerText()), 'Versions: yours on top, the agent\'s and the others under it', await p.locator('.sd-versions').innerText().catch(() => ''))
+  // The save is kept as your version just after the file is written, so the list can show the
+  // version before it for a moment.
+  ok(!!(await until(async () => (await p.locator('.sd-versions li').count()) >= 5 && /You/.test(await p.locator('.sd-versions li').first().innerText()), 5000)), 'Versions: yours on top, the agent\'s and the others under it', await p.locator('.sd-versions').innerText().catch(() => ''))
   // Compare: an older version against the file as it is now.
   await p.locator('.sd-versions li').nth(1).locator('button', { hasText: 'Compare' }).click()
   ok(!!(await until(async () => (await p.locator('.sd-diff .add').count()) > 0 && /Edited here/.test(await p.locator('.sd-diff .add').allInnerTexts().then((x) => x.join(' ')).catch(() => '')), 8000)), "Compare: what's new since that version, marked", { text: await p.locator('.sd-compare').innerText().catch(() => ''), errors: w.errors })
