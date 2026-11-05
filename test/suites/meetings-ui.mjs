@@ -15,7 +15,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { startKit, startModel, checks, until, sleep, browser, page, shot, solid, noServiceWorker, TEST, IS_MAC } from '../lib/harness.mjs'
+import { startKit, startModel, checks, until, sleep, browser, page, shot, solid, noServiceWorker, changeAnswer, TEST, IS_MAC } from '../lib/harness.mjs'
 
 const { ok, skip, done } = checks('meetings-ui')
 const kit = await startKit('meetings-ui')
@@ -526,7 +526,7 @@ process.exit(1)`)
   const nv = await page(b, kit.url, { store: { 'cc-rail-meetings': true }, before: async (c) => {
     await noServiceWorker(c)
     await c.route(/\/api\/meetings\/voices(\?|$)/, (r) => { askedVoices++; return r.fulfill({ json: { offered: false, why: 'sherpa-onnx needs glibc 2.32 or later', live: false, have: false } }) })
-    await c.route(/\/api\/speech(\?|$)/, async (r) => { const res = await r.fetch(); const j = await res.json(); await r.fulfill({ response: res, json: { ...j, voices: { offered: false } } }) })
+    await changeAnswer(c, /\/api\/speech(\?|$)/, (real) => ({ ...real, voices: { offered: false } }))
   } })
   await nv.p.waitForSelector('.rail-nav-row', { timeout: 15000 }).catch(() => {})
   await until(async () => { await nv.p.evaluate((id) => window.dispatchEvent(new CustomEvent('bridge-open-meeting', { detail: { id } })), V2.id); return nv.p.locator('.mt-title').isVisible() }, 10000, 1000)

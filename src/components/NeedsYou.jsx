@@ -16,7 +16,7 @@ import './needsyou.css'
 // answer goes to the device the agent is on, at /m/<id>/ through this one (server/machines.js).
 
 const at = (machine) => (machine ? `/m/${encodeURIComponent(machine)}` : '')
-async function onDevice(machine, path, body) {
+export async function onDevice(machine, path, body) {
   const res = await fetch(`${at(machine)}/api${path}`, { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), { status: res.status })
@@ -104,7 +104,8 @@ function LiveQuestion({ it, onDone }) {
   return <div className="ny-live"><Question q={q} send={send} busy={busy} /></div>
 }
 
-function Item({ it, focused, onOpen, onGone, setNote }) {
+// One thing waiting, answered right there (the inbox, and Home: NeedsHome.jsx).
+export function NeedsItem({ it, focused, onOpen, onGone, setNote }) {
   const [mode, setMode] = useState(focused && isAsk(it) && !it.answers?.length && !it.old ? 'live' : null) // 'reply' | 'live'
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
@@ -235,7 +236,7 @@ export function NeedsYouPanel({ data, refresh, phone = false, focus = null, onCl
   }
   const focusId = focus?.paneId ? all.find((i) => i.paneId === focus.paneId && (i.machine || null) === (focus.machine || null))?.id : null
   const waiting = all.filter((i) => isAsk(i) && i.online).length
-  const list = (rows) => rows.map((it) => <Item key={it.id} it={it} focused={it.id === focusId} onOpen={onOpen} onGone={onGone} setNote={setNote} />)
+  const list = (rows) => rows.map((it) => <NeedsItem key={it.id} it={it} focused={it.id === focusId} onOpen={onOpen} onGone={onGone} setNote={setNote} />)
   return (
     <div className={`ny-panel ${phone ? 'phone' : ''}`} ref={box} role="dialog" aria-label={t('Needs you')}>
       <header className="ny-head">

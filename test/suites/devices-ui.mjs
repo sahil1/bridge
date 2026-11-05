@@ -12,7 +12,7 @@
 // from Studio (on Desk itself), Studio renamed, and both back to their own names.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, startRelay, checks, until, browser, page, shot, noServiceWorker, TEST } from '../lib/harness.mjs'
+import { startKit, startRelay, checks, until, browser, page, shot, noServiceWorker, changeAnswer, TEST } from '../lib/harness.mjs'
 
 const { ok, done } = checks('devices-ui')
 const relays = []
@@ -46,7 +46,7 @@ try {
     mode: 'light', theme: 'sky',
     before: async (cx) => {
       await noServiceWorker(cx)
-      await cx.route(/\/api\/machines(\?|$)/, async (r) => { const real = await (await r.fetch()).json(); await r.fulfill({ json: { ...real, machines: [...real.machines, laptop()] } }) })
+      await changeAnswer(cx, /\/api\/machines(\?|$)/, (real) => ({ ...real, machines: [...real.machines, laptop()] }))
     },
   })
   const fp = fresh.p

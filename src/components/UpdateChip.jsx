@@ -23,8 +23,9 @@ export const overdue = (u) => !!u?.available && !!u.publishedAt && Date.now() - 
 export const installUpdate = (u) => api('/updates/install', { method: 'POST', body: u?.forApp ? { app: true } : {} })
 
 // The top bar's Update button: what's new and Update now, without going to Settings. A version this
-// Mac's macOS can't open (u.held) is said once instead, until OK.
-export default function UpdateChip({ u, onDetails, onDone }) {
+// Mac's macOS can't open (u.held) is said once instead, until OK. row: a row of the Status menu
+// (StatusMenu.jsx), its details opening under it.
+export default function UpdateChip({ u, onDetails, onDone, row = false }) {
   const [open, setOpen] = useState(false)
   const [state, setState] = useState(null) // installing | { error }
   const ref = useRef(null)
@@ -51,9 +52,11 @@ export default function UpdateChip({ u, onDetails, onDone }) {
   })
   if (u.held) return (
     <div className="update-wrap" ref={ref}>
-      <button className="top-chip" onClick={() => setOpen((o) => !o)} aria-expanded={open} title={t('Bridge AI {version} needs macOS {macos}', { version: u.latest, macos: u.held.macos })}>
-        <Icon name="info" size={13} /><span className="hide-sm">{t('Newer version')}</span>
-      </button>
+      {row
+        ? <button type="button" className="status-row" onClick={() => setOpen((o) => !o)} aria-expanded={open}><Icon name="info" size={14} /><span className="status-row-text">{t('Bridge AI {version} needs macOS {macos}', { version: u.latest, macos: u.held.macos })}</span><Icon name="chevron" size={13} className="status-go" /></button>
+        : <button className="top-chip" onClick={() => setOpen((o) => !o)} aria-expanded={open} title={t('Bridge AI {version} needs macOS {macos}', { version: u.latest, macos: u.held.macos })}>
+          <Icon name="info" size={13} /><span className="hide-sm">{t('Newer version')}</span>
+        </button>}
       {open && (
         <div className="update-pop" role="dialog" aria-label={t('Newer version')}>
           <div className="update-head"><b>Bridge AI {u.latest}</b><span className="muted small">{t('you have {version}', { version: u.current })}</span></div>
@@ -65,9 +68,11 @@ export default function UpdateChip({ u, onDetails, onDone }) {
   )
   return (
     <div className="update-wrap" ref={ref}>
-      <button className={`top-chip update-chip${loud ? ' loud' : ''}`} onClick={() => setOpen((o) => !o)} aria-expanded={open} title={t('Bridge AI {latest} is available (you have {current})', { latest: u.latest, current: u.current })}>
-        <Icon name="download" size={13} /><span className={loud ? '' : 'hide-sm'}>{loud ? t('Update to {version}', { version: u.latest }) : t('Update')}</span>
-      </button>
+      {row
+        ? <button type="button" className="status-row update-row" onClick={() => setOpen((o) => !o)} aria-expanded={open} title={t('Bridge AI {latest} is available (you have {current})', { latest: u.latest, current: u.current })}><Icon name="download" size={14} /><span className="status-row-text">{t('Bridge AI {version} is available', { version: u.latest })}</span><Icon name="chevron" size={13} className="status-go" /></button>
+        : <button className={`top-chip update-chip${loud ? ' loud' : ''}`} onClick={() => setOpen((o) => !o)} aria-expanded={open} title={t('Bridge AI {latest} is available (you have {current})', { latest: u.latest, current: u.current })}>
+          <Icon name="download" size={13} /><span className={loud ? '' : 'hide-sm'}>{loud ? t('Update to {version}', { version: u.latest }) : t('Update')}</span>
+        </button>}
       {open && (
         <div className="update-pop" role="dialog" aria-label={t('Update Bridge AI')}>
           <div className="update-head"><b>Bridge AI {u.latest}</b><span className="muted small">{t('you have {version}', { version: u.current })}</span></div>

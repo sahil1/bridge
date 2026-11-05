@@ -61,9 +61,10 @@ try {
     await m2.waitFor({ timeout: 5000 }).catch(() => {})
     ok(/It's working\. Another account can pick it up once it's done/.test(await m2.innerText().catch(() => '')) && await m2.locator('.acct-item', { hasText: 'Work' }).isDisabled(), `${t}: while it's working the other account waits, and says why`)
     await p.keyboard.press('Escape')
-    // The top bar's menu is for new agents.
-    await p.locator('.usage-chip').first().click()
-    const top = await p.locator('.acct-pop.top').innerText().catch(() => '')
+    // The top bar's menu is for new agents (from usage, in its Status menu).
+    await p.locator('.topbar .status-btn').click()
+    await p.locator('.status-pop .usage-chip').click()
+    const top = await until(() => p.locator('.acct-pop.top').innerText().catch(() => ''), 5000) || ''
     ok(/New Claude agents start on/i.test(top), `${t}: the top bar's account menu says it's for new agents`, top)
     await p.keyboard.press('Escape')
     ok(errors.length === 0, `${t}: no page errors`, errors)

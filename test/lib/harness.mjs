@@ -291,6 +291,17 @@ export async function page(b, url, { mode = 'light', theme = 'sky', width = 1440
 }
 // No service worker, as in the desktop app: WebKit's test build doesn't route what a page fetches
 // through one, so a test that stands in for an API with ctx.route needs this (in its before).
+// Answers a request with the real answer, changed by `change`. A page can close while the real
+// answer is on its way (as a test ends), and then there's nothing left to answer; anything else that
+// goes wrong lets the real answer through unchanged, for the test's own checks to see. `orElse` stands
+// in for a real answer that isn't JSON.
+export const changeAnswer = (ctx, url, change, { orElse } = {}) => ctx.route(url, async (r) => {
+  try {
+    const res = await r.fetch()
+    const real = await res.json().catch((e) => { if (orElse === undefined) throw e; return orElse })
+    await r.fulfill({ json: await change(real) })
+  } catch { await r.continue().catch(() => {}) }
+})
 export const noServiceWorker = (ctx) => ctx.addInitScript(() => { try { delete Navigator.prototype.serviceWorker } catch { /* none */ } })
 export const shot = (p, name, o = {}) => { fs.mkdirSync(path.join(OUT, 'shots'), { recursive: true }); return p.screenshot({ path: path.join(OUT, 'shots', `${name}.png`), ...o }) }
 // What's wrong on a phone's screen, within the first of scopes (CSS selectors) that's there: the

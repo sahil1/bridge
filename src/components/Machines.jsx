@@ -130,7 +130,7 @@ export function MachineMenu({ phone = false }) {
     <div className="mc-wrap" ref={ref}>
       <button type="button" className={`mc-chip ${machineId ? 'remote' : ''}`} onClick={() => setOpen(!open)} aria-haspopup="menu" aria-expanded={open} title={t('Your devices')}>
         <Icon name="laptop" size={phone ? 16 : 13} />
-        <span className="mc-name">{cur ? cur.name : data.here.name}</span>
+        <span className="mc-name" title={cur ? cur.name : data.here.name}>{cur ? cur.name : data.here.name}</span>
         {needs > 0 && <span className="mc-needs" title={needs === 1 ? t('{n} on your other devices needs you', { n: needs }) : t('{n} on your other devices need you', { n: needs })}>{needs}</span>}
         <Icon name="down" size={11} />
       </button>

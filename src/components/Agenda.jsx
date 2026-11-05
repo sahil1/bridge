@@ -194,7 +194,11 @@ export function Agenda() {
 
 // Top-bar chip: the meeting you're in, or the next one with a countdown. The one recording
 // (`recording`, its title) is in the recording's own pill already: then the next one, if any.
-export function NextMeetingChip({ onClick, recording = null }) {
+// A title kept short in words rather than cut by the chip it's in (the whole of it is in the tooltip).
+export const shortTitle = (s, n = 24) => { const x = String(s || '').trim(); return x.length > n ? `${x.slice(0, n - 1).trimEnd()}…` : x }
+
+// The top bar's meeting: the one on now, else the next one today. row: a row of the Status menu.
+export function NextMeetingChip({ onClick, recording = null, row = false }) {
   const { data } = useCalendar()
   const now = useNow()
   if (!data) return null
@@ -203,11 +207,20 @@ export function NextMeetingChip({ onClick, recording = null }) {
   const next = today.upcoming[0]
   if (!cur && !next) return null
   const soon = next && new Date(next.start) - now < 10 * 6e4
-  return (
-    <button className={`top-chip meet-chip ${cur ? 'live' : soon ? 'soon' : ''}`} onClick={onClick} title={cur ? t('{title} until {time}', { title: cur.title, time: fmt(cur.end) }) : t('{title} at {time}', { title: next.title, time: fmt(next.start) })}>
+  const title = cur ? t('{title} until {time}', { title: cur.title, time: fmt(cur.end) }) : t('{title} at {time}', { title: next.title, time: fmt(next.start) })
+  if (row) return (
+    <button type="button" className="status-row meet-row" onClick={onClick} title={title}>
       <Icon name={cur ? 'video' : 'calendar'} size={14} />
-      {cur ? <span><b>{t('Now')}</b> <span className="meet-title">{cur.title}</span> <small>{t('{time} left', { time: dur(new Date(cur.end) - now) })}</small></span>
-        : <span><b>{fmt(next.start)}</b> <span className="meet-title">{next.title}</span> <small>{t('in {time}', { time: dur(new Date(next.start) - now) })}</small></span>}
+      <span className="status-row-text">{cur ? <><b>{t('Now')}</b> {shortTitle(cur.title, 34)} <small>{t('{time} left', { time: dur(new Date(cur.end) - now) })}</small></>
+        : <><b>{fmt(next.start)}</b> {shortTitle(next.title, 34)} <small>{t('in {time}', { time: dur(new Date(next.start) - now) })}</small></>}</span>
+      <Icon name="chevron" size={13} className="status-go" />
+    </button>
+  )
+  return (
+    <button className={`top-chip meet-chip ${cur ? 'live' : soon ? 'soon' : ''}`} onClick={onClick} title={title}>
+      <Icon name={cur ? 'video' : 'calendar'} size={14} />
+      {cur ? <span><b>{t('Now')}</b> <span className="meet-title">{shortTitle(cur.title)}</span> <small>{t('{time} left', { time: dur(new Date(cur.end) - now) })}</small></span>
+        : <span><b>{fmt(next.start)}</b> <span className="meet-title">{shortTitle(next.title)}</span> <small>{t('in {time}', { time: dur(new Date(next.start) - now) })}</small></span>}
     </button>
   )
 }

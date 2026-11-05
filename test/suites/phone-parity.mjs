@@ -15,7 +15,8 @@
 // desktop it's as it was: General, with the sections down the left.
 //
 // A path is what's tapped, from the tab bar: a tab (Chief, Agents, Meetings, Today, More), then the
-// buttons in it by name. "Search › x" types x in the top bar's search, which must offer it (for
+// buttons in it by name. A trial feature's paths (trial: its id) are followed with it on; with Home
+// on, Home is the first tab and Today is in More, which is checked then too. "Search › x" types x in the top bar's search, which must offer it (for
 // actions rather than places); "Settings › x" is the top bar's Settings, then its section x.
 import fs from 'node:fs'
 import path from 'node:path'
@@ -25,6 +26,8 @@ const { ok, done } = checks('phone-parity')
 
 const PATHS = {
   // The views in tabs (App.jsx VIEWS).
+  'view:home': { phone: 'Home', shows: '.hm', trial: 'home' },
+  'view:everything': { phone: 'Home › See everything', shows: '.ey', trial: 'home' },
   'view:new': { phone: 'Agents › New', shows: '.home-title' },
   'view:meetings': { phone: 'Meetings', shows: '.m-meetings' },
   'view:dictations': { phone: 'Meetings › Dictations', shows: '.dc-home, .dc-empty, .dc-body' },
@@ -32,6 +35,8 @@ const PATHS = {
   'view:studio': { phone: 'More › Studio', shows: '.sd-home' },
   'view:map': { phone: 'Agents › Map', shows: '.am' },
   // ⌘K's actions (App.jsx paletteActions).
+  'a:homeview': { phone: 'Home', shows: '.hm', trial: 'home' },
+  'a:everything': { phone: 'Home › See everything', shows: '.ey', trial: 'home' },
   'a:home': { phone: 'Agents › New', shows: '.home-title' },
   'a:new': { phone: 'Agents › New › More options', shows: '.modal.new-agent' },
   'a:record': { phone: 'Meetings', shows: '.m-meetings button:has-text("Start recording")' },
@@ -79,6 +84,7 @@ const PATHS = {
   'settings:config': { phone: 'Settings › Config File' },
   'settings:about': { phone: 'Settings › About & Updates' },
   // The sidebar's rows and tools, by their names (Rail.jsx).
+  'rail:Home': { phone: 'Home', shows: '.hm', trial: 'home' },
   'rail:New': { phone: 'Agents › New', shows: '.home-title' },
   'rail:Chief of Staff': { phone: 'Chief', shows: '.mate-hero, .console' },
   'rail:Meetings': { phone: 'Meetings', shows: '.m-meetings' },
@@ -147,7 +153,7 @@ try {
   const TABS = ['Chief', 'Agents', 'Meetings', 'Today', 'More']
   // Settings showing a section on a phone: its name over it, with ‹ Settings beside.
   const at = (p, name, ms) => until(async () => (await p.locator('.st-bar h3').innerText().catch(() => '')).trim() === name && p.locator('.st-bar .st-back').isVisible(), ms)
-  const follow = async (p, route) => {
+  const follow = async (p, route, tabs = TABS) => {
     const [first, ...rest] = route.split(' › ')
     if (first === 'Search') {
       await p.locator('.search-btn').click()
@@ -161,7 +167,7 @@ try {
       await row.first().click()
       return (await at(p, rest[0], 4000)) ? null : `Settings doesn't open at "${rest[0]}" with ‹ Settings`
     }
-    if (!TABS.includes(first)) return `"${first}" isn't a tab`
+    if (!tabs.includes(first)) return `"${first}" isn't a tab`
     await p.locator('.tabbar button', { hasText: first }).click()
     for (const name of rest) {
       const btn = p.locator(`.m-body button:visible, .m-body a:visible`, { hasText: name }).first()
@@ -176,7 +182,7 @@ try {
     await ph.p.waitForSelector('.tabbar button', { timeout: 20000 })
     const tabs = (await ph.p.locator('.tabbar button').allInnerTexts()).map((x) => x.trim())
     ok(tabs.join('|') === TABS.join('|'), `${width}: five tabs, the last one More`, tabs)
-    const routes = [...new Map(Object.values(PATHS).filter((x) => x.phone).map((x) => [`${x.phone}|${x.shows || ''}`, x])).values()]
+    const routes = [...new Map(Object.values(PATHS).filter((x) => x.phone && !x.trial).map((x) => [`${x.phone}|${x.shows || ''}`, x])).values()]
     const bad = []
     for (const r of routes) {
       await ph.p.goto(kit.url)
@@ -286,6 +292,37 @@ try {
     ok(!ph.errors.filter((e) => !/\/api\/\S+ due to access control checks|^TypeError: Importing a module script failed\.$/.test(e)).length, `${width}: no page errors`, ph.errors)
     await ph.ctx.close()
   }
+
+  // ---------- Home, a trial feature, on ----------
+  // Home is the first tab and where the phone opens, and Today is in More: each of Home's paths, and
+  // Today's from More.
+  await kit.api('/settings', { trials: { home: true } }, 'PATCH')
+  {
+    const HOME_TABS = ['Home', 'Chief', 'Agents', 'Meetings', 'More']
+    const ph = await page(b, kit.url, { phone: true })
+    await ph.p.setViewportSize({ width: 375, height: 860 })
+    await ph.p.waitForSelector('.tabbar button', { timeout: 20000 })
+    // (The tabs are the usual ones until the page has its settings, a moment after it opens.)
+    const tabNames = async () => (await ph.p.locator('.tabbar button').allInnerTexts()).map((x) => x.trim().split('\n').pop().trim())
+    await until(async () => (await tabNames()).join('|') === HOME_TABS.join('|'), 10000)
+    const tabs = await tabNames()
+    ok(tabs.join('|') === HOME_TABS.join('|'), 'Home on: Home is the first tab, Today is not a tab', tabs)
+    ok(!!(await until(() => ph.p.locator('.hm').isVisible(), 10000)), 'and the phone opens at Home')
+    const today = [['More › Today', '.m-more-view .m-today'], ['More › Today › Calendar', '.m-more-view .m-today'], ['More › Today › Mail', '.m-more-view .m-today']].map(([phone, shows]) => ({ phone, shows }))
+    const routes = [...new Map([...Object.values(PATHS).filter((x) => x.trial === 'home'), ...today].map((x) => [`${x.phone}|${x.shows || ''}`, x])).values()]
+    const bad = []
+    for (const r of routes) {
+      await ph.p.goto(kit.url)
+      await ph.p.waitForSelector('.tabbar button', { timeout: 20000 })
+      const why = await follow(ph.p, r.phone, HOME_TABS).catch((e) => e.message)
+      if (why) { bad.push(`${r.phone}: ${why}`); continue }
+      if (r.shows && !(await ph.p.locator(r.shows).first().waitFor({ timeout: 8000 }).then(() => true, () => false))) bad.push(`${r.phone}: ${r.shows} doesn't show`)
+    }
+    ok(!bad.length, `Home on: each of its paths, and Today from More, is there on the phone and opens its place (${routes.length} of them)`, bad)
+    ok(!ph.errors.filter((e) => !/\/api\/\S+ due to access control checks|^TypeError: Importing a module script failed\.$/.test(e)).length, 'Home on: no page errors', ph.errors)
+    await ph.ctx.close()
+  }
+  await kit.api('/settings', { trials: { home: false } }, 'PATCH')
 
   // A phone that had the Terminals tab open (before More): Terminals, in More.
   const old = await page(b, kit.url, { phone: true, store: { 'cc-mtab': 'herdr' } })

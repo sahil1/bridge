@@ -7,6 +7,9 @@ import { watch as watchShare, sendPicture, sendGlance } from './screen.js'
 import { t, locale } from '../../i18n/index.js'
 import './meetings.css'
 
+// The top bar's pill says a long title in short, not cut off by the pill (the whole is in its tooltip).
+const shortTitle = (s, n = 24) => { const x = String(s || '').trim(); return x.length > n ? `${x.slice(0, n - 1).trimEnd()}…` : x }
+
 // Meeting notes: Start recording, write your own notes beside the live transcript if you like,
 // Stop. The notes come back as a summary with decisions and action items, written by any model,
 // which you can ask questions of, hand to the chief of staff, or save as Markdown.
@@ -303,7 +306,7 @@ export function RecordingPill() {
       <button type="button" className={`rec-pill${m.rec.paused ? ' paused' : ''}`} onClick={() => { shut.current = true; clearTimeout(timer.current); setOpen(false); openMeeting(m.rec.id) }} aria-haspopup="true" aria-expanded={open} title={m.rec.paused ? t('{title}: paused. Click to open it.', { title: m.rec.title }) : t('{title}: recording. Click to open it.', { title: m.rec.title })}>
         <span className="rec-dot" aria-hidden="true" />
         <span className="rec-time">{clock(m.elapsed)}</span>
-        <span className="rec-name">{m.rec.paused ? t('Paused') : m.rec.title}</span>
+        <span className="rec-name">{m.rec.paused ? t('Paused') : shortTitle(m.rec.title)}</span>
       </button>
       {open && (
         <div className="rec-menu" role="dialog" aria-label={t('Recording')}>

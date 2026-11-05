@@ -1,0 +1,369 @@
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import Icon, { StatusDot } from './Icon.jsx'
+import { NeedsItem, onDevice } from './NeedsYou.jsx'
+import { useAgentMap } from './AgentMap.jsx'
+import { useCalendar, shortTitle } from './Agenda.jsx'
+import { ago } from './Machines.jsx'
+import { api, hostApi } from '../api.js'
+import { t, tx, locale } from '../i18n/index.js'
+import './needshome.css'
+
+// Home (a trial feature, `home`): Needs you as the place the app opens at, on a computer and a
+// phone. What needs you first, answered right there (Yes, No, the agent's own choices, Reply), then
+// what's ready to look at (finished work and its pull request, a meeting's notes and the action
+// items not handed on, a whiteboard an agent drew, a task the Chief of Staff finished) and what's
+// coming up (the next meeting with its brief and the files in its invite, the Chief of Staff's
+// tasks). From every linked computer at once (server/home.js, by way of each one's summary), with a
+// filter by kind and by device. Everything opens every item on every computer, in lanes as the
+// Agent Map has them: by device, or by kind.
+
+const KINDS = [['all', tx('All')], ['agent', tx('Agents')], ['meeting', tx('Meetings')], ['chief', tx('Chief of Staff')], ['board', tx('Whiteboards')], ['file', tx('Files')]]
+// Chief of Staff's own questions count with its tasks.
+const kindOf = (i) => (i.kind === 'task' || (i.kind === 'agent' && i.agent?.chief) ? 'chief' : i.kind)
+const RANK = { permission: 0, question: 1, failed: 2 }
+const fmt = (iso) => new Date(iso).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' })
+const mins = (ms) => { const m = Math.max(1, Math.round(ms / 6e4)); return m < 60 ? t('{n} min', { n: m }) : t('{n} h {m} min', { n: Math.floor(m / 60), m: m % 60 }) }
+const why = (e, device) => (e?.status === 404 ? t('Update Bridge AI on {name} to do this from here.', { name: device }) : e?.message || t("That didn't work. Open it instead."))
+
+// The list from the device this page comes from: every few seconds while it's on screen (less
+// often for a count elsewhere). uid: an item's id with its device's, as each device numbers its own.
+export function useHome(on = true, every = 5000) {
+  const [data, setData] = useState(null)
+  const [error, setError] = useState(null)
+  const load = useCallback(() => hostApi(`/home${every <= 5000 ? '?live=1' : ''}`).then((d) => { setData({ ...d, items: (d.items || []).map((i) => ({ ...i, uid: `${i.machine || 'here'}|${i.id}` })) }); setError(null) }, (e) => setError(e.message || String(e))), [every])
+  useEffect(() => {
+    if (!on) return
+    load()
+    const id = setInterval(() => { if (!document.hidden) load() }, every)
+    return () => clearInterval(id)
+  }, [load, on, every])
+  return { data, error, refresh: load }
+}
+
+// What needs you, by kind, for the top bar and the tab's count: questions, permissions, failed runs
+// and tasks waiting on you, on devices that can hear an answer.
+export const needCount = (data) => (data?.items || []).filter((i) => i.group === 'needs' && i.online).length
+
+// The calendar's part of coming up: the meeting on now or next today, with the files its invite
+// links to. Only where the calendar is (a Mac).
+function useComing(on) {
+  const { data, error } = useCalendar()
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => { const id = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(id) }, [])
+  if (!on) return { events: [], error: null }
+  const today = (data?.today || []).filter((e) => !e.allDay && !e.canceled && Date.parse(e.end) > now)
+  return { events: today.slice(0, 3), error: error || (data && data.available === false ? data.error || t('Calendar needs setting up') : null), now }
+}
+
+// The meeting before this one that it follows on from (server/meetwork.js), as its brief.
+function useBrief(e) {
+  const [brief, setBrief] = useState(null)
+  useEffect(() => {
+    if (!e) return
+    const q = new URLSearchParams({ title: e.title || '', start: e.start || '' })
+    for (const p of (e.attendees || []).slice(0, 20)) q.append('people', p.email || p.name || String(p))
+    let live = true
+    api(`/meetings/since?${q}`).then((d) => { if (live) setBrief(d?.last ? d : null) }, () => { if (live) setBrief(null) })
+    return () => { live = false }
+  }, [e?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  return brief
+}
+
+function Row({ icon, dot, title, sub, children, device, off }) {
+  return (
+    <article className={`hm-row ${off ? 'off' : ''}`}>
+      {dot ? <StatusDot status={dot} size={8} /> : <span className="hm-ico"><Icon name={icon} size={13} /></span>}
+      <div className="hm-row-main">
+        <b className="hm-row-title">{title}</b>
+        {(sub || device) && <span className="hm-row-sub">{sub}{device && <span className="hm-dev"><Icon name="laptop" size={10} />{device}{off ? ` · ${t('offline')}` : ''}</span>}</span>}
+      </div>
+      {children && <div className="hm-row-acts">{children}</div>}
+    </article>
+  )
+}
+
+// A task of the Chief of Staff's waiting on you: what it needs, a reply to it, or open the Chief.
+function TaskWaiting({ it, multi, onOpenChief, onGone, setNote }) {
+  const [text, setText] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [open, setOpen] = useState(false)
+  const off = !it.online
+  const send = async (e) => {
+    e.preventDefault()
+    if (!text.trim()) return
+    setBusy(true)
+    try {
+      const r = await onDevice(it.machine, `/chief/tasks/${encodeURIComponent(it.task.id)}/reply`, { text: text.trim() })
+      setText(''); setOpen(false)
+      onGone(it, r.queued ? t('Sent. Chief of Staff gets it when it can take it.') : t('Sent to Chief of Staff'))
+    } catch (x) { setNote({ id: it.id, text: why(x, it.device) }) } finally { setBusy(false) }
+  }
+  return (
+    <article className={`ny-item hm-task ${off ? 'off' : ''}`} aria-label={t('Chief of Staff task: {title}', { title: it.task.title })}>
+      <div className="ny-top">
+        <StatusDot status="blocked" size={8} />
+        <span className="ny-kind">{t('Chief of Staff task')}</span>
+        <span className="ny-grow" />
+        {multi && <span className={`ny-device ${it.machine ? '' : 'here'}`}><Icon name="laptop" size={11} />{it.device}{off && <span className="ny-off"> · {t('offline')}</span>}</span>}
+      </div>
+      <p className="ny-text">{it.task.needs || t('Waiting on you')}</p>
+      <div className="ny-meta"><b className="ny-agent"><Icon name="helm" size={11} />{it.task.title}</b></div>
+      <div className="ny-acts">
+        {!off && <button type="button" className="ghost-btn" aria-expanded={open} onClick={() => setOpen(!open)}><Icon name="chat" size={12} /> {t('Reply')}</button>}
+        <span className="ny-grow" />
+        <button type="button" className="ghost-btn strong" onClick={() => onOpenChief(it)} disabled={off}>{t('Open')}</button>
+      </div>
+      {open && (
+        <form className="ny-reply" onSubmit={send}>
+          <input autoFocus value={text} onChange={(e) => setText(e.target.value)} placeholder={t('Reply to Chief of Staff…')} aria-label={t('Reply to Chief of Staff')} disabled={busy} />
+          <button type="submit" className="btn small primary" disabled={busy || !text.trim()}><Icon name="send" size={12} /> {t('Send')}</button>
+        </form>
+      )}
+    </article>
+  )
+}
+
+// A meeting whose notes are ready: its action items to Chief of Staff in one click, or open it.
+function MeetingReady({ it, multi, onOpenMeeting, setNote, refresh }) {
+  const [busy, setBusy] = useState(false)
+  const [sent, setSent] = useState(null)
+  const m = it.meeting
+  const send = async () => {
+    setBusy(true)
+    try {
+      const r = await onDevice(it.machine, `/meetings/${encodeURIComponent(m.id)}/chief`, {})
+      setSent(r.sent === false ? t('On Chief of Staff\'s list. It isn\'t running: it reads them when it starts.') : t('Sent to Chief of Staff'))
+      refresh()
+    } catch (e) { setNote({ id: it.id, text: why(e, it.device) }) } finally { setBusy(false) }
+  }
+  const left = sent ? 0 : it.unsent
+  return (
+    <Row icon="mic" title={t('Notes ready · {title}', { title: shortTitle(m.title, 48) })} device={multi ? it.device : null} off={!it.online}
+      sub={sent || (left === 1 ? t('1 action item not handed on yet') : left > 1 ? t('{n} action items not handed on yet', { n: left }) : t('Written {when}', { when: ago(it.at) }))}>
+      {left > 0 && it.online && <button type="button" className="btn small" disabled={busy} onClick={send}><Icon name="helm" size={12} /> {t('To Chief of Staff')}</button>}
+      <button type="button" className="btn small" onClick={() => onOpenMeeting(it)} disabled={!it.online}>{t('Open')}</button>
+    </Row>
+  )
+}
+
+function NextMeeting({ e, now, onOpenMeeting, onCalendar }) {
+  const brief = useBrief(e)
+  const on = Date.parse(e.start) <= now
+  const last = brief?.last
+  const open = brief?.counts?.open || 0
+  const was = last && { title: shortTitle(last.title, 40), date: new Date(last.startedAt).toLocaleDateString(locale(), { month: 'short', day: 'numeric' }), n: open }
+  return (
+    <Row icon="calendar" title={on ? t('{title} · on now', { title: shortTitle(e.title, 48) }) : t('{title} · {time}, in {wait}', { title: shortTitle(e.title, 48), time: fmt(e.start), wait: mins(Date.parse(e.start) - now) })}
+      sub={!last ? t('No earlier meeting to brief you from') : open ? t('Brief: last time, {title} on {date}, {n} still open', was) : t('Brief: last time, {title} on {date}', was)}>
+      {e.join && <a className="btn small" href={e.join} target="_blank" rel="noreferrer"><Icon name="video" size={12} /> {t('Join')}</a>}
+      {last ? <button type="button" className="btn small" onClick={() => onOpenMeeting({ machine: null, online: true, meeting: { id: last.id } })}>{t('Open brief')}</button>
+        : <button type="button" className="btn small" onClick={onCalendar}>{t('Calendar')}</button>}
+    </Row>
+  )
+}
+
+// Home itself. phone: the phone's Home tab. onOpen(item): an agent wherever it runs; onOpenMeeting,
+// onOpenBoard, onOpenChief: the rest, here or on their own device; onEverything, onCalendar.
+export default function NeedsHome({ phone = false, calendar = false, onOpen, onOpenMeeting, onOpenBoard, onOpenChief, onEverything, onCalendar }) {
+  const { data, error, refresh } = useHome(true)
+  const [kind, setKind] = useState('all')
+  const [device, setDevice] = useState('all')
+  const [gone, setGone] = useState({})
+  const [note, setNote] = useState(null)
+  useEffect(() => { if (!note) return; const id = setTimeout(() => setNote(null), 6000); return () => clearTimeout(id) }, [note])
+  const cal = useComing(calendar)
+  const devices = data?.devices || []
+  const multi = devices.length > 1
+  // The invite's files for the meetings coming up (Files), as items like the rest.
+  const files = cal.events.filter((e) => e.links?.length).map((e) => ({ id: `file:${e.id}`, uid: `here|file:${e.id}`, kind: 'file', group: 'coming', event: e, machine: null, online: true, device: devices[0]?.name }))
+  const meetings = cal.events.slice(0, 1).map((e) => ({ id: `cal:${e.id}`, uid: `here|cal:${e.id}`, kind: 'meeting', group: 'coming', event: e, machine: null, online: true, device: devices[0]?.name }))
+  const all = [...(data?.items || []), ...meetings, ...files].filter((i) => i.group && !gone[i.uid])
+  const onDev = (i) => device === 'all' || (i.machine || 'here') === device
+  const shown = all.filter((i) => onDev(i) && (kind === 'all' || kindOf(i) === kind))
+  const count = (k) => all.filter((i) => onDev(i) && (k === 'all' || kindOf(i) === k)).length
+  const needs = shown.filter((i) => i.group === 'needs').sort((x, y) => (x.kind === 'task') - (y.kind === 'task') || (RANK[x.type] ?? 9) - (RANK[y.type] ?? 9) || (Date.parse(x.at || 0) || 0) - (Date.parse(y.at || 0) || 0))
+  const ready = shown.filter((i) => i.group === 'ready').sort((x, y) => (Date.parse(y.at || 0) || 0) - (Date.parse(x.at || 0) || 0))
+  const coming = shown.filter((i) => i.group === 'coming')
+  const waiting = needs.filter((i) => i.online).length
+  const onGone = (it, said) => {
+    setGone((g) => ({ ...g, [it.uid]: Date.now() }))
+    if (said) setNote({ text: `${said} · ${it.agent?.title || it.task?.title || ''}` })
+    for (const ms of [0, 1500, 4000]) setTimeout(refresh, ms)
+  }
+  const offline = devices.filter((d) => !d.online).length
+  const partial = devices.filter((d) => d.partial && d.online)
+  const where = !multi ? t('On this computer') : offline ? t('On {n} computers · {m} offline', { n: devices.length, m: offline }) : t('On {n} computers', { n: devices.length })
+  // The inbox's own card, with its own id (Clear and the answers take it).
+  const agentItem = (it) => <NeedsItem key={it.uid} it={{ ...it, id: it.nid || it.id }} onOpen={onOpen} onGone={(x, said) => onGone(it, said)} setNote={setNote} />
+  return (
+    <div className={`hm ${phone ? 'phone' : ''}`}>
+      <header className="hm-head">
+        <div className="hm-title">
+          <h2>{waiting === 0 ? t('Nothing needs you') : waiting === 1 ? t('1 thing needs you') : t('{n} things need you', { n: waiting })}</h2>
+          <p className="muted">{where}</p>
+        </div>
+        <div className="hm-tools">
+          {multi && (
+            <select className="hm-device" value={device} onChange={(e) => setDevice(e.target.value)} aria-label={t('Device')}>
+              <option value="all">{t('All devices')}</option>
+              {devices.map((d) => <option key={d.id || 'here'} value={d.id || 'here'}>{d.online ? d.name : t('{name} (offline)', { name: d.name })}</option>)}
+            </select>
+          )}
+          <button type="button" className="btn small hm-every" onClick={onEverything}>{t('See everything')} <Icon name="chevron" size={11} /></button>
+        </div>
+      </header>
+      <div className="chips hm-kinds" role="tablist" aria-label={t('Kind')}>
+        {KINDS.map(([id, label]) => {
+          const n = count(id)
+          if (id !== 'all' && !n && kind !== id) return null
+          return <button key={id} type="button" role="tab" aria-selected={kind === id} className={`fchip ${kind === id ? 'on' : ''}`} onClick={() => setKind(kind === id ? 'all' : id)}>{t(label)}<span className="fcount">{n}</span></button>
+        })}
+      </div>
+      {note && <p className="ny-note" role="status">{note.text}</p>}
+      {error && <p className="error-text hm-err" role="alert">{t("Home couldn't load: {why}", { why: error })} <button type="button" className="link-btn" onClick={refresh}>{t('Try again')}</button></p>}
+      {partial.length > 0 && <p className="muted small hm-partial">{partial.length === 1 ? t('From {name}, only what needs you: its meetings, tasks and whiteboards show once it has Bridge AI with Home.', { name: partial[0].name }) : t('From {names}, only what needs you: their meetings, tasks and whiteboards show once they have Bridge AI with Home.', { names: partial.map((d) => d.name).join(', ') })}</p>}
+      {!data && !error && <div className="skeleton-rows pad"><div /><div /></div>}
+      {data && (
+        <>
+          <section className="hm-sec" aria-label={t('Waiting on you')}>
+            <h3>{t('Waiting on you')}<span className="muted">{t('your answer starts them again')}</span></h3>
+            {needs.map((it) => (it.kind === 'task' ? <TaskWaiting key={it.uid} it={it} multi={multi} onOpenChief={onOpenChief} onGone={onGone} setNote={setNote} /> : agentItem(it)))}
+            {!needs.length && <div className="hm-empty"><Icon name="check" size={16} /><span>{t('Nothing needs you right now.')}</span></div>}
+          </section>
+          <div className="hm-cols">
+            <section className="hm-sec" aria-label={t('Ready to look at')}>
+              <h3>{t('Ready to look at')}<span className="fcount">{ready.length}</span></h3>
+              {ready.map((it) => (
+                it.kind === 'agent' ? agentItem(it)
+                  : it.kind === 'meeting' ? <MeetingReady key={it.uid} it={it} multi={multi} onOpenMeeting={onOpenMeeting} setNote={setNote} refresh={refresh} />
+                    : it.kind === 'board' ? <Row key={it.uid} icon="shapes" title={t('Whiteboard · {title}', { title: it.board.title })} sub={t('Changed {when}, since you last looked', { when: ago(it.at) })} device={multi ? it.device : null} off={!it.online}><button type="button" className="btn small" onClick={() => onOpenBoard(it)} disabled={!it.online}>{t('Open')}</button></Row>
+                      : <Row key={it.uid} icon="helm" title={t('Chief of Staff finished · {title}', { title: it.task.title })} sub={it.task.outcome || it.task.link} device={multi ? it.device : null} off={!it.online}><button type="button" className="btn small" onClick={() => onOpenChief(it)} disabled={!it.online}>{t('Open')}</button></Row>
+              ))}
+              {!ready.length && <p className="muted small hm-none">{t('Nothing new to look at.')}</p>}
+            </section>
+            <section className="hm-sec" aria-label={t('Coming up')}>
+              <h3>{t('Coming up')}<span className="muted">{t('today')}</span></h3>
+              {coming.map((it) => (
+                it.kind === 'meeting' ? <NextMeeting key={it.uid} e={it.event} now={cal.now} onOpenMeeting={onOpenMeeting} onCalendar={onCalendar} />
+                  : it.kind === 'file' ? (
+                    <Row key={it.uid} icon="file" title={it.event.links.length === 1 ? t('1 file for {title}', { title: shortTitle(it.event.title, 40) }) : t('{n} files for {title}', { n: it.event.links.length, title: shortTitle(it.event.title, 40) })}
+                      sub={<span className="hm-links">{it.event.links.slice(0, 4).map((l, i) => <a key={i} href={l.url} target="_blank" rel="noreferrer">{shortTitle(l.name || l.url, 40)}</a>)}</span>} />
+                  ) : <Row key={it.uid} icon="helm" title={it.task.title} sub={it.task.status === 'doing' ? t('Chief of Staff task · on it now') : t('Chief of Staff task · to do')} device={multi ? it.device : null} off={!it.online}><button type="button" className="btn small" onClick={() => onOpenChief(it)} disabled={!it.online}>{t('Open')}</button></Row>
+              ))}
+              {cal.error && <p className="muted small hm-none">{t('Your calendar: {why}', { why: cal.error })} <button type="button" className="link-btn" onClick={onCalendar}>{t('Set up')}</button></p>}
+              {!coming.length && !cal.error && <p className="muted small hm-none">{t('Nothing else today.')}</p>}
+            </section>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// ---------- Everything ----------
+// Every item on every computer: each computer's agents (the Agent Map's), what waits on you, its
+// meetings this week, the Chief of Staff's tasks and its whiteboards, in a lane per computer, or a
+// lane per kind. A computer that's offline keeps its lane with what it last said.
+const LANES = [['agent', tx('Agents')], ['needs', tx('Questions')], ['meeting', tx('Meetings')], ['task', tx('Chief of Staff tasks')], ['board', tx('Whiteboards')]]
+export function Everything({ phone = false, onOpenAgent, onOpenMeeting, onOpenBoard, onOpenChief, onBack }) {
+  const home = useHome(true)
+  const map = useAgentMap(true)
+  const [by, setBy] = useState(() => { try { return localStorage.getItem('cc-every-by') || 'device' } catch { return 'device' } })
+  const [kind, setKind] = useState('all')
+  const [mine, setMine] = useState(false)
+  const pick = (v) => { setBy(v); try { localStorage.setItem('cc-every-by', v) } catch { /* no storage */ } }
+  const devices = useMemo(() => {
+    const ds = home.data?.devices || (map.data?.devices || []).map((d) => ({ id: d.id, name: d.name, online: d.online, here: d.here, os: d.os }))
+    return ds.map((d) => ({ ...d, agents: (map.data?.devices || []).find((x) => (x.id || null) === (d.id || null))?.agents || [] }))
+  }, [home.data, map.data])
+  // One list of things: each agent (not one that only waits on you: that's its question), then the
+  // rest of Home's items.
+  const things = useMemo(() => {
+    const items = home.data?.items || []
+    const asking = new Set(items.filter((i) => i.kind === 'agent' && i.group === 'needs').map((i) => `${i.machine || ''}:${i.paneId}`))
+    const agents = devices.flatMap((d) => d.agents.filter((a) => !asking.has(`${d.id || ''}:${a.paneId}`)).map((a) => ({ id: `a:${d.id || ''}:${a.paneId}`, lane: 'agent', a, machine: d.id || null, device: d.name, online: !!d.online, needs: a.status === 'blocked' })))
+    const rest = items.filter((i) => i.kind !== 'agent' || i.group === 'needs').map((i) => ({ ...i, lane: i.kind === 'agent' ? 'needs' : i.kind, needs: i.group === 'needs' }))
+    return [...agents, ...rest]
+  }, [devices, home.data])
+  const counts = Object.fromEntries(LANES.map(([k]) => [k, things.filter((x) => x.lane === k).length]))
+  const shown = things.filter((x) => (kind === 'all' || x.lane === kind) && (!mine || x.needs))
+  const needN = things.filter((x) => x.needs && x.online).length
+  const open = (x) => {
+    if (x.lane === 'agent') return onOpenAgent(x)
+    if (x.lane === 'needs') return onOpenAgent({ ...x, a: { paneId: x.paneId, name: x.agent?.title, kind: x.agent?.kind } })
+    if (x.lane === 'meeting') return onOpenMeeting(x)
+    if (x.lane === 'board') return onOpenBoard(x)
+    return onOpenChief(x)
+  }
+  const line = (x) => {
+    if (x.lane === 'agent') return { dot: x.a.status, title: [x.a.project, x.a.name || x.a.title].filter(Boolean).join(' · '), sub: x.a.asking || x.a.doing?.text || x.a.kindLabel || x.a.kind }
+    if (x.lane === 'needs') return { dot: x.type === 'failed' ? 'unknown' : 'blocked', title: [x.agent?.project, x.agent?.title].filter(Boolean).join(' · '), sub: x.text || t('Waiting on you') }
+    if (x.lane === 'meeting') return { icon: 'mic', title: x.meeting.title, sub: x.meeting.status === 'recording' ? t('Recording') : x.unsent ? (x.unsent === 1 ? t('1 action item not handed on yet') : t('{n} action items not handed on yet', { n: x.unsent })) : x.meeting.hasSummary ? t('Notes ready') : ago(x.meeting.startedAt) }
+    if (x.lane === 'board') return { icon: 'shapes', title: x.board.title, sub: x.board.changed ? t('Changed {when}, since you last looked', { when: ago(x.at) }) : t('Changed {when}', { when: ago(x.at) }) }
+    return { icon: 'helm', title: x.task.title, sub: x.task.status === 'waiting' ? x.task.needs || t('Waiting on you') : x.task.status === 'done' ? x.task.outcome || t('Done') : x.task.status === 'doing' ? t('On it now') : t('To do') }
+  }
+  const item = (x, showDev) => {
+    const l = line(x)
+    return (
+      <button key={x.uid || x.id} type="button" className={`ey-item ${x.needs ? 'needs' : ''}`} onClick={() => open(x)} disabled={!x.online} title={x.online ? t('Open') : t('{name} is offline', { name: x.device })}>
+        {l.dot ? <StatusDot status={x.online ? l.dot : 'unknown'} size={8} /> : <span className="hm-ico"><Icon name={l.icon} size={12} /></span>}
+        <span className="ey-text"><b>{l.title}</b>{(l.sub || showDev) && <small>{showDev ? [x.device, l.sub].filter(Boolean).join(' · ') : l.sub}</small>}</span>
+      </button>
+    )
+  }
+  // By kind, filtered (Only what needs me): the kinds with something in them.
+  const kinds = LANES.filter(([k]) => kind === 'all' || kind === k).map(([k, label]) => ({ key: k, label: t(label), list: shown.filter((x) => x.lane === k) }))
+  const lanes = by === 'device'
+    ? devices.map((d) => ({ key: d.id || 'here', d, list: shown.filter((x) => (x.machine || null) === (d.id || null)) }))
+    : mine && kinds.some((l) => l.list.length) ? kinds.filter((l) => l.list.length) : kinds
+  const error = home.error && map.error ? home.error : null
+  return (
+    <div className={`ey ${phone ? 'phone' : ''}`}>
+      <header className="ey-head">
+        {onBack && <button type="button" className="ghost-btn m-view-back" onClick={onBack}><Icon name="back" size={14} /> {t('Home')}</button>}
+        <div className="hm-title">
+          <h2>{t('Everything')}</h2>
+          <p className="muted">{t('{n} things on {m} computers · {k} need you', { n: things.length, m: devices.length || 1, k: needN })}</p>
+        </div>
+        <div className="ey-seg" role="tablist" aria-label={t('Lanes')}>
+          <button type="button" role="tab" aria-selected={by === 'device'} className={by === 'device' ? 'on' : ''} onClick={() => pick('device')}>{t('By device')}</button>
+          <button type="button" role="tab" aria-selected={by === 'kind'} className={by === 'kind' ? 'on' : ''} onClick={() => pick('kind')}>{t('By kind')}</button>
+        </div>
+      </header>
+      <div className="ey-filters">
+        <div className="chips" role="tablist" aria-label={t('Kind')}>
+          <button type="button" role="tab" aria-selected={kind === 'all'} className={`fchip ${kind === 'all' ? 'on' : ''}`} onClick={() => setKind('all')}>{t('All')}<span className="fcount">{things.length}</span></button>
+          {LANES.map(([k, label]) => (counts[k] || kind === k) && <button key={k} type="button" role="tab" aria-selected={kind === k} className={`fchip ${kind === k ? 'on' : ''}`} onClick={() => setKind(kind === k ? 'all' : k)}>{t(label)}<span className="fcount">{counts[k]}</span></button>)}
+        </div>
+        <label className="st-check ey-mine"><input type="checkbox" checked={mine} onChange={(e) => setMine(e.target.checked)} /> {t('Only what needs me')}</label>
+      </div>
+      {error && <p className="error-text hm-err" role="alert">{t("Everything couldn't load: {why}", { why: error })} <button type="button" className="link-btn" onClick={() => { home.refresh(); map.refresh() }}>{t('Try again')}</button></p>}
+      {!home.data && !map.data && !error && <div className="skeleton-rows pad"><div /><div /><div /></div>}
+      {(home.data || map.data) && (
+        <div className="ey-lanes">
+          {lanes.map((l) => (
+            <section key={l.key} className={`ey-lane ${l.d && !l.d.online ? 'off' : ''}`} aria-label={l.d ? l.d.name : l.label}>
+              <header className="ey-lane-head">
+                {l.d ? <span className={`mc-dot ${l.d.online ? 'on' : ''}`} /> : null}
+                <div className="am-lane-name">
+                  <b>{l.d ? l.d.name : l.label}</b>
+                  {l.d && <small className="muted">{l.d.here ? t('this computer') : l.d.online ? t('Online') : (l.d.at || l.d.lastSeen) ? t('Offline · as of {when}', { when: ago(l.d.at || l.d.lastSeen) }) : t('Offline')}</small>}
+                </div>
+                <span className="am-lane-count">{l.list.length}</span>
+              </header>
+              {l.d && !l.d.online && l.list.length > 0 && <p className="am-said">{t('What it last said. Answers go through once it\'s back.')}</p>}
+              {l.d?.partial && l.d.online && <p className="am-said">{t('Only what needs you: its meetings, tasks and whiteboards show once it has Bridge AI with Home.')}</p>}
+              {by === 'device'
+                ? LANES.map(([k, label]) => {
+                  const xs = l.list.filter((x) => x.lane === k)
+                  return xs.length > 0 && <div key={k} className="ey-group"><h4>{t(label)}<span className="fcount">{xs.length}</span></h4>{xs.map((x) => item(x, false))}</div>
+                })
+                : l.list.map((x) => item(x, true))}
+              {!l.list.length && <p className="muted am-none">{t('Nothing here right now.')}</p>}
+            </section>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}

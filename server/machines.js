@@ -421,6 +421,8 @@ export function list() {
       counts: s?.counts || {}, agents: s?.agents || [],
       // What waits on you there (null from a Bridge AI too old to say), and when it last said.
       needs: s?.needs || null, at: s?.at ? new Date(s.at).toISOString() : null,
+      // Everything Home lists from there (null unless Home asked, or from a Bridge AI too old to say).
+      home: s?.home || null,
       about: s?.about || null, systemName: s?.systemName || null, safety: safety(m.hostKey),
     }
   })
@@ -660,8 +662,11 @@ async function introduce(n) {
 // Its agents, for the sidebar here. getSummary: this device's own (index.js).
 let getSummary = async () => ({})
 export const useSummary = (fn) => { getSummary = fn }
-export const summary = async () => {
-  const s = await getSummary()
+// Whether to ask the others for what Home lists too (Home is on here).
+let wantHome = () => false
+export const askHome = (fn) => { wantHome = fn }
+export const summary = async (opts = {}) => {
+  const s = await getSummary(opts)
   return { ...here(), ...s, about: { ...(await about()), runtime: s.runtime || null } }
 }
 const asking = new Map() // machine id -> its summary on the way, so a burst of asks makes one call
@@ -672,8 +677,8 @@ function refresh(m) {
 async function refreshNow(m) {
   const l = links.get(m.id)
   if (!l?.session) return
-  const s = await l.call('GET', '/api/machines/summary', undefined, 12000)
-  keep(m.id, { name: s.name, os: s.os, version: s.version, counts: s.counts || {}, agents: Array.isArray(s.agents) ? s.agents.slice(0, 40) : [], needs: Array.isArray(s.needs) ? s.needs.slice(0, 60) : null, about: s.about || null, systemName: s.systemName || null, at: Date.now() })
+  const s = await l.call('GET', `/api/machines/summary${wantHome() ? '?home=1' : ''}`, undefined, 12000)
+  keep(m.id, { name: s.name, os: s.os, version: s.version, counts: s.counts || {}, agents: Array.isArray(s.agents) ? s.agents.slice(0, 40) : [], needs: Array.isArray(s.needs) ? s.needs.slice(0, 60) : null, home: Array.isArray(s.home) ? s.home.slice(0, 100) : null, about: s.about || null, systemName: s.systemName || null, at: Date.now() })
   if (s.name && s.name !== m.name) { m.name = String(s.name).slice(0, 60); save() }
   if (s.os !== m.os || s.version !== m.version) { m.os = s.os; m.version = s.version; save() }
 }

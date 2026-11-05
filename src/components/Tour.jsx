@@ -31,7 +31,7 @@ const STEPS = {
     { at: 'views', title: 'Chat or terminal', body: 'Chat is the conversation. Terminal is the agent\'s real screen, live, and you can type in it.' },
     { at: 'composer', title: 'Talk to it', body: 'Type here to send a message: @ adds a file, / runs a command. When an agent asks you something, its question shows up just above as a card you can click.' },
     { at: 'changes', title: 'Review and ship', body: 'Changes shows what the agent edited. Comment on any line to send it feedback, then commit, push and open a pull request from here.' },
-    { at: 'usage', title: 'Usage at a glance', body: 'How much of your plan is left: this 5-hour window and this week. Click it for the details, or to switch accounts if you have more than one.' },
+    { at: 'usage', title: 'Status at a glance', body: 'The ring is how much of your plan is left. Click it for this 5-hour window and this week, your accounts, updates, sounds, the weather and the time.' },
     { at: 'settings', title: 'On your phone too, free', body: 'In Settings › Devices, follow the steps and scan the QR code with your phone. Everything between your phone and this computer is end-to-end encrypted, and you get a ping when an agent needs you or finishes.', link: { label: 'Set up phone', section: 'phone' } },
     { at: 'new-agent', title: 'Your turn', body: 'Pick a folder and the agent to work in it, or start a chat with any model. Agents in the same project can each get their own copy, so they don\'t get in each other\'s way.', last: true },
   ],

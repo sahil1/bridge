@@ -11,13 +11,15 @@
 // recording in Chromium), at 320, 375 and 430 wide: only what needs you now in it, each a 40px
 // target that's all there and on top, nothing wider than the phone; the rest a line under it; and
 // the update a tap away (the line, or a dot on Settings that opens About & Updates). The desktop's
-// bar keeps all of them. Inside a computer on the phone app (stood in for: its page around Bridge
+// bar with all of them at each width from 1600 to 900: nothing past its edge, squeezed, cut off or on
+// two lines, the news that had no room counted on Status and in its menu with usage, sounds, the
+// weather and the time; a font that grows the words gives way again. Inside a computer on the phone app (stood in for: its page around Bridge
 // AI, the computers it's paired with), the devices menu switches computer (online or not, straight
 // to one paired on the phone) and opens the app's Cloud Agents and start screen; in a browser it's
 // your devices alone.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, checks, until, browser, page, shot, solid, noServiceWorker, IS_WIN } from '../lib/harness.mjs'
+import { startKit, checks, until, browser, page, shot, solid, noServiceWorker, changeAnswer, IS_WIN } from '../lib/harness.mjs'
 
 const { ok, done } = checks('app-ui')
 const kit = await startKit('app-ui')
@@ -102,16 +104,18 @@ try {
   // An agent waiting on you, in the fleet the page is given (the live feed is turned away, so it stays).
   const waiting = (f) => ({ ...f, workspaces: [...(f.workspaces || []), { id: 'w-wait', label: 'acme-shop' }], tabs: [...(f.tabs || []), { tabId: 't-wait', workspaceId: 'w-wait', label: 'checkout', panes: [{ paneId: 'p-wait', agent: true, cwd: kit.home }] }],
     agents: [...(f.agents || []), { paneId: 'p-wait', tabId: 't-wait', workspaceId: 'w-wait', workspace: 'acme-shop', tab: 'checkout', title: 'Fix login redirect', kind: 'claude', status: 'blocked', cwd: kit.home }] })
+  const LONG_NAME = 'Design Team MacBook Pro 16-inch (2)'
   const busy = ({ setup = true, restart = true } = {}) => async (c) => {
     await noServiceWorker(c)
     await c.route(/\/api\/updates(\?|$)/, (r) => r.fulfill({ json: fakes.updates }))
     await c.route(/\/api\/setup\/plan(\?|$)/, (r) => r.fulfill({ json: setup ? fakes.plan : { running: false, needsYou: null, run: null, items: [] } }))
-    await c.route(/\/api\/fix(\?|$)/, async (r) => { const real = await (await r.fetch()).json().catch(() => ({})); await r.fulfill({ json: { ...real, restart: restart ? [{ label: 'Full Disk Access' }] : [] } }) })
+    await changeAnswer(c, /\/api\/fix(\?|$)/, (real) => ({ ...real, restart: restart ? [{ label: 'Full Disk Access' }] : [] }), { orElse: {} })
     await c.route(/\/api\/calendar(\?|$)/, (r) => r.fulfill({ json: fakes.calendar }))
     await c.route(/\/api\/weather(\?|$)/, (r) => r.fulfill({ json: fakes.weather }))
     await c.route(/\/api\/quota(\?|$)/, (r) => r.fulfill({ json: fakes.quota }))
-    await c.route(/\/api\/machines(\?|$)/, async (r) => { const real = await (await r.fetch()).json(); await r.fulfill({ json: { ...real, machines: [...real.machines, fakes.device] } }) })
-    await c.route(/\/api\/fleet(\?|$)/, async (r) => r.fulfill({ json: waiting(await (await r.fetch()).json()) }))
+    // This computer has a long name (as a work computer often does), so every run sees the same bar.
+    await changeAnswer(c, /\/api\/machines(\?|$)/, (real) => ({ ...real, here: { ...real.here, name: LONG_NAME }, machines: [...real.machines, fakes.device] }))
+    await changeAnswer(c, /\/api\/fleet(\?|$)/, waiting)
     await c.route(/\/api\/events(\?|$)/, (r) => r.abort())
   }
   // Every control in the bar: whole, on screen, on top where you'd tap it, and big enough to tap.
@@ -198,7 +202,7 @@ try {
     { id: 'test-studio', name: 'Studio Mac', relay: studio, os: 'mac', version: '3.6.0', state: 'linked', online: true, lastSeen: new Date().toISOString(), addedAt: new Date().toISOString(), code: null, error: null, counts: { blocked: 1 }, agents: [] },
     { id: 'test-win', name: 'Windows PC', relay: 'https://win-relay.example.com', os: 'windows', version: '3.6.0', state: 'linked', online: false, lastSeen: new Date(Date.now() - 3 * 36e5).toISOString(), addedAt: new Date().toISOString(), code: null, error: null, counts: null, agents: [] },
   ].concat(real.machines || [])
-  const withDevices = async (c) => { await noServiceWorker(c); await c.route(/\/api\/machines(\?|$)/, async (r) => { const real = await (await r.fetch()).json(); await r.fulfill({ json: { ...real, machines: linkedTo(real) } }) }) }
+  const withDevices = async (c) => { await noServiceWorker(c); await changeAnswer(c, /\/api\/machines(\?|$)/, (real) => ({ ...real, machines: linkedTo(real) })) }
   {
     // The phone app's page: Bridge AI inside it, the computers the phone is paired with, and the app
     // itself (what it's asked, as the relay page's own screens ask it).
@@ -257,36 +261,138 @@ try {
     await ctx.close()
   }
 
-  // The desktop's bar keeps every chip.
-  {
-    const { ctx, p } = await page(b, kit.url, { mode: 'light', theme: 'sky', width: 1600, before: busy() })
-    await until(async () => (await p.locator('.topbar .usage-chip').count()) > 0, 10000)
-    const got = await p.evaluate(() => ['.needs-chip', '.setup-chip', '.meet-chip', '.usage-chip', '.update-chip', '.wx-chip', '.clock', '.sound-btn', 'button[aria-label="Settings"]'].filter((s) => document.querySelector(`.topbar ${s}`)))
-    ok(got.length === 9 && !(await p.locator('.top-notes').count()), 'desktop: the top bar still has needs you, setup, the next meeting, usage, the update, the weather, the clock, the speaker and Settings', got)
-    await ctx.close()
+  // ---------- The desktop's top bar, with everything going at once ----------
+  // Its three places (which computer, search, what's happening now) and the Status menu, with an
+  // agent waiting, a meeting on now and one next, setup going, a restart to apply, an update, usage
+  // on an account, the weather, another device, the Bridge and Herdr tabs and the desktop app's room
+  // for the Mac's window buttons. At each width from 1600 down to 900, as the window is made smaller
+  // and as it opens at that size: nothing past the bar's edge, nothing narrower than what it says
+  // (squeezed, cut off) or on two lines, and what left the bar is in the Status menu, one click away.
+  const onNow = new Date(Date.now() - 10 * 6e4)
+  const deskFakes = {
+    calendar: { today: [{ id: 'e0', title: 'APM Platform weekly review with the whole team', canceled: false, calendar: 'Work', start: onNow.toISOString(), end: new Date(+onNow + 60 * 6e4).toISOString(), allDay: false, attendees: [], attendeeCount: 6 }, ...fakes.calendar.today], tomorrow: [], fetchedAt: new Date().toISOString() },
+    quota: { ...fakes.quota, accounts: [{ kind: 'claude', accounts: [{ id: 'acct-w', label: 'Work Primary', active: true, isDefault: true, usable: true, status: 'ok', windows: fakes.quota.providers[0].windows }, { id: 'acct-p', label: 'Personal', usable: true, status: 'ok', windows: [] }] }] },
   }
-
-  // A laptop's window with as much going on: the chips give way, least needed first, and nothing
-  // runs off the window (Settings was off it).
+  const deskBusy = async (c) => {
+    await busy()(c)
+    await c.addInitScript(() => document.addEventListener('DOMContentLoaded', () => document.documentElement.classList.add('in-bridge-app', 'platform-darwin')))
+    await c.route(/\/api\/calendar(\?|$)/, (r) => r.fulfill({ json: deskFakes.calendar }))
+    await c.route(/\/api\/quota(\?|$)/, (r) => r.fulfill({ json: deskFakes.quota }))
+    await changeAnswer(c, /\/api\/config(\?|$)/, (real) => ({ ...real, runtime: { ...real.runtime, liveView: true } }))
+  }
+  // What's wrong with the bar: past its edge, narrower than what it says, a line of words broken in
+  // two; and what's in it, as each news chip and the meeting are there or not.
+  const deskBar = (p) => p.evaluate(() => {
+    const bar = document.querySelector('.topbar')
+    const br = bar.getBoundingClientRect()
+    const name = (e) => `${(e.getAttribute('aria-label') || e.innerText || e.className).trim().replace(/\s+/g, ' ').slice(0, 40)} <${e.tagName.toLowerCase()}.${String(e.className).split(' ')[0]}>`
+    const inPop = (e) => e.closest('.status-pop, .acct-pop, .update-pop, .rec-menu, .menu')
+    const out = { over: bar.scrollWidth - bar.clientWidth, past: [], squeezed: [], broken: [] }
+    for (const e of bar.querySelectorAll('*')) {
+      if (inPop(e) || !e.getClientRects().length) continue
+      const r = e.getBoundingClientRect()
+      if (r.width < 1) continue
+      if (r.right > br.right + 0.5 || r.left < br.left - 0.5) out.past.push(name(e))
+      // The computer's name is the one thing that may end in "…": its chip stops at 220px, and the
+      // whole name is there on hover.
+      if (e.matches('.mc-chip .mc-name') && e.title === e.textContent) continue
+      if (e.clientWidth && e.scrollWidth > e.clientWidth + 1) out.squeezed.push(`${name(e)} ${e.scrollWidth}>${e.clientWidth}`)
+    }
+    const walk = document.createTreeWalker(bar, NodeFilter.SHOW_TEXT)
+    for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+      if (!n.textContent.trim() || inPop(n.parentElement) || !n.parentElement.getClientRects().length) continue
+      const range = document.createRange()
+      range.selectNodeContents(n)
+      const lines = new Set([...range.getClientRects()].filter((x) => x.width > 0).map((x) => Math.round(x.top)))
+      if (lines.size > 1) out.broken.push(n.textContent.trim().slice(0, 40))
+    }
+    const shows = (s) => { const e = bar.querySelector(s); return !!e && e.getClientRects().length > 0 }
+    out.has = { setup: shows('.x-setup .setup-chip'), restart: shows('.x-restart .update-chip'), update: shows('.x-update .update-chip'), meeting: shows('.meet-chip'), needs: shows('.needs-chip'), search: shows('.search-btn'), devices: shows('.mc-chip'), status: shows('.status-btn'), settings: shows('button[aria-label="Settings"]') }
+    out.count = Number(bar.querySelector('.status-count')?.textContent || 0)
+    out.name = bar.querySelector('.mc-chip .mc-name')?.title
+    out.fit = [...bar.classList].filter((c) => c.startsWith('fit-')).length
+    return out
+  })
+  const statusRows = async (p) => {
+    const pop = p.locator('.status-pop')
+    if (!(await pop.count())) await p.locator('.topbar .status-btn').click()
+    await pop.waitFor({ timeout: 5000 }).catch(() => {})
+    await until(async () => /Setting up/.test(await pop.innerText().catch(() => '')) && /Claude/.test(await pop.innerText().catch(() => '')), 5000)
+    const text = (await pop.innerText().catch(() => '')).replace(/\s+/g, ' ')
+    await p.keyboard.press('Escape')
+    ok(!!(await until(async () => !(await pop.count()), 3000)), 'Esc closes the Status menu')
+    return text
+  }
+  const checkBar = async (p, t) => {
+    await p.waitForTimeout(500)
+    const bar = await deskBar(p)
+    ok(bar.over <= 0 && !bar.past.length, `${t}: nothing runs past the bar`, { over: bar.over, past: bar.past })
+    ok(!bar.squeezed.length && !bar.broken.length, `${t}: nothing narrower than what it says, nothing on two lines`, { squeezed: bar.squeezed, broken: bar.broken })
+    ok(bar.name === LONG_NAME, `${t}: a long computer name is whole on hover`, { name: bar.name })
+    ok(bar.has.needs && bar.has.search && bar.has.devices && bar.has.status && bar.has.settings, `${t}: what needs you, search, the computer, Status and Settings are always there`, bar.has)
+    const folded = ['setup', 'restart', 'update'].filter((k) => !bar.has[k])
+    ok(bar.count === folded.length, `${t}: the Status button counts the news that left the bar (${folded.join(', ') || 'none'})`, { count: bar.count, has: bar.has })
+    const rows = await statusRows(p)
+    const want = { setup: /Setting up · 1 of 3/, restart: /Restart Bridge AI to apply it/, update: /Bridge AI 3\.7\.0 is available/, meeting: /Now APM Platform/ }
+    const missing = Object.entries(want).filter(([k, re]) => !bar.has[k] && !re.test(rows)).map(([k]) => k)
+    ok(!missing.length && /Claude/.test(rows) && /New: Work Primary/.test(rows) && /Notification sounds/.test(rows) && /Springfield/.test(rows) && /°F/.test(rows), `${t}: what isn't in the bar is in the Status menu, with usage, sounds, the weather and the time`, { missing, rows: rows.slice(0, 400) })
+    return bar
+  }
   {
-    const { ctx, p } = await page(b, kit.url, { mode: 'light', theme: 'sky', width: 1000, before: busy() })
-    await until(async () => (await p.locator('.topbar .needs-chip').count()) > 0 && (await p.locator('.topbar .meet-chip, .topbar .usage-chip').count()) > 0, 10000)
-    await p.waitForTimeout(800)
-    const fit = await p.evaluate(() => {
-      const bar = document.querySelector('.topbar')
-      const shows = (s) => { const el = bar.querySelector(s); return !!el && el.getClientRects().length > 0 && el.getBoundingClientRect().right <= innerWidth + 0.5 }
-      return { over: bar.scrollWidth - bar.clientWidth, steps: [...bar.classList].filter((c) => c.startsWith('fit-')).length, needs: shows('.needs-chip'), sound: shows('.sound-btn'), settings: shows('button[aria-label="Settings"]'), clock: shows('.clock') }
-    })
-    ok(fit.over <= 0 && fit.steps > 0 && fit.needs && fit.sound && fit.settings && !fit.clock, 'a 1000 px window: nothing runs off it, the clock gives way first, and needs you, the speaker and Settings stay', fit)
-    await shot(p, `${tag}top-bar-1000`)
-    // The speaker: notifications without a sound, kept on the computer, and back.
-    const speaker = p.locator('.topbar .sound-btn')
-    ok((await speaker.getAttribute('aria-pressed')) === 'false' && (await kit.api('/config')).alertSounds === true, 'the speaker: notifications make a sound to begin with')
+    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky', width: 1600, before: deskBusy })
+    await until(async () => (await p.locator('.topbar .status-btn').count()) > 0 && (await p.locator('.topbar .meet-chip').count()) > 0 && (await p.locator('.topbar .x-update .update-chip').count()) > 0 && (await p.locator('.topbar .needs-chip').count()) > 0, 15000)
+    const at = {}
+    for (const w of [1600, 1440, 1280, 1100, 1000, 900]) {
+      await p.setViewportSize({ width: w, height: 900 })
+      at[w] = await checkBar(p, `desktop ${w}`)
+      if ([1600, 1280, 900].includes(w)) await shot(p, `${tag}top-bar-${w}`, { clip: { x: 0, y: 0, width: w, height: 64 } })
+    }
+    ok(at[1600].has.update && at[1600].has.meeting && at[900].fit > at[1600].fit, 'with room the update and the meeting are in the bar; on a small window more of it gives way', { 1600: at[1600].has, fit: [at[1600].fit, at[900].fit] })
+    // A font picked in Appearance: the words grow, the bar doesn't change size, and it gives way again.
+    await p.setViewportSize({ width: 1280, height: 900 })
+    await p.waitForTimeout(500)
+    await p.evaluate(() => document.documentElement.style.setProperty('--font', 'Verdana, "DejaVu Sans", Arial, sans-serif'))
+    await checkBar(p, 'a wider font at 1280')
+    await p.evaluate(() => document.documentElement.style.removeProperty('--font'))
+    // The Status menu, open: its usage row opens the account menu; sounds go off and back on.
+    await p.locator('.topbar .status-btn').click()
+    await p.locator('.status-pop .usage-chip').click()
+    ok(!!(await until(async () => /New Claude agents start on/i.test(await p.locator('.acct-pop.top').innerText().catch(() => '')), 5000)), 'Status › usage opens the account menu, for new agents')
+    await p.keyboard.press('Escape')
+    await p.locator('.topbar .status-btn').click()
+    const speaker = p.locator('.status-pop .sound-btn')
+    ok((await speaker.getAttribute('aria-checked')) === 'true' && (await kit.api('/config')).alertSounds === true, 'Status › Notification sounds: on to begin with')
     await speaker.click()
-    ok(!!(await until(async () => (await kit.api('/config')).alertSounds === false && (await speaker.getAttribute('aria-pressed')) === 'true', 5000)), 'a click mutes them, kept on the computer', await kit.api('/config').then((c) => c.alertSounds))
+    ok(!!(await until(async () => (await kit.api('/config')).alertSounds === false && (await speaker.getAttribute('aria-checked')) === 'false', 5000)), 'a click mutes them, kept on the computer', await kit.api('/config').then((c) => c.alertSounds))
     ok(/still come, without a sound/.test(await speaker.getAttribute('title')), 'and it says they still come, without a sound', await speaker.getAttribute('title'))
     await speaker.click()
-    ok(!!(await until(async () => (await kit.api('/config')).alertSounds === true && (await speaker.getAttribute('aria-pressed')) === 'false', 5000)), 'and another turns sounds back on')
+    ok(!!(await until(async () => (await kit.api('/config')).alertSounds === true && (await speaker.getAttribute('aria-checked')) === 'true', 5000)), 'and another turns sounds back on')
+    // °F and °C: two plain buttons, the one picked pressed.
+    await p.locator('.status-unit button', { hasText: '°C' }).click()
+    ok(!!(await until(async () => (await p.locator('.status-unit button', { hasText: '°C' }).getAttribute('aria-pressed')) === 'true' && /\b18°/.test(await p.locator('.status-wx-open').innerText()), 3000)), 'the weather in °C at a click', await p.locator('.status-wx-open').innerText().catch(() => ''))
+    await shot(p, `${tag}status-menu`, { clip: { x: 1280 - 420, y: 0, width: 420, height: 600 } })
+    await p.keyboard.press('Escape')
+    // Restart to apply, asked for in Settings while its chip had no room: the Status menu opens at it.
+    await p.setViewportSize({ width: 1000, height: 900 })
+    await p.waitForTimeout(600)
+    if (!(await deskBar(p)).has.restart) {
+      await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-restart')))
+      ok(!!(await until(async () => /Bridge AI applies it when it restarts/.test(await p.locator('.status-pop').innerText().catch(() => '')), 4000)), 'Restart to apply, asked for with its chip out of the bar, opens in the Status menu')
+      await p.keyboard.press('Escape')
+    }
+    // The Bridge and Herdr tabs still switch, at any width (their words go before they do).
+    await p.locator('.view-tabs button[aria-label="Herdr"]').click()
+    ok(!!(await until(async () => (await p.locator('.view-tabs button[aria-label="Herdr"]').getAttribute('aria-selected')) === 'true' && await p.locator('main.cmd').isHidden(), 4000)), 'Herdr switches to the Herdr view')
+    await p.locator('.view-tabs button[aria-label="Bridge"]').click()
+    ok(!!(await until(async () => (await p.locator('.view-tabs button[aria-label="Bridge"]').getAttribute('aria-selected')) === 'true' && await p.locator('main.cmd').isVisible(), 4000)), 'and Bridge back')
+    ok(errors.filter((e) => !/herdr|WebSocket|socket/i.test(e)).length === 0, 'desktop top bar: no page errors', errors)
+    await ctx.close()
+  }
+  for (const w of [1280, 900]) {
+    const { ctx, p } = await page(b, kit.url, { mode: 'dark', theme: 'midnight', width: w, before: deskBusy })
+    await until(async () => (await p.locator('.topbar .status-btn').count()) > 0 && (await p.locator('.topbar .needs-chip').count()) > 0 && (await p.locator('.topbar .x-update .update-chip').count()) > 0, 15000)
+    await p.waitForTimeout(800)
+    await checkBar(p, `opened at ${w}`)
     await ctx.close()
   }
 

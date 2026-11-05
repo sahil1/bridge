@@ -3,7 +3,7 @@
 // account as Personal (Claude Code's /login does that to your usual login), Personal (the default),
 // Work Secondary, whose saved sign-in ran out while a stand-in Claude Code still works on it, and
 // Work Primary. Their readings are made up here (plan usage reads real accounts), laid over the
-// server's own list, so what the app changes shows. Checks: the top bar says its account is where
+// server's own list, so what the app changes shows. Checks: the top bar's Status menu says its account is where
 // new agents start; its menu lists your usual login under that name, gives both windows and when
 // the week resets, puts the star on the default, says Work Secondary is in use, and offers to take
 // the extra one of the same account off the list; Usage details (the Today panel's Usage card) has
@@ -24,6 +24,18 @@ kit.program('claude', fs.readFileSync(path.join(TEST, 'stand-ins', 'claude.cjs')
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
 const at = (h) => new Date(Date.now() + h * 3600e3).toISOString()
+// Usage in the top bar: a row of its Status menu, which is opened for it when it isn't.
+const usageChip = (p) => {
+  const row = p.locator('.status-pop .usage-chip')
+  const open = async () => {
+    if (await row.count()) return
+    const btn = p.locator('.topbar .status-btn')
+    await btn.waitFor({ timeout: 15000 })
+    await btn.click()
+    await row.waitFor({ timeout: 15000 })
+  }
+  return { waitFor: open, innerText: async () => { await open(); return row.innerText() }, click: async () => { await open(); await row.click() } }
+}
 // Claude's accounts open in a Usage list: by its head saying so, not by rows being there yet (on a
 // slow machine they weren't, and a click then closed it).
 const openGroup = async (where) => {
@@ -85,7 +97,7 @@ try {
   for (const look of [{ mode: 'light', theme: 'sky' }, { mode: 'dark', theme: 'midnight' }]) {
     const t = look.theme
     const { ctx, p, errors } = await page(b, kit.url, { ...look, before: fake })
-    const chip = p.locator('.usage-chip').first()
+    const chip = usageChip(p)
     await chip.waitFor({ timeout: 15000 })
     const chipText = (await chip.innerText()).replace(/\s+/g, ' ')
     ok(/New:\s*Personal/.test(chipText), `${t}: the top bar says Personal is where new agents start`, chipText)
@@ -232,7 +244,7 @@ try {
     const asked = []
     let answer = true
     p.on('dialog', (d) => { asked.push(d.message()); return answer ? d.accept() : d.dismiss() })
-    const chip = p.locator('.usage-chip').first()
+    const chip = usageChip(p)
     await chip.waitFor({ timeout: 15000 })
     await chip.click()
     await p.locator('.acct-pop.top .acct-item', { hasText: 'Usage details' }).click()
@@ -389,7 +401,7 @@ try {
   for (const look of [{ mode: 'light', theme: 'sky' }, { mode: 'dark', theme: 'midnight' }, { mode: 'light', theme: 'sky', phone: true }, { mode: 'dark', theme: 'midnight', phone: true }]) {
     const t = `settings ${look.theme}${look.phone ? ' phone' : ''}`
     const { ctx, p, errors } = await page(b, kit.url, { ...look, before: fake })
-    await p.locator('.usage-chip').first().waitFor({ timeout: 15000 }).catch(() => {})
+    await p.locator('.topbar .status-btn, .tabbar button').first().waitFor({ timeout: 15000 }).catch(() => {})
     await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'accounts' } })))
     const sec = p.locator('#pv-accounts')
     await sec.waitFor({ timeout: 15000 })
