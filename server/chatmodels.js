@@ -14,7 +14,9 @@
 // as a 'tool' turn. A user turn may carry pictures (images: ['data:image/png;base64,…']) for a model
 // that can see them (canSee); other models get the words only. reply() turns that into each
 // provider's own shape (OpenAI-style, Anthropic, Bedrock's Converse) and returns { text, calls }. A
-// sign-in's one-shot mode has no tools.
+// sign-in's one-shot mode has no tools. What each answer took (tokens in and out, as the provider
+// says, and the seconds) is noted on this computer with the part of Bridge AI that asked
+// (usagelog.js).
 // Request shapes from each provider's docs: platform.claude.com (tool use), developers.openai.com
 // (function calling), docs.cohere.com/docs/compatibility-api, docs.z.ai, huggingface.co/docs/
 // inference-providers, learn.microsoft.com (Azure OpenAI v1), docs.aws.amazon.com/bedrock (Converse,
@@ -24,12 +26,13 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
-import { API, CLI, keyFor, runCli } from './consult.js'
+import { API, CLI, keyFor, oneShot, anthropicUrl } from './consult.js'
 import { installed, adapter, loginPath } from './agents.js'
 import { providerEnv, subscriptions, keysStamp } from './providers.js'
 import { moreOn, hiddenModel, OFF } from './labs.js'
 import { machine } from './machine.js'
 import * as llm from './llm.js'
+import * as usagelog from './usagelog.js'
 
 const TIMEOUT = 5 * 60 * 1000
 const until = (signal, ms = TIMEOUT) => (AbortSignal.any && signal ? AbortSignal.any([signal, AbortSignal.timeout(ms)]) : signal || AbortSignal.timeout(ms)) // any(): Node 20+
@@ -244,6 +247,9 @@ export async function models({ fresh = false } = {}) {
   return list
 }
 
+// A route by the name people know it, and how it's reached: { label, via } ('key', 'cloud', 'local').
+export const routeInfo = (route) => ({ label: (PROVIDER[route] || MORE[route]?.label || API[route]?.label || route).replace(/, on this computer$/, ''), via: /^(ollama|lmstudio|bridge)$/.test(route) ? 'local' : /^(azure|bedrock|vertex)$/.test(route) ? 'cloud' : 'key' })
+
 // How a model id reads in the chat: "GPT-5, OpenAI key"-ish, from the list when it's there.
 export function describe(id, list = cache.list || []) {
   const m = list.find((x) => x.id === id)
@@ -332,7 +338,7 @@ async function openaiStyle(who, url, headers, model, messages, { signal, tools, 
   if (Array.isArray(j.citations) && j.citations.length) text += `\n\nSources:\n${j.citations.map((u, i) => `[${i + 1}] ${u}`).join('\n')}`
   const calls = (msg.tool_calls || []).filter((c) => c.function?.name).map((c, i) => ({ id: c.id || `call_${Date.now().toString(36)}_${i}`, name: c.function.name, args: parseArgs(c.function.arguments) }))
   if (!text && !calls.length) throw new Error(msg.content || msg.reasoning_content || msg.reasoning ? `${who} only thought, and sent back no answer` : `${who} sent back an empty answer`)
-  return { text, calls }
+  return { text, calls, usage: usagelog.usageOf(j) }
 }
 const bearer = (k) => (k ? { authorization: `Bearer ${k}` } : {})
 
@@ -362,7 +368,7 @@ async function anthropicStyle(who, url, headers, body0, messages, { signal, tool
   const text = (j.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n').trim()
   const calls = (j.content || []).filter((c) => c.type === 'tool_use').map((c) => ({ id: c.id, name: c.name, args: c.input || {} }))
   if (!text && !calls.length) throw new Error(`${who} sent back an empty answer`)
-  return { text, calls }
+  return { text, calls, usage: usagelog.usageOf(j) }
 }
 
 // Bedrock's Converse API: content blocks keyed by kind ({ text }, { toolUse }, { toolResult }).
@@ -390,7 +396,7 @@ async function converse(model, messages, { signal, tools, system }) {
   const text = content.filter((c) => typeof c.text === 'string').map((c) => c.text).join('\n').trim()
   const calls = content.filter((c) => c.toolUse).map((c) => ({ id: c.toolUse.toolUseId, name: c.toolUse.name, args: c.toolUse.input || {} }))
   if (!text && !calls.length) throw new Error(`AWS Bedrock sent back an empty answer${j.stopReason ? ` (${j.stopReason})` : ''}`)
-  return { text, calls }
+  return { text, calls, usage: usagelog.usageOf(j) }
 }
 
 // ---------- Models on this computer ----------
@@ -561,7 +567,7 @@ async function ollamaChat(model, messages, o) {
   const out = unthink(msg.content)
   const calls = (msg.tool_calls || []).filter((c) => c.function?.name).map((c, n) => ({ id: c.id || `call_${Date.now().toString(36)}_${n}`, name: c.function.name, args: parseArgs(c.function.arguments) }))
   if (!out && !calls.length) throw new Error(msg.thinking || msg.content ? `${model} only thought, and sent back no answer` : 'Ollama sent back an empty answer')
-  return { text: out, calls }
+  return { text: out, calls, usage: usagelog.usageOf(j) }
 }
 
 // LM Studio: its OpenAI-style API (tools, a schema held to with `strict`), or for a plain one-off
@@ -581,7 +587,7 @@ async function lmsChat(model, messages, o) {
       const s = j.stats || {}
       measured(id, s.input_tokens > 200 && s.time_to_first_token_seconds ? s.input_tokens / s.time_to_first_token_seconds : null, s.total_output_tokens > 50 ? s.tokens_per_second : null)
       const out = unthink((j.output || []).filter((x) => x.type === 'message').map((x) => x.content).join('\n'))
-      if (out) return { text: out, calls: [] }
+      if (out) return { text: out, calls: [], usage: usagelog.usageOf(j) }
       throw new Error(`${model} sent back an empty answer`)
     }
     if (r && tooLongSaid(j)) throw tooLong(id, cap, need)
@@ -649,21 +655,29 @@ export const SMALLEST = 8192
 // json: a JSON Schema to hold the answer to, where the provider takes one (Ollama's format, LM
 // Studio's and OpenAI-style APIs' response_format); others answer in plain text, as asked.
 // think: let a model that thinks before answering do so (a chat); Bridge AI's own jobs don't wait.
-export async function reply(id, messages, { signal, tools, system = SYSTEM, json = null, think = false } = {}) {
+// feature: the part of Bridge AI asking (usagelog.js FEATURES), noted with what the answer took.
+export async function reply(id, messages, { signal, tools, system = SYSTEM, json = null, think = false, feature = null } = {}) {
   if (hiddenModel(id)) throw new Error(OFF)
+  const started = Date.now()
+  const { usage, ...r } = await answer(id, messages, { signal, tools: canUseTools(id) ? tools : null, system, json, think })
+  usagelog.record({ id, feature, usage, ms: Date.now() - started })
+  return r
+}
+async function answer(id, messages, o) {
+  const { signal, system } = o
   const [route, ...rest] = String(id || '').split(':')
   const model = rest.join(':')
-  const o = { signal, tools: canUseTools(id) ? tools : null, system, json, think }
   if (route === 'cli') {
     if (!CLI[model]) throw new Error(`Can't chat through ${model}`)
-    const text = String(await runCli(model, asTranscript(messages, system), null, {}, signal)).trim()
+    const r = await oneShot(model, asTranscript(messages, system), null, {}, signal)
+    const text = String(r.text).trim()
     if (!text) throw new Error(`${adapter(model).label} sent back an empty answer`)
-    return { text, calls: [] }
+    return { text, calls: [], usage: r.usage }
   }
   if (route === 'anthropic') {
     const key = keyFor(API.anthropic)
     if (!key) throw new Error('No Anthropic key saved. Add one in Settings › Model Providers.')
-    return anthropicStyle('Anthropic', 'https://api.anthropic.com/v1/messages', { 'x-api-key': key, 'anthropic-version': '2023-06-01' }, { model }, messages, o)
+    return anthropicStyle('Anthropic', `${anthropicUrl()}/v1/messages`, { 'x-api-key': key, 'anthropic-version': '2023-06-01' }, { model }, messages, o)
   }
   if (route === 'ollama') return ollamaChat(model, messages, o)
   if (route === 'lmstudio') return lmsChat(model, messages, o)

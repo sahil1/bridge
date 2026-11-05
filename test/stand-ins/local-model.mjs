@@ -16,7 +16,9 @@
 //   prompt longer than the loaded context is refused, in LM Studio's words. A model that thinks
 //   writes its reasoning in <think> tags at the start of an OpenAI-style answer (a draft of the JSON
 //   in it, as reasoning often has).
-// Tokens here are about 3.5 characters each.
+// Tokens here are about 3.5 characters each, and each answer says how many it read and wrote as the
+// real ones do: Ollama's prompt_eval_count and eval_count, LM Studio's stats, and usage in the
+// OpenAI-style API of both.
 // Answers: meeting notes (from the lines it was given), a part of a long meeting (the first and last
 // line numbers it saw), merged parts, who said what (JSON only when held to a schema), edit by
 // voice, and anything else: "local answer from <model>".
@@ -80,7 +82,7 @@ async function ollama(req, b, j) {
     const content = answer(cut ? text : lastUser(b.messages) || text, b.model, json)
     log({ kind: 'ollama', path: req.url, model: b.model, num_ctx: native ? b.options?.num_ctx ?? null : null, think: b.think, format: b.format ?? null, response_format: b.response_format ?? null, truncate: b.truncate, tokens: n, cut, read: lineNumbers(text), thought, user: lastUser(b.messages) })
     const stats = { prompt_eval_count: n, prompt_eval_duration: n * 2e6, eval_count: 120, eval_duration: 120 * 25e6 }
-    if (!native) return j(200, { choices: [{ message: { role: 'assistant', content } }] })
+    if (!native) return j(200, { choices: [{ message: { role: 'assistant', content } }], usage: { prompt_tokens: n, completion_tokens: tokens(content), total_tokens: n + tokens(content) } })
     return j(200, { model: b.model, done: true, message: { role: 'assistant', content, ...(thought ? { thinking: 'Let me think about this for a while.' } : {}) }, ...stats })
   }
   return j(404, { error: 'not found' })
@@ -112,7 +114,8 @@ async function lmstudio(req, b, j) {
     log({ kind: 'lmstudio', path: req.url, model: b.model, response_format: b.response_format ?? null, tokens: n, context: ctx, user: lastUser(b.messages) })
     if (n > ctx) return j(400, { error: { message: tooLong(n, ctx) } })
     const content = answer(lastUser(b.messages), b.model, b.response_format?.type === 'json_schema')
-    return j(200, { choices: [{ message: { role: 'assistant', content: m.thinks ? `<think>\nIt could be {"1": "Dan Ruiz"}, but the budget line is Priya's.\n</think>\n\n${content}` : content } }] })
+    const said = m.thinks ? `<think>\nIt could be {"1": "Dan Ruiz"}, but the budget line is Priya's.\n</think>\n\n${content}` : content
+    return j(200, { choices: [{ message: { role: 'assistant', content: said } }], usage: { prompt_tokens: n, completion_tokens: tokens(said), total_tokens: n + tokens(said) } })
   }
   return j(404, { error: { message: 'Unexpected endpoint or method.' } })
 }

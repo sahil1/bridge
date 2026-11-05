@@ -9,6 +9,7 @@ import { attachHandler } from './attach.js'
 import { makeGuard } from './guard.js'
 import { usage } from './usage.js'
 import { usageStats } from './usagestats.js'
+import * as usagelog from './usagelog.js'
 import * as files from './files.js'
 import * as pr from './pr.js'
 import * as office from './office.js'
@@ -1204,7 +1205,9 @@ app.get('/api/dictations/:id/audio', async (req, res) => {
   try { res.type('audio/wav').sendFile(await dictations.audioFile(req.params.id), { dotfiles: 'allow' }) } catch (e) { res.status(e.status || 502).json({ error: e.message }) }
 })
 // Older than you keep them for: taken out a few minutes after the start, and every six hours.
+// The usage log's old months too (it also does so itself as a new month starts).
 setTimeout(() => dictations.tidy().catch(() => {}), 3 * 60 * 1000).unref()
+setTimeout(() => usagelog.tidy().catch(() => {}), 5 * 1000).unref()
 setInterval(() => dictations.tidy().catch(() => {}), 6 * 60 * 60 * 1000).unref()
 
 // ---------- Meeting notes (meetings.js; speech engines in speech.js) ----------
@@ -2440,7 +2443,7 @@ app.post('/api/panes/:pane/terminal', wrap(async (req) => {
 // ---------- Consult another model (second opinions, live news, long documents) ----------
 consult.configure(cfg) // the model on this computer picked in Settings › Model Providers (localModel)
 app.get('/api/consult', wrap(() => consult.options()))
-app.post('/api/consult', wrap((req) => consult.ask({ ...(req.body || {}), env: undefined }, cfg)))
+app.post('/api/consult', wrap((req) => consult.ask({ ...(req.body || {}), env: undefined, feature: 'consult' }, cfg)))
 
 // ---------- Providers and MCP servers (settings) ----------
 // The models on this computer (Ollama, LM Studio), for Settings › Model Providers: how much each

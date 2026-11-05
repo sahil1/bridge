@@ -365,7 +365,7 @@ async function context(from = {}, n = 1) {
 async function ask(model, messages, system, more = {}) {
   const use = model || await helpers.pickModel?.()
   if (!use) throw Object.assign(new Error('No model to draw with yet: sign in to an agent (Claude Code, Codex…) or add a key in Settings › Model Providers'), { code: 'noModel' })
-  const r = await helpers.reply(use, messages, { system, ...more })
+  const r = await helpers.reply(use, messages, { system, ...more, feature: 'board' })
   return { text: String(r?.text || '').trim(), model: use }
 }
 

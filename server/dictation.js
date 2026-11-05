@@ -70,7 +70,7 @@ export async function edit({ text, instruction, model, reply }) {
   if (!said) throw new Error('Nothing was said about what to change')
   if (t.length > EDIT_MAX) throw new Error('That\'s more text than edit by voice takes (20,000 characters)')
   if (!model) throw new Error('Pick the model that rewrites it, in Settings › Voice › Dictation')
-  const r = await reply(model, [{ role: 'user', text: `Instruction: ${said.slice(0, 2000)}\n\nText:\n${t}` }], { system: EDIT_SYSTEM })
+  const r = await reply(model, [{ role: 'user', text: `Instruction: ${said.slice(0, 2000)}\n\nText:\n${t}` }], { system: EDIT_SYSTEM, feature: 'voice-edit' })
   let out = String(r?.text || '').trim()
   // What models put around an answer anyway: a code fence, and quotes the text didn't have.
   const fenced = /^```[\w-]*\n([\s\S]*?)\n```$/.exec(out)
