@@ -2,6 +2,20 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
+## 3.10.1
+
+The top bar shows what you pin; meeting dropdowns that open in a smaller window; AI Assist with room to read, how often it suggests, and a sort.
+
+### What's new
+
+- **Pin what you want in the top bar.** 3.10.0 moved the weather, the clock, usage and updates into the Status menu, even with room to spare. Now each item in Status has a pin (and Settings › Appearance › **In the Top Bar** has the same switches): pinned, it's in the bar as an icon and its value (☀ 20°, the time, usage's ring, the update), and pointing at it shows the details. The weather, the clock, usage, updates, a restart to apply and setup are pinned to start with, as before 3.10.0; notification sounds aren't. As the window narrows, pinned items drop their words first, then leave the bar one at a time, counted on the Status button. The choice is this computer's, the same in each of its windows. With no city picked, the weather says so (and opens the city picker); when it can't be fetched, its chip shows —, with why when you point at it.
+- **Meeting dropdowns that open in a smaller window.** In a narrower window the summary's tools (Regenerate, the language, the model and the template) wrap onto two lines, and the summary under them covered the second, so its dropdowns didn't open. They're whole again.
+- **AI Assist keeps room to read.** On a short meeting panel (a smaller window, a banner, the Agents panel under it), your notes and Assist were squeezed to a sliver and its suggestions scrolled inside it. They keep their room, and the page scrolls instead.
+- **How often AI Assist suggests**: Low, Medium or High, a slider on Assist while it records, and in Settings › Meetings, for every meeting. Low looks every few minutes and says one thing, only when something stands out; Medium is as before, about once a minute; High about every 30 seconds. A change while it records counts at once.
+- **Sort Assist's suggestions** newest first, oldest first or by kind (questions to ask first).
+- **One Who spoke** on a transcript with the other side in it, where there were two.
+- **No card about usage stats.** Usage stats and crash reports are as they were (on unless turned off); the card that said so is gone. Their switches are in Settings › About & Updates, and what's sent is in PRIVACY.md.
+
 ## 3.10.0
 
 A top bar that fits any window; Bridge AI's website at boldbridge.ai; anonymous usage stats and crash reports, on unless you turn them off; and four new parts to try: Home, Meeting Insights with the people you meet, usage across every provider, and dictation tidied before it's pasted.
