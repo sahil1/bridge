@@ -36,6 +36,7 @@ import { makeMail, setRule } from './mail.js'
 import { makeMacro } from './macro.js'
 import * as slash from './commands.js'
 import * as mentions from './mentions.js'
+import { MEETING_KEYS } from '../shared/mentions.js'
 import { promptSafe, draftIn } from './promptsafe.js'
 import { rewindAndSend, codexRewindAndSend, undoReply, btwAnswer } from './rewind.js'
 import { makeNews } from './news.js'
@@ -65,6 +66,9 @@ import * as meetWork from './meetwork.js'
 import * as speech from './speech.js'
 import * as projects from './projects.js'
 import * as calls from './calls.js'
+import * as callEvent from './callevent.js'
+import * as perf from './perf.js'
+import * as studio from './studio.js'
 import { terminals, openAttach, openCommand } from './terminal.js'
 import { mcpRoutes } from './mcp.js'
 import * as notify from './notify.js'
@@ -122,6 +126,8 @@ const news = makeNews(cfg)
 const guard = makeGuard(cfg, { tailnetOwner: phone.tailnetOwner })
 const app = express()
 app.use(guard.http)
+// Each request timed, for how Bridge AI itself is doing (perf.js).
+app.use(perf.timing)
 // Your other devices' Bridge AI, through this one (machines.js), before anything reads the body.
 app.use('/m', (req, res) => machines.proxy(req, res))
 // Saving a file from the viewer can send more than the usual 1 MB.
@@ -163,6 +169,11 @@ cloud.routes(app, { pushFleet: () => pushFleet() })
 
 // When each agent started and since when it's in its state, for the agent map (agentmap.js).
 const runs = agentMap.make({ rt, cfg })
+// Tabs you renamed: their agents go by that name everywhere (the header, the tabs, notifications),
+// over the title an agent gives its own session ("✳ Fix the login page").
+const NAMED_TABS = path.join(DATA, 'named-tabs.json')
+const namedTabs = new Set((() => { try { return JSON.parse(fs.readFileSync(NAMED_TABS, 'utf8')) } catch { return [] } })())
+const nameTab = (tabId) => { namedTabs.add(String(tabId)); try { writeFileAtomic(NAMED_TABS, JSON.stringify([...namedTabs].slice(-500))) } catch { /* named until a restart */ } }
 async function fleetView() {
   const f = await rt.fleet()
   delete f.panes
@@ -181,6 +192,7 @@ async function fleetView() {
     if (a.chief) a.title = 'Chief of Staff'
     // A fresh session has no title yet; the tab name (e.g. a routine's) says more than "Claude Code".
     else if (generic && a.tab && !/^\d+$/.test(a.tab)) a.title = a.tab
+    if (!a.chief && a.tab && namedTabs.has(String(a.tabId))) { a.ownTitle = a.title; a.title = a.tab; a.named = true }
   }
   threads.decorate(f)
   // Its space and first tab, made before 3.6 as "Chief of staff", show by its name now.
@@ -203,6 +215,9 @@ async function findAgent(paneId) {
 }
 
 app.get('/api/fleet', wrap(fleetView))
+// How Bridge AI is doing: its CPU, how long its event loop was held up, the slowest requests
+// (perf.js). reset=1: count afresh from now.
+app.get('/api/perf', wrap((req) => perf.snapshot({ reset: req.query.reset === '1' })))
 
 // Pane geometry (columns) for the terminal mirror, refreshed at most every few seconds.
 let geo = { at: 0, cols: {} }
@@ -305,6 +320,8 @@ app.get('/api/previews', wrap(async () => {
 // Any pane works here (agents and plain shells); the root is that pane's folder. A place you
 // added to Files (place:<id>) works the same way, its folder the root.
 const rootOf = async (pane) => {
+  // Studio's own folder: decks made from meetings, and new files with no folder of yours to go in.
+  if (pane === 'studio') { const d = path.join(DATA, 'studio', 'files'); fs.mkdirSync(d, { recursive: true }); return d }
   if (String(pane).startsWith('place:')) {
     const pl = places.placeOf(String(pane).slice(6))
     if (!pl) throw new Error('That place isn\'t in Files any more')
@@ -314,6 +331,57 @@ const rootOf = async (pane) => {
   if (!p) throw new Error(`No pane ${pane}`)
   return p.cwd
 }
+// ---------- Trial features ----------
+// Still being finished, so hidden until turned on in Settings › About & Updates › Trial Features
+// (trials: { studio: true } in the config; src/trials.js). Their routes answer only then.
+const TRIALS = ['studio']
+const trialOn = (id) => cfg.trials?.[id] === true
+const trialOff = (id, label) => (req, res, next) => (trialOn(id) ? next() : res.status(404).json({ error: `${label} is a trial feature. Turn it on in Settings › About & Updates › Trial Features.`, trial: id }))
+
+// ---------- Studio (studio.js) ----------
+// Its files are named as Files names them: root (an agent's pane, or place:<id>) and a path in it.
+// Ask an agent sends the change to the agent you pick (pane), or starts one in the file's folder.
+app.use('/api/studio', trialOff('studio', 'Studio'))
+const sq = (req) => ({ root: String(req.query.root || req.body?.root || ''), path: String(req.query.path || req.body?.path || '') })
+app.get('/api/studio/recent', wrap(async () => ({ files: await studio.recentFiles() })))
+app.delete('/api/studio/recent', wrap((req) => { const q = sq(req); return studio.forget(q.root, q.path) }))
+app.get('/api/studio/open', wrap(async (req) => { const q = sq(req); return studio.open(await rootOf(q.root), q.path, { rootId: q.root, label: String(req.query.where || '') || null }) }))
+// A save over a change made meanwhile is a 409, so the page offers theirs or yours.
+app.put('/api/studio/file', express.raw({ type: () => true, limit: '80mb' }), async (req, res) => {
+  try { const q = sq(req); res.json(await studio.save(await rootOf(q.root), q.path, req.body, { mtime: req.query.mtime, force: req.query.force === '1' })) } catch (e) { res.status(e.conflict ? 409 : 502).json({ error: e.message, ...(e.conflict ? { conflict: true } : {}) }) }
+})
+app.get('/api/studio/changed', wrap(async (req) => { const q = sq(req); return studio.changed(await rootOf(q.root), q.path, req.query.since) }))
+app.get('/api/studio/versions', wrap(async (req) => { const q = sq(req); return studio.versions(await rootOf(q.root), q.path) }))
+app.get('/api/studio/version', async (req, res) => {
+  try { const q = sq(req); const { file, name } = await studio.versionFile(await rootOf(q.root), q.path, String(req.query.id || '')); res.type(path.extname(file)); res.set('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(name)}`); res.sendFile(file, { dotfiles: 'allow' }) } catch (e) { res.status(e.status || 404).json({ error: e.message }) }
+})
+app.post('/api/studio/restore', wrap(async (req) => { const q = sq(req); return studio.restore(await rootOf(q.root), q.path, String(req.body?.id || '')) }))
+app.post('/api/studio/new', express.json({ limit: '30mb' }), wrap(async (req) => {
+  const q = sq(req)
+  return studio.create(await rootOf(q.root), String(req.body?.dir || ''), String(req.body?.name || ''), req.body?.data ? Buffer.from(String(req.body.data), 'base64') : Buffer.from(String(req.body?.text || '')))
+}))
+app.get('/api/studio/packs', wrap(async () => ({ packs: await studio.packs() })))
+app.post('/api/studio/packs', express.json({ limit: '1mb' }), wrap((req) => studio.savePack(req.body || {})))
+app.delete('/api/studio/packs/:id', wrap((req) => studio.removePack(req.params.id)))
+app.post('/api/studio/ask', wrap(async (req) => {
+  const q = sq(req)
+  const root = await rootOf(q.root)
+  const text = studio.askText({ rel: q.path, kind: String(req.body?.kind || ''), instruction: req.body?.instruction, selection: req.body?.selection, where: req.body?.where })
+  if (!String(req.body?.instruction || '').trim()) throw new Error('Say what to change')
+  const pane = String(req.body?.pane || '')
+  if (pane) {
+    const a = await findAgent(pane)
+    queue.add(pane, text)
+    pushFleet()
+    const name = (a.tab && !/^\d+$/.test(a.tab) ? a.tab : a.title) || adapter(a.kind).label
+    await studio.noteAsk(root, q.path, name)
+    return { paneId: pane, name }
+  }
+  const kind = String(req.body?.agent || cfg.defaultAgent || 'claude')
+  const out = await launchFrom({ kind, cwd: root, label: `Studio · ${path.basename(q.path)}`.slice(0, 60), prompt: text })
+  await studio.noteAsk(root, q.path, adapter(kind).label)
+  return { ...out, name: adapter(kind).label }
+}))
 app.get('/api/agents/:pane/files', wrap(async (req) => files.listDir(await rootOf(req.params.pane), String(req.query.path || ''), { showHidden: req.query.hidden === '1' })))
 app.get('/api/agents/:pane/file', wrap(async (req) => files.readFile(await rootOf(req.params.pane), String(req.query.path || ''))))
 app.put('/api/agents/:pane/file', async (req, res) => {
@@ -695,7 +763,7 @@ async function launchFrom(body) {
   pushFleet()
   return out
 }
-app.post('/api/tabs/:tab/rename', wrap(async (req) => { await rt.renameTab(req.params.tab, String(req.body?.label || '').trim()); pushFleet(); return { ok: true } }))
+app.post('/api/tabs/:tab/rename', wrap(async (req) => { await rt.renameTab(req.params.tab, String(req.body?.label || '').trim()); nameTab(req.params.tab); pushFleet(); return { ok: true } }))
 // Closing ends the terminal; the conversation is kept in "Closed agents" to find and resume.
 async function archiveWhere(match) {
   for (const a of (await rt.fleet()).agents.filter(match)) {
@@ -831,7 +899,10 @@ app.post('/api/agents/:pane/continue', wrap(async (req) => {
   const id = String(req.body?.account || '')
   if (!accounts.supports(a.kind) || !adapter(a.kind).resume || !a.sessionId) throw new Error(`Continuing on another account isn't available for ${adapter(a.kind).label}${a.sessionId ? '' : ' until it has a conversation'}`)
   if (!accounts.has(a.kind, id)) throw new Error('No such account')
-  if (a.status === 'working') throw new Error('The agent is working. Wait for it to finish, or press Esc, then try again.')
+  // Stopped at its usage limit, it's done for now, though its screen can still show it busy (Claude
+  // Code's working line stays up after "You've hit your weekly limit"): that's when it's wanted.
+  const atLimit = () => { try { return !!transcript(a, 1).limit } catch { return false } }
+  if (a.status === 'working' && !atLimit()) throw new Error('The agent is working. Wait for it to finish, or press Esc, then try again.')
   if (((await rt.fleet()).panes || []).some((p) => p.tabId === a.tabId && p.paneId !== a.paneId)) throw new Error('This tab has other panes. Close them first.')
   const name = a.tab && !/^\d+$/.test(a.tab) ? a.tab : a.title || adapter(a.kind).label
   // Kept in Closed agents until it's back, so a failed restart loses nothing.
@@ -1155,6 +1226,8 @@ meetings.setHelpers({
   reply: (id, msgs, o) => chatModels.reply(id, msgs, o), pickModel: pickMeetingModel, models: meetingModels, mailRelated: (o) => mail.related(o), mailMessage: (id) => mail.message(id),
   // How much a model on this computer takes at a time, and how long it takes here.
   context: (id) => chatModels.contextOf(id), tokens: chatModels.tokensOf, estimate: (id, text, out) => chatModels.estimate(id, text, out),
+  // A look at the call's window, when Screen Recording allows it (calls.js).
+  canLook: () => calls.screen(), look: (app) => calls.shot(app),
 })
 // A meeting's action items as agents and Chief of Staff's tasks (meetwork.js).
 meetWork.configure(cfg)
@@ -1219,6 +1292,8 @@ app.get('/api/meetings/since', wrap((req) => meetWork.since({ title: String(req.
 app.get('/api/meetings/search', wrap((req) => meetings.search(String(req.query.q || '').slice(0, 200), { archived: req.query.archived === '1' })))
 app.post('/api/meetings/ask', wrap((req) => meetings.askAll(String(req.body?.question || '').slice(0, 2000), { ids: [].concat(req.body?.ids || []).slice(0, 50), model: req.body?.model })))
 app.post('/api/meetings/:id/keep', wrap((req) => meetings.keep(req.params.id)))
+// Make a deck from a meeting, in Studio's own folder, to open in Studio.
+app.post('/api/meetings/:id/deck', trialOff('studio', 'Studio'), wrap((req) => meetings.deck(req.params.id, { model: req.body?.model })))
 // Meeting memory (meetmemory.js): the names and terms in your meetings, yours to edit.
 app.get('/api/meetings/memory', wrap(() => ({ terms: meetMemory.list() })))
 app.post('/api/meetings/memory', wrap((req) => meetMemory.add({ term: req.body?.term, heard: req.body?.heard, note: req.body?.note })))
@@ -1250,11 +1325,30 @@ app.get('/api/calls', wrap(() => {
   return {
     ...calls.now(), detect: cfg.meetings?.detect !== false, float: cfg.meetings?.floatCard || 'meetings', floatHover: cfg.meetings?.floatHover !== false,
     prompt: rec ? null : prompt,
-    recording: rec && { id: rec.id, title: rec.title, status: rec.status, startedAt: rec.startedAt, seconds: Math.round(meetings.elapsed(rec.id) || 0), talking: meetings.talking(rec.id), callApps: rec.callApps || [], callEnded: rec.callEnded || null, callEndedApp: rec.callEndedApp || null, stopsAt: rec.stopsAt || null, callQuiet: meetings.callQuiet(rec.id) },
+    recording: rec && { id: rec.id, title: rec.title, status: rec.status, startedAt: rec.startedAt, seconds: Math.round(meetings.elapsed(rec.id) || 0), talking: meetings.talking(rec.id), callApps: rec.callApps || [], callEnded: rec.callEnded || null, callEndedApp: rec.callEndedApp || null, endWhy: rec.endWhy || (rec.callEnded ? 'call' : null), stopsAt: rec.stopsAt || null, callQuiet: meetings.callQuiet(rec.id) },
   }
 }))
 app.post('/api/calls/dismiss', wrap(() => { prompt = null; return { ok: true } }))
+// Screen Recording, for the names a call shows as people talk: whether it's allowed, and Allow
+// (macOS's own window the first time; after that, System Settings is where it's turned on).
+app.get('/api/calls/screen', wrap(async () => ({ allowed: await calls.screen() })))
+app.post('/api/calls/screen', wrap(async (req) => { hereOnly(req, 'Allow Screen Recording'); return { allowed: await calls.screenAsk() } }))
+// The calendar event to take notes for (callevent.js): the one the call on app is for (or the call
+// on now), by its window's title, a Join in Bridge AI or when it started; with no call, the one
+// under way. others: the rest that were on, for the meeting's page to offer instead.
+app.get('/api/calls/event', wrap(async (req) => {
+  const d = await calendar().catch(() => null)
+  const events = [...(d?.today || []), ...(d?.tomorrow || [])]
+  const want = String(req.query.app || '').slice(0, 40)
+  const on = calls.now().calls
+  const call = (want && on.find((c) => c.app === want)) || (!want && on.sort((a, b) => b.since.localeCompare(a.since))[0]) || (want ? { app: want, browser: calls.BROWSERS.has(want) } : null)
+  return callEvent.pick(events, { call, titles: call?.since ? await calls.windowTitles(call.app) : [] })
+}))
 syncCalls()
+// Meetings to mention in a message, and one as a file for an agent to read (the message box's
+// meeting key, @ unless Settings › Meetings says another).
+app.get('/api/meetings/mentions', wrap((req) => ({ meetings: meetings.mentionable(req.query.q) })))
+app.post('/api/meetings/:id/for-agents', wrap((req) => meetings.forAgents(req.params.id)))
 app.get('/api/meetings/:id', wrap((req) => meetings.get(req.params.id)))
 app.post('/api/meetings/:id/audio', express.raw({ type: () => true, limit: '4mb' }), wrap((req) => meetings.audio(req.params.id, String(req.query.src || ''), req.body, req.query.seq)))
 app.post('/api/meetings/:id/pause', wrap((req) => meetings.pause(req.params.id)))
@@ -1444,6 +1538,8 @@ app.get('/api/quota', wrap((req) => quota(req.query.refresh === '1')))
 app.post('/api/quota/allow/:id', wrap((req) => quota.allow(req.params.id)))
 app.get('/api/weather', wrap(() => weather()))
 app.get('/api/calendar', wrap((req) => calendar(req.query.refresh === '1')))
+// Join clicked on an event, on any of your devices: the call that starts next is likely for it.
+app.post('/api/calendar/joined', wrap((req) => callEvent.noteJoin(req.body?.id)))
 app.get('/api/mail', wrap((req) => mail(req.query.refresh === '1')))
 app.get('/api/mail/message/:id', wrap((req) => mail.message(req.params.id)))
 app.post('/api/mail/rules', wrap((req) => { const r = setRule(req.body?.address, req.body?.rule); mail.invalidate(); return r }))
@@ -1915,6 +2011,8 @@ app.get('/api/config', (req, res) => res.json({
   defaultAgent: cfg.defaultAgent || 'claude', chiefKind: cfg.chief?.kind || 'claude', setupDone: !!cfg.setupDone, simple: !!cfg.simple,
   dictation: cfg.dictation || {}, // Settings › Voice › Dictation
   alertSounds: cfg.alertSounds !== false, // the speaker in the top bar
+  meetingKey: MEETING_KEYS.includes(cfg.meetings?.mentionKey) ? cfg.meetings.mentionKey : '@', // Settings › Meetings
+  trials: Object.fromEntries(TRIALS.map((id) => [id, trialOn(id)])), // Settings › About & Updates › Trial Features
 }))
 // The speaker in the top bar: notifications (this computer's, a browser's, your phones') come with a
 // sound, or without one; they still come. Your other devices are told too, unless one of them is

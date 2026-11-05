@@ -1,6 +1,6 @@
 # Bridge AI
 
-**The bridge between you and your AI agents.** Tell a chief of staff what you need and it hands the work to the right agent, while your agents (Claude Code, Codex, Gemini CLI, Copilot, OpenCode and others, plus cloud agents) work in parallel. Spaces keep every project organized, and one window holds every provider, on your computer and your phone.
+**The bridge between you and your AI agents.** Tell a chief of staff what you need and it hands the work to the right agent, while your agents (Claude Code, Codex, Antigravity CLI, Gemini CLI, Copilot, OpenCode and others, plus cloud agents) work in parallel. Spaces keep every project organized, and one window holds every provider, on your computer and your phone.
 
 Bridge AI runs on your device. Your agents use their own logins; Bridge AI only reads their screens and transcripts and types into them for you. Nothing else is sent anywhere, apart from anonymous usage stats and crash reports to the project, which you can turn off ([PRIVACY.md](PRIVACY.md)).
 
@@ -125,7 +125,8 @@ Bridge AI finds the agent CLIs on your PATH. Each one is described in [`server/a
 |---|---|---|---|---|
 | Claude Code | `claude` | ✓ | ✓, several accounts | subagents and background shells, slash commands, question cards, safe sending |
 | Codex | `codex` | ✓ | ✓, several accounts | slash commands, question cards, safe sending |
-| Gemini CLI | `gemini` | ✓ | ✓ (Google account) | |
+| Antigravity CLI | `agy` | terminal | in its own screen (your Google account, the first time) | what Google AI plans use since 18 June 2026 |
+| Gemini CLI | `gemini` | ✓ | ✓ (a Gemini API key, or a Code Assist licence) | |
 | GitHub Copilot CLI | `copilot` | ✓ | ✓ | |
 | Cursor Agent | `cursor-agent` | ✓ | ✓ | |
 | Qwen Code | `qwen` | ✓ | in its own screen | |

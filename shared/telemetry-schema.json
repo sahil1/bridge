@@ -39,6 +39,7 @@
   "counters": {
     "agents.started.claude": "Claude Code agents started",
     "agents.started.codex": "Codex agents started",
+    "agents.started.agy": "Antigravity CLI agents started",
     "agents.started.gemini": "Gemini CLI agents started",
     "agents.started.grok": "Grok agents started",
     "agents.started.cursor": "Cursor Agent agents started",
@@ -129,6 +130,7 @@
   "agents": [
     "claude",
     "codex",
+    "agy",
     "gemini",
     "grok",
     "cursor",
@@ -147,6 +149,7 @@
       "values": [
         "claude",
         "codex",
+        "agy",
         "gemini",
         "grok",
         "cursor",
@@ -166,6 +169,7 @@
       "values": [
         "claude",
         "codex",
+        "agy",
         "gemini",
         "grok",
         "cursor",

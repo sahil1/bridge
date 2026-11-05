@@ -16,9 +16,10 @@ const { ok, done } = checks('devices')
 const QUIET = 1500 * 2.5 // BRIDGE_LINK_PING_MS below: a quiet link is started over after this
 const relays = []
 const kits = []
-const kitWith = async (name, rel) => {
+// fast: links checked every 1.5 s (so a quiet one is seen quickly); without, as in the app (30 s).
+const kitWith = async (name, rel, { fast = true } = {}) => {
   const k = await startKit(`devices-${name.toLowerCase()}`, {
-    env: ({ data }) => { fs.writeFileSync(path.join(data, 'relay.json'), JSON.stringify(rel.relayFile)); return { BRIDGE_COMPUTER_NAME: name, BRIDGE_LINK_PING_MS: '1500' } },
+    env: ({ data }) => { fs.writeFileSync(path.join(data, 'relay.json'), JSON.stringify(rel.relayFile)); return { BRIDGE_COMPUTER_NAME: name, ...(fast ? { BRIDGE_LINK_PING_MS: '1500' } : {}) } },
   })
   kits.push(k)
   return k
@@ -60,6 +61,18 @@ try {
   await ra.drop()
   ok(!!(await online(b, 'Studio')), 'a dropped connection comes back by itself')
 
+  // ---------- one that drops while something of Studio's is on its way ----------
+  // Asked again once the link is back: a window opened then showed the error as its page, or
+  // stayed white for want of its code.
+  const net = (r, q = '') => fetch(`${r.url}/_test/net${q}`, { method: 'POST' })
+  await net(ra, '?ms=400')
+  const inFlight = fetch(`${b.url}/m/${studio.id}/api/version`).then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) }))
+  await sleep(200)
+  await ra.drop()
+  const got = await inFlight
+  await net(ra)
+  ok(got.status === 200 && !!got.json?.version, 'something of Studio\'s asked for as its link drops is asked again once it\'s back, and comes', got)
+
   // ---------- Studio drops off the network without a word (Wi-Fi off, a lid closed on the move) ----------
   // Its relay hears nothing either way, and kept saying it was there: Laptop asks Studio itself.
   const ctl = (r, what) => fetch(`${r.url}/_test/${what}`, { method: 'POST' }).then((x) => x.json())
@@ -75,11 +88,33 @@ try {
   const relinkedIn = backOn ? Date.now() - t0 : null
   ok(relinkedIn != null && relinkedIn < 12000, `back on the network: linked again in ${relinkedIn} ms (limit 12 s)`, await other(b, 'Studio'))
 
+  // ---------- a link that dies without a word, then something's asked of it ----------
+  // Desk checks its links as the app does (every 30 s). Its link to Studio goes dead without a word
+  // (its relay hears nothing either way): what you click there is answered within seconds, on a new
+  // link, rather than waiting on the dead one until its next check (up to 75 s).
+  const rd = await startRelay('devices-desk')
+  relays.push(rd)
+  const desk = await kitWith('Desk', rd, { fast: false })
+  ok(!!(await until(async () => (await desk.api('/relay')).online, 20000)), 'Desk, which checks its links every 30 s, is on its relay')
+  await desk.api('/machines', { link: (await a.api('/relay/pair', {})).pairing.link })
+  ok(!!(await online(desk, 'Studio')), 'and linked with Studio')
+  const studioOnDesk = await other(desk, 'Studio')
+  await fetch(`${ra.url}/_test/silence`, { method: 'POST' }) // Studio's relay: the devices' connections to it go dead
+  ok((await other(desk, 'Studio'))?.online === true, 'Studio still looks online to Desk')
+  t0 = Date.now()
+  const late = await fetch(`${desk.url}/m/${studioOnDesk.id}/api/version`).then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) }), (e) => ({ error: e.message }))
+  const lateIn = Date.now() - t0
+  ok(late.status === 200 && !!late.json?.version && lateIn < 20000, `something asked of Studio on the dead link is answered in ${lateIn} ms, on a new one (limit 20 s; it waited for the next check)`, late)
+
   // ---------- a new link that doesn't work, for a device that's linked ----------
   // (Pasted while Studio is closed, so it's tried as Studio comes back; it used to stop the link
   // for good, until Bridge AI was restarted.)
   a.stop()
   ok(!!(await until(async () => (await other(b, 'Studio'))?.online === false, 15000, 200)), 'Studio quit: Laptop sees it offline')
+  // Its page meanwhile, in a window: that it isn't reachable, trying again by itself (not the error as the page).
+  const away = await fetch(`${b.url}/m/${studio.id}/`, { headers: { accept: 'text/html' } })
+  const awayHtml = await away.text()
+  ok(away.status === 503 && /Studio isn't reachable/.test(awayHtml) && /http-equiv="refresh"/.test(awayHtml) && /Trying again/.test(awayHtml), 'a page of Studio\'s while it\'s away says it isn\'t reachable, and tries again by itself', { status: away.status, html: awayHtml.slice(0, 300) })
   const pasted = b.api('/machines', { link: `${ra.url}/#pair=AAAA-BBBB-CCCC-DDDD-EEEE` }).then((r) => r, (e) => ({ error: e.message }))
   await a.restart()
   const bogus = await pasted

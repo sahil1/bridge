@@ -7,9 +7,30 @@
 //   {"input":[{"pid":123,"bundle":"us.zoom.xos"}]}
 // Checks twice a second (a handful of property reads). Exits on SIGTERM, when stdout closes, or
 // when the process that started it goes.
+//
+//   callwatch windows <bundle id>...   the titles of those apps' windows, once, which say which
+//                                      meeting a call is (Teams names it in its window's title, a
+//                                      browser the tab in front). Only when macOS already lets
+//                                      Bridge AI read them, through Accessibility, else Screen
+//                                      Recording: it never asks. One line, then it exits:
+//     {"by":"accessibility","windows":[{"bundle":"com.microsoft.teams2","title":"Weekly sync | Microsoft Teams"}]}
+//     {"by":null,"windows":[]}         when it isn't allowed to read them
+//   callwatch screen                   whether macOS lets Bridge AI see windows (Screen Recording),
+//                                      without asking: {"allowed":true}
+//   callwatch screen-ask               the same, asking macOS the first time (its own window, from
+//                                      Allow on a meeting): {"allowed":false}
+//   callwatch shot <out.png> <bundle id>...   a picture of the biggest window those apps have on
+//                                      screen (the call's), for the names it shows as people talk.
+//                                      Never asks: {"ok":true} or {"error":"not-allowed"|"no-window"}
+//
 //   swiftc -O -target arm64-apple-macos14.0 native/callwatch.swift -o native/bin/callwatch
+import AppKit
+import ApplicationServices
 import CoreAudio
 import Foundation
+import ImageIO
+import ScreenCaptureKit
+import UniformTypeIdentifiers
 
 func address(_ sel: AudioObjectPropertySelector) -> AudioObjectPropertyAddress {
   AudioObjectPropertyAddress(mSelector: sel, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
@@ -53,7 +74,74 @@ func quote(_ s: String) -> String {
   return String(arr.dropFirst().dropLast())
 }
 
+func windowTitles(_ bundles: [String]) -> (by: String?, windows: [(bundle: String, title: String)]) {
+  let apps = bundles.flatMap { NSRunningApplication.runningApplications(withBundleIdentifier: $0) }
+  var out: [(bundle: String, title: String)] = []
+  if AXIsProcessTrusted() {
+    for app in apps {
+      let el = AXUIElementCreateApplication(app.processIdentifier)
+      AXUIElementSetMessagingTimeout(el, 1.0) // an app that's stuck doesn't hold us up
+      var value: CFTypeRef?
+      guard AXUIElementCopyAttributeValue(el, kAXWindowsAttribute as CFString, &value) == .success, let windows = value as? [AXUIElement] else { continue }
+      for w in windows {
+        var title: CFTypeRef?
+        if AXUIElementCopyAttributeValue(w, kAXTitleAttribute as CFString, &title) == .success, let s = title as? String, !s.isEmpty { out.append((app.bundleIdentifier ?? "", s)) }
+      }
+    }
+    return ("accessibility", out)
+  }
+  if CGPreflightScreenCaptureAccess() {
+    var bundleOfPid: [pid_t: String] = [:]
+    for app in apps { bundleOfPid[app.processIdentifier] = app.bundleIdentifier ?? "" }
+    let list = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+    for w in list {
+      guard let pid = w[kCGWindowOwnerPID as String] as? pid_t, let b = bundleOfPid[pid], (w[kCGWindowLayer as String] as? Int) == 0,
+            let s = w[kCGWindowName as String] as? String, !s.isEmpty else { continue }
+      out.append((b, s))
+    }
+    return ("screen", out)
+  }
+  return (nil, [])
+}
+
+// The call's window, as a PNG at out: the biggest one on screen of those apps.
+func shot(_ out: String, _ bundles: [String]) -> String {
+  if !CGPreflightScreenCaptureAccess() { return "{\"error\":\"not-allowed\"}" }
+  let done = DispatchSemaphore(value: 0)
+  var said = "{\"error\":\"no-window\"}"
+  Task.detached {
+    defer { done.signal() }
+    guard let content = try? await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true) else { return }
+    let wins = content.windows.filter { w in bundles.contains(w.owningApplication?.bundleIdentifier ?? "") && w.windowLayer == 0 && w.frame.width >= 320 && w.frame.height >= 200 }
+    guard let w = wins.max(by: { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }) else { return }
+    let cfg = SCStreamConfiguration()
+    // Enough to read names on tiles; no bigger than 1600 wide.
+    let scale = min(2.0, 1600.0 / max(1.0, Double(w.frame.width)))
+    cfg.width = Int(Double(w.frame.width) * scale)
+    cfg.height = Int(Double(w.frame.height) * scale)
+    cfg.showsCursor = false
+    guard let img = try? await SCScreenshotManager.captureImage(contentFilter: SCContentFilter(desktopIndependentWindow: w), configuration: cfg),
+          let dest = CGImageDestinationCreateWithURL(URL(fileURLWithPath: out) as CFURL, UTType.png.identifier as CFString, 1, nil) else { return }
+    CGImageDestinationAddImage(dest, img, nil)
+    if CGImageDestinationFinalize(dest) { said = "{\"ok\":true}" }
+  }
+  _ = done.wait(timeout: .now() + 8)
+  return said
+}
+
 signal(SIGPIPE, SIG_DFL) // stdout closed: the server has gone, so do we
+let args = CommandLine.arguments.dropFirst()
+if args.first == "screen" { print("{\"allowed\":\(CGPreflightScreenCaptureAccess())}"); exit(0) }
+if args.first == "screen-ask" { print("{\"allowed\":\(CGRequestScreenCaptureAccess())}"); exit(0) }
+if args.first == "shot", args.count >= 3 {
+  print(shot(Array(args)[1], Array(args.dropFirst(2))))
+  exit(0)
+}
+if args.first == "windows" {
+  let (by, windows) = windowTitles(Array(args.dropFirst()))
+  print("{\"by\":\(by.map(quote) ?? "null"),\"windows\":[" + windows.map { "{\"bundle\":\(quote($0.bundle)),\"title\":\(quote($0.title))}" }.joined(separator: ",") + "]}")
+  exit(0)
+}
 let parent = getppid()
 var last = ""
 while true {

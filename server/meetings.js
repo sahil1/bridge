@@ -26,6 +26,7 @@ import * as voices from './voices.js'
 import * as doctext from './doctext.js'
 import { canOpen } from './files.js'
 import { mayLook, noteAsked } from './projects.js'
+import { isLimit } from './consult.js'
 
 const DIR = path.join(DATA, 'meetings')
 const RATE = 16000
@@ -142,14 +143,14 @@ export function transcript(id, { raw = false, clean = true, dropped = false } = 
   const drop = new Set(c?.drop || [])
   let one = null
   try { one = onlyGuest(meta(id)) } catch { /* gone */ }
-  // In a room (your mic only), each of your lines' voice (voices.js): Speaker n, or the name given
-  // to that voice, or you. A name you gave the line itself comes first.
+  // Each line's voice (voices.js), on the side told apart: your mic's in a room, the call's on a
+  // call. Speaker n, or the name given to that voice, or you. A name you gave the line comes first.
   const room = voices.of(id)
   const voiceOf = (l, k) => {
-    const n = l.src === 'you' && room?.speakers >= 2 ? room.line?.[k] : null
+    const n = l.src === (room?.src || 'you') && room?.speakers >= 2 ? room.line?.[k] : null
     if (!n) return {}
     const v = room.names?.[n]
-    return v?.me ? { voice: n, me: true } : v?.name ? { voice: n, name: v.name, guess: !!v.guess, ...(v.byVoice ? { byVoice: true } : {}) } : { voice: n }
+    return v?.me ? { voice: n, me: true, ...(v.byVoice ? { byVoice: true } : {}) } : v?.name ? { voice: n, name: v.name, guess: !!v.guess, ...(v.byVoice ? { byVoice: true } : {}) } : { voice: n }
   }
   const out = []
   for (const l of kept) {
@@ -367,7 +368,7 @@ async function run(job) {
       append(job.id, line)
       if (!job.retry) assistSoon(job.id)
       // In a room, whose voice it was, while it records (voices.js decides whether it can).
-      if (job.src === 'you' && !job.retry) voices.heard(job.id, line, job.pcm, lines(job.id)).catch(() => {})
+      if (!job.retry) voices.heard(job.id, line, job.pcm, lines(job.id)).catch(() => {})
     }
     // Its line is in: the words heard so far for it go.
     const so = live.get(job.id)?.sources[job.src]
@@ -396,14 +397,21 @@ function settle(id) {
   // turned it on (someone who keeps the transcript from a model until they ask isn't surprised).
   const clean = (cfg.meetings?.cleanup ?? cfg.meetings?.autoSummary !== false) && transcript(id).filter((l) => l.text).length >= 3
   const sum = cfg.meetings?.autoSummary !== false
-  // In a room, the voices told apart first (the lines heard while it recorded are done already),
-  // so the summary can say who said what.
-  const room = voices.wanted(lines(id))
-  if (!clean && !sum && !room) return
+  // The voices told apart first (in a room, or the call's; the lines heard while it recorded are
+  // done already), so the summary can say who said what. On a call, your voice is learned from
+  // your mic too, so a room knows you.
+  const ls = lines(id)
+  const room = voices.wanted(ls, { guests: m.event?.attendees ? guests(m).length : null })
+  const learn = voices.sideOf(ls) === 'them' && cfg.meetings?.learnVoice !== false
+  if (!clean && !sum && !room && !learn) { resave(id); return }
   ;(async () => {
-    if (room) await voices.tell(id, lines(id)).then(() => voices.wait(id)).catch(() => {})
+    if (room) await voices.tell(id, ls).then(() => voices.wait(id)).catch(() => {})
+    if (learn) await voices.learnMe(id, transcript(id, { raw: true })).catch(() => {})
     if (clean) await cleanup(id).catch(() => {})
     if (sum && transcriptText(id)) await summarize(id).catch(() => {})
+    // Saved by itself (Settings › Meetings) with its summary, or without one when it couldn't be
+    // written: the transcript and your notes, and the summary once it is.
+    resave(id)
   })()
 }
 
@@ -528,7 +536,7 @@ export function callQuiet(id) {
 }
 
 export function pause(id) { return patchMeta(id, { status: meta(id).status === 'recording' ? 'paused' : meta(id).status }) }
-export function resume(id) { return patchMeta(id, { status: meta(id).status === 'paused' ? 'recording' : meta(id).status }) }
+export function resume(id) { return patchMeta(id, meta(id).status === 'paused' ? { status: 'recording', keptAt: new Date().toISOString() } : {}) }
 
 export async function stop(id) {
   const m = meta(id)
@@ -554,32 +562,83 @@ const recordingNow = () => list().filter((m) => m.status === 'recording' || m.st
 export function callStarted(app) {
   for (const m of recordingNow()) {
     clearTimeout(stopping.get(m.id)); stopping.delete(m.id)
-    patchMeta(m.id, { callApps: [...new Set([...(m.callApps || []), app])], callEnded: null, callEndedApp: null })
+    patchMeta(m.id, { callApps: [...new Set([...(m.callApps || []), app])], callEnded: null, callEndedApp: null, endWhy: null, stopsAt: null })
   }
 }
 // still: the apps on a call now. A meeting on two (Zoom, and Meet in a browser) ends with the last.
 export function callEnded(app, still = []) {
-  for (const m of recordingNow().filter((x) => (x.callApps || []).includes(app) && !x.callApps.some((a) => still.includes(a)))) {
-    patchMeta(m.id, { callEnded: new Date().toISOString(), callEndedApp: app, stopsAt: cfg.meetings?.autoStop !== false ? new Date(Date.now() + AUTO_STOP_MS).toISOString() : null })
-    if (cfg.meetings?.autoStop === false) continue
-    clearTimeout(stopping.get(m.id))
-    stopping.set(m.id, setTimeout(() => {
-      stopping.delete(m.id)
-      const x = meta(m.id)
-      if (x.callEnded && (x.status === 'recording' || x.status === 'paused')) stop(m.id).catch(() => {})
-    }, AUTO_STOP_MS))
-  }
+  for (const m of recordingNow().filter((x) => (x.callApps || []).includes(app) && !x.callApps.some((a) => still.includes(a)))) ending(m.id, { app, why: 'call' })
 }
-// "Keep recording": the call ended, but the meeting goes on.
+// The meeting seems to be over (why: its call ended; over, its calendar time is up and it's gone
+// quiet; or quiet, nobody heard for a long while): the app asks whether to stop, with the floating
+// card up. stops: it also stops by itself AUTO_STOP_MS later (unless that's turned off); without,
+// it only asks.
+function ending(id, { app = null, why, stops = true }) {
+  const auto = stops && cfg.meetings?.autoStop !== false
+  patchMeta(id, { callEnded: new Date().toISOString(), callEndedApp: app, endWhy: why, stopsAt: auto ? new Date(Date.now() + AUTO_STOP_MS).toISOString() : null })
+  clearTimeout(stopping.get(id)); stopping.delete(id)
+  if (!auto) return
+  stopping.set(id, setTimeout(() => {
+    stopping.delete(id)
+    const x = meta(id)
+    if (x.callEnded && (x.status === 'recording' || x.status === 'paused')) stop(id).catch(() => {})
+  }, AUTO_STOP_MS))
+}
+// "Keep recording": the call ended or it went quiet, but the meeting goes on. Quiet again from now
+// counts afresh.
 export function keep(id) {
   clearTimeout(stopping.get(id)); stopping.delete(id)
-  return patchMeta(id, { callEnded: null, callEndedApp: null, stopsAt: null })
+  return patchMeta(id, { callEnded: null, callEndedApp: null, endWhy: null, stopsAt: null, keptAt: new Date().toISOString() })
 }
+// A meeting that's over ends too, as Granola's do, without ending one that runs over: while its
+// calendar time lasts, quiet says nothing. Once its time is up, nobody heard (on your mic or the
+// call) for QUIET_OVER_MS brings the card up to ask, and for QUIET_END_MS it stops by itself. With
+// no calendar time to go by, it asks after QUIET_REMIND_MS of quiet and stops after QUIET_LONG_MS.
+// Quiet counts from the last thing said (or Keep recording, or Resume), and someone talking again
+// takes the question back. For a meeting in a room, and a call whose app keeps the mic once it's over.
+const QUIET_OVER_MS = Number(process.env.BRIDGE_QUIET_OVER_MS || 90_000)
+const QUIET_END_MS = Number(process.env.BRIDGE_QUIET_END_MS || 5 * 60_000)
+const QUIET_REMIND_MS = Number(process.env.BRIDGE_QUIET_REMIND_MS || 10 * 60_000)
+const QUIET_LONG_MS = Number(process.env.BRIDGE_QUIET_LONG_MS || 30 * 60_000)
+export function checkQuiet(now = Date.now()) {
+  for (const m of recordingNow()) {
+    const l = live.get(m.id)
+    if (m.status !== 'recording' || !l) continue
+    const said = Math.max(0, ...Object.values(l.sources).map((s) => s.talkingAt || 0))
+    if (m.callEnded && m.endWhy !== 'call' && said > Date.parse(m.callEnded)) {
+      clearTimeout(stopping.get(m.id)); stopping.delete(m.id)
+      patchMeta(m.id, { callEnded: null, callEndedApp: null, endWhy: null, stopsAt: null })
+      continue
+    }
+    // On a call whose sound isn't heard (macOS not letting Bridge AI hear it yet), quiet says nothing.
+    if (!said || cfg.meetings?.quietEnd === false || (m.call === 'on' && !l.sources.them?.heard)) continue
+    if (m.callEnded && (m.endWhy === 'call' || m.stopsAt)) continue
+    const end = m.event?.end ? Date.parse(m.event.end) : null
+    if (end && now <= end) continue
+    const quiet = now - Math.max(said, Date.parse(m.keptAt || 0) || 0)
+    const why = end ? 'over' : 'quiet'
+    if (quiet >= (end ? QUIET_END_MS : QUIET_LONG_MS)) ending(m.id, { why })
+    else if (!m.callEnded && quiet >= (end ? QUIET_OVER_MS : QUIET_REMIND_MS)) ending(m.id, { why, stops: false })
+  }
+}
+setInterval(() => { try { checkQuiet() } catch { /* a meeting gone */ } }, Number(process.env.BRIDGE_QUIET_CHECK_MS || 10_000)).unref?.()
 
 // A recording left open when the app closed: what was transcribed stays; it's marked stopped.
 export function recover() {
   for (const m of list()) {
     if (m.status === 'recording' || m.status === 'paused' || m.status === 'transcribing') saveMeta({ ...m, status: 'done', endedAt: m.endedAt || m.startedAt })
+    // Notes that are only a model's "You've hit your weekly limit" (saved as the notes before 3.9.3,
+    // when a command line's limit message passed for its answer): set aside (summary-limit.md) and
+    // written again, as a summary that couldn't be.
+    const sum = path.join(DIR, m.id, 'summary.md')
+    try {
+      const text = fs.statSync(sum).size < 600 ? fs.readFileSync(sum, 'utf8').trim() : ''
+      if (text && isLimit(text)) {
+        fs.renameSync(sum, path.join(DIR, m.id, 'summary-limit.md'))
+        m.summaryRetryAt = new Date(Date.now() + 5_000).toISOString()
+        saveMeta({ ...meta(m.id), summaryError: `The notes weren't written: ${text.split('\n')[0].slice(0, 200)}`, summaryRetryAt: m.summaryRetryAt })
+      }
+    } catch { /* no notes yet */ }
     // A summary that was waiting to be tried again still is.
     if (m.summaryRetryAt && !fs.existsSync(path.join(DIR, m.id, 'summary.md'))) {
       later.set(m.id, setTimeout(() => { later.delete(m.id); summarize(m.id, { again: true }).catch(() => {}) }, Math.max(5000, Date.parse(m.summaryRetryAt) - Date.now())))
@@ -680,7 +739,7 @@ export function get(id) {
   // me: your name (Settings › General), for your lines.
   // In a room: how many voices, and telling them apart while it's going (the model downloading).
   const room = voices.of(id)
-  return { ...m, voices: room ? { speakers: room.speakers, names: room.names || {}, at: room.at } : null, voicesWork: voices.working(id), links, captures: m.captures || [], canRead: !!doctext.ocrBin(), me: String(cfg.name || '').trim() || null, levels, callQuiet: quiet, partial: soFar(id), transcript: transcript(id, { dropped: true }), notes: readText(path.join(d, 'notes.md')), summary: readText(path.join(d, 'summary.md')), waiting: waiting(id), pending: pending.length, saved: m.saved || null, progress, assistItems: help.items.filter((x) => x.state !== 'dismissed').slice(-20), assistError: help.error || null, assisting: assisting.has(id) }
+  return { ...m, voices: room ? { src: room.src || 'you', speakers: room.speakers, names: room.names || {}, at: room.at } : null, voicesWork: voices.working(id), links, captures: m.captures || [], canRead: !!doctext.ocrBin(), me: String(cfg.name || '').trim() || null, levels, callQuiet: quiet, partial: soFar(id), transcript: transcript(id, { dropped: true }), notes: readText(path.join(d, 'notes.md')), summary: readText(path.join(d, 'summary.md')), waiting: waiting(id), pending: pending.length, saved: m.saved || null, progress, assistItems: help.items.filter((x) => x.state !== 'dismissed').slice(-20), assistError: help.error || null, assistAt: help.at || null, assisting: assisting.has(id) }
 }
 
 export function setKind(id, kind) { return patchMeta(id, { kind: KINDS[kind] ? kind : 'general', kindPicked: true }) }
@@ -864,7 +923,9 @@ export async function nameSpeakers(id, { model } = {}) {
   const m = meta(id)
   const use = model || m.summaryModelPick || cfg.meetings?.model || await helpers.pickModel()
   if (!use) throw noModel()
-  if (voices.of(id)?.speakers >= 2 && !transcript(id).some((l) => l.src === 'them' && l.text)) return nameVoices(id, use)
+  const told = voices.of(id)
+  if (told?.speakers >= 2 && (told.src || 'you') === 'you' && !transcript(id).some((l) => l.src === 'them' && l.text)) return nameVoices(id, use)
+  if (told?.speakers >= 2 && told.src === 'them') return nameVoices(id, use, { call: true })
   const said = transcript(id).filter((l) => l.text)
   if (!said.some((l) => l.src === 'them')) throw new Error('Nobody on the call was heard in this meeting')
   const me = String(cfg.name || '').trim()
@@ -909,21 +970,29 @@ export async function nameSpeakers(id, { model } = {}) {
   return { ok: true, named: n, of: byN.size, model: used }
 }
 
-// In a room, the same for its voices: each Speaker n named from what's said ("Thanks, Priya"), who
-// was invited, and which of them is you. A voice you named yourself is left as it is; one it can't
-// place stays Speaker n.
-async function nameVoices(id, use) {
+// The same for told-apart voices: each Speaker n named from what's said ("Thanks, Priya"), who was
+// invited and, in a room, which of them is you; on a call, also from the names its window showed as
+// they talked (glances). A voice you named yourself is left as it is; one it can't place stays
+// Speaker n.
+async function nameVoices(id, use, { call = false } = {}) {
   const m = meta(id)
   const said = transcript(id).filter((l) => l.text)
   const room = voices.of(id)
   const me = String(cfg.name || '').trim()
   const people = guests(m)
-  const rows = said.map((l) => `[${clock(l.t0)}] ${l.voice ? `Speaker ${l.voice}` : me || 'You'}: ${l.text}`)
+  const screens = call ? [...(m.captures || []).filter((c) => c.text).map((c) => ({ t: c.t, screen: c.text.replace(/\s+/g, ' ').slice(0, 300) })), ...glances(id).map((g) => ({ t: g.t, screen: g.text.slice(0, 500), talking: true }))] : []
+  const rows = [...said, ...screens].sort((a, b) => (a.t0 ?? a.t) - (b.t0 ?? b.t)).map((l) => (l.screen ? `    [${clock(l.t)}] On the screen${l.talking ? ' as someone on the call talked' : ''}: ${l.screen}`
+    : `[${clock(l.t0)}] ${l.voice ? `Speaker ${l.voice}` : call && l.src === 'them' ? 'Someone on the call' : me || 'You'}: ${l.text}`))
   const mem = memory.about(`${m.title}\n${people.join('\n')}\n${said.map((l) => l.text).join('\n')}`)
-  const ask = [`Meeting: ${m.title}`, people.length ? `Invited, besides the person recording: ${people.join(', ')}` : 'There is no list of who was invited, but the meeting\'s name may say who it was with.', me ? `The person recording it is ${me}.` : '', mem ? `\n${mem}` : '', '',
-    `This meeting was in a room with one microphone, and the voices were told apart by how they sound: Speaker 1 to Speaker ${room.speakers}. Say who each speaker is, from what was said (names used, introductions, a question put to someone and their answer), who was invited and the meeting's name. One of them is usually the person recording it: say "me" for that one.`,
-    'Use names the way they were invited or said. When you can\'t tell, use null: a wrong name is worse than none.',
-    'Answer with one JSON object and nothing else, from speaker number to name, like {"1": "me", "2": "Priya Shah", "3": null}.'].filter((x) => x !== null).join('\n')
+  const ask = call
+    ? [`Meeting: ${m.title}`, people.length ? `Invited, besides You: ${people.join(', ')}` : 'There is no list of who was invited, but the meeting\'s name may say who it was with.', me ? `"You" is ${me}, who recorded it, on their own microphone.` : '"You" is the person who recorded it, on their own microphone.', mem ? `\n${mem}` : '', '',
+      `Everyone else on this call shares one sound, and their voices were told apart by how they sound: Speaker 1 to Speaker ${room.speakers}. Say who each voice on the call is, from what was said (names used, introductions, a question put to someone and their answer), the words on the screen at the time (a call's window shows names on its tiles, "Talking: ..." labels and captions with who said them), who was invited and the meeting's name. None of them is You.`,
+      'Use names the way they were invited or said. When you can\'t tell, use null: a wrong name is worse than none.',
+      'Answer with one JSON object and nothing else, from speaker number to name, like {"1": "Priya Shah", "2": null}.'].join('\n')
+    : [`Meeting: ${m.title}`, people.length ? `Invited, besides the person recording: ${people.join(', ')}` : 'There is no list of who was invited, but the meeting\'s name may say who it was with.', me ? `The person recording it is ${me}.` : '', mem ? `\n${mem}` : '', '',
+      `This meeting was in a room with one microphone, and the voices were told apart by how they sound: Speaker 1 to Speaker ${room.speakers}. Say who each speaker is, from what was said (names used, introductions, a question put to someone and their answer), who was invited and the meeting's name. One of them is usually the person recording it: say "me" for that one.`,
+      'Use names the way they were invited or said. When you can\'t tell, use null: a wrong name is worse than none.',
+      'Answer with one JSON object and nothing else, from speaker number to name, like {"1": "me", "2": "Priya Shah", "3": null}.'].filter((x) => x !== null).join('\n')
   const got = {}
   let used = use
   await roomy(use, 'working out who said what')
@@ -940,7 +1009,7 @@ async function nameVoices(id, use) {
     if (!(s >= 1 && s <= room.speakers) || (was && !was.guess && !was.byVoice) || typeof name !== 'string') continue
     const v = clean(name, 80)
     const isMe = /^(me|you|myself)$/i.test(v) || (me && sameName(v, me))
-    if (!v || /^(null|unknown|speaker \d+)$/i.test(v) || taken.has(isMe ? ':me' : v)) continue
+    if (!v || /^(null|unknown|speaker \d+|them)$/i.test(v) || taken.has(isMe ? ':me' : v) || (call && isMe)) continue
     await voices.name(id, s, isMe ? { me: true, guess: true } : { name: v, guess: true })
     taken.add(isMe ? ':me' : v)
     n++
@@ -1047,16 +1116,18 @@ export function uncleanLine(id, key) {
   return { ok: true }
 }
 
-// The calendar event a meeting was for, picked afterwards (when it was recorded without one): its
-// people, its time and its links. The name too, while it's still the one it started with. Who said
-// what is worked out again with its people, at the next summary.
+// The calendar event a meeting was for, picked afterwards (when it was recorded without one, or
+// with another that was on then): its people, its time and its links, in place of the other's. The
+// name too, while it's still the one it started with or the other event's. Who said what is worked
+// out again with its people, at the next summary.
 export function setEvent(id, event) {
   const m = meta(id)
   if (!event?.title) throw new Error('No event')
   const ev = eventOf(event)
-  const plain = /^(Meeting|.+ call), /.test(m.title) || m.title === 'Meeting'
-  const have = new Set((m.links || []).map((l) => l.url || l.path))
-  const p = patchMeta(id, { event: ev, namedAt: null, ...(plain ? { title: ev.title } : {}), ...guessKind(m, `${plain ? ev.title : m.title} ${ev.title}`), links: [...(m.links || []), ...inviteLinks(event).filter((l) => !have.has(l.url || l.path))] })
+  const plain = /^(Meeting|.+ call), /.test(m.title) || m.title === 'Meeting' || (!!m.event?.title && m.title === m.event.title)
+  const kept = (m.links || []).filter((l) => !(m.event && l.from === 'invite'))
+  const have = new Set(kept.map((l) => l.url || l.path))
+  const p = patchMeta(id, { event: ev, namedAt: null, ...(plain ? { title: ev.title } : {}), ...(m.event && !m.kindPicked ? { kind: kindOf(`${plain ? ev.title : m.title} ${ev.title}`) } : guessKind(m, `${plain ? ev.title : m.title} ${ev.title}`)), links: [...kept, ...inviteLinks(event).filter((l) => !have.has(l.url || l.path))] })
   resave(id, 1000)
   return p
 }
@@ -1220,8 +1291,9 @@ const glancesFile = (id) => path.join(dirOf(id), 'glances.jsonl')
 export const glances = (id) => readText(glancesFile(id)).split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l) } catch { return null } }).filter((g) => g?.text)
 const lastGlance = new Map() // id -> { text, n }: the last look kept, and how many
 let glancing = false
-export async function glance(id, buf) {
+export async function glance(id, buf, { auto = false } = {}) {
   const m = meta(id)
+  if (!auto) pageLook.set(id, Date.now())
   if (cfg.meetings?.nameSpeakers === false) return { kept: false, stop: 'off' }
   if (!doctext.ocrBin()) return { kept: false, stop: 'unreadable' }
   if (m.status !== 'recording') return { kept: false }
@@ -1244,6 +1316,34 @@ export async function glance(id, buf) {
   lastGlance.set(id, { text, n: was.n + 1 })
   return { kept: true }
 }
+
+// ---------- Looks at the call's window, by itself ----------
+// With Screen Recording allowed, nobody has to pick a screen: while a call records and someone on it
+// talks, Bridge AI takes the same looks at the call's window (as each starts talking, and every 15 s
+// while one goes on), read on this Mac and kept as text as a watched screen's are. Not while the
+// page watches a screen (it sends its own), with names off (Settings › Meetings), or once there are
+// enough.
+const pageLook = new Map() // id -> when the page last sent a look
+const looked = new Map() // id -> { stretch, at }
+let lookingNow = false
+export async function lookAround(now = Date.now()) {
+  if (lookingNow || cfg.meetings?.nameSpeakers === false || !helpers.look) return
+  lookingNow = true
+  try {
+    for (const m of recordingNow()) {
+      const stretch = talking(m.id)
+      if (m.status !== 'recording' || m.call !== 'on' || !(m.callApps || []).length || stretch == null) continue
+      if (now - (pageLook.get(m.id) || 0) < 30_000 || (lastGlance.get(m.id)?.n || 0) >= GLANCES) continue
+      const k = looked.get(m.id) || { stretch: null, at: 0 }
+      if (now - k.at < 4000 || (k.stretch === stretch && now - k.at < 15_000)) continue
+      if (!(await helpers.canLook?.())) return
+      looked.set(m.id, { stretch, at: now })
+      const buf = await helpers.look(m.callApps[0]).catch(() => null)
+      if (buf) await glance(m.id, buf, { auto: true }).catch(() => {})
+    }
+  } finally { lookingNow = false }
+}
+setInterval(() => { lookAround().catch(() => {}) }, Number(process.env.BRIDGE_LOOK_EVERY_MS || 1000)).unref?.()
 
 // ---------- Files and links ----------
 // What goes with a meeting: files on this computer (a deck, the SOW), links (a SharePoint deck from
@@ -1497,7 +1597,8 @@ async function replyAny(use, msgs, o) {
     for (let i = 0; ; i++) {
       try { return { ...(await helpers.reply(id, msgs, o)), model: id } } catch (e) {
         // A model on this computer that ran out of time was working, not cut off: no second go.
-        if (i >= 2 || !passing(e) || e.code === 'too_long' || (isLocal(id) && /Timeout|Abort/.test(e.name))) throw e
+        // At its usage limit (on every account it has): not something a few seconds fix.
+        if (i >= 2 || !passing(e) || e.code === 'too_long' || e.code === 'limit' || (isLocal(id) && /Timeout|Abort/.test(e.name))) throw e
         await new Promise((r) => setTimeout(r, RETRY_MS * (i + 1)))
       }
     }
@@ -1724,6 +1825,7 @@ export function summarize(id, { model, kind, language, again = false } = {}) {
       try { memory.learn(JSON.parse(block[1]), { meeting: id, known: `${m.title}\n${(m.event?.attendees || []).join('\n')}\n${notes}`, heard: transcript(id, { raw: true }).map((l) => l.text).join('\n') }) } catch { /* not JSON: nothing learned */ }
     }
     if (!out) throw new Error('The model sent back nothing')
+    if (isLimit(out)) throw Object.assign(new Error(`${r.model} is at its usage limit: ${out.split('\n')[0].slice(0, 200)}`), { code: 'limit' })
     writeFileAtomic(path.join(dirOf(id), 'summary.md'), `${out}\n`)
     // What it was written from, for the page to say: your points, the pictures read, the files and
     // links, and whether the invite said anything.
@@ -1851,11 +1953,14 @@ export function assist(id, { now = false, model } = {}) {
     ].filter((x) => x !== '').join('\n')
     try {
       const r = await jsonReply(use, [{ role: 'user', text: `${ask}\n\nTranscript so far:\n${recent || '(nothing yet)'}` }], { system: 'You quietly help someone during a live meeting with a few sharp, specific suggestions. You are brief and never make things up.' }, { schema: ASSIST_SCHEMA, check: assistOk, schemaFirst: true })
-      const items = [].concat(r.value?.items || []) // not JSON: nothing this time
+      const items = [].concat(r.value?.items || [])
       const was = new Set(a.items.map((x) => x.text.toLowerCase()))
       const add = items.filter((x) => x && typeof x.text === 'string' && x.text.trim() && !was.has(x.text.trim().toLowerCase())).slice(0, 3)
         .map((x) => ({ id: crypto.randomBytes(4).toString('hex'), t: Math.round(secs), kind: KIND_WORD[x.kind] ? x.kind : 'idea', text: clean(x.text, 300), why: clean(x.why, 200), state: 'new', model: r.model }))
-      const out = { items: [...a.items, ...add].slice(-60), at: new Date().toISOString(), upTo: said.length ? said[said.length - 1].t1 : 0, error: null }
+      // An answer it can't read (not the JSON asked for, twice): said, so it never looks as if it
+      // read along and found nothing. It looks again with the next lines.
+      const error = r.value ? null : `${r.model} answered, but not in a form Assist can read. It tries again in a minute.`
+      const out = { items: [...a.items, ...add].slice(-60), at: new Date().toISOString(), upTo: said.length ? said[said.length - 1].t1 : 0, error, looks: (a.looks || 0) + 1 }
       writeFileAtomic(assistFile(id), JSON.stringify(out, null, 1))
       return out
     } catch (e) {
@@ -2066,6 +2171,42 @@ function fill(pattern, m, { dir = false } = {}) {
   const out = String(pattern || '').replace(/\{(\w+)\}/g, (x, k) => (k in v ? String(v[k]) : x))
   return dir ? out.split(/[\\/]+/).map((p) => fileSafe(p).replace(/^\.+$/, '_')).filter((p) => p && p !== 'Untitled').join(path.sep) : fileSafe(out)
 }
+// ---------- A meeting mentioned in a message ----------
+// The meetings that match what's typed after the meeting key (@, or the one picked in Settings ›
+// Meetings) in the message box: every word in the title, newest first; with nothing typed, the
+// latest ones that aren't archived.
+export function mentionable(q = '', n = 8) {
+  const words = String(q || '').toLowerCase().split(/\s+/).filter(Boolean).slice(0, 8)
+  const hit = (m) => words.every((w) => String(m.title || '').toLowerCase().includes(w))
+  return list().filter((m) => (words.length ? hit(m) : !m.archived)).slice(0, n)
+    .map((m) => ({ id: m.id, title: m.title, startedAt: m.startedAt, seconds: m.seconds || 0, status: m.status, hasSummary: !!m.hasSummary, people: (m.event?.attendees || []).length }))
+}
+// The meeting as one file for an agent to read (Claude Code reads @path): when, who, its summary and
+// action items, your notes and the transcript. Written fresh each time it's mentioned, beside the
+// meeting, named for it (so the agent shows its name); a recording so far as it's got.
+export function forAgents(id) {
+  const m = meta(id)
+  const at = new Date(m.startedAt)
+  const when = `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`
+  const who = m.event?.attendees?.length ? `Attendees: ${m.event.attendees.join(', ')}` : ''
+  const summary = readText(path.join(dirOf(id), 'summary.md')).trim()
+  const notes = filled(readText(path.join(dirOf(id), 'notes.md')), m.sections).trim()
+  const said = transcriptText(id)
+  const text = [
+    `# ${m.title}`,
+    [`Meeting on ${when}, ${clock(m.seconds || 0)} long${m.status === 'recording' || m.status === 'paused' ? ' (still recording: this is as far as it has got)' : ''}.`, who].filter(Boolean).join('\n'),
+    summary ? `## Summary\n\n${summary.replace(/^#\s.*\n+/, '')}` : '',
+    notes ? `## My notes\n\n${notes}` : '',
+    said ? `## Transcript\n\n${said}` : '',
+  ].filter(Boolean).join('\n\n')
+  const dir = path.join(dirOf(id), 'for-agents')
+  fs.mkdirSync(dir, { recursive: true })
+  for (const f of fs.readdirSync(dir)) fs.rmSync(path.join(dir, f), { force: true }) // one file, under the meeting's name as it is now
+  const file = path.join(dir, `${fileSafe(m.title)}.md`)
+  fs.writeFileSync(file, `${text}\n`)
+  return { path: file, title: m.title }
+}
+
 // Where a meeting's notes go with Settings as they are.
 export function target(m, o = saving()) {
   const note = o.what === 'transcript' ? null : path.join(o.folder, fill(o.noteSub, m, { dir: true }), `${fill(o.noteName, m)}.md`)
@@ -2074,7 +2215,15 @@ export function target(m, o = saving()) {
 }
 // auto: a save by itself (Keep saved notes up to date), which leaves alone a note you've changed
 // in your notes app since it was saved. Save, asked for, writes it as Bridge AI has it.
-export async function save(id, { auto = false } = {}) {
+// One that can't be written says why on the meeting, until a save works.
+export async function save(id, opts = {}) {
+  try { return await writeNotes(id, opts) } catch (e) {
+    const why = savingError(e)
+    try { patchMeta(id, { saveError: why }) } catch { /* gone */ }
+    throw new Error(why)
+  }
+}
+async function writeNotes(id, { auto = false } = {}) {
   const m = meta(id)
   const o = saving()
   const { note, transcript: tfile } = target(m, o)
@@ -2126,7 +2275,7 @@ export async function save(id, { auto = false } = {}) {
     const text = await fs.promises.readFile(old, 'utf8').catch(() => null)
     if (text != null && (m.savedHashes?.[old] ? m.savedHashes[old] === hash(text) : text.startsWith('---') && text.includes(`\nmeeting_id: ${m.id}\n`))) await fs.promises.rm(old, { force: true }).catch(() => {})
   }
-  patchMeta(id, { saved: note || tfile, savedFiles: now, savedHashes: hashes })
+  patchMeta(id, { saved: note || tfile, savedFiles: now, savedHashes: hashes, saveError: null })
   return { file: note || tfile, files: now }
 }
 // Meetings saved before, somewhere Settings wouldn't put them now (a folder or pattern changed).
@@ -2144,9 +2293,44 @@ const resaving = new Map()
 function resave(id, ms = 0) {
   let m
   try { m = meta(id) } catch { return }
-  if (!m.saved && !(cfg.meetings?.autoSave && m.summarizedAt)) return
+  if (!m.saved && !(cfg.meetings?.autoSave && (m.summarizedAt || (m.status === 'done' && !m.summarizing)))) return
   // "Keep saved notes up to date" off: a meeting saved once isn't written again by itself.
   if (m.saved && cfg.meetings?.keepSaved === false) return
   clearTimeout(resaving.get(id))
   resaving.set(id, setTimeout(() => { resaving.delete(id); save(id, { auto: true }).catch(() => {}) }, ms))
+}
+// Why a save didn't work: macOS not letting Bridge AI into the folder, a disk full.
+const savingError = (e) => (e?.code === 'EPERM' || e?.code === 'EACCES' ? `Bridge AI isn't allowed to write to ${folder().replace(os.homedir(), '~')}.${IS_MAC ? ' Allow it in System Settings › Privacy & Security › Files and Folders, or pick' : ' Pick'} another folder in Settings › Meetings.` : String(e?.message || e).slice(0, 300))
+
+// ---------- A deck from a meeting ----------
+// Make a deck: a short Marp deck (Markdown slides, MIT), written by the notes model from the
+// meeting's summary, your notes and its sections, in Studio's own folder (<data>/studio/files), to
+// open there, present, change by asking an agent, and send as PowerPoint. Its title slide, what it
+// was about, what was decided, the action items with who has them, and speaker notes from what was
+// said.
+export async function deck(id, { model } = {}) {
+  const m = meta(id)
+  const use = model || m.summaryModelPick || cfg.meetings?.model || await helpers.pickModel()
+  if (!use) throw noModel()
+  const summary = readText(path.join(dirOf(id), 'summary.md')).trim()
+  const notes = filled(readText(path.join(dirOf(id), 'notes.md')), m.sections).trim()
+  const said = summary ? '' : transcriptText(id).slice(0, 30_000)
+  if (!summary && !notes && !said) throw new Error('This meeting has nothing to make a deck from yet')
+  const people = (m.event?.attendees || []).join(', ')
+  const ask = [
+    `Meeting: ${m.title}, ${new Date(m.startedAt).toDateString()}${people ? `, with ${people}` : ''}`,
+    summary ? `\nIts notes:\n${summary}` : '', notes ? `\nMy own notes:\n${notes}` : '', said ? `\nThe transcript:\n${said}` : '',
+    '\nWrite a slide deck of this meeting, in Marp Markdown: a front matter block (---, marp: true, paginate: true, ---), then slides separated by lines of ---.',
+    'A title slide (the meeting\'s name, its date); 4 to 8 slides, each a "# " heading with 3 to 5 short bullets; a slide of what was decided; a slide of the action items with who has each. Under each slide, its speaker notes in an HTML comment (<!-- ... -->), from what was said. Only what the meeting covered. Answer with the deck and nothing else.',
+  ].filter(Boolean).join('\n')
+  const r = await replyAny(use, [{ role: 'user', text: ask }], { system: 'You turn meeting notes into clear, short slide decks in Marp Markdown.' })
+  let md = String(r.text || '').trim().replace(/^```(?:markdown|md)?\s*\n([\s\S]*?)\n```$/, '$1').trim()
+  if (!/^---\s*\n[\s\S]*?\bmarp:\s*true\b/.test(md)) md = `---\nmarp: true\npaginate: true\n---\n\n${md.replace(/^---\s*\n[\s\S]*?\n---\s*\n/, '')}`
+  const dir = path.join(DATA, 'studio', 'files')
+  fs.mkdirSync(dir, { recursive: true })
+  const stem = fileSafe(`${m.title} deck`)
+  let name = `${stem}.md`
+  for (let n = 2; fs.existsSync(path.join(dir, name)); n++) name = `${stem} ${n}.md`
+  fs.writeFileSync(path.join(dir, name), `${md}\n`, { flag: 'wx' })
+  return { root: 'studio', path: name, model: r.model }
 }

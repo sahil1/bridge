@@ -102,6 +102,16 @@ function answer(b) {
     for (const [, n, t] of last.matchAll(/^(\d+)\. \[[^\]]+\] Them: (.*)$/gm)) out[n] = /slides|agenda/i.test(t) ? 'Dan Ruiz' : /budget/i.test(t) ? 'Priya Shah' : null
     return say(`Here you go:\n${JSON.stringify(out)}`)
   }
+  // A deck of a meeting: its name on the title slide, and a slide for what it was about.
+  if (/Write a slide deck of this meeting/.test(last)) {
+    const title = (/^Meeting: (.+?), /m.exec(last)?.[1] || 'Meeting').trim()
+    return say(['```markdown', '---', 'marp: true', 'paginate: true', '---', '', `# ${title}`, '', '---', '', '# What we covered', '', '- The pricing page', '- Who does what', '', '<!-- Start with the numbers -->', '```'].join('\n'))
+  }
+  // Who each voice on a call is: Speaker 1 the first one invited, Speaker 2 the second.
+  if (/Say who each voice on the call is/.test(last)) {
+    const invited = (/^Invited, besides You: (.+)$/m.exec(last)?.[1] || '').split(', ').filter(Boolean)
+    return say(JSON.stringify({ 1: invited[0] || null, 2: invited[1] || null }))
+  }
   // Who each voice in a room is: Speaker 1 is the one recording, Speaker 2 the first one invited.
   if (/Say who each speaker is/.test(last)) {
     const invited = (/^Invited, besides the person recording: (.+)$/m.exec(last)?.[1] || '').split(', ').filter(Boolean)

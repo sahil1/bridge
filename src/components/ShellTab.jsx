@@ -6,6 +6,7 @@ import { FilesView, ChangesView, PreviewView } from '../lazy.jsx'
 import { PaneHeader, usePersisted, useWidth } from './layout.jsx'
 import { api, openInTerminal } from '../api.js'
 import disposeTerm from '../disposeTerm.js'
+import gpu from '../termGpu.js'
 import LiveShell from './LiveShell.jsx'
 
 // A tab with plain shells (dev servers, editors, logs). One shell (a New terminal, say) is a
@@ -39,6 +40,7 @@ function MiniTerm({ pane, selected, onSelect, onZoom, zoomed, fontSize, onLineHe
   useEffect(() => {
     const term = new XTerm({ disableStdin: true, cols, rows, scrollback: 0, fontSize, fontFamily: getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim() || 'monospace', theme: termTheme() })
     term.open(hostRef.current)
+    gpu(term)
     termRef.current = term
     const mo = new MutationObserver(() => { term.options.theme = termTheme() })
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })

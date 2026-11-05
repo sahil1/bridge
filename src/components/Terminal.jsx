@@ -5,6 +5,7 @@ import '@xterm/xterm/css/xterm.css'
 import Icon from './Icon.jsx'
 import { api } from '../api.js'
 import disposeTerm from '../disposeTerm.js'
+import gpu from '../termGpu.js'
 import altArrows from '../altArrows.js'
 
 // Live mirror of a herdr pane you can type into. herdr has no output stream per pane, so the
@@ -182,6 +183,7 @@ export default function Terminal({ paneId, active, focusKey, onChat, shell = fal
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(hostRef.current)
+    gpu(term)
     termRef.current = term
     fitRef.current = fit
     layout()

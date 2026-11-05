@@ -174,6 +174,7 @@ try {
   const card = docs.locator('.qcard')
   await card.waitFor({ timeout: 15000 })
   ok(/Yes, and don't ask again/.test(await card.innerText()), 'More answers… shows every choice it has, read from its screen on Desk', await card.innerText())
+  ok(/Bash command/.test(await card.locator('.q-context').innerText().catch(() => '')) && /npm run publish/.test(await card.locator('.q-context').innerText().catch(() => '')), 'and what it is about, above the question: the command it would run', await card.innerText())
   await card.locator('.q-opt', { hasText: "don't ask again" }).click()
   ok(!!(await until(() => answers(c).some((x) => x.command === 'npm run publish' && x.key === '2'), 15000)), 'and picking one answers it there', answers(c))
   await s.p.keyboard.press('Escape')

@@ -30,16 +30,25 @@ export const MEETINGS_CHANNEL = 'bridge-meetings'
 // Calls are noticed on the computer the server runs on: only a window there offers to record one.
 const here = onThisComputer
 const when = () => new Date().toLocaleString(locale(), { weekday: 'short', hour: 'numeric', minute: '2-digit' })
-// A calendar event on now (or starting within ten minutes), to name a call's notes after. With
-// two at once, the one under way and online, on the call's app (app: Teams, Zoom...) when that's
-// known, the nearer start breaking a tie.
+// The calendar event to name a call's notes after (app: the call's, Teams or Zoom), as the computer
+// works it out (server callevent.js): the one the call's window names, the one you clicked Join on,
+// else the one starting nearest to when the call did; with no call, the one under way. null when
+// there's none, or no calendar.
+// Not waited on for long: a calendar slow to read shouldn't hold up taking notes, which then
+// start without its name.
 export async function eventNow(app) {
-  const d = await api('/calendar').catch(() => null)
-  const now = Date.now()
-  const on = (d?.events || d?.today || []).filter((e) => e.start && !e.allDay && !e.canceled && new Date(e.start).getTime() - now < 10 * 60_000 && (!e.end || new Date(e.end).getTime() > now))
-  const word = String(app || '').split(/\s+/)[0].toLowerCase()
-  const score = (e) => (new Date(e.start).getTime() <= now ? 2 : 0) + (e.online ? 1 : 0) + (word && `${e.join || ''} ${e.location || ''}`.toLowerCase().includes(word) ? 2 : 0) - Math.abs(new Date(e.start).getTime() - now) / 3_600_000
-  return on.sort((a, b) => score(b) - score(a))[0] || null
+  const d = await Promise.race([api(`/calls/event${app ? `?app=${encodeURIComponent(app)}` : ''}`).catch(() => null), new Promise((r) => setTimeout(() => r(null), 4000))])
+  return d?.event || null
+}
+// The mic, or why not within ms: one that never answers (macOS asking somewhere out of sight, a
+// device that's stuck) says so rather than leaving Take notes hanging. If it answers after all,
+// it's let go.
+function micWithin(open, ms = 20_000) {
+  return new Promise((resolve, reject) => {
+    let late = false
+    const timer = setTimeout(() => { late = true; reject(new Error(t("The microphone didn't start. If macOS is asking about it, answer there; otherwise check System Settings › Privacy & Security › Microphone, then try again."))) }, ms)
+    open().then((s) => { clearTimeout(timer); if (late) s.getTracks().forEach((x) => x.stop()); else resolve(s) }, (e) => { clearTimeout(timer); if (!late) reject(e) })
+  })
 }
 
 export function MeetingsProvider({ children }) {
@@ -72,7 +81,8 @@ export function MeetingsProvider({ children }) {
       : t('Recording needs the desktop app, or this page over HTTPS.'))
     let mic
     room.current = inRoom()
-    try { mic = await microphone(undefined, { room: room.current }) } catch (e) {
+    try { mic = await micWithin(() => microphone(undefined, { room: room.current })) } catch (e) {
+      if (!e.name) throw e // it never answered
       // In the desktop app on a Mac: the way to allow it (or reset it) there (Meetings.jsx shows it).
       const fix = await micRefused(e)
       if (fix) throw Object.assign(new Error(t('macOS is blocking the microphone for Bridge AI.')), { code: 'mic', stale: fix.stale })
@@ -357,50 +367,71 @@ export function ScreenButton({ m, small = true }) {
   )
 }
 
-// The calendar event on now, for a call that started at `at` (named in the prompt).
-export function useCallEvent(at) {
+// The calendar event a call on app that started at `at` is for (named in the prompt), the one
+// Take notes names it after.
+export function useCallEvent(at, app) {
   const [ev, setEv] = useState(null)
   useEffect(() => {
     setEv(null)
     if (!at) return
     let on = true
-    eventNow().then((e) => on && setEv(e)).catch(() => {})
+    eventNow(app).then((e) => on && setEv(e)).catch(() => {})
     return () => { on = false }
-  }, [at])
+  }, [at, app])
   return ev
 }
 
+// Why a recording seems to be over: its call ended, its time on the calendar is up and it's gone
+// quiet, or nobody's said anything for a long while.
+export const endedWords = (r) => (r.endWhy === 'over' ? t("Its time on your calendar is up, and it's gone quiet.") : r.endWhy === 'quiet' ? t('Nobody has said anything for a while.') : r.callEndedApp ? t('The {app} call ended.', { app: r.callEndedApp }) : t('The call ended.'))
+
 // When a call starts with nothing recording ("Zoom call started. Take notes?") and when the call a
 // meeting was on ends ("Stop recording?"), at the top of the window. The floating card asks too.
+// Not now always closes it, at once, even while Take notes is still starting (and then what was
+// starting stops again).
 export function CallPrompt() {
   const m = useMeetings()
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
+  const [gone, setGone] = useState(null) // the call (its start) Not now was pressed for
+  const goneRef = useRef(null) // the same, for a Take notes still starting
   const c = m?.calls
-  const ev = useCallEvent(c?.prompt && !m?.rec ? c.prompt.at : null)
+  const ev = useCallEvent(c?.prompt && !m?.rec ? c.prompt.at : null, c?.prompt?.app)
   if (!c) return null
   const r = c.recording
   const act = async (fn) => { setBusy(true); setErr(null); try { await fn() } catch (e) { setErr(e.message) } finally { setBusy(false); m.refreshCalls() } }
+  const notNow = () => {
+    const at = c.prompt?.at
+    goneRef.current = at
+    setGone(at); setErr(null)
+    api('/calls/dismiss', { method: 'POST' }).catch(() => {}).finally(() => m.refreshCalls())
+  }
+  const takeNotes = () => act(async () => {
+    const at = c.prompt.at
+    const id = await m.startForCall(c.prompt.app)
+    if (goneRef.current === at) { await m.stop(); return }
+    if (id) openMeeting(id)
+  })
   if (r?.callEnded && m.rec?.id === r.id) {
     const left = r.stopsAt ? Math.max(0, Math.round((new Date(r.stopsAt).getTime() - Date.now()) / 1000)) : null
     return (
-      <div className="call-prompt" role="alertdialog" aria-label={t('The call ended')}>
+      <div className="call-prompt" role="alertdialog" aria-label={r.endWhy === 'over' || r.endWhy === 'quiet' ? t('It went quiet') : t('The call ended')}>
         <span className="rec-dot" aria-hidden="true" />
-        <span className="call-prompt-main"><b>{r.callEndedApp ? t('The {app} call ended.', { app: r.callEndedApp }) : t('The call ended.')}</b><small>{left != null ? t('Stop recording? It stops by itself in {time}.', { time: clock(left) }) : t('Stop recording?')}</small></span>
+        <span className="call-prompt-main"><b>{endedWords(r)}</b><small>{left != null ? t('Stop recording? It stops by itself in {time}.', { time: clock(left) }) : t('Stop recording?')}</small></span>
         <button type="button" className="btn small primary" disabled={busy} onClick={() => act(() => m.stop())}><Icon name="stop" size={12} /> {t('Stop')}</button>
         <button type="button" className="btn small" disabled={busy} onClick={() => act(() => api(`/meetings/${r.id}/keep`, { method: 'POST' }))}>{t('Keep recording')}</button>
         {err && <span className="error-text small">{err}</span>}
       </div>
     )
   }
-  if (c.prompt && !m.rec) {
+  if (c.prompt && !m.rec && gone !== c.prompt.at) {
     const what = c.prompt.browser ? t('A call in {app} started.', { app: c.prompt.app }) : t('{app} call started.', { app: c.prompt.app })
     return (
       <div className="call-prompt" role="alertdialog" aria-label={t('A call started')}>
         <Icon name="mic" size={15} />
         <span className="call-prompt-main"><b>{what}</b><small>{ev ? t('Take notes for "{title}"?', { title: ev.title }) : t('Take notes?')} {t('Your mic and the call, transcribed as you go.')}</small></span>
-        <button type="button" className="btn small primary" disabled={busy} onClick={() => act(async () => { const id = await m.startForCall(c.prompt.app); if (id) openMeeting(id) })}><Icon name="mic" size={12} /> {t('Take notes')}</button>
-        <button type="button" className="ghost-btn" disabled={busy} onClick={() => act(() => api('/calls/dismiss', { method: 'POST' }))}>{t('Not now')}</button>
+        <button type="button" className="btn small primary" disabled={busy} onClick={takeNotes}><Icon name="mic" size={12} /> {busy ? t('Starting…') : t('Take notes')}</button>
+        <button type="button" className="ghost-btn" onClick={notNow}>{t('Not now')}</button>
         {err && <span className="error-text small">{err}</span>}
       </div>
     )
