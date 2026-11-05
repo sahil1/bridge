@@ -133,18 +133,24 @@ function useNow() {
 }
 const timeOf = (d) => d.toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' })
 const dayOf = (d) => d.toLocaleDateString(locale(), { weekday: 'long', month: 'short', day: 'numeric' })
+// The weather, and when there's none to show, why (none): no city picked yet (the Weather card a
+// click opens has the city picker), or it couldn't be fetched. Said in the bar and in Status alike,
+// so a pinned weather is never an empty space; until the first answer there's nothing to say.
 function useWeather() {
-  const { data, errorCode } = usePoll('/weather', 15 * 60 * 1000)
+  const { data, error, errorCode } = usePoll('/weather', 15 * 60 * 1000)
   const [unit, setUnit] = useShared('cc-unit', 'f')
   const c = unit === 'c'
   const temp = data?.current ? Math.round(c ? (data.current.temp - 32) * 5 / 9 : data.current.temp) : null
-  return { data, c, temp, setUnit, noCity: !data && errorCode === 'noLocation' }
+  const none = temp != null || !error ? null
+    : errorCode === 'noLocation' ? { word: t('Pick your city'), why: t('No city picked yet: click to pick one for the weather') }
+      : { word: '—', why: t("The weather couldn't be fetched: {why}", { why: error }) }
+  return { data, c, temp, setUnit, none }
 }
 // The clock, and the weather with °F or °C picked as two plain buttons, each with its pin at the
 // end of its line, as the rows under them have.
 function Now({ onWeather }) {
   const now = useNow()
-  const { data, c, temp, setUnit } = useWeather()
+  const { data, c, temp, setUnit, none } = useWeather()
   return (
     <div className="status-now">
       <div className="status-clock">
@@ -166,18 +172,28 @@ function Now({ onWeather }) {
           <PinButton id="weather" />
         </>
       )}
+      {none && (
+        <>
+          <div className="status-wx">
+            <button type="button" className="status-wx-open" onClick={onWeather} title={none.why}>
+              <Icon name="cloud" size={16} /><span className="muted small">{none.word === '—' ? none.why : none.word}</span>
+            </button>
+          </div>
+          <PinButton id="weather" />
+        </>
+      )}
     </div>
   )
 }
 // The weather and the clock pinned to the bar. The sky's icon and the temperature, with the place
-// and the sky on hover, and the forecast (Today's Weather card) at a click, as from Status; with no
-// city picked yet it says so, and the card it opens has the city picker. The time, with the date on
-// hover.
+// and the sky on hover, and the forecast (Today's Weather card) at a click, as from Status. With
+// none to show it says why: its word stays while the chip is in the bar (it's what the chip has to
+// say, not a label to drop), and the reason in full is on hover. The time, with the date on hover.
 export function WeatherChip({ onClick }) {
-  const { data, c, temp, noCity } = useWeather()
-  if (noCity) return (
-    <button type="button" className="top-chip wx-chip" onClick={onClick} title={t('No city picked yet: click to pick one for the weather')} aria-label={t('Pick your city')}>
-      <Icon name="sun" size={14} /><span className="pin-word">{t('Pick your city')}</span>
+  const { data, c, temp, none } = useWeather()
+  if (none) return (
+    <button type="button" className="top-chip wx-chip" onClick={onClick} title={none.why} aria-label={none.why}>
+      <Icon name="cloud" size={14} /><span>{none.word}</span>
     </button>
   )
   if (temp == null) return null

@@ -17,8 +17,8 @@
 // the weather, the clock, usage and the news, not sounds; each says what it is on hover; as the
 // window narrows the pinned chips go down to their icons before any leaves the bar; a pin in Status
 // puts one in the bar or takes it out (an unpinned one isn't counted), kept for the next window;
-// Settings › Appearance › In the Top Bar has the same switches; and the weather with no city picked
-// says so and opens the city picker. Inside a computer on the phone app (stood in for: its page around Bridge
+// Settings › Appearance › In the Top Bar has the same switches; and the weather with none to show
+// (no city picked, or not fetched) says why, at every width, and opens the city picker. Inside a computer on the phone app (stood in for: its page around Bridge
 // AI, the computers it's paired with), the devices menu switches computer (online or not, straight
 // to one paired on the phone) and opens the app's Cloud Agents and start screen; in a browser it's
 // your devices alone.
@@ -431,8 +431,11 @@ try {
     await changeAnswer(c, /\/api\/fix(\?|$)/, (real) => ({ ...real, restart: [] }), { orElse: {} })
     await c.route(/\/api\/calendar(\?|$)/, (r) => r.fulfill({ json: fakes.calendar }))
   }
+  // A wide window (2400): at 1920 this bar only just fits, by a few words' width that changes with
+  // the time of day (the clock, the next meeting's time), so "with room" wouldn't always be so.
+  const ROOM = 2400
   {
-    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky', width: 1920, before: deskCalm })
+    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky', width: ROOM, before: deskCalm })
     const chip = (id, pg = p) => pg.locator(`.topbar .x-${id}`).locator('button, time').first()
     await until(async () => (await chip('update').count()) > 0 && (await chip('usage').count()) > 0 && (await chip('weather').count()) > 0 && (await chip('clock').count()) > 0, 15000)
     await p.waitForTimeout(500)
@@ -440,7 +443,7 @@ try {
     ok(bar.has.weather && bar.has.clock && bar.has.usage && bar.has.update && !bar.has.sounds && !(await p.evaluate(() => localStorage.getItem('cc-pins'))), 'pins, by default: the weather, the clock, usage and the update in the bar, sounds not', bar.has)
     const said = { usage: await chip('usage').innerText(), update: await chip('update').innerText(), weather: await chip('weather').innerText() }
     ok(bar.fit === 0 && /Claude/.test(said.usage) && /New:\s*Work Primary/.test(said.usage) && /62%/.test(said.usage) && /Update/.test(said.update) && /64°/.test(said.weather), 'with room, each with its words: usage its account and both figures, the update its word, the weather its temperature', { fit: bar.fit, said })
-    await shot(p, `${tag}top-bar-pins-1920`, { clip: { x: 0, y: 0, width: 1920, height: 64 } })
+    await shot(p, `${tag}top-bar-pins-${ROOM}`, { clip: { x: 0, y: 0, width: ROOM, height: 64 } })
     // What each says on hover: what its Status row says.
     const hover = { weather: await chip('weather').getAttribute('title'), usage: await chip('usage').getAttribute('title'), clock: await chip('clock').getAttribute('title'), update: await chip('update').getAttribute('title') }
     ok(hover.weather === 'Springfield: Partly cloudy, 64°F' && hover.usage === 'Claude (Work Primary, where new agents start) usage · 62% left this 5-hour window · 41% left this week'
@@ -477,7 +480,7 @@ try {
     ok(!!next && !next.has.weather && !next.has.update && next.has.clock, 'the next window has the same pins', next?.has)
     await p2.close()
     // Settings › Appearance › In the Top Bar, from the foot of the Status menu: the same pins as switches.
-    await p.setViewportSize({ width: 1920, height: 900 })
+    await p.setViewportSize({ width: ROOM, height: 900 })
     await p.locator('.topbar .status-btn').click()
     await p.locator('.status-foot .link-btn').click()
     const sec = p.locator('#st-topbar')
@@ -498,15 +501,37 @@ try {
     ok(errors.filter((e) => !/herdr|WebSocket|socket/i.test(e)).length === 0, 'pins: no page errors', errors)
     await ctx.close()
   }
-  // No city picked yet: the pinned weather says so, rather than nothing, and opens the Weather card
-  // with its city picker.
-  {
-    const noCity = async (c) => { await deskCalm(c); await c.route(/\/api\/weather(\?|$)/, (r) => r.fulfill({ status: 400, json: { error: 'Pick your city to see the weather.', code: 'noLocation' } })) }
-    const { ctx, p } = await page(b, kit.url, { width: 1920, before: noCity })
+  // With no weather to show, the pinned weather says why rather than nothing: no city picked yet (a
+  // click opens the Weather card, with its city picker), or it couldn't be fetched (the reason on
+  // hover). That word stays while the chip is in the bar, however little room there is (as the bar
+  // gives way the other chips' words go, never this one), and Status says it too, with the pin.
+  const noWeather = [
+    { what: 'no city picked yet', answer: (r) => r.fulfill({ status: 400, json: { error: 'Pick your city to see the weather.', code: 'noLocation' } }), word: 'Pick your city', why: /^No city picked yet: click to pick one for the weather$/, status: /Pick your city/ },
+    { what: 'the weather not fetched', answer: (r) => r.abort(), word: '—', why: /^The weather couldn't be fetched: \S/, status: /The weather couldn't be fetched/ },
+  ]
+  for (const x of noWeather) {
+    const { ctx, p } = await page(b, kit.url, { width: 2400, before: async (c) => { await deskCalm(c); await c.route(/\/api\/weather(\?|$)/, x.answer) } })
     const wx = p.locator('.topbar .x-weather .wx-chip')
-    ok(!!(await until(async () => /Pick your city/.test(await wx.innerText().catch(() => '')), 15000)) && /No city picked yet/.test(await wx.getAttribute('title').catch(() => '')), 'the pinned weather with no city picked yet says so', await wx.innerText().catch(() => ''))
-    await wx.click()
-    ok(!!(await until(() => p.getByText('Pick your city to see the weather.').first().isVisible(), 5000)), 'and opens the Weather card, where the city is picked')
+    const said = async () => ({ text: (await wx.innerText({ timeout: 1000 }).catch(() => '')).trim(), title: await wx.getAttribute('title', { timeout: 1000 }).catch(() => null) })
+    const first = await until(async () => { const s = await said(); return s.text === x.word && s }, 15000)
+    ok(!!first && x.why.test(first.title || ''), `${x.what}: the pinned weather says so in the bar ("${x.word}"), and why on hover`, first || await said())
+    const bare = []
+    for (const w of [1600, 1280, 1100, 1000, 900]) {
+      await p.setViewportSize({ width: w, height: 900 })
+      await p.waitForTimeout(400)
+      const now = await p.evaluate(() => { const e = document.querySelector('.topbar .x-weather .wx-chip'); return e && e.getClientRects().length ? e.innerText.trim() : null })
+      if (now !== null && now !== x.word) bare.push(`${w}: "${now}"`)
+    }
+    ok(!bare.length, `${x.what}: with less room it keeps its word while it's in the bar, never an icon alone`, bare)
+    await p.setViewportSize({ width: 2400, height: 900 })
+    await p.locator('.topbar .status-btn').click()
+    const pop = p.locator('.status-pop')
+    ok(!!(await until(async () => x.status.test(await pop.locator('.status-now').innerText().catch(() => '')), 5000)) && await pop.locator('button[aria-label="Pin to the bar: Weather"]').isVisible(), `${x.what}: Status says so too, with the weather's pin`, await pop.locator('.status-now').innerText().catch(() => ''))
+    await p.keyboard.press('Escape')
+    if (x.word === 'Pick your city') {
+      await wx.click()
+      ok(!!(await until(() => p.getByText('Pick your city to see the weather.').first().isVisible(), 5000)), 'and a click opens the Weather card, where the city is picked')
+    }
     await ctx.close()
   }
 

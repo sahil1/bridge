@@ -2241,6 +2241,7 @@
   "The transcript is back to what was heard.": "La transcripción vuelve a ser lo que se oyó.",
   "The transcript wasn't cleaned up: {error}": "No se limpió la transcripción: {error}",
   "The voices weren't told apart: {error}": "No se distinguieron las voces: {error}",
+  "The weather couldn't be fetched: {why}": "No se pudo obtener el tiempo: {why}",
   "The whiteboard couldn't load: {error}": "No se pudo cargar la pizarra: {error}",
   "The words on it": "El texto que contiene",
   "The {app} call ended.": "La llamada de {app} terminó.",

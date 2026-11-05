@@ -2241,6 +2241,7 @@
   "The transcript is back to what was heard.": "文字起こしを聞き取ったままの状態に戻しました。",
   "The transcript wasn't cleaned up: {error}": "文字起こしをクリーンアップできませんでした：{error}",
   "The voices weren't told apart: {error}": "声を聞き分けられませんでした: {error}",
+  "The weather couldn't be fetched: {why}": "天気を取得できませんでした: {why}",
   "The whiteboard couldn't load: {error}": "ホワイトボードを読み込めませんでした: {error}",
   "The words on it": "画面上の文字",
   "The {app} call ended.": "{app} の通話が終了しました。",

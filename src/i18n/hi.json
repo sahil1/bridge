@@ -2241,6 +2241,7 @@
   "The transcript is back to what was heard.": "ट्रांसक्रिप्ट फिर से वैसा ही है जैसा सुना गया था।",
   "The transcript wasn't cleaned up: {error}": "ट्रांसक्रिप्ट साफ़ नहीं हो सका: {error}",
   "The voices weren't told apart: {error}": "आवाज़ें अलग नहीं हुईं: {error}",
+  "The weather couldn't be fetched: {why}": "मौसम नहीं मिल सका: {why}",
   "The whiteboard couldn't load: {error}": "व्हाइटबोर्ड लोड नहीं हो सका: {error}",
   "The words on it": "इस पर लिखे शब्द",
   "The {app} call ended.": "{app} कॉल ख़त्म हो गई।",

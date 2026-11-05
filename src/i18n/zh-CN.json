@@ -2241,6 +2241,7 @@
   "The transcript is back to what was heard.": "转录已恢复为听到的原样。",
   "The transcript wasn't cleaned up: {error}": "转录未能清理：{error}",
   "The voices weren't told apart: {error}": "未能区分声音：{error}",
+  "The weather couldn't be fetched: {why}": "无法获取天气：{why}",
   "The whiteboard couldn't load: {error}": "白板无法加载：{error}",
   "The words on it": "上面的文字",
   "The {app} call ended.": "{app} 通话已结束。",
