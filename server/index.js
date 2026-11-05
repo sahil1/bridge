@@ -2048,7 +2048,7 @@ app.get('/api/config', (req, res) => res.json({
   runtime: { name: rt.name, ...rt.caps, attach: !!rt.attach, ...(rt.name === 'herdr' ? { session: herdrSession() } : { keep: cfg.keepAgents !== false }), ...(fellBack() ? { fellBack: fellBack() } : {}) }, platform: process.platform, mail: IS_MAC, calendar: IS_MAC,
   defaultAgent: cfg.defaultAgent || 'claude', chiefKind: cfg.chief?.kind || 'claude', setupDone: !!cfg.setupDone, simple: !!cfg.simple,
   // Settings › Voice › Dictation; Tidy what I say only while its trial is on.
-  dictation: trialOn('dictation-cleanup') ? cfg.dictation || {} : { ...(cfg.dictation || {}), tidy: false },
+  dictation: trialOn('dictation-cleanup') || !cfg.dictation?.tidy ? cfg.dictation || {} : { ...cfg.dictation, tidy: false },
   alertSounds: cfg.alertSounds !== false, // the speaker in the top bar
   meetingKey: MEETING_KEYS.includes(cfg.meetings?.mentionKey) ? cfg.meetings.mentionKey : '@', // Settings › Meetings
   trials: Object.fromEntries(TRIALS.map((id) => [id, trialOn(id)])), // Settings › About & Updates › Trial Features

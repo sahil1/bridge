@@ -110,12 +110,14 @@ export default function Dictations() {
 
 // One dictation: where it went, when, how long, and its words (a few lines). Open: all of them,
 // what was heard, the recording, and what to do with it. Tidied by a model (Tidy what I say): what
-// you said before that too, and Copy, Paste again and Send take whichever is shown.
+// you said before that too, and Copy, Paste again and Send take whichever of those is shown.
 function Row({ r, open, onToggle, onDelete, paste, onMsg }) {
   const [picking, setPicking] = useState(false)
   const [heard, setHeard] = useState(false)
   const [asSaid, setAsSaid] = useState(false)
-  const shown = heard && r.raw ? r.raw : asSaid && r.said ? r.said : r.text
+  // What Copy, Paste again and Send take: tidied, or what you said; as heard is only to read.
+  const words = asSaid && r.said ? r.said : r.text
+  const shown = heard && r.raw ? r.raw : words
   const [busy, setBusy] = useState(false)
   // Paste again with no Accessibility yet: the way to allow it, right here, and then it's pasted.
   // stale: macOS says it's on and the paste was refused anyway, so Reset and ask again first.
@@ -127,12 +129,12 @@ function Row({ r, open, onToggle, onDelete, paste, onMsg }) {
     setPicking((v) => !v)
   }
   const copy = async () => {
-    try { await navigator.clipboard.writeText(shown); onMsg({ text: t('Copied.') }) } catch (e) { onMsg({ text: e.message, error: true }) }
+    try { await navigator.clipboard.writeText(words); onMsg({ text: t('Copied.') }) } catch (e) { onMsg({ text: e.message, error: true }) }
   }
   const again = async () => {
     setBusy(true)
     try {
-      const x = await app().dictateRepaste({ text: shown, bundle: r.app?.bundle || null })
+      const x = await app().dictateRepaste({ text: words, bundle: r.app?.bundle || null })
       if (x?.pasted) onMsg({ text: r.app?.name ? t('Pasted into {app}', { app: r.app.name }) : t('Pasted') })
       else if (x?.error === 'accessibility') setAccess((await app().pasteAccess?.().catch(() => null)) === 'ok' ? 'stale' : 'off')
       else onMsg({ text: (WHY[x?.error] || (() => t('Couldn\'t paste it there.')))(), error: true })
@@ -142,7 +144,7 @@ function Row({ r, open, onToggle, onDelete, paste, onMsg }) {
     setPicking(false)
     try {
       // As the message box does: a working agent that can't take a message now gets it when it's free.
-      await api(`/agents/${encodeURIComponent(a.paneId)}/${a.status === 'working' && !a.caps?.typeAhead ? 'queue' : 'prompt'}`, { method: 'POST', body: { text: shown } })
+      await api(`/agents/${encodeURIComponent(a.paneId)}/${a.status === 'working' && !a.caps?.typeAhead ? 'queue' : 'prompt'}`, { method: 'POST', body: { text: words } })
       onMsg({ text: t('Sent to {name}', { name: nameOf(a) }) })
     } catch (e) { onMsg({ text: e.message, error: true }) }
   }
