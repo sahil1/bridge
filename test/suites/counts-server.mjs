@@ -63,9 +63,10 @@ try {
   const privacy = read('PRIVACY.md')
   ok(/counts\.boldbridge\.ai/.test(privacy) && /keeps only totals/.test(privacy) && /counts\/worker\.js/.test(privacy), 'PRIVACY.md names the server, says only totals are kept, and where its code is')
   const page = await worker.fetch(new Request('https://counts.boldbridge.ai/'), {})
-  const pageText = await page.text()
-  ok(page.status === 200 && /usage stats server/.test(pageText) && /telemetry-schema\.json/.test(pageText) && /boldbridge\.ai\/privacy/.test(pageText), 'its own address shows what it is, what can be counted and the privacy policy', pageText.slice(0, 200))
-  ok(/unless you turn off/.test(pageText) && !/off unless/.test(pageText), 'and says the stats are on unless turned off, as the app does', pageText.slice(0, 300))
+  ok(page.status === 301 && page.headers.get('location') === 'https://boldbridge.ai/privacy#usage-stats-on-unless-you-turn-them-off' && !(await page.text()), 'its own address shows nothing: it sends a browser to the privacy policy\'s Usage stats', page.headers.get('location'))
+  const privacyHeads = [...privacy.matchAll(/^## (.+)$/gm)].map((m) => m[1].toLowerCase().replace(/[^\w\- ]/g, '').replace(/ /g, '-'))
+  ok(privacyHeads.includes('usage-stats-on-unless-you-turn-them-off') && privacyHeads.includes('crash-reports-on-unless-you-turn-them-off'), 'and both addresses\' anchors are headings in PRIVACY.md', privacyHeads)
+  ok((await worker.fetch(new Request('https://counts.boldbridge.ai/v1/stats'), {})).status === 404 && (await worker.fetch(new Request('https://counts.boldbridge.ai/v1/week'), {})).status === 405, 'nothing can be read back: no other path, and a GET of /v1/week is refused')
 
   // ---------- A report, kept as totals ----------
   {
@@ -137,8 +138,6 @@ try {
     ok(stop.body?.stop === true && /stopped collecting/.test(stop.body.why) && everything(db) === '[[],[],[]]', 'COUNTS_OFF=1: every report is answered "stop", with nothing kept', stop)
     const said = await answer(await post({ DB: db, COUNTS_OFF: 'Paused while we move to a new database.' }, report()))
     ok(said.body?.why === 'Paused while we move to a new database.', 'COUNTS_OFF with a sentence of its own: that sentence is the reason', said)
-    const page = await (await worker.fetch(new Request('https://counts.boldbridge.ai/'), { COUNTS_OFF: '1' })).text()
-    ok(/isn't collecting anything now/.test(page), 'and its page says it isn\'t collecting', page)
   }
 
   // ---------- Once a day ----------
@@ -245,9 +244,9 @@ try {
   {
     const db = d1()
     const env = { DB: db }
-    const page = await (await worker.fetch(new Request('https://crashes.boldbridge.ai/'), env)).text()
-    ok(/crash report server/.test(page) && /90 days/.test(page) && /boldbridge\.ai\/privacy/.test(page), 'crashes.boldbridge.ai says what it is, how long it keeps reports, and the privacy policy')
-    ok(/unless you turn off/.test(page) && !/off unless/.test(page), 'and says crash reports go unless turned off, as the app does', page)
+    const page = await worker.fetch(new Request('https://crashes.boldbridge.ai/'), env)
+    ok(page.status === 301 && page.headers.get('location') === 'https://boldbridge.ai/privacy#crash-reports-on-unless-you-turn-them-off', 'crashes.boldbridge.ai shows nothing: it sends a browser to the privacy policy\'s Crash reports', page.headers.get('location'))
+    ok((await worker.fetch(new Request('https://crashes.boldbridge.ai/v1/reports'), env)).status === 404 && (await worker.fetch(new Request('https://crashes.boldbridge.ai/v1/report'), env)).status === 405, 'and no crash report can be read back from it')
     const a = await answer(await crashPost(env, crash()))
     ok(a.status === 200 && a.body?.ok === true, 'a crash report is taken', a)
     // Made of parts, as the other tests do, so the repo's own check doesn't take them for real ones.

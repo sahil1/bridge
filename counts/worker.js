@@ -249,38 +249,20 @@ async function takeCrash(req, env) {
   return json({ ok: true })
 }
 
-const CRASH_PAGE = (stop) => `Bridge AI's crash report server.
-
-When something in Bridge AI crashes, its report comes here unless you turn off Send crash reports
-by themselves (Settings > About & Updates; at most five a day, the same crash once), and when you
-click Send to Bold Bridge on a crash's report: the same text Report on GitHub shows, with names,
-folders, emails and keys taken out. Each is kept for 90 days, with no ID for you or your computer,
-and IP addresses aren't stored. DO_NOT_TRACK=1 or BRIDGE_TELEMETRY=0 keeps it off.
-${stop ? `\nIt isn't collecting anything now: ${stop}\n` : ''}
-What a report has: https://github.com/sahil1/bridge/blob/main/shared/telemetry-schema.json
-This server's code: https://github.com/sahil1/bridge/tree/main/counts
-Privacy: https://boldbridge.ai/privacy
-`
-
-const PAGE = (stop) => `Bridge AI's usage stats server.
-
-Bridge AI sends anonymous usage stats here unless you turn off Share anonymous usage counts
-(Settings > About & Updates): once a week, the week's counts as numbers in ranges, and once a day,
-the version it ran and whether something crashed. Neither has a name or an ID for you or your
-computer. Only totals are kept, and IP addresses aren't stored. DO_NOT_TRACK=1 or
-BRIDGE_TELEMETRY=0 keeps them off.
-${stop ? `\nIt isn't collecting anything now: ${stop}\n` : ''}
-What can be sent: https://github.com/sahil1/bridge/blob/main/shared/telemetry-schema.json
-This server's code: https://github.com/sahil1/bridge/tree/main/counts
-Privacy: https://boldbridge.ai/privacy
-`
+// Nothing is read from here: these addresses only take reports. Anyone who opens one in a browser
+// goes to what the privacy policy says about it (its headings' anchors, as GitHub makes them).
+const PRIVACY = {
+  counts: 'https://boldbridge.ai/privacy#usage-stats-on-unless-you-turn-them-off',
+  crashes: 'https://boldbridge.ai/privacy#crash-reports-on-unless-you-turn-them-off',
+}
+const away = (to) => new Response(null, { status: 301, headers: { location: to, 'cache-control': 'public, max-age=3600' } })
 
 export default {
   async fetch(req, env) {
     const { pathname, hostname } = new URL(req.url)
     if (hostname.startsWith('crashes.')) {
       if (pathname === '/v1/report') return req.method === 'POST' ? takeCrash(req, env) : json({ ok: false, error: 'POST a report' }, 405)
-      if (pathname === '/' && (req.method === 'GET' || req.method === 'HEAD')) return new Response(CRASH_PAGE(await offCrashes(env)), { headers: { 'content-type': 'text/plain; charset=utf-8' } })
+      if (pathname === '/' && (req.method === 'GET' || req.method === 'HEAD')) return away(PRIVACY.crashes)
       return new Response('Not found\n', { status: 404 })
     }
     if (pathname === '/v1/week') {
@@ -288,7 +270,7 @@ export default {
       return take(req, env)
     }
     if (pathname === '/v1/day') return req.method === 'POST' ? takeDay(req, env) : json({ ok: false, error: 'POST a report' }, 405)
-    if (pathname === '/' && (req.method === 'GET' || req.method === 'HEAD')) return new Response(PAGE(await off(env)), { headers: { 'content-type': 'text/plain; charset=utf-8' } })
+    if (pathname === '/' && (req.method === 'GET' || req.method === 'HEAD')) return away(PRIVACY.counts)
     return new Response('Not found\n', { status: 404 })
   },
   // Once a day: nonces past ten weeks go, and crash reports past 90 days.

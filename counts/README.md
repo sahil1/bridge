@@ -91,7 +91,8 @@ boldbridge.ai already a zone on that account:
    prints into [wrangler.toml](wrangler.toml).
 2. **Deploy**: `npx wrangler@4.149.0 deploy -c counts/wrangler.toml`. The custom domains make the
    DNS records and certificates for `counts.boldbridge.ai` and `crashes.boldbridge.ai` themselves.
-3. **Check it**: `https://counts.boldbridge.ai/` shows what it is, and
+3. **Check it**: `https://counts.boldbridge.ai/` sends a browser on to the privacy policy (nothing
+   can be read from either address; the numbers are only in the admin view), and
    `curl -s -X POST https://counts.boldbridge.ai/v1/week -H 'content-type: application/json' -d '{}'`
    answers `{"ok":false,"error":"No schema number"}`.
 4. **Optional, against floods**: Security › WAF › Rate limiting rules, one rule for hostnames
