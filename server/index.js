@@ -9,6 +9,7 @@ import { attachHandler } from './attach.js'
 import { makeGuard } from './guard.js'
 import { usage } from './usage.js'
 import { usageStats } from './usagestats.js'
+import { everywhere } from './usageall.js'
 import * as usagelog from './usagelog.js'
 import * as files from './files.js'
 import * as pr from './pr.js'
@@ -335,7 +336,7 @@ const rootOf = async (pane) => {
 // ---------- Trial features ----------
 // Still being finished, so hidden until turned on in Settings › About & Updates › Trial Features
 // (trials: { studio: true } in the config; src/trials.js). Their routes answer only then.
-const TRIALS = ['studio']
+const TRIALS = ['studio', 'usage-everywhere']
 const trialOn = (id) => cfg.trials?.[id] === true
 const trialOff = (id, label) => (req, res, next) => (trialOn(id) ? next() : res.status(404).json({ error: `${label} is a trial feature. Turn it on in Settings › About & Updates › Trial Features.`, trial: id }))
 
@@ -1620,6 +1621,9 @@ app.post('/api/calendar/prep', wrap(async (req) => {
   ].filter(Boolean).join('\n')
   return launchInSpace('Meetings', `Prep: ${e.title}`, prompt)
 }))
+// Every provider's tokens in one view (usageall.js), a trial feature. What it reads is noted
+// whether it's on or not (usagelog.js), so it has the days before it was turned on.
+app.get('/api/usage-everywhere', trialOff('usage-everywhere', 'Usage across every provider'), wrap((req) => everywhere({ days: req.query.days, force: !!req.query.refresh })))
 app.get('/api/usage/:provider/stats', wrap((req) => usageStats(req.params.provider, { force: !!req.query.refresh })))
 app.get('/api/usage/:provider', wrap((req) => usage(req.params.provider)))
 app.get('/api/market', wrap((req) => market(req.query.refresh === '1')))
