@@ -87,6 +87,7 @@ const OFF_NET_TRY = 5000
 const NO_NET = /ENOTFOUND|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|ENETDOWN|EADDRNOTAVAIL/
 let failed = null // how the last try failed: { code } when nothing answered, { status } when the relay did
 let limit = null // what Bridge AI's relay last said about its limits: { why, text, until }
+let plan = null // and this computer's plan there: { plan, dayMessages, dayMB, phones, resets }
 let pinger = null
 let hostKey = null // { privateKey, public }
 let awakeProc = null // what keeps this computer awake, while it does (holdAwake)
@@ -155,6 +156,7 @@ export function status() {
     hosted: !!conf.hosted, // on Bridge AI's relay
     hostedAvailable: !!hostedBase(), // Bridge AI's relay is offered at all
     limit: limit && limit.until > Date.now() ? limit : null,
+    plan: conf.hosted ? plan : null,
     needsUpdate: !!(!conf.hosted && online && relayBuild && relayBuild !== relayCode().build),
     devices: (conf.devices || []).map(({ id, name, kind, relay, addedAt, lastSeen }) => ({ id, name, kind: kind || 'phone', relay: relay || null, addedAt, lastSeen, connected: live.has(id) })),
     asks: [...asks.values()].filter((a) => a.code && a.at > Date.now() - ASK_MINUTES * 60000).map(({ id, name, os, relay, at, code }) => ({ id, name, os, relay, at, code })),
@@ -210,7 +212,7 @@ function connect() {
     heard = Date.now()
     if (!isBinary) {
       const s = String(data)
-      if (s[0] === '{') try { const m = JSON.parse(s); if (m.t === 'note' && m.note) onNote(m.box, m.note); else if (m.t === 'limit') onLimit(m) } catch { /* not ours */ }
+      if (s[0] === '{') try { const m = JSON.parse(s); if (m.t === 'note' && m.note) onNote(m.box, m.note); else if (m.t === 'limit') onLimit(m); else if (m.t === 'plan') onPlan(m) } catch { /* not ours */ }
       return
     }
     const b = new Uint8Array(data)
@@ -245,7 +247,7 @@ function connect() {
     link = null
     if (!conf.url || !conf.token) return
     // Bridge AI's relay said to wait (it's switched off, or doesn't know this computer): until then.
-    const wait = conf.hosted && limit?.until > Date.now() && limit.why !== 'day' ? limit.until - Date.now() + Math.random() * 60000 : 0
+    const wait = conf.hosted && limit?.until > Date.now() && (limit.why === 'off' || limit.why === 'gone') ? limit.until - Date.now() + Math.random() * 60000 : 0
     const offNet = !wait && failed?.code && (!conf.hosted || NO_NET.test(failed.code))
     retry = setTimeout(connect, offNet ? Math.min(backoff, OFF_NET_TRY) + Math.random() * 500 : Math.max(backoff, wait))
     backoff = Math.min(backoff * 2, 60000)
@@ -253,10 +255,19 @@ function connect() {
 }
 
 // Bridge AI's relay says this computer has used up today's allowance (phones are turned away until
-// it resets), or that it's switched off. Shown in Settings.
+// it resets), that it turned one of its phones away for now (too much at once, too many connected),
+// or that it's switched off. Shown in Settings.
 function onLimit(m) {
   if (!conf.hosted) return
   limit = { why: String(m.why || ''), text: String(m.text || '').slice(0, 400), until: Math.min(Number(m.until) || 0, Date.now() + 26 * 3600000) }
+}
+// ...and which plan this computer is on there, with its daily allowance (Settings says it). A new
+// plan lifts a day's limit the old one had reached; if the new one's is reached too, it says so next.
+function onPlan(m) {
+  if (!conf.hosted) return
+  const n = (v) => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : null)
+  plan = { plan: String(m.plan || 'free').slice(0, 24), dayMessages: n(m.dayMessages), dayMB: n(m.dayMB), phones: n(m.phones), resets: n(m.resets) }
+  if (limit?.why === 'day') limit = null
 }
 
 function disconnect() {
@@ -907,6 +918,7 @@ function leave() {
   conns.clear()
   pairing = null
   limit = null
+  plan = null
   relayBuild = null
   // (Which Worker was yours on Cloudflare stays, so going back to it updates that one.)
   conf = { key: was.key, awake: was.awake, ...(was.cf?.script ? { cf: { account: was.cf.account, accountName: was.cf.accountName, script: was.cf.script } } : {}) }
@@ -982,6 +994,7 @@ export async function update() {
 export function forget() {
   if (conf.hosted) unregister(conf)
   limit = null
+  plan = null
   disconnect()
   for (const c of conns.values()) c.end()
   conns.clear()

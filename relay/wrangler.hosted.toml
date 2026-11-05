@@ -34,7 +34,8 @@ HOSTED = "1"
 HOSTED_DOMAIN = "example.com"
 # The kill switch: "1" (or a message of your own) refuses new computers and every connection.
 HOSTED_OFF = "0"
-# Limits per computer, and for registering. These are the defaults; HOSTED.md says why.
+# The free plan's limits per computer, and for registering. These are the defaults; HOSTED.md says
+# why. Every computer starts on the free plan.
 MAX_PHONES = "16"
 MAX_MESSAGE_KB = "256"
 MESSAGES_PER_SECOND = "200"
@@ -44,3 +45,15 @@ DAILY_MESSAGES = "200000"
 IDLE_DAYS = "90"
 REGISTER_PER_IP = "10"
 REGISTER_PER_DAY = "1000"
+# Other plans, each with the limits it raises over the free plan's (HOSTED.md, Plans), e.g.
+# PLANS = '{"plus":{"dayMessages":2000000,"dayMB":10240,"phones":32}}'. None yet.
+PLANS = "{}"
+# "1" once the account is on Workers Paid, so /_relay/stats measures against its allowance.
+WORKERS_PAID = "0"
+# Secrets, never here (npx wrangler@4.149.0 secret put <name> -c relay/wrangler.hosted.toml):
+#   STATS_TOKEN  reads GET /_relay/stats; unset, it isn't there at all
+#   PLAN_TOKEN   sets a computer's plan, POST /_relay/plan; unset, the same
+
+# No logs: nothing about a request (its IP address included) is kept by the Worker.
+[observability]
+enabled = false

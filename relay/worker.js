@@ -10,7 +10,7 @@
 // It also serves the small page your phone opens (web/), which pairs with your computer and then
 // shows Bridge AI from it, through the encrypted link.
 //
-// Deployed by Bridge AI (Settings › Phone & notifications), as one module: FILES is filled in then.
+// Deployed by Bridge AI (Settings › Devices), as one module: FILES is filled in then.
 //
 // The same code also runs Bridge AI's hosted relay, for people who'd rather not set up their own:
 // with HOSTED=1 it serves many computers, one per subdomain, each with its own Hub and its own
@@ -116,10 +116,17 @@ const nextDay = (t = Date.now()) => Date.parse(utcDay(t)) + DAY
 const version = (v) => (/^\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(String(v || '')) ? String(v) : 'unknown')
 
 // Every limit, from the Worker's settings (wrangler.hosted.toml [vars]); HOSTED.md says why each
-// default is what it is.
-function limits(env) {
+// default is what it is. Those are the free plan's. A computer on another plan (its Hub's meta.plan,
+// set by POST /_relay/plan) gets what PLANS says that plan raises, e.g.
+// PLANS = '{"plus":{"dayMessages":2000000,"dayMB":10240}}', and the free plan's for the rest.
+const PLAN_LIMITS = ['phones', 'messageKB', 'rate', 'burst', 'dayMB', 'dayMessages', 'idleDays']
+function plans(env) {
+  try { const p = JSON.parse(env.PLANS || '{}'); return p && typeof p === 'object' && !Array.isArray(p) ? p : {} } catch { return {} }
+}
+const planOk = (env, plan) => plan === 'free' || (/^[a-z][a-z0-9-]{0,23}$/.test(String(plan)) && Object.hasOwn(plans(env), plan))
+function limits(env, plan = 'free') {
   const n = (k, d) => (env[k] != null && env[k] !== '' && Number.isFinite(Number(env[k])) ? Number(env[k]) : d)
-  return {
+  const free = {
     phones: n('MAX_PHONES', MAX_PHONES), // connections to one computer at once
     messageKB: n('MAX_MESSAGE_KB', 256), // one message
     rate: n('MESSAGES_PER_SECOND', 200), // incoming messages to one computer, on average…
@@ -127,20 +134,33 @@ function limits(env) {
     dayMB: n('DAILY_MB', 512), // a computer's daily allowance (UTC days), in data…
     dayMessages: n('DAILY_MESSAGES', 200000), // …and in messages, which is what Cloudflare bills
     idleDays: n('IDLE_DAYS', 90), // a computer not seen this long is deleted
+  }
+  const more = plan !== 'free' && planOk(env, plan) ? plans(env)[plan] : null
+  for (const k of PLAN_LIMITS) if (more && Number.isFinite(Number(more[k])) && more[k] !== '' && more[k] !== null) free[k] = Number(more[k])
+  return {
+    plan: more ? plan : 'free',
+    ...free,
     perIp: n('REGISTER_PER_IP', 10), // new computers a day from one network
     perDay: n('REGISTER_PER_DAY', 1000), // new computers a day, in all
   }
 }
+// What a computer is told about its plan (and Settings shows): its name and daily allowance.
+const planOf = (lim) => ({ t: 'plan', plan: lim.plan, dayMessages: lim.dayMessages, dayMB: lim.dayMB, phones: lim.phones, resets: nextDay() })
 // The kill switch: HOSTED_OFF=1 (or a message of your own) refuses new computers and connections.
 // (Said to a phone, it also says where to change that: on the computer.)
 const OFF_TEXT = 'Bridge AI\'s relay is switched off for now. To keep using your phone, put a relay on your own Cloudflare account, or use Tailscale'
-const offText = (env, phone) => (!env.HOSTED_OFF || env.HOSTED_OFF === '0' || env.HOSTED_OFF === 'false' ? null : on(env.HOSTED_OFF) ? `${OFF_TEXT}${phone ? ' (Settings › Phone & notifications, on the computer)' : ' instead'}.` : String(env.HOSTED_OFF).slice(0, 300))
+const offText = (env, phone) => (!env.HOSTED_OFF || env.HOSTED_OFF === '0' || env.HOSTED_OFF === 'false' ? null : on(env.HOSTED_OFF) ? `${OFF_TEXT}${phone ? ' (Settings › Devices, on the computer)' : ' instead'}.` : String(env.HOSTED_OFF).slice(0, 300))
 
 // A computer's id: 10 random base32 characters and 2 of checksum, so a made-up name is turned away
 // here, without waking a Hub.
 async function check(s) { const h = await sha(`bridge relay id ${s}`); const v = parseInt(h.slice(0, 3), 16) >> 2; return B32[v >> 5] + B32[v & 31] }
 async function newId() { const s = [...crypto.getRandomValues(new Uint8Array(10))].map((b) => B32[b & 31]).join(''); return s + (await check(s)) }
 const idOk = async (s) => /^[a-z2-7]{12}$/.test(s) && !RESERVED.has(s) && (await check(s.slice(0, 10))) === s.slice(10)
+
+// The registry's counts for /_relay/stats: one day's, kept 35 days, with its busiest computers.
+const KEEP_STATS_DAYS = 35
+const TOP = 10
+const blankDay = () => ({ registered: 0, refused: 0, computers: 0, connections: { computers: 0, phones: 0 }, messages: 0, bytes: 0, limits: { day: 0, rate: 0, size: 0, phones: 0 }, top: [] })
 
 const hub = (env, id) => env.HUB.get(env.HUB.idFromName(id))
 const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
@@ -183,6 +203,8 @@ async function hosted(req, env) {
   if (host === domain) {
     if (p === '/_relay/register') return req.method === 'POST' ? register(req, env, url) : new Response('Use POST', { status: 405 })
     if (p === '/_relay/health') return health()
+    if (p === '/_relay/stats') return stats(req, env, url)
+    if (p === '/_relay/plan') return setPlan(req, env)
     if (p === '/') return new Response(LANDING, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'public, max-age=3600', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; frame-ancestors 'none'", 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' } })
     if (p === '/mark.svg') return page(req, url)
     return notFound()
@@ -243,12 +265,66 @@ async function register(req, env, url) {
   return json({ error: 'Couldn\'t set up an address. Try again in a minute.' }, 500)
 }
 
+// For whoever runs it, each behind a secret of its own (wrangler secret put): without one, the
+// address isn't there at all (404); with a wrong one, 403.
+async function admin(req, secret) {
+  if (!secret) return notFound()
+  return (await tokenOk(req.headers.get('Authorization'), secret)) ? null : json({ error: 'Not allowed' }, 403)
+}
+
+// GET /_relay/stats (STATS_TOKEN): the last days' counts, kept by the registry: computers set up,
+// connections, messages and data, limits reached, and today's busiest computers by id, with what
+// that comes to in Cloudflare requests. Nothing about what passed through, or who.
+// ?days=N (up to 35, default 7).
+async function stats(req, env, url) {
+  const no = await admin(req, env.STATS_TOKEN)
+  if (no) return no
+  const days = Math.min(35, Math.max(1, Number(url.searchParams.get('days')) || 7))
+  const out = await hub(env, 'registry').fetch('https://hub/_hosted/stats').then((r) => r.json())
+  return json({ ...advice(out.days, env), ...out, days: out.days.slice(0, days) })
+}
+
+// What the counts mean for Cloudflare's bill (HOSTED.md, Cost): incoming messages are billed as
+// requests at 20 to 1, and each connection is a request too. Keepalives aren't counted here (up to
+// about 175 requests a day for each computer that stays connected), so the dashboard's figure is
+// the exact one. On Workers Free, past 100,000 requests a day the relay stops for everyone until
+// 00:00 UTC; Workers Paid includes a million a month, then $0.15 a million.
+const FREE_REQUESTS = 100000
+const PAID_INCLUDED = 1000000
+function advice(days, env) {
+  const today = days[0]?.requests || 0
+  const month = utcDay().slice(0, 7)
+  const monthRequests = days.filter((d) => d.day.startsWith(month)).reduce((a, d) => a + d.requests, 0)
+  const paid = on(env.WORKERS_PAID)
+  const note = paid
+    ? monthRequests > PAID_INCLUDED ? `Past Workers Paid's included million requests this month: about $${(((monthRequests - PAID_INCLUDED) / 1e6) * 0.15).toFixed(2)} so far, before keepalives.` : 'Within Workers Paid\'s included million requests this month.'
+    : today > FREE_REQUESTS / 2 ? 'Over half of Workers Free\'s 100,000 requests a day: move to Workers Paid ($5 a month) now. When Free runs out, the relay stops for everyone until 00:00 UTC.' : 'Within Workers Free\'s 100,000 requests a day. Move to Workers Paid before telling anyone, or once a day passes 50,000.'
+  return { requests: { today, month: monthRequests, workers: paid ? 'paid' : 'free' }, note }
+}
+
+// POST /_relay/plan (PLAN_TOKEN): { id, plan } puts a computer on a plan ('free', or one of PLANS);
+// { id } alone says which it's on. The hook for paid plans: whatever takes payment calls this.
+async function setPlan(req, env) {
+  const no = await admin(req, env.PLAN_TOKEN)
+  if (no) return no
+  if (req.method !== 'POST') return new Response('Use POST', { status: 405 })
+  let b = {}
+  try { b = JSON.parse(await req.text()) } catch { /* nothing said */ }
+  if (!(await idOk(String(b?.id || '')))) return json({ error: 'No such computer' }, 404)
+  if (b.plan != null && !planOk(env, b.plan)) return json({ error: `No such plan. There are: ${['free', ...Object.keys(plans(env))].join(', ')}` }, 400)
+  const r = await hub(env, b.id).fetch('https://hub/_hosted/plan', { method: 'POST', body: JSON.stringify({ plan: b.plan ?? null }) })
+  if (r.status === 404) return json({ error: 'No such computer' }, 404)
+  const out = await r.json()
+  if (b.plan != null) count(env, b.id, 'plan', [out.plan])
+  return json(out)
+}
+
 const LANDING = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Bridge AI relay</title><meta name="robots" content="noindex">
 <style>:root{color-scheme:light dark;--bg:#fafaf9;--ink:#1c1917;--ink2:#57534e;--line:#e7e5e4}@media (prefers-color-scheme:dark){:root{--bg:#0c0a09;--ink:#f5f5f4;--ink2:#a8a29e;--line:#292524}}
 body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--ink);font:15px/1.55 system-ui,-apple-system,sans-serif}main{max-width:460px;padding:32px 20px}h1{font-size:20px;margin:14px 0 8px}p{color:var(--ink2);margin:0 0 12px}a{color:inherit}</style></head>
 <body><main><img src="/mark.svg" alt="" width="44" height="44"><h1>Bridge AI relay</h1>
 <p>This relay lets Bridge AI on a phone reach Bridge AI on a computer, from anywhere. Everything between them is end-to-end encrypted, so the relay passes it on without being able to read it.</p>
-<p>There's nothing to do here: Bridge AI sets it up by itself (Settings › Phone &amp; notifications). To run your own relay instead, see <a href="https://github.com/sahil1/bridge">github.com/sahil1/bridge</a>.</p></main></body></html>`
+<p>There's nothing to do here: Bridge AI sets it up by itself (Settings › Devices). To run your own relay instead, see <a href="https://github.com/sahil1/bridge">github.com/sahil1/bridge</a>.</p></main></body></html>`
 
 // One per relay: holds your computer's connection and the phones'. Uses WebSocket hibernation,
 // so while nobody is talking it isn't running (and isn't billed).
@@ -278,6 +354,7 @@ export class Hub {
       ctx.blockConcurrencyWhile(async () => {
         this.meta = (await ctx.storage.get('meta')) || null
         this.day = (await ctx.storage.get('day')) || null
+        if (this.meta?.plan) this.lim = limits(env, this.meta.plan)
       })
     }
   }
@@ -303,12 +380,13 @@ export class Hub {
       const phones = this.ctx.getWebSockets('phone')
       if (phones.length >= (this.lim?.phones ?? MAX_PHONES)) {
         const stranger = phones.map((w) => [w, w.deserializeAttachment() || {}]).filter(([, a]) => !a.ok).sort((a, b) => (a[1].at || 0) - (b[1].at || 0))[0]
-        if (!stranger) return new Response('Too many connections', { status: 429 })
+        if (!stranger) return this.lim ? this.full() : new Response('Too many connections', { status: 429 })
         try { stranger[0].close(4004, 'make room') } catch { /* gone */ }
       }
       const id = crypto.getRandomValues(new Uint32Array(1))[0]
       this.ctx.acceptWebSocket(server, ['phone', `p${id}`])
       server.serializeAttachment({ id, at: Date.now() })
+      if (this.lim) { this.pendOf(this.today().d).phones++; this.tally() }
       const h = await this.live()
       // q: this relay keeps notes (older pages ignore it).
       server.send(JSON.stringify({ host: !!h, seen: (await this.ctx.storage.get('seen')) || null, q: 1 }))
@@ -371,7 +449,7 @@ export class Hub {
 
   async webSocketClose(ws, code) {
     await this.gone(ws, code)
-    if (this.lim && this.day) await this.saveDay(true)
+    if (this.lim && this.day) { await this.saveDay(true); this.tally() }
   }
 
   async webSocketError(ws) {
@@ -483,22 +561,26 @@ export class Hub {
 
   // ---------- Bridge AI's hosted relay: one computer ----------
   // What a computer's Hub keeps beyond what a relay of your own does: meta { id, hash (of its token),
-  // at, v }, last (when its computer last connected), day { d, bytes, msgs } (today's use, UTC) and
-  // wk (which of its paired phones were counted this week, by box). The registry is a Hub of its
-  // own and keeps only today's g:<day>:<network> counts.
+  // at, v, plan }, last (when its computer last connected), day { d, bytes, msgs } (today's use,
+  // UTC) and wk (which of its paired phones were counted this week, by box). The registry is a Hub
+  // of its own and keeps only today's g:<day>:<network> counts, and s:<day>, each day's counts for
+  // /_relay/stats (35 days).
   async gate(req, url) {
     const p = url.pathname
     if (p === '/_hosted/check') return new Response(null, { status: this.meta ? 204 : 404 })
     if (p === '/_hosted/gate') return this.registry(await req.json())
+    if (p === '/_hosted/tally') return this.tallied(await req.json())
+    if (p === '/_hosted/stats') return this.statsOf()
     if (p === '/_hosted/init') {
       if (this.meta) return new Response('Taken', { status: 409 })
       const { id, hash, version: v } = await req.json()
-      this.meta = { id, hash, at: Date.now(), v }
+      this.meta = { id, hash, at: Date.now(), v, plan: 'free' }
       await this.ctx.storage.put('meta', this.meta)
       await this.ctx.storage.setAlarm(Date.now() + this.lim.idleDays * DAY)
       return new Response('Created', { status: 201 })
     }
     if (!this.meta) return notFound()
+    if (p === '/_hosted/plan') return this.plan(await req.json())
     if (p === '/_relay/forget') {
       if (!(await this.tokenOk(req))) return new Response('Not allowed', { status: 403 })
       count(this.env, this.meta.id, 'removed', ['forget'])
@@ -520,11 +602,29 @@ export class Hub {
     return d === 0
   }
 
+  // The computer connected: it hears its plan (Settings shows it), and today's limit if it's used up.
   async hostIn(ws, req) {
     count(this.env, this.meta.id, 'computer', [version(req.headers.get('X-Bridge-Version'))])
     await this.ctx.storage.put('last', Date.now())
     if (!(await this.ctx.storage.getAlarm())) await this.ctx.storage.setAlarm(Date.now() + this.lim.idleDays * DAY)
+    ws.send(JSON.stringify(planOf(this.lim)))
+    this.pendOf(this.today().d).computers++
+    this.tally()
     if (this.over(this.today())) ws.send(JSON.stringify(this.limit('day')))
+  }
+
+  // POST /_relay/plan, through the Worker: this computer's plan, set ({ plan }) or only asked.
+  // Its limits change at once, and its computer hears the new plan.
+  async plan({ plan }) {
+    if (plan != null) {
+      this.meta = { ...this.meta, plan: String(plan) }
+      await this.ctx.storage.put('meta', this.meta)
+      this.lim = limits(this.env, this.meta.plan)
+      const h = this.host()
+      if (h) try { h.send(JSON.stringify(planOf(this.lim))); if (this.over(this.today())) h.send(JSON.stringify(this.limit('day'))) } catch { /* gone */ }
+    }
+    const d = this.today()
+    return json({ id: this.meta.id, plan: this.lim.plan, limits: Object.fromEntries(PLAN_LIMITS.map((k) => [k, this.lim[k]])), today: { day: d.d, messages: d.msgs, bytes: d.bytes } })
   }
 
   // A phone said which it is: counted once a week if it's one of this computer's paired phones.
@@ -542,6 +642,7 @@ export class Hub {
     const d = utcDay(now)
     if (this.day?.d !== d) {
       if (this.day && (this.day.bytes > this.day.sb || this.day.msgs > this.day.sm)) count(this.env, this.meta?.id, 'usage', [], [this.day.bytes - this.day.sb, this.day.msgs - this.day.sm])
+      if (this.day && this.pend?.d === this.day.d) this.tally(this.day) // the day that ended, with its totals
       this.day = { d, bytes: 0, msgs: 0, sb: 0, sm: 0 } // sb, sm: how much of it is saved (and counted)
     }
     return this.day
@@ -561,6 +662,27 @@ export class Hub {
     await this.ctx.storage.put('day', d)
   }
 
+  // This computer's use since its last tally, for the registry's counts (/_relay/stats): sent with
+  // each connection, a limit reached, every 1,000 messages or 4 MB, and when a connection ends. In
+  // between it's only in memory, so the counts can come out a little low, never high. Counting never
+  // gets in the way: a tally that doesn't arrive is let go.
+  pendOf(d) {
+    if (this.pend && this.pend.d !== d) this.tally()
+    return (this.pend ||= { d, msgs: 0, bytes: 0, computers: 0, phones: 0, limits: {} })
+  }
+
+  tally(day = this.day) {
+    const p = this.pend
+    if (!p || !this.meta) return
+    this.pend = null
+    const mine = day?.d === p.d ? day : null
+    const first = !!mine && !mine.tallied // its first today: one more computer in use today
+    if (first) { mine.tallied = true; this.ctx.storage.put('day', mine).catch(() => {}) }
+    const total = mine && { msgs: mine.msgs, bytes: mine.bytes, of: Math.max(mine.msgs / this.lim.dayMessages, mine.bytes / (this.lim.dayMB * 1048576)) }
+    const body = { d: p.d, id: this.meta.id, plan: this.lim.plan, msgs: p.msgs, bytes: p.bytes, computers: p.computers, phones: p.phones, limits: p.limits, first, total }
+    hub(this.env, 'registry').fetch('https://hub/_hosted/tally', { method: 'POST', body: JSON.stringify(body) }).catch(() => {})
+  }
+
   // Each message in: counted, and turned away if it's too big, too many at once, or past today's
   // allowance. A phone's own is turned away by closing that phone; so is a computer's message for
   // a phone (its link can't carry on with a piece missing). The computer's own text messages (about
@@ -572,6 +694,9 @@ export class Hub {
     const day = this.today(now)
     day.bytes += size
     day.msgs++
+    const pend = this.pendOf(day.d)
+    pend.bytes += size
+    if (++pend.msgs >= 1000 || pend.bytes >= 4194304) this.tally()
     const housekeeping = fromHost && typeof msg === 'string'
     const phone = !fromHost ? ws : !housekeeping && size >= 5 ? this.ctx.getWebSockets(`p${new DataView(msg).getUint32(1)}`)[0] : null
     // For a phone that's just been let go: nowhere to go (its computer hears it's gone).
@@ -590,21 +715,52 @@ export class Hub {
     return true
   }
 
+  // What a phone is told at a limit (and the computer, for a day's), with when it can carry on.
   limit(why, until) {
     const reset = nextDay()
+    const l = this.lim
     const text = {
-      day: `The hosted relay's daily limit for this computer is used up. It resets at ${new Date(reset).toISOString().slice(11, 16)} UTC. For no limits, put the relay on your own Cloudflare account (Settings › Phone & notifications, on the computer).`,
+      day: `The hosted relay's daily limit for this computer is used up (${l.dayMessages.toLocaleString('en-US')} messages or ${l.dayMB.toLocaleString('en-US')} MB a day on the ${l.plan} plan). It resets at ${new Date(reset).toISOString().slice(11, 16)} UTC. For no limits, put the relay on your own Cloudflare account (Settings › Devices, on the computer).`,
       rate: 'Too much at once for Bridge AI\'s relay. Connecting again in a moment.',
-      size: `That was too big for Bridge AI's relay (over ${this.lim.messageKB} KB at once). Connecting again in a moment.`,
+      size: `That was too big for Bridge AI's relay (over ${l.messageKB} KB at once). Connecting again in a moment.`,
+      phones: `Bridge AI's relay takes ${l.phones} connections to one computer at once, and this computer has that many paired phones and tabs connected. Close Bridge AI on one you're not using; this one tries again in a minute.`,
     }[why]
-    return { t: 'limit', why, text, until: why === 'day' ? reset : until }
+    return { t: 'limit', why, plan: l.plan, text, until: why === 'day' ? reset : until }
+  }
+
+  // ...and what the computer is told when one of its phones was turned away (Settings shows it).
+  tellHost(why, until) {
+    const l = this.lim
+    const text = {
+      rate: 'A phone sent more at once than Bridge AI\'s relay takes, so it was disconnected for a few seconds. It connects again by itself.',
+      size: `A message between a phone and this computer was over ${l.messageKB} KB, more than Bridge AI's relay takes at once, so that phone was disconnected. It connects again by itself.`,
+      phones: `A phone was turned away: Bridge AI's relay takes ${l.phones} connections to this computer at once (the ${l.plan} plan), and that many paired phones and tabs were connected. Close Bridge AI on one you're not using.`,
+    }[why]
+    try { this.host()?.send(JSON.stringify({ t: 'limit', why, plan: l.plan, text, until })) } catch { /* gone */ }
+  }
+
+  limited(why) {
+    count(this.env, this.meta.id, 'limit', [why])
+    const p = this.pendOf(this.today().d)
+    p.limits[why] = (p.limits[why] || 0) + 1
+    this.tally()
   }
 
   cut(ws, why, until) {
     if (ws?.readyState !== 1) return false
-    count(this.env, this.meta.id, 'limit', [why])
+    this.limited(why)
     try { ws.send(JSON.stringify(this.limit(why, until))); ws.close(4005, 'limit') } catch { /* gone */ }
+    this.tellHost(why, until)
     return false
+  }
+
+  // Every connection to this computer is a paired phone's or tab's, as many as its plan takes at
+  // once: this one is turned away, saying so, and the computer hears it too.
+  full() {
+    const until = Date.now() + 60000
+    this.limited('phones')
+    this.tellHost('phones', until)
+    return refuse(this.limit('phones', until), 4005)
   }
 
   // Today's allowance is used up: both ends hear so, phones are let go until it resets, and the
@@ -613,7 +769,7 @@ export class Hub {
     day.told = true
     await this.saveDay(true)
     await this.ctx.storage.put('day', day)
-    count(this.env, this.meta.id, 'limit', ['day'])
+    this.limited('day')
     const m = JSON.stringify(this.limit('day'))
     for (const w of this.ctx.getWebSockets()) try { w.send(m); if (!this.ctx.getTags(w).includes('host')) w.close(4005, 'limit') } catch { /* gone */ }
   }
@@ -623,27 +779,73 @@ export class Hub {
     const all = this.ctx.getWebSockets()
     this.meta = null
     this.day = null
+    this.pend = null
     await this.ctx.storage.deleteAlarm()
     await this.ctx.storage.deleteAll()
     for (const w of all) try { w.close(code, why) } catch { /* gone */ }
   }
 
+  // ---------- the registry ----------
   async registry({ key, day, perIp, perDay }) {
     const st = this.ctx.storage
     const mine = (await st.get(`g:${day}:${key}`)) || 0
     const all = (await st.get(`g:${day}`)) || 0
-    if (mine >= perIp) return json({ ok: false, why: 'ip' })
-    if (all >= perDay) return json({ ok: false, why: 'all' })
-    await st.put({ [`g:${day}:${key}`]: mine + 1, [`g:${day}`]: all + 1, registry: true })
+    const s = (await st.get(`s:${day}`)) || blankDay()
+    const why = mine >= perIp ? 'ip' : all >= perDay ? 'all' : null
+    if (why) s.refused++
+    else s.registered++
+    await st.put({ ...(why ? {} : { [`g:${day}:${key}`]: mine + 1, [`g:${day}`]: all + 1 }), [`s:${day}`]: s, registry: true })
+    if (!(await st.getAlarm())) await st.setAlarm(nextDay() + 60000)
+    return json(why ? { ok: false, why } : { ok: true })
+  }
+
+  // A computer's tally (tally() above), added to its day's counts; the day's busiest computers by
+  // id, with how much of their allowance they used, kept beside them.
+  async tallied(t) {
+    if (!/^\d{4}-\d\d-\d\d$/.test(String(t?.d))) return json({ ok: false }, 400)
+    const st = this.ctx.storage
+    const k = `s:${t.d}`
+    const s = (await st.get(k)) || blankDay()
+    const n = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : 0)
+    s.messages += n(t.msgs)
+    s.bytes += n(t.bytes)
+    s.connections.computers += n(t.computers)
+    s.connections.phones += n(t.phones)
+    if (t.first) s.computers++
+    for (const w of Object.keys(s.limits)) s.limits[w] += n(t.limits?.[w])
+    if (t.total && /^[a-z2-7]{12}$/.test(String(t.id))) {
+      const top = s.top.filter((x) => x.id !== t.id)
+      if (top.length < TOP || n(t.total.msgs) > top[top.length - 1].messages) {
+        top.push({ id: t.id, plan: String(t.plan || 'free').slice(0, 24), messages: n(t.total.msgs), bytes: n(t.total.bytes), ofAllowance: Math.round(n(t.total.of) * 1000) / 1000 })
+        s.top = top.sort((a, b) => b.messages - a.messages).slice(0, TOP)
+      } else s.top = top
+    }
+    await st.put({ [k]: s, registry: true })
     if (!(await st.getAlarm())) await st.setAlarm(nextDay() + 60000)
     return json({ ok: true })
   }
 
+  // The last 35 days' counts, today first, each with what it comes to in Cloudflare requests:
+  // incoming messages at 20 to 1 (and a tally every 1,000), and about three for each connection or
+  // computer set up (the Worker, its Hub, and the tally or the registry). Keepalives aren't in it.
+  async statsOf() {
+    const st = this.ctx.storage
+    const days = []
+    for (let i = 0; i < KEEP_STATS_DAYS; i++) {
+      const day = utcDay(Date.now() - i * DAY)
+      const s = (await st.get(`s:${day}`)) || blankDay()
+      days.push({ day, ...s, requests: Math.ceil(s.messages / 20 + s.messages / 1000) + 3 * (s.connections.computers + s.connections.phones + s.registered + s.refused) })
+    }
+    return json({ days })
+  }
+
   async hostedAlarm() {
     const st = this.ctx.storage
-    if (await st.get('registry')) { // the registry: past days' counts go
+    if (await st.get('registry')) { // the registry: past days' counts go, and stats after 35 days
       const today = `g:${utcDay()}`
+      const keep = `s:${utcDay(Date.now() - (KEEP_STATS_DAYS - 1) * DAY)}`
       const old = [...(await st.list({ prefix: 'g:' })).keys()].filter((k) => k !== today && !k.startsWith(`${today}:`))
+      old.push(...[...(await st.list({ prefix: 's:' })).keys()].filter((k) => k < keep))
       for (let i = 0; i < old.length; i += 128) await st.delete(old.slice(i, i + 128))
       await st.setAlarm(nextDay() + 60000)
       return

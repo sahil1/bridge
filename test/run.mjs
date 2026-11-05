@@ -74,7 +74,9 @@ const SUITES = [
   { name: 'ios-app', build: null, covers: [/^mobile\/ios\//, /^scripts\/ios-release\.js$/, /^relay\/web\/index\.html$/, /^PRIVACY\.md$/, /^src\/components\/Settings\.jsx$/, /^src\/components\/settings\/Relay\.jsx$/] },
   { name: 'android-key', build: null, covers: [/^scripts\/(android-key\.sh|release\.js)$/, /^\.github\/workflows\/(android|android-apk|release|test)\.yml$/, /^mobile\/android\/(PLAY\.md|play\/)/, /^src\/components\/settings\/Relay\.jsx$/] },
   { name: 'site', build: null, browser: true, covers: [/^site\//, /^\.github\/workflows\/android\.yml$/, /^README\.md$/] },
-  { name: 'counts-server', build: null, covers: [/^counts\//, /^shared\/(telemetry-schema\.json|crashreport\.js|private\.js)$/, /^server\/(counts|crashes)\.js$/, /^PRIVACY\.md$/] },
+  { name: 'counts-server', build: null, covers: [/^counts\//, /^shared\/(telemetry-schema\.json|crashreport\.js|private\.js)$/, /^server\/(counts|crashes)\.js$/, /^PRIVACY\.md$/, /^src\/components\/settings\/UsageCounts\.jsx$/] },
+  { name: 'relay-hosted', build: null, covers: [/^relay\/(worker|build)\.js$/, /^relay\/(HOSTED\.md|wrangler\.hosted\.toml)$/, /^server\/hosted\.js$/, /^(PRIVACY|TERMS)\.md$/] },
+  { name: 'privacy-hosts', build: null, covers: [/^server\//, /^desktop\//, /^shared\//, /^PRIVACY\.md$/] },
 ]
 // A change to these runs everything.
 const EVERYTHING = [/^test\/(lib|stand-ins)\//, /^test\/run\.mjs$/, /^package(-lock)?\.json$/]

@@ -104,6 +104,40 @@ boldbridge.ai already a zone on that account:
 **When the public list changes** (a new counter in shared/telemetry-schema.json), deploy again, or
 the server drops the new name until it is.
 
+## Running your own
+
+Bridge AI is open source, so a fork or a company can collect anonymous usage stats and crash
+reports of its own, on its own Cloudflare account, with this same Worker and the same promise.
+
+1. **Deploy it to your account.** In [wrangler.toml](wrangler.toml), change `name`, and the two
+   routes to names under a zone on your account (`counts.<your domain>` and `crashes.<your
+   domain>`). Or leave out `routes`, set `workers_dev = true`, and use
+   `https://bridge-counts.<your subdomain>.workers.dev`: at a name that's neither `counts.` nor
+   `crashes.`, the Worker takes both kinds of report. Then, signed in to your account
+   (`npx wrangler@4.149.0 login`), steps 1 to 4 of Going live above. `PRIVACY` in
+   [worker.js](worker.js) is where a browser opening its address is sent: your own policy.
+2. **Point Bridge AI at it**, with one setting, `stats.url`, the counts server's address:
+   - for everyone who installs your build: `"stats": { "url": "https://counts.<your domain>" }` in
+     [config.example.json](../config.example.json);
+   - for one computer, or each computer a company manages: the same in `~/.bridge-ai/config.json`;
+   - in the environment (a Docker image, a launch script): `BRIDGE_STATS_URL=https://counts.<your domain>`.
+
+   The first there is wins: the environment, then config.json, then config.example.json, then the
+   public list's `endpoint`s (the project's server). A week's report goes to `<url>/v1/week` and a
+   day's to `<url>/v1/day`; crash reports go to the same server's `crashes.` name when `<url>` is at
+   a `counts.` name, else to `<url>/v1/report`. https only (plain http just for `localhost` and
+   `127.0.0.1`); a `stats.url` that isn't one is said in Settings › About & Updates, and nothing is
+   sent.
+3. **Or send nothing** from your build: `"stats": { "url": "" }` in config.example.json. Neither is
+   offered then, as when there's no server.
+4. **Say so in your privacy policy**: where the reports go and who runs it.
+
+Whatever the address, people keep the same controls: the card after setup says they're on, with
+Turn off right there; Settings › About & Updates names the address, shows exactly what would be
+sent and turns each off in one click; and `DO_NOT_TRACK=1` or `BRIDGE_TELEMETRY=0` keeps both off.
+What can be sent is still the public list ([shared/telemetry-schema.json](../shared/telemetry-schema.json));
+a fork that adds to it deploys its Worker again, or the Worker drops the new names.
+
 ## Reading the totals
 
 ```sh
