@@ -708,7 +708,7 @@ a.btn:not(.primary), a.btn:not(.primary):visited { color: var(--ink); text-decor
 .quota-chip { display: none; }
 @media (max-width: 1250px) { .hide-sm { display: none; } }
 .app.narrow .top-chip { height: 30px; padding: 0 9px; box-shadow: none; }
-.app.narrow .top-chip .chip-sep, .app.narrow .clock { display: none; }
+.app.narrow .top-chip .chip-sep { display: none; }
 
 /* ============ Editor tabs ============ */
 .ws-tabs { flex: none; display: flex; align-items: flex-end; gap: 8px; height: 38px; padding: 0 2px; }
@@ -989,15 +989,6 @@ a.btn:not(.primary), a.btn:not(.primary):visited { color: var(--ink); text-decor
 .ps-enter.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); background: var(--accent-soft); }
 .ps-input .send { width: 38px; height: 38px; }
 
-/* ============ Weather chip ============ */
-.wx-chip { padding: 0; gap: 0; overflow: hidden; }
-.wx-chip button { display: inline-flex; align-items: center; gap: 6px; height: 100%; padding: 0 10px; color: inherit; }
-.wx-chip button:hover { background: var(--pane-2); }
-.wx-open { padding-right: 6px !important; }
-.wx-temp-btn { border-left: 1px solid var(--line); }
-.unit-flip { display: inline-flex; flex-direction: column; font-size: 8.5px; line-height: 1; font-weight: 700; gap: 1px; margin-left: 1px; }
-.unit-flip span { color: var(--ink-3); opacity: .5; }
-.unit-flip span.on { color: var(--accent); opacity: 1; }
 
 /* ============ Markets ============ */
 .mk-tools { display: inline-flex; align-items: center; gap: 2px; }
@@ -1405,13 +1396,12 @@ a.btn:not(.primary), a.btn:not(.primary):visited { color: var(--ink); text-decor
 /* Top-bar meeting chip */
 .meet-chip { max-width: 340px; }
 .meet-chip > span { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; }
-.meet-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px; color: var(--ink-2); }
+.meet-title { white-space: nowrap; color: var(--ink-2); }
 .meet-chip small { color: var(--ink-3); white-space: nowrap; }
 .meet-chip.soon { box-shadow: inset 0 0 0 1px var(--warning); }
 .meet-chip.soon small { color: var(--warning); font-weight: 600; }
 .meet-chip.live { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--critical) 50%, transparent); }
 .meet-chip.live .icon { color: var(--critical); }
-@media (max-width: 1400px) { .meet-title { max-width: 110px; } }
 .app.narrow .meet-chip .meet-title, .app.narrow .meet-chip small { display: none; }
 .dock-scroll.wide > * { display: inline-block; vertical-align: top; }
 .join-btn, .join-btn:hover { text-decoration: none; }
@@ -2026,7 +2016,7 @@ button.yg-day:hover { box-shadow: 0 0 0 1.5px var(--accent); }
   --pane: var(--chrome-fill); --pane-2: var(--chrome-fill-2); --pane-3: var(--chrome-fill-3);
   --shadow: none; color: var(--ink);
 }
-:root[data-chrome] :is(.rail .menu, .topbar .menu, .hs-menu, .ws-tab.main, .ws-tab.side, .update-pop, .tour-card, .acct-pop, .rec-menu) {
+:root[data-chrome] :is(.rail .menu, .topbar .menu, .hs-menu, .ws-tab.main, .ws-tab.side, .update-pop, .tour-card, .acct-pop, .rec-menu, .status-pop) {
   --ink: var(--root-ink); --ink-2: var(--root-ink-2); --ink-3: var(--root-ink-3);
   --line: var(--root-line); --line-2: var(--root-line-2);
   --pane: var(--root-pane); --pane-2: var(--root-pane-2); --pane-3: var(--root-pane-3);
@@ -2241,41 +2231,38 @@ button.yg-day:hover { box-shadow: 0 0 0 1.5px var(--accent); }
 .live-activity .typing { flex: none; }
 .live-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; animation: fade-in .2s ease; }
 
-/* Top bar: search in the middle. Equal side columns keep it centred; when the chips on the right
-   need more room, the search gets narrower (down to 220px) and moves left rather than cover them. */
+/* Top bar: search in the middle. Equal side columns keep it centred; when the right side needs more
+   room, the search gets narrower (down to --search-min) and moves left rather than cover it. Nothing
+   in the bar shrinks below what it says: what doesn't fit gives way a step at a time (useFit in
+   App.jsx), never squeezed, cut off or wrapped. */
 .top-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.app.wide .topbar { padding-right: 14px; display: grid; grid-template-columns: minmax(max-content, 1fr) minmax(220px, 1fr) minmax(max-content, 1fr); }
+.app.wide .topbar { --search-min: 220px; padding-right: 14px; display: grid; grid-template-columns: minmax(max-content, 1fr) minmax(var(--search-min), 1fr) minmax(max-content, 1fr); }
 .app.wide .top-right { justify-content: flex-end; min-width: 0; }
+.app.wide :is(.top-left, .top-right) > *, .app.wide .top-x > * { flex: none; }
+.app.wide .top-right .top-chip, .app.wide .top-right .needs-chip, .app.wide .top-right .rec-pill { max-width: none; }
+.top-extras, .top-x { display: contents; }
 .app.wide .search-btn { width: 100%; max-width: 560px; justify-self: center; height: 38px; padding: 0 10px 0 14px; gap: 10px; border-radius: 11px; font-size: 13.5px; box-shadow: var(--shadow); }
-.app.wide .search-btn span { flex: 1; text-align: left; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.app.wide .search-btn span { flex: 1; text-align: left; white-space: nowrap; }
+.app.wide .search-btn .s-short, .app.wide .search-btn.s-short .s-long, .app.wide .search-btn.s-none :is(.s-long, .s-short) { display: none; }
+.app.wide .search-btn.s-short .s-short { display: inline; }
+.app.wide .search-btn.s-none { justify-content: space-between; }
 .app.wide .search-btn kbd { margin-left: 0; }
-.app.wide .search-btn .hide-sm { display: inline; }
-/* Laptop widths: tighter chips so the search can stay centred. Full details stay in each tooltip. */
-.app.wide .meet-chip .meet-title { display: inline-block; max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
-@media (max-width: 1700px) {
-  .app.wide .meet-chip .meet-title { display: inline-block; max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
-  .app.wide .meet-chip small { display: none; }
-}
-@media (max-width: 2100px) {
-  .app.wide .wx-open .hide-sm, .app.wide .usage-chip .usage-name { display: none; }
-}
-/* The chips giving way when they don't all fit (useFit in App.jsx), a step at a time. */
-.app.wide .topbar.fit-1 .clock { display: none; }
-.app.wide .topbar.fit-2 .usage-chip :is(.usage-new, .usage-acct, .chip-sep) { display: none; }
-.app.wide .topbar.fit-3 .wx-chip { display: none; }
-.app.wide .topbar.fit-4 .meet-chip :is(.meet-title, small) { display: none; }
-.app.wide .topbar.fit-5 .meet-chip { display: none; }
-.app.wide .topbar.fit-6 :is(.acct-wrap, .usage-chip) { display: none; }
-.app.wide .topbar.fit-7 .needs-word { display: none; }
+/* The steps the bar gives way in (useFit in App.jsx), least needed first. */
+.app.wide .topbar.fit-1 .x-setup, .app.wide .topbar.fit-2 .x-restart, .app.wide .topbar.fit-3 .x-update, .app.wide .topbar.fit-4 .x-fresh { display: none; }
+.app.wide .topbar.fit-5 .meet-chip :is(.meet-title, small) { display: none; }
+.app.wide .topbar.fit-6 .status-word { display: none; }
+.app.wide .topbar.fit-7 .view-tabs .vt-word { display: none; }
 .app.wide .topbar.fit-8 .rec-name { display: none; }
+.app.wide .topbar.fit-9 .needs-word { display: none; }
+.app.wide .topbar.fit-10 .meet-chip { display: none; }
+.app.wide .topbar.fit-11 .mc-chip .mc-name { display: none; }
+.app.wide .topbar.fit-12 { --search-min: 84px; }
 /* The speaker, muted: in the warning colour, so it shows. */
 .sound-btn.off { color: var(--warn, #d97706); }
 /* Phone: the logo and the search button keep their size; the chips give way first. */
 .app.narrow .top-left, .app.narrow .search-btn { flex: none; }
 .app.narrow .top-right { min-width: 0; overflow: hidden; }
 .app.narrow .top-right > * { flex: none; }
-.app.narrow .usage-chip .usage-name, .app.narrow .wx-open .hide-sm { display: none; }
-.app.narrow .wx-chip .unit-flip { display: none; }
 
 /* Onboarding v2: editable rows, one button style. */
 .onb-hint { margin: -4px 0 2px !important; }

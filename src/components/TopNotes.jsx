@@ -81,10 +81,15 @@ export default function TopNotes({ update, onUpdate, fleet, conf, fresh, app }) 
   )
 }
 
-// The same news on a wide screen: a chip in the top bar, with Reload.
-export function FreshChip({ fresh }) {
+// The same news on a wide screen: a chip in the top bar, with Reload (row: a row of the Status menu).
+export function FreshChip({ fresh, row = false }) {
   if (!fresh?.stale) return null
   const what = fresh.stale.computer ? t('Bridge AI on {computer} was updated', { computer: fresh.stale.computer }) : t('Bridge AI on your computer was updated')
+  if (row) return (
+    <button type="button" className="status-row fresh-row" onClick={fresh.reload} title={t('Reload to use the new version.')}>
+      <Icon name="refresh" size={14} /><span className="status-row-text">{what}</span><span className="top-note-act">{t('Reload')}</span>
+    </button>
+  )
   return (
     <button type="button" className="top-chip fresh-chip" onClick={fresh.reload} title={`${what}. ${t('Reload to use the new version.')}`}>
       <Icon name="refresh" size={13} /><span className="hide-sm">{t('Updated')}</span><b>{t('Reload')}</b>

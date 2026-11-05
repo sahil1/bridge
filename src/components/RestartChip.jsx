@@ -9,10 +9,11 @@ import { t } from '../i18n/index.js'
 // reaches Bridge AI only after it restarts. It stays until then, so you restart when it suits you.
 // From a phone it shows, but the restart happens on the computer. Agents keep running through it
 // (keep: in the terminal host), unless Keep agents running is off. line: on a phone, a line under the
-// top bar (TopNotes.jsx) that says what it's for.
-export default function RestartChip({ fleet, runtime, keep, line = false }) {
+// top bar (TopNotes.jsx), or a row of the Status menu (StatusMenu.jsx), that says what it's for;
+// startOpen: open from the start (asked for in Settings while its chip had no room in the bar).
+export default function RestartChip({ fleet, runtime, keep, line = false, startOpen = false }) {
   const { data } = useFix()
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(startOpen)
   const [busy, setBusy] = useState(false)
   const ref = useRef(null)
   useEffect(() => {
