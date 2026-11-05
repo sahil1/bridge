@@ -15,7 +15,7 @@ routes = [{ pattern = "counts.boldbridge.ai", custom_domain = true }]
 [[d1_databases]]
 binding = "DB"
 database_name = "bridge-counts"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "d104581b-fc64-45fd-b349-f7177f9bff71"
 
 # Once a day: nonces older than ten weeks go.
 [triggers]
