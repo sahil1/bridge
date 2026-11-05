@@ -795,3 +795,69 @@ button.mt-from-chip:hover { color: var(--ink); border-color: color-mix(in srgb, 
 .mt-talk .c3 { background: var(--series-4); }
 .mt-talk .c4 { background: var(--series-5); }
 .mt-talk .c5 { background: var(--series-7); }
+
+/* ============ Insights and People (insights.jsx, a trial feature) ============
+   Usage's tiles, cards and bars (styles.css .us-*), with what each number is based on under it. */
+.mt-home:has(> .mi:not(.mi-people)) { max-width: 1120px; }
+.mi { display: grid; gap: 12px; align-content: start; min-width: 0; }
+.mi-lede, .mi-why, .mi-basis { margin: 0; }
+.mi-bar { justify-content: flex-start; }
+.mi-kinds button .muted { font-variant-numeric: tabular-nums; }
+.mi .us-grid { grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); }
+.mi-tile { cursor: default; }
+.mi-weeks .us-col-label { white-space: nowrap; overflow: visible; }
+.mi-stack { display: flex; flex-direction: column; width: 100%; border-radius: 3px 3px 0 0; overflow: hidden; }
+.mi-stack i { background: var(--hm-1); min-height: 0; }
+.mi-stack b { background: var(--series-1); min-height: 0; }
+.mi .us-row { grid-template-columns: minmax(90px, 1.2fr) minmax(40px, 1fr) 44px 30px; }
+.mi-signals { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(90px, .6fr) minmax(180px, 1.6fr); font-size: 12.5px; }
+.mi-signal { display: contents; }
+.mi-signal > * { padding: 7px 8px 7px 0; border-top: 1px solid var(--line); }
+.mi-signal > b { font-weight: 650; }
+.mi-signal > b i { font-weight: 400; color: var(--ink-2); }
+.mi-cal { display: grid; gap: 6px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--pane-2); }
+.mi-cal > p { margin: 0; display: flex; gap: 6px; align-items: baseline; }
+.mi-map { width: 100%; max-width: 420px; height: auto; justify-self: center; overflow: hidden; }
+.mi-map-line { stroke: var(--line-2); stroke-width: 1.5; }
+.mi-map-you { fill: var(--ink); }
+.mi-map-youtext { fill: var(--pane); font: 650 11px var(--font); }
+.mi-map-node { cursor: pointer; }
+.mi-map-node circle { fill: var(--series-1); stroke: var(--pane); stroke-width: 2; }
+.mi-map-node text { fill: var(--ink); font: 11px var(--font); }
+.mi-map-node:hover circle { fill: var(--hm-4); }
+.mi-plist, .mi-mlist { display: grid; gap: 2px; }
+.mi-prow, .mi-mrow { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border-radius: 9px; color: var(--ink); text-align: left; }
+.mi-prow:hover, .mi-mrow:hover, .mi-prow:focus-visible, .mi-mrow:focus-visible { background: var(--pane-2); outline: none; }
+.mi-av { display: inline-grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 8px; background: var(--pane-3); color: var(--ink-2); font: 600 12.5px var(--font); }
+.mi-av.big { width: 40px; height: 40px; border-radius: 11px; font-size: 16px; }
+.mi-ptext { display: grid; flex: 1; min-width: 0; }
+.mi-ptext b { font-weight: 550; overflow-wrap: anywhere; }
+.mi-ptext > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mi-pnum { flex: none; color: var(--ink-2); font-size: 12px; }
+.mi-back { justify-self: start; }
+.mi-phead { display: flex; align-items: center; gap: 12px; }
+.mi-phead h3 { margin: 0; font-size: 18px; }
+.mi-phead p { margin: 2px 0 0; }
+.mi-next { margin: 0; display: flex; gap: 6px; align-items: baseline; }
+.mi-sec { display: grid; gap: 6px; }
+.mi-sec h4 { margin: 6px 0 0; font-size: 13px; font-weight: 600; }
+.mi-sec > p { margin: 0; }
+.mi-topics { display: flex; flex-wrap: wrap; gap: 6px; }
+.mi-items, .mi-written { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.mi-items li { display: grid; gap: 1px; font-size: 13px; }
+.mi-items .link-btn { justify-self: start; color: var(--ink-3); }
+.mi-written li { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.mi-written li span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.mi-merge { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.mi-merge select { min-width: 0; max-width: 100%; height: 30px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--pane); color: var(--ink); font: 13px var(--font); }
+/* On a phone: the cards one under another, the signals as rows of their own, whole targets. */
+.app.narrow .mi .us-grid { grid-template-columns: minmax(0, 1fr); }
+.app.narrow .mi .us-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.app.narrow .mi .us-tile-sub { white-space: normal; }
+.app.narrow .mi-signals { grid-template-columns: minmax(0, 1fr) auto; }
+.app.narrow .mi-signal > span.muted { grid-column: 1 / -1; padding-top: 0; border-top: 0; }
+.app.narrow .mi .seg.small-seg { display: flex; width: 100%; }
+.app.narrow .mi .seg.small-seg button { flex: 1 1 0; min-width: 0; justify-content: center; height: 40px; padding: 0 4px; }
+.app.narrow .mi :is(.mi-prow, .mi-mrow, .us-row) { min-height: 44px; }
+.app.narrow .mi :is(.mi-merge select, .mi-back) { min-height: 40px; font-size: 16px; }
+.app.narrow .mi :is(.us-tile-val, .us-row-name, .mi-ptext > span) { white-space: normal; overflow-wrap: anywhere; }

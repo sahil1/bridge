@@ -4,6 +4,8 @@ import { usePersisted, useWidth } from './layout.jsx'
 import { Updated } from './Trackers.jsx'
 import { usePoll } from '../api.js'
 import Usage, { fmtTokens } from './Usage.jsx'
+import UsageEverywhere from './UsageEverywhere.jsx'
+import { useTrial } from '../trials.js'
 import { t, tx, locale, midSentence } from '../i18n/index.js'
 
 // Usage stats: a year of activity as a heatmap, plus totals, streaks, models, projects and
@@ -239,6 +241,7 @@ export default function UsageStats() {
   const [model, setModel] = useState('all')
   const [project, setProject] = useState('all')
   const { data, error, refresh } = useStats(provider)
+  const everywhere = useTrial('usage-everywhere') // a trial feature (src/trials.js)
   // Messages and sessions come from Claude Code's own counts, so they show on Claude only.
   const counts = provider === 'claude'
   const heat = counts || METRICS[metric].filtered ? metric : 'tokens'
@@ -287,6 +290,7 @@ export default function UsageStats() {
   return (
     <div className="ustats">
       <PlanUsage />
+      {everywhere && <UsageEverywhere />}
       <div className="us-bar">
         <div className="seg small-seg" role="tablist" aria-label={t('Agent')}>
           {AGENTS.map(([p, label]) => <button key={p} role="tab" aria-selected={provider === p} className={provider === p ? 'on' : ''} onClick={() => { setProvider(p); setModel('all'); setProject('all') }}>{t(label)}</button>)}

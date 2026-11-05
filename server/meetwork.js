@@ -293,7 +293,7 @@ const FREE_MAIL = /^(gmail|googlemail|outlook|hotmail|live|msn|yahoo|ymail|iclou
 const domainOf = (p) => { const d = /@([\w.-]+\.[a-z]{2,})\s*>?$/i.exec(String(p || ''))?.[1]?.toLowerCase(); return d && !FREE_MAIL.test(d) ? d : null }
 // Your own organisation's domains aren't a customer: Settings' mail domains, and the one most of
 // your meetings have people from (in three or more, and at least two in five of those with any).
-function ownDomains(all) {
+export function ownDomains(all) {
   const out = new Set((cfg.mail?.myDomains || []).map((d) => String(d).toLowerCase().replace(/^@/, '')))
   const seen = new Map()
   let withAny = 0
@@ -314,7 +314,7 @@ function samePeople(a, b) {
 }
 const CUSTOMER = /\b(customer|client|prospect|partner|account|buyer|vendor|supplier)\b/i
 const OURS = /\b(my|our)\s+(company|team|employer)\b/i
-function customers(about, ours = new Set()) {
+export function customers(about, ours = new Set()) {
   const text = ` ${String(about.title || '')} `.toLowerCase()
   const doms = new Set(others(about.people).map(domainOf).filter((d) => d && !ours.has(d)))
   const out = new Set([...doms].map((d) => `@${d}`))

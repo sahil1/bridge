@@ -2,6 +2,8 @@ import { useState } from 'react'
 import Icon from './Icon.jsx'
 import { usePersisted, useShared } from './layout.jsx'
 import Usage from './Usage.jsx'
+import { UsageEverywhereBrief } from './UsageEverywhere.jsx'
+import { useTrial } from '../trials.js'
 import { openToday } from './today.js'
 import Markets, { RangePicker } from './Markets.jsx'
 import { api, usePoll, fmtTime, refetch, settingsChanged } from '../api.js'
@@ -97,9 +99,11 @@ export function Quota() {
   const { data, error, refresh } = usePoll('/quota', 5 * 60 * 1000)
   const [primary] = useShared('cc-primary', 'claude')
   const p = data?.providers?.find((x) => x.provider === primary)
+  const everywhere = useTrial('usage-everywhere') // a trial feature (src/trials.js)
   return (
     <Card icon="gauge" title={t('Usage')} className="usage-card" summary={p ? t('{name} {pct}% left', { name: p.provider, pct: p.percentRemaining ?? '—' }) : ''} right={<Updated data={data} onRefresh={() => refresh('?refresh=1')} />}>
       <Usage data={data} error={error} />
+      {everywhere && <UsageEverywhereBrief />}
       <button className="ghost-btn idea-more" onClick={() => openToday('usage')}>{t('Stats, patterns and history')} <Icon name="chevron" size={10} /></button>
     </Card>
   )

@@ -153,7 +153,7 @@ export async function draft(root, { base } = {}) {
   // A model on this computer by its name ("Local model, qwen3.5:4b (Ollama, on this computer)").
   const label = pick[0] === 'local' && o?.route ? `${o.label}, ${o.route}` : `${o?.label || pick[0]}${pick[1] ? ` (${pick[1]})` : ''}`
   try {
-    const a = await consult.ask({ who: pick[0], prompt, model: pick[1], via: pick[0] === 'local' ? 'api' : 'cli' })
+    const a = await consult.ask({ who: pick[0], prompt, model: pick[1], via: pick[0] === 'local' ? 'api' : 'cli', feature: 'pr' })
     const lines = String(a.text || '').trim().replace(/^```\w*\n([\s\S]*?)\n```$/, '$1').split('\n')
     const title = uncredit(lines.shift().replace(/^#+\s*|^title:\s*/i, '').replace(/^["'*`]+|["'*`]+$/g, '')).slice(0, 200)
     if (!title) throw new Error('it came back empty')

@@ -289,13 +289,13 @@ async function next(signal) {
   settle()
   try {
     // think: a model that thinks before answering may here (Bridge AI's own jobs turn it off).
-    return await reply(model, messages, { signal, tools: tools(), system: system(), think: true })
+    return await reply(model, messages, { signal, tools: tools(), system: system(), think: true, feature: 'chat' })
   } catch (e) {
     // A model that can't take tools (some local and hosted ones): carry on just talking.
     if (tools() && e.status === 400 && /tool|function/i.test(e.message)) {
       noTools = true
       say(dim(`${describe(model)} can't use tools here, so it can only talk, not work on files. /models lists others.`))
-      return reply(model, messages, { signal, tools: null, system: system(), think: true })
+      return reply(model, messages, { signal, tools: null, system: system(), think: true, feature: 'chat' })
     }
     throw e
   }

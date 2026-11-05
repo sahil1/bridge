@@ -13,6 +13,9 @@
 //   said.
 //   Edit by voice ("Instruction: … Text: …"): the text with "teh" spelled right and its first letter a
 //   capital, in quotes and a code fence (which Bridge AI takes off).
+//   Dictation to tidy ("<dictation>…</dictation>"): "you know" taken out, in quotes; a model that
+//   falls for what it's told, so "write a poem" in it is answered with a poem; "take your time"
+//   answers after 8 s, and "fail on purpose" with an error (HTTP 500).
 //   With tools, "EDIT <file>" runs a script (read it, change "hello" to "hello world", cat it).
 //   Whiteboards' "Draw this": a flowchart in Mermaid (Start, Tests pass?, Ship, Fix), broken the
 //   first time when asked for "broken"; for "AWS" or "3-tier", a diagram spec (users, a load
@@ -40,6 +43,7 @@ let tagged = 0
 
 // The words of a message (a message with a picture is a list of parts).
 const words = (c) => (typeof c === 'string' ? c : Array.isArray(c) ? c.map((p) => p.text || '').join('\n') : '')
+const dictated = (text) => /^<dictation>\n([\s\S]*)\n<\/dictation>$/.exec(text)?.[1] ?? null
 const ARCH = { direction: 'LR', groups: [{ id: 'aws', label: 'AWS us-east-1', kind: 'region' }, { id: 'vpc', label: 'VPC', kind: 'vpc', parent: 'aws' }, { id: 'pub', label: 'Public subnet', kind: 'subnet', parent: 'vpc' }, { id: 'privA', label: 'Private subnet A', kind: 'subnet', parent: 'vpc' }, { id: 'privB', label: 'Private subnet B', kind: 'subnet', parent: 'vpc' }],
   nodes: [{ id: 'users', label: 'Users', shape: 'users' }, { id: 'lb', label: 'Load balancer', shape: 'aws.elb', group: 'pub' }, { id: 'app1', label: 'App server 1', shape: 'aws.ec2', group: 'privA' }, { id: 'app2', label: 'App server 2', shape: 'aws.ec2', group: 'privB' }, { id: 'db', label: 'RDS', shape: 'aws.rds', group: 'privB' }],
   edges: [{ from: 'users', to: 'lb', label: 'HTTPS' }, { from: 'lb', to: 'app1' }, { from: 'lb', to: 'app2' }, { from: 'app1', to: 'db', label: 'SQL' }, { from: 'app2', to: 'db', label: 'SQL' }] }
@@ -76,6 +80,11 @@ function answer(b) {
   }
   const edit = /^Instruction: [\s\S]*?\n\nText:\n([\s\S]*)$/.exec(last)
   if (edit) { const t = edit[1].replace(/\bteh\b/g, 'the'); return say('```\n"' + t.charAt(0).toUpperCase() + t.slice(1) + '"\n```') }
+  const said = dictated(last)
+  if (said != null) {
+    if (/write a poem/i.test(said)) return say('The sea rolls in with silver light,\nIt hums a tune into the night,\nAnd every wave that finds the shore\nCalls softly back for something more.')
+    return say(`"${said.replace(/,?\s*\byou know\b,?/gi, '').replace(/\s{2,}/g, ' ').trim()}"`)
+  }
   if (/Write meeting notes in Markdown/.test(last)) {
     return say(`## Summary\n- The beta ships on November third.\n\n## Decisions\n- Ship the beta on November third.\n\n## Action items\n- [ ] You: send the updated budget to finance (Friday)\n- [ ] Priya: fix the login bug\n\n## Notes\n- Design review done.\n\n\`\`\`terms\n${JSON.stringify({ names: ['Priya'], misheard: {}, about: { Priya: 'fixing the login bug before the beta', Zed: 'nobody in this meeting' } })}\n\`\`\``)
   }
@@ -171,7 +180,9 @@ http.createServer((req, res) => {
     if (req.method === 'POST' && req.url === '/v1/chat/completions') {
       const b = JSON.parse(String(body) || '{}')
       log({ model: b.model, tools: (b.tools || []).map((t) => t.function.name), messages: b.messages, ...(b.response_format ? { format: b.response_format.type } : {}) })
-      return setTimeout(() => j(200, answer(b)), 300)
+      const said = dictated(words([...(b.messages || [])].reverse().find((x) => x.role === 'user')?.content)) || ''
+      if (/fail on purpose/i.test(said)) return j(500, { error: { message: 'The server had an error while processing your request.' } })
+      return setTimeout(() => j(200, answer(b)), /take your time/i.test(said) ? 8000 : 300)
     }
     j(404, { error: { message: 'not found' } })
   })

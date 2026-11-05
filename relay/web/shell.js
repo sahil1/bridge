@@ -271,7 +271,8 @@ let hostOnline = false
 const offlineText = () => (silent ? 'Your computer isn\'t answering right now.' : hostOnline ? 'Reconnecting to your computer…' : hostSeen ? `Your computer is offline (since ${new Date(hostSeen).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}).` : 'Your computer isn\'t connected to the relay right now.')
 
 // Bridge AI's hosted relay turned this phone away for now: its daily limit for your computer, too
-// much at once, or it's switched off. Until then, no trying again.
+// much at once, as many phones and tabs connected as it takes, or it's switched off. Until then, no
+// trying again.
 let limited = { until: 0 }
 function onLimit(m) {
   const until = Math.min(Math.max(Number(m.until) || 0, Date.now() + 3000), Date.now() + 26 * 3600000)
@@ -280,7 +281,7 @@ function onLimit(m) {
     : String(m.text || 'Bridge AI\'s relay can\'t take this right now.').slice(0, 300)
   limited = { why: m.why, text, until }
   if (appShown) bar(text, true)
-  else waitScreen(m.why === 'day' ? 'Daily limit reached' : m.why === 'off' ? 'Bridge AI\'s relay is off' : 'One moment…', text, false)
+  else waitScreen(m.why === 'day' ? 'Daily limit reached' : m.why === 'off' ? 'Bridge AI\'s relay is off' : m.why === 'phones' ? 'Too many connected' : 'One moment…', text, false)
 }
 
 function bar(msg, off) {

@@ -7,6 +7,7 @@ import { store } from '../components/layout.jsx'
 import { keyLabel } from '../../shared/dictation/keys.js'
 import { useDictation, configure, press, release, finish, cancel, dismiss, retry, keysPlatform, dictationKey, amend, forget } from './controller.js'
 import { Morph, Listening, Working, Done } from './Pill.jsx'
+import { untidiedWhy, TidyNeeds } from './Tidy.jsx'
 import { t } from '../i18n/index.js'
 import './dictation.css'
 
@@ -23,7 +24,11 @@ import './dictation.css'
 // paste for you next time. Each dictation is kept with the app it was said in, and amended with what
 // became of it (controller.js keep). Edit by voice (Settings › Voice, a Mac): with text selected where
 // you were typing, what you said is how to change it; the model picked for it rewrites the text and
-// it's pasted in its place.
+// it's pasted in its place. Tidy what I say (a trial, Settings › Voice): what you said is tidied by
+// a model first ("Tidying…"), and pasted tidied; when it isn't (too slow, an error, an answer that
+// wasn't what you said, no model yet) it's pasted as you said it, and the pill says why for a
+// moment, or with no model yet, the card offers the local model in one click. On the card, Use what
+// I said swaps in the words from before tidying.
 // The desktop app tells it when the key goes down and up (bridge-dictate-key events, as in the main
 // window); a press from before it was ready comes from hudReady(). The window keeps its width and
 // top, and grows down to fit (hudSize); on a Mac and Windows, clicks go through it except on the
@@ -65,6 +70,7 @@ export default function Hud() {
   const [allowed, setAllowed] = useState(false) // Accessibility turned on while the words waited here
   const [editing, setEditing] = useState(false) // edit by voice: the selection being read and rewritten
   const [edited, setEdited] = useState(null) // ...and what it was rewritten as
+  const [asSaid, setAsSaid] = useState(false) // tidied, and you picked what you said instead
   const timer = useRef(null)
   const going = useRef(null)
   // This press's words, straight from the key: not after a download or Try again, when you've long
@@ -97,7 +103,7 @@ export default function Hud() {
   useEffect(() => {
     const begin = (at, name, bundle) => {
       clearTimeout(timer.current); clearTimeout(going.current); setLeaving(false)
-      setDone(null); setErr(null); setPicking(false); setWhy(null); setOffer(false); setPasting(false); setAllowed(false); setEditing(false); setEdited(null)
+      setDone(null); setErr(null); setPicking(false); setWhy(null); setOffer(false); setPasting(false); setAllowed(false); setEditing(false); setEdited(null); setAsSaid(false)
       setInto(name || null)
       setShown((n) => n + 1)
       press0.current++
@@ -144,7 +150,10 @@ export default function Hud() {
   }
   const later = (ms) => { clearTimeout(timer.current); timer.current = setTimeout(() => { setDone(null); hide() }, ms) }
   const target = agents.find((a) => a.paneId === to) || null
-  const text = edited ?? (s.result?.text || '')
+  const text = edited ?? (asSaid && s.result?.said ? s.result.said : s.result?.text || '')
+  // Not tidied, and why (with no model yet, what's needed shows on the card).
+  const untidied = edited == null ? s.result?.untidied || null : null
+  const needsModel = untidied?.code === 'no-model'
   const canPaste = !!st?.paste?.can && !!app().hudPaste
   const pasteOn = conf?.to === 'paste' && canPaste
   // Where I'm typing: the text, as soon as it's here, pasted by the desktop app. Decided once, when
@@ -193,7 +202,9 @@ export default function Hud() {
         // Nothing took it (no text field there): it's on the clipboard to paste by hand.
         if (x.read === false) { setDone(t('Nothing took it there, so it\'s on the clipboard: press {key} to paste it.', { key: pasteKey() })); later(3500) }
         else if (change) { setDone(into ? t('Changed in {app}', { app: into }) : t('Changed')); later(1200) }
-        else { setDone(into ? t('Pasted into {app}', { app: into }) : t('Pasted')); later(900) }
+        else if (r.by != null) { setDone(into ? t('Tidied and pasted into {app}', { app: into }) : t('Tidied and pasted')); later(900) }
+        // As you said it: why, for long enough to read (with no model yet, the card, a while longer).
+        else { setDone(into ? t('Pasted into {app}', { app: into }) : t('Pasted')); later(r.untidied ? (r.untidied.code === 'no-model' ? 15000 : 4000) : 900) }
       } else setWhy(WHY[x?.error] ? x.error : x?.error === 'off' ? null : 'failed')
     }, () => { if (g === press0.current) { setPasting(false); setWhy('failed') } })
   }
@@ -270,7 +281,7 @@ export default function Hud() {
   const listening = s.phase === 'opening' || s.phase === 'listening'
   const autoPaste = !!s.result && (pasteOn || edited != null) && !!st?.paste?.allowed && !why && (pasting || (fresh.current && pasted.current !== s.result.at))
   const view = listening ? 'listening' : s.phase === 'working' ? 'working' : s.result && (editing || (autoPaste && !done)) ? 'pasting'
-    : done && !offer && !err ? 'done' : s.result ? 'card' : s.note || s.setup ? 'note' : 'idle'
+    : done && !offer && !err && !needsModel ? 'done' : s.result ? 'card' : s.note || s.setup ? 'note' : 'idle'
   const card = view === 'card' || view === 'note'
   const hint = s.mode === 'free' ? t('Listening… press {key} again when you\'re done', { key: label }) : t('Let go to finish · Esc cancels')
   return (
@@ -279,9 +290,9 @@ export default function Hud() {
     <div className={`hud-root${leaving || view === 'idle' ? ' leaving' : ''}`}>
       <Morph key={shown} className={`hud${card ? ' card' : ''}`} role="dialog" aria-label={t('Dictation')} onSize={(z) => setRoom(z.h)}>
         {view === 'listening' && <Listening s={s} to={toChip} hint={hint} onCancel={() => { cancel(); hide() }} onStop={finish} />}
-        {view === 'working' && <Working s={s} />}
+        {view === 'working' && <Working s={s} text={s.tidying ? t('Tidying what you said…') : undefined} />}
         {view === 'pasting' && <Working s={s} text={editing ? t('Changing what you selected…') : into ? t('Pasting into {app}…', { app: into }) : t('Pasting…')} />}
-        {view === 'done' && <Done text={done} />}
+        {view === 'done' && <Done text={done} warn={!!untidied} note={untidiedWhy(untidied)} />}
         {view === 'card' && (
           <div className="dp-card">
             <div className="hud-row">{toChip}<span className="grow" /><button type="button" className="dp-x" onClick={hide} aria-label={t('Close')} title={t('Close')}><Icon name="x" size={12} /></button></div>
@@ -289,12 +300,18 @@ export default function Hud() {
             {err && <p className="error-text small">{err}</p>}
             {why && <p className="hud-why small" role="status"><Icon name="info" size={12} /> {WHY[why]()}{why === 'accessibility' && (app().permission || app().pasteAsk) ? <> <button type="button" className="link-btn" onClick={askAccess}>{t('Allow it')}</button></> : null}</p>}
             {allowed && !done && <p className="hud-why small" role="status"><Icon name="check" size={12} /> {t('Accessibility is on. Click where you were typing, then Paste.')}</p>}
+            {s.result?.by != null && edited == null && (
+              <p className="hud-why small hud-tidied"><Icon name="sparkle" size={12} /> {asSaid ? t('As you said it.') : s.result.by ? t('Tidied by {model}.', { model: s.result.by }) : t('Tidied.')}
+                {s.result.said && <>{' '}<button type="button" className="link-btn" onClick={() => setAsSaid((v) => !v)}>{asSaid ? t('Use the tidied text') : t('Use what I said')}</button></>}</p>
+            )}
+            {untidied && <p className="hud-why small hud-untidied" role="status"><Icon name="info" size={12} /> {untidiedWhy(untidied)}</p>}
+            {needsModel && <TidyNeeds local={untidied.local} className="hud-tidy" />}
             {done ? <p className="hud-done" role="status"><Icon name="check" size={12} /> {done}</p> : (
               <div className="hud-actions">
                 {app().hudOpen && <button type="button" className="btn small" onClick={edit} disabled={!target}>{t('Edit in Bridge AI')}</button>}
                 <button type="button" className="btn small" onClick={copy}>{t('Copy')}</button>
                 {allowed
-                  ? <button type="button" className="btn small primary" onClick={() => { setAllowed(false); pasteIt(s.result) }}>{t('Paste')}</button>
+                  ? <button type="button" className="btn small primary" onClick={() => { setAllowed(false); pasteIt(asSaid ? { ...s.result, text, by: null } : s.result) }}>{t('Paste')}</button>
                   : <button type="button" className="btn small primary" onClick={send} disabled={!target}>{t('Send')}</button>}
               </div>
             )}

@@ -100,7 +100,8 @@ const gemini = {
 // ---------- Qwen Code ----------
 // ~/.qwen/projects/<cwd, every non-alphanumeric a "-">/chats/<session id>.jsonl: entries linked by
 // uuid and parentUuid, as Claude Code does; the conversation is the chain back from the last one.
-const qwenDir = (cwd) => path.join(process.env.QWEN_RUNTIME_DIR || process.env.QWEN_HOME || path.join(HOME, '.qwen'), 'projects', path.resolve(cwd).replace(/[^a-zA-Z0-9]/g, '-'), 'chats')
+const qwenRoot = () => path.join(process.env.QWEN_RUNTIME_DIR || process.env.QWEN_HOME || path.join(HOME, '.qwen'), 'projects')
+const qwenDir = (cwd) => path.join(qwenRoot(), path.resolve(cwd).replace(/[^a-zA-Z0-9]/g, '-'), 'chats')
 function qwenRead(file) {
   const all = readLines(file)
   const byUuid = new Map(all.filter((e) => e.uuid).map((e) => [e.uuid, e]))
@@ -180,7 +181,8 @@ const copilot = {
 // ---------- Cursor Agent ----------
 // ~/.cursor/projects/<cwd as a slug>/agent-transcripts/<chat id>/<chat id>.jsonl: { role, message }
 // lines, with no times or tool results (so its edits show as calls, without counts).
-const cursorDir = (cwd) => path.join(process.env.CURSOR_DATA_DIR || path.join(HOME, '.cursor'), 'projects', path.resolve(cwd).replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, ''), 'agent-transcripts')
+const cursorRoot = () => path.join(process.env.CURSOR_DATA_DIR || path.join(HOME, '.cursor'), 'projects')
+const cursorDir = (cwd) => path.join(cursorRoot(), path.resolve(cwd).replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, ''), 'agent-transcripts')
 function cursorRead(file) {
   const out = []
   for (const e of readLines(file)) {
@@ -206,3 +208,7 @@ const cursor = {
 }
 
 export const OTHER = { gemini, qwen, copilot, cursor }
+// Where each keeps its logs, every folder's together (agenttokens.js reads the tokens in them):
+// Gemini CLI's tmp/<project>/chats, Qwen Code's projects/<folder>/chats, Copilot CLI's
+// session-state/<id>, Cursor Agent's projects/<folder>/agent-transcripts/<id>.
+export const ROOTS = { gemini: () => path.join(geminiRoot(), 'tmp'), qwen: qwenRoot, copilot: copilotDir, cursor: cursorRoot }

@@ -103,12 +103,12 @@ export function Working({ s, text }) {
   )
 }
 
-// What became of the words, for a moment.
-export function Done({ text, warn = false }) {
+// What became of the words, for a moment. note: a second line, why it went the way it did.
+export function Done({ text, note = null, warn = false }) {
   return (
     <div className={`dp-row dp-done${warn ? ' warn' : ''}`} role="status">
       <span className="dp-tick" aria-hidden="true"><Icon name={warn ? 'info' : 'check'} size={12} /></span>
-      <span className="dp-what">{text}</span>
+      <span className="dp-what">{text}{note && <span className="dp-note">{note}</span>}</span>
     </div>
   )
 }
