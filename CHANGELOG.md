@@ -4,7 +4,7 @@ Each version's section here becomes its GitHub release notes (`npm run release`)
 
 ## 3.9.3
 
-Studio, for your documents, sheets, decks and pages, edited by you or your agents with every version kept; quicker with two windows open; notes named after the right meeting when two are on; names for who's talking on a call; meetings that end by themselves once they're over and save as they end; and agents that go by the name you give them.
+Studio to try (documents, sheets, decks and pages, edited by you or your agents with every version kept); AI Assist and meeting notes that carry on on your other account when one is at its limit; quicker with two windows open; notes named after the right meeting when two are on; names for who's talking on a call; meetings that end by themselves once they're over and save as they end; and agents that go by the name you give them.
 
 ### What's new
 
