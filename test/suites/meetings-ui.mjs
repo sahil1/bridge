@@ -292,12 +292,20 @@ process.stdout.write('@@EV@@Pricing review (Work)\\u00a6' + d.getFullYear() + '-
     await p.locator('.mt-places button', { hasText: 'All' }).click()
     await p.locator('.mt-row-open', { hasText: title }).click()
   }
+  // Controls a click at their middle doesn't reach (something else is on top of them).
+  const covered = (sel) => p.evaluate((sel) => [...document.querySelectorAll(sel)].filter((e) => e.getClientRects().length).map((e) => {
+    const r = e.getBoundingClientRect()
+    const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+    return top && (top === e || e.contains(top) || top.contains(e)) ? null : `${e.getAttribute('aria-label') || e.className} under ${top ? top.className : 'nothing'}`
+  }).filter(Boolean), sel)
   // A line the cleanup fixed says so, with Undo; one it left out is hidden and said, and shown on request.
   const L = await api('/meetings', { title: 'Launch review', call: false })
   await api(`/meetings/${L.id}/stop`, {})
   said(L.id, [['them', 1, 'We should demo bridge ay eye at the offsite.'], ['them', 6, 'Thanks for watching!'], ['you', 11, 'Good, and the phone app is ready for it too.']])
   await api(`/meetings/${L.id}/cleanup`, {})
   await openMeeting('Launch review')
+  // The other side's lines: one Who spoke (it tells the voices apart, then names them), not two.
+  ok(!!(await until(async () => (await p.locator('.mt-transcript .mt-thead button[aria-label="Who spoke"]').count()) === 1, 6000)), 'one Who spoke on a transcript with the other side in it, not two', await p.locator('.mt-transcript .mt-thead').innerText().catch(() => ''))
   const fixedLine = p.locator('.mt-transcript .mt-line', { hasText: 'demo Bridge AI at the offsite' })
   ok(!!(await until(() => fixedLine.isVisible(), 8000)) && /cleaned up/.test(await fixedLine.innerText()), 'a line the cleanup fixed shows the fix, marked cleaned up', await p.locator('.mt-transcript').innerText().catch(() => ''))
   ok(await p.locator('.mt-transcript .mt-line', { hasText: 'Thanks for watching' }).count() === 0 && /1 line left out by the cleanup/.test(await p.locator('.mt-transcript').innerText()), 'a line it left out is hidden, and said')
@@ -364,6 +372,14 @@ process.exit(1)`)
   said(W.id, [['them', 2, 'The Stripe webhook in payments-api retries forever when it gets a 500.'], ['you', 6, 'I can fix the retry this week, with a backoff.']])
   fs.writeFileSync(path.join(kit.data, 'meetings', W.id, 'summary.md'), '## Summary\n- Webhook retries and pricing.\n\n## Decisions\n- Retry with a backoff.\n\n## Action items\n- [ ] You: fix the retry on the Stripe webhook in payments-api\n- [ ] Mia: send the pricing doc to Acme\n- [ ] Ola: book the offsite venue\n')
   await openMeeting('Weekly payments sync')
+  // In a smaller window the summary's tools wrap onto two lines, and every one of them still opens:
+  // the summary under them used to cover the second line.
+  await p.setViewportSize({ width: 1100, height: 700 })
+  await until(async () => (await p.locator('.mt-notes .mt-tools select').count()) === 3, 6000)
+  await p.waitForTimeout(400)
+  const toolsHigh = await p.locator('.mt-notes .mt-tools').evaluate((e) => e.getBoundingClientRect().height).catch(() => 0)
+  ok(!(await covered('.mt-notes .mt-tools select, .mt-notes .mt-tools button')).length && (await p.locator('.mt-notes .mt-tools select').count()) === 3, 'a smaller window: the summary\'s language, model and template can each be opened', { covered: await covered('.mt-notes .mt-tools select, .mt-notes .mt-tools button'), toolsHigh })
+  await p.setViewportSize({ width: 1440, height: 900 })
   const item = (i) => p.locator('.mt-items .mt-item').nth(i)
   ok(!!(await until(async () => (await p.locator('.mt-items .mt-item').count()) === 3, 8000)), 'each action item on a line of its own', await p.locator('.mt-notes').innerText().catch(() => ''))
   const leads = await p.evaluate(() => [...document.querySelectorAll('.mt-items .mt-item')].map((li) => [...li.querySelectorAll('.mt-item-acts .btn')].map((b) => `${b.textContent.trim()}${b.classList.contains('lead') ? '*' : ''}`).join('|')))
@@ -462,6 +478,26 @@ process.exit(1)`)
   }
   ok(!!(await until(() => resume.isVisible(), 8000)), 'the resume in Downloads is offered', await p.locator('.mt-assist').innerText().catch(() => ''))
   await shot(p, `${tag}meeting-assist`)
+  // How often it suggests: a slider, Low to High, for every meeting; and the suggestions sorted.
+  const level = p.locator('.mt-assist-level input')
+  ok(await level.isVisible() && await level.inputValue() === '1' && /Medium/.test(await p.locator('.mt-assist-level').innerText()), 'How often: a slider, at Medium')
+  await level.fill('2')
+  ok(!!(await until(async () => (await api('/settings')).user?.meetings?.assistLevel === 'high', 5000)) && /High/.test(await p.locator('.mt-assist-level').innerText()) && /about every 30 seconds/.test(await p.locator('.mt-assist').innerText()), 'moved to High: kept for every meeting, and it says how often it looks', (await api('/settings')).user?.meetings)
+  await level.fill('1')
+  await until(async () => (await api('/settings')).user?.meetings?.assistLevel === 'medium', 5000)
+  const tipTexts = () => p.locator('.mt-assist .mt-tip .mt-tip-text').allInnerTexts().catch(() => [])
+  const newest = await tipTexts()
+  await p.locator('.mt-assist-sort select').selectOption('old')
+  ok(!!(await until(async () => JSON.stringify(await tipTexts()) === JSON.stringify([...newest].reverse()), 4000)), 'Sort: oldest first turns the list around', { newest, now: await tipTexts() })
+  await p.locator('.mt-assist-sort select').selectOption('kind')
+  ok(!!(await until(async () => /^Ask$/i.test((await p.locator('.mt-assist .mt-tip .mt-tip-kind').first().innerText().catch(() => '')).trim()), 4000)), 'Sort by kind: questions to ask first', await p.locator('.mt-assist .mt-tip .mt-tip-kind').allInnerTexts())
+  await p.locator('.mt-assist-sort select').selectOption('new')
+  // A short window: the columns keep room to read in, and the page scrolls instead.
+  await p.setViewportSize({ width: 1100, height: 600 })
+  await p.waitForTimeout(400)
+  const colsHigh = await p.locator('.mt-page > .mt-cols').first().evaluate((e) => e.getBoundingClientRect().height).catch(() => 0)
+  ok(colsHigh >= 239, 'a short window: Assist and your notes keep room to read in (the page scrolls)', { colsHigh })
+  await p.setViewportSize({ width: 1440, height: 900 })
   await resume.locator('button', { hasText: 'Add' }).click({ timeout: 5000 }).catch(() => {})
   ok(!!(await until(async () => ((await api(`/meetings/${I.id}`)).links || []).some((l) => /Mara_Lind_Resume\.pdf$/.test(l.path || '')), 5000)), 'Add links it to the meeting')
   await api(`/meetings/${I.id}/assist`, { on: false })

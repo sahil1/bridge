@@ -81,13 +81,12 @@ try {
   const d0 = await dnt.api('/counts')
   ok(d0.available === false && d0.refused === 'DO_NOT_TRACK' && await dnt.api('/counts', { share: true }).then(() => false, () => true), 'DO_NOT_TRACK=1: off, and it can\'t be turned on', d0)
 
-  // On unless turned off: a new install shares, and says so once.
+  // On unless turned off: a new install shares. Nothing pops up to say so: Settings › About & Updates
+  // and PRIVACY.md do.
   {
     const fresh = await kitWith('default', { BRIDGE_COUNTS_URL: URL_ })
     const f0 = await fresh.api('/counts')
-    ok(f0.available && f0.share === true && f0.notice === true, 'on unless turned off: a new install shares usage stats, and the card that says so is due', f0)
-    const f1 = await fresh.api('/counts/noticed', {})
-    ok(f1.notice === false && f1.share === true, 'once seen, the card isn\'t shown again', f1)
+    ok(f0.available && f0.share === true && !('notice' in f0), 'on unless turned off: a new install shares usage stats, with no card to say so', f0)
     const pf = (await fresh.api('/counts/preview')).report
     const allowed = (k, v) => SCHEMA.values[k].includes(v)
     ok(/^macOS \d+\.\d+$|^Windows 1[01]|^[A-Z][a-z]+/.test(pf.osVersion) && typeof pf.chip === 'string' && pf.chip.length > 1 && allowed('memory', pf.memory) && allowed('cores', pf.cores) && allowed('phones', pf.phones) && allowed('computers', pf.computers), 'a report says the system\'s version, the chip\'s family, memory and cores (ranges), and the phones and other computers linked', { osVersion: pf.osVersion, chip: pf.chip, memory: pf.memory, cores: pf.cores, phones: pf.phones, computers: pf.computers })
@@ -103,7 +102,7 @@ try {
   k.program('claude', fs.readFileSync(path.join(TEST, 'stand-ins', 'claude.cjs'), 'utf8'))
   await k.api('/setup', { name: 'Priya Raman' })
   const s0 = await k.api('/counts')
-  ok(s0.available === true && s0.share === false && s0.notice === false && s0.to === `127.0.0.1:${port}` && s0.sent.length === 0, 'turned off: offered, off, and no card', s0)
+  ok(s0.available === true && s0.share === false && s0.to === `127.0.0.1:${port}` && s0.sent.length === 0, 'turned off: offered and off', s0)
   await use(k, 1)
   await new Promise((r) => setTimeout(r, 900))
   const p0 = await k.api('/counts/preview')
@@ -167,26 +166,16 @@ try {
   await later.api('/counts', { share: false })
   ok(before === 1 && weekFiles(k.data).length === 0 && (await later.api('/counts/preview')).share === false, 'turned off: what was counted and not sent is forgotten', { before, after: weekFiles(k.data) })
 
-  // ---------- In the app: the card that says it's on ----------
+  // ---------- In the app: no card ----------
+  // After setup the app says nothing about usage stats: they're in Settings › About & Updates.
   {
-    const crashSrv = `http://127.0.0.1:${port}/v1/report`
-    const kc = await kitWith('card', { BRIDGE_COUNTS_URL: URL_, BRIDGE_CRASHES_URL: crashSrv }, { name: 'Priya Raman' })
+    const kc = await kitWith('card', { BRIDGE_COUNTS_URL: URL_ }, { name: 'Priya Raman' })
     await kc.api('/setup', { name: 'Priya Raman' })
     const { ctx, p } = await page(b, kc.url)
-    const card = p.locator('.stats-notice')
-    const said = await until(async () => /sends anonymous usage stats and crash reports/.test(await card.innerText().catch(() => '')), 15000)
-    const text = await card.innerText().catch(() => '')
-    ok(said && /Never your code, what you type or say/.test(text) && /no ID for you or this computer/.test(text), 'after setup, a card says usage stats and crash reports are on, what goes and what never does', text)
-    await shot(p, `${tag}usage-stats-card`)
-    await card.locator('button', { hasText: 'Turn off' }).click()
-    const offNow = await until(async () => (await kc.api('/counts')).share === false && (await kc.api('/crashes/sending')).send === false, 8000)
-    ok(offNow && await until(async () => (await card.count()) === 0, 5000), 'Turn off turns both off, in one click, and the card goes', { counts: await kc.api('/counts'), crashes: await kc.api('/crashes/sending') })
+    await p.locator('.topbar .search-btn').waitFor({ timeout: 15000 }).catch(() => {})
+    await p.waitForTimeout(1500)
+    ok(!/anonymous usage stats/i.test(await p.locator('body').innerText()) && (await kc.api('/counts')).share === true, 'after setup, nothing pops up about usage stats, and they\'re on')
     await ctx.close()
-    const { ctx: c2, p: p2 } = await page(b, kc.url)
-    await p2.locator('.topbar .search-btn').waitFor({ timeout: 15000 }).catch(() => {})
-    await p2.waitForTimeout(1500)
-    ok((await p2.locator('.stats-notice').count()) === 0, 'and it doesn\'t come back')
-    await c2.close()
     kc.stop()
   }
 

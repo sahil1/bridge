@@ -97,8 +97,9 @@ const PRODUCTS = new Set(['teams', 'zoom', 'webex', 'slack', 'jira', 'confluence
 // Values that are yours, from this machine and your Bridge AI data folder.
 function personalValues() {
   const vals = new Map() // value -> where it came from
-  // exact: matched as written (a name in meeting memory, so "Mark" doesn't flag "mark").
-  const addVal = (v, from, exact = false) => { if (typeof v === 'string' && v.trim().length >= 4) vals.set(v.trim(), { from, exact }) }
+  // exact: matched as written (a name in meeting memory, so "Mark" doesn't flag "mark"). place: a
+  // place's name, which libraries use too (below).
+  const addVal = (v, from, exact = false, place = false) => { if (typeof v === 'string' && v.trim().length >= 4) vals.set(v.trim(), { from, exact, place }) }
   try { const u = os.userInfo().username; if (u.length >= 4 && !GENERIC_USER.has(u)) addVal(u, 'your username') } catch { /* no user */ }
   addVal(os.homedir(), 'your home folder')
   // A no-reply address (GitHub's users.noreply.github.com) is made to be public, as in the scan below.
@@ -108,7 +109,7 @@ function personalValues() {
   try {
     const c = JSON.parse(fs.readFileSync(path.join(data, 'config.json'), 'utf8'))
     addVal(c.name, 'your name in Bridge AI settings')
-    addVal(c.location?.label, 'your location in Bridge AI settings')
+    addVal(c.location?.label, 'your location in Bridge AI settings', false, true)
     for (const v of [c.location?.lat, c.location?.lon]) if (typeof v === 'number' && String(v).includes('.')) addVal(String(v), 'your location in Bridge AI settings')
     for (const h of c.allowedHosts || []) addVal(h, 'an allowed host in your settings')
     for (const m of [].concat(c.mail?.accounts || [])) addVal(m?.address || m?.email, 'a mail account in your settings')
@@ -133,13 +134,14 @@ try { const m = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf
 const problems = []
 // Whole words only, so a first name doesn't match inside another word.
 const esc = (v) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-const mine = [...personalValues()].filter(([v]) => !PUBLIC_NAMES.has(v.toLowerCase())).map(([v, { from, exact }]) => [new RegExp(`(?<![A-Za-z0-9])${esc(v)}(?![A-Za-z0-9])`, exact ? '' : 'i'), from])
+const mine = [...personalValues()].filter(([v]) => !PUBLIC_NAMES.has(v.toLowerCase())).map(([v, { from, exact, place }]) => [new RegExp(`(?<![A-Za-z0-9])${esc(v)}(?![A-Za-z0-9])`, exact ? '' : 'i'), from, place])
 const BINARY = /\.(png|jpe?g|gif|webp|ico|icns|woff2?|ttf|otf|pdf|zip|gz|dmg|exe|node|wasm|mp[34]|wav)$/i
 const SKIP_TEXT = new Set(['package-lock.json', 'desktop/package-lock.json'])
 // This file itself, with / separators like the paths it's compared with (Windows gives \).
 const self = path.relative(ROOT, fileURLToPath(import.meta.url)).split(path.sep).join('/')
-// Built bundles carry the libraries' own credits (authors' emails); your values and secrets are
-// still looked for in them.
+// Built bundles carry the libraries' own credits (authors' emails) and place names (time zones, a
+// metadata standard named after a city); your other values and secrets are still looked for in
+// them, and your place in everything else.
 const BUNDLE = /(^|\/)assets\/[^/]+\.(js|css|map)$/
 
 for (const { f, read, at: commit = '' } of list) {
@@ -161,7 +163,7 @@ for (const { f, read, at: commit = '' } of list) {
         for (const m of line.matchAll(g)) if (!keep || keep(m[0], m[1] || '')) problems.push(`${at}: ${what} (${m[0].slice(0, 12)}…)`)
       }
     }
-    for (const [re, from] of mine) if (re.test(line)) problems.push(`${at}: ${from} appears here`)
+    for (const [re, from, place] of mine) if (!(place && BUNDLE.test(rel)) && re.test(line)) problems.push(`${at}: ${from} appears here`)
   })
 }
 
