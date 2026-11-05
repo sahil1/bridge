@@ -15,6 +15,17 @@ Most logos come from Simple Icons (https://simpleicons.org, CC0).
 The Geist and JetBrains Mono fonts are included under the SIL Open Font License 1.1 (via
 Fontsource).
 
+Studio's sheets are Univer (https://github.com/dream-num/univer, Apache License 2.0, Copyright
+DreamNum Co., Ltd.), reading and writing Excel files with ExcelJS (https://github.com/exceljs/exceljs,
+MIT). Its documents are edited with Tiptap (https://github.com/ueberdosis/tiptap, MIT) on ProseMirror
+(MIT), Markdown through tiptap-markdown (MIT), Word files read with mammoth
+(https://github.com/mwilliamson/mammoth.js, BSD 2-Clause) and written with docx
+(https://github.com/dolanmiu/docx, MIT), their look read with JSZip (https://github.com/Stuk/jszip,
+MIT, offered as MIT or GPLv3; used under MIT). Decks are drawn with Marp Core (https://github.com/marp-team/marp-core,
+MIT) and saved as PowerPoint with PptxGenJS (https://github.com/gitbrent/PptxGenJS, MIT). Studio is
+built on the same open parts as GenOffice (https://github.com/genspark-ai/genoffice, Apache License 2.0);
+it isn't affiliated with Genspark or GenOffice, whose names belong to Mainfunc, Inc.
+
 Whiteboards are drawn with Excalidraw (https://github.com/excalidraw/excalidraw, MIT License), which
 turns Mermaid into shapes with mermaid-to-excalidraw (MIT) and Mermaid
 (https://github.com/mermaid-js/mermaid, MIT). Excalidraw's fonts are included as it ships them:

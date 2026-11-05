@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import Icon, { StatusDot } from './Icon.jsx'
 import { api, hostApi, machineId, relayComputers, phoneApp } from '../api.js'
 import { t, tx, locale } from '../i18n/index.js'
@@ -20,17 +20,31 @@ export const machinesChanged = () => window.dispatchEvent(new Event('bridge-mach
 export const openMap = () => window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: 'view:map' } }))
 
 // Your devices, as the device this page comes from knows them. on: whether to look at all.
+// One look for the whole page, however many parts of it show them (the devices menu, the sidebar,
+// the window's title): each says how often (ms), and the page looks as often as the most eager
+// one asks, once, sharing what comes back. Not while the page is hidden.
+const seen = { data: null, subs: new Set(), timer: null, busy: null }
+function lookNow() {
+  if (!seen.busy) seen.busy = hostApi('/machines').then((d) => { seen.data = d; for (const s of seen.subs) s.set(d) }, () => {}).finally(() => { seen.busy = null })
+  return seen.busy
+}
+function lookEvery() {
+  clearInterval(seen.timer)
+  seen.timer = seen.subs.size ? setInterval(() => { if (!document.hidden) lookNow() }, Math.min(...[...seen.subs].map((s) => s.ms))) : null
+}
+if (typeof window !== 'undefined') window.addEventListener('bridge-machines', () => { if (seen.subs.size) lookNow() })
 export function useMachines(ms = 10000, on = true) {
-  const [data, setData] = useState(null)
-  const load = useCallback(() => hostApi('/machines').then(setData).catch(() => {}), [])
+  const [data, setData] = useState(seen.data)
   useEffect(() => {
     if (!on) return
-    load()
-    const t = setInterval(() => { if (!document.hidden) load() }, ms)
-    window.addEventListener('bridge-machines', load)
-    return () => { clearInterval(t); window.removeEventListener('bridge-machines', load) }
-  }, [load, ms, on])
-  return { data, refresh: load }
+    const sub = { ms, set: setData }
+    seen.subs.add(sub)
+    lookEvery()
+    if (seen.data) setData(seen.data)
+    lookNow()
+    return () => { seen.subs.delete(sub); lookEvery() }
+  }, [ms, on])
+  return { data, refresh: lookNow }
 }
 
 // An agent on another of your devices, in a tab of this window (RemoteAgent.jsx). Tab ids:

@@ -86,9 +86,10 @@ export async function snapshot() {
   return res.snapshot
 }
 
-// Flatten the snapshot into one row per agent with its workspace and tab labels.
-export async function fleet() {
-  const snap = await snapshot()
+// Flatten the snapshot into one row per agent with its workspace and tab labels. snap: one read
+// already, so it isn't asked for twice.
+export async function fleet(snap) {
+  snap = snap || await snapshot()
   const ws = Object.fromEntries((snap.workspaces || []).map((w) => [w.workspace_id, w]))
   const tabs = Object.fromEntries((snap.tabs || []).map((t) => [t.tab_id, t]))
   const agents = (snap.agents || []).map((a) => ({

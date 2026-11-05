@@ -302,8 +302,11 @@ function LiveActivity({ paneId }) {
   )
 }
 
-function Chat({ agent, pending, queued = [], outbox = [], onCancelQueued, onEdit, onUndo, editingText, onOpenTerminal, accounts }) {
+function Chat({ agent, pending, queued = [], outbox = [], onCancelQueued, onEdit, onUndo, editingText, onOpenTerminal, accounts, onLimit }) {
   const { data, error } = useLive(`/agents/${encodeURIComponent(agent.paneId)}/transcript`)
+  // Stopped at its limit, for the account menu (its other accounts can pick it up now).
+  const stopped = !!data?.limit
+  useEffect(() => { onLimit?.(stopped); return () => onLimit?.(false) }, [stopped]) // eslint-disable-line react-hooks/exhaustive-deps
   const scrollRef = useRef(null)
   const stick = useRef(true)
   // Older messages, loaded on request: Chat starts with the end of the agent's log, which after
@@ -419,8 +422,9 @@ function Chat({ agent, pending, queued = [], outbox = [], onCancelQueued, onEdit
             </div>
           </div>
         ))}
-        {data?.limit && !isWorking(agent) && <LimitCard agent={agent} limit={data.limit} accounts={accounts} />}
-        {isWorking(agent) && <LiveActivity paneId={agent.paneId} />}
+        {/* Stopped at its limit: said so, though its screen may still show it working. */}
+        {data?.limit && <LimitCard agent={agent} limit={data.limit} accounts={accounts} />}
+        {isWorking(agent) && !data?.limit && <LiveActivity paneId={agent.paneId} />}
         {firstRun}
         {queued.map((q) => (
           <div key={q.id} className="msg user queued">
@@ -550,6 +554,7 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
   }
   const [pending, setPending] = useState([])
   const [flash, setFlash] = useState(null)
+  const [atLimit, setAtLimit] = useState(false) // stopped at its usage limit (its chat says, from its log)
   const [btw, setBtw] = useState(null) // a /btw side question and its answer
   // Editing a sent message: it goes into the message box; sending it rewinds the agent to just
   // before it. { original, back, undoFiles }, and prefill puts the text in the box.
@@ -561,15 +566,22 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
   const [keysOpen, setKeysOpen] = useState(false)
   const [termFocus, setTermFocus] = useState(0)
   const [menu, setMenu] = useState(false)
+  const [renaming, setRenaming] = useState(false)
   const outbox = useOutbox(agent?.paneId)
   const places = usePoll('/places', 15000)
   // Continue on another account: Claude Code and Codex, once there's a conversation to resume.
   const movable = (agent?.kind === 'claude' || agent?.kind === 'codex') && !!agent?.sessionId
   const quota = usePoll('/quota', 5 * 60 * 1000, { enabled: movable })
-  const accts = quota.data?.accounts?.find((g) => g.kind === agent?.kind)?.accounts || []
-  // Not the one it's on (one started outside Bridge AI is taken to be on your usual login, which
-  // may be off the list, and then every listed one is another).
-  const others = movable ? accts.filter((x) => x.id !== (agent.accountId || `${agent.kind}-default`)) : []
+  const grp = quota.data?.accounts?.find((g) => g.kind === agent?.kind)
+  const accts = grp?.accounts || []
+  // The account it's on. One started outside Bridge AI is taken to be on your usual login; when
+  // that's off the list but signed in as one you listed (Personal, say), it's that one.
+  const onId = agent ? agent.accountId || `${agent.kind}-default` : null
+  const usual = grp?.usual?.id === onId && !accts.some((x) => x.id === onId) ? grp.usual : null
+  const curId = usual?.sameAs || onId
+  // Not the one it's on (with your usual login off the list and no other it's the same as, every
+  // listed one is another).
+  const others = movable ? accts.filter((x) => x.id !== curId) : []
   // The account it's on, in the header, when it isn't your usual login (as in the sidebar).
   const onAccount = agent?.account || null
   // The sidebar's "Browse folder" asks an open agent to switch views.
@@ -728,15 +740,24 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
 
   const title = agent.chief ? t('Chief of Staff') : agent.title || agent.tab || agent.workspace
   const kindName = agent.kindLabel || agent.kind
-  const where = agent.chief ? (agent.thread && !agent.thread.main ? t('{name} thread · {kind}', { name: agent.thread.name, kind: kindName }) : t('{kind} · sends work to your agents', { kind: kindName })) : `${agent.workspace}${agent.tab && !/^\d+$/.test(agent.tab) ? ` › ${agent.tab}` : ''} · ${kindName}`
+  // Named by you (Rename): the name is its title, so the tab's name isn't said twice.
+  const where = agent.chief ? (agent.thread && !agent.thread.main ? t('{name} thread · {kind}', { name: agent.thread.name, kind: kindName }) : t('{kind} · sends work to your agents', { kind: kindName })) : `${agent.workspace}${agent.tab && !agent.named && !/^\d+$/.test(agent.tab) ? ` › ${agent.tab}` : ''} · ${kindName}`
+  // Rename: the name it goes by everywhere, over the title the agent gives its own session.
+  const canRename = !agent.chief && !!agent.tabId
+  const rename = async (label) => {
+    setRenaming(false)
+    if (!label) return
+    try { await api(`/tabs/${encodeURIComponent(agent.tabId)}/rename`, { method: 'POST', body: { label } }) } catch (e) { setFlash(e.message) }
+  }
+  const shown = renaming ? <NameInput value={title} onDone={rename} /> : canRename ? <span className="console-title" onDoubleClick={() => setRenaming(true)} title={agent.ownTitle && agent.ownTitle !== title ? t('{title}\nDouble-click to rename', { title: agent.ownTitle }) : t('Double-click to rename')}>{title}</span> : title
   const g = places.data?.[agent.cwd]
   // The account it's on, in the message box's model chip, whose menu continues the conversation on
   // another one: there when there's another to go to, or it isn't on your usual login.
-  const curId = agent.accountId || `${agent.kind}-default`
-  const curAcct = onAccount || nameOf(accts.find((x) => x.id === curId)) || null
-  // On your usual login after you took it off the list: still the one ticked, above the listed ones.
-  const listWith = accts.some((x) => x.id === curId) ? accts : [{ id: curId, label: curAcct || t('Your usual login'), usable: false, status: 'pending', signedIn: true, windows: [] }, ...accts]
-  const account = (onAccount || others.length > 0) ? { label: curAcct || t('Your usual login'), current: curId, list: others.length ? listWith : [], onContinue: continueOn } : null
+  const curAcct = onAccount || nameOf(accts.find((x) => x.id === curId) || usual) || null
+  // On your usual login after you took it off the list, and not one you listed: still the one
+  // ticked, above the listed ones, by who it's signed in as.
+  const listWith = accts.some((x) => x.id === curId) ? accts : [usual || { id: curId, label: curAcct || t('Your usual login'), isDefault: true, named: false, usable: false, status: 'pending', signedIn: true, windows: [] }, ...accts]
+  const account = (onAccount || usual?.sameAs || others.length > 0) ? { label: curAcct || t('Your usual login'), current: curId, list: others.length ? listWith : [], atLimit, onContinue: (x) => continueOn(x, atLimit ? { nudge: true } : {}) } : null
   const subtitle = (
     <>
       <span className="sub-where">{where}</span>
@@ -753,7 +774,7 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
 
   return (
     <section className={`pane console v-${variant} ${minimized ? 'is-min' : ''}`} aria-label={t('{name} console', { name: title })}>
-      <PaneHeader icon={agent.chief ? 'helm' : 'bot'} title={title} subtitle={subtitle} {...controls}
+      <PaneHeader icon={agent.chief ? 'helm' : 'bot'} title={shown} subtitle={subtitle} {...controls}
         leading={onBack && <button className="win-btn back" onClick={onBack} aria-label={t('Back')}><Icon name="chevron" size={16} className="flip" /></button>}>
         <span className={`state-tag st-${agent.status}`}><StatusDot status={agent.status} size={7} />{{ blocked: t('Needs you'), done: t('Done'), working: t('Working'), idle: t('Idle') }[agent.status] || t('Unknown')}</span>
         {agent.muted && <span className="muted-tag" role="img" title={t('Notifications muted (⋯ to unmute)')} aria-label={t('Notifications muted')}><Icon name="bell-off" size={13} /></span>}
@@ -785,6 +806,7 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
             {menu && <Menu onClose={() => setMenu(false)} items={[
               variant === 'mobile' && canFork && { icon: 'split', label: t('Fork this conversation'), run: fork },
               variant === 'mobile' && { icon: 'terminal', label: t('Open in the computer\'s terminal app'), run: inTerminal },
+              canRename && { icon: 'edit', label: t('Rename…'), run: () => setRenaming(true) },
               agent.muted
                 ? { icon: 'bell', label: t('Unmute notifications'), run: () => mute(false) }
                 : { icon: 'bell-off', label: t('Mute notifications'), run: () => mute(true) },
@@ -801,7 +823,7 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
             <PathCtx.Provider value={openFromChat}>
               {view === 'chat' && <Chat agent={agent} pending={pending} queued={queued} outbox={outbox} onCancelQueued={cancelQueued} onEdit={agent.caps?.rewind ? (t) => { setEditTarget({ ...t, undoFiles: false, canUndoFiles: agent.kind === 'claude' }); setPrefill({ text: t.original, n: Date.now() }) } : null}
                 onUndo={agent.caps?.undo ? undoReply : null} editingText={editTarget?.original} onOpenTerminal={() => setView('terminal')}
-                accounts={movable && quota.data ? { others, onContinue: (x) => continueOn(x, { nudge: true }) } : null} />}
+                accounts={movable && quota.data ? { others, onContinue: (x) => continueOn(x, { nudge: true }) } : null} onLimit={setAtLimit} />}
             </PathCtx.Provider>
             <div className="term-wrap" hidden={view !== 'terminal'}><Terminal paneId={agent.paneId} active={view === 'terminal'} focusKey={termFocus} onChat={() => setView('chat')} /></div>
             {view === 'files' && <FilesView agent={agent} openPath={openPath} onConsumed={() => setOpenPath(null)} onMention={(p) => setPrefill({ text: /\s/.test(p) ? `@"${p}" ` : `@${p} `, add: true, append: true, n: Date.now() })} />}
@@ -863,5 +885,15 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
         </>
       )}
     </section>
+  )
+}
+
+// The agent's name, typed over in its header: Enter keeps it, Escape or clicking away doesn't.
+function NameInput({ value, onDone }) {
+  const [v, setV] = useState(value)
+  return (
+    <input className="console-rename" autoFocus value={v} onChange={(e) => setV(e.target.value)} onFocus={(e) => e.target.select()}
+      onKeyDown={(e) => { if (e.key === 'Enter') onDone(v.trim() && v.trim() !== value ? v.trim() : null); if (e.key === 'Escape') onDone(null) }}
+      onBlur={() => onDone(null)} aria-label={t('New name')} />
   )
 }

@@ -155,7 +155,9 @@ async function createWindow() {
   // Links to anything but the app open in their own apps (Teams, Outlook, Mail, the browser).
   win.webContents.setWindowOpenHandler(({ url }) => { if (!isLocal(url)) openOutside(url); return { action: 'deny' } })
   win.webContents.on('will-navigate', (e, url) => { if (!isLocal(url) && !url.startsWith('data:')) { e.preventDefault(); openOutside(url) } })
-  win.webContents.on('page-title-updated', (e, title) => { e.preventDefault(); updateBadge(title) })
+  // Its title as the page says it (what waits on you, and which computer it is, for the Dock's and
+  // the Window menu's list of windows); the count also goes on the Dock's badge.
+  win.webContents.on('page-title-updated', (e, title) => { e.preventDefault(); win?.setTitle(title); updateBadge(title) })
   win.webContents.on('did-fail-load', (_e, code) => { if (code !== -3) setTimeout(connect, 1500) })
   // The page went away (a crash, out of memory): written down, and opened again, which then offers
   // to report it. At most once a minute, so a page that can't stay up doesn't go round and round.
@@ -248,7 +250,9 @@ ipcMain.handle('bridge:open-machine', (e, { id = null, agent = null } = {}) => {
   const key = id || ''
   const page = `${URL_BASE}${id ? `/m/${id}` : ''}/${agent ? `?agent=${encodeURIComponent(agent)}` : ''}`
   const have = machineWins.get(key)
-  if (have && !have.isDestroyed()) { if (agent) have.loadURL(page); have.show(); have.focus(); return true }
+  // Open already: brought to the front, and opened again if what it shows is an error (its device
+  // wasn't reachable then), rather than left on it.
+  if (have && !have.isDestroyed()) { if (agent || have.bridgeFailed) have.loadURL(page); have.show(); have.focus(); return true }
   const at = win && !win.isDestroyed() ? win.getBounds() : null
   const was = deviceBounds()[key]
   const w = new BrowserWindow({
@@ -265,6 +269,10 @@ ipcMain.handle('bridge:open-machine', (e, { id = null, agent = null } = {}) => {
   w.webContents.on('will-navigate', (ev, url) => { if (!isLocal(url)) { ev.preventDefault(); openOutside(url) } })
   if (was?.maximized) w.maximize()
   for (const ev of ['resize', 'move', 'close']) w.on(ev, () => saveDeviceBounds(key, w))
+  // Whether it shows an error: an answer that isn't the page (that device wasn't reachable), or one
+  // that didn't load at all, which is tried again in a moment, as the main window does.
+  w.webContents.on('did-navigate', (_e, _url, code) => { w.bridgeFailed = code >= 400 })
+  w.webContents.on('did-fail-load', (_e, code, _d, _u, main) => { if (!main || code === -3) return; w.bridgeFailed = true; setTimeout(() => { if (!w.isDestroyed()) w.loadURL(page) }, 2000) })
   w.loadURL(page)
   machineWins.set(key, w)
   w.on('closed', () => { if (machineWins.get(key) === w) machineWins.delete(key) })
@@ -791,14 +799,14 @@ function setTray(c, instead) {
   const paused = r?.status === 'paused'
   trayAt = { c, at: Date.now(), base: was && (paused || (s < was && was - s < 8)) ? was : s }
   trayTitle()
-  const key = JSON.stringify([r?.id, r?.title, paused, r?.callEnded, c.prompt?.app, c.prompt?.at, instead])
+  const key = JSON.stringify([r?.id, r?.title, paused, r?.callEnded, r?.endWhy, c.prompt?.app, c.prompt?.at, instead])
   if (key === trayMenu) return
   trayMenu = key
   const title = (t) => (t.length > 48 ? `${t.slice(0, 47)}…` : t)
   const items = r
     ? [
       { label: `${paused ? 'Paused' : 'Recording'}: ${title(r.title || 'Meeting')}`, enabled: false },
-      ...(r.callEnded ? [{ label: `The ${r.callEndedApp || 'call'} call ended`, enabled: false }, { label: 'Keep recording', click: () => meetingOp('keep', r.id) }] : []),
+      ...(r.callEnded ? [{ label: r.endWhy === 'over' ? "Its time is up, and it's gone quiet" : r.endWhy === 'quiet' ? 'Nobody has said anything for a while' : r.callEndedApp ? `The ${r.callEndedApp} call ended` : 'The call ended', enabled: false }, { label: 'Keep recording', click: () => meetingOp('keep', r.id) }] : []),
       paused ? { label: 'Resume', click: () => meetingOp('resume', r.id) } : { label: 'Pause', click: () => meetingOp('pause', r.id) },
       { label: 'Stop', click: () => meetingOp('stop', r.id) },
       { type: 'separator' },

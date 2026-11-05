@@ -133,6 +133,8 @@ kbd { font: 11px var(--font-mono); padding: 1px 5px; border-radius: 4px; backgro
 .btn.primary:hover { filter: brightness(1.08); }
 .btn.block { width: 100%; }
 .btn:disabled { opacity: .5; cursor: default; }
+/* A link that looks like a button reads like one: the button's ink, not the link's blue. */
+a.btn:not(.primary), a.btn:not(.primary):visited { color: var(--ink); text-decoration: none; }
 .link { color: var(--accent); font-size: 12px; margin-left: auto; font-weight: 500; }
 .win-btn {
   display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 7px; color: var(--ink-3);
@@ -753,6 +755,17 @@ kbd { font: 11px var(--font-mono); padding: 1px 5px; border-radius: 4px; backgro
 .tree-name { overflow: hidden; text-overflow: ellipsis; }
 .viewer-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .viewer { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* Files' open files, a tab each above the one in front (FilesView). */
+.file-tabs { flex: none; display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; padding: 4px 6px 0; border-bottom: 1px solid var(--line); background: var(--pane-2); }
+.file-tabs::-webkit-scrollbar { display: none; }
+.file-tab { flex: none; display: inline-flex; align-items: center; max-width: 220px; height: 30px; border-radius: 8px 8px 0 0; color: var(--ink-3); }
+.file-tab:hover { color: var(--ink-2); }
+.file-tab.on { background: var(--pane); color: var(--ink); box-shadow: inset 0 -2px 0 var(--accent); }
+.file-tab-name { display: inline-flex; align-items: center; gap: 6px; min-width: 0; height: 100%; padding: 0 2px 0 10px; color: inherit; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.file-tab-x { flex: none; display: grid; place-items: center; width: 22px; height: 22px; margin-right: 4px; border-radius: 6px; color: inherit; opacity: .55; }
+.file-tab-x:hover { opacity: 1; background: var(--pane-3); }
+.files-view.narrow .file-tab { height: 40px; }
+.files-view.narrow .file-tab-x { width: 40px; height: 40px; margin-right: 0; }
 .viewer-head { flex: none; display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 8px 0 14px; border-bottom: 1px solid var(--line); }
 .crumbs { display: flex; align-items: center; gap: 2px; min-width: 0; overflow: hidden; white-space: nowrap; font-size: 12.5px; color: var(--ink-3); flex: 1; }
 .crumb { display: inline-flex; align-items: center; gap: 2px; }
@@ -1240,6 +1253,7 @@ kbd { font: 11px var(--font-mono); padding: 1px 5px; border-radius: 4px; backgro
 .tp-dir:has(+ .git-bit.own) { flex-shrink: 0; max-width: 40%; }
 .tab-row .tab-act { align-self: center; }
 .rail-rename { flex: 1; min-width: 0; height: 22px; padding: 0 6px; border-radius: 6px; border: 1px solid var(--accent); background: var(--pane); color: var(--ink); font: 500 12.5px var(--font); outline: none; }
+.console-rename { width: min(420px, 100%); height: 24px; padding: 0 6px; border-radius: 6px; border: 1px solid var(--accent); background: var(--pane); color: var(--ink); font: 600 13.5px var(--font); outline: none; }
 .menu { position: absolute; z-index: 60; top: calc(100% - 2px); right: 4px; min-width: 190px; padding: 4px; border-radius: 10px; background: var(--pane); border: 1px solid var(--line-2); box-shadow: 0 10px 30px rgb(0 0 0 / .14), 0 2px 6px rgb(0 0 0 / .06); }
 .menu-item { display: flex; align-items: center; gap: 9px; width: 100%; height: 30px; padding: 0 9px; border-radius: 7px; font-size: 12.5px; color: var(--ink); text-align: left; }
 .menu-item:hover, .menu-item:focus-visible { background: var(--pane-3); }
@@ -1962,6 +1976,11 @@ button.yg-day:hover { box-shadow: 0 0 0 1.5px var(--accent); }
 .q-tab.done svg { color: #1baf7a; }
 .q-tab-dot { width: 6px; height: 6px; border-radius: 50%; border: 1.5px solid currentColor; }
 .q-title { font-size: 14.5px; font-weight: 600; color: var(--ink); line-height: 1.4; }
+.q-context { display: grid; gap: 4px; justify-items: start; }
+.q-context pre { width: 100%; max-height: 360px; overflow: auto; margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--term-bg, var(--pane-2)); color: var(--term-fg, var(--ink)); font: 12px/1.5 var(--font-mono); white-space: pre; }
+.q-context pre .del { display: inline-block; min-width: 100%; background: color-mix(in srgb, #e5484d 22%, transparent); }
+.q-context pre .add { display: inline-block; min-width: 100%; background: color-mix(in srgb, #30a46c 22%, transparent); }
+.q-context .link-btn { font-size: 12px; }
 .q-options { display: flex; flex-direction: column; gap: 6px; }
 .q-opt { display: flex; align-items: flex-start; gap: 10px; text-align: left; padding: 9px 12px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--pane); }
 .q-opt:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); }
@@ -2362,6 +2381,11 @@ button.yg-day:hover { box-shadow: 0 0 0 1.5px var(--accent); }
 .acct-left .u-fill { display: block; }
 .app.narrow .usage-acct { max-width: 64px; }
 .acct-left small { color: var(--ink-3); font-size: 10.5px; }
+/* Each window in a place of its own, so the numbers line up down a list of accounts. */
+.acct-win { display: inline-flex; align-items: baseline; justify-content: flex-end; gap: 3px; min-width: 60px; font-variant-numeric: tabular-nums; }
+.acct-win.none { visibility: hidden; }
+.usage-add { position: relative; display: inline-block; margin: 8px 2px 2px; }
+.usage-add .menu { top: auto; bottom: calc(100% + 2px); }
 .acct-left.muted { font-size: 11.5px; }
 .acct-sep { height: 1px; margin: 4px 6px; background: var(--line); }
 .acct-err { margin: 4px 8px; }
@@ -2404,7 +2428,7 @@ button.yg-day:hover { box-shadow: 0 0 0 1.5px var(--accent); }
 .acct-u-head:hover { background: var(--pane-2); }
 .acct-u-body { display: grid; gap: 10px; padding: 0 10px 10px; }
 .acct-u-head .acct-left { justify-self: end; }
-.acct-u-head .acct-left .u-bar { width: 32px; }
+.acct-u-head .acct-left .u-bar { display: none; } /* the numbers say it, coloured; open, each window has its bar */
 .app.narrow .acct-u-head .acct-left .u-bar { display: none; } /* the numbers say it; room for the name's tags */
 .acct-u-name { display: grid; gap: 1px; min-width: 0; }
 /* Its name, then its tags (plan, the star, auto), which go under it rather than get cut. */
@@ -3106,3 +3130,8 @@ table.sheet tbody tr:hover td { background: var(--pane-2); }
 .app.narrow .mc-menu.phone { position: fixed; top: calc(52px + var(--safe-top) + 6px); left: max(12px, env(safe-area-inset-left)); right: max(12px, env(safe-area-inset-right)); width: auto; max-width: none; max-height: calc(100dvh - 52px - var(--safe-top) - 90px); overflow-y: auto; }
 .mc-menu.phone .mc-item, .mc-menu.phone .menu-item { min-height: 44px; }
 .mc-dot.unknown { background: transparent; box-shadow: inset 0 0 0 1.5px var(--line-2); }
+
+/* A trial feature's tab while it's off (App.jsx TrialOff). */
+.trial-off { display: grid; justify-items: center; align-content: center; gap: 8px; height: 100%; min-height: 240px; padding: 24px 16px; text-align: center; color: var(--ink-2); }
+.trial-off b { color: var(--ink); font-size: 14px; }
+.trial-off p { margin: 0; max-width: 360px; }

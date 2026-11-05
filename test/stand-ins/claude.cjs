@@ -5,6 +5,8 @@
 //                                           only the footer shows its subagents; "idle" draws
 //                                           it done working; "limit" and "weekly limit" end it
 //                                           at a usage limit (the 5-hour one carries on by itself);
+//                                           "stuck weekly limit" logs the weekly one with its
+//                                           working line still on screen, as Claude Code can leave it;
 //                                           "table" ends it with a reply holding a wide table,
 //                                           "diagram" with one holding a Mermaid flowchart
 //   claude --resume <id> [...]              the same conversation again (on another account, say):
@@ -17,6 +19,14 @@
 //                                           if none), the way Claude Code does: 1 or 2 goes ahead,
 //                                           3 or Esc doesn't; the key is noted in ~/claude-answers.log
 //                                           (with the command), then it works a moment and is done
+//   claude --session-id <id> "title <words>"  names its session in the terminal's title, as Claude
+//                                           Code does ("✳ <words>")
+//   claude -p <prompt>                      answers once and exits, as Claude Code's print mode does,
+//                                           on the config folder it's run for: AI Assist's ask gets one
+//                                           suggestion as JSON, anything else meeting notes. With
+//                                           stand-in-limit in that folder, it answers as Claude Code
+//                                           does at its weekly limit instead (and exits 1). Each run is
+//                                           noted in ~/claude-print.log (the folder, and how it began)
 //   claude auth status --json | login | logout
 //                                           the sign-in of the config folder it's run for
 //                                           (CLAUDE_CONFIG_DIR, else ~/.claude): signed in until
@@ -38,12 +48,23 @@ if (args[0] === 'auth') {
   console.log(JSON.stringify({ loggedIn: signedIn, authMethod: signedIn ? 'claude.ai' : 'none', subscriptionType: signedIn ? 'max' : null }))
   process.exit(signedIn ? 0 : 1)
 }
+if (args[0] === '-p') {
+  const dir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude')
+  const prompt = String(args[1] || '')
+  const limited = fs.existsSync(path.join(dir, 'stand-in-limit'))
+  fs.appendFileSync(path.join(os.homedir(), 'claude-print.log'), JSON.stringify({ dir: process.env.CLAUDE_CONFIG_DIR || null, limited, began: prompt.slice(0, 80) }) + '\n')
+  if (limited) { process.stdout.write('You\'ve hit your weekly limit · resets 4am (America/Los_Angeles)\n'); process.exit(1) }
+  if (/This meeting is going on now/.test(prompt)) process.stdout.write(JSON.stringify({ items: [{ kind: 'question', text: 'Ask how they measured the savings.', why: 'At 0:02 they said fuel costs fell by a third.' }] }) + '\n')
+  else process.stdout.write('## Summary\n- The stand-in\'s notes of the meeting.\n')
+  process.exit(0)
+}
 const WITH_VALUE = new Set(['--session-id', '--resume', '--model', '--permission-mode'])
 const opt = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : null }
 const message = args.find((a, i) => !a.startsWith('--') && !WITH_VALUE.has(args[i - 1])) || ''
 const resumed = opt('--resume')
 const id = opt('--session-id') || resumed
 const screenOnly = message === 'screen only'
+if (message.startsWith('title ')) process.stdout.write(`\x1b]0;✳ ${message.slice(6)}\x07`)
 const rule = '─'.repeat(60)
 // Its screen, as Claude Code draws it: working, with its footer, or done. low: at the bottom, as
 // under a conversation it resumed.
@@ -62,6 +83,8 @@ const draw = (working, low = false) => {
   ].join('\r\n'))
   setInterval(() => {}, 1 << 30)
 }
+// CLAUDE_STAND_IN_TYPED=1: whatever it's started as, what's typed to it goes in ~/claude-typed.log too.
+if (process.env.CLAUDE_STAND_IN_TYPED === '1' && !resumed && process.env.CLAUDE_STAND_IN !== 'fresh') process.stdin.on('data', (d) => fs.appendFileSync(path.join(os.homedir(), 'claude-typed.log'), d))
 if (resumed) {
   // What it's sent, written down: a Windows terminal doesn't show what a program hasn't read.
   process.stdin.on('data', (d) => fs.appendFileSync(path.join(os.homedir(), 'claude-typed.log'), d))
@@ -93,6 +116,7 @@ const padding = (mb) => { const line = JSON.stringify({ type: 'api-request-blob'
 
 // Its screen first, so its footer is up before the log is done.
 const limited = /limit$/.test(message)
+const stuck = message === 'stuck weekly limit'
 const asks = /^ask\b/.test(message) ? message.slice(3).trim() || 'npm run deploy' : null
 if (asks) {
   // A permission prompt under its rule, as Claude Code draws one, until a key answers it.
@@ -110,7 +134,7 @@ if (asks) {
     setTimeout(() => process.stdout.write(`\x1b[2J\x1b[H${go ? `Ran ${asks}. Everything is up.` : 'Stopped, as you asked.'}\r\n\r\n✻ Brewed for 9s\r\n${rule}\r\n❯ \x1b[7m \x1b[27m\r\n${rule}\r\n`), 2500)
   })
   setInterval(() => {}, 1 << 30)
-} else draw(message !== 'idle' && message !== 'table' && message !== 'diagram' && !limited)
+} else draw((message !== 'idle' && message !== 'table' && message !== 'diagram' && !limited) || stuck)
 
 // Then the shells' output and the subagent's own files, so the log's last notice is the last thing written.
 fs.writeFileSync(path.join(tasks, 'bsh0.output'), 'ready on :5173\n')
@@ -159,7 +183,7 @@ if (message === 'table') use(0, [{ type: 'text', text: 'Where each ticket stands
 if (message === 'diagram') use(0, [{ type: 'text', text: 'Here is the checkout flow, also in `flow.mmd`:\n\n```mermaid\nflowchart LR\n  Cart --> Pay[Payment] --> Done\n```' }])
 // A usage limit, as Claude Code logs one: the error, then whether it carries on by itself at the reset.
 if (limited) {
-  const weekly = message === 'weekly limit'
+  const weekly = /weekly limit$/.test(message)
   w({ type: 'assistant', timestamp: at(0), error: 'rate_limit', isApiErrorMessage: true, apiErrorStatus: 429, message: { role: 'assistant', content: [{ type: 'text', text: weekly ? 'You\'ve hit your weekly limit · resets Oct 29 at 5am (America/Los_Angeles)' : 'You\'ve hit your session limit · resets 3:10am (America/Los_Angeles)' }] } })
   if (!weekly) w({ type: 'system', subtype: 'informational', timestamp: at(0), content: 'Usage limit reached · continuing automatically at 3:10am · esc to cancel' })
 }

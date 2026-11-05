@@ -59,6 +59,12 @@ export const WhiteboardsHome = whiteboard && wrap(whiteboard, 'WhiteboardsHome')
 export const WhiteboardPage = whiteboard && wrap(whiteboard, 'WhiteboardPage')
 export const FileDrawing = whiteboard && wrap(whiteboard, 'FileDrawing')
 
+// Studio loads only when it's opened too, and each kind's editor only when a file of that kind does
+// (Univer, Tiptap and Marp are big); not in the demo or the phone apps' Cloud agents.
+const studio = import.meta.env.MODE !== 'demo' && import.meta.env.MODE !== 'cloud' ? () => import('./components/studio/Studio.jsx') : null
+export const StudioHome = studio && wrap(studio, 'StudioHome')
+export const StudioPage = studio && wrap(studio, 'StudioPage')
+
 let preloaded = false
 export function preloadViews() {
   if (preloaded) return

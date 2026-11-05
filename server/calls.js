@@ -2,8 +2,9 @@
 // so meeting notes can offer to start when a call does and to stop when it ends, like Granola.
 // A call app has to keep the mic for a few seconds to count (a quick device check isn't a call),
 // and has to let go of it for a few more to count as ended (a blip isn't the end).
-import { spawn } from 'node:child_process'
+import { spawn, execFile } from 'node:child_process'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import readline from 'node:readline'
 import { ROOT, IS_MAC } from './paths.js'
@@ -104,6 +105,61 @@ export function stop() {
   timers.clear(); using.clear(); calls.clear(); gone.clear()
 }
 process.once('exit', () => { if (proc) try { proc.kill('SIGTERM') } catch { /* gone */ } })
+
+// The titles of a call app's windows, which say which meeting it is (Teams names the meeting in its
+// window's title; a browser, the tab in front): when macOS already lets Bridge AI read them, through
+// Accessibility (which dictation's typing uses) or Screen Recording. It never asks. [] when it can't,
+// or off a Mac. Kept a few seconds, as each window asks.
+const seenTitles = new Map() // app -> { at, titles }
+export function windowTitles(app) {
+  const bin = watchBin()
+  const ids = APPS.filter(([, a]) => a === app).map(([id]) => id)
+  if (!bin || !ids.length) return Promise.resolve([])
+  const was = seenTitles.get(app)
+  if (was && Date.now() - was.at < 5000) return Promise.resolve(was.titles)
+  return new Promise((resolve) => {
+    execFile(bin, ['windows', ...ids], { timeout: 3000, maxBuffer: 256 * 1024 }, (err, out) => {
+      let titles = []
+      try { titles = (JSON.parse(String(out || '').trim().split('\n')[0]).windows || []).map((w) => String(w.title || '').slice(0, 300)).filter(Boolean).slice(0, 20) } catch { /* an older callwatch, or none */ }
+      seenTitles.set(app, { at: Date.now(), titles })
+      resolve(titles)
+    })
+  })
+}
+
+// Screen Recording, which lets Bridge AI look at the call's window as people talk and read the
+// names it shows (who's talking, captions), to put names on the transcript. screen(): whether
+// macOS allows it, never asking (null off a Mac, or with no callwatch). screenAsk(): the same,
+// asking macOS the first time (its own window), for Allow on a meeting.
+const once = (args, ms = 5000) => new Promise((resolve) => {
+  const bin = watchBin()
+  if (!bin) return resolve(null)
+  execFile(bin, args, { timeout: ms, maxBuffer: 64 * 1024 }, (err, out) => {
+    try { resolve(JSON.parse(String(out || '').trim().split('\n')[0])) } catch { resolve(null) }
+  })
+})
+let screenSaid = { at: 0, allowed: null }
+const SCREEN_RECHECK_MS = Number(process.env.BRIDGE_SCREEN_RECHECK_MS || 30_000)
+export async function screen() {
+  if (Date.now() - screenSaid.at < SCREEN_RECHECK_MS) return screenSaid.allowed
+  const r = await once(['screen'])
+  screenSaid = { at: Date.now(), allowed: typeof r?.allowed === 'boolean' ? r.allowed : null }
+  return screenSaid.allowed
+}
+export async function screenAsk() {
+  const r = await once(['screen-ask'], 60_000)
+  screenSaid = { at: Date.now(), allowed: typeof r?.allowed === 'boolean' ? r.allowed : null }
+  return screenSaid.allowed
+}
+// A picture of the call app's window, as a PNG buffer, or null (not allowed, no window on screen).
+export async function shot(app) {
+  const ids = APPS.filter(([, a]) => a === app).map(([id]) => id)
+  if (!ids.length || !watchBin()) return null
+  const file = path.join(os.tmpdir(), `bridge-call-${process.pid}-${Date.now()}.png`)
+  const r = await once(['shot', file, ...ids], 10_000)
+  if (r?.error === 'not-allowed') screenSaid = { at: Date.now(), allowed: false }
+  try { return r?.ok ? await fs.promises.readFile(file) : null } catch { return null } finally { fs.promises.rm(file, { force: true }).catch(() => {}) }
+}
 
 // What's going on now: { watching, calls: [{ app, since, browser }] }.
 export function now() {

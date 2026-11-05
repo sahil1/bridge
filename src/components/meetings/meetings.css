@@ -64,6 +64,8 @@
 .mt-meter i.on { background: var(--good); }
 .mt-meter small { margin-left: 5px; font-size: 11.5px; color: var(--ink-3); align-self: center; }
 .mt-trouble, .mt-hint-call { flex-basis: 100%; margin: 0; }
+.mt-ask-screen { flex-basis: 100%; display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin: 2px 0 0; padding: 7px 10px; border-radius: 9px; background: color-mix(in srgb, var(--accent) 8%, var(--pane)); color: var(--ink-2); }
+.mt-ask-screen > span { flex: 1 1 260px; min-width: 0; }
 .mt-trouble { color: var(--warning, #b7791f); }
 .btn.danger-soft { color: var(--critical); }
 
@@ -212,8 +214,11 @@ html.is-float, html.is-float body, html.is-float #root { background: transparent
 .fc-time { font-variant-numeric: tabular-nums; }
 .fc-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; }
 .fc-accent { color: var(--accent); }
-.fc-x { flex: none; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; color: var(--ink-3); }
-.fc-x:hover { background: var(--pane-2); color: var(--ink); }
+/* The header's buttons, easy to see over a busy screen: ink, not grey, on a faint plate. */
+.fc-x { flex: none; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 7px; color: var(--ink-2); background: color-mix(in srgb, var(--ink) 5%, transparent); }
+.fc-x:hover { background: var(--pane-3, var(--pane-2)); color: var(--ink); }
+.fc-x:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.fc-tip .fc-x { background: none; }
 .fc-line { margin: 0; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .fc-acts { display: flex; align-items: center; gap: 6px; }
 .fc-grow { flex: 1; }
@@ -234,6 +239,8 @@ html.is-float, html.is-float body, html.is-float #root { background: transparent
 
 /* The transcript: a header with Fix a word and Transcribe again; lines you can edit in place. */
 .mt-transcript { position: relative; grid-template-rows: auto minmax(0, 1fr); }
+/* With who spoke how much under its header: a row of its own, the lines still the rest. */
+.mt-transcript:has(> .mt-talk) { grid-template-rows: auto auto minmax(0, 1fr); }
 .mt-thead { display: flex; align-items: center; gap: 4px; min-height: 26px; }
 .mt-line { position: relative; border-radius: 8px; padding: 2px 4px; margin: 0 -4px; }
 .mt-line:hover { background: var(--pane-2); }
@@ -774,3 +781,17 @@ button.mt-from-chip:hover { color: var(--ink); border-color: color-mix(in srgb, 
 .mt-pick-opt:active, .mt-pick-opt:focus-visible { background: var(--pane-3); outline: none; }
 .mt-pick-opt svg { flex: none; color: var(--ink-3); }
 .mt-pick-sep { height: 1px; margin: 4px 10px; background: var(--line); }
+/* Who spoke how much, above the transcript: a bar in each speaker's share, and their names. */
+.mt-talk { display: grid; gap: 5px; margin: 0 4px 2px 0; }
+.mt-talk-bar { display: flex; gap: 2px; height: 6px; border-radius: 4px; overflow: hidden; }
+.mt-talk-bar i { flex-basis: 0; min-width: 3px; }
+.mt-talk-keys { display: flex; flex-wrap: wrap; gap: 3px 12px; font-size: 11.5px; color: var(--ink-2); }
+.mt-talk-keys span { display: inline-flex; align-items: center; gap: 5px; }
+.mt-talk-keys i { width: 7px; height: 7px; border-radius: 2px; }
+.mt-talk-keys b { font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+.mt-talk .c0 { background: var(--series-1); }
+.mt-talk .c1 { background: var(--series-2); }
+.mt-talk .c2 { background: var(--series-3); }
+.mt-talk .c3 { background: var(--series-4); }
+.mt-talk .c4 { background: var(--series-5); }
+.mt-talk .c5 { background: var(--series-7); }

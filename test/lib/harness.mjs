@@ -269,10 +269,11 @@ export async function browser() {
 // touch. store: more of the page's saved state, there before it opens (a reload to change it would
 // cut off its requests, which WebKit reports as page errors). before(ctx): routes of the test's own,
 // in place before it opens (WebKit doesn't apply ones added after). Calls that would reach the
-// internet (news, markets, weather, mail) are turned away.
+// internet (news, markets, weather, mail) are turned away. Terminals are drawn as page elements
+// (cc-term-dom), so a test can read their rows as text; store { 'cc-term-dom': false } for the GPU.
 export async function page(b, url, { mode = 'light', theme = 'sky', width = 1440, height = 900, phone = false, mic = true, store = {}, before, locale } = {}) {
   const ctx = await b.newContext({ viewport: phone ? { width: 390, height: 844 } : { width, height }, ...(phone ? { isMobile: true, hasTouch: true, deviceScaleFactor: 2 } : {}), colorScheme: mode, ...(locale ? { locale } : {}), ...(mic && b.browserType().name() === 'chromium' ? { permissions: ['microphone'] } : {}) })
-  await ctx.addInitScript(({ look, more }) => { try { localStorage.setItem('cc-toured', JSON.stringify({ desktop: true, phone: true })); localStorage.setItem('cc-appearance', JSON.stringify({ ...look, text: 'm' })); for (const [k, v] of Object.entries(more)) localStorage.setItem(k, JSON.stringify(v)) } catch { /* no storage */ } }, { look: { mode, theme }, more: store })
+  await ctx.addInitScript(({ look, more }) => { try { localStorage.setItem('cc-toured', JSON.stringify({ desktop: true, phone: true })); localStorage.setItem('cc-appearance', JSON.stringify({ ...look, text: 'm' })); for (const [k, v] of Object.entries(more)) localStorage.setItem(k, JSON.stringify(v)) } catch { /* no storage */ } }, { look: { mode, theme }, more: { 'cc-term-dom': true, ...store } })
   // Playwright's own WebKit build freezes the whole page on pushManager.getSubscription() (Settings ›
   // Devices asks it, for "Notifications on this device"), so there it answers "not
   // subscribed" itself. Real Safari isn't covered by this.

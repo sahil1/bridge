@@ -20,14 +20,17 @@ import dockerfile from 'highlight.js/lib/languages/dockerfile'
 import { markdownHtml } from '../markdown.js'
 import Icon from './Icon.jsx'
 import { Handle, usePersisted, useWidth } from './layout.jsx'
-import { api, usePoll, BASE } from '../api.js'
+import { api, usePoll, BASE, machineId } from '../api.js'
 import PermissionFix, { InstallFix, protectedFolder } from './PermissionFix.jsx'
 import { OfficeView, Menu, menuItems, NameDialog, fileOp, onComputer } from './FileExtras.jsx'
 import { MediaView, PictureView, OtherFile, useSave, canSave, saveLabel } from './FileMedia.jsx'
 import { SendDialog, UploadSheet, TransferStrip, PlacesMenu, usePlaces, canCopyHere, copyHereLabel, canAddPlace, canDrag, dragData, dropOk, onDrop } from './Transfers.jsx'
 import { locale, t } from '../i18n/index.js'
 import { FileDrawing } from '../lazy.jsx'
-import { isDiagramFile, addMermaidButtons } from './whiteboard/links.js'
+import { isDiagramFile, addMermaidButtons, whiteboards as studioHere } from './whiteboard/links.js'
+import { useTrial } from '../trials.js'
+// The kinds of file Studio opens (server/studio.js).
+const STUDIO_OPENS = /\.(docx|md|markdown|txt|xlsx|xlsm|csv|tsv|pptx|pdf|html?)$/i
 
 Object.entries({ javascript, typescript, python, json, bash, css, xml, markdown, yaml, sql, go, rust, java, ini, diff: diffLang, dockerfile })
   .forEach(([n, l]) => hljs.registerLanguage(n, l))
@@ -204,6 +207,7 @@ function Editor({ value, onChange, onSave }) {
 }
 
 function Viewer({ pane, filePath, onOpenPath, onBack, onMenu, ver, onCopyHere }) {
+  const studio = useTrial('studio') // a trial feature (src/trials.js)
   const [state, setState] = useState({ loading: true })
   const [mode, setMode] = usePersisted('cc-md-mode', 'preview')
   const [copied, setCopied] = useState(false)
@@ -324,6 +328,8 @@ function Viewer({ pane, filePath, onOpenPath, onBack, onMenu, ver, onCopyHere })
           {f && !['binary', 'video', 'audio'].includes(f.kind) && canSave && <SaveButton f={f} src={raw} />}
           {(f?.kind === 'image' || f?.kind === 'pdf' || f?.kind === 'video' || f?.kind === 'audio' || isHtml) && <a className="win-btn" href={isHtml ? site : raw} target="_blank" rel="noreferrer" title="Open in new tab" aria-label="Open in new tab"><Icon name="external" size={13} /></a>}
           {f && onCopyHere && <button className="ghost-btn small copy-here" onClick={() => onCopyHere({ path: filePath, name: f.name, dir: false, size: f.size })} title={copyHereLabel()} aria-label={copyHereLabel()}><Icon name="download" size={12} /><span>{copyHereLabel()}</span></button>}
+          {/* Studio edits Word, Excel, PowerPoint, Markdown, CSV, HTML and PDF files, with versions and Ask an agent. */}
+          {f && studioHere && studio && STUDIO_OPENS.test(filePath) && <button className="btn small" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root: pane, path: filePath } }))} title={t('Edit it in Studio, with every version kept and your agents to change it')}><Icon name="layers" size={12} /> {t('Open in Studio')}</button>}
           {f?.kind === 'office' && onComputer && <button className="btn small" onClick={() => fileOp(pane, 'open', filePath).catch((e) => setSaveMsg({ text: e.message }))} title="Open it in the app that usually opens it"><Icon name="external" size={12} /> Open in app</button>}
           {onMenu && <button className="win-btn" title="More" aria-label="More actions for this file" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); onMenu({ path: filePath, name: crumbs.at(-1), dir: false }, { clientX: r.right - 200, clientY: r.bottom + 4 }) }}><Icon name="more" size={14} /></button>}
         </div>
@@ -382,20 +388,53 @@ function SaveButton({ f, src }) {
 }
 
 // ---------- Files view ----------
+// Where you were in each agent's files (and each place's), kept on this device: the folders open,
+// the files open as tabs and the one in front, and the place picked. Leaving Files (for the chat,
+// another agent) and coming back used to start again from the top, which on another device meant
+// finding your way back each time. The latest 30 are kept, per device shown.
+const WHERE = 'cc-files-where'
+const MAX_TABS = 10
+const whereKey = (k) => `${machineId || 'here'}\n${k}`
+const allWhere = () => { try { return JSON.parse(localStorage.getItem(WHERE)) || {} } catch { return {} } }
+const whereOf = (k) => allWhere()[whereKey(k)] || null
+function keepWhere(k, v) {
+  try {
+    const all = { ...allWhere(), [whereKey(k)]: { ...whereOf(k), ...v, at: Date.now() } }
+    localStorage.setItem(WHERE, JSON.stringify(Object.fromEntries(Object.entries(all).sort((a, b) => b[1].at - a[1].at).slice(0, 30))))
+  } catch { /* not kept */ }
+}
+const nameOf = (p) => p.split('/').pop()
+function loadWhere(pane) {
+  const w = whereOf(pane)
+  const tabs = (w?.tabs || []).filter((x) => typeof x === 'string').slice(0, MAX_TABS)
+  const selected = typeof w?.selected === 'string' ? w.selected : null
+  return { pane, tabs: selected && !tabs.includes(selected) ? [...tabs, selected] : tabs, selected, expanded: new Set(w?.expanded || []) }
+}
+
 export function FilesView({ agent, openPath, onConsumed, onMention }) {
   // The agent's folder, or one of this computer's Places (a folder you picked): place:<id> works
   // as a pane does, with that folder as its root.
   const { places, refresh: refreshPlaces } = usePlaces()
-  const [placeId, setPlaceId] = useState(null)
+  const [placeId, setPlaceIdState] = useState(() => whereOf(`agent:${agent.paneId}`)?.place || null)
+  const setPlaceId = (id) => { setPlaceIdState(id); keepWhere(`agent:${agent.paneId}`, { place: id }) }
   const place = places.find((p) => p.id === placeId) || null
   const pane = place ? `place:${place.id}` : agent.paneId
   const cwd = place ? place.path : agent.cwd
-  useEffect(() => { setPlaceId(null) }, [agent.paneId])
+  const firstAgent = useRef(agent.paneId)
+  useEffect(() => { if (firstAgent.current !== agent.paneId) { firstAgent.current = agent.paneId; setPlaceIdState(whereOf(`agent:${agent.paneId}`)?.place || null) } }, [agent.paneId])
   const [placesAt, setPlacesAt] = useState(null)
   const [treeW, setTreeW] = usePersisted('cc-tree-w', 250)
   const [showHidden, setShowHidden] = usePersisted('cc-show-hidden', false)
-  const [selected, setSelected] = useState(null)
-  const [expanded, setExpanded] = useState(() => new Set())
+  // The files open (tabs) and the one in front, and the folders open in the tree: kept with the
+  // agent or place they're for, and another's as soon as that's shown.
+  const [st, setSt] = useState(() => loadWhere(pane))
+  if (st.pane !== pane) setSt(loadWhere(pane))
+  const { tabs, selected, expanded } = st
+  const { setTabs, setSelected, setExpanded } = useMemo(() => {
+    const field = (k) => (v) => setSt((x) => ({ ...x, [k]: typeof v === 'function' ? v(x[k]) : v }))
+    return { setTabs: field('tabs'), setSelected: field('selected'), setExpanded: field('expanded') }
+  }, [])
+  useEffect(() => { keepWhere(st.pane, { tabs: st.tabs, selected: st.selected, expanded: [...st.expanded].slice(0, 200) }) }, [st])
   const [quick, setQuick] = useState(false)
   const [ver, setVer] = useState(0)
   const root = usePoll(`/agents/${enc(pane)}/files?v=${ver}${showHidden ? '&hidden=1' : ''}`, 15000)
@@ -424,20 +463,44 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
     for (let i = 1; i < parts.length; i++) n.add(parts.slice(0, i).join('/'))
     return n
   })
+  // A file opens in a tab of its own, beside the one in front (or is brought to the front if it's
+  // open already); past MAX_TABS the one looked at least lately goes.
+  const used = useRef(new Map()) // path -> when it was last in front
+  const selectedRef = useRef(selected)
+  selectedRef.current = selected
   const open = useCallback((p, isDir = false) => {
     if (isDir) { revealDirs(`${p}/x`); return }
+    setTabs((ts) => {
+      if (ts.includes(p)) return ts
+      const at = ts.indexOf(selectedRef.current)
+      let next = at >= 0 ? [...ts.slice(0, at + 1), p, ...ts.slice(at + 1)] : [...ts, p]
+      while (next.length > MAX_TABS) {
+        const old = next.filter((x) => x !== p).sort((a, b) => (used.current.get(a) || 0) - (used.current.get(b) || 0))[0]
+        next = next.filter((x) => x !== old)
+      }
+      return next
+    })
     setSelected(p)
     revealDirs(p)
   }, [])
+  useEffect(() => { if (selected) used.current.set(selected, Date.now()) }, [selected])
+  // Closing a tab brings the one beside it to the front.
+  const closeTab = (p) => {
+    const at = tabs.indexOf(p)
+    const next = tabs.filter((x) => x !== p)
+    setTabs(next)
+    if (selected === p) setSelected(next[Math.min(at, next.length - 1)] || null)
+  }
   const toggle = (p) => setExpanded((s) => { const n = new Set(s); if (n.has(p)) n.delete(p); else n.add(p); return n })
 
-  useEffect(() => { setSelected(null); setExpanded(new Set()) }, [pane])
 
   // The menu's actions. Paths are relative to the agent's folder ('' is the folder itself).
   const sep = cwd.includes('\\') && !cwd.includes('/') ? '\\' : '/'
   const act = async (op, e) => {
     const refresh = () => setVer((v) => v + 1)
-    const moved = (from, to) => setSelected((s) => (s === from ? to : s?.startsWith(`${from}/`) ? (to ? to + s.slice(from.length) : null) : s))
+    // A file or folder renamed or gone: its tabs follow it, or close.
+    const was = (s, from, to) => (s === from ? to : s?.startsWith(`${from}/`) ? (to ? to + s.slice(from.length) : null) : s)
+    const moved = (from, to) => { setSelected((s) => was(s, from, to)); setTabs((ts) => ts.map((x) => was(x, from, to)).filter(Boolean)) }
     try {
       if (op === 'copyPath' || op === 'copyRel') {
         const text = op === 'copyRel' ? e.path : e.path ? `${cwd}${sep}${e.path.split('/').join(sep)}` : cwd
@@ -482,7 +545,13 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
     onDrop: (e) => { e.preventDefault(); setDropAt(false); onDropIn(e, '') },
   }
   // A path ending in / is a folder: shown open in the tree.
-  useEffect(() => { if (openPath) { open(openPath.replace(/\/$/, ''), openPath.endsWith('/')); onConsumed?.() } }, [openPath]) // eslint-disable-line react-hooks/exhaustive-deps
+  // It's the agent's own file (a link, a notification): in its folder, not the place last picked.
+  useEffect(() => {
+    if (!openPath) return
+    if (placeId) { setPlaceId(null); return }
+    open(openPath.replace(/\/$/, ''), openPath.endsWith('/'))
+    onConsumed?.()
+  }, [openPath, pane]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const onKey = (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'p') { e.preventDefault(); setQuick(true) } }
     window.addEventListener('keydown', onKey)
@@ -517,6 +586,17 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
       </aside>
       {!narrow && <Handle axis="x" size={treeW} min={160} max={520} onSize={setTreeW} label="Resize file tree" />}
       <section className="viewer-wrap" hidden={narrow && !selected}>
+        {tabs.length > 1 && (
+          <div className="file-tabs" role="tablist" aria-label={t('Open files')}>
+            {tabs.map((p) => (
+              <div key={p} role="tab" aria-selected={p === selected} className={`file-tab ${p === selected ? 'on' : ''}`} title={p}
+                onMouseDown={(e) => { if (e.button === 1) { e.preventDefault(); closeTab(p) } }}>
+                <button type="button" className="file-tab-name" onClick={() => setSelected(p)}><Icon name={iconFor(nameOf(p))} size={12} /> {nameOf(p)}</button>
+                <button type="button" className="file-tab-x" onClick={() => closeTab(p)} aria-label={t('Close {name}', { name: nameOf(p) })}><Icon name="x" size={11} /></button>
+              </div>
+            ))}
+          </div>
+        )}
         {selected
           ? <Viewer key={`${pane}\n${selected}`} pane={pane} filePath={selected} onOpenPath={open} onBack={narrow ? () => setSelected(null) : undefined} onMenu={onMenu} ver={ver}
               onCopyHere={canCopyHere ? (src) => setSend({ src: { pane, ...src }, here: true }) : null} />

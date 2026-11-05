@@ -53,7 +53,7 @@ export async function outdated() {
 
 // Agents that continue in another session than herdr reports (Codex after an edit).
 const followed = new Map() // pane key (scope.js: per herdr session) -> sessionId
-export async function setSession(paneId, sessionId) { followed.set(paneKey(paneId), sessionId) }
+export async function setSession(paneId, sessionId) { followed.set(paneKey(paneId), sessionId); fresh() }
 
 // Bridge AI's own agents (the chat with any model, agents.js CHAT): to herdr they're a program in
 // a plain pane, so Bridge AI remembers which panes they're in and lists them as agents itself.
@@ -93,11 +93,28 @@ const isOwn = (paneId) => !!own[paneKey(paneId)]
 
 // session: the herdr session in view (the sidebar's session menu). When it isn't running, an
 // empty fleet that says so (down), so the last session's agents don't linger on screen.
-export async function fleet() {
+// Each read runs herdr once, and the server asks for the fleet from many places at once (each
+// window's polls, the notifications, the queue): so one read is shared by everyone who asks while
+// it runs and for FLEET_MS after, each with a copy of its own to change. Anything that changes
+// the layout (a launch, a rename, a close) reads afresh.
+const FLEET_MS = Number(process.env.BRIDGE_FLEET_MS || 700)
+let shared = null // { p, at }: the read under way, or the last one and when it came
+const fresh = () => { shared = null }
+const after = (fn) => async (...a) => { try { return await fn(...a) } finally { fresh() } }
+export function fleet() {
+  if (!shared || (shared.at && Date.now() - shared.at > FLEET_MS)) {
+    const s = { p: readFleet(), at: 0 }
+    shared = s
+    s.p.then(() => { if (shared === s) s.at = Date.now() }, () => { if (shared === s) shared = null })
+  }
+  return shared.p.then((f) => structuredClone(f))
+}
+async function readFleet() {
   const session = cli.sessionName()
   let f, snap
   try {
-    [f, snap] = await Promise.all([cli.fleet(), cli.snapshot()])
+    snap = await cli.snapshot()
+    f = await cli.fleet(snap)
   } catch (err) {
     if (await answers(cli.herdrSocket())) throw err
     return { agents: [], tabs: [], workspaces: [], panes: [], session, down: true }
@@ -162,12 +179,13 @@ export async function focusAgent(paneId) {
   if (st) st.seen = true
 }
 export const focusTab = (tabId) => cli.focusTab(tabId)
-export const renameTab = cli.renameTab
-export const closeTab = cli.closeTab
-export const renameWorkspace = cli.renameWorkspace
+export const renameTab = after(cli.renameTab)
+export const closeTab = after(cli.closeTab)
+export const renameWorkspace = after(cli.renameWorkspace)
 // A space with herdr worktree spaces open closes only with them (herdr 0.9.0 on). Bridge AI shows
 // each as a space of its own, so closing the one you picked mustn't close the others: say which.
-export async function closeWorkspace(wsId) {
+export const closeWorkspace = after(closeWorkspaceNow)
+async function closeWorkspaceNow(wsId) {
   try { return await cli.closeWorkspace(wsId) } catch (err) {
     if (err.code !== 'workspace_group_close_required') throw err
     const snap = await cli.snapshot().catch(() => ({}))
@@ -176,11 +194,12 @@ export async function closeWorkspace(wsId) {
     throw Object.assign(new Error(`This space has herdr worktree spaces open${others.length ? ` (${others.join(', ')})` : ''}. Close those first, or close the whole group in herdr.`), { code: err.code })
   }
 }
-export const moveWorkspace = (wsId, index) => sock.call('workspace.move', { workspace_id: wsId, insert_index: index })
-export const moveTab = (tabId, index) => sock.call('tab.move', { tab_id: tabId, insert_index: index })
+export const moveWorkspace = after((wsId, index) => sock.call('workspace.move', { workspace_id: wsId, insert_index: index }))
+export const moveTab = after((tabId, index) => sock.call('tab.move', { tab_id: tabId, insert_index: index }))
 
 // A new space. herdr has no empty spaces: it opens with a shell tab in your home folder.
-export async function createSpace({ label, cwd = os.homedir() }) {
+export const createSpace = after(createSpaceNow)
+async function createSpaceNow({ label, cwd = os.homedir() }) {
   const r = await sock.call('workspace.create', { label: String(label || 'Space').slice(0, 80), cwd, focus: false })
   return { workspaceId: r?.workspace?.workspace_id || null }
 }
@@ -189,7 +208,8 @@ export async function createSpace({ label, cwd = os.homedir() }) {
 // moves panes, not tabs: the first pane becomes a new tab there, the others join it side by
 // side. The terminals keep running, but get new pane ids (returned as moved: old -> new).
 // The space left empty closes by itself.
-export async function moveTabToSpace(tabId, { workspaceId, newSpace, index } = {}) {
+export const moveTabToSpace = after(moveTabToSpaceNow)
+async function moveTabToSpaceNow(tabId, { workspaceId, newSpace, index } = {}) {
   const snap = await cli.snapshot()
   const tab = (snap.tabs || []).find((t) => t.tab_id === tabId)
   if (!tab) throw new Error('Not found')
@@ -223,7 +243,8 @@ export async function moveTabToSpace(tabId, { workspaceId, newSpace, index } = {
 // agent only at an idle shell prompt, so it runs before the pane opens; if it fails, the agent
 // still starts and setupError says why.
 // env: extra variables for the agent (a chief of staff thread's id).
-export async function launch({ kind = 'claude', cwd, label, workspaceId, newSpace, prompt: opening, model, pinModel, access, account, resume, fork, setup, env: extraEnv }) {
+export const launch = after(launchNow)
+async function launchNow({ kind = 'claude', cwd, label, workspaceId, newSpace, prompt: opening, model, pinModel, access, account, resume, fork, setup, env: extraEnv }) {
   const env = { ...envFor(kind, account), ...extraEnv } // a second account's config folder, if one was picked
   const a = adapter(kind)
   const resumed = fork && a.fork ? a.fork(fork, a.sessionId === 'assign' ? newSessionId() : undefined) : resume && a.resume ? a.resume(resume) : []
