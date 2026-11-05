@@ -6,6 +6,8 @@ import { useSettings, SaveNote } from './General.jsx'
 import PermissionFix, { UpdateApp } from '../PermissionFix.jsx'
 import { keyLabel, keyFromEvent } from '../../../shared/dictation/keys.js'
 import { pause, keysPlatform, dictationKey } from '../../dictation/controller.js'
+import { TidyNeeds } from '../../dictation/Tidy.jsx'
+import { useTrial } from '../../trials.js'
 import { t, tx } from '../../i18n/index.js'
 import '../../dictation/dictation.css'
 
@@ -28,6 +30,12 @@ import '../../dictation/dictation.css'
 // turn it on, then the model that rewrites the selection is picked here, said to keep the text on this
 // computer or to send it out; Accessibility, if it isn't on yet, asked then.
 //
+// Tidy what I say (a trial: dictation-cleanup, shown only while it's on, where the key works from
+// other apps): off until you turn it on, then what you say from another app is tidied by a model
+// before it's pasted; the model picked here (the local model built in by default), said to keep the
+// words here or send them out. With no model to tidy with, what's needed, on or off: the local
+// model in one click where it runs, else a model of your own (Tidy.jsx).
+//
 // History: each dictation kept on this computer (Dictations, under Meetings), on until you turn it
 // off, for always or less; the recordings only if you ask; Delete all, after asking.
 const TO = [['last', tx('The agent I looked at last')], ['chief', tx('The chief of staff')], ['ask', tx('Ask each time')]]
@@ -45,6 +53,7 @@ export default function Dictation() {
   const [asking, setAsking] = useState(0) // "Where I'm typing" just picked: Accessibility asked for then
   const [askListen, setAskListen] = useState(0) // Fn or the right ⌥ just picked: Input Monitoring asked for then
   const [askEdit, setAskEdit] = useState(0) // Edit by voice just turned on: Accessibility asked for then
+  const tidyTrial = useTrial('dictation-cleanup')
   // Accessibility turned on: the desktop app's status again, so pasting is on.
   const refresh = useCallback(async () => {
     const st = await app?.dictateStatus?.().catch(() => null)
@@ -162,6 +171,7 @@ export default function Dictation() {
               )}
             </>
           )}
+          {mode && background && tidyTrial && <Tidy d={d} set={set} />}
           {/* wtype (Wayland) types it in, with no clipboard to put back. */}
           {pasting && paste && !needsAccess && paste.via !== 'wtype' && <p className="muted small">{paste.limit === 'admin'
             ? t('What you had copied is put back after. It can\'t paste into an app running as administrator.')
@@ -241,6 +251,46 @@ function EditModel({ value, onPick }) {
       </div>
       {cur && cur.via !== 'local' && <p className="st-note warn"><Icon name="alert" size={13} /> {t('What you select and what you say go to {provider}.', { provider: cur.provider })}</p>}
       {cur?.via === 'local' && <p className="muted small"><Icon name="laptop" size={12} /> {t('Rewritten on this computer. Nothing is sent anywhere.')}</p>}
+    </>
+  )
+}
+
+// Tidy what I say (a trial): on or off, the model, and with none to tidy with, what's needed. st:
+// /dictation/tidy ({ model, auto, local }), asked again after a change here or the download.
+function Tidy({ d, set }) {
+  const [st, setSt] = useState(null)
+  const load = useCallback(() => api('/dictation/tidy').then(setSt, () => setSt(null)), [])
+  useEffect(() => { load() }, [load, d.tidyModel])
+  const on = d.tidy === true
+  return (
+    <div className="dict-tidy">
+      <label className="st-check"><input type="checkbox" checked={on} onChange={(e) => set({ tidy: e.target.checked })} />
+        <span><b>{t('Tidy what I say')}</b> <span className="muted small">{t('Before what you say in another app is pasted or sent, a model takes out "um", false starts and words said twice, and fixes the punctuation. It keeps your words, and never answers them or adds to them. If it takes more than a few seconds, or anything goes wrong, your words go as you said them.')}</span></span></label>
+      {st && !st.model && <TidyNeeds local={st.local} onReady={load} />}
+      {on && st?.model && <TidyModel value={d.tidyModel || null} st={st} onPick={(m) => set({ tidyModel: m })} />}
+    </div>
+  )
+}
+// The model it tidies with (dictation.tidyModel), from the ones you can use but a sign-in's (an
+// agent's one-shot mode takes longer to start than tidying waits). None picked: the local model
+// built in, or one of yours on this computer (server/index.js tidyModel).
+function TidyModel({ value, st, onPick }) {
+  const [models, setModels] = useState(null)
+  useEffect(() => { api('/chat/models').then((r) => setModels((r.models || []).filter((m) => m.via !== 'sign-in')), () => setModels([])) }, [])
+  if (!models) return null
+  const cur = models.find((m) => m.id === st.model.id) || null
+  return (
+    <>
+      <div className="st-row dict-tidy-model"><span>{t('Tidied by')}</span>
+        <select value={value || ''} onChange={(e) => onPick(e.target.value || null)} aria-label={t('Tidied by')}>
+          <option value="">{st.auto ? t('{model}, on this computer (the default)', { model: st.auto.label }) : t('Pick a model')}</option>
+          {models.filter((m) => !(m.id === st.auto?.id && !value)).map((m) => <option key={m.id} value={m.id}>{`${m.label} · ${m.via === 'local' ? t('on this computer') : t('text leaves this computer')}`}</option>)}
+          {value && !models.some((m) => m.id === value) && <option value={value}>{st.model.label}</option>}
+        </select>
+      </div>
+      {st.model.missing && <p className="st-note warn"><Icon name="alert" size={13} /> {t('{model} isn\'t there now, so what you say goes as you said it until it\'s back.', { model: st.model.label })}</p>}
+      {cur && cur.via !== 'local' && <p className="st-note warn"><Icon name="alert" size={13} /> {t('What you say goes to {provider}.', { provider: cur.provider })}</p>}
+      {cur?.via === 'local' && <p className="muted small"><Icon name="laptop" size={12} /> {t('Tidied on this computer. Nothing is sent anywhere.')}</p>}
     </>
   )
 }

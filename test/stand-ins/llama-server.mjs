@@ -10,8 +10,11 @@
 //                    /v1/chat/completions, which turns away a request without the key (401). A
 //                    model file that isn't there stops it, as the real one does.
 // Answers: edit by voice (the text in capitals), meeting notes, who said what (JSON when held to a
-// schema), anything else "built-in answer". A prompt with "CRASH ONCE" stops the process mid-request
-// the first time (a file beside the log remembers), as a crash would.
+// schema), dictation to tidy (tidied as a model that keeps to its instructions would: "you know" and
+// "I mean" out, a phrase said twice kept once, a capital and a full stop; "take your time" in it
+// answers after 8 s, "fail on purpose" with an error), anything else "built-in answer". A prompt
+// with "CRASH ONCE" stops the process mid-request the first time (a file beside the log
+// remembers), as a crash would.
 import http from 'node:http'
 import fs from 'node:fs'
 
@@ -48,7 +51,15 @@ function answer(text, json) {
     for (const [, n, t] of text.matchAll(/^(\d+)\. \[[^\]]+\] Them: (.*)$/gm)) out[n] = /budget/i.test(t) ? 'Priya Shah' : null
     return json ? JSON.stringify(out) : 'The budget line is Priya\'s, I think.'
   }
+  const said = dictated(text)
+  if (said != null) return tidied(said)
   return 'built-in answer'
+}
+const dictated = (text) => /^<dictation>\n([\s\S]*)\n<\/dictation>$/.exec(text)?.[1] ?? null
+function tidied(s) {
+  const x = s.replace(/,?\s*\b(?:you know|I mean)\b,?/gi, '').replace(/\b(\w+(?:\s+\w+){1,2})\s+\1\b/gi, '$1').replace(/\s{2,}/g, ' ').trim()
+  const y = x.charAt(0).toUpperCase() + x.slice(1)
+  return /[.!?]$/.test(y) ? y : `${y}.`
 }
 http.createServer((req, res) => {
   const chunks = []
@@ -62,10 +73,13 @@ http.createServer((req, res) => {
       let b = {}
       try { b = JSON.parse(Buffer.concat(chunks).toString()) } catch { /* not JSON */ }
       const user = [...(b.messages || [])].reverse().find((m) => m.role === 'user')?.content || ''
-      log({ chat: true, user, chat_template_kwargs: b.chat_template_kwargs ?? null, response_format: b.response_format ?? null })
+      const system = dictated(user) != null ? (b.messages || []).find((m) => m.role === 'system')?.content || '' : undefined
+      log({ chat: true, user, system, chat_template_kwargs: b.chat_template_kwargs ?? null, response_format: b.response_format ?? null })
       if (/CRASH ONCE/.test(user) && !fs.existsSync(crashMark)) { fs.writeFileSync(crashMark, '1'); process.exit(1) }
+      if (/fail on purpose/i.test(dictated(user) || '')) return j(500, { error: { code: 500, message: 'Context shift is disabled (stand-in)', type: 'server_error' } })
       const content = answer(user, b.response_format?.type === 'json_schema')
-      return j(200, { choices: [{ message: { role: 'assistant', content } }], timings: { prompt_n: 300, prompt_per_second: 500, predicted_n: 80, predicted_per_second: 48 } })
+      const reply = () => j(200, { choices: [{ message: { role: 'assistant', content } }], timings: { prompt_n: 300, prompt_per_second: 500, predicted_n: 80, predicted_per_second: 48 } })
+      return /take your time/i.test(dictated(user) || '') ? setTimeout(reply, 8000) : reply()
     }
     j(404, { error: { code: 404, message: 'File Not Found' } })
   })

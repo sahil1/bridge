@@ -2,8 +2,8 @@
 // llama-server (MIT), which comes with the desktop app for each platform and chip (scripts/llama.js
 // fetches the pinned build at build time; desktop/stage.js puts it in, and the Mac app signs it).
 // Nothing about it happens until you ask for it:
-//   The model (2.8 GB) is downloaded only when you pick it in Settings › Model Providers, never at
-//   setup or start: from Hugging Face at a pinned revision, resumable, checked against its SHA-256
+//   The model (2.8 GB) is downloaded only when you pick it in Settings › Model Providers (or Download
+//   where Tidy what I say needs it), never at setup or start: from Hugging Face at a pinned revision, resumable, checked against its SHA-256
 //   before it gets its name, with room for it checked first, as speech models are (speech.js).
 //   llama-server starts the first time something asks the model: a process of its own, so loading
 //   the model and writing an answer never run on the server's thread, on 127.0.0.1 with a key made
@@ -14,8 +14,9 @@
 // chip that loads here (macOS 13.3 or later; glibc 2.34 on Linux x64, 2.38 on Linux Arm). The Docker
 // image and a server run from a checkout have no build, so they don't offer it (scripts/llama.js
 // fetches one for a checkout). What it's used for is decided elsewhere: index.js prefers Claude and
-// the other models you have, and picks this one by itself only for edit by voice, or when there's
-// nothing else; once it's downloaded, every model list offers it as "on this computer".
+// the other models you have, and picks this one by itself only for edit by voice and Tidy what I say,
+// or when there's nothing else; once it's downloaded, every model list offers it as "on this
+// computer".
 // BRIDGE_LLAMA_SERVER (tests, or a checkout's own build): the llama-server to run.
 // BRIDGE_LLM_MODELS (tests): a JSON file of { id: { files } } standing in for the real file's name,
 // size and checksum. BRIDGE_MODELS_URL (tests): where it's downloaded from instead of Hugging Face.
@@ -177,7 +178,8 @@ async function fetchFile(m, f, d) {
   }
   fs.renameSync(tmp, dest)
 }
-// Only ever from you (Settings › Model Providers' Download): nothing else in Bridge AI calls this.
+// Only ever from you (a Download button: Settings › Model Providers', or where Tidy what I say needs
+// it, src/dictation/Tidy.jsx): nothing else in Bridge AI calls this.
 export async function fetchModel(id = DEFAULT) {
   const m = model(id)
   if (!m) throw new Error('No such model')
@@ -312,6 +314,16 @@ export async function use(fn) {
     }
   }
 }
+// Started ahead of a job that's on its way (dictation to tidy, while you're still talking), so the
+// job doesn't wait for the model to load; let go when idle, as after any answer. Only once it's
+// downloaded and can run here, and nothing if it's running or starting already.
+export async function warm() {
+  if (live(server) || starting || !(await ready())) return false
+  running().then((s) => { if (!s.busy) idleLater(s) }, () => {})
+  return true
+}
+// Loading now (started, not answering yet).
+export const loading = () => !!starting
 // How much it reads at a time on this computer, whether it's running or not.
 export async function context() { return contextFor((await machine()).memGB) }
 export const loaded = () => !!live(server)

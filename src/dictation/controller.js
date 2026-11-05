@@ -24,13 +24,16 @@ export const HOLD_MS = 300
 // for the pill's moving bars (Pill.jsx). live: what's been heard so far, while it listens and until
 // the text is in (live words, below). note: a line to show. setup: what /voice says is missing, or
 // { mic: true }. result: { text } the last text (for the floating window). offer: the desktop app's
-// key status, while asking whether the key should work from any app too.
+// key status, while asking whether the key should work from any app too. tidying: the words are
+// with the model being tidied (Tidy what I say, below); result.by is then the model that tidied
+// them, result.said what you said when that changed it, and result.untidied why they weren't
+// ({ code, error, local }).
 export const LEVELS = 18
 const QUIET = Array(LEVELS).fill(0)
-let st = { phase: 'idle', mode: null, target: null, level: 0, levels: QUIET, live: '', since: 0, note: null, setup: null, result: null, retry: false, offer: null }
+let st = { phase: 'idle', mode: null, target: null, level: 0, levels: QUIET, live: '', since: 0, note: null, setup: null, result: null, retry: false, offer: null, tidying: false }
 const subs = new Set()
 // Done with listening (the text is in, or it isn't coming): its live words go with it.
-const set = (p) => { st = { ...st, ...p, ...(p.phase === 'idle' ? { live: '' } : {}) }; for (const f of subs) f() }
+const set = (p) => { st = { ...st, ...p, ...(p.phase === 'idle' ? { live: '', tidying: false } : {}) }; for (const f of subs) f() }
 export const getState = () => st
 export const subscribe = (f) => { subs.add(f); return () => subs.delete(f) }
 // select: what a component needs of it, so one that isn't recording isn't drawn again ten times a
@@ -48,7 +51,7 @@ export const dictationKey = (c) => (c?.key && (c.key !== 'Fn' || fnHeard(c)) ? c
 export const listeningHint = (mode, label) => (mode === 'free' ? t("Listening… press {key} or Enter when you're done", { key: label }) : t('Talking… let go to add it · Esc cancels'))
 
 // Settings › Voice › Dictation, from /api/config: { on, key, cleanup, atFiles, to, background,
-// history, keepFor, keepAudio, liveWords }.
+// history, keepFor, keepAudio, liveWords, tidy }.
 let cfg = {}
 export const configure = (c) => { cfg = c || {} }
 export const settings = () => cfg
@@ -148,6 +151,8 @@ export async function press(target, at = Date.now()) {
   pressAt = at
   set({ phase: 'opening', mode: 'hold', target, level: 0, levels: QUIET, live: '', since: Date.now(), note: null, setup: null, result: null, retry: false, offer: null })
   words()
+  // The model that tidies it, loaded while you talk rather than after.
+  if (tidyFor(target)) api('/dictation/tidy/warm', { method: 'POST' }).catch(() => {})
   // Something to install first (whisper.cpp, for a Whisper model)? Then the mic isn't opened: nothing
   // could turn it into text. The speech model only to download is different: you talk now, and
   // what you said is kept and turned into text once it's here (transcribe, below). Asked once in a
@@ -240,12 +245,18 @@ async function transcribe(id) {
     const text = clean(data.text, { cleanup: cfg.cleanup !== false, atFiles: cfg.atFiles !== false, sentence: target?.sentence !== false, names: w?.names, heard: w?.heard })
     if (seq !== id) return
     if (!text) { set({ phase: 'idle', note: t('No speech detected') }); return }
+    const tidy = tidyFor(target) ? await tidyWords(text, target) : null
+    if (seq !== id) return
+    const out = tidy?.text || text
+    // by: what tidied it; said: what you said, when tidying changed it.
+    const said = tidy?.text && tidy.text !== text ? text : null
+    const tidied = tidy?.text ? { by: tidy.by || '', ...(said ? { said } : {}) } : tidy ? { untidied: tidy } : {}
     lastAudio = null
     const at = Date.now()
-    set({ phase: 'idle', mode: null, result: { text, at } })
-    const put = deliver(target, text)
-    keep(at, target, put, { text, raw: data.text, ms: Math.round(((blob.size - 44) / 2 / RATE) * 1000) }, blob)
-    if (!put) set({ note: t('Nowhere to put it, so here it is: {text}', { text }) })
+    set({ phase: 'idle', mode: null, result: { text: out, at, ...tidied } })
+    const put = deliver(target, out)
+    keep(at, target, put, { text: out, raw: data.text, ...(said ? { said, tidiedBy: tidy.by } : {}), ms: Math.round(((blob.size - 44) / 2 / RATE) * 1000) }, blob)
+    if (!put) set({ note: t('Nowhere to put it, so here it is: {text}', { text: out }) })
     else if (target?.kind !== 'hud') offerAnyApp()
   } catch (e) {
     if (seq !== id) return
@@ -255,6 +266,30 @@ async function transcribe(id) {
     // What the computer said, as it said it (a speech model to download first, say).
     set({ phase: 'idle', mode: null, setup: v && !v.ready ? v : null, retry: true, note: e.said || t("Couldn't transcribe: {error}", { error: e.message }) })
   }
+}
+
+// ---------- Tidy what I say (a trial: dictation-cleanup) ----------
+// From another app (the dictation window), with it on in Settings › Voice › Dictation: the words go
+// to the computer to be tidied by a model before they're pasted or sent (server/dictation.js tidy).
+// The server gives it a few seconds; this waits a little longer for the answer, then stops waiting
+// too. Nothing is lost either way: { text, by } tidied, or { code, error, local } and the words go
+// as you said them, the dictation window saying why (Tidy.jsx). null: not tidied, nothing to say
+// (the trial was turned off meanwhile).
+const TIDY_WAIT = 12_000
+export const tidyFor = (target) => cfg.tidy === true && target?.kind === 'hud'
+async function tidyWords(text, target) {
+  set({ tidying: true })
+  const stop = new AbortController()
+  const timer = setTimeout(() => stop.abort(), TIDY_WAIT)
+  try {
+    const r = await fetch(apiUrl('/dictation/tidy'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, app: target.app?.name || null }), signal: stop.signal })
+    const j = await r.json().catch(() => ({}))
+    if (r.ok && j.text) return { text: j.text, by: j.by || null }
+    if (r.status === 404 && j.trial) return null
+    return { code: j.code || 'failed', error: j.error || `HTTP ${r.status}`, local: j.local || null }
+  } catch (e) {
+    return stop.signal.aborted ? { code: 'slow', error: null } : { code: 'failed', error: e.message }
+  } finally { clearTimeout(timer) }
 }
 
 // ---------- Live words while you talk (server/livewords.js) ----------
