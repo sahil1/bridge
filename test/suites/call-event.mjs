@@ -74,7 +74,7 @@ try { process.stdout.write(fs.readFileSync(path.join(__dirname, 'ocr.txt'), 'utf
   return path.join(bin, 'bridgeocr')
 }
 const kit = await startKit('call-event', {
-  env: ({ bin }) => ({ BRIDGE_SCREEN_RECHECK_MS: '300', ...(IS_WIN ? {} : { BRIDGE_OCR: ocr(bin) }), BRIDGE_CALL_START_MS: '300', BRIDGE_CALL_END_MS: '600', BRIDGE_QUIET_OVER_MS: '1500', BRIDGE_QUIET_END_MS: '4000', BRIDGE_QUIET_REMIND_MS: '1500', BRIDGE_QUIET_LONG_MS: '4000', BRIDGE_QUIET_CHECK_MS: '300', BRIDGE_AUTO_STOP_MS: '2000', ...(IS_WIN ? {} : { BRIDGE_CALLWATCH: callwatch(bin) }) }),
+  env: ({ bin }) => ({ BRIDGE_CALL_QUIET_MS: '1500', BRIDGE_SCREEN_RECHECK_MS: '300', ...(IS_WIN ? {} : { BRIDGE_OCR: ocr(bin) }), BRIDGE_CALL_START_MS: '300', BRIDGE_CALL_END_MS: '600', BRIDGE_QUIET_OVER_MS: '1500', BRIDGE_QUIET_END_MS: '4000', BRIDGE_QUIET_REMIND_MS: '1500', BRIDGE_QUIET_LONG_MS: '4000', BRIDGE_QUIET_CHECK_MS: '300', BRIDGE_AUTO_STOP_MS: '2000', ...(IS_WIN ? {} : { BRIDGE_CALLWATCH: callwatch(bin) }) }),
 })
 const model = await startModel('call-event')
 const browsers = []
@@ -152,7 +152,12 @@ try {
     const askedNow = await api('/calls/screen', {})
     ok(askedNow.allowed === false && fs.existsSync(path.join(kit.bin, 'screen-asked')), "Allow asks macOS (its own window), and says it isn't on yet", askedNow)
     const L = await api('/meetings', { title: 'Pricing sync' })
+    // On a call (Teams has the mic) whose sound is a few steps off silence: said, on the meeting and
+    // on the floating card, and not once the call is heard.
+    fs.writeFileSync(path.join(kit.bin, 'calltap.json'), JSON.stringify({ level: 3 }))
+    ok(!!(await until(async () => (await api(`/meetings/${L.id}`)).callQuiet, 10000)) && (await api('/calls')).recording?.callQuiet === true, 'on a call whose sound is silent, that\'s said, on the meeting and the floating card')
     fs.writeFileSync(path.join(kit.bin, 'calltap.json'), JSON.stringify({ level: 3000 }))
+    ok(!!(await until(async () => (await api(`/meetings/${L.id}`)).callQuiet === false, 10000)), 'once the call is heard, not any more')
     await sleep(3000)
     ok(!shots().length, 'not allowed: no look at the call, someone talking or not', shots())
     call({ input: ['com.microsoft.teams2'], screen: true })
@@ -210,8 +215,9 @@ try {
   ok(!!rec && rec.endWhy === 'over', 'quiet a while longer past its time: now it says when it stops by itself', rec)
   let stopped = await until(async () => { const x = await api(`/meetings/${past.id}`); return x.status !== 'recording' && x }, 10000)
   ok(!!stopped, 'and it stops', stopped && stopped.status)
-  // No calendar time: it asks after a while, and stops after longer.
-  const Q = await api('/meetings', { title: 'Whiteboard session', call: false })
+  // No calendar time: it asks after a while, and stops after longer. A meeting in a room, recording
+  // what the computer plays as every meeting does (on a Mac), with nothing playing: no call to wait on.
+  const Q = await api('/meetings', { title: 'Whiteboard session' })
   await send(Q.id, Buffer.concat([pcm(2, true), pcm(0.5)]))
   rec = await until(async () => { const c = await api('/calls'); return c.recording?.endWhy === 'quiet' && c.recording }, 8000)
   ok(!!rec && !rec.stopsAt, 'with no calendar time, quiet a while: it asks, and only asks', rec)

@@ -824,13 +824,15 @@ function setTray(c, instead) {
 const fromFloat = (e) => !!float && !float.isDestroyed() && e.sender === float.webContents
 ipcMain.on('bridge:float-size', (e, w, h) => {
   if (!fromFloat(e) || !Number.isFinite(w) || !Number.isFinite(h)) return
+  // As tall as the card, up to the screen's height (opened, with AI Assist's suggestion, it's taller
+  // than a fixed 420 was, and was cut off; the card scrolls what's under its bar past that).
+  const b = float.getBounds()
+  const a = screen.getDisplayMatching(b).workArea
   const [cw, ch] = float.getContentSize()
-  const nw = Math.max(60, Math.min(420, Math.round(w))), nh = Math.max(40, Math.min(420, Math.round(h)))
+  const nw = Math.max(60, Math.min(420, Math.round(w))), nh = Math.max(40, Math.min(a.height - 16, Math.round(h)))
   if (cw === nw && ch === nh) return
   // On the right of the screen it grows and shrinks to the left, so it stays in its corner; near
   // the bottom it grows upward, so it stays on the screen.
-  const b = float.getBounds()
-  const a = screen.getDisplayMatching(b).workArea
   float.setContentSize(nw, nh)
   const n = float.getBounds()
   const x = b.x + b.width / 2 > a.x + a.width / 2 ? b.x + b.width - n.width : n.x
