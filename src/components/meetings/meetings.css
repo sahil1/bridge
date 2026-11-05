@@ -567,6 +567,9 @@ button.mt-who:not(:disabled):hover { text-decoration: underline dotted; text-und
   .mt-mynotes-name { font-size: 15px; }
 }
 .app.narrow .mt-mine { font-size: 16px; } /* stops iOS zooming into the box */
+/* Assist's How often and sort: whole 40px targets on a phone, and 16px so iOS doesn't zoom in. */
+.app.narrow .mt-assist-level input { width: 120px; height: 40px; font-size: 16px; }
+.app.narrow .mt-assist-sort select { height: 40px; font-size: 16px; }
 /* AI Assist's switch keeps its room on a phone: what it's doing wraps under it. */
 .mt-assist > .mt-phead { display: flex; flex-wrap: wrap; }
 .mt-assist-on { flex: none; }
