@@ -557,6 +557,18 @@ process.exit(1)`)
   ok(w.items?.[2]?.done && !!w.items?.[0]?.agent?.paneId, 'a summary written again keeps what became of its items', (w.items || []).map((x) => [x.text, x.state]))
   fs.writeFileSync(path.join(dirOf(PS.id), 'summary.md'), '## Summary\n- Webhook retries and pricing.\n\n## Decisions\n- Retry with a backoff, at most five times.\n\n## Action items\n- [ ] You: fix the retry on the Stripe webhook in payments-api\n- [ ] Priya: send the pricing doc to Acme\n- [ ] Dan: review the website copy\n')
 
+  // Sent again with nothing new: every item again, and the ones already on Chief of Staff's list
+  // (and not done) are the same tasks, not copies.
+  const RS = await kit.api('/meetings', { title: 'Vendor review', call: false })
+  await kit.api(`/meetings/${RS.id}/stop`, {})
+  fs.writeFileSync(path.join(dirOf(RS.id), 'summary.md'), '## Action items\n- [ ] Ola: book the offsite venue\n- [ ] Mia: send the vendor shortlist\n')
+  const openTitles = async () => ((await tryApi('/chief/tasks')).items || []).filter((x) => x.status !== 'done').map((x) => x.title.toLowerCase())
+  r = await tryApi(`/meetings/${RS.id}/chief`, {})
+  const openBefore = await openTitles()
+  const again = await tryApi(`/meetings/${RS.id}/chief`, {})
+  const openAfter = await openTitles()
+  ok(r.added === 2 && again.added === 2 && openAfter.length === openBefore.length && openAfter.filter((x) => /offsite venue|vendor shortlist/.test(x)).length === 2, 'Send again with nothing new: the same two tasks, no copies on Chief of Staff\'s list', { first: r.added, again: again.added, before: openBefore, after: openAfter })
+
   // Since last time. The next one in the series (its name, without the date): the last one's items.
   const P2 = await kit.api('/meetings', { title: 'Weekly payments sync (Nov 7)', call: false })
   let since = await tryApi(`/meetings/${P2.id}/since`)

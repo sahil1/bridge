@@ -1549,7 +1549,11 @@ app.post('/api/meetings/:id/chief', wrap(async (req) => {
   const fresh = Array.isArray(req.body?.items) ? null : meetWork.unsent(m.id)
   const items = (Array.isArray(req.body?.items) ? req.body.items : fresh.length ? fresh : meetings.actions(req.params.id)).map((x) => String(x).trim()).filter(Boolean).slice(0, 30)
   if (!items.length) throw new Error('No action items in the summary')
-  const added = items.map((t) => chiefTasks.add(t.slice(0, 300), { from: 'meeting', link: m.saved || null }))
+  // One that's already on Chief of Staff's list and not done, word for word, is the same task, not
+  // a copy: Send again with nothing new hands over the same tasks (it added all of them again).
+  const same = (s) => String(s).replace(/\s+/g, ' ').trim().toLowerCase()
+  const open = new Map(chiefTasks.list().items.filter((x) => x.status !== 'done').map((x) => [same(x.title), x]))
+  const added = items.map((t) => open.get(same(t.slice(0, 200))) || chiefTasks.add(t.slice(0, 300), { from: 'meeting', link: m.saved || null }))
   if (!Array.isArray(req.body?.items)) meetings.toChief(m.id, added.length)
   meetWork.sentToChief(m.id, items.map((text, i) => ({ text, task: added[i] })))
   const text = [`From my meeting "${m.title}" (${new Date(m.startedAt).toDateString()}), these action items are on your task list:`, ...added.map((t) => `- ${t.id}: ${t.title}`), '', 'Take the ones that are mine to hand off: start or brief the right agent for each, and keep the tasks current with `node bin/bridge task`. For the ones that belong to other people, draft the follow-up for me to send; don\'t message anyone yourself.'].join('\n')
