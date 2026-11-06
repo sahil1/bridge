@@ -96,10 +96,14 @@ try {
   const desk = await page(b, kit.url, { store: { 'cc-rail-meetings': true, 'cc-meet-tab': 'insights' } })
   pages.push(desk)
   const p = desk.p
-  // Meetings, from the sidebar once the app is up.
+  // Meetings, from the sidebar once the app is up (clicked again until it shows: WebKit, and a busy
+  // Linux runner, can take a click before the app is listening).
   const openMeetings = async () => {
-    await p.locator('.rail-nav-btn', { hasText: 'Meetings' }).first().click({ timeout: 20000 })
-    await p.locator('.mt-view .pane-head').first().waitFor({ timeout: 15000 })
+    const shown = await until(async () => {
+      await p.locator('.rail-nav-btn', { hasText: 'Meetings' }).first().click({ timeout: 5000 }).catch(() => {})
+      return p.locator('.mt-view .pane-head').first().waitFor({ timeout: 1500 }).then(() => true, () => false)
+    }, 30000, 300)
+    if (!shown) throw new Error('Meetings never opened from the sidebar')
   }
   await openMeetings()
   await p.keyboard.press('ControlOrMeta+k')
