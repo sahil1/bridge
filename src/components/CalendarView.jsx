@@ -358,14 +358,14 @@ function AgendaList({ days, events, tasks, colors, now, onSelect }) {
             {list.map((e) => (
               <button key={e.id} className={`cal-agenda-ev ${evClass(e, now)}`} style={{ '--c': colors[calOf(e)] }} onClick={() => onSelect(e)}>
                 <span className="cal-agenda-time">{e.allDay ? t('All day') : fmtT(e.start)}</span>
-                <span className="cal-agenda-title">{e.title}</span>
+                <span className="cal-agenda-title" title={e.title}>{e.title}</span>
                 <span className="cal-agenda-marks">{e.recorded && <i className="tg-rec" aria-label={t('Recorded')} />}{e.join && <Icon name="video" size={11} />}</span>
               </button>
             ))}
             {todo.map((x) => (
               <button key={x.id} className="cal-agenda-ev task" onClick={() => onSelect(x)}>
                 <span className="cal-agenda-time"><Icon name="helm" size={11} /> {t('Task')}</span>
-                <span className="cal-agenda-title">{x.title}</span>
+                <span className="cal-agenda-title" title={x.title}>{x.title}</span>
                 <span />
               </button>
             ))}

@@ -89,12 +89,19 @@ export function docLinks(...texts) {
   return out
 }
 
+// Cut to n characters at a whole word, with "…" (never mid-word), when it's longer.
+export const whole = (s, n) => {
+  const t = String(s ?? '').replace(/\s+/g, ' ').trim()
+  if (t.length <= n) return t
+  const c = t.slice(0, n)
+  return `${(c.slice(0, c.lastIndexOf(' ')) || c).replace(/[\s,;:.·-]+$/, '')}…`
+}
 function agendaOf(notes) {
   const before = (notes || '').split(/_{8,}|Microsoft Teams|Join Zoom|Join with Google Meet/)[0]
   const lines = before.split('\n').map((l) => l.replace(/^\s*[*•-]\s*/, '').trim()).filter((l) => l && !/^https?:/.test(l))
   // Exchange often stores curly apostrophes as "???" (I???d); show them as apostrophes.
   const text = lines.join(' · ').replace(/(\w)\?{3}(\w)/g, "$1'$2").replace(/\s+/g, ' ').trim()
-  return text ? text.slice(0, 220) : null
+  return text ? whole(text, 220) : null
 }
 
 export function parse(out) {

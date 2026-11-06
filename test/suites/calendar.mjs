@@ -53,7 +53,9 @@ const SOON = ev('Northwind pricing sync', 'Work', mins(8), mins(38), {
   emails: ['tester@example.com', 'maya.okafor@example.org', 'leo.brandt@example.org', 'ravi.menon@example.org'],
   notes: 'Agree the renewal price and the seat count for Q1.\n\nhttps://northwind.sharepoint.com/:p:/s/sales/renewal-deck.pptx\n________________\nMicrosoft Teams meeting\nJoin: https://teams.microsoft.com/l/meetup-join/19%3ameeting_abc',
 })
-const LATER = ev('Design review with Ines', 'Work', mins(180), mins(225), { response: 'none', attendees: ['Tester', 'Ines Varga'], notes: 'Walk through onboarding v2 before it goes to engineering.\nhttps://docs.google.com/document/d/onboarding-v2/edit' })
+// Its invite says a lot in one line: longer than the agenda the calendar keeps.
+const LONG_AGENDA = 'Walk through onboarding v2 before it goes to engineering, then agree which of the three empty-state designs ships first, who writes the copy for the welcome screens, and whether the import step can wait for the second release without hurting activation in the pilot accounts.'
+const LATER = ev('Design review with Ines', 'Work', mins(180), mins(225), { response: 'none', attendees: ['Tester', 'Ines Varga'], notes: `${LONG_AGENDA}\nhttps://docs.google.com/document/d/onboarding-v2/edit` })
 const RECORDED = ev('Quarterly planning', 'Work', mins(-180), mins(-120), { attendees: ['Tester', 'Maya Okafor', 'Ines Varga'] })
 const FOCUS = ev('Focus time', 'Personal', mins(300), mins(360), { response: '' })
 const DECLINED = ev('Budget office hours', 'Work', mins(60), mins(90), { response: 'declined', attendees: ['Tester', 'Pat Lin'] })
@@ -229,6 +231,12 @@ try {
   await api('/prep/suggest', { event: laterEv })
   ok(asked(/^Prepare me for a meeting: "Design review with Ines"/).length === 1, 'asked again: the kept ones, with no second call')
   const p3 = await api('/prep/suggest', { event: laterEv, again: true })
+  // A long agenda: cut only at a whole word, with "…"; what's made from it, whole.
+  const cut = laterEv.agenda.slice(0, -1)
+  ok(LONG_AGENDA.length > 220 && laterEv.agenda.endsWith('…') && LONG_AGENDA.startsWith(cut) && !/[\p{L}\p{N}]/u.test(LONG_AGENDA[cut.length]) && laterEv.agenda.length <= 221, "a long invite's agenda is cut at a whole word, with \"…\", never mid-word", laterEv.agenda)
+  ok(p3.agenda === laterEv.agenda && asked(/^Prepare me for a meeting: "Design review with Ines"/).at(-1).includes(`The invite says: ${laterEv.agenda}\n`), 'Prep shows it and sends it as kept, not cut again', p3.agenda)
+  const goal = p3.suggest.items.find((x) => x.kind === 'goal')?.text
+  ok(goal === `Agree on: ${laterEv.agenda}`, 'the goal made from it is kept whole', goal)
   ok(asked(/^Prepare me for a meeting: "Design review with Ines"/).length === 2 && p3.suggest.items.length > 0, 'Again: asked afresh')
 
   // ---------- The app, with a model: 1440, light and dark ----------
@@ -291,6 +299,10 @@ try {
     await until(async () => /wrote these/.test(await card.innerText().catch(() => '')), 15000)
     const text = await card.innerText().catch(() => '')
     ok(/Goals and Questions/i.test(text) && /Ines: mock up the empty states/.test(text) && /gpt-5 wrote these at .*, from the invite, 1 file in it, last time \(Design review with Ines, .*\),? and 1 person you've met\./.test(text) && await card.locator('button', { hasText: 'Again' }).count() === 1, 'the panel shows the suggestions, which model wrote them, when, and from what', text)
+    const say = await card.locator('.prep-tip.goal .prep-tip-say').innerText().catch(() => '')
+    const hover = await card.locator('.prep-tip.goal .prep-tip-text').getAttribute('title').catch(() => '')
+    const ag = await p.locator('.cal-detail .cal-sec .prep-agenda').innerText().catch(() => '')
+    ok(say === `Agree on: ${laterEv.agenda}` && hover?.startsWith(say) && ag === laterEv.agenda, `${mode}: the goal shows whole (the agenda ending at a word, with "…"), all of it on hover too`, { say, hover, ag })
     await shot(p, `${tag}calendar-prep-${mode}`)
     // A meeting this morning that was recorded: its notes.
     if (Date.parse(RECORDED.start) > +monday) {
@@ -343,6 +355,8 @@ try {
     await until(async () => /Agree on/.test(await card.locator('.float-card').innerText().catch(() => '')), 10000)
     const fc = await card.locator('.float-card').innerText().catch(() => '')
     ok(/Northwind pricing sync/.test(fc) && /Starts in \d+ min/.test(fc) && /3 invited · 2 you've met · 1 new to your meetings/.test(fc) && /Last time: Northwind pricing sync, .* · 2 still open/.test(fc) && /Agree on/.test(fc) && /By gpt-5 at/.test(fc) && await card.locator('.float-card a', { hasText: 'Join' }).count() === 1, "the card before it starts: who's coming, last time, the goals, which model, and Join", fc)
+    const clamped = await card.evaluate(() => [...document.querySelectorAll('.float-card .prep-line, .float-card .prep-tip-text')].map((x) => ({ text: x.innerText.split('\n')[0], title: x.getAttribute('title') || '' })))
+    ok(clamped.length > 3 && clamped.every((x) => x.title && x.title.replace(/\n.*/s, '').length >= Math.min(x.text.length, 1)), 'on the card, each line that may be clamped has all of it on hover', clamped)
     await shot(card, `${tag}calendar-float`)
     ok(real(errors).length === 0, 'the card: no page errors', errors)
     await api('/settings', { meetings: { prep: false } }, 'PATCH')

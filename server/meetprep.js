@@ -13,6 +13,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { DATA, cacheFile, writeFileAtomic } from './paths.js'
+import { whole } from './calendar.js'
 import * as meetings from './meetings.js'
 import * as meetWork from './meetwork.js'
 import * as insights from './meetinsights.js'
@@ -33,7 +34,12 @@ export const setHelpers = (h) => { helpers = { ...helpers, ...h } }
 
 const readJSON = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')) } catch { return d } }
 const hash = (s) => crypto.createHash('sha1').update(String(s)).digest('hex').slice(0, 12)
-const clip = (s, n) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, n)
+// Text to show or send: whole, or cut at a word with "…" past n characters, never mid-word. Ids are
+// only ever trimmed (plain).
+const clip = whole
+const plain = (s, n) => String(s ?? '').trim().slice(0, n)
+// Mail's own preview stops at 240 characters wherever that falls (mail.js): ended at a word here.
+const preview = (s) => { const t = clip(s, 240); return t.length >= 240 && !/[.!?…]$/.test(t) ? `${t.replace(/\s+\S*$/, '').replace(/[\s,;:.-]+$/, '')}…` : t }
 const within = (p, ms, what) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error(`${what} took too long to answer`)), ms).unref?.())])
 const me = () => String(cfg.name || '').trim()
 
@@ -42,11 +48,11 @@ export function eventOf(e = {}) {
   const list = (v, n, m) => [].concat(v || []).map((x) => clip(typeof x === 'string' ? x : x?.name || x?.email || '', m)).filter(Boolean).slice(0, n)
   const start = Date.parse(e.start) ? new Date(e.start).toISOString() : null
   return {
-    id: clip(e.id, 300) || null, uid: clip(e.uid, 400) || null,
+    id: plain(e.id, 300) || null, uid: plain(e.uid, 400) || null,
     title: clip(e.title, 200) || '(no title)', start, end: Date.parse(e.end) ? new Date(e.end).toISOString() : null,
     calendar: clip(e.calendar, 120) || null, attendees: list(e.attendees, 50, 120), attendeeCount: Number(e.attendeeCount) || 0,
     emails: list(e.emails, 50, 200).map((x) => x.toLowerCase()).filter((x) => x.includes('@')),
-    agenda: clip(e.agenda, 1000) || null, organizer: clip(e.organizer, 120) || null, response: clip(e.response, 20) || null,
+    agenda: clip(e.agenda, 1000) || null, organizer: clip(e.organizer, 120) || null, response: plain(e.response, 20) || null,
     links: [].concat(e.links || []).filter((l) => /^https?:\/\//.test(l?.url || '')).slice(0, 8).map((l) => ({ url: String(l.url).slice(0, 1000), name: clip(l.name, 120) || null })),
   }
 }
@@ -94,7 +100,7 @@ function summaryOf(id) {
   let text = ''
   try { text = fs.readFileSync(path.join(DIR, id, 'summary.md'), 'utf8') } catch { return [] }
   const part = text.split(/\n(?=##\s)/).find((x) => /^\s*##\s*Summary/i.test(x)) || ''
-  return [...part.matchAll(/^\s*[-*]\s+(.+)$/gm)].map((m) => clip(m[1].replace(/\*\*/g, ''), 300)).slice(0, 5)
+  return [...part.matchAll(/^\s*[-*]\s+(.+)$/gm)].map((m) => clip(m[1].replace(/\*\*/g, ''), 400)).slice(0, 5)
 }
 // The meeting before this one that it follows on from, with what's still open, yours and theirs.
 // By the series and the people as named first, as Home's brief does; then by their addresses, whose
@@ -127,7 +133,7 @@ async function mailWith(e) {
   for (const m of (box.messages || []).filter((x) => !x.bulk && theirs(x))) {
     if (m.conv && convs.has(m.conv)) continue
     if (m.conv) convs.add(m.conv)
-    threads.push({ id: m.id, subject: clip(m.subject, 200), from: clip(m.from, 120), received: m.received, snippet: clip(m.ai || m.snippet, 240) || null, replied: !!m.replied })
+    threads.push({ id: m.id, subject: clip(m.subject, 200), from: clip(m.from, 120), received: m.received, snippet: preview(m.ai || m.snippet) || null, replied: !!m.replied })
     if (threads.length >= 5) break
   }
   const waiting = (box.waiting || []).filter((w) => names.some((n) => String(w.to || '').split(/,\s*/).some((x) => meetings.sameName(n, x)))).slice(0, 3)
@@ -206,7 +212,7 @@ export function suggest(raw, { again = false } = {}) {
       // Held to the shape asked for when the first answer isn't it.
       if (!v) { r = await helpers.reply(w.id, msgs, { ...o, json: SCHEMA }).catch(() => r); v = parsed(r.text) }
       entry.items = (v?.items || []).filter((x) => x && typeof x.text === 'string' && x.text.trim()).slice(0, 4)
-        .map((x) => ({ kind: KINDS.has(x.kind) ? x.kind : 'goal', text: clip(x.text, 300), why: clip(x.why, 200) || null }))
+        .map((x) => ({ kind: KINDS.has(x.kind) ? x.kind : 'goal', text: clip(x.text, 400), why: clip(x.why, 240) || null }))
       if (!v) entry.error = `${w.label} answered, but not in a form Prep Assist can read. Try again.`
       else if (!entry.items.length) entry.error = `${w.label} found nothing to suggest from what there is.`
     } catch (x) {

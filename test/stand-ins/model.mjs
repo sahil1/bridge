@@ -113,8 +113,8 @@ function answer(b) {
     const open = /^Still open, theirs: ([^;\n]+)/m.exec(last)?.[1] || /^Still open, mine: ([^;\n]+)/m.exec(last)?.[1]
     const mail = /^- From ([^,\n]+), [^:\n]+: "([^"\n]+)"/m.exec(last)
     const items = []
-    if (invite) items.push({ kind: 'goal', text: `Agree on: ${invite.slice(0, 50)}`, why: 'The invite' })
-    if (open) items.push({ kind: 'follow-up', text: `Settle "${open.slice(0, 50)}"`, why: 'Last time' })
+    if (invite) items.push({ kind: 'goal', text: `Agree on: ${invite}`, why: 'The invite' })
+    if (open) items.push({ kind: 'follow-up', text: `Settle "${open}"`, why: 'Last time' })
     if (mail) items.push({ kind: 'question', text: `Ask ${mail[1]} about "${mail[2]}"`, why: `Email from ${mail[1]}` })
     if (!items.length) items.push({ kind: 'question', text: 'Ask what they hope to get out of this', why: 'Nothing else to go on' })
     return say(JSON.stringify({ items }))

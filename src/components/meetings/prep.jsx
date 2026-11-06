@@ -75,7 +75,7 @@ function Suggestions({ p, prep, compact, onSettings }) {
       {shown.map((x, i) => (
         <div key={i} className={`prep-tip ${x.kind}`}>
           <span className="prep-tip-kind">{t(PREP_KIND[x.kind] || PREP_KIND.goal)}</span>
-          <span className="prep-tip-text">{x.text}{x.why && <small>{x.why}</small>}</span>
+          <span className="prep-tip-text" title={x.why ? `${x.text}\n${x.why}` : x.text}><span className="prep-tip-say">{x.text}</span>{x.why && <small>{x.why}</small>}</span>
         </div>
       ))}
       {s?.error && <p className="error-text small">{t("Couldn't suggest anything: {error}", { error: s.error })}</p>}
@@ -96,7 +96,8 @@ function People({ people, compact }) {
   if (!known.length && !fresh.length) return <p className="muted small">{t('No one else is invited.')}</p>
   if (compact) {
     const n = known.length + fresh.length + more
-    return <p className="prep-line small">{[n === 1 ? t('1 invited') : t('{n} invited', { n }), known.length ? (known.length === 1 ? t('1 you\'ve met') : t('{n} you\'ve met', { n: known.length })) : null, fresh.length ? t('{n} new to your meetings', { n: fresh.length }) : null].filter(Boolean).join(' · ')}</p>
+    const said = [n === 1 ? t('1 invited') : t('{n} invited', { n }), known.length ? (known.length === 1 ? t('1 you\'ve met') : t('{n} you\'ve met', { n: known.length })) : null, fresh.length ? t('{n} new to your meetings', { n: fresh.length }) : null].filter(Boolean).join(' · ')
+    return <p className="prep-line small" title={[...known.map((x) => x.name), ...fresh].join(', ')}>{said}</p>
   }
   return (
     <div className="prep-people">
@@ -105,7 +106,7 @@ function People({ people, compact }) {
           <span className="prep-av" aria-hidden="true">{x.name.split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase()}</span>
           <span className="prep-person-text">
             <b>{x.name}</b>
-            <small>{[x.meetings === 1 ? t('1 meeting') : t('{n} meetings', { n: x.meetings }), x.last && t('last {date}', { date: day(x.last) }), x.about].filter(Boolean).join(' · ')}</small>
+            <small title={x.about || undefined}>{[x.meetings === 1 ? t('1 meeting') : t('{n} meetings', { n: x.meetings }), x.last && t('last {date}', { date: day(x.last) }), x.about].filter(Boolean).join(' · ')}</small>
           </span>
         </div>
       ))}
@@ -121,7 +122,8 @@ function Last({ last, compact, onOpenMeeting }) {
   const open = last.yours.length + last.theirs.length
   const item = (x, i) => <li key={i}><Icon name="clock" size={10} /> {x.text}</li>
   if (compact) {
-    return <p className="prep-line small">{open ? t('Last time: {title}, {date} · {n} still open', { title: last.title, date: day(last.startedAt), n: open }) : t('Last time: {title}, {date}', { title: last.title, date: day(last.startedAt) })}</p>
+    const said = open ? t('Last time: {title}, {date} · {n} still open', { title: last.title, date: day(last.startedAt), n: open }) : t('Last time: {title}, {date}', { title: last.title, date: day(last.startedAt) })
+    return <p className="prep-line small" title={said}>{said}</p>
   }
   return (
     <div className="prep-last">
@@ -146,7 +148,7 @@ function Mail({ mail, onOpenMail }) {
       {mail.threads.map((m) => (
         <li key={m.id}>
           <button type="button" className="prep-mail-row" onClick={() => onOpenMail?.(m.id)} disabled={!onOpenMail}>
-            <b>{m.subject}</b>
+            <b title={m.subject}>{m.subject}</b>
             <small>{t('From {name}, {date}', { name: m.from, date: day(m.received) })}{m.replied ? ` · ${t('you replied')}` : ''}</small>
           </button>
         </li>
@@ -154,7 +156,7 @@ function Mail({ mail, onOpenMail }) {
       {mail.waiting.map((m) => (
         <li key={`w${m.id}`}>
           <span className="prep-mail-row">
-            <b>{m.subject}</b>
+            <b title={m.subject}>{m.subject}</b>
             <small>{t('You wrote to {name}, {date}: no reply yet', { name: m.to, date: day(m.sent) })}</small>
           </span>
         </li>
@@ -166,7 +168,7 @@ function Mail({ mail, onOpenMail }) {
 // The invite's agenda and the files it links to.
 export function InviteFiles({ agenda, files, compact }) {
   if (!agenda && !files?.length) return null
-  if (compact) return <p className="prep-line small prep-agenda">{agenda ? t('The invite: {text}', { text: agenda }) : files.length === 1 ? t('1 file in the invite') : t('{n} files in the invite', { n: files.length })}</p>
+  if (compact) return <p className="prep-line small prep-agenda" title={agenda || undefined}>{agenda ? t('The invite: {text}', { text: agenda }) : files.length === 1 ? t('1 file in the invite') : t('{n} files in the invite', { n: files.length })}</p>
   return (
     <>
       {agenda && <p className="prep-agenda">{agenda}</p>}

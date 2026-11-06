@@ -52,6 +52,8 @@ button.prep-mail-row:not(:disabled):hover { background: var(--pane-3); }
 .prep-tip.follow-up .prep-tip-kind { color: var(--warning); background: color-mix(in srgb, var(--warning) 14%, transparent); }
 .prep-tip-text { display: grid; gap: 2px; font-size: 12.5px; line-height: 1.45; color: var(--ink); }
 .prep-tip-text small { font-size: 11px; color: var(--ink-3); }
+/* Whole in the panel; in a compact card three lines at most, all of it on hover. */
+.prep.compact .prep-tip-say { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
 .prep-foot { line-height: 1.45; }
 .prep-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
 .prep-acts .muted { line-height: 1.4; }
