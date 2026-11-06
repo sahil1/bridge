@@ -28,6 +28,8 @@ Beta Features (were Trial Features), each finished: Home, Studio, Meeting Insigh
 - **One Who spoke** on a transcript with the other side in it, where there were two.
 - **Send action items to Chief of Staff again, without copies.** With nothing left unsent, sending a meeting's action items again added every one to Chief of Staff's list again. The ones already on it are now the same tasks.
 - **No card about usage stats.** Usage stats and crash reports are as they were (on unless turned off); the card that said so is gone. Their switches are in Settings › About & Updates, and what's sent is in PRIVACY.md.
+- **Bold Bridge is the publisher.** The Windows installer, Apps & features and the Linux package name Bold Bridge, the company behind Bridge AI (they said "Bridge AI contributors").
+- **A link to star Bridge AI on GitHub** at the foot of Settings › About & Updates' Report a problem. No pop-up and no count.
 - **A failed update on Windows says why.** The Windows installer says what went wrong and ends without an error, so Update now showed "Updating…" with no end. It now says the installer's own words.
 - **The @ menu names the agent's folder on Windows** (it showed the whole path).
 
