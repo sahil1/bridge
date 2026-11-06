@@ -7,6 +7,7 @@ import { openFile, bytesOf, rawUrl, versionUrl, saveFile, changedSince, restoreV
 import { useDesignPacks, PacksSection, packFor } from './packs.jsx'
 import { lineDiff, textFor, comparable } from './diff.js'
 import { fontCss, lookOfPack } from './look.js'
+import { withKeys } from './keys.js'
 import './studio.css'
 
 // Studio: documents, sheets, decks, PDFs and pages, like Meetings and Whiteboards a place of its own.
@@ -23,6 +24,10 @@ const EDITORS = {
 }
 const ICON = { doc: 'doc', sheet: 'grid', deck: 'screen', pdf: 'file', page: 'code' }
 const KIND_LABEL = { doc: tx('Document'), sheet: tx('Sheet'), deck: tx('Deck'), pdf: tx('PDF'), page: tx('Page') }
+// What a file is, in words, by its extension ("Word document"); a Markdown file that's a deck says so.
+const KIND_OF = { '.docx': tx('Word document'), '.md': tx('Markdown'), '.markdown': tx('Markdown'), '.txt': tx('Plain text'), '.xlsx': tx('Excel workbook'), '.xlsm': tx('Excel workbook'), '.csv': tx('CSV'), '.tsv': tx('TSV'), '.pptx': tx('PowerPoint'), '.pdf': tx('PDF'), '.html': tx('HTML page'), '.htm': tx('HTML page') }
+const kindName = (kind, ext) => (kind === 'deck' && ext !== '.pptx' ? t('Markdown deck') : t(KIND_OF[ext] || KIND_LABEL[kind] || 'Studio'))
+const READ_ONLY = (kind, ext) => kind === 'pdf' || ext === '.pptx'
 export const openStudio = (f) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: f }))
 const when = (iso) => new Date(iso).toLocaleString(locale(), { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 const sizeOf = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`)
@@ -79,6 +84,16 @@ function useFolders() {
     return out
   }, [fleet, pl])
 }
+// Where a file is, for its header and Recent: the folder's path (home as ~), and its name in Bridge
+// AI (the agent's workspace, the place). Null when its folder isn't one open here now.
+const home = (p) => p.replace(/^(\/Users\/|\/home\/|[A-Z]:\\Users\\)[^/\\]+/, '~')
+function whereOf(folders, root, rel) {
+  const dir = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : ''
+  const f = folders.find((x) => x.root === root)
+  if (!f) return null
+  const at = dir ? `${f.path.replace(/\/$/, '')}/${dir}` : f.path
+  return { label: f.label, path: home(at), full: at }
+}
 
 export function StudioHome({ onOpen }) {
   const { data, refresh } = usePoll('/studio/recent', 15_000)
@@ -113,38 +128,49 @@ export function StudioHome({ onOpen }) {
         <h3>{t('New')}</h3>
         <div className="sd-new">
           {NEW.map((n) => (
-            <button key={n.label} type="button" className={`sd-new-btn${making === n ? ' on' : ''}`} onClick={() => { setMaking(n); setErr(null) }} disabled={!folders.length} title={t(n.hint)}>
-              <Icon name={ICON[n.kind]} size={18} /><b>{t(n.label)}</b><small className="muted">{t(n.hint)}</small>
+            <button key={n.label} type="button" className={`sd-new-btn${making === n ? ' on' : ''}`} onClick={() => { setMaking(n); setErr(null) }} disabled={!folders.length} aria-pressed={making === n}>
+              <span className="sd-new-ic"><Icon name={ICON[n.kind]} size={16} /></span><b>{t(n.label)}</b><small className="muted">{t(n.hint)}</small>
             </button>
           ))}
         </div>
         {folders.length === 1 && <p className="muted small">{t('Start an agent in a folder, or add a place in Files, to make a file there; until then, they go in Studio\'s own folder.')}</p>}
         {making && (
           <form className="sd-new-form" onSubmit={make}>
-            <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={t(making.label)} aria-label={t('Name')} maxLength={100} />
-            <select value={where} onChange={(e) => setWhere(e.target.value)} aria-label={t('Where')}>
-              {folders.map((f) => <option key={f.root} value={f.root}>{f.label} · {f.path}</option>)}
-            </select>
-            <button type="submit" className="btn small primary" disabled={busy}>{t('Make it')}</button>
-            <button type="button" className="ghost-btn" onClick={() => setMaking(null)}>{t('Cancel')}</button>
-            {err && <span className="error-text small">{err}</span>}
+            <label className="sd-field"><span className="muted small">{t('Name')}</span>
+              <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={t(making.label)} maxLength={100} />
+            </label>
+            <label className="sd-field wide"><span className="muted small">{t('Where')}</span>
+              <select value={where} onChange={(e) => setWhere(e.target.value)}>
+                {folders.map((f) => <option key={f.root} value={f.root}>{f.label} · {home(f.path)}</option>)}
+              </select>
+            </label>
+            <span className="sd-new-acts">
+              <button type="submit" className="btn small primary" disabled={busy}>{busy ? t('Making it…') : t('Make it')}</button>
+              <button type="button" className="ghost-btn" onClick={() => setMaking(null)}>{t('Cancel')}</button>
+            </span>
+            {err && <p className="error-text small sd-new-err" role="alert">{t("Couldn't make it: {error}", { error: err })}</p>}
           </form>
         )}
       </section>
       <section className="sd-sec">
         <h3>{t('Recent')}</h3>
-        {!files.length && <p className="muted small">{t('Files you open in Studio show here.')}</p>}
+        {!data && <p className="muted small">{t('Opening…')}</p>}
+        {data && !files.length && <p className="muted small sd-none">{t('Nothing yet. A file you open here (from Files, with Open in Studio, or one you start above) shows here, to come back to.')}</p>}
         <ul className="sd-recent">
-          {files.map((f) => (
-            <li key={`${f.root}\n${f.path}`}>
-              <button type="button" className="sd-recent-open" onClick={() => onOpen({ root: f.root, path: f.path })}>
-                <Icon name={ICON[f.kind] || 'file'} size={15} />
-                <span className="sd-recent-name"><b>{f.name}</b><small className="muted">{f.where ? `${f.where} · ` : ''}{f.path}</small></span>
-                <small className="muted">{when(f.at)}</small>
-              </button>
-              <button type="button" className="ghost-btn sd-recent-x" aria-label={t('Take {name} off the list', { name: f.name })} title={t('Take it off the list (the file stays)')} onClick={() => api(`/studio/recent?root=${encodeURIComponent(f.root)}&path=${encodeURIComponent(f.path)}`, { method: 'DELETE' }).then(refresh)}><Icon name="x" size={12} /></button>
-            </li>
-          ))}
+          {files.map((f) => {
+            const at = whereOf(folders, f.root, f.path)
+            const ext = extOf(f.name)
+            return (
+              <li key={`${f.root}\n${f.path}`}>
+                <button type="button" className="sd-recent-open" onClick={() => onOpen({ root: f.root, path: f.path })} title={at ? `${at.label} · ${at.full}` : f.path}>
+                  <span className={`sd-recent-ic ${f.kind || ''}`}><Icon name={ICON[f.kind] || 'file'} size={15} /></span>
+                  <span className="sd-recent-name"><b>{f.name}</b><small className="muted">{kindName(f.kind, ext)}{at ? ` · ${at.path}` : f.where ? ` · ${f.where}` : ''}</small></span>
+                  <small className="muted sd-recent-when">{when(f.at)}</small>
+                </button>
+                <button type="button" className="ghost-btn sd-recent-x" aria-label={t('Take {name} off the list', { name: f.name })} title={t('Take it off the list (the file stays)')} onClick={() => api(`/studio/recent?root=${encodeURIComponent(f.root)}&path=${encodeURIComponent(f.path)}`, { method: 'DELETE' }).then(refresh)}><Icon name="x" size={12} /></button>
+              </li>
+            )
+          })}
         </ul>
       </section>
       <PacksSection packs={packs} />
@@ -156,7 +182,24 @@ export function StudioHome({ onOpen }) {
 // Saved with ⌘S or Save, only over the version you loaded; a change from an agent or another app
 // while it's open is shown at once when you've changed nothing, and offered when you have.
 const WHO = { you: tx('You'), agent: tx('An agent'), outside: tx('Changed outside Studio'), restored: tx('Put back'), opened: tx('When it was first opened here') }
-const RISKY = { '.docx': tx('Saving here keeps its text, headings, lists, tables, pictures, fonts and colours. Word\'s own layout (headers, footers, comments, tracked changes, page setup) isn\'t kept; the file as it was stays in its versions, and Ask an agent changes it in place.'), '.xlsx': tx('Saving here keeps its values, formulas, formats, merged cells and every sheet. Charts, pivot tables and comments aren\'t kept; the file as it was stays in its versions, and Ask an agent changes it in place.') }
+const RISKY = { '.docx': tx('Saving here keeps its text, headings, lists, tables, links, quotes, pictures, fonts and colours. Word\'s own layout (headers, footers, comments, tracked changes, page setup) isn\'t kept; the file as it was stays in its versions, and Ask an agent changes it in place.'), '.xlsx': tx('Saving here keeps its values, formulas, formats, merged cells and every sheet. Charts, pivot tables and comments aren\'t kept; the file as it was stays in its versions, and Ask an agent changes it in place.') }
+// What saving keeps, in each kind of file: said under the file (its kind, in the status line), and
+// before the first save of a Word or Excel file. The editors offer only what's kept.
+const KEEPS = {
+  '.docx': RISKY['.docx'], '.xlsx': RISKY['.xlsx'], '.xlsm': RISKY['.xlsx'],
+  '.md': tx('Saved as Markdown, as written: headings, bold, italic, strikethrough, code, lists, quotes, links, tables and pictures. Markdown has no underline or colours, so they aren\'t offered.'),
+  '.txt': tx('Saved as plain text, as it is.'),
+  '.csv': tx('Saved as a {kind} file: the first sheet\'s values. Formulas, formats and other sheets aren\'t part of a {kind} file, so they aren\'t kept.'),
+  deck: tx('Saved as a Markdown deck, as written: slides between lines of ---. PowerPoint and PDF make a copy beside it.'),
+  '.pptx': tx('Shown here, not edited: Ask an agent changes the PowerPoint itself, and Edit as a Markdown deck makes a copy to edit here.'),
+  '.pdf': tx('Shown here, not edited: Ask an agent to change it, or the file it was made from.'),
+  '.html': tx('Saved as it\'s written: one HTML file that works on its own.'),
+}
+const keepsOf = (kind, ext) => {
+  if (kind === 'deck' && ext !== '.pptx') return t(KEEPS.deck)
+  if (ext === '.csv' || ext === '.tsv') return t(KEEPS['.csv'], { kind: ext.slice(1).toUpperCase() })
+  return t(KEEPS[{ '.markdown': '.md', '.htm': '.html' }[ext] || ext] || KEEPS['.txt'])
+}
 
 export function StudioPage({ root, path: rel, onBack, onOpen }) {
   const f = useMemo(() => ({ root, path: rel }), [root, rel])
@@ -165,18 +208,20 @@ export function StudioPage({ root, path: rel, onBack, onOpen }) {
   const [err, setErr] = useState(null)
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [note, setNote] = useState(null) // { text, error }
+  const [note, setNote] = useState(null) // { text, error, info, brief }
   const [conflict, setConflict] = useState(null) // { by, name } changed on disk while yours is unsaved
   const [panel, setPanel] = useState(null) // 'versions'
   const [ask, setAsk] = useState(null) // { selection }
   const [warn, setWarn] = useState(null) // the first save of a Word or Excel file, to say what's kept
   const [gen, setGen] = useState(0) // a new load (not a save): the editor starts again from it
+  const [stats, setStats] = useState(null) // what the editor counts (words, slides), for the status line
   const handle = useRef(null)
   const metaRef = useRef(null)
   const dirtyRef = useRef(false)
   useEffect(() => { metaRef.current = meta }, [meta])
   useEffect(() => { dirtyRef.current = dirty }, [dirty])
   const packs = useDesignPacks()
+  const folders = useFolders()
   const load = useCallback(async () => {
     const m = await openFile(f)
     const buf = await bytesOf(rawUrl(f))
@@ -187,7 +232,10 @@ export function StudioPage({ root, path: rel, onBack, onOpen }) {
     setConflict(null)
     return m
   }, [f])
-  useEffect(() => { setMeta(null); setData(null); setErr(null); load().catch((e) => setErr(e.message)) }, [load])
+  const open = useCallback(() => { setMeta(null); setData(null); setErr(null); setStats(null); load().catch((e) => setErr(e.message)) }, [load])
+  useEffect(open, [open])
+  // "Saved." goes by itself after a few seconds (the status line still says it); what needs reading stays.
+  useEffect(() => { if (!note?.brief) return undefined; const id = setTimeout(() => setNote(null), 4000); return () => clearTimeout(id) }, [note])
   // Changed on disk (an agent asked, another app): looked at while it's in view, every few seconds
   // while an agent's working on it (asked, or it changed it in the last two minutes), else every
   // ten, and at once when you come back to the window (from editing it in Word, say).
@@ -211,7 +259,7 @@ export function StudioPage({ root, path: rel, onBack, onOpen }) {
     return () => { clearInterval(id); window.removeEventListener('focus', back) }
   }, [f, load])
   const save = useCallback(async ({ force = false, ok = false } = {}) => {
-    if (!handle.current || !meta) return
+    if (!handle.current || !meta || READ_ONLY(meta.kind, meta.ext)) return
     if (RISKY[meta.ext] && !ok) { try { if (!localStorage.getItem(`cc-studio-said${meta.ext}`)) { setWarn(meta.ext); return } } catch { /* say it again next time */ } }
     setSaving(true); setNote(null)
     try {
@@ -219,10 +267,10 @@ export function StudioPage({ root, path: rel, onBack, onOpen }) {
       const r = await saveFile(f, bytes, { mtime: meta.mtime, force })
       setMeta((m) => ({ ...m, mtime: r.mtime, size: r.size, versions: r.versions }))
       setDirty(false); setConflict(null)
-      setNote({ text: t('Saved.') })
+      setNote({ text: t('Saved.'), brief: true })
     } catch (e) {
       if (e.conflict) setConflict({ who: t('Something else'), mtime: null })
-      else setNote({ text: e.message, error: true })
+      else setNote({ text: t("Couldn't save it: {error}", { error: e.message }), error: true })
     } finally { setSaving(false) }
   }, [f, meta])
   useEffect(() => {
@@ -234,19 +282,47 @@ export function StudioPage({ root, path: rel, onBack, onOpen }) {
   useEffect(() => { if (!dirty) return; const q = (e) => { e.preventDefault(); e.returnValue = '' }; window.addEventListener('beforeunload', q); return () => window.removeEventListener('beforeunload', q) }, [dirty])
   const restore = async (id) => { if (dirty && !window.confirm(t('Put this version back? Your unsaved changes here are lost (what\'s in the file now is kept as a version).'))) return; await restoreVersion(f, id); await load(); setNote({ text: t('Put back. What was there is kept as a version too.') }) }
 
-  if (err) return <div className="sd-file"><PaneHeader icon="layers" title={rel.split('/').pop()} leading={onBack && <BackBtn onBack={onBack} />} /><p className="error-text sd-err">{err}</p></div>
+  const name = meta?.name || rel.split('/').pop()
   const kind = meta?.kind
+  const at = whereOf(folders, root, rel)
+  if (err) {
+    return (
+      <div className="sd-file">
+        <PaneHeader icon="layers" title={name} leading={onBack && <BackBtn onBack={onBack} icon="layers" />} />
+        <div className="sd-empty" role="alert">
+          <Icon name="alert" size={20} />
+          <b>{t("Couldn't open {name}", { name })}</b>
+          <span className="muted small">{err}</span>
+          <span className="sd-empty-acts"><button type="button" className="btn small" onClick={open}><Icon name="refresh" size={12} /> {t('Try again')}</button>{onBack && <button type="button" className="ghost-btn" onClick={onBack}>{t('Back to Studio')}</button>}</span>
+        </div>
+      </div>
+    )
+  }
   const Editor = kind ? EDITORS[kind] : null
+  const readOnly = !!meta && READ_ONLY(meta.kind, meta.ext)
+  const opening = <div className="sd-empty sd-loading" role="status"><Icon name="refresh" size={16} className="spin" /><span className="muted">{t('Opening {name}…', { name })}</span></div>
+  const versions = meta?.versions?.length || 0
+  const state = saving ? { text: t('Saving…'), cls: 'busy' } : note?.error ? { text: t("Couldn't save"), cls: 'bad' } : conflict ? { text: t('Changed elsewhere'), cls: 'bad' } : dirty ? { text: t('Unsaved changes'), cls: 'dirty' } : readOnly ? { text: t('Read only'), cls: '' } : { text: t('Saved'), cls: 'ok' }
   return (
     <div className="sd-file">
-      <PaneHeader icon={ICON[kind] || 'layers'} title={meta?.name || rel.split('/').pop()} leading={onBack && <BackBtn onBack={onBack} />}
-        subtitle={<><span className="sub-where">{t(KIND_LABEL[kind] || 'Studio')}{meta ? ` · ${sizeOf(meta.size)}` : ''}</span><span className="path-chip" title={rel}><Icon name="folder" size={10} /> <span>{rel}</span></span></>}>
-        {kind && kind !== 'pdf' && <button type="button" className={`btn small${dirty ? ' primary' : ''}`} onClick={() => save()} disabled={saving || !dirty} title={t('Save (⌘S)')}><Icon name="check" size={12} /> {saving ? t('Saving…') : dirty ? t('Save') : t('Saved')}</button>}
-        <button type="button" className="btn small" onClick={() => setAsk({ selection: handle.current?.selection?.() || null })} disabled={!meta} title={t('Have one of your agents change it: pick the part first, or describe it')}><Icon name="sparkle" size={12} /> {t('Ask an agent')}</button>
-        <button type="button" className={`win-btn${panel === 'versions' ? ' on' : ''}`} onClick={() => setPanel(panel === 'versions' ? null : 'versions')} aria-pressed={panel === 'versions'} title={t('Versions: yours, your agents\' and changes from outside')} aria-label={t('Versions')}><Icon name="clock" size={14} /></button>
-        <a className="win-btn" href={rawUrl(f)} download={meta?.name} title={t('Download')} aria-label={t('Download')}><Icon name="download" size={14} /></a>
+      <PaneHeader icon={ICON[kind] || 'layers'} title={name} leading={onBack && <BackBtn onBack={onBack} icon={ICON[kind] || 'layers'} />}
+        subtitle={<>
+          <span className="sd-sub-kind">{meta ? `${kindName(kind, meta.ext)} · ${sizeOf(meta.size)}` : t('Opening…')}</span>
+          {at && <span className="path-chip sd-sub-where" title={`${at.label} · ${at.full}`}><Icon name="folder" size={10} /> <span>{at.path}</span></span>}
+        </>}>
+        {kind && !readOnly && <button type="button" className={`btn small sd-head-btn${dirty ? ' primary' : ''}`} onClick={() => save()} disabled={saving || !dirty} title={withKeys(dirty ? t('Save') : t('Saved: nothing new to save'), 'mod', 's')} aria-label={saving ? t('Saving…') : dirty ? t('Save') : t('Saved')}><Icon name="check" size={12} /> <span className="sd-btn-label">{saving ? t('Saving…') : dirty ? t('Save') : t('Saved')}</span></button>}
+        <button type="button" className="btn small sd-head-btn" onClick={() => setAsk({ selection: handle.current?.selection?.() || null })} disabled={!meta} title={t('Have one of your agents change it: pick the part first, or describe it')} aria-label={t('Ask an agent')}><Icon name="sparkle" size={12} /> <span className="sd-btn-label">{t('Ask an agent')}</span></button>
+        <button type="button" className={`win-btn${panel === 'versions' ? ' on' : ''}`} onClick={() => setPanel(panel === 'versions' ? null : 'versions')} aria-pressed={panel === 'versions'} title={t('Versions: yours, your agents\' and changes from outside')} aria-label={t('Versions')} disabled={!meta}><Icon name="clock" size={14} /></button>
+        <a className="win-btn" href={rawUrl(f)} download={name} title={t('Download {name}', { name })} aria-label={t('Download')}><Icon name="download" size={14} /></a>
       </PaneHeader>
-      {note && <p className={`sd-bar small${note.error ? ' error-text' : ''}`} role="status">{note.text}</p>}
+      {note && (
+        <div className={`sd-bar sd-note-bar${note.error ? ' bad' : ''}`} role={note.error ? 'alert' : 'status'}>
+          {note.info && <Icon name="info" size={13} />}
+          {note.error && <Icon name="alert" size={13} />}
+          <span>{note.text}</span>
+          <button type="button" className="win-btn" onClick={() => setNote(null)} aria-label={t('Close')} title={t('Close')}><Icon name="x" size={12} /></button>
+        </div>
+      )}
       {conflict && (
         <div className="sd-bar sd-conflict" role="alert">
           <span><b>{t('{who} changed this file', { who: conflict.who })}</b> {t('while you were editing it. Your changes aren\'t saved yet.')}</span>
@@ -263,16 +339,27 @@ export function StudioPage({ root, path: rel, onBack, onOpen }) {
       )}
       <div className={`sd-body${panel ? ' with-panel' : ''}`}>
         <div className="sd-editor">
-          {!meta || !data ? <p className="muted small sd-loading">{t('Opening…')}</p>
-            : <Suspense fallback={<p className="muted small sd-loading">{t('Opening…')}</p>}><Editor key={gen} file={{ ...meta, root, path: rel }} data={data} onDirty={setDirty} handle={handle} packs={packs.list} onOpen={onOpen} /></Suspense>}
+          {!meta || !data ? opening
+            : <Suspense fallback={opening}><Editor key={gen} file={{ ...meta, root, path: rel }} data={data} onDirty={setDirty} onStats={setStats} handle={handle} packs={packs.list} onOpen={onOpen} /></Suspense>}
         </div>
         {panel === 'versions' && meta && <Versions f={f} ext={meta.ext} versions={meta.versions} onRestore={restore} onClose={() => setPanel(null)} />}
       </div>
+      {/* The status line: what the editor counts, what kind of file it is (tapped: what saving keeps),
+          how many versions are kept, and whether it's saved. */}
+      {meta && (
+        <footer className="sd-status">
+          {stats && <span className="sd-stat" title={stats.title || undefined}>{stats.text}</span>}
+          <button type="button" className={`sd-status-btn${note?.info ? ' on' : ''}`} onClick={() => setNote(note?.info ? null : { text: keepsOf(kind, meta.ext), info: true })} aria-pressed={!!note?.info} title={t('What saving keeps')}><Icon name="info" size={12} /> {kindName(kind, meta.ext)}</button>
+          <button type="button" className="sd-status-btn vers" onClick={() => setPanel(panel === 'versions' ? null : 'versions')} title={t('Versions: yours, your agents\' and changes from outside')}><Icon name="clock" size={12} /> {versions === 1 ? t('1 version') : t('{n} versions', { n: versions })}</button>
+          <span className="sd-grow" />
+          <span className={`sd-state ${state.cls}`} title={meta.mtime ? t('The file last changed {when}', { when: when(meta.mtime) }) : undefined}><i aria-hidden="true" />{state.text}</span>
+        </footer>
+      )}
       {ask && <AskAgent f={f} meta={meta} selection={ask.selection} onClose={() => setAsk(null)} onSent={(name) => { setAsk(null); quick.current = Date.now() + 15 * 60_000; setNote({ text: t('Sent to {name}. Studio shows the change once it saves the file.', { name }) }) }} />}
     </div>
   )
 }
-const BackBtn = ({ onBack }) => <><button type="button" className="win-btn back" onClick={onBack} aria-label={t('Studio')} title={t('Studio')}><Icon name="chevron" size={16} className="flip" /></button><span className="pane-icon"><Icon name="layers" size={15} /></span></>
+const BackBtn = ({ onBack, icon }) => <><button type="button" className="win-btn back" onClick={onBack} aria-label={t('Back to Studio')} title={t('Back to Studio')}><Icon name="chevron" size={16} className="flip" /></button><span className="pane-icon"><Icon name={icon} size={15} /></span></>
 
 function Versions({ f, ext, versions, onRestore, onClose }) {
   const [compare, setCompare] = useState(null) // the version compared with the file as it is
