@@ -259,7 +259,7 @@ export default function Meetings() {
             {MEETING_KEYS.map((k) => <option key={k} value={k}>{k === '@' ? t('@, with the files') : k}</option>)}
           </select>
         </div>
-        <p className="muted small">{t('In an agent\'s message box, type it and a few words of the meeting\'s name, and pick it: the agent gets the meeting as a file to read, with its summary and action items, your notes and the transcript.')}</p>
+        <p className="muted small">{t('In an agent\'s message box, type it and a few words of the meeting\'s name, and pick it: the agent gets the meeting as a file to read, with its summary and action items, your notes and the transcript.')} {t('Meetings recorded on your other computers are offered too.')}</p>
       </section>
 
       <section className="st-sec">

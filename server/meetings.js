@@ -2204,7 +2204,8 @@ export function mentionable(q = '', n = 8) {
 // The meeting as one file for an agent to read (Claude Code reads @path): when, who, its summary and
 // action items, your notes and the transcript. Written fresh each time it's mentioned, beside the
 // meeting, named for it (so the agent shows its name); a recording so far as it's got.
-export function forAgents(id) {
+// text: its words come back too, for another of your computers to keep a copy of (keepCopy there).
+export function forAgents(id, { text: withText = false } = {}) {
   const m = meta(id)
   const at = new Date(m.startedAt)
   const when = `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`
@@ -2224,7 +2225,34 @@ export function forAgents(id) {
   for (const f of fs.readdirSync(dir)) fs.rmSync(path.join(dir, f), { force: true }) // one file, under the meeting's name as it is now
   const file = path.join(dir, `${fileSafe(m.title)}.md`)
   fs.writeFileSync(file, `${text}\n`)
-  return { path: file, title: m.title }
+  return { path: file, title: m.title, ...(withText ? { text: `${text}\n` } : {}) }
+}
+// A meeting recorded on another of your computers, as a file for an agent here: its words from there
+// (forAgents with text), kept in a folder of such copies, one folder per computer and meeting, named
+// for the meeting as forAgents names it. Written again each time it's mentioned; a copy not mentioned
+// for a month goes.
+const COPIES = path.join(DATA, 'meeting-copies')
+const COPY_DAYS = 30
+export async function keepCopy({ machine, id, title, text }) {
+  if (!/^[\w-]{1,40}$/.test(String(machine || '')) || !/^[\w-]{1,80}$/.test(String(id || ''))) throw new Error('No such meeting')
+  if (typeof text !== 'string' || !text.trim()) throw new Error('That meeting came without its words')
+  const name = String(title || '').slice(0, 200) || 'Untitled'
+  const dir = path.join(COPIES, machine, id)
+  await fs.promises.mkdir(dir, { recursive: true })
+  for (const f of await fs.promises.readdir(dir)) await fs.promises.rm(path.join(dir, f), { force: true }) // one file, under the meeting's name as it is now
+  const file = path.join(dir, `${fileSafe(name)}.md`)
+  await fs.promises.writeFile(file, text.endsWith('\n') ? text : `${text}\n`)
+  pruneCopies().catch(() => {})
+  return { path: file, title: name }
+}
+async function pruneCopies() {
+  const old = Date.now() - COPY_DAYS * 86400000
+  for (const m of await fs.promises.readdir(COPIES)) {
+    for (const id of await fs.promises.readdir(path.join(COPIES, m)).catch(() => [])) {
+      const st = await fs.promises.stat(path.join(COPIES, m, id)).catch(() => null)
+      if (st && st.mtimeMs < old) await fs.promises.rm(path.join(COPIES, m, id), { recursive: true, force: true })
+    }
+  }
 }
 
 // Where a meeting's notes go with Settings as they are.

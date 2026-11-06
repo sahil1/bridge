@@ -54,6 +54,7 @@ const SUITES = [
   { name: 'phone-fresh', build: 'dist', browser: true, covers: [/^src\/(fresh|App|api)\.jsx?$/, /^src\/components\/TopNotes\.jsx$/, /^relay\/web\//, /^server\/index\.js$/, /^test\/stand-ins\/relay\.mjs$/] },
   { name: 'phone-meetings', build: 'dist', browser: true, covers: [/^src\/components\/meetings\//, /^src\/(App|api)\.jsx?$/, /^src\/styles\.css$/, /^server\/(meetings|speech|index)\.js$/] },
   { name: 'phone-composer', build: 'dist', browser: true, covers: [/^src\/components\/(Composer|ModelChip|Console|Handoff|Rail)\.jsx$/, /^src\/styles\.css$/, /^test\/stand-ins\/claude\.cjs$/] },
+  { name: 'mention-meetings', build: 'dist', browser: true, covers: [/^src\/components\/Composer\.jsx$/, /^src\/styles\.css$/, /^server\/(meetings|machines|index)\.js$/, /^shared\/mentions\.js$/, /^test\/stand-ins\/(relay|older-meetings)\.mjs$/, /^test\/stand-ins\/claude\.cjs$/] },
   { name: 'demo-ui', build: 'dist-demo', browser: true, covers: [/^src\/demo\//, /^src\/components\/meetings\//, /^src\/(App|api)\.jsx?$/, /^vite\.config\.js$/] },
   { name: 'herdr', build: null, covers: [/^server\/runtime\/(herdr[\w-]*|index)\.js$/, /^server\/(index|agents|chatagent)\.js$/] },
   { name: 'saves', build: null, covers: [/^server\/paths\.js$/] },

@@ -1788,6 +1788,29 @@ button.yg-day:hover { box-shadow: 0 0 0 1.5px var(--accent); }
 .mention-jump { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--ink-2); background: var(--pane-3); border-radius: 6px; padding: 3px 8px; }
 .mention-jump:hover { background: var(--accent-soft); color: var(--ink); }
 .rot-up { transform: rotate(-90deg); }
+.rot-back { transform: rotate(180deg); }
+/* Meetings in it: a meeting row in the app's own type with the meetings icon and its badge, so it
+   doesn't read as a file; Meetings at the top, a jump to them, with an arrow. The foot's note (a
+   computer that didn't answer) shows on a phone too, where the keys don't. */
+.slash-title .slash-where { font-weight: 400; margin-left: 8px; }
+.slash-item b svg { flex: none; margin-right: 6px; vertical-align: -2px; color: var(--accent); }
+.slash-item.meeting b, .slash-item.jump b { font: 600 13px var(--font); overflow: hidden; text-overflow: ellipsis; max-width: 46ch; }
+.slash-item.meeting .slash-badge { color: var(--accent); background: var(--accent-soft); }
+.slash-item.meeting.on .slash-badge { background: var(--pane); }
+.slash-go { color: var(--ink-3); align-self: center; }
+.slash-empty { font-size: 12.5px; color: var(--ink-3); padding: 8px 10px 10px; }
+.slash-keys { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.slash-foot.has-note { flex-wrap: wrap; row-gap: 2px; }
+.slash-note { margin-left: auto; text-align: right; }
+.slash-note.warn { color: var(--ink-2); font-weight: 500; }
+.slash-note.warn svg { color: var(--warning); margin-right: 4px; vertical-align: -1px; }
+.app.narrow .slash-foot.has-note { display: flex; font-size: 12.5px; }
+.app.narrow .slash-keys { display: none; }
+.app.narrow .slash-note { margin-left: 0; text-align: left; }
+.app.narrow .mention-menu .slash-item { min-height: 40px; align-content: center; }
+.app.narrow .mention-menu .slash-item b, .app.narrow .mention-menu .slash-desc { white-space: normal; overflow-wrap: anywhere; max-width: none; }
+.app.narrow .slash-go { display: none; }
+.app.narrow .mention-jump { min-height: 40px; padding: 0 12px; font-size: 13px; }
 
 /* ============ Usage stats ============ */
 :root { --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-4: #eda100; --series-5: #e87ba4; --series-6: #008300; --series-7: #4a3aa7; --series-8: #e34948; --series-other: #a3a7b0;
