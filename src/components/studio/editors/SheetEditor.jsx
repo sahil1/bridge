@@ -39,10 +39,15 @@ export default function SheetEditor({ file, data, onDirty, onStats, handle, read
       made.univerAPI.createWorkbook(wb.data)
       setReady(true)
       if (readOnly) made.univerAPI.getActiveWorkbook()?.setEditable?.(false)
-      // Changed once something's edited after it opened (the first mutations are its own setting up).
+      // Changed once the workbook itself changes after it opened: a mutation (type 2) to it, as an
+      // edit, a format or an undo make. Not Univer's own: its setting up as it opens, its cell
+      // editor's scratch document (doc.*, which a cell picked fills), or a formula's result worked
+      // out again (onlyLocal). Univer's Facade gives these as its CommandExecuted event.
       let ready = false
       setTimeout(() => { ready = true }, 600)
-      off = made.univerAPI.onCommandExecuted?.((cmd) => { if (ready && cmd?.type === 2) onDirty(true) })
+      off = made.univerAPI.addEvent(made.univerAPI.Event.CommandExecuted, (cmd) => {
+        if (ready && cmd.type === 2 && !cmd.options?.onlyLocal && !String(cmd.id).startsWith('doc.')) onDirty(true)
+      })
     }, (e) => on && setErr(e.message))
     return () => { on = false; try { off?.dispose?.() } catch { /* gone */ } try { univer?.dispose() } catch { /* gone */ } api.current = null }
   }, [data, readOnly]) // eslint-disable-line react-hooks/exhaustive-deps
