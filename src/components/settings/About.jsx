@@ -140,7 +140,7 @@ function ByItself({ u, checks }) {
   )
 }
 
-// Trial features (src/trials.js): each hidden until it's turned on here, for this computer.
+// Beta features (src/trials.js): each hidden until it's turned on here, for this computer.
 function Trials() {
   const { s, save } = useSettings()
   const [mine, setMine] = useState({}) // as you set it, at once; saved behind it
@@ -148,8 +148,8 @@ function Trials() {
   const set = (id, v) => { setMine((m) => ({ ...m, [id]: v })); save({ trials: { [id]: v } }) }
   return (
     <section className="st-sec">
-      <h4>{t('Trial Features')}</h4>
-      <p className="muted small">{t("New parts of Bridge AI that are still being finished. Each stays hidden until you turn it on here, and turning it off hides it again; what you made with it stays where it is.")}</p>
+      <h4>{t('Beta Features')}</h4>
+      <p className="muted small">{t("New parts of Bridge AI, in beta. Each stays hidden until you turn it on here, and turning it off hides it again; what you made with it stays where it is.")}</p>
       {TRIALS.map((x) => (
         <label key={x.id} className="st-check"><input type="checkbox" checked={on(x.id)} disabled={!s} onChange={(e) => set(x.id, e.target.checked)} />
           <span><b>{t(x.label)}</b> <span className="muted small">{t(x.hint)}</span></span></label>

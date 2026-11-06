@@ -99,7 +99,7 @@ export function Quota() {
   const { data, error, refresh } = usePoll('/quota', 5 * 60 * 1000)
   const [primary] = useShared('cc-primary', 'claude')
   const p = data?.providers?.find((x) => x.provider === primary)
-  const everywhere = useTrial('usage-everywhere') // a trial feature (src/trials.js)
+  const everywhere = useTrial('usage-everywhere') // a beta feature (src/trials.js)
   return (
     <Card icon="gauge" title={t('Usage')} className="usage-card" summary={p ? t('{name} {pct}% left', { name: p.provider, pct: p.percentRemaining ?? '—' }) : ''} right={<Updated data={data} onRefresh={() => refresh('?refresh=1')} />}>
       <Usage data={data} error={error} />

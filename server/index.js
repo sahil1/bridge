@@ -335,12 +335,12 @@ const rootOf = async (pane) => {
   if (!p) throw new Error(`No pane ${pane}`)
   return p.cwd
 }
-// ---------- Trial features ----------
-// Still being finished, so hidden until turned on in Settings › About & Updates › Trial Features
+// ---------- Beta features ----------
+// Still being finished, so hidden until turned on in Settings › About & Updates › Beta Features
 // (trials: { studio: true } in the config; src/trials.js). Their routes answer only then.
 const TRIALS = ['studio', 'home', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights']
 const trialOn = (id) => cfg.trials?.[id] === true
-const trialOff = (id, label) => (req, res, next) => (trialOn(id) ? next() : res.status(404).json({ error: `${label} is a trial feature. Turn it on in Settings › About & Updates › Trial Features.`, trial: id }))
+const trialOff = (id, label) => (req, res, next) => (trialOn(id) ? next() : res.status(404).json({ error: `${label} is a beta feature. Turn it on in Settings › About & Updates › Beta Features.`, trial: id }))
 
 // ---------- Studio (studio.js) ----------
 // Its files are named as Files names them: root (an agent's pane, or place:<id>) and a path in it.
@@ -1343,7 +1343,7 @@ app.post('/api/meetings/bulk', wrap(async (req) => {
 app.get('/api/meetings/voices', wrap(() => voices.status()))
 app.post('/api/meetings/voices/forget', wrap(() => voices.forget()))
 app.post('/api/meetings/voices/download', wrap(async () => { if (!(await voices.status()).offered) throw new Error((await voices.status()).why || 'Telling voices apart can\'t run on this computer'); speech.fetchModel(speech.VOICE.id); return voices.status() }))
-// Meeting Insights and the people you meet (meetinsights.js), a trial feature: your meetings added
+// Meeting Insights and the people you meet (meetinsights.js), a beta feature: your meetings added
 // up by week and kind, and everyone you've met, with merging and splitting people by hand.
 meetInsights.configure(cfg)
 meetInsights.setHelpers({ calendar: (from, to) => calendar.range(from, to) })
@@ -1753,7 +1753,7 @@ app.post('/api/calendar/prep', wrap(async (req) => {
   ].filter(Boolean).join('\n')
   return launchInSpace('Meetings', `Prep: ${e.title}`, prompt)
 }))
-// Every provider's tokens in one view (usageall.js), a trial feature. What it reads is noted
+// Every provider's tokens in one view (usageall.js), a beta feature. What it reads is noted
 // whether it's on or not (usagelog.js), so it has the days before it was turned on.
 app.get('/api/usage-everywhere', trialOff('usage-everywhere', 'Usage across every provider'), wrap((req) => everywhere({ days: req.query.days, force: !!req.query.refresh })))
 app.get('/api/usage/:provider/stats', wrap((req) => usageStats(req.params.provider, { force: !!req.query.refresh })))
@@ -2008,7 +2008,7 @@ app.post('/api/needs-you/answer', wrap(async (req) => {
 }))
 app.post('/api/needs-you/clear', wrap((req) => waiting.clear(req.body?.id)))
 
-// ---------- Home (home.js), a trial feature ----------
+// ---------- Home (home.js), a beta feature ----------
 // What needs you, what's ready to look at and what's coming up, on this device and your others (from
 // what each last said, asked again while you're looking), each answered on its own device as in
 // Needs you. A device that sends only what needs you (an older Bridge AI, or Home's list not come
@@ -2200,7 +2200,7 @@ app.get('/api/config', (req, res) => res.json({
   dictation: trialOn('dictation-cleanup') || !cfg.dictation?.tidy ? cfg.dictation || {} : { ...cfg.dictation, tidy: false },
   alertSounds: cfg.alertSounds !== false, // the speaker in the top bar
   meetingKey: MEETING_KEYS.includes(cfg.meetings?.mentionKey) ? cfg.meetings.mentionKey : '@', // Settings › Meetings
-  trials: Object.fromEntries(TRIALS.map((id) => [id, trialOn(id)])), // Settings › About & Updates › Trial Features
+  trials: Object.fromEntries(TRIALS.map((id) => [id, trialOn(id)])), // Settings › About & Updates › Beta Features
 }))
 // The speaker in the top bar: notifications (this computer's, a browser's, your phones') come with a
 // sound, or without one; they still come. Your other devices are told too, unless one of them is

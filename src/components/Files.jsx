@@ -208,7 +208,7 @@ function Editor({ value, onChange, onSave }) {
 }
 
 function Viewer({ pane, filePath, onOpenPath, onBack, onMenu, ver, onCopyHere }) {
-  const studio = useTrial('studio') // a trial feature (src/trials.js)
+  const studio = useTrial('studio') // a beta feature (src/trials.js)
   const [state, setState] = useState({ loading: true })
   const [mode, setMode] = usePersisted('cc-md-mode', 'preview')
   const [copied, setCopied] = useState(false)

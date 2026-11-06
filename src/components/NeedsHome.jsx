@@ -8,7 +8,7 @@ import { api, hostApi } from '../api.js'
 import { t, tx, locale } from '../i18n/index.js'
 import './needshome.css'
 
-// Home (a trial feature, `home`): Needs you as the place the app opens at, on a computer and a
+// Home (a beta feature, `home`): Needs you as the place the app opens at, on a computer and a
 // phone. What needs you first, answered right there (Yes, No, the agent's own choices, Reply). Then
 // what's ready to look at (finished work and its pull request, a meeting's notes and the action
 // items not handed on, a whiteboard an agent drew, a task the Chief of Staff finished) as short

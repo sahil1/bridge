@@ -815,7 +815,7 @@ button.mt-from-chip:hover { color: var(--ink); border-color: color-mix(in srgb, 
 .mt-talk .c4 { background: var(--series-5); }
 .mt-talk .c5 { background: var(--series-7); }
 
-/* ============ Insights and People (insights.jsx, a trial feature) ============
+/* ============ Insights and People (insights.jsx, a beta feature) ============
    Usage's tiles, cards and bars (styles.css .us-*), with what each number is based on under it. */
 .mt-home:has(> .mi:not(.mi-people)) { max-width: 1120px; }
 .mi { display: grid; gap: 12px; align-content: start; min-width: 0; }
