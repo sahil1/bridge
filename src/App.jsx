@@ -329,10 +329,11 @@ function App() {
     return () => window.removeEventListener('bridge-needs-you', on)
   }, [])
 
-  // In the phone apps: the agents at work, for the lock screen.
+  // In the phone apps: the agents at work, for the lock screen. One whose turn is over while its
+  // subagents still work is at work.
   useEffect(() => {
     // With the herdr session: another session's agents left the view, they didn't finish.
-    if (relayActivity && fleet && !fleet.down) relayActivity(agents.map((a) => ({ id: a.paneId, name: nameOf(a), status: a.status })), { session: fleet.session || null })
+    if (relayActivity && fleet && !fleet.down) relayActivity(agents.map((a) => ({ id: a.paneId, name: nameOf(a), status: a.subagents?.running && (a.status === 'done' || a.status === 'idle') ? 'working' : a.status })), { session: fleet.session || null })
   }, [fleet]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // replace: the chief's thread bar shows another thread in the same tab.
@@ -573,6 +574,7 @@ function App() {
   const fromHome = (out) => { if (out?.paneId) setTimeout(() => { if (wide) openAgent(out.paneId, { replace: 'view:new' }); else openAgent(out.paneId) }, 1200) }
   const openNew = () => openAgent('view:new')
   const queuedFor = (id) => fleet?.queue?.[id] || []
+  const deliveredFor = (id) => fleet?.delivered?.[id] || []
   // A plain terminal on the device on screen, for anything you'd type yourself (brew upgrade, a
   // dev server): in a space's folder ("New terminal here"), else your home folder in a space of its
   // own. Its tab opens once the fleet has it.
@@ -847,11 +849,11 @@ function App() {
         <Quiet name="Link requests"><AskBanner /></Quiet>
         <main className="m-body">
           {mtab === 'home' && homeOn && viewFor(homeView === 'everything' ? 'view:everything' : 'view:home')}
-          {mtab === 'mate' && (mateShown ? <Console key={mateShown.paneId} agent={mateShown} variant="mobile" queued={queuedFor(mateShown.paneId)} agents={agents} onThread={(id) => setMateId(id)} /> : <MateEmpty onLaunch={mateLaunch.launch} {...mateLaunch} />)}
+          {mtab === 'mate' && (mateShown ? <Console key={mateShown.paneId} agent={mateShown} variant="mobile" queued={queuedFor(mateShown.paneId)} delivered={deliveredFor(mateShown.paneId)} agents={agents} onThread={(id) => setMateId(id)} /> : <MateEmpty onLaunch={mateLaunch.launch} {...mateLaunch} />)}
           {mtab === 'agents' && (mAgent
             ? mAgent.view
               ? <div className="m-view">{!mAgent.paneId.startsWith('view:meeting:') && <button type="button" className="ghost-btn m-view-back" onClick={() => setMobileAgent(null)}><Icon name="back" size={14} /> {t('Agents')}</button>}{viewFor(mAgent.paneId, { onBack: () => openAgent('view:meetings') })}</div>
-              : <Console agent={mAgent} variant="mobile" onBack={() => setMobileAgent(null)} queued={queuedFor(mAgent.paneId)} />
+              : <Console agent={mAgent} variant="mobile" onBack={() => setMobileAgent(null)} queued={queuedFor(mAgent.paneId)} delivered={deliveredFor(mAgent.paneId)} />
             : <><SessionSwitcher fleet={fleet} phone /><Board fleet={fleet} compact onOpen={openAgent}
               action={<span className="m-acts"><button className="btn small" onClick={openMap} aria-label={t('Agent Map')} title={t("What's running on each of your computers")}><Icon name="grid" size={12} /> {t('Map')}</button><button className="btn small" onClick={openNew} aria-label={t('Start something new')}><Icon name="plus" size={12} /> {t('New')}</button></span>} /></>)}
           {mtab === 'meetings' && (
@@ -957,7 +959,7 @@ function App() {
                 </div>
               </section>
             )
-            : <ErrorBoundary key={sessionKey + a.paneId} name="This agent's view" resetKey={a.paneId}><Console agent={a} variant={a.chief ? 'mate' : 'focus'} simple={simple} onOpenInHerdr={openInHerdr} onPopOut={() => popOut(a)} controls={controls} queued={queuedFor(a.paneId)}
+            : <ErrorBoundary key={sessionKey + a.paneId} name="This agent's view" resetKey={a.paneId}><Console agent={a} variant={a.chief ? 'mate' : 'focus'} simple={simple} onOpenInHerdr={openInHerdr} onPopOut={() => popOut(a)} controls={controls} queued={queuedFor(a.paneId)} delivered={deliveredFor(a.paneId)}
               agents={a.chief ? agents : undefined} onThread={(id) => openAgent(id, { replace: a.paneId })} /></ErrorBoundary>}
       </div>
     )

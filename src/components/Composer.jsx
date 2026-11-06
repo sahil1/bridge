@@ -283,7 +283,7 @@ function SavedPrompts({ current, onPick, onClose }) {
 // the row under what you write is +, the mic, the model and send, each a whole 40px target, and
 // what the agent is doing (Working, Stop, Send now) and what the box is doing (uploading,
 // transcribing) are a line over the box, so the row never runs out of room.
-export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKeys, busy: agentBusy = false, typeAhead = false, prefill = null, editing = null, onEditChange, onDraft, mirroring = false, onStop, queuedCount = 0, commandsUrl, filesUrl, onInteractive, historyUrl, tools = null, phone = false }) {
+export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKeys, busy: agentBusy = false, prefill = null, editing = null, onEditChange, onDraft, mirroring = false, onStop, queuedCount = 0, commandsUrl, filesUrl, onInteractive, historyUrl, tools = null, phone = false }) {
   const [draft, setDraft] = useState(() => loadDraft(id))
   const [note, setNote] = useState(null)
   const [uploading, setUploading] = useState(0)
@@ -482,7 +482,8 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
     saveDraft(id, { text: '', files: [] })
     const wasEditing = !!editing
     const ok = await onSend(message, { now: now === true })
-    if (ok === false) setDraft(prev) // keep what you wrote if sending failed
+    // Not sent: what you wrote comes back, in front of anything you've written since.
+    if (ok === false) setDraft((d) => (d.text.trim() || d.files.length ? { text: `${prev.text}\n\n${d.text}`.trim(), files: [...prev.files, ...d.files] } : prev))
     else if (wasEditing) endEdit(false)
   }
 
@@ -672,6 +673,8 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
   const keyName = keyLabel(dictationKey(settings()), keysPlatform())
   const dictNote = mine && dict.phase === 'idle' && !dict.setup && dict.note
   const canSend = !!(draft.text.trim() || draft.files.length) && !uploading
+  // Sending now waits its turn: the agent is working (a sent message's edit goes in at once).
+  const queues = agentBusy && !editing
   const attachNums = numbered(draft.files)
   const attachPics = draft.files.filter((f) => f.image && f.preview).map((f) => ({ path: f.path, src: f.preview, name: attachNums.count > 1 ? t('Image {n} · {name}', { n: attachNums.of(f), name: f.name }) : f.name }))
   const status = busy ? t('Transcribing on your computer…') : uploading ? (uploading > 1 ? t('Uploading {n} files…', { n: uploading }) : t('Uploading {n} file…', { n: uploading })) : null
@@ -783,16 +786,16 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
               <input ref={fileRef} type="file" multiple hidden onChange={(e) => { upload(e.target.files); e.target.value = '' }} />
               {phone ? <span className="comp-hint" /> : <>
               <span className={`comp-hint ${status ? 'status' : ''}`}>{status || (agentBusy
-                // typeAhead: the agent takes messages while it works, like typing in its terminal.
-                ? <span className="busy-hint">{t('Working')}{queuedCount ? ` · ${t('{n} queued', { n: queuedCount })}` : ''}<span className="hide-touch"> · <kbd>⏎</kbd> {typeAhead ? t('send (it picks it up next)') : t('queue')} · <kbd>{/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl'}⏎</kbd> {t('interrupt and send')}</span></span>
+                // While it works, a message waits its turn (held by your computer), or interrupts it.
+                ? <span className="busy-hint">{t('Working')}{queuedCount ? ` · ${t('{n} queued', { n: queuedCount })}` : ''}<span className="hide-touch"> · <kbd>⏎</kbd> {t('queue')} · <kbd>{/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl'}⏎</kbd> {t('interrupt and send')}</span></span>
                 : mirroring ? <span className="hide-touch">{t("Shows in the agent's input line above as you type")} · <kbd>⏎</kbd> {t('send')}</span>
                 : <span className="hide-touch"><kbd>⏎</kbd> {t('send')} · <kbd>⇧⏎</kbd> {t('new line')}</span>)}</span>
               {agentBusy && stopBtn}
               {agentBusy && canSend && nowBtn}
               </>}
-              <button className={`send ${agentBusy && !typeAhead ? 'queue' : ''}`} onClick={() => send(false)} disabled={!canSend} aria-label={editing ? t('Send edit') : agentBusy && !typeAhead ? t('Queue message') : t('Send')}
-                title={agentBusy ? (typeAhead ? t('Send: the agent picks it up after its current step (/btw asks a side question)') : t('Queue: sends when the agent is free')) : t('Send')}>
-                <Icon name={agentBusy && !typeAhead ? 'clock' : 'send'} size={15} />
+              <button className={`send ${queues ? 'queue' : ''}`} onClick={() => send(false)} disabled={!canSend} aria-label={editing ? t('Send edit') : queues ? t('Queue message') : t('Send')}
+                title={queues ? t('Queue: sends when the agent is free') : t('Send')}>
+                <Icon name={queues ? 'clock' : 'send'} size={15} />
               </button>
             </>
           )}

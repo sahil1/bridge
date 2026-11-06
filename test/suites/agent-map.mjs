@@ -1,7 +1,8 @@
 // The agent map: what's running on which computer, in the browser named by BRIDGE_TEST_BROWSER.
 // First what the map says about each agent, from made-up ones (no server): its name and project,
 // the Chief of Staff thread that handed it work, its model, how long it has run and been in its
-// state (kept across a restart, forgotten once it's gone), and the subagents its terminal shows.
+// state (kept across a restart, forgotten once it's gone), and the subagents its terminal shows
+// (as the fleet has them, also once its own turn is over while one still works in the background).
 // Then three Bridge AIs ("Studio", "Desk" and "Laptop"), each on a relay of its own and linked,
 // with stand-in Claude Code agents working, asking, done and idle: Studio's map lists every
 // computer's agents by project with their state, what they're doing, their model and subagents,
@@ -22,17 +23,22 @@ const was = { BRIDGE_HOME: process.env.BRIDGE_HOME, HOME: process.env.HOME }
 process.env.BRIDGE_HOME = path.join(scratch, 'data')
 process.env.HOME = path.join(scratch, 'home')
 const am = await import('../../server/agentmap.js')
+const sub = await import('../../server/subagents.js')
 for (const [k, v] of Object.entries(was)) { if (v === undefined) delete process.env[k]; else process.env[k] = v }
 {
   // The stand-in Claude Code's footer while it works, with a subagent going.
   const footer = ['✻ Pondering… (12s · ↓ 2.1k tokens)', '─'.repeat(60), '❯ ', '─'.repeat(60), '  ⏵⏵ auto mode on · 2 shells, 1 monitor', '  ⏺ main', '  ◯ Explore  Look for rounding in billing                    11m 2s · ↓ 28.0k tokens', ''].join('\n')
   const rt = { read: async () => footer }
+  // Its subagents, as the fleet has them (subagents.js runningFor: here from its terminal's footer).
+  const look = () => sub.runningFor({ paneId: 'a1', status: 'working', sessionId: 's1', caps: { subagents: true } }, { locate: () => null, read: rt.read })
+  look()
+  const subs = await until(look, 5000, 50)
   const T0 = Date.now() - 10 * 60000 // ten minutes ago
   const fleet = (over = []) => ({
     agents: [
       { paneId: 'c1', kind: 'claude', kindLabel: 'Claude Code', status: 'idle', seq: 1, chief: true, title: 'Chief of Staff', thread: { id: 'main', name: 'Main', main: true }, cwd: '/data/chief', caps: { subagents: true } },
       { paneId: 'c2', kind: 'claude', kindLabel: 'Claude Code', status: 'blocked', seq: 4, chief: true, title: 'Launch', thread: { id: 't2', name: 'Launch', main: false }, cwd: '/data/chief', caps: { subagents: true } },
-      { paneId: 'a1', kind: 'claude', kindLabel: 'Claude Code', status: 'working', seq: 2, title: 'Fix rounding', cwd: '/data/worktrees/w1', worktree: { repo: '/home/me/code/billing-api', branch: 'fix/rounding' }, account: 'Work', sessionId: 's1', caps: { subagents: true }, chiefThreads: ['main', 't2'], workspace: 'Billing' },
+      { paneId: 'a1', kind: 'claude', kindLabel: 'Claude Code', status: 'working', seq: 2, title: 'Fix rounding', cwd: '/data/worktrees/w1', worktree: { repo: '/home/me/code/billing-api', branch: 'fix/rounding' }, account: 'Work', sessionId: 's1', caps: { subagents: true }, subagents: subs, chiefThreads: ['main', 't2'], workspace: 'Billing' },
       { paneId: 'a2', kind: 'codex', kindLabel: 'Codex', status: 'blocked', seq: 7, title: 'Administrator: C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', tab: 'Docs', cwd: '/home/me/code/docs', asking: { count: 1, title: 'Keep the old API page?' } },
       { paneId: 'k1', kind: 'cloud', kindLabel: 'Cursor cloud agent', status: 'done', seq: 3, title: 'Cart totals', cwd: '', cloud: { label: 'Cursor', repo: 'acme/shop', branch: 'cursor/totals', prUrl: 'https://github.com/acme/shop/pull/9', state: 'FINISHED', failed: false, startedAt: '2026-10-31T08:00:00Z' } },
       ...over,
@@ -54,6 +60,7 @@ for (const [k, v] of Object.entries(was)) { if (v === undefined) delete process.
   map.observe(later, T0 + 5 * 60000)
   const again = (await map.agents({ agents: later })).find((a) => a.paneId === 'a1')
   ok(again.since === new Date(T0).toISOString() && again.statusSince === new Date(T0 + 5 * 60000).toISOString(), 'done: the same start, and done since then', again)
+  ok(again.subagents?.count === 1 && again.subagents.items[0].title === 'Look for rounding in billing', 'done, with its subagent still at work in the background: the subagent is still on the map (it showed only while the agent itself worked)', again.subagents)
   const kept = (await am.make({ rt, cfg: {} }).agents({ agents: later })).find((a) => a.paneId === 'a1')
   ok(kept.since === again.since && kept.statusSince === again.statusSince, 'after a restart it keeps when each agent started and since when it is done', kept)
   am.make({ rt, cfg: {} }).observe([], T0 + 60 * 60000) // nowhere to be seen for most of an hour

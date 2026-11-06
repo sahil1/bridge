@@ -17,6 +17,7 @@ import CloudConsole from './CloudConsole.jsx'
 import { PaneHeader } from './layout.jsx'
 import { tildePath, Menu } from './Rail.jsx'
 import { api, usePoll, useLive, fmtTime, openInTerminal, useOutbox, relayOutbox, BASE } from '../api.js'
+import { send as sendMessage, useSending, landed } from '../sendbox.js'
 import AskOutLoud from '../voice/AskOutLoud.jsx'
 import FindBar from './FindBar.jsx'
 import { pageFinder, openFind } from '../find.js'
@@ -135,8 +136,9 @@ function ToolGroup({ items }) {
   )
 }
 
-// "[Request interrupted by user]" isn't a new message from you: what follows carries on the same reply.
-const opensReply = (m) => m.role === 'user' && !/^\[Request interrupted/.test(m.text || '')
+// "[Request interrupted by user]" isn't a new message from you: what follows carries on the same
+// reply, as does one it took in between two steps (mid).
+const opensReply = (m) => m.role === 'user' && !m.mid && !/^\[Request interrupted/.test(m.text || '')
 
 // The replies that changed files, by the index of each one's last part: the index of your message
 // that started it (-1 when that's further back than Chat has loaded) and its edit steps.
@@ -306,7 +308,47 @@ function LiveActivity({ paneId }) {
   )
 }
 
-function Chat({ agent, pending, queued = [], outbox = [], onCancelQueued, onEdit, onUndo, editingText, onOpenTerminal, accounts, onLimit }) {
+// A message waiting for the agent to be free, in the order they'll go: change it or take it back
+// until it goes. Changing it holds the agent's messages until you're done (two minutes at most).
+function QueuedMsg({ q, agent, actions }) {
+  const [draft, setDraft] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const ready = !!q.id && !q.sending && !q.local
+  // Opened to change: all of it in view, Save and Cancel too.
+  const ref = useRef(null)
+  const editing = draft != null
+  useEffect(() => { if (editing) ref.current?.scrollIntoView({ block: 'nearest' }) }, [editing])
+  const start = () => { setDraft(q.text); actions.hold(q.id, true) }
+  const stop = () => { setDraft(null); actions.hold(q.id, false) }
+  const save = async () => {
+    const text = draft.trim()
+    if (!text || text === q.text) return stop()
+    setBusy(true)
+    if (await actions.edit(q.id, text)) setDraft(null)
+    setBusy(false)
+  }
+  return (
+    <div ref={ref} className={`msg user queued ${editing ? 'editing' : ''}`}>
+      <div className="msg-text">
+        {editing
+          ? <textarea className="queued-edit" value={draft} autoFocus rows={Math.min(8, Math.max(2, draft.split('\n').length))} onChange={(e) => setDraft(e.target.value)} aria-label={t('Change this message')}
+            onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); stop() } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); save() } }} />
+          : <UserText text={q.text} paneId={agent.paneId} />}
+      </div>
+      <div className="msg-time">
+        <Icon name="clock" size={11} />
+        {q.sending ? t('Sending…') : q.waiting ? t('Waiting for the connection to your computer…') : agent.chief ? t('Queued, sends when Chief of Staff is free') : t('Queued, sends when the agent is free')}
+        {editing
+          ? <><button className="link" disabled={busy} onClick={save}>{t('Save')}</button><button className="link" disabled={busy} onClick={stop}>{t('Cancel')}</button></>
+          : ready && <><button className="link" onClick={start}>{t('Edit')}</button><button className="link" onClick={() => actions.remove(q.id)}>{t('Remove')}</button></>}
+      </div>
+    </div>
+  )
+}
+
+// going: this agent's messages on their way from here or just answered (sendbox.js); queued: what
+// your computer holds for it; delivered: what it sent it lately, until the chat shows each.
+function Chat({ agent, going = [], queued = [], delivered = [], outbox = [], queuedActions, onEdit, onUndo, editingText, onOpenTerminal, accounts, onLimit }) {
   const { data, error } = useLive(`/agents/${encodeURIComponent(agent.paneId)}/transcript`)
   // Stopped at its limit, for the account menu (its other accounts can pick it up now).
   const stopped = !!data?.limit
@@ -352,21 +394,30 @@ function Chat({ agent, pending, queued = [], outbox = [], onCancelQueued, onEdit
     if (anchor.current != null) { el.scrollTop = anchor.current.top + el.scrollHeight - anchor.current.height; anchor.current = null; return }
     // Not while Find is on a match: new messages come in below it, and it stays where it is.
     if (stick.current && !finder.current.holding()) el.scrollTop = el.scrollHeight
-  }, [data, pending, queued.length, outbox.length, older.messages.length])
+  }, [data, going, queued.length, delivered.length, outbox.length, older.messages.length])
 
-  const shownPending = pending.filter((p) => !(data?.messages || []).some((m) => m.role === 'user' && sameMsg(m.text, p.text)))
+  // In the chat since it went in (`at`, by your computer's clock, as the chat's times are): a message
+  // the same as an earlier one ("yes") doesn't count as there before it is.
+  const inChat = (text, at) => recent.some((m) => m.role === 'user' && sameMsg(m.text, text) && (!at || !m.ts || Date.parse(m.ts) >= Date.parse(at) - 3000))
+  // Typed in now (or on the way to be): until the chat has it.
+  const shownPending = going.filter((x) => x.way === 'prompt' && !x.answer?.queued && !(x.answer && inChat(x.text, x.answer.at)))
+  // Held by your computer, and the ones on their way to be.
+  const known = new Set([...queued, ...delivered].flatMap((q) => [q.id, q.cid]).filter(Boolean))
+  const toHold = going.filter((x) => (x.way !== 'prompt' || x.answer?.queued) && !known.has(x.cid) && !known.has(x.answer?.id))
+  const held = [...queued, ...toHold.map((x) => ({ id: x.cid, cid: x.cid, text: x.text, local: true, waiting: x.waiting }))]
+  const sentNow = delivered.filter((d) => !inChat(d.text, d.at))
   // Sent from the phone while your computer was offline: once delivered and in the chat, the
   // message there says so instead.
-  const inChat = (o) => o.kind === 'say' && o.state === 'delivered' && recent.some((m) => m.role === 'user' && sameMsg(m.text, o.text))
-  const delivered = outbox.filter(inChat)
-  const shownOutbox = outbox.filter((o) => !inChat(o))
-  const fromPhone = (m) => m.role === 'user' && delivered.some((o) => sameMsg(m.text, o.text))
+  const outIn = (o) => o.kind === 'say' && o.state === 'delivered' && inChat(o.text)
+  const fromOutbox = outbox.filter(outIn)
+  const shownOutbox = outbox.filter((o) => !outIn(o))
+  const fromPhone = (m) => m.role === 'user' && fromOutbox.some((o) => sameMsg(m.text, o.text))
 
   // No chat to show, or none yet (a new session): say so rather than leave the space blank.
   const nothing = data && (!data.supported || (!recent.length && !more && !isWorking(agent)))
   // A new agent still on its first-run screens (sign-in and so on): walk through them here.
   const firstRun = showsFirstRun(agent) && <FirstRunCard agent={agent} onOpenTerminal={onOpenTerminal} />
-  if (nothing && !shownPending.length && !queued.length && !shownOutbox.length) {
+  if (nothing && !shownPending.length && !held.length && !sentNow.length && !shownOutbox.length) {
     if (firstRun) return <div className="chat-empty firstrun-wrap">{firstRun}</div>
     if (agent.status === 'blocked') return null // its question card, below, says what's needed
     return (
@@ -410,7 +461,7 @@ function Chat({ agent, pending, queued = [], outbox = [], onCancelQueued, onEdit
                 <div className="msg-time">
                   {fmtTime(m.ts)}
                   {fromPhone(m) && <span className="msg-sent"><Icon name="check" size={11} /> {t('Delivered from your phone')}</span>}
-                  {m.role === 'user' && onEdit && i >= editFrom && <button className="msg-edit-btn" onClick={() => onEdit({ original: m.text, back: messages.slice(i).filter((x) => x.role === 'user').length })}
+                  {m.role === 'user' && !m.mid && onEdit && i >= editFrom && <button className="msg-edit-btn" onClick={() => onEdit({ original: m.text, back: messages.slice(i).filter((x) => x.role === 'user' && !x.mid).length })}
                     aria-label={t('Edit this message')} title={t('Edit and resend: the agent goes back to this point')}><Icon name="edit" size={11} /> {t('Edit')}</button>}
                 </div>
               </div>
@@ -420,11 +471,17 @@ function Chat({ agent, pending, queued = [], outbox = [], onCancelQueued, onEdit
           r && <ReplyChanges key={`chg-${messages[r.from]?.id || r.from}`} items={r.items} paneId={agent.paneId} cwd={agent.cwd}
             onUndo={canUndo && r.from >= 0 && r.from >= editFrom ? () => onUndo({ id: messages[r.from].id, original: messages[r.from].text, back: messages.slice(r.from).filter(opensReply).length }) : null} />,
         ] })}
+        {sentNow.map((d) => (
+          <div key={d.id} className="msg user pending">
+            <div className="msg-text"><UserText text={d.text} paneId={agent.paneId} /></div>
+            <div className="msg-time"><Icon name="check" size={11} /> {t('Sent')}</div>
+          </div>
+        ))}
         {shownPending.map((p) => (
-          <div key={p.id} className="msg user pending">
+          <div key={p.cid} className="msg user pending">
             <div className="msg-text"><UserText text={p.text} paneId={agent.paneId} /></div>
-            <div className="msg-time">{p.error ? <span className="error-text">{p.error}</span>
-              : Date.now() - p.id > 30000 ? <span className="warn-text">{t("Not in the agent's chat yet. Check the Terminal tab; ↑ in the message box brings it back to resend.")}</span>
+            <div className="msg-time">{p.waiting ? t('Waiting for the connection to your computer…')
+              : Date.now() - p.at > 30000 ? <span className="warn-text">{t("Not in the agent's chat yet. Check the Terminal tab; ↑ in the message box brings it back to resend.")}</span>
               : t('sending…')}</div>
           </div>
         ))}
@@ -441,15 +498,7 @@ function Chat({ agent, pending, queued = [], outbox = [], onCancelQueued, onEdit
         {data?.limit && <LimitCard agent={agent} limit={data.limit} accounts={accounts} />}
         {isWorking(agent) && !data?.limit && <LiveActivity paneId={agent.paneId} />}
         {firstRun}
-        {queued.map((q) => (
-          <div key={q.id} className="msg user queued">
-            <div className="msg-text"><UserText text={q.text} paneId={agent.paneId} /></div>
-            <div className="msg-time">
-              <Icon name="clock" size={11} /> {agent.chief ? t('Queued, sends when Chief of Staff is free') : t('Queued, sends when the agent is free')}
-              <button className="link" onClick={() => onCancelQueued(q.id)}>{t('Cancel')}</button>
-            </div>
-          </div>
-        ))}
+        {held.map((q) => <QueuedMsg key={q.cid || q.id} q={q} agent={agent} actions={queuedActions} />)}
       </div>
     </div>
   )
@@ -551,7 +600,7 @@ export default function Console(props) {
 
 // agents and onThread (the chief of staff): the fleet's agents for its thread bar, and how to show
 // another thread in its place.
-function AgentConsole({ agent, variant = 'focus', simple = false, controls = {}, onBack, onOpenInHerdr, onPopOut, extraActions, queued = [], agents, onThread }) {
+function AgentConsole({ agent, variant = 'focus', simple = false, controls = {}, onBack, onOpenInHerdr, onPopOut, extraActions, queued = [], delivered = [], agents, onThread }) {
   const [view, setViewRaw] = useState('chat')
   const [openPath, setOpenPath] = useState(null)
   const setView = (v) => {
@@ -567,7 +616,10 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
     setOpenPath(p)
     setView('files')
   }
-  const [pending, setPending] = useState([])
+  const going = useSending(agent?.paneId)
+  // What your computer holds or has sent: shown from there from now on (sendbox.js landed).
+  const heldIds = [...queued, ...delivered].map((q) => q.cid).filter(Boolean).join(' ')
+  useEffect(() => { if (heldIds) landed(new Set(heldIds.split(' '))) }, [heldIds])
   const [flash, setFlash] = useState(null)
   const [atLimit, setAtLimit] = useState(false) // stopped at its usage limit (its chat says, from its log)
   const [btw, setBtw] = useState(null) // a /btw side question and its answer
@@ -608,7 +660,7 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
   })
 
   useEffect(() => {
-    setPending([]); setFlash(null)
+    setFlash(null)
     const saved = agent && readViews()[agent.paneId]
     setViewRaw(saved || (agent?.caps?.chat ? 'chat' : 'terminal'))
   }, [agent?.paneId, agent?.kind])
@@ -674,32 +726,26 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
         return true
       } catch (e) { setBtw(null); setFlash(e.message); return false }
     }
-    // Busy agent: agents that take messages while they work (typeAhead) get it straight away, as
-    // if typed in their terminal. Others: the server holds it and sends it when the agent is free.
-    // "Send now" interrupts the agent and sends it as soon as it's back at its prompt.
-    if (agent.status === 'working' && (now || !agent.caps?.typeAhead)) {
-      try {
-        await api(`/agents/${pid}/${now ? 'steer' : 'queue'}`, { method: 'POST', body: { text } })
-        if (now) setFlash(t('Interrupted; sending your message'))
-        return true
-      } catch (e) { setFlash(e.message); return false }
-    }
-    const id = Date.now()
-    setPending((p) => [...p, { id, text }])
+    // While it works, or behind messages still waiting for it: your computer holds it and sends it
+    // when the agent is free, in the order sent, each on its own and as written (typed in now, an
+    // agent folds it in with whatever else is typed meanwhile, or takes it in where its chat doesn't
+    // show it). Send now interrupts the agent and sends this first, as soon as it's back at its
+    // prompt. Otherwise it's typed in now, unless the computer finds it busy after all and holds it.
+    const behind = queued.length > 0 || going.some((x) => x.way !== 'prompt' || x.answer?.queued)
+    const way = now && agent.status === 'working' ? 'steer' : isWorking(agent) || behind ? 'queue' : 'prompt'
+    const { sent } = sendMessage(agent.paneId, way, text)
+    // Typed in the Terminal tab's input line as you wrote (mirrored), but held: cleared there.
+    const unmirror = () => { if (wasMirrored) { mirrored.current = wasMirrored; syncMirror() } }
+    if (way !== 'prompt') unmirror()
     try {
-      const r = await api(`/agents/${pid}/prompt`, { method: 'POST', body: { text } })
-      // Your computer is offline: it waits for it (the phone shows how it's doing).
-      if (r?.offline) { setPending((p) => p.filter((x) => x.id !== id)); return true }
-      if (r?.queued) {
-        // Something covered the agent's input box; the server holds the message until it's back.
-        setPending((p) => p.filter((x) => x.id !== id))
-        setFlash(t('Held, not lost: {reason} in the agent. It sends once that closes (Esc in the Terminal tab closes most panels).', { reason: heldWhy(r.reason) }))
-        return true
-      }
+      const r = await sent
+      if (way === 'steer') setFlash(t('Interrupted; sending your message'))
+      if (way === 'prompt' && r?.queued) unmirror()
+      // Something covered the agent's input box; the server holds the message until it's back.
+      if (r?.queued && r.reason && r.reason !== 'working' && r.reason !== 'behind') setFlash(t('Held, not lost: {reason} in the agent. It sends once that closes (Esc in the Terminal tab closes most panels).', { reason: heldWhy(r.reason) }))
       if (r?.cleared && r.cleared !== wasMirrored.trim()) setFlash(t('Cleared "{text}" that was already typed in the agent\'s input box', { text: r.cleared.length > 60 ? `${r.cleared.slice(0, 60)}…` : r.cleared }))
       return true
     } catch (e) {
-      setPending((p) => p.filter((x) => x.id !== id))
       setFlash(e.message === 'agent_blocked' || /blocked/.test(e.message) ? t('Agent is waiting on an answer; use the keys first') : e.message)
       return false
     }
@@ -725,7 +771,20 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
       setUndone({ text: original, files: r.files })
     } catch (e) { setFlash(e.message) }
   }
-  const cancelQueued = async (qid) => { try { await api(`/agents/${pid}/queue/${qid}`, { method: 'DELETE' }) } catch (e) { setFlash(e.message) } }
+  // A queued message, before it goes (QueuedMsg). A change that comes too late (it went as it was)
+  // goes back in the message box, so what you wrote isn't lost.
+  const queuedActions = {
+    remove: async (qid) => { try { await api(`/agents/${pid}/queue/${qid}`, { method: 'DELETE' }) } catch (e) { setFlash(e.message) } },
+    hold: (qid, on) => api(`/agents/${pid}/queue/${qid}`, { method: 'PATCH', body: { editing: on } }).catch(() => {}),
+    edit: async (qid, text) => {
+      try { await api(`/agents/${pid}/queue/${qid}`, { method: 'PATCH', body: { text } }); return true } catch (e) {
+        setFlash(e.code === 'gone' ? t('{error} Your change is in the message box.', { error: e.message }) : e.message)
+        if (e.code === 'gone') setPrefill({ text, append: true, add: true, n: Date.now() })
+        return e.code === 'gone'
+      }
+    },
+  }
+  const heldCount = queued.length + going.filter((x) => (x.way !== 'prompt' || x.answer?.queued) && !queued.some((q) => q.cid === x.cid || q.id === x.answer?.id) && !delivered.some((d) => d.id === x.answer?.id)).length
   const stop = async () => {
     try { await api(`/agents/${pid}/keys`, { method: 'POST', body: { keys: ['esc'] } }); setFlash(t('Sent Esc to interrupt')) } catch (e) { setFlash(e.message) }
   }
@@ -840,7 +899,7 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
           {agent.chief && agents && onThread && <ChiefThreads agent={agent} agents={agents} onSwitch={onThread} onNote={setFlash} />}
           <div className="console-body">
             <PathCtx.Provider value={openFromChat}>
-              {view === 'chat' && <Chat agent={agent} pending={pending} queued={queued} outbox={outbox} onCancelQueued={cancelQueued} onEdit={agent.caps?.rewind ? (t) => { setEditTarget({ ...t, undoFiles: false, canUndoFiles: agent.kind === 'claude' }); setPrefill({ text: t.original, n: Date.now() }) } : null}
+              {view === 'chat' && <Chat agent={agent} going={going} queued={queued} delivered={delivered} outbox={outbox} queuedActions={queuedActions} onEdit={agent.caps?.rewind ? (t) => { setEditTarget({ ...t, undoFiles: false, canUndoFiles: agent.kind === 'claude' }); setPrefill({ text: t.original, n: Date.now() }) } : null}
                 onUndo={agent.caps?.undo ? undoReply : null} editingText={editTarget?.original} onOpenTerminal={() => setView('terminal')}
                 accounts={movable && quota.data ? { others, onContinue: (x) => continueOn(x, { nudge: true }) } : null} onLimit={setAtLimit} />}
             </PathCtx.Provider>
@@ -892,9 +951,9 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
             {agent.chief && view === 'chat' && <AskOutLoud agent={agent} onSend={send} />}
             <Composer id={agent.paneId} placeholder={agent.chief ? t('Tell your chief of staff what you need…') : t('Message {name}…', { name: title })}
               onSend={send} keysOpen={keysOpen} onToggleKeys={() => setKeysOpen(!keysOpen)}
-              busy={isWorking(agent)} typeAhead={!!agent.caps?.typeAhead}
+              busy={isWorking(agent)}
               prefill={prefill} editing={editTarget} onEditChange={(e) => setEditTarget(e)}
-              mirroring={mirrorOn} onDraft={(t) => { draftNow.current = t; if (mirrorOn || mirrored.current) syncMirror() }} onStop={stop} queuedCount={queued.length}
+              mirroring={mirrorOn} onDraft={(t) => { draftNow.current = t; if (mirrorOn || mirrored.current) syncMirror() }} onStop={stop} queuedCount={heldCount}
               commandsUrl={agent.caps?.commands ? `/agents/${encodeURIComponent(agent.paneId)}/commands` : null}
               filesUrl={`/agents/${encodeURIComponent(agent.paneId)}/mentions`}
               historyUrl={agent.caps?.chat ? `/agents/${encodeURIComponent(agent.paneId)}/transcript` : null}

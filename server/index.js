@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { transcript, earlier, replyDiffs, markUndone, preview, locate, imageFrom } from './transcripts.js'
-import { listSubagents } from './subagents.js'
+import { listSubagents, runningFor, forgetExcept } from './subagents.js'
 import { ttyHandler } from './tty.js'
 import { attachHandler } from './attach.js'
 import { makeGuard } from './guard.js'
@@ -202,12 +202,16 @@ async function fleetView() {
   // Its space and first tab, made before 3.6 as "Chief of staff", show by its name now.
   for (const x of [...(f.workspaces || []), ...(f.tabs || [])]) if (x.label === 'Chief of staff') x.label = 'Chief of Staff'
   for (const t of f.tabs || []) for (const p of t.panes || []) p.worktree = worktrees.describe(p.cwd)
+  // What each one has running beside its conversation (its subagents), from what was last looked at.
+  for (const a of f.agents) a.subagents = runningFor(a, { locate: (x) => locate('claude', x.sessionId, x.cwd), read: (id) => rt.read(id, 60) })
+  forgetExcept(new Set(f.agents.map((a) => a.paneId)))
   // Cloud agents you started from Bridge AI, in their own Cloud space.
   cloud.addTo(f, { isMuted: notify.isMuted })
   const rank = { blocked: 0, done: 1, working: 2, idle: 3, unknown: 4 }
   f.agents.sort((a, b) => (b.chief - a.chief) || (!!b.thread?.main - !!a.thread?.main) || (rank[a.status] ?? 9) - (rank[b.status] ?? 9) || b.seq - a.seq)
   f.counts = f.agents.reduce((c, a) => ({ ...c, [a.status]: (c[a.status] || 0) + 1 }), {})
   f.queue = queue.all()
+  f.delivered = queue.delivered()
   return f
 }
 
@@ -577,30 +581,63 @@ app.post('/api/tabs/:tab/focus', wrap(async (req) => {
 // Status colors from the runtime (herdr's theme), so both views use the same ones.
 app.get('/api/runtime-theme', (req, res) => res.json(rt.theme()))
 
-// A message to an agent: typed into its input box, or held until that box is back.
-async function sendPrompt(paneId, text, agent) {
+// A message to an agent: typed into its input box, or held until that box is back. at: when it
+// went in, by this computer's clock (the app matches it to the message in the agent's chat by that).
+async function sendPrompt(paneId, text, agent, cid = null) {
   try {
+    const at = new Date().toISOString()
     const r = await promptSafe(rt, paneId, text, agent)
     // Show "working" right away rather than at the next fleet poll.
     for (const ms of [150, 700, 1600]) setTimeout(pushFleet, ms)
-    return r
+    return { ...r, at }
   } catch (e) {
     if (e.code !== 'not_at_prompt') throw e
     // Hold it and send when the input box is back (the queue checks before each try).
-    const item = queue.add(paneId, text)
+    const item = queue.add(paneId, text, { cid })
     pushFleet()
     return { ok: true, queued: true, reason: e.reason, id: item.id }
   }
 }
+// Once per message the app sent (cid, its own id for it): a phone whose connection dropped before
+// the answer came sends it again, and gets the first answer instead of the message going twice.
+const answering = new Map() // cid -> the answer on its way
+function onlyOnce(cid, fn) {
+  if (!cid) return fn()
+  const had = queue.recall(cid)
+  if (had) return had
+  if (!answering.has(cid)) answering.set(cid, fn().then((r) => { queue.remember(cid, r); return r }).finally(() => answering.delete(cid)))
+  return answering.get(cid)
+}
+const cidOf = (req) => (req.body?.cid ? String(req.body.cid).slice(0, 80) : null)
+// Held for later, in the order sent: behind messages still waiting for this agent, and while it
+// works (it would fold what's typed in now into one message with whatever else comes, or take it
+// in mid-step where its chat doesn't show it). A side question (/btw) goes in now: it's answered
+// while it works.
+const holdFor = (paneId, agent, text) => {
+  if (agent && caps(agent.kind).btw && /^\/btw\s/.test(text)) return null
+  if ((queue.all()[paneId] || []).length) return 'behind'
+  return agent?.status === 'working' ? 'working' : null
+}
 app.post('/api/agents/:pane/prompt', wrap(async (req) => {
   const text = String(req.body?.text || '').trim()
   if (!text) throw new Error('Empty prompt')
-  const agent = await findAgent(req.params.pane).catch(() => null)
-  const r = await sendPrompt(req.params.pane, text, agent)
-  insights.noteSent(req.params.pane, text)
-  // A side question: its answer is in a panel, not the chat, so bring it back here.
-  if (!r.queued && agent && caps(agent.kind).btw && /^\/btw\s/.test(text)) return { ...r, btw: (await btwAnswer(rt, req.params.pane, text)) || null }
-  return r
+  const pane = req.params.pane
+  const cid = cidOf(req)
+  return onlyOnce(cid, async () => {
+    const agent = await findAgent(pane).catch(() => null)
+    const why = holdFor(pane, agent, text)
+    if (why) {
+      const item = queue.add(pane, text, { cid })
+      pushFleet()
+      insights.noteSent(pane, text)
+      return { ok: true, queued: true, reason: why, id: item.id }
+    }
+    const r = await sendPrompt(pane, text, agent, cid)
+    insights.noteSent(pane, text)
+    // A side question: its answer is in a panel, not the chat, so bring it back here.
+    if (!r.queued && agent && caps(agent.kind).btw && /^\/btw\s/.test(text)) return { ...r, btw: (await btwAnswer(rt, pane, text)) || null }
+    return r
+  })
 }))
 
 const ALLOWED_KEYS = /^(enter|esc|tab|up|down|left|right|space|backspace|delete|home|end|pageup|pagedown|ctrl\+[a-z\[\]]|alt\+[a-z]|shift\+tab|[0-9yn])$/
@@ -664,9 +701,12 @@ function notInstalled(kind, message = `${adapter(kind).label} isn't installed`) 
 app.post('/api/agents/:pane/queue', wrap(async (req) => {
   const text = String(req.body?.text || '').trim()
   if (!text) throw new Error('Empty message')
-  const item = queue.add(req.params.pane, text)
-  pushFleet()
-  return item
+  const cid = cidOf(req)
+  return onlyOnce(cid, async () => {
+    const item = queue.add(req.params.pane, text, { cid })
+    pushFleet()
+    return item
+  })
 }))
 // Send now: interrupt what the agent is doing (Esc) and send this as soon as it's back at its prompt.
 // Edit a message you sent: rewind the agent to just before it and send the new text instead.
@@ -701,10 +741,19 @@ app.post('/api/agents/:pane/undo', wrap(async (req) => {
 app.post('/api/agents/:pane/steer', wrap(async (req) => {
   const text = String(req.body?.text || '').trim()
   if (!text) throw new Error('Empty message')
-  await rt.keys(req.params.pane, ['esc'])
-  const item = queue.add(req.params.pane, text, { now: true })
+  return onlyOnce(cidOf(req), async () => {
+    await rt.keys(req.params.pane, ['esc'])
+    const item = queue.add(req.params.pane, text, { now: true, cid: cidOf(req) })
+    pushFleet()
+    return { ...item, steered: true }
+  })
+}))
+// A queued message, before it goes: changed ({ text }), held while you change it ({ editing }), or
+// taken back. Refused once it's being sent, or gone.
+app.patch('/api/agents/:pane/queue/:id', wrap(async (req) => {
+  const it = queue.edit(req.params.pane, req.params.id, typeof req.body?.text === 'string' ? { text: req.body.text } : { editing: !!req.body?.editing })
   pushFleet()
-  return { ...item, steered: true }
+  return it
 }))
 app.delete('/api/agents/:pane/queue/:id', wrap(async (req) => { queue.remove(req.params.pane, req.params.id); pushFleet(); return { ok: true } }))
 // The message box's model menu: what the agent is on, and switching it (models.js).
@@ -1045,7 +1094,7 @@ async function pollFleet() {
       let f = await fleetView()
       if (same() && !f.down && queue.size() && await queue.deliver(f.agents, (id, text, a) => (same() ? promptSafe(rt, id, text, a) : Promise.reject(new Error('Another session is in view'))), (id) => rt.read(id, 40))) f = await fleetView()
       if (same()) {
-        const key = JSON.stringify([f.session, f.down, f.agents.map((a) => [a.paneId, a.status, a.title, a.seq, a.muted, a.asking?.count, a.asking?.working, a.chiefThreads]), f.tabs.map((t) => [t.tabId, t.label, t.panes.map((p) => [p.paneId, p.cwd, p.rect?.width, p.rect?.height, p.rect?.x, p.rect?.y])]), f.workspaces.map((w) => w.label), f.queue])
+        const key = JSON.stringify([f.session, f.down, f.agents.map((a) => [a.paneId, a.status, a.title, a.seq, a.muted, a.asking?.count, a.asking?.working, a.chiefThreads, a.subagents]), f.tabs.map((t) => [t.tabId, t.label, t.panes.map((p) => [p.paneId, p.cwd, p.rect?.width, p.rect?.height, p.rect?.x, p.rect?.y])]), f.workspaces.map((w) => w.label), f.queue, f.delivered])
         lastFleet = f
         insights.observe(f.agents)
         counts.most('agents.peak', f.agents.length)
