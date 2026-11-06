@@ -377,8 +377,10 @@ app.delete('/api/studio/packs/:id', wrap((req) => studio.removePack(req.params.i
 app.post('/api/studio/ask', wrap(async (req) => {
   const q = sq(req)
   const root = await rootOf(q.root)
-  const text = studio.askText({ rel: q.path, kind: String(req.body?.kind || ''), instruction: req.body?.instruction, selection: req.body?.selection, where: req.body?.where })
+  const propose = req.body?.propose === true
+  const text = studio.askText({ rel: q.path, kind: String(req.body?.kind || ''), instruction: req.body?.instruction, selection: req.body?.selection, where: req.body?.where, propose })
   if (!String(req.body?.instruction || '').trim()) throw new Error('Say what to change')
+  if (propose) await studio.dropProposal(root, q.path)
   const pane = String(req.body?.pane || '')
   if (pane) {
     const a = await findAgent(pane)
@@ -434,6 +436,8 @@ app.post('/api/studio/rewrite', async (req, res) => {
     res.json({ ...out, model, by: d?.label || model })
   } catch (e) { res.status(e.status || 502).json({ error: e.message, code: e.code || 'failed' }) }
 })
+// The change an agent asked in place wrote beside the file, taken once (studio.takeProposal).
+app.get('/api/studio/proposal', wrap(async (req) => { const q = sq(req); return studio.takeProposal(await rootOf(q.root), q.path) }))
 app.get('/api/agents/:pane/files', wrap(async (req) => files.listDir(await rootOf(req.params.pane), String(req.query.path || ''), { showHidden: req.query.hidden === '1' })))
 app.get('/api/agents/:pane/file', wrap(async (req) => files.readFile(await rootOf(req.params.pane), String(req.query.path || ''))))
 app.put('/api/agents/:pane/file', async (req, res) => {

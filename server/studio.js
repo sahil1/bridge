@@ -118,14 +118,41 @@ const HOW = {
   pdf: () => 'It\'s a PDF: say what you\'d change, or make the change in the file it was made from.',
   page: () => 'It\'s an HTML page: keep it one file that works on its own.',
 }
-export function askText({ rel, kind, instruction, selection, where }) {
+export function askText({ rel, kind, instruction, selection, where, propose = false }) {
   const ext = path.extname(rel).toLowerCase()
   return [
     `In ${rel}: ${String(instruction || '').trim()}`,
     selection ? `The part I mean${where ? ` (${where})` : ''}:\n"""\n${String(selection).slice(0, 4000)}\n"""` : '',
-    HOW[kind]?.(ext) || '',
-    'Edit the file itself and save it: I have it open in Studio, which shows your change.',
+    propose && PROPOSE[kind] ? PROPOSE[kind](proposalName(rel)) : HOW[kind]?.(ext) || '',
+    propose && PROPOSE[kind] ? '' : 'Edit the file itself and save it: I have it open in Studio, which shows your change.',
   ].filter(Boolean).join('\n\n')
+}
+
+// ---------- A change shown before it's made ----------
+// Asked "in place" (a sheet's Ask AI), the agent doesn't edit the file: it writes the change as
+// JSON beside it (a dot file in the same folder, where any agent may write), Studio shows it on
+// the open file, and you keep it or not. Taken once: read, then deleted.
+const proposalName = (rel) => `.${path.basename(rel)}.studio-change.json`
+const PROPOSE = {
+  sheet: (name) => [
+    `Don't change the file itself. Write your change as JSON to ${name} in the same folder as it, and nothing else; Studio shows it to me on the sheet, and makes it if I keep it:`,
+    '{"summary": "what this does, in one sentence", "sheet": "the sheet\'s name", "cells": {"D2": "=B2*C2", "D1": "Total", "B7": 42}, "answer": "for a question: the answer, in a few sentences", "chart": {"type": "column|bar|line|pie", "title": "…", "range": "A1:B7"}}',
+    'Only what the change needs: "cells" maps A1 references to their new contents (a formula starts with =, numbers as numbers, "" empties a cell), "answer" is for a question (a summary of the cells, say), "chart" for a chart of a range whose first column is the labels and first row the series names. Read the file yourself if you need more of it than the part above.',
+  ].join('\n'),
+}
+export async function takeProposal(root, rel) {
+  const { real } = await locate(root, rel)
+  const file = path.join(path.dirname(real), proposalName(real))
+  let text
+  try { text = await fsp.readFile(file, 'utf8') } catch { return { proposal: null } }
+  await fsp.rm(file, { force: true }).catch(() => {})
+  if (text.length > 2 * 1024 * 1024) return { proposal: null, error: 'The agent\'s change was too big to show (2 MB at most)' }
+  try { return { proposal: JSON.parse(text) } } catch (e) { return { proposal: null, error: `The agent's change isn't JSON Studio can read: ${e.message}` } }
+}
+// One left from an earlier ask isn't taken as the answer to a new one.
+export async function dropProposal(root, rel) {
+  const { real } = await locate(root, rel)
+  await fsp.rm(path.join(path.dirname(real), proposalName(real)), { force: true }).catch(() => {})
 }
 export function noteAsk(root, rel, name) {
   return safePath(root, rel).then(({ real }) => { asked.set(real, { name: String(name || 'an agent').slice(0, 80), at: Date.now() }) })
