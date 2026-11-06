@@ -7,6 +7,9 @@ import { api } from '../api.js'
 import disposeTerm from '../disposeTerm.js'
 import gpu from '../termGpu.js'
 import altArrows from '../altArrows.js'
+import FindBar from './FindBar.jsx'
+import termFinder from '../termFind.js'
+import { t } from '../i18n/index.js'
 
 // Live mirror of a herdr pane you can type into. herdr has no output stream per pane, so the
 // screen is re-read (fast while you type) and drawn at the pane's own width, so lines wrap the
@@ -126,6 +129,8 @@ export default function Terminal({ paneId, active, focusKey, onChat, shell = fal
   const [more, setMore] = useState(null) // 'loading' | 'all': reading earlier output, or that's all there is
   const [error, setError] = useState(null)
   const [noHistory, setNoHistory] = useState(false)
+  const wrapRef = useRef(null)
+  const [finder] = useState(termFinder) // Find (⌘F), in the whole buffer
 
   // Size the font so the pane's real column count fills the width: the room inside the padding,
   // less xterm's own scrollbar. The first guess comes from the font's shape; then the drawn width
@@ -184,6 +189,7 @@ export default function Terminal({ paneId, active, focusKey, onChat, shell = fal
     term.loadAddon(fit)
     term.open(hostRef.current)
     gpu(term)
+    finder.attach(term)
     termRef.current = term
     fitRef.current = fit
     layout()
@@ -257,6 +263,7 @@ export default function Terminal({ paneId, active, focusKey, onChat, shell = fal
       sub.dispose(); onScroll.dispose(); ro.disconnect(); mo.disconnect(); mq.removeEventListener('change', applyTheme)
       host.removeEventListener('bridge-type', onType)
       ta?.removeEventListener('focus', onFocus); ta?.removeEventListener('blur', onBlur)
+      finder.detach()
       disposeTerm(term); termRef.current = null; lastRef.current = ''
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -275,6 +282,9 @@ export default function Terminal({ paneId, active, focusKey, onChat, shell = fal
     pendingRef.current = null
     lastRef.current = ansi
     paintingRef.current = true
+    // Find's current match, found again once it's drawn (the lines read further back go in above).
+    const mark = finder.mark()
+    const before = term.buffer.active.length
     term.reset()
     // The agent's screen is often taller than what it drew (a short prompt at the top of a tall
     // terminal); drop the blank rows below, so the view doesn't scroll down to empty space.
@@ -289,6 +299,7 @@ export default function Terminal({ paneId, active, focusKey, onChat, shell = fal
     term.write(lines.join('\r\n').replace(/(?:\r?\n(?:\x1b\[[0-9;?]*[A-Za-z]|[ \t])*)+$/, ''), () => {
       if (keepAt != null) term.scrollToLine(Math.max(0, term.buffer.active.length - keepAt))
       else term.scrollToBottom()
+      finder.restore(mark, keepAt != null ? term.buffer.active.length - before : 0)
       ;(shell ? shellCursor : placeCursor)(term)
       paintingRef.current = false
     })
@@ -368,7 +379,8 @@ export default function Terminal({ paneId, active, focusKey, onChat, shell = fal
   }
 
   return (
-    <div className={`live-term ${focused ? 'focused' : ''}`}>
+    <div className={`live-term ${focused ? 'focused' : ''}`} data-find="terminal" ref={wrapRef}>
+      <FindBar host={wrapRef} finder={finder} label={t('Find in this terminal')} />
       <div className="terminal-host" ref={hostRef} onClick={onClick}
         onWheel={(e) => { const b = termRef.current?.buffer.active; if (!shell && e.deltaY < 0 && b && b.baseY === 0) setNoHistory(true) }} />
       {held && (

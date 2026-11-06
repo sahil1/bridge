@@ -8,6 +8,9 @@ import { api, openInTerminal } from '../api.js'
 import disposeTerm from '../disposeTerm.js'
 import gpu from '../termGpu.js'
 import LiveShell from './LiveShell.jsx'
+import { openFind } from '../find.js'
+import { withKeys } from './studio/keys.js'
+import { t } from '../i18n/index.js'
 
 // A tab with plain shells (dev servers, editors, logs). One shell (a New terminal, say) is a
 // terminal you type straight into. Several (a herdr tab split into panes) are laid out the way
@@ -148,6 +151,8 @@ export default function ShellTab({ tab, controls = {}, onOpenInHerdr }) {
             <button key={id} role="tab" aria-selected={view === id} className={view === id ? 'on' : ''} onClick={() => setView(id)} title={label}><Icon name={icon} size={14} /><span>{label}</span></button>
           ))}
         </div>
+        {/* ⌘F does the same; on a phone this is the way in. */}
+        {view === 'panes' && single && <button className="win-btn" onClick={(e) => openFind(e.currentTarget.closest('.pane'))} title={withKeys(t('Find in this terminal'), 'mod', 'f')} aria-label={t('Find in this terminal')}><Icon name="search" size={14} /></button>}
         <button className="win-btn" onClick={() => openInTerminal(`tab:${tab.tabId}`).catch((e) => window.alert(e.message))} title="Open in your terminal app" aria-label="Open in your terminal app"><Icon name="terminal" size={14} /></button>
         {onOpenInHerdr && <button className="win-btn" onClick={() => onOpenInHerdr(`tab:${tab.tabId}`)} title="Open in Herdr view" aria-label="Open in Herdr view"><Icon name="external" size={14} /></button>}
       </PaneHeader>
