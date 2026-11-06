@@ -100,6 +100,22 @@ looks in none of them until you open it. A file you copy to another of your comp
 your phone, goes end-to-end encrypted over the same link as everything else (the relay sees only
 how much goes), and lands only in the folder you pick on the computer it goes to.
 
+The calendar reads macOS Calendar on your computer, once you allow it: each event's title, time,
+place and calendar (and that calendar's colour), who's invited (their names and addresses), who
+organised it, your answer to it, and its notes, from which it keeps the join link, a short agenda
+and the files the invite links to. It only reads: Bridge AI never adds, changes, deletes or answers
+an event. How you have it shown (the day your week starts, your working hours, the calendars you
+hide) is kept in `~/.bridge-ai/config.json`.
+
+Prep Assist, before a meeting with other people, puts together what's already on your computer:
+who's coming and which of them are in your recorded meetings, the summary and the action items still
+open from the last meeting like it, the invite's agenda and files, and on a Mac your mail with them
+from Mail's own index (the last ten days' subjects, senders and Mail's short previews, read only).
+When it suggests goals and questions (when you ask, or by itself fifteen minutes before, unless you
+turn that off in Settings › Meetings), all of that goes to the model that writes your meeting notes,
+as your meeting notes do: a model on your computer keeps it there; any other gets it. What it
+suggests is kept in `~/.bridge-ai/cache/meeting-prep.json` until two days after the meeting.
+
 If you run Bridge AI on a server or in Docker, all of this applies to that machine instead of your
 computer.
 

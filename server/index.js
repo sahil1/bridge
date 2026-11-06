@@ -33,7 +33,7 @@ import * as routines from './routines.js'
 import * as ideas from './ideas.js'
 import * as queue from './queue.js'
 import * as places from './places.js'
-import { makeCalendar } from './calendar.js'
+import { makeCalendar, viewOf as calendarView, viewPatch as calendarViewPatch } from './calendar.js'
 import { makeMail, setRule } from './mail.js'
 import { makeMacro } from './macro.js'
 import * as slash from './commands.js'
@@ -66,6 +66,7 @@ import * as meetMemory from './meetmemory.js'
 import * as voices from './voices.js'
 import * as meetWork from './meetwork.js'
 import * as meetInsights from './meetinsights.js'
+import * as meetPrep from './meetprep.js'
 import * as speech from './speech.js'
 import * as projects from './projects.js'
 import * as calls from './calls.js'
@@ -1347,6 +1348,13 @@ app.post('/api/meetings/voices/download', wrap(async () => { if (!(await voices.
 // up by week and kind, and everyone you've met, with merging and splitting people by hand.
 meetInsights.configure(cfg)
 meetInsights.setHelpers({ calendar: (from, to) => calendar.range(from, to) })
+// Prep Assist (meetprep.js): before a meeting, who's coming, last time, the invite, your mail with
+// them and a few goals from the model that writes your notes. Read only, like the calendar.
+meetPrep.configure(cfg)
+meetPrep.setHelpers({ calendar: () => calendar.cached(), mail: IS_MAC ? () => mail() : null, reply: (id, msgs, o) => chatModels.reply(id, msgs, o), pickModel: pickMeetingModel, models: () => chatModels.models() })
+meetPrep.start()
+app.post('/api/prep', wrap((req) => meetPrep.prep(req.body?.event || {})))
+app.post('/api/prep/suggest', wrap((req) => meetPrep.suggest(req.body?.event || {}, { again: !!req.body?.again })))
 app.use(['/api/meetings/insights', '/api/meetings/people'], trialOff('meeting-insights', 'Meeting Insights'))
 app.get('/api/meetings/insights', wrap((req) => meetInsights.insights({ days: req.query.days === 'all' ? 'all' : Number(req.query.days) || 90, kind: String(req.query.kind || 'all') })))
 app.get('/api/meetings/people', wrap(() => meetInsights.list()))
@@ -1390,7 +1398,10 @@ calls.on((e) => {
 })
 app.get('/api/calls', wrap(() => {
   const rec = meetings.list().find((m) => m.status === 'recording' || m.status === 'paused') || null
+  // A meeting about to start, with nothing recording or asked: the card shows its prep.
+  const soon = rec || prompt ? null : meetPrep.soon()
   return {
+    soon,
     ...calls.now(), detect: cfg.meetings?.detect !== false, float: cfg.meetings?.floatCard || 'meetings', floatHover: cfg.meetings?.floatHover !== false,
     prompt: rec ? null : prompt,
     recording: rec && { id: rec.id, title: rec.title, status: rec.status, startedAt: rec.startedAt, seconds: Math.round(meetings.elapsed(rec.id) || 0), talking: meetings.talking(rec.id), callApps: rec.callApps || [], callEnded: rec.callEnded || null, callEndedApp: rec.callEndedApp || null, endWhy: rec.endWhy || (rec.callEnded ? 'call' : null), stopsAt: rec.stopsAt || null, callQuiet: meetings.callQuiet(rec.id) },
@@ -1673,13 +1684,41 @@ app.get('/api/quota', wrap((req) => quota(req.query.refresh === '1')))
 // macOS keeps a second Claude account's login in its own Keychain item: let quota-axi read it.
 app.post('/api/quota/allow/:id', wrap((req) => quota.allow(req.params.id)))
 app.get('/api/weather', wrap(() => weather()))
-app.get('/api/calendar', wrap((req) => calendar(req.query.refresh === '1')))
+// Today's and tomorrow's events, without the calendars you hid (the Schedule, the top bar, Home).
+app.get('/api/calendar', wrap(async (req) => {
+  const d = await calendar(req.query.refresh === '1')
+  const hid = new Set(calendarView(cfg).hidden)
+  return hid.size ? { ...d, today: d.today.filter((e) => !hid.has(e.calendar)), tomorrow: d.tomorrow.filter((e) => !hid.has(e.calendar)) } : d
+}))
 // Join clicked on an event, on any of your devices: the call that starts next is likely for it.
 app.post('/api/calendar/joined', wrap((req) => callEvent.noteJoin(req.body?.id)))
 app.get('/api/mail', wrap((req) => mail(req.query.refresh === '1')))
 app.get('/api/mail/message/:id', wrap((req) => mail.message(req.params.id)))
 app.post('/api/mail/rules', wrap((req) => { const r = setRule(req.body?.address, req.body?.rule); mail.invalidate(); return r }))
-app.get('/api/calendar/range', wrap((req) => calendar.range(String(req.query.from || ''), String(req.query.to || ''), req.query.refresh === '1')))
+// A span of days for Today › Calendar: every calendar's events (the hidden ones too, for the legend
+// to bring back), each with the meeting recorded for it.
+app.get('/api/calendar/range', wrap(async (req) => {
+  const r = await calendar.range(String(req.query.from || ''), String(req.query.to || ''), req.query.refresh === '1')
+  const rec = meetPrep.recorded(r.events)
+  return { ...r, events: r.events.map((e) => (rec[e.id] ? { ...e, recorded: rec[e.id] } : e)) }
+}))
+// How the calendar is shown (week start, working hours, hidden calendars, tasks on the grid), on
+// every device. Nothing here changes a calendar.
+app.get('/api/calendar/view', wrap(() => calendarView(cfg)))
+app.patch('/api/calendar/view', wrap((req) => { afterChange(settings.patch(calendarViewPatch(req.body || {}, cfg))); return calendarView(cfg) }))
+// Chief of Staff's tasks that name a day in the span (home.js's dueOf), for the grid, on any
+// computer, calendar or not. An overdue one keeps its day.
+app.get('/api/calendar/tasks', wrap((req) => {
+  const from = String(req.query.from || ''), to = String(req.query.to || '')
+  if (!/^\d{4}-\d\d-\d\d$/.test(from) || !/^\d{4}-\d\d-\d\d$/.test(to)) throw new Error('from and to must be YYYY-MM-DD')
+  let list = []
+  try { list = chiefTasks.list().items || [] } catch { /* no list yet */ }
+  const tasks = list.filter((x) => x.status !== 'done').map((x) => ({ id: x.id, title: x.title, status: x.status, needs: x.needs || null, due: home.dueOf(x.title, x.added) }))
+    .filter((x) => x.due && x.due >= from && x.due <= to)
+  return { tasks }
+}))
+// A recorded meeting's notes, for the calendar's event panel.
+app.get('/api/calendar/notes/:id', wrap((req) => meetPrep.notes(String(req.params.id))))
 app.get('/api/macro', wrap((req) => macro(req.query.refresh === '1')))
 app.get('/api/news', wrap((req) => news(req.query.refresh === '1')))
 

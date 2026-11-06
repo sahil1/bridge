@@ -3,28 +3,49 @@ import Icon from './Icon.jsx'
 import { usePersisted, useWidth } from './layout.jsx'
 import { api, usePoll } from '../api.js'
 import { CalendarSetup, joined } from './Agenda.jsx'
-import { locale } from '../i18n/index.js'
+import { PrepCard, InviteFiles } from './meetings/prep.jsx'
+import { openToday } from './today.js'
+import { t, tx, locale } from '../i18n/index.js'
 
-// Day / week / month / year views over the Mac's Calendar (Exchange plus personal calendars).
+// Day / week / month / year views over the Mac's Calendar (Exchange plus personal calendars), with
+// Chief of Staff's tasks that name a day on the same days. Each calendar keeps its own colour
+// (Calendar's, else one from its name, so it's the same every week), and a click on its key hides
+// it or brings it back. The week starts on the day your language has it (or the one you pick), and
+// the grids show your working hours at least, the rest shaded. Your answer to each invite shows as
+// Calendar has it. An event's panel has the invite's files and links, the notes of a meeting already
+// recorded, and Prep Assist for one coming up. It only reads: nothing here adds, moves, changes or
+// answers an event; that stays in your calendar app.
 const DAY = 864e5
 const pad = (n) => String(n).padStart(2, '0')
 const isoDay = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 const parseDay = (s) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d) }
 const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x }
 const startOfDay = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x }
-const monday = (d) => { const x = startOfDay(d); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x }
+const weekOf = (d, ws) => { const x = startOfDay(d); x.setDate(x.getDate() - ((x.getDay() - ws + 7) % 7)); return x }
 const sameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
 const fmtT = (d) => new Date(d).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' })
-const fmtH = (h) => (h === 0 || h === 24 ? '12 AM' : h === 12 ? 'Noon' : h < 12 ? `${h} AM` : `${h - 12} PM`)
+const fmtH = (h) => new Date(2000, 0, 1, h % 24).toLocaleTimeString(locale(), { hour: 'numeric' })
 const dur = (ms) => { const m = Math.round(ms / 6e4); return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ''}` }
-const WD = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+// Weekday names in your language: 0 Sunday … 6 Saturday (7 January 2024 was a Sunday).
+const wdName = (i, weekday = 'short') => new Date(2024, 0, 7 + i).toLocaleDateString(locale(), { weekday })
+const weekend = (d) => d.getDay() % 6 === 0
 
-function rangeFor(mode, anchor) {
+// The day the week starts on where you are: the browser's region, as Intl says it (Sunday in the
+// US, Monday in most of Europe), else Monday.
+function localWeekStart() {
+  try {
+    const l = new Intl.Locale(navigator.language || 'en-US')
+    const w = l.getWeekInfo?.() || l.weekInfo
+    if (w?.firstDay) return w.firstDay % 7
+    return /-(US|CA|MX|BR|JP|KR|IL|PH|IN|ZA|TW|HK)\b/i.test(navigator.language || '') ? 0 : 1
+  } catch { return 1 }
+}
+
+function rangeFor(mode, anchor, ws) {
   if (mode === 'day') return [anchor, anchor]
-  if (mode === 'week') { const s = monday(anchor); return [s, addDays(s, 6)] }
+  if (mode === 'week') { const s = weekOf(anchor, ws); return [s, addDays(s, 6)] }
   if (mode === 'month') {
-    const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1)
-    const s = monday(first)
+    const s = weekOf(new Date(anchor.getFullYear(), anchor.getMonth(), 1), ws)
     return [s, addDays(s, 41)]
   }
   return [new Date(anchor.getFullYear(), 0, 1), new Date(anchor.getFullYear(), 11, 31)]
@@ -42,22 +63,20 @@ function title(mode, anchor, [from, to]) {
   if (mode === 'day') return anchor.toLocaleDateString(locale(), { weekday: 'long', month: 'long', day: 'numeric' })
   if (mode === 'week') {
     const a = from.toLocaleDateString(locale(), { month: 'short', day: 'numeric' })
-    const b = to.toLocaleDateString(locale(), from.getMonth() === to.getMonth() ? { day: 'numeric' } : { month: 'short', day: 'numeric' })
-    return `${a} – ${b}, ${to.getFullYear()}`
+    const b = to.toLocaleDateString(locale(), { month: 'short', day: 'numeric', year: 'numeric' })
+    return `${a} – ${b}`
   }
   if (mode === 'month') return anchor.toLocaleDateString(locale(), { month: 'long', year: 'numeric' })
   return String(anchor.getFullYear())
 }
 
-// Calendars get colors in a fixed order by first appearance, so a calendar keeps its color.
-const HUES = ['var(--accent)', '#0f9d8a', '#8b5cf6', '#d97706', '#db2777', '#64748b']
-function useCalColors(events) {
-  return useMemo(() => {
-    const map = {}
-    for (const e of events) { const k = e.calendar || 'Calendar'; if (!(k in map)) map[k] = HUES[Object.keys(map).length % HUES.length] }
-    return map
-  }, [events])
-}
+// ---------- Colours ----------
+// A calendar's colour: Calendar's own (bridgecal reads it), else one picked by its name, so it's the
+// same in every week, month and view, on every device.
+const PALETTE = ['#2f6fe0', '#0f9d8a', '#8b5cf6', '#d97706', '#db2777', '#64748b', '#16a34a', '#0891b2']
+const hashOf = (s) => { let h = 7; for (const c of String(s)) h = (h * 31 + c.codePointAt(0)) >>> 0; return h }
+export const calColor = (name, color) => color || PALETTE[hashOf(name || 'Calendar') % PALETTE.length]
+const calOf = (e) => e.calendar || 'Calendar'
 
 // Events that touch a given day, clipped to it.
 function eventsOn(events, day) {
@@ -65,6 +84,7 @@ function eventsOn(events, day) {
   const e = s + DAY
   return events.filter((x) => new Date(x.start) < e && new Date(x.end) > s)
 }
+const byTime = (a, b) => (a.allDay === b.allDay ? (a.start < b.start ? -1 : 1) : a.allDay ? -1 : 1)
 
 // Side-by-side lanes for overlapping meetings.
 function layoutDay(events, day) {
@@ -100,8 +120,79 @@ function useNow(ms = 60000) {
   return now
 }
 
-// ---------- Event details ----------
-function EventDetail({ e, onClose, onOpenAgent }) {
+// How it's shown (server: calendar.js viewOf), the same on each of your devices. save(patch): shown
+// at once, put back with why when it couldn't be kept.
+const VIEW = { weekStart: null, workStart: 9, workEnd: 17, hidden: [], tasks: true }
+function useView() {
+  const { data, refresh } = usePoll('/calendar/view', 10 * 60 * 1000)
+  const [mine, setMine] = useState(null)
+  const [error, setError] = useState(null)
+  const v = { ...VIEW, ...(data || {}), ...(mine || {}) }
+  const save = async (patch) => {
+    setMine((m) => ({ ...(m || {}), ...patch }))
+    setError(null)
+    try { await api('/calendar/view', { method: 'PATCH', body: patch }); await refresh() } catch (x) { setError(x.message) }
+    setMine(null)
+  }
+  return { view: { ...v, ws: v.weekStart ?? localWeekStart() }, save, error }
+}
+
+// What a task says about when, and where it is.
+const STATUS = { open: tx('To do'), doing: tx('Chief of Staff is on it'), waiting: tx('Waiting on you') }
+const ANSWER = { accepted: tx('You accepted'), tentative: tx('You said maybe'), declined: tx('You declined'), none: tx('Not answered yet'), organizer: tx('You organised it') }
+const ANSWER_ICON = { accepted: 'check', tentative: 'unknown', declined: 'x', none: 'clock', organizer: 'users' }
+
+// ---------- A recorded meeting's notes ----------
+function RecordedNotes({ id, onOpen }) {
+  const { data, error } = usePoll(`/calendar/notes/${encodeURIComponent(id)}`, 5 * 60 * 1000)
+  const open = (data?.items || []).filter((x) => !x.done)
+  return (
+    <div className="cal-sec">
+      <h5><Icon name="record" size={11} /> {t('Your Notes')}</h5>
+      {!data && !error && <div className="skeleton-rows"><div /></div>}
+      {error && <p className="error-text small">{error}</p>}
+      {data && (
+        <>
+          {data.summary.length > 0 ? <ul className="cal-bullets">{data.summary.map((x, i) => <li key={i}>{x}</li>)}</ul>
+            : <p className="muted small">{data.status === 'recording' || data.status === 'paused' ? t('Recording now.') : t('Recorded, with no summary yet.')}</p>}
+          {data.items.length > 0 && (
+            <div className="cal-items">
+              <span className="na-label">{open.length ? t('{n} of {all} action items still open', { n: open.length, all: data.items.length }) : t('Every action item is done')}</span>
+              <ul>{data.items.slice(0, 6).map((x, i) => <li key={i} className={x.done ? 'done' : ''}><Icon name={x.done ? 'check' : 'clock'} size={10} /> {x.text}</li>)}</ul>
+            </div>
+          )}
+          <div><button type="button" className="btn small" onClick={onOpen}><Icon name="external" size={12} /> {t('Open the notes')}</button></div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// ---------- A task's panel ----------
+function TaskDetail({ it, now, onClose }) {
+  const due = parseDay(it.due)
+  const late = due < startOfDay(new Date(now))
+  const dayText = due.toLocaleDateString(locale(), { weekday: 'short', month: 'short', day: 'numeric' })
+  return (
+    <div className="cal-detail" role="dialog" aria-label={it.title} style={{ '--c': 'var(--working)' }}>
+      <div className="cal-detail-head">
+        <span className="cal-detail-sw" aria-hidden="true" />
+        <h4>{it.title}</h4>
+        <button className="icon-btn" onClick={onClose} aria-label={t('Close')}><Icon name="x" size={13} /></button>
+      </div>
+      <p className="cal-detail-when">{late ? t('Was due {date}', { date: dayText }) : t('Due {date}', { date: dayText })}</p>
+      <p className="cal-detail-meta"><Icon name="helm" size={11} /> {t("Chief of Staff's task")} · {t(STATUS[it.status] || STATUS.open)}</p>
+      {it.status === 'waiting' && it.needs && <p className="cal-note">{it.needs}</p>}
+      <div className="cal-detail-actions">
+        <button type="button" className="btn small" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: 'chief' } }))}><Icon name="helm" size={12} /> {t('Open Chief of Staff')}</button>
+      </div>
+      <p className="muted small">{t('On this day because the task names it ("by Friday", "on 12 Nov").')}</p>
+    </div>
+  )
+}
+
+// ---------- An event's panel ----------
+function EventDetail({ e, color, now, onClose, onOpenAgent }) {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState(null)
   const prep = async () => {
@@ -109,77 +200,102 @@ function EventDetail({ e, onClose, onOpenAgent }) {
     setMsg(null)
     try {
       const out = await api('/calendar/prep', { method: 'POST', body: e })
-      setMsg('Prep agent started in the Meetings space')
+      setMsg(t('Prep agent started in the Meetings space'))
       if (out.paneId && onOpenAgent) setTimeout(() => onOpenAgent(out.paneId), 1200)
     } catch (x) { setMsg(x.message) } finally { setBusy(false) }
   }
   const start = new Date(e.start)
+  const past = Date.parse(e.end) <= now
+  const others = e.attendeeCount > 1 || (e.attendees || []).length > 1
+  const openMeeting = (id) => onOpenAgent?.(`view:meeting:${id}`)
   return (
-    <div className="cal-detail" role="dialog" aria-label={e.title}>
+    <div className="cal-detail" role="dialog" aria-label={e.title} style={{ '--c': color }}>
       <div className="cal-detail-head">
+        <span className="cal-detail-sw" aria-hidden="true" />
         <h4>{e.title}</h4>
-        <button className="icon-btn" onClick={onClose} aria-label="Close"><Icon name="x" size={13} /></button>
+        <button className="icon-btn" onClick={onClose} aria-label={t('Close')}><Icon name="x" size={13} /></button>
       </div>
       <p className="cal-detail-when">
         {start.toLocaleDateString(locale(), { weekday: 'short', month: 'short', day: 'numeric' })}
-        {e.allDay ? ' · all day' : ` · ${fmtT(e.start)} – ${fmtT(e.end)} · ${dur(new Date(e.end) - start)}`}
+        {e.allDay ? ` · ${t('all day')}` : ` · ${fmtT(e.start)} – ${fmtT(e.end)} · ${dur(new Date(e.end) - start)}`}
       </p>
-      {(e.calendar || e.location) && <p className="muted small">{[e.calendar, e.location].filter(Boolean).join(' · ')}</p>}
+      <p className="cal-detail-meta">{[calOf(e), e.location, e.organizer && t('organised by {name}', { name: e.organizer })].filter(Boolean).join(' · ')}</p>
+      {e.canceled && <p className="cal-answer declined"><Icon name="x" size={11} /> {t('Cancelled')}</p>}
+      {!e.canceled && e.response && (
+        <p className={`cal-answer ${e.response}`}>
+          <Icon name={ANSWER_ICON[e.response]} size={11} /> {t(ANSWER[e.response])}
+          {e.response !== 'organizer' && !past && <small>{t('Change it in your calendar app.')}</small>}
+        </p>
+      )}
       <div className="cal-detail-actions">
-        {e.join && <a className="join-btn strong" href={e.join} target="_blank" rel="noreferrer" onClick={() => joined(e)}><Icon name="video" size={12} /> Join</a>}
-        <button className="btn small" onClick={prep} disabled={busy}><Icon name="sparkle" size={12} /> {busy ? 'Starting…' : 'Prep with agent'}</button>
+        {e.join && !past && <a className="join-btn strong" href={e.join} target="_blank" rel="noreferrer" onClick={() => joined(e)}><Icon name="video" size={12} /> {t('Join')}</a>}
+        {!past && !e.allDay && <button className="btn small" onClick={prep} disabled={busy} title={t('An agent reads your mail with them, your notes and your tracker, and writes you a brief. It sends nothing.')}><Icon name="sparkle" size={12} /> {busy ? t('Starting…') : t('Prep with agent')}</button>}
       </div>
       {msg && <p className="small muted">{msg}</p>}
-      {e.agenda && <p className="cal-detail-agenda">{e.agenda}</p>}
+      {(e.agenda || e.links?.length > 0) && (
+        <div className="cal-sec">
+          <h5>{t('From the Invite')}</h5>
+          <InviteFiles agenda={e.agenda} files={e.links} />
+        </div>
+      )}
+      {e.recorded && <RecordedNotes id={e.recorded.id} onOpen={() => openMeeting(e.recorded.id)} />}
+      {!past && !e.allDay && !e.canceled && others && <PrepCard e={e} invite={false} onOpenMeeting={openMeeting} onOpenMail={(id) => openToday('mail', { mailId: id })} />}
       {e.attendees?.length > 0 && (
-        <div className="cal-detail-people">
-          <span className="na-label"><Icon name="users" size={11} /> {e.attendeeCount} attendee{e.attendeeCount === 1 ? '' : 's'}</span>
-          <p>{e.attendees.join(', ')}{e.attendeeCount > e.attendees.length ? ` and ${e.attendeeCount - e.attendees.length} more` : ''}</p>
+        <div className="cal-sec cal-detail-people">
+          <h5>{e.attendeeCount === 1 ? t('1 Attendee') : t('{n} Attendees', { n: e.attendeeCount })}</h5>
+          <p>{e.attendeeCount > e.attendees.length ? t('{names} and {n} more', { names: e.attendees.join(', '), n: e.attendeeCount - e.attendees.length }) : e.attendees.join(', ')}</p>
         </div>
       )}
     </div>
   )
 }
 
+// An event's look on any grid: its calendar's colour, and how you answered.
+const evClass = (e, now) => [e.canceled ? 'cx' : '', e.response ? `ans-${e.response}` : '', Date.parse(e.end) < now ? 'past' : ''].filter(Boolean).join(' ')
+const answerTip = (e) => (e.response && e.response !== 'accepted' && e.response !== 'organizer' ? `\n${t(ANSWER[e.response])}` : '')
+
 // ---------- Time grid (day and week) ----------
 const HOUR_PX = 44
 
-function TimeGrid({ days, events, colors, now, selected, onSelect, compactCols }) {
+function TimeGrid({ days, events, tasks, colors, now, view, selected, onSelect, compactCols }) {
   const scrollRef = useRef(null)
   const timed = events.filter((e) => !e.allDay)
-  // Show the hours that have meetings, at least 8 AM to 6 PM.
+  // Your working hours with an hour either side, widened to fit the meetings.
   const hours = timed.flatMap((e) => {
     const s = new Date(e.start), t = new Date(e.end)
     return [s.getHours(), t.getHours() + (t.getMinutes() ? 1 : 0) || 24]
   })
-  const h0 = Math.max(0, Math.min(8, ...hours))
-  const h1 = Math.min(24, Math.max(18, ...hours))
+  const h0 = Math.max(0, Math.min(view.workStart - 1, ...hours))
+  const h1 = Math.min(24, Math.max(view.workEnd + 1, ...hours))
   const today = days.find((d) => sameDay(d, new Date(now)))
 
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return
     const n = new Date()
-    const target = today ? Math.max(0, (n.getHours() + n.getMinutes() / 60 - h0 - 1.5) * HOUR_PX) : 0
-    el.scrollTop = target
+    el.scrollTop = today ? Math.max(0, (n.getHours() + n.getMinutes() / 60 - h0 - 1.5) * HOUR_PX) : Math.max(0, (view.workStart - h0 - 0.5) * HOUR_PX)
   }, [days[0]?.getTime(), h0]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const allDay = days.map((d) => eventsOn(events.filter((e) => e.allDay), d))
-  const hasAllDay = allDay.some((a) => a.length)
+  const dayTasks = days.map((d) => tasks.filter((x) => x.due === isoDay(d)))
+  const hasAllDay = allDay.some((a) => a.length) || dayTasks.some((a) => a.length)
   const cols = `52px repeat(${days.length}, minmax(${compactCols ? 0 : 80}px, 1fr))`
+  const workTop = (view.workStart - h0) * HOUR_PX
+  const workBottom = (view.workEnd - h0) * HOUR_PX
   return (
     <div className="tg">
       <div className="tg-head" style={{ gridTemplateColumns: cols }}>
         <span />
         {days.map((d) => (
-          <span key={d.getTime()} className={`tg-day ${sameDay(d, new Date(now)) ? 'today' : ''} ${d.getDay() % 6 === 0 ? 'wkend' : ''}`}>
-            <small>{WD[(d.getDay() + 6) % 7]}</small><b>{d.getDate()}</b>
+          <span key={d.getTime()} className={`tg-day ${sameDay(d, new Date(now)) ? 'today' : ''} ${weekend(d) ? 'wkend' : ''}`}>
+            <small>{wdName(d.getDay())}</small><b>{d.getDate()}</b>
           </span>
         ))}
-        {hasAllDay && <span className="tg-allday-label">all-day</span>}
-        {hasAllDay && allDay.map((list, i) => (
+        {hasAllDay && <span className="tg-allday-label">{t('all day')}</span>}
+        {hasAllDay && days.map((d, i) => (
           <span key={i} className="tg-allday">
-            {list.map((e) => <button key={e.id} className="tg-chip" style={{ '--c': colors[e.calendar || 'Calendar'] }} onClick={() => onSelect(e)}>{e.title}</button>)}
+            {allDay[i].map((e) => <button key={e.id} className={`tg-chip ${evClass(e, now)} ${selected?.id === e.id ? 'sel' : ''}`} style={{ '--c': colors[calOf(e)] }} onClick={() => onSelect(e)} title={`${e.title}${answerTip(e)}`}>{e.title}</button>)}
+            {dayTasks[i].map((x) => <button key={x.id} className={`tg-chip task ${x.due < isoDay(new Date(now)) ? 'late' : ''} ${selected?.id === x.id ? 'sel' : ''}`} onClick={() => onSelect(x)} title={t("Chief of Staff's task")}><Icon name="helm" size={10} />{x.title}</button>)}
           </span>
         ))}
       </div>
@@ -192,19 +308,21 @@ function TimeGrid({ days, events, colors, now, selected, onSelect, compactCols }
             const isToday = sameDay(d, new Date(now))
             const base = startOfDay(d).getTime() + h0 * 36e5
             return (
-              <div key={d.getTime()} className={`tg-col ${isToday ? 'today' : ''} ${d.getDay() % 6 === 0 ? 'wkend' : ''}`}>
+              <div key={d.getTime()} className={`tg-col ${isToday ? 'today' : ''} ${weekend(d) ? 'wkend' : ''}`}>
+                {!weekend(d) && workTop > 0 && <span className="tg-off" style={{ top: 0, height: workTop }} />}
+                {!weekend(d) && workBottom < (h1 - h0) * HOUR_PX && <span className="tg-off" style={{ top: workBottom, bottom: 0 }} />}
                 {Array.from({ length: h1 - h0 }, (_, i) => <span key={i} className="tg-line" style={{ top: i * HOUR_PX }} />)}
-                {layoutDay(eventsOn(timed, d), d).map(({ e, s, t, lane, lanes }) => {
+                {layoutDay(eventsOn(timed, d), d).map(({ e, s, t: end, lane, lanes }) => {
                   const top = ((s - base) / 36e5) * HOUR_PX
-                  const h = Math.max(18, ((t - s) / 36e5) * HOUR_PX - 2)
-                  const past = t < now
-                  const live = s <= now && t > now
+                  const h = Math.max(18, ((end - s) / 36e5) * HOUR_PX - 2)
+                  const live = s <= now && end > now
                   return (
-                    <button key={e.id} className={`tg-ev ${e.canceled ? 'cx' : ''} ${past ? 'past' : ''} ${live ? 'live' : ''} ${selected?.id === e.id ? 'sel' : ''} ${h < 34 ? 'short' : ''}`}
-                      style={{ top, height: h, left: `calc(${(lane / lanes) * 100}% + 2px)`, width: `calc(${100 / lanes}% - 4px)`, '--c': colors[e.calendar || 'Calendar'], '--lines': Math.max(1, Math.floor((h - 20) / 14)) }}
-                      onClick={() => onSelect(e)} title={`${e.title}\n${fmtT(e.start)} – ${fmtT(e.end)}`}>
+                    <button key={e.id} className={`tg-ev ${evClass(e, now)} ${live ? 'live' : ''} ${selected?.id === e.id ? 'sel' : ''} ${h < 34 ? 'short' : ''}`}
+                      style={{ top, height: h, left: `calc(${(lane / lanes) * 100}% + 2px)`, width: `calc(${100 / lanes}% - 4px)`, '--c': colors[calOf(e)], '--lines': Math.max(1, Math.floor((h - 20) / 14)) }}
+                      onClick={() => onSelect(e)} title={`${e.title}\n${fmtT(e.start)} – ${fmtT(e.end)}${answerTip(e)}`}>
                       <b>{e.title}</b>
-                      {h >= 34 && <span>{fmtT(e.start)}{e.join ? ' · online' : ''}</span>}
+                      {h >= 34 && <span>{fmtT(e.start)}{e.join ? ` · ${t('online')}` : ''}</span>}
+                      {e.recorded && <i className="tg-rec" aria-label={t('Recorded')} />}
                     </button>
                   )
                 })}
@@ -219,7 +337,7 @@ function TimeGrid({ days, events, colors, now, selected, onSelect, compactCols }
 }
 
 // ---------- Agenda list (week on narrow screens) ----------
-function AgendaList({ days, events, colors, now, onSelect }) {
+function AgendaList({ days, events, tasks, colors, now, onSelect }) {
   const ref = useRef(null)
   const loaded = events.length > 0
   useEffect(() => {
@@ -229,17 +347,26 @@ function AgendaList({ days, events, colors, now, onSelect }) {
   return (
     <div className="cal-agenda" ref={ref}>
       {days.map((d) => {
-        const list = eventsOn(events, d).sort((a, b) => (a.allDay === b.allDay ? (a.start < b.start ? -1 : 1) : a.allDay ? -1 : 1))
+        const list = eventsOn(events, d).sort(byTime)
+        const todo = tasks.filter((x) => x.due === isoDay(d))
         const isToday = sameDay(d, new Date(now))
+        const n = list.filter((e) => !e.allDay && !e.canceled).length
         return (
           <section key={d.getTime()} className={`cal-agenda-day ${isToday ? 'today' : ''}`}>
-            <h5><b>{d.toLocaleDateString(locale(), { weekday: 'short' })}</b> {d.toLocaleDateString(locale(), { month: 'short', day: 'numeric' })}{isToday && <span className="live-pill">Today</span>}<span className="muted">{list.filter((e) => !e.allDay).length || ''}</span></h5>
-            {!list.length && <p className="muted small">Nothing scheduled</p>}
+            <h5><b>{wdName(d.getDay())}</b> {d.toLocaleDateString(locale(), { month: 'short', day: 'numeric' })}{isToday && <span className="live-pill">{t('Today')}</span>}<span className="muted">{n ? (n === 1 ? t('1 meeting') : t('{n} meetings', { n })) : ''}</span></h5>
+            {!list.length && !todo.length && <p className="muted small">{t('Nothing scheduled')}</p>}
             {list.map((e) => (
-              <button key={e.id} className={`cal-agenda-ev ${e.canceled ? 'cx' : ''} ${new Date(e.end) < now ? 'past' : ''}`} style={{ '--c': colors[e.calendar || 'Calendar'] }} onClick={() => onSelect(e)}>
-                <span className="cal-agenda-time">{e.allDay ? 'All day' : fmtT(e.start)}</span>
+              <button key={e.id} className={`cal-agenda-ev ${evClass(e, now)}`} style={{ '--c': colors[calOf(e)] }} onClick={() => onSelect(e)}>
+                <span className="cal-agenda-time">{e.allDay ? t('All day') : fmtT(e.start)}</span>
                 <span className="cal-agenda-title">{e.title}</span>
-                {e.join && <Icon name="video" size={11} />}
+                <span className="cal-agenda-marks">{e.recorded && <i className="tg-rec" aria-label={t('Recorded')} />}{e.join && <Icon name="video" size={11} />}</span>
+              </button>
+            ))}
+            {todo.map((x) => (
+              <button key={x.id} className="cal-agenda-ev task" onClick={() => onSelect(x)}>
+                <span className="cal-agenda-time"><Icon name="helm" size={11} /> {t('Task')}</span>
+                <span className="cal-agenda-title">{x.title}</span>
+                <span />
               </button>
             ))}
           </section>
@@ -250,32 +377,42 @@ function AgendaList({ days, events, colors, now, onSelect }) {
 }
 
 // ---------- Month ----------
-function MonthGrid({ anchor, from, events, colors, now, onDay, onSelect, compact }) {
+function MonthGrid({ anchor, from, events, tasks, colors, now, ws, onDay, onSelect, compact }) {
   const days = Array.from({ length: 42 }, (_, i) => addDays(from, i))
   const rows = days[35].getMonth() !== anchor.getMonth() ? 5 : 6
   const max = compact ? 0 : 3
+  const order = Array.from({ length: 7 }, (_, i) => (ws + i) % 7)
   return (
     <div className="mg">
-      <div className="mg-head">{WD.map((w) => <span key={w}>{compact ? w[0] : w}</span>)}</div>
+      <div className="mg-head">{order.map((w) => <span key={w}>{wdName(w, compact ? 'narrow' : 'short')}</span>)}</div>
       <div className="mg-grid" style={{ gridTemplateRows: `repeat(${rows}, minmax(${compact ? 44 : 96}px, 1fr))` }}>
         {days.slice(0, rows * 7).map((d) => {
-          const list = eventsOn(events, d).sort((a, b) => (a.allDay === b.allDay ? (a.start < b.start ? -1 : 1) : a.allDay ? -1 : 1))
-          const timed = list.filter((e) => !e.allDay)
+          const list = [...eventsOn(events, d).sort(byTime), ...tasks.filter((x) => x.due === isoDay(d))]
+          const timed = list.filter((e) => e.kind !== 'task' && !e.allDay)
           const out = d.getMonth() !== anchor.getMonth()
           const isToday = sameDay(d, new Date(now))
+          const label = t('Open {date}', { date: d.toLocaleDateString(locale(), { weekday: 'long', month: 'long', day: 'numeric' }) })
           return (
-            <div key={d.getTime()} className={`mg-cell ${out ? 'out' : ''} ${isToday ? 'today' : ''} ${d.getDay() % 6 === 0 ? 'wkend' : ''}`}>
-              <button className="mg-num" onClick={() => onDay(d)} aria-label={`Open ${d.toDateString()}`}>{d.getDate()}</button>
+            <div key={d.getTime()} className={`mg-cell ${out ? 'out' : ''} ${isToday ? 'today' : ''} ${weekend(d) ? 'wkend' : ''}`}>
+              {/* A narrow month: the whole day is one button, its number and a dot for each meeting. */}
               {compact
-                ? timed.length > 0 && <button className="mg-dots" onClick={() => onDay(d)}>{timed.slice(0, 4).map((e) => <i key={e.id} style={{ background: colors[e.calendar || 'Calendar'] }} />)}{timed.length > 4 && <small>+</small>}</button>
+                ? (
+                  <button className="mg-tap" onClick={() => onDay(d)} aria-label={label}>
+                    <span className="mg-num">{d.getDate()}</span>
+                    <span className="mg-dots">{timed.slice(0, 4).map((e) => <i key={e.id} style={{ background: colors[calOf(e)] }} />)}{list.some((x) => x.kind === 'task') && <i className="task" />}{timed.length > 4 && <small>+</small>}</span>
+                  </button>
+                )
                 : (
                   <>
-                    {list.slice(0, max).map((e) => (
-                      <button key={e.id} className={`mg-ev ${e.canceled ? 'cx' : ''} ${e.allDay ? 'all' : ''} ${new Date(e.end) < now ? 'past' : ''}`} style={{ '--c': colors[e.calendar || 'Calendar'] }} onClick={() => onSelect(e)} title={e.title}>
-                        {!e.allDay && <span>{fmtT(e.start).replace(':00', '').replace(' ', '').toLowerCase()}</span>}{e.title}
-                      </button>
-                    ))}
-                    {list.length > max && <button className="mg-more" onClick={() => onDay(d)}>{list.length - max} more</button>}
+                    <button className="mg-num" onClick={() => onDay(d)} aria-label={label}>{d.getDate()}</button>
+                    {list.slice(0, max).map((e) => (e.kind === 'task'
+                      ? <button key={e.id} className="mg-ev task" onClick={() => onSelect(e)} title={e.title}><Icon name="helm" size={10} />{e.title}</button>
+                      : (
+                        <button key={e.id} className={`mg-ev ${evClass(e, now)} ${e.allDay ? 'all' : ''}`} style={{ '--c': colors[calOf(e)] }} onClick={() => onSelect(e)} title={`${e.title}${answerTip(e)}`}>
+                          {!e.allDay && <span>{fmtT(e.start)}</span>}{e.title}
+                        </button>
+                      )))}
+                    {list.length > max && <button className="mg-more" onClick={() => onDay(d)}>{t('{n} more', { n: list.length - max })}</button>}
                   </>
                 )}
             </div>
@@ -287,13 +424,13 @@ function MonthGrid({ anchor, from, events, colors, now, onDay, onSelect, compact
 }
 
 // ---------- Year ----------
-function YearGrid({ year, events, now, onDay, cols }) {
-  // Booked hours per day (overlaps counted once).
+function YearGrid({ year, events, now, ws, onDay, cols }) {
+  // Booked hours per day (overlaps counted once), leaving out what you declined.
   const load = useMemo(() => {
     const m = {}
     const byDay = {}
     for (const e of events) {
-      if (e.allDay || e.canceled) continue
+      if (e.allDay || e.canceled || e.response === 'declined') continue
       const s = new Date(e.start).getTime()
       const t = new Date(e.end).getTime()
       // Blocks of 10h+ are travel or out-of-office holds, not meetings.
@@ -319,38 +456,40 @@ function YearGrid({ year, events, now, onDay, cols }) {
     const hours = vals.reduce((s, [, v]) => s + v.hours, 0)
     const count = vals.reduce((s, [, v]) => s + v.count, 0)
     const wd = Array(7).fill(0)
-    for (const [k, v] of vals) wd[(parseDay(k).getDay() + 6) % 7] += v.hours
+    for (const [k, v] of vals) wd[parseDay(k).getDay()] += v.hours
     const busiest = wd.indexOf(Math.max(...wd))
     const top = vals.sort((a, b) => b[1].hours - a[1].hours)[0]
-    return { hours, count, busiest: WD[busiest], top }
+    return { hours, count, busiest: wdName(busiest, 'long'), top }
   }, [load])
   const today = new Date(now)
+  const order = Array.from({ length: 7 }, (_, i) => (ws + i) % 7)
   return (
     <div className="yg">
       <div className="yg-stats">
-        <div><b>{stats.count.toLocaleString()}</b><span>meetings</span></div>
-        <div><b>{Math.round(stats.hours).toLocaleString()}h</b><span>booked</span></div>
-        <div><b>{stats.busiest}</b><span>busiest weekday</span></div>
-        {stats.top && <div><b>{parseDay(stats.top[0]).toLocaleDateString(locale(), { month: 'short', day: 'numeric' })}</b><span>heaviest day · {stats.top[1].hours.toFixed(1)}h</span></div>}
+        <div><b>{stats.count.toLocaleString(locale())}</b><span>{t('meetings')}</span></div>
+        <div><b>{Math.round(stats.hours).toLocaleString(locale())}h</b><span>{t('booked')}</span></div>
+        <div><b>{stats.busiest}</b><span>{t('busiest weekday')}</span></div>
+        {stats.top && <div><b>{parseDay(stats.top[0]).toLocaleDateString(locale(), { month: 'short', day: 'numeric' })}</b><span>{t('heaviest day · {hours}h', { hours: stats.top[1].hours.toFixed(1) })}</span></div>}
       </div>
       <div className="yg-months" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
         {Array.from({ length: 12 }, (_, mi) => {
           const first = new Date(year, mi, 1)
-          const lead = (first.getDay() + 6) % 7
+          const lead = (first.getDay() - ws + 7) % 7
           const n = new Date(year, mi + 1, 0).getDate()
           const monthHours = Array.from({ length: n }, (_, i) => load[isoDay(new Date(year, mi, i + 1))]?.hours || 0).reduce((a, b) => a + b, 0)
           return (
             <div key={mi} className="yg-month">
               <h5>{first.toLocaleDateString(locale(), { month: 'long' })}<span>{monthHours ? `${Math.round(monthHours)}h` : ''}</span></h5>
               <div className="yg-days">
-                {WD.map((w) => <span key={w} className="yg-wd">{w[0]}</span>)}
+                {order.map((w) => <span key={w} className="yg-wd">{wdName(w, 'narrow')}</span>)}
                 {Array.from({ length: lead }, (_, i) => <span key={`l${i}`} />)}
                 {Array.from({ length: n }, (_, i) => {
                   const d = new Date(year, mi, i + 1)
                   const v = load[isoDay(d)]
+                  const when = d.toLocaleDateString(locale(), { weekday: 'short', month: 'short', day: 'numeric' })
                   return (
                     <button key={i} className={`yg-day l${level(v?.hours)} ${sameDay(d, today) ? 'today' : ''} ${d < startOfDay(today) ? 'past' : ''}`}
-                      onClick={() => onDay(d)} title={`${d.toDateString()}${v ? ` · ${v.count} meeting${v.count === 1 ? '' : 's'}, ${v.hours.toFixed(1)}h` : ''}`}>{i + 1}</button>
+                      onClick={() => onDay(d)} title={v ? (v.count === 1 ? t('{date} · 1 meeting, {hours}h', { date: when, hours: v.hours.toFixed(1) }) : t('{date} · {n} meetings, {hours}h', { date: when, n: v.count, hours: v.hours.toFixed(1) })) : when}>{i + 1}</button>
                   )
                 })}
               </div>
@@ -358,27 +497,101 @@ function YearGrid({ year, events, now, onDay, cols }) {
           )
         })}
       </div>
-      <div className="yg-legend"><span>Less</span>{[0, 1, 2, 3, 4].map((l) => <i key={l} className={`yg-day l${l}`} />)}<span>More booked</span></div>
+      <div className="yg-legend"><span>{t('Less')}</span>{[0, 1, 2, 3, 4].map((l) => <i key={l} className={`yg-day l${l}`} />)}<span>{t('More booked')}</span></div>
+    </div>
+  )
+}
+
+// ---------- How it's shown ----------
+function ViewMenu({ view, save, error, onClose }) {
+  const ref = useRef(null)
+  useEffect(() => {
+    const out = (e) => { if (ref.current && !ref.current.contains(e.target) && !e.target.closest?.('.calv-view-btn')) onClose() }
+    const esc = (e) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('pointerdown', out)
+    document.addEventListener('keydown', esc)
+    return () => { document.removeEventListener('pointerdown', out); document.removeEventListener('keydown', esc) }
+  }, [onClose])
+  const local = wdName(localWeekStart(), 'long')
+  const hours = Array.from({ length: 25 }, (_, h) => h)
+  return (
+    <div className="calv-menu" ref={ref} role="dialog" aria-label={t('Week start and working hours')}>
+      <label className="calv-menu-row"><span>{t('Week starts on')}</span>
+        <select value={view.weekStart ?? 'auto'} onChange={(e) => save({ weekStart: e.target.value === 'auto' ? null : Number(e.target.value) })} aria-label={t('Week starts on')}>
+          <option value="auto">{t('As your region has it ({day})', { day: local })}</option>
+          {[1, 0, 6].map((d) => <option key={d} value={d}>{wdName(d, 'long')}</option>)}
+        </select>
+      </label>
+      <div className="calv-menu-row"><span>{t('Working hours')}</span>
+        <span className="calv-hours">
+          <select value={view.workStart} onChange={(e) => save({ workStart: Number(e.target.value), workEnd: Math.max(view.workEnd, Number(e.target.value) + 1) })} aria-label={t('Working hours start')}>
+            {hours.slice(0, 24).map((h) => <option key={h} value={h}>{fmtH(h)}</option>)}
+          </select>
+          <span className="muted">{t('to')}</span>
+          <select value={view.workEnd} onChange={(e) => save({ workEnd: Number(e.target.value), workStart: Math.min(view.workStart, Number(e.target.value) - 1) })} aria-label={t('Working hours end')}>
+            {hours.slice(1).map((h) => <option key={h} value={h}>{h === 24 ? t('Midnight') : fmtH(h)}</option>)}
+          </select>
+        </span>
+      </div>
+      <label className="calv-menu-check">
+        <input type="checkbox" checked={view.tasks} onChange={(e) => save({ tasks: e.target.checked })} />
+        <span>{t("Chief of Staff's tasks that name a day")}</span>
+      </label>
+      <p className="muted small">{t('The same on each of your devices. Bridge AI only reads your calendars: add, move or answer events in your calendar app.')}</p>
+      {error && <p className="error-text small">{t("Couldn't keep that: {error}", { error })}</p>}
     </div>
   )
 }
 
 // ---------- The view ----------
-export default function CalendarView({ onOpenAgent, focusDate }) {
+export default function CalendarView({ onOpenAgent, focus }) {
   const [mode, setMode] = usePersisted('cc-cal-mode', 'week')
   const [anchorIso, setAnchorIso] = useState(isoDay(new Date()))
   const [selected, setSelected] = useState(null)
+  const [menu, setMenu] = useState(false)
+  const [seen, setSeen] = usePersisted('cc-cal-colors', {}) // calendar -> colour, for one hidden this week
   const [ref, width] = useWidth()
   const now = useNow()
+  const { view, save, error: viewError } = useView()
   const anchor = parseDay(anchorIso)
-  const range = rangeFor(mode, anchor)
-  const { data, error, errorCode, loading, refresh } = usePoll(`/calendar/range?from=${isoDay(range[0])}&to=${isoDay(range[1])}`, 5 * 60 * 1000)
-  const events = useMemo(() => (data?.from === isoDay(range[0]) ? data.events : []), [data, anchorIso, mode]) // eslint-disable-line react-hooks/exhaustive-deps
-  const colors = useCalColors(events)
+  const range = rangeFor(mode, anchor, view.ws)
+  const from = isoDay(range[0]), to = isoDay(range[1])
+  const { data, error, errorCode, loading, refresh } = usePoll(`/calendar/range?from=${from}&to=${to}`, 5 * 60 * 1000)
+  const { data: taskData } = usePoll(view.tasks && mode !== 'year' ? `/calendar/tasks?from=${from}&to=${to}` : null, 2 * 60 * 1000)
+  const all = useMemo(() => (data?.from === from ? data.events : []), [data, from])
+  const tasks = useMemo(() => (view.tasks && mode !== 'year' ? (taskData?.tasks || []).map((x) => ({ ...x, kind: 'task', id: `task:${x.id}` })) : []), [taskData, view.tasks, mode])
+  const hidden = useMemo(() => new Set(view.hidden), [view.hidden.join('\n')]) // eslint-disable-line react-hooks/exhaustive-deps
+  const events = useMemo(() => all.filter((e) => !hidden.has(calOf(e))), [all, hidden])
+  // Every calendar in view or hidden, each with its colour, by name.
+  const colors = useMemo(() => {
+    const m = {}
+    for (const e of all) if (!(calOf(e) in m) || (!m[calOf(e)] && e.color)) m[calOf(e)] = calColor(calOf(e), e.color)
+    for (const k of view.hidden) if (!(k in m)) m[k] = calColor(k, seen[k])
+    return m
+  }, [all, view.hidden, seen])
+  useEffect(() => {
+    const fresh = Object.fromEntries(all.filter((e) => e.color && seen[calOf(e)] !== e.color).map((e) => [calOf(e), e.color]))
+    if (Object.keys(fresh).length) setSeen({ ...seen, ...fresh })
+  }, [all]) // eslint-disable-line react-hooks/exhaustive-deps
   const narrow = width > 0 && width < 620
 
-  useEffect(() => { if (focusDate) { setAnchorIso(focusDate); setMode('day') } }, [focusDate]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { setSelected(null) }, [anchorIso, mode])
+  // Opened at a day, and an event on it (the floating card, Home): the event once it's loaded, kept
+  // open as the view moves to its day.
+  const want = useRef(null)
+  const keep = useRef(false)
+  useEffect(() => {
+    if (!focus?.date) return
+    want.current = focus.event
+    keep.current = focus.date !== anchorIso || mode !== 'day'
+    setAnchorIso(focus.date)
+    setMode('day')
+  }, [focus?.at]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!want.current || !all.length) return
+    const e = all.find((x) => x.id === want.current || x.uid === want.current)
+    if (e) { setSelected(e); want.current = null }
+  }, [all, focus?.at])
+  useEffect(() => { if (keep.current) keep.current = false; else setSelected(null) }, [anchorIso, mode])
   useEffect(() => {
     const k = (e) => {
       if (e.target.closest?.('input, textarea, select, .xterm, [contenteditable]') || e.metaKey || e.ctrlKey || e.altKey) return
@@ -397,46 +610,67 @@ export default function CalendarView({ onOpenAgent, focusDate }) {
   const goDay = (d) => { setAnchorIso(isoDay(d)); setMode('day') }
   const days = mode === 'day' ? [anchor] : mode === 'week' ? Array.from({ length: 7 }, (_, i) => addDays(range[0], i)) : []
   const inView = mode === 'month' ? (e) => new Date(e.start).getMonth() === anchor.getMonth() : () => true
-  const timed = events.filter((e) => !e.allDay && !e.canceled && inView(e))
+  const timed = events.filter((e) => !e.allDay && !e.canceled && e.response !== 'declined' && inView(e))
   const booked = timed.reduce((s, e) => s + (new Date(e.end) - new Date(e.start)), 0)
   const isNow = mode === 'year' ? anchor.getFullYear() === new Date().getFullYear() : now >= range[0].getTime() && now < addDays(range[1], 1).getTime()
+  const toggle = (name) => save({ hidden: hidden.has(name) ? view.hidden.filter((x) => x !== name) : [...view.hidden, name] })
+  const names = Object.keys(colors).sort((a, b) => a.localeCompare(b))
+  const sel = selected && (selected.kind === 'task' ? tasks.find((x) => x.id === selected.id) || selected : selected)
+  const detail = sel && (sel.kind === 'task'
+    ? <TaskDetail it={sel} now={now} onClose={() => setSelected(null)} />
+    : <EventDetail key={sel.id} e={sel} color={colors[calOf(sel)] || calColor(calOf(sel), sel.color)} now={now} onClose={() => setSelected(null)} onOpenAgent={onOpenAgent} />)
+  const grid = { events, tasks, colors, now, onSelect: setSelected }
 
   return (
     <div className="calv" ref={ref}>
       <div className="calv-bar">
         <div className="calv-nav">
-          <button className="icon-btn" onClick={() => setAnchorIso(isoDay(step(mode, anchor, -1)))} aria-label="Previous" title="Previous (←)"><Icon name="chevron" size={13} className="rot180" /></button>
-          <button className={`btn small ${isNow ? 'is-now' : ''}`} onClick={() => setAnchorIso(isoDay(new Date()))} title="Today (T)">Today</button>
-          <button className="icon-btn" onClick={() => setAnchorIso(isoDay(step(mode, anchor, 1)))} aria-label="Next" title="Next (→)"><Icon name="chevron" size={13} /></button>
+          <button className="icon-btn" onClick={() => setAnchorIso(isoDay(step(mode, anchor, -1)))} aria-label={t('Previous')} title={t('Previous (←)')}><Icon name="chevron" size={13} className="rot180" /></button>
+          <button className={`btn small ${isNow ? 'is-now' : ''}`} onClick={() => setAnchorIso(isoDay(new Date()))} title={t('Today (T)')}>{t('Today')}</button>
+          <button className="icon-btn" onClick={() => setAnchorIso(isoDay(step(mode, anchor, 1)))} aria-label={t('Next')} title={t('Next (→)')}><Icon name="chevron" size={13} /></button>
           <h3>{title(mode, anchor, range)}</h3>
-          {mode !== 'year' && data && <span className="calv-sum">{timed.length} meeting{timed.length === 1 ? '' : 's'} · {dur(booked)}</span>}
-          {loading && <span className="calv-sum">Loading…</span>}
+          {mode !== 'year' && data && <span className="calv-sum">{timed.length === 1 ? t('1 meeting · {time}', { time: dur(booked) }) : t('{n} meetings · {time}', { n: timed.length, time: dur(booked) })}</span>}
+          {loading && <span className="calv-sum">{t('Loading…')}</span>}
         </div>
         <div className="calv-tools">
-          <div className="seg" role="tablist" aria-label="Calendar view">
-            {[['day', 'D', 'Day'], ['week', 'W', 'Week'], ['month', 'M', 'Month'], ['year', 'Y', 'Year']].map(([m, k, l]) => (
-              <button key={m} role="tab" aria-selected={mode === m} className={mode === m ? 'on' : ''} onClick={() => setMode(m)} title={`${l} (${k})`}>{narrow ? k : l}</button>
+          <div className="seg" role="tablist" aria-label={t('Calendar view')}>
+            {[['day', 'D', t('Day')], ['week', 'W', t('Week')], ['month', 'M', t('Month')], ['year', 'Y', t('Year')]].map(([m, k, l]) => (
+              <button key={m} role="tab" aria-selected={mode === m} className={mode === m ? 'on' : ''} onClick={() => setMode(m)} title={`${l} (${k})`}>{narrow ? l[0] : l}</button>
             ))}
           </div>
-          <button className="icon-btn" onClick={() => refresh('&refresh=1')} aria-label="Refresh" title="Refresh"><Icon name="refresh" size={13} /></button>
-        </div>
+          <button className={`icon-btn calv-view-btn ${menu ? 'on' : ''}`} onClick={() => setMenu(!menu)} aria-expanded={menu} aria-label={t('Week start and working hours')} title={t('Week start and working hours')}><Icon name="settings" size={13} /></button>
+          <button className="icon-btn" onClick={() => refresh('&refresh=1')} aria-label={t('Refresh')} title={t('Refresh')}><Icon name="refresh" size={13} /></button>
+            </div>
+        {menu && <ViewMenu view={view} save={save} error={viewError} onClose={() => setMenu(false)} />}
       </div>
       {error && <div className="pad"><CalendarSetup error={error} code={errorCode} onCheck={() => refresh('&refresh=1')} /></div>}
-      <div className={`calv-body ${selected && !narrow ? 'with-detail' : ''}`}>
+      <div className={`calv-body ${sel && !narrow ? 'with-detail' : ''}`}>
         <div className="calv-main">
-          {mode === 'day' && <TimeGrid days={days} events={events} colors={colors} now={now} selected={selected} onSelect={setSelected} compactCols />}
+          {mode === 'day' && <TimeGrid days={days} {...grid} view={view} selected={sel} compactCols />}
           {mode === 'week' && (narrow
-            ? <AgendaList days={days} events={events} colors={colors} now={now} onSelect={setSelected} />
-            : <TimeGrid days={days} events={events} colors={colors} now={now} selected={selected} onSelect={setSelected} compactCols={width < 900} />)}
-          {mode === 'month' && <MonthGrid anchor={anchor} from={range[0]} events={events} colors={colors} now={now} onDay={goDay} onSelect={setSelected} compact={narrow} />}
-          {mode === 'year' && <YearGrid year={anchor.getFullYear()} events={events} now={now} onDay={goDay} cols={width < 520 ? 2 : width < 900 ? 3 : width < 1250 ? 4 : 6} />}
-          {Object.keys(colors).length > 1 && mode !== 'year' && (
-            <div className="cal-legend">{Object.entries(colors).map(([k, c]) => <span key={k}><i style={{ background: c }} />{k}</span>)}</div>
+            ? <AgendaList days={days} {...grid} />
+            : <TimeGrid days={days} {...grid} view={view} selected={sel} compactCols={width < 900} />)}
+          {mode === 'month' && <MonthGrid anchor={anchor} from={range[0]} {...grid} ws={view.ws} onDay={goDay} compact={narrow} />}
+          {mode === 'year' && <YearGrid year={anchor.getFullYear()} events={events} now={now} ws={view.ws} onDay={goDay} cols={width < 520 ? 2 : width < 900 ? 3 : width < 1250 ? 4 : 6} />}
+          {(names.length > 0 || tasks.length > 0 || !view.tasks) && mode !== 'year' && (
+            <div className="cal-legend" role="group" aria-label={t('Calendars')}>
+              {names.map((k) => (
+                <button key={k} type="button" className={`cal-key ${hidden.has(k) ? 'off' : ''}`} style={{ '--c': colors[k] }} aria-pressed={!hidden.has(k)} onClick={() => toggle(k)} title={hidden.has(k) ? t('Show {name}', { name: k }) : t('Hide {name}', { name: k })}>
+                  <i aria-hidden="true" />{k}
+                </button>
+              ))}
+              {(tasks.length > 0 || !view.tasks) && (
+                <button type="button" className={`cal-key task ${view.tasks ? '' : 'off'}`} aria-pressed={view.tasks} onClick={() => save({ tasks: !view.tasks })} title={view.tasks ? t("Hide Chief of Staff's tasks") : t("Show Chief of Staff's tasks")}>
+                  <Icon name="helm" size={11} />{t("Chief of Staff's tasks")}
+                </button>
+              )}
+              {viewError && <span className="error-text small">{t("Couldn't keep that: {error}", { error: viewError })}</span>}
+            </div>
           )}
         </div>
-        {selected && (narrow
-          ? <div className="modal-backdrop" onMouseDown={(x) => { if (x.target === x.currentTarget) setSelected(null) }}><div className="modal cal-sheet"><EventDetail e={selected} onClose={() => setSelected(null)} onOpenAgent={onOpenAgent} /></div></div>
-          : <EventDetail e={selected} onClose={() => setSelected(null)} onOpenAgent={onOpenAgent} />)}
+        {detail && (narrow
+          ? <div className="modal-backdrop" onMouseDown={(x) => { if (x.target === x.currentTarget) setSelected(null) }}><div className="modal cal-sheet">{detail}</div></div>
+          : detail)}
       </div>
     </div>
   )

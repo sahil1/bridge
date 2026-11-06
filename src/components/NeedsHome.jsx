@@ -3,6 +3,7 @@ import Icon, { StatusDot } from './Icon.jsx'
 import { NeedsItem, onDevice } from './NeedsYou.jsx'
 import { useAgentMap } from './AgentMap.jsx'
 import { useCalendar, shortTitle } from './Agenda.jsx'
+import { PrepCard } from './meetings/prep.jsx'
 import { ago } from './Machines.jsx'
 import { api, hostApi } from '../api.js'
 import { t, tx, locale } from '../i18n/index.js'
@@ -89,7 +90,7 @@ function useComing(on) {
   if (!on) return { events: [], error: null, now, loading: false }
   const seen = new Set()
   const pick = (list) => (list || []).filter((e) => {
-    if (e.allDay || e.canceled || Date.parse(e.end) <= now) return false
+    if (e.allDay || e.canceled || e.response === 'declined' || Date.parse(e.end) <= now) return false
     const k = `${String(e.title || '').trim().toLowerCase()}|${Date.parse(e.start)}`
     if (seen.has(k)) return false
     seen.add(k)
@@ -256,12 +257,16 @@ function ReadyItem({ it, multi, phone, read, open, onToggle, onRead, h }) {
 }
 
 // A meeting coming up: when, the brief from the last in the series (for the next one), the files in
-// its invite, and Join.
+// its invite, Join, and Prep for one with other people (Prep Assist: who's coming, last time, your
+// mail with them, goals to go in with), the whole of it in the calendar.
 function EventRow({ e, now, next, onOpenMeeting, onCalendar }) {
   const brief = useBrief(next ? e : null)
+  const [prep, setPrep] = useState(false)
+  const others = e.attendeeCount > 1 || (e.attendees || []).length > 1
   const on = Date.parse(e.start) <= now
   const last = brief?.last
-  const open = brief?.counts?.open || 0
+  // Still open: not done, and not ticked in the notes (as Prep counts them).
+  const open = (brief?.items || []).filter((x) => x.state !== 'done' && !x.ticked).length
   const was = last && { title: shortTitle(last.title, 40), date: new Date(last.startedAt).toLocaleDateString(locale(), { month: 'short', day: 'numeric' }), n: open }
   const wait = Date.parse(e.start) - now
   const when = on ? t('On now, until {time}', { time: fmt(e.end) }) : wait < 3 * 3600e3 ? t('In {wait}', { wait: mins(wait) }) : null
@@ -273,12 +278,18 @@ function EventRow({ e, now, next, onOpenMeeting, onCalendar }) {
         <b>{e.title}</b>
         {(when || said) && <span className="hm-item-sub">{[when, said].filter(Boolean).join(' · ')}</span>}
         {e.links?.length > 0 && <span className="hm-links">{e.links.slice(0, 4).map((x, i) => <a key={i} href={x.url} target="_blank" rel="noreferrer"><Icon name="file" size={11} />{shortTitle(x.name || x.url, 40)}</a>)}</span>}
+        {others && <button type="button" className={`link-btn hm-prep-btn${prep ? ' on' : ''}`} aria-expanded={prep} onClick={() => setPrep(!prep)} title={t("Who's coming, last time with them, your mail with them and goals to go in with")}><Icon name="bulb" size={11} /> {prep ? t('Hide prep') : t('Prep')}</button>}
       </div>
       {(e.join || next) && (
         <div className="hm-ev-acts">
           {e.join && <a className="btn small" href={e.join} target="_blank" rel="noreferrer"><Icon name="video" size={12} /> {t('Join')}</a>}
           {next && (last ? <button type="button" className="btn small" onClick={() => onOpenMeeting({ machine: null, online: true, meeting: { id: last.id } })}>{t('Open brief')}</button>
             : <button type="button" className="btn small" onClick={onCalendar}>{t('Calendar')}</button>)}
+        </div>
+      )}
+      {prep && (
+        <div className="hm-prep">
+          <PrepCard e={e} size="compact" invite={false} onOpenEvent={() => window.dispatchEvent(new CustomEvent('bridge-open-event', { detail: { date: dayKey(e.start), id: e.id } }))} />
         </div>
       )}
     </li>

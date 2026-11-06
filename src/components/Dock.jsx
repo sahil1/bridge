@@ -57,18 +57,18 @@ export function TodayTabs({ tab, setTab, compact }) {
 // The tab bodies, shared by the desktop panel and the phone's Today tab.
 export function TodayBody({ wide, onOpenAgent, tab, setTab, stackClass = 'dock-scroll' }) {
   const [mailId, setMailId] = useState(null)
-  const [date, setDate] = useState(null)
+  const [focus, setFocus] = useState(null) // { date, event, at }: a day in the calendar, and an event on it to open
   useEffect(() => {
     const on = (e) => {
       const d = e.detail || {}
       if (d.tab) setTab(d.tab)
       if (d.mailId) setMailId(d.mailId)
-      if (d.date) setDate(d.date)
+      if (d.date) setFocus({ date: d.date, event: d.event || null, at: Date.now() })
     }
     window.addEventListener('cc-today', on)
     return () => window.removeEventListener('cc-today', on)
   }, [setTab])
-  if (tab === 'calendar') return <CalendarView onOpenAgent={onOpenAgent} focusDate={date} />
+  if (tab === 'calendar') return <CalendarView onOpenAgent={onOpenAgent} focus={focus} />
   if (tab === 'mail') return <MailView onOpenAgent={onOpenAgent} openId={mailId} />
   if (tab === 'markets') return <MarketsView />
   if (tab === 'usage') return <UsageStats />
