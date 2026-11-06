@@ -135,8 +135,14 @@ export async function install({ app = false, auto = false } = {}) {
   const env = { ...process.env, BRIDGE_VERSION: tag, ...(dir ? { BRIDGE_APP_DIR: dir } : {}) }
   const command = IS_WIN ? `irm ${at}/install.ps1 | iex` : `curl --proto '=https' -fsSL ${at}/install.sh | sh`
   const standIn = process.env.BRIDGE_INSTALL_STANDIN
+  // On Windows the stand-in is a .cmd that runs Node. Started on its own (detached), cmd.exe has no
+  // console, so the Node it runs gets one of its own and what it says misses the log: Node runs the
+  // stand-in itself instead, handed the log as the installer is.
+  const standInJs = IS_WIN && standIn && /\.cmd$/i.test(standIn) ? standIn.replace(/\.cmd$/i, '.cjs') : null
   const child = standIn
-    ? spawn(standIn, [Buffer.from(command).toString('base64')], { detached: true, stdio: ['ignore', out, out], env, shell: IS_WIN })
+    ? standInJs && fs.existsSync(standInJs)
+      ? spawn(process.execPath, [standInJs, Buffer.from(command).toString('base64')], { detached: true, stdio: ['ignore', out, out], windowsHide: true, env })
+      : spawn(standIn, [Buffer.from(command).toString('base64')], { detached: true, stdio: ['ignore', out, out], env, shell: IS_WIN })
     : IS_WIN
       ? spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command], { detached: true, stdio: ['ignore', out, out], windowsHide: true, env })
       : spawn('/bin/sh', ['-c', command], { detached: true, stdio: ['ignore', out, out], env })
@@ -149,17 +155,21 @@ export async function install({ app = false, auto = false } = {}) {
   const t = { version: latest, from: current, at: run.at, auto: !!auto, failed: null }
   setTried(t)
   const failed = (f) => { run.failed = { ...f, ...(auto ? { auto: true } : {}) }; setTried({ ...t, failed: f }) }
-  child.on('exit', (code) => { if (code) failed({ code, line: lastLine(log) }) })
+  child.on('exit', (code) => { const line = lastLine(log); if (didntGoThrough(code, line)) failed({ code, line: reasonOf(line) }) })
   child.on('error', (e) => failed({ code: -1, line: e.message }))
   child.unref()
   return { started: true, log }
 }
-// The installer's last words: what it was doing when it stopped.
+// The installer's last words: what it was doing when it stopped. PowerShell ends its lines with \r\n.
 function lastLine(log) {
-  let line = ''
-  try { line = String(fs.readFileSync(log, 'utf8')).trim().split('\n').filter(Boolean).pop() || '' } catch { /* no log */ }
-  return line.replace(/^Bridge AI install:\s*/, '').slice(0, 300)
+  try { return String(fs.readFileSync(log, 'utf8')).split(/\r?\n/).map((l) => l.trim()).filter(Boolean).pop() || '' } catch { return '' }
 }
+const reasonOf = (line) => line.replace(/^Bridge AI install:\s*/, '').slice(0, 300)
+// An install that didn't go through: the installer stopped with an error, or said why it couldn't
+// ("Bridge AI install: …", both installers' words for it, and only for it). install.ps1 says so and
+// returns without an error, so a PowerShell window it was pasted into stays open: on Windows that
+// line is the only sign.
+export const didntGoThrough = (code, line) => !!code || /^Bridge AI install:/.test(line || '')
 
 // ---------- Updating by itself while you're away ----------
 // Settings › About & Updates › Update by itself while you're away: on unless turned off, in the
@@ -193,7 +203,7 @@ function autoFailed(latest) {
   if (!x?.auto || x.from !== current || x.version !== latest) return null
   const ago = Date.now() - x.at
   if (ago >= RETRY_HOURS * 60 * 60 * 1000 || (!x.failed && ago < INSTALL_MINUTES * 60 * 1000)) return null
-  return { ...(x.failed || { code: null, line: lastLine(path.join(cacheFile('update'), 'update.log')) }), auto: true }
+  return { ...(x.failed || { code: null, line: reasonOf(lastLine(path.join(cacheFile('update'), 'update.log'))) }), auto: true }
 }
 
 // { on, release: there's one to update to, why: what the server waits for, desktop: what the app

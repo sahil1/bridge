@@ -5,7 +5,8 @@
 // asks for the Mac's password first when it installs Apple's developer tools or Homebrew: so does
 // this, as sudo does, and it carries on once a line is typed (noted in passwords.log; "no" stands
 // for a password that didn't work: it stops the way setup-mac.sh does). An update of Bridge AI
-// itself goes through, or with update-fails.txt there, doesn't (its last line that file's words).
+// itself goes through, or with update-fails.txt there, doesn't (its last line that file's words,
+// with an error from install.sh's stand-in and none from install.ps1's, as each really does).
 //   installer.cjs <the command that would have run, in base64>
 const fs = require('node:fs')
 const path = require('node:path')
@@ -31,11 +32,14 @@ const go = () => {
   }, 4000)
 }
 // An update (Bridge AI's own installer, at a release's tag): with update-fails.txt beside this, it
-// stops as install.sh does when something goes wrong, its last line what that file says.
+// stops as that installer does when something goes wrong, its last line what that file says:
+// install.sh with an error, install.ps1 (Windows) saying why and returning without one.
 const fails = path.join(bin, 'update-fails.txt')
-if (/sahil1\/bridge\/v[\d.]+\/install\.(sh|ps1)/.test(cmd) && fs.existsSync(fails)) {
+const update = /sahil1\/bridge\/v[\d.]+\/install\.(sh|ps1)/.exec(cmd)
+if (update && fs.existsSync(fails)) {
   say(`(A test: this stands in for ${cmd})`)
-  setTimeout(() => { process.stderr.write(`Bridge AI install: ${fs.readFileSync(fails, 'utf8').trim()}\n`); process.exitCode = 1 }, 300)
+  const line = `Bridge AI install: ${fs.readFileSync(fails, 'utf8').trim()}`
+  setTimeout(() => { if (update[1] === 'ps1') process.stdout.write(`${line}\r\n`); else { process.stderr.write(`${line}\n`); process.exitCode = 1 } }, 300)
 } else if (/setup-mac\.sh/.test(cmd) && /\s(devtools|homebrew)(\s|$)/.test(cmd)) {
   process.stdout.write('Password for this Mac, to set up Bridge AI: ')
   let typed = ''

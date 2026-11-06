@@ -12,6 +12,8 @@
 // installed as asked; macOS 14 gets the newest; macOS 12 is told it needs 14. Not on Windows (no sh).
 // The desktop app's own update (its version behind a server run from a clone, which is as new as the
 // release) is held back the same way: not offered on the 13.6 Mac, said once with the app's version.
+// An install that didn't go through: one stopped with an error, or one whose installer said so
+// without one (install.ps1 does, on Windows), and not one that finished.
 // Updating by itself while you're away: the rules (shared/autoupdate.js) at any moment, for the
 // release (its age, a pre-release, held back, the switch), what runs (agents, a meeting, dictation,
 // an install going in or one that failed) and the desktop app's side (away, locked, just woken,
@@ -76,6 +78,21 @@ for (const [what, m, release, want] of RULES) {
   const mac13 = { platform: 'darwin', arch: 'arm64', os: '13.6' }
   const got = [up.below?.(same, mac13), up.below?.(same, { ...mac13, os: '14.6' }), up.below?.(same, { platform: 'win32', arch: 'x64', os: '10.0.22631' }), up.below?.({ latest: '1.0.0', minMac: null }, mac13)]
   ok(JSON.stringify(got) === JSON.stringify([{ latest: '1.0.0', macos: '14', have: '13.6' }, null, null, null]), 'the desktop app\'s own update: a Mac on 13.6 isn\'t offered a release that needs 14, even one no newer than the server; 14.6, Windows and a release that says nothing are', got)
+}
+
+// An install that didn't go through, from how the installer ended: with an error, or saying so in
+// its own words without one (install.ps1 returns, so a PowerShell window it was pasted into stays
+// open: on Windows its line is the only sign).
+{
+  const ENDS = [
+    ['install.sh stopping with an error', 1, "Bridge AI install: couldn't download https://example.com/Bridge-AI-mac-arm64.zip", true],
+    ['an error with nothing said', 1, '', true],
+    ['install.ps1 saying why, with no error', 0, "Bridge AI install: the download of Bridge-AI-win-x64.exe doesn't match its checksum; run the installer again", true],
+    ['install.ps1 done', 0, 'Bridge AI is installed. Opening it now; next time, find it in the Start menu.', false],
+    ['install.sh leaving a Mac on its last version', 0, 'Bridge AI 3.7.1, the last version for macOS 13, stays as it is and keeps working.', false],
+  ]
+  const got = ENDS.map(([, code, line]) => up.didntGoThrough?.(code, line))
+  ok(JSON.stringify(got) === JSON.stringify(ENDS.map((x) => x[3])), 'an install that didn\'t go through: an error, or the installer saying so without one (install.ps1); not one that finished or kept the version there', ENDS.map(([what], i) => `${what}: ${got[i]}`))
 }
 
 // ---------- Updating by itself while you're away: the rules ----------
