@@ -14,11 +14,13 @@
 // items, Prep Assist); Prep with no model (all the rest, and how to add one), then with the stand-in
 // model: what it's sent and what's shown, kept, Again, by itself shortly before, and on the floating
 // card. The calendar helper is only ever asked to read. Screenshots at 1440 and on a 390 phone,
-// light and dark.
+// light and dark. It holds at any time of day: BRIDGE_TEST_CLOCK=HH:MM runs the server
+// (stand-ins/clock.mjs) and every page at that time today, to try one (03:00, 21:30).
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { startKit, startModel, checks, until, sleep, browser, page, shot, phoneFaults, noServiceWorker, changeAnswer, IS_WIN, IS_MAC } from '../lib/harness.mjs'
+import { pathToFileURL } from 'node:url'
+import { startKit, startModel, checks, until, sleep, browser, page, shot, phoneFaults, noServiceWorker, changeAnswer, IS_WIN, IS_MAC, TEST } from '../lib/harness.mjs'
 
 const { ok, skip, done } = checks('calendar')
 if (IS_WIN) {
@@ -28,7 +30,12 @@ if (IS_WIN) {
 
 // ---------- The week ----------
 const DAY = 864e5
-const NOW = Date.now()
+// The time it's run at, or the one BRIDGE_TEST_CLOCK names (today, this computer's time), which the
+// server and the pages then run from.
+const CLOCK = /^(\d\d):(\d\d)$/.exec(process.env.BRIDGE_TEST_CLOCK || '')
+const NOW = CLOCK ? new Date().setHours(+CLOCK[1], +CLOCK[2], 0, 0) : Date.now()
+const OFFSET = NOW - Date.now()
+if (CLOCK) console.log(`calendar: run at ${new Date(NOW).toString()}`)
 const monday = (() => { const d = new Date(NOW); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d })()
 const at = (day, h, m = 0) => { const d = new Date(monday); d.setDate(d.getDate() + day); d.setHours(h, m, 0, 0); return d }
 const ymd = (d) => new Date(d).toLocaleDateString('en-CA')
@@ -59,7 +66,10 @@ const LATER = ev('Design review with Ines', 'Work', mins(180), mins(225), { resp
 const RECORDED = ev('Quarterly planning', 'Work', mins(-180), mins(-120), { attendees: ['Tester', 'Maya Okafor', 'Ines Varga'] })
 const FOCUS = ev('Focus time', 'Personal', mins(300), mins(360), { response: '' })
 const DECLINED = ev('Budget office hours', 'Work', mins(60), mins(90), { response: 'declined', attendees: ['Tester', 'Pat Lin'] })
-const EVENTS = [...week(-7), ...week(0), ...week(7), SOON, LATER, RECORDED, FOCUS, DECLINED]
+// Two weeks on, only the week's own meetings (nothing set by the time it's run): the one the grid's
+// hours are checked on. Four weeks on, a release window from 11 PM to half past midnight.
+const LATE = ev('Release window', 'Work', at(32, 23), at(33, 0, 30), { attendees: ['Tester', 'Leo Brandt'] })
+const EVENTS = [...week(-7), ...week(0), ...week(7), ...week(14), SOON, LATER, RECORDED, FOCUS, DECLINED, LATE]
 
 // The calendar helper: answers from bridgecal.json, and writes down every way it was asked.
 const helper = (bin) => {
@@ -79,7 +89,8 @@ process.exit(cmd === 'events' ? 3 : 0)`)
   return path.join(bin, 'bridgecal')
 }
 // No model on this computer's own servers either, whatever this computer has running.
-const kit = await startKit('calendar', { env: ({ bin }) => ({ BRIDGE_CALASK: helper(bin), BRIDGE_PREP_EVERY_MS: '1000', OLLAMA_HOST: 'http://127.0.0.1:9', LM_STUDIO_BASE_URL: 'http://127.0.0.1:9/v1' }) })
+const shifted = CLOCK ? { NODE_OPTIONS: `--import=${pathToFileURL(path.join(TEST, 'stand-ins', 'clock.mjs')).href}`, BRIDGE_TEST_CLOCK_OFFSET: String(OFFSET) } : {}
+const kit = await startKit('calendar', { env: ({ bin }) => ({ BRIDGE_CALASK: helper(bin), BRIDGE_PREP_EVERY_MS: '1000', OLLAMA_HOST: 'http://127.0.0.1:9', LM_STUDIO_BASE_URL: 'http://127.0.0.1:9/v1', ...shifted }) })
 const model = await startModel('calendar')
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
@@ -133,11 +144,13 @@ if (IS_MAC) {
 // open it), or at a week.
 const LAYOUT = { railW: 232, railOpen: true, dockW: 380, dockMin: false, boardH: 280, boardMin: false, sideW: 560, max: 'dock', todayOpen: true }
 const open = async (look = {}) => {
-  const pg = await page(b, kit.url, { width: 1440, height: 900, ...look, store: { 'cc-layout': LAYOUT, 'cc-today-tab': 'calendar', 'cc-cal-mode': 'week', ...(look.store || {}) }, before: noServiceWorker })
+  const pg = await page(b, kit.url, { width: 1440, height: 900, ...look, store: { 'cc-layout': LAYOUT, 'cc-today-tab': 'calendar', 'cc-cal-mode': 'week', ...(look.store || {}) }, before: setUp })
   pages.push(pg)
   await pg.p.waitForSelector(look.phone ? '.tabbar' : '.calv', { timeout: 20000 }).catch(() => {})
   return pg
 }
+// Each page runs at the test's time, as the server does.
+const setUp = async (c) => { await noServiceWorker(c); if (CLOCK) await c.clock.install({ time: Date.now() + OFFSET }) }
 const openEvent = (p, e) => p.evaluate((d) => window.dispatchEvent(new CustomEvent('bridge-open-event', { detail: d })), { date: ymd(e.start), id: `${e.title}|${e.start}` })
 const keyColors = (p) => p.evaluate(() => Object.fromEntries([...document.querySelectorAll('.cal-key:not(.task)')].map((k) => [k.innerText.trim(), k.style.getPropertyValue('--c').trim()])))
 const asked = (re) => model.asked(re)
@@ -165,6 +178,8 @@ try {
 
   // How it's shown: checked, kept on the server.
   ok(JSON.stringify(await api('/calendar/view')) === JSON.stringify({ weekStart: null, workStart: 9, workEnd: 17, hidden: [], tasks: true }), 'how the calendar is shown, to start: the week as your region has it, nine to five, nothing hidden, tasks on the grid', await api('/calendar/view'))
+  // Weeks from Monday from here on, as the week is seeded, whatever this browser's region says.
+  await api('/calendar/view', { weekStart: 1 }, 'PATCH')
   const bad = await err('/calendar/view', { workStart: 18, workEnd: 9 }, 'PATCH')
   ok(bad && /Working hours end after they start/.test(bad.message), 'working hours that end before they start: refused, saying why', bad?.message)
   const bad2 = await err('/calendar/view', { weekStart: 3 }, 'PATCH')
@@ -285,13 +300,25 @@ try {
       await p.locator('.calv-menu select[aria-label="Working hours start"]').selectOption('8')
       await p.locator('.calv-menu select[aria-label="Working hours end"]').selectOption('18')
       await until(async () => (await api('/calendar/view')).workEnd === 18, 5000)
-      const hours = await p.evaluate(() => [...document.querySelectorAll('.tg-hours span')].map((s) => s.innerText).filter(Boolean))
-      ok((await api('/calendar/view')).workStart === 8 && /^8/.test(hours[0]) && hours.some((h) => /^7\s?PM/.test(h)), 'working hours 8 to 6: the grid shows them with an hour either side', hours)
       await shot(p, `${tag}calendar-menu`)
       await p.keyboard.press('Escape')
+      // On the week two on, which has only the week's own meetings: 8 AM to 6 PM with an hour either
+      // side (7 to 7), and to 8 PM for Sunday's dinner (6 to 7:30 PM), whatever time it is now.
+      await p.locator('.calv-nav button[aria-label="Next"]').click()
+      await p.locator('.calv-nav button[aria-label="Next"]').click()
+      await until(async () => (await p.locator('.tg-ev', { hasText: 'Dinner with the Okafors' }).count()) > 0, 8000)
+      const hours = await p.evaluate(() => [...document.querySelectorAll('.tg-hours span')].map((s) => s.innerText).filter(Boolean))
+      ok((await api('/calendar/view')).workStart === 8 && hours.length === 12 && /^8\s?AM/.test(hours[0]) && /^7\s?PM/.test(hours.at(-1)), 'working hours 8 to 6: the grid shows them with an hour either side, widened only to take in a meeting (Sunday\'s dinner, to 7:30 PM)', hours)
       await api('/calendar/view', { weekStart: 1, workStart: 9, workEnd: 17 }, 'PATCH')
       await p.reload()
       await until(() => p.locator('.tg-ev').count(), 15000)
+      // A meeting from 11 PM to half past midnight: its day's grid runs from your working hours to
+      // midnight, not from the small hours.
+      await openEvent(p, LATE)
+      await until(async () => /Release window/.test(await p.locator('.cal-detail h4').innerText().catch(() => '')), 8000)
+      const late = await p.evaluate(() => [...document.querySelectorAll('.tg-hours span')].map((s) => s.innerText).filter(Boolean))
+      ok(/^9\s?AM/.test(late[0]) && /^11\s?PM/.test(late.at(-1)), 'a meeting past midnight: its first day\'s grid runs from 9 AM to midnight, not from the small hours', late)
+      await p.keyboard.press('Escape')
     }
     // The meeting coming up later, with its prep and the model's suggestions.
     await openEvent(p, LATER)
@@ -331,6 +358,7 @@ try {
 
   // ---------- In German: the week starts on Monday there, and the panel is in German ----------
   {
+    await api('/calendar/view', { weekStart: null }, 'PATCH')
     const { p, errors } = await open({ locale: 'de-DE', store: { 'cc-lang': 'auto' } })
     await until(() => p.locator('.tg-ev').count(), 15000)
     ok(/^Mo/.test((await p.locator('.tg-day small').first().innerText().catch(() => '')).trim()), 'in German, the week starts on Monday, with German day names', await p.locator('.tg-day small').allInnerTexts())
@@ -342,6 +370,7 @@ try {
     await shot(p, `${tag}calendar-prep-de`)
     ok(real(errors).length === 0, 'German: no page errors', errors)
     await p.context().close()
+    await api('/calendar/view', { weekStart: 1 }, 'PATCH')
   }
 
   // ---------- The floating card, shortly before ----------
@@ -368,7 +397,7 @@ try {
   // ---------- Home's Coming Up ----------
   {
     await api('/settings', { trials: { home: true } }, 'PATCH')
-    const pg = await page(b, kit.url, { width: 1440, height: 900, before: async (c) => { await noServiceWorker(c); await changeAnswer(c, /\/api\/config(\?|$)/, (real) => ({ ...real, calendar: true })) } })
+    const pg = await page(b, kit.url, { width: 1440, height: 900, before: async (c) => { await setUp(c); await changeAnswer(c, /\/api\/config(\?|$)/, (real) => ({ ...real, calendar: true })) } })
     pages.push(pg)
     const { p, errors } = pg
     const row = p.locator('.hm-ev', { hasText: 'Northwind pricing sync' })
