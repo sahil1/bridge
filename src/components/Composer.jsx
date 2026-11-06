@@ -9,6 +9,7 @@ import { t, tx, locale } from '../i18n/index.js'
 import { keyLabel } from '../../shared/dictation/keys.js'
 import { LiveWords } from '../dictation/Pill.jsx'
 import { useDictation, registerBox, noteBoxFocus, press, release, finish, cancel, dismiss, retry, settings, keysPlatform, dictationKey, listeningHint } from '../dictation/controller.js'
+import { useBusy } from '../busy.js'
 
 // Drafts survive navigation and reloads: one per agent, kept in this browser.
 const draftKey = (id) => `cc-draft-${id}`
@@ -352,6 +353,8 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
   }
   useEffect(() => { const t = setTimeout(() => saveDraft(id, draft), 250); return () => clearTimeout(t) }, [id, draft])
   useEffect(() => { onDraft?.(draft.text) }, [draft.text]) // eslint-disable-line react-hooks/exhaustive-deps
+  // A message being typed: the desktop app doesn't update by itself under it (busy.js).
+  useBusy('draft', !!(draft.text.trim() || draft.files.length))
   // Height: grows with the text up to 200px, unless you've dragged the grip to set your own.
   const [manualH, setManualH] = usePersisted('cc-composer-h', null)
   const fit = () => {

@@ -5,11 +5,13 @@
 // still updates here, on a Mac or Windows (install({ app: true })).
 // A release that needs a newer macOS than this Mac has isn't offered (the app's own update neither):
 // Bridge AI says once that it stays on this version, and why.
+// The desktop app on a Mac or Windows also updates by itself while you're away (autoView, below).
 import { spawn, execFile } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { ROOT, IN_APP, IS_WIN, IS_MAC, cacheFile, ensureDir } from './paths.js'
 import { machine, atLeast } from './machine.js'
+import { serverWhy, releaseWhy, RETRY_HOURS, INSTALL_MINUTES } from '../shared/autoupdate.js'
 
 const REPO = 'sahil1/bridge'
 // BRIDGE_RELEASES_API (tests): where the latest release is asked for.
@@ -35,7 +37,7 @@ async function check(force = false) {
     if (!r.ok) throw new Error(`GitHub answered ${r.status}`)
     const j = await r.json()
     const body = String(j.body || '')
-    last = { at: Date.now(), latest: String(j.tag_name || '').replace(/^v/, ''), url: j.html_url, notes: body.replace(MIN_MAC, '').trim().slice(0, 4000), minMac: minMacOf(body), publishedAt: j.published_at || null, error: null }
+    last = { at: Date.now(), latest: String(j.tag_name || '').replace(/^v/, ''), url: j.html_url, notes: body.replace(MIN_MAC, '').trim().slice(0, 4000), minMac: minMacOf(body), publishedAt: j.published_at || null, prerelease: !!j.prerelease, error: null }
   } catch (e) {
     last = { ...last, at: Date.now(), error: e.message }
   }
@@ -43,7 +45,9 @@ async function check(force = false) {
 }
 
 // How this copy was installed decides how it updates. The Docker image sets BRIDGE_DOCKER.
-const how = () => (IN_APP ? (IS_MAC || IS_WIN ? 'app' : 'app-linux') : process.env.BRIDGE_DOCKER ? 'docker' : 'source')
+// BRIDGE_INSTALL_HOW (tests): stands in for it ('app': the desktop app on a Mac or Windows).
+const HOWS = ['app', 'app-linux', 'docker', 'source']
+const how = () => (HOWS.includes(process.env.BRIDGE_INSTALL_HOW) ? process.env.BRIDGE_INSTALL_HOW : IN_APP ? (IS_MAC || IS_WIN ? 'app' : 'app-linux') : process.env.BRIDGE_DOCKER ? 'docker' : 'source')
 const COMMAND = { source: 'git pull && npm start', 'app-linux': `curl -fsSL https://raw.githubusercontent.com/${REPO}/main/install.sh | sh`, docker: 'docker compose pull && docker compose up -d' }
 
 // A newer release this Mac can't open (m: machine()): { latest, macos: what it needs, have: what
@@ -78,8 +82,10 @@ export async function status({ force = false, disabled = false } = {}) {
     url: s.url,
     notes: s.notes,
     checkedAt: s.at ? new Date(s.at).toISOString() : null,
-    // When it came out: one that's been out a few days is said more plainly (UpdateChip.jsx).
+    // When it came out: one that's been out a few days is said more plainly (UpdateChip.jsx), and
+    // one only just out doesn't go in by itself yet (autoView).
     publishedAt: s.publishedAt || null,
+    prerelease: !!s.prerelease,
     error: s.error,
     how: how(),
     // Shown when the app can't update itself: from source, Linux (the .deb asks for a password),
@@ -89,8 +95,9 @@ export async function status({ force = false, disabled = false } = {}) {
     // knows its own version: the page compares).
     appUpdate: (how() === 'app' || (how() === 'source' && (IS_MAC || IS_WIN))) && !low,
     // The last update that didn't go through, while this server is still here to say so (one that
-    // did replaces it). Its last line says why.
-    failed: lastRun?.failed && Date.now() - lastRun.at < 60 * 60 * 1000 ? lastRun.failed : null,
+    // did replaces it). Its last line says why. One tried by itself while you were away is said
+    // until it's tried again (auto: it was by itself).
+    failed: lastRun?.failed && Date.now() - lastRun.at < 60 * 60 * 1000 ? lastRun.failed : autoFailed(s.latest),
   }
 }
 
@@ -101,12 +108,21 @@ export async function status({ force = false, disabled = false } = {}) {
 // app: the desktop app only, for a server run from your clone: the installer replaces the app where
 // it's running and opens it again, and leaves this server be (it stops only what's inside the app).
 // BRIDGE_INSTALL_STANDIN: the tests' stand-in runs instead, told what would have.
-let lastRun = null // { at, log, failed: { code, line } | null }
-export async function install({ app = false } = {}) {
+// auto: by itself while you're away (the desktop app asks, desktop/main.js). Everything is asked
+// again with GitHub's answer as it is now (a release pulled meanwhile isn't installed), and nothing
+// starts unless it's still the time: { started: false, why } then.
+let lastRun = null // { at, log, failed: { code, line, auto } | null }
+export async function install({ app = false, auto = false } = {}) {
   const forApp = app && how() === 'source' && (IS_MAC || IS_WIN)
   if (how() !== 'app' && !forApp) throw new Error('This copy updates from a terminal; see the command shown.')
   const s = await check(true)
   const { latest } = s
+  if (auto) {
+    // And the app said it's the time within the last minute (it asks again right before this).
+    const v = await autoView()
+    const fresh = !!v.desktop && Date.now() - Date.parse(v.desktop.at) < 60 * 1000
+    if (!v.ready || !fresh) return { started: false, why: v.why.length ? v.why : v.desktop?.why.length ? v.desktop.why : ['desktop'] }
+  }
   if (!/^\d+\.\d+\.\d+$/.test(latest || '')) throw new Error('Couldn\'t find the newest version on GitHub; try again in a minute.')
   const m = await machine()
   const held = heldBack(s, m) || (forApp ? below(s, m) : null)
@@ -128,15 +144,77 @@ export async function install({ app = false } = {}) {
   // network, a download that doesn't match its checksum) is said here, with the installer's last words.
   const run = { at: Date.now(), log, failed: null }
   lastRun = run
-  child.on('exit', (code) => {
-    if (!code) return
-    let line = ''
-    try { line = String(fs.readFileSync(log, 'utf8')).trim().split('\n').filter(Boolean).pop() || '' } catch { /* no log */ }
-    run.failed = { code, line: line.replace(/^Bridge AI install:\s*/, '').slice(0, 300) }
-  })
-  child.on('error', (e) => { run.failed = { code: -1, line: e.message } })
+  // Kept on disk too, as this server is stopped on the way: whether it went in by itself, and
+  // which version not to try by itself again for a while if it didn't.
+  const t = { version: latest, from: current, at: run.at, auto: !!auto, failed: null }
+  setTried(t)
+  const failed = (f) => { run.failed = { ...f, ...(auto ? { auto: true } : {}) }; setTried({ ...t, failed: f }) }
+  child.on('exit', (code) => { if (code) failed({ code, line: lastLine(log) }) })
+  child.on('error', (e) => failed({ code: -1, line: e.message }))
   child.unref()
   return { started: true, log }
+}
+// The installer's last words: what it was doing when it stopped.
+function lastLine(log) {
+  let line = ''
+  try { line = String(fs.readFileSync(log, 'utf8')).trim().split('\n').filter(Boolean).pop() || '' } catch { /* no log */ }
+  return line.replace(/^Bridge AI install:\s*/, '').slice(0, 300)
+}
+
+// ---------- Updating by itself while you're away ----------
+// Settings › About & Updates › Update by itself while you're away: on unless turned off, in the
+// desktop app on a Mac or Windows (where install() works). The desktop app asks once a minute
+// (desktop/main.js), and this says what the server waits for (shared/autoupdate.js): a release
+// that's offered here and has been out a few hours, and nothing running that an update would cut
+// short (quiet, from index.js). The app says what it waits for itself (you're here, a window with
+// unsaved work); that's kept a few minutes, for About & Updates to say why when it's been a while.
+let settings = () => ({ on: true, checks: true })
+let quiet = async () => ({ agents: null })
+export const useSettings = (fn) => { settings = fn }
+export const useQuiet = (fn) => { quiet = fn }
+let desktopSaid = null // { why, at }
+const SAID_FOR = 5 * 60 * 1000
+
+// The last update this copy started ({ version, from, at, auto, failed }), in the cache.
+const TRIED = () => path.join(cacheFile('update'), 'tried.json')
+let tried
+function lastTried() {
+  if (tried === undefined) try { const x = JSON.parse(fs.readFileSync(TRIED(), 'utf8')); tried = x?.version ? x : null } catch { tried = null }
+  return tried
+}
+function setTried(t) {
+  tried = t
+  try { ensureDir(cacheFile('update')); fs.writeFileSync(TRIED(), JSON.stringify(t)) } catch { /* kept in memory */ }
+}
+// An update by itself that didn't go through, said until it's tried again. One that stopped this
+// server and then didn't bring the new version counts once it's had its time.
+function autoFailed(latest) {
+  const x = lastTried()
+  if (!x?.auto || x.from !== current || x.version !== latest) return null
+  const ago = Date.now() - x.at
+  if (ago >= RETRY_HOURS * 60 * 60 * 1000 || (!x.failed && ago < INSTALL_MINUTES * 60 * 1000)) return null
+  return { ...(x.failed || { code: null, line: lastLine(path.join(cacheFile('update'), 'update.log')) }), auto: true }
+}
+
+// { on, release: there's one to update to, why: what the server waits for, desktop: what the app
+// last said it waits for ({ why, at }, null when it hasn't lately), ready: neither waits, done: the
+// update that went in by itself to this version ({ version, at }), kept until the next one }.
+// said: what the desktop app waits for, now.
+export async function autoView({ said } = {}) {
+  if (Array.isArray(said)) desktopSaid = { why: said.filter((x) => typeof x === 'string').slice(0, 20).map((x) => x.slice(0, 40)), at: Date.now() }
+  const { on, checks } = settings()
+  const u = await status({ disabled: !checks })
+  const now = Date.now()
+  const release = !releaseWhy({ u, on, checks, now }).length
+  // What runs here is only asked while there's something to update to.
+  const why = serverWhy({ u, on, checks, quiet: release ? await quiet().catch(() => ({ agents: null })) : {}, tried: lastTried(), current, now })
+  const desktop = desktopSaid && now - desktopSaid.at < SAID_FOR ? { why: desktopSaid.why, at: new Date(desktopSaid.at).toISOString() } : null
+  const x = lastTried()
+  return {
+    on, release, why, desktop,
+    ready: release && !why.length && !!desktop && !desktop.why.length,
+    done: x?.auto && x.version === current ? { version: x.version, at: new Date(x.at).toISOString() } : null,
+  }
 }
 
 // The desktop app that's open now (its window shows this server), for its update to go where it is.
