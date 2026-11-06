@@ -215,7 +215,8 @@ export async function restore(root, rel, id) {
 }
 
 // A new file in a folder (relative to root), from the start the page made for it (buf), or empty
-// text. A name already taken gets " 2", " 3"... so nothing is overwritten.
+// text. A name already taken gets " 2", " 3"... so nothing is overwritten; a copy Studio makes,
+// "<name> (Studio)", gets "(Studio 2)".
 export async function create(root, dirRel, name, buf = Buffer.from('')) {
   const { real: dir } = await safePath(root, dirRel || '')
   const st = await fsp.stat(dir)
@@ -224,7 +225,8 @@ export async function create(root, dirRel, name, buf = Buffer.from('')) {
   if (!clean || !opens(clean)) throw new Error('A name ending in .docx, .md, .xlsx, .csv, .pptx or .html')
   const ext = path.extname(clean), stem = clean.slice(0, -ext.length)
   let file = path.join(dir, clean)
-  for (let n = 2; await fsp.access(file).then(() => true, () => false); n++) file = path.join(dir, `${stem} ${n}${ext}`)
+  const nth = (n) => (/ \(Studio\)$/.test(stem) ? `${stem.slice(0, -1)} ${n})` : `${stem} ${n}`)
+  for (let n = 2; await fsp.access(file).then(() => true, () => false); n++) file = path.join(dir, `${nth(n)}${ext}`)
   await fsp.writeFile(file, buf, { flag: 'wx' })
   return { path: path.relative((await safePath(root, '')).realRoot, file), name: path.basename(file) }
 }

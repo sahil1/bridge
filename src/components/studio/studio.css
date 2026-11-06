@@ -285,6 +285,7 @@
 .app.narrow .sd-status-btn { height: 40px; padding: 0 8px; }
 .app.narrow .sd-status-btn.vers { display: none; } /* the header's clock is there */
 .app.narrow .sd-empty .btn.small { height: 40px; padding: 0 14px; }
+.app.narrow .sd-conflict .btn.small, .app.narrow .sd-conflict .ghost-btn { min-height: 40px; }
 .app.narrow .sd-versions li { padding: 4px 6px; }
 .app.narrow .sd-v-acts { gap: 4px; }
 .app.narrow .sd-v-acts .link-btn { min-height: 40px; min-width: 40px; display: inline-flex; align-items: center; justify-content: center; }

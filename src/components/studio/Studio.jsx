@@ -198,6 +198,8 @@ const KEEPS = {
   '.pdf': tx('Shown here, not edited: Ask an agent to change it, or the file it was made from.'),
   '.html': tx('Saved as it\'s written: one HTML file that works on its own.'),
 }
+// A PowerPoint whose saves go over it: one you chose to replace, or a copy Studio made. Asked once.
+const replaces = (f, yes = false) => { const k = `cc-studio-pptx:${f.root}\n${f.path}`; try { if (yes) localStorage.setItem(k, '1'); return !!localStorage.getItem(k) } catch { return yes } }
 const keepsOf = (kind, ext) => {
   if (kind === 'deck' && ext !== '.pptx') return t(KEEPS.deck)
   if (ext === '.csv' || ext === '.tsv') return t(KEEPS['.csv'], { kind: ext.slice(1).toUpperCase() })
@@ -263,7 +265,9 @@ export function StudioPage({ root, path: rel, onBack, onOpen }) {
   }, [f, load])
   const save = useCallback(async ({ force = false, ok = false } = {}) => {
     if (!handle.current || !meta || READ_ONLY(meta.kind, meta.ext)) return
-    if (RISKY[meta.ext] && !ok) { try { if (!localStorage.getItem(`cc-studio-said${meta.ext}`)) { setWarn(meta.ext); return } } catch { /* say it again next time */ } }
+    // A PowerPoint is redrawn in Studio's layouts: asked once per file, its copy the default.
+    if (meta.ext === '.pptx' && !ok && !replaces(f)) { setWarn(meta.ext); return }
+    if (RISKY[meta.ext] && !ok && meta.ext !== '.pptx') { try { if (!localStorage.getItem(`cc-studio-said${meta.ext}`)) { setWarn(meta.ext); return } } catch { /* say it again next time */ } }
     setSaving(true); setNote(null)
     try {
       const bytes = await handle.current.save()
@@ -276,6 +280,19 @@ export function StudioPage({ root, path: rel, onBack, onOpen }) {
       else setNote({ text: t("Couldn't save it: {error}", { error: e.message }), error: true })
     } finally { setSaving(false) }
   }, [f, meta])
+  // Saved as a copy beside it ("<name> (Studio).pptx", never over another), which opens and is
+  // saved to from then on; this one goes back to the file as it is.
+  const saveCopy = async () => {
+    setWarn(null); setSaving(true); setNote(null)
+    try {
+      const bytes = await handle.current.save()
+      const r = await api('/studio/new', { method: 'POST', body: { root, dir: rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : '', name: `${(meta?.name || rel.split('/').pop()).replace(/\.pptx$/i, '')} (Studio).pptx`, data: base64(bytes) } })
+      replaces({ root, path: r.path }, true)
+      await load()
+      setNote({ text: t('Saved as {name}, a copy beside the original, which is as it was.', { name: r.name }) })
+      onOpen?.({ root, path: r.path })
+    } catch (e) { setNote({ text: t("Couldn't save it: {error}", { error: e.message }), error: true }) } finally { setSaving(false) }
+  }
   useEffect(() => {
     const key = (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') { e.preventDefault(); save() } }
     window.addEventListener('keydown', key)
@@ -335,7 +352,15 @@ export function StudioPage({ root, path: rel, onBack, onOpen }) {
           <button type="button" className="btn small" onClick={() => save({ force: true, ok: true })}>{t('Save mine over it')}</button>
         </div>
       )}
-      {warn && (
+      {warn === '.pptx' && (
+        <div className="sd-bar sd-conflict" role="alertdialog">
+          <span>{t(RISKY[warn])}</span>
+          <button type="button" className="btn small primary" onClick={saveCopy} title={t('A copy beside it, which opens here; the original stays as it is')}>{t('Save as a copy')}</button>
+          <button type="button" className="btn small" onClick={() => { replaces(f, true); setWarn(null); save({ ok: true }) }}>{t('Replace the original')}</button>
+          <button type="button" className="ghost-btn" onClick={() => setWarn(null)}>{t('Not now')}</button>
+        </div>
+      )}
+      {warn && warn !== '.pptx' && (
         <div className="sd-bar sd-conflict" role="alertdialog">
           <span>{t(RISKY[warn])}</span>
           <button type="button" className="btn small primary" onClick={() => { try { localStorage.setItem(`cc-studio-said${warn}`, '1') } catch { /* asks again next time */ } setWarn(null); save({ ok: true }) }}>{t('Save')}</button>
