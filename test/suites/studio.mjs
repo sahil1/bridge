@@ -4,7 +4,7 @@
 // change made meanwhile is refused; a change from outside, or from an agent asked, is kept as a
 // version by them; an older version put back keeps the one before too; a new file never
 // overwrites; design packs. The page: Studio's home with New and Recent; a Markdown file edited
-// and saved; a Word file's text; a sheet; a deck drawn, and its PowerPoint beside it; a page drawn
+// and saved; a Word file's text; a sheet, still saved until a value's typed in, then saved with it; a deck drawn, and its PowerPoint beside it; a page drawn
 // as it's typed; versions and Put back; Ask an agent queueing the change for the agent you pick.
 // The editors finished: a document's toolbar (each button named, with its shortcut in its tooltip,
 // doing what it says and showing it, only what the format keeps), heading levels, links, a table's
@@ -338,6 +338,23 @@ try {
   await shot(p, `${tag}studio-sheet-ask`)
   await p.locator('.sd-ask button', { hasText: 'Cancel' }).click()
   ok(looks <= 2 && reqs.length <= 15, `and asks the server little: whether the file changed ${looks} time${looks === 1 ? '' : 's'} in 10 s, ${reqs.length} requests in all (at most 90 a minute, as everywhere)`, [...new Set(reqs)])
+  // Edited and saved. Left alone and its cells picked, it's still Saved (Univer's own setting up,
+  // and its cell editor filled as a cell is picked, aren't changes). A value typed in B3 (Design's
+  // cost) is: Unsaved changes and Save on, and saved, the file has it with its total worked out again.
+  const sheetState = () => p.locator('.sd-status .sd-state').innerText().catch(() => '')
+  ok((await sheetState()) === 'Saved', 'a sheet opened, left alone and a cell picked: still Saved', await sheetState())
+  await p.mouse.click(grid.x + 46 + 88 + 44, grid.y + 20 + 24 * 2 + 12)
+  await sleep(300)
+  await p.keyboard.type('950')
+  await p.keyboard.press('Enter')
+  ok(!!(await until(async () => (await sheetState()) === 'Unsaved changes' && (await p.locator('.pane-head button[aria-label="Save"]').isEnabled().catch(() => false)), 5000)), 'a value typed in a cell: Unsaved changes, and Save is on', await sheetState())
+  await p.locator('.pane-head button[aria-label="Save"]').click({ timeout: 3000 }).catch(() => {})
+  const keeps = p.locator('.sd-conflict[role="alertdialog"]')
+  ok(/formulas, formats, merged cells and every sheet/.test(await keeps.innerText({ timeout: 5000 }).catch(() => '')), "an Excel file's first save here says what's kept", await keeps.innerText().catch(() => ''))
+  await keeps.locator('button', { hasText: 'Save' }).click({ timeout: 3000 }).catch(() => {})
+  const cellsOf = async () => { try { const x = new ExcelJS.Workbook(); await x.xlsx.readFile(path.join(dir, 'budget.xlsx')); const s = x.getWorksheet('Budget'); return { B3: s.getCell('B3').value, B4: s.getCell('B4').value, A1bold: !!s.getCell('A1').font?.bold } } catch { return null } }
+  const sheetSaved = await until(async () => { const c = await cellsOf(); return c?.B3 === 950 && c.B4?.formula === 'SUM(B2:B3)' && c.B4.result === 1070 && c.A1bold && (await sheetState()) === 'Saved' && c }, 10000)
+  ok(!!sheetSaved, 'saved: the file has the value, its total worked out again (1070), and its bold heading; the status line says Saved', { cells: await cellsOf(), state: await sheetState() })
   // A deck, drawn, and its PowerPoint beside it (the deck editor itself: studio-deck).
   await open('pitch.md')
   const slides = await until(async () => p.locator('.sd-strip .sd-thumb').count(), 15000)

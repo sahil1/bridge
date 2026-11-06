@@ -61,7 +61,7 @@ else contextBridge.exposeInMainWorld('bridgeApp', {
   // Meetings: the main window says when it's recording (so closing it hides it instead), and the
   // floating card fits its size, hides, takes notes for a call and opens things in the main window.
   recording: (on) => ipcRenderer.invoke('bridge:recording', !!on),
-  floatSize: (w, h) => ipcRenderer.send('bridge:float-size', w, h),
+  floatSize: (w, h, low) => ipcRenderer.send('bridge:float-size', w, h, low),
   floatHide: () => ipcRenderer.invoke('bridge:float-hide'),
   floatStart: (o) => ipcRenderer.invoke('bridge:float-start', o),
   floatOpen: (o) => ipcRenderer.invoke('bridge:float-open', o),
