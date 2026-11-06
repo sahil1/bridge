@@ -554,7 +554,8 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
   useEffect(() => { if (meetAt !== atStart) setMeetAt(-1) }, [atStart]) // eslint-disable-line react-hooks/exhaustive-deps
   const onlyMeet = mentionQ != null && meetAt === atStart
   const { items: found, cwd: agentCwd } = useMentions(filesUrl, mentionQ)
-  const cwdName = agentCwd ? agentCwd.split('/').pop() : null
+  // The agent's folder by its name alone, on Windows too (C:\Users\me\launch is launch).
+  const cwdName = agentCwd ? agentCwd.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || null : null
   const [mentionSel, setMentionSel] = useState(0)
   useEffect(() => { setMentionSel(0) }, [mentionQ, onlyMeet])
   const baseName = (p) => p.replace(/\/$/, '').split('/').pop()

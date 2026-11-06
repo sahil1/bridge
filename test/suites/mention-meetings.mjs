@@ -98,7 +98,8 @@ try {
   let r = await settle((x) => x.length > 2 && x.some((y) => y.label === 'quarterly-report.md'))
   ok(r[0]?.kind === 'jump' && r[0].label === 'Meetings' && r[0].desc === 'Your recorded meetings, on every computer' && r[0].icon && r[0].on, '"@" alone: the first row is Meetings, with the meetings icon and what it is, chosen', r.slice(0, 2))
   ok(r.slice(1).every((x) => x.kind === 'file') && r.some((x) => x.label === 'src/') && r.some((x) => x.label === 'notes.md'), 'then the folder\'s files', r.map((x) => x.label))
-  ok(/^Files and meetings ?launch\/$/.test(await title()), 'the title says what\'s in it: files and meetings, in the agent\'s folder', await title())
+  // The folder by its name alone, on every system (on Windows its path has backslashes).
+  ok(/^Files and meetings ?launch\/$/.test(await title()), 'the title says what\'s in it: files and meetings, in the agent\'s folder, by its name', await title())
   await shot(p, `${tag}mention-at`)
 
   await p.keyboard.press('Enter')
@@ -159,7 +160,7 @@ try {
     await kbox.pressSequentially('@', { delay: 30 })
     kr = await until(async () => { const x = await krows(); return x.some((y) => y.label === 'quarterly-report.md') && x }, 8000, 100) || await krows()
     const ktitle = await k.p.locator('.mention-menu .slash-title').innerText().catch(() => '')
-    ok(kr.every((x) => x.kind === 'file') && !/meetings/i.test(ktitle), 'and @ is only the files', [kr.map((x) => x.label), ktitle])
+    ok(kr.every((x) => x.kind === 'file') && ktitle === 'launch/', 'and @ is only the files, under the agent\'s folder', [kr.map((x) => x.label), ktitle])
     ok(!k.errors.length, 'no page errors there', k.errors)
     await kbox.fill('')
     await k.p.waitForTimeout(400)
