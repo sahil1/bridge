@@ -137,6 +137,8 @@ export default function Meetings() {
   const [vocab, setVocab] = useState(null)
   const [instr, setInstr] = useState(null)
   const [memory, setMemory] = useState(false)
+  // Prep Assist needs the calendar: only where there's one (a Mac).
+  const calendar = usePoll('/config', 10 * 60 * 1000).data?.calendar === true
   useEffect(() => { api('/chat/models').then((r) => setModels(r.models || [])).catch(() => setModels([])) }, [])
   const m = s?.effective?.meetings || {}
   useEffect(() => { if (s) { setVocab(m.vocabulary || ''); setInstr(m.instructions || '') } }, [s]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -242,6 +244,10 @@ export default function Meetings() {
             <option value="high">High: up to three, about every 30 seconds</option>
           </select>
         </label>
+        {calendar && <label className="st-check">
+          <input type="checkbox" checked={m.prep !== false} onChange={(e) => set({ prep: e.target.checked })} />
+          <span><b>{t('Prep Assist before each meeting')}</b> <span className="muted small">{t("Fifteen minutes before a meeting with other people, the model that writes your notes suggests goals and questions from who's coming, last time with them, the invite and your mail with them. Off, it does this only when you ask, from the meeting in Calendar or Home.")}{window.bridgeApp?.desktop && ` ${t('In the desktop app, the floating card shows them ten minutes before, with Join.')}`}</span></span>
+        </label>}
         <label className="st-check">
           <input type="checkbox" checked={m.nameSpeakers !== false} onChange={(e) => set({ nameSpeakers: e.target.checked })} />
           <span><b>Name who spoke on the call</b> <span className="muted small">Before the first summary, the model works out who said each of Them's lines from names said, the invite and the screen. On a Mac, a watched screen is read while the call talks, and those pictures aren't kept. With one other person invited, it's them. In a room, the voices told apart are named the same way.</span></span>

@@ -10,7 +10,8 @@
 //   "bridge ay eye" to "Bridge AI", rewrites a line that says "rewrite me" (which meetings.js
 //   turns down), and leaves out "Thanks for watching" and "drop me please"; Assist suggests a
 //   question about what the files say (or the invite, without them) and a check of the last thing
-//   said.
+//   said. Prep Assist, before a meeting: a goal from the invite, a follow-up on what's still open
+//   and a question about the newest email, from what it was sent.
 //   Edit by voice ("Instruction: … Text: …"): the text with "teh" spelled right and its first letter a
 //   capital, in quotes and a code fence (which Bridge AI takes off).
 //   Dictation to tidy ("<dictation>…</dictation>"): "you know" taken out, in quotes; a model that
@@ -114,6 +115,19 @@ function answer(b) {
     const lastSaid = [...last.matchAll(/^\[[^\]]+\] [^:]+: (.*)$/gm)].at(-1)?.[1]
     const items = [{ kind: 'question', text: file ? `Ask about "${file[2].slice(0, 40)}"` : 'Ask what they hope to get out of this', why: file ? `${file[1]}` : 'The invite' }]
     if (lastSaid) items.push({ kind: 'check', text: `Check: "${lastSaid.slice(0, 40)}"`, why: 'Just said' })
+    return say(JSON.stringify({ items }))
+  }
+  // Prep Assist, before a meeting: a goal from the invite, a follow-up on what's still open from last
+  // time (theirs first), and a question about the newest email with them, each from what it was sent.
+  if (/^Prepare me for a meeting:/.test(last)) {
+    const invite = /^The invite says: (.+)$/m.exec(last)?.[1]
+    const open = /^Still open, theirs: ([^;\n]+)/m.exec(last)?.[1] || /^Still open, mine: ([^;\n]+)/m.exec(last)?.[1]
+    const mail = /^- From ([^,\n]+), [^:\n]+: "([^"\n]+)"/m.exec(last)
+    const items = []
+    if (invite) items.push({ kind: 'goal', text: `Agree on: ${invite}`, why: 'The invite' })
+    if (open) items.push({ kind: 'follow-up', text: `Settle "${open}"`, why: 'Last time' })
+    if (mail) items.push({ kind: 'question', text: `Ask ${mail[1]} about "${mail[2]}"`, why: `Email from ${mail[1]}` })
+    if (!items.length) items.push({ kind: 'question', text: 'Ask what they hope to get out of this', why: 'Nothing else to go on' })
     return say(JSON.stringify({ items }))
   }
   // Who said what: the slides and the agenda are Dan's, the budget Priya's, the rest unknown.

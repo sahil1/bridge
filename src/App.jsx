@@ -502,6 +502,14 @@ function App() {
     window.addEventListener('bridge-open-card', on)
     return () => window.removeEventListener('bridge-open-card', on)
   }, [])
+  // A calendar event, with its prep (the floating card's Open prep, Home's Coming Up): Today ›
+  // Calendar on its day, with it open.
+  const showTodayRef = useRef(null)
+  useEffect(() => {
+    const on = (e) => { if (e.detail?.date) showTodayRef.current?.('calendar', { date: e.detail.date, event: e.detail.id || null }) }
+    window.addEventListener('bridge-open-event', on)
+    return () => window.removeEventListener('bridge-open-event', on)
+  }, [])
   // Home on: the app opens there, once each time it loads (an agent a link names still comes after).
   const homed = useRef(false)
   useEffect(() => {
@@ -557,6 +565,7 @@ function App() {
     else set({ dockMin: false, todayOpen: true, max: 'dock' })
     if (detail) setTimeout(() => openToday(tab, detail), 60)
   }
+  showTodayRef.current = showToday
 
   // Open an agent (or shell tab) straight into its Files view, optionally at a file.
   const openFiles = (id, filePath) => {
@@ -601,8 +610,9 @@ function App() {
   useHotkey(useCallback((e) => (e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'f', []), () => setHistory((v) => !v))
   // ⌥1 and ⌥2 alone: with ⌘ (or Ctrl) they're a document's Heading 1 and 2, in Studio.
   useHotkey(useCallback((e) => e.altKey && !e.metaKey && !e.ctrlKey && (e.code === 'Digit1' || e.code === 'Digit2'), []), (e) => setView(e.code === 'Digit1' ? 'command' : 'herdr'))
-  // (Not while something open says Esc is its own, data-esc: Mail's Reply Assist, say.)
-  useHotkey(useCallback((e) => e.key === 'Escape' && !e.target.closest?.('.xterm, textarea, input, .quick-open, .tour, .excalidraw, .find-bar') && !document.querySelector('[data-esc]'), []), () => set({ max: null }))
+  // (Not while something open says Esc is its own, data-esc: Mail's Reply Assist, say; and an event
+  // open in the calendar, or its menu, closes first: Escape is its, then the panel's.)
+  useHotkey(useCallback((e) => e.key === 'Escape' && !e.target.closest?.('.xterm, textarea, input, .quick-open, .tour, .excalidraw, .find-bar') && !document.querySelector('[data-esc], .calv .cal-detail, .calv-menu'), []), () => set({ max: null }))
 
   // The tour: once per device after setup (the phone layout has its own), and again on request.
   // It waits while anything else is open on top, and starts from the beginning after.

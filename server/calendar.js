@@ -2,7 +2,9 @@
 // (native/bridgecal.swift), or icalBuddy on a Mac without it. The Exchange account is
 // already synced there, so there's no sign-in and nothing leaves the Mac.
 // Meeting notes carry Teams passcodes and organizer links; only the join link and the
-// short agenda above the Teams boilerplate are kept.
+// short agenda above the Teams boilerplate are kept. With bridgecal, each event also has its
+// calendar's colour, a lasting id, your answer to it, who organised it and the addresses of who's
+// invited. It only reads: nothing here adds, changes or answers an event.
 import { execFile } from 'node:child_process'
 import { tool, calBin } from './fixes.js'
 import { notPerson } from './notpeople.js'
@@ -88,12 +90,19 @@ export function docLinks(...texts) {
   return out
 }
 
+// Cut to n characters at a whole word, with "…" (never mid-word), when it's longer.
+export const whole = (s, n) => {
+  const t = String(s ?? '').replace(/\s+/g, ' ').trim()
+  if (t.length <= n) return t
+  const c = t.slice(0, n)
+  return `${(c.slice(0, c.lastIndexOf(' ')) || c).replace(/[\s,;:.·-]+$/, '')}…`
+}
 function agendaOf(notes) {
   const before = (notes || '').split(/_{8,}|Microsoft Teams|Join Zoom|Join with Google Meet/)[0]
   const lines = before.split('\n').map((l) => l.replace(/^\s*[*•-]\s*/, '').trim()).filter((l) => l && !/^https?:/.test(l))
   // Exchange often stores curly apostrophes as "???" (I???d); show them as apostrophes.
   const text = lines.join(' · ').replace(/(\w)\?{3}(\w)/g, "$1'$2").replace(/\s+/g, ' ').trim()
-  return text ? text.slice(0, 220) : null
+  return text ? whole(text, 220) : null
 }
 
 export function parse(out) {
@@ -117,13 +126,24 @@ export function parse(out) {
   return events.sort(byStart)
 }
 
+// Your answer to an invite, as bridgecal reads it (icalBuddy can't): accepted, tentative,
+// declined, none (not answered yet), organizer (yours), or null (no one invited).
+const ANSWERS = new Set(['accepted', 'tentative', 'declined', 'none', 'organizer'])
+const HEX = /^#[0-9a-f]{6}$/i
+
 // One event as the app shows it, from what bridgecal or icalBuddy said about it. start, end: Dates.
 // Its people only: a room, a shared calendar, a list or a mailbox like schedule@ invited with them
-// isn't someone at it (told while its address is still whole).
-function eventOf({ title, calendar, start, end, allDay, location, url, notes, attendees: all = [], canceled = false }) {
+// isn't someone at it (told while its address is still whole). id: the title and start, as before
+// (callevent.js and meetings keep it); uid: the event's own lasting id with its start, when the
+// calendar has one, so a renamed event is still itself.
+function eventOf({ title, calendar, start, end, allDay, location, url, notes, attendees: all = [], emails = [], canceled = false, color, uid, response, organizer }) {
   const attendees = all.filter((a) => !notPerson(a))
   return {
     id: `${title}|${start.toISOString()}`,
+    uid: uid ? `${uid}|${start.toISOString()}` : null,
+    color: HEX.test(color || '') ? color.toLowerCase() : null,
+    response: ANSWERS.has(response) ? response : null,
+    organizer: organizer ? (organizer.includes('@') ? organizer.split('@')[0] : organizer) : null,
     title: title || '(no title)',
     canceled: canceled || /^cancell?ed:/i.test(title),
     calendar: calendar || null,
@@ -135,6 +155,8 @@ function eventOf({ title, calendar, start, end, allDay, location, url, notes, at
     join: joinLink(url) || joinLink(notes),
     attendees: attendees.slice(0, 12).map((a) => (a.includes('@') ? a.split('@')[0] : a)),
     attendeeCount: attendees.length,
+    // Their addresses, for Prep Assist to find your mail with them and the people you've met.
+    emails: emails.filter((x) => /^[^\s@]+@[^\s@]+$/.test(x) && !notPerson(x)).slice(0, 50).map((x) => x.toLowerCase()),
     agenda: agendaOf(notes),
     links: docLinks(url, notes),
   }
@@ -188,6 +210,9 @@ export function makeCalendar(cfg) {
     at0 = Date.now()
     return cache
   }
+  // Today's and tomorrow's as last read for the app, or null: no read of its own, so what looks in
+  // the background (Prep Assist) never waits on the calendar or asks macOS for it.
+  get.cached = () => cache
   // Any span up to a year, for the week, month and year views. Long spans skip notes and
   // attendees (the year view only needs titles and times).
   get.range = async (from, to, force = false) => {
@@ -204,4 +229,45 @@ export function makeCalendar(cfg) {
     return value
   }
   return get
+}
+
+// How the calendar is shown, the same on each of your devices (config.json's calendar): the day the
+// week starts on (0 Sunday, 1 Monday, 6 Saturday; null: what the browser's language says), your
+// working hours (what the day and week grids show at least, the rest shaded), the calendars hidden
+// from view (still read, so the legend can bring them back) and whether Chief of Staff's tasks with
+// a day are on the grid. Only what Bridge AI shows: nothing here changes a calendar.
+const hour = (v, d) => (Number.isInteger(v) && v >= 0 && v <= 24 ? v : d)
+export function viewOf(cfg) {
+  const c = cfg.calendar || {}
+  const workStart = Math.min(23, hour(c.workStart, 9))
+  const end = hour(c.workEnd, 17)
+  return {
+    weekStart: [0, 1, 6].includes(c.weekStart) ? c.weekStart : null,
+    workStart, workEnd: end > workStart ? end : Math.min(24, workStart + 8),
+    hidden: Array.isArray(c.hidden) ? c.hidden.filter((x) => typeof x === 'string').slice(0, 60) : [],
+    tasks: c.tasks !== false,
+  }
+}
+// A change from the calendar's own controls, checked, as settings.patch takes it (which keeps the
+// rest of calendar, such as exclude).
+export function viewPatch(body = {}, cfg = {}) {
+  const now = viewOf(cfg)
+  const out = {}
+  if ('weekStart' in body) {
+    if (body.weekStart !== null && ![0, 1, 6].includes(body.weekStart)) throw new Error('The week starts on a Sunday, a Monday or a Saturday')
+    out.weekStart = body.weekStart
+  }
+  if ('workStart' in body || 'workEnd' in body) {
+    const s = 'workStart' in body ? body.workStart : now.workStart
+    const e = 'workEnd' in body ? body.workEnd : now.workEnd
+    if (!Number.isInteger(s) || !Number.isInteger(e) || s < 0 || e > 24 || e <= s) throw new Error('Working hours end after they start, within the day')
+    Object.assign(out, { workStart: s, workEnd: e })
+  }
+  if ('hidden' in body) {
+    if (!Array.isArray(body.hidden)) throw new Error('Say which calendars to hide')
+    out.hidden = [...new Set(body.hidden.map((x) => String(x).slice(0, 120)).filter(Boolean))].slice(0, 60)
+  }
+  if ('tasks' in body) out.tasks = !!body.tasks
+  if (!Object.keys(out).length) throw new Error('Nothing to change')
+  return { calendar: out }
 }

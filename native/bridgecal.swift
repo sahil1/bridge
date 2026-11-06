@@ -9,12 +9,38 @@
 //   bridgecal events <from> <to> full|light [leave out]...
 //                      the events from the start of <from> to the end of <to> (YYYY-MM-DD, this
 //                      Mac's time zone) as JSON, leaving out the calendars named after them. light:
-//                      without notes, link and attendees (the year view). Without full access it
+//                      without notes, link and attendees (the year view). Each has its calendar's
+//                      own colour (as Calendar shows it), a lasting id, and your answer to it
+//                      (accepted, tentative, declined, none yet; organizer when it's yours). Read
+//                      only: nothing here adds, changes or answers an event. Without full access it
 //                      prints the status word instead and exits 3.
 // The reading used to be icalBuddy's; on current macOS it sees no calendars even with full access.
 //   swiftc -O -target arm64-apple-macos14.0 native/bridgecal.swift -o native/bin/bridgecal
 import EventKit
 import Foundation
+
+// A calendar's colour as #rrggbb, in sRGB: what Calendar shows for it.
+func hex(_ c: CGColor?) -> String? {
+  guard let c = c, let srgb = CGColorSpace(name: CGColorSpace.sRGB), let x = c.converted(to: srgb, intent: .defaultIntent, options: nil), let p = x.components, p.count >= 3 else { return nil }
+  let n = p.prefix(3).map { Int((max(0, min(1, $0)) * 255).rounded()) }
+  return String(format: "#%02x%02x%02x", n[0], n[1], n[2])
+}
+
+// Your answer to an invite: unknown 0, pending 1, accepted 2, declined 3, tentative 4, delegated 5.
+func answer(_ e: EKEvent) -> String? {
+  if e.organizer?.isCurrentUser == true { return "organizer" }
+  guard let me = (e.attendees ?? []).first(where: { $0.isCurrentUser }) else { return nil }
+  switch me.participantStatus.rawValue {
+  case 2: return "accepted"
+  case 3: return "declined"
+  case 4: return "tentative"
+  default: return "none"
+  }
+}
+let mail = { (p: EKParticipant) -> String? in
+  let u = p.url.absoluteString
+  return u.lowercased().hasPrefix("mailto:") ? String(u.dropFirst(7)) : nil
+}
 
 func done(_ word: String, _ code: Int32 = 0) -> Never {
   print(word)
@@ -67,12 +93,19 @@ if args.first == "events" {
         "allDay": e.isAllDay,
         "location": e.location ?? "",
         "canceled": e.status == .canceled,
+        "color": hex(e.calendar?.cgColor) ?? "",
+        // The same in every span asked for: a repeat's occurrences share it, so with its start.
+        "uid": e.calendarItemExternalIdentifier ?? e.eventIdentifier ?? "",
+        "response": answer(e) ?? "",
       ]
       if !light {
         it["url"] = e.url?.absoluteString ?? ""
         it["notes"] = e.notes ?? ""
         // People only: a room, a resource or a group invited to it isn't someone at it.
-        it["attendees"] = (e.attendees ?? []).filter { p in p.participantType == .person || p.participantType == .unknown }.map { p in p.name ?? p.url.absoluteString.replacingOccurrences(of: "mailto:", with: "") }
+        let people = (e.attendees ?? []).filter { p in p.participantType == .person || p.participantType == .unknown }
+        it["attendees"] = people.map { p in p.name ?? p.url.absoluteString.replacingOccurrences(of: "mailto:", with: "") }
+        it["emails"] = people.compactMap(mail)
+        if let o = e.organizer { it["organizer"] = o.isCurrentUser ? "" : (o.name ?? mail(o) ?? "") }
       }
       out.append(it)
     }

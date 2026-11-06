@@ -761,7 +761,8 @@ function buildMenu() {
 
 // ---------- The floating card (Settings › Meetings) ----------
 // A small window over the others, on every desktop and over full-screen apps: the meeting being
-// recorded, Take notes when a call starts, Stop when it ends, or what needs you. It's the app's own
+// recorded, Take notes when a call starts, Stop when it ends, a meeting's prep shortly before it
+// starts, or what needs you. It's the app's own
 // page (?float=1); this decides when it shows, from the server's /api/calls, every two seconds.
 const FLOAT_STATE = path.join(app.getPath('userData'), 'float.json')
 let float = null
@@ -790,7 +791,8 @@ function showFloat() {
   float.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   // Not in pictures of the screen: the meeting's own (Watch a screen) or a screen you share on a call.
   float.setContentProtection(true)
-  float.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  // Join and an invite's files, from a meeting's prep: in their own apps, as from the main window.
+  float.webContents.setWindowOpenHandler(({ url }) => { if (!isLocal(url)) openOutside(url); return { action: 'deny' } })
   float.webContents.on('will-navigate', (e) => e.preventDefault())
   float.on('moved', () => { try { const b = float.getBounds(); fs.writeFileSync(FLOAT_STATE, JSON.stringify({ x: b.x, y: b.y })) } catch { /* read-only */ } })
   float.on('closed', () => { float = null })
@@ -804,7 +806,8 @@ async function watchCalls() {
       const c = await fetch(`${URL_BASE}/api/calls`, { signal: AbortSignal.timeout(3000) }).then((r) => (r.ok ? r.json() : null))
       if (c) {
         const mode = c.float === 'menubar' && !IS_MAC ? 'meetings' : c.float || 'meetings'
-        floatKey = c.recording ? `rec:${c.recording.id}:${c.recording.callEnded || ''}` : c.prompt ? `call:${c.prompt.app}:${c.prompt.at}` : 'idle'
+        // A meeting with other people starting within ten minutes: the card shows its prep.
+        floatKey = c.recording ? `rec:${c.recording.id}:${c.recording.callEnded || ''}` : c.prompt ? `call:${c.prompt.app}:${c.prompt.at}` : c.soon ? `soon:${c.soon.id}` : 'idle'
         const want = mode === 'always' || (mode === 'meetings' && floatKey !== 'idle')
         const card = want && floatHiddenFor !== floatKey
         if (card) showFloat()
@@ -947,9 +950,11 @@ ipcMain.handle('bridge:float-start', async (e, { app: callApp } = {}) => {
   await tellMain(`window.dispatchEvent(new CustomEvent('bridge-meeting-start', { detail: { app: ${JSON.stringify(callApp)} } }))`, false)
   return true
 })
-ipcMain.handle('bridge:float-open', async (e, { meeting, meetings, paneId } = {}) => {
+// event: a calendar event's day and id, to open it in Today › Calendar with its prep.
+ipcMain.handle('bridge:float-open', async (e, { meeting, meetings, paneId, event } = {}) => {
   if (!fromFloat(e)) return false
-  if (meetings === true) await tellMain(`window.dispatchEvent(new CustomEvent('bridge-open-meeting', { detail: { list: true } }))`, true)
+  if (event && typeof event.date === 'string' && /^\d{4}-\d\d-\d\d$/.test(event.date) && typeof event.id === 'string' && event.id.length < 400) await tellMain(`window.dispatchEvent(new CustomEvent('bridge-open-event', { detail: ${JSON.stringify({ date: event.date, id: event.id })} }))`, true)
+  else if (meetings === true) await tellMain(`window.dispatchEvent(new CustomEvent('bridge-open-meeting', { detail: { list: true } }))`, true)
   else if (typeof meeting === 'string' && /^[\w-]{1,80}$/.test(meeting)) await tellMain(`window.dispatchEvent(new CustomEvent('bridge-open-meeting', { detail: { id: ${JSON.stringify(meeting)} } }))`, true)
   else if (typeof paneId === 'string' && paneId.length < 200) await tellMain(`window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: ${JSON.stringify(paneId)}, view: 'chat' } }))`, true)
   return true
