@@ -7,8 +7,10 @@
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import crypto from 'node:crypto'
+import os from 'node:os'
 import { DATA, writeFileAtomic } from './paths.js'
 import { safePath } from './files.js'
+import * as doctext from './doctext.js'
 
 const DIR = path.join(DATA, 'studio')
 const VERSIONS = path.join(DIR, 'versions')
@@ -114,7 +116,7 @@ const whoChanged = (real) => { const a = asked.get(real); return a && Date.now()
 const HOW = {
   doc: (ext) => (ext === '.docx' ? 'It\'s a Word file: change it in place with a library that keeps its formatting (python-docx, or docx for Node), not by rewriting it as text.' : ''),
   sheet: (ext) => (ext === '.xlsx' || ext === '.xlsm' ? 'It\'s an Excel file: change it with a library that keeps its formulas and formatting (openpyxl, or ExcelJS for Node).' : ''),
-  deck: (ext) => (ext === '.pptx' ? 'It\'s a PowerPoint file: change it with a library that keeps its layouts (python-pptx, or PptxGenJS for a new deck).' : 'It\'s a Markdown deck (Marp): slides are separated by lines of ---.'),
+  deck: (ext) => (ext === '.pptx' ? 'It\'s a PowerPoint file: change it with a library that keeps its layouts (python-pptx, or PptxGenJS for a new deck).' : 'It\'s a Markdown deck (Marp): slides are separated by lines of ---, and a slide\'s layout is a class directive on it (<!-- _class: title -->; also section, stats, cols, quote, image, picture). Keep its front matter.'),
   pdf: () => 'It\'s a PDF: say what you\'d change, or make the change in the file it was made from.',
   page: () => 'It\'s an HTML page: keep it one file that works on its own.',
 }
@@ -225,6 +227,94 @@ export async function create(root, dirRel, name, buf = Buffer.from('')) {
   for (let n = 2; await fsp.access(file).then(() => true, () => false); n++) file = path.join(dir, `${stem} ${n}${ext}`)
   await fsp.writeFile(file, buf, { flag: 'wx' })
   return { path: path.relative((await safePath(root, '')).realRoot, file), name: path.basename(file) }
+}
+
+// A picture for a deck, beside it: in an images folder next to the deck, named as it came (a name
+// taken gets "-2"). Its path from the deck's folder, as the deck's Markdown names it.
+const PICTURE = /\.(png|jpe?g|gif|webp|svg)$/i
+export async function savePicture(root, deckRel, name, buf) {
+  if (!Buffer.isBuffer(buf) || !buf.length) throw new Error('Expected the picture')
+  if (buf.length > 20 * 1024 * 1024) throw new Error('Too big a picture (20 MB at most)')
+  const clean = path.basename(String(name || '')).replace(/[\\/:*?"<>|#()[\]\s]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80)
+  if (!PICTURE.test(clean)) throw new Error('A picture: PNG, JPEG, GIF, WebP or SVG')
+  const { real: deck } = await safePath(root, deckRel)
+  const dir = path.join(path.dirname(deck), 'images')
+  await fsp.mkdir(dir, { recursive: true })
+  const ext = path.extname(clean), stem = clean.slice(0, -ext.length)
+  let file = path.join(dir, clean)
+  for (let n = 2; await fsp.access(file).then(() => true, () => false); n++) file = path.join(dir, `${stem}-${n}${ext}`)
+  await fsp.writeFile(file, buf, { flag: 'wx' })
+  return { src: `images/${path.basename(file)}` }
+}
+
+// ---------- Decks written by a model ----------
+// How a deck Studio draws is written: its layouts, as Marp class directives. Meetings' Make a deck
+// writes to the same.
+export const DECK_RULES = [
+  'Write it in Marp Markdown. Slides are separated by a line with --- on it, with a blank line before and after. Each slide sets its layout with a class directive as its first line, or none for a plain slide of a title and points:',
+  '- <!-- _class: title --> the opening slide: "# The title", then "## A one-line subtitle".',
+  '- (no directive) "# A title", then 3 to 5 short bullets ("- ...").',
+  '- <!-- _class: section --> a divider between parts: "# The part\'s name".',
+  '- <!-- _class: stats --> "# A title", then 2 to 4 bullets that each start with a number in bold: "- **42%** of trials convert".',
+  '- <!-- _class: cols --> "# A title", then "### One side" with its bullets and "### The other" with its bullets, side by side.',
+  '- <!-- _class: quote --> "> What someone said", then a line with who said it.',
+  'Use a mix of layouts where they fit the content. Keep bullets under 12 words, and every word true to what you were given. Under each slide, what the speaker says, in an HTML comment: <!-- ... -->. No pictures, no HTML, no code fences around the answer.',
+].join('\n')
+const clip = (s, n) => (String(s || '').length > n ? `${String(s).slice(0, n)}\n[…]` : String(s || ''))
+// The deck's slides without its front matter, numbered for the model.
+const numbered = (slides) => slides.map((s, i) => `Slide ${i + 1}:\n${s}`).join('\n\n---\n\n')
+// What to ask for: a whole deck (mode deck) from what it's about and a document's words, slide n
+// rewritten (slide), or a slide to go after slide n (add). slides: the deck's slides as Markdown.
+export function deckAsk({ mode, prompt, slides = [], at = 0, source = null, sourceName = null, count = null }) {
+  const want = String(prompt || '').trim()
+  const deck = clip(numbered(slides), 24_000)
+  const n = Math.max(0, Math.min(slides.length - 1, Number(at) || 0))
+  const parts = mode === 'deck'
+    ? [
+        `Write a slide deck${want ? `: ${want}` : ' from the document below'}.`,
+        count ? `About ${Math.max(2, Math.min(30, Number(count)))} slides.` : 'Between 6 and 10 slides.',
+        source ? `\nThe document (${sourceName || 'attached'}), to make it from:\n"""\n${clip(source, 30_000)}\n"""` : '',
+        `\n${DECK_RULES}`,
+        'Answer with the slides only, without front matter.',
+      ]
+    : [
+        `This is a slide deck, for context:\n"""\n${deck}\n"""`,
+        mode === 'add' ? `\nWrite one new slide to go after slide ${n + 1}${want ? `: ${want}` : ', that follows on from it'}.` : `\nRewrite slide ${n + 1}${want ? `: ${want}` : ' to be clearer and shorter'}. Keep what it says unless asked otherwise.`,
+        source ? `\nFrom this document (${sourceName || 'attached'}):\n"""\n${clip(source, 20_000)}\n"""` : '',
+        `\n${DECK_RULES}`,
+        `Answer with ${mode === 'add' ? 'the new slide' : 'the rewritten slide'} only, and nothing else.`,
+      ]
+  return { system: 'You write clear, short, well-structured slide decks in Marp Markdown. You answer with the Markdown asked for and nothing else.', prompt: parts.filter(Boolean).join('\n') }
+}
+// The words of a document to make a deck from: a file in your folders (from), or one sent from the
+// page (upload: { name, data } in base64), read on this computer (doctext.js) and then deleted.
+export async function deckSource(from, upload) {
+  if (from?.root && from.path) {
+    const { real } = await safePath(from.root, from.path)
+    if (!doctext.readable(real)) throw new Error(`Studio can't read the words in ${path.basename(real)} on this computer`)
+    return { name: path.basename(real), text: await doctext.textOf(real, 40_000) }
+  }
+  if (upload?.data) {
+    const name = path.basename(String(upload.name || 'document.txt')).slice(0, 120)
+    if (!doctext.readable(name)) throw new Error(`Studio can't read the words in ${name} on this computer`)
+    const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'bridge-deck-'))
+    const file = path.join(dir, name)
+    try {
+      await fsp.writeFile(file, Buffer.from(String(upload.data), 'base64'))
+      return { name, text: await doctext.textOf(file, 40_000) }
+    } finally { await fsp.rm(dir, { recursive: true, force: true }).catch(() => {}) }
+  }
+  return null
+}
+// The slides in a model's answer: its fence and front matter taken off, split at its lines of ---.
+export function deckAnswer(text) {
+  let md = String(text || '').trim()
+  const fence = /```(?:markdown|md|marp)?[ \t]*\n([\s\S]*?)\n```/.exec(md)
+  if (fence) md = fence[1].trim()
+  md = md.replace(/^---[ \t]*\n[\s\S]*?\n---[ \t]*\n/, (m) => (/^\s*(marp|title|theme|paginate|pack)\s*:/m.test(m) ? '' : m))
+  const slides = md.split(/\n[ \t]*---[ \t]*\n/).map((s) => s.trim()).filter((s) => s && s !== '---')
+  if (!slides.length) throw new Error('The model\'s answer had no slides in it. Try again, or pick another model.')
+  return { slides: slides.slice(0, 40) }
 }
 
 // ---------- Design packs ----------

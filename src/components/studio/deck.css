@@ -1,0 +1,219 @@
+/* A deck: the toolbar; the slides down the side; the slide in the middle on the app's grey, with its
+   speaker notes under it; the Markdown and Write with AI beside it; the grid of every slide; and
+   presenting. The app's colours (--pane, --ink, --line, --accent), so light and dark both look right.
+   The slides are Marp's drawings, 1280 by 720, scaled. */
+.sd-deck2 { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--pane); }
+.sd-deck-body { flex: 1; display: grid; grid-template-columns: 208px minmax(0, 1fr); min-height: 0; }
+.sd-deck2.with-md .sd-deck-body { grid-template-columns: 208px minmax(0, 1fr) minmax(300px, 32%); }
+.sd-deck2.with-ai .sd-deck-body { grid-template-columns: 208px minmax(0, 1fr) 340px; }
+.sd-deck2.with-md.with-ai .sd-deck-body { grid-template-columns: 208px minmax(0, 1fr) minmax(280px, 26%) 320px; }
+.sd-deck-said { display: flex; align-items: flex-start; gap: 6px; color: var(--ink-2); border-bottom: 1px solid var(--line); background: var(--pane-2); }
+.sd-deck-said > svg { flex: none; margin-top: 3px; color: var(--accent); }
+
+/* Marp's drawing of a slide, at 1280 by 720, scaled into its box. */
+.sd-slide { position: relative; flex: none; overflow: hidden; background: #fff; }
+/* Nothing of the app's own text (a button's centring, its font) reaches into a slide. */
+.sd-slide-in, .sd-canvas-in { all: initial; display: block; width: 1280px; height: 720px; transform-origin: 0 0; }
+.sd-slide-in svg[data-marpit-svg], .sd-canvas-in svg[data-marpit-svg] { display: block; width: 1280px; height: 720px; }
+.sd-slide-in { position: absolute; top: 0; left: 0; pointer-events: none; }
+
+/* The toolbar: buttons with their names where there's room. */
+.sd-deck-tools { z-index: 5; gap: 4px; padding: 6px 10px; }
+.sd-deck-tools .sd-group { gap: 2px; }
+.sd-deck-tools .sd-group + .sd-group { padding-left: 4px; margin-left: 2px; }
+.sd-tool.wide { display: inline-flex; align-items: center; gap: 6px; width: auto; padding: 0 9px 0 8px; }
+.sd-tool-label { font: 500 12.5px var(--font); white-space: nowrap; }
+.sd-tool.caret { width: 20px; margin-left: -2px; }
+.sd-split { gap: 0; }
+.sd-split .sd-present-btn { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.sd-split .sd-present-btn + .sd-tool.caret { width: 24px; height: 28px; border-radius: 0 7px 7px 0; background: var(--accent); color: var(--on-accent, #fff); margin-left: 1px; }
+.sd-split .sd-present-btn + .sd-tool.caret:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 85%, #000); color: var(--on-accent, #fff); }
+.sd-present-btn { height: 28px; }
+.sd-tool-menu.right, .sd-gallery.right { left: auto; right: 0; }
+.sd-tool-menu .menu-item.on { color: var(--accent); }
+.sd-menu-label { flex: 1; }
+.sd-kbd { margin-left: 12px; font: 11px var(--font); color: var(--ink-3); }
+@container (max-width: 980px) { .sd-deck-tools .sd-tool.wide .sd-tool-label { display: none; } .sd-deck-tools .sd-tool.wide { width: 30px; padding: 0; justify-content: center; } }
+
+/* Galleries: the layouts drawn in the deck's look, and the themes. */
+.sd-gallery { top: calc(100% + 4px); width: 448px; max-width: calc(100vw - 24px); max-height: min(560px, calc(100vh - 160px)); overflow: auto; padding: 10px 10px 8px; }
+.sd-gallery-head { display: block; margin: 2px 4px 8px; font: 600 10.5px var(--font); letter-spacing: .07em; text-transform: uppercase; color: var(--ink-3); }
+.sd-gallery-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
+.sd-gallery-grid > button { display: grid; justify-items: center; gap: 6px; padding: 6px 4px 7px; border-radius: 9px; color: var(--ink-2); font-size: 12px; text-align: center; }
+.sd-gallery-grid > button:hover, .sd-gallery-grid > button:focus-visible { background: var(--pane-3); color: var(--ink); }
+.sd-gallery-grid > button .sd-slide { border-radius: 4px; box-shadow: 0 0 0 1px var(--line), 0 1px 3px rgb(0 0 0 / .1); }
+.sd-gallery-grid > button.on { color: var(--accent); }
+.sd-gallery-grid > button.on .sd-slide, .sd-gallery-grid > button.on .sd-look-card { box-shadow: 0 0 0 2px var(--accent); }
+.sd-gallery-grid > button > span:last-child { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sd-gallery-foot { margin: 0 4px 2px; line-height: 1.45; }
+.sd-look-card { position: relative; display: grid; align-content: center; gap: 2px; width: 124px; height: 70px; padding: 8px 12px; overflow: hidden; border-radius: 4px; box-shadow: 0 0 0 1px var(--line), 0 1px 3px rgb(0 0 0 / .1); text-align: left; }
+.sd-look-card > i { width: 16px; height: 3px; border-radius: 2px; }
+.sd-look-card > b { position: relative; z-index: 1; font-size: 20px; line-height: 1.1; }
+.sd-look-card > span { position: relative; z-index: 1; font-size: 9.5px; }
+.sd-look-card > em { position: absolute; right: -22px; top: -22px; width: 64px; height: 64px; border-radius: 50%; }
+.sd-look-card > img { position: absolute; right: 8px; bottom: 6px; max-width: 32px; max-height: 12px; object-fit: contain; }
+
+/* The slides down the side: each one's number, its drawing, its menu; a line where a dragged one
+   would go. */
+.sd-strip { list-style: none; margin: 0; padding: 10px 8px 24px 4px; overflow-y: auto; border-right: 1px solid var(--line); background: var(--pane); }
+.sd-thumb { position: relative; display: flex; align-items: flex-start; gap: 6px; padding: 5px 4px; border-radius: 8px; }
+.sd-thumb-n { flex: none; width: 20px; padding-top: 2px; text-align: right; font: 600 11px var(--font); color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.sd-thumb.on .sd-thumb-n { color: var(--accent); }
+.sd-thumb-btn { display: block; padding: 0; border-radius: 5px; overflow: hidden; box-shadow: 0 0 0 1px var(--line-2, var(--line)), 0 1px 2px rgb(0 0 0 / .06); transition: box-shadow .12s; cursor: pointer; }
+.sd-thumb:hover .sd-thumb-btn { box-shadow: 0 0 0 1px var(--ink-3), 0 1px 3px rgb(0 0 0 / .1); }
+.sd-thumb.on .sd-thumb-btn { box-shadow: 0 0 0 2px var(--accent), 0 2px 6px rgb(0 0 0 / .12); }
+.sd-thumb-btn:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent), 0 0 0 5px var(--accent-soft); }
+.sd-thumb-more { position: absolute; top: 9px; right: 8px; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; background: rgb(255 255 255 / .92); color: #333; box-shadow: 0 1px 3px rgb(0 0 0 / .2); opacity: 0; transition: opacity .12s; }
+.sd-thumb:hover .sd-thumb-more, .sd-thumb-more:focus-visible, .sd-thumb.on .sd-thumb-more { opacity: 1; }
+@media (hover: none) { .sd-thumb-more { opacity: 1; } }
+.sd-thumb.drop-before::before, .sd-thumb.drop-after::after { content: ''; position: absolute; left: 30px; right: 4px; height: 3px; border-radius: 2px; background: var(--accent); }
+.sd-thumb.drop-before::before { top: -2px; }
+.sd-thumb.drop-after::after { bottom: -2px; }
+.sd-strip-add { padding: 8px 4px 0 30px; }
+.sd-strip-add .ghost-btn { width: 100%; justify-content: center; height: 32px; border: 1px dashed var(--line-2, var(--line)); border-radius: 7px; }
+.sd-ctx { position: fixed; z-index: 70; width: 0; height: 0; }
+.sd-ctx > .menu { top: 0; left: 0; }
+
+/* The slide being edited, on the app's grey, its words typed right on it. */
+.sd-work { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-width: 0; min-height: 0; }
+.sd-stage { position: relative; display: grid; place-items: center; min-height: 0; overflow: hidden; padding-top: 32px; background: var(--pane-3); outline: none; }
+.sd-canvas { position: relative; overflow: hidden; border-radius: 3px; background: #fff; box-shadow: 0 0 0 1px rgb(0 0 0 / .06), 0 2px 4px rgb(0 0 0 / .06), 0 12px 32px rgb(0 0 0 / .14); }
+.sd-canvas .sd-ed { outline: none; cursor: text; border-radius: 6px; transition: box-shadow .1s; }
+.sd-canvas .sd-ed:hover { box-shadow: 0 0 0 calc(1.5px / var(--k, 1)) color-mix(in srgb, var(--accent) 45%, transparent); }
+.sd-canvas .sd-ed:focus { box-shadow: 0 0 0 calc(2px / var(--k, 1)) var(--accent); }
+.sd-canvas .sd-ed.sd-blank::after { content: attr(data-hint); opacity: .42; pointer-events: none; }
+.sd-canvas li > .sd-ed { display: inline-block; min-width: 1em; vertical-align: top; }
+.sd-canvas .sd-ghost { opacity: .5; cursor: text; border-radius: 8px; outline: calc(1.5px / var(--k, 1)) dashed currentColor; outline-offset: calc(6px / var(--k, 1)); }
+.sd-canvas .sd-ghost:hover { opacity: .7; }
+.sd-canvas ul.sd-ghost, .sd-canvas ol.sd-ghost { outline: none; opacity: 1; }
+.sd-canvas.picked { box-shadow: 0 0 0 2px var(--accent), 0 12px 32px rgb(0 0 0 / .14); }
+.sd-pic-ghost { position: absolute; top: 0; bottom: 0; display: grid; place-content: center; justify-items: center; gap: 8px; border: 2px dashed color-mix(in srgb, var(--ink-3) 70%, transparent); background: color-mix(in srgb, var(--ink-3) 10%, transparent); color: var(--ink-2); font: 500 13px var(--font); }
+.sd-pic-ghost.image { right: 0; width: 42%; }
+.sd-pic-ghost.picture { left: 0; right: 0; background: color-mix(in srgb, var(--ink) 30%, transparent); color: #fff; border-color: rgb(255 255 255 / .5); }
+.sd-pic-ghost:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--ink); }
+.sd-pic-ghost.picture:hover { color: #fff; }
+.sd-pic-bar { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); display: flex; gap: 6px; padding: 6px; border-radius: 10px; background: var(--pane); box-shadow: 0 4px 16px rgb(0 0 0 / .2); }
+/* Over the slide: AI for this slide, and its menu. */
+.sd-pill { position: absolute; top: 8px; left: 50%; z-index: 2; transform: translateX(-50%); display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: 10px; background: var(--pane); box-shadow: 0 0 0 1px var(--line), 0 2px 8px rgb(0 0 0 / .08); }
+.sd-pill button { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 9px; border-radius: 7px; color: var(--ink-2); font: 500 12px var(--font); white-space: nowrap; }
+.sd-pill button:hover { background: var(--pane-3); color: var(--ink); }
+.sd-pill button svg { color: var(--accent); }
+/* Under the slide on a phone: back, which slide, next, and every slide. */
+.sd-nav { display: none; }
+
+/* Speaker notes, under the slide. */
+.sd-notes { border-top: 1px solid var(--line); background: var(--pane); }
+.sd-notes-head { display: flex; align-items: center; gap: 6px; width: 100%; height: 30px; padding: 0 14px; color: var(--ink-2); font: 600 11px var(--font); letter-spacing: .05em; text-transform: uppercase; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sd-notes-head:hover { color: var(--ink); }
+.sd-notes-head .muted { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.sd-notes-head svg.down { transform: rotate(90deg); }
+.sd-notes-box { display: block; width: 100%; height: 104px; min-height: 60px; max-height: 40vh; padding: 2px 16px 12px 34px; border: 0; resize: vertical; background: transparent; color: var(--ink); font: 13.5px/1.55 var(--font); outline: none; }
+.sd-notes-box::placeholder { color: var(--ink-3); }
+
+/* The Markdown, beside the slides. */
+.sd-md-pane { display: grid; grid-template-rows: auto minmax(0, 1fr); min-width: 0; min-height: 0; border-left: 1px solid var(--line); }
+.sd-md-head { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 6px 0 14px; border-bottom: 1px solid var(--line); }
+.sd-md-head b { font-size: 12.5px; font-weight: 600; }
+.sd-md-pane .sd-deck-md { height: 100%; min-height: 0; border: 0; }
+
+/* Every slide at once: a grid, to see the whole deck and drag slides into order. */
+.sd-sorter { overflow: auto; padding: 22px 26px 40px; background: var(--pane-3); }
+.sd-sorter > ol { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 22px 18px; }
+.sd-sorter .sd-thumb { flex-direction: column-reverse; align-items: stretch; gap: 6px; padding: 0; }
+.sd-sorter .sd-thumb-n { width: auto; text-align: left; padding: 0 2px; }
+.sd-sorter .sd-thumb-btn { width: 100%; }
+.sd-sorter .sd-thumb-btn .sd-slide { width: 100% !important; height: auto !important; aspect-ratio: 16 / 9; }
+.sd-sorter .sd-thumb-more { top: 6px; right: 6px; }
+.sd-sorter .sd-thumb.drop-before::before, .sd-sorter .sd-thumb.drop-after::after { left: 0; right: 0; }
+
+/* Write with AI, beside the slides. */
+.sd-ai { display: flex; flex-direction: column; gap: 12px; min-width: 0; min-height: 0; overflow-y: auto; padding: 12px 14px 20px; border-left: 1px solid var(--line); background: var(--pane); }
+.sd-ai-head { display: flex; align-items: center; gap: 6px; margin: -2px -6px 0 0; }
+.sd-ai-head b { display: inline-flex; align-items: center; gap: 7px; font-size: 13.5px; font-weight: 600; }
+.sd-ai-head b svg { color: var(--accent); }
+.sd-ai-modes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.sd-ai-modes button { justify-content: center; white-space: nowrap; }
+.sd-ai-form { display: grid; gap: 10px; }
+.sd-ai-form > p { margin: 0; line-height: 1.45; }
+.sd-ai textarea { width: 100%; min-height: 76px; padding: 9px 11px; border: 1px solid var(--line-2, var(--line)); border-radius: 10px; resize: vertical; background: var(--pane); color: var(--ink); font: 13px/1.5 var(--font); }
+.sd-ai textarea:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+.sd-ai-field { display: grid; gap: 4px; }
+.sd-ai-field select { height: 30px; padding: 0 8px; border: 1px solid var(--line-2, var(--line)); border-radius: 8px; background: var(--pane); color: var(--ink); font: 12.5px var(--font); min-width: 0; }
+.sd-ai-attach { display: inline-flex; align-items: center; gap: 5px; justify-self: start; font-size: 12.5px; cursor: pointer; }
+.sd-ai-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.sd-chip { height: 26px; padding: 0 10px; border: 1px solid var(--line-2, var(--line)); border-radius: 13px; color: var(--ink-2); font-size: 12px; }
+.sd-chip:hover { border-color: var(--accent); color: var(--accent); }
+.sd-ai-go { justify-self: start; height: 30px; }
+.sd-ai-busy { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 10px; background: var(--pane-2); font-size: 12.5px; }
+.sd-ai-busy > span { flex: 1; }
+.sd-ai-busy > svg { color: var(--accent); }
+.sd-ai-result { display: grid; gap: 10px; }
+.sd-ai-result > p { margin: 0; line-height: 1.45; }
+.sd-ai-slides { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 10px 8px; }
+.sd-ai-slides li { position: relative; display: grid; gap: 4px; }
+.sd-ai-slides .sd-slide { border-radius: 4px; box-shadow: 0 0 0 1px var(--line), 0 2px 6px rgb(0 0 0 / .1); }
+.sd-ai-slides .sd-thumb-n { width: auto; text-align: left; }
+.sd-ai-acts { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* Presenting: full screen, black around the slide; the controls come up when the mouse moves. */
+.sd-present { position: fixed; inset: 0; z-index: 200; background: #000; color: #eee; font: 13px var(--font); }
+.sd-present-stage { position: absolute; inset: 0; display: grid; place-items: center; cursor: none; }
+.sd-present.bar .sd-present-stage { cursor: default; }
+.sd-present .sd-slide { background: #000; }
+.sd-present-black { position: absolute; inset: 0; background: #000; }
+.sd-present-bar { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 12px; background: rgb(30 30 30 / .88); box-shadow: 0 4px 20px rgb(0 0 0 / .4); opacity: 0; transition: opacity .2s; }
+.sd-present.bar .sd-present-bar, .sd-present.presenter .sd-present-bar, .sd-present-bar:focus-within { opacity: 1; }
+.sd-present-bar .win-btn { color: #ddd; }
+.sd-present-bar .win-btn:hover, .sd-present-bar .win-btn.on { background: rgb(255 255 255 / .14); color: #fff; }
+.sd-present-bar .win-btn:disabled { opacity: .35; }
+.sd-present-n { min-width: 64px; text-align: center; font-variant-numeric: tabular-nums; }
+.sd-present-sep { width: 1px; height: 18px; margin: 0 4px; background: rgb(255 255 255 / .2); }
+.sd-present-notes { position: absolute; left: 50%; bottom: 72px; transform: translateX(-50%); max-width: min(760px, 90vw); margin: 0; padding: 10px 14px; border-radius: 10px; background: rgb(0 0 0 / .75); color: #eee; font: 15px/1.5 var(--font); white-space: pre-wrap; }
+/* The presenter's view: this slide, and beside it the next, the notes and the time. */
+.sd-present.presenter .sd-present-stage { grid-template-columns: 64% 36%; place-items: center start; padding: 24px 24px 80px; gap: 24px; background: #111; }
+.sd-present.presenter .sd-present-stage > .sd-slide { justify-self: end; box-shadow: 0 0 0 1px #333; }
+.sd-presenter { align-self: stretch; display: flex; flex-direction: column; gap: 10px; min-width: 0; overflow: auto; padding: 4px 4px 0 0; }
+.sd-presenter .muted { color: #999; }
+.sd-presenter-time { display: flex; align-items: baseline; gap: 12px; }
+.sd-presenter-time b { font: 600 34px var(--font); font-variant-numeric: tabular-nums; color: #fff; }
+.sd-presenter-time .ghost-btn { color: #bbb; }
+.sd-presenter > .sd-slide { box-shadow: 0 0 0 1px #333; opacity: .92; }
+.sd-presenter-notes { margin: 0; font: 19px/1.55 var(--font); color: #f2f2f2; white-space: pre-wrap; }
+.sd-print-frame { position: fixed; right: 0; bottom: 0; width: 1px; height: 1px; border: 0; opacity: 0; pointer-events: none; }
+
+/* A phone: the slide across the screen with back and next under it, every slide a tap away in the
+   grid, Write with AI and the Markdown over the slide, each thing you tap a whole 40px target. */
+@media (max-width: 700px) {
+  .sd-deck-body, .sd-deck2.with-md .sd-deck-body, .sd-deck2.with-ai .sd-deck-body, .sd-deck2.with-md.with-ai .sd-deck-body { grid-template-columns: minmax(0, 1fr); position: relative; }
+  .sd-deck-body > .sd-strip { display: none; }
+  .sd-stage { padding: 12px 0; place-items: start center; }
+  .sd-work { grid-template-rows: auto auto auto; align-content: start; overflow-y: auto; }
+  .sd-nav { display: flex; align-items: center; justify-content: center; gap: 4px; padding: 4px 8px; border-top: 1px solid var(--line); background: var(--pane); }
+  .sd-nav .win-btn { width: 40px; height: 40px; }
+  .sd-nav .sd-nav-n { min-width: 96px; text-align: center; color: var(--ink-2); font-size: 13px; font-variant-numeric: tabular-nums; }
+  .sd-nav .ghost-btn { height: 40px; padding: 0 12px; }
+  .sd-ai, .sd-md-pane { position: absolute; inset: 0; z-index: 4; border-left: 0; }
+  .sd-sorter { padding: 14px 12px 32px; }
+  .sd-sorter > ol { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 12px; }
+  .sd-sorter .sd-thumb-more { width: 40px; height: 40px; top: 0; right: 0; background: none; box-shadow: none; }
+  .sd-sorter .sd-thumb-more svg { box-sizing: content-box; padding: 5px; border-radius: 7px; background: rgb(255 255 255 / .92); box-shadow: 0 1px 3px rgb(0 0 0 / .2); }
+  .sd-gallery { width: calc(100vw - 24px); position: fixed; left: 12px !important; right: 12px; top: 120px; }
+  .sd-gallery-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sd-notes-head { height: 40px; }
+  .sd-notes-box { font-size: 16px; padding-left: 16px; }
+}
+.app.narrow .sd-deck-tools .sd-tool.wide { width: 40px; padding: 0; justify-content: center; }
+.app.narrow .sd-deck-tools .sd-tool.wide .sd-tool-label { display: none; }
+.app.narrow .sd-deck-tools .sd-tool.caret { width: 40px; margin: 0; }
+.app.narrow .sd-deck-tools .sd-marks { display: none; }
+.app.narrow .sd-split .sd-present-btn { height: 40px; }
+.app.narrow .sd-split .sd-present-btn + .sd-tool.caret { height: 40px; }
+.app.narrow .sd-strip-add .ghost-btn, .app.narrow .sd-ai .btn.small, .app.narrow .sd-ai .ghost-btn, .app.narrow .sd-chip, .app.narrow .sd-pic-bar .btn.small { min-height: 40px; }
+.app.narrow .sd-ai textarea, .app.narrow .sd-ai-field select { font-size: 16px; }
+.app.narrow .sd-ai-field select { height: 40px; }
+.app.narrow .sd-ai-modes button { height: 40px; }
+.app.narrow .sd-ai-head .win-btn, .app.narrow .sd-md-head .win-btn { width: 40px; height: 40px; }
+.app.narrow .sd-ai-attach { min-height: 40px; }
+.app.narrow .sd-gallery-grid > button { min-height: 40px; }
+.app.narrow .sd-sorter .ghost-btn { min-height: 40px; }
+.app.narrow .sd-present-bar .win-btn { width: 44px; height: 44px; }

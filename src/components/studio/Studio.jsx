@@ -28,7 +28,7 @@ const KIND_LABEL = { doc: tx('Document'), sheet: tx('Sheet'), deck: tx('Deck'), 
 // What a file is, in words, by its extension ("Word document"); a Markdown file that's a deck says so.
 const KIND_OF = { '.docx': tx('Word document'), '.md': tx('Markdown'), '.markdown': tx('Markdown'), '.txt': tx('Plain text'), '.xlsx': tx('Excel workbook'), '.xlsm': tx('Excel workbook'), '.csv': tx('CSV'), '.tsv': tx('TSV'), '.pptx': tx('PowerPoint'), '.pdf': tx('PDF'), '.html': tx('HTML page'), '.htm': tx('HTML page') }
 const kindName = (kind, ext) => (kind === 'deck' && ext !== '.pptx' ? t('Markdown deck') : t(KIND_OF[ext] || KIND_LABEL[kind] || 'Studio'))
-const READ_ONLY = (kind, ext) => kind === 'pdf' || ext === '.pptx'
+const READ_ONLY = (kind) => kind === 'pdf'
 export const openStudio = (f) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: f }))
 const when = (iso) => new Date(iso).toLocaleString(locale(), { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 const sizeOf = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`)
@@ -184,6 +184,8 @@ export function StudioHome({ onOpen }) {
 // while it's open is shown at once when you've changed nothing, and offered when you have.
 const WHO = { you: tx('You'), agent: tx('An agent'), outside: tx('Changed outside Studio'), restored: tx('Put back'), opened: tx('When it was first opened here') }
 const RISKY = { '.docx': tx('Saving here keeps its text, headings, lists, tables, links, quotes, pictures, fonts and colours. Word\'s own layout (headers, footers, comments, tracked changes, page setup) isn\'t kept; the file as it was stays in its versions, and Ask an agent changes it in place.'), '.xlsx': tx('Saving here keeps its values, formulas, formats, merged cells and every sheet. Charts, pivot tables and comments aren\'t kept; the file as it was stays in its versions, and Ask an agent changes it in place.') }
+// A PowerPoint is written again from its slides in Studio's layouts (editors/DeckEditor.jsx).
+RISKY['.pptx'] = tx('Saving here writes the PowerPoint again from its slides as Studio shows them: their titles, text, lists, pictures, tables, notes and theme, in Studio\'s layouts. Its own shapes, charts, animations and exact positions aren\'t kept; the file as it was stays in its versions, and Ask an agent changes it in place.')
 // What saving keeps, in each kind of file: said under the file (its kind, in the status line), and
 // before the first save of a Word or Excel file. The editors offer only what's kept.
 const KEEPS = {
@@ -192,7 +194,7 @@ const KEEPS = {
   '.txt': tx('Saved as plain text, as it is.'),
   '.csv': tx('Saved as a {kind} file: the first sheet\'s values. Formulas, formats and other sheets aren\'t part of a {kind} file, so they aren\'t kept.'),
   deck: tx('Saved as a Markdown deck, as written: slides between lines of ---. PowerPoint and PDF make a copy beside it.'),
-  '.pptx': tx('Shown here, not edited: Ask an agent changes the PowerPoint itself, and Edit as a Markdown deck makes a copy to edit here.'),
+  '.pptx': tx('Saved as a PowerPoint, written again from its slides in Studio\'s layouts: their titles, text, lists, pictures, tables, notes and theme. Export makes a Markdown deck of it beside it.'),
   '.pdf': tx('Shown here, not edited: Ask an agent to change it, or the file it was made from.'),
   '.html': tx('Saved as it\'s written: one HTML file that works on its own.'),
 }

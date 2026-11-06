@@ -25,6 +25,8 @@
 //   Refine ("You drew a diagram for"): labels the first arrow without a label, saying so, and says
 //   {"ok":true} once every arrow has one. "Change it": Start renamed Begin, Ship coloured red, a
 //   Cache box beside the first shape with an arrow to it; its review says ok.
+//   Studio's decks: a deck of four slides (its title from what it's about, or the document's first
+//   line), a slide rewritten as big numbers ("Rewritten"), a new slide of next steps.
 //   Ollama's own API (a model server on this computer, when OLLAMA_HOST points here): its models
 //   (llama3.1:8b, and llama3.2-vision:11b, which can see), what each can do, none running, and
 //   /api/chat answering as Ollama does (its message, pictures as base64 in `images`) with the same
@@ -116,6 +118,15 @@ function answer(b) {
     const title = (/^Meeting: (.+?), /m.exec(last)?.[1] || 'Meeting').trim()
     return say(['```markdown', '---', 'marp: true', 'paginate: true', '---', '', `# ${title}`, '', '---', '', '# What we covered', '', '- The pricing page', '- Who does what', '', '<!-- Start with the numbers -->', '```'].join('\n'))
   }
+  // Studio's decks: a deck (from what it's about, or a document's words: its first line becomes the
+  // title), slide n rewritten as big numbers, a new slide of next steps.
+  if (/^Write a slide deck(: | from the document)/m.test(last)) {
+    const doc = /The document \([^)]*\), to make it from:\n"""\n([^\n]+)/.exec(last)?.[1]
+    const title = (doc || /^Write a slide deck: (.+?)\.?$/m.exec(last)?.[1] || 'A deck').slice(0, 40)
+    return say(['```markdown', '<!-- _class: title -->', '', `# ${title}`, '', '## Written for the test', '', '---', '', '# Why now', '', '- Customers asked', '- It is ready', '', '<!-- Say why -->', '', '---', '', '<!-- _class: stats -->', '', '# What changed', '', '- **42%** of trials convert', '- **3x** more seats', '', '---', '', '<!-- _class: section -->', '', '# Next', '```'].join('\n'))
+  }
+  if (/^Rewrite slide \d+/m.test(last)) return say('<!-- _class: stats -->\n\n# Rewritten\n\n- **42%** shorter\n- **3x** clearer\n\n<!-- The new notes -->')
+  if (/^Write one new slide to go after slide \d+/m.test(last)) return say('# Next steps\n\n- Ship it\n- Tell customers')
   // Who each voice on a call is: Speaker 1 the first one invited, Speaker 2 the second.
   if (/Say who each voice on the call is/.test(last)) {
     const invited = (/^Invited, besides You: (.+)$/m.exec(last)?.[1] || '').split(', ').filter(Boolean)
