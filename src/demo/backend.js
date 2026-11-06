@@ -700,10 +700,17 @@ export function createDemo({ everything = true } = {}) {
   })
   on('POST', '/agents/:pane/queue', ({ p, body }) => {
     agent(p.pane)
-    const item = { id: uid(), text: String(body?.text || '').trim(), at: iso() }
+    const item = { id: uid(), text: String(body?.text || '').trim(), at: iso(), ...(body?.cid ? { cid: String(body.cid) } : {}) }
     ;(S.queue[p.pane] ||= []).push(item)
     bump()
-    return item
+    return { ...item, queued: true, position: S.queue[p.pane].length }
+  })
+  on('PATCH', '/agents/:pane/queue/:id', ({ p, body }) => {
+    const it = (S.queue[p.pane] || []).find((x) => x.id === p.id)
+    if (!it) fail('That message is no longer waiting.')
+    if (typeof body?.text === 'string' && body.text.trim()) it.text = body.text.trim()
+    bump()
+    return it
   })
   on('DELETE', '/agents/:pane/queue/:id', ({ p }) => { S.queue[p.pane] = (S.queue[p.pane] || []).filter((x) => x.id !== p.id); bump(); return ok })
   on('POST', '/agents/:pane/steer', ({ p, body }) => {

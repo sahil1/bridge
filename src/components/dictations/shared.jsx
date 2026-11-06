@@ -23,13 +23,15 @@ export function byDay(list) {
 }
 export const length = (ms) => { const s = Math.max(1, Math.round((ms || 0) / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` }
 
-// Where it went, in a few words: pasted into an app, sent or typed to an agent, typed into a
+// Where it went, in a few words: pasted into an app, sent to an agent (or held for it while it was
+// busy), typed for one, typed into a
 // terminal or a box in Bridge AI, copied, or (nothing done with it) where it was said.
 export function whereOf(r) {
   const app = r.app?.name || ''
   const agent = r.agent?.chief ? t('Chief of Staff') : r.agent?.name || ''
   if (r.how === 'pasted') return app ? t('Pasted into {app}', { app }) : t('Pasted')
   if (r.how === 'sent') return agent ? t('Sent to {name}', { name: agent }) : t('Sent to an agent')
+  if (r.how === 'queued') return agent ? t('Queued for {name}', { name: agent }) : t('Queued for an agent')
   if (r.how === 'typed' && r.agent) return agent ? t('Typed for {name}', { name: agent }) : t('Typed for an agent')
   if (r.how === 'typed') return r.place === 'terminal' ? t('Typed into the terminal') : t('Typed in Bridge AI')
   if (r.how === 'copied') return app ? t('Copied, in {app}', { app }) : t('Copied')
@@ -40,7 +42,7 @@ export function whereOf(r) {
 // The icon: the agent's when it went to one, else the app's (kept by the desktop app), else what
 // kind of place it was. bare: the icon alone, the size of the text around it (the sidebar).
 export function Glyph({ r, size = 28, bare = false }) {
-  const toAgent = (r.how === 'sent' || r.how === 'typed') && r.agent
+  const toAgent = (r.how === 'sent' || r.how === 'queued' || r.how === 'typed') && r.agent
   if (!toAgent && r.icon && r.app?.bundle) return <img className="dc-glyph" src={apiUrl(`/dictations/icons/${encodeURIComponent(r.app.bundle)}`)} alt="" width={size} height={size} draggable="false" />
   const name = toAgent ? (r.agent.chief ? 'helm' : 'bot') : r.place === 'terminal' ? 'terminal' : r.how === 'copied' ? 'copy' : r.how === 'typed' ? 'edit' : 'wave'
   if (bare) return <Icon name={name} size={size} className="dc-glyph muted" />

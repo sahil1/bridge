@@ -50,6 +50,7 @@
 .am-subs li { display: flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--ink-2); min-width: 0; }
 .am-subs li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .am-subs li b { font-weight: 600; font-size: 10.5px; color: var(--working); }
+.am-subs li span.am-sub-doing { flex: 1 1 0; min-width: 0; font: 10.5px var(--font-mono); color: var(--ink-3); }
 .am-handed { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin: -1px 4px 7px 14px; font-size: 11px; }
 .am-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 180px; padding: 2px 7px; border-radius: 6px; background: var(--pane-3); color: var(--ink-2); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .am-chip:hover { color: var(--ink); }

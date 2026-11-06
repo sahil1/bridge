@@ -15,11 +15,11 @@ const live = (x) => x.status === 'recording' || x.status === 'paused'
 const tilde = (p) => String(p || '').replace(/^\/Users\/[^/]+/, '~')
 // The folders in use, by name.
 export const foldersOf = (list) => [...new Set((list || []).map((x) => x.folder).filter(Boolean))].sort((a, b) => a.localeCompare(b))
-// What became of action items sent to the Chief of Staff (the server's answer: added, and sent and
-// queued when it's running), the same wherever they were sent from.
+// What became of action items sent to the Chief of Staff (the server's answer: added, and sent, or
+// queued while it's busy, when it's running), the same wherever they were sent from.
 export function chiefSaid({ added: n = 0, sent, queued }) {
   if (!sent) return n === 1 ? t("{n} action item is on Chief of Staff's task list. Start Chief of Staff and it picks it up.", { n }) : t("{n} action items are on Chief of Staff's task list. Start Chief of Staff and it picks them up.", { n })
-  if (queued) return n === 1 ? t("{n} action item sent to Chief of Staff (after what it's doing now).", { n }) : t("{n} action items sent to Chief of Staff (after what it's doing now).", { n })
+  if (queued) return n === 1 ? t("{n} action item queued for Chief of Staff, after what it's doing now.", { n }) : t("{n} action items queued for Chief of Staff, after what it's doing now.", { n })
   return n === 1 ? t('{n} action item sent to Chief of Staff.', { n }) : t('{n} action items sent to Chief of Staff.', { n })
 }
 

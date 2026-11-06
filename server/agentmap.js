@@ -10,20 +10,19 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { cacheFile, writeFileAtomic } from './paths.js'
-import { preview, modelOf, locate } from './transcripts.js'
-import { listSubagents } from './subagents.js'
+import { preview, modelOf } from './transcripts.js'
 import { nameOf, projectOf } from './needsyou.js'
 
 const FILE = cacheFile('agent-runs.json')
 const GONE_MS = 15 * 60 * 1000 // an agent missing this long has ended
-// What it's doing and its subagents are looked at again after a few seconds while it works (an
+// What it's doing is looked at again after a few seconds while it works (an
 // agent that isn't working says nothing new until its state changes); its model once a minute.
 const LOOK_MS = 8000
 const IDLE_MS = 60000
 const clip = (s, n) => { const t = String(s || '').replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t }
 const keyOf = (a) => `${a.paneId}|${a.kind}|${a.cwd || a.cloud?.repo || ''}`
 
-export function make({ rt, cfg = {} }) {
+export function make({ cfg = {} }) {
   let runs = {} // key -> { start, status, at, last }
   try { const d = JSON.parse(fs.readFileSync(FILE, 'utf8')); if (d && typeof d === 'object') runs = d } catch { /* none yet */ }
   let saved = Date.now()
@@ -54,7 +53,7 @@ export function make({ rt, cfg = {} }) {
     save(now)
   }
 
-  // What's slow to find out about one agent (its last words or tool, its model, its subagents),
+  // What's slow to find out about one agent (its last words or tool, its model),
   // kept for a few seconds so a map watched on several screens reads each once.
   const looked = new Map() // paneId -> { at, key, v }
   const models = new Map() // paneId -> { at, key, model }
@@ -77,20 +76,13 @@ export function make({ rt, cfg = {} }) {
     if (a.cloud) p = cloudSaid?.[a.paneId] || null
     else { try { p = preview(a) } catch { /* no transcript */ } }
     const model = modelFor(a)
-    // Subagents only show while it works (Claude Code's, from its logs and its footer).
-    let subagents = null
-    if (a.status === 'working' && a.caps?.subagents && a.sessionId) {
-      try {
-        const screen = await rt.read(a.paneId, 60).catch(() => '')
-        const s = await listSubagents(locate(a.kind, a.sessionId, a.cwd), screen)
-        const on = (s.items || []).filter((i) => i.status === 'running')
-        subagents = on.length ? { count: on.length, items: on.slice(0, 4).map((i) => ({ title: clip(i.description, 80), type: i.type || null })) } : null
-      } catch { /* its logs aren't readable now */ }
-    }
-    const v = { doing: p ? { text: clip(p.text, 140) || null, tool: a.status === 'working' && p.tool ? clip(p.tool, 100) : null, at: p.ts || null } : null, model, subagents }
+    const v = { doing: p ? { text: clip(p.text, 140) || null, tool: a.status === 'working' && p.tool ? clip(p.tool, 100) : null, at: p.ts || null } : null, model }
     looked.set(a.paneId, { at: Date.now(), key, v })
     return v
   }
+  // Its subagents at work, from the fleet (subagents.js runningFor): also once its own turn is
+  // over, while ones it sent off in the background still work.
+  const subagentsOf = (a) => (a.subagents?.running ? { count: a.subagents.running, items: a.subagents.items.slice(0, 4).map((i) => ({ title: clip(i.title, 80), type: i.type || null, doing: i.doing ? clip(i.doing, 100) : null })) } : null)
 
   // This computer's agents for the map (and for your other devices' maps), from a fleet
   // (index.js fleetView).
@@ -111,7 +103,7 @@ export function make({ rt, cfg = {} }) {
         model: v.model, account: a.account || null, chat: !!a.plainChat,
         cloud: a.cloud ? { label: a.cloud.label, repo: a.cloud.repo || null, prUrl: a.cloud.prUrl || null, state: a.cloud.state || null, failed: !!a.cloud.failed } : null,
         asking: a.asking ? clip(a.asking.title, 140) : a.cloud?.ask ? clip(a.cloud.ask, 140) : null,
-        doing: v.doing, subagents: v.subagents,
+        doing: v.doing, subagents: subagentsOf(a),
         since: r ? new Date(r.start).toISOString() : null, statusSince: r ? new Date(r.at).toISOString() : null,
       }
     }))

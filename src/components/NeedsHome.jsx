@@ -7,6 +7,7 @@ import { PrepCard } from './meetings/prep.jsx'
 import { ago } from './Machines.jsx'
 import { api, hostApi } from '../api.js'
 import { t, tx, locale } from '../i18n/index.js'
+import { sentTo } from '../sendbox.js'
 import './needshome.css'
 
 // Home (a beta feature, `home`): Needs you as the place the app opens at, on a computer and a
@@ -293,7 +294,7 @@ function TaskWaiting({ it, onOpenChief, onGone, setNote, pin }) {
     try {
       const r = await onDevice(it.machine, `/chief/tasks/${encodeURIComponent(it.task.id)}/reply`, { text: text.trim() })
       setText(''); setOpen(false)
-      onGone(it, r.queued ? t('Sent. Chief of Staff gets it when it can take it.') : t('Sent to Chief of Staff'))
+      onGone(it, sentTo(r, t('Chief of Staff')))
     } catch (x) { setNote({ id: it.id, text: why(x, it.device) }) } finally { setBusy(false) }
   }
   return (
@@ -340,7 +341,7 @@ function useReady(it, { phone, h, onRead }) {
     setBusy(true)
     try {
       const r = await onDevice(it.machine, `/meetings/${encodeURIComponent(it.meeting.id)}/chief`, {})
-      setSent(r.sent === false ? t('On Chief of Staff\'s list. It isn\'t running: it reads them when it starts.') : t('Sent to Chief of Staff'))
+      setSent(r.sent === false ? t('On Chief of Staff\'s list. It isn\'t running: it reads them when it starts.') : sentTo(r, t('Chief of Staff')))
       onRead()
       h.refresh()
     } catch (e) { h.setNote({ id: it.id, text: why(e, it.device) }) } finally { setBusy(false) }
@@ -354,7 +355,9 @@ function useReady(it, { phone, h, onRead }) {
       const r = await onDevice(it.machine, `/agents/${encodeURIComponent(it.paneId)}/prompt`, { text: v })
       setText('')
       setReplying(false)
-      h.onGone(it, r.queued ? t('Sent. It gets it when it can take it.') : t('Sent'))
+      // In now, or held until it's free: as your computer answered.
+      h.onGone(it, null)
+      h.setNote({ text: sentTo(r, it.agent?.title || t('the agent')) })
     } catch (x) { h.setNote({ id: it.id, text: why(x, it.device) }) } finally { setBusy(false) }
   }
   const m = it.meeting

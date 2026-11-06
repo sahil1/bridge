@@ -384,7 +384,7 @@ export function StudioPage({ root, path: rel, onBack, onOpen }) {
           <span className={`sd-state ${state.cls}`} title={meta.mtime ? t('The file last changed {when}', { when: when(meta.mtime) }) : undefined}><i aria-hidden="true" />{state.text}</span>
         </footer>
       )}
-      {ask && <AskAgent f={f} meta={meta} selection={ask.selection} onClose={() => setAsk(null)} onSent={(name) => { setAsk(null); quick.current = Date.now() + 15 * 60_000; setNote({ text: t('Sent to {name}. Studio shows the change once it saves the file.', { name }) }) }} />}
+      {ask && <AskAgent f={f} meta={meta} selection={ask.selection} onClose={() => setAsk(null)} onSent={(r) => { setAsk(null); quick.current = Date.now() + 15 * 60_000; setNote({ text: r.queued ? t('Queued for {name}. Studio shows the change once it saves the file.', { name: r.name }) : t('Sent to {name}. Studio shows the change once it saves the file.', { name: r.name }) }) }} />}
     </div>
   )
 }
@@ -466,7 +466,7 @@ function AskAgent({ f, meta, selection, onClose, onSent }) {
     setBusy(true); setErr(null)
     try {
       const r = await api('/studio/ask', { method: 'POST', body: { ...f, kind: meta?.kind, instruction: text, selection: selection?.text || null, where: selection?.where || null, ...(to !== 'new' ? { pane: to } : {}) } })
-      onSent(r.name)
+      onSent(r)
     } catch (x) { setErr(x.message) } finally { setBusy(false) }
   }
   return (

@@ -85,7 +85,7 @@ function Row({ a, d, off, hl, onOpen, onShow, from }) {
       )}
       {a.subagents?.count > 0 && (
         <ul className="am-subs" aria-label={a.subagents.count === 1 ? t('{n} subagent', { n: 1 }) : t('{n} subagents', { n: a.subagents.count })}>
-          {a.subagents.items.map((s, i) => <li key={i}><StatusDot status="working" size={6} />{s.type && <b>{s.type}</b>}<span>{s.title}</span></li>)}
+          {a.subagents.items.map((s, i) => <li key={i}><StatusDot status="working" size={6} />{s.type && <b>{s.type}</b>}<span>{s.title}</span>{s.doing && <span className="am-sub-doing">{s.doing}</span>}</li>)}
           {a.subagents.count > a.subagents.items.length && <li className="muted">{t('and {n} more', { n: a.subagents.count - a.subagents.items.length })}</li>}
         </ul>
       )}

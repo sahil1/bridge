@@ -14,6 +14,21 @@
 //                                           billing/ledger.py and a code block among them, forty
 //                                           lines apart; and "zeppelin" once, at its start, before
 //                                           what Chat first shows
+//   claude --session-id <id> "busy <s> [<s>...] [bg <s>]"  a conversation that takes messages: it
+//                                           works on each for the next of those seconds (the last
+//                                           for every one after; the first is the message it was
+//                                           started with), its working line up, a subagent
+//                                           ("Check the invoices") at work for the first part of it;
+//                                           with bg, one more sent off in the background on its
+//                                           first turn ("Watch the build"), which works on for that
+//                                           many seconds after the turn is over. What's typed while
+//                                           it works waits in its own queue, as Claude Code's does:
+//                                           once the subagent is back, all of it is taken in at once
+//                                           (logged as an attachment, not a message), and what's left
+//                                           at the end of a turn goes in joined, as one message. Esc
+//                                           stops a turn, and what was queued goes back in the box.
+//                                           Each message it takes goes in ~/claude-got.log
+//                                           ({ session, text, how: 'turn' or 'mid' }), as it got it
 //   claude --resume <id> [...]              the same conversation again (on another account, say):
 //                                           its log as it was, done working, its message box at
 //                                           the bottom under the conversation; what's typed to it
@@ -118,6 +133,7 @@ if (process.env.CLAUDE_STAND_IN === 'fresh') {
 }
 
 const project = path.join(os.homedir(), '.claude', 'projects', process.cwd().replace(/[^a-zA-Z0-9]/g, '-'))
+if (/^busy\b/.test(message)) return busy()
 const tasks = path.join(os.homedir(), 'claude-tmp', 'tasks')
 fs.mkdirSync(path.join(project, id, 'subagents'), { recursive: true })
 fs.mkdirSync(tasks, { recursive: true })
@@ -221,3 +237,140 @@ if (limited) {
   if (!weekly) w({ type: 'system', subtype: 'informational', timestamp: at(0), content: 'Usage limit reached · continuing automatically at 3:10am · esc to cancel' })
 }
 fs.closeSync(log)
+
+// "busy": a conversation that takes messages, works on each a while with a subagent, and queues
+// what's typed meanwhile the way Claude Code does (see the top).
+function busy() {
+  const m = /^busy((?:\s+\d+)+)(?:\s+bg\s+(\d+))?/.exec(message) || []
+  const TURNS = (m[1] || '6').trim().split(/\s+/).map((x) => Number(x) * 1000)
+  const BG = m[2] ? Number(m[2]) * 1000 : 0
+  const subDir = path.join(project, id, 'subagents')
+  fs.mkdirSync(subDir, { recursive: true })
+  const log = fs.openSync(path.join(project, `${id}.jsonl`), 'w')
+  const now = () => new Date().toISOString()
+  let prev = null
+  // A conversation entry, linked to the one before as Claude Code links them; raw: one that isn't.
+  const w = (o, raw = false) => {
+    const e = raw ? { ...o, timestamp: now() } : { sessionId: id, cwd: process.cwd(), uuid: `b-${Math.random().toString(36).slice(2)}`, parentUuid: prev, timestamp: now(), ...o }
+    if (!raw) prev = e.uuid
+    fs.writeSync(log, JSON.stringify(e) + '\n')
+  }
+  const got = (text, how) => fs.appendFileSync(path.join(os.homedir(), 'claude-got.log'), JSON.stringify({ session: id, text, how }) + '\n')
+  const subs = new Map() // its subagents at work: id -> { description, file, bg, steps, began }
+  let box = '' // what's typed in its input box
+  let queued = [] // typed while it works
+  let working = false
+  let began = 0
+  let n = 0
+  let said = 'Ready.'
+  const timers = []
+  const later = (ms, fn) => timers.push(setTimeout(fn, ms))
+
+  const startSub = (sid, description, bg) => {
+    const file = path.join(subDir, `agent-${sid}.jsonl`)
+    fs.writeFileSync(path.join(subDir, `agent-${sid}.meta.json`), JSON.stringify({ description, agentType: 'general-purpose', toolUseId: `toolu_${sid}`, requestShape: bg ? 'background' : 'foreground' }))
+    fs.writeFileSync(file, JSON.stringify({ type: 'user', timestamp: now(), message: { role: 'user', content: `${description}, and say what you found.` } }) + '\n')
+    w({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: `toolu_${sid}`, name: 'Agent', input: { description, subagent_type: 'general-purpose', prompt: description, ...(bg ? { run_in_background: true } : {}) } }] } })
+    if (bg) w({ type: 'user', message: { role: 'user', content: [{ tool_use_id: `toolu_${sid}`, type: 'tool_result', content: [{ type: 'text', text: `Async agent launched successfully. agentId: ${sid}` }] }] } })
+    subs.set(sid, { description, file, bg, steps: 0, began: Date.now() })
+  }
+  const endSub = (sid) => {
+    const s = subs.get(sid)
+    if (!s) return
+    fs.appendFileSync(s.file, JSON.stringify({ type: 'assistant', timestamp: now(), message: { role: 'assistant', content: [{ type: 'text', text: 'Nothing rounds twice.' }] } }) + '\n')
+    if (s.bg) w({ type: 'user', origin: { kind: 'task-notification' }, message: { role: 'user', content: `<task-notification>\n<task-id>${sid}</task-id>\n<tool-use-id>toolu_${sid}</tool-use-id>\n<status>completed</status>\n<summary>Agent "${s.description}" completed</summary>\n</task-notification>` } })
+    else w({ type: 'user', message: { role: 'user', content: [{ tool_use_id: `toolu_${sid}`, type: 'tool_result', content: [{ type: 'text', text: 'Nothing rounds twice.' }] }] } })
+    subs.delete(sid)
+  }
+  // Each second, a step for each subagent at work.
+  setInterval(() => {
+    for (const s of subs.values()) fs.appendFileSync(s.file, JSON.stringify({ type: 'assistant', timestamp: now(), message: { role: 'assistant', content: [{ type: 'tool_use', name: 'Read', input: { file_path: `billing/part-${++s.steps}.py` } }] } }) + '\n')
+    draw()
+  }, 1000)
+
+  const joined = () => { const t = queued.join('\n'); queued = []; return t }
+  const begin = (text, how) => {
+    got(text, how)
+    w({ type: 'user', message: { role: 'user', content: text } })
+    working = true
+    began = Date.now()
+    n++
+    const TURN = TURNS[Math.min(n, TURNS.length) - 1]
+    const fg = `f${n}`
+    startSub(fg, `Check the invoices ${n}`, false)
+    if (BG && n === 1) { startSub('b1', 'Watch the build', true); setTimeout(() => endSub('b1'), TURN + BG) }
+    // The subagent back: what was typed meanwhile is taken in, all of it at once.
+    later(Math.round(TURN * 0.6), () => {
+      endSub(fg)
+      if (!queued.length) return
+      w({ type: 'queue-operation', operation: 'remove' }, true)
+      const t = joined()
+      got(t, 'mid')
+      w({ type: 'attachment', attachment: { type: 'queued_command', prompt: t, commandMode: 'prompt', origin: { kind: 'human' } } })
+    })
+    later(TURN, () => {
+      said = `Done with turn ${n}.`
+      w({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: said }] } })
+      working = false
+      // What's left goes in as one message.
+      if (queued.length) { w({ type: 'queue-operation', operation: 'dequeue' }, true); begin(joined(), 'turn') }
+      draw()
+    })
+    draw()
+  }
+  const stop = () => {
+    if (!working) return
+    while (timers.length) clearTimeout(timers.pop())
+    for (const [sid, s] of subs) if (!s.bg) endSub(sid)
+    w({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user]' }] } })
+    working = false
+    // As Claude Code does: what was queued comes back into the box.
+    if (queued.length) box = [joined(), box].filter(Boolean).join('\n')
+    draw()
+  }
+  const submit = () => {
+    const text = box.trim()
+    box = ''
+    if (!text) return
+    if (working) { queued.push(text); w({ type: 'queue-operation', operation: 'enqueue', content: text }, true) } else begin(text, 'turn')
+  }
+
+  // Its screen: what it said last, its working line, what's queued, its box, its footer (its
+  // subagents under "⏺ main").
+  function draw() {
+    const secs = Math.round((Date.now() - began) / 1000)
+    const lines = [`⏺ ${said}`, '', working ? `✻ Pondering… (${secs}s · ↓ 1.2k tokens)` : '✻ Brewed for 6s', ...queued.map((q) => `  ⎿ ${q.split('\n')[0]}`), rule,
+      `❯ ${box ? box.split('\n').join('\r\n  ') : '\x1b[7m \x1b[27m'}`, rule, '  ⏵⏵ auto mode on']
+    if (subs.size) lines.push('  ⏺ main', ...[...subs.values()].map((s) => `  ◯ general-purpose  ${s.description}   ${Math.round((Date.now() - s.began) / 1000)}s · ↓ 1.2k tokens`))
+    // At the bottom of the terminal, as Claude Code draws it.
+    const below = lines.reduce((k, l) => k + l.split('\r\n').length, 0)
+    process.stdout.write(`\x1b[2J\x1b[H${'\r\n'.repeat(Math.max(0, (process.stdout.rows || 24) - below - 1))}${lines.join('\r\n')}`)
+  }
+
+  // What's typed, a key at a time, and pastes (bracketed, so a message keeps its lines).
+  if (process.stdin.isTTY) process.stdin.setRawMode(true)
+  process.stdout.write('\x1b[?2004h')
+  let pasting = false
+  process.stdin.on('data', (d) => {
+    let s = String(d)
+    while (s.length) {
+      if (pasting) {
+        const end = s.indexOf('\x1b[201~')
+        if (end < 0) { box += s; s = '' } else { box += s.slice(0, end); s = s.slice(end + 6); pasting = false }
+      } else if (s.startsWith('\x1b[200~')) { pasting = true; s = s.slice(6) }
+      else if (s.startsWith('\x1b\r')) { box += '\n'; s = s.slice(2) }
+      else if (s.startsWith('\x1b[') || s.startsWith('\x1bO')) { const k = /^\x1b[[O][0-9;?]*[A-Za-z~]/.exec(s); s = s.slice(k ? k[0].length : 2) } // arrows and the like
+      else if (s[0] === '\x1b') { s = s.slice(1); stop() }
+      else {
+        const c = s[0]
+        s = s.slice(1)
+        if (c === '\r' || c === '\n') submit()
+        else if (c === '\x7f' || c === '\b') box = Array.from(box).slice(0, -1).join('')
+        else if (c === '\x03') box = ''
+        else if (c >= ' ') box += c
+      }
+    }
+    draw()
+  })
+  begin(message, 'turn')
+}

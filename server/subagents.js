@@ -277,6 +277,16 @@ function settle(all, foot, now) {
     }))
 }
 
+const ORDER = { running: 0, failed: 1, killed: 1, stopped: 2, ended: 2, done: 3 }
+const byState = (a, b) => (ORDER[a.status] ?? 2) - (ORDER[b.status] ?? 2) || (b.startedAt || '').localeCompare(a.startedAt || '')
+
+// Running in the terminal but not in its logs (a Claude Code that keeps them somewhere new): the
+// footer's rows, so you still see what each one is doing.
+function withFooter(items, foot) {
+  if (items.some((i) => i.status === 'running') || !foot.rows.length) return items
+  return [...foot.rows.map((r, i) => ({ id: `screen-${i}`, description: r.doing, type: r.type, status: 'running', fromScreen: true, elapsed: r.elapsed, tokens: r.tokens, steps: [], tools: 0 })), ...items]
+}
+
 // mainFile: the session's own transcript (or null); screen: its terminal's last lines.
 export async function listSubagents(mainFile, screen = '') {
   const now = Date.now()
@@ -290,13 +300,61 @@ export async function listSubagents(mainFile, screen = '') {
     const theirs = await Promise.all(subs.map(async ({ file, item }) => tasksOf(await scan(file), now, item.description).catch(() => [])))
     tasks = settle([...(await tasksOf(c, now, null)), ...theirs.flat()], foot, now)
   }
-  // Running in the terminal but not in its logs (a Claude Code that keeps them somewhere new): the
-  // footer's rows, so you still see what each one is doing.
-  if (!items.some((i) => i.status === 'running') && foot.rows.length) {
-    items = [...foot.rows.map((r, i) => ({ id: `screen-${i}`, description: r.doing, type: r.type, status: 'running', fromScreen: true, elapsed: r.elapsed, tokens: r.tokens, steps: [], tools: 0 })), ...items]
-  }
-  const order = { running: 0, failed: 1, killed: 1, stopped: 2, ended: 2, done: 3 }
-  items.sort((a, b) => (order[a.status] ?? 2) - (order[b.status] ?? 2) || (b.startedAt || '').localeCompare(a.startedAt || ''))
-  tasks.sort((a, b) => (order[a.status] ?? 2) - (order[b.status] ?? 2) || (b.startedAt || '').localeCompare(a.startedAt || ''))
+  items = withFooter(items, foot).sort(byState)
+  tasks.sort(byState)
   return { items, tasks, running: items.filter((i) => i.status === 'running').length + tasks.filter((t) => t.status === 'running').length }
 }
+
+// --- What each agent has running, for the fleet ----------------------------------------------
+// Its subagents at work, and the ones that finished in the last few minutes, for its row wherever
+// agents are listed (the phone's Agents tab, the sidebar, the agent map). The main conversation can
+// be done while they still work (a background subagent), so this is looked at whatever its state.
+// Kept beside the fleet and brought up to date in the background, so the fleet never waits on the
+// logs: every few seconds while it works or has any running, on a change of state, else now and then.
+const JUST_MS = 3 * 60 * 1000
+const looks = new Map() // paneId -> { key, when, busy, v }
+
+const doingOf = (it) => {
+  if (it.fromScreen) return null
+  const last = it.steps?.at(-1)
+  if (!last) return null
+  return (last.kind === 'tool' ? `${last.tool} ${last.hint || ''}` : last.text.split('\n')[0]).trim().slice(0, 140) || null
+}
+
+async function summaryOf(file, screen) {
+  const now = Date.now()
+  let items = []
+  if (file) {
+    const c = await scan(file)
+    items = (await subagents(file, c.ends, now)).map((s) => s.item)
+  }
+  items = withFooter(items, footerOf(screen)).sort(byState)
+  const on = items.filter((i) => i.status === 'running')
+  const just = items.filter((i) => i.status !== 'running' && !i.fromScreen && now - Date.parse(i.updatedAt) < JUST_MS)
+  if (!on.length && !just.length) return null
+  return {
+    running: on.length,
+    items: on.slice(0, 4).map((i) => ({ id: i.id, title: i.description, type: i.type || null, doing: doingOf(i), since: i.startedAt || null })),
+    done: just.slice(0, 3).map((i) => ({ id: i.id, title: i.description, type: i.type || null, status: i.status, at: i.updatedAt })),
+  }
+}
+
+// a: an agent from the fleet. locate(a): its transcript; read(paneId): its screen. What's known
+// now (null for none), with a fresh look started when it's due.
+export function runningFor(a, { locate, read }) {
+  if (!a.caps?.subagents || !a.sessionId) { looks.delete(a.paneId); return null }
+  const key = `${a.sessionId}|${a.status}`
+  let s = looks.get(a.paneId)
+  if (!s) looks.set(a.paneId, (s = { key: null, when: 0, busy: false, v: null }))
+  const due = s.key !== key || Date.now() - s.when > (a.status === 'working' || s.v ? 3000 : 30000)
+  if (due && !s.busy) {
+    s.busy = true
+    s.key = key
+    ;(async () => { s.v = await summaryOf(locate(a), await read(a.paneId).catch(() => '')) })()
+      .catch(() => { /* its logs aren't readable now: as it was */ })
+      .finally(() => { s.busy = false; s.when = Date.now() })
+  }
+  return s.v
+}
+// Agents that are gone: forget them.
+export function forgetExcept(paneIds) { for (const k of looks.keys()) if (!paneIds.has(k)) looks.delete(k) }

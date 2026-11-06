@@ -219,7 +219,8 @@ try {
   await p.locator('.sd-ask textarea').fill('add a summary at the top')
   await p.locator('.sd-ask-to select').selectOption(agent.paneId)
   await p.locator('.sd-ask button', { hasText: 'Send' }).click()
-  ok(!!(await until(async () => /Sent to/.test(await p.locator('.sd-bar').innerText().catch(() => '')), 5000)), 'Ask an agent: sent to the agent picked, and it says so')
+  // Your computer holds it for the agent until it's ready (it said "Sent to" before it had gone).
+  ok(!!(await until(async () => /Queued for .+\. Studio shows the change/.test(await p.locator('.sd-bar').innerText().catch(() => '')), 5000)), 'Ask an agent: held for the agent picked, and it says so', await p.locator('.sd-bar').innerText().catch(() => ''))
   // A Word file's text.
   const open = async (name) => p.evaluate(({ root, name }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: name } })), { root, name })
   await open('plan.docx')

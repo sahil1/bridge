@@ -167,6 +167,16 @@ function modelStep(e) {
 }
 const SET_MODEL = /^(set model to|kept model as)\b/i
 
+// The words of a message Claude Code took in mid-turn ('' for one that isn't yours, a background
+// task's notice), or null for any other entry.
+function queuedPrompt(e) {
+  const at = e.type === 'attachment' && e.attachment?.type === 'queued_command' ? e.attachment : null
+  if (!at || e.isSidechain) return null
+  if ((at.commandMode || 'prompt') !== 'prompt' || (at.origin?.kind && at.origin.kind !== 'human')) return ''
+  const p = at.prompt
+  return (typeof p === 'string' ? p : Array.isArray(p) ? p.filter((b) => b.type === 'text').map((b) => b.text).join('\n\n') : '').trim()
+}
+
 function claudeMessages(entries) {
   const out = []
   const calls = new Map() // edit call id -> { m: its message, b: the call }, for the count its result brings
@@ -187,6 +197,10 @@ function claudeMessages(entries) {
       modelCmd = false
       continue
     }
+    // A message you sent while it worked, which it took in between two steps: Claude Code logs it as
+    // an attachment, not as a message from you. mid: it didn't start a reply of its own.
+    const mid = queuedPrompt(e)
+    if (mid != null) { if (mid) add({ role: 'user', text: mid, ts: e.timestamp, mid: true }); continue }
     if ((e.type !== 'user' && e.type !== 'assistant') || e.isMeta || e.isSidechain) continue
     // Claude's summary of earlier turns (after /compact or "summarize"): a note, not your message.
     if (e.isCompactSummary) {

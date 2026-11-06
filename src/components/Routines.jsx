@@ -280,7 +280,7 @@ function IdeaRow({ it, onChanged, setFlash }) {
   const patch = async (body) => { await api(`/ideas/${it.id}`, { method: 'PATCH', body }); onChanged() }
   const send = async () => {
     setBusy(true)
-    try { await api(`/ideas/${it.id}/send`, { method: 'POST' }); setFlash(t('Sent to your chief of staff; it will plan it and check with you')); onChanged() } catch (e) { setFlash(e.message) } finally { setBusy(false) }
+    try { const r = await api(`/ideas/${it.id}/send`, { method: 'POST' }); setFlash(r.queued ? t('Queued for your chief of staff. Once it gets to it, it plans it and checks with you.') : t('Sent to your chief of staff; it will plan it and check with you')); onChanged() } catch (e) { setFlash(e.message) } finally { setBusy(false) }
   }
   const del = async () => {
     if (!window.confirm(`${t('Delete this idea?')}\n\n${it.text}`)) return
