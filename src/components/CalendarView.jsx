@@ -260,13 +260,19 @@ const HOUR_PX = 44
 function TimeGrid({ days, events, tasks, colors, now, view, selected, onSelect, compactCols }) {
   const scrollRef = useRef(null)
   const timed = events.filter((e) => !e.allDay)
-  // Your working hours with an hour either side, widened to fit the meetings.
-  const hours = timed.flatMap((e) => {
-    const s = new Date(e.start), t = new Date(e.end)
-    return [s.getHours(), t.getHours() + (t.getMinutes() ? 1 : 0) || 24]
-  })
-  const h0 = Math.max(0, Math.min(view.workStart - 1, ...hours))
-  const h1 = Math.min(24, Math.max(view.workEnd + 1, ...hours))
+  // Your working hours with an hour either side, widened to take in each meeting on these days: as
+  // much of it as falls on them, so one that runs past midnight doesn't stretch the grid to every
+  // hour. The time now never widens it.
+  const starts = [], ends = []
+  for (const d of days) {
+    const s0 = startOfDay(d).getTime()
+    for (const e of eventsOn(timed, d)) {
+      starts.push(Math.floor((Math.max(Date.parse(e.start), s0) - s0) / 36e5))
+      ends.push(Math.ceil((Math.min(Date.parse(e.end), s0 + DAY) - s0) / 36e5))
+    }
+  }
+  const h0 = Math.max(0, Math.min(view.workStart - 1, ...starts))
+  const h1 = Math.min(24, Math.max(view.workEnd + 1, ...ends))
   const today = days.find((d) => sameDay(d, new Date(now)))
 
   useEffect(() => {
