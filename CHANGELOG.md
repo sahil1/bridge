@@ -4,7 +4,7 @@ Each version's section here becomes its GitHub release notes (`npm run release`)
 
 ## 3.10.1
 
-The top bar shows what you pin; meeting dropdowns that open in a smaller window; AI Assist with room to read, how often it suggests, and a sort; the floating card whole with Assist on; and no warning about a call's sound in a room.
+Beta Features (were Trial Features), each finished: Home, Studio, Meeting Insights, usage across every provider and Tidy what I say. The top bar shows what you pin; meeting dropdowns that open in a smaller window; AI Assist with room to read, how often it suggests, and a sort; the floating card whole with Assist on; and no warning about a call's sound in a room.
 
 ### What's new
 
@@ -16,6 +16,13 @@ The top bar shows what you pin; meeting dropdowns that open in a smaller window;
 - **The floating card fits the screen with AI Assist on.** Open, with Assist's suggestion under the bar, the card was taller than its window could be, and its bottom was cut off. The window now grows to the screen's height, and what's under the bar scrolls past that, with the bar and the suggestion always in view.
 - **A meeting in a room isn't a silent call.** On a Mac every meeting records what the computer plays too, in case a call starts. In a room nothing plays, so after half a minute it kept warning to allow Bridge AI in System Settings, and a quiet room meeting never ended by itself. Both now wait for a call to be on (an app like Teams, Zoom or a browser using the mic).
 - **One Who spoke** on a transcript with the other side in it, where there were two.
+- **Beta Features, finished.** Trial Features are now **Beta Features**, last on Settings › About & Updates, and each of them had a finishing pass:
+  - **Home**: one row for each thing (a task that was twice on Chief of Staff's list, or on two computers, shows once). **Coming Up** goes a day at a time: the meetings left today and tomorrow, and the tasks that name a day; Chief of Staff's other tasks are in a section of their own, the ones with no day folded. **Ready to Look At** is short rows that end at a word, the project said once, the newest first, with Show all and the ones older than a day folded away; Reply, Clear and Open come up when you point at a row or open it. Loading, nothing there and a failed refresh each say so.
+  - **Studio**: a toolbar of real buttons, each saying what it does and its shortcut: Paragraph and Heading 1 to 3, bold, italic, underline, strikethrough, lists, quote, a link, a table (with rows and columns to add or take out) and undo and redo. It offers only what the file keeps when it's saved, and a Word file now keeps quotes and underline. A Word file is a page on a desk; under every file, its words (or sheets, or slides), its kind, its versions and whether it's saved. A deck shows its Markdown, its slides or both. A PDF that can't be shown inside a page says so, with Open it and Download. Its home, Versions and Ask an agent fit a phone.
+  - **Meeting Insights**: you're never one of the people you meet (an invite with your email address made you one); a person's action items once each, not once per summary; the chart by week has a scale; the columns say what they are; times and counts in words you'd use ("24 s", "none").
+  - **Usage across every provider**: names in full, not cut off; minutes and seconds as words; the chart titled, with a scale; picking a provider says so, with Show every provider.
+  - **Tidy what I say**: on with no model to tidy with, Settings says your words go as you said them, with Open Model Providers; Dictations marks the tidied ones.
+- **Send action items to Chief of Staff again, without copies.** With nothing left unsent, sending a meeting's action items again added every one to Chief of Staff's list again. The ones already on it are now the same tasks.
 - **No card about usage stats.** Usage stats and crash reports are as they were (on unless turned off); the card that said so is gone. Their switches are in Settings › About & Updates, and what's sent is in PRIVACY.md.
 
 ## 3.10.0
