@@ -228,7 +228,7 @@ function RemindMenu({ mine, onPick, onClose }) {
     return () => window.removeEventListener('keydown', on, true)
   })
   return (
-    <div className="mremind" role="menu" aria-label={mine ? t('Remind me if nobody answers') : t('Remind me')}>
+    <div className="mremind" role="menu" aria-label={mine ? t('Remind me if nobody answers') : t('Remind me')} data-esc>
       <b className="small">{mine ? t('Remind me if nobody answers') : t('Remind me')}</b>
       {choices.map(([k, label, when], i) => (
         <button key={k} ref={i === 0 ? first : null} type="button" role="menuitem" className="mremind-row" onClick={() => onPick(when)}>
@@ -258,7 +258,7 @@ const KEYS = [
 ]
 function KeysSheet({ onClose }) {
   return (
-    <div className="mkeys-back" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
+    <div className="mkeys-back" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }} data-esc>
       <div className="mkeys" role="dialog" aria-label={t('Mail keys')}>
         <header><b>{t('Mail keys')}</b><button type="button" className="icon-btn" onClick={onClose} aria-label={t('Close')}><Icon name="x" size={13} /></button></header>
         <dl>{KEYS.map(([k, what]) => <div key={k}><dt>{k.split('  ').map((x) => <kbd key={x}>{x}</kbd>)}</dt><dd>{t(what)}</dd></div>)}</dl>
@@ -296,7 +296,7 @@ function Reader({ id, summary, onBack, onOpenAgent, onRule, rules, onOpen, onDon
   const nudge = !!m.mine
   const panel = assist && <ReplyAssist id={id} data={data} nudge={nudge} onClose={() => setAssist(false)} beside={wideAssist} />
   return (
-    <div className={`mreader-wrap ${assist && wideAssist ? 'with-assist' : ''}`}>
+    <div className={`mreader-wrap ${assist && wideAssist ? 'with-assist' : ''}`} data-esc={onBack ? '' : undefined}>
       <article className="mreader">
         <header className="mreader-head">
           {onBack && <button className="icon-btn" onClick={onBack} aria-label={t('Back to list')}><Icon name="chevron" size={14} className="rot180" /></button>}

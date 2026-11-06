@@ -155,7 +155,7 @@ export function ReplyAssist({ id, data, nudge, onClose, beside }) {
   const who = res?.reply?.to?.[0]
   const asks = !nudge && (data?.meet?.asks || findTimes)
   return (
-    <aside className={`massist ${beside ? 'beside' : ''}`} aria-label={t('Reply Assist')}>
+    <aside className={`massist ${beside ? 'beside' : ''}`} aria-label={t('Reply Assist')} data-esc>
       <div className="massist-head">
         <b><Icon name="edit" size={13} /> {nudge ? t('Nudge') : t('Reply Assist')}</b>
         <span className="muted small grow" title={res?.modelLabel || v?.now?.label || undefined}>{res ? t('By {model}', { model: res.modelLabel }) : v?.now ? t('Uses {model}, the model for your meeting notes', { model: v.now.label }) : ''}</span>

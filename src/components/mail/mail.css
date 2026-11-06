@@ -21,6 +21,7 @@
 .mremind > p { margin: 6px 6px 0; line-height: 1.45; }
 .mremind-row { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; min-height: 32px; padding: 0 6px; border-radius: 8px; text-align: left; font-size: 12.5px; }
 .mremind-row:hover, .mremind-row:focus-visible { background: var(--pane-2); outline: none; }
+.mremind-row > span:last-child { justify-self: end; }
 .mremind-pick { display: flex; gap: 6px; padding: 6px 6px 0; }
 .mremind-pick input { flex: 1; min-width: 0; height: 30px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--pane-2); color: var(--ink); font: 12.5px var(--font); }
 
@@ -97,4 +98,6 @@
 .app.narrow .massist-draft, .app.narrow .mremind-pick input { font-size: 16px; }
 .app.narrow .mlist-tabs { flex-wrap: wrap; overflow-x: visible; }
 .app.narrow .mreader-do kbd, .app.narrow .massist kbd, .app.narrow .mnote kbd { display: none; }
-.app.narrow .mremind { position: fixed; left: 16px; right: 16px; top: auto; bottom: calc(16px + env(safe-area-inset-bottom)); width: auto; }
+.app.narrow .mreader-do { position: relative; }
+.app.narrow .mreader-remind { position: static; }
+.app.narrow .mremind { left: 0; right: 0; width: auto; }
