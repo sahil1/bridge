@@ -122,6 +122,7 @@ export function readEmlx(file) {
     from: decodeWords(headers.from),
     to: decodeWords(headers.to),
     cc: decodeWords(headers.cc),
+    replyTo: decodeWords(headers['reply-to']),
     date: headers.date,
     subject: decodeWords(headers.subject),
     text,
@@ -135,4 +136,16 @@ export function splitQuoted(text) {
   const m = /\n(?:_{5,}\s*\n)?\s*(?:From: .+\n(?:Sent|Date): |On .{6,120}wrote:\s*\n|-{3,} ?Original Message ?-{3,})/i.exec(`\n${text}`)
   if (!m || m.index < 20) return { latest: text, quoted: null }
   return { latest: text.slice(0, m.index - 1).trim(), quoted: text.slice(m.index - 1).trim() }
+}
+
+// What you wrote yourself in a message you sent: not the quoted history, the signature after
+// "-- ", or the line a phone's mail app adds ("Sent from my iPhone").
+export function ownWords(text) {
+  const { latest } = splitQuoted(String(text || ''))
+  return String(latest || '')
+    .replace(/\n-- ?\n[\s\S]*$/, '')
+    .replace(/\n*(?:Sent from my \w+|Get Outlook for \w+|Sent from Mail for \w+)\.?\s*$/i, '')
+    .replace(/^>.*$/gm, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
 }

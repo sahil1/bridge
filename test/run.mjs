@@ -49,6 +49,8 @@ const SUITES = [
   { name: 'devices-ui', build: 'dist', browser: true, covers: [/^src\/components\/(Machines|OnboardingPhone)\.jsx$/, /^src\/components\/settings\/(Relay|Phone)\.jsx$/, /^server\/(machines|relay)\.js$/, /^test\/stand-ins\/relay\.mjs$/] },
   { name: 'phone-link', build: 'dist', browser: true, covers: [/^relay\//, /^server\/relay\.js$/, /^test\/stand-ins\/relay\.mjs$/] },
   { name: 'mail', build: null, covers: [/^server\/(mail|mailparse)\.js$/] },
+  { name: 'mail-ui', build: 'dist', browser: true, covers: [/^src\/components\/(MailView|Inbox|Dock|Settings|Palette|Agenda)\.jsx$/, /^src\/components\/mail\//, /^src\/components\/settings\/Mail\.jsx$/, /^src\/components\/today\.js$/, /^src\/App\.jsx$/, /^server\/(mail|mailparse|mailassist|freetimes|index)\.js$/, /^test\/stand-ins\/(model|mailbox)\.mjs$/] },
+  { name: 'mail-assist', build: null, covers: [/^server\/(mail|mailparse|mailassist|freetimes|calendar|usagelog)\.js$/, /^test\/stand-ins\/(model|mailbox)\.mjs$/] },
   { name: 'updates', build: 'dist', browser: true, covers: [/^server\/(updates|machine)\.js$/, /^install\.sh$/, /^scripts\/release\.js$/, /^desktop\/package\.json$/, /^src\/components\/(UpdateChip|TopNotes)\.jsx$/, /^src\/components\/settings\/About\.jsx$/, /^shared\/autoupdate\.js$/, /^src\/busy\.js$/, /^desktop\/(main|preload)\.js$/, /^test\/stand-ins\/installer\.cjs$/] },
   { name: 'screen-watch', build: null, covers: [/^src\/components\/meetings\/(changes|screen)\.js$/] },
   { name: 'devices', build: null, covers: [/^server\/(machines|relay|index)\.js$/, /^relay\//, /^test\/stand-ins\/relay\.mjs$/] },

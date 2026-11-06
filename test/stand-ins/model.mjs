@@ -33,6 +33,9 @@
 //   (llama3.1:8b, and llama3.2-vision:11b, which can see), what each can do, none running, and
 //   /api/chat answering as Ollama does (its message, pictures as base64 in `images`) with the same
 //   answers as above, logged with path '/api/chat'.
+//   Mail's How You Write: a profile saying how many emails and meeting lines it read, with the first
+//   email as its example. Reply Assist: a reply in a code fence (which Bridge AI takes off) with the
+//   free times it was given, a nudge, and the draft shorter, warmer or more direct.
 //   Anything else: "echo: <the last thing said>".
 //   A key of sk-bad is turned down (HTTP 401), as a provider would.
 import http from 'node:http'
@@ -160,6 +163,23 @@ function answer(b) {
     const first = scene.shapes?.[0]?.id
     const ops = { update: [id('Start') && { id: id('Start'), text: 'Begin' }, id('Ship') && { id: id('Ship'), fill: '#ffc9c9' }].filter(Boolean), add: first ? [{ ref: 'n1', shape: 'rectangle', text: 'Cache', near: first, side: 'right' }] : [], connect: first ? [{ from: first, to: 'n1', text: 'reads' }] : [] }
     return say(`\`\`\`json\n${JSON.stringify(ops)}\n\`\`\``)
+  }
+  // How You Write (mailassist.js): a profile from what it was given, and the first email as the example.
+  if (/Describe how they write email/.test(last)) {
+    const emails = (last.match(/^E\d+ \(/gm) || []).length, lines = (last.match(/^M\d+ \(/gm) || []).length
+    const profile = [`Greets with "${/\bHey\b/.test(last) ? 'Hey' : 'Hi'}" and the first name`, /Cheers/.test(last) ? 'Signs off with "Cheers"' : 'Signs off with their name', 'Short replies, two or three sentences', `Read ${emails} emails and ${lines} meeting lines`]
+    return say(JSON.stringify({ profile, examples: emails ? ['E1'] : [] }))
+  }
+  // Reply Assist: a reply, a nudge, or the draft so far shorter, warmer or more direct. The times it
+  // was given go in as they were said.
+  if (/reply to the email below|Write a short, friendly follow-up/.test(last)) {
+    const first = (/The email[^(]*\(from "?([^\s<"]+)/.exec(last)?.[1] || 'there')
+    if (/Make it shorter/.test(last)) return say(`Hi ${first},\n\nYes, today.\n\nCheers`)
+    if (/Make it warmer/.test(last)) return say(`Hi ${first},\n\nThanks so much for sending this! I'll look at it today.\n\nCheers`)
+    if (/Make it more direct/.test(last)) return say(`${first}, I'll review it by 5 today.`)
+    if (/Write a short, friendly follow-up/.test(last)) return say(`Hi ${first},\n\nJust checking in on this.\n\nCheers`)
+    const times = /Times they're free[^\n]*\n((?:- [^\n]+\n?)+)/.exec(last)?.[1]
+    return say(`\`\`\`\nHi ${first},\n\nThanks, I'll review the launch plan today.${times ? `\n\nI could meet at any of these:\n${times.trim()}` : ''}\n\nCheers\n\`\`\``)
   }
   return say(`echo: ${last} (${m.length} messages, ${b.model}, tools: ${b.tools ? b.tools.length : 0})`)
 }

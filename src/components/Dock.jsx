@@ -41,7 +41,8 @@ export function showCard(id) {
 
 export function TodayTabs({ tab, setTab, compact }) {
   const mail = useMail()
-  const needs = mail.data?.available ? mail.data.messages.filter((m) => m.bucket === 'needs' && !m.read).length : 0
+  // Unread, a reminder that's come back, or mail you sent that nobody answered by when you said.
+  const needs = mail.data?.available ? mail.data.messages.filter((m) => m.bucket === 'needs' && (!m.read || m.reminded)).length + (mail.data.nudges || []).filter((n) => n.due).length : 0
   return (
     <nav className={`today-tabs ${compact ? 'compact' : ''}`} role="tablist" aria-label={t('Today sections')}>
       {TABS.map(([id, icon, label]) => (
