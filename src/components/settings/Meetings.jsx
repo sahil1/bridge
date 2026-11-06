@@ -259,7 +259,7 @@ export default function Meetings() {
             {MEETING_KEYS.map((k) => <option key={k} value={k}>{k === '@' ? t('@, with the files') : k}</option>)}
           </select>
         </div>
-        <p className="muted small">{t('In an agent\'s message box, type it and a few words of the meeting\'s name, and pick it: the agent gets the meeting as a file to read, with its summary and action items, your notes and the transcript.')}</p>
+        <p className="muted small">{t('In an agent\'s message box, type it and a few words of the meeting\'s name, and pick it: the agent gets the meeting as a file to read, with its summary and action items, your notes and the transcript.')} {t('Meetings recorded on your other computers are offered too.')}</p>
       </section>
 
       <section className="st-sec">
@@ -299,7 +299,7 @@ export default function Meetings() {
         <p className="muted small">Save on a meeting writes it for Obsidian or any notes app, laid out like Granola's and Meetily's Obsidian plugins, so they sit side by side.</p>
         <SaveNotes set={set} pickFolder={pickFolder} />
         <label className="st-check">
-          <input type="checkbox" checked={!!m.autoSave} onChange={(e) => set({ autoSave: e.target.checked, ...(m.folder ? {} : { folder: d.folder }) })} />
+          <input type="checkbox" checked={m.autoSave !== false} onChange={(e) => set({ autoSave: e.target.checked, ...(m.folder ? {} : { folder: d.folder }) })} />
           <span><b>Save every meeting there by itself</b> <span className="muted small">As it ends, and again with its summary once that's written.</span></span>
         </label>
       </section>

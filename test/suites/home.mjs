@@ -310,10 +310,14 @@ try {
   extra.push({ id: 'agent:f1@2', nid: 'f1@2', kind: 'agent', group: 'needs', type: 'failed', paneId: 'f1', seq: 2, since: new Date(Date.now() - 50 * 6e4).toISOString(), at: new Date(Date.now() - 50 * 6e4).toISOString(), text: 'npm ERR! code ELIFECYCLE: the build failed in packages/web', agent: { title: 'deploy', project: 'deploy', kind: 'claude', kindLabel: 'Claude Code' }, machine: null, device: 'Studio', online: true })
   const clock = (h, m = 0) => { const d = new Date(); d.setHours(h, m, 0, 0); return d }
   const inMin = (n) => new Date(Date.now() + n * 6e4)
+  // Today's two meetings both still today, whatever the time (late in the evening, 2½ hours on was
+  // tomorrow): at a fifth and three fifths of what's left of the day, at most 25 and 150 minutes on.
+  const dayLeft = (new Date(new Date().setHours(24, 0, 0, 0)) - Date.now()) / 6e4
+  const firstIn = Math.max(1, Math.min(25, Math.floor(dayLeft / 5))), nextIn = Math.max(2, Math.min(150, Math.floor(dayLeft * 0.6)))
   const ev = (id, title, start, mins, more = {}) => ({ id, title, canceled: false, calendar: 'Work', start: start.toISOString(), end: new Date(+start + mins * 6e4).toISOString(), allDay: false, attendees: [], attendeeCount: 3, ...more })
   const tomorrow = clock(10); tomorrow.setDate(tomorrow.getDate() + 1)
   const morningCal = {
-    today: [ev('e1', 'Acme renewal sync', inMin(25), 30, { links: [{ url: 'https://example.com/sow', name: 'SOW draft' }] }), ev('e1b', 'Acme renewal sync', inMin(25), 30, { calendar: 'Personal' }), ev('e2', '1:1 with Gary', inMin(150), 30)],
+    today: [ev('e1', 'Acme renewal sync', inMin(firstIn), 30, { links: [{ url: 'https://example.com/sow', name: 'SOW draft' }] }), ev('e1b', 'Acme renewal sync', inMin(firstIn), 30, { calendar: 'Personal' }), ev('e2', '1:1 with Gary', inMin(nextIn), 30)],
     tomorrow: [ev('e3', 'Board prep', tomorrow, 60)], fetchedAt: new Date().toISOString(),
   }
   const morning = async (c2) => {

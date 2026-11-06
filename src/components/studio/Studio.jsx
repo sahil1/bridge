@@ -8,6 +8,7 @@ import { useDesignPacks, PacksSection, packFor } from './packs.jsx'
 import { lineDiff, textFor, comparable } from './diff.js'
 import { fontCss, lookOfPack } from './look.js'
 import { withKeys } from './keys.js'
+import { useBusy } from '../../busy.js'
 import './studio.css'
 
 // Studio: documents, sheets, decks, PDFs and pages, like Meetings and Whiteboards a place of its own.
@@ -278,8 +279,10 @@ export function StudioPage({ root, path: rel, onBack, onOpen }) {
     window.addEventListener('keydown', key)
     return () => window.removeEventListener('keydown', key)
   }, [save])
-  // Leaving with unsaved changes asks first (the browser's own question).
+  // Leaving with unsaved changes asks first (the browser's own question), and the desktop app
+  // doesn't update by itself meanwhile (busy.js).
   useEffect(() => { if (!dirty) return; const q = (e) => { e.preventDefault(); e.returnValue = '' }; window.addEventListener('beforeunload', q); return () => window.removeEventListener('beforeunload', q) }, [dirty])
+  useBusy('studio', dirty)
   const restore = async (id) => { if (dirty && !window.confirm(t('Put this version back? Your unsaved changes here are lost (what\'s in the file now is kept as a version).'))) return; await restoreVersion(f, id); await load(); setNote({ text: t('Put back. What was there is kept as a version too.') }) }
 
   const name = meta?.name || rel.split('/').pop()

@@ -1169,10 +1169,13 @@ app.post('/api/fix/install', wrap(async (req) => {
 // A voice note or a dictation, the audio as the body (a 16 kHz mono WAV from the page): { text }.
 // Not set up yet: 409 with what's needed in words (error), code needs-model and the model, which
 // the page offers to download, then sends the recording again.
+// hearing: how many are being turned into text now (an update waits for them, updates.js).
+let hearing = 0
 app.post('/api/transcribe', express.raw({ type: () => true, limit: '30mb' }), async (req, res) => {
+  hearing++
   try { res.json(await voice.transcribe(req.body, req.headers['content-type'], { more: dictation.hints(dictationSources) })); counts.add('voice.transcribed') } catch (e) {
     res.status(e.status || 502).json({ error: e.message, ...(typeof e.code === 'string' ? { code: e.code } : {}), ...(e.model ? { model: e.model } : {}) })
-  }
+  } finally { hearing-- }
 })
 // Dictation: the names it spells the way they're written (dictation.js; the page tidies the text),
 // which the speech engine also listens for.
@@ -1411,9 +1414,65 @@ app.get('/api/calls/event', wrap(async (req) => {
 }))
 syncCalls()
 // Meetings to mention in a message, and one as a file for an agent to read (the message box's
-// meeting key, @ unless Settings › Meetings says another).
-app.get('/api/meetings/mentions', wrap((req) => ({ meetings: meetings.mentionable(req.query.q) })))
-app.post('/api/meetings/:id/for-agents', wrap((req) => meetings.forAgents(req.params.id)))
+// meeting key, @ unless Settings › Meetings says another): this computer's, and those on your other
+// computers (machines.js), each asked at once and given MENTION_MS, so one that's slow or offline
+// never holds up the menu; it's named in unreachable instead. here=1: only this computer's, as
+// another computer asks. agentText: this Bridge AI gives a meeting's words to another computer
+// (forAgents with text); one that doesn't (an older Bridge AI) is named in update, its meetings
+// marked old.
+const MENTION_MS = 2000
+const fromMachine = async (m, opts, ms) => {
+  let t
+  try {
+    return await Promise.race([
+      machines.exchange(m.id, { ...opts, ms }).then(async (r) => ({ status: r.status, j: await r.json() })),
+      new Promise((resolve, reject) => { t = setTimeout(() => reject(new Error(`${m.name} didn't answer`)), ms) }),
+    ])
+  } finally { clearTimeout(t) }
+}
+const isOld = (r) => r.status === 404 && r.j?.error === 'Not found' && !r.j.missing
+async function mentionsElsewhere(q, n) {
+  const out = { meetings: [], unreachable: [], update: [], from: [] }
+  await Promise.all(machines.list().filter((m) => m.state === 'linked').map(async (m) => {
+    if (!m.online) { out.unreachable.push(m.name); return }
+    let r
+    try { r = await fromMachine(m, { u: `/api/meetings/mentions?here=1&n=${n}&q=${encodeURIComponent(q)}` }, MENTION_MS) } catch { out.unreachable.push(m.name); return }
+    if (isOld(r)) { out.update.push(m.name); return }
+    if (r.status >= 400 || !Array.isArray(r.j?.meetings)) { out.unreachable.push(m.name); return }
+    if (!r.j.agentText) out.update.push(m.name)
+    out.from.push(m.name)
+    for (const x of r.j.meetings.slice(0, n)) {
+      if (!/^[\w-]{1,80}$/.test(String(x?.id || ''))) continue
+      out.meetings.push({ id: x.id, title: String(x.title || '').slice(0, 200), startedAt: String(x.startedAt || ''), seconds: Number(x.seconds) || 0, status: String(x.status || ''), hasSummary: !!x.hasSummary, people: Number(x.people) || 0, machine: m.id, device: m.name, ...(r.j.agentText ? {} : { old: true }) })
+    }
+  }))
+  return out
+}
+app.get('/api/meetings/mentions', wrap(async (req) => {
+  const q = String(req.query.q || '').slice(0, 200)
+  const n = Math.min(30, Math.max(1, Number(req.query.n) || 8))
+  const mine = meetings.mentionable(q, n).map((m) => ({ ...m, machine: null, device: null }))
+  if (req.query.here) return { meetings: mine, agentText: true }
+  const there = await mentionsElsewhere(q, n)
+  const all = [...mine, ...there.meetings].sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt))).slice(0, n)
+  return { meetings: all, here: relay.thisName(), from: there.from, unreachable: there.unreachable, update: there.update, agentText: true }
+}))
+// Picked: the file for the agent. machine: a meeting on another of your computers, whose words come
+// from there (forAgents with text) and are kept here (meetings.keepCopy), so an agent on this
+// computer can read it. One on an older Bridge AI, which can't give them: it says to update it.
+app.post('/api/meetings/:id/for-agents', wrap(async (req) => {
+  const from = req.body?.machine ? String(req.body.machine) : null
+  if (!from) return meetings.forAgents(req.params.id, { text: !!req.query.text })
+  const m = machines.list().find((x) => x.id === from && x.state === 'linked')
+  if (!m) throw Object.assign(new Error('That computer isn\'t linked to this one any more'), { status: 404 })
+  const update = () => Object.assign(new Error(`Update Bridge AI on ${m.name} to mention its meetings here`), { status: 409, code: 'update' })
+  let r
+  try { r = await fromMachine(m, { method: 'POST', u: `/api/meetings/${encodeURIComponent(req.params.id)}/for-agents?text=1` }, 20000) } catch { throw Object.assign(new Error(`${m.name} isn't reachable`), { status: 503, code: 'offline' }) }
+  if (isOld(r)) throw update()
+  if (r.status >= 400) throw Object.assign(new Error(r.j?.error || `${m.name} answered ${r.status}`), { status: r.status })
+  if (typeof r.j?.text !== 'string') throw update()
+  return { ...(await meetings.keepCopy({ machine: m.id, id: req.params.id, title: r.j.title, text: r.j.text })), device: m.name }
+}))
 app.get('/api/meetings/:id', wrap((req) => meetings.get(req.params.id)))
 app.post('/api/meetings/:id/audio', express.raw({ type: () => true, limit: '4mb' }), wrap((req) => meetings.audio(req.params.id, String(req.query.src || ''), req.body, req.query.seq)))
 app.post('/api/meetings/:id/pause', wrap((req) => meetings.pause(req.params.id)))
@@ -2036,7 +2095,31 @@ app.get('/api/counts/sent/:week', wrap((req) => counts.sentReport(req.params.wee
 app.post('/api/counts/active', wrap(() => counts.activity()))
 
 app.get('/api/updates', wrap((req) => updates.status({ force: req.query.refresh === '1', disabled: cfg.updates?.check === false })))
-app.post('/api/updates/install', wrap((req) => updates.install({ app: req.body?.app === true })))
+// auto: by itself while you're away, asked by the desktop app on this computer only.
+app.post('/api/updates/install', wrap((req) => {
+  if (req.body?.auto === true && !fromHere(req)) throw Object.assign(new Error('Only the desktop app updates by itself'), { status: 403 })
+  return updates.install({ app: req.body?.app === true, auto: req.body?.auto === true })
+}))
+// Updating by itself while you're away (updates.js autoView): whether it's the time, and what it
+// waits for. The desktop app says what it waits for itself (POST, from this computer).
+updates.useSettings(() => ({ on: cfg.updates?.auto !== false, checks: cfg.updates?.check !== false }))
+// What an update would cut short: this computer's agents working or waiting on you (a cloud agent
+// runs elsewhere, and other devices' agents on them), a meeting recording, being transcribed or its
+// notes being written, and a dictation being heard (its live words, or its recording being turned
+// into text, from any of your devices).
+updates.useQuiet(async () => {
+  const f = await fleetView().catch(() => null)
+  return {
+    agents: f ? f.agents.filter((a) => !a.cloud && (a.status === 'working' || a.status === 'blocked')).length : null,
+    meeting: meetings.busy(),
+    dictation: hearing > 0 || livewords.active(),
+  }
+})
+app.get('/api/updates/auto', wrap(() => updates.autoView()))
+app.post('/api/updates/auto', wrap((req) => {
+  if (!fromHere(req)) throw Object.assign(new Error('Only the desktop app says this'), { status: 403 })
+  return updates.autoView({ said: Array.isArray(req.body?.why) ? req.body.why : [] })
+}))
 
 // Which server this is, so the desktop app can tell when one left over from an older build (or
 // another copy of the app) is still running, and replace it with its own.
