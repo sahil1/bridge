@@ -72,6 +72,7 @@ import * as calls from './calls.js'
 import * as callEvent from './callevent.js'
 import * as perf from './perf.js'
 import * as studio from './studio.js'
+import * as studioFound from './studiofound.js'
 import { terminals, openAttach, openCommand } from './terminal.js'
 import { mcpRoutes } from './mcp.js'
 import * as notify from './notify.js'
@@ -331,6 +332,8 @@ const rootOf = async (pane) => {
     if (!pl) throw new Error('That place isn\'t in Files any more')
     return pl.path
   }
+  // A folder Studio's home found one of your files in (studiofound.js).
+  if (String(pane).startsWith('found:')) return studioFound.foundDir(String(pane).slice(6))
   const p = ((await rt.fleet()).panes || []).find((x) => x.paneId === pane)
   if (!p) throw new Error(`No pane ${pane}`)
   return p.cwd
@@ -386,6 +389,39 @@ app.post('/api/studio/ask', wrap(async (req) => {
   await studio.noteAsk(root, q.path, adapter(kind).label)
   return { ...out, name: adapter(kind).label }
 }))
+// Your files wherever they are, for Studio's home (studiofound.js): asked for only once it's open,
+// and let go of if you leave before it's done. Each found in an agent's folder or a place opens
+// through it.
+app.get('/api/studio/found', async (req, res) => {
+  const ctl = new AbortController()
+  res.on('close', () => { if (!res.writableEnded) ctl.abort() })
+  try {
+    const fleet = lastFleet || await fleetView().catch(() => null)
+    const roots = [
+      ...(fleet?.agents || []).filter((a) => a.cwd && !a.chief && !a.plainChat && !a.cloudOnly).map((a) => ({ root: a.paneId, dir: a.cwd, label: a.workspace || null })),
+      ...places.pickedPlaces().map((p) => ({ root: `place:${p.id}`, dir: places.placeOf(p.id)?.path, label: p.name })),
+    ].filter((r) => r.dir)
+    res.json(await studioFound.found({ roots, signal: ctl.signal, fresh: req.query.fresh === '1' }))
+  } catch (e) { if (!res.headersSent) res.status(502).json({ error: e.message }) }
+})
+// Edit in place: part of a document rewritten as asked, by the model picked for Studio (Settings:
+// studio.model), else the one the app reaches first (your agent's sign-in, a key, one on this
+// computer). writer: which that is, and the others to pick from.
+const studioModel = async () => cfg.studio?.model || await pickMeetingModel()
+app.get('/api/studio/writer', wrap(async () => {
+  const list = await chatModels.models().catch(() => [])
+  const id = await studioModel()
+  const d = list.find((x) => x.id === id)
+  return { model: id ? { id, label: d?.label || String(id).split(':').slice(1).join(':') || id, provider: d?.provider || null, missing: !d } : null, picked: !!cfg.studio?.model, models: list.map((m) => ({ id: m.id, label: m.label, provider: m.provider, via: m.via })) }
+}))
+app.post('/api/studio/rewrite', async (req, res) => {
+  try {
+    const model = String(req.body?.model || '') || await studioModel()
+    const out = await studioFound.rewrite({ ...req.body, model, reply: (id, msgs, o) => chatModels.reply(id, msgs, o) })
+    const d = (await chatModels.models().catch(() => [])).find((x) => x.id === model)
+    res.json({ ...out, model, by: d?.label || model })
+  } catch (e) { res.status(e.status || 502).json({ error: e.message, code: e.code || 'failed' }) }
+})
 app.get('/api/agents/:pane/files', wrap(async (req) => files.listDir(await rootOf(req.params.pane), String(req.query.path || ''), { showHidden: req.query.hidden === '1' })))
 app.get('/api/agents/:pane/file', wrap(async (req) => files.readFile(await rootOf(req.params.pane), String(req.query.path || ''))))
 app.put('/api/agents/:pane/file', async (req, res) => {

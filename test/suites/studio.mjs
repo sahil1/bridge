@@ -6,11 +6,10 @@
 // overwrites; design packs. The page: Studio's home with New and Recent; a Markdown file edited
 // and saved; a Word file's text; a sheet; a deck drawn, and its PowerPoint beside it; a page drawn
 // as it's typed; versions and Put back; Ask an agent queueing the change for the agent you pick.
-// The editors finished: a document's toolbar (each button named, with its shortcut in its tooltip,
-// doing what it says and showing it, only what the format keeps), heading levels, links, a table's
-// rows, undo and redo, the shortcuts; a quote, an underline and a link kept through a save; the
-// header's kind, size and folder never cut off; the status line; each kind saying what it is and
-// what it can't do; on 375 and 430 px phones, Studio's home and a document fitting.
+// The editors finished: a Markdown file's toolbar (only what Markdown keeps), a Word file in its own
+// look saved with every other part as it was (its editor in full is studio-docs.mjs); the header's
+// kind, size and folder never cut off; the status line; each kind saying what it is and what it
+// can't do; on 375 and 430 px phones, Studio's home and a document fitting.
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
@@ -145,10 +144,10 @@ try {
   // app is listening).
   const home = () => until(async () => { await p.locator('.rail-nav-btn', { hasText: 'Studio' }).click(); return p.locator('.sd-home').waitFor({ timeout: 1500 }).then(() => true, () => false) }, 20000, 300)
   ok(!!(await home()), "Studio opens from the rail")
-  ok(await p.locator('.sd-new-btn').count() === 5 && await p.locator('.sd-recent li', { hasText: 'notes.md' }).count() > 0, "Studio's home: New (document, Markdown, sheet, deck, page) and Recent")
+  ok(await p.locator('.sd-new-btn').count() === 5 && !!(await until(async () => (await p.locator('.sd-files-row', { hasText: 'notes.md' }).count()) > 0, 10000)), "Studio's home: New (document, Markdown, sheet, deck, page) and your recent files")
   await shot(p, `${tag}studio-home`)
   // A Markdown file, edited and saved.
-  await p.locator('.sd-recent-open', { hasText: 'notes.md' }).first().click()
+  await p.locator('.sd-file-name', { hasText: 'notes.md' }).first().click()
   const pm = p.locator('.sd-page .ProseMirror')
   ok(!!(await until(async () => /Second draft/.test(await pm.innerText().catch(() => '')), 15000)), 'a Markdown file opens as a document')
   const mdTools = await p.locator('.sd-doc-tools button').evaluateAll((bs) => bs.map((b) => b.getAttribute('aria-label')))
@@ -182,117 +181,25 @@ try {
   // A Word file's text.
   const open = async (name) => p.evaluate(({ root, name }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: name } })), { root, name })
   await open('plan.docx')
-  ok(!!(await until(async () => /Q4 plan/.test(await p.locator('.sd-page .ProseMirror').innerText().catch(() => '')) && /Ship the pricing page/.test(await p.locator('.sd-page .ProseMirror').innerText().catch(() => '')), 20000)), 'a Word file opens with its heading and text')
-  const h1 = await p.locator('.sd-page.word h1').first().evaluate((e) => { const c = getComputedStyle(e), b = getComputedStyle(e.closest('.sd-page')); return { color: c.color, font: c.fontFamily, size: c.fontSize, body: b.fontFamily, paper: b.backgroundColor } })
+  ok(!!(await until(async () => /Q4 plan/.test(await p.locator('.sd-w').innerText().catch(() => '')) && /Ship the pricing page/.test(await p.locator('.sd-w').innerText().catch(() => '')), 20000)), 'a Word file opens with its heading and text')
+  const h1 = await p.locator('.sd-w h1').first().evaluate((e) => { const c = getComputedStyle(e), b = getComputedStyle(e.closest('.sd-w')); return { color: c.color, font: c.fontFamily, size: c.fontSize, body: b.fontFamily, paper: b.backgroundColor } })
   ok(h1.color === 'rgb(192, 0, 0)' && /Georgia/.test(h1.font) && h1.size === '24px' && /Arial/.test(h1.body) && h1.paper === 'rgb(255, 255, 255)', 'in its own look: its fonts, sizes and colours, on white paper', h1)
   await shot(p, `${tag}studio-word`)
-  // Saved here: the same look in the file (docx would have put its own in).
-  const docText = p.locator('.sd-page .ProseMirror')
-  await docText.click()
-  await p.keyboard.press(process.platform === 'darwin' ? 'Meta+End' : 'Control+End')
+  // Saved here: only what changed is written; its styles as they were, byte for byte. (A Word
+  // file's editor is checked in studio-docs.mjs.)
+  const JSZip = require('jszip')
+  const partsOf = async (file) => { const z = await JSZip.loadAsync(fs.readFileSync(file)); const o = {}; for (const n of Object.keys(z.files)) if (!z.files[n].dir) o[n] = await z.file(n).async('string'); return o }
+  const stylesOf = async (file) => { try { return await (await JSZip.loadAsync(fs.readFileSync(file))).file('word/styles.xml').async('string') } catch { return '' } }
+  const was = await partsOf(path.join(dir, 'plan.docx'))
+  await p.locator('.sd-w p', { hasText: 'Ship the pricing page' }).click()
+  await p.keyboard.press('End')
   await p.keyboard.type(' Agreed.')
   await p.locator('.pane-head button', { hasText: 'Save' }).click()
-  const said = await p.locator('.sd-conflict[role="alertdialog"]').innerText({ timeout: 5000 }).catch(() => '')
-  ok(/fonts and colours/.test(said), "a Word file's first save here says what's kept", said)
-  await p.locator('.sd-conflict[role="alertdialog"] button', { hasText: 'Save' }).click()
-  const JSZip = require('jszip')
-  const stylesOf = async (file) => { try { return await (await JSZip.loadAsync(fs.readFileSync(file))).file('word/styles.xml').async('string') } catch { return '' } }
-  const kept = await until(async () => { const x = await stylesOf(path.join(dir, 'plan.docx')); return /Agreed/.test(await (await JSZip.loadAsync(fs.readFileSync(path.join(dir, 'plan.docx')))).file('word/document.xml').async('string')) && x }, 10000)
-  ok(!!kept && /w:ascii="Georgia"/.test(kept) && /w:val="C00000"/.test(kept) && /w:ascii="Arial"/.test(kept) && /w:sz w:val="36"/.test(kept) && !/2E74B5/.test(kept.split('Heading1')[1]?.split('</w:style>')[0] || ''), 'saved: the change, in the same fonts, sizes and colours', kept && kept.slice(0, 300))
-  // ---------- A document's toolbar (a Word file) ----------
-  // Each button named, with its shortcut in its tooltip; only what a Word file keeps (no code,
-  // which docx.js would write as plain text); undo and redo with nothing done yet, off.
-  const tb = p.locator('.sd-doc-tools')
-  const tools = await tb.locator('button').evaluateAll((bs) => bs.map((b) => ({ name: b.getAttribute('aria-label'), title: b.title, pressed: b.getAttribute('aria-pressed'), off: b.disabled })))
-  const names = tools.map((x) => x.name)
-  ok(JSON.stringify(names) === JSON.stringify(['Bold', 'Italic', 'Underline', 'Strikethrough', 'Bulleted list', 'Numbered list', 'Quote', 'Insert link', 'Table', 'Undo', 'Redo']), "a Word file's toolbar: marks, lists, quote, link, table, undo and redo, in that order (no code: a Word file wouldn't keep it)", names)
-  const key = process.platform === 'darwin' ? '⌘' : 'Ctrl'
-  ok(tools.every((x) => x.title.startsWith(x.name)) && ['Bold', 'Italic', 'Underline', 'Strikethrough', 'Bulleted list', 'Numbered list', 'Quote', 'Undo', 'Redo'].every((n) => tools.find((x) => x.name === n).title.includes(key)), 'every button has a tooltip with its name, and its shortcut where it has one', tools.map((x) => x.title))
-  ok(tools.filter((x) => x.pressed !== null).map((x) => x.name).join() === 'Bold,Italic,Underline,Strikethrough,Bulleted list,Numbered list,Quote,Insert link', 'each mark and block says whether it is on (aria-pressed)', tools)
-  const styles = await tb.locator('select.sd-style option').allInnerTexts()
-  ok(styles.join() === 'Paragraph,Heading 1,Heading 2,Heading 3' && /Text style/.test(await tb.locator('select.sd-style').getAttribute('title')), 'a Text style menu: Paragraph and Heading 1 to 3', styles)
-  ok(!!(await bare(p).then((x) => !x.length)), 'nothing on the page is a bare control: each has a name, and an icon-only one a tooltip', await bare(p))
-  // A line of its own, picked, then each mark and block on and off: shown in the text and on its button.
-  const btn = (name) => tb.locator(`button[aria-label="${name}"]`)
-  const pressed = async (name) => (await btn(name).getAttribute('aria-pressed')) === 'true'
-  await docText.click()
-  await p.keyboard.press(`${MOD}+End`)
-  await p.keyboard.press('Enter')
-  await p.keyboard.type('Toggle me')
-  // The line picked whole (a triple click), whatever it's in by then.
-  const pick = () => docText.locator('p', { hasText: 'Toggle me' }).click({ clickCount: 3 })
-  await pick()
-  const has = (sel) => docText.locator(sel, { hasText: 'Toggle me' }).count()
-  // It carries on in bold from the line before (" Agreed.", typed after bold words): the button
-  // says so, and takes it off.
-  if (await pressed('Bold')) { await btn('Bold').click(); await until(async () => (await has('strong')) === 0, 3000, 100) }
-  const toggles = []
-  for (const [name, sel] of [['Bold', 'strong'], ['Italic', 'em'], ['Underline', 'u'], ['Strikethrough', 's'], ['Bulleted list', 'ul'], ['Numbered list', 'ol'], ['Quote', 'blockquote']]) {
-    await btn(name).click()
-    const on = !!(await until(async () => (await has(sel)) === 1 && await pressed(name), 3000, 100))
-    await btn(name).click()
-    const off = !!(await until(async () => (await has(sel)) === 0 && !(await pressed(name)), 3000, 100))
-    toggles.push(`${name} ${on ? 'on' : 'NOT ON'} ${off ? 'off' : 'NOT OFF'}`)
-  }
-  ok(toggles.every((x) => /on off$/.test(x)), 'each mark and block does what it says, and its button shows it on, then off again', toggles)
-  // Heading levels, from the menu and from the keyboard (⌥⌘1, which the app's own ⌥1 doesn't take).
-  const style = tb.locator('select.sd-style')
-  const levels = []
-  for (const v of ['h2', 'h3', 'p']) { await style.selectOption(v); levels.push(await until(async () => (await has(v)) === 1 && (await style.inputValue()) === v, 3000, 100) ? v : `not ${v}`) }
-  await docText.locator('p', { hasText: 'Toggle me' }).click()
-  await p.keyboard.press(`${MOD}+Alt+Digit1`)
-  levels.push(await until(async () => (await has('h1')) === 1 && (await style.inputValue()) === 'h1', 3000, 100) ? 'keys h1' : 'keys not h1')
-  await p.keyboard.press(`${MOD}+Alt+Digit0`)
-  levels.push(await until(async () => (await has('p')) === 1 && (await style.inputValue()) === 'p', 3000, 100) ? 'keys p' : 'keys not p')
-  ok(levels.join() === 'h2,h3,p,keys h1,keys p', 'Text style: Heading 2, Heading 3 and back to Paragraph; and from the keyboard', levels)
-  await pick()
-  await p.keyboard.press(`${MOD}+b`)
-  const boldKeys = !!(await until(async () => (await has('strong')) === 1 && await pressed('Bold'), 3000, 100))
-  await p.keyboard.press(`${MOD}+b`)
-  ok(boldKeys && !!(await until(async () => (await has('strong')) === 0, 3000, 100)), 'the shortcuts work too: ⌘B bold, and off again')
-  // A link: added from the link bar to what's picked (example.com made https://example.com), shown
-  // on its button, and taken back with Undo, put back with Redo.
-  ok(!!(await until(async () => !(await btn('Undo').isDisabled()) && await btn('Redo').isDisabled(), 3000, 100)), 'Undo is there once something is done; Redo is not, until something is undone')
-  // Clicked again until the link bar shows (WebKit can take a click while the toolbar redraws).
-  await until(async () => { if (!(await p.locator('.sd-linkbar input').count())) await btn('Insert link').click(); return p.locator('.sd-linkbar input').waitFor({ timeout: 1500 }).then(() => true, () => false) }, 10000, 300)
-  await p.locator('.sd-linkbar input').fill('example.com')
-  await p.locator('.sd-linkbar input').press('Enter')
-  const link = docText.locator('a[href="https://example.com"]', { hasText: 'Toggle me' })
-  ok(!!(await until(async () => (await link.count()) === 1 && (await p.locator('.sd-linkbar').count()) === 0, 3000, 100)), 'Link: the address typed (made whole) on what is picked, and the bar gone')
-  await link.click()
-  ok(!!(await until(() => pressed('Insert link'), 3000, 100)), 'in the link, its button shows it')
-  await btn('Undo').click()
-  const undone = !!(await until(async () => (await link.count()) === 0, 3000, 100))
-  await btn('Redo').click()
-  ok(undone && !!(await until(async () => (await link.count()) === 1, 3000, 100)), 'Undo takes the link back, Redo puts it back')
-  // A table: added, a row added and the table deleted from its button's menu.
-  const tables = await docText.locator('table').count()
-  await pick()
-  await p.keyboard.press('ArrowRight')
-  await btn('Table').click()
-  const added = !!(await until(async () => (await docText.locator('table').count()) === tables + 1, 3000, 100))
-  const table = docText.locator('table').last()
-  const rows = await table.locator('tr').count()
-  await btn('Table').click()
-  await p.locator('.sd-tool-menu button', { hasText: 'Add a row below' }).click()
-  const more = !!(await until(async () => (await table.locator('tr').count()) === rows + 1, 3000, 100))
-  await btn('Table').click()
-  await p.locator('.sd-tool-menu button', { hasText: 'Delete the table' }).click()
-  ok(added && rows === 3 && more && !!(await until(async () => (await docText.locator('table').count()) === tables, 3000, 100)), 'Table: a 3 by 3 table with a header row, a row added below, and deleted, from its menu', { added, rows, more })
-  // Kept through a save: the line as a quote, underlined, with its link; read back as they were.
-  await pick()
-  await btn('Underline').click()
-  await btn('Quote').click()
-  ok(/Unsaved changes/.test(await p.locator('.sd-status').innerText()), 'the status line says there are unsaved changes', await p.locator('.sd-status').innerText())
-  await p.locator('.pane-head button', { hasText: 'Save' }).click()
-  const xml = () => JSZip.loadAsync(fs.readFileSync(path.join(dir, 'plan.docx'))).then((z) => z.file('word/document.xml').async('string')).catch(() => '')
-  const wrote = await until(async () => { const x = await xml(); return /Toggle me/.test(x) && x }, 10000)
-  ok(!!wrote && /<w:pStyle w:val="Quote"\/>/.test(wrote) && /<w:u /.test(wrote) && /<w:hyperlink/.test(wrote), "saved as Word's own: a quote in its Quote style, the underline, the link", wrote && wrote.slice(wrote.indexOf('Toggle') - 400, wrote.indexOf('Toggle') + 40))
+  ok(!(await p.locator('.sd-conflict[role="alertdialog"]').count()), "a Word file saves at once: nothing to warn about, as it keeps everything")
+  const kept = await until(async () => { const x = await partsOf(path.join(dir, 'plan.docx')); return /Agreed/.test(x['word/document.xml']) && x }, 10000)
+  const changedParts = kept ? Object.keys({ ...was, ...kept }).filter((k) => was[k] !== kept[k]) : null
+  ok(!!kept && changedParts.join() === 'word/document.xml', 'saved: the change, and every other part of the file (its styles too) as it was', changedParts)
   ok(!!(await until(async () => /Saved/.test(await p.locator('.sd-status .sd-state').innerText()), 5000)), 'and then the status line says Saved')
-  await p.locator('.sd-file button[aria-label="Back to Studio"]').click()
-  await p.locator('.sd-home').waitFor({ timeout: 10000 })
-  await open('plan.docx')
-  ok(!!(await until(async () => (await docText.locator('blockquote u', { hasText: 'Toggle me' }).count()) === 1 && (await docText.locator('blockquote a[href="https://example.com"]').count()) === 1, 15000)), 'opened again: still a quote, underlined, with its link', await docText.innerHTML().catch(() => ''))
   // The header at the width of the owner's window: the kind and size whole, then the folder.
   await p.setViewportSize({ width: 1230, height: 820 })
   await sleep(300)
@@ -304,7 +211,7 @@ try {
   const status = await p.locator('.sd-status').innerText()
   ok(/\d+ words/.test(status) && /Word document/.test(status) && /\d+ versions/.test(status) && /Saved/.test(status), 'the status line: words, the kind of file, its versions, saved', status)
   await p.locator('.sd-status button', { hasText: 'Word document' }).click()
-  ok(/keeps its text, headings, lists, tables, links, quotes/.test(await p.locator('.sd-note-bar').innerText().catch(() => '')), 'and tapped, the kind says what saving keeps', await p.locator('.sd-note-bar').innerText().catch(() => ''))
+  ok(/writes only what you changed/.test(await p.locator('.sd-note-bar').innerText().catch(() => '')), 'and tapped, the kind says what saving keeps', await p.locator('.sd-note-bar').innerText().catch(() => ''))
   await p.locator('.sd-note-bar button[aria-label="Close"]').click()
   // A sheet.
   await open('budget.xlsx')
@@ -405,12 +312,12 @@ try {
     await ph.p.locator('nav.tabbar button', { hasText: 'More' }).first().click({ timeout: 20000 })
     await ph.p.locator('button, .m-more-row', { hasText: 'Studio' }).first().click({ timeout: 10000 })
     await ph.p.waitForSelector('.sd-home', { timeout: 15000 })
-    await until(async () => (await ph.p.locator('.sd-recent li').count()) > 0, 10000)
+    await until(async () => (await ph.p.locator('.sd-files-row', { hasText: 'notes.md' }).count()) > 0, 10000)
     await sleep(400)
     let f = await phoneFaults(ph.p, '.sd-home')
     ok(!Object.keys(f).length, `phone ${width}: Studio's home fits (nothing wider, past its edge or cut off; each control a whole 40 px target, each field 16 px)`, f)
     await shot(ph.p, `${tag}studio-home-phone-${width}`)
-    await ph.p.locator('.sd-recent-open', { hasText: 'notes.md' }).first().click()
+    await ph.p.locator('.sd-file-name', { hasText: 'notes.md' }).first().click()
     ok(!!(await until(async () => /Notes/.test(await ph.p.locator('.sd-page .ProseMirror').innerText().catch(() => '')), 15000)), `phone ${width}: Studio in More, a document opened`)
     await sleep(400)
     f = await phoneFaults(ph.p, '.sd-file')

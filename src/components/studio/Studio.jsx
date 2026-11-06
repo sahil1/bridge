@@ -9,7 +9,9 @@ import { lineDiff, textFor, comparable } from './diff.js'
 import { fontCss, lookOfPack } from './look.js'
 import { withKeys } from './keys.js'
 import { useBusy } from '../../busy.js'
+import { YourFiles } from './HomeFiles.jsx'
 import './studio.css'
+import './home.css'
 
 // Studio: documents, sheets, decks, PDFs and pages, like Meetings and Whiteboards a place of its own.
 // Any of them from Files or an agent's folder (on this computer, or another of yours through its
@@ -34,8 +36,8 @@ const when = (iso) => new Date(iso).toLocaleString(locale(), { month: 'short', d
 const sizeOf = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`)
 
 // ---------- Home ----------
-// New (a document, sheet, deck or page in a folder you pick), what you opened lately, and your
-// design packs.
+// New (a document, sheet, deck or page in a folder you pick), your files from wherever they are
+// (HomeFiles.jsx), and your design packs.
 const NEW = [
   { kind: 'doc', ext: '.docx', label: tx('Document'), hint: tx('A Word file') },
   { kind: 'doc', ext: '.md', label: tx('Markdown'), hint: tx('A Markdown file') },
@@ -118,18 +120,18 @@ export function StudioHome({ onOpen }) {
       onOpen({ root: where, path: r.path })
     } catch (x) { setErr(x.message) } finally { setBusy(false) }
   }
-  const files = data?.files || []
   return (
     <div className="sd-home">
       <div className="sd-home-head">
         <h2><Icon name="layers" size={18} /> {t('Studio')}</h2>
-        <p className="muted small">{t('Documents, sheets, decks, PDFs and pages from any of your folders and computers, edited here or by your agents, with every version kept. Open one from Files, or start one.')}</p>
+        <p className="muted small">{t('Your documents, sheets, decks, PDFs and pages, wherever they are, edited here or by your agents, with every version kept.')}</p>
       </div>
       <section className="sd-sec">
         <h3>{t('New')}</h3>
         <div className="sd-new">
           {NEW.map((n) => (
             <button key={n.label} type="button" className={`sd-new-btn${making === n ? ' on' : ''}`} onClick={() => { setMaking(n); setErr(null) }} disabled={!folders.length} aria-pressed={making === n}>
+              <span className={`sd-new-thumb ${n.deck ? 'deck' : n.ext === '.md' ? 'md' : n.kind}`} aria-hidden="true"><i /><i /><i /><i /></span>
               <span className="sd-new-ic"><Icon name={ICON[n.kind]} size={16} /></span><b>{t(n.label)}</b><small className="muted">{t(n.hint)}</small>
             </button>
           ))}
@@ -153,27 +155,10 @@ export function StudioHome({ onOpen }) {
           </form>
         )}
       </section>
-      <section className="sd-sec">
-        <h3>{t('Recent')}</h3>
-        {!data && <p className="muted small">{t('Opening…')}</p>}
-        {data && !files.length && <p className="muted small sd-none">{t('Nothing yet. A file you open here (from Files, with Open in Studio, or one you start above) shows here, to come back to.')}</p>}
-        <ul className="sd-recent">
-          {files.map((f) => {
-            const at = whereOf(folders, f.root, f.path)
-            const ext = extOf(f.name)
-            return (
-              <li key={`${f.root}\n${f.path}`}>
-                <button type="button" className="sd-recent-open" onClick={() => onOpen({ root: f.root, path: f.path })} title={at ? `${at.label} · ${at.full}` : f.path}>
-                  <span className={`sd-recent-ic ${f.kind || ''}`}><Icon name={ICON[f.kind] || 'file'} size={15} /></span>
-                  <span className="sd-recent-name"><b>{f.name}</b><small className="muted">{kindName(f.kind, ext)}{at ? ` · ${at.path}` : f.where ? ` · ${f.where}` : ''}</small></span>
-                  <small className="muted sd-recent-when">{when(f.at)}</small>
-                </button>
-                <button type="button" className="ghost-btn sd-recent-x" aria-label={t('Take {name} off the list', { name: f.name })} title={t('Take it off the list (the file stays)')} onClick={() => api(`/studio/recent?root=${encodeURIComponent(f.root)}&path=${encodeURIComponent(f.path)}`, { method: 'DELETE' }).then(refresh)}><Icon name="x" size={12} /></button>
-              </li>
-            )
-          })}
-        </ul>
-      </section>
+      <YourFiles recent={data} refreshRecent={refresh} onOpen={onOpen} describe={(f) => {
+        const at = whereOf(folders, f.root, f.path)
+        return { kind: kindName(f.kind, extOf(f.name)), folder: f.dir || at?.path || f.where || null, full: at ? `${at.label} · ${at.full}` : f.dir || null }
+      }} />
       <PacksSection packs={packs} />
     </div>
   )
@@ -183,11 +168,11 @@ export function StudioHome({ onOpen }) {
 // Saved with ⌘S or Save, only over the version you loaded; a change from an agent or another app
 // while it's open is shown at once when you've changed nothing, and offered when you have.
 const WHO = { you: tx('You'), agent: tx('An agent'), outside: tx('Changed outside Studio'), restored: tx('Put back'), opened: tx('When it was first opened here') }
-const RISKY = { '.docx': tx('Saving here keeps its text, headings, lists, tables, links, quotes, pictures, fonts and colours. Word\'s own layout (headers, footers, comments, tracked changes, page setup) isn\'t kept; the file as it was stays in its versions, and Ask an agent changes it in place.'), '.xlsx': tx('Saving here keeps its values, formulas, formats, merged cells and every sheet. Charts, pivot tables and comments aren\'t kept; the file as it was stays in its versions, and Ask an agent changes it in place.') }
+const RISKY = { '.xlsx': tx('Saving here keeps its values, formulas, formats, merged cells and every sheet. Charts, pivot tables and comments aren\'t kept; the file as it was stays in its versions, and Ask an agent changes it in place.') }
 // What saving keeps, in each kind of file: said under the file (its kind, in the status line), and
-// before the first save of a Word or Excel file. The editors offer only what's kept.
+// before the first save of an Excel file. The editors offer only what's kept.
 const KEEPS = {
-  '.docx': RISKY['.docx'], '.xlsx': RISKY['.xlsx'], '.xlsm': RISKY['.xlsx'],
+  '.docx': tx('Saving here writes only what you changed. Everything else in the file (its styles, headers and footers, comments, tracked changes, fields and page setup) stays exactly as it was, and the file as it was stays in its versions.'), '.xlsx': RISKY['.xlsx'], '.xlsm': RISKY['.xlsx'],
   '.md': tx('Saved as Markdown, as written: headings, bold, italic, strikethrough, code, lists, quotes, links, tables and pictures. Markdown has no underline or colours, so they aren\'t offered.'),
   '.txt': tx('Saved as plain text, as it is.'),
   '.csv': tx('Saved as a {kind} file: the first sheet\'s values. Formulas, formats and other sheets aren\'t part of a {kind} file, so they aren\'t kept.'),
@@ -351,7 +336,7 @@ export function StudioPage({ root, path: rel, onBack, onOpen }) {
           how many versions are kept, and whether it's saved. */}
       {meta && (
         <footer className="sd-status">
-          {stats && <span className="sd-stat" title={stats.title || undefined}>{stats.text}</span>}
+          {stats && (stats.open ? <button type="button" className="sd-status-btn sd-stat" title={stats.title || undefined} onClick={stats.open}>{stats.text}</button> : <span className="sd-stat" title={stats.title || undefined}>{stats.text}</span>)}
           <button type="button" className={`sd-status-btn${note?.info ? ' on' : ''}`} onClick={() => setNote(note?.info ? null : { text: keepsOf(kind, meta.ext), info: true })} aria-pressed={!!note?.info} title={t('What saving keeps')}><Icon name="info" size={12} /> {kindName(kind, meta.ext)}</button>
           <button type="button" className="sd-status-btn vers" onClick={() => setPanel(panel === 'versions' ? null : 'versions')} title={t('Versions: yours, your agents\' and changes from outside')}><Icon name="clock" size={12} /> {versions === 1 ? t('1 version') : t('{n} versions', { n: versions })}</button>
           <span className="sd-grow" />

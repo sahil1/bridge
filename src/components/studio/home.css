@@ -1,0 +1,109 @@
+/* Studio's home: New as a row of cards, each with a small picture of what it makes; then your files
+   as a table (name, folder, when it changed, Open), filtered by kind or name. */
+.sd-home > * { max-width: 1120px; }
+.sd-home-head h2 { font-size: 20px; letter-spacing: -.01em; }
+.sd-home-head p { max-width: 760px; }
+.sd-new { grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); gap: 12px; }
+.sd-new-btn { grid-template-rows: auto auto auto 1fr; min-height: 0; padding: 10px 10px 12px; }
+.sd-new-btn .sd-new-ic { display: none; }
+.sd-new-btn b { margin-top: 10px; padding: 0 4px; }
+.sd-new-btn small { padding: 0 4px; }
+/* A picture of each kind: a page with lines, a grid, a slide, a page of code. */
+.sd-new-thumb { position: relative; display: block; width: 100%; height: 96px; overflow: hidden; border-radius: 7px; background: var(--pane); box-shadow: inset 0 0 0 1px var(--line); }
+.sd-new-thumb i { position: absolute; left: 18%; right: 18%; height: 5px; border-radius: 3px; background: color-mix(in srgb, var(--ink) 12%, transparent); }
+.sd-new-thumb i:nth-child(1) { top: 18px; right: 44%; height: 8px; background: color-mix(in srgb, #2b6cde 55%, transparent); }
+.sd-new-thumb i:nth-child(2) { top: 36px; }
+.sd-new-thumb i:nth-child(3) { top: 48px; right: 26%; }
+.sd-new-thumb i:nth-child(4) { top: 60px; right: 34%; }
+.sd-new-thumb.md i:nth-child(1) { background: color-mix(in srgb, var(--ink) 45%, transparent); }
+.sd-new-thumb.sheet { background: linear-gradient(var(--line) 1px, transparent 1px) 0 0 / 100% 16px, linear-gradient(90deg, var(--line) 1px, transparent 1px) 0 0 / 36px 100%, var(--pane); }
+.sd-new-thumb.sheet i { display: none; }
+.sd-new-thumb.sheet::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 16px; background: color-mix(in srgb, #1e8e3e 22%, transparent); }
+.sd-new-thumb.deck { background: color-mix(in srgb, #e8710a 10%, var(--pane)); }
+.sd-new-thumb.deck i:nth-child(1) { top: 30px; left: 20%; right: 20%; height: 10px; background: color-mix(in srgb, #e8710a 60%, transparent); }
+.sd-new-thumb.deck i:nth-child(2) { top: 48px; left: 32%; right: 32%; }
+.sd-new-thumb.deck i:nth-child(3), .sd-new-thumb.deck i:nth-child(4) { display: none; }
+.sd-new-thumb.page { background: color-mix(in srgb, #7c4dff 7%, var(--pane)); }
+.sd-new-thumb.page i { left: 12%; height: 4px; background: color-mix(in srgb, #7c4dff 30%, transparent); }
+.sd-new-thumb.page i:nth-child(1) { height: 4px; right: 60%; background: color-mix(in srgb, #7c4dff 55%, transparent); }
+.sd-new-thumb.page i:nth-child(3) { left: 20%; }
+.sd-new-thumb.page i:nth-child(4) { left: 20%; }
+
+/* Your files. */
+.sd-files-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin-bottom: 8px; }
+.sd-files-head h3 { margin: 0 6px 0 0; }
+.sd-filter { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 2px; border-radius: 9px; background: var(--pane-2); }
+.sd-filter button { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border-radius: 7px; color: var(--ink-2); font: 500 12.5px var(--font); }
+.sd-filter button small { color: var(--ink-3); font-size: 11px; font-variant-numeric: tabular-nums; }
+.sd-filter button.on { background: var(--pane); color: var(--ink); box-shadow: 0 1px 2px rgb(0 0 0 / .08), 0 0 0 1px var(--line); }
+.sd-filter button:disabled { opacity: .45; cursor: default; }
+.sd-files-search { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 1px solid var(--line-2, var(--line)); border-radius: 8px; background: var(--pane); color: var(--ink-3); }
+.sd-files-search input { width: 150px; border: 0; outline: 0; background: none; color: var(--ink); font: 13px var(--font); }
+.sd-files-search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.sd-add-folder { position: relative; display: inline-flex; align-items: center; gap: 8px; }
+.sd-add-form { position: absolute; top: calc(100% + 6px); right: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 6px; width: 360px; padding: 10px; border-radius: 10px; background: var(--pane); box-shadow: 0 0 0 1px var(--line), 0 12px 32px rgb(0 0 0 / .18); }
+.sd-add-form input { flex: 1; min-width: 0; height: 30px; }
+.sd-add-form p { flex: 1 1 100%; margin: 0; }
+.sd-files-table { display: grid; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--pane); }
+.sd-files-row { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(0, 1.6fr) 120px 96px; align-items: center; gap: 12px; min-height: 48px; padding: 0 12px 0 8px; border-top: 1px solid var(--line); }
+.sd-files-row:first-child { border-top: 0; }
+.sd-files-row:not(.head):hover { background: color-mix(in srgb, var(--pane-2) 70%, transparent); }
+.sd-files-row.head { min-height: 34px; background: var(--pane-2); color: var(--ink-3); font: 600 10.5px var(--font); letter-spacing: .06em; text-transform: uppercase; }
+.sd-files-row.head > span:first-child { padding-left: 46px; }
+.sd-files-row.wait { grid-template-columns: 1fr; padding-left: 16px; }
+.sd-files-row.wait span { display: inline-flex; align-items: center; gap: 6px; }
+.sd-file-name { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 6px 4px; border-radius: 8px; color: var(--ink); text-align: left; }
+.sd-file-ic { flex: none; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; background: var(--pane-2); color: var(--ink-2); }
+.sd-file-ic.doc { background: color-mix(in srgb, #2b6cde 13%, var(--pane)); color: #2b6cde; }
+.sd-file-ic.sheet { background: color-mix(in srgb, #1e8e3e 13%, var(--pane)); color: #1e8e3e; }
+.sd-file-ic.deck { background: color-mix(in srgb, #e8710a 14%, var(--pane)); color: #d9650a; }
+.sd-file-ic.pdf { background: color-mix(in srgb, #d93025 12%, var(--pane)); color: #d93025; }
+.sd-file-ic.page { background: color-mix(in srgb, #7c4dff 12%, var(--pane)); color: #7c4dff; }
+.sd-file-text { display: grid; min-width: 0; }
+.sd-file-text b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; font-size: 13px; }
+.sd-file-text small { font-size: 11.5px; }
+.sd-file-name:hover b { color: var(--accent); }
+.sd-file-dir { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--ink-2); font-size: 12.5px; }
+.sd-file-dir > svg { flex: none; color: var(--ink-3); }
+.sd-file-dir > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sd-file-when { color: var(--ink-2); font-size: 12.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.sd-file-acts { display: grid; grid-template-columns: auto 26px; align-items: center; justify-content: end; gap: 4px; }
+.sd-file-acts .btn { grid-column: 1; }
+.sd-file-acts .btn.small { height: 28px; padding: 0 12px; }
+.sd-file-x { width: 26px; height: 26px; justify-content: center; opacity: 0; }
+.sd-files-row:hover .sd-file-x, .sd-file-x:focus-visible { opacity: 1; }
+@media (hover: none) { .sd-file-x { opacity: 1; } }
+.sd-files-none { padding: 28px 20px; color: var(--ink-2); font-size: 13px; line-height: 1.5; text-align: center; }
+.sd-files-src { margin: 8px 2px 0; line-height: 1.5; }
+.sd-files-err { color: var(--warning-ink, var(--ink-2)); }
+
+@container (max-width: 760px) { .sd-files-row { grid-template-columns: minmax(0, 1fr) 110px 84px; } .sd-files-row > :nth-child(2) { display: none; } }
+@media (max-width: 760px) {
+  /* A row each: the name, its folder and when it changed under it, Open beside them. */
+  .sd-files-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto auto; gap: 0 10px; padding: 6px 10px 8px 6px; }
+  .sd-files-row.head { display: none; }
+  .sd-file-name { grid-row: 1; grid-column: 1; }
+  .sd-file-dir { grid-row: 2; grid-column: 1; padding-left: 48px; font-size: 12px; }
+  .sd-file-when { grid-row: 3; grid-column: 1; padding-left: 48px; font-size: 12px; color: var(--ink-3); }
+  .sd-file-acts { grid-row: 1 / 4; grid-column: 2; align-self: center; }
+  .sd-files-search input { width: 120px; }
+  .sd-add-form { right: auto; left: 0; width: min(360px, calc(100vw - 32px)); }
+}
+.app.narrow .sd-files-head { gap: 8px; }
+.app.narrow .sd-filter button { height: 40px; padding: 0 12px; }
+.app.narrow .sd-files-search { height: auto; flex: 1 1 100%; }
+.app.narrow .sd-files-search input { flex: 1; width: auto; height: 40px; font-size: 16px; }
+.app.narrow .sd-files-head .win-btn { width: 40px; height: 40px; }
+.app.narrow .sd-files-head .btn.small, .app.narrow .sd-add-form .btn.small, .app.narrow .sd-add-form .ghost-btn { height: 40px; }
+.app.narrow .sd-add-form input { height: 40px; font-size: 16px; }
+.app.narrow .sd-file-name { min-height: 44px; }
+.app.narrow .sd-file-acts .btn.small { height: 40px; }
+.app.narrow .sd-file-x { width: 40px; height: 40px; }
+.app.narrow .sd-file-dir span { white-space: normal; overflow-wrap: anywhere; direction: ltr; }
+.app.narrow .sd-new-thumb { display: none; }
+.app.narrow .sd-filter { flex-wrap: nowrap; }
+.app.narrow .sd-filter button { min-width: 40px; justify-content: center; padding: 0 9px; }
+.app.narrow .sd-filter small { display: none; }
+.app.narrow .sd-file-acts { grid-template-columns: auto 40px; }
+.app.narrow .sd-new-btn .sd-new-ic { display: grid; }
+.app.narrow .sd-new-btn b, .app.narrow .sd-new-btn small { padding: 0; }
