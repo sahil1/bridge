@@ -596,7 +596,9 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
     ...(meetFound.failed ? [t("Couldn't get your meetings just now")] : []),
   ].join(' · ') : ''
   const meetFrom = meetsOnly && meetFound?.from.length && meetFound.here ? t('Meetings on {names}', { names: listOf([meetFound.here, ...meetFound.from]) }) : ''
-  const meetEmpty = onlyMeet && !meetItems.length ? (!meetFound || meetFound.waiting ? t('Looking for meetings…') : meetQ ? t('No meetings match "{query}"', { query: meetQ }) : t('No meetings yet')) : null
+  // With none to show, the meetings say so: after Meetings is picked, and after another key alone
+  // (a word after that key with no meeting to match, "#123", leaves the menu closed, as it was).
+  const meetEmpty = (onlyMeet || (keyAt && !meetQ)) && !meetItems.length ? (!meetFound || meetFound.waiting ? t('Looking for meetings…') : meetQ ? t('No meetings match "{query}"', { query: meetQ }) : t('No meetings yet')) : null
   const pickMeeting = async (it) => {
     const m = it.meeting
     const from = menuStart
@@ -634,10 +636,12 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
 
   const onKeyDown = (e) => {
     if (editing && e.key === 'Escape') { e.preventDefault(); endEdit(true); return }
-    // In the meetings: Esc, or Backspace with nothing typed after the @, goes back to the files; with
-    // none to pick (still on their way, or none match), Enter waits rather than sending the @.
+    // In the meetings: Esc, or Backspace with nothing typed after the @, goes back to the files. With
+    // none to pick (still on their way, or none yet), Enter waits rather than sending the @ or the
+    // key, and Esc after another key closes the menu.
     if (onlyMeet && (e.key === 'Escape' || (e.key === 'Backspace' && at[2] === '' && e.currentTarget.selectionStart === e.currentTarget.selectionEnd))) { e.preventDefault(); e.stopPropagation(); setMeetAt(-1); return }
-    if (onlyMeet && !atItems.length && (e.key === 'Enter' || e.key === 'Tab')) { e.preventDefault(); return }
+    if (menuOpen && meetEmpty && (e.key === 'Enter' || e.key === 'Tab')) { e.preventDefault(); return }
+    if (keyAt && meetEmpty && e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setMentionOff(menuStart); return }
     if (menuOpen && (atItems.length || (!keyAt && mentionJumps.length))) {
       if (e.key === 'ArrowDown') { e.preventDefault(); setMentionSel((i) => Math.min(i + 1, atItems.length - 1)); return }
       if (e.key === 'ArrowUp') { e.preventDefault(); setMentionSel((i) => Math.max(i - 1, 0)); return }
