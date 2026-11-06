@@ -2,8 +2,7 @@ import { useState } from 'react'
 import Icon from '../Icon.jsx'
 import { api, usePoll } from '../../api.js'
 import { t, tx, locale } from '../../i18n/index.js'
-import { usePersisted } from '../layout.jsx'
-import { clock } from './recording.jsx'
+import { usePersisted, useWidth } from '../layout.jsx'
 import { CalendarSetup } from '../Agenda.jsx'
 
 // Meeting Insights and People, the Meetings section's other two tabs (a trial feature,
@@ -29,6 +28,10 @@ const num = (n) => Math.round(n).toLocaleString(locale())
 const compact = (n) => new Intl.NumberFormat(locale(), { notation: 'compact', maximumFractionDigits: 1 }).format(n)
 const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0)
 export const hours = (s) => { const m = Math.round(s / 60); return m < 60 ? t('{n} min', { n: m }) : t('{h} h {m} min', { h: Math.floor(m / 60), m: m % 60 }) }
+// A short stretch of time: seconds under a minute, else as hours() has it.
+const span = (s) => (s < 59.5 ? t('{n} s', { n: Math.round(s) }) : hours(s))
+// A round number at or above x (1, 2, 2.5 or 5 times a power of ten), for the top of a chart.
+const nice = (x) => { if (!(x > 0)) return 1; const p = 10 ** Math.floor(Math.log10(x)); return [1, 2, 2.5, 5, 10].map((k) => k * p).find((v) => v >= x * 0.999) }
 const day = (iso, o = { month: 'short', day: 'numeric' }) => new Date(iso.length === 10 ? `${iso}T12:00` : iso).toLocaleDateString(locale(), o)
 const when = (iso) => new Date(iso).toLocaleString(locale(), { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 
@@ -42,28 +45,40 @@ function Tile({ label, value, sub, why }) {
   )
 }
 
-// The weeks as columns, as Usage's bars are: words as yours under what you heard.
+// The weeks as columns, Monday to Sunday, the last one this week so far: a line at the top and the
+// middle with what it's worth, and what a week came to on hover (this week's, until then). Words:
+// yours over what you heard. Only as many dates under them as fit.
 function WeekBars({ weeks, metric }) {
   const [hover, setHover] = useState(null)
+  const [ref, width] = useWidth()
   const val = (w) => (metric === 'hours' ? w.seconds / 3600 : metric === 'meetings' ? w.n : metric === 'share' ? pct(w.you, w.talk) : w.words + w.heard)
-  const max = metric === 'share' ? 100 : Math.max(...weeks.map(val), 0) || 1
+  const top = metric === 'share' ? 100 : nice(Math.max(...weeks.map(val), 0))
+  const axis = (v) => (metric === 'hours' ? t('{n} h', { n: (Math.round(v * 10) / 10).toLocaleString(locale()) }) : metric === 'share' ? `${v}%` : metric === 'words' ? compact(v) : num(v))
   const read = (w) => (metric === 'hours' ? hours(w.seconds) : metric === 'meetings' ? (w.n === 1 ? t('{n} meeting', { n: w.n }) : t('{n} meetings', { n: w.n }))
     : metric === 'share' ? (w.talk ? t('you spoke {pct}% of the talk', { pct: pct(w.you, w.talk) }) : t('who spoke isn\'t known'))
       : t('{you} words spoken by you, {heard} heard', { you: num(w.words), heard: num(w.heard) }))
-  const every = Math.max(1, Math.ceil(weeks.length / 8))
+  const last = weeks.length - 1
+  const at = hover ?? last
+  const say = (i) => `${i === last ? t('This week so far') : t('Week of {date}', { date: day(weeks[i].week) })}: ${read(weeks[i])}`
+  // Dates counted back from this week, so it always has one and they're evenly spaced.
+  const every = Math.max(1, Math.ceil(weeks.length / Math.max(2, Math.floor((width || 600) / 58))))
+  const name = t(METRICS.find((m) => m[0] === metric)[1])
   return (
-    <div className="us-cols mi-weeks" onPointerLeave={() => setHover(null)} role="img" aria-label={t('{metric} by week', { metric: t(METRICS.find((m) => m[0] === metric)[1]) })}>
-      {weeks.map((w, i) => (
-        <div key={w.week} className={`us-col ${hover === i ? 'hl' : ''} ${i === weeks.length - 1 ? 'peak' : ''}`} onPointerEnter={() => setHover(i)} title={`${t('Week of {date}', { date: day(w.week) })}: ${read(w)}`}>
-          <span className="us-col-bar">
+    <div className="mi-weeks" ref={ref} onPointerLeave={() => setHover(null)}>
+      <p className="mi-wread small" aria-live="polite">{say(at)}</p>
+      <div className="mi-plot" role="img" aria-label={t('{metric} by week', { metric: name })}>
+        {[1, 0.5].map((f) => <span key={f} className="mi-gl" style={{ bottom: `${f * 100}%` }}><i>{axis(top * f)}</i></span>)}
+        {weeks.map((w, i) => (
+          <div key={w.week} className={`mi-wcol${hover === i ? ' hl' : ''}${i === last ? ' now' : ''}`} onPointerEnter={() => setHover(i)} title={say(i)}>
             {metric === 'words'
-              ? <span className="mi-stack" style={{ height: `${Math.max(val(w) ? 3 : 0, (val(w) / max) * 100)}%` }}><i style={{ flexGrow: w.heard }} /><b style={{ flexGrow: w.words }} /></span>
-              : <span style={{ height: `${Math.max(val(w) ? 3 : 0, (val(w) / max) * 100)}%` }} />}
-          </span>
-          <span className="us-col-label">{i % every === 0 || i === weeks.length - 1 ? day(w.week) : ''}</span>
-        </div>
-      ))}
-      <span className="us-cols-read">{hover != null ? `${t('Week of {date}', { date: day(weeks[hover].week) })} · ${read(weeks[hover])}` : ''}</span>
+              ? <span className="mi-stack" style={{ height: `${Math.max(val(w) ? 3 : 0, (val(w) / top) * 100)}%` }}><i style={{ flexGrow: w.heard }} /><b style={{ flexGrow: w.words }} /></span>
+              : <span className="mi-wbar" style={{ height: `${Math.max(val(w) ? 3 : 0, (val(w) / top) * 100)}%` }} />}
+          </div>
+        ))}
+      </div>
+      <div className="mi-wdates" aria-hidden="true">
+        {weeks.map((w, i) => <span key={w.week}>{(last - i) % every === 0 ? day(w.week) : ''}</span>)}
+      </div>
     </div>
   )
 }
@@ -114,16 +129,16 @@ export function InsightsView({ onPerson }) {
         {data.kinds.map((k) => <button key={k.id} type="button" role="tab" data-kind={k.id} aria-selected={kind === k.id} className={kind === k.id ? 'on' : ''} onClick={() => setKind(kind === k.id ? 'all' : k.id)} title={t(KIND_WHY[k.id])}>{t(KINDS[k.id])} <span className="muted">{k.n}</span></button>)}
       </div>
       {kind !== 'all' && <p className="muted small mi-why">{t(KINDS[kind])}: {t(KIND_WHY[kind])}</p>}
-      {!data.meetings ? <p className="muted small" role="status">{t('No meetings in this range.')}</p> : (
+      {!data.meetings ? <p className="muted small mi-none" role="status">{kind === 'all' ? t('No recorded meetings in this range. A longer range, or All, has the ones before it.') : t('No meetings of this kind in this range.')}</p> : (
         <>
           <div className="us-tiles mi-tiles">
             <Tile label={t('Meetings')} value={num(data.meetings)} why={t('Recorded meetings; the calendar\'s other meetings aren\'t counted.')}
-              sub={more == null ? t('since {date}', { date: day(data.from, { month: 'short', day: 'numeric', year: 'numeric' }) }) : more > 0 ? t('{n} more than the {days} days before', { n: more, days: data.days }) : more < 0 ? t('{n} fewer than the {days} days before', { n: -more, days: data.days }) : t('as many as the {days} days before', { days: data.days })} />
+              sub={more == null ? t('since {date}', { date: day(data.from, { month: 'short', day: 'numeric', year: 'numeric' }) }) : !prev.meetings ? t('none in the {days} days before', { days: data.days }) : more > 0 ? t('{n} more than the {days} days before', { n: more, days: data.days }) : more < 0 ? t('{n} fewer than the {days} days before', { n: -more, days: data.days }) : t('as many as the {days} days before', { days: data.days })} />
             <Tile label={t('Time in meetings')} value={hours(data.seconds)} sub={t('{time} a meeting, on average', { time: hours(data.seconds / data.meetings) })} why={t('How long each was recorded.')} />
             <Tile label={t('You spoke')} value={data.talk.told ? `${pct(data.talk.you, talk)}%` : '–'} sub={data.talk.told ? t('of the talk · {time}', { time: hours(data.talk.you) }) : t('who spoke isn\'t known')} why={talkBasis(data)} />
-            <Tile label={t('Words')} value={data.talk.told ? `${compact(data.words.you)} / ${compact(data.words.heard)}` : '–'} sub={t('spoken by you / heard from others')} why={talkBasis(data)} />
+            <Tile label={t('Words you spoke')} value={data.talk.told ? num(data.words.you) : '–'} sub={data.talk.told ? t('{n} heard from others', { n: num(data.words.heard) }) : t('who spoke isn\'t known')} why={talkBasis(data)} />
           </div>
-          <p className="muted small mi-basis" data-basis="talk">{talkBasis(data)}</p>
+          <p className="muted small mi-basis" data-basis="talk"><Icon name="info" size={12} /> <span>{talkBasis(data)}</span></p>
           <div className="us-grid mi-grid">
             <section className="us-card us-wide">
               <div className="us-card-head">
@@ -133,51 +148,56 @@ export function InsightsView({ onPerson }) {
                 </div>
               </div>
               <WeekBars weeks={data.weeks} metric={metric} />
-              <p className="muted small us-note">{metric === 'share' || metric === 'words' ? t('Only weeks with meetings where who spoke is known.') : t('Recorded meetings; the calendar\'s other meetings aren\'t counted.')}{metric === 'words' ? ` ${t('Darker: your words. Lighter: what you heard.')}` : ''}</p>
+              <p className="muted small mi-note">
+                {metric === 'words' && <><span className="mi-key"><i className="mine" />{t('Words you spoke')}</span><span className="mi-key"><i />{t('Words heard')}</span></>}
+                <span>{metric === 'share' || metric === 'words' ? t('Only meetings where who spoke is known.') : t('Recorded meetings; the calendar\'s other meetings aren\'t counted.')}</span>
+              </p>
             </section>
             <section className="us-card">
               <div className="us-card-head"><h4>{t('Your share of the talk, by kind')}</h4></div>
               {known.length ? (
                 <ul className="us-list">
+                  <li className="mi-colhead" aria-hidden="true"><span /><span /><span>{t('You spoke')}</span><span>{t('Meetings')}</span></li>
                   {known.map((k) => (
                     <li key={k.id}>
                       <div className="us-row static mi-row" title={t(KIND_WHY[k.id])}>
-                        <span className="us-row-name">{t(KINDS[k.id])}</span>
+                        <span className="us-row-name"><span className="us-ell">{t(KINDS[k.id])}</span></span>
                         <span className="us-row-bar"><span style={{ width: `${pct(k.you, k.talk)}%` }} /></span>
                         <span className="us-row-num num">{pct(k.you, k.talk)}%</span>
-                        <span className="us-row-num num muted">{k.n}</span>
+                        <span className="us-row-num num muted" title={k.n === 1 ? t('{n} meeting', { n: k.n }) : t('{n} meetings', { n: k.n })}>{k.n}</span>
                       </div>
                     </li>
                   ))}
                 </ul>
               ) : <p className="muted small">{t('No meetings in this range where who spoke is known.')}</p>}
-              <p className="muted small us-note">{t('From who said each line: you and the call on a call, voices told apart in a room. The last number is how many meetings.')}</p>
+              {known.length > 0 && <p className="muted small mi-note">{t('Only meetings where who spoke is known.')}</p>}
             </section>
             {data.people.length > 0 && (
               <section className="us-card">
                 <div className="us-card-head"><h4>{t('People you meet')}</h4></div>
                 <ul className="us-list">
+                  <li className="mi-colhead" aria-hidden="true"><span /><span /><span>{t('Meetings')}</span><span>{t('Their share')}</span></li>
                   {data.people.map((p) => (
                     <li key={p.id}>
-                      <button type="button" className="us-row mi-row" onClick={() => onPerson?.(p.id)}>
-                        <span className="us-row-name">{p.name}</span>
+                      <button type="button" className="us-row mi-row" onClick={() => onPerson?.(p.id)} title={t('Open {name}', { name: p.name })}>
+                        <span className="us-row-name" title={p.name}><span className="us-ell">{p.name}</span></span>
                         <span className="us-row-bar"><span style={{ width: `${pct(p.n, data.people[0].n)}%` }} /></span>
                         <span className="us-row-num num">{p.n}</span>
-                        <span className="us-row-num num muted">{p.share ? `${p.share.pct}%` : '–'}</span>
+                        <span className="us-row-num num muted" title={p.share ? t('{pct}% of the talk', { pct: p.share.pct }) : t('their lines aren\'t named in any')}>{p.share ? `${p.share.pct}%` : '–'}</span>
                       </button>
                     </li>
                   ))}
                 </ul>
-                <p className="muted small us-note">{t('Meetings together in this range, and their share of the talk where their lines are named. From invites and the names on transcripts.')}</p>
+                <p className="muted small mi-note">{t('Meetings together in this range, and their share of the talk where their lines are named. From invites and the names on transcripts.')}</p>
               </section>
             )}
             <section className="us-card us-wide">
               <div className="us-card-head"><h4>{t('Signals, and what each is based on')}</h4><span className="muted small">{t('A mirror for you; nothing here scores anyone')}</span></div>
               <div className="mi-signals" role="table">
                 <Signal name={t('Questions you asked')} value={s.questions.meetings ? t('{n} a meeting', { n: (Math.round((s.questions.n / s.questions.meetings) * 10) / 10).toLocaleString(locale()) }) : '–'} how={t('Your lines with a question mark, in meetings where who spoke is known.')} />
-                <Signal name={t('Your longest stretch')} value={s.longest.meetings ? clock(s.longest.s) : '–'} how={t('Your longest run of talking with nobody else between, on average.')} />
+                <Signal name={t('Your longest stretch')} value={s.longest.meetings ? span(s.longest.s) : '–'} how={t('Your longest run of talking with nobody else between, on average.')} />
                 <Signal name={t('Meetings that ran over')} value={s.ranOver.of ? t('{n} of {of}', { n: s.ranOver.n, of: s.ranOver.of }) : '–'} how={t("The recording's end against the invite's, 5 minutes or more past it. Only meetings with an invite's times.")} />
-                <Signal name={t('Back to back')} value={s.backToBack.days === 1 ? t('{n} day', { n: 1 }) : t('{n} days', { n: s.backToBack.days })} how={t('Days with 3 or more recorded meetings under 5 minutes apart.')} />
+                <Signal name={t('Back to back')} value={!s.backToBack.days ? t('none') : s.backToBack.days === 1 ? t('{n} day', { n: 1 }) : t('{n} days', { n: s.backToBack.days })} how={t('Days with 3 or more recorded meetings under 5 minutes apart.')} />
                 <Signal name={t('Followed through')} value={s.followed.of ? t('{n} of {of}', { n: s.followed.done, of: s.followed.of }) : '–'} how={t('Your action items from the summaries, ticked or marked done.')} />
                 <Signal name={t('Attention, productivity')} value={<i>{t('not shown')}</i>} how={t("Nothing in a recording shows them, and Bridge AI won't guess.")} />
               </div>
@@ -222,11 +242,12 @@ function PeopleMap({ people, onPerson }) {
         const a = at(i)
         const x = cx + Math.cos(a) * RX, y = cy + Math.sin(a) * RY
         const right = Math.cos(a) >= -0.01
+        const r = 6 + (p.meetings / most) * 9
         return (
           <g key={p.id} className="mi-map-node" onClick={() => onPerson(p.id)} role="link" aria-label={p.name}>
             <title>{p.meetings === 1 ? t('{name}: {n} meeting together', { name: p.name, n: p.meetings }) : t('{name}: {n} meetings together', { name: p.name, n: p.meetings })}</title>
-            <circle cx={x} cy={y} r={6 + (p.meetings / most) * 9} />
-            <text x={x + (right ? 14 : -14)} y={y + 4} textAnchor={right ? 'start' : 'end'}>{`${p.name.split(' ')[0].slice(0, 10)} · ${p.meetings}`}</text>
+            <circle cx={x} cy={y} r={r} />
+            <text x={x + (right ? r + 5 : -(r + 5))} y={y + 4} textAnchor={right ? 'start' : 'end'}>{`${p.name.split(' ')[0].slice(0, 10)} · ${p.meetings}`}</text>
           </g>
         )
       })}
@@ -261,15 +282,17 @@ export function PeopleView({ onOpen, person, setPerson }) {
                 <span className="mi-av" aria-hidden="true">{initial(p.name)}</span>
                 <span className="mi-ptext">
                   <b>{p.name}</b>
-                  <span className="muted small">{[p.about, p.topics.length ? p.topics.join(', ') : null].filter(Boolean).join(' · ') || (p.meetings === 1 ? t('{n} meeting together', { n: p.meetings }) : t('{n} meetings together', { n: p.meetings }))}</span>
+                  {(p.about || p.topics.length > 0) && <span className="muted small">{[p.about, p.topics.length ? p.topics.join(', ') : null].filter(Boolean).join(' · ')}</span>}
                   <span className="muted small">{[t('last {date}', { date: day(p.last) }), p.next ? t('next {date}', { date: day(p.next.start, { weekday: 'short', month: 'short', day: 'numeric' }) }) : null, t('{time} together', { time: hours(p.seconds) })].filter(Boolean).join(' · ')}</span>
                 </span>
-                <span className="mi-pnum num" title={p.share ? t('{n} meetings together · {pct}% of the talk, in the {m} where their lines are named', { n: p.meetings, pct: p.share.pct, m: p.share.meetings }) : t('{n} meetings together · their lines aren\'t named in any', { n: p.meetings })}>{p.meetings} · {p.share ? `${p.share.pct}%` : '–'}</span>
+                <span className="mi-pnum" title={p.share ? t('{n} meetings together · {pct}% of the talk, in the {m} where their lines are named', { n: p.meetings, pct: p.share.pct, m: p.share.meetings }) : t('{n} meetings together · their lines aren\'t named in any', { n: p.meetings })}>
+                  <span className="num">{p.meetings === 1 ? t('{n} meeting', { n: 1 }) : t('{n} meetings', { n: p.meetings })}</span>
+                  {p.share && <span className="num muted">{t('{pct}% of the talk', { pct: p.share.pct })}</span>}
+                </span>
               </button>
             ))}
             {!list.length && <p className="muted small">{t('Nobody matches "{q}".', { q: q.trim() })}</p>}
           </div>
-          <p className="muted small us-note">{t('Meetings together · their share of the talk, in the meetings where their lines are named.')}</p>
         </>
       )}
     </div>
@@ -280,6 +303,7 @@ function PersonPage({ id, onBack, onOpen, onPerson }) {
   const { data, error, refresh } = usePoll(`/meetings/people/${encodeURIComponent(id)}`, 60_000)
   const [other, setOther] = useState('')
   const [msg, setMsg] = useState(null)
+  const [all, setAll] = useState(false) // every meeting with them, not just the latest
   const merge = async () => {
     if (!other) return
     try { const r = await api('/meetings/people/merge', { method: 'POST', body: { a: id, b: other } }); setOther(''); setMsg({ text: t('Put together') }); if (r.id !== id) onPerson(r.id); else refresh() } catch (e) { setMsg({ text: e.message, error: true }) }
@@ -305,10 +329,10 @@ function PersonPage({ id, onBack, onOpen, onPerson }) {
         <Tile label={t('Time together')} value={hours(data.seconds)} sub={t('how long those meetings were recorded')} />
         <Tile label={t('Their share of the talk')} value={data.share ? `${data.share.pct}%` : '–'}
           sub={data.share ? (data.share.meetings === 1 ? t('in {n} meeting where their lines are named', { n: data.share.meetings }) : t('in {n} meetings where their lines are named', { n: data.share.meetings })) : t('their lines aren\'t named in any')} />
-        <Tile label={t('Next')} value={data.next ? day(data.next.start, { weekday: 'short', month: 'short', day: 'numeric' }) : '–'} sub={data.next ? data.next.title : data.calendar?.ok ? t('nothing with them in the next 30 days') : t('needs your calendar')} />
+        <Tile label={t('Next')} value={data.next ? day(data.next.start, { weekday: 'short', month: 'short', day: 'numeric' }) : '–'} why={data.next ? t('Next: {title}, {when}', { title: data.next.title, when: when(data.next.start) }) : undefined}
+          sub={data.next ? <span data-next="1">{`${new Date(data.next.start).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' })} · ${data.next.title}`}</span> : data.calendar?.ok ? t('nothing with them in the next 30 days') : t('needs your calendar')} />
       </div>
       <CalendarNeeded cal={data.calendar} onCheck={() => refresh()} />
-      {data.next && <p className="small mi-next" data-next="1"><Icon name="calendar" size={13} /> {t('Next: {title}, {when}', { title: data.next.title, when: when(data.next.start) })}</p>}
       {data.topics.length > 0 && (
         <section className="mi-sec">
           <h4>{t('What you talk about')}</h4>
@@ -323,22 +347,26 @@ function PersonPage({ id, onBack, onOpen, onPerson }) {
             {data.items.map((x, i) => (
               <li key={i}>
                 <span>{x.who ? <b>{x.who}: </b> : null}{x.text}</span>
-                <button type="button" className="link-btn small" onClick={() => onOpen?.(x.meeting.id)}>{x.meeting.title} · {day(x.meeting.start)}</button>
+                <span className="mi-item-from small">
+                  <button type="button" className="mi-from" onClick={() => onOpen?.(x.meeting.id)} title={t('Open {name}', { name: x.meeting.title })}><Icon name="mic" size={11} /> {x.meeting.title} · {day(x.meeting.start)}</button>
+                  {x.meetings > 1 && <span className="muted">{t('and {n} earlier', { n: x.meetings - 1 })}</span>}
+                </span>
               </li>
             ))}
           </ul>
         ) : <p className="muted small">{t('None open: nothing in your summaries is theirs or names them and isn\'t ticked.')}</p>}
       </section>
       <section className="mi-sec">
-        <h4>{t('Meetings')}</h4>
+        <div className="mi-sec-head"><h4>{t('Meetings')} <span className="muted num">{data.meetingsList.length}</span></h4><span className="muted small">{t('Their share')}</span></div>
         <div className="mi-mlist">
-          {data.meetingsList.map((m) => (
+          {(all ? data.meetingsList : data.meetingsList.slice(0, 8)).map((m) => (
             <button key={m.id} type="button" className="mi-mrow" data-meeting={m.id} onClick={() => onOpen?.(m.id)}>
               <span className="mi-ptext"><b>{m.title}</b><span className="muted small">{when(m.start)} · {hours(m.seconds)}{m.how?.spoke ? '' : ` · ${t('invited')}`}</span></span>
               <span className="mi-pnum num" title={m.pct == null ? t('Their lines aren\'t named in this one') : t('Their share of the talk in this one')}>{m.pct == null ? '–' : `${m.pct}%`}</span>
             </button>
           ))}
         </div>
+        {data.meetingsList.length > 8 && <button type="button" className="ghost-btn mi-all" onClick={() => setAll((v) => !v)}>{all ? t('Show fewer') : t('Show all {n}', { n: data.meetingsList.length })} <Icon name={all ? 'up' : 'down'} size={11} /></button>}
       </section>
       <section className="mi-sec">
         <h4>{t('The same person?')}</h4>
