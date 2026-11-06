@@ -47,7 +47,7 @@ export async function readSheet(buf, name, ext, opts = {}) {
       })
     })
     // Each column wide enough for what's in it (a CSV has no widths of its own; none are saved).
-    widest.forEach((w2, j) => { if (w2 > 11) sh.columnData[j] = { w: Math.round(w2 * 7.2 + 14) } })
+    widest.forEach((w2, j) => { const w = Math.round(w2 * 7.2 + 16); if (w > 88) sh.columnData[j] = { w } })
     sh.rowCount = Math.max(100, csv.rows.length + 50)
     sh.columnCount = Math.max(26, cols + 10)
     return { kind: 'csv', data: w.data, lost: [], charts: [], csv }

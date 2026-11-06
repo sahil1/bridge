@@ -75,7 +75,7 @@ const OPS = {
 
 // The ribbon's tools for what a CSV can't hold: fonts, colours, borders, alignment, merged cells,
 // number formats, conditional formats and validation.
-const itemsOf = (schema, tab, group) => Object.keys(schema?.[tab]?.[group] || {})
+const itemsOf = (schema, tab, group) => Object.keys(schema?.[tab]?.[group] || schema?.[group] || {})
 const CSV_HIDDEN = [
   ...itemsOf(SheetsUIMenuSchema, 'ribbon.start', 'ribbon.start.format'),
   ...itemsOf(SheetsUIMenuSchema, 'ribbon.start', 'ribbon.start.layout'),
@@ -273,8 +273,9 @@ const SEP_LABEL = { ',': tx('Commas'), ';': tx('Semicolons'), '\t': tx('Tabs'), 
 const ENC_LABEL = { 'utf-8': 'UTF-8', 'utf-8-bom': tx('UTF-8 with BOM'), 'utf-16le': 'UTF-16 LE', 'utf-16be': 'UTF-16 BE', 'windows-1252': tx('Western (Windows-1252)'), shift_jis: tx('Japanese (Shift JIS)'), gbk: tx('Chinese, Simplified (GBK)'), big5: tx('Chinese, Traditional (Big5)'), 'euc-kr': tx('Korean (EUC-KR)') }
 function CsvBar({ csv, ext, onPick }) {
   const kind = ext === '.tsv' ? 'TSV' : 'CSV'
+  const found = `${csv.eol === '\r\n' ? t('Windows line endings') : t('Unix line endings')} · ${csv.sniffed.sep && csv.sniffed.enc ? t('found by Studio, and kept when it\'s saved') : t('kept when it\'s saved')}`
   return (
-    <div className="sh-csv" role="group" aria-label={t('How this {kind} file is read and saved', { kind })}>
+    <div className="sh-csv" role="group" aria-label={t('How this {kind} file is read and saved', { kind })} title={found}>
       <label>{t('Separated by')}
         <select value={csv.sep} onChange={(e) => onPick({ sep: e.target.value })} title={t('What separates the values on each line. Saved the same way.')}>
           {Object.keys(SEP_LABEL).map((s) => <option key={s} value={s}>{t(SEP_LABEL[s])}</option>)}
@@ -285,7 +286,7 @@ function CsvBar({ csv, ext, onPick }) {
           {ENCODINGS.map((e) => <option key={e} value={e}>{t(ENC_LABEL[e])}</option>)}
         </select>
       </label>
-      <span className="muted small sh-csv-eol">{csv.eol === '\r\n' ? t('Windows line endings') : t('Unix line endings')} · {csv.sniffed.sep && csv.sniffed.enc ? t('found by Studio, and kept when it\'s saved') : t('kept when it\'s saved')}</span>
+      <span className="muted small sh-csv-eol">{found}</span>
     </div>
   )
 }

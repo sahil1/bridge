@@ -187,7 +187,7 @@ const RISKY = { '.docx': tx('Saving here keeps its text, headings, lists, tables
 // An Excel file is written back into itself: what changed here, and the rest as it was.
 const SHEET_KEEPS = tx('Saved into the Excel file itself: what you change here is written in, and everything else in it (charts, pictures, pivot tables, comments, macros) stays as it was. Anything a change can\'t keep is said before it\'s saved.')
 // What saving keeps, in each kind of file: said under the file (its kind, in the status line), and
-// before the first save of a Word or Excel file. The editors offer only what's kept.
+// before the first save of a Word file. The editors offer only what's kept.
 const KEEPS = {
   '.docx': RISKY['.docx'], '.xlsx': SHEET_KEEPS, '.xlsm': SHEET_KEEPS,
   '.md': tx('Saved as Markdown, as written: headings, bold, italic, strikethrough, code, lists, quotes, links, tables and pictures. Markdown has no underline or colours, so they aren\'t offered.'),
@@ -215,7 +215,7 @@ export function StudioPage({ root, path: rel, onBack, onOpen }) {
   const [conflict, setConflict] = useState(null) // { by, name } changed on disk while yours is unsaved
   const [panel, setPanel] = useState(null) // 'versions'
   const [ask, setAsk] = useState(null) // { selection }
-  const [warn, setWarn] = useState(null) // the first save of a Word or Excel file, to say what's kept
+  const [warn, setWarn] = useState(null) // the first save of a Word file (to say what's kept), or { text } what a save can't keep
   const [gen, setGen] = useState(0) // a new load (not a save): the editor starts again from it
   const [stats, setStats] = useState(null) // what the editor counts (words, slides), for the status line
   const handle = useRef(null)
@@ -268,8 +268,8 @@ export function StudioPage({ root, path: rel, onBack, onOpen }) {
     try {
       // An editor that can't keep everything in the file says what, before it's saved (a sheet).
       let bytes = await handle.current.save()
-      if (bytes?.bytes) {
-        if (bytes.notKept?.length && !ok) { setWarn({ text: t('Saving here can\'t keep {what}. Save anyway? The file as it is now stays in its versions.', { what: bytes.notKept.join('; ') }) }); return }
+      if (bytes && typeof bytes === 'object' && Array.isArray(bytes.notKept)) {
+        if (bytes.notKept.length && !ok) { setWarn({ text: t('Saving here can\'t keep {what}. Save anyway? The file as it is now stays in its versions.', { what: bytes.notKept.join('; ') }) }); return }
         bytes = bytes.bytes
       }
       const r = await saveFile(f, bytes, { mtime: meta.mtime, force })

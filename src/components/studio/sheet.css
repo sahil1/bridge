@@ -99,3 +99,6 @@
 @font-face { font-family: 'Cambria'; src: local('Cambria'), local('Caladea'), local('Georgia'); }
 @font-face { font-family: 'Cambria'; font-weight: bold; src: local('Cambria Bold'), local('Cambria-Bold'), local('Caladea Bold'), local('Caladea-Bold'), local('Georgia Bold'), local('Georgia-Bold'); }
 @font-face { font-family: 'Cambria'; font-style: italic; src: local('Cambria Italic'), local('Cambria-Italic'), local('Caladea Italic'), local('Caladea-Italic'), local('Georgia Italic'), local('Georgia-Italic'); }
+/* On a phone the CSV strip keeps to its two choices; what was found is in its tooltip. */
+.app.narrow .sh-csv-eol { display: none; }
+.app.narrow .sh-csv { gap: 6px 12px; }
