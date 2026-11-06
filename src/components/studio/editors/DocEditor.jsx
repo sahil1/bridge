@@ -428,7 +428,7 @@ function WordDoc({ file, model, onDirty, onStats, handle, readOnly }) {
         <Tool name={t('Insert link')} icon="link" run={() => setLinking(linking == null ? s.href || '' : null)} on={s.link || linking != null} tip={s.link ? t('Link: change it, open it or remove it') : t('Insert link')} keys={['mod', 'k']} />
         <Tool name={t('Insert picture')} icon="image" run={() => picker.current?.click()} tip={t('Insert a picture (PNG, JPEG or GIF)')} />
         <input ref={picker} type="file" accept="image/png,image/jpeg,image/gif" hidden onChange={(e) => { insertImage(e.target.files?.[0]); e.target.value = '' }} />
-        <TableTool editor={editor} c={c} on={s.table} />
+        <TableTool editor={editor} c={c} on={s.table} width={g.w - g.left - g.right} />
         <Drop name={t('Insert')} className="sd-wide-only" icon="plus" tip={t('Insert a page break, header or footer')} panel={(close) => (<>
           <Item icon="page-break" label={t('Page break')} keys={['mod', 'enter']} run={() => c().insertContent([{ type: 'paragraph', content: [{ type: 'pbr' }] }]).run()} close={close} />
           <Item icon="header-footer" label={hf.header ? t('Edit the header') : t('Add a header')} run={() => setEditingHf('header')} close={close} />
@@ -513,8 +513,21 @@ function LinkBar({ value, setValue, link, href, onSubmit, onRemove, onClose }) {
   )
 }
 
-// A table: a grid to pick its size from; in one, what to add, take out or merge.
-function TableTool({ editor, c, on }) {
+// A table: a grid to pick its size from; in one, what to add, take out or merge. width: the page's
+// text width (a Word file), which a new table's columns share, as Word gives them.
+function TableTool({ editor, c, on, width }) {
+  const insert = (rows, cols) => {
+    c().insertTable({ rows, cols, withHeaderRow: false }).run()
+    if (!width) return
+    const { state } = editor
+    let at = null
+    state.doc.nodesBetween(0, state.selection.from, (n, pos) => { if (n.type.name === 'table' && pos + n.nodeSize >= state.selection.from) at = pos })
+    if (at == null) return
+    const tr = state.tr
+    const each = Math.floor(width / cols)
+    state.doc.nodeAt(at).descendants((n, pos) => { if (n.type.name === 'tableCell') tr.setNodeMarkup(at + 1 + pos, null, { ...n.attrs, colwidth: [each] }); return n.type.name !== 'tableCell' })
+    editor.view.dispatch(tr)
+  }
   const [hover, setHover] = useState([0, 0])
   if (on) {
     return <Drop name={t('Table')} icon="table" tip={t('Table: add or delete rows and columns, merge cells')} panel={(close) => (<>
@@ -535,7 +548,7 @@ function TableTool({ editor, c, on }) {
     <div className="sd-grid-pick" onMouseLeave={() => setHover([0, 0])}>
       <div className="sd-grid-cells" role="grid" aria-label={t('Table size')}>
         {Array.from({ length: 8 }, (_, r) => Array.from({ length: 8 }, (__, k) => (
-          <button key={`${r}-${k}`} type="button" className={`sd-grid-cell${r < hover[0] && k < hover[1] ? ' on' : ''}`} aria-label={t('{rows} by {cols}', { rows: r + 1, cols: k + 1 })} onMouseEnter={() => setHover([r + 1, k + 1])} onFocus={() => setHover([r + 1, k + 1])} onMouseDown={(e) => e.preventDefault()} onClick={() => { c().insertTable({ rows: r + 1, cols: k + 1, withHeaderRow: false }).run(); close() }} />
+          <button key={`${r}-${k}`} type="button" className={`sd-grid-cell${r < hover[0] && k < hover[1] ? ' on' : ''}`} aria-label={t('{rows} by {cols}', { rows: r + 1, cols: k + 1 })} onMouseEnter={() => setHover([r + 1, k + 1])} onFocus={() => setHover([r + 1, k + 1])} onMouseDown={(e) => e.preventDefault()} onClick={() => { insert(r + 1, k + 1); close() }} />
         )))}
       </div>
       <small className="muted">{hover[0] ? t('{rows} by {cols}', { rows: hover[0], cols: hover[1] }) : t('Pick its size')}</small>

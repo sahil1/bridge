@@ -82,7 +82,9 @@ try {
   const found = await api('/studio/found')
   const contract = found.files.find((f) => f.name === 'Contract.docx')
   const report = found.files.find((f) => f.name === 'report.docx')
-  ok(!!contract && /^found:[0-9a-f]{12}$/.test(contract.root) && contract.dir === '~/Downloads' && contract.kind === 'doc' && !Number.isNaN(Date.parse(contract.at)), 'Studio\'s home finds a document in Downloads, with its folder and when it changed, to open through its folder', contract)
+  // Its folder as the computer writes it (~\Downloads on Windows).
+  const downloadsShown = `~${path.sep}Downloads`
+  ok(!!contract && /^found:[0-9a-f]{12}$/.test(contract.root) && contract.dir === downloadsShown && contract.where === null && contract.kind === 'doc' && !Number.isNaN(Date.parse(contract.at)), 'Studio\'s home finds a document in Downloads, with its folder and when it changed, to open through its folder', contract)
   ok(!!report && report.root === root && report.path === 'report.docx', 'one in a place opens through the place', report)
   ok(found.sources.includes(process.platform === 'darwin' ? 'spotlight' : process.platform === 'linux' ? 'xbel' : 'folders') && (process.platform !== 'darwin' || fs.existsSync(asked)), `found by ${found.sources.join(', ')}`, found)
   ok((await api(`/studio/open?root=${encodeURIComponent(contract.root)}&path=${encodeURIComponent(contract.path)}`)).kind === 'doc', 'a file found in Downloads opens')
@@ -106,7 +108,7 @@ try {
   const row = (name) => p.locator('.sd-files-row', { hasText: name })
   ok(!!(await until(async () => (await row('Contract.docx').count()) === 1 && (await row('report.docx').count()) === 1, 10000)), 'its home lists your files from wherever they are')
   const cells = await row('Contract.docx').evaluate((r) => ({ dir: r.querySelector('.sd-file-dir')?.innerText, when: r.querySelector('.sd-file-when')?.innerText, open: !!r.querySelector('.sd-file-acts .btn') }))
-  ok(cells.dir === '~/Downloads' && !!cells.when && cells.open, 'each with its folder, when it changed, and Open', cells)
+  ok(cells.dir === downloadsShown && !!cells.when && cells.open, 'each with its folder, when it changed, and Open', cells)
   await p.locator('.sd-filter button', { hasText: 'Sheets' }).click()
   ok(!!(await until(async () => (await row('Budget 2027.xlsx').count()) === 1 && (await row('report.docx').count()) === 0, 3000, 100)), 'filtered by kind: Sheets')
   await p.locator('.sd-filter button', { hasText: 'All' }).click()
@@ -235,7 +237,10 @@ try {
   await p.keyboard.type('Cell one')
   await tb.locator('button[aria-label="Table"]').click()
   await p.locator('.sd-drop .sd-item', { hasText: 'Add a row below' }).click()
-  ok(tables === 2 && (await doc.locator('table').last().locator('tr').count()) === 3, 'a table picked by its size from a grid, and a row added', { tables, rows: await doc.locator('table').last().locator('tr').count() })
+  // Its own rows: where a page ends inside a table (as it can with another computer's fonts), the
+  // page's band is a row of its own between them.
+  const rowsOf = () => doc.locator('table').last().locator('tr:not(.sd-pb-row)').count()
+  ok(tables === 2 && (await rowsOf()) === 3, 'a table picked by its size from a grid, and a row added', { tables, rows: await rowsOf() })
   // The header, edited (a double click on it).
   await p.locator('.sd-desk').evaluate((e) => { e.scrollTop = 0 })
   await p.locator('.sd-pb-top').dblclick()
@@ -254,7 +259,9 @@ try {
   const stylesKept = after && (after['word/styles.xml'] === before['word/styles.xml'] || after['word/styles.xml'].replace(/<w:style [^>]*w:styleId="TableGrid"[\s\S]*?<\/w:style>/, '') === before['word/styles.xml'])
   ok(!!after && parts.includes('word/header1.xml') && !parts.some((k) => /footer|comments|footnotes|numbering|settings/.test(k)) && stylesKept && parts.some((k) => /^word\/media\/studio/.test(k)) && /Extension="png"/i.test(after['[Content_Types].xml']), 'saved: the header part, the document and the new picture (with its relationship and type); nothing else but the table style it now uses', parts)
   const drawn = after?.['word/document.xml'] || ''
-  ok(!drawn.includes('cx="2286000"') && /<w:tbl>[\s\S]*Cell one/.test(drawn) && /TableGrid/.test(after['word/styles.xml']), 'the picture\'s new size, and the table in Word\'s Table Grid style', { hasOldSize: drawn.includes('cx="2286000"') })
+  const made = (drawn.match(/<w:tbl>(?:(?!<\/w:tbl>)[\s\S])*Cell one[\s\S]*?<\/w:tbl>/) || [''])[0]
+  const cols = [...made.matchAll(/<w:gridCol w:w="(\d+)"\/>/g)].map((m) => Number(m[1]))
+  ok(!drawn.includes('cx="2286000"') && cols.length === 3 && cols.every((w) => w > 1000) && !/<w:tcW w:w="0"/.test(made) && /TableGrid/.test(after['word/styles.xml']), 'the picture\'s new size, and the new table in Word\'s Table Grid style, its columns sharing the page\'s width', { hasOldSize: drawn.includes('cx="2286000"'), cols })
 
   // ---------- Find and replace, word count ----------
   await doc.click()

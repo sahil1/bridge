@@ -804,7 +804,7 @@ export class Writer {
     const was = this.same(n, part, seen)
     if (was) return was.gap + was.raw
     const copy = was === false
-    if (n.type === 'paragraph') return `<w:p${copy ? noIds(n.attrs.pa) : n.attrs.pa || ''}>${this.ppr(n.attrs, part)}${this.inline(n.content || [], part)}</w:p>`
+    if (n.type === 'paragraph') { const a = n.attrs || {}; return `<w:p${copy ? noIds(a.pa) : a.pa || ''}>${this.ppr(a, part)}${this.inline(n.content || [], part)}</w:p>` }
     if (n.type === 'table') return this.table(n, part, seen)
     if (n.type === 'xbl') return n.attrs.raw || ''
     return ''
@@ -816,8 +816,17 @@ export class Writer {
     const was = (a.grid || '').split(',').filter(Boolean).map(Number)
     const cols = []
     rows.forEach((r) => { let c = 0; for (const cell of r.content || []) { const w = cell.attrs.colwidth; for (let i = 0; i < (cell.attrs.colspan || 1); i++) { if (w?.[i] && cols[c + i] == null) cols[c + i] = w[i] } c += cell.attrs.colspan || 1 } })
-    const resized = cols.length !== was.length || cols.some((w, i) => w !== Math.max(8, Math.round(was[i] / 15)))
-    const grid = resized ? cols.map((w, i) => (w ? w * 15 : was[i] || 1440)) : was
+    let resized = cols.length !== was.length || cols.some((w, i) => w !== Math.max(8, Math.round(was[i] / 15)))
+    let grid = resized ? cols.map((w, i) => (w ? w * 15 : was[i] || 1440)) : was
+    // A table made here (or given more columns) has no width for some: the page's width shared out,
+    // as Word gives a new table. Word wants a width for every column in the grid.
+    const wide = Math.max(0, ...rows.map((r) => (r.content || []).reduce((sum, c) => sum + (c.attrs.colspan || 1), 0)))
+    if (grid.length < wide || (!a.x && grid.some((w) => !w))) {
+      const pg = this.m.page
+      const each = Math.round(Math.max(1440, pg.w - pg.left - pg.right) / wide)
+      grid = Array.from({ length: wide }, (_, i) => grid[i] || each)
+      resized = true
+    }
     this.resized = resized
     let out = `<w:tbl${a.ta || ''}>${a.tpr || '<w:tblPr><w:tblStyle w:val="TableGrid"/><w:tblW w:w="0" w:type="auto"/><w:tblLook w:val="04A0"/></w:tblPr>'}<w:tblGrid>${grid.map((w) => `<w:gridCol w:w="${Math.round(w)}"/>`).join('')}</w:tblGrid>`
     if (!a.tpr) this.needStyle('TableGrid')
