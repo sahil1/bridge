@@ -1,90 +1,192 @@
 /* Studio: its home, a file's page, each kind's editor, versions, Ask an agent and design packs.
    The app's colours (--pane, --ink, --line, --accent) so light and dark both look right. */
 .sd-home { height: 100%; overflow: auto; padding: 22px 26px 40px; background: var(--pane); }
+.sd-home > * { max-width: 1040px; }
 .sd-home-head h2 { display: flex; align-items: center; gap: 8px; margin: 0 0 4px; font: 650 19px var(--font); color: var(--ink); }
-.sd-home-head p { margin: 0 0 18px; max-width: 640px; }
-.sd-sec { margin: 0 0 26px; }
+.sd-home-head p { margin: 0 0 20px; max-width: 640px; line-height: 1.5; }
+.sd-sec { margin: 0 0 28px; }
 .sd-sec h3 { margin: 0 0 10px; font: 600 10.5px var(--font); letter-spacing: .07em; text-transform: uppercase; color: var(--ink-3); }
-.sd-new { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
-.sd-new-btn { display: grid; gap: 4px; justify-items: start; padding: 12px 14px; border: 1px solid var(--line-2, var(--line)); border-radius: 12px; background: var(--pane-2); color: var(--ink); text-align: left; }
+.sd-sec > p { margin: 0 0 10px; }
+.sd-none { max-width: 560px; line-height: 1.5; }
+/* New: one card per kind, each the same shape (its icon, its name, what it is). */
+.sd-new { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+.sd-new-btn { display: grid; grid-template-rows: auto auto 1fr; align-content: start; gap: 3px; justify-items: start; min-height: 112px; padding: 12px 14px; border: 1px solid var(--line-2, var(--line)); border-radius: 12px; background: var(--pane-2); color: var(--ink); text-align: left; transition: border-color .12s, background .12s; }
 .sd-new-btn:hover, .sd-new-btn.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--pane-2)); }
-.sd-new-btn small { font-size: 11.5px; line-height: 1.35; }
+.sd-new-btn b { margin-top: 8px; font-weight: 600; font-size: 13.5px; }
+.sd-new-btn small { font-size: 12px; line-height: 1.4; }
 .sd-new-btn:disabled { opacity: .55; cursor: default; }
-.sd-new-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
-.sd-new-form input, .sd-new-form select, .sd-pack-form input[type=text], .sd-pack-form > input { height: 30px; padding: 0 10px; border: 1px solid var(--line-2, var(--line)); border-radius: 8px; background: var(--pane); color: var(--ink); font: 13px var(--font); }
-.sd-new-form input { flex: 1 1 200px; min-width: 0; }
-.sd-new-form select { flex: 1 1 260px; min-width: 0; max-width: 100%; }
+.sd-new-ic { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); }
+.sd-new-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; margin-top: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--pane-2); }
+.sd-field { display: grid; gap: 4px; flex: 1 1 200px; min-width: 0; }
+.sd-field.wide { flex: 2 1 280px; }
+.sd-new-form input, .sd-new-form select, .sd-pack-form input[type=text], .sd-pack-form > input { width: 100%; height: 32px; padding: 0 10px; border: 1px solid var(--line-2, var(--line)); border-radius: 8px; background: var(--pane); color: var(--ink); font: 13px var(--font); }
+.sd-new-acts { display: flex; align-items: center; gap: 6px; }
+.sd-new-acts .btn.small { height: 32px; }
+.sd-new-err { flex: 1 1 100%; margin: 0; }
+/* Recent: a file a row, its kind and folder under its name. */
 .sd-recent { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 .sd-recent li { display: flex; align-items: center; gap: 4px; }
-.sd-recent-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 9px; color: var(--ink); text-align: left; }
+.sd-recent-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; padding: 7px 10px; border-radius: 9px; color: var(--ink); text-align: left; }
 .sd-recent-open:hover { background: var(--pane-2); }
-.sd-recent-name { flex: 1; min-width: 0; display: grid; }
+.sd-recent-ic { flex: none; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; background: var(--pane-2); color: var(--ink-2); }
+.sd-recent-open:hover .sd-recent-ic { background: var(--pane-3); }
+.sd-recent-name { flex: 1; min-width: 0; display: grid; gap: 1px; }
 .sd-recent-name b, .sd-recent-name small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sd-recent-name b { font-weight: 550; font-size: 13px; }
+.sd-recent-when { flex: none; }
 .sd-recent-x { opacity: 0; }
 .sd-recent li:hover .sd-recent-x, .sd-recent-x:focus-visible { opacity: 1; }
+@media (hover: none) { .sd-recent-x { opacity: 1; } }
 
-/* A file's page */
-.sd-file { display: grid; grid-template-rows: auto auto auto auto minmax(0, 1fr); height: 100%; min-height: 0; background: var(--pane); }
-.sd-err, .sd-loading { padding: 20px; }
-.sd-bar { margin: 0; padding: 7px 16px; border-bottom: 1px solid var(--line); background: var(--pane-2); }
-.sd-conflict { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12.5px; background: color-mix(in srgb, #e5a50a 12%, var(--pane)); }
-.sd-conflict > span { flex: 1 1 280px; }
-.sd-body { grid-row: 5; display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; }
+/* A file's page: the header, a bar for what it needs to say, the editor, the status line. */
+.sd-file { display: grid; grid-template-rows: auto auto auto auto minmax(0, 1fr) auto; height: 100%; min-height: 0; background: var(--pane); }
+.sd-err { padding: 20px; }
+.sd-bar { margin: 0; padding: 7px 16px; border-bottom: 1px solid var(--line); background: var(--pane-2); font-size: 12.5px; }
+.sd-note-bar { display: flex; align-items: center; gap: 8px; padding-top: 4px; padding-bottom: 4px; color: var(--ink-2); line-height: 1.45; }
+.sd-note-bar > span { flex: 1; min-width: 0; }
+.sd-note-bar > svg { flex: none; color: var(--accent); }
+.sd-note-bar.bad { color: var(--critical); background: color-mix(in srgb, var(--critical) 8%, var(--pane)); }
+.sd-note-bar.bad > svg { color: var(--critical); }
+.sd-note-bar .win-btn { flex: none; width: 24px; height: 24px; }
+.sd-conflict { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12.5px; background: color-mix(in srgb, var(--warning) 12%, var(--pane)); }
+.sd-conflict > span { flex: 1 1 280px; line-height: 1.45; }
+.sd-body { position: relative; grid-row: 5; display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; }
 .sd-body.with-panel { grid-template-columns: minmax(0, 1fr) 280px; }
 .sd-editor { position: relative; min-width: 0; min-height: 0; overflow: auto; }
-.sd-toolbar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; flex-wrap: wrap; gap: 4px; padding: 6px 12px; border-bottom: 1px solid var(--line); background: var(--pane); }
-.sd-tool { min-width: 28px; height: 28px; padding: 0 7px; border-radius: 7px; color: var(--ink-2); font: 13px var(--font); }
-.sd-tool:hover { background: var(--pane-2); color: var(--ink); }
-.sd-tool.on { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
-.sd-grow { flex: 1; }
-.sd-note { margin: 0; padding: 6px 16px; }
+/* The header: what it is and how big, then where it is; the folder gives way first, never the kind. */
+.pane-sub .sd-sub-kind { flex: none; white-space: nowrap; }
+.pane-sub .sd-sub-where { flex: 0 1 auto; }
+.sd-head-btn .sd-btn-label:empty { display: none; }
+@container (max-width: 620px) {
+  .sd-file .sd-btn-label { display: none; }
+  .sd-file .pane-head .btn.small { padding: 0 9px; gap: 0; }
+  .pane-sub .sd-sub-where { display: none; }
+}
+/* Empty, opening and couldn't: said in the middle of where the file would be. */
+.sd-empty { display: grid; justify-items: center; align-content: center; gap: 8px; min-height: 240px; height: 100%; padding: 32px 20px; text-align: center; color: var(--ink-2); }
+.sd-empty > b { max-width: 520px; font-weight: 600; color: var(--ink); line-height: 1.4; }
+.sd-empty > span { max-width: 520px; line-height: 1.5; }
+.sd-empty > svg { color: var(--ink-3); }
+.sd-empty[role="alert"] > svg { color: var(--critical); }
+.sd-empty-acts { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 6px; }
+.sd-file a.btn { text-decoration: none; }
+.sd-file a.btn.primary, .sd-file a.btn.primary:visited { color: var(--on-accent); }
+.sd-loading { display: flex; justify-content: center; align-items: center; gap: 8px; }
+.sd-over { position: absolute; inset: 0; background: var(--pane); }
+/* The status line, under the file. */
+.sd-status { grid-row: 6; display: flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; height: 30px; padding: 0 8px 0 12px; border-top: 1px solid var(--line); background: var(--pane); color: var(--ink-3); font-size: 11.5px; white-space: nowrap; }
+.sd-stat { padding: 0 6px; font-variant-numeric: tabular-nums; }
+.sd-status-btn { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 7px; border-radius: 6px; color: var(--ink-3); font-size: 11.5px; }
+.sd-status-btn:hover, .sd-status-btn.on { background: var(--pane-3); color: var(--ink); }
+.sd-state { display: inline-flex; align-items: center; gap: 6px; padding: 0 6px; }
+.sd-state > i { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3); opacity: .6; }
+.sd-state.ok > i { background: var(--good, var(--done)); opacity: 1; }
+.sd-state.dirty { color: var(--ink-2); }
+.sd-state.dirty > i { background: var(--warning); opacity: 1; }
+.sd-state.busy > i { background: var(--accent); opacity: 1; }
+.sd-state.bad { color: var(--critical); }
+.sd-state.bad > i { background: var(--critical); opacity: 1; }
 
-/* Documents */
+/* A toolbar over an editor: groups of buttons, each group set off by a line. */
+.sd-toolbar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-height: 42px; padding: 6px 12px; border-bottom: 1px solid var(--line); background: var(--pane); }
+.sd-group { display: inline-flex; align-items: center; gap: 2px; }
+.sd-group + .sd-group { padding-left: 6px; border-left: 1px solid var(--line); }
+.sd-grow + .sd-group { border-left: 0; padding-left: 0; }
+.sd-tool { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 7px; color: var(--ink-2); transition: background .12s, color .12s; }
+.sd-tool:hover:not(:disabled) { background: var(--pane-3); color: var(--ink); }
+.sd-tool.on { background: var(--accent-soft); color: var(--accent); }
+.sd-tool:disabled { opacity: .35; cursor: default; }
+.sd-style { height: 30px; min-width: 124px; padding: 0 8px; border: 1px solid var(--line-2, var(--line)); border-radius: 7px; background: var(--pane); color: var(--ink); font: 500 12.5px var(--font); }
+.sd-tool-menu { top: calc(100% + 4px); min-width: 210px; }
+.sd-tool-note { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.sd-grow { flex: 1; }
+.sd-note { margin: 0; padding: 6px 16px; line-height: 1.45; }
+/* The link bar, under the toolbar while a link is being added or changed; both stay in view. */
+.sd-doc-head { position: sticky; top: 0; z-index: 2; }
+.sd-doc-head > .sd-toolbar { position: static; }
+.sd-linkbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--line); background: var(--pane-2); }
+.sd-linkbar > svg { color: var(--ink-3); }
+.sd-linkbar input { flex: 1 1 220px; min-width: 0; height: 28px; padding: 0 9px; border: 1px solid var(--line-2, var(--line)); border-radius: 7px; background: var(--pane); color: var(--ink); font: 13px var(--font); }
+.sd-linkbar input:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+
+/* Documents. A Word file is a page: its width and margins as printed (8.5 in, 1 in), on a desk.
+   Markdown is a column to read and write in, as wide as reads well. */
 .sd-doc { min-height: 100%; background: var(--pane-2); }
-.sd-page { max-width: 820px; margin: 18px auto 40px; padding: 48px 64px; min-height: 70vh; background: var(--pane); border-radius: 6px; box-shadow: 0 0 0 1px var(--line), 0 2px 10px rgb(0 0 0 / .06); color: var(--ink); font: 15.5px/1.65 var(--font); }
+.sd-doc.md { background: var(--pane); }
+.sd-page { color: var(--ink); font: 15.5px/1.65 var(--font); }
+.sd-page.word { box-sizing: border-box; width: 816px; max-width: calc(100% - 48px); min-height: 1056px; margin: 24px auto 48px; padding: 96px clamp(24px, 11.8%, 96px); background: var(--pane); border-radius: 3px; box-shadow: 0 0 0 1px var(--line), 0 1px 3px rgb(0 0 0 / .06), 0 8px 24px rgb(0 0 0 / .06); }
+.sd-page.md { max-width: 740px; margin: 0 auto; padding: 36px 32px 96px; }
+.sd-page:not(.word):not(.md) { max-width: 820px; margin: 18px auto 40px; padding: 48px 64px; }
 .sd-page .ProseMirror { outline: none; min-height: 60vh; }
-.sd-page h1 { font-size: 1.9em; margin: .2em 0 .5em; } .sd-page h2 { font-size: 1.45em; margin: 1.2em 0 .4em; } .sd-page h3 { font-size: 1.2em; margin: 1em 0 .3em; }
+.sd-page h1 { font-size: 1.9em; line-height: 1.25; margin: .2em 0 .5em; } .sd-page h2 { font-size: 1.45em; line-height: 1.3; margin: 1.2em 0 .4em; } .sd-page h3 { font-size: 1.2em; margin: 1em 0 .3em; }
+.sd-page h4, .sd-page h5, .sd-page h6 { font-size: 1em; margin: 1em 0 .3em; }
+.sd-page p { margin: 0 0 .7em; }
+.sd-page ul, .sd-page ol { margin: 0 0 .7em; padding-left: 1.6em; }
+.sd-page li > p { margin: 0 0 .2em; }
+.sd-page a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; cursor: text; }
 .sd-page table { border-collapse: collapse; margin: 1em 0; width: 100%; }
 .sd-page td, .sd-page th { border: 1px solid var(--line-2, var(--line)); padding: 6px 8px; vertical-align: top; }
-.sd-page th { background: var(--pane-2); font-weight: 600; }
+.sd-page td > p, .sd-page th > p { margin: 0; }
+.sd-page th { background: var(--pane-2); font-weight: 600; text-align: left; }
+.sd-page .selectedCell { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .sd-page img { max-width: 100%; height: auto; }
 .sd-page blockquote { margin: 1em 0; padding-left: 14px; border-left: 3px solid var(--line-2, var(--line)); color: var(--ink-2); }
+.sd-page blockquote > p { margin: 0 0 .4em; }
 .sd-page pre { padding: 10px 12px; border-radius: 8px; background: var(--pane-2); font: 13px/1.5 var(--font-mono); overflow: auto; }
 .sd-page code { font-family: var(--font-mono); font-size: .9em; }
+.sd-page :not(pre) > code { padding: .1em .35em; border-radius: 5px; background: var(--pane-2); }
+.sd-page hr { border: 0; border-top: 1px solid var(--line-2, var(--line)); margin: 1.4em 0; }
+/* Where to start writing, in an empty document or under a new one's title. */
+.sd-page .ProseMirror > p:only-child:has(> br.ProseMirror-trailingBreak:only-child)::before,
+.sd-page .ProseMirror > :is(h1, h2, h3):first-child + p:last-child:has(> br.ProseMirror-trailingBreak:only-child)::before { content: var(--sd-ph); float: left; height: 0; color: var(--ink-3); pointer-events: none; }
 /* A Word file in its own look (look.js): its fonts, sizes and colours; on paper when it has colours. */
 .sd-page.word { font-family: var(--doc-font, var(--font)); font-size: var(--doc-size, 15.5px); }
 .sd-page.paper { background: #fff; color: var(--doc-color, #1f2328); }
 .sd-page.paper th, .sd-page.paper pre { background: #f3f4f6; }
+/* Paper is white in a dark look too: its lines drawn for white, not the look's light ones. */
+.sd-page.paper td, .sd-page.paper th { border-color: #d0d7de; }
+.sd-page.paper hr { border-top-color: #d0d7de; }
+.sd-page.paper .ProseMirror > p:only-child:has(> br.ProseMirror-trailingBreak:only-child)::before,
+.sd-page.paper .ProseMirror > :is(h1, h2, h3):first-child + p:last-child:has(> br.ProseMirror-trailingBreak:only-child)::before { color: #8a92a3; }
 .sd-page.word h1 { font-family: var(--doc-h1-font, inherit); color: var(--doc-h1-color, inherit); font-size: var(--doc-h1-size, 1.9em); }
 .sd-page.word h2 { font-family: var(--doc-h2-font, inherit); color: var(--doc-h2-color, inherit); font-size: var(--doc-h2-size, 1.45em); }
 .sd-page.word h3 { font-family: var(--doc-h3-font, inherit); color: var(--doc-h3-color, inherit); font-size: var(--doc-h3-size, 1.2em); }
 .sd-page.word h4 { font-family: var(--doc-h4-font, inherit); color: var(--doc-h4-color, inherit); font-size: var(--doc-h4-size, 1em); }
 .sd-page.word h5 { font-family: var(--doc-h5-font, inherit); color: var(--doc-h5-color, inherit); font-size: var(--doc-h5-size, 1em); }
 .sd-page.word h6 { font-family: var(--doc-h6-font, inherit); color: var(--doc-h6-color, inherit); font-size: var(--doc-h6-size, 1em); }
-.sd-plain, .sd-code, .sd-deck-md { font-variant-ligatures: none; display: block; width: 100%; height: 100%; min-height: 60vh; padding: 16px 18px; border: 0; resize: none; background: var(--pane); color: var(--ink); font: 13px/1.6 var(--font-mono); outline: none; }
+.sd-page.word blockquote { border-left: 0; padding: 0 .5in; font-style: italic; }
+.sd-page.paper blockquote { color: #595959; }
+/* The code font's ligatures off, after the font shorthand (which resets them): <!-- and --> as typed. */
+.sd-plain, .sd-code, .sd-deck-md { display: block; width: 100%; height: 100%; min-height: 60vh; padding: 16px 18px; border: 0; resize: none; background: var(--pane); color: var(--ink); font: 13px/1.6 var(--font-mono); outline: none; font-variant-ligatures: none; }
+.sd-plain { max-width: 860px; margin: 0 auto; padding: 28px 32px; }
 
 /* Sheets */
-.sd-sheet { display: flex; flex-direction: column; height: 100%; }
+.sd-sheet { position: relative; display: flex; flex-direction: column; height: 100%; }
 .sd-univer { flex: 1; min-height: 0; }
 
 /* Decks */
 .sd-deck { display: flex; flex-direction: column; height: 100%; }
-.sd-deck > .sd-deck-cols, .sd-deck > .sd-outline, .sd-deck > .sd-pdf { flex: 1; min-height: 0; }
+.sd-deck > .sd-deck-cols, .sd-deck > .sd-outline, .sd-deck > .sd-pdf, .sd-deck > .sd-empty { flex: 1; min-height: 0; }
 .sd-deck-cols { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); min-height: 0; }
+.sd-deck-cols.show-md, .sd-deck-cols.show-slides { grid-template-columns: minmax(0, 1fr); }
 .sd-look { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); margin-right: 4px; }
-.sd-look select { font: inherit; padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--pane); color: var(--ink); max-width: 180px; }
+.sd-look select { font: inherit; height: 26px; padding: 0 6px; border: 1px solid var(--line-2, var(--line)); border-radius: 7px; background: var(--pane); color: var(--ink); max-width: 180px; }
 .sd-deck-md { border-right: 1px solid var(--line); }
-.sd-deck-view, .sd-page-view, .sd-pdf { width: 100%; height: 100%; min-height: 60vh; border: 0; background: #8a8f99; }
+.sd-deck-view, .sd-page-view, .sd-pdf { width: 100%; height: 100%; min-height: 60vh; border: 0; background: var(--pane-3); }
 .sd-pdf { background: var(--pane-2); }
 .sd-present { position: fixed; inset: 0; z-index: 200; background: #000; display: grid; grid-template-rows: minmax(0, 1fr) auto; }
 .sd-present iframe { width: 100%; height: 100%; border: 0; }
 .sd-present-bar { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 8px; color: #ddd; font: 13px var(--font); }
 .sd-present-bar .win-btn { color: #ddd; }
+.sd-present-bar .win-btn:hover { background: rgb(255 255 255 / .12); color: #fff; }
 .sd-present-notes { position: absolute; left: 50%; bottom: 52px; transform: translateX(-50%); max-width: min(760px, 90vw); margin: 0; padding: 8px 12px; border-radius: 8px; background: rgb(0 0 0 / .7); color: #eee; font: 14px/1.45 var(--font); }
-.sd-outline { display: grid; gap: 10px; padding: 16px; }
-.sd-slide-card { padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--pane-2); }
-.sd-slide-card p { margin: 4px 0 0; }
+/* A PowerPoint as its slides' text: a card a slide, in slide shape where there's room. */
+.sd-outline { list-style: none; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); align-content: start; gap: 14px; padding: 16px; overflow: auto; background: var(--pane-2); }
+.sd-slide-card { position: relative; display: grid; align-content: start; gap: 4px; aspect-ratio: 16 / 9; overflow: hidden; padding: 16px 18px 14px; border-radius: 6px; background: var(--pane); box-shadow: 0 0 0 1px var(--line), 0 2px 8px rgb(0 0 0 / .05); }
+.sd-slide-card > b { font-size: 15px; line-height: 1.3; padding-right: 22px; }
+.sd-slide-card p { margin: 0; font-size: 12.5px; line-height: 1.4; color: var(--ink-2); }
+.sd-slide-card .sd-slide-notes { margin-top: 4px; padding-top: 6px; border-top: 1px dashed var(--line-2, var(--line)); }
+.sd-slide-n { position: absolute; top: 10px; right: 12px; font: 600 11px var(--font); color: var(--ink-3); font-variant-numeric: tabular-nums; }
 
 /* Pages */
 .sd-page-ed { display: flex; flex-direction: column; height: 100%; }
@@ -114,7 +216,9 @@
 .sd-diff .fold { color: var(--ink-3); font-style: italic; }
 
 /* Ask an agent */
-.sd-modal { position: fixed; inset: 0; z-index: 150; display: grid; place-items: center; padding: 16px; background: rgb(0 0 0 / .32); }
+/* Its one column at most 560px and never wider than the screen: sized by what's in it (the part you
+   picked, a long line of it), the form was wider than a phone. */
+.sd-modal { position: fixed; inset: 0; z-index: 150; display: grid; grid-template-columns: minmax(0, 560px); place-content: center; place-items: center; padding: 16px; background: rgb(0 0 0 / .32); }
 .sd-ask { display: grid; gap: 10px; width: min(560px, 100%); padding: 16px 18px; border-radius: 14px; background: var(--pane); box-shadow: 0 0 0 1px var(--line), 0 18px 50px rgb(0 0 0 / .28); }
 .sd-ask textarea { width: 100%; padding: 9px 11px; border: 1px solid var(--line-2, var(--line)); border-radius: 9px; background: var(--pane); color: var(--ink); font: 13.5px/1.45 var(--font); resize: vertical; }
 .sd-ask-sel { margin: 0; padding: 8px 10px; border-radius: 9px; background: var(--pane-2); }
@@ -138,12 +242,67 @@
 .sd-pack-preview { display: grid; gap: 2px; padding: 14px 16px; border-radius: 8px; box-shadow: 0 0 0 1px var(--line); }
 .sd-pack-preview b { font-size: 18px; }
 
-/* A phone: one column, the versions over the file. */
+/* A narrow pane: one column, the versions over the file (under its header, over its editor); a Word
+   page with smaller margins. */
 @media (max-width: 700px) {
   .sd-home { padding: 16px 16px 32px; }
   .sd-body.with-panel { grid-template-columns: minmax(0, 1fr); }
   .sd-panel { position: absolute; inset: 0; z-index: 3; }
-  .sd-page { margin: 0; padding: 22px 16px; border-radius: 0; box-shadow: none; }
+  .sd-page.word { width: auto; max-width: none; min-height: 0; margin: 0; padding: 24px 18px 48px; border-radius: 0; box-shadow: none; }
+  .sd-page.md, .sd-page:not(.word):not(.md) { margin: 0; padding: 22px 18px 48px; }
   .sd-deck-cols, .sd-page-cols { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); }
+  .sd-deck-cols.show-md, .sd-deck-cols.show-slides, .sd-page-cols.show-code, .sd-page-cols.show-page { grid-template-rows: minmax(0, 1fr); }
   .sd-deck-md, .sd-page-cols .sd-code { border-right: 0; border-bottom: 1px solid var(--line); }
 }
+
+/* On a phone (the phone layout, .app.narrow): each thing you tap a whole 40px target, fields at
+   16px (iOS zooms into a smaller one), the toolbar wrapping onto a second row rather than scrolling
+   sideways, and the header leaving the file's name its room (Save and Ask an agent as icons). */
+.app.narrow .sd-file .pane-head { padding-left: max(6px, env(safe-area-inset-left)); padding-right: max(6px, env(safe-area-inset-right)); gap: 4px; }
+.app.narrow .sd-file .pane-head .pane-icon { display: none; }
+.app.narrow .sd-file .pane-head .win-btn { width: 40px; height: 40px; }
+.app.narrow .sd-file .pane-head .btn.small { width: 40px; height: 40px; padding: 0; gap: 0; }
+.app.narrow .sd-file .pane-extras { gap: 2px; }
+.app.narrow .sd-toolbar { gap: 4px; padding: 4px 8px; }
+.app.narrow .sd-group + .sd-group { padding-left: 0; border-left: 0; }
+.app.narrow .sd-toolbar .sd-grow { display: none; }
+.app.narrow .sd-tool { width: 40px; height: 40px; }
+.app.narrow .sd-style { height: 40px; font-size: 16px; }
+.app.narrow .sd-toolbar .btn.small, .app.narrow .sd-toolbar a.btn.small { height: 40px; min-width: 40px; padding: 0 10px; }
+.app.narrow .sd-toolbar .btn.small .sd-btn-label { display: none; }
+.app.narrow .sd-toolbar .seg button { justify-content: center; width: 48px; height: 36px; padding: 0; }
+.app.narrow .sd-toolbar .seg button span { display: none; }
+.app.narrow .sd-look select { height: 40px; font-size: 16px; }
+.app.narrow .sd-linkbar input { height: 40px; font-size: 16px; }
+.app.narrow .sd-linkbar .btn.small { height: 40px; }
+.app.narrow .sd-linkbar .win-btn, .app.narrow .sd-note-bar .win-btn { width: 40px; height: 40px; }
+.app.narrow .sd-tool-menu .menu-item { height: 40px; font-size: 14px; }
+.app.narrow .sd-plain, .app.narrow .sd-code, .app.narrow .sd-deck-md { font-size: 16px; padding: 14px 16px; }
+.app.narrow .sd-page { font-size: 16px; }
+.app.narrow .sd-status { height: 40px; padding: 0 6px 0 8px; }
+.app.narrow .sd-status-btn { height: 40px; padding: 0 8px; }
+.app.narrow .sd-status-btn.vers { display: none; } /* the header's clock is there */
+.app.narrow .sd-empty .btn.small { height: 40px; padding: 0 14px; }
+.app.narrow .sd-versions li { padding: 4px 6px; }
+.app.narrow .sd-v-acts { gap: 4px; }
+.app.narrow .sd-v-acts .link-btn { min-height: 40px; min-width: 40px; display: inline-flex; align-items: center; justify-content: center; }
+.app.narrow .sd-panel-head .win-btn, .app.narrow .sd-compare .win-btn { width: 40px; height: 40px; }
+.app.narrow .sd-ask textarea, .app.narrow .sd-ask-to select { font-size: 16px; }
+.app.narrow .sd-ask-to select { height: 40px; }
+.app.narrow .sd-ask .btn.small, .app.narrow .sd-ask .ghost-btn { height: 40px; }
+.app.narrow .sd-ask .ghost-btn { padding: 0 12px; }
+/* Studio's home on a phone: two cards a row, the form's fields whole, a recent file's folder on a
+   line of its own rather than cut off, and its remove button always there (a phone has no hover). */
+.app.narrow .sd-home { padding-left: max(14px, env(safe-area-inset-left)); padding-right: max(14px, env(safe-area-inset-right)); }
+.app.narrow .sd-new { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.app.narrow .sd-new-btn { grid-template-columns: 30px minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 12px; align-items: center; min-height: 0; padding: 10px 12px; }
+.app.narrow .sd-new-ic { grid-row: 1 / 3; }
+.app.narrow .sd-new-btn b { margin-top: 0; }
+.app.narrow .sd-new-form input, .app.narrow .sd-new-form select { height: 40px; font-size: 16px; }
+.app.narrow .sd-new-acts .btn.small, .app.narrow .sd-new-acts .ghost-btn { height: 40px; }
+.app.narrow .sd-recent-open { min-height: 48px; padding: 6px 4px; }
+.app.narrow .sd-recent-name small { white-space: normal; overflow-wrap: anywhere; }
+.app.narrow .sd-recent-name b { white-space: normal; overflow-wrap: anywhere; }
+.app.narrow .sd-recent-when { display: none; }
+.app.narrow .sd-recent-x { width: 40px; height: 40px; justify-content: center; }
+.app.narrow .sd-pack .ghost-btn, .app.narrow .sd-sec > .ghost-btn { min-height: 40px; min-width: 40px; justify-content: center; }
