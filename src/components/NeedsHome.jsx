@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Icon, { StatusDot } from './Icon.jsx'
 import { NeedsItem, onDevice } from './NeedsYou.jsx'
 import { useAgentMap } from './AgentMap.jsx'
@@ -16,8 +16,10 @@ import './needshome.css'
 // at a time: the next meetings (with the brief and the files in the invite) and the tasks that name
 // a day; and the Chief of Staff's other tasks, the ones with no day folded away. From every linked
 // computer at once (server/home.js, by way of each one's summary, one row per thing), with a filter
-// by kind and by device. Everything opens every item on every computer, in lanes as the Agent Map
-// has them: by device, or by kind.
+// by kind and by device, and one order for it all: what needs you first, newest, oldest, by computer
+// or by kind. Anything you pin goes to the top, as a card like the ones waiting on you, and stays
+// there until you unpin it. Everything opens every item on every computer, in lanes as the Agent
+// Map has them: by device, or by kind.
 
 const KINDS = [['all', tx('All')], ['agent', tx('Agents')], ['meeting', tx('Meetings')], ['chief', tx('Chief of Staff')], ['board', tx('Whiteboards')]]
 // Chief of Staff's own questions count with its tasks.
@@ -126,8 +128,159 @@ function useRead() {
   return [read, mark]
 }
 
+// What's pinned to the top. Kept on the computer this page comes from (server/home.js), so every
+// page and phone it serves has the same. Pinned here at once; one that couldn't be saved goes back
+// to where it was and says why.
+function usePins(data, refresh, setNote) {
+  const [mine, setMine] = useState({}) // uid -> pinned, until the list says so too
+  const saved = useMemo(() => new Set((data?.pins || []).map((p) => p.id)), [data])
+  useEffect(() => setMine((m) => {
+    const left = Object.entries(m).filter(([k, v]) => saved.has(k) !== v)
+    return left.length === Object.keys(m).length ? m : Object.fromEntries(left)
+  }), [saved])
+  const has = (uid) => (uid in mine ? mine[uid] : saved.has(uid))
+  const toggle = async (it) => {
+    const on = !has(it.uid)
+    setMine((m) => ({ ...m, [it.uid]: on }))
+    try {
+      await hostApi('/home-pins', { method: 'POST', body: { id: it.uid, on } })
+      refresh()
+    } catch (e) {
+      setMine((m) => { const n = { ...m }; delete n[it.uid]; return n })
+      setNote({ text: on ? t("Couldn't pin it: {why}", { why: e.message }) : t("Couldn't unpin it: {why}", { why: e.message }) })
+    }
+  }
+  return { has, toggle }
+}
+
+// The order, picked once and kept in this browser: what needs you first, newest, oldest, or in a
+// group for each computer or each kind.
+const SORTS = [['needs', tx('Needs you first')], ['newest', tx('Newest first')], ['oldest', tx('Oldest first')], ['device', tx('By computer')], ['kind', tx('By kind')]]
+function useSort() {
+  const [by, setBy] = useState(() => { try { const v = localStorage.getItem('cc-home-sort'); return SORTS.some(([k]) => k === v) ? v : 'needs' } catch { return 'needs' } })
+  const pick = (v) => { setBy(v); try { localStorage.setItem('cc-home-sort', v) } catch { /* no storage */ } }
+  return [by, pick]
+}
+// What needs you first: a permission, a question, a failed run, then a task that waits on you, the
+// one waiting longest first; then what's ready to look at, newest first; then what's coming up.
+const GROUP = { needs: 0, ready: 1, coming: 2 }
+const urgent = (x, y) => (GROUP[x.group] ?? 3) - (GROUP[y.group] ?? 3)
+  || (x.group === 'needs' ? (x.kind === 'task') - (y.kind === 'task') || (RANK[x.type] ?? 9) - (RANK[y.type] ?? 9) || time(x) - time(y) : time(y) - time(x))
+const ORDER = { newest: (x, y) => time(y) - time(x) || urgent(x, y), oldest: (x, y) => time(x) - time(y) || urgent(x, y) }
+const sortBy = (list, by) => [...list].sort(ORDER[by] || urgent)
+const KIND_ICON = { agent: 'bot', meeting: 'mic', chief: 'helm', board: 'shapes' }
+// By computer or by kind: a group for each, this computer first or in the tabs' order.
+function groupsOf(rows, by, devices) {
+  if (by !== 'device' && by !== 'kind') return [{ key: 'all', rows }]
+  const keyOf = by === 'device' ? (i) => i.machine || 'here' : kindOf
+  const keys = by === 'device' ? [...new Set([...devices.map((d) => d.id || 'here'), ...rows.map(keyOf)])] : KINDS.slice(1).map(([k]) => k)
+  return keys.map((key) => ({ key, rows: rows.filter((i) => keyOf(i) === key) })).filter((g) => g.rows.length)
+}
+// A group's heading: the computer (and whether it's offline), or the kind.
+function GroupHead({ by, g, devices }) {
+  const d = by === 'device' && devices.find((x) => (x.id || 'here') === g.key)
+  const label = by === 'device' ? d?.name || g.rows[0]?.device : t(KINDS.find(([k]) => k === g.key)?.[1] || '')
+  return (
+    <h4 className="hm-ghead">
+      <Icon name={by === 'device' ? 'laptop' : KIND_ICON[g.key]} size={12} />{label}
+      {d && !d.online && <span className="hm-ghead-off">· {t('offline')}</span>}
+      <span className="fcount">{g.rows.length}</span>
+    </h4>
+  )
+}
+// Each group under its heading, when there's more than one.
+const grouped = (rows, by, devices, render) => {
+  const gs = groupsOf(rows, by, devices)
+  return gs.length > 1 ? gs.map((g) => <div key={g.key} className="hm-group"><GroupHead by={by} g={g} devices={devices} />{render(g.rows)}</div>) : render(rows)
+}
+
+// The computer it's on, as every card has it.
+function DeviceChip({ it }) {
+  const off = !it.online
+  return (
+    <span className={`ny-device ${it.machine ? '' : 'here'}`} title={off ? t('{name} is offline', { name: it.device }) : t('On {name}', { name: it.device })}>
+      <Icon name="laptop" size={11} />{it.device}{off && <span className="ny-off"> · {t('offline')}</span>}
+    </span>
+  )
+}
+
+// The heading's count: everything that needs you on every computer (offline ones too, as Waiting on
+// You has them), with a ring like the Status menu's, filled by the share you can answer now (on a
+// computer that's on) and the rest in a quieter tone. Pointed at, reached by the keyboard or tapped,
+// what's in it: on each computer and by kind. Escape, a tap elsewhere or a second tap puts it away.
+const NEED_KINDS = [['permission', tx('Permissions')], ['question', tx('Questions')], ['failed', tx('Failed')], ['task', tx('Chief of Staff tasks')]]
+function NeedCount({ list, devices }) {
+  const [hover, setHover] = useState(false)
+  const [focus, setFocus] = useState(false)
+  const [stuck, setStuck] = useState(false)
+  const box = useRef(null)
+  const pointing = useRef(false) // a click or a tap, which opens it itself, rather than the keyboard
+  useEffect(() => {
+    if (!stuck) return
+    const away = (e) => { if (!box.current?.contains(e.target)) setStuck(false) }
+    document.addEventListener('pointerdown', away)
+    return () => document.removeEventListener('pointerdown', away)
+  }, [stuck])
+  const total = list.length
+  const now = list.filter((i) => i.online).length
+  const title = total === 0 ? t('Nothing needs you') : total === 1 ? t('1 thing needs you') : t('{n} things need you', { n: total })
+  if (!total) return <h2>{title}</h2>
+  const open = hover || focus || stuck
+  const away = () => { setStuck(false); setHover(false); setFocus(false) }
+  const on = devices.map((d) => ({ d, n: list.filter((i) => (i.machine || 'here') === (d.id || 'here')).length })).filter((x) => x.n)
+  const kinds = NEED_KINDS.map(([k, label]) => ({ k, label, n: list.filter((i) => (i.kind === 'task' ? 'task' : i.type) === k).length })).filter((x) => x.n)
+  return (
+    <div className="hm-count-box" ref={box} onPointerEnter={(e) => { if (e.pointerType === 'mouse') setHover(true) }} onPointerLeave={(e) => { if (e.pointerType === 'mouse') setHover(false) }}>
+      <h2>
+        <button type="button" className="hm-count" aria-expanded={open} aria-describedby={open ? 'hm-count-tip' : undefined}
+          onPointerDown={() => { pointing.current = true }}
+          onFocus={() => { if (!pointing.current) setFocus(true) }}
+          onBlur={() => setFocus(false)}
+          onClick={() => { pointing.current = false; if (stuck) away(); else setStuck(true) }}
+          onKeyDown={(e) => { if (e.key === 'Escape') away() }}>
+          {title}
+          <span className="mini-ring hm-ring" role="img" aria-label={t('{n} of {m} you can answer now', { n: now, m: total })} style={{ '--p': Math.round((now / total) * 100) }} />
+        </button>
+      </h2>
+      {open && (
+        <div id="hm-count-tip" role="tooltip" className="hm-tip">
+          <p>{now === total ? (total === 1 ? t('You can answer it now.') : t('You can answer all {n} now.', { n: total }))
+            : now === 0 ? t('None can be answered now: each waits for its computer to be back.')
+              : t('You can answer {n} of {m} now; the rest wait for their computer to be back.', { n: now, m: total })}</p>
+          <div className="hm-tip-cols">
+            <dl>
+              <dt>{t('By computer')}</dt>
+              {on.map(({ d, n }) => <dd key={d.id || 'here'} className={d.online ? '' : 'off'}><span className={`mc-dot ${d.online ? 'on' : ''}`} /><span className="hm-tip-name">{d.name}{!d.online && <small> · {t('offline')}</small>}</span><b>{n}</b></dd>)}
+            </dl>
+            <dl>
+              <dt>{t('By kind')}</dt>
+              {kinds.map(({ k, label, n }) => <dd key={k}><span className="hm-tip-name">{t(label)}</span><b>{n}</b></dd>)}
+            </dl>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Pin to the top of Home, or unpin: a pin, filled while it's pinned.
+function PinBtn({ on, onClick }) {
+  return (
+    <button type="button" className={`hm-pin ${on ? 'on' : ''}`} aria-pressed={on} onClick={onClick}
+      aria-label={on ? t('Unpin') : t('Pin to the top')} title={on ? t('Unpin: back to where it was') : t('Pin to the top of Home: it stays there until you unpin it')}>
+      <Icon name="pin" size={13} />
+    </button>
+  )
+}
+
+// A line about the page itself (it couldn't load, a computer sends only part of it), in the column
+// with everything else.
+function Notice({ tone = 'info', icon = 'info', role, className = '', children }) {
+  return <div className={`hm-notice ${tone} ${className}`} role={role}><Icon name={icon} size={14} /><div className="hm-notice-text">{children}</div></div>
+}
+
 // A task of the Chief of Staff's waiting on you: what it needs, a reply to it, or open the Chief.
-function TaskWaiting({ it, multi, onOpenChief, onGone, setNote }) {
+function TaskWaiting({ it, onOpenChief, onGone, setNote, pin }) {
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [open, setOpen] = useState(false)
@@ -148,14 +301,15 @@ function TaskWaiting({ it, multi, onOpenChief, onGone, setNote }) {
         <StatusDot status="blocked" size={8} />
         <span className="ny-kind">{t('Chief of Staff task')}</span>
         <span className="ny-grow" />
-        {multi && <span className={`ny-device ${it.machine ? '' : 'here'}`}><Icon name="laptop" size={11} />{it.device}{off && <span className="ny-off"> · {t('offline')}</span>}</span>}
+        <DeviceChip it={it} />
+        {pin}
       </div>
       <p className="ny-text">{it.task.needs || t('Waiting on you')}</p>
-      <div className="ny-meta"><b className="ny-agent"><Icon name="helm" size={11} />{it.task.title}</b></div>
+      <div className="ny-meta"><Icon name="helm" size={11} /><b className="hm-clamp">{it.task.title}</b></div>
       <div className="ny-acts">
         {!off && <button type="button" className="ghost-btn" aria-expanded={open} onClick={() => setOpen(!open)}><Icon name="chat" size={12} /> {t('Reply')}</button>}
         <span className="ny-grow" />
-        <button type="button" className="ghost-btn strong" onClick={() => onOpenChief(it)} disabled={off}>{t('Open')}</button>
+        <button type="button" className="ghost-btn strong" onClick={() => onOpenChief(it)} disabled={off}><Icon name="open" size={12} /> {t('Open')}</button>
       </div>
       {open && (
         <form className="ny-reply" onSubmit={send}>
@@ -167,10 +321,9 @@ function TaskWaiting({ it, multi, onOpenChief, onGone, setNote }) {
   )
 }
 
-// One thing ready to look at, as a short row: what it is, a line or two of it that ends at a word,
-// and where and when. Opened (a click, or Enter), the whole of it and what you can do with it; on a
-// computer the usual ones are also on the row while the pointer or the keyboard is on it.
-function ReadyItem({ it, multi, phone, read, open, onToggle, onRead, h }) {
+// What a thing ready to look at says, by kind, and what you can do with it: for its row, and for
+// its card when it's pinned. The buttons are the same, with the same icons, in either.
+function useReady(it, { phone, h, onRead }) {
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [replying, setReplying] = useState(false)
@@ -203,17 +356,39 @@ function ReadyItem({ it, multi, phone, read, open, onToggle, onRead, h }) {
       h.onGone(it, r.queued ? t('Sent. It gets it when it can take it.') : t('Sent'))
     } catch (x) { h.setNote({ id: it.id, text: why(x, it.device) }) } finally { setBusy(false) }
   }
-  // What the row says, by kind.
-  const l = it.kind === 'agent' ? { dot: 'done', title: a.title || t('Agent'), what: same(a.project, a.title) ? null : a.project, sub: gist(it.text, phone ? 90 : 140) || t('Finished, with nothing more to say.'), full: whole(it.text) }
-    : it.kind === 'meeting' ? { icon: 'mic', title: it.meeting.title, what: t('Meeting notes'), sub: sent || (left === 1 ? t('1 action item not handed on yet') : left > 1 ? t('{n} action items not handed on yet', { n: left }) : t('The summary is ready')) }
-      : it.kind === 'board' ? { icon: 'shapes', title: it.board.title, what: t('Whiteboard'), sub: t('Changed since you last looked') }
-        : { icon: 'helm', title: it.task.title, what: t('Chief of Staff finished'), sub: it.task.outcome || it.task.link || t('Done'), full: [it.task.outcome, it.task.link].filter(Boolean).join('\n') }
+  const m = it.meeting
+  const tk = it.task
+  const dueOn = (d) => new Date(`${d}T12:00:00`).toLocaleDateString(locale(), { weekday: 'short', month: 'short', day: 'numeric' })
+  // kind: what it is, on its card; what: beside its title, on its row.
+  const l = it.kind === 'agent' ? { dot: 'done', kind: t('Finished'), title: a.title || t('Agent'), what: same(a.project, a.title) ? null : a.project, sub: gist(it.text, phone ? 90 : 140) || t('Finished, with nothing more to say.'), full: whole(it.text) }
+    : it.kind === 'meeting' ? { icon: 'mic', kind: t('Meeting notes'), title: m.title, what: t('Meeting notes'), sub: sent || (left === 1 ? t('1 action item not handed on yet') : left > 1 ? t('{n} action items not handed on yet', { n: left }) : m.hasSummary ? t('The summary is ready') : m.status === 'recording' ? t('Recording') : t('No summary yet')) }
+      : it.kind === 'board' ? { icon: 'shapes', kind: t('Whiteboard'), title: it.board.title, what: t('Whiteboard'), sub: it.board.changed === false ? t('Changed {when}', { when: ago(it.at) }) : t('Changed since you last looked') }
+        : tk.status === 'done' ? { icon: 'helm', kind: t('Chief of Staff finished'), title: tk.title, what: t('Chief of Staff finished'), sub: tk.outcome || tk.link || t('Done'), full: [tk.outcome, tk.link].filter(Boolean).join('\n') }
+          : { icon: 'helm', kind: t('Chief of Staff task'), title: tk.title, what: t('Chief of Staff task'), sub: tk.status === 'doing' ? t('On it now') : !tk.due ? t('To do') : tk.due < dayKey(Date.now()) ? t('Was due {date}', { date: dueOn(tk.due) }) : t('Due {date}', { date: dueOn(tk.due) }) }
   const opener = it.kind === 'agent' ? h.onOpen : it.kind === 'meeting' ? h.onOpenMeeting : it.kind === 'board' ? h.onOpenBoard : h.onOpenChief
   const canClear = it.kind === 'agent' && it.type === 'review' && !off && !it.old
-  const pr = it.pr && <a className="ghost-btn" href={it.pr} target="_blank" rel="noopener noreferrer" onClick={onRead}><Icon name="external" size={12} /> {t('Pull request')}</a>
-  const handOn = it.kind === 'meeting' && left > 0 && !off && <button type="button" className="ghost-btn" disabled={busy} onClick={toChief}><Icon name="helm" size={12} /> {t('To Chief of Staff')}</button>
-  const clearBtn = canClear && <button type="button" className="ghost-btn" onClick={clear} title={t('Take it off the list until it has something new')}>{t('Clear')}</button>
-  const openBtn = <button type="button" className="ghost-btn strong" onClick={go(opener)} disabled={off}>{t('Open')}</button>
+  return {
+    l, off,
+    pr: it.pr && <a className="ghost-btn" href={it.pr} target="_blank" rel="noopener noreferrer" onClick={onRead}><Icon name="external" size={12} /> {t('Pull request')}</a>,
+    handOn: it.kind === 'meeting' && left > 0 && !off && <button type="button" className="ghost-btn" disabled={busy} onClick={toChief}><Icon name="helm" size={12} /> {t('To Chief of Staff')}</button>,
+    clearBtn: canClear && <button type="button" className="ghost-btn" onClick={clear} title={t('Take it off the list until it has something new')}><Icon name="check" size={12} /> {t('Clear')}</button>,
+    openBtn: <button type="button" className="ghost-btn strong" onClick={go(opener)} disabled={off}><Icon name="open" size={12} /> {t('Open')}</button>,
+    replyBtn: it.kind === 'agent' && !off && <button type="button" className="ghost-btn" aria-expanded={replying} onClick={() => setReplying(!replying)}><Icon name="chat" size={12} /> {t('Reply')}</button>,
+    form: replying && (
+      <form className="ny-reply" onSubmit={reply}>
+        <input autoFocus value={text} onChange={(e) => setText(e.target.value)} placeholder={t('Reply to {name}…', { name: a.title })} aria-label={t('Reply to {name}', { name: a.title })} disabled={busy} />
+        <button type="submit" className="btn small primary" disabled={busy || !text.trim()}><Icon name="send" size={12} /> {t('Send')}</button>
+      </form>
+    ),
+  }
+}
+
+// One thing ready to look at, as a short row: what it is, a line or two of it that ends at a word,
+// and where and when. Opened (a click, or Enter), the whole of it and what you can do with it; on a
+// computer the usual ones are also on the row while the pointer or the keyboard is on it.
+function ReadyItem({ it, multi, phone, read, open, onToggle, onRead, h, pin }) {
+  const r = useReady(it, { phone, h, onRead })
+  const { l, off } = r
   // Where and when: on the right on a computer, under it on a phone (where the room is for the words).
   const when = (
     <span className="hm-item-when">
@@ -233,25 +408,57 @@ function ReadyItem({ it, multi, phone, read, open, onToggle, onRead, h }) {
         </span>
         {!phone && when}
       </button>
-      {!phone && !open && <div className="hm-quick">{pr}{handOn}{clearBtn}{openBtn}</div>}
+      {!phone && !open && <div className="hm-quick">{r.pr}{r.handOn}{r.clearBtn}{pin}{r.openBtn}</div>}
       {open && (
         <div className="hm-item-more">
           {l.full && l.full !== l.sub && <p className="hm-full">{l.full}</p>}
           <div className="hm-item-acts">
-            {it.kind === 'agent' && !off && <button type="button" className="ghost-btn" aria-expanded={replying} onClick={() => setReplying(!replying)}><Icon name="chat" size={12} /> {t('Reply')}</button>}
-            {pr}{handOn}
+            {r.replyBtn}{r.pr}{r.handOn}
             <span className="ny-grow" />
-            {clearBtn}{openBtn}
+            {r.clearBtn}{pin}{r.openBtn}
           </div>
-          {replying && (
-            <form className="ny-reply" onSubmit={reply}>
-              <input autoFocus value={text} onChange={(e) => setText(e.target.value)} placeholder={t('Reply to {name}…', { name: a.title })} aria-label={t('Reply to {name}', { name: a.title })} disabled={busy} />
-              <button type="submit" className="btn small primary" disabled={busy || !text.trim()}><Icon name="send" size={12} /> {t('Send')}</button>
-            </form>
-          )}
+          {r.form}
         </div>
       )}
     </li>
+  )
+}
+
+// Anything else as a card, when it's pinned: the same look, and the same buttons in the same
+// places, as what waits on you.
+function ItemCard({ it, phone, onRead, h, pin }) {
+  const r = useReady(it, { phone, h, onRead })
+  const { l } = r
+  const a = it.agent || {}
+  const when = it.kind === 'task' ? (it.task.done ? dayName(it.task.done) : null) : it.at ? ago(it.at) : null
+  return (
+    <article className={`ny-item hm-card k-${it.kind} ${r.off ? 'off' : ''}`} aria-label={`${l.kind}: ${l.title}`}>
+      <div className="ny-top">
+        {l.dot ? <StatusDot status={l.dot} size={8} /> : <Icon name={l.icon} size={12} />}
+        <span className="ny-kind">{l.kind}</span>
+        {when && <span className="ny-age">{when}</span>}
+        <span className="ny-grow" />
+        <DeviceChip it={it} />
+        {pin}
+      </div>
+      {it.kind === 'agent' ? (
+        <>
+          <p className="ny-text said">{gist(it.text, 220) || l.sub}</p>
+          <div className="ny-meta"><b className="ny-agent">{l.title}</b>{l.what && <span>{l.what}</span>}{a.kindLabel && <span className="muted">{a.kindLabel}</span>}</div>
+        </>
+      ) : (
+        <>
+          <p className="ny-text">{l.title}</p>
+          <div className="ny-meta"><span className="hm-clamp">{l.sub}</span></div>
+        </>
+      )}
+      <div className="ny-acts">
+        {r.replyBtn}{r.pr}{r.handOn}
+        <span className="ny-grow" />
+        {r.clearBtn}{r.openBtn}
+      </div>
+      {r.form}
+    </article>
   )
 }
 
@@ -277,8 +484,8 @@ function EventRow({ e, now, next, onOpenMeeting, onCalendar }) {
       {(e.join || next) && (
         <div className="hm-ev-acts">
           {e.join && <a className="btn small" href={e.join} target="_blank" rel="noreferrer"><Icon name="video" size={12} /> {t('Join')}</a>}
-          {next && (last ? <button type="button" className="btn small" onClick={() => onOpenMeeting({ machine: null, online: true, meeting: { id: last.id } })}>{t('Open brief')}</button>
-            : <button type="button" className="btn small" onClick={onCalendar}>{t('Calendar')}</button>)}
+          {next && (last ? <button type="button" className="btn small" onClick={() => onOpenMeeting({ machine: null, online: true, meeting: { id: last.id } })}><Icon name="doc" size={12} /> {t('Open brief')}</button>
+            : <button type="button" className="btn small" onClick={onCalendar}><Icon name="calendar" size={12} /> {t('Calendar')}</button>)}
         </div>
       )}
     </li>
@@ -286,9 +493,11 @@ function EventRow({ e, now, next, onOpenMeeting, onCalendar }) {
 }
 
 // One of the Chief of Staff's tasks, as a row that opens the Chief of Staff it's with. lead: what
-// goes where a meeting's time does (Due, Overdue, On it now).
-function TaskRow({ it, lead, multi, onOpenChief }) {
+// goes where a meeting's time does (Due, Overdue, On it now). Its pin: on the row while the pointer
+// is on it, and always on a phone (where there's no pointer).
+function TaskRow({ it, lead, multi, phone, onOpenChief, pin }) {
   const off = !it.online
+  const dev = multi && <span className="hm-item-when"><span className="hm-dev"><Icon name="laptop" size={10} />{it.device}{off ? ` · ${t('offline')}` : ''}</span></span>
   return (
     <li className={`hm-item hm-trow ${off ? 'off' : ''}`}>
       <button type="button" className="hm-item-main" onClick={() => onOpenChief(it)} disabled={off} title={off ? t('{name} is offline', { name: it.device }) : t('Open Chief of Staff')}>
@@ -296,9 +505,11 @@ function TaskRow({ it, lead, multi, onOpenChief }) {
         <span className="hm-item-body">
           <span className="hm-item-l1"><b>{it.task.title}</b></span>
           {lead?.sub && <span className="hm-item-sub">{lead.sub}</span>}
+          {phone && dev}
         </span>
-        {multi && <span className="hm-item-when"><span className="hm-dev"><Icon name="laptop" size={10} />{it.device}{off ? ` · ${t('offline')}` : ''}</span></span>}
+        {!phone && dev}
       </button>
+      {phone ? <span className="hm-trow-pin">{pin}</span> : <div className="hm-quick">{pin}</div>}
     </li>
   )
 }
@@ -309,6 +520,7 @@ export default function NeedsHome({ phone = false, calendar = false, onOpen, onO
   const { data, error, refresh } = useHome(true)
   const [kind, setKind] = useState('all')
   const [device, setDevice] = useState('all')
+  const [sort, setSort] = useSort()
   const [gone, setGone] = useState({})
   const [note, setNote] = useState(null)
   const [openId, setOpenId] = useState(null) // the ready row whose whole text is out
@@ -317,34 +529,44 @@ export default function NeedsHome({ phone = false, calendar = false, onOpen, onO
   const [todo, setTodo] = useState(false) // the Chief of Staff's tasks with no day, unfolded
   const [sure, setSure] = useState(false) // Clear all older, asked once more
   const [read, markRead] = useRead()
+  const pins = usePins(data, refresh, setNote)
   useEffect(() => { if (!note) return; const id = setTimeout(() => setNote(null), 6000); return () => clearTimeout(id) }, [note])
   const cal = useComing(calendar)
   const devices = data?.devices || []
   const multi = devices.length > 1
   const events = cal.events.map((e) => ({ id: `cal:${e.id}`, uid: `here|cal:${e.id}`, kind: 'meeting', group: 'coming', event: e, machine: null, online: true, device: devices[0]?.name, at: e.start }))
-  const all = [...(data?.items || []), ...events].filter((i) => i.group && !gone[i.uid])
+  // What needs you, is ready or is coming up, and what you pinned (a whiteboard you've opened since too).
+  const all = [...(data?.items || []), ...events].filter((i) => (i.group || pins.has(i.uid)) && !gone[i.uid])
   const onDev = (i) => device === 'all' || (i.machine || 'here') === device
   const shown = all.filter((i) => onDev(i) && (kind === 'all' || kindOf(i) === kind))
   const count = (k) => all.filter((i) => onDev(i) && (k === 'all' || kindOf(i) === k)).length
-  const needs = shown.filter((i) => i.group === 'needs').sort((x, y) => (x.kind === 'task') - (y.kind === 'task') || (RANK[x.type] ?? 9) - (RANK[y.type] ?? 9) || time(x) - time(y))
-  // Ready to look at: newest first; the last day's few, then Show all; anything older folded away.
-  const ready = shown.filter((i) => i.group === 'ready').sort((x, y) => time(y) - time(x))
+  // Pinned: at the top, as cards, and nowhere else. A meeting on the calendar keeps its time.
+  const isPinned = (i) => !i.event && pins.has(i.uid)
+  const pinned = sortBy(shown.filter(isPinned), sort)
+  const rest = shown.filter((i) => !isPinned(i))
+  const needs = sortBy(rest.filter((i) => i.group === 'needs'), sort)
+  // Ready to look at: newest first (or as picked); the last day's few, then Show all; anything older folded away.
+  const ready = sortBy(rest.filter((i) => i.group === 'ready'), sort)
   const recent = ready.filter((i) => Date.now() - time(i) < DAY)
   const old = ready.filter((i) => Date.now() - time(i) >= DAY)
   const clearable = (i) => i.kind === 'agent' && i.type === 'review' && i.online && !i.old
   const readOnes = ready.filter((i) => read.has(i.uid) && clearable(i))
   // Coming up, a day at a time: the meetings at their times, then the tasks that name that day (one
-  // overdue is today's). The Chief of Staff's other tasks: the ones it's on, and the rest folded.
-  const tasks = shown.filter((i) => i.kind === 'task' && i.group === 'coming')
+  // overdue is today's). The Chief of Staff's other tasks: the ones it's on, and the rest folded, in
+  // its list's order or as picked (each row says its computer, so by computer is in their order).
+  const tasks = rest.filter((i) => i.kind === 'task' && i.group === 'coming')
   const today = dayKey(Date.now())
   const days = new Map()
   const put = (k, row) => { if (!days.has(k)) days.set(k, []); days.get(k).push(row) }
-  for (const i of shown.filter((x) => x.kind === 'meeting' && x.group === 'coming')) put(dayKey(i.event.start), i)
+  for (const i of rest.filter((x) => x.kind === 'meeting' && x.group === 'coming')) put(dayKey(i.event.start), i)
   for (const i of tasks.filter((x) => x.task.due).sort((x, y) => x.task.due.localeCompare(y.task.due))) put(i.task.due < today ? today : i.task.due, i)
   const coming = [...days.keys()].sort().map((k) => ({ key: k, label: dayName(k), rows: days.get(k) }))
-  const doing = tasks.filter((i) => !i.task.due && i.task.status === 'doing')
-  const todos = tasks.filter((i) => !i.task.due && i.task.status !== 'doing')
-  const waiting = needs.filter((i) => i.online).length
+  const devAt = (i) => devices.findIndex((d) => (d.id || 'here') === (i.machine || 'here'))
+  const inOrder = (list) => (sort === 'newest' || sort === 'oldest' ? sortBy(list, sort) : sort === 'device' ? [...list].sort((x, y) => devAt(x) - devAt(y)) : list)
+  const doing = inOrder(tasks.filter((i) => !i.task.due && i.task.status === 'doing'))
+  const todos = inOrder(tasks.filter((i) => !i.task.due && i.task.status !== 'doing'))
+  // Everything that needs you, on a computer that's on or not (the heading counts it all).
+  const needing = shown.filter((i) => i.group === 'needs')
   const onGone = (it, said) => {
     setGone((g) => ({ ...g, [it.uid]: Date.now() }))
     if (said) setNote({ text: `${said} · ${it.agent?.title || it.task?.title || ''}` })
@@ -367,130 +589,184 @@ export default function NeedsHome({ phone = false, calendar = false, onOpen, onO
   const where = !multi ? t('On this computer') : offline ? t('On {n} computers · {m} offline', { n: devices.length, m: offline }) : t('On {n} computers', { n: devices.length })
   const date = new Date().toLocaleDateString(locale(), { weekday: 'long', month: 'long', day: 'numeric' })
   const h = { onOpen, onOpenMeeting, onOpenBoard, onOpenChief, onGone, setNote, refresh }
-  const row = (it) => <ReadyItem key={it.uid} it={it} multi={multi} phone={phone} read={read.has(it.uid)} open={openId === it.uid} onToggle={() => setOpenId(openId === it.uid ? null : it.uid)} onRead={() => markRead(it.uid)} h={h} />
-  // The inbox's own card, with its own id (Clear and the answers take it).
-  const agentItem = (it) => <NeedsItem key={it.uid} it={{ ...it, id: it.nid || it.id }} onOpen={onOpen} onGone={(x, said) => onGone(it, said)} setNote={setNote} />
+  const pinOf = (it) => <PinBtn on={pins.has(it.uid)} onClick={() => pins.toggle(it)} />
+  const row = (it) => <ReadyItem key={it.uid} it={it} multi={multi} phone={phone} read={read.has(it.uid)} open={openId === it.uid} onToggle={() => setOpenId(openId === it.uid ? null : it.uid)} onRead={() => markRead(it.uid)} h={h} pin={pinOf(it)} />
+  const rows = (list) => <ul className="hm-list hm-ready">{list.map(row)}</ul>
+  // A card for each: the inbox's own for an agent waiting (with its own id: Clear and the answers
+  // take it), a task's, or the one for anything else that's pinned.
+  const card = (it) => (it.group === 'needs' && it.kind === 'task' ? <TaskWaiting key={it.uid} it={it} onOpenChief={onOpenChief} onGone={onGone} setNote={setNote} pin={pinOf(it)} />
+    : it.group === 'needs' ? <NeedsItem key={it.uid} it={{ ...it, id: it.nid || it.id }} onOpen={onOpen} onGone={(x, said) => onGone(it, said)} setNote={setNote} pin={pinOf(it)} />
+      : <ItemCard key={it.uid} it={it} phone={phone} onRead={() => markRead(it.uid)} h={h} pin={pinOf(it)} />)
+  const cards = (list) => <div className="hm-grid">{list.map(card)}</div>
   const lead = (i) => {
     const late = i.task.due < today
     const on = i.task.status === 'doing'
     const sub = late ? t('Chief of Staff · was due {date}', { date: new Date(`${i.task.due}T12:00:00`).toLocaleDateString(locale(), { month: 'short', day: 'numeric' }) }) : on ? t('Chief of Staff · on it now') : t('Chief of Staff · to do')
     return { text: late ? t('Overdue') : t('Due'), cls: late ? 'late' : 'due', sub }
   }
+  const taskRow = (i, lead) => <TaskRow key={i.uid} it={i} lead={lead} multi={multi} phone={phone} onOpenChief={onOpenChief} pin={pinOf(i)} />
   const showAll = kind === 'all'
   const shownRecent = more ? recent : recent.slice(0, CAP)
+  const pinnedOf = (g) => pinned.some((i) => i.group === g)
   return (
-    <div className={`hm ${phone ? 'phone' : ''}`}>
-      <header className="hm-head">
-        <div className="hm-title">
-          <h2>{waiting === 0 ? t('Nothing needs you') : waiting === 1 ? t('1 thing needs you') : t('{n} things need you', { n: waiting })}</h2>
-          <p className="muted">{date} · {where}</p>
-        </div>
-        <div className="hm-tools">
-          {multi && (
-            <select className="hm-device" value={device} onChange={(e) => setDevice(e.target.value)} aria-label={t('Device')}>
-              <option value="all">{t('All devices')}</option>
-              {devices.map((d) => <option key={d.id || 'here'} value={d.id || 'here'}>{d.online ? d.name : t('{name} (offline)', { name: d.name })}</option>)}
-            </select>
-          )}
+    <div className={`hm by-${sort} ${phone ? 'phone' : ''}`}>
+      <div className="hm-in">
+        <header className="hm-head">
+          <div className="hm-title">
+            {/* Until the list has come (or when it can't), no count: "Nothing needs you" would be a guess. */}
+            {!data ? <h2>{t('Home')}</h2> : <NeedCount list={needing} devices={devices} />}
+            <p className="muted">{date}{data && <><span className="hm-sep"> · </span><span className="hm-where">{where}</span></>}</p>
+          </div>
           <button type="button" className="btn small hm-every" onClick={onEverything}>{t('See everything')} <Icon name="chevron" size={11} /></button>
-        </div>
-      </header>
-      {/* A filter by kind, once there's something to filter. */}
-      {(count('all') > 0 || kind !== 'all') && (
-        <div className="chips hm-kinds" role="tablist" aria-label={t('Kind')}>
-          {KINDS.map(([id, label]) => {
-            const n = count(id)
-            if (id !== 'all' && !n && kind !== id) return null
-            return <button key={id} type="button" role="tab" aria-selected={kind === id} className={`fchip ${kind === id ? 'on' : ''}`} onClick={() => setKind(kind === id ? 'all' : id)}>{t(label)}<span className="fcount">{n}</span></button>
-          })}
-        </div>
-      )}
-      {note && <p className="ny-note" role="status">{note.text}</p>}
-      {error && <p className="error-text hm-err" role="alert">{data ? t("Home couldn't update: {why}. This is what it had last.", { why: error }) : t("Home couldn't load: {why}", { why: error })} <button type="button" className="link-btn" onClick={refresh}>{t('Try again')}</button></p>}
-      {partial.length > 0 && <p className="muted small hm-partial">{partial.length === 1 ? t('From {name}, only what needs you: its meetings, tasks and whiteboards show once it has Bridge AI with Home.', { name: partial[0].name }) : t('From {names}, only what needs you: their meetings, tasks and whiteboards show once they have Bridge AI with Home.', { names: partial.map((d) => d.name).join(', ') })}</p>}
-      {!data && !error && <div className="skeleton-rows pad hm-loading" role="status" aria-label={t('Loading what needs you on each computer…')}><div /><div /><div /></div>}
-      {data && (
-        <>
-          {(showAll || needs.length > 0) && (
-            <section className="hm-sec" aria-label={t('Waiting on You')}>
-              <h3>{t('Waiting on You')}{needs.length > 0 && <span className="fcount">{needs.length}</span>}<span className="hm-hint">{t('your answer starts them again')}</span></h3>
-              {needs.length > 0
-                ? <div className="hm-needs">{needs.map((it) => (it.kind === 'task' ? <TaskWaiting key={it.uid} it={it} multi={multi} onOpenChief={onOpenChief} onGone={onGone} setNote={setNote} /> : agentItem(it)))}</div>
-                : <div className="hm-empty"><Icon name="check" size={16} /><span>{t('Nothing needs you right now.')}</span></div>}
-            </section>
-          )}
-          <div className="hm-cols">
-            {(showAll || ready.length > 0) && (
-              <section className="hm-sec" aria-label={t('Ready to Look At')}>
-                <h3>
-                  {t('Ready to Look At')}{ready.length > 0 && <span className="fcount">{ready.length}</span>}
-                  <span className="ny-grow" />
-                  {readOnes.length > 0 && <button type="button" className="ghost-btn hm-clear-read" onClick={() => clearAll(readOnes)} title={t('Take the finished work you\'ve opened off the list until each has something new')}>{t('Clear read · {n}', { n: readOnes.length })}</button>}
-                </h3>
-                {recent.length > 0 && <ul className="hm-list hm-ready">{shownRecent.map(row)}</ul>}
-                {recent.length > CAP && (
-                  <button type="button" className="hm-more-btn" aria-expanded={more} onClick={() => setMore(!more)}>{more ? t('Show fewer') : t('Show all {n}', { n: recent.length })}</button>
-                )}
-                {!recent.length && old.length > 0 && <p className="muted small hm-none">{t('Nothing new in the last day.')}</p>}
-                {old.length > 0 && (
-                  <div className="hm-fold-box">
-                    <div className="hm-fold-row">
-                      <button type="button" className="hm-fold" aria-expanded={older} onClick={() => { setOlder(!older); setSure(false) }}>
-                        <Icon name="chevron" size={12} />{t('Older than a day')}<span className="fcount">{old.length}</span>
-                      </button>
-                      {old.some(clearable) && (sure
-                        ? <span className="hm-sure">{t('Clear {n}? Each comes back when it has something new.', { n: old.filter(clearable).length })}<button type="button" className="btn small" onClick={() => clearAll(old.filter(clearable))}>{t('Clear')}</button><button type="button" className="ghost-btn" onClick={() => setSure(false)}>{t('Cancel')}</button></span>
-                        : <button type="button" className="ghost-btn hm-clear-old" onClick={() => setSure(true)}>{t('Clear all')}</button>)}
-                    </div>
-                    {older && <ul className="hm-list hm-ready">{old.map(row)}</ul>}
-                  </div>
-                )}
-                {!ready.length && (
-                  <div className="hm-none">
-                    <p>{t('Nothing new to look at.')}</p>
-                    <small className="muted">{t('Finished work, meeting notes and whiteboards an agent changed show here.')}</small>
-                  </div>
-                )}
-              </section>
+        </header>
+        {/* What to show (a kind, a computer) and in what order, once there's something to show. */}
+        {data && (all.length > 0 || multi) && (
+          <div className="hm-bar">
+            {(count('all') > 0 || kind !== 'all') && (
+              <div className="chips hm-kinds" role="tablist" aria-label={t('Kind')}>
+                {KINDS.map(([id, label]) => {
+                  const n = count(id)
+                  if (id !== 'all' && !n && kind !== id) return null
+                  return <button key={id} type="button" role="tab" aria-selected={kind === id} className={`fchip ${kind === id ? 'on' : ''}`} onClick={() => setKind(kind === id ? 'all' : id)}>{t(label)}<span className="fcount">{n}</span></button>
+                })}
+              </div>
             )}
-            <div className="hm-side">
-              {(showAll || kind === 'meeting' || coming.length > 0) && (
-                <section className="hm-sec" aria-label={t('Coming Up')}>
-                  <h3>{t('Coming Up')}</h3>
-                  {coming.map((d) => (
-                    <div key={d.key} className="hm-day">
-                      <h4>{d.label}</h4>
-                      <ul className="hm-list">
-                        {d.rows.map((i) => (i.event
-                          ? <EventRow key={i.uid} e={i.event} now={cal.now} next={i === coming[0].rows.find((x) => x.event)} onOpenMeeting={onOpenMeeting} onCalendar={onCalendar} />
-                          : <TaskRow key={i.uid} it={i} lead={lead(i)} multi={multi} onOpenChief={onOpenChief} />))}
-                      </ul>
-                    </div>
-                  ))}
-                  {cal.loading && !coming.length && <p className="muted small hm-none">{t('Looking at your calendar…')}</p>}
-                  {cal.error && <p className="muted small hm-none">{t('Your calendar: {why}', { why: cal.error })} <button type="button" className="link-btn" onClick={onCalendar}>{t('Set up')}</button></p>}
-                  {!coming.length && !cal.error && !cal.loading && <p className="muted small hm-none">{calendar ? t('Nothing on your calendar for the rest of today or tomorrow, and no task with a day.') : t('No task with a day coming up.')}</p>}
-                </section>
+            <div className="hm-tools">
+              {all.length > 0 && (
+                <label className="hm-pick" title={t('Sort')}>
+                  <Icon name="sort" size={13} />
+                  <select className="hm-sort" value={sort} onChange={(e) => setSort(e.target.value)} aria-label={t('Sort')}>
+                    {SORTS.map(([id, label]) => <option key={id} value={id}>{t(label)}</option>)}
+                  </select>
+                  <Icon name="down" size={12} />
+                </label>
               )}
-              {(showAll || kind === 'chief') && (
-                <section className="hm-sec" aria-label={t("Chief of Staff's Tasks")}>
-                  <h3>{t("Chief of Staff's Tasks")}{doing.length + todos.length > 0 && <span className="fcount">{doing.length + todos.length}</span>}</h3>
-                  {doing.length > 0 && <ul className="hm-list">{doing.map((i) => <TaskRow key={i.uid} it={i} lead={{ text: t('On it'), cls: 'doing' }} multi={multi} onOpenChief={onOpenChief} />)}</ul>}
-                  {todos.length > 0 && (
-                    <div className="hm-fold-box">
-                      <button type="button" className="hm-fold" aria-expanded={todo} onClick={() => setTodo(!todo)}>
-                        <Icon name="chevron" size={12} />{todos.length === 1 ? t('1 to do, with no day set') : t('{n} to do, with no day set', { n: todos.length })}
-                      </button>
-                      {todo && <ul className="hm-list">{todos.map((i) => <TaskRow key={i.uid} it={i} multi={multi} onOpenChief={onOpenChief} />)}</ul>}
-                    </div>
-                  )}
-                  {!doing.length && !todos.length && <p className="muted small hm-none">{tasks.length ? t('Each of its tasks has a day: they\'re under Coming Up.') : t('Nothing on Chief of Staff\'s list.')}</p>}
-                </section>
+              {multi && (
+                <label className="hm-pick" title={t('Device')}>
+                  <Icon name="laptop" size={13} />
+                  <select className="hm-device" value={device} onChange={(e) => setDevice(e.target.value)} aria-label={t('Device')}>
+                    <option value="all">{t('All devices')}</option>
+                    {devices.map((d) => <option key={d.id || 'here'} value={d.id || 'here'}>{d.online ? d.name : t('{name} (offline)', { name: d.name })}</option>)}
+                  </select>
+                  <Icon name="down" size={12} />
+                </label>
               )}
             </div>
           </div>
-        </>
-      )}
+        )}
+        {(error || partial.length > 0) && (
+          <div className="hm-notices">
+            {error && (
+              <Notice tone="error" icon="alert" role="alert" className="hm-err">
+                {data ? t("Home couldn't update: {why}. This is what it had last.", { why: error }) : t("Home couldn't load: {why}", { why: error })}
+                <button type="button" className="link-btn" onClick={refresh}>{t('Try again')}</button>
+              </Notice>
+            )}
+            {partial.length > 0 && (
+              <Notice className="hm-partial">
+                {partial.map((d) => <span key={d.id} className="ny-device"><Icon name="laptop" size={11} />{d.name}</span>)}
+                {partial.length === 1 ? t('Only what needs you, for now: its meetings, tasks and whiteboards show here once it has Bridge AI with Home.') : t('Only what needs you, for now: their meetings, tasks and whiteboards show here once they have Bridge AI with Home.')}
+              </Notice>
+            )}
+          </div>
+        )}
+        {!data && !error && (
+          <div className="hm-loading" role="status" aria-label={t('Loading what needs you on each computer…')}>
+            <div className="hm-skel hm-skel-h" />
+            <div className="hm-grid"><div className="hm-skel hm-skel-card" /><div className="hm-skel hm-skel-card" /></div>
+            <div className="hm-skel hm-skel-list" />
+          </div>
+        )}
+        {data && (
+          <>
+            {pinned.length > 0 && (
+              <section className="hm-sec hm-pinned" aria-label={t('Pinned')}>
+                <h3><Icon name="pin" size={13} />{t('Pinned')}<span className="fcount">{pinned.length}</span><span className="hm-hint">{t('at the top until you unpin it')}</span></h3>
+                {grouped(pinned, sort, devices, cards)}
+              </section>
+            )}
+            {(showAll || needs.length > 0) && (
+              <section className="hm-sec hm-waiting" aria-label={t('Waiting on You')}>
+                <h3>{t('Waiting on You')}{needs.length > 0 && <span className="fcount">{needs.length}</span>}<span className="hm-hint">{t('your answer starts them again')}</span></h3>
+                {needs.length > 0 ? grouped(needs, sort, devices, cards)
+                  : pinnedOf('needs') ? <p className="muted small hm-none">{t('Pinned, at the top.')}</p>
+                    : <div className="hm-empty"><Icon name="check" size={16} /><span>{t('Nothing needs you right now.')}</span></div>}
+              </section>
+            )}
+            <div className="hm-cols">
+              {(showAll || ready.length > 0) && (
+                <section className="hm-sec" aria-label={t('Ready to Look At')}>
+                  <h3>
+                    {t('Ready to Look At')}{ready.length > 0 && <span className="fcount">{ready.length}</span>}
+                    <span className="ny-grow" />
+                    {readOnes.length > 0 && <button type="button" className="ghost-btn hm-clear-read" onClick={() => clearAll(readOnes)} title={t('Take the finished work you\'ve opened off the list until each has something new')}><Icon name="check" size={12} /> {t('Clear read · {n}', { n: readOnes.length })}</button>}
+                  </h3>
+                  {recent.length > 0 && grouped(shownRecent, sort, devices, rows)}
+                  {recent.length > CAP && (
+                    <button type="button" className="hm-more-btn" aria-expanded={more} onClick={() => setMore(!more)}><Icon name={more ? 'up' : 'down'} size={12} />{more ? t('Show fewer') : t('Show all {n}', { n: recent.length })}</button>
+                  )}
+                  {!recent.length && old.length > 0 && <p className="muted small hm-none">{t('Nothing new in the last day.')}</p>}
+                  {old.length > 0 && (
+                    <div className="hm-fold-box">
+                      <div className="hm-fold-row">
+                        <button type="button" className="hm-fold" aria-expanded={older} onClick={() => { setOlder(!older); setSure(false) }}>
+                          <Icon name="chevron" size={12} />{t('Older than a day')}<span className="fcount">{old.length}</span>
+                        </button>
+                        {old.some(clearable) && (sure
+                          ? <span className="hm-sure">{t('Clear {n}? Each comes back when it has something new.', { n: old.filter(clearable).length })}<button type="button" className="btn small" onClick={() => clearAll(old.filter(clearable))}><Icon name="check" size={12} /> {t('Clear')}</button><button type="button" className="ghost-btn" onClick={() => setSure(false)}>{t('Cancel')}</button></span>
+                          : <button type="button" className="ghost-btn hm-clear-old" onClick={() => setSure(true)}><Icon name="check" size={12} /> {t('Clear all')}</button>)}
+                      </div>
+                      {older && grouped(old, sort, devices, rows)}
+                    </div>
+                  )}
+                  {!ready.length && (pinnedOf('ready') ? <p className="muted small hm-none">{t('Pinned, at the top.')}</p> : (
+                    <div className="hm-none">
+                      <p>{t('Nothing new to look at.')}</p>
+                      <small className="muted">{t('Finished work, meeting notes and whiteboards an agent changed show here.')}</small>
+                    </div>
+                  ))}
+                </section>
+              )}
+              <div className="hm-side">
+                {(showAll || kind === 'meeting' || coming.length > 0) && (
+                  <section className="hm-sec" aria-label={t('Coming Up')}>
+                    <h3>{t('Coming Up')}</h3>
+                    {coming.map((d) => (
+                      <div key={d.key} className="hm-day">
+                        <h4>{d.label}</h4>
+                        <ul className="hm-list">
+                          {d.rows.map((i) => (i.event
+                            ? <EventRow key={i.uid} e={i.event} now={cal.now} next={i === coming[0].rows.find((x) => x.event)} onOpenMeeting={onOpenMeeting} onCalendar={onCalendar} />
+                            : taskRow(i, lead(i))))}
+                        </ul>
+                      </div>
+                    ))}
+                    {cal.loading && !coming.length && <p className="muted small hm-none">{t('Looking at your calendar…')}</p>}
+                    {cal.error && <p className="muted small hm-none">{t('Your calendar: {why}', { why: cal.error })} <button type="button" className="link-btn" onClick={onCalendar}>{t('Set up')}</button></p>}
+                    {!coming.length && !cal.error && !cal.loading && <p className="muted small hm-none">{calendar ? t('Nothing on your calendar for the rest of today or tomorrow, and no task with a day.') : t('No task with a day coming up.')}</p>}
+                  </section>
+                )}
+                {(showAll || kind === 'chief') && (
+                  <section className="hm-sec" aria-label={t("Chief of Staff's Tasks")}>
+                    <h3>{t("Chief of Staff's Tasks")}{doing.length + todos.length > 0 && <span className="fcount">{doing.length + todos.length}</span>}</h3>
+                    {doing.length > 0 && <ul className="hm-list">{doing.map((i) => taskRow(i, { text: t('On it'), cls: 'doing' }))}</ul>}
+                    {todos.length > 0 && (
+                      <div className="hm-fold-box">
+                        <button type="button" className="hm-fold" aria-expanded={todo} onClick={() => setTodo(!todo)}>
+                          <Icon name="chevron" size={12} />{todos.length === 1 ? t('1 to do, with no day set') : t('{n} to do, with no day set', { n: todos.length })}
+                        </button>
+                        {todo && <ul className="hm-list">{todos.map((i) => taskRow(i, null))}</ul>}
+                      </div>
+                    )}
+                    {!doing.length && !todos.length && <p className="muted small hm-none">{tasks.length ? t('Each of its tasks has a day: they\'re under Coming Up.') : pinned.some((i) => i.kind === 'task') ? t('Pinned, at the top.') : t('Nothing on Chief of Staff\'s list.')}</p>}
+                  </section>
+                )}
+              </div>
+            </div>
+          </>
+        )}
+        {note && <p className="hm-toast" role="status">{note.text}</p>}
+      </div>
     </div>
   )
 }
@@ -555,51 +831,60 @@ export function Everything({ phone = false, onOpenAgent, onOpenMeeting, onOpenBo
   const error = home.error && map.error ? home.error : null
   return (
     <div className={`ey ${phone ? 'phone' : ''}`}>
-      <header className="ey-head">
-        {onBack && <button type="button" className="ghost-btn m-view-back" onClick={onBack}><Icon name="back" size={14} /> {t('Home')}</button>}
-        <div className="hm-title">
-          <h2>{t('Everything')}</h2>
-          <p className="muted">{t('{n} things on {m} computers · {k} need you', { n: things.length, m: devices.length || 1, k: needN })}</p>
+      <div className="hm-in">
+        <header className="ey-head">
+          {onBack && <button type="button" className="ghost-btn m-view-back" onClick={onBack}><Icon name="back" size={14} /> {t('Home')}</button>}
+          <div className="hm-title">
+            <h2>{t('Everything')}</h2>
+            <p className="muted">{t('{n} things on {m} computers · {k} need you', { n: things.length, m: devices.length || 1, k: needN })}</p>
+          </div>
+          <div className="ey-seg" role="tablist" aria-label={t('Lanes')}>
+            <button type="button" role="tab" aria-selected={by === 'device'} className={by === 'device' ? 'on' : ''} onClick={() => pick('device')}>{t('By device')}</button>
+            <button type="button" role="tab" aria-selected={by === 'kind'} className={by === 'kind' ? 'on' : ''} onClick={() => pick('kind')}>{t('By kind')}</button>
+          </div>
+        </header>
+        <div className="ey-filters">
+          <div className="chips" role="tablist" aria-label={t('Kind')}>
+            <button type="button" role="tab" aria-selected={kind === 'all'} className={`fchip ${kind === 'all' ? 'on' : ''}`} onClick={() => setKind('all')}>{t('All')}<span className="fcount">{things.length}</span></button>
+            {LANES.map(([k, label]) => (counts[k] || kind === k) && <button key={k} type="button" role="tab" aria-selected={kind === k} className={`fchip ${kind === k ? 'on' : ''}`} onClick={() => setKind(kind === k ? 'all' : k)}>{t(label)}<span className="fcount">{counts[k]}</span></button>)}
+          </div>
+          <label className="st-check ey-mine"><input type="checkbox" checked={mine} onChange={(e) => setMine(e.target.checked)} /> {t('Only what needs me')}</label>
         </div>
-        <div className="ey-seg" role="tablist" aria-label={t('Lanes')}>
-          <button type="button" role="tab" aria-selected={by === 'device'} className={by === 'device' ? 'on' : ''} onClick={() => pick('device')}>{t('By device')}</button>
-          <button type="button" role="tab" aria-selected={by === 'kind'} className={by === 'kind' ? 'on' : ''} onClick={() => pick('kind')}>{t('By kind')}</button>
-        </div>
-      </header>
-      <div className="ey-filters">
-        <div className="chips" role="tablist" aria-label={t('Kind')}>
-          <button type="button" role="tab" aria-selected={kind === 'all'} className={`fchip ${kind === 'all' ? 'on' : ''}`} onClick={() => setKind('all')}>{t('All')}<span className="fcount">{things.length}</span></button>
-          {LANES.map(([k, label]) => (counts[k] || kind === k) && <button key={k} type="button" role="tab" aria-selected={kind === k} className={`fchip ${kind === k ? 'on' : ''}`} onClick={() => setKind(kind === k ? 'all' : k)}>{t(label)}<span className="fcount">{counts[k]}</span></button>)}
-        </div>
-        <label className="st-check ey-mine"><input type="checkbox" checked={mine} onChange={(e) => setMine(e.target.checked)} /> {t('Only what needs me')}</label>
+        {error && (
+          <div className="hm-notices">
+            <Notice tone="error" icon="alert" role="alert" className="hm-err">
+              {t("Everything couldn't load: {why}", { why: error })}
+              <button type="button" className="link-btn" onClick={() => { home.refresh(); map.refresh() }}>{t('Try again')}</button>
+            </Notice>
+          </div>
+        )}
+        {!home.data && !map.data && !error && <div className="skeleton-rows pad" role="status" aria-label={t('Loading everything on each computer…')}><div /><div /><div /></div>}
+        {(home.data || map.data) && (
+          <div className="ey-lanes">
+            {lanes.map((l) => (
+              <section key={l.key} className={`ey-lane ${l.d && !l.d.online ? 'off' : ''}`} aria-label={l.d ? l.d.name : l.label}>
+                <header className="ey-lane-head">
+                  {l.d ? <span className={`mc-dot ${l.d.online ? 'on' : ''}`} /> : null}
+                  <div className="am-lane-name">
+                    <b>{l.d ? l.d.name : l.label}</b>
+                    {l.d && <small className="muted">{l.d.here ? t('this computer') : l.d.online ? t('Online') : (l.d.at || l.d.lastSeen) ? t('Offline · as of {when}', { when: ago(l.d.at || l.d.lastSeen) }) : t('Offline')}</small>}
+                  </div>
+                  <span className="am-lane-count">{l.list.length}</span>
+                </header>
+                {l.d && !l.d.online && l.list.length > 0 && <p className="am-said">{t('What it last said. Answers go through once it\'s back.')}</p>}
+                {l.d?.partial && l.d.online && <p className="am-said">{t('Only what needs you: its meetings, tasks and whiteboards show once it has Bridge AI with Home.')}</p>}
+                {by === 'device'
+                  ? LANES.map(([k, label]) => {
+                    const xs = l.list.filter((x) => x.lane === k)
+                    return xs.length > 0 && <div key={k} className="ey-group"><h4>{t(label)}<span className="fcount">{xs.length}</span></h4>{xs.map((x) => item(x, false))}</div>
+                  })
+                  : l.list.map((x) => item(x, true))}
+                {!l.list.length && <p className="muted am-none">{t('Nothing here right now.')}</p>}
+              </section>
+            ))}
+          </div>
+        )}
       </div>
-      {error && <p className="error-text hm-err" role="alert">{t("Everything couldn't load: {why}", { why: error })} <button type="button" className="link-btn" onClick={() => { home.refresh(); map.refresh() }}>{t('Try again')}</button></p>}
-      {!home.data && !map.data && !error && <div className="skeleton-rows pad"><div /><div /><div /></div>}
-      {(home.data || map.data) && (
-        <div className="ey-lanes">
-          {lanes.map((l) => (
-            <section key={l.key} className={`ey-lane ${l.d && !l.d.online ? 'off' : ''}`} aria-label={l.d ? l.d.name : l.label}>
-              <header className="ey-lane-head">
-                {l.d ? <span className={`mc-dot ${l.d.online ? 'on' : ''}`} /> : null}
-                <div className="am-lane-name">
-                  <b>{l.d ? l.d.name : l.label}</b>
-                  {l.d && <small className="muted">{l.d.here ? t('this computer') : l.d.online ? t('Online') : (l.d.at || l.d.lastSeen) ? t('Offline · as of {when}', { when: ago(l.d.at || l.d.lastSeen) }) : t('Offline')}</small>}
-                </div>
-                <span className="am-lane-count">{l.list.length}</span>
-              </header>
-              {l.d && !l.d.online && l.list.length > 0 && <p className="am-said">{t('What it last said. Answers go through once it\'s back.')}</p>}
-              {l.d?.partial && l.d.online && <p className="am-said">{t('Only what needs you: its meetings, tasks and whiteboards show once it has Bridge AI with Home.')}</p>}
-              {by === 'device'
-                ? LANES.map(([k, label]) => {
-                  const xs = l.list.filter((x) => x.lane === k)
-                  return xs.length > 0 && <div key={k} className="ey-group"><h4>{t(label)}<span className="fcount">{xs.length}</span></h4>{xs.map((x) => item(x, false))}</div>
-                })
-                : l.list.map((x) => item(x, true))}
-              {!l.list.length && <p className="muted am-none">{t('Nothing here right now.')}</p>}
-            </section>
-          ))}
-        </div>
-      )}
     </div>
   )
 }

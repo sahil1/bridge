@@ -55,6 +55,8 @@ const PATHS = {
   x: <><path d="M18 6 6 18"/><path d="m6 6 12 12"/></>,
   keyboard: <><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 13h.01M18 13h.01M8 16h8"/></>,
   external: <><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></>,
+  open: <path d="M7 17 17 7M8 7h9v9"/>,
+  sort: <><path d="m3 16 4 4 4-4M7 20V4"/><path d="m21 8-4-4-4 4M17 4v16"/></>,
   grid: <><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></>,
   shapes: <><path d="M8.3 10a.7.7 0 0 1-.6-1.1L11.4 3a.7.7 0 0 1 1.2 0l3.7 5.9a.7.7 0 0 1-.6 1.1z"/><rect x="3" y="14" width="7" height="7" rx="1"/><circle cx="17.5" cy="17.5" r="3.5"/></>,
   'panel-left': <><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></>,

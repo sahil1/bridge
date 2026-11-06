@@ -2028,8 +2028,11 @@ app.get('/api/home', trialOff('home', 'Home'), wrap(async (req) => {
   return {
     items: home.tidy([...mine, ...there]),
     devices: [{ id: null, name, os: machines.OS, online: true, here: true }, ...linked.map((m) => ({ id: m.id, name: m.name, os: m.os, online: !!m.online, lastSeen: m.lastSeen, at: m.at, partial: !Array.isArray(m.home) }))],
+    pins: homeList.pins(),
   }
 }))
+// Pin one to the top of Home, or unpin it: kept here, for every page and phone this computer serves.
+app.post('/api/home-pins', trialOff('home', 'Home'), wrap((req) => homeList.pin(req.body?.id, req.body?.on !== false)))
 app.post('/api/relay/deploy', wrap((req) => { onComputer(req); return relay.deploy({ method: req.body?.method, token: req.body?.token, account: req.body?.account }) }))
 app.post('/api/relay/update', wrap((req) => { onComputer(req); return relay.update() }))
 app.post('/api/relay/pair', wrap((req) => { onComputer(req); return req.body?.stop ? relay.stopPairing() : relay.pair() }))

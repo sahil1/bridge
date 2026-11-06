@@ -4,7 +4,7 @@
 // items not handed on, a whiteboard an agent drew since you looked, a task Chief of Staff finished),
 // what's coming up (its tasks), and the rest for Everything; a whiteboard you opened isn't news;
 // one row per thing (the same task twice, on one computer or two); the day a task names; an agent's
-// last message cut at a whole word.
+// last message cut at a whole word; what's pinned, newest first, kept when Bridge AI starts again.
 // Then two Bridge AIs on relays of their own, linked: "Studio" with Home on and "Desk" with it off.
 // Off, Home's route says how to turn it on and nothing leads to it. On, Studio's Home lists a stand-in
 // Claude Code asking for permission, the tasks that wait on you on both computers (Desk's asked for
@@ -19,7 +19,13 @@
 // name a day, a meeting on two calendars): headings that say what's under them, Coming Up a day at a
 // time, to-dos with no day folded, the last day's six newest with Show all and the older folded, a
 // summary that ends at a word, actions on a row while it's pointed at, Clear read and Clear all, the
-// phone with all of it out; then loading, nothing at all, and a look that fails.
+// phone with all of it out. A busy day on four computers (one older, one offline; many of each kind,
+// long titles), from 1920 px wide to a phone: the note about the older one is in the column with
+// everything else, as are the bar and the sections; cards side by side are the same height with their
+// buttons at the bottom, each with its icon; sorted what needs you first, oldest first, by computer
+// and by kind, the order kept; pinned to the top (a row, a to-do, a question, a whiteboard that isn't
+// news), kept on the computer and seen from a phone, a pin that can't be saved said, unpinned back
+// where it was. Then loading, nothing at all, and a look that fails.
 // On a phone at 375 and 430: Home is the first tab and where it opens, Today is in More, Home and
 // Everything fit the phone with every control a whole 40 px target.
 import fs from 'node:fs'
@@ -97,6 +103,24 @@ for (const [k, v] of Object.entries(was)) { if (v === undefined) delete process.
   const long = 'Done. I moved the release checklist into the roadmap and closed the three that shipped. Still pending on your list, from the meeting on Monday: the AWS paper and the intro to Gary, and the pricing page that legal still has, which I left open with a note for you to look at when you are back from the offsite, from'
   const cut = needsJs.itemOf({ paneId: 'p1', seq: 2, status: 'done', kind: 'claude', cwd: '/x/GIT', tab: 'GIT' }, { p: { text: long } }).text
   ok(cut.endsWith('…') && long.startsWith(cut.slice(0, -1)) && /[\s,;:.-]/.test(long[cut.length - 1]) && cut.length <= 300, 'a long last message ends at a whole word and "…"', cut)
+
+  // Pinned to the top: by its id on Home (its device's and its own), newest first, kept in
+  // home.json so it's still pinned after Bridge AI starts again; the newest 200 at most.
+  h.pin('here|task:4', true)
+  await sleep(5)
+  h.pin('desk|agent:p3@5', true)
+  ok(h.pins().map((x) => x.id).join() === 'desk|agent:p3@5,here|task:4', 'pinned: the newest first', h.pins())
+  h.pin('here|task:4', false)
+  ok(h.pins().map((x) => x.id).join() === 'desk|agent:p3@5', 'and unpinned, it goes', h.pins())
+  const noId = (() => { try { h.pin('', true); return null } catch (e) { return e } })()
+  ok(/which one/i.test(noId?.message || ''), 'a pin that names nothing is refused, with why', noId?.message)
+  await sleep(700)
+  const again = homeJs.make({ waiting: { items: async () => [] }, tasks: { list: () => ({ items: [] }) }, meetings: { list: () => [] }, unsent: () => [], boards: { list: async () => ({ boards: [] }) }, chief: async () => null })
+  ok(again.pins().map((x) => x.id).join() === 'desk|agent:p3@5', 'still pinned when Bridge AI starts again', again.pins())
+  for (let i = 0; i < 205; i++) again.pin(`here|board:b${i}`, true)
+  ok(again.pins().length === 200, 'the newest 200 pins are kept', again.pins().length)
+  for (const x of again.pins()) again.pin(x.id, false)
+  await sleep(700)
 }
 
 // ---------- two Bridge AIs, linked ----------
@@ -215,7 +239,7 @@ try {
     await taskCard.locator('button', { hasText: 'Reply' }).click()
     await taskCard.locator('input').fill('Priya')
     await taskCard.locator('button', { hasText: 'Send' }).click()
-    ok(!!(await until(async () => /chief of staff isn't running/i.test(await hm.locator('.ny-note').innerText().catch(() => '')), 6000)), "a reply with no Chief of Staff running says it isn't, in place", await hm.locator('.ny-note').innerText().catch(() => ''))
+    ok(!!(await until(async () => /chief of staff isn't running/i.test(await hm.locator('.hm-toast').innerText().catch(() => '')), 6000)), "a reply with no Chief of Staff running says it isn't", await hm.locator('.hm-toast').innerText().catch(() => ''))
     // Yes, right there: the agent gets it and goes on.
     await ask.locator('button', { hasText: 'Yes' }).click()
     ok(!!(await until(async () => !(await hm.locator('.ny-item.t-permission').count()) && /2 things need you/.test(await hm.innerText()), 15000)), 'Yes answers the agent in place, and it leaves the list', await hm.innerText().catch(() => ''))
@@ -265,7 +289,8 @@ try {
     let fail = true
     const { ctx, p } = await page(b, a.url, { width: 1280, before: async (c2) => { await noServiceWorker(c2); await c2.route(/\/api\/home(\?|$)/, (r) => (fail ? r.fulfill({ status: 500, json: { error: 'the disk is full' } }) : r.fallback())) } })
     const e = p.locator('.hm-err')
-    ok(!!(await until(async () => /Home couldn't load: the disk is full/.test(await e.innerText().catch(() => '')), 15000)), "Home that can't load says why", await p.locator('.hm').innerText().catch(() => ''))
+    ok(!!(await until(async () => /Home couldn't load: the disk is full/.test(await e.innerText().catch(() => '')), 15000)) && !/needs you/.test(await p.locator('.hm-title h2').innerText()), "Home that can't load says why (and not that nothing needs you)", await p.locator('.hm').innerText().catch(() => ''))
+    await shot(p, `${tag}home-cant-load`)
     fail = false
     await e.locator('button', { hasText: 'Try again' }).click()
     ok(!!(await until(async () => !(await p.locator('.hm-err').count()) && /need you|needs you/.test(await p.locator('.hm-title h2').innerText().catch(() => '')), 8000)), 'and Try again brings it')
@@ -335,6 +360,12 @@ try {
   const dueIn = (title) => real?.items.find((i) => i.task?.title === title)?.task.due
   ok(dueIn('Call the accountant tomorrow') === new Date(Date.now() + 864e5).toLocaleDateString('en-CA') && /-11-12$/.test(dueIn('Book flights to New York on 12 Nov') || '') && dueIn(gary) === null, 'with the day each names, or none', real?.items.filter((i) => i.kind === 'task').map((i) => [i.task.title, i.task.due]))
 
+  // The heading's count and its ring: everything that needs you, and the share you can answer now.
+  const ringOf = (p) => p.locator('.hm-count .hm-ring').evaluate((e) => ({ fill: Number(e.style.getPropertyValue('--p')), said: e.getAttribute('aria-label') }))
+  const tip = (p) => p.locator('#hm-count-tip')
+  // What the count's details say: how many on each computer (an offline one said), and by kind.
+  const tipRight = (x) => /You can answer 6 of 8 now; the rest wait for their computer to be back/.test(x) && /Studio\s*3/.test(x) && /Desk\s*2/.test(x) && /Travel Laptop\s*1/.test(x) && /Lab Mini\s*· offline\s*2/.test(x)
+    && /Permissions\s*1/.test(x) && /Questions\s*2/.test(x) && /Failed\s*2/.test(x) && /Chief of Staff tasks\s*3/.test(x)
   const loaded = async (hm) => until(async () => { const x = await hm.innerText().catch(() => ''); return /roadmap/.test(x) && /Board prep/.test(x) && /to do, with no day set/.test(x) && /Waiting on You\s*4/.test(x) }, 20000)
   const said0 = (sub) => said.find((x) => x.startsWith(sub.replace(/…$/, '')))
   // A summary ends at a word: all of a sentence, or whole words and "…".
@@ -344,6 +375,8 @@ try {
     const hm = p.locator('.hm')
     ok(!!(await loaded(hm)), 'a morning: Home opens with all of it', await hm.innerText().catch(() => ''))
     await p.waitForTimeout(800)
+    const whole = await ringOf(p)
+    ok(whole.fill === 100 && whole.said === '4 of 4 you can answer now' && /^4 things need you/.test(await hm.locator('.hm-title h2').innerText()), 'with every computer on, the ring is full', whole)
     await shot(p, `${tag}home-morning-1440`)
     const ready = hm.locator('.hm-sec[aria-label="Ready to Look At"]')
     const coming = hm.locator('.hm-sec[aria-label="Coming Up"]')
@@ -401,13 +434,13 @@ try {
     ok(/Clear read · 2/.test(await clearRead.innerText().catch(() => '')), "the two you've opened can be cleared at once", await ready.locator('h3').innerText())
     const before = await ready.locator('ul.hm-ready').first().locator('.hm-item').count()
     await clearRead.click()
-    ok(!!(await until(async () => await ready.locator('ul.hm-ready').first().locator('.hm-item').count() <= before - 2 && !(await ready.locator(`time[datetime="${extra[0].at}"], time[datetime="${extra[1].at}"]`).count()) && /Cleared 2/.test(await hm.locator('.ny-note').innerText().catch(() => '')), 15000)), 'Clear read takes them off, and says so', await hm.locator('.ny-note').innerText().catch(() => ''))
+    ok(!!(await until(async () => await ready.locator('ul.hm-ready').first().locator('.hm-item').count() <= before - 2 && !(await ready.locator(`time[datetime="${extra[0].at}"], time[datetime="${extra[1].at}"]`).count()) && /Cleared 2/.test(await hm.locator('.hm-toast').innerText().catch(() => '')), 15000)), 'Clear read takes them off, and says so', await hm.locator('.hm-toast').innerText().catch(() => ''))
     await fold2.click()
     ok(await ready.locator('ul.hm-ready').nth(1).locator('.hm-item').count() === 14, 'unfolded, the 14 older ones')
     await ready.locator('.hm-clear-old').click()
     ok(/Clear 14\? Each comes back when it has something new/.test(await ready.locator('.hm-sure').innerText().catch(() => '')), 'Clear all asks once more', await ready.innerText())
-    await ready.locator('.hm-sure button', { hasText: /^Clear$/ }).click()
-    ok(!!(await until(async () => !(await ready.locator('.hm-fold').count()) && /Cleared 14/.test(await hm.locator('.ny-note').innerText().catch(() => '')), 15000)), 'and they go, all 14', await ready.innerText())
+    await ready.locator('.hm-sure .btn', { hasText: 'Clear' }).click()
+    ok(!!(await until(async () => !(await ready.locator('.hm-fold').count()) && /Cleared 14/.test(await hm.locator('.hm-toast').innerText().catch(() => '')), 15000)), 'and they go, all 14', await ready.innerText())
     ok(errors.length === 0, 'a morning: no page errors', errors)
     await p.setViewportSize({ width: 1440, height: 2600 })
     await ctx.close()
@@ -448,6 +481,240 @@ try {
     await ctx.close()
   }
 
+  // ---------- a busy day on four computers ----------
+  // Studio and Desk, with "Travel Laptop" (an older Bridge AI: only what needs you) and "Lab Mini"
+  // (offline) stood in for, each with questions, permissions, failed runs, tasks waiting, finished
+  // work, meeting notes and whiteboards, many with long titles. Home's own answer is swapped for it;
+  // pins are the real ones (Studio keeps them).
+  const busyDevs = [
+    { id: null, name: 'Studio', here: true, online: true },
+    { id: deskId, name: 'Desk', online: true, partial: false },
+    { id: 'travel-laptop', name: 'Travel Laptop', online: true, partial: true },
+    { id: 'lab-mini', name: 'Lab Mini', online: false, partial: false, at: new Date(Date.now() - 90 * 6e4).toISOString() },
+  ]
+  const on = (id) => { const d = busyDevs.find((x) => x.id === id); return { machine: id, device: d.name, online: d.online } }
+  const minAgo = (m) => new Date(Date.now() - m * 6e4).toISOString()
+  const busy = []
+  const ask = (id, m, type, text, agent, more = {}) => busy.push({ id: `agent:${id}`, nid: id, kind: 'agent', group: 'needs', type, paneId: id.split('@')[0], seq: 1, since: minAgo(m), at: minAgo(m), text, agent: { kind: 'claude', kindLabel: 'Claude Code', ...agent }, ...on(more.machine ?? null), ...more })
+  ask('n1@1', 3, 'permission', 'Do you want to proceed?', { title: 'deploy', project: 'site' }, { about: 'npm run deploy -- --prod --all-regions --skip-cache-warmup', answers: [{ n: '1', title: 'Yes' }, { n: '2', title: 'No' }], qid: 'b1' })
+  ask('n2@1', 9, 'question', 'Which of the three onboarding layouts should I keep for the first-run screens, now that pairing a phone comes first and the permissions screen moved to the end of the flow?', { title: 'onboarding', project: 'app', branch: 'first-run-layouts' }, { machine: deskId, qid: 'b2' })
+  ask('n3@1', 14, 'question', 'Should the preview server use port 5173 or 8080? 5173 is taken by the docs site.', { title: 'preview', project: 'docs', kind: 'codex', kindLabel: 'Codex' }, { machine: 'travel-laptop' })
+  ask('n4@1', 40, 'failed', 'npm ERR! code ELIFECYCLE: the build failed in packages/web after the type check found 14 errors in the new settings pages', { title: 'build', project: 'web' }, { machine: 'lab-mini' })
+  ask('n5@1', 65, 'failed', 'The tests timed out after 10 minutes.', { title: 'tests', project: 'tests' })
+  const btask = (id, m, status, title, more = {}, machine = null) => busy.push({ id: `task:${id}`, kind: 'task', group: status === 'waiting' ? 'needs' : status === 'done' ? 'ready' : 'coming', at: minAgo(m), task: { id, title, status, added: new Date(Date.now() - m * 6e4).toLocaleDateString('en-CA'), due: null, ...more }, chief: null, ...on(machine) })
+  btask('w1', 20, 'waiting', 'Send the revised quote for the annual plan to the customer before their budget meeting closes', { needs: 'Which of the two price sheets goes with it: the one with the volume discount, or the one without?' })
+  btask('w2', 120, 'waiting', 'Book the venue for the offsite', { needs: 'Which week suits you?' }, deskId)
+  btask('w3', 300, 'waiting', 'Choose a logo for the beta landing page', { needs: 'The three options are in the shared folder. Which one?' }, 'lab-mini')
+  btask('c1', 30, 'doing', 'Draft the hiring plan for next quarter, with the two roles from the planning meeting and a budget for each')
+  btask('c2', 60, 'open', 'Look into compliance vendors and put the three cheapest side by side', {}, deskId)
+  btask('c3', 70, 'open', 'Send the board deck by Friday', { due: new Date(Date.now() + 864e5).toLocaleDateString('en-CA') })
+  btask('c4', 80, 'open', 'Read the term sheet and list the questions for the lawyer', {}, 'travel-laptop')
+  btask('c5', 90, 'open', 'Renew the domain and move the DNS to the new provider without losing the mail records', {}, deskId)
+  btask('d1', 400, 'done', 'Compare the CRM quotes from the three vendors', { outcome: 'The cheapest is the one we already use; the other two cost twice as much for what we need. Written up in work/crm.md.', done: new Date().toLocaleDateString('en-CA') })
+  const finished = [['GIT', 'GIT'], ['roadmap', 'roadmap'], ['relay', 'bridge'], ['a-very-long-agent-name-for-the-settings-rewrite', 'settings-and-preferences-overhaul'], ['site', 'site']]
+  const where = [null, deskId, 'travel-laptop', 'lab-mini']
+  ;[2, 12, 40, 95, 170, 240, 360, 540, 1300, 1700, 2300, 2900].forEach((m, i) => {
+    const [title, project] = finished[i % finished.length]
+    busy.push({ id: `agent:r${i}@1`, nid: `r${i}@1`, kind: 'agent', group: 'ready', type: 'review', paneId: `r${i}`, seq: 1, since: minAgo(m), at: minAgo(m), text: said[i % 4].slice(0, 220), pr: i % 3 === 1 ? `https://github.com/acme/${project}/pull/${100 + i}` : null, agent: { title, project, kind: 'claude', kindLabel: 'Claude Code' }, ...on(where[i % 4]) })
+  })
+  const bmeet = (id, m, title, unsent, machine = null) => busy.push({ id: `meeting:${id}`, kind: 'meeting', group: 'ready', meeting: { id, title, startedAt: minAgo(m + 30), status: 'done', summarizing: false, hasSummary: true }, unsent, at: minAgo(m), ...on(machine) })
+  bmeet('bm1', 25, 'Weekly product review: pricing, the onboarding rewrite and what ships in the next release', 3)
+  bmeet('bm2', 200, 'Design review: first-run screens', 0, deskId)
+  bmeet('bm3', 1500, 'Customer call about the annual renewal and the security questionnaire', 2, 'travel-laptop')
+  const bboard = (id, m, title, machine = null, group = 'ready') => busy.push({ id: `board:${id}`, kind: 'board', group, board: { id, title, mtime: Date.now() - m * 6e4, changed: group === 'ready' }, at: minAgo(m), ...on(machine) })
+  bboard('bb1', 50, 'Auth flow v2: sign-in, pairing a phone and what happens when the relay is down')
+  bboard('bb2', 600, 'Release plan', deskId)
+  // A whiteboard you've opened since: not news, so only on Home if you pin it.
+  bboard('bb3', 30, 'Org chart', null, null)
+  const busyCal = { today: [ev('e1', 'Weekly product review', inMin(firstIn), 30, { links: [{ url: 'https://example.com/agenda', name: 'Agenda' }] })], tomorrow: [], fetchedAt: new Date().toISOString() }
+  let failPin = false
+  const busyDay = async (c2) => {
+    await noServiceWorker(c2)
+    await c2.route(/\/api\/calendar(\?|$)/, (r) => r.fulfill({ json: busyCal }))
+    await changeAnswer(c2, /\/api\/config(\?|$)/, (real) => ({ ...real, calendar: true }))
+    await changeAnswer(c2, /\/api\/home(\?|$)/, (real) => ({ ...real, items: busy, devices: busyDevs }))
+    await c2.route(/\/api\/home-pins$/, (r) => (failPin ? r.fulfill({ status: 500, json: { error: 'the disk is full' } }) : r.fallback()))
+  }
+  const busyLoaded = (hm) => until(async () => { const x = await hm.innerText().catch(() => ''); return /Only what needs you, for now/.test(x) && /port 5173/.test(x) && /Weekly product review/.test(x) }, 20000)
+  // Every line about the page (a notice, the bar, the sections) starts and ends where the header does.
+  const aligned = (p) => p.evaluate(() => {
+    const box = (e) => e.getBoundingClientRect()
+    const head = box(document.querySelector('.hm-head'))
+    const off = []
+    for (const e of document.querySelectorAll('.hm-notice, .hm-bar, .hm-grid, .hm-cols, .hm-toast')) {
+      const r = box(e)
+      if (!r.width) continue
+      if (Math.abs(r.left - head.left) > 1 || r.right > head.right + 1) off.push(`${e.className}: ${Math.round(r.left)}..${Math.round(r.right)}, not ${Math.round(head.left)}..${Math.round(head.right)}`)
+    }
+    return off
+  })
+  // Cards side by side are the same height, with their buttons along the same line at the bottom.
+  const rowsEven = (p) => p.evaluate(() => {
+    const bad = []
+    for (const g of document.querySelectorAll('.hm-grid')) {
+      const rows = new Map()
+      for (const c of g.children) { const r = c.getBoundingClientRect(); const k = Math.round(r.top); rows.set(k, [...(rows.get(k) || []), c]) }
+      for (const cs of rows.values()) {
+        const hs = cs.map((c) => Math.round(c.getBoundingClientRect().height))
+        const feet = cs.map((c) => Math.round(c.getBoundingClientRect().bottom - c.querySelector('.ny-acts').getBoundingClientRect().bottom))
+        if (new Set(hs).size > 1 || new Set(feet).size > 1) bad.push(`${cs.map((c) => c.getAttribute('aria-label')).join(' | ')}: heights ${hs}, buttons ${feet} from the bottom`)
+      }
+    }
+    return bad
+  })
+  // Every button on a card or a row says what it is with an icon too (the agent's own answers aside).
+  const bare = (p) => p.evaluate(() => [...document.querySelectorAll('.hm .ny-acts .ghost-btn, .hm .hm-quick .ghost-btn, .hm .hm-item-acts .ghost-btn, .hm .hm-pin')].filter((x) => !x.querySelector('svg')).map((x) => x.innerText.trim()))
+  for (const [width, mode] of [[1920, 'light'], [1440, 'light'], [1440, 'dark'], [1100, 'light'], [800, 'dark']]) {
+    const { ctx, p, errors } = await page(b, a.url, { mode, theme: mode === 'dark' ? 'midnight' : 'sky', width, height: 1100, before: busyDay })
+    const hm = p.locator('.hm')
+    ok(!!(await busyLoaded(hm)), `a busy day, ${width} ${mode}: Home opens with all of it`, await hm.innerText().catch(() => ''))
+    await p.waitForTimeout(600)
+    const note = hm.locator('.hm-partial')
+    ok(/Travel Laptop/.test(await note.innerText().catch(() => '')) && await note.locator('.ny-device').count() === 1, `${width}: the computer that sends only what needs you is said once, as its chip`, await note.innerText().catch(() => ''))
+    const off = await aligned(p)
+    ok(!off.length, `${width}: every notice, the bar and each section line up with the header, inside the column`, off)
+    const uneven = await rowsEven(p)
+    ok(!uneven.length, `${width}: cards side by side are the same height, their buttons on one line at the bottom`, uneven)
+    const noIcon = await bare(p)
+    ok(!noIcon.length, `${width}: every button on a card has its icon`, noIcon)
+    const head = await hm.locator('.hm-title h2').innerText()
+    const ring = await ringOf(p)
+    ok(/^8 things need you/.test(head) && /Waiting on You\s*8/.test(await hm.locator('.hm-sec[aria-label="Waiting on You"] h3').innerText()) && ring.fill === 75 && ring.said === '6 of 8 you can answer now', `${width}: the heading counts all 8, as Waiting on You does, its ring three quarters full (6 on computers that are on)`, [head, ring])
+    await shot(p, `${tag}home-busy-${width}-${mode}`)
+    if (width === 1440) {
+      // Pointed at: what's in the count, on each computer and by kind.
+      await hm.locator('.hm-count').hover()
+      ok(!!(await until(async () => tipRight(await tip(p).innerText().catch(() => '')), 4000)), `${mode}: pointed at, the count says what's in it: on each computer (an offline one said) and by kind`, await tip(p).innerText().catch(() => ''))
+      await shot(p, `${tag}home-busy-1440-${mode}-count`)
+      await p.mouse.move(5, 600)
+      ok(!!(await until(async () => !(await tip(p).count()), 3000)), `${mode}: and away again, it goes`)
+    }
+    if (width === 1440 && mode === 'light') {
+      // By the keyboard too: focused, it says the same; Escape puts it away.
+      await hm.locator('.hm-count').focus()
+      ok(!!(await until(async () => tipRight(await tip(p).innerText().catch(() => '')), 3000)) && (await hm.locator('.hm-count').getAttribute('aria-describedby')) === 'hm-count-tip', 'focused by the keyboard, the count shows the same, as its description', await tip(p).innerText().catch(() => ''))
+      await p.keyboard.press('Escape')
+      ok(!!(await until(async () => !(await tip(p).count()), 3000)), 'and Escape puts it away')
+      await hm.locator('.hm-count').blur()
+      // On a row while it's pointed at: Pin among its buttons.
+      const row = hm.locator('.hm-sec[aria-label="Ready to Look At"] .hm-item').filter({ hasText: 'Auth flow v2' })
+      await row.hover()
+      await p.waitForTimeout(250)
+      ok(await row.locator('.hm-quick .hm-pin').isVisible() && /Open/.test(await row.locator('.hm-quick').innerText()), 'a row pointed at has Pin beside Open', await row.locator('.hm-quick').innerText())
+      await shot(p, `${tag}home-busy-1440-hover`)
+    }
+    ok(errors.length === 0, `a busy day, ${width}: no page errors`, errors)
+    await ctx.close()
+  }
+  // Sort: what needs you first, newest, oldest, by computer or by kind, kept for next time.
+  {
+    const { ctx, p, errors } = await page(b, a.url, { mode: 'light', theme: 'sky', width: 1440, height: 1400, before: busyDay })
+    const hm = p.locator('.hm')
+    await busyLoaded(hm)
+    const waiting = hm.locator('.hm-sec[aria-label="Waiting on You"]')
+    const cards = () => waiting.locator('.ny-item').evaluateAll((xs) => xs.map((x) => x.getAttribute('aria-label')))
+    const first = await cards()
+    ok(/^Permission/.test(first[0]) && /^Question/.test(first[1]) && /^Failed/.test(first[3]) && /^Chief of Staff task/.test(first.at(-1)) && (await hm.locator('select.hm-sort').inputValue()) === 'needs', 'needs you first, to start with: permissions, questions, failed runs, then the tasks waiting on you', first)
+    await hm.locator('select.hm-sort').selectOption('oldest')
+    const oldest = await cards()
+    ok(/logo for the beta landing page/.test(oldest[0]) && /^Permission/.test(oldest.at(-1)), 'oldest first: what has waited longest leads', oldest)
+    const ages = await hm.locator('.hm-sec[aria-label="Ready to Look At"] ul.hm-ready').first().locator('time').evaluateAll((ts) => ts.map((x) => Date.parse(x.getAttribute('datetime'))))
+    ok(ages.length > 1 && ages.every((x, i) => i === 0 || ages[i - 1] <= x), 'and what is ready, oldest first too', ages)
+    await hm.locator('select.hm-sort').selectOption('device')
+    const heads = (await waiting.locator('.hm-ghead').allInnerTexts()).map((x) => x.split(/\s*·|\s*\d+$/)[0].trim())
+    ok(heads.join('|') === 'Studio|Desk|Travel Laptop|Lab Mini', 'by computer: a group for each, this one first', heads)
+    ok(/offline/.test(await waiting.locator('.hm-ghead', { hasText: 'Lab Mini' }).innerText()), 'an offline one says so', await waiting.locator('.hm-ghead').allInnerTexts())
+    await shot(p, `${tag}home-busy-by-computer`)
+    await hm.locator('select.hm-sort').selectOption('kind')
+    const kinds = (await waiting.locator('.hm-ghead').allInnerTexts()).map((x) => x.replace(/\s*\d+$/, '').trim())
+    ok(kinds.join('|') === 'Agents|Chief of Staff', 'by kind: a group for each kind', kinds)
+    await p.reload()
+    await busyLoaded(p.locator('.hm'))
+    ok((await p.locator('select.hm-sort').inputValue()) === 'kind', 'the order picked is kept for next time')
+    await p.locator('select.hm-sort').selectOption('needs')
+    // (A reload cuts off what the page was asking, which WebKit reports as an error.)
+    ok(errors.filter((e) => !/due to access control checks/.test(e)).length === 0, 'sorting: no page errors', errors)
+    await ctx.close()
+  }
+  // Pin: to the top, out of its own section, kept on the computer (it's there after a reload and
+  // on a phone); unpinned, back where it was. One that couldn't be saved says why.
+  {
+    const { ctx, p, errors } = await page(b, a.url, { mode: 'light', theme: 'sky', width: 1440, height: 1400, before: busyDay })
+    const hm = p.locator('.hm')
+    await busyLoaded(hm)
+    const ready = hm.locator('.hm-sec[aria-label="Ready to Look At"]')
+    const pinned = hm.locator('.hm-sec[aria-label="Pinned"]')
+    ok(!(await pinned.count()), 'nothing pinned: no Pinned section')
+    const row = ready.locator('.hm-item').filter({ hasText: 'Weekly product review' })
+    await row.hover()
+    await row.locator('.hm-quick .hm-pin').click()
+    ok(!!(await until(async () => /Weekly product review/.test(await pinned.innerText().catch(() => '')) && !(await row.count()), 8000)), 'pinned: at the top as a card, and out of Ready to Look At', await pinned.innerText().catch(() => ''))
+    const heads = (await hm.locator('.hm-sec h3').allInnerTexts()).map((x) => x.split('\n')[0].replace(/\d+$/, '').trim())
+    ok(heads[0] === 'Pinned', 'Pinned is the first section', heads)
+    const card = pinned.locator('.ny-item', { hasText: 'Weekly product review' })
+    ok(/Meeting notes/.test(await card.innerText()) && /3 action items not handed on yet/.test(await card.innerText()) && await card.locator('button', { hasText: 'To Chief of Staff' }).isVisible() && await card.locator('button', { hasText: 'Open' }).isVisible() && (await card.locator('.hm-pin').getAttribute('aria-pressed')) === 'true', 'its card: what it is, its buttons, and a pin that shows it is pinned', await card.innerText())
+    ok(!!(await until(async () => (await a.api('/home')).pins?.some((x) => x.id === 'here|meeting:bm1'), 5000)), 'kept on the computer', (await a.api('/home')).pins)
+    // A to-do folded away, pinned: out of the fold and at the top.
+    await hm.locator('.hm-sec[aria-label="Chief of Staff\'s Tasks"] .hm-fold').click()
+    const todoRow = hm.locator('.hm-trow', { hasText: 'Look into compliance vendors' })
+    await todoRow.hover()
+    await todoRow.locator('.hm-pin').click()
+    ok(!!(await until(async () => /Look into compliance vendors/.test(await pinned.innerText()), 6000)), 'a to-do with no day, pinned, is at the top', await pinned.innerText())
+    // A question waiting on you, pinned from its card.
+    await hm.locator('.hm-sec[aria-label="Waiting on You"] .ny-item', { hasText: 'port 5173' }).locator('.hm-pin').click()
+    await a.api('/home-pins', { id: 'here|board:bb3', on: true })
+    await p.reload()
+    await busyLoaded(p.locator('.hm'))
+    const after = await until(async () => { const x = await pinned.innerText().catch(() => ''); return /Org chart/.test(x) && x }, 8000)
+    ok(!!after && /Weekly product review/.test(after) && /Look into compliance vendors/.test(after) && /port 5173/.test(after), 'after a reload, still pinned: and a whiteboard you have opened since (not news) stays while pinned', after)
+    await shot(p, `${tag}home-busy-pinned`)
+    // A pin that can't be saved goes back, and says why.
+    failPin = true
+    await pinned.locator('.ny-item', { hasText: 'Org chart' }).locator('.hm-pin').click()
+    ok(!!(await until(async () => /Couldn't unpin it: the disk is full/.test(await hm.locator('.hm-toast').innerText().catch(() => '')), 6000)) && /Org chart/.test(await pinned.innerText()), "a pin that can't be saved stays as it was, and says why", await hm.locator('.hm-toast').innerText().catch(() => ''))
+    failPin = false
+    // Unpinned: back where it was.
+    await pinned.locator('.ny-item', { hasText: 'Weekly product review' }).locator('.hm-pin').click()
+    ok(!!(await until(async () => !/Weekly product review/.test(await pinned.innerText().catch(() => '')) && await row.count() === 1, 8000)), 'unpinned: back in Ready to Look At', await ready.innerText())
+    // (A reload cuts off what the page was asking, which WebKit reports as an error.)
+    ok(errors.filter((e) => !/due to access control checks/.test(e)).length === 0, 'pins: no page errors', errors)
+    await ctx.close()
+  }
+  {
+    const { ctx, p } = await page(b, a.url, { mode: 'dark', theme: 'midnight', width: 1440, height: 2400, before: busyDay })
+    await busyLoaded(p.locator('.hm'))
+    await p.waitForTimeout(600)
+    await shot(p, `${tag}home-busy-pinned-tall-dark`)
+    await ctx.close()
+  }
+  for (const width of [375, 430]) {
+    const { ctx, p, errors } = await page(b, a.url, { phone: true, mode: width === 430 ? 'dark' : 'light', theme: width === 430 ? 'midnight' : 'sky', before: busyDay })
+    await p.setViewportSize({ width, height: 860 })
+    const hm = p.locator('.hm')
+    ok(!!(await busyLoaded(hm)), `a busy day, phone ${width}: all of it`)
+    await p.waitForTimeout(600)
+    ok(/Pinned/.test(await hm.locator('.hm-sec h3').first().innerText()), `phone ${width}: what was pinned on the computer is pinned here too`)
+    const off = await aligned(p)
+    ok(!off.length, `phone ${width}: every notice and section lines up with the header`, off)
+    await shot(p, `${tag}home-busy-phone-${width}`)
+    await hm.locator('.hm-sec[aria-label="Chief of Staff\'s Tasks"] .hm-fold').click()
+    const f = await phoneFaults(p, '.hm')
+    // A tap on the count shows what's in it; a tap elsewhere puts it away.
+    await hm.locator('.hm-title').evaluate((e) => e.scrollIntoView({ block: 'start' }))
+    await hm.locator('.hm-count').tap()
+    ok(!!(await until(async () => tipRight(await tip(p).innerText().catch(() => '')), 4000)) && (await ringOf(p)).fill === 75, `phone ${width}: a tap on the count shows what's in it`, await tip(p).innerText().catch(() => ''))
+    await shot(p, `${tag}home-busy-phone-${width}-count`)
+    await hm.locator('.hm-sec[aria-label="Waiting on You"] h3').tap()
+    ok(!!(await until(async () => !(await tip(p).count()), 3000)), `phone ${width}: and a tap elsewhere puts it away`)
+    ok(!Object.keys(f).length, `a busy day, phone ${width}: it fits (nothing wider, past its edge or cut off; every control, the pins too, a whole 40 px target)`, f)
+    await p.setViewportSize({ width, height: 5200 })
+    await p.waitForTimeout(400)
+    await shot(p, `${tag}home-busy-phone-${width}-tall`)
+    ok(errors.length === 0, `a busy day, phone ${width}: no page errors`, errors)
+    await ctx.close()
+  }
+  for (const id of ['here|meeting:bm1', `${deskId}|task:c2`, 'travel-laptop|agent:n3@1', 'here|board:bb3']) await a.api('/home-pins', { id, on: false })
+
   // Nothing at all, and while it loads: each part says so, none is a blank. Then a list it had, and
   // a look that fails: it says it couldn't update and keeps what it had.
   {
@@ -468,8 +735,11 @@ try {
     })
     const hm = p.locator('.hm')
     ok(!!(await until(() => p.locator('.hm-loading[role="status"]').isVisible(), 15000)) && /Loading what needs you/.test(await p.locator('.hm-loading').getAttribute('aria-label')), 'loading: it says it is', await hm.innerText().catch(() => ''))
+    ok((await p.locator('.hm-title h2').innerText()) === 'Home' && !/computer/.test(await p.locator('.hm-title p').innerText()), "and doesn't guess: no count, no computers, until the list comes", await p.locator('.hm-title').innerText())
+    await shot(p, `${tag}home-loading`)
     hold = false
     const text = await until(async () => { const x = await hm.innerText(); return /Nothing new to look at/.test(x) && x }, 10000)
+    ok(!(await hm.locator('.hm-sort').count()), 'nothing at all: nothing to sort, so no order to pick')
     ok(!!text && /Nothing needs you right now/.test(text) && /Finished work, meeting notes and whiteboards an agent changed show here/.test(text) && /Nothing on your calendar for the rest of today or tomorrow, and no task with a day/.test(text) && /Nothing on Chief of Staff's list/.test(text), 'nothing at all: each part says there is nothing, and what would show there', text)
     await shot(p, `${tag}home-empty`)
     fail = true

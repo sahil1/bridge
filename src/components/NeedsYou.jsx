@@ -104,8 +104,9 @@ function LiveQuestion({ it, onDone }) {
   return <div className="ny-live"><Question q={q} send={send} busy={busy} /></div>
 }
 
-// One thing waiting, answered right there (the inbox, and Home: NeedsHome.jsx).
-export function NeedsItem({ it, focused, onOpen, onGone, setNote }) {
+// One thing waiting, answered right there (the inbox, and Home: NeedsHome.jsx). pin: Home's Pin
+// button, at the end of its top line.
+export function NeedsItem({ it, focused, onOpen, onGone, setNote, pin = null }) {
   const [mode, setMode] = useState(focused && isAsk(it) && !it.answers?.length && !it.old ? 'live' : null) // 'reply' | 'live'
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
@@ -156,6 +157,7 @@ export function NeedsItem({ it, focused, onOpen, onGone, setNote }) {
         <span className={`ny-device ${it.machine ? '' : 'here'}`} title={off ? (it.asOf ? t('{name} is offline. As of {when}.', { name: it.device, when: ago(it.asOf) }) : t('{name} is offline', { name: it.device })) : t('On {name}', { name: it.device })}>
           <Icon name={a.cloud ? 'cloud' : 'laptop'} size={11} />{it.device}{off && <span className="ny-off"> · {t('offline')}</span>}
         </span>
+        {pin}
       </div>
       {what && <p className={`ny-text ${it.type === 'review' ? 'said' : ''}`}>{what}</p>}
       {it.about && <code className="ny-about">{it.about}</code>}
@@ -169,12 +171,12 @@ export function NeedsItem({ it, focused, onOpen, onGone, setNote }) {
         {!off && it.answers?.map((o, i) => (
           <button key={o.n} type="button" className={`btn small ${i === 0 ? 'primary' : ''}`} disabled={busy} onClick={() => answer(o)}>{o.title}</button>
         ))}
-        {!off && isAsk(it) && it.qid && !it.old && <button type="button" className="ghost-btn" aria-expanded={mode === 'live'} onClick={() => setMode(mode === 'live' ? null : 'live')}>{it.answers?.length ? t('More answers…') : t('Answer here…')}</button>}
+        {!off && isAsk(it) && it.qid && !it.old && <button type="button" className="ghost-btn" aria-expanded={mode === 'live'} onClick={() => setMode(mode === 'live' ? null : 'live')}><Icon name="list" size={12} /> {it.answers?.length ? t('More answers…') : t('Answer here…')}</button>}
         {canReply && <button type="button" className="ghost-btn" aria-expanded={mode === 'reply'} onClick={() => setMode(mode === 'reply' ? null : 'reply')}><Icon name="chat" size={12} /> {t('Reply')}</button>}
         {it.pr && <a className="ghost-btn" href={it.pr} target="_blank" rel="noopener noreferrer"><Icon name="external" size={12} /> {t('Pull request')}</a>}
         <span className="ny-grow" />
-        {!off && (it.type === 'review' || it.type === 'failed') && !it.old && <button type="button" className="ghost-btn" onClick={clear} title={t('Take it off the list until it has something new')}>{t('Clear')}</button>}
-        <button type="button" className="ghost-btn strong" onClick={() => onOpen(it)} disabled={off}>{t('Open')}</button>
+        {!off && (it.type === 'review' || it.type === 'failed') && !it.old && <button type="button" className="ghost-btn" onClick={clear} title={t('Take it off the list until it has something new')}><Icon name="check" size={12} /> {t('Clear')}</button>}
+        <button type="button" className="ghost-btn strong" onClick={() => onOpen(it)} disabled={off}><Icon name="open" size={12} /> {t('Open')}</button>
       </div>
       {mode === 'reply' && (
         <form className="ny-reply" onSubmit={reply}>
