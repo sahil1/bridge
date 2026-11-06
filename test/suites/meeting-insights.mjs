@@ -7,11 +7,13 @@
 // Windows, where the stand-in is a script it can't start): the numbers exactly (how many, how long,
 // your share of the talk, words spoken and heard, by week and by kind), what each is based on and
 // the meetings that aren't counted; each meeting read once, and again only when it changes, also
-// after a restart; the people, the same person put together across names and addresses, and a merge
-// and a split by hand; a person's page with their meetings, open action items and next meeting; the
-// calendar not allowed, then allowed. In the app: the tabs, the numbers and what they're based on, a
-// kind picked, People, a person's page linking to a meeting, a merge and a split; on a phone, each
-// fitting the screen.
+// after a restart; the people (you left out, also when an invite has your address), the same person
+// put together across names and addresses, and a merge and a split by hand; a person's page with
+// their meetings, open action items (one carried from summary to summary shown once) and next
+// meeting; the calendar not allowed, then allowed. In the app: the tabs, the numbers and what
+// they're based on, the weeks with their scale and this week's, the columns named, a kind picked,
+// People with what each number is, a person's page with the next meeting once, linking to a
+// meeting, a merge and a split; on a phone, each fitting the screen, the weeks' dates apart.
 import fs from 'node:fs'
 import path from 'node:path'
 import { startKit, checks, until, browser, page, shot, phoneFaults, IS_WIN } from '../lib/harness.mjs'
@@ -57,7 +59,7 @@ const weekOf = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); x.setDate
 const M1 = at(3, 10), M2 = at(10, 10), M3 = at(17, 10), M4 = at(24, 10), M5 = at(5, 15), M6 = at(2, 9), M7 = at(2, 9, 16), M8 = at(2, 9, 48), M9 = at(100, 10)
 const seed = () => {
   // A 1:1 call: your mic and Priya's (the one person invited, so her lines are hers). On time.
-  meeting('m1', { title: 'Pricing review', when: M1, seconds: 1800, people: ['Priya Shah', 'Tester'], event: { start: M1.toISOString(), end: new Date(+M1 + 1800e3).toISOString() },
+  meeting('m1', { title: 'Pricing review', when: M1, seconds: 1800, people: ['Priya Shah', 'tester@example.com'], event: { start: M1.toISOString(), end: new Date(+M1 + 1800e3).toISOString() },
     lines: [['you', 0, 10, 'Shall we look at the enterprise tiers today?'], ['them', 10, 40, 'Yes, that price needs a rethink soon.'], ['you', 40, 50, 'Good. What about the pilot?'], ['them', 50, 60, 'It starts in May.']],
     summary: '## Summary\n\n- The **Enterprise tier** needs a new price.\n\n## Action items\n\n- [ ] Priya Shah: send the pricing sheet\n- [ ] You: draft the pilot plan\n- [x] You: book the room\n' })
   // A weekly call with three others: Dan and "priya" named on the transcript, one line nobody named.
@@ -71,7 +73,7 @@ const seed = () => {
   meeting('m4', { title: 'Weekly payments sync', when: M4, seconds: 2700, people: ['Priya Shah <priya.shah@example.com>', 'dan.ruiz@example.com', 'Mia Chen', 'Tester'],
     lines: [['you', 0, 10, 'I will take the first part.'], ['you', 10, 40, 'Thanks, here is my update on the launch plan.'], ['you', 40, 45, 'Any questions?']],
     voices: { src: 'you', speakers: 2, line: { 'you:0': 1, 'you:10': 2, 'you:40': 1 }, names: { 1: { me: true }, 2: { name: 'Mia Chen' } } },
-    summary: '## Summary\n\n### Launch plan\n\n- Mia shared the launch plan.\n' })
+    summary: '## Summary\n\n### Launch plan\n\n- Mia shared the launch plan.\n\n## Action items\n\n- [ ] Priya Shah: send the pricing sheet\n' })
   // A customer: someone from another company's address. It ran ten minutes over.
   meeting('m5', { title: 'Onboarding call', when: M5, seconds: 1200, people: ['Ola Berg <ola@example.org>', 'Tester'], event: { start: M5.toISOString(), end: new Date(+M5 + 600e3).toISOString() },
     lines: [['you', 0, 20, 'Welcome aboard, how was setup?'], ['them', 20, 80, 'Smooth, thanks.']] })
@@ -94,10 +96,14 @@ try {
   const desk = await page(b, kit.url, { store: { 'cc-rail-meetings': true, 'cc-meet-tab': 'insights' } })
   pages.push(desk)
   const p = desk.p
-  // Meetings, from the sidebar once the app is up.
+  // Meetings, from the sidebar once the app is up (clicked again until it shows: WebKit, and a busy
+  // Linux runner, can take a click before the app is listening).
   const openMeetings = async () => {
-    await p.locator('.rail-nav-btn', { hasText: 'Meetings' }).first().click({ timeout: 20000 })
-    await p.locator('.mt-view .pane-head').first().waitFor({ timeout: 15000 })
+    const shown = await until(async () => {
+      await p.locator('.rail-nav-btn', { hasText: 'Meetings' }).first().click({ timeout: 5000 }).catch(() => {})
+      return p.locator('.mt-view .pane-head').first().waitFor({ timeout: 1500 }).then(() => true, () => false)
+    }, 30000, 300)
+    if (!shown) throw new Error('Meetings never opened from the sidebar')
   }
   await openMeetings()
   await p.keyboard.press('ControlOrMeta+k')
@@ -170,6 +176,8 @@ try {
   const priya = by('Priya Shah'), dan = by('Dan Ruiz'), mia = by('Mia Chen')
   ok(JSON.stringify(ppl.people.map((x) => [x.name, x.meetings])) === JSON.stringify([['Priya Shah', 6], ['Dan Ruiz', 5], ['Mia Chen', 4], ['Lena Park', 1], ['M Chen', 1], ['Ola Berg', 1]]),
     'everyone you met, most often first: invited and named on transcripts, you left out', ppl.people.map((x) => [x.name, x.meetings]))
+  ok(!ppl.people.some((x) => /tester/i.test(`${x.name} ${x.emails.join(' ')}`)) && kinds.one_on_one === 1,
+    'you, invited by your address (tester@example.com), aren\'t one of the people, and that 1:1 is still a 1:1', ppl.people.map((x) => x.name))
   ok(priya && JSON.stringify(priya.also) === JSON.stringify(['priya']) && JSON.stringify(priya.emails) === JSON.stringify(['priya.shah@example.com']) && dan?.emails[0] === 'dan.ruiz@example.com',
     'the same person put together: "priya" on a transcript where only Priya Shah was invited, and an address with her name; dan.ruiz@example.com is Dan Ruiz', { priya, dan })
   ok(!!by('M Chen') && mia?.meetings === 4, '"m.chen" isn\'t taken for Mia Chen: not clear enough to put together', by('M Chen'))
@@ -184,7 +192,8 @@ try {
   let pg = await api(`/meetings/people/${encodeURIComponent(priya.id)}`)
   ok(JSON.stringify(pg.meetingsList.map((x) => [x.id, x.pct])) === JSON.stringify([['m6', null], ['m1', 67], ['m2', 20], ['m3', null], ['m4', null], ['m9', null]]),
     'a person\'s page lists every meeting with them, newest first, with their share where it\'s known', pg.meetingsList)
-  ok(JSON.stringify(pg.items.map((x) => [x.text, x.meeting.id])) === JSON.stringify([['send the pricing sheet', 'm1'], ['check refunds with Priya Shah', 'm2']]), 'the action items still open that are theirs or name them, each with its meeting', pg.items)
+  ok(JSON.stringify(pg.items.map((x) => [x.text, x.meeting.id, x.meetings])) === JSON.stringify([['send the pricing sheet', 'm1', 2], ['check refunds with Priya Shah', 'm2', 1]]),
+    'the action items still open that are theirs or name them, each with its meeting; one in two summaries shown once, the newest, saying it\'s in 2', pg.items)
   if (CAL) {
     const soon = new Date(Date.now() + 2 * DAY); soon.setHours(11, 0, 0, 0)
     fs.writeFileSync(path.join(kit.bin, 'bridgecal.json'), JSON.stringify({ status: 'granted', events: [
@@ -218,13 +227,27 @@ try {
   await tabBtn('insights').click({ timeout: 15000 })
   const tiles = async () => (await p.locator('.mi-tiles .us-tile-val').allInnerTexts().catch(() => [])).map((x) => x.trim())
   await p.locator('.mi-bar button', { hasText: '90 days' }).click()
-  ok(!!(await until(async () => (await tiles()).join('|') === '8|4 h 50 min|31%|44 / 43', 10000)), 'Insights: 8 meetings, 4 h 50 min, you spoke 31% of the talk, 44 words spoken and 43 heard', await tiles())
+  ok(!!(await until(async () => (await tiles()).join('|') === '8|4 h 50 min|31%|44', 10000)), 'Insights: 8 meetings, 4 h 50 min, you spoke 31% of the talk, 44 words spoken', await tiles())
+  const subs = async () => (await p.locator('.mi-tiles .us-tile-sub').allInnerTexts().catch(() => [])).map((x) => x.trim())
+  ok(/^7 more than the 90 days before$/.test((await subs())[0]) && (await subs())[3] === '43 heard from others', 'each tile says what its number is: against the days before, and the words heard under the words spoken (each in full, not 44 / 43)', await subs())
+  // The weeks: what this week came to, a scale, and the columns named.
+  const chart = p.locator('.mi-weeks')
+  ok(/^This week so far: \d+ (min|h)/.test(await chart.locator('.mi-wread').innerText()) && (await chart.locator('.mi-gl i').allInnerTexts()).every((x) => /^\d+(\.\d+)? h$/.test(x)) && (await chart.locator('.mi-gl').count()) === 2,
+    'by week: what this week came to so far, and a line at the top and the middle saying how many hours', [await chart.locator('.mi-wread').innerText(), await chart.locator('.mi-gl i').allInnerTexts()])
+  await chart.locator('.mi-wcol').nth(ins.weeks.length - 2).hover()
+  ok(/^Week of \w+ \d+: /.test(await chart.locator('.mi-wread').innerText()), 'and a week pointed at, what it came to', await chart.locator('.mi-wread').innerText())
+  const heads = await p.locator('.mi-grid .mi-colhead').allInnerTexts()
+  ok(heads.length === 2 && /You spoke\s+Meetings/.test(heads[0]) && /Meetings\s+Their share/.test(heads[1]), 'the cards\' numbers have their columns named, not explained in a footnote', heads)
+  await p.locator('.mi-bar button', { hasText: '30 days' }).click()
+  ok(!!(await until(async () => (await subs())[0] === 'none in the 30 days before', 8000)), 'with no meetings in the days before: none, not "8 more"', await subs())
+  await p.locator('.mi-bar button', { hasText: '90 days' }).click()
+  await until(async () => (await tiles())[0] === '8', 8000)
   const basis = await p.locator('[data-basis="talk"]').innerText().catch(() => '')
   ok(/From 5 meetings where who spoke is known: on a call, your mic and the call's sound; in a room, voices told apart and one of them you\. 2 in a room without the voices told apart aren't counted\. 1 with nothing transcribed isn't counted\./.test(basis), 'what your share of the talk is based on, and what isn\'t counted', basis)
   ok(/Worked out on this computer from 9 recorded meetings/.test(await p.locator('.mi-lede').innerText()) && /Archived meetings are left out/.test(await p.locator('.mi-lede').innerText()), 'and where it all comes from')
   const sig = await p.locator('.mi-signals').innerText()
-  ok(/Questions you asked\s+1 a meeting\s+Your lines with a question mark/.test(sig) && /Meetings that ran over\s+1 of 2/.test(sig) && /Attention, productivity\s+not shown\s+Nothing in a recording shows them/.test(sig), 'the signals, each with what it\'s worked out from, and no score of attention', sig)
-  ok((await p.locator('.mi-weeks .us-col').count()) === ins.weeks.length, 'a column for each week')
+  ok(/Questions you asked\s+1 a meeting\s+Your lines with a question mark/.test(sig) && /Your longest stretch\s+20 s\s/.test(sig) && /Meetings that ran over\s+1 of 2/.test(sig) && /Back to back\s+1 day\s/.test(sig) && /Attention, productivity\s+not shown\s+Nothing in a recording shows them/.test(sig), 'the signals, each with what it\'s worked out from (a stretch in seconds, not a clock), and no score of attention', sig)
+  ok((await p.locator('.mi-weeks .mi-wcol').count()) === ins.weeks.length, 'a column for each week')
   await p.locator('.mi-kinds button[data-kind="customer"]').click()
   ok(!!(await until(async () => (await tiles())[0] === '1', 8000)) && /Customer calls: Someone invited from another company/.test(await p.locator('.mi-why').innerText().catch(() => '')), 'a kind picked: its numbers, and what makes a meeting that kind', await tiles())
   await p.locator('.mi-kinds button', { hasText: 'All kinds' }).click()
@@ -233,7 +256,8 @@ try {
   await p.locator('.mi-grid .us-row', { hasText: 'Priya Shah' }).click()
   await p.locator('.mi-person h3').waitFor({ timeout: 8000 })
   ok((await p.locator('.mi-person h3').innerText()) === 'Priya Shah' && (await p.locator('.mi-mrow').count()) === 6 && (await p.locator('.mi-items li').count()) === 2, 'a person\'s page: their meetings and open action items')
-  if (CAL) ok(!!(await until(async () => /Next: Pricing follow-up, /.test(await p.locator('.mi-next').innerText().catch(() => '')), 8000)) && !(await p.locator('.mi-cal').count()), 'and the next meeting with them, from the calendar')
+  ok(/send the pricing sheet\s+Pricing review · \w+ \d+\s+and 1 earlier/.test(await p.locator('.mi-items li').first().innerText()), 'an action item in two summaries: once, from the newest, and "and 1 earlier"', await p.locator('.mi-items li').first().innerText())
+  if (CAL) ok(!!(await until(async () => /Pricing follow-up/.test(await p.locator('[data-next]').innerText().catch(() => '')), 8000)) && !(await p.locator('.mi-cal').count()) && !/Next: Pricing follow-up/.test(await p.locator('.mi-person').innerText()), 'and the next meeting with them, from the calendar, in its tile (once, not again under it)')
   await shot(p, `${tag}insights-person`)
   await p.locator('.mi-mrow[data-meeting="m1"]').click()
   ok(!!(await until(async () => (await p.locator('.mt-title').inputValue().catch(() => '')) === 'Pricing review', 10000)), 'a meeting on their page opens it')
@@ -242,6 +266,8 @@ try {
   await tabBtn('people').click({ timeout: 10000 })
   await p.locator('.mi-prow').first().waitFor({ timeout: 8000 })
   ok((await p.locator('.mi-prow').count()) === 5 && (await p.locator('.mi-map .mi-map-node').count()) === 5 && /From who was invited to your 9 recorded meetings/.test(await p.locator('[data-basis="people"]').innerText()), 'People: everyone, on a map around you and in a list, saying where they come from')
+  const pn = (await p.locator('.mi-prow[data-person] .mi-pnum').first().innerText()).replace(/\s+/g, ' ')
+  ok(/^6 meetings \d+% of the talk$/.test(pn), 'each person\'s numbers say what they are: meetings, and their share of the talk', pn)
   await p.locator('.mi-prow', { hasText: 'Lena Park' }).click()
   await p.locator('.mi-merge select').selectOption({ label: 'Ola Berg' })
   await p.locator('.mi-merge button').click()
@@ -268,6 +294,8 @@ try {
     await ph.p.locator('.mi-tiles').waitFor({ timeout: 10000 })
     let f = await phoneFaults(ph.p, '.m-meetings')
     ok(!Object.keys(f).length, `${width}: Insights fits the phone`, f)
+    const dates = await ph.p.locator('.mi-wdates span').evaluateAll((xs) => xs.filter((x) => x.textContent).map((x) => { const r = document.createRange(); r.selectNodeContents(x); const b = r.getBoundingClientRect(); return [b.left, b.right] }))
+    ok(dates.length >= 2 && dates.every((d, i) => !i || d[0] >= dates[i - 1][1] + 2), `${width}: the weeks' dates don't run into each other`, dates)
     await shot(ph.p, `${tag}insights-phone-${width}`, { fullPage: true })
     await ph.p.locator('.m-meetings .seg button[data-view="people"]').click()
     await ph.p.locator('.mi-prow').first().waitFor({ timeout: 10000 })
