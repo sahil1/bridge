@@ -11,6 +11,13 @@
 // rows, undo and redo, the shortcuts; a quote, an underline and a link kept through a save; the
 // header's kind, size and folder never cut off; the status line; each kind saying what it is and
 // what it can't do; on 375 and 430 px phones, Studio's home and a document fitting.
+// A sheet: Excel's ribbon with Ask AI first, the name box and tabs; Ask AI on the cells picked,
+// the agent told to answer with the change, which is shown on the sheet before it's made, kept and
+// saved, or put back; a summary beside it; a chart drawn first, then in Charts and saved as an
+// Excel chart; an answer that isn't JSON said. An Excel file with a chart, a note, a dropdown and
+// more, one cell changed and saved: every other part the same bytes, and read back the same. A CSV
+// in semicolons with a BOM and Windows line endings, saved back the same but for the one field.
+// On phones, a sheet and Ask AI fitting; a sheet in the dark look.
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
@@ -402,7 +409,9 @@ try {
   await shot(p, `${tag}studio-sheet-ask`)
   // Asked in place: the agent is told to answer with the change, not to make it.
   await askAi.locator('.sh-chip', { hasText: 'Write a formula' }).click()
-  await p.keyboard.type('doubles the cost in column C')
+  ok(!!(await until(() => askAi.locator('textarea').evaluate((e) => e === document.activeElement && e.selectionStart === e.value.length), 2000, 50)), 'and the cursor waits at its end, to finish it in your words')
+  await askAi.locator('textarea').press('End')
+  await askAi.locator('textarea').pressSequentially('doubles the cost in column C')
   ok(/^Write a formula for the cells I picked that doubles the cost in column C$/.test(await askAi.locator('textarea').inputValue()), 'Write a formula starts the ask, to finish in your words', await askAi.locator('textarea').inputValue())
   await askAi.locator('.sh-send').click()
   const proposed = (x) => /In budget\.xlsx: Write a formula/.test(x) && /Don't change the file itself/.test(x) && /\.budget\.xlsx\.studio-change\.json/.test(x) && /B2 on Budget/.test(x) && /120/.test(x)
@@ -450,7 +459,17 @@ try {
   const JSZip0 = require('jszip')
   const chartIn = await until(async () => { try { const z = await JSZip0.loadAsync(fs.readFileSync(path.join(dir, 'budget.xlsx'))); const c = Object.keys(z.files).find((n) => /^xl\/charts\/chart\d+\.xml$/.test(n)); return c ? z.file(c).async('string') : null } catch { return null } }, 10000)
   ok(!!chartIn && /<c:barChart>/.test(chartIn) && /Budget!\$B\$2:\$B\$3/.test(chartIn) && /Costs/.test(chartIn), 'saved as an Excel chart of those cells', chartIn && chartIn.slice(0, 400))
+  // A filter, from the Data tab, saved as Excel's own.
+  await goTo('A1:C3')
+  await p.locator('.sd-univer [role="tab"]', { hasText: 'Data' }).click()
+  await p.locator('.sd-univer [data-u-command="sheet.command.smart-toggle-filter"]').first().click()
+  await until(async () => /Unsaved changes/.test(await p.locator('.sd-status').innerText()), 5000)
+  await p.locator('.pane-head button', { hasText: 'Save' }).click()
+  const sheetXml = () => JSZip0.loadAsync(fs.readFileSync(path.join(dir, 'budget.xlsx'))).then((z) => z.file('xl/worksheets/sheet1.xml').async('string')).catch(() => '')
+  ok(!!(await until(async () => /<autoFilter ref="A1:C3"/.test(await sheetXml()), 10000)), 'Data › Filter on the cells picked: saved as an Excel filter on them', (await sheetXml()).slice(-600))
+  await p.locator('.sd-univer [role="tab"]', { hasText: 'Start' }).click()
   // A change that can't be read is said, not dropped.
+  await p.locator('.sd-univer [data-u-command="bridge.sheet.ask-ai"]').click({ timeout: 3000 }).catch(async () => { await p.locator('.sd-univer [role="tab"]', { hasText: 'Start' }).first().click(); await p.locator('.sd-univer [data-u-command="bridge.sheet.ask-ai"]').click() })
   await askAi.locator('textarea').fill('Anything')
   await askAi.locator('.sh-send').click()
   await until(async () => /Asked/.test(await askAi.locator('.sh-wait').innerText().catch(() => '')), 10000)
@@ -586,7 +605,30 @@ try {
     f = await phoneFaults(ph.p, '.sd-ask')
     ok(!Object.keys(f).length, `phone ${width}: Ask an agent fits, its fields at 16 px`, f)
     await ph.p.locator('.sd-ask button', { hasText: 'Cancel' }).click()
+    // A sheet: the grid with its tabs, and Ask AI over it from the bottom, fitting.
+    await ph.p.evaluate(({ root }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: 'budget.xlsx' } })), { root })
+    ok(!!(await until(async () => (await ph.p.locator('.sd-univer canvas').count()) > 0 && /Budget/.test(await ph.p.locator('.sd-univer').innerText().catch(() => '')), 30000)), `phone ${width}: a sheet opens, with its tabs`)
+    await sleep(600)
+    ok(await ph.p.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), `phone ${width}: the sheet fits the screen`)
+    await shot(ph.p, `${tag}studio-sheet-phone-${width}`)
+    await ph.p.locator('.pane-head button[aria-label="Ask an agent"]').click()
+    await ph.p.locator('.sh-ask textarea').waitFor({ timeout: 5000 })
+    f = await phoneFaults(ph.p, '.sh-side')
+    ok(!Object.keys(f).length, `phone ${width}: Ask AI fits over the sheet, each button a whole target, its fields at 16 px`, f)
+    await shot(ph.p, `${tag}studio-sheet-ask-phone-${width}`)
+    await ph.p.locator('.sh-ask button[aria-label="Close"]').click()
   }
+  // Dark: a sheet in the app's dark look, Ask AI beside it.
+  const night = await page(b, kit.url, { width: 1440, height: 900, mode: 'dark' })
+  pages.push(night)
+  await night.p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
+  // Asked again until it opens (a page just loaded may not be listening yet).
+  await until(async () => { if (!(await night.p.locator('.sd-univer').count())) await night.p.evaluate(({ root }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: 'ledger.xlsx' } })), { root }); return (await night.p.locator('.sd-univer canvas').count()) > 0 }, 30000, 1000)
+  await sleep(1200)
+  await night.p.locator('.sd-univer [data-u-command="bridge.sheet.ask-ai"]').click()
+  await night.p.locator('.sh-ask').waitFor({ timeout: 5000 })
+  await shot(night.p, `${tag}studio-sheet-dark`)
+  ok(night.errors.length === 0, 'dark: no page errors', night.errors)
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
   console.log(kit.log().slice(-1500))

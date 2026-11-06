@@ -40,6 +40,27 @@ export function lineDiff(a, b) {
 
 export async function textFor(ext, buf) {
   if (ext === '.docx') { const m = await import('mammoth/mammoth.browser.js'); return ((await (m.default || m).extractRawText({ arrayBuffer: buf })).value || '').replace(/\n{3,}/g, '\n\n') }
+  if (ext === '.xlsx' || ext === '.xlsm') return sheetText(buf)
   return new TextDecoder().decode(buf)
 }
-export const comparable = (ext) => ['.md', '.markdown', '.txt', '.csv', '.tsv', '.html', '.htm', '.docx'].includes(ext)
+export const comparable = (ext) => ['.md', '.markdown', '.txt', '.csv', '.tsv', '.html', '.htm', '.docx', '.xlsx', '.xlsm'].includes(ext)
+
+// An Excel file by its cells, a line each: "Budget!B3  950", a formula with its result.
+async function sheetText(buf) {
+  const { readBook, colName } = await import('./xlsxbook.js')
+  const { data } = await readBook(new Uint8Array(buf))
+  const lines = []
+  for (const sid of data.sheetOrder) {
+    const sh = data.sheets[sid]
+    const name = /^[A-Za-z_][\w.]*$/.test(sh.name) ? sh.name : `'${String(sh.name).replace(/'/g, "''")}'`
+    for (const r of Object.keys(sh.cellData || {}).map(Number).sort((a, b) => a - b)) {
+      const row = sh.cellData[r] || {}
+      for (const c of Object.keys(row).map(Number).sort((a, b) => a - b)) {
+        const cell = row[c]
+        if (!cell || (cell.v == null && !cell.f)) continue
+        lines.push(`${name}!${colName(c)}${r + 1}  ${cell.f ? `${cell.f} → ${cell.v ?? ''}` : cell.v}`)
+      }
+    }
+  }
+  return lines.join('\n')
+}

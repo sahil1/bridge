@@ -4,6 +4,8 @@
 .sh-body > .sd-univer { flex: 1; min-width: 0; min-height: 0; }
 .sh-note { display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--line); }
 .sh-note > svg { flex: none; color: var(--accent); }
+.sh-note > span { flex: 1; min-width: 0; }
+.sh-note .link-btn { flex: none; }
 
 /* A CSV's separator and encoding, plainly, in a strip of its own. */
 .sh-csv { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 6px 16px; border-bottom: 1px solid var(--line); background: var(--pane-2); font-size: 12.5px; color: var(--ink-2); }
@@ -12,6 +14,7 @@
 .sh-csv-eol { margin-left: auto; }
 
 /* Ask AI and Charts: a panel at the side of the sheet. */
+.sh-side[hidden] { display: none; }
 .sh-side { flex: none; width: 320px; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--line); background: var(--pane); }
 .sh-side .sd-panel-head { position: static; gap: 6px; }
 .sh-side .sd-panel-head > svg { color: var(--accent); }
@@ -50,11 +53,11 @@
 .sh-none { display: grid; justify-items: center; gap: 8px; padding: 24px 8px; text-align: center; color: var(--ink-2); }
 .sh-none > svg { color: var(--ink-3); }
 .sh-none > b { color: var(--ink); }
-.sc-chart { width: 100%; height: auto; display: block; font: 10px var(--font); }
+.sc-chart { width: 100%; height: auto; display: block; font: 11px var(--font); }
 .sc-grid { stroke: var(--line); stroke-width: 1; }
 .sc-base { stroke: var(--ink-3); stroke-width: 1; }
 .sc-axis { fill: var(--ink-3); }
-.sc-legend text { fill: var(--ink-2); font-size: 10px; }
+.sc-legend text { fill: var(--ink-2); font-size: 11px; }
 .sc-hole { fill: var(--pane); }
 .sc-slice { stroke: var(--pane); stroke-width: 2; }
 .sc-bar:hover, .sc-slice:hover, .sc-dot:hover { opacity: .8; }

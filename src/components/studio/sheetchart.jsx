@@ -26,7 +26,7 @@ function ticks(lo, hi) {
 export default function SheetChart({ chart, dark = false, height = 200 }) {
   const colors = dark ? SERIES_DARK : SERIES
   const { type = 'column', cats = [], series = [] } = chart
-  const W = 340, H = height, L = 44, R = 10, T = 10, B = 30
+  const W = 300, H = height, L = 40, R = 8, T = 10, B = 26
   const shown = series.slice(0, 8)
   const vals = shown.flatMap((s) => s.vals.filter(Number.isFinite))
   if (!shown.length || !vals.length) return null
@@ -46,7 +46,7 @@ export default function SheetChart({ chart, dark = false, height = 200 }) {
           return <path key={p.i} d={d} fill={colors[p.i % 8]} className="sc-slice"><title>{`${p.name}: ${fmt(p.v)} (${Math.round((p.v / total) * 100)}%)`}</title></path>
         })}
         {type === 'doughnut' && <circle cx={cx} cy={cy} r={r * 0.55} className="sc-hole" />}
-        <g className="sc-legend">{parts.slice(0, 8).map((p, k) => <g key={p.i} transform={`translate(${2 * r + 30} ${16 + k * 20})`}><rect width="10" height="10" rx="2" fill={colors[p.i % 8]} /><text x="16" y="9">{p.name.slice(0, 22)}</text></g>)}</g>
+        <g className="sc-legend">{parts.slice(0, 8).map((p, k) => <g key={p.i} transform={`translate(${2 * r + 30} ${16 + k * 20})`}><rect width="10" height="10" rx="2" fill={colors[p.i % 8]} /><text x="16" y="9">{p.name.slice(0, 12)}</text></g>)}</g>
       </svg>
     )
   }

@@ -38,7 +38,7 @@ export function encode(text, enc) {
     for (let i = 0; i < text.length; i++) {
       const c = text.charCodeAt(i)
       const k = CP1252.indexOf(text[i])
-      out[i] = c < 0x80 || (c >= 0xa0 && c <= 0xff) ? c : k >= 0 ? 0x80 + k : 0x3f // ? for what it can't hold
+      out[i] = c <= 0xff ? c : k >= 0 ? 0x80 + k : 0x3f // ? for what it can't hold
     }
     return out
   }
@@ -49,7 +49,7 @@ export function encode(text, enc) {
   return out
 }
 // Characters Windows-1252 can't hold (a file read as it, then typed into): saved as "?" otherwise.
-export const fitsEncoding = (text, enc) => enc !== 'windows-1252' || [...text].every((ch) => { const c = ch.charCodeAt(0); return c < 0x80 || (c >= 0xa0 && c <= 0xff) || CP1252.includes(ch) })
+export const fitsEncoding = (text, enc) => enc !== 'windows-1252' || [...text].every((ch) => ch.charCodeAt(0) <= 0xff || CP1252.includes(ch))
 
 // Fields, each with its raw text as written (quotes and all), row by row; a quoted field may run
 // over several lines.

@@ -7,6 +7,7 @@ import { UniverSheetsConditionalFormattingPreset, SheetsConditionalFormattingUIM
 import { UniverSheetsDataValidationPreset, SheetsDataValidationUIMenuSchema } from '@univerjs/preset-sheets-data-validation'
 import { UniverSheetsFindReplacePreset } from '@univerjs/preset-sheets-find-replace'
 import { UniverSheetsHyperLinkPreset } from '@univerjs/preset-sheets-hyper-link'
+import { UniverSheetsNotePreset } from '@univerjs/preset-sheets-note'
 import '@univerjs/preset-sheets-core/lib/index.css'
 import '@univerjs/preset-sheets-sort/lib/index.css'
 import '@univerjs/preset-sheets-filter/lib/index.css'
@@ -14,18 +15,19 @@ import '@univerjs/preset-sheets-conditional-formatting/lib/index.css'
 import '@univerjs/preset-sheets-data-validation/lib/index.css'
 import '@univerjs/preset-sheets-find-replace/lib/index.css'
 import '@univerjs/preset-sheets-hyper-link/lib/index.css'
+import '@univerjs/preset-sheets-note/lib/index.css'
 import Icon from '../../Icon.jsx'
 import { api as call, useFleet } from '../../../api.js'
 import { t, tx, currentLang } from '../../../i18n/index.js'
 import { withKeys } from '../keys.js'
-import { readSheet, writeSheet } from '../xlsx.js'
+import { readSheet, writeSheet, kindWords } from '../xlsx.js'
 import { ENCODINGS } from '../csv.js'
 import SheetChart, { chartOfGrid } from '../sheetchart.jsx'
 import '../sheet.css'
 
 // A sheet: Univer (Apache-2.0, what GenOffice's Sheets is built on too) with its ribbon, formula
 // bar, sheet tabs, number formats, freeze, sort, filter, conditional formatting, data validation,
-// find and replace, and links; read from and written back to the file's own kind (xlsx.js), in the
+// find and replace, links and notes; read from and written back to the file's own kind (xlsx.js), in the
 // app's light or dark look and its language where Univer has it. Ask AI (the ribbon's first
 // button, or the page's Ask an agent) sends the cells picked to one of your agents, which answers
 // with the change rather than making it: it's shown on the sheet, and kept or not. Charts the file
@@ -45,6 +47,7 @@ const PRESET_LOCALES = [
   import.meta.glob('/node_modules/@univerjs/preset-sheets-data-validation/lib/es/locales/{en-US,de-DE,es-ES,fr-FR,ja-JP,pt-BR,zh-CN}.js'),
   import.meta.glob('/node_modules/@univerjs/preset-sheets-find-replace/lib/es/locales/{en-US,de-DE,es-ES,fr-FR,ja-JP,pt-BR,zh-CN}.js'),
   import.meta.glob('/node_modules/@univerjs/preset-sheets-hyper-link/lib/es/locales/{en-US,de-DE,es-ES,fr-FR,ja-JP,pt-BR,zh-CN}.js'),
+  import.meta.glob('/node_modules/@univerjs/preset-sheets-note/lib/es/locales/{en-US,de-DE,es-ES,fr-FR,ja-JP,pt-BR,zh-CN}.js'),
 ]
 async function univerWords() {
   const code = UNIVER_LANG[currentLang()] || 'en-US'
@@ -111,6 +114,8 @@ export default function SheetEditor({ file, data, onDirty, onStats, handle, read
   const [sel, setSel] = useState(null) // { a1, sheet, sheetId, rows, cols }
   const [isDark, setDark] = useState(dark)
   const [empty, setEmpty] = useState(false) // a new sheet with nothing in it yet
+  const [asked, setAsked] = useState(false) // Ask AI opened once: kept from then on
+  useEffect(() => { if (panel === 'ask') setAsked(true) }, [panel])
   const dirty = useRef(false)
   const setPanelRef = useRef(setPanel)
   setPanelRef.current = setPanel
@@ -149,7 +154,7 @@ export default function SheetEditor({ file, data, onDirty, onStats, handle, read
         presets: [
           UniverSheetsCorePreset({ container: host.current, header: !readOnly, toolbar: !readOnly, ribbonType: narrow ? 'simple' : 'grid', menu, footer: { sheetBar: true, statisticBar: !narrow, menus: false, zoomSlider: !narrow } }),
           UniverSheetsSortPreset(), UniverSheetsFilterPreset(), UniverSheetsConditionalFormattingPreset(),
-          UniverSheetsDataValidationPreset(), UniverSheetsFindReplacePreset(), UniverSheetsHyperLinkPreset(),
+          UniverSheetsDataValidationPreset(), UniverSheetsFindReplacePreset(), UniverSheetsHyperLinkPreset(), UniverSheetsNotePreset(),
         ],
       })
       const u = made.univerAPI
@@ -220,7 +225,16 @@ export default function SheetEditor({ file, data, onDirty, onStats, handle, read
   return (
     <div className={`sd-sheet${panel ? ' with-side' : ''}`}>
       {info?.csv && !readOnly && <CsvBar csv={info.csv} ext={file.ext} onPick={repick} />}
-      {info?.lost?.length > 0 && <p className="muted small sd-note sh-note"><Icon name="info" size={12} /> {t('This file also has {what}: they aren\'t shown here, and saving here keeps them as they are.', { what: info.lost.map((x) => t(x)).join(', ') })}</p>}
+      {(info?.lost?.length > 0 || info?.charts?.length > 0) && !readOnly && (
+        <p className="muted small sd-note sh-note">
+          <Icon name="info" size={12} />
+          <span>
+            {info.lost.length > 0 && `${t('This file also has {what}: they aren\'t shown here, and saving here keeps them as they are.', { what: info.lost.map(kindWords).join(', ') })} `}
+            {info.charts.length > 0 && (info.charts.length === 1 ? t('Its chart is drawn in Charts, from its cells.') : t('Its {n} charts are drawn in Charts, from their cells.', { n: info.charts.length }))}
+          </span>
+          {info.charts.length > 0 && <button type="button" className="link-btn" onClick={() => setPanel('charts')}>{t('Charts')}</button>}
+        </p>
+      )}
       <div className="sh-body">
         <div ref={host} className="sd-univer" />
         {empty && ready && !panel && (
@@ -231,7 +245,8 @@ export default function SheetEditor({ file, data, onDirty, onStats, handle, read
             <button type="button" className="win-btn" onClick={() => setEmpty(false)} aria-label={t('Close')} title={t('Close')}><Icon name="x" size={12} /></button>
           </div>
         )}
-        {panel === 'ask' && <AskPanel file={file} univer={univer} sel={sel} dark={isDark} onDirty={changed} onChart={(c) => setAdded((a) => [...a, c])} onClose={() => setPanel(null)} />}
+        {/* Ask AI stays as it was (waiting for an answer, say) while Charts is open instead. */}
+        {asked && <AskPanel hidden={panel !== 'ask'} onShow={() => setPanel('ask')} file={file} univer={univer} sel={sel} dark={isDark} onDirty={changed} onChart={(c) => setAdded((a) => [...a, c])} onClose={() => setPanel(null)} />}
         {panel === 'charts' && <ChartsPanel charts={sheetCharts} univer={univer} sel={sel} dark={isDark} onAsk={() => setPanel('ask')} onClose={() => setPanel(null)} />}
       </div>
       {!ready && <div className="sd-empty sd-loading sd-over" role="status"><Icon name="refresh" size={16} className="spin" /><span className="muted">{t('Opening {name}…', { name: file.name })}</span></div>}
@@ -283,7 +298,7 @@ const QUICK = [
   { id: 'chart', icon: 'trend', label: tx('Chart this'), text: tx('Make a chart of the cells I picked that shows them best.') },
 ]
 const WAIT_MS = 20 * 60_000
-function AskPanel({ file, univer, sel, dark, onDirty, onChart, onClose }) {
+function AskPanel({ hidden, onShow, file, univer, sel, dark, onDirty, onChart, onClose }) {
   const { fleet } = useFleet()
   const here = fleet?.agents?.find((a) => a.paneId === file.root)
   const agents = (fleet?.agents || []).filter((a) => !a.chief && !a.plainChat && !a.cloudOnly && a.kind !== 'chat' && (!here || a.cwd === here.cwd))
@@ -348,6 +363,7 @@ function AskPanel({ file, univer, sel, dark, onDirty, onChart, onClose }) {
         onDirty(true)
       }
       setState({ step: 'shown', proposal: p, before, chart, sheetId: sheet.getSheetId(), name: asked.name })
+      onShow()
     } catch (x) { setState({ step: 'error', message: t("Couldn't show {name}'s change: {error}", { name: asked.name, error: x.message }) }) }
   }
   const unmark = () => { try { lit.current?.dispose() } catch { /* gone */ } lit.current = null }
@@ -373,7 +389,7 @@ function AskPanel({ file, univer, sel, dark, onDirty, onChart, onClose }) {
   const busy = state.step === 'sending' || state.step === 'waiting'
   const p = state.proposal
   return (
-    <aside className="sh-side sh-ask" aria-label={t('Ask AI')}>
+    <aside className="sh-side sh-ask" aria-label={t('Ask AI')} hidden={hidden}>
       <div className="sd-panel-head"><Icon name="sparkle" size={13} /><b>{t('Ask AI')}</b><span className="sd-grow" /><button type="button" className="win-btn" onClick={() => { if (state.step === 'shown') putBack(); onClose() }} aria-label={t('Close')} title={t('Close')}><Icon name="x" size={13} /></button></div>
       <div className="sh-side-body">
         <p className="sh-picked">{sel ? <><b>{sel.a1}</b> <span className="muted">{t('on {sheet}', { sheet: sel.sheet })} · {sel.rows * sel.cols === 1 ? t('1 cell') : t('{n} cells', { n: (sel.rows * sel.cols).toLocaleString() })}</span></> : <span className="muted">{t('Pick the cells to ask about, or ask about the whole sheet.')}</span>}</p>
