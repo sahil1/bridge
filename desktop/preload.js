@@ -2,12 +2,20 @@
 // picture of part of its own window (the Preview tab's app), lets an agent open in a window of its
 // own, says how long since you last used the computer, restarts the app, picks a folder or files in
 // Finder, says where a dropped file is, helps you allow what macOS asks about (asking it, seeing
-// it, and forgetting an answer that doesn't take), and sets up the dictation key and its window.
-// Nothing else is exposed.
+// it, and forgetting an answer that doesn't take), sets up the dictation key and its window, and
+// says what an update would lose in the window. Nothing else is exposed.
 const { contextBridge, ipcRenderer, webUtils } = require('electron')
 // Another of your devices, shown through this one (/m/<id>/): its pages get windows and nothing
 // of this computer's (no Finder, files, mic, screen or floating card), as on a phone.
 const machine = /^\/m\/([A-Za-z0-9_-]{1,20})\//.exec(location.pathname)?.[1] || null
+// What an update would lose in this window, asked by the app before it updates by itself while
+// you're away (main.js): the page answers (src/busy.js). No answer: null, which counts as busy.
+let busyAnswer = null
+ipcRenderer.on('bridge:busy-ask', (_e, id) => {
+  let a = null
+  try { a = busyAnswer ? busyAnswer() : null } catch { /* no answer */ }
+  ipcRenderer.send('bridge:busy-said', id, Array.isArray(a) ? a.filter((x) => typeof x === 'string') : null)
+})
 const windows = {
   // An agent in a window of its own (on this device or the one shown), and back.
   popOut: (paneId, title) => ipcRenderer.invoke('bridge:popout', { paneId, title, machine }),
@@ -15,6 +23,8 @@ const windows = {
   focusPopout: (paneId) => ipcRenderer.invoke('bridge:focus-popout', paneId),
   // One of your devices (or this one, id null) in a window of its own.
   openMachine: (id, agent) => ipcRenderer.invoke('bridge:open-machine', { id: id || null, agent: agent || null }),
+  // How the page says what an update would lose in it (above).
+  answerBusy: (fn) => { busyAnswer = typeof fn === 'function' ? fn : null },
 }
 if (machine) contextBridge.exposeInMainWorld('bridgeApp', { platform: process.platform, desktop: false, machine, ...windows })
 else contextBridge.exposeInMainWorld('bridgeApp', {

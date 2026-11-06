@@ -563,6 +563,9 @@ export async function stop(id) {
 const AUTO_STOP_MS = Number(process.env.BRIDGE_AUTO_STOP_MS || 120_000)
 const stopping = new Map() // id -> timer
 const recordingNow = () => list().filter((m) => m.status === 'recording' || m.status === 'paused')
+// A meeting recording, being transcribed (again, too) or its notes being written: what an update
+// would cut short (updates.js waits for it).
+export const busy = () => queue.length > 0 || running.length > 0 || decoding.size > 0 || summarizing.size > 0 || list().some((m) => ['recording', 'paused', 'transcribing'].includes(m.status))
 export function callStarted(app) {
   for (const m of recordingNow()) {
     clearTimeout(stopping.get(m.id)); stopping.delete(m.id)
