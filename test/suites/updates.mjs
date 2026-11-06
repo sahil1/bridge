@@ -52,6 +52,7 @@ const notes = wrote.status === 0 ? fs.readFileSync(notesFile, 'utf8') : ''
 const up = await import('../../server/updates.js')
 ok(up.minMacOf?.(notes) === appMin, 'the release notes say the oldest macOS the app opens on, as the update check reads it', `${wrote.stderr || ''}${notes.slice(-200)}`)
 ok(/The Mac app needs macOS 14 or later\./.test(notes), 'and say it in words too', notes.slice(-200))
+ok(notes.split('a star on GitHub').length === 2 && /SHA256SUMS\.txt`\.\n\nIf Bridge AI is useful to you, a star on GitHub helps other people find it\.\n\n<!-- macOS/.test(notes), 'and end, once, with a line asking for a GitHub star, before the line GitHub hides', notes.slice(-300))
 
 // ---------- The rules, for every kind of computer ----------
 const NEW = { latest: '99.0.0', minMac: '14.0' }
@@ -190,6 +191,7 @@ try {
   const u = await old.api('/updates?refresh=1')
   ok(u.latest === '99.0.0' && u.available === false && u.held?.macos === '14' && u.held?.have === '13.6', 'a Mac on 13.6: 99.0.0 isn\'t offered, and the answer says it needs macOS 14', u)
   ok(u.latest === '99.0.0' && !/<!--/.test(u.notes || '') && /The Mac app needs macOS 14 or later\. Checksums/.test(u.notes || ''), 'the notes shown leave out the line GitHub hides', (u.notes || '').slice(-200))
+  ok(!/a star on GitHub/.test(u.notes || '') && /Checksums \(SHA-256\) are in `SHA256SUMS\.txt`\.$/.test(u.notes || ''), 'and the star line, which is for GitHub\'s page, not the app\'s update notes', (u.notes || '').slice(-200))
   const newer = await kitOn('mac14', '14.6')
   const n = await newer.api('/updates?refresh=1')
   ok(n.available === true && !n.held, 'a Mac on 14.6: offered as usual', n)
@@ -241,6 +243,8 @@ try {
     ok(!!about, 'About & Updates: up to date for this Mac, and why it stays on this version', (await p.locator('.st-body').innerText().catch(() => '')).slice(0, 600))
     await shot(p, `${tag}updates-held-about`)
     ok(!!about && await p.locator('.st-body button', { hasText: /Update to/ }).count() === 0, 'About & Updates: no Update button')
+    const star = p.locator('.st-body a', { hasText: 'Star Bridge AI on GitHub' })
+    ok(await star.count() === 1 && await star.getAttribute('href') === 'https://github.com/sahil1/bridge' && await star.getAttribute('target') === '_blank', 'About & Updates: one plain link to star Bridge AI on GitHub')
     ok(cut(errors).length === 0, 'desktop: no page errors', errors)
     await ctx.close()
   }

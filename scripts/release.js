@@ -27,7 +27,9 @@ if (read('desktop/package.json') !== version) fail(`desktop/package.json is ${re
 // The notes end with the oldest macOS the Mac app opens on, in words and as a line GitHub doesn't
 // show, which the update check reads (server/updates.js), so a Mac that can't open this version
 // isn't offered it. With the Android app in the release (CI passes --android when it was built and
-// signed), they say how to install it too.
+// signed), they say how to install it too. A line asking for a star goes last, where people read
+// release notes on GitHub; the app's own update notes leave it out (server/updates.js).
+const STAR = 'If Bridge AI is useful to you, a star on GitHub helps other people find it.'
 function notesFor(v, { android = false } = {}) {
   const log = fs.readFileSync(path.join(ROOT, 'CHANGELOG.md'), 'utf8')
   const m = log.match(new RegExp(`^## ${v.replace(/\./g, '\\.')}\\s*\\n([\\s\\S]*?)(?=^## |(?![\\s\\S]))`, 'm'))
@@ -35,7 +37,7 @@ function notesFor(v, { android = false } = {}) {
   const mac = JSON.parse(fs.readFileSync(path.join(ROOT, 'desktop', 'package.json'), 'utf8')).build?.mac?.minimumSystemVersion
   if (!/^\d+(\.\d+)*$/.test(mac || '')) fail('desktop/package.json has no build.mac.minimumSystemVersion')
   const apk = android ? 'The Android app is `Bridge-AI-android.apk`: open it on your phone to install it, or to update the one you have. It isn\'t on Google Play yet.\n\n' : ''
-  return `${m[1].trim().replace(/^### /gm, '## ')}\n\n${apk}The Mac app needs macOS ${mac.replace(/\.0$/, '')} or later. Checksums (SHA-256) are in \`SHA256SUMS.txt\`.\n\n<!-- macOS ${mac} or later -->\n`
+  return `${m[1].trim().replace(/^### /gm, '## ')}\n\n${apk}The Mac app needs macOS ${mac.replace(/\.0$/, '')} or later. Checksums (SHA-256) are in \`SHA256SUMS.txt\`.\n\n${STAR}\n\n<!-- macOS ${mac} or later -->\n`
 }
 
 // CI: write the notes, after checking the tag that started the build matches package.json.
