@@ -16,8 +16,9 @@ export const SECRETS = [
 ]
 
 // Home folders of users that aren't anyone in particular (bridge: the user inside the Docker image,
-// whose home is /home/bridge).
-export const GENERIC_USER = new Set(['you', 'me', 'user', 'username', 'name', 'runner', 'example', 'shared', 'public', 'yourname', 'your-name', '<you>', 'jane', 'john', 'alice', 'bob', 'admin', 'default', 'bridge'])
+// whose home is /home/bridge; web_user: the made-up home of code built with Emscripten, like
+// pdf.js's image decoders).
+export const GENERIC_USER = new Set(['you', 'me', 'user', 'username', 'name', 'runner', 'example', 'shared', 'public', 'yourname', 'your-name', '<you>', 'jane', 'john', 'alice', 'bob', 'admin', 'default', 'bridge', 'web_user'])
 // A home folder and the user it's named for (the first group).
 export const HOME_PATH = /(?:\/Users\/|\/home\/|[A-Za-z]:\\\\?Users\\\\?)([A-Za-z0-9._-]+)/
 // Addresses made to be public, or the companies whose tools Bridge AI runs.

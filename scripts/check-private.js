@@ -139,10 +139,11 @@ const BINARY = /\.(png|jpe?g|gif|webp|ico|icns|woff2?|ttf|otf|pdf|zip|gz|dmg|exe
 const SKIP_TEXT = new Set(['package-lock.json', 'desktop/package-lock.json'])
 // This file itself, with / separators like the paths it's compared with (Windows gives \).
 const self = path.relative(ROOT, fileURLToPath(import.meta.url)).split(path.sep).join('/')
-// Built bundles carry the libraries' own credits (authors' emails) and place names (time zones, a
-// metadata standard named after a city); your other values and secrets are still looked for in
-// them, and your place in everything else.
-const BUNDLE = /(^|\/)assets\/[^/]+\.(js|css|map)$/
+// Built bundles carry the libraries' own credits (authors' emails), place names (time zones, a
+// metadata standard named after a city) and minified text that reads like an address (pdf.js's
+// worker, an .mjs); your other values and secrets are still looked for in them, and your place in
+// everything else.
+const BUNDLE = /(^|\/)assets\/[^/]+\.(m?js|css|map)$/
 
 for (const { f, read, at: commit = '' } of list) {
   const rel = f.split(path.sep).join('/')
