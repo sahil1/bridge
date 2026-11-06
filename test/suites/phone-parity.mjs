@@ -16,8 +16,8 @@
 //
 // A path is what's tapped, from the tab bar: a tab (Chief, Agents, Meetings, Today, More), then the
 // buttons in it by name. A beta feature's paths (trial: its id) are followed with it on; with Home
-// on, Home is the first tab and Today is in More, which is checked then too. One marked mac (Settings
-// › Mail) is only there, and followed, on a Mac. "Search › x" types x in the top bar's search, which must offer it (for
+// on, Home is the first tab and Today is in More, which is checked then too. One marked mac (Mail,
+// its ⌘K actions and Settings › Mail) is only there, and followed, on a Mac. "Search › x" types x in the top bar's search, which must offer it (for
 // actions rather than places); "Settings › x" is the top bar's Settings, then its section x.
 import fs from 'node:fs'
 import path from 'node:path'
@@ -67,11 +67,11 @@ const PATHS = {
   'a:theme': { phone: 'Search › Color mode' },
   'a:ideas': { phone: 'Search › Add an idea' },
   'a:cal': { phone: 'Today › Calendar' },
-  'a:mail': { phone: 'Today › Mail' },
-  'a:triage': { phone: 'Search › Triage my inbox' },
-  'a:mail-done': { phone: 'Today › Mail' },
-  'a:mail-later': { phone: 'Today › Mail' },
-  'a:mail-reply': { phone: 'Today › Mail' },
+  'a:mail': { phone: 'Today › Mail', mac: true },
+  'a:triage': { phone: 'Search › Triage my inbox', mac: true },
+  'a:mail-done': { phone: 'Today › Mail', mac: true },
+  'a:mail-later': { phone: 'Today › Mail', mac: true },
+  'a:mail-reply': { phone: 'Today › Mail', mac: true },
   'a:mail-keys': { none: 'Keys are for a keyboard; on a phone the open message has Done, Remind me and Reply Assist as buttons' },
   'a:markets': { phone: 'Today › Markets' },
   'a:routines': { phone: 'Search › Show routines' },
@@ -316,7 +316,7 @@ try {
     const tabs = await tabNames()
     ok(tabs.join('|') === HOME_TABS.join('|'), 'Home on: Home is the first tab, Today is not a tab', tabs)
     ok(!!(await until(() => ph.p.locator('.hm').isVisible(), 10000)), 'and the phone opens at Home')
-    const today = [['More › Today', '.m-more-view .m-today'], ['More › Today › Calendar', '.m-more-view .m-today'], ['More › Today › Mail', '.m-more-view .m-today']].map(([phone, shows]) => ({ phone, shows }))
+    const today = [['More › Today', '.m-more-view .m-today'], ['More › Today › Calendar', '.m-more-view .m-today'], ...(IS_MAC ? [['More › Today › Mail', '.m-more-view .m-today']] : [])].map(([phone, shows]) => ({ phone, shows }))
     const routes = [...new Map([...Object.values(PATHS).filter((x) => x.trial === 'home'), ...today].map((x) => [`${x.phone}|${x.shows || ''}`, x])).values()]
     const bad = []
     for (const r of routes) {

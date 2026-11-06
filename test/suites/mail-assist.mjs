@@ -1,38 +1,32 @@
-// Mail's read-only help (server/mail.js, mailassist.js, freetimes.js), on a made-up Apple Mail (its
-// index and .emlx files in the server's own home folder) and a stand-in calendar (bridgecal), with
-// the stand-in model. Done and Remind me kept by Bridge AI: off Needs you and back, a reminder that
-// comes back saying so, new mail bringing a thread back, "remind me if nobody answers" going by
-// itself once someone does. New mail seen as Mail's index changes, and a message read once, then
-// kept. How You Write learnt from invented sent mail (your own words only, not what they quote or
-// the signature) and meeting lines (yours as Who spoke marks them: your mic on a call, your voice in
-// a room, not another voice and not a room nobody told apart), then shown, edited and cleared. With
-// no model, Reply Assist and How You Write say so; with one (the model picked for meeting notes),
-// a draft says which model and exactly what was sent, and Shorter, Warmer and More direct change it.
-// Scheduling Assist from a seeded calendar: working hours and days, a buffer around meetings and
-// more around one somewhere else, a day away, the length asked for and the other side's time zone.
-// And no write path anywhere: Mail's index and files are as they were, sqlite3 only ever opened read
-// only, osascript never run, and no code that scripts Mail.
+// Mail's read-only help (server/mail.js, mailassist.js, freetimes.js). Everywhere: Scheduling
+// Assist's time-finding on a seeded calendar (working hours and days, a buffer around meetings and
+// more around one somewhere else, a booked day and a day away, the length asked for, the other
+// side's working day, and theirs and yours not meeting); How You Write from recorded meetings (your
+// lines as Who spoke marks them: your mic on a call, your voice in a room, not the call's side,
+// another voice or a room nobody told apart), with no model first, then shown, edited and cleared;
+// and no write path (osascript never run, no server code that scripts Mail, an agent told mail is
+// read only). Off a Mac, mail, a draft and free times for an email say Mail is the Mac's, and Mail's
+// index is never opened.
+// On a Mac, the rest, on a made-up Apple Mail (its index and .emlx files in the server's own home
+// folder) and a stand-in calendar (bridgecal), with the stand-in model: Done and Remind me kept by
+// Bridge AI (off Needs you and back, a reminder that comes back saying so, new mail bringing a
+// thread back, "remind me if nobody answers" going by itself once someone does); new mail seen as
+// Mail's index changes, and a message read once, then kept; How You Write from sent mail too (your
+// own words only, not what they quote or the signature); a draft that says which model and exactly
+// what was sent, Shorter, Warmer and More direct, a nudge; free times for an email through the
+// server, put into a draft; and Mail's index and files as they were, sqlite3 only ever read only.
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { startKit, startModel, checks, until, sleep, ROOT, IS_MAC } from '../lib/harness.mjs'
-import { makeMailbox, calendarStandIn, rfc, SQLITE } from '../stand-ins/mailbox.mjs'
+import { makeMailbox, seedMeetings, calendarStandIn, rfc, sqliteBin } from '../stand-ins/mailbox.mjs'
+import { freeTimes, asksToMeet, minutesAsked, theirZone, scheduleOf } from '../../server/freetimes.js'
 
 const { ok, done } = checks('mail-assist')
 const ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone
 const pad = (n) => String(n).padStart(2, '0')
 const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const LOCAL = -new Date().getTimezoneOffset()
-
-if (!IS_MAC) {
-  const k = await startKit('mail-assist')
-  const r = await k.api('/mail')
-  ok(r.available === false && r.reason === 'notMac', 'not a Mac: the inbox says it reads Apple Mail on macOS', r)
-  const e = await k.api('/mail/1/draft', {}).then(() => null, (x) => x)
-  ok(!!e, 'and Reply Assist has nothing to read there', e?.message)
-  k.stop()
-  process.exit(done().fail ? 1 : 0)
-}
 
 // ---------- A calendar ----------
 // The next three working days after today: the first fully booked, the second with a meeting
@@ -51,27 +45,90 @@ const EVENTS = [
   { title: 'Cancelled: old sync', calendar: 'Work', start: at(D2, 15).toISOString(), end: at(D2, 16).toISOString(), allDay: false, canceled: true, attendees: [] },
 ]
 const SCHEDULE = { days: [1, 2, 3, 4, 5], start: '09:00', end: '17:00', buffer: 15, travel: 30, count: 3 }
-const kit = await startKit('mail-assist', { config: { name: 'Sam Tester', mail: { myDomains: ['example.com'], schedule: SCHEDULE } }, env: ({ bin }) => ({ BRIDGE_CALASK: calendarStandIn(bin), TZ: ZONE }) })
+const wall = (iso, zone) => {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: zone, hourCycle: 'h23', weekday: 'short', hour: 'numeric', minute: 'numeric', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date(iso)).map((x) => [x.type, x.value]))
+  return { wd: WD.indexOf(p.weekday), mins: (Number(p.hour) % 24) * 60 + Number(p.minute), day: `${p.year}-${p.month}-${p.day}` }
+}
+// Clear of every meeting by its buffer: 15 minutes, 30 around one somewhere else.
+const clear = (s) => EVENTS.filter((x) => !x.canceled && !x.allDay).every((x) => { const p = (x.location ? 30 : 15) * 60e3; return Date.parse(s.end) <= Date.parse(x.start) - p || Date.parse(s.start) >= Date.parse(x.end) + p })
+const inHours = (s, from = 9 * 60) => { const a = wall(s.start, ZONE), b = wall(s.end, ZONE); return a.wd >= 1 && a.wd <= 5 && a.mins >= from && b.mins <= 17 * 60 && a.day === b.day }
+
+// ---------- Scheduling Assist's time-finding, on every system ----------
+{
+  ok(asksToMeet('Could we find a time next week for a 45 minute call about the rollout?') && asksToMeet('When are you free on Thursday?') && !asksToMeet('Could you send me the budget sheet please?'), 'an email asking to meet is told from one that doesn\'t')
+  ok(minutesAsked('a 45 minute call') === 45 && minutesAsked('half an hour') === 30 && minutesAsked('an hour') === 60 && minutesAsked('a quick chat') === null, 'how long they ask for: 45 minutes, half an hour, an hour, or not said')
+  const nov = new Date(Date.UTC(2026, 10, 10, 12)), jul = new Date(Date.UTC(2026, 6, 10, 12))
+  ok(theirZone({ date: 'Thu, 05 Nov 2026 10:12:00 -0500' })?.offset === -300 && theirZone({ text: "I'm on PT, mornings are best", at: nov })?.offset === -480 && theirZone({ text: "I'm on PT", at: jul })?.offset === -420 && theirZone({ text: 'Anything after 2pm CET works' })?.offset === 60 && theirZone({ text: 'Thanks' }) === null,
+    'their time zone: from their Date header, or one they name (PT in winter and summer, CET), and none when neither says')
+  const s = scheduleOf({ mail: { schedule: SCHEDULE } })
+  ok(s.start === 540 && s.end === 1020 && s.buffer === 15 && s.travel === 30 && s.days.join() === '1,2,3,4,5' && scheduleOf({}).count === 3, 'working hours from settings, Monday to Friday 9 to 5 unless set')
+  const now = day(0) // the start of today: today's working hours count too
+  let r = freeTimes({ events: EVENTS, now, zone: ZONE, schedule: SCHEDULE, minutes: 30 })
+  ok(r.slots.length === 3 && r.slots.every((x) => inHours(x) && clear(x)) && !r.slots.some((x) => [ymd(D1), ymd(D3)].includes(wall(x.start, ZONE).day)), '3 free half hours: in working hours on working days, clear of meetings, none on the booked day or the day away', r.slots.map((x) => wall(x.start, ZONE)))
+  ok(r.slots.some((x) => x.start === at(D2, 9).toISOString()), 'the half hour before the site visit\'s travel time is free (9:00)', r.slots)
+  r = freeTimes({ events: EVENTS, now, zone: ZONE, schedule: SCHEDULE, minutes: 45 })
+  ok(r.minutes === 45 && r.slots.every((x) => Date.parse(x.end) - Date.parse(x.start) === 45 * 60e3 && clear(x)) && !r.slots.some((x) => x.start === at(D2, 9).toISOString()), '45 minutes: as long as asked, and 9:00 before the site visit no longer fits', r.slots)
+  const behind = -D2.getTimezoneOffset() - 180
+  r = freeTimes({ events: EVENTS, now, zone: ZONE, schedule: SCHEDULE, minutes: 45, theirs: { offset: behind } })
+  const theirs = (x) => { const t = new Date(Date.parse(x.start) + behind * 60e3); return { h: t.getUTCHours() + t.getUTCMinutes() / 60, wd: t.getUTCDay() } }
+  ok(r.both === true && r.slots.length === 3 && r.slots.every((x) => inHours(x) && clear(x) && theirs(x).h >= 9 && theirs(x).h + 0.75 <= 18 && theirs(x).wd >= 1 && theirs(x).wd <= 5), 'three hours behind: in your working hours and in theirs', r.slots.map(theirs))
+  r = freeTimes({ events: EVENTS, now, zone: ZONE, schedule: SCHEDULE, minutes: 30, theirs: { offset: -D2.getTimezoneOffset() + 12 * 60 } })
+  ok(r.both === false && r.slots.length === 3 && r.slots.every((x) => inHours(x)), 'twelve hours apart, the days don\'t meet: it says so, and offers yours', r)
+  r = freeTimes({ events: EVENTS, now, zone: ZONE, schedule: { ...SCHEDULE, start: '10:00' }, minutes: 30 })
+  ok(r.slots.every((x) => inHours(x, 10 * 60)), 'from 10:00 when that\'s when your day starts', r.slots.map((x) => wall(x.start, ZONE)))
+  r = freeTimes({ events: EVENTS, now, zone: ZONE, schedule: { ...SCHEDULE, count: 5 }, minutes: 30 })
+  ok(r.slots.length === 5, 'five times when Settings › Mail asks for five', r.slots.length)
+}
+
+const kit = await startKit('mail-assist', { config: { name: 'Sam Tester', mail: { myDomains: ['example.com'], schedule: SCHEDULE } }, env: ({ bin }) => (IS_MAC ? { BRIDGE_CALASK: calendarStandIn(bin), TZ: ZONE } : {}) })
 const model = await startModel('mail-assist')
 const api = kit.api
 const err = (p, body, method) => api(p, body, method).then(() => null, (e) => e)
 
-// What's run by the server, logged: sqlite3 (then the real one) and osascript (never the real one).
+// What's run by the server, logged: sqlite3 (then the system's, on a Mac) and osascript (never the
+// real one).
 const LOGS = path.join(kit.bin, 'runs.log')
-const real = SQLITE
+const real = sqliteBin()
 kit.program('sqlite3', `const fs = require('node:fs'); fs.appendFileSync(${JSON.stringify(LOGS)}, JSON.stringify({ sqlite3: process.argv.slice(2) }) + '\\n')
-const r = require('node:child_process').spawnSync(${JSON.stringify(real)}, process.argv.slice(2), { stdio: 'inherit' }); process.exit(r.status ?? 1)`)
+${IS_MAC ? `const r = require('node:child_process').spawnSync(${JSON.stringify(real)}, process.argv.slice(2), { stdio: 'inherit' }); process.exit(r.status ?? 1)` : 'process.exit(1)'}`)
 kit.program('osascript', `require('node:fs').appendFileSync(${JSON.stringify(LOGS)}, JSON.stringify({ osascript: process.argv.slice(2) }) + '\\n')`)
 const runs = () => (fs.existsSync(LOGS) ? fs.readFileSync(LOGS, 'utf8') : '').split('\n').filter(Boolean).map((l) => JSON.parse(l))
 
-// ---------- Mail and meetings, made up (stand-ins/mailbox.mjs) ----------
-const box = makeMailbox(kit)
-const { V, sqlite, emlx, who } = box
-const ME = 'Sam Tester <me@example.com>'
-ok(fs.existsSync(box.INDEX), 'the made-up index is there')
-
 const DRAFT_ASK = /reply to the email below|follow-up asking again/
-try {
+const ME = 'Sam Tester <me@example.com>'
+
+// ---------- Off a Mac: Mail is the Mac's; How You Write from meetings ----------
+async function elsewhere() {
+  seedMeetings(kit)
+  const r = await api('/mail')
+  ok(r.available === false && r.reason === 'notMac' && /macOS/.test(r.setup), 'not a Mac: the inbox says it reads Apple Mail on macOS', r)
+  for (const [p, what] of [['/mail/1/draft', 'a draft'], ['/mail/1/times', 'free times for an email'], ['/mail/message/1', 'an email']]) {
+    const e = await err(p, p.endsWith('draft') ? {} : null)
+    ok(/isn't available on this platform/.test(e?.message || ''), `${what}: says Mail is the Mac's`, e?.message)
+  }
+  let v = await api('/mail/voice')
+  ok(v.profile === null && v.now === null, 'How You Write: nothing yet, and no model to learn with', v)
+  const e = await err('/mail/voice/learn', {})
+  ok(e?.j?.code === 'no_model' && /Model Providers/.test(e.message), 'with no model, learning says so and where to add one', e?.j)
+  await api('/providers/openai', { values: { OPENAI_API_KEY: 'sk-test', OPENAI_BASE_URL: `${model.url}/v1` } }, 'PUT')
+  await api('/settings', { meetings: { model: 'openai:gpt-5' } }, 'PATCH')
+  v = await api('/mail/voice/learn', {})
+  const learnt = model.asked(/Describe how they write email/).at(-1) || ''
+  ok(/Read 0 emails and 2 meeting lines/.test(v.profile || '') && v.from?.replies === 0 && v.from.lines === 2 && v.from.meetings === 2 && !v.examples.length && v.model === 'openai:gpt-5', 'learnt from your 2 lines in 2 meetings, with no mail here, by the model for meeting notes', v)
+  ok(/ship the pilot on Monday/.test(learnt) && /keep the review short/.test(learnt) && !/budget is not approved/.test(learnt) && !/wait until next quarter/.test(learnt) && !/Nobody can tell/.test(learnt) && !/Fine by me/.test(learnt),
+    'only your lines: your mic on a call and your voice in a room, not the call\'s side, another voice or a room nobody told apart', learnt.split('\n').filter((l) => /^M\d/.test(l)))
+  v = await api('/mail/voice', { profile: '- Short and friendly' }, 'PUT')
+  ok(v.profile === '- Short and friendly' && !!v.editedAt, 'changed by you')
+  v = await api('/mail/voice', null, 'DELETE')
+  ok(v.profile === null && !fs.existsSync(path.join(kit.data, 'mail', 'voice.json')), 'and cleared: nothing kept')
+  ok(!runs().some((x) => x.sqlite3), 'Mail\'s index was never opened (no sqlite3)', runs())
+}
+
+// ---------- On a Mac: the whole of it, on a made-up Apple Mail (stand-ins/mailbox.mjs) ----------
+async function onMac() {
+  const box = makeMailbox(kit)
+  const { V, sqlite, emlx, who } = box
+  ok(fs.existsSync(box.INDEX), 'the made-up index is there')
   // ---------- The inbox, with Done and Remind me ----------
   let r = await api('/mail?refresh=1')
   ok(r.available && r.messages.length === 4, 'the inbox reads', r.error || r.messages?.map((m) => m.subject))
@@ -190,18 +247,13 @@ INSERT INTO messages VALUES (141, 0, 0, 0, ${t2 + 6}, ${t2 + 1}, 1, 1, 91, 141, 
   e = await err('/mail/3/times')
   ok(e?.j?.code === 'calendarAccess', 'with the calendar not allowed, Scheduling Assist says so (to allow it)', e?.j)
   fs.writeFileSync(path.join(kit.bin, 'bridgecal.json'), JSON.stringify({ status: 'granted', events: EVENTS }))
-  const wall = (iso, zone) => {
-    const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: zone, hourCycle: 'h23', weekday: 'short', hour: 'numeric', minute: 'numeric', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date(iso)).map((x) => [x.type, x.value]))
-    return { wd: WD.indexOf(p.weekday), mins: (Number(p.hour) % 24) * 60 + Number(p.minute), day: `${p.year}-${p.month}-${p.day}` }
-  }
-  const clear = (s, pad) => EVENTS.filter((x) => !x.canceled && !x.allDay).every((x) => { const p = (x.location ? 30 : 15) * 60e3; return Date.parse(s.end) <= Date.parse(x.start) - Math.max(p, pad) || Date.parse(s.start) >= Date.parse(x.end) + Math.max(p, pad) })
   let t = await api('/mail/3/times')
   const theirDay = (s) => { const x = new Date(Date.parse(s.start) + t.theirs.offset * 60000); return { h: x.getUTCHours() + x.getUTCMinutes() / 60, wd: x.getUTCDay() } }
   ok(t.zone === ZONE && t.asks && t.asked === 45 && t.minutes === 45 && t.theirs?.offset === LOCAL - 180 && t.both === true, 'Lee asks for 45 minutes, three hours behind (from the Date header)', { zone: t.zone, asked: t.asked, theirs: t.theirs, both: t.both })
   ok(t.slots.length === 3 && t.slots.every((s) => Date.parse(s.end) - Date.parse(s.start) === 45 * 60e3), '3 times, each 45 minutes', t.slots)
   ok(t.slots.every((s) => { const a = wall(s.start, ZONE), b = wall(s.end, ZONE); return a.wd >= 1 && a.wd <= 5 && a.mins >= 9 * 60 && b.mins <= 17 * 60 && a.day === b.day }), 'all in your working hours, on working days', t.slots.map((s) => wall(s.start, ZONE)))
   ok(t.slots.every((s) => { const x = theirDay(s); return x.h >= 9 && x.h + 0.75 <= 18 && x.wd >= 1 && x.wd <= 5 }), 'and in Lee\'s working day too', t.slots.map(theirDay))
-  ok(t.slots.every((s) => clear(s, 0)) && !t.slots.some((s) => [ymd(D1), ymd(D3)].includes(wall(s.start, ZONE).day)), 'clear of your meetings by 15 minutes (30 around the site visit), none on the booked day or the day away', t.slots)
+  ok(t.slots.every((s) => clear(s)) && !t.slots.some((s) => [ymd(D1), ymd(D3)].includes(wall(s.start, ZONE).day)), 'clear of your meetings by 15 minutes (30 around the site visit), none on the booked day or the day away', t.slots)
   ok(t.slots.every((s) => Date.parse(s.start) >= Date.now() + 55 * 60e3), 'and none in the next hour', t.slots)
   // Another email with no zone named, mail from your own time zone: your hours only, the length asked.
   t = await api('/mail/4/times?minutes=30')
@@ -238,9 +290,15 @@ INSERT INTO messages VALUES (141, 0, 0, 0, ${t2 + 6}, ${t2 + 1}, 1, 1, 91, 141, 
   ok(snap() === was, 'Mail\'s index and message files are exactly as they were, after reading, Done, Remind me, learning, drafting and scheduling')
   const sq = runs().filter((x) => x.sqlite3)
   ok(sq.length > 5 && sq.every((x) => x.sqlite3.includes('-readonly') && x.sqlite3.some((a) => /\?mode=ro$/.test(a))), 'sqlite3 was only ever opened read only', sq.filter((x) => !x.sqlite3.includes('-readonly')).slice(0, 3))
+}
+
+try {
+  if (IS_MAC) await onMac()
+  else await elsewhere()
+  // ---------- No write path, on every system ----------
   ok(!runs().some((x) => x.osascript), 'osascript never ran: Mail was never scripted', runs().filter((x) => x.osascript))
   // In the code: nothing scripts Mail, and an agent working on mail is told it's read only.
-  const code = ['mail.js', 'mailparse.js', 'mailassist.js', 'freetimes.js', 'index.js'].map((f) => [f, fs.readFileSync(path.join(ROOT, 'server', f), 'utf8')])
+  const code = ['mail.js', 'mailparse.js', 'mailassist.js', 'freetimes.js', 'index.js'].map((f) => [f, fs.readFileSync(path.join(ROOT, 'server', f), 'utf8').replace(/\r\n/g, '\n')])
   const scripts = code.filter(([, s]) => /tell application "Mail"|Application\(['"]Mail['"]\)|\b(?:set (?:read|flagged|junk mail|deleted) status|make new outgoing message|send outgoing|move \w+ to mailbox)\b/i.test(s)).map(([f]) => f)
   ok(!scripts.length, 'no server code scripts Mail (no tell application "Mail", no read, flag, junk, delete, move or send)', scripts)
   const index = code.find(([f]) => f === 'index.js')[1]
