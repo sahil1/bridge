@@ -20,7 +20,8 @@ import './meetings.css'
 import SpeechSetup, { MeetingsSetup } from './SpeechSetup.jsx'
 import { ActionItems, SinceLastTime } from './work.jsx'
 import { useTrial } from '../../trials.js'
-import { InsightsView, PeopleView } from './insights.jsx'
+import { InsightsView } from './insights.jsx'
+import { PeopleView } from './people.jsx'
 
 // The meeting pages: the list of meetings, and one meeting with your notes beside its transcript, the
 // summary, questions about it, and its action items for the Chief of Staff. The recording itself is
@@ -165,6 +166,27 @@ function useSearch(q, archived = false) {
   return hits?.archived === archived ? hits : null
 }
 
+// Meeting Insights turned itself on (5 meetings recorded here): said once, with the way to look and
+// Turn off. Either, or OK, and it isn't said again on any device.
+function InsightsOn({ n, onShow }) {
+  const [busy, setBusy] = useState(false)
+  const done = async (off = false) => {
+    setBusy(true)
+    try { await api('/meetings/auto-insights', { method: 'POST', body: { off } }); refetch('/meetings'); refetch('/config') } catch { setBusy(false) }
+  }
+  return (
+    <div className="mt-insights-on" role="status">
+      <Icon name="trend" size={15} />
+      <p className="small"><b>{t('Meeting Insights is on.')}</b> {t('With {n} meetings recorded on this computer, Insights and People add them up: the time you spend in meetings, when, in which series and with whom. Worked out here and never sent. It\'s a beta feature, also in Settings › About & Updates › Beta Features.', { n })}</p>
+      <div className="mt-insights-acts">
+        <button type="button" className="btn small primary" disabled={busy} onClick={() => { onShow(); done() }}>{t('Show Insights')}</button>
+        <button type="button" className="btn small" disabled={busy} onClick={() => done(true)}>{t('Turn off')}</button>
+        <button type="button" className="ghost-btn" disabled={busy} onClick={() => done()} aria-label={t('Got it')} title={t('Got it')}><Icon name="x" size={13} /></button>
+      </div>
+    </div>
+  )
+}
+
 const SETUP = 'cc-meet-setup'
 const HOME_TABS = [['list', 'mic', tx('Meetings')], ['insights', 'trend', tx('Insights')], ['people', 'users', tx('People')]]
 const ASK_ALL = [tx('What did I agree to do this week?'), tx("What's still open from this week?"), tx('Write my weekly update from these meetings')]
@@ -191,6 +213,10 @@ export function MeetingsHome({ onOpen }) {
   const [tabKept, setTab] = usePersisted('cc-meet-tab', 'list')
   const tab = insightsOn && ['insights', 'people'].includes(tabKept) ? tabKept : 'list'
   const [person, setPerson] = useState(null)
+  // Turned on by itself once there were meetings to add up (server/index.js): the tabs at once, and
+  // a note saying so until it's read.
+  const autoOn = data?.insightsOn
+  useEffect(() => { if (autoOn && !insightsOn) refetch('/config') }, [autoOn, insightsOn])
   useEffect(() => {
     const on = (e) => { setTab(e.detail?.tab || 'list'); setPerson(e.detail?.person || null) }
     window.addEventListener('bridge-meetings-tab', on)
@@ -229,7 +255,8 @@ export function MeetingsHome({ onOpen }) {
       </PaneHeader>
     <div className="mt-home">
       {memory && <MemoryPanel onClose={() => setMemory(false)} />}
-      {tab === 'insights' && <InsightsView onPerson={(pid) => { setTab('people'); setPerson(pid) }} />}
+      {autoOn && insightsOn && <InsightsOn n={autoOn.meetings} onShow={() => { setTab('insights'); setPerson(null) }} />}
+      {tab === 'insights' && <InsightsView onPerson={(pid) => { setTab('people'); setPerson(pid) }} onOpen={onOpen} onPeople={() => { setTab('people'); setPerson(null) }} />}
       {tab === 'people' && <PeopleView onOpen={onOpen} person={person} setPerson={setPerson} />}
       {tab === 'list' && <>
       {first ? <MeetingsSetup onDone={doneSetup} /> : <SpeechSetup recording={!!m?.rec} />}

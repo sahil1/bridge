@@ -5,6 +5,7 @@
 // short agenda above the Teams boilerplate are kept.
 import { execFile } from 'node:child_process'
 import { tool, calBin } from './fixes.js'
+import { notPerson } from './notpeople.js'
 
 const SEP_EV = '@@EV@@'
 const SEP_PROP = '¦' // ¦
@@ -117,7 +118,10 @@ export function parse(out) {
 }
 
 // One event as the app shows it, from what bridgecal or icalBuddy said about it. start, end: Dates.
-function eventOf({ title, calendar, start, end, allDay, location, url, notes, attendees = [], canceled = false }) {
+// Its people only: a room, a shared calendar, a list or a mailbox like schedule@ invited with them
+// isn't someone at it (told while its address is still whole).
+function eventOf({ title, calendar, start, end, allDay, location, url, notes, attendees: all = [], canceled = false }) {
+  const attendees = all.filter((a) => !notPerson(a))
   return {
     id: `${title}|${start.toISOString()}`,
     title: title || '(no title)',

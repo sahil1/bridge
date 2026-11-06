@@ -1,12 +1,29 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import Icon from '../Icon.jsx'
 import { api, refetch } from '../../api.js'
-import { t, tx } from '../../i18n/index.js'
+import { t, tx, locale } from '../../i18n/index.js'
+import { usePersisted } from '../layout.jsx'
+import { openMeeting } from './recording.jsx'
 
 // Tools for meetings: meeting memory (the names and terms in your meetings, how they get misheard,
 // a note on each), fixing a word everywhere in a meeting, and transcribing a meeting again from its
 // audio with another engine, model or language.
+
+// A group that folds: its name, how many it has, something more about it, and what's in it.
+export function Fold({ id, label, count, extra, open, onToggle, children }) {
+  return (
+    <div className={`mt-fold${open ? ' open' : ''}`} data-fold={id}>
+      <button type="button" className="mt-fold-head" aria-expanded={open} onClick={() => onToggle(!open)}>
+        <Icon name="chevron" size={11} className="mt-fold-chev" />
+        <span className="mt-fold-name">{label}</span>
+        <span className="mt-fold-n num">{count}</span>
+        {extra && <span className="muted small mt-fold-extra">{extra}</span>}
+      </button>
+      {open && <div className="mt-fold-body">{children}</div>}
+    </div>
+  )
+}
 
 export const LANGS = [['auto', tx('Detect it')], ['en', tx('English')], ['es', tx('Spanish')], ['fr', tx('French')], ['de', tx('German')], ['it', tx('Italian')], ['pt', tx('Portuguese')], ['nl', tx('Dutch')], ['hi', tx('Hindi')], ['zh', tx('Chinese')], ['ja', tx('Japanese')], ['ko', tx('Korean')], ['ar', tx('Arabic')], ['ru', tx('Russian')], ['pl', tx('Polish')], ['tr', tx('Turkish')], ['sv', tx('Swedish')], ['uk', tx('Ukrainian')]]
 // The languages notes can be written in (meetings.js SUMMARY_LANGS).
@@ -74,12 +91,102 @@ export function FixWord({ id, from: from0 = '', onClose, onDone }) {
 }
 
 // Meeting memory: yours to read and change. Learned ones came from summaries; edit one and it's yours.
+// As it grows (dozens of meetings bring hundreds of names) it's in groups that fold, each saying how
+// many it has: by the series of meetings a name comes up in (the one-off meetings together), by the
+// month it last came up, or A to Z. A search and a filter narrow it; a name's meetings open from it.
+const MEM_BY = [['series', tx('By meeting')], ['month', tx('By month')], ['az', tx('A–Z')]]
+const MEM_ONLY = [['all', tx('All')], ['you', tx('Yours')], ['learned', tx('Learned')], ['note', tx('With a note')], ['heard', tx('Misheard')]]
+const ONLY = { all: () => true, you: (x) => x.source === 'you', learned: (x) => x.source !== 'you', note: (x) => !!x.note, heard: (x) => x.heard.length > 0 }
+// With no more than this many shown, every group is open.
+const MEM_OPEN = 30
+const shortDay = (iso) => new Date(iso).toLocaleDateString(locale(), { month: 'short', day: 'numeric', year: new Date(iso).getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined })
+
+function memGroups(list, seen, by) {
+  const ms = (x) => (x.meetings || []).map((id) => seen[id] && { id, ...seen[id] }).filter(Boolean).sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt)))
+  const groups = new Map()
+  const into = (key, label, x, m) => {
+    const g = groups.get(key) || { key, label, items: [], meetings: new Map() }
+    g.items.push(x)
+    for (const y of m) g.meetings.set(y.id, y)
+    groups.set(key, g)
+  }
+  // A series' name: the newest of its meetings' names.
+  const names = new Map()
+  for (const m of Object.values(seen).sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt)))) if (m.series && !names.has(m.series)) names.set(m.series, m.title)
+  for (const x of list) {
+    const m = ms(x)
+    if (by === 'az') { const c = x.term.trim()[0]?.toLocaleUpperCase(locale()) || '#'; into(/\p{L}/u.test(c) ? c : '#', /\p{L}/u.test(c) ? c : '#', x, []); continue }
+    if (by === 'month') {
+      const at = m[0]?.startedAt || x.updatedAt
+      const k = at ? at.slice(0, 7) : ':none'
+      into(k, at ? new Date(`${k}-15T12:00`).toLocaleDateString(locale(), { month: 'long', year: 'numeric' }) : t('Not from a meeting'), x, m.filter((y) => String(y.startedAt).startsWith(k)))
+      continue
+    }
+    // The series it comes up in most, else the one-off meetings, else none.
+    const count = new Map()
+    for (const y of m) if (y.series) count.set(y.series, (count.get(y.series) || 0) + 1)
+    const top = [...count].sort((a, b) => b[1] - a[1])[0]?.[0]
+    if (top) into(top, names.get(top) || top, x, m.filter((y) => y.series === top))
+    else if (m.length) into(':one', t('One-off meetings'), x, m)
+    else into(':none', t('Not from a meeting'), x, m)
+  }
+  const out = [...groups.values()].map((g) => ({ ...g, meetings: [...g.meetings.values()].sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt))) }))
+  if (by === 'az') return out.sort((a, b) => (a.key === '#') - (b.key === '#') || a.key.localeCompare(b.key, locale()))
+  if (by === 'month') return out.sort((a, b) => (a.key === ':none') - (b.key === ':none') || b.key.localeCompare(a.key))
+  return out.sort((a, b) => (a.key.startsWith(':')) - (b.key.startsWith(':')) || (a.key === ':none') - (b.key === ':none') || b.items.length - a.items.length)
+}
+
+// One name: how it's spelled, what it's heard as, its note, and the meetings it came up in (each
+// opens). Edit puts its three fields in place of it.
+function MemTerm({ x, seen, onSave, onRemove, onOpen }) {
+  const [edit, setEdit] = useState(false)
+  const [shown, setShown] = useState(false)
+  const list = (s) => s.split(',').map((y) => y.trim()).filter(Boolean)
+  const ms = (x.meetings || []).map((id) => seen[id] && { id, ...seen[id] }).filter(Boolean).sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt)))
+  if (edit) {
+    return (
+      <div className="mt-mem-row" data-term={x.term}>
+        <input className="mt-mem-term" defaultValue={x.term} autoFocus onBlur={(e) => e.target.value.trim() !== x.term && onSave(x, { term: e.target.value })} aria-label={t('{term}: name', { term: x.term })} />
+        <input defaultValue={x.heard.join(', ')} onBlur={(e) => e.target.value !== x.heard.join(', ') && onSave(x, { heard: list(e.target.value) })} placeholder={t('Heard as')} aria-label={t('{term}: heard as', { term: x.term })} />
+        <input defaultValue={x.note} onBlur={(e) => e.target.value !== x.note && onSave(x, { note: e.target.value })} placeholder={t('Note')} aria-label={t('{term}: note', { term: x.term })} />
+        <button type="button" className="btn small" onClick={() => setEdit(false)}>{t('Done')}</button>
+        <button type="button" className="ghost-btn" onClick={() => onRemove(x)} aria-label={t('Remove {name}', { name: x.term })} title={t('Remove')}><Icon name="trash" size={13} /></button>
+      </div>
+    )
+  }
+  return (
+    <div className="mt-mem-item" data-term={x.term}>
+      <div className="mt-mem-line">
+        <span className="mt-mem-what">
+          <b>{x.term}</b>
+          {x.heard.length > 0 && <span className="mt-mem-heard small">{t('heard as')} {x.heard.slice(0, 4).map((h) => <i key={h}>{h}</i>)}{x.heard.length > 4 ? ` +${x.heard.length - 4}` : ''}</span>}
+          {x.note && <span className="muted small mt-mem-note">{x.note}</span>}
+        </span>
+        <span className={`mt-mem-src ${x.source}`}>{x.source === 'you' ? t('yours') : t('learned')}</span>
+        {ms.length > 0 && <button type="button" className="ghost-btn mt-mem-in small" aria-expanded={shown} onClick={() => setShown((v) => !v)}>{ms.length === 1 ? t('In {n} meeting', { n: 1 }) : t('In {n} meetings', { n: ms.length })}</button>}
+        <button type="button" className="ghost-btn" onClick={() => setEdit(true)} aria-label={t('Edit {name}', { name: x.term })} title={t('Edit')}><Icon name="edit" size={13} /></button>
+      </div>
+      {shown && (
+        <div className="mt-mem-meetings">
+          {ms.slice(0, 12).map((m) => <button key={m.id} type="button" className="mt-mem-meeting small" onClick={() => onOpen(m.id)} title={t('Open {name}', { name: m.title })}><Icon name="mic" size={11} /> <span>{m.title}</span> <span className="muted">{shortDay(m.startedAt)}</span></button>)}
+          {ms.length > 12 && <span className="muted small">{t('and {n} earlier', { n: ms.length - 12 })}</span>}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function MemoryPanel({ onClose }) {
   const [terms, setTerms] = useState(null)
+  const [seen, setSeen] = useState({}) // meeting id -> { title, startedAt, series }
   const [q, setQ] = useState('')
+  const [only, setOnly] = useState('all')
+  const [by, setBy] = usePersisted('cc-mem-by', 'series')
+  const [open, setOpen] = useState({})
+  const [full, setFull] = useState({}) // groups shown in full
   const [add, setAdd] = useState({ term: '', heard: '', note: '' })
   const [err, setErr] = useState(null)
-  const load = () => api('/meetings/memory').then((r) => setTerms(r.terms)).catch((e) => setErr(e.message))
+  const load = () => api('/meetings/memory').then((r) => { setTerms(r.terms); setSeen(r.meetings || {}) }).catch((e) => setErr(e.message))
   useEffect(() => { load() }, [])
   const list = (s) => s.split(',').map((x) => x.trim()).filter(Boolean)
   const save = async (x, patch) => { setErr(null); try { await api(`/meetings/memory/${x.id}`, { method: 'PATCH', body: patch }); load(); refetch('/meetings') } catch (e) { setErr(e.message) } }
@@ -89,7 +196,11 @@ export function MemoryPanel({ onClose }) {
     setErr(null)
     try { await api('/meetings/memory', { method: 'POST', body: { term: add.term, heard: list(add.heard), note: add.note } }); setAdd({ term: '', heard: '', note: '' }); load() } catch (x) { setErr(x.message) }
   }
-  const shown = (terms || []).filter((x) => !q || `${x.term} ${x.heard.join(' ')} ${x.note}`.toLowerCase().includes(q.toLowerCase()))
+  const go = (id) => { onClose(); openMeeting(id) }
+  const s = q.trim().toLowerCase()
+  const shown = (terms || []).filter(ONLY[only]).filter((x) => !s || `${x.term} ${x.heard.join(' ')} ${x.note}`.toLowerCase().includes(s))
+  const groups = useMemo(() => memGroups(shown, seen, by), [shown.map((x) => `${x.id}:${x.updatedAt}`).join('|'), seen, by]) // eslint-disable-line react-hooks/exhaustive-deps
+  const every = !!s || shown.length <= MEM_OPEN
   return (
     <Dialog title={t('Meeting memory')} onClose={onClose} wide>
       <p className="muted small mt-mem-about">{t('Names and terms from your meetings. The speech engine listens for them, transcripts show them fixed where they were misheard, and the notes and answers know who and what they are. Fixing a word with Remember on adds it here, and each summary adds the names it finds.')}</p>
@@ -100,18 +211,31 @@ export function MemoryPanel({ onClose }) {
         <button type="submit" className="btn small" disabled={add.term.trim().length < 2}><Icon name="plus" size={12} /> {t('Add')}</button>
       </form>
       {err && <p className="error-text small">{err}</p>}
-      {terms && terms.length > 8 && <input className="mt-search" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('Find a name')} aria-label={t('Find a name')} />}
+      {terms?.length > 0 && (
+        <div className="mt-mem-tools">
+          <input className="mt-search" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={terms.length === 1 ? t('Find a name') : t('Find a name among {n}', { n: terms.length })} aria-label={t('Find a name')} />
+          <div className="mt-places mt-mem-only" role="tablist" aria-label={t('Show')}>
+            {MEM_ONLY.map(([k, l]) => { const n = terms.filter(ONLY[k]).length; return (k === 'all' || n > 0) && <button key={k} type="button" role="tab" aria-selected={only === k} className={only === k ? 'on' : ''} onClick={() => setOnly(k)}>{t(l)} <span className="muted num">{n}</span></button> })}
+          </div>
+          <div className="seg small-seg" role="tablist" aria-label={t('Group by')}>
+            {MEM_BY.map(([k, l]) => <button key={k} type="button" role="tab" aria-selected={by === k} className={by === k ? 'on' : ''} onClick={() => setBy(k)}>{t(l)}</button>)}
+          </div>
+        </div>
+      )}
       <div className="mt-mem-list">
         {!terms && <div className="skeleton-rows"><div /><div /></div>}
         {terms && !terms.length && <p className="muted small">{t('Nothing yet. Fix a misheard name in a transcript, or add one above.')}</p>}
-        {shown.map((x) => (
-          <div key={`${x.id}:${x.updatedAt}`} className="mt-mem-row">
-            <input className="mt-mem-term" defaultValue={x.term} onBlur={(e) => e.target.value.trim() !== x.term && save(x, { term: e.target.value })} aria-label={t('{term}: name', { term: x.term })} />
-            <input defaultValue={x.heard.join(', ')} onBlur={(e) => e.target.value !== x.heard.join(', ') && save(x, { heard: list(e.target.value) })} placeholder={t('Heard as')} aria-label={t('{term}: heard as', { term: x.term })} />
-            <input defaultValue={x.note} onBlur={(e) => e.target.value !== x.note && save(x, { note: e.target.value })} placeholder={t('Note')} aria-label={t('{term}: note', { term: x.term })} />
-            <span className={`mt-mem-src ${x.source}`} title={x.seen ? (x.seen === 1 ? t('In {n} meeting', { n: x.seen }) : t('In {n} meetings', { n: x.seen })) : ''}>{x.source === 'you' ? t('yours') : t('learned')}</span>
-            <button type="button" className="ghost-btn" onClick={() => remove(x)} aria-label={t('Remove {name}', { name: x.term })} title={t('Remove')}><Icon name="trash" size={13} /></button>
-          </div>
+        {terms?.length > 0 && !shown.length && <p className="muted small">{s ? t('Nothing matches "{q}".', { q: q.trim() }) : t('None of these yet.')}</p>}
+        {groups.map((g, i) => (
+          <Fold key={`${by}:${g.key}`} id={`mem-${g.key}`} count={g.items.length} open={g.key in open ? open[g.key] : every || i === 0} onToggle={(v) => setOpen((o) => ({ ...o, [g.key]: v }))}
+            label={<>{by === 'series' && !g.key.startsWith(':') && <Icon name="repeat" size={11} className="muted" />}{g.label}</>}
+            extra={g.meetings.length > 0 && (g.meetings.length === 1 ? t('in {n} meeting', { n: 1 }) : t('in {n} meetings', { n: g.meetings.length }))}>
+            <div className="mt-mem-group">
+              {g.meetings.length > 0 && <button type="button" className="mt-mem-meeting small mt-mem-latest" onClick={() => go(g.meetings[0].id)} title={t('Open {name}', { name: g.meetings[0].title })}><Icon name="mic" size={11} /> <span>{t('The latest: {title}', { title: g.meetings[0].title })}</span> <span className="muted">{shortDay(g.meetings[0].startedAt)}</span></button>}
+              {(full[g.key] || every ? g.items : g.items.slice(0, MEM_OPEN)).map((x) => <MemTerm key={`${x.id}:${x.updatedAt}`} x={x} seen={seen} onSave={save} onRemove={remove} onOpen={go} />)}
+              {!every && g.items.length > MEM_OPEN && <button type="button" className="ghost-btn mt-mem-more" onClick={() => setFull((f) => ({ ...f, [g.key]: !f[g.key] }))}>{full[g.key] ? t('Show fewer') : t('Show all {n}', { n: g.items.length })} <Icon name={full[g.key] ? 'up' : 'down'} size={11} /></button>}
+            </div>
+          </Fold>
         ))}
       </div>
     </Dialog>

@@ -71,7 +71,8 @@ if args.first == "events" {
       if !light {
         it["url"] = e.url?.absoluteString ?? ""
         it["notes"] = e.notes ?? ""
-        it["attendees"] = (e.attendees ?? []).map { p in p.name ?? p.url.absoluteString.replacingOccurrences(of: "mailto:", with: "") }
+        // People only: a room, a resource or a group invited to it isn't someone at it.
+        it["attendees"] = (e.attendees ?? []).filter { p in p.participantType == .person || p.participantType == .unknown }.map { p in p.name ?? p.url.absoluteString.replacingOccurrences(of: "mailto:", with: "") }
       }
       out.append(it)
     }
