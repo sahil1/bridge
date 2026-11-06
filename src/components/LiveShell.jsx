@@ -7,6 +7,9 @@ import { openSocket, usePoll } from '../api.js'
 import disposeTerm from '../disposeTerm.js'
 import gpu from '../termGpu.js'
 import altArrows from '../altArrows.js'
+import FindBar from './FindBar.jsx'
+import termFinder from '../termFind.js'
+import { t } from '../i18n/index.js'
 
 // A plain terminal you type into, like a terminal app: brew upgrade, a dev server, anything you'd
 // run yourself, on whichever machine the window shows. With the built-in runtime it's attached to
@@ -31,6 +34,8 @@ function Attached({ paneId }) {
   const hostRef = useRef(null)
   const [state, setState] = useState('connecting') // connecting | live | ended | lost
   const [error, setError] = useState(null)
+  const wrapRef = useRef(null)
+  const [finder] = useState(termFinder) // Find (⌘F), in the whole buffer
 
   useEffect(() => {
     const css = getComputedStyle(document.documentElement)
@@ -47,6 +52,7 @@ function Attached({ paneId }) {
     term.loadAddon(fit)
     term.open(hostRef.current)
     gpu(term)
+    finder.attach(term)
     try { fit.fit() } catch { /* not laid out yet */ }
     // ⌘ shortcuts stay the app's (⌘K, ⌘C, ⌘V still copy and paste).
     term.attachCustomKeyEventHandler((e) => !(e.type === 'keydown' && e.metaKey) && !altArrows(term, e))
@@ -100,12 +106,14 @@ function Attached({ paneId }) {
       typed.dispose(); sized.dispose(); ro.disconnect(); mo.disconnect()
       host.removeEventListener('bridge-type', onType)
       try { ws?.close() } catch { /* closed */ }
+      finder.detach()
       disposeTerm(term)
     }
-  }, [paneId])
+  }, [paneId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className="live-term live-shell">
+    <div className="live-term live-shell" data-find="terminal" ref={wrapRef}>
+      <FindBar host={wrapRef} finder={finder} label={t('Find in this terminal')} />
       <div className="terminal-host" ref={hostRef} />
       <div className="term-hint">
         {error ? <span className="error-text">{error}</span>

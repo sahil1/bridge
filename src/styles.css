@@ -1738,6 +1738,27 @@ button.yg-day:hover { box-shadow: 0 0 0 1.5px var(--accent); }
 .live-term .xterm-viewport::-webkit-scrollbar { width: 8px; height: 8px; background: transparent; }
 .live-term .xterm-viewport::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--term-fg) 22%, transparent); border-radius: 4px; }
 
+/* ============ Find in this chat or terminal ============ */
+/* The bar over the top right of what it finds in (FindBar.jsx). A chat's is held there while the
+   chat scrolls under it (.find-dock takes no room); a terminal's sits over the terminal. */
+.find-dock { position: sticky; top: 0; height: 0; z-index: 20; }
+.find-bar { position: absolute; top: 8px; right: 14px; z-index: 20; width: min(420px, calc(100% - 28px)); padding: 3px 4px 3px 10px; border-radius: 10px; background: var(--pane); color: var(--ink); border: 1px solid var(--line-2); box-shadow: var(--shadow-lg); }
+.find-row { display: flex; align-items: center; gap: 2px; }
+.find-icon { color: var(--ink-3); margin-right: 4px; }
+.find-bar input { flex: 1; min-width: 0; height: 28px; border: 0; outline: 0; background: none; color: inherit; font: inherit; font-size: 13px; }
+.find-count { flex: none; padding: 0 6px; font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.find-count.none { color: var(--critical); }
+.find-busy { display: inline-grid; margin-right: 2px; color: var(--ink-3); }
+.find-case { font-size: 12px; font-weight: 650; letter-spacing: -.02em; }
+.find-note { padding: 2px 2px 5px; }
+/* Every match, and the current one more strongly: the colours browsers' own find uses. */
+::highlight(bridge-find) { background-color: #ffe36e; color: #16130b; }
+::highlight(bridge-find-now) { background-color: #ff9632; color: #16130b; }
+.app.narrow .find-bar { top: 6px; left: 8px; right: 8px; width: auto; padding: 2px 2px 2px 12px; }
+.app.narrow .find-icon { display: none; }
+.app.narrow .find-bar input { height: 40px; font-size: 16px; }
+.app.narrow .find-bar .win-btn { width: 40px; height: 40px; }
+
 /* ============ Slash menu ============ */
 .composer-stack { position: relative; }
 .slash-menu { position: absolute; left: 0; right: 0; bottom: calc(100% + 6px); max-height: min(360px, 50vh); overflow-y: auto; z-index: 30; background: var(--pane); border: 1px solid var(--line-2); border-radius: 12px; box-shadow: var(--shadow-lg); padding: 4px; scrollbar-width: thin; }

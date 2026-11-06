@@ -8,7 +8,12 @@
 //                                           "stuck weekly limit" logs the weekly one with its
 //                                           working line still on screen, as Claude Code can leave it;
 //                                           "table" ends it with a reply holding a wide table,
-//                                           "diagram" with one holding a Mermaid flowchart
+//                                           "diagram" with one holding a Mermaid flowchart,
+//                                           "find" with a conversation to find words in: "ledger"
+//                                           five times (Ledger once, LEDGER once), a Read of
+//                                           billing/ledger.py and a code block among them, forty
+//                                           lines apart; and "zeppelin" once, at its start, before
+//                                           what Chat first shows
 //   claude --resume <id> [...]              the same conversation again (on another account, say):
 //                                           its log as it was, done working, its message box at
 //                                           the bottom under the conversation; what's typed to it
@@ -118,7 +123,14 @@ fs.mkdirSync(path.join(project, id, 'subagents'), { recursive: true })
 fs.mkdirSync(tasks, { recursive: true })
 const log = fs.openSync(path.join(project, `${id}.jsonl`), 'w')
 const at = (minAgo) => new Date(Date.now() - minAgo * 60000).toISOString()
-const w = (o) => fs.writeSync(log, JSON.stringify({ sessionId: id, cwd: process.cwd(), ...o }) + '\n')
+// "find": each entry linked to the one before (uuid, parentUuid), as Claude Code links them, so
+// Chat can read further back than it first shows.
+let prev = null
+const w = (o) => {
+  const e = { sessionId: id, cwd: process.cwd(), ...(message === 'find' ? { uuid: `find-${Math.random().toString(36).slice(2)}`, parentUuid: prev } : {}), ...o }
+  if (message === 'find') prev = e.uuid
+  fs.writeSync(log, JSON.stringify(e) + '\n')
+}
 const use = (minAgo, blocks) => w({ type: 'assistant', timestamp: at(minAgo), message: { role: 'assistant', content: blocks } })
 const result = (minAgo, toolUseId, content, toolUseResult) => w({ type: 'user', timestamp: at(minAgo), toolUseResult, message: { role: 'user', content: [{ tool_use_id: toolUseId, type: 'tool_result', content }] } })
 const notice = (minAgo, body) => w({ type: 'user', timestamp: at(minAgo), origin: { kind: 'task-notification' }, message: { role: 'user', content: `<task-notification>\n${body}\n</task-notification>` } })
@@ -167,6 +179,7 @@ if (!screenOnly) {
 }
 
 w({ type: 'user', timestamp: at(30), message: { role: 'user', content: message || 'Check the billing code' } })
+if (message === 'find') use(30, [{ type: 'text', text: 'Noted: the zeppelin fixtures stay as they are.' }])
 // An old shell nothing was heard from since (its session restarted): the footer counts one shell, the newer one.
 use(30, [{ type: 'tool_use', id: 'toolu_S0', name: 'Bash', input: { command: 'npm run dev', description: 'Start the dev server', run_in_background: true } }])
 result(30, 'toolu_S0', started('bsh0'), { backgroundTaskId: 'bsh0' })
@@ -193,6 +206,14 @@ notice(5, '<task-id>bmon1</task-id>\n<summary>Monitor event: "Watch the deploy"<
 if (message === 'table') use(0, [{ type: 'text', text: 'Where each ticket stands:\n\n| Ticket | What changed | Who reviews it | Status |\n|---|---|---|---|\n| PLT-12) | The billing export rounds each line before it adds them up, so totals match the invoices | Priya Shah | Done |\n| PLT-15 | Refunds keep their original currency through the whole export | Dan Ruiz | In review |' }])
 // A reply with a diagram in it, and the file it's also in.
 if (message === 'diagram') use(0, [{ type: 'text', text: 'Here is the checkout flow, also in `flow.mmd`:\n\n```mermaid\nflowchart LR\n  Cart --> Pay[Payment] --> Done\n```' }])
+// Words to find, the last thing in the conversation.
+if (message === 'find') {
+  w({ type: 'user', timestamp: at(4), message: { role: 'user', content: 'Why does the Ledger total drift?' } })
+  use(4, [{ type: 'tool_use', id: 'toolu_R1', name: 'Read', input: { file_path: 'billing/ledger.py' } }])
+  result(4, 'toolu_R1', 'def total(lines):\n    return sum(round(x, 2) for x in lines)')
+  use(3, [{ type: 'text', text: Array.from({ length: 40 }, (_, i) => `Step ${i + 1}: checked how line ${i + 1} is rounded.`).join('\n') }])
+  use(2, [{ type: 'text', text: 'Fixed: the ledger now rounds once, at the end.\n\n```python\ntotal = round(sum(ledger_lines), 2)\n```\n\nThe LEDGER report matches the invoices again.' }])
+}
 // A usage limit, as Claude Code logs one: the error, then whether it carries on by itself at the reset.
 if (limited) {
   const weekly = /weekly limit$/.test(message)
