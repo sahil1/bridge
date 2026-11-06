@@ -3,7 +3,6 @@ import Icon from './Icon.jsx'
 import { usePersisted, useWidth } from './layout.jsx'
 import { usePoll } from '../api.js'
 import { fmtTokens } from './Usage.jsx'
-import { openToday } from './today.js'
 import { t, tx, locale } from '../i18n/index.js'
 
 // Every provider in one view (the trial usage-everywhere, server/usageall.js): the tokens each
@@ -19,8 +18,12 @@ const VIA_ICON = { agent: 'bot', key: 'unlock', cloud: 'cloud', local: 'laptop' 
 const RANGES = [[7, '7D'], [30, '30D'], [90, '90D']]
 const SERIES = Array.from({ length: 8 }, (_, i) => `var(--series-${i + 1})`)
 const fmtCost = (n) => (n > 0 && n < 0.01 ? '<$0.01' : `$${n >= 1000 ? Math.round(n).toLocaleString(locale()) : n.toFixed(2)}`)
-const fmtTime = (s) => (s >= 3600 ? `${Math.floor(s / 3600)}h ${Math.round((s % 3600) / 60)}m` : s >= 60 ? `${Math.round(s / 60)}m` : `${Math.round(s)}s`)
+const fmtTime = (s) => { if (s < 59.5) return t('{n} s', { n: Math.round(s) }); const m = Math.round(s / 60); return m < 60 ? t('{n} min', { n: m }) : t('{h} h {m} min', { h: Math.floor(m / 60), m: m % 60 }) }
 const fmtDay = (d) => new Date(`${d}T12:00`).toLocaleDateString(locale(), { month: 'short', day: 'numeric' })
+// The chart's scale: a round number at or above the busiest day, said short (800K).
+const nice = (x) => { if (!(x > 0)) return 1; const p = 10 ** Math.floor(Math.log10(x)); return [1, 2, 2.5, 5, 10].map((k) => k * p).find((v) => v >= x * 0.999) }
+const axisTok = (n) => new Intl.NumberFormat(locale(), { notation: 'compact', maximumFractionDigits: 1 }).format(n)
+const MODELS_SHOWN = 8
 
 // rows: [date, source, model, feature, tokens, in, out, cost, seconds, answers]
 function summarize(data, pick) {
@@ -70,19 +73,22 @@ function notesFor(s) {
   return out
 }
 
-function DayBars({ days, colorOf }) {
+// Tokens a day, a column each, the providers stacked in their colors; a line at the top and the
+// middle with what it's worth. On hover: the day, its total and the providers in it.
+function DayBars({ days, colorOf, nameOf }) {
   const [ref, width] = useWidth()
   const [hover, setHover] = useState(null)
   const sum = (d) => Object.values(d.by).reduce((a, b) => a + b, 0)
-  const max = Math.max(...days.map(sum), 0) || 1
+  const max = nice(Math.max(...days.map(sum), 0))
   const W = Math.max(240, width || 400), H = 110, B = 16, R = 40
   const bw = (W - R) / days.length
   const h = hover != null ? days[hover] : null
   const ticks = [0, Math.floor(days.length / 2), days.length - 1].filter((v, i, a) => a.indexOf(v) === i)
+  const y = (f) => 4 + (1 - f) * (H - B - 4)
   return (
     <div className="us-trend" ref={ref}>
       <svg width={W} height={H} role="img" aria-label={t('Tokens per day, by provider')} onPointerLeave={() => setHover(null)}>
-        {[0, 0.5, 1].map((f) => <g key={f}><line x1={0} x2={W - R} y1={4 + (1 - f) * (H - B - 4)} y2={4 + (1 - f) * (H - B - 4)} className="grid" /><text x={W - R + 4} y={4 + (1 - f) * (H - B - 4) + 3} className="axis-label">{fmtTokens(max * f)}</text></g>)}
+        {[0, 0.5, 1].map((f) => <g key={f}><line x1={0} x2={W - R} y1={y(f)} y2={y(f)} className="grid" /><text x={W - R + 4} y={y(f) + 3} className="axis-label">{f ? axisTok(max * f) : '0'}</text></g>)}
         {days.map((d, i) => {
           let top = H - B
           return (
@@ -99,44 +105,87 @@ function DayBars({ days, colorOf }) {
         {ticks.map((i) => <text key={i} x={i * bw + (i === 0 ? 0 : bw / 2)} y={H - 3} className="axis-label" textAnchor={i === 0 ? 'start' : i === days.length - 1 ? 'end' : 'middle'}>{fmtDay(days[i].date)}</text>)}
       </svg>
       {h && (
-        <div className="tooltip" style={{ left: `${((hover * bw + bw / 2) / W) * 100}%`, transform: `translateX(${hover < days.length * 0.2 ? '-10%' : hover > days.length * 0.7 ? '-92%' : '-50%'})` }}>
+        <div className="tooltip us-tip ue-tip" style={{ left: `${((hover * bw + bw / 2) / W) * 100}%`, transform: `translateX(${hover < days.length * 0.3 ? '-10%' : hover > days.length * 0.6 ? '-92%' : '-50%'})` }}>
           <div className="muted small">{fmtDay(h.date)}</div>
           <div><b>{fmtTokens(sum(h))}</b> {t('tokens')}</div>
+          {Object.entries(h.by).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([id, v]) => (
+            <div key={id} className="us-tip-row"><i style={{ background: colorOf(id) }} /><span>{nameOf(id)}</span><span className="num muted">{fmtTokens(v)}</span></div>
+          ))}
         </div>
       )}
     </div>
   )
 }
 
+// A row of a list: what it is on the first line with its numbers at the right (never cut off: a
+// long model name goes onto another line), its share as a bar under it. onClick makes it a button.
+function Row({ color, name, sub, via, tokens, more, share, on, onClick, title }) {
+  const inner = (
+    <>
+      <span className="ue-top">
+        <span className="ue-name" title={title}>
+          {color && <i className="us-sw" style={{ background: color }} />}
+          <span className="ue-nm">{name}</span>
+          {via}
+          {sub && <small className="muted">{sub}</small>}
+        </span>
+        <span className="ue-nums"><span className="num">{tokens}</span>{more && <span className="num muted">{more}</span>}</span>
+      </span>
+      <span className="us-row-bar"><span style={{ width: `${share * 100}%`, ...(color ? { background: color } : {}) }} /></span>
+    </>
+  )
+  return onClick
+    ? <button type="button" className={`ue-row${on ? ' on' : ''}`} onClick={onClick} aria-pressed={!!on}>{inner}</button>
+    : <div className="ue-row static">{inner}</div>
+}
+
 const label = (data, id) => data.sources.find((s) => s.id === id)?.label || id
 
-// Today › Usage: every provider, its models, the days and what used them.
+// Today › Usage: every provider, its models, the days and what used them. A provider picked shows
+// only its own numbers, and says so, with the way back to all of them.
 export default function UsageEverywhere() {
   const [days, setDays] = usePersisted('cc-ue-days', 30)
   const [pick, setPick] = useState(null)
+  const [allModels, setAllModels] = useState(false)
   const { data, error } = usePoll(`/usage-everywhere?days=${days}`, 5 * 60 * 1000)
   const view = useMemo(() => summarize(data, pick), [data, pick])
   const top = (list) => Math.max(1, ...list.map((x) => x.tokens))
+  const asOf = data?.pricesAsOf ? new Date(`${data.pricesAsOf}-15T12:00`).toLocaleDateString(locale(), { month: 'long', year: 'numeric' }) : ''
+  const models = view ? (allModels ? view.models : view.models.slice(0, MODELS_SHOWN)) : []
   return (
     <section className="us-card ue" aria-label={t('Every Provider')}>
       <div className="us-card-head">
         <h4>{t('Every Provider')}</h4>
         <div className="seg small-seg" role="tablist" aria-label={t('Range')}>
-          {RANGES.map(([v, l]) => <button key={v} role="tab" aria-selected={days === v} className={days === v ? 'on' : ''} onClick={() => setDays(v)}>{l}</button>)}
+          {RANGES.map(([v, l]) => <button key={v} role="tab" aria-selected={days === v} className={days === v ? 'on' : ''} onClick={() => setDays(v)} title={t('Last {n} days', { n: v })}>{l}</button>)}
         </div>
       </div>
-      {error && <p className="error-text small" role="alert">{error}</p>}
+      {error && <p className="error-text small" role="alert">{t("Couldn't add up what every provider used: {error}", { error })}</p>}
       {!view && !error && <div className="skeleton-rows"><div /><div /></div>}
       {view && (
         <>
-          <div className="us-tiles">
-            <div className="us-tile"><span className="us-tile-label">{t('Tokens')}</span><span className="us-tile-val num">{fmtTokens(view.total.tokens)}</span><span className="us-tile-sub">{pick ? label(data, pick) : t('every provider')}</span></div>
-            <div className="us-tile"><span className="us-tile-label">{t('Cost on API keys')}</span><span className="us-tile-val num">{view.total.priced ? fmtCost(view.total.cost) : '—'}</span><span className="us-tile-sub">{t('at list prices')}</span></div>
-            <div className="us-tile"><span className="us-tile-label">{t('Time on this computer')}</span><span className="us-tile-val num">{view.total.timed ? fmtTime(view.total.seconds) : '—'}</span><span className="us-tile-sub">{t('local models')}</span></div>
-            <div className="us-tile"><span className="us-tile-label">{t('Answers for Bridge AI')}</span><span className="us-tile-val num">{view.total.answers.toLocaleString(locale())}</span><span className="us-tile-sub">{t('its own jobs')}</span></div>
-          </div>
-          {!data.rows.length && <p className="muted small">{t('Nothing used in these days yet. Tokens show here as your agents and the models Bridge AI calls are used.')}</p>}
-          {view.days.some((d) => Object.keys(d.by).length) && <DayBars days={view.days} colorOf={view.colorOf} />}
+          {pick && (
+            <p className="ue-picked small" role="status">
+              <i className="us-sw" style={{ background: view.colorOf(pick) }} /> <span>{t('Showing {name} only', { name: label(data, pick) })}</span>
+              <button type="button" className="ghost-btn" onClick={() => setPick(null)}>{t('Show every provider')}</button>
+            </p>
+          )}
+          {data.rows.length > 0 ? (
+            <>
+              <div className="us-tiles">
+                <div className="us-tile"><span className="us-tile-label">{t('Tokens')}</span><span className="us-tile-val num">{fmtTokens(view.total.tokens)}</span><span className="us-tile-sub">{pick ? label(data, pick) : t('every provider')}</span></div>
+                <div className="us-tile" title={t('What the answers through an API key cost, at its list price. A plan or a model on this computer has no cost here.')}><span className="us-tile-label">{t('Cost on API keys')}</span><span className="us-tile-val num">{view.total.priced ? fmtCost(view.total.cost) : '—'}</span><span className="us-tile-sub">{t('at list prices')}</span></div>
+                <div className="us-tile" title={t('How long the models on this computer took to answer.')}><span className="us-tile-label">{t('Time on this computer')}</span><span className="us-tile-val num">{view.total.timed ? fmtTime(view.total.seconds) : '—'}</span><span className="us-tile-sub">{t('local models')}</span></div>
+                <div className="us-tile" title={t('Answers Bridge AI asked a model for itself: chat, meeting notes, AI Assist, whiteboards, dictation, pull requests.')}><span className="us-tile-label">{t("Bridge AI's own answers")}</span><span className="us-tile-val num">{view.total.answers.toLocaleString(locale())}</span><span className="us-tile-sub">{t('notes, chat, AI Assist and more')}</span></div>
+              </div>
+              {view.days.some((d) => Object.keys(d.by).length) && (
+                <div className="ue-days">
+                  <h5>{t('Tokens a day')}</h5>
+                  <DayBars days={view.days} colorOf={view.colorOf} nameOf={(id) => label(data, id)} />
+                </div>
+              )}
+            </>
+          ) : <p className="muted small ue-none" role="status">{t('Nothing used in these days yet. Tokens show here as your agents and the models Bridge AI calls are used.')}</p>}
           <div className="us-grid ue-grid">
             <div className="ue-part">
               <h5>{t('By provider')}</h5>
@@ -146,12 +195,9 @@ export default function UsageEverywhere() {
                   const notes = notesFor(s)
                   return (
                     <li key={s.id} className="ue-src" data-source={s.id}>
-                      <button className={`us-row ${pick === s.id ? 'on' : ''}`} onClick={() => setPick(pick === s.id ? null : s.id)} aria-pressed={pick === s.id}>
-                        <span className="us-row-name" title={`${s.label} · ${t(VIA[s.via] || s.via)}`}><i className="us-sw" style={{ background: view.colorOf(s.id) }} /><span className="us-ell">{s.label}</span><Icon name={VIA_ICON[s.via] || 'bot'} size={11} className="ue-via" /></span>
-                        <span className="us-row-bar"><span style={{ width: `${(x.tokens / top(view.sources)) * 100}%`, background: view.colorOf(s.id) }} /></span>
-                        <span className="us-row-num num">{s.counts === 'none' && !x.tokens ? '—' : fmtTokens(x.tokens)}</span>
-                        <span className="us-row-num num muted">{x.priced ? fmtCost(x.cost) : x.timed ? fmtTime(x.seconds) : ''}</span>
-                      </button>
+                      <Row color={view.colorOf(s.id)} name={s.label} title={`${s.label} · ${t(VIA[s.via] || s.via)}`} via={<Icon name={VIA_ICON[s.via] || 'bot'} size={11} className="ue-via" />}
+                        tokens={s.counts === 'none' && !x.tokens ? '—' : fmtTokens(x.tokens)} more={x.priced ? fmtCost(x.cost) : x.timed ? fmtTime(x.seconds) : null}
+                        share={x.tokens / top(view.sources)} on={pick === s.id} onClick={() => setPick(pick === s.id ? null : s.id)} />
                       {notes.map((n) => <p key={n} className="ue-why small"><Icon name="alert" size={11} /> {n}</p>)}
                     </li>
                   )
@@ -162,45 +208,39 @@ export default function UsageEverywhere() {
             <div className="ue-part">
               <h5>{t('By model')}</h5>
               <ul className="us-list">
-                {view.models.slice(0, 12).map((m) => (
+                {models.map((m) => (
                   <li key={m.k}>
-                    <div className="us-row static">
-                      <span className="us-row-name"><i className="us-sw" style={{ background: view.colorOf(m.source) }} /><span className="us-ell">{m.model || t('Not said')}</span>{!pick && <small className="muted us-ell">{label(data, m.source)}</small>}</span>
-                      <span className="us-row-bar"><span style={{ width: `${(m.tokens / top(view.models)) * 100}%`, background: view.colorOf(m.source) }} /></span>
-                      <span className="us-row-num num">{fmtTokens(m.tokens)}</span>
-                      <span className="us-row-num num muted">{m.priced ? fmtCost(m.cost) : m.timed ? fmtTime(m.seconds) : ''}</span>
-                    </div>
+                    <Row color={view.colorOf(m.source)} name={m.model || t('Model not said')} sub={!pick ? label(data, m.source) : null}
+                      tokens={fmtTokens(m.tokens)} more={m.priced ? fmtCost(m.cost) : m.timed ? fmtTime(m.seconds) : null} share={m.tokens / top(view.models)} />
                   </li>
                 ))}
-                {view.models.length > 12 && <li className="muted small us-more">{t('and {n} smaller', { n: view.models.length - 12 })}</li>}
+                {!view.models.length && <li className="muted small">{t('No model used in these days.')}</li>}
               </ul>
+              {view.models.length > MODELS_SHOWN && <button type="button" className="ghost-btn ue-more" onClick={() => setAllModels((v) => !v)}>{allModels ? t('Show fewer') : t('Show all {n}', { n: view.models.length })} <Icon name={allModels ? 'up' : 'down'} size={10} /></button>}
             </div>
             <div className="ue-part">
               <h5>{t('By feature')}</h5>
               <ul className="us-list">
                 {view.features.map((f) => (
                   <li key={f.k} data-feature={f.k}>
-                    <div className="us-row static">
-                      <span className="us-row-name"><span className="us-ell">{t(FEATURES[f.k] || FEATURES.other)}</span></span>
-                      <span className="us-row-bar"><span style={{ width: `${(f.tokens / top(view.features)) * 100}%` }} /></span>
-                      <span className="us-row-num num">{fmtTokens(f.tokens)}</span>
-                      <span className="us-row-num num muted">{f.answers ? (f.answers === 1 ? t('1 answer') : t('{n} answers', { n: f.answers })) : ''}</span>
-                    </div>
+                    <Row name={t(FEATURES[f.k] || FEATURES.other)} tokens={fmtTokens(f.tokens)} more={f.answers ? (f.answers === 1 ? t('1 answer') : t('{n} answers', { n: f.answers.toLocaleString(locale()) })) : null} share={f.tokens / top(view.features)} />
                   </li>
                 ))}
+                {!view.features.length && <li className="muted small">{t('No model used in these days.')}</li>}
               </ul>
             </div>
           </div>
           {data.log?.error && <p className="error-text small" role="alert">{t("Bridge AI couldn't write down what its models used: {error}", { error: data.log.error })}</p>}
           {data.log?.full && <p className="error-text small" role="alert">{t("This month's record of what its models used is full, so answers since {date} aren't in it.", { date: fmtDay(data.log.full.since.slice(0, 10)) })}</p>}
-          <p className="muted small us-src">{t('Kept on this computer and never part of the usage counts sent. Cost is for API keys, at list prices as of {date}; Claude Code and Codex at API prices are in their stats below.', { date: data.pricesAsOf })}</p>
+          <p className="muted small us-src">{t('Kept on this computer and never part of the usage counts sent. Cost is for API keys, at list prices as of {date}; Claude Code and Codex at API prices are in their stats below.', { date: asOf })}</p>
         </>
       )}
     </section>
   )
 }
 
-// The usage panel's line: the last week across every provider, and the way to all of it.
+// The usage panel's line: the last week across every provider. The way to all of it is the panel's
+// own Stats, patterns and history under it (Trackers.jsx), so it has no second button to the same.
 export function UsageEverywhereBrief() {
   const { data } = usePoll('/usage-everywhere?days=7', 5 * 60 * 1000)
   const view = useMemo(() => summarize(data, null), [data])
@@ -217,7 +257,6 @@ export function UsageEverywhereBrief() {
           {shown.map((s) => <li key={s.k}><i className="us-sw" style={{ background: view.colorOf(s.k) }} /><span className="us-ell">{label(data, s.k)}</span><span className="num">{fmtTokens(s.tokens)}</span></li>)}
         </ul>
       )}
-      <button type="button" className="ghost-btn" onClick={() => openToday('usage')}>{t('Every provider, by model, day and feature')} <Icon name="chevron" size={10} /></button>
     </div>
   )
 }

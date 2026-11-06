@@ -16,11 +16,13 @@
 //   your own. Nothing is downloaded until asked.
 //   In the app, the desktop app simulated: Trial Features lists it; Settings › Voice › Dictation has
 //   Tidy what I say only with the trial on (off to start with), the model it uses and whether the
-//   words leave the computer; with no model, the download in one click and its progress; on 4 GB,
-//   where to add one. The dictation window: Tidying…, then tidied and pasted; off, as before; too
+//   words leave the computer, picked in a field like Settings' others; with no model, the download
+//   in one click and its progress; on 4 GB, where to add one, with the way there, and turned on
+//   without one, a warning that your words go as you said them. The dictation window: Tidying…, then tidied and pasted; off, as before; too
 //   slow, an error, a provider that fell for it: pasted as said, saying why; no model yet: pasted
-//   as said, with the download offered there; the card's Use what I said. Dictations: the tidied
-//   text and what was said, Paste again with either. The trial off: nothing shows, nothing's tidied.
+//   as said, with the download offered there; the card's Use what I said; light and dark, the pill
+//   whole once it's grown. Dictations: which were tidied, in the list; the tidied text and what was
+//   said, Paste again with either. The trial off: nothing shows, nothing's tidied.
 import fs from 'node:fs'
 import path from 'node:path'
 import http from 'node:http'
@@ -244,6 +246,7 @@ try {
     ok(!!(await until(() => sel.isVisible(), 5000, 100)) && (await kit.api('/settings')).effective?.dictation?.tidy === true, 'turned on: kept, and the model it tidies with shown')
     ok(/Gemma 4 E2B, on this computer \(the default\)/.test(await sel.innerText()) && /Tidied on this computer\. Nothing is sent anywhere/.test(await tidyBox(s).innerText()), 'the local model by default, on this computer', await tidyBox(s).innerText())
     ok(/gpt-5 · text leaves this computer/.test(await sel.innerText()) && !/sign-in/.test(await sel.innerText()), 'a provider offered, said to send the words out', await sel.innerText())
+    ok(await sel.evaluate((e) => e.classList.contains('st-input') && e.getBoundingClientRect().height >= 34), 'the model picked in a field like the rest of Settings\' (not a bare one)')
     await sel.selectOption('openai:gpt-5')
     ok(!!(await until(async () => /What you say goes to OpenAI/.test(await tidyBox(s).innerText()), 5000, 100)) && (await kit.api('/settings')).effective?.dictation?.tidyModel === 'openai:gpt-5', 'picked: said plainly that what you say goes to OpenAI', await tidyBox(s).innerText())
     await tidyBox(s).scrollIntoViewIfNeeded()
@@ -263,8 +266,18 @@ try {
     await ctx.close()
   }
   {
-    const { ctx, s } = await voice(small)
+    const { ctx, p, s } = await voice(small)
     ok(!!(await until(async () => /Tidying needs a model: add one in Settings › Model Providers \(Ollama, LM Studio or a key\)/.test(await tidyBox(s).innerText().catch(() => '')), 8000, 100)) && await tidyBox(s).locator('button', { hasText: /Download/ }).count() === 0, 'a computer with 4 GB: no download offered, but where to add a model of your own', await tidyBox(s).innerText().catch(() => ''))
+    ok(!(await tidyBox(s).locator('.tidy-needs.warn').count()) && !/Until then/.test(await tidyBox(s).innerText()), 'tidying off: said as a note, not a warning')
+    await tidyBox(s).locator('input[type=checkbox]').click()
+    const warn = tidyBox(s).locator('.tidy-needs.warn')
+    ok(!!(await until(() => warn.isVisible(), 5000, 100)) && /Until then, what you say goes as you said it\./.test(await warn.innerText()), 'turned on with no model: a warning, saying your words go as you said them meanwhile (it doesn\'t do nothing without saying)', await tidyBox(s).innerText())
+    await tidyBox(s).scrollIntoViewIfNeeded()
+    await shot(p, `${tag}dictation-cleanup-no-model-on`)
+    await warn.locator('button', { hasText: 'Open Model Providers' }).click()
+    const at = () => p.locator('.st-nav-item[aria-current="page"]').innerText().catch(() => '')
+    ok(!!(await until(async () => /Model Providers/.test(await at()), 5000, 100)), 'and the way there: Open Model Providers opens that section', await at())
+    await small.api('/settings', { dictation: { tidy: null } }, 'PATCH')
     await ctx.close()
   }
 
@@ -299,6 +312,9 @@ try {
     const waited = (await p.evaluate(() => window.__hud.at.at(-1))) - up
     ok(got === 'Take your time with the report.' && waited < 5000, `the model too slow: pasted as you said it, without waiting for it (${waited} ms after letting go)`, { got, waited })
     ok(!!(await until(async () => /Pasted into TextEdit/.test(await hudText(p)) && /Not tidied: the model took too long\./.test(await hudText(p)), 3000, 50)), 'and the window says so: pasted, not tidied, the model took too long', await hudText(p))
+    await sleep(400)
+    const fits = await p.evaluate(() => { const n = document.querySelector('.hud .dp-note'), h = document.querySelector('.hud'); return !!n && n.getBoundingClientRect().bottom <= h.getBoundingClientRect().bottom + 0.5 })
+    ok(fits, 'the pill grows to the why: its second line whole, not cut off at the bottom')
     await shot(p, `${tag}dictation-cleanup-slow`)
     // An error.
     n = await pastedCount(p)
@@ -331,6 +347,16 @@ try {
     ok(!!(await until(async () => (await p.locator('.hud-text').innerText().catch(() => '')) === 'So we should ship it on Friday.' && /Tidied by Gemma 4 E2B\./.test(await line.innerText().catch(() => '')), 6000, 100)), 'the card: the tidied words, and what tidied them', await hudText(p))
     await sleep(500)
     await shot(p, `${tag}dictation-cleanup-card`)
+    {
+      // The same card in the dark.
+      const dk = await page(b, `${kit.url}/?dictate=1`, { before: asApp, mode: 'dark' })
+      await dk.p.waitForSelector('.hud', { timeout: 15000 })
+      await talk(dk.p, 'so you know we should we should ship it on Friday')
+      ok(!!(await until(async () => /Tidied by Gemma 4 E2B\./.test(await dk.p.locator('.hud-tidied').innerText().catch(() => '')), 6000, 100)), 'and in the dark')
+      await sleep(500)
+      await shot(dk.p, `${tag}dictation-cleanup-card-dark`)
+      await dk.ctx.close()
+    }
     await line.locator('button', { hasText: 'Use what I said' }).click()
     ok(!!(await until(async () => (await p.locator('.hud-text').innerText()) === 'So you know we should we should ship it on Friday.', 3000, 100)), 'Use what I said: the words from before tidying instead', await hudText(p))
     await p.locator('.hud button', { hasText: 'Copy' }).click()
@@ -377,8 +403,12 @@ try {
     const { ctx, p, errors } = await page(b, kit.url, { before: asApp })
     await p.waitForSelector('.rail-nav-btn', { timeout: 30000 })
     await until(async () => { await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-dictations'))); return (await p.locator('.dc-view').count()) > 0 }, 15000, 800)
-    const kept = (await kit.api('/dictations')).items.find((x) => x.text === 'So we should ship it on Friday.' && x.said)
+    const all = (await kit.api('/dictations')).items
+    const kept = all.find((x) => x.text === 'So we should ship it on Friday.' && x.said)
     const row = p.locator(`.dc-row[data-id="${kept?.id}"]`)
+    const plain = all.find((x) => !x.said)
+    await row.waitFor({ timeout: 5000 })
+    ok(/Tidied/.test(await row.locator('.dc-tidy-mark').innerText().catch(() => '')) && !(await p.locator(`.dc-row[data-id="${plain?.id}"] .dc-tidy-mark`).count()), 'Dictations: which ones were tidied, said in the list without opening them (and not on one that wasn\'t)')
     await row.locator('.dc-head').click()
     const tidied = row.locator('.dc-tidied')
     ok(!!(await until(() => tidied.isVisible(), 5000, 100)) && /Tidied by Gemma 4 E2B\./.test(await tidied.innerText()) && (await row.locator('.dc-full').innerText()) === 'So we should ship it on Friday.', 'Dictations: one tidied shows the tidied text and what tidied it', await row.innerText())

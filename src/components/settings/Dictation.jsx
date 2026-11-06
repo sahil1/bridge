@@ -266,7 +266,7 @@ function Tidy({ d, set }) {
     <div className="dict-tidy">
       <label className="st-check"><input type="checkbox" checked={on} onChange={(e) => set({ tidy: e.target.checked })} />
         <span><b>{t('Tidy what I say')}</b> <span className="muted small">{t('Before what you say in another app is pasted or sent, a model takes out "um", false starts and words said twice, and fixes the punctuation. It keeps your words, and never answers them or adds to them. If it takes more than a few seconds, or anything goes wrong, your words go as you said them.')}</span></span></label>
-      {st && !st.model && <TidyNeeds local={st.local} onReady={load} />}
+      {st && !st.model && <TidyNeeds local={st.local} onReady={load} on={on} onProviders={() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'providers' } }))} />}
       {on && st?.model && <TidyModel value={d.tidyModel || null} st={st} onPick={(m) => set({ tidyModel: m })} />}
     </div>
   )
@@ -282,7 +282,7 @@ function TidyModel({ value, st, onPick }) {
   return (
     <>
       <div className="st-row dict-tidy-model"><span>{t('Tidied by')}</span>
-        <select value={value || ''} onChange={(e) => onPick(e.target.value || null)} aria-label={t('Tidied by')}>
+        <select className="st-input" value={value || ''} onChange={(e) => onPick(e.target.value || null)} aria-label={t('Tidied by')}>
           <option value="">{st.auto ? t('{model}, on this computer (the default)', { model: st.auto.label }) : t('Pick a model')}</option>
           {models.filter((m) => !(m.id === st.auto?.id && !value)).map((m) => <option key={m.id} value={m.id}>{`${m.label} · ${m.via === 'local' ? t('on this computer') : t('text leaves this computer')}`}</option>)}
           {value && !models.some((m) => m.id === value) && <option value={value}>{st.model.label}</option>}
