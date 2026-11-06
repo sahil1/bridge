@@ -67,7 +67,7 @@
   },
   "devDependencies": {
     "@excalidraw/excalidraw": "0.18.1",
-    "@excalidraw/mermaid-to-excalidraw": "2.2.2",
+    "@excalidraw/mermaid-to-excalidraw": "3.1.0",
     "@tabler/icons": "3.50.0",
     "@vitejs/plugin-react": "^6.1.2",
     "concurrently": "^9.2.0",
