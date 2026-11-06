@@ -15,6 +15,8 @@
 //   a reconnect mid-queue: the phone offline as it sends (the message waits, says so, and goes once
 //   it's back), the page reloaded (the queue is still there), a message the page left on its way
 //   as it closed (sent once it opens again), and the same message sent twice (held once);
+//   two sent at once to an agent that's free: one goes in and the other waits its turn (the
+//   second found the first still in the input box and cleared it);
 //   and a message typed in its terminal while it works, which it takes in between two steps: in
 //   the chat (Claude Code logs it where Chat didn't look).
 import fs from 'node:fs'
@@ -217,6 +219,19 @@ try {
     // WebKit reports each request it couldn't make while offline as a page error.
     ok(errors.filter((e) => !/\/api\/[\w/.?=&-]+ due to access control checks/.test(e)).length === 0, 'reconnect: no page errors', errors)
     await ctx.close()
+  }
+
+  // ---------- Two sent at once to an agent that's free (a phone sending the next before the first's answer came) ----------
+  {
+    const ag = await launch('Payouts', 'busy 2 3')
+    await settled(ag, 2)
+    const two = ['Check the payouts', 'And the fees']
+    const rs = await Promise.all(two.map((text, i) => kit.api(`/agents/${enc(ag.paneId)}/prompt`, { text, cid: `at-once-${i}` })))
+    const first = rs.findIndex((r) => !r.queued)
+    const order = first < 0 ? two : [two[first], two[1 - first]]
+    ok(first >= 0 && rs.filter((r) => r.queued).length === 1, 'two sent at once to an agent that\'s free: one goes in, the other waits its turn', rs)
+    const g = await wentIn(ag, two)
+    ok(same(g.map((x) => x.text), ['busy 2 3', ...order]) && g.every((x) => x.how === 'turn'), 'and both go in, one after the other, each on its own (the second used to find the first still in the input box and clear it)', g)
   }
 
   // ---------- Typed in its terminal while it works ----------

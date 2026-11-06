@@ -581,12 +581,24 @@ app.post('/api/tabs/:tab/focus', wrap(async (req) => {
 // Status colors from the runtime (herdr's theme), so both views use the same ones.
 app.get('/api/runtime-theme', (req, res) => res.json(rt.theme()))
 
+// One message at a time into each agent, decided and typed in together: two at once ran together,
+// or the second found the first still in the input box (pasted, Enter not pressed yet) and cleared
+// it as something left typed there.
+const typing = new Map() // pane -> the message going in now
+const wentIn = new Map() // pane -> when a message last went in
+function onPane(paneId, fn) {
+  const p = (typing.get(paneId) || Promise.resolve()).catch(() => {}).then(fn)
+  typing.set(paneId, p)
+  p.catch(() => {}).finally(() => { if (typing.get(paneId) === p) typing.delete(paneId) })
+  return p
+}
 // A message to an agent: typed into its input box, or held until that box is back. at: when it
 // went in, by this computer's clock (the app matches it to the message in the agent's chat by that).
 async function sendPrompt(paneId, text, agent, cid = null) {
   try {
     const at = new Date().toISOString()
     const r = await promptSafe(rt, paneId, text, agent)
+    wentIn.set(paneId, Date.now())
     // Show "working" right away rather than at the next fleet poll.
     for (const ms of [150, 700, 1600]) setTimeout(pushFleet, ms)
     return { ...r, at }
@@ -611,12 +623,12 @@ function onlyOnce(cid, fn) {
 const cidOf = (req) => (req.body?.cid ? String(req.body.cid).slice(0, 80) : null)
 // Held for later, in the order sent: behind messages still waiting for this agent, and while it
 // works (it would fold what's typed in now into one message with whatever else comes, or take it
-// in mid-step where its chat doesn't show it). A side question (/btw) goes in now: it's answered
-// while it works.
+// in mid-step where its chat doesn't show it), which includes the moment just after a message went
+// in, before its screen says so. A side question (/btw) goes in now: it's answered while it works.
 const holdFor = (paneId, agent, text) => {
   if (agent && caps(agent.kind).btw && /^\/btw\s/.test(text)) return null
   if ((queue.all()[paneId] || []).length) return 'behind'
-  return agent?.status === 'working' ? 'working' : null
+  return agent?.status === 'working' || Date.now() - (wentIn.get(paneId) || 0) < 3000 ? 'working' : null
 }
 app.post('/api/agents/:pane/prompt', wrap(async (req) => {
   const text = String(req.body?.text || '').trim()
@@ -624,15 +636,14 @@ app.post('/api/agents/:pane/prompt', wrap(async (req) => {
   const pane = req.params.pane
   const cid = cidOf(req)
   return onlyOnce(cid, async () => {
-    const agent = await findAgent(pane).catch(() => null)
-    const why = holdFor(pane, agent, text)
-    if (why) {
+    const { agent, r } = await onPane(pane, async () => {
+      const agent = await findAgent(pane).catch(() => null)
+      const why = holdFor(pane, agent, text)
+      if (!why) return { agent, r: await sendPrompt(pane, text, agent, cid) }
       const item = queue.add(pane, text, { cid })
       pushFleet()
-      insights.noteSent(pane, text)
-      return { ok: true, queued: true, reason: why, id: item.id }
-    }
-    const r = await sendPrompt(pane, text, agent, cid)
+      return { agent, r: { ok: true, queued: true, reason: why, id: item.id } }
+    })
     insights.noteSent(pane, text)
     // A side question: its answer is in a panel, not the chat, so bring it back here.
     if (!r.queued && agent && caps(agent.kind).btw && /^\/btw\s/.test(text)) return { ...r, btw: (await btwAnswer(rt, pane, text)) || null }
@@ -1092,7 +1103,7 @@ async function pollFleet() {
       const gen = fleetGen
       const same = () => gen === fleetGen
       let f = await fleetView()
-      if (same() && !f.down && queue.size() && await queue.deliver(f.agents, (id, text, a) => (same() ? promptSafe(rt, id, text, a) : Promise.reject(new Error('Another session is in view'))), (id) => rt.read(id, 40))) f = await fleetView()
+      if (same() && !f.down && queue.size() && await queue.deliver(f.agents, (id, text, a) => (same() ? onPane(id, () => promptSafe(rt, id, text, a)).then((r) => { wentIn.set(id, Date.now()); return r }) : Promise.reject(new Error('Another session is in view'))), (id) => rt.read(id, 40))) f = await fleetView()
       if (same()) {
         const key = JSON.stringify([f.session, f.down, f.agents.map((a) => [a.paneId, a.status, a.title, a.seq, a.muted, a.asking?.count, a.asking?.working, a.chiefThreads, a.subagents]), f.tabs.map((t) => [t.tabId, t.label, t.panes.map((p) => [p.paneId, p.cwd, p.rect?.width, p.rect?.height, p.rect?.x, p.rect?.y])]), f.workspaces.map((w) => w.label), f.queue, f.delivered])
         lastFleet = f
