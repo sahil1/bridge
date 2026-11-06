@@ -1863,9 +1863,11 @@ button.yg-day:hover { box-shadow: 0 0 0 1.5px var(--accent); }
 .us-trend .hit { fill: transparent; }
 .us-trend rect.hl { opacity: .8; }
 .us-trend { position: relative; }
-.hm { fill: var(--hm-0); }
-.hm.l1 { fill: var(--hm-1); } .hm.l2 { fill: var(--hm-2); } .hm.l3 { fill: var(--hm-3); } .hm.l4 { fill: var(--hm-4); }
-.hm.hl { stroke: var(--ink); stroke-width: 1.5; }
+/* The heatmap's squares: a class of its own, as Home's page is .hm (needshome.css), whose height
+   and padding would stretch them. */
+.us-hm { fill: var(--hm-0); }
+.us-hm.l1 { fill: var(--hm-1); } .us-hm.l2 { fill: var(--hm-2); } .us-hm.l3 { fill: var(--hm-3); } .us-hm.l4 { fill: var(--hm-4); }
+.us-hm.hl { stroke: var(--ink); stroke-width: 1.5; }
 .us-tip { transform: none; white-space: normal; width: max-content; max-width: min(300px, 90%); }
 .us-tip-row { display: flex; align-items: center; gap: 6px; }
 .us-tip-row i, .us-sw { width: 8px; height: 8px; border-radius: 2px; display: inline-block; flex: none; }

@@ -113,7 +113,7 @@ function Heatmap({ days, metric, tokensFrom }) {
         {[0, 2, 4].map((i) => <text key={i} x={0} y={TOP + i * (cell + GAP) + cell - 1} className="axis-label">{t(WEEKDAYS[i])}</text>)}
         {cols.map((col, w) => col.map((c, i) => !c.future && (
           <rect key={c.key} x={LEFT + w * (cell + GAP)} y={TOP + i * (cell + GAP)} width={cell} height={cell} rx="2.5"
-            className={`hm l${lvl(c.v)} ${hover?.key === c.key ? 'hl' : ''}`} onPointerEnter={() => setHover({ key: c.key, x: LEFT + w * (cell + GAP), y: TOP + i * (cell + GAP) })} />
+            className={`us-hm l${lvl(c.v)} ${hover?.key === c.key ? 'hl' : ''}`} onPointerEnter={() => setHover({ key: c.key, x: LEFT + w * (cell + GAP), y: TOP + i * (cell + GAP) })} />
         )))}
       </svg>
       {hover && (

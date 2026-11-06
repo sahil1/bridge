@@ -19,6 +19,8 @@
 //   Colors: each account has its own by default (in the order added), the same in every list; one
 //     picked is kept and the others keep theirs; a new account takes one not taken; one removed
 //     takes nothing from the others; a color out of range is refused.
+//   The heatmap with Home on: Home's page is .hm (needshome.css), which once stretched the
+//     heatmap's squares; with Home opened first, they're square and in their levels' colors.
 //   The page: the card's swatch opens the colors and a pick shows everywhere at once (the header's
 //     bars, the account's dot, the chart's legend, the top bar's menu, New agent's account picker);
 //     the chart stacked by account with Not known in grey, a legend, a line saying what's counted,
@@ -383,6 +385,36 @@ try {
       await shot(p, `${tag}usage-accounts-palette-phone`)
     }
     ok(w.errors.length === 0, `${t}: no page errors`, w.errors)
+  }
+
+  // With Home on and its page opened first, Usage's heatmap: square, in its levels' colors.
+  {
+    await kit.api('/settings', { trials: { home: true } }, 'PATCH')
+    const w = await page(b, kit.url, { mode: 'light', theme: 'sky', before: fake })
+    pages.push(w)
+    const p = w.p
+    ok(!!(await until(() => p.locator('.hm').first().isVisible(), 20000)), 'Home on: it opens at Home (its page, .hm)')
+    const card = await openUsage(p)
+    await card.locator('button', { hasText: 'Stats, patterns and history' }).first().click()
+    const heat = p.locator('.ustats .us-heat')
+    await heat.waitFor({ timeout: 20000 })
+    const cells = await heat.evaluate((el) => {
+      const probe = (v) => { const x = document.createElement('i'); x.style.color = `var(${v})`; document.body.append(x); const c = getComputedStyle(x).color; x.remove(); return c }
+      const want = [0, 1, 2, 3, 4].map((l) => probe(`--hm-${l}`))
+      return [...el.querySelectorAll('rect')].map((r) => {
+        const b = r.getBoundingClientRect()
+        const l = Number(/\bl(\d)\b/.exec(r.getAttribute('class'))?.[1] ?? -1)
+        return { w: b.width, h: b.height, l, fill: getComputedStyle(r).fill, want: want[l] }
+      })
+    })
+    const square = cells.length > 50 && cells.every((c) => c.w > 5 && Math.abs(c.w - c.h) < 0.5)
+    ok(square, "its squares are square (Home's page styles don't reach them)", cells.slice(0, 3))
+    ok(cells.some((c) => c.l > 0) && cells.every((c) => c.l >= 0 && c.fill === c.want), "and each is its level's color, the active days' too", cells.filter((c) => c.fill !== c.want).slice(0, 3))
+    await p.mouse.move(5, 5)
+    await heat.scrollIntoViewIfNeeded()
+    await sleep(300)
+    await shot(p, `${tag}usage-accounts-heatmap-home`)
+    ok(w.errors.length === 0, 'Home on: no page errors', w.errors)
   }
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
