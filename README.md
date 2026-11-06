@@ -6,7 +6,7 @@ It runs on your computer. Meetings and dictation are transcribed there, your age
 
 [![Watch the video](site/poster.jpg)](https://boldbridge.ai/)
 
-**[Download](https://boldbridge.ai/#install)** for Mac, Windows or Linux, and the [Android app](#android) · **[Try the demo](https://boldbridge.ai/demo/)** in your browser, with made-up agents and meetings · [All releases](https://github.com/sahil1/bridge/releases/latest)
+**[Download](https://boldbridge.ai/#install)** for Mac, Windows or Linux, and the [Android app](#android) · **[Open the demo](https://boldbridge.ai/demo/)**, with sample agents and meetings · [All releases](https://github.com/sahil1/bridge/releases/latest)
 
 **For everyone**
 
