@@ -107,7 +107,7 @@ export function setRule(address, rule) {
 // threads: { c<conversation> | m<message>: { mark: 'done' | 'later', at, until, id, subject } }:
 // a thread done, or set aside until a time (then back in Needs you, saying it's a reminder). New
 // mail in the thread since brings it back at once, as a reply would in Mail. nudges: { <id of a
-// message you sent>: { until, at, conv, sent, subject, to } }: "remind me if nobody answers",
+// message you sent>: { until, at, conv, subject, to } }: "remind me if nobody answers",
 // which goes by itself once someone does (or you write again).
 function readMarks() {
   try { const m = JSON.parse(fs.readFileSync(MARKS, 'utf8')); return { threads: m.threads || {}, nudges: m.nudges || {} } } catch { return { threads: {}, nudges: {} } }
