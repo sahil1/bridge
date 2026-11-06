@@ -150,10 +150,14 @@ function Trials() {
     <section className="st-sec">
       <h4>{t('Beta Features')}</h4>
       <p className="muted small">{t("New parts of Bridge AI, in beta. Each stays hidden until you turn it on here, and turning it off hides it again; what you made with it stays where it is.")}</p>
-      {TRIALS.map((x) => (
-        <label key={x.id} className="st-check"><input type="checkbox" checked={on(x.id)} disabled={!s} onChange={(e) => set(x.id, e.target.checked)} />
-          <span><b>{t(x.label)}</b> <span className="muted small">{t(x.hint)}</span></span></label>
-      ))}
+      {TRIALS.map((x) => {
+        // One that's part of another works only with that one on, and says so.
+        const needs = x.needs && !on(x.needs) ? TRIALS.find((y) => y.id === x.needs) : null
+        return (
+          <label key={x.id} className="st-check"><input type="checkbox" checked={on(x.id) && !needs} disabled={!s || !!needs} onChange={(e) => set(x.id, e.target.checked)} />
+            <span><b>{t(x.label)}</b> <span className="muted small">{t(x.hint)}</span>{needs && <span className="muted small"> {t('It needs {name} on.', { name: t(needs.label) })}</span>}</span></label>
+        )
+      })}
     </section>
   )
 }

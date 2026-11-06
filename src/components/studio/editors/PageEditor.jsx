@@ -35,30 +35,3 @@ export default function PageEditor({ file, data, onDirty, onStats, handle, readO
     </div>
   )
 }
-
-// A PDF: the browser's own viewer, which reads, searches and prints it. A browser that shows a PDF
-// only on its own (a phone's, mostly) is told so, with the PDF a tap away, rather than a blank box.
-export function PdfView({ file }) {
-  const inline = typeof navigator === 'undefined' || navigator.pdfViewerEnabled !== false
-  return (
-    <div className="sd-deck">
-      {inline && (
-        <div className="sd-toolbar" role="toolbar" aria-label={t('PDF')}>
-          <span className="sd-grow" />
-          <a className="btn small" href={rawUrl(file)} target="_blank" rel="noreferrer" title={t('Open it in a tab of its own, in the browser\'s viewer')} aria-label={t('Open on its own')}><Icon name="external" size={12} /> <span className="sd-btn-label">{t('Open on its own')}</span></a>
-        </div>
-      )}
-      {inline ? <iframe className="sd-pdf" title={file.name} src={rawUrl(file)} /> : (
-        <div className="sd-empty">
-          <Icon name="file" size={22} />
-          <b>{t('This browser shows a PDF on its own, not inside a page')}</b>
-          <span className="muted small">{t('Open it in a tab of its own to read it, or download it.')}</span>
-          <span className="sd-empty-acts">
-            <a className="btn small primary" href={rawUrl(file)} target="_blank" rel="noreferrer"><Icon name="external" size={12} /> {t('Open it')}</a>
-            <a className="btn small" href={rawUrl(file)} download={file.name}><Icon name="download" size={12} /> {t('Download')}</a>
-          </span>
-        </div>
-      )}
-    </div>
-  )
-}

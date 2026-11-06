@@ -100,6 +100,14 @@ looks in none of them until you open it. A file you copy to another of your comp
 your phone, goes end-to-end encrypted over the same link as everything else (the relay sees only
 how much goes), and lands only in the folder you pick on the computer it goes to.
 
+Signature Assist (a beta feature in Studio, off until you turn it on) keeps the signature and
+initials you draw as two pictures in `~/.bridge-ai/studio/signatures`, readable by you only; they're
+never sent to a model or anywhere else, and removing one deletes it from the disk. A PDF you sign
+is read on your computer to find where to sign. Only when you press Explain it does the PDF's text go
+to the model you pick, as any other request to that model does (one on your computer keeps it
+there); a scan with no text in it is read on a Mac first, on your computer. The signed copy is a new
+file in a `_signed` folder beside the PDF, and the PDF itself isn't changed.
+
 If you run Bridge AI on a server or in Docker, all of this applies to that machine instead of your
 computer.
 

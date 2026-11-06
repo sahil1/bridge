@@ -9,6 +9,7 @@ import { lineDiff, textFor, comparable } from './diff.js'
 import { fontCss, lookOfPack } from './look.js'
 import { withKeys } from './keys.js'
 import { useBusy } from '../../busy.js'
+import { useTrial } from '../../trials.js'
 import './studio.css'
 
 // Studio: documents, sheets, decks, PDFs and pages, like Meetings and Whiteboards a place of its own.
@@ -21,8 +22,10 @@ const EDITORS = {
   sheet: lazy(() => import('./editors/SheetEditor.jsx')),
   deck: lazy(() => import('./editors/DeckEditor.jsx')),
   page: lazy(() => import('./editors/PageEditor.jsx')),
-  pdf: lazy(() => import('./editors/PageEditor.jsx').then((m) => ({ default: m.PdfView }))),
+  pdf: lazy(() => import('./pdf/PdfView.jsx')),
 }
+// Signature Assist's signature and initials, on the home page while it's on (a beta feature).
+const SignatureHome = lazy(() => import('./pdf/Signatures.jsx'))
 const ICON = { doc: 'doc', sheet: 'grid', deck: 'screen', pdf: 'file', page: 'code' }
 const KIND_LABEL = { doc: tx('Document'), sheet: tx('Sheet'), deck: tx('Deck'), pdf: tx('PDF'), page: tx('Page') }
 // What a file is, in words, by its extension ("Word document"); a Markdown file that's a deck says so.
@@ -100,6 +103,7 @@ export function StudioHome({ onOpen }) {
   const { data, refresh } = usePoll('/studio/recent', 15_000)
   const folders = useFolders()
   const packs = useDesignPacks()
+  const signing = useTrial('signature-assist')
   const [making, setMaking] = useState(null) // the New kind being named
   const [name, setName] = useState('')
   const [where, setWhere] = useState('')
@@ -175,6 +179,7 @@ export function StudioHome({ onOpen }) {
         </ul>
       </section>
       <PacksSection packs={packs} />
+      {signing && <Suspense fallback={null}><SignatureHome /></Suspense>}
     </div>
   )
 }

@@ -127,7 +127,7 @@ try {
   // Settings › About & Updates: Studio's switch under Beta Features, and every button there one
   // size. Off, Studio leaves the sidebar; on, it's back.
   await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'about' } })))
-  const trial = p.locator('.st-check', { hasText: 'Studio' }).locator('input')
+  const trial = p.locator('.st-check', { has: p.locator('b', { hasText: /^Studio$/ }) }).locator('input')
   await trial.waitFor({ timeout: 15000 })
   // The switch is off and disabled until the settings have come (a slow computer shows that first).
   await until(async () => !(await trial.isDisabled()), 10000)
@@ -390,11 +390,11 @@ try {
   await code.fill('<!doctype html><title>Dash</title><h1 id="h">Revenue</h1>')
   ok(!!(await until(async () => /Revenue/.test(await p.locator('.sd-page-view').getAttribute('srcdoc').catch(() => '')), 5000)), 'a page is drawn as you type it')
   ok(!!(await until(async () => { const x = await p.locator('.sd-status').innerText(); return /HTML page/.test(x) && /Unsaved changes/.test(x) }, 5000)) && !(await bare(p)).length, 'its status line: an HTML page, with unsaved changes; no bare controls', { status: await p.locator('.sd-status').innerText(), bare: await bare(p) })
-  // A PDF: shown, or where the browser shows one only on its own, saying so with it a tap away.
-  // Nothing to save, and it says so.
+  // A PDF: drawn in the page by pdf.js, in every browser (studio-pdf.mjs has the rest). Nothing to
+  // save, and it says so.
   await open('report.pdf')
-  const pdf = await until(async () => ((await p.locator('iframe.sd-pdf').count()) ? 'inline' : (await p.locator('.sd-empty', { hasText: 'shows a PDF on its own' }).locator('a', { hasText: 'Open it' }).count()) ? 'said' : null), 10000)
-  ok(!!pdf && !!(await until(async () => /Read only/.test(await p.locator('.sd-status').innerText()), 5000)) && (await p.locator('.pane-head button', { hasText: 'Save' }).count()) === 0 && !(await bare(p)).length, `a PDF: ${pdf === 'said' ? 'this browser shows one only on its own, which it says, with Open it' : 'shown in the page'}; read only, no Save`, { pdf, status: await p.locator('.sd-status').innerText().catch(() => ''), bare: await bare(p) })
+  const pdf = await until(async () => (await p.locator('.sd-pdf .pdfViewer .page canvas').count()) > 0, 15000)
+  ok(!!pdf && !!(await until(async () => /Read only/.test(await p.locator('.sd-status').innerText()), 5000)) && (await p.locator('.pane-head button', { hasText: 'Save' }).count()) === 0 && !(await bare(p)).length, 'a PDF: drawn in the page; read only, no Save', { pdf, status: await p.locator('.sd-status').innerText().catch(() => ''), bare: await bare(p) })
   await shot(p, `${tag}studio-pdf`)
   ok(w.errors.length === 0, 'no page errors', w.errors)
   // On a phone, 375 and 430 px: Studio from More, its home and a document fitting the screen.
