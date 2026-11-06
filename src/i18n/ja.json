@@ -3380,5 +3380,7 @@
   "… and {n} more": "… ほか {n} 件",
   "… {n} lines the same": "… 同じ行が {n} 行",
   "⌘-click to pick several, right-click for more": "⌘-クリックで複数選択、右クリックでその他の操作",
-  "⌘⏎ to start": "⌘⏎ で開始"
+  "⌘⏎ to start": "⌘⏎ で開始",
+  "If Bridge AI is useful to you, a star on GitHub helps other people find it.": "Bridge AI が役に立ったら、GitHub でスターを付けてもらえると、ほかの人が見つけやすくなります。",
+  "Star Bridge AI on GitHub": "GitHub で Bridge AI にスターを付ける"
 }

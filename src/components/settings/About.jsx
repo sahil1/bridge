@@ -127,6 +127,7 @@ function Report() {
         <button type="button" className="btn small" disabled={!d} onClick={copy}><Icon name={copied ? 'check' : 'copy'} size={13} /> {copied ? t('Copied') : t('Copy details')}</button>
       </div>
       <p className="muted small">{t('Free and open source under the Apache License 2.0, as is, with no warranty. Not affiliated with Anthropic, OpenAI, Google, GitHub or the other companies whose tools it works with.')} <a href={`${REPO}/blob/main/TERMS.md`} target="_blank" rel="noreferrer">{t('Terms')}</a> · <a href={`${REPO}/blob/main/PRIVACY.md`} target="_blank" rel="noreferrer">{t('Privacy')}</a> · <a href={`${REPO}/blob/main/LICENSE`} target="_blank" rel="noreferrer">{t('License')}</a> · <a href={`${REPO}/blob/main/NOTICE`} target="_blank" rel="noreferrer">{t('Notices')}</a></p>
+      <p className="muted small">{t('If Bridge AI is useful to you, a star on GitHub helps other people find it.')} <a href={REPO} target="_blank" rel="noreferrer">{t('Star Bridge AI on GitHub')}</a></p>
       {/* The open-source parts Bridge AI is built with are in NOTICE; the one you see most is named. */}
       <p className="muted small">{t('Whiteboards are drawn with Excalidraw (MIT License).')} <a href="https://github.com/excalidraw/excalidraw" target="_blank" rel="noreferrer">github.com/excalidraw/excalidraw</a></p>
     </section>
