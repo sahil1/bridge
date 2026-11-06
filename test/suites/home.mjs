@@ -286,7 +286,9 @@ try {
   seed(c, sync, 'Weekly sync with Parvinder', yday, '# Weekly sync\n\n## Summary\n\nThe AWS paper and New York.\n\n## Action items\n\n- [ ] Gary: make the introduction he offered (not done yet)\n- [ ] Them: set up the face-to-face meeting in New York\n- [ ] Parvinder: present the AWS paper at the offsite\n')
   await until(async () => (await c.api('/meetings')).meetings?.some((m) => m.id === sync), 8000)
   await c.api(`/meetings/${sync}/chief`, {})
-  await c.api(`/meetings/${sync}/chief`, {})
+  // A list with copies on it already: before 3.10.1 a second Send added every item again (now it
+  // doesn't: meetings-api), so a list from then can have each twice.
+  for (const x of (await c.api('/chief/tasks')).items.filter((x) => x.from === 'meeting')) await task(c, x.title)
   for (const [title, status] of [['Send the board deck by Friday'], ['Book flights to New York on 12 Nov'], ['Call the accountant tomorrow'], ['Look into SOC 2 vendors'], ['Draft the Q1 hiring plan', 'doing'], ['Read the Series A term sheet']]) await task(c, title, status && { status })
   const review = Date.now() - 3 * 3600e3
   seed(a, `${new Date(review).toISOString().slice(0, 10)}-design`, 'Design review: onboarding', review, '# Design review\n\n## Summary\n\nThe first-run screens.\n\n## Action items\n\n- [ ] Sam: cut the second permissions screen\n- [ ] Ana: send the new icons\n')
