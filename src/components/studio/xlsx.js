@@ -1,18 +1,99 @@
-// Excel files (ExcelJS) to the workbook Univer shows, and back: values and formulas (with their last
-// results), bold, italic, underline and strikethrough, font size and colour, fills, alignment,
-// number formats, merged cells, column widths and row heights, and every sheet in its order. A
-// CSV is one sheet of values. What an Excel file has beyond that (charts, pivot tables,
-// conditional formats, comments) isn't in Univer's workbook here, so Studio says it isn't kept
-// before the first save, and the file as it was stays a version.
-const loadExcel = () => import('exceljs/dist/exceljs.min.js').then((m) => m.default || m)
+// A sheet's file to the workbook Univer shows, and back to the same kind of file. A CSV or TSV is
+// one sheet of values, read and written back as it's written (csv.js). An Excel file: see
+// readSheet below.
+import { readCsv, writeCsv, writesBack, asCell, SEPARATORS } from './csv.js'
 
+const loadExcel = () => import('exceljs/dist/exceljs.min.js').then((m) => m.default || m)
+const isCsv = (ext) => ext === '.csv' || ext === '.tsv'
+
+let n = 0
+const id = (p) => `${p}${Date.now().toString(36)}${(n++).toString(36)}`
+
+export function blankWorkbook(name = 'Sheet') {
+  const sid = id('s')
+  return { data: { id: id('w'), name, appVersion: '', locale: 'enUS', styles: {}, sheetOrder: [sid], sheets: { [sid]: { id: sid, name: 'Sheet1', rowCount: 100, columnCount: 26, cellData: {}, mergeData: [], columnData: {}, rowData: {}, defaultColumnWidth: 88, defaultRowHeight: 24 } } }, lost: [] }
+}
+
+// Office's fonts, which a Mac or Linux computer may not have: drawn in the nearest one it does,
+// and kept by name in the file.
+const LOOKALIKE = { Calibri: 'Calibri, Carlito, "Helvetica Neue", Arial, sans-serif', Cambria: 'Cambria, Caladea, Georgia, serif', Aptos: 'Aptos, "Helvetica Neue", Arial, sans-serif', 'Aptos Narrow': '"Aptos Narrow", "Arial Narrow", "Helvetica Neue", Arial, sans-serif', Arial: 'Arial, "Helvetica Neue", sans-serif', 'Times New Roman': '"Times New Roman", Times, serif', Consolas: 'Consolas, Menlo, monospace' }
+export const lookalike = (ff) => LOOKALIKE[ff] || ff
+function withLookalikes(data) {
+  for (const st of Object.values(data.styles || {})) if (st?.ff) st.ff = lookalike(st.ff)
+  if (data.defaultStyle && typeof data.defaultStyle === 'object' && data.defaultStyle.ff) data.defaultStyle.ff = lookalike(data.defaultStyle.ff)
+  return data
+}
+
+// ---------- Reading ----------
+// What a file is read into: { kind, data (Univer's workbook), lost (what it has that isn't shown
+// here, kept in the file), keep (what the writer needs), charts (the file's own, to draw beside
+// the sheet), csv (how a CSV is written) }. opts: a CSV's separator and encoding, when picked.
+export async function readSheet(buf, name, ext, opts = {}) {
+  const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf)
+  if (isCsv(ext)) {
+    const csv = readCsv(bytes, { ext, sep: opts.sep, enc: opts.enc })
+    const w = blankWorkbook(name)
+    const sh = Object.values(w.data.sheets)[0]
+    let cols = 0
+    const widest = []
+    csv.rows.forEach((r, i) => {
+      cols = Math.max(cols, r.length)
+      r.forEach((f, j) => {
+        if (f.v === '') return
+        ;(sh.cellData[i] ||= {})[j] = asCell(f.v)
+        if (i < 1000) widest[j] = Math.max(widest[j] || 0, Math.min(48, f.v.length))
+      })
+    })
+    // Each column wide enough for what's in it (a CSV has no widths of its own; none are saved).
+    widest.forEach((n, j) => { if (n > 11) sh.columnData[j] = { w: Math.round(n * 7.2 + 14) } })
+    sh.rowCount = Math.max(100, csv.rows.length + 50)
+    sh.columnCount = Math.max(26, cols + 10)
+    return { kind: 'csv', data: w.data, lost: [], charts: [], csv, base: JSON.stringify(w.data.sheets) }
+  }
+  const r = await legacyRead(bytes, name)
+  return { kind: 'xlsx', data: withLookalikes(r.data), lost: r.lost, charts: [], keep: null, original: bytes }
+}
+
+// ---------- Writing ----------
+// Back to the file's own kind: { bytes, notKept }. A CSV keeps its first sheet's values (a
+// formula as its result), in its own separator, encoding and line endings. as: a CSV's separator
+// and encoding picked to save it in.
+export async function writeSheet(book, now, { ops = [], charts = [], as = {} } = {}) {
+  if (book.kind === 'csv') {
+    const sh = now.sheets[now.sheetOrder[0]]
+    const rows = Object.keys(sh.cellData || {}).map(Number).filter((r) => Object.values(sh.cellData[r] || {}).some((c) => c && (c.v != null && c.v !== '')))
+    const last = Math.max(rows.length ? Math.max(...rows) : -1, book.csv.rows.length - 1)
+    const lines = []
+    for (let r = 0; r <= last; r++) {
+      const cells = sh.cellData?.[r] || {}
+      const cols = Object.keys(cells).map(Number).filter((c) => cells[c]?.v != null && cells[c].v !== '')
+      const end = cols.length ? Math.max(...cols) : -1
+      lines.push(Array.from({ length: end + 1 }, (_, c) => textOf(cells[c])))
+    }
+    const out = writeCsv(book.csv, lines, as)
+    const notKept = []
+    if (now.sheetOrder.length > 1) notKept.push(`the other ${now.sheetOrder.length - 1 === 1 ? 'sheet' : `${now.sheetOrder.length - 1} sheets`} (a ${book.csv.sep === '\t' ? 'TSV' : 'CSV'} file is one sheet)`)
+    if (!writesBack(as.enc || book.csv.enc)) notKept.push(`its ${as.enc || book.csv.enc} encoding (saved as UTF-8)`)
+    if (!out.fits) notKept.push('characters Windows-1252 has no place for (saved as ?)')
+    return { bytes: out.bytes, notKept }
+  }
+  return { bytes: await bytesOf(now, '.xlsx'), notKept: [] }
+}
+// A cell as a CSV has it: its value (a formula's result), true and false as Excel writes them.
+function textOf(cell) {
+  if (!cell || cell.v == null) return ''
+  if (cell.t === 3) return cell.v ? 'TRUE' : 'FALSE'
+  return String(cell.v)
+}
+export const separatorName = (sep) => SEPARATORS[sep] || sep
+
+// ---------- Excel files, through ExcelJS (until the engine replaces it) ----------
 const colourOf = (c) => (c?.argb ? `#${c.argb.slice(-6)}` : null)
 const argbOf = (rgb) => (rgb ? `FF${rgb.replace('#', '').toUpperCase().padStart(6, '0')}` : undefined)
 const H_ALIGN = { left: 1, center: 2, right: 3, justify: 4 }
 const H_BACK = Object.fromEntries(Object.entries(H_ALIGN).map(([k, v]) => [v, k]))
 const V_ALIGN = { top: 1, middle: 2, bottom: 3 }
 const V_BACK = Object.fromEntries(Object.entries(V_ALIGN).map(([k, v]) => [v, k]))
-
 function styleOf(cell) {
   const f = cell.font || {}
   const s = {}
@@ -31,7 +112,6 @@ function styleOf(cell) {
   if (cell.numFmt && cell.numFmt !== 'General') s.n = { pattern: cell.numFmt }
   return Object.keys(s).length ? s : null
 }
-
 function valueOf(v) {
   if (v == null) return null
   if (typeof v === 'number') return { v, t: 2 }
@@ -44,19 +124,14 @@ function valueOf(v) {
   if (v.error) return { v: v.error, t: 1 }
   return { v: String(v), t: 1 }
 }
-
-let n = 0
-const id = (p) => `${p}${Date.now().toString(36)}${(n++).toString(36)}`
-
-export async function workbookOf(buf, name, ext) {
-  if (ext === '.csv' || ext === '.tsv') return csvWorkbook(new TextDecoder().decode(buf), name, ext === '.tsv' ? '\t' : ',')
+async function legacyRead(buf, name) {
   const ExcelJS = await loadExcel()
   const wb = new ExcelJS.Workbook()
   await wb.xlsx.load(buf)
   const styles = {}
   const sheets = {}
   const order = []
-  const kinds = new Set() // what isn't kept: charts, pivots, conditional formats, comments
+  const kinds = new Set()
   wb.eachSheet((ws) => {
     const sid = id('s')
     order.push(sid)
@@ -87,61 +162,9 @@ export async function workbookOf(buf, name, ext) {
     sheets[sid] = { id: sid, name: ws.name, rowCount: Math.max(100, rows + 50), columnCount: Math.max(26, cols + 10), cellData, mergeData, columnData, rowData, defaultColumnWidth: 88, defaultRowHeight: 24 }
   })
   if (!order.length) return blankWorkbook(name)
-  return { data: { id: id('w'), name, appVersion: '', locale: 'enUS', styles, sheetOrder: order, sheets }, lost: [...kinds] }
+  return { data: { id: id('w'), name, appVersion: '', locale: 'enUS', styles, sheetOrder: order, sheets, defaultStyle: { ff: 'Calibri', fs: 11 } }, lost: [...kinds] }
 }
-
-export function blankWorkbook(name = 'Sheet') {
-  const sid = id('s')
-  return { data: { id: id('w'), name, appVersion: '', locale: 'enUS', styles: {}, sheetOrder: [sid], sheets: { [sid]: { id: sid, name: 'Sheet1', rowCount: 100, columnCount: 26, cellData: {}, mergeData: [], columnData: {}, rowData: {}, defaultColumnWidth: 88, defaultRowHeight: 24 } } }, lost: [] }
-}
-
-// CSV: quoted fields with "" for a quote, a field over several lines in quotes.
-function parseCsv(text, sep) {
-  const rows = []
-  let row = [], field = '', quoted = false
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i]
-    if (quoted) { if (ch === '"') { if (text[i + 1] === '"') { field += '"'; i++ } else quoted = false } else field += ch; continue }
-    if (ch === '"') quoted = true
-    else if (ch === sep) { row.push(field); field = '' }
-    else if (ch === '\n' || ch === '\r') { if (ch === '\r' && text[i + 1] === '\n') i++; row.push(field); rows.push(row); row = []; field = '' }
-    else field += ch
-  }
-  if (field || row.length) { row.push(field); rows.push(row) }
-  return rows
-}
-function csvWorkbook(text, name, sep) {
-  const w = blankWorkbook(name)
-  const sh = Object.values(w.data.sheets)[0]
-  const rows = parseCsv(text, sep)
-  rows.forEach((r, i) => r.forEach((v, j) => {
-    if (v === '') return
-    const num = /^-?\d+(\.\d+)?$/.test(v.trim()) ? Number(v) : null
-    ;(sh.cellData[i] ||= {})[j] = num != null ? { v: num, t: 2 } : { v, t: 1 }
-  }))
-  sh.rowCount = Math.max(100, rows.length + 50)
-  sh.columnCount = Math.max(26, Math.max(0, ...rows.map((r) => r.length)) + 10)
-  return w
-}
-
-const csvField = (v, sep) => { const s = v == null ? '' : String(v); return /["\n\r]/.test(s) || s.includes(sep) ? `"${s.replace(/"/g, '""')}"` : s }
-
-// Back to the file's own kind: a CSV keeps its first sheet's values, an Excel file everything above.
-export async function bytesOf(data, ext) {
-  if (ext === '.csv' || ext === '.tsv') {
-    const sep = ext === '.tsv' ? '\t' : ','
-    const sh = data.sheets[data.sheetOrder[0]]
-    const rows = Object.keys(sh.cellData).map(Number)
-    const last = rows.length ? Math.max(...rows) : -1
-    const lines = []
-    for (let r = 0; r <= last; r++) {
-      const cells = sh.cellData[r] || {}
-      const cols = Object.keys(cells).map(Number)
-      const end = cols.length ? Math.max(...cols) : -1
-      lines.push(Array.from({ length: end + 1 }, (_, c) => csvField(cells[c]?.v, sep)).join(sep))
-    }
-    return `${lines.join('\n')}\n`
-  }
+export async function bytesOf(data) {
   const ExcelJS = await loadExcel()
   const wb = new ExcelJS.Workbook()
   for (const sid of data.sheetOrder) {

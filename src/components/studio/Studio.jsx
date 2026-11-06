@@ -183,14 +183,16 @@ export function StudioHome({ onOpen }) {
 // Saved with ⌘S or Save, only over the version you loaded; a change from an agent or another app
 // while it's open is shown at once when you've changed nothing, and offered when you have.
 const WHO = { you: tx('You'), agent: tx('An agent'), outside: tx('Changed outside Studio'), restored: tx('Put back'), opened: tx('When it was first opened here') }
-const RISKY = { '.docx': tx('Saving here keeps its text, headings, lists, tables, links, quotes, pictures, fonts and colours. Word\'s own layout (headers, footers, comments, tracked changes, page setup) isn\'t kept; the file as it was stays in its versions, and Ask an agent changes it in place.'), '.xlsx': tx('Saving here keeps its values, formulas, formats, merged cells and every sheet. Charts, pivot tables and comments aren\'t kept; the file as it was stays in its versions, and Ask an agent changes it in place.') }
+const RISKY = { '.docx': tx('Saving here keeps its text, headings, lists, tables, links, quotes, pictures, fonts and colours. Word\'s own layout (headers, footers, comments, tracked changes, page setup) isn\'t kept; the file as it was stays in its versions, and Ask an agent changes it in place.') }
+// An Excel file is written back into itself: what changed here, and the rest as it was.
+const SHEET_KEEPS = tx('Saved into the Excel file itself: what you change here is written in, and everything else in it (charts, pictures, pivot tables, comments, macros) stays as it was. Anything a change can\'t keep is said before it\'s saved.')
 // What saving keeps, in each kind of file: said under the file (its kind, in the status line), and
 // before the first save of a Word or Excel file. The editors offer only what's kept.
 const KEEPS = {
-  '.docx': RISKY['.docx'], '.xlsx': RISKY['.xlsx'], '.xlsm': RISKY['.xlsx'],
+  '.docx': RISKY['.docx'], '.xlsx': SHEET_KEEPS, '.xlsm': SHEET_KEEPS,
   '.md': tx('Saved as Markdown, as written: headings, bold, italic, strikethrough, code, lists, quotes, links, tables and pictures. Markdown has no underline or colours, so they aren\'t offered.'),
   '.txt': tx('Saved as plain text, as it is.'),
-  '.csv': tx('Saved as a {kind} file: the first sheet\'s values. Formulas, formats and other sheets aren\'t part of a {kind} file, so they aren\'t kept.'),
+  '.csv': tx('Saved as a {kind} file in its own separator, encoding and line endings: the first sheet\'s values, each line you didn\'t change written as it was. Formulas (saved as their results), formats and other sheets aren\'t part of a {kind} file.'),
   deck: tx('Saved as a Markdown deck, as written: slides between lines of ---. PowerPoint and PDF make a copy beside it.'),
   '.pptx': tx('Shown here, not edited: Ask an agent changes the PowerPoint itself, and Edit as a Markdown deck makes a copy to edit here.'),
   '.pdf': tx('Shown here, not edited: Ask an agent to change it, or the file it was made from.'),
@@ -264,7 +266,12 @@ export function StudioPage({ root, path: rel, onBack, onOpen }) {
     if (RISKY[meta.ext] && !ok) { try { if (!localStorage.getItem(`cc-studio-said${meta.ext}`)) { setWarn(meta.ext); return } } catch { /* say it again next time */ } }
     setSaving(true); setNote(null)
     try {
-      const bytes = await handle.current.save()
+      // An editor that can't keep everything in the file says what, before it's saved (a sheet).
+      let bytes = await handle.current.save()
+      if (bytes?.bytes) {
+        if (bytes.notKept?.length && !ok) { setWarn({ text: t('Saving here can\'t keep {what}. Save anyway? The file as it is now stays in its versions.', { what: bytes.notKept.join('; ') }) }); return }
+        bytes = bytes.bytes
+      }
       const r = await saveFile(f, bytes, { mtime: meta.mtime, force })
       setMeta((m) => ({ ...m, mtime: r.mtime, size: r.size, versions: r.versions }))
       setDirty(false); setConflict(null)
@@ -314,7 +321,7 @@ export function StudioPage({ root, path: rel, onBack, onOpen }) {
           {at && <span className="path-chip sd-sub-where" title={`${at.label} · ${at.full}`}><Icon name="folder" size={10} /> <span>{at.path}</span></span>}
         </>}>
         {kind && !readOnly && <button type="button" className={`btn small sd-head-btn${dirty ? ' primary' : ''}`} onClick={() => save()} disabled={saving || !dirty} title={withKeys(dirty ? t('Save') : t('Saved: nothing new to save'), 'mod', 's')} aria-label={saving ? t('Saving…') : dirty ? t('Save') : t('Saved')}><Icon name="check" size={12} /> <span className="sd-btn-label">{saving ? t('Saving…') : dirty ? t('Save') : t('Saved')}</span></button>}
-        <button type="button" className="btn small sd-head-btn" onClick={() => setAsk({ selection: handle.current?.selection?.() || null })} disabled={!meta} title={t('Have one of your agents change it: pick the part first, or describe it')} aria-label={t('Ask an agent')}><Icon name="sparkle" size={12} /> <span className="sd-btn-label">{t('Ask an agent')}</span></button>
+        <button type="button" className="btn small sd-head-btn" onClick={() => (handle.current?.ask ? handle.current.ask() : setAsk({ selection: handle.current?.selection?.() || null }))} disabled={!meta} title={t('Have one of your agents change it: pick the part first, or describe it')} aria-label={t('Ask an agent')}><Icon name="sparkle" size={12} /> <span className="sd-btn-label">{t('Ask an agent')}</span></button>
         <button type="button" className={`win-btn${panel === 'versions' ? ' on' : ''}`} onClick={() => setPanel(panel === 'versions' ? null : 'versions')} aria-pressed={panel === 'versions'} title={t('Versions: yours, your agents\' and changes from outside')} aria-label={t('Versions')} disabled={!meta}><Icon name="clock" size={14} /></button>
         <a className="win-btn" href={rawUrl(f)} download={name} title={t('Download {name}', { name })} aria-label={t('Download')}><Icon name="download" size={14} /></a>
       </PaneHeader>
@@ -335,8 +342,8 @@ export function StudioPage({ root, path: rel, onBack, onOpen }) {
       )}
       {warn && (
         <div className="sd-bar sd-conflict" role="alertdialog">
-          <span>{t(RISKY[warn])}</span>
-          <button type="button" className="btn small primary" onClick={() => { try { localStorage.setItem(`cc-studio-said${warn}`, '1') } catch { /* asks again next time */ } setWarn(null); save({ ok: true }) }}>{t('Save')}</button>
+          <span>{typeof warn === 'string' ? t(RISKY[warn]) : warn.text}</span>
+          <button type="button" className="btn small primary" onClick={() => { try { if (typeof warn === 'string') localStorage.setItem(`cc-studio-said${warn}`, '1') } catch { /* asks again next time */ } setWarn(null); save({ ok: true }) }}>{t('Save')}</button>
           <button type="button" className="ghost-btn" onClick={() => setWarn(null)}>{t('Not now')}</button>
         </div>
       )}
