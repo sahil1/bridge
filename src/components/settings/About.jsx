@@ -13,14 +13,14 @@ import { TRIALS } from '../../trials.js'
 const REPO = 'https://github.com/sahil1/bridge'
 
 // Settings › About & Updates: which version you have, whether there's a newer one (and updating
-// to it), the features on trial, the tour again, and what to include when you report a problem.
+// to it), the tour again, what to include when you report a problem, usage stats and crash reports,
+// and last, the features on trial.
 // Every action here is the same small button (btn small, a 13 px icon); the one that matters most
 // in a section is primary.
 export default function About() {
   return (
     <div className="st-sections">
       <Updates />
-      <Trials />
       <section className="st-sec">
         <h4>{t('Tour')}</h4>
         <p className="muted small">{t('A quick look at the main parts of Bridge AI, the same one you saw after setup.')}</p>
@@ -29,6 +29,7 @@ export default function About() {
       <Report />
       <UsageCounts />
       <CrashReports />
+      <Trials />
     </div>
   )
 }
