@@ -1,9 +1,9 @@
 import { usePoll } from './api.js'
 import { tx } from './i18n/index.js'
 
-// Trial features: parts of Bridge AI still being finished, shipped hidden. Each stays out of sight
+// Beta features: new parts of Bridge AI, shipped hidden. Each stays out of sight
 // (the sidebar, ⌘K, the phone's More, the buttons that lead to it) until it's turned on in
-// Settings › About & Updates › Trial Features, and turning it off hides it again; what was made
+// Settings › About & Updates › Beta Features, and turning it off hides it again; what was made
 // with it stays. The server says which are on (/config trials) and answers a trial's routes only
 // then (server/index.js TRIALS).
 export const TRIALS = [

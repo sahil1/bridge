@@ -241,7 +241,7 @@ export default function UsageStats() {
   const [model, setModel] = useState('all')
   const [project, setProject] = useState('all')
   const { data, error, refresh } = useStats(provider)
-  const everywhere = useTrial('usage-everywhere') // a trial feature (src/trials.js)
+  const everywhere = useTrial('usage-everywhere') // a beta feature (src/trials.js)
   // Messages and sessions come from Claude Code's own counts, so they show on Claude only.
   const counts = provider === 'claude'
   const heat = counts || METRICS[metric].filtered ? metric : 'tokens'

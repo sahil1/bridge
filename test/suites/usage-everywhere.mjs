@@ -13,7 +13,9 @@
 //   provider with tokens by model, day and feature, the cost of what an API key used at the pinned
 //   prices, the time on this computer, and the other agents' own logs (Gemini CLI's and Qwen Code's
 //   counts, Copilot CLI's at a session's end or out only, Cursor Agent's none) each saying when it
-//   has no counts. On a phone too, nothing wider than the screen.
+//   has no counts. Each row's name whole (never cut off), its numbers with their units, a chart with
+//   a round scale, a provider picked saying so with the way back, the prices' month by name. On a
+//   phone too, nothing wider than the screen and whole targets.
 import fs from 'node:fs'
 import path from 'node:path'
 import http from 'node:http'
@@ -140,9 +142,9 @@ try {
   await kit.api('/providers/lmstudio', { values: { LM_STUDIO_BASE_URL: `${lms.url}/v1` } }, 'PUT')
 
   // ---------- Off until it's turned on ----------
-  ok((await kit.api('/config')).trials?.['usage-everywhere'] === false, 'a trial feature, off to start with', (await kit.api('/config')).trials)
+  ok((await kit.api('/config')).trials?.['usage-everywhere'] === false, 'a beta feature, off to start with', (await kit.api('/config')).trials)
   const off = await err('/usage-everywhere')
-  ok(off?.status === 404 && off.j?.trial === 'usage-everywhere' && /trial feature/.test(off.message), 'its route says how to turn it on', off?.message)
+  ok(off?.status === 404 && off.j?.trial === 'usage-everywhere' && /beta feature/.test(off.message), 'its route says how to turn it on', off?.message)
 
   // ---------- Each answer, a line (whether the trial is on or not) ----------
   for (const model of ['openai:gpt-5', 'anthropic:claude-sonnet-5-5', 'openai:quiet', 'cli:claude', 'cli:gemini']) {
@@ -214,7 +216,7 @@ try {
   const trial = p.locator('.st-check', { hasText: 'Usage Across Every Provider' }).locator('input')
   await trial.waitFor({ timeout: 15000 })
   await until(async () => !(await trial.isDisabled()), 10000)
-  ok(await trial.isChecked(), 'Settings › About & Updates › Trial Features: Usage Across Every Provider, on')
+  ok(await trial.isChecked(), 'Settings › About & Updates › Beta Features: Usage Across Every Provider, on')
   await trial.uncheck()
   await until(async () => (await kit.api('/config')).trials?.['usage-everywhere'] === false, 8000)
   await p.locator('button[aria-label="Close settings"]').click()
@@ -241,15 +243,28 @@ try {
   ok(/Cursor Agent's logs don't record tokens/.test(await say('cli:cursor')), 'Cursor Agent says it has no counts', await say('cli:cursor'))
   ok(/didn't say how many tokens it took: its one-shot mode doesn't report them/.test(await say('cli:gemini')), "Gemini CLI says its one-shot answer didn't say", await say('cli:gemini'))
   ok(/only the tokens out until a session ends/.test(await say('cli:copilot')), 'Copilot CLI says some sessions count tokens out alone', await say('cli:copilot'))
-  const via = (id) => view.locator(`[data-source="${id}"] .us-row-name`).getAttribute('title')
+  const via = (id) => view.locator(`[data-source="${id}"] .ue-name`).getAttribute('title')
   ok(/OpenAI/.test(await say('openai')) && /API key/.test(await via('openai')) && /on this computer/.test(await via('ollama')) && /\$0\.00|<\$0\.01/.test(await say('openai')), 'OpenAI: by API key, with its cost; Ollama on this computer', [await say('openai'), await via('openai'), await via('ollama')])
   const feats = await view.locator('[data-feature]').evaluateAll((xs) => xs.map((x) => x.getAttribute('data-feature')))
   ok(['meetings', 'consult', 'voice-edit', 'agents'].every((f) => feats.includes(f)), 'by feature: meeting notes, questions, edit by voice, and the agents\' own work', feats)
   ok(/Time on this computer/.test(await view.innerText()) && /Cost on API keys/.test(await view.innerText()), 'tiles for the cost on API keys and the time on this computer')
-  // A provider picked: the rest of the view is its alone.
+  const tileVals = (await view.locator('.us-tile-val').allInnerTexts()).map((x) => x.trim())
+  ok(/^\d+ s$|^\d+ min$|^\d+ h \d+ min$/.test(tileVals[2]), 'the time on this computer with its unit spelled out (3 s, not 3s)', tileVals)
+  const times = await view.locator('[data-source="ollama"] .ue-nums .muted').allInnerTexts()
+  ok(times.length === 1 && /^\d+ s$/.test(times[0]), "and so on a provider's row", times)
+  // No name cut off: a long one goes onto another line instead.
+  const cut = await view.evaluate((el) => [...el.querySelectorAll('*')].filter((e) => e.scrollWidth > e.clientWidth + 1 && getComputedStyle(e).textOverflow === 'ellipsis').map((e) => e.textContent.slice(0, 40)))
+  ok(!cut.length && (await view.locator('.ue-row').count()) > 10, 'nothing in it cut off with … at the width of the Today panel: every provider, model and feature whole', cut)
+  // The chart: a round scale (0, half, the top), each label short.
+  const ys = (await view.locator('.ue-days svg .axis-label').allTextContents()).slice(0, 3)
+  ok(/^Tokens a day$/.test(await view.locator('.ue-days h5').innerText()) && ys[0] === '0' && ys.slice(1).every((x) => /^\d+(\.\d)?[KMB]?$/.test(x)), 'the chart says what it shows, with a round scale (no 656.2K)', ys)
+  ok(/at list prices as of [A-Z][a-z]+ \d{4};/.test(await view.locator('.us-src').innerText()), "the prices' month by name, not 2026-10", await view.locator('.us-src').innerText())
+  // A provider picked: the rest of the view is its alone, and it says so.
   await view.locator('[data-source="cli:qwen"] button').click()
   ok(!!(await until(async () => /qwen3-coder-plus/.test(await view.locator('.ue-part').nth(1).innerText()) && !/gpt-5/.test(await view.locator('.ue-part').nth(1).innerText()), 5000)), 'a provider picked: its models alone')
-  await view.locator('[data-source="cli:qwen"] button').click()
+  ok(/Showing Qwen Code only/.test(await view.locator('.ue-picked').innerText().catch(() => '')), 'and it says whose numbers these are', await view.locator('.ue-picked').innerText().catch(() => ''))
+  await view.locator('.ue-picked button', { hasText: 'Show every provider' }).click()
+  ok(!!(await until(async () => !(await view.locator('.ue-picked').count()) && /gpt-5/.test(await view.locator('.ue-part').nth(1).innerText()), 5000)), 'Show every provider: all of them again')
   await shot(p, `${tag}usage-everywhere`)
   ok(w.errors.length === 0, 'no page errors', w.errors)
 
@@ -264,6 +279,8 @@ try {
   await pv.scrollIntoViewIfNeeded()
   const faults = await phoneFaults(ph.p, '.ustats')
   ok(!faults.wider && !faults.past && !faults.sideways, 'and nothing wider than the screen', faults)
+  const own = await phoneFaults(ph.p, '.ue')
+  ok(!Object.keys(own).length, 'Every Provider itself: whole 40 px targets (the range, each provider), nothing cut off', own)
   await shot(ph.p, `${tag}usage-everywhere-phone`)
   ok(ph.errors.length === 0, 'no page errors on the phone', ph.errors)
 } catch (e) {

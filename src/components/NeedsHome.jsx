@@ -8,22 +8,58 @@ import { api, hostApi } from '../api.js'
 import { t, tx, locale } from '../i18n/index.js'
 import './needshome.css'
 
-// Home (a trial feature, `home`): Needs you as the place the app opens at, on a computer and a
-// phone. What needs you first, answered right there (Yes, No, the agent's own choices, Reply), then
+// Home (a beta feature, `home`): Needs you as the place the app opens at, on a computer and a
+// phone. What needs you first, answered right there (Yes, No, the agent's own choices, Reply). Then
 // what's ready to look at (finished work and its pull request, a meeting's notes and the action
-// items not handed on, a whiteboard an agent drew, a task the Chief of Staff finished) and what's
-// coming up (the next meeting with its brief and the files in its invite, the Chief of Staff's
-// tasks). From every linked computer at once (server/home.js, by way of each one's summary), with a
-// filter by kind and by device. Everything opens every item on every computer, in lanes as the
-// Agent Map has them: by device, or by kind.
+// items not handed on, a whiteboard an agent drew, a task the Chief of Staff finished) as short
+// rows, newest first, the last day's few and the rest folded away. Beside it what's coming up, a day
+// at a time: the next meetings (with the brief and the files in the invite) and the tasks that name
+// a day; and the Chief of Staff's other tasks, the ones with no day folded away. From every linked
+// computer at once (server/home.js, by way of each one's summary, one row per thing), with a filter
+// by kind and by device. Everything opens every item on every computer, in lanes as the Agent Map
+// has them: by device, or by kind.
 
-const KINDS = [['all', tx('All')], ['agent', tx('Agents')], ['meeting', tx('Meetings')], ['chief', tx('Chief of Staff')], ['board', tx('Whiteboards')], ['file', tx('Files')]]
+const KINDS = [['all', tx('All')], ['agent', tx('Agents')], ['meeting', tx('Meetings')], ['chief', tx('Chief of Staff')], ['board', tx('Whiteboards')]]
 // Chief of Staff's own questions count with its tasks.
 const kindOf = (i) => (i.kind === 'task' || (i.kind === 'agent' && i.agent?.chief) ? 'chief' : i.kind)
 const RANK = { permission: 0, question: 1, failed: 2 }
+const DAY = 864e5
+// The last day's finished work shown before Show all: a morning's worth, not the whole pile.
+const CAP = 6
 const fmt = (iso) => new Date(iso).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' })
 const mins = (ms) => { const m = Math.max(1, Math.round(ms / 6e4)); return m < 60 ? t('{n} min', { n: m }) : t('{n} h {m} min', { n: Math.floor(m / 60), m: m % 60 }) }
 const why = (e, device) => (e?.status === 404 ? t('Update Bridge AI on {name} to do this from here.', { name: device }) : e?.message || t("That didn't work. Open it instead."))
+const time = (i) => Date.parse(i.at || 0) || 0
+// A project named as the agent is ("GIT" in GIT) is said once.
+const same = (a, b) => !a || !b || String(a).trim().toLowerCase() === String(b).trim().toLowerCase()
+
+// An agent's last message, whole: without the half word an older Bridge AI's cut can leave before
+// its "…" (it cuts at 300 characters, so only a message that long is one it cut).
+export const whole = (s) => {
+  const x = String(s || '').replace(/\s+/g, ' ').trim()
+  return x.endsWith('…') && x.length > 250 ? `${x.slice(0, -1).replace(/\s*\S*$/, '').replace(/[\s,;:.-]+$/, '')}…` : x
+}
+// A line or two of it that ends at a word: its first sentences, as many as fit in n characters
+// (when that's at least half of them), else as many whole words as fit, and "…".
+export function gist(s, n = 140) {
+  const x = whole(s)
+  if (x.length <= n) return x
+  let out = ''
+  for (const part of x.match(/.*?[.!?](?:\s+|$)|.+$/g) || []) {
+    if (out.length + part.trimEnd().length > n) break
+    out += part
+  }
+  if (out.trim().length >= n / 2) return out.trim()
+  const c = x.slice(0, n + 1)
+  return `${(c.slice(0, c.lastIndexOf(' ')) || c.slice(0, n)).replace(/[\s,;:.-]+$/, '')}…`
+}
+
+// Days, as the calendar and the task list have them (YYYY-MM-DD, this computer's own day).
+const dayKey = (v) => new Date(v).toLocaleDateString('en-CA')
+function dayName(key) {
+  const diff = Math.round((new Date(`${key}T12:00:00`) - new Date().setHours(12, 0, 0, 0)) / DAY)
+  return diff === 0 ? t('Today') : diff === 1 ? t('Tomorrow') : diff === -1 ? t('Yesterday') : new Date(`${key}T12:00:00`).toLocaleDateString(locale(), { weekday: 'short', month: 'short', day: 'numeric' })
+}
 
 // The list from the device this page comes from: every few seconds while it's on screen (less
 // often for a count elsewhere). uid: an item's id with its device's, as each device numbers its own.
@@ -44,15 +80,23 @@ export function useHome(on = true, every = 5000) {
 // and tasks waiting on you, on devices that can hear an answer.
 export const needCount = (data) => (data?.items || []).filter((i) => i.group === 'needs' && i.online).length
 
-// The calendar's part of coming up: the meeting on now or next today, with the files its invite
-// links to. Only where the calendar is (a Mac).
+// The calendar's part of coming up: the meetings left today and tomorrow's, with the files each
+// invite links to. One meeting on two of your calendars is one. Only where the calendar is (a Mac).
 function useComing(on) {
   const { data, error } = useCalendar()
   const [now, setNow] = useState(Date.now())
   useEffect(() => { const id = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(id) }, [])
-  if (!on) return { events: [], error: null }
-  const today = (data?.today || []).filter((e) => !e.allDay && !e.canceled && Date.parse(e.end) > now)
-  return { events: today.slice(0, 3), error: error || (data && data.available === false ? data.error || t('Calendar needs setting up') : null), now }
+  if (!on) return { events: [], error: null, now, loading: false }
+  const seen = new Set()
+  const pick = (list) => (list || []).filter((e) => {
+    if (e.allDay || e.canceled || Date.parse(e.end) <= now) return false
+    const k = `${String(e.title || '').trim().toLowerCase()}|${Date.parse(e.start)}`
+    if (seen.has(k)) return false
+    seen.add(k)
+    return true
+  })
+  const events = [...pick(data?.today), ...pick(data?.tomorrow)].sort((a, b) => Date.parse(a.start) - Date.parse(b.start)).slice(0, 6)
+  return { events, error: error || (data && data.available === false ? data.error || t('Calendar needs setting up') : null), now, loading: !data && !error }
 }
 
 // The meeting before this one that it follows on from (server/meetwork.js), as its brief.
@@ -69,17 +113,17 @@ function useBrief(e) {
   return brief
 }
 
-function Row({ icon, dot, title, sub, children, device, off }) {
-  return (
-    <article className={`hm-row ${off ? 'off' : ''}`}>
-      {dot ? <StatusDot status={dot} size={8} /> : <span className="hm-ico"><Icon name={icon} size={13} /></span>}
-      <div className="hm-row-main">
-        <b className="hm-row-title">{title}</b>
-        {(sub || device) && <span className="hm-row-sub">{sub}{device && <span className="hm-dev"><Icon name="laptop" size={10} />{device}{off ? ` · ${t('offline')}` : ''}</span>}</span>}
-      </div>
-      {children && <div className="hm-row-acts">{children}</div>}
-    </article>
-  )
+// What you've opened here (a row's whole text, or the thing itself), so Clear read can take those
+// off and the rest stand out. Kept in this browser only: it's a convenience, nothing depends on it.
+function useRead() {
+  const [read, setRead] = useState(() => { try { return new Set(JSON.parse(localStorage.getItem('cc-home-read') || '[]')) } catch { return new Set() } })
+  const mark = useCallback((uid) => setRead((r) => {
+    if (r.has(uid)) return r
+    const n = new Set([...r, uid])
+    try { localStorage.setItem('cc-home-read', JSON.stringify([...n].slice(-300))) } catch { /* no storage */ }
+    return n
+  }), [])
+  return [read, mark]
 }
 
 // A task of the Chief of Staff's waiting on you: what it needs, a reply to it, or open the Chief.
@@ -123,42 +167,139 @@ function TaskWaiting({ it, multi, onOpenChief, onGone, setNote }) {
   )
 }
 
-// A meeting whose notes are ready: its action items to Chief of Staff in one click, or open it.
-function MeetingReady({ it, multi, onOpenMeeting, setNote, refresh }) {
+// One thing ready to look at, as a short row: what it is, a line or two of it that ends at a word,
+// and where and when. Opened (a click, or Enter), the whole of it and what you can do with it; on a
+// computer the usual ones are also on the row while the pointer or the keyboard is on it.
+function ReadyItem({ it, multi, phone, read, open, onToggle, onRead, h }) {
+  const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
+  const [replying, setReplying] = useState(false)
   const [sent, setSent] = useState(null)
-  const m = it.meeting
-  const send = async () => {
+  const off = !it.online
+  const a = it.agent || {}
+  const left = sent ? 0 : it.unsent || 0
+  const go = (fn) => () => { onRead(); fn(it) }
+  const clear = async () => {
+    try { await onDevice(it.machine, '/needs-you/clear', { id: it.nid || it.id }); h.onGone(it, null) } catch (x) { h.setNote({ id: it.id, text: why(x, it.device) }) }
+  }
+  const toChief = async () => {
     setBusy(true)
     try {
-      const r = await onDevice(it.machine, `/meetings/${encodeURIComponent(m.id)}/chief`, {})
+      const r = await onDevice(it.machine, `/meetings/${encodeURIComponent(it.meeting.id)}/chief`, {})
       setSent(r.sent === false ? t('On Chief of Staff\'s list. It isn\'t running: it reads them when it starts.') : t('Sent to Chief of Staff'))
-      refresh()
-    } catch (e) { setNote({ id: it.id, text: why(e, it.device) }) } finally { setBusy(false) }
+      onRead()
+      h.refresh()
+    } catch (e) { h.setNote({ id: it.id, text: why(e, it.device) }) } finally { setBusy(false) }
   }
-  const left = sent ? 0 : it.unsent
+  const reply = async (e) => {
+    e.preventDefault()
+    const v = text.trim()
+    if (!v) return
+    setBusy(true)
+    try {
+      const r = await onDevice(it.machine, `/agents/${encodeURIComponent(it.paneId)}/prompt`, { text: v })
+      setText('')
+      setReplying(false)
+      h.onGone(it, r.queued ? t('Sent. It gets it when it can take it.') : t('Sent'))
+    } catch (x) { h.setNote({ id: it.id, text: why(x, it.device) }) } finally { setBusy(false) }
+  }
+  // What the row says, by kind.
+  const l = it.kind === 'agent' ? { dot: 'done', title: a.title || t('Agent'), what: same(a.project, a.title) ? null : a.project, sub: gist(it.text, phone ? 90 : 140) || t('Finished, with nothing more to say.'), full: whole(it.text) }
+    : it.kind === 'meeting' ? { icon: 'mic', title: it.meeting.title, what: t('Meeting notes'), sub: sent || (left === 1 ? t('1 action item not handed on yet') : left > 1 ? t('{n} action items not handed on yet', { n: left }) : t('The summary is ready')) }
+      : it.kind === 'board' ? { icon: 'shapes', title: it.board.title, what: t('Whiteboard'), sub: t('Changed since you last looked') }
+        : { icon: 'helm', title: it.task.title, what: t('Chief of Staff finished'), sub: it.task.outcome || it.task.link || t('Done'), full: [it.task.outcome, it.task.link].filter(Boolean).join('\n') }
+  const opener = it.kind === 'agent' ? h.onOpen : it.kind === 'meeting' ? h.onOpenMeeting : it.kind === 'board' ? h.onOpenBoard : h.onOpenChief
+  const canClear = it.kind === 'agent' && it.type === 'review' && !off && !it.old
+  const pr = it.pr && <a className="ghost-btn" href={it.pr} target="_blank" rel="noopener noreferrer" onClick={onRead}><Icon name="external" size={12} /> {t('Pull request')}</a>
+  const handOn = it.kind === 'meeting' && left > 0 && !off && <button type="button" className="ghost-btn" disabled={busy} onClick={toChief}><Icon name="helm" size={12} /> {t('To Chief of Staff')}</button>
+  const clearBtn = canClear && <button type="button" className="ghost-btn" onClick={clear} title={t('Take it off the list until it has something new')}>{t('Clear')}</button>
+  const openBtn = <button type="button" className="ghost-btn strong" onClick={go(opener)} disabled={off}>{t('Open')}</button>
+  // Where and when: on the right on a computer, under it on a phone (where the room is for the words).
+  const when = (
+    <span className="hm-item-when">
+      {multi && <span className="hm-dev"><Icon name="laptop" size={10} />{it.device}{off ? ` · ${t('offline')}` : ''}</span>}
+      {it.kind === 'task' && it.task.done ? <span>{dayName(it.task.done)}</span>
+        : it.at && <time dateTime={it.at} title={new Date(it.at).toLocaleString(locale())}>{ago(it.at)}</time>}
+    </span>
+  )
   return (
-    <Row icon="mic" title={t('Notes ready · {title}', { title: shortTitle(m.title, 48) })} device={multi ? it.device : null} off={!it.online}
-      sub={sent || (left === 1 ? t('1 action item not handed on yet') : left > 1 ? t('{n} action items not handed on yet', { n: left }) : t('Written {when}', { when: ago(it.at) }))}>
-      {left > 0 && it.online && <button type="button" className="btn small" disabled={busy} onClick={send}><Icon name="helm" size={12} /> {t('To Chief of Staff')}</button>}
-      <button type="button" className="btn small" onClick={() => onOpenMeeting(it)} disabled={!it.online}>{t('Open')}</button>
-    </Row>
+    <li className={`hm-item ${read ? 'read' : ''} ${open ? 'open' : ''} ${off ? 'off' : ''}`} data-kind={it.kind}>
+      <button type="button" className="hm-item-main" aria-expanded={open} onClick={() => { onToggle(); onRead() }}>
+        <span className="hm-item-ico">{l.dot ? <StatusDot status={l.dot} size={8} /> : <Icon name={l.icon} size={13} />}</span>
+        <span className="hm-item-body">
+          <span className="hm-item-l1"><b>{l.title}</b>{l.what && <span className="hm-what">{l.what}</span>}{it.pr && <span className="hm-tag"><Icon name="branch" size={10} />{t('PR')}</span>}</span>
+          <span className="hm-item-sub">{l.sub}</span>
+          {phone && when}
+        </span>
+        {!phone && when}
+      </button>
+      {!phone && !open && <div className="hm-quick">{pr}{handOn}{clearBtn}{openBtn}</div>}
+      {open && (
+        <div className="hm-item-more">
+          {l.full && l.full !== l.sub && <p className="hm-full">{l.full}</p>}
+          <div className="hm-item-acts">
+            {it.kind === 'agent' && !off && <button type="button" className="ghost-btn" aria-expanded={replying} onClick={() => setReplying(!replying)}><Icon name="chat" size={12} /> {t('Reply')}</button>}
+            {pr}{handOn}
+            <span className="ny-grow" />
+            {clearBtn}{openBtn}
+          </div>
+          {replying && (
+            <form className="ny-reply" onSubmit={reply}>
+              <input autoFocus value={text} onChange={(e) => setText(e.target.value)} placeholder={t('Reply to {name}…', { name: a.title })} aria-label={t('Reply to {name}', { name: a.title })} disabled={busy} />
+              <button type="submit" className="btn small primary" disabled={busy || !text.trim()}><Icon name="send" size={12} /> {t('Send')}</button>
+            </form>
+          )}
+        </div>
+      )}
+    </li>
   )
 }
 
-function NextMeeting({ e, now, onOpenMeeting, onCalendar }) {
-  const brief = useBrief(e)
+// A meeting coming up: when, the brief from the last in the series (for the next one), the files in
+// its invite, and Join.
+function EventRow({ e, now, next, onOpenMeeting, onCalendar }) {
+  const brief = useBrief(next ? e : null)
   const on = Date.parse(e.start) <= now
   const last = brief?.last
   const open = brief?.counts?.open || 0
   const was = last && { title: shortTitle(last.title, 40), date: new Date(last.startedAt).toLocaleDateString(locale(), { month: 'short', day: 'numeric' }), n: open }
+  const wait = Date.parse(e.start) - now
+  const when = on ? t('On now, until {time}', { time: fmt(e.end) }) : wait < 3 * 3600e3 ? t('In {wait}', { wait: mins(wait) }) : null
+  const said = next && (!last ? t('No earlier meeting to brief you from') : open ? t('Brief: last time, {title} on {date}, {n} still open', was) : t('Brief: last time, {title} on {date}', was))
   return (
-    <Row icon="calendar" title={on ? t('{title} · on now', { title: shortTitle(e.title, 48) }) : t('{title} · {time}, in {wait}', { title: shortTitle(e.title, 48), time: fmt(e.start), wait: mins(Date.parse(e.start) - now) })}
-      sub={!last ? t('No earlier meeting to brief you from') : open ? t('Brief: last time, {title} on {date}, {n} still open', was) : t('Brief: last time, {title} on {date}', was)}>
-      {e.join && <a className="btn small" href={e.join} target="_blank" rel="noreferrer"><Icon name="video" size={12} /> {t('Join')}</a>}
-      {last ? <button type="button" className="btn small" onClick={() => onOpenMeeting({ machine: null, online: true, meeting: { id: last.id } })}>{t('Open brief')}</button>
-        : <button type="button" className="btn small" onClick={onCalendar}>{t('Calendar')}</button>}
-    </Row>
+    <li className={`hm-ev ${on ? 'now' : ''}`}>
+      <span className="hm-time">{on ? t('Now') : fmt(e.start)}</span>
+      <div className="hm-ev-main">
+        <b>{e.title}</b>
+        {(when || said) && <span className="hm-item-sub">{[when, said].filter(Boolean).join(' · ')}</span>}
+        {e.links?.length > 0 && <span className="hm-links">{e.links.slice(0, 4).map((x, i) => <a key={i} href={x.url} target="_blank" rel="noreferrer"><Icon name="file" size={11} />{shortTitle(x.name || x.url, 40)}</a>)}</span>}
+      </div>
+      {(e.join || next) && (
+        <div className="hm-ev-acts">
+          {e.join && <a className="btn small" href={e.join} target="_blank" rel="noreferrer"><Icon name="video" size={12} /> {t('Join')}</a>}
+          {next && (last ? <button type="button" className="btn small" onClick={() => onOpenMeeting({ machine: null, online: true, meeting: { id: last.id } })}>{t('Open brief')}</button>
+            : <button type="button" className="btn small" onClick={onCalendar}>{t('Calendar')}</button>)}
+        </div>
+      )}
+    </li>
+  )
+}
+
+// One of the Chief of Staff's tasks, as a row that opens the Chief of Staff it's with. lead: what
+// goes where a meeting's time does (Due, Overdue, On it now).
+function TaskRow({ it, lead, multi, onOpenChief }) {
+  const off = !it.online
+  return (
+    <li className={`hm-item hm-trow ${off ? 'off' : ''}`}>
+      <button type="button" className="hm-item-main" onClick={() => onOpenChief(it)} disabled={off} title={off ? t('{name} is offline', { name: it.device }) : t('Open Chief of Staff')}>
+        {lead ? <span className={`hm-time ${lead.cls || ''}`}>{lead.text}</span> : <span className="hm-item-ico"><Icon name="helm" size={13} /></span>}
+        <span className="hm-item-body">
+          <span className="hm-item-l1"><b>{it.task.title}</b></span>
+          {lead?.sub && <span className="hm-item-sub">{lead.sub}</span>}
+        </span>
+        {multi && <span className="hm-item-when"><span className="hm-dev"><Icon name="laptop" size={10} />{it.device}{off ? ` · ${t('offline')}` : ''}</span></span>}
+      </button>
+    </li>
   )
 }
 
@@ -170,37 +311,79 @@ export default function NeedsHome({ phone = false, calendar = false, onOpen, onO
   const [device, setDevice] = useState('all')
   const [gone, setGone] = useState({})
   const [note, setNote] = useState(null)
+  const [openId, setOpenId] = useState(null) // the ready row whose whole text is out
+  const [more, setMore] = useState(false) // the last day's finished work, all of it
+  const [older, setOlder] = useState(false) // what's older than a day, unfolded
+  const [todo, setTodo] = useState(false) // the Chief of Staff's tasks with no day, unfolded
+  const [sure, setSure] = useState(false) // Clear all older, asked once more
+  const [read, markRead] = useRead()
   useEffect(() => { if (!note) return; const id = setTimeout(() => setNote(null), 6000); return () => clearTimeout(id) }, [note])
   const cal = useComing(calendar)
   const devices = data?.devices || []
   const multi = devices.length > 1
-  // The invite's files for the meetings coming up (Files), as items like the rest.
-  const files = cal.events.filter((e) => e.links?.length).map((e) => ({ id: `file:${e.id}`, uid: `here|file:${e.id}`, kind: 'file', group: 'coming', event: e, machine: null, online: true, device: devices[0]?.name }))
-  const meetings = cal.events.slice(0, 1).map((e) => ({ id: `cal:${e.id}`, uid: `here|cal:${e.id}`, kind: 'meeting', group: 'coming', event: e, machine: null, online: true, device: devices[0]?.name }))
-  const all = [...(data?.items || []), ...meetings, ...files].filter((i) => i.group && !gone[i.uid])
+  const events = cal.events.map((e) => ({ id: `cal:${e.id}`, uid: `here|cal:${e.id}`, kind: 'meeting', group: 'coming', event: e, machine: null, online: true, device: devices[0]?.name, at: e.start }))
+  const all = [...(data?.items || []), ...events].filter((i) => i.group && !gone[i.uid])
   const onDev = (i) => device === 'all' || (i.machine || 'here') === device
   const shown = all.filter((i) => onDev(i) && (kind === 'all' || kindOf(i) === kind))
   const count = (k) => all.filter((i) => onDev(i) && (k === 'all' || kindOf(i) === k)).length
-  const needs = shown.filter((i) => i.group === 'needs').sort((x, y) => (x.kind === 'task') - (y.kind === 'task') || (RANK[x.type] ?? 9) - (RANK[y.type] ?? 9) || (Date.parse(x.at || 0) || 0) - (Date.parse(y.at || 0) || 0))
-  const ready = shown.filter((i) => i.group === 'ready').sort((x, y) => (Date.parse(y.at || 0) || 0) - (Date.parse(x.at || 0) || 0))
-  const coming = shown.filter((i) => i.group === 'coming')
+  const needs = shown.filter((i) => i.group === 'needs').sort((x, y) => (x.kind === 'task') - (y.kind === 'task') || (RANK[x.type] ?? 9) - (RANK[y.type] ?? 9) || time(x) - time(y))
+  // Ready to look at: newest first; the last day's few, then Show all; anything older folded away.
+  const ready = shown.filter((i) => i.group === 'ready').sort((x, y) => time(y) - time(x))
+  const recent = ready.filter((i) => Date.now() - time(i) < DAY)
+  const old = ready.filter((i) => Date.now() - time(i) >= DAY)
+  const clearable = (i) => i.kind === 'agent' && i.type === 'review' && i.online && !i.old
+  const readOnes = ready.filter((i) => read.has(i.uid) && clearable(i))
+  // Coming up, a day at a time: the meetings at their times, then the tasks that name that day (one
+  // overdue is today's). The Chief of Staff's other tasks: the ones it's on, and the rest folded.
+  const tasks = shown.filter((i) => i.kind === 'task' && i.group === 'coming')
+  const today = dayKey(Date.now())
+  const days = new Map()
+  const put = (k, row) => { if (!days.has(k)) days.set(k, []); days.get(k).push(row) }
+  for (const i of shown.filter((x) => x.kind === 'meeting' && x.group === 'coming')) put(dayKey(i.event.start), i)
+  for (const i of tasks.filter((x) => x.task.due).sort((x, y) => x.task.due.localeCompare(y.task.due))) put(i.task.due < today ? today : i.task.due, i)
+  const coming = [...days.keys()].sort().map((k) => ({ key: k, label: dayName(k), rows: days.get(k) }))
+  const doing = tasks.filter((i) => !i.task.due && i.task.status === 'doing')
+  const todos = tasks.filter((i) => !i.task.due && i.task.status !== 'doing')
   const waiting = needs.filter((i) => i.online).length
   const onGone = (it, said) => {
     setGone((g) => ({ ...g, [it.uid]: Date.now() }))
     if (said) setNote({ text: `${said} · ${it.agent?.title || it.task?.title || ''}` })
     for (const ms of [0, 1500, 4000]) setTimeout(refresh, ms)
   }
+  // Clear several (read ones, or all that are older than a day), each on its own device: off the
+  // list at once, and back with a note for any its device couldn't clear.
+  const clearAll = async (list) => {
+    setSure(false)
+    setGone((g) => ({ ...g, ...Object.fromEntries(list.map((i) => [i.uid, Date.now()])) }))
+    const missed = []
+    await Promise.all(list.map((i) => onDevice(i.machine, '/needs-you/clear', { id: i.nid || i.id }).catch(() => missed.push(i))))
+    if (missed.length) setGone((g) => { const n = { ...g }; for (const i of missed) delete n[i.uid]; return n })
+    const done = list.length - missed.length
+    setNote({ text: missed.length ? t("Cleared {n}; {m} couldn't be cleared from here. Open them instead.", { n: done, m: missed.length }) : done === 1 ? t('Cleared 1') : t('Cleared {n}', { n: done }) })
+    refresh()
+  }
   const offline = devices.filter((d) => !d.online).length
   const partial = devices.filter((d) => d.partial && d.online)
   const where = !multi ? t('On this computer') : offline ? t('On {n} computers · {m} offline', { n: devices.length, m: offline }) : t('On {n} computers', { n: devices.length })
+  const date = new Date().toLocaleDateString(locale(), { weekday: 'long', month: 'long', day: 'numeric' })
+  const h = { onOpen, onOpenMeeting, onOpenBoard, onOpenChief, onGone, setNote, refresh }
+  const row = (it) => <ReadyItem key={it.uid} it={it} multi={multi} phone={phone} read={read.has(it.uid)} open={openId === it.uid} onToggle={() => setOpenId(openId === it.uid ? null : it.uid)} onRead={() => markRead(it.uid)} h={h} />
   // The inbox's own card, with its own id (Clear and the answers take it).
   const agentItem = (it) => <NeedsItem key={it.uid} it={{ ...it, id: it.nid || it.id }} onOpen={onOpen} onGone={(x, said) => onGone(it, said)} setNote={setNote} />
+  const lead = (i) => {
+    const late = i.task.due < today
+    const on = i.task.status === 'doing'
+    const sub = late ? t('Chief of Staff · was due {date}', { date: new Date(`${i.task.due}T12:00:00`).toLocaleDateString(locale(), { month: 'short', day: 'numeric' }) }) : on ? t('Chief of Staff · on it now') : t('Chief of Staff · to do')
+    return { text: late ? t('Overdue') : t('Due'), cls: late ? 'late' : 'due', sub }
+  }
+  const showAll = kind === 'all'
+  const shownRecent = more ? recent : recent.slice(0, CAP)
   return (
     <div className={`hm ${phone ? 'phone' : ''}`}>
       <header className="hm-head">
         <div className="hm-title">
           <h2>{waiting === 0 ? t('Nothing needs you') : waiting === 1 ? t('1 thing needs you') : t('{n} things need you', { n: waiting })}</h2>
-          <p className="muted">{where}</p>
+          <p className="muted">{date} · {where}</p>
         </div>
         <div className="hm-tools">
           {multi && (
@@ -212,53 +395,106 @@ export default function NeedsHome({ phone = false, calendar = false, onOpen, onO
           <button type="button" className="btn small hm-every" onClick={onEverything}>{t('See everything')} <Icon name="chevron" size={11} /></button>
         </div>
       </header>
-      <div className="chips hm-kinds" role="tablist" aria-label={t('Kind')}>
-        {KINDS.map(([id, label]) => {
-          const n = count(id)
-          if (id !== 'all' && !n && kind !== id) return null
-          return <button key={id} type="button" role="tab" aria-selected={kind === id} className={`fchip ${kind === id ? 'on' : ''}`} onClick={() => setKind(kind === id ? 'all' : id)}>{t(label)}<span className="fcount">{n}</span></button>
-        })}
-      </div>
+      {/* A filter by kind, once there's something to filter. */}
+      {(count('all') > 0 || kind !== 'all') && (
+        <div className="chips hm-kinds" role="tablist" aria-label={t('Kind')}>
+          {KINDS.map(([id, label]) => {
+            const n = count(id)
+            if (id !== 'all' && !n && kind !== id) return null
+            return <button key={id} type="button" role="tab" aria-selected={kind === id} className={`fchip ${kind === id ? 'on' : ''}`} onClick={() => setKind(kind === id ? 'all' : id)}>{t(label)}<span className="fcount">{n}</span></button>
+          })}
+        </div>
+      )}
       {note && <p className="ny-note" role="status">{note.text}</p>}
-      {error && <p className="error-text hm-err" role="alert">{t("Home couldn't load: {why}", { why: error })} <button type="button" className="link-btn" onClick={refresh}>{t('Try again')}</button></p>}
+      {error && <p className="error-text hm-err" role="alert">{data ? t("Home couldn't update: {why}. This is what it had last.", { why: error }) : t("Home couldn't load: {why}", { why: error })} <button type="button" className="link-btn" onClick={refresh}>{t('Try again')}</button></p>}
       {partial.length > 0 && <p className="muted small hm-partial">{partial.length === 1 ? t('From {name}, only what needs you: its meetings, tasks and whiteboards show once it has Bridge AI with Home.', { name: partial[0].name }) : t('From {names}, only what needs you: their meetings, tasks and whiteboards show once they have Bridge AI with Home.', { names: partial.map((d) => d.name).join(', ') })}</p>}
-      {!data && !error && <div className="skeleton-rows pad"><div /><div /></div>}
+      {!data && !error && <div className="skeleton-rows pad hm-loading" role="status" aria-label={t('Loading what needs you on each computer…')}><div /><div /><div /></div>}
       {data && (
         <>
-          <section className="hm-sec" aria-label={t('Waiting on you')}>
-            <h3>{t('Waiting on you')}<span className="muted">{t('your answer starts them again')}</span></h3>
-            {needs.map((it) => (it.kind === 'task' ? <TaskWaiting key={it.uid} it={it} multi={multi} onOpenChief={onOpenChief} onGone={onGone} setNote={setNote} /> : agentItem(it)))}
-            {!needs.length && <div className="hm-empty"><Icon name="check" size={16} /><span>{t('Nothing needs you right now.')}</span></div>}
-          </section>
+          {(showAll || needs.length > 0) && (
+            <section className="hm-sec" aria-label={t('Waiting on You')}>
+              <h3>{t('Waiting on You')}{needs.length > 0 && <span className="fcount">{needs.length}</span>}<span className="hm-hint">{t('your answer starts them again')}</span></h3>
+              {needs.length > 0
+                ? <div className="hm-needs">{needs.map((it) => (it.kind === 'task' ? <TaskWaiting key={it.uid} it={it} multi={multi} onOpenChief={onOpenChief} onGone={onGone} setNote={setNote} /> : agentItem(it)))}</div>
+                : <div className="hm-empty"><Icon name="check" size={16} /><span>{t('Nothing needs you right now.')}</span></div>}
+            </section>
+          )}
           <div className="hm-cols">
-            <section className="hm-sec" aria-label={t('Ready to look at')}>
-              <h3>{t('Ready to look at')}<span className="fcount">{ready.length}</span></h3>
-              {ready.map((it) => (
-                it.kind === 'agent' ? agentItem(it)
-                  : it.kind === 'meeting' ? <MeetingReady key={it.uid} it={it} multi={multi} onOpenMeeting={onOpenMeeting} setNote={setNote} refresh={refresh} />
-                    : it.kind === 'board' ? <Row key={it.uid} icon="shapes" title={t('Whiteboard · {title}', { title: it.board.title })} sub={t('Changed {when}, since you last looked', { when: ago(it.at) })} device={multi ? it.device : null} off={!it.online}><button type="button" className="btn small" onClick={() => onOpenBoard(it)} disabled={!it.online}>{t('Open')}</button></Row>
-                      : <Row key={it.uid} icon="helm" title={t('Chief of Staff finished · {title}', { title: it.task.title })} sub={it.task.outcome || it.task.link} device={multi ? it.device : null} off={!it.online}><button type="button" className="btn small" onClick={() => onOpenChief(it)} disabled={!it.online}>{t('Open')}</button></Row>
-              ))}
-              {!ready.length && <p className="muted small hm-none">{t('Nothing new to look at.')}</p>}
-            </section>
-            <section className="hm-sec" aria-label={t('Coming up')}>
-              <h3>{t('Coming up')}<span className="muted">{t('today')}</span></h3>
-              {coming.map((it) => (
-                it.kind === 'meeting' ? <NextMeeting key={it.uid} e={it.event} now={cal.now} onOpenMeeting={onOpenMeeting} onCalendar={onCalendar} />
-                  : it.kind === 'file' ? (
-                    <Row key={it.uid} icon="file" title={it.event.links.length === 1 ? t('1 file for {title}', { title: shortTitle(it.event.title, 40) }) : t('{n} files for {title}', { n: it.event.links.length, title: shortTitle(it.event.title, 40) })}
-                      sub={<span className="hm-links">{it.event.links.slice(0, 4).map((l, i) => <a key={i} href={l.url} target="_blank" rel="noreferrer">{shortTitle(l.name || l.url, 40)}</a>)}</span>} />
-                  ) : <Row key={it.uid} icon="helm" title={it.task.title} sub={it.task.status === 'doing' ? t('Chief of Staff task · on it now') : t('Chief of Staff task · to do')} device={multi ? it.device : null} off={!it.online}><button type="button" className="btn small" onClick={() => onOpenChief(it)} disabled={!it.online}>{t('Open')}</button></Row>
-              ))}
-              {cal.error && <p className="muted small hm-none">{t('Your calendar: {why}', { why: cal.error })} <button type="button" className="link-btn" onClick={onCalendar}>{t('Set up')}</button></p>}
-              {!coming.length && !cal.error && <p className="muted small hm-none">{t('Nothing else today.')}</p>}
-            </section>
+            {(showAll || ready.length > 0) && (
+              <section className="hm-sec" aria-label={t('Ready to Look At')}>
+                <h3>
+                  {t('Ready to Look At')}{ready.length > 0 && <span className="fcount">{ready.length}</span>}
+                  <span className="ny-grow" />
+                  {readOnes.length > 0 && <button type="button" className="ghost-btn hm-clear-read" onClick={() => clearAll(readOnes)} title={t('Take the finished work you\'ve opened off the list until each has something new')}>{t('Clear read · {n}', { n: readOnes.length })}</button>}
+                </h3>
+                {recent.length > 0 && <ul className="hm-list hm-ready">{shownRecent.map(row)}</ul>}
+                {recent.length > CAP && (
+                  <button type="button" className="hm-more-btn" aria-expanded={more} onClick={() => setMore(!more)}>{more ? t('Show fewer') : t('Show all {n}', { n: recent.length })}</button>
+                )}
+                {!recent.length && old.length > 0 && <p className="muted small hm-none">{t('Nothing new in the last day.')}</p>}
+                {old.length > 0 && (
+                  <div className="hm-fold-box">
+                    <div className="hm-fold-row">
+                      <button type="button" className="hm-fold" aria-expanded={older} onClick={() => { setOlder(!older); setSure(false) }}>
+                        <Icon name="chevron" size={12} />{t('Older than a day')}<span className="fcount">{old.length}</span>
+                      </button>
+                      {old.some(clearable) && (sure
+                        ? <span className="hm-sure">{t('Clear {n}? Each comes back when it has something new.', { n: old.filter(clearable).length })}<button type="button" className="btn small" onClick={() => clearAll(old.filter(clearable))}>{t('Clear')}</button><button type="button" className="ghost-btn" onClick={() => setSure(false)}>{t('Cancel')}</button></span>
+                        : <button type="button" className="ghost-btn hm-clear-old" onClick={() => setSure(true)}>{t('Clear all')}</button>)}
+                    </div>
+                    {older && <ul className="hm-list hm-ready">{old.map(row)}</ul>}
+                  </div>
+                )}
+                {!ready.length && (
+                  <div className="hm-none">
+                    <p>{t('Nothing new to look at.')}</p>
+                    <small className="muted">{t('Finished work, meeting notes and whiteboards an agent changed show here.')}</small>
+                  </div>
+                )}
+              </section>
+            )}
+            <div className="hm-side">
+              {(showAll || kind === 'meeting' || coming.length > 0) && (
+                <section className="hm-sec" aria-label={t('Coming Up')}>
+                  <h3>{t('Coming Up')}</h3>
+                  {coming.map((d) => (
+                    <div key={d.key} className="hm-day">
+                      <h4>{d.label}</h4>
+                      <ul className="hm-list">
+                        {d.rows.map((i) => (i.event
+                          ? <EventRow key={i.uid} e={i.event} now={cal.now} next={i === coming[0].rows.find((x) => x.event)} onOpenMeeting={onOpenMeeting} onCalendar={onCalendar} />
+                          : <TaskRow key={i.uid} it={i} lead={lead(i)} multi={multi} onOpenChief={onOpenChief} />))}
+                      </ul>
+                    </div>
+                  ))}
+                  {cal.loading && !coming.length && <p className="muted small hm-none">{t('Looking at your calendar…')}</p>}
+                  {cal.error && <p className="muted small hm-none">{t('Your calendar: {why}', { why: cal.error })} <button type="button" className="link-btn" onClick={onCalendar}>{t('Set up')}</button></p>}
+                  {!coming.length && !cal.error && !cal.loading && <p className="muted small hm-none">{calendar ? t('Nothing on your calendar for the rest of today or tomorrow, and no task with a day.') : t('No task with a day coming up.')}</p>}
+                </section>
+              )}
+              {(showAll || kind === 'chief') && (
+                <section className="hm-sec" aria-label={t("Chief of Staff's Tasks")}>
+                  <h3>{t("Chief of Staff's Tasks")}{doing.length + todos.length > 0 && <span className="fcount">{doing.length + todos.length}</span>}</h3>
+                  {doing.length > 0 && <ul className="hm-list">{doing.map((i) => <TaskRow key={i.uid} it={i} lead={{ text: t('On it'), cls: 'doing' }} multi={multi} onOpenChief={onOpenChief} />)}</ul>}
+                  {todos.length > 0 && (
+                    <div className="hm-fold-box">
+                      <button type="button" className="hm-fold" aria-expanded={todo} onClick={() => setTodo(!todo)}>
+                        <Icon name="chevron" size={12} />{todos.length === 1 ? t('1 to do, with no day set') : t('{n} to do, with no day set', { n: todos.length })}
+                      </button>
+                      {todo && <ul className="hm-list">{todos.map((i) => <TaskRow key={i.uid} it={i} multi={multi} onOpenChief={onOpenChief} />)}</ul>}
+                    </div>
+                  )}
+                  {!doing.length && !todos.length && <p className="muted small hm-none">{tasks.length ? t('Each of its tasks has a day: they\'re under Coming Up.') : t('Nothing on Chief of Staff\'s list.')}</p>}
+                </section>
+              )}
+            </div>
           </div>
         </>
       )}
     </div>
   )
 }
+
 
 // ---------- Everything ----------
 // Every item on every computer: each computer's agents (the Agent Map's), what waits on you, its
@@ -296,8 +532,8 @@ export function Everything({ phone = false, onOpenAgent, onOpenMeeting, onOpenBo
     return onOpenChief(x)
   }
   const line = (x) => {
-    if (x.lane === 'agent') return { dot: x.a.status, title: [x.a.project, x.a.name || x.a.title].filter(Boolean).join(' · '), sub: x.a.asking || x.a.doing?.text || x.a.kindLabel || x.a.kind }
-    if (x.lane === 'needs') return { dot: x.type === 'failed' ? 'unknown' : 'blocked', title: [x.agent?.project, x.agent?.title].filter(Boolean).join(' · '), sub: x.text || t('Waiting on you') }
+    if (x.lane === 'agent') return { dot: x.a.status, title: [same(x.a.project, x.a.name || x.a.title) ? null : x.a.project, x.a.name || x.a.title].filter(Boolean).join(' · '), sub: x.a.asking || x.a.doing?.text || x.a.kindLabel || x.a.kind }
+    if (x.lane === 'needs') return { dot: x.type === 'failed' ? 'unknown' : 'blocked', title: [same(x.agent?.project, x.agent?.title) ? null : x.agent?.project, x.agent?.title].filter(Boolean).join(' · '), sub: x.text || t('Waiting on you') }
     if (x.lane === 'meeting') return { icon: 'mic', title: x.meeting.title, sub: x.meeting.status === 'recording' ? t('Recording') : x.unsent ? (x.unsent === 1 ? t('1 action item not handed on yet') : t('{n} action items not handed on yet', { n: x.unsent })) : x.meeting.hasSummary ? t('Notes ready') : ago(x.meeting.startedAt) }
     if (x.lane === 'board') return { icon: 'shapes', title: x.board.title, sub: x.board.changed ? t('Changed {when}, since you last looked', { when: ago(x.at) }) : t('Changed {when}', { when: ago(x.at) }) }
     return { icon: 'helm', title: x.task.title, sub: x.task.status === 'waiting' ? x.task.needs || t('Waiting on you') : x.task.status === 'done' ? x.task.outcome || t('Done') : x.task.status === 'doing' ? t('On it now') : t('To do') }

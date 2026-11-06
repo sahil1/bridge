@@ -1851,16 +1851,36 @@ button.yg-day:hover { box-shadow: 0 0 0 1.5px var(--accent); }
 .us-cols-read { position: absolute; top: 0; right: 0; font-size: 11px; color: var(--ink-2); }
 .us-src { margin: 0; }
 .us-ell { overflow: hidden; text-overflow: ellipsis; }
-/* Every provider in one view (UsageEverywhere.jsx, a trial feature) */
+/* Every provider in one view (UsageEverywhere.jsx, a beta feature) */
 .ue .us-tiles { margin-bottom: 10px; }
+.ue .us-tile-sub { white-space: normal; }
 .ue-grid { margin-top: 10px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }
 .ue-part { min-width: 0; }
-.ue-part h5 { margin: 0 0 6px; font-size: 12px; font-weight: 600; color: var(--ink-2); }
-.ue .us-row { grid-template-columns: minmax(0, 2.2fr) minmax(24px, 1fr) 46px 48px; gap: 8px; }
-.ue .us-row-name > .us-ell { flex: 0 1 auto; min-width: 2.5em; }
-.ue .us-row-name small { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.ue-via { flex: none; color: var(--ink-3); }
+.ue-part h5, .ue-days h5 { margin: 0 0 6px; font-size: 12px; font-weight: 600; color: var(--ink-2); }
+/* A row: its name and numbers on one line (a long name goes onto the next, never cut off), its
+   share as a thin bar under them. A provider's row is a button that shows only its numbers. */
+.ue-row { width: 100%; display: grid; gap: 4px; padding: 6px; border-radius: 7px; text-align: left; font-size: 12px; color: var(--ink); }
+button.ue-row:hover { background: var(--pane-2); }
+.ue-row.on { background: var(--accent-soft); }
+.ue-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; min-width: 0; }
+.ue-name { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 6px; min-width: 0; }
+.ue-name .us-sw { align-self: center; }
+.ue-nm { overflow-wrap: anywhere; min-width: 0; }
+.ue-name small { font-size: 10.5px; }
+.ue-nums { flex: none; display: flex; gap: 10px; font-size: 11.5px; }
+.ue-nums .muted { min-width: 44px; text-align: right; }
+.ue-row .us-row-bar { height: 4px; }
+.ue-via { flex: none; color: var(--ink-3); align-self: center; }
 .ue-why { margin: 0 6px 4px; color: var(--ink-3); display: flex; gap: 5px; align-items: baseline; overflow-wrap: anywhere; min-width: 0; }
+.ue-picked { margin: 0 0 10px; display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; color: var(--ink-2); }
+.ue-picked .ghost-btn { margin-left: auto; }
+.ue-none { margin: 0 0 10px; }
+.ue-more { margin-top: 4px; }
+.ue .us-src { margin-top: 10px; }
+.ue-tip .us-tip-row .num { margin-left: auto; padding-left: 10px; }
+/* On a phone: whole targets. */
+.app.narrow .ue .seg.small-seg button { height: 40px; min-width: 44px; }
+.app.narrow .ue :is(button.ue-row, .ue-more, .ue-picked .ghost-btn) { min-height: 44px; }
 .ue-why svg { flex: none; }
 .ue-brief { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .ue-brief p { margin: 0; }
@@ -3149,7 +3169,7 @@ table.sheet tbody tr:hover td { background: var(--pane-2); }
 .mc-menu.phone .mc-item, .mc-menu.phone .menu-item { min-height: 44px; }
 .mc-dot.unknown { background: transparent; box-shadow: inset 0 0 0 1.5px var(--line-2); }
 
-/* A trial feature's tab while it's off (App.jsx TrialOff). */
+/* A beta feature's tab while it's off (App.jsx TrialOff). */
 .trial-off { display: grid; justify-items: center; align-content: center; gap: 8px; height: 100%; min-height: 240px; padding: 24px 16px; text-align: center; color: var(--ink-2); }
 .trial-off b { color: var(--ink); font-size: 14px; }
 .trial-off p { margin: 0; max-width: 360px; }

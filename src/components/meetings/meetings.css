@@ -815,20 +815,43 @@ button.mt-from-chip:hover { color: var(--ink); border-color: color-mix(in srgb, 
 .mt-talk .c4 { background: var(--series-5); }
 .mt-talk .c5 { background: var(--series-7); }
 
-/* ============ Insights and People (insights.jsx, a trial feature) ============
+/* ============ Insights and People (insights.jsx, a beta feature) ============
    Usage's tiles, cards and bars (styles.css .us-*), with what each number is based on under it. */
 .mt-home:has(> .mi:not(.mi-people)) { max-width: 1120px; }
 .mi { display: grid; gap: 12px; align-content: start; min-width: 0; }
-.mi-lede, .mi-why, .mi-basis { margin: 0; }
+.mi-lede, .mi-why, .mi-basis, .mi-none { margin: 0; }
+.mi-basis { display: flex; gap: 6px; align-items: baseline; }
+.mi-basis svg { flex: none; position: relative; top: 1px; }
 .mi-bar { justify-content: flex-start; }
 .mi-kinds button .muted { font-variant-numeric: tabular-nums; }
 .mi .us-grid { grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); }
 .mi-tile { cursor: default; }
-.mi-weeks .us-col-label { white-space: nowrap; overflow: visible; }
+/* By week: what the week under the pointer came to (this week's, until then) over the columns; a
+   line at the top and the middle with what it's worth at the right; the dates under them. */
+.mi-weeks { display: grid; gap: 4px; min-width: 0; }
+.mi-wread { margin: 0; color: var(--ink-2); font-variant-numeric: tabular-nums; min-height: 1.4em; }
+.mi-plot { position: relative; display: flex; align-items: flex-end; gap: 3px; height: 120px; padding-right: 40px; }
+.mi-gl { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--line-2); pointer-events: none; }
+.mi-gl i { position: absolute; right: 0; top: -7px; font: 10px var(--font); font-style: normal; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.mi-wcol { position: relative; flex: 1; min-width: 0; height: 100%; display: flex; align-items: flex-end; }
+.mi-wbar { display: block; width: 100%; background: var(--hm-2); border-radius: 3px 3px 0 0; }
+.mi-wcol.now .mi-wbar { background: var(--series-1); }
+.mi-wcol.hl .mi-wbar { background: var(--hm-4); }
+.mi-wcol.hl .mi-stack { opacity: .8; }
+.mi-wdates { display: flex; gap: 3px; padding-right: 40px; }
+.mi-wdates span { flex: 1; min-width: 0; font-size: 10px; color: var(--ink-3); white-space: nowrap; overflow: visible; text-align: center; height: 13px; }
+.mi-wdates span:empty { visibility: hidden; }
 .mi-stack { display: flex; flex-direction: column; width: 100%; border-radius: 3px 3px 0 0; overflow: hidden; }
 .mi-stack i { background: var(--hm-1); min-height: 0; }
 .mi-stack b { background: var(--series-1); min-height: 0; }
-.mi .us-row { grid-template-columns: minmax(90px, 1.2fr) minmax(40px, 1fr) 44px 30px; }
+.mi-note { margin: 8px 0 0; display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+.mi-key { display: inline-flex; align-items: center; gap: 5px; color: var(--ink-2); }
+.mi-key i { width: 9px; height: 9px; border-radius: 2px; background: var(--hm-1); }
+.mi-key i.mine { background: var(--series-1); }
+/* The kinds' and people's rows, with what each number is under a line of its own. */
+.mi .us-row, .mi-colhead { grid-template-columns: minmax(90px, 1.6fr) minmax(40px, 1fr) 72px 72px; }
+.mi-colhead { display: grid; gap: 10px; padding: 0 6px 2px; font-size: 10.5px; color: var(--ink-3); }
+.mi-colhead span { text-align: right; white-space: nowrap; }
 .mi-signals { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(90px, .6fr) minmax(180px, 1.6fr); font-size: 12.5px; }
 .mi-signal { display: contents; }
 .mi-signal > * { padding: 7px 8px 7px 0; border-top: 1px solid var(--line); }
@@ -852,19 +875,25 @@ button.mt-from-chip:hover { color: var(--ink); border-color: color-mix(in srgb, 
 .mi-ptext { display: grid; flex: 1; min-width: 0; }
 .mi-ptext b { font-weight: 550; overflow-wrap: anywhere; }
 .mi-ptext > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mi-pnum { flex: none; color: var(--ink-2); font-size: 12px; }
+.mi-pnum { flex: none; display: grid; justify-items: end; gap: 1px; color: var(--ink-2); font-size: 12px; text-align: right; }
+.mi-pnum .muted { font-size: 11.5px; }
 .mi-back { justify-self: start; }
 .mi-phead { display: flex; align-items: center; gap: 12px; }
 .mi-phead h3 { margin: 0; font-size: 18px; }
 .mi-phead p { margin: 2px 0 0; }
-.mi-next { margin: 0; display: flex; gap: 6px; align-items: baseline; }
 .mi-sec { display: grid; gap: 6px; }
 .mi-sec h4 { margin: 6px 0 0; font-size: 13px; font-weight: 600; }
+.mi-sec h4 .muted { font-weight: 500; margin-left: 4px; }
+.mi-sec-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding-right: 10px; }
+.mi-all { justify-self: start; }
 .mi-sec > p { margin: 0; }
 .mi-topics { display: flex; flex-wrap: wrap; gap: 6px; }
 .mi-items, .mi-written { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
-.mi-items li { display: grid; gap: 1px; font-size: 13px; }
-.mi-items .link-btn { justify-self: start; color: var(--ink-3); }
+.mi-items li { display: grid; gap: 2px; font-size: 13px; padding: 6px 0; border-top: 1px solid var(--line); }
+.mi-items li:first-child { border-top: 0; padding-top: 0; }
+.mi-item-from { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; color: var(--ink-3); }
+.mi-from { display: inline-flex; align-items: center; gap: 5px; min-width: 0; padding: 1px 6px; margin-left: -6px; border-radius: 6px; color: var(--ink-2); text-align: left; overflow-wrap: anywhere; }
+.mi-from:hover, .mi-from:focus-visible { background: var(--pane-2); color: var(--ink); outline: none; }
 .mi-written li { display: flex; align-items: center; gap: 10px; font-size: 13px; }
 .mi-written li span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .mi-merge { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
@@ -878,5 +907,7 @@ button.mt-from-chip:hover { color: var(--ink); border-color: color-mix(in srgb, 
 .app.narrow .mi .seg.small-seg { display: flex; width: 100%; }
 .app.narrow .mi .seg.small-seg button { flex: 1 1 0; min-width: 0; justify-content: center; height: 40px; padding: 0 4px; }
 .app.narrow .mi :is(.mi-prow, .mi-mrow, .us-row) { min-height: 44px; }
+.app.narrow .mi :is(.mi-from, .mi-all) { min-height: 40px; }
+.app.narrow .mi .us-row, .app.narrow .mi-colhead { grid-template-columns: minmax(80px, 1.2fr) minmax(30px, 1fr) 64px 64px; }
 .app.narrow .mi :is(.mi-merge select, .mi-back) { min-height: 40px; font-size: 16px; }
 .app.narrow .mi :is(.us-tile-val, .us-row-name, .mi-ptext > span) { white-space: normal; overflow-wrap: anywhere; }

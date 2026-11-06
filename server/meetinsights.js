@@ -2,7 +2,7 @@
 // (how many, how long, your share of the talk, words spoken and heard, by week and by kind of
 // meeting), and People: everyone you've met, from invites and the names on transcripts, each with
 // how often, when last and next, the time together, their share of the talk and what you talk
-// about. A trial feature (meeting-insights). Worked out here, never sent, and nothing in it is a
+// about. A beta feature (meeting-insights). Worked out here, never sent, and nothing in it is a
 // score of anyone: only what a transcript and a calendar can say, each with what it's based on.
 //
 // Each meeting is read once into a digest (who talked how long, words, questions, its people, the
@@ -21,7 +21,7 @@ import * as memory from './meetmemory.js'
 const DIR = path.join(DATA, 'meetings')
 const CACHE = cacheFile('meeting-insights.json')
 const PEOPLE = path.join(DIR, 'people.json')
-const VERSION = 1
+const VERSION = 2
 const DAY = 864e5
 let cfg = {}
 export const configure = (c) => { cfg = c || {} }
@@ -34,7 +34,13 @@ const readJSON = (f, d = null) => { try { return JSON.parse(fs.readFileSync(f, '
 const readText = (f) => { try { return fs.readFileSync(f, 'utf8') } catch { return '' } }
 const hash = (s) => crypto.createHash('sha1').update(s).digest('hex').slice(0, 16)
 const me = () => String(cfg.name || '').trim()
-const isMe = (name) => !!me() && meetings.sameName(name, me())
+// You, by your name (Settings › General), or by an address whose name is yours, as an invite often
+// lists you (alex@example.com for Alex Morgan).
+const isMe = (name) => {
+  if (!me()) return false
+  const em = /([^\s<>@,;"']+)@[\w.-]+/.exec(String(name || ''))
+  return meetings.sameName(name, me()) || (!!em && !/\S\s+\S/.test(String(name).replace(em[0], '').replace(/[<>"']/g, '').trim()) && meetings.sameName(em[1], me()))
+}
 
 // ---------- One meeting, read once ----------
 // What a digest is read from: the meeting, and each file beside it that changes what it says.
@@ -397,12 +403,21 @@ export async function person(pid) {
   const p = all.find((x) => x.id === pid || x.keys.includes(pid))
   if (!p) throw new Error('No such person in your meetings')
   const named = (text) => p.variants.some((v) => whole(v) && new RegExp(`(?<![\\p{L}])${v.parts.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[\\s.-]+')}(?![\\p{L}])`, 'iu').test(text))
-  const items = p._mine.flatMap((d) => d.items.filter((x) => !x.done && ((x.who && !x.yours && p.variants.some((v) => meetings.sameName(x.who, v.display))) || named(x.text))).map((x) => ({ text: x.text, who: x.who, yours: x.yours, meeting: { id: d.id, title: d.title, start: d.start } })))
+  // An item carried from summary to summary (a weekly's, repeating it) is one: the newest, with how
+  // many meetings have it.
+  const items = new Map()
+  for (const d of p._mine) {
+    for (const x of d.items.filter((x) => !x.done && ((x.who && !x.yours && p.variants.some((v) => meetings.sameName(x.who, v.display))) || named(x.text)))) {
+      const k = `${String(x.who || '').toLowerCase()}|${x.text.toLowerCase().replace(/\s+/g, ' ').trim()}`
+      if (items.has(k)) items.get(k).meetings++
+      else items.set(k, { text: x.text, who: x.who, yours: x.yours, meeting: { id: d.id, title: d.title, start: d.start }, meetings: 1 })
+    }
+  }
   const e = cal.events ? nextWith(p, cal.events) : null
   return {
     ...shown(p),
     meetingsList: p._mine.map((d) => { const s = p._theirs(d).s; const talk = d.you.s + d.others.s + d.unknown.s; return { id: d.id, title: d.title, start: d.start, seconds: d.seconds, how: p._seen.get(d.id), pct: (d.told === 'call' || d.told === 'voices') && s > 0 && talk ? Math.round((s / talk) * 100) : null } }),
-    items,
+    items: [...items.values()],
     next: e ? { title: e.title, start: e.start, attendees: e.attendees } : null,
     calendar: cal.events ? { ok: true } : { ok: false, error: cal.error, code: cal.code },
     // The ways their name is written, to take one out (split).

@@ -61,16 +61,17 @@ export function PacksSection({ packs }) {
   const font = (k) => <label className="sd-pack-font">{k === 'heading' ? t('Headings') : t('Body')}<select value={edit.fonts[k]} onChange={(e) => setEdit((x) => ({ ...x, fonts: { ...x.fonts, [k]: e.target.value } }))}>{FONTS.map((f) => <option key={f}>{f}</option>)}</select></label>
   return (
     <section className="sd-sec">
-      <h3>{t('Design packs')}</h3>
-      <p className="muted small">{t('Your colours, fonts and logo, once, for every deck Studio draws and every PowerPoint it makes.')}</p>
+      <h3>{t('Design Packs')}</h3>
+      <p className="muted small">{t('Your colours, fonts and logo, once: for every deck Studio draws and every PowerPoint it makes, and for new documents and pages.')}</p>
+      {!packs.list.length && !edit && <p className="muted small sd-none">{t('None yet. Until there is one, decks are drawn in Marp\'s own look, and new documents and pages in a plain one.')}</p>}
       <ul className="sd-packs">
         {packs.list.map((p) => (
           <li key={p.id} className="sd-pack">
             <span className="sd-pack-sw" style={{ background: p.colors?.background, color: p.colors?.text, fontFamily: p.fonts?.heading }}><b style={{ color: p.colors?.accent }}>Aa</b>{p.logo && <img src={p.logo} alt="" />}</span>
             <span className="sd-pack-name"><b>{p.name}</b>{p.isDefault && <small className="muted">{t('Default')}</small>}</span>
             <button type="button" className="ghost-btn" onClick={() => setEdit(p)}>{t('Change')}</button>
-            {!p.isDefault && <button type="button" className="ghost-btn" onClick={() => api('/studio/packs', { method: 'POST', body: { ...p, isDefault: true } }).then(packs.refresh)}>{t('Make default')}</button>}
-            <button type="button" className="ghost-btn" aria-label={t('Delete {name}', { name: p.name })} onClick={() => remove(p)}><Icon name="trash" size={12} /></button>
+            {!p.isDefault && <button type="button" className="ghost-btn" onClick={() => api('/studio/packs', { method: 'POST', body: { ...p, isDefault: true } }).then(packs.refresh)} title={t('New decks, documents and pages use your default pack')}>{t('Make default')}</button>}
+            <button type="button" className="ghost-btn" aria-label={t('Delete {name}', { name: p.name })} title={t('Delete {name}', { name: p.name })} onClick={() => remove(p)}><Icon name="trash" size={12} /></button>
           </li>
         ))}
       </ul>
