@@ -216,7 +216,9 @@
 .sd-diff .fold { color: var(--ink-3); font-style: italic; }
 
 /* Ask an agent */
-.sd-modal { position: fixed; inset: 0; z-index: 150; display: grid; place-items: center; padding: 16px; background: rgb(0 0 0 / .32); }
+/* Its one column at most 560px and never wider than the screen: sized by what's in it (the part you
+   picked, a long line of it), the form was wider than a phone. */
+.sd-modal { position: fixed; inset: 0; z-index: 150; display: grid; grid-template-columns: minmax(0, 560px); place-content: center; place-items: center; padding: 16px; background: rgb(0 0 0 / .32); }
 .sd-ask { display: grid; gap: 10px; width: min(560px, 100%); padding: 16px 18px; border-radius: 14px; background: var(--pane); box-shadow: 0 0 0 1px var(--line), 0 18px 50px rgb(0 0 0 / .28); }
 .sd-ask textarea { width: 100%; padding: 9px 11px; border: 1px solid var(--line-2, var(--line)); border-radius: 9px; background: var(--pane); color: var(--ink); font: 13.5px/1.45 var(--font); resize: vertical; }
 .sd-ask-sel { margin: 0; padding: 8px 10px; border-radius: 9px; background: var(--pane-2); }
