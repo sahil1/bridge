@@ -346,6 +346,7 @@ try {
   const alone = !!(await until(async () => (await p.locator('.sd-deck-md').count()) === 0 && (await p.locator('.sd-deck-view').count()) === 1, 3000, 100))
   await p.locator('.sd-toolbar [role="tab"]', { hasText: 'Both' }).click()
   ok(alone && !!(await until(async () => (await p.locator('.sd-deck-md').count()) === 1, 3000, 100)), 'Slides alone, for room, and back to both')
+  ok(await p.locator('.sd-deck-md').evaluate((e) => getComputedStyle(e).fontVariantLigatures) === 'none', 'the deck\'s Markdown shows what\'s typed: no ligatures (<!-- and --> as typed)')
   await p.locator('.sd-toolbar button', { hasText: 'PowerPoint' }).click()
   ok(!!(await until(() => fs.existsSync(path.join(dir, 'pitch.pptx')) && fs.readFileSync(path.join(dir, 'pitch.pptx')).subarray(0, 2).toString() === 'PK', 15000)), 'PowerPoint: pitch.pptx beside it')
   await shot(p, `${tag}studio-deck`)
