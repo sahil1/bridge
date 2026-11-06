@@ -9,7 +9,8 @@
 // email that asks to meet: free times with theirs beside them, put into the draft. Settings › Mail:
 // How You Write shown, changed, an example taken out, cleared; the working hours. At 1440 and on a
 // 390 px phone, light and dark, with nothing wider than the phone and every target whole. Mail is
-// never scripted. Off a Mac there's no Settings › Mail and no mail actions in ⌘K.
+// never scripted. Off a Mac (Mail reads Apple Mail) there's no way into Mail at all: no Mail tab or
+// Inbox card in Today, on a computer or a phone, no Settings › Mail and nothing for mail in ⌘K.
 import fs from 'node:fs'
 import path from 'node:path'
 import { startKit, startModel, checks, until, browser, page, shot, phoneFaults, IS_MAC } from '../lib/harness.mjs'
@@ -23,21 +24,50 @@ const allowMail = (ctx) => ctx.route(/\/api\/mail(\/|\?|$)/, (r) => r.continue()
 const real = (errors) => errors.filter((e) => !/\/api\/[\w/.?=&-]+ due to access control checks|^TypeError: Importing a module script failed\.$/.test(e))
 
 if (!IS_MAC) {
+  // Mail reads Apple Mail: here there's no way into it at all, rather than a tab that says it can't work.
   const kit = await startKit('mail-ui')
+  const ctxs = []
   try {
     await kit.api('/setup', { name: 'Sam Tester' })
-    const { p, ctx } = await page(b, kit.url)
+    const { p, ctx, errors } = await page(b, kit.url)
+    ctxs.push(ctx)
     await p.waitForSelector('.settings-btn', { timeout: 20000 })
-    await p.locator('.settings-btn').click()
-    await p.locator('.modal.settings .st-nav').waitFor({ timeout: 8000 })
-    const nav = await p.locator('.st-nav .st-nav-item').allInnerTexts()
-    ok(!nav.map((x) => x.trim()).includes('Mail'), 'not a Mac: Settings has no Mail section', nav)
-    await p.keyboard.press('Escape')
     await p.keyboard.press('ControlOrMeta+k')
     await p.waitForSelector('.pal-item', { timeout: 5000 })
-    ok(!(await p.locator('.pal-item[data-id^="a:mail-"]').count()), 'and ⌘K has no mail actions')
-    await ctx.close()
-  } finally { kit.stop(); await b.close() }
+    await p.locator('.palette input').fill('mail')
+    await p.waitForTimeout(300)
+    const ids = await p.evaluate(() => [...document.querySelectorAll('.pal-item[data-id^="a:"]')].map((e) => e.dataset.id))
+    ok(!ids.some((x) => /^a:(mail|triage)/.test(x)), 'not a Mac: ⌘K offers nothing for mail (Open mail, Triage, Done, Remind me, Reply Assist, its keys)', ids)
+    await p.locator('.palette input').fill('Open calendar')
+    await p.locator('.pal-item[data-id="a:cal"]').click()
+    await p.waitForSelector('.today-tabs button', { timeout: 10000 })
+    const tabs = (await p.locator('.today-tabs button').allInnerTexts()).map((x) => x.trim())
+    ok(tabs.some((x) => /Calendar/.test(x)) && !tabs.some((x) => /^Mail\b/.test(x)), 'Today has no Mail tab', tabs)
+    await p.locator('.today-tabs button', { hasText: /^\s*Today\s*$/ }).click()
+    await p.waitForSelector('#card-calendar', { timeout: 10000 })
+    ok(!(await p.locator('#card-mail').count()), 'and its overview has no Inbox card')
+    await p.locator('.settings-btn').click()
+    await p.locator('.modal.settings .st-nav').waitFor({ timeout: 8000 })
+    const nav = (await p.locator('.st-nav .st-nav-item').allInnerTexts()).map((x) => x.trim())
+    ok(nav.includes('Meetings') && !nav.includes('Mail'), 'Settings has no Mail section', nav)
+    await shot(p, `${tag}mail-not-mac-1440`)
+    ok(!real(errors).length, 'no page errors', errors)
+    const ph = await page(b, kit.url, { phone: true })
+    ctxs.push(ph.ctx)
+    await ph.p.waitForSelector('.tabbar button', { timeout: 20000 })
+    await ph.p.locator('.tabbar button', { hasText: 'Today' }).click()
+    await ph.p.waitForSelector('.m-body .today-tabs button', { timeout: 10000 })
+    const phoneTabs = (await ph.p.locator('.m-body .today-tabs button').allInnerTexts()).map((x) => x.trim())
+    ok(!phoneTabs.some((x) => /^Mail\b/.test(x)) && !(await ph.p.locator('#card-mail').count()), 'on a phone too: no Mail tab in Today, no Inbox card', phoneTabs)
+    await shot(ph.p, `${tag}mail-not-mac-390`)
+    ok(!real(ph.errors).length, 'no page errors on the phone', ph.errors)
+  } catch (e) {
+    ok(false, `crashed: ${e.stack}`)
+  } finally {
+    for (const c of ctxs) await c.close().catch(() => {})
+    kit.stop()
+    await b.close()
+  }
   process.exit(done().fail ? 1 : 0)
 }
 

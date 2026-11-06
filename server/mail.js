@@ -390,6 +390,7 @@ export function makeMail(cfg = {}) {
   // Kept a while once read (the app reads the next few ahead of you), until Mail's index changes.
   const bodies = new Map() // id -> { at, value }
   get.message = async (id) => {
+    if (process.platform !== 'darwin') throw new Error(SETUP.notMac)
     if (!idx?.file) idx = findIndex()
     if (idx.error) throw new Error(SETUP[idx.error])
     const n = Number(id)
@@ -436,6 +437,7 @@ export function makeMail(cfg = {}) {
   // three days before it to two weeks after. Each file says where Mail keeps it, when Mail has
   // downloaded it.
   get.related = async ({ title, start } = {}) => {
+    if (process.platform !== 'darwin') return { available: false, reason: 'notMac', messages: [] }
     if (!idx?.file) idx = findIndex()
     if (idx.error) return { available: false, reason: idx.error, messages: [] }
     const words = (x) => (String(x || '').toLowerCase().match(/[\p{L}\p{N}]+/gu) || []).filter((w) => w.length > 2 && !/^(re|fw|fwd|the|and|for|with|meeting|call|sync|invitation|updated|accepted|declined|tentative)$/.test(w))

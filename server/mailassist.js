@@ -172,9 +172,10 @@ export function makeMailAssist({ cfg, mail, calendar, meetings, chat, zone }) {
   // back with it, word for word (prompt) and in short (sent).
   async function draft(id, { tweak, text, times, theirs, nudge = false, voice = true } = {}) {
     if (tweak && !TWEAKS[tweak]) throw fail('Unknown change', null, 400)
+    // The email first: where Mail can't be read (not a Mac), that's what to say.
+    const msg = await mail.message(id)
     const use = await pickModel()
     if (!use) throw noModel()
-    const msg = await mail.message(id)
     const list = await mail().catch(() => null)
     const row = list?.messages?.find((x) => String(x.id) === String(id))
     const subject = msg.subject || row?.subject || ''

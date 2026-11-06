@@ -681,9 +681,9 @@ function App() {
     { id: 'a:theme', label: nextTheme === 'dark' ? t('Color mode: switch to dark') : nextTheme === 'light' ? t('Color mode: switch to light') : t('Color mode: switch to system'), icon: theme === 'dark' ? 'sun' : 'moon', keywords: 'dark light mode', run: () => setTheme(nextTheme) },
     { id: 'a:ideas', label: t('Add an idea'), icon: 'bulb', keywords: 'backlog todo', run: () => { showCard('bulb'); setTimeout(() => document.querySelector('.idea-add input')?.focus(), 250) } },
     { id: 'a:cal', label: t('Open calendar'), icon: 'calendar', keywords: 'week month year schedule meetings', run: () => showToday('calendar') },
-    { id: 'a:mail', label: t('Open mail'), icon: 'mail', keywords: 'inbox email outlook needs you', run: () => showToday('mail') },
-    { id: 'a:triage', label: t('Triage my inbox with an agent'), icon: 'sparkle', keywords: 'mail email', run: async () => { try { const o = await api('/mail/triage', { method: 'POST' }); if (o.paneId) setTimeout(() => openAgent(o.paneId), 1200) } catch { showToday('mail') } } },
-    // Mail's keys, taught here: each action with its key beside it (where Mail can be read).
+    conf?.mail && { id: 'a:mail', label: t('Open mail'), icon: 'mail', keywords: 'inbox email outlook needs you', run: () => showToday('mail') },
+    conf?.mail && { id: 'a:triage', label: t('Triage my inbox with an agent'), icon: 'sparkle', keywords: 'mail email', run: async () => { try { const o = await api('/mail/triage', { method: 'POST' }); if (o.paneId) setTimeout(() => openAgent(o.paneId), 1200) } catch { showToday('mail') } } },
+    // Mail's keys, taught here: each action with its key beside it. Mail is only where it can be read.
     wide && conf?.mail && { id: 'a:mail-done', label: t('Mail: Done'), icon: 'check', hint: 'E', keywords: 'mail email archive done finished mark inbox zero clear', run: () => { showToday('mail'); mailDo('done') } },
     wide && conf?.mail && { id: 'a:mail-later', label: t('Mail: Remind me…'), icon: 'clock', hint: 'H', keywords: 'mail email snooze later remind reminder set aside nobody answers follow up', run: () => { showToday('mail'); mailDo('later') } },
     wide && conf?.mail && { id: 'a:mail-reply', label: t('Mail: Reply Assist'), icon: 'edit', hint: 'R', keywords: 'mail email reply draft answer write respond voice tone schedule free times', run: () => { showToday('mail'); mailDo('reply') } },

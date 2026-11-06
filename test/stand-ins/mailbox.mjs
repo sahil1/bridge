@@ -1,6 +1,7 @@
 // A made-up Apple Mail for the mail tests: Mail's index ("Envelope Index", SQLite, as Mail keeps
 // it) and each message's .emlx file, in a test server's home folder (Library/Mail/V10), and a few
-// recorded meetings in its data folder. All invented: example.com addresses, made-up people.
+// recorded meetings in its data folder. All invented: example.com addresses, made-up people. Mail
+// is a Mac's (makeMailbox, with the system's sqlite3); the meetings are anywhere (seedMeetings).
 //   Inbox: 1 Dana asks for a review today (quoting your last message); 2 a shop's deals; 3 Lee, three
 //   hours behind you (their Date header), asks for a 45 minute call; 4 Kim asks for the budget.
 //   Sent: 100-121, 22 replies in your own words with a signature, each quoting what it answers;
@@ -8,6 +9,7 @@
 //   Meetings: a call (your mic's lines are yours), a room with voices told apart (voice 1 is you),
 //   and a room nobody told apart.
 // makeMailbox(kit) -> { V, INDEX, sqlite(q), emlx(folder, id, headers), who(n), rfc(unix, off), LOCAL, now }
+// (it seeds the meetings too)
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -17,11 +19,13 @@ const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct
 const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 // A Date header as a mail app writes it, at that many minutes from UTC.
 export const rfc = (unix, off) => { const t = new Date(unix * 1000 + off * 60000); return `${WD[t.getUTCDay()]}, ${pad(t.getUTCDate())} ${MON[t.getUTCMonth()]} ${t.getUTCFullYear()} ${pad(t.getUTCHours())}:${pad(t.getUTCMinutes())}:00 ${off < 0 ? '-' : '+'}${pad(Math.floor(Math.abs(off) / 60))}${pad(Math.abs(off) % 60)}` }
-export const SQLITE = spawnSync('/bin/sh', ['-c', 'command -v sqlite3'], { encoding: 'utf8' }).stdout.trim() || '/usr/bin/sqlite3'
+// The system's sqlite3 (a Mac has one in /usr/bin), found only when asked: nothing runs as this loads.
+export const sqliteBin = () => (process.platform === 'win32' ? null : spawnSync('/bin/sh', ['-c', 'command -v sqlite3'], { encoding: 'utf8' }).stdout?.trim() || '/usr/bin/sqlite3')
 const UUID = '0A1B2C3D-0000-4000-8000-00000000AB12'
 export const PEOPLE = { 1: ['dana@example.com', 'Dana Lee'], 2: ['me@example.com', 'Sam Tester'], 3: ['news@example.com', 'Shop'], 4: ['lee@example.com', 'Lee Park'], 5: ['kim@example.com', 'Kim Ito'] }
 
 export function makeMailbox(kit) {
+  const SQLITE = sqliteBin()
   const now = Math.floor(Date.now() / 1000)
   const LOCAL = -new Date().getTimezoneOffset()
   const V = path.join(kit.home, 'Library', 'Mail', 'V10')
@@ -75,7 +79,13 @@ ${to.map((n) => `INSERT INTO recipients (message, address, type) VALUES (${id}, 
   message({ id: 130, box: 2, from: 2, to: [5], subject: 'Contract for the pilot', when: now - 2 * 86400, conv: 300, read: 1, body: 'Hi Kim,\n\nAttached is the contract for the pilot. Could you sign it this week?\n\nCheers,\nSam' })
   const made = spawnSync(SQLITE, [INDEX], { input: text, encoding: 'utf8' })
   if (made.status) throw new Error(`the made-up index: ${made.stderr}`)
+  seedMeetings(kit)
+  return { V, INDEX, sqlite, emlx, who, rfc, LOCAL, now }
+}
 
+// Three recorded meetings, written as Bridge AI keeps them: a call, a room with voices told apart
+// (voice 1 is you), and a room nobody told apart.
+export function seedMeetings(kit) {
   const meeting = (id, { title, daysAgo, lines, voices }) => {
     const d = path.join(kit.data, 'meetings', id)
     fs.mkdirSync(d, { recursive: true })
@@ -94,7 +104,6 @@ ${to.map((n) => `INSERT INTO recipients (message, address, type) VALUES (${id}, 
     ['you', 10, 15, 'I would rather wait until next quarter for this whole thing.'],
   ], voices: { src: 'you', speakers: 2, line: { 'you:0': 1, 'you:10': 2 }, names: { 1: { me: true }, 2: { name: 'Mia Chen' } } } })
   meeting('mt-untold', { title: 'Hallway chat', daysAgo: 9, lines: [['you', 0, 5, 'Nobody can tell who said this line in the room at all.']] })
-  return { V, INDEX, sqlite, emlx, who, rfc, LOCAL, now }
 }
 
 // A stand-in for Bridge AI's calendar helper (native/bridgecal) in a kit's bin folder, answering
