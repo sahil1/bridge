@@ -1,8 +1,8 @@
 // Diagrams into whiteboard shapes, and back into words for a model. X is the Excalidraw module
 // (excalidraw.js), handed in so nothing here loads it by itself.
 //   Mermaid (a model's "Draw this", an agent's .mmd, a ```mermaid block): Excalidraw's own
-//   mermaid-to-excalidraw lays it out (dagre) as boxes, arrows and words. Flowcharts, sequence and
-//   class diagrams become shapes; other kinds come in as one picture.
+//   mermaid-to-excalidraw lays it out as boxes, arrows and words. Flowcharts and sequence, class
+//   and state diagrams become shapes where it can read them; other kinds come in as one picture.
 //   draw.io (.drawio): its boxes, ellipses, diamonds, words and arrows, where they were, with their
 //   colours; each page beside the last.
 //   A diagram spec (a model's "Draw this", an agent's .json): drawn by spec.js.
@@ -11,14 +11,30 @@
 // Everything comes out in the board's look (look.js): clean, or hand-drawn.
 import { loadMermaid } from './excalidraw.js'
 import { restyle, lookOf, INK } from './look.js'
-import { sides } from './layout.js'
+import { sides, elbowPoints } from './layout.js'
 import { fromSpec } from './spec.js'
 import { makeItem } from './shapes/make.js'
 import { ITEMS, itemFor } from '../../../shared/whiteboard/catalog.js'
 
 // ---------- Mermaid ----------
 // In the clean look its arrows between two shapes turn at right angles, as a model's do; the
-// board routes them once they're on it (layout.js reroute).
+// board routes them once they're on it (layout.js reroute). An arrow keeps the ends the diagram
+// gave it (a class diagram's diamond or hollow triangle, a line with no head); only Mermaid's
+// plain arrowhead becomes the look's. A second arrow between the same two shapes (there and back,
+// as a state's "changes asked") goes round the outside of the two, on the side nearer the edge of
+// the diagram, so the two and their words aren't drawn on top of each other (a third, round the
+// other side). A sequence diagram's messages stay as drawn: straight across, in order down the
+// page (some versions join them to the boxes at the top, where turning them would put them all).
+const SEQUENCE = /^\s*(?:---\n[\s\S]*?\n---\s*)?(?:%%[^\n]*\n\s*)*sequenceDiagram\b/
+const head = (h, look) => (h === 'arrow' ? look.arrowhead : h)
+const aside = (a, b, [fa], n, mid) => {
+  const across = fa[1] === 0.5 // the first leaves by a side: these go below or above, else right or left
+  const at = across ? (a.y + a.height / 2 + b.y + b.height / 2) / 2 : (a.x + a.width / 2 + b.x + b.width / 2) / 2
+  const out = at >= (across ? mid.y : mid.x)
+  const far = n % 2 ? out : !out
+  const p = across ? [0.5, far ? 1 : 0] : [far ? 1 : 0, 0.5]
+  return [p, p]
+}
 export async function fromMermaid(X, text, look = 'clean') {
   const { parseMermaidToExcalidraw } = await loadMermaid()
   // Strict, as Mermaid is by default: no scripts, links or HTML from a diagram an agent wrote.
@@ -27,12 +43,21 @@ export async function fromMermaid(X, text, look = 'clean') {
   const l = lookOf(look)
   if (l.arrowType === 'elbow') {
     const byId = new Map(out.map((e) => [e.id, e]))
+    const between = new Map() // arrows so far between two shapes, either way
+    const [x1, y1, x2, y2] = X.getCommonBounds(out)
+    const mid = { x: (x1 + x2) / 2, y: (y1 + y2) / 2 }
+    const turn = !SEQUENCE.test(String(text))
     out = out.map((e) => {
       const a = byId.get(e.startBinding?.elementId), b = byId.get(e.endBinding?.elementId)
-      if (e.type !== 'arrow' || !a || !b || a.id === b.id) return e.type === 'text' && e.strokeColor === '#1e1e1e' ? X.newElementWith(e, { strokeColor: INK }) : e
-      const [fa, fb] = sides(a, b, 'TB')
-      const last = e.points[e.points.length - 1]
-      return X.newElementWith(e, { elbowed: true, roundness: null, points: [[0, 0], last], endArrowhead: l.arrowhead, startBinding: { ...e.startBinding, fixedPoint: fa }, endBinding: { ...e.endBinding, fixedPoint: fb } })
+      if (!turn || e.type !== 'arrow' || !a || !b || a.id === b.id) return e.type === 'text' && e.strokeColor === '#1e1e1e' ? X.newElementWith(e, { strokeColor: INK }) : e
+      const pair = [a.id, b.id].sort().join(' ')
+      const n = between.get(pair) || 0
+      between.set(pair, n + 1)
+      const first = sides(a, b, 'TB')
+      const [fa, fb] = n ? aside(a, b, first, n, mid) : first
+      // The first keeps the ends the diagram drew; another starts from the sides it now joins.
+      const path = n ? { ...elbowPoints(a, b, [fa, fb]), fixedSegments: null } : { points: [[0, 0], e.points[e.points.length - 1]] }
+      return X.newElementWith(e, { elbowed: true, roundness: null, ...path, startArrowhead: head(e.startArrowhead, l), endArrowhead: head(e.endArrowhead, l), startBinding: { ...e.startBinding, fixedPoint: fa }, endBinding: { ...e.endBinding, fixedPoint: fb } })
     })
   }
   return { elements: out, files: files || {}, picture: out.length > 0 && out.every((e) => e.type === 'image') }
