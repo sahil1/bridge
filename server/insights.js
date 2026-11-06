@@ -4,8 +4,10 @@
 //
 // Where the numbers come from:
 //   Claude Code and Codex: their conversation logs. Every account of one agent shares them
-//     (accounts.js links each account's folder to your usual one), and Bridge AI remembers which
-//     account each conversation it started was on. The rest ran on your usual login.
+//     (accounts.js links each account's folder to your usual one), so which account ran each
+//     five minutes of a conversation comes from usagesplit.js, by the same record and rule as
+//     Usage's bars split by account: what nothing ties to one account is Not known, never put on
+//     your usual login.
 //   Any other agent: Bridge AI's own record of the agents it ran (activity.json here): where,
 //     how long it worked and waited for you, and what you sent it. It also adds the waiting time
 //     to Claude Code and Codex conversations.
@@ -21,6 +23,7 @@ import { CLAUDE_EDITS, codexPatch, codexFailed } from './edits.js'
 import { adapter } from './agents.js'
 import * as accounts from './accounts.js'
 import * as consult from './consult.js'
+import { attributor, STEP_MS } from './usagesplit.js'
 
 const HOME = os.homedir()
 const CLAUDE = path.join(HOME, '.claude', 'projects')
@@ -120,13 +123,18 @@ export function noteSent(paneId, text) {
 
 // ---------- Reading the conversation logs ----------
 // One session, whatever the agent: when, where, how much, and what you asked.
-const blank = (kind, file) => ({ kind, file, sessionId: null, cwd: null, start: null, end: null, days: {}, you: 0, prompts: [], reply: '', tools: 0, files: 0, tokens: 0, failed: 0, declined: 0, stopped: 0, model: null })
+// slots: active time by five minutes (usagesplit.js STEP_MS), for which account it was on.
+const blank = (kind, file) => ({ kind, file, sessionId: null, cwd: null, start: null, end: null, days: {}, slots: {}, you: 0, prompts: [], reply: '', tools: 0, files: 0, tokens: 0, failed: 0, declined: 0, stopped: 0, model: null })
 function tick(s, ts, prev) {
   const t = Date.parse(ts)
   if (!Number.isFinite(t)) return prev
   if (s.start == null || t < s.start) s.start = t
   if (s.end == null || t > s.end) s.end = t
-  if (prev != null && t > prev && t - prev <= GAP) { const d = day(t); s.days[d] = (s.days[d] || 0) + (t - prev) }
+  if (prev != null && t > prev && t - prev <= GAP) {
+    const d = day(t), b = Math.floor(t / STEP_MS)
+    s.days[d] = (s.days[d] || 0) + (t - prev)
+    s.slots[b] = (s.slots[b] || 0) + (t - prev)
+  }
   return t
 }
 const ask = (s, text) => {
@@ -277,7 +285,7 @@ function codexFiles(since) {
 
 // Each log is read once: what it said is kept until the file changes (or how it's read does: V).
 const CACHE = () => path.join(DIR(), 'sessions.json')
-const V = 2
+const V = 3
 async function readAll(since) {
   const kept = readJSON(CACHE(), {})
   const cache = kept.v === V && kept.files && typeof kept.files === 'object' ? kept.files : {}
@@ -326,6 +334,19 @@ export async function scan({ force = false } = {}) {
     const since = now - DAYS * 864e5
     const from = day(since)
     const all = (await readAll(since)).map((s) => ({ ...s, days: { ...s.days }, prompts: [...s.prompts] }))
+    // Each log's active time by account ('?': not known), from its own conversation's record.
+    const who = Object.fromEntries(['claude', 'codex'].filter((k) => accounts.supports(k)).map((k) => [k, attributor(k)]))
+    const fromMs = new Date(`${from}T00:00`).getTime()
+    for (const s of all) {
+      if (!who[s.kind]) continue
+      s.acct = {}
+      for (const [b, ms] of Object.entries(s.slots || {})) {
+        const b0 = Number(b) * STEP_MS
+        if (b0 < fromMs) continue
+        const id = who[s.kind](s.sessionId, b0)
+        s.acct[id] = (s.acct[id] || 0) + ms
+      }
+    }
     // A Codex file that carries on a rewound conversation is part of that conversation.
     const index = new Map(all.map((s) => [`${s.kind}:${s.sessionId}`, s]))
     const rootOf = (s) => { let r = s; for (let n = 0; r.parent && index.has(`${r.kind}:${r.parent}`) && n < 20; n++) r = index.get(`${r.kind}:${r.parent}`); return r }
@@ -334,6 +355,7 @@ export async function scan({ force = false } = {}) {
       if (r === s) continue
       for (const [d, ms] of Object.entries(s.days)) r.days[d] = (r.days[d] || 0) + ms
       for (const k of ['you', 'tools', 'files', 'failed', 'declined', 'stopped', 'tokens']) r[k] += s[k]
+      if (r.acct) for (const [id, ms] of Object.entries(s.acct || {})) r.acct[id] = (r.acct[id] || 0) + ms
       if (s.end > r.end) { r.end = s.end; r.reply = s.reply || r.reply; if (s.prompts.length) r.prompts[Math.min(3, r.prompts.length)] = s.prompts.at(-1) }
       r.forks = [...(r.forks || []), s.sessionId]
       index.set(`${s.kind}:${s.sessionId}`, r)
@@ -343,7 +365,12 @@ export async function scan({ force = false } = {}) {
     for (const s of sessions) {
       s.active = Object.entries(s.days).filter(([d]) => d >= from).reduce((x, [, v]) => x + v, 0)
       Object.assign(s, { needs: 0, asks: 0, seen: false })
-      s.account = [s.sessionId, ...(s.forks || [])].map((id) => accounts.accountOf(s.kind, null, id)).find(Boolean) || null
+      // The accounts it ran on, most time first. None active in these days (a message, no reply
+      // yet): the one it was on at its last word.
+      if (who[s.kind]) {
+        if (!Object.keys(s.acct).length) s.acct[who[s.kind](s.sessionId, Math.floor(s.end / STEP_MS) * STEP_MS)] = 0
+        s.accounts = Object.entries(s.acct).sort((a, b) => (a[0] === '?') - (b[0] === '?') || b[1] - a[1])
+      }
     }
     // Bridge AI's record: waiting time for logged conversations, everything for the other agents.
     for (const r of runs()) {
@@ -352,7 +379,7 @@ export async function scan({ force = false } = {}) {
       if (hit) { hit.needs += r.needs; hit.asks += r.asks; hit.seen = true; continue }
       if (r.kind === 'claude' || r.kind === 'codex') continue // its log is the better record, or it never got going
       if (!r.working && !r.sent && !r.prompts.length) continue
-      sessions.push({ ...blank(r.kind, null), sessionId: r.id, cwd: r.cwd, start: r.start, end: r.last, active: r.working, you: r.sent, prompts: r.prompts.slice(0, 4), needs: r.needs, asks: r.asks, seen: true, fromBridge: true, account: null })
+      sessions.push({ ...blank(r.kind, null), sessionId: r.id, cwd: r.cwd, start: r.start, end: r.last, active: r.working, you: r.sent, prompts: r.prompts.slice(0, 4), needs: r.needs, asks: r.asks, seen: true, fromBridge: true })
     }
     sessions.sort((a, b) => b.end - a.end)
 
@@ -364,14 +391,15 @@ export async function scan({ force = false } = {}) {
     let watched = false
     for (const s of sessions) {
       s.place = placeName(s.cwd)
-      s.accountName = accounts.nameOf(s.kind, s.account)
+      s.accountName = s.accounts ? accountWords(s.kind, s.accounts.map(([id]) => id)) : null
       const g = agents.get(s.kind) || { kind: s.kind, label: labelOf(s.kind), sessions: 0, ms: 0, messages: 0, fromBridge: !!s.fromBridge }
       g.sessions++; g.ms += s.active; g.messages += s.you
       agents.set(s.kind, g)
-      if (s.accountName) {
-        const k = `${s.kind}:${s.accountName}`
-        const x = accts.get(k) || { kind: s.kind, agent: labelOf(s.kind), account: s.accountName, sessions: 0, ms: 0, tokens: 0 }
-        x.sessions++; x.ms += s.active; x.tokens += s.tokens
+      // A conversation that ran on two accounts is one of each one's, with its time on each.
+      for (const [id, ms] of s.accounts || []) {
+        const k = `${s.kind}:${id}`
+        const x = accts.get(k) || { kind: s.kind, agent: labelOf(s.kind), id, account: id === '?' ? 'Not known' : accounts.nameOf(s.kind, id), sessions: 0, ms: 0 }
+        x.sessions++; x.ms += ms
         accts.set(k, x)
       }
       const p = places.get(s.place) || { name: s.place, sessions: 0, ms: 0, agents: new Set() }
@@ -391,7 +419,7 @@ export async function scan({ force = false } = {}) {
         files: sessions.reduce((x, s) => x + s.files, 0), projects: places.size, agents: agents.size, waitingHours: watched ? hours(needs) : null,
       },
       agents: [...agents.values()].sort((a, b) => b.ms - a.ms).map(({ ms, ...g }) => ({ ...g, hours: hours(ms) })),
-      accounts: [...accts.values()].sort((a, b) => b.ms - a.ms).map(({ ms, ...x }) => ({ ...x, hours: hours(ms) })),
+      accounts: [...accts.values()].sort((a, b) => (a.id === '?') - (b.id === '?') || b.ms - a.ms).map(({ ms, ...x }) => ({ ...x, hours: hours(ms) })),
       projects: [...places.values()].sort((a, b) => b.ms - a.ms).slice(0, 8).map((p) => ({ name: p.name, sessions: p.sessions, hours: hours(p.ms), agents: [...p.agents] })),
       daily: days,
     }
@@ -399,6 +427,16 @@ export async function scan({ force = false } = {}) {
     return stats
   })().finally(() => { scanning = null })
   return scanning
+}
+
+// The accounts a conversation ran on, in words for the write-up: "Work", "Work and Side",
+// "account not known", "Side and an account not known".
+function accountWords(kind, ids) {
+  const names = ids.filter((id) => id !== '?').map((id) => accounts.nameOf(kind, id))
+  const unknown = ids.includes('?')
+  if (!names.length) return unknown ? 'account not known' : null
+  const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0]
+  return unknown ? `${names.join(', ')} and an account not known` : list
 }
 
 // ---------- The write-up ----------
@@ -414,7 +452,7 @@ export function digest({ value: v, sessions }) {
     '',
     `Totals: ${n(v.totals.sessions, 'session')}, ${v.totals.hours} active hours, ${n(v.totals.messages, 'message')} from them, ${n(v.totals.files, 'file')} changed, ${n(v.totals.projects, 'project')}${v.totals.waitingHours != null ? `, ${v.totals.waitingHours} hours agents spent waiting for them` : ''}.`,
     `By agent: ${v.agents.map((a) => `${a.label} ${n(a.sessions, 'session')} (${a.hours} h)${a.fromBridge ? ', seen through Bridge AI only' : ''}`).join('; ') || 'none'}.`,
-    v.accounts.length ? `By account: ${v.accounts.map((a) => `${a.agent} on ${a.account}: ${n(a.sessions, 'session')} (${a.hours} h)`).join('; ')}.` : null,
+    v.accounts.length ? `By account: ${v.accounts.map((a) => `${a.agent} ${a.id === '?' ? 'on no account known (nothing records which)' : `on ${a.account}`}: ${n(a.sessions, 'session')} (${a.hours} h)`).join('; ')}.` : null,
     `By project: ${v.projects.map((p) => `${p.name} ${n(p.sessions, 'session')} (${p.hours} h; ${p.agents.join(', ')})`).join('; ') || 'none'}.`,
     '',
     'Sessions, newest first:',

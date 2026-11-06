@@ -205,7 +205,7 @@ export function Insights() {
             {s.daily.map((d) => <i key={d.date} title={`${shortDay(d.date)}: ${d.hours} h`} style={{ height: `${d.hours ? Math.max(8, (d.hours / top) * 100) : 0}%` }} />)}
           </div>
           <Split title={t('By agent')} rows={s.agents.map((a) => ({ key: a.kind, kind: a.kind, name: a.label, hint: a.fromBridge ? t('{agent}: counted while Bridge AI ran it', { agent: a.label }) : a.label, sessions: a.sessions, hours: a.hours }))} />
-          {s.accounts.length > 0 && <Split title={t('By account')} rows={s.accounts.map((a) => ({ key: `${a.kind}:${a.account}`, kind: a.kind, name: a.account, hint: `${a.agent}: ${a.account}`, sessions: a.sessions, hours: a.hours }))} />}
+          {s.accounts.length > 0 && <Split title={t('By account')} rows={s.accounts.map((a) => { const name = a.id === '?' ? t('Not known') : a.account; return { key: `${a.kind}:${a.id || a.account}`, kind: a.kind, name, hint: a.id === '?' ? t('{agent}: conversations nothing ties to one account', { agent: a.agent }) : `${a.agent}: ${name}`, sessions: a.sessions, hours: a.hours } })} />}
           <Split title={t('Projects')} rows={s.projects.slice(0, 5).map((p) => ({ key: p.name, name: p.name, hint: `${p.name}: ${p.agents.join(', ')}`, sessions: p.sessions, hours: p.hours }))} />
         </>
       )}

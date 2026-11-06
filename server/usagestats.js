@@ -1,8 +1,10 @@
 // Full usage history for the Stats view: every day since you started, split by model and by
 // project, plus Claude Code's own activity counts (messages, sessions, tool calls, hours).
 // Tokens and cost come from ccusage over the local logs; counts from ~/.claude/stats-cache.json.
-// Every account is in it: each account's folder links to your usual one's logs (accounts.js), and
-// the split by account comes from Insights, which knows which account each conversation was on.
+// Every account is in it: each account's folder links to your usual one's logs (accounts.js). By
+// account: the conversations and hours from Insights, the tokens from Usage's daily bars split by
+// account (usage.js, usagesplit.js), both by the same rule, with Not known for what nothing ties
+// to one account.
 // "all" is Claude Code and Codex together.
 import { execFile } from 'node:child_process'
 import fs from 'node:fs'
@@ -11,6 +13,7 @@ import path from 'node:path'
 import { localBin, IS_WIN } from './paths.js'
 import * as insights from './insights.js'
 import * as accounts from './accounts.js'
+import { usage } from './usage.js'
 
 const BIN = localBin('ccusage')
 const HOME = os.homedir()
@@ -62,22 +65,36 @@ const cache = new Map()
 const LABEL = { claude: 'Claude Code', codex: 'Codex' }
 
 // Tokens and conversations by account over the last 30 days, for the agents shown. An agent with
-// more than one account lists them all, an unused one at nothing, so none looks left out.
+// more than one account lists them all, an unused one at nothing, so none looks left out. Tokens:
+// Usage's daily bars' by account (the same 30 days); with one account, all of them are its.
 async function byAccount(kinds, force) {
   const st = await insights.scan({ force }).catch(() => null)
-  const rows = (st?.value.accounts || []).filter((a) => kinds.includes(a.kind)).map(({ kind, agent, account, sessions, hours, tokens }) => ({ kind, agent, account, sessions, hours, tokens: tokens || 0 }))
+  const rows = (st?.value.accounts || []).filter((a) => kinds.includes(a.kind)).map(({ kind, agent, id, account, sessions, hours }) => ({ kind, agent, id, account, sessions, hours, tokens: 0 }))
+  const row = (kind, id) => rows.find((r) => r.kind === kind && r.id === id)
+    || rows[rows.push({ kind, agent: LABEL[kind] || kind, id, account: id === '?' ? 'Not known' : accounts.nameOf(kind, id), sessions: 0, hours: 0, tokens: 0 }) - 1]
+  for (const kind of kinds.filter((k) => accounts.supports(k))) {
+    const u = await usage(kind, force ? { ttlMs: 0 } : {}).catch(() => null)
+    if (!u?.supported) continue
+    const folders = accounts.folders(kind)
+    const only = folders.length === 1 ? folders[0].id : null
+    const tok = {}
+    const add = (id, n) => { tok[id] = (tok[id] || 0) + n }
+    // No split (one account, or it couldn't be worked out, which Usage says): its one account's, else not known.
+    for (const d of u.daily) if (d.by) for (const [id, x] of Object.entries(d.by)) add(id, x[1]); else if (d.tokens) add(only || '?', d.tokens)
+    for (const [id, n] of Object.entries(tok)) if (n > 0) row(kind, id).tokens = Math.round(n)
+  }
   const groups = accounts.groups()
   for (const g of groups) {
     if (!kinds.includes(g.kind) || g.accounts.length < 2) continue
-    for (const a of g.accounts) if (!rows.some((r) => r.kind === g.kind && r.account === a.label)) rows.push({ kind: g.kind, agent: g.label, account: a.label, sessions: 0, hours: 0, tokens: 0 })
+    for (const a of g.accounts) row(g.kind, a.id)
   }
-  // Each with its color, as Usage shows the account (Insights names them).
+  // Each with its color, as Usage shows the account; Not known last.
   for (const r of rows) {
     const g = groups.find((x) => x.kind === r.kind)
-    const a = [...(g?.accounts || []), ...(g?.usual ? [g.usual] : [])].find((x) => x.label === r.account)
-    if (a) Object.assign(r, { id: a.id, color: a.color })
+    const a = [...(g?.accounts || []), ...(g?.usual ? [g.usual] : [])].find((x) => x.id === r.id)
+    if (a) Object.assign(r, { account: a.label, color: a.color })
   }
-  return rows
+  return rows.sort((a, b) => (a.id === '?') - (b.id === '?'))
 }
 
 // One agent's history alone (the usage view across providers, usageall.js), kept as the Stats view's.

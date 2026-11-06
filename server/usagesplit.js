@@ -188,6 +188,25 @@ function whoRan({ spans, firsts, all }, b0, b1) {
   return could.length === 1 ? could[0] : null
 }
 
+// For Insights (insights.js): which account ran a conversation in the five minutes from b0, by
+// the same record and rule as the split, so both say the same of the same days. '?': not known,
+// or an account since removed. With only your usual login of a kind, it's that one: the one
+// folder there is, so every log in it ran on it (unless the record names one since removed).
+export const STEP_MS = STEP
+export function attributor(kind) {
+  const ids = new Set(accounts.folders(kind).map((f) => f.id))
+  const only = ids.size === 1 ? [...ids][0] : null
+  const known = knownOf(kind)
+  const evs = new Map()
+  return (sid, b0) => {
+    if (!evs.has(sid)) evs.set(sid, known(sid))
+    const ev = evs.get(sid)
+    if (only && ev.spans.every(([id]) => id === only) && [...ev.firsts.keys()].every((id) => id === only)) return only
+    const who = whoRan(ev, b0, b0 + STEP)
+    return who && ids.has(who) ? who : '?'
+  }
+}
+
 // ---------- The split ----------
 // days: usage.js's, each with its models (byModel: [[model, cost, tokens, cache]]). Each day gets
 // by: { account: [cost, tokens, cache] } with '?' for what isn't known; and the accounts in it.

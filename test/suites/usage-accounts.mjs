@@ -10,6 +10,10 @@
 //     subagent's with its conversation's, a reply logged twice counted once; one that moved goes
 //     to each account by when; one nothing records, or a stretch two accounts could have run, is
 //     Not known. The parts add up to the day's cost and tokens, which stay ccusage's.
+//   Insights (server/insights.js), by the same rule: each account's conversations and Not known
+//     for the ones nothing records (never your usual login's), a conversation that moved counted
+//     on each account it ran on; the write-up's digest says the same; the Usage tab's By account
+//     tokens are the bars' to the token; the Insights card's By account has Not known too.
 //   Live: an agent Bridge AI starts on Work and sees running goes to Work; a one-off answer
 //     (a question asked through Claude Code) is noted on the account it ran on.
 //   Colors: each account has its own by default (in the order added), the same in every list; one
@@ -22,7 +26,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import { startKit, checks, until, sleep, browser, page, shot, phoneFaults, noServiceWorker, TEST } from '../lib/harness.mjs'
+import { startKit, startLocalModel, checks, until, sleep, browser, page, shot, phoneFaults, noServiceWorker, TEST } from '../lib/harness.mjs'
 
 const { ok, done } = checks('usage-accounts')
 const NOW = Date.now()
@@ -40,6 +44,8 @@ const reply = (session, at, model) => ({
   message: { id: `msg_${n}`, type: 'message', role: 'assistant', model, content: [{ type: 'text', text: 'Done.' }], usage: { input_tokens: 2000, output_tokens: 3000, cache_read_input_tokens: 400000, cache_creation_input_tokens: 20000 } },
 })
 const want = { [MAIN]: 0, [WORK]: 0, [SIDE]: 0, '?': 0 }
+// The conversations each account (or Not known) ran some of, for Insights.
+const convs = { [MAIN]: new Set(), [WORK]: new Set(), [SIDE]: new Set(), '?': new Set() }
 const legacy = {}
 
 const seed = ({ data, home, bin }) => {
@@ -48,7 +54,13 @@ const seed = ({ data, home, bin }) => {
   else fs.symlinkSync(process.execPath, path.join(bin, 'node'))
   const proj = path.join(home, '.claude', 'projects', '-work-app')
   const log = (file, lines) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.appendFileSync(file, lines.map((l) => JSON.stringify(l)).join('\n') + '\n') }
-  const say = (session, min, model, who, file = path.join(proj, `${session}.jsonl`)) => { log(file, [reply(session, ago(min), model)]); want[who] += PER }
+  // A reply, after a message from you a minute before it (a minute active, for Insights).
+  const say = (session, min, model, who, file = path.join(proj, `${session}.jsonl`)) => {
+    const sub = file !== path.join(proj, `${session}.jsonl`)
+    log(file, [...(sub ? [] : [{ type: 'user', sessionId: session, timestamp: ago(min + 1).toISOString(), cwd: '/work/app', message: { role: 'user', content: 'Go on.' } }]), reply(session, ago(min), model)])
+    want[who] += PER
+    if (!sub) convs[who].add(session)
+  }
   // Work: its own folder records it; two replies today, one logged in two parts (counted once),
   // and a subagent's log in the conversation's folder.
   say(S.work, 3, SONNET, WORK)
@@ -108,6 +120,8 @@ const seed = ({ data, home, bin }) => {
   }))
   return {}
 }
+// A model on this computer to write the insights with, so the digest it's given can be read.
+const ollama = await startLocalModel('usage-accounts', 'ollama', [{ name: 'llama3.2:3b', context: 131072, loaded: 131072, params: '3.2B' }])
 const kit = await startKit('usage-accounts', { env: seed })
 kit.program('claude', fs.readFileSync(path.join(TEST, 'stand-ins', 'claude.cjs'), 'utf8'))
 const usage = () => kit.api('/usage/claude?refresh=1')
@@ -138,6 +152,23 @@ try {
   const adds = day.every((d) => { const by = Object.values(d.by || {}); return Math.abs(by.reduce((s, x) => s + x[1], 0) - d.tokens) <= by.length && Math.abs(by.reduce((s, x) => s + x[0], 0) - d.cost) < 0.001 * by.length + 1e-9 })
   ok(day.length >= 2 && adds, "each day's parts add up to its cost and tokens, which stay ccusage's", day.map((d) => ({ date: d.date, cost: d.cost, tokens: d.tokens, by: d.by })))
   ok(Object.values(v.daily.at(-1).by || {}).length > 0 && (v.today.by?.[WORK]?.[0] || 0) > 0, "today's cost by account, Work's among it", v.today)
+
+  // ---------- Insights, by the same rule ----------
+  const ins = (await kit.api('/insights?refresh=1')).stats
+  const insRow = (id) => ins.accounts.find((a) => a.kind === 'claude' && a.id === id)
+  const count = (id) => insRow(id)?.sessions || 0
+  ok([MAIN, WORK, SIDE, '?'].every((id) => count(id) === convs[id].size), "Insights by account: each account's conversations, one that moved on each it ran on, and Not known for those nothing records", { got: ins.accounts.map((a) => [a.id, a.sessions]), want: Object.fromEntries(Object.entries(convs).map(([k, v]) => [k, v.size])) })
+  ok(insRow('?')?.account === 'Not known' && ins.accounts.at(-1)?.id === '?' && !convs[MAIN].has(S.none), 'the conversation nothing records is Not known (listed last), not your usual login\'s', ins.accounts)
+  await kit.api('/providers/ollama', { values: { OLLAMA_HOST: ollama.url } }, 'PUT')
+  await kit.api('/insights/run', { who: 'local' }).catch((e) => ({ error: e.message }))
+  const digestSent = await until(() => ollama.sent().map((x) => x.user || '').find((u) => /Bridge AI insights digest/.test(u)), 20000)
+  const byLine = (digestSent || '').split('\n').find((l) => l.startsWith('By account:')) || ''
+  ok(/Claude Code on Main: \d+ session/.test(byLine) && /Claude Code on no account known \(nothing records which\): \d+ session/.test(byLine), "the write-up's digest by account says the same: Main's, and those nothing records as such", byLine || digestSent)
+  ok(/Claude Code \(account not known\)/.test(digestSent || '') && /Claude Code \(Side, Work and an account not known\)/.test(digestSent || ''), "and each conversation in it says its accounts: one nothing records as not known, one that moved by each it ran on", (digestSent || '').slice(0, 1500))
+  const stats = await kit.api('/usage/all/stats?refresh=1')
+  const now = totals(await usage())
+  const statRow = (id) => stats.accounts?.find((a) => a.kind === 'claude' && a.id === id)
+  ok([MAIN, WORK, SIDE, '?'].every((id) => statRow(id)?.tokens === Math.round(now[id]?.[1] || 0)), "the Usage tab's By account tokens are the daily bars' by account, to the token, Not known included", { stats: stats.accounts, bars: now })
 
   // ---------- Live: an agent started on Work, seen running ----------
   const dir = path.join(kit.home, 'work', 'live')
@@ -307,7 +338,17 @@ try {
       ok(!!(await until(async () => (await sws.count()) >= 2, 8000)) && await bg(byAcct.locator('.us-row', { hasText: 'Work' }).locator('.us-sw')) === want7, `${t}: the Usage tab's By account card has each account in its color, Work's Violet`, await byAcct.innerText().catch(() => ''))
       await byAcct.scrollIntoViewIfNeeded()
       await sleep(300)
+      const unknownRow = byAcct.locator(`li[data-acct="?"]`)
+      ok(/Not known/.test(await unknownRow.innerText().catch(() => '')) && await bg(unknownRow.locator('.us-sw')) === grey, `${t}: and Not known, in grey`, await byAcct.innerText().catch(() => ''))
       await shot(p, `${tag}usage-accounts-stats`)
+      // The Today panel's Insights card: By account, with Not known.
+      await p.locator('.today-tabs button', { hasText: 'Today' }).first().click()
+      const insBy = p.locator('#card-sparkle .ins-split', { has: p.locator('h4', { hasText: /^By account$/ }) })
+      await insBy.waitFor({ timeout: 20000 })
+      ok(!!(await until(async () => /Not known/.test(await insBy.innerText()) && /Main/.test(await insBy.innerText()), 10000)), `${t}: the Insights card's By account has Not known too`, await insBy.innerText().catch(() => ''))
+      await insBy.scrollIntoViewIfNeeded()
+      await sleep(300)
+      await shot(p, `${tag}usage-accounts-insights`)
       await kit.api(`/accounts/${WORK}/color`, { color: 2 })
     }
     ok(w.errors.length === 0, `${t}: no page errors`, w.errors)
@@ -349,6 +390,6 @@ try {
 } finally {
   for (const x of pages) await x.ctx.close().catch(() => {})
   await b.close()
-  kit.stop()
+  kit.stop(); ollama.stop()
 }
 process.exit(done().fail ? 1 : 0)
