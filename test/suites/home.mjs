@@ -245,6 +245,8 @@ try {
     ok(!!(await until(() => ey.isVisible(), 8000)), 'See everything opens Everything')
     const lanes = await until(async () => { const n = await ey.locator('.ey-lane-head b').allInnerTexts(); return n.length === 2 && n }, 10000)
     ok(lanes && lanes[0] === 'Studio' && lanes[1] === 'Desk', 'a lane per computer, this one first', lanes)
+    // (Its agents come from the Agent Map's list, which can come a moment after Home's.)
+    await until(async () => /Deploy/.test(await ey.locator('.ey-lane').first().innerText()), 10000)
     const studioLane = await ey.locator('.ey-lane').first().innerText()
     ok(/Agents/i.test(studioLane) && /Meetings/i.test(studioLane) && /Chief of Staff tasks/i.test(studioLane) && /Whiteboards/i.test(studioLane) && /Deploy/.test(studioLane) && /My sketch/.test(studioLane), "Studio's lane has its agents, meetings, Chief of Staff tasks and whiteboards, the ones that need nothing too", studioLane)
     await ey.locator('.ey-seg button', { hasText: 'By kind' }).click()
