@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, refetch, settingsChanged } from '../../api.js'
 import Icon from '../Icon.jsx'
-import { AllowKeychain, Left, nameOf, makeDefault, removeAccount, signOut, DefaultTag, weekResets, slotsOf } from '../AccountMenu.jsx'
+import { AllowKeychain, Left, nameOf, makeDefault, removeAccount, signOut, DefaultTag, weekResets, slotsOf, ColorPick } from '../AccountMenu.jsx'
 import { t } from '../../i18n/index.js'
 import { addAccount } from '../AddAccount.jsx'
 import ProviderIcon, { AgentIcon } from './ProviderIcon.jsx'
@@ -82,8 +82,9 @@ function AutoRow({ k, onChange }) {
 // much of each window is left and when the week starts again, and what you can do: Make default,
 // Sign in (again), Sign out, Remove, and move it up or down the list (every list of accounts
 // follows this order). auto: Auto is on (its pick gets the auto tag, no row the star). only: the
-// one listed, which stays. onMove(-1 | 1): up or down; null at that end.
-function AccountRow({ a, kind, auto, only, slots, onChange, onUp, onDown }) {
+// one listed, which stays. onMove(-1 | 1): up or down; null at that end. Its color's swatch
+// before its name (others: the rest of its agent's accounts).
+function AccountRow({ a, kind, auto, only, slots, others, onChange, onUp, onDown }) {
   const [busy, setBusy] = useState(null)
   const [err, setErr] = useState(null)
   const [renaming, setRenaming] = useState(false)
@@ -114,6 +115,7 @@ function AccountRow({ a, kind, auto, only, slots, onChange, onUp, onDown }) {
           </form>
         : <span className="pv-acct-name">
             <span className="pv-acct-title">
+              <ColorPick a={a} others={others} />
               <span className="pv-acct-label">{shown}</span>
               <button type="button" className="ghost-btn pv-acct-edit" onClick={() => setRenaming(true)} aria-label={t('Rename {name}', { name: shown })} title={t('Rename')}><Icon name="edit" size={11} /></button>
               {isDefault && <DefaultTag />}{auto && a.active && <span className="best-tag" title={t('Auto starts new agents here now: it has the most left')}>{t('auto')}</span>}
@@ -190,7 +192,7 @@ function AccountsSection({ focus, ready }) {
           <div className="pv-acct-kind"><AgentIcon kind={k.kind} size={20} name={k.label} /><b>{k.label}</b></div>
           {k.accounts.length > 1 && <AutoRow k={k} onChange={() => load(true)} />}
           <ul className="pv-accts">
-            {k.accounts.map((a, i) => <AccountRow key={a.id} a={a} slots={slotsOf(k.accounts)} kind={k.kind} auto={k.setting === 'auto' && k.accounts.length > 1} only={k.accounts.length < 2} onChange={() => load(true)}
+            {k.accounts.map((a, i) => <AccountRow key={a.id} a={a} others={k.accounts} slots={slotsOf(k.accounts)} kind={k.kind} auto={k.setting === 'auto' && k.accounts.length > 1} only={k.accounts.length < 2} onChange={() => load(true)}
               onUp={i > 0 ? () => move(k, i, -1) : null} onDown={i < k.accounts.length - 1 ? () => move(k, i, 1) : null} />)}
           </ul>
           <div className="pv-acct-more">
@@ -200,7 +202,7 @@ function AccountsSection({ focus, ready }) {
           {showErr && <p className="pv-msg bad" role="status"><Icon name="alert" size={12} />{showErr}</p>}
         </div>
       ))}
-      <p className="pv-note">{t("Sign in uses whichever account your browser is signed in to, so switch accounts there first (or open the link it prints in a private window). Each account keeps only its own login; settings, skills and session history are shared with your usual setup, so cost and token history in Usage covers every account together. Removing your usual login only takes it off this list: the agent stays signed in to it for the terminal. Agents already running keep the account they started with; the model chip in an agent's message box can continue its conversation on another account.")}</p>
+      <p className="pv-note">{t("Sign in uses whichever account your browser is signed in to, so switch accounts there first (or open the link it prints in a private window). Each account keeps only its own login; settings, skills and session history are shared with your usual setup, so they share one cost and token history, which Usage splits by account where it can tell which one ran what. Removing your usual login only takes it off this list: the agent stays signed in to it for the terminal. Agents already running keep the account they started with; the model chip in an agent's message box can continue its conversation on another account.")}</p>
     </section>
   )
 }

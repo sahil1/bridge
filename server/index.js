@@ -192,6 +192,8 @@ async function fleetView() {
     a.worktree = worktrees.describe(a.cwd)
     a.muted = notify.isMuted(a.paneId)
     if (a.accountId && a.sessionId) accounts.noteSession(a.sessionId, a.accountId)
+    // Seen live on the account it was started on: Usage's split by account (usagesplit.js).
+    if (a.accountSure && a.sessionId) accounts.seenOn(a.sessionId, a.accountId)
     const generic = !a.title || a.title.toLowerCase() === a.kindLabel.toLowerCase() || /^(claude code|claude|codex|grok|cursor( agent)?|gemini)$/i.test(a.title)
     if (a.chief) a.title = 'Chief of Staff'
     // A fresh session has no title yet; the tab name (e.g. a routine's) says more than "Claude Code".
@@ -1757,7 +1759,7 @@ app.post('/api/calendar/prep', wrap(async (req) => {
 // whether it's on or not (usagelog.js), so it has the days before it was turned on.
 app.get('/api/usage-everywhere', trialOff('usage-everywhere', 'Usage across every provider'), wrap((req) => everywhere({ days: req.query.days, force: !!req.query.refresh })))
 app.get('/api/usage/:provider/stats', wrap((req) => usageStats(req.params.provider, { force: !!req.query.refresh })))
-app.get('/api/usage/:provider', wrap((req) => usage(req.params.provider)))
+app.get('/api/usage/:provider', wrap((req) => usage(req.params.provider, req.query.refresh ? { ttlMs: 0 } : {})))
 app.get('/api/market', wrap((req) => market(req.query.refresh === '1')))
 app.get('/api/market/search', wrap(async (req) => ({ results: await mk.search(String(req.query.q || '').slice(0, 40)) })))
 app.get('/api/market/history', wrap((req) => mk.history(String(req.query.symbol || ''), String(req.query.range || '3mo'))))
@@ -2486,6 +2488,8 @@ app.post('/api/accounts/active/:kind', wrap((req) => accounts.setActive(req.para
 // Your usual login back on the list, after Remove took it off.
 app.post('/api/accounts/show/:kind', wrap((req) => accounts.show(req.params.kind)))
 app.post('/api/accounts/order/:kind', wrap((req) => accounts.reorder(req.params.kind, req.body?.ids)))
+// The color an account goes by everywhere (1 to 8; null: the one it would have).
+app.post('/api/accounts/:id/color', wrap((req) => accounts.setColor(req.params.id, req.body?.color ?? null)))
 // The add-account dialog asks this while you sign in. Once it says yes, read the account's usage
 // again: the reading from before it signed in is out of date.
 const justIn = new Set()

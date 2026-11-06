@@ -57,6 +57,7 @@ function readRun(kind, stdout, fromFile) {
     let j = null
     try { j = JSON.parse(out.trim().split('\n').reverse().find((l) => /^\{.*"type":\s*"result"/.test(l.trim())) || '') } catch { /* not its result */ }
     if (!j || j.type !== 'result') return { text: fromFile ?? out, usage: null }
+    const session = typeof j.session_id === 'string' ? j.session_id : null
     const per = Object.entries(j.modelUsage || {})
     const sum = (k) => per.reduce((s, [, m]) => s + (Number(m[k]) || 0), 0)
     const u = j.usage || {}
@@ -68,7 +69,7 @@ function readRun(kind, stdout, fromFile) {
       cached, written,
       model: per.sort((a, b) => (b[1].outputTokens || 0) - (a[1].outputTokens || 0))[0]?.[0] || null,
     }
-    return { text: String(j.result ?? ''), usage }
+    return { text: String(j.result ?? ''), usage, session }
   }
   if (kind === 'codex') {
     const events = out.split('\n').map((l) => { try { return JSON.parse(l) } catch { return null } }).filter((e) => e && typeof e === 'object')
@@ -76,7 +77,8 @@ function readRun(kind, stdout, fromFile) {
     const said = events.filter((e) => e.type === 'item.completed' && e.item?.type === 'agent_message').map((e) => e.item.text).filter(Boolean)
     const add = (k) => turns.reduce((s, e) => s + (Number(e.usage[k]) || 0), 0)
     const usage = turns.length ? { in: add('input_tokens'), out: add('output_tokens'), cached: add('cached_input_tokens'), written: 0, model: null } : null
-    return { text: fromFile ?? (events.length ? said.at(-1) || '' : out), usage }
+    const session = events.find((e) => e.type === 'thread.started' && typeof e.thread_id === 'string')?.thread_id || null
+    return { text: fromFile ?? (events.length ? said.at(-1) || '' : out), usage, session }
   }
   return { text: fromFile ?? out, usage: null }
 }
@@ -206,11 +208,14 @@ function runOnce(kind, prompt, model, extraEnv = {}, signal) {
     const out = path.join(os.tmpdir(), `bridge-consult-${process.pid}-${Date.now()}.txt`)
     const env = agentEnv(await loginPath(), { ...providerEnv(), ...extraEnv })
     const asked = !!SAYS[kind] && !refused.has(kind)
+    const started = Date.now()
     const child = launch(bin, argsFor(kind, prompt, model, out), { cwd: DIR(), env, timeout: TIMEOUT, maxBuffer: 8 * 1024 * 1024, windowsHide: true, signal }, (err, stdout, stderr) => {
       if (err && asked && flagRefused(kind, String(stderr || ''))) { refused.add(kind); fs.rmSync(out, { force: true }); return runOnce(kind, prompt, model, extraEnv, signal).then(resolve, reject) }
       let fromFile
       try { fromFile = fs.readFileSync(out, 'utf8'); fs.rmSync(out, { force: true }) } catch { /* none */ }
       const r = readRun(kind, stdout, fromFile)
+      // Which account it ran on, by the folder it was given, for Usage's split by account.
+      if (r.session && accounts.supports(kind)) accounts.ranOn(r.session, accounts.idOfEnv(kind, env), started)
       const text = String(r.text || '').trim()
       if (err && !text) return reject(new Error(`${adapter(kind).label} failed: ${String(stderr || err.message).trim().split('\n').slice(-3).join(' ').slice(0, 400)}`))
       // It failed and said why in its answer ("API Error: Connection dropped (ECONNRESET)"): an

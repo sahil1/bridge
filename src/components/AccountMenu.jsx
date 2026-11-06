@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import Icon from './Icon.jsx'
 import { api, refetch, viaRelay, useFleet } from '../api.js'
 import { t, tx, locale } from '../i18n/index.js'
@@ -20,10 +21,89 @@ export const maskEmail = (e) => { const [u, d] = String(e).split('@'); return d 
 // in as (its email, mostly hidden), else "Your usual login" in your language (the server's label
 // is the English).
 export const nameOf = (a) => (!a ? '' : a.isDefault && a.named === false ? (a.account?.email ? maskEmail(a.account.email) : t('Your usual login')) : a.label)
-// The name in a row, cut short with … when it's long, with its plan beside it whole.
+// The name in a row, after its color, cut short with … when it's long, with its plan beside it whole.
 export const AcctName = ({ a, children }) => (
-  <span className="acct-name" title={nameOf(a)}><span className="acct-nm">{nameOf(a)}</span>{a.plan && <span className="plan-tag">{a.plan}</span>}{children}</span>
+  <span className="acct-name" title={nameOf(a)}><AcctDot a={a} /><span className="acct-nm">{nameOf(a)}</span>{a.plan && <span className="plan-tag">{a.plan}</span>}{children}</span>
 )
+
+// ---------- Each account's color ----------
+// The color an account goes by wherever it shows (accounts.js colorsOf): one of the chart colors,
+// which have a light and a dark step each (styles.css). What isn't any one account's is grey.
+export const COLORS = [tx('Blue'), tx('Orange'), tx('Aqua'), tx('Yellow'), tx('Pink'), tx('Green'), tx('Violet'), tx('Red')]
+export const NOT_KNOWN = 'var(--series-other)'
+export const acctColor = (a) => (a?.color ? `var(--series-${a.color})` : NOT_KNOWN)
+export const AcctDot = ({ a, className = '' }) => <i className={`acct-dot ${className}`} style={{ background: acctColor(a) }} aria-hidden="true" />
+
+// The swatch on an account's card: a click opens the colors to pick from, over the page (a card
+// cuts off what spills out of it), under the swatch or above it when there's no room below.
+// others: the rest of its agent's accounts, so a color one of them has says so.
+export function ColorPick({ a, others = [] }) {
+  const [open, setOpen] = useState(false)
+  const [err, setErr] = useState(null)
+  const [at, setAt] = useState(null)
+  const btn = useRef(null)
+  const pal = useRef(null)
+  const name = nameOf(a)
+  // Under the swatch, kept there as what it's in scrolls.
+  const place = () => {
+    if (!btn.current || !pal.current) return
+    const r = btn.current.getBoundingClientRect(), w = pal.current.offsetWidth, h = pal.current.offsetHeight
+    const below = r.bottom + 6 + h <= innerHeight - 8
+    setAt({ left: Math.max(8, Math.min(r.left, innerWidth - w - 8)), top: below ? r.bottom + 6 : Math.max(8, r.top - 6 - h) })
+  }
+  useLayoutEffect(() => { if (open) place() }, [open])
+  useEffect(() => {
+    if (!open) return
+    const close = () => setOpen(false)
+    const down = (e) => { if (!pal.current?.contains(e.target) && !btn.current?.contains(e.target)) close() }
+    const key = (e) => { if (e.key === 'Escape') { e.stopPropagation(); close(); btn.current?.focus() } }
+    document.addEventListener('mousedown', down)
+    document.addEventListener('keydown', key, true)
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true)
+    ;(pal.current?.querySelector('[aria-checked="true"]') || pal.current?.querySelector('.acct-color'))?.focus({ preventScroll: true })
+    return () => { document.removeEventListener('mousedown', down); document.removeEventListener('keydown', key, true); window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true) }
+  }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!open) setAt(null) }, [open])
+  const pick = async (n) => {
+    setErr(null)
+    try { await api(`/accounts/${encodeURIComponent(a.id)}/color`, { method: 'POST', body: { color: n } }); changed(); setOpen(false); btn.current?.focus() } catch (e) { setErr(e.message) }
+  }
+  // Arrows move along the colors, as in any group of radio buttons.
+  const onKeyDown = (e) => {
+    if (!['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp'].includes(e.key)) return
+    e.preventDefault()
+    const list = [...pal.current.querySelectorAll('.acct-color')]
+    const i = list.indexOf(document.activeElement)
+    list[(i + (e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : -1) + list.length) % list.length]?.focus()
+  }
+  return (
+    <span className="acct-color-wrap">
+      <button type="button" ref={btn} className="acct-swatch" aria-haspopup="true" aria-expanded={open} onClick={(e) => { e.stopPropagation(); setOpen((o) => !o) }}
+        aria-label={t('Color for {name}: {color}', { name, color: t(COLORS[(a.color || 1) - 1]) })} title={t('Pick a color for {name}', { name })}>
+        <AcctDot a={a} />
+      </button>
+      {open && createPortal(
+        <span ref={pal} className="acct-colors" role="radiogroup" aria-label={t('Color for {name}', { name })} onKeyDown={onKeyDown} data-acct={a.id}
+          style={at ? { left: at.left, top: at.top } : { left: 0, top: 0, visibility: 'hidden' }}>
+          {COLORS.map((c, i) => {
+            const n = i + 1
+            const has = others.filter((o) => o.id !== a.id && o.color === n).map(nameOf)
+            return (
+              <button key={n} type="button" role="radio" aria-checked={a.color === n} className="acct-color" style={{ background: `var(--series-${n})` }} onClick={() => pick(n)}
+                title={has.length ? t('{color} ({names} has it too)', { color: t(c), names: has.join(', ') }) : t(c)} aria-label={t(c)} tabIndex={a.color === n ? 0 : -1}>
+                {a.color === n && <Icon name="check" size={12} />}
+                {a.color !== n && has.length > 0 && <span className="acct-color-taken" aria-hidden="true" />}
+              </button>
+            )
+          })}
+          {err && <span className="error-text small" role="alert">{err}</span>}
+        </span>,
+        document.querySelector('.app') || document.body,
+      )}
+    </span>
+  )
+}
 // An agent whose accounts are listed one by one: more than one, or one that isn't your usual login
 // (you took that off the list). Otherwise its one login is just the agent's, as for any other.
 export const asList = (g) => !!g && (g.accounts.length > 1 || !!g.usualHidden || !g.accounts.some((a) => a.isDefault))
@@ -352,6 +432,7 @@ export function AccountPicker({ group, value, onChange, onAdd, off }) {
       <button type="button" className="acct-btn" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}
         onKeyDown={(e) => { if (e.key === 'ArrowDown' && !open) { e.preventDefault(); setOpen(true) } }}>
         <span className="acct-btn-main">
+          {cur && <AcctDot a={cur} />}
           {value === 'auto' ? <><b>{t('Auto')}</b>{cur && <span className="muted"> · {nameOf(cur)}</span>}</> : <b>{nameOf(cur)}</b>}
           {cur?.plan && <span className="plan-tag">{cur.plan}</span>}
         </span>
