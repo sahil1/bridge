@@ -23,6 +23,7 @@ const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 const crashes = require('./crashes.js')
+const { floatPlace } = require('./floatfit.js')
 
 // Where Bridge AI's code is: inside the app when built, the repo next to this folder from source.
 // BRIDGE_ROOT overrides both (a built app running your clone, say).
@@ -879,7 +880,7 @@ function setTray(c, instead) {
   tray.setContextMenu(Menu.buildFromTemplate(items))
 }
 const fromFloat = (e) => !!float && !float.isDestroyed() && e.sender === float.webContents
-ipcMain.on('bridge:float-size', (e, w, h) => {
+ipcMain.on('bridge:float-size', (e, w, h, low) => {
   if (!fromFloat(e) || !Number.isFinite(w) || !Number.isFinite(h)) return
   // As tall as the card, up to the screen's height (opened, with AI Assist's suggestion, it's taller
   // than a fixed 420 was, and was cut off; the card scrolls what's under its bar past that).
@@ -888,13 +889,11 @@ ipcMain.on('bridge:float-size', (e, w, h) => {
   const [cw, ch] = float.getContentSize()
   const nw = Math.max(60, Math.min(420, Math.round(w))), nh = Math.max(40, Math.min(a.height - 16, Math.round(h)))
   if (cw === nw && ch === nh) return
-  // On the right of the screen it grows and shrinks to the left, so it stays in its corner; near
-  // the bottom it grows upward, so it stays on the screen.
+  // From its bar's side, staying on the screen (desktop/floatfit.js).
   float.setContentSize(nw, nh)
   const n = float.getBounds()
-  const x = b.x + b.width / 2 > a.x + a.width / 2 ? b.x + b.width - n.width : n.x
-  const y = b.y + b.height / 2 > a.y + a.height / 2 ? b.y + b.height - n.height : Math.min(n.y, a.y + a.height - n.height)
-  if (x !== n.x || y !== n.y) float.setPosition(Math.round(x), Math.round(Math.max(a.y, y)))
+  const { x, y } = floatPlace(b, n, a, low)
+  if (x !== n.x || y !== n.y) float.setPosition(x, y)
 })
 ipcMain.handle('bridge:float-hide', (e) => { if (!fromFloat(e)) return false; floatHiddenFor = floatKey; hideFloat(); return true })
 // Dragged from anywhere on it: kept whole on the screen it's over. (null, null): let go, so it's

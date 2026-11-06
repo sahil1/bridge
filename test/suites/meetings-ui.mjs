@@ -681,6 +681,30 @@ process.exit(1)`)
     return { more: true, scrolls, card: Math.round(card.height), asked: Math.max(...window.__heights), lastShown: !!last && last.bottom <= box.bottom + 1 && last.top >= box.top - 1, tip: !!document.querySelector('.float-card .fc-tip') }
   })
   ok(fits.more && fits.tip && fits.scrolls && fits.lastShown && fits.card + 24 <= 400 && fits.asked <= 400, 'open with AI Assist on a short screen: the card fits it, and what\'s under the bar scrolls to its last button', fits)
+  // Opened taller than half the screen, it keeps the side it opened to, and tells the desktop app to
+  // grow from its bar's side: a window as tall as asked (outerHeight) once moved its middle past the
+  // screen's, and the card flipped. High on the screen it opens down; low, up.
+  // 250 from the top: its bar above the middle, but opened (over 300 tall) the window's middle below it.
+  for (const [top, low] of [[250, false], [560, true]]) {
+    const side = await fl.ctx.newPage()
+    side.on('pageerror', (e) => fl.errors.push(`card at ${top}: ${e.message}`))
+    await side.addInitScript((top) => {
+      window.__asked = []
+      Object.defineProperty(screen, 'availHeight', { get: () => 800 })
+      Object.defineProperty(window, 'screenY', { get: () => top })
+      Object.defineProperty(window, 'outerHeight', { get: () => window.__asked.at(-1)?.h || 150 })
+      window.bridgeApp = { floatSize: (w, h, low) => window.__asked.push({ h, low }) }
+    }, top)
+    await side.setViewportSize({ width: 360, height: 800 })
+    await side.goto(`${kit.url}/?float=1`)
+    await side.waitForSelector('.float-card .fc-tip', { timeout: 10000 }).catch(() => {})
+    await side.hover('.float-card .fc-head')
+    await side.waitForSelector('.float-card .fc-more', { timeout: 5000 }).catch(() => {})
+    await sleep(600)
+    const s = await side.evaluate(() => ({ up: document.querySelector('.float-card')?.classList.contains('up'), tallest: Math.max(...window.__asked.map((x) => x.h)), sides: [...new Set(window.__asked.map((x) => x.low))] }))
+    ok(s.tallest > 300 && s.up === low && s.sides.length === 1 && s.sides[0] === low, `open with AI Assist, ${low ? 'low' : 'high'} on the screen: it opens ${low ? 'up' : 'down'} and stays so, the window growing from its bar's side`, s)
+    await side.close()
+  }
   await api(`/meetings/${A.id}/assist`, { on: false })
   ok(fl.errors.length === 0, 'card: no page errors', fl.errors)
   await fl.ctx.close()

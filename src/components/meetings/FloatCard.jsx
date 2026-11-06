@@ -68,9 +68,9 @@ export default function FloatCard() {
   const leave = useRef(null)
   const r = c?.recording
   const onHover = c?.floatHover !== false
-  // Low on the screen, the desktop app's window grows upward (desktop/main.js), so the rest opens
-  // above the bar. In a browser tab the page doesn't move.
-  const up = !!app().floatSize && window.screenY + window.outerHeight / 2 > (window.screen.availTop || 0) + window.screen.availHeight / 2
+  // Low on the screen, the desktop app's window grows upward (desktop/floatfit.js), so the rest opens
+  // above the bar. In a browser tab the page doesn't move. Set below, once it's known if it's open.
+  const upAt = useRef(null)
   const { data: m } = usePoll(r ? `/meetings/${encodeURIComponent(r.id)}` : null, hover || pinned ? 1500 : 4000)
   const ev = useCallEvent(!r && c?.prompt ? c.prompt.at : null, c?.prompt?.app)
 
@@ -89,7 +89,7 @@ export default function FloatCard() {
   useLayoutEffect(() => {
     const el = card.current
     if (!el) return
-    const fit = () => { const b = el.getBoundingClientRect(); app().floatSize?.(Math.ceil(b.width) + 24, Math.ceil(b.height) + 24) }
+    const fit = () => { const b = el.getBoundingClientRect(); app().floatSize?.(Math.ceil(b.width) + 24, Math.ceil(b.height) + 24, !!upAt.current) }
     fit()
     const ro = new ResizeObserver(fit)
     ro.observe(el)
@@ -266,6 +266,17 @@ export default function FloatCard() {
       </>
     )
   }
+  // Which way it opens goes by where its bar is, and an open meeting card keeps it: by the window's
+  // middle, a card opened taller than half the screen flipped (the rest jumped above the bar) and
+  // the window went to the other end of the screen. It's decided again once it's closed (moved
+  // while open, say).
+  if (!app().floatSize) upAt.current = false
+  else if (!(r && open) || upAt.current == null) {
+    const head = card.current?.querySelector('.fc-head')?.getBoundingClientRect()
+    const bar = window.screenY + (head ? head.top + head.height / 2 : window.outerHeight / 2)
+    upAt.current = bar > (window.screen.availTop || 0) + window.screen.availHeight / 2
+  }
+  const up = upAt.current
   return (
     <div className="float-root">
       <div ref={card} className={`float-card${r && !open ? ' slim' : ''}${up ? ' up' : ''}${dragging ? ' dragging' : ''}`} style={{ '--fc-more-max': `${Math.max(220, (window.screen?.availHeight || 900) - 180)}px` }} onMouseEnter={enter} onMouseLeave={out} onFocus={enter} onBlur={out}
