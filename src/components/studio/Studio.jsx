@@ -33,7 +33,7 @@ const KIND_LABEL = { doc: tx('Document'), sheet: tx('Sheet'), deck: tx('Deck'), 
 // What a file is, in words, by its extension ("Word document"); a Markdown file that's a deck says so.
 const KIND_OF = { '.docx': tx('Word document'), '.md': tx('Markdown'), '.markdown': tx('Markdown'), '.txt': tx('Plain text'), '.xlsx': tx('Excel workbook'), '.xlsm': tx('Excel workbook'), '.csv': tx('CSV'), '.tsv': tx('TSV'), '.pptx': tx('PowerPoint'), '.pdf': tx('PDF'), '.html': tx('HTML page'), '.htm': tx('HTML page') }
 const kindName = (kind, ext) => (kind === 'deck' && ext !== '.pptx' ? t('Markdown deck') : t(KIND_OF[ext] || KIND_LABEL[kind] || 'Studio'))
-const READ_ONLY = (kind, ext) => kind === 'pdf' || ext === '.pptx'
+const READ_ONLY = (kind) => kind === 'pdf'
 export const openStudio = (f) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: f }))
 const when = (iso) => new Date(iso).toLocaleString(locale(), { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 const sizeOf = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`)
@@ -176,6 +176,8 @@ const WHO = { you: tx('You'), agent: tx('An agent'), outside: tx('Changed outsid
 // Nothing in a Word or an Excel file is lost by saving it here, so neither is warned about before
 // its first save; an editor still says what one change can't keep (warn.text).
 const RISKY = {}
+// A PowerPoint is written again from its slides in Studio's layouts (editors/DeckEditor.jsx).
+RISKY['.pptx'] = tx('Saving here writes the PowerPoint again from its slides as Studio shows them: their titles, text, lists, pictures, tables, notes and theme, in Studio\'s layouts. Its own shapes, charts, animations and exact positions aren\'t kept; the file as it was stays in its versions, and Ask an agent changes it in place.')
 // An Excel file is written back into itself: what changed here, and the rest as it was.
 const SHEET_KEEPS = tx('Saved into the Excel file itself: what you change here is written in, and everything else in it (charts, pictures, pivot tables, comments, macros) stays as it was. Anything a change can\'t keep is said before it\'s saved.')
 // What saving keeps, in each kind of file: said under the file (its kind, in the status line). The
@@ -186,10 +188,12 @@ const KEEPS = {
   '.txt': tx('Saved as plain text, as it is.'),
   '.csv': tx('Saved as a {kind} file in its own separator, encoding and line endings: the first sheet\'s values, each line you didn\'t change written as it was. Formulas (saved as their results), formats and other sheets aren\'t part of a {kind} file.'),
   deck: tx('Saved as a Markdown deck, as written: slides between lines of ---. PowerPoint and PDF make a copy beside it.'),
-  '.pptx': tx('Shown here, not edited: Ask an agent changes the PowerPoint itself, and Edit as a Markdown deck makes a copy to edit here.'),
+  '.pptx': tx('Saved as a PowerPoint, written again from its slides in Studio\'s layouts: their titles, text, lists, pictures, tables, notes and theme. Export makes a Markdown deck of it beside it.'),
   '.pdf': tx('Shown here, not edited: Ask an agent to change it, or the file it was made from.'),
   '.html': tx('Saved as it\'s written: one HTML file that works on its own.'),
 }
+// A PowerPoint whose saves go over it: one you chose to replace, or a copy Studio made. Asked once.
+const replaces = (f, yes = false) => { const k = `cc-studio-pptx:${f.root}\n${f.path}`; try { if (yes) localStorage.setItem(k, '1'); return !!localStorage.getItem(k) } catch { return yes } }
 const keepsOf = (kind, ext) => {
   if (kind === 'deck' && ext !== '.pptx') return t(KEEPS.deck)
   if (ext === '.csv' || ext === '.tsv') return t(KEEPS['.csv'], { kind: ext.slice(1).toUpperCase() })
@@ -255,7 +259,9 @@ export function StudioPage({ root, path: rel, onBack, onOpen }) {
   }, [f, load])
   const save = useCallback(async ({ force = false, ok = false } = {}) => {
     if (!handle.current || !meta || READ_ONLY(meta.kind, meta.ext)) return
-    if (RISKY[meta.ext] && !ok) { try { if (!localStorage.getItem(`cc-studio-said${meta.ext}`)) { setWarn(meta.ext); return } } catch { /* say it again next time */ } }
+    // A PowerPoint is redrawn in Studio's layouts: asked once per file, its copy the default.
+    if (meta.ext === '.pptx' && !ok && !replaces(f)) { setWarn(meta.ext); return }
+    if (RISKY[meta.ext] && !ok && meta.ext !== '.pptx') { try { if (!localStorage.getItem(`cc-studio-said${meta.ext}`)) { setWarn(meta.ext); return } } catch { /* say it again next time */ } }
     setSaving(true); setNote(null)
     try {
       // An editor that can't keep everything in the file says what, before it's saved (a sheet).
@@ -273,6 +279,19 @@ export function StudioPage({ root, path: rel, onBack, onOpen }) {
       else setNote({ text: t("Couldn't save it: {error}", { error: e.message }), error: true })
     } finally { setSaving(false) }
   }, [f, meta])
+  // Saved as a copy beside it ("<name> (Studio).pptx", never over another), which opens and is
+  // saved to from then on; this one goes back to the file as it is.
+  const saveCopy = async () => {
+    setWarn(null); setSaving(true); setNote(null)
+    try {
+      const bytes = await handle.current.save()
+      const r = await api('/studio/new', { method: 'POST', body: { root, dir: rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : '', name: `${(meta?.name || rel.split('/').pop()).replace(/\.pptx$/i, '')} (Studio).pptx`, data: base64(bytes) } })
+      replaces({ root, path: r.path }, true)
+      await load()
+      setNote({ text: t('Saved as {name}, a copy beside the original, which is as it was.', { name: r.name }) })
+      onOpen?.({ root, path: r.path })
+    } catch (e) { setNote({ text: t("Couldn't save it: {error}", { error: e.message }), error: true }) } finally { setSaving(false) }
+  }
   useEffect(() => {
     const key = (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') { e.preventDefault(); save() } }
     window.addEventListener('keydown', key)
@@ -332,7 +351,15 @@ export function StudioPage({ root, path: rel, onBack, onOpen }) {
           <button type="button" className="btn small" onClick={() => save({ force: true, ok: true })}>{t('Save mine over it')}</button>
         </div>
       )}
-      {warn && (
+      {warn === '.pptx' && (
+        <div className="sd-bar sd-conflict" role="alertdialog">
+          <span>{t(RISKY[warn])}</span>
+          <button type="button" className="btn small primary" onClick={saveCopy} title={t('A copy beside it, which opens here; the original stays as it is')}>{t('Save as a copy')}</button>
+          <button type="button" className="btn small" onClick={() => { replaces(f, true); setWarn(null); save({ ok: true }) }}>{t('Replace the original')}</button>
+          <button type="button" className="ghost-btn" onClick={() => setWarn(null)}>{t('Not now')}</button>
+        </div>
+      )}
+      {warn && warn !== '.pptx' && (
         <div className="sd-bar sd-conflict" role="alertdialog">
           <span>{typeof warn === 'string' ? t(RISKY[warn]) : warn.text}</span>
           <button type="button" className="btn small primary" onClick={() => { try { if (typeof warn === 'string') localStorage.setItem(`cc-studio-said${warn}`, '1') } catch { /* asks again next time */ } setWarn(null); save({ ok: true }) }}>{t('Save')}</button>

@@ -25,6 +25,7 @@ import * as memory from './meetmemory.js'
 import { notPerson } from './notpeople.js'
 import * as voices from './voices.js'
 import * as doctext from './doctext.js'
+import { DECK_RULES } from './studio.js'
 import { canOpen } from './files.js'
 import { mayLook, noteAsked } from './projects.js'
 import { isLimit } from './consult.js'
@@ -2371,8 +2372,9 @@ export async function deck(id, { model } = {}) {
   const ask = [
     `Meeting: ${m.title}, ${new Date(m.startedAt).toDateString()}${people ? `, with ${people}` : ''}`,
     summary ? `\nIts notes:\n${summary}` : '', notes ? `\nMy own notes:\n${notes}` : '', said ? `\nThe transcript:\n${said}` : '',
-    '\nWrite a slide deck of this meeting, in Marp Markdown: a front matter block (---, marp: true, paginate: true, ---), then slides separated by lines of ---.',
-    'A title slide (the meeting\'s name, its date); 4 to 8 slides, each a "# " heading with 3 to 5 short bullets; a slide of what was decided; a slide of the action items with who has each. Under each slide, its speaker notes in an HTML comment (<!-- ... -->), from what was said. Only what the meeting covered. Answer with the deck and nothing else.',
+    '\nWrite a slide deck of this meeting: a title slide (the meeting\'s name, its date); 4 to 8 slides of what it covered; a slide of what was decided; a slide of the action items with who has each. Only what the meeting covered, with speaker notes from what was said.',
+    DECK_RULES,
+    'Answer with the deck and nothing else: a front matter block (---, marp: true, paginate: true, ---), then its slides.',
   ].filter(Boolean).join('\n')
   const r = await replyAny(use, [{ role: 'user', text: ask }], { system: 'You turn meeting notes into clear, short slide decks in Marp Markdown.' })
   let md = String(r.text || '').trim().replace(/^```(?:markdown|md)?\s*\n([\s\S]*?)\n```$/, '$1').trim()

@@ -438,6 +438,22 @@ app.post('/api/studio/rewrite', async (req, res) => {
 })
 // The change an agent asked in place wrote beside the file, taken once (studio.takeProposal).
 app.get('/api/studio/proposal', wrap(async (req) => { const q = sq(req); return studio.takeProposal(await rootOf(q.root), q.path) }))
+// Decks written by a model (the one meeting notes use, unless one's picked): a whole deck from what
+// it's about or a document, a slide rewritten, a slide added. The page shows it before it's taken.
+app.get('/api/studio/models', wrap(async () => ({ models: (await chatModels.models().catch(() => [])).map(({ id, label, provider, via }) => ({ id, label, provider, via })), pick: cfg.meetings?.model || await pickMeetingModel() })))
+app.post('/api/studio/deck/ai', express.json({ limit: '40mb' }), wrap(async (req) => {
+  const b = req.body || {}
+  const mode = ['deck', 'slide', 'add'].includes(b.mode) ? b.mode : 'deck'
+  const use = String(b.model || '') || cfg.meetings?.model || await pickMeetingModel()
+  if (!use) throw Object.assign(new Error('No model to write with yet: sign in to an agent (Claude Code, Codex…) or add a key in Settings › Model Providers.'), { code: 'noModel' })
+  const source = await studio.deckSource(b.from?.root ? { root: await rootOf(String(b.from.root)), path: String(b.from.path || '') } : null, b.upload)
+  if (mode === 'deck' && !String(b.prompt || '').trim() && !source) throw new Error('Say what the deck is about, or pick a document to make it from')
+  const ask = studio.deckAsk({ mode, prompt: b.prompt, slides: Array.isArray(b.slides) ? b.slides.map(String) : [], at: b.at, source: source?.text, sourceName: source?.name, count: b.count })
+  const r = await chatModels.reply(use, [{ role: 'user', text: ask.prompt }], { system: ask.system, feature: 'studio' })
+  return { ...studio.deckAnswer(r?.text), model: use }
+}))
+// A picture put on a slide, saved beside the deck.
+app.post('/api/studio/picture', express.json({ limit: '30mb' }), wrap(async (req) => { const q = sq(req); return studio.savePicture(await rootOf(q.root), q.path, req.body?.name, Buffer.from(String(req.body?.data || ''), 'base64')) }))
 app.get('/api/agents/:pane/files', wrap(async (req) => files.listDir(await rootOf(req.params.pane), String(req.query.path || ''), { showHidden: req.query.hidden === '1' })))
 app.get('/api/agents/:pane/file', wrap(async (req) => files.readFile(await rootOf(req.params.pane), String(req.query.path || ''))))
 app.put('/api/agents/:pane/file', async (req, res) => {
