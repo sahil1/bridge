@@ -2310,7 +2310,8 @@ const resaving = new Map()
 function resave(id, ms = 0) {
   let m
   try { m = meta(id) } catch { return }
-  if (!m.saved && !(cfg.meetings?.autoSave && (m.summarizedAt || (m.status === 'done' && !m.summarizing)))) return
+  // Saving every meeting by itself is on unless turned off (Settings › Meetings).
+  if (!m.saved && !(cfg.meetings?.autoSave !== false && (m.summarizedAt || (m.status === 'done' && !m.summarizing)))) return
   // "Keep saved notes up to date" off: a meeting saved once isn't written again by itself.
   if (m.saved && cfg.meetings?.keepSaved === false) return
   clearTimeout(resaving.get(id))
