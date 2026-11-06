@@ -131,9 +131,9 @@ function HoverCard({ row, rect, git, preview }) {
 }
 
 // New (Home: start something) and Meetings sit above the spaces; a red dot while a meeting records.
-// With Home on (a trial feature), Home is the first row, with what needs you on every device (needs).
+// With Home on (a beta feature), Home is the first row, with what needs you on every device (needs).
 export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpen, onOpenInHerdr, onOpenFiles, onNewAgent, onNewTerminal, onHistory, onMeetings, onDictations, recording, needs = 0 }) {
-  const studio = useTrial('studio') // a trial feature (src/trials.js)
+  const studio = useTrial('studio') // a beta feature (src/trials.js)
   const home = useTrial('home')
   const [launching, setLaunching] = useState(false)
   const [error, setError] = useState(null)

@@ -1,4 +1,4 @@
-// Home, a trial feature (`home`), in the browser named by BRIDGE_TEST_BROWSER. First what goes in it
+// Home, a beta feature (`home`), in the browser named by BRIDGE_TEST_BROWSER. First what goes in it
 // (server/home.js, no server): what needs you (questions, permissions, failed runs, Chief of Staff's
 // tasks that wait on you), what's ready to look at (finished work, a meeting's notes with action
 // items not handed on, a whiteboard an agent drew since you looked, a task Chief of Staff finished),
@@ -130,7 +130,7 @@ try {
 
   // Off to start with: its route says how to turn it on.
   const off = await err(a, '/home')
-  ok((await a.api('/config')).trials?.home === false && off?.status === 404 && /Home is a trial feature\. Turn it on in Settings › About & Updates › Trial Features/.test(off.message), 'Home is a trial feature, off to start with: its route says how to turn it on', off?.message)
+  ok((await a.api('/config')).trials?.home === false && off?.status === 404 && /Home is a beta feature\. Turn it on in Settings › About & Updates › Beta Features/.test(off.message), 'Home is a beta feature, off to start with: its route says how to turn it on', off?.message)
   // What's on Studio: an agent asking for permission, tasks, a meeting with action items, boards.
   const dir = path.join(a.home, 'code', 'shop')
   fs.mkdirSync(dir, { recursive: true })

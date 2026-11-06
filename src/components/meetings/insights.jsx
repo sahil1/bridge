@@ -5,7 +5,7 @@ import { t, tx, locale } from '../../i18n/index.js'
 import { usePersisted, useWidth } from '../layout.jsx'
 import { CalendarSetup } from '../Agenda.jsx'
 
-// Meeting Insights and People, the Meetings section's other two tabs (a trial feature,
+// Meeting Insights and People, the Meetings section's other two tabs (a beta feature,
 // meeting-insights): your meetings added up the way Usage adds up tokens, and everyone you've met.
 // The server works it all out from the transcripts and invites on this computer
 // (server/meetinsights.js); each number here says what it's based on, and none scores anyone.

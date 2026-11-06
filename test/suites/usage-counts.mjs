@@ -206,7 +206,7 @@ try {
     const box = p.locator('label', { hasText: 'Share anonymous usage counts' }).locator('input')
     ok(/Usage counts/.test(text) && await box.count() === 1 && !(await box.isChecked()), 'with an endpoint: the switch, off', text.slice(-600))
     const heads = await p.locator('.st-body .st-sec > h4').allInnerTexts()
-    ok(heads.at(-1) === 'Trial Features', 'Trial Features is the last thing on the page', heads)
+    ok(heads.at(-1) === 'Beta Features', 'Beta Features is the last thing on the page', heads)
     await p.locator('button', { hasText: 'See exactly what would be sent' }).click()
     const shown = await until(async () => { const x = await p.locator('.counts-doc').innerText().catch(() => ''); return /Nothing is counted while this is off/.test(x) && /"counts": \{\}/.test(x) && x }, 5000)
     ok(!!shown, 'See exactly what would be sent: nothing is counted while it\'s off, and the report it would be', await p.locator('.counts-doc').innerText().catch(() => ''))
