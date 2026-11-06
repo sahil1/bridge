@@ -15,7 +15,7 @@
 // desktop it's as it was: General, with the sections down the left.
 //
 // A path is what's tapped, from the tab bar: a tab (Chief, Agents, Meetings, Today, More), then the
-// buttons in it by name. A trial feature's paths (trial: its id) are followed with it on; with Home
+// buttons in it by name. A beta feature's paths (trial: its id) are followed with it on; with Home
 // on, Home is the first tab and Today is in More, which is checked then too. "Search › x" types x in the top bar's search, which must offer it (for
 // actions rather than places); "Settings › x" is the top bar's Settings, then its section x.
 import fs from 'node:fs'
@@ -118,7 +118,7 @@ for (const [what, ids] of [['view', views], ['⌘K action', actions], ['Settings
   ok(!missing(ids).length, `every desktop ${what} has a way in on a phone, or says why not (add it to PATHS here)`, missing(ids))
 }
 
-const kit = await startKit('phone-parity', { config: { trials: { studio: true, 'meeting-insights': true } } }) // the trial features on: their ways in are checked too
+const kit = await startKit('phone-parity', { config: { trials: { studio: true, 'meeting-insights': true } } }) // the beta features on: their ways in are checked too
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
 try {
@@ -294,7 +294,7 @@ try {
     await ph.ctx.close()
   }
 
-  // ---------- Home, a trial feature, on ----------
+  // ---------- Home, a beta feature, on ----------
   // Home is the first tab and where the phone opens, and Today is in More: each of Home's paths, and
   // Today's from More.
   await kit.api('/settings', { trials: { home: true } }, 'PATCH')

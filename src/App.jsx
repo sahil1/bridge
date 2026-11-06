@@ -141,14 +141,14 @@ const VIEWS = { 'view:home': { title: tx('Home'), icon: 'home' }, 'view:everythi
 // A whiteboard's tab is named as the board is (its id).
 const BOARD = 'view:whiteboard:'
 // A Studio file's tab: its root (an agent's pane, or place:<id>) and path, each encoded.
-// A trial feature's tab, left open from before it was turned off (or opened on another computer
+// A beta feature's tab, left open from before it was turned off (or opened on another computer
 // where it's on): says so, with the way to turn it on.
 function TrialOff({ name }) {
   return (
     <div className="trial-off" role="status">
       <Icon name="layers" size={20} />
-      <b>{t('{name} is a trial feature, off here.', { name })}</b>
-      <p className="muted small">{t('Turn it on in Settings › About & Updates › Trial Features.')}</p>
+      <b>{t('{name} is a beta feature, off here.', { name })}</b>
+      <p className="muted small">{t('Turn it on in Settings › About & Updates › Beta Features.')}</p>
       <button type="button" className="btn small" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'about' } }))}>{t('Open Settings')}</button>
     </div>
   )
@@ -171,9 +171,9 @@ function App() {
   // The live herdr view exists only when herdr is the runtime (see server/runtime).
   const confPoll = usePoll('/config', 10 * 60 * 1000)
   const conf = confPoll.data
-  // Studio is a trial feature (src/trials.js): out of sight until it's turned on.
+  // Studio is a beta feature (src/trials.js): out of sight until it's turned on.
   const studioOn = conf?.trials?.studio === true
-  // Meeting Insights and People, tabs of Meetings (a trial feature): ⌘K opens Meetings at either.
+  // Meeting Insights and People, tabs of Meetings (a beta feature): ⌘K opens Meetings at either.
   const insightsOn = conf?.trials?.['meeting-insights'] === true
   const studioOnRef = useRef(studioOn)
   studioOnRef.current = studioOn
@@ -600,7 +600,7 @@ function App() {
   useHotkey(useCallback((e) => (e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'f', []), () => setHistory((v) => !v))
   // ⌥1 and ⌥2 alone: with ⌘ (or Ctrl) they're a document's Heading 1 and 2, in Studio.
   useHotkey(useCallback((e) => e.altKey && !e.metaKey && !e.ctrlKey && (e.code === 'Digit1' || e.code === 'Digit2'), []), (e) => setView(e.code === 'Digit1' ? 'command' : 'herdr'))
-  useHotkey(useCallback((e) => e.key === 'Escape' && !e.target.closest?.('.xterm, textarea, input, .quick-open, .tour, .excalidraw'), []), () => set({ max: null }))
+  useHotkey(useCallback((e) => e.key === 'Escape' && !e.target.closest?.('.xterm, textarea, input, .quick-open, .tour, .excalidraw, .find-bar'), []), () => set({ max: null }))
 
   // The tour: once per device after setup (the phone layout has its own), and again on request.
   // It waits while anything else is open on top, and starts from the beginning after.

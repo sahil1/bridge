@@ -209,7 +209,8 @@ try {
     const started = v.play().then(() => true, () => false)
     const playing = await ev('playing')
     await started
-    await new Promise((r) => setTimeout(r, 800))
+    // Playing past the first frames, given the time a slow runner takes to buffer over the relay.
+    for (let i = 0; i < 30 && v.currentTime <= 0.2; i++) await new Promise((r) => setTimeout(r, 200))
     const at = v.currentTime
     v.currentTime = 2.2
     const seeked = await ev('seeked')

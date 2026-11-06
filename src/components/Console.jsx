@@ -18,6 +18,8 @@ import { PaneHeader } from './layout.jsx'
 import { tildePath, Menu } from './Rail.jsx'
 import { api, usePoll, useLive, fmtTime, openInTerminal, useOutbox, relayOutbox, BASE } from '../api.js'
 import AskOutLoud from '../voice/AskOutLoud.jsx'
+import FindBar from './FindBar.jsx'
+import { pageFinder, openFind } from '../find.js'
 import { t, tx } from '../i18n/index.js'
 import { whiteboards, isMermaid, boardFromMermaid } from './whiteboard/links.js'
 
@@ -90,10 +92,12 @@ function Prose({ text }) {
   return out
 }
 
+// Each run of prose is in a span: Safari doesn't mark Find's matches (find.js) in text that sits
+// straight in a box beside a code block.
 function RichText({ text }) {
   const parts = text.split(/```[^\n]*\n?/)
   return parts.map((part, i) =>
-    i % 2 === 1 ? <Fragment key={i}><pre className="code">{part.replace(/\n$/, '')}</pre>{whiteboards && isMermaid(part) && <MermaidBoard text={part} />}</Fragment> : <Prose key={i} text={part} />,
+    i % 2 === 1 ? <Fragment key={i}><pre className="code">{part.replace(/\n$/, '')}</pre>{whiteboards && isMermaid(part) && <MermaidBoard text={part} />}</Fragment> : <span key={i}><Prose text={part} /></span>,
   )
 }
 
@@ -314,16 +318,23 @@ function Chat({ agent, pending, queued = [], outbox = [], onCancelQueued, onEdit
   const [older, setOlder] = useState({ messages: [], more: undefined, busy: false, error: null })
   useEffect(() => { setOlder({ messages: [], more: undefined, busy: false, error: null }) }, [agent.paneId])
   const more = older.more === undefined ? data?.more : older.more
-  const anchor = useRef(null) // scroll height before older messages went in above
-  const loadEarlier = async () => {
+  const anchor = useRef(null) // the scroll height and place before older messages went in above
+  // want: how many messages to read (Find reads bigger pages); the error, if it couldn't.
+  const loadEarlier = async ({ want } = {}) => {
     if (!more || older.busy) return
     setOlder((o) => ({ ...o, busy: true, error: null }))
     try {
-      const r = await api(`/agents/${encodeURIComponent(agent.paneId)}/transcript/earlier?before=${more.before}${more.after ? `&after=${encodeURIComponent(more.after)}` : ''}`)
-      anchor.current = scrollRef.current?.scrollHeight ?? null
+      const r = await api(`/agents/${encodeURIComponent(agent.paneId)}/transcript/earlier?before=${more.before}${more.after ? `&after=${encodeURIComponent(more.after)}` : ''}${want ? `&want=${want}` : ''}`)
+      anchor.current = scrollRef.current ? { height: scrollRef.current.scrollHeight, top: scrollRef.current.scrollTop } : null
       setOlder((o) => ({ messages: [...r.messages, ...o.messages], more: r.more, busy: false, error: null }))
-    } catch (e) { setOlder((o) => ({ ...o, busy: false, error: e.message })) }
+    } catch (e) { setOlder((o) => ({ ...o, busy: false, error: e.message })); return e.message }
   }
+  // Find (⌘F) looks through the whole conversation: what's shown, and the earlier messages, read
+  // in a page at a time while there's something to find.
+  const history = useRef(null)
+  history.current = { more: !!more, busy: older.busy, load: () => loadEarlier({ want: 200 }) }
+  const finder = useRef(null)
+  if (!finder.current) finder.current = pageFinder({ root: () => scrollRef.current?.querySelector('.chat-col'), scroller: () => scrollRef.current, history: () => history.current })
   const recent = data?.messages || []
   const recentIds = new Set(recent.map((m) => m.id).filter(Boolean))
   const all = [...older.messages.filter((m) => !m.id || !recentIds.has(m.id)), ...recent]
@@ -337,8 +348,10 @@ function Chat({ agent, pending, queued = [], outbox = [], onCancelQueued, onEdit
   useLayoutEffect(() => {
     const el = scrollRef.current
     if (!el) return
-    if (anchor.current != null) { el.scrollTop += el.scrollHeight - anchor.current; anchor.current = null; return }
-    if (stick.current) el.scrollTop = el.scrollHeight
+    // Set, not added to: Chrome keeps the place itself when you're not at the top (scroll anchoring).
+    if (anchor.current != null) { el.scrollTop = anchor.current.top + el.scrollHeight - anchor.current.height; anchor.current = null; return }
+    // Not while Find is on a match: new messages come in below it, and it stays where it is.
+    if (stick.current && !finder.current.holding()) el.scrollTop = el.scrollHeight
   }, [data, pending, queued.length, outbox.length, older.messages.length])
 
   const shownPending = pending.filter((p) => !(data?.messages || []).some((m) => m.role === 'user' && sameMsg(m.text, p.text)))
@@ -368,16 +381,18 @@ function Chat({ agent, pending, queued = [], outbox = [], onCancelQueued, onEdit
   }
 
   return (
-    <div className="chat" ref={scrollRef} onScroll={(e) => {
+    <div className="chat" data-find="chat" ref={scrollRef} onScroll={(e) => {
       const el = e.currentTarget
       stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
     }}>
+      {/* Find's bar, held at the top while the chat scrolls under it */}
+      <div className="find-dock"><FindBar host={scrollRef} finder={finder.current} label={t('Find in this chat')} /></div>
       <div className="chat-col">
         {!data && !error && <div className="skeleton-rows"><div /><div /><div /></div>}
         {error && <div className="error-text">{error}</div>}
         {more && (
           <div className="chat-earlier">
-            <button className="ghost-btn" onClick={loadEarlier} disabled={older.busy}><Icon name={older.busy ? 'refresh' : 'up'} size={12} className={older.busy ? 'spin' : ''} /> {older.busy ? t('Loading…') : t('Show earlier messages')}</button>
+            <button className="ghost-btn" onClick={() => loadEarlier()} disabled={older.busy}><Icon name={older.busy ? 'refresh' : 'up'} size={12} className={older.busy ? 'spin' : ''} /> {older.busy ? t('Loading…') : t('Show earlier messages')}</button>
             {older.error && <span className="error-text small">{older.error}</span>}
           </div>
         )}
@@ -387,8 +402,8 @@ function Chat({ agent, pending, queued = [], outbox = [], onCancelQueued, onEdit
             ? <ToolGroup key={k} items={m.items} />
             : m.role === 'event'
             ? m.summary
-              ? <details key={k} className="chat-summary"><summary className={`chat-event ev-${m.status}`}><span className="ev-dot" />{m.text}<time>{fmtTime(m.ts)}</time><Icon name="chevron" size={10} className="sum-caret" /></summary><div className="chat-summary-body"><RichText text={m.summary} /></div></details>
-              : <div key={k} className={`chat-event ev-${m.status}`}><span className="ev-dot" />{m.text}<time>{fmtTime(m.ts)}</time></div>
+              ? <details key={k} className="chat-summary"><summary className={`chat-event ev-${m.status}`}><span className="ev-dot" /><span>{m.text}</span><time>{fmtTime(m.ts)}</time><Icon name="chevron" size={10} className="sum-caret" /></summary><div className="chat-summary-body"><RichText text={m.summary} /></div></details>
+              : <div key={k} className={`chat-event ev-${m.status}`}><span className="ev-dot" /><span>{m.text}</span><time>{fmtTime(m.ts)}</time></div>
             : (
               <div key={k} className={`msg ${m.role} ${editingText && m.role === 'user' && m.text === editingText ? 'editing' : ''} ${fromPhone(m) ? 'from-phone' : ''}`}>
                 <div className="msg-text">{m.role === 'user' ? <UserText text={m.text} images={m.images} paneId={agent.paneId} /> : <RichText text={m.text} />}</div>
@@ -567,6 +582,7 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
   const [termFocus, setTermFocus] = useState(0)
   const [menu, setMenu] = useState(false)
   const [renaming, setRenaming] = useState(false)
+  const paneRef = useRef(null)
   const outbox = useOutbox(agent?.paneId)
   const places = usePoll('/places', 15000)
   // Continue on another account: Claude Code and Codex, once there's a conversation to resume.
@@ -773,7 +789,7 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
   )
 
   return (
-    <section className={`pane console v-${variant} ${minimized ? 'is-min' : ''}`} aria-label={t('{name} console', { name: title })}>
+    <section ref={paneRef} className={`pane console v-${variant} ${minimized ? 'is-min' : ''}`} aria-label={t('{name} console', { name: title })}>
       <PaneHeader icon={agent.chief ? 'helm' : 'bot'} title={shown} subtitle={subtitle} {...controls}
         leading={onBack && <button className="win-btn back" onClick={onBack} aria-label={t('Back')}><Icon name="chevron" size={16} className="flip" /></button>}>
         <span className={`state-tag st-${agent.status}`}><StatusDot status={agent.status} size={7} />{{ blocked: t('Needs you'), done: t('Done'), working: t('Working'), idle: t('Idle') }[agent.status] || t('Unknown')}</span>
@@ -804,6 +820,9 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
           <span className="menu-anchor">
             <button className="win-btn" onClick={() => setMenu(!menu)} title={t('More')} aria-label={t('More actions')}><Icon name="more" size={14} /></button>
             {menu && <Menu onClose={() => setMenu(false)} items={[
+              // ⌘F does the same; on a phone this is the way in.
+              view === 'chat' && agent.caps?.chat && { icon: 'search', label: t('Find in this chat'), run: () => { if (!openFind(paneRef.current)) setFlash(t('No messages to find in yet')) } },
+              view === 'terminal' && { icon: 'search', label: t('Find in this terminal'), run: () => openFind(paneRef.current) },
               variant === 'mobile' && canFork && { icon: 'split', label: t('Fork this conversation'), run: fork },
               variant === 'mobile' && { icon: 'terminal', label: t('Open in the computer\'s terminal app'), run: inTerminal },
               canRename && { icon: 'edit', label: t('Rename…'), run: () => setRenaming(true) },

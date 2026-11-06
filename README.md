@@ -1,12 +1,28 @@
 # Bridge AI
 
-**The bridge between you and your AI agents.** Tell a chief of staff what you need and it hands the work to the right agent, while your agents (Claude Code, Codex, Antigravity CLI, Gemini CLI, Copilot, OpenCode and others, plus cloud agents) work in parallel. Spaces keep every project organized, and one window holds every provider, on your computer and your phone.
+**One app for the AI you already use.** Bridge AI takes notes in your meetings with nothing joining the call, types what you say into any app, and passes work to the right assistant. If you write code, Claude Code, Codex, Gemini CLI and your other agents run side by side, each on its own branch, and you can answer them from your phone.
 
-Bridge AI runs on your device. Your agents use their own logins; Bridge AI only reads their screens and transcripts and types into them for you. Nothing else is sent anywhere, apart from anonymous usage stats and crash reports to the project, which you can turn off ([PRIVACY.md](PRIVACY.md)).
+It runs on your computer. Meetings and dictation are transcribed there, your agents sign in with their own accounts, and your notes are files in a folder you choose. It's free and open source (Apache-2.0), with no account. Anonymous usage stats and crash reports are on unless you turn them off ([PRIVACY.md](PRIVACY.md)).
 
-[![Bridge AI 3.0 in under a minute, with sound](site/poster.jpg)](https://boldbridge.ai/)
+[![Watch the video](site/poster.jpg)](https://boldbridge.ai/)
 
-**[Download](https://boldbridge.ai/)** for macOS, Windows or Linux (the page offers the one for your computer, Apple Silicon or Intel), and the [Android app](#android) · **[Try the demo](https://boldbridge.ai/demo/)** in your browser, with made-up agents · [All releases](https://github.com/sahil1/bridge/releases/latest)
+**[Download](https://boldbridge.ai/#install)** for Mac, Windows or Linux, and the [Android app](#android) · **[Open the demo](https://boldbridge.ai/demo/)**, with sample agents and meetings · [All releases](https://github.com/sahil1/bridge/releases/latest)
+
+**For everyone**
+
+- Notes from every meeting, with the decisions and who's doing what. Nothing joins the call, and the audio stays on your computer.
+- Hold ⌥Space on a Mac and talk, and your words appear in whatever app you're typing in.
+- A Chief of Staff that keeps your tasks and drafts follow-ups, using the AI plan you already have: Claude, ChatGPT, Gemini or Copilot.
+- A free model that runs on your computer, even offline.
+
+**For developers**
+
+- Claude Code, Codex, Copilot, Cursor Agent, Gemini CLI, OpenCode and [more](#agents), each in its own terminal with your own sign-in.
+- Each agent on its own branch, with its changes to review, commit and push.
+- One list of every agent that's waiting on you, across your Mac, Linux and Windows machines.
+- A phone app to answer them, end-to-end encrypted.
+
+If Bridge AI is useful to you, a star helps other people find it.
 
 ## Install
 

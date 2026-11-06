@@ -668,6 +668,63 @@ async function checkForUpdates() {
 // 1.24.0 < 1.24.1 < 2.0.0, as server/updates.js compares them.
 const parts = (v) => String(v).replace(/^v/, '').split('-')[0].split('.').map((n) => Number(n) || 0)
 const newer = (a, b) => { const x = parts(a); const y = parts(b); for (let i = 0; i < 3; i++) { if (x[i] !== y[i]) return x[i] > y[i] } return false }
+
+// ---------- Updating by itself while you're away ----------
+// Settings › About & Updates › Update by itself while you're away (on unless turned off), in the
+// built app on a Mac or Windows: from source it's your clone (git pull), and on Linux the package
+// asks for a password. Once a minute the server says whether there's a release to update to and
+// anything of its own running (/api/updates/auto: agents, a meeting, dictation). While there is
+// one, this app says what it waits for itself: you using the computer, battery power, and what each
+// of its windows holds (src/busy.js, asked through preload.js; a window that doesn't answer in 3
+// seconds counts as busy). When neither waits it's all asked again, and then the same install as
+// Update now runs (the server asks GitHub once more first). Nothing is shown meanwhile, or after.
+// shared/autoupdate.js decides.
+let rules = null
+let locked = false
+let wokeAt = 0
+let asked = 0
+const asking = new Map() // id -> { wc, done }
+ipcMain.on('bridge:busy-said', (e, id, answer) => { const a = asking.get(id); if (a && e.sender === a.wc) a.done(Array.isArray(answer) ? answer.slice(0, 20) : null) })
+function askWindow(w) {
+  return new Promise((resolve) => {
+    const id = ++asked
+    const done = (a) => { clearTimeout(timer); asking.delete(id); resolve(a) }
+    const timer = setTimeout(() => done(null), 3000)
+    asking.set(id, { wc: w.webContents, done })
+    try { w.webContents.send('bridge:busy-ask', id) } catch { done(null) }
+  })
+}
+async function whileAway() {
+  return rules.desktopWhy({
+    idle: powerMonitor.getSystemIdleTime(),
+    locked: locked || powerMonitor.getSystemIdleState(1) === 'locked',
+    woke: wokeAt ? (Date.now() - wokeAt) / 1000 : null,
+    battery: !!powerMonitor.isOnBatteryPower?.(),
+    windows: await Promise.all(BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed()).map(askWindow)),
+  })
+}
+const local = (p, body) => fetch(`${URL_BASE}/api${p}`, { ...(body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(30000) }).then((r) => (r.ok ? r.json() : null))
+let updating = false
+async function updateWhileAway() {
+  if (updating) return
+  updating = true
+  try {
+    rules ||= await import(require('node:url').pathToFileURL(path.join(ROOT, 'shared', 'autoupdate.js')).href)
+    if (!(await local('/updates/auto'))?.release) return
+    // Said, and when both say it's the time, said again right before.
+    const ready = async () => !!(await local('/updates/auto', { why: await whileAway() }))?.ready
+    if (!(await ready()) || !(await ready())) return
+    await local('/updates/install', { auto: true })
+  } finally { updating = false }
+}
+function startUpdatingWhileAway() {
+  if (!BUNDLED || !(IS_MAC || process.platform === 'win32')) return
+  powerMonitor.on('lock-screen', () => { locked = true })
+  powerMonitor.on('unlock-screen', () => { locked = false })
+  powerMonitor.on('resume', () => { wokeAt = Date.now() })
+  setInterval(() => { updateWhileAway().catch(() => {}) }, 60 * 1000)
+}
+
 // What the window remembers about its layout (open tabs, panel sizes, what's expanded), forgotten,
 // as the crash screen's Reset this window's layout does: for a window that can't show that screen.
 const resetLayout = () => win?.webContents.executeJavaScript(`(() => { const keep = new Set(['cc-appearance', 'cc-theme', 'cc-toured', 'cc-lang']); try { for (const k of Object.keys(localStorage)) if (k.startsWith('cc-') && !keep.has(k)) localStorage.removeItem(k) } catch {} location.reload() })()`).catch(() => {})
@@ -938,6 +995,7 @@ app.whenReady().then(() => {
   createWindow()
   watchFleet()
   watchCalls()
+  startUpdatingWhileAway()
   // The dictation key from any app (dictation.js): the main window, an agent's own window and
   // another device's window take it as their own when they're in front.
   const ours = (w) => w === win || [...pops.values(), ...machineWins.values()].includes(w)

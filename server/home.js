@@ -1,4 +1,4 @@
-// Home (a trial feature, `home`): what needs you, what's ready to look at and what's coming up on
+// Home (a beta feature, `home`): what needs you, what's ready to look at and what's coming up on
 // this computer, in one list for Home (src/components/NeedsHome.jsx) and for your other devices'
 // Home, which ask for it with this device's summary (machines.js). Each item says which of the
 // three it belongs to (group), or none: Everything shows those too.

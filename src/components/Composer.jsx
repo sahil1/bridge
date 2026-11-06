@@ -9,6 +9,7 @@ import { t, tx, locale } from '../i18n/index.js'
 import { keyLabel } from '../../shared/dictation/keys.js'
 import { LiveWords } from '../dictation/Pill.jsx'
 import { useDictation, registerBox, noteBoxFocus, press, release, finish, cancel, dismiss, retry, settings, keysPlatform, dictationKey, listeningHint } from '../dictation/controller.js'
+import { useBusy } from '../busy.js'
 
 // Drafts survive navigation and reloads: one per agent, kept in this browser.
 const draftKey = (id) => `cc-draft-${id}`
@@ -126,7 +127,8 @@ function useSlash(url) {
   return { cmds, load }
 }
 
-// "@" menu: files and folders under the agent's folder, searched as you type.
+// "@" menu: files and folders under the agent's folder, searched as you type (while the menu shows
+// only meetings too, so going back to the files has those for what's typed).
 function useMentions(url, query) {
   const [items, setItems] = useState(null)
   const [cwd, setCwd] = useState(null)
@@ -140,18 +142,31 @@ function useMentions(url, query) {
   }, [url, query])
   return { items, cwd }
 }
-// Meetings to mention, found as you type after the meeting key (Settings › Meetings), on the
-// computer the agent runs on (its own, where the file it reads will be).
+// Meetings to mention, found as you type after the meeting key (Settings › Meetings): on the
+// computer the agent runs on (its own, where the file it reads will be) and on the ones linked to it,
+// which that computer asks (one that's offline or slow is named in unreachable, not waited for).
+// While the answer for what's typed is on its way, the last answer's meetings that match it stay, so
+// the rows don't blink out and back with each letter.
+const MEETINGS_N = 20
+const wordsOf = (q) => String(q || '').toLowerCase().split(/\s+/).filter(Boolean)
 function useMeetingMentions(query) {
-  const [items, setItems] = useState(null)
+  const [got, setGot] = useState(null) // { q, meetings, here, from, unreachable, update, failed }
   useEffect(() => {
-    if (query == null) { setItems(null); return }
+    if (query == null) return
     let live = true
-    const t = setTimeout(() => { api(`/meetings/mentions?q=${encodeURIComponent(query)}`).then((d) => { if (live) setItems(d.meetings || []) }).catch(() => { if (live) setItems([]) }) }, query ? 120 : 0)
+    const t = setTimeout(() => {
+      api(`/meetings/mentions?n=${MEETINGS_N}&q=${encodeURIComponent(query)}`)
+        .then((d) => { if (live) setGot({ q: query, meetings: d.meetings || [], here: d.here || null, from: d.from || [], unreachable: d.unreachable || [], update: d.update || [] }) })
+        .catch(() => { if (live) setGot({ q: query, meetings: [], here: null, from: [], unreachable: [], update: [], failed: true }) })
+    }, query ? 120 : 0)
     return () => { live = false; clearTimeout(t) }
   }, [query])
-  return items
+  if (query == null || !got) return null
+  if (got.q === query) return got
+  const words = wordsOf(query)
+  return { ...got, meetings: got.meetings.filter((m) => words.every((w) => String(m.title || '').toLowerCase().includes(w))), waiting: true }
 }
+const listOf = (names) => { try { return new Intl.ListFormat(locale(), { type: 'conjunction' }).format(names) } catch { return names.join(', ') } }
 const meetingWhen = (m) => {
   const at = new Date(m.startedAt).toLocaleString(locale(), { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
   const s = Math.round(m.seconds || 0)
@@ -178,27 +193,37 @@ async function mentionFiles(text, url) {
 
 const SOURCE_LABEL = { skill: tx('skill'), plugin: tx('plugin'), project: tx('project') }
 
-function SlashMenu({ items, sel, onPick, onHover, title, mention, jumps = [] }) {
+// A row can be a meeting (kind 'meeting': its icon and badge, so it doesn't look like a file) or a
+// jump to another list (kind 'jump', with an arrow). empty: said when there are no rows (the
+// meetings, still on their way or none). back: Esc goes back rather than closing. note: what the
+// foot says about what's shown, on a phone too; warn: it's what's missing (a computer that didn't
+// answer).
+function SlashMenu({ items, sel, onPick, onHover, title, mention, jumps = [], empty = null, back = false, note = '', warn = false }) {
   const ref = useRef(null)
   useEffect(() => { ref.current?.querySelector('.slash-item.on')?.scrollIntoView({ block: 'nearest' }) }, [sel])
-  if (!items.length && !jumps.length) return null
+  if (!items.length && !jumps.length && !empty) return null
   return (
     <div className={`slash-menu ${mention ? 'mention-menu' : ''}`} role="listbox" ref={ref} onMouseDown={(e) => e.preventDefault()}>
       {jumps.length > 0 && (
         <div className="mention-jumps">
           <span>{t('Go to')}</span>
-          {jumps.map((j) => <button key={j.key} className="mention-jump" title={j.file.path} onClick={() => onPick(j)}><Icon name={j.label === '..' ? 'chevron' : 'folder'} size={11} className={j.label === '..' ? 'rot-up' : ''} />{j.label === '..' ? t('Up') : j.label}</button>)}
+          {jumps.map((j) => <button key={j.key} className="mention-jump" title={j.file?.path} onClick={() => onPick(j)}><Icon name={j.back || j.label === '..' ? 'chevron' : 'folder'} size={11} className={j.back ? 'rot-back' : j.label === '..' ? 'rot-up' : ''} />{j.label === '..' ? t('Up') : j.label}</button>)}
         </div>
       )}
       {title && <div className="slash-title">{title}</div>}
       {items.map((it, i) => (
-        <button key={it.key} role="option" aria-selected={i === sel} className={`slash-item ${i === sel ? 'on' : ''}`} onMouseMove={() => onHover(i)} onClick={() => onPick(it)}>
-          <b>{it.label}</b>
+        <button key={it.key} role="option" aria-selected={i === sel} className={`slash-item ${it.kind || ''} ${i === sel ? 'on' : ''}`} onMouseMove={() => onHover(i)} onClick={() => onPick(it)}>
+          <b>{it.icon && <Icon name={it.icon} size={12} />}{it.label}</b>
           <span className="slash-desc">{it.description}</span>
           {it.badge && <span className="slash-badge">{it.badge}</span>}
+          {it.kind === 'jump' && <Icon name="chevron" size={12} className="slash-go" />}
         </button>
       ))}
-      <div className="slash-foot"><kbd>↑</kbd><kbd>↓</kbd> choose · <kbd>⏎</kbd> or <kbd>Tab</kbd> pick · <kbd>Esc</kbd> close{mention && <> · <kbd>Space</kbd> after a folder to use it</>}</div>
+      {!items.length && empty && <div className="slash-empty" role="status">{empty}</div>}
+      <div className={`slash-foot ${note ? 'has-note' : ''}`}>
+        <span className="slash-keys"><kbd>↑</kbd><kbd>↓</kbd> {t('choose')} · <kbd>⏎</kbd> {t('or')} <kbd>Tab</kbd> {t('pick')} · <kbd>Esc</kbd> {back ? t('back') : t('close')}{mention && items.some((it) => it.file) && <> · <kbd>Space</kbd> {t('after a folder to use it')}</>}</span>
+        {note && <span className={`slash-note ${warn ? 'warn' : ''}`} role="status">{warn && <Icon name="alert" size={11} />}{note}</span>}
+      </div>
     </div>
   )
 }
@@ -352,6 +377,8 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
   }
   useEffect(() => { const t = setTimeout(() => saveDraft(id, draft), 250); return () => clearTimeout(t) }, [id, draft])
   useEffect(() => { onDraft?.(draft.text) }, [draft.text]) // eslint-disable-line react-hooks/exhaustive-deps
+  // A message being typed: the desktop app doesn't update by itself under it (busy.js).
+  useBusy('draft', !!(draft.text.trim() || draft.files.length))
   // Height: grows with the text up to 200px, unless you've dragged the grip to set your own.
   const [manualH, setManualH] = usePersisted('cc-composer-h', null)
   const fit = () => {
@@ -521,35 +548,74 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
   const at = filesUrl && !slashItems.length ? /(^|\s)@("[^"]*|[^\s"@]*)$/.exec(before) : null
   const atStart = at ? at.index + at[1].length : -1
   const mentionQ = at && mentionOff !== atStart ? at[2].replace(/^"/, '') : null
+  // The @ whose menu is only meetings (Meetings, picked from the top of it): what's typed after it
+  // looks for meetings, not files. Another @, or this one gone, and it's the files again.
+  const [meetAt, setMeetAt] = useState(-1)
+  useEffect(() => { if (meetAt !== atStart) setMeetAt(-1) }, [atStart]) // eslint-disable-line react-hooks/exhaustive-deps
+  const onlyMeet = mentionQ != null && meetAt === atStart
   const { items: found, cwd: agentCwd } = useMentions(filesUrl, mentionQ)
-  const cwdName = agentCwd ? agentCwd.split('/').pop() : null
+  // The agent's folder by its name alone, on Windows too (C:\Users\me\launch is launch).
+  const cwdName = agentCwd ? agentCwd.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || null : null
   const [mentionSel, setMentionSel] = useState(0)
-  useEffect(() => { setMentionSel(0) }, [mentionQ])
+  useEffect(() => { setMentionSel(0) }, [mentionQ, onlyMeet])
   const baseName = (p) => p.replace(/\/$/, '').split('/').pop()
   const parentOf = (p) => (p.replace(/\/$/, '').includes('/') ? p.replace(/[^/]+\/?$/, '') : '')
   const toItem = (f) => ({ key: `${f.label || ''}:${f.path}`, label: f.label || baseName(f.path) + (f.dir ? '/' : ''), description: f.hint || (mentionQ?.endsWith('/') ? '' : parentOf(f.path)), badge: f.dir && !f.label ? t('folder') : null, file: f })
   // With just "@", the way up and the usual places sit in a row above this folder's list.
   const isJump = (f) => f.place || (f.label === '..' && mentionQ === '')
-  const mentionItems = mentionQ != null && found ? found.filter((f) => !isJump(f)).map(toItem) : []
-  const mentionJumps = mentionQ != null && found ? found.filter(isJump).map(toItem) : []
-  // Meetings, mentioned with the meeting key (Settings › Meetings): with @, a few beside the files
-  // found for what's typed; with another key, only meetings, the latest first. A meeting goes in as
-  // @ and the file the agent reads (forAgents on the server): its summary, your notes, the transcript.
+  const mentionItems = mentionQ != null && found && !onlyMeet ? found.filter((f) => !isJump(f)).map(toItem) : []
+  const mentionJumps = mentionQ != null && found && !onlyMeet ? found.filter(isJump).map(toItem) : []
+  // Meetings, mentioned with the meeting key (Settings › Meetings). With @ and nothing after it, the
+  // first row is Meetings, which makes the menu your meetings, the latest first and then those that
+  // match what you type (Esc, or Backspace with nothing typed, goes back to the files); with a word
+  // after @, the meetings whose name has it come first, then the files. With another key, only
+  // meetings. Each from this computer or one linked to it, which this one asks (useMeetingMentions).
+  // A meeting goes in as @ and the file the agent reads (forAgents on the server): its summary, your
+  // notes, the transcript; one on another computer, as a copy of that file here.
   const meetKey = usePoll('/config', 10 * 60 * 1000).data?.meetingKey || '@'
   const keyAt = meetKey !== '@' && filesUrl && !slashItems.length ? new RegExp(`(^|\\s)${meetKey.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')}([^\\s]*)$`).exec(before) : null
   const keyStart = keyAt ? keyAt.index + keyAt[1].length : -1
-  const meetQ = meetKey !== '@' ? (keyAt && mentionOff !== keyStart ? keyAt[2] : null) : mentionQ && !/[/~."\\]/.test(mentionQ) ? mentionQ : null
+  const meetQ = meetKey !== '@' ? (keyAt && mentionOff !== keyStart ? keyAt[2] : null) : mentionQ == null ? null : onlyMeet || !/[/~."\\]/.test(mentionQ) ? mentionQ : null
   const meetFound = useMeetingMentions(meetQ)
-  const meetItems = (meetQ != null && meetFound ? meetFound : []).slice(0, keyAt ? 8 : 4).map((m) => ({ key: `meeting:${m.id}`, label: m.title, description: meetingWhen(m), badge: t('meeting'), meeting: m }))
-  const atItems = keyAt ? meetItems : [...mentionItems, ...meetItems]
+  const meetsOnly = !!keyAt || onlyMeet
+  const meetItems = (meetQ != null && meetFound ? meetFound.meetings : []).slice(0, meetsOnly ? MEETINGS_N : 3).map((m) => ({
+    key: `meeting:${m.machine || ''}:${m.id}`, kind: 'meeting', icon: 'mic', label: m.title, badge: t('meeting'), meeting: m,
+    description: m.device ? `${meetingWhen(m)} · ${m.device}` : meetingWhen(m),
+  }))
+  const toMeetings = { key: 'meetings', kind: 'jump', icon: 'mic', label: t('Meetings'), description: t('Your recorded meetings, on every computer'), toMeetings: true }
+  const atItems = meetsOnly ? meetItems : meetKey === '@' && mentionQ === '' ? [toMeetings, ...mentionItems] : [...meetItems, ...mentionItems]
   const menuOpen = keyAt ? meetQ != null : mentionQ != null
   const menuStart = keyAt ? keyStart : atStart
   useEffect(() => { setMentionSel(0) }, [meetQ])
+  // What the menu says: what's in it (its title), and in its foot a computer whose meetings aren't
+  // in it, and why (or, with only meetings, the computers they're from).
+  const where = mentionQ == null ? '' : /^[~/]/.test(mentionQ) ? mentionQ.replace(/[^/]*$/, '') || '~/' : mentionQ.endsWith('/') ? mentionQ : mentionQ ? t('Matching "{query}"', { query: mentionQ }) : `${cwdName || t('This folder')}/`
+  const menuTitle = meetsOnly ? (meetQ ? t('Meetings matching "{query}"', { query: meetQ }) : t('Meetings'))
+    : meetKey === '@' && mentionQ === '' ? <>{t('Files and meetings')}<span className="slash-where">{where}</span></>
+      : meetItems.length ? t('Files and meetings matching "{query}"', { query: mentionQ }) : where
+  const update = (name) => t('Update Bridge AI on {name} to mention its meetings here', { name })
+  const meetWarn = meetQ != null && meetFound ? [
+    ...meetFound.update.map(update),
+    ...meetFound.unreachable.map((name) => t("{name} isn't reachable", { name })),
+    ...(meetFound.failed ? [t("Couldn't get your meetings just now")] : []),
+  ].join(' · ') : ''
+  const meetFrom = meetsOnly && meetFound?.from.length && meetFound.here ? t('Meetings on {names}', { names: listOf([meetFound.here, ...meetFound.from]) }) : ''
+  // With none to show, the meetings say so: after Meetings is picked, and after another key alone
+  // (a word after that key with no meeting to match, "#123", leaves the menu closed, as it was).
+  const meetEmpty = (onlyMeet || (keyAt && !meetQ)) && !meetItems.length ? (!meetFound || meetFound.waiting ? t('Looking for meetings…') : meetQ ? t('No meetings match "{query}"', { query: meetQ }) : t('No meetings yet')) : null
   const pickMeeting = async (it) => {
+    const m = it.meeting
     const from = menuStart
     const to = caret
+    // An older Bridge AI there can't give a meeting's words, so there's nothing to put in: it says so.
+    if (m.old) { setNote(update(m.device)); return }
+    if (m.machine) setNote(t('Getting {title} from {name}…', { title: m.title, name: m.device }))
     let ref
-    try { ref = await api(`/meetings/${encodeURIComponent(it.meeting.id)}/for-agents`, { method: 'POST' }) } catch (e) { setNote(e.message); return }
+    try { ref = await api(`/meetings/${encodeURIComponent(m.id)}/for-agents`, { method: 'POST', body: m.machine ? { machine: m.machine } : undefined }) } catch (e) {
+      setNote(e.code === 'update' ? update(m.device) : e.code === 'offline' ? t("{name} isn't reachable", { name: m.device }) : e.message)
+      return
+    }
+    if (m.machine) setNote(null)
     const ins = `${mentionText(ref.path)} `
     setDraft((d) => ({ ...d, text: d.text.slice(0, from) + ins + d.text.slice(to) }))
     const pos = from + ins.length
@@ -557,6 +623,8 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
     requestAnimationFrame(() => { const el = taRef.current; if (el) { el.focus(); el.setSelectionRange(pos, pos) } })
   }
   const pickMention = (it) => {
+    if (it.toMeetings) { setMeetAt(atStart); return }
+    if (it.back) { setMeetAt(-1); return }
     if (it.meeting) { pickMeeting(it); return }
     const p = it.file.path
     const end = caret
@@ -572,6 +640,12 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
 
   const onKeyDown = (e) => {
     if (editing && e.key === 'Escape') { e.preventDefault(); endEdit(true); return }
+    // In the meetings: Esc, or Backspace with nothing typed after the @, goes back to the files. With
+    // none to pick (still on their way, or none yet), Enter waits rather than sending the @ or the
+    // key, and Esc after another key closes the menu.
+    if (onlyMeet && (e.key === 'Escape' || (e.key === 'Backspace' && at[2] === '' && e.currentTarget.selectionStart === e.currentTarget.selectionEnd))) { e.preventDefault(); e.stopPropagation(); setMeetAt(-1); return }
+    if (menuOpen && meetEmpty && (e.key === 'Enter' || e.key === 'Tab')) { e.preventDefault(); return }
+    if (keyAt && meetEmpty && e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setMentionOff(menuStart); return }
     if (menuOpen && (atItems.length || (!keyAt && mentionJumps.length))) {
       if (e.key === 'ArrowDown') { e.preventDefault(); setMentionSel((i) => Math.min(i + 1, atItems.length - 1)); return }
       if (e.key === 'ArrowUp') { e.preventDefault(); setMentionSel((i) => Math.max(i - 1, 0)); return }
@@ -615,9 +689,8 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
         </div>
       )}
       <SlashMenu items={slashItems} sel={slashSel} onHover={setSlashSel} onPick={pickSlash} title={slashTitle} />
-      {menuOpen && <SlashMenu items={atItems} sel={mentionSel} onHover={setMentionSel} onPick={pickMention}
-        title={keyAt ? (meetQ ? t('Meetings matching "{query}"', { query: meetQ }) : t('Latest meetings')) : /^[~/]/.test(mentionQ) ? mentionQ.replace(/[^/]*$/, '') || '~/' : mentionQ.endsWith('/') ? mentionQ : mentionQ ? t('Matching "{query}"', { query: mentionQ }) : `${cwdName || t('This folder')}/`}
-        jumps={keyAt ? [] : mentionJumps} mention />}
+      {menuOpen && <SlashMenu items={atItems} sel={mentionSel} onHover={setMentionSel} onPick={pickMention} title={menuTitle} note={meetWarn || meetFrom} warn={!!meetWarn} empty={meetEmpty} back={onlyMeet}
+        jumps={keyAt ? [] : onlyMeet ? [{ key: 'back', label: t('Files and meetings'), back: true }] : mentionJumps} mention />}
       {voiceSetup && (voiceSetup.mic ? <MicFix stale={voiceSetup.stale} onClose={closeVoiceSetup} /> : <VoiceSetup initial={voiceSetup} onReady={retry} onClose={closeVoiceSetup} />)}
       {note && <div className="comp-note" role="status">{note}</div>}
       {dictNote && <div className="comp-note" role="status">{dictNote} {dict.retry && <button className="link-btn" onClick={retry}>{t('Try again')}</button>} <button className="link-btn" onClick={dismiss}>{t('Close')}</button></div>}

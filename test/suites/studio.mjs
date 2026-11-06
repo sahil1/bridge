@@ -38,9 +38,9 @@ const bare = (p) => p.locator('.sd-file').evaluateAll((els) => els.flatMap((root
 try {
   await api('/setup', { name: 'Tester' })
   await api('/agents/catalog')
-  // A trial feature: off to start with, its routes refused and nothing leading to it, until it's
-  // turned on (Settings › About & Updates › Trial Features, checked on the page below).
-  ok((await api('/config')).trials?.studio === false && /trial feature/.test((await err('/studio/recent'))?.message || ''), 'Studio is a trial feature, off to start with: its routes say how to turn it on', (await api('/config')).trials)
+  // A beta feature: off to start with, its routes refused and nothing leading to it, until it's
+  // turned on (Settings › About & Updates › Beta Features, checked on the page below).
+  ok((await api('/config')).trials?.studio === false && /beta feature/.test((await err('/studio/recent'))?.message || ''), 'Studio is a beta feature, off to start with: its routes say how to turn it on', (await api('/config')).trials)
   await api('/settings', { trials: { studio: true } }, 'PATCH')
   ok((await api('/config')).trials?.studio === true && Array.isArray((await api('/studio/recent')).files), 'turned on, it answers')
   // ---------- The files ----------
@@ -124,14 +124,14 @@ try {
   pages.push(w)
   const p = w.p
   await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
-  // Settings › About & Updates: Studio's switch under Trial Features, and every button there one
+  // Settings › About & Updates: Studio's switch under Beta Features, and every button there one
   // size. Off, Studio leaves the sidebar; on, it's back.
   await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'about' } })))
   const trial = p.locator('.st-check', { hasText: 'Studio' }).locator('input')
   await trial.waitFor({ timeout: 15000 })
   // The switch is off and disabled until the settings have come (a slow computer shows that first).
   await until(async () => !(await trial.isDisabled()), 10000)
-  ok(await trial.isChecked(), 'Settings › About & Updates › Trial Features: Studio, on')
+  ok(await trial.isChecked(), 'Settings › About & Updates › Beta Features: Studio, on')
   const sizes = await p.locator('.st-sections .st-sec .btn').evaluateAll((bs) => [...new Set(bs.map((x) => Math.round(x.getBoundingClientRect().height)))])
   ok(sizes.length === 1, `every button on About & Updates is one size (${sizes.join(', ')} px)`, sizes)
   await shot(p, `${tag}studio-trial`)
@@ -253,7 +253,8 @@ try {
   // A link: added from the link bar to what's picked (example.com made https://example.com), shown
   // on its button, and taken back with Undo, put back with Redo.
   ok(!!(await until(async () => !(await btn('Undo').isDisabled()) && await btn('Redo').isDisabled(), 3000, 100)), 'Undo is there once something is done; Redo is not, until something is undone')
-  await btn('Insert link').click()
+  // Clicked again until the link bar shows (WebKit can take a click while the toolbar redraws).
+  await until(async () => { if (!(await p.locator('.sd-linkbar input').count())) await btn('Insert link').click(); return p.locator('.sd-linkbar input').waitFor({ timeout: 1500 }).then(() => true, () => false) }, 10000, 300)
   await p.locator('.sd-linkbar input').fill('example.com')
   await p.locator('.sd-linkbar input').press('Enter')
   const link = docText.locator('a[href="https://example.com"]', { hasText: 'Toggle me' })

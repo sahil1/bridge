@@ -14,7 +14,7 @@
 //   within the budget saying so), an error, a provider that fell for an instruction (turned down),
 //   the model started while you talk; no model: what's needed, and on a 4 GB computer, a model of
 //   your own. Nothing is downloaded until asked.
-//   In the app, the desktop app simulated: Trial Features lists it; Settings › Voice › Dictation has
+//   In the app, the desktop app simulated: Beta Features lists it; Settings › Voice › Dictation has
 //   Tidy what I say only with the trial on (off to start with), the model it uses and whether the
 //   words leave the computer, picked in a field like Settings' others; with no model, the download
 //   in one click and its progress; on 4 GB, where to add one, with the way there, and turned on
@@ -117,7 +117,7 @@ try {
   await kit.api('/settings', { trials: { 'dictation-cleanup': false }, dictation: { tidy: true } }, 'PATCH')
   let r = await tidy(kit, 'so you know we ship it')
   const conf = await kit.api('/config')
-  ok(r.status === 404 && r.j.trial === 'dictation-cleanup' && /trial feature\. Turn it on in Settings › About & Updates › Trial Features/.test(r.j.error || ''), 'the trial off: tidying isn\'t there, and says how to turn it on', r)
+  ok(r.status === 404 && r.j.trial === 'dictation-cleanup' && /beta feature\. Turn it on in Settings › About & Updates › Beta Features/.test(r.j.error || ''), 'the trial off: tidying isn\'t there, and says how to turn it on', r)
   ok(conf.trials?.['dictation-cleanup'] === false && conf.dictation?.tidy === false && !chats(kit).length, 'and /config says tidying is off, though it was turned on (nothing was asked of a model)', conf.dictation)
   await kit.api('/settings', { trials: { 'dictation-cleanup': true }, dictation: { tidy: null } }, 'PATCH')
   const fresh = await kit.api('/config')
@@ -223,14 +223,14 @@ try {
   }
   const tidyBox = (s) => s.locator('.dict-tidy')
 
-  // Trial Features lists it; with the trial off, Settings › Voice doesn't show it.
+  // Beta Features lists it; with the trial off, Settings › Voice doesn't show it.
   await kit.api('/settings', { trials: { 'dictation-cleanup': false } }, 'PATCH')
   {
     const { ctx, p, s } = await voice(kit)
     ok(await tidyBox(s).count() === 0 && !/Tidy what I say/.test(await s.innerText()), 'the trial off: Settings › Voice › Dictation has no Tidy what I say', await s.innerText())
     await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'about' } })))
     const trial = p.locator('.st-check', { hasText: 'Tidy what I say' })
-    ok(!!(await until(() => trial.isVisible(), 10000, 200)) && /tidied by a model before it's pasted/.test(await trial.innerText()) && !(await trial.locator('input').isChecked()), 'Settings › About & Updates › Trial Features: Tidy what I say, off', await trial.innerText().catch(() => ''))
+    ok(!!(await until(() => trial.isVisible(), 10000, 200)) && /tidied by a model before it's pasted/.test(await trial.innerText()) && !(await trial.locator('input').isChecked()), 'Settings › About & Updates › Beta Features: Tidy what I say, off', await trial.innerText().catch(() => ''))
     await until(async () => !(await trial.locator('input').isDisabled()), 10000)
     await trial.locator('input').check()
     ok(!!(await until(async () => (await kit.api('/config')).trials?.['dictation-cleanup'] === true, 5000, 200)), 'turned on there: kept')

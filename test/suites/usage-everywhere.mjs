@@ -142,9 +142,9 @@ try {
   await kit.api('/providers/lmstudio', { values: { LM_STUDIO_BASE_URL: `${lms.url}/v1` } }, 'PUT')
 
   // ---------- Off until it's turned on ----------
-  ok((await kit.api('/config')).trials?.['usage-everywhere'] === false, 'a trial feature, off to start with', (await kit.api('/config')).trials)
+  ok((await kit.api('/config')).trials?.['usage-everywhere'] === false, 'a beta feature, off to start with', (await kit.api('/config')).trials)
   const off = await err('/usage-everywhere')
-  ok(off?.status === 404 && off.j?.trial === 'usage-everywhere' && /trial feature/.test(off.message), 'its route says how to turn it on', off?.message)
+  ok(off?.status === 404 && off.j?.trial === 'usage-everywhere' && /beta feature/.test(off.message), 'its route says how to turn it on', off?.message)
 
   // ---------- Each answer, a line (whether the trial is on or not) ----------
   for (const model of ['openai:gpt-5', 'anthropic:claude-sonnet-5-5', 'openai:quiet', 'cli:claude', 'cli:gemini']) {
@@ -216,7 +216,7 @@ try {
   const trial = p.locator('.st-check', { hasText: 'Usage Across Every Provider' }).locator('input')
   await trial.waitFor({ timeout: 15000 })
   await until(async () => !(await trial.isDisabled()), 10000)
-  ok(await trial.isChecked(), 'Settings › About & Updates › Trial Features: Usage Across Every Provider, on')
+  ok(await trial.isChecked(), 'Settings › About & Updates › Beta Features: Usage Across Every Provider, on')
   await trial.uncheck()
   await until(async () => (await kit.api('/config')).trials?.['usage-everywhere'] === false, 8000)
   await p.locator('button[aria-label="Close settings"]').click()

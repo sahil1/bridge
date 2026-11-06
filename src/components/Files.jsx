@@ -29,6 +29,7 @@ import { locale, t } from '../i18n/index.js'
 import { FileDrawing } from '../lazy.jsx'
 import { isDiagramFile, addMermaidButtons, whiteboards as studioHere } from './whiteboard/links.js'
 import { useTrial } from '../trials.js'
+import { useBusy } from '../busy.js'
 // The kinds of file Studio opens (server/studio.js).
 const STUDIO_OPENS = /\.(docx|md|markdown|txt|xlsx|xlsm|csv|tsv|pptx|pdf|html?)$/i
 
@@ -207,7 +208,7 @@ function Editor({ value, onChange, onSave }) {
 }
 
 function Viewer({ pane, filePath, onOpenPath, onBack, onMenu, ver, onCopyHere }) {
-  const studio = useTrial('studio') // a trial feature (src/trials.js)
+  const studio = useTrial('studio') // a beta feature (src/trials.js)
   const [state, setState] = useState({ loading: true })
   const [mode, setMode] = usePersisted('cc-md-mode', 'preview')
   const [copied, setCopied] = useState(false)
@@ -270,13 +271,14 @@ function Viewer({ pane, filePath, onOpenPath, onBack, onMenu, ver, onCopyHere })
     if (isDrawing) setDrawMode(m)
     else setMode(m)
   }
-  // Unsaved edits: ask before the page closes.
+  // Unsaved edits: ask before the page closes, and the desktop app doesn't update by itself (busy.js).
   useEffect(() => {
     if (!dirty) return
     const warn = (e) => { e.preventDefault(); e.returnValue = '' }
     window.addEventListener('beforeunload', warn)
     return () => window.removeEventListener('beforeunload', warn)
   }, [dirty])
+  useBusy('file', dirty)
 
   // Editing Markdown or HTML: the text on the left and how it looks on the right, when there's room.
   const split = editing && (isMd || isHtml) && boxW > 640

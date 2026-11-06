@@ -1,4 +1,4 @@
-// Meeting Insights and the people you meet, a trial feature (meeting-insights), on any platform, in
+// Meeting Insights and the people you meet, a beta feature (meeting-insights), on any platform, in
 // the browser named by BRIDGE_TEST_BROWSER. Off to start with: its routes refused saying how to turn
 // it on, and nothing in Meetings or ⌘K leading to it. On with no meetings, Insights and People say
 // what they need. Then nine made-up meetings in the data folder (calls with named lines, a room with
@@ -90,9 +90,9 @@ try {
   await api('/setup', { name: 'Tester' })
   // ---------- Off to start with ----------
   const off = await err('/meetings/insights')
-  ok((await api('/config')).trials?.['meeting-insights'] === false && off?.status === 404 && /Meeting Insights is a trial feature\. Turn it on in Settings › About & Updates › Trial Features/.test(off.message)
+  ok((await api('/config')).trials?.['meeting-insights'] === false && off?.status === 404 && /Meeting Insights is a beta feature\. Turn it on in Settings › About & Updates › Beta Features/.test(off.message)
     && (await err('/meetings/people'))?.status === 404 && (await err('/meetings/people/merge', { a: 'x', b: 'y' }))?.status === 404,
-  'a trial feature, off to start with: its routes answer 404, saying how to turn it on', { off: off?.message, trials: (await api('/config')).trials })
+  'a beta feature, off to start with: its routes answer 404, saying how to turn it on', { off: off?.message, trials: (await api('/config')).trials })
   const desk = await page(b, kit.url, { store: { 'cc-rail-meetings': true, 'cc-meet-tab': 'insights' } })
   pages.push(desk)
   const p = desk.p

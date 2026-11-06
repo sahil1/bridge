@@ -185,7 +185,7 @@ export function MeetingsHome({ onOpen }) {
   useEffect(() => { if (data && place && (place === ':archived' ? !archivedN : !folders.includes(place))) setPlace('') }, [data, place, archivedN, folders.join('|')]) // eslint-disable-line react-hooks/exhaustive-deps
   const hits = useSearch(q, place === ':archived')
   const [memory, setMemory] = useState(false)
-  // Insights and People beside the list (a trial feature, insights.jsx). ⌘K opens either, through
+  // Insights and People beside the list (a beta feature, insights.jsx). ⌘K opens either, through
   // the tab kept here and bridge-meetings-tab for a list already open.
   const insightsOn = useTrial('meeting-insights')
   const [tabKept, setTab] = usePersisted('cc-meet-tab', 'list')
@@ -477,7 +477,7 @@ const tilde = (p) => String(p || '').replace(/^\/Users\/[^/]+/, '~')
 const localInput = (iso) => { const d = new Date(iso); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16) }
 
 export function MeetingPage({ id, onBack }) {
-  const studio = useTrial('studio') // Make a deck writes one into Studio, a trial feature (src/trials.js)
+  const studio = useTrial('studio') // Make a deck writes one into Studio, a beta feature (src/trials.js)
   const m = useMeetings()
   const live = m?.rec?.id === id
   const { data, refresh } = usePoll(`/meetings/${encodeURIComponent(id)}`, live ? 1500 : 4000)

@@ -187,7 +187,7 @@ function Rich({ file, start, md, onDirty, onStats, handle, readOnly }) {
               {md && tool(t('Code block'), 'code-block', () => c().toggleCodeBlock().run(), { on: s.codeBlock, k: ['mod', 'alt', 'c'] })}
             </span>
             <span className="sd-group">
-              {tool(t('Insert link'), 'link', () => setLinking(linking == null ? s.href : null), { on: s.link || linking != null, tip: s.link ? t('Link: change it, open it or remove it') : t('Insert link') })}
+              {tool(t('Insert link'), 'link', () => setLinking(linking == null ? s.href || '' : null), { on: s.link || linking != null, tip: s.link ? t('Link: change it, open it or remove it') : t('Insert link') })}
               <span className="menu-anchor">
                 {s.table
                   ? tool(t('Table'), 'table', () => setTableMenu((x) => !x), { tip: t('Table: add or delete rows and columns'), 'aria-haspopup': 'menu', 'aria-expanded': tableMenu })
