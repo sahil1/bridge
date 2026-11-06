@@ -360,6 +360,12 @@ try {
   const dueIn = (title) => real?.items.find((i) => i.task?.title === title)?.task.due
   ok(dueIn('Call the accountant tomorrow') === new Date(Date.now() + 864e5).toLocaleDateString('en-CA') && /-11-12$/.test(dueIn('Book flights to New York on 12 Nov') || '') && dueIn(gary) === null, 'with the day each names, or none', real?.items.filter((i) => i.kind === 'task').map((i) => [i.task.title, i.task.due]))
 
+  // The heading's count and its ring: everything that needs you, and the share you can answer now.
+  const ringOf = (p) => p.locator('.hm-count .hm-ring').evaluate((e) => ({ fill: Number(e.style.getPropertyValue('--p')), said: e.getAttribute('aria-label') }))
+  const tip = (p) => p.locator('#hm-count-tip')
+  // What the count's details say: how many on each computer (an offline one said), and by kind.
+  const tipRight = (x) => /You can answer 6 of 8 now; the rest wait for their computer to be back/.test(x) && /Studio\s*3/.test(x) && /Desk\s*2/.test(x) && /Travel Laptop\s*1/.test(x) && /Lab Mini\s*· offline\s*2/.test(x)
+    && /Permissions\s*1/.test(x) && /Questions\s*2/.test(x) && /Failed\s*2/.test(x) && /Chief of Staff tasks\s*3/.test(x)
   const loaded = async (hm) => until(async () => { const x = await hm.innerText().catch(() => ''); return /roadmap/.test(x) && /Board prep/.test(x) && /to do, with no day set/.test(x) && /Waiting on You\s*4/.test(x) }, 20000)
   const said0 = (sub) => said.find((x) => x.startsWith(sub.replace(/…$/, '')))
   // A summary ends at a word: all of a sentence, or whole words and "…".
@@ -369,6 +375,8 @@ try {
     const hm = p.locator('.hm')
     ok(!!(await loaded(hm)), 'a morning: Home opens with all of it', await hm.innerText().catch(() => ''))
     await p.waitForTimeout(800)
+    const whole = await ringOf(p)
+    ok(whole.fill === 100 && whole.said === '4 of 4 you can answer now' && /^4 things need you/.test(await hm.locator('.hm-title h2').innerText()), 'with every computer on, the ring is full', whole)
     await shot(p, `${tag}home-morning-1440`)
     const ready = hm.locator('.hm-sec[aria-label="Ready to Look At"]')
     const coming = hm.locator('.hm-sec[aria-label="Coming Up"]')
@@ -569,8 +577,25 @@ try {
     ok(!uneven.length, `${width}: cards side by side are the same height, their buttons on one line at the bottom`, uneven)
     const noIcon = await bare(p)
     ok(!noIcon.length, `${width}: every button on a card has its icon`, noIcon)
+    const head = await hm.locator('.hm-title h2').innerText()
+    const ring = await ringOf(p)
+    ok(/^8 things need you/.test(head) && /Waiting on You\s*8/.test(await hm.locator('.hm-sec[aria-label="Waiting on You"] h3').innerText()) && ring.fill === 75 && ring.said === '6 of 8 you can answer now', `${width}: the heading counts all 8, as Waiting on You does, its ring three quarters full (6 on computers that are on)`, [head, ring])
     await shot(p, `${tag}home-busy-${width}-${mode}`)
+    if (width === 1440) {
+      // Pointed at: what's in the count, on each computer and by kind.
+      await hm.locator('.hm-count').hover()
+      ok(!!(await until(async () => tipRight(await tip(p).innerText().catch(() => '')), 4000)), `${mode}: pointed at, the count says what's in it: on each computer (an offline one said) and by kind`, await tip(p).innerText().catch(() => ''))
+      await shot(p, `${tag}home-busy-1440-${mode}-count`)
+      await p.mouse.move(5, 600)
+      ok(!!(await until(async () => !(await tip(p).count()), 3000)), `${mode}: and away again, it goes`)
+    }
     if (width === 1440 && mode === 'light') {
+      // By the keyboard too: focused, it says the same; Escape puts it away.
+      await hm.locator('.hm-count').focus()
+      ok(!!(await until(async () => tipRight(await tip(p).innerText().catch(() => '')), 3000)) && (await hm.locator('.hm-count').getAttribute('aria-describedby')) === 'hm-count-tip', 'focused by the keyboard, the count shows the same, as its description', await tip(p).innerText().catch(() => ''))
+      await p.keyboard.press('Escape')
+      ok(!!(await until(async () => !(await tip(p).count()), 3000)), 'and Escape puts it away')
+      await hm.locator('.hm-count').blur()
       // On a row while it's pointed at: Pin among its buttons.
       const row = hm.locator('.hm-sec[aria-label="Ready to Look At"] .hm-item').filter({ hasText: 'Auth flow v2' })
       await row.hover()
@@ -674,6 +699,13 @@ try {
     await shot(p, `${tag}home-busy-phone-${width}`)
     await hm.locator('.hm-sec[aria-label="Chief of Staff\'s Tasks"] .hm-fold').click()
     const f = await phoneFaults(p, '.hm')
+    // A tap on the count shows what's in it; a tap elsewhere puts it away.
+    await hm.locator('.hm-title').evaluate((e) => e.scrollIntoView({ block: 'start' }))
+    await hm.locator('.hm-count').tap()
+    ok(!!(await until(async () => tipRight(await tip(p).innerText().catch(() => '')), 4000)) && (await ringOf(p)).fill === 75, `phone ${width}: a tap on the count shows what's in it`, await tip(p).innerText().catch(() => ''))
+    await shot(p, `${tag}home-busy-phone-${width}-count`)
+    await hm.locator('.hm-sec[aria-label="Waiting on You"] h3').tap()
+    ok(!!(await until(async () => !(await tip(p).count()), 3000)), `phone ${width}: and a tap elsewhere puts it away`)
     ok(!Object.keys(f).length, `a busy day, phone ${width}: it fits (nothing wider, past its edge or cut off; every control, the pins too, a whole 40 px target)`, f)
     await p.setViewportSize({ width, height: 5200 })
     await p.waitForTimeout(400)

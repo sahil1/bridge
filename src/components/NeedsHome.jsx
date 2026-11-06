@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Icon, { StatusDot } from './Icon.jsx'
 import { NeedsItem, onDevice } from './NeedsYou.jsx'
 import { useAgentMap } from './AgentMap.jsx'
@@ -201,6 +201,65 @@ function DeviceChip({ it }) {
     <span className={`ny-device ${it.machine ? '' : 'here'}`} title={off ? t('{name} is offline', { name: it.device }) : t('On {name}', { name: it.device })}>
       <Icon name="laptop" size={11} />{it.device}{off && <span className="ny-off"> · {t('offline')}</span>}
     </span>
+  )
+}
+
+// The heading's count: everything that needs you on every computer (offline ones too, as Waiting on
+// You has them), with a ring like the Status menu's, filled by the share you can answer now (on a
+// computer that's on) and the rest in a quieter tone. Pointed at, reached by the keyboard or tapped,
+// what's in it: on each computer and by kind. Escape, a tap elsewhere or a second tap puts it away.
+const NEED_KINDS = [['permission', tx('Permissions')], ['question', tx('Questions')], ['failed', tx('Failed')], ['task', tx('Chief of Staff tasks')]]
+function NeedCount({ list, devices }) {
+  const [hover, setHover] = useState(false)
+  const [focus, setFocus] = useState(false)
+  const [stuck, setStuck] = useState(false)
+  const box = useRef(null)
+  const pointing = useRef(false) // a click or a tap, which opens it itself, rather than the keyboard
+  useEffect(() => {
+    if (!stuck) return
+    const away = (e) => { if (!box.current?.contains(e.target)) setStuck(false) }
+    document.addEventListener('pointerdown', away)
+    return () => document.removeEventListener('pointerdown', away)
+  }, [stuck])
+  const total = list.length
+  const now = list.filter((i) => i.online).length
+  const title = total === 0 ? t('Nothing needs you') : total === 1 ? t('1 thing needs you') : t('{n} things need you', { n: total })
+  if (!total) return <h2>{title}</h2>
+  const open = hover || focus || stuck
+  const away = () => { setStuck(false); setHover(false); setFocus(false) }
+  const on = devices.map((d) => ({ d, n: list.filter((i) => (i.machine || 'here') === (d.id || 'here')).length })).filter((x) => x.n)
+  const kinds = NEED_KINDS.map(([k, label]) => ({ k, label, n: list.filter((i) => (i.kind === 'task' ? 'task' : i.type) === k).length })).filter((x) => x.n)
+  return (
+    <div className="hm-count-box" ref={box} onPointerEnter={(e) => { if (e.pointerType === 'mouse') setHover(true) }} onPointerLeave={(e) => { if (e.pointerType === 'mouse') setHover(false) }}>
+      <h2>
+        <button type="button" className="hm-count" aria-expanded={open} aria-describedby={open ? 'hm-count-tip' : undefined}
+          onPointerDown={() => { pointing.current = true }}
+          onFocus={() => { if (!pointing.current) setFocus(true) }}
+          onBlur={() => setFocus(false)}
+          onClick={() => { pointing.current = false; if (stuck) away(); else setStuck(true) }}
+          onKeyDown={(e) => { if (e.key === 'Escape') away() }}>
+          {title}
+          <span className="mini-ring hm-ring" role="img" aria-label={t('{n} of {m} you can answer now', { n: now, m: total })} style={{ '--p': Math.round((now / total) * 100) }} />
+        </button>
+      </h2>
+      {open && (
+        <div id="hm-count-tip" role="tooltip" className="hm-tip">
+          <p>{now === total ? (total === 1 ? t('You can answer it now.') : t('You can answer all {n} now.', { n: total }))
+            : now === 0 ? t('None can be answered now: each waits for its computer to be back.')
+              : t('You can answer {n} of {m} now; the rest wait for their computer to be back.', { n: now, m: total })}</p>
+          <div className="hm-tip-cols">
+            <dl>
+              <dt>{t('By computer')}</dt>
+              {on.map(({ d, n }) => <dd key={d.id || 'here'} className={d.online ? '' : 'off'}><span className={`mc-dot ${d.online ? 'on' : ''}`} /><span className="hm-tip-name">{d.name}{!d.online && <small> · {t('offline')}</small>}</span><b>{n}</b></dd>)}
+            </dl>
+            <dl>
+              <dt>{t('By kind')}</dt>
+              {kinds.map(({ k, label, n }) => <dd key={k}><span className="hm-tip-name">{t(label)}</span><b>{n}</b></dd>)}
+            </dl>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -506,7 +565,8 @@ export default function NeedsHome({ phone = false, calendar = false, onOpen, onO
   const inOrder = (list) => (sort === 'newest' || sort === 'oldest' ? sortBy(list, sort) : sort === 'device' ? [...list].sort((x, y) => devAt(x) - devAt(y)) : list)
   const doing = inOrder(tasks.filter((i) => !i.task.due && i.task.status === 'doing'))
   const todos = inOrder(tasks.filter((i) => !i.task.due && i.task.status !== 'doing'))
-  const waiting = shown.filter((i) => i.group === 'needs' && i.online).length
+  // Everything that needs you, on a computer that's on or not (the heading counts it all).
+  const needing = shown.filter((i) => i.group === 'needs')
   const onGone = (it, said) => {
     setGone((g) => ({ ...g, [it.uid]: Date.now() }))
     if (said) setNote({ text: `${said} · ${it.agent?.title || it.task?.title || ''}` })
@@ -554,7 +614,7 @@ export default function NeedsHome({ phone = false, calendar = false, onOpen, onO
         <header className="hm-head">
           <div className="hm-title">
             {/* Until the list has come (or when it can't), no count: "Nothing needs you" would be a guess. */}
-            <h2>{!data ? t('Home') : waiting === 0 ? t('Nothing needs you') : waiting === 1 ? t('1 thing needs you') : t('{n} things need you', { n: waiting })}</h2>
+            {!data ? <h2>{t('Home')}</h2> : <NeedCount list={needing} devices={devices} />}
             <p className="muted">{date}{data && <><span className="hm-sep"> · </span><span className="hm-where">{where}</span></>}</p>
           </div>
           <button type="button" className="btn small hm-every" onClick={onEverything}>{t('See everything')} <Icon name="chevron" size={11} /></button>
