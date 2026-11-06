@@ -154,7 +154,8 @@ function Row({ r, open, onToggle, onDelete, paste, onMsg }) {
       <button type="button" className="dc-head" onClick={onToggle} aria-expanded={open}>
         <Glyph r={r} />
         <span className="dc-main">
-          <span className="dc-where"><b>{where}</b><span className="muted">{timeOf(r.at)}{r.ms ? ` · ${length(r.ms)}` : ''}</span></span>
+          <span className="dc-where"><b>{where}</b><span className="muted">{timeOf(r.at)}{r.ms ? ` · ${length(r.ms)}` : ''}</span>
+            {r.said && <span className="dc-tidy-mark" title={r.tidiedBy ? t('Tidied by {model}.', { model: r.tidiedBy }) : t('Tidied.')}><Icon name="sparkle" size={10} /> {t('Tidied')}</span>}</span>
           {!open && <span className="dc-text">{r.text}</span>}
         </span>
       </button>

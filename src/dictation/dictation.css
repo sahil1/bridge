@@ -90,7 +90,12 @@ html.is-hud, html.is-hud body, html.is-hud #root { background: transparent !impo
 .hud-tidied .link-btn { font-size: inherit; }
 .tidy-needs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
 .tidy-needs p { margin: 0; flex: 1 1 220px; color: var(--ink-2); line-height: 1.4; }
+.st-note.tidy-needs p { color: inherit; }
+.st-note.tidy-needs .btn { color: var(--ink); }
+.tidy-needs p svg { vertical-align: -2px; }
 .hud-tidy { border-top: 1px solid var(--line); padding-top: 8px; }
+.app.narrow .dict-tidy :is(.btn, .st-input) { min-height: 40px; }
+.app.narrow .dict-tidy .st-input { font-size: 16px; }
 
 /* Settings › Voice › Dictation. */
 .st-dictation .st-check, .st-dict-history .st-check { display: flex; align-items: flex-start; gap: 9px; font-size: 13px; line-height: 1.45; cursor: pointer; }

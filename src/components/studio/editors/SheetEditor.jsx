@@ -3,20 +3,22 @@ import { createUniver, LocaleType, mergeLocales } from '@univerjs/presets'
 import { UniverSheetsCorePreset } from '@univerjs/preset-sheets-core'
 import sheetsEnUS from '@univerjs/preset-sheets-core/locales/en-US'
 import '@univerjs/preset-sheets-core/lib/index.css'
+import Icon from '../../Icon.jsx'
 import { t } from '../../../i18n/index.js'
 import { workbookOf, bytesOf } from '../xlsx.js'
 
 // A sheet: Univer (Apache-2.0), the spreadsheet GenOffice's Sheets is built on, with formulas,
 // formats and every sheet of the file. Read from and written back to the file's own kind (xlsx.js).
 // It follows the app's light or dark look. handle: save() gives the bytes, selection() the cells
-// picked ("B2:D9 on Budget") with their values, for Ask an agent.
+// picked ("B2:D9 on Budget") with their values, for Ask an agent. onStats: how many sheets.
 const dark = () => { const m = document.documentElement.getAttribute('data-theme'); return m ? m === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches }
 
-export default function SheetEditor({ file, data, onDirty, handle, readOnly = false }) {
+export default function SheetEditor({ file, data, onDirty, onStats, handle, readOnly = false }) {
   const host = useRef(null)
   const api = useRef(null)
   const [lost, setLost] = useState([])
   const [err, setErr] = useState(null)
+  const [ready, setReady] = useState(false)
   useEffect(() => {
     let on = true
     let univer = null
@@ -24,6 +26,8 @@ export default function SheetEditor({ file, data, onDirty, handle, readOnly = fa
     workbookOf(data, file.name, file.ext).then((wb) => {
       if (!on || !host.current) return
       setLost(wb.lost)
+      const n = wb.data.sheetOrder.length
+      onStats?.({ text: n === 1 ? t('1 sheet') : t('{n} sheets', { n }) })
       const made = createUniver({
         locale: LocaleType.EN_US,
         locales: { [LocaleType.EN_US]: mergeLocales(sheetsEnUS) },
@@ -33,6 +37,7 @@ export default function SheetEditor({ file, data, onDirty, handle, readOnly = fa
       univer = made.univer
       api.current = made.univerAPI
       made.univerAPI.createWorkbook(wb.data)
+      setReady(true)
       if (readOnly) made.univerAPI.getActiveWorkbook()?.setEditable?.(false)
       // Changed once something's edited after it opened (the first mutations are its own setting up).
       let ready = false
@@ -53,11 +58,12 @@ export default function SheetEditor({ file, data, onDirty, handle, readOnly = fa
       } catch { return null }
     },
   }
-  if (err) return <p className="error-text">{t("Couldn't read this sheet: {error}", { error: err })}</p>
+  if (err) return <div className="sd-empty" role="alert"><Icon name="alert" size={18} /><b>{t("Couldn't read this sheet: {error}", { error: err })}</b><span className="muted small">{t('The file is as it was. Download it to open it in Excel, or put back an earlier version.')}</span></div>
   return (
     <div className="sd-sheet">
       {lost.length > 0 && <p className="muted small sd-note">{t('This file has {what}, which aren\'t shown here and aren\'t kept if you save it here; the file as it was stays in its versions.', { what: lost.join(', ') })}</p>}
       <div ref={host} className="sd-univer" />
+      {!ready && <div className="sd-empty sd-loading sd-over" role="status"><Icon name="refresh" size={16} className="spin" /><span className="muted">{t('Opening {name}…', { name: file.name })}</span></div>}
     </div>
   )
 }

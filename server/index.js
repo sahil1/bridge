@@ -1953,7 +1953,8 @@ app.post('/api/needs-you/clear', wrap((req) => waiting.clear(req.body?.id)))
 // What needs you, what's ready to look at and what's coming up, on this device and your others (from
 // what each last said, asked again while you're looking), each answered on its own device as in
 // Needs you. A device that sends only what needs you (an older Bridge AI, or Home's list not come
-// yet) says so (partial), so Home can say why its meetings and tasks aren't there.
+// yet) says so (partial), so Home can say why its meetings and tasks aren't there. One row per
+// thing across them all (home.tidy): the same task on two of them is one.
 const homeList = home.make({ waiting, tasks: chiefTasks, meetings, unsent: (id) => meetWork.unsent(id), boards, chief: async () => mainChief(await fleetView())?.paneId || null })
 app.get('/api/home', trialOff('home', 'Home'), wrap(async (req) => {
   await machines.fresh({ maxAge: req.query.live ? 2500 : 8000 })
@@ -1966,7 +1967,7 @@ app.get('/api/home', trialOff('home', 'Home'), wrap(async (req) => {
     return from.map((i) => ({ ...i, machine: m.id, device: m.name, online: !!m.online, asOf: m.at, old: !own && !Array.isArray(m.needs) }))
   })
   return {
-    items: [...mine, ...there],
+    items: home.tidy([...mine, ...there]),
     devices: [{ id: null, name, os: machines.OS, online: true, here: true }, ...linked.map((m) => ({ id: m.id, name: m.name, os: m.os, online: !!m.online, lastSeen: m.lastSeen, at: m.at, partial: !Array.isArray(m.home) }))],
   }
 }))

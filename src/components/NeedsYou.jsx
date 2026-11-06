@@ -143,6 +143,8 @@ export function NeedsItem({ it, focused, onOpen, onGone, setNote }) {
   // run, finished work. A menu on the screen is answered with its own choices.
   const canReply = !off && it.type !== 'permission' && (!isAsk(it) || (!it.qid && !it.old))
   const a = it.agent || {}
+  // The project, unless the agent is named as it is (a tab named after its folder): said once.
+  const project = a.project && String(a.project).trim().toLowerCase() !== String(a.title || '').trim().toLowerCase() ? a.project : null
   const what = it.text || (it.type === 'review' ? null : it.type === 'failed' ? t('The run failed.') : t('Waiting on you. Open it to answer.'))
   return (
     <article ref={ref} className={`ny-item t-${it.type} ${off ? 'off' : ''} ${focused ? 'focus' : ''}`} aria-label={`${t(ty.label)}: ${a.title}`}>
@@ -159,7 +161,7 @@ export function NeedsItem({ it, focused, onOpen, onGone, setNote }) {
       {it.about && <code className="ny-about">{it.about}</code>}
       <div className="ny-meta">
         <b className="ny-agent">{a.chief && <Icon name="helm" size={11} />}{a.title}</b>
-        {a.project && <span>{a.project}</span>}
+        {project && <span>{project}</span>}
         {a.branch && <span className="ny-branch"><Icon name="branch" size={10} />{a.branch}</span>}
         <span className="muted">{a.cloud ? t('{label} cloud', { label: a.cloud }) : a.kindLabel}{a.account ? ` · ${a.account}` : ''}</span>
       </div>

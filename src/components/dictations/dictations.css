@@ -21,6 +21,8 @@
 .dc-where { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 12px; }
 .dc-where b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dc-where .muted { flex: none; font-variant-numeric: tabular-nums; }
+/* Tidied by a model (Tidy what I say): said beside where it went, so it shows without opening it. */
+.dc-tidy-mark { flex: none; display: inline-flex; align-items: center; gap: 3px; color: var(--ink-3); font-size: 11px; }
 .dc-text { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.45; font-size: 13.5px; overflow-wrap: anywhere; }
 /* Open: all of it, what was heard, the recording, and what to do with it. */
 .dc-body { display: grid; gap: 8px; padding: 0 12px 12px 49px; }
@@ -41,6 +43,12 @@
 .dc-toast.error { background: var(--critical); color: #fff; }
 .app.narrow .dc-body { padding-left: 12px; }
 .app.narrow .dc-home { padding-bottom: 96px; }
+/* On a phone: whole targets, and a search box iOS doesn't zoom into. */
+.app.narrow .dc-search { height: 40px; font-size: 16px; }
+.app.narrow .dc-view :is(.dc-body .btn, .dc-said, .dc-heard, .pane-head .btn) { min-height: 40px; }
+.app.narrow .dc-view :is(.dc-said, .dc-heard) { display: inline-flex; align-items: center; }
+.app.narrow .dc-where { flex-wrap: wrap; row-gap: 0; }
+.app.narrow .dc-where b { white-space: normal; overflow-wrap: anywhere; }
 
 /* The sidebar: a day's heading, then its dictations, each with its icon. */
 .rd-day { margin: 6px 0 2px 25px; font: 600 10.5px var(--font); letter-spacing: .05em; text-transform: uppercase; color: var(--ink-3); }
