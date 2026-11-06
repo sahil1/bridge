@@ -225,7 +225,8 @@ try {
   ok(!!stopped, 'quiet much longer, it stops by itself', stopped && stopped.status)
 
   // ---------- Saved as it ends ----------
-  await api('/settings', { meetings: { autoSave: true } }, 'PATCH')
+  // On unless turned off: nothing in the settings says so.
+  ok((await api('/settings')).user?.meetings?.autoSave === undefined, '(saving every meeting by itself is left as it comes)')
   const S = await api('/meetings', { title: 'Vendor call', call: false })
   await send(S.id, Buffer.concat([pcm(2, true), pcm(1)]))
   await api(`/meetings/${S.id}/stop`, {})

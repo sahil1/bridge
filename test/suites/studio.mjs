@@ -253,7 +253,8 @@ try {
   // A link: added from the link bar to what's picked (example.com made https://example.com), shown
   // on its button, and taken back with Undo, put back with Redo.
   ok(!!(await until(async () => !(await btn('Undo').isDisabled()) && await btn('Redo').isDisabled(), 3000, 100)), 'Undo is there once something is done; Redo is not, until something is undone')
-  await btn('Insert link').click()
+  // Clicked again until the link bar shows (WebKit can take a click while the toolbar redraws).
+  await until(async () => { if (!(await p.locator('.sd-linkbar input').count())) await btn('Insert link').click(); return p.locator('.sd-linkbar input').waitFor({ timeout: 1500 }).then(() => true, () => false) }, 10000, 300)
   await p.locator('.sd-linkbar input').fill('example.com')
   await p.locator('.sd-linkbar input').press('Enter')
   const link = docText.locator('a[href="https://example.com"]', { hasText: 'Toggle me' })

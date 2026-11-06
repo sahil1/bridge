@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import Icon from '../Icon.jsx'
 import { api, settingsChanged } from '../../api.js'
 import { SaveNote } from './General.jsx'
+import { useBusy } from '../../busy.js'
 
 // Settings › Config file: your config.json as text, checked before it's saved, plus the full
 // effective settings (defaults merged with yours) and the defaults, for reference.
@@ -11,6 +12,8 @@ export default function ConfigFile() {
   const [note, setNote] = useState(null)
   const [view, setView] = useState(null) // 'effective' | 'defaults'
   useEffect(() => { api('/settings').then((r) => { setS(r); setText(r.raw) }).catch((e) => setNote({ error: e.message })) }, [])
+  // Changed and not saved: the desktop app doesn't update by itself meanwhile (busy.js).
+  useBusy('file', !!s && text !== s.raw)
   if (!s) return <div className="skeleton-rows"><div /><div /><div /></div>
 
   let parseError = null
