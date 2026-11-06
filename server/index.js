@@ -72,6 +72,8 @@ import * as calls from './calls.js'
 import * as callEvent from './callevent.js'
 import * as perf from './perf.js'
 import * as studio from './studio.js'
+import * as signing from './signing.js'
+import * as doctext from './doctext.js'
 import { terminals, openAttach, openCommand } from './terminal.js'
 import { mcpRoutes } from './mcp.js'
 import * as notify from './notify.js'
@@ -340,7 +342,7 @@ const rootOf = async (pane) => {
 // ---------- Beta features ----------
 // Still being finished, so hidden until turned on in Settings › About & Updates › Beta Features
 // (trials: { studio: true } in the config; src/trials.js). Their routes answer only then.
-const TRIALS = ['studio', 'home', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights']
+const TRIALS = ['studio', 'home', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights', 'signature-assist']
 const trialOn = (id) => cfg.trials?.[id] === true
 const trialOff = (id, label) => (req, res, next) => (trialOn(id) ? next() : res.status(404).json({ error: `${label} is a beta feature. Turn it on in Settings › About & Updates › Beta Features.`, trial: id }))
 
@@ -388,6 +390,14 @@ app.post('/api/studio/ask', wrap(async (req) => {
   await studio.noteAsk(root, q.path, adapter(kind).label)
   return { ...out, name: adapter(kind).label }
 }))
+// Signature Assist (signing.js): a PDF explained by the model meeting notes use unless you pick
+// another, then signed in a copy in _signed beside it. A scan is read on a Mac (doctext.js).
+signing.setHelpers({
+  reply: (id, msgs, o) => chatModels.reply(id, msgs, o), pickModel: () => (cfg.meetings?.model ? Promise.resolve(cfg.meetings.model) : pickMeetingModel()),
+  describe: (id) => chatModels.describe(id), via: async (id) => (await chatModels.models().catch(() => [])).find((m) => m.id === id)?.via || null,
+  contextOf: (id) => chatModels.contextOf(id), scanText: doctext.ocrBin() ? (file) => doctext.textOf(file, 200_000) : null,
+})
+signing.routes(app, { wrap, rootOf, sq, trialOff })
 app.get('/api/agents/:pane/files', wrap(async (req) => files.listDir(await rootOf(req.params.pane), String(req.query.path || ''), { showHidden: req.query.hidden === '1' })))
 app.get('/api/agents/:pane/file', wrap(async (req) => files.readFile(await rootOf(req.params.pane), String(req.query.path || ''))))
 app.put('/api/agents/:pane/file', async (req, res) => {
