@@ -13,6 +13,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import * as meetings from './meetings.js'
 import * as memory from './meetmemory.js'
+import { notPerson } from './notpeople.js'
 
 let cfg = {}
 export const configure = (c) => { cfg = c || {} }
@@ -305,7 +306,8 @@ export function ownDomains(all) {
   for (const [d, n] of seen) if (n >= 3 && n / withAny >= 0.4) out.add(d)
   return out
 }
-const others = (people) => { const me = String(cfg.name || '').trim(); return [...new Set([].concat(people || []).map(String).filter(Boolean))].filter((p) => !me || !meetings.sameName(p, me)) }
+// The people besides you: not a room, a list or a mailbox (notpeople.js), so noreply@ isn't a customer.
+const others = (people) => { const me = String(cfg.name || '').trim(); return [...new Set([].concat(people || []).map(String).filter(Boolean))].filter((p) => (!me || !meetings.sameName(p, me)) && !notPerson(p)) }
 function samePeople(a, b) {
   const x = others(a), y = others(b)
   if (!x.length || !y.length) return false

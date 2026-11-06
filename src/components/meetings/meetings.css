@@ -815,9 +815,10 @@ button.mt-from-chip:hover { color: var(--ink); border-color: color-mix(in srgb, 
 .mt-talk .c4 { background: var(--series-5); }
 .mt-talk .c5 { background: var(--series-7); }
 
-/* ============ Insights and People (insights.jsx, a beta feature) ============
-   Usage's tiles, cards and bars (styles.css .us-*), with what each number is based on under it. */
-.mt-home:has(> .mi:not(.mi-people)) { max-width: 1120px; }
+/* ============ Insights and People (insights.jsx, people.jsx, a beta feature) ============
+   Usage's tiles, cards, bars and heatmap (styles.css .us-*, .hm), with what each number is based on
+   under it. Recurring is the first series color, one-off the second, as the legend says. */
+.mt-home:has(> .mi) { max-width: 1120px; }
 .mi { display: grid; gap: 12px; align-content: start; min-width: 0; }
 .mi-lede, .mi-why, .mi-basis, .mi-none { margin: 0; }
 .mi-basis { display: flex; gap: 6px; align-items: baseline; }
@@ -825,19 +826,40 @@ button.mt-from-chip:hover { color: var(--ink); border-color: color-mix(in srgb, 
 .mi-bar { justify-content: flex-start; }
 .mi-kinds button .muted { font-variant-numeric: tabular-nums; }
 .mi .us-grid { grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); }
-.mi-tile { cursor: default; }
+.mi-tile { cursor: default; position: relative; }
+.mi-tile .us-tile-val { font-size: 21px; }
+.mi-tile .us-tile-sub { white-space: normal; line-height: 1.35; }
+.mi-tile .us-tile-sub .up, .mi-tile .us-tile-sub .down, .mi-sig-trend .up, .mi-sig-trend .down { color: var(--ink-2); }
+/* A tile's weeks, small columns in its top right corner, this week's in the series color. */
+.mi-tile.has-spark .us-tile-label { padding-right: 52px; }
+.mi-spark { position: absolute; top: 11px; right: 12px; width: 44px; height: 16px; display: flex; align-items: flex-end; gap: 1px; }
+.mi-spark i { flex: 1; min-width: 0; background: var(--hm-1); border-radius: 1px; }
+.mi-spark i:last-child { background: var(--series-1); }
+/* Something that shows after more meetings: what it will be, in place of it. */
+.mi-soon-bar { margin: 0; display: flex; gap: 8px; align-items: baseline; padding: 8px 12px; border-radius: 10px; background: var(--pane-2); color: var(--ink-2); }
+.mi-soon-bar svg { flex: none; position: relative; top: 2px; }
+.mi-soon { margin: 2px 0; padding: 16px 14px; border: 1px dashed var(--line-2); border-radius: 10px; text-align: center; }
 /* By week: what the week under the pointer came to (this week's, until then) over the columns; a
-   line at the top and the middle with what it's worth at the right; the dates under them. */
+   line at the top and the middle with what it's worth at the right, the average week dashed; the
+   dates under them. This week, not over yet, is fainter. */
 .mi-weeks { display: grid; gap: 4px; min-width: 0; }
 .mi-wread { margin: 0; color: var(--ink-2); font-variant-numeric: tabular-nums; min-height: 1.4em; }
-.mi-plot { position: relative; display: flex; align-items: flex-end; gap: 3px; height: 120px; padding-right: 40px; }
+.mi-plot { position: relative; display: flex; align-items: flex-end; gap: 3px; height: 150px; padding-right: 40px; }
 .mi-gl { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--line-2); pointer-events: none; }
 .mi-gl i { position: absolute; right: 0; top: -7px; font: 10px var(--font); font-style: normal; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.mi-avg { position: absolute; left: 0; right: 40px; z-index: 1; border-top: 1.5px dashed color-mix(in srgb, var(--ink) 45%, transparent); pointer-events: none; }
+.mi-avg i { position: absolute; left: 0; top: -17px; padding: 0 5px; border-radius: 4px; background: var(--pane); font: 10.5px var(--font); font-style: normal; color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .mi-wcol { position: relative; flex: 1; min-width: 0; height: 100%; display: flex; align-items: flex-end; }
 .mi-wbar { display: block; width: 100%; background: var(--hm-2); border-radius: 3px 3px 0 0; }
 .mi-wcol.now .mi-wbar { background: var(--series-1); }
 .mi-wcol.hl .mi-wbar { background: var(--hm-4); }
-.mi-wcol.hl .mi-stack { opacity: .8; }
+.mi-wbar.split, .mi-wcol.now .mi-wbar.split, .mi-wcol.hl .mi-wbar.split { display: flex; flex-direction: column-reverse; gap: 1px; background: none; }
+.mi-wbar.split > * { flex-basis: 0; min-height: 0; }
+.mi-wbar.split b { background: var(--series-1); }
+.mi-wbar.split i { background: var(--series-2); }
+.mi-wbar.split > :last-child { border-radius: 3px 3px 0 0; }
+.mi-wcol.now .mi-wbar.split, .mi-wcol.now .mi-stack { opacity: .55; }
+.mi-wcol.hl .mi-wbar.split, .mi-wcol.hl .mi-stack { opacity: .75; }
 .mi-wdates { display: flex; gap: 3px; padding-right: 40px; }
 .mi-wdates span { flex: 1; min-width: 0; font-size: 10px; color: var(--ink-3); white-space: nowrap; overflow: visible; text-align: center; height: 13px; }
 .mi-wdates span:empty { visibility: hidden; }
@@ -848,46 +870,119 @@ button.mt-from-chip:hover { color: var(--ink); border-color: color-mix(in srgb, 
 .mi-key { display: inline-flex; align-items: center; gap: 5px; color: var(--ink-2); }
 .mi-key i { width: 9px; height: 9px; border-radius: 2px; background: var(--hm-1); }
 .mi-key i.mine { background: var(--series-1); }
-/* The kinds' and people's rows, with what each number is under a line of its own. */
+.mi-key i.one { background: var(--series-2); }
+/* When you meet: Usage's heatmap colors, a weekday a row and an hour a column. */
+.mi-heat svg { max-width: 100%; }
+.mi-cell { fill: var(--hm-0); }
+.mi-cell.l1 { fill: var(--hm-1); } .mi-cell.l2 { fill: var(--hm-2); } .mi-cell.l3 { fill: var(--hm-3); } .mi-cell.l4 { fill: var(--hm-4); }
+.mi-cell.hl { stroke: var(--ink); stroke-width: 1.5; }
+/* Where the time goes: three parts side by side, one under another when there's no room. */
+.mi .mi-where-grid { margin-top: 0; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 14px 22px; }
+.mi-where-grid .ue-part h5 { margin-bottom: 8px; }
+.mi-cols { height: 130px; }
+.mi-split { display: flex; gap: 2px; height: 10px; border-radius: 5px; overflow: hidden; margin: 2px 0 6px; }
+.mi-split > * { flex-basis: 0; min-width: 4px; }
+.mi-split b { background: var(--series-1); }
+.mi-split i { background: var(--series-2); }
+.mi-split-keys { display: flex; flex-wrap: wrap; gap: 3px 14px; color: var(--ink-2); }
+.mi-split-keys > span { display: inline-flex; align-items: center; gap: 5px; }
+.mi-split-keys i { width: 8px; height: 8px; border-radius: 2px; background: var(--series-2); }
+.mi-split-keys i.rec { background: var(--series-1); }
+.mi-split-keys b { color: var(--ink); font-weight: 650; }
+.mi-series { margin-top: 8px; }
+.mi-series .ue-name svg { position: relative; top: 1px; }
+.mi-who .ue-name { align-items: center; }
+.mi-who .ue-nm, .mi-series .ue-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.mi-who .ue-name, .mi-series .ue-name { flex-wrap: nowrap; }
+/* The kinds' rows, with what each number is under a line of its own. */
 .mi .us-row, .mi-colhead { grid-template-columns: minmax(90px, 1.6fr) minmax(40px, 1fr) 72px 72px; }
 .mi-colhead { display: grid; gap: 10px; padding: 0 6px 2px; font-size: 10.5px; color: var(--ink-3); }
 .mi-colhead span { text-align: right; white-space: nowrap; }
-.mi-signals { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(90px, .6fr) minmax(180px, 1.6fr); font-size: 12.5px; }
-.mi-signal { display: contents; }
-.mi-signal > * { padding: 7px 8px 7px 0; border-top: 1px solid var(--line); }
-.mi-signal > b { font-weight: 650; }
-.mi-signal > b i { font-weight: 400; color: var(--ink-2); }
+/* Signals: a tile each, what it's worked out from under it. Attention isn't shown, so its tile is
+   only an outline. */
+.mi-signals { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 290px), 1fr)); gap: 8px; }
+.mi-signal { display: grid; gap: 4px; align-content: start; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--pane-2); min-width: 0; }
+.mi-signal.off { background: none; border-style: dashed; }
+.mi-sig-name { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--ink-2); }
+.mi-sig-name svg { flex: none; color: var(--ink-3); }
+.mi-sig-val { font-size: 19px; font-weight: 650; color: var(--ink); }
+.mi-sig-val i { font-size: 15px; font-weight: 500; color: var(--ink-2); }
+.mi-sig-bar { height: 5px; border-radius: 3px; overflow: hidden; background: var(--pane-3); }
+.mi-sig-bar span { display: block; height: 100%; border-radius: 3px; background: var(--series-1); }
+.mi-sig-trend { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.mi-sig-how { line-height: 1.4; }
 .mi-cal { display: grid; gap: 6px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--pane-2); }
 .mi-cal > p { margin: 0; display: flex; gap: 6px; align-items: baseline; }
-.mi-map { width: 100%; max-width: 420px; height: auto; justify-self: center; overflow: hidden; }
-.mi-map-line { stroke: var(--line-2); stroke-width: 1.5; }
+/* A person in their own color: a tint of it behind their initial, in plain ink. */
+.mi-av { display: inline-grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 8px; background: color-mix(in srgb, var(--av, var(--ink-3)) 24%, var(--pane)); color: var(--ink); font: 600 12.5px var(--font); }
+.mi-av.big { width: 44px; height: 44px; border-radius: 12px; font-size: 17px; }
+.ue-row .mi-av, .mi-merge-pick .mi-av { width: 20px; height: 20px; border-radius: 6px; font-size: 10.5px; }
+/* People's map: you in the middle, lines to each person and between two who meet each other. */
+.mi-map-wrap { min-width: 0; display: grid; justify-items: center; }
+.mi-map { display: block; max-width: 100%; overflow: visible; }
+.mi-map-line { stroke: var(--line-2); transition: opacity .15s; }
+.mi-map-link { fill: none; stroke: var(--ink-3); opacity: .3; transition: opacity .15s; }
+.mi-map-link.lit { opacity: .9; stroke: var(--ink-2); }
+.mi-map-link.dim { opacity: .05; }
+.mi-map-line.dim { opacity: .35; }
 .mi-map-you { fill: var(--ink); }
 .mi-map-youtext { fill: var(--pane); font: 650 11px var(--font); }
-.mi-map-node { cursor: pointer; }
-.mi-map-node circle { fill: var(--series-1); stroke: var(--pane); stroke-width: 2; }
-.mi-map-node text { fill: var(--ink); font: 11px var(--font); }
-.mi-map-node:hover circle { fill: var(--hm-4); }
+.mi-map-node { cursor: pointer; transition: opacity .15s; }
+.mi-map-node circle { stroke: var(--pane); stroke-width: 2; }
+.mi-map-node text { fill: var(--ink); font: 11px var(--font); paint-order: stroke; stroke: var(--pane); stroke-width: 3px; }
+.mi-map-node:hover circle { stroke: var(--ink); }
+.mi-map-node.dim { opacity: .35; }
+/* Find someone: a box that lists as you type, over what's under it. */
+.mi-find { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+.mi-picker { position: relative; flex: 1 1 260px; min-width: 0; max-width: 460px; }
+.mi-picker-box { display: flex; align-items: center; gap: 7px; height: 34px; padding: 0 10px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--pane); color: var(--ink-3); }
+.mi-picker-box:focus-within { border-color: color-mix(in srgb, var(--accent) 50%, var(--line-2)); }
+.mi-picker-box input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: none; color: var(--ink); font: 13px var(--font); }
+.mi-picker-pop { position: absolute; z-index: 20; left: 0; top: calc(100% + 4px); width: max(100%, 280px); max-width: calc(100vw - 32px); max-height: 340px; overflow: auto; display: grid; gap: 1px; padding: 4px; border-radius: 12px; border: 1px solid var(--line-2); background: var(--pane); box-shadow: var(--shadow-lg); }
+.mi-picker-head { padding: 6px 8px 2px; font-size: 11px; font-weight: 600; color: var(--ink-3); }
+.mi-picker-opt { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 4px 8px; border-radius: 8px; color: var(--ink); text-align: left; font-size: 13px; }
+.mi-picker-opt.on { background: var(--pane-2); }
+.mi-picker-opt .mi-av { width: 22px; height: 22px; border-radius: 6px; font-size: 11px; }
+.mi-picker-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mi-picker-name mark { background: color-mix(in srgb, var(--accent) 22%, transparent); color: inherit; border-radius: 2px; }
+.mi-picker-opt > .muted { flex: none; }
+.mi-picker-none { margin: 6px 8px; }
+.mi-groups { display: grid; }
 .mi-plist, .mi-mlist { display: grid; gap: 2px; }
 .mi-prow, .mi-mrow { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border-radius: 9px; color: var(--ink); text-align: left; }
 .mi-prow:hover, .mi-mrow:hover, .mi-prow:focus-visible, .mi-mrow:focus-visible { background: var(--pane-2); outline: none; }
-.mi-av { display: inline-grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 8px; background: var(--pane-3); color: var(--ink-2); font: 600 12.5px var(--font); }
-.mi-av.big { width: 40px; height: 40px; border-radius: 11px; font-size: 16px; }
 .mi-ptext { display: grid; flex: 1; min-width: 0; }
 .mi-ptext b { font-weight: 550; overflow-wrap: anywhere; }
 .mi-ptext > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mi-pnum { flex: none; display: grid; justify-items: end; gap: 1px; color: var(--ink-2); font-size: 12px; text-align: right; }
+.mi-pnum { flex: none; display: grid; justify-items: end; gap: 1px; min-width: 84px; color: var(--ink-2); font-size: 12px; text-align: right; }
 .mi-pnum .muted { font-size: 11.5px; }
+/* A person's last six months, this one in the series color. */
+.mi-pspark { flex: none; display: flex; align-items: flex-end; gap: 2px; width: 38px; height: 20px; }
+.mi-pspark i { flex: 1; background: var(--hm-2); border-radius: 1px; }
+.mi-pspark i.none { background: var(--pane-3); }
+.mi-pspark i:last-child:not(.none) { background: var(--series-1); }
+.mi-badge { margin-left: 6px; padding: 1px 6px; border-radius: 999px; background: color-mix(in srgb, var(--series-3) 20%, transparent); color: var(--ink-2); font-size: 10.5px; font-weight: 600; vertical-align: 1px; white-space: nowrap; }
+.mi-badge.quiet { background: var(--pane-3); }
 .mi-back { justify-self: start; }
+.mi-person-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.mi-person-bar .mi-picker { max-width: 300px; }
 .mi-phead { display: flex; align-items: center; gap: 12px; }
-.mi-phead h3 { margin: 0; font-size: 18px; }
+.mi-phead h3 { margin: 0; font-size: 19px; }
 .mi-phead p { margin: 2px 0 0; }
+.mi-pseries { display: flex; align-items: center; gap: 5px; color: var(--ink-2); }
+.mi-months { height: 110px; }
 .mi-sec { display: grid; gap: 6px; }
 .mi-sec h4 { margin: 6px 0 0; font-size: 13px; font-weight: 600; }
 .mi-sec h4 .muted { font-weight: 500; margin-left: 4px; }
-.mi-sec-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding-right: 10px; }
+.us-card.mi-sec h4 { margin: 0; }
+.mi-sec-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .mi-all { justify-self: start; }
 .mi-sec > p { margin: 0; }
 .mi-topics { display: flex; flex-wrap: wrap; gap: 6px; }
+.mi-items-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 12px 22px; }
+.mi-items-part h5 { margin: 0 0 6px; font-size: 12px; font-weight: 600; color: var(--ink-2); }
+.mi-items-part h5 .muted { font-weight: 500; margin-left: 3px; }
+.mi-items-part > p { margin: 0; }
 .mi-items, .mi-written { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .mi-items li { display: grid; gap: 2px; font-size: 13px; padding: 6px 0; border-top: 1px solid var(--line); }
 .mi-items li:first-child { border-top: 0; padding-top: 0; }
@@ -897,17 +992,70 @@ button.mt-from-chip:hover { color: var(--ink); border-color: color-mix(in srgb, 
 .mi-written li { display: flex; align-items: center; gap: 10px; font-size: 13px; }
 .mi-written li span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .mi-merge { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.mi-merge select { min-width: 0; max-width: 100%; height: 30px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--pane); color: var(--ink); font: 13px var(--font); }
-/* On a phone: the cards one under another, the signals as rows of their own, whole targets. */
+.mi-merge-pick { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font-size: 13px; }
+/* Groups that fold (tools.jsx Fold): a person's meetings, People, meeting memory. */
+.mt-fold { border-top: 1px solid var(--line); }
+.mt-fold:first-child { border-top: 0; }
+.mt-fold-head { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 6px 6px; border-radius: 8px; color: var(--ink); text-align: left; font: 600 13px var(--font); }
+.mt-fold-head:hover, .mt-fold-head:focus-visible { background: var(--pane-2); outline: none; }
+.mt-fold-chev { flex: none; color: var(--ink-3); transition: transform .15s; }
+.mt-fold.open .mt-fold-chev { transform: rotate(90deg); }
+.mt-fold-name { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mt-fold-n { flex: none; padding: 1px 7px; border-radius: 999px; background: var(--pane-3); color: var(--ink-2); font-size: 11px; font-weight: 600; }
+.mt-fold-extra { flex: none; margin-left: auto; font-weight: 400; }
+.mt-fold-body { padding: 0 0 8px; }
+/* Meeting memory, grouped: a name on a line with how it's heard and its note, its meetings under it. */
+.mt-mem-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.mt-mem-tools .mt-search { flex: 1 1 220px; min-width: 0; }
+.mt-mem-only { margin: 0; }
+.mt-mem-list { gap: 0; }
+.mt-mem-group { display: grid; gap: 1px; }
+.mt-mem-group .mt-mem-row { padding-left: 22px; }
+.mt-mem-item { padding: 5px 4px 5px 22px; border-radius: 8px; }
+.mt-mem-item:hover { background: var(--pane-2); }
+.mt-mem-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.mt-mem-what { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; font-size: 13px; }
+.mt-mem-what b { font-weight: 600; overflow-wrap: anywhere; }
+.mt-mem-heard { color: var(--ink-3); }
+.mt-mem-heard i { white-space: nowrap; margin-left: 4px; padding: 0 6px; border-radius: 6px; background: var(--pane-3); color: var(--ink-2); font-style: normal; }
+.mt-mem-note { overflow-wrap: anywhere; }
+.mt-mem-in { flex: none; white-space: nowrap; color: var(--ink-2); }
+.mt-mem-meetings { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 0 2px; }
+.mt-mem-meeting { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; min-width: 0; padding: 3px 8px; border-radius: 7px; border: 1px solid var(--line); color: var(--ink-2); text-align: left; }
+.mt-mem-meeting > span:first-of-type { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mt-mem-meeting > .muted { flex: none; }
+.mt-mem-meeting:hover, .mt-mem-meeting:focus-visible { background: var(--pane-2); color: var(--ink); outline: none; }
+.mt-mem-latest { justify-self: start; margin: 0 0 4px 22px; }
+.mt-mem-more { justify-self: start; margin-left: 16px; }
+/* Meeting Insights turned itself on: said once, over the list. */
+.mt-insights-on { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--series-1) 35%, var(--line)); background: color-mix(in srgb, var(--series-1) 7%, var(--pane)); }
+.mt-insights-on > svg { flex: none; margin-top: 2px; color: var(--series-1); }
+.mt-insights-on p { flex: 1; min-width: 0; margin: 0; line-height: 1.45; }
+.mt-insights-acts { flex: none; display: flex; align-items: center; gap: 6px; }
+/* On a phone: the cards one under another, whole targets, fields that iOS doesn't zoom into. */
 .app.narrow .mi .us-grid { grid-template-columns: minmax(0, 1fr); }
 .app.narrow .mi .us-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .app.narrow .mi .us-tile-sub { white-space: normal; }
-.app.narrow .mi-signals { grid-template-columns: minmax(0, 1fr) auto; }
-.app.narrow .mi-signal > span.muted { grid-column: 1 / -1; padding-top: 0; border-top: 0; }
 .app.narrow .mi .seg.small-seg { display: flex; width: 100%; }
 .app.narrow .mi .seg.small-seg button { flex: 1 1 0; min-width: 0; justify-content: center; height: 40px; padding: 0 4px; }
-.app.narrow .mi :is(.mi-prow, .mi-mrow, .us-row) { min-height: 44px; }
+.app.narrow .mi :is(.mi-prow, .mi-mrow, .us-row, .ue-row, .mt-fold-head, .mi-picker-opt) { min-height: 44px; }
 .app.narrow .mi :is(.mi-from, .mi-all) { min-height: 40px; }
 .app.narrow .mi .us-row, .app.narrow .mi-colhead { grid-template-columns: minmax(80px, 1.2fr) minmax(30px, 1fr) 64px 64px; }
-.app.narrow .mi :is(.mi-merge select, .mi-back) { min-height: 40px; font-size: 16px; }
+.app.narrow .mi :is(.mi-back, .mi-merge .btn, .mi-merge .ghost-btn) { min-height: 40px; font-size: 16px; }
+.app.narrow .mi-picker { flex-basis: 100%; max-width: none; }
+.app.narrow .mi-person-bar .mi-picker { max-width: none; }
+.app.narrow .mi-picker-box { height: 44px; }
+.app.narrow .mi-picker-box input { font-size: 16px; }
 .app.narrow .mi :is(.us-tile-val, .us-row-name, .mi-ptext > span) { white-space: normal; overflow-wrap: anywhere; }
+.app.narrow .mi-pspark { display: none; }
+.app.narrow .mi-pnum { min-width: 0; }
+.app.narrow .mt-insights-on { flex-wrap: wrap; }
+.app.narrow .mt-insights-acts { width: 100%; justify-content: flex-end; }
+.app.narrow .mt-insights-acts :is(.btn, .ghost-btn) { min-height: 40px; min-width: 40px; justify-content: center; font-size: 13px; }
+@media (max-width: 899px) {
+  .mt-dialog :is(.mt-fold-head, .mt-mem-meeting, .mt-mem-in, .mt-mem-only button, .mt-mem-tools .seg button) { min-height: 40px; }
+  .mt-mem-tools .seg { display: flex; width: 100%; }
+  .mt-mem-tools .seg button { flex: 1 1 0; justify-content: center; }
+  .mt-mem-item, .mt-mem-group .mt-mem-row { padding-left: 4px; }
+  .mt-mem-latest { margin-left: 4px; }
+}

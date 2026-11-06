@@ -1303,7 +1303,12 @@ app.post('/api/speech/install', wrap(async (req) => {
   return { openId: await setupTab('Install whisper.cpp', s.local.installCommand) }
 }))
 // The list without each meeting's pictures and files (counts only): they can be long.
-app.get('/api/meetings', wrap(() => ({ meetings: meetings.list().map(({ captures, links, ...m }) => ({ ...m, pictures: captures?.length || 0, files: links?.length || 0 })), folder: meetings.folder(), kinds: Object.entries(meetings.KINDS).map(([id, k]) => ({ id, label: k.label })) })))
+app.get('/api/meetings', wrap(() => {
+  const list = meetings.list()
+  insightsByItself(list)
+  const auto = trialOn('meeting-insights') && meetInsights.autoOn()
+  return { meetings: list.map(({ captures, links, ...m }) => ({ ...m, pictures: captures?.length || 0, files: links?.length || 0 })), folder: meetings.folder(), kinds: Object.entries(meetings.KINDS).map(([id, k]) => ({ id, label: k.label })), ...(auto && !auto.said ? { insightsOn: { at: auto.at, meetings: auto.meetings } } : {}) }
+}))
 app.post('/api/meetings', wrap(async (req) => { prompt = null; const m = await meetings.start({ ...(req.body || {}), callApps: calls.now().calls.map((c) => c.app) }); counts.add('meetings.recorded'); return m }))
 // Several at once, from the list: delete, save as notes, write the summary again, archive, put in a
 // folder, or the action items of all of them to the chief in one go. A meeting still recording is
@@ -1350,6 +1355,23 @@ app.post('/api/meetings/voices/download', wrap(async () => { if (!(await voices.
 meetInsights.configure(cfg)
 meetInsights.setHelpers({ calendar: (from, to) => calendar.range(from, to) })
 app.use(['/api/meetings/insights', '/api/meetings/people'], trialOff('meeting-insights', 'Meeting Insights'))
+// On by itself once 5 meetings are recorded here and you haven't set it either way, asked as the
+// list of meetings is (so there's nothing more to read); Meetings says so once, with Turn off.
+let insightsSet = false // set by you, or on by itself already
+function insightsByItself(list) {
+  if (insightsSet) return
+  if (settings.readUser().trials?.['meeting-insights'] !== undefined || meetInsights.autoOn()) { insightsSet = true; return }
+  const n = meetInsights.ready(list)
+  if (!n) return
+  insightsSet = true
+  meetInsights.turnedOn(n)
+  afterChange(settings.patch({ trials: { 'meeting-insights': true } }))
+}
+app.post('/api/meetings/auto-insights', wrap((req) => {
+  meetInsights.said()
+  if (req.body?.off) afterChange(settings.patch({ trials: { 'meeting-insights': false } }))
+  return { ok: true, on: trialOn('meeting-insights') }
+}))
 app.get('/api/meetings/insights', wrap((req) => meetInsights.insights({ days: req.query.days === 'all' ? 'all' : Number(req.query.days) || 90, kind: String(req.query.kind || 'all') })))
 app.get('/api/meetings/people', wrap(() => meetInsights.list()))
 app.post('/api/meetings/people/merge', wrap((req) => meetInsights.mergePeople(String(req.body?.a || ''), String(req.body?.b || ''))))
@@ -1365,7 +1387,18 @@ app.post('/api/meetings/:id/keep', wrap((req) => meetings.keep(req.params.id)))
 // Make a deck from a meeting, in Studio's own folder, to open in Studio.
 app.post('/api/meetings/:id/deck', trialOff('studio', 'Studio'), wrap((req) => meetings.deck(req.params.id, { model: req.body?.model })))
 // Meeting memory (meetmemory.js): the names and terms in your meetings, yours to edit.
-app.get('/api/meetings/memory', wrap(() => ({ terms: meetMemory.list() })))
+// With the meetings each came up in (name, when, series), to group them and open one.
+app.get('/api/meetings/memory', wrap(() => {
+  const terms = meetMemory.list()
+  const ids = new Set(terms.flatMap((x) => x.meetings || []))
+  const all = meetings.list()
+  // A series: the same name three times or more, as Meeting Insights has it.
+  const key = (m) => meetWork.seriesOf(m.title) || meetWork.seriesOf(m.event?.title)
+  const n = new Map()
+  for (const m of all) { const k = key(m); if (k) n.set(k, (n.get(k) || 0) + 1) }
+  const seen = all.filter((m) => ids.has(m.id)).map((m) => [m.id, { title: m.title, startedAt: m.startedAt, series: n.get(key(m)) >= 3 ? key(m) : null }])
+  return { terms, meetings: Object.fromEntries(seen) }
+}))
 app.post('/api/meetings/memory', wrap((req) => meetMemory.add({ term: req.body?.term, heard: req.body?.heard, note: req.body?.note })))
 app.patch('/api/meetings/memory/:tid', wrap((req) => meetMemory.update(req.params.tid, req.body || {})))
 app.delete('/api/meetings/memory/:tid', wrap((req) => meetMemory.remove(req.params.tid)))
@@ -2206,6 +2239,7 @@ app.get('/api/config', (req, res) => res.json({
   alertSounds: cfg.alertSounds !== false, // the speaker in the top bar
   meetingKey: MEETING_KEYS.includes(cfg.meetings?.mentionKey) ? cfg.meetings.mentionKey : '@', // Settings › Meetings
   trials: Object.fromEntries(TRIALS.map((id) => [id, trialOn(id)])), // Settings › About & Updates › Beta Features
+  trialsAuto: trialOn('meeting-insights') && meetInsights.autoOn() ? { 'meeting-insights': meetInsights.autoOn().at } : {}, // the ones that turned themselves on, when
 }))
 // The speaker in the top bar: notifications (this computer's, a browser's, your phones') come with a
 // sound, or without one; they still come. Your other devices are told too, unless one of them is
