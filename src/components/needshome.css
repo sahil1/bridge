@@ -1,30 +1,103 @@
-/* Home (NeedsHome.jsx): what needs you across the top, then ready to look at beside coming up and
-   the Chief of Staff's tasks when there's room. Its needs-you cards are the inbox's (needsyou.css);
-   the rest are short rows in quiet lists, as Meetings' list and the Agent Map have them. */
+/* Home (NeedsHome.jsx): what you pinned and what needs you across the top, as cards; then ready to
+   look at beside coming up and the Chief of Staff's tasks when there's room. The cards are the
+   inbox's (needsyou.css); the rest are short rows in quiet lists, as Meetings' list and the Agent Map
+   have them. Everything on the page is in one column (hm-in), so nothing sits outside it however
+   wide the window is. */
 .hm, .ey { height: 100%; min-height: 0; overflow-y: auto; overscroll-behavior: contain; background: var(--pane); color: var(--ink); }
 .hm { container-type: inline-size; padding: 22px 28px 40px; }
 .hm.phone, .ey.phone { padding: 14px 12px 28px; }
-.hm > *, .ey > * { max-width: 1180px; margin-left: auto; margin-right: auto; }
-.hm-head, .ey-head { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 10px 16px; margin-bottom: 12px; }
+.hm-in { max-width: 1180px; min-width: 0; margin: 0 auto; }
+.hm-head, .ey-head { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 10px 16px; margin-bottom: 14px; }
 .hm-title { flex: 1 1 260px; min-width: 0; }
 .hm-title h2 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -.02em; }
 .hm-title p { margin: 3px 0 0; font-size: 13px; }
 .hm.phone .hm-title h2, .ey.phone .hm-title h2 { font-size: 19px; }
-.hm-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.hm-device { height: 28px; max-width: 220px; padding: 0 6px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--pane); color: var(--ink); font: 500 12.5px var(--font); }
-.hm-every { gap: 4px; }
-.hm-kinds { margin-bottom: 14px; flex-wrap: wrap; overflow: visible; }
-.hm-err, .hm-partial { margin: 0 0 10px; }
-.hm .ny-note { margin: 0 0 12px; }
-.hm-loading { margin-top: 8px; }
+.hm.phone .hm-title { flex-basis: 0; }
+.hm.phone .hm-sep { display: none; }
+.hm.phone .hm-where { display: block; }
+.hm-every { flex: none; gap: 4px; height: 28px; margin-top: 2px; }
+
+/* What to show and in what order: the kinds on the left, the order and the computer on the right. */
+.hm-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 16px; }
+.hm-kinds { flex: 1 1 auto; min-width: 0; flex-wrap: wrap; overflow: visible; }
+.hm-tools { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.hm-pick { position: relative; display: inline-flex; align-items: center; min-width: 0; }
+/* Drawn here rather than by the system (Safari doesn't move a select's words for its padding):
+   what it is on the left, a chevron on the right. */
+.hm-pick > .icon { position: absolute; left: 9px; color: var(--ink-3); pointer-events: none; }
+.hm-pick > .icon:last-child { left: auto; right: 8px; }
+.hm-pick select { appearance: none; -webkit-appearance: none; height: 28px; max-width: 220px; padding: 0 26px 0 28px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--pane); color: var(--ink); font: 500 12.5px var(--font); cursor: pointer; }
+.hm-pick select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.hm-pick select:hover { border-color: var(--ink-3); }
+
+/* Lines about the page itself (it couldn't load, a computer sends only part of it): in the column,
+   lined up with the rest, an icon saying what kind of line. The computer as its chip. */
+.hm-notices { display: grid; gap: 8px; margin-bottom: 16px; }
+.hm-notice { display: flex; align-items: flex-start; gap: 9px; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--pane-2); color: var(--ink-2); font-size: 12.5px; line-height: 1.5; }
+.hm-notice > .icon { flex: none; margin-top: 2px; color: var(--ink-3); }
+.hm-notice.error { border-color: color-mix(in srgb, var(--critical) 35%, transparent); background: color-mix(in srgb, var(--critical) 6%, var(--pane)); color: var(--ink); }
+.hm-notice.error > .icon { color: var(--critical); }
+.hm-notice-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.hm-notice-text .ny-device { display: inline-flex; vertical-align: 1px; max-width: 100%; margin-right: 6px; font-size: 11.5px; }
+.hm-notice-text .link-btn { margin-left: 8px; }
+
+/* While it loads: the shape of what's coming, not a blank. */
+.hm-loading { display: grid; gap: 12px; }
+.hm-skel { border-radius: 11px; background: linear-gradient(90deg, var(--pane-2), var(--pane-3), var(--pane-2)); background-size: 200% 100%; animation: shimmer 1.2s infinite; }
+.hm-skel-h { width: 180px; height: 16px; border-radius: 6px; }
+.hm-skel-card { height: 140px; }
+.hm-skel-list { height: 180px; margin-top: 14px; }
+@media (prefers-reduced-motion: reduce) { .hm-skel { animation: none; } }
 
 /* A section: its name, how many, and what it's for, on one quiet line. */
 .hm-sec { min-width: 0; }
 .hm-sec h3 { display: flex; align-items: center; gap: 8px; min-height: 26px; margin: 0 2px 8px; font-size: 14px; font-weight: 650; }
-.hm-hint { font-weight: 450; font-size: 12.5px; color: var(--ink-3); }
-.hm-needs { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 400px), 1fr)); gap: 10px; align-items: start; }
-.hm-needs .ny-item { margin: 0; }
-.hm-needs .ny-item.hm-task { background: color-mix(in srgb, var(--needs) 4%, var(--pane-2)); border-color: color-mix(in srgb, var(--needs) 28%, var(--line)); }
+.hm-sec h3 > .icon { color: var(--accent); }
+.hm-hint { min-width: 0; font-weight: 450; font-size: 12.5px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hm-pinned { margin-bottom: 26px; }
+/* By computer or by kind: each group under a quiet heading of its own. */
+.hm-group + .hm-group { margin-top: 14px; }
+.hm-ghead { display: flex; align-items: center; gap: 6px; min-width: 0; margin: 0 4px 6px; font-size: 12px; font-weight: 650; color: var(--ink-2); }
+.hm-ghead > .icon { flex: none; color: var(--ink-3); }
+.hm-ghead-off { font-weight: 500; color: var(--ink-3); }
+/* Under its computer's heading, a card or a row doesn't say the computer again. */
+.hm.by-device .hm-group :is(.ny-device, .hm-dev) { display: none; }
+
+/* Cards: what you pinned, and what waits on you. In a row they're the same height: the top line at
+   the top, the words cut at three lines and the line under them at one (a task's title at two),
+   the buttons along the bottom, Open always last. */
+.hm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr)); gap: 10px; }
+.hm-grid > .ny-item { display: flex; flex-direction: column; margin: 0; min-width: 0; }
+.hm-grid .ny-top { min-height: 22px; }
+.hm-grid .ny-age { flex: none; white-space: nowrap; }
+.hm-grid .ny-kind { white-space: nowrap; }
+.hm-grid .ny-meta { flex-wrap: nowrap; overflow: hidden; }
+.hm-grid .ny-meta > * { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hm-grid .ny-meta > .icon { flex: none; }
+.hm-grid .ny-meta .hm-clamp { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.hm-grid .ny-acts { margin-top: auto; padding-top: 10px; min-width: 0; }
+.hm-grid .ny-acts > :is(.ghost-btn, .btn) { flex: none; }
+/* A button with no box of its own lines its icon up with the words above it, and Open its end with
+   the card's other edge. */
+.hm-grid .ny-acts > .ghost-btn:first-child { margin-left: -9px; }
+.hm-grid .ny-acts > .ghost-btn:last-child { margin-right: -9px; }
+.hm-grid .hm-task .ny-meta { flex-wrap: nowrap; align-items: flex-start; }
+.hm-grid .hm-task .ny-meta .hm-clamp { flex: 1 1 auto; }
+.hm-task .ny-meta > .icon { margin-top: 3px; }
+.hm-grid .ny-item.hm-task { background: color-mix(in srgb, var(--needs) 4%, var(--pane-2)); border-color: color-mix(in srgb, var(--needs) 28%, var(--line)); }
+.hm-card .ny-top > .icon { flex: none; color: var(--ink-3); }
+.hm-card .ny-text.said { font-weight: 450; }
+.hm-card .ny-meta .hm-clamp { color: var(--ink-2); }
+/* Pin: on every card's top line, quiet until it's pinned; tilted, or upright and filled while
+   pinned, as the Status menu's pins are. */
+.hm-pin { flex: none; display: inline-grid; place-items: center; width: 24px; height: 24px; margin: -3px -5px -3px -2px; border-radius: 7px; color: var(--ink-3); }
+.hm-pin:hover { background: var(--pane-3); color: var(--ink); }
+.hm-pin .icon { transform: rotate(45deg); transition: transform .12s; }
+.hm-pin.on { color: var(--accent); }
+.hm-pin.on .icon { transform: none; fill: currentColor; }
+@media (prefers-reduced-motion: reduce) { .hm-pin .icon { transition: none; } }
+.hm-pin:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.hm-quick .hm-pin, .hm-item-acts .hm-pin { width: 26px; height: 26px; margin: 0; }
 .hm-cols { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 26px 32px; align-items: start; margin-top: 26px; }
 .hm-side { display: grid; gap: 26px; min-width: 0; align-content: start; }
 @container (max-width: 860px) { .hm-cols { grid-template-columns: minmax(0, 1fr); } }
@@ -34,6 +107,9 @@
 .hm-none p { margin: 0 0 2px; font-size: 13px; color: var(--ink-2); }
 .hm-none small { font-size: 12px; }
 .hm-ico { flex: none; display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 7px; background: var(--pane-3); color: var(--ink-2); }
+
+/* What you did, said for a few seconds at the foot of the window: nothing above it moves. */
+.hm-toast { position: sticky; bottom: 14px; z-index: 5; width: fit-content; max-width: min(560px, 100%); margin: 18px auto 0; padding: 9px 14px; border-radius: 10px; background: var(--ink); color: var(--pane); font-size: 12.5px; line-height: 1.45; box-shadow: 0 8px 24px rgb(0 0 0 / .18); overflow-wrap: anywhere; }
 
 /* A list of short rows: the thing, a line or two of it, and where and when on the right. */
 .hm-list { list-style: none; margin: 0; padding: 3px; display: grid; gap: 1px; border-radius: 12px; border: 1px solid var(--line); background: var(--pane); min-width: 0; }
@@ -66,10 +142,13 @@
 .hm-item-more { display: grid; gap: 8px; padding: 0 10px 10px 38px; }
 .hm-full { margin: 0; font-size: 13px; line-height: 1.55; color: var(--ink); white-space: pre-line; overflow-wrap: anywhere; }
 .hm-item-acts { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; }
+.hm-item-acts > .ghost-btn:first-child { margin-left: -9px; }
+/* Open stays at the end, on a line of its own too when the row is narrow. */
+.hm-item-acts > :last-child { margin-left: auto; }
 .hm-item-more .ny-reply { margin-top: 0; }
 
 /* Show all, and what's folded away (older than a day, tasks with no day). */
-.hm-more-btn { display: block; margin: 6px 0 0; padding: 4px 10px; border-radius: 8px; font: 500 12.5px var(--font); color: var(--accent); }
+.hm-more-btn { display: inline-flex; align-items: center; gap: 6px; margin: 6px 0 0; padding: 5px 10px 5px 8px; border-radius: 8px; font: 500 12.5px var(--font); color: var(--accent); }
 .hm-more-btn:hover { background: var(--accent-soft); }
 .hm-fold-box { margin-top: 8px; display: grid; gap: 6px; }
 .hm-fold-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
@@ -99,6 +178,7 @@
 .hm-links a { display: inline-flex; align-items: center; gap: 4px; color: var(--accent); text-decoration: none; }
 .hm-links a:hover { text-decoration: underline; }
 .hm-trow .hm-item-l1 b { white-space: normal; overflow-wrap: anywhere; font-weight: 550; }
+.hm-trow-pin { position: absolute; top: 2px; right: 0; }
 
 /* A phone: no pointer to hover with, so a row opens to what you can do; titles wrap rather than
    cut off; every control is a whole 40 px target and a field 16 px (iOS zooms into a smaller one). */
@@ -112,10 +192,21 @@
 .hm.phone .hm-ev-acts { flex: 1 1 100%; padding-left: 64px; }
 .hm.phone :is(.btn.small, .ghost-btn, .fchip, .link-btn, .hm-fold, .hm-more-btn), .ey.phone :is(.btn.small, .ghost-btn, .fchip, .link-btn) { min-height: 40px; min-width: 40px; }
 .hm.phone .hm-links a { min-height: 40px; }
-.hm.phone .hm-tools { flex: 1 1 100%; flex-wrap: nowrap; }
-.hm.phone .hm-device { flex: 1; min-width: 0; max-width: none; height: 40px; font-size: 16px; }
-.hm.phone .hm-every { flex: none; }
+.hm.phone .hm-every { height: 40px; margin-top: 0; }
+.hm.phone .hm-tools { flex: 1 1 100%; margin-left: 0; }
+.hm.phone .hm-pick { flex: 1 1 0; }
+.hm.phone .hm-pick select { width: 100%; max-width: none; height: 40px; font-size: 16px; }
 .hm.phone .hm-kinds { gap: 2px 4px; }
+.hm.phone .hm-sec h3 { flex-wrap: wrap; row-gap: 0; }
+.hm.phone .hm-hint { white-space: normal; }
+.hm.phone .hm-grid .ny-item:not(.hm-task) .ny-meta { flex-wrap: wrap; }
+.hm.phone .hm-grid .ny-meta > * { white-space: normal; overflow-wrap: anywhere; text-overflow: clip; }
+/* A pin on a phone: a whole 40 px target that takes no more room on the line than the small one. */
+.hm.phone .hm-pin { width: 40px; height: 40px; margin: -10px -12px -10px -6px; }
+.hm.phone .hm-item-acts .hm-pin { margin: 0; }
+.hm.phone .hm-trow .hm-item-main { padding-right: 44px; }
+.hm.phone .hm-trow-pin { top: 2px; right: 2px; }
+.hm.phone .hm-trow-pin .hm-pin { margin: 0; }
 .hm.phone .ny-reply input { height: 40px; font-size: 16px; }
 .hm.phone .ny-reply .btn { min-height: 40px; }
 .hm.phone .hm-cols, .hm.phone .hm-side { gap: 22px; }

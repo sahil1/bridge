@@ -15,7 +15,9 @@
 // One row per thing (tidy): the same task twice on the list (a meeting's action items handed on
 // again) or on two of your computers is one row, and so is a cloud agent seen from both.
 //
-// Kept in the cache folder (home.json): when you last opened or saved each whiteboard.
+// Kept in the cache folder (home.json): when you last opened or saved each whiteboard, and what you
+// pinned to the top of Home (by its id there: its device's and its own), so it stays there on every
+// page and phone this computer serves.
 import fs from 'node:fs'
 import path from 'node:path'
 import { cacheFile, writeFileAtomic } from './paths.js'
@@ -93,8 +95,12 @@ export function tidy(items) {
 // meeting's action items not handed on (meetwork.js); boards: boards.js; chief(): the Chief of
 // Staff's main pane, or null when it isn't running (a reply to a task goes there).
 export function make({ waiting, tasks, meetings, unsent, boards, chief }) {
-  let kept = { boards: {} }
-  try { const d = JSON.parse(fs.readFileSync(FILE, 'utf8')); if (d?.boards && typeof d.boards === 'object') kept = { boards: d.boards } } catch { /* none yet */ }
+  let kept = { boards: {}, pins: {} }
+  try {
+    const d = JSON.parse(fs.readFileSync(FILE, 'utf8'))
+    if (d?.boards && typeof d.boards === 'object') kept.boards = d.boards
+    if (d?.pins && typeof d.pins === 'object') kept.pins = d.pins
+  } catch { /* none yet */ }
   let timer = null
   const save = () => { clearTimeout(timer); timer = setTimeout(() => { try { fs.mkdirSync(path.dirname(FILE), { recursive: true }); writeFileAtomic(FILE, JSON.stringify(kept)) } catch { /* next change */ } }, 500); timer.unref?.() }
   // You opened, saved, made or renamed it here: what's in it now is yours, not news.
@@ -164,5 +170,18 @@ export function make({ waiting, tasks, meetings, unsent, boards, chief }) {
     return last.p
   }
   function forget() { last = { at: 0, items: null, p: null } }
-  return { items, looked, forget }
+
+  // Pinned: what you put at the top of Home, newest first. One that's gone (answered, cleared, a
+  // meeting a week old) shows no more; the list keeps the newest 200.
+  const pins = () => Object.entries(kept.pins).sort((x, y) => y[1] - x[1]).map(([id, at]) => ({ id, at }))
+  function pin(id, on) {
+    const k = typeof id === 'string' ? id.trim().slice(0, 300) : ''
+    if (!k) throw new Error('Say which one to pin')
+    if (on) kept.pins[k] = Date.now()
+    else delete kept.pins[k]
+    kept.pins = Object.fromEntries(pins().slice(0, 200).map((p) => [p.id, p.at]))
+    save()
+    return { pins: pins() }
+  }
+  return { items, looked, forget, pins, pin }
 }
