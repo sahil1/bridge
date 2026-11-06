@@ -10,7 +10,7 @@ import * as sock from './herdr-socket.js'
 import { answers } from './herdr-sessions.js'
 import { AGENTS, adapter, newSessionId } from '../agents.js'
 import { quoteCommand, runSetup } from './spawn.js'
-import { envFor, notePane, movePane, keepPanes, accountOf, labelOf } from '../accounts.js'
+import { envFor, notePane, movePane, keepPanes, accountOf, startedOn, labelOf } from '../accounts.js'
 import { paneKey, inView } from '../scope.js'
 import { DATA, dataFile, writeFileAtomic } from '../paths.js'
 
@@ -130,6 +130,7 @@ async function readFleet() {
     if (followed.has(paneKey(a.paneId))) a.sessionId = followed.get(paneKey(a.paneId))
     // herdr doesn't know which account an agent uses: the one it was started on from here.
     a.accountId = accountOf(a.kind, a.paneId, a.sessionId)
+    a.accountSure = !!a.accountId && a.accountId === startedOn(a.kind, a.paneId) // not only remembered for its conversation
     a.account = labelOf(a.accountId)
   }
   if (snap.panes?.length) keepPanes(new Set(snap.panes.map((p) => p.pane_id)))

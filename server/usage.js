@@ -6,6 +6,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { localBin, IS_WIN } from './paths.js'
 import { readAdded } from './logread.js'
+import * as accounts from './accounts.js'
+import { split } from './usagesplit.js'
 
 const BIN = localBin('ccusage')
 const HOME = os.homedir()
@@ -26,15 +28,22 @@ function ccusage(args) {
 function normalizeDay(d) {
   const tokens = d.totalTokens ?? 0
   const cacheRead = d.cacheReadTokens ?? 0
+  const cost = d.totalCost ?? d.costUSD ?? 0
+  // Each model's part, for the split by account (usagesplit.js): Claude's with its own cost,
+  // Codex's with the day's shared out by tokens. [model, cost, tokens, cache read]
+  const byModel = d.modelBreakdowns
+    ? d.modelBreakdowns.map((b) => [b.modelName, b.cost || 0, (b.inputTokens || 0) + (b.outputTokens || 0) + (b.cacheCreationTokens || 0) + (b.cacheReadTokens || 0), b.cacheReadTokens || 0])
+    : Object.entries(d.models || {}).map(([name, m]) => [name, tokens ? (cost * (m.totalTokens || 0)) / tokens : 0, m.totalTokens || 0, m.cacheReadTokens || 0])
   return {
     date: d.date || d.period,
-    cost: d.totalCost ?? d.costUSD ?? 0,
+    cost,
     tokens,
     input: d.inputTokens ?? 0,
     output: (d.outputTokens ?? 0) + (d.reasoningOutputTokens ?? 0),
     cacheRead,
     cacheWrite: d.cacheCreationTokens ?? 0,
     models: d.modelsUsed || Object.keys(d.models || {}),
+    byModel,
   }
 }
 
@@ -106,9 +115,15 @@ export async function usage(provider, { days = 30, ttlMs = 5 * 60 * 1000 } = {})
   if (hit && Date.now() - hit.at < ttlMs) return hit.value
   const since = new Date()
   since.setDate(since.getDate() - (days - 1))
-  const raw = await ccusage([provider, 'daily', '--since', compact(since)])
+  const raw = await ccusage([provider, 'daily', '--since', compact(since), '--breakdown'])
   const rows = (raw.daily || raw || []).map(normalizeDay)
   const daily = fillDays(rows, days)
+  // With several accounts, each day split by the account it was on, where that's known.
+  let accts = null
+  if (accounts.supports(provider) && accounts.folders(provider).length > 1) {
+    try { accts = await split(provider, daily) } catch (e) { accts = { error: String(e?.message || e).slice(0, 200) } }
+  }
+  for (const d of daily) delete d.byModel
   const today = daily.at(-1)
   const yesterday = daily.at(-2)
   const active = await activeMinutes(provider)
@@ -124,6 +139,7 @@ export async function usage(provider, { days = 30, ttlMs = 5 * 60 * 1000 } = {})
       tokens: daily.reduce((s, d) => s + d.tokens, 0),
     },
     source: 'ccusage (local logs, offline pricing)',
+    ...(accts ? { accounts: accts } : {}),
     fetchedAt: new Date().toISOString(),
   }
   cache.set(provider, { at: Date.now(), value })

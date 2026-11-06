@@ -4,6 +4,7 @@ import { usePersisted, useWidth } from './layout.jsx'
 import { Updated } from './Trackers.jsx'
 import { usePoll } from '../api.js'
 import Usage, { fmtTokens } from './Usage.jsx'
+import { acctColor } from './AccountMenu.jsx'
 import UsageEverywhere from './UsageEverywhere.jsx'
 import { useTrial } from '../trials.js'
 import { t, tx, locale, midSentence } from '../i18n/index.js'
@@ -380,8 +381,8 @@ export default function UsageStats() {
                     return (
                       <li key={`${a.kind}:${a.account}`}>
                         <div className="us-row static" title={a.sessions === 1 ? t('{agent}, {account} · {n} conversation · {hours} h', { agent: a.agent, account: a.account, n: a.sessions, hours: a.hours }) : t('{agent}, {account} · {n} conversations · {hours} h', { agent: a.agent, account: a.account, n: a.sessions, hours: a.hours })}>
-                          <span className="us-row-name"><span className="us-ell">{provider === 'all' ? `${a.agent} · ` : ''}{a.account}</span></span>
-                          <span className="us-row-bar"><span style={{ width: `${(a.tokens / max) * 100}%` }} /></span>
+                          <span className="us-row-name">{a.color && <i className="us-sw" style={{ background: acctColor(a) }} />}<span className="us-ell">{provider === 'all' ? `${a.agent} · ` : ''}{a.account}</span></span>
+                          <span className="us-row-bar"><span style={{ width: `${(a.tokens / max) * 100}%`, ...(a.color ? { background: acctColor(a) } : {}) }} /></span>
                           <span className="us-row-num num">{fmtTokens(a.tokens)}</span>
                           <span className="us-row-num num muted">{a.sessions ? `${a.hours} h` : t('unused')}</span>
                         </div>

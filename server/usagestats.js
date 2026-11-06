@@ -66,9 +66,16 @@ const LABEL = { claude: 'Claude Code', codex: 'Codex' }
 async function byAccount(kinds, force) {
   const st = await insights.scan({ force }).catch(() => null)
   const rows = (st?.value.accounts || []).filter((a) => kinds.includes(a.kind)).map(({ kind, agent, account, sessions, hours, tokens }) => ({ kind, agent, account, sessions, hours, tokens: tokens || 0 }))
-  for (const g of accounts.groups()) {
+  const groups = accounts.groups()
+  for (const g of groups) {
     if (!kinds.includes(g.kind) || g.accounts.length < 2) continue
     for (const a of g.accounts) if (!rows.some((r) => r.kind === g.kind && r.account === a.label)) rows.push({ kind: g.kind, agent: g.label, account: a.label, sessions: 0, hours: 0, tokens: 0 })
+  }
+  // Each with its color, as Usage shows the account (Insights names them).
+  for (const r of rows) {
+    const g = groups.find((x) => x.kind === r.kind)
+    const a = [...(g?.accounts || []), ...(g?.usual ? [g.usual] : [])].find((x) => x.label === r.account)
+    if (a) Object.assign(r, { id: a.id, color: a.color })
   }
   return rows
 }

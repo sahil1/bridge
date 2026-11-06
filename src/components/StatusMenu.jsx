@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import Icon from './Icon.jsx'
-import AccountMenu, { listed, setDefault, lapsed, asList, nameOf as accountName } from './AccountMenu.jsx'
+import AccountMenu, { listed, setDefault, lapsed, asList, nameOf as accountName, AcctDot } from './AccountMenu.jsx'
 import UpdateChip from './UpdateChip.jsx'
 import RestartChip from './RestartChip.jsx'
 import SetupChip from './SetupChip.jsx'
@@ -73,6 +73,7 @@ function UsageRow({ u, onClick }) {
       <span className="status-row-text">
         <b className="usage-name">{u.off ? t('Usage') : u.name}</b>
         {u.act && <span className="usage-new">{t('New:')}</span>}
+        {u.act && <AcctDot a={u.act} />}
         {u.act && <b className="usage-acct">{accountName(u.act)}</b>}
         <Figs u={u} />
       </span>
@@ -98,6 +99,7 @@ export function UsageChip({ quota, primary, onUsage, onAddAccount }) {
         <Ring u={u} />
         <b className="usage-name pin-word">{u.off ? t('Usage') : u.name}</b>
         {u.act && <span className="usage-new pin-word">{t('New:')}</span>}
+        {u.act && <AcctDot a={u.act} className="pin-word" />}
         {u.act && <b className="usage-acct pin-word">{accountName(u.act)}</b>}
         <Figs u={u} className="pin-long" />
         {!u.off && u.p?.usable && u.ring && <span className="pin-short">{u.ring.percentRemaining}%</span>}

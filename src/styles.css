@@ -2500,7 +2500,9 @@ button.ue-row:hover { background: var(--pane-2); }
 .seg-part.unread { background: none; box-shadow: inset 0 0 0 1px var(--line-2); }
 .prov-name.grp { overflow: hidden; }
 .grp-count { font-size: 11px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; }
-.prov-head:has(.prov-name.grp) { grid-template-columns: auto minmax(0, 1fr) minmax(70px, 34%) auto; }
+/* Room for each account's bar in its color, beside the numbers (the name gives way first). */
+.prov-head:has(.prov-name.grp) { grid-template-columns: auto minmax(0, 1fr) minmax(136px, 42%) auto; }
+.prov-head .seg-bar { min-width: 54px; }
 .acct-sum { display: grid; gap: 2px; font-size: 12px; color: var(--ink-2); padding: 8px 10px; border-radius: 9px; background: var(--pane-2); }
 .acct-sum b { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); font-weight: 600; }
 .acct-us { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
@@ -2538,6 +2540,47 @@ button.ue-row:hover { background: var(--pane-2); }
 .w-pace { color: var(--ink-3); }
 .usage-new { color: var(--chrome-ink-3, var(--ink-3)); font-weight: 500; margin-right: -2px; }
 .acct-u-body .acct { padding-top: 0; }
+/* Each account's color (accounts.js colorsOf), as a dot wherever it shows, and the swatch on its
+   card that opens the colors to pick from. What isn't one account's is grey (--series-other). */
+.acct-dot { flex: none; display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+.usage-chip .acct-dot { margin: 0 -1px 0 1px; }
+.acct-btn-main .acct-dot { margin-right: -1px; }
+.acct-u-top { display: flex; align-items: center; min-width: 0; }
+.acct-u-top > .acct-u-head { flex: 1; min-width: 0; padding-left: 4px; }
+.acct-u-top > .acct-color-wrap { margin-left: 5px; }
+/* What's under its name goes onto a second line rather than be cut, with the swatch beside it. */
+.acct-u-top .acct-u-reset { white-space: normal; }
+.acct-color-wrap { position: relative; display: inline-flex; flex: none; }
+.acct-swatch { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 7px; }
+.acct-swatch:hover, .acct-swatch[aria-expanded="true"] { background: var(--pane-3); }
+.acct-swatch:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.acct-swatch .acct-dot { width: 12px; height: 12px; }
+.acct-colors { position: fixed; z-index: 400; display: grid; grid-template-columns: repeat(4, 28px); gap: 8px; padding: 10px; border-radius: 12px; background: var(--pane); border: 1px solid var(--line-2); box-shadow: var(--shadow-lg); animation: fade-in .1s ease; }
+.acct-colors .error-text { grid-column: 1 / -1; }
+.acct-color { position: relative; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; color: #fff; }
+.acct-color .icon { filter: drop-shadow(0 0 1px rgb(0 0 0 / .55)); }
+.acct-color[aria-checked="true"] { box-shadow: 0 0 0 2px var(--pane), 0 0 0 4px var(--ink-2); }
+.acct-color:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.acct-color-taken { position: absolute; right: 0; bottom: 0; width: 9px; height: 9px; border-radius: 50%; background: var(--pane); box-shadow: 0 0 0 1px var(--line-2); }
+.app.narrow .acct-swatch { width: 40px; height: 40px; }
+.app.narrow .acct-colors { grid-template-columns: repeat(4, 40px); }
+.app.narrow .acct-color { width: 40px; height: 40px; }
+.seg-part.low { box-shadow: inset 0 0 0 1px var(--critical); }
+/* The daily bars split by account: who each color is, under them, with each one's total. */
+.u-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 0; padding: 2px 0 4px; list-style: none; font-size: 11.5px; }
+.u-legend li { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+.u-legend i, .u-tip-part i, .cost-split-list i { flex: none; width: 8px; height: 8px; border-radius: 2px; }
+.u-legend-name { color: var(--ink-2); overflow-wrap: anywhere; }
+.u-tip-part { display: flex; align-items: center; gap: 5px; }
+.u-tip-part .num { margin-left: auto; padding-left: 10px; }
+/* Today's cost by account, under the day's figures. */
+.cost-split { display: grid; gap: 6px; padding: 8px 9px; border-radius: 9px; background: var(--pane-2); }
+.cost-split-bar { display: flex; gap: 2px; height: 6px; border-radius: 3px; overflow: hidden; }
+.cost-split-bar span { min-width: 3px; }
+.cost-split-label { font-size: 10.5px; color: var(--ink-3); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
+.cost-split-list { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0; padding: 0; list-style: none; font-size: 12px; color: var(--ink-2); }
+.cost-split-list li { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+.cost-split-list b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
 /* An agent's ⋯ menu: "Continue on Work (64% left)" stays on one line. */
 .console .menu .menu-item { white-space: nowrap; }
 .now-btn { flex: none; white-space: nowrap; height: 30px; padding: 0 10px; border-radius: 8px; font-size: 12.5px; font-weight: 600; color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); background: var(--accent-soft); }

@@ -368,7 +368,7 @@ export async function fleet() {
   const agents = live.filter((p) => p.kind !== 'shell').map((p) => ({
     paneId: p.paneId, tabId: p.tabId, workspaceId: p.workspaceId,
     workspace: wsLabel(p.workspaceId), tab: tabOf(p.tabId)?.label || '',
-    kind: p.kind, status: statusOf(p), title: p.title, cwd: p.cwd, account: accounts.labelOf(p.account), accountId: p.account,
+    kind: p.kind, status: statusOf(p), title: p.title, cwd: p.cwd, account: accounts.labelOf(p.account), accountId: p.account, accountSure: !!p.account,
     sessionId: p.sessionId, model: p.model, focused: false, seq: p.seq,
     setup: p.setup?.step || null, setupUrl: p.setup?.url || null, setupKeys: p.setup?.keys || null,
   }))
