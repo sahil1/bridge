@@ -379,11 +379,11 @@ app.post('/api/studio/ask', wrap(async (req) => {
   const pane = String(req.body?.pane || '')
   if (pane) {
     const a = await findAgent(pane)
-    queue.add(pane, text)
+    const item = queue.add(pane, text)
     pushFleet()
     const name = (a.tab && !/^\d+$/.test(a.tab) ? a.tab : a.title) || adapter(a.kind).label
     await studio.noteAsk(root, q.path, name)
-    return { paneId: pane, name }
+    return { paneId: pane, name, queued: true, position: queue.placeOf(pane, item.id) }
   }
   const kind = String(req.body?.agent || cfg.defaultAgent || 'claude')
   const out = await launchFrom({ kind, cwd: root, label: `Studio · ${path.basename(q.path)}`.slice(0, 60), prompt: text })
@@ -607,7 +607,7 @@ async function sendPrompt(paneId, text, agent, cid = null) {
     // Hold it and send when the input box is back (the queue checks before each try).
     const item = queue.add(paneId, text, { cid })
     pushFleet()
-    return { ok: true, queued: true, reason: e.reason, id: item.id }
+    return { ok: true, queued: true, reason: e.reason, id: item.id, position: queue.placeOf(paneId, item.id) }
   }
 }
 // Once per message the app sent (cid, its own id for it): a phone whose connection dropped before
@@ -642,7 +642,7 @@ app.post('/api/agents/:pane/prompt', wrap(async (req) => {
       if (!why) return { agent, r: await sendPrompt(pane, text, agent, cid) }
       const item = queue.add(pane, text, { cid })
       pushFleet()
-      return { agent, r: { ok: true, queued: true, reason: why, id: item.id } }
+      return { agent, r: { ok: true, queued: true, reason: why, id: item.id, position: queue.placeOf(pane, item.id) } }
     })
     insights.noteSent(pane, text)
     // A side question: its answer is in a panel, not the chat, so bring it back here.
@@ -716,7 +716,7 @@ app.post('/api/agents/:pane/queue', wrap(async (req) => {
   return onlyOnce(cid, async () => {
     const item = queue.add(req.params.pane, text, { cid })
     pushFleet()
-    return item
+    return { ...item, queued: true, position: queue.placeOf(req.params.pane, item.id) }
   })
 }))
 // Send now: interrupt what the agent is doing (Esc) and send this as soon as it's back at its prompt.
@@ -756,7 +756,7 @@ app.post('/api/agents/:pane/steer', wrap(async (req) => {
     await rt.keys(req.params.pane, ['esc'])
     const item = queue.add(req.params.pane, text, { now: true, cid: cidOf(req) })
     pushFleet()
-    return { ...item, steered: true }
+    return { ...item, steered: true, queued: true, position: queue.placeOf(req.params.pane, item.id) }
   })
 }))
 // A queued message, before it goes: changed ({ text }), held while you change it ({ editing }), or
@@ -1026,12 +1026,12 @@ app.delete('/api/ideas/:id', wrap((req) => { ideas.remove(req.params.id); return
 app.post('/api/ideas/:id/send', wrap(async (req) => {
   const it = ideas.list().items.find((x) => x.id === req.params.id)
   if (!it) throw new Error('No such idea')
-  const mate = mainChief(await fleetView())
-  if (!mate) throw new Error('The chief of staff is not running')
   const tags = it.tags.length ? ` (${it.tags.map((t) => '#' + t).join(' ')})` : ''
-  await promptSafe(rt, mate.paneId, `From my ideas backlog${tags}: ${it.text}\n\nWork out which agent should take it (or whether it needs a new one), tell me the plan in a few lines, and check with me before handing it off.`)
+  // As the chief's other messages: in now if it's waiting, else after what it's doing.
+  const r = await tellChief(`From my ideas backlog${tags}: ${it.text}\n\nWork out which agent should take it (or whether it needs a new one), tell me the plan in a few lines, and check with me before handing it off.`)
+  if (!r.sent) throw new Error(r.error || 'The chief of staff is not running')
   ideas.update(it.id, { sent: true })
-  return { ok: true, paneId: mate.paneId }
+  return { ok: true, ...r }
 }))
 
 // ---------- The chief of staff's own tasks (state/tasks.md in its folder) ----------
@@ -1049,20 +1049,23 @@ app.post('/api/chief/tasks', wrap(async (req) => {
 async function tellChief(text) {
   const mate = mainChief(await fleetView().catch(() => null))
   if (!mate) return { sent: false }
+  const held = () => {
+    const item = queue.add(mate.paneId, text)
+    pushFleet()
+    return { sent: true, queued: true, position: queue.placeOf(mate.paneId, item.id) }
+  }
   try {
-    if (mate.status === 'working' || mate.status === 'blocked' || queue.all()[mate.paneId]?.length) {
-      queue.add(mate.paneId, text)
-      pushFleet()
-      return { sent: true, queued: true }
-    }
-    await promptSafe(rt, mate.paneId, text, mate)
-    for (const ms of [150, 700, 1600]) setTimeout(pushFleet, ms)
-    return { sent: true }
+    // One at a time into it, as from the message box (onPane, holdFor).
+    return await onPane(mate.paneId, async () => {
+      if (mate.status === 'blocked' || holdFor(mate.paneId, mate, text)) return held()
+      await promptSafe(rt, mate.paneId, text, mate)
+      wentIn.set(mate.paneId, Date.now())
+      for (const ms of [150, 700, 1600]) setTimeout(pushFleet, ms)
+      return { sent: true }
+    })
   } catch (e) {
     if (e.code !== 'not_at_prompt') return { sent: false, error: e.message }
-    queue.add(mate.paneId, text)
-    pushFleet()
-    return { sent: true, queued: true }
+    return held()
   }
 }
 app.patch('/api/chief/tasks/:id', wrap((req) => ({ item: chiefTasks.update(req.params.id, req.body || {}) })))

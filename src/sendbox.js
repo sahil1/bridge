@@ -8,6 +8,7 @@
 // goes twice nor is lost.
 import { useSyncExternalStore } from 'react'
 import { api, BASE } from './api.js'
+import { t } from './i18n/index.js'
 
 const KEY = `cc-sending${BASE}`
 const OLD_MS = 20 * 60 * 1000 // the computer remembers an id for 30 minutes
@@ -46,6 +47,16 @@ async function attempt(x) {
       await sleep([600, 1500, 3000, 6000][i] ?? 10000)
     }
   }
+}
+
+// What became of a message to `name`, by your computer's answer (never a guess): it went in, it's
+// held for it until it's free (and where it is in line), or this phone keeps it until your
+// computer is back.
+export function sentTo(r, name) {
+  if (r?.offline) return t('Waiting for your computer. It goes to {name} once it\'s back.', { name })
+  if (!r?.queued) return t('Sent to {name}', { name })
+  if (r.position > 1) return t('Queued for {name}, number {n} in line', { name, n: r.position })
+  return r.position === 1 ? t('Queued for {name}, next in line', { name }) : t('Queued for {name}', { name })
 }
 
 // way: 'prompt' (typed in now, or held by the computer while the agent is busy), 'queue', or 'steer'

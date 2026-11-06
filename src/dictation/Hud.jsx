@@ -9,6 +9,7 @@ import { useDictation, configure, press, release, finish, cancel, dismiss, retry
 import { Morph, Listening, Working, Done } from './Pill.jsx'
 import { untidiedWhy, TidyNeeds } from './Tidy.jsx'
 import { t } from '../i18n/index.js'
+import { sentTo } from '../sendbox.js'
 import './dictation.css'
 
 // The desktop app's dictation window (?dictate=1, desktop/dictation.js): it shows over whatever app
@@ -225,12 +226,13 @@ export default function Hud() {
     const g = press0.current
     try {
       const pid = encodeURIComponent(target.paneId)
-      // As the message box does: a working agent that can't take a message now gets it when it's free.
+      // As the message box does: your computer types it in, or holds it while the agent is busy, and
+      // its answer says which.
       const r = s.result
-      await api(`/agents/${pid}/${target.status === 'working' && !target.caps?.typeAhead ? 'queue' : 'prompt'}`, { method: 'POST', body: { text } })
-      amend(r, { how: 'sent', agent: agentOf(target) })
+      const got = await api(`/agents/${pid}/prompt`, { method: 'POST', body: { text } })
+      amend(r, { how: got?.queued ? 'queued' : 'sent', agent: agentOf(target) })
       if (g !== press0.current) return
-      setDone(t('Sent to {name}', { name: nameOf(target) }))
+      setDone(sentTo(got, nameOf(target)))
       later(1200)
     } catch (e) { if (g === press0.current) setErr(e.message) }
   }

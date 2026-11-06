@@ -4,6 +4,7 @@ import Question, { parseScreen } from './Question.jsx'
 import { hostApi } from '../api.js'
 import { ago } from './Machines.jsx'
 import { t, tx } from '../i18n/index.js'
+import { sentTo } from '../sendbox.js'
 import './needsyou.css'
 
 // The needs-you inbox: everything waiting on you, on this computer, your other devices and the
@@ -133,7 +134,9 @@ export function NeedsItem({ it, focused, onOpen, onGone, setNote }) {
       const r = await onDevice(it.machine, `/agents/${encodeURIComponent(it.paneId)}/prompt`, { text: v })
       setText('')
       setMode(null)
-      onGone(it, r.queued ? t('Sent. It gets it when it can take it.') : t('Sent'))
+      // In now, or held until it's free: as your computer answered.
+      onGone(it, null)
+      setNote({ text: sentTo(r, it.agent?.title || t('the agent')) })
     } catch (x) { say(x) } finally { setBusy(false) }
   }
   const clear = async () => {

@@ -744,7 +744,8 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
       // Something covered the agent's input box; the server holds the message until it's back.
       if (r?.queued && r.reason && r.reason !== 'working' && r.reason !== 'behind') setFlash(t('Held, not lost: {reason} in the agent. It sends once that closes (Esc in the Terminal tab closes most panels).', { reason: heldWhy(r.reason) }))
       if (r?.cleared && r.cleared !== wasMirrored.trim()) setFlash(t('Cleared "{text}" that was already typed in the agent\'s input box', { text: r.cleared.length > 60 ? `${r.cleared.slice(0, 60)}…` : r.cleared }))
-      return true
+      // Your computer's answer, for what says how it went (Ask out loud: queued or asked).
+      return r || true
     } catch (e) {
       setFlash(e.message === 'agent_blocked' || /blocked/.test(e.message) ? t('Agent is waiting on an answer; use the keys first') : e.message)
       return false

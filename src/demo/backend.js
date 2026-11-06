@@ -703,7 +703,7 @@ export function createDemo({ everything = true } = {}) {
     const item = { id: uid(), text: String(body?.text || '').trim(), at: iso(), ...(body?.cid ? { cid: String(body.cid) } : {}) }
     ;(S.queue[p.pane] ||= []).push(item)
     bump()
-    return item
+    return { ...item, queued: true, position: S.queue[p.pane].length }
   })
   on('PATCH', '/agents/:pane/queue/:id', ({ p, body }) => {
     const it = (S.queue[p.pane] || []).find((x) => x.id === p.id)

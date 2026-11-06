@@ -17,6 +17,8 @@
 //   as it closed (sent once it opens again), and the same message sent twice (held once);
 //   two sent at once to an agent that's free: one goes in and the other waits its turn (the
 //   second found the first still in the input box and cleared it);
+//   what a send says, by the computer's answer (Dictations' Send to an agent): "Queued for" a busy
+//   agent with its place in line, "Sent to" one that's free (it said "Sent to" either way);
 //   and a message typed in its terminal while it works, which it takes in between two steps: in
 //   the chat (Claude Code logs it where Chat didn't look).
 import fs from 'node:fs'
@@ -232,6 +234,43 @@ try {
     ok(first >= 0 && rs.filter((r) => r.queued).length === 1, 'two sent at once to an agent that\'s free: one goes in, the other waits its turn', rs)
     const g = await wentIn(ag, two)
     ok(same(g.map((x) => x.text), ['busy 2 3', ...order]) && g.every((x) => x.how === 'turn'), 'and both go in, one after the other, each on its own (the second used to find the first still in the input box and clear it)', g)
+  }
+
+  // ---------- What a send says, by the computer's answer: "Queued for" a busy agent, "Sent to" a free one ----------
+  {
+    const busyOne = await launch('Receipts', 'busy 3 20 3')
+    const freeOne = await launch('Fees', 'busy 2 3')
+    await settled(busyOne, 3)
+    await kit.api(`/agents/${enc(busyOne.paneId)}/prompt`, { text: 'Start on the receipts' })
+    await working(busyOne)
+    await settled(freeOne, 2)
+    for (const text of ['Note the receipt totals.', 'Note the fees.']) await kit.api('/dictations', { text, ms: 900 })
+    const { ctx, p, errors } = await page(b, kit.url, { ...LIGHT, width: 1440, height: 900, store: { 'cc-rail-dictations': true } })
+    await p.locator('.rail-nav-btn', { hasText: 'Dictations' }).click()
+    const v = p.locator('.dc-view')
+    await v.waitFor({ timeout: 10000 })
+    const sendTo = async (text, pane) => {
+      const row = v.locator('.dc-row', { hasText: text }).first()
+      if (!(await row.locator('button', { hasText: 'Send to an agent' }).count())) await row.locator('.dc-head').click()
+      await row.locator('button', { hasText: 'Send to an agent' }).click()
+      await row.locator(`.dc-menu button[data-pane="${pane}"]`).click()
+    }
+    const toast = (re) => until(async () => { const x = await p.locator('.dc-toast').innerText().catch(() => ''); return re.test(x) && x }, 8000, 100)
+    await sendTo('Note the receipt totals', busyOne.paneId)
+    const first = await toast(/Queued for Receipts, next in line/)
+    ok(!!first && !/Sent to/.test(first), 'Dictations, to a busy agent: "Queued for" it, next in line (your computer held it), not "Sent to"', first || await p.locator('.dc-toast').innerText().catch(() => ''))
+    await sleep(300) // the toast fades in
+    await shot(p, `${tag}busy-queued-for-toast-light-1440`)
+    await sendTo('Note the fees', busyOne.paneId)
+    ok(!!(await toast(/Queued for Receipts, number 2 in line/)), 'a second one: number 2 in line', await p.locator('.dc-toast').innerText().catch(() => ''))
+    ok(same(await queueOf(busyOne.paneId), ['Note the receipt totals.', 'Note the fees.']), 'both held for it, in order', await queueOf(busyOne.paneId))
+    await sendTo('Note the fees', freeOne.paneId)
+    const sent = await toast(/Sent to Fees/)
+    ok(!!sent && !/Queued/.test(sent), 'to one that\'s free: "Sent to" it', sent || await p.locator('.dc-toast').innerText().catch(() => ''))
+    ok(!!(await until(() => got(freeOne.sessionId).some((x) => x.text === 'Note the fees.'), 10000, 300)), 'and it went in', got(freeOne.sessionId))
+    await shot(p, `${tag}busy-queued-for-dictations-light-1440`)
+    ok(errors.length === 0, 'Dictations: no page errors', errors)
+    await ctx.close()
   }
 
   // ---------- Typed in its terminal while it works ----------

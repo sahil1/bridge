@@ -64,6 +64,12 @@ export function add(paneId, text, { now = false, cid = null } = {}) {
   return item
 }
 
+// Where a held message is in its agent's line (1: it goes next), or null once it's gone.
+export function placeOf(paneId, id) {
+  const i = (q[paneKey(paneId)] || []).findIndex((x) => x.id === id)
+  return i < 0 ? null : i + 1
+}
+
 const gone = (k, id) => Object.assign(new Error((sent.get(k) || []).some((x) => x.id === id) ? 'Already sent: the agent has it.' : 'That message is no longer waiting.'), { code: 'gone' })
 const going = () => Object.assign(new Error("It's going to the agent now."), { code: 'sending' })
 

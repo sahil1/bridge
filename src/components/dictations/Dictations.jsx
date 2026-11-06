@@ -7,6 +7,7 @@ import { keysPlatform, dictationKey, settings as dictationSettings } from '../..
 import { RECENT, ANY, byDay, timeOf, length, whereOf, Glyph, takeWanted } from './shared.jsx'
 import PermissionFix from '../PermissionFix.jsx'
 import { t } from '../../i18n/index.js'
+import { sentTo } from '../../sendbox.js'
 import './dictations.css'
 
 // Dictations: everything you've said with the dictation key, kept on this computer
@@ -143,9 +144,10 @@ function Row({ r, open, onToggle, onDelete, paste, onMsg }) {
   const send = async (a) => {
     setPicking(false)
     try {
-      // As the message box does: a working agent that can't take a message now gets it when it's free.
-      await api(`/agents/${encodeURIComponent(a.paneId)}/${a.status === 'working' && !a.caps?.typeAhead ? 'queue' : 'prompt'}`, { method: 'POST', body: { text: words } })
-      onMsg({ text: t('Sent to {name}', { name: nameOf(a) }) })
+      // As the message box does: your computer types it in, or holds it while the agent is busy, and
+      // its answer says which.
+      const got = await api(`/agents/${encodeURIComponent(a.paneId)}/prompt`, { method: 'POST', body: { text: words } })
+      onMsg({ text: sentTo(got, nameOf(a)) })
     } catch (e) { onMsg({ text: e.message, error: true }) }
   }
   const where = whereOf(r)
