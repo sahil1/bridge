@@ -85,3 +85,17 @@
 .sh-start .btn { flex: none; }
 .sh-start .win-btn { flex: none; width: 26px; height: 26px; }
 @media (max-width: 700px) { .sh-start { bottom: 56px; flex-wrap: wrap; } .app.narrow .sh-start .win-btn { width: 40px; height: 40px; } .app.narrow .sh-start .btn { height: 40px; } }
+
+/* Office's fonts, which a Mac or Linux computer may not have: a cell in Calibri is drawn in
+   Calibri where it's installed, else the nearest that is (Carlito is made to its measure), and the
+   file keeps the font's own name. */
+@font-face { font-family: 'Calibri'; src: local('Calibri'), local('Carlito'), local('Helvetica Neue'), local('Arial'); }
+@font-face { font-family: 'Calibri'; font-weight: bold; src: local('Calibri Bold'), local('Calibri-Bold'), local('Carlito Bold'), local('Carlito-Bold'), local('Helvetica Neue Bold'), local('HelveticaNeue-Bold'), local('Arial Bold'), local('Arial-BoldMT'); }
+@font-face { font-family: 'Calibri'; font-style: italic; src: local('Calibri Italic'), local('Calibri-Italic'), local('Carlito Italic'), local('Carlito-Italic'), local('Helvetica Neue Italic'), local('HelveticaNeue-Italic'), local('Arial Italic'), local('Arial-ItalicMT'); }
+@font-face { font-family: 'Calibri'; font-weight: bold; font-style: italic; src: local('Calibri Bold Italic'), local('Calibri-BoldItalic'), local('Carlito Bold Italic'), local('Carlito-BoldItalic'), local('Helvetica Neue Bold Italic'), local('HelveticaNeue-BoldItalic'), local('Arial Bold Italic'), local('Arial-BoldItalicMT'); }
+@font-face { font-family: 'Aptos'; src: local('Aptos'), local('Helvetica Neue'), local('Arial'); }
+@font-face { font-family: 'Aptos'; font-weight: bold; src: local('Aptos Bold'), local('Aptos-Bold'), local('Helvetica Neue Bold'), local('HelveticaNeue-Bold'), local('Arial Bold'), local('Arial-BoldMT'); }
+@font-face { font-family: 'Aptos'; font-style: italic; src: local('Aptos Italic'), local('Aptos-Italic'), local('Helvetica Neue Italic'), local('HelveticaNeue-Italic'), local('Arial Italic'), local('Arial-ItalicMT'); }
+@font-face { font-family: 'Cambria'; src: local('Cambria'), local('Caladea'), local('Georgia'); }
+@font-face { font-family: 'Cambria'; font-weight: bold; src: local('Cambria Bold'), local('Cambria-Bold'), local('Caladea Bold'), local('Caladea-Bold'), local('Georgia Bold'), local('Georgia-Bold'); }
+@font-face { font-family: 'Cambria'; font-style: italic; src: local('Cambria Italic'), local('Cambria-Italic'), local('Caladea Italic'), local('Caladea-Italic'), local('Georgia Italic'), local('Georgia-Italic'); }

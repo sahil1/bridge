@@ -16,21 +16,6 @@ export function blankWorkbook(name = 'Sheet') {
   return { data: { id: id('w'), name, appVersion: '', locale: 'enUS', styles: {}, sheetOrder: [sid], sheets: { [sid]: { id: sid, name: 'Sheet1', rowCount: 100, columnCount: 26, cellData: {}, mergeData: [], columnData: {}, rowData: {}, defaultColumnWidth: 88, defaultRowHeight: 24 } } }, lost: [] }
 }
 
-// Office's fonts, which a Mac or Linux computer may not have: drawn in the nearest one it does,
-// and written back by their own name.
-const LOOKALIKE = { Calibri: 'Calibri, Carlito, "Helvetica Neue", Arial, sans-serif', Cambria: 'Cambria, Caladea, Georgia, serif', Aptos: 'Aptos, "Helvetica Neue", Arial, sans-serif', 'Aptos Narrow': '"Aptos Narrow", "Arial Narrow", "Helvetica Neue", Arial, sans-serif', 'Times New Roman': '"Times New Roman", Times, serif', Consolas: 'Consolas, Menlo, monospace' }
-const OWN_NAME = Object.fromEntries(Object.entries(LOOKALIKE).map(([k, v]) => [v, k]))
-const fonts = (data, map) => {
-  const fix = (st) => { if (st && typeof st === 'object' && st.ff && map[st.ff]) st.ff = map[st.ff] }
-  for (const st of Object.values(data.styles || {})) fix(st)
-  fix(data.defaultStyle)
-  for (const sh of Object.values(data.sheets || {})) {
-    fix(sh.defaultStyle)
-    for (const row of Object.values(sh.cellData || {})) for (const cell of Object.values(row || {})) fix(cell?.s)
-  }
-  return data
-}
-
 // What a file has that isn't shown here, in words, translated.
 const KINDS = {
   macros: tx('macros'), slicers: tx('slicers'), 'links to other workbooks': tx('links to other workbooks'), 'data connections': tx('data connections'),
@@ -71,7 +56,7 @@ export async function readSheet(buf, name, ext, opts = {}) {
   const r = await readBook(bytes, name)
   // Its charts are drawn in Charts, so they aren't among what isn't shown.
   const lost = r.lost.filter((k) => !(k === 'charts' && r.charts?.length))
-  return { kind: 'xlsx', data: fonts(r.data, LOOKALIKE), lost, charts: r.charts || [], keep: r.keep, original: bytes }
+  return { kind: 'xlsx', data: r.data, lost, charts: r.charts || [], keep: r.keep, original: bytes }
 }
 
 // ---------- Writing ----------
@@ -100,7 +85,7 @@ export async function writeSheet(book, now, { ops = [], charts = [] } = {}) {
     return { bytes: out.bytes, notKept }
   }
   const { writeBook } = await loadBook()
-  const r = await writeBook(book.original, book.keep, fonts(JSON.parse(JSON.stringify(now)), OWN_NAME), { ops, charts })
+  const r = await writeBook(book.original, book.keep, now, { ops, charts })
   return { bytes: r.bytes, notKept: r.notKept.map(sayWhy) }
 }
 // The writer's reasons, in the app's language: "{what} on {sheet}" and the rest as they are.

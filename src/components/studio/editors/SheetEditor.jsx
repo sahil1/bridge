@@ -58,6 +58,10 @@ async function univerWords() {
   return { code, words: mergeLocales(...packs) }
 }
 
+// Office's fonts, drawn by their stand-ins where they aren't installed (sheet.css), ready before the
+// sheet is first drawn: its canvas doesn't draw again when a font comes in later.
+const officeFonts = () => (document.fonts?.load ? Promise.all(['Calibri', 'Aptos', 'Cambria'].flatMap((f) => ['', 'bold ', 'italic '].map((s) => document.fonts.load(`${s}12px "${f}"`).catch(() => null)))) : Promise.resolve())
+
 // Rows and columns added, removed or moved, as they happen (undo and redo too): the writer moves
 // what the file keeps beside the cells (charts, pictures, notes, names) with them.
 const OPS = {
@@ -136,7 +140,7 @@ export default function SheetEditor({ file, data, onDirty, onStats, handle, read
     let made = null
     const offs = []
     setReady(false); setErr(null); ops.current = []
-    Promise.all([readSheet(data, file.name, file.ext, picked), univerWords()]).then(([wb, { code, words }]) => {
+    Promise.all([readSheet(data, file.name, file.ext, picked), univerWords(), officeFonts()]).then(([wb, { code, words }]) => {
       if (!on || !host.current) return
       book.current = wb
       setInfo({ lost: wb.lost, charts: wb.charts || [], csv: wb.csv || null })
