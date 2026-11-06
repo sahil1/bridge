@@ -4,7 +4,7 @@
 // change made meanwhile is refused; a change from outside, or from an agent asked, is kept as a
 // version by them; an older version put back keeps the one before too; a new file never
 // overwrites; design packs. The page: Studio's home with New and Recent; a Markdown file edited
-// and saved; a Word file's text; a sheet; a deck drawn, and its PowerPoint beside it; a page drawn
+// and saved; a Word file's text; a sheet, still saved until a value's typed in, then saved with it; a deck drawn, and its PowerPoint beside it; a page drawn
 // as it's typed; versions and Put back; Ask an agent queueing the change for the agent you pick.
 // The editors finished: a document's toolbar (each button named, with its shortcut in its tooltip,
 // doing what it says and showing it, only what the format keeps), heading levels, links, a table's
@@ -362,14 +362,6 @@ try {
   if (cdp) ok(share < 8, `a window with a sheet open, idle, keeps its main thread free (${share}% busy)`, share)
   const looks = reqs.filter((x) => x === '/api/studio/changed').length
   ok(looks <= 2 && reqs.length <= 15, `and asks the server little: whether the file changed ${looks} time${looks === 1 ? '' : 's'} in 10 s, ${reqs.length} requests in all (at most 90 a minute, as everywhere)`, [...new Set(reqs)])
-  // The ribbon as Excel's: Ask AI first, then the clipboard, fonts, alignment and number formats;
-  // the formula bar with its name box; the sheet's tabs; Charts under Insert.
-  const ribbon = await p.evaluate(() => {
-    const u = document.querySelector('.sd-univer')
-    const cmd = (id) => !!u.querySelector(`[data-u-command="${id}"]`)
-    return { ask: cmd('bridge.sheet.ask-ai'), first: u.querySelector('[data-u-command]')?.getAttribute('data-u-command'), tabs: [...u.querySelectorAll('[role="tablist"] [role="tab"], [data-u-comp="ribbon-tab"]')].map((e) => e.textContent.trim()).filter(Boolean), names: [...u.querySelectorAll('input')].map((i) => i.value), sheets: u.innerText.includes('Budget') }
-  })
-  ok(ribbon.ask && ribbon.first === 'bridge.sheet.ask-ai' && ribbon.names.includes('A1') && ribbon.sheets, 'a sheet\'s ribbon: Ask AI first; the formula bar\'s name box; its sheet\'s tab', ribbon)
   // A cell picked by its name, as in Excel's name box (the mouse would need the grid's sizes).
   const goTo = async (a1) => {
     await p.evaluate(() => { const i = [...document.querySelectorAll('.sd-univer input')].find((x) => /^[A-Z]+[0-9]+(:[A-Z]+[0-9]+)?$/.test(x.value)); document.querySelectorAll('[data-name-box]').forEach((x) => x.removeAttribute('data-name-box')); i?.setAttribute('data-name-box', '1') })
@@ -377,6 +369,28 @@ try {
     await nb.click(); await nb.fill(a1); await nb.press('Enter')
     await sleep(250)
   }
+  // Edited and saved. Left alone and its cells picked, it's still Saved (Univer's own setting up,
+  // and its cell editor filled as a cell is picked, aren't changes). A value typed in B3 (Design's
+  // cost) is: Unsaved changes and Save on, and saved, the file has it with its total worked out
+  // again. Nothing in it is lost by saving here, so there's nothing to say first.
+  const sheetState = () => p.locator('.sd-status .sd-state').innerText().catch(() => '')
+  await goTo('B3')
+  ok((await sheetState()) === 'Saved', 'a sheet opened, left alone and a cell picked: still Saved', await sheetState())
+  await p.keyboard.type('950')
+  await p.keyboard.press('Enter')
+  ok(!!(await until(async () => (await sheetState()) === 'Unsaved changes' && (await p.locator('.pane-head button[aria-label="Save"]').isEnabled().catch(() => false)), 5000)), 'a value typed in a cell: Unsaved changes, and Save is on', await sheetState())
+  await p.locator('.pane-head button[aria-label="Save"]').click({ timeout: 3000 }).catch(() => {})
+  const cellsOf = async () => { try { const x = new ExcelJS.Workbook(); await x.xlsx.readFile(path.join(dir, 'budget.xlsx')); const s = x.getWorksheet('Budget'); return { B3: s.getCell('B3').value, B4: s.getCell('B4').value, A1bold: !!s.getCell('A1').font?.bold } } catch { return null } }
+  const sheetSaved = await until(async () => { const c = await cellsOf(); return c?.B3 === 950 && c.B4?.formula === 'SUM(B2:B3)' && c.B4.result === 1070 && c.A1bold && (await sheetState()) === 'Saved' && c }, 10000)
+  ok(!!sheetSaved && !(await p.locator('.sd-conflict[role="alertdialog"]').count()), 'saved: the file has the value, its total worked out again (1070), and its bold heading; the status line says Saved, with nothing to warn of first', { cells: await cellsOf(), state: await sheetState() })
+  // The ribbon as Excel's: Ask AI first, then the clipboard, fonts, alignment and number formats;
+  // the formula bar with its name box; the sheet's tabs; Charts under Insert.
+  const ribbon = await p.evaluate(() => {
+    const u = document.querySelector('.sd-univer')
+    const cmd = (id) => !!u.querySelector(`[data-u-command="${id}"]`)
+    return { ask: cmd('bridge.sheet.ask-ai'), first: u.querySelector('[data-u-command]')?.getAttribute('data-u-command'), tabs: [...u.querySelectorAll('[role="tablist"] [role="tab"], [data-u-comp="ribbon-tab"]')].map((e) => e.textContent.trim()).filter(Boolean), names: [...u.querySelectorAll('input')].map((i) => i.value), sheets: u.innerText.includes('Budget') }
+  })
+  ok(ribbon.ask && ribbon.first === 'bridge.sheet.ask-ai' && ribbon.names.some((v) => /^[A-Z]+\d+$/.test(v)) && ribbon.sheets, 'a sheet\'s ribbon: Ask AI first; the formula bar\'s name box; its sheet\'s tab', ribbon)
   const sheetCell = async (file, sheet, a1) => { const x = new ExcelJS.Workbook(); await x.xlsx.load(fs.readFileSync(path.join(dir, file))); return x.getWorksheet(sheet).getCell(a1).value }
   // Ask an agent on a sheet: Ask AI beside it, about the cells picked, to the agent at work there.
   await goTo('B2')
@@ -449,7 +463,7 @@ try {
   // back is what was there, with the one change.
   const JSZip1 = require('jszip')
   const entries = async (file) => { const z = await JSZip1.loadAsync(fs.readFileSync(file)); const out = {}; for (const n of Object.keys(z.files).sort()) if (!z.files[n].dir) out[n] = await z.file(n).async('nodebuffer'); return out }
-  const before = await entries(path.join(dir, 'ledger.xlsx'))
+  const ledgerWas = await entries(path.join(dir, 'ledger.xlsx'))
   await open('ledger.xlsx')
   await until(async () => (await p.locator('.sd-univer canvas').count()) > 0 && /Ledger/.test(await p.locator('.sd-univer').innerText().catch(() => '')), 30000)
   await sleep(800)
@@ -459,9 +473,9 @@ try {
   await until(async () => /Unsaved changes/.test(await p.locator('.sd-status').innerText()), 5000)
   await p.locator('.pane-head button', { hasText: 'Save' }).click()
   await until(async () => /Saved/.test(await p.locator('.sd-status .sd-state').innerText()) && !(await p.locator('.sd-conflict').count()), 10000)
-  const after = await entries(path.join(dir, 'ledger.xlsx'))
-  const differ = Object.keys({ ...before, ...after }).filter((n) => !before[n] || !after[n] || !before[n].equals(after[n]))
-  ok(differ.every((n) => ['xl/worksheets/sheet1.xml', 'xl/workbook.xml', 'xl/calcChain.xml', 'xl/sharedStrings.xml', 'xl/styles.xml', '[Content_Types].xml', 'xl/_rels/workbook.xml.rels'].includes(n)) && differ.includes('xl/worksheets/sheet1.xml') && !!after['xl/charts/chart1.xml'] && !!after['xl/drawings/drawing1.xml'], 'an Excel file saved here: only the changed sheet is written again; its chart, drawing, styles and other sheet are the same bytes', differ)
+  const ledgerNow = await entries(path.join(dir, 'ledger.xlsx'))
+  const differ = Object.keys({ ...ledgerWas, ...ledgerNow }).filter((n) => !ledgerWas[n] || !ledgerNow[n] || !ledgerWas[n].equals(ledgerNow[n]))
+  ok(differ.every((n) => ['xl/worksheets/sheet1.xml', 'xl/workbook.xml', 'xl/calcChain.xml', 'xl/sharedStrings.xml', 'xl/styles.xml', '[Content_Types].xml', 'xl/_rels/workbook.xml.rels'].includes(n)) && differ.includes('xl/worksheets/sheet1.xml') && !!ledgerNow['xl/charts/chart1.xml'] && !!ledgerNow['xl/drawings/drawing1.xml'], 'an Excel file saved here: only the changed sheet is written again; its chart, drawing, styles and other sheet are the same bytes', differ)
   const lb = new ExcelJS.Workbook()
   await lb.xlsx.load(fs.readFileSync(path.join(dir, 'ledger.xlsx')))
   const lsh = lb.getWorksheet('Ledger')

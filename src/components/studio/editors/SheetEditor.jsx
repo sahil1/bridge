@@ -169,7 +169,10 @@ export default function SheetEditor({ file, data, onDirty, onStats, handle, read
       setEmpty(!readOnly && Object.values(wb.data.sheets).every((s) => !Object.keys(s.cellData || {}).length))
       setReady(true)
       if (readOnly) u.getActiveWorkbook()?.setEditable?.(false)
-      // Changed once something's edited after it opened (the first mutations are its own setting up).
+      // Changed once the workbook itself changes after it opened: a mutation (type 2) to it, as an
+      // edit, a format or an undo make. Not Univer's own: its setting up as it opens, its cell
+      // editor's scratch document (doc.*, which a cell picked fills), or a formula's result worked
+      // out again (onlyLocal). Univer's Facade gives these as its CommandExecuted event.
       let settled = false
       const settle = setTimeout(() => { settled = true }, 600)
       offs.push({ dispose: () => clearTimeout(settle) })
@@ -177,11 +180,11 @@ export default function SheetEditor({ file, data, onDirty, onStats, handle, read
       // mouse, the keys, the name box) it's set by the same operation.
       let tick = null
       const look = () => { clearTimeout(tick); tick = setTimeout(() => on && setSel(selectionOf(u)), 120) }
-      offs.push(u.onCommandExecuted?.((cmd) => {
-        if (settled && cmd?.type === 2) { changed(true); setEmpty(false) }
-        const op = OPS[cmd?.id]
+      offs.push(u.addEvent(u.Event.CommandExecuted, (cmd) => {
+        if (settled && cmd.type === 2 && !cmd.options?.onlyLocal && !String(cmd.id).startsWith('doc.')) { changed(true); setEmpty(false) }
+        const op = OPS[cmd.id]
         if (op && cmd.params?.subUnitId) ops.current.push({ sheet: cmd.params.subUnitId, ...op(cmd.params) })
-        if (cmd?.id === 'sheet.operation.set-selections' || cmd?.id === 'sheet.command.set-worksheet-activate') look()
+        if (cmd.id === 'sheet.operation.set-selections' || cmd.id === 'sheet.command.set-worksheet-activate') look()
       }))
       look()
     }, (e) => on && setErr(e.message))
