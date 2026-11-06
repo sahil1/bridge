@@ -15,21 +15,23 @@
 
 /* Ask AI and Charts: a panel at the side of the sheet. */
 .sh-side[hidden] { display: none; }
-.sh-side { flex: none; width: 320px; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--line); background: var(--pane); }
+.sh-side { flex: none; width: 320px; display: flex; flex-direction: column; min-width: 0; min-height: 0; border-left: 1px solid var(--line); background: var(--pane); }
 .sh-side .sd-panel-head { position: static; gap: 6px; }
 .sh-side .sd-panel-head > svg { color: var(--accent); }
-.sh-side-body { flex: 1; min-height: 0; overflow: auto; padding: 12px 14px 16px; display: grid; align-content: start; gap: 12px; }
-.sh-picked { margin: 0; font-size: 12.5px; }
+/* Each grid here is one column as wide as the panel (minmax(0, 1fr)), never as wide as its widest
+   word or option: wider fonts (Windows) wrap rather than push the panel sideways. */
+.sh-side-body { flex: 1; min-height: 0; overflow: auto; padding: 12px 14px 16px; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 12px; }
+.sh-picked { margin: 0; font-size: 12.5px; overflow-wrap: anywhere; }
 .sh-picked b { font-family: var(--font-mono); font-weight: 600; }
-.sh-quick { display: flex; flex-wrap: wrap; gap: 6px; }
-.sh-chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--pane-2); color: var(--ink); font: 500 12.5px/1 var(--font); cursor: pointer; }
+.sh-quick { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.sh-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; min-height: 28px; padding: 4px 10px; text-align: left; border: 1px solid var(--line); border-radius: 999px; background: var(--pane-2); color: var(--ink); font: 500 12.5px/1.25 var(--font); cursor: pointer; }
 .sh-chip:hover:not(:disabled) { border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); background: var(--accent-soft); }
-.sh-chip > svg { color: var(--accent); }
-.sh-ask-form { display: grid; gap: 8px; }
+.sh-chip > svg { flex: none; color: var(--accent); }
+.sh-ask-form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; }
 .sh-ask-form textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 84px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--pane); color: var(--ink); font: 13px/1.45 var(--font); }
 .sh-ask-form textarea:focus { outline: none; border-color: color-mix(in srgb, var(--accent) 55%, transparent); box-shadow: 0 0 0 3px var(--accent-soft); }
-.sh-to { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-2); }
-.sh-to select { flex: 1; min-width: 0; height: 28px; border: 1px solid var(--line); border-radius: 6px; background: var(--pane); color: var(--ink); font: inherit; }
+.sh-to { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12.5px; color: var(--ink-2); }
+.sh-to select { flex: 1; width: 100%; min-width: 0; height: 28px; border: 1px solid var(--line); border-radius: 6px; background: var(--pane); color: var(--ink); font: inherit; }
 .sh-send { justify-self: end; }
 .sh-wait { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px 8px; padding: 9px 10px; border-radius: 8px; background: var(--pane-2); font-size: 12.5px; line-height: 1.45; color: var(--ink-2); }
 .sh-wait > svg { flex: none; margin-top: 2px; color: var(--accent); }
@@ -37,9 +39,9 @@
 .sh-wait.bad { background: color-mix(in srgb, var(--critical) 8%, var(--pane)); color: var(--critical); }
 .sh-wait.bad > svg { color: var(--critical); }
 .sh-wait.ok > svg { color: var(--ok, #1f9d55); }
-.sh-change { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid color-mix(in srgb, #7c5cff 45%, var(--line)); border-radius: 10px; background: color-mix(in srgb, #7c5cff 6%, var(--pane)); }
+.sh-change { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 10px 12px; border: 1px solid color-mix(in srgb, #7c5cff 45%, var(--line)); border-radius: 10px; background: color-mix(in srgb, #7c5cff 6%, var(--pane)); }
 .sh-sum { font-weight: 600; line-height: 1.4; }
-.sh-answer { margin: 0; white-space: pre-wrap; line-height: 1.5; font-size: 13px; }
+.sh-answer { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; font-size: 13px; }
 .sh-cells ul { margin: 4px 0 0; padding: 0; list-style: none; display: grid; gap: 2px; font-size: 12px; }
 .sh-cells li { display: flex; gap: 8px; min-width: 0; }
 .sh-cells code { flex: none; min-width: 38px; color: var(--ink-2); }
@@ -47,7 +49,7 @@
 .sh-acts { display: flex; flex-wrap: wrap; gap: 8px; }
 
 /* Charts, drawn from the cells. */
-.sh-fig { margin: 0; display: grid; gap: 6px; padding: 10px 10px 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--pane); }
+.sh-fig { margin: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; padding: 10px 10px 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--pane); }
 .sh-fig figcaption { font-size: 12.5px; font-weight: 600; }
 .sh-fig figcaption .link-btn { font-weight: 600; color: var(--ink); }
 .sh-none { display: grid; justify-items: center; gap: 8px; padding: 24px 8px; text-align: center; color: var(--ink-2); }
@@ -70,7 +72,7 @@
   .sh-csv { padding: 6px 12px; }
   .sh-csv-eol { margin-left: 0; }
 }
-.app.narrow .sh-chip { height: 40px; padding: 0 14px; font-size: 14px; }
+.app.narrow .sh-chip { min-height: 40px; padding: 6px 14px; font-size: 14px; }
 .app.narrow .sh-side .win-btn { width: 40px; height: 40px; }
 .app.narrow .sh-ask-form textarea, .app.narrow .sh-to select, .app.narrow .sh-csv select { font-size: 16px; }
 .app.narrow .sh-to select, .app.narrow .sh-csv select { height: 40px; }
