@@ -1169,10 +1169,13 @@ app.post('/api/fix/install', wrap(async (req) => {
 // A voice note or a dictation, the audio as the body (a 16 kHz mono WAV from the page): { text }.
 // Not set up yet: 409 with what's needed in words (error), code needs-model and the model, which
 // the page offers to download, then sends the recording again.
+// hearing: how many are being turned into text now (an update waits for them, updates.js).
+let hearing = 0
 app.post('/api/transcribe', express.raw({ type: () => true, limit: '30mb' }), async (req, res) => {
+  hearing++
   try { res.json(await voice.transcribe(req.body, req.headers['content-type'], { more: dictation.hints(dictationSources) })); counts.add('voice.transcribed') } catch (e) {
     res.status(e.status || 502).json({ error: e.message, ...(typeof e.code === 'string' ? { code: e.code } : {}), ...(e.model ? { model: e.model } : {}) })
-  }
+  } finally { hearing-- }
 })
 // Dictation: the names it spells the way they're written (dictation.js; the page tidies the text),
 // which the speech engine also listens for.
@@ -2092,7 +2095,31 @@ app.get('/api/counts/sent/:week', wrap((req) => counts.sentReport(req.params.wee
 app.post('/api/counts/active', wrap(() => counts.activity()))
 
 app.get('/api/updates', wrap((req) => updates.status({ force: req.query.refresh === '1', disabled: cfg.updates?.check === false })))
-app.post('/api/updates/install', wrap((req) => updates.install({ app: req.body?.app === true })))
+// auto: by itself while you're away, asked by the desktop app on this computer only.
+app.post('/api/updates/install', wrap((req) => {
+  if (req.body?.auto === true && !fromHere(req)) throw Object.assign(new Error('Only the desktop app updates by itself'), { status: 403 })
+  return updates.install({ app: req.body?.app === true, auto: req.body?.auto === true })
+}))
+// Updating by itself while you're away (updates.js autoView): whether it's the time, and what it
+// waits for. The desktop app says what it waits for itself (POST, from this computer).
+updates.useSettings(() => ({ on: cfg.updates?.auto !== false, checks: cfg.updates?.check !== false }))
+// What an update would cut short: this computer's agents working or waiting on you (a cloud agent
+// runs elsewhere, and other devices' agents on them), a meeting recording, being transcribed or its
+// notes being written, and a dictation being heard (its live words, or its recording being turned
+// into text, from any of your devices).
+updates.useQuiet(async () => {
+  const f = await fleetView().catch(() => null)
+  return {
+    agents: f ? f.agents.filter((a) => !a.cloud && (a.status === 'working' || a.status === 'blocked')).length : null,
+    meeting: meetings.busy(),
+    dictation: hearing > 0 || livewords.active(),
+  }
+})
+app.get('/api/updates/auto', wrap(() => updates.autoView()))
+app.post('/api/updates/auto', wrap((req) => {
+  if (!fromHere(req)) throw Object.assign(new Error('Only the desktop app says this'), { status: 403 })
+  return updates.autoView({ said: Array.isArray(req.body?.why) ? req.body.why : [] })
+}))
 
 // Which server this is, so the desktop app can tell when one left over from an older build (or
 // another copy of the app) is still running, and replace it with its own.

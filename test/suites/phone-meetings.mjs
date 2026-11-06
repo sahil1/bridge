@@ -202,8 +202,11 @@ try {
     await fits('a finished meeting\'s summary', 'meeting-summary')
     const head = await tab.locator('.pane-head').evaluate((e) => ({ h: Math.round(e.getBoundingClientRect().height), sub: !!e.querySelector('.pane-sub'), title: e.querySelector('.mt-title').getBoundingClientRect().bottom, views: e.querySelector('.seg').getBoundingClientRect().top }))
     ok(!head.sub && head.views >= head.title && head.h <= 120, `${at}: the header is the name (with Back, its state and ⋯) and the views under it`, head)
-    const meta = await tab.locator('.mt-page > .mt-meta').innerText().catch(() => '')
-    ok(/Priya Shah, Dan Ruiz, Tester/.test(meta) && /Not saved yet/.test(meta) && /\d:\d\d/.test(meta), `${at}: when, who and where it's saved at the top of the page, whole`, meta)
+    // Saved by itself as it ended (on unless turned off), so where it's saved is there too.
+    const metaText = () => tab.locator('.mt-page > .mt-meta').innerText().catch(() => '')
+    const metaOk = (x) => /Priya Shah, Dan Ruiz, Tester/.test(x) && /Meeting notes/.test(x) && /\d:\d\d/.test(x)
+    const meta = (await until(async () => { const x = await metaText(); return metaOk(x) && x }, 8000)) || await metaText()
+    ok(metaOk(meta), `${at}: when, who and where it's saved at the top of the page, whole`, meta)
     const flow = await tab.locator('.mt-page').evaluate((pg) => { const n = pg.querySelector('.mt-cols > .mt-notes'); const a = pg.querySelector('.mt-ask'); return { page: pg.scrollHeight > pg.clientHeight, box: n.scrollHeight > n.clientHeight + 1, ask: a.getBoundingClientRect().top >= n.getBoundingClientRect().bottom - 1 } })
     ok(flow.page && !flow.box && flow.ask, `${at}: the summary is one page that scrolls, with Ask under it (not a box scrolling over an Ask that stays)`, flow)
     const fill = await p.evaluate(() => { const pane = document.querySelector('.m-meetings > .pane').getBoundingClientRect(); const body = document.querySelector('.m-body').getBoundingClientRect(); return { pane: Math.round(pane.bottom), body: Math.round(body.bottom) } })

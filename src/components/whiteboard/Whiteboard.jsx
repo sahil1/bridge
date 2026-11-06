@@ -18,6 +18,7 @@ import { holderOf, contents } from './holders.js'
 import { ITEMS } from '../../../shared/whiteboard/catalog.js'
 import { openBoard, openBoards } from './links.js'
 import { NameDialog } from '../FileExtras.jsx'
+import { useBusy } from '../../busy.js'
 import './whiteboard.css'
 
 // Whiteboards: the list (WhiteboardsHome), one board (WhiteboardPage), and a diagram file in an
@@ -208,12 +209,14 @@ function useDrawing(key, store, look = null) {
     return () => clearInterval(id)
   }, [ready, key]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Unsaved when the window closes: saved, and the browser asked to wait.
+  // Unsaved when the window closes: saved, and the browser asked to wait. Meanwhile the desktop app
+  // doesn't update by itself (busy.js).
   useEffect(() => {
     const warn = (e) => { if (st.current.dirty) { flush(); e.preventDefault(); e.returnValue = '' } }
     window.addEventListener('beforeunload', warn)
     return () => window.removeEventListener('beforeunload', warn)
   }, [flush])
+  useBusy('board', status !== 'saved')
 
   const onApi = useCallback((a, X) => {
     st.current.api = a

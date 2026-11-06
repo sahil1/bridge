@@ -299,7 +299,7 @@ export default function Meetings() {
         <p className="muted small">Save on a meeting writes it for Obsidian or any notes app, laid out like Granola's and Meetily's Obsidian plugins, so they sit side by side.</p>
         <SaveNotes set={set} pickFolder={pickFolder} />
         <label className="st-check">
-          <input type="checkbox" checked={!!m.autoSave} onChange={(e) => set({ autoSave: e.target.checked, ...(m.folder ? {} : { folder: d.folder }) })} />
+          <input type="checkbox" checked={m.autoSave !== false} onChange={(e) => set({ autoSave: e.target.checked, ...(m.folder ? {} : { folder: d.folder }) })} />
           <span><b>Save every meeting there by itself</b> <span className="muted small">As it ends, and again with its summary once that's written.</span></span>
         </label>
       </section>

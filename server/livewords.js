@@ -127,6 +127,8 @@ export async function feed(sid, buf, { cfg, words = [] } = {}) {
   hear(s)
   return { live: true, text: textOf(s) }
 }
+// A dictation being heard now: sound came for it in the last 10 seconds (an update waits for it).
+export const active = () => [...sessions.values()].some((s) => !s.ended && Date.now() - s.at < 10_000)
 // Done (let go, Esc, or gone): nothing more is heard for it.
 export function end(sid) {
   const s = sessions.get(sid)
