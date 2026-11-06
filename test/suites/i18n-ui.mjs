@@ -33,7 +33,18 @@ try {
     const phone = l === 'de' || l === 'hi'
     const look = l === 'ja' || l === 'hi' ? { mode: 'dark', theme: 'midnight' } : { mode: 'light', theme: 'sky' }
     const { ctx, p, errors } = await page(b, kit.url, { ...look, store: { 'cc-lang': l } })
-    await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
+    // What the page was doing when the sidebar doesn't come: said, not just a timeout.
+    const said = []
+    const pending = new Set()
+    p.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') said.push(`${m.type()}: ${m.text().slice(0, 300)}`) })
+    p.on('request', (r) => pending.add(r.url()))
+    p.on('requestfinished', (r) => pending.delete(r.url()))
+    p.on('requestfailed', (r) => { pending.delete(r.url()); said.push(`failed: ${r.url()} ${r.failure()?.errorText || ''}`) })
+    if (!(await p.waitForSelector('.rail-nav-btn', { timeout: 15000 }).then(() => true, () => false))) {
+      await shot(p, `${tag}i18n-${l}-stuck`).catch(() => {})
+      const seen = await p.evaluate(() => ({ ready: document.readyState, lang: document.documentElement.lang, text: document.body?.innerText.slice(0, 400) })).catch((e) => ({ evaluate: e.message }))
+      throw new Error(`${l}: the sidebar didn't come in 15 s ${JSON.stringify({ seen, errors, said: said.slice(-15), pending: [...pending].slice(0, 15) })}`)
+    }
     ok((await p.evaluate(() => document.documentElement.lang)) === l, `${l}: the page says it's in ${l}`)
     const nav = (await p.locator('.rail-nav-btn').allInnerTexts()).map((x) => x.trim())
     ok(['New', 'Chief of Staff', 'Meetings'].every((en) => nav.some((x) => x.includes(say(l, en)))), `${l}: the sidebar is in its words`, nav)
