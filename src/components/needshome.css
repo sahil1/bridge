@@ -1,7 +1,8 @@
-/* Home (NeedsHome.jsx): what needs you, then ready to look at and coming up, side by side when
-   there's room. Its needs-you cards are the inbox's (needsyou.css). */
+/* Home (NeedsHome.jsx): what needs you across the top, then ready to look at beside coming up and
+   the Chief of Staff's tasks when there's room. Its needs-you cards are the inbox's (needsyou.css);
+   the rest are short rows in quiet lists, as Meetings' list and the Agent Map have them. */
 .hm, .ey { height: 100%; min-height: 0; overflow-y: auto; overscroll-behavior: contain; background: var(--pane); color: var(--ink); }
-.hm { container-type: inline-size; padding: 22px 28px 32px; }
+.hm { container-type: inline-size; padding: 22px 28px 40px; }
 .hm.phone, .ey.phone { padding: 14px 12px 28px; }
 .hm > *, .ey > * { max-width: 1180px; margin-left: auto; margin-right: auto; }
 .hm-head, .ey-head { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 10px 16px; margin-bottom: 12px; }
@@ -12,41 +13,113 @@
 .hm-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .hm-device { height: 28px; max-width: 220px; padding: 0 6px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--pane); color: var(--ink); font: 500 12.5px var(--font); }
 .hm-every { gap: 4px; }
-.hm-kinds { margin-bottom: 10px; flex-wrap: wrap; overflow: visible; }
+.hm-kinds { margin-bottom: 14px; flex-wrap: wrap; overflow: visible; }
 .hm-err, .hm-partial { margin: 0 0 10px; }
-.hm .ny-note { margin: 0 0 10px; }
-.hm-sec { min-width: 0; margin-top: 10px; }
-.hm-sec h3 { display: flex; align-items: baseline; gap: 8px; margin: 6px 2px 8px; font-size: 14px; font-weight: 650; }
-.hm-sec h3 .muted { font-weight: 450; font-size: 12.5px; }
-.hm-sec .ny-item { margin-bottom: 8px; background: var(--pane); box-shadow: var(--shadow); }
-.hm-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 18px; margin-top: 8px; }
-@container (max-width: 760px) { .hm-cols { grid-template-columns: minmax(0, 1fr); } }
-.hm-empty { display: flex; align-items: center; gap: 8px; padding: 14px 14px; border-radius: 11px; border: 1px dashed var(--line-2); color: var(--good); font-size: 13px; }
+.hm .ny-note { margin: 0 0 12px; }
+.hm-loading { margin-top: 8px; }
+
+/* A section: its name, how many, and what it's for, on one quiet line. */
+.hm-sec { min-width: 0; }
+.hm-sec h3 { display: flex; align-items: center; gap: 8px; min-height: 26px; margin: 0 2px 8px; font-size: 14px; font-weight: 650; }
+.hm-hint { font-weight: 450; font-size: 12.5px; color: var(--ink-3); }
+.hm-needs { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 400px), 1fr)); gap: 10px; align-items: start; }
+.hm-needs .ny-item { margin: 0; }
+.hm-needs .ny-item.hm-task { background: color-mix(in srgb, var(--needs) 4%, var(--pane-2)); border-color: color-mix(in srgb, var(--needs) 28%, var(--line)); }
+.hm-cols { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 26px 32px; align-items: start; margin-top: 26px; }
+.hm-side { display: grid; gap: 26px; min-width: 0; align-content: start; }
+@container (max-width: 860px) { .hm-cols { grid-template-columns: minmax(0, 1fr); } }
+.hm-empty { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-radius: 11px; border: 1px dashed var(--line-2); color: var(--good); font-size: 13px; }
 .hm-empty span { color: var(--ink-2); }
-.hm-none { margin: 4px 2px 10px; }
-.hm-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; padding: 10px 12px; border-radius: 11px; border: 1px solid var(--line); background: var(--pane); box-shadow: var(--shadow); min-width: 0; }
-.hm-row.off { opacity: .62; }
-.hm-row > .sdot { flex: none; }
+.hm-none { margin: 2px 2px 8px; }
+.hm-none p { margin: 0 0 2px; font-size: 13px; color: var(--ink-2); }
+.hm-none small { font-size: 12px; }
 .hm-ico { flex: none; display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 7px; background: var(--pane-3); color: var(--ink-2); }
-.hm-row-main { flex: 1; min-width: 0; display: grid; gap: 2px; }
-.hm-row-title { font-size: 13.5px; font-weight: 600; overflow-wrap: anywhere; }
-.hm-row-sub { font-size: 12.5px; color: var(--ink-3); overflow-wrap: anywhere; display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: center; }
-.hm-dev { display: inline-flex; align-items: center; gap: 3px; padding: 0 6px; border-radius: 6px; background: var(--pane-3); color: var(--ink-2); font-size: 11.5px; }
-.hm-row-acts { flex: none; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
-.hm-row-acts a.btn { text-decoration: none; display: inline-flex; align-items: center; gap: 5px; }
-.hm-links { display: flex; flex-wrap: wrap; gap: 4px 10px; }
-.hm-links a { color: var(--accent); text-decoration: none; }
+
+/* A list of short rows: the thing, a line or two of it, and where and when on the right. */
+.hm-list { list-style: none; margin: 0; padding: 3px; display: grid; gap: 1px; border-radius: 12px; border: 1px solid var(--line); background: var(--pane); min-width: 0; }
+.hm-item { position: relative; border-radius: 9px; min-width: 0; }
+.hm-item:hover, .hm-item:focus-within, .hm-item.open { background: var(--pane-2); }
+.hm-item.off { opacity: .62; }
+.hm-item-main { display: flex; align-items: flex-start; gap: 10px; width: 100%; min-width: 0; padding: 8px 10px; border-radius: 9px; color: inherit; text-align: left; font: inherit; }
+.hm-item-main:disabled { cursor: default; }
+.hm-item-main:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.hm-item-ico { flex: none; display: grid; place-items: center; width: 18px; height: 20px; color: var(--ink-3); }
+.hm-item-body { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.hm-item-l1 { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
+.hm-item-l1 b { min-width: 0; font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hm-what { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--ink-3); }
+.hm-tag { flex: none; display: inline-flex; align-items: center; gap: 3px; align-self: center; height: 17px; padding: 0 5px; border-radius: 5px; background: var(--accent-soft); color: var(--accent); font-size: 10.5px; font-weight: 650; }
+.hm-item-sub { font-size: 12.5px; line-height: 1.45; color: var(--ink-2); overflow-wrap: anywhere; }
+.hm-item.read .hm-item-l1 b { font-weight: 500; color: var(--ink-2); }
+.hm-item.read .hm-item-sub { color: var(--ink-3); }
+.hm-item.open .hm-item-sub { display: none; }
+.hm-item-when { flex: none; display: inline-flex; align-items: center; gap: 8px; margin-top: 1px; font-size: 11.5px; color: var(--ink-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.hm-dev { display: inline-flex; align-items: center; gap: 3px; color: var(--ink-2); font-size: 11.5px; }
+/* What you'd do with it, on the row while the pointer or the keyboard is on it (a computer). */
+.hm-quick { position: absolute; top: 5px; right: 6px; display: flex; align-items: center; gap: 2px; padding-left: 28px; background: linear-gradient(to right, transparent, var(--pane-2) 26px); opacity: 0; pointer-events: none; transition: opacity .12s; }
+.hm-item:hover .hm-quick, .hm-item:focus-within .hm-quick { opacity: 1; pointer-events: auto; }
+.hm-item:hover .hm-item-when, .hm-item:focus-within .hm-item-when { visibility: hidden; }
+.hm-item.open .hm-item-when { visibility: visible; }
+.hm-quick .ghost-btn, .hm-item-acts .ghost-btn { text-decoration: none; }
+.hm-quick .ghost-btn.strong, .hm-item-acts .ghost-btn.strong { color: var(--accent); font-weight: 600; }
+/* Opened: the whole of it, and what you can do with it. */
+.hm-item-more { display: grid; gap: 8px; padding: 0 10px 10px 38px; }
+.hm-full { margin: 0; font-size: 13px; line-height: 1.55; color: var(--ink); white-space: pre-line; overflow-wrap: anywhere; }
+.hm-item-acts { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; }
+.hm-item-more .ny-reply { margin-top: 0; }
+
+/* Show all, and what's folded away (older than a day, tasks with no day). */
+.hm-more-btn { display: block; margin: 6px 0 0; padding: 4px 10px; border-radius: 8px; font: 500 12.5px var(--font); color: var(--accent); }
+.hm-more-btn:hover { background: var(--accent-soft); }
+.hm-fold-box { margin-top: 8px; display: grid; gap: 6px; }
+.hm-fold-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
+.hm-fold { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px 5px 6px; border-radius: 8px; font: 500 12.5px var(--font); color: var(--ink-2); }
+.hm-fold:hover { background: var(--pane-2); color: var(--ink); }
+.hm-fold .icon { transition: transform .15s; color: var(--ink-3); }
+.hm-fold[aria-expanded="true"] .icon { transform: rotate(90deg); }
+.hm-fold-row > .ghost-btn { margin-left: auto; }
+.hm-sure { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-left: auto; font-size: 12.5px; color: var(--ink-2); }
+.hm-clear-read { color: var(--ink-2); font-weight: 500; }
+
+/* Coming up, a day at a time: the time (or Due) in a column of its own. */
+.hm-day + .hm-day { margin-top: 12px; }
+.hm-day h4 { margin: 0 4px 5px; font-size: 11px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-3); }
+.hm-time { flex: none; width: 62px; padding-top: 1px; font-size: 12px; font-weight: 600; color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hm-time.due { color: var(--ink-3); font-weight: 550; }
+.hm-time.late { color: var(--warning); }
+.hm-time.doing { color: var(--working); }
+.hm-ev { display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px; border-radius: 9px; min-width: 0; }
+.hm-ev.now { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.hm-ev.now .hm-time { color: var(--accent); }
+.hm-ev-main { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.hm-ev-main b { font-size: 13.5px; font-weight: 600; overflow-wrap: anywhere; }
+.hm-ev-acts { flex: none; display: flex; align-items: center; gap: 6px; }
+.hm-ev-acts a.btn { text-decoration: none; display: inline-flex; align-items: center; gap: 5px; }
+.hm-links { display: flex; flex-wrap: wrap; gap: 2px 12px; margin-top: 2px; font-size: 12.5px; }
+.hm-links a { display: inline-flex; align-items: center; gap: 4px; color: var(--accent); text-decoration: none; }
 .hm-links a:hover { text-decoration: underline; }
-/* A phone: rows stack their buttons under them, and every control is a whole 40 px target. */
-.hm.phone .hm-row { flex-wrap: wrap; }
-.hm.phone .hm-row-acts { flex: 1 1 100%; justify-content: flex-start; }
-.hm.phone :is(.btn.small, .ghost-btn, .fchip, .link-btn), .ey.phone :is(.btn.small, .ghost-btn, .fchip, .link-btn) { min-height: 40px; min-width: 40px; }
-.hm.phone .hm-links a { display: inline-flex; align-items: center; min-height: 40px; }
+.hm-trow .hm-item-l1 b { white-space: normal; overflow-wrap: anywhere; font-weight: 550; }
+
+/* A phone: no pointer to hover with, so a row opens to what you can do; titles wrap rather than
+   cut off; every control is a whole 40 px target and a field 16 px (iOS zooms into a smaller one). */
+.hm.phone .hm-item-l1 { flex-wrap: wrap; row-gap: 0; }
+.hm.phone .hm-item-l1 b, .hm.phone .hm-what { white-space: normal; overflow-wrap: anywhere; max-width: 100%; }
+.hm.phone .hm-item-main { min-height: 44px; padding: 10px 8px; }
+.hm.phone .hm-item-when { margin-top: 2px; }
+.hm.phone .hm-item-more { padding: 0 8px 10px; }
+.hm.phone .hm-time { width: 54px; }
+.hm.phone .hm-ev { flex-wrap: wrap; padding: 10px 8px; }
+.hm.phone .hm-ev-acts { flex: 1 1 100%; padding-left: 64px; }
+.hm.phone :is(.btn.small, .ghost-btn, .fchip, .link-btn, .hm-fold, .hm-more-btn), .ey.phone :is(.btn.small, .ghost-btn, .fchip, .link-btn) { min-height: 40px; min-width: 40px; }
+.hm.phone .hm-links a { min-height: 40px; }
 .hm.phone .hm-tools { flex: 1 1 100%; flex-wrap: nowrap; }
 .hm.phone .hm-device { flex: 1; min-width: 0; max-width: none; height: 40px; font-size: 16px; }
 .hm.phone .hm-every { flex: none; }
+.hm.phone .hm-kinds { gap: 2px 4px; }
 .hm.phone .ny-reply input { height: 40px; font-size: 16px; }
 .hm.phone .ny-reply .btn { min-height: 40px; }
+.hm.phone .hm-cols, .hm.phone .hm-side { gap: 22px; }
+.hm.phone .hm-cols { margin-top: 22px; }
 
 /* Everything: a lane per computer (or per kind), as the Agent Map has them. */
 .ey { padding: 18px 20px 28px; }

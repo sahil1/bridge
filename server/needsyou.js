@@ -21,7 +21,8 @@ const MAX = 60
 // What a Claude Code or Codex agent says when it stops at its plan's usage limit.
 const LIMIT = /\b(hit your (session|weekly|usage|5-hour) limit|usage limit reached|rate limit reached)\b/i
 const base = (p) => String(p || '').split(/[\\/]/).filter(Boolean).pop() || ''
-const clip = (s, n) => { const t = String(s || '').replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t }
+// Cut at a whole word: an agent's last message never ends in half of one ("…on your list, fr…").
+const clip = (s, n) => { const t = String(s || '').replace(/\s+/g, ' ').trim(); if (t.length <= n) return t; const c = t.slice(0, n); return `${(c.slice(0, c.lastIndexOf(' ')) || c).replace(/[\s,;:.-]+$/, '')}…` }
 
 // What the inbox calls an agent: its tab's name, as the sidebar does (on Windows its terminal's
 // title can be the shell's, the same for every agent), else its title; and the project it works on.
