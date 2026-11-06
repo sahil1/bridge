@@ -27,6 +27,9 @@ const newer = (a, b) => { const x = parts(a); const y = parts(b); for (let i = 0
 // (scripts/release.js writes it there from desktop/package.json): <!-- macOS 14.0 or later -->.
 // A release without one opens wherever this version does.
 const MIN_MAC = /^<!-- macOS ([\d.]+) or later -->\s*$/m
+// The notes' last line asks for a GitHub star (scripts/release.js); that's for GitHub's page, not
+// for the app's own update notes.
+const STAR = /^If Bridge AI is useful to you, a star on GitHub helps other people find it\.\s*$/m
 export const minMacOf = (notes) => String(notes || '').match(MIN_MAC)?.[1] || null
 
 let last = { at: 0, latest: null, url: null, notes: null, minMac: null, error: null }
@@ -37,7 +40,7 @@ async function check(force = false) {
     if (!r.ok) throw new Error(`GitHub answered ${r.status}`)
     const j = await r.json()
     const body = String(j.body || '')
-    last = { at: Date.now(), latest: String(j.tag_name || '').replace(/^v/, ''), url: j.html_url, notes: body.replace(MIN_MAC, '').trim().slice(0, 4000), minMac: minMacOf(body), publishedAt: j.published_at || null, prerelease: !!j.prerelease, error: null }
+    last = { at: Date.now(), latest: String(j.tag_name || '').replace(/^v/, ''), url: j.html_url, notes: body.replace(MIN_MAC, '').replace(STAR, '').trim().slice(0, 4000), minMac: minMacOf(body), publishedAt: j.published_at || null, prerelease: !!j.prerelease, error: null }
   } catch (e) {
     last = { ...last, at: Date.now(), error: e.message }
   }

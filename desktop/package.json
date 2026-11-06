@@ -4,7 +4,7 @@
   "version": "3.10.0",
   "description": "Bridge AI as a desktop app for macOS, Windows and Linux",
   "license": "Apache-2.0",
-  "author": "Bridge AI contributors",
+  "author": "Bold Bridge",
   "main": "main.js",
   "desktopName": "dev.bridge-ai.app.desktop",
   "private": true,
@@ -112,7 +112,7 @@
       "executableName": "bridge-ai",
       "syncDesktopName": true,
       "synopsis": "Run and talk to all your AI coding agents",
-      "maintainer": "Bridge AI contributors <sahil1@users.noreply.github.com>",
+      "maintainer": "Bold Bridge <sahil1@users.noreply.github.com>",
       "artifactName": "Bridge-AI-linux-${arch}.${ext}",
       "files": [
         "package.json",
