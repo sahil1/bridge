@@ -1,0 +1,100 @@
+/* Mail's Done and Remind me, its keys, Reply Assist and Scheduling Assist (MailView.jsx,
+   mail/ReplyAssist.jsx), and Settings › Mail. */
+.mailv { position: relative; }
+.mailv.assisting { grid-template-columns: minmax(300px, 360px) minmax(0, 1fr); }
+.mlist-tabs { flex-wrap: wrap; row-gap: 2px; }
+.mlist-bar .btn { white-space: nowrap; }
+.mreader-wrap { min-height: 0; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
+.mreader-wrap.with-assist { grid-template-columns: minmax(0, 1fr) minmax(320px, 380px); }
+.mreader-wrap > .mreader { min-height: 0; min-width: 0; }
+
+.mreader-do { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.mreader-do kbd, .massist kbd, .mnote kbd { font-size: 10px; line-height: 14px; padding: 0 4px; margin-left: 2px; opacity: .8; }
+.btn.on { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 35%, transparent); color: var(--accent); }
+.btn.primary kbd { background: transparent; color: inherit; border-color: color-mix(in srgb, currentColor 45%, transparent); }
+.mrow-when { font-size: 11px; color: var(--ink-3); }
+
+/* Remind me: when, as a menu under its button. */
+.mreader-remind { position: relative; }
+.mremind { position: absolute; z-index: 30; top: calc(100% + 6px); left: 0; width: min(300px, calc(100vw - 32px)); display: grid; gap: 2px; padding: 10px; border-radius: 12px; background: var(--pane); border: 1px solid var(--line-2); box-shadow: var(--shadow-lg); }
+.mremind > b { padding: 0 6px 4px; }
+.mremind > p { margin: 6px 6px 0; line-height: 1.45; }
+.mremind-row { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; min-height: 32px; padding: 0 6px; border-radius: 8px; text-align: left; font-size: 12.5px; }
+.mremind-row:hover, .mremind-row:focus-visible { background: var(--pane-2); outline: none; }
+.mremind-pick { display: flex; gap: 6px; padding: 6px 6px 0; }
+.mremind-pick input { flex: 1; min-width: 0; height: 30px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--pane-2); color: var(--ink); font: 12.5px var(--font); }
+
+/* What just happened, with Undo. */
+.mnote { position: absolute; z-index: 40; left: 50%; bottom: 14px; transform: translateX(-50%); max-width: calc(100% - 32px); display: flex; align-items: center; gap: 12px; padding: 8px 14px; border-radius: 10px; background: var(--ink); color: var(--pane); font-size: 12.5px; box-shadow: var(--shadow-lg); }
+.mnote .link-btn { color: inherit; white-space: nowrap; }
+.mnote kbd { background: transparent; color: inherit; border-color: color-mix(in srgb, currentColor 40%, transparent); }
+.mnote.bad { background: var(--critical); color: #fff; }
+
+/* The keys. */
+.mkeys-back { position: absolute; inset: 0; z-index: 50; display: grid; place-items: center; padding: 16px; background: color-mix(in srgb, var(--ink) 18%, transparent); }
+.mkeys { width: min(420px, 100%); max-height: 100%; overflow-y: auto; padding: 14px 16px; border-radius: 14px; background: var(--pane); border: 1px solid var(--line-2); box-shadow: var(--shadow-lg); display: grid; gap: 10px; }
+.mkeys header { display: flex; align-items: center; justify-content: space-between; }
+.mkeys dl { margin: 0; display: grid; gap: 6px; }
+.mkeys dl > div { display: grid; grid-template-columns: 96px 1fr; gap: 10px; align-items: baseline; font-size: 12.5px; }
+.mkeys dt { display: flex; gap: 4px; }
+.mkeys dd { margin: 0; color: var(--ink-2); }
+.mkeys p { margin: 0; line-height: 1.45; }
+
+/* Reply Assist, beside the email or under its buttons. */
+.massist { display: grid; gap: 10px; align-content: start; padding: 12px; border-radius: 12px; background: var(--pane-2); border: 1px solid var(--line); min-width: 0; }
+.massist.beside { border-radius: 0; border-width: 0 0 0 1px; background: var(--pane); padding: 16px; overflow-y: auto; min-height: 0; }
+.massist p { margin: 0; line-height: 1.45; }
+.massist-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.massist-head > b { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; white-space: nowrap; }
+.massist-head .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.massist-intro { display: grid; gap: 8px; }
+.massist-busy { display: flex; align-items: center; gap: 6px; }
+.massist-err { display: grid; gap: 6px; justify-items: start; }
+.massist-draft { width: 100%; min-height: 120px; resize: vertical; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line-2); background: var(--pane); color: var(--ink); font: 13.5px/1.55 var(--font); outline: none; }
+.massist-draft:focus { border-color: var(--accent); }
+.massist-acts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.massist-acts a.btn { text-decoration: none; }
+.massist-sent .link-btn { font-size: inherit; }
+.massist-prompt { margin: 0; max-height: 260px; overflow: auto; padding: 10px; border-radius: 8px; background: var(--pane-3); font: 11px/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink-2); }
+.massist-find { justify-self: start; }
+.massist-foot { padding-top: 6px; border-top: 1px solid var(--line); }
+
+/* Scheduling Assist's free times. */
+.massist-times { display: grid; gap: 8px; padding: 10px; border-radius: 10px; background: var(--pane); border: 1px solid var(--line); }
+.massist.beside .massist-times { background: var(--pane-2); }
+.massist-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.massist-row b { display: inline-flex; align-items: center; gap: 5px; }
+.massist-slots { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.massist-slots label { display: flex; align-items: flex-start; gap: 8px; padding: 6px 8px; border-radius: 8px; cursor: pointer; font-size: 12.5px; }
+.massist-slots label:hover { background: var(--pane-2); }
+.massist-slots input { margin-top: 2px; }
+.massist-slots span { display: grid; gap: 1px; min-width: 0; }
+.massist-slots small { font-size: 11.5px; }
+
+/* Settings › Mail. */
+.st-mail .st-input.mvoice-text { width: 100%; height: auto; padding: 8px 11px; line-height: 1.5; resize: vertical; }
+.mvoice-examples { display: grid; gap: 6px; }
+.mvoice-example { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; padding: 8px 10px; border-radius: 9px; background: var(--pane-2); border: 1px solid var(--line); }
+.mvoice-example p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.45; }
+.mvoice-example .muted { grid-column: 1; }
+.mvoice-example .icon-btn { grid-column: 2; grid-row: 1 / span 2; align-self: start; }
+.mdays { gap: 4px; }
+.mdays > span { margin-right: 4px; }
+.mdays .fchip { border: 1px solid var(--line-2); }
+.mdays .fchip.on { background: var(--accent-soft); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+.st-mail .st-input.mtime { width: 120px; }
+.st-mail .btn.danger { background: var(--critical); border-color: transparent; color: #fff; }
+
+/* On a phone: whole targets, and fields iOS doesn't zoom into. No keys to show. */
+.app.narrow .mlist-keys { display: none; }
+.app.narrow .mlist-bar .btn, .app.narrow .mlist-bar .icon-btn, .app.narrow .mreader-head .icon-btn { min-height: 40px; min-width: 40px; }
+.app.narrow .mlist-search { height: 42px; }
+.app.narrow .mlist-search input { align-self: stretch; }
+.app.narrow .mreader-do .btn, .app.narrow .massist .btn, .app.narrow .massist .ghost-btn, .app.narrow .mremind-row, .app.narrow .mremind-pick .btn, .app.narrow .mremind-pick input,
+.app.narrow .mlist-tabs .fchip, .app.narrow .massist .icon-btn, .app.narrow .mnote .link-btn, .app.narrow .mkeys .icon-btn { min-height: 40px; min-width: 40px; }
+.app.narrow .massist .link-btn { min-height: 40px; display: inline-flex; align-items: center; }
+.app.narrow .massist-slots label { min-height: 40px; align-items: center; }
+.app.narrow .massist-draft, .app.narrow .mremind-pick input { font-size: 16px; }
+.app.narrow .mlist-tabs { flex-wrap: wrap; overflow-x: visible; }
+.app.narrow .mreader-do kbd, .app.narrow .massist kbd, .app.narrow .mnote kbd { display: none; }
+.app.narrow .mremind { position: fixed; left: 16px; right: 16px; top: auto; bottom: calc(16px + env(safe-area-inset-bottom)); width: auto; }

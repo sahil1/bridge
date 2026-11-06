@@ -6,15 +6,20 @@
 // Transactions, Updates, Promotions) and "high impact" flag, whether it was sent to you or only
 // cc'd, whether you write to the sender, whether you're in the thread and already replied, and
 // urgency words. Your own "always important" / "mute" rules live in ~/.bridge-ai/cache/mail-rules.json.
+//
+// Read only, always: nothing here sends, archives, flags, moves or deletes mail, or puts a draft in
+// Mail. Done and Remind me are kept by Bridge AI (~/.bridge-ai/mail/marks.json) and leave Mail as
+// it is; you answer from your own mail app.
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
-import { cacheFile, writeFileAtomic } from './paths.js'
-import { readEmlx, splitQuoted, summaryText } from './mailparse.js'
+import { cacheFile, dataFile, writeFileAtomic } from './paths.js'
+import { readEmlx, splitQuoted, summaryText, ownWords } from './mailparse.js'
 
 const MAIL = path.join(os.homedir(), 'Library', 'Mail')
 const RULES = cacheFile('mail-rules.json')
+const MARKS = dataFile('mail', 'marks.json')
 
 const SETUP = {
   noAccess: 'Bridge AI needs Full Disk Access to read Mail\'s local index. Nothing leaves your Mac.',
@@ -98,6 +103,50 @@ export function setRule(address, rule) {
   return r
 }
 
+// ---------- Done and Remind me, kept by Bridge AI ----------
+// threads: { c<conversation> | m<message>: { mark: 'done' | 'later', at, until, id, subject } }:
+// a thread done, or set aside until a time (then back in Needs you, saying it's a reminder). New
+// mail in the thread since brings it back at once, as a reply would in Mail. nudges: { <id of a
+// message you sent>: { until, at, conv, sent, subject, to } }: "remind me if nobody answers",
+// which goes by itself once someone does (or you write again).
+function readMarks() {
+  try { const m = JSON.parse(fs.readFileSync(MARKS, 'utf8')); return { threads: m.threads || {}, nudges: m.nudges || {} } } catch { return { threads: {}, nudges: {} } }
+}
+function writeMarks(m) {
+  fs.mkdirSync(path.dirname(MARKS), { recursive: true })
+  writeFileAtomic(MARKS, JSON.stringify(m, null, 1))
+}
+const threadKey = (m) => (m.conv ? `c${m.conv}` : `m${m.id}`)
+const YEAR = 366 * 864e5
+const clip = (s, n) => String(s || '').replace(/\s+/g, ' ').trim().slice(0, n)
+// mark: 'done', 'later' (until), 'nudge' (a message you sent: sent, conv, until) or 'clear'. at:
+// when it was set, given back by Undo; otherwise now.
+export function setMark({ key, id, mark, until, at, subject, from, sent, conv, to } = {}) {
+  const marks = readMarks()
+  const when = at && Date.parse(at) <= Date.now() + 1000 ? new Date(Date.parse(at)).toISOString() : new Date().toISOString()
+  const later = (u) => {
+    const t = Date.parse(u)
+    if (!Number.isFinite(t) || t <= Date.now() || t > Date.now() + YEAR) throw Object.assign(new Error('Pick a time from now to a year ahead'), { status: 400 })
+    return new Date(t).toISOString()
+  }
+  if (sent != null) {
+    const n = String(Number(sent))
+    if (!Number.isInteger(Number(sent))) throw Object.assign(new Error('Which message you sent?'), { status: 400 })
+    if (mark === 'clear') delete marks.nudges[n]
+    else if (mark === 'nudge') marks.nudges[n] = { until: later(until), at: when, conv: Number(conv) || null, subject: clip(subject, 200), to: clip(to, 200) }
+    else throw Object.assign(new Error('Unknown mark'), { status: 400 })
+    writeMarks(marks)
+    return { ok: true, nudge: marks.nudges[n] || null }
+  }
+  if (!/^[cm]\d+$/.test(String(key || ''))) throw Object.assign(new Error('Which thread?'), { status: 400 })
+  if (mark === 'clear') delete marks.threads[key]
+  else if (mark === 'done') marks.threads[key] = { mark: 'done', at: when, id: Number(id) || null, subject: clip(subject, 200), from: clip(from, 120) }
+  else if (mark === 'later') marks.threads[key] = { mark: 'later', at: when, until: later(until), id: Number(id) || null, subject: clip(subject, 200), from: clip(from, 120) }
+  else throw Object.assign(new Error('Unknown mark'), { status: 400 })
+  writeMarks(marks)
+  return { ok: true, mark: marks.threads[key] || null }
+}
+
 // Where Mail keeps a message on disk: <account>/<Folder>.mbox/<uuid>/Data/<digits>/Messages/<id>[.partial].emlx
 function emlxPath(root, url, id) {
   const m = /^\w+:\/\/([^/]+)\/(.+)$/.exec(url || '')
@@ -132,6 +181,39 @@ function attachmentPath(root, url, id, aid, name) {
   }
   return null
 }
+
+// Done and Remind me on what was read: a thread done is 'done', one set aside is 'later' until its
+// time and then back in Needs you with Reminder first among its reasons. A mark that new mail has
+// overtaken, or that's long past and out of the window, is let go. The reminders for mail you sent:
+// [{ id, subject, to, until, due }], the ones nobody has answered yet.
+function applyMarks(messages, marks, answered = []) {
+  const now = Date.now()
+  let changed = false
+  const latest = new Map()
+  for (const m of messages) { const k = threadKey(m); if (!latest.has(k) || m.received > latest.get(k)) latest.set(k, m.received) }
+  for (const [k, mk] of Object.entries(marks.threads)) {
+    const last = latest.get(k)
+    const old = now - Date.parse(mk.at) > 30 * 864e5
+    if ((last && Date.parse(last) > Date.parse(mk.at) + 1000) || (!last && old && (mk.mark === 'done' || Date.parse(mk.until) < now))) { delete marks.threads[k]; changed = true }
+  }
+  for (const m of messages) {
+    const mk = marks.threads[threadKey(m)]
+    if (!mk) continue
+    if (mk.mark === 'done') { m.done = mk.at; m.bucket = 'done' } else if (Date.parse(mk.until) > now) { m.later = mk.until; m.bucket = 'later' } else { m.reminded = mk.until; m.bucket = 'needs'; m.reasons = ['Reminder', ...m.reasons.filter((r) => r !== 'Reminder')] }
+  }
+  const by = new Map(answered.map((a) => [Number(a.conv), a]))
+  const out = []
+  for (const [id, n] of Object.entries(marks.nudges)) {
+    const a = by.get(Number(n.conv))
+    const since = Date.parse(n.at) / 1000
+    // Someone answered, or you wrote again: nothing to remind you of.
+    if ((a?.answered && toUnix(a.answered) > since) || (a?.again && toUnix(a.again) > since + 5) || now - Date.parse(n.until) > 30 * 864e5) { delete marks.nudges[id]; changed = true; continue }
+    out.push({ id: Number(id), conv: n.conv, subject: n.subject || '(no subject)', to: n.to || '', until: n.until, due: Date.parse(n.until) <= now })
+  }
+  if (changed) { try { writeMarks(marks) } catch { /* kept as it was */ } }
+  return out.sort((x, y) => (x.until < y.until ? -1 : 1))
+}
+const toUnix = (v) => (Number(v) < 1e9 ? Number(v) + 978307200 : Number(v))
 
 export function makeMail(cfg = {}) {
   // Your own organisation's domains, so mail from colleagues isn't marked "External".
@@ -199,7 +281,11 @@ export function makeMail(cfg = {}) {
     const meList = ppl.me.map(q).join(',') || "''"
     const since = Math.floor(Date.now() / 1000) - 10 * 86400
     const today = Math.floor(new Date().setHours(0, 0, 0, 0) / 1000)
-    const [[counts], rows, waiting] = await Promise.all([
+    const marks = readMarks()
+    // A thread set aside for longer than the window still comes back: its message is read too.
+    const laterIds = Object.values(marks.threads).filter((x) => x.mark === 'later' && Number.isInteger(x.id)).map((x) => x.id)
+    const nudgeConvs = Object.values(marks.nudges).map((x) => Number(x.conv)).filter((c) => Number.isInteger(c) && c > 0)
+    const [[counts], rows, waiting, answered] = await Promise.all([
       sql(file, `SELECT SUM(m.read = 0) AS unread, SUM(m.flagged = 1) AS flagged, SUM(m.date_received >= ${today}) AS today
         FROM messages m WHERE m.deleted = 0 AND ${INBOX}`),
       sql(file, `
@@ -217,7 +303,7 @@ export function makeMail(cfg = {}) {
         ${x.summaries ? 'LEFT JOIN summaries su ON su.ROWID = m.summary' : ''}
         ${x.g ? 'LEFT JOIN message_global_data g ON g.ROWID = m.global_message_id' : ''}
         ${x.generated ? 'LEFT JOIN generated_summaries gs ON gs.ROWID = g.generated_summary' : ''}
-        WHERE m.deleted = 0 AND ${INBOX} AND (m.date_received >= ${since} OR m.flagged = 1)
+        WHERE m.deleted = 0 AND ${INBOX} AND (m.date_received >= ${since} OR m.flagged = 1${laterIds.length ? ` OR m.ROWID IN (${laterIds.join(',')})` : ''})
         ORDER BY m.date_received DESC LIMIT 500`),
       // Things you sent in the last 10 days where nobody has replied since (by conversation).
       !x.conv ? [] : sql(file, `
@@ -228,6 +314,11 @@ export function makeMail(cfg = {}) {
           AND NOT EXISTS (SELECT 1 FROM messages x WHERE x.conversation_id = m.conversation_id AND x.date_received > m.date_sent AND ${INBOX.replace(/m\.mailbox/g, 'x.mailbox')})
           AND NOT EXISTS (SELECT 1 FROM messages y WHERE y.conversation_id = m.conversation_id AND y.date_sent > m.date_sent AND ${SENT.replace(/m\.mailbox/g, 'y.mailbox')})
         ORDER BY m.date_sent DESC LIMIT 40`),
+      // The threads with a "remind me if nobody answers": the last answer in each, and the last
+      // thing you sent there.
+      !x.conv || !nudgeConvs.length ? [] : sql(file, `
+        SELECT m.conversation_id AS conv, max(CASE WHEN ${INBOX} THEN m.date_received END) AS answered, max(CASE WHEN ${SENT} THEN m.date_sent END) AS again
+        FROM messages m WHERE m.deleted = 0 AND m.conversation_id IN (${nudgeConvs.join(',')}) GROUP BY 1`),
     ])
     const rules = readRules()
     const seen = new Set()
@@ -265,6 +356,7 @@ export function makeMail(cfg = {}) {
       delete m.automated
       messages.push(m)
     }
+    const nudges = applyMarks(messages, marks, answered)
     const needs = messages.filter((m) => m.bucket === 'needs').sort((a, b) => b.score - a.score)
     return {
       available: true,
@@ -274,7 +366,8 @@ export function makeMail(cfg = {}) {
       needs: needs.length,
       action: messages.filter((m) => m.bucket === 'action').length,
       messages,
-      waiting: waiting.filter((w) => !/^(accepted|declined|tentative|canceled|cancelled|automatic reply|out of office)\b/i.test(w.subject || '') && w.toNames).map((w) => ({ id: w.id, subject: w.subject || '(no subject)', to: w.toNames || '', sent: toISO(w.sent) })),
+      waiting: waiting.filter((w) => !/^(accepted|declined|tentative|canceled|cancelled|automatic reply|out of office)\b/i.test(w.subject || '') && w.toNames).map((w) => ({ id: w.id, conv: w.conv, subject: w.subject || '(no subject)', to: w.toNames || '', sent: toISO(w.sent), ...(marks.nudges[w.id] ? { nudge: marks.nudges[w.id].until } : {}) })),
+      nudges,
       rules,
       me: ppl.me,
       fetchedAt: new Date().toISOString(),
@@ -294,11 +387,21 @@ export function makeMail(cfg = {}) {
   }
 
   // One message in full: headers, newest reply, quoted history, attachments, thread, file path.
+  // Kept a while once read (the app reads the next few ahead of you), until Mail's index changes.
+  const bodies = new Map() // id -> { at, value }
   get.message = async (id) => {
     if (!idx?.file) idx = findIndex()
     if (idx.error) throw new Error(SETUP[idx.error])
     const n = Number(id)
     if (!Number.isInteger(n)) throw new Error('Bad message id')
+    const hit = bodies.get(n)
+    if (hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.value
+    const value = await readMessage(n)
+    // One Mail hasn't finished downloading is read again next time.
+    if (!value.partial) { bodies.set(n, { at: Date.now(), value }); if (bodies.size > 80) bodies.delete(bodies.keys().next().value) }
+    return value
+  }
+  async function readMessage(n) {
     const x = parts(await shapeOf(idx.file))
     const [row] = await sql(idx.file, `SELECT m.ROWID AS id, ${x.col('m', 'conversation_id', 'conv')}, mb.url AS mailbox FROM messages m JOIN mailboxes mb ON mb.ROWID = m.mailbox WHERE m.ROWID = ${n}`)
     if (!row) throw new Error('Message not found')
@@ -318,6 +421,8 @@ export function makeMail(cfg = {}) {
       from: body?.from || null,
       to: body?.to || null,
       cc: body?.cc || null,
+      replyTo: body?.replyTo || null,
+      date: body?.date || null,
       subject: body?.subject || null,
       latest: split.latest ? split.latest.slice(0, 20000) : null,
       quoted: split.quoted ? split.quoted.slice(0, 20000) : null,
@@ -364,6 +469,71 @@ export function makeMail(cfg = {}) {
     }
     return { available: true, messages: out }
   }
+  // What you wrote yourself in mail you sent, newest first: [{ id, to, subject, sent, text }], for How
+  // You Write (mailassist.js). to: only what went to that address. Each message's own words, without
+  // what it quotes or its signature; invitations' answers and out-of-office replies left out.
+  get.sent = async ({ days = 120, limit = 40, to = null } = {}) => {
+    if (process.platform !== 'darwin') return { available: false, reason: 'notMac', items: [] }
+    if (!idx?.file) idx = findIndex()
+    if (idx.error) return { available: false, reason: idx.error, items: [] }
+    const since = Math.floor(Date.now() / 1000) - days * 86400
+    const only = to ? `AND EXISTS (SELECT 1 FROM recipients r JOIN addresses ra ON ra.ROWID = r.address WHERE r.message = m.ROWID AND lower(ra.address) = ${q(String(to).toLowerCase())})` : ''
+    const rows = await sql(idx.file, `
+      SELECT m.ROWID AS id, m.date_sent AS sent, mb.url AS mailbox, s.subject,
+             (SELECT group_concat(lower(ra.address), ',') FROM recipients r JOIN addresses ra ON ra.ROWID = r.address WHERE r.message = m.ROWID AND r.type = 0) AS toAddr
+      FROM messages m JOIN mailboxes mb ON mb.ROWID = m.mailbox LEFT JOIN subjects s ON s.ROWID = m.subject
+      WHERE ${SENT} AND m.deleted = 0 AND m.date_sent >= ${since} ${only}
+      ORDER BY m.date_sent DESC LIMIT ${Math.min(400, limit * 3)}`)
+    const items = []
+    for (const r of rows) {
+      if (/^(accepted|declined|tentative|canceled|cancelled|automatic reply|out of office)\b/i.test(r.subject || '')) continue
+      const file = emlxPath(idx.root, r.mailbox, r.id)
+      if (!file) continue
+      let text = ''
+      try { text = ownWords(readEmlx(file).text) } catch { continue }
+      if (text.length < 15) continue
+      items.push({ id: r.id, to: String(r.toAddr || '').split(',')[0] || null, subject: r.subject || '', sent: toISO(r.sent), text: text.slice(0, 1500) })
+      if (items.length >= limit) break
+    }
+    return { available: true, items }
+  }
+
+  // New mail as soon as Mail's index changes on disk, rather than at the next look: fn() is called
+  // a moment after Mail writes it (its main file or its write-ahead log; not the shared-memory file,
+  // which reading touches too). Watched only while someone listens. Returns a function to stop.
+  const listeners = new Set()
+  let watcher = null
+  let soon = null
+  let fired = 0
+  const fire = () => {
+    fired = Date.now()
+    at = 0
+    bodies.clear()
+    for (const fn of listeners) { try { fn() } catch { /* a listener gone */ } }
+  }
+  const watch = () => {
+    if (watcher || process.platform !== 'darwin') return
+    if (!idx?.file) idx = findIndex()
+    if (idx.error) return
+    try {
+      watcher = fs.watch(path.dirname(idx.file), (_ev, name) => {
+        if (name && !/^Envelope Index(-wal)?$/.test(String(name))) return
+        clearTimeout(soon)
+        // Mail writes in bursts: once it's quiet a moment, and at most every few seconds.
+        soon = setTimeout(fire, Math.max(800, 3000 - (Date.now() - fired)))
+      })
+      watcher.on('error', () => { watcher?.close(); watcher = null })
+    } catch { watcher = null }
+  }
+  get.watch = (fn) => {
+    listeners.add(fn)
+    watch()
+    return () => {
+      listeners.delete(fn)
+      if (!listeners.size) { clearTimeout(soon); watcher?.close(); watcher = null }
+    }
+  }
+  get.watching = () => !!watcher
   get.invalidate = () => { at = 0 }
   return get
 }

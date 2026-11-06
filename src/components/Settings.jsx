@@ -10,22 +10,25 @@ import ConfigFile from './settings/ConfigFile.jsx'
 import Phone from './settings/Phone.jsx'
 import About from './settings/About.jsx'
 import Meetings from './settings/Meetings.jsx'
+import Mail from './settings/Mail.jsx'
 import Voice from './settings/Voice.jsx'
 import CloudKeys from './settings/CloudKeys.jsx'
 import ErrorBoundary from './ErrorBoundary.jsx'
 import { SettingsAt } from './settings/where.js'
-import { cloudOnly } from '../api.js'
+import { cloudOnly, usePoll } from '../api.js'
 import { t, tx } from '../i18n/index.js'
 
 // One Settings window, Slack style: sections down the left, one scrolling panel on the right.
 // On a phone it's a phone's settings: the list of sections, each opening full width under a bar
-// with ‹ Settings (back to the list), its name, and the one close.
+// with ‹ Settings (back to the list), its name, and the one close. A section marked mac is only
+// where it can work: Mail, where Bridge AI reads Apple Mail (the computer shown is a Mac).
 export const SECTIONS = [
   { id: 'general', label: tx('General'), icon: 'home', hint: tx('Name, default agent and model, location') },
   { id: 'agents', label: tx('Agents'), icon: 'bot', hint: tx('Installed agents and sign-in') },
   { id: 'providers', label: tx('Model Providers'), icon: 'layers', hint: tx('API keys, clouds, local models, cloud agents') },
   { id: 'voice', label: tx('Voice'), icon: 'mic', hint: tx('Speech to text on this computer, and dictation') },
   { id: 'meetings', label: tx('Meetings'), icon: 'mic', hint: tx('How meetings are transcribed and summarized') },
+  { id: 'mail', label: tx('Mail'), icon: 'mail', hint: tx('How You Write, for Reply Assist, and your working hours'), mac: true },
   { id: 'mcp', label: tx('MCP Servers'), icon: 'tool', hint: tx('Tools your agents can use') },
   { id: 'phone', label: tx('Devices'), icon: 'phone', hint: tx('Your phone and your other computers, through your relay or Tailscale; what to notify you about') },
   { id: 'appearance', label: tx('Appearance'), icon: 'palette', hint: tx('Theme, text size, density') },
@@ -52,7 +55,8 @@ const sectionFor = (section, sections) => {
 }
 
 export default function Settings({ section = 'all', onClose, onOpenAgent }) {
-  const sections = cloudOnly ? PHONE : SECTIONS
+  const conf = usePoll(cloudOnly ? null : '/config', 10 * 60 * 1000).data
+  const sections = cloudOnly ? PHONE : SECTIONS.filter((s) => !s.mac || conf?.mail)
   const phone = useMedia('(max-width: 760px)')
   const to = sectionFor(section, sections)
   const [at, setAt] = useState(to || sections[0].id)
@@ -60,8 +64,10 @@ export default function Settings({ section = 'all', onClose, onOpenAgent }) {
   const go = (id) => { setAt(id); setList(false) }
   useEffect(() => { if (to) go(to) }, [to]) // eslint-disable-line react-hooks/exhaustive-deps
   // A link to a section from inside Settings (Meetings' Model Providers), even to the one it opened at.
+  const shown = useRef(sections)
+  shown.current = sections
   useEffect(() => {
-    const on = (e) => { const s = sectionFor(e.detail?.section, sections); if (s) go(s) }
+    const on = (e) => { const s = sectionFor(e.detail?.section, shown.current); if (s) go(s) }
     window.addEventListener('bridge-open-settings', on)
     return () => window.removeEventListener('bridge-open-settings', on)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -89,6 +95,7 @@ export default function Settings({ section = 'all', onClose, onOpenAgent }) {
     {at === 'providers' && <Providers focus={section === 'accounts' || section === 'cloud' ? section : null} onOpenAgent={(id) => { onOpenAgent?.(id); onClose() }} />}
     {at === 'voice' && <Voice />}
     {at === 'meetings' && <Meetings />}
+    {at === 'mail' && <Mail />}
     {at === 'mcp' && <Mcp />}
     {at === 'appearance' && <Appearance focus={section === 'topbar' ? 'topbar' : null} />}
     {at === 'config' && <ConfigFile />}
