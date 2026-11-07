@@ -23,8 +23,11 @@
 // Last, a computer of its own with Meeting Insights never set: on by itself at the fifth meeting,
 // said once on Meetings with Turn off, shown in Beta Features, and not on again once turned off.
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
-import { startKit, checks, until, browser, page, shot, phoneFaults, withoutCutOff, IS_WIN } from '../lib/harness.mjs'
+import { execFileSync } from 'node:child_process'
+import { pathToFileURL } from 'node:url'
+import { startKit, checks, until, browser, page, shot, phoneFaults, withoutCutOff, IS_WIN, ROOT } from '../lib/harness.mjs'
 
 const { ok, skip, done } = checks('meeting-insights')
 // The calendar: a stand-in bridgecal that answers from bridgecal.json beside it ({ status, events }).
@@ -244,6 +247,20 @@ try {
     && ins.heat.find(([d, h]) => d === (M6.getDay() + 6) % 7 && h === 9)?.[3] === 3,
   'when you meet: each meeting\'s time put in its weekday and hours, all of it once; the three back to back in the same hour', ins.heat)
   ok(ins.weekdays.reduce((a, w) => a + w.s, 0) === 17400 && ins.weekdays.reduce((a, w) => a + w.days, 0) === 90 && ins.weekdays.reduce((a, w) => a + w.n, 0) === 8, 'by weekday: the time and meetings on each, and how many of each weekday the 90 days have', ins.weekdays)
+  // The 90 days are days, not 90 × 24 hours: just after a clock change one day is 23 or 25 hours, and
+  // the range started a day off for an hour of every day (89 days late in the evening after the
+  // clocks went back, 91 just after midnight after they went forward). Worked out in a time zone that
+  // changes its clocks, at those moments, on no meetings.
+  {
+    const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-dst-'))
+    const at = ['2026-11-07T23:30:00-08:00', '2026-11-29T23:59:00-08:00', '2027-03-20T00:30:00-07:00', '2027-03-15T00:01:00-07:00']
+    const code = `const t = new Date('2026-07-01T12:00:00Z').getTimezoneOffset(); const m = await import(${JSON.stringify(pathToFileURL(path.join(ROOT, 'server/meetinsights.js')).href)}); const out = []; for (const a of ${JSON.stringify(at)}) { const r = await m.insights({ now: Date.parse(a) }); out.push(r.weekdays.reduce((n, w) => n + w.days, 0)) } console.log(JSON.stringify({ t, out }))`
+    let got = null
+    try { got = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', code], { env: { ...process.env, TZ: 'America/Los_Angeles', HOME: empty, BRIDGE_HOME: empty }, encoding: 'utf8', timeout: 30000 }).trim().split('\n').pop()) } catch (e) { got = { error: String(e.stderr || e.message).slice(0, 300) } }
+    if (got?.t === 420) ok(got.out.every((n) => n === 90), 'by weekday: 90 days just after the clocks change, late at night and just past midnight, not 89 or 91', { at, got: got.out })
+    else skip('by weekday across a clock change', `this computer can't work in another time zone here (${JSON.stringify(got)})`)
+    fs.rmSync(empty, { recursive: true, force: true })
+  }
   ok(ins.busiest?.date === ymd(M6) && ins.busiest.seconds === 4500 && ins.busiest.n === 3, 'the busiest day: the three back to back, 1 h 15 min', ins.busiest)
   ok(ins.series.length === 1 && ins.series[0].title === 'Weekly payments sync' && ins.series[0].n === 3 && ins.series[0].seconds === 9900 && ins.series[0].people === 3 && ins.series[0].id === 'm2'
     && ins.recurring.seconds === 9900 && ins.recurring.series === 1 && ins.oneoff.seconds === 7500 && ins.oneoff.n === 5,

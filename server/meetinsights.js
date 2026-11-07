@@ -253,14 +253,17 @@ function heatOf(these) {
 export async function insights({ days = 90, kind = 'all', now = Date.now() } = {}) {
   const { list, archived, recording, reread, failed } = await digests()
   const span = days === 'all' ? null : Math.max(1, Math.min(3660, Number(days) || 90))
-  const from = span ? dayStart(now - (span - 1) * DAY).getTime() : -Infinity
+  // Counted back in days, not 24 hours: across a clock change one of them is 23 or 25, and the range
+  // would start a day off for an hour of every day.
+  const daysBack = (t, n) => { const d = dayStart(t); d.setDate(d.getDate() - n); return d.getTime() }
+  const from = span ? daysBack(now, span - 1) : -Infinity
   const at = startOf
   const seriesOf = seriesIn(list)
   const kindOf = kinder(list, seriesOf)
   const inRange = list.filter((d) => at(d) >= from && at(d) <= now)
   const kinds = KIND_ORDER.map((id) => ({ id, n: inRange.filter((d) => kindOf(d) === id).length })).filter((k) => k.n)
   const these = inRange.filter((d) => kind === 'all' || kindOf(d) === kind).sort((a, b) => at(a) - at(b))
-  const prevFrom = span ? from - span * DAY : null
+  const prevFrom = span ? daysBack(from, span) : null
   const prev = span ? list.filter((d) => at(d) >= prevFrom && at(d) < from && (kind === 'all' || kindOf(d) === kind)) : null
   const told = these.filter(knownTalk)
   const untold = { room: these.filter((d) => d.told === 'room').length, noyou: these.filter((d) => d.told === 'noyou').length, silent: these.filter((d) => d.told === 'silent').length }
