@@ -358,8 +358,9 @@ try {
   const inMin = (n) => new Date(Date.now() + n * 6e4)
   // Today's two meetings both still today, whatever the time (late in the evening, 2½ hours on was
   // tomorrow): at a fifth and three fifths of what's left of the day, at most 25 and 150 minutes on.
+  // Not in whole minutes: two minutes before midnight, a minute and two minutes on were tomorrow.
   const dayLeft = (new Date(new Date().setHours(24, 0, 0, 0)) - Date.now()) / 6e4
-  const firstIn = Math.max(1, Math.min(25, Math.floor(dayLeft / 5))), nextIn = Math.max(2, Math.min(150, Math.floor(dayLeft * 0.6)))
+  const firstIn = Math.min(25, dayLeft / 5), nextIn = Math.min(150, dayLeft * 0.6)
   const ev = (id, title, start, mins, more = {}) => ({ id, title, canceled: false, calendar: 'Work', start: start.toISOString(), end: new Date(+start + mins * 6e4).toISOString(), allDay: false, attendees: [], attendeeCount: 3, ...more })
   const tomorrow = clock(10); tomorrow.setDate(tomorrow.getDate() + 1)
   // The one meeting on two calendars starts at the same moment on both (two inMin()s can be a
