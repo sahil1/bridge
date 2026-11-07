@@ -666,9 +666,26 @@ async function checkForUpdates() {
   const r = await fetch(`${URL_BASE}/api/updates/install`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ app: forApp }), signal: AbortSignal.timeout(30000) }).then((x) => x.json(), (e) => ({ error: e.message }))
   if (r?.error) say({ type: 'warning', message: 'Couldn\'t update', detail: r.error })
 }
-// 1.24.0 < 1.24.1 < 2.0.0, as server/updates.js compares them.
-const parts = (v) => String(v).replace(/^v/, '').split('-')[0].split('.').map((n) => Number(n) || 0)
-const newer = (a, b) => { const x = parts(a); const y = parts(b); for (let i = 0; i < 3; i++) { if (x[i] !== y[i]) return x[i] > y[i] } return false }
+// 1.24.0 < 1.24.1 < 2.0.0, and a pre-release before its version (3.13.0-beta.1 < 3.13.0), as
+// shared/version.js compares them (a copy: this file can't import it before it's needed).
+const parts = (v) => { const [core, pre = ''] = String(v).replace(/^v/, '').split('+')[0].split(/-(.*)/s); return [...core.split('.').map((n) => Number(n) || 0), pre] }
+const newer = (a, b) => {
+  const x = parts(a)
+  const y = parts(b)
+  for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] > y[i]
+  if (!x[3] || !y[3]) return !x[3] && !!y[3]
+  const p = x[3].split('.')
+  const q = y[3].split('.')
+  for (let i = 0; i < Math.max(p.length, q.length); i++) {
+    if (p[i] === q[i]) continue
+    if (p[i] === undefined || q[i] === undefined) return q[i] === undefined
+    const pn = /^\d+$/.test(p[i])
+    const qn = /^\d+$/.test(q[i])
+    if (pn && qn) return Number(p[i]) > Number(q[i])
+    return pn !== qn ? qn : p[i] > q[i]
+  }
+  return false
+}
 
 // ---------- Updating by itself while you're away ----------
 // Settings › About & Updates › Update by itself while you're away (on unless turned off), in the
