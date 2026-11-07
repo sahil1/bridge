@@ -8,7 +8,7 @@
 // answering questions is told who and what they are.
 //
 // With Memory on (a beta feature: memory), it's a page of its own (memoryview.js): each name has a
-// kind (a person, an organisation, a project or product, a term) and the dictations it came up in
+// kind (a person, an organization, a project or product, a term) and the dictations it came up in
 // as well as the meetings, and an "About you" made from it goes with what the models are told.
 //
 // Kept in <data>/meetings/memory.json: { terms: [{ id, term, kind, heard: [], also: [], note,
@@ -60,7 +60,7 @@ const variants = (list, but) => [...new Set([].concat(list || []).map((h) => cle
 
 // What kind of name it is, from what a summary or the page calls it.
 export const KINDS = ['person', 'org', 'project', 'term']
-const KIND = { person: 'person', people: 'person', org: 'org', organisation: 'org', organization: 'org', organisations: 'org', organizations: 'org', company: 'org', project: 'project', projects: 'project', product: 'project', products: 'project', term: 'term', terms: 'term' }
+const KIND = { person: 'person', people: 'person', org: 'org', organization: 'org', organizations: 'org', organisation: 'org', organisations: 'org', company: 'org', project: 'project', projects: 'project', product: 'project', products: 'project', term: 'term', terms: 'term' }
 export const kindOf = (k) => KIND[String(k || '').toLowerCase()] || null
 
 export const changed = () => version
@@ -114,7 +114,7 @@ export function update(id, { term, heard, note, kind } = {}) {
   }
   if (note != null) { t.note = clean(note, 200); t.noteBy = 'you' }
   if (kind != null) {
-    if (kind && !kindOf(kind)) throw new Error('A person, an organisation, a project or a term, please')
+    if (kind && !kindOf(kind)) throw new Error('A person, an organization, a project or a term, please')
     if (kindOf(kind)) { t.kind = kindOf(kind); t.kindBy = 'you' } else { delete t.kind; delete t.kindBy }
   }
   t.source = 'you'
@@ -346,7 +346,7 @@ export function plainFor(name, kind) {
   return kind === 'person' && (why === 'place' || why === 'language') ? null : why
 }
 
-// What a summary found: names by kind (people, organisations, projects and products, terms; or
+// What a summary found: names by kind (people, organizations, projects and products, terms; or
 // names, as older notes and the tests' model have it), kept as learned for the speech engine and
 // later notes; clear mishearings ({ "Ack me": "Acme" }), taken only when the right spelling is one
 // memory or the meeting already knows (`known`: its title, people and your notes) and the wrong one
@@ -365,7 +365,7 @@ export function learn(found = {}, { meeting, known = '', heard = '' } = {}) {
   const k = String(known).toLowerCase(), h = String(heard).toLowerCase()
   const kinds = new Map()
   const named = []
-  for (const key of ['people', 'organisations', 'organizations', 'projects', 'terms']) {
+  for (const key of ['people', 'organizations', 'organisations', 'projects', 'terms']) {
     for (const n of [].concat(found?.[key] || []).slice(0, 30)) { named.push([n, kindOf(key)]); kinds.set(low(clean(n, 60)), kindOf(key)) }
   }
   for (const n of [].concat(names || []).slice(0, 30)) named.push([n, kinds.get(low(clean(n, 60))) || null])

@@ -13,11 +13,11 @@ import './memory.css'
 // sidebar and in the phone's More: what Bridge AI has learned from your meetings and dictations.
 // About You at the top (a few lines made from it, or as you wrote them, on or off), then what looks
 // the same (merged, or kept apart) and what looks like it adds little (for you to look over), then
-// the collections: People (memory's and, with Meeting Insights on, the people you meet), Organisations,
+// the collections: People (memory's and, with Meeting Insights on, the people you meet), Organizations,
 // Projects & Products and Terms, each name with how it's misheard, its note, and the meetings and
 // dictations it came up in (each opens). Search, group, add, edit and delete as in Meetings' dialog.
-const COLLECTIONS = [['all', tx('All'), 'book'], ['person', tx('People'), 'users'], ['org', tx('Organisations'), 'layers'], ['project', tx('Projects & Products'), 'shapes'], ['term', tx('Terms'), 'quote']]
-const KINDS = [['person', tx('Person')], ['org', tx('Organisation')], ['project', tx('Project or product')], ['term', tx('Term')]]
+const COLLECTIONS = [['all', tx('All'), 'book'], ['person', tx('People'), 'users'], ['org', tx('Organizations'), 'layers'], ['project', tx('Projects & Products'), 'shapes'], ['term', tx('Terms'), 'quote']]
+const KINDS = [['person', tx('Person')], ['org', tx('Organization')], ['project', tx('Project or product')], ['term', tx('Term')]]
 const KIND = Object.fromEntries(KINDS)
 const WHY = { place: tx('A place'), language: tx('A language or nationality'), time: tx('A day, month or year'), common: tx('An everyday word or acronym'), once: tx('Came up once, over a month ago, with nothing to fix') }
 // With no more than this many shown, every group is open.
@@ -192,9 +192,9 @@ function AboutYou({ a, me, onChange }) {
         </label>
       </div>
       {editing
-        ? <textarea className="mm-you-edit" value={text} onChange={(e) => setText(e.target.value)} rows={6} autoFocus aria-label={t('About You')} placeholder={t('Who you are, what you work on, the people and organisations you deal with most')} />
+        ? <textarea className="mm-you-edit" value={text} onChange={(e) => setText(e.target.value)} rows={6} autoFocus aria-label={t('About You')} placeholder={t('Who you are, what you work on, the people and organizations you deal with most')} />
         : a.text ? <p className="mm-you-text">{a.text}</p>
-          : <p className="muted small mm-you-text">{t('Nothing to go on yet: it\'s made from the people, organisations and projects memory has, once your meetings and dictations bring some. Or write it yourself.')}</p>}
+          : <p className="muted small mm-you-text">{t('Nothing to go on yet: it\'s made from the people, organizations and projects memory has, once your meetings and dictations bring some. Or write it yourself.')}</p>}
       <p className="muted small mm-you-where">
         {on
           ? t('While it\'s on, the model that writes your meeting notes and the one that tidies your dictation are given it, and Chief of Staff reads it. It\'s made and kept on this computer.')

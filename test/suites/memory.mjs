@@ -14,8 +14,8 @@
 // sidebar's Memory under Dictations, live. Each name's kind (yours, or a guess from an invite or its
 // note), the dictations it came up in (ones from before Memory was on and one after), what looks the
 // same, what looks like it adds little and why (never yours, a person or a name with a mishearing),
-// and About You made from it (your name and organisation, what you work on, the people and
-// organisations you deal with most), in Chief of Staff's folder too. The model writing notes and
+// and About You made from it (your name and organization, what you work on, the people and
+// organizations you deal with most), in Chief of Staff's folder too. The model writing notes and
 // the one tidying dictation are given it (the names, for tidying); yours once you write it; off,
 // neither is, and Chief of Staff's copy is gone.
 //
@@ -46,7 +46,7 @@ const ago = (days) => new Date(Date.now() - days * DAY).toISOString()
     && plain.CEO === 'common' && plain.API === 'common' && plain.$5M === 'common' && plain.Acme === null && plain['Priya Shah'] === null && plain.Kubernetes === null, 'what adds nothing: places, languages, days, months, quarters and everyday words, in other languages too', plain)
   ok(m.plainFor('Jordan', 'person') === null && m.plainFor('Jordan', 'org') === 'place', 'a person can be called what a country is')
   const heard = 'Priya said the Northwind deal is fine and India signed. We run Kubernetes, and the ack me portal goes live on Monday. The CEO wants Q3. Dan agreed, and so did Lee.'
-  m.learn({ people: ['Priya Shah', 'Dan', 'Lee'], organisations: ['Northwind', 'Contoso'], projects: ['Kubernetes'], terms: ['Q3', 'CEO', 'SKU sync'], names: ['India', 'Monday', 'Germany'], misheard: { 'ack me': 'Acme' }, about: { Dan: 'runs the depot', India: 'where the team is' } },
+  m.learn({ people: ['Priya Shah', 'Dan', 'Lee'], organizations: ['Northwind', 'Contoso'], projects: ['Kubernetes'], terms: ['Q3', 'CEO', 'SKU sync'], names: ['India', 'Monday', 'Germany'], misheard: { 'ack me': 'Acme' }, about: { Dan: 'runs the depot', India: 'where the team is' } },
     { meeting: 'm1', known: 'Northwind weekly\nPriya Shah\nAcme', heard })
   const got = Object.fromEntries(m.list().map((t) => [t.term, t]))
   ok(['Priya Shah', 'Northwind', 'Contoso', 'SKU sync', 'Acme', 'Dan'].every((n) => got[n]) && !['India', 'Monday', 'Germany', 'Q3', 'CEO', 'Kubernetes', 'Lee'].some((n) => got[n]),
@@ -177,8 +177,8 @@ try {
   const pairs = v.same.map(([a, c]) => `${v.terms.find((t) => t.id === a).term}|${v.terms.find((t) => t.id === c).term}`)
   ok(pairs.includes('Priya Shah|Priya') && pairs.some((x) => /^(Open AI\|OpenAI|OpenAI\|Open AI)$/.test(x)) && pairs.length === 2, 'what looks the same: written alike, and a first name with the whole one (kept first)', pairs)
   const draft = v.aboutYou.text
-  ok(v.aboutYou.on && !v.aboutYou.yours && /^I'm Tester, at Acme\.$/m.test(draft) && /^What I work on: Atlas \(our billing app\)\.$/m.test(draft) && /^The people I deal with most: Priya Shah \(head of data at Northwind\)/m.test(draft) && /^The organisations I deal with most: Northwind \(customer, buys the enterprise plan\)/m.test(draft) && !/India|Monday/.test(draft),
-    'About You made from it: your name and company, your work, the people and organisations most', draft)
+  ok(v.aboutYou.on && !v.aboutYou.yours && /^I'm Tester, at Acme\.$/m.test(draft) && /^What I work on: Atlas \(our billing app\)\.$/m.test(draft) && /^The people I deal with most: Priya Shah \(head of data at Northwind\)/m.test(draft) && /^The organizations I deal with most: Northwind \(customer, buys the enterprise plan\)/m.test(draft) && !/India|Monday/.test(draft),
+    'About You made from it: your name and company, your work, the people and organizations most', draft)
   ok(!!(await until(() => read(chiefFile())?.includes(draft), 5000)) && /# About Tester\n\nWhat Bridge AI knows about Tester, made on this computer/.test(read(chiefFile())), 'and it\'s in Chief of Staff\'s folder', read(chiefFile()))
   const chiefMd = read(path.join(kit.data, 'chief', 'CLAUDE.md')) || ''
   ok(/When there's an `about-you\.md` in this folder/.test(chiefMd), 'which Chief of Staff is told to read', chiefMd.slice(0, 300))
@@ -218,7 +218,7 @@ try {
   await home.locator('.mm-item[data-term="OpenAI"] .mm-pen').click()
   await home.locator('.mm-edit select').selectOption('org')
   await home.locator('.mm-edit button', { hasText: 'Done' }).click()
-  ok(!!(await until(async () => (await home.locator('.mm-item[data-term="OpenAI"] .mm-kind').innerText().catch(() => '')) === 'Organisation' && !(await home.locator('.mm-item[data-term="OpenAI"] .mm-kind.guess').count()), 8000)), 'a kind changed is yours, no longer a guess')
+  ok(!!(await until(async () => (await home.locator('.mm-item[data-term="OpenAI"] .mm-kind').innerText().catch(() => '')) === 'Organization' && !(await home.locator('.mm-item[data-term="OpenAI"] .mm-kind.guess').count()), 8000)), 'a kind changed is yours, no longer a guess')
   await home.locator('.mm-find input').fill('')
   // A dictation opened from a name.
   await home.locator('.mm-colls button[data-coll="project"]').click()

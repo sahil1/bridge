@@ -1,11 +1,11 @@
 // Memory as a page of its own (a beta feature: memory; src/components/memory/Memory.jsx): what
-// meeting memory (meetmemory.js) holds, put in collections (People, Organisations, Projects &
+// meeting memory (meetmemory.js) holds, put in collections (People, Organizations, Projects &
 // Products, Terms), with the meetings and dictations each came up in, the people you meet (Meeting
 // Insights, when it's on) beside the ones memory has, what looks the same, what looks like it adds
 // little (for you to look over: nothing goes by itself), and About you.
 //
-// About you: a few lines made here from what memory holds (your name, your organisation, what you
-// work on, the people and organisations that come up most), or as you wrote it. While it's on it
+// About you: a few lines made here from what memory holds (your name, your organization, what you
+// work on, the people and organizations that come up most), or as you wrote it. While it's on it
 // goes with what the models writing notes and tidying dictation are told (meetmemory.js about), and
 // into Chief of Staff's folder as about-you.md for it to read. Nothing here asks a model or leaves
 // this computer by itself.
@@ -29,7 +29,7 @@ const insightsOn = () => cfg.trials?.['meeting-insights'] === true
 
 // ---------- What kind each one is ----------
 // The kind you or a summary gave it, else a guess: a person you've met (an invite, a name on a
-// transcript), an organisation by its name (Inc, Labs) or an address's domain, a project of yours
+// transcript), an organization by its name (Inc, Labs) or an address's domain, a project of yours
 // (Bridge AI's projects), else from its note ("customer", "head of data at", "our billing app").
 const ORG_NAME = /\b(inc|ltd|llc|llp|plc|corp|corporation|gmbh|ag|bv|pty|limited|group|holdings|labs|partners|capital|ventures|bank|university|institute|foundation|agency|studios?)\.?$/i
 const PERSON_NOTE = /\b(he|she|him|her|his|hers|head of|lead|manager|director|engineer|designer|developer|founder|co-?founder|ceo|cto|cfo|coo|vp|chief|recruiter|contact|colleague|boss|reports to|works (at|on|for)|intern|analyst|consultant|advisor|partner at|friend|candidate)\b/i
@@ -38,7 +38,7 @@ const PROJECT_NOTE = /\b(product|project|app|tool|feature|platform|service|libra
 const OURS = /\b(my|our)\s+(company|employer|organi[sz]ation|firm|startup|team)\b|\bwhere I work\b/i
 const FREE = /^(gmail|googlemail|outlook|hotmail|live|yahoo|icloud|me|mac|aol|proton|protonmail|gmx|zoho|yandex|fastmail|hey)\./i
 
-// The people and the organisations' domains meetings know, read from what the server already has.
+// The people and the organizations' domains meetings know, read from what the server already has.
 function known(all) {
   const names = new Set(), domains = new Map()
   for (const m of all) {
@@ -145,7 +145,7 @@ function draft(items, people, all) {
   else if (ownDomains.size) lines.push(`My work email is at ${[...ownDomains][0]}.`)
   if (work.length) lines.push(`What I work on: ${named(work)}.`)
   if (who.length) lines.push(`The people I deal with most: ${named(who)}.`)
-  if (orgs.length) lines.push(`The organisations I deal with most: ${named(orgs)}.`)
+  if (orgs.length) lines.push(`The organizations I deal with most: ${named(orgs)}.`)
   // Only a name isn't much to go on: nothing, until memory has something about your work.
   if (!work.length && !who.length && !orgs.length) return { text: '', names: [] }
   return { text: lines.join('\n'), names: [mine, ...work, ...who, ...orgs].filter(Boolean).map((x) => x.term) }
