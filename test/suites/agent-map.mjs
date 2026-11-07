@@ -219,21 +219,27 @@ try {
   // Tab Groups, a beta feature: the tabs kept together as the sidebar has them, the views first,
   // then this computer's spaces, then Desk's agent at the end under Desk's name; Desk's group folds
   // to its name and how many. A reload keeps the tabs and what's on screen.
+  // The agent opened here has a shell's title in its terminal, as one on Windows can: its tab is
+  // named as the sidebar names it.
   await a.api('/settings', { trials: { 'tab-groups': true } }, 'PATCH')
-  await s.p.locator('.rail .tab-main', { hasText: 'Checkout copy' }).first().click()
-  await until(async () => /Checkout copy/.test(await s.p.locator('.ws-tab.main').innerText().catch(() => '')), 8000)
+  const ledger = await launch(a, 'books', 'shell title', 'Ledger')
+  ok(!!(await until(async () => /^Administrator: C:\\Windows/.test((await laneOf(a, 'Studio'))?.agents?.find((x) => x.paneId === ledger.paneId)?.title || ''), 30000, 400)), "Ledger's terminal has a shell's title")
+  await s.p.locator('.rail .tab-main', { hasText: 'Ledger' }).first().click()
+  await until(async () => (await s.p.locator('.ws-tab.main').getAttribute('data-pane').catch(() => '')) === ledger.paneId, 8000)
   await s.p.waitForTimeout(300)
   await s.p.reload()
   const strip = s.p.locator('.ws-tabs-scroll')
-  const order = () => strip.evaluate((e) => [...e.children].map((x) => (x.classList.contains('ws-group') ? `[${x.innerText.trim()}]` : x.querySelector('.ws-tab-name')?.innerText.trim())))
-  const grouped = await until(async () => { const o = await order(); return o.includes('[Desk]') && o.includes('Checkout copy') && o }, 15000)
-  ok(!!grouped && grouped[0] === 'Agent Map' && grouped.at(-2) === '[Desk]' && grouped.at(-1) === 'Fix rounding' && grouped.filter((x) => /^\[/.test(x)).length >= 2 && !grouped.includes('[Chief of Staff]'), "Tab Groups: the views first, then each space here under its name (not the Chief of Staff's, its one tab named as it is), then Desk's agent at the end under Desk's", grouped)
-  ok(/Checkout copy/.test(await s.p.locator('.ws-tab.main').innerText().catch(() => '')), 'after a reload, the tab that was on screen still is', await s.p.locator('.ws-tab.main').innerText().catch(() => ''))
+  // (Each tab by its pane: on Windows a stand-in agent's terminal title is the shell's own.)
+  const order = () => strip.evaluate((e) => [...e.children].map((x) => (x.classList.contains('ws-group') ? `[${x.innerText.trim()}]` : x.dataset.pane)))
+  const deskTab = `remote:${deskLane?.id}:${work.paneId}`
+  const grouped = await until(async () => { const o = await order(); return o.includes('[Desk]') && o.includes(ledger.paneId) && o }, 15000)
+  ok(!!grouped && grouped[0] === 'view:map' && grouped.at(-2) === '[Desk]' && grouped.at(-1) === deskTab && grouped.filter((x) => /^\[/.test(x)).length >= 2 && !grouped.includes('[Chief of Staff]'), "Tab Groups: the views first, then each space here under its name (not the Chief of Staff's, its one tab named as it is), then Desk's agent at the end under Desk's", grouped)
+  ok((await s.p.locator('.ws-tab.main').getAttribute('data-pane').catch(() => '')) === ledger.paneId && (await s.p.locator('.ws-tab.main .ws-tab-name').innerText().catch(() => '')).trim() === 'Ledger', "after a reload, the tab that was on screen still is, named as the sidebar names it (its tab's name, not its terminal's title)", await s.p.locator('.ws-tab.main').innerText().catch(() => ''))
   await shot(s.p, `${tag}agent-map-tab-groups`)
   await strip.locator('.ws-group', { hasText: 'Desk' }).click()
-  ok(!!(await until(async () => !(await strip.locator('.ws-tab', { hasText: 'Fix rounding' }).count()) && /Desk\s*1/.test(await strip.locator('.ws-group.folded').innerText().catch(() => '')), 5000)), "folded, Desk's group is its name and how many", await order())
+  ok(!!(await until(async () => !(await strip.locator(`.ws-tab[data-pane="${deskTab}"]`).count()) && /Desk\s*1/.test(await strip.locator('.ws-group.folded').innerText().catch(() => '')), 5000)), "folded, Desk's group is its name and how many", await order())
   await strip.locator('.ws-group', { hasText: 'Desk' }).click()
-  ok(!!(await until(async () => (await strip.locator('.ws-tab', { hasText: 'Fix rounding' }).count()) === 1, 5000)), 'and unfolded, its tab is back')
+  ok(!!(await until(async () => (await strip.locator(`.ws-tab[data-pane="${deskTab}"]`).count()) === 1, 5000)), 'and unfolded, its tab is back')
   await a.api('/settings', { trials: { 'tab-groups': false } }, 'PATCH')
   ok(s.errors.filter((e) => !/due to access control checks/.test(e)).length === 0, 'no page errors', s.errors)
   await s.ctx.close()

@@ -6,7 +6,7 @@ import { useAppearance } from './appearance.js'
 import { usePins } from './pins.js'
 import ErrorBoundary, { Quiet } from './components/ErrorBoundary.jsx'
 import { CrashNotice } from './components/CrashReport.jsx'
-import Rail from './components/Rail.jsx'
+import Rail, { agentName } from './components/Rail.jsx'
 import Board from './components/Board.jsx'
 import Dock from './components/Dock.jsx'
 import Console, { MateEmpty, showChat } from './components/Console.jsx'
@@ -1070,7 +1070,9 @@ function App() {
     m.get(g.key).ids.push(id)
     return m
   }, new Map()).values()].sort((x, y) => x.at - y.at || x.first - y.first)
-  const tabName = (a) => (a.chief ? (a.thread && !a.thread.main ? a.title : t('Chief of Staff')) : a.title || a.tab)
+  // An agent's tab is named as the sidebar names it (its tab's name, not its terminal's title, which
+  // on Windows can be the shell's own); a view, a terminal or another computer's agent by its title.
+  const tabName = (a) => (a.view || a.shellTab || a.remote ? a.title : agentName(a))
   const named = groups.filter((g) => g.label).length > 1 || groups.some((g) => g.device)
   const headed = (g) => named && !!g.label && (g.device || g.ids.length > 1 || String(tabName(byId[g.ids[0]]) || '').trim().toLowerCase() !== String(g.label).trim().toLowerCase())
   const URGENT = { blocked: 0, working: 1, done: 2, idle: 3 }
@@ -1098,7 +1100,7 @@ function App() {
                 const inMain = id === W.active
                 const inSide = split && id === W.side
                 return (
-                  <div key={id} role="tab" aria-selected={inMain || inSide} tabIndex={0} draggable
+                  <div key={id} role="tab" data-pane={id} aria-selected={inMain || inSide} tabIndex={0} draggable
                     className={`ws-tab ${inMain ? 'main' : ''} ${inSide ? 'side' : ''} ${(inMain && W.group === 'main') || (inSide && W.group === 'side') ? 'focus' : ''} ${tabDrag?.id === id ? 'dragging' : ''} ${tabDrag?.over === id && tabDrag.id !== id ? (tabDrag.after ? 'drop-after' : 'drop-before') : ''}`}
                     onClick={() => openAgent(id)} onAuxClick={(e) => { if (e.button === 1) closeTab(id) }}
                     onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/x-bridge-tab', id); setTabDrag({ id }) }}
@@ -1119,7 +1121,7 @@ function App() {
                     <span className="ws-tab-name">{tabName(a)}</span>
                     {a.remote && a.device && !named && <span className="ws-tab-where">{a.device}</span>}
                     {a.chief && <StatusDot status={a.status} size={6} />}
-                    <button className="ws-tab-x" aria-label={t('Close {name}', { name: a.title })} onClick={(e) => { e.stopPropagation(); closeTab(id) }}><Icon name="x" size={11} /></button>
+                    <button className="ws-tab-x" aria-label={t('Close {name}', { name: tabName(a) })} onClick={(e) => { e.stopPropagation(); closeTab(id) }}><Icon name="x" size={11} /></button>
                   </div>
                 )
               })}
