@@ -143,7 +143,7 @@ function DailyChart({ daily, parts }) {
             // Stacked: each account's part from the bottom, a 2px gap of the card between them.
             let base = H - B
             return (
-              <g key={d.date} onPointerEnter={() => setHover(i)}>
+              <g key={d.date} data-date={d.date} onPointerEnter={() => setHover(i)}>
                 <rect x={x} y={T} width={bw} height={H - T - B} className="hit" />
                 {v > 0 && !parts && <rect x={x + 1} y={top} width={Math.max(1, bw - 2)} height={Math.max(1.5, H - B - top)} rx="1.5" className={cls} />}
                 {v > 0 && parts && parts.map((p) => {

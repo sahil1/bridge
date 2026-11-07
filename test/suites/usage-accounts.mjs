@@ -25,14 +25,32 @@
 //     bars, the account's dot, the chart's legend, the top bar's menu, New agent's account picker);
 //     the chart stacked by account with Not known in grey, a legend, a line saying what's counted,
 //     and today's cost by account. On a phone, nothing wider than the screen and whole targets.
+// It holds at any time of day, past midnight too: what today has is worked out from what was put
+// on each day, not taken to be everything of the last few minutes. BRIDGE_TEST_CLOCK=HH:MM runs it
+// at the last time it was that (today's, or yesterday's while it's still to come): the server
+// through stand-ins/clock.mjs, the pages through Playwright's clock. Never later than now, as the
+// session-env folders' times are set back to when each conversation began, and a folder's made
+// time (now) mustn't come before that.
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
+import { pathToFileURL } from 'node:url'
 import { startKit, startLocalModel, checks, until, sleep, browser, page, shot, phoneFaults, noServiceWorker, TEST } from '../lib/harness.mjs'
 
 const { ok, done } = checks('usage-accounts')
-const NOW = Date.now()
+const CLOCK = /^(\d\d):(\d\d)$/.exec(process.env.BRIDGE_TEST_CLOCK || '')
+const NOW = (() => {
+  if (!CLOCK) return Date.now()
+  const d = new Date()
+  d.setHours(+CLOCK[1], +CLOCK[2], 0, 0)
+  if (+d > Date.now()) d.setDate(d.getDate() - 1)
+  return +d
+})()
+const OFFSET = NOW - Date.now()
+if (CLOCK) console.log(`usage-accounts: run at ${new Date(NOW).toString()}`)
+const clockNow = () => Date.now() + OFFSET
 const ago = (min) => new Date(NOW - min * 60000)
+const ymd = (t) => new Date(t).toLocaleDateString('en-CA')
 const WORK = 'claude-aaaa0001', SIDE = 'claude-bbbb0002', MAIN = 'claude-default'
 const sid = () => crypto.randomUUID()
 const S = { work: sid(), main: sid(), none: sid(), moved: sid(), sub: sid(), legacy: sid(), both: sid() }
@@ -46,6 +64,9 @@ const reply = (session, at, model) => ({
   message: { id: `msg_${n}`, type: 'message', role: 'assistant', model, content: [{ type: 'text', text: 'Done.' }], usage: { input_tokens: 2000, output_tokens: 3000, cache_read_input_tokens: 400000, cache_creation_input_tokens: 20000 } },
 })
 const want = { [MAIN]: 0, [WORK]: 0, [SIDE]: 0, '?': 0 }
+// Each day's tokens by account, as put in the logs (local days, as the server counts them).
+const byDay = {}
+const put = (at, who) => { const d = (byDay[ymd(at)] ||= {}); d[who] = (d[who] || 0) + PER }
 // The conversations each account (or Not known) ran some of, for Insights.
 const convs = { [MAIN]: new Set(), [WORK]: new Set(), [SIDE]: new Set(), '?': new Set() }
 const legacy = {}
@@ -61,6 +82,7 @@ const seed = ({ data, home, bin }) => {
     const sub = file !== path.join(proj, `${session}.jsonl`)
     log(file, [...(sub ? [] : [{ type: 'user', sessionId: session, timestamp: ago(min + 1).toISOString(), cwd: '/work/app', message: { role: 'user', content: 'Go on.' } }]), reply(session, ago(min), model)])
     want[who] += PER
+    put(ago(min), who)
     if (!sub) convs[who].add(session)
   }
   // Work: its own folder records it; two replies today, one logged in two parts (counted once),
@@ -69,6 +91,7 @@ const seed = ({ data, home, bin }) => {
   const twice = reply(S.work, ago(2), SONNET)
   log(path.join(proj, `${S.work}.jsonl`), [twice, { ...twice, message: { ...twice.message, content: [{ type: 'tool_use', id: 't1', name: 'Read', input: {} }] } }])
   want[WORK] += PER
+  put(ago(2), WORK)
   say(S.work, 2, HAIKU, WORK, path.join(proj, S.work, 'subagents', 'agent-a1.jsonl'))
   // Main (your usual login): its folder records it; yesterday and today.
   say(S.main, 24 * 60, SONNET, MAIN)
@@ -120,7 +143,7 @@ const seed = ({ data, home, bin }) => {
     panes: {}, sessions: { ...legacy, [S.legacy]: SIDE },
     runs: { [S.moved]: [[SIDE, +ago(200), +ago(150)], [WORK, +ago(90), +ago(30)]] },
   }))
-  return {}
+  return CLOCK ? { NODE_OPTIONS: `--import=${pathToFileURL(path.join(TEST, 'stand-ins', 'clock.mjs')).href}`, BRIDGE_TEST_CLOCK_OFFSET: String(OFFSET) } : {}
 }
 // A model on this computer to write the insights with, so the digest it's given can be read.
 const ollama = await startLocalModel('usage-accounts', 'ollama', [{ name: 'llama3.2:3b', context: 131072, loaded: 131072, params: '3.2B' }])
@@ -153,7 +176,10 @@ try {
   const day = v.daily.filter((d) => d.tokens > 0)
   const adds = day.every((d) => { const by = Object.values(d.by || {}); return Math.abs(by.reduce((s, x) => s + x[1], 0) - d.tokens) <= by.length && Math.abs(by.reduce((s, x) => s + x[0], 0) - d.cost) < 0.001 * by.length + 1e-9 })
   ok(day.length >= 2 && adds, "each day's parts add up to its cost and tokens, which stay ccusage's", day.map((d) => ({ date: d.date, cost: d.cost, tokens: d.tokens, by: d.by })))
-  ok(Object.values(v.daily.at(-1).by || {}).length > 0 && (v.today.by?.[WORK]?.[0] || 0) > 0, "today's cost by account, Work's among it", v.today)
+  // Today: what was put on it, by account (nothing yet, just after midnight).
+  const today0 = byDay[v.today.date] || {}
+  const sameDay = (got, wanted) => Object.keys(wanted).every((id) => Math.round(got?.[id]?.[1] || 0) === wanted[id] && got[id][0] > 0) && Object.keys(got || {}).every((id) => wanted[id])
+  ok(v.today.date === ymd(clockNow()) && sameDay(v.today.by, today0), "today's cost and tokens by account: each account's part of what was used today", { today: v.today, want: today0 })
 
   // ---------- Insights, by the same rule ----------
   const ins = (await kit.api('/insights?refresh=1')).stats
@@ -179,9 +205,13 @@ try {
   const agent = await until(async () => ((await kit.api('/fleet')).agents || []).find((a) => a.paneId === l.paneId && a.sessionId && a.accountId === WORK), 30000, 500)
   ok(!!agent, '(an agent runs on Work)', agent)
   if (agent) {
-    const file = path.join(kit.home, '.claude', 'projects', dir.replace(/[^a-zA-Z0-9]/g, '-'), `${agent.sessionId}.jsonl`)
-    await until(() => fs.existsSync(file), 10000)
-    fs.appendFileSync(file, `${JSON.stringify({ ...reply(agent.sessionId, new Date(), SONNET), cwd: dir })}\n`)
+    // In a subagent's log of the conversation: the stand-in keeps writing its own log from where it
+    // was, over anything added to it meanwhile (it did, on a slow Windows runner).
+    const file = path.join(kit.home, '.claude', 'projects', dir.replace(/[^a-zA-Z0-9]/g, '-'), agent.sessionId, 'subagents', 'agent-live.jsonl')
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    const at = new Date(clockNow())
+    fs.appendFileSync(file, `${JSON.stringify({ ...reply(agent.sessionId, at, SONNET), cwd: dir })}\n`)
+    put(at, WORK)
     for (let i = 0; i < 3; i++) { await kit.api('/fleet'); await sleep(400) }
     const after = totals(await usage())
     ok(Math.round(after[WORK]?.[1] || 0) === want[WORK] + PER, 'a reply from an agent Bridge AI started on Work and saw running goes to Work', { work: after[WORK], want: want[WORK] + PER })
@@ -234,7 +264,15 @@ try {
       accounts: live.accounts.filter((g) => g.kind === 'claude').map((g) => ({ ...g, accounts: g.accounts.map((a) => ({ ...a, signedIn: true, usable: true, status: 'ok', plan: a.id === SIDE ? 'max' : 'team', percentRemaining: Math.min(...left[a.id]), windows: windows(a.id) })) })),
     }
   }
-  const fake = async (c) => { await noServiceWorker(c); await c.route(/\/api\/quota(\?|$)/, async (r) => r.fulfill({ json: await quota() })) }
+  const fake = async (c) => {
+    await noServiceWorker(c)
+    if (CLOCK) await c.clock.install({ time: clockNow() })
+    await c.route(/\/api\/quota(\?|$)/, async (r) => r.fulfill({ json: await quota() }))
+  }
+  // What the page shows (Usage's last answer, kept for a few minutes), and who's on a day of it.
+  const NAME = { [MAIN]: 'Main', [WORK]: 'Work', [SIDE]: 'Side', '?': 'Not known' }
+  const shownNow = () => kit.api('/usage/claude')
+  const onDay = (d) => Object.entries(d?.by || {}).filter(([, x]) => x[0] > 0).map(([id]) => NAME[id])
   const openUsage = async (p) => {
     await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-card', { detail: { id: 'gauge' } })))
     const card = p.locator('.usage-card').first()
@@ -270,13 +308,16 @@ try {
     ok(await fill(chart.locator(`rect[data-part="${WORK}"]`).first()) === want2 && await fill(chart.locator('rect[data-part="?"]').first()) === grey, `${t}: Work's bars in its color, Not known in grey`)
     const counted = await card.locator('.acct-counted').innerText()
     ok(/Split by the account each conversation ran on, where Bridge AI saw it there or that account's own folder records it\. Not known, in grey: \d+% of the cost in these days\./.test(counted), `${t}: one line says what's counted, and how much isn't known`, counted)
+    const shown = await shownNow()
     const split = card.locator('.cost-split')
-    ok(await split.isVisible() && /Work/.test(await split.innerText()) && /\$\d/.test(await split.innerText()), `${t}: today's cost by account, under the day's figures`, await split.innerText().catch(() => ''))
-    // On hover, the day's accounts.
-    const today = chart.locator('svg g').last()
-    await today.hover()
+    const todayNames = onDay(shown.today)
+    const splitText = await split.innerText().catch(() => '')
+    ok(todayNames.length ? todayNames.every((x) => splitText.includes(x)) && /\$\d/.test(splitText) : !(await split.count()), `${t}: today's cost by account, under the day's figures (${todayNames.join(', ') || 'none yet'})`, splitText)
+    // On hover, a day's accounts: the latest with three or more of them in it.
+    const busy = [...shown.daily].reverse().find((d) => onDay(d).length >= 3)
+    await chart.locator(`svg g[data-date="${busy?.date}"]`).hover()
     const tip = await chart.locator('.tooltip').innerText().catch(() => '')
-    ok(/Work/.test(tip) && /Not known/.test(tip), `${t}: the day's tooltip names its accounts`, tip)
+    ok(!!busy && onDay(busy).every((x) => tip.includes(x)) && Object.values(NAME).filter((x) => !onDay(busy).includes(x)).every((x) => !tip.includes(x)), `${t}: a day's tooltip names its accounts, and only those`, { tip, want: onDay(busy || {}) })
     await p.mouse.move(5, 5)
     await card.locator('.u-chart').scrollIntoViewIfNeeded()
     await sleep(300)
