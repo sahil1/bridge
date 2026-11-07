@@ -74,10 +74,11 @@ else contextBridge.exposeInMainWorld('bridgeApp', {
   watching: (on) => ipcRenderer.invoke('bridge:watching', !!on),
   // Dictation's key from other apps (Settings › Voice), and its window (?dictate=1): what was
   // pressed before it was ready, its size, whether it's listening (Esc is held for it then), hiding,
-  // copying, and opening the agent in the main window. Pasting where you're typing in another app:
-  // the text pasted there, whether it's allowed (a Mac's Accessibility), and asking for it.
+  // copying, and the keyboard while its words are edited there (taken, then given back). Pasting
+  // where you're typing in another app: the text pasted there (back: from the card, with that app
+  // brought to the front first), whether it's allowed (a Mac's Accessibility), and asking for it.
   dictateStatus: () => ipcRenderer.invoke('bridge:dictate-status'),
-  hudPaste: (text) => ipcRenderer.invoke('bridge:hud-paste', String(text)),
+  hudPaste: (text, o) => ipcRenderer.invoke('bridge:hud-paste', String(text), { back: o?.back === true }),
   // Edit by voice: what was selected where you were typing, read as the key was let go.
   hudSelection: () => ipcRenderer.invoke('bridge:hud-selection'),
   pasteAccess: () => ipcRenderer.invoke('bridge:paste-access'),
@@ -88,7 +89,7 @@ else contextBridge.exposeInMainWorld('bridgeApp', {
   hudPhase: (phase) => ipcRenderer.send('bridge:hud-phase', String(phase)),
   hudHide: () => ipcRenderer.invoke('bridge:hud-hide'),
   hudCopy: (text) => ipcRenderer.invoke('bridge:hud-copy', String(text)),
-  hudOpen: (o) => ipcRenderer.invoke('bridge:hud-open', o),
+  hudKeyboard: (on) => ipcRenderer.invoke('bridge:hud-keys', on === true),
   // The pointer on its pill (clicks go through the rest of its window), and Paste again from the
   // list of your dictations.
   hudPointer: (on) => ipcRenderer.send('bridge:hud-pointer', !!on),

@@ -12,7 +12,8 @@
 //   /api/transcribe: the first time, the answer says a one-time download is needed (name, size, it
 //   stays on this computer) and starts nothing; after the download, a 16 kHz WAV goes to Parakeet
 //   (another rate or stereo is turned into that first, and audio that needs ffmpeg says so when
-//   it's missing); names to listen for go with it, and meeting memory's spellings come out fixed.
+//   it's missing); names to listen for go with it (whisper's hint with Settings' words and meeting
+//   memory's names), and meeting memory's spellings come out fixed.
 //   The engine runs in a process of its own, loaded once and kept, let go when idle, started
 //   again after a crash. A meeting transcribed by Parakeet.
 // BRIDGE_REAL_PARAKEET=1: also the real thing, once, by hand: both real models downloaded from
@@ -62,6 +63,24 @@ ok(!fit({ platform: 'linux', arch: 'x64', glibc: '2.36', docker: true }, {}, whi
 ok(fit({ platform: 'linux', arch: 'x64', glibc: '2.36', docker: true }, { whisperHere: true }, whisper).ok, 'unless whisper.cpp was installed in the container')
 for (const [what, m] of [['a Mac', { platform: 'darwin', arch: 'arm64' }], ['Windows', { platform: 'win32', arch: 'x64' }], ['Linux with an old glibc', { platform: 'linux', arch: 'x64', glibc: '2.31' }]]) ok(fit(m, {}, whisper).ok, `${what}: Whisper is offered (kept for other languages)`)
 ok(speech.DEFAULT === 'parakeet-v3', 'the portable default is Parakeet')
+
+// What a voice note or a dictation tells the engine to listen for (voice.js listenFor): whisper's
+// hint has Bridge AI's words, Settings' words and meeting memory's names, as a meeting's has;
+// Parakeet's names have the names Bridge AI knows too (speech.js adds memory's).
+{
+  fs.rmSync(path.join(process.env.BRIDGE_HOME, 'meetings'), { recursive: true, force: true })
+  const voice = await import('../../server/voice.js')
+  const memory = await import('../../server/meetmemory.js')
+  memory.add({ term: 'Northwind', heard: ['north wind'] })
+  voice.configure({ meetings: { vocabulary: 'Kubernetes, OKRs' } })
+  const l = voice.listenFor(['payments-api'])
+  ok(/^chief of staff, Claude, .*, repo, Kubernetes, OKRs, Northwind\.$/.test(l.prompt) && l.words.includes('Kubernetes') && l.words.includes('payments-api') && l.words.includes('Claude Code'), 'a dictation\'s hint for whisper: Bridge AI\'s words, Settings\' words and meeting memory\'s names; Parakeet\'s names with the ones Bridge AI knows', l)
+  voice.configure({ voice: { prompt: 'Acme, Globex.' } })
+  const own = voice.listenFor()
+  ok(own.prompt === 'Acme, Globex, Northwind.' && own.words[0] === 'Acme', 'your own words (voice.prompt) in place of Bridge AI\'s, with meeting memory\'s names after', own)
+  voice.configure({})
+  fs.rmSync(path.join(process.env.BRIDGE_HOME, 'meetings'), { recursive: true, force: true })
+}
 
 // ---------- A small fake model, served from this computer ----------
 const served = await startSpeechModels('speech')

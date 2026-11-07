@@ -1006,7 +1006,7 @@ app.whenReady().then(() => {
   // Each time the key is set: whether pasting can work and whether a lone key is picked, which is
   // what Accessibility and Input Monitoring are asked for.
   const onStatus = (v) => { canPaste = !!v?.paste?.can; loneKey = !!v?.lone && /^(Fn|RightAlt)$/.test(v.key || ''); reportPerms() }
-  dictation.start({ electron, ROOT, DATA, URL_BASE, preload: path.join(__dirname, 'preload.js'), isOurs: ours, tellMain, askAccess: showTile, trusted: fromApp, perms, onStatus })
+  dictation.start({ electron, ROOT, DATA, URL_BASE, preload: path.join(__dirname, 'preload.js'), isOurs: ours, askAccess: showTile, trusted: fromApp, perms, onStatus })
     .catch((e) => console.error('dictation:', e.message))
   // What the app is allowed: told once a minute (the server forgets it after three), and whenever you
   // come back to one of its windows (System Settings is where it changes).

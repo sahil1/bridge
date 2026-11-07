@@ -5,7 +5,8 @@
 // the desktop app (its Electron, an application ID GNOME accepts, a menu entry of that name, which
 // install.sh puts in place), the light cleanup
 // (fillers, doubled words, capitals, the full stop, names spelled the way they're written, files
-// said aloud), and how the desktop app hears the key (desktop/dictation.js) with a stand-in keyboard
+// said aloud), a name put right in an edit (to offer to meeting memory) told from a word fixed or
+// a sentence reworded, and how the desktop app hears the key (desktop/dictation.js) with a stand-in keyboard
 // hook and globalShortcut: held, tapped, a key repeating, X11's repeats, another app having it, no
 // hook at all. Pasting where you're typing: where it can work (simulated per system and desktop),
 // telling a terminal on X11, Windows' and X11's paste with a stand-in clipboard and hook (the text on
@@ -17,13 +18,16 @@
 // app the key was pressed in, refused without Accessibility or with the setting off; the window in the
 // middle at the top, growing down and back with its top kept, clicks going through it but for the
 // pill; the app's icon kept for the list of dictations (not with history off); Paste again from that
-// list, into the app it was said in. On a Mac:
+// list, into the app it was said in; the window taking the keyboard for its words to be edited and
+// giving it back (that app brought to the front again), also for a paste from the card, a click
+// into another app and the key pressed again. On a Mac:
 // native/bridgekeys builds for both chips, says what's in front, sets a key and prints its presses
 // (made through its stdin, no real key), says when macOS has the key, and pastes into a pasteboard of
 // the test's own (never a key pressed, never your clipboard): what was there back once it's read,
 // every item and type; not when something was copied meanwhile; the text left when nothing read it;
 // a password field or no Accessibility refused before touching anything.
-// Then the server's names for it (/api/dictation/words) and its settings in /api/config.
+// Then the server's names for it (/api/dictation/words), a name remembered from an edit and Undo,
+// edit by voice's model told meeting memory's names the text mentions, and its settings in /api/config.
 import fs from 'node:fs'
 import path from 'node:path'
 import { EventEmitter } from 'node:events'
@@ -35,6 +39,7 @@ const { ok, skip, done } = checks('dictation')
 const keys = await import('../../shared/dictation/keys.js')
 const { globalKey, pasteInto, loneKeys, editByVoice, isTerminal } = await import('../../shared/dictation/platform.js')
 const { clean, makeNames } = await import('../../shared/dictation/clean.js')
+const { corrections } = await import('../../shared/dictation/corrected.js')
 const desk = createRequire(import.meta.url)('../../desktop/dictation.js')
 
 // ---------- The key ----------
@@ -180,6 +185,29 @@ for (const [said, want, what] of cases) ok(C(said) === want, `cleanup: ${what}`,
 ok(C('git status', { sentence: false }) === 'git status' && C('payments', { sentence: false }) === 'payments', 'a terminal or a search box gets no capital or full stop')
 ok(C('um look at payments dot ts', { cleanup: false, atFiles: false }) === 'um look at payments dot ts', 'with cleanup and file mentions off, it\'s as said')
 ok(C('tell strike about it', { heard: [['strike', 'Stripe']] }) === 'Tell Stripe about it.', 'meeting memory\'s "heard as" pairs')
+
+// ---------- A name put right in an edit, to offer to meeting memory ----------
+const fixed = (a, b) => JSON.stringify(corrections(a, b))
+const found = [
+  ['Send it to ack me by Friday.', 'Send it to Acme by Friday.', [{ heard: 'ack me', term: 'Acme' }], 'two words heard for one name'],
+  ['Ask jon about the open ai bill.', 'Ask Jan about the OpenAI bill.', [{ heard: 'jon', term: 'Jan' }, { heard: 'open ai', term: 'OpenAI' }], 'two in one edit'],
+  ['Talk to Priya shaw today.', 'Talk to Priya Shah today.', [{ heard: 'Priya shaw', term: 'Priya Shah' }], 'a name\'s other half that was right already goes with it'],
+  ['ping north wind, then go', 'ping Northwind, then go', [{ heard: 'north wind', term: 'Northwind' }], 'the punctuation around it left out'],
+  ['use gpt five', 'use GPT-5', [{ heard: 'gpt five', term: 'GPT-5' }], 'a digit in it'],
+]
+for (const [a, b, want, what] of found) ok(fixed(a, b) === JSON.stringify(want), `an edit: ${what}`, `${JSON.stringify(a)} -> ${JSON.stringify(b)}: ${fixed(a, b)}`)
+const none = [
+  ['Their going to ship it.', 'They\'re going to ship it.', 'a sentence\'s first word (its capital is the sentence\'s)'],
+  ['I think there going.', 'I think they\'re going.', 'a plain word fixed'],
+  ['Send the report.', 'Send Acme\'s report.', 'a little word heard ("the")'],
+  ['Meet at five thirty.', 'Meet at 5:30.', 'figures for words, with no letter'],
+  ['the acme deal', 'the Acme deal', 'a capital alone'],
+  ['We need to talk about the budget for next quarter.', 'Let us discuss the Q3 budget soon please.', 'a sentence reworded'],
+  ['Ship it.', 'Ship it to Acme today.', 'words added'],
+  ['look at payments dot ts', 'look at @Payments.ts', 'a file mentioned'],
+]
+for (const [a, b, what] of none) ok(fixed(a, b) === '[]', `not a name put right: ${what}`, `${JSON.stringify(a)} -> ${JSON.stringify(b)}: ${fixed(a, b)}`)
+ok(corrections('one aa two bb three cc four dd', 'one Aa1 two Bb1 three Cc1 four Dd1').length === 3 && corrections('ack me '.repeat(250), 'Acme '.repeat(250)).length === 0, 'three at most, and a long dictation isn\'t compared')
 
 // ---------- One key on its own: Fn or the right ⌥ ----------
 {
@@ -440,8 +468,12 @@ else {
   let hud = null
   class Win {
     static getFocusedWindow() { return null }
-    constructor(o) { hud = this; this.shown = false; this.made = o; this.bounds = { x: o.x, y: o.y, width: o.width, height: o.height }; this.through = []; this.told = []; this.webContents = { setWindowOpenHandler() {}, on() {}, isDestroyed: () => false, executeJavaScript: async (js) => { this.told.push(js) } } }
-    setAlwaysOnTop() {} setVisibleOnAllWorkspaces() {} setContentProtection() {} on() {} loadURL() {}
+    constructor(o) { hud = this; this.shown = false; this.made = o; this.bounds = { x: o.x, y: o.y, width: o.width, height: o.height }; this.through = []; this.told = []; this.focusable = []; this.focused = false; this.ons = {}; this.webContents = { setWindowOpenHandler() {}, on() {}, isDestroyed: () => false, executeJavaScript: async (js) => { this.told.push(js) } } }
+    setAlwaysOnTop() {} setVisibleOnAllWorkspaces() {} setContentProtection() {} loadURL() {}
+    on(ev, fn) { (this.ons[ev] ||= []).push(fn) }
+    emit(ev) { if (ev === 'blur') this.focused = false; for (const fn of this.ons[ev] || []) fn() }
+    setFocusable(v) { this.focusable.push(v) }
+    focus() { this.focused = true }
     setBounds(b) { this.bounds = { ...b } }
     getBounds() { return { ...this.bounds } }
     setIgnoreMouseEvents(on, o) { this.through.push([on, !!o?.forward]) }
@@ -450,16 +482,17 @@ else {
     hide() { this.shown = false }
     isVisible() { return this.shown }
     isDestroyed() { return false }
-    isFocused() { return false }
+    isFocused() { return this.focused }
     getContentSize() { return [this.bounds.width, this.bounds.height] }
   }
   // The icon of the app the key was pressed in, as macOS would give it; and Bridge AI stepping back.
   const thumbs = []
   let hidden = 0
+  const stole = [] // Bridge AI made the app in front, for the window to have the keyboard
   const electron = {
     BrowserWindow: Win, globalShortcut: fakeShortcuts(), clipboard: fakeClipboard(),
     nativeImage: { createThumbnailFromPath: async (p) => { thumbs.push(p); return { isEmpty: () => false, toPNG: () => Buffer.from('png of TextEdit') } } },
-    app: { hide: () => { hidden++ } },
+    app: { hide: () => { hidden++ }, focus: (o) => { stole.push(o) } },
     screen: { getCursorScreenPoint: () => ({ x: 0, y: 0 }), getDisplayNearestPoint: () => ({ workArea: { x: 0, y: 0, width: 1440, height: 900 } }) },
     ipcMain: { handle: (n, fn) => { handlers[n] = fn }, on: (n, fn) => { handlers[n] = fn } },
     systemPreferences: { isTrustedAccessibilityClient: (prompt) => { if (prompt) asked.push(prompt); return allowed } },
@@ -517,8 +550,28 @@ else {
     allowed = false
     ok((await call('bridge:dictate-repaste', me, { text: 'Not allowed.' }))?.error === 'accessibility' && pasted().length === 3, 'not without Accessibility')
     allowed = true
+    // The words edited on the card: the window takes the keyboard (a Mac lets it, for that), and
+    // gives it back with TextEdit brought to the front again; a paste from the card brings it back
+    // first; clicking into another app meanwhile gives it back too.
+    ok(await call('bridge:hud-keys', me, true) === false && !hud.focusable.length && !hud.focused, 'only the dictation window can take the keyboard')
+    ok(await call('bridge:hud-keys', from, true) === true && hud.focusable.join() === 'true' && hud.focused && stole.length === 1, 'editing the words on the card: the window may take the keyboard (it can\'t otherwise on a Mac), and has it', { focusable: hud.focusable, focused: hud.focused, stole })
+    const b0 = brought.length
+    ok(await call('bridge:hud-keys', from, false) === true && hud.focusable.join() === 'true,false' && brought.slice(b0).join() === 'com.apple.TextEdit', 'done with them: it can\'t take it again, and TextEdit is brought back to the front', { focusable: hud.focusable, brought })
+    ok(await call('bridge:hud-keys', from, false) === false && brought.length === b0 + 1, 'given back once, not again')
+    await call('bridge:hud-keys', from, true)
+    const back = await call('bridge:hud-paste', from, 'Edited words.', { back: true })
+    ok(back?.pasted && brought.length === b0 + 2 && pasted().at(-1)?.text === 'Edited words.' && pasted().at(-1).args.join(' ') === '--pid 4242' && hud.focusable.at(-1) === false && await call('bridge:hud-keys', from, false) === false, 'Paste on the card: the keyboard given back, TextEdit brought to the front, then the words pasted into it', { back, brought, last: pasted().at(-1) })
+    await call('bridge:hud-keys', from, true)
+    hud.emit('blur')
+    ok(hud.focusable.at(-1) === false && await call('bridge:hud-keys', from, false) === false && brought.length === b0 + 2, 'clicking into another app while editing: the window can\'t take the keyboard from it any more', hud.focusable)
+    await call('bridge:hud-keys', from, true)
+    const toldK = hud.told.length
+    await call('bridge:dictate-configure', me, { background: true, to: 'paste' })
+    await until(() => hud.told.slice(toldK).some((js) => js.includes('"type":"down"')), 3000, 50)
+    ok(hud.focusable.at(-1) === false && brought.length === b0 + 3 && hud.told.slice(toldK).some((js) => js.includes('"app":"TextEdit"')), 'the key pressed again while editing: the keyboard back to TextEdit, and the new words for it', { focusable: hud.focusable, brought })
     await call('bridge:dictate-configure', me, { background: true, to: 'last' })
-    ok((await call('bridge:hud-paste', from, 'Hello again.'))?.error === 'off' && pasted().length === 3, 'with the text going to an agent instead: nothing pasted')
+    const n0 = pasted().length
+    ok((await call('bridge:hud-paste', from, 'Hello again.'))?.error === 'off' && pasted().length === n0, 'with the text going to an agent instead: nothing pasted')
     // Edit by voice on: the selection in TextEdit read as the key's let go, for the dictation window.
     ok(!(await call('bridge:dictate-status', me)).edit?.on && (await call('bridge:dictate-status', me)).edit?.can, 'edit by voice: offered on a Mac, off until it\'s turned on')
     process.env.BRIDGEKEYS_SELECTION = 'teh draft'
@@ -660,6 +713,21 @@ try {
   const w = await kit.api('/dictation/words')
   ok(['Claude Code', 'worktree', 'Chief of Staff', 'Northwind'].every((x) => w.terms.includes(x)), 'the server\'s names: its agents, models and words, and meeting memory', w.terms.slice(0, 30))
   ok(w.heard.some(([h, t]) => h === 'north wind' && t === 'Northwind'), 'and how meeting memory\'s names are misheard', w.heard)
+  // A name put right in a dictation, kept in meeting memory when you say so (Remember), and Undo.
+  const kept = await kit.api('/dictation/remember', { term: 'Contoso', heard: 'con toso' })
+  const w1 = await kit.api('/dictation/words')
+  ok(kept.created && w1.terms.includes('Contoso') && w1.heard.some(([h, t]) => h === 'con toso' && t === 'Contoso'), 'Remember: the name you put right is in meeting memory, spelled its way and heard right from then on', kept)
+  await kit.api('/dictation/remember/undo', kept)
+  const w2 = await kit.api('/dictation/words')
+  ok(!w2.terms.includes('Contoso') && !w2.heard.some(([h]) => h === 'con toso'), 'Undo: a new name taken out again', w2.heard)
+  const again = await kit.api('/dictation/remember', { term: 'northwind', heard: 'nor wind' })
+  const w3 = await kit.api('/dictation/words')
+  await kit.api('/dictation/remember/undo', again)
+  const w4 = await kit.api('/dictation/words')
+  ok(!again.created && again.term === 'Northwind' && JSON.stringify(again.was) === '["north wind"]' && w3.heard.some(([h, t]) => h === 'nor wind' && t === 'Northwind'), 'one memory has already: another way it\'s misheard, added to it', again)
+  ok(w4.heard.some(([h, t]) => h === 'north wind' && t === 'Northwind') && !w4.heard.some(([h]) => h === 'nor wind'), 'and Undo puts back the ways it was misheard before', w4.heard)
+  const bad = await kit.api('/dictation/remember', { term: 'x', heard: 'ex' }).catch((e) => e.message)
+  ok(/A name or term/.test(bad), 'a name that isn\'t one: said, nothing kept', bad)
   ok(JSON.stringify((await kit.api('/config')).dictation) === '{}', 'no dictation settings at first: everything as it comes')
   await kit.api('/settings', { dictation: { key: 'Control+Alt+D', cleanup: false } }, 'PATCH')
   const c = (await kit.api('/config')).dictation
@@ -673,6 +741,13 @@ try {
   const r = await kit.api('/dictation/edit', { text: 'teh draft', instruction: 'fix the spelling' })
   const asked = model.asked(/^Instruction: fix the spelling\n\nText:\nteh draft$/)
   ok(r.text === 'The draft' && asked.length === 1, 'picked: the selection and what was said go to that model, and its answer comes back without the quotes and code fence it put around it', { r, asked: model.asked().slice(-1) })
+  // Meeting memory's names that either mentions go with them, with who each is; the rest don't.
+  const sysOf = () => { const m = model.requests().at(-1)?.messages || []; const s = m.find((x) => x.role === 'system')?.content; return typeof s === 'string' ? s : (s || []).map((x) => x.text || '').join('') }
+  ok(!/meeting memory/.test(sysOf()), 'with no name from memory in them: nothing more', sysOf().slice(-300))
+  await kit.api('/meetings/memory', { term: 'Northwind', note: 'the customer we ship to' })
+  await kit.api('/meetings/memory', { term: 'Fabrikam', note: 'a supplier' })
+  await kit.api('/dictation/edit', { text: 'teh note for north wind', instruction: 'make it about Northwind' })
+  ok(/- Northwind: the customer we ship to \(misheard as "north wind"\)/.test(sysOf()) && !/Fabrikam/.test(sysOf()), 'Northwind mentioned: the model is told how it\'s spelled, who it is and how it\'s misheard; Fabrikam, not mentioned, isn\'t', sysOf().slice(-400))
   const relay = await fetch(`${kit.url}/api/dictation/edit`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-bridge-relay': 'phone' }, body: JSON.stringify({ text: 'a', instruction: 'b' }) })
   ok(!relay.ok && model.asked(/^Instruction: b/).length === 0, 'never through the relay: only the computer\'s own dictation window asks', relay.status)
   const big = await kit.api('/dictation/edit', { text: 'x'.repeat(20001), instruction: 'shorter' }).catch((e) => e.message)
