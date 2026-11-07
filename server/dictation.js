@@ -78,10 +78,10 @@ export function namesIn(text, max = 12) {
 // listened for. The answer says what was there before, so Undo can put it back (forget): a name
 // that's new is taken out again, one that was there gets back the ways it was misheard.
 const same = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase().replace(/[\s-]+/g, ' ')
-export function remember({ term, heard } = {}) {
+export function remember({ term, heard, dictation = null } = {}) {
   const had = memory.list().find((t) => same(t.term) === same(term))
   const was = had ? [...had.heard] : null
-  const t = memory.add({ term, heard: heard && same(heard) !== same(term) ? [String(heard)] : [] })
+  const t = memory.add({ term, heard: heard && same(heard) !== same(term) ? [String(heard)] : [] }, { source: 'you', dictation: dictation ? String(dictation) : null })
   return { id: t.id, term: t.term, heard: t.heard, created: !had, was }
 }
 export function forget({ id, created, was } = {}) {

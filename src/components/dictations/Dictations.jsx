@@ -216,7 +216,7 @@ function Row({ r, open, onToggle, onDelete, onChanged, paste, onMsg }) {
       {open && draft == null && (
         <div className="dc-body">
           <p className="dc-full">{shown}</p>
-          {fixes.map((f) => <Remember key={`${f.heard}\n${f.term}`} fix={f} className="dc-remember" onClose={() => setFixes((x) => x.filter((y) => y !== f))} />)}
+          {fixes.map((f) => <Remember key={`${f.heard}\n${f.term}`} fix={f} dictation={r.id} className="dc-remember" onClose={() => setFixes((x) => x.filter((y) => y !== f))} />)}
           {r.said && !heard && (
             <p className="muted small dc-tidied"><Icon name="sparkle" size={12} /> {asSaid ? t('As you said it, before it was tidied.') : edited ? t('As you edited it.') : r.tidiedBy ? t('Tidied by {model}.', { model: r.tidiedBy }) : t('Tidied.')}
               {' '}<button type="button" className="link-btn small dc-said" onClick={() => setAsSaid((v) => !v)}>{asSaid ? (edited ? t('Show it as you edited it') : t('Show it tidied')) : t('Show what I said')}</button></p>

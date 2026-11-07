@@ -413,6 +413,7 @@ try {
     if (mode === 'light') {
       await offers.nth(0).locator('button', { hasText: 'Remember' }).click()
       ok(!!(await until(async () => (await memTerm('Priya Shah'))?.heard.includes('pria Shah') && /Remembered/.test(await offers.nth(0).innerText().catch(() => '')), 4000, 100)), 'Remember: Priya Shah in meeting memory, heard as "pria Shah"', await memTerm('Priya Shah'))
+      ok((await memTerm('Priya Shah'))?.dictations?.includes(toEdit[mode].id), 'and with the dictation it was put right in, for Memory to list it there', await memTerm('Priya Shah'))
       await offers.nth(1).locator('button', { hasText: 'Not now' }).click()
       ok(!!(await until(async () => (await offers.count()) === 1, 3000, 100)) && !(await memTerm('OpenAI')), 'Not now: OpenAI isn\'t kept, and its offer goes')
       await offers.nth(0).locator('button', { hasText: 'Undo' }).click()
