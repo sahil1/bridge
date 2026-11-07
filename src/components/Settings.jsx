@@ -94,7 +94,7 @@ export default function Settings({ section = 'all', onClose, onOpenAgent }) {
     {at === 'agents' && <Agents onOpenAgent={(id) => { onOpenAgent?.(id); onClose() }} />}
     {at === 'providers' && <Providers focus={section === 'accounts' || section === 'cloud' ? section : null} onOpenAgent={(id) => { onOpenAgent?.(id); onClose() }} />}
     {at === 'voice' && <Voice />}
-    {at === 'meetings' && <Meetings />}
+    {at === 'meetings' && <Meetings onOpenAgent={(id) => { onOpenAgent?.(id); onClose() }} />}
     {at === 'mail' && <Mail />}
     {at === 'mcp' && <Mcp />}
     {at === 'appearance' && <Appearance focus={section === 'topbar' ? 'topbar' : null} />}

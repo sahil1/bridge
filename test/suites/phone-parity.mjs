@@ -32,6 +32,7 @@ const PATHS = {
   'view:new': { phone: 'Agents › New', shows: '.home-title' },
   'view:meetings': { phone: 'Meetings', shows: '.m-meetings' },
   'view:dictations': { phone: 'Meetings › Dictations', shows: '.dc-home, .dc-empty, .dc-body' },
+  'view:memory': { phone: 'More › Memory', shows: '.mm-home' },
   'view:whiteboards': { phone: 'More › Whiteboards', shows: '.wb-home' },
   'view:studio': { phone: 'More › Studio', shows: '.sd-home' },
   'view:map': { phone: 'Agents › Map', shows: '.am' },
@@ -45,6 +46,7 @@ const PATHS = {
   'a:insights': { phone: 'Meetings › Insights', shows: '.m-meetings :is(.mi, .mi-empty)' },
   'a:people': { phone: 'Meetings › People', shows: '.m-meetings .mi-people' },
   'a:dictations': { phone: 'More › Dictations', shows: '.dc-home, .dc-empty, .dc-body' },
+  'a:memory': { phone: 'More › Memory', shows: '.mm-home' },
   'a:boards': { phone: 'More › Whiteboards', shows: '.wb-home' },
   'a:studio': { phone: 'More › Studio', shows: '.sd-home' },
   'a:map': { phone: 'More › Agent Map', shows: '.am' },
@@ -97,6 +99,7 @@ const PATHS = {
   'rail:Meetings': { phone: 'Meetings', shows: '.m-meetings' },
   'rail:Record a meeting now': { phone: 'Meetings', shows: '.m-meetings button:has-text("Start recording")' },
   'rail:Dictations': { phone: 'Meetings › Dictations', shows: '.dc-home, .dc-empty, .dc-body' },
+  'rail:Memory': { phone: 'More › Memory', shows: '.mm-home' },
   'rail:Whiteboards': { phone: 'More › Whiteboards', shows: '.wb-home' },
   'rail:Studio': { phone: 'More › Studio', shows: '.sd-home' },
   'rail:New space': { phone: 'Search › New agent with all the options' },
@@ -125,7 +128,7 @@ for (const [what, ids] of [['view', views], ['⌘K action', actions], ['Settings
   ok(!missing(ids).length, `every desktop ${what} has a way in on a phone, or says why not (add it to PATHS here)`, missing(ids))
 }
 
-const kit = await startKit('phone-parity', { config: { trials: { studio: true, 'meeting-insights': true } } }) // the beta features on: their ways in are checked too
+const kit = await startKit('phone-parity', { config: { trials: { studio: true, 'meeting-insights': true, memory: true } } }) // the beta features on: their ways in are checked too
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
 try {

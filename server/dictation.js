@@ -156,13 +156,19 @@ const TIDY_SYSTEM = [
 // the same everywhere.
 const STYLES = {}
 export const styleFor = (app) => STYLES[String(app || '').trim().toLowerCase()] || null
-// names: namesIn's lines for what was said, or none. They come last, after what never changes, so a
-// model that keeps what it has read of a prompt reads only them again.
-export function tidyPrompt(text, { app = null, names = '' } = {}) {
+// names: namesIn's lines for what was said, or none. often: the names this person says most (About
+// You, with Memory on), for their spelling only. Both come after what never changes, and names last,
+// so a model that keeps what it has read of a prompt reads only them again.
+export function tidyPrompt(text, { app = null, names = '', often = [] } = {}) {
   const style = styleFor(app)
   // The fence can't be closed from inside: a tag in what was heard is taken out.
   const said = String(text || '').replace(/<\s*\/?\s*dictation\s*>/gi, ' ').replace(/[ \t]{2,}/g, ' ').trim()
-  const system = [TIDY_SYSTEM, style ? `It's going into ${app}: ${style}` : null, names ? `${names}\nWhere one of these was said, or clearly misheard, write it as it's written here. They aren't part of the dictation: never add one that wasn't said.` : null]
+  const system = [
+    TIDY_SYSTEM,
+    often.length ? `Names this person often says, spelled the way they write them (only for spelling; never add one that wasn't said): ${often.slice(0, 30).join(', ')}.` : null,
+    style ? `It's going into ${app}: ${style}` : null,
+    names ? `${names}\nWhere one of these was said, or clearly misheard, write it as it's written here. They aren't part of the dictation: never add one that wasn't said.` : null,
+  ]
   return { system: system.filter(Boolean).join('\n\n'), user: `<dictation>\n${said}\n</dictation>` }
 }
 
@@ -209,12 +215,12 @@ export const TIDY_MAX = 4000
 // { text, ms }, or an error with its status and code: slow (past the budget), failed (the model's
 // own error), changed (not what was said), long. reply: chatmodels.js reply; ms: the budget, else
 // tidyBudget's and more.
-export async function tidy({ text, app = null, model, reply, ms = null, more = 0 }) {
+export async function tidy({ text, app = null, model, reply, ms = null, more = 0, names = [] }) {
   const said = String(text || '').trim()
   if (!said) throw Object.assign(new Error('Nothing was said'), { status: 400 })
   if (said.length > TIDY_MAX) throw Object.assign(new Error('That\'s more than tidying takes (4,000 characters)'), { status: 413, code: 'long' })
   const budget = ms ?? tidyBudget(model, wordsOf(said).length) + more
-  const { system, user } = tidyPrompt(said, { app, names: namesIn(said) })
+  const { system, user } = tidyPrompt(said, { app, names: namesIn(said), often: names })
   const stop = new AbortController()
   const t0 = Date.now()
   let timer

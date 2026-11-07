@@ -18,6 +18,7 @@ const LOADERS = {
   UsageStats: () => import('./components/UsageStats.jsx'),
   Meetings: () => import('./components/meetings/Meetings.jsx'),
   Dictations: () => import('./components/dictations/Dictations.jsx'),
+  Memory: () => import('./components/memory/Memory.jsx'),
 }
 
 // A view's styles that didn't come (the computer out of reach as they loaded): Vite's loader asks for
@@ -63,6 +64,7 @@ export const Settings = wrap(LOADERS.Settings)
 export const MeetingsHome = wrap(LOADERS.Meetings, 'MeetingsHome')
 export const MeetingPage = wrap(LOADERS.Meetings, 'MeetingPage')
 export const Dictations = wrap(LOADERS.Dictations)
+export const Memory = wrap(LOADERS.Memory)
 export const Onboarding = wrap(LOADERS.Onboarding)
 export const HerdrView = wrap(LOADERS.HerdrView)
 export const Terminals = wrap(LOADERS.Terminals)
