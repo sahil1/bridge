@@ -100,13 +100,21 @@ export function make({ rt, fleet }) {
     return q
   }
 
+  // The waits answered from here (`${paneId}@${seq}`): off the list at once, however long the
+  // agent's screen takes to redraw (a terminal on Windows can take a while). A new question is a new
+  // wait (its seq), so it shows.
+  const answered = new Set()
   let last = { at: 0, items: null, p: null }
+  let gen = 0 // a look begun before an answer isn't kept after it
   async function build() {
     const f = await fleet()
     if (f.down) return []
     const out = []
+    const live = new Set((f.agents || []).map((a) => `${a.paneId}@${a.seq}`))
+    for (const k of answered) if (!live.has(k)) answered.delete(k)
     for (const a of f.agents || []) {
       if (a.status !== 'blocked' && a.status !== 'done') continue
+      if (a.status === 'blocked' && answered.has(`${a.paneId}@${a.seq}`)) continue
       let p = null
       if (a.status === 'done' && !a.cloud) {
         const key = `${a.paneId}@${a.seq}`
@@ -132,10 +140,11 @@ export function make({ rt, fleet }) {
   function items() {
     if (last.p) return last.p
     if (last.items && Date.now() - last.at < 1000) return Promise.resolve(last.items)
-    last.p = build().then((x) => { last = { at: Date.now(), items: x, p: null }; return x }, (e) => { last.p = null; throw e })
+    const g = gen
+    last.p = build().then((x) => { if (g === gen) last = { at: Date.now(), items: x, p: null }; return x }, (e) => { if (g === gen) last.p = null; throw e })
     return last.p
   }
-  const forget = () => { last = { at: 0, items: null, p: null } }
+  const forget = () => { gen++; last = { at: 0, items: null, p: null } }
 
   // An answer from the inbox: one of the question's simple answers, typed if it still asks that.
   // A cloud agent's plan is approved with its own provider (cloud.js).
@@ -143,7 +152,10 @@ export function make({ rt, fleet }) {
     forget()
     if (n === 'approve' && approve) { await approve(paneId); return { ok: true, answered: 'approve' } }
     if (!paneId || !qid || n == null) return { ok: false, why: 'changed' }
-    return pick(String(paneId), { seq: seq == null ? null : Number(seq), qid: String(qid), n: String(n) })
+    const r = await pick(String(paneId), { seq: seq == null ? null : Number(seq), qid: String(qid), n: String(n) })
+    if (r.ok && seq != null) answered.add(`${paneId}@${Number(seq)}`)
+    forget()
+    return r
   }
   // Cleared: finished work you've looked at, or a failed run you've dealt with. It comes back
   // only when that agent has something new.

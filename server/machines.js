@@ -669,16 +669,24 @@ export const summary = async (opts = {}) => {
   const s = await getSummary(opts)
   return { ...here(), ...s, about: { ...(await about()), runtime: s.runtime || null } }
 }
-const asking = new Map() // machine id -> its summary on the way, so a burst of asks makes one call
-function refresh(m) {
-  if (!asking.has(m.id)) asking.set(m.id, refreshNow(m).finally(() => asking.delete(m.id)))
-  return asking.get(m.id)
+// machine id -> { at, p }: its summary on the way and when it was asked for, so a burst of asks
+// makes one call. since: one asked for at that time or later (after you answered something there,
+// one asked before is no news of it).
+const asking = new Map()
+function refresh(m, since = 0) {
+  const was = asking.get(m.id)
+  if (was && was.at >= since) return was.p
+  const at = Date.now()
+  const p = refreshNow(m, at).finally(() => { if (asking.get(m.id)?.p === p) asking.delete(m.id) })
+  asking.set(m.id, { at, p })
+  return p
 }
-async function refreshNow(m) {
+async function refreshNow(m, asked = Date.now()) {
   const l = links.get(m.id)
   if (!l?.session) return
   const s = await l.call('GET', `/api/machines/summary${wantHome() ? '?home=1' : ''}`, undefined, 12000)
-  keep(m.id, { name: s.name, os: s.os, version: s.version, counts: s.counts || {}, agents: Array.isArray(s.agents) ? s.agents.slice(0, 40) : [], needs: Array.isArray(s.needs) ? s.needs.slice(0, 60) : null, home: Array.isArray(s.home) ? s.home.slice(0, 100) : null, about: s.about || null, systemName: s.systemName || null, at: Date.now() })
+  if ((kept.get(m.id)?.asked || 0) > asked) return // a later one came first
+  keep(m.id, { asked, name: s.name, os: s.os, version: s.version, counts: s.counts || {}, agents: Array.isArray(s.agents) ? s.agents.slice(0, 40) : [], needs: Array.isArray(s.needs) ? s.needs.slice(0, 60) : null, home: Array.isArray(s.home) ? s.home.slice(0, 100) : null, about: s.about || null, systemName: s.systemName || null, at: Date.now() })
   if (s.name && s.name !== m.name) { m.name = String(s.name).slice(0, 60); save() }
   if (s.os !== m.os || s.version !== m.version) { m.os = s.os; m.version = s.version; save() }
 }
@@ -687,10 +695,11 @@ setInterval(() => { for (const m of conf.machines) if (m.state === 'linked') ref
 // older than maxAge (or only the one named, after you answered something there) is asked again,
 // waiting at most `wait` for the answers so a slow device doesn't hold up the rest.
 export async function fresh({ only = null, maxAge = 6000, wait = 1500 } = {}) {
-  const due = conf.machines.filter((m) => m.state === 'linked' && links.get(m.id)?.session && (!only || m.id === only) && Date.now() - (kept.get(m.id)?.at || 0) > maxAge)
+  const now = Date.now()
+  const due = conf.machines.filter((m) => m.state === 'linked' && links.get(m.id)?.session && (!only || m.id === only) && now - (kept.get(m.id)?.at || 0) > maxAge)
   if (!due.length) return
   let t
-  await Promise.race([Promise.allSettled(due.map((m) => refresh(m))), new Promise((r) => { t = setTimeout(r, wait) })])
+  await Promise.race([Promise.allSettled(due.map((m) => refresh(m, maxAge === 0 ? now : 0))), new Promise((r) => { t = setTimeout(r, wait) })])
   clearTimeout(t)
 }
 

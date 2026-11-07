@@ -182,6 +182,27 @@ try {
   ok(s.errors.length === 0, 'no page errors on the desktop', s.errors)
   await s.ctx.close()
 
+  // Two devices number their panes alike: the same pane and wait on each is two items, each shown
+  // once, and answering one leaves the other (told apart by id alone, both went, or one showed twice).
+  {
+    const twin = (machine, device, about) => ({ id: 'w4:p6@2', paneId: 'w4:p6', seq: 2, type: 'permission', text: 'Do you want to proceed?', about, qid: 'q-twin', answers: [{ n: '1', title: 'Yes' }, { n: '3', title: 'No' }], machine, device, online: true, since: new Date().toISOString(), agent: { title: about, kind: 'claude', kindLabel: 'Claude Code', project: 'docs', chief: false } })
+    const list = { items: [twin(null, 'Studio', 'git push --tags'), twin(desk.id, 'Desk', 'npm run release')], devices: [{ id: null, name: 'Studio', online: true }, { id: desk.id, name: 'Desk', online: true }] }
+    const v = await page(b, a.url, { mode: 'light', theme: 'sky', before: async (cx) => {
+      await noServiceWorker(cx)
+      await cx.route(/\/api\/needs-you(\?|$)/, (r) => r.fulfill({ json: list }))
+      await cx.route(/\/api\/needs-you\/answer$/, (r) => r.fulfill({ json: { ok: true, answered: 'Yes' } }))
+    } })
+    await v.p.locator('.top-right .needs-chip').click()
+    const pn = v.p.locator('.ny-panel')
+    await pn.waitFor({ timeout: 10000 })
+    const count = async (about) => pn.locator('.ny-item', { hasText: about }).count()
+    ok(!!(await until(async () => (await count('git push --tags')) === 1 && (await count('npm run release')) === 1, 8000, 200)), 'the same pane and wait on two devices: two items, each shown once', await pn.innerText().catch(() => ''))
+    await pn.locator('.ny-item', { hasText: 'npm run release' }).locator('.ny-acts button', { hasText: /^Yes$/ }).click()
+    ok(!!(await until(async () => (await count('npm run release')) === 0, 5000, 100)) && (await count('git push --tags')) === 1, "answering Desk's leaves Studio's, which has the same id", await pn.innerText().catch(() => ''))
+    ok(v.errors.length === 0, 'no page errors with the same id on two devices', v.errors)
+    await v.ctx.close()
+  }
+
   // Yes to all: two waiting, one on each device.
   const six = await launch(c, 'api-server', 'ask npm run seed', 'Seed')
   ok(!!(await until(async () => {
