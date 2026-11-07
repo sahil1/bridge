@@ -89,23 +89,26 @@ function startedBy(pid) {
 }
 
 // Stops a process and everything it started. itselfFirst: the process, then what it started, as a
-// server quitting goes before its agents (macOS and Linux: a server's SIGTERM keeps its list of
-// agents to reopen). Windows' taskkill /T stops them all at once instead, so a server could see an
-// agent's terminal end before it does, and take the agent off its list.
+// server quitting goes before its agents; stopped together, a server could see an agent's terminal
+// end before it hears it's stopping, and take the agent off its list to reopen. Windows: the server
+// at once (taskkill /F), then the rest. macOS and Linux: only the server's SIGTERM here (it saves
+// its list, then ends its terminals); what it started is handed back, to stop once it's gone.
 export function stopTree(pid, { itselfFirst = false } = {}) {
-  if (!pid) return
+  if (!pid) return []
   if (IS_WIN && itselfFirst) {
     const rest = startedBy(pid)
     spawnSync('taskkill', ['/pid', String(pid), '/F'], { stdio: 'ignore' })
     if (rest.length) spawnSync('taskkill', ['/F', '/T', ...rest.flatMap((p) => ['/pid', String(p)])], { stdio: 'ignore' })
-    return
+    return []
   }
-  if (IS_WIN) { spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' }); return }
+  if (IS_WIN) { spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' }); return [] }
   const kids = (p) => { const r = spawnSync('pgrep', ['-P', String(p)], { encoding: 'utf8' }); return (r.stdout || '').split('\n').filter(Boolean).map(Number) }
   const all = []
   const walk = (p) => { all.push(p); for (const k of kids(p)) walk(k) }
   walk(pid)
+  if (itselfFirst) { try { process.kill(pid, 'SIGTERM') } catch { /* gone */ } return all.slice(1) }
   for (const p of all.reverse()) { try { process.kill(p, 'SIGTERM') } catch { /* gone */ } }
+  return []
 }
 
 // A server of its own. name: for its folder under test/.out. env: more settings for the server, or
@@ -167,8 +170,9 @@ export async function startKit(name, { env = {}, config = {}, node = process.exe
   const restart = async () => {
     const was = server
     const gone = new Promise((r) => (was.exitCode != null ? r() : was.once('exit', r)))
-    stopTree(was.pid, { itselfFirst: true })
+    const rest = stopTree(was.pid, { itselfFirst: true })
     await gone
+    for (const p of rest) { try { process.kill(p, 'SIGTERM') } catch { /* gone */ } }
     await until(async () => !(await fetch(`${url}/api/config`).then(() => true, () => false)), 10000, 100)
     await run()
   }
