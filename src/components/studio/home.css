@@ -1,8 +1,7 @@
-/* Studio's home: New as a row of cards, each with a small picture of what it makes; then your files
-   as a table (name, folder, when it changed, Open), filtered by kind or name. */
+/* Studio's Files: New as a row of cards, each with a small picture of what it makes; then your files,
+   what to show on the left (Recent, the kinds, where they are) and a table of them beside it (name,
+   folder, when it changed, Open). */
 .sd-home > * { max-width: 1120px; }
-.sd-home-head h2 { font-size: 20px; letter-spacing: -.01em; }
-.sd-home-head p { max-width: 760px; }
 .sd-new { grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); gap: 12px; }
 .sd-new-btn { grid-template-rows: auto auto auto 1fr; min-height: 0; padding: 10px 10px 12px; }
 .sd-new-btn .sd-new-ic { display: none; }
@@ -32,11 +31,23 @@
 /* Your files. */
 .sd-files-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin-bottom: 8px; }
 .sd-files-head h3 { margin: 0 6px 0 0; }
-.sd-filter { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 2px; border-radius: 9px; background: var(--pane-2); }
-.sd-filter button { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border-radius: 7px; color: var(--ink-2); font: 500 12.5px var(--font); }
-.sd-filter button small { color: var(--ink-3); font-size: 11px; font-variant-numeric: tabular-nums; }
-.sd-filter button.on { background: var(--pane); color: var(--ink); box-shadow: 0 1px 2px rgb(0 0 0 / .08), 0 0 0 1px var(--line); }
-.sd-filter button:disabled { opacity: .45; cursor: default; }
+.sd-browse { display: grid; grid-template-columns: 210px minmax(0, 1fr); align-items: start; gap: 16px; }
+.sd-browse.narrow { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+/* What to show: Recent, then the kinds, then where they are, each with how many. */
+.sd-groups { position: sticky; top: 0; display: grid; gap: 1px; }
+.sd-groups h4 { margin: 12px 8px 4px; font: 600 10.5px var(--font); letter-spacing: .07em; text-transform: uppercase; color: var(--ink-3); }
+.sd-groups button { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: 30px; padding: 0 8px; border-radius: 7px; color: var(--ink-2); font: 500 13px var(--font); text-align: left; }
+.sd-groups button > svg { color: var(--ink-3); }
+.sd-groups button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sd-groups button small { color: var(--ink-3); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.sd-groups button:hover { background: var(--pane-2); color: var(--ink); }
+.sd-groups button.on { background: var(--accent-soft); color: var(--ink); }
+.sd-groups button.on > svg { color: var(--accent); }
+.sd-group-pick { display: grid; gap: 4px; }
+.sd-group-pick select { width: 100%; height: 40px; padding: 0 10px; border: 1px solid var(--line-2, var(--line)); border-radius: 8px; background: var(--pane); color: var(--ink); font: 16px var(--font); }
+.sd-list { min-width: 0; }
+.sd-list-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 2px 2px 8px; }
+.sd-list-head b { font-weight: 600; font-size: 14px; color: var(--ink); }
 .sd-files-search { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 1px solid var(--line-2, var(--line)); border-radius: 8px; background: var(--pane); color: var(--ink-3); }
 .sd-files-search input { width: 150px; border: 0; outline: 0; background: none; color: var(--ink); font: 13px var(--font); }
 .sd-files-search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
@@ -59,6 +70,7 @@
 .sd-file-ic.deck { background: color-mix(in srgb, #e8710a 14%, var(--pane)); color: #d9650a; }
 .sd-file-ic.pdf { background: color-mix(in srgb, #d93025 12%, var(--pane)); color: #d93025; }
 .sd-file-ic.page { background: color-mix(in srgb, #7c4dff 12%, var(--pane)); color: #7c4dff; }
+.sd-file-ic.board { background: color-mix(in srgb, #0f9d8f 13%, var(--pane)); color: #0f9d8f; }
 .sd-file-text { display: grid; min-width: 0; }
 .sd-file-text b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; font-size: 13px; }
 .sd-file-text small { font-size: 11.5px; }
@@ -77,7 +89,8 @@
 .sd-files-src { margin: 8px 2px 0; line-height: 1.5; }
 .sd-files-err { color: var(--warning-ink, var(--ink-2)); }
 
-@container (max-width: 760px) { .sd-files-row { grid-template-columns: minmax(0, 1fr) 110px 84px; } .sd-files-row > :nth-child(2) { display: none; } }
+/* A narrow pane on a computer: no folder column; on a phone, the folder goes under the name instead. */
+@container (max-width: 760px) { .app:not(.narrow) .sd-files-row { grid-template-columns: minmax(0, 1fr) 110px 84px; } .app:not(.narrow) .sd-files-row > :nth-child(2) { display: none; } }
 @media (max-width: 760px) {
   /* A row each: the name, its folder and when it changed under it, Open beside them. */
   .sd-files-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto auto; gap: 0 10px; padding: 6px 10px 8px 6px; }
@@ -90,7 +103,6 @@
   .sd-add-form { right: auto; left: 0; width: min(360px, calc(100vw - 32px)); }
 }
 .app.narrow .sd-files-head { gap: 8px; }
-.app.narrow .sd-filter button { height: 40px; padding: 0 12px; }
 .app.narrow .sd-files-search { height: auto; flex: 1 1 100%; }
 .app.narrow .sd-files-search input { flex: 1; width: auto; height: 40px; font-size: 16px; }
 .app.narrow .sd-files-head .win-btn { width: 40px; height: 40px; }
@@ -101,9 +113,6 @@
 .app.narrow .sd-file-x { width: 40px; height: 40px; }
 .app.narrow .sd-file-dir span { white-space: normal; overflow-wrap: anywhere; direction: ltr; }
 .app.narrow .sd-new-thumb { display: none; }
-.app.narrow .sd-filter { flex-wrap: nowrap; }
-.app.narrow .sd-filter button { min-width: 40px; justify-content: center; padding: 0 9px; }
-.app.narrow .sd-filter small { display: none; }
 .app.narrow .sd-file-acts { grid-template-columns: auto 40px; }
 .app.narrow .sd-new-btn .sd-new-ic { display: grid; }
 .app.narrow .sd-new-btn b, .app.narrow .sd-new-btn small { padding: 0; }

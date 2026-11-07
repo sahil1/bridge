@@ -297,7 +297,9 @@ async function addShape(X, ex, item, { at, look, scheme }) {
 }
 
 // ---------- One board ----------
-export function WhiteboardPage({ id, onBack }) {
+// In Studio's Preview (Studio.jsx): tabs, its Files and Preview, go first in the header; renamed,
+// onRenamed(new name) keeps it in Studio's tab, and deleted, onGone goes back to Studio's Files.
+export function WhiteboardPage({ id, onBack, backLabel = null, tabs = null, onRenamed = null, onGone = null }) {
   const store = useMemo(() => ({
     load: async () => { const b = await api(`/boards/${enc(id)}`); return { mtime: b.mtime, elements: b.data.elements || [], appState: b.data.appState || {}, files: b.data.files || {}, pending: b.data.bridge?.pending || null } },
     save: async ({ X, elements, appState, files, mtime, force }) => {
@@ -356,13 +358,13 @@ export function WhiteboardPage({ id, onBack }) {
     const r = await api(`/boards/${enc(id)}`, { method: 'PATCH', body: { title } })
     refetch('/boards')
     if (r.id !== id && drawnOn.has(id)) { drawnOn.set(r.id, { ...drawnOn.get(id), board: r.id }); drawnOn.delete(id) }
-    if (r.id !== id) openBoard(r.id, { replace: `view:whiteboard:${id}` })
+    if (r.id !== id) { if (onRenamed) onRenamed(r.id); else openBoard(r.id, { replace: `view:whiteboard:${id}` }) }
   }
   const remove = async () => {
     if (!window.confirm(t('Delete the whiteboard "{name}"? It goes to the .trash folder beside your boards.', { name: id }))) return
     await api(`/boards/${enc(id)}`, { method: 'DELETE' })
     refetch('/boards')
-    openBoards({ replace: `view:whiteboard:${id}` })
+    if (onGone) onGone(); else openBoards({ replace: `view:whiteboard:${id}` })
   }
   const [naming, setNaming] = useState(false)
   const [only, setOnly] = useState(false)
@@ -410,7 +412,8 @@ export function WhiteboardPage({ id, onBack }) {
   return (
     <div className="wb-view">
       <PaneHeader icon="shapes" title={<EditableName name={id} onRename={rename} label={t('Name this whiteboard')} />} subtitle={<SaveState status={d.status} />}
-        leading={onBack ? <button type="button" className="win-btn" onClick={onBack} aria-label={t('All whiteboards')} title={t('All whiteboards')}><Icon name="back" size={15} /></button> : null}>
+        leading={onBack ? <button type="button" className="win-btn" onClick={onBack} aria-label={backLabel || t('All whiteboards')} title={backLabel || t('All whiteboards')}><Icon name="back" size={15} /></button> : null}>
+        {tabs}
         <button type="button" className={`btn small${shapes ? ' on' : ''}`} onClick={() => setShapes(!shapes)} aria-pressed={!!shapes} disabled={!d.board.api} title={t('Shapes')}><Icon name="shapes" size={12} /> {wide ? t('Shapes') : ''}</button>
         <button type="button" className={`btn small${panel === 'draw' ? '' : ' primary'}`} onClick={() => setPanel(panel === 'draw' ? null : 'draw')} aria-pressed={panel === 'draw'} disabled={!d.board.api} aria-label={t('Draw this')} title={t('Draw this')}><Icon name="sparkle" size={12} /> {wide ? t('Draw this') : ''}</button>
         {/* On a phone, Auto-layout and Export are in the More menu, so the header fits. */}

@@ -1,9 +1,14 @@
 /* Studio: its home, a file's page, each kind's editor, versions, Ask an agent and design packs.
    The app's colours (--pane, --ink, --line, --accent) so light and dark both look right. */
-.sd-home { height: 100%; overflow: auto; padding: 22px 26px 40px; background: var(--pane); }
+.sd-home-view { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100%; min-height: 0; background: var(--pane); }
+.sd-home { min-height: 0; overflow: auto; padding: 20px 26px 40px; background: var(--pane); }
 .sd-home > * { max-width: 1040px; }
-.sd-home-head h2 { display: flex; align-items: center; gap: 8px; margin: 0 0 4px; font: 650 19px var(--font); color: var(--ink); }
-.sd-home-head p { margin: 0 0 20px; max-width: 640px; line-height: 1.5; }
+.sd-home-say { margin: 0 0 16px; line-height: 1.5; }
+/* Files and Preview in the header: their words while there's room (there are only two), then icons. */
+@container (max-width: 880px) { .pane-head .sd-tabs span { display: inline; } .pane-head .sd-tabs button { padding: 0 10px; } }
+@container (max-width: 620px) { .pane-head .sd-tabs span { display: none; } .pane-head .sd-tabs button { padding: 0 8px; } }
+.app.narrow .pane-head .sd-tabs button { min-width: 40px; min-height: 40px; justify-content: center; padding: 0 12px; }
+.app.narrow .pane-head .sd-tabs span { display: inline; font-size: 13px; }
 .sd-sec { margin: 0 0 28px; }
 .sd-sec h3 { margin: 0 0 10px; font: 600 10.5px var(--font); letter-spacing: .07em; text-transform: uppercase; color: var(--ink-3); }
 .sd-sec > p { margin: 0 0 10px; }
@@ -275,13 +280,15 @@
 .app.narrow .sd-ask-to select { height: 40px; }
 .app.narrow .sd-ask .btn.small, .app.narrow .sd-ask .ghost-btn { height: 40px; }
 .app.narrow .sd-ask .ghost-btn { padding: 0 12px; }
-/* Studio's home on a phone: two cards a row, the form's fields whole, a recent file's folder on a
-   line of its own rather than cut off, and its remove button always there (a phone has no hover). */
+/* Studio's home on a phone: New two a row, each its icon and name (what it makes in its title), so
+   your files come into sight sooner; the form's fields whole, a recent file's folder on a line of
+   its own rather than cut off, and its remove button always there (a phone has no hover). */
 .app.narrow .sd-home { padding-left: max(14px, env(safe-area-inset-left)); padding-right: max(14px, env(safe-area-inset-right)); }
-.app.narrow .sd-new { grid-template-columns: minmax(0, 1fr); gap: 8px; }
-.app.narrow .sd-new-btn { grid-template-columns: 30px minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 12px; align-items: center; min-height: 0; padding: 10px 12px; }
-.app.narrow .sd-new-ic { grid-row: 1 / 3; }
+.app.narrow .sd-new { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.app.narrow .sd-new-btn { grid-template-columns: 30px minmax(0, 1fr); grid-template-rows: auto; column-gap: 10px; align-items: center; min-height: 48px; padding: 8px 10px; }
+.app.narrow .sd-new-ic { grid-row: 1; }
 .app.narrow .sd-new-btn b { margin-top: 0; }
+.app.narrow .sd-new-btn small { display: none; }
 .app.narrow .sd-new-form input, .app.narrow .sd-new-form select { height: 40px; font-size: 16px; }
 .app.narrow .sd-new-acts .btn.small, .app.narrow .sd-new-acts .ghost-btn { height: 40px; }
 .app.narrow .sd-recent-open { min-height: 48px; padding: 6px 4px; }

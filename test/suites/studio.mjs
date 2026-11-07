@@ -505,7 +505,7 @@ try {
     await ph.p.waitForSelector('.sd-home', { timeout: 15000 })
     await until(async () => (await ph.p.locator('.sd-files-row', { hasText: 'notes.md' }).count()) > 0, 10000)
     await sleep(400)
-    let f = await phoneFaults(ph.p, '.sd-home')
+    let f = await phoneFaults(ph.p, '.sd-home-view')
     ok(!Object.keys(f).length, `phone ${width}: Studio's home fits (nothing wider, past its edge or cut off; each control a whole 40 px target, each field 16 px)`, f)
     await shot(ph.p, `${tag}studio-home-phone-${width}`)
     await ph.p.locator('.sd-file-name', { hasText: 'notes.md' }).first().click()

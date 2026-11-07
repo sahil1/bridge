@@ -385,6 +385,15 @@ try {
     const was = first && await fetch(`${M}/api/studio/version?root=${enc(pane)}&path=draft.md&id=${enc(first.id)}`).then((r) => r.text())
     ok(vs.versions?.[0]?.by === 'you' && was === '# Draft\n\nFrom the studio.\n', 'and what it was is a version on Studio, read back through the link', vs.versions)
     await shot(lp, `${tag}remote-files-studio`)
+    // Its Files, in Laptop's window: Studio's computer's files (the one opened there, a PDF in its
+    // agent's folder), by kind, and one opened from there in Preview.
+    await lp.locator('.sd-file .sd-tabs [role="tab"]', { hasText: 'Files' }).click()
+    const listed = (name) => lp.locator('.sd-files-row', { hasText: name })
+    ok(!!(await until(async () => (await listed('draft.md').count()) === 1 && (await listed('doc.pdf').count()) === 1, 15000)), "Studio's Files on Laptop lists Studio's computer's files: one opened there, a PDF in its agent's folder")
+    await lp.locator('.sd-groups button', { hasText: 'PDFs' }).first().click()
+    await listed('doc.pdf').locator('.sd-file-name').click()
+    ok(!!(await until(async () => (await lp.locator('.sd-file .sd-tabs [role="tab"][aria-selected="true"]', { hasText: 'Preview' }).count()) === 1 && /doc\.pdf/.test(await lp.locator('.sd-file .pane-head h2').innerText().catch(() => '')) && /Read only/.test(await lp.locator('.sd-status').innerText().catch(() => '')), 20000)), 'a PDF there, picked by its kind, opens in Preview')
+    await shot(lp, `${tag}remote-files-studio-pdf`)
   }
 
   // Open in new tab: the video on its own, playing (its player asks for it again, in parts).
