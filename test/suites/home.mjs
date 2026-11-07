@@ -225,10 +225,33 @@ try {
     const hm = p.locator('.hm')
     ok(!!(await until(() => hm.isVisible(), 20000)), 'desktop: it opens at Home')
     ok(await p.locator('.work.maxed .hm').isVisible(), 'full size, as the Agent Map opens')
-    await until(async () => /3 things need you/.test(await hm.innerText()), 15000)
+    // This computer's things first: what needs you on Studio, and Desk's as a line of its own.
+    await until(async () => /2 things need you/.test(await hm.innerText()) && /On Other Computers/.test(await hm.innerText()), 15000)
     const text = await hm.innerText()
-    ok(/3 things need you/.test(text) && /On 2 computers/.test(text), 'three things need you, on two computers', text.slice(0, 300))
-    ok(await p.locator('.rail-nav-btn.rail-home').isVisible() && /3/.test(await p.locator('.rail-home .mc-needs').innerText().catch(() => '')), 'the sidebar has Home first, counting what needs you', await p.locator('.rail-nav').innerText())
+    ok(/2 things need you/.test(text) && /On Studio, this computer/.test(text) && (await hm.locator('select.hm-device').inputValue()) === 'this', 'this computer first: the two things that need you on Studio', text.slice(0, 300))
+    const awayLine = hm.locator('.hm-away-row', { hasText: 'Desk' })
+    ok(/1 more on another computer/.test(await hm.locator('.hm-away h3').innerText()) && /1 needs you/.test(await awayLine.innerText()) && !/Book the venue/.test(await hm.locator('.hm-sec[aria-label="Waiting on You"]').innerText()), "Desk's as one line under them, not among them", await hm.locator('.hm-away').innerText().catch(() => ''))
+    ok(await p.locator('.rail-nav-btn.rail-home').isVisible() && (await p.locator('.rail-home .mc-needs').innerText().catch(() => '')).trim() === '2', 'the sidebar has Home first, counting what needs you on this computer', await p.locator('.rail-nav').innerText())
+    const pill = p.locator('.topbar .needs-chip')
+    ok(/^2\s*need you/.test((await pill.innerText()).trim()) && /1 more on another computer/.test(await pill.getAttribute('title')) && (await p.locator('.mc-chip .mc-needs').innerText().catch(() => '')).trim() === '1', "the top bar's chip counts this computer's two and says there's one more, the devices menu's chip Desk's one", [await pill.innerText(), await pill.getAttribute('title'), await p.locator('.mc-chip').innerText()])
+    await awayLine.locator('.hm-away-line').click()
+    const venue = awayLine.locator('.hm-task', { hasText: 'Book the venue' })
+    ok(await venue.isVisible() && await venue.locator('button', { hasText: 'Reply' }).isVisible() && /Open on Desk/.test(await venue.locator('.ny-acts').innerText()), "opened, Desk's task is there to answer in place, and its Open says it goes to Desk", await awayLine.innerText())
+    await shot(p, `${tag}home-this-computer`)
+    // Open on Desk: this window shows Desk and says so, and Back brings Studio's Home again.
+    const deskAt = (await a.api('/machines')).machines.find((m) => m.name === 'Desk').id
+    await venue.locator('button', { hasText: 'Open on Desk' }).click()
+    const sw = p.locator('.ask-banner.switched')
+    ok(!!(await until(async () => p.url().includes(`/m/${deskAt}/`) && /This window shows Desk now, to open Chief of Staff/.test(await sw.innerText().catch(() => '')), 20000)), 'Open on Desk switches this window to Desk, and says so with the way back', await sw.innerText().catch(() => p.url()))
+    await shot(p, `${tag}home-switched`)
+    await sw.locator('button', { hasText: 'Back to Studio' }).click()
+    ok(!!(await until(async () => !p.url().includes('/m/') && /2 things need you/.test(await p.locator('.work.maxed .hm').innerText().catch(() => '')), 20000)), 'Back to Studio: its Home as it was, this computer first')
+    // Every computer together: picked once, and kept after a reload.
+    await hm.locator('select.hm-device').selectOption({ value: 'all' })
+    await p.reload()
+    await until(async () => /3 things need you/.test(await hm.innerText().catch(() => '')), 15000)
+    const allText = await hm.innerText()
+    ok(/3 things need you/.test(allText) && /On 2 computers/.test(allText) && (await hm.locator('select.hm-device').inputValue()) === 'all' && !(await hm.locator('.hm-away').count()), 'All devices: three things need you, on two computers, still picked after a reload', allText.slice(0, 300))
     const ask = hm.locator('.ny-item.t-permission')
     ok(/npm run deploy/.test(await ask.innerText().catch(() => '')) && await ask.locator('button', { hasText: 'Yes' }).isVisible() && await ask.locator('button', { hasText: 'No' }).isVisible(), 'the agent asking, with Yes and No right there', await ask.innerText().catch(() => ''))
     const ready = hm.locator('.hm-sec[aria-label="Ready to Look At"]')
@@ -274,6 +297,17 @@ try {
     await boardRow.hover()
     await boardRow.locator('.hm-quick button', { hasText: 'Open' }).click()
     ok(!!(await until(async () => /Auth flow v2/.test(await p.locator('.ws-tab.main').innerText().catch(() => '')), 8000)), 'a whiteboard opens from Home', await p.locator('.ws-tab.main').innerText().catch(() => ''))
+    // Switched to Desk from the devices menu and back: the whiteboard, as it was, not Home; and the
+    // same after a reload.
+    await p.locator('.mc-chip').click()
+    await p.locator('.mc-menu .mc-item', { hasText: 'Desk' }).click()
+    ok(!!(await until(async () => p.url().includes('/m/') && (await p.locator('.mc-chip .mc-name').innerText().catch(() => '')) === 'Desk', 20000)), 'switched to Desk')
+    await p.locator('.mc-chip').click()
+    await p.locator('.mc-menu .mc-item', { hasText: 'Studio' }).click()
+    const onBoard = async () => !p.url().includes('/m/') && /Auth flow v2/.test(await p.locator('.ws-tab.main').innerText().catch(() => '')) && !(await p.locator('.work.maxed .hm').count())
+    ok(!!(await until(onBoard, 20000)), 'and back to Studio: the whiteboard is open again, not Home', p.url())
+    await p.reload()
+    ok(!!(await until(onBoard, 20000)), 'and the same after a reload')
     // Back to Home from the top bar's chip, and from the sidebar.
     await p.locator('.topbar .needs-chip').click()
     ok(!!(await until(() => hm.isVisible(), 5000)) && !(await p.locator('.ny-panel').count()), "the top bar's needs-you chip opens Home")
@@ -299,7 +333,8 @@ try {
     const mine = await ey.innerText()
     ok(/Book the venue/.test(mine) && !/My sketch/.test(mine), 'Only what needs me', mine.slice(0, 300))
     await shot(p, `${tag}home-everything`)
-    ok(errors.length === 0, 'desktop: no page errors', errors)
+    // (Switching computers and reloading cut off what the page was asking, which WebKit reports as an error.)
+    ok(errors.filter((e) => !/due to access control checks/.test(e)).length === 0, 'desktop: no page errors', errors)
     await ctx.close()
   }
   // Home that can't load says why, with Try again.
@@ -315,6 +350,9 @@ try {
     await ctx.close()
   }
 
+  // The scenes below look at every computer together, as Home's Device menu can (this computer first
+  // is checked above, and on a busy day below).
+  const ALL = { 'cc-home-device': 'all' }
   // ---------- a morning, as Home is used ----------
   // What the owner's Home had: two computers, a pile of finished work of every age (each with an
   // agent's whole last message, the project named as its folder is), a meeting's notes, Chief of
@@ -398,7 +436,7 @@ try {
   // A summary ends at a word: all of a sentence, or whole words and "…".
   const atWord = (sub) => { const s = said0(sub); const body = sub.replace(/…$/, ''); return !!s && body.length < s.length && (sub.endsWith('…') ? /[\s,;:.-]/.test(s[body.length]) : /\s/.test(s[body.length]) && /[.!?]$/.test(body)) }
   {
-    const { ctx, p, errors } = await pageAt(b, a.url, { mode: 'light', theme: 'sky', width: 1440, height: 1000, before: morning })
+    const { ctx, p, errors } = await pageAt(b, a.url, { mode: 'light', theme: 'sky', width: 1440, height: 1000, store: ALL, before: morning })
     const hm = p.locator('.hm')
     ok(!!(await loaded(hm)), 'a morning: Home opens with all of it', await hm.innerText().catch(() => ''))
     await p.waitForTimeout(800)
@@ -474,14 +512,14 @@ try {
     await ctx.close()
   }
   {
-    const { ctx, p } = await pageAt(b, a.url, { mode: 'dark', theme: 'midnight', width: 1440, height: 2400, before: morning })
+    const { ctx, p } = await pageAt(b, a.url, { mode: 'dark', theme: 'midnight', width: 1440, height: 2400, store: ALL, before: morning })
     await loaded(p.locator('.hm'))
     await p.waitForTimeout(800)
     await shot(p, `${tag}home-morning-1440-tall-dark`)
     await ctx.close()
   }
   for (const width of [375, 430]) {
-    const { ctx, p, errors } = await pageAt(b, a.url, { phone: true, mode: width === 430 ? 'dark' : 'light', theme: width === 430 ? 'midnight' : 'sky', before: morning })
+    const { ctx, p, errors } = await pageAt(b, a.url, { phone: true, mode: width === 430 ? 'dark' : 'light', theme: width === 430 ? 'midnight' : 'sky', store: ALL, before: morning })
     await p.setViewportSize({ width, height: 860 })
     const hm = p.locator('.hm')
     ok(!!(await loaded(hm)), `a morning, phone ${width}: all of it`)
@@ -593,7 +631,7 @@ try {
   // Every button on a card or a row says what it is with an icon too (the agent's own answers aside).
   const bare = (p) => p.evaluate(() => [...document.querySelectorAll('.hm .ny-acts .ghost-btn, .hm .hm-quick .ghost-btn, .hm .hm-item-acts .ghost-btn, .hm .hm-pin')].filter((x) => !x.querySelector('svg')).map((x) => x.innerText.trim()))
   for (const [width, mode] of [[1920, 'light'], [1440, 'light'], [1440, 'dark'], [1100, 'light'], [800, 'dark']]) {
-    const { ctx, p, errors } = await pageAt(b, a.url, { mode, theme: mode === 'dark' ? 'midnight' : 'sky', width, height: 1100, before: busyDay })
+    const { ctx, p, errors } = await pageAt(b, a.url, { mode, theme: mode === 'dark' ? 'midnight' : 'sky', width, height: 1100, store: ALL, before: busyDay })
     const hm = p.locator('.hm')
     ok(!!(await busyLoaded(hm)), `a busy day, ${width} ${mode}: Home opens with all of it`, await hm.innerText().catch(() => ''))
     await p.waitForTimeout(600)
@@ -634,9 +672,28 @@ try {
     ok(errors.length === 0, `a busy day, ${width}: no page errors`, errors)
     await ctx.close()
   }
-  // Sort: what needs you first, newest, oldest, by computer or by kind, kept for next time.
+  // The same day as Home starts, this computer first: Studio's three, and a line for each of the
+  // others, the older one saying it sends only what needs you, the offline one that it's offline.
+  // The top bar's chip counts Studio's, the devices menu's the others' that are on.
   {
     const { ctx, p, errors } = await pageAt(b, a.url, { mode: 'light', theme: 'sky', width: 1440, height: 1400, before: busyDay })
+    const hm = p.locator('.hm')
+    await until(async () => (await hm.locator('.hm-away-row').count()) === 3, 20000)
+    await p.waitForTimeout(600)
+    const lines = await hm.locator('.hm-away-line').allInnerTexts()
+    ok(/^3 things need you/.test(await hm.locator('.hm-title h2').innerText()) && /Waiting on You\s*3/.test(await hm.locator('.hm-sec[aria-label="Waiting on You"] h3').innerText()) && !/port 5173/.test(await hm.locator('.hm-sec[aria-label="Waiting on You"]').innerText()), "a busy day, this computer first: the heading and Waiting on You count Studio's three", await hm.locator('.hm-title h2').innerText())
+    ok(/Desk/.test(lines[0]) && /2 need you/.test(lines[0]) && /Travel Laptop/.test(lines[1]) && /1 needs you/.test(lines[1]) && /Lab Mini/.test(lines[2]) && /offline/.test(lines[2]), 'a line for each other computer, in their order, saying what needs you there', lines)
+    ok(/update Bridge AI on it/.test(await hm.locator('.hm-away-row', { hasText: 'Travel Laptop' }).innerText()) && !(await hm.locator('.hm-partial').count()), "the older one's line says it sends only what needs you, and there's no note about it at the top", await hm.locator('.hm-away').innerText())
+    ok(!!(await until(async () => /^3\s*need you/.test((await p.locator('.topbar .needs-chip').innerText().catch(() => '')).trim()) && (await p.locator('.mc-chip .mc-needs').innerText().catch(() => '')).trim() === '3', 8000)), "the top bar's chip counts Studio's three, the devices menu's chip the three on the others that are on", [await p.locator('.topbar .needs-chip').innerText().catch(() => ''), await p.locator('.mc-chip').innerText().catch(() => '')])
+    await hm.locator('.hm-away-row', { hasText: 'Desk' }).locator('.hm-away-line').click()
+    ok(/onboarding layouts/.test(await hm.locator('.hm-away-row', { hasText: 'Desk' }).innerText()), "Desk's line opened: its question, to answer here", await hm.locator('.hm-away-row', { hasText: 'Desk' }).innerText())
+    await shot(p, `${tag}home-busy-this-computer`)
+    ok(errors.length === 0, 'a busy day, this computer first: no page errors', errors)
+    await ctx.close()
+  }
+  // Sort: what needs you first, newest, oldest, by computer or by kind, kept for next time.
+  {
+    const { ctx, p, errors } = await pageAt(b, a.url, { mode: 'light', theme: 'sky', width: 1440, height: 1400, store: ALL, before: busyDay })
     const hm = p.locator('.hm')
     await busyLoaded(hm)
     const waiting = hm.locator('.hm-sec[aria-label="Waiting on You"]')
@@ -667,7 +724,7 @@ try {
   // Pin: to the top, out of its own section, kept on the computer (it's there after a reload and
   // on a phone); unpinned, back where it was. One that couldn't be saved says why.
   {
-    const { ctx, p, errors } = await pageAt(b, a.url, { mode: 'light', theme: 'sky', width: 1440, height: 1400, before: busyDay })
+    const { ctx, p, errors } = await pageAt(b, a.url, { mode: 'light', theme: 'sky', width: 1440, height: 1400, store: ALL, before: busyDay })
     const hm = p.locator('.hm')
     await busyLoaded(hm)
     const ready = hm.locator('.hm-sec[aria-label="Ready to Look At"]')
@@ -711,14 +768,14 @@ try {
     await ctx.close()
   }
   {
-    const { ctx, p } = await pageAt(b, a.url, { mode: 'dark', theme: 'midnight', width: 1440, height: 2400, before: busyDay })
+    const { ctx, p } = await pageAt(b, a.url, { mode: 'dark', theme: 'midnight', width: 1440, height: 2400, store: ALL, before: busyDay })
     await busyLoaded(p.locator('.hm'))
     await p.waitForTimeout(600)
     await shot(p, `${tag}home-busy-pinned-tall-dark`)
     await ctx.close()
   }
   for (const width of [375, 430]) {
-    const { ctx, p, errors } = await pageAt(b, a.url, { phone: true, mode: width === 430 ? 'dark' : 'light', theme: width === 430 ? 'midnight' : 'sky', before: busyDay })
+    const { ctx, p, errors } = await pageAt(b, a.url, { phone: true, mode: width === 430 ? 'dark' : 'light', theme: width === 430 ? 'midnight' : 'sky', store: ALL, before: busyDay })
     await p.setViewportSize({ width, height: 860 })
     const hm = p.locator('.hm')
     ok(!!(await busyLoaded(hm)), `a busy day, phone ${width}: all of it`)

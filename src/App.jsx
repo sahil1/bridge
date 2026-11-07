@@ -35,7 +35,7 @@ import { api, useFleet, usePoll, relayActivity, cloudOnly, refetch, viaRelay, ma
 import { takeReturn } from './permissions.js'
 import CloudHome from './components/CloudHome.jsx'
 import SessionSwitcher from './components/Sessions.jsx'
-import { MachineMenu, AskBanner, useMachines, goMachine, isRemote, remoteOf, openRemote } from './components/Machines.jsx'
+import { MachineMenu, AskBanner, SwitchedHere, useMachines, goMachine, isRemote, remoteOf, openRemote } from './components/Machines.jsx'
 import { useNeedsYou, NeedsYouChip, NeedsYouPanel, waitingOn } from './components/NeedsYou.jsx'
 import AgentMap from './components/AgentMap.jsx'
 import NeedsHome, { Everything, useHome, needCount } from './components/NeedsHome.jsx'
@@ -72,6 +72,11 @@ function useLaunchMate(onOpen) {
 
 // The iPhone or Android app this page is in, when it's older than this page needs (src/fresh.js).
 const appTooOld = oldApp()
+
+// Whether this window has shown Bridge AI before: a reload, or a switch to another of your computers
+// (which loads that computer's page in the same window). Kept for the window's life alone, so a new
+// window (the app opening) starts afresh.
+const openedBefore = (() => { try { const was = sessionStorage.getItem('cc-opened') === '1'; sessionStorage.setItem('cc-opened', '1'); return was } catch { return false } })()
 
 // The phone apps' way back to their start screen, from the phone's Cloud agents (cloudOnly).
 const toStart = !cloudOnly ? null : window.bridgeAndroid?.home ? () => window.bridgeAndroid.home()
@@ -265,10 +270,14 @@ function App() {
   const [inbox, setInbox] = useState(null)
   const ny = useNeedsYou({ fleet, open: !!inbox, on: !cloudOnly })
   const waiting = waitingOn(ny.data, { here: needsYou.length, shown: machineId || null })
-  const toReview = (ny.data?.items || []).filter((i) => (i.type === 'review' || i.type === 'failed') && i.online).length
-  // With Home on, its count (what waits on you, Chief of Staff's tasks too) on the sidebar, the tab and the chip.
+  // The computer this window shows: one computer's work at a time. The chip, the sidebar and the
+  // phone's tab count what waits on you here (with Home on, its count: Chief of Staff's tasks too);
+  // the devices menu's chip counts the rest, so the two add up to the window's title.
+  const toReview = (ny.data?.items || []).filter((i) => (i.type === 'review' || i.type === 'failed') && i.online && (i.machine || null) === (machineId || null)).length
   const homeCount = useHome(homeOn && !cloudOnly, 12000)
-  const needN = homeOn && homeCount.data ? needCount(homeCount.data) : waiting
+  const homeNeeds = homeOn && homeCount.data ? needCount(homeCount.data) : null
+  const needN = homeNeeds ? homeNeeds.here : needsYou.length
+  const needElse = homeNeeds ? homeNeeds.elsewhere : waiting - needsYou.length
 
   // herdr sessions each have their own agents (and number panes alike), so each keeps its own open
   // tabs, and a switch announces nothing: the last session's agents only left the view.
@@ -323,7 +332,8 @@ function App() {
   // says which one this window shows: the Dock and the Window menu list each window by it.
   const { data: macs } = useMachines(60_000, !cloudOnly)
   const shownName = !macs?.machines?.length ? null : machineId ? macs.machines.find((x) => x.id === machineId)?.name : macs.here?.name
-  useEffect(() => { document.title = `${waiting ? `(${waiting}) ` : ''}Bridge AI${shownName ? ` · ${shownName}` : ''}` }, [waiting, shownName])
+  const allNeeds = needN + needElse
+  useEffect(() => { document.title = `${allNeeds ? `(${allNeeds}) ` : ''}Bridge AI${shownName ? ` · ${shownName}` : ''}` }, [allNeeds, shownName])
   // A notification about an agent that needs you (pwa.js openLink, ?inbox=1): the inbox, at it.
   useEffect(() => {
     if (cloudOnly) return
@@ -345,7 +355,7 @@ function App() {
     if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission()
     setView('command')
     // Not on a phone, or in the phone apps (their page holds this one): there, that device is shown.
-    if (isRemote(paneId) && (!wide || viaRelay)) { const r = remoteOf(paneId); goMachine(r.machine, { agent: r.pane }); return }
+    if (isRemote(paneId) && (!wide || viaRelay)) { const r = remoteOf(paneId); goMachine(r.machine, { agent: r.pane, back: byId[paneId]?.title || true }); return }
     if (!wide) {
       const a = byId[paneId]
       // On the phone's Cloud agents, Back (Android's) closes the agent first.
@@ -370,13 +380,13 @@ function App() {
     })
     setL((l) => (l.max ? { ...l, max: null } : l))
   }, [wide, fleet, mobileAgent]) // eslint-disable-line react-hooks/exhaustive-deps
-  // An agent wherever it runs (the needs-you inbox, the agent map): here, on the device this window
-  // shows; on the device this page comes from while it shows another; or in a tab here for one
-  // elsewhere. chat: at its Chat, where a question's card is.
+  // An agent wherever it runs (the needs-you inbox, Home, the agent map): here, on the device this
+  // window shows; or in a tab here for one elsewhere (the device this page comes from too, while it
+  // shows another), so what you're doing here stays. chat: at its Chat, where a question's card is.
+  const shownHere = (machine) => (machine || null) === (machineId || null)
   const openOn = (machine, paneId, { device, title, kind, chat = false } = {}) => {
-    if ((machine || null) === (machineId || null)) { if (chat) showChat(paneId); openAgent(paneId) }
-    else if (!machine) goMachine(null, { agent: paneId })
-    else openRemote({ id: machine, name: device }, { paneId, title, kind })
+    if (shownHere(machine)) { if (chat) showChat(paneId); openAgent(paneId) }
+    else openRemote({ id: machine || null, name: device }, { paneId, title, kind })
   }
   const openItem = (it) => { setInbox(null); openOn(it.machine, it.paneId, { device: it.device, title: it.agent?.title, kind: it.agent?.kind, chat: true }) }
   // The map opens full size on a computer (Esc, or its own button, puts the rest back).
@@ -514,12 +524,17 @@ function App() {
     window.addEventListener('bridge-open-event', on)
     return () => window.removeEventListener('bridge-open-event', on)
   }, [])
-  // Home on: the app opens there, once each time it loads (an agent a link names still comes after).
+  // Home on: a new window opens there (an agent a link names still comes after). A reload, or this
+  // window switched to another of your computers and back, opens what you were on there instead:
+  // each computer keeps its own tabs, layout and phone tab (layout.jsx), so Home only when there's
+  // nothing to go back to.
   const homed = useRef(false)
   useEffect(() => {
     if (homed.current || !fleet || !conf || cloudOnly) return
     homed.current = true
     if (!homeOn) return
+    const back = openedBefore && (wide ? !!W.active && (isView(W.active) || isRemote(W.active) || !!byId[W.active]) : store.get('cc-mtab', null) != null)
+    if (back) return
     if (wide) { setW((w) => ({ ...w, tabs: w.tabs.includes('view:home') ? w.tabs : ['view:home', ...w.tabs], active: 'view:home', group: 'main' })); set({ max: 'main' }) }
     else { setMtab('home'); setHomeView('home') }
   }, [fleet, conf]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -744,7 +759,7 @@ function App() {
       <div className="top-left">
       <img className="mark" src={`${import.meta.env.BASE_URL}mark.svg`} alt="Bridge AI" width="24" height="24" />
       {railBtn}
-      {!cloudOnly && <Quiet name="Devices menu"><MachineMenu phone={!wide} /></Quiet>}
+      {!cloudOnly && <Quiet name="Devices menu"><MachineMenu phone={!wide} elsewhere={homeNeeds ? needElse : null} /></Quiet>}
       {wide && liveView && (
         <nav className="view-tabs" role="tablist" aria-label={t('View')}>
           <button role="tab" aria-selected={view === 'command'} className={view === 'command' ? 'on' : ''} onClick={() => setView('command')} title="Alt+1" aria-label="Bridge">
@@ -767,7 +782,7 @@ function App() {
               <StatusDot status="blocked" size={8} /> {needsYou.length}<span className="needs-word"> {needsYou.length === 1 ? t('needs you') : t('need you')}</span>
             </button>
           )
-          : <NeedsYouChip count={needN} review={wide ? toReview : 0} open={!!inbox} onClick={() => (homeOn ? openHome() : setInbox(inbox ? null : {}))} />}
+          : <NeedsYouChip count={needN} elsewhere={needElse} review={wide ? toReview : 0} open={!!inbox} onClick={() => (homeOn ? openHome() : setInbox(inbox ? null : {}))} />}
         {!cloudOnly && wide && (
           <>
             <Quiet name="Next meeting"><NextMeetingChip onClick={() => showCard('calendar')} recording={meetings?.rec?.title || null} /></Quiet>
@@ -805,9 +820,13 @@ function App() {
   const homeProps = {
     phone: !wide, calendar: !!conf?.calendar,
     onOpen: (it) => openOn(it.machine, it.paneId, { device: it.device, title: it.agent?.title, kind: it.agent?.kind, chat: true }),
-    onOpenMeeting: (it) => (it.machine ? goMachine(it.machine) : openAgent(`view:meeting:${it.meeting.id}`)),
-    onOpenBoard: (it) => (it.machine ? goMachine(it.machine) : openAgent(`${BOARD}${it.board.id}`)),
-    onOpenChief: (it) => (it.machine ? (it.chief ? openOn(it.machine, it.chief, { device: it.device, title: t('Chief of Staff') }) : goMachine(it.machine)) : window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: 'chief' } }))),
+    // A meeting, a whiteboard or a Chief of Staff that isn't running, on another computer: that
+    // computer's own page, at it, saying this window switched (with Back to this one, which opens
+    // what you had here).
+    onOpenMeeting: (it) => (shownHere(it.machine) ? openAgent(`view:meeting:${it.meeting.id}`) : goMachine(it.machine, { agent: `view:meeting:${it.meeting.id}`, back: it.meeting.title || true })),
+    onOpenBoard: (it) => (shownHere(it.machine) ? openAgent(`${BOARD}${it.board.id}`) : goMachine(it.machine, { agent: `${BOARD}${it.board.id}`, back: it.board.title || true })),
+    onOpenChief: (it) => (shownHere(it.machine) ? window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: 'chief' } }))
+      : it.chief ? openOn(it.machine, it.chief, { device: it.device, title: t('Chief of Staff') }) : goMachine(it.machine, { agent: 'chief', back: t('Chief of Staff') })),
     onCalendar: () => showCard('calendar'),
   }
   const viewFor = (id, { onBack } = {}) => (
@@ -867,6 +886,7 @@ function App() {
         {topbar}
         <RuntimeNotice runtime={conf?.runtime?.name} fellBack={conf?.runtime?.fellBack} />
         <Quiet name="Link requests"><AskBanner /></Quiet>
+        <Quiet name="Switched computer"><SwitchedHere /></Quiet>
         <main className="m-body">
           {mtab === 'home' && homeOn && viewFor(homeView === 'everything' ? 'view:everything' : 'view:home')}
           {mtab === 'mate' && (mateShown ? <Console key={mateShown.paneId} agent={mateShown} variant="mobile" queued={queuedFor(mateShown.paneId)} delivered={deliveredFor(mateShown.paneId)} agents={agents} onThread={(id) => setMateId(id)} /> : <MateEmpty onLaunch={mateLaunch.launch} {...mateLaunch} />)}
@@ -1065,6 +1085,7 @@ function App() {
       ))}
       <RuntimeNotice runtime={conf?.runtime?.name} fellBack={conf?.runtime?.fellBack} />
       <Quiet name="Link requests"><AskBanner /></Quiet>
+      <Quiet name="Switched computer"><SwitchedHere /></Quiet>
       <div className="views">
         <main className="cmd" hidden={view !== 'command'} ref={cmdRef}>
           <div className="slot rail-slot" style={{ width: railOpen ? L.railW : 52 }}>
