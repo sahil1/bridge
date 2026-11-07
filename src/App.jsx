@@ -34,6 +34,7 @@ import { mailDo } from './components/today.js'
 import { Handle, usePersisted, useMedia, useHotkey, useWidth, useShared, store } from './components/layout.jsx'
 import { api, useFleet, usePoll, relayActivity, cloudOnly, refetch, viaRelay, machineId } from './api.js'
 import { takeReturn } from './permissions.js'
+import { takeEarlyLink } from './earlyLink.js'
 import CloudHome from './components/CloudHome.jsx'
 import SessionSwitcher from './components/Sessions.jsx'
 import { MachineMenu, AskBanner, SwitchedHere, useMachines, goMachine, isRemote, remoteOf, openRemote } from './components/Machines.jsx'
@@ -508,6 +509,8 @@ function App() {
   // Back from a restart to apply a permission: Settings where it was asked for, to see it's on (the
   // agent you had open comes back by itself).
   useEffect(() => { const r = takeReturn(); if (r?.section) setSettings(r.section) }, [])
+  // A tester's early-access link (?early=<code>): About & Updates, with the code filled in.
+  useEffect(() => { if (takeEarlyLink()) setSettings('about') }, [])
   // Restart to apply, asked for in Settings: the top bar's Restart to apply decides it (with what it
   // means for agents at work), so Settings steps aside for it rather than covering it.
   useEffect(() => {

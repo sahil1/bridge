@@ -10,12 +10,15 @@ import { appVersion } from '../../permissions.js'
 import { t, tx, locale } from '../../i18n/index.js'
 import { TRIALS } from '../../trials.js'
 import { AWAY_MINUTES, RELEASE_HOURS, waitingLong } from '../../../shared/autoupdate.js'
+import { isPre } from '../../../shared/version.js'
+import { earlyFromLink } from '../../earlyLink.js'
 
 const REPO = 'https://github.com/sahil1/bridge'
 
 // Settings › About & Updates: which version you have, whether there's a newer one (and updating
-// to it, now or by itself while you're away), the tour again, what to include when you report a
-// problem, usage stats and crash reports, and last, the features on trial.
+// to it, now or by itself while you're away), Early Access for testers with a code, the tour
+// again, what to include when you report a problem, usage stats and crash reports, and last, the
+// features on trial.
 // Every action here is the same small button (btn small, a 13 px icon); the one that matters most
 // in a section is primary.
 export default function About() {
@@ -59,8 +62,14 @@ function Updates() {
   // Updating by itself works in the desktop app on a Mac or Windows only (install() there), so it's
   // offered only there: not from source, in a browser or on a phone.
   const canAuto = !!window.bridgeApp?.desktop && raw?.how === 'app'
+  // Early Access: a code from a link (?early=), or the quiet link below opens it.
+  const [link] = useState(earlyFromLink)
+  const [joining, setJoining] = useState(!!link)
+  const early = raw?.early
+  const earlyShown = !!early && (joining || early.on || !!early.problem)
 
   return (
+    <>
     <section className="st-sec">
       <h4>{t('Version')}</h4>
       {!u ? <div className="skeleton-rows"><div /></div> : (
@@ -75,6 +84,8 @@ function Updates() {
               : <span className="st-chip good"><Icon name="check" size={11} /> {t('Up to date')}</span>}
           </div>
           {u.held && <p className="muted small">{t('Bridge AI {latest} needs macOS {macos} or later, and this Mac has macOS {have}, so Bridge AI stays on {current}, which keeps working. Update macOS in System Settings › General › Software Update to get newer versions.', { latest: u.held.latest, macos: u.held.macos, have: u.held.have, current: u.current })}</p>}
+          {/* A pre-release, off Early Access (left, or its code ended): it's never put back to an older version. */}
+          {raw?.channel === 'stable' && isPre(raw.current) && !u.available && <p className="muted small ab-pre-stays">{t('{version} is a pre-release. Bridge AI stays on it until a regular release is newer, then updates to that.', { version: raw.current })}</p>}
           {u.failed && state !== 'installing' && <p className="st-note bad"><Icon name="alert" size={13} /> {t('The last update didn\'t go through: {why}', { why: u.failed.line || t('the installer stopped') })}{u.failed.auto && ` ${t('It was updating by itself while you were away, and tries again in a few hours.')}`}</p>}
           {u.available && (
             state === 'installing'
@@ -90,6 +101,88 @@ function Updates() {
           <label className="st-check"><input type="checkbox" checked={auto} onChange={(e) => save({ updates: { check: e.target.checked } }).then(() => load(true))} />
             <span><b>{t('Check for new versions')}</b> <span className="muted small">{t('Asks GitHub a few times a day; nothing about you is sent.')}</span></span></label>
           {canAuto && <ByItself u={raw} checks={auto} />}
+          {early?.offered && !earlyShown && <p className="small ab-early-ask"><button type="button" className="link-btn" onClick={() => setJoining(true)}>{t('Have an early-access code?')}</button></p>}
+        </>
+      )}
+    </section>
+    {earlyShown && <EarlyAccess u={raw} code={link} onDone={() => setJoining(false)} onChange={() => load(false)} />}
+    </>
+  )
+}
+
+// Early Access: pre-releases for testers, joined with a code the project made for them. Joined, it
+// says who it's for and when it ends, with Leave Early Access; a code that stopped working says why
+// (ended, taken back), and this computer is on regular releases again, never put back to an older
+// version. A code that's wrong when pasted says why too (server/earlyaccess.js).
+const day = (iso) => new Date(iso).toLocaleDateString(locale(), { day: 'numeric', month: 'long', year: 'numeric' })
+// Who a pasted code says it's for and when it ends, to say why it can't be used (the server checked
+// it; this only reads it).
+function detailsOf(code) {
+  try { return JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(String(code).replace(/\s+/g, '').split('.')[1].replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0)))) } catch { return {} }
+}
+function whyNot(err, code) {
+  const d = detailsOf(code)
+  if (err.code === 'early-malformed') return t("That isn't a whole early-access code. Paste all of it, from ea1. to the end.")
+  if (err.code === 'early-forged') return t("That code doesn't check out: it wasn't made by the Bridge AI project, or it changed on the way. Paste it exactly as you got it.")
+  if (err.code === 'early-expired' && d.for && d.until) return t('That code, for {name}, ended on {date}. Ask for a new one.', { name: d.for, date: day(d.until * 1000) })
+  if (err.code === 'early-revoked' && d.for) return t('That code, for {name}, was taken back. Ask for a new one.', { name: d.for })
+  if (err.code === 'early-none') return t("This version of Bridge AI doesn't take early-access codes.")
+  return err.message
+}
+function EarlyAccess({ u, code: fromLink, onDone, onChange }) {
+  const e = u.early
+  const [code, setCode] = useState(fromLink || '')
+  const [state, setState] = useState(null) // joining | leaving | { error }
+  const join = async () => {
+    setState('joining')
+    try { await api('/updates/early', { method: 'POST', body: { code } }); setCode(''); setState(null); onChange() } catch (err) { setState({ error: whyNot(err, code) }) }
+  }
+  // Left: the section goes, and the version line says the version here stays until Stable passes it.
+  const leave = async () => {
+    setState('leaving')
+    try { await api('/updates/early', { method: 'DELETE' }); setState(null); onDone(); onChange() } catch (err) { setState({ error: err.message }) }
+  }
+  const PROBLEM = {
+    expired: t('The early-access code for {name} ended on {date}, so this computer is back on regular releases.', { name: e.for, date: e.until && day(e.until) }),
+    revoked: t('The early-access code for {name} was taken back, so this computer is back on regular releases.', { name: e.for }),
+    forged: t("The early-access code saved here doesn't check out, so this computer is on regular releases."),
+    malformed: t("The early-access code saved here doesn't check out, so this computer is on regular releases."),
+    none: t("This version of Bridge AI doesn't take early-access codes, so this computer is on regular releases."),
+    unsupported: u.how === 'docker' ? t("Early Access is for the desktop app. Bridge AI in Docker updates by its image's tag, which stays on regular releases.") : t('Early Access is for the desktop app. Bridge AI from a clone already runs the newest code there is (git pull).'),
+  }
+  const form = (
+    <>
+      <div className="st-row ab-early-form">
+        <input className="st-input mono" value={code} onChange={(x) => setCode(x.target.value)} onKeyDown={(x) => { if (x.key === 'Enter' && code.trim()) join() }} placeholder="ea1.…" aria-label={t('Early-access code')} spellCheck={false} autoComplete="off" autoFocus={!e.on && !e.problem} />
+        <button type="button" className="btn small primary" disabled={!code.trim() || state === 'joining'} onClick={join}><Icon name="check" size={13} /> {state === 'joining' ? t('Joining…') : t('Join')}</button>
+        {!e.on && !e.problem && <button type="button" className="btn small" onClick={onDone}>{t('Cancel')}</button>}
+      </div>
+      {state?.error && <p className="st-note bad ab-early-error"><Icon name="alert" size={13} /> {state.error}</p>}
+    </>
+  )
+  return (
+    <section className="st-sec ab-early">
+      <h4>{t('Early Access')}</h4>
+      {e.on ? (
+        <>
+          <div className="st-row"><span className="st-chip good"><Icon name="check" size={11} /> {t('On for {name}', { name: e.for })}</span></div>
+          <p className="muted small">{t("This computer gets pre-releases of Bridge AI as soon as they're out, before everyone else, to try new things and say what's wrong. Its usage stats and crash reports say they're from {name}'s Early Access.", { name: e.for })}</p>
+          <p className="muted small ab-early-code">{e.until ? t('Code made on {made}, good until {until}.', { made: day(e.made), until: day(e.until) }) : t('Code made on {made}, with no end date.', { made: day(e.made) })}</p>
+          {state?.error && <p className="st-note bad ab-early-error"><Icon name="alert" size={13} /> {state.error}</p>}
+          <div className="st-row"><button type="button" className="btn small" disabled={state === 'leaving'} onClick={leave}><Icon name="x" size={13} /> {t('Leave Early Access')}</button></div>
+          <p className="muted small">{t('Leaving keeps the version you have: Bridge AI stays on it until a regular release is newer.')}</p>
+        </>
+      ) : e.problem ? (
+        <>
+          <p className="st-note bad ab-early-problem"><Icon name="alert" size={13} /> {PROBLEM[e.problem] || PROBLEM.forged}</p>
+          {e.offered && <p className="muted small">{t('Paste a new code to carry on:')}</p>}
+          {e.offered ? form : state?.error && <p className="st-note bad ab-early-error"><Icon name="alert" size={13} /> {state.error}</p>}
+          <div className="st-row"><button type="button" className="btn small" disabled={state === 'leaving'} onClick={leave}>{t('Remove the code')}</button></div>
+        </>
+      ) : (
+        <>
+          <p className="muted small">{t('Pre-releases of Bridge AI, for testers, before everyone else. Paste the code the Bridge AI project sent you.')}</p>
+          {form}
         </>
       )}
     </section>

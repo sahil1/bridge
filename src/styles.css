@@ -2581,6 +2581,12 @@ button.ue-row:hover { background: var(--pane-2); }
 .ab-cmd p { margin: 0; }
 .ab-cmd code { display: block; padding: 8px 10px; border-radius: 8px; background: var(--pane-2); border: 1px solid var(--line); font: 12.5px var(--font-mono); word-break: break-all; }
 .ab-diag { margin: 0; max-height: 220px; }
+/* Early Access: a quiet link for those with a code, and the code's field taking the row's room. */
+.ab-early-ask { margin: 2px 0 0; }
+.ab-early-ask .link-btn { color: var(--ink-3); font-weight: 400; }
+.ab-early-ask .link-btn:hover { color: var(--accent); }
+.ab-early-form .st-input { flex: 1 1 260px; min-width: 0; }
+.ab-early p { margin: 0; }
 .update-chip { color: var(--accent); font-weight: 600; }
 /* Out for a few days and still not installed: said more plainly. */
 .update-chip.loud { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
