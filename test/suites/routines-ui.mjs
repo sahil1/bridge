@@ -85,6 +85,8 @@ const text = async (l) => ((await l.innerText().catch(() => '')) || '').replace(
 const field = (scope, label, tagName = 'input') => scope.locator(`label:has(> span:text-is("${label}")) ${tagName}`)
 const options = (sel) => sel.locator('option').allInnerTexts()
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+// One folder however it's written (a Windows path's case and separators).
+const sameDir = (a, b) => { const k = (p) => { const x = String(p || '').replace(/\\/g, '/').replace(/\/+$/, ''); return process.platform === 'win32' ? x.toLowerCase() : x }; return !!a && k(a) === k(b) }
 // A picture once what just opened has faded in.
 const still = async (p, name) => { await p.waitForTimeout(450); await shot(p, name) }
 
@@ -190,7 +192,7 @@ try {
     const dlg = p.locator('.r-dialog')
     await dlg.waitFor({ timeout: 5000 })
     const df = (label, tagName = 'input') => field(dlg, label, tagName)
-    ok((await df('Command', 'textarea').inputValue()) === 'Triage the new bug reports and label them' && (await df('Folder').inputValue()).endsWith('code/shop') && (await dlg.locator('.r-sched-text').inputValue()) === 'every weekday at 09:00' && /^Triage the new bug reports/.test(await df('Name').inputValue()), 'Make a routine: the dialog filled in from the suggestion', { name: await df('Name').inputValue(), folder: await df('Folder').inputValue(), when: await dlg.locator('.r-sched-text').inputValue() })
+    ok((await df('Command', 'textarea').inputValue()) === 'Triage the new bug reports and label them' && sameDir(await df('Folder').inputValue(), shopDir) && (await dlg.locator('.r-sched-text').inputValue()) === 'every weekday at 09:00' && /^Triage the new bug reports/.test(await df('Name').inputValue()), 'Make a routine: the dialog filled in from the suggestion', { name: await df('Name').inputValue(), folder: await df('Folder').inputValue(), when: await dlg.locator('.r-sched-text').inputValue() })
     await still(p, `${tag}routines-dialog-light`)
     await dlg.locator('button[type=submit]').click()
     await dlg.locator('.r-made').waitFor({ timeout: 5000 })
@@ -219,12 +221,12 @@ try {
     await dlg.waitFor({ timeout: 5000 })
     const sent = new Date()
     await until(async () => (await df('Agent', 'select').inputValue()) === 'claude', 8000)
-    ok((await df('Command', 'textarea').inputValue()) === said && (await df('Folder').inputValue()).endsWith('code/shop') && (await df('Agent', 'select').inputValue()) === 'claude' && (await df('Space').inputValue()) === 'Shop' && /^every (weekday|sunday|saturday) at \d\d:\d\d$/.test(await dlg.locator('.r-sched-text').inputValue()), 'Routine on a message: its words, its folder, agent and space, and about the time it was sent', { when: await dlg.locator('.r-sched-text').inputValue(), sent: sent.toString() })
+    ok((await df('Command', 'textarea').inputValue()) === said && sameDir(await df('Folder').inputValue(), shopDir) && (await df('Agent', 'select').inputValue()) === 'claude' && (await df('Space').inputValue()) === 'Shop' && /^every (weekday|sunday|saturday) at \d\d:\d\d$/.test(await dlg.locator('.r-sched-text').inputValue()), 'Routine on a message: its words, its folder, agent and space, and about the time it was sent (to the quarter hour)', { folder: await df('Folder').inputValue(), when: await dlg.locator('.r-sched-text').inputValue(), sent: sent.toString() })
     await dlg.locator('button[type=submit]').click()
     await dlg.locator('.r-made').waitFor({ timeout: 5000 })
     await dlg.locator('button', { hasText: 'Done' }).click()
     const fromChat = (await routinesOf()).find((r) => r.command === said)
-    ok(fromChat?.kind === 'claude' && fromChat.cwd.endsWith('code/shop') && fromChat.auto, 'saved as a routine for that agent in that folder', fromChat)
+    ok(fromChat?.kind === 'claude' && sameDir(fromChat.cwd, shopDir) && fromChat.auto, 'saved as a routine for that agent in that folder', fromChat)
 
     // History › Commands.
     await p.keyboard.press('ControlOrMeta+Shift+KeyF')
@@ -232,6 +234,7 @@ try {
     const item = p.locator('.cmd-item', { hasText: said })
     await item.waitFor({ timeout: 8000 })
     ok(/Shop/.test(await text(item.locator('.hist-where'))) && /Message box/.test(await text(item.locator('.hist-where'))) && (await p.locator('.cmd-day').first().innerText()).toLowerCase() === new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }).toLowerCase(), 'History › Commands: what was sent from the message box, today, with the agent it went to', await text(item))
+    ok((await text(item.locator('.hist-where'))).includes(`…${path.sep}code${path.sep}shop`), 'and its folder, written as this computer writes folders', await text(item.locator('.hist-where')))
     ok(await p.locator('.cmd-item', { hasText: 'Triage the new bug reports' }).count() === 4, 'and what was asked before', await p.locator('.cmd-item', { hasText: 'Triage' }).count())
     ok(/Kept on this computer for 90 days/.test(await text(p.locator('.cmd-foot'))), 'kept on this computer for 90 days, it says', await text(p.locator('.cmd-foot')))
     await still(p, `${tag}routines-commands-light`)

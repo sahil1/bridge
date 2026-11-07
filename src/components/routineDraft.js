@@ -4,8 +4,14 @@
 import { toText } from '../../shared/schedule.js'
 
 // A folder to show (the routine keeps it whole: this page doesn't know where home is on the
-// computer that runs it): its last two parts.
-export const shortDir = (p) => { const parts = String(p || '').split(/[\\/]/).filter(Boolean); return parts.length > 2 ? `…/${parts.slice(-2).join('/')}` : p || '' }
+// computer that runs it): its last two parts, with that computer's own separator (C:\…\code\shop
+// on Windows).
+export function shortDir(p) {
+  const s = String(p || '')
+  const sep = /^[A-Za-z]:\\|^\\\\/.test(s) || (s.includes('\\') && !s.includes('/')) ? '\\' : '/'
+  const parts = s.split(/[\\/]/).filter(Boolean)
+  return parts.length > 2 ? `…${sep}${parts.slice(-2).join(sep)}` : s
+}
 
 // A routine's name from what was asked: its first words (a slash command by its name).
 export function nameFrom(text) {

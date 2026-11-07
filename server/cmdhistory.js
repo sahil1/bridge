@@ -189,7 +189,10 @@ const STOP = new Set(['the', 'a', 'an', 'to', 'of', 'and', 'or', 'please', 'can'
 const norm = (s) => String(s || '').toLowerCase().replace(/https?:\/\/\S+/g, ' link ').replace(/\d+/g, '#').replace(/[^\p{L}\p{N}#/@._-]+/gu, ' ').trim()
 const wordsOf = (s) => new Set(norm(s).split(' ').map((w) => w.replace(/^[._\-/@]+|[._\-/@]+$/g, '')).filter((w) => w.length > 1 && !STOP.has(w)))
 const alike = (a, b) => { if (!a.size || !b.size) return false; let n = 0; for (const w of a) if (b.has(w)) n++; return n / (a.size + b.size - n) >= 0.7 }
-const placeOf = (to = {}) => (to.chief ? 'chief' : `dir:${to.cwd || ''}`)
+// The same folder however it was written: either separator, no slash at the end, and on Windows any
+// case (D:\a\Shop and d:/a/shop/ are one folder there).
+export const dirKey = (p, win = process.platform === 'win32') => { const s = String(p || '').replace(/\\/g, '/').replace(/(.)\/+$/, '$1'); return win ? s.toLowerCase() : s }
+const placeOf = (to = {}) => (to.chief ? 'chief' : `dir:${dirKey(to.cwd)}`)
 const dayNo = (d) => Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / DAY)
 const dateOf = (n) => { const u = new Date(n * DAY); return new Date(u.getUTCFullYear(), u.getUTCMonth(), u.getUTCDate()) }
 export const keyOf = (text, to) => crypto.createHash('sha256').update(`${placeOf(to)}\n${[...wordsOf(text)].sort().join(' ')}`).digest('hex').slice(0, 16)
@@ -257,7 +260,7 @@ export async function suggestions({ routines = [], now = new Date() } = {}) {
     const latest = g.items.at(-1)
     const key = keyOf(latest.text, latest.to)
     if (gone.has(key)) continue
-    const isRoutine = routines.some((x) => (x.to === 'chief' ? 'chief' : `dir:${x.cwd || ''}`) === g.place && alike(wordsOf(x.command), g.words))
+    const isRoutine = routines.some((x) => placeOf({ chief: x.to === 'chief', cwd: x.cwd }) === g.place && alike(wordsOf(x.command), g.words))
     if (isRoutine) continue
     out.push({
       key, text: latest.text, to: latest.to, count: byDay.size, first: g.items[0].at, last: latest.at,
