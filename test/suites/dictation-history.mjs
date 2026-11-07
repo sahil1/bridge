@@ -160,10 +160,10 @@ try {
   await setDictation({ history: null })
 
   // ---------- The pill, inside Bridge AI ----------
-  // The agent the app parts open is back after the restarts above (reopened, resuming its session):
-  // on a busy machine (macOS in CI) a while after the server answers.
-  const payBack = await until(() => agentOf((a) => a.paneId === one.paneId), 60000, 500)
-  ok(!!payBack, 'payments is back after the restarts', ((await kit.api('/fleet')).agents || []).map((a) => [a.paneId, a.name, a.status]))
+  // The agents the app parts use are back after the restarts above (reopened, resuming their
+  // sessions): on a busy machine (macOS in CI) a while after the server answers, and not both at once.
+  const payBack = await until(async () => { const f = (await kit.api('/fleet')).agents || []; return [one, ledger].every((x) => f.some((a) => a.paneId === x.paneId)) }, 60000, 500)
+  ok(!!payBack, 'payments and Ledger are back after the restarts', ((await kit.api('/fleet')).agents || []).map((a) => [a.paneId, a.name, a.status]))
   const shots = async (p, name) => { await shot(p, `${tag}${name}`) }
   // Inside Bridge AI: the whole window, and the bottom of it around the pill.
   const pillShot = async (p, name) => {
