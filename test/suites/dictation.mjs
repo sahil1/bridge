@@ -23,7 +23,8 @@
 // the test's own (never a key pressed, never your clipboard): what was there back once it's read,
 // every item and type; not when something was copied meanwhile; the text left when nothing read it;
 // a password field or no Accessibility refused before touching anything.
-// Then the server's names for it (/api/dictation/words) and its settings in /api/config.
+// Then the server's names for it (/api/dictation/words), edit by voice's model told meeting memory's
+// names the text mentions, and its settings in /api/config.
 import fs from 'node:fs'
 import path from 'node:path'
 import { EventEmitter } from 'node:events'
@@ -673,6 +674,13 @@ try {
   const r = await kit.api('/dictation/edit', { text: 'teh draft', instruction: 'fix the spelling' })
   const asked = model.asked(/^Instruction: fix the spelling\n\nText:\nteh draft$/)
   ok(r.text === 'The draft' && asked.length === 1, 'picked: the selection and what was said go to that model, and its answer comes back without the quotes and code fence it put around it', { r, asked: model.asked().slice(-1) })
+  // Meeting memory's names that either mentions go with them, with who each is; the rest don't.
+  const sysOf = () => { const m = model.requests().at(-1)?.messages || []; const s = m.find((x) => x.role === 'system')?.content; return typeof s === 'string' ? s : (s || []).map((x) => x.text || '').join('') }
+  ok(!/meeting memory/.test(sysOf()), 'with no name from memory in them: nothing more', sysOf().slice(-300))
+  await kit.api('/meetings/memory', { term: 'Northwind', note: 'the customer we ship to' })
+  await kit.api('/meetings/memory', { term: 'Fabrikam', note: 'a supplier' })
+  await kit.api('/dictation/edit', { text: 'teh note for north wind', instruction: 'make it about Northwind' })
+  ok(/- Northwind: the customer we ship to \(misheard as "north wind"\)/.test(sysOf()) && !/Fabrikam/.test(sysOf()), 'Northwind mentioned: the model is told how it\'s spelled, who it is and how it\'s misheard; Fabrikam, not mentioned, isn\'t', sysOf().slice(-400))
   const relay = await fetch(`${kit.url}/api/dictation/edit`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-bridge-relay': 'phone' }, body: JSON.stringify({ text: 'a', instruction: 'b' }) })
   ok(!relay.ok && model.asked(/^Instruction: b/).length === 0, 'never through the relay: only the computer\'s own dictation window asks', relay.status)
   const big = await kit.api('/dictation/edit', { text: 'x'.repeat(20001), instruction: 'shorter' }).catch((e) => e.message)

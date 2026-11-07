@@ -14,6 +14,7 @@ import { execFile } from 'node:child_process'
 import { IS_MAC, brewInstall } from './paths.js'
 import { tool } from './fixes.js'
 import * as speech from './speech.js'
+import * as memory from './meetmemory.js'
 
 let cfg = {}
 export const configure = (c) => { cfg = c || {} }
@@ -126,6 +127,19 @@ function notYet(s) {
 
 // The names Parakeet listens for in a voice note, besides yours: the agents' and what they work in.
 const WORDS = ['Claude', 'Claude Code', 'Codex', 'Gemini', 'Cursor', 'Copilot', 'GitHub', 'worktree']
+const HINT = 'chief of staff, Claude, Codex, Gemini, Cursor, Grok, Copilot, GitHub, worktree, PR, repo'
+
+// So names come out right: whisper takes a hint (words it's likely to hear), Parakeet names to
+// listen for (speech.js adds meeting memory's). Both have Bridge AI's words (or your own:
+// voice.prompt) and the words in Settings › Meetings; whisper's also meeting memory's names (yours
+// first, then the ones that come up most), as a meeting's has, and Parakeet's the names Bridge AI
+// knows (more). { prompt, words }.
+export function listenFor(more = []) {
+  const own = cfg.voice?.prompt ? String(cfg.voice.prompt) : null
+  const vocab = String(cfg.meetings?.vocabulary || '').split(',').map((w) => w.trim()).filter(Boolean)
+  const prompt = `${[(own || HINT).replace(/[\s.,]+$/, ''), ...vocab, memory.hint(240)].filter(Boolean).join(', ')}.`
+  return { prompt, words: [...(own ? own.split(',') : WORDS), ...vocab, ...more] }
+}
 
 // Speech to text for a voice note: { text, engine }. Throws with code and status when it can't
 // (needs-model: the page offers the download). more: names Bridge AI knows (dictation.js: your
@@ -136,10 +150,7 @@ export async function transcribe(audio, type, { more = [] } = {}) {
   if (!s.ready) throw notYet(s)
   const pcm = readWav(audio)
   const wav = pcm ? wavOf(pcm) : await viaFfmpeg(audio, type)
-  // So tool names come out right: whisper takes a hint, Parakeet names to listen for (with the
-  // words in Settings › Meetings and meeting memory). Add your own with voice.prompt.
-  const prompt = cfg.voice?.prompt || 'chief of staff, Claude, Codex, Gemini, Cursor, Grok, Copilot, GitHub, worktree, PR, repo.'
-  const words = [...(cfg.voice?.prompt ? prompt.split(',') : WORDS), ...String(cfg.meetings?.vocabulary || '').split(','), ...more]
+  const { prompt, words } = listenFor(more)
   const r = await speech.voice(wav, { cfg, prompt, words })
   return { text: r.text, engine: r.engine }
 }
