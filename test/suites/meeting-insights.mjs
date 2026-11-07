@@ -24,7 +24,7 @@
 // said once on Meetings with Turn off, shown in Beta Features, and not on again once turned off.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, checks, until, browser, page, shot, phoneFaults, IS_WIN } from '../lib/harness.mjs'
+import { startKit, checks, until, browser, page, shot, phoneFaults, withoutCutOff, IS_WIN } from '../lib/harness.mjs'
 
 const { ok, skip, done } = checks('meeting-insights')
 // The calendar: a stand-in bridgecal that answers from bridgecal.json beside it ({ status, events }).
@@ -47,8 +47,8 @@ const api = kit.api
 const err = (p, body, method) => api(p, body, method).then(() => null, (e) => e)
 const pages = []
 const kits = [kit]
-// A request cut off by a reload, which WebKit reports as a page error.
-const real = (errors) => errors.filter((e) => !/\/api\/[\w/.?=&-]+ due to access control checks/.test(e))
+// A request cut off by a reload or a restart, which WebKit reports as a page error.
+const real = withoutCutOff
 // A picture of all of it: Meetings scrolls inside itself, so the window is made as tall as what's in
 // it for the picture, then put back.
 const whole = async (pg, name) => {
