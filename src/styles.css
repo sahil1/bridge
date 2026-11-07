@@ -2959,7 +2959,13 @@ table.sheet tbody tr:hover td { background: var(--pane-2); }
 .ph-way-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13.5px; }
 @media (max-width: 560px) { .ph-ways { grid-template-columns: 1fr; } }
 .ph-facts { margin: 0; padding-left: 18px; display: grid; gap: 5px; font-size: 12.5px; line-height: 1.45; color: var(--ink-2); }
+/* …and when it's full for now: what to do instead, under it */
+.hosted-full { display: grid; gap: 8px; align-items: start; margin: 0; }
+.st-note.warn.hosted-full { color: var(--ink-2); }
+.hosted-full p { margin: 0; line-height: 1.45; color: var(--warning); }
+.hosted-full .icon { vertical-align: -2px; }
 .onb-phone { margin-bottom: 6px; }
+.wiz .onb-phone { margin: 6px 0 0; box-shadow: none; background: var(--pane-2); }
 .onb-phone h3 { display: flex; align-items: center; gap: 7px; margin: 0; }
 .onb-phone h3 .icon { color: var(--accent); }
 .onb-phone .ph-pair-text { text-align: left; justify-items: start; }

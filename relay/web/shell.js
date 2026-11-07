@@ -270,18 +270,20 @@ let hostSeen = null
 let hostOnline = false
 const offlineText = () => (silent ? 'Your computer isn\'t answering right now.' : hostOnline ? 'Reconnecting to your computer…' : hostSeen ? `Your computer is offline (since ${new Date(hostSeen).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}).` : 'Your computer isn\'t connected to the relay right now.')
 
-// Bridge AI's hosted relay turned this phone away for now: its daily limit for your computer, too
-// much at once, as many phones and tabs connected as it takes, or it's switched off. Until then, no
-// trying again.
+// Bridge AI's hosted relay turned this phone away for now: its daily limit for your computer (or the
+// whole relay's, for every computer on it), too much at once, as many phones and tabs connected as it
+// takes, or it's switched off. Until then, no trying again.
 let limited = { until: 0 }
 function onLimit(m) {
   const until = Math.min(Math.max(Number(m.until) || 0, Date.now() + 3000), Date.now() + 26 * 3600000)
   const text = m.why === 'day'
     ? `The hosted relay's daily limit for this computer is used up. It resets at ${when(until)}. For no limits, put the relay on your own Cloudflare account (Settings › Devices, on the computer).`
-    : String(m.text || 'Bridge AI\'s relay can\'t take this right now.').slice(0, 300)
+    : m.why === 'all'
+      ? `Bridge AI's relay has carried all it can today, for every computer on it. It starts again at ${when(until)}. For no limits, put the relay on your own Cloudflare account (Settings › Devices, on the computer), or use Tailscale.`
+      : String(m.text || 'Bridge AI\'s relay can\'t take this right now.').slice(0, 300)
   limited = { why: m.why, text, until }
   if (appShown) bar(text, true)
-  else waitScreen(m.why === 'day' ? 'Daily limit reached' : m.why === 'off' ? 'Bridge AI\'s relay is off' : m.why === 'phones' ? 'Too many connected' : 'One moment…', text, false)
+  else waitScreen(m.why === 'day' || m.why === 'all' ? 'Daily limit reached' : m.why === 'off' ? 'Bridge AI\'s relay is off' : m.why === 'phones' ? 'Too many connected' : 'One moment…', text, false)
 }
 
 function bar(msg, off) {

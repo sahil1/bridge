@@ -39,9 +39,10 @@ export default function Relay({ way, setWay, onOffer }) {
     return () => clearInterval(timer.current)
   }, [working, st?.busy, !!st?.pairing, waiting]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // (Bridge AI's relay being full is said by its own box, from st.hostedFull, not an error line.)
   const run = async (path, body) => {
     setErr(null)
-    try { const r = await api(path, { method: 'POST', body }); setSt(r); return r } catch (e) { setErr(e.message); load() }
+    try { const r = await api(path, { method: 'POST', body }); setSt(r); return r } catch (e) { setErr(e.code === 'hostedFull' ? null : e.message); load() }
   }
   const deploy = async (account) => {
     if (st.hosted && !account && !window.confirm('Move to a relay on your own Cloudflare account? Your phones pair again with it afterwards.')) return
@@ -57,6 +58,7 @@ export default function Relay({ way, setWay, onOffer }) {
     const r = await run('/relay/deploy', { method: 'hosted' })
     setWorking(false)
     if (r) { setChanging(false); setWay?.(null) }
+    else setWay?.((w) => w || 'hosted') // turned away (full for now): it stays picked, saying why
   }
 
   if (!st) return <section className="st-sec"><h4>From anywhere</h4><div className="skeleton-rows"><div /></div></section>
@@ -103,9 +105,13 @@ export default function Relay({ way, setWay, onOffer }) {
     ? <div className="relay-box"><p className="small">Signing in with the browser needs Node.js, which this computer doesn't have yet. Install it here and Bridge AI signs you in right after, or use an API token instead.</p><InstallNode onDone={() => deploy()} /></div>
     : <p className="st-note bad"><Icon name="alert" size={13} /> {err || st.error}</p>)
 
-  // Bridge AI's relay is offered: first, how should the phone reach this computer?
+  // Bridge AI's relay is full for now: the other ways, a click away.
+  const full = st.hostedFull && <HostedFull onWay={(w) => { if (st.configured) setChanging(true); setWay?.(w) }} onRetry={useHosted} busy={busy} />
+
+  // Bridge AI's relay is offered: first, how should the phone reach this computer? (Full for now,
+  // your own Cloudflare is the one picked.)
   if (offer && (!st.configured || changing)) {
-    const pick = way || (st.configured ? null : 'hosted')
+    const pick = way || (st.configured ? null : st.hostedFull ? 'cloudflare' : 'hosted')
     const current = st.configured ? (st.hosted ? 'hosted' : 'cloudflare') : null
     return (
       <section className="st-sec">
@@ -114,7 +120,7 @@ export default function Relay({ way, setWay, onOffer }) {
         <div className="ph-ways" role="radiogroup" aria-label="How your phone reaches this computer">
           {WAYS.map((w) => (
             <button key={w.id} type="button" role="radio" aria-checked={pick === w.id} className={`ph-way ${pick === w.id ? 'on' : ''}`} onClick={() => setWay?.(w.id)}>
-              <span className="ph-way-head"><b>{w.title}</b>{current === w.id ? <span className="st-chip">In use</span> : w.tag && !current && <span className="st-chip good">{w.tag}</span>}</span>
+              <span className="ph-way-head"><b>{w.title}</b>{current === w.id ? <span className="st-chip">In use</span> : w.id === 'hosted' && st.hostedFull ? <span className="st-chip warn">{t('Full for now')}</span> : w.tag && !current && <span className="st-chip good">{w.tag}</span>}</span>
               <span className="muted small">{w.text}</span>
             </button>
           ))}
@@ -129,7 +135,7 @@ export default function Relay({ way, setWay, onOffer }) {
             </ul>
             {current === 'hosted' ? <p className="muted small"><Icon name="check" size={12} /> This is how your phone connects now.</p>
               : busy ? <p className="st-note"><Icon name="refresh" size={13} className="spin" /> {st.busy || 'Working…'}</p>
-              : <div className="st-row"><button type="button" className="btn primary" onClick={useHosted}><Icon name="phone" size={14} /> Use Bridge AI's relay</button></div>}
+              : full || <div className="st-row"><button type="button" className="btn primary" onClick={useHosted}><Icon name="phone" size={14} /> Use Bridge AI's relay</button></div>}
           </div>
         )}
         {pick === 'cloudflare' && (
@@ -145,9 +151,12 @@ export default function Relay({ way, setWay, onOffer }) {
     )
   }
 
-  // What Bridge AI's relay said last: today's limit reached, a phone turned away for now, or it's
-  // switched off ('gone' has its own way back, below).
-  const limitText = st.limit?.why === 'day' ? `The hosted relay's daily limit for this computer is used up. It resets at ${new Date(st.limit.until).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' })}. For no limits, put the relay on your own Cloudflare account.` : st.limit && st.limit.why !== 'gone' ? st.limit.text : null
+  // What Bridge AI's relay said last: today's limit reached (this computer's, or the whole relay's),
+  // a phone turned away for now, or it's switched off ('gone' has its own way back, below).
+  const resetAt = st.limit && new Date(st.limit.until).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' })
+  const limitText = st.limit?.why === 'day' ? `The hosted relay's daily limit for this computer is used up. It resets at ${resetAt}. For no limits, put the relay on your own Cloudflare account.`
+    : st.limit?.why === 'all' ? t('Bridge AI\'s relay has carried all it can today, for every computer on it. It starts again at {time}. For no limits, put the relay on your own Cloudflare account.', { time: resetAt })
+    : st.limit && st.limit.why !== 'gone' ? st.limit.text : null
   // ...and the plan this computer is on there, with its daily allowance.
   const plan = st.hosted && st.plan?.dayMessages != null && st.plan?.dayMB != null ? st.plan : null
   const planVars = plan && { plan: plan.plan, messages: plan.dayMessages.toLocaleString(locale()), mb: plan.dayMB.toLocaleString(locale()), time: new Date(plan.resets || Date.UTC(2000, 0, 1)).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' }) }
@@ -173,8 +182,8 @@ export default function Relay({ way, setWay, onOffer }) {
           </div>
           {planText && <p className="muted small">{planText}</p>}
           {st.busy && <p className="st-note"><Icon name="refresh" size={13} className="spin" /> {st.busy}</p>}
-          {limitText && <p className="st-note warn"><Icon name="alert" size={13} /> {limitText} {st.limit.why === 'day' && <button type="button" className="link-btn" onClick={() => { setChanging(true); setWay?.('cloudflare') }}>Use your own Cloudflare</button>}</p>}
-          {st.limit?.why === 'gone' && !busy && <div className="st-row"><button type="button" className="btn primary" onClick={useHosted}><Icon name="refresh" size={13} /> Set up Bridge AI's relay again</button><span className="muted small">Phones you paired pair again afterwards.</span></div>}
+          {limitText && <p className="st-note warn"><Icon name="alert" size={13} /> {limitText} {(st.limit.why === 'day' || st.limit.why === 'all') && <button type="button" className="link-btn" onClick={() => { setChanging(true); setWay?.('cloudflare') }}>Use your own Cloudflare</button>}</p>}
+          {st.limit?.why === 'gone' && !busy && (full || <div className="st-row"><button type="button" className="btn primary" onClick={useHosted}><Icon name="refresh" size={13} /> Set up Bridge AI's relay again</button><span className="muted small">Phones you paired pair again afterwards.</span></div>)}
           {st.needsUpdate && !st.busy && <p className="st-note warn"><Icon name="alert" size={13} /> Your relay is older than this Bridge AI. <button type="button" className="link-btn" onClick={() => run('/relay/update')}>Update it</button></p>}
 
           {st.pairing ? <PairCode p={st.pairing} onStop={() => run('/relay/pair', { stop: true })} /> : (
@@ -205,6 +214,24 @@ export default function Relay({ way, setWay, onOffer }) {
       )}
       {problem}
     </section>
+  )
+}
+
+// Bridge AI's relay turned this computer away: it takes so many computers at once, and has them.
+// The other two ways, one click each (onWay picks one), or try again later. In Settings › Devices,
+// and in first-run setup without the buttons (Settings has them).
+export function HostedFull({ onWay, onRetry, busy }) {
+  return (
+    <div className="st-note warn hosted-full" role="alert">
+      <p><Icon name="alert" size={13} /> {t('Bridge AI\'s relay is full for now, so it can\'t take this computer.')} {onWay ? t('Your phone can still reach it: through a relay on your own Cloudflare account (free, and Bridge AI sets it up), or through Tailscale.') : t('Your phone can still reach it: Settings › Devices sets up a relay on your own Cloudflare account (free), or Tailscale.')}</p>
+      {onWay && (
+        <div className="st-row">
+          <button type="button" className="btn primary small" onClick={() => onWay('cloudflare')}>{t('Use your own Cloudflare')}</button>
+          <button type="button" className="btn small" onClick={() => onWay('tailscale')}>{t('Use Tailscale')}</button>
+          {onRetry && <button type="button" className="ghost-btn" disabled={busy} onClick={onRetry}>{t('Try again')}</button>}
+        </div>
+      )}
+    </div>
   )
 }
 
