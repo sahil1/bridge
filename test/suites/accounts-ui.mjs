@@ -100,7 +100,9 @@ try {
     const chip = usageChip(p)
     await chip.waitFor({ timeout: 15000 })
     const chipText = (await chip.innerText()).replace(/\s+/g, ' ')
-    ok(/New:\s*Personal/.test(chipText), `${t}: the top bar says Personal is where new agents start`, chipText)
+    ok(/new agents start on\s*Personal/.test(chipText), `${t}: the top bar says Personal is where new agents start`, chipText)
+    const pinned = p.locator('.topbar .x-usage .usage-chip')
+    ok(/^Personal 24% wk$/.test((await pinned.innerText()).replace(/\s+/g, ' ').trim()) && (await pinned.getAttribute('title')).startsWith('New Claude agents start on Personal\n24% of the week left, Week resets '), `${t}: pinned to the bar, Personal and its week, the limit closest to its end, in full on hover`, { text: await pinned.innerText(), title: await pinned.getAttribute('title') })
 
     // Its menu.
     await chip.click()
@@ -258,7 +260,7 @@ try {
     // with no account picked starts on it.
     await (await openRow(USUAL)).locator('button', { hasText: 'Make default' }).click()
     ok(!!(await until(async () => (await uRow(USUAL).locator('.def-tag').count()) === 1 && (await plan.locator('.def-tag').count()) === 1, 8000)), `${t}: Make default puts the star on your usual login, and only there`)
-    ok(!!(await until(async () => (await chip.innerText()).replace(/\s+/g, ' ').includes(`New: ${USUAL}`), 8000)), `${t}: the top bar says new agents start there`, await chip.innerText())
+    ok(!!(await until(async () => (await chip.innerText()).replace(/\s+/g, ' ').includes(`new agents start on ${USUAL}`), 8000)), `${t}: the top bar says new agents start there`, await chip.innerText())
     ok((await launchOn()) === 'claude-default', `${t}: and a new agent with no account picked starts on it`)
 
     // Auto: no star on any row, the auto tag on the one it picks; off again, the star on that one.
@@ -285,7 +287,7 @@ try {
     ok(!(await plan.locator('.acct-same-note').count()), `${t}: the note goes with it`)
     const g2 = await claudeOf()
     ok(g2.usualHidden && !g2.accounts.some((a) => a.id === 'claude-default') && g2.setting === personal.id, `${t}: your usual login is off the list, and Personal (the same account) is the default`, { hidden: g2.usualHidden, list: g2.accounts.map((a) => a.label), setting: g2.setting })
-    ok(!!(await until(async () => (await uRow('Personal').locator('.def-tag').count()) === 1 && /New:\s*Personal/.test((await chip.innerText()).replace(/\s+/g, ' ')), 8000)), `${t}: the star and the top bar say Personal`)
+    ok(!!(await until(async () => (await uRow('Personal').locator('.def-tag').count()) === 1 && /new agents start on\s*Personal/.test((await chip.innerText()).replace(/\s+/g, ' ')), 8000)), `${t}: the star and the top bar say Personal`)
     await chip.click()
     const menu = p.locator('.acct-pop.top')
     await menu.waitFor({ timeout: 5000 })

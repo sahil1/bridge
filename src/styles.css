@@ -2431,9 +2431,8 @@ button.ue-row:hover { background: var(--pane-2); }
 .app.wide .search-btn.s-none { justify-content: space-between; }
 .app.wide .search-btn kbd { margin-left: 0; }
 /* What's pinned to the bar (src/pins.js), beside its three places. A chip's words (pin-word) and a
-   long value (pin-long, with pin-short in its place where it has one) are what go first. The
-   clock is its time alone, as it was before the Status menu. */
-.pin-short { display: none; }
+   long value (pin-long) are what go first. The clock is its time alone, as it was before the
+   Status menu. */
 .app.wide .top-x .clock { padding: 0 2px; white-space: nowrap; }
 .app.wide .top-x .wx-chip .icon { color: var(--ink-3); }
 .app.wide .top-x .usage-acct { max-width: none; }
@@ -2441,7 +2440,6 @@ button.ue-row:hover { background: var(--pane-2); }
    their long values, other words, then the pinned chips one at a time, and the rest. */
 .app.wide .topbar.fit-1 .top-x .pin-word { display: none; }
 .app.wide .topbar.fit-2 .top-x .pin-long { display: none; }
-.app.wide .topbar.fit-2 .top-x .pin-short { display: inline; }
 .app.wide .topbar.fit-3 .meet-chip :is(.meet-title, small) { display: none; }
 .app.wide .topbar.fit-4 .status-word { display: none; }
 .app.wide .topbar.fit-5 .view-tabs .vt-word { display: none; }
@@ -2644,6 +2642,19 @@ button.ue-row:hover { background: var(--pane-2); }
    card that opens the colors to pick from. What isn't one account's is grey (--series-other). */
 .acct-dot { flex: none; display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
 .usage-chip .acct-dot { margin: 0 -1px 0 1px; }
+/* Usage pinned to the bar (UsageChip): the provider's mark, the account's color and name, and one
+   figure. The mark's own name on hover would hide the chip's, so the pointer goes through it. */
+.usage-pin { gap: 6px; }
+.usage-pin .pv-tile { display: inline-grid; place-items: center; flex: none; pointer-events: none; box-shadow: inset 0 0 0 1px rgb(0 0 0 / .06); }
+.usage-pin .pv-tile svg { display: block; }
+.usage-tight { display: inline-flex; align-items: baseline; gap: 3px; }
+/* A figure running low: on the warning's or the critical color, in the text's own color, so a
+   small number stays easy to read on any theme's chip (the colors as text are too faint on a light
+   frame, Sky's or Sand's). */
+.u-pct.t-warning, .u-pct.t-critical { padding: 0 4px; border-radius: 5px; color: var(--ink); }
+.u-pct.t-warning { background: color-mix(in srgb, var(--warning) 30%, transparent); }
+.u-pct.t-critical { background: color-mix(in srgb, var(--critical) 28%, transparent); }
+.acct-models { display: flex; flex-wrap: wrap; gap: 0 8px; }
 .acct-btn-main .acct-dot { margin-right: -1px; }
 .acct-u-top { display: flex; align-items: center; min-width: 0; }
 .acct-u-top > .acct-u-head { flex: 1; min-width: 0; padding-left: 4px; }

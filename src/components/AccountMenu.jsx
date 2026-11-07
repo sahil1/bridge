@@ -142,8 +142,8 @@ export function statusText(a, off, inUse) {
   if (off || (a.status === 'pending' && a.signedIn)) return a.signedIn ? t('signed in') : ''
   return a.status === 'pending' ? t('checking…') : a.status === 'error' ? t("couldn't read") : t('no data')
 }
-// Each window in words, for a tooltip, with when it starts again.
-const windowsText = (a) => windowsOf(a).map((w) => [t(w.of, { pct: String(w.pct) }), w.resetsAt && resetWords(w)].filter(Boolean).join(', ')).join(' · ')
+// Each window in words, for a tooltip, with when it starts again; then each model's own limit.
+const windowsText = (a) => [...windowsOf(a), ...modelLimits(a)].map(limitWords).join(' · ')
 
 // What's left of each window, as "75% wk left", the bar for the tightest. slots: the windows any of
 // the accounts beside it has (slotsOf), so each window's numbers line up down a list, and an
@@ -173,6 +173,24 @@ export function windowsOf(a) {
 }
 // The windows any of these accounts has, shortest first: the places in each row's Left.
 export const slotsOf = (accounts) => WINDOWS.map((k) => k.win).filter((win) => (accounts || []).some((a) => windowsOf(a).some((w) => w.win === win)))
+// Every limit a reading has, as windowsOf gives them: the plan's own windows, ones a provider names
+// itself (Cursor's "included usage"), and a model's own (quota-axi's "model" windows: Claude's
+// Fable week, a Codex model's), which only stops agents on that model. Extra usage bought (credits)
+// isn't a limit. short: what the top bar calls it ("wk", or the model's name, "Fable").
+export function limitsOf(a) {
+  if (!a?.usable) return []
+  return (a.windows || []).filter((w) => w.kind !== 'credits' && w.percentRemaining != null).map((w) => {
+    const k = WINDOWS.find((x) => x.kind === w.kind)
+    if (k) return { ...k, pct: w.percentRemaining, resetsAt: w.resetsAt || null, short: t(k.win) }
+    const label = String(w.label || t('limit'))
+    const model = w.kind === 'model'
+    return { kind: w.kind, model, label, pct: w.percentRemaining, resetsAt: w.resetsAt || null, short: model ? label.replace(/\s+(week|session|\S+ window)$/i, '') || label : label }
+  })
+}
+export const modelLimits = (a) => limitsOf(a).filter((l) => l.model)
+// A limit in words, with when it starts again: "29% of the week left, Week resets Sat 2:00 PM",
+// "Fable week: 8% left, Resets in 5 h".
+export const limitWords = (l) => [l.of ? t(l.of, { pct: String(l.pct) }) : t('{label}: {pct}% left', { label: l.label, pct: String(l.pct) }), resetWords(l)].filter(Boolean).join(', ')
 // When a window starts again: "Week resets Sat 2:00 PM", or in hours when that's soon.
 function resetWords(w) {
   const h = w.resetsAt ? (new Date(w.resetsAt) - Date.now()) / 3600e3 : NaN
@@ -353,6 +371,8 @@ export default function AccountMenu({ groups, value, onPick, onAdd, extra = [], 
             // Why it has a button, in a few words (the tooltip says more, but a phone has no hover).
             const why = needs === 'allow' ? t('Allow once to see its usage') : needs === 'signin' ? (inUse ? t('In use: sign in to see its usage') : t('Sign-in expired')) : null
             const sub = allowing === a.id ? t('macOS asks once: choose Always Allow in its window') : [!dialog && on && t('Default'), usual && t('Your usual login'), why || weekResets(a)].filter(Boolean).join(' · ')
+            // A model's own limit (Claude's Fable week): a line of its own, colored once it's low.
+            const models = needs ? [] : modelLimits(a)
             // In the top bar, what a click on the row does, said on it: Set as default.
             const canSet = !dialog && !on && !needs && g.accounts.length > 1
             return (
@@ -364,6 +384,11 @@ export default function AccountMenu({ groups, value, onPick, onAdd, extra = [], 
                   <span className="acct-main">
                     <AcctName a={a}>{auto && <span className="best-tag" title={t('Auto starts new agents here now: it has the most left')}>{t('auto')}</span>}</AcctName>
                     {sub ? <span className="acct-desc">{sub}</span> : null}
+                    {models.length > 0 && (
+                      <span className="acct-desc acct-models">
+                        {models.map((m) => <span key={m.label} className={level(m.pct) === 'good' ? undefined : `t-${level(m.pct)}`}>{t('{label}: {pct}% left', { label: m.label, pct: String(m.pct) })}</span>)}
+                      </span>
+                    )}
                   </span>
                   {!needs && <Left a={a} off={off} inUse={inUse} slots={slotsOf(g.accounts)} />}
                 </button>
