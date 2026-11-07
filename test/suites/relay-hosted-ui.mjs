@@ -3,20 +3,27 @@
 // computer on it already. Settings › Devices: Use Bridge AI's relay says it's full for now and that
 // the phone can still reach this computer, with your own Cloudflare and Tailscale a click each and
 // Try again, said once; the relay marked Full for now among the ways, your own Cloudflare picked when
-// Settings opens again, and it fits a phone; Try again once there's room sets it up. The server: the
-// refusal with its code, and /api/relay saying so. `bridge-ai relay setup --hosted`: the reason and
-// the other ways, and it fails. First-run setup on a new computer: Use Bridge AI on your phone,
-// ticked; Continue says it's full and where the other ways are, and setup goes on to the end.
-// Unticked, the relay isn't asked; with no hosted relay at all, setup doesn't offer it.
+// Settings opens again, and it fits a phone; Try again once there's room sets it up. Stop using the
+// relay gives the place back at once, or, stopped while the relay can't be reached, once it can.
+// The server: the refusal with its code, and /api/relay saying so. `bridge-ai relay setup
+// --hosted`: the reason and the other ways, and it fails. First-run setup on a new computer: Use
+// Bridge AI on your phone, ticked; Continue says it's full and where the other ways are, and setup
+// goes on to the end. Unticked, the relay isn't asked; with no hosted relay at all, setup doesn't
+// offer it.
+import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { ROOT, startKit, startHostedRelay, checks, until, browser, page, shot } from '../lib/harness.mjs'
+import { pathToFileURL } from 'node:url'
+import { ROOT, TEST, startKit, startHostedRelay, checks, until, browser, page, shot } from '../lib/harness.mjs'
 
 const { ok, done } = checks('relay-hosted-ui')
 const kits = []
 const devices = (p) => p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'machines' } })))
 const HOSTED = 'Bridge AI\'s relay'
 const TOKEN = 'stats-for-tests'
+// The servers can't look up <id>.localhost, as on macOS and Windows (stand-ins/no-localhost-names.mjs),
+// so they reach a computer's address on the stand-in the way Bridge AI does everywhere.
+const env = { NODE_OPTIONS: `--import ${pathToFileURL(path.join(TEST, 'stand-ins', 'no-localhost-names.mjs')).href}` }
 
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
@@ -28,7 +35,7 @@ try {
   ok(first.status === 200 && !!first.id, 'the hosted relay takes one computer, and has one', first)
 
   // ---------- Settings › Devices ----------
-  const k = await startKit('relay-hosted-ui', { config: { relay: { hostedUrl: hr.url } } })
+  const k = await startKit('relay-hosted-ui', { env, config: { relay: { hostedUrl: hr.url } } })
   kits.push(k)
   await k.api('/setup', { name: 'Tester' })
   const s = await page(b, k.url, { mode: 'light', theme: 'sky' })
@@ -90,13 +97,25 @@ try {
   await s.p.locator('.hosted-full button', { hasText: 'Try again' }).click()
   ok(!!(await until(async () => (await s.p.locator('h4', { hasText: 'From anywhere, through Bridge AI\'s relay' }).count()) === 1, 15000)), 'once there\'s room, Try again sets it up: this computer is on Bridge AI\'s relay', (await k.api('/relay')).error)
   ok(!(await k.api('/relay')).hostedFull, 'and it no longer says it was full', null)
-  // Stop using it: its place there is given back.
+  // Stop using it: its place there is given back at once (its address, <id>.localhost, reached on
+  // this computer whatever the system's resolver says), or, if the relay can't be reached just then,
+  // once it can: here, when Bridge AI starts again.
+  for (const x of [s, ph]) await x.ctx.close()
   await k.api('/relay/forget', {})
-  ok(!!(await until(async () => (await hr.stats(TOKEN)).computers.registered === 1, 10000)), 'and Stop using the relay gives its place back', (await hr.stats(TOKEN)).computers)
+  ok(!!(await until(async () => (await hr.stats(TOKEN)).computers.registered === 1, 10000)), 'and Stop using the relay gives its place back at once', (await hr.stats(TOKEN)).computers)
+  const relayFile = () => JSON.parse(fs.readFileSync(path.join(k.data, 'relay.json'), 'utf8'))
+  await k.api('/relay/deploy', { method: 'hosted' })
+  await hr.down()
+  await k.api('/relay/forget', {})
+  const held = await until(() => relayFile().leaving?.length === 1 && relayFile(), 10000, 200)
+  ok(!!held && (await hr.stats(TOKEN)).computers.registered === 2 && !(await k.api('/relay')).configured, 'stopped while the relay can\'t be reached: it\'s stopped here, and Bridge AI keeps the address to tell the relay later', held?.leaving?.map((l) => l.url))
+  await hr.up()
+  await k.restart()
+  ok(!!(await until(async () => (await hr.stats(TOKEN)).computers.registered === 1 && !relayFile().leaving, 15000)), 'once it can be reached (Bridge AI started again), the relay hears it and the place is given back', { computers: (await hr.stats(TOKEN)).computers, leaving: relayFile().leaving })
   await hr.vars({ MAX_COMPUTERS: '1' }) // full again
 
   // ---------- First-run setup ----------
-  const fresh = async (name, config) => { const x = await startKit(`relay-hosted-ui-${name}`, { config }); kits.push(x); return x }
+  const fresh = async (name, config) => { const x = await startKit(`relay-hosted-ui-${name}`, { env, config }); kits.push(x); return x }
   const level = async (pg) => { if (await pg.locator('input[name="wiz-level"][value="later"]').count()) await pg.check('input[name="wiz-level"][value="later"]') }
   const n = await fresh('new', { relay: { hostedUrl: hr.url } })
   const f = await page(b, n.url, { mode: 'dark', theme: 'midnight' })

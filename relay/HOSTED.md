@@ -499,7 +499,8 @@ rule.
 
 ## Trying it locally
 
-`wrangler dev` passes the Host header through, and Chrome sends `*.localhost` to 127.0.0.1, so
+`wrangler dev` passes the Host header through, and Chrome sends `*.localhost` to 127.0.0.1 (so
+does Bridge AI, though macOS and Windows don't look such names up themselves), so
 `<id>.localhost` stands in for a computer's address:
 
 ```sh

@@ -227,7 +227,8 @@ export async function startRelay(name) {
 
 // Bridge AI's hosted relay, stood in for (stand-ins/hosted-relay.mjs: the real Worker with HOSTED
 // on, at localhost), with these settings. A kit uses it with "relay": { "hostedUrl": url } in its
-// config. vars() changes its settings from then on; register() registers a computer, as the app does.
+// config. vars() changes its settings from then on; register() registers a computer, as the app does;
+// down() makes computers' addresses unreachable, up() reachable again.
 export async function startHostedRelay(name, settings = {}) {
   const port = await freePort()
   const log = path.join(OUT, 'kits', `${name}-hosted-relay-${port}.log`)
@@ -240,6 +241,8 @@ export async function startHostedRelay(name, settings = {}) {
   return {
     url: `http://localhost:${port}`, port,
     vars: (v) => post('/_test/vars', v).then((r) => r.json()),
+    down: () => post('/_test/down', {}).then((r) => r.json()),
+    up: () => post('/_test/up', {}).then((r) => r.json()),
     register: () => post('/_relay/register', { version: '3.9.2' }).then(async (r) => ({ status: r.status, ...(await r.json()) })),
     stats: (token) => fetch(`${at}/_relay/stats`, { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()),
     stop: () => stopTree(p.pid),

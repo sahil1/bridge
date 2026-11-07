@@ -6,6 +6,8 @@
 // in one process.
 //   node hosted-relay.mjs <port> [its settings as JSON, e.g. '{"MAX_COMPUTERS":"1"}']
 //   POST /_test/vars   more settings (JSON), from then on
+//   POST /_test/down   computers' addresses can't be reached (each connection dropped), as with no
+//                      network; the bare domain still answers. POST /_test/up: as before
 import http from 'node:http'
 import { bundle } from '../../relay/build.js'
 
@@ -55,17 +57,20 @@ function make(name) {
 }
 env.HUB = { idFromName: (n) => n, get: (n) => objs.get(n) || objs.set(n, make(n)).get(n) }
 
+let down = false
 const server = http.createServer(async (req, res) => {
   const chunks = []
   for await (const c of req) chunks.push(c)
   const body = Buffer.concat(chunks)
-  if (req.url === '/_test/vars') {
-    Object.assign(env, JSON.parse(String(body) || '{}'))
+  if (req.url.startsWith('/_test/')) {
+    if (req.url === '/_test/vars') Object.assign(env, JSON.parse(String(body) || '{}'))
+    if (req.url === '/_test/down' || req.url === '/_test/up') down = req.url === '/_test/down'
     res.setHeader('content-type', 'application/json')
     return res.end('{"ok":true}')
   }
   const headers = Object.entries(req.headers).filter(([, v]) => typeof v === 'string')
   const host = String(req.headers.host || `localhost:${port}`).replace(/^127\.0\.0\.1(?=:|$)/, 'localhost')
+  if (down && host !== `localhost:${port}`) return req.socket.destroy()
   const r = await worker.default.fetch(new Request(`http://${host}${req.url}`, { method: req.method, headers, body: ['GET', 'HEAD'].includes(req.method) ? undefined : body }), env)
   res.writeHead(r.status, Object.fromEntries(r.headers))
   res.end(Buffer.from(await r.arrayBuffer()))
