@@ -120,6 +120,19 @@ try {
   fs.writeFileSync(path.join(dir, 'notes.md'), '# Notes\n\nThird draft, from another app.\n')
   r = await api(`/studio/changed?${q(F('notes.md'))}&since=${r.mtime}`)
   ok(r.changed && r.by === 'outside' && r.versions[0].by === 'outside', 'changed from outside: noticed, and kept as a version', r)
+  // Looks at whether it changed, made while Studio saves it (a big file, so the write takes a while):
+  // each waits for the save, so none sees the file half written and keeps that as a version from
+  // outside, as they did.
+  fs.writeFileSync(path.join(dir, 'long.md'), '# Long\n')
+  const lm = await api(`/studio/open?${q(F('long.md'))}`)
+  const long = Buffer.alloc(24 * 1024 * 1024, 'A long line of notes. ')
+  let saving = true
+  const bigSave = put(F('long.md'), long, lm.mtime).finally(() => { saving = false })
+  const during = []
+  while (saving) { during.push(api(`/studio/changed?${q(F('long.md'))}&since=${lm.mtime}`).catch((e) => ({ error: e.message }))); await sleep(5) }
+  const seen = await Promise.all(during)
+  const lv = (await api(`/studio/versions?${q(F('long.md'))}`)).versions
+  ok((await bigSave).status === 200 && seen.length > 1 && seen.every((x) => !x.error && (!x.changed || x.by === 'you')) && !lv.some((v) => v.by === 'outside') && lv[0].by === 'you' && lv[0].size === long.length, 'looks at the file while Studio saves it wait for the save: never half written, never kept as a change from outside', { during: seen.length, by: [...new Set(seen.map((x) => x.by || (x.changed ? '?' : 'same')))], versions: lv.map((v) => [v.by, v.size]) })
   // Asked of an agent: the change it makes is its version, with its name.
   const d2 = path.join(kit.home, 'code', 'site')
   fs.mkdirSync(d2, { recursive: true })

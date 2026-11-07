@@ -217,6 +217,11 @@ export function StudioPage({ root, path: rel, onBack, onOpen }) {
   const handle = useRef(null)
   const metaRef = useRef(null)
   const dirtyRef = useRef(false)
+  // Studio's own writes to the file (a save, a version put back). A look at whether the file changed
+  // that's sent while one is on its way, or answered after it, sees that write and would take it for
+  // someone else's: the editor loaded again (losing what's being done in it), or a conflict offered.
+  const writing = useRef(0) // on their way
+  const wrote = useRef(0) // made so far
   useEffect(() => { metaRef.current = meta }, [meta])
   useEffect(() => { dirtyRef.current = dirty }, [dirty])
   const packs = useDesignPacks()
@@ -224,7 +229,9 @@ export function StudioPage({ root, path: rel, onBack, onOpen }) {
   const load = useCallback(async () => {
     const m = await openFile(f)
     const buf = await bytesOf(rawUrl(f))
-    setMeta({ ...m, root: f.root })
+    // Known at once, before it's drawn: the next look at the file goes from this.
+    metaRef.current = { ...m, root: f.root }
+    setMeta(metaRef.current)
     setData(buf)
     setGen((g) => g + 1)
     setDirty(false)
@@ -243,10 +250,13 @@ export function StudioPage({ root, path: rel, onBack, onOpen }) {
   useEffect(() => {
     const look = async () => {
       const m = metaRef.current
-      if (!m || document.hidden) return
+      if (!m || document.hidden || writing.current) return
       if (Date.now() > quick.current && Date.now() - lastLook.current < 10_000) return
       lastLook.current = Date.now()
+      const n = wrote.current
       const r = await changedSince(f, m.mtime).catch(() => null)
+      // Written here meanwhile: what this look saw may be that. The next one looks again from it.
+      if (writing.current || wrote.current !== n) { lastLook.current = 0; return }
       if (!r?.changed) return
       if (r.by === 'agent') quick.current = Math.max(quick.current, Date.now() + 120_000)
       const who = r.by === 'agent' ? (r.name || t('An agent')) : t('Another app')
@@ -263,6 +273,7 @@ export function StudioPage({ root, path: rel, onBack, onOpen }) {
     if (meta.ext === '.pptx' && !ok && !replaces(f)) { setWarn(meta.ext); return }
     if (RISKY[meta.ext] && !ok && meta.ext !== '.pptx') { try { if (!localStorage.getItem(`cc-studio-said${meta.ext}`)) { setWarn(meta.ext); return } } catch { /* say it again next time */ } }
     setSaving(true); setNote(null)
+    writing.current++
     try {
       // An editor that can't keep everything in the file says what, before it's saved (a sheet).
       let bytes = await handle.current.save()
@@ -271,13 +282,14 @@ export function StudioPage({ root, path: rel, onBack, onOpen }) {
         bytes = bytes.bytes
       }
       const r = await saveFile(f, bytes, { mtime: meta.mtime, force })
+      metaRef.current = { ...metaRef.current, mtime: r.mtime, size: r.size, versions: r.versions }
       setMeta((m) => ({ ...m, mtime: r.mtime, size: r.size, versions: r.versions }))
       setDirty(false); setConflict(null)
       setNote({ text: t('Saved.'), brief: true })
     } catch (e) {
       if (e.conflict) setConflict({ who: t('Something else'), mtime: null })
       else setNote({ text: t("Couldn't save it: {error}", { error: e.message }), error: true })
-    } finally { setSaving(false) }
+    } finally { writing.current--; wrote.current++; setSaving(false) }
   }, [f, meta])
   // Saved as a copy beside it ("<name> (Studio).pptx", never over another), which opens and is
   // saved to from then on; this one goes back to the file as it is.
@@ -301,7 +313,12 @@ export function StudioPage({ root, path: rel, onBack, onOpen }) {
   // doesn't update by itself meanwhile (busy.js).
   useEffect(() => { if (!dirty) return; const q = (e) => { e.preventDefault(); e.returnValue = '' }; window.addEventListener('beforeunload', q); return () => window.removeEventListener('beforeunload', q) }, [dirty])
   useBusy('studio', dirty)
-  const restore = async (id) => { if (dirty && !window.confirm(t('Put this version back? Your unsaved changes here are lost (what\'s in the file now is kept as a version).'))) return; await restoreVersion(f, id); await load(); setNote({ text: t('Put back. What was there is kept as a version too.') }) }
+  const restore = async (id) => {
+    if (dirty && !window.confirm(t('Put this version back? Your unsaved changes here are lost (what\'s in the file now is kept as a version).'))) return
+    writing.current++
+    try { await restoreVersion(f, id); await load() } finally { writing.current--; wrote.current++ }
+    setNote({ text: t('Put back. What was there is kept as a version too.') })
+  }
 
   const name = meta?.name || rel.split('/').pop()
   const kind = meta?.kind
