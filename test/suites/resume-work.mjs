@@ -6,17 +6,21 @@
 // down: its terminals end one by one, after the terminal host is stopped from outside (a Mac or
 // Linux shutting down) or after the desktop app says so (Windows warns background processes of
 // nothing); the working agent stays on the list to reopen, and carries on after the restart.
+// Bridge AI quit again before it had its agents back (one waiting on macOS about its folder, which
+// scripts/tcc-sim.mjs stands in for): the one it hadn't reopened yet still comes back next time.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, checks, until, sleep, TEST, IS_WIN } from '../lib/harness.mjs'
+import { pathToFileURL } from 'node:url'
+import { startKit, checks, until, sleep, TEST, ROOT, IS_WIN } from '../lib/harness.mjs'
 
-const { ok, done } = checks('resume-work')
+const { ok, skip, done } = checks('resume-work')
 const kit = await startKit('resume-work')
 kit.program('claude', fs.readFileSync(path.join(TEST, 'stand-ins', 'claude.cjs'), 'utf8'))
 // What the resumed stand-ins were sent (both write to the same file).
 const typed = () => { try { return fs.readFileSync(path.join(kit.home, 'claude-typed.log'), 'utf8') } catch { return '' } }
 const carryOns = () => (typed().match(/Carry on from where you left off/g) || []).length
 const agentOf = async (pred) => ((await kit.api('/fleet')).agents || []).find(pred)
+let held = null // a second server, for quitting before its agents are back
 try {
   await kit.api('/setup', { name: 'Tester' })
   // Look for agents again, as the app does after an install: the server looked before the stand-in was there.
@@ -62,10 +66,33 @@ try {
   await kit.restart()
   ok(!!(await until(() => agentOf((a) => a.paneId === busy3.paneId), 60000, 500)), 'after the restart it\'s back')
   ok(!!(await until(() => carryOns() === 2, 30000, 500)), 'and told to carry on', typed())
+
+  // Quit again before they're all back: the server answers after 3 s whether or not it has reopened
+  // them, and one in a folder macOS is asking about (held 8 s here) isn't back yet. It was left out
+  // of what's saved then, and never came back.
+  if (IS_WIN) skip('quit again before its agents were back', 'the slow-folder stand-in takes POSIX paths')
+  else {
+    held = await startKit('resume-work-held', { env: ({ home }) => ({ NODE_OPTIONS: `--import ${pathToFileURL(path.join(ROOT, 'scripts', 'tcc-sim.mjs')).href}`, SIM_PROTECTED: path.join(home, 'Documents'), SIM_MS: '8000' }) })
+    held.program('claude', fs.readFileSync(path.join(TEST, 'stand-ins', 'claude.cjs'), 'utf8'))
+    await held.api('/setup', { name: 'Tester' })
+    await held.api('/agents/catalog')
+    const code = path.join(held.home, 'code')
+    const notes = path.join(held.home, 'Documents', 'notes')
+    for (const d of [code, notes]) fs.mkdirSync(d, { recursive: true })
+    const a = await held.api('/agents/launch', { kind: 'claude', cwd: code, label: 'Code', newSpace: 'Code', prompt: 'idle' })
+    const b = await held.api('/agents/launch', { kind: 'claude', cwd: notes, label: 'Notes', newSpace: 'Notes', prompt: 'idle' })
+    const both = async () => { const f = (await held.api('/fleet')).agents || []; return [a, b].every((x) => f.some((y) => y.paneId === x.paneId)) }
+    await until(both, 30000, 300)
+    await held.restart()
+    const early = await both()
+    await held.restart()
+    ok(!early && !!(await until(both, 30000, 300)), 'quit again before its agents were all back (one waiting on its folder): it still reopens next time', { early, saved: JSON.parse(fs.readFileSync(path.join(held.data, 'runtime.json'), 'utf8')).panes.map((p) => p.paneId), fleet: ((await held.api('/fleet')).agents || []).map((x) => x.paneId) })
+  }
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
   console.log(kit.log().slice(-1500))
 } finally {
   kit.stop()
+  held?.stop()
 }
 process.exit(done().fail ? 1 : 0)
