@@ -28,7 +28,10 @@
 //                                           at the end of a turn goes in joined, as one message. Esc
 //                                           stops a turn, and what was queued goes back in the box.
 //                                           Each message it takes goes in ~/claude-got.log
-//                                           ({ session, text, how: 'turn' or 'mid' }), as it got it
+//                                           ({ session, text, how: 'turn' or 'mid' }), as it got it.
+//                                           With blink, each repaint clears the screen and draws it
+//                                           again 400 ms later, as a terminal on Windows (ConPTY) can
+//                                           hand one over in pieces
 //   claude --resume <id> [...]              the same conversation again (on another account, say):
 //                                           its log as it was, done working, its message box at
 //                                           the bottom under the conversation; what's typed to it
@@ -244,7 +247,8 @@ fs.closeSync(log)
 // "busy": a conversation that takes messages, works on each a while with a subagent, and queues
 // what's typed meanwhile the way Claude Code does (see the top).
 function busy() {
-  const m = /^busy((?:\s+\d+)+)(?:\s+bg\s+(\d+))?/.exec(message) || []
+  const m = /^busy((?:\s+\d+)+)(?:\s+bg\s+(\d+))?(\s+blink)?/.exec(message) || []
+  const BLINK = !!m[3]
   const TURNS = (m[1] || '6').trim().split(/\s+/).map((x) => Number(x) * 1000)
   const BG = m[2] ? Number(m[2]) * 1000 : 0
   const subDir = path.join(project, id, 'subagents')
@@ -347,8 +351,13 @@ function busy() {
     if (subs.size) lines.push('  ⏺ main', ...[...subs.values()].map((s) => `  ◯ general-purpose  ${s.description}   ${Math.round((Date.now() - s.began) / 1000)}s · ↓ 1.2k tokens`))
     // At the bottom of the terminal, as Claude Code draws it.
     const below = lines.reduce((k, l) => k + l.split('\r\n').length, 0)
-    process.stdout.write(`\x1b[2J\x1b[H${'\r\n'.repeat(Math.max(0, (process.stdout.rows || 24) - below - 1))}${lines.join('\r\n')}`)
+    const frame = `${'\r\n'.repeat(Math.max(0, (process.stdout.rows || 24) - below - 1))}${lines.join('\r\n')}`
+    if (!BLINK) return process.stdout.write(`\x1b[2J\x1b[H${frame}`)
+    process.stdout.write('\x1b[2J\x1b[H')
+    clearTimeout(blinking)
+    blinking = setTimeout(() => process.stdout.write(frame), 400)
   }
+  let blinking = null
 
   // What's typed, a key at a time, and pastes (bracketed, so a message keeps its lines).
   if (process.stdin.isTTY) process.stdin.setRawMode(true)

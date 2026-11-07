@@ -211,12 +211,14 @@ export function NeedsYouPanel({ data, refresh, phone = false, focus = null, onCl
   }, [onClose, phone])
   useEffect(() => { if (!note) return; const id = setTimeout(() => setNote(null), 6000); return () => clearTimeout(id) }, [note])
   const pickSort = (v) => { setBy(v); try { localStorage.setItem('cc-needs-sort', v) } catch { /* no storage */ } }
-  const all = (data?.items || []).filter((i) => !gone[i.id])
+  // An item by its device and its id: each device numbers its own panes, so two can have the same.
+  const uid = (i) => `${i.machine || 'here'}|${i.id}`
+  const all = (data?.items || []).filter((i) => !gone[uid(i)])
   const devices = (data?.devices || []).filter((d) => all.some((i) => (i.machine || null) === d.id))
   const items = sorted(device === 'all' ? all : all.filter((i) => (i.machine || 'here') === device), by)
   // Answered: off the list here at once, and the device it's on asked again as it moves on.
   const onGone = (it, said, soft = false) => {
-    if (!soft) setGone((g) => ({ ...g, [it.id]: Date.now() }))
+    if (!soft) setGone((g) => ({ ...g, [uid(it)]: Date.now() }))
     if (said) setNote({ text: `${said} · ${it.agent?.title || ''}` })
     const q = it.machine ? `?fresh=${encodeURIComponent(it.machine)}` : ''
     for (const ms of [0, 1500, 4000]) setTimeout(() => refresh(q), ms)
@@ -234,16 +236,17 @@ export function NeedsYouPanel({ data, refresh, phone = false, focus = null, onCl
         const r = o.n === 'approve'
           ? await onDevice(it.machine, `/cloud/agents/${encodeURIComponent(it.paneId)}/approve`, {}).then(() => ({ ok: true }))
           : await onDevice(it.machine, '/needs-you/answer', { paneId: it.paneId, seq: it.seq, qid: it.qid, n: o.n })
-        if (r.ok) { done++; setGone((g) => ({ ...g, [it.id]: Date.now() })) } else missed++
+        if (r.ok) { done++; setGone((g) => ({ ...g, [uid(it)]: Date.now() })) } else missed++
       } catch { missed++ }
     }
     setBusy(false)
     setNote({ text: missed ? t('Answered {n}; {m} had moved on or didn\'t take.', { n: done, m: missed }) : t('Answered all {n}', { n: done }) })
     refresh('')
   }
-  const focusId = focus?.paneId ? all.find((i) => i.paneId === focus.paneId && (i.machine || null) === (focus.machine || null))?.id : null
+  const focused = focus?.paneId ? all.find((i) => i.paneId === focus.paneId && (i.machine || null) === (focus.machine || null)) : null
+  const focusId = focused ? uid(focused) : null
   const waiting = all.filter((i) => isAsk(i) && i.online).length
-  const list = (rows) => rows.map((it) => <NeedsItem key={it.id} it={it} focused={it.id === focusId} onOpen={onOpen} onGone={onGone} setNote={setNote} />)
+  const list = (rows) => rows.map((it) => <NeedsItem key={uid(it)} it={it} focused={uid(it) === focusId} onOpen={onOpen} onGone={onGone} setNote={setNote} />)
   return (
     <div className={`ny-panel ${phone ? 'phone' : ''}`} ref={box} role="dialog" aria-label={t('Needs you')}>
       <header className="ny-head">

@@ -82,15 +82,17 @@ try {
 
   // ---------- Two sent at once to an agent that's free (a phone sending the next before the first's answer came) ----------
   {
-    const ag = await launch('Payouts', 'busy 2 3')
+    // Its screen repainted in pieces, as a terminal on Windows hands it over: a look in between
+    // isn't taken for a menu covering its input box.
+    const ag = await launch('Payouts', 'busy 2 3 blink')
     await settled(ag, 2)
     const two = ['Check the payouts', 'And the fees']
     const rs = await Promise.all(two.map((text, i) => kit.api(`/agents/${enc(ag.paneId)}/prompt`, { text, cid: `at-once-${i}` })))
     const first = rs.findIndex((r) => !r.queued)
     const order = first < 0 ? two : [two[first], two[1 - first]]
-    ok(first >= 0 && rs.filter((r) => r.queued).length === 1, 'two sent at once to an agent that\'s free: one goes in, the other waits its turn', rs)
+    ok(first >= 0 && rs.filter((r) => r.queued).length === 1 && !rs.some((r) => /menu or dialog/.test(r.reason || '')), 'two sent at once to an agent that\'s free, its screen repainting: one goes in, the other waits its turn (not "a menu or dialog is open")', rs)
     const g = await wentIn(ag, two)
-    ok(same(g.map((x) => x.text), ['busy 2 3', ...order]) && g.every((x) => x.how === 'turn'), 'and both go in, one after the other, each on its own (the second used to find the first still in the input box and clear it)', g)
+    ok(same(g.map((x) => x.text), ['busy 2 3 blink', ...order]) && g.every((x) => x.how === 'turn'), 'and both go in, one after the other, each on its own (the second used to find the first still in the input box and clear it)', g)
   }
 
   // ---------- What a send says, by the computer's answer: "Queued for" a busy agent, "Sent to" a free one ----------
