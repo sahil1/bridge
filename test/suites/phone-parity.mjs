@@ -16,11 +16,12 @@
 //
 // A path is what's tapped, from the tab bar: a tab (Chief, Agents, Meetings, Today, More), then the
 // buttons in it by name. A beta feature's paths (trial: its id) are followed with it on; with Home
-// on, Home is the first tab and Today is in More, which is checked then too. "Search › x" types x in the top bar's search, which must offer it (for
+// on, Home is the first tab and Today is in More, which is checked then too. One marked mac (Mail,
+// its ⌘K actions and Settings › Mail) is only there, and followed, on a Mac. "Search › x" types x in the top bar's search, which must offer it (for
 // actions rather than places); "Settings › x" is the top bar's Settings, then its section x.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, checks, until, browser, page, shot, phoneFaults, ROOT } from '../lib/harness.mjs'
+import { startKit, checks, until, browser, page, shot, phoneFaults, ROOT, IS_MAC } from '../lib/harness.mjs'
 
 const { ok, done } = checks('phone-parity')
 
@@ -66,8 +67,12 @@ const PATHS = {
   'a:theme': { phone: 'Search › Color mode' },
   'a:ideas': { phone: 'Search › Add an idea' },
   'a:cal': { phone: 'Today › Calendar' },
-  'a:mail': { phone: 'Today › Mail' },
-  'a:triage': { phone: 'Search › Triage my inbox' },
+  'a:mail': { phone: 'Today › Mail', mac: true },
+  'a:triage': { phone: 'Search › Triage my inbox', mac: true },
+  'a:mail-done': { phone: 'Today › Mail', mac: true },
+  'a:mail-later': { phone: 'Today › Mail', mac: true },
+  'a:mail-reply': { phone: 'Today › Mail', mac: true },
+  'a:mail-keys': { none: 'Keys are for a keyboard; on a phone the open message has Done, Remind me and Reply Assist as buttons' },
   'a:markets': { phone: 'Today › Markets' },
   'a:routines': { phone: 'Search › Show routines' },
   'a:usage': { phone: 'Today › Usage' },
@@ -79,6 +84,7 @@ const PATHS = {
   'settings:providers': { phone: 'Settings › Model Providers' },
   'settings:voice': { phone: 'Settings › Voice' },
   'settings:meetings': { phone: 'Settings › Meetings' },
+  'settings:mail': { phone: 'Settings › Mail', mac: true },
   'settings:mcp': { phone: 'Settings › MCP Servers' },
   'settings:phone': { phone: 'Settings › Devices' },
   'settings:appearance': { phone: 'Settings › Appearance' },
@@ -109,7 +115,8 @@ const actions = [...app.matchAll(/\{ id: '(a:[\w-]+)'/g)].map((m) => m[1])
 const settings = source('src', 'components', 'Settings.jsx')
 const sections = [...(/export const SECTIONS = \[([\s\S]*?)\n\]/.exec(settings)?.[1] || '').matchAll(/\{ id: '([\w-]+)'/g)].map((m) => `settings:${m[1]}`)
 // Each section's name and what's in it, as the phone's list of them shows them.
-const named = [...(/export const SECTIONS = \[([\s\S]*?)\n\]/.exec(settings)?.[1] || '').matchAll(/label: tx\('([^']+)'\), icon: '[\w-]+', hint: tx\('([^']+)'\)/g)].map((m) => ({ name: m[1], hint: m[2] }))
+// (One marked mac, Mail, is there only where Apple Mail can be read.)
+const named = [...(/export const SECTIONS = \[([\s\S]*?)\n\]/.exec(settings)?.[1] || '').matchAll(/label: tx\('([^']+)'\), icon: '[\w-]+', hint: tx\('([^']+)'\)(, mac: true)?/g)].filter((m) => !m[3] || IS_MAC).map((m) => ({ name: m[1], hint: m[2] }))
 ok(views.length >= 5 && views.includes('view:whiteboards'), 'the desktop\'s views are read from App.jsx', views)
 ok(actions.length >= 30 && actions.includes('a:boards'), 'and ⌘K\'s actions', actions.length)
 ok(sections.length >= 8, 'and Settings\' sections', sections)
@@ -183,7 +190,7 @@ try {
     await ph.p.waitForSelector('.tabbar button', { timeout: 20000 })
     const tabs = (await ph.p.locator('.tabbar button').allInnerTexts()).map((x) => x.trim())
     ok(tabs.join('|') === TABS.join('|'), `${width}: five tabs, the last one More`, tabs)
-    const routes = [...new Map(Object.values(PATHS).filter((x) => x.phone && !x.trial).map((x) => [`${x.phone}|${x.shows || ''}`, x])).values()]
+    const routes = [...new Map(Object.values(PATHS).filter((x) => x.phone && !x.trial && (!x.mac || IS_MAC)).map((x) => [`${x.phone}|${x.shows || ''}`, x])).values()]
     const bad = []
     for (const r of routes) {
       await ph.p.goto(kit.url)
@@ -309,7 +316,7 @@ try {
     const tabs = await tabNames()
     ok(tabs.join('|') === HOME_TABS.join('|'), 'Home on: Home is the first tab, Today is not a tab', tabs)
     ok(!!(await until(() => ph.p.locator('.hm').isVisible(), 10000)), 'and the phone opens at Home')
-    const today = [['More › Today', '.m-more-view .m-today'], ['More › Today › Calendar', '.m-more-view .m-today'], ['More › Today › Mail', '.m-more-view .m-today']].map(([phone, shows]) => ({ phone, shows }))
+    const today = [['More › Today', '.m-more-view .m-today'], ['More › Today › Calendar', '.m-more-view .m-today'], ...(IS_MAC ? [['More › Today › Mail', '.m-more-view .m-today']] : [])].map(([phone, shows]) => ({ phone, shows }))
     const routes = [...new Map([...Object.values(PATHS).filter((x) => x.trial === 'home'), ...today].map((x) => [`${x.phone}|${x.shows || ''}`, x])).values()]
     const bad = []
     for (const r of routes) {

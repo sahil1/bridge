@@ -1,0 +1,225 @@
+/* A PDF in Studio: its toolbar, the thumbnails, the pages (pdf.js), Signature Assist beside them
+   and the places to sign over them. The pages stay paper white in dark mode too; what's around
+   them follows the app's colours. */
+.sd-pdf { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.sd-pdf-bar { flex-wrap: nowrap; gap: 4px; }
+.sd-pdf-bar > * { flex: none; }
+.sd-pdf-bar .sd-group + .sd-group, .sd-pdf-bar > .sd-group { padding-left: 6px; border-left: 1px solid var(--line); }
+.sd-pdf-nav { gap: 4px; }
+.sd-pdf-page { width: 44px; height: 28px; padding: 0 4px; border: 1px solid var(--line-2, var(--line)); border-radius: 7px; background: var(--pane); color: var(--ink); font: 500 12.5px var(--font); text-align: center; font-variant-numeric: tabular-nums; }
+.sd-pdf-of { padding-right: 2px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.sd-pdf-zoomsel { min-width: 104px; }
+.sd-pdf-find { display: flex; align-items: center; gap: 2px; flex: 0 1 300px; min-width: 150px; height: 30px; margin-left: 6px; padding: 0 2px 0 8px; border: 1px solid var(--line-2, var(--line)); border-radius: 8px; background: var(--pane); color: var(--ink-3); }
+.sd-pdf-find:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.sd-pdf-find input { flex: 1; min-width: 40px; height: 100%; border: 0; background: none; color: var(--ink); font: 13px var(--font); outline: none; }
+.sd-pdf-find input::-webkit-search-cancel-button { display: none; }
+.sd-pdf-find .sd-tool { width: 24px; height: 24px; }
+.sd-pdf-hits { white-space: nowrap; padding: 0 4px; font-variant-numeric: tabular-nums; }
+.sd-pdf-sign.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--line-2)); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.sd-pdf-findbar { position: static; padding: 4px 8px; }
+.sd-pdf-findbar .sd-pdf-find { flex: 1; margin: 0; }
+
+.sd-pdf-body { position: relative; flex: 1; display: flex; min-height: 0; }
+.sd-pdf-main { position: relative; flex: 1; min-width: 0; background: color-mix(in srgb, var(--ink) 7%, var(--pane-2)); }
+.sd-pdf-scroll { position: absolute; inset: 0; overflow: auto; outline: none; touch-action: pan-x pan-y; }
+.sd-pdf-cover { position: absolute; inset: 0; background: var(--pane); }
+.sd-pdf-pw-row { display: flex; gap: 8px; margin-top: 4px; }
+.sd-pdf-pw-row input { width: 220px; height: 32px; padding: 0 10px; border: 1px solid var(--line-2, var(--line)); border-radius: 8px; background: var(--pane); color: var(--ink); font: 13px var(--font); }
+
+/* Thumbnails: each page small, in its own shape, the one you're on outlined. */
+.sd-pdf-thumbs { flex: none; width: 132px; overflow: auto; display: grid; align-content: start; gap: 10px; padding: 12px 14px; border-right: 1px solid var(--line); background: var(--pane); }
+.sd-pdf-thumbs button { display: grid; justify-items: center; gap: 4px; padding: 0; color: var(--ink-3); }
+.sd-pdf-thumb { display: block; width: 96px; overflow: hidden; border-radius: 3px; background: #fff; box-shadow: 0 0 0 1px var(--line), 0 1px 3px rgb(0 0 0 / .08); transition: box-shadow .12s; }
+.sd-pdf-thumb canvas { display: block; width: 100%; height: 100%; }
+.sd-pdf-thumbs button:hover .sd-pdf-thumb { box-shadow: 0 0 0 1px var(--ink-3), 0 1px 3px rgb(0 0 0 / .1); }
+.sd-pdf-thumbs button.on .sd-pdf-thumb { box-shadow: 0 0 0 2px var(--accent), 0 1px 4px rgb(0 0 0 / .12); }
+.sd-pdf-thumbs button.on small { color: var(--accent); font-weight: 600; }
+.sd-pdf-thumbs small { font-size: 11px; font-variant-numeric: tabular-nums; }
+
+/* The pages, as pdf.js lays them out. From pdf.js's own pdf_viewer.css (Apache-2.0), only what
+   these need: each page's size and canvas, and the text over it to select and find in. */
+/* pdf.js leaves 20 px each side of a page fitted to the width, and 5 px over one fitted whole. */
+.sd-pdf .pdfViewer { --scale-factor: 1; padding: 6px 0 20px; }
+.sd-pdf .pdfViewer .page {
+  --user-unit: 1; --total-scale-factor: calc(var(--scale-factor) * var(--user-unit)); --scale-round-x: 1px; --scale-round-y: 1px;
+  direction: ltr; position: relative; overflow: visible; margin: 0 auto 12px; border: 0; background: #fff; background-clip: content-box;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / .06), 0 2px 10px rgb(0 0 0 / .1);
+}
+.sd-pdf .pdfViewer .dummyPage { position: relative; width: 0; height: var(--viewer-container-height, 0); }
+.sd-pdf .canvasWrapper { overflow: hidden; width: 100%; height: 100%; }
+.sd-pdf .canvasWrapper canvas { position: absolute; top: 0; left: 0; margin: 0; display: block; width: 100%; height: 100%; contain: content; }
+.sd-pdf .canvasWrapper canvas.detailView { image-rendering: pixelated; }
+.sd-pdf .textLayer {
+  color-scheme: only light; position: absolute; text-align: initial; inset: 0; overflow: clip; opacity: 1; line-height: 1;
+  letter-spacing: normal; word-spacing: normal; text-size-adjust: none; -webkit-text-size-adjust: none; forced-color-adjust: none;
+  transform-origin: 0 0; caret-color: CanvasText; z-index: 0;
+  --min-font-size: 1; --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size)); --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+.sd-pdf .textLayer :is(span, br) { color: transparent; position: absolute; white-space: pre; cursor: text; transform-origin: 0% 0%; -webkit-user-select: text; user-select: text; }
+.sd-pdf .textLayer > :not(.markedContent), .sd-pdf .textLayer .markedContent span:not(.markedContent) {
+  z-index: 1; --font-height: 0; font-size: calc(var(--text-scale-factor) * var(--font-height));
+  --scale-x: 1; --rotate: 0deg; transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+.sd-pdf .textLayer .markedContent { display: contents; }
+.sd-pdf .textLayer span[role="img"] { user-select: none; cursor: default; }
+.sd-pdf .textLayer .highlight { margin: -1px; padding: 1px; border-radius: 3px; background-color: rgb(255 196 0 / .4); }
+.sd-pdf .textLayer .highlight.appended { position: initial; }
+.sd-pdf .textLayer .highlight.begin { border-radius: 3px 0 0 3px; }
+.sd-pdf .textLayer .highlight.end { border-radius: 0 3px 3px 0; }
+.sd-pdf .textLayer .highlight.middle { border-radius: 0; }
+.sd-pdf .textLayer .highlight.selected { background-color: rgb(255 120 0 / .5); scroll-margin-top: 60px; }
+.sd-pdf .textLayer ::selection { background: rgb(0 96 255 / .26); color: transparent; }
+.sd-pdf .textLayer br::selection { background: transparent; }
+.sd-pdf .textLayer .endOfContent { display: block; position: absolute; inset: 100% 0 0; z-index: 0; cursor: default; user-select: none; }
+.sd-pdf .textLayer.selecting .endOfContent { top: 0; }
+/* Links in it, over the text, so a click on one opens it. */
+.sd-pdf .annotationLayer { position: absolute; top: 0; left: 0; pointer-events: none; transform-origin: 0 0; z-index: 3; }
+.sd-pdf .annotationLayer section { position: absolute; text-align: initial; pointer-events: auto; box-sizing: border-box; transform-origin: 0 0; }
+.sd-pdf .annotationLayer .linkAnnotation > a { position: absolute; font-size: 1em; top: 0; left: 0; width: 100%; height: 100%; }
+.sd-pdf .annotationLayer .linkAnnotation > a:hover { background: rgb(255 210 0 / .18); }
+.sd-pdf .annotationLayer :is(.popupAnnotation, .popup) { display: none; }
+
+/* Places to sign, over the pages. */
+.sd-marks { position: absolute; top: 0; left: 0; width: 0; height: 0; z-index: 6; }
+.sd-mark { position: absolute; box-sizing: border-box; border: 1.5px dashed var(--accent); border-radius: 3px; background: color-mix(in srgb, var(--accent) 8%, transparent); cursor: grab; touch-action: none; user-select: none; outline: none; }
+.sd-mark:active { cursor: grabbing; }
+.sd-mark.on { border-style: solid; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
+.sd-mark.ok { border: 1px solid color-mix(in srgb, var(--good, #2f9e5b) 55%, transparent); background: transparent; }
+.sd-mark.ok.on { box-shadow: 0 0 0 3px color-mix(in srgb, var(--good, #2f9e5b) 20%, transparent); }
+.sd-mark-tag { position: absolute; left: -1.5px; bottom: 100%; margin-bottom: 3px; display: inline-flex; align-items: center; gap: 3px; padding: 2px 7px 2px 5px; border-radius: 5px; background: var(--accent); color: var(--on-accent, #fff); font: 600 10.5px/1.3 var(--font); white-space: nowrap; pointer-events: none; box-shadow: 0 1px 3px rgb(0 0 0 / .15); }
+.sd-mark-tag.ok { padding: 2px 4px; background: var(--good, #2f9e5b); }
+.sd-mark-pic { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; object-position: center; pointer-events: none; opacity: .55; }
+.sd-mark-pic.left { object-position: left bottom; }
+.sd-mark.ok .sd-mark-pic, .sd-mark.on .sd-mark-pic { opacity: 1; }
+.sd-mark-date { position: absolute; line-height: 1; white-space: nowrap; color: #1a1a1f; font-family: Helvetica, Arial, sans-serif; pointer-events: none; opacity: .6; }
+.sd-mark.ok .sd-mark-date, .sd-mark.on .sd-mark-date { opacity: 1; }
+.sd-mark-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--accent); font: italic 500 11px var(--font); pointer-events: none; }
+.sd-mark-size { position: absolute; right: -7px; bottom: -7px; width: 14px; height: 14px; border: 2px solid #fff; border-radius: 50%; background: var(--accent); cursor: nwse-resize; touch-action: none; box-shadow: 0 1px 3px rgb(0 0 0 / .25); }
+.sd-mark-acts { position: absolute; top: calc(100% + 8px); left: -1.5px; z-index: 2; display: flex; gap: 4px; padding: 4px; border-radius: 9px; background: var(--pane); box-shadow: 0 0 0 1px var(--line), 0 6px 18px rgb(0 0 0 / .16); cursor: default; }
+.sd-mark-acts .btn.small { height: 26px; white-space: nowrap; }
+
+/* Signature Assist, beside the pages: one step open at a time. */
+.sd-sign { flex: none; width: 360px; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--line); background: var(--pane); }
+.sd-sign-head { position: static; gap: 7px; color: var(--ink); }
+.sd-sign-head > svg { color: var(--accent); }
+.sd-beta { padding: 1px 6px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); font: 600 10px/1.5 var(--font); letter-spacing: .02em; }
+.sd-sign-body { flex: 1; min-height: 0; overflow: auto; padding: 12px 12px 18px; }
+.sd-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.sd-step { border: 1px solid var(--line); border-radius: 12px; background: var(--pane); transition: border-color .15s, box-shadow .15s; }
+.sd-step.on { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); box-shadow: 0 4px 18px rgb(0 0 0 / .06); }
+.sd-step-head { width: 100%; display: flex; align-items: center; gap: 10px; padding: 11px 12px; border-radius: 12px; color: var(--ink); text-align: left; }
+.sd-step-head:not(:disabled):hover { background: var(--pane-2); }
+.sd-step-head:disabled { cursor: default; opacity: 1; }
+.sd-step-n { flex: none; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--pane-3); color: var(--ink-2); font: 650 11.5px var(--font); }
+.sd-step.on .sd-step-n { background: var(--accent); color: var(--on-accent, #fff); }
+.sd-step.done .sd-step-n { background: color-mix(in srgb, var(--good, #2f9e5b) 16%, transparent); color: var(--good, #2f9e5b); }
+.sd-step-title { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.sd-step-title b { font-weight: 600; font-size: 13.5px; }
+.sd-step-title small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sd-step-body { display: grid; gap: 11px; padding: 0 14px 14px 44px; font-size: 13px; line-height: 1.5; }
+.sd-step-body p { margin: 0; }
+.sd-step-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.sd-step-acts .btn.small { height: 30px; }
+.sd-warn { display: block; padding: 7px 9px; border-radius: 8px; background: color-mix(in srgb, var(--warning) 12%, var(--pane)); color: var(--ink-2); }
+.sd-warn > svg { color: var(--warning); vertical-align: -1px; }
+.sd-sent > svg, .sd-kept > svg, .sd-sign-honest > svg { vertical-align: -1px; }
+.sd-sign-honest { margin: 14px 4px 0; line-height: 1.45; }
+.sd-model select { width: 100%; height: 32px; padding: 0 8px; border: 1px solid var(--line-2, var(--line)); border-radius: 8px; background: var(--pane); color: var(--ink); font: 13px var(--font); }
+/* What it is, in plain words. */
+.sd-explained { display: grid; gap: 12px; }
+.sd-kind { justify-self: start; padding: 2px 9px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); font: 600 11.5px/1.6 var(--font); }
+.sd-what { font-size: 14px; line-height: 1.55; color: var(--ink); }
+.sd-ex-sec { display: grid; gap: 4px; }
+.sd-ex-sec > b { display: flex; align-items: center; gap: 5px; font: 600 10.5px var(--font); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.sd-ex-sec ul { margin: 0; padding: 0 0 0 16px; display: grid; gap: 4px; }
+.sd-ex-sec li::marker { color: var(--ink-3); }
+.sd-parties { list-style: none; padding-left: 0 !important; }
+.sd-watch { padding: 9px 10px 10px; border-radius: 10px; background: color-mix(in srgb, var(--warning) 9%, var(--pane)); }
+.sd-watch > b { color: color-mix(in srgb, var(--warning) 70%, var(--ink)); }
+.sd-watch li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+.sd-watch li > span { flex: 1 1 200px; }
+.sd-watch .link-btn { white-space: nowrap; font-size: 12px; }
+.sd-ex-by { padding-top: 10px; border-top: 1px solid var(--line); }
+/* Where to sign. */
+.sd-place { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.sd-date { grid-template-columns: minmax(0, 1fr); }
+.sd-looking { display: flex; align-items: center; gap: 6px; }
+.sd-places { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.sd-places li { display: flex; align-items: center; gap: 4px; padding: 3px 3px 3px 4px; border: 1px solid var(--line); border-radius: 10px; }
+.sd-places li.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 5%, transparent); }
+.sd-places li.ok { border-color: color-mix(in srgb, var(--good, #2f9e5b) 35%, var(--line)); }
+.sd-place-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 9px; padding: 4px; border-radius: 8px; color: var(--ink); text-align: left; }
+.sd-place-ic { flex: none; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 7px; background: var(--accent-soft); color: var(--accent); }
+.sd-places li.ok .sd-place-ic { background: color-mix(in srgb, var(--good, #2f9e5b) 15%, transparent); color: var(--good, #2f9e5b); }
+.sd-place-name { min-width: 0; display: grid; }
+.sd-place-name b { font-weight: 550; font-size: 12.5px; }
+.sd-place-name small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sd-place-undo { color: var(--good, #2f9e5b); font-size: 12px; }
+.sd-places .btn.small { height: 26px; }
+.sd-add { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.sd-date-row { display: flex; gap: 6px; }
+.sd-date-row input, .sd-date-row select { min-width: 0; height: 30px; padding: 0 8px; border: 1px solid var(--line-2, var(--line)); border-radius: 8px; background: var(--pane); color: var(--ink); font: 13px var(--font); }
+.sd-date-row input { flex: 1; }
+.sd-date-row select { flex: none; width: 92px; color: var(--ink-2); }
+/* The signed copy. */
+.sd-save { display: grid; gap: 10px; }
+.sd-saved { display: grid; justify-items: start; gap: 6px; }
+.sd-saved-ic { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: color-mix(in srgb, var(--good, #2f9e5b) 16%, transparent); color: var(--good, #2f9e5b); }
+
+/* Your signature and initials: on Studio's home, and in Signature Assist. */
+.sd-sigcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 10px; max-width: 800px; margin-bottom: 8px; }
+.sd-sigcard { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--pane-2); }
+.sd-sigcard.compact { padding: 8px 10px; gap: 10px; background: var(--pane); }
+.sd-sigcard.drawing { display: grid; gap: 8px; background: var(--pane); }
+.sd-sigcard-pic { flex: none; display: grid; place-items: center; width: 116px; height: 46px; overflow: hidden; border-radius: 7px; background: #fff; box-shadow: 0 0 0 1px var(--line); }
+.sd-sigcard.compact .sd-sigcard-pic { width: 92px; height: 38px; }
+.sd-sigcard-pic img { max-width: 92%; max-height: 86%; object-fit: contain; }
+.sd-sigcard.waiting .sd-sigcard-pic { background: var(--pane-3); box-shadow: none; }
+.sd-sigcard-name { flex: 1; min-width: 0; display: grid; gap: 1px; font-size: 13px; }
+.sd-sigcard-acts { display: flex; align-items: center; gap: 4px; }
+/* In Signature Assist's narrow column: its name over it, then the picture and what to do. */
+.sd-sigcard.compact .sd-sigcard-name { flex-basis: 100%; order: -1; font-size: 12px; color: var(--ink-2); }
+.sd-sigcard.compact .sd-sigcard-name b { font-weight: 550; }
+.sd-sigcard.compact .sd-sigcard-pic { flex: 1 1 auto; max-width: 160px; }
+.sd-sign-home > p { max-width: 640px; line-height: 1.5; }
+/* The pad: paper white with a line to sign on, whatever the theme. */
+.sd-pad { display: grid; gap: 6px; }
+.sd-pad-box { position: relative; height: 150px; border-radius: 10px; background: #fff; box-shadow: 0 0 0 1px var(--line-2, var(--line)), inset 0 1px 2px rgb(0 0 0 / .04); }
+.sd-pad.initials .sd-pad-box { height: 110px; max-width: 260px; }
+.sd-pad-canvas { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 10px; cursor: crosshair; touch-action: none; }
+.sd-pad-line { position: absolute; left: 16px; right: 16px; bottom: 30px; display: flex; align-items: center; height: 0; border-bottom: 1px solid #c9ccd3; color: #9aa0ab; pointer-events: none; }
+.sd-pad-line > svg { margin: 0 0 14px -2px; }
+.sd-pad-hint { position: absolute; inset: 0 0 34px; display: grid; place-items: center; color: #a3a8b2; font: italic 14px var(--font); pointer-events: none; }
+.sd-pad-how { margin: 0; }
+.sd-pad-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.sd-pad-inks { display: inline-flex; gap: 4px; }
+.sd-pad-inks button { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; }
+.sd-pad-inks button i { width: 14px; height: 14px; border-radius: 50%; box-shadow: 0 0 0 1px rgb(0 0 0 / .12); }
+.sd-pad-inks button.on { box-shadow: 0 0 0 2px var(--accent); }
+
+/* Thumbnails beside the pages while there's room; Signature Assist under them on a phone. */
+@media (max-width: 700px) {
+  .sd-pdf-thumbs { position: absolute; z-index: 7; left: 0; top: 0; bottom: 0; box-shadow: 4px 0 18px rgb(0 0 0 / .18); }
+  .sd-pdf.signing .sd-pdf-body { flex-direction: column; }
+  .sd-pdf.signing .sd-pdf-main { flex: 1 1 46%; min-height: 160px; }
+  .sd-sign { width: auto; flex: 1 1 54%; border-left: 0; border-top: 1px solid var(--line); box-shadow: 0 -6px 20px rgb(0 0 0 / .08); }
+  .sd-step-body { padding: 0 12px 12px; }
+}
+.app.narrow .sd-pdf-bar { padding: 4px 6px; gap: 2px; overflow-x: auto; }
+.app.narrow .sd-pdf-bar .sd-group + .sd-group, .app.narrow .sd-pdf-bar > .sd-group { padding-left: 2px; border-left: 0; }
+.app.narrow .sd-pdf-page { width: 46px; height: 40px; font-size: 16px; }
+.app.narrow .sd-pdf-of { display: none; }
+.app.narrow .sd-pdf-find { height: 40px; }
+.app.narrow .sd-pdf-find input { font-size: 16px; }
+.app.narrow .sd-pdf-find .sd-tool { width: 40px; height: 40px; }
+.app.narrow .sd-pdf-thumbs button { min-height: 40px; }
+.app.narrow .sd-sign .btn.small, .app.narrow .sd-sign .ghost-btn, .app.narrow .sd-sigcard .btn.small, .app.narrow .sd-sigcard .ghost-btn { min-height: 40px; min-width: 40px; padding: 0 12px; justify-content: center; }
+.app.narrow .sd-sign .link-btn { min-height: 40px; }
+.app.narrow .sd-place-name small, .app.narrow .sd-step-title small { white-space: normal; }
+.app.narrow .sd-sign .win-btn { width: 40px; height: 40px; }
+.app.narrow .sd-step-head { min-height: 44px; }
+.app.narrow .sd-place-open { min-height: 40px; }
+.app.narrow .sd-model select, .app.narrow .sd-date-row input, .app.narrow .sd-date-row select, .app.narrow .sd-pdf-pw-row input { height: 40px; font-size: 16px; }
+.app.narrow .sd-pad-inks button { width: 40px; height: 40px; }
+.app.narrow .sd-mark-size { right: -12px; bottom: -12px; width: 24px; height: 24px; }
+.app.narrow .sd-mark-acts .btn.small { height: 40px; min-width: 40px; }

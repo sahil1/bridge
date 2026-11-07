@@ -11,6 +11,7 @@ import { loadLang } from './i18n/index.js'
 import { registerServiceWorker, reportPresence } from './pwa.js'
 import { countActiveTime } from './activeTime.js'
 import { answerBusy } from './busy.js'
+import { resume as resumeSending } from './sendbox.js'
 
 apply()
 // ?window=<pane>: one agent in a window of its own. ?float=1: the desktop app's floating card.
@@ -22,6 +23,8 @@ if (float) document.documentElement.classList.add('is-float')
 if (hud) document.documentElement.classList.add('is-hud')
 registerServiceWorker()
 if (!float && !hud) { reportPresence(); countActiveTime() }
+// Messages the last page left on their way to an agent go now (sendbox.js).
+if (!float && !hud) resumeSending()
 // Every window of the desktop app says what an update would lose in it (busy.js).
 answerBusy()
 

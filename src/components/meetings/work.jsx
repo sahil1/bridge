@@ -139,7 +139,7 @@ export function ActionItems({ id, heading, fallback, onMsg }) {
   const [ticks, setTicks] = useState({}) // ticked or unticked here, until the server says so too
   const items = data?.items
   const act = async (key, fn) => { setBusy(key); try { await fn() } catch (e) { onMsg?.({ error: true, text: e.message }) } finally { setBusy(null); refresh() } }
-  const toChief = (x) => act(x.key, async () => { const r = await api(`/meetings/${encodeURIComponent(id)}/chief`, { method: 'POST', body: { items: [x.text] } }); refetch(`/meetings/${encodeURIComponent(id)}`); onMsg?.({ text: r.sent ? (r.queued ? t("Sent to Chief of Staff (after what it's doing now).") : t('Sent to Chief of Staff.')) : t("On Chief of Staff's task list. Start Chief of Staff and it picks it up.") }) })
+  const toChief = (x) => act(x.key, async () => { const r = await api(`/meetings/${encodeURIComponent(id)}/chief`, { method: 'POST', body: { items: [x.text] } }); refetch(`/meetings/${encodeURIComponent(id)}`); onMsg?.({ text: r.sent ? (r.queued ? t("Queued for Chief of Staff, after what it's doing now.") : t('Sent to Chief of Staff.')) : t("On Chief of Staff's task list. Start Chief of Staff and it picks it up.") }) })
   const tick = async (x, on) => {
     setTicks((m) => ({ ...m, [x.key]: on }))
     try { await api(`/meetings/${encodeURIComponent(id)}/work/${x.key}/done`, { method: 'POST', body: { done: on } }); await refresh() } catch (e) { onMsg?.({ error: true, text: e.message }) }

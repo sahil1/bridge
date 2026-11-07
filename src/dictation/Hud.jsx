@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import Icon, { StatusDot } from '../components/Icon.jsx'
 import { VoiceSetup, MicFix } from '../components/Composer.jsx'
+import { agentName } from '../components/Rail.jsx'
 import { api, settingsChanged } from '../api.js'
 import { useRecheck } from '../permissions.js'
 import { store } from '../components/layout.jsx'
@@ -9,6 +10,7 @@ import { useDictation, configure, press, release, finish, cancel, dismiss, retry
 import { Morph, Listening, Working, Done } from './Pill.jsx'
 import { untidiedWhy, TidyNeeds } from './Tidy.jsx'
 import { t } from '../i18n/index.js'
+import { sentTo } from '../sendbox.js'
 import './dictation.css'
 
 // The desktop app's dictation window (?dictate=1, desktop/dictation.js): it shows over whatever app
@@ -35,7 +37,6 @@ import './dictation.css'
 // pill (hudPointer).
 const app = () => window.bridgeApp || {}
 const WIDTH = 420
-const nameOf = (a) => (a.chief ? t('Chief of Staff') : a.title || a.tab || a.workspace || a.paneId)
 const pasteKey = () => (keysPlatform() === 'darwin' ? '⌘V' : 'Ctrl+V')
 // Why it wasn't pasted (desktop/dictation.js's answers).
 const WHY = {
@@ -218,19 +219,20 @@ export default function Hud() {
     setAllowed(true)
     loadStatus()
   }, 2500, why === 'accessibility')
-  const agentOf = (a) => ({ id: a.paneId, name: nameOf(a), ...(a.chief ? { chief: true } : {}) })
+  const agentOf = (a) => ({ id: a.paneId, name: agentName(a), ...(a.chief ? { chief: true } : {}) })
   const send = async () => {
     if (!target || !text) return
     setErr(null)
     const g = press0.current
     try {
       const pid = encodeURIComponent(target.paneId)
-      // As the message box does: a working agent that can't take a message now gets it when it's free.
+      // As the message box does: your computer types it in, or holds it while the agent is busy, and
+      // its answer says which.
       const r = s.result
-      await api(`/agents/${pid}/${target.status === 'working' && !target.caps?.typeAhead ? 'queue' : 'prompt'}`, { method: 'POST', body: { text } })
-      amend(r, { how: 'sent', agent: agentOf(target) })
+      const got = await api(`/agents/${pid}/prompt`, { method: 'POST', body: { text } })
+      amend(r, { how: got?.queued ? 'queued' : 'sent', agent: agentOf(target) })
       if (g !== press0.current) return
-      setDone(t('Sent to {name}', { name: nameOf(target) }))
+      setDone(sentTo(got, agentName(target)))
       later(1200)
     } catch (e) { if (g === press0.current) setErr(e.message) }
   }
@@ -273,7 +275,7 @@ export default function Hud() {
     <span className="dp-to hud-into" title={t('Pasted where you\'re typing')}>{into ? t('Into {app}', { app: into }) : t('Where you\'re typing')}</span>
   ) : (
     <button type="button" className="dp-to hud-to-btn" data-pane={target?.paneId || ''} onClick={() => setPicking((v) => !v)} aria-haspopup="menu" aria-expanded={picking}>
-      <span>{target ? t('To {name}', { name: nameOf(target) }) : t('Pick an agent')}</span> <Icon name="down" size={11} />
+      <span>{target ? t('To {name}', { name: agentName(target) }) : t('Pick an agent')}</span> <Icon name="down" size={11} />
     </button>
   )
   // What shows: the pill while it listens, transcribes, pastes, or says what became of the words;
@@ -347,7 +349,7 @@ export default function Hud() {
         <div className="hud-menu" role="menu" ref={menu}>
           {agents.map((a) => (
             <button key={a.paneId} type="button" role="menuitem" data-pane={a.paneId} className={a.paneId === to ? 'on' : ''} onClick={() => { setTo(a.paneId); setPicking(false) }}>
-              {a.chief ? <Icon name="helm" size={12} /> : <StatusDot status={a.status} size={7} />} <span>{nameOf(a)}</span>
+              {a.chief ? <Icon name="helm" size={12} /> : <StatusDot status={a.status} size={7} />} <span>{agentName(a)}</span>
             </button>
           ))}
           {!agents.length && <p className="muted small">{t('No agents are running.')}</p>}

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import Icon from '../Icon.jsx'
 import UsageCounts from './UsageCounts.jsx'
 import CrashReports from './CrashReports.jsx'
-import { api } from '../../api.js'
+import { api, usePoll } from '../../api.js'
 import { useSettings } from './General.jsx'
 import { startTour } from '../Tour.jsx'
 import { withApp, installUpdate } from '../UpdateChip.jsx'
@@ -146,14 +146,21 @@ function Trials() {
   const [mine, setMine] = useState({}) // as you set it, at once; saved behind it
   const on = (id) => mine[id] ?? s?.effective?.trials?.[id] === true
   const set = (id, v) => { setMine((m) => ({ ...m, [id]: v })); save({ trials: { [id]: v } }) }
+  // The ones that turned themselves on (Meeting Insights, once there were meetings to add up), when.
+  const { data: conf } = usePoll('/config', 10 * 60 * 1000)
+  const auto = conf?.trialsAuto || {}
   return (
     <section className="st-sec">
       <h4>{t('Beta Features')}</h4>
       <p className="muted small">{t("New parts of Bridge AI, in beta. Each stays hidden until you turn it on here, and turning it off hides it again; what you made with it stays where it is.")}</p>
-      {TRIALS.map((x) => (
-        <label key={x.id} className="st-check"><input type="checkbox" checked={on(x.id)} disabled={!s} onChange={(e) => set(x.id, e.target.checked)} />
-          <span><b>{t(x.label)}</b> <span className="muted small">{t(x.hint)}</span></span></label>
-      ))}
+      {TRIALS.map((x) => {
+        // One that's part of another works only with that one on, and says so.
+        const needs = x.needs && !on(x.needs) ? TRIALS.find((y) => y.id === x.needs) : null
+        return (
+          <label key={x.id} className="st-check"><input type="checkbox" checked={on(x.id) && !needs} disabled={!s || !!needs} onChange={(e) => set(x.id, e.target.checked)} />
+            <span><b>{t(x.label)}</b> <span className="muted small">{t(x.hint)}</span>{needs && <span className="muted small"> {t('It needs {name} on.', { name: t(needs.label) })}</span>}{auto[x.id] && on(x.id) && <span className="muted small ab-auto-on"> {t('Turned on by itself on {date}, once there were meetings to add up.', { date: new Date(auto[x.id]).toLocaleDateString(locale(), { month: 'long', day: 'numeric' }) })}</span>}</span></label>
+        )
+      })}
     </section>
   )
 }

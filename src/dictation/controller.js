@@ -109,9 +109,10 @@ function typeInto(el, text, sel) {
   if (setter) setter.call(el, v.slice(0, a) + ins + v.slice(b)); else el.value = v.slice(0, a) + ins + v.slice(b)
   el.dispatchEvent(new Event('input', { bubbles: true }))
 }
-function deliver(target, text) {
+// at: the words' time, by which they're kept (amend), for Ask out loud to say what came of them.
+function deliver(target, text, at) {
   if (!target || target.kind === 'hud') return true
-  if (target.kind === 'ask') { const f = asks.get(target.id); if (f) f(text); return !!f }
+  if (target.kind === 'ask') { const f = asks.get(target.id); if (f) f(text, { at }); return !!f }
   if (target.kind === 'composer' && boxes.get(target.id)) { boxes.get(target.id).insert(text, target.caret); return true }
   // Typed into the terminal, without Enter (Terminal.jsx and LiveShell.jsx listen for this).
   if (target.kind === 'terminal' && target.el?.isConnected) { target.el.dispatchEvent(new CustomEvent('bridge-type', { detail: text })); return true }
@@ -254,7 +255,7 @@ async function transcribe(id) {
     lastAudio = null
     const at = Date.now()
     set({ phase: 'idle', mode: null, result: { text: out, at, ...tidied } })
-    const put = deliver(target, out)
+    const put = deliver(target, out, at)
     keep(at, target, put, { text: out, raw: data.text, ...(said ? { said, tidiedBy: tidy.by } : {}), ms: Math.round(((blob.size - 44) / 2 / RATE) * 1000) }, blob)
     if (!put) set({ note: t('Nowhere to put it, so here it is: {text}', { text: out }) })
     else if (target?.kind !== 'hud') offerAnyApp()

@@ -4,6 +4,7 @@ import { usePersisted, useWidth } from './layout.jsx'
 import { Updated } from './Trackers.jsx'
 import { usePoll } from '../api.js'
 import Usage, { fmtTokens } from './Usage.jsx'
+import { acctColor, NOT_KNOWN } from './AccountMenu.jsx'
 import UsageEverywhere from './UsageEverywhere.jsx'
 import { useTrial } from '../trials.js'
 import { t, tx, locale, midSentence } from '../i18n/index.js'
@@ -112,7 +113,7 @@ function Heatmap({ days, metric, tokensFrom }) {
         {[0, 2, 4].map((i) => <text key={i} x={0} y={TOP + i * (cell + GAP) + cell - 1} className="axis-label">{t(WEEKDAYS[i])}</text>)}
         {cols.map((col, w) => col.map((c, i) => !c.future && (
           <rect key={c.key} x={LEFT + w * (cell + GAP)} y={TOP + i * (cell + GAP)} width={cell} height={cell} rx="2.5"
-            className={`hm l${lvl(c.v)} ${hover?.key === c.key ? 'hl' : ''}`} onPointerEnter={() => setHover({ key: c.key, x: LEFT + w * (cell + GAP), y: TOP + i * (cell + GAP) })} />
+            className={`us-hm l${lvl(c.v)} ${hover?.key === c.key ? 'hl' : ''}`} onPointerEnter={() => setHover({ key: c.key, x: LEFT + w * (cell + GAP), y: TOP + i * (cell + GAP) })} />
         )))}
       </svg>
       {hover && (
@@ -377,19 +378,23 @@ export default function UsageStats() {
                 <ul className="us-list">
                   {data.accounts.map((a) => {
                     const max = Math.max(...data.accounts.map((x) => x.tokens), 1)
+                    // The agent's name only when accounts of more than one agent are listed.
+                    const bothAgents = provider === 'all' && new Set(data.accounts.map((x) => x.kind)).size > 1
+                    const name = a.id === '?' ? t('Not known') : a.account
+                    const color = a.id === '?' ? NOT_KNOWN : a.color ? acctColor(a) : null
                     return (
-                      <li key={`${a.kind}:${a.account}`}>
-                        <div className="us-row static" title={a.sessions === 1 ? t('{agent}, {account} · {n} conversation · {hours} h', { agent: a.agent, account: a.account, n: a.sessions, hours: a.hours }) : t('{agent}, {account} · {n} conversations · {hours} h', { agent: a.agent, account: a.account, n: a.sessions, hours: a.hours })}>
-                          <span className="us-row-name"><span className="us-ell">{provider === 'all' ? `${a.agent} · ` : ''}{a.account}</span></span>
-                          <span className="us-row-bar"><span style={{ width: `${(a.tokens / max) * 100}%` }} /></span>
+                      <li key={`${a.kind}:${a.id || a.account}`} data-acct={a.id}>
+                        <div className="us-row static" title={a.sessions === 1 ? t('{agent}, {account} · {n} conversation · {hours} h', { agent: a.agent, account: name, n: a.sessions, hours: a.hours }) : t('{agent}, {account} · {n} conversations · {hours} h', { agent: a.agent, account: name, n: a.sessions, hours: a.hours })}>
+                          <span className="us-row-name">{color && <i className="us-sw" style={{ background: color }} />}<span className="us-ell">{bothAgents ? `${a.agent} · ` : ''}{name}</span></span>
+                          <span className="us-row-bar"><span style={{ width: `${(a.tokens / max) * 100}%`, ...(color ? { background: color } : {}) }} /></span>
                           <span className="us-row-num num">{fmtTokens(a.tokens)}</span>
-                          <span className="us-row-num num muted">{a.sessions ? `${a.hours} h` : t('unused')}</span>
+                          <span className="us-row-num num muted">{a.sessions ? `${a.hours} h` : a.tokens ? '—' : t('unused')}</span>
                         </div>
                       </li>
                     )
                   })}
                 </ul>
-                <p className="muted small us-note">{t('Every account is in the totals above.')}</p>
+                <p className="muted small us-note">{t('Every account is in the totals above. Tokens are as in Usage\'s daily bars by account; Not known is what nothing ties to one account.')}</p>
               </section>
             )}
 

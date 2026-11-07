@@ -9,7 +9,10 @@ import { lineDiff, textFor, comparable } from './diff.js'
 import { fontCss, lookOfPack } from './look.js'
 import { withKeys } from './keys.js'
 import { useBusy } from '../../busy.js'
+import { useTrial } from '../../trials.js'
+import { YourFiles } from './HomeFiles.jsx'
 import './studio.css'
+import './home.css'
 
 // Studio: documents, sheets, decks, PDFs and pages, like Meetings and Whiteboards a place of its own.
 // Any of them from Files or an agent's folder (on this computer, or another of yours through its
@@ -21,21 +24,23 @@ const EDITORS = {
   sheet: lazy(() => import('./editors/SheetEditor.jsx')),
   deck: lazy(() => import('./editors/DeckEditor.jsx')),
   page: lazy(() => import('./editors/PageEditor.jsx')),
-  pdf: lazy(() => import('./editors/PageEditor.jsx').then((m) => ({ default: m.PdfView }))),
+  pdf: lazy(() => import('./pdf/PdfView.jsx')),
 }
+// Signature Assist's signature and initials, on the home page while it's on (a beta feature).
+const SignatureHome = lazy(() => import('./pdf/Signatures.jsx'))
 const ICON = { doc: 'doc', sheet: 'grid', deck: 'screen', pdf: 'file', page: 'code' }
 const KIND_LABEL = { doc: tx('Document'), sheet: tx('Sheet'), deck: tx('Deck'), pdf: tx('PDF'), page: tx('Page') }
 // What a file is, in words, by its extension ("Word document"); a Markdown file that's a deck says so.
 const KIND_OF = { '.docx': tx('Word document'), '.md': tx('Markdown'), '.markdown': tx('Markdown'), '.txt': tx('Plain text'), '.xlsx': tx('Excel workbook'), '.xlsm': tx('Excel workbook'), '.csv': tx('CSV'), '.tsv': tx('TSV'), '.pptx': tx('PowerPoint'), '.pdf': tx('PDF'), '.html': tx('HTML page'), '.htm': tx('HTML page') }
 const kindName = (kind, ext) => (kind === 'deck' && ext !== '.pptx' ? t('Markdown deck') : t(KIND_OF[ext] || KIND_LABEL[kind] || 'Studio'))
-const READ_ONLY = (kind, ext) => kind === 'pdf' || ext === '.pptx'
+const READ_ONLY = (kind) => kind === 'pdf'
 export const openStudio = (f) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: f }))
 const when = (iso) => new Date(iso).toLocaleString(locale(), { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 const sizeOf = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`)
 
 // ---------- Home ----------
-// New (a document, sheet, deck or page in a folder you pick), what you opened lately, and your
-// design packs.
+// New (a document, sheet, deck or page in a folder you pick), your files from wherever they are
+// (HomeFiles.jsx), and your design packs.
 const NEW = [
   { kind: 'doc', ext: '.docx', label: tx('Document'), hint: tx('A Word file') },
   { kind: 'doc', ext: '.md', label: tx('Markdown'), hint: tx('A Markdown file') },
@@ -100,6 +105,7 @@ export function StudioHome({ onOpen }) {
   const { data, refresh } = usePoll('/studio/recent', 15_000)
   const folders = useFolders()
   const packs = useDesignPacks()
+  const signing = useTrial('signature-assist')
   const [making, setMaking] = useState(null) // the New kind being named
   const [name, setName] = useState('')
   const [where, setWhere] = useState('')
@@ -118,18 +124,18 @@ export function StudioHome({ onOpen }) {
       onOpen({ root: where, path: r.path })
     } catch (x) { setErr(x.message) } finally { setBusy(false) }
   }
-  const files = data?.files || []
   return (
     <div className="sd-home">
       <div className="sd-home-head">
         <h2><Icon name="layers" size={18} /> {t('Studio')}</h2>
-        <p className="muted small">{t('Documents, sheets, decks, PDFs and pages from any of your folders and computers, edited here or by your agents, with every version kept. Open one from Files, or start one.')}</p>
+        <p className="muted small">{t('Your documents, sheets, decks, PDFs and pages, wherever they are, edited here or by your agents, with every version kept.')}</p>
       </div>
       <section className="sd-sec">
         <h3>{t('New')}</h3>
         <div className="sd-new">
           {NEW.map((n) => (
             <button key={n.label} type="button" className={`sd-new-btn${making === n ? ' on' : ''}`} onClick={() => { setMaking(n); setErr(null) }} disabled={!folders.length} aria-pressed={making === n}>
+              <span className={`sd-new-thumb ${n.deck ? 'deck' : n.ext === '.md' ? 'md' : n.kind}`} aria-hidden="true"><i /><i /><i /><i /></span>
               <span className="sd-new-ic"><Icon name={ICON[n.kind]} size={16} /></span><b>{t(n.label)}</b><small className="muted">{t(n.hint)}</small>
             </button>
           ))}
@@ -153,28 +159,12 @@ export function StudioHome({ onOpen }) {
           </form>
         )}
       </section>
-      <section className="sd-sec">
-        <h3>{t('Recent')}</h3>
-        {!data && <p className="muted small">{t('Opening…')}</p>}
-        {data && !files.length && <p className="muted small sd-none">{t('Nothing yet. A file you open here (from Files, with Open in Studio, or one you start above) shows here, to come back to.')}</p>}
-        <ul className="sd-recent">
-          {files.map((f) => {
-            const at = whereOf(folders, f.root, f.path)
-            const ext = extOf(f.name)
-            return (
-              <li key={`${f.root}\n${f.path}`}>
-                <button type="button" className="sd-recent-open" onClick={() => onOpen({ root: f.root, path: f.path })} title={at ? `${at.label} · ${at.full}` : f.path}>
-                  <span className={`sd-recent-ic ${f.kind || ''}`}><Icon name={ICON[f.kind] || 'file'} size={15} /></span>
-                  <span className="sd-recent-name"><b>{f.name}</b><small className="muted">{kindName(f.kind, ext)}{at ? ` · ${at.path}` : f.where ? ` · ${f.where}` : ''}</small></span>
-                  <small className="muted sd-recent-when">{when(f.at)}</small>
-                </button>
-                <button type="button" className="ghost-btn sd-recent-x" aria-label={t('Take {name} off the list', { name: f.name })} title={t('Take it off the list (the file stays)')} onClick={() => api(`/studio/recent?root=${encodeURIComponent(f.root)}&path=${encodeURIComponent(f.path)}`, { method: 'DELETE' }).then(refresh)}><Icon name="x" size={12} /></button>
-              </li>
-            )
-          })}
-        </ul>
-      </section>
+      <YourFiles recent={data} refreshRecent={refresh} onOpen={onOpen} describe={(f) => {
+        const at = whereOf(folders, f.root, f.path)
+        return { kind: kindName(f.kind, extOf(f.name)), folder: f.dir || at?.path || f.where || null, full: at ? `${at.label} · ${at.full}` : f.dir || null }
+      }} />
       <PacksSection packs={packs} />
+      {signing && <Suspense fallback={null}><SignatureHome /></Suspense>}
     </div>
   )
 }
@@ -183,19 +173,27 @@ export function StudioHome({ onOpen }) {
 // Saved with ⌘S or Save, only over the version you loaded; a change from an agent or another app
 // while it's open is shown at once when you've changed nothing, and offered when you have.
 const WHO = { you: tx('You'), agent: tx('An agent'), outside: tx('Changed outside Studio'), restored: tx('Put back'), opened: tx('When it was first opened here') }
-const RISKY = { '.docx': tx('Saving here keeps its text, headings, lists, tables, links, quotes, pictures, fonts and colours. Word\'s own layout (headers, footers, comments, tracked changes, page setup) isn\'t kept; the file as it was stays in its versions, and Ask an agent changes it in place.'), '.xlsx': tx('Saving here keeps its values, formulas, formats, merged cells and every sheet. Charts, pivot tables and comments aren\'t kept; the file as it was stays in its versions, and Ask an agent changes it in place.') }
-// What saving keeps, in each kind of file: said under the file (its kind, in the status line), and
-// before the first save of a Word or Excel file. The editors offer only what's kept.
+// Nothing in a Word or an Excel file is lost by saving it here, so neither is warned about before
+// its first save; an editor still says what one change can't keep (warn.text).
+const RISKY = {}
+// A PowerPoint is written again from its slides in Studio's layouts (editors/DeckEditor.jsx).
+RISKY['.pptx'] = tx('Saving here writes the PowerPoint again from its slides as Studio shows them: their titles, text, lists, pictures, tables, notes and theme, in Studio\'s layouts. Its own shapes, charts, animations and exact positions aren\'t kept; the file as it was stays in its versions, and Ask an agent changes it in place.')
+// An Excel file is written back into itself: what changed here, and the rest as it was.
+const SHEET_KEEPS = tx('Saved into the Excel file itself: what you change here is written in, and everything else in it (charts, pictures, pivot tables, comments, macros) stays as it was. Anything a change can\'t keep is said before it\'s saved.')
+// What saving keeps, in each kind of file: said under the file (its kind, in the status line). The
+// editors offer only what's kept.
 const KEEPS = {
-  '.docx': RISKY['.docx'], '.xlsx': RISKY['.xlsx'], '.xlsm': RISKY['.xlsx'],
+  '.docx': tx('Saving here writes only what you changed. Everything else in the file (its styles, headers and footers, comments, tracked changes, fields and page setup) stays exactly as it was, and the file as it was stays in its versions.'), '.xlsx': SHEET_KEEPS, '.xlsm': SHEET_KEEPS,
   '.md': tx('Saved as Markdown, as written: headings, bold, italic, strikethrough, code, lists, quotes, links, tables and pictures. Markdown has no underline or colours, so they aren\'t offered.'),
   '.txt': tx('Saved as plain text, as it is.'),
-  '.csv': tx('Saved as a {kind} file: the first sheet\'s values. Formulas, formats and other sheets aren\'t part of a {kind} file, so they aren\'t kept.'),
+  '.csv': tx('Saved as a {kind} file in its own separator, encoding and line endings: the first sheet\'s values, each line you didn\'t change written as it was. Formulas (saved as their results), formats and other sheets aren\'t part of a {kind} file.'),
   deck: tx('Saved as a Markdown deck, as written: slides between lines of ---. PowerPoint and PDF make a copy beside it.'),
-  '.pptx': tx('Shown here, not edited: Ask an agent changes the PowerPoint itself, and Edit as a Markdown deck makes a copy to edit here.'),
+  '.pptx': tx('Saved as a PowerPoint, written again from its slides in Studio\'s layouts: their titles, text, lists, pictures, tables, notes and theme. Export makes a Markdown deck of it beside it.'),
   '.pdf': tx('Shown here, not edited: Ask an agent to change it, or the file it was made from.'),
   '.html': tx('Saved as it\'s written: one HTML file that works on its own.'),
 }
+// A PowerPoint whose saves go over it: one you chose to replace, or a copy Studio made. Asked once.
+const replaces = (f, yes = false) => { const k = `cc-studio-pptx:${f.root}\n${f.path}`; try { if (yes) localStorage.setItem(k, '1'); return !!localStorage.getItem(k) } catch { return yes } }
 const keepsOf = (kind, ext) => {
   if (kind === 'deck' && ext !== '.pptx') return t(KEEPS.deck)
   if (ext === '.csv' || ext === '.tsv') return t(KEEPS['.csv'], { kind: ext.slice(1).toUpperCase() })
@@ -213,7 +211,7 @@ export function StudioPage({ root, path: rel, onBack, onOpen }) {
   const [conflict, setConflict] = useState(null) // { by, name } changed on disk while yours is unsaved
   const [panel, setPanel] = useState(null) // 'versions'
   const [ask, setAsk] = useState(null) // { selection }
-  const [warn, setWarn] = useState(null) // the first save of a Word or Excel file, to say what's kept
+  const [warn, setWarn] = useState(null) // the first save of a Word file (to say what's kept), or { text } what a save can't keep
   const [gen, setGen] = useState(0) // a new load (not a save): the editor starts again from it
   const [stats, setStats] = useState(null) // what the editor counts (words, slides), for the status line
   const handle = useRef(null)
@@ -261,10 +259,17 @@ export function StudioPage({ root, path: rel, onBack, onOpen }) {
   }, [f, load])
   const save = useCallback(async ({ force = false, ok = false } = {}) => {
     if (!handle.current || !meta || READ_ONLY(meta.kind, meta.ext)) return
-    if (RISKY[meta.ext] && !ok) { try { if (!localStorage.getItem(`cc-studio-said${meta.ext}`)) { setWarn(meta.ext); return } } catch { /* say it again next time */ } }
+    // A PowerPoint is redrawn in Studio's layouts: asked once per file, its copy the default.
+    if (meta.ext === '.pptx' && !ok && !replaces(f)) { setWarn(meta.ext); return }
+    if (RISKY[meta.ext] && !ok && meta.ext !== '.pptx') { try { if (!localStorage.getItem(`cc-studio-said${meta.ext}`)) { setWarn(meta.ext); return } } catch { /* say it again next time */ } }
     setSaving(true); setNote(null)
     try {
-      const bytes = await handle.current.save()
+      // An editor that can't keep everything in the file says what, before it's saved (a sheet).
+      let bytes = await handle.current.save()
+      if (bytes && typeof bytes === 'object' && Array.isArray(bytes.notKept)) {
+        if (bytes.notKept.length && !ok) { setWarn({ text: t('Saving here can\'t keep {what}. Save anyway? The file as it is now stays in its versions.', { what: bytes.notKept.join('; ') }) }); return }
+        bytes = bytes.bytes
+      }
       const r = await saveFile(f, bytes, { mtime: meta.mtime, force })
       setMeta((m) => ({ ...m, mtime: r.mtime, size: r.size, versions: r.versions }))
       setDirty(false); setConflict(null)
@@ -274,6 +279,19 @@ export function StudioPage({ root, path: rel, onBack, onOpen }) {
       else setNote({ text: t("Couldn't save it: {error}", { error: e.message }), error: true })
     } finally { setSaving(false) }
   }, [f, meta])
+  // Saved as a copy beside it ("<name> (Studio).pptx", never over another), which opens and is
+  // saved to from then on; this one goes back to the file as it is.
+  const saveCopy = async () => {
+    setWarn(null); setSaving(true); setNote(null)
+    try {
+      const bytes = await handle.current.save()
+      const r = await api('/studio/new', { method: 'POST', body: { root, dir: rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : '', name: `${(meta?.name || rel.split('/').pop()).replace(/\.pptx$/i, '')} (Studio).pptx`, data: base64(bytes) } })
+      replaces({ root, path: r.path }, true)
+      await load()
+      setNote({ text: t('Saved as {name}, a copy beside the original, which is as it was.', { name: r.name }) })
+      onOpen?.({ root, path: r.path })
+    } catch (e) { setNote({ text: t("Couldn't save it: {error}", { error: e.message }), error: true }) } finally { setSaving(false) }
+  }
   useEffect(() => {
     const key = (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') { e.preventDefault(); save() } }
     window.addEventListener('keydown', key)
@@ -314,7 +332,7 @@ export function StudioPage({ root, path: rel, onBack, onOpen }) {
           {at && <span className="path-chip sd-sub-where" title={`${at.label} · ${at.full}`}><Icon name="folder" size={10} /> <span>{at.path}</span></span>}
         </>}>
         {kind && !readOnly && <button type="button" className={`btn small sd-head-btn${dirty ? ' primary' : ''}`} onClick={() => save()} disabled={saving || !dirty} title={withKeys(dirty ? t('Save') : t('Saved: nothing new to save'), 'mod', 's')} aria-label={saving ? t('Saving…') : dirty ? t('Save') : t('Saved')}><Icon name="check" size={12} /> <span className="sd-btn-label">{saving ? t('Saving…') : dirty ? t('Save') : t('Saved')}</span></button>}
-        <button type="button" className="btn small sd-head-btn" onClick={() => setAsk({ selection: handle.current?.selection?.() || null })} disabled={!meta} title={t('Have one of your agents change it: pick the part first, or describe it')} aria-label={t('Ask an agent')}><Icon name="sparkle" size={12} /> <span className="sd-btn-label">{t('Ask an agent')}</span></button>
+        <button type="button" className="btn small sd-head-btn" onClick={() => (handle.current?.ask ? handle.current.ask() : setAsk({ selection: handle.current?.selection?.() || null }))} disabled={!meta} title={t('Have one of your agents change it: pick the part first, or describe it')} aria-label={t('Ask an agent')}><Icon name="sparkle" size={12} /> <span className="sd-btn-label">{t('Ask an agent')}</span></button>
         <button type="button" className={`win-btn${panel === 'versions' ? ' on' : ''}`} onClick={() => setPanel(panel === 'versions' ? null : 'versions')} aria-pressed={panel === 'versions'} title={t('Versions: yours, your agents\' and changes from outside')} aria-label={t('Versions')} disabled={!meta}><Icon name="clock" size={14} /></button>
         <a className="win-btn" href={rawUrl(f)} download={name} title={t('Download {name}', { name })} aria-label={t('Download')}><Icon name="download" size={14} /></a>
       </PaneHeader>
@@ -333,10 +351,18 @@ export function StudioPage({ root, path: rel, onBack, onOpen }) {
           <button type="button" className="btn small" onClick={() => save({ force: true, ok: true })}>{t('Save mine over it')}</button>
         </div>
       )}
-      {warn && (
+      {warn === '.pptx' && (
         <div className="sd-bar sd-conflict" role="alertdialog">
           <span>{t(RISKY[warn])}</span>
-          <button type="button" className="btn small primary" onClick={() => { try { localStorage.setItem(`cc-studio-said${warn}`, '1') } catch { /* asks again next time */ } setWarn(null); save({ ok: true }) }}>{t('Save')}</button>
+          <button type="button" className="btn small primary" onClick={saveCopy} title={t('A copy beside it, which opens here; the original stays as it is')}>{t('Save as a copy')}</button>
+          <button type="button" className="btn small" onClick={() => { replaces(f, true); setWarn(null); save({ ok: true }) }}>{t('Replace the original')}</button>
+          <button type="button" className="ghost-btn" onClick={() => setWarn(null)}>{t('Not now')}</button>
+        </div>
+      )}
+      {warn && warn !== '.pptx' && (
+        <div className="sd-bar sd-conflict" role="alertdialog">
+          <span>{typeof warn === 'string' ? t(RISKY[warn]) : warn.text}</span>
+          <button type="button" className="btn small primary" onClick={() => { try { if (typeof warn === 'string') localStorage.setItem(`cc-studio-said${warn}`, '1') } catch { /* asks again next time */ } setWarn(null); save({ ok: true }) }}>{t('Save')}</button>
           <button type="button" className="ghost-btn" onClick={() => setWarn(null)}>{t('Not now')}</button>
         </div>
       )}
@@ -351,14 +377,14 @@ export function StudioPage({ root, path: rel, onBack, onOpen }) {
           how many versions are kept, and whether it's saved. */}
       {meta && (
         <footer className="sd-status">
-          {stats && <span className="sd-stat" title={stats.title || undefined}>{stats.text}</span>}
+          {stats && (stats.open ? <button type="button" className="sd-status-btn sd-stat" title={stats.title || undefined} onClick={stats.open}>{stats.text}</button> : <span className="sd-stat" title={stats.title || undefined}>{stats.text}</span>)}
           <button type="button" className={`sd-status-btn${note?.info ? ' on' : ''}`} onClick={() => setNote(note?.info ? null : { text: keepsOf(kind, meta.ext), info: true })} aria-pressed={!!note?.info} title={t('What saving keeps')}><Icon name="info" size={12} /> {kindName(kind, meta.ext)}</button>
           <button type="button" className="sd-status-btn vers" onClick={() => setPanel(panel === 'versions' ? null : 'versions')} title={t('Versions: yours, your agents\' and changes from outside')}><Icon name="clock" size={12} /> {versions === 1 ? t('1 version') : t('{n} versions', { n: versions })}</button>
           <span className="sd-grow" />
           <span className={`sd-state ${state.cls}`} title={meta.mtime ? t('The file last changed {when}', { when: when(meta.mtime) }) : undefined}><i aria-hidden="true" />{state.text}</span>
         </footer>
       )}
-      {ask && <AskAgent f={f} meta={meta} selection={ask.selection} onClose={() => setAsk(null)} onSent={(name) => { setAsk(null); quick.current = Date.now() + 15 * 60_000; setNote({ text: t('Sent to {name}. Studio shows the change once it saves the file.', { name }) }) }} />}
+      {ask && <AskAgent f={f} meta={meta} selection={ask.selection} onClose={() => setAsk(null)} onSent={(r) => { setAsk(null); quick.current = Date.now() + 15 * 60_000; setNote({ text: r.queued ? t('Queued for {name}. Studio shows the change once it saves the file.', { name: r.name }) : t('Sent to {name}. Studio shows the change once it saves the file.', { name: r.name }) }) }} />}
     </div>
   )
 }
@@ -440,7 +466,7 @@ function AskAgent({ f, meta, selection, onClose, onSent }) {
     setBusy(true); setErr(null)
     try {
       const r = await api('/studio/ask', { method: 'POST', body: { ...f, kind: meta?.kind, instruction: text, selection: selection?.text || null, where: selection?.where || null, ...(to !== 'new' ? { pane: to } : {}) } })
-      onSent(r.name)
+      onSent(r)
     } catch (x) { setErr(x.message) } finally { setBusy(false) }
   }
   return (

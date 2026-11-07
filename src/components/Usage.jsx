@@ -4,7 +4,7 @@ import { usePersisted, useShared, useWidth } from './layout.jsx'
 import { api, usePoll, fmtTime, settingsChanged, refetch, useFleet } from '../api.js'
 import SignInButton, { openSettings } from './SignIn.jsx'
 import { Menu } from './Rail.jsx'
-import { AllowKeychain, level, statusText, lapsed, Left, weekResets, slotsOf, sameAs, sameText, usingIt, nameOf, asList, makeDefault, removeAccount, removeTwin, signOut, DefaultTag, maskEmail } from './AccountMenu.jsx'
+import { AllowKeychain, level, statusText, lapsed, Left, weekResets, slotsOf, sameAs, sameText, usingIt, nameOf, asList, makeDefault, removeAccount, removeTwin, signOut, DefaultTag, maskEmail, acctColor, ColorPick, NOT_KNOWN } from './AccountMenu.jsx'
 import { addAccount } from './AddAccount.jsx'
 import { t, tx, locale, midSentence } from '../i18n/index.js'
 
@@ -97,11 +97,16 @@ function niceMax(v) {
   return [1, 2, 2.5, 5, 10].map((m) => m * p).find((m) => m >= v)
 }
 
-function DailyChart({ daily }) {
+// parts (optional): the accounts each day is split into, stacked in their colors with Not known
+// in grey on top ({ id, name, color }, '?' for Not known), each day's by[id] holding
+// [cost, tokens, cache]. Without them, one bar a day.
+const PART = { cost: 0, tokens: 1, cache: 2 }
+function DailyChart({ daily, parts }) {
   const [metric, setMetric] = usePersisted('cc-usage-metric', 'cost')
   const [hover, setHover] = useState(null)
   const [boxRef, boxW] = useWidth()
   const M = METRICS[metric]
+  const part = (d, id) => d.by?.[id]?.[PART[metric]] || 0
   const vals = daily.map(M.get)
   const max = niceMax(Math.max(...vals))
   // Draw at the real pixel width so text stays 9px however wide the panel is.
@@ -134,11 +139,20 @@ function DailyChart({ daily }) {
             const v = M.get(d)
             const top = y(v)
             const x = L + i * bw
+            const cls = `bar ${i === daily.length - 1 ? 'today' : ''} ${hover === i ? 'hl' : ''}`
+            // Stacked: each account's part from the bottom, a 2px gap of the card between them.
+            let base = H - B
             return (
-              <g key={d.date} onPointerEnter={() => setHover(i)}>
+              <g key={d.date} data-date={d.date} onPointerEnter={() => setHover(i)}>
                 <rect x={x} y={T} width={bw} height={H - T - B} className="hit" />
-                {v > 0 && <rect x={x + 1} y={top} width={Math.max(1, bw - 2)} height={Math.max(1.5, H - B - top)} rx="1.5"
-                  className={`bar ${i === daily.length - 1 ? 'today' : ''} ${hover === i ? 'hl' : ''}`} />}
+                {v > 0 && !parts && <rect x={x + 1} y={top} width={Math.max(1, bw - 2)} height={Math.max(1.5, H - B - top)} rx="1.5" className={cls} />}
+                {v > 0 && parts && parts.map((p) => {
+                  const h = (part(d, p.id) / max) * (H - T - B)
+                  if (h <= 0) return null
+                  const gap = base < H - B && h > 3 ? 2 : 0
+                  base -= h
+                  return <rect key={p.id} x={x + 1} y={base} width={Math.max(1, bw - 2)} height={Math.max(1, h - gap)} className={cls} style={{ fill: p.color }} data-part={p.id} />
+                })}
               </g>
             )
           })}
@@ -153,22 +167,72 @@ function DailyChart({ daily }) {
             <div className="muted small">{new Date(`${h.date}T12:00`).toLocaleDateString(locale(), { weekday: 'short', month: 'short', day: 'numeric' })}</div>
             <div><b>{fmtCost(h.cost)}</b> · {t('{n} tokens', { n: fmtTokens(h.tokens) })}</div>
             {h.tokens > 0 && <div className="muted small">{t('{pct}% from cache', { pct: Math.round((h.cacheRead / h.tokens) * 100) })}</div>}
+            {parts && parts.filter((p) => part(h, p.id) > 0).map((p) => (
+              <div key={p.id} className="small u-tip-part"><i style={{ background: p.color }} /><span>{p.name}</span><span className="num">{M.fmt(part(h, p.id))}</span></div>
+            ))}
           </div>
         )}
       </div>
+      {parts && (
+        <ul className="u-legend" aria-label={t('Accounts')}>
+          {parts.filter((p) => p.id !== '?' || daily.some((d) => part(d, '?') > 0)).map((p) => (
+            <li key={p.id} data-part={p.id} title={p.id === '?' ? t(NOT_KNOWN_WHY) : undefined}>
+              <i style={{ background: p.color }} /><span className="u-legend-name">{p.name}</span><span className="num muted">{M.fmt(daily.reduce((s, d) => s + part(d, p.id), 0))}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+// What Not known holds, on hover.
+const NOT_KNOWN_WHY = tx("Use that can't be tied to one account: a conversation that moved between accounts before Bridge AI noted when, one started outside Bridge AI that no account's folder records, or one on an account since removed.")
+
+// Today's cost by account, under the day's figures: a bar in their colors, each one's part named.
+function CostSplit({ day, parts }) {
+  const shown = parts.map((p) => ({ ...p, v: day.by?.[p.id]?.[0] || 0 })).filter((p) => p.v > 0)
+  const sum = shown.reduce((x, p) => x + p.v, 0)
+  if (!shown.length || !(day.cost > 0)) return null
+  return (
+    <div className="cost-split" role="group" aria-label={t('Cost today by account')}>
+      <span className="cost-split-label">{t('Cost today by account')}</span>
+      <span className="cost-split-bar" aria-hidden="true">{shown.map((p) => <span key={p.id} style={{ flex: `${p.v / sum} 1 0`, background: p.color }} />)}</span>
+      <ul className="cost-split-list">
+        {shown.map((p) => <li key={p.id} data-part={p.id} title={p.id === '?' ? t(NOT_KNOWN_WHY) : undefined}><i style={{ background: p.color }} /><span>{p.name}</span><b className="num">{fmtCost(p.v)}</b></li>)}
+      </ul>
     </div>
   )
 }
 
 // ---------- panel ----------
 
-function Activity({ provider, note }) {
+// accounts (an agent with several): its accounts as Usage lists them, for their names and colors.
+// The server splits each day by account where that's known (usagesplit.js); what isn't is Not
+// known, in grey, and a line says what's counted.
+function Activity({ provider, note, accounts }) {
   const { data, loading } = usePoll(`/usage/${provider}`, 5 * 60 * 1000)
   if (loading && !data) return <div className="skeleton-rows"><div /><div /></div>
   if (!data?.supported) return null
   const today = data.today, y = data.yesterday
   const lastActive = [...data.daily].reverse().find((d) => d.tokens > 0)
   const anyMonth = data.daily.some((d) => d.tokens > 0)
+  const split = accounts && data.accounts?.accounts ? data.accounts.accounts : null
+  // Each account as Usage has it now (a color just picked), else as the split names it (your
+  // usual login when it's off the list).
+  const parts = split && [
+    ...split.map((s) => {
+      const a = accounts.find((x) => x.id === s.id) || { ...s, isDefault: s.id.endsWith('-default'), named: s.label !== 'Your usual login' }
+      return { id: s.id, name: nameOf(a), color: acctColor(a) }
+    }),
+    { id: '?', name: t('Not known'), color: NOT_KNOWN },
+  ]
+  const cost = data.daily.reduce((s, d) => s + d.cost, 0)
+  const unknown = data.daily.reduce((s, d) => s + (d.by?.['?']?.[0] || 0), 0)
+  const counted = parts && [
+    provider === 'claude' ? t("Split by the account each conversation ran on, where Bridge AI saw it there or that account's own folder records it.") : t('Split by the account each conversation ran on, where Bridge AI saw it there.'),
+    unknown > 0 && t('Not known, in grey: {pct}% of the cost in these days.', { pct: cost ? Math.max(1, Math.round((unknown / cost) * 100)) : 0 }),
+  ].filter(Boolean).join(' ')
   return (
     <div className="activity">
       {today.tokens > 0 ? (
@@ -184,9 +248,11 @@ function Activity({ provider, note }) {
             : t('No activity today in the last 30 days')}
         </p>
       )}
+      {parts && today.tokens > 0 && <CostSplit day={today} parts={parts} />}
       {today.tokens > 0 && <p className="muted small cache-note">{t("{pct}% of today's tokens came from cache. Cost is at API prices, not your bill.", { pct: Math.round((today.cacheRead / today.tokens) * 100) })}</p>}
-      {note && (today.tokens > 0 || anyMonth) && <p className="muted small cache-note">{note}</p>}
-      {anyMonth && <DailyChart daily={data.daily} />}
+      {accounts && data.accounts?.error && <p className="error-text small" role="alert">{t("Couldn't split it by account: {error}", { error: data.accounts.error })}</p>}
+      {(parts ? counted : note) && (today.tokens > 0 || anyMonth) && <p className="muted small cache-note acct-counted">{parts ? counted : note}</p>}
+      {anyMonth && <DailyChart daily={data.daily} parts={parts} />}
     </div>
   )
 }
@@ -259,7 +325,7 @@ function TopBarPick({ on, onClick }) {
 function combine(accounts, kind) {
   const parts = accounts.filter((a) => !a.usable || a.windows.some((x) => x.kind === kind)).map((a) => {
     const w = a.usable ? a.windows.find((x) => x.kind === kind) : null
-    return { id: a.id, label: a.label, pct: w?.percentRemaining ?? null, resetsAt: w?.resetsAt || null }
+    return { id: a.id, label: nameOf(a), color: acctColor(a), pct: w?.percentRemaining ?? null, resetsAt: w?.resetsAt || null }
   })
   const known = parts.filter((x) => x.pct != null)
   const resets = known.map((x) => x.resetsAt).filter(Boolean).sort((a, b) => new Date(a) - new Date(b))
@@ -275,12 +341,14 @@ function combinedText(c, what) {
   return [total, c.soonest && t('next reset in {time}', { time: fmtIn(c.soonest) }), c.missing && t('{n} not read', { n: c.missing })].filter(Boolean).join(' · ')
 }
 
+// Each account's part in its color; one nearly out (under 10% left) has a red edge, and its name
+// and what's left say so on hover and on its row.
 function SegBar({ parts }) {
   return (
     <span className="seg-bar" role="img" aria-label={parts.map((x) => (x.pct == null ? t('{label} no data', { label: x.label }) : t('{label} {pct}% left', { label: x.label, pct: x.pct }))).join(', ')}>
       {parts.map((x) => (
-        <span key={x.id} className={`seg-part ${x.pct == null ? 'unread' : ''}`} title={x.pct == null ? t('{label}: no data', { label: x.label }) : t('{label}: {pct}% left', { label: x.label, pct: x.pct })}>
-          {x.pct != null && <span className={`u-fill f-${level(x.pct)}`} style={{ width: `${Math.max(x.pct ? 4 : 0, x.pct)}%` }} />}
+        <span key={x.id} className={`seg-part ${x.pct == null ? 'unread' : ''} ${level(x.pct) === 'critical' ? 'low' : ''}`} data-acct={x.id} title={x.pct == null ? t('{label}: no data', { label: x.label }) : t('{label}: {pct}% left', { label: x.label, pct: x.pct })}>
+          {x.pct != null && <span className="u-fill" style={{ width: `${Math.max(x.pct ? 4 : 0, x.pct)}%`, background: x.color }} />}
         </span>
       ))}
     </span>
@@ -291,7 +359,7 @@ function SegBar({ parts }) {
 // (Make default, Sign in again, Sign out, Remove). The row shows both windows and when the week
 // resets; Sign in is on the row, not inside it. auto: Auto is on (its pick gets the auto tag, and
 // no row the star). only: the one account listed, which can't be removed.
-function AccountUsage({ a, auto, open, onToggle, inUse, only, slots }) {
+function AccountUsage({ a, auto, open, onToggle, inUse, only, slots, others }) {
   const [reveal, setReveal] = usePersisted('cc-usage-reveal', false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
@@ -304,20 +372,23 @@ function AccountUsage({ a, auto, open, onToggle, inUse, only, slots }) {
   const act = async (fn) => { setBusy(true); setErr(null); try { await fn() } catch (e) { setErr(e.message) } finally { setBusy(false) } }
   const rowSignIn = !a.allow && ((!a.usable && a.signedIn === false) || (a.signedIn !== false && lapsed(a)))
   return (
-    <li className={`acct-u ${open ? 'open' : ''}`}>
-      <button className="acct-u-head" onClick={onToggle} aria-expanded={open}>
-        <span className="acct-u-name">
-          <span className="prov-name">
-            <b>{name}</b>
-            {a.plan && <span className="plan-tag">{a.plan}</span>}
-            {isDefault && <DefaultTag />}
-            {a.active && auto && <span className="best-tag" title={t('Auto starts new agents here now: it has the most left')}>{t('auto')}</span>}
+    <li className={`acct-u ${open ? 'open' : ''}`} data-acct={a.id}>
+      <div className="acct-u-top">
+        <ColorPick a={a} others={others} />
+        <button className="acct-u-head" onClick={onToggle} aria-expanded={open}>
+          <span className="acct-u-name">
+            <span className="prov-name">
+              <b>{name}</b>
+              {a.plan && <span className="plan-tag">{a.plan}</span>}
+              {isDefault && <DefaultTag />}
+              {a.active && auto && <span className="best-tag" title={t('Auto starts new agents here now: it has the most left')}>{t('auto')}</span>}
+            </span>
+            {reset && <small className="acct-u-reset">{reset}</small>}
           </span>
-          {reset && <small className="acct-u-reset">{reset}</small>}
-        </span>
-        {a.usable && main ? <Left a={a} slots={slots} /> : <span className="prov-status">{statusText(a, false, inUse)}</span>}
-        <Icon name="chevron" size={12} className={`caret ${open ? 'rot90' : ''}`} />
-      </button>
+          {a.usable && main ? <Left a={a} slots={slots} /> : <span className="prov-status">{statusText(a, false, inUse)}</span>}
+          <Icon name="chevron" size={12} className={`caret ${open ? 'rot90' : ''}`} />
+        </button>
+      </div>
       {!a.allow && !a.usable && a.signedIn === false && <div className="acct-u-signin"><SignInButton kind={kind} account={a.id} onCheck={() => refetch('/quota')} /></div>}
       {/* Why it asks is in the button's tooltip: the row already says in use or sign-in expired. */}
       {!a.allow && a.signedIn !== false && lapsed(a) && (
@@ -410,10 +481,10 @@ function AccountsRow({ g, open, onToggle, isPrimary, onMakePrimary }) {
           ) })}
           {err && <p className="error-text small" role="alert">{err}</p>}
           <ul className="acct-us">
-            {g.accounts.map((a) => <AccountUsage key={a.id} a={a} slots={slotsOf(g.accounts)} auto={auto} only={!several} inUse={usingIt(fleet, a.id)} open={openAcct === a.id} onToggle={() => setOpenAcct(openAcct === a.id ? null : a.id)} />)}
+            {g.accounts.map((a) => <AccountUsage key={a.id} a={a} others={g.accounts} slots={slotsOf(g.accounts)} auto={auto} only={!several} inUse={usingIt(fleet, a.id)} open={openAcct === a.id} onToggle={() => setOpenAcct(openAcct === a.id ? null : a.id)} />)}
           </ul>
           <button type="button" className="ghost-btn acct-add" onClick={() => addAccount(g.kind)}><Icon name="plus" size={12} /> {t('Add another {agent} account', { agent: nice(g.kind) })}</button>
-          {(g.kind === 'claude' || g.kind === 'codex') && <Activity provider={g.kind} note={t('Cost and tokens are for all your {agent} accounts together: they share one history.', { agent: nice(g.kind) })} />}
+          {(g.kind === 'claude' || g.kind === 'codex') && <Activity provider={g.kind} accounts={several || g.usualHidden ? [...g.accounts, ...(g.usual ? [g.usual] : [])] : null} note={t('Cost and tokens are for all your {agent} accounts together: they share one history.', { agent: nice(g.kind) })} />}
         </div>
       )}
     </li>

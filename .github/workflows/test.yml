@@ -22,9 +22,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # macOS runs every suite in both browsers, as two jobs side by side: in one they took over
+          # 40 minutes.
           - os: macos-15
             name: macOS
-            browser: both
+            browser: chromium
+          - os: macos-15
+            name: macOS WebKit
+            browser: webkit
           - os: windows-latest
             name: Windows
             browser: chromium
@@ -32,7 +37,6 @@ jobs:
             name: Linux
             browser: chromium
     runs-on: ${{ matrix.os }}
-    # macOS runs every suite in both browsers: about 25 minutes, and growing.
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -53,7 +57,7 @@ jobs:
           npm run demo:build
 
       - name: Browsers
-        run: npx playwright-core install --with-deps chromium ${{ matrix.browser == 'both' && 'webkit' || '' }}
+        run: npx playwright-core install --with-deps chromium ${{ matrix.browser != 'chromium' && 'webkit' || '' }}
 
       # The herdr test drives a real herdr (elsewhere it checks only what it can without one): a
       # pinned release, refused unless it matches its checksum.

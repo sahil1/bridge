@@ -22,8 +22,10 @@ import { tool } from './fixes.js'
 import * as speech from './speech.js'
 import * as livewords from './livewords.js'
 import * as memory from './meetmemory.js'
+import { notPerson } from './notpeople.js'
 import * as voices from './voices.js'
 import * as doctext from './doctext.js'
+import { DECK_RULES } from './studio.js'
 import { canOpen } from './files.js'
 import { mayLook, noteAsked } from './projects.js'
 import { isLimit } from './consult.js'
@@ -917,8 +919,9 @@ export const sameName = (a, b) => {
   return x[0] === y[0] && (x.length === 1 || y.length === 1 || x[1][0] === y[1][0])
 }
 // Who was invited besides you (Settings › General › Your name), and the one person when that's all
-// there is: a call with one other person, so they said what the call did.
-const guests = (m) => { const me = String(cfg.name || '').trim(); return (m.event?.attendees || []).filter((p) => !me || !sameName(p, me)) }
+// there is: a call with one other person, so they said what the call did. A room, a list or a
+// mailbox on the invite isn't anyone (notpeople.js).
+const guests = (m) => { const me = String(cfg.name || '').trim(); return (m.event?.attendees || []).filter((p) => (!me || !sameName(p, me)) && !notPerson(p)) }
 const asWritten = (p) => (/^[a-z0-9._-]+$/.test(p) && /[._-]/.test(p) ? nameParts(p).map((w) => w[0].toUpperCase() + w.slice(1)).join(' ') : p)
 function onlyGuest(m) { const g = guests(m); return g.length === 1 ? asWritten(g[0]) : null }
 // The call is one sound for everyone on it, so who said each of Them's lines is worked out by a
@@ -967,7 +970,7 @@ export async function nameSpeakers(id, { model } = {}) {
   for (const [num, name] of Object.entries(got)) {
     const key = byN.get(Number(num))
     const v = typeof name === 'string' ? clean(name, 80) : ''
-    if (!key || !v || /^(them|you|null|unknown)$/i.test(v) || (me && sameName(v, me)) || (names[key] && !names[key].guess)) continue
+    if (!key || !v || /^(them|you|null|unknown)$/i.test(v) || notPerson(v) || (me && sameName(v, me)) || (names[key] && !names[key].guess)) continue
     names[key] = { name: v, guess: true }
     n++
   }
@@ -1016,7 +1019,7 @@ async function nameVoices(id, use, { call = false } = {}) {
     if (!(s >= 1 && s <= room.speakers) || (was && !was.guess && !was.byVoice) || typeof name !== 'string') continue
     const v = clean(name, 80)
     const isMe = /^(me|you|myself)$/i.test(v) || (me && sameName(v, me))
-    if (!v || /^(null|unknown|speaker \d+|them)$/i.test(v) || taken.has(isMe ? ':me' : v) || (call && isMe)) continue
+    if (!v || /^(null|unknown|speaker \d+|them)$/i.test(v) || (!isMe && notPerson(v)) || taken.has(isMe ? ':me' : v) || (call && isMe)) continue
     await voices.name(id, s, isMe ? { me: true, guess: true } : { name: v, guess: true })
     taken.add(isMe ? ':me' : v)
     n++
@@ -2369,8 +2372,9 @@ export async function deck(id, { model } = {}) {
   const ask = [
     `Meeting: ${m.title}, ${new Date(m.startedAt).toDateString()}${people ? `, with ${people}` : ''}`,
     summary ? `\nIts notes:\n${summary}` : '', notes ? `\nMy own notes:\n${notes}` : '', said ? `\nThe transcript:\n${said}` : '',
-    '\nWrite a slide deck of this meeting, in Marp Markdown: a front matter block (---, marp: true, paginate: true, ---), then slides separated by lines of ---.',
-    'A title slide (the meeting\'s name, its date); 4 to 8 slides, each a "# " heading with 3 to 5 short bullets; a slide of what was decided; a slide of the action items with who has each. Under each slide, its speaker notes in an HTML comment (<!-- ... -->), from what was said. Only what the meeting covered. Answer with the deck and nothing else.',
+    '\nWrite a slide deck of this meeting: a title slide (the meeting\'s name, its date); 4 to 8 slides of what it covered; a slide of what was decided; a slide of the action items with who has each. Only what the meeting covered, with speaker notes from what was said.',
+    DECK_RULES,
+    'Answer with the deck and nothing else: a front matter block (---, marp: true, paginate: true, ---), then its slides.',
   ].filter(Boolean).join('\n')
   const r = await replyAny(use, [{ role: 'user', text: ask }], { system: 'You turn meeting notes into clear, short slide decks in Marp Markdown.' })
   let md = String(r.text || '').trim().replace(/^```(?:markdown|md)?\s*\n([\s\S]*?)\n```$/, '$1').trim()

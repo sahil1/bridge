@@ -40,6 +40,8 @@ const typed = () => (fs.existsSync(typedLog) ? fs.readFileSync(typedLog, 'utf8')
 const sent = []
 const said = []
 const prompts = []
+// What the computer answers a message with: gone in, unless a test makes it held for a busy agent.
+let promptAnswer = { ok: true }
 // A WAV of 16 kHz mono 16-bit PCM, with some sound in it: { head: its first 44 bytes, length }.
 const wavOk = (w) => {
   if (!w?.head) return false
@@ -107,7 +109,8 @@ try {
   spawnSync('git', ['init', '-q', dir])
   const agentOf = async (pred) => ((await kit.api('/fleet')).agents || []).find(pred)
   const one = await kit.api('/agents/launch', { kind: 'claude', cwd: dir, label: 'payments', newSpace: 'payments' })
-  const two = await kit.api('/agents/launch', { kind: 'claude', cwd: dir, label: 'billing', newSpace: 'billing' })
+  // billing's terminal has a shell's title, as a Windows terminal's can: it still goes by its tab's name.
+  const two = await kit.api('/agents/launch', { kind: 'claude', cwd: dir, label: 'billing', newSpace: 'billing', prompt: 'shell title' })
   ok(!!(await until(() => agentOf((a) => a.paneId === one.paneId), 30000, 500)) && !!(await until(() => agentOf((a) => a.paneId === two.paneId), 30000, 500)), 'two stand-in agents, payments and billing')
 
   const { ctx, p, errors } = await page(b, kit.url, { before })
@@ -607,7 +610,7 @@ try {
   // ---------- The dictation window (?dictate=1) ----------
   const hudPage = (pending = null) => page(b, `${kit.url}/?dictate=1`, { store: { 'cc-ws': { tabs: [one.paneId], active: one.paneId } }, before: async (c) => {
     await before(c)
-    await c.route(/\/api\/agents\/[^/]+\/(prompt|queue)$/, async (route) => { prompts.push({ url: route.request().url(), body: route.request().postDataJSON() }); await route.fulfill({ json: { ok: true } }) })
+    await c.route(/\/api\/agents\/[^/]+\/(prompt|queue)$/, async (route) => { prompts.push({ url: route.request().url(), body: route.request().postDataJSON() }); await route.fulfill({ json: promptAnswer }) })
     await c.addInitScript((p0) => {
       window.__hud = { phases: [], copied: [], hidden: 0, opened: [] }
       window.bridgeApp = {
@@ -634,7 +637,8 @@ try {
     const np = prompts.length
     await h.locator('.hud button', { hasText: 'Send' }).click()
     ok(!!(await until(() => prompts.length > np, 5000, 100)) && prompts.at(-1).url.includes(encodeURIComponent(one.paneId)) && prompts.at(-1).body.text === 'Add a retry to the webhook.', 'Send: to that agent', prompts.at(-1))
-    const named = (a) => a.title || a.tab
+    // As the sidebar names it: the tab you named, else its title.
+    const named = (a) => (a.tab && !/^\d+$/.test(a.tab) ? a.tab : a.title)
     const pay = named(await agentOf((a) => a.paneId === one.paneId))
     ok(!!(await until(async () => (await h.locator('.hud').innerText()).includes(`Sent to ${pay}`), 4000, 100)) && !!(await until(() => h.evaluate(() => window.__hud.hidden > 0), 4000, 100)), '"Sent to" that agent, then it hides', [pay, await h.locator('.hud').innerText().catch(() => '')])
     // Another agent, picked; and Copy.
@@ -642,9 +646,18 @@ try {
     await key(h, 'down'); await sleep(1300); await key(h, 'up')
     await until(async () => (await h.locator('.hud-text').count()) > 0, 8000, 100)
     await h.locator('.hud-to-btn').click()
+    const shellTitled = await until(async () => { const x = await agentOf((a) => a.paneId === two.paneId); return /^Administrator: C:\\Windows/.test(x?.title || '') && x }, 15000, 300)
+    const picked = (await h.locator(`.hud-menu button[data-pane="${two.paneId}"]`).innerText()).trim()
+    ok(!!shellTitled && picked === 'billing', 'an agent whose terminal has a shell\'s title ("Administrator: C:\\Windows\\…") is named by its tab in the To picker, as in the sidebar', { title: shellTitled?.title, picked })
     await h.locator(`.hud-menu button[data-pane="${two.paneId}"]`).click()
+    // This one the computer holds for the agent (it's busy), second in its line: the window says so.
+    promptAnswer = { ok: true, queued: true, reason: 'working', id: 'q2', position: 2 }
     await h.locator('.hud button', { hasText: 'Send' }).click()
     ok(!!(await until(() => prompts.at(-1)?.url.includes(encodeURIComponent(two.paneId)), 5000, 100)), 'To ▾: another agent picked, and sent there', prompts.at(-1))
+    const bill = named(await agentOf((a) => a.paneId === two.paneId))
+    ok(!!(await until(async () => (await h.locator('.hud').innerText()).includes(`Queued for ${bill}, number 2 in line`), 4000, 100)) && !(await h.locator('.hud').innerText()).includes('Sent to'), 'held for a busy agent: "Queued for" it, with its place in line, not "Sent to"', await h.locator('.hud').innerText().catch(() => ''))
+    ok(bill === 'billing' && !/Administrator/.test(await h.locator('.hud').innerText().catch(() => '')), 'and named by its tab there too, not its terminal\'s title', await h.locator('.hud').innerText().catch(() => ''))
+    promptAnswer = { ok: true }
     said.push('copy me')
     await key(h, 'down'); await sleep(1300); await key(h, 'up')
     await until(async () => (await h.locator('.hud-text').innerText().catch(() => '')) === 'Copy me.', 8000, 100)

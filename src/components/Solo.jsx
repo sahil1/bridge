@@ -66,7 +66,7 @@ export default function Solo({ paneId }) {
       <Dictation conf={conf?.dictation} onScreen={() => paneId} />
       {!fleet ? <div className="pad"><div className="skeleton-rows"><div /><div /></div></div>
         : agent
-          ? <ErrorBoundary name="This agent's view" resetKey={agent.paneId}><Console agent={agent} variant="focus" extraActions={embedded ? null : back} queued={fleet.queue?.[paneId] || []} /></ErrorBoundary>
+          ? <ErrorBoundary name="This agent's view" resetKey={agent.paneId}><Console agent={agent} variant="focus" extraActions={embedded ? null : back} queued={fleet.queue?.[paneId] || []} delivered={fleet.delivered?.[paneId] || []} /></ErrorBoundary>
           : (
             <div className="viewer-empty">
               <Icon name="x" size={22} />

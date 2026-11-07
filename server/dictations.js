@@ -97,7 +97,7 @@ async function load() {
 
 // Only what a dictation is made of, each part checked and cut to size.
 const str = (v, n) => (typeof v === 'string' ? v.slice(0, n) : undefined)
-const HOW = ['pasted', 'sent', 'typed', 'copied']
+const HOW = ['pasted', 'sent', 'queued', 'typed', 'copied'] // queued: held for a busy agent
 const PLACE = ['terminal', 'field']
 function clip(r = {}) {
   const o = {}

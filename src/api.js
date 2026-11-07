@@ -64,8 +64,9 @@ export async function api(path, opts = {}) {
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   })
   const data = await res.json().catch(() => ({}))
-  // code: set when the app can offer a fix (EPERM, noBrew, calendarAccess...).
-  if (!res.ok) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), data.code ? { code: data.code } : {})
+  // code: set when the app can offer a fix (EPERM, noBrew, calendarAccess...). status: there was an
+  // answer (a failed fetch has none).
+  if (!res.ok) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), { status: res.status }, data.code ? { code: data.code } : {})
   return data
 }
 
@@ -110,13 +111,15 @@ export function usePoll(path, intervalMs, { enabled = true } = {}) {
 
   // Timed and on-mount loads share requests; a refresh you ask for (after a change, or with
   // ?refresh=1) always goes to the server.
+  // An answer for a path this no longer shows (a slow week's, after a day's came) is dropped.
   const load = useCallback(async (suffix = '', shared = false) => {
-    if (!pathRef.current) return
+    const asked = pathRef.current
+    if (!asked) return
     try {
-      const data = suffix ? await api(pathRef.current + suffix) : await sharedGet(pathRef.current, !shared)
-      setState({ data, error: null, errorCode: null, loading: false })
+      const data = suffix ? await api(asked + suffix) : await sharedGet(asked, !shared)
+      if (asked === pathRef.current) setState({ data, error: null, errorCode: null, loading: false })
     } catch (error) {
-      setState((s) => ({ ...s, error: error.message, errorCode: error.code || null, loading: false }))
+      if (asked === pathRef.current) setState((s) => ({ ...s, error: error.message, errorCode: error.code || null, loading: false }))
     }
   }, [])
   const refresh = useCallback((suffix = '') => load(suffix, false), [load])
@@ -155,6 +158,8 @@ export function useFleet() {
     const connect = () => {
       es = new EventSource(`${BASE}/api/events`)
       es.addEventListener('fleet', (e) => { setFleet(JSON.parse(e.data)); setLive(true) })
+      // The config changed on the server (a Beta Feature turned on or off, here or on another device).
+      es.addEventListener('config', () => refetch('/config'))
       es.onerror = () => { setLive(false); es.close(); timer = setTimeout(connect, 3000) }
     }
     connect()

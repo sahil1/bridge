@@ -6,11 +6,17 @@
 // overwrites; design packs. The page: Studio's home with New and Recent; a Markdown file edited
 // and saved; a Word file's text; a sheet, still saved until a value's typed in, then saved with it; a deck drawn, and its PowerPoint beside it; a page drawn
 // as it's typed; versions and Put back; Ask an agent queueing the change for the agent you pick.
-// The editors finished: a document's toolbar (each button named, with its shortcut in its tooltip,
-// doing what it says and showing it, only what the format keeps), heading levels, links, a table's
-// rows, undo and redo, the shortcuts; a quote, an underline and a link kept through a save; the
-// header's kind, size and folder never cut off; the status line; each kind saying what it is and
-// what it can't do; on 375 and 430 px phones, Studio's home and a document fitting.
+// The editors finished: a Markdown file's toolbar (only what Markdown keeps), a Word file in its own
+// look saved with every other part as it was (its editor in full is studio-docs.mjs); the header's
+// kind, size and folder never cut off; the status line; each kind saying what it is and what it
+// can't do; on 375 and 430 px phones, Studio's home and a document fitting.
+// A sheet: Excel's ribbon with Ask AI first, the name box and tabs; Ask AI on the cells picked,
+// the agent told to answer with the change, which is shown on the sheet before it's made, kept and
+// saved, or put back; a summary beside it; a chart drawn first, then in Charts and saved as an
+// Excel chart; an answer that isn't JSON said. An Excel file with a chart, a note, a dropdown and
+// more, one cell changed and saved: every other part the same bytes, and read back the same. A CSV
+// in semicolons with a BOM and Windows line endings, saved back the same but for the one field.
+// On phones, a sheet and Ask AI fitting; a sheet in the dark look.
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
@@ -58,6 +64,41 @@ try {
   fs.writeFileSync(path.join(dir, 'pitch.md'), '---\nmarp: true\n---\n\n# Pitch\n\n## Q4\n\n---\n\n# Why now\n\n- Customers asked\n- It is ready\n\n<!-- Say the numbers -->\n')
   fs.writeFileSync(path.join(dir, 'dash.html'), '<!doctype html><title>Dash</title><h1 id="h">Dashboard</h1>')
   fs.writeFileSync(path.join(dir, 'data.csv'), 'a,b\n1,"x, y"\n')
+  // A CSV as Excel writes one in much of Europe: a byte order mark, semicolons, Windows line
+  // endings, a quoted field with the separator in it, and codes with leading zeros.
+  const peopleCsv = '﻿Name;Town;Code\r\nAda Example;Springfield;007\r\nBo Sample;"Rivertown; North";0042\r\n'
+  fs.writeFileSync(path.join(dir, 'people.csv'), peopleCsv)
+  // A workbook with more in it than the editor shows: two sheets, styles, a merged title, frozen
+  // rows, a conditional format, a dropdown, a link, a note, a name, and a chart (Excel's own XML,
+  // put in as Excel puts it, since ExcelJS can't make charts).
+  const lw = new ExcelJS.Workbook()
+  const ls = lw.addWorksheet('Ledger', { views: [{ state: 'frozen', ySplit: 1 }] })
+  ls.addRow(['Month', 'Spend', 'Note']); ls.addRow(['Jan', 410, 'ok']); ls.addRow(['Feb', 380, 'ok']); ls.addRow(['Mar', 520, 'high'])
+  ls.getCell('B5').value = { formula: 'SUM(B2:B4)', result: 1310 }
+  ls.getRow(1).font = { bold: true, color: { argb: 'FF1F3864' } }
+  ls.getCell('B2').numFmt = '#,##0.00'; ls.getCell('B2').border = { bottom: { style: 'thin', color: { argb: 'FF999999' } } }
+  ls.getColumn(1).width = 18
+  ls.addConditionalFormatting({ ref: 'B2:B4', rules: [{ type: 'cellIs', operator: 'greaterThan', formulae: [500], style: { fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFFFC7CE' } } }, priority: 1 }] })
+  ls.getCell('C2').dataValidation = { type: 'list', allowBlank: true, formulae: ['"ok,high"'] }
+  ls.getCell('C4').note = 'Checked with the team'
+  ls.getCell('A7').value = { text: 'Policy', hyperlink: 'https://example.com/policy' }
+  ls.mergeCells('D1:E1'); ls.getCell('D1').value = 'Quarter one'
+  lw.definedNames.add('Ledger!$B$2:$B$4', 'Spend')
+  lw.addWorksheet('Notes').getCell('A1').value = 'Kept'
+  const JSZipX = require('jszip')
+  const lz = await JSZipX.loadAsync(await lw.xlsx.writeBuffer())
+  lz.file('xl/charts/chart1.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><c:chart><c:title><c:tx><c:rich><a:bodyPr/><a:p><a:r><a:t>Spend by month</a:t></a:r></a:p></c:rich></c:tx><c:overlay val="0"/></c:title><c:plotArea><c:barChart><c:barDir val="col"/><c:grouping val="clustered"/><c:ser><c:idx val="0"/><c:order val="0"/><c:tx><c:strRef><c:f>Ledger!$B$1</c:f><c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>Spend</c:v></c:pt></c:strCache></c:strRef></c:tx><c:cat><c:strRef><c:f>Ledger!$A$2:$A$4</c:f><c:strCache><c:ptCount val="3"/><c:pt idx="0"><c:v>Jan</c:v></c:pt><c:pt idx="1"><c:v>Feb</c:v></c:pt><c:pt idx="2"><c:v>Mar</c:v></c:pt></c:strCache></c:strRef></c:cat><c:val><c:numRef><c:f>Ledger!$B$2:$B$4</c:f><c:numCache><c:ptCount val="3"/><c:pt idx="0"><c:v>410</c:v></c:pt><c:pt idx="1"><c:v>380</c:v></c:pt><c:pt idx="2"><c:v>520</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser><c:axId val="1"/><c:axId val="2"/></c:barChart><c:catAx><c:axId val="1"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="b"/><c:crossAx val="2"/></c:catAx><c:valAx><c:axId val="2"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="l"/><c:crossAx val="1"/></c:valAx></c:plotArea></c:chart></c:chartSpace>`)
+  lz.file('xl/drawings/drawing1.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><xdr:twoCellAnchor><xdr:from><xdr:col>5</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>1</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:to><xdr:col>11</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>15</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to><xdr:graphicFrame macro=""><xdr:nvGraphicFramePr><xdr:cNvPr id="2" name="Chart 1"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr><xdr:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/></xdr:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="rId1"/></a:graphicData></a:graphic></xdr:graphicFrame><xdr:clientData/></xdr:twoCellAnchor></xdr:wsDr>')
+  lz.file('xl/drawings/_rels/drawing1.xml.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chart1.xml"/></Relationships>')
+  const sheetRels = 'xl/worksheets/_rels/sheet1.xml.rels'
+  const relsXml = lz.file(sheetRels) ? await lz.file(sheetRels).async('string') : '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>'
+  lz.file(sheetRels, relsXml.replace('</Relationships>', '<Relationship Id="rIdChart9" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/></Relationships>'))
+  const s1 = await lz.file('xl/worksheets/sheet1.xml').async('string')
+  const at = ['<legacyDrawing', '<tableParts', '<extLst', '</worksheet>'].map((x) => s1.indexOf(x)).filter((i) => i >= 0).sort((a, b) => a - b)[0]
+  lz.file('xl/worksheets/sheet1.xml', `${s1.slice(0, at)}<drawing r:id="rIdChart9"/>${s1.slice(at)}`)
+  const types = await lz.file('[Content_Types].xml').async('string')
+  lz.file('[Content_Types].xml', types.replace('</Types>', '<Override PartName="/xl/charts/chart1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/><Override PartName="/xl/drawings/drawing1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/></Types>'))
+  fs.writeFileSync(path.join(dir, 'ledger.xlsx'), await lz.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }))
   fs.writeFileSync(path.join(dir, 'report.pdf'), '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj 2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj 3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n')
   const place = (await api('/places', { path: dir })).place
   const root = `place:${place.id}`
@@ -127,7 +168,7 @@ try {
   // Settings › About & Updates: Studio's switch under Beta Features, and every button there one
   // size. Off, Studio leaves the sidebar; on, it's back.
   await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'about' } })))
-  const trial = p.locator('.st-check', { hasText: 'Studio' }).locator('input')
+  const trial = p.locator('.st-check', { has: p.locator('b', { hasText: /^Studio$/ }) }).locator('input')
   await trial.waitFor({ timeout: 15000 })
   // The switch is off and disabled until the settings have come (a slow computer shows that first).
   await until(async () => !(await trial.isDisabled()), 10000)
@@ -145,10 +186,10 @@ try {
   // app is listening).
   const home = () => until(async () => { await p.locator('.rail-nav-btn', { hasText: 'Studio' }).click(); return p.locator('.sd-home').waitFor({ timeout: 1500 }).then(() => true, () => false) }, 20000, 300)
   ok(!!(await home()), "Studio opens from the rail")
-  ok(await p.locator('.sd-new-btn').count() === 5 && await p.locator('.sd-recent li', { hasText: 'notes.md' }).count() > 0, "Studio's home: New (document, Markdown, sheet, deck, page) and Recent")
+  ok(await p.locator('.sd-new-btn').count() === 5 && !!(await until(async () => (await p.locator('.sd-files-row', { hasText: 'notes.md' }).count()) > 0, 10000)), "Studio's home: New (document, Markdown, sheet, deck, page) and your recent files")
   await shot(p, `${tag}studio-home`)
   // A Markdown file, edited and saved.
-  await p.locator('.sd-recent-open', { hasText: 'notes.md' }).first().click()
+  await p.locator('.sd-file-name', { hasText: 'notes.md' }).first().click()
   const pm = p.locator('.sd-page .ProseMirror')
   ok(!!(await until(async () => /Second draft/.test(await pm.innerText().catch(() => '')), 15000)), 'a Markdown file opens as a document')
   const mdTools = await p.locator('.sd-doc-tools button').evaluateAll((bs) => bs.map((b) => b.getAttribute('aria-label')))
@@ -178,121 +219,30 @@ try {
   await p.locator('.sd-ask textarea').fill('add a summary at the top')
   await p.locator('.sd-ask-to select').selectOption(agent.paneId)
   await p.locator('.sd-ask button', { hasText: 'Send' }).click()
-  ok(!!(await until(async () => /Sent to/.test(await p.locator('.sd-bar').innerText().catch(() => '')), 5000)), 'Ask an agent: sent to the agent picked, and it says so')
+  // Your computer holds it for the agent until it's ready (it said "Sent to" before it had gone).
+  ok(!!(await until(async () => /Queued for .+\. Studio shows the change/.test(await p.locator('.sd-bar').innerText().catch(() => '')), 5000)), 'Ask an agent: held for the agent picked, and it says so', await p.locator('.sd-bar').innerText().catch(() => ''))
   // A Word file's text.
   const open = async (name) => p.evaluate(({ root, name }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: name } })), { root, name })
   await open('plan.docx')
-  ok(!!(await until(async () => /Q4 plan/.test(await p.locator('.sd-page .ProseMirror').innerText().catch(() => '')) && /Ship the pricing page/.test(await p.locator('.sd-page .ProseMirror').innerText().catch(() => '')), 20000)), 'a Word file opens with its heading and text')
-  const h1 = await p.locator('.sd-page.word h1').first().evaluate((e) => { const c = getComputedStyle(e), b = getComputedStyle(e.closest('.sd-page')); return { color: c.color, font: c.fontFamily, size: c.fontSize, body: b.fontFamily, paper: b.backgroundColor } })
+  ok(!!(await until(async () => /Q4 plan/.test(await p.locator('.sd-w').innerText().catch(() => '')) && /Ship the pricing page/.test(await p.locator('.sd-w').innerText().catch(() => '')), 20000)), 'a Word file opens with its heading and text')
+  const h1 = await p.locator('.sd-w h1').first().evaluate((e) => { const c = getComputedStyle(e), b = getComputedStyle(e.closest('.sd-w')); return { color: c.color, font: c.fontFamily, size: c.fontSize, body: b.fontFamily, paper: b.backgroundColor } })
   ok(h1.color === 'rgb(192, 0, 0)' && /Georgia/.test(h1.font) && h1.size === '24px' && /Arial/.test(h1.body) && h1.paper === 'rgb(255, 255, 255)', 'in its own look: its fonts, sizes and colours, on white paper', h1)
   await shot(p, `${tag}studio-word`)
-  // Saved here: the same look in the file (docx would have put its own in).
-  const docText = p.locator('.sd-page .ProseMirror')
-  await docText.click()
-  await p.keyboard.press(process.platform === 'darwin' ? 'Meta+End' : 'Control+End')
+  // Saved here: only what changed is written; its styles as they were, byte for byte. (A Word
+  // file's editor is checked in studio-docs.mjs.)
+  const JSZip = require('jszip')
+  const partsOf = async (file) => { const z = await JSZip.loadAsync(fs.readFileSync(file)); const o = {}; for (const n of Object.keys(z.files)) if (!z.files[n].dir) o[n] = await z.file(n).async('string'); return o }
+  const stylesOf = async (file) => { try { return await (await JSZip.loadAsync(fs.readFileSync(file))).file('word/styles.xml').async('string') } catch { return '' } }
+  const was = await partsOf(path.join(dir, 'plan.docx'))
+  await p.locator('.sd-w p', { hasText: 'Ship the pricing page' }).click()
+  await p.keyboard.press('End')
   await p.keyboard.type(' Agreed.')
   await p.locator('.pane-head button', { hasText: 'Save' }).click()
-  const said = await p.locator('.sd-conflict[role="alertdialog"]').innerText({ timeout: 5000 }).catch(() => '')
-  ok(/fonts and colours/.test(said), "a Word file's first save here says what's kept", said)
-  await p.locator('.sd-conflict[role="alertdialog"] button', { hasText: 'Save' }).click()
-  const JSZip = require('jszip')
-  const stylesOf = async (file) => { try { return await (await JSZip.loadAsync(fs.readFileSync(file))).file('word/styles.xml').async('string') } catch { return '' } }
-  const kept = await until(async () => { const x = await stylesOf(path.join(dir, 'plan.docx')); return /Agreed/.test(await (await JSZip.loadAsync(fs.readFileSync(path.join(dir, 'plan.docx')))).file('word/document.xml').async('string')) && x }, 10000)
-  ok(!!kept && /w:ascii="Georgia"/.test(kept) && /w:val="C00000"/.test(kept) && /w:ascii="Arial"/.test(kept) && /w:sz w:val="36"/.test(kept) && !/2E74B5/.test(kept.split('Heading1')[1]?.split('</w:style>')[0] || ''), 'saved: the change, in the same fonts, sizes and colours', kept && kept.slice(0, 300))
-  // ---------- A document's toolbar (a Word file) ----------
-  // Each button named, with its shortcut in its tooltip; only what a Word file keeps (no code,
-  // which docx.js would write as plain text); undo and redo with nothing done yet, off.
-  const tb = p.locator('.sd-doc-tools')
-  const tools = await tb.locator('button').evaluateAll((bs) => bs.map((b) => ({ name: b.getAttribute('aria-label'), title: b.title, pressed: b.getAttribute('aria-pressed'), off: b.disabled })))
-  const names = tools.map((x) => x.name)
-  ok(JSON.stringify(names) === JSON.stringify(['Bold', 'Italic', 'Underline', 'Strikethrough', 'Bulleted list', 'Numbered list', 'Quote', 'Insert link', 'Table', 'Undo', 'Redo']), "a Word file's toolbar: marks, lists, quote, link, table, undo and redo, in that order (no code: a Word file wouldn't keep it)", names)
-  const key = process.platform === 'darwin' ? '⌘' : 'Ctrl'
-  ok(tools.every((x) => x.title.startsWith(x.name)) && ['Bold', 'Italic', 'Underline', 'Strikethrough', 'Bulleted list', 'Numbered list', 'Quote', 'Undo', 'Redo'].every((n) => tools.find((x) => x.name === n).title.includes(key)), 'every button has a tooltip with its name, and its shortcut where it has one', tools.map((x) => x.title))
-  ok(tools.filter((x) => x.pressed !== null).map((x) => x.name).join() === 'Bold,Italic,Underline,Strikethrough,Bulleted list,Numbered list,Quote,Insert link', 'each mark and block says whether it is on (aria-pressed)', tools)
-  const styles = await tb.locator('select.sd-style option').allInnerTexts()
-  ok(styles.join() === 'Paragraph,Heading 1,Heading 2,Heading 3' && /Text style/.test(await tb.locator('select.sd-style').getAttribute('title')), 'a Text style menu: Paragraph and Heading 1 to 3', styles)
-  ok(!!(await bare(p).then((x) => !x.length)), 'nothing on the page is a bare control: each has a name, and an icon-only one a tooltip', await bare(p))
-  // A line of its own, picked, then each mark and block on and off: shown in the text and on its button.
-  const btn = (name) => tb.locator(`button[aria-label="${name}"]`)
-  const pressed = async (name) => (await btn(name).getAttribute('aria-pressed')) === 'true'
-  await docText.click()
-  await p.keyboard.press(`${MOD}+End`)
-  await p.keyboard.press('Enter')
-  await p.keyboard.type('Toggle me')
-  // The line picked whole (a triple click), whatever it's in by then.
-  const pick = () => docText.locator('p', { hasText: 'Toggle me' }).click({ clickCount: 3 })
-  await pick()
-  const has = (sel) => docText.locator(sel, { hasText: 'Toggle me' }).count()
-  // It carries on in bold from the line before (" Agreed.", typed after bold words): the button
-  // says so, and takes it off.
-  if (await pressed('Bold')) { await btn('Bold').click(); await until(async () => (await has('strong')) === 0, 3000, 100) }
-  const toggles = []
-  for (const [name, sel] of [['Bold', 'strong'], ['Italic', 'em'], ['Underline', 'u'], ['Strikethrough', 's'], ['Bulleted list', 'ul'], ['Numbered list', 'ol'], ['Quote', 'blockquote']]) {
-    await btn(name).click()
-    const on = !!(await until(async () => (await has(sel)) === 1 && await pressed(name), 3000, 100))
-    await btn(name).click()
-    const off = !!(await until(async () => (await has(sel)) === 0 && !(await pressed(name)), 3000, 100))
-    toggles.push(`${name} ${on ? 'on' : 'NOT ON'} ${off ? 'off' : 'NOT OFF'}`)
-  }
-  ok(toggles.every((x) => /on off$/.test(x)), 'each mark and block does what it says, and its button shows it on, then off again', toggles)
-  // Heading levels, from the menu and from the keyboard (⌥⌘1, which the app's own ⌥1 doesn't take).
-  const style = tb.locator('select.sd-style')
-  const levels = []
-  for (const v of ['h2', 'h3', 'p']) { await style.selectOption(v); levels.push(await until(async () => (await has(v)) === 1 && (await style.inputValue()) === v, 3000, 100) ? v : `not ${v}`) }
-  await docText.locator('p', { hasText: 'Toggle me' }).click()
-  await p.keyboard.press(`${MOD}+Alt+Digit1`)
-  levels.push(await until(async () => (await has('h1')) === 1 && (await style.inputValue()) === 'h1', 3000, 100) ? 'keys h1' : 'keys not h1')
-  await p.keyboard.press(`${MOD}+Alt+Digit0`)
-  levels.push(await until(async () => (await has('p')) === 1 && (await style.inputValue()) === 'p', 3000, 100) ? 'keys p' : 'keys not p')
-  ok(levels.join() === 'h2,h3,p,keys h1,keys p', 'Text style: Heading 2, Heading 3 and back to Paragraph; and from the keyboard', levels)
-  await pick()
-  await p.keyboard.press(`${MOD}+b`)
-  const boldKeys = !!(await until(async () => (await has('strong')) === 1 && await pressed('Bold'), 3000, 100))
-  await p.keyboard.press(`${MOD}+b`)
-  ok(boldKeys && !!(await until(async () => (await has('strong')) === 0, 3000, 100)), 'the shortcuts work too: ⌘B bold, and off again')
-  // A link: added from the link bar to what's picked (example.com made https://example.com), shown
-  // on its button, and taken back with Undo, put back with Redo.
-  ok(!!(await until(async () => !(await btn('Undo').isDisabled()) && await btn('Redo').isDisabled(), 3000, 100)), 'Undo is there once something is done; Redo is not, until something is undone')
-  // Clicked again until the link bar shows (WebKit can take a click while the toolbar redraws).
-  await until(async () => { if (!(await p.locator('.sd-linkbar input').count())) await btn('Insert link').click(); return p.locator('.sd-linkbar input').waitFor({ timeout: 1500 }).then(() => true, () => false) }, 10000, 300)
-  await p.locator('.sd-linkbar input').fill('example.com')
-  await p.locator('.sd-linkbar input').press('Enter')
-  const link = docText.locator('a[href="https://example.com"]', { hasText: 'Toggle me' })
-  ok(!!(await until(async () => (await link.count()) === 1 && (await p.locator('.sd-linkbar').count()) === 0, 3000, 100)), 'Link: the address typed (made whole) on what is picked, and the bar gone')
-  await link.click()
-  ok(!!(await until(() => pressed('Insert link'), 3000, 100)), 'in the link, its button shows it')
-  await btn('Undo').click()
-  const undone = !!(await until(async () => (await link.count()) === 0, 3000, 100))
-  await btn('Redo').click()
-  ok(undone && !!(await until(async () => (await link.count()) === 1, 3000, 100)), 'Undo takes the link back, Redo puts it back')
-  // A table: added, a row added and the table deleted from its button's menu.
-  const tables = await docText.locator('table').count()
-  await pick()
-  await p.keyboard.press('ArrowRight')
-  await btn('Table').click()
-  const added = !!(await until(async () => (await docText.locator('table').count()) === tables + 1, 3000, 100))
-  const table = docText.locator('table').last()
-  const rows = await table.locator('tr').count()
-  await btn('Table').click()
-  await p.locator('.sd-tool-menu button', { hasText: 'Add a row below' }).click()
-  const more = !!(await until(async () => (await table.locator('tr').count()) === rows + 1, 3000, 100))
-  await btn('Table').click()
-  await p.locator('.sd-tool-menu button', { hasText: 'Delete the table' }).click()
-  ok(added && rows === 3 && more && !!(await until(async () => (await docText.locator('table').count()) === tables, 3000, 100)), 'Table: a 3 by 3 table with a header row, a row added below, and deleted, from its menu', { added, rows, more })
-  // Kept through a save: the line as a quote, underlined, with its link; read back as they were.
-  await pick()
-  await btn('Underline').click()
-  await btn('Quote').click()
-  ok(/Unsaved changes/.test(await p.locator('.sd-status').innerText()), 'the status line says there are unsaved changes', await p.locator('.sd-status').innerText())
-  await p.locator('.pane-head button', { hasText: 'Save' }).click()
-  const xml = () => JSZip.loadAsync(fs.readFileSync(path.join(dir, 'plan.docx'))).then((z) => z.file('word/document.xml').async('string')).catch(() => '')
-  const wrote = await until(async () => { const x = await xml(); return /Toggle me/.test(x) && x }, 10000)
-  ok(!!wrote && /<w:pStyle w:val="Quote"\/>/.test(wrote) && /<w:u /.test(wrote) && /<w:hyperlink/.test(wrote), "saved as Word's own: a quote in its Quote style, the underline, the link", wrote && wrote.slice(wrote.indexOf('Toggle') - 400, wrote.indexOf('Toggle') + 40))
+  ok(!(await p.locator('.sd-conflict[role="alertdialog"]').count()), "a Word file saves at once: nothing to warn about, as it keeps everything")
+  const kept = await until(async () => { const x = await partsOf(path.join(dir, 'plan.docx')); return /Agreed/.test(x['word/document.xml']) && x }, 10000)
+  const changedParts = kept ? Object.keys({ ...was, ...kept }).filter((k) => was[k] !== kept[k]) : null
+  ok(!!kept && changedParts.join() === 'word/document.xml', 'saved: the change, and every other part of the file (its styles too) as it was', changedParts)
   ok(!!(await until(async () => /Saved/.test(await p.locator('.sd-status .sd-state').innerText()), 5000)), 'and then the status line says Saved')
-  await p.locator('.sd-file button[aria-label="Back to Studio"]').click()
-  await p.locator('.sd-home').waitFor({ timeout: 10000 })
-  await open('plan.docx')
-  ok(!!(await until(async () => (await docText.locator('blockquote u', { hasText: 'Toggle me' }).count()) === 1 && (await docText.locator('blockquote a[href="https://example.com"]').count()) === 1, 15000)), 'opened again: still a quote, underlined, with its link', await docText.innerHTML().catch(() => ''))
   // The header at the width of the owner's window: the kind and size whole, then the folder.
   await p.setViewportSize({ width: 1230, height: 820 })
   await sleep(300)
@@ -304,7 +254,7 @@ try {
   const status = await p.locator('.sd-status').innerText()
   ok(/\d+ words/.test(status) && /Word document/.test(status) && /\d+ versions/.test(status) && /Saved/.test(status), 'the status line: words, the kind of file, its versions, saved', status)
   await p.locator('.sd-status button', { hasText: 'Word document' }).click()
-  ok(/keeps its text, headings, lists, tables, links, quotes/.test(await p.locator('.sd-note-bar').innerText().catch(() => '')), 'and tapped, the kind says what saving keeps', await p.locator('.sd-note-bar').innerText().catch(() => ''))
+  ok(/writes only what you changed/.test(await p.locator('.sd-note-bar').innerText().catch(() => '')), 'and tapped, the kind says what saving keeps', await p.locator('.sd-note-bar').innerText().catch(() => ''))
   await p.locator('.sd-note-bar button[aria-label="Close"]').click()
   // A sheet.
   await open('budget.xlsx')
@@ -326,65 +276,183 @@ try {
   const share = Math.round(((await busy()) - b0) * 100) / 10
   if (cdp) ok(share < 8, `a window with a sheet open, idle, keeps its main thread free (${share}% busy)`, share)
   const looks = reqs.filter((x) => x === '/api/studio/changed').length
-  // Ask an agent on the cells picked: B2 (Hosting's cost), clicked in the sheet's drawing (its
-  // row numbers 46 wide, its column letters 20 high, columns 88 by rows 24).
-  const grid = await p.locator('.sd-univer canvas').evaluateAll((cs) => cs.map((c) => c.getBoundingClientRect()).map((r) => ({ x: r.x, y: r.y, a: r.width * r.height })).sort((a, b) => b.a - a.a)[0])
-  await p.mouse.click(grid.x + 46 + 88 + 44, grid.y + 20 + 24 + 12)
-  await sleep(300)
-  await p.locator('.pane-head button', { hasText: 'Ask an agent' }).click()
-  const picked = await p.locator('.sd-ask-sel').innerText({ timeout: 5000 }).catch(() => '')
-  ok(/B2 on Budget/.test(picked) && /120/.test(picked), 'Ask an agent on a sheet: the cells picked, where they are, and their values', picked)
-  ok(!!(await until(async () => (await p.locator('.sd-ask-to select').inputValue()) === agent.paneId, 5000)), 'and it goes to the agent at work there unless you pick another', await p.locator('.sd-ask-to select').inputValue())
-  await shot(p, `${tag}studio-sheet-ask`)
-  await p.locator('.sd-ask button', { hasText: 'Cancel' }).click()
   ok(looks <= 2 && reqs.length <= 15, `and asks the server little: whether the file changed ${looks} time${looks === 1 ? '' : 's'} in 10 s, ${reqs.length} requests in all (at most 90 a minute, as everywhere)`, [...new Set(reqs)])
+  // A cell picked by its name, as in Excel's name box (the mouse would need the grid's sizes).
+  const goTo = async (a1) => {
+    await p.evaluate(() => { const i = [...document.querySelectorAll('.sd-univer input')].find((x) => /^[A-Z]+[0-9]+(:[A-Z]+[0-9]+)?$/.test(x.value)); document.querySelectorAll('[data-name-box]').forEach((x) => x.removeAttribute('data-name-box')); i?.setAttribute('data-name-box', '1') })
+    const nb = p.locator('input[data-name-box]')
+    await nb.click(); await nb.fill(a1); await nb.press('Enter')
+    await sleep(250)
+  }
   // Edited and saved. Left alone and its cells picked, it's still Saved (Univer's own setting up,
   // and its cell editor filled as a cell is picked, aren't changes). A value typed in B3 (Design's
-  // cost) is: Unsaved changes and Save on, and saved, the file has it with its total worked out again.
+  // cost) is: Unsaved changes and Save on, and saved, the file has it with its total worked out
+  // again. Nothing in it is lost by saving here, so there's nothing to say first.
   const sheetState = () => p.locator('.sd-status .sd-state').innerText().catch(() => '')
+  await goTo('B3')
   ok((await sheetState()) === 'Saved', 'a sheet opened, left alone and a cell picked: still Saved', await sheetState())
-  await p.mouse.click(grid.x + 46 + 88 + 44, grid.y + 20 + 24 * 2 + 12)
-  await sleep(300)
   await p.keyboard.type('950')
   await p.keyboard.press('Enter')
   ok(!!(await until(async () => (await sheetState()) === 'Unsaved changes' && (await p.locator('.pane-head button[aria-label="Save"]').isEnabled().catch(() => false)), 5000)), 'a value typed in a cell: Unsaved changes, and Save is on', await sheetState())
   await p.locator('.pane-head button[aria-label="Save"]').click({ timeout: 3000 }).catch(() => {})
-  const keeps = p.locator('.sd-conflict[role="alertdialog"]')
-  ok(/formulas, formats, merged cells and every sheet/.test(await keeps.innerText({ timeout: 5000 }).catch(() => '')), "an Excel file's first save here says what's kept", await keeps.innerText().catch(() => ''))
-  await keeps.locator('button', { hasText: 'Save' }).click({ timeout: 3000 }).catch(() => {})
   const cellsOf = async () => { try { const x = new ExcelJS.Workbook(); await x.xlsx.readFile(path.join(dir, 'budget.xlsx')); const s = x.getWorksheet('Budget'); return { B3: s.getCell('B3').value, B4: s.getCell('B4').value, A1bold: !!s.getCell('A1').font?.bold } } catch { return null } }
   const sheetSaved = await until(async () => { const c = await cellsOf(); return c?.B3 === 950 && c.B4?.formula === 'SUM(B2:B3)' && c.B4.result === 1070 && c.A1bold && (await sheetState()) === 'Saved' && c }, 10000)
-  ok(!!sheetSaved, 'saved: the file has the value, its total worked out again (1070), and its bold heading; the status line says Saved', { cells: await cellsOf(), state: await sheetState() })
-  // A deck, drawn, and its PowerPoint beside it.
+  ok(!!sheetSaved && !(await p.locator('.sd-conflict[role="alertdialog"]').count()), 'saved: the file has the value, its total worked out again (1070), and its bold heading; the status line says Saved, with nothing to warn of first', { cells: await cellsOf(), state: await sheetState() })
+  // The ribbon as Excel's: Ask AI first, then the clipboard, fonts, alignment and number formats;
+  // the formula bar with its name box; the sheet's tabs; Charts under Insert.
+  const ribbon = await p.evaluate(() => {
+    const u = document.querySelector('.sd-univer')
+    const cmd = (id) => !!u.querySelector(`[data-u-command="${id}"]`)
+    return { ask: cmd('bridge.sheet.ask-ai'), first: u.querySelector('[data-u-command]')?.getAttribute('data-u-command'), tabs: [...u.querySelectorAll('[role="tablist"] [role="tab"], [data-u-comp="ribbon-tab"]')].map((e) => e.textContent.trim()).filter(Boolean), names: [...u.querySelectorAll('input')].map((i) => i.value), sheets: u.innerText.includes('Budget') }
+  })
+  ok(ribbon.ask && ribbon.first === 'bridge.sheet.ask-ai' && ribbon.names.some((v) => /^[A-Z]+\d+$/.test(v)) && ribbon.sheets, 'a sheet\'s ribbon: Ask AI first; the formula bar\'s name box; its sheet\'s tab', ribbon)
+  const sheetCell = async (file, sheet, a1) => { const x = new ExcelJS.Workbook(); await x.xlsx.load(fs.readFileSync(path.join(dir, file))); return x.getWorksheet(sheet).getCell(a1).value }
+  // Ask an agent on a sheet: Ask AI beside it, about the cells picked, to the agent at work there.
+  await goTo('B2')
+  await p.locator('.pane-head button', { hasText: 'Ask an agent' }).click()
+  const askAi = p.locator('.sh-ask')
+  ok(!!(await until(async () => /B2/.test(await askAi.locator('.sh-picked').innerText().catch(() => '')) && /on Budget/.test(await askAi.innerText()) && /1 cell/.test(await askAi.innerText()), 5000)), 'Ask an agent on a sheet: Ask AI beside it, about the cell picked (B2 on Budget)', await askAi.innerText().catch(() => ''))
+  ok(!!(await until(async () => (await askAi.locator('.sh-to select').inputValue()) === agent.paneId, 5000)), 'and it goes to the agent at work there unless you pick another', await askAi.locator('.sh-to select').inputValue().catch(() => ''))
+  ok(JSON.stringify(await askAi.locator('.sh-chip').allInnerTexts()) === JSON.stringify(['Write a formula', 'Clean this column', 'Summarise', 'Chart this']) && !(await bare(p)).length, 'its quick asks: a formula, a cleaned-up column, a summary, a chart; no bare controls', { chips: await askAi.locator('.sh-chip').allInnerTexts(), bare: await bare(p) })
+  await shot(p, `${tag}studio-sheet-ask`)
+  // Asked in place: the agent is told to answer with the change, not to make it.
+  await askAi.locator('.sh-chip', { hasText: 'Write a formula' }).click()
+  ok(!!(await until(() => askAi.locator('textarea').evaluate((e) => e === document.activeElement && e.selectionStart === e.value.length), 2000, 50)), 'and the cursor waits at its end, to finish it in your words')
+  await askAi.locator('textarea').press('End')
+  await askAi.locator('textarea').pressSequentially('doubles the cost in column C')
+  ok(/^Write a formula for the cells I picked that doubles the cost in column C$/.test(await askAi.locator('textarea').inputValue()), 'Write a formula starts the ask, to finish in your words', await askAi.locator('textarea').inputValue())
+  await askAi.locator('.sh-send').click()
+  const proposed = (x) => /In budget\.xlsx: Write a formula/.test(x) && /Don't change the file itself/.test(x) && /\.budget\.xlsx\.studio-change\.json/.test(x) && /B2 on Budget/.test(x) && /120/.test(x)
+  const told = await until(async () => proposed(typed()) || Object.values((await api('/fleet')).queue || {}).flat().some((i) => proposed(i.text || '')), 20000)
+  ok(!!told && /Asked/.test(await askAi.locator('.sh-wait').innerText().catch(() => '')), 'sent: the cell and its value, and to write the change beside the file rather than make it; Ask AI waits for it', { typed: typed().slice(-600), wait: await askAi.innerText().catch(() => '') })
+  const change = path.join(dir, '.budget.xlsx.studio-change.json')
+  fs.writeFileSync(change, JSON.stringify({ summary: 'Doubled each cost in column C', sheet: 'Budget', cells: { C1: 'Doubled', C2: '=B2*2', C3: '=B3*2' } }))
+  const shown = p.locator('.sh-change')
+  ok(!!(await until(async () => /Doubled each cost/.test(await shown.innerText().catch(() => '')) && /3 cells, marked on the sheet/.test(await shown.innerText()), 10000)) && !fs.existsSync(change), "the agent's change: shown on the sheet before it's made, said in words, and taken from beside the file", await shown.innerText().catch(() => ''))
+  ok(/Unsaved changes/.test(await p.locator('.sd-status').innerText()) && fs.readFileSync(path.join(dir, 'budget.xlsx')).length > 0 && (await sheetCell('budget.xlsx', 'Budget', 'C2')) == null, "and the file isn't changed until it's kept and saved", await p.locator('.sd-status').innerText())
+  await shot(p, `${tag}studio-sheet-proposal`)
+  await shown.locator('button', { hasText: 'Keep' }).click()
+  await p.locator('.pane-head button', { hasText: 'Save' }).click()
+  const c2 = await until(async () => { const v = await sheetCell('budget.xlsx', 'Budget', 'C2').catch(() => null); return v?.formula ? v : null }, 10000)
+  ok(c2?.formula === 'B2*2' && c2.result === 240 && (await sheetCell('budget.xlsx', 'Budget', 'C1')) === 'Doubled', 'kept and saved: the formulas in the file, with their results', c2)
+  // Another, put back: the cells as they were.
+  await askAi.locator('textarea').fill('Rename the first column')
+  await askAi.locator('.sh-send').click()
+  await until(async () => /Asked/.test(await askAi.locator('.sh-wait').innerText().catch(() => '')), 10000)
+  fs.writeFileSync(change, JSON.stringify({ summary: 'Renamed it', cells: { A1: 'Thing' } }))
+  await until(async () => (await shown.count()) > 0, 10000)
+  await shown.locator('button', { hasText: 'Put back' }).click()
+  await p.locator('.pane-head button', { hasText: 'Save' }).click().catch(() => {})
+  await sleep(1500)
+  ok((await sheetCell('budget.xlsx', 'Budget', 'A1')) === 'Item', 'put back: nothing of it is left in the file', await sheetCell('budget.xlsx', 'Budget', 'A1'))
+  // Summarise: an answer, said beside the sheet; nothing to keep.
+  await askAi.locator('.sh-chip', { hasText: 'Summarise' }).click()
+  await askAi.locator('.sh-send').click()
+  await until(async () => /Asked/.test(await askAi.locator('.sh-wait').innerText().catch(() => '')), 10000)
+  fs.writeFileSync(change, JSON.stringify({ answer: 'Two costs come to 1,020; design is most of it.' }))
+  ok(!!(await until(async () => /Two costs come to 1,020/.test(await shown.innerText().catch(() => '')) && (await shown.locator('button', { hasText: 'Copy' }).count()) === 1, 10000)), 'Summarise: the answer beside the sheet, to copy', await shown.innerText().catch(() => ''))
+  await shown.locator('button', { hasText: 'Done' }).click()
+  // Chart this: drawn from the cells before it's added, then in Charts, and saved as an Excel chart.
+  await goTo('A1:B3')
+  await askAi.locator('.sh-chip', { hasText: 'Chart this' }).click()
+  await askAi.locator('.sh-send').click()
+  await until(async () => /Asked/.test(await askAi.locator('.sh-wait').innerText().catch(() => '')), 10000)
+  fs.writeFileSync(change, JSON.stringify({ summary: 'A column chart of the costs', chart: { type: 'column', title: 'Costs', range: 'A1:B3' } }))
+  ok(!!(await until(async () => (await shown.locator('svg .sc-bar').count()) === 2 && /Costs/.test(await shown.innerText()), 10000)), 'Chart this: the chart drawn from the cells, before it\'s added', await shown.innerHTML().catch(() => ''))
+  await shot(p, `${tag}studio-sheet-chart`)
+  await shown.locator('button', { hasText: 'Keep' }).click()
+  await p.locator('.sd-univer [data-u-command="bridge.sheet.charts"]').click({ timeout: 3000 }).catch(async () => { await p.locator('.sd-univer [role="tab"]', { hasText: 'Insert' }).first().click(); await p.locator('.sd-univer [data-u-command="bridge.sheet.charts"]').click() })
+  ok(!!(await until(async () => /Costs/.test(await p.locator('.sh-charts').innerText().catch(() => '')) && (await p.locator('.sh-charts svg .sc-bar').count()) === 2, 5000)), 'Charts: the one kept, drawn from its cells', await p.locator('.sh-charts').innerText().catch(() => ''))
+  await p.locator('.pane-head button', { hasText: 'Save' }).click()
+  const JSZip0 = require('jszip')
+  const chartIn = await until(async () => { try { const z = await JSZip0.loadAsync(fs.readFileSync(path.join(dir, 'budget.xlsx'))); const c = Object.keys(z.files).find((n) => /^xl\/charts\/chart\d+\.xml$/.test(n)); return c ? z.file(c).async('string') : null } catch { return null } }, 10000)
+  ok(!!chartIn && /<c:barChart>/.test(chartIn) && /Budget!\$B\$2:\$B\$3/.test(chartIn) && /Costs/.test(chartIn), 'saved as an Excel chart of those cells', chartIn && chartIn.slice(0, 400))
+  // A filter, from the Data tab, saved as Excel's own.
+  await goTo('A1:C3')
+  await p.locator('.sd-univer [role="tab"]', { hasText: 'Data' }).click()
+  await p.locator('.sd-univer [data-u-command="sheet.command.smart-toggle-filter"]').first().click()
+  await until(async () => /Unsaved changes/.test(await p.locator('.sd-status').innerText()), 5000)
+  await p.locator('.pane-head button', { hasText: 'Save' }).click()
+  const sheetXml = () => JSZip0.loadAsync(fs.readFileSync(path.join(dir, 'budget.xlsx'))).then((z) => z.file('xl/worksheets/sheet1.xml').async('string')).catch(() => '')
+  ok(!!(await until(async () => /<autoFilter ref="A1:C3"/.test(await sheetXml()), 10000)), 'Data › Filter on the cells picked: saved as an Excel filter on them', (await sheetXml()).slice(-600))
+  await p.locator('.sd-univer [role="tab"]', { hasText: 'Start' }).click()
+  // A change that can't be read is said, not dropped.
+  await p.locator('.sd-univer [data-u-command="bridge.sheet.ask-ai"]').click({ timeout: 3000 }).catch(async () => { await p.locator('.sd-univer [role="tab"]', { hasText: 'Start' }).first().click(); await p.locator('.sd-univer [data-u-command="bridge.sheet.ask-ai"]').click() })
+  await askAi.locator('textarea').fill('Anything')
+  await askAi.locator('.sh-send').click()
+  await until(async () => /Asked/.test(await askAi.locator('.sh-wait').innerText().catch(() => '')), 10000)
+  fs.writeFileSync(change, '{ not json')
+  ok(!!(await until(async () => /isn't JSON Studio can read/.test(await askAi.locator('.sh-wait.bad').innerText().catch(() => '')), 10000)), "an agent's change that isn't JSON: said so", await askAi.innerText().catch(() => ''))
+  await askAi.locator('.sh-wait.bad button', { hasText: 'OK' }).click()
+  await p.locator('.sh-ask button[aria-label="Close"]').click()
+  // An Excel file's round trip: opened, one cell changed, saved, opened again. Everything else in
+  // it is the same bytes (its chart, its drawing, its styles, the other sheet), and what's read
+  // back is what was there, with the one change.
+  const JSZip1 = require('jszip')
+  const entries = async (file) => { const z = await JSZip1.loadAsync(fs.readFileSync(file)); const out = {}; for (const n of Object.keys(z.files).sort()) if (!z.files[n].dir) out[n] = await z.file(n).async('nodebuffer'); return out }
+  const ledgerWas = await entries(path.join(dir, 'ledger.xlsx'))
+  await open('ledger.xlsx')
+  await until(async () => (await p.locator('.sd-univer canvas').count()) > 0 && /Ledger/.test(await p.locator('.sd-univer').innerText().catch(() => '')), 30000)
+  await sleep(800)
+  await goTo('B3')
+  await p.keyboard.type('395')
+  await p.keyboard.press('Enter')
+  await until(async () => /Unsaved changes/.test(await p.locator('.sd-status').innerText()), 5000)
+  await p.locator('.pane-head button', { hasText: 'Save' }).click()
+  await until(async () => /Saved/.test(await p.locator('.sd-status .sd-state').innerText()) && !(await p.locator('.sd-conflict').count()), 10000)
+  const ledgerNow = await entries(path.join(dir, 'ledger.xlsx'))
+  const differ = Object.keys({ ...ledgerWas, ...ledgerNow }).filter((n) => !ledgerWas[n] || !ledgerNow[n] || !ledgerWas[n].equals(ledgerNow[n]))
+  ok(differ.every((n) => ['xl/worksheets/sheet1.xml', 'xl/workbook.xml', 'xl/calcChain.xml', 'xl/sharedStrings.xml', 'xl/styles.xml', '[Content_Types].xml', 'xl/_rels/workbook.xml.rels'].includes(n)) && differ.includes('xl/worksheets/sheet1.xml') && !!ledgerNow['xl/charts/chart1.xml'] && !!ledgerNow['xl/drawings/drawing1.xml'], 'an Excel file saved here: only the changed sheet is written again; its chart, drawing, styles and other sheet are the same bytes', differ)
+  const lb = new ExcelJS.Workbook()
+  await lb.xlsx.load(fs.readFileSync(path.join(dir, 'ledger.xlsx')))
+  const lsh = lb.getWorksheet('Ledger')
+  const back = { b3: lsh.getCell('B3').value, b5: lsh.getCell('B5').value, b2: [lsh.getCell('B2').numFmt, lsh.getCell('B2').border?.bottom?.style], bold: lsh.getCell('A1').font?.bold, cf: lsh.conditionalFormattings?.length, dv: lsh.getCell('C2').dataValidation?.type, note: lsh.getCell('C4').note, link: lsh.getCell('A7').value?.hyperlink, merged: lsh.getCell('E1').isMerged, frozen: lsh.views?.[0]?.state, name: lb.definedNames.getRanges('Spend')?.ranges?.[0], notes: lb.getWorksheet('Notes')?.getCell('A1').value, width: lsh.getColumn(1).width }
+  ok(back.b3 === 395 && back.b5?.formula === 'SUM(B2:B4)' && back.b2[0] === '#,##0.00' && back.b2[1] === 'thin' && back.bold && back.cf === 1 && back.dv === 'list' && /Checked/.test(JSON.stringify(back.note)) && back.link === 'https://example.com/policy' && back.merged && back.frozen === 'frozen' && /\$B\$2:\$B\$4/.test(back.name || '') && back.notes === 'Kept' && back.width === 18, 'opened again: the change, and everything else as it was (formats, the formula, the conditional format, the dropdown, the note, the link, the merged title, the frozen row, the name, the other sheet, the widths)', back)
+  // A CSV: read as it's written, its separator, encoding and line endings said, and written back
+  // the same way, only the field changed different.
+  await open('people.csv')
+  const csvBar = p.locator('.sh-csv')
+  ok(!!(await until(async () => (await csvBar.locator('select').first().inputValue().catch(() => '')) === ';' && (await csvBar.locator('select').nth(1).inputValue()) === 'utf-8-bom' && /Windows line endings/.test(await csvBar.innerText()), 15000)), "a CSV: its separator (semicolons), encoding (UTF-8 with a BOM) and line endings found, and said", await csvBar.innerText().catch(() => ''))
+  ok(!(await p.locator('.sd-univer [data-u-command="sheet.command.set-range-bold"]').count()) && (await p.locator('.sd-univer [data-u-command="bridge.sheet.ask-ai"]').count()) === 1, "and its ribbon offers no formats, which a CSV can't keep")
+  await shot(p, `${tag}studio-sheet-csv`)
+  await sleep(500)
+  await goTo('B2')
+  await p.keyboard.type('Lakeside')
+  await p.keyboard.press('Enter')
+  await until(async () => /Unsaved changes/.test(await p.locator('.sd-status').innerText()), 5000)
+  await p.locator('.pane-head button', { hasText: 'Save' }).click()
+  const wroteCsv = await until(() => { const x = fs.readFileSync(path.join(dir, 'people.csv'), 'utf8'); return x.includes('Lakeside') && x }, 10000)
+  ok(wroteCsv === peopleCsv.replace('Springfield', 'Lakeside'), 'saved: the same bytes but the one field (its BOM, semicolons, Windows line endings, quotes and leading zeros kept)', JSON.stringify(wroteCsv))
+  // A deck, drawn, and its PowerPoint beside it (the deck editor itself: studio-deck).
   await open('pitch.md')
-  const slides = await until(async () => { const h = await p.locator('.sd-deck-view').getAttribute('srcdoc').catch(() => ''); return (h.match(/<svg data-marpit-svg/g) || []).length }, 15000)
+  const slides = await until(async () => p.locator('.sd-strip .sd-thumb').count(), 15000)
   ok(slides === 2, 'a Markdown deck is drawn as its slides', slides)
-  ok(!!(await until(async () => { const x = await p.locator('.sd-status').innerText(); return /2 slides/.test(x) && /Markdown deck/.test(x) }, 5000)) && !(await bare(p)).length, 'its status line: 2 slides, a Markdown deck; no bare controls', { status: await p.locator('.sd-status').innerText(), bare: await bare(p) })
-  await p.locator('.sd-toolbar [role="tab"]', { hasText: 'Slides' }).click()
-  const alone = !!(await until(async () => (await p.locator('.sd-deck-md').count()) === 0 && (await p.locator('.sd-deck-view').count()) === 1, 3000, 100))
-  await p.locator('.sd-toolbar [role="tab"]', { hasText: 'Both' }).click()
-  ok(alone && !!(await until(async () => (await p.locator('.sd-deck-md').count()) === 1, 3000, 100)), 'Slides alone, for room, and back to both')
-  ok(await p.locator('.sd-deck-md').evaluate((e) => getComputedStyle(e).fontVariantLigatures) === 'none', 'the deck\'s Markdown shows what\'s typed: no ligatures (<!-- and --> as typed)')
-  await p.locator('.sd-toolbar button', { hasText: 'PowerPoint' }).click()
+  ok(!!(await until(async () => { const x = await p.locator('.sd-status').innerText(); return /Slide 1 of 2/.test(x) && /Markdown deck/.test(x) }, 5000)) && !(await bare(p)).length, 'its status line: slide 1 of 2, a Markdown deck; no bare controls', { status: await p.locator('.sd-status').innerText(), bare: await bare(p) })
+  const mdToggle = p.locator('.sd-deck-tools button[aria-label="Markdown"]')
+  await mdToggle.click()
+  const both = !!(await until(async () => (await p.locator('.sd-deck-md').count()) === 1 && (await p.locator('.sd-canvas').count()) === 1, 3000, 100))
+  ok(both && await p.locator('.sd-deck-md').evaluate((e) => getComputedStyle(e).fontVariantLigatures) === 'none', 'its Markdown beside the slides, showing what\'s typed: no ligatures (<!-- and --> as typed)')
+  await p.locator('.sd-deck-tools button[aria-label="Export"]').click()
+  await p.locator('.sd-tool-menu .menu-item', { hasText: 'PowerPoint, beside it' }).click()
   ok(!!(await until(() => fs.existsSync(path.join(dir, 'pitch.pptx')) && fs.readFileSync(path.join(dir, 'pitch.pptx')).subarray(0, 2).toString() === 'PK', 15000)), 'PowerPoint: pitch.pptx beside it')
   await shot(p, `${tag}studio-deck`)
-  // Its look: the default pack, until the deck names another (pack: Board), which Look writes.
-  const drawn = () => p.locator('.sd-deck-view').getAttribute('srcdoc').catch(() => '')
-  ok(/#ff8800!important/.test(await drawn()), 'a deck is drawn in your default design pack', (await drawn()).slice(-400))
+  // Its look: the default pack, until the deck names another (pack: Board), which Theme writes.
+  const drawn = () => p.locator('.sd-deck2 > style').innerText().catch(() => '')
+  ok(/#ff8800/.test(await drawn()), 'a deck is drawn in your default design pack', (await drawn()).slice(0, 400))
   await api('/studio/packs', { name: 'Board', colors: { background: '#ffffff', text: '#222222', accent: '#0a7d4f' }, fonts: { heading: 'Georgia', body: 'Georgia' } })
   await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-refetch', { detail: '/studio/packs' })))
-  const look = p.locator('.sd-look select')
-  await look.waitFor({ timeout: 15000 })
-  await look.selectOption({ label: 'Board' })
+  const theme = async (name) => { await p.locator('.sd-deck-tools button[aria-label="Theme"]').click(); await p.locator('.sd-themes button', { hasText: name }).first().click() }
+  await until(async () => { await p.locator('.sd-deck-tools button[aria-label="Theme"]').click(); const n = await p.locator('.sd-themes button', { hasText: 'Board' }).count(); await p.keyboard.press('Escape'); return n > 0 }, 15000, 500)
+  await theme('Board')
   const deckMd = () => p.locator('.sd-deck-md').inputValue()
-  ok(!!(await until(async () => /^---\nmarp: true\npack: Board\n---\n/.test(await deckMd()) && /#0a7d4f!important/.test(await drawn()), 5000)), 'Look: another pack, written in its front matter and drawn in it', await deckMd())
+  ok(!!(await until(async () => /^---\nmarp: true\npack: Board\n---\n/.test(await deckMd()) && /#0a7d4f/.test(await drawn()), 5000)), 'Theme: another pack, written in its front matter and drawn in it', await deckMd())
   await shot(p, `${tag}studio-look`)
-  await look.selectOption({ label: 'Bold (your default)' })
-  ok(!!(await until(async () => !/pack:/.test(await deckMd()) && /#ff8800!important/.test(await drawn()), 5000)), 'and back to the default: the line is gone', await deckMd())
+  await theme('Bold (your default)')
+  ok(!!(await until(async () => !/pack:/.test(await deckMd()) && /#ff8800/.test(await drawn()), 5000)), 'and back to the default: the line is gone', await deckMd())
   await p.locator('.sd-deck-md').fill('---\nmarp: true\npack: "board"\n---\n\n# Pitch\n')
-  ok(!!(await until(async () => /#0a7d4f!important/.test(await drawn()), 5000)), 'a deck that names its pack (any case, quoted or not) is drawn in it')
+  ok(!!(await until(async () => /#0a7d4f/.test(await drawn()), 5000)), 'a deck that names its pack (any case, quoted or not) is drawn in it')
   await p.locator('.sd-deck-md').fill('---\nmarp: true\npack: Nowhere\n---\n\n# Pitch\n')
-  ok(!!(await until(async () => /#ff8800!important/.test(await drawn()) && (await p.locator('.sd-toolbar', { hasText: 'No pack "Nowhere"' }).count()) > 0, 5000)), "a pack you don't have: your default, and it says so")
+  ok(!!(await until(async () => /#ff8800/.test(await drawn()) && (await p.locator('.sd-toolbar', { hasText: 'No pack "Nowhere"' }).count()) > 0, 5000)), "a pack you don't have: your default, and it says so")
   // New, in your default pack's look (Bold: Georgia headings in orange; its near-white text isn't
   // used on a white Word page).
   const make = async (label, name) => {
@@ -407,11 +475,11 @@ try {
   await code.fill('<!doctype html><title>Dash</title><h1 id="h">Revenue</h1>')
   ok(!!(await until(async () => /Revenue/.test(await p.locator('.sd-page-view').getAttribute('srcdoc').catch(() => '')), 5000)), 'a page is drawn as you type it')
   ok(!!(await until(async () => { const x = await p.locator('.sd-status').innerText(); return /HTML page/.test(x) && /Unsaved changes/.test(x) }, 5000)) && !(await bare(p)).length, 'its status line: an HTML page, with unsaved changes; no bare controls', { status: await p.locator('.sd-status').innerText(), bare: await bare(p) })
-  // A PDF: shown, or where the browser shows one only on its own, saying so with it a tap away.
-  // Nothing to save, and it says so.
+  // A PDF: drawn in the page by pdf.js, in every browser (studio-pdf.mjs has the rest). Nothing to
+  // save, and it says so.
   await open('report.pdf')
-  const pdf = await until(async () => ((await p.locator('iframe.sd-pdf').count()) ? 'inline' : (await p.locator('.sd-empty', { hasText: 'shows a PDF on its own' }).locator('a', { hasText: 'Open it' }).count()) ? 'said' : null), 10000)
-  ok(!!pdf && !!(await until(async () => /Read only/.test(await p.locator('.sd-status').innerText()), 5000)) && (await p.locator('.pane-head button', { hasText: 'Save' }).count()) === 0 && !(await bare(p)).length, `a PDF: ${pdf === 'said' ? 'this browser shows one only on its own, which it says, with Open it' : 'shown in the page'}; read only, no Save`, { pdf, status: await p.locator('.sd-status').innerText().catch(() => ''), bare: await bare(p) })
+  const pdf = await until(async () => (await p.locator('.sd-pdf .pdfViewer .page canvas').count()) > 0, 15000)
+  ok(!!pdf && !!(await until(async () => /Read only/.test(await p.locator('.sd-status').innerText()), 5000)) && (await p.locator('.pane-head button', { hasText: 'Save' }).count()) === 0 && !(await bare(p)).length, 'a PDF: drawn in the page; read only, no Save', { pdf, status: await p.locator('.sd-status').innerText().catch(() => ''), bare: await bare(p) })
   await shot(p, `${tag}studio-pdf`)
   ok(w.errors.length === 0, 'no page errors', w.errors)
   // On a phone, 375 and 430 px: Studio from More, its home and a document fitting the screen.
@@ -422,12 +490,12 @@ try {
     await ph.p.locator('nav.tabbar button', { hasText: 'More' }).first().click({ timeout: 20000 })
     await ph.p.locator('button, .m-more-row', { hasText: 'Studio' }).first().click({ timeout: 10000 })
     await ph.p.waitForSelector('.sd-home', { timeout: 15000 })
-    await until(async () => (await ph.p.locator('.sd-recent li').count()) > 0, 10000)
+    await until(async () => (await ph.p.locator('.sd-files-row', { hasText: 'notes.md' }).count()) > 0, 10000)
     await sleep(400)
     let f = await phoneFaults(ph.p, '.sd-home')
     ok(!Object.keys(f).length, `phone ${width}: Studio's home fits (nothing wider, past its edge or cut off; each control a whole 40 px target, each field 16 px)`, f)
     await shot(ph.p, `${tag}studio-home-phone-${width}`)
-    await ph.p.locator('.sd-recent-open', { hasText: 'notes.md' }).first().click()
+    await ph.p.locator('.sd-file-name', { hasText: 'notes.md' }).first().click()
     ok(!!(await until(async () => /Notes/.test(await ph.p.locator('.sd-page .ProseMirror').innerText().catch(() => '')), 15000)), `phone ${width}: Studio in More, a document opened`)
     await sleep(400)
     f = await phoneFaults(ph.p, '.sd-file')
@@ -445,7 +513,30 @@ try {
     f = await phoneFaults(ph.p, '.sd-ask')
     ok(!Object.keys(f).length, `phone ${width}: Ask an agent fits, its fields at 16 px`, f)
     await ph.p.locator('.sd-ask button', { hasText: 'Cancel' }).click()
+    // A sheet: the grid with its tabs, and Ask AI over it from the bottom, fitting.
+    await ph.p.evaluate(({ root }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: 'budget.xlsx' } })), { root })
+    ok(!!(await until(async () => (await ph.p.locator('.sd-univer canvas').count()) > 0 && /Budget/.test(await ph.p.locator('.sd-univer').innerText().catch(() => '')), 30000)), `phone ${width}: a sheet opens, with its tabs`)
+    await sleep(600)
+    ok(await ph.p.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), `phone ${width}: the sheet fits the screen`)
+    await shot(ph.p, `${tag}studio-sheet-phone-${width}`)
+    await ph.p.locator('.pane-head button[aria-label="Ask an agent"]').click()
+    await ph.p.locator('.sh-ask textarea').waitFor({ timeout: 5000 })
+    f = await phoneFaults(ph.p, '.sh-side')
+    ok(!Object.keys(f).length, `phone ${width}: Ask AI fits over the sheet, each button a whole target, its fields at 16 px`, f)
+    await shot(ph.p, `${tag}studio-sheet-ask-phone-${width}`)
+    await ph.p.locator('.sh-ask button[aria-label="Close"]').click()
   }
+  // Dark: a sheet in the app's dark look, Ask AI beside it.
+  const night = await page(b, kit.url, { width: 1440, height: 900, mode: 'dark' })
+  pages.push(night)
+  await night.p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
+  // Asked again until it opens (a page just loaded may not be listening yet).
+  await until(async () => { if (!(await night.p.locator('.sd-univer').count())) await night.p.evaluate(({ root }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: 'ledger.xlsx' } })), { root }); return (await night.p.locator('.sd-univer canvas').count()) > 0 }, 30000, 1000)
+  await sleep(1200)
+  await night.p.locator('.sd-univer [data-u-command="bridge.sheet.ask-ai"]').click()
+  await night.p.locator('.sh-ask').waitFor({ timeout: 5000 })
+  await shot(night.p, `${tag}studio-sheet-dark`)
+  ok(night.errors.length === 0, 'dark: no page errors', night.errors)
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
   console.log(kit.log().slice(-1500))

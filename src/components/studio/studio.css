@@ -109,12 +109,11 @@
 .sd-linkbar input { flex: 1 1 220px; min-width: 0; height: 28px; padding: 0 9px; border: 1px solid var(--line-2, var(--line)); border-radius: 7px; background: var(--pane); color: var(--ink); font: 13px var(--font); }
 .sd-linkbar input:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
 
-/* Documents. A Word file is a page: its width and margins as printed (8.5 in, 1 in), on a desk.
-   Markdown is a column to read and write in, as wide as reads well. */
+/* Documents (doc.css has their pages, toolbar and panes). Markdown is a column to read and write
+   in, as wide as reads well. */
 .sd-doc { min-height: 100%; background: var(--pane-2); }
 .sd-doc.md { background: var(--pane); }
 .sd-page { color: var(--ink); font: 15.5px/1.65 var(--font); }
-.sd-page.word { box-sizing: border-box; width: 816px; max-width: calc(100% - 48px); min-height: 1056px; margin: 24px auto 48px; padding: 96px clamp(24px, 11.8%, 96px); background: var(--pane); border-radius: 3px; box-shadow: 0 0 0 1px var(--line), 0 1px 3px rgb(0 0 0 / .06), 0 8px 24px rgb(0 0 0 / .06); }
 .sd-page.md { max-width: 740px; margin: 0 auto; padding: 36px 32px 96px; }
 .sd-page:not(.word):not(.md) { max-width: 820px; margin: 18px auto 40px; padding: 48px 64px; }
 .sd-page .ProseMirror { outline: none; min-height: 60vh; }
@@ -139,23 +138,6 @@
 /* Where to start writing, in an empty document or under a new one's title. */
 .sd-page .ProseMirror > p:only-child:has(> br.ProseMirror-trailingBreak:only-child)::before,
 .sd-page .ProseMirror > :is(h1, h2, h3):first-child + p:last-child:has(> br.ProseMirror-trailingBreak:only-child)::before { content: var(--sd-ph); float: left; height: 0; color: var(--ink-3); pointer-events: none; }
-/* A Word file in its own look (look.js): its fonts, sizes and colours; on paper when it has colours. */
-.sd-page.word { font-family: var(--doc-font, var(--font)); font-size: var(--doc-size, 15.5px); }
-.sd-page.paper { background: #fff; color: var(--doc-color, #1f2328); }
-.sd-page.paper th, .sd-page.paper pre { background: #f3f4f6; }
-/* Paper is white in a dark look too: its lines drawn for white, not the look's light ones. */
-.sd-page.paper td, .sd-page.paper th { border-color: #d0d7de; }
-.sd-page.paper hr { border-top-color: #d0d7de; }
-.sd-page.paper .ProseMirror > p:only-child:has(> br.ProseMirror-trailingBreak:only-child)::before,
-.sd-page.paper .ProseMirror > :is(h1, h2, h3):first-child + p:last-child:has(> br.ProseMirror-trailingBreak:only-child)::before { color: #8a92a3; }
-.sd-page.word h1 { font-family: var(--doc-h1-font, inherit); color: var(--doc-h1-color, inherit); font-size: var(--doc-h1-size, 1.9em); }
-.sd-page.word h2 { font-family: var(--doc-h2-font, inherit); color: var(--doc-h2-color, inherit); font-size: var(--doc-h2-size, 1.45em); }
-.sd-page.word h3 { font-family: var(--doc-h3-font, inherit); color: var(--doc-h3-color, inherit); font-size: var(--doc-h3-size, 1.2em); }
-.sd-page.word h4 { font-family: var(--doc-h4-font, inherit); color: var(--doc-h4-color, inherit); font-size: var(--doc-h4-size, 1em); }
-.sd-page.word h5 { font-family: var(--doc-h5-font, inherit); color: var(--doc-h5-color, inherit); font-size: var(--doc-h5-size, 1em); }
-.sd-page.word h6 { font-family: var(--doc-h6-font, inherit); color: var(--doc-h6-color, inherit); font-size: var(--doc-h6-size, 1em); }
-.sd-page.word blockquote { border-left: 0; padding: 0 .5in; font-style: italic; }
-.sd-page.paper blockquote { color: #595959; }
 /* The code font's ligatures off, after the font shorthand (which resets them): <!-- and --> as typed. */
 .sd-plain, .sd-code, .sd-deck-md { display: block; width: 100%; height: 100%; min-height: 60vh; padding: 16px 18px; border: 0; resize: none; background: var(--pane); color: var(--ink); font: 13px/1.6 var(--font-mono); outline: none; font-variant-ligatures: none; }
 .sd-plain { max-width: 860px; margin: 0 auto; padding: 28px 32px; }
@@ -250,7 +232,6 @@
   .sd-home { padding: 16px 16px 32px; }
   .sd-body.with-panel { grid-template-columns: minmax(0, 1fr); }
   .sd-panel { position: absolute; inset: 0; z-index: 3; }
-  .sd-page.word { width: auto; max-width: none; min-height: 0; margin: 0; padding: 24px 18px 48px; border-radius: 0; box-shadow: none; }
   .sd-page.md, .sd-page:not(.word):not(.md) { margin: 0; padding: 22px 18px 48px; }
   .sd-deck-cols, .sd-page-cols { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); }
   .sd-deck-cols.show-md, .sd-deck-cols.show-slides, .sd-page-cols.show-code, .sd-page-cols.show-page { grid-template-rows: minmax(0, 1fr); }
@@ -285,6 +266,7 @@
 .app.narrow .sd-status-btn { height: 40px; padding: 0 8px; }
 .app.narrow .sd-status-btn.vers { display: none; } /* the header's clock is there */
 .app.narrow .sd-empty .btn.small { height: 40px; padding: 0 14px; }
+.app.narrow .sd-conflict .btn.small, .app.narrow .sd-conflict .ghost-btn { min-height: 40px; }
 .app.narrow .sd-versions li { padding: 4px 6px; }
 .app.narrow .sd-v-acts { gap: 4px; }
 .app.narrow .sd-v-acts .link-btn { min-height: 40px; min-width: 40px; display: inline-flex; align-items: center; justify-content: center; }

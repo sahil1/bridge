@@ -70,8 +70,9 @@ export function useCalendar() {
   return usePoll('/calendar', 3 * 60 * 1000)
 }
 
+// A meeting you declined isn't one of yours to go to: not next, not on now.
 function split(events, now) {
-  const timed = events.filter((e) => !e.allDay && !e.canceled)
+  const timed = events.filter((e) => !e.allDay && !e.canceled && e.response !== 'declined')
   return {
     allDay: events.filter((e) => e.allDay),
     past: timed.filter((e) => new Date(e.end) <= now),

@@ -3,6 +3,8 @@ import Icon, { StatusDot } from '../Icon.jsx'
 import { api, usePoll, useFleet } from '../../api.js'
 import { MEETINGS_CHANNEL, clock, useCallEvent, QuickNote, endedWords } from './recording.jsx'
 import { KIND, setAssist, markAssist } from './assist.jsx'
+import { PrepCard } from './prep.jsx'
+import { joined } from '../Agenda.jsx'
 import { t, locale } from '../../i18n/index.js'
 import './meetings.css'
 
@@ -15,7 +17,8 @@ import './meetings.css'
 // menu bar for the meeting, out of the way of a screen you share. When a call starts: Take notes.
 // When it ends: Stop or keep recording. Otherwise (Settings › Meetings › Always): what needs you.
 // With AI Assist on, its newest suggestion shows under the bar, open or not, since you're looking
-// at the call: ✓ puts it in your notes, ✕ waves it away.
+// at the call: ✓ puts it in your notes, ✕ waves it away. Ten minutes before a meeting with other
+// people: its prep (who's coming, last time, goals to go in with), Join, and the whole of it.
 // Drag it from anywhere that isn't a button.
 // The recording itself is in the main window; this one asks it over a BroadcastChannel, and asks
 // the desktop app (preload) to start notes for a call, to open things and to fit its size.
@@ -246,6 +249,22 @@ export default function FloatCard() {
           {/* Not now always works, even while Take notes is still starting. */}
           <button type="button" className="ghost-btn" onClick={() => { setErr(null); api('/calls/dismiss', { method: 'POST' }).catch(() => {}).finally(refresh) }}>{t('Not now')}</button>
         </div>
+      </>
+    )
+  } else if (c?.soon) {
+    const e = c.soon
+    const mins = Math.max(1, Math.round((Date.parse(e.start) - Date.now()) / 60000))
+    const day = new Date(e.start).toLocaleDateString('en-CA')
+    body = (
+      <>
+        <div className="fc-head">{grip}<Icon name="calendar" size={14} className="fc-accent" /><b className="fc-title" title={e.title}>{e.title}</b>{hide}</div>
+        <p className="fc-line muted">{mins === 1 ? t('Starts in 1 min, at {time}', { time: new Date(e.start).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' }) }) : t('Starts in {n} min, at {time}', { n: mins, time: new Date(e.start).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' }) })}</p>
+        {e.join && (
+          <div className="fc-acts">
+            <a className="btn small primary fc-join" href={e.join} target="_blank" rel="noreferrer" onClick={() => joined(e)}><Icon name="video" size={12} /> {t('Join')}</a>
+          </div>
+        )}
+        <div className="fc-prep"><PrepCard e={e} size="compact" onSettings={null} onOpenEvent={app().floatOpen ? () => app().floatOpen({ event: { date: day, id: e.id } }) : null} /></div>
       </>
     )
   } else {

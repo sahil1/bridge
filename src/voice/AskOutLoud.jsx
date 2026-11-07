@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import Icon from '../components/Icon.jsx'
 import { api } from '../api.js'
-import { useDictation, press, release, registerAsk } from '../dictation/controller.js'
+import { useDictation, press, release, registerAsk, amend } from '../dictation/controller.js'
+import { sentTo } from '../sendbox.js'
 import { how, onVoices, forEar, say, unlock } from './speak.js'
 import { t } from '../i18n/index.js'
 import './voice.css'
@@ -27,7 +28,7 @@ export default function AskOutLoud({ agent, onSend }) {
     return () => { on = false; off() }
   }, [])
   const dict = useDictation((s) => (s.target?.kind === 'ask' && s.target.id === pid ? s : QUIET))
-  const [state, setState] = useState(null) // null | 'sending' | 'waiting' | 'speaking' | 'heard' | { error }
+  const [state, setState] = useState(null) // null | 'sending' | { queued: its answer } | 'waiting' | 'speaking' | 'heard' | { error }
   const [answer, setAnswer] = useState(null) // the last one heard, to hear again
   const speaking = useRef(null)
   const status = useRef(agent.status)
@@ -43,16 +44,16 @@ export default function AskOutLoud({ agent, onSend }) {
     s.done.then(() => { if (speaking.current === s) { speaking.current = null; setState('heard') } })
   }
   const stop = () => { speaking.current?.stop(); speaking.current = null; setState(answer ? 'heard' : null) }
-  // What was said: sent, then the answer waited for (its last reply after the question, once it's
-  // done working) and read aloud.
-  const ask = async (text) => {
+  // What was said: sent (or held while it's busy, which it says, and the dictation is kept as), then
+  // the answer waited for (its last reply after the question, once it's done working) and read aloud.
+  const ask = async (text, said) => {
     const me = ++run.current
     speaking.current?.stop()
     setState('sending')
-    const ok = await onSend(`${MARK} ${text}`)
+    const r = await onSend(`${MARK} ${text}`)
     if (me !== run.current) return
-    if (ok === false) { setState({ error: t('It didn\'t go to the Chief of Staff. Try again.') }); return }
-    setState('waiting')
+    if (r === false) { setState({ error: t('It didn\'t go to the Chief of Staff. Try again.') }); return }
+    if (r?.queued) { setState({ queued: r }); if (said) amend(said, { how: 'queued' }) } else setState('waiting')
     const end = Date.now() + WAIT_MS
     while (Date.now() < end && me === run.current) {
       await new Promise((r) => setTimeout(r, 1500))
@@ -62,6 +63,7 @@ export default function AskOutLoud({ agent, onSend }) {
       let q = -1
       for (let i = msgs.length - 1; i >= 0; i--) if (msgs[i].role === 'user' && String(msgs[i].text || '').includes(text)) { q = i; break }
       if (q < 0) continue
+      setState((s) => (s?.queued ? 'waiting' : s))
       const reply = msgs.slice(q + 1).filter((m) => m.role === 'assistant' && String(m.text || '').trim()).at(-1)
       if (!reply || status.current === 'working') continue
       setAnswer(reply.text)
@@ -70,7 +72,7 @@ export default function AskOutLoud({ agent, onSend }) {
     }
     if (me === run.current) setState({ error: t('No answer yet. It\'s in the chat when it comes.') })
   }
-  useEffect(() => registerAsk(pid, (text) => ask(text)), [pid]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => registerAsk(pid, (text, said) => ask(text, said)), [pid]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => { run.current++; speaking.current?.stop() }, [])
 
   if (!voice?.system && !voice?.espeak) return null
@@ -87,6 +89,7 @@ export default function AskOutLoud({ agent, onSend }) {
   const line = listening ? t('Listening… let go when you\'re done')
     : dict.phase === 'working' ? t('Turning it into text…')
       : state === 'sending' ? t('Asking…')
+        : state?.queued ? sentTo(state.queued, t('Chief of Staff'))
         : state === 'waiting' ? t('The Chief of Staff is working on it…')
           : state === 'speaking' ? t('Reading the answer aloud…')
             : state?.error ? state.error
@@ -98,7 +101,7 @@ export default function AskOutLoud({ agent, onSend }) {
         aria-pressed={listening} title={t('Hold to ask the Chief of Staff out loud; the answer is read to you')}>
         <Icon name={listening ? 'wave' : 'mic'} size={14} /> <span>{t('Ask out loud')}</span>
       </button>
-      <span className={`ask-line${state?.error ? ' error' : ''}`} role="status">{(state === 'waiting' || state === 'sending') && <Icon name="refresh" size={11} className="spin" />} {line}</span>
+      <span className={`ask-line${state?.error ? ' error' : ''}`} role="status">{(state === 'waiting' || state === 'sending') && <Icon name="refresh" size={11} className="spin" />}{state?.queued && <Icon name="clock" size={11} />} {line}</span>
       {state === 'speaking' && <button type="button" className="ghost-btn ask-act" onClick={stop}><Icon name="stop" size={12} /> {t('Stop')}</button>}
       {state === 'heard' && answer && <button type="button" className="ghost-btn ask-act" onClick={() => speak(answer)}><Icon name="repeat" size={12} /> {t('Again')}</button>}
     </div>

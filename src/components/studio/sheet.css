@@ -1,0 +1,106 @@
+/* A sheet (editors/SheetEditor.jsx): Univer's ribbon, formula bar, grid and sheet tabs, with Ask AI
+   and Charts beside it, and a CSV's separator and encoding above it. */
+.sh-body { position: relative; flex: 1; min-height: 0; display: flex; }
+.sh-body > .sd-univer { flex: 1; min-width: 0; min-height: 0; }
+.sh-note { display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--line); }
+.sh-note > svg { flex: none; color: var(--accent); }
+.sh-note > span { flex: 1; min-width: 0; }
+.sh-note .link-btn { flex: none; }
+
+/* A CSV's separator and encoding, plainly, in a strip of its own. */
+.sh-csv { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 6px 16px; border-bottom: 1px solid var(--line); background: var(--pane-2); font-size: 12.5px; color: var(--ink-2); }
+.sh-csv label { display: inline-flex; align-items: center; gap: 6px; }
+.sh-csv select { height: 26px; padding: 0 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--pane); color: var(--ink); font: inherit; }
+.sh-csv-eol { margin-left: auto; }
+
+/* Ask AI and Charts: a panel at the side of the sheet. */
+.sh-side[hidden] { display: none; }
+.sh-side { flex: none; width: 320px; display: flex; flex-direction: column; min-width: 0; min-height: 0; border-left: 1px solid var(--line); background: var(--pane); }
+.sh-side .sd-panel-head { position: static; gap: 6px; }
+.sh-side .sd-panel-head > svg { color: var(--accent); }
+/* Each grid here is one column as wide as the panel (minmax(0, 1fr)), never as wide as its widest
+   word or option: wider fonts (Windows) wrap rather than push the panel sideways. */
+.sh-side-body { flex: 1; min-height: 0; overflow: auto; padding: 12px 14px 16px; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 12px; }
+.sh-picked { margin: 0; font-size: 12.5px; overflow-wrap: anywhere; }
+.sh-picked b { font-family: var(--font-mono); font-weight: 600; }
+.sh-quick { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.sh-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; min-height: 28px; padding: 4px 10px; text-align: left; border: 1px solid var(--line); border-radius: 999px; background: var(--pane-2); color: var(--ink); font: 500 12.5px/1.25 var(--font); cursor: pointer; }
+.sh-chip:hover:not(:disabled) { border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); background: var(--accent-soft); }
+.sh-chip > svg { flex: none; color: var(--accent); }
+.sh-ask-form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; }
+.sh-ask-form textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 84px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--pane); color: var(--ink); font: 13px/1.45 var(--font); }
+.sh-ask-form textarea:focus { outline: none; border-color: color-mix(in srgb, var(--accent) 55%, transparent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.sh-to { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12.5px; color: var(--ink-2); }
+.sh-to select { flex: 1; width: 100%; min-width: 0; height: 28px; border: 1px solid var(--line); border-radius: 6px; background: var(--pane); color: var(--ink); font: inherit; }
+.sh-send { justify-self: end; }
+.sh-wait { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px 8px; padding: 9px 10px; border-radius: 8px; background: var(--pane-2); font-size: 12.5px; line-height: 1.45; color: var(--ink-2); }
+.sh-wait > svg { flex: none; margin-top: 2px; color: var(--accent); }
+.sh-wait > span { flex: 1; min-width: 0; }
+.sh-wait.bad { background: color-mix(in srgb, var(--critical) 8%, var(--pane)); color: var(--critical); }
+.sh-wait.bad > svg { color: var(--critical); }
+.sh-wait.ok > svg { color: var(--ok, #1f9d55); }
+.sh-change { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 10px 12px; border: 1px solid color-mix(in srgb, #7c5cff 45%, var(--line)); border-radius: 10px; background: color-mix(in srgb, #7c5cff 6%, var(--pane)); }
+.sh-sum { font-weight: 600; line-height: 1.4; }
+.sh-answer { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; font-size: 13px; }
+.sh-cells ul { margin: 4px 0 0; padding: 0; list-style: none; display: grid; gap: 2px; font-size: 12px; }
+.sh-cells li { display: flex; gap: 8px; min-width: 0; }
+.sh-cells code { flex: none; min-width: 38px; color: var(--ink-2); }
+.sh-cells li > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); }
+.sh-acts { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* Charts, drawn from the cells. */
+.sh-fig { margin: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; padding: 10px 10px 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--pane); }
+.sh-fig figcaption { font-size: 12.5px; font-weight: 600; }
+.sh-fig figcaption .link-btn { font-weight: 600; color: var(--ink); }
+.sh-none { display: grid; justify-items: center; gap: 8px; padding: 24px 8px; text-align: center; color: var(--ink-2); }
+.sh-none > svg { color: var(--ink-3); }
+.sh-none > b { color: var(--ink); }
+.sc-chart { width: 100%; height: auto; display: block; font: 11px var(--font); }
+.sc-grid { stroke: var(--line); stroke-width: 1; }
+.sc-base { stroke: var(--ink-3); stroke-width: 1; }
+.sc-axis { fill: var(--ink-3); }
+.sc-legend text { fill: var(--ink-2); font-size: 11px; }
+.sc-hole { fill: var(--pane); }
+.sc-slice { stroke: var(--pane); stroke-width: 2; }
+.sc-bar:hover, .sc-slice:hover, .sc-dot:hover { opacity: .8; }
+
+/* Univer, in the app's look: its panels and the sheet's frame follow the app's colours. */
+.sd-univer { --univer-font-family: var(--font); }
+
+@media (max-width: 700px) {
+  .sh-side { position: absolute; left: 0; right: 0; bottom: 0; z-index: 50; width: auto; max-height: 72%; border-left: 0; border-top: 1px solid var(--line); border-radius: 14px 14px 0 0; box-shadow: 0 -8px 28px rgba(0, 0, 0, .18); }
+  .sh-csv { padding: 6px 12px; }
+  .sh-csv-eol { margin-left: 0; }
+}
+.app.narrow .sh-chip { min-height: 40px; padding: 6px 14px; font-size: 14px; }
+.app.narrow .sh-side .win-btn { width: 40px; height: 40px; }
+.app.narrow .sh-ask-form textarea, .app.narrow .sh-to select, .app.narrow .sh-csv select { font-size: 16px; }
+.app.narrow .sh-to select, .app.narrow .sh-csv select { height: 40px; }
+.app.narrow .sh-send, .app.narrow .sh-acts .btn, .app.narrow .sh-acts .ghost-btn { height: 40px; padding: 0 16px; }
+.app.narrow .sh-wait .link-btn, .app.narrow .sh-fig .link-btn { min-height: 40px; }
+.sh-ribbon-icon { color: var(--accent); }
+
+/* A new sheet with nothing in it: how to start, over the grid, out of the way of the cells. */
+.sh-start { position: absolute; left: 50%; bottom: 64px; transform: translateX(-50%); z-index: 50; display: flex; align-items: center; gap: 12px; width: min(560px, calc(100% - 32px)); box-sizing: border-box; padding: 12px 12px 12px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--pane); box-shadow: 0 8px 28px rgba(0, 0, 0, .12); }
+.sh-start > svg { flex: none; color: var(--accent); }
+.sh-start > span { flex: 1; min-width: 0; display: grid; gap: 2px; line-height: 1.4; }
+.sh-start .btn { flex: none; }
+.sh-start .win-btn { flex: none; width: 26px; height: 26px; }
+@media (max-width: 700px) { .sh-start { bottom: 56px; flex-wrap: wrap; } .app.narrow .sh-start .win-btn { width: 40px; height: 40px; } .app.narrow .sh-start .btn { height: 40px; } }
+
+/* Office's fonts, which a Mac or Linux computer may not have: a cell in Calibri is drawn in
+   Calibri where it's installed, else the nearest that is (Carlito is made to its measure), and the
+   file keeps the font's own name. */
+@font-face { font-family: 'Calibri'; src: local('Calibri'), local('Carlito'), local('Helvetica Neue'), local('Arial'); }
+@font-face { font-family: 'Calibri'; font-weight: bold; src: local('Calibri Bold'), local('Calibri-Bold'), local('Carlito Bold'), local('Carlito-Bold'), local('Helvetica Neue Bold'), local('HelveticaNeue-Bold'), local('Arial Bold'), local('Arial-BoldMT'); }
+@font-face { font-family: 'Calibri'; font-style: italic; src: local('Calibri Italic'), local('Calibri-Italic'), local('Carlito Italic'), local('Carlito-Italic'), local('Helvetica Neue Italic'), local('HelveticaNeue-Italic'), local('Arial Italic'), local('Arial-ItalicMT'); }
+@font-face { font-family: 'Calibri'; font-weight: bold; font-style: italic; src: local('Calibri Bold Italic'), local('Calibri-BoldItalic'), local('Carlito Bold Italic'), local('Carlito-BoldItalic'), local('Helvetica Neue Bold Italic'), local('HelveticaNeue-BoldItalic'), local('Arial Bold Italic'), local('Arial-BoldItalicMT'); }
+@font-face { font-family: 'Aptos'; src: local('Aptos'), local('Helvetica Neue'), local('Arial'); }
+@font-face { font-family: 'Aptos'; font-weight: bold; src: local('Aptos Bold'), local('Aptos-Bold'), local('Helvetica Neue Bold'), local('HelveticaNeue-Bold'), local('Arial Bold'), local('Arial-BoldMT'); }
+@font-face { font-family: 'Aptos'; font-style: italic; src: local('Aptos Italic'), local('Aptos-Italic'), local('Helvetica Neue Italic'), local('HelveticaNeue-Italic'), local('Arial Italic'), local('Arial-ItalicMT'); }
+@font-face { font-family: 'Cambria'; src: local('Cambria'), local('Caladea'), local('Georgia'); }
+@font-face { font-family: 'Cambria'; font-weight: bold; src: local('Cambria Bold'), local('Cambria-Bold'), local('Caladea Bold'), local('Caladea-Bold'), local('Georgia Bold'), local('Georgia-Bold'); }
+@font-face { font-family: 'Cambria'; font-style: italic; src: local('Cambria Italic'), local('Cambria-Italic'), local('Caladea Italic'), local('Caladea-Italic'), local('Georgia Italic'), local('Georgia-Italic'); }
+/* On a phone the CSV strip keeps to its two choices; what was found is in its tooltip. */
+.app.narrow .sh-csv-eol { display: none; }
+.app.narrow .sh-csv { gap: 6px 12px; }

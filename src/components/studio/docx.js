@@ -1,12 +1,11 @@
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, ExternalHyperlink, ImageRun, LevelFormat, AlignmentType, BorderStyle } from 'docx'
 import { docxStyles } from './look.js'
 
-// A document as Studio edits it (Tiptap's JSON) written as a Word file: headings, paragraphs with
-// bold, italic, underline, strikethrough, code and links, bulleted and numbered lists (nested),
-// tables, quotes (in Word's Quote style, which Studio reads back as a quote), code blocks, rules and
-// pictures. What a Word file has beyond that (headers, footers, comments, tracked changes, page
-// setup) isn't in Studio's document, so it isn't written: Studio says so before the first save, and
-// the file as it was stays a version. look: the fonts, sizes and colours it had (look.js), kept.
+// A new Word file, from a document as a Tiptap JSON: headings, paragraphs with bold, italic,
+// underline, strikethrough, code and links, bulleted and numbered lists (nested), tables, quotes (in
+// Word's Quote style), code blocks, rules and pictures. Studio makes a new document with it; a Word
+// file that's already there is saved by ooxml.js, which keeps all of it. look: the fonts, sizes and
+// colours to give it (look.js).
 const HEADINGS = [HeadingLevel.HEADING_1, HeadingLevel.HEADING_2, HeadingLevel.HEADING_3, HeadingLevel.HEADING_4, HeadingLevel.HEADING_5, HeadingLevel.HEADING_6]
 
 function runs(nodes = [], extra = {}) {

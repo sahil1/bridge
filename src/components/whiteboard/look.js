@@ -79,12 +79,15 @@ export async function fontsReady(name) {
   try { await Promise.race([document.fonts.load(`16px "${family}"`).then(() => document.fonts.ready), new Promise((r) => setTimeout(r, 3000))]) } catch { /* drawn in the fallback, measured again below */ }
 }
 // Words made before their font had loaded (a diagram handed over, drawn as the board opened),
-// measured again in it. ids: only these and the words in them.
+// measured again in it, so none are cut off (a class diagram's members). ids: only these and the
+// words in them. Words in a shape keep their lines: the shape was sized for them, and measured
+// again they'd wrap in it. Excalidraw measures words again only when it's also asked to mend
+// bindings; only the words are taken from what it gives back.
 export async function remeasure(X, ex, ids = null, name = 'clean') {
   await fontsReady(name)
   const all = ex.getSceneElementsIncludingDeleted()
   const pick = all.filter((e) => !e.isDeleted && (!ids || ids.has(e.id) || ids.has(e.containerId)))
-  const fresh = new Map(X.restoreElements(pick, null, { refreshDimensions: true }).filter((e) => e.type === 'text').map((e) => [e.id, e]))
+  const fresh = new Map(X.restoreElements(pick, null, { refreshDimensions: true, repairBindings: true }).filter((e) => e.type === 'text' && !e.containerId).map((e) => [e.id, e]))
   if (fresh.size) ex.updateScene({ elements: all.map((e) => fresh.get(e.id) || e) })
 }
 

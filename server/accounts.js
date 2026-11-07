@@ -83,8 +83,9 @@ function load() {
   const accounts = (Array.isArray(d.accounts) ? d.accounts : []).filter((a) => a && KINDS[a.kind] && /^[\w-]+$/.test(a.id || ''))
   // names: what you call each kind's usual login. hidden: kinds whose usual login you took off the list.
   // order: each kind's accounts as you put them in Settings (ids), for every list of them.
+  // colors: the color each account goes by (colorsOf), kept once picked or once another is added.
   const obj = (o) => (o && typeof o === 'object' && !Array.isArray(o) ? o : {})
-  memo = { mtime, d: { accounts, active: obj(d.active), names: obj(d.names), hidden: obj(d.hidden), order: obj(d.order) } }
+  memo = { mtime, d: { accounts, active: obj(d.active), names: obj(d.names), hidden: obj(d.hidden), order: obj(d.order), colors: obj(d.colors) } }
   return structuredClone(memo.d)
 }
 function save(d) {
@@ -146,6 +147,50 @@ const rowsOf = (kind, d) => {
   return rows.sort((a, b) => at(a) - at(b))
 }
 const listed = (kind, id, d) => rowsOf(kind, d).some((a) => a.id === id)
+
+// ---------- Each account's color ----------
+// A color for each account of an agent, the same wherever it shows (Usage's bars, the account
+// menus, Settings): one of the app's eight chart colors (--series-1 to --series-8, styles.css),
+// each with a step for the light theme and one for the dark. One you picked; else the first not
+// taken, in the order the accounts were added (your usual login first), so a new list order
+// doesn't repaint them. Kept once another account is added or one removed (keepColors), so none
+// changes then either.
+export const COLORS = 8
+const slot = (v) => { const n = Number(v); return Number.isInteger(n) && n >= 1 && n <= COLORS ? n : null }
+function colorsOf(kind, d) {
+  const ids = [defaultId(kind), ...d.accounts.filter((a) => a.kind === kind).map((a) => a.id)]
+  const out = new Map(ids.map((id) => [id, slot(d.colors[id])]))
+  const taken = new Set([...out.values()].filter(Boolean))
+  let i = 0
+  for (const id of ids) {
+    if (out.get(id)) continue
+    let c = null
+    for (let k = 1; k <= COLORS && !c; k++) if (!taken.has(k)) c = k
+    c ||= (i++ % COLORS) + 1 // more accounts than colors: round again
+    taken.add(c)
+    out.set(id, c)
+  }
+  return out
+}
+const keepColors = (kind, d) => { for (const [id, c] of colorsOf(kind, d)) d.colors[id] = c }
+export const colorOf = (kind, id) => (KINDS[kind] ? colorsOf(kind, load()).get(id) || null : null)
+// Pick one (1 to COLORS), or null for the one it would have. The others keep theirs, even one
+// that had the color picked: two can share one if you want them to.
+export function setColor(id, color) {
+  const kind = String(id || '').replace(/-[^-]+$/, '')
+  if (!known(kind, id)) throw new Error('No such account')
+  const d = load()
+  keepColors(kind, d)
+  if (color == null || color === '') {
+    delete d.colors[id]
+  } else {
+    const c = slot(color)
+    if (!c) throw new Error(`A color is a number from 1 to ${COLORS}`)
+    d.colors[id] = c
+  }
+  save(d)
+  return { id, color: colorsOf(kind, d).get(id) }
+}
 const firstOf = (kind, d) => rowsOf(kind, d)[0].id
 // Auto: the signed-in account with the most left at the last reading (the tighter of its 5-hour
 // and weekly windows, so one about to hit its weekly cap isn't picked). The first listed until there's one.
@@ -225,20 +270,77 @@ export function labelOf(id) {
 // (or forked) stays on its account, and a pane herdr renumbers can be matched again.
 const USED = dataFile('account-use.json')
 const MAX_SESSIONS = 3000 // a month of conversations, for Insights by account
-let used = null // { panes: { paneId: { id, kind } }, sessions: { sessionId: id } }
+let used = null // { panes: { paneId: { id, kind } }, sessions: { sessionId: id }, runs: { sessionId: [[id, from, to]] } }
 function usedNow() {
   if (used) return used
   try { used = JSON.parse(fs.readFileSync(USED, 'utf8')) } catch { /* none yet */ }
   if (!used || typeof used !== 'object') used = {}
   used.panes = used.panes && typeof used.panes === 'object' ? used.panes : {}
   used.sessions = used.sessions && typeof used.sessions === 'object' ? used.sessions : {}
+  used.runs = used.runs && typeof used.runs === 'object' && !Array.isArray(used.runs) ? used.runs : {}
   if (adopt(used.panes)) saveUsed() // panes are filed per herdr session (scope.js)
   return used
 }
 function saveUsed() {
   const s = Object.entries(used.sessions)
   if (s.length > MAX_SESSIONS) used.sessions = Object.fromEntries(s.slice(-MAX_SESSIONS))
+  const cut = Date.now() - RUN_DAYS * 864e5
+  const r = Object.entries(used.runs).map(([k, v]) => [k, Array.isArray(v) ? v.filter((x) => Array.isArray(x) && x[2] >= cut).slice(-MAX_RUNS) : []]).filter(([, v]) => v.length)
+  used.runs = Object.fromEntries(r.slice(-MAX_RUN_SESSIONS))
+  runsDirty = false
   try { ensureDir(DATA); writeFileAtomic(USED, JSON.stringify(used) + '\n', { mode: 0o600 }) } catch { /* read-only disk: keep it in memory */ }
+}
+
+// When each conversation ran on which account, for Usage's split by account (usagesplit.js): a
+// list of [account, from, to] stretches per conversation. Seen live in a pane Bridge AI started on
+// that account, at each look at the agents (seenOn), and each one-off answer it asked an agent for
+// (ranOn). A look after a gap starts a new stretch, so a time nothing was watching isn't counted
+// as seen. The looks come every second or two, so they're written once a minute.
+const RUN_GAP = 90 * 1000
+const RUN_DAYS = 45
+const MAX_RUNS = 200 // stretches of one conversation
+const MAX_RUN_SESSIONS = 5000
+let runsDirty = false
+const runsOf = (u, sessionId) => {
+  const list = u.runs[sessionId] || []
+  delete u.runs[sessionId] // newest last, for the trim in saveUsed
+  u.runs[sessionId] = list
+  return list
+}
+export function seenOn(sessionId, id, at = Date.now()) {
+  if (!sessionId || !id) return
+  const u = usedNow()
+  const last = u.runs[sessionId]?.at(-1)
+  if (last && last[0] === id && at >= last[1] && at - last[2] <= RUN_GAP) { if (at > last[2]) { last[2] = at; runsDirty = true } return }
+  runsOf(u, sessionId).push([id, at, at])
+  runsDirty = true
+}
+export function ranOn(sessionId, id, from, to = Date.now()) {
+  if (!sessionId || !id || !(from <= to)) return
+  runsOf(usedNow(), String(sessionId)).push([id, from, to])
+  saveUsed()
+}
+setInterval(() => { if (runsDirty) saveUsed() }, 60 * 1000).unref()
+process.on('exit', () => { if (runsDirty) saveUsed() })
+// What's known of which account ran each conversation, for usagesplit.js: the stretches above,
+// and the account each conversation was last started on from here (sessions; when isn't kept).
+export function runs() {
+  const u = usedNow()
+  return { runs: u.runs, sessions: u.sessions }
+}
+// Every account Bridge AI knows of a kind, with its config folder: your usual login (listed or
+// not), then the added ones.
+export function folders(kind) {
+  if (!KINDS[kind]) return []
+  return [{ id: defaultId(kind), dir: KINDS[kind].home() }, ...load().accounts.filter((a) => a.kind === kind).map((a) => ({ id: a.id, dir: dirOf(a) }))]
+}
+// The account whose config folder an environment points at (a one-off run's), else your usual login.
+export function idOfEnv(kind, env = {}) {
+  const k = KINDS[kind]
+  if (!k) return null
+  const dir = env[k.env]
+  if (!dir || path.resolve(dir) === path.resolve(k.home())) return defaultId(kind)
+  return load().accounts.find((a) => a.kind === kind && path.resolve(dirOf(a)) === path.resolve(dir))?.id || null
 }
 // A pane just started on account `id` (or moved from `from`, when herdr gives it a new id).
 export function notePane(paneId, kind, id) {
@@ -273,6 +375,11 @@ export function noteSession(sessionId, id) {
   delete u.sessions[sessionId] // newest last, for the trim in saveUsed
   u.sessions[sessionId] = id
   saveUsed()
+}
+// The account a pane was started on from here (not one only remembered for its conversation).
+export function startedOn(kind, paneId) {
+  const p = paneId ? usedNow().panes[paneKey(paneId)] : null
+  return p && p.kind === kind && known(kind, p.id) ? p.id : null
 }
 // The account of an agent of this kind in this pane, or that had this conversation.
 export function accountOf(kind, paneId, sessionId) {
@@ -347,7 +454,8 @@ export function groups() {
   return Object.keys(KINDS).map((kind) => {
     const { setting, pick, active } = choice(kind, d)
     // With who quota-axi says it is, as the quota feed gives for your usual login (Usage masks it).
-    const accounts = rowsOf(kind, d).map((a) => ({ ...view(a, active), account: readings.get(a.id)?.account || null }))
+    const colors = colorsOf(kind, d)
+    const accounts = rowsOf(kind, d).map((a) => ({ ...view(a, active), color: colors.get(a.id), account: readings.get(a.id)?.account || null }))
     return { kind, label: adapter(kind).label, setting, pick, usualHidden: hiddenUsual(kind, d), accounts, ...(hiddenUsual(kind, d) ? { usual: usualView(kind, d, accounts) } : {}) }
   })
 }
@@ -360,7 +468,7 @@ function usualView(kind, d, listed) {
   const id = defaultId(kind)
   const account = readings.get(id)?.account || null
   const k = whoKey(account)
-  return { ...view({ id, kind, label: defaultName(kind, d), isDefault: true, named: !!cleanLabel(d.names?.[kind]) }, null), account, sameAs: (k && listed.find((a) => whoKey(a.account) === k)?.id) || null }
+  return { ...view({ id, kind, label: defaultName(kind, d), isDefault: true, named: !!cleanLabel(d.names?.[kind]) }, null), color: colorsOf(kind, d).get(id), account, sameAs: (k && listed.find((a) => whoKey(a.account) === k)?.id) || null }
 }
 
 export async function list({ refresh = false } = {}) {
@@ -371,11 +479,12 @@ export async function list({ refresh = false } = {}) {
   return Promise.all(Object.keys(KINDS).map(async (kind) => {
     const bin = inst.find((x) => x.kind === kind)?.path || null
     const { setting, pick, active } = choice(kind, d)
+    const colors = colorsOf(kind, d)
     // statusPlan: the plan as the sign-in check names it (Max, ChatGPT), as Settings shows it.
     // account: who quota-axi says it is, which names your usual login until you name it.
     const accounts = await Promise.all(rowsOf(kind, d).map(async (a) => {
       const s = await statusOf(kind, a.id, bin, PATH)
-      return { ...view(a, active, s), statusPlan: s.plan, account: readings.get(a.id)?.account || null }
+      return { ...view(a, active, s), color: colors.get(a.id), statusPlan: s.plan, account: readings.get(a.id)?.account || null }
     }))
     return { kind, label: adapter(kind).label, installed: !!bin, setting, pick, usualHidden: hiddenUsual(kind, d), accounts }
   }))
@@ -409,6 +518,7 @@ export function add(kind, label) {
   if (taken(d, kind, name)) throw new Error(`There's already an account called ${name}`)
   const a = { id: `${kind}-${crypto.randomBytes(4).toString('hex')}`, kind, label: name, createdAt: new Date().toISOString() }
   d.accounts.push(a)
+  keepColors(kind, d)
   save(d)
   prepare(a)
   return a
@@ -515,7 +625,9 @@ export async function remove(id) {
     }
     fs.rmSync(dir, { recursive: true, force: true })
   }
+  keepColors(k, d) // before it goes, so the others keep theirs
   d.accounts = d.accounts.filter((x) => x.id !== id)
+  delete d.colors[id]
   if (wasDefault) d.active[k] = firstOf(k, d)
   save(d)
   statusCache.delete(id)

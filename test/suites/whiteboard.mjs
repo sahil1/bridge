@@ -9,14 +9,17 @@
 //   The app, in Chromium or WebKit: Whiteboards in the sidebar and ⌘K; Excalidraw loaded only when
 //   a board opens; a shape drawn by hand saved to its file and there when opened again; a board the
 //   chief made drawn into shapes when opened, and a new version from it drawn in while it's open;
-//   "Draw this" from the list and on a board (boxes,
-//   arrows joined to them and words you can edit, not a picture; Mermaid that doesn't draw sent
-//   back once); "Change it" in place, and undone; PNG and SVG export; ⌘K over the board opening
-//   Bridge AI's search; a dark theme. Diagram files in an agent's Files tab: .excalidraw drawn and
-//   saved back into the file, .mmd and .drawio (plain and compressed) drawn as shapes, saved
-//   beside or added to Whiteboards; a Mermaid block in Markdown and in the agent's chat opening as
-//   a board. On a phone: the list and a board fit, with Excalidraw's phone tools. Nothing the page
-//   loads comes from anywhere but this computer (Excalidraw's fonts included).
+//   Mermaid's own arrow ends kept (a line has none), an arrow back between two shapes drawn apart
+//   from the first, a sequence diagram's messages in order down the page; words handed over
+//   measured in another font measured again in the board's; "Draw this" from the list and on a
+//   board (boxes, arrows joined to them and words you can edit, not a picture; Mermaid that
+//   doesn't draw sent back once); "Change it" in place, and undone; PNG and SVG export; ⌘K over
+//   the board opening Bridge AI's search; a dark theme. Diagram files in an agent's Files tab:
+//   .excalidraw drawn and saved back into the file, .mmd and .drawio (plain and compressed) drawn
+//   as shapes, saved beside or added to Whiteboards; a Mermaid block in Markdown and in the
+//   agent's chat opening as a board. On a phone: the list and a board fit, with Excalidraw's phone
+//   tools. Nothing the page loads comes from anywhere but this computer (Excalidraw's fonts
+//   included).
 import fs from 'node:fs'
 import path from 'node:path'
 import zlib from 'node:zlib'
@@ -158,6 +161,41 @@ try {
   const cu = chief(['update', 'Checkout', '-'], 'flowchart LR\n  Cart --> Ship[Shipping]\n')
   ok(cu.status === 0, '`bridge board update` hands over a new version', cu.stdout + cu.stderr)
   ok(await until(() => { const j = readBoard('Checkout'); return !j?.bridge && texts(j).includes('Shipping') && !texts(j).includes('Payment') }, 15000), 'which the open board draws in place of the old one, and saves', readBoard('Checkout') && texts(readBoard('Checkout')))
+
+  // Mermaid's own ends kept (a line, no arrowheads), an arrow back drawn apart from the first
+  // rather than on top of it (its words too), and a sequence diagram's messages in order down the
+  // page.
+  const drawnAs = async (title, source, word) => {
+    const { id } = await api('/boards', { title, source: { kind: 'mermaid', text: source } })
+    await p.evaluate((id) => window.dispatchEvent(new CustomEvent('bridge-open-board', { detail: { id } })), id)
+    return until(() => { const j = readBoard(id); return !j?.bridge && texts(j).includes(word) && j }, 20000)
+  }
+  const word = (j, w) => live(j).find((e) => e.type === 'text' && (e.originalText ?? e.text) === w)
+  const holding = (j, w) => { const t = word(j, w); return t && live(j).find((e) => e.id === t.containerId) }
+  const end = (a, i) => { const q = a.points.at(i); return { x: a.x + q[0], y: a.y + q[1] } }
+  const far = (p, q) => Math.hypot(p.x - q.x, p.y - q.y) > 20
+  const across = (p, q) => !!p && !!q && p.x < q.x + q.width && q.x < p.x + p.width && p.y < q.y + q.height && q.y < p.y + p.height
+  const loop = await drawnAs('Review loop', 'flowchart TD\n  A[Draft] -->|submit| B[Review]\n  B -->|changes asked| A\n  B --- C[Notes]', 'Notes')
+  if (loop) {
+    const [A, B, C] = ['Draft', 'Review', 'Notes'].map((w) => holding(loop, w))
+    const arrows = live(loop).filter((e) => e.type === 'arrow')
+    const joining = (s, t) => arrows.find((e) => e.startBinding?.elementId === s?.id && e.endBinding?.elementId === t?.id)
+    const there = joining(A, B), back = joining(B, A), line = joining(B, C)
+    ok(!!line && !line.startArrowhead && !line.endArrowhead && !!there?.endArrowhead, 'a Mermaid line (---) comes in without arrowheads, its arrows with them', arrows.map((e) => [e.startArrowhead, e.endArrowhead]))
+    const said = [word(loop, 'submit'), word(loop, 'changes asked')]
+    ok(!!there && !!back && far(end(there, 0), end(back, -1)) && far(end(there, -1), end(back, 0)) && !across(...said), 'an arrow back between the same two shapes is drawn apart from the first, its words clear of the first one\'s', { ends: [there, back].map((e) => e && [end(e, 0), end(e, -1)]), words: said.map((t) => t && [t.x, t.y, t.width, t.height]) })
+  } else ok(false, 'a Mermaid flowchart with a line and an arrow back is drawn', fs.readdirSync(BOARDS))
+  const seq = await drawnAs('Sign in flow', 'sequenceDiagram\n  Web->>API: Sign in\n  API-->>Web: Token\n  Web->>API: Refresh', 'Refresh')
+  const rows = ['Sign in', 'Token', 'Refresh'].map((w) => { const a = seq && holding(seq, w); return a ? a.y + Math.min(...a.points.map((q) => q[1])) : NaN })
+  ok(rows.every((y, i) => y > (i ? rows[i - 1] + 10 : -Infinity)), 'a sequence diagram\'s messages are drawn in order down the page', rows)
+  // Words handed over measured in another font (as a diagram drawn before the board's font has
+  // loaded) are measured again once it's open, so they aren't cut off.
+  const words = await api('/boards', { title: 'Handed words' })
+  const narrow = { ...rect('w1', 0), type: 'text', width: 10, height: 20, text: 'Measured again', originalText: 'Measured again', fontSize: 16, fontFamily: 6, textAlign: 'left', verticalAlign: 'top', containerId: null, autoResize: true, lineHeight: 1.25 }
+  await api(`/boards/${enc(words.id)}/update`, { source: { kind: 'excalidraw', text: JSON.stringify({ type: 'excalidraw', elements: [narrow] }) }, mode: 'add' })
+  await p.evaluate((id) => window.dispatchEvent(new CustomEvent('bridge-open-board', { detail: { id } })), words.id)
+  const measured = await until(() => { const j = readBoard(words.id); const t = !j?.bridge && word(j, 'Measured again'); return t && t.width > 40 && t }, 15000)
+  ok(!!measured, 'words handed over measured in another font are measured again in the board\'s once it opens', word(readBoard(words.id), 'Measured again'))
 
   // A new board, a shape drawn by hand, saved, and there after a reload.
   await p.locator('.wb-view .pane-head button', { hasText: /^‹?\s*$/ }).first().click().catch(() => {})

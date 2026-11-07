@@ -55,9 +55,12 @@ export function groupByWorkspace(fleet) {
 const rowCwd = (r) => (r.kind === 'agent' ? r.agent.cwd : r.tab?.panes.find((p) => !p.agent)?.cwd || r.tab?.panes[0]?.cwd)
 // On its own branch (a worktree Bridge AI made): { repo, branch, base }, else null.
 const rowTree = (r) => (r.kind === 'agent' ? r.agent.worktree : (r.tab?.panes.find((p) => !p.agent) || r.tab?.panes[0])?.worktree) || null
-const rowName = (r) => (r.kind === 'agent'
-  ? (r.agent.chief ? (r.agent.thread && !r.agent.thread.main ? r.agent.title : t('Chief of Staff')) : r.agent.tab && !/^\d+$/.test(r.agent.tab) ? r.agent.tab : r.agent.title || t('agent'))
-  : (r.tab.label && !/^\d+$/.test(r.tab.label) ? r.tab.label : t('shell')))
+// What an agent is called wherever it's listed: the tab's name you gave it (not a bare number), else
+// its own title; a Chief of Staff thread by its topic. One rule, so the sidebar, Dictations and the
+// dictation window can't name it differently (on Windows a terminal's title can be the shell's own,
+// "Administrator: C:\Windows\…").
+export const agentName = (a) => (a.chief ? (a.thread && !a.thread.main ? a.title : t('Chief of Staff')) : a.tab && !/^\d+$/.test(a.tab) ? a.tab : a.title || t('agent'))
+const rowName = (r) => (r.kind === 'agent' ? agentName(r.agent) : (r.tab.label && !/^\d+$/.test(r.tab.label) ? r.tab.label : t('shell')))
 
 // own: it works on its own branch, in a worktree Bridge AI made.
 function GitBit({ g, own }) {
@@ -495,6 +498,7 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
                           {r.kind === 'agent' && r.agent.chief && <Icon name="helm" size={12} className="tab-badge" />}
                           {r.kind === 'agent' && r.agent.account && <span className="acct-tag" title={t('On the {name} account', { name: r.agent.account })}>{r.agent.account}</span>}
                           {r.kind === 'agent' && r.agent.muted && <Icon name="bell-off" size={11} className="muted" />}
+                          {r.kind === 'agent' && r.agent.subagents?.running > 0 && <span className="tab-subs" title={r.agent.subagents.items.map((i) => i.title).join('\n')} aria-label={r.agent.subagents.running === 1 ? t('{n} subagent running', { n: 1 }) : t('{n} subagents running', { n: r.agent.subagents.running })}><Icon name="layers" size={10} />{r.agent.subagents.running}</span>}
                           {r.kind === 'shell' && tab.panes.length > 1 && <span className="tab-count">{tab.panes.length}</span>}
                         </span>
                         {r.agent?.cloud

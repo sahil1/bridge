@@ -69,6 +69,10 @@ try {
   const agentOf = async (pred) => ((await kit.api('/fleet')).agents || []).find(pred)
   const pay = await until(() => agentOf((a) => a.paneId === one.paneId), 30000, 500)
   ok(!!pay, 'a stand-in agent, payments')
+  // One whose terminal has a shell's title, as a Windows terminal's can: it goes by its tab's name.
+  const ledger = await kit.api('/agents/launch', { kind: 'claude', cwd: dir, label: 'Ledger', newSpace: 'Ledger', prompt: 'shell title' })
+  const shellTitled = await until(async () => { const x = await agentOf((y) => y.paneId === ledger.paneId); return /^Administrator: C:\\Windows/.test(x?.title || '') && x }, 30000, 300)
+  ok(!!shellTitled, 'and Ledger, whose terminal has a shell\'s title', (await agentOf((y) => y.paneId === ledger.paneId))?.title)
   // On Windows a stand-in's name is its terminal's title, which changes as it runs: an agent is told
   // by its pane, and its name only checked to be there.
 
@@ -326,9 +330,14 @@ try {
 
   // ---------- Dictations ----------
   const asked = []
+  // What the computer answers a message with: gone in, unless a test makes it held for a busy agent.
+  let askedAnswer = { ok: true }
+  // One the computer held for a busy agent: kept as queued for it, not sent.
+  const held = await kit.api('/dictations', { text: 'Hold the release until Friday.', ms: 1200, how: 'queued', agent: { id: one.paneId, name: 'payments' } })
+  ok((await list()).items.find((x) => x.id === held.id)?.how === 'queued', 'one held for a busy agent is kept as queued for it', (await list()).items.find((x) => x.id === held.id))
   const view = (opts = {}) => page(b, kit.url, { ...opts, before: async (ctx) => {
     await before(ctx)
-    await ctx.route(/\/api\/agents\/[^/]+\/(prompt|queue)$/, async (route) => { asked.push({ url: route.request().url(), body: route.request().postDataJSON() }); await route.fulfill({ json: { ok: true } }) })
+    await ctx.route(/\/api\/agents\/[^/]+\/(prompt|queue)$/, async (route) => { asked.push({ url: route.request().url(), body: route.request().postDataJSON() }); await route.fulfill({ json: askedAnswer }) })
     // What the server says about permissions, when a check needs a Mac's answer wherever it runs.
     if (opts.fix) await ctx.route(/\/api\/fix(\?|$)/, (r) => r.fulfill({ json: opts.fix }))
     if (!opts.phone) {
@@ -351,6 +360,8 @@ try {
     ok(await slack.locator('img.dc-glyph').count() === 1 && /Pasted into Slack/.test(await slack.locator('.dc-where').innerText()) && await slack.evaluate((el) => el.querySelector('img.dc-glyph').naturalWidth > 0), `${mode}: one pasted into Slack shows Slack's icon`, await slack.innerText())
     const sent = v.locator('.dc-row', { hasText: `Check the invoices ${mode}` }).first()
     ok(await sent.locator('.dc-glyph-icon').count() === 1 && /Sent to/.test(await sent.locator('.dc-where').innerText()), `${mode}: one sent to an agent shows the agent`, await sent.innerText())
+    const queuedRow = v.locator('.dc-row', { hasText: 'Hold the release' }).first()
+    ok(/Queued for payments/.test(await queuedRow.locator('.dc-where').innerText().catch(() => '')) && await queuedRow.locator('.dc-glyph-icon').count() === 1, `${mode}: one held for a busy agent says "Queued for" it, not "Sent to"`, await queuedRow.innerText().catch(() => ''))
     const typed = v.locator('.dc-row', { hasText: 'Ship the fix' }).first()
     ok(/Typed for/.test(await typed.locator('.dc-where').innerText()) && await typed.locator('.dc-glyph-icon').count() === 1, `${mode}: one said into an agent's box shows the agent`, await typed.innerText())
     await shots(p, `dictations-view-${mode}`)
@@ -371,6 +382,21 @@ try {
     await first.locator('button', { hasText: 'Send to an agent' }).click()
     await first.locator(`.dc-menu button[data-pane="${one.paneId}"]`).click()
     ok(!!(await until(() => asked.some((x) => x.url.includes(encodeURIComponent(one.paneId)) && x.body.text === 'Add a retry to the webhook.'), 4000, 100)) && /Sent to/.test(await p.locator('.dc-toast').innerText().catch(() => '')), 'Send to an agent: sent, and it says so')
+    // Again, with the agent busy: the computer holds it, first in line, and the toast says so.
+    askedAnswer = { ok: true, queued: true, reason: 'working', id: 'q1', position: 1 }
+    const before2 = asked.length
+    await first.locator('button', { hasText: 'Send to an agent' }).click()
+    await first.locator(`.dc-menu button[data-pane="${one.paneId}"]`).click()
+    const toast = await until(async () => { const x = await p.locator('.dc-toast').innerText().catch(() => ''); return asked.length > before2 && /Queued for .+, next in line/.test(x) && x }, 4000, 100)
+    ok(!!toast && !/Sent to/.test(toast), 'Send to an agent that\'s busy: "Queued for" it, next in line, not "Sent to"', toast || await p.locator('.dc-toast').innerText().catch(() => ''))
+    askedAnswer = { ok: true }
+    // Ledger, named by its tab in the menu and in what it says, not by its terminal's title.
+    await first.locator('button', { hasText: 'Send to an agent' }).click()
+    const pick = first.locator(`.dc-menu button[data-pane="${ledger.paneId}"]`)
+    const named = (await pick.innerText().catch(() => '')).trim()
+    await pick.click()
+    const toLedger = await until(async () => { const x = await p.locator('.dc-toast').innerText().catch(() => ''); return /Sent to Ledger/.test(x) && x }, 4000, 100)
+    ok(named === 'Ledger' && !!toLedger && !/Administrator/.test(toLedger), 'an agent whose terminal has a shell\'s title: "Ledger" in the menu and "Sent to Ledger", as the sidebar names it', { named, toast: toLedger || await p.locator('.dc-toast').innerText().catch(() => '') })
     // Paste again: into the app it was said in.
     const sl = v.locator('.dc-row', { hasText: 'Check the invoices light' }).first()
     await sl.locator('.dc-head').click()

@@ -10,7 +10,8 @@
 //   "bridge ay eye" to "Bridge AI", rewrites a line that says "rewrite me" (which meetings.js
 //   turns down), and leaves out "Thanks for watching" and "drop me please"; Assist suggests a
 //   question about what the files say (or the invite, without them) and a check of the last thing
-//   said.
+//   said. Prep Assist, before a meeting: a goal from the invite, a follow-up on what's still open
+//   and a question about the newest email, from what it was sent.
 //   Edit by voice ("Instruction: … Text: …"): the text with "teh" spelled right and its first letter a
 //   capital, in quotes and a code fence (which Bridge AI takes off).
 //   Dictation to tidy ("<dictation>…</dictation>"): "you know" taken out, in quotes; a model that
@@ -25,10 +26,17 @@
 //   Refine ("You drew a diagram for"): labels the first arrow without a label, saying so, and says
 //   {"ok":true} once every arrow has one. "Change it": Start renamed Begin, Ship coloured red, a
 //   Cache box beside the first shape with an arrow to it; its review says ok.
+//   Signature Assist's "Explain this document": a mutual NDA between Northwind Labs and Contoso
+//   Ltd, a fee, a renewal worth a look on page 1 ("renews automatically").
+//   Studio's decks: a deck of four slides (its title from what it's about, or the document's first
+//   line), a slide rewritten as big numbers ("Rewritten"), a new slide of next steps.
 //   Ollama's own API (a model server on this computer, when OLLAMA_HOST points here): its models
 //   (llama3.1:8b, and llama3.2-vision:11b, which can see), what each can do, none running, and
 //   /api/chat answering as Ollama does (its message, pictures as base64 in `images`) with the same
 //   answers as above, logged with path '/api/chat'.
+//   Mail's How You Write: a profile saying how many emails and meeting lines it read, with the first
+//   email as its example. Reply Assist: a reply in a code fence (which Bridge AI takes off) with the
+//   free times it was given, a nudge, and the draft shorter, warmer or more direct.
 //   Anything else: "echo: <the last thing said>".
 //   A key of sk-bad is turned down (HTTP 401), as a provider would.
 import http from 'node:http'
@@ -68,6 +76,10 @@ function answer(b) {
     return say(JSON.stringify({ ok: false, ...spec, changes: [`Labelled the arrow from ${name(bare.from)} to ${name(bare.to)} with HTTP, so it says what goes along it.`] }))
   }
   if (/^You changed this diagram as asked:/.test(first)) return say('{"ok":true}')
+  // Signature Assist's "What you're signing": a mutual NDA, in the shape it asks for.
+  if (/^Explain this document, which I have been asked to sign\./.test(first)) {
+    return say(`\`\`\`json\n${JSON.stringify({ kind: 'Mutual NDA', what: 'Two companies agree to keep what they share with each other secret for two years.', parties: [{ name: 'Northwind Labs', role: 'shares and receives' }, { name: 'Contoso Ltd', role: 'shares and receives' }], money: ['A fee of $1,200 a year, paid by Contoso Ltd'], dates: ['Starts on signing; lasts two years'], obligations: ['Keep the other side\'s information secret', 'Return or destroy it when asked'], renewal: 'It renews by itself every year unless either side says no 30 days before.', termination: 'Either side can end it with 30 days\' notice.', watch: [{ what: 'It renews by itself unless you say no in time.', page: 1, quote: 'renews automatically' }] })}\n\`\`\``)
+  }
   const tail = m.at(-1)
   const file = /EDIT (\S+)/.exec(last)?.[1]
   if (b.tools && file && tail.role === 'user') return call(`r${m.length}`, 'read_file', { path: file })
@@ -105,6 +117,19 @@ function answer(b) {
     if (lastSaid) items.push({ kind: 'check', text: `Check: "${lastSaid.slice(0, 40)}"`, why: 'Just said' })
     return say(JSON.stringify({ items }))
   }
+  // Prep Assist, before a meeting: a goal from the invite, a follow-up on what's still open from last
+  // time (theirs first), and a question about the newest email with them, each from what it was sent.
+  if (/^Prepare me for a meeting:/.test(last)) {
+    const invite = /^The invite says: (.+)$/m.exec(last)?.[1]
+    const open = /^Still open, theirs: ([^;\n]+)/m.exec(last)?.[1] || /^Still open, mine: ([^;\n]+)/m.exec(last)?.[1]
+    const mail = /^- From ([^,\n]+), [^:\n]+: "([^"\n]+)"/m.exec(last)
+    const items = []
+    if (invite) items.push({ kind: 'goal', text: `Agree on: ${invite}`, why: 'The invite' })
+    if (open) items.push({ kind: 'follow-up', text: `Settle "${open}"`, why: 'Last time' })
+    if (mail) items.push({ kind: 'question', text: `Ask ${mail[1]} about "${mail[2]}"`, why: `Email from ${mail[1]}` })
+    if (!items.length) items.push({ kind: 'question', text: 'Ask what they hope to get out of this', why: 'Nothing else to go on' })
+    return say(JSON.stringify({ items }))
+  }
   // Who said what: the slides and the agenda are Dan's, the budget Priya's, the rest unknown.
   if (/Say who said each numbered Them line/.test(last)) {
     const out = {}
@@ -116,6 +141,15 @@ function answer(b) {
     const title = (/^Meeting: (.+?), /m.exec(last)?.[1] || 'Meeting').trim()
     return say(['```markdown', '---', 'marp: true', 'paginate: true', '---', '', `# ${title}`, '', '---', '', '# What we covered', '', '- The pricing page', '- Who does what', '', '<!-- Start with the numbers -->', '```'].join('\n'))
   }
+  // Studio's decks: a deck (from what it's about, or a document's words: its first line becomes the
+  // title), slide n rewritten as big numbers, a new slide of next steps.
+  if (/^Write a slide deck(: | from the document)/m.test(last)) {
+    const doc = /The document \([^)]*\), to make it from:\n"""\n([^\n]+)/.exec(last)?.[1]
+    const title = (doc || /^Write a slide deck: (.+?)\.?$/m.exec(last)?.[1] || 'A deck').slice(0, 40)
+    return say(['```markdown', '<!-- _class: title -->', '', `# ${title}`, '', '## Written for the test', '', '---', '', '# Why now', '', '- Customers asked', '- It is ready', '', '<!-- Say why -->', '', '---', '', '<!-- _class: stats -->', '', '# What changed', '', '- **42%** of trials convert', '- **3x** more seats', '', '---', '', '<!-- _class: section -->', '', '# Next', '```'].join('\n'))
+  }
+  if (/^Rewrite slide \d+/m.test(last)) return say('<!-- _class: stats -->\n\n# Rewritten\n\n- **42%** shorter\n- **3x** clearer\n\n<!-- The new notes -->')
+  if (/^Write one new slide to go after slide \d+/m.test(last)) return say('# Next steps\n\n- Ship it\n- Tell customers')
   // Who each voice on a call is: Speaker 1 the first one invited, Speaker 2 the second.
   if (/Say who each voice on the call is/.test(last)) {
     const invited = (/^Invited, besides You: (.+)$/m.exec(last)?.[1] || '').split(', ').filter(Boolean)
@@ -143,6 +177,23 @@ function answer(b) {
     const first = scene.shapes?.[0]?.id
     const ops = { update: [id('Start') && { id: id('Start'), text: 'Begin' }, id('Ship') && { id: id('Ship'), fill: '#ffc9c9' }].filter(Boolean), add: first ? [{ ref: 'n1', shape: 'rectangle', text: 'Cache', near: first, side: 'right' }] : [], connect: first ? [{ from: first, to: 'n1', text: 'reads' }] : [] }
     return say(`\`\`\`json\n${JSON.stringify(ops)}\n\`\`\``)
+  }
+  // How You Write (mailassist.js): a profile from what it was given, and the first email as the example.
+  if (/Describe how they write email/.test(last)) {
+    const emails = (last.match(/^E\d+ \(/gm) || []).length, lines = (last.match(/^M\d+ \(/gm) || []).length
+    const profile = [`Greets with "${/\bHey\b/.test(last) ? 'Hey' : 'Hi'}" and the first name`, /Cheers/.test(last) ? 'Signs off with "Cheers"' : 'Signs off with their name', 'Short replies, two or three sentences', `Read ${emails} emails and ${lines} meeting lines`]
+    return say(JSON.stringify({ profile, examples: emails ? ['E1'] : [] }))
+  }
+  // Reply Assist: a reply, a nudge, or the draft so far shorter, warmer or more direct. The times it
+  // was given go in as they were said.
+  if (/reply to the email below|Write a short, friendly follow-up/.test(last)) {
+    const first = (/The email[^(]*\(from "?([^\s<"]+)/.exec(last)?.[1] || 'there')
+    if (/Make it shorter/.test(last)) return say(`Hi ${first},\n\nYes, today.\n\nCheers`)
+    if (/Make it warmer/.test(last)) return say(`Hi ${first},\n\nThanks so much for sending this! I'll look at it today.\n\nCheers`)
+    if (/Make it more direct/.test(last)) return say(`${first}, I'll review it by 5 today.`)
+    if (/Write a short, friendly follow-up/.test(last)) return say(`Hi ${first},\n\nJust checking in on this.\n\nCheers`)
+    const times = /Times they're free[^\n]*\n((?:- [^\n]+\n?)+)/.exec(last)?.[1]
+    return say(`\`\`\`\nHi ${first},\n\nThanks, I'll review the launch plan today.${times ? `\n\nI could meet at any of these:\n${times.trim()}` : ''}\n\nCheers\n\`\`\``)
   }
   return say(`echo: ${last} (${m.length} messages, ${b.model}, tools: ${b.tools ? b.tools.length : 0})`)
 }

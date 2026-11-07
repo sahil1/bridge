@@ -13,6 +13,33 @@ const FILTERS = [
 // A status the filters don't name (unknown) counts as idle.
 const bucket = (s) => (s === 'blocked' || s === 'working' || s === 'done' ? s : 'idle')
 
+const when = (iso) => (Date.now() - Date.parse(iso) < 60000 ? t('just now') : fmtRelative(iso))
+// Its subagents at work, each with what it's doing, and the ones that just finished. They can
+// still be at work after its own turn is over (sent off in the background), so this shows
+// whatever its state.
+export function SubagentRows({ s, className = 'tile-subs' }) {
+  if (!s) return null
+  const more = s.running - s.items.length
+  return (
+    <span className={className} role="list" aria-label={s.running === 1 ? t('{n} subagent running', { n: 1 }) : s.running ? t('{n} subagents running', { n: s.running }) : t('Subagents')}>
+      {s.running > 0 && <span className="ts-head" role="listitem"><span className="sa-dot s-running" aria-hidden="true" />{s.running === 1 ? t('{n} subagent running', { n: 1 }) : t('{n} subagents running', { n: s.running })}</span>}
+      {s.items.map((i) => (
+        <span key={i.id} className="ts-row" role="listitem">
+          {i.type && <b>{i.type}</b>}<span className="ts-title">{i.title}</span>
+          {i.doing && <span className="ts-doing">{i.doing}</span>}
+        </span>
+      ))}
+      {more > 0 && <span className="ts-row muted" role="listitem">{t('and {n} more', { n: more })}</span>}
+      {(s.done || []).map((i) => (
+        <span key={i.id} className={`ts-row ts-done s-${i.status}`} role="listitem">
+          <Icon name={i.status === 'done' ? 'check' : 'x'} size={11} /><span className="ts-title">{i.title}</span>
+          <span className="ts-when">{i.status === 'done' ? t('finished {when}', { when: when(i.at) }) : i.status === 'failed' ? t('failed {when}', { when: when(i.at) }) : t('stopped {when}', { when: when(i.at) })}</span>
+        </span>
+      ))}
+    </span>
+  )
+}
+
 function Tile({ a, p, selected, onOpen, onOpenInHerdr, onOpenSide }) {
   return (
     <article className={`tile tile-${a.status} ${selected ? 'on' : ''}`}>
@@ -31,6 +58,7 @@ function Tile({ a, p, selected, onOpen, onOpenInHerdr, onOpenSide }) {
         {p?.tool && a.status === 'working'
           ? <p className="tile-preview mono"><Icon name="tool" size={11} /> {p.tool}</p>
           : <p className="tile-preview">{p?.text || <span className="muted">{t('No messages yet')}</span>}</p>}
+        <SubagentRows s={a.subagents} />
       </button>
       <footer className="tile-foot">
         <span className="muted">{p?.ts ? fmtRelative(p.ts) : ''}</span>

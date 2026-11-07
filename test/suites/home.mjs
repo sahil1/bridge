@@ -28,13 +28,26 @@
 // where it was. Then loading, nothing at all, and a look that fails.
 // On a phone at 375 and 430: Home is the first tab and where it opens, Today is in More, Home and
 // Everything fit the phone with every control a whole 40 px target.
+// It holds on any day at any hour: BRIDGE_TEST_CLOCK ("Sat 00:30", "Sun 23:50", "16:05") runs this
+// test, both servers and every page from then (testClock in the harness).
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, startRelay, checks, until, sleep, browser, page, shot, phoneFaults, noServiceWorker, changeAnswer, OUT, TEST } from '../lib/harness.mjs'
+import { startKit, startRelay, checks, until, sleep, browser, page, shot, phoneFaults, noServiceWorker, changeAnswer, testClock, OUT, TEST } from '../lib/harness.mjs'
 
 const { ok, done } = checks('home')
+const clock = testClock()
+// This test's times by that clock: its own Date, so Playwright (in this process too) keeps the real one.
+const Date = clock.Date
+if (clock.on) console.log(`home: run at ${new Date().toString()}`)
+// Each page from the test's time too.
+const pageAt = (b, url, o = {}) => page(b, url, { ...o, before: async (c) => { await clock.install(c); await o.before?.(c) } })
+// A day from today (YYYY-MM-DD, this computer's), counted in days rather than hours.
+const dayFrom = (n, from = Date.now()) => { const d = new Date(from); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() + n); return d }
+const ymd = (d) => d.toLocaleDateString('en-CA')
 
 // ---------- what goes in it (no server) ----------
+// (Server modules run here by the test's clock too, until the browser opens.)
+clock.here()
 const scratch = path.join(OUT, 'kits', `home-unit-${process.pid}`)
 fs.mkdirSync(path.join(scratch, 'home'), { recursive: true })
 const was = { BRIDGE_HOME: process.env.BRIDGE_HOME, HOME: process.env.HOME }
@@ -85,11 +98,11 @@ for (const [k, v] of Object.entries(was)) { if (v === undefined) delete process.
   // The day a task names, counted from when it was added (a Thursday): Chief of Staff's tasks have
   // no due date, and a meeting's action items often say when. Nothing else is read as one.
   const due = (title) => homeJs.dueOf(title, '2026-11-05')
-  const days = [['Send the board deck by Friday', '2026-11-06'], ['Call the accountant tomorrow', '2026-11-06'], ['Book flights to New York on 12 Nov', '2026-11-12'], ['Renew the domain by January 3rd', '2027-01-03'], ['Ship it on 2026-11-20', '2026-11-20'], ['Review the deck next Thursday', '2026-11-12'], ['Wrap up by end of week', '2026-11-06'], ['Reply to Sam today', '2026-11-05'],
-    ['Parvinder: present the AWS paper at the offsite', null], ['Send the Monday report', null], ['Them: set up the face-to-face meeting in New York', null]]
+  const days = [['Send the board deck by Friday', '2026-11-06'], ['Call the accountant tomorrow', '2026-11-06'], ['Book flights to the offsite on 12 Nov', '2026-11-12'], ['Renew the domain by January 3rd', '2027-01-03'], ['Ship it on 2026-11-20', '2026-11-20'], ['Review the deck next Thursday', '2026-11-12'], ['Wrap up by end of week', '2026-11-06'], ['Reply to Sam today', '2026-11-05'],
+    ['Parvinder: present the AWS paper at the offsite', null], ['Send the Monday report', null], ['Them: set up the face-to-face meeting at the offsite', null]]
   const wrong = days.filter(([title, d]) => due(title) !== d).map(([title, d]) => `${title}: ${due(title)}, not ${d}`)
   ok(!wrong.length, 'the day a task names: a weekday after by/on/next, today, tomorrow, end of week, a date; none from a task that names no day', wrong)
-  ok(items.find((i) => i.id === 'task:3').task.due === null && homeJs.dueOf('Call them tomorrow', null) === new Date(Date.now() + 864e5).toLocaleDateString('en-CA'), 'a task with no day has none; one with no date added counts from today')
+  ok(items.find((i) => i.id === 'task:3').task.due === null && homeJs.dueOf('Call them tomorrow', null) === ymd(dayFrom(1)), 'a task with no day has none; one with no date added counts from today')
 
   // One row per thing, across computers (the route merges every device's list this way).
   const tk = (id, machine, status, title = 'Gary: make the introduction he offered (not done yet)') => ({ id: `task:${id}`, kind: 'task', group: status === 'waiting' ? 'needs' : 'coming', machine, online: true, task: { id, title, status, added: '2026-11-04' } })
@@ -123,13 +136,15 @@ for (const [k, v] of Object.entries(was)) { if (v === undefined) delete process.
   await sleep(700)
 }
 
+clock.real()
+
 // ---------- two Bridge AIs, linked ----------
 const relays = []
 const kits = []
 const kitWith = async (name, rel, config = {}) => {
   const k = await startKit(`home-${name.toLowerCase()}`, {
     config,
-    env: ({ data }) => { fs.writeFileSync(path.join(data, 'relay.json'), JSON.stringify(rel.relayFile)); return { BRIDGE_COMPUTER_NAME: name, BRIDGE_LINK_PING_MS: '1500' } },
+    env: ({ data }) => { fs.writeFileSync(path.join(data, 'relay.json'), JSON.stringify(rel.relayFile)); return { BRIDGE_COMPUTER_NAME: name, BRIDGE_LINK_PING_MS: '1500', ...clock.env } },
   })
   kits.push(k)
   k.program('claude', fs.readFileSync(path.join(TEST, 'stand-ins', 'claude.cjs'), 'utf8'))
@@ -195,7 +210,10 @@ try {
   ok(!!(await until(async () => (await homeOf(a)).items.find((i) => i.id === `board:${drawn.id}`)?.group === 'ready', 6000)), 'and changed by an agent again, it is')
 
   // ---------- in the app, on a desktop ----------
-  const soon = new Date(Date.now() + 25 * 6e4)
+  // The next meeting in 25 minutes, or sooner late in the evening, so it's still today.
+  const soonIn = Math.max(1, Math.min(25, Math.floor((new Date().setHours(24, 0, 0, 0) - Date.now()) / 6e4 / 2)))
+  const soon = new Date(Date.now() + soonIn * 6e4)
+  const inAbout = (x) => { const m = /In (\d+) min/.exec(x); return !!m && Math.abs(+m[1] - soonIn) <= 2 }
   const cal = { today: [{ id: 'e1', title: 'Acme renewal sync', canceled: false, calendar: 'Work', start: soon.toISOString(), end: new Date(+soon + 30 * 6e4).toISOString(), allDay: false, attendees: [], attendeeCount: 3, links: [{ url: 'https://example.com/sow', name: 'SOW draft' }, { url: 'https://example.com/pricing', name: 'Pricing v3' }] }], tomorrow: [], fetchedAt: new Date().toISOString() }
   const desk = async (c2) => {
     await noServiceWorker(c2)
@@ -203,7 +221,7 @@ try {
     await changeAnswer(c2, /\/api\/config(\?|$)/, (real) => ({ ...real, calendar: true }))
   }
   {
-    const { ctx, p, errors } = await page(b, a.url, { mode: 'light', theme: 'sky', width: 1440, before: desk })
+    const { ctx, p, errors } = await pageAt(b, a.url, { mode: 'light', theme: 'sky', width: 1440, before: desk })
     const hm = p.locator('.hm')
     ok(!!(await until(() => hm.isVisible(), 20000)), 'desktop: it opens at Home')
     ok(await p.locator('.work.maxed .hm').isVisible(), 'full size, as the Agent Map opens')
@@ -222,7 +240,7 @@ try {
     await ready.locator('.hm-fold').click()
     ok(/Meeting notes/.test(await meetRow.innerText()) && /2 action items not handed on yet/.test(await meetRow.innerText()) && /Whiteboard/.test(await ready.locator('.hm-item', { hasText: 'Auth flow v2' }).innerText()) && !/My sketch/.test(await ready.innerText()), "ready to look at: the meeting's notes and the whiteboard Chief of Staff drew", await ready.innerText())
     const brief = await until(async () => { const x = await coming.innerText(); return /Acme renewal sync/.test(x) && /Brief: last time, Acme renewal sync/.test(x) && x }, 10000)
-    ok(!!brief && /^TODAY/m.test(brief) && /In 2\d min/.test(brief) && /SOW draft/.test(brief) && /Pricing v3/.test(brief), 'coming up, today: the next meeting, how soon, its brief from the last in the series and the files in its invite', await coming.innerText())
+    ok(!!brief && /^TODAY/m.test(brief) && inAbout(brief) && /SOW draft/.test(brief) && /Pricing v3/.test(brief), 'coming up, today: the next meeting, how soon, its brief from the last in the series and the files in its invite', await coming.innerText())
     ok(/On it\s+Draft the offsite agenda/.test(await chiefSec.innerText()), "the task Chief of Staff is on, under its tasks (it names no day, so it isn't under Coming Up)", await chiefSec.innerText())
     await shot(p, `${tag}home-desktop`)
     // A filter by kind, and by device.
@@ -287,7 +305,7 @@ try {
   // Home that can't load says why, with Try again.
   {
     let fail = true
-    const { ctx, p } = await page(b, a.url, { width: 1280, before: async (c2) => { await noServiceWorker(c2); await c2.route(/\/api\/home(\?|$)/, (r) => (fail ? r.fulfill({ status: 500, json: { error: 'the disk is full' } }) : r.fallback())) } })
+    const { ctx, p } = await pageAt(b, a.url, { width: 1280, before: async (c2) => { await noServiceWorker(c2); await c2.route(/\/api\/home(\?|$)/, (r) => (fail ? r.fulfill({ status: 500, json: { error: 'the disk is full' } }) : r.fallback())) } })
     const e = p.locator('.hm-err')
     ok(!!(await until(async () => /Home couldn't load: the disk is full/.test(await e.innerText().catch(() => '')), 15000)) && !/needs you/.test(await p.locator('.hm-title h2').innerText()), "Home that can't load says why (and not that nothing needs you)", await p.locator('.hm').innerText().catch(() => ''))
     await shot(p, `${tag}home-cant-load`)
@@ -308,13 +326,16 @@ try {
   // (Twenty hours ago: well inside the last day however long the run takes.)
   const yday = Date.now() - 20 * 3600e3
   const sync = `${new Date(yday).toISOString().slice(0, 10)}-weekly`
-  seed(c, sync, 'Weekly sync with Parvinder', yday, '# Weekly sync\n\n## Summary\n\nThe AWS paper and New York.\n\n## Action items\n\n- [ ] Gary: make the introduction he offered (not done yet)\n- [ ] Them: set up the face-to-face meeting in New York\n- [ ] Parvinder: present the AWS paper at the offsite\n')
+  seed(c, sync, 'Weekly sync with Parvinder', yday, '# Weekly sync\n\n## Summary\n\nThe AWS paper and the offsite.\n\n## Action items\n\n- [ ] Gary: make the introduction he offered (not done yet)\n- [ ] Them: set up the face-to-face meeting at the offsite\n- [ ] Parvinder: present the AWS paper at the offsite\n')
   await until(async () => (await c.api('/meetings')).meetings?.some((m) => m.id === sync), 8000)
   await c.api(`/meetings/${sync}/chief`, {})
   // A list with copies on it already: before 3.10.1 a second Send added every item again (now it
   // doesn't: meetings-api), so a list from then can have each twice.
   for (const x of (await c.api('/chief/tasks')).items.filter((x) => x.from === 'meeting')) await task(c, x.title)
-  for (const [title, status] of [['Send the board deck by Friday'], ['Book flights to New York on 12 Nov'], ['Call the accountant tomorrow'], ['Look into SOC 2 vendors'], ['Draft the Q1 hiring plan', 'doing'], ['Read the Series A term sheet']]) await task(c, title, status && { status })
+  // A task naming a date eight days on: after any "by Friday", so the last day under Coming Up.
+  const flightsOn = dayFrom(8)
+  const flights = `Book flights to the offsite on ${flightsOn.getDate()} ${flightsOn.toLocaleDateString('en-US', { month: 'short' })}`
+  for (const [title, status] of [['Send the board deck by Friday'], [flights], ['Call the accountant tomorrow'], ['Look into SOC 2 vendors'], ['Draft the Q1 hiring plan', 'doing'], ['Read the Series A term sheet']]) await task(c, title, status && { status })
   const review = Date.now() - 3 * 3600e3
   seed(a, `${new Date(review).toISOString().slice(0, 10)}-design`, 'Design review: onboarding', review, '# Design review\n\n## Summary\n\nThe first-run screens.\n\n## Action items\n\n- [ ] Sam: cut the second permissions screen\n- [ ] Ana: send the new icons\n')
   const said = [
@@ -358,7 +379,9 @@ try {
   const titles = (real?.items || []).filter((i) => i.kind === 'task').map((i) => i.task.title)
   ok(titles.length > 0 && titles.length === new Set(titles).size && titles.filter((x) => x === gary).length === 1, 'Home has each of them once (one row per task)', titles)
   const dueIn = (title) => real?.items.find((i) => i.task?.title === title)?.task.due
-  ok(dueIn('Call the accountant tomorrow') === new Date(Date.now() + 864e5).toLocaleDateString('en-CA') && /-11-12$/.test(dueIn('Book flights to New York on 12 Nov') || '') && dueIn(gary) === null, 'with the day each names, or none', real?.items.filter((i) => i.kind === 'task').map((i) => [i.task.title, i.task.due]))
+  // (Counted from the day it was added, which is today unless the run went past midnight.)
+  const addedOf = (title) => `${real?.items.find((i) => i.task?.title === title)?.task.added}T12:00:00`
+  ok(dueIn('Call the accountant tomorrow') === ymd(dayFrom(1, Date.parse(addedOf('Call the accountant tomorrow')))) && dueIn(flights) === ymd(flightsOn) && dueIn(gary) === null, 'with the day each names, or none', real?.items.filter((i) => i.kind === 'task').map((i) => [i.task.title, i.task.due]))
 
   // The heading's count and its ring: everything that needs you, and the share you can answer now.
   const ringOf = (p) => p.locator('.hm-count .hm-ring').evaluate((e) => ({ fill: Number(e.style.getPropertyValue('--p')), said: e.getAttribute('aria-label') }))
@@ -371,7 +394,7 @@ try {
   // A summary ends at a word: all of a sentence, or whole words and "…".
   const atWord = (sub) => { const s = said0(sub); const body = sub.replace(/…$/, ''); return !!s && body.length < s.length && (sub.endsWith('…') ? /[\s,;:.-]/.test(s[body.length]) : /\s/.test(s[body.length]) && /[.!?]$/.test(body)) }
   {
-    const { ctx, p, errors } = await page(b, a.url, { mode: 'light', theme: 'sky', width: 1440, height: 1000, before: morning })
+    const { ctx, p, errors } = await pageAt(b, a.url, { mode: 'light', theme: 'sky', width: 1440, height: 1000, before: morning })
     const hm = p.locator('.hm')
     ok(!!(await loaded(hm)), 'a morning: Home opens with all of it', await hm.innerText().catch(() => ''))
     await p.waitForTimeout(800)
@@ -385,11 +408,12 @@ try {
     const heads = (await hm.locator('.hm-sec h3').allInnerTexts()).map((x) => x.split('\n')[0].replace(/\d+$/, '').trim())
     ok(heads.join('|') === "Waiting on You|Ready to Look At|Coming Up|Chief of Staff's Tasks", 'a morning: the sections, by name', heads)
     const dayHeads = await coming.locator('h4').allInnerTexts()
-    ok(dayHeads[0] === 'TODAY' && dayHeads[1] === 'TOMORROW' && dayHeads.length >= 3 && /12/.test(dayHeads.at(-1)), 'Coming Up: today, tomorrow, then each day after, in order', dayHeads)
-    const todayText = await coming.locator('.hm-day').first().innerText()
+    ok(dayHeads[0] === 'TODAY' && dayHeads[1] === 'TOMORROW' && dayHeads.length >= 3 && new RegExp(`\\b${flightsOn.getDate()}\\b`).test(dayHeads.at(-1)), 'Coming Up: today, tomorrow, then each day after, in order', dayHeads)
+    // (Today's meetings come with the calendar's answer, which can be a moment behind Home's.)
+    const todayText = await until(async () => { const x = await coming.locator('.hm-day').first().innerText(); return /Acme renewal sync/.test(x) && /1:1 with Gary/.test(x) && x }, 8000) || await coming.locator('.hm-day').first().innerText()
     ok(/Acme renewal sync/.test(todayText) && (await coming.locator('.hm-ev-main b').allInnerTexts()).filter((x) => x === 'Acme renewal sync').length === 1 && /1:1 with Gary/.test(todayText) && todayText.indexOf('Acme') < todayText.indexOf('1:1 with Gary'), "today: the meetings left, at their times (the one on two calendars once)", todayText)
     const comingText = await coming.innerText()
-    ok(/Call the accountant tomorrow/.test(await coming.locator('.hm-day', { hasText: 'TOMORROW' }).innerText()) && /Book flights to New York on 12 Nov/.test(await coming.locator('.hm-day').last().innerText()) && /Send the board deck by Friday/.test(comingText), 'the tasks that name a day are under that day, as Due', comingText)
+    ok(/Call the accountant tomorrow/.test(await coming.locator('.hm-day', { hasText: 'TOMORROW' }).innerText()) && (await coming.locator('.hm-day').last().innerText()).includes(flights) && /Send the board deck by Friday/.test(comingText), 'the tasks that name a day are under that day, as Due', comingText)
     ok(!/Gary: make|SOC 2|Series A|Them: set up|Parvinder/.test(comingText) && !/today/.test(heads.join()), "and none with no day: Coming Up isn't a to-do list", comingText)
     const fold = chiefSec.locator('.hm-fold')
     const n = Number(/(\d+) to do, with no day set/.exec(await fold.innerText())?.[1])
@@ -446,14 +470,14 @@ try {
     await ctx.close()
   }
   {
-    const { ctx, p } = await page(b, a.url, { mode: 'dark', theme: 'midnight', width: 1440, height: 2400, before: morning })
+    const { ctx, p } = await pageAt(b, a.url, { mode: 'dark', theme: 'midnight', width: 1440, height: 2400, before: morning })
     await loaded(p.locator('.hm'))
     await p.waitForTimeout(800)
     await shot(p, `${tag}home-morning-1440-tall-dark`)
     await ctx.close()
   }
   for (const width of [375, 430]) {
-    const { ctx, p, errors } = await page(b, a.url, { phone: true, mode: width === 430 ? 'dark' : 'light', theme: width === 430 ? 'midnight' : 'sky', before: morning })
+    const { ctx, p, errors } = await pageAt(b, a.url, { phone: true, mode: width === 430 ? 'dark' : 'light', theme: width === 430 ? 'midnight' : 'sky', before: morning })
     await p.setViewportSize({ width, height: 860 })
     const hm = p.locator('.hm')
     ok(!!(await loaded(hm)), `a morning, phone ${width}: all of it`)
@@ -507,7 +531,7 @@ try {
   btask('w3', 300, 'waiting', 'Choose a logo for the beta landing page', { needs: 'The three options are in the shared folder. Which one?' }, 'lab-mini')
   btask('c1', 30, 'doing', 'Draft the hiring plan for next quarter, with the two roles from the planning meeting and a budget for each')
   btask('c2', 60, 'open', 'Look into compliance vendors and put the three cheapest side by side', {}, deskId)
-  btask('c3', 70, 'open', 'Send the board deck by Friday', { due: new Date(Date.now() + 864e5).toLocaleDateString('en-CA') })
+  btask('c3', 70, 'open', 'Send the board deck by Friday', { due: ymd(dayFrom(1)) })
   btask('c4', 80, 'open', 'Read the term sheet and list the questions for the lawyer', {}, 'travel-laptop')
   btask('c5', 90, 'open', 'Renew the domain and move the DNS to the new provider without losing the mail records', {}, deskId)
   btask('d1', 400, 'done', 'Compare the CRM quotes from the three vendors', { outcome: 'The cheapest is the one we already use; the other two cost twice as much for what we need. Written up in work/crm.md.', done: new Date().toLocaleDateString('en-CA') })
@@ -565,7 +589,7 @@ try {
   // Every button on a card or a row says what it is with an icon too (the agent's own answers aside).
   const bare = (p) => p.evaluate(() => [...document.querySelectorAll('.hm .ny-acts .ghost-btn, .hm .hm-quick .ghost-btn, .hm .hm-item-acts .ghost-btn, .hm .hm-pin')].filter((x) => !x.querySelector('svg')).map((x) => x.innerText.trim()))
   for (const [width, mode] of [[1920, 'light'], [1440, 'light'], [1440, 'dark'], [1100, 'light'], [800, 'dark']]) {
-    const { ctx, p, errors } = await page(b, a.url, { mode, theme: mode === 'dark' ? 'midnight' : 'sky', width, height: 1100, before: busyDay })
+    const { ctx, p, errors } = await pageAt(b, a.url, { mode, theme: mode === 'dark' ? 'midnight' : 'sky', width, height: 1100, before: busyDay })
     const hm = p.locator('.hm')
     ok(!!(await busyLoaded(hm)), `a busy day, ${width} ${mode}: Home opens with all of it`, await hm.innerText().catch(() => ''))
     await p.waitForTimeout(600)
@@ -608,7 +632,7 @@ try {
   }
   // Sort: what needs you first, newest, oldest, by computer or by kind, kept for next time.
   {
-    const { ctx, p, errors } = await page(b, a.url, { mode: 'light', theme: 'sky', width: 1440, height: 1400, before: busyDay })
+    const { ctx, p, errors } = await pageAt(b, a.url, { mode: 'light', theme: 'sky', width: 1440, height: 1400, before: busyDay })
     const hm = p.locator('.hm')
     await busyLoaded(hm)
     const waiting = hm.locator('.hm-sec[aria-label="Waiting on You"]')
@@ -639,7 +663,7 @@ try {
   // Pin: to the top, out of its own section, kept on the computer (it's there after a reload and
   // on a phone); unpinned, back where it was. One that couldn't be saved says why.
   {
-    const { ctx, p, errors } = await page(b, a.url, { mode: 'light', theme: 'sky', width: 1440, height: 1400, before: busyDay })
+    const { ctx, p, errors } = await pageAt(b, a.url, { mode: 'light', theme: 'sky', width: 1440, height: 1400, before: busyDay })
     const hm = p.locator('.hm')
     await busyLoaded(hm)
     const ready = hm.locator('.hm-sec[aria-label="Ready to Look At"]')
@@ -681,14 +705,14 @@ try {
     await ctx.close()
   }
   {
-    const { ctx, p } = await page(b, a.url, { mode: 'dark', theme: 'midnight', width: 1440, height: 2400, before: busyDay })
+    const { ctx, p } = await pageAt(b, a.url, { mode: 'dark', theme: 'midnight', width: 1440, height: 2400, before: busyDay })
     await busyLoaded(p.locator('.hm'))
     await p.waitForTimeout(600)
     await shot(p, `${tag}home-busy-pinned-tall-dark`)
     await ctx.close()
   }
   for (const width of [375, 430]) {
-    const { ctx, p, errors } = await page(b, a.url, { phone: true, mode: width === 430 ? 'dark' : 'light', theme: width === 430 ? 'midnight' : 'sky', before: busyDay })
+    const { ctx, p, errors } = await pageAt(b, a.url, { phone: true, mode: width === 430 ? 'dark' : 'light', theme: width === 430 ? 'midnight' : 'sky', before: busyDay })
     await p.setViewportSize({ width, height: 860 })
     const hm = p.locator('.hm')
     ok(!!(await busyLoaded(hm)), `a busy day, phone ${width}: all of it`)
@@ -721,7 +745,7 @@ try {
     let hold = true
     let fail = false
     const empty = { items: [], devices: [{ id: null, name: 'Studio', online: true, here: true }] }
-    const { ctx, p, errors } = await page(b, a.url, {
+    const { ctx, p, errors } = await pageAt(b, a.url, {
       width: 1280,
       before: async (c2) => {
         await noServiceWorker(c2)
@@ -750,7 +774,7 @@ try {
 
   // ---------- on a phone ----------
   for (const width of [375, 430]) {
-    const { ctx, p, errors } = await page(b, a.url, { phone: true, mode: width === 430 ? 'dark' : 'light', theme: width === 430 ? 'midnight' : 'sky', before: desk })
+    const { ctx, p, errors } = await pageAt(b, a.url, { phone: true, mode: width === 430 ? 'dark' : 'light', theme: width === 430 ? 'midnight' : 'sky', before: desk })
     await p.setViewportSize({ width, height: 860 })
     await p.waitForSelector('.tabbar button', { timeout: 20000 })
     // (The tabs are the usual ones until the page has its settings, a moment after it opens.)
@@ -784,7 +808,7 @@ try {
   // Off again: nothing leads to it, and the app opens as it did.
   await a.api('/settings', { trials: { home: false } }, 'PATCH')
   {
-    const { ctx, p } = await page(b, a.url, { width: 1280 })
+    const { ctx, p } = await pageAt(b, a.url, { width: 1280 })
     await p.waitForSelector('.rail-nav-btn', { timeout: 20000 })
     await p.waitForTimeout(1500)
     ok(!(await p.locator('.rail-home').count()) && !(await p.locator('.hm').count()), 'turned off: no Home in the sidebar, and the app opens as before')

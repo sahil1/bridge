@@ -94,11 +94,57 @@ Settings › Voice › Dictation turns the history off (then nothing new is kept
 deleting one deletes it from the disk, not just from the list. A dictation refused because a
 password field had the keyboard isn't kept.
 
+Mail (on a Mac) is read from Apple Mail's own files on your computer: its index (in
+`~/Library/Mail`, opened read only) for the list, and a message's file when you open it or when it's
+next in the list (read ahead, so it opens at once). Bridge AI only reads mail. It never sends,
+archives, flags, moves or deletes anything, never puts a draft in your mailbox, and talks to no mail
+server. What you mark Done or set aside with Remind me (including "remind me if nobody answers"),
+and the senders you mark Always important or mute, are kept in `~/.bridge-ai` (`mail/marks.json`,
+`cache/mail-rules.json`), and Mail is left as it is. An agent you start on an email (Summarize, Action
+items, Ticket, Triage) reads that message's file on your computer, works under its own provider's
+terms, and is told your mail is read only.
+
+Reply Assist writes a draft only when you ask for one. Then the open email (with the earlier messages
+it quotes), your How You Write profile with a few of your own replies as examples, and any free times
+you put in, go to the model you picked for meeting notes (Settings › Meetings); a model on your
+computer keeps them there. Reply Assist names that model and shows exactly what it was sent. How You
+Write is learnt the first time you agree to it, and again now and then while you use Reply Assist
+(Settings › Mail turns that off): up to 40 of your own replies from Mail's Sent folders and up to 40
+of the lines Who spoke marks as yours in recorded meetings, from the last four months, go to that
+same model. Only the short profile and a few examples are kept, in `~/.bridge-ai/mail/voice.json`,
+which Settings › Mail shows, lets you change and clears. Scheduling Assist reads your calendar on
+your computer and holds or adds nothing; the times reach a model only if you put them in a draft.
+Copy and Open in your mail app hand the draft to you and your mail app; you send it.
+
 Files shows your agents' folders, and only the other folders you add to it yourself (Places, with
 the folder picker); it keeps each place's path in `~/.bridge-ai/places.json`, not what's in it, and
 looks in none of them until you open it. A file you copy to another of your computers, or send from
 your phone, goes end-to-end encrypted over the same link as everything else (the relay sees only
 how much goes), and lands only in the folder you pick on the computer it goes to.
+
+Signature Assist (a beta feature in Studio, off until you turn it on) keeps the signature and
+initials you draw as two pictures in `~/.bridge-ai/studio/signatures`, readable by you only; they're
+never sent to a model or anywhere else, and removing one deletes it from the disk. A PDF you sign
+is read on your computer to find where to sign. Only when you press Explain it does the PDF's text go
+to the model you pick, as any other request to that model does (one on your computer keeps it
+there); a scan with no text in it is read on a Mac first, on your computer. The signed copy is a new
+file in a `_signed` folder beside the PDF, and the PDF itself isn't changed.
+
+The calendar reads macOS Calendar on your computer, once you allow it: each event's title, time,
+place and calendar (and that calendar's colour), who's invited (their names and addresses), who
+organised it, your answer to it, and its notes, from which it keeps the join link, a short agenda
+and the files the invite links to. It only reads: Bridge AI never adds, changes, deletes or answers
+an event. How you have it shown (the day your week starts, your working hours, the calendars you
+hide) is kept in `~/.bridge-ai/config.json`.
+
+Prep Assist, before a meeting with other people, puts together what's already on your computer:
+who's coming and which of them are in your recorded meetings, the summary and the action items still
+open from the last meeting like it, the invite's agenda and files, and on a Mac your mail with them
+from Mail's own index (the last ten days' subjects, senders and Mail's short previews, read only).
+When it suggests goals and questions (when you ask, or by itself fifteen minutes before, unless you
+turn that off in Settings › Meetings), all of that goes to the model that writes your meeting notes,
+as your meeting notes do: a model on your computer keeps it there; any other gets it. What it
+suggests is kept in `~/.bridge-ai/cache/meeting-prep.json` until two days after the meeting.
 
 If you run Bridge AI on a server or in Docker, all of this applies to that machine instead of your
 computer.
