@@ -88,11 +88,11 @@ export default function Home({ fleet, onLaunched, onMore, autoFocus = true }) {
     try {
       const out = project
         ? await api('/agents/launch', { method: 'POST', body: {
-          kind, cwd: project.path, prompt, access: access.id, ...(kind === 'chat' ? { model } : {}),
+          kind, cwd: project.path, prompt, typed: 'new', access: access.id, ...(kind === 'chat' ? { model } : {}),
           workspaceId: space, newSpace: space ? null : project.name.split('/').pop(), label: prompt.replace(/\s+/g, ' ').slice(0, 40),
           ...(repo ? { remember: true, ownBranch: own } : {}),
         } })
-        : await api('/chats', { method: 'POST', body: kind === 'chat' ? { kind, prompt, model } : { kind, prompt } })
+        : await api('/chats', { method: 'POST', body: kind === 'chat' ? { kind, prompt, model, typed: 'new' } : { kind, prompt, typed: 'new' } })
       setText('')
       onLaunched?.(out)
     } catch (x) { setErr(x.message) } finally { setBusy(false) }

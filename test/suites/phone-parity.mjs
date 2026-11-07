@@ -75,6 +75,7 @@ const PATHS = {
   'a:mail-keys': { none: 'Keys are for a keyboard; on a phone the open message has Done, Remind me and Reply Assist as buttons' },
   'a:markets': { phone: 'Today › Markets' },
   'a:routines': { phone: 'Search › Show routines' },
+  'a:new-routine': { phone: 'Search › New routine' },
   'a:usage': { phone: 'Today › Usage' },
   'a:stats': { phone: 'Today › Usage' },
   'a:tour': { phone: 'Search › Take the tour' },
@@ -125,7 +126,7 @@ for (const [what, ids] of [['view', views], ['⌘K action', actions], ['Settings
   ok(!missing(ids).length, `every desktop ${what} has a way in on a phone, or says why not (add it to PATHS here)`, missing(ids))
 }
 
-const kit = await startKit('phone-parity', { config: { trials: { studio: true, 'meeting-insights': true } } }) // the beta features on: their ways in are checked too
+const kit = await startKit('phone-parity', { config: { trials: { studio: true, 'meeting-insights': true, routines: true } } }) // the beta features on: their ways in are checked too
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
 try {

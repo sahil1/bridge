@@ -125,11 +125,11 @@ export default function NewAgent({ fleet, initial = {}, onClose, onLaunched, onA
     setError(null)
     try {
       if (mode === 'chat') {
-        onLaunched(await api('/chats', { method: 'POST', body: kind === 'chat' ? { kind, prompt, model: pickedModel } : { kind, prompt, account: pickedAccount } }))
+        onLaunched(await api('/chats', { method: 'POST', body: kind === 'chat' ? { kind, prompt, model: pickedModel, typed: 'new' } : { kind, prompt, account: pickedAccount, typed: 'new' } }))
         return
       }
       const out = await api('/agents/launch', { method: 'POST', body: {
-        kind, cwd, label: name || folderName, prompt, account: pickedAccount, ...(kind === 'chat' ? { model: pickedModel } : {}),
+        kind, cwd, label: name || folderName, prompt, typed: 'new', account: pickedAccount, ...(kind === 'chat' ? { model: pickedModel } : {}),
         workspaceId: space === '__new' ? null : space,
         newSpace: space === '__new' ? (spaceName || name || folderName) : null,
         alsoKind: also && prompt.trim() ? also : undefined,

@@ -91,7 +91,7 @@ export default function ChiefTasks({ agent, onOpenPath }) {
     if (!title || busy) return
     setBusy('add')
     try {
-      const r = await api('/chief/tasks', { method: 'POST', body: { title, send: true } })
+      const r = await api('/chief/tasks', { method: 'POST', body: { title, send: true, typed: 'tasks' } })
       setText('')
       setAdding(false)
       setCollapsed(false)

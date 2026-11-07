@@ -1,11 +1,13 @@
 // History: search every agent conversation on this computer, and the agents you closed. A
 // running agent opens; a closed or old one resumes with its full history (in its old space
-// when that's still open).
+// when that's still open). With Scheduled Routines on, a second tab, Commands: what you asked in
+// Bridge AI's boxes (CommandHistory.jsx).
 import { useEffect, useRef, useState } from 'react'
 import Icon from './Icon.jsx'
 import AgentMark from './settings/agentMark.jsx'
+import CommandHistory from './CommandHistory.jsx'
 import { api } from '../api.js'
-import { locale } from '../i18n/index.js'
+import { locale, t } from '../i18n/index.js'
 
 const ago = (t) => {
   const s = (Date.now() - (typeof t === 'number' ? t : Date.parse(t))) / 1000
@@ -23,7 +25,8 @@ function Snip({ text, q }) {
   return <>{text.slice(0, i)}<mark>{text.slice(i, i + q.length)}</mark>{text.slice(i + q.length)}</>
 }
 
-export default function History({ onClose, onOpen }) {
+export default function History({ onClose, onOpen, commands = false }) {
+  const [tab, setTab] = useState('conversations')
   const [q, setQ] = useState('')
   const [closed, setClosed] = useState(null)
   const [found, setFound] = useState(null) // { q, results, total }
@@ -67,6 +70,13 @@ export default function History({ onClose, onOpen }) {
           <h3>History</h3>
           <button type="button" className="win-btn" onClick={onClose} aria-label="Close"><Icon name="x" size={14} /></button>
         </header>
+        {commands && (
+          <nav className="hist-tabs" role="tablist" aria-label={t('History')}>
+            <button type="button" role="tab" aria-selected={tab === 'conversations'} className={tab === 'conversations' ? 'on' : ''} onClick={() => setTab('conversations')}><Icon name="chat" size={13} /> {t('Conversations')}</button>
+            <button type="button" role="tab" aria-selected={tab === 'commands'} className={tab === 'commands' ? 'on' : ''} onClick={() => setTab('commands')}><Icon name="command" size={13} /> {t('Commands')}</button>
+          </nav>
+        )}
+        {commands && tab === 'commands' ? <CommandHistory onClose={onClose} onSettings={() => { onClose(); window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'commands' } })) }} /> : <>
         <div className="hist-search">
           <Icon name="search" size={14} />
           <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search every conversation: a customer, a file, an error…" aria-label="Search conversations" />
@@ -106,6 +116,7 @@ export default function History({ onClose, onOpen }) {
             </>
           )}
         </div>
+        </>}
       </div>
     </div>
   )

@@ -48,7 +48,7 @@ const PHONE = [
 // opens Devices at your devices (they were two sections, and linking machines needs the
 // relay set up on the phone one); "permissions" opens General at its Permissions; "topbar" opens
 // Appearance at In the Top Bar (from the Status menu).
-const LEADS = { accounts: 'providers', cloud: 'providers', machines: 'phone', permissions: 'general', topbar: 'appearance' }
+const LEADS = { accounts: 'providers', cloud: 'providers', machines: 'phone', permissions: 'general', commands: 'general', topbar: 'appearance' }
 const sectionFor = (section, sections) => {
   const to = cloudOnly ? (section === 'all' ? null : section === 'appearance' ? 'appearance' : 'cloud') : LEADS[section] || section
   return sections.some((s) => s.id === to) ? to : null
@@ -90,7 +90,7 @@ export default function Settings({ section = 'all', onClose, onOpenAgent }) {
   const body = (
     <SettingsAt.Provider value={at}>
     <ErrorBoundary key={at} name={t(cur.label)} resetKey={at}>
-    {at === 'general' && <General onGo={go} focus={section === 'permissions' ? 'permissions' : null} onOpenAgent={(id) => { onOpenAgent?.(id); onClose() }} />}
+    {at === 'general' && <General onGo={go} focus={section === 'permissions' || section === 'commands' ? section : null} onOpenAgent={(id) => { onOpenAgent?.(id); onClose() }} />}
     {at === 'agents' && <Agents onOpenAgent={(id) => { onOpenAgent?.(id); onClose() }} />}
     {at === 'providers' && <Providers focus={section === 'accounts' || section === 'cloud' ? section : null} onOpenAgent={(id) => { onOpenAgent?.(id); onClose() }} />}
     {at === 'voice' && <Voice />}

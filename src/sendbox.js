@@ -28,14 +28,14 @@ const subs = new Set()
 const tell = () => { items = [...items]; for (const fn of subs) fn() }
 const put = (x) => { items = items.filter((y) => y.cid !== x.cid).concat(x); tell() }
 const drop = (cid) => { items = items.filter((y) => y.cid !== cid); tell() }
-const keep = (x) => store([...stored().filter((y) => y.cid !== x.cid), { cid: x.cid, pane: x.pane, way: x.way, text: x.text, at: x.at }])
+const keep = (x) => store([...stored().filter((y) => y.cid !== x.cid), { cid: x.cid, pane: x.pane, way: x.way, text: x.text, at: x.at, ...(x.typed ? { typed: x.typed } : {}) }])
 const done = (cid) => store(stored().filter((y) => y.cid !== cid))
 
 const lines = new Map() // pane -> its last message's sending
 async function attempt(x) {
   for (let i = 0; ; i++) {
     try {
-      const r = await api(`/agents/${encodeURIComponent(x.pane)}/${x.way}`, { method: 'POST', body: { text: x.text, cid: x.cid } })
+      const r = await api(`/agents/${encodeURIComponent(x.pane)}/${x.way}`, { method: 'POST', body: { text: x.text, cid: x.cid, ...(x.typed ? { typed: x.typed } : {}) } })
       done(x.cid)
       // Kept by the phone for your computer while it's offline (the outbox shows it), or answered.
       if (r?.offline || landedIds.has(x.cid)) drop(x.cid)
@@ -60,10 +60,11 @@ export function sentTo(r, name) {
 }
 
 // way: 'prompt' (typed in now, or held by the computer while the agent is busy), 'queue', or 'steer'
-// (interrupt it, and this goes first). { cid, sent }: sent settles with the computer's answer, or
-// fails with its refusal.
-export function send(pane, way, text, cid = newCid()) {
-  const x = { cid, pane, way, text, at: Date.now() }
+// (interrupt it, and this goes first). typed: the box you typed it in, for History › Commands
+// (server/cmdhistory.js). { cid, sent }: sent settles with the computer's answer, or fails with its
+// refusal.
+export function send(pane, way, text, cid = newCid(), { typed = null } = {}) {
+  const x = { cid, pane, way, text, at: Date.now(), ...(typed ? { typed } : {}) }
   keep(x)
   put(x)
   const sent = (lines.get(pane) || Promise.resolve()).catch(() => {}).then(() => attempt(x))

@@ -132,7 +132,7 @@ export function NeedsItem({ it, focused, onOpen, onGone, setNote, pin = null }) 
     if (!v) return
     setBusy(true)
     try {
-      const r = await onDevice(it.machine, `/agents/${encodeURIComponent(it.paneId)}/prompt`, { text: v })
+      const r = await onDevice(it.machine, `/agents/${encodeURIComponent(it.paneId)}/prompt`, { text: v, typed: 'reply' })
       setText('')
       setMode(null)
       // In now, or held until it's free: as your computer answered.

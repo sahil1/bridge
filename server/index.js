@@ -30,6 +30,7 @@ import http from 'node:http'
 import { makeQuota, makeWeather, makeMortgage } from './feeds.js'
 import * as mk from './market.js'
 import * as routines from './routines.js'
+import * as cmdHistory from './cmdhistory.js'
 import * as ideas from './ideas.js'
 import * as queue from './queue.js'
 import * as places from './places.js'
@@ -351,7 +352,7 @@ const rootOf = async (pane) => {
 // ---------- Beta features ----------
 // Still being finished, so hidden until turned on in Settings › About & Updates › Beta Features
 // (trials: { studio: true } in the config; src/trials.js). Their routes answer only then.
-const TRIALS = ['studio', 'home', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights', 'signature-assist']
+const TRIALS = ['studio', 'home', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights', 'signature-assist', 'routines']
 const trialOn = (id) => cfg.trials?.[id] === true
 const trialOff = (id, label) => (req, res, next) => (trialOn(id) ? next() : res.status(404).json({ error: `${label} is a beta feature. Turn it on in Settings › About & Updates › Beta Features.`, trial: id }))
 
@@ -715,6 +716,7 @@ app.post('/api/agents/:pane/prompt', wrap(async (req) => {
       return { agent, r: { ok: true, queued: true, reason: why, id: item.id, position: queue.placeOf(pane, item.id) } }
     })
     insights.noteSent(pane, text)
+    noteTyped(req.body, agent)
     // A side question: its answer is in a panel, not the chat, so bring it back here.
     if (!r.queued && agent && caps(agent.kind).btw && /^\/btw\s/.test(text)) return { ...r, btw: (await btwAnswer(rt, pane, text)) || null }
     return r
@@ -729,7 +731,8 @@ app.post('/api/agents/:pane/keys', wrap(async (req) => {
   return { ok: true }
 }))
 
-app.post('/api/chief/launch', wrap(async () => {
+app.post('/api/chief/launch', wrap(() => startChief()))
+async function startChief() {
   const f = await fleetView()
   const existing = mainChief(f)
   if (existing) return { paneId: existing.paneId, existing: true }
@@ -740,7 +743,7 @@ app.post('/api/chief/launch', wrap(async () => {
   counts.add('chief.started')
   pushFleet()
   return out
-}))
+}
 async function chiefKind() {
   if (!(await exists(CHIEF_DIR))) throw new Error(`Chief of Staff folder not found at ${CHIEF_DIR}`)
   const kind = cfg.chief?.kind || 'claude'
@@ -786,6 +789,7 @@ app.post('/api/agents/:pane/queue', wrap(async (req) => {
   return onlyOnce(cid, async () => {
     const item = queue.add(req.params.pane, text, { cid })
     pushFleet()
+    if (req.body?.typed) findAgent(req.params.pane).then((a) => noteTyped(req.body, a), () => {})
     return { ...item, queued: true, position: queue.placeOf(req.params.pane, item.id) }
   })
 }))
@@ -826,6 +830,7 @@ app.post('/api/agents/:pane/steer', wrap(async (req) => {
     await rt.keys(req.params.pane, ['esc'])
     const item = queue.add(req.params.pane, text, { now: true, cid: cidOf(req) })
     pushFleet()
+    if (req.body?.typed) findAgent(req.params.pane).then((a) => noteTyped(req.body, a), () => {})
     return { ...item, steered: true, queued: true, position: queue.placeOf(req.params.pane, item.id) }
   })
 }))
@@ -861,7 +866,12 @@ app.get('/api/repo', wrap(async (req) => {
   try { dir = await places.resolveDir(req.query.dir) } catch { return { repo: null } }
   return worktrees.info(dir, { branch: req.query.branch, label: req.query.label })
 }))
-app.post('/api/agents/launch', wrap((req) => launchFrom(req.body || {})))
+app.post('/api/agents/launch', wrap(async (req) => {
+  const b = req.body || {}
+  const out = await launchFrom(b)
+  if (b.typed && b.prompt) noteTyped({ typed: b.typed, text: b.prompt }, { kind: b.kind || cfg.defaultAgent || 'claude', title: b.label, cwd: await places.resolveDir(b.cwd).catch(() => String(b.cwd || '')), paneId: out?.paneId })
+  return out
+}))
 // New agent's choices (also a meeting's action item, meetwork.js): which agent, in which folder,
 // where in the sidebar, on its own branch or not, and its first message.
 async function launchFrom(body) {
@@ -1055,7 +1065,9 @@ app.post('/api/agents/:pane/continue', wrap(async (req) => {
 }))
 
 // ---------- Routines (recurring jobs, last run read from evidence) ----------
-app.get('/api/routines', wrap((req) => routines.list(req.query.refresh === '1')))
+// With Scheduled Routines on, each can also run by itself at its time, on this computer (named, so
+// the page says where it runs), and says what became of each run (routines.js).
+app.get('/api/routines', wrap(async (req) => ({ ...(await routines.list(req.query.refresh === '1')), computer: relay.thisName() })))
 app.post('/api/routines', wrap((req) => routines.add(req.body || {})))
 app.patch('/api/routines/:id', wrap((req) => routines.update(req.params.id, req.body || {})))
 app.delete('/api/routines/:id', wrap((req) => { routines.remove(req.params.id); return { ok: true } }))
@@ -1063,14 +1075,59 @@ app.post('/api/routines/:id/done', wrap((req) => { routines.markDone(req.params.
 app.post('/api/routines/:id/run', wrap(async (req) => {
   const def = routines.readDefs().find((d) => d.id === req.params.id)
   if (!def) throw new Error('No such routine')
+  try {
+    const out = await startRoutine(def)
+    routines.noteLaunch(def.id, out.paneId)
+    return out
+  } catch (e) { if (trialOn('routines')) routines.noteFailed(def.id, e.message); throw e }
+}))
+// A routine's run: a new agent in its folder, typed its command (the same agent, space and words
+// each time), or its command to the Chief of Staff, started first if it isn't running.
+async function startRoutine(def) {
+  if (def.to === 'chief') {
+    const mate = mainChief(await fleetView())
+    if (mate) {
+      const r = await tellChief(def.command)
+      if (!r.sent) throw new Error(r.error || 'The Chief of Staff didn\'t take it')
+      return { paneId: mate.paneId, ...r }
+    }
+    const out = await startChief()
+    queue.add(out.paneId, def.command)
+    pushFleet()
+    return { ...out, queued: true }
+  }
   const cwd = routines.resolveCwd(def)
   if (!(await exists(cwd))) throw new Error(`Folder not found: ${def.cwd}`)
   const f = await rt.fleet()
   const ws = def.workspace && f.workspaces.find((w) => w.label.toLowerCase() === def.workspace.toLowerCase())
-  const out = await launchAgent({ kind: def.kind || cfg.defaultAgent || 'claude', cwd, label: def.name, workspaceId: ws?.id, newSpace: ws ? undefined : def.workspace || def.name, prompt: def.command })
-  routines.noteLaunch(def.id, out.paneId)
-  return out
-}))
+  return launchAgent({ kind: def.kind || cfg.defaultAgent || 'claude', cwd, label: def.name, workspaceId: ws?.id, newSpace: ws ? undefined : def.workspace || def.name, prompt: def.command }).then((out) => { pushFleet(); return out })
+}
+// Each one whose time has come, started (or written down as missed, or why it couldn't start, with
+// a notification saying so). BRIDGE_ROUTINE_TICK_MS: how often it looks (a test's few seconds).
+const ROUTINE_TICK = Number(process.env.BRIDGE_ROUTINE_TICK_MS) || 30_000
+const routineTold = (def, run) => notify.send({ kind: 'routine', title: run.missed ? `${def.name} didn't run` : `${def.name} couldn't start`, body: run.missed ? `Its ${new Date(run.slot).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} run was missed: ${run.why}.` : run.error, url: '/?card=repeat', tag: `routine-${def.id}` }).catch(() => {})
+const routineTick = () => routines.tick({ on: trialOn('routines'), start: startRoutine, live: (id) => lastFleet?.agents?.find((a) => a.paneId === id) || null, told: routineTold, slack: ROUTINE_TICK * 3 }).catch((e) => console.log(`routines: ${e.message}`))
+routines.scheduling(trialOn('routines'))
+setTimeout(routineTick, Math.min(ROUTINE_TICK, 15_000)).unref()
+setInterval(routineTick, ROUTINE_TICK).unref()
+
+// ---------- History › Commands (cmdhistory.js), with Scheduled Routines on ----------
+// What you typed in one of the app's boxes, which says so (typed: the box). What agents send each
+// other comes through the same routes without it, and isn't kept.
+cmdHistory.configure(cfg)
+function noteTyped(body, a) {
+  if (!body?.typed || !trialOn('routines')) return
+  const to = a ? { kind: a.kind, name: a.plainChat ? a.title : needsYou.nameOf(a), chief: !!a.chief, cwd: a.plainChat || a.chief ? '' : a.worktree?.repo || a.cwd, pane: a.paneId } : {}
+  cmdHistory.add({ text: body.text, box: body.typed, to }).catch((e) => console.log(`command history: ${e.message}`))
+}
+app.use('/api/command-history', trialOff('routines', 'Scheduled Routines'))
+app.get('/api/command-history', wrap((req) => cmdHistory.list({ q: String(req.query.q || ''), before: req.query.before || null, limit: req.query.limit })))
+app.delete('/api/command-history', wrap(() => cmdHistory.clear()))
+// Asked on a schedule: a routine to suggest, filled in, unless it's one already (its folder as here).
+app.get('/api/command-history/suggestions', wrap(async () => ({ suggestions: await cmdHistory.suggestions({ routines: routines.readDefs().map((d) => ({ command: d.command, to: d.to, cwd: d.to === 'chief' ? '' : routines.resolveCwd(d) })) }) })))
+app.post('/api/command-history/suggestions/:key/dismiss', wrap((req) => cmdHistory.dismiss(req.params.key)))
+app.delete('/api/command-history/:id', wrap((req) => cmdHistory.remove(req.params.id)))
+setInterval(() => cmdHistory.tidy().catch(() => {}), 6 * 60 * 60 * 1000).unref()
 // Insights over every agent and account (insights.js), and Claude Code's own /insights report
 // when you've run one, as a link.
 insights.setup({ chiefDir: CHIEF_DIR })
@@ -1112,6 +1169,7 @@ app.post('/api/chief/tasks', wrap(async (req) => {
   const send = !!req.body?.send
   const item = chiefTasks.add(req.body?.title, { status: req.body?.status, link: req.body?.link, from: send ? 'you' : null })
   counts.add('chief.tasks')
+  if (req.body?.typed) noteTyped({ typed: 'tasks', text: req.body.title }, { chief: true, kind: cfg.chief?.kind || 'claude' })
   if (!send) return { item }
   return { item, ...(await tellChief(`Task ${item.id} from my Tasks panel: ${item.title}\n\n(It's on your task list as ${item.id}. Keep it current with \`node bin/bridge task\`.)`)) }
 }))
@@ -1183,6 +1241,7 @@ async function pollFleet() {
         insights.observe(f.agents)
         counts.most('agents.peak', f.agents.length)
         runs.observe(f.agents)
+        routines.observe(f.agents, { said: routineSaid })
         // Another session's agents are new to the notifications, not news (see notify.forget).
         if (f.session !== notifiedSession) { notifiedSession = f.session; notify.forget() }
         if (!f.down) notify.onFleet(f, cfg)
@@ -1221,7 +1280,9 @@ rt.whenInterrupted?.((paneId, why) => {
   pushFleet()
 })
 // Nobody watching: still note now and then what each agent is doing, for Insights.
-setInterval(() => { if (!(clients.size || queue.size() || notify.active())) rt.fleet().then((f) => { if (!f.down) { insights.observe(f.agents); runs.observe(f.agents) } }, () => {}) }, 30 * 1000)
+setInterval(() => { if (!(clients.size || queue.size() || notify.active())) rt.fleet().then((f) => { if (!f.down) { insights.observe(f.agents); runs.observe(f.agents); routines.observe(f.agents, { said: routineSaid }) } }, () => {}) }, 30 * 1000)
+// What a routine's agent said last, once it's done (Routines shows it under the run).
+function routineSaid(a) { return preview(a)?.text || null }
 setInterval(() => { for (const c of clients) c.write(': ping\n\n') }, 25000)
 // Cloud agents are checked on their own, gently; finished ones only while someone's watching.
 cloud.start({ watched: () => clients.size > 0 || notify.active() })
@@ -2051,10 +2112,13 @@ app.get('/api/brief', wrap(async (req) => {
   }
   if (r?.routines?.length) {
     const due = r.routines.filter((x) => ['due', 'overdue', 'never'].includes(x.state))
+    // Scheduled ones that didn't run (a failure, or missed while the computer was off) say why first.
+    const failed = r.routines.filter((x) => ['error', 'missed'].includes(x.state) && x.runs)
+    const said = [failed.length ? `${failed.length} didn't run: ${failed.map((x) => `${x.name} (${x.note})`).join(', ')}.` : '', due.length ? `${due.length} due: ${due.map((x) => x.name + (x.note ? ` (${x.note})` : '')).join(', ')}.` : ''].filter(Boolean).join(' ')
     lines.push({
       key: 'routines',
-      text: due.length ? `${due.length} due: ${due.map((x) => x.name + (x.note ? ` (${x.note})` : '')).join(', ')}.` : 'All routines are up to date.',
-      routines: due.map((x) => ({ id: x.id, name: x.name, state: x.state })),
+      text: said || 'All routines are up to date.',
+      routines: [...failed, ...due].map((x) => ({ id: x.id, name: x.name, state: x.state })),
     })
   }
   // Plan usage off (the default): nothing to say about it.
@@ -2446,6 +2510,7 @@ function applyConfig() {
   for (const k of Object.keys(cfg)) if (!(k in fresh)) delete cfg[k]
   Object.assign(cfg, fresh)
   TZ = cfg.location?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone
+  routines.scheduling(trialOn('routines'))
   weather = makeWeather(cfg)
   prepareChief(cfg)
   // The herdr session in view (the sidebar's session menu, Settings), at once.
@@ -2801,6 +2866,7 @@ app.post('/api/chats', wrap(async (req) => {
   const title = String(req.body?.title || req.body?.prompt || 'New chat').replace(/\s+/g, ' ').trim().slice(0, 40) || 'New chat'
   const out = await launchAgent({ kind, model: (kind !== 'chat' && model) || undefined, cwd: dir, label: title, workspaceId: ws?.id, newSpace: ws ? undefined : 'Chats', prompt: String(req.body?.prompt || '').trim() || undefined, account: req.body?.account ? String(req.body.account) : undefined, ...(kind === 'chat' && model ? { env: { BRIDGE_CHAT_MODEL: model } } : {}) })
   pushFleet()
+  if (req.body?.typed && req.body?.prompt) noteTyped({ typed: req.body.typed, text: req.body.prompt }, { kind, title, plainChat: true, paneId: out?.paneId })
   return out
 }))
 
