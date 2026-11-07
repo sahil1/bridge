@@ -14,8 +14,8 @@
 // items, Prep Assist); Prep with no model (all the rest, and how to add one), then with the stand-in
 // model: what it's sent and what's shown, kept, Again, by itself shortly before, and on the floating
 // card. The calendar helper is only ever asked to read. Screenshots at 1440 and on a 390 phone,
-// light and dark. It holds at any time of day: BRIDGE_TEST_CLOCK=HH:MM runs the server
-// (stand-ins/clock.mjs) and every page at that time today, to try one (03:00, 21:30).
+// light and dark. It holds on any day at any time: BRIDGE_TEST_CLOCK=HH:MM (or "Fri 16:05", that day
+// this week) runs the server (stand-ins/clock.mjs) and every page then, to try one.
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -30,10 +30,15 @@ if (IS_WIN) {
 
 // ---------- The week ----------
 const DAY = 864e5
-// The time it's run at, or the one BRIDGE_TEST_CLOCK names (today, this computer's time), which the
-// server and the pages then run from.
-const CLOCK = /^(\d\d):(\d\d)$/.exec(process.env.BRIDGE_TEST_CLOCK || '')
-const NOW = CLOCK ? new Date().setHours(+CLOCK[1], +CLOCK[2], 0, 0) : Date.now()
+// The time it's run at, or the one BRIDGE_TEST_CLOCK names (today, or that weekday of this week from
+// Monday; this computer's time), which the server and the pages then run from.
+const CLOCK = /^(?:(sun|mon|tue|wed|thu|fri|sat)\w*\s+)?(\d\d):(\d\d)$/i.exec(process.env.BRIDGE_TEST_CLOCK || '')
+const NOW = (() => {
+  if (!CLOCK) return Date.now()
+  const d = new Date()
+  if (CLOCK[1]) d.setDate(d.getDate() - ((d.getDay() + 6) % 7) + ((['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'].indexOf(CLOCK[1].toLowerCase()) + 6) % 7))
+  return d.setHours(+CLOCK[2], +CLOCK[3], 0, 0)
+})()
 const OFFSET = NOW - Date.now()
 if (CLOCK) console.log(`calendar: run at ${new Date(NOW).toString()}`)
 const monday = (() => { const d = new Date(NOW); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d })()
@@ -69,7 +74,22 @@ const DECLINED = ev('Budget office hours', 'Work', mins(60), mins(90), { respons
 // Two weeks on, only the week's own meetings (nothing set by the time it's run): the one the grid's
 // hours are checked on. Four weeks on, a release window from 11 PM to half past midnight.
 const LATE = ev('Release window', 'Work', at(32, 23), at(33, 0, 30), { attendees: ['Tester', 'Leo Brandt'] })
-const EVENTS = [...week(-7), ...week(0), ...week(7), ...week(14), SOON, LATER, RECORDED, FOCUS, DECLINED, LATE]
+// The weeks' own meetings keep clear of the hours the checks about now use (from 4 hours before to 7
+// after: last time, the next meeting, the one later): one that would fall there moves, on its own
+// day, to the nearest half hour that doesn't, so "the next meeting" is always the one meant, on any
+// day at any time. Every title is its own: none is also one of today's.
+const AWAY = [NOW - 4 * 3600e3, NOW + 7 * 3600e3]
+const clear = (e) => {
+  const s = Date.parse(e.start), len = Date.parse(e.end) - s
+  const free = (x) => x + len <= AWAY[0] || x >= AWAY[1]
+  if (e.allDay || free(s)) return e
+  const day = new Date(s).setHours(0, 0, 0, 0)
+  const slot = Array.from({ length: 48 }, (_, i) => day + i * 30 * 60e3).filter((x) => free(x) && x + len <= day + DAY).sort((a, b) => Math.abs(a - s) - Math.abs(b - s))[0]
+  return { ...e, start: new Date(slot).toISOString(), end: new Date(slot + len).toISOString() }
+}
+const FIXED = [...week(-7), ...week(0), ...week(7), ...week(14)].map(clear)
+const EVENTS = [...FIXED, SOON, LATER, RECORDED, FOCUS, DECLINED, LATE]
+if (new Set([SOON, LATER, RECORDED, FOCUS, DECLINED, LATE].map((e) => e.title)).size !== 6 || FIXED.some((e) => [SOON, LATER, RECORDED, FOCUS, DECLINED, LATE].some((x) => x.title === e.title))) throw new Error('every seeded title must be its own')
 
 // The calendar helper: answers from bridgecal.json, and writes down every way it was asked.
 const helper = (bin) => {
@@ -166,8 +186,10 @@ try {
   ok(by('Daily standup').color === '#1badf8' && by('Lunch with Sam').color === '#63da38' && by('Offsite prep').color === null && by('Football practice').color === '#ff9500', "each event carries its calendar's own colour, and none for a calendar that has none", wk.events.map((e) => [e.title, e.calendar, e.color]).slice(0, 12))
   ok(by('Design crit').response === 'tentative' && by('Vendor pitch: Contoso').response === 'declined' && by('Week wrap').response === 'none' && by('Lunch with Sam').response === 'organizer' && by('Northwind renewal review').response === 'accepted' && by('Offsite prep').response === null, 'your answer to each invite, as Calendar has it', wk.events.map((e) => [e.title, e.response]).slice(0, 12))
   ok(by('Daily standup').uid === `uid-standup|${by('Daily standup').start}` && by('Vendor pitch: Contoso').organizer === 'Pat Lin', 'a lasting id (a repeat\'s, with its start) and who organised it', [by('Daily standup').uid, by('Vendor pitch: Contoso').organizer])
-  const rec = by('Quarterly planning')
-  if (rec) ok(rec.recorded?.id === '2000-01-03-qp0003' && rec.recorded.summary === true && !by('Design review with Ines')?.recorded, 'the meeting recorded for an event is named with it, and only that one', [rec.recorded, by('Design review with Ines')?.recorded])
+  // The recorded one's day (this week's, or Sunday's just before it, run just after midnight).
+  const recDay = await api(`/calendar/range?from=${ymd(RECORDED.start)}&to=${ymd(RECORDED.start)}`)
+  const rec = by('Quarterly planning', recDay.events)
+  ok(rec?.recorded?.id === '2000-01-03-qp0003' && rec.recorded.summary === true && recDay.events.filter((e) => e.recorded).length === 1, 'the meeting recorded for an event is named with it, and only that one', recDay.events.map((e) => [e.title, e.recorded]))
   // The events as the calendar gives them to the app (the join link, agenda and files from the notes).
   const today = await api('/calendar')
   const asApp = (e) => [...today.today, ...today.tomorrow].find((x) => x.title === e.title && x.start === e.start)
@@ -238,7 +260,7 @@ try {
   const n0 = asked(/^Prepare me for a meeting:/).length
   const p1 = await api('/prep', { event: soonEv })
   ok(p1.suggest?.items.length === (mailOn ? 3 : 2) && p1.suggest.items[0].kind === 'goal' && /Agree on: Agree the renewal price/.test(p1.suggest.items[0].text) && p1.suggest.items[1].kind === 'follow-up' && /confirm the seat count/.test(p1.suggest.items[1].text) && p1.suggest.label === 'gpt-5' && p1.suggest.model === 'openai:gpt-5', 'kept: the goal, the follow-up and (with mail) the question, and which model said them', p1.suggest)
-  ok(p1.suggest.basis?.invite && p1.suggest.basis.files === 1 && p1.suggest.basis.people === 2 && p1.suggest.basis.last?.title === 'Northwind pricing sync', 'and what they were based on', p1.suggest.basis)
+  ok(p1.suggest?.basis?.invite && p1.suggest.basis.files === 1 && p1.suggest.basis.people === 2 && p1.suggest.basis.last?.title === 'Northwind pricing sync', 'and what they were based on', p1.suggest.basis)
   ok(asked(/^Prepare me for a meeting:/).length === n0, 'looking again asks the model nothing')
   // On demand, for one later today.
   const p2 = await api('/prep/suggest', { event: laterEv })
@@ -331,8 +353,8 @@ try {
     const ag = await p.locator('.cal-detail .cal-sec .prep-agenda').innerText().catch(() => '')
     ok(say === `Agree on: ${laterEv.agenda}` && hover?.startsWith(say) && ag === laterEv.agenda, `${mode}: the goal shows whole (the agenda ending at a word, with "…"), all of it on hover too`, { say, hover, ag })
     await shot(p, `${tag}calendar-prep-${mode}`)
-    // A meeting this morning that was recorded: its notes.
-    if (Date.parse(RECORDED.start) > +monday) {
+    // A meeting earlier today that was recorded: its notes.
+    {
       await openEvent(p, RECORDED)
       const notes = p.locator('.cal-detail')
       await until(async () => /The Q1 hiring plan is approved/.test(await notes.innerText().catch(() => '')), 10000)
@@ -400,13 +422,17 @@ try {
     const pg = await page(b, kit.url, { width: 1440, height: 900, before: async (c) => { await setUp(c); await changeAnswer(c, /\/api\/config(\?|$)/, (real) => ({ ...real, calendar: true })) } })
     pages.push(pg)
     const { p, errors } = pg
-    const row = p.locator('.hm-ev', { hasText: 'Northwind pricing sync' })
+    // A row by its own title: another's brief can name the meeting before it ("last time, …").
+    const rowOf = (title) => p.locator('.hm-ev').filter({ has: p.locator('.hm-ev-main > b').getByText(title, { exact: true }) })
+    const row = rowOf('Northwind pricing sync')
     await until(() => row.count(), 20000)
     await row.locator('.hm-prep-btn').click()
     await until(async () => /Agree on/.test(await row.innerText().catch(() => '')), 10000)
     const ht = await row.innerText().catch(() => '')
     ok(/3 invited/.test(ht) && /Last time: Northwind pricing sync/.test(ht) && /Agree on/.test(ht), "Home's Coming Up: Prep under the meeting", ht)
-    ok(!(await p.locator('.hm-ev', { hasText: 'Budget office hours' }).count()), "a meeting you declined isn't in Coming Up")
+    ok(!(await rowOf('Budget office hours').count()), "a meeting you declined isn't in Coming Up")
+    const listed = await p.locator('.hm-ev-main > b').allInnerTexts()
+    ok(listed.length > 1 && new Set(listed).size === listed.length, 'Coming Up lists each meeting once', listed)
     await shot(p, `${tag}calendar-home`)
     await row.locator('button', { hasText: 'Open in Calendar' }).click()
     ok(!!(await until(async () => /Northwind pricing sync/.test(await p.locator('.cal-detail h4').innerText().catch(() => '')), 10000)), 'Open in Calendar opens the meeting there, with its panel')
