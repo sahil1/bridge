@@ -194,9 +194,12 @@ const ro = await import('../../shared/rollout.js')
 const ea = await import('../../server/earlyaccess.js')
 {
   const ORDER = ['3.12.0', '3.13.0-alpha.1', '3.13.0-beta.1', '3.13.0-beta.2', '3.13.0-beta.10', '3.13.0-rc.1', '3.13.0', '3.13.1', '3.14.0-beta.1', '4.0.0']
-  const main = fs.readFileSync(path.join(ROOT, 'desktop', 'main.js'), 'utf8')
+  // As checked out: a Windows checkout ends its lines with \r\n.
+  const main = fs.readFileSync(path.join(ROOT, 'desktop', 'main.js'), 'utf8').replace(/\r\n/g, '\n')
   const from = main.indexOf('const parts = (v) =>')
-  const appNewer = from < 0 ? () => null : new Function(`${main.slice(from, main.indexOf('\n}\n', main.indexOf('const newer = (a, b) =>', from)) + 3)}; return newer`)()
+  // Its copy, taken out of the file; one that can't be is a failed check, not the end of the test.
+  let appNewer = () => null
+  try { appNewer = new Function(`${main.slice(from, main.indexOf('\n}\n', main.indexOf('const newer = (a, b) =>', from)) + 3)}; return newer`)() } catch { /* said below */ }
   const wrong = []
   for (let i = 0; i < ORDER.length; i++) {
     for (let j = 0; j < ORDER.length; j++) {
