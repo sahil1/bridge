@@ -9,9 +9,10 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import http from 'node:http'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 import crypto from 'node:crypto'
+import { shiftedDate } from '../stand-ins/clock.mjs'
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 export const TEST = path.join(ROOT, 'test')
@@ -303,6 +304,36 @@ export const changeAnswer = (ctx, url, change, { orElse } = {}) => ctx.route(url
   } catch { await r.continue().catch(() => {}) }
 })
 export const noServiceWorker = (ctx) => ctx.addInitScript(() => { try { delete Navigator.prototype.serviceWorker } catch { /* none */ } })
+// The time a test runs at: now, or what BRIDGE_TEST_CLOCK names, a time today ("21:30") or a weekday
+// and a time ("Sat 00:30": that weekday nearest today), so a test can be tried at any hour on any day.
+// The clock flows on from there as the real one does.
+// - Date: the test's own (a module's `const Date = clock.Date`). Not this process's global one:
+//   Playwright drives the browser from this process and times its clock by the real one.
+// - env: for a kit's server, which then runs from it (stand-ins/clock.mjs).
+// - install(ctx): a browser's pages from it (Playwright's clock).
+// - here() and real(): the global one shifted for a while, for the server's own modules tried in
+//   the test without a server, and back before a browser opens.
+const RealDate = Date
+export function testClock(spec = process.env.BRIDGE_TEST_CLOCK || '') {
+  const m = /^(?:(sun|mon|tue|wed|thu|fri|sat)[a-z]*\s+)?(\d\d?):(\d\d)$/i.exec(String(spec).trim())
+  if (!m) return { on: false, offset: 0, Date: RealDate, env: {}, install: async () => {}, here: () => {}, real: () => {} }
+  const at = new RealDate()
+  at.setHours(+m[2], +m[3], 0, 0)
+  if (m[1]) {
+    let d = (['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'].indexOf(m[1].toLowerCase()) - at.getDay() + 7) % 7
+    if (d > 3) d -= 7
+    at.setDate(at.getDate() + d)
+  }
+  const offset = at - RealDate.now()
+  const Shifted = shiftedDate(offset, RealDate)
+  return {
+    on: true, offset, at, Date: Shifted,
+    env: { NODE_OPTIONS: `--import=${pathToFileURL(path.join(TEST, 'stand-ins', 'clock.mjs')).href}`, BRIDGE_TEST_CLOCK_OFFSET: String(offset) },
+    install: (ctx) => ctx.clock.install({ time: RealDate.now() + offset }),
+    here: () => { globalThis.Date = Shifted },
+    real: () => { globalThis.Date = RealDate },
+  }
+}
 export const shot = (p, name, o = {}) => { fs.mkdirSync(path.join(OUT, 'shots'), { recursive: true }); return p.screenshot({ path: path.join(OUT, 'shots', `${name}.png`), ...o }) }
 // What's wrong on a phone's screen, within the first of scopes (CSS selectors) that's there: the
 // page wider than the screen; something past its edge, scrolling sideways or cut off (…); a button,
