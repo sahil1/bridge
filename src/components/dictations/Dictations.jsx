@@ -6,6 +6,7 @@ import { keyLabel } from '../../../shared/dictation/keys.js'
 import { keysPlatform, dictationKey, settings as dictationSettings } from '../../dictation/controller.js'
 import { RECENT, ANY, byDay, timeOf, length, whereOf, Glyph, takeWanted } from './shared.jsx'
 import PermissionFix from '../PermissionFix.jsx'
+import { agentName } from '../Rail.jsx'
 import { t } from '../../i18n/index.js'
 import { sentTo } from '../../sendbox.js'
 import './dictations.css'
@@ -17,7 +18,6 @@ import './dictations.css'
 // where pasting works), Send it to an agent, or Delete it, with Undo for a moment. It sits under
 // Meetings in the sidebar, and in the phone's Meetings tab: the other things you've said.
 const app = () => window.bridgeApp || {}
-const nameOf = (a) => (a.chief ? t('Chief of Staff') : a.title || a.tab || a.workspace || a.paneId)
 const WHY = {
   secure: () => t('Secure input is on (a password field, or Secure Keyboard Entry), so it wasn\'t pasted.'),
   moved: () => t('That app didn\'t come to the front, so it wasn\'t pasted.'),
@@ -147,7 +147,7 @@ function Row({ r, open, onToggle, onDelete, paste, onMsg }) {
       // As the message box does: your computer types it in, or holds it while the agent is busy, and
       // its answer says which.
       const got = await api(`/agents/${encodeURIComponent(a.paneId)}/prompt`, { method: 'POST', body: { text: words } })
-      onMsg({ text: sentTo(got, nameOf(a)) })
+      onMsg({ text: sentTo(got, agentName(a)) })
     } catch (e) { onMsg({ text: e.message, error: true }) }
   }
   const where = whereOf(r)
@@ -184,7 +184,7 @@ function Row({ r, open, onToggle, onDelete, paste, onMsg }) {
                 <div className="dc-menu" role="menu">
                   {agents.map((a) => (
                     <button key={a.paneId} type="button" role="menuitem" data-pane={a.paneId} onClick={() => send(a)}>
-                      {a.chief ? <Icon name="helm" size={12} /> : <StatusDot status={a.status} size={7} />} <span>{nameOf(a)}</span>
+                      {a.chief ? <Icon name="helm" size={12} /> : <StatusDot status={a.status} size={7} />} <span>{agentName(a)}</span>
                     </button>
                   ))}
                   {!agents.length && <p className="muted small">{t('No agents are running.')}</p>}
