@@ -2464,6 +2464,9 @@ const settingsView = () => ({
 const atStart = Object.fromEntries(settings.RESTART_KEYS.map((k) => [k, JSON.stringify(settings.readUser()[k])]))
 const afterChange = (changed) => {
   applyConfig()
+  // Beta Features on or off: every open window shows or hides them at once (the live feed), not at
+  // its next look at /config, which can be minutes away.
+  if (changed.includes('trials')) for (const c of clients) c.write('event: config\ndata: {}\n\n')
   syncCalls()
   rt.setKeep?.(cfg.keepAgents !== false) // applies right away
   const restart = changed.filter((k) => settings.RESTART_KEYS.includes(k))

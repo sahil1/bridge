@@ -521,11 +521,20 @@ try {
   }
 
   // ---------- Off again ----------
+  // Turned off somewhere else (here, the API) with Insights open: this window drops it at once, no
+  // reload and no waiting for its next look at /config, and Meetings is its list again once the list
+  // has come (a Windows runner takes a second or more to read 150 meetings). After a reload, the same.
+  await openMeetings()
+  await tabBtn('insights').click({ timeout: 10000 })
+  await p.locator('.mi-tiles').waitFor({ timeout: 10000 })
   await api('/settings', { trials: { 'meeting-insights': false } }, 'PATCH')
   ok((await err('/meetings/insights'))?.status === 404, 'turned off again: refused')
+  const listed = async () => !(await tabBtn('insights').count()) && !(await tabBtn('people').count()) && !(await p.locator('.mi').count()) && (await p.locator('.mt-row').count()) > 0
+  const shown = async () => ({ tabs: await tabBtn('insights').count(), mi: await p.locator('.mi').count(), rows: await p.locator('.mt-row').count() })
+  ok(!!(await until(listed, 8000, 100)), 'turned off elsewhere: this window drops Insights and People at once, and Meetings is its list again', await shown())
   await p.reload()
   await openMeetings()
-  ok(!(await tabBtn('insights').count()) && !(await p.locator('.mi').count()) && (await p.locator('.mt-search, .mt-empty, .mt-row').count()) > 0, 'and hidden: Meetings is its list again')
+  ok(!!(await until(listed, 20000, 200)), 'and hidden after a reload: Meetings is its list again', await shown())
   ok(!(await api('/meetings')).insightsOn && (await api('/config')).trials['meeting-insights'] === false, 'turned off by hand, it stays off with all these meetings')
 
   // ---------- On by itself ----------
