@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Icon from '../Icon.jsx'
-import { api, refetch, usePoll } from '../../api.js'
+import { api, refetch, usePoll, onThisComputer } from '../../api.js'
 import { useWidth, usePersisted } from '../layout.jsx'
 import { t, tx, locale } from '../../i18n/index.js'
 import { canAddPlace } from '../Transfers.jsx'
+import { fileOp } from '../FileExtras.jsx'
 
 // Studio's Files: what you opened here, the documents, sheets, decks and PDFs on this computer
 // (server/studiofound.js: Spotlight on a Mac, Recent items on Windows, the recently used list on
@@ -30,6 +31,9 @@ const keyOf = (f) => `${f.root}\n${f.path}`
 const areaKey = (a) => `${a?.type || 'other'}:${a?.name || ''}`
 const areaName = (a) => (a.type === 'studio' ? t('Bridge AI') : a.type === 'home' ? t('Home folder') : a.name || t('Elsewhere'))
 const picker = typeof window !== 'undefined' ? window.bridgeApp?.pickFolder : null
+// A file's own app opens it on the computer it's on, so only from a window there (not a phone, or
+// another computer's window).
+const inApp = typeof window !== 'undefined' && onThisComputer()
 const when = (f) => Math.max(Date.parse(f.changed || 0) || 0, Date.parse(f.opened || 0) || 0)
 
 // "5 minutes ago", "Yesterday", "Mar 3": how long ago, as near as it matters.
@@ -46,10 +50,14 @@ export function ago(iso) {
 }
 
 // recent: Studio's own list (/studio/recent); describe(f): { kind, folder, full } in words;
-// areaOf(f): where a file Studio opened is ({ type, name }) when the look didn't find it.
-export function YourFiles({ recent, refreshRecent, describe, areaOf, onOpen }) {
+// areaOf(f): where a file Studio opened is ({ type, name }) when the look didn't find it;
+// onEmpty(yes): whether there are no files at all, once that's known.
+export function YourFiles({ recent, refreshRecent, describe, areaOf, onOpen, onEmpty }) {
   const [found, setFound] = useState(null) // { files, sources, errors, at, capped, skipped } or { error }
   const [looking, setLooking] = useState(false)
+  const [note, setNote] = useState(null) // { text, error }: what came of Open in app
+  useEffect(() => { if (!note || note.error) return undefined; const id = setTimeout(() => setNote(null), 4000); return () => clearTimeout(id) }, [note])
+  const openInApp = (f) => fileOp(f.root, 'open', f.path).then(() => setNote({ text: t('Opening {name} in its own app…', { name: f.name }) }), (e) => setNote({ text: t("Couldn't open {name}: {error}", { name: f.name, error: e.message }), error: true }))
   const [group, setGroup] = usePersisted('cc-studio-group', 'recent') // recent, kind:<kind> or area:<type>:<name>
   const [q, setQ] = useState('')
   const [boxRef, boxW] = useWidth()
@@ -76,6 +84,7 @@ export function YourFiles({ recent, refreshRecent, describe, areaOf, onOpen }) {
     for (const b of boards.data?.boards || []) by.set(`board\n${b.id}`, { root: 'board', path: b.id, name: b.id, kind: 'board', changed: new Date(b.mtime).toISOString(), area: { type: 'studio', name: null } })
     return [...by.values()].sort((a, b) => when(b) - when(a))
   }, [found, recent, boards.data, areaOf])
+  useEffect(() => { onEmpty?.(!!found && !rows.length) }, [found, rows, onEmpty])
   // Recent: what you opened here, and what was opened or changed in the last 30 days.
   const recentRows = useMemo(() => rows.filter((f) => f.mine || Date.now() - when(f) < RECENT_DAYS * 86400_000).slice(0, RECENT_MAX), [rows])
   const areas = useMemo(() => {
@@ -137,20 +146,28 @@ export function YourFiles({ recent, refreshRecent, describe, areaOf, onOpen }) {
             <small className="muted">{shown.length === 1 ? t('1 file') : t('{n} files', { n: shown.length })}</small>
             {kind && found?.capped?.[kind[0]] && <small className="muted">{t('the newest {n} of {total}', { n: found.perKind, total: found.capped[kind[0]].toLocaleString(locale()) })}</small>}
           </div>
+          {note && <p className={`sd-files-note small${note.error ? ' error-text' : ' muted'}`} role={note.error ? 'alert' : 'status'}>{note.text}</p>}
           <div className="sd-files-table" role="table" aria-label={title}>
             <div className="sd-files-row head" role="row"><span role="columnheader">{t('Name')}</span><span role="columnheader">{t('Folder')}</span><span role="columnheader">{t('Changed')}</span><span role="columnheader" aria-label={t('Open')} /></div>
             {shown.map((f) => {
               const d = describe(f)
+              // A kind Studio doesn't open (an older Word file, Keynote…): its own app opens it, from a
+              // window on its computer; anywhere else that's said rather than offered.
+              const other = f.opens === false
+              const open = other ? (inApp ? () => openInApp(f) : null) : () => onOpen({ root: f.root, path: f.path })
+              const inner = <>
+                <span className={`sd-file-ic ${f.kind || ''}`}><Icon name={KIND_ICON[f.kind] || 'file'} size={15} /></span>
+                <span className="sd-file-text"><b>{f.name}</b><small className="muted">{other ? t('{kind}, opened in its own app', { kind: d.kind }) : d.kind}</small></span>
+              </>
               return (
-                <div key={keyOf(f)} className="sd-files-row" role="row">
-                  <button type="button" role="cell" className="sd-file-name" onClick={() => onOpen({ root: f.root, path: f.path })} title={d.full || f.path}>
-                    <span className={`sd-file-ic ${f.kind || ''}`}><Icon name={KIND_ICON[f.kind] || 'file'} size={15} /></span>
-                    <span className="sd-file-text"><b>{f.name}</b><small className="muted">{d.kind}</small></span>
-                  </button>
+                <div key={keyOf(f)} className={`sd-files-row${other ? ' other' : ''}`} role="row">
+                  {open ? <button type="button" role="cell" className="sd-file-name" onClick={open} title={d.full || f.path}>{inner}</button> : <span role="cell" className="sd-file-name" title={d.full || f.path}>{inner}</span>}
                   <span role="cell" className="sd-file-dir" title={d.full || d.folder || ''}><Icon name="folder" size={12} /><span>{d.folder || '—'}</span></span>
                   <span role="cell" className="sd-file-when" title={f.changed ? new Date(f.changed).toLocaleString(locale()) : f.opened ? new Date(f.opened).toLocaleString(locale()) : ''}>{f.changed ? ago(f.changed) : f.opened ? t('Opened {when}', { when: ago(f.opened) }) : ''}</span>
                   <span role="cell" className="sd-file-acts">
-                    <button type="button" className="btn small" onClick={() => onOpen({ root: f.root, path: f.path })} aria-label={t('Open {name}', { name: f.name })} title={t('Open it in Preview, in its own editor')}>{t('Open')}</button>
+                    {!other && <button type="button" className="btn small" onClick={open} aria-label={t('Open {name}', { name: f.name })} title={t('Open it in Preview, in its own editor')}>{t('Open')}</button>}
+                    {other && inApp && <button type="button" className="btn small" onClick={open} aria-label={t('Open {name} in its app', { name: f.name })} title={t("Studio doesn't open this kind of file: open it in the app that usually does")}><Icon name="external" size={11} /> {t('Open in app')}</button>}
+                    {other && !inApp && <span className="sd-file-away muted small" title={t("Studio doesn't open this kind of file, and its app opens it only in a window on the computer it's on")}>{t('Open it on its computer')}</span>}
                     {f.mine && <button type="button" className="ghost-btn sd-file-x" aria-label={t('Take {name} off the list', { name: f.name })} title={t('Take it off the list (the file stays)')} onClick={() => forget(f)}><Icon name="x" size={12} /></button>}
                   </span>
                 </div>

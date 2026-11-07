@@ -3,6 +3,7 @@ import Icon from '../Icon.jsx'
 import { api, usePoll, useFleet } from '../../api.js'
 import { PaneHeader, useMedia, store } from '../layout.jsx'
 import { WhiteboardPage } from '../../lazy.jsx'
+import { Menu } from '../FileExtras.jsx'
 import { t, tx, locale } from '../../i18n/index.js'
 import { openFile, bytesOf, rawUrl, versionUrl, saveFile, changedSince, restoreVersion, base64, extOf } from './files.js'
 import { useDesignPacks, PacksSection, packFor } from './packs.jsx'
@@ -32,8 +33,12 @@ const SignatureHome = lazy(() => import('./pdf/Signatures.jsx'))
 const ICON = { doc: 'doc', sheet: 'grid', deck: 'screen', pdf: 'file', page: 'code', board: 'shapes' }
 const KIND_LABEL = { doc: tx('Document'), sheet: tx('Sheet'), deck: tx('Deck'), pdf: tx('PDF'), page: tx('Page'), board: tx('Whiteboard') }
 // What a file is, in words, by its extension ("Word document"); a Markdown file that's a deck says so.
-const KIND_OF = { '.docx': tx('Word document'), '.md': tx('Markdown'), '.markdown': tx('Markdown'), '.txt': tx('Plain text'), '.xlsx': tx('Excel workbook'), '.xlsm': tx('Excel workbook'), '.csv': tx('CSV'), '.tsv': tx('TSV'), '.pptx': tx('PowerPoint'), '.pdf': tx('PDF'), '.html': tx('HTML page'), '.htm': tx('HTML page') }
-const kindName = (kind, ext) => (kind === 'deck' && ext !== '.pptx' ? t('Markdown deck') : t(KIND_OF[ext] || KIND_LABEL[kind] || 'Studio'))
+// Kinds Studio doesn't open, listed in Files to open in their own app, are named the same way.
+const KIND_OF = {
+  '.docx': tx('Word document'), '.md': tx('Markdown'), '.markdown': tx('Markdown'), '.txt': tx('Plain text'), '.xlsx': tx('Excel workbook'), '.xlsm': tx('Excel workbook'), '.csv': tx('CSV'), '.tsv': tx('TSV'), '.pptx': tx('PowerPoint'), '.pdf': tx('PDF'), '.html': tx('HTML page'), '.htm': tx('HTML page'),
+  '.doc': tx('Word document, an older kind'), '.xls': tx('Excel workbook, an older kind'), '.ppt': tx('PowerPoint, an older kind'), '.pages': tx('Pages'), '.numbers': tx('Numbers'), '.key': tx('Keynote'), '.odt': tx('OpenDocument text'), '.ods': tx('OpenDocument spreadsheet'), '.odp': tx('OpenDocument presentation'),
+}
+const kindName = (kind, ext) => (kind === 'deck' && (ext === '.md' || ext === '.markdown') ? t('Markdown deck') : t(KIND_OF[ext] || KIND_LABEL[kind] || 'Studio'))
 const READ_ONLY = (kind) => kind === 'pdf'
 export const openStudio = (f) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: f }))
 const when = (iso) => new Date(iso).toLocaleString(locale(), { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
@@ -55,9 +60,10 @@ function StudioTabs({ on, onFiles, onPreview, name }) {
 }
 
 // ---------- Files ----------
-// Studio's home, its Files: New (a document, sheet, deck or page in a folder you pick), your files
-// from wherever they are by kind and by where (HomeFiles.jsx), and your design packs. Preview opens
-// the file last open, or says how to pick one.
+// Studio's home, its Files: your files from wherever they are by kind and by where (HomeFiles.jsx),
+// and your design packs, with New in the header (a document, sheet, deck or page in a folder you
+// pick; its cards on the page only while there are no files yet). Preview opens the file last
+// open, or says how to pick one.
 const NEW = [
   { kind: 'doc', ext: '.docx', label: tx('Document'), hint: tx('A Word file') },
   { kind: 'doc', ext: '.md', label: tx('Markdown'), hint: tx('A Markdown file') },
@@ -136,6 +142,8 @@ export function StudioHome({ onOpen }) {
   const last = lastOpen()
   const preview = () => (last?.root && last.path ? onOpen({ root: last.root, path: last.path }) : setView('preview'))
   const areaOf = useMemo(() => areaOfOpened(folders), [folders])
+  const [menuAt, setMenuAt] = useState(null) // where New's menu opens
+  const [empty, setEmpty] = useState(false) // no files at all yet: New's cards, as the start
   const [making, setMaking] = useState(null) // the New kind being named
   const [name, setName] = useState('')
   const [where, setWhere] = useState('')
@@ -154,9 +162,15 @@ export function StudioHome({ onOpen }) {
       onOpen({ root: where, path: r.path })
     } catch (x) { setErr(x.message) } finally { setBusy(false) }
   }
+  const pick = (n) => { setMaking(n); setErr(null); setView('files') }
+  const closeMenu = useCallback(() => setMenuAt(null), [])
+  // New, beside Files and Preview: a menu of what it makes, and its name and folder asked under it.
   const head = (
     <PaneHeader icon="layers" title={t('Studio')}>
       <StudioTabs on={view} onFiles={() => setView('files')} onPreview={preview} name={last?.name} />
+      <button type="button" className="btn small sd-head-btn sd-new-open" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMenuAt(menuAt ? null : { x: r.right - 220, y: r.bottom + 4 }) }} disabled={!folders.length}
+        aria-haspopup="menu" aria-expanded={!!menuAt} aria-label={t('New')} title={t('Make a new document, sheet, deck or page')}><Icon name="plus" size={12} /> <span className="sd-btn-label">{t('New')}</span></button>
+      {menuAt && <Menu x={menuAt.x} y={menuAt.y} className="sd-new-menu" onClose={closeMenu} items={NEW.map((n) => ({ label: t(n.label), icon: n.deck ? 'screen' : n.ext === '.md' ? 'doc' : ICON[n.kind], run: () => pick(n) }))} />}
     </PaneHeader>
   )
   if (view === 'preview') {
@@ -177,16 +191,18 @@ export function StudioHome({ onOpen }) {
       {head}
       <div className="sd-home">
         <p className="muted small sd-home-say">{t('Your documents, sheets, decks, PDFs and pages, wherever they are, edited here or by your agents, with every version kept.')}</p>
-        <section className="sd-sec">
-          <h3>{t('New')}</h3>
-          <div className="sd-new">
+        {/* New's cards only while there are no files at all, as the way to start; else it's the
+            header's menu, and your files have the page. */}
+        {(empty || making) && <section className="sd-sec sd-new-sec">
+          <h3>{making && !empty ? t('New {kind}', { kind: t(making.label) }) : t('New')}</h3>
+          {empty && <div className="sd-new">
             {NEW.map((n) => (
-              <button key={n.label} type="button" className={`sd-new-btn${making === n ? ' on' : ''}`} onClick={() => { setMaking(n); setErr(null) }} disabled={!folders.length} aria-pressed={making === n} title={t(n.hint)}>
+              <button key={n.label} type="button" className={`sd-new-btn${making === n ? ' on' : ''}`} onClick={() => pick(n)} disabled={!folders.length} aria-pressed={making === n} title={t(n.hint)}>
                 <span className={`sd-new-thumb ${n.deck ? 'deck' : n.ext === '.md' ? 'md' : n.kind}`} aria-hidden="true"><i /><i /><i /><i /></span>
                 <span className="sd-new-ic"><Icon name={ICON[n.kind]} size={16} /></span><b>{t(n.label)}</b><small className="muted">{t(n.hint)}</small>
               </button>
             ))}
-          </div>
+          </div>}
           {folders.length === 1 && <p className="muted small">{t('Start an agent in a folder, or add a place in Files, to make a file there; until then, they go in Studio\'s own folder.')}</p>}
           {making && (
             <form className="sd-new-form" onSubmit={make}>
@@ -205,9 +221,10 @@ export function StudioHome({ onOpen }) {
               {err && <p className="error-text small sd-new-err" role="alert">{t("Couldn't make it: {error}", { error: err })}</p>}
             </form>
           )}
-        </section>
-        <YourFiles recent={data} refreshRecent={refresh} onOpen={onOpen} areaOf={areaOf} describe={(f) => {
+        </section>}
+        <YourFiles recent={data} refreshRecent={refresh} onOpen={onOpen} areaOf={areaOf} onEmpty={setEmpty} describe={(f) => {
           if (f.kind === 'board') return { kind: t('Whiteboard'), folder: t('Whiteboards'), full: null }
+          if (f.root === 'studio') return { kind: kindName(f.kind, extOf(f.name)), folder: t('Bridge AI'), full: t("Studio's own folder: decks made from meetings, and new files with nowhere else to go") }
           const at = whereOf(folders, f.root, f.path)
           return { kind: kindName(f.kind, extOf(f.name)), folder: f.dir || at?.path || f.where || null, full: at ? `${at.label} · ${at.full}` : f.dir || null }
         }} />

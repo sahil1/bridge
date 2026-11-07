@@ -56,7 +56,7 @@
 .sd-add-form input { flex: 1; min-width: 0; height: 30px; }
 .sd-add-form p { flex: 1 1 100%; margin: 0; }
 .sd-files-table { display: grid; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--pane); }
-.sd-files-row { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(0, 1.6fr) 120px 96px; align-items: center; gap: 12px; min-height: 48px; padding: 0 12px 0 8px; border-top: 1px solid var(--line); }
+.sd-files-row { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(0, 1.6fr) 120px 150px; align-items: center; gap: 12px; min-height: 48px; padding: 0 12px 0 8px; border-top: 1px solid var(--line); }
 .sd-files-row:first-child { border-top: 0; }
 .sd-files-row:not(.head):hover { background: color-mix(in srgb, var(--pane-2) 70%, transparent); }
 .sd-files-row.head { min-height: 34px; background: var(--pane-2); color: var(--ink-3); font: 600 10.5px var(--font); letter-spacing: .06em; text-transform: uppercase; }
@@ -80,17 +80,20 @@
 .sd-file-dir > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sd-file-when { color: var(--ink-2); font-size: 12.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .sd-file-acts { display: grid; grid-template-columns: auto 26px; align-items: center; justify-content: end; gap: 4px; }
-.sd-file-acts .btn { grid-column: 1; }
+.sd-file-acts .btn { grid-column: 1; white-space: nowrap; }
 .sd-file-acts .btn.small { height: 28px; padding: 0 12px; }
 .sd-file-x { width: 26px; height: 26px; justify-content: center; opacity: 0; }
 .sd-files-row:hover .sd-file-x, .sd-file-x:focus-visible { opacity: 1; }
 @media (hover: none) { .sd-file-x { opacity: 1; } }
+/* A kind Studio doesn't open: its own app opens it, or where that can't be, it says so. */
+.sd-file-away { display: inline-block; max-width: 120px; line-height: 1.3; text-align: right; }
+.sd-files-note { margin: 0 2px 8px; }
 .sd-files-none { padding: 28px 20px; color: var(--ink-2); font-size: 13px; line-height: 1.5; text-align: center; }
 .sd-files-src { margin: 8px 2px 0; line-height: 1.5; }
 .sd-files-err { color: var(--warning-ink, var(--ink-2)); }
 
 /* A narrow pane on a computer: no folder column; on a phone, the folder goes under the name instead. */
-@container (max-width: 760px) { .app:not(.narrow) .sd-files-row { grid-template-columns: minmax(0, 1fr) 110px 84px; } .app:not(.narrow) .sd-files-row > :nth-child(2) { display: none; } }
+@container (max-width: 760px) { .app:not(.narrow) .sd-files-row { grid-template-columns: minmax(0, 1fr) 110px 150px; } .app:not(.narrow) .sd-files-row > :nth-child(2) { display: none; } }
 @media (max-width: 760px) {
   /* A row each: the name, its folder and when it changed under it, Open beside them. */
   .sd-files-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto auto; gap: 0 10px; padding: 6px 10px 8px 6px; }
