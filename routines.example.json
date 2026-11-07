@@ -9,6 +9,35 @@
       "workspace": "Maintenance",
       "kind": "claude",
       "command": "Check this repo for outdated and vulnerable dependencies. List what to upgrade and why; don't change anything yet."
+    },
+    {
+      "id": "standup-notes",
+      "name": "Standup notes",
+      "detail": "Runs by itself at its time with Scheduled Routines on (Beta Features)",
+      "every": "weekday",
+      "at": "09:00",
+      "schedule": "every weekday at 9",
+      "auto": true,
+      "since": "2026-11-09T08:00:00.000Z",
+      "cwd": "~/code/my-project",
+      "workspace": "Standup",
+      "kind": "claude",
+      "command": "Summarize what changed in this repo since yesterday morning and what's still open."
+    },
+    {
+      "id": "weekly-status",
+      "name": "Weekly status",
+      "detail": "Sent to the Chief of Staff every Monday at 4 pm",
+      "every": "week",
+      "days": [1],
+      "at": "16:00",
+      "schedule": "every monday at 4pm",
+      "auto": true,
+      "since": "2026-11-09T08:00:00.000Z",
+      "to": "chief",
+      "cwd": "",
+      "workspace": "",
+      "command": "Write my weekly status update from what the agents finished this week."
     }
   ]
 }

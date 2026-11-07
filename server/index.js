@@ -1098,9 +1098,11 @@ async function startRoutine(def) {
   }
   const cwd = routines.resolveCwd(def)
   if (!(await exists(cwd))) throw new Error(`Folder not found: ${def.cwd}`)
+  const kind = def.kind || cfg.defaultAgent || 'claude'
+  if (!(await installed()).some((k) => k.kind === kind)) throw notInstalled(kind)
   const f = await rt.fleet()
   const ws = def.workspace && f.workspaces.find((w) => w.label.toLowerCase() === def.workspace.toLowerCase())
-  return launchAgent({ kind: def.kind || cfg.defaultAgent || 'claude', cwd, label: def.name, workspaceId: ws?.id, newSpace: ws ? undefined : def.workspace || def.name, prompt: def.command }).then((out) => { pushFleet(); return out })
+  return launchAgent({ kind, cwd, label: def.name, workspaceId: ws?.id, newSpace: ws ? undefined : def.workspace || def.name, prompt: def.command }).then((out) => { pushFleet(); return out })
 }
 // Each one whose time has come, started (or written down as missed, or why it couldn't start, with
 // a notification saying so). BRIDGE_ROUTINE_TICK_MS: how often it looks (a test's few seconds).

@@ -1175,6 +1175,7 @@ a.btn:not(.primary), a.btn:not(.primary):visited { color: var(--ink); text-decor
   .r-days button { min-width: 40px; height: 40px; }
   .r-form-row { grid-template-columns: 1fr; }
   .r-form input, .r-form input.mono, .r-form select, .r-form textarea { font-size: 16px; min-height: 40px; }
+  .r-form select { height: 40px; } /* WebKit leaves a select's min-height be */
   .r-form .r-check { min-height: 40px; }
   .r-sched-pick input[type="time"] { width: 150px; }
   .modal.r-dialog { width: 100%; max-height: none; }

@@ -130,7 +130,8 @@ try {
     ok(!!(await until(() => when.isVisible(), 10000)), 'on: the routines say when they run, at once')
     const mRow = card.locator('.r-row', { hasText: 'Morning check' })
     const wantAt = new Date(2000, 0, 3, ...morning.at.split(':').map(Number)).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
-    ok((await text(mRow.locator('.r-when'))) === `Every day at ${wantAt}` && /Next tomorrow/.test(await text(mRow.locator('.r-meta'))), 'its schedule in words, and its next run', await text(mRow))
+    const nextDay = hoursAgo(3).getDate() === now.getDate() ? 'tomorrow' : 'today' // before 3 am, its time is still to come today
+    ok((await text(mRow.locator('.r-when'))) === `Every day at ${wantAt}` && new RegExp(`Next ${nextDay}`).test(await text(mRow.locator('.r-meta'))), 'its schedule in words, and its next run', await text(mRow))
     ok(/^Ran .* \(by itself\) and finished$/.test(await text(mRow.locator('.r-last'))), 'and what became of its last run', await text(mRow.locator('.r-last')))
     const rRow = card.locator('.r-row', { hasText: 'Release notes' })
     ok(await rRow.evaluate((e) => e.classList.contains('st-error')) && /^Didn't run .*: Folder not found: ~\/code\/gone$/.test(await text(rRow.locator('.r-last.bad'))), 'one whose folder is gone: didn\'t run, and why, in red', await text(rRow.locator('.r-last')))
