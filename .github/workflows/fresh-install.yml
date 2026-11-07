@@ -397,7 +397,10 @@ jobs:
         run: |
           pkg="$(dpkg -S "/opt/Bridge AI/bridge-ai" | cut -d: -f1)"
           dpkg -s "$pkg" | grep -E '^(Package|Status|Version):'
-          [ "$(dpkg-query -W -f '${Version}' "$pkg")" = "${TAG#v}" ]
+          # A pre-release's (3.13.0-beta.1) can be written 3.13.0~beta.1 in the package, as Debian
+          # orders it before 3.13.0.
+          v="$(dpkg-query -W -f '${Version}' "$pkg")"
+          [ "$v" = "${TAG#v}" ] || [ "$v" = "$(printf '%s' "${TAG#v}" | sed 's/-/~/')" ]
           command -v bridge-ai
           test -x "/opt/Bridge AI/bridge-ai"
           # Its menu entry, named for the app's ID (desktopName) when it has one: GNOME matches its

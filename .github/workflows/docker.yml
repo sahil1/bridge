@@ -1,7 +1,8 @@
 # Builds the Docker image (the server only, for an always-on machine) for amd64 and arm64, checks
 # that it starts, and pushes it to ghcr.io/sahil1/bridge.
 #   Pushing a tag v<version> (npm run release does this) pushes <version>, <major>.<minor> and
-#   latest. It runs apart from release.yml, so a problem here never holds up the desktop release.
+#   latest; a pre-release's (v3.13.0-beta.1) pushes only <version>. It runs apart from release.yml,
+#   so a problem here never holds up the desktop release.
 #   A pull request that changes what goes into the image, or running it by hand (Actions › Docker
 #   image › Run workflow), only builds and tests, so a release isn't the first to find a broken image.
 name: Docker image
@@ -55,13 +56,25 @@ jobs:
           docker exec bridge git --version
           docker rm -f bridge
 
+      # A pre-release (v3.13.0-beta.1) gets only its own tag: never latest or <major>.<minor>, which
+      # people's docker-compose.yml pull. A version without a dash is tagged as it always was.
       - id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ghcr.io/sahil1/bridge
+          flavor: |
+            latest=${{ contains(github.ref_name, '-') && 'false' || 'auto' }}
           tags: |
             type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ !contains(github.ref_name, '-') }}
+
+      - name: A pre-release gets only its own tag
+        if: startsWith(github.ref, 'refs/tags/v') && contains(github.ref_name, '-')
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          echo "$TAGS"
+          [ "$(printf '%s\n' "$TAGS" | sed '/^$/d' | sort -u)" = "ghcr.io/sahil1/bridge:${GITHUB_REF_NAME#v}" ] || { echo "::error::A pre-release would get more than its own tag"; exit 1; }
 
       - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         if: startsWith(github.ref, 'refs/tags/v')
