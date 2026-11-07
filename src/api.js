@@ -158,6 +158,8 @@ export function useFleet() {
     const connect = () => {
       es = new EventSource(`${BASE}/api/events`)
       es.addEventListener('fleet', (e) => { setFleet(JSON.parse(e.data)); setLive(true) })
+      // The config changed on the server (a Beta Feature turned on or off, here or on another device).
+      es.addEventListener('config', () => refetch('/config'))
       es.onerror = () => { setLive(false); es.close(); timer = setTimeout(connect, 3000) }
     }
     connect()
