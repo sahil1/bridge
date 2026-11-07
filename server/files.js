@@ -443,13 +443,15 @@ export async function reveal(root, rel) {
 }
 
 // Open in its usual app (Word, Excel, Preview…). Documents and media only: never something
-// that runs (a script, an app, a shortcut), since this can be asked for from a page.
+// that runs (a script, an app, a shortcut), since this can be asked for from a page. On a Mac a
+// Keynote, Pages or Numbers document can be a folder (a package), which opens too.
 const OPENABLE = new Set(['.pdf', '.docx', '.doc', '.odt', '.rtf', '.pptx', '.ppt', '.odp', '.key', '.xlsx', '.xlsm', '.xls', '.ods', '.numbers', '.pages', '.csv', '.tsv', '.txt', '.md',
   '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.heic', '.tif', '.tiff', '.bmp', '.mp4', '.mov', '.m4v', '.webm', '.mp3', '.m4a', '.wav', '.aac', '.flac', '.zip', '.epub'])
 export async function openDefault(root, rel) {
   const { real } = await inside(root, rel)
   const ext = path.extname(real).toLowerCase()
-  if ((await fsp.stat(real)).isDirectory() || !OPENABLE.has(ext)) throw new Error('Only documents, images and media open from here')
+  const pkg = IS_MAC && ['.key', '.pages', '.numbers'].includes(ext)
+  if (((await fsp.stat(real)).isDirectory() && !pkg) || !OPENABLE.has(ext)) throw new Error('Only documents, images and media open from here')
   if (IS_MAC) await run('open', [real])
   else if (IS_WIN) await run('explorer.exe', [real]).catch(() => {})
   else await run('xdg-open', [real])

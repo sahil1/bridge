@@ -199,7 +199,10 @@ try {
   // app is listening).
   const home = () => until(async () => { await p.locator('.rail-nav-btn', { hasText: 'Studio' }).click(); return p.locator('.sd-home').waitFor({ timeout: 1500 }).then(() => true, () => false) }, 20000, 300)
   ok(!!(await home()), "Studio opens from the rail")
-  ok(await p.locator('.sd-new-btn').count() === 5 && !!(await until(async () => (await p.locator('.sd-files-row', { hasText: 'notes.md' }).count()) > 0, 10000)), "Studio's home: New (document, Markdown, sheet, deck, page) and your recent files")
+  await p.locator('.sd-new-open').click()
+  const newItems = await p.locator('.sd-new-menu [role="menuitem"]').allInnerTexts()
+  await p.keyboard.press('Escape')
+  ok(JSON.stringify(newItems) === '["Document","Markdown","Sheet","Deck","Page"]' && !!(await until(async () => (await p.locator('.sd-files-row', { hasText: 'notes.md' }).count()) > 0, 10000)), "Studio's home: New in its header (document, Markdown, sheet, deck, page) and your recent files", newItems)
   await shot(p, `${tag}studio-home`)
   // A Markdown file, edited and saved.
   await p.locator('.sd-file-name', { hasText: 'notes.md' }).first().click()
@@ -470,7 +473,8 @@ try {
   // used on a white Word page).
   const make = async (label, name) => {
     await home()
-    await p.locator('.sd-new-btn', { hasText: label }).first().click()
+    await p.locator('.sd-new-open').click()
+    await p.locator('.sd-new-menu [role="menuitem"]', { hasText: label }).first().click()
     await p.locator('.sd-new-form input').fill(name)
     await p.locator('.sd-new-form select').selectOption(root)
     await p.locator('.sd-new-form button', { hasText: 'Make it' }).click()
@@ -505,7 +509,7 @@ try {
     await ph.p.waitForSelector('.sd-home', { timeout: 15000 })
     await until(async () => (await ph.p.locator('.sd-files-row', { hasText: 'notes.md' }).count()) > 0, 10000)
     await sleep(400)
-    let f = await phoneFaults(ph.p, '.sd-home')
+    let f = await phoneFaults(ph.p, '.sd-home-view')
     ok(!Object.keys(f).length, `phone ${width}: Studio's home fits (nothing wider, past its edge or cut off; each control a whole 40 px target, each field 16 px)`, f)
     await shot(ph.p, `${tag}studio-home-phone-${width}`)
     await ph.p.locator('.sd-file-name', { hasText: 'notes.md' }).first().click()

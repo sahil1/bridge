@@ -101,7 +101,7 @@ function SheetView({ pane, f }) {
 
 // ---------- menu ----------
 // items: [{ label, icon, run, danger, hint }] or 'sep'.
-export function Menu({ x, y, items, onClose }) {
+export function Menu({ x, y, items, onClose, className = '' }) {
   const ref = useRef(null)
   const [pos, setPos] = useState({ left: x, top: y })
   useLayoutEffect(() => {
@@ -126,7 +126,7 @@ export function Menu({ x, y, items, onClose }) {
     bs[(i + (e.key === 'ArrowDown' ? 1 : -1) + bs.length) % bs.length]?.focus()
   }
   return createPortal(
-    <div className="ctx-menu" ref={ref} role="menu" style={pos} onKeyDown={onKey} onContextMenu={(e) => e.preventDefault()}>
+    <div className={`ctx-menu ${className}`} ref={ref} role="menu" style={pos} onKeyDown={onKey} onContextMenu={(e) => e.preventDefault()}>
       {items.filter(Boolean).map((it, i) => (it === 'sep' ? <div key={i} className="ctx-sep" role="separator" />
         : <button key={i} role="menuitem" className={it.danger ? 'danger' : ''} onClick={() => { onClose(); it.run() }}>
             <Icon name={it.icon || 'dot'} size={13} /><span>{it.label}</span>{it.hint && <kbd>{it.hint}</kbd>}

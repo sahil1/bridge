@@ -5,30 +5,41 @@
 // exactly as it was, part by part and paragraph by paragraph; its toolbar (styles, fonts, sizes,
 // colours, highlight, alignment, spacing, lists), pictures put in and resized, tables, its header
 // edited, find and replace, the outline, the word count; Ask AI in place on a Markdown file (the
-// change shown before it's taken, and a model that can't answer saying why). Studio's home: your
+// change shown before it's taken, and a model that can't answer saying why). Studio's Files: your
 // files from wherever they are (Spotlight on a Mac, the recently used list on Linux, a look in the
-// usual folders elsewhere), each with its folder, when it changed and Open, looked for only once
-// Studio is opened; a folder added. On a phone: the home and a Word file as one column, fitting.
+// usual and cloud drive folders elsewhere, your places, your agents' folders and Studio's own),
+// each with its folder, when it changed and Open, looked for only once Studio is opened; shown by
+// Recent, by kind and by where they are, with a search through all of them; a project's code
+// listing only its documents and decks; the newest of each kind; a folder added. Preview beside
+// Files, as an agent's tab has them: the file open in its own editor, a whiteboard on its own page.
+// On a phone: what to show picked from one list, the home and a Word file as one column, fitting.
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
-import { startKit, startModel, checks, until, sleep, browser, page, shot, phoneFaults, TEST, ROOT } from '../lib/harness.mjs'
+import { startKit, startModel, checks, until, sleep, browser, page, shot, phoneFaults, solid, TEST, ROOT } from '../lib/harness.mjs'
 import { richDocx, chartPng } from '../lib/wordfile.mjs'
 
 const require = createRequire(path.join(ROOT, 'package.json'))
 const JSZip = require('jszip')
-const { ok, done } = checks('studio-docs')
+const { ok, skip, done } = checks('studio-docs')
 const kit = await startKit('studio-docs', { env: { CLAUDE_STAND_IN_TYPED: '1' } })
 kit.program('claude', fs.readFileSync(path.join(TEST, 'stand-ins', 'claude.cjs'), 'utf8'))
-// Spotlight, standing in: the kit's home's documents as mdfind prints them, each run noted.
+// Spotlight, standing in: the kit's home's documents as mdfind prints them, each run noted. When
+// each changed is the file's own time; one that changed in the last 60 days was opened yesterday,
+// an older one not lately (as Spotlight has it: no date). A .key file is Keynote's only when it's a
+// zip, as Spotlight tells by its kind.
 const asked = path.join(kit.home, 'mdfind.log')
-kit.program('mdfind', `const fs=require('fs'),path=require('path');fs.appendFileSync(${JSON.stringify(asked)},process.argv.slice(2).join(' ')+'\\n');const home=${JSON.stringify(kit.home)};const out=[];const walk=(d)=>{for(const e of fs.readdirSync(d,{withFileTypes:true})){if(e.name.startsWith('.'))continue;const p=path.join(d,e.name);if(e.isDirectory())walk(p);else if(/\\.(docx|xlsx|pptx|pdf)$/.test(e.name))out.push(p+'   kMDItemLastUsedDate = 2026-11-05 10:00:00 +0000   kMDItemFSContentChangeDate = 2026-11-04 09:00:00 +0000')}};walk(home);console.log(out.join('\\n'))`)
+kit.program('mdfind', `const fs=require('fs'),path=require('path');fs.appendFileSync(${JSON.stringify(asked)},process.argv.slice(2).join(' ')+'\\n');const home=${JSON.stringify(kit.home)};const out=[];const at=(ms)=>new Date(ms).toISOString().replace('T',' ').replace(/\\.\\d+Z$/,' +0000');const walk=(d)=>{for(const e of fs.readdirSync(d,{withFileTypes:true})){if(e.name.startsWith('.'))continue;const p=path.join(d,e.name);if(e.isDirectory())walk(p);else if(/\\.(docx|xlsx|pptx|pdf|doc|xls|ppt|odt|ods|odp|key)$/.test(e.name)&&!(/\\.key$/.test(e.name)&&fs.readFileSync(p).toString('latin1',0,2)!=='PK')){const m=fs.statSync(p).mtimeMs;out.push(p+'   kMDItemLastUsedDate = '+(Date.now()-m<60*864e5?at(Date.now()-864e5):'(null)')+'   kMDItemFSContentChangeDate = '+at(m))}}};walk(home);console.log(out.join('\\n'))`)
+// Opening a file in its own app, standing in for macOS's open and Linux's xdg-open: what it was asked to open.
+const opened = path.join(kit.home, 'opened.log')
+for (const n of ['open', 'xdg-open']) kit.program(n, `require('fs').appendFileSync(${JSON.stringify(opened)},process.argv.slice(2).join(' ')+'\\n')`)
 const model = await startModel('studio-docs')
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
 const MOD = process.platform === 'darwin' ? 'Meta' : 'Control'
 const api = kit.api
 const pages = []
+let empty = null // a second Bridge AI, with no files at all
 const partsOf = async (file) => { const z = await JSZip.loadAsync(fs.readFileSync(file)); const o = {}; for (const n of Object.keys(z.files)) if (!z.files[n].dir) o[n] = await z.file(n).async('string'); return o }
 const changed = (a, c) => Object.keys({ ...a, ...c }).filter((k) => a[k] !== c[k]).sort()
 // The caret put at the end of the paragraph with some words in it (or of the document), through the
@@ -71,6 +82,41 @@ try {
     fs.mkdirSync(path.join(kit.home, '.local', 'share'), { recursive: true })
     fs.writeFileSync(path.join(kit.home, '.local', 'share', 'recently-used.xbel'), `<?xml version="1.0"?>\n<xbel version="1.0"><bookmark href="file://${encodeURI(path.join(downloads, 'Contract.docx'))}" added="2026-11-04T09:00:00Z" modified="2026-11-04T09:00:00Z" visited="2026-11-05T10:00:00Z"></bookmark></xbel>\n`)
   }
+  // A presentation in a cloud drive (where each system keeps one: ~/Library/CloudStorage on a Mac),
+  // a deck Studio made from a meeting in its own folder, a project's code (a git repository) with
+  // its README, a page and data beside a Word file and a Markdown deck, more PDFs in a place than
+  // the home lists, and a whiteboard.
+  const cloudName = process.platform === 'linux' ? 'Dropbox' : 'OneDrive'
+  const cloud = path.join(kit.home, ...(process.platform === 'darwin' ? ['Library', 'CloudStorage', 'OneDrive-Test'] : process.platform === 'win32' ? ['OneDrive - Test'] : ['Dropbox']), 'Plans')
+  fs.mkdirSync(cloud, { recursive: true })
+  fs.writeFileSync(path.join(cloud, 'Pitch.pptx'), 'x')
+  const own = path.join(kit.data, 'studio', 'files')
+  fs.mkdirSync(own, { recursive: true })
+  fs.writeFileSync(path.join(own, 'Weekly sync deck.md'), '---\nmarp: true\n---\n\n# Weekly sync\n')
+  const code = path.join(kit.home, 'Code', 'app')
+  fs.mkdirSync(path.join(code, '.git'), { recursive: true })
+  fs.mkdirSync(path.join(code, 'docs'), { recursive: true })
+  fs.writeFileSync(path.join(code, 'README.md'), '# App\n')
+  fs.writeFileSync(path.join(code, 'index.html'), '<!doctype html>\n<title>App</title>\n')
+  fs.writeFileSync(path.join(code, 'data.csv'), 'a,b\n1,2\n')
+  fs.writeFileSync(path.join(code, 'docs', 'Spec.docx'), await richDocx({ pages: 1 }))
+  fs.writeFileSync(path.join(code, 'docs', 'Launch.md'), '---\nmarp: true\n---\n\n# Launch\n')
+  const scans = path.join(kit.home, 'Scans')
+  fs.mkdirSync(scans, { recursive: true })
+  // Scanned over a year ago: not recent, but a kind's files all the same.
+  const yearAgo = new Date(Date.now() - 400 * 86400_000)
+  for (let i = 0; i < 104; i++) { fs.writeFileSync(path.join(scans, `Scan ${i}.pdf`), 'x'); fs.utimesSync(path.join(scans, `Scan ${i}.pdf`), yearAgo, yearAgo) }
+  // Kinds Studio doesn't open: an older Word file (everywhere), and on a Mac Keynote, as a zip in the
+  // project's docs and as a package (a folder) in a place; a key file that's named .key isn't one.
+  fs.writeFileSync(path.join(downloads, 'Old notes.doc'), 'x')
+  fs.mkdirSync(path.join(code, 'certs'), { recursive: true })
+  fs.writeFileSync(path.join(code, 'certs', 'server.key'), 'a key, not a zip\n')
+  fs.writeFileSync(path.join(code, 'docs', 'Talk.key'), Buffer.from('PK\x03\x04keynote', 'latin1'))
+  fs.mkdirSync(path.join(dir, 'Plan.key'), { recursive: true })
+  fs.writeFileSync(path.join(dir, 'Plan.key', 'Index.zip'), 'PK')
+  const codeRoot = `place:${(await api('/places', { path: code })).place.id}`
+  await api('/places', { path: scans })
+  await api('/boards', { title: 'Roadmap' })
   const place = (await api('/places', { path: dir })).place
   const root = `place:${place.id}`
   const F = (p) => ({ root, path: p })
@@ -88,6 +134,22 @@ try {
   ok(!!report && report.root === root && report.path === 'report.docx', 'one in a place opens through the place', report)
   ok(found.sources.includes(process.platform === 'darwin' ? 'spotlight' : process.platform === 'linux' ? 'xbel' : 'folders') && (process.platform !== 'darwin' || fs.existsSync(asked)), `found by ${found.sources.join(', ')}`, found)
   ok((await api(`/studio/open?root=${encodeURIComponent(contract.root)}&path=${encodeURIComponent(contract.path)}`)).kind === 'doc', 'a file found in Downloads opens')
+  if (process.platform === 'darwin') ok(/-attr kMDItemFSContentChangeDate \(kMDItemFSName == "\*\.docx"c \|\| [^)]*"\*\.pdf"c \|\| [^)]*"\*\.doc"c[^)]*\) \|\| \(kMDItemContentType == "com\.apple\.iwork\.\*" && \([^)]*"\*\.key"c\)\) \|\| \(/.test(fs.readFileSync(asked, 'utf8')), 'Spotlight is asked for every Word, Excel, PowerPoint and PDF file however long ago it changed, their older kinds too, and Keynote, Pages and Numbers by their kind', fs.readFileSync(asked, 'utf8'))
+  const pitch = found.files.find((f) => f.name === 'Pitch.pptx')
+  ok(pitch?.kind === 'deck' && pitch.area?.type === 'cloud' && pitch.area.name === cloudName && /^found:/.test(pitch.root), `a presentation in ${cloudName} is found, said to be there`, pitch)
+  const weekly = found.files.find((f) => f.name === 'Weekly sync deck.md')
+  ok(weekly?.root === 'studio' && weekly.path === 'Weekly sync deck.md' && weekly.kind === 'deck' && weekly.area?.type === 'studio', "a deck in Studio's own folder (made from a meeting) is found, as a deck", weekly)
+  ok(contract.area?.type === 'folder' && contract.area.name === 'Downloads' && report.area?.type === 'place' && report.area.name === 'plans', 'each says where it is: a folder in your home, a place', { contract: contract.area, report: report.area })
+  const inCode = found.files.filter((f) => f.root === codeRoot).map((f) => `${f.path}:${f.kind}`).sort()
+  ok(JSON.stringify(inCode) === JSON.stringify(['docs/Launch.md:deck', 'docs/Spec.docx:doc', ...(process.platform === 'darwin' ? ['docs/Talk.key:deck'] : [])]) && found.skipped >= 3, "in a project's code only its Word file, its Markdown deck (and on a Mac its Keynote), not its README, page or data, which are counted", { inCode, skipped: found.skipped })
+  const old = found.files.find((f) => f.name === 'Old notes.doc')
+  ok(old?.kind === 'doc' && old.opens === false && !found.files.some((f) => f.name === 'server.key'), "an older Word file is listed as a document Studio doesn't open; a key file named .key isn't taken for Keynote", old)
+  if (process.platform === 'darwin') {
+    const talk = found.files.find((f) => f.name === 'Talk.key'), plan = found.files.find((f) => f.name === 'Plan.key')
+    ok(talk?.kind === 'deck' && talk.opens === false && plan?.kind === 'deck' && plan.opens === false && plan.root === root && plan.path === 'Plan.key', "Keynote on a Mac, a file and a package (a folder): decks Studio doesn't open", { talk, plan })
+  }
+  const pdfs = found.files.filter((f) => f.kind === 'pdf').length
+  ok(pdfs === found.perKind && found.capped.pdf >= 104, `the newest ${found.perKind} PDFs, saying there are ${found.capped?.pdf}`, { pdfs, capped: found.capped })
   ok(/didn't find that folder/.test((await api('/studio/open?root=found:000000000000&path=x.docx').catch((e) => e)).message || ''), 'a folder Studio never found doesn\'t open, saying so')
   // Edit in place: the model picked for Studio rewrites what's picked; a model that can't, says why.
   await api('/providers/openai', { values: { OPENAI_API_KEY: 'sk-test', OPENAI_BASE_URL: `${model.url}/v1` } }, 'PUT')
@@ -105,17 +167,60 @@ try {
   await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
   const home = () => until(async () => { await p.locator('.rail-nav-btn', { hasText: 'Studio' }).click(); return p.locator('.sd-home').waitFor({ timeout: 1500 }).then(() => true, () => false) }, 20000, 300)
   ok(!!(await home()), 'Studio opens from the rail')
+  // Files and Preview, as an agent's tab has them: Files first, and Preview with nothing open yet
+  // saying how to open one.
+  const tab = (name) => p.locator('.sd-tabs [role="tab"]', { hasText: name })
+  ok(await tab('Files').getAttribute('aria-selected') === 'true' && await tab('Preview').count() === 1, 'Studio opens at Files, with Preview beside it')
+  await tab('Preview').click()
+  ok(!!(await until(async () => /Nothing open in Preview yet/.test(await p.locator('.sd-home-view .sd-empty').innerText().catch(() => '')), 3000, 100)), 'Preview with nothing open yet says how to open something')
+  await p.locator('.sd-home-view .sd-empty button', { hasText: 'Show Files' }).click()
   const row = (name) => p.locator('.sd-files-row', { hasText: name })
-  ok(!!(await until(async () => (await row('Contract.docx').count()) === 1 && (await row('report.docx').count()) === 1, 10000)), 'its home lists your files from wherever they are')
+  const group = (name) => p.locator('.sd-groups button', { hasText: name }).first()
+  const listed = () => p.locator('.sd-files-row:not(.head) .sd-file-text b').allInnerTexts()
+  ok(!!(await until(async () => (await row('Contract.docx').count()) === 1 && (await row('report.docx').count()) === 1, 10000)), 'its home lists your files from wherever they are, in Recent')
   const cells = await row('Contract.docx').evaluate((r) => ({ dir: r.querySelector('.sd-file-dir')?.innerText, when: r.querySelector('.sd-file-when')?.innerText, open: !!r.querySelector('.sd-file-acts .btn') }))
   ok(cells.dir === downloadsShown && !!cells.when && cells.open, 'each with its folder, when it changed, and Open', cells)
-  await p.locator('.sd-filter button', { hasText: 'Sheets' }).click()
-  ok(!!(await until(async () => (await row('Budget 2027.xlsx').count()) === 1 && (await row('report.docx').count()) === 0, 3000, 100)), 'filtered by kind: Sheets')
-  await p.locator('.sd-filter button', { hasText: 'All' }).click()
+  const groups = await p.locator('.sd-groups').textContent()
+  ok(['Recent', 'Kinds', 'Documents', 'Presentations', 'Sheets', 'PDFs', 'Pages', 'Whiteboards', 'Where', 'Bridge AI', cloudName, 'plans', 'Downloads'].every((w) => groups.includes(w)), 'shown by Recent, by kind and by where they are', groups)
+  // New, in the header beside Files and Preview: no cards on a page that has files.
+  ok(await p.locator('.sd-new-btn').count() === 0, "with files, New's cards aren't on the page")
+  await p.locator('.sd-new-open').click()
+  ok(JSON.stringify(await p.locator('.sd-new-menu [role="menuitem"]').allInnerTexts()) === '["Document","Markdown","Sheet","Deck","Page"]', 'New is a menu in the header: a document, Markdown, a sheet, a deck, a page')
+  await p.locator('.sd-new-menu [role="menuitem"]', { hasText: 'Markdown' }).click()
+  ok(!!(await until(async () => (await p.locator('.sd-new-sec h3').textContent().catch(() => '')) === 'New Markdown', 3000, 100)) && await p.locator('.sd-new-form input').count() === 1, 'one picked asks its name and folder at the top of Files')
+  await p.locator('.sd-new-form button', { hasText: 'Cancel' }).click()
+  await group('Sheets').click()
+  ok(!!(await until(async () => (await row('Budget 2027.xlsx').count()) === 1 && (await row('report.docx').count()) === 0, 3000, 100)), 'by kind: Sheets')
+  // A kind Studio doesn't open, among Documents, said so, and opened in its own app (stood in for).
+  await group('Documents').click()
+  const oldRow = row('Old notes.doc')
+  ok(!!(await until(async () => /opened in its own app/.test(await oldRow.innerText().catch(() => '')) && (await oldRow.locator('button', { hasText: 'Open in app' }).count()) === 1 && (await oldRow.locator('button', { hasText: /^Open$/ }).count()) === 0, 3000, 100)), "an older Word file among Documents: said to open in its own app, with Open in app, not Studio's Open", await oldRow.innerText().catch(() => ''))
+  if (process.platform !== 'win32') {
+    await oldRow.locator('button', { hasText: 'Open in app' }).click()
+    ok(!!(await until(() => fs.existsSync(opened) && fs.readFileSync(opened, 'utf8').includes('Old notes.doc'), 5000)) && /Opening Old notes\.doc in its own app/.test(await p.locator('.sd-files-note').innerText().catch(() => '')), 'Open in app: the system opens it, and Studio says so', fs.existsSync(opened) ? fs.readFileSync(opened, 'utf8') : '')
+  } else skip('Open in app opens it', 'Windows opens it through Explorer, which has no stand-in here')
+  await group('Presentations').click()
+  ok(!!(await until(async () => { const n = await listed(); return ['Pitch.pptx', 'Weekly sync deck.md', 'Launch.md'].every((x) => n.includes(x)) && !n.includes('Contract.docx') && !n.includes('README.md') }, 3000, 100)), "Presentations: a PowerPoint in a cloud drive, the deck in Studio's own folder and a project's Markdown deck", await listed())
+  await shot(p, `${tag}studio-docs-presentations`)
+  await group(cloudName).click()
+  ok(!!(await until(async () => JSON.stringify(await listed()) === '["Pitch.pptx"]', 3000, 100)), `by where: ${cloudName}`, await listed())
+  await group('Bridge AI').click()
+  ok(!!(await until(async () => { const n = await listed(); return n.includes('Weekly sync deck.md') && n.includes('Roadmap') }, 3000, 100)), "Bridge AI's own: the deck made from a meeting and the whiteboard", await listed())
+  ok(await row('Weekly sync deck.md').locator('.sd-file-dir').innerText() === 'Bridge AI', "a file in Studio's own folder: its folder said as Bridge AI, not a path", await row('Weekly sync deck.md').locator('.sd-file-dir').innerText())
+  await group('PDFs').click()
+  ok(!!(await until(async () => /the newest 100 of 1(0[4-9]|[1-9]\d)/.test(await p.locator('.sd-list-head').innerText()), 3000, 100)), 'PDFs: the newest 100, saying how many there are', await p.locator('.sd-list-head').innerText())
+  await group('Pages').click()
+  ok(!!(await until(async () => /No pages found/.test(await p.locator('.sd-files-none').innerText().catch(() => '')), 3000, 100)), 'a kind with nothing in it says so')
+  await group('Recent').click()
   await p.locator('.sd-files-search input').fill('contr')
   ok(!!(await until(async () => (await p.locator('.sd-files-row:not(.head)').count()) === 1, 3000, 100)), 'and by name')
+  await group('Sheets').click()
+  await p.locator('.sd-files-search input').fill('pitch')
+  ok(!!(await until(async () => JSON.stringify(await listed()) === '["Pitch.pptx"]', 3000, 100)), 'a search looks through all your files, not only the kind picked', await listed())
   await p.locator('.sd-files-search input').fill('')
-  ok(/Spotlight|recently used|folders/.test(await p.locator('.sd-files-src').innerText()), 'it says where it looked', await p.locator('.sd-files-src').innerText())
+  await group('Recent').click()
+  const src = await p.locator('.sd-files-src').innerText()
+  ok(/Spotlight|recently used|folders/.test(src) && /Studio's own folder/.test(src) && /newest 100 of each kind/.test(src) && /projects' code/.test(src), 'it says where it looked, that only the newest of each kind are listed, and what a project\'s code leaves out', src)
   // Add a folder (a browser on this computer: typed), and its files are looked for.
   const extra = path.join(kit.home, 'Projects', 'site')
   fs.mkdirSync(extra, { recursive: true })
@@ -125,12 +230,27 @@ try {
   await p.locator('.sd-add-form button', { hasText: 'Add' }).first().click()
   ok(!!(await until(async () => (await api('/places')).places.some((x) => /Projects[\\/]site$/.test(x.path)) && (await row('Brief.md').count()) === 1, 10000)), 'Add a folder: a place in Files, and its files in the list')
   await shot(p, `${tag}studio-docs-home`)
-  ok(!(await bare(p, '.sd-home')).length, 'nothing on the home is a bare control', await bare(p, '.sd-home'))
+  ok(!(await bare(p, '.sd-home-view')).length, 'nothing on the home is a bare control', await bare(p, '.sd-home-view'))
+  // A whiteboard opens in Preview as a board, Studio's tabs in its header; Files is a click back.
+  await group('Whiteboards').click()
+  await row('Roadmap').locator('.sd-file-name').click()
+  ok(!!(await until(async () => (await p.locator('.wb-view .sd-tabs [role="tab"][aria-selected="true"]', { hasText: 'Preview' }).count()) === 1 && (await p.locator('.wb-view .pane-head h2').innerText().catch(() => '')).includes('Roadmap'), 20000)), 'a whiteboard opens in Preview, on its own page with Files and Preview')
+  await p.locator('.wb-view .excalidraw').first().waitFor({ timeout: 20000 }).catch(() => {})
+  await shot(p, `${tag}studio-docs-board`)
+  await p.locator('.wb-view .sd-tabs [role="tab"]', { hasText: 'Files' }).click()
+  ok(!!(await p.locator('.sd-home').waitFor({ timeout: 10000 }).then(() => true, () => false)), 'and Files goes back to your files')
+  await group('Recent').click()
 
   // ---------- A Word file, as pages ----------
   await row('report.docx').locator('.sd-file-acts .btn').click()
   const doc = p.locator('.sd-w')
   ok(!!(await until(async () => (await p.locator('.sd-pb').count()) > 0, 20000)), 'a Word file opens as pages')
+  // In Preview: Files goes back to your files, and Preview to the file again.
+  ok(await tab('Preview').getAttribute('aria-selected') === 'true', 'it opens in Preview')
+  await tab('Files').click()
+  await p.locator('.sd-home').waitFor({ timeout: 10000 })
+  await tab('Preview').click()
+  ok(!!(await until(async () => (await p.locator('.sd-pb').count()) > 0 && /report\.docx/.test(await p.locator('.pane-head h2').first().innerText()), 20000)), 'Files, then Preview: back to the file last open')
   const look = await p.evaluate(() => ({
     head: document.querySelector('.sd-pb-top .sd-pb-head')?.innerText, foot: document.querySelector('.sd-pb-end .sd-pb-foot')?.innerText,
     comment: !!document.querySelector('.sd-w .sd-cmt'), ins: document.querySelector('.sd-w ins.sd-rev')?.innerText, del: document.querySelector('.sd-w del.sd-rev')?.innerText,
@@ -310,6 +430,24 @@ try {
   await until(async () => { await dark.p.evaluate(({ root }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: 'report.docx' } })), { root }); return dark.p.locator('.sd-pb').first().waitFor({ timeout: 2000 }).then(() => true, () => false) }, 25000, 300)
   ok(await dark.p.locator('.sd-w').evaluate((e) => getComputedStyle(e).backgroundColor) === 'rgb(255, 255, 255)', 'in the dark look, the page is still paper')
   await shot(dark.p, `${tag}studio-docs-word-dark`)
+  // Files in the dark look too, from the file's Files tab.
+  await dark.p.locator('.sd-file .sd-tabs [role="tab"]', { hasText: 'Files' }).click()
+  await dark.p.locator('.sd-groups button', { hasText: 'Presentations' }).first().click({ timeout: 15000 })
+  ok(!!(await until(async () => (await dark.p.locator('.sd-files-row', { hasText: 'Pitch.pptx' }).count()) === 1, 10000)), 'dark: Files, at Presentations')
+  await shot(dark.p, `${tag}studio-docs-presentations-dark`)
+
+  // ---------- No files yet ----------
+  // New's cards on the page, as the way to start, only while Studio has no files at all: a Bridge AI
+  // of its own with nothing in its home, its folder or Spotlight (stood in for, saying nothing).
+  empty = await startKit('studio-docs-none', { config: { trials: { studio: true } } })
+  empty.program('mdfind', '')
+  await empty.api('/setup', { name: 'Tester' })
+  const none = await page(b, empty.url, { width: 1440, height: 900 })
+  pages.push(none)
+  await none.p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
+  await until(async () => { await none.p.locator('.rail-nav-btn', { hasText: 'Studio' }).click(); return none.p.locator('.sd-home').waitFor({ timeout: 1500 }).then(() => true, () => false) }, 20000, 300)
+  ok(!!(await until(async () => (await none.p.locator('.sd-new-btn').count()) === 5 && /No documents, sheets, decks or PDFs yet/.test(await none.p.locator('.sd-files-none').innerText().catch(() => '')), 10000)), "no files at all: New's cards on the page as the way to start, and the list says so")
+  await shot(none.p, `${tag}studio-docs-empty`)
 
   // ---------- A phone ----------
   const ph = await page(b, kit.url, { phone: true })
@@ -319,9 +457,23 @@ try {
   await ph.p.waitForSelector('.sd-home', { timeout: 15000 })
   await until(async () => (await ph.p.locator('.sd-files-row', { hasText: 'report.docx' }).count()) > 0, 10000)
   await sleep(400)
-  let f = await phoneFaults(ph.p, '.sd-home')
-  ok(!Object.keys(f).length, 'phone: Studio\'s home fits, each control a whole target', f)
+  let f = await phoneFaults(ph.p, '.sd-home-view')
+  ok(!Object.keys(f).length, 'phone: Studio\'s home fits, Files and Preview and each control a whole target', f)
   await shot(ph.p, `${tag}studio-docs-home-phone`)
+  await ph.p.locator('.sd-new-open').click()
+  await ph.p.locator('.sd-new-menu').waitFor({ timeout: 3000 })
+  await solid(ph.p, '.sd-new-menu')
+  f = await phoneFaults(ph.p, '.sd-new-menu')
+  ok(!Object.keys(f).length && await ph.p.locator('.sd-new-menu [role="menuitem"]').count() === 5, "phone: New's menu from the header, each a whole target", f)
+  await shot(ph.p, `${tag}studio-docs-new-phone`)
+  await ph.p.keyboard.press('Escape')
+  // What to show is one list to pick from on a phone.
+  await ph.p.locator('.sd-group-pick select').selectOption('kind:deck')
+  ok(!!(await until(async () => (await ph.p.locator('.sd-files-row', { hasText: 'Pitch.pptx' }).count()) === 1 && (await ph.p.locator('.sd-files-row', { hasText: 'report.docx' }).count()) === 0, 3000, 100)), 'phone: Presentations picked from the list')
+  f = await phoneFaults(ph.p, '.sd-home-view')
+  ok(!Object.keys(f).length, 'phone: and it still fits', f)
+  await shot(ph.p, `${tag}studio-docs-presentations-phone`)
+  await ph.p.locator('.sd-group-pick select').selectOption('recent')
   await ph.p.locator('.sd-files-row', { hasText: 'report.docx' }).locator('.sd-file-name').click()
   await until(async () => (await ph.p.locator('.sd-word.flow .sd-w').count()) > 0, 15000)
   await sleep(600)
@@ -334,6 +486,6 @@ try {
 } finally {
   for (const x of pages) await x.ctx.close().catch(() => {})
   await b.close()
-  kit.stop(); model.stop()
+  kit.stop(); model.stop(); empty?.stop()
 }
 process.exit(done().fail ? 1 : 0)

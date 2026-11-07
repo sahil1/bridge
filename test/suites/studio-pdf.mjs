@@ -241,7 +241,7 @@ try {
   // Chromium takes a route added after the page opened).
   const slow = which === 'chromium' ? async (r) => { await sleep(1500); await r.continue().catch(() => {}) } : null
   if (slow) await p.route('**/api/studio/sign/setup*', slow)
-  await p.locator('.sd-file button[aria-label="Back to Studio"]').click()
+  await p.locator('.sd-file .sd-tabs [role="tab"]', { hasText: 'Files' }).click()
   if (slow) {
     await p.locator('.sd-sign-home[aria-busy="true"]').waitFor({ timeout: 10000 })
     const waiting = await p.locator('.sd-sign-home').innerText()

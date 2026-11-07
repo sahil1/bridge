@@ -147,7 +147,8 @@ function useFit(onFold) {
 const VIEWS = { 'view:home': { title: tx('Home'), icon: 'home' }, 'view:everything': { title: tx('Everything'), icon: 'grid' }, 'view:new': { title: tx('New'), icon: 'plus' }, 'view:meetings': { title: tx('Meetings'), icon: 'mic' }, 'view:dictations': { title: tx('Dictations'), icon: 'wave' }, 'view:memory': { title: tx('Memory'), icon: 'book' }, 'view:whiteboards': { title: tx('Whiteboards'), icon: 'shapes' }, 'view:studio': { title: tx('Studio'), icon: 'layers' }, 'view:map': { title: tx('Agent Map'), icon: 'grid' } }
 // A whiteboard's tab is named as the board is (its id).
 const BOARD = 'view:whiteboard:'
-// A Studio file's tab: its root (an agent's pane, or place:<id>) and path, each encoded.
+// A Studio file's tab: its root (an agent's pane, or place:<id>) and path, each encoded. A
+// whiteboard in Studio's Preview is root board, its name the path.
 // A beta feature's tab, left open from before it was turned off (or opened on another computer
 // where it's on): says so, with the way to turn it on.
 function TrialOff({ name }) {
@@ -248,7 +249,7 @@ function App() {
   const views = [...new Set([...W.tabs, mobileAgent].filter(isView))].map((id) => {
     const m = id.startsWith('view:meeting:') ? meetingList.find((x) => x.id === id.slice(13)) : null
     if (id.startsWith(BOARD)) return { paneId: id, view: true, title: id.slice(BOARD.length), icon: 'shapes' }
-    if (id.startsWith(STUDIO)) return { paneId: id, view: true, title: studioOf(id).path.split('/').pop(), icon: 'layers' }
+    if (id.startsWith(STUDIO)) return { paneId: id, view: true, title: studioOf(id).path.split('/').pop(), icon: studioOf(id).root === 'board' ? 'shapes' : 'layers' }
     return { paneId: id, view: true, title: VIEWS[id] ? t(VIEWS[id].title) : m?.title || t('Meeting'), icon: VIEWS[id]?.icon || 'mic' }
   })
   // Agents on your other devices, in tabs here: named from what each device last said about them
@@ -866,7 +867,7 @@ function App() {
               : id.startsWith(BOARD) && WhiteboardPage ? <section className="pane view-pane"><WhiteboardPage id={id.slice(BOARD.length)} onBack={() => openAgent('view:whiteboards', { replace: id })} /></section>
                 : id.startsWith('view:studio') && !studioOn ? <section className="pane view-pane"><TrialOff name={t('Studio')} /></section>
                 : id === 'view:studio' && StudioHome ? <section className="pane view-pane"><StudioHome onOpen={(f) => openAgent(studioId(f), wide ? { replace: 'view:studio' } : {})} /></section>
-                  : id.startsWith(STUDIO) && StudioPage ? <section className="pane view-pane"><StudioPage {...studioOf(id)} onBack={() => openAgent('view:studio', { replace: id })} onOpen={(f) => openAgent(studioId(f))} /></section>
+                  : id.startsWith(STUDIO) && StudioPage ? <section className="pane view-pane"><StudioPage {...studioOf(id)} onBack={() => openAgent('view:studio', { replace: id })} onOpen={(f, o) => openAgent(studioId(f), o?.replace ? { replace: id } : {})} /></section>
                 : <section className="pane view-pane"><MeetingPage id={id.slice(13)} onBack={onBack || (() => openAgent('view:meetings', { replace: id }))} /></section>}
     </ErrorBoundary>
   )
