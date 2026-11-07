@@ -18,8 +18,10 @@ import { defaultKey, keyLabel } from '../../shared/dictation/keys.js'
 import { t } from '../i18n/index.js'
 
 export const HOLD_MS = 300
+// The most it waits for the mic's first sound before listening all the same.
+const SOUND_MS = 3000
 
-// phase: idle | opening (asking for the mic) | listening | working (turning it into text).
+// phase: idle | opening (till the mic's sound comes) | listening | working (turning it into text).
 // mode: hold | free (hands-free). level: how loud now (0 to 1); levels: the last few, oldest first,
 // for the pill's moving bars (Pill.jsx). live: what's been heard so far, while it listens and until
 // the text is in (live words, below). note: a line to show. setup: what /voice says is missing, or
@@ -173,6 +175,11 @@ export async function press(target, at = Date.now()) {
     const pcm = await startPcm(stream, { onLevel: (level) => { if (seq === id) set({ level, levels: [...st.levels.slice(1 - LEVELS), level] }) }, onPcm: live?.push, every: live ? LIVE_MS : 0 })
     if (seq !== id) { pcm.cancel(); live?.end(); return }
     rec = { pcm, id, live }
+    // Listening once the sound comes, not before: till then nothing is recorded, so a let go meanwhile
+    // is one before the mic was on (release), and its time starts then. One that never comes is
+    // listened to all the same after a while, and says it was too short.
+    await Promise.race([pcm.sounding, new Promise((r) => setTimeout(r, SOUND_MS))])
+    if (seq !== id) return
     set({ phase: 'listening', since: Date.now() })
     navigator.vibrate?.(15)
   } catch (e) {

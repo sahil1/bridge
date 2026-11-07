@@ -758,7 +758,7 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
             <>
               <span className="comp-hint">{touch ? (dict.mode === 'free' ? t("Listening… tap ✓ when you're done") : t('Talking… let go to add it')) : listeningHint(dict.mode, keyName)}</span>
               <button className="comp-text-btn" onClick={cancel}>{t('Cancel')}</button>
-              <button className="send rec-stop" onClick={finish} aria-label={t('Stop and transcribe')} title={t('Stop and transcribe')}><Icon name="check" size={16} /></button>
+              <button className="send rec-stop" onClick={finish} disabled={dict.phase !== 'listening'} aria-label={t('Stop and transcribe')} title={t('Stop and transcribe')}><Icon name="check" size={16} /></button>
             </>
           ) : (
             <>

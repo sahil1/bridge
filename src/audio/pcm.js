@@ -51,8 +51,8 @@ class Pcm extends AudioWorkletProcessor {
       this.cnt++
       if (++this.pos >= this.step) { this.pos -= this.step; this.put(this.acc / this.cnt); this.acc = 0; this.cnt = 0 }
     }
-    // The level, about ten times a second, for the meter.
-    if (++this.ticks % Math.round(12 * this.step) === 0) { this.port.postMessage({ level: this.peak }); this.peak = 0 }
+    // The level, at once (the sound has started) and then about ten times a second, for the meter.
+    if (this.ticks++ % Math.round(12 * this.step) === 0) { this.port.postMessage({ level: this.peak }); this.peak = 0 }
     return true
   }
 }
@@ -87,6 +87,8 @@ export const microphone = async () => {
 
 // Records a stream until stop() (the samples, an Int16Array) or cancel(). onLevel(0..1) for a meter.
 // onPcm(samples): each piece as it comes, every `every` ms (live words: dictation/controller.js).
+// sounding: settles once the sound starts coming, which can be a while after this returns (the
+// audio device starting up on a busy computer, a Bluetooth headset switching over to its mic).
 export async function startPcm(stream, { onLevel, onPcm, every = 0 } = {}) {
   let ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: RATE })
   let input
@@ -101,8 +103,10 @@ export async function startPcm(stream, { onLevel, onPcm, every = 0 } = {}) {
   const node = new AudioWorkletNode(ctx, 'bridge-pcm', { numberOfInputs: 1, numberOfOutputs: 0, channelCount: 1, channelCountMode: 'explicit' })
   const chunks = []
   let flushed = null
+  let heard
+  const sounding = new Promise((resolve) => { heard = resolve })
   node.port.onmessage = (e) => {
-    if (e.data.level != null) onLevel?.(e.data.level)
+    if (e.data.level != null) { heard(); onLevel?.(e.data.level) }
     else if (e.data.pcm) { const c = new Int16Array(e.data.pcm); chunks.push(c); onPcm?.(c) }
     else if (e.data.flushed) flushed?.()
   }
@@ -120,6 +124,7 @@ export async function startPcm(stream, { onLevel, onPcm, every = 0 } = {}) {
     ctx.close().catch(() => {})
   }
   return {
+    sounding,
     get seconds() { return (performance.now() - started) / 1000 },
     async stop() {
       if (done) return new Int16Array(0)
