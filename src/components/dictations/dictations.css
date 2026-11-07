@@ -27,6 +27,11 @@
 /* Open: all of it, what was heard, the recording, and what to do with it. */
 .dc-body { display: grid; gap: 8px; padding: 0 12px 12px 49px; }
 .dc-full { margin: 0; line-height: 1.5; font-size: 13.5px; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+/* Edit: its words in a box in their place, the same size, growing with what you type. */
+.dc-edit { display: block; width: calc(100% + 16px); min-height: 44px; max-height: 50vh; margin: -6px -8px 0; padding: 5px 7px; box-sizing: border-box; border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent); border-radius: 8px; background: var(--pane); color: var(--ink); font: 13.5px/1.5 var(--font); resize: vertical; box-shadow: 0 0 0 3px var(--accent-soft); overflow-wrap: anywhere; }
+.dc-edit:is(:focus, :focus-visible) { outline: none; }
+.dc-keys { white-space: nowrap; }
+.dc-remember { padding: 8px 10px; border-radius: 9px; background: var(--pane); border: 1px solid var(--line-2); }
 .dc-heard { justify-self: start; }
 .dc-tidied { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
 .dc-audio { width: min(100%, 360px); height: 32px; }
@@ -45,7 +50,8 @@
 .app.narrow .dc-home { padding-bottom: 96px; }
 /* On a phone: whole targets, and a search box iOS doesn't zoom into. */
 .app.narrow .dc-search { height: 40px; font-size: 16px; }
-.app.narrow .dc-view :is(.dc-body .btn, .dc-said, .dc-heard, .pane-head .btn) { min-height: 40px; }
+.app.narrow .dc-edit { font-size: 16px; }
+.app.narrow .dc-view :is(.dc-body .btn, .dc-said, .dc-heard, .pane-head .btn, .remember .comp-text-btn) { min-height: 40px; }
 .app.narrow .dc-view :is(.dc-said, .dc-heard) { display: inline-flex; align-items: center; }
 .app.narrow .dc-where { flex-wrap: wrap; row-gap: 0; }
 .app.narrow .dc-where b { white-space: normal; overflow-wrap: anywhere; }

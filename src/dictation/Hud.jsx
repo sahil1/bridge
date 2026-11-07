@@ -6,9 +6,11 @@ import { api, settingsChanged } from '../api.js'
 import { useRecheck } from '../permissions.js'
 import { store } from '../components/layout.jsx'
 import { keyLabel } from '../../shared/dictation/keys.js'
+import { corrections } from '../../shared/dictation/corrected.js'
 import { useDictation, configure, press, release, finish, cancel, dismiss, retry, keysPlatform, dictationKey, amend, forget } from './controller.js'
 import { Morph, Listening, Working, Done } from './Pill.jsx'
 import { untidiedWhy, TidyNeeds } from './Tidy.jsx'
+import Remember from './Remember.jsx'
 import { t } from '../i18n/index.js'
 import { sentTo } from '../sendbox.js'
 import './dictation.css'
@@ -19,12 +21,17 @@ import './dictation.css'
 // "Transcribing…", and with "Where I'm typing" picked in Settings › Voice, "Pasted into Slack" for a
 // moment, and it's gone. Otherwise the pill grows into a card with the words, to Send to the agent
 // (the one you last looked at in Bridge AI, or the chief of staff: Settings › Voice), to another (To
-// ▾), to Copy, or to finish in Bridge AI. When pasting can't be done (no Accessibility yet on a Mac,
-// a password field, another app in front by then) the words stay there to copy or send, with one
-// line saying why. No Accessibility yet: Allow it asks macOS from there, and once it's on (noticed by
-// itself), Paste pastes what's waiting where you were typing. After a Copy, it asks once whether to
-// paste for you next time. Each dictation is kept with the app it was said in, and amended with what
-// became of it (controller.js keep). Edit by voice (Settings › Voice, a Mac): with text selected where
+// ▾), or to Copy. The words can be edited right there first: click them (or Edit), and the window
+// takes the keyboard until you're done (the desktop app gives it back to the app you were in); Esc
+// stops editing, ⌘↩ (Ctrl+Enter) does what the card's main button does. A name you put right is
+// offered to meeting memory once they've gone (Remember.jsx), and kept only if you say so. When
+// pasting can't be done (no Accessibility yet on a Mac, a password field, another app in front by
+// then) the words stay there to edit, copy or send, with one line saying why; where it can be tried
+// again, Paste brings that app back and pastes them there. No Accessibility yet: Allow it asks macOS
+// from there, and once it's on (noticed by itself), Paste pastes what's waiting where you were
+// typing. After a Copy, it asks once whether to paste for you next time. Each dictation is kept with
+// the app it was said in, and amended with what became of it, and your edit of it (controller.js
+// keep). Edit by voice (Settings › Voice, a Mac): with text selected where
 // you were typing, what you said is how to change it; the model picked for it rewrites the text and
 // it's pasted in its place. Tidy what I say (a trial, Settings › Voice): what you said is tidied by
 // a model first ("Tidying…"), and pasted tidied; when it isn't (too slow, an error, an answer that
@@ -72,6 +79,10 @@ export default function Hud() {
   const [editing, setEditing] = useState(false) // edit by voice: the selection being read and rewritten
   const [edited, setEdited] = useState(null) // ...and what it was rewritten as
   const [asSaid, setAsSaid] = useState(false) // tidied, and you picked what you said instead
+  const [draft, setDraft] = useState(null) // the words as you edit them on the card (null: not editing)
+  const [fixes, setFixes] = useState([]) // names you put right there, offered to meeting memory
+  const area = useRef(null)
+  const caret = useRef(null) // where the caret goes as editing starts: where the words were clicked
   const timer = useRef(null)
   const going = useRef(null)
   // This press's words, straight from the key: not after a download or Try again, when you've long
@@ -104,7 +115,7 @@ export default function Hud() {
   useEffect(() => {
     const begin = (at, name, bundle) => {
       clearTimeout(timer.current); clearTimeout(going.current); setLeaving(false)
-      setDone(null); setErr(null); setPicking(false); setWhy(null); setOffer(false); setPasting(false); setAllowed(false); setEditing(false); setEdited(null); setAsSaid(false)
+      setDone(null); setErr(null); setPicking(false); setWhy(null); setOffer(false); setPasting(false); setAllowed(false); setEditing(false); setEdited(null); setAsSaid(false); setDraft(null); setFixes([])
       setInto(name || null)
       setShown((n) => n + 1)
       press0.current++
@@ -152,6 +163,10 @@ export default function Hud() {
   const later = (ms) => { clearTimeout(timer.current); timer.current = setTimeout(() => { setDone(null); hide() }, ms) }
   const target = agents.find((a) => a.paneId === to) || null
   const text = edited ?? (asSaid && s.result?.said ? s.result.said : s.result?.text || '')
+  // What goes: your edit of the words, once you've started one (mine: it changed them).
+  const words = draft ?? text
+  const mine = draft != null && draft !== text
+  const typing = draft != null && !done
   // Not tidied, and why (with no model yet, what's needed shows on the card).
   const untidied = edited == null ? s.result?.untidied || null : null
   const needsModel = untidied?.code === 'no-model'
@@ -186,28 +201,39 @@ export default function Hud() {
       if (g !== press0.current) return
       setEdited(x.text)
       setEditing(false)
-      pasteIt({ ...r, text: x.text }, true)
+      pasteIt({ ...r, text: x.text }, { change: true })
     } catch (e) { if (g === press0.current) { setEditing(false); setErr(e.message) } }
   }
-  function pasteIt(r, change = false) {
+  // change: the selection rewritten (edit by voice). back: from the card, so the app it goes into is
+  // brought back to the front first. fx: names you put right in your edit of the words (kept as you
+  // edited them), offered to memory once they're in, the window staying up a while for that.
+  function pasteIt(r, { change = false, back = false, fx = null } = {}) {
     setPasting(true)
     setWhy(null)
     const g = press0.current
-    app().hudPaste(r.text).then((x) => {
-      if (x?.pasted) amend(r, { how: 'pasted' })
+    const stay = (ms) => later(fx?.length ? 20000 : ms)
+    app().hudPaste(r.text, back ? { back: true } : undefined).then((x) => {
+      if (x?.pasted) amend(r, { how: 'pasted', ...(fx ? { text: r.text } : {}) })
       // Said into a password field, most likely: not kept.
       else if (x?.error === 'secure') forget(r)
       if (g !== press0.current) return
       setPasting(false)
       if (x?.pasted) {
+        if (fx?.length) setFixes(fx)
         // Nothing took it (no text field there): it's on the clipboard to paste by hand.
-        if (x.read === false) { setDone(t('Nothing took it there, so it\'s on the clipboard: press {key} to paste it.', { key: pasteKey() })); later(3500) }
+        if (x.read === false) { setDone(t('Nothing took it there, so it\'s on the clipboard: press {key} to paste it.', { key: pasteKey() })); stay(3500) }
         else if (change) { setDone(into ? t('Changed in {app}', { app: into }) : t('Changed')); later(1200) }
         else if (r.by != null) { setDone(into ? t('Tidied and pasted into {app}', { app: into }) : t('Tidied and pasted')); later(900) }
         // As you said it: why, for long enough to read (with no model yet, the card, a while longer).
-        else { setDone(into ? t('Pasted into {app}', { app: into }) : t('Pasted')); later(r.untidied ? (r.untidied.code === 'no-model' ? 15000 : 4000) : 900) }
+        else { setDone(into ? t('Pasted into {app}', { app: into }) : t('Pasted')); stay(r.untidied ? (r.untidied.code === 'no-model' ? 15000 : 4000) : 900) }
       } else setWhy(WHY[x?.error] ? x.error : x?.error === 'off' ? null : 'failed')
     }, () => { if (g === press0.current) { setPasting(false); setWhy('failed') } })
+  }
+  // Paste on the card: what's there now (your edit of it, or what you said), into the app the key was
+  // pressed in, brought back to the front first.
+  const pasteCard = () => {
+    setAllowed(false)
+    pasteIt({ ...s.result, text: words, ...(mine || asSaid ? { by: null } : {}) }, { back: true, fx: mine ? corrections(text, words) : null })
   }
   // Waiting for Accessibility: Allow it asks macOS (its question, then System Settings with the tile:
   // desktop/permissions.js), and it's looked at every few seconds, so what you said is pasted once
@@ -220,8 +246,12 @@ export default function Hud() {
     loadStatus()
   }, 2500, why === 'accessibility')
   const agentOf = (a) => ({ id: a.paneId, name: agentName(a), ...(a.chief ? { chief: true } : {}) })
+  // What became of the words, for the history: and your edit of them, when they went edited.
+  const how = (o) => ({ ...o, ...(mine ? { text: words } : {}) })
+  // Done with the words: the keyboard back to the app you were in, and a name you put right offered.
+  const went = () => { if (draft != null) app().hudKeyboard?.(false); const fx = mine ? corrections(text, words) : []; setFixes(fx); return fx.length > 0 }
   const send = async () => {
-    if (!target || !text) return
+    if (!target || !words.trim()) return
     setErr(null)
     const g = press0.current
     try {
@@ -229,25 +259,55 @@ export default function Hud() {
       // As the message box does: your computer types it in, or holds it while the agent is busy, and
       // its answer says which.
       const r = s.result
-      const got = await api(`/agents/${pid}/prompt`, { method: 'POST', body: { text } })
-      amend(r, { how: got?.queued ? 'queued' : 'sent', agent: agentOf(target) })
+      const got = await api(`/agents/${pid}/prompt`, { method: 'POST', body: { text: words } })
+      amend(r, how({ how: got?.queued ? 'queued' : 'sent', agent: agentOf(target) }))
       if (g !== press0.current) return
+      const ask = went()
       setDone(sentTo(got, agentName(target)))
-      later(1200)
+      later(ask ? 20000 : 1200)
     } catch (e) { if (g === press0.current) setErr(e.message) }
   }
   const copy = async () => {
     const g = press0.current
     const r = s.result
     try {
-      if (app().hudCopy) await app().hudCopy(text)
-      else await navigator.clipboard.writeText(text)
-      amend(r, { how: 'copied' })
+      if (app().hudCopy) await app().hudCopy(words)
+      else await navigator.clipboard.writeText(words)
+      amend(r, how({ how: 'copied' }))
       if (g !== press0.current) return
+      const ask = went()
       setDone(keysPlatform() === 'darwin' ? t('Copied. Press ⌘V to paste it.') : t('Copied. Press Ctrl+V to paste it.'))
-      // Asked once: paste it for you next time? (Only where this computer can.)
-      if (canPaste && conf?.to !== 'paste' && !conf?.offeredPaste) { setOffer(true); later(15000) } else later(2200)
+      // Asked once: paste it for you next time? (Only where this computer can, and not while a name
+      // you put right is being offered.)
+      if (ask) later(20000)
+      else if (canPaste && conf?.to !== 'paste' && !conf?.offeredPaste) { setOffer(true); later(15000) } else later(2200)
     } catch (e) { setErr(e.message) }
+  }
+  // Editing the words on the card: the window takes the keyboard (the desktop app lets it, for this),
+  // with the caret where you clicked, or at the end. Esc stops (the words as they were), ⌘↩ or
+  // Ctrl+Enter does what the card's main button does.
+  const startEdit = (at = null) => {
+    if (draft != null) return
+    caret.current = at
+    setDraft(text)
+    setOffer(false)
+    app().hudKeyboard?.(true)
+  }
+  const stopEdit = () => { setDraft(null); app().hudKeyboard?.(false) }
+  const fit = (el) => { el.style.height = 'auto'; el.style.height = `${Math.min(el.scrollHeight + 2, 160)}px` }
+  useLayoutEffect(() => {
+    const el = area.current
+    if (!typing || !el) return
+    el.focus()
+    const at = Math.min(caret.current ?? el.value.length, el.value.length)
+    el.setSelectionRange(at, at)
+    fit(el)
+  }, [typing])
+  // Where in the words a click landed (not the end of a selection being made, to copy part of them).
+  const clickAt = (e) => {
+    if (String(window.getSelection?.() || '')) return
+    const r = document.caretRangeFromPoint?.(e.clientX, e.clientY)
+    startEdit(r && e.currentTarget.contains(r.startContainer) ? r.startOffset : null)
   }
   const answer = async (yes) => {
     setOffer(false)
@@ -266,10 +326,19 @@ export default function Hud() {
       later(6000)
     } else { setDone(t('From next time, it\'s pasted where you\'re typing.')); later(2500) }
   }
-  const edit = () => { if (target) amend(s.result, { how: 'typed', agent: agentOf(target) }); app().hudOpen?.({ paneId: target?.paneId, text }); hide() }
   const label = keyLabel(dictationKey(conf), keysPlatform())
   // Pasting where you're typing, allowed: no agent to pick while it listens.
   const intoApp = pasteOn && st?.paste?.allowed && !why
+  // Paste on the card: once Accessibility was turned on while the words waited, or after a paste
+  // that didn't go and may now (another app was in front, a key still held, Bridge AI in front).
+  const again = pasteOn && !!st?.paste?.allowed && ['moved', 'held', 'failed', 'focus'].includes(why)
+  const pasteNow = allowed || again
+  // With nobody to send to yet, the list of agents to pick from.
+  const main = () => (pasteNow ? pasteCard() : target ? send() : setPicking(true))
+  const onKey = (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); stopEdit() } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); main() }
+  }
+  const enter = keysPlatform() === 'darwin' ? '⌘↩' : 'Ctrl+Enter'
 
   const toChip = intoApp ? (
     <span className="dp-to hud-into" title={t('Pasted where you\'re typing')}>{into ? t('Into {app}', { app: into }) : t('Where you\'re typing')}</span>
@@ -283,7 +352,7 @@ export default function Hud() {
   const listening = s.phase === 'opening' || s.phase === 'listening'
   const autoPaste = !!s.result && (pasteOn || edited != null) && !!st?.paste?.allowed && !why && (pasting || (fresh.current && pasted.current !== s.result.at))
   const view = listening ? 'listening' : s.phase === 'working' ? 'working' : s.result && (editing || (autoPaste && !done)) ? 'pasting'
-    : done && !offer && !err && !needsModel ? 'done' : s.result ? 'card' : s.note || s.setup ? 'note' : 'idle'
+    : done && !offer && !err && !needsModel && !fixes.length ? 'done' : s.result ? 'card' : s.note || s.setup ? 'note' : 'idle'
   const card = view === 'card' || view === 'note'
   const hint = s.mode === 'free' ? t('Listening… press {key} again when you\'re done', { key: label }) : t('Let go to finish · Esc cancels')
   return (
@@ -298,11 +367,13 @@ export default function Hud() {
         {view === 'card' && (
           <div className="dp-card">
             <div className="hud-row">{toChip}<span className="grow" /><button type="button" className="dp-x" onClick={hide} aria-label={t('Close')} title={t('Close')}><Icon name="x" size={12} /></button></div>
-            <p className="hud-text">{text}</p>
+            {typing
+              ? <textarea ref={area} className="hud-edit" value={draft} rows={1} spellCheck aria-label={t('What you said')} onChange={(e) => { setDraft(e.target.value); fit(e.target) }} onKeyDown={onKey} onPointerDown={() => app().hudKeyboard?.(true)} />
+              : <p className={`hud-text${done ? '' : ' editable'}`} onClick={done ? undefined : clickAt} title={done ? undefined : t('Click to edit')}>{words}</p>}
             {err && <p className="error-text small">{err}</p>}
             {why && <p className="hud-why small" role="status"><Icon name="info" size={12} /> {WHY[why]()}{why === 'accessibility' && (app().permission || app().pasteAsk) ? <> <button type="button" className="link-btn" onClick={askAccess}>{t('Allow it')}</button></> : null}</p>}
             {allowed && !done && <p className="hud-why small" role="status"><Icon name="check" size={12} /> {t('Accessibility is on. Click where you were typing, then Paste.')}</p>}
-            {s.result?.by != null && edited == null && (
+            {s.result?.by != null && edited == null && draft == null && (
               <p className="hud-why small hud-tidied"><Icon name="sparkle" size={12} /> {asSaid ? t('As you said it.') : s.result.by ? t('Tidied by {model}.', { model: s.result.by }) : t('Tidied.')}
                 {s.result.said && <>{' '}<button type="button" className="link-btn" onClick={() => setAsSaid((v) => !v)}>{asSaid ? t('Use the tidied text') : t('Use what I said')}</button></>}</p>
             )}
@@ -310,11 +381,19 @@ export default function Hud() {
             {needsModel && <TidyNeeds local={untidied.local} className="hud-tidy" />}
             {done ? <p className="hud-done" role="status"><Icon name="check" size={12} /> {done}</p> : (
               <div className="hud-actions">
-                {app().hudOpen && <button type="button" className="btn small" onClick={edit} disabled={!target}>{t('Edit in Bridge AI')}</button>}
-                <button type="button" className="btn small" onClick={copy}>{t('Copy')}</button>
-                {allowed
-                  ? <button type="button" className="btn small primary" onClick={() => { setAllowed(false); pasteIt(asSaid ? { ...s.result, text, by: null } : s.result) }}>{t('Paste')}</button>
-                  : <button type="button" className="btn small primary" onClick={send} disabled={!target}>{t('Send')}</button>}
+                {typing && <span className="hud-keys">{pasteNow ? t('{key} pastes · Esc cancels', { key: enter }) : t('{key} sends · Esc cancels', { key: enter })}</span>}
+                {typing
+                  ? <button type="button" className="btn small" onClick={stopEdit}>{t('Cancel')}</button>
+                  : <button type="button" className="btn small" onClick={() => startEdit()}>{t('Edit')}</button>}
+                <button type="button" className="btn small" onClick={copy} disabled={!words.trim()}>{t('Copy')}</button>
+                {pasteNow
+                  ? <button type="button" className="btn small primary" onClick={pasteCard} disabled={!words.trim()}>{into && again ? t('Paste into {app}', { app: into }) : t('Paste')}</button>
+                  : <button type="button" className="btn small primary" onClick={send} disabled={!target || !words.trim()}>{t('Send')}</button>}
+              </div>
+            )}
+            {fixes.length > 0 && (
+              <div className="hud-remember">
+                {fixes.map((f) => <Remember key={`${f.heard}\n${f.term}`} fix={f} onKept={() => later(8000)} onClose={() => { const left = fixes.filter((x) => x !== f); setFixes(left); if (!left.length) later(400) }} />)}
               </div>
             )}
             {offer && (

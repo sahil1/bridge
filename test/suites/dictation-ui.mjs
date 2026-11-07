@@ -14,7 +14,10 @@
 //   first words in Bridge AI (Turn on, Not now); what's shown for a key held from any app, tapped
 //   (Wayland), not offered, and taken; changes go to the app; its key handed to the page in front.
 //   The desktop app's dictation window (?dictate=1): the level while you talk, then the text, Send to
-//   the agent you last looked at or one picked, Copy, Esc, and a press from before it was ready.
+//   the agent you last looked at or one picked, Copy, Esc, and a press from before it was ready;
+//   the words edited on its card (Edit, a click on them, Esc, ⌘↩ sending what you typed, the
+//   keyboard taken and given back), kept as edited, and the name put right offered to meeting
+//   memory (Remember, Undo, Not now), light and dark.
 //   The mic turned down in the desktop app on a Mac: macOS asked first, Reset and ask again when it
 //   lists Bridge AI as allowed and blocks it anyway, the way to allow it when it says no.
 //   Pasting where you're typing, the desktop app simulated: "Where I'm typing" offered where it can
@@ -22,6 +25,7 @@
 //   Accessibility asked for when it's picked on a Mac and a card until it's on, said once when it was
 //   picked on a computer where it can't work; the dictation window saying which app the text goes
 //   into, then "Pasted"; refused (a password field, a key still held) and not yet allowed (the text to copy, with why);
+//   another app in front by then (the words edited on the card, and ⌘↩ pastes them, that app brought back first);
 //   asked once after a Copy (Paste it picks it and asks for Accessibility; Not now is kept).
 import fs from 'node:fs'
 import path from 'node:path'
@@ -624,7 +628,7 @@ try {
   // ---------- The dictation window (?dictate=1) ----------
   // late: ms before the recording's sound starts coming, as when the audio starts up slowly on a busy
   // computer or a Bluetooth headset switches over to its mic (its audio context held suspended).
-  const hudPage = (pending = null, late = 0) => page(b, `${kit.url}/?dictate=1`, { store: { 'cc-ws': { tabs: [one.paneId], active: one.paneId } }, before: async (c) => {
+  const hudPage = (pending = null, late = 0, mode = 'light') => page(b, `${kit.url}/?dictate=1`, { mode, store: { 'cc-ws': { tabs: [one.paneId], active: one.paneId } }, before: async (c) => {
     await before(c)
     if (late) {
       await c.addInitScript((ms) => {
@@ -644,12 +648,12 @@ try {
     }
     await c.route(/\/api\/agents\/[^/]+\/(prompt|queue)$/, async (route) => { prompts.push({ url: route.request().url(), body: route.request().postDataJSON() }); await route.fulfill({ json: promptAnswer }) })
     await c.addInitScript((p0) => {
-      window.__hud = { phases: [], copied: [], hidden: 0, opened: [] }
+      window.__hud = { phases: [], copied: [], hidden: 0, keys: [] }
       window.bridgeApp = {
         platform: navigator.platform.startsWith('Mac') ? 'darwin' : 'linux', desktop: true,
         hudReady: async () => (p0 ? { down: Date.now() - 900, up: Date.now() - 100 } : null),
         hudSize: () => {}, hudPhase: (x) => window.__hud.phases.push(x), hudHide: async () => { window.__hud.hidden++ },
-        hudCopy: async (x) => { window.__hud.copied.push(x) }, hudOpen: async (o) => { window.__hud.opened.push(o) },
+        hudCopy: async (x) => { window.__hud.copied.push(x) }, hudKeyboard: async (on) => { window.__hud.keys.push(on); return true },
       }
     }, pending)
   } })
@@ -715,6 +719,49 @@ try {
     ok(real(he).length === 0, 'no page errors', he)
     await hc.close()
   }
+  // The words edited right there on the card, keyboard first: Edit and the window takes the
+  // keyboard, the caret at the end; Esc puts them back as they were; a click on them edits too;
+  // ⌘↩ (Ctrl+Enter) sends what you typed and gives the keyboard back, kept as you edited it; the
+  // name you put right offered to meeting memory, Remember and Undo (light), Not now (dark).
+  for (const mode of ['light', 'dark']) {
+    const { ctx: hc, p: h, errors: he } = await hudPage(null, 0, mode)
+    await h.waitForSelector('.hud', { timeout: 10000 })
+    const keys = () => h.evaluate(() => window.__hud.keys)
+    said.push('send the draft to ack me')
+    await key(h, 'down'); await listens(h); await sleep(1300); await key(h, 'up')
+    ok(!!(await until(async () => (await h.locator('.hud-text').innerText().catch(() => '')) === 'Send the draft to ack me.', 8000, 100)) && await h.locator('.hud button', { hasText: /^Edit$/ }).isVisible() && !(await h.locator('.hud button', { hasText: 'Edit in Bridge AI' }).count()), `${mode}: the card: Edit right there (no Edit in Bridge AI)`, await h.locator('.hud').innerText().catch(() => ''))
+    await h.locator('.hud button', { hasText: /^Edit$/ }).click()
+    const area = h.locator('.hud-edit')
+    const focused = await until(() => area.evaluate((el) => document.activeElement === el && el.selectionStart === el.value.length && el.value === 'Send the draft to ack me.').catch(() => false), 3000, 50)
+    ok(!!focused && (await keys()).join() === 'true' && /(⌘↩|Ctrl\+Enter) sends · Esc cancels/.test(await h.locator('.hud-keys').innerText()), `${mode}: Edit: the words in a box with the caret at the end, the window has the keyboard, and it says what the keys do`, { keys: await keys(), hint: await h.locator('.hud-keys').innerText().catch(() => '') })
+    await h.keyboard.type(' and more')
+    await h.keyboard.press('Escape')
+    ok(!!(await until(async () => (await area.count()) === 0 && (await h.locator('.hud-text').innerText().catch(() => '')) === 'Send the draft to ack me.', 3000, 50)) && (await keys()).join() === 'true,false', `${mode}: Esc: the words as they were, and the keyboard given back`, await keys())
+    await h.locator('.hud-text').click()
+    ok(!!(await until(() => area.evaluate((el) => document.activeElement === el).catch(() => false), 3000, 50)), `${mode}: a click on the words edits them too`)
+    await area.fill('Send the draft to Acme.')
+    await shot(h, `${tag}dictation-window-edit-${mode}`)
+    const np = prompts.length
+    await h.keyboard.press('ControlOrMeta+Enter')
+    ok(!!(await until(() => prompts.length > np, 5000, 100)) && prompts.at(-1).body.text === 'Send the draft to Acme.' && prompts.at(-1).url.includes(encodeURIComponent(one.paneId)), `${mode}: ⌘↩ (Ctrl+Enter): what you typed, sent to the agent`, prompts.at(-1))
+    const offer = h.locator('.hud-remember .remember')
+    ok(!!(await until(async () => /Sent to/.test(await h.locator('.hud').innerText().catch(() => '')) && await offer.isVisible().catch(() => false), 4000, 100)) && /Remember "Acme"\?/.test(await offer.innerText()) && /Heard as "ack me"/.test(await offer.innerText()) && (await keys()).at(-1) === false && await h.evaluate(() => window.__hud.hidden) === 0, `${mode}: "Sent to", the keyboard given back, and the name you put right offered to meeting memory (the window waits for an answer)`, await h.locator('.hud').innerText().catch(() => ''))
+    const kept = await until(async () => (await kit.api('/dictations?limit=20')).items.find((x) => x.text === 'Send the draft to Acme.' && x.how === 'sent' && x.edited), 5000, 200)
+    ok(kept?.raw === 'Send the draft to ack me.' || kept?.raw === 'send the draft to ack me', `${mode}: kept as you edited it, with what was heard`, kept)
+    await shot(h, `${tag}dictation-window-remember-${mode}`)
+    if (mode === 'light') {
+      await offer.locator('button', { hasText: 'Remember' }).click()
+      const mem = () => kit.api('/meetings/memory').then((m) => m.terms.find((x) => x.term === 'Acme'))
+      ok(!!(await until(async () => /Remembered\. "ack me" is written "Acme" from now on/.test(await offer.innerText().catch(() => '')) && (await mem())?.heard.includes('ack me'), 4000, 100)), 'Remember: in meeting memory, heard as "ack me", and it says so, with Undo', [await offer.innerText().catch(() => ''), await mem()])
+      await offer.locator('button', { hasText: 'Undo' }).click()
+      ok(!!(await until(async () => !(await mem()), 4000, 100)), 'Undo: taken out again')
+    } else {
+      await offer.locator('button', { hasText: 'Not now' }).click()
+      ok(!!(await until(() => h.evaluate(() => window.__hud.hidden > 0), 4000, 100)) && !(await kit.api('/meetings/memory')).terms.some((x) => x.term === 'Acme'), `${mode}: Not now: nothing kept, and the window goes`)
+    }
+    ok(real(he).length === 0, `${mode}: no page errors`, he)
+    await hc.close()
+  }
   {
     // A press from before the window was ready: let go by now, so it listens hands-free.
     const { ctx: hc, p: h } = await hudPage(true)
@@ -752,7 +799,7 @@ try {
       window.bridgeApp = {
         platform: navigator.platform.startsWith('Mac') ? 'darwin' : 'linux', desktop: true,
         hudReady: async () => null, hudSize: () => {}, hudPhase: (x) => window.__hud.phases.push(x), hudHide: async () => { window.__hud.hidden++ },
-        hudCopy: async (x) => { window.__hud.copied.push(x) }, hudOpen: async () => {},
+        hudCopy: async (x) => { window.__hud.copied.push(x) },
         dictateStatus: async () => st, dictateConfigure: async (x) => { window.__hud.configured.push(x); return st },
         hudPaste: async (x) => { window.__hud.pasted.push(x); return ans }, pasteAsk: async () => { window.__hud.asked++; return 'asked' },
       }
@@ -796,6 +843,38 @@ try {
     await hc.close()
   }
   {
+    // Another app came in front before it was pasted: the words stay on the card to edit, and ⌘↩
+    // (Ctrl+Enter) pastes what you typed, TextEdit brought back first; kept as you edited it.
+    const { ctx: hc, p: h, errors: he } = await page(b, `${kit.url}/?dictate=1`, { store: { 'cc-ws': { tabs: [one.paneId], active: one.paneId } }, before: async (c) => {
+      await before(c)
+      await c.addInitScript((st) => {
+        window.__hud = { pasted: [], opts: [], keys: [], hidden: 0 }
+        const answers = [{ error: 'moved' }, { pasted: true, read: true, restored: true }]
+        window.bridgeApp = {
+          platform: navigator.platform.startsWith('Mac') ? 'darwin' : 'linux', desktop: true,
+          hudReady: async () => null, hudSize: () => {}, hudPhase: () => {}, hudHide: async () => { window.__hud.hidden++ }, hudCopy: async () => {},
+          hudKeyboard: async (on) => { window.__hud.keys.push(on); return true },
+          dictateStatus: async () => st, dictateConfigure: async () => st,
+          hudPaste: async (x, o) => { window.__hud.pasted.push(x); window.__hud.opts.push(o || null); return answers.shift() || { pasted: true, read: true } },
+        }
+      }, MAC(true))
+    } })
+    await h.waitForSelector('.hud', { timeout: 10000 })
+    await talk(h, 'tell north wind it ships friday', 'TextEdit')
+    const pasteBtn = h.locator('.hud-actions button', { hasText: 'Paste into TextEdit' })
+    ok(!!(await until(async () => /Another app is in front now/.test(await hudText(h)) && await pasteBtn.isVisible().catch(() => false), 8000, 100)) && await h.evaluate(() => window.__hud.pasted.length === 1 && window.__hud.opts[0] === null), 'another app in front by then: not pasted, the words on the card with Paste into TextEdit (and Edit)', await hudText(h))
+    await h.locator('.hud-text').click()
+    await h.locator('.hud-edit').fill('Tell Northwind it ships Friday.')
+    ok(/(⌘↩|Ctrl\+Enter) pastes · Esc cancels/.test(await h.locator('.hud-keys').innerText().catch(() => '')) && (await h.evaluate(() => window.__hud.keys)).join() === 'true', 'edited: the window has the keyboard, and ⌘↩ (Ctrl+Enter) pastes', await hudText(h))
+    await h.locator('.hud-edit').press('ControlOrMeta+Enter')
+    ok(!!(await until(() => h.evaluate(() => window.__hud.pasted.length === 2), 4000, 100)) && await h.evaluate(() => window.__hud.pasted[1] === 'Tell Northwind it ships Friday.' && window.__hud.opts[1]?.back === true), 'what you typed, pasted, TextEdit brought back to the front first', await h.evaluate(() => window.__hud))
+    ok(!!(await until(async () => /Pasted into TextEdit/.test(await hudText(h)) && /Remember "Northwind"\?/.test(await hudText(h)), 4000, 100)) && !/Remember "Friday"/.test(await hudText(h)), '"Pasted into TextEdit", and Northwind offered to meeting memory (Friday, only a capital, isn\'t)', await hudText(h))
+    const kept = await until(async () => (await kit.api('/dictations?limit=20')).items.find((x) => x.text === 'Tell Northwind it ships Friday.' && x.how === 'pasted'), 5000, 200)
+    ok(kept?.edited === true && kept.app?.name === 'TextEdit', 'kept as you edited it, pasted into TextEdit', kept)
+    ok(real(he).length === 0, 'no page errors', he)
+    await hc.close()
+  }
+  {
     // No Accessibility yet: not even tried; the window as before, and one line saying why.
     const { ctx: hc, p: h } = await pasteHud(MAC(false), { pasted: true })
     await h.waitForSelector('.hud', { timeout: 10000 })
@@ -823,7 +902,7 @@ try {
         const now = () => ({ ...st, paste: { ...st.paste, allowed: window.__allowed } })
         window.bridgeApp = {
           platform: 'darwin', desktop: true,
-          hudReady: async () => null, hudSize: () => {}, hudPhase: () => {}, hudHide: async () => { window.__hud.hidden++ }, hudCopy: async () => {}, hudOpen: async () => {},
+          hudReady: async () => null, hudSize: () => {}, hudPhase: () => {}, hudHide: async () => { window.__hud.hidden++ }, hudCopy: async () => {},
           dictateStatus: async () => now(), dictateConfigure: async () => now(),
           hudPaste: async (x) => { window.__hud.pasted.push(x); return { pasted: true, read: true, restored: true } },
           pasteAccess: async () => (window.__allowed ? 'ok' : 'denied'), pasteAsk: async () => { window.__hud.asked++; return 'asked' },
@@ -855,7 +934,7 @@ try {
         window.__hud = { pasted: [], hidden: 0 }
         window.bridgeApp = {
           platform: 'darwin', desktop: true,
-          hudReady: async () => null, hudSize: () => {}, hudPhase: () => {}, hudHide: async () => { window.__hud.hidden++ }, hudCopy: async () => {}, hudOpen: async () => {},
+          hudReady: async () => null, hudSize: () => {}, hudPhase: () => {}, hudHide: async () => { window.__hud.hidden++ }, hudCopy: async () => {},
           dictateStatus: async () => st, dictateConfigure: async () => st,
           hudPaste: async (x) => { window.__hud.pasted.push(x); return { pasted: true, read: true, restored: true } },
           hudSelection: async () => ({ text: sel }),

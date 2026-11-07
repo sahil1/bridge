@@ -60,19 +60,6 @@ export default function Dictation({ conf, onScreen }) {
       window.removeEventListener('bridge-dictate-key', fromApp)
     }
   }, [off, key])
-  // From the floating window: Edit in Bridge (the agent's tab, the text in its box).
-  useEffect(() => {
-    const edit = (e) => {
-      const { paneId, text } = e.detail || {}
-      if (!paneId || !text) return
-      window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId } }))
-      const end = Date.now() + 4000
-      const put = () => { const b = box(paneId); if (b?.visible()) b.insert(text); else if (Date.now() < end) setTimeout(put, 150) }
-      setTimeout(put, 100)
-    }
-    window.addEventListener('bridge-dictate-text', edit)
-    return () => window.removeEventListener('bridge-dictate-text', edit)
-  }, [])
   // A line said for a moment, then gone.
   useEffect(() => { if (!s.note || s.setup || s.retry) return; const id = setTimeout(dismiss, 6000); return () => clearTimeout(id) }, [s.note, s.setup, s.retry])
   // Typed into a terminal or another box: said for a moment in the pill, then it's gone. Worked out

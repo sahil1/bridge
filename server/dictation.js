@@ -71,6 +71,25 @@ export function namesIn(text, max = 12) {
   return `Names and terms they use, from their meeting memory, spelled the way they're written (with who or what each is, and how speech recognition has misheard it):\n${pick.map((t) => `- ${t.term}${t.note ? `: ${t.note}` : ''}${t.heard.length ? ` (misheard as ${t.heard.slice(0, 3).map((h) => `"${h}"`).join(', ')})` : ''}`).join('\n')}`
 }
 
+// ---------- A name you put right, remembered ----------
+// A name you corrected in what dictation wrote down (on the dictation window's card, or in
+// Dictations: shared/dictation/corrected.js finds it), kept in meeting memory when you say so:
+// written that way from then on wherever it's heard as it was, in dictation and in meetings, and
+// listened for. The answer says what was there before, so Undo can put it back (forget): a name
+// that's new is taken out again, one that was there gets back the ways it was misheard.
+const same = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase().replace(/[\s-]+/g, ' ')
+export function remember({ term, heard } = {}) {
+  const had = memory.list().find((t) => same(t.term) === same(term))
+  const was = had ? [...had.heard] : null
+  const t = memory.add({ term, heard: heard && same(heard) !== same(term) ? [String(heard)] : [] })
+  return { id: t.id, term: t.term, heard: t.heard, created: !had, was }
+}
+export function forget({ id, created, was } = {}) {
+  if (created) return memory.remove(String(id || ''))
+  memory.update(String(id || ''), { heard: Array.isArray(was) ? was : [] })
+  return { ok: true }
+}
+
 // ---------- Edit by voice ----------
 // Select text in another app, hold the dictation key, say what to change: the text and what you said
 // go to the model you picked in Settings › Voice (dictation.editModel), and its answer is pasted in

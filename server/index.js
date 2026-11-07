@@ -1314,6 +1314,10 @@ app.post('/api/transcribe', express.raw({ type: () => true, limit: '30mb' }), as
 // which the speech engine also listens for.
 const dictationSources = async () => ({ fleet: lastFleet || await fleetView().catch(() => null), projects: await projects.list().catch(() => []) })
 app.get('/api/dictation/words', wrap(async () => dictation.words(await dictationSources())))
+// A name you put right in a dictation, kept in meeting memory once you say so (Remember), and
+// taken back by Undo with what the first answer said was there before.
+app.post('/api/dictation/remember', wrap((req) => dictation.remember({ term: req.body?.term, heard: req.body?.heard })))
+app.post('/api/dictation/remember/undo', wrap((req) => dictation.forget({ id: req.body?.id, created: req.body?.created === true, was: req.body?.was })))
 // Live words while you talk (livewords.js): whether they can work here, the sound as it comes (half
 // a second at a time, 16-bit PCM) with what's been heard so far back, and the dictation done.
 app.get('/api/dictation/live', wrap(() => livewords.status(cfg)))

@@ -277,12 +277,13 @@ const BUNDLE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/
 // electron: the module; ROOT: Bridge AI's code (shared/, native/bin); DATA: its data folder;
 // isOurs(win): one of the app's own windows, where the key goes to the page.
 // askAccess(pane): the Allow access tile (main.js); trusted(e): an IPC call from the app's own page.
-// openApp(bundle): brings that app to the front (Paste again; the tests stand in for it).
+// openApp(bundle): brings that app to the front (Paste again, and back from the card; the tests
+// stand in for it).
 // perms: the app's permissions (permissions.js), which ask for Accessibility the same way everywhere.
 // onStatus(view): what Settings is told, each time the key is set (main.js keeps what it needs).
 // fnUsage(): what macOS does when 🌐 is pressed (System Settings › Keyboard), for the Fn key's note.
 const openBundle = (bundle) => new Promise((resolve) => execFile('open', ['-b', bundle], { timeout: 5000 }, () => resolve()))
-function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, tellMain, askAccess, trusted = () => true, openApp = openBundle, perms = null, onStatus = null, fnUsage = readFnUsage }) {
+function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, askAccess, trusted = () => true, openApp = openBundle, perms = null, onStatus = null, fnUsage = readFnUsage }) {
   const { BrowserWindow, globalShortcut, screen, ipcMain, clipboard, systemPreferences, shell } = electron
   const IS_MAC = process.platform === 'darwin'
   let lib = null
@@ -301,6 +302,7 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, tellMain, askA
   let pending = null // a press from before the dictation window's page was ready
   let ready = false
   let esc = false
+  let keyboard = false // the dictation window has the keyboard, for its words to be edited
   const helperBin = () => process.env.BRIDGE_KEYS || path.join(ROOT, 'native', 'bin', 'bridgekeys')
   const readSettings = () => { try { return JSON.parse(fs.readFileSync(path.join(DATA, 'config.json'), 'utf8')).dictation || {} } catch { return {} } }
 
@@ -321,11 +323,16 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, tellMain, askA
     if (w && w !== hud && isOurs(w) && heardByPage) { route = null; return }
     if (w && w !== hud && isOurs(w)) { route = w.webContents; say(route, { type: 'down', at }); return }
     route = 'hud'
-    const bundle = typeof info?.bundle === 'string' && BUNDLE.test(info.bundle) ? info.bundle : ''
-    front = Number.isInteger(info?.pid) ? { app: typeof info.app === 'string' ? info.app.slice(0, 80) : '', bundle, pid: info.pid } : null
+    // Pressed while the window had the keyboard (its words being edited): Bridge AI is in front only
+    // for that, so the words are for the app the last ones were for, and the keyboard goes back there.
+    if (keyboard) giveKeys()
+    else {
+      const bundle = typeof info?.bundle === 'string' && BUNDLE.test(info.bundle) ? info.bundle : ''
+      front = Number.isInteger(info?.pid) ? { app: typeof info.app === 'string' ? info.app.slice(0, 80) : '', bundle, pid: info.pid } : null
+      if (bundle) keepIcon(bundle, info.path).catch(() => {})
+    }
     showHud()
-    toHud({ type: 'down', at, ...(front?.app ? { app: front.app } : {}), ...(bundle ? { bundle } : {}) })
-    if (bundle) keepIcon(bundle, info.path).catch(() => {})
+    toHud({ type: 'down', at, ...(front?.app ? { app: front.app } : {}), ...(front?.bundle ? { bundle: front.bundle } : {}) })
   }
   function onUp(at) {
     // Edit by voice: what's selected in the app you were in, read now (the dictation window never
@@ -358,7 +365,8 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, tellMain, askA
       hud = new BrowserWindow({
         ...place(), frame: false, transparent: true, resizable: false, minimizable: false, maximizable: false, fullscreenable: false,
         skipTaskbar: true, hasShadow: false, alwaysOnTop: true, acceptFirstMouse: true, show: false, title: 'Bridge AI dictation',
-        // On a Mac it never takes the keyboard from the app you're in, even when clicked.
+        // On a Mac it never takes the keyboard from the app you're in, even when clicked, but while
+        // you edit its words (takeKeys).
         ...(IS_MAC ? { focusable: false } : {}),
         webPreferences: { preload, contextIsolation: true, sandbox: true },
       })
@@ -370,7 +378,10 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, tellMain, askA
       hud.setContentProtection(true)
       hud.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
       hud.webContents.on('will-navigate', (e) => e.preventDefault())
-      hud.on('closed', () => { hud = null; ready = false; holdEsc(false) })
+      hud.on('closed', () => { hud = null; ready = false; keyboard = false; holdEsc(false) })
+      // You clicked into another app while editing the words: that app has the keyboard again, and
+      // the window can't take it back until it's asked to.
+      hud.on('blur', () => { if (!keyboard) return; keyboard = false; if (IS_MAC) hud?.setFocusable?.(false) })
       hud.once('ready-to-show', () => hud?.showInactive())
       hud.loadURL(`${URL_BASE}/?dictate=1`)
       return
@@ -400,21 +411,57 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, tellMain, askA
   // The pointer on the pill: clicks are the window's; off it, they go through to what's beneath.
   ipcMain.on('bridge:hud-pointer', (e, on) => { if (fromHud(e) && CLICK_THROUGH) hud.setIgnoreMouseEvents?.(!on, { forward: true }) })
   ipcMain.on('bridge:hud-phase', (e, phase) => { if (fromHud(e)) holdEsc(phase === 'opening' || phase === 'listening' || phase === 'working') })
-  ipcMain.handle('bridge:hud-hide', (e) => { if (fromHud(e)) hideHud(); return true })
+  ipcMain.handle('bridge:hud-hide', async (e) => { if (fromHud(e)) { await giveKeys(); hideHud() } return true })
+  // ---------- The words on the card, edited there ----------
+  // The dictation window never takes the keyboard by itself. To edit the words on its card (click
+  // them, or Edit), the page asks for it: on a Mac the window is let take it for that (it can't
+  // otherwise, even when clicked), elsewhere it's focused. Done with them (sent, copied, Esc), it's
+  // given back: on a Mac the app the key was pressed in is brought to the front again, so you're
+  // back where you were typing (a paste does the same: pasteHere's back). Clicking into another app
+  // meanwhile gives it back too (the window's blur).
+  function takeKeys() {
+    if (!hud || hud.isDestroyed() || !hud.isVisible()) return false
+    keyboard = true
+    if (IS_MAC) { hud.setFocusable(true); electron.app?.focus?.({ steal: true }) }
+    hud.focus()
+    return true
+  }
+  async function giveKeys() {
+    if (!keyboard) return false
+    keyboard = false
+    if (!IS_MAC || !hud || hud.isDestroyed()) return true
+    hud.setFocusable(false)
+    if (front?.bundle) { await openApp(front.bundle); await frontNow(front.bundle, 1000) }
+    return true
+  }
+  ipcMain.handle('bridge:hud-keys', (e, on) => (fromHud(e) ? (on === true ? takeKeys() : giveKeys()) : false))
   ipcMain.handle('bridge:hud-copy', (e, text) => { if (!fromHud(e) || typeof text !== 'string') return false; clipboard.writeText(text.slice(0, 200_000)); return true })
   // ---------- Pasting where you're typing ----------
   // Allowed now? Asked of macOS each time without asking you (Accessibility); elsewhere nothing to allow.
   const allowedNow = () => !IS_MAC || !!systemPreferences?.isTrustedAccessibilityClient?.(false)
   const pasteStatus = () => ({ ...pz, allowed: !!pz.can && (pz.asks !== 'accessibility' || allowedNow()) })
-  async function pasteHere(text) {
+  // back: pasted from the card (the words edited there, Accessibility allowed while they waited, or
+  // a paste that didn't go), so the window may have the keyboard, or another app be in front by now.
+  async function pasteHere(text, { back = false } = {}) {
     const p = pasteStatus()
     if (settings.to !== 'paste' || !p.can) return { error: 'off' }
     if (!p.allowed) return { error: 'accessibility' }
-    // The Mac's dictation window never has the keyboard; the helper checks the app in front is still
-    // the one the key was pressed in. macOS counts the helper's Accessibility as the app's (the app
+    const had = keyboard
+    if (back) keyboard = false
+    // The Mac's dictation window doesn't have the keyboard; the helper checks the app in front is
+    // still the one the key was pressed in. From the card, that app is brought back to the front
+    // first, as Paste again does. macOS counts the helper's Accessibility as the app's (the app
     // started it), so both answer alike; if they ever don't, the log says so.
     if (p.via === 'bridgekeys') {
-      const r = await helperPaste({ bin: helperBin(), text, pid: front?.pid })
+      let pid = front?.pid
+      if (back) {
+        if (hud && !hud.isDestroyed()) hud.setFocusable(false)
+        if (front?.bundle) await openApp(front.bundle); else if (had) electron.app?.hide?.()
+        const now = await frontNow(front?.bundle || null)
+        if (!now) return { error: 'moved' }
+        pid = now.pid
+      }
+      const r = await helperPaste({ bin: helperBin(), text, pid })
       if (r.error === 'accessibility') console.error('dictation: macOS lets Bridge AI use Accessibility, but not its helper (bridgekeys)')
       return r
     }
@@ -441,7 +488,7 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, tellMain, askA
     })
   }
   ipcMain.handle('bridge:hud-selection', async (e) => (fromHud(e) && sel ? sel : null))
-  ipcMain.handle('bridge:hud-paste', (e, text) => (fromHud(e) && typeof text === 'string' && text ? pasteHere(text.slice(0, 100_000)) : { error: 'off' }))
+  ipcMain.handle('bridge:hud-paste', (e, text, o) => (fromHud(e) && typeof text === 'string' && text ? pasteHere(text.slice(0, 100_000), { back: o?.back === true }) : { error: 'off' }))
   ipcMain.handle('bridge:paste-access', (e) => (trusted(e) ? (pasteStatus().allowed ? 'ok' : 'denied') : null))
   // Picking "Where I'm typing" on a Mac: the first time, macOS lists Bridge AI under Accessibility
   // (turned off) and asks in a window of its own, whose Open System Settings goes to that list; after
@@ -509,14 +556,6 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, tellMain, askA
     await fs.promises.writeFile(tmp, img.toPNG())
     await fs.promises.rename(tmp, file)
   }
-
-  // Edit in Bridge AI: the agent's tab in the main window, the text in its message box.
-  ipcMain.handle('bridge:hud-open', async (e, { paneId, text } = {}) => {
-    if (!fromHud(e)) return false
-    hideHud()
-    if (typeof paneId === 'string' && paneId.length < 200 && typeof text === 'string') await tellMain(`window.dispatchEvent(new CustomEvent('bridge-dictate-text', { detail: ${JSON.stringify({ paneId, text: text.slice(0, 100_000) })} }))`, true)
-    return true
-  })
 
   // ---------- The key ----------
   let applying = 0

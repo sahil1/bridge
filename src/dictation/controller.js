@@ -9,7 +9,7 @@
 // (shared/dictation/clean.js, with the names the computer knows) and put where you were: the message
 // box (at its cursor), a terminal tab (typed, without Enter), any other field; with nothing focused,
 // the message box of the agent on screen. The desktop app's floating window (Hud.jsx) shows it
-// instead, to send or copy.
+// instead, to edit, send or copy.
 import { useSyncExternalStore } from 'react'
 import { api, apiUrl, settingsChanged, viaRelay } from '../api.js'
 import { startPcm, microphone, wav, RATE, micRefused, micBlocked } from '../audio/pcm.js'
@@ -135,6 +135,8 @@ function words() {
   }
   return wordsP
 }
+// A name just kept in meeting memory, or taken out (Remember.jsx): asked for again next time.
+export const wordsChanged = () => { wordsAt = 0 }
 
 // ---------- Recording ----------
 let seq = 0
@@ -376,7 +378,8 @@ function keep(at, target, put, said, blob) {
   kept.set(at, p)
   for (const k of kept.keys()) if (kept.size > 8) kept.delete(k)
 }
-// What became of the words (result: s.result): { how, agent }.
+// What became of the words (result: s.result): { how, agent }, and text when you edited them on the
+// dictation window's card before they went.
 export async function amend(result, patch) {
   const id = await kept.get(result?.at)
   if (id) await api(`/dictations/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch }).catch(() => {})
