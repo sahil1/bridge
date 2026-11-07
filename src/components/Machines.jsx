@@ -68,15 +68,55 @@ const demoUrl = (id, agent) => {
 }
 
 // Show one of your devices (id), or the one this page comes from (null). In a window of its own
-// when asked, or while a meeting records here (the page changing would stop it).
-export function goMachine(id, { agent, own = false } = {}) {
+// when asked, or while a meeting records here (the page changing would stop it). back: it's to open
+// something that's on that device (Home, Everything, a phone's inbox), what in a few words: the page
+// there says this window switched, with the way back to this one (SwitchedHere).
+const BACK = 'cc-switched'
+export function goMachine(id, { agent, own = false, back = null } = {}) {
   const url = import.meta.env.MODE === 'demo' ? demoUrl(id, agent) : `${id ? `/m/${id}` : ''}/${agent ? `?agent=${encodeURIComponent(agent)}` : ''}`
   const recording = document.documentElement.dataset.recording === '1'
   if (own || recording) {
     if (window.bridgeApp?.openMachine) return window.bridgeApp.openMachine(id, agent || null)
     return window.open(url, '_blank')
   }
+  if (back) {
+    const d = seen.data
+    const name = machineId ? d?.machines?.find((m) => m.id === machineId)?.name : d?.here?.name
+    try { sessionStorage.setItem(BACK, JSON.stringify({ from: machineId || null, name: name || null, to: id || null, what: typeof back === 'string' ? back : null, at: Date.now() })) } catch { /* no storage */ }
+  }
   location.assign(url)
+}
+
+// This window switched to the device it shows to open something there: a line under the top bar
+// says so, with Back to the one you were on (which opens where you left it, App.jsx). Read once,
+// so a reload or the next switch doesn't say it again.
+const switched = (() => {
+  try {
+    const s = JSON.parse(sessionStorage.getItem(BACK) || 'null')
+    sessionStorage.removeItem(BACK)
+    return s && (s.to || null) === (machineId || null) && (s.from || null) !== (machineId || null) && Date.now() - s.at < 60000 ? s : null
+  } catch { return null }
+})()
+export function SwitchedHere() {
+  const { data } = useMachines(60_000, !!switched)
+  const [shown, setShown] = useState(!!switched)
+  if (!shown || !switched) return null
+  const here = machineId ? data?.machines?.find((m) => m.id === machineId)?.name : data?.here?.name
+  const from = switched.name || t('the computer you were on')
+  return (
+    <div className="ask-banner switched" role="status">
+      <div className="ask-row">
+        <Icon name="laptop" size={14} />
+        <span>{switched.what
+          ? t('This window shows {here} now, to open {what}.', { here: here || t('this computer'), what: switched.what })
+          : t('This window shows {here} now.', { here: here || t('this computer') })} {t('What you had open on {name} is kept.', { name: from })}</span>
+        <span className="ask-btns">
+          <button type="button" className="btn small primary" onClick={() => goMachine(switched.from)}><Icon name="back" size={12} /> {t('Back to {name}', { name: from })}</button>
+          <button type="button" className="win-btn" onClick={() => setShown(false)} aria-label={t('Close')}><Icon name="x" size={13} /></button>
+        </span>
+      </div>
+    </div>
+  )
 }
 
 // A device's agents in a few words. Its counts are null until its summary is in (a device that has
@@ -93,7 +133,9 @@ const counts = (c) => {
 // start screen. In a browser there's neither (the relay's page is one computer's, and Cloud Agents
 // keep their keys in the app), so it's your devices alone, as on a computer.
 const bare = (u) => String(u || '').replace(/\/+$/, '')
-export function MachineMenu({ phone = false }) {
+// elsewhere: what waits on you on your other devices, as the top bar's chip counts it (App.jsx), so
+// the two add up; without it, the agents waiting on each one.
+export function MachineMenu({ phone = false, elsewhere = null }) {
   const { data } = useMachines()
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
@@ -109,7 +151,7 @@ export function MachineMenu({ phone = false }) {
   const linked = (data?.machines || []).filter((m) => m.state === 'linked')
   if (!data || (!linked.length && !machineId && !app)) return null
   const cur = machineId ? linked.find((m) => m.id === machineId) : null
-  const needs = linked.filter((m) => m.id !== machineId).reduce((n, m) => n + (m.counts?.blocked || 0), 0)
+  const needs = elsewhere ?? linked.filter((m) => m.id !== machineId).reduce((n, m) => n + (m.counts?.blocked || 0), 0)
   // The computers this phone is paired with, besides the one it's connected to.
   const paired = app ? (relayComputers.list?.() || []).filter((c) => !c.current && bare(c.relay) !== bare(data.here.relay)) : []
   const pairedTo = (m) => paired.find((c) => bare(c.relay) === bare(m.relay))

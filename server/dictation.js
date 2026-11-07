@@ -55,12 +55,48 @@ export async function words({ fleet, projects = [] } = {}) {
   return { terms: [...new Set(terms)].slice(0, 3000), heard: mem.flatMap((t) => t.heard.map((h) => [h, t.term])) }
 }
 
+// ---------- Meeting memory, for the models ----------
+// The names in meeting memory that some text mentions, by name or as it's been misheard, with who
+// or what each is: what the model tidying your words (Tidy what I say) or changing text by voice is
+// told, so it writes them the way they're written and takes them for names. Only the ones
+// mentioned, a dozen at most, so the prompt stays short (tidying has a couple of seconds). Matched
+// as whole words, any case, spaces or hyphens between them.
+const plain = (s) => ` ${String(s || '').toLowerCase().normalize('NFKC').replace(/[^\p{L}\p{N}]+/gu, ' ').trim()} `
+export function namesIn(text, max = 12) {
+  const s = plain(text)
+  if (!s.trim()) return ''
+  const said = (w) => { const p = plain(w); return p.trim().length >= 2 && s.includes(p) }
+  const pick = memory.list().filter((t) => said(t.term) || t.heard.some(said)).slice(0, max)
+  if (!pick.length) return ''
+  return `Names and terms they use, from their meeting memory, spelled the way they're written (with who or what each is, and how speech recognition has misheard it):\n${pick.map((t) => `- ${t.term}${t.note ? `: ${t.note}` : ''}${t.heard.length ? ` (misheard as ${t.heard.slice(0, 3).map((h) => `"${h}"`).join(', ')})` : ''}`).join('\n')}`
+}
+
+// ---------- A name you put right, remembered ----------
+// A name you corrected in what dictation wrote down (on the dictation window's card, or in
+// Dictations: shared/dictation/corrected.js finds it), kept in meeting memory when you say so:
+// written that way from then on wherever it's heard as it was, in dictation and in meetings, and
+// listened for. The answer says what was there before, so Undo can put it back (forget): a name
+// that's new is taken out again, one that was there gets back the ways it was misheard.
+const same = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase().replace(/[\s-]+/g, ' ')
+export function remember({ term, heard, dictation = null } = {}) {
+  const had = memory.list().find((t) => same(t.term) === same(term))
+  const was = had ? [...had.heard] : null
+  const t = memory.add({ term, heard: heard && same(heard) !== same(term) ? [String(heard)] : [] }, { source: 'you', dictation: dictation ? String(dictation) : null })
+  return { id: t.id, term: t.term, heard: t.heard, created: !had, was }
+}
+export function forget({ id, created, was } = {}) {
+  if (created) return memory.remove(String(id || ''))
+  memory.update(String(id || ''), { heard: Array.isArray(was) ? was : [] })
+  return { ok: true }
+}
+
 // ---------- Edit by voice ----------
 // Select text in another app, hold the dictation key, say what to change: the text and what you said
 // go to the model you picked in Settings › Voice (dictation.editModel), and its answer is pasted in
 // the selection's place (src/dictation/Hud.jsx). Only that model sees them: one on this computer
 // (Ollama, LM Studio) keeps them here; any other is labelled, where it's picked, as sending them out.
-// reply: chatmodels.js reply.
+// The names from meeting memory that either mentions go with them (namesIn). reply: chatmodels.js
+// reply.
 const EDIT_SYSTEM = "You rewrite text as the user asks. You get the text and an instruction they said aloud, so the instruction may have speech-to-text slips. Answer with the rewritten text only: no quotes around it, no notes, no Markdown the text didn't have. Keep the text's language unless the instruction asks for another. If the instruction doesn't ask for a change to the text, answer with the text as it was."
 export const EDIT_MAX = 20000
 export async function edit({ text, instruction, model, reply }) {
@@ -70,7 +106,8 @@ export async function edit({ text, instruction, model, reply }) {
   if (!said) throw new Error('Nothing was said about what to change')
   if (t.length > EDIT_MAX) throw new Error('That\'s more text than edit by voice takes (20,000 characters)')
   if (!model) throw new Error('Pick the model that rewrites it, in Settings › Voice › Dictation')
-  const r = await reply(model, [{ role: 'user', text: `Instruction: ${said.slice(0, 2000)}\n\nText:\n${t}` }], { system: EDIT_SYSTEM, feature: 'voice-edit' })
+  const names = namesIn(`${said.slice(0, 2000)}\n${t}`)
+  const r = await reply(model, [{ role: 'user', text: `Instruction: ${said.slice(0, 2000)}\n\nText:\n${t}` }], { system: names ? `${EDIT_SYSTEM}\n\n${names}` : EDIT_SYSTEM, feature: 'voice-edit' })
   let out = String(r?.text || '').trim()
   // What models put around an answer anyway: a code fence, and quotes the text didn't have.
   const fenced = /^```[\w-]*\n([\s\S]*?)\n```$/.exec(out)
@@ -91,7 +128,9 @@ export async function edit({ text, instruction, model, reply }) {
 // What was said is the model's text to tidy, never a message to it: it's fenced in <dictation>,
 // the instructions say so, with an instruction tidied like any other sentence among the examples,
 // and an answer with words that weren't said is turned down (sameWords). The light cleanup
-// (shared/dictation/clean.js) has run first, so names are already spelled the way they're written.
+// (shared/dictation/clean.js) has run first, so names are already spelled the way they're written;
+// the ones from meeting memory that were said go with the instructions too (namesIn), with who or
+// what each is, so the model leaves them as they are, or puts one right that was misheard.
 const TIDY_SYSTEM = [
   'You tidy up dictation: what someone said aloud, turned into text by speech recognition, which they are about to paste into an app.',
   'Give back the same text, cleaned up:',
@@ -117,11 +156,20 @@ const TIDY_SYSTEM = [
 // the same everywhere.
 const STYLES = {}
 export const styleFor = (app) => STYLES[String(app || '').trim().toLowerCase()] || null
-export function tidyPrompt(text, { app = null } = {}) {
+// names: namesIn's lines for what was said, or none. often: the names this person says most (About
+// You, with Memory on), for their spelling only. Both come after what never changes, and names last,
+// so a model that keeps what it has read of a prompt reads only them again.
+export function tidyPrompt(text, { app = null, names = '', often = [] } = {}) {
   const style = styleFor(app)
   // The fence can't be closed from inside: a tag in what was heard is taken out.
   const said = String(text || '').replace(/<\s*\/?\s*dictation\s*>/gi, ' ').replace(/[ \t]{2,}/g, ' ').trim()
-  return { system: style ? `${TIDY_SYSTEM}\n\nIt's going into ${app}: ${style}` : TIDY_SYSTEM, user: `<dictation>\n${said}\n</dictation>` }
+  const system = [
+    TIDY_SYSTEM,
+    often.length ? `Names this person often says, spelled the way they write them (only for spelling; never add one that wasn't said): ${often.slice(0, 30).join(', ')}.` : null,
+    style ? `It's going into ${app}: ${style}` : null,
+    names ? `${names}\nWhere one of these was said, or clearly misheard, write it as it's written here. They aren't part of the dictation: never add one that wasn't said.` : null,
+  ]
+  return { system: system.filter(Boolean).join('\n\n'), user: `<dictation>\n${said}\n</dictation>` }
 }
 
 // Whether the model's answer is what was said, tidied: null, or why not ('added', 'dropped'). Its
@@ -167,12 +215,12 @@ export const TIDY_MAX = 4000
 // { text, ms }, or an error with its status and code: slow (past the budget), failed (the model's
 // own error), changed (not what was said), long. reply: chatmodels.js reply; ms: the budget, else
 // tidyBudget's and more.
-export async function tidy({ text, app = null, model, reply, ms = null, more = 0 }) {
+export async function tidy({ text, app = null, model, reply, ms = null, more = 0, names = [] }) {
   const said = String(text || '').trim()
   if (!said) throw Object.assign(new Error('Nothing was said'), { status: 400 })
   if (said.length > TIDY_MAX) throw Object.assign(new Error('That\'s more than tidying takes (4,000 characters)'), { status: 413, code: 'long' })
   const budget = ms ?? tidyBudget(model, wordsOf(said).length) + more
-  const { system, user } = tidyPrompt(said, { app })
+  const { system, user } = tidyPrompt(said, { app, names: namesIn(said), often: names })
   const stop = new AbortController()
   const t0 = Date.now()
   let timer

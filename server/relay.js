@@ -24,6 +24,8 @@
 // same six digits (checkCode). The asking device commits to a random number first and shows it only
 // after this one has sent its own, so a relay in between can't try keys until the digits match.
 import fs from 'node:fs'
+import http from 'node:http'
+import https from 'node:https'
 import os from 'node:os'
 import path from 'node:path'
 import { spawn, execFile, execFileSync } from 'node:child_process'
@@ -88,6 +90,7 @@ const NO_NET = /ENOTFOUND|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|ENETDOWN|EADDRNOTAV
 let failed = null // how the last try failed: { code } when nothing answered, { status } when the relay did
 let limit = null // what Bridge AI's relay last said about its limits: { why, text, until }
 let plan = null // and this computer's plan there: { plan, dayMessages, dayMB, phones, resets }
+let hostedFull = null // Bridge AI's relay turned this computer away as full: { at, text }, said for an hour
 let pinger = null
 let hostKey = null // { privateKey, public }
 let awakeProc = null // what keeps this computer awake, while it does (holdAwake)
@@ -155,6 +158,7 @@ export function status() {
     account: conf.hosted ? null : conf.cf?.accountName || null,
     hosted: !!conf.hosted, // on Bridge AI's relay
     hostedAvailable: !!hostedBase(), // Bridge AI's relay is offered at all
+    hostedFull: hostedFull && hostedFull.at > Date.now() - 3600000 ? hostedFull.text : null, // ...but it was full just now
     limit: limit && limit.until > Date.now() ? limit : null,
     plan: conf.hosted ? plan : null,
     needsUpdate: !!(!conf.hosted && online && relayBuild && relayBuild !== relayCode().build),
@@ -172,6 +176,7 @@ export function start(serverBase) {
   base = serverBase
   holdAwake()
   if (conf.url && conf.token) connect()
+  if (conf.leaving?.length) sendLeaving()
 }
 
 function connect() {
@@ -181,7 +186,7 @@ function connect() {
   // One still closing is let go first, with its phones' sessions.
   if (link) { const old = link; link = null; clearInterval(pinger); try { old.terminate() } catch { /* closed */ } for (const c of conns.values()) c.end(); conns.clear() }
   // (Bridge AI's relay hears which version this is, for its counts: HOSTED.md.)
-  const ws = new WebSocket(`${conf.url.replace(/^http/, 'ws').replace(/\/$/, '')}/_relay/host`, { headers: { Authorization: `Bearer ${conf.token}`, ...(conf.hosted ? { 'X-Bridge-Version': VERSION } : {}) }, handshakeTimeout: 15000 })
+  const ws = new WebSocket(`${conf.url.replace(/^http/, 'ws').replace(/\/$/, '')}/_relay/host`, { headers: { Authorization: `Bearer ${conf.token}`, ...(conf.hosted ? { 'X-Bridge-Version': VERSION } : {}) }, handshakeTimeout: 15000, ...(onThisComputer(conf.url) ? { lookup: loopback } : {}) })
   link = ws
   failed = null
   let heard = Date.now() // when the relay last sent anything
@@ -246,8 +251,9 @@ function connect() {
     conns.clear()
     link = null
     if (!conf.url || !conf.token) return
-    // Bridge AI's relay said to wait (it's switched off, or doesn't know this computer): until then.
-    const wait = conf.hosted && limit?.until > Date.now() && (limit.why === 'off' || limit.why === 'gone') ? limit.until - Date.now() + Math.random() * 60000 : 0
+    // Bridge AI's relay said to wait (it's switched off, doesn't know this computer, or let it go for
+    // the day for sending on past its limits): until then.
+    const wait = conf.hosted && limit?.until > Date.now() && ['off', 'gone', 'shut'].includes(limit.why) ? limit.until - Date.now() + Math.random() * 60000 : 0
     const offNet = !wait && failed?.code && (!conf.hosted || NO_NET.test(failed.code))
     retry = setTimeout(connect, offNet ? Math.min(backoff, OFF_NET_TRY) + Math.random() * 500 : Math.max(backoff, wait))
     backoff = Math.min(backoff * 2, 60000)
@@ -891,7 +897,13 @@ async function useHosted() {
   try {
     const res = await fetch(`${where}/_relay/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version: VERSION }), signal: AbortSignal.timeout(20000) })
     const d = await res.json().catch(() => ({}))
+    // Full (it takes so many computers at once): said wherever it's offered, with the other ways.
+    if (d.why === 'full') {
+      hostedFull = { at: Date.now(), text: String(d.error || 'Bridge AI\'s relay is full for now.').slice(0, 400) }
+      throw Object.assign(new Error(hostedFull.text), { code: 'hostedFull' })
+    }
     if (!res.ok || !d.id || !d.url || !d.token) throw new Error(d.error || `Bridge AI's relay answered ${res.status}. Try again in a minute.`)
+    hostedFull = null
     let ok = false
     try { const u = new URL(d.url); ok = u.protocol === new URL(where).protocol && u.host === `${d.id}.${new URL(where).host}` } catch { /* not a URL */ }
     if (!ok) throw new Error('Bridge AI\'s relay gave an address that isn\'t its own')
@@ -901,6 +913,7 @@ async function useHosted() {
     save()
     connect()
   } catch (e) {
+    if (e.code === 'hostedFull') throw e // said by status().hostedFull (for an hour), not as an error
     lastError = e.name === 'TimeoutError' ? 'Bridge AI\'s relay didn\'t answer. Try again in a minute.' : /fetch failed|ENOTFOUND|ECONNREFUSED/.test(e.message) ? 'Can\'t reach Bridge AI\'s relay. Check the internet connection and try again.' : e.message
     throw new Error(lastError)
   } finally {
@@ -921,14 +934,53 @@ function leave() {
   plan = null
   relayBuild = null
   // (Which Worker was yours on Cloudflare stays, so going back to it updates that one.)
-  conf = { key: was.key, awake: was.awake, ...(was.cf?.script ? { cf: { account: was.cf.account, accountName: was.cf.accountName, script: was.cf.script } } : {}) }
+  conf = { key: was.key, awake: was.awake, ...(was.leaving ? { leaving: was.leaving } : {}), ...(was.cf?.script ? { cf: { account: was.cf.account, accountName: was.cf.accountName, script: was.cf.script } } : {}) }
   save()
   if (was.hosted) unregister(was)
 }
 
+// This computer's address on Bridge AI's relay, removed there. Until the relay has heard it, the
+// address is kept in conf.leaving and asked again (every 10 minutes, and when Bridge AI starts):
+// one that didn't get through (no network just then) would hold one of the relay's places
+// (MAX_COMPUTERS, relay/HOSTED.md) until it's removed as unused, 90 days on.
+let leavingTimer = null
+let leavingNow = false
 function unregister(was) {
   if (!was.url || !was.token) return
-  fetch(`${was.url}/_relay/forget`, { method: 'POST', headers: { Authorization: `Bearer ${was.token}` }, signal: AbortSignal.timeout(10000) }).catch(() => { /* it goes by itself after 90 days unused */ })
+  conf.leaving = [...(conf.leaving || []).filter((l) => l.url !== was.url), { url: was.url, token: was.token }].slice(-8)
+  save()
+  sendLeaving()
+}
+async function sendLeaving() {
+  if (leavingNow) return
+  leavingNow = true
+  clearTimeout(leavingTimer)
+  try {
+    for (const l of [...(conf.leaving || [])]) {
+      // Gone (204), or it doesn't know this address any more (403, 404): done. Otherwise, later.
+      if ([204, 403, 404].includes(await relayPost(`${l.url}/_relay/forget`, l.token))) conf.leaving = (conf.leaving || []).filter((x) => x.url !== l.url)
+    }
+    if (!conf.leaving?.length) delete conf.leaving
+    save()
+  } finally { leavingNow = false }
+  if (conf.leaving?.length) leavingTimer = setTimeout(sendLeaving, 10 * 60000)
+}
+
+// A relay at <name>.localhost (a test relay on this computer, HOSTED.md): reached on this computer,
+// as browsers reach such names, whatever the system's resolver says about them (macOS and Windows
+// may know only "localhost" itself).
+const onThisComputer = (u) => { try { return /\.localhost$/i.test(new URL(u).hostname) } catch { return false } }
+const loopback = (host, opts, cb) => (opts?.all ? cb(null, [{ address: '127.0.0.1', family: 4 }]) : cb(null, '127.0.0.1', 4))
+// POST to a relay with this computer's token: its status, or 0 when it couldn't be reached.
+function relayPost(url, token) {
+  return new Promise((resolve) => {
+    let u
+    try { u = new URL(url) } catch { return resolve(0) }
+    const req = (u.protocol === 'https:' ? https : http).request(u, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Length': 0 }, timeout: 10000, ...(onThisComputer(url) ? { lookup: loopback } : {}) }, (res) => { res.resume(); resolve(res.statusCode) })
+    req.on('timeout', () => req.destroy(new Error('timed out')))
+    req.on('error', () => resolve(0))
+    req.end()
+  })
 }
 
 // method: 'hosted' (Bridge AI's relay), 'browser' (sign in with wrangler) or 'token' (an API token
@@ -999,8 +1051,8 @@ export function forget() {
   for (const c of conns.values()) c.end()
   conns.clear()
   pairing = null
-  const { key: k, awake: a } = conf
-  conf = { key: k, awake: a }
+  const { key: k, awake: a, leaving: l } = conf
+  conf = { key: k, awake: a, ...(l ? { leaving: l } : {}) }
   save()
   fs.rmSync(CF_HOME, { recursive: true, force: true }) // and sign Bridge AI out of Cloudflare
   return status()

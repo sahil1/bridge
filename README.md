@@ -279,7 +279,8 @@ Everything personal lives in `~/.bridge-ai` (set `BRIDGE_HOME` to move it), neve
 |---|---|
 | `config.json` | Your settings (see below) |
 | `chief/` | The chief of staff's folder: its instructions, `state/playbook.md` (what it has learned about how you work), `state/ledger.md` (its hand-offs), `state/tasks.md` (tasks it does itself) and `work/` (what it makes for them) |
-| `routines.json`, `ideas.md` | Recurring jobs and your ideas backlog ([`routines.example.json`](routines.example.json) shows the shape) |
+| `routines.json`, `ideas.md` | Recurring jobs and your ideas backlog ([`routines.example.json`](routines.example.json) shows the shape); each routine's runs are in `cache/routines-log.json` |
+| `commands/` | With Scheduled Routines on: what you typed into Bridge AI's boxes, a month to a file, for History › Commands (90 days unless Settings › General says otherwise) |
 | `runtime.json` | Spaces and tabs for the built-in runtime |
 | `host/` | The terminal host's token, socket and log (built-in runtime), readable only by you |
 | `cloud-keys.json`, `cloud-agents.json` | Your cloud agent keys (readable only by you, never given to the agents on your computer) and the cloud agents you started |

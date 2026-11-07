@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import Icon, { StatusDot } from './Icon.jsx'
 import { tildePath } from './Rail.jsx'
 import { api } from '../api.js'
-import { t } from '../i18n/index.js'
+import { t, locale } from '../i18n/index.js'
 
 // A chief of staff's thread other than Main goes by its topic.
 const chiefName = (a) => (a.thread && !a.thread.main ? `${t('Chief of Staff')} · ${a.title}` : t('Chief of Staff'))
@@ -69,7 +69,9 @@ export default function Palette({ fleet, activeId, onClose, onOpen, onOpenFile, 
       out.push({ id: `tab:${tab.tabId}`, group: t('Shells'), label: tab.label || t('shell'), sub: `${tab.workspace} · ${n === 1 ? t('{n} pane', { n }) : t('{n} panes', { n })}`, icon: 'terminal', text: `${tab.label} ${tab.workspace} ${tab.panes.map((p) => p.cwd).join(' ')}`, run: () => onOpen(`tab:${tab.tabId}`) })
     }
     for (const r of routines) {
-      out.push({ id: `r:${r.id}`, group: t('Routines'), label: t('Run {name}', { name: r.name }), sub: `${r.command} · ${r.state === 'ok' ? t('up to date') : r.note || r.state}`, icon: 'play', text: `run routine ${r.name} ${r.command}`,
+      // A scheduled one (Scheduled Routines): when it runs next, or why its last run didn't go.
+      const when = r.when && (r.paused ? t('paused') : ['error', 'missed'].includes(r.state) ? r.note : r.next?.[0] ? t('next {time}', { time: new Date(r.next[0]).toLocaleString(locale(), { weekday: 'short', hour: 'numeric', minute: '2-digit' }) }) : null)
+      out.push({ id: `r:${r.id}`, group: t('Routines'), label: t('Run {name}', { name: r.name }), sub: `${r.command} · ${when || (r.state === 'ok' ? t('up to date') : r.note || r.state)}`, icon: 'play', text: `run routine ${r.name} ${r.command}`,
         run: async () => { await api(`/routines/${r.id}/run`, { method: 'POST' }).then((o) => { setFlash(t('{name} started', { name: r.name })); if (o.paneId) setTimeout(() => onOpen(o.paneId), 1200) }).catch((e) => setFlash(e.message)); return 'keep' } })
     }
     for (const a of actions) out.push({ ...a, group: t('Actions'), text: `${a.label} ${a.keywords || ''}` })

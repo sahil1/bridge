@@ -94,6 +94,14 @@ Settings › Voice › Dictation turns the history off (then nothing new is kept
 deleting one deletes it from the disk, not just from the list. A dictation refused because a
 password field had the keyboard isn't kept.
 
+With Scheduled Routines on (a beta feature), what you type into Bridge AI's boxes (an agent's or the
+Chief of Staff's message box, New, the Tasks panel, an answer in Needs You) is kept on your computer,
+in `~/.bridge-ai/commands`, for History › Commands and to suggest a routine when you ask the same
+thing on a schedule: the words, when, and where they went (the agent, its folder, or the Chief of
+Staff). Not the files you attached, only how many. It's kept for 90 days unless you pick 30 days or
+a year, never leaves your computer, and Settings › General › Command History turns it off (then
+nothing new is kept) and deletes all of it. What agents send each other isn't kept.
+
 Mail (on a Mac) is read from Apple Mail's own files on your computer: its index (in
 `~/Library/Mail`, opened read only) for the list, and a message's file when you open it or when it's
 next in the list (read ahead, so it opens at once). Bridge AI only reads mail. It never sends,

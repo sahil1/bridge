@@ -155,7 +155,11 @@ try {
   await until(async () => (await a.api('/needs-you')).items.filter((i) => i.qid && i.online).length >= 3, 40000, 500)
   const s = await page(b, a.url, { mode: 'light', theme: 'sky' })
   const chip = s.p.locator('.top-right .needs-chip')
-  ok(!!(await until(async () => /3\s*need you/.test(await chip.innerText().catch(() => '')), 20000)), "the top bar's chip counts what waits on both devices", await chip.innerText().catch(() => ''))
+  // The chip counts what waits on the computer this window shows (Studio); the devices menu's chip
+  // what waits on the other (Desk): the two add up, and the chip says there's more elsewhere.
+  const num = (x) => Number((/\d+/.exec(x || '') || [0])[0])
+  const split = async () => ({ here: num(await chip.innerText().catch(() => '')), there: num(await s.p.locator('.mc-chip .mc-needs').innerText().catch(() => '')), title: await chip.getAttribute('title').catch(() => '') })
+  ok(!!(await until(async () => { const x = await split(); return x.here >= 1 && x.here + x.there === 3 && /more on (another computer|your other computers)/.test(x.title) }, 20000)), "the top bar's chip counts what waits on this computer, the devices menu's chip the other's, and the chip says there's more there", await split())
   await chip.click()
   const panel = s.p.locator('.ny-panel')
   await panel.waitFor({ timeout: 10000 })

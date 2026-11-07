@@ -199,7 +199,10 @@ try {
   // app is listening).
   const home = () => until(async () => { await p.locator('.rail-nav-btn', { hasText: 'Studio' }).click(); return p.locator('.sd-home').waitFor({ timeout: 1500 }).then(() => true, () => false) }, 20000, 300)
   ok(!!(await home()), "Studio opens from the rail")
-  ok(await p.locator('.sd-new-btn').count() === 5 && !!(await until(async () => (await p.locator('.sd-files-row', { hasText: 'notes.md' }).count()) > 0, 10000)), "Studio's home: New (document, Markdown, sheet, deck, page) and your recent files")
+  await p.locator('.sd-new-open').click()
+  const newItems = await p.locator('.sd-new-menu [role="menuitem"]').allInnerTexts()
+  await p.keyboard.press('Escape')
+  ok(JSON.stringify(newItems) === '["Document","Markdown","Sheet","Deck","Page"]' && !!(await until(async () => (await p.locator('.sd-files-row', { hasText: 'notes.md' }).count()) > 0, 10000)), "Studio's home: New in its header (document, Markdown, sheet, deck, page) and your recent files", newItems)
   await shot(p, `${tag}studio-home`)
   // A Markdown file, edited and saved.
   await p.locator('.sd-file-name', { hasText: 'notes.md' }).first().click()
@@ -275,7 +278,11 @@ try {
   ok(!!(await until(async () => { const x = await p.locator('.sd-status').innerText(); return /1 sheet/.test(x) && /Excel workbook/.test(x) }, 5000)) && !(await bare(p)).length, 'a sheet: its status line says how many sheets and what it is; no bare controls', { status: await p.locator('.sd-status').innerText(), bare: await bare(p) })
   await shot(p, `${tag}studio-sheet`)
   // Quick: a window with a sheet open, left alone, keeps its main thread free and asks the server
-  // little (the change watcher, every few seconds). Generous, for a slow CI computer.
+  // little (the change watcher, every few seconds). Generous, for a slow CI computer. Watched for 20 s
+  // and held to 90 a minute over the time it was really watched: the whole window's own looks (calls
+  // every 2.5 s, the agents' previews every 5 s, devices, what needs you) come to about 13 in any
+  // 10 s, and the once-a-minute ones landing together in a 10 s window on a slow computer took it
+  // past 15 there without asking any more a minute.
   const reqs = []
   const count = (r) => { if (new URL(r.url()).pathname.startsWith('/api/')) reqs.push(new URL(r.url()).pathname) }
   const cdp = which === 'chromium' ? await w.ctx.newCDPSession(p) : null
@@ -283,13 +290,16 @@ try {
   const busy = async () => (cdp ? (await cdp.send('Performance.getMetrics')).metrics.find((m) => m.name === 'TaskDuration').value : 0)
   await sleep(1500)
   const b0 = await busy()
+  const w0 = Date.now()
   p.on('request', count)
-  await sleep(10_000)
+  await sleep(20_000)
   p.off('request', count)
-  const share = Math.round(((await busy()) - b0) * 100) / 10
+  const secs = (Date.now() - w0) / 1000
+  const share = Math.round((((await busy()) - b0) * 1000) / secs) / 10
   if (cdp) ok(share < 8, `a window with a sheet open, idle, keeps its main thread free (${share}% busy)`, share)
   const looks = reqs.filter((x) => x === '/api/studio/changed').length
-  ok(looks <= 2 && reqs.length <= 15, `and asks the server little: whether the file changed ${looks} time${looks === 1 ? '' : 's'} in 10 s, ${reqs.length} requests in all (at most 90 a minute, as everywhere)`, [...new Set(reqs)])
+  const each = Object.fromEntries([...new Set(reqs)].map((x) => [x, reqs.filter((y) => y === x).length]))
+  ok(looks <= 3 && reqs.length <= Math.floor((90 * secs) / 60), `and asks the server little: whether the file changed ${looks} time${looks === 1 ? '' : 's'} in ${Math.round(secs)} s, ${reqs.length} requests in all (at most 90 a minute, as everywhere)`, each)
   // A cell picked by its name, as in Excel's name box (the mouse would need the grid's sizes).
   const goTo = async (a1) => {
     await p.evaluate(() => { const i = [...document.querySelectorAll('.sd-univer input')].find((x) => /^[A-Z]+[0-9]+(:[A-Z]+[0-9]+)?$/.test(x.value)); document.querySelectorAll('[data-name-box]').forEach((x) => x.removeAttribute('data-name-box')); i?.setAttribute('data-name-box', '1') })
@@ -470,7 +480,8 @@ try {
   // used on a white Word page).
   const make = async (label, name) => {
     await home()
-    await p.locator('.sd-new-btn', { hasText: label }).first().click()
+    await p.locator('.sd-new-open').click()
+    await p.locator('.sd-new-menu [role="menuitem"]', { hasText: label }).first().click()
     await p.locator('.sd-new-form input').fill(name)
     await p.locator('.sd-new-form select').selectOption(root)
     await p.locator('.sd-new-form button', { hasText: 'Make it' }).click()
@@ -505,7 +516,7 @@ try {
     await ph.p.waitForSelector('.sd-home', { timeout: 15000 })
     await until(async () => (await ph.p.locator('.sd-files-row', { hasText: 'notes.md' }).count()) > 0, 10000)
     await sleep(400)
-    let f = await phoneFaults(ph.p, '.sd-home')
+    let f = await phoneFaults(ph.p, '.sd-home-view')
     ok(!Object.keys(f).length, `phone ${width}: Studio's home fits (nothing wider, past its edge or cut off; each control a whole 40 px target, each field 16 px)`, f)
     await shot(ph.p, `${tag}studio-home-phone-${width}`)
     await ph.p.locator('.sd-file-name', { hasText: 'notes.md' }).first().click()

@@ -2,7 +2,8 @@
 // BRIDGE_TEST_BROWSER, with a stand-in for the computer's speech to text (/api/transcribe answers
 // what each test says was said) and a stand-in Claude Code.
 //   Kept (server/dictations.js): written to the data folder a month to a file and read back after a
-//   restart, what became of it appended as a line of its own, an agent named from its pane; search
+//   restart, what became of it appended as a line of its own, an agent named from its pane; its
+//   words edited (marked so, what was heard kept, read back after a restart); search
 //   (every word, in the words, what was heard and the app's or agent's name); deleted from the disk
 //   (not just the list) and put back by Undo; kept for 30 days, a year or always, the old ones taken
 //   out of their files; a line cut off by a crash skipped and the next one on a line of its own; the
@@ -16,7 +17,8 @@
 //   go through it but for the pill; each kept with the app it was said in and what became of it; a
 //   password field's not kept. Light and dark.
 //   Dictations: in the sidebar once there's one, by day with each one's app icon or agent, search,
-//   one open whole (and as it was heard), Copy, Paste again (the desktop app simulated; with no
+//   one open whole (and as it was heard), Edit right there (Esc, ⌘↩ saves it, the names put right
+//   offered to meeting memory: Remember, Not now, Undo; light and dark), Copy, Paste again (the desktop app simulated; with no
 //   Accessibility yet, the way to allow it there, then pasted), Send to an agent, Delete and Undo; on a phone in the Meetings tab, with no Paste again. Settings › Voice:
 //   history off (nothing kept, and the view says so), 30 days, the recordings, Delete all.
 import fs from 'node:fs'
@@ -128,6 +130,17 @@ try {
   ok(!fs.existsSync(path.join(DIR, 'audio', `${b1.id}.wav`)), 'deleted: its recording too')
   await setDictation({ keepAudio: null })
 
+  // ---------- Its words, edited ----------
+  // Put right by you (Dictations, or the dictation window's card): the text changes, marked edited,
+  // what was heard kept (the words as they were, when that's what was heard); a line of its own.
+  const e1 = await kit.api('/dictations', { text: 'Ask jon about the bill.', ms: 1500, how: 'copied', app: { name: 'Notes', bundle: 'com.apple.Notes' } })
+  const lines0 = fileText().trim().split('\n').length
+  const ed = await kit.api(`/dictations/${e1.id}`, { text: 'Ask Jan about the bill.' }, 'PATCH')
+  ok(ed.text === 'Ask Jan about the bill.' && ed.edited === true && ed.raw === 'Ask jon about the bill.' && ed.how === 'copied' && fileText().trim().split('\n').length === lines0 + 1, 'edited: the new words, marked edited, what was heard kept, in a line of its own', ed)
+  const blank = await kit.api(`/dictations/${e1.id}`, { text: '   ' }, 'PATCH').catch((x) => x.message)
+  ok(/Nothing was said/.test(blank) && (await list()).items.find((x) => x.id === e1.id)?.text === 'Ask Jan about the bill.', 'edited down to nothing: refused, the words as they were', blank)
+  ok(await ids('jan') === e1.id && await ids('jon') === e1.id, 'search finds it by its new words and by what was heard')
+
   // ---------- How long they're kept ----------
   // Older ones, as an earlier Bridge AI kept them (written before the server reads them).
   const old = (days, text) => { const at = new Date(Date.now() - days * 864e5).toISOString(); fs.appendFileSync(path.join(DIR, `${month(at)}.jsonl`), `${JSON.stringify({ id: `old${days}xxxxxxxx`, at, ms: 1000, text, how: 'copied' })}\n`) }
@@ -139,6 +152,8 @@ try {
   await kit.restart()
   l = await list()
   ok(['Forty days ago.', 'Two hundred days ago.', 'Two years ago.'].every((x) => l.items.some((y) => y.text === x)), 'kept for always, at first: the old ones too', l.items.map((x) => x.text))
+  const e1back = l.items.find((x) => x.id === e1.id)
+  ok(e1back?.text === 'Ask Jan about the bill.' && e1back.edited === true && e1back.raw === 'Ask jon about the bill.', 'an edited one, after a restart: as you edited it', e1back)
   const c = await kit.api('/dictations', { text: 'After the crash.', ms: 700 })
   ok(c.kept && fileText().split('\n').some((line) => { try { return JSON.parse(line).id === c.id } catch { return false } }) && (await list()).items.some((x) => x.id === c.id), 'a line cut off by a crash: skipped, and the next one kept on a line of its own')
   await setDictation({ keepFor: '1y' })
@@ -255,7 +270,7 @@ try {
       window.bridgeApp = {
         platform: navigator.platform.startsWith('Mac') ? 'darwin' : 'linux', desktop: true,
         hudReady: async () => null, hudSize: (w, h) => window.__hud.sizes.push([w, h]), hudPhase: () => {}, hudHide: async () => { window.__hud.hidden++ },
-        hudCopy: async () => {}, hudOpen: async () => {}, hudPointer: (on) => window.__hud.pointer.push(on),
+        hudCopy: async () => {}, hudPointer: (on) => window.__hud.pointer.push(on),
         dictateStatus: async () => st, dictateConfigure: async () => st,
         hudPaste: async (x) => { window.__hud.pasted.push(x); await new Promise((r) => setTimeout(r, 700)); return ans },
       }
@@ -342,6 +357,10 @@ try {
   // One the computer held for a busy agent: kept as queued for it, not sent.
   const held = await kit.api('/dictations', { text: 'Hold the release until Friday.', ms: 1200, how: 'queued', agent: { id: one.paneId, name: 'payments' } })
   ok((await list()).items.find((x) => x.id === held.id)?.how === 'queued', 'one held for a busy agent is kept as queued for it', (await list()).items.find((x) => x.id === held.id))
+  // One for each look, to edit there.
+  const toEdit = {}
+  for (const mode of ['light', 'dark']) toEdit[mode] = await kit.api('/dictations', { text: `Call pria Shah about the open ai bill, ${mode}.`, ms: 2100, how: 'pasted', app: { name: 'Slack', bundle: 'com.tinyspeck.slackmacgap' } })
+  const memTerm = (term) => kit.api('/meetings/memory').then((m) => m.terms.find((x) => x.term === term))
   const view = (opts = {}) => page(b, kit.url, { ...opts, before: async (ctx) => {
     await before(ctx)
     await ctx.route(/\/api\/agents\/[^/]+\/(prompt|queue)$/, async (route) => { asked.push({ url: route.request().url(), body: route.request().postDataJSON() }); await route.fulfill({ json: askedAnswer }) })
@@ -372,6 +391,34 @@ try {
     const typed = v.locator('.dc-row', { hasText: 'Ship the fix' }).first()
     ok(/Typed for/.test(await typed.locator('.dc-where').innerText()) && await typed.locator('.dc-glyph-icon').count() === 1, `${mode}: one said into an agent's box shows the agent`, await typed.innerText())
     await shots(p, `dictations-view-${mode}`)
+    // Edit, right there, keyboard first: the caret at the end; Esc puts it back; ⌘↩ (Ctrl+Enter)
+    // saves what you typed, marked Edited, and the names you put right are offered to meeting memory.
+    const er = v.locator(`.dc-row[data-id="${toEdit[mode].id}"]`)
+    await er.locator('.dc-head').click()
+    await er.locator('.dc-acts button', { hasText: 'Edit' }).click()
+    const box = er.locator('.dc-edit')
+    const caretEnd = await until(() => box.evaluate((el) => document.activeElement === el && el.selectionStart === el.value.length).catch(() => false), 3000, 50)
+    await p.keyboard.type(' oops')
+    await p.keyboard.press('Escape')
+    ok(!!caretEnd && !!(await until(async () => (await box.count()) === 0 && (await er.locator('.dc-full').innerText().catch(() => '')) === `Call pria Shah about the open ai bill, ${mode}.`, 3000, 50)) && await v.isVisible(), `${mode}: Edit: its words in a box, the caret at the end; Esc: as they were (and Dictations still open)`)
+    await er.locator('.dc-acts button', { hasText: 'Edit' }).click()
+    await box.fill(`Call Priya Shah about the OpenAI bill, ${mode}.`)
+    await shots(p, `dictations-edit-${mode}`)
+    await box.press('ControlOrMeta+Enter')
+    const saved = await until(async () => { const x = (await list()).items.find((y) => y.id === toEdit[mode].id); return x?.edited && x }, 4000, 100)
+    ok(saved?.text === `Call Priya Shah about the OpenAI bill, ${mode}.` && saved.raw === `Call pria Shah about the open ai bill, ${mode}.` && !!(await until(async () => (await er.locator('.dc-full').innerText().catch(() => '')) === saved.text && await er.locator('.dc-edited-mark').isVisible().catch(() => false), 4000, 100)), `${mode}: ⌘↩ (Ctrl+Enter): saved as you typed it, marked Edited, what was heard kept`, saved)
+    const offers = er.locator('.remember')
+    ok(!!(await until(async () => (await offers.count()) === 2, 3000, 100)) && /Remember "Priya Shah"\?/.test(await offers.nth(0).innerText()) && /Remember "OpenAI"\?/.test(await offers.nth(1).innerText()), `${mode}: the names you put right, each offered to meeting memory`, await er.innerText().catch(() => ''))
+    await shots(p, `dictations-edited-${mode}`)
+    if (mode === 'light') {
+      await offers.nth(0).locator('button', { hasText: 'Remember' }).click()
+      ok(!!(await until(async () => (await memTerm('Priya Shah'))?.heard.includes('pria Shah') && /Remembered/.test(await offers.nth(0).innerText().catch(() => '')), 4000, 100)), 'Remember: Priya Shah in meeting memory, heard as "pria Shah"', await memTerm('Priya Shah'))
+      ok((await memTerm('Priya Shah'))?.dictations?.includes(toEdit[mode].id), 'and with the dictation it was put right in, for Memory to list it there', await memTerm('Priya Shah'))
+      await offers.nth(1).locator('button', { hasText: 'Not now' }).click()
+      ok(!!(await until(async () => (await offers.count()) === 1, 3000, 100)) && !(await memTerm('OpenAI')), 'Not now: OpenAI isn\'t kept, and its offer goes')
+      await offers.nth(0).locator('button', { hasText: 'Undo' }).click()
+      ok(!!(await until(async () => !(await memTerm('Priya Shah')) && (await offers.count()) === 0, 4000, 100)), 'Undo: Priya Shah taken out again')
+    }
     if (mode === 'dark') { ok(real(errors).length === 0, 'no page errors', errors); await ctx.close(); continue }
     // Search.
     await v.locator('.dc-search').fill('invoices')

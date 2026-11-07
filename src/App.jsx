@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import SoundButton from './components/SoundButton.jsx'
 import StatusMenu, { UsageChip, WeatherChip, ClockChip } from './components/StatusMenu.jsx'
 import Icon, { StatusDot } from './components/Icon.jsx'
@@ -6,11 +6,11 @@ import { useAppearance } from './appearance.js'
 import { usePins } from './pins.js'
 import ErrorBoundary, { Quiet } from './components/ErrorBoundary.jsx'
 import { CrashNotice } from './components/CrashReport.jsx'
-import Rail from './components/Rail.jsx'
+import Rail, { agentName } from './components/Rail.jsx'
 import Board from './components/Board.jsx'
 import Dock from './components/Dock.jsx'
 import Console, { MateEmpty, showChat } from './components/Console.jsx'
-import { Settings, Onboarding, HerdrView, Terminals, ShellTab, MeetingsHome, MeetingPage, Dictations, WhiteboardsHome, WhiteboardPage, StudioHome, StudioPage, preloadViews } from './lazy.jsx'
+import { Settings, Onboarding, HerdrView, Terminals, ShellTab, MeetingsHome, MeetingPage, Dictations, Memory, WhiteboardsHome, WhiteboardPage, StudioHome, StudioPage, preloadViews } from './lazy.jsx'
 import Home from './components/Home.jsx'
 import { FirstRunAnswers } from './components/FirstRun.jsx'
 import { MeetingsProvider, RecordingPill, CallPrompt, useMeetings } from './components/meetings/recording.jsx'
@@ -18,6 +18,7 @@ import { openLink } from './pwa.js'
 import NewAgent from './components/NewAgent.jsx'
 import AddAccount from './components/AddAccount.jsx'
 import History from './components/History.jsx'
+import { RoutineDialog } from './components/Routines.jsx'
 import UpdateChip, { withApp } from './components/UpdateChip.jsx'
 import RestartChip from './components/RestartChip.jsx'
 import SetupChip from './components/SetupChip.jsx'
@@ -35,7 +36,7 @@ import { api, useFleet, usePoll, relayActivity, cloudOnly, refetch, viaRelay, ma
 import { takeReturn } from './permissions.js'
 import CloudHome from './components/CloudHome.jsx'
 import SessionSwitcher from './components/Sessions.jsx'
-import { MachineMenu, AskBanner, useMachines, goMachine, isRemote, remoteOf, openRemote } from './components/Machines.jsx'
+import { MachineMenu, AskBanner, SwitchedHere, useMachines, goMachine, isRemote, remoteOf, openRemote } from './components/Machines.jsx'
 import { useNeedsYou, NeedsYouChip, NeedsYouPanel, waitingOn } from './components/NeedsYou.jsx'
 import AgentMap from './components/AgentMap.jsx'
 import NeedsHome, { Everything, useHome, needCount } from './components/NeedsHome.jsx'
@@ -73,6 +74,11 @@ function useLaunchMate(onOpen) {
 // The iPhone or Android app this page is in, when it's older than this page needs (src/fresh.js).
 const appTooOld = oldApp()
 
+// Whether this window has shown Bridge AI before: a reload, or a switch to another of your computers
+// (which loads that computer's page in the same window). Kept for the window's life alone, so a new
+// window (the app opening) starts afresh.
+const openedBefore = (() => { try { const was = sessionStorage.getItem('cc-opened') === '1'; sessionStorage.setItem('cc-opened', '1'); return was } catch { return false } })()
+
 // The phone apps' way back to their start screen, from the phone's Cloud agents (cloudOnly).
 const toStart = !cloudOnly ? null : window.bridgeAndroid?.home ? () => window.bridgeAndroid.home()
   : window.bridgeNative?.post ? () => window.bridgeNative.post({ type: 'home' }) : null
@@ -83,9 +89,9 @@ const toStart = !cloudOnly ? null : window.bridgeAndroid?.home ? () => window.br
 // and the clock are in the Status menu (StatusMenu.jsx), and each of those that's pinned
 // (src/pins.js: all but sounds, unless you change it) shows in the bar too while there's room. When
 // it doesn't all fit (a laptop's screen, a busy day), the bar gives way a step at a time, least
-// needed first: the pinned chips' words (Update, Restart to apply, usage's names), so each is its
-// icon and value; then their long values (usage's two figures become the ring's one, setup's how
-// far goes); the next meeting's title; the word Status; the Bridge and Herdr tabs' words; then the
+// needed first: the pinned chips' words (Update, Restart to apply, usage's account), so each is its
+// icon and value; then their long values (which limit usage's figure is, setup's how far it is);
+// the next meeting's title; the word Status; the Bridge and Herdr tabs' words; then the
 // pinned chips themselves, one at a time: setup, sounds, the clock, a restart to apply, usage, the
 // weather, the update and Updated (the news among them then counted on the Status button; all of
 // them still in its menu); the recording's title, the words after what's waiting, the next meeting
@@ -138,10 +144,11 @@ function useFit(onFold) {
 // Views that open in tabs beside the agents: Home (start something new), Meetings, a meeting,
 // Dictations, Whiteboards and a whiteboard, and the agent map (what runs on which of your computers).
 // With Home on (a trial): Home (what needs you, NeedsHome.jsx) and Everything.
-const VIEWS = { 'view:home': { title: tx('Home'), icon: 'home' }, 'view:everything': { title: tx('Everything'), icon: 'grid' }, 'view:new': { title: tx('New'), icon: 'plus' }, 'view:meetings': { title: tx('Meetings'), icon: 'mic' }, 'view:dictations': { title: tx('Dictations'), icon: 'wave' }, 'view:whiteboards': { title: tx('Whiteboards'), icon: 'shapes' }, 'view:studio': { title: tx('Studio'), icon: 'layers' }, 'view:map': { title: tx('Agent Map'), icon: 'grid' } }
+const VIEWS = { 'view:home': { title: tx('Home'), icon: 'home' }, 'view:everything': { title: tx('Everything'), icon: 'grid' }, 'view:new': { title: tx('New'), icon: 'plus' }, 'view:meetings': { title: tx('Meetings'), icon: 'mic' }, 'view:dictations': { title: tx('Dictations'), icon: 'wave' }, 'view:memory': { title: tx('Memory'), icon: 'book' }, 'view:whiteboards': { title: tx('Whiteboards'), icon: 'shapes' }, 'view:studio': { title: tx('Studio'), icon: 'layers' }, 'view:map': { title: tx('Agent Map'), icon: 'grid' } }
 // A whiteboard's tab is named as the board is (its id).
 const BOARD = 'view:whiteboard:'
-// A Studio file's tab: its root (an agent's pane, or place:<id>) and path, each encoded.
+// A Studio file's tab: its root (an agent's pane, or place:<id>) and path, each encoded. A
+// whiteboard in Studio's Preview is root board, its name the path.
 // A beta feature's tab, left open from before it was turned off (or opened on another computer
 // where it's on): says so, with the way to turn it on.
 function TrialOff({ name }) {
@@ -180,6 +187,9 @@ function App() {
   studioOnRef.current = studioOn
   // So is Home: with it on, it's where the app opens, and what needs you opens there.
   const homeOn = conf?.trials?.home === true
+  // And Memory as a page of its own (memory/Memory.jsx); off, meeting memory is Meetings' dialog.
+  const memoryOn = conf?.trials?.memory === true
+  const routinesOn = conf?.trials?.routines === true
   // Onboarding stays up from the first sign that setup is needed until you close it, so its last
   // screen (how Bridge AI works) isn't swept away the moment setup is saved.
   const [onboarding, setOnboarding] = useState(false)
@@ -214,6 +224,7 @@ function App() {
   const [palette, setPalette] = useState(false)
   const [newAgent, setNewAgent] = useState(null) // null = closed, {} = open with defaults
   const [history, setHistory] = useState(false) // search every conversation, closed agents
+  const [routineDraft, setRoutineDraft] = useState(null) // the New Routine dialog, filled in (Routines.jsx makeRoutine)
   const [addAcct, setAddAcct] = useState(null) // the Add another account dialog: { kind, account }
   const [tour, setTour] = useState(false)
   const [toured, setToured] = usePersisted('cc-toured', {}) // { desktop, phone }: seen on this device
@@ -238,7 +249,7 @@ function App() {
   const views = [...new Set([...W.tabs, mobileAgent].filter(isView))].map((id) => {
     const m = id.startsWith('view:meeting:') ? meetingList.find((x) => x.id === id.slice(13)) : null
     if (id.startsWith(BOARD)) return { paneId: id, view: true, title: id.slice(BOARD.length), icon: 'shapes' }
-    if (id.startsWith(STUDIO)) return { paneId: id, view: true, title: studioOf(id).path.split('/').pop(), icon: 'layers' }
+    if (id.startsWith(STUDIO)) return { paneId: id, view: true, title: studioOf(id).path.split('/').pop(), icon: studioOf(id).root === 'board' ? 'shapes' : 'layers' }
     return { paneId: id, view: true, title: VIEWS[id] ? t(VIEWS[id].title) : m?.title || t('Meeting'), icon: VIEWS[id]?.icon || 'mic' }
   })
   // Agents on your other devices, in tabs here: named from what each device last said about them
@@ -265,10 +276,14 @@ function App() {
   const [inbox, setInbox] = useState(null)
   const ny = useNeedsYou({ fleet, open: !!inbox, on: !cloudOnly })
   const waiting = waitingOn(ny.data, { here: needsYou.length, shown: machineId || null })
-  const toReview = (ny.data?.items || []).filter((i) => (i.type === 'review' || i.type === 'failed') && i.online).length
-  // With Home on, its count (what waits on you, Chief of Staff's tasks too) on the sidebar, the tab and the chip.
+  // The computer this window shows: one computer's work at a time. The chip, the sidebar and the
+  // phone's tab count what waits on you here (with Home on, its count: Chief of Staff's tasks too);
+  // the devices menu's chip counts the rest, so the two add up to the window's title.
+  const toReview = (ny.data?.items || []).filter((i) => (i.type === 'review' || i.type === 'failed') && i.online && (i.machine || null) === (machineId || null)).length
   const homeCount = useHome(homeOn && !cloudOnly, 12000)
-  const needN = homeOn && homeCount.data ? needCount(homeCount.data) : waiting
+  const homeNeeds = homeOn && homeCount.data ? needCount(homeCount.data) : null
+  const needN = homeNeeds ? homeNeeds.here : needsYou.length
+  const needElse = homeNeeds ? homeNeeds.elsewhere : waiting - needsYou.length
 
   // herdr sessions each have their own agents (and number panes alike), so each keeps its own open
   // tabs, and a switch announces nothing: the last session's agents only left the view.
@@ -323,7 +338,8 @@ function App() {
   // says which one this window shows: the Dock and the Window menu list each window by it.
   const { data: macs } = useMachines(60_000, !cloudOnly)
   const shownName = !macs?.machines?.length ? null : machineId ? macs.machines.find((x) => x.id === machineId)?.name : macs.here?.name
-  useEffect(() => { document.title = `${waiting ? `(${waiting}) ` : ''}Bridge AI${shownName ? ` · ${shownName}` : ''}` }, [waiting, shownName])
+  const allNeeds = needN + needElse
+  useEffect(() => { document.title = `${allNeeds ? `(${allNeeds}) ` : ''}Bridge AI${shownName ? ` · ${shownName}` : ''}` }, [allNeeds, shownName])
   // A notification about an agent that needs you (pwa.js openLink, ?inbox=1): the inbox, at it.
   useEffect(() => {
     if (cloudOnly) return
@@ -345,7 +361,7 @@ function App() {
     if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission()
     setView('command')
     // Not on a phone, or in the phone apps (their page holds this one): there, that device is shown.
-    if (isRemote(paneId) && (!wide || viaRelay)) { const r = remoteOf(paneId); goMachine(r.machine, { agent: r.pane }); return }
+    if (isRemote(paneId) && (!wide || viaRelay)) { const r = remoteOf(paneId); goMachine(r.machine, { agent: r.pane, back: byId[paneId]?.title || true }); return }
     if (!wide) {
       const a = byId[paneId]
       // On the phone's Cloud agents, Back (Android's) closes the agent first.
@@ -353,7 +369,7 @@ function App() {
       // Meetings, a meeting and Dictations open in the phone's own Meetings tab; Whiteboards and a
       // whiteboard in its More tab.
       if (typeof paneId === 'string' && (paneId.startsWith('view:meeting') || paneId === 'view:dictations')) { setMtab('meetings'); setMobileMeeting(paneId === 'view:meetings' ? null : paneId); return }
-      if (typeof paneId === 'string' && (paneId.startsWith('view:whiteboard') || paneId.startsWith('view:studio'))) { setMtab('more'); setMoreView(paneId); return }
+      if (typeof paneId === 'string' && (paneId.startsWith('view:whiteboard') || paneId.startsWith('view:studio') || paneId === 'view:memory')) { setMtab('more'); setMoreView(paneId); return }
       if (paneId === 'view:home' || paneId === 'view:everything') { setMtab('home'); setHomeView(paneId === 'view:home' ? 'home' : 'everything'); return }
       if (a?.chief) { setMtab('mate'); setMobileAgent(null); setMateId(paneId) } else { setMtab('agents'); setMobileAgent(paneId) }
       return
@@ -370,13 +386,13 @@ function App() {
     })
     setL((l) => (l.max ? { ...l, max: null } : l))
   }, [wide, fleet, mobileAgent]) // eslint-disable-line react-hooks/exhaustive-deps
-  // An agent wherever it runs (the needs-you inbox, the agent map): here, on the device this window
-  // shows; on the device this page comes from while it shows another; or in a tab here for one
-  // elsewhere. chat: at its Chat, where a question's card is.
+  // An agent wherever it runs (the needs-you inbox, Home, the agent map): here, on the device this
+  // window shows; or in a tab here for one elsewhere (the device this page comes from too, while it
+  // shows another), so what you're doing here stays. chat: at its Chat, where a question's card is.
+  const shownHere = (machine) => (machine || null) === (machineId || null)
   const openOn = (machine, paneId, { device, title, kind, chat = false } = {}) => {
-    if ((machine || null) === (machineId || null)) { if (chat) showChat(paneId); openAgent(paneId) }
-    else if (!machine) goMachine(null, { agent: paneId })
-    else openRemote({ id: machine, name: device }, { paneId, title, kind })
+    if (shownHere(machine)) { if (chat) showChat(paneId); openAgent(paneId) }
+    else openRemote({ id: machine || null, name: device }, { paneId, title, kind })
   }
   const openItem = (it) => { setInbox(null); openOn(it.machine, it.paneId, { device: it.device, title: it.agent?.title, kind: it.agent?.kind, chat: true }) }
   // The map opens full size on a computer (Esc, or its own button, puts the rest back).
@@ -398,6 +414,8 @@ function App() {
   wsRef.current = W
   openAgentRef.current = openAgent
   const openFilesRef = useRef(null)
+  const startChiefRef = useRef(null)
+  const wideRef = useRef(wide)
   useEffect(() => {
     // "chief" (the home-screen shortcut) means whichever agent is the chief of staff.
     const on = (e) => {
@@ -407,9 +425,10 @@ function App() {
       if (id === 'chief') {
         const all = fleetRef.current?.agents || []
         id = (all.find((a) => a.chief && a.thread?.main) || all.find((a) => a.chief))?.paneId
-        // No chief running: show where to start one (the phone's Chief tab; on a wide screen the
-        // main area already offers it).
-        if (!id) { setMtab('mate'); return }
+        // No chief running: on a phone, its Chief tab, which offers to start one; on a computer it's
+        // started, as the sidebar's Chief of Staff row does, and opens at its Chat, where its tasks
+        // are (Home's Open on one of them, here or switched to from another computer).
+        if (!id) { if (wideRef.current) startChiefRef.current?.(); else setMtab('mate'); return }
       }
       if (!id) return
       if (id === 'view:map') { openMapRef.current?.(); return }
@@ -506,6 +525,12 @@ function App() {
     window.addEventListener('bridge-open-card', on)
     return () => window.removeEventListener('bridge-open-card', on)
   }, [])
+  // Make a routine of a message you sent (its chat, History › Commands, a suggestion).
+  useEffect(() => {
+    const on = (e) => setRoutineDraft(e.detail || {})
+    window.addEventListener('bridge-new-routine', on)
+    return () => window.removeEventListener('bridge-new-routine', on)
+  }, [])
   // A calendar event, with its prep (the floating card's Open prep, Home's Coming Up): Today ›
   // Calendar on its day, with it open.
   const showTodayRef = useRef(null)
@@ -514,12 +539,17 @@ function App() {
     window.addEventListener('bridge-open-event', on)
     return () => window.removeEventListener('bridge-open-event', on)
   }, [])
-  // Home on: the app opens there, once each time it loads (an agent a link names still comes after).
+  // Home on: a new window opens there (an agent a link names still comes after). A reload, or this
+  // window switched to another of your computers and back, opens what you were on there instead:
+  // each computer keeps its own tabs, layout and phone tab (layout.jsx), so Home only when there's
+  // nothing to go back to.
   const homed = useRef(false)
   useEffect(() => {
     if (homed.current || !fleet || !conf || cloudOnly) return
     homed.current = true
     if (!homeOn) return
+    const back = openedBefore && (wide ? !!W.active && (isView(W.active) || isRemote(W.active) || !!byId[W.active]) : store.get('cc-mtab', null) != null)
+    if (back) return
     if (wide) { setW((w) => ({ ...w, tabs: w.tabs.includes('view:home') ? w.tabs : ['view:home', ...w.tabs], active: 'view:home', group: 'main' })); set({ max: 'main' }) }
     else { setMtab('home'); setHomeView('home') }
   }, [fleet, conf]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -606,6 +636,11 @@ function App() {
   }, [fleet, termFor]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const mateLaunch = useLaunchMate(openAgent)
+  const startChief = async () => {
+    try { const r = await api('/chief/launch', { method: 'POST' }); showChat(r.paneId); openAgent(r.paneId) } catch (e) { window.alert(t("Chief of Staff couldn't start: {why}", { why: e.message })) }
+  }
+  startChiefRef.current = startChief
+  wideRef.current = wide
   const meetings = useMeetings()
   // The computer updated while this page was open: the new one loads by itself when nothing's under
   // way, or a line under the top bar says so with Reload (src/fresh.js).
@@ -661,6 +696,7 @@ function App() {
     insightsOn && { id: 'a:insights', label: t('Meeting Insights'), icon: 'trend', keywords: 'meetings stats hours talk time share words week kind', run: () => meetingsTab('insights') },
     insightsOn && { id: 'a:people', label: t('People You Meet'), icon: 'users', keywords: 'people attendees contacts who met meetings together', run: () => meetingsTab('people') },
     { id: 'a:dictations', label: t('Dictations'), icon: 'wave', keywords: 'dictation history voice said typed pasted wispr macwhisper', run: () => openAgent('view:dictations') },
+    memoryOn && { id: 'a:memory', label: t('Memory'), icon: 'book', keywords: 'memory people organizations organisations companies projects products terms names words misheard about me persona context', run: () => openAgent('view:memory') },
     StudioHome && studioOn && { id: 'a:studio', label: t('Studio'), icon: 'layers', keywords: 'studio document word docx sheet excel xlsx spreadsheet deck slides powerpoint pptx pdf page html artifact markdown design pack', run: () => openAgent('view:studio') },
     WhiteboardsHome && { id: 'a:boards', label: t('Whiteboards'), icon: 'shapes', keywords: 'whiteboard board excalidraw draw sketch diagram flowchart architecture sequence org chart mermaid drawio canvas', run: () => openAgent('view:whiteboards') },
     { id: 'a:map', label: t('Agent Map'), icon: 'grid', keywords: 'what is running where devices computers machines all agents overview cloud subagents', run: openMap },
@@ -693,6 +729,7 @@ function App() {
     wide && conf?.mail && { id: 'a:mail-keys', label: t('Mail: every key'), icon: 'keyboard', hint: '?', keywords: 'mail email keys keyboard shortcuts hotkeys j k next previous', run: () => { showToday('mail'); mailDo('keys') } },
     { id: 'a:markets', label: t('Markets & news'), icon: 'trend', keywords: 'fed rates treasury mortgage stocks headlines tech', run: () => showToday('markets') },
     { id: 'a:routines', label: t('Show routines'), icon: 'repeat', run: () => showCard('repeat') },
+    routinesOn && { id: 'a:new-routine', label: t('New routine…'), icon: 'repeat', keywords: 'schedule scheduled recurring repeat every day weekday week cron automation task later', run: () => setRoutineDraft({}) },
     { id: 'a:usage', label: t('Show usage'), icon: 'gauge', keywords: 'quota tokens cost', run: () => showCard('gauge') },
     { id: 'a:stats', label: t('Usage stats and history'), icon: 'gauge', keywords: 'stats heatmap tokens cost models projects', run: () => openToday('usage') },
     { id: 'a:tour', label: t('Take the tour'), icon: 'sparkle', keywords: 'help guide walkthrough intro getting started how', run: takeTour },
@@ -720,7 +757,8 @@ function App() {
       {inbox && !cloudOnly && <NeedsYouPanel data={ny.data} refresh={ny.refresh} phone={!wide} focus={inbox.focus} onClose={() => setInbox(null)} onOpen={openItem} />}
       {onboarding && <Onboarding onDone={(pane) => { setOnboarding(false); confPoll.refresh(); if (pane) setTimeout(() => openAgent(pane), 800); else openAgent('view:new') }} />}
       {newAgent && <NewAgent fleet={fleet} initial={newAgent} onClose={() => setNewAgent(null)} onLaunched={onLaunched} onAddAccount={(kind) => setAddAcct({ kind })} onCloudSettings={() => { setNewAgent(null); setSettings('cloud') }} />}
-      {history && <History onClose={() => setHistory(false)} onOpen={(id, fresh) => (fresh ? setTimeout(() => openAgent(id), 1200) : openAgent(id))} />}
+      {history && <History onClose={() => setHistory(false)} onOpen={(id, fresh) => (fresh ? setTimeout(() => openAgent(id), 1200) : openAgent(id))} commands={routinesOn} />}
+      {routineDraft && routinesOn && <RoutineDialog initial={routineDraft} onClose={() => setRoutineDraft(null)} onShow={() => { setHistory(false); showCard('repeat') }} />}
       {addAcct && <AddAccount initial={addAcct} onClose={() => setAddAcct(null)} onOpenAgent={(id) => { setSettings(null); setNewAgent(null); openAgent(id) }}
         onStart={(kind, account) => { setAddAcct(null); setSettings(null); if (!newAgent) setNewAgent({ mode: 'project', kind, account }) }} />}
       {tour && !covered && <Tour key={device} phone={!wide} simple={simple} actionLabel={agents.some((a) => !a.chief) ? t('Start an agent') : t('Start your first agent')}
@@ -744,7 +782,7 @@ function App() {
       <div className="top-left">
       <img className="mark" src={`${import.meta.env.BASE_URL}mark.svg`} alt="Bridge AI" width="24" height="24" />
       {railBtn}
-      {!cloudOnly && <Quiet name="Devices menu"><MachineMenu phone={!wide} /></Quiet>}
+      {!cloudOnly && <Quiet name="Devices menu"><MachineMenu phone={!wide} elsewhere={homeNeeds ? needElse : null} /></Quiet>}
       {wide && liveView && (
         <nav className="view-tabs" role="tablist" aria-label={t('View')}>
           <button role="tab" aria-selected={view === 'command'} className={view === 'command' ? 'on' : ''} onClick={() => setView('command')} title="Alt+1" aria-label="Bridge">
@@ -767,7 +805,7 @@ function App() {
               <StatusDot status="blocked" size={8} /> {needsYou.length}<span className="needs-word"> {needsYou.length === 1 ? t('needs you') : t('need you')}</span>
             </button>
           )
-          : <NeedsYouChip count={needN} review={wide ? toReview : 0} open={!!inbox} onClick={() => (homeOn ? openHome() : setInbox(inbox ? null : {}))} />}
+          : <NeedsYouChip count={needN} elsewhere={needElse} review={wide ? toReview : 0} open={!!inbox} onClick={() => (homeOn ? openHome() : setInbox(inbox ? null : {}))} />}
         {!cloudOnly && wide && (
           <>
             <Quiet name="Next meeting"><NextMeetingChip onClick={() => showCard('calendar')} recording={meetings?.rec?.title || null} /></Quiet>
@@ -805,9 +843,13 @@ function App() {
   const homeProps = {
     phone: !wide, calendar: !!conf?.calendar,
     onOpen: (it) => openOn(it.machine, it.paneId, { device: it.device, title: it.agent?.title, kind: it.agent?.kind, chat: true }),
-    onOpenMeeting: (it) => (it.machine ? goMachine(it.machine) : openAgent(`view:meeting:${it.meeting.id}`)),
-    onOpenBoard: (it) => (it.machine ? goMachine(it.machine) : openAgent(`${BOARD}${it.board.id}`)),
-    onOpenChief: (it) => (it.machine ? (it.chief ? openOn(it.machine, it.chief, { device: it.device, title: t('Chief of Staff') }) : goMachine(it.machine)) : window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: 'chief' } }))),
+    // A meeting, a whiteboard or a Chief of Staff that isn't running, on another computer: that
+    // computer's own page, at it, saying this window switched (with Back to this one, which opens
+    // what you had here).
+    onOpenMeeting: (it) => (shownHere(it.machine) ? openAgent(`view:meeting:${it.meeting.id}`) : goMachine(it.machine, { agent: `view:meeting:${it.meeting.id}`, back: it.meeting.title || true })),
+    onOpenBoard: (it) => (shownHere(it.machine) ? openAgent(`${BOARD}${it.board.id}`) : goMachine(it.machine, { agent: `${BOARD}${it.board.id}`, back: it.board.title || true })),
+    onOpenChief: (it) => (shownHere(it.machine) ? window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: 'chief' } }))
+      : it.chief ? openOn(it.machine, it.chief, { device: it.device, title: t('Chief of Staff') }) : goMachine(it.machine, { agent: 'chief', back: t('Chief of Staff') })),
     onCalendar: () => showCard('calendar'),
   }
   const viewFor = (id, { onBack } = {}) => (
@@ -820,11 +862,12 @@ function App() {
           controls={wide ? { maximized: !!L.max, onMaximize: () => set({ max: L.max ? null : 'main' }) } : null} /></section>
         : id === 'view:meetings' ? <section className="pane view-pane"><MeetingsHome onOpen={(mid) => openAgent(`view:meeting:${mid}`, wide ? { replace: 'view:meetings' } : {})} /></section>
           : id === 'view:dictations' ? <section className="pane view-pane"><Dictations /></section>
+          : id === 'view:memory' ? <section className="pane view-pane">{memoryOn ? <Memory /> : <TrialOff name={t('Memory')} />}</section>
             : id === 'view:whiteboards' && WhiteboardsHome ? <section className="pane view-pane"><WhiteboardsHome onOpen={(bid) => openAgent(`${BOARD}${bid}`, wide ? { replace: 'view:whiteboards' } : {})} /></section>
               : id.startsWith(BOARD) && WhiteboardPage ? <section className="pane view-pane"><WhiteboardPage id={id.slice(BOARD.length)} onBack={() => openAgent('view:whiteboards', { replace: id })} /></section>
                 : id.startsWith('view:studio') && !studioOn ? <section className="pane view-pane"><TrialOff name={t('Studio')} /></section>
                 : id === 'view:studio' && StudioHome ? <section className="pane view-pane"><StudioHome onOpen={(f) => openAgent(studioId(f), wide ? { replace: 'view:studio' } : {})} /></section>
-                  : id.startsWith(STUDIO) && StudioPage ? <section className="pane view-pane"><StudioPage {...studioOf(id)} onBack={() => openAgent('view:studio', { replace: id })} onOpen={(f) => openAgent(studioId(f))} /></section>
+                  : id.startsWith(STUDIO) && StudioPage ? <section className="pane view-pane"><StudioPage {...studioOf(id)} onBack={() => openAgent('view:studio', { replace: id })} onOpen={(f, o) => openAgent(studioId(f), o?.replace ? { replace: id } : {})} /></section>
                 : <section className="pane view-pane"><MeetingPage id={id.slice(13)} onBack={onBack || (() => openAgent('view:meetings', { replace: id }))} /></section>}
     </ErrorBoundary>
   )
@@ -858,6 +901,7 @@ function App() {
       { id: 'terminals', icon: 'terminal', label: t('Terminals'), hint: t("Every agent's terminal, live"), run: () => setMoreView('terminals') },
       { id: 'map', icon: 'grid', label: t('Agent Map'), hint: t("What's running on each of your computers"), run: () => setMoreView('view:map') },
       { id: 'dictations', icon: 'wave', label: t('Dictations'), hint: t("Everything you've dictated"), run: () => setMoreView('view:dictations') },
+      memoryOn && { id: 'memory', icon: 'book', label: t('Memory'), hint: t('People, organizations and words from your meetings and dictations'), run: () => setMoreView('view:memory') },
       { id: 'needs', icon: 'bell', label: t('Needs you'), hint: t("What's waiting on you, on every device"), count: waiting, run: () => setInbox({}) },
       { id: 'history', icon: 'clock', label: t('History'), hint: t('Every conversation, and closed agents'), run: () => setHistory(true) },
       { id: 'settings', icon: 'settings', label: t('Settings'), hint: t('Devices, voice, appearance and more'), run: () => setSettings('all') },
@@ -867,6 +911,7 @@ function App() {
         {topbar}
         <RuntimeNotice runtime={conf?.runtime?.name} fellBack={conf?.runtime?.fellBack} />
         <Quiet name="Link requests"><AskBanner /></Quiet>
+        <Quiet name="Switched computer"><SwitchedHere /></Quiet>
         <main className="m-body">
           {mtab === 'home' && homeOn && viewFor(homeView === 'everything' ? 'view:everything' : 'view:home')}
           {mtab === 'mate' && (mateShown ? <Console key={mateShown.paneId} agent={mateShown} variant="mobile" queued={queuedFor(mateShown.paneId)} delivered={deliveredFor(mateShown.paneId)} agents={agents} onThread={(id) => setMateId(id)} /> : <MateEmpty onLaunch={mateLaunch.launch} {...mateLaunch} />)}
@@ -1002,37 +1047,85 @@ function App() {
     return { ...w, tabs }
   })
 
+  // Tab Groups (a beta feature): the tabs kept together as the sidebar has them. Home and the other
+  // views first, then each space of this computer in the sidebar's order, then each of your other
+  // computers under its name, so what's from elsewhere is out of the way of what you're doing here.
+  // A group's name folds it to that name, how many it holds and the most urgent dot among them (the
+  // tab on screen stays out); with only one group there are no names, nor for a space whose one tab
+  // is named as it is (the Chief of Staff's). Each tab's place in its group
+  // is yours, as before (drag, or Ctrl+Shift+←/→).
+  const grouping = conf?.trials?.['tab-groups'] === true
+  const openTabs = W.tabs.filter((id) => byId[id])
+  const groupOf = (id) => {
+    const a = byId[id]
+    if (a.view) return { key: 'views', at: -1 }
+    if (a.remote) return { key: `dev:${a.remote.machine || 'here'}`, at: 1e6, label: a.device || t('Another computer'), device: true }
+    const spaces = fleet?.workspaces || []
+    const i = spaces.findIndex((w) => w.id === a.workspaceId)
+    return { key: `ws:${a.workspaceId || ''}`, at: i < 0 ? 1e5 : i, label: spaces[i]?.label || a.workspace || t('Space') }
+  }
+  const groups = !grouping ? [{ key: 'all', ids: openTabs }] : [...openTabs.reduce((m, id, n) => {
+    const g = groupOf(id)
+    if (!m.has(g.key)) m.set(g.key, { ...g, first: n, ids: [] })
+    m.get(g.key).ids.push(id)
+    return m
+  }, new Map()).values()].sort((x, y) => x.at - y.at || x.first - y.first)
+  // An agent's tab is named as the sidebar names it (its tab's name, not its terminal's title, which
+  // on Windows can be the shell's own); a view, a terminal or another computer's agent by its title.
+  const tabName = (a) => (a.view || a.shellTab || a.remote ? a.title : agentName(a))
+  const named = groups.filter((g) => g.label).length > 1 || groups.some((g) => g.device)
+  const headed = (g) => named && !!g.label && (g.device || g.ids.length > 1 || String(tabName(byId[g.ids[0]]) || '').trim().toLowerCase() !== String(g.label).trim().toLowerCase())
+  const URGENT = { blocked: 0, working: 1, done: 2, idle: 3 }
+  const worstOf = (ids) => ids.map((id) => byId[id]?.status).filter((x) => x in URGENT).sort((x, y) => URGENT[x] - URGENT[y])[0] || 'unknown'
+  const foldGroup = (key) => setW((w) => ({ ...w, folded: { ...(w.folded || {}), [key]: !w.folded?.[key] } }))
+  const groupHead = (g, folded) => (
+    <button type="button" className={`ws-group ${folded ? 'folded' : ''} ${g.device ? 'device' : ''}`} onClick={() => foldGroup(g.key)} aria-expanded={!folded}
+      title={folded ? (g.ids.length === 1 ? t('{name}: 1 tab. Show it', { name: g.label }) : t('{name}: {n} tabs. Show them', { name: g.label, n: g.ids.length })) : t('{name}: fold its tabs away', { name: g.label })}>
+      {g.device ? <Icon name="laptop" size={11} /> : <StatusDot status={worstOf(g.ids)} size={6} />}
+      <span className="ws-group-name">{g.label}</span>
+      {folded && <span className="ws-group-n">{g.ids.length}</span>}
+    </button>
+  )
   const tabStrip = (
     <div className="ws-tabs" role="tablist" aria-label={t('Open agents')}>
       <div className="ws-tabs-scroll">
-        {W.tabs.filter((id) => byId[id]).map((id) => {
-          const a = byId[id]
-          const inMain = id === W.active
-          const inSide = split && id === W.side
+        {groups.map((g) => {
+          const folded = headed(g) && !!W.folded?.[g.key]
+          const ids = folded ? g.ids.filter((id) => id === W.active || (split && id === W.side)) : g.ids
           return (
-            <div key={id} role="tab" aria-selected={inMain || inSide} tabIndex={0} draggable
-              className={`ws-tab ${inMain ? 'main' : ''} ${inSide ? 'side' : ''} ${(inMain && W.group === 'main') || (inSide && W.group === 'side') ? 'focus' : ''} ${tabDrag?.id === id ? 'dragging' : ''} ${tabDrag?.over === id && tabDrag.id !== id ? (tabDrag.after ? 'drop-after' : 'drop-before') : ''}`}
-              onClick={() => openAgent(id)} onAuxClick={(e) => { if (e.button === 1) closeTab(id) }}
-              onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/x-bridge-tab', id); setTabDrag({ id }) }}
-              onDragOver={(e) => {
-                if (!tabDrag) return
-                e.preventDefault()
-                const r = e.currentTarget.getBoundingClientRect()
-                const after = e.clientX > r.left + r.width / 2
-                if (tabDrag.over !== id || tabDrag.after !== after) setTabDrag({ ...tabDrag, over: id, after })
-              }}
-              onDrop={(e) => { e.preventDefault(); if (tabDrag) moveTab(tabDrag.id, id, tabDrag.after); setTabDrag(null) }}
-              onDragEnd={() => setTabDrag(null)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') openAgent(id)
-                if (e.ctrlKey && e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) { e.preventDefault(); nudgeTab(id, e.key === 'ArrowLeft' ? -1 : 1) }
-              }} title={a.view ? a.title : a.shellTab ? `${a.workspace} › ${a.label}` : a.remote ? `${a.title}\n${t('On {name}', { name: a.device })}` : `${a.title}\n${a.cwd}`}>
-              {a.view ? <Icon name={a.icon} size={12} className="muted" /> : a.chief ? <Icon name="helm" size={13} className="tab-ship" /> : a.shellTab ? <Icon name="terminal" size={12} className="muted" /> : <StatusDot status={a.status} size={7} />}
-              <span className="ws-tab-name">{a.chief ? (a.thread && !a.thread.main ? a.title : t('Chief of Staff')) : a.title || a.tab}</span>
-              {a.remote && a.device && <span className="ws-tab-where">{a.device}</span>}
-              {a.chief && <StatusDot status={a.status} size={6} />}
-              <button className="ws-tab-x" aria-label={t('Close {name}', { name: a.title })} onClick={(e) => { e.stopPropagation(); closeTab(id) }}><Icon name="x" size={11} /></button>
-            </div>
+            <Fragment key={g.key}>
+              {headed(g) && groupHead(g, folded)}
+              {ids.map((id) => {
+                const a = byId[id]
+                const inMain = id === W.active
+                const inSide = split && id === W.side
+                return (
+                  <div key={id} role="tab" data-pane={id} aria-selected={inMain || inSide} tabIndex={0} draggable
+                    className={`ws-tab ${inMain ? 'main' : ''} ${inSide ? 'side' : ''} ${(inMain && W.group === 'main') || (inSide && W.group === 'side') ? 'focus' : ''} ${tabDrag?.id === id ? 'dragging' : ''} ${tabDrag?.over === id && tabDrag.id !== id ? (tabDrag.after ? 'drop-after' : 'drop-before') : ''}`}
+                    onClick={() => openAgent(id)} onAuxClick={(e) => { if (e.button === 1) closeTab(id) }}
+                    onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/x-bridge-tab', id); setTabDrag({ id }) }}
+                    onDragOver={(e) => {
+                      if (!tabDrag) return
+                      e.preventDefault()
+                      const r = e.currentTarget.getBoundingClientRect()
+                      const after = e.clientX > r.left + r.width / 2
+                      if (tabDrag.over !== id || tabDrag.after !== after) setTabDrag({ ...tabDrag, over: id, after })
+                    }}
+                    onDrop={(e) => { e.preventDefault(); if (tabDrag) moveTab(tabDrag.id, id, tabDrag.after); setTabDrag(null) }}
+                    onDragEnd={() => setTabDrag(null)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') openAgent(id)
+                      if (e.ctrlKey && e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) { e.preventDefault(); nudgeTab(id, e.key === 'ArrowLeft' ? -1 : 1) }
+                    }} title={a.view ? a.title : a.shellTab ? `${a.workspace} › ${a.label}` : a.remote ? `${a.title}\n${t('On {name}', { name: a.device })}` : `${a.title}\n${a.cwd}`}>
+                    {a.view ? <Icon name={a.icon} size={12} className="muted" /> : a.chief ? <Icon name="helm" size={13} className="tab-ship" /> : a.shellTab ? <Icon name="terminal" size={12} className="muted" /> : <StatusDot status={a.status} size={7} />}
+                    <span className="ws-tab-name">{tabName(a)}</span>
+                    {a.remote && a.device && !named && <span className="ws-tab-where">{a.device}</span>}
+                    {a.chief && <StatusDot status={a.status} size={6} />}
+                    <button className="ws-tab-x" aria-label={t('Close {name}', { name: tabName(a) })} onClick={(e) => { e.stopPropagation(); closeTab(id) }}><Icon name="x" size={11} /></button>
+                  </div>
+                )
+              })}
+            </Fragment>
           )
         })}
       </div>
@@ -1065,6 +1158,7 @@ function App() {
       ))}
       <RuntimeNotice runtime={conf?.runtime?.name} fellBack={conf?.runtime?.fellBack} />
       <Quiet name="Link requests"><AskBanner /></Quiet>
+      <Quiet name="Switched computer"><SwitchedHere /></Quiet>
       <div className="views">
         <main className="cmd" hidden={view !== 'command'} ref={cmdRef}>
           <div className="slot rail-slot" style={{ width: railOpen ? L.railW : 52 }}>

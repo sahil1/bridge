@@ -2,7 +2,7 @@
 // you on every channel you've set up (phone and browser push today; chat apps can plug in the same
 // way). Each channel is { name, ready(), send(note) }.
 //
-// A note is { kind: 'needs-you' | 'finished' | 'quota' | 'test', title, body, paneId?, url, tag,
+// A note is { kind: 'needs-you' | 'finished' | 'quota' | 'routine' | 'test', title, body, paneId?, url, tag,
 // actions?, onlyHere? }. actions are answer buttons ({ action, title, token }); onlyHere means
 // you're at the computer, so only its own devices get it.
 // Settings: "notify": { "needsYou": true, "finished": true, "quotaBelow": 15 (percent left; 0 = off),

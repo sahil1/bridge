@@ -1,7 +1,8 @@
 // Your dictations, kept (Settings › Voice › Dictation History): what you said with the
 // dictation key, inside Bridge AI or in another app, so it's never lost in an app that didn't take
-// it. Each one: when and how long, the text as it was put in and as it was heard (before the light
-// cleanup), and with Tidy what I say, what you said before the model tidied it; where it went (the app you were in, by name and bundle ID; an agent or the Chief of
+// it. Each one: when and how long, the text as it was put in (or as you edited it since) and as it
+// was heard (before the light cleanup), and with Tidy what I say, what you said before the model
+// tidied it; where it went (the app you were in, by name and bundle ID; an agent or the Chief of
 // Staff; a terminal; a box in Bridge AI) and whether it was pasted, sent, typed or copied. The
 // recording itself only with "Keep the recordings too" (off until you turn it on).
 //
@@ -69,7 +70,7 @@ const fold = (map, line, m) => {
   let j
   try { j = JSON.parse(line) } catch { return false } // a line cut off by a crash: skipped
   if (!j || typeof j !== 'object' || !ID.test(String(j.id || ''))) return true
-  if (j.set) { const was = map.get(j.id); if (was) map.set(j.id, { ...was, ...clip(j.set) }) } else if (typeof j.text === 'string') { map.set(j.id, j); month.set(j.id, m) }
+  if (j.set) { const was = map.get(j.id); if (was) map.set(j.id, { ...was, ...clip(j.set), ...reworded(j.set) }) } else if (typeof j.text === 'string') { map.set(j.id, j); month.set(j.id, m) }
   return true
 }
 async function load() {
@@ -115,6 +116,13 @@ function clip(r = {}) {
   if (r.audio === true) o.audio = true
   return o
 }
+// Its words, changed by you (update): the text, what was heard when the text was just that, and
+// that you edited it.
+const reworded = (s = {}) => ({
+  ...(str(s.text, 100_000)?.trim() ? { text: str(s.text, 100_000) } : {}),
+  ...(str(s.raw, 100_000) ? { raw: str(s.raw, 100_000) } : {}),
+  ...(s.edited === true ? { edited: true } : {}),
+})
 
 // The newest first, without what's older than you keep them for. q: words that must all be in its
 // text, what was heard, or the app's or agent's name. before: the time to list from (for the next
@@ -156,7 +164,7 @@ export async function add(body = {}, { restore = false } = {}) {
   const raw = str(body.raw, 100_000)
   const said = str(body.said, 100_000)
   const tidied = said && said.trim() && said !== text ? { said, ...(str(body.tidiedBy, 120) ? { tidiedBy: str(body.tidiedBy, 120) } : {}) } : {}
-  const rec = { id, at, ms: Math.max(0, Math.min(3_600_000, Math.round(Number(body.ms) || 0))), text, ...(raw && raw !== text ? { raw } : {}), ...tidied, ...clip(body) }
+  const rec = { id, at, ms: Math.max(0, Math.min(3_600_000, Math.round(Number(body.ms) || 0))), text, ...(raw && raw !== text ? { raw } : {}), ...tidied, ...clip(body), ...(restore && body.edited === true ? { edited: true } : {}) }
   if (!('how' in rec)) rec.how = null
   const back = restore ? undo.get(id) : null
   if (!back?.audio) delete rec.audio
@@ -173,15 +181,22 @@ export async function add(body = {}, { restore = false } = {}) {
   })
 }
 
-// What became of it (pasted, sent to an agent, copied): a line saying so, after the first.
+// What became of it (pasted, sent to an agent, copied), or its words as you put them right (text:
+// in Dictations, or on the dictation window's card before it went): a line saying so, after the
+// first. Edited, it's marked so, and what was heard stays: the words as they were, when that's what
+// was heard.
 export async function update(id, body = {}) {
   const set = clip(body)
   delete set.audio
-  if (!Object.keys(set).length) return get(id)
+  const text = typeof body.text === 'string' ? body.text.slice(0, 100_000) : null
+  if (text != null && !text.trim()) throw Object.assign(new Error('Nothing was said'), { status: 400 })
+  if (!Object.keys(set).length && text == null) return get(id)
   return one(async () => {
     const map = await load()
     const r = map.get(String(id))
     if (!r) throw Object.assign(new Error('That dictation isn\'t here anymore'), { status: 404 })
+    if (text != null && text !== r.text) Object.assign(set, { text, edited: true }, r.raw ? {} : { raw: r.text })
+    if (!Object.keys(set).length) return r
     await fs.promises.appendFile(fileOf(month.get(r.id)), `${JSON.stringify({ id: r.id, set })}\n`, { mode: 0o600 })
     const next = { ...r, ...set }
     map.set(r.id, next)

@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import Icon, { StatusDot } from '../Icon.jsx'
 import { PaneHeader } from '../layout.jsx'
 import { api, apiUrl, usePoll, refetch } from '../../api.js'
 import { keyLabel } from '../../../shared/dictation/keys.js'
+import { corrections } from '../../../shared/dictation/corrected.js'
 import { keysPlatform, dictationKey, settings as dictationSettings } from '../../dictation/controller.js'
+import Remember from '../../dictation/Remember.jsx'
 import { RECENT, ANY, byDay, timeOf, length, whereOf, Glyph, takeWanted } from './shared.jsx'
 import PermissionFix from '../PermissionFix.jsx'
 import { agentName } from '../Rail.jsx'
@@ -14,9 +16,10 @@ import './dictations.css'
 // Dictations: everything you've said with the dictation key, kept on this computer
 // (server/dictations.js), newest first by day, each with where it went (the app's icon, or the
 // agent's). Search; click one to see it whole (and what was heard, before the cleanup, and the
-// recording when it was kept), to Copy it, Paste it again into the app it went to (the desktop app,
-// where pasting works), Send it to an agent, or Delete it, with Undo for a moment. It sits under
-// Meetings in the sidebar, and in the phone's Meetings tab: the other things you've said.
+// recording when it was kept), to Edit its words right there, Copy it, Paste it again into the app
+// it went to (the desktop app, where pasting works), Send it to an agent, or Delete it, with Undo
+// for a moment. A name you put right in an edit is offered to meeting memory (Remember.jsx). It
+// sits under Meetings in the sidebar, and in the phone's Meetings tab: the other things you've said.
 const app = () => window.bridgeApp || {}
 const WHY = {
   secure: () => t('Secure input is on (a password field, or Secure Keyboard Entry), so it wasn\'t pasted.'),
@@ -95,7 +98,7 @@ export default function Dictations() {
         {groups.map((g) => (
           <section key={g.d} className="dc-group">
             <h3>{g.d}</h3>
-            {g.items.map((r) => <Row key={r.id} r={r} open={open === r.id} onToggle={() => setOpen(open === r.id ? null : r.id)} onDelete={() => remove(r)} paste={paste} onMsg={setMsg} />)}
+            {g.items.map((r) => <Row key={r.id} r={r} open={open === r.id} onToggle={() => setOpen(open === r.id ? null : r.id)} onDelete={() => remove(r)} onChanged={changed} paste={paste} onMsg={setMsg} />)}
           </section>
         ))}
         {data?.more && <button type="button" className="btn small dc-more" onClick={() => setLimit((n) => n + 200)}>{t('Show more')}</button>}
@@ -111,15 +114,52 @@ export default function Dictations() {
 
 // One dictation: where it went, when, how long, and its words (a few lines). Open: all of them,
 // what was heard, the recording, and what to do with it. Tidied by a model (Tidy what I say): what
-// you said before that too, and Copy, Paste again and Send take whichever of those is shown.
-function Row({ r, open, onToggle, onDelete, paste, onMsg }) {
+// you said before that too, and Copy, Paste again and Send take whichever of those is shown. Edit:
+// its words in a box in their place (Esc stops, ⌘↩ or Ctrl+Enter saves), kept as you put them, with
+// what was heard as it was; a name you put right is offered to meeting memory.
+function Row({ r, open, onToggle, onDelete, onChanged, paste, onMsg }) {
   const [picking, setPicking] = useState(false)
   const [heard, setHeard] = useState(false)
   const [asSaid, setAsSaid] = useState(false)
-  // What Copy, Paste again and Send take: tidied, or what you said; as heard is only to read.
-  const words = asSaid && r.said ? r.said : r.text
+  const [draft, setDraft] = useState(null) // its words as you edit them (null: not editing)
+  const [saving, setSaving] = useState(false)
+  const [fixes, setFixes] = useState([]) // names you put right, offered to meeting memory
+  // Saved, before the list has it back: shown meanwhile.
+  const [saved, setSaved] = useState(null)
+  useEffect(() => { setSaved(null) }, [r.text])
+  useEffect(() => { if (!open) { setDraft(null); setFixes([]) } }, [open])
+  const text = saved ?? r.text
+  const edited = r.edited || saved != null
+  // What Copy, Paste again and Send take: tidied (or as you edited it), or what you said; as heard
+  // is only to read.
+  const words = asSaid && r.said ? r.said : text
   const shown = heard && r.raw ? r.raw : words
   const [busy, setBusy] = useState(false)
+  const area = useRef(null)
+  const edit = () => { setHeard(false); setAsSaid(false); setPicking(false); setDraft(text) }
+  useLayoutEffect(() => {
+    const el = area.current
+    if (draft == null || !el || el === document.activeElement) return
+    el.focus()
+    el.setSelectionRange(el.value.length, el.value.length)
+    el.style.height = `${el.scrollHeight + 2}px`
+  }, [draft != null]) // eslint-disable-line react-hooks/exhaustive-deps
+  const save = async () => {
+    const next = draft.trim()
+    if (!next) return
+    if (next === text) { setDraft(null); return }
+    setSaving(true)
+    try {
+      await api(`/dictations/${encodeURIComponent(r.id)}`, { method: 'PATCH', body: { text: next } })
+      setFixes(corrections(text, next))
+      setSaved(next)
+      setDraft(null)
+      onChanged()
+    } catch (e) { onMsg({ text: e.message, error: true }) } finally { setSaving(false) }
+  }
+  const onKey = (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setDraft(null) } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); save() }
+  }
   // Paste again with no Accessibility yet: the way to allow it, right here, and then it's pasted.
   // stale: macOS says it's on and the paste was refused anyway, so Reset and ask again first.
   const [access, setAccess] = useState(null) // null | 'off' | 'stale'
@@ -157,21 +197,35 @@ function Row({ r, open, onToggle, onDelete, paste, onMsg }) {
         <Glyph r={r} />
         <span className="dc-main">
           <span className="dc-where"><b>{where}</b><span className="muted">{timeOf(r.at)}{r.ms ? ` · ${length(r.ms)}` : ''}</span>
-            {r.said && <span className="dc-tidy-mark" title={r.tidiedBy ? t('Tidied by {model}.', { model: r.tidiedBy }) : t('Tidied.')}><Icon name="sparkle" size={10} /> {t('Tidied')}</span>}</span>
-          {!open && <span className="dc-text">{r.text}</span>}
+            {r.said && <span className="dc-tidy-mark" title={r.tidiedBy ? t('Tidied by {model}.', { model: r.tidiedBy }) : t('Tidied.')}><Icon name="sparkle" size={10} /> {t('Tidied')}</span>}
+            {edited && <span className="dc-tidy-mark dc-edited-mark" title={t('You edited it.')}><Icon name="edit" size={10} /> {t('Edited')}</span>}</span>
+          {!open && <span className="dc-text">{text}</span>}
         </span>
       </button>
-      {open && (
+      {open && draft != null && (
+        <div className="dc-body">
+          <textarea ref={area} className="dc-edit" value={draft} spellCheck aria-label={t('Edit what you said')} onChange={(e) => { setDraft(e.target.value); e.target.style.height = 'auto'; e.target.style.height = `${e.target.scrollHeight + 2}px` }} onKeyDown={onKey} />
+          <div className="dc-acts">
+            {!matchMedia('(pointer: coarse)').matches && <span className="muted small dc-keys">{t('{key} saves · Esc cancels', { key: keysPlatform() === 'darwin' ? '⌘↩' : 'Ctrl+Enter' })}</span>}
+            <span className="grow" />
+            <button type="button" className="btn small" onClick={() => setDraft(null)}>{t('Cancel')}</button>
+            <button type="button" className="btn small primary" onClick={save} disabled={saving || !draft.trim()}>{t('Save')}</button>
+          </div>
+        </div>
+      )}
+      {open && draft == null && (
         <div className="dc-body">
           <p className="dc-full">{shown}</p>
+          {fixes.map((f) => <Remember key={`${f.heard}\n${f.term}`} fix={f} dictation={r.id} className="dc-remember" onClose={() => setFixes((x) => x.filter((y) => y !== f))} />)}
           {r.said && !heard && (
-            <p className="muted small dc-tidied"><Icon name="sparkle" size={12} /> {asSaid ? t('As you said it, before it was tidied.') : r.tidiedBy ? t('Tidied by {model}.', { model: r.tidiedBy }) : t('Tidied.')}
-              {' '}<button type="button" className="link-btn small dc-said" onClick={() => setAsSaid((v) => !v)}>{asSaid ? t('Show it tidied') : t('Show what I said')}</button></p>
+            <p className="muted small dc-tidied"><Icon name="sparkle" size={12} /> {asSaid ? t('As you said it, before it was tidied.') : edited ? t('As you edited it.') : r.tidiedBy ? t('Tidied by {model}.', { model: r.tidiedBy }) : t('Tidied.')}
+              {' '}<button type="button" className="link-btn small dc-said" onClick={() => setAsSaid((v) => !v)}>{asSaid ? (edited ? t('Show it as you edited it') : t('Show it tidied')) : t('Show what I said')}</button></p>
           )}
           {r.raw && <button type="button" className="link-btn small dc-heard" onClick={() => setHeard((v) => !v)}>{heard ? t('Show it as it was put in') : t('Show it as it was heard, before the cleanup')}</button>}
           {access && <PermissionFix pane="accessibility" stale={access === 'stale'} ask={access === 'off' ? 1 : 0} onCheck={() => { setAccess(null); again() }}><p className="small">{t('Pasting needs Accessibility.')}</p></PermissionFix>}
           {r.audio && <audio className="dc-audio" controls preload="none" src={apiUrl(`/dictations/${encodeURIComponent(r.id)}/audio`)} />}
           <div className="dc-acts">
+            <button type="button" className="btn small" onClick={edit}><Icon name="edit" size={12} /> {t('Edit')}</button>
             <button type="button" className="btn small" onClick={copy}><Icon name="copy" size={12} /> {t('Copy')}</button>
             {paste && app().dictateRepaste && (
               <button type="button" className="btn small" onClick={again} disabled={busy} title={r.app?.name ? t('Paste it where you were typing in {app}', { app: r.app.name }) : t('Paste it where you were typing before Bridge AI')}>

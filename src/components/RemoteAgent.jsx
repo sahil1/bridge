@@ -16,7 +16,7 @@ export default function RemoteAgent({ a }) {
         <Icon name="laptop" size={12} />
         <span className="remote-where">{t('On {name}', { name: device })}</span>
         <span className="grow" />
-        <button type="button" className="ghost-btn small" onClick={() => goMachine(machine, { agent: pane })} title={t('Show {name} in this window, at this agent', { name: device })}>{t('Go to {name}', { name: device })}</button>
+        <button type="button" className="ghost-btn small" onClick={() => goMachine(machine, { agent: pane, back: a.title })} title={t('Show {name} in this window, at this agent', { name: device })}>{t('Go to {name}', { name: device })}</button>
         <button type="button" className="ghost-btn small" onClick={() => goMachine(machine, { agent: pane, own: true })} title={t('Open {name} in a window of its own, beside this one', { name: device })}><Icon name="popout" size={12} /> {t('New window')}</button>
       </div>
       <iframe className="remote-frame" title={a.title} src={src} allow="clipboard-read; clipboard-write" />

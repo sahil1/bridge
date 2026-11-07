@@ -55,14 +55,18 @@ export function useNeedsYou({ fleet, open = false, on = true }) {
   return { data, refresh: load }
 }
 
-// The top bar's chip. count: what the inbox says waits on you (or, before it has answered, the
-// agents waiting in this window).
-export function NeedsYouChip({ count, review = 0, onClick, open }) {
-  if (!count && !review) return null
-  const label = count ? (count === 1 ? t('{n} needs you', { n: count }) : t('{n} need you', { n: count })) : t('{n} to review', { n: review })
+// The top bar's chip, for the computer this window shows: one computer's work at a time, so what
+// waits on your others doesn't crowd it. count: what waits on you here; elsewhere: on your other
+// devices, said on hover (and on the devices menu's chip), or quietly in its place when nothing
+// here does; review: finished work here, quietly, when nothing waits on you at all.
+export function NeedsYouChip({ count, elsewhere = 0, review = 0, onClick, open }) {
+  if (!count && !elsewhere && !review) return null
+  const label = count ? (count === 1 ? t('{n} needs you', { n: count }) : t('{n} need you', { n: count }))
+    : elsewhere ? (elsewhere === 1 ? t('{n} needs you on another computer', { n: elsewhere }) : t('{n} need you on your other computers', { n: elsewhere })) : t('{n} to review', { n: review })
+  const more = count && elsewhere ? ` ${elsewhere === 1 ? t('1 more on another computer.') : t('{n} more on your other computers.', { n: elsewhere })}` : ''
   return (
-    <button type="button" className={`needs-chip ${count ? '' : 'quiet'}`} onClick={onClick} aria-haspopup="dialog" aria-expanded={!!open} aria-label={label} title={t('Everything waiting on you')}>
-      <StatusDot status={count ? 'blocked' : 'done'} size={8} /> {count || review}<span className="needs-word"> {count ? (count === 1 ? t('needs you') : t('need you')) : t('to review')}</span>
+    <button type="button" className={`needs-chip ${count ? '' : 'quiet'} ${!count && elsewhere ? 'away' : ''}`} onClick={onClick} aria-haspopup="dialog" aria-expanded={!!open} aria-label={more ? `${label}.${more}` : label} title={`${count ? t('Waiting on you on this computer.') : t('Everything waiting on you')}${more}`}>
+      <StatusDot status={count ? 'blocked' : elsewhere ? 'unknown' : 'done'} size={8} /> {count || elsewhere || review}<span className="needs-word"> {count ? (count === 1 ? t('needs you') : t('need you')) : elsewhere ? t('elsewhere') : t('to review')}</span>
     </button>
   )
 }
@@ -132,7 +136,7 @@ export function NeedsItem({ it, focused, onOpen, onGone, setNote, pin = null }) 
     if (!v) return
     setBusy(true)
     try {
-      const r = await onDevice(it.machine, `/agents/${encodeURIComponent(it.paneId)}/prompt`, { text: v })
+      const r = await onDevice(it.machine, `/agents/${encodeURIComponent(it.paneId)}/prompt`, { text: v, typed: 'reply' })
       setText('')
       setMode(null)
       // In now, or held until it's free: as your computer answered.

@@ -741,6 +741,15 @@ a.btn:not(.primary), a.btn:not(.primary):visited { color: var(--ink); text-decor
 .ws-tab:hover .ws-tab-x, .ws-tab.main .ws-tab-x, .ws-tab.side .ws-tab-x { opacity: 1; }
 .ws-tab-x:hover { background: var(--pane-3); color: var(--ink); }
 .ws-tab-tools { display: flex; align-items: center; gap: 4px; padding-bottom: 4px; }
+/* Tab Groups (a beta feature): a group's name before its tabs (a space, or another of your
+   computers), which folds them away to that name and how many. */
+.ws-group { flex: none; align-self: flex-end; display: inline-flex; align-items: center; gap: 5px; height: 22px; max-width: 160px; margin: 0 1px 5px 9px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--line); background: var(--pane-2); color: var(--ink-3); font-size: 11px; font-weight: 600; }
+.ws-group:first-child { margin-left: 0; }
+.ws-group:hover { color: var(--ink); }
+.ws-group.folded { color: var(--ink-2); background: var(--pane); }
+.ws-group.device { border-style: dashed; }
+.ws-group-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-group-n { font-variant-numeric: tabular-nums; color: var(--ink-2); }
 .win-btn.on { background: var(--accent-soft); color: var(--accent); }
 .win-btn:disabled { opacity: .35; cursor: default; }
 .group { flex: 1; min-height: 0; display: flex; flex-direction: column; border-radius: var(--r); }
@@ -1125,7 +1134,65 @@ a.btn:not(.primary), a.btn:not(.primary):visited { color: var(--ink); text-decor
 .r-form-actions { display: flex; justify-content: flex-end; gap: 6px; }
 .r-form p { margin: 0; }
 .chip.r-chip.due, .chip.r-chip.never { color: var(--warning); }
-.chip.r-chip.overdue { color: var(--critical); }
+.chip.r-chip.overdue, .chip.r-chip.error, .chip.r-chip.missed { color: var(--critical); }
+/* Scheduled Routines (a beta feature): when each runs, its runs, the schedule picker, suggestions */
+.r-row.st-paused .r-state { background: var(--pane-3); color: var(--ink-3); }
+.r-row.st-missed .r-state { background: color-mix(in srgb, var(--critical) 14%, transparent); color: var(--critical); }
+.r-to { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--ink-3); }
+.r-when { display: inline-flex; align-items: center; gap: 4px; color: var(--ink-2); }
+.r-last { margin-top: 3px; font-size: 11.5px; color: var(--ink-3); overflow-wrap: anywhere; }
+.r-last.bad, .r-runs li.bad { color: var(--critical); }
+.r-last.warn, .r-runs li.warn { color: var(--warning); }
+.r-last.good { color: var(--ink-3); }
+.r-runs { grid-column: 2 / -1; list-style: none; margin: 2px 0 0; padding: 6px 0 0; border-top: 1px solid var(--line); display: grid; gap: 5px; font-size: 11.5px; color: var(--ink-2); }
+.r-runs li { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 6px; align-items: start; }
+.r-runs li > .icon { margin-top: 2px; }
+.r-runs li.good > .icon { color: var(--good); }
+.r-run-main { display: grid; gap: 2px; overflow-wrap: anywhere; }
+.r-said { color: var(--ink-3); font-style: italic; quotes: '“' '”'; }
+.r-runs-none { grid-column: 2 / -1; margin: 2px 0 0; }
+.r-form textarea { padding: 7px 9px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--pane); color: var(--ink); font: 12.5px var(--font-mono); resize: vertical; min-height: 54px; min-width: 0; }
+.r-form textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.r-form .r-check { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; }
+.r-form .r-check > span { font-size: 12.5px; font-weight: 400; color: var(--ink); text-transform: none; letter-spacing: 0; }
+.r-form .r-check input { all: revert; flex: none; width: 15px; height: 15px; margin: 2px 0 0; accent-color: var(--accent); }
+.r-field { display: grid; gap: 3px; min-width: 0; }
+.r-field > span { font-size: 11px; font-weight: 600; color: var(--ink-3); text-transform: uppercase; letter-spacing: .04em; }
+.r-sched { display: grid; gap: 6px; }
+.r-sched-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.r-sched-pick input[type="time"] { width: 112px; }
+.r-days { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 2px; border-radius: 9px; background: var(--pane); border: 1px solid var(--line-2); }
+.r-days button { min-width: 38px; height: 28px; padding: 0 5px; border-radius: 7px; font-size: 11.5px; color: var(--ink-2); }
+.r-days button:hover { background: var(--pane-3); color: var(--ink); }
+.r-days button.on { background: var(--accent); color: var(--on-accent, #fff); }
+.r-sched-says { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; font-size: 12px; color: var(--good); }
+.r-sched-says b { font-weight: 600; color: var(--ink); }
+.r-sched-says.bad { color: var(--critical); }
+.r-next { flex-basis: 100%; color: var(--ink-3); }
+.r-suggest { display: grid; gap: 6px; margin: 0 0 8px; }
+.r-sug { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 8px; align-items: start; padding: 9px 10px; border-radius: 10px; border: 1px dashed color-mix(in srgb, var(--accent) 45%, var(--line-2)); background: color-mix(in srgb, var(--accent) 5%, var(--pane)); }
+.r-sug > .icon { margin-top: 2px; color: var(--accent); }
+.r-sug-main { display: grid; gap: 2px; min-width: 0; font-size: 12.5px; }
+.r-sug-main q { color: var(--ink); overflow-wrap: anywhere; }
+.r-sug-acts { display: flex; align-items: center; gap: 4px; }
+.modal.r-dialog { width: min(600px, calc(100vw - 32px)); }
+.r-dialog .r-form { margin: 0; padding: 0; background: none; border: 0; }
+.r-made { display: grid; gap: 8px; }
+.r-made p { margin: 0; }
+.r-where { display: flex; align-items: center; gap: 5px; margin: 8px 6px 0; }
+@media (max-width: 760px) {
+  .r-days button { min-width: 40px; height: 40px; }
+  .r-form-row { grid-template-columns: 1fr; }
+  .r-form input, .r-form input.mono, .r-form select, .r-form textarea { font-size: 16px; min-height: 40px; }
+  .r-form select { height: 40px; } /* WebKit leaves a select's min-height be */
+  .r-form .r-check { min-height: 40px; }
+  .r-sched-pick input[type="time"] { width: 150px; }
+  .modal.r-dialog { width: 100%; max-height: none; }
+  .r-dialog .modal-head .win-btn { width: 40px; height: 40px; }
+  .r-form-actions .btn, .r-made .btn, .r-sug-acts .btn, .r-sug-acts .icon-btn, .r-runs .link-btn { min-height: 40px; min-width: 40px; }
+  .r-sug { grid-template-columns: 16px minmax(0, 1fr); }
+  .r-sug-acts { grid-column: 2; }
+}
 
 /* ---------- Insights ---------- */
 .ins-sub { margin: 0 0 10px; }
@@ -2431,9 +2498,8 @@ button.ue-row:hover { background: var(--pane-2); }
 .app.wide .search-btn.s-none { justify-content: space-between; }
 .app.wide .search-btn kbd { margin-left: 0; }
 /* What's pinned to the bar (src/pins.js), beside its three places. A chip's words (pin-word) and a
-   long value (pin-long, with pin-short in its place where it has one) are what go first. The
-   clock is its time alone, as it was before the Status menu. */
-.pin-short { display: none; }
+   long value (pin-long) are what go first. The clock is its time alone, as it was before the
+   Status menu. */
 .app.wide .top-x .clock { padding: 0 2px; white-space: nowrap; }
 .app.wide .top-x .wx-chip .icon { color: var(--ink-3); }
 .app.wide .top-x .usage-acct { max-width: none; }
@@ -2441,7 +2507,6 @@ button.ue-row:hover { background: var(--pane-2); }
    their long values, other words, then the pinned chips one at a time, and the rest. */
 .app.wide .topbar.fit-1 .top-x .pin-word { display: none; }
 .app.wide .topbar.fit-2 .top-x .pin-long { display: none; }
-.app.wide .topbar.fit-2 .top-x .pin-short { display: inline; }
 .app.wide .topbar.fit-3 .meet-chip :is(.meet-title, small) { display: none; }
 .app.wide .topbar.fit-4 .status-word { display: none; }
 .app.wide .topbar.fit-5 .view-tabs .vt-word { display: none; }
@@ -2644,6 +2709,19 @@ button.ue-row:hover { background: var(--pane-2); }
    card that opens the colors to pick from. What isn't one account's is grey (--series-other). */
 .acct-dot { flex: none; display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
 .usage-chip .acct-dot { margin: 0 -1px 0 1px; }
+/* Usage pinned to the bar (UsageChip): the provider's mark, the account's color and name, and one
+   figure. The mark's own name on hover would hide the chip's, so the pointer goes through it. */
+.usage-pin { gap: 6px; }
+.usage-pin .pv-tile { display: inline-grid; place-items: center; flex: none; pointer-events: none; box-shadow: inset 0 0 0 1px rgb(0 0 0 / .06); }
+.usage-pin .pv-tile svg { display: block; }
+.usage-tight { display: inline-flex; align-items: baseline; gap: 3px; }
+/* A figure running low: on the warning's or the critical color, in the text's own color, so a
+   small number stays easy to read on any theme's chip (the colors as text are too faint on a light
+   frame, Sky's or Sand's). */
+.u-pct.t-warning, .u-pct.t-critical { padding: 0 4px; border-radius: 5px; color: var(--ink); }
+.u-pct.t-warning { background: color-mix(in srgb, var(--warning) 30%, transparent); }
+.u-pct.t-critical { background: color-mix(in srgb, var(--critical) 28%, transparent); }
+.acct-models { display: flex; flex-wrap: wrap; gap: 0 8px; }
 .acct-btn-main .acct-dot { margin-right: -1px; }
 .acct-u-top { display: flex; align-items: center; min-width: 0; }
 .acct-u-top > .acct-u-head { flex: 1; min-width: 0; padding-left: 4px; }
@@ -2778,6 +2856,30 @@ button.ue-row:hover { background: var(--pane-2); }
 .hist-hit { font-size: 12.5px; line-height: 1.45; color: var(--ink-2); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .hist-hit mark { background: color-mix(in srgb, var(--warning) 35%, transparent); color: inherit; border-radius: 3px; padding: 0 1px; }
 .hist-live { margin-left: 8px; font-size: 10.5px; font-weight: 600; color: var(--good); text-transform: uppercase; letter-spacing: .04em; }
+/* History › Commands (Scheduled Routines): what you asked, by day */
+.hist-tabs { display: flex; gap: 4px; margin: -4px 0 2px; }
+.hist-tabs button { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 8px; font-size: 13px; color: var(--ink-2); }
+.hist-tabs button:hover { background: var(--pane-2); color: var(--ink); }
+.hist-tabs button.on { background: var(--pane-3); color: var(--ink); font-weight: 600; }
+.cmd-day { margin: 8px 2px 0; font-size: 11.5px; font-weight: 600; color: var(--ink-3); text-transform: uppercase; letter-spacing: .04em; }
+.cmd-text { font-size: 13px; line-height: 1.45; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 7.3em; overflow: hidden; }
+.cmd-mark { display: grid; place-items: center; width: 18px; height: 18px; color: var(--accent); flex: none; }
+.cmd-acts { display: flex; align-items: center; gap: 4px; flex: none; }
+.cmd-foot { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin: 6px 2px 0; }
+.cmd-off { margin: 0; }
+@media (max-width: 760px) {
+  .hist-search { height: 44px; }
+  .hist-search input { font-size: 16px; min-height: 40px; }
+  .modal.history { width: 100%; max-height: none; }
+  .modal.history .win-btn { width: 40px; height: 40px; }
+  .cmd-foot { display: block; }
+  .cmd-foot .icon { vertical-align: -1px; margin-right: 4px; }
+  .cmd-foot .link-btn, .cmd-off .link-btn { display: inline-flex; align-items: center; min-height: 40px; }
+  .hist-tabs button { height: 40px; }
+  .cmd-item { flex-wrap: wrap; }
+  .cmd-acts { width: 100%; justify-content: flex-end; }
+  .cmd-acts .btn, .cmd-acts .win-btn { min-height: 40px; min-width: 40px; }
+}
 /* Changes tab: undo and commit */
 .hunk-row { display: flex; align-items: center; gap: 10px; }
 .hunk-row > span:not(.dl-n) { flex: 1; min-width: 0; }
@@ -2959,7 +3061,13 @@ table.sheet tbody tr:hover td { background: var(--pane-2); }
 .ph-way-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13.5px; }
 @media (max-width: 560px) { .ph-ways { grid-template-columns: 1fr; } }
 .ph-facts { margin: 0; padding-left: 18px; display: grid; gap: 5px; font-size: 12.5px; line-height: 1.45; color: var(--ink-2); }
+/* …and when it's full for now: what to do instead, under it */
+.hosted-full { display: grid; gap: 8px; align-items: start; margin: 0; }
+.st-note.warn.hosted-full { color: var(--ink-2); }
+.hosted-full p { margin: 0; line-height: 1.45; color: var(--warning); }
+.hosted-full .icon { vertical-align: -2px; }
 .onb-phone { margin-bottom: 6px; }
+.wiz .onb-phone { margin: 6px 0 0; box-shadow: none; background: var(--pane-2); }
 .onb-phone h3 { display: flex; align-items: center; gap: 7px; margin: 0; }
 .onb-phone h3 .icon { color: var(--accent); }
 .onb-phone .ph-pair-text { text-align: left; justify-items: start; }

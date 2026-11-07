@@ -136,8 +136,9 @@ export async function startKit(name, { env = {}, config = {}, node = process.exe
   const base = {
     PATH, BRIDGE_PATH: PATH, HOME: home, BRIDGE_HOME: data, BRIDGE_PORT: String(port), BRIDGE_RUNTIME: 'builtin',
     // No usage stats or crash server unless a test gives one, so no test can reach the project's
-    // (both are on unless turned off).
-    BRIDGE_COUNTS_URL: '', BRIDGE_CRASHES_URL: '',
+    // (both are on unless turned off). Nor Bridge AI's hosted relay: a test gives a stand-in in its
+    // config.json (relay.hostedUrl), or there's none.
+    BRIDGE_COUNTS_URL: '', BRIDGE_CRASHES_URL: '', BRIDGE_HOSTED_URL: '',
     BRIDGE_FIX_DRYRUN: '1', LANG: 'en_US.UTF-8', TMPDIR: os.tmpdir(), USER: os.userInfo().username,
     BRIDGE_SUMMARY_RETRY_MS: '4000', BRIDGE_MODEL_RETRY_MS: '200',
     // No test ever runs a real installer or downloads Node.js: a stand-in installer runs instead
@@ -220,6 +221,30 @@ export async function startRelay(name) {
     url, port, token,
     relayFile: { url, token },
     freeze: () => ctl('freeze'), thaw: () => ctl('thaw'), drop: () => ctl('drop'), state: () => ctl('state'),
+    stop: () => stopTree(p.pid),
+  }
+}
+
+// Bridge AI's hosted relay, stood in for (stand-ins/hosted-relay.mjs: the real Worker with HOSTED
+// on, at localhost), with these settings. A kit uses it with "relay": { "hostedUrl": url } in its
+// config. vars() changes its settings from then on; register() registers a computer, as the app does;
+// down() makes computers' addresses unreachable, up() reachable again.
+export async function startHostedRelay(name, settings = {}) {
+  const port = await freePort()
+  const log = path.join(OUT, 'kits', `${name}-hosted-relay-${port}.log`)
+  fs.mkdirSync(path.dirname(log), { recursive: true })
+  const out = fs.openSync(log, 'w')
+  const p = spawn(process.execPath, [path.join(TEST, 'stand-ins', 'hosted-relay.mjs'), String(port), JSON.stringify(settings)], { stdio: ['ignore', out, out] })
+  const at = `http://127.0.0.1:${port}` // (which it takes as localhost)
+  if (!await until(async () => (await fetch(`${at}/_relay/health`)).ok, 15000, 150)) throw new Error(`the hosted relay stand-in didn't start: ${fs.readFileSync(log, 'utf8').slice(-800)}`)
+  const post = (p2, body) => fetch(`${at}${p2}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+  return {
+    url: `http://localhost:${port}`, port,
+    vars: (v) => post('/_test/vars', v).then((r) => r.json()),
+    down: () => post('/_test/down', {}).then((r) => r.json()),
+    up: () => post('/_test/up', {}).then((r) => r.json()),
+    register: () => post('/_relay/register', { version: '3.9.2' }).then(async (r) => ({ status: r.status, ...(await r.json()) })),
+    stats: (token) => fetch(`${at}/_relay/stats`, { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()),
     stop: () => stopTree(p.pid),
   }
 }

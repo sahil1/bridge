@@ -1,0 +1,86 @@
+/* Memory, a page of its own (Memory.jsx). Its names use Meetings' dialog's rows (meetings.css). */
+.mm-view { display: grid; grid-template-rows: auto minmax(0, 1fr); grid-template-columns: minmax(0, 1fr); height: 100%; min-height: 0; min-width: 0; background: var(--pane); }
+.mm-count { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mm-home { min-height: 0; overflow: auto; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 14px; width: 100%; max-width: 900px; margin: 0 auto; padding: 18px clamp(14px, 3vw, 32px) 72px; }
+.mm-lede { margin: 0; max-width: 72ch; }
+
+/* About You, what may be the same, what adds little, and adding one: cards. */
+.mm-card { display: grid; gap: 8px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--pane-2); min-width: 0; }
+.mm-card p { margin: 0; }
+.mm-card-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; min-width: 0; }
+.mm-card-head > svg { color: var(--ink-3); flex: none; }
+.mm-card-head b { font-weight: 600; font-size: 13.5px; }
+.mm-head-btn { margin-left: auto; }
+.mm-by { min-width: 0; }
+.mm-switch { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; font-size: 12.5px; color: var(--ink-2); cursor: pointer; }
+.mm-switch input { accent-color: var(--accent); width: 16px; height: 16px; margin: 0; }
+.mm-you-text { white-space: pre-wrap; line-height: 1.5; font-size: 13.5px; overflow-wrap: anywhere; }
+.mm-you.off .mm-you-text:not(.muted) { color: var(--ink-3); }
+.mm-you-edit { width: 100%; min-height: 120px; resize: vertical; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--pane); color: var(--ink); font: 13.5px/1.5 var(--font); }
+.mm-you-edit:focus { outline: none; border-color: color-mix(in srgb, var(--accent) 50%, var(--line-2)); }
+.mm-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.mm-rows { display: grid; gap: 2px; max-height: 360px; overflow: auto; padding: 2px 0; }
+.mm-same-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 6px 8px; border-radius: 8px; background: var(--pane); }
+.mm-same-what { flex: 1 1 200px; min-width: 0; font-size: 13px; overflow-wrap: anywhere; }
+.mm-same-acts { display: flex; flex-wrap: wrap; gap: 6px; }
+.mm-tidy-row { padding: 5px 8px; border-radius: 8px; }
+.mm-tidy-row:hover { background: var(--pane); }
+.mm-tidy-row b { font-weight: 600; overflow-wrap: anywhere; }
+.mm-add { grid-template-columns: 1fr auto 1.2fr 1fr auto; align-items: center; gap: 6px; }
+.mm-add :is(input, select), .mm-edit :is(input, select) { height: 32px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--pane); color: var(--ink); font: 13px var(--font); outline: none; min-width: 0; }
+.mm-add :is(input, select):focus, .mm-edit :is(input, select):focus { border-color: color-mix(in srgb, var(--accent) 50%, var(--line-2)); }
+.mm-add .error-text { grid-column: 1 / -1; margin: 0; }
+
+/* The collections, the search and how they're grouped. */
+.mm-tools { display: grid; gap: 8px; }
+.mm-colls button svg { color: var(--ink-3); }
+.mm-colls button.on svg { color: var(--accent); }
+.mm-find { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.mm-find .mt-search { flex: 1 1 220px; min-width: 0; }
+.mm-empty { display: grid; justify-items: center; gap: 4px; padding: 32px 16px; text-align: center; border-radius: 14px; border: 1px dashed var(--line-2); color: var(--ink-2); }
+.mm-empty p { margin: 0; max-width: 460px; }
+.mm-empty > svg { color: var(--ink-3); margin-bottom: 6px; }
+
+/* One name: what it is, then its kind, yours or learned, where it came from and Edit. */
+.mm-item { padding: 6px 4px 6px 22px; border-radius: 8px; }
+.mm-item:hover { background: var(--pane-2); }
+.mm-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+/* Its tags go under it when the two don't fit side by side. */
+.mm-line > .mt-mem-what { flex: 1 1 260px; }
+.mm-tags { display: inline-flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 6px; flex: 0 1 auto; min-width: 0; margin-left: auto; }
+.mm-kind { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line-2); color: var(--ink-2); white-space: nowrap; }
+.mm-kind.guess { border-style: dashed; color: var(--ink-3); }
+.mm-from { white-space: nowrap; color: var(--ink-2); }
+/* A dictation: its words around the name, on as many lines as they take. */
+.mm-dict { align-items: baseline; }
+.mm-dict > span:first-of-type { font-style: italic; white-space: normal; overflow-wrap: anywhere; }
+.mm-edit { display: grid; grid-template-columns: 1.2fr 1fr 1.2fr 1.4fr; gap: 6px 8px; align-items: end; padding: 8px 4px 8px 22px; border-radius: 8px; background: var(--pane-2); }
+.mm-edit label { display: grid; gap: 3px; min-width: 0; font-size: 11.5px; color: var(--ink-3); }
+.mm-edit-acts { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 6px; }
+.mm-edit-acts .danger { color: var(--critical); margin-right: auto; }
+
+/* The people you meet that memory doesn't have. */
+.mm-met { display: grid; gap: 4px; padding-top: 4px; border-top: 1px solid var(--line); }
+.mm-met h3 { margin: 6px 0 0; font: 600 13px var(--font); }
+.mm-met > p { margin: 0 0 4px; }
+.mm-met-row { display: flex; align-items: center; gap: 10px; padding: 5px 4px 5px 8px; border-radius: 8px; }
+.mm-met-row:hover { background: var(--pane-2); }
+.mm-met-what { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 13px; }
+.mm-note { display: flex; align-items: flex-start; gap: 7px; margin: 0; padding: 9px 12px; border-radius: 10px; background: var(--pane-2); }
+.mm-note svg { flex: none; margin-top: 1px; }
+
+@media (max-width: 700px) {
+  .mm-tags { justify-content: flex-start; margin-left: 0; }
+  .mm-add, .mm-edit { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .mm-add > input:first-child { grid-column: 1 / -1; }
+}
+/* On a phone: whole targets, and fields iOS doesn't zoom into. */
+.app.narrow .mm-home { padding-bottom: 96px; }
+.app.narrow .mm-view :is(.mt-search, .mm-add input, .mm-add select, .mm-edit input, .mm-edit select, .mm-you-edit) { font-size: 16px; }
+.app.narrow .mm-view :is(.mt-search, .mm-add input, .mm-add select, .mm-edit input, .mm-edit select) { height: 40px; }
+.app.narrow .mm-view :is(.btn, .ghost-btn, .mt-places button, .seg button, .mt-fold-head, .mt-mem-meeting, .mm-switch, .mm-tidy-row) { min-height: 40px; }
+.app.narrow .mm-view .seg.small-seg { display: flex; width: 100%; }
+.app.narrow .mm-view .seg.small-seg button { flex: 1 1 0; justify-content: center; }
+.app.narrow .mm-view :is(.mm-pen, .mm-switch) { min-width: 44px; justify-content: center; }
+.app.narrow .mm-view :is(.mm-item, .mm-edit) { padding-left: 6px; }
+.app.narrow .mm-view .mm-tidy-row { align-items: center; }

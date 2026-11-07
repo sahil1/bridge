@@ -116,6 +116,29 @@
 @media (prefers-reduced-motion: reduce) { .hm-pin .icon { transition: none; } }
 .hm-pin:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .hm-quick .hm-pin, .hm-item-acts .hm-pin { width: 26px; height: 26px; margin: 0; }
+/* Your other computers while Home shows this one's: a line each, opened one at a time. */
+.hm-away { margin-top: 22px; }
+.hm-away h3 .hm-away-all { flex: none; gap: 5px; }
+.hm-away-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.hm-away-row { min-width: 0; border-radius: 11px; border: 1px solid var(--line); background: var(--pane); }
+.hm-away-row.needs { border-color: color-mix(in srgb, var(--needs) 30%, var(--line)); }
+.hm-away-row.open { padding-bottom: 12px; }
+.hm-away-line { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 40px; padding: 8px 12px; border-radius: 11px; color: var(--ink); font-size: 13px; text-align: left; }
+.hm-away-line:hover:not(:disabled) { background: var(--pane-2); }
+.hm-away-line:disabled { cursor: default; }
+.hm-away-line:disabled .caret { visibility: hidden; }
+.hm-away-name { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hm-away-sub { flex: 1; min-width: 0; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hm-away-row.needs .hm-away-sub { color: var(--needs); }
+.hm-away-row.off .hm-away-sub { color: var(--ink-3); }
+.hm-away-show { flex: none; font-size: 12px; color: var(--ink-3); }
+.hm-away-note { margin: -2px 12px 8px 34px; }
+.hm-away-items { display: grid; gap: 10px; padding: 4px 12px 0; }
+.hm-away-items .hm-list { margin: 0; }
+.hm.phone .hm-away-line { flex-wrap: wrap; }
+.hm.phone .hm-away-sub { flex-basis: 100%; padding-left: 34px; white-space: normal; }
+.hm.phone .hm-away-items { padding: 4px 8px 0; }
+.hm.phone .hm-away-show { display: none; }
 .hm-cols { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 26px 32px; align-items: start; margin-top: 26px; }
 .hm-side { display: grid; gap: 26px; min-width: 0; align-content: start; }
 @container (max-width: 860px) { .hm-cols { grid-template-columns: minmax(0, 1fr); } }

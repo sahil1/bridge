@@ -20,7 +20,11 @@
 // window narrows the pinned chips go down to their icons before any leaves the bar; a pin in Status
 // puts one in the bar or takes it out (an unpinned one isn't counted), kept for the next window;
 // Settings › Appearance › In the Top Bar has the same switches; and the weather with none to show
-// (no city picked, or not fetched) says why, at every width, and opens the city picker. Inside a computer on the phone app (stood in for: its page around Bridge
+// (no city picked, or not fetched) says why, at every width, and opens the city picker. Usage
+// pinned is kept small: the provider's mark, the account new agents start on and the one figure
+// that matters, colored and readable as it runs low, a model's own limit only once it's the one
+// running out; all of it on hover, to a screen reader and in its menu, opened from the keyboard.
+// Inside a computer on the phone app (stood in for: its page around Bridge
 // AI, the computers it's paired with), the devices menu switches computer (online or not, straight
 // to one paired on the phone) and opens the app's Cloud Agents and start screen; in a browser it's
 // your devices alone.
@@ -108,11 +112,15 @@ try {
     const html = fs.readFileSync(path.join(ROOT, 'dist', 'index.html'), 'utf8')
     const first = new Set([...html.matchAll(/assets\/([^"]+)"/g)].map((m) => m[1])) // what the page loads itself
     let cut = true
+    // Meetings' own file stays out of reach until Try again: the page fetches the views ahead again
+    // after a while (lazy.jsx preloadViews), and on a slow computer that could fall while Settings
+    // was being opened, leaving Meetings nothing to fail on.
+    let held = true
     const turned = []
     const { ctx, p } = await page(b, kit.url, {
       before: async (c) => {
         await noServiceWorker(c)
-        await c.route(/\/assets\//, (r) => { const f = r.request().url().split('/').pop(); if (!cut || first.has(f)) return r.continue(); turned.push(f); return r.abort() })
+        await c.route(/\/assets\//, (r) => { const f = r.request().url().split('/').pop(); if (first.has(f) || (!cut && !(held && /^Meetings-/.test(f)))) return r.continue(); turned.push(f); return r.abort() })
       },
     })
     await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
@@ -127,6 +135,7 @@ try {
     await p.locator('.rail-nav-btn', { hasText: 'Meetings' }).first().click()
     ok(!!(await until(async () => /hit an error/.test(await p.locator('.crash').innerText().catch(() => '')), 8000, 200)), 'out of reach again: a view not fetched yet says it hit an error, with Try again', await p.locator('.crash').innerText().catch(() => ''))
     cut = false
+    held = false
     await p.locator('.crash button', { hasText: 'Try again' }).click()
     ok(!!(await until(() => p.locator('.mt-view .pane-head').first().isVisible(), 8000, 200)), 'back: Try again opens it', await p.locator('.crash').innerText().catch(() => ''))
     await shot(p, `${tag}views-back`)
@@ -403,7 +412,7 @@ try {
     const rows = await statusRows(p)
     const want = { setup: /Setting up · 1 of 3/, restart: /Restart Bridge AI to apply it/, update: /Bridge AI 3\.7\.0 is available/, meeting: /Now APM Platform/ }
     const missing = Object.entries(want).filter(([k, re]) => !bar.has[k] && !re.test(rows)).map(([k]) => k)
-    ok(!missing.length && /Claude/.test(rows) && /New: Work Primary/.test(rows) && /Notification sounds/.test(rows) && /Springfield/.test(rows) && /°F/.test(rows), `${t}: what isn't in the bar is in the Status menu, with usage, sounds, the weather and the time`, { missing, rows: rows.slice(0, 400) })
+    ok(!missing.length && /Claude/.test(rows) && /new agents start on Work Primary/.test(rows) && /Notification sounds/.test(rows) && /Springfield/.test(rows) && /°F/.test(rows), `${t}: what isn't in the bar is in the Status menu, with usage, sounds, the weather and the time`, { missing, rows: rows.slice(0, 400) })
     return bar
   }
   {
@@ -492,11 +501,11 @@ try {
     let bar = await deskBar(p)
     ok(bar.has.weather && bar.has.clock && bar.has.usage && bar.has.update && !bar.has.sounds && !(await p.evaluate(() => localStorage.getItem('cc-pins'))), 'pins, by default: the weather, the clock, usage and the update in the bar, sounds not', bar.has)
     const said = { usage: await chip('usage').innerText(), update: await chip('update').innerText(), weather: await chip('weather').innerText() }
-    ok(bar.fit === 0 && /Claude/.test(said.usage) && /New:\s*Work Primary/.test(said.usage) && /62%/.test(said.usage) && /Update/.test(said.update) && /64°/.test(said.weather), 'with room, each with its words: usage its account and both figures, the update its word, the weather its temperature', { fit: bar.fit, said })
+    ok(bar.fit === 0 && said.usage.replace(/\s+/g, ' ').trim() === 'Work Primary 41% wk' && /Update/.test(said.update) && /64°/.test(said.weather), 'with room, each with its words: usage its account and the figure that matters (its week), the update its word, the weather its temperature', { fit: bar.fit, said })
     await shot(p, `${tag}top-bar-pins-${ROOM}`, { clip: { x: 0, y: 0, width: ROOM, height: 64 } })
     // What each says on hover: what its Status row says.
     const hover = { weather: await chip('weather').getAttribute('title'), usage: await chip('usage').getAttribute('title'), clock: await chip('clock').getAttribute('title'), update: await chip('update').getAttribute('title') }
-    ok(hover.weather === 'Springfield: Partly cloudy, 64°F' && hover.usage === 'Claude (Work Primary, where new agents start) usage · 62% left this 5-hour window · 41% left this week'
+    ok(hover.weather === 'Springfield: Partly cloudy, 64°F' && hover.usage === 'New Claude agents start on Work Primary\n41% of the week left\n62% of the 5-hour window left\nClick to switch account or see each limit'
       && /^[A-Z][a-z]+day, [A-Z][a-z]{2} \d{1,2}$/.test(hover.clock || '') && /Bridge AI 3\.7\.0 is available \(you have 3\.6\.0\)/.test(hover.update || ''), 'a pinned chip says it all on hover: the place and sky, usage in full, the date, the version', hover)
     await chip('usage').click()
     ok(!!(await until(async () => /New Claude agents start on/i.test(await p.locator('.acct-pop.top').innerText().catch(() => '')), 5000)), 'usage in the bar opens its account menu, as its Status row does')
@@ -583,6 +592,158 @@ try {
       ok(!!(await until(() => p.getByText('Pick your city to see the weather.').first().isVisible(), 5000)), 'and a click opens the Weather card, where the city is picked')
     }
     await ctx.close()
+  }
+
+  // ---------- Usage pinned to the bar, kept small ----------
+  // As one owner's bar had it: a plan with no 5-hour window, its week 29% left and a model's own
+  // weekly limit (Fable) untouched, on Personal, where new agents start, with Work the other
+  // account. The chip is the provider's mark, the account and the one figure that matters, colored
+  // as it runs low and easy to read; no model's limit, no "Claude", no "New:"; all of it in words on
+  // hover and to a screen reader (each limit and when it resets). A model's limit about to run out
+  // takes the figure's place, and the menu has every model's limit; Auto, a sign-in that ran out and
+  // plan usage off each say so; one account is the mark and the figure. With the busy day's bar, at
+  // 1440 (a 13-inch laptop) down to 900, light and dark: nothing past its edge, squeezed or on two
+  // lines, and the figure there whenever the chip is. Opened from the keyboard, closed with Escape.
+  {
+    const at = (h) => new Date(Date.now() + h * 3600e3).toISOString()
+    const five = (pct) => ({ id: 'five_hour', kind: 'session', label: 'session', percentRemaining: pct, resetsAt: at(2) })
+    const week = (pct) => ({ id: 'seven_day', kind: 'weekly', label: 'week', percentRemaining: pct, resetsAt: at(50) })
+    const fable = (pct) => ({ id: 'model:fable', kind: 'model', label: 'Fable week', percentRemaining: pct, resetsAt: at(50) })
+    const OWNER = [week(29), fable(100)]
+    const usage = ({ windows = OWNER, setting = 'acct-p', personal = {}, off = false, one = false } = {}) => ({
+      generatedAt: new Date().toISOString(), bestNow: 'claude', ...(off ? { off: true } : {}),
+      providers: off ? [] : [{ provider: 'claude', usable: true, status: 'fresh', plan: 'max', percentRemaining: 29, windows }],
+      accounts: [{ kind: 'claude', setting, pick: 'acct-p', accounts: one ? [{ id: 'claude-default', label: 'Your usual login', isDefault: true, named: false, active: true, usable: true, status: 'fresh', windows }] : [
+        { id: 'acct-w', label: 'Work', isDefault: true, named: true, active: false, usable: true, status: 'fresh', color: 1, percentRemaining: 70, windows: [five(80), week(70)] },
+        { id: 'acct-p', label: 'Personal', named: true, active: true, usable: true, status: 'fresh', color: 2, percentRemaining: 29, windows, ...personal },
+      ] }],
+    })
+    const withUsage = (answer, day = deskCalm) => async (c) => { await day(c); await c.route(/\/api\/quota(\?|$)/, (r) => r.fulfill({ json: answer })) }
+    // The chip as it is: what it says, on hover and to a screen reader, its size, and its figure's
+    // level and contrast with what's behind it: each see-through background (the figure's own, the
+    // chip's, the theme's frame) laid over the one under it, as the screen shows them.
+    const pill = (p) => p.evaluate(() => {
+      const e = document.querySelector('.topbar .x-usage .usage-chip')
+      if (!e || !e.getClientRects().length) return null
+      const seen = (x) => !!x && x.getClientRects().length > 0
+      const fig = e.querySelector('.u-pct')
+      const rgba = (c) => {
+        const n = (c.match(/[\d.]+/g) || []).map(Number)
+        if (/^color\(srgb/.test(c)) return [n[0] * 255, n[1] * 255, n[2] * 255, n[3] ?? 1]
+        return [n[0], n[1], n[2], n[3] ?? 1]
+      }
+      const behind = (el) => {
+        const layers = []
+        for (let x = el; x; x = x.parentElement) { const c = rgba(getComputedStyle(x).backgroundColor); if (c[3] > 0) layers.unshift(c); if (c[3] >= 1) break }
+        return layers.reduce((u, [r, g, b, al]) => [r * al + u[0] * (1 - al), g * al + u[1] * (1 - al), b * al + u[2] * (1 - al)], [255, 255, 255])
+      }
+      const lum = (c) => c.slice(0, 3).map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4 }).reduce((s, v, i) => s + v * [0.2126, 0.7152, 0.0722][i], 0)
+      const ink = fig && rgba(getComputedStyle(fig).color), under = fig && behind(fig)
+      const a = fig && lum(ink.slice(0, 3).map((v, i) => v * ink[3] + under[i] * (1 - ink[3]))), b = fig && lum(under)
+      const r = e.getBoundingClientRect()
+      return { text: e.innerText.replace(/\s+/g, ' ').trim(), title: e.getAttribute('title') || '', aria: e.getAttribute('aria-label') || '', width: Math.round(r.width), height: Math.round(r.height),
+        mark: seen(e.querySelector('.pv-tile')), dot: seen(e.querySelector('.acct-dot')), fig: seen(fig) ? fig.textContent : null, level: fig ? ([...fig.classList].find((c) => c.startsWith('t-')) || 'plain') : null,
+        contrast: fig ? Math.round(((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)) * 10) / 10 : null }
+    })
+    const open = async (answer, o = {}) => {
+      const x = await page(b, kit.url, { width: ROOM, ...o, before: withUsage(answer, o.day) })
+      const got = await until(() => pill(x.p).then((c) => c?.fig || /sign in|usage off/.test(c?.text || '') ? c : null), 15000)
+      return { ...x, chip: got }
+    }
+    const statusRow = async (p) => {
+      await p.locator('.topbar .status-btn').click()
+      const row = p.locator('.status-pop .usage-chip')
+      await row.waitFor({ timeout: 5000 }).catch(() => {})
+      const text = (await row.innerText().catch(() => '')).replace(/\s+/g, ' ')
+      await p.keyboard.press('Escape')
+      return text
+    }
+
+    // The owner's: Personal and its week, nothing about Fable, in the warning's color, readable.
+    for (const look of [{ mode: 'light', theme: 'sky' }, { mode: 'dark', theme: 'midnight' }]) {
+      const t = `usage chip ${look.theme}`
+      const { ctx, p, chip } = await open(usage(), look)
+      const lines = chip?.title.split('\n') || []
+      ok(chip?.text === 'Personal 29% wk' && chip.mark && chip.dot, `${t}: the provider's mark, Personal's color and name, and its week's 29% (no "Claude", "New:" or Fable)`, chip)
+      ok(chip?.width <= 200 && chip.height <= 34, `${t}: one line, at most 200 px wide (it was 371)`, chip)
+      ok(chip?.level === 't-warning' && chip.contrast >= 4.5, `${t}: the figure in the warning's color (under 30% left), 4.5:1 or more against the chip`, chip)
+      ok(lines[0] === 'New Claude agents start on Personal' && /^29% of the week left, Week resets /.test(lines[1] || '') && /^Fable week: 100% left, Resets /.test(lines[2] || '') && lines.at(-1) === 'Click to switch account or see each limit',
+        `${t}: on hover, where new agents start, the week's limit and when it resets, the Fable week's, and what a click does`, lines)
+      ok(chip?.aria === lines.slice(0, -1).join('. '), `${t}: and the same to a screen reader`, chip?.aria)
+      await shot(p, `${tag}usage-chip-${look.theme}`, { clip: { x: ROOM - 760, y: 0, width: 760, height: 56 } })
+      if (look.mode === 'light') {
+        const row = await statusRow(p)
+        ok(/^Claude new agents start on Personal 29% wk$/.test(row), 'Status › usage says which account new agents start on, in words, and its figure', row)
+        await p.locator('.topbar .x-usage .usage-chip').click()
+        const menu = p.locator('.acct-pop.top')
+        ok(!!(await until(async () => /Fable week: 100% left/.test(await menu.innerText().catch(() => '')), 5000)), 'its menu has the Fable week\'s limit, under Personal', await menu.innerText().catch(() => ''))
+        await p.keyboard.press('Escape')
+      }
+      await ctx.close()
+    }
+
+    // A model's limit about to run out: it's the figure, in the critical color; the Status row has
+    // it beside the plan's; the menu says it under the account. And the keyboard: Enter opens the
+    // menu with the focus in it, Escape closes it and puts the focus back on the chip.
+    {
+      const { ctx, p, chip } = await open(usage({ windows: [five(62), week(41), fable(7)] }))
+      ok(chip?.text === 'Personal 7% Fable' && chip.level === 't-critical' && chip.contrast >= 4.5, 'Fable 7% left: the chip says so, in the critical color, readable', chip)
+      ok(/^Fable week: 7% left, Resets /.test(chip?.title.split('\n')[1] || ''), 'and it\'s first on hover', chip?.title)
+      ok(/62% 5h 41% wk 7% Fable/.test(await statusRow(p)), 'Status › usage: the 5-hour window, the week, and Fable now it\'s running out')
+      await shot(p, `${tag}usage-chip-model-low`, { clip: { x: ROOM - 760, y: 0, width: 760, height: 56 } })
+      const btn = p.locator('.topbar .x-usage .usage-chip')
+      await btn.focus()
+      await p.keyboard.press('Enter')
+      const menu = p.locator('.acct-pop.top')
+      ok(!!(await until(async () => (await menu.isVisible()) && await p.evaluate(() => !!document.activeElement?.closest('.acct-pop')), 4000)), 'Enter on the chip opens its menu, the focus in it')
+      ok(/Fable week: 7% left/.test(await menu.innerText()) && await menu.locator('.acct-models .t-critical').count() === 1, 'the menu says Fable is at 7%, in the critical color', await menu.innerText())
+      await p.waitForTimeout(300) // its fade in
+      await shot(p, `${tag}usage-chip-menu`, { clip: { x: ROOM - 760, y: 0, width: 760, height: 420 } })
+      await p.keyboard.press('Escape')
+      ok(!!(await until(async () => !(await menu.count()) && await p.evaluate(() => !!document.activeElement?.matches('.x-usage .usage-chip')), 3000)), 'Escape closes it, the focus back on the chip')
+      await ctx.close()
+    }
+
+    // Auto, a sign-in that ran out, plan usage off and one account: each says what it is.
+    {
+      const { ctx, p, chip } = await open(usage({ setting: 'auto' }))
+      ok(chip?.title.split('\n')[0] === 'Auto: new Claude agents start on the account with the most left, now Personal', 'Auto: the chip says on hover that new agents start on the one with the most left, now Personal', chip?.title)
+      ok(/new agents start on Personal auto 29% wk/.test(await statusRow(p)), 'and Status says Auto picked it, as the menu does')
+      await ctx.close()
+    }
+    {
+      const { ctx, chip } = await open(usage({ personal: { usable: false, status: 'error', error: 'Claude access token expired', percentRemaining: null, windows: [] } }))
+      ok(chip?.text === 'Personal sign in' && chip.title.split('\n')[1] === 'Usage: sign-in expired (Claude access token expired)', 'a sign-in that ran out: the chip says sign in, and why on hover', chip)
+      await ctx.close()
+    }
+    {
+      const { ctx, chip } = await open(usage({ off: true }))
+      ok(chip?.text === 'Personal usage off' && /Plan usage is off/.test(chip.title), 'plan usage off: the chip says so', chip)
+      await ctx.close()
+    }
+    {
+      const { ctx, chip } = await open(usage({ one: true }))
+      ok(chip?.text === '29% wk' && chip.mark && !chip.dot && chip.title.split('\n')[0] === 'Claude usage', 'one account: the mark and the figure, Claude on hover', chip)
+      await ctx.close()
+    }
+
+    // The busy day's bar with this usage, as the window narrows: nothing past its edge, squeezed or
+    // on two lines; the chip gives way to its figure and stays one line while it's in the bar.
+    for (const look of [{ mode: 'light', theme: 'sky' }, { mode: 'dark', theme: 'midnight' }]) {
+      const { ctx, p } = await open(usage(), { ...look, width: 1440, day: deskBusy })
+      const said = {}
+      for (const w of [1440, 1280, 1100, 1000, 900]) {
+        await p.setViewportSize({ width: w, height: 900 })
+        const bar = await settledBar(p)
+        const c = await pill(p)
+        said[w] = c ? c.text : 'out'
+        ok(bar.over <= 0 && !bar.past.length && !bar.squeezed.length && !bar.broken.length, `usage chip ${look.theme} ${w}: nothing past the bar, squeezed or on two lines`, { past: bar.past, squeezed: bar.squeezed, broken: bar.broken })
+        ok(!c || (c.fig === '29%' && c.height <= 34 && !/Fable|Claude|New:/.test(c.text)), `usage chip ${look.theme} ${w}: while it's in the bar, its figure is there on one line`, c)
+        if ([1440, 1100, 900].includes(w)) await shot(p, `${tag}usage-bar-${look.theme}-${w}`, { clip: { x: 0, y: 0, width: w, height: 56 } })
+      }
+      ok(said[1440] !== 'out', `usage chip ${look.theme}: in the bar at 1440`, said)
+      await ctx.close()
+    }
   }
 
   // ---------- The whole window broke ----------
