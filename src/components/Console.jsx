@@ -23,6 +23,8 @@ import FindBar from './FindBar.jsx'
 import { pageFinder, openFind } from '../find.js'
 import { t, tx } from '../i18n/index.js'
 import { whiteboards, isMermaid, boardFromMermaid } from './whiteboard/links.js'
+import { useTrial } from '../trials.js'
+import { makeRoutine, fromMessage } from './routineDraft.js'
 
 const KEYS = [
   ['1', '1'], ['2', '2'], ['3', '3'], ['enter', '⏎ Enter'], ['esc', 'Esc'],
@@ -350,6 +352,7 @@ function QueuedMsg({ q, agent, actions }) {
 // your computer holds for it; delivered: what it sent it lately, until the chat shows each.
 function Chat({ agent, going = [], queued = [], delivered = [], outbox = [], queuedActions, onEdit, onUndo, editingText, onOpenTerminal, accounts, onLimit }) {
   const { data, error } = useLive(`/agents/${encodeURIComponent(agent.paneId)}/transcript`)
+  const routinesOn = useTrial('routines') // Make a routine of a message you sent
   // Stopped at its limit, for the account menu (its other accounts can pick it up now).
   const stopped = !!data?.limit
   useEffect(() => { onLimit?.(stopped); return () => onLimit?.(false) }, [stopped]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -463,6 +466,8 @@ function Chat({ agent, going = [], queued = [], delivered = [], outbox = [], que
                   {fromPhone(m) && <span className="msg-sent"><Icon name="check" size={11} /> {t('Delivered from your phone')}</span>}
                   {m.role === 'user' && !m.mid && onEdit && i >= editFrom && <button className="msg-edit-btn" onClick={() => onEdit({ original: m.text, back: messages.slice(i).filter((x) => x.role === 'user' && !x.mid).length })}
                     aria-label={t('Edit this message')} title={t('Edit and resend: the agent goes back to this point')}><Icon name="edit" size={11} /> {t('Edit')}</button>}
+                  {routinesOn && m.role === 'user' && !m.mid && m.text && !m.text.startsWith('<') && !agent.cloud && <button className="msg-edit-btn msg-routine-btn" onClick={() => makeRoutine(fromMessage(agent, m.text, m.ts))}
+                    aria-label={t('Make this a routine')} title={t('Make this a routine: send it again on a schedule')}><Icon name="repeat" size={11} /> {t('Routine')}</button>}
                 </div>
               </div>
             )),
@@ -720,7 +725,7 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
     if (agent.caps?.btw && /^\/btw\s/.test(text)) {
       setBtw({ q: text.replace(/^\/btw\s+/, ''), a: null })
       try {
-        const r = await api(`/agents/${pid}/prompt`, { method: 'POST', body: { text } })
+        const r = await api(`/agents/${pid}/prompt`, { method: 'POST', body: { text, typed: 'message' } })
         if (r?.queued) { setBtw(null); setFlash(t('Held, not lost: {reason} in the agent.', { reason: heldWhy(r.reason) })); return true }
         setBtw({ q: text.replace(/^\/btw\s+/, ''), a: r?.btw || t('No answer came back. Check the Terminal tab.') })
         return true
@@ -733,7 +738,7 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
     // prompt. Otherwise it's typed in now, unless the computer finds it busy after all and holds it.
     const behind = queued.length > 0 || going.some((x) => x.way !== 'prompt' || x.answer?.queued)
     const way = now && agent.status === 'working' ? 'steer' : isWorking(agent) || behind ? 'queue' : 'prompt'
-    const { sent } = sendMessage(agent.paneId, way, text)
+    const { sent } = sendMessage(agent.paneId, way, text, undefined, { typed: review ? null : 'message' })
     // Typed in the Terminal tab's input line as you wrote (mirrored), but held: cleared there.
     const unmirror = () => { if (wasMirrored) { mirrored.current = wasMirrored; syncMirror() } }
     if (way !== 'prompt') unmirror()

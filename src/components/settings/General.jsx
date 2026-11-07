@@ -3,8 +3,9 @@ import Icon from '../Icon.jsx'
 import AgentMark from './agentMark.jsx'
 import LocationPicker from './LocationPicker.jsx'
 import { USAGE_OFF_WHY } from '../Usage.jsx'
-import { t } from '../../i18n/index.js'
+import { t, tx } from '../../i18n/index.js'
 import { api, settingsChanged, refetch } from '../../api.js'
+import { useTrial } from '../../trials.js'
 import { askRestart, useRecheck } from '../PermissionFix.jsx'
 import SetupAll from '../SetupAll.jsx'
 import Permissions from './Permissions.jsx'
@@ -46,8 +47,10 @@ export default function General({ onGo, onOpenAgent, focus = null }) {
   const [name, setName] = useState('')
   useEffect(() => { api('/agents/catalog').then(setAgents).catch(() => setAgents([])) }, [])
   useEffect(() => { if (s) setName(s.effective.name || '') }, [s])
-  // Opened at Permissions (another device asked for one, or a restart came back to it).
-  useEffect(() => { if (s && focus === 'permissions') setTimeout(() => document.getElementById('permissions')?.scrollIntoView({ block: 'start' }), 50) }, [!!s, focus])
+  const commandsOn = useTrial('routines')
+  // Opened at Permissions (another device asked for one, or a restart came back to it), or at
+  // Command History (from History › Commands).
+  useEffect(() => { if (s && focus) setTimeout(() => document.getElementById(focus)?.scrollIntoView({ block: 'start' }), 50) }, [!!s, focus])
   if (!s) return <div className="skeleton-rows"><div /><div /><div /></div>
 
   const eff = s.effective
@@ -133,6 +136,8 @@ export default function General({ onGo, onOpenAgent, focus = null }) {
         </div>
       </section>
 
+      {commandsOn && <CommandHistory value={eff.commands || {}} save={save} />}
+
       {/* For people who live in a terminal; open already when agents run in herdr. */}
       <details className="st-adv" open={eff.runtime === 'herdr'}>
       <summary>Advanced: terminal app, where agents run</summary>
@@ -214,6 +219,39 @@ function TerminalApp({ value, onSave }) {
         <option value="auto">Automatic{found?.[0] ? ` (${found[0].name})` : ''}</option>
         {(found || []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
       </select>
+    </section>
+  )
+}
+
+// Command History (Scheduled Routines, a beta feature): what you asked in Bridge AI's boxes, kept on
+// this computer for History › Commands and routine suggestions. On or off, for how long, Delete all.
+const KEEP = [['30d', tx('30 days')], ['90d', tx('90 days')], ['1y', tx('1 year')]]
+function CommandHistory({ value, save }) {
+  const [cleared, setCleared] = useState(null)
+  const [mine, setMine] = useState({}) // as you set it, at once; saved behind it
+  const set = (patch) => { setMine((m) => ({ ...m, ...patch })); save({ commands: patch }) }
+  const on = (mine.history ?? value.history) !== false
+  const keep = KEEP.some(([v]) => v === (mine.keepFor ?? value.keepFor)) ? mine.keepFor ?? value.keepFor : '90d'
+  const clear = async () => {
+    if (!window.confirm(`${t('Delete everything in Command History?')}\n\n${t('What you asked, and the routine suggestions you dismissed, go from this computer. This can\'t be undone.')}`)) return
+    try { await api('/command-history', { method: 'DELETE' }); setCleared(t('Deleted.')) } catch (e) { setCleared(e.message) }
+  }
+  return (
+    <section className="st-sec" id="commands">
+      <h4>{t('Command History')}</h4>
+      <label className="st-check"><input type="checkbox" checked={on} onChange={(e) => set({ history: e.target.checked })} />
+        <span><b>{t('Keep a history of what you ask')}</b> <span className="muted small">{t('In History › Commands: what you send your agents and Chief of Staff from their message boxes, New and the Tasks panel, to find again or make a routine of, and to suggest a routine when you ask the same thing on a schedule. Only on this computer; what agents send each other isn\'t kept.')}</span></span></label>
+      {on && (
+        <div className="st-row st-radios" role="radiogroup" aria-label={t('Keep them for')}><span>{t('Keep them for')}</span>
+          <span className="st-choices st-choices-row">{KEEP.map(([v, l]) => (
+            <label key={v}><input type="radio" name="cmd-keep" checked={keep === v} onChange={() => set({ keepFor: v })} /> {t(l)}</label>
+          ))}</span>
+        </div>
+      )}
+      <div className="st-row">
+        <button type="button" className="btn small danger-soft" onClick={clear}><Icon name="trash" size={12} /> {t('Delete all commands…')}</button>
+        {cleared && <span className="muted small" role="status">{cleared}</span>}
+      </div>
     </section>
   )
 }

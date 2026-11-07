@@ -378,7 +378,7 @@ function useReady(it, { phone, h, onRead }) {
     if (!v) return
     setBusy(true)
     try {
-      const r = await onDevice(it.machine, `/agents/${encodeURIComponent(it.paneId)}/prompt`, { text: v })
+      const r = await onDevice(it.machine, `/agents/${encodeURIComponent(it.paneId)}/prompt`, { text: v, typed: 'reply' })
       setText('')
       setReplying(false)
       // In now, or held until it's free: as your computer answered.

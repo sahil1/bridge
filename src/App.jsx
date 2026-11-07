@@ -18,6 +18,7 @@ import { openLink } from './pwa.js'
 import NewAgent from './components/NewAgent.jsx'
 import AddAccount from './components/AddAccount.jsx'
 import History from './components/History.jsx'
+import { RoutineDialog } from './components/Routines.jsx'
 import UpdateChip, { withApp } from './components/UpdateChip.jsx'
 import RestartChip from './components/RestartChip.jsx'
 import SetupChip from './components/SetupChip.jsx'
@@ -187,6 +188,7 @@ function App() {
   const homeOn = conf?.trials?.home === true
   // And Memory as a page of its own (memory/Memory.jsx); off, meeting memory is Meetings' dialog.
   const memoryOn = conf?.trials?.memory === true
+  const routinesOn = conf?.trials?.routines === true
   // Onboarding stays up from the first sign that setup is needed until you close it, so its last
   // screen (how Bridge AI works) isn't swept away the moment setup is saved.
   const [onboarding, setOnboarding] = useState(false)
@@ -221,6 +223,7 @@ function App() {
   const [palette, setPalette] = useState(false)
   const [newAgent, setNewAgent] = useState(null) // null = closed, {} = open with defaults
   const [history, setHistory] = useState(false) // search every conversation, closed agents
+  const [routineDraft, setRoutineDraft] = useState(null) // the New Routine dialog, filled in (Routines.jsx makeRoutine)
   const [addAcct, setAddAcct] = useState(null) // the Add another account dialog: { kind, account }
   const [tour, setTour] = useState(false)
   const [toured, setToured] = usePersisted('cc-toured', {}) // { desktop, phone }: seen on this device
@@ -521,6 +524,12 @@ function App() {
     window.addEventListener('bridge-open-card', on)
     return () => window.removeEventListener('bridge-open-card', on)
   }, [])
+  // Make a routine of a message you sent (its chat, History › Commands, a suggestion).
+  useEffect(() => {
+    const on = (e) => setRoutineDraft(e.detail || {})
+    window.addEventListener('bridge-new-routine', on)
+    return () => window.removeEventListener('bridge-new-routine', on)
+  }, [])
   // A calendar event, with its prep (the floating card's Open prep, Home's Coming Up): Today ›
   // Calendar on its day, with it open.
   const showTodayRef = useRef(null)
@@ -719,6 +728,7 @@ function App() {
     wide && conf?.mail && { id: 'a:mail-keys', label: t('Mail: every key'), icon: 'keyboard', hint: '?', keywords: 'mail email keys keyboard shortcuts hotkeys j k next previous', run: () => { showToday('mail'); mailDo('keys') } },
     { id: 'a:markets', label: t('Markets & news'), icon: 'trend', keywords: 'fed rates treasury mortgage stocks headlines tech', run: () => showToday('markets') },
     { id: 'a:routines', label: t('Show routines'), icon: 'repeat', run: () => showCard('repeat') },
+    routinesOn && { id: 'a:new-routine', label: t('New routine…'), icon: 'repeat', keywords: 'schedule scheduled recurring repeat every day weekday week cron automation task later', run: () => setRoutineDraft({}) },
     { id: 'a:usage', label: t('Show usage'), icon: 'gauge', keywords: 'quota tokens cost', run: () => showCard('gauge') },
     { id: 'a:stats', label: t('Usage stats and history'), icon: 'gauge', keywords: 'stats heatmap tokens cost models projects', run: () => openToday('usage') },
     { id: 'a:tour', label: t('Take the tour'), icon: 'sparkle', keywords: 'help guide walkthrough intro getting started how', run: takeTour },
@@ -746,7 +756,8 @@ function App() {
       {inbox && !cloudOnly && <NeedsYouPanel data={ny.data} refresh={ny.refresh} phone={!wide} focus={inbox.focus} onClose={() => setInbox(null)} onOpen={openItem} />}
       {onboarding && <Onboarding onDone={(pane) => { setOnboarding(false); confPoll.refresh(); if (pane) setTimeout(() => openAgent(pane), 800); else openAgent('view:new') }} />}
       {newAgent && <NewAgent fleet={fleet} initial={newAgent} onClose={() => setNewAgent(null)} onLaunched={onLaunched} onAddAccount={(kind) => setAddAcct({ kind })} onCloudSettings={() => { setNewAgent(null); setSettings('cloud') }} />}
-      {history && <History onClose={() => setHistory(false)} onOpen={(id, fresh) => (fresh ? setTimeout(() => openAgent(id), 1200) : openAgent(id))} />}
+      {history && <History onClose={() => setHistory(false)} onOpen={(id, fresh) => (fresh ? setTimeout(() => openAgent(id), 1200) : openAgent(id))} commands={routinesOn} />}
+      {routineDraft && routinesOn && <RoutineDialog initial={routineDraft} onClose={() => setRoutineDraft(null)} onShow={() => { setHistory(false); showCard('repeat') }} />}
       {addAcct && <AddAccount initial={addAcct} onClose={() => setAddAcct(null)} onOpenAgent={(id) => { setSettings(null); setNewAgent(null); openAgent(id) }}
         onStart={(kind, account) => { setAddAcct(null); setSettings(null); if (!newAgent) setNewAgent({ mode: 'project', kind, account }) }} />}
       {tour && !covered && <Tour key={device} phone={!wide} simple={simple} actionLabel={agents.some((a) => !a.chief) ? t('Start an agent') : t('Start your first agent')}
