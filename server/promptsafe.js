@@ -119,8 +119,11 @@ export async function promptSafe(rt, paneId, text, agent) {
     // No input box: looked at again before it's taken as covered. A terminal on Windows (ConPTY)
     // hands over a repaint in pieces, so a read can land on the cleared screen before the box is
     // drawn again; held then, a message to a free agent waited, said "a menu or dialog is open".
-    for (const ms of [150, 300]) {
+    // A screen with nothing on it is still being drawn: looked at for a while longer then (a busy
+    // computer can take a moment over it), where something drawn without the box is held as before.
+    for (const ms of [150, 300, 500, 1000]) {
       if (left !== null) break
+      if (ms > 300 && plain(screen).trim()) break
       await sleep(ms)
       try { screen = await rt.read(paneId, 30) } catch { break }
       left = draftIn(screen)
