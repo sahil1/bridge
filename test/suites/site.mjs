@@ -3,9 +3,9 @@
 // GitHub Pages serves it (under /bridge/, 404.html for any other path), with boldbridge.ai stood
 // in for and nothing else reaching the internet: the home page, with what's after the # kept (the
 // app's old link to #android), the demo, any other old path to the same path there, and, with
-// scripts off, a refresh and a plain link. The README sends people to boldbridge.ai, keeps the
-// README's poster, and its Install section links the APK the build makes (android.yml), with the
-// same steps as the website.
+// scripts off, a refresh (each of the three pages) and a plain link. The README sends people to
+// boldbridge.ai, keeps the README's poster, and its Install section links the APK the build makes
+// (android.yml), with the same steps as the website.
 import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -60,8 +60,11 @@ try {
     const { at } = await lands(old + from)
     ok(at === to, what, { from: old + from, at })
   }
-  const off = await lands(old, { scripts: false })
-  ok(off.at === NEW, 'with scripts off, the page refreshes to boldbridge.ai', off)
+  // The refresh is in <noscript>, so it can't go before the script and drop what it keeps.
+  for (const [from, to, what] of [['', NEW, 'the page'], ['demo/', `${NEW}demo/`, 'the demo'], ['privacy', NEW, 'GitHub Pages\' 404 page']]) {
+    const off = await lands(old + from, { scripts: false })
+    ok(off.at === to, `with scripts off, ${what} refreshes to boldbridge.ai`, off)
+  }
   for (const f of ['index.html', 'demo/index.html', '404.html']) {
     const html = fs.readFileSync(path.join(SITE, f), 'utf8')
     ok(/<a href="https:\/\/boldbridge\.ai\/(demo\/)?">/.test(html) && /noindex/.test(html) && (f === '404.html' || /<link rel="canonical" href="https:\/\/boldbridge\.ai\//.test(html)), `${f}: a plain link to boldbridge.ai, and search engines told where the page is now`)
