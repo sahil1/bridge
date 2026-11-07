@@ -33,7 +33,8 @@ async function api(p, opts = {}) {
     res = await fetch(`${BASE}/api${p}`, { method: opts.method || 'GET', headers: opts.body ? { 'Content-Type': 'application/json' } : {}, body: opts.body ? JSON.stringify(opts.body) : undefined })
   } catch { throw new Error(`Bridge AI isn't running at ${BASE}. Start it with: bridge-ai start`) }
   const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+  // code: what the server says it was (hostedFull…), for a way on to offer.
+  if (!res.ok) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), data.code ? { code: data.code } : {})
   return data
 }
 
@@ -169,7 +170,8 @@ function relayLine(r) {
   if (r.busy) return r.busy
   if (!r.configured) return 'not set up. Set it up with: bridge-ai relay setup'
   const update = r.needsUpdate ? DIM(' (an update is ready: bridge-ai relay update)') : r.hosted ? DIM(' (Bridge AI\'s relay)') : ''
-  const limit = r.limit ? `\n            ${r.limit.why === 'day' ? `Today's allowance is used up; phones can connect again after ${new Date(r.limit.until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.` : r.limit.text}` : ''
+  const at = r.limit && new Date(r.limit.until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  const limit = r.limit ? `\n            ${r.limit.why === 'day' ? `Today's allowance is used up; phones can connect again after ${at}.` : r.limit.why === 'all' ? `Bridge AI's relay has carried all it can today, for everyone on it; phones can connect again after ${at}.` : r.limit.text}` : ''
   return (r.online ? `online at ${r.url}${update}` : `offline${r.error ? `: ${r.error}` : ', connecting'} (${r.url})`) + limit
 }
 const phoneLine = (d) => `${d.name}  ${DIM(d.connected ? 'connected now' : `last seen ${ago(d.lastSeen)}`)}`
@@ -223,7 +225,13 @@ async function hostedSetup(args) {
   if (before.configured && before.hosted) return console.log(`Relay: ${relayLine(before)}`)
   if (before.configured) await switching(before, 'Bridge AI\'s relay', args)
   console.log(DIM('Setting up Bridge AI\'s relay...'))
-  await api('/relay/deploy', { method: 'POST', body: { method: 'hosted' } })
+  try {
+    await api('/relay/deploy', { method: 'POST', body: { method: 'hosted' } })
+  } catch (e) {
+    // Full for now: the other ways, as Settings › Devices offers them.
+    if (e.code === 'hostedFull') e.message += `\n\nOther ways to reach this computer from your phone:\n  bridge-ai relay setup     a relay on your own Cloudflare account (free)\n  bridge-ai start phone     through Tailscale, if it's on this computer and your phone`
+    throw e
+  }
   let s = await api('/relay')
   for (let i = 0; i < 15 && !s.online; i++) { await sleep(1000); s = await api('/relay') }
   console.log(`\nRelay: ${relayLine(s)}`)

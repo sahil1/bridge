@@ -93,6 +93,7 @@ const SUITES = [
   { name: 'site', build: null, browser: true, covers: [/^site\//, /^\.github\/workflows\/android\.yml$/, /^README\.md$/] },
   { name: 'counts-server', build: null, covers: [/^counts\//, /^shared\/(telemetry-schema\.json|crashreport\.js|private\.js)$/, /^server\/(counts|crashes)\.js$/, /^PRIVACY\.md$/, /^src\/components\/settings\/UsageCounts\.jsx$/] },
   { name: 'relay-hosted', build: null, covers: [/^relay\/(worker|build)\.js$/, /^relay\/(HOSTED\.md|wrangler\.hosted\.toml)$/, /^server\/hosted\.js$/, /^(PRIVACY|TERMS)\.md$/] },
+  { name: 'relay-hosted-ui', build: 'dist', browser: true, covers: [/^relay\/worker\.js$/, /^server\/(relay|hosted)\.js$/, /^scripts\/cli\.js$/, /^src\/components\/(Onboarding|OnboardingPhone)\.jsx$/, /^src\/components\/settings\/(Relay|Phone)\.jsx$/, /^test\/stand-ins\/hosted-relay\.mjs$/] },
   { name: 'privacy-hosts', build: null, covers: [/^server\//, /^desktop\//, /^shared\//, /^PRIVACY\.md$/] },
 ]
 // A change to these runs everything.

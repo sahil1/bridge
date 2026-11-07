@@ -88,6 +88,7 @@ const NO_NET = /ENOTFOUND|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|ENETDOWN|EADDRNOTAV
 let failed = null // how the last try failed: { code } when nothing answered, { status } when the relay did
 let limit = null // what Bridge AI's relay last said about its limits: { why, text, until }
 let plan = null // and this computer's plan there: { plan, dayMessages, dayMB, phones, resets }
+let hostedFull = null // Bridge AI's relay turned this computer away as full: { at, text }, said for an hour
 let pinger = null
 let hostKey = null // { privateKey, public }
 let awakeProc = null // what keeps this computer awake, while it does (holdAwake)
@@ -155,6 +156,7 @@ export function status() {
     account: conf.hosted ? null : conf.cf?.accountName || null,
     hosted: !!conf.hosted, // on Bridge AI's relay
     hostedAvailable: !!hostedBase(), // Bridge AI's relay is offered at all
+    hostedFull: hostedFull && hostedFull.at > Date.now() - 3600000 ? hostedFull.text : null, // ...but it was full just now
     limit: limit && limit.until > Date.now() ? limit : null,
     plan: conf.hosted ? plan : null,
     needsUpdate: !!(!conf.hosted && online && relayBuild && relayBuild !== relayCode().build),
@@ -246,8 +248,9 @@ function connect() {
     conns.clear()
     link = null
     if (!conf.url || !conf.token) return
-    // Bridge AI's relay said to wait (it's switched off, or doesn't know this computer): until then.
-    const wait = conf.hosted && limit?.until > Date.now() && (limit.why === 'off' || limit.why === 'gone') ? limit.until - Date.now() + Math.random() * 60000 : 0
+    // Bridge AI's relay said to wait (it's switched off, doesn't know this computer, or let it go for
+    // the day for sending on past its limits): until then.
+    const wait = conf.hosted && limit?.until > Date.now() && ['off', 'gone', 'shut'].includes(limit.why) ? limit.until - Date.now() + Math.random() * 60000 : 0
     const offNet = !wait && failed?.code && (!conf.hosted || NO_NET.test(failed.code))
     retry = setTimeout(connect, offNet ? Math.min(backoff, OFF_NET_TRY) + Math.random() * 500 : Math.max(backoff, wait))
     backoff = Math.min(backoff * 2, 60000)
@@ -891,7 +894,13 @@ async function useHosted() {
   try {
     const res = await fetch(`${where}/_relay/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version: VERSION }), signal: AbortSignal.timeout(20000) })
     const d = await res.json().catch(() => ({}))
+    // Full (it takes so many computers at once): said wherever it's offered, with the other ways.
+    if (d.why === 'full') {
+      hostedFull = { at: Date.now(), text: String(d.error || 'Bridge AI\'s relay is full for now.').slice(0, 400) }
+      throw Object.assign(new Error(hostedFull.text), { code: 'hostedFull' })
+    }
     if (!res.ok || !d.id || !d.url || !d.token) throw new Error(d.error || `Bridge AI's relay answered ${res.status}. Try again in a minute.`)
+    hostedFull = null
     let ok = false
     try { const u = new URL(d.url); ok = u.protocol === new URL(where).protocol && u.host === `${d.id}.${new URL(where).host}` } catch { /* not a URL */ }
     if (!ok) throw new Error('Bridge AI\'s relay gave an address that isn\'t its own')
@@ -901,6 +910,7 @@ async function useHosted() {
     save()
     connect()
   } catch (e) {
+    if (e.code === 'hostedFull') throw e // said by status().hostedFull (for an hour), not as an error
     lastError = e.name === 'TimeoutError' ? 'Bridge AI\'s relay didn\'t answer. Try again in a minute.' : /fetch failed|ENOTFOUND|ECONNREFUSED/.test(e.message) ? 'Can\'t reach Bridge AI\'s relay. Check the internet connection and try again.' : e.message
     throw new Error(lastError)
   } finally {
