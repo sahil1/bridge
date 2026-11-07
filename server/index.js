@@ -64,6 +64,7 @@ import * as meetings from './meetings.js'
 import * as boards from './boards.js'
 import * as labs from './labs.js'
 import * as meetMemory from './meetmemory.js'
+import * as memoryView from './memoryview.js'
 import * as voices from './voices.js'
 import * as meetWork from './meetwork.js'
 import * as meetInsights from './meetinsights.js'
@@ -351,7 +352,7 @@ const rootOf = async (pane) => {
 // ---------- Beta features ----------
 // Still being finished, so hidden until turned on in Settings › About & Updates › Beta Features
 // (trials: { studio: true } in the config; src/trials.js). Their routes answer only then.
-const TRIALS = ['studio', 'home', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights', 'signature-assist']
+const TRIALS = ['studio', 'home', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights', 'signature-assist', 'memory']
 const trialOn = (id) => cfg.trials?.[id] === true
 const trialOff = (id, label) => (req, res, next) => (trialOn(id) ? next() : res.status(404).json({ error: `${label} is a beta feature. Turn it on in Settings › About & Updates › Beta Features.`, trial: id }))
 
@@ -1368,7 +1369,8 @@ app.post('/api/dictation/tidy', async (req, res) => {
     const into = typeof req.body?.app === 'string' ? req.body.app.slice(0, 80) : null
     // The local model still loading (started as the key went down, after a while unused): 2 s more.
     const more = model === llm.ID && llm.loading() ? 2000 : 0
-    const out = await dictation.tidy({ text: req.body?.text, app: into, model, reply: (id, msgs, o) => chatModels.reply(id, msgs, { ...o, feature: 'dictation' }), more })
+    // With About you on (Memory, a beta feature), the names in it, so they come out spelled right.
+    const out = await dictation.tidy({ text: req.body?.text, app: into, model, reply: (id, msgs, o) => chatModels.reply(id, msgs, { ...o, feature: 'dictation' }), more, names: meetMemory.personaNames() })
     res.json({ ...out, model, by: tidyLabel(model) })
   } catch (e) { res.status(e.status || 502).json({ error: e.message, code: e.code || 'failed' }) }
 })
@@ -1378,7 +1380,9 @@ app.post('/api/dictation/tidy', async (req, res) => {
 dictations.configure(cfg, { agent: (id) => { const a = lastFleet?.agents?.find((x) => x.paneId === id); return a ? { name: a.chief ? 'Chief of Staff' : a.title || a.tab || a.workspace || '', chief: !!a.chief } : null } })
 const said = (fn) => async (req, res) => { try { res.json(await fn(req)) } catch (e) { res.status(e.status || 502).json({ error: e.message }) } }
 app.get('/api/dictations', said((req) => dictations.list({ q: String(req.query.q || ''), before: req.query.before || null, limit: req.query.limit })))
-app.post('/api/dictations', said((req) => (req.body?.restore ? dictations.add(req.body.restore, { restore: true }) : (counts.add('dictations.saved'), dictations.add(req.body || {})))))
+// With Memory on, the names said in each one kept go on memory's names (memoryview.js said).
+const toMemory = (r) => { if (r?.kept && r.id && meetMemory.pageOn()) dictations.get(r.id).then((d) => memoryView.said(d)).catch(() => {}); return r }
+app.post('/api/dictations', said(async (req) => toMemory(await (req.body?.restore ? dictations.add(req.body.restore, { restore: true }) : (counts.add('dictations.saved'), dictations.add(req.body || {}))))))
 app.delete('/api/dictations', said(() => dictations.clear()))
 app.get('/api/dictations/icons/:bundle', async (req, res) => {
   const f = dictations.iconFile(req.params.bundle)
@@ -1387,7 +1391,7 @@ app.get('/api/dictations/icons/:bundle', async (req, res) => {
 })
 app.get('/api/dictations/:id', said((req) => dictations.get(req.params.id)))
 app.patch('/api/dictations/:id', said((req) => dictations.update(req.params.id, req.body || {})))
-app.delete('/api/dictations/:id', said((req) => dictations.remove(req.params.id)))
+app.delete('/api/dictations/:id', said(async (req) => { const r = await dictations.remove(req.params.id); meetMemory.forgetDictations([r.deleted?.id]); return r }))
 app.post('/api/dictations/:id/audio', express.raw({ type: () => true, limit: '60mb' }), said((req) => dictations.saveAudio(req.params.id, req.body)))
 app.get('/api/dictations/:id/audio', async (req, res) => {
   try { res.type('audio/wav').sendFile(await dictations.audioFile(req.params.id), { dotfiles: 'allow' }) } catch (e) { res.status(e.status || 502).json({ error: e.message }) }
@@ -1400,6 +1404,9 @@ setInterval(() => dictations.tidy().catch(() => {}), 6 * 60 * 60 * 1000).unref()
 
 // ---------- Meeting notes (meetings.js; speech engines in speech.js) ----------
 meetings.configure(cfg)
+meetMemory.configure(cfg)
+memoryView.configure(cfg, { chief: CHIEF_DIR })
+memoryView.keepFresh()
 voices.configure(cfg)
 // Used once, Who spoke in a room turns telling voices apart on for the meetings after.
 voices.setSaver(async (p) => afterChange(settings.patch({ meetings: p })))
@@ -1537,9 +1544,18 @@ app.get('/api/meetings/memory', wrap(() => {
   const seen = all.filter((m) => ids.has(m.id)).map((m) => [m.id, { title: m.title, startedAt: m.startedAt, series: n.get(key(m)) >= 3 ? key(m) : null }])
   return { terms, meetings: Object.fromEntries(seen) }
 }))
-app.post('/api/meetings/memory', wrap((req) => meetMemory.add({ term: req.body?.term, heard: req.body?.heard, note: req.body?.note })))
+app.post('/api/meetings/memory', wrap((req) => meetMemory.add({ term: req.body?.term, heard: req.body?.heard, note: req.body?.note, kind: req.body?.kind })))
 app.patch('/api/meetings/memory/:tid', wrap((req) => meetMemory.update(req.params.tid, req.body || {})))
 app.delete('/api/meetings/memory/:tid', wrap((req) => meetMemory.remove(req.params.tid)))
+// Memory as a page (memoryview.js), a beta feature: its collections, what looks the same (merged
+// or kept apart), what looks like it adds little (taken out or kept, as you pick), and About you.
+app.use('/api/memory', trialOff('memory', 'Memory'))
+app.get('/api/memory', wrap(() => memoryView.view()))
+app.post('/api/memory/merge', wrap((req) => meetMemory.merge(String(req.body?.into || ''), String(req.body?.from || ''))))
+app.post('/api/memory/apart', wrap((req) => meetMemory.apart(String(req.body?.a || ''), String(req.body?.b || ''))))
+app.post('/api/memory/tidy', wrap((req) => ({ ...meetMemory.removeMany([].concat(req.body?.remove || []).slice(0, 2000)), ...meetMemory.keep([].concat(req.body?.keep || []).slice(0, 2000)) })))
+app.post('/api/memory/about', wrap((req) => memoryView.setAboutYou(req.body || {})))
+app.post('/api/memory/people/keep', wrap((req) => memoryView.keepPerson(String(req.body?.id || ''))))
 // Where notes are saved (Settings › Meetings), the example it shows, and meetings saved elsewhere.
 app.get('/api/meetings/saving', wrap(() => {
   const o = meetings.saving()
@@ -2448,6 +2464,7 @@ function applyConfig() {
   TZ = cfg.location?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone
   weather = makeWeather(cfg)
   prepareChief(cfg)
+  memoryView.sync() // About you in Chief of Staff's folder, as Memory and About you are
   // The herdr session in view (the sidebar's session menu, Settings), at once.
   if (rt.name === 'herdr') {
     const before = herdrSession()

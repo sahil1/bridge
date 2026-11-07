@@ -117,11 +117,13 @@ const TIDY_SYSTEM = [
 // the same everywhere.
 const STYLES = {}
 export const styleFor = (app) => STYLES[String(app || '').trim().toLowerCase()] || null
-export function tidyPrompt(text, { app = null } = {}) {
+// names: the names this person says most (About you, with Memory on), for their spelling only.
+export function tidyPrompt(text, { app = null, names = [] } = {}) {
   const style = styleFor(app)
   // The fence can't be closed from inside: a tag in what was heard is taken out.
   const said = String(text || '').replace(/<\s*\/?\s*dictation\s*>/gi, ' ').replace(/[ \t]{2,}/g, ' ').trim()
-  return { system: style ? `${TIDY_SYSTEM}\n\nIt's going into ${app}: ${style}` : TIDY_SYSTEM, user: `<dictation>\n${said}\n</dictation>` }
+  const spell = names.length ? `\n\nNames this person often says, spelled the way they write them (only for spelling; never add one that wasn't said): ${names.slice(0, 30).join(', ')}.` : ''
+  return { system: `${TIDY_SYSTEM}${spell}${style ? `\n\nIt's going into ${app}: ${style}` : ''}`, user: `<dictation>\n${said}\n</dictation>` }
 }
 
 // Whether the model's answer is what was said, tidied: null, or why not ('added', 'dropped'). Its
@@ -167,12 +169,12 @@ export const TIDY_MAX = 4000
 // { text, ms }, or an error with its status and code: slow (past the budget), failed (the model's
 // own error), changed (not what was said), long. reply: chatmodels.js reply; ms: the budget, else
 // tidyBudget's and more.
-export async function tidy({ text, app = null, model, reply, ms = null, more = 0 }) {
+export async function tidy({ text, app = null, model, reply, ms = null, more = 0, names = [] }) {
   const said = String(text || '').trim()
   if (!said) throw Object.assign(new Error('Nothing was said'), { status: 400 })
   if (said.length > TIDY_MAX) throw Object.assign(new Error('That\'s more than tidying takes (4,000 characters)'), { status: 413, code: 'long' })
   const budget = ms ?? tidyBudget(model, wordsOf(said).length) + more
-  const { system, user } = tidyPrompt(said, { app })
+  const { system, user } = tidyPrompt(said, { app, names })
   const stop = new AbortController()
   const t0 = Date.now()
   let timer

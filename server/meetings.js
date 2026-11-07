@@ -1637,8 +1637,8 @@ export const KINDS = {
 
 // A small model on this computer copies a prompt's examples into its answer (the example company
 // went into meeting memory as if it had been in the meeting), so it gets placeholders instead.
-const TERMS_EXAMPLE = '```terms\n{"names": ["Acme", "Northwind Traders"], "misheard": {"Ack me": "Acme"}, "about": {"Priya Shah": "head of data at Northwind, the main contact there"}}\n```'
-const TERMS_SHAPE = '```terms\n{"names": ["<a name said in this meeting>"], "misheard": {"<the name as transcribed>": "<as it should be>"}, "about": {"<a name>": "<who or what it is>"}}\n```'
+const TERMS_EXAMPLE = '```terms\n{"people": ["Priya Shah"], "organisations": ["Acme", "Northwind Traders"], "projects": ["Atlas"], "terms": ["SKU sync"], "misheard": {"Ack me": "Acme"}, "about": {"Priya Shah": "head of data at Northwind, the main contact there"}}\n```'
+const TERMS_SHAPE = '```terms\n{"people": ["<a person named in this meeting>"], "organisations": ["<a company or organisation>"], "projects": ["<a product or project>"], "terms": ["<jargon special to this work>"], "misheard": {"<the name as transcribed>": "<as it should be>"}, "about": {"<a name>": "<who or what it is>"}}\n```'
 const summaryRules = (local) => SUMMARY_RULES.replace(TERMS_EXAMPLE, local ? TERMS_SHAPE : TERMS_EXAMPLE)
 const SUMMARY_RULES = [
   'Write meeting notes in Markdown with these sections, leaving out any that would be empty:',
@@ -1651,7 +1651,7 @@ const SUMMARY_RULES = [
   'In the transcript, "You" is the person who recorded it (their microphone) and "Them" is everyone on the call.',
   'Speech to text mishears names. Write names the way the meeting memory, the title, the people invited or the user\'s notes spell them.',
   'When there are words from the screen or files and emails that go with the meeting, use them for names, numbers and what was being shown, and say when a point is from a slide or a document. The meeting comes first: don\'t summarize the files on their own.',
-  `After the notes, add one fenced block for Bridge AI (it is removed from the notes), like this:\n${TERMS_EXAMPLE}\n"names": the proper nouns in this meeting (people, companies, products, places, acronyms), spelled as they should be. "misheard": only clear speech-to-text mistakes of a name, as transcribed: as it should be. "about": who or what a name is, in a few words, only when this meeting makes it clear (a person\'s role and company and how they relate to the person who recorded it; what a product or project is), for the meetings after. Empty when there are none.`,
+  `After the notes, add one fenced block for Bridge AI (it is removed from the notes), like this:\n${TERMS_EXAMPLE}\n"people", "organisations", "projects" (products, projects and tools by name) and "terms" (jargon and acronyms special to this work): the names in this meeting, spelled as they should be. Leave out places, languages, days and months, and everyday words and acronyms anyone would spell right (CEO, API, Q3). "misheard": only clear speech-to-text mistakes of a name, as transcribed: as it should be. "about": who or what a name is, in a few words, only when this meeting makes it clear (a person\'s role and company and how they relate to the person who recorded it; what a product or project is), for the meetings after. Empty when there are none.`,
 ].join('\n')
 export const SUMMARY_LANGS = { auto: null, en: 'English', es: 'Spanish', fr: 'French', de: 'German', it: 'Italian', pt: 'Portuguese', nl: 'Dutch', hi: 'Hindi', zh: 'Chinese', ja: 'Japanese', ko: 'Korean', ar: 'Arabic' }
 
