@@ -1,7 +1,9 @@
 // The app as a whole, on any platform and in the browser named by BRIDGE_TEST_BROWSER (Chromium,
 // or WebKit, the engine of Safari and the iPhone app): it loads in a light colour theme, a dark one
 // and at phone width without page errors or sideways scrolling; the sidebar, ⌘K and Settings
-// open (its section names in Title Case); and a New terminal runs a command typed into it. And
+// open (its section names in Title Case); and a New terminal runs a command typed into it. Its
+// views fetched ahead while the computer can't be reached: once it's back, Settings opens with its
+// look, and a view opened meanwhile says it hit an error, then opens with Try again. And
 // when the whole window breaks (a crash made on cue): a brief one just after it opened gone by
 // itself; one that stays, tried again twice, then the way back in the middle of the window with a
 // newer version offered straight away, Copy details, the crash written down on the computer, Reset
@@ -24,7 +26,7 @@
 // your devices alone.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, checks, until, browser, page, shot, solid, noServiceWorker, changeAnswer, IS_WIN } from '../lib/harness.mjs'
+import { startKit, checks, until, browser, page, shot, solid, noServiceWorker, changeAnswer, IS_WIN, ROOT } from '../lib/harness.mjs'
 
 const { ok, done } = checks('app-ui')
 const kit = await startKit('app-ui')
@@ -95,6 +97,41 @@ try {
   await shot(ph.p, `${tag}phone`)
   ok(ph.errors.length === 0, 'phone: no page errors', ph.errors)
   await ph.ctx.close()
+
+  // ---------- Out of reach as it fetches its views ahead ----------
+  // (A phone opened as its link to the computer drops a moment, or the computer starting again.) The
+  // views' files can't be had as the page fetches them ahead; back, Settings opens with its look
+  // (WebKit kept a file that had failed as failed until a reload, and Settings' styles were never
+  // asked for again). A view opened while they still can't be had says so, and Try again opens it
+  // once they can.
+  {
+    const html = fs.readFileSync(path.join(ROOT, 'dist', 'index.html'), 'utf8')
+    const first = new Set([...html.matchAll(/assets\/([^"]+)"/g)].map((m) => m[1])) // what the page loads itself
+    let cut = true
+    const turned = []
+    const { ctx, p } = await page(b, kit.url, {
+      before: async (c) => {
+        await noServiceWorker(c)
+        await c.route(/\/assets\//, (r) => { const f = r.request().url().split('/').pop(); if (!cut || first.has(f)) return r.continue(); turned.push(f); return r.abort() })
+      },
+    })
+    await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
+    ok(!!(await until(() => turned.some((f) => /^Settings-/.test(f)), 10000, 100)), 'out of reach: the views it fetches ahead don\'t come', turned)
+    cut = false
+    await p.locator('button[aria-label="Settings"]').first().click()
+    // (A stylesheet that failed has no rules to read: WebKit and Chromium refuse to, as from elsewhere.)
+    const look = () => p.evaluate(() => [...document.querySelectorAll('link[rel="stylesheet"][href*="assets/"]')].map((l) => { try { return [l.href.split('/').pop(), l.sheet?.cssRules.length || 0] } catch { return [l.href.split('/').pop(), 0] } }))
+    ok(!!(await until(async () => (await p.locator('.modal.settings').count()) > 0 && (await look()).every(([, n]) => n > 0), 8000, 200)), 'back: Settings opens, with its look (each of the app\'s stylesheets there)', { settings: await p.locator('.modal.settings').count(), look: await look() })
+    await p.keyboard.press('Escape')
+    cut = true
+    await p.locator('.rail-nav-btn', { hasText: 'Meetings' }).first().click()
+    ok(!!(await until(async () => /hit an error/.test(await p.locator('.crash').innerText().catch(() => '')), 8000, 200)), 'out of reach again: a view not fetched yet says it hit an error, with Try again', await p.locator('.crash').innerText().catch(() => ''))
+    cut = false
+    await p.locator('.crash button', { hasText: 'Try again' }).click()
+    ok(!!(await until(() => p.locator('.mt-view .pane-head').first().isVisible(), 8000, 200)), 'back: Try again opens it', await p.locator('.crash').innerText().catch(() => ''))
+    await shot(p, `${tag}views-back`)
+    await ctx.close()
+  }
 
   // ---------- The phone's top bar, with everything in it at once ----------
   const soon = new Date(Date.now() + 20 * 6e4)
@@ -292,7 +329,8 @@ try {
   const deskBar = (p) => p.evaluate(() => {
     const bar = document.querySelector('.topbar')
     const br = bar.getBoundingClientRect()
-    const name = (e) => `${(e.getAttribute('aria-label') || e.innerText || e.className).trim().replace(/\s+/g, ' ').slice(0, 40)} <${e.tagName.toLowerCase()}.${String(e.className).split(' ')[0]}>`
+    // An icon (SVG) has no innerText, and its className isn't a string: its class attribute is.
+    const name = (e) => `${(e.getAttribute('aria-label') || e.innerText || e.textContent || e.getAttribute('class') || '').trim().replace(/\s+/g, ' ').slice(0, 40)} <${e.tagName.toLowerCase()}.${(e.getAttribute('class') || '').split(' ')[0]}>`
     const inPop = (e) => e.closest('.status-pop, .acct-pop, .update-pop, .rec-menu, .menu')
     const out = { over: bar.scrollWidth - bar.clientWidth, past: [], squeezed: [], broken: [] }
     for (const e of bar.querySelectorAll('*')) {
@@ -327,6 +365,19 @@ try {
     out.fit = [...bar.classList].filter((c) => c.startsWith('fit-')).length
     return out
   })
+  // The bar once it's done giving way: it fits itself on the frame after anything in it changes size,
+  // and the Status button's count is drawn after that (which can change what fits again), so it's
+  // read when two looks, two frames apart, agree.
+  const settledBar = async (p) => {
+    let was = null
+    for (let i = 0; i < 20; i++) {
+      const x = await deskBar(p)
+      if (was && JSON.stringify(x) === JSON.stringify(was)) return x
+      was = x
+      await p.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
+    }
+    return was
+  }
   const statusRows = async (p) => {
     const pop = p.locator('.status-pop')
     if (!(await pop.count())) await p.locator('.topbar .status-btn').click()
@@ -338,8 +389,7 @@ try {
     return text
   }
   const checkBar = async (p, t) => {
-    await p.waitForTimeout(500)
-    const bar = await deskBar(p)
+    const bar = await settledBar(p)
     ok(bar.over <= 0 && !bar.past.length, `${t}: nothing runs past the bar`, { over: bar.over, past: bar.past })
     ok(!bar.squeezed.length && !bar.broken.length, `${t}: nothing narrower than what it says, nothing on two lines`, { squeezed: bar.squeezed, broken: bar.broken })
     ok(bar.name === LONG_NAME, `${t}: a long computer name is whole on hover`, { name: bar.name })
@@ -496,8 +546,8 @@ try {
     ok(!!bar, 'switched there: the update back in the bar, the clock out of it', bar?.has)
     // Pinned again, an update with no room is counted on Status.
     await p.setViewportSize({ width: 900, height: 900 })
-    bar = await until(async () => { const x = await deskBar(p); return x.pinned.includes('update') && !x.has.update && x }, 4000)
-    ok(!!bar && bar.count === 1, 'at 900, the pinned update with no room is counted on Status', bar && { count: bar.count, has: bar.has })
+    bar = await settledBar(p)
+    ok(bar.pinned.includes('update') && !bar.has.update && bar.count === 1, 'at 900, the pinned update with no room is counted on Status', { count: bar.count, has: bar.has })
     ok(errors.filter((e) => !/herdr|WebSocket|socket/i.test(e)).length === 0, 'pins: no page errors', errors)
     await ctx.close()
   }

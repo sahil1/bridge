@@ -44,6 +44,9 @@ const ROWS = Number(process.env.BRIDGE_ROWS) || 40
 let spaces = [] // { id, label, fresh } (fresh: made empty from the UI and nothing put in it yet)
 let tabs = [] // { tabId, workspaceId, label }
 const panes = new Map() // paneId -> live pane
+// Saved ones restore hasn't reopened yet (as saved): still saved meanwhile, so a stop before they're
+// back (the server answers after 3 s whether or not they are) doesn't forget them.
+let reopening = new Map()
 let nextId = 1
 let stopping = false
 const id = () => nextId++
@@ -67,7 +70,7 @@ function save() {
   // version and at: whether what ends up reopening them was an update or the computer restarting.
   const out = {
     nextId, spaces, tabs, version: VERSION, at: Date.now(),
-    panes: [...panes.values()].map((p) => ({ paneId: p.paneId, tabId: p.tabId, workspaceId: p.workspaceId, kind: p.kind, cwd: p.cwd, model: p.model, sessionId: p.sessionId, account: p.account, ...(p.env ? { env: p.env } : {}), ...(p.midTask ? { midTask: true } : {}), ...(p.continuedAt ? { continuedAt: p.continuedAt } : {}) })),
+    panes: [...panes.values(), ...[...reopening.values()].filter((p) => !panes.has(p.paneId))].map((p) => ({ paneId: p.paneId, tabId: p.tabId, workspaceId: p.workspaceId, kind: p.kind, cwd: p.cwd, model: p.model, sessionId: p.sessionId, account: p.account, ...(p.env ? { env: p.env } : {}), ...(p.midTask ? { midTask: true } : {}), ...(p.continuedAt ? { continuedAt: p.continuedAt } : {}) })),
   }
   // Whole or not at all: which agents to reopen, and which were mid-task, survive a crash mid-save.
   try { writeFileAtomic(STATE, JSON.stringify(out, null, 2)) } catch { /* read-only disk: keep going */ }
@@ -259,6 +262,7 @@ export async function restore({ keep = true } = {}) {
   tabs = s.tabs || []
   nextId = s.nextId || 1
   const saved = new Map((s.panes || []).map((p) => [p.paneId, p]))
+  reopening = saved
   // Why the ones that have to start again ended: an update, the computer restarting, or Bridge AI
   // stopping (a crash, or quitting with Keep agents running off).
   const booted = Date.now() - os.uptime() * 1000
@@ -281,6 +285,7 @@ export async function restore({ keep = true } = {}) {
   }
   for (const p of saved.values()) {
     try { const back = await spawnPane({ ...p, resume: true }); if (p.midTask) carryOn(back, why) } catch { /* agent no longer installed */ }
+    saved.delete(p.paneId)
   }
   tabs = tabs.filter((t) => [...panes.values()].some((p) => p.tabId === t.tabId))
   prune()

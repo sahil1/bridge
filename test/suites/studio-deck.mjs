@@ -18,7 +18,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
-import { startKit, startModel, checks, until, sleep, browser, page, shot, phoneFaults, ROOT } from '../lib/harness.mjs'
+import { startKit, startModel, checks, until, sleep, browser, page, shot, phoneFaults, noServiceWorker, ROOT } from '../lib/harness.mjs'
 
 const require = createRequire(path.join(ROOT, 'package.json'))
 const JSZip = require('jszip')
@@ -401,6 +401,46 @@ try {
   await p.locator('.pane-head button', { hasText: 'Save' }).click()
   ok(!!(await until(async () => /# Replaced twice/.test((await read('theirs.pptx'))?.md || ''), 10000, 300)) && (await dialog.count()) === 0, 'and from then on it saves over it without asking again')
   ok(w.errors.length === 0, 'no page errors', w.errors)
+  // Studio's own save isn't a change from outside. A look at whether the file changed, sent just
+  // before a save and answered after it, saw the save: the deck was loaded again (back to slide 1,
+  // what was being done in it lost) and "Another app changed it" said. Now it stays as it is, and a
+  // change from outside after it is still shown.
+  fs.writeFileSync(path.join(dir, 'race.md'), DECK)
+  let hold = false
+  const held = []
+  const rc = await page(b, kit.url, { width: 1440, height: 900, before: async (c) => { await noServiceWorker(c); await c.route(/\/api\/studio\/changed/, (r) => (hold ? held.push(r) : r.continue())) } })
+  pages.push(rc)
+  const rp = rc.p
+  const rThumbs = rp.locator('.sd-strip .sd-thumb')
+  const rBar = () => rp.locator('.sd-bar').innerText().catch(() => '')
+  await rp.waitForSelector('.rail-nav-btn', { timeout: 15000 })
+  await opened(rp, 'race.md')
+  await until(async () => (await rThumbs.count()) === 6, 10000)
+  await rThumbs.nth(2).locator('.sd-thumb-btn').click()
+  await rp.locator('.sd-canvas section[id] h1.sd-ed').click()
+  await rp.keyboard.press(`${MOD}+a`)
+  await rp.keyboard.type('What changed here')
+  await rp.keyboard.press('Escape')
+  await until(async () => /Unsaved/.test(await rp.locator('.sd-status .sd-state').innerText()), 5000, 100)
+  hold = true
+  await rp.evaluate(() => window.dispatchEvent(new Event('focus'))) // Studio looks at once
+  const looked = await until(() => held.length > 0, 5000, 50)
+  await rp.keyboard.press(`${MOD}+s`)
+  await until(async () => /Saved/.test(await rp.locator('.sd-status .sd-state').innerText()), 8000, 100)
+  hold = false
+  const answered = rp.waitForResponse(/\/api\/studio\/changed/, { timeout: 5000 }).catch(() => null)
+  for (const r of held.splice(0)) await r.continue()
+  await answered
+  // Given time to load it again, as it did.
+  const raced = async () => ({ status: (await rp.locator('.sd-status').innerText()).replace(/\s+/g, ' '), bar: await rBar(), conflict: await rp.locator('.sd-conflict').count(), title: await rp.locator('.sd-canvas section[id] h1').innerText().catch(() => '') })
+  const reloaded = await until(async () => { const x = await raced(); return (!/Slide 3 of 6/.test(x.status) || /changed it/.test(x.bar) || x.conflict) && x }, 3000, 100)
+  const now = reloaded || await raced()
+  const rVersions = (await api(`/studio/versions?root=${encodeURIComponent(root)}&path=race.md`)).versions.map((v) => v.by)
+  ok(!!looked && !reloaded && /What changed here/.test(now.title) && rVersions[0] === 'you' && !rVersions.includes('outside'), 'a look at the file sent before your save and answered after it: the deck stays as it is (the slide you\'re on, nothing said), and the save is your version', { ...now, versions: rVersions })
+  await sleep(50)
+  fs.writeFileSync(path.join(dir, 'race.md'), fs.readFileSync(path.join(dir, 'race.md'), 'utf8').replace('# Why now', '# Why now, from outside'))
+  await rp.evaluate(() => window.dispatchEvent(new Event('focus')))
+  ok(!!(await until(async () => /from outside/.test(await rThumbs.nth(1).innerText().catch(() => '')) && /Another app changed it/.test(await rBar()), 8000, 100)), 'and a change from outside after it is still shown, and said', await rBar())
   // In the dark, the same deck.
   const dk = await page(b, kit.url, { width: 1440, height: 900, mode: 'dark' })
   pages.push(dk)

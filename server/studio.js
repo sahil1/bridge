@@ -189,32 +189,50 @@ export async function open(root, rel, { rootId = null, label = null } = {}) {
   return { path: r, name: path.basename(real), kind, ext: path.extname(real).toLowerCase(), size: st.size, mtime: st.mtimeMs, versions: shown(await versionsOf(real)) }
 }
 
+// Studio's writes to a file (a save, a version put back) and the looks at whether it changed, one
+// at a time per file: a look never sees a save half written, or written and not yet kept as yours
+// (it took it for a change from outside, and kept a version by "outside" of your own save).
+const turns = new Map() // real -> the last one's promise
+function inTurn(real, fn) {
+  const run = (turns.get(real) || Promise.resolve()).then(fn)
+  const tail = run.catch(() => {})
+  turns.set(real, tail)
+  tail.then(() => { if (turns.get(real) === tail) turns.delete(real) })
+  return run
+}
+
 // Saved from Studio: only if nobody changed it since you opened it (mtime: what you loaded),
 // unless force. What was there is kept first, if it isn't already.
 export async function save(root, rel, buf, { mtime, force = false } = {}) {
   if (!Buffer.isBuffer(buf)) throw new Error('Expected the file')
   if (buf.length > MAX_BYTES) throw new Error('Too big to save (80 MB at most)')
-  const { real, st } = await locate(root, rel)
-  if (!force && mtime != null && Math.abs(st.mtimeMs - Number(mtime)) > 1) {
-    throw Object.assign(new Error('The file changed since you opened it (an agent, or another app). Open its newest version, or save yours over it.'), { conflict: true, status: 409 })
-  }
-  const w = whoChanged(real)
-  await snapshot(real, w.by, { name: w.name })
-  await fsp.writeFile(real, buf)
-  await snapshot(real, 'you', { buf })
-  const after = await fsp.stat(real)
-  return { mtime: after.mtimeMs, size: after.size, versions: shown(await versionsOf(real)) }
+  const { real } = await locate(root, rel)
+  return inTurn(real, async () => {
+    const st = await fsp.stat(real)
+    if (!force && mtime != null && Math.abs(st.mtimeMs - Number(mtime)) > 1) {
+      throw Object.assign(new Error('The file changed since you opened it (an agent, or another app). Open its newest version, or save yours over it.'), { conflict: true, status: 409 })
+    }
+    const w = whoChanged(real)
+    await snapshot(real, w.by, { name: w.name })
+    await fsp.writeFile(real, buf)
+    await snapshot(real, 'you', { buf })
+    const after = await fsp.stat(real)
+    return { mtime: after.mtimeMs, size: after.size, versions: shown(await versionsOf(real)) }
+  })
 }
 
 // Has it changed since `since` (its mtime when you loaded it)? Then the change is kept as a version,
 // by the agent asked or from outside, and the page offers to show it.
 export async function changed(root, rel, since) {
-  const { real, st } = await locate(root, rel)
-  if (since == null || Math.abs(st.mtimeMs - Number(since)) <= 1) return { changed: false, mtime: st.mtimeMs }
-  const w = whoChanged(real)
-  const v = await snapshot(real, w.by, { name: w.name })
-  if (w.by === 'agent') asked.delete(real)
-  return { changed: true, mtime: st.mtimeMs, size: st.size, by: v?.by || w.by, name: v?.name || null, versions: shown(await versionsOf(real)) }
+  const { real } = await locate(root, rel)
+  return inTurn(real, async () => {
+    const st = await fsp.stat(real)
+    if (since == null || Math.abs(st.mtimeMs - Number(since)) <= 1) return { changed: false, mtime: st.mtimeMs }
+    const w = whoChanged(real)
+    const v = await snapshot(real, w.by, { name: w.name })
+    if (w.by === 'agent') asked.delete(real)
+    return { changed: true, mtime: st.mtimeMs, size: st.size, by: v?.by || w.by, name: v?.name || null, versions: shown(await versionsOf(real)) }
+  })
 }
 
 export async function versions(root, rel) {
@@ -232,13 +250,15 @@ export async function versionFile(root, rel, id) {
 export async function restore(root, rel, id) {
   const { real } = await locate(root, rel)
   const { file } = await versionFile(root, rel, id)
-  const w = whoChanged(real)
-  await snapshot(real, w.by, { name: w.name })
-  const data = await fsp.readFile(file)
-  await fsp.writeFile(real, data)
-  await snapshot(real, 'restored', { buf: data })
-  const st = await fsp.stat(real)
-  return { mtime: st.mtimeMs, size: st.size, versions: shown(await versionsOf(real)) }
+  return inTurn(real, async () => {
+    const w = whoChanged(real)
+    await snapshot(real, w.by, { name: w.name })
+    const data = await fsp.readFile(file)
+    await fsp.writeFile(real, data)
+    await snapshot(real, 'restored', { buf: data })
+    const st = await fsp.stat(real)
+    return { mtime: st.mtimeMs, size: st.size, versions: shown(await versionsOf(real)) }
+  })
 }
 
 // A new file in a folder (relative to root), from the start the page made for it (buf), or empty

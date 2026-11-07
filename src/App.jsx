@@ -285,14 +285,17 @@ function App() {
   }, [fleet]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // The chief of staff is the first tab that loads, not a fixture: it's added only when no tabs are open.
-  // (Not while the herdr session is stopped: its tabs come back with it.)
+  // (Not while the herdr session is stopped: its tabs come back with it.) Only agents and shells that
+  // are gone are closed: a view or another device's agent is there as long as its tab is, and this
+  // render's byId can be a moment old (one opened just as the fleet came in isn't in it yet).
   useEffect(() => {
     if (!fleet || fleet.down) return
     setW((w) => {
-      const tabs = w.tabs.filter((id) => byId[id])
+      const open = (id) => isView(id) || isRemote(id) || !!byId[id]
+      const tabs = w.tabs.filter(open)
       if (!tabs.length && mate) return { ...w, tabs: [mate.paneId], active: mate.paneId, side: null, split: false }
-      const active = byId[w.active] ? w.active : tabs[0] || null
-      const side = byId[w.side] ? w.side : null
+      const active = open(w.active) ? w.active : tabs[0] || null
+      const side = open(w.side) ? w.side : null
       return tabs.length === w.tabs.length && active === w.active && side === w.side ? w : { ...w, tabs, active, side }
     })
   }, [fleet]) // eslint-disable-line react-hooks/exhaustive-deps

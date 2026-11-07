@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import Icon from '../components/Icon.jsx'
 import { VoiceSetup, MicFix } from '../components/Composer.jsx'
 import { parseKey, keyLabel, isKeyDown, isKeyUp } from '../../shared/dictation/keys.js'
-import { useDictation, getState, configure, setOnScreen, press, release, finish, cancel, dismiss, retry, targetFromFocus, isPaused, box, keysPlatform, dictationKey, listeningHint, answerOffer } from './controller.js'
+import { useDictation, getState, configure, setOnScreen, press, release, finish, cancel, dismiss, retry, targetFromFocus, isPaused, box, keysPlatform, dictationKey, listeningHint, answerOffer, eventTime } from './controller.js'
 import { t } from '../i18n/index.js'
 import { Morph, Listening, Working, Done } from './Pill.jsx'
 import './dictation.css'
@@ -35,7 +35,7 @@ export default function Dictation({ conf, onScreen }) {
       if (isKeyDown(e, k)) {
         if (!k.lone) { e.preventDefault(); e.stopPropagation() }
         held = true
-        if (!e.repeat && !isPaused()) press(targetFromFocus())
+        if (!e.repeat && !isPaused()) press(targetFromFocus(), eventTime(e))
         return
       }
       if (k?.lone && held && e.code !== 'ControlLeft') { held = false; if (getState().phase !== 'idle') cancel(); return }
@@ -44,7 +44,7 @@ export default function Dictation({ conf, onScreen }) {
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancel() }
       else if (e.key === 'Enter' && now.mode === 'free' && now.phase === 'listening') { e.preventDefault(); e.stopPropagation(); finish() }
     }
-    const up = (e) => { if (isKeyUp(e, k)) held = false; if (getState().phase !== 'idle' && isKeyUp(e, k)) { e.preventDefault(); release() } }
+    const up = (e) => { if (isKeyUp(e, k)) held = false; if (getState().phase !== 'idle' && isKeyUp(e, k)) { e.preventDefault(); release(eventTime(e)) } }
     // Let go while in another window: as if let go here.
     const blur = () => release()
     // From the desktop app (its key, heard while this window is in front), or a test.

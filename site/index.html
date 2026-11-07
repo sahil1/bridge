@@ -8,9 +8,10 @@
 <meta name="robots" content="noindex">
 <!-- Bridge AI's website moved to boldbridge.ai (its source is in the project's planning repo). This
      page, and demo/ and 404.html, send old links there: the script keeps what's after the # (an
-     old link to #android), and the refresh is for a browser with scripts off. -->
+     old link to #android), and the refresh is for a browser with scripts off. It's in <noscript>:
+     as well, it sometimes went first (Safari, a busy machine) and dropped the # and the path. -->
 <script>location.replace('https://boldbridge.ai/' + location.search + location.hash)</script>
-<meta http-equiv="refresh" content="0; url=https://boldbridge.ai/">
+<noscript><meta http-equiv="refresh" content="0; url=https://boldbridge.ai/"></noscript>
 <style>body { font: 16px/1.5 ui-sans-serif, -apple-system, "Segoe UI", sans-serif; margin: 40px 16px; text-align: center; color-scheme: light dark; }</style>
 </head>
 <body>

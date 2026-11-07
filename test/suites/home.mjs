@@ -358,12 +358,16 @@ try {
   const inMin = (n) => new Date(Date.now() + n * 6e4)
   // Today's two meetings both still today, whatever the time (late in the evening, 2½ hours on was
   // tomorrow): at a fifth and three fifths of what's left of the day, at most 25 and 150 minutes on.
+  // Not in whole minutes: two minutes before midnight, a minute and two minutes on were tomorrow.
   const dayLeft = (new Date(new Date().setHours(24, 0, 0, 0)) - Date.now()) / 6e4
-  const firstIn = Math.max(1, Math.min(25, Math.floor(dayLeft / 5))), nextIn = Math.max(2, Math.min(150, Math.floor(dayLeft * 0.6)))
+  const firstIn = Math.min(25, dayLeft / 5), nextIn = Math.min(150, dayLeft * 0.6)
   const ev = (id, title, start, mins, more = {}) => ({ id, title, canceled: false, calendar: 'Work', start: start.toISOString(), end: new Date(+start + mins * 6e4).toISOString(), allDay: false, attendees: [], attendeeCount: 3, ...more })
   const tomorrow = clock(10); tomorrow.setDate(tomorrow.getDate() + 1)
+  // The one meeting on two calendars starts at the same moment on both (two inMin()s can be a
+  // millisecond apart, and then they're two meetings).
+  const acme = inMin(firstIn)
   const morningCal = {
-    today: [ev('e1', 'Acme renewal sync', inMin(firstIn), 30, { links: [{ url: 'https://example.com/sow', name: 'SOW draft' }] }), ev('e1b', 'Acme renewal sync', inMin(firstIn), 30, { calendar: 'Personal' }), ev('e2', '1:1 with Gary', inMin(nextIn), 30)],
+    today: [ev('e1', 'Acme renewal sync', acme, 30, { links: [{ url: 'https://example.com/sow', name: 'SOW draft' }] }), ev('e1b', 'Acme renewal sync', acme, 30, { calendar: 'Personal' }), ev('e2', '1:1 with Gary', inMin(nextIn), 30)],
     tomorrow: [ev('e3', 'Board prep', tomorrow, 60)], fetchedAt: new Date().toISOString(),
   }
   const morning = async (c2) => {
@@ -687,6 +691,8 @@ try {
     // A question waiting on you, pinned from its card.
     await hm.locator('.hm-sec[aria-label="Waiting on You"] .ny-item', { hasText: 'port 5173' }).locator('.hm-pin').click()
     await a.api('/home-pins', { id: 'here|board:bb3', on: true })
+    // (Shown pinned at once, saved a moment later: a reload before then cuts the saving off.)
+    await until(async () => { const ids = ((await a.api('/home')).pins || []).map((x) => x.id); return ids.includes(`${deskId}|task:c2`) && ids.includes('travel-laptop|agent:n3@1') }, 5000)
     await p.reload()
     await busyLoaded(p.locator('.hm'))
     const after = await until(async () => { const x = await pinned.innerText().catch(() => ''); return /Org chart/.test(x) && x }, 8000)

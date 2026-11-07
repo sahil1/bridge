@@ -48,6 +48,9 @@ const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
 const said = []
 let slow = 0
 const real = (errors) => errors.filter((e) => !/\/api\/[\w/.?=&-]+ due to access control checks/.test(e))
+// Listening: the mic's sound has come, and ✓ can stop it. On a busy computer that can be a while
+// after the press, and nothing before it is recorded, so a hold is timed from then.
+const listens = (pg) => until(() => pg.locator('.rec-stop:enabled, .dp-ok:enabled').count(), 5000, 50)
 const before = async (ctx) => {
   await noServiceWorker(ctx)
   if (which === 'webkit') {
@@ -157,10 +160,10 @@ try {
   await setDictation({ history: null })
 
   // ---------- The pill, inside Bridge AI ----------
-  // The agent the app parts open is back after the restarts above (reopened, resuming its session):
-  // on a busy machine (macOS in CI) a while after the server answers.
-  const payBack = await until(() => agentOf((a) => a.paneId === one.paneId), 60000, 500)
-  ok(!!payBack, 'payments is back after the restarts', ((await kit.api('/fleet')).agents || []).map((a) => [a.paneId, a.name, a.status]))
+  // The agents the app parts use are back after the restarts above (reopened, resuming their
+  // sessions): on a busy machine (macOS in CI) a while after the server answers, and not both at once.
+  const payBack = await until(async () => { const f = (await kit.api('/fleet')).agents || []; return [one, ledger].every((x) => f.some((a) => a.paneId === x.paneId)) }, 60000, 500)
+  ok(!!payBack, 'payments and Ledger are back after the restarts', ((await kit.api('/fleet')).agents || []).map((a) => [a.paneId, a.name, a.status]))
   const shots = async (p, name) => { await shot(p, `${tag}${name}`) }
   // Inside Bridge AI: the whole window, and the bottom of it around the pill.
   const pillShot = async (p, name) => {
@@ -201,6 +204,7 @@ try {
     // The same pill all along (never taken away and put back, which would flash): marked now, and
     // looked for at the end.
     await p.evaluate(() => { document.querySelector('.dict-dock .dp').dataset.same = '1' })
+    await listens(p)
     await sleep(900)
     await pillShot(p, `dictation-pill-${mode}`)
     await p.keyboard.up('Space')
@@ -231,6 +235,7 @@ try {
     await p.keyboard.down('Space')
     const own = await until(async () => (await p.locator('.composer.rec .rec-bar').count()) > 0, 5000, 100)
     const noPill = await p.locator('.dict-dock').count() === 0
+    await listens(p)
     await sleep(1300)
     await p.keyboard.up('Space')
     for (const m of [...MODS].reverse()) await p.keyboard.up(m)
@@ -267,6 +272,7 @@ try {
     slow = 1200
     await key(p, 'down', SLACK)
     ok(!!(await until(async () => (await p.locator('.hud .dp-listening .dp-wave').count()) > 0 && (await p.locator('.hud-to-btn').getAttribute('data-pane').catch(() => '')) === one.paneId && /^To \S/.test(await p.locator('.hud-to-btn').innerText().catch(() => '')), 5000, 100)), `${mode}: from another app, the same pill: "To" the agent you looked at last`, [await p.locator('.hud-to-btn').getAttribute('data-pane').catch(() => ''), await hud.innerText().catch(() => '')])
+    await listens(p)
     await sleep(900)
     const pillBox = await hud.boundingBox()
     await p.evaluate(() => { document.querySelector('.hud').dataset.same = '1' })
@@ -304,6 +310,7 @@ try {
     said.push('see you at three')
     await key(p, 'down', SLACK)
     ok(!!(await until(async () => /Into Slack/.test(await hud.innerText().catch(() => '')), 5000, 100)), 'pasting where you\'re typing: "Into Slack" while it listens')
+    await listens(p)
     await sleep(1200)
     await key(p, 'up')
     let sawCard = false
@@ -320,7 +327,7 @@ try {
     const { ctx, p } = await hudPage({ ...HELD, paste: { can: true, via: 'bridgekeys', asks: 'accessibility', allowed: true } }, { error: 'secure' })
     await p.locator('.hud').waitFor({ timeout: 10000 })
     said.push('my secret words')
-    await key(p, 'down', SLACK); await sleep(1200); await key(p, 'up')
+    await key(p, 'down', SLACK); await listens(p); await sleep(1200); await key(p, 'up')
     await until(async () => /Secure input is on/.test(await p.locator('.hud').innerText().catch(() => '')), 6000, 100)
     await sleep(1000)
     ok(!(await list()).items.some((x) => /secret words/i.test(x.text)) && !fileText().includes('secret words'), 'a password field\'s words: not kept', (await list()).items.map((x) => x.text))
@@ -483,7 +490,7 @@ try {
     const mac = await p.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform))
     const MODS = mac ? ['Alt'] : ['Control', 'Alt']
     for (const m of MODS) await p.keyboard.down(m)
-    await p.keyboard.down('Space'); await sleep(1300); await p.keyboard.up('Space')
+    await p.keyboard.down('Space'); await listens(p); await sleep(1300); await p.keyboard.up('Space')
     for (const m of [...MODS].reverse()) await p.keyboard.up(m)
     await until(async () => (await box.inputValue()) === 'Forget this one.', 8000)
     await sleep(800)

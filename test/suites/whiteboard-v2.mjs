@@ -46,8 +46,11 @@ const inside = (a, c) => a.x >= c.x - 1 && a.y >= c.y - 1 && a.x + a.width <= c.
 const chief = (args, input) => spawnSync(process.execPath, [path.join(ROOT, 'chief', 'bin', 'bridge'), 'board', ...args], { input, encoding: 'utf8', env: { ...process.env, BRIDGE_URL: kit.url } })
 // The words in a PDF: its text, in its streams (compressed or not).
 function pdfWords(buf) {
-  let out = buf.toString('latin1')
-  for (const m of out.matchAll(/stream\r?\n([\s\S]*?)\r?\nendstream/g)) { try { out += zlib.inflateSync(Buffer.from(m[1], 'latin1')).toString('latin1') } catch { /* not deflated */ } }
+  const raw = buf.toString('latin1')
+  let out = raw
+  // Each stream as long as its dictionary says, not up to the line end before "endstream": its last
+  // byte can be a carriage return (1 in 256), which that line end would take, and then it didn't inflate.
+  for (const m of raw.matchAll(/\/Length (\d+)[^>]*>>\s*stream\r?\n/g)) { try { out += zlib.inflateSync(Buffer.from(raw.substr(m.index + m[0].length, Number(m[1])), 'latin1')).toString('latin1') } catch { /* not deflated */ } }
   return out
 }
 // A part of the suite that fails as one when it crashes, so the parts after it still run.
@@ -371,6 +374,8 @@ try {
     await p.locator('.wb-ask').getByRole('button', { name: 'Draw' }).click()
     await p.waitForSelector('.excalidraw canvas', { timeout: 30000 })
     ok(await until(() => p.locator('.wb-rounds-head', { hasText: 'Done' }).count(), 30000), 'Draw this with Refine x3 runs its rounds and says it\'s done', await p.locator('.wb-draw').innerText().catch(() => ''))
+    // The board saves a moment after the last round goes on it: until then its file has an earlier one.
+    await saved()
     const j = await until(() => { const x = readBoard(board); return texts(x).includes('RDS') && x }, 10000)
     const els = live(j)
     const icons = els.filter((e) => e.type === 'image' && e.customData?.bridge?.icon)

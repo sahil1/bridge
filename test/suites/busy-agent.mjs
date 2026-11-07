@@ -11,7 +11,7 @@
 //   as it closed (sent once it opens again), and the same message sent twice (held once);
 //   and a message typed in its terminal while it works, which it takes in between two steps: in
 //   the chat (Claude Code logs it where Chat didn't look).
-import { checks, until, shot, phoneFaults } from '../lib/harness.mjs'
+import { checks, until, shot, phoneFaults, withoutCutOff } from '../lib/harness.mjs'
 import { busyKit, LIGHT, DARK, enc, same, openChat, seesWorking, sendFrom, bubbles } from '../lib/busy.mjs'
 
 const { ok, done } = checks('busy-agent')
@@ -99,8 +99,9 @@ try {
     ok(same(await queueOf(ag.paneId), want) && again.id === again2.id, 'the same message sent twice is held once', { queue: await queueOf(ag.paneId), again, again2 })
     const g = await wentIn(ag, want, 120000)
     ok(same(g.map((x) => x.text), ['busy 3 24 3', 'Start on the taxes', ...want]), 'then each goes in, in order, once', g)
-    // WebKit reports each request it couldn't make while offline as a page error.
-    ok(errors.filter((e) => !/\/api\/[\w/.?=&-]+ due to access control checks/.test(e)).length === 0, 'reconnect: no page errors', errors)
+    // WebKit reports each request it couldn't make while offline as a page error (the app's own
+    // files too, when it was fetching its views ahead just then).
+    ok(withoutCutOff(errors).length === 0, 'reconnect: no page errors', errors)
     await ctx.close()
   }
 

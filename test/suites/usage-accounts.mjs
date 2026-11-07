@@ -133,7 +133,9 @@ const seed = ({ data, home, bin }) => {
     accounts: [{ id: WORK, kind: 'claude', label: 'Work', createdAt: ago(9000).toISOString() }, { id: SIDE, kind: 'claude', label: 'Side', createdAt: ago(8000).toISOString() }],
     active: { claude: MAIN }, names: { claude: 'Main' },
   }))
-  const ran = (dir, session, min) => { const d = path.join(dir, 'session-env', session); fs.mkdirSync(d, { recursive: true }); fs.utimesSync(d, ago(min), ago(min)) }
+  // (Set as much the other way as the clock is moved: at another time, the server's stat says a
+  // file's times by its clock, as stand-ins/clock.mjs has it, and would move these twice.)
+  const ran = (dir, session, min) => { const d = path.join(dir, 'session-env', session); fs.mkdirSync(d, { recursive: true }); const at = new Date(+ago(min) - OFFSET); fs.utimesSync(d, at, at) }
   ran(path.join(data, 'accounts', WORK), S.work, 300)
   ran(path.join(home, '.claude'), S.main, 26 * 60)
   ran(path.join(home, '.claude'), S.both, 300)

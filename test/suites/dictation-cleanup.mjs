@@ -288,8 +288,9 @@ try {
     return w
   }
   const press = (pg, type, extra = {}) => pg.evaluate(([tp, x]) => window.dispatchEvent(new CustomEvent('bridge-dictate-key', { detail: { type: tp, at: Date.now(), ...x } })), [type, extra])
-  // Said in TextEdit, held a moment and let go: when it was let go.
-  const talk = async (pg, words) => { said.push(words); await press(pg, 'down', { app: 'TextEdit' }); await sleep(1300); const at = Date.now(); await press(pg, 'up'); return at }
+  // Said in TextEdit, held a moment once it listens (the mic's sound has come, and ✓ is on: on a busy
+  // computer a while after the press) and let go: when it was let go.
+  const talk = async (pg, words) => { said.push(words); await press(pg, 'down', { app: 'TextEdit' }); await until(() => pg.locator('.dp-ok:enabled').count(), 5000, 50); await sleep(1300); const at = Date.now(); await press(pg, 'up'); return at }
   const hudText = (pg) => pg.locator('.hud').innerText().catch(() => '')
   const pastedNow = (pg, n) => until(() => pg.evaluate((k) => window.__hud.pasted.length > k && window.__hud.pasted.at(-1), n), 12000, 50)
   const pastedCount = (pg) => pg.evaluate(() => window.__hud.pasted.length)
@@ -301,7 +302,8 @@ try {
     let got = await pastedNow(p, 0)
     ok(got === 'So we should ship it on Friday.' && askedOf(/we should we should/) === n0 + 1, 'on: what you said tidied by the local model, and that is what\'s pasted', { got, asked: chats(kit).at(-1)?.user })
     ok(!!(await until(async () => /Tidied and pasted into TextEdit/.test(await hudText(p)), 4000, 50)), '"Tidied and pasted into TextEdit"', await hudText(p))
-    const kept = await until(async () => (await kit.api('/dictations')).items.find((x) => x.text === 'So we should ship it on Friday.'), 5000, 200)
+    // What became of it (pasted) is added to it once the paste is done, a moment after it's kept.
+    const kept = await until(async () => (await kit.api('/dictations')).items.find((x) => x.text === 'So we should ship it on Friday.' && x.how), 5000, 200)
     ok(kept?.said === 'So you know we should we should ship it on Friday.' && kept.tidiedBy === 'Gemma 4 E2B' && kept.how === 'pasted' && kept.app?.name === 'TextEdit', 'kept: the tidied text, what you said before it was tidied, and by what', kept)
 
     // Too slow: Tidying… while it waits, then your words as you said them, in time, and why.

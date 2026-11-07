@@ -52,8 +52,25 @@ const colour = async (p, clip) => {
     return { r: Math.round(r / n), g: Math.round(g / n), b: Math.round(bl / n) }
   }, png.toString('base64'))
 }
-// Where the current match is on the screen.
-const nowBox = (p) => p.evaluate(() => { const r = [...(CSS.highlights?.get('bridge-find-now') || [])][0]?.getBoundingClientRect(); return r && { x: r.x, y: r.y, width: r.width, height: r.height } })
+// Where the current match is on the screen, once a frame has been drawn: WebKit works out where a
+// highlight goes as it draws the next frame, so a screenshot before then shows the text unmarked.
+const nowBox = (p) => p.evaluate(async () => {
+  await new Promise((r) => requestAnimationFrame(r))
+  window.__drawn = CSS.highlights?.get('bridge-find-now')
+  const r = [...(window.__drawn || [])][0]?.getBoundingClientRect()
+  return r && { x: r.x, y: r.y, width: r.width, height: r.height }
+})
+// The current match as drawn. Find marks the matches anew as the earlier messages are read in: if it
+// did while the screen was read, it's read again.
+const nowColour = async (p) => {
+  let c = null
+  for (let i = 0; i < 5; i++) {
+    const nb = await nowBox(p)
+    c = nb && await colour(p, nb)
+    if (await p.evaluate(() => CSS.highlights.get('bridge-find-now') === window.__drawn)) break
+  }
+  return c
+}
 // Whether the next keydown of F reached the page unhandled: set by a listener after ours.
 const watchF = (p) => p.evaluate(() => { window.__f = 'none'; if (!window.__fl) { window.__fl = true; window.addEventListener('keydown', (e) => { if (e.key.toLowerCase() === 'f') window.__f = e.defaultPrevented }) } })
 try {
@@ -97,8 +114,7 @@ try {
     ok(m0.all.length === 5 && m0.all.every((x) => /^ledger$/i.test(x)) && /^ledger$/i.test(m0.now || '') && m0.shown, 'every match is marked, the current one more strongly, in view', m0)
     // As drawn: the current match orange, here a match in a reply beside a code block (which Safari
     // leaves unmarked in text straight in its box).
-    const nb = await nowBox(p)
-    const c = nb && await colour(p, nb)
+    const c = await nowColour(p)
     ok(!!c && c.r - c.b > 60, 'the current match is drawn in its colour', c)
   }
   const n0 = Number(first?.split(' ')[0] || 0)

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import Icon from '../components/Icon.jsx'
 import { api } from '../api.js'
-import { useDictation, press, release, registerAsk, amend } from '../dictation/controller.js'
+import { useDictation, press, release, registerAsk, amend, eventTime } from '../dictation/controller.js'
 import { sentTo } from '../sendbox.js'
 import { how, onVoices, forEar, say, unlock } from './speak.js'
 import { t } from '../i18n/index.js'
@@ -81,8 +81,8 @@ export default function AskOutLoud({ agent, onSend }) {
     if (e.button !== 0 || dict.phase === 'working') return
     e.preventDefault()
     unlock()
-    press({ kind: 'ask', id: pid })
-    const up = () => { window.removeEventListener('pointerup', up, true); window.removeEventListener('pointercancel', up, true); release() }
+    press({ kind: 'ask', id: pid }, eventTime(e))
+    const up = (u) => { window.removeEventListener('pointerup', up, true); window.removeEventListener('pointercancel', up, true); release(eventTime(u)) }
     window.addEventListener('pointerup', up, true)
     window.addEventListener('pointercancel', up, true)
   }

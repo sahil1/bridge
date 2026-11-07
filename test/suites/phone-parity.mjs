@@ -322,6 +322,8 @@ try {
     for (const r of routes) {
       await ph.p.goto(kit.url)
       await ph.p.waitForSelector('.tabbar button', { timeout: 20000 })
+      // Opened again, it has the usual tabs (Today one of them, not in More) until its settings come.
+      await until(async () => (await tabNames()).join('|') === HOME_TABS.join('|'), 10000)
       const why = await follow(ph.p, r.phone, HOME_TABS).catch((e) => e.message)
       if (why) { bad.push(`${r.phone}: ${why}`); continue }
       if (r.shows && !(await ph.p.locator(r.shows).first().waitFor({ timeout: 8000 }).then(() => true, () => false))) bad.push(`${r.phone}: ${r.shows} doesn't show`)

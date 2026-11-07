@@ -142,6 +142,7 @@ function useDrawing(key, store, look = null) {
         if (e.conflict) { setConflict(true); setStatus('unsaved') } else setStatus({ failed: e.message })
       } finally {
         s.busy = null
+        s.saves++
         if (s.again) { s.again = false; if (s.dirty) flush() }
       }
     })()
@@ -150,7 +151,7 @@ function useDrawing(key, store, look = null) {
 
   useEffect(() => {
     let gone = false
-    const s0 = { mtime: null, sig: null, dirty: false, store: storeRef.current }
+    const s0 = { mtime: null, sig: null, dirty: false, saves: 0, store: storeRef.current }
     st.current = s0
     setReady(null); setError(null); setConflict(false); setStatus('saved'); setBoard({ X: null, api: null })
     ;(async () => {
@@ -200,7 +201,10 @@ function useDrawing(key, store, look = null) {
     const tick = async () => {
       const s = st.current
       if (document.hidden || s.busy || !s.api) return
+      const n = s.saves
       const now = await s.store.stat?.().catch(() => null)
+      // Saved here meanwhile: what this look saw may be that save, not someone else's. The next looks again.
+      if (s.busy || s.saves !== n) return
       if (!now || s.mtime == null || Math.abs(now.mtime - s.mtime) <= 1) return
       if (s.dirty) setConflict(true)
       else takeTheirs().catch(() => {})

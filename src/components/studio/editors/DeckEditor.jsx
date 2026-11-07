@@ -93,7 +93,8 @@ function Deck({ file, start, pptx, onDirty, onStats, handle, readOnly, packs, on
   const [present, setPresent] = useState(null) // { at, presenter }
   const [busy, setBusy] = useState(null)
   const [msg, setMsg] = useState(null)
-  const [drag, setDrag] = useState(null) // { from, to, before }
+  const [drag, setDrag] = useState(null) // where a slide being dragged would go, as drawn: { to, before }
+  const dragFrom = useRef(null) // the slide being dragged
   const [picked, setPicked] = useState(false) // the slide's picture, picked
   const [grid, setGrid] = useState(false) // every slide at once
   const [narrow, setNarrow] = useState(isPhone)
@@ -543,10 +544,11 @@ html,body{margin:0;background:#fff}div.marpit>svg{display:block;width:100vw;heig
       drop={drag && drag.to === i ? (drag.before ? 'before' : 'after') : null}
       onPick={pick}
       onMenu={(e) => { e.preventDefault(); go(i); setCtx({ i, x: e.clientX, y: e.clientY }) }}
-      onDragStart={() => setDrag({ from: i, to: i, before: true })}
+      onDragStart={() => { dragFrom.current = i; setDrag({ to: i, before: true }) }}
       onDragOver={(before) => setDrag((d) => (d ? { ...d, to: i, before } : d))}
-      onDrop={() => { if (drag) { const to = drag.before ? drag.to : drag.to + 1; move(drag.from, to > drag.from ? to - 1 : to) } setDrag(null) }}
-      onDragEnd={() => setDrag(null)} />
+      // Where it goes is read from the drop itself: a drop can come before the last dragover is drawn.
+      onDrop={(before) => { const from = dragFrom.current; dragFrom.current = null; setDrag(null); if (from == null) return; const to = before ? i : i + 1; move(from, to > from ? to - 1 : to) }}
+      onDragEnd={() => { dragFrom.current = null; setDrag(null) }} />
   )
   return (
     <div className={`sd-deck2${show.ai ? ' with-ai' : ''}${show.md ? ' with-md' : ''}`}>
@@ -686,7 +688,7 @@ const Thumb = memo(function Thumb({ i, svg, w, on, readOnly, drop, onPick, onMen
       onClick={(e) => { e.currentTarget.querySelector('.sd-thumb-btn')?.focus({ preventScroll: true }); onPick() }} onContextMenu={readOnly ? undefined : onMenu}
       onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(i)); onDragStart() }}
       onDragOver={(e) => { e.preventDefault(); const r = e.currentTarget.getBoundingClientRect(); onDragOver(e.clientY < r.top + r.height / 2) }}
-      onDrop={(e) => { e.preventDefault(); onDrop() }} onDragEnd={onDragEnd}>
+      onDrop={(e) => { e.preventDefault(); const r = e.currentTarget.getBoundingClientRect(); onDrop(e.clientY < r.top + r.height / 2) }} onDragEnd={onDragEnd}>
       <span className="sd-thumb-n">{i + 1}</span>
       <button type="button" className="sd-thumb-btn" aria-current={on ? 'true' : undefined} aria-label={t('Slide {n}', { n: i + 1 })} title={t('Slide {n}', { n: i + 1 })}><Slide svg={svg} w={w} /></button>
       {!readOnly && <button type="button" className="sd-thumb-more" onClick={(e) => { e.stopPropagation(); onMenu(e) }} aria-label={t('More for slide {n}', { n: i + 1 })} title={t('More for slide {n}', { n: i + 1 })}><Icon name="more" size={13} /></button>}

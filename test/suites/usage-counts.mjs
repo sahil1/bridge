@@ -155,8 +155,9 @@ try {
   answer = { stop: true, why: 'The project has stopped collecting usage counts.' }
   const later = await kitWith('stop', { BRIDGE_COUNTS_URL: URL_, BRIDGE_COUNTS_NOW: day(16), BRIDGE_HOME: k.data })
   later.program('claude', fs.readFileSync(path.join(TEST, 'stand-ins', 'claude.cjs'), 'utf8'))
-  const stopped = await until(async () => { const s = await later.api('/counts'); return s.share === false && s.stopped && s }, 8000)
-  ok(!!stopped && /stopped collecting/.test(stopped.stopped) && weekFiles(k.data).length === 0, 'the endpoint says stop: sharing turns off, saying why, and what wasn\'t sent is forgotten', stopped)
+  // (It turns off first, so nothing more is counted, then forgets what it had: a moment apart.)
+  const stopped = await until(async () => { const s = await later.api('/counts'); return s.share === false && s.stopped && !weekFiles(k.data).length && s }, 8000)
+  ok(!!stopped && /stopped collecting/.test(stopped.stopped) && weekFiles(k.data).length === 0, 'the endpoint says stop: sharing turns off, saying why, and what wasn\'t sent is forgotten', stopped || { status: await later.api('/counts'), files: weekFiles(k.data) })
   answer = { ok: true }
   // Turned off by you: what wasn't sent is forgotten.
   await later.api('/counts', { share: true })

@@ -67,6 +67,9 @@ const firstUse = async (c, got) => {
 }
 // WebKit counts a request a reload cuts off (the presence ping, the live feed) as a page error.
 const real = (errors) => errors.filter((e) => !/\/api\/[\w/.-]+ due to access control checks/.test(e))
+// Listening: the mic's sound has come, and ✓ can stop it. Nothing before that is recorded, and on a
+// busy computer it can come a while after the press, so a hold here is timed from then.
+const listens = (pg) => until(() => pg.locator('.rec-stop:enabled, .dp-ok:enabled').count(), 5000, 50)
 const before = async (ctx) => {
   await noServiceWorker(ctx)
   // What the page sends to be transcribed, read in the page (WebKit doesn't hand a test the body).
@@ -118,8 +121,12 @@ try {
   const MODS = mac ? ['Alt'] : ['Control', 'Alt']
   const down = async (key = 'Space', mods = MODS) => { for (const m of mods) await p.keyboard.down(m); await p.keyboard.down(key) }
   const up = async (key = 'Space', mods = MODS) => { await p.keyboard.up(key); for (const m of [...mods].reverse()) await p.keyboard.up(m) }
-  const hold = async (ms = 1500, key, mods) => { await down(key, mods); await sleep(ms); await up(key, mods) }
-  const tap = async (key, mods) => { await down(key, mods); await up(key, mods) }
+  const hold = async (ms = 1500, key, mods) => { await down(key, mods); await listens(p); await sleep(ms); await up(key, mods) }
+  // The key pressed where it should do nothing: held as long, with nothing to wait for.
+  const holdNothing = async (ms) => { await down(); await sleep(ms); await up() }
+  // Down and up in one go, as a tap is: not two calls apart, which a busy test machine can stretch
+  // past a tap's 300 ms.
+  const tap = (key = 'Space', mods = MODS) => p.keyboard.press([...mods, key].join('+'))
   const heardNow = () => sent.length
 
   await p.locator('.tab-main', { hasText: 'payments' }).first().click({ timeout: 20000 })
@@ -135,6 +142,7 @@ try {
   const bar = await until(async () => (await p.locator('.composer.rec .rec-bar').count()) > 0 && /let go/i.test(await p.locator('.composer.rec .comp-hint').innerText().catch(() => '')), 5000, 100)
   ok(!!bar, 'held in the message box: its recording bar, "let go to add it"')
   await shot(p, `${tag}dictation-holding`)
+  await listens(p)
   await sleep(1300)
   await up()
   await until(() => heardNow() > n, 10000, 100)
@@ -152,6 +160,7 @@ try {
   await tap()
   const free = await until(async () => /Listening/.test(await p.locator('.composer.rec .comp-hint').innerText().catch(() => '')), 5000, 100)
   ok(!!free, 'tapped: it keeps listening, hands-free', await p.locator('.composer').first().innerText().catch(() => ''))
+  await listens(p)
   await sleep(900)
   ok(heardNow() === n, 'nothing sent until it\'s pressed again')
   await tap()
@@ -173,12 +182,14 @@ try {
   const mb = await mic.boundingBox()
   await p.mouse.move(mb.x + mb.width / 2, mb.y + mb.height / 2)
   await p.mouse.down()
+  await listens(p)
   await sleep(1500)
   await p.mouse.up()
   ok(!!(await until(async () => (await value()) === 'Ship it.', 8000)), 'the mic button held: the text when it\'s let go', await value())
   said.push('and test it')
   await mic.click()
   await until(async () => (await p.locator('.composer.rec').count()) > 0, 5000, 100)
+  await listens(p)
   await sleep(900)
   await p.locator('.composer.rec .rec-stop').click()
   ok(!!(await until(async () => (await value()) === 'Ship it. And test it.', 8000)), 'clicked: listening until ✓', await value())
@@ -249,7 +260,7 @@ try {
   await box.fill('')
   await box.click()
   n = heardNow()
-  await hold(900)
+  await holdNothing(900)
   await sleep(500)
   ok(heardNow() === n, 'the old key does nothing now')
   await box.fill('')
@@ -262,7 +273,7 @@ try {
   await box.waitFor({ timeout: 15000 })
   await box.click()
   n = heardNow()
-  await hold(900)
+  await holdNothing(900)
   await sleep(500)
   ok(heardNow() === n && (await p.locator('.composer.rec, .dict-dock').count()) === 0, 'turned off: the key does nothing')
   await kit.api('/settings', { dictation: { on: null } }, 'PATCH')
@@ -295,6 +306,7 @@ try {
       await dbox.click()
       said.push(words)
       await d.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-dictate-key', { detail: { type: 'down', at: Date.now() } })))
+      await listens(d.p)
       await sleep(1500)
       await d.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-dictate-key', { detail: { type: 'up', at: Date.now() } })))
     }
@@ -329,6 +341,7 @@ try {
     await dbox.click()
     said.push('not this time')
     await d.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-dictate-key', { detail: { type: 'down', at: Date.now() } })))
+    await listens(d.p)
     await sleep(1500)
     await d.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-dictate-key', { detail: { type: 'up', at: Date.now() } })))
     const offer = d.p.locator('.dict-offer')
@@ -506,6 +519,7 @@ try {
     ok(rec && gone && sent.length === n0, 'the right Alt held in the message box: it listens; a key typed with it (AltGr): cancelled, nothing sent', { rec, gone, sent: sent.length - n0 })
     said.push('right alt works')
     await lp.keyboard.down('AltRight')
+    await listens(lp)
     await sleep(1300)
     await lp.keyboard.up('AltRight')
     ok(!!(await until(async () => /Right alt works\./.test(await lbox.inputValue().catch(() => '')), 8000, 100)), 'held and let go: the words in the box', await lbox.inputValue().catch(() => ''))
@@ -608,8 +622,26 @@ try {
   }
 
   // ---------- The dictation window (?dictate=1) ----------
-  const hudPage = (pending = null) => page(b, `${kit.url}/?dictate=1`, { store: { 'cc-ws': { tabs: [one.paneId], active: one.paneId } }, before: async (c) => {
+  // late: ms before the recording's sound starts coming, as when the audio starts up slowly on a busy
+  // computer or a Bluetooth headset switches over to its mic (its audio context held suspended).
+  const hudPage = (pending = null, late = 0) => page(b, `${kit.url}/?dictate=1`, { store: { 'cc-ws': { tabs: [one.paneId], active: one.paneId } }, before: async (c) => {
     await before(c)
+    if (late) {
+      await c.addInitScript((ms) => {
+        const Real = window.AudioContext
+        window.AudioContext = class extends Real {
+          constructor(o) {
+            super(o)
+            if (o?.sampleRate !== 16000) return
+            const resume = Real.prototype.resume.bind(this)
+            let started = false
+            this.suspend()
+            setTimeout(() => { started = true; resume().catch(() => {}) }, ms)
+            this.resume = () => (started ? resume() : Promise.resolve())
+          }
+        }
+      }, late)
+    }
     await c.route(/\/api\/agents\/[^/]+\/(prompt|queue)$/, async (route) => { prompts.push({ url: route.request().url(), body: route.request().postDataJSON() }); await route.fulfill({ json: promptAnswer }) })
     await c.addInitScript((p0) => {
       window.__hud = { phases: [], copied: [], hidden: 0, opened: [] }
@@ -630,6 +662,7 @@ try {
     // Agents by their pane (a stand-in's title is its terminal's on Windows, the same for both).
     ok(!!(await until(async () => (await h.locator('.hud .dp-listening .dp-wave').count()) > 0 && (await h.locator('.hud-to-btn').getAttribute('data-pane').catch(() => '')) === one.paneId, 5000, 100)), 'the dictation window: listening, for the agent you last looked at', await h.locator('.hud').innerText().catch(() => ''))
     await shot(h, `${tag}dictation-window-listening`)
+    await listens(h)
     await sleep(1300)
     await key(h, 'up')
     ok(!!(await until(async () => (await h.locator('.hud-text').innerText().catch(() => '')) === 'Add a retry to the webhook.', 8000)), 'let go: the text', await h.locator('.hud').innerText().catch(() => ''))
@@ -643,7 +676,7 @@ try {
     ok(!!(await until(async () => (await h.locator('.hud').innerText()).includes(`Sent to ${pay}`), 4000, 100)) && !!(await until(() => h.evaluate(() => window.__hud.hidden > 0), 4000, 100)), '"Sent to" that agent, then it hides', [pay, await h.locator('.hud').innerText().catch(() => '')])
     // Another agent, picked; and Copy.
     said.push('check the invoices')
-    await key(h, 'down'); await sleep(1300); await key(h, 'up')
+    await key(h, 'down'); await listens(h); await sleep(1300); await key(h, 'up')
     await until(async () => (await h.locator('.hud-text').count()) > 0, 8000, 100)
     await h.locator('.hud-to-btn').click()
     const shellTitled = await until(async () => { const x = await agentOf((a) => a.paneId === two.paneId); return /^Administrator: C:\\Windows/.test(x?.title || '') && x }, 15000, 300)
@@ -659,7 +692,7 @@ try {
     ok(bill === 'billing' && !/Administrator/.test(await h.locator('.hud').innerText().catch(() => '')), 'and named by its tab there too, not its terminal\'s title', await h.locator('.hud').innerText().catch(() => ''))
     promptAnswer = { ok: true }
     said.push('copy me')
-    await key(h, 'down'); await sleep(1300); await key(h, 'up')
+    await key(h, 'down'); await listens(h); await sleep(1300); await key(h, 'up')
     await until(async () => (await h.locator('.hud-text').innerText().catch(() => '')) === 'Copy me.', 8000, 100)
     await h.locator('.hud button', { hasText: 'Copy' }).click()
     ok(!!(await until(() => h.evaluate(() => window.__hud.copied.at(-1) === 'Copy me.'), 4000, 100)) && /Copied/.test(await h.locator('.hud').innerText()), 'Copy: on the clipboard, and it says how to paste')
@@ -673,7 +706,7 @@ try {
     // Settings › Voice says Ask each time (changed since the window opened): nobody picked, no Send yet.
     await kit.api('/settings', { dictation: { to: 'ask' } }, 'PATCH')
     said.push('who is this for')
-    await key(h, 'down'); await sleep(1300); await key(h, 'up')
+    await key(h, 'down'); await listens(h); await sleep(1300); await key(h, 'up')
     await until(async () => (await h.locator('.hud-text').count()) > 0, 8000, 100)
     ok(/Pick an agent/.test(await h.locator('.hud-to-btn').innerText()) && await h.locator('.hud button', { hasText: 'Send' }).isDisabled(), 'Ask each time: "pick an agent", and Send waits for one', await h.locator('.hud').innerText())
     await kit.api('/settings', { dictation: { to: null } }, 'PATCH')
@@ -686,6 +719,27 @@ try {
     // A press from before the window was ready: let go by now, so it listens hands-free.
     const { ctx: hc, p: h } = await hudPage(true)
     ok(!!(await until(async () => /again when you're done/.test(await h.locator('.hud .dp-listening').getAttribute('aria-label').catch(() => '')), 8000, 100)), 'a press from before it was ready: it listens, hands-free', await h.locator('.hud').innerText().catch(() => ''))
+    await hc.close()
+  }
+  {
+    // The mic's sound 2 s after the press: not listening till it comes (✓ off), so a let go
+    // before then keeps listening hands-free rather than saying it was too short, and a hold timed
+    // from then has the words.
+    const { ctx: hc, p: h, errors: he } = await hudPage(null, 2000)
+    await h.waitForSelector('.hud', { timeout: 10000 })
+    const hint = () => h.locator('.hud .dp-listening').getAttribute('aria-label').catch(() => '')
+    said.push('heard in the end')
+    await key(h, 'down')
+    await sleep(400)
+    const waiting = await h.locator('.hud .dp-ok').isDisabled().catch(() => false)
+    await key(h, 'up')
+    const free = !!(await until(async () => /again when you're done/.test(await hint()) && await h.locator('.hud .dp-ok').isEnabled(), 5000, 100))
+    await sleep(800)
+    await key(h, 'down')
+    ok(waiting && free && !!(await until(async () => (await h.locator('.hud-text').innerText().catch(() => '')) === 'Heard in the end.', 8000, 100)), 'the mic\'s sound coming late: not listening till it comes, a let go before then keeps it listening hands-free, and pressed again, the words', { waiting, free, hud: await h.locator('.hud').innerText().catch(() => '') })
+    said.push('held from when it listened')
+    await key(h, 'down'); await listens(h); await sleep(1300); await key(h, 'up')
+    ok(!!(await until(async () => (await h.locator('.hud-text').innerText().catch(() => '')) === 'Held from when it listened.', 8000, 100)) && real(he).length === 0, 'and held from when it listens: the words, not "Recording too short"', [await h.locator('.hud').innerText().catch(() => ''), he])
     await hc.close()
   }
 
@@ -706,7 +760,7 @@ try {
   } })
   const MAC = (allowed) => ({ ...HELD, background: true, paste: { can: true, via: 'bridgekeys', asks: 'accessibility', allowed } })
   const press = (pg, type, extra = {}) => pg.evaluate(([tp, x]) => window.dispatchEvent(new CustomEvent('bridge-dictate-key', { detail: { type: tp, at: Date.now(), ...x } })), [type, extra])
-  const talk = async (pg, words, app) => { said.push(words); await press(pg, 'down', app ? { app } : {}); await sleep(1300); await press(pg, 'up') }
+  const talk = async (pg, words, app) => { said.push(words); await press(pg, 'down', app ? { app } : {}); await listens(pg); await sleep(1300); await press(pg, 'up') }
   const hudText = (pg) => pg.locator('.hud').innerText().catch(() => '')
   await kit.api('/settings', { dictation: { to: 'paste' } }, 'PATCH')
   {
@@ -717,6 +771,7 @@ try {
     await press(h, 'down', { app: 'TextEdit' })
     ok(!!(await until(async () => /Into TextEdit/.test(await hudText(h)) && (await h.locator('.hud-to-btn').count()) === 0, 5000, 100)), 'Where I\'m typing: while you talk, it says the text goes into the app you\'re in, with no agent to pick', await hudText(h))
     await shot(h, `${tag}dictation-window-into`)
+    await listens(h)
     await sleep(1300)
     await press(h, 'up')
     ok(!!(await until(() => h.evaluate(() => window.__hud.pasted.at(-1) === 'Paste this in.'), 8000, 100)), 'let go: the text handed to the desktop app to paste', await h.evaluate(() => window.__hud.pasted))
@@ -747,6 +802,7 @@ try {
     said.push('not allowed yet')
     await press(h, 'down', { app: 'TextEdit' })
     const chip = !!(await until(async () => (await h.locator('.hud-to-btn').count()) === 1, 5000, 100))
+    await listens(h)
     await sleep(1300)
     await press(h, 'up')
     const why = !!(await until(async () => /Pasting needs Accessibility/.test(await hudText(h)) && (await h.locator('.hud-text').innerText().catch(() => '')) === 'Not allowed yet.', 8000, 100)) && await h.evaluate(() => window.__hud.pasted.length) === 0 && await h.locator('.hud button', { hasText: 'Copy' }).isVisible()
@@ -880,7 +936,7 @@ try {
     const fmods = (await f.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform))) ? ['Alt'] : ['Control', 'Alt']
     for (const m of fmods) await f.keyboard.down(m)
     await f.keyboard.down('Space')
-    ok(!!(await until(() => f.locator('.composer.rec').count(), 5000, 100)), 'first use, no speech model yet: the mic opens all the same (only a download is missing)')
+    ok(!!(await until(() => f.locator('.composer.rec').count(), 5000, 100)) && !!(await listens(f)), 'first use, no speech model yet: the mic opens all the same (only a download is missing)')
     await sleep(1300)
     await f.keyboard.up('Space')
     for (const m of [...fmods].reverse()) await f.keyboard.up(m)
@@ -905,7 +961,7 @@ try {
     await h.waitForSelector('.hud', { timeout: 10000 })
     said.push('from another app')
     const key = (type) => h.evaluate((tp) => window.dispatchEvent(new CustomEvent('bridge-dictate-key', { detail: { type: tp, at: Date.now() } })), type)
-    await key('down'); await sleep(1300); await key('up')
+    await key('down'); await listens(h); await sleep(1300); await key('up')
     const hp = h.locator('.hud .voice-setup')
     ok(!!(await until(async () => await hp.locator('button', { hasText: 'Download, then transcribe' }).isVisible().catch(() => false), 8000, 100)), 'the dictation window, first use: the same offer', await h.locator('.hud').innerText().catch(() => ''))
     await hp.locator('button', { hasText: 'Download, then transcribe' }).click()
@@ -926,6 +982,7 @@ try {
     said.push('from my phone')
     const pm = ph.locator('.comp-btn.mic-btn').first()
     await pm.dispatchEvent('pointerdown', { button: 0, pointerType: 'touch', isPrimary: true, pointerId: 7 })
+    await listens(ph)
     await sleep(1500)
     await ph.evaluate(() => window.dispatchEvent(new PointerEvent('pointerup', { button: 0, pointerType: 'touch', isPrimary: true, pointerId: 7 })))
     ok(!!(await until(async () => (await pbox.inputValue()) === 'From my phone.', 8000)), 'on a phone: the mic button held, then let go', await pbox.inputValue())
