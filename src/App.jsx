@@ -83,9 +83,9 @@ const toStart = !cloudOnly ? null : window.bridgeAndroid?.home ? () => window.br
 // and the clock are in the Status menu (StatusMenu.jsx), and each of those that's pinned
 // (src/pins.js: all but sounds, unless you change it) shows in the bar too while there's room. When
 // it doesn't all fit (a laptop's screen, a busy day), the bar gives way a step at a time, least
-// needed first: the pinned chips' words (Update, Restart to apply, usage's names), so each is its
-// icon and value; then their long values (usage's two figures become the ring's one, setup's how
-// far goes); the next meeting's title; the word Status; the Bridge and Herdr tabs' words; then the
+// needed first: the pinned chips' words (Update, Restart to apply, usage's account), so each is its
+// icon and value; then their long values (which limit usage's figure is, setup's how far it is);
+// the next meeting's title; the word Status; the Bridge and Herdr tabs' words; then the
 // pinned chips themselves, one at a time: setup, sounds, the clock, a restart to apply, usage, the
 // weather, the update and Updated (the news among them then counted on the Status button; all of
 // them still in its menu); the recording's title, the words after what's waiting, the next meeting

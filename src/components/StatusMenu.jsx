@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import Icon from './Icon.jsx'
-import AccountMenu, { listed, setDefault, lapsed, asList, nameOf as accountName, AcctDot } from './AccountMenu.jsx'
+import AccountMenu, { listed, setDefault, lapsed, asList, nameOf as accountName, AcctDot, limitsOf, limitWords, statusText } from './AccountMenu.jsx'
+import { AgentIcon } from './settings/ProviderIcon.jsx'
 import UpdateChip from './UpdateChip.jsx'
 import RestartChip from './RestartChip.jsx'
 import SetupChip from './SetupChip.jsx'
@@ -25,41 +26,64 @@ import './status.css'
 const NAMES = { claude: 'Claude', codex: 'Codex', cursor: 'Cursor', grok: 'Grok' }
 const level = (v) => (v == null ? 'unknown' : v < 10 ? 'critical' : v < 30 ? 'warning' : 'good')
 
-// The default provider's usage: the account new agents start on (with several), its 5-hour window
-// and its week (a plan with no 5-hour window shows its week once, one with neither its first
-// window), and the lower of the two for the ring.
+// The default provider's usage: the account new agents start on (with several, and whether Auto
+// picked it), its 5-hour window and its week (a plan with no 5-hour window shows its week once, one
+// with neither its first window), and the limit that matters most now (tight): the plan's own with
+// the least left, or a model's own (Claude's Fable week) once that's the one about to run out. It
+// only stops agents on that model, so until it's low (under 30% left) and lower than the plan's,
+// it's in the menu and on hover, not in the bar. tight is the bar's one figure and the ring's.
 export function usageOf(quota, primary) {
   const groups = quota?.accounts || []
   const g = groups.find((x) => x.kind === primary)
   const act = asList(g) ? g.accounts.find((a) => a.active) : null
+  const auto = !!act && g.setting === 'auto'
   const name = NAMES[primary] || primary
-  if (quota?.off) return { off: true, groups, act, name }
+  if (quota?.off) return { off: true, groups, act, auto, name }
   const p = act || quota?.providers?.find((x) => x.provider === primary)
-  if (!p) return groups.length ? { groups, act, name } : null
-  const week = p.windows.find((w) => w.kind === 'weekly')
-  const sess = p.windows.find((w) => w.kind === 'session') || p.windows.find((w) => w.kind !== 'weekly' && w.kind !== 'credits') || (week ? null : p.windows[0])
-  const ring = [sess, week].filter((w) => w?.percentRemaining != null).reduce((m, w) => (!m || w.percentRemaining < m.percentRemaining ? w : m), null)
-  return { groups, act, p, week, sess, ring, name }
+  if (!p) return groups.length ? { groups, act, auto, name } : null
+  const limits = limitsOf(p)
+  const own = limits.filter((l) => !l.model)
+  const week = own.find((l) => l.kind === 'weekly')
+  const sess = own.find((l) => l.kind === 'session') || own.find((l) => l.kind !== 'weekly')
+  const lowest = (list) => list.reduce((m, l) => (!m || l.pct < m.pct ? l : m), null)
+  const plan = lowest(own), model = lowest(limits.filter((l) => l.model))
+  const tight = model && (!plan || (model.pct < 30 && model.pct < plan.pct)) ? model : plan
+  return { groups, act, auto, p, limits, week, sess, tight, ring: tight, name }
 }
 
-// Who new agents start with and how much is left, said in full (the row's and the chip's hover).
-function usageTitle(u) {
-  const { act, sess, week } = u
-  const name = act ? t('{agent} ({name}, where new agents start)', { agent: u.name, name: accountName(act) }) : u.name
-  return u.off ? t('Plan usage is off · click to see it or turn it on')
-    : `${t('{name} usage', { name })}${sess ? ` · ${sess.kind === 'session' ? t('{n}% left this 5-hour window', { n: sess.percentRemaining }) : t('{n}% left this {window}', { n: sess.percentRemaining, window: sess.label })}` : ''}${week ? ` · ${t('{n}% left this week', { n: week.percentRemaining })}` : ''}`
+// Why there's no figure to show, in a word: macOS's Allow, a sign-in, a reading on its way.
+const noFigure = (p) => (p.allow ? t('allow') : lapsed(p) || p.status === 'auth_required' || p.notSetUp || p.signedIn === false ? t('sign in') : p.status === 'pending' ? '…' : t('no data'))
+// Usage said in full, a line each (the chip's and the row's hover, the chip's name): where new
+// agents start, the limit that matters most and when it starts again, then every other limit, or
+// why there are none.
+function usageSays(u) {
+  const who = !u.act ? t('{name} usage', { name: u.name })
+    : u.auto ? t('Auto: new {agent} agents start on the account with the most left, now {name}', { agent: u.name, name: accountName(u.act) })
+      : t('New {agent} agents start on {name}', { agent: u.name, name: accountName(u.act) })
+  if (u.off) return [who, t('Plan usage is off · click to see it or turn it on')]
+  const { p, tight } = u
+  if (!p) return [who, t('No reading of its usage yet')]
+  if (!p.usable) return [who, `${t('Usage: {state}', { state: statusText(p) })}${p.error ? ` (${p.error})` : ''}`]
+  if (!tight) return [who, t('Its plan says nothing about limits')]
+  return [who, limitWords(tight), ...u.limits.filter((l) => l !== tight).map(limitWords)]
 }
-const Ring = ({ u }) => (u.off || !u.p ? <Icon name="gauge" size={14} /> : <span className={`mini-ring r-${level(u.ring?.percentRemaining)}`} style={{ '--p': u.ring?.percentRemaining ?? 0 }} />)
-// The 5-hour window's and the week's figures, or why there are none.
-function Figs({ u, className = '' }) {
-  const { p, sess, week } = u
-  if (u.off) return <span className={`muted ${className}`}>{t('off')}</span>
+// What a click does, for the end of the hover.
+const clickSays = (menu) => (menu ? t('Click to switch account or see each limit') : t('Click for usage details'))
+const Ring = ({ u }) => (u.off || !u.p ? <Icon name="gauge" size={14} /> : <span className={`mini-ring r-${level(u.ring?.pct)}`} style={{ '--p': u.ring?.pct ?? 0 }} />)
+// A limit's figure, colored once it's low (styles.css keeps the colors readable on the chip).
+const Pct = ({ l }) => <b className={level(l.pct) === 'good' ? 'u-pct' : `u-pct t-${level(l.pct)}`}>{l.pct}%</b>
+// The 5-hour window's and the week's figures, and a model's own once it's the one running out, or
+// why there are none.
+function Figs({ u }) {
+  const { p, sess, week, tight } = u
+  if (u.off) return <span className="muted">{t('usage off')}</span>
   if (!p) return null
-  if (!p.usable) return <span className={`muted ${className}`}>{p.allow ? t('allow') : lapsed(p) || p.status === 'auth_required' || p.notSetUp || p.signedIn === false ? t('sign in') : p.status === 'pending' ? '…' : t('no data')}</span>
+  if (!p.usable) return <span className="muted">{noFigure(p)}</span>
+  const figs = [sess, week, tight?.model && tight].filter(Boolean)
+  if (!figs.length) return <span className="muted">{t('no data')}</span>
   return (
-    <span className={`status-row-figs ${className}`}>
-      {sess && <span>{sess.percentRemaining}%<small> {sess.kind === 'session' ? t('5h') : sess.label}</small></span>}
-      {week && <span className={sess ? 'chip-sep' : undefined}>{week.percentRemaining}%<small> {t('wk')}</small></span>}
+    <span className="status-row-figs">
+      {figs.map((l, i) => <span key={i} className={i ? 'chip-sep' : undefined}><Pct l={l} /><small> {l.short}</small></span>)}
     </span>
   )
 }
@@ -67,14 +91,16 @@ function Figs({ u, className = '' }) {
 // Usage's row: who new agents start with and how much is left. With accounts listed it opens the
 // account menu (switch, Add another account, Usage details); otherwise Today's Usage card.
 function UsageRow({ u, onClick }) {
+  const menu = u.groups.length > 0
   return (
-    <button type="button" className="status-row usage-chip" onClick={onClick} aria-haspopup={u.groups.length ? 'menu' : undefined} title={usageTitle(u)}>
+    <button type="button" className="status-row usage-chip" onClick={onClick} aria-haspopup={menu ? 'menu' : undefined} title={[...usageSays(u), clickSays(menu)].join('\n')}>
       <Ring u={u} />
       <span className="status-row-text">
-        <b className="usage-name">{u.off ? t('Usage') : u.name}</b>
-        {u.act && <span className="usage-new">{t('New:')}</span>}
+        <b className="usage-name">{u.name}</b>
+        {u.act && <span className="usage-new">{t('new agents start on')}</span>}
         {u.act && <AcctDot a={u.act} />}
         {u.act && <b className="usage-acct">{accountName(u.act)}</b>}
+        {u.auto && <span className="best-tag" title={t('Auto starts new agents here now: it has the most left')}>{t('auto')}</span>}
         <Figs u={u} />
       </span>
       <Icon name="chevron" size={13} className="status-go" />
@@ -82,9 +108,23 @@ function UsageRow({ u, onClick }) {
   )
 }
 
-// Usage pinned to the bar: its row as a chip, opening what the row opens. As the bar gives way
-// (useFit in App.jsx) the names go first (pin-word), then the two figures become the ring's own
-// (pin-long, pin-short); all of it is there on hover.
+// The bar's one figure: what's left of the limit that matters most (tight), colored as it runs low,
+// and which limit it is (pin-long, the first to go when the bar has no room). Or why there's none,
+// which stays: it's what the chip has to say.
+function Tight({ u }) {
+  const { p, tight } = u
+  if (u.off) return <span className="muted">{t('usage off')}</span>
+  if (!p) return <span className="muted">{t('no data')}</span>
+  if (!p.usable) return <span className="muted">{noFigure(p)}</span>
+  if (!tight) return <span className="muted">{t('no data')}</span>
+  return <span className="usage-tight"><Pct l={tight} /><small className="pin-long">{tight.short}</small></span>
+}
+
+// Usage pinned to the bar, kept small: the provider's mark, the account new agents start on and the
+// one figure that matters most (Tight). Every limit, when each resets and the other accounts are in
+// the menu it opens (or Today's Usage card, with one account) and on hover. As the bar gives way
+// (useFit in App.jsx) the account's name goes first (pin-word, its color stays), then which limit
+// the figure is (pin-long).
 export function UsageChip({ quota, primary, onUsage, onAddAccount }) {
   const [open, setOpen] = useState(false)
   const wrap = useRef(null)
@@ -92,17 +132,15 @@ export function UsageChip({ quota, primary, onUsage, onAddAccount }) {
   if (!u) return null
   const menu = u.groups.length > 0
   const shown = menu ? listed(u.groups, primary) : []
-  const title = usageTitle(u)
+  const says = usageSays(u)
   return (
     <div className="acct-wrap" ref={wrap}>
-      <button type="button" className="top-chip usage-chip" onClick={menu ? () => setOpen((o) => !o) : onUsage} aria-haspopup={menu ? 'menu' : undefined} aria-expanded={menu ? open : undefined} title={title} aria-label={title}>
-        <Ring u={u} />
-        <b className="usage-name pin-word">{u.off ? t('Usage') : u.name}</b>
-        {u.act && <span className="usage-new pin-word">{t('New:')}</span>}
-        {u.act && <AcctDot a={u.act} className="pin-word" />}
+      <button type="button" className="top-chip usage-chip usage-pin" onClick={menu ? () => setOpen((o) => !o) : onUsage} aria-haspopup={menu ? 'menu' : undefined} aria-expanded={menu ? open : undefined}
+        title={[...says, clickSays(menu)].join('\n')} aria-label={says.join('. ')}>
+        {u.off ? <Icon name="gauge" size={14} /> : <AgentIcon kind={primary} size={16} name={u.name} />}
+        {u.act && <AcctDot a={u.act} />}
         {u.act && <b className="usage-acct pin-word">{accountName(u.act)}</b>}
-        <Figs u={u} className="pin-long" />
-        {!u.off && u.p?.usable && u.ring && <span className="pin-short">{u.ring.percentRemaining}%</span>}
+        <Tight u={u} />
         {menu && <Icon name="down" size={11} className="usage-caret" />}
       </button>
       {open && (
@@ -243,7 +281,7 @@ export default function StatusMenu({ quota, primary, update, upNote, fresh, flee
     <div className="status-wrap" ref={wrap}>
       <button type="button" className="top-chip status-btn" data-tour="usage" onClick={() => setOpen(open === 'menu' ? null : 'menu')} aria-haspopup="dialog" aria-expanded={open === 'menu'} aria-label={label}
         title={t('Usage, updates, setup, sounds, the weather and the time')}>
-        {u?.p && !u.off ? <span className={`mini-ring r-${level(u.ring?.percentRemaining)}`} style={{ '--p': u.ring?.percentRemaining ?? 0 }} /> : <Icon name="gauge" size={14} />}
+        {u?.p && !u.off ? <span className={`mini-ring r-${level(u.ring?.pct)}`} style={{ '--p': u.ring?.pct ?? 0 }} /> : <Icon name="gauge" size={14} />}
         <span className="status-word">{t('Status')}</span>
         <Icon name="down" size={11} className="usage-caret" />
         {folded > 0 && <span className="status-count" aria-hidden="true">{folded}</span>}
