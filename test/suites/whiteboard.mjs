@@ -24,7 +24,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import zlib from 'node:zlib'
 import { spawnSync } from 'node:child_process'
-import { startKit, startModel, checks, until, sleep, browser, page, shot, ROOT, TEST } from '../lib/harness.mjs'
+import { startKit, startModel, checks, until, sleep, browser, page, shot, noServiceWorker, ROOT, TEST } from '../lib/harness.mjs'
 
 const { ok, done } = checks('whiteboard')
 
@@ -350,6 +350,54 @@ try {
     await link.click()
     ok(await until(() => p.locator('.viewer .wb-file .excalidraw canvas').count(), 20000), 'and the file it names opens drawn, from the chat')
   } else ok(false, 'the chat names flow.mmd as a link')
+
+  // A board's own save isn't a change from somewhere else. Its look for a newer file, sent just
+  // before a save and answered once the file was written but before the save's answer was back, took
+  // the save for someone else's: "changed somewhere else", whose Show theirs dropped what was drawn
+  // meanwhile.
+  await api('/boards', { title: 'Race' })
+  let holdSave = false
+  const heldSaves = []
+  const rc = await page(b, kit.url, { before: async (c) => {
+    watch(c)
+    await noServiceWorker(c)
+    // The look held in the page, not on the network (where it would take one of the few connections).
+    await c.addInitScript(() => {
+      const f0 = window.fetch
+      window.__look = { hold: false, waiting: [] }
+      window.fetch = function (u, o) {
+        if (window.__look.hold && /\/api\/boards\/Race\/stat/.test(String(u))) return new Promise((res) => window.__look.waiting.push(() => res(f0.call(this, u, o))))
+        return f0.call(this, u, o)
+      }
+    })
+    await c.route(/\/api\/boards\/Race(\?|$)/, async (r) => { if (r.request().method() !== 'PUT' || !holdSave) return r.continue(); const res = await r.fetch(); heldSaves.push(() => r.fulfill({ response: res })) })
+  } })
+  const rp = rc.p
+  await rp.waitForSelector('.rail-nav', { timeout: 30000 })
+  await until(async () => { if (await rp.locator('.excalidraw canvas').count()) return true; await rp.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-board', { detail: { id: 'Race' } }))); return false }, 30000, 1000)
+  await rp.waitForSelector('.excalidraw canvas.interactive', { timeout: 30000 })
+  const rbox = await rp.locator('.wb-canvas').boundingBox()
+  const rFrame = () => rp.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
+  const drawBox = async (x, y) => {
+    await until(async () => { await rp.locator('[data-testid="toolbar-rectangle"]').click({ force: true }); return rp.locator('input[data-testid="toolbar-rectangle"]:checked').count() }, 5000, 200)
+    await rp.mouse.move(x, y); await rFrame(); await rp.mouse.down(); await rFrame()
+    for (let i = 1; i <= 6; i++) { await rp.mouse.move(x + i * 20, y + i * 10); await rFrame() }
+    await rp.mouse.up(); await rFrame(); await rp.keyboard.press('Escape')
+  }
+  await rp.evaluate(() => { window.__look.hold = true })
+  const looking = await until(() => rp.evaluate(() => window.__look.waiting.length > 0), 6000, 50)
+  holdSave = true
+  await drawBox(rbox.x + rbox.width / 2 - 150, rbox.y + rbox.height / 2)
+  const written = await until(() => heldSaves.length > 0, 8000, 50)
+  await drawBox(rbox.x + rbox.width / 2 + 100, rbox.y + rbox.height / 2)
+  await rp.evaluate(() => { window.__look.hold = false; for (const f of window.__look.waiting.splice(0)) f() })
+  // Given time to say so, as it did.
+  const said = await until(() => rp.locator('.wb-conflict').count(), 3000, 100)
+  holdSave = false
+  for (const f of heldSaves.splice(0)) await f()
+  const both = await until(() => live(readBoard('Race')).filter((e) => e.type === 'rectangle').length === 2, 8000)
+  ok(!!looking && !!written && !said && !!both, 'a look for a newer file answered while the board\'s own save is on its way: not taken for a change from somewhere else, and what was drawn meanwhile saved too', { looking: !!looking, written: !!written, said: !!said, rects: live(readBoard('Race')).filter((e) => e.type === 'rectangle').length })
+  await rc.ctx.close()
 
   // A dark theme.
   const dark = await page(b, kit.url, { mode: 'dark', store: { 'cc-ws': { tabs: [`view:whiteboard:${board}`], active: `view:whiteboard:${board}`, side: null, split: false, group: 'main' } }, before: async (c) => watch(c) })
