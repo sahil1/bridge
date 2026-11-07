@@ -411,7 +411,7 @@ signing.setHelpers({
 signing.routes(app, { wrap, rootOf, sq, trialOff })
 // Your files wherever they are, for Studio's home (studiofound.js): asked for only once it's open,
 // and let go of if you leave before it's done. Each found in an agent's folder or a place opens
-// through it.
+// through it, and one in Studio's own folder (a deck made from a meeting) through that.
 app.get('/api/studio/found', async (req, res) => {
   const ctl = new AbortController()
   res.on('close', () => { if (!res.writableEnded) ctl.abort() })
@@ -421,7 +421,7 @@ app.get('/api/studio/found', async (req, res) => {
       ...(fleet?.agents || []).filter((a) => a.cwd && !a.chief && !a.plainChat && !a.cloudOnly).map((a) => ({ root: a.paneId, dir: a.cwd, label: a.workspace || null })),
       ...places.pickedPlaces().map((p) => ({ root: `place:${p.id}`, dir: places.placeOf(p.id)?.path, label: p.name })),
     ].filter((r) => r.dir)
-    res.json(await studioFound.found({ roots, signal: ctl.signal, fresh: req.query.fresh === '1' }))
+    res.json(await studioFound.found({ roots, own: path.join(DATA, 'studio', 'files'), signal: ctl.signal, fresh: req.query.fresh === '1' }))
   } catch (e) { if (!res.headersSent) res.status(502).json({ error: e.message }) }
 })
 // Edit in place: part of a document rewritten as asked, by the model picked for Studio (Settings:
