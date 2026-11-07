@@ -174,6 +174,7 @@
 .sd-sigcard-pic { flex: none; display: grid; place-items: center; width: 116px; height: 46px; overflow: hidden; border-radius: 7px; background: #fff; box-shadow: 0 0 0 1px var(--line); }
 .sd-sigcard.compact .sd-sigcard-pic { width: 92px; height: 38px; }
 .sd-sigcard-pic img { max-width: 92%; max-height: 86%; object-fit: contain; }
+.sd-sigcard.waiting .sd-sigcard-pic { background: var(--pane-3); box-shadow: none; }
 .sd-sigcard-name { flex: 1; min-width: 0; display: grid; gap: 1px; font-size: 13px; }
 .sd-sigcard-acts { display: flex; align-items: center; gap: 4px; }
 /* In Signature Assist's narrow column: its name over it, then the picture and what to do. */

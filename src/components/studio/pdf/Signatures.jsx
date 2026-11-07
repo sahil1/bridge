@@ -38,6 +38,15 @@ export function SignatureCard({ which, setup, compact = false, onKept }) {
     setBusy(true); setErr(null)
     try { await setup.remove(which) } catch (e) { setErr(e.message) } finally { setBusy(false) }
   }
+  // Until it's known whether there's one, neither "not drawn yet" nor a pad: a card waiting.
+  if (!setup.data && !drawing) {
+    return (
+      <div className={`sd-sigcard${compact ? ' compact' : ''} waiting`} aria-busy="true">
+        <span className="sd-sigcard-pic" />
+        <span className="sd-sigcard-name"><b>{name}</b></span>
+      </div>
+    )
+  }
   if (drawing || (!meta && compact)) {
     return (
       <div className="sd-sigcard drawing">
@@ -65,14 +74,17 @@ export function SignatureCard({ which, setup, compact = false, onKept }) {
 export default function SignatureHome() {
   const setup = useSignSetup()
   return (
-    <section className="sd-sec sd-sign-home">
+    <section className="sd-sec sd-sign-home" aria-busy={!setup.data && !setup.err}>
       <h3>{t('Signature Assist')}</h3>
       <p className="muted small">{t('Draw your signature and initials once. Then open a PDF you\'re asked to sign and press Sign: it says what you\'re signing in plain words, finds where your signature goes, and saves a signed copy in a _signed folder beside it.')}</p>
-      {setup.err && <p className="error-text small" role="alert">{setup.err}</p>}
-      <div className="sd-sigcards">
-        <SignatureCard which="signature" setup={setup} />
-        <SignatureCard which="initials" setup={setup} />
-      </div>
+      {setup.err && !setup.data
+        ? <p className="error-text small" role="alert">{setup.err} <button type="button" className="link-btn" onClick={setup.refresh}>{t('Try again')}</button></p>
+        : (
+          <div className="sd-sigcards">
+            <SignatureCard which="signature" setup={setup} />
+            <SignatureCard which="initials" setup={setup} />
+          </div>
+        )}
       <p className="muted small sd-kept"><Icon name="info" size={11} /> {t(KEPT)}</p>
     </section>
   )

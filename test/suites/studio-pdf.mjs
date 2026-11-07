@@ -234,9 +234,20 @@ try {
   ok(!!(await until(async () => (await marks()).some((m) => m.kind === 'initials' && m.page === 1), 3000)) && (await p.locator('.sd-place .sd-pad.initials').count()) === 1, 'Add Initials: a place on the page, and a pad to draw them on, as there are none yet')
   await p.locator('.sd-places li', { hasText: 'Initials' }).locator('button[aria-label="Take this place away"]').click()
   ok(!!(await until(async () => !(await marks()).some((m) => m.kind === 'initials'), 3000)), 'taken away again')
-  // Studio's home: your signature, kept here, to draw again or remove.
+  // Studio's home: your signature, kept here, to draw again or remove. While it's still asking
+  // the server, it says neither "not drawn yet" nor offers a pad (the answer held back here; only
+  // Chromium takes a route added after the page opened).
+  const slow = which === 'chromium' ? async (r) => { await sleep(1500); await r.continue().catch(() => {}) } : null
+  if (slow) await p.route('**/api/studio/sign/setup*', slow)
   await p.locator('.sd-file button[aria-label="Back to Studio"]').click()
-  await p.locator('.sd-sign-home').waitFor({ timeout: 10000 })
+  if (slow) {
+    await p.locator('.sd-sign-home[aria-busy="true"]').waitFor({ timeout: 10000 })
+    const waiting = await p.locator('.sd-sign-home').innerText()
+    ok(!/Not drawn yet/.test(waiting) && !(await p.locator('.sd-sign-home .sd-pad, .sd-sign-home button', { hasText: /Draw/ }).count()), 'before it knows: no "not drawn yet", nothing to draw on', waiting)
+    await p.unroute('**/api/studio/sign/setup*', slow)
+  } else skip('before it knows, nothing half-ready', 'WebKit takes no route added after the page opened')
+  // Read once it knows what's drawn (it asks the server after it shows).
+  await p.locator('.sd-sign-home[aria-busy="false"]').waitFor({ timeout: 10000 })
   ok((await p.locator('.sd-sign-home .sd-sigcard img').count()) === 1 && /Kept only on this computer/.test(await p.locator('.sd-sign-home').innerText()) && (await p.locator('.sd-sign-home button[aria-label="Remove your signature"]').count()) === 1, "Studio's home: Signature Assist, your signature and initials, where they're kept, and Remove", await p.locator('.sd-sign-home').innerText())
   await p.locator('.sd-sign-home').scrollIntoViewIfNeeded()
   await shot(p, `${tag}studio-sign-home`)
