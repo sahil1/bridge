@@ -34,7 +34,7 @@ const NAMES = new Set(Object.keys(SCHEMA.counters))
   const { AGENTS, CHAT } = await import('../../server/agents.js')
   const kinds = [...AGENTS, CHAT].map((a) => a.kind)
   ok(kinds.every((k) => NAMES.has(`agents.started.${k}`)), 'and every kind of agent has its own counter (a new one is added to the list in public)', kinds.filter((k) => !NAMES.has(`agents.started.${k}`)))
-  ok(SCHEMA.buckets.join() === '0,1,2-5,6-20,21-100,100+' && Object.keys(SCHEMA.report).join() === 'schema,week,app,os,osVersion,arch,chip,memory,cores,install,layout,runtime,phone,phones,computers,installAge,daysActive,activeTime,openTime,features,agents,counts,nonce' && kinds.filter((k) => k !== 'chat').every((k) => SCHEMA.agents.includes(k)) && SCHEMA.timeRanges.join() === '0,under 1 hour,1-5 hours,5-10 hours,10-20 hours,20-40 hours,40+ hours', 'the list says what a report has, field by field, and its ranges (counts, and time in use and open)')
+  ok(SCHEMA.buckets.join() === '0,1,2-5,6-20,21-100,100+' && Object.keys(SCHEMA.report).join() === 'schema,week,app,channel,tester,rollout,os,osVersion,arch,chip,memory,cores,install,layout,runtime,phone,phones,computers,installAge,daysActive,activeTime,openTime,features,agents,counts,nonce' && kinds.filter((k) => k !== 'chat').every((k) => SCHEMA.agents.includes(k)) && SCHEMA.timeRanges.join() === '0,under 1 hour,1-5 hours,5-10 hours,10-20 hours,20-40 hours,40+ hours', 'the list says what a report has, field by field, and its ranges (counts, and time in use and open)')
 }
 process.env.BRIDGE_HOME = path.join(os.tmpdir(), `bridge-counts-rules-${process.pid}`)
 const c = await import('../../server/counts.js')

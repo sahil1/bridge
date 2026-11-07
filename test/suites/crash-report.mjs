@@ -279,7 +279,7 @@ try {
     await sendBtn.click()
     ok(await until(() => got.length === 1, 8000), 'Send to Bold Bridge sends it, once', got.length)
     const r1 = got[0] ? JSON.parse(got[0].body) : {}
-    ok(got[0]?.path === '/v1/report' && /application\/json/.test(got[0]?.type || '') && r1.kind === 'ui' && /A crash made by a test/.test(r1.title) && /What crashed: the window hit an error/.test(r1.details) && Object.keys(r1).join() === 'schema,kind,app,os,arch,install,title,what,details', 'as the report it showed, with the fields the public list names', r1)
+    ok(got[0]?.path === '/v1/report' && /application\/json/.test(got[0]?.type || '') && r1.kind === 'ui' && /A crash made by a test/.test(r1.title) && /What crashed: the window hit an error/.test(r1.details) && Object.keys(r1).join() === 'schema,kind,app,channel,tester,os,arch,install,title,what,details', 'as the report it showed, with the fields the public list names', r1)
     ok(!/Priya|acme-billing/.test(got[0]?.body || '') && /<name>/.test(r1.what) && /<project>/.test(r1.what), 'with what the person typed in, and their names taken out of it again', r1.what)
     const sentNote = dlg.locator('.cr-sent')
     ok(await until(async () => /Sent to Bold Bridge/.test(await sentNote.innerText().catch(() => '')), 5000), 'it says it was sent')

@@ -9,6 +9,9 @@
 // reason. Once a day, nonces older than ten weeks go. And the public list, wrangler.toml and
 // PRIVACY.md say where it is: counts.boldbridge.ai, with the Worker's logs off.
 //
+// The update channel (stable or early, with who an early-access code is for) and the rollout
+// bucket are kept with the version and nothing else, a week's, a day's with whether it crashed and
+// a crash report's; a pre-release's version as itself; anything else as "other", none as "unknown".
 // Time in use and time open are kept as their ranges. Crash reports, at crashes.boldbridge.ai: one
 // made by Bridge AI's own send() is kept with what's personal stripped again on the server, grouped
 // with the same crash elsewhere (line numbers and numbers don't split a group) and apart from a
@@ -279,7 +282,37 @@ try {
     ok(stop.body?.stop === true && stop.body.why === 'Paused for a move.', 'CRASHES_OFF: every report is answered "stop", with the reason', stop)
     db.sql.prepare('UPDATE crash_reports SET day = ? WHERE rowid = 1').run('2020-01-01')
     await worker.scheduled({}, { DB: db })
-    ok(rows(db, 'crash_reports').length === 3, 'once a day, crash reports older than 90 days go')
+    ok(rows(db, 'crash_reports').length === 3 && rows(db, 'crash_channels').length === 3, 'once a day, crash reports older than 90 days go, with their channel')
+  }
+
+  // ---------- The update channel ----------
+  // Stable or Early Access (and who the code is for) and the rollout bucket, kept with the version
+  // and nothing else: a week's, a day's with whether it crashed, and a crash report's. A
+  // pre-release's version is kept as itself; a report from before channels says unknown.
+  {
+    const db = d1()
+    const env = { DB: db }
+    const mail = ['priya', 'example.com'].join('@')
+    await post(env, report({ app: '3.13.0-beta.1', channel: 'early', tester: 'Sam', rollout: 80 }))
+    await post(env, report({ nonce: nonce(2), channel: 'stable', tester: 'Sam', rollout: 7 }))
+    await post(env, report({ nonce: nonce(3), channel: 'nightly', tester: 'Sam', rollout: 120 }))
+    await post(env, report({ nonce: nonce(4) }))
+    await post(env, report({ nonce: nonce(5), app: '3.13.0-beta.1', channel: 'early', tester: mail, rollout: 3 }))
+    await post(env, report({ nonce: nonce(6), app: '3.13.0-nightly.1', channel: 'early', tester: 'Sam', rollout: 3.5 }))
+    const ch = rows(db, 'channels').map((x) => `${x.app} ${x.channel} "${x.tester}" ${x.rollout} ${x.n}`)
+    ok(JSON.stringify(ch) === JSON.stringify(['3.13.0-beta.1 early "Sam" 80 1', '3.9.2 stable "" 7 1', '3.9.2 other "" -1 1', '3.9.2 unknown "" -1 1', '3.13.0-beta.1 early "other" 3 1', 'other early "Sam" -1 1']), 'a week\'s channel, tester (on Early Access only) and bucket, kept with the version: anything else as "other", a report from before channels as "unknown"', ch)
+    ok(rows(db, 'reports').some((x) => x.app === '3.13.0-beta.1') && !new RegExp(mail.replace('.', '\\.')).test(JSON.stringify([rows(db, 'channels'), rows(db, 'reports'), rows(db, 'dims')])), 'a pre-release\'s version is kept as itself; a tester that isn\'t a name is never kept', rows(db, 'reports').map((x) => x.app))
+    const y = new Date(Date.now() - 864e5).toISOString().slice(0, 10)
+    const dayPost = (body) => worker.fetch(new Request('https://counts.boldbridge.ai/v1/day', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }), env)
+    await dayPost({ schema: 1, day: y, app: '3.13.0-beta.1', from: '3.12.0', channel: 'early', tester: 'Sam', rollout: 80, os: 'mac', arch: 'arm64', install: 'desktop', starts: '1', crashed: true, nonce: nonce(70) })
+    await dayPost({ schema: 1, day: y, app: '3.12.0', from: null, os: 'mac', arch: 'arm64', install: 'desktop', starts: '1', crashed: false, nonce: nonce(71) })
+    const dc = rows(db, 'daily_channels').map((x) => `${x.app} ${x.channel} "${x.tester}" ${x.rollout} ${x.crashed} ${x.n}`)
+    ok(JSON.stringify(dc) === JSON.stringify(['3.13.0-beta.1 early "Sam" 80 1 1', '3.12.0 unknown "" -1 0 1']) && rows(db, 'daily_updates')[0]?.app === '3.13.0-beta.1', 'a day\'s: each version on each channel, and whether it crashed', dc)
+    const crashPostHere = (body) => worker.fetch(new Request('https://crashes.boldbridge.ai/v1/report', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }), env)
+    await crashPostHere({ schema: 1, kind: 'ui', app: '3.13.0-beta.1', channel: 'early', tester: 'Sam', os: 'mac', arch: 'arm64', install: 'desktop', title: 'x', details: 'Error: x' })
+    const cr = rows(db, 'crash_reports')[0]
+    const cc = rows(db, 'crash_channels')[0]
+    ok(cr?.app === '3.13.0-beta.1' && cc?.id === cr.id && cc.channel === 'early' && cc.tester === 'Sam', 'a crash report\'s channel and tester, by its id', { cr, cc })
   }
 
   // ---------- Bridge AI's own crash report, end to end ----------
