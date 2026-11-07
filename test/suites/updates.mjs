@@ -31,10 +31,31 @@
 // why in plain words; no switch in a browser, on a phone or from source. And what a window answers
 // the desktop app (src/busy.js): nothing open, nothing; Studio with an unsaved change, busy; a chat
 // with a message being typed, busy; each back to nothing once saved or cleared.
+// Channels. The rules: versions in semver's order (a pre-release before its version, the desktop
+// app's copy the same); the release each channel takes from GitHub's list (Early Access the newest,
+// pre-releases too, never a draft or a paused one; Stable never a pre-release); offered or not
+// (never an older version, so leaving Early Access stays put until Stable passes it; a staged
+// release to the buckets under its percentage, at 0, 10 and 100, or asked for by hand; paused, to
+// nobody); the lines a release's notes hide; codes good, ended, taken back, forged, cut short. npm
+// run release in a repo of its own: a beta (3.13.0-beta.1) said to be a pre-release for Early Access
+// only, never the latest release or Docker's latest, its notes saying so; a rollout line kept, last;
+// a version that's neither refused. npm run rollout and the code script with gh stood in for: 10, 50,
+// 0, 100, --dry-run, a key pair made once and never in the repo, a code that checks out, --revoke.
+// Then servers with GitHub's list stood in for: a staged release (bucket 37 at 10%: not offered, nor
+// by itself; Check now offers it; 50 does; 0 doesn't even by hand, and Update refuses it; bucket 5
+// at 10% is offered), Early Access (wrong codes refused saying why and not kept; Sam's code: the
+// newest pre-release, by itself too, the usage stats saying early, Sam and the bucket; taken back
+// in a release's notes: Stable, saying why; leaving; an older Stable never installed; a kept code
+// that ended), and where it isn't offered (Docker, a build with no key), the bucket picked once and
+// kept, Linux's command with the pre-release's tag. The page: the quiet link, a wrong and an ended
+// code saying why, Sam's code in light, dark and on a phone (nothing wider than it), leaving, a
+// ?early= link filling it in, a kept code that ended, no link where it can't work, and a staged
+// release Up to date until Check now.
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import http from 'node:http'
+import crypto from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { ROOT, OUT, IS_WIN, startKit, checks, until, browser, page, shot, freePort } from '../lib/harness.mjs'
 
@@ -163,6 +184,202 @@ ok(au.RELEASE_HOURS === 4 && au.AWAY_MINUTES === 20, 'by itself: a release out 4
   ok(au.waitingLong(out(), NOW) && !au.waitingLong(out({ publishedAt: ago(5) }), NOW) && !au.waitingLong(out({ available: false }), NOW), 'out a day and still not in: said why; out 5 hours, or nothing to update to: not', null)
 }
 
+// ---------- Channels: the rules ----------
+// Versions in semver's order (a pre-release before its version), in the server and in the desktop
+// app's copy; the release each channel takes from GitHub's list; whether one is offered here (never
+// an older version, the staged rollout's bucket, asked for by hand, paused); the lines a release's
+// notes hide; early-access codes, good and not; and a pre-release by itself only on Early Access.
+const ver = await import('../../shared/version.js')
+const ro = await import('../../shared/rollout.js')
+const ea = await import('../../server/earlyaccess.js')
+{
+  const ORDER = ['3.12.0', '3.13.0-alpha.1', '3.13.0-beta.1', '3.13.0-beta.2', '3.13.0-beta.10', '3.13.0-rc.1', '3.13.0', '3.13.1', '3.14.0-beta.1', '4.0.0']
+  const main = fs.readFileSync(path.join(ROOT, 'desktop', 'main.js'), 'utf8')
+  const from = main.indexOf('const parts = (v) =>')
+  const appNewer = from < 0 ? () => null : new Function(`${main.slice(from, main.indexOf('\n}\n', main.indexOf('const newer = (a, b) =>', from)) + 3)}; return newer`)()
+  const wrong = []
+  for (let i = 0; i < ORDER.length; i++) {
+    for (let j = 0; j < ORDER.length; j++) {
+      if (ver.newer(ORDER[i], ORDER[j]) !== i > j) wrong.push(`${ORDER[i]} vs ${ORDER[j]}`)
+      if (appNewer(ORDER[i], ORDER[j]) !== i > j) wrong.push(`desktop app: ${ORDER[i]} vs ${ORDER[j]}`)
+    }
+  }
+  ok(!wrong.length, 'versions in order, a pre-release before its version (3.13.0-beta.2 < beta.10 < rc.1 < 3.13.0), the desktop app\'s copy the same', wrong)
+
+  const R = (tag, o = {}) => ({ tag_name: tag, prerelease: !!o.pre, draft: !!o.draft, body: `Notes\n${o.rollout != null ? `<!-- rollout: ${o.rollout} -->\n` : ''}` })
+  const LIST = [R('v99.3.0-beta.1', { pre: true, rollout: 0 }), R('v99.2.0', { draft: true }), R('nightly-1', { pre: true }), R('v99.1.0-beta.2', { pre: true }), R('v99.1.0-beta.1', { pre: true }), R('v99.0.0', { rollout: 10 }), R('v98.0.0')]
+  ok(up.newestOf?.(LIST, { early: true })?.tag_name === 'v99.1.0-beta.2' && up.newestOf(LIST)?.tag_name === 'v99.0.0', 'from GitHub\'s list, Early Access takes the newest release, pre-releases too, but not a draft, a paused one or a tag that isn\'t a version; Stable never a pre-release', [up.newestOf?.(LIST, { early: true })?.tag_name, up.newestOf?.(LIST)?.tag_name])
+  ok(up.newestOf?.([R('v99.1.0-beta.2', { pre: true }), R('v99.1.0')], { early: true })?.tag_name === 'v99.1.0', 'a release is newer than its betas: Early Access moves on to it')
+
+  const OFFERED = [
+    ['on Stable, a release with no rollout line', { latest: '99.0.0', bucket: 99 }, true],
+    ['at 10%, to bucket 5', { latest: '99.0.0', rollout: 10, bucket: 5 }, true],
+    ['at 10%, to bucket 10', { latest: '99.0.0', rollout: 10, bucket: 10 }, false],
+    ['at 10%, to bucket 37 that asked by hand', { latest: '99.0.0', rollout: 10, bucket: 37, asked: '99.0.0' }, true],
+    ['at 100%, to bucket 99', { latest: '99.0.0', rollout: 100, bucket: 99 }, true],
+    ['paused (0), to bucket 0', { latest: '99.0.0', rollout: 0, bucket: 0 }, false],
+    ['paused, asked for by hand', { latest: '99.0.0', rollout: 0, bucket: 0, asked: '99.0.0' }, false],
+    ['paused, on Early Access', { latest: '99.0.0', rollout: 0, channel: 'early' }, false],
+    ['at 10%, on Early Access in bucket 80', { latest: '99.0.0', rollout: 10, bucket: 80, channel: 'early' }, true],
+    ['the version it has', { latest: '3.12.0' }, false],
+    ['an older one', { latest: '3.11.0', channel: 'early' }, false],
+    ['on 99.1.0-beta.2 after leaving Early Access, Stable at 99.0.0 (it stays put)', { current: '99.1.0-beta.2', latest: '99.0.0' }, false],
+    ['on 99.1.0-beta.2, once Stable passes it with 99.1.0', { current: '99.1.0-beta.2', latest: '99.1.0' }, true],
+    ['on 99.1.0-beta.2 on Early Access, the next beta', { current: '99.1.0-beta.2', latest: '99.1.0-beta.3', channel: 'early' }, true],
+  ]
+  const got = OFFERED.map(([, o]) => up.offered?.({ current: '3.12.0', ...o }))
+  ok(same(got, OFFERED.map((x) => x[2])), 'offered or not: never an older version or the same one, a staged release to the buckets under its percentage or by hand, a paused one to nobody', OFFERED.map(([what], i) => `${what}: ${got[i]}`))
+
+  const n0 = 'Notes.\n\n<!-- macOS 14.0 or later -->\n'
+  const n10 = ro.withRollout(n0, 10)
+  ok(ro.rolloutOf(n0) === null && ro.rolloutOf(n10) === 10 && ro.rolloutOf(ro.withRollout(n10, 50)) === 50 && ro.withRollout(n10, 50).split('rollout').length === 2 && ro.withRollout(n10, 100) === n0 && ro.rolloutOf(ro.withRollout(n10, 0)) === 0, 'the rollout line in a release\'s notes: none is everyone; set, changed, taken out at 100, and 0 pauses', n10)
+  const twice = ro.withRevoked(ro.withRevoked(n10, 'abcd1234'), 'ef567890')
+  ok(same(ro.revokedIn(twice), ['abcd1234', 'ef567890']) && twice.split('revoked').length === 2 && ro.shown(twice).trim() === 'Notes.', 'codes taken back go in one line, and the notes shown leave out every line GitHub hides', twice)
+
+  const { privateKey: owner } = crypto.generateKeyPairSync('ed25519')
+  const { privateKey: someone } = crypto.generateKeyPairSync('ed25519')
+  const key = ea.publicOf(owner)
+  const sam = ea.makeCode({ label: 'Sam', days: 30, privateKey: owner })
+  const r = ea.readCode(sam, { key })
+  ok(r.ok && r.for === 'Sam' && /^[0-9a-f]{8}$/.test(r.id) && Math.abs(Date.parse(r.until) - Date.now() - 30 * 24 * HOUR) < 60000 && Math.abs(Date.parse(r.made) - Date.now()) < 60000, 'an early-access code: who it\'s for, its id, when it was made and when it ends, signed with the owner\'s key', r)
+  const [, details, sig] = sam.split('.')
+  const longer = `ea1.${Buffer.from(JSON.stringify({ ...JSON.parse(Buffer.from(details, 'base64url').toString('utf8')), until: 4102444800 })).toString('base64url')}.${sig}`
+  const CODES = [
+    ['signed with another key (forged)', ea.makeCode({ label: 'Sam', privateKey: someone }), {}, 'forged'],
+    ['changed on the way (a later end)', longer, {}, 'forged'],
+    ['cut short', sam.slice(0, 80), {}, 'malformed'],
+    ['not a code', 'let me in', {}, 'malformed'],
+    ['past its end', sam, { now: Date.now() + 31 * 24 * HOUR }, 'expired'],
+    ['taken back', sam, { revoked: [r.id] }, 'revoked'],
+    ['in a build with no key', sam, { key: '' }, 'none'],
+  ]
+  const why = CODES.map(([, c, o]) => ea.readCode(c, { key, ...o }).why)
+  ok(same(why, CODES.map((x) => x[3])), 'a code that doesn\'t work says why', CODES.map(([what], i) => `${what}: ${why[i]}`))
+  ok(ea.readCode(` ${sam.slice(0, 50)}\n${sam.slice(50)} `, { key }).ok && ea.readCode(ea.makeCode({ label: 'Lee', privateKey: owner }), { key }).until === null, 'pasted with spaces or a line break in it, it works; made without --days, it doesn\'t end')
+  ok(!ea.labelOk('sam@example.com') && !ea.labelOk('') && !ea.labelOk('x'.repeat(33)) && ea.labelOk('Zoë K.'), 'who it\'s for: a first name or nickname, never an email')
+  ok(ea.PUBLIC_KEY === '' || /^[A-Za-z0-9_-]{43}$/.test(ea.PUBLIC_KEY), 'the key built in is the public half of one (32 bytes), or none yet', ea.PUBLIC_KEY)
+  const pre = { how: 'app', available: true, latest: '99.1.0-beta.2', prerelease: true, publishedAt: ago(30) }
+  ok(same(au.releaseWhy({ u: { ...pre, channel: 'early' }, now: NOW }), []) && same(au.releaseWhy({ u: { ...pre, channel: 'stable' }, now: NOW }), ['prerelease']), 'by itself: a pre-release goes in on Early Access, which asked for them, and never on Stable')
+}
+
+// ---------- npm run release with a beta, and a release out a few computers at a time ----------
+// In a repo of its own, with an origin on this computer (nothing reaches GitHub): the version
+// decides, and --dry-run says who it goes to and pushes nothing.
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-release-'))
+  const repo = path.join(dir, 'repo')
+  const origin = path.join(dir, 'origin.git')
+  for (const f of ['scripts/release.js', 'scripts/check-private.js', 'shared/private.js', 'shared/version.js', 'shared/rollout.js']) {
+    fs.mkdirSync(path.dirname(path.join(repo, f)), { recursive: true })
+    fs.copyFileSync(path.join(ROOT, f), path.join(repo, f))
+  }
+  fs.mkdirSync(path.join(repo, 'desktop'))
+  const gitConfig = path.join(dir, 'gitconfig')
+  fs.writeFileSync(gitConfig, '[user]\n\tname = Tester\n\temail = tester@example.com\n[init]\n\tdefaultBranch = main\n')
+  const renv = { ...env, HOME: dir, USERPROFILE: dir, BRIDGE_HOME: path.join(dir, 'data'), GIT_CONFIG_GLOBAL: gitConfig, GIT_CONFIG_NOSYSTEM: '1' }
+  const git = (...a) => spawnSync('git', a, { cwd: repo, env: renv, encoding: 'utf8' })
+  spawnSync('git', ['init', '-q', '--bare', origin], { env: renv })
+  git('init', '-q')
+  git('remote', 'add', 'origin', origin)
+  const version = (v, section) => {
+    fs.writeFileSync(path.join(repo, 'package.json'), `${JSON.stringify({ name: 'bridge-ai', version: v, type: 'module' }, null, 2)}\n`)
+    fs.writeFileSync(path.join(repo, 'desktop', 'package.json'), `${JSON.stringify({ name: 'bridge-ai-desktop', version: v, build: { mac: { minimumSystemVersion: '14.0' } } }, null, 2)}\n`)
+    fs.writeFileSync(path.join(repo, 'CHANGELOG.md'), `# Changelog\n\n## ${v}\n\n${section}\n\n## 3.12.0\n\nThe one before.\n`)
+    git('add', '-A')
+    git('commit', '-qm', `Bridge AI ${v}`)
+    git('push', '-q', 'origin', 'HEAD:main')
+  }
+  const release = (args, more = {}) => { const x = spawnSync(process.execPath, [path.join(repo, 'scripts', 'release.js'), ...args], { cwd: repo, env: { ...renv, ...more }, encoding: 'utf8' }); return { status: x.status, out: `${x.stdout}${x.stderr}` } }
+  version('99.1.0-beta.1', 'A beta: the new thing, to try.')
+  let r = release(['--dry-run'])
+  ok(r.status === 0 && /A pre-release, for Early Access/.test(r.out) && /never becomes the latest release, the website's download or Docker's latest \(only ghcr\.io\/sahil1\/bridge:99\.1\.0-beta\.1\)/.test(r.out) && /Dry run: nothing pushed\./.test(r.out), 'npm run release -- --dry-run, at 99.1.0-beta.1: a pre-release for Early Access, never the latest release, the website\'s download or Docker\'s latest', r.out)
+  ok(/A beta: the new thing, to try\.\n\nThis is a pre-release, for testers/.test(r.out) && !git('ls-remote', '--tags', 'origin').stdout.trim(), 'its notes say what it is after its changes, and nothing is pushed', r.out)
+  const notesAt = path.join(dir, 'notes.md')
+  r = release(['--notes', notesAt], { GITHUB_REF_NAME: 'v99.1.0-beta.1' })
+  const ci = r.status === 0 ? fs.readFileSync(notesAt, 'utf8') : ''
+  ok(/This is a pre-release, for testers/.test(ci) && up.minMacOf(ci) === '14.0' && ro.rolloutOf(ci) === null, 'the notes CI publishes it with (as a pre-release, release.yml) say the same, with the macOS line', ci || r.out)
+  version('99.1.0', 'Everyone gets the new thing.\n\n<!-- rollout: 10 -->')
+  r = release(['--dry-run'])
+  ok(r.status === 0 && /10% of computers on Stable are offered it at first/.test(r.out) && /npm run rollout -- 99\.1\.0 <percent>/.test(r.out) && !/pre-release/.test(r.out), 'a release whose CHANGELOG section has a rollout line: 10% of Stable at first, and how to widen it', r.out)
+  ok(/Everyone gets the new thing\.\n\nThe Mac app/.test(r.out) && /<!-- macOS 14\.0 or later -->\n\n<!-- rollout: 10 -->\n/.test(r.out), 'its notes keep the line, last, where npm run rollout changes it', r.out)
+  version('99.2.0', 'Everyone at once.')
+  r = release(['--dry-run'])
+  ok(r.status === 0 && /Everyone on Stable is offered it at once/.test(r.out), 'one with no rollout line: everyone at once, as before', r.out)
+  version('99.3.0-nightly', 'Something.')
+  r = release(['--dry-run'])
+  ok(r.status !== 0 && /isn't a version Bridge AI is released as/.test(r.out), 'a version that\'s neither a release nor a beta is refused', r.out)
+  fs.rmSync(dir, { recursive: true, force: true })
+}
+
+// ---------- npm run rollout and the code script, with the GitHub CLI stood in for ----------
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-gh-'))
+  const state = path.join(dir, 'releases.json')
+  const ghJs = path.join(dir, 'gh.cjs')
+  fs.writeFileSync(ghJs, `const fs = require('fs')
+const all = JSON.parse(fs.readFileSync(process.env.GH_STATE, 'utf8'))
+const [cmd, sub, ...rest] = process.argv.slice(2)
+if (cmd !== 'release') { console.error('unknown command'); process.exit(1) }
+if (sub === 'list') { console.log(JSON.stringify(all.filter((x) => !x.isDraft).slice(0, 1).map((x) => ({ tagName: x.tagName })))); process.exit(0) }
+const r = all.find((x) => x.tagName === rest[0])
+if (!r) { console.error('release not found'); process.exit(1) }
+if (sub === 'view') console.log(JSON.stringify(r))
+if (sub === 'edit') { r.body = fs.readFileSync(rest[rest.indexOf('--notes-file') + 1], 'utf8'); fs.writeFileSync(process.env.GH_STATE, JSON.stringify(all)) }
+`)
+  const n0 = 'Everyone gets the new thing.\n\n<!-- macOS 14.0 or later -->\n'
+  fs.writeFileSync(state, JSON.stringify([{ tagName: 'v99.1.0', body: n0, isPrerelease: false, isDraft: false }, { tagName: 'v99.2.0-beta.1', body: 'A beta.\n', isPrerelease: true, isDraft: false }]))
+  const gh = { BRIDGE_GH: ghJs, GH_STATE: state }
+  const notesOf = (tag) => JSON.parse(fs.readFileSync(state, 'utf8')).find((x) => x.tagName === tag).body
+  const rollout = (...a) => { const x = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'rollout.js'), ...a], { cwd: ROOT, env: { ...env, ...gh }, encoding: 'utf8' }); return { status: x.status, out: `${x.stdout}${x.stderr}`, notes: notesOf('v99.1.0') } }
+  let r = rollout('99.1.0', '10')
+  ok(r.status === 0 && ro.rolloutOf(r.notes) === 10 && r.notes.startsWith(n0.trimEnd()) && /now offered to 10% of computers on Stable/.test(r.out), 'npm run rollout -- 99.1.0 10: the release\'s notes on GitHub say 10%, and the rest stays as it was', r)
+  r = rollout('99.1.0', '50', '--dry-run')
+  ok(r.status === 0 && ro.rolloutOf(r.notes) === 10 && /Dry run: nothing changed/.test(r.out), '--dry-run shows what it would write and changes nothing', r.out)
+  r = rollout('v99.1.0', '50')
+  ok(r.status === 0 && ro.rolloutOf(r.notes) === 50 && r.notes.split('rollout').length === 2, '50: the line changed, still one', r.notes)
+  r = rollout('99.1.0', '0')
+  ok(r.status === 0 && ro.rolloutOf(r.notes) === 0 && /nobody \(paused\)/.test(r.out), '0: paused', r.out)
+  r = rollout('99.1.0', '100')
+  ok(r.status === 0 && r.notes === n0 && /now offered to everyone/.test(r.out), '100: everyone, and the line goes', r)
+  r = rollout('99.1.0')
+  ok(r.status === 0 && /offered to everyone\./.test(r.out), 'with no percentage, where it\'s at', r.out)
+  r = rollout('99.1.0', '150')
+  ok(r.status !== 0 && /a whole number from 0 to 100/.test(r.out) && r.notes === n0, 'a percentage over 100: refused, nothing changed', r.out)
+  r = rollout('99.9.9', '10')
+  ok(r.status !== 0 && /release not found/.test(r.out), 'a release GitHub doesn\'t have: GitHub\'s words', r.out)
+  r = rollout('99.2.0-beta.1', '0')
+  ok(r.status === 0 && ro.rolloutOf(notesOf('v99.2.0-beta.1')) === 0 && /pre-release \(Early Access only\)/.test(rollout('99.2.0-beta.1').out), 'a beta paused the same way (0 holds it back from Early Access)', notesOf('v99.2.0-beta.1'))
+
+  // node scripts/early-access-code.js: the key pair once, a code per tester, taking one back.
+  const keyAt = path.join(dir, 'keys', 'early-access-key.pem')
+  const source = fs.readFileSync(path.join(ROOT, 'server', 'earlyaccess.js'), 'utf8')
+  const codes = (a, more = {}) => { const x = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'early-access-code.js'), ...a], { cwd: ROOT, env: { ...env, BRIDGE_EARLY_ACCESS_PRIVATE_KEY: keyAt, ...more }, encoding: 'utf8' }); return { status: x.status, out: `${x.stdout}${x.stderr}` } }
+  r = codes(['--new-key'])
+  const pub = /export const PUBLIC_KEY = '([A-Za-z0-9_-]{43})'/.exec(r.out)?.[1]
+  // The key's first line made of parts, so the repo's own check doesn't take this for a real one.
+  ok(r.status === 0 && !!pub && fs.readFileSync(keyAt, 'utf8').startsWith(['-----BEGIN', 'PRIVATE', 'KEY-----'].join(' ')) && (IS_WIN || (fs.statSync(keyAt).mode & 0o777) === 0o600) && fs.readFileSync(path.join(ROOT, 'server', 'earlyaccess.js'), 'utf8') === source, '--new-key: the private key in a file only you can read, and the public key printed to put in server/earlyaccess.js', r.out)
+  r = codes(['--new-key'])
+  ok(r.status !== 0 && /there's a key at/.test(r.out), 'run again, it keeps the key there (codes made with it would stop working)', r.out)
+  const inRepo = path.join(OUT, 'early-access-key.pem')
+  r = codes(['--new-key', '--key', inRepo])
+  ok(r.status !== 0 && /inside this repo/.test(r.out) && !fs.existsSync(inRepo), 'and never makes one inside the repo', r.out)
+  r = codes(['Sam', '--days', '30'], { BRIDGE_EARLY_ACCESS_KEY: pub })
+  const made = /^ea1\.\S+$/m.exec(r.out)?.[0]
+  const c = ea.readCode(made, { key: pub })
+  ok(r.status === 0 && c.ok && c.for === 'Sam' && c.until && new RegExp(`--revoke ${c.id}`).test(r.out), 'a code for Sam, for 30 days: it checks out with the public key, and it says how to take it back', r.out)
+  r = codes(['--check', made], { BRIDGE_EARLY_ACCESS_KEY: pub })
+  ok(r.status === 0 && /For Sam \(id [0-9a-f]{8}\)/.test(r.out) && /It checks out/.test(r.out), '--check: who it\'s for, and that it checks out', r.out)
+  r = codes(['Sam'], { BRIDGE_EARLY_ACCESS_KEY: ea.publicOf(crypto.generateKeyPairSync('ed25519').privateKey) })
+  ok(r.status !== 0 && /isn't the one server\/earlyaccess\.js has/.test(r.out) && !/^ea1\./m.test(r.out), 'with a key that isn\'t the one built in: no code, so none is sent that wouldn\'t work', r.out)
+  r = codes(['Kim'], { BRIDGE_EARLY_ACCESS_KEY: '' })
+  ok(r.status === 0 && /^ea1\./m.test(r.out) && /No build takes it yet/.test(r.out), 'before any build has the key: the code, and that no build takes it yet', r.out)
+  r = codes(['sam@example.com'], { BRIDGE_EARLY_ACCESS_KEY: pub })
+  ok(r.status !== 0 && /can't be a code's name/.test(r.out), 'an email as the name: refused', r.out)
+  r = codes(['--revoke', c.id], gh)
+  ok(r.status === 0 && same(ro.revokedIn(notesOf('v99.1.0')), [c.id]) && /REVOKED in server\/earlyaccess\.js/.test(r.out), '--revoke: written in the newest release\'s notes, for computers on Early Access to read, and how to make it for good', r.out)
+  fs.rmSync(dir, { recursive: true, force: true })
+}
+
 // ---------- The server, with GitHub's releases stood in for ----------
 // The notes as GitHub would send them. A long release's notes are cut at 4,000 characters in the
 // app, so the stand-in's are the start and the part this test is about: the macOS line and after.
@@ -186,6 +403,7 @@ const tag = which === 'webkit' ? 'webkit-' : ''
 // A request a reload cut off isn't the page's fault (WebKit reports it as an error).
 const cut = (errors) => errors.filter((e) => !/due to access control checks/.test(e))
 let gh = null // GitHub's latest release, stood in for, for updating by itself
+let ghc = null // and its list of releases, for the channels
 try {
   const old = await kitOn('mac13', '13.6')
   const u = await old.api('/updates?refresh=1')
@@ -490,10 +708,234 @@ try {
     ok(cut(errors).length === 0, 'no page errors', errors)
     await ctx.close()
   }
+
+  // ---------- Channels: the server ----------
+  // GitHub stood in for with a list of releases (newest first) and its latest (the newest that isn't
+  // a pre-release or a draft), and the owner's key a pair made here, its public half given to the
+  // servers as the one built in (BRIDGE_EARLY_ACCESS_KEY). The desktop app on a Mac (BRIDGE_INSTALL_HOW).
+  {
+    const { privateKey: owner } = crypto.generateKeyPairSync('ed25519')
+    const KEY = ea.publicOf(owner)
+    const codeFor = (label, o = {}) => ea.makeCode({ label, privateKey: owner, ...o })
+    const rel2 = (tag, o = {}) => ({ tag_name: tag, html_url: `https://github.com/sahil1/bridge/releases/tag/${tag}`, body: `${body}${o.rollout != null ? `\n<!-- rollout: ${o.rollout} -->\n` : ''}${o.revoked ? `\n<!-- revoked: ${o.revoked} -->\n` : ''}`, published_at: new Date(Date.now() - (o.age ?? 30) * HOUR).toISOString(), prerelease: !!o.pre, draft: !!o.draft })
+    const hub = { list: [] }
+    ghc = http.createServer((req, res) => {
+      const at = new URL(req.url, 'http://x').pathname
+      const out = at.endsWith('/releases/latest') ? hub.list.find((x) => !x.prerelease && !x.draft) : at.endsWith('/releases') ? hub.list : null
+      res.writeHead(out ? 200 : 404, { 'content-type': 'application/json' })
+      res.end(JSON.stringify(out || { message: 'Not Found' }))
+    })
+    const ghcPort = await freePort()
+    await new Promise((r) => ghc.listen(ghcPort, '127.0.0.1', r))
+    const chKit = async (name, { how = 'app', bucket, key = KEY } = {}) => {
+      const k = await startKit(`updates-${name}`, { env: { BRIDGE_RELEASES_API: `http://127.0.0.1:${ghcPort}/repos/sahil1/bridge/releases/latest`, BRIDGE_INSTALL_HOW: how, BRIDGE_EARLY_ACCESS_KEY: key, BRIDGE_MACHINE: JSON.stringify({ platform: 'darwin', arch: 'arm64', os: '14.6', docker: how === 'docker' }) }, config: bucket != null ? { updates: { bucket } } : {} })
+      kits.push(k)
+      await k.api('/setup', { name: 'Tester' })
+      return k
+    }
+    const refused = (p) => p.then((x) => ({ ok: true, x }), (e) => ({ error: e.message }))
+
+    // A staged release on Stable: 99.0.0 out to 10%, this computer in bucket 37.
+    hub.list = [rel2('v99.0.0', { rollout: 10 }), rel2('v98.0.0')]
+    const st = await chKit('rollout', { bucket: 37 })
+    let u = await st.api('/updates')
+    ok(u.latest === '99.0.0' && u.rollout === 10 && u.bucket === 37 && u.available === false && u.channel === 'stable', 'Stable, 99.0.0 out to 10%: a computer in bucket 37 isn\'t offered it yet', u)
+    let v = await st.api('/updates/auto')
+    ok(same(v.why, ['none']) && v.release === false, 'and doesn\'t update to it by itself', v)
+    u = await st.api('/updates?refresh=1')
+    ok(u.available === true, 'Check now (asked by hand): offered all the same', u)
+    ok((await st.api('/updates')).available === true, 'and still offered after, without asking again')
+    await st.restart()
+    ok((await st.api('/updates')).available === false, 'Bridge AI opened again: not offered until asked again')
+    hub.list[0] = rel2('v99.0.0', { rollout: 50 })
+    await st.restart()
+    ok((await st.api('/updates')).available === true, 'raised to 50%: bucket 37 is offered it, without asking')
+    hub.list[0] = rel2('v99.0.0', { rollout: 0 })
+    u = await st.api('/updates?refresh=1')
+    let e = await refused(st.api('/updates/install', {}))
+    ok(u.available === false && u.rollout === 0 && /99\.0\.0 is paused for now/.test(e.error || ''), 'paused (0): not offered, not even asked for by hand, and Update refuses it', { u, e })
+    hub.list[0] = rel2('v99.0.0')
+    u = await st.api('/updates?refresh=1')
+    ok(u.available === true && u.rollout === null, 'no rollout line (everyone): offered', u)
+    hub.list[0] = rel2('v99.0.0', { rollout: 10 })
+    await st.api('/settings', { updates: { bucket: 5 } }, 'PATCH')
+    await st.restart()
+    ok((await st.api('/updates')).available === true, 'at 10%, a computer in bucket 5 is offered it')
+
+    // Early Access, on a computer in bucket 80: GitHub has a paused beta, a draft, two betas, the
+    // release at 10% and one before.
+    const sam = codeFor('Sam', { days: 30 })
+    const samId = ea.readCode(sam, { key: KEY }).id
+    const lee = codeFor('Lee')
+    const leeId = ea.readCode(lee, { key: KEY }).id
+    const LIST = () => [rel2('v99.3.0-beta.1', { pre: true, rollout: 0 }), rel2('v99.2.0', { draft: true }), rel2('v99.1.0-beta.2', { pre: true }), rel2('v99.1.0-beta.1', { pre: true, age: 60 }), rel2('v99.0.0', { rollout: 10 }), rel2('v98.0.0', { revoked: leeId })]
+    hub.list = LIST()
+    const ek = await chKit('early', { bucket: 80 })
+    u = await ek.api('/updates')
+    ok(u.channel === 'stable' && u.early?.offered === true && u.early.on === false && u.latest === '99.0.0' && u.available === false, 'before a code: Stable (GitHub\'s latest release, never a pre-release), with Early Access there to join', u)
+    const { privateKey: someone } = crypto.generateKeyPairSync('ed25519')
+    const [, part, sig] = sam.split('.')
+    const WRONG = [
+      ['that isn\'t a code', 'let me in', /isn't a whole early-access code/],
+      ['cut short', sam.slice(0, 70), /isn't a whole early-access code/],
+      ['made with another key', ea.makeCode({ label: 'Sam', privateKey: someone }), /doesn't check out/],
+      ['changed on the way', `ea1.${Buffer.from(JSON.stringify({ ...JSON.parse(Buffer.from(part, 'base64url').toString('utf8')), for: 'Max' })).toString('base64url')}.${sig}`, /doesn't check out/],
+      ['that ended', codeFor('Kim', { days: 1, now: Date.now() - 3 * 24 * HOUR }), /That code, for Kim, ended on/],
+      ['taken back in a release\'s notes', lee, /That code, for Lee, was taken back/],
+    ]
+    for (const [what, code, why] of WRONG) {
+      e = await refused(ek.api('/updates/early', { code }))
+      const kept = (await ek.api('/settings')).user.earlyAccess
+      ok(why.test(e.error || '') && !kept && (await ek.api('/updates')).channel === 'stable', `a code ${what}: refused, saying why, and nothing kept`, { e, kept })
+    }
+    u = await ek.api('/updates/early', { code: sam })
+    ok(u.channel === 'early' && u.early?.on === true && u.early.for === 'Sam' && u.early.id === samId && u.latest === '99.1.0-beta.2' && u.available === true && u.prerelease === true, 'Sam\'s code: Early Access, offered the newest pre-release (99.1.0-beta.2), not the draft (99.2.0) or the paused beta (99.3.0-beta.1)', u)
+    ok(Math.abs(Date.parse(u.early.until) - Date.now() - 30 * 24 * HOUR) < 60000 && (await ek.api('/settings')).user.earlyAccess?.code === sam, 'it says when the code ends, and it\'s kept in the settings', u.early)
+    v = await ek.api('/updates/auto')
+    ok(v.release === true && !v.why.includes('prerelease'), 'on Early Access a pre-release goes in by itself too, once it\'s been out 4 hours', v)
+    let pv = (await ek.api('/counts/preview')).report
+    ok(pv.channel === 'early' && pv.tester === 'Sam' && pv.rollout === 80 && pv.app === current, 'what the usage stats say: Early Access, for Sam, in bucket 80, with the version', { channel: pv.channel, tester: pv.tester, rollout: pv.rollout })
+    // Taken back in a release's notes after joining: Stable again, saying why.
+    hub.list[5] = rel2('v98.0.0', { revoked: `${leeId} ${samId}` })
+    u = await ek.api('/updates?refresh=1')
+    ok(u.channel === 'stable' && u.early.on === false && u.early.problem === 'revoked' && u.latest === '99.0.0' && !u.prerelease, 'Sam\'s code taken back in a release\'s notes: back on Stable (99.0.0), saying why', u)
+    pv = (await ek.api('/counts/preview')).report
+    ok(pv.channel === 'stable' && pv.tester === null, 'and the usage stats say Stable, with no tester', { channel: pv.channel, tester: pv.tester })
+    hub.list = LIST()
+    ok((await ek.api('/updates?refresh=1')).channel === 'early', 'given back: Early Access again')
+    // Leaving: Stable, and what's here stays (here 99.x on GitHub is newer; an older one isn't offered).
+    u = await ek.api('/updates/early', undefined, 'DELETE')
+    ok(u.channel === 'stable' && u.early.on === false && !u.early.problem && !(await ek.api('/settings')).user.earlyAccess, 'Leave Early Access: Stable, the code gone', u)
+    hub.list = [rel2('v3.0.0')]
+    u = await ek.api('/updates?refresh=1')
+    e = await refused(ek.api('/updates/install', {}))
+    ok(u.latest === '3.0.0' && u.available === false && /nothing to update to/.test(e.error || ''), `Stable's latest older than this version (${current}): not offered, and Update refuses to go back to it`, { u, e })
+    hub.list = LIST()
+    // A code that ended while kept.
+    await ek.api('/settings', { earlyAccess: { code: codeFor('Kim', { days: 1, now: Date.now() - 3 * 24 * HOUR }) } }, 'PATCH')
+    u = await ek.api('/updates?refresh=1')
+    ok(u.channel === 'stable' && u.early.problem === 'expired' && u.early.for === 'Kim' && !!u.early.until, 'a kept code that has ended: Stable, saying it ended and when', u.early)
+    await ek.api('/updates/early', undefined, 'DELETE')
+    // Where Early Access isn't offered: Docker (by its image's tag), a build with no key. On Linux's
+    // package, the command shown installs the pre-release by its tag.
+    const dk = await chKit('early-docker', { how: 'docker' })
+    u = await dk.api('/updates')
+    e = await refused(dk.api('/updates/early', { code: sam }))
+    ok(u.early?.offered === false && /Early Access is for the desktop app\. Bridge AI in Docker/.test(e.error || ''), 'Docker: not offered, and a code says why', { early: u.early, e })
+    ok(Number.isInteger(u.bucket) && u.bucket >= 0 && u.bucket < 100 && (await dk.api('/settings')).user.updates?.bucket === u.bucket, 'a computer\'s bucket: picked at random the first time, and kept in its settings', u.bucket)
+    await dk.restart()
+    ok((await dk.api('/updates')).bucket === u.bucket, 'the same after Bridge AI opens again')
+    const nk = await chKit('early-nokey', { key: '' })
+    u = await nk.api('/updates')
+    e = await refused(nk.api('/updates/early', { code: sam }))
+    ok(u.early?.offered === false && /doesn't take early-access codes/.test(e.error || ''), 'a build with no key: Early Access not offered, and a code says so', { early: u.early, e })
+    const lk = await chKit('early-linux', { how: 'app-linux' })
+    u = await lk.api('/updates/early', { code: sam })
+    ok(u.channel === 'early' && u.available && /install\.sh \| BRIDGE_VERSION=v99\.1\.0-beta\.2 sh$/.test(u.command || ''), 'Linux\'s package on Early Access: the command shown installs 99.1.0-beta.2 by its tag', u.command)
+
+    // ---------- Channels: the page ----------
+    // About & Updates in the desktop app: the quiet link, a wrong and an ended code saying why, Sam's
+    // code (light, dark, a phone), leaving; a link with ?early= filling it in; a code that ended; and
+    // where it can't work, no link at all. A staged release: Up to date, until Check now.
+    const early = (p) => p.locator('.st-sec.ab-early')
+    const join = async (p, code) => {
+      await early(p).locator('input').fill(code)
+      await early(p).locator('button', { hasText: 'Join' }).click()
+    }
+    const noOverflow = (p) => p.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1 && [...document.querySelectorAll('.ab-early *')].every((x) => x.getBoundingClientRect().right <= window.innerWidth + 1))
+    {
+      const { ctx, p, errors } = await page(b, ek.url, { mode: 'light', theme: 'sky', before: desktop })
+      await about(p)
+      const ask = p.locator('.ab-early-ask button')
+      ok(!!(await until(async () => (await ask.innerText().catch(() => '')) === 'Have an early-access code?', 10000)) && await early(p).count() === 0, 'About & Updates: only a quiet "Have an early-access code?"')
+      await p.waitForTimeout(400) // Settings' fade-in
+      await shot(p, `${tag}early-access-ask`)
+      await ask.click()
+      ok(await early(p).locator('h4').innerText().catch(() => '') === 'Early Access', 'it opens Early Access, to paste a code in')
+      await join(p, 'let me in')
+      const wrong = await until(async () => { const x = await early(p).locator('.ab-early-error').innerText().catch(() => ''); return /isn't a whole early-access code/.test(x) && x }, 8000)
+      ok(!!wrong, 'a wrong code says why', wrong)
+      await join(p, codeFor('Kim', { days: 1, now: Date.now() - 3 * 24 * HOUR }))
+      const kimEnded = new Date(Date.now() - 2 * 24 * HOUR).toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' })
+      const ended = await until(async () => { const x = await early(p).locator('.ab-early-error').innerText().catch(() => ''); return x === `That code, for Kim, ended on ${kimEnded}. Ask for a new one.` && x }, 8000)
+      ok(!!ended, 'one that ended says when, as the page writes dates', ended || await early(p).locator('.ab-early-error').innerText().catch(() => ''))
+      await shot(p, `${tag}early-access-wrong`)
+      await join(p, sam)
+      const on = await until(async () => { const x = await early(p).innerText().catch(() => ''); return /On for Sam/.test(x) && /gets pre-releases of Bridge AI/.test(x) && /good until/.test(x) && x }, 10000)
+      ok(!!on, 'Sam\'s code: on for Sam, getting pre-releases, good until when', on || await early(p).innerText().catch(() => ''))
+      ok(!!(await until(async () => /99\.1\.0-beta\.2 is available/.test(await p.locator('.st-body').innerText().catch(() => '')), 8000)), 'and the version line offers 99.1.0-beta.2')
+      await shot(p, `${tag}early-access-on`)
+      ok(cut(errors).length === 0, 'no page errors', errors)
+      await ctx.close()
+    }
+    for (const [what, o] of [['dark', { mode: 'dark', theme: 'midnight', before: desktop }], ['on a phone', { mode: 'light', theme: 'sky', phone: true }], ['on a phone, dark', { mode: 'dark', theme: 'midnight', phone: true }]]) {
+      const { ctx, p, errors } = await page(b, ek.url, o)
+      await about(p)
+      const shown = await until(async () => /On for Sam/.test(await early(p).innerText().catch(() => '')), 10000)
+      await early(p).scrollIntoViewIfNeeded().catch(() => {})
+      ok(!!shown && await noOverflow(p), `Early Access ${what}: on for Sam, and nothing wider than the screen`)
+      await shot(p, `${tag}early-access-on-${what.replace(/[^a-z]+/g, '-')}`)
+      ok(cut(errors).length === 0, `${what}: no page errors`, errors)
+      await ctx.close()
+    }
+    {
+      const { ctx, p, errors } = await page(b, ek.url, { mode: 'light', theme: 'sky', before: desktop })
+      await about(p)
+      await until(async () => /On for Sam/.test(await early(p).innerText().catch(() => '')), 10000)
+      await early(p).locator('button', { hasText: 'Leave Early Access' }).click()
+      ok(!!(await until(async () => !(await early(p).count()) && await p.locator('.ab-early-ask').count() === 1, 8000)) && (await ek.api('/updates')).channel === 'stable', 'Leave Early Access: Stable again, and back to the quiet link')
+      ok(cut(errors).length === 0, 'no page errors', errors)
+      await ctx.close()
+    }
+    {
+      // A link with the code in it (?early=), as sent to a tester.
+      const { ctx, p, errors } = await page(b, `${ek.url}/?early=${encodeURIComponent(sam)}`, { mode: 'light', theme: 'sky' })
+      const filled = await until(async () => (await early(p).locator('input').inputValue().catch(() => '')) === sam, 15000)
+      ok(!!filled && !/early=/.test(await p.evaluate(() => location.href)), 'a link with ?early=<code>: About & Updates opens with the code filled in, and it\'s taken off the address', await p.evaluate(() => location.href))
+      await early(p).locator('button', { hasText: 'Join' }).click()
+      ok(!!(await until(async () => /On for Sam/.test(await early(p).innerText().catch(() => '')), 8000)), 'Join: on for Sam')
+      ok(cut(errors).length === 0, 'no page errors', errors)
+      await ctx.close()
+    }
+    await ek.api('/settings', { earlyAccess: { code: codeFor('Kim', { days: 1, now: Date.now() - 3 * 24 * HOUR }) } }, 'PATCH')
+    await ek.api('/updates?refresh=1')
+    {
+      const { ctx, p, errors } = await page(b, ek.url, { mode: 'dark', theme: 'midnight', before: desktop })
+      await about(p)
+      const said = await until(async () => { const x = await early(p).locator('.ab-early-problem').innerText().catch(() => ''); return /The early-access code for Kim ended on .+, so this computer is back on regular releases\./.test(x) && x }, 10000)
+      ok(!!said && await early(p).locator('input').count() === 1 && await early(p).locator('button', { hasText: 'Remove the code' }).count() === 1, 'a code that ended: said, with a place for a new one and Remove the code', said || await early(p).innerText().catch(() => ''))
+      await shot(p, `${tag}early-access-ended`)
+      ok(cut(errors).length === 0, 'no page errors', errors)
+      await ctx.close()
+    }
+    for (const [what, url] of [['a build with no key', nk.url], ['Docker', dk.url], ['from source', newer.url]]) {
+      const { ctx, p } = await page(b, url, { mode: 'light', theme: 'sky', before: desktop })
+      await about(p)
+      const shown = await until(async () => /Check for new versions/.test(await p.locator('.modal.settings').innerText().catch(() => '')), 10000)
+      ok(!!shown && await p.locator('.ab-early-ask').count() === 0 && await early(p).count() === 0, `${what}: no early-access link`)
+      await ctx.close()
+    }
+    {
+      // The staged release, in a computer outside it: Up to date, until a person checks.
+      hub.list = [rel2('v99.0.0', { rollout: 10 })]
+      await st.api('/settings', { updates: { bucket: 37 } }, 'PATCH')
+      await st.restart()
+      const { ctx, p, errors } = await page(b, st.url, { mode: 'light', theme: 'sky', before: desktop })
+      await about(p)
+      const row = p.locator('.st-sec').first().locator('.st-row').first()
+      ok(!!(await until(async () => /Up to date/.test(await row.innerText().catch(() => '')), 10000)) && await p.locator('.topbar .update-chip').count() === 0, 'a release out to 10%, this computer not in it: Up to date, and no Update in the top bar')
+      await p.locator('.st-body button', { hasText: 'Check now' }).click()
+      ok(!!(await until(async () => /99\.0\.0 is available/.test(await row.innerText().catch(() => '')), 8000)) && await p.locator('.st-body button', { hasText: 'Update to 99.0.0' }).count() === 1, 'Check now: 99.0.0 is available, with Update', await row.innerText().catch(() => ''))
+      await shot(p, `${tag}early-access-staged-checked`)
+      ok(cut(errors).length === 0, 'no page errors', errors)
+      await ctx.close()
+    }
+  }
 } finally {
   for (const k of kits) k.stop()
   srv.close()
   gh?.close()
+  ghc?.close()
   await b.close()
 }
 
