@@ -112,11 +112,15 @@ try {
     const html = fs.readFileSync(path.join(ROOT, 'dist', 'index.html'), 'utf8')
     const first = new Set([...html.matchAll(/assets\/([^"]+)"/g)].map((m) => m[1])) // what the page loads itself
     let cut = true
+    // Meetings' own file stays out of reach until Try again: the page fetches the views ahead again
+    // after a while (lazy.jsx preloadViews), and on a slow computer that could fall while Settings
+    // was being opened, leaving Meetings nothing to fail on.
+    let held = true
     const turned = []
     const { ctx, p } = await page(b, kit.url, {
       before: async (c) => {
         await noServiceWorker(c)
-        await c.route(/\/assets\//, (r) => { const f = r.request().url().split('/').pop(); if (!cut || first.has(f)) return r.continue(); turned.push(f); return r.abort() })
+        await c.route(/\/assets\//, (r) => { const f = r.request().url().split('/').pop(); if (first.has(f) || (!cut && !(held && /^Meetings-/.test(f)))) return r.continue(); turned.push(f); return r.abort() })
       },
     })
     await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
@@ -131,6 +135,7 @@ try {
     await p.locator('.rail-nav-btn', { hasText: 'Meetings' }).first().click()
     ok(!!(await until(async () => /hit an error/.test(await p.locator('.crash').innerText().catch(() => '')), 8000, 200)), 'out of reach again: a view not fetched yet says it hit an error, with Try again', await p.locator('.crash').innerText().catch(() => ''))
     cut = false
+    held = false
     await p.locator('.crash button', { hasText: 'Try again' }).click()
     ok(!!(await until(() => p.locator('.mt-view .pane-head').first().isVisible(), 8000, 200)), 'back: Try again opens it', await p.locator('.crash').innerText().catch(() => ''))
     await shot(p, `${tag}views-back`)
