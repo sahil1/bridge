@@ -1,7 +1,9 @@
 // The app as a whole, on any platform and in the browser named by BRIDGE_TEST_BROWSER (Chromium,
 // or WebKit, the engine of Safari and the iPhone app): it loads in a light colour theme, a dark one
 // and at phone width without page errors or sideways scrolling; the sidebar, ⌘K and Settings
-// open (its section names in Title Case); and a New terminal runs a command typed into it. And
+// open (its section names in Title Case); and a New terminal runs a command typed into it. Its
+// views fetched ahead while the computer can't be reached: once it's back, Settings opens with its
+// look, and a view opened meanwhile says it hit an error, then opens with Try again. And
 // when the whole window breaks (a crash made on cue): a brief one just after it opened gone by
 // itself; one that stays, tried again twice, then the way back in the middle of the window with a
 // newer version offered straight away, Copy details, the crash written down on the computer, Reset
@@ -24,7 +26,7 @@
 // your devices alone.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, checks, until, browser, page, shot, solid, noServiceWorker, changeAnswer, IS_WIN } from '../lib/harness.mjs'
+import { startKit, checks, until, browser, page, shot, solid, noServiceWorker, changeAnswer, IS_WIN, ROOT } from '../lib/harness.mjs'
 
 const { ok, done } = checks('app-ui')
 const kit = await startKit('app-ui')
@@ -95,6 +97,41 @@ try {
   await shot(ph.p, `${tag}phone`)
   ok(ph.errors.length === 0, 'phone: no page errors', ph.errors)
   await ph.ctx.close()
+
+  // ---------- Out of reach as it fetches its views ahead ----------
+  // (A phone opened as its link to the computer drops a moment, or the computer starting again.) The
+  // views' files can't be had as the page fetches them ahead; back, Settings opens with its look
+  // (WebKit kept a file that had failed as failed until a reload, and Settings' styles were never
+  // asked for again). A view opened while they still can't be had says so, and Try again opens it
+  // once they can.
+  {
+    const html = fs.readFileSync(path.join(ROOT, 'dist', 'index.html'), 'utf8')
+    const first = new Set([...html.matchAll(/assets\/([^"]+)"/g)].map((m) => m[1])) // what the page loads itself
+    let cut = true
+    const turned = []
+    const { ctx, p } = await page(b, kit.url, {
+      before: async (c) => {
+        await noServiceWorker(c)
+        await c.route(/\/assets\//, (r) => { const f = r.request().url().split('/').pop(); if (!cut || first.has(f)) return r.continue(); turned.push(f); return r.abort() })
+      },
+    })
+    await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
+    ok(!!(await until(() => turned.some((f) => /^Settings-/.test(f)), 10000, 100)), 'out of reach: the views it fetches ahead don\'t come', turned)
+    cut = false
+    await p.locator('button[aria-label="Settings"]').first().click()
+    // (A stylesheet that failed has no rules to read: WebKit and Chromium refuse to, as from elsewhere.)
+    const look = () => p.evaluate(() => [...document.querySelectorAll('link[rel="stylesheet"][href*="assets/"]')].map((l) => { try { return [l.href.split('/').pop(), l.sheet?.cssRules.length || 0] } catch { return [l.href.split('/').pop(), 0] } }))
+    ok(!!(await until(async () => (await p.locator('.modal.settings').count()) > 0 && (await look()).every(([, n]) => n > 0), 8000, 200)), 'back: Settings opens, with its look (each of the app\'s stylesheets there)', { settings: await p.locator('.modal.settings').count(), look: await look() })
+    await p.keyboard.press('Escape')
+    cut = true
+    await p.locator('.rail-nav-btn', { hasText: 'Meetings' }).first().click()
+    ok(!!(await until(async () => /hit an error/.test(await p.locator('.crash').innerText().catch(() => '')), 8000, 200)), 'out of reach again: a view not fetched yet says it hit an error, with Try again', await p.locator('.crash').innerText().catch(() => ''))
+    cut = false
+    await p.locator('.crash button', { hasText: 'Try again' }).click()
+    ok(!!(await until(() => p.locator('.mt-view .pane-head').first().isVisible(), 8000, 200)), 'back: Try again opens it', await p.locator('.crash').innerText().catch(() => ''))
+    await shot(p, `${tag}views-back`)
+    await ctx.close()
+  }
 
   // ---------- The phone's top bar, with everything in it at once ----------
   const soon = new Date(Date.now() + 20 * 6e4)

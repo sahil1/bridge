@@ -20,14 +20,36 @@ const LOADERS = {
   Dictations: () => import('./components/dictations/Dictations.jsx'),
 }
 
+// A view's styles that didn't come (the computer out of reach as they loaded): Vite's loader asks for
+// each only once, so the view would open without them. They're asked for again before a view loads
+// (one that still doesn't come is asked for the next time).
+const unstyled = new Set() // the app's own <link rel="stylesheet">s that failed
+if (typeof document !== 'undefined') document.addEventListener('error', (e) => { const l = e.target; if (l instanceof HTMLLinkElement && l.rel === 'stylesheet' && /\/assets\/[^/?#]+\.css$/.test(l.href)) unstyled.add(l) }, true)
+let restyling = Promise.resolve()
+const restyle = () => {
+  if (!unstyled.size) return restyling
+  const again = [...unstyled].map((old) => {
+    const link = old.cloneNode()
+    const done = new Promise((resolve) => { link.addEventListener('load', resolve); link.addEventListener('error', resolve) })
+    old.replaceWith(link)
+    return done
+  })
+  unstyled.clear()
+  restyling = Promise.all([restyling, ...again])
+  return restyling
+}
+
 // Once a view's code is loaded (by preloadViews, or the first time it's opened) it renders
 // directly. Only a view that isn't loaded yet goes through Suspense, which React holds back for a
 // few hundred milliseconds before showing.
 const loaded = new Map() // loader -> module
-const ensure = (load) => (loaded.has(load) ? Promise.resolve(loaded.get(load)) : load().then((m) => { loaded.set(load, m); return m }))
+const ensure = (load) => (loaded.has(load) ? Promise.resolve(loaded.get(load)) : restyle().then(() => load()).then((m) => { loaded.set(load, m); return m }))
 
 function wrap(load, name = 'default') {
-  const C = lazy(() => ensure(load).then((m) => ({ default: m[name] })))
+  // React keeps a lazy view's failure for good: one that couldn't load is made anew, so Try again,
+  // or opening it later, loads it then.
+  const make = () => lazy(() => ensure(load).then((m) => ({ default: m[name] }), (e) => { C = make(); throw e }))
+  let C = make()
   return function Lazy(props) {
     // Which way is decided once: a view opened while still loading would otherwise start over
     // (losing what you'd done in it) the next time it's drawn, once loaded.
@@ -65,11 +87,19 @@ const studio = import.meta.env.MODE !== 'demo' && import.meta.env.MODE !== 'clou
 export const StudioHome = studio && wrap(studio, 'StudioHome')
 export const StudioPage = studio && wrap(studio, 'StudioPage')
 
+// Not while the page is offline (it waits until it's back on); if some didn't come (the computer out
+// of reach for a moment), they're fetched again a little later.
+const AGAIN_MS = 30000
 let preloaded = false
 export function preloadViews() {
   if (preloaded) return
   preloaded = true
-  const go = () => Object.values(LOADERS).forEach((load) => ensure(load).catch(() => { preloaded = false }))
+  const go = () => {
+    if (!navigator.onLine) { preloaded = false; window.addEventListener('online', preloadViews, { once: true }); return }
+    Promise.allSettled(Object.values(LOADERS).map((load) => ensure(load))).then((r) => {
+      if (r.some((x) => x.status === 'rejected')) { preloaded = false; setTimeout(preloadViews, AGAIN_MS) }
+    })
+  }
   if ('requestIdleCallback' in window) requestIdleCallback(go, { timeout: 2500 })
   else setTimeout(go, 1200)
 }

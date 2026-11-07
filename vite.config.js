@@ -53,7 +53,11 @@ export default defineConfig(({ mode }) => {
     base: './',
     ...(entry && { publicDir: false }),
     // Source maps so a crash in the browser console names the real file and line.
-    build: entry ? { outDir: `dist-${mode}`, emptyOutDir: true, sourcemap: false } : { sourcemap: true },
+    // No <link rel="modulepreload"> for what loads later (a view, an editor): WebKit (Safari, the
+    // iPhone app) keeps one that failed (the computer out of reach for a moment) as failed for as
+    // long as the page is open, so that view could never open again without a reload. Its files load
+    // as they're found instead; the views are fetched ahead anyway (src/lazy.jsx).
+    build: { ...(entry ? { outDir: `dist-${mode}`, emptyOutDir: true, sourcemap: false } : { sourcemap: true }), modulePreload: { resolveDependencies: (file, deps, { hostType }) => (hostType === 'html' ? deps : []) } },
     server: { host: '127.0.0.1', port: port + 1, strictPort: true, proxy: { '/api': { target: `http://127.0.0.1:${port}`, ws: true } } },
   }
 })
