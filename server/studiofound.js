@@ -12,9 +12,11 @@
 // folder (and on Windows and Linux your Documents, Desktop, Downloads and cloud drive folders), a few
 // levels down, each a share of the time and the files, never into a folder macOS would ask about
 // first. In a project's code (a git repository) only its documents proper are listed: Word, Excel,
-// PowerPoint, PDFs and Markdown decks, not its READMEs, pages and data. The newest 100 of each kind,
-// saying how many there were when there were more. Kept a minute. A file found outside those folders
-// opens through its own folder (found:<key>), which only a folder found this way can be.
+// PowerPoint, PDFs and Markdown decks, not its READMEs, pages and data. Kinds Studio doesn't open
+// are listed too (opens: false), to open in their own app: Word's, Excel's and PowerPoint's older
+// formats and OpenDocument's everywhere, and Pages, Numbers and Keynote on a Mac. The newest 100 of
+// each kind, saying how many there were when there were more. Kept a minute. A file found outside
+// those folders opens through its own folder (found:<key>), which only a folder found this way can be.
 import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -27,7 +29,14 @@ import { mayLook } from './projects.js'
 const DIR = path.join(DATA, 'studio')
 const FOUND = path.join(DIR, 'found.json')
 const OFFICE = ['.docx', '.xlsx', '.xlsm', '.pptx', '.pdf']
-const RECENTLY = [...OFFICE, '.md', '.csv']
+// What Studio doesn't open but lists by its kind, for its own app to open. Apple's are a Mac's
+// only; there a Keynote, Pages or Numbers file can be a folder (a package), and Spotlight is asked
+// for them by kind, as .key is also the name of a key file.
+const OTHER = { '.doc': 'doc', '.odt': 'doc', '.xls': 'sheet', '.ods': 'sheet', '.ppt': 'deck', '.odp': 'deck', ...(process.platform === 'darwin' ? { '.pages': 'doc', '.numbers': 'sheet', '.key': 'deck' } : {}) }
+const APPLE = new Set(['.pages', '.numbers', '.key'])
+const otherKind = (name) => OTHER[path.extname(String(name)).toLowerCase()] || null
+const lists = (name) => opens(name) || !!otherKind(name)
+const RECENTLY = [...OFFICE, ...Object.keys(OTHER), '.md', '.csv']
 const MARKDOWN = new Set(['.md', '.markdown'])
 const SKIP = new Set(['node_modules', '.git', 'dist', 'build', 'out', 'target', 'vendor', '__pycache__', '.venv', 'venv', 'Library', 'Pods', 'DerivedData', '.next', '.cache', 'coverage', 'AppData', 'fixtures', '__fixtures__'])
 const LOOK_MS = 2500 // the longest the look through folders takes
@@ -72,13 +81,15 @@ function areaOf(file, home, r = null) {
   return rel.length === 1 ? { type: 'home', name: null } : { type: 'folder', name: top }
 }
 
-// Spotlight: every Word, Excel, PowerPoint and PDF file in your home folder, whenever it changed,
-// and the Markdown and CSV files you opened in the last 60 days (all of them would be every README
-// in every project), each with when you last opened it and when it changed (its attributes, so no
-// file is read). Read as it comes, up to SPOT_MAX files.
+// Spotlight: every Word, Excel, PowerPoint and PDF file in your home folder, whenever it changed (and
+// the kinds Studio lists for their own app: Keynote, Pages and Numbers by their kind), and the
+// Markdown and CSV files you opened in the last 60 days (all of them would be every README in every
+// project), each with when you last opened it and when it changed (its attributes, so no file is
+// read). Read as it comes, up to SPOT_MAX files.
 function spotlight(home, signal) {
   const named = (exts) => exts.map((e) => `kMDItemFSName == "*${e}"c`).join(' || ')
-  const query = `(${named(OFFICE)}) || ((${named(['.md', '.csv'])}) && kMDItemLastUsedDate >= $time.today(-60))`
+  const others = Object.keys(OTHER).filter((e) => !APPLE.has(e))
+  const query = `(${named([...OFFICE, ...others])}) || (kMDItemContentType == "com.apple.iwork.*" && (${named([...APPLE])})) || ((${named(['.md', '.csv'])}) && kMDItemLastUsedDate >= $time.today(-60))`
   const date = (s) => { const d = s && s !== '(null)' ? new Date(s.replace(/^(\S+) (\S+) ([+-]\d{2})(\d{2})$/, '$1T$2$3:$4')) : null; return d && !Number.isNaN(d.getTime()) ? d.getTime() : null }
   const parse = (line) => {
     if (!line.trim()) return null
@@ -179,11 +190,13 @@ async function headOf(file) {
   if (!fh) return ''
   try { const b = Buffer.alloc(600); const { bytesRead } = await fh.read(b, 0, 600, 0); return b.toString('utf8', 0, bytesRead) } catch { return '' } finally { await fh.close().catch(() => {}) }
 }
-// A look through folders: a few levels down, breadth first, the files of the kinds Studio opens, with
+// A look through folders: a few levels down, breadth first, the files of the kinds Studio lists, with
 // their kind and when each changed. Each folder gets its share of the time and the entries read, so
 // one big project doesn't leave the others unlooked. In a project's code only Word, Excel,
-// PowerPoint, PDF files and Markdown decks; what's left out is counted (skipped). late: it ran out of
-// time before it was through (a folder slow to answer), so some files may be missing.
+// PowerPoint (any of their formats), PDF files and Markdown decks; what's left out is counted
+// (skipped). A Keynote, Pages or Numbers file is a package (a folder) or a zip, never a key file
+// that's also named .key. late: it ran out of time before it was through (a folder slow to answer),
+// so some files may be missing.
 async function look(roots, { signal, until, budget }) {
   const found = []
   let heads = 0, skipped = 0, late = false
@@ -206,7 +219,9 @@ async function look(roots, { signal, until, budget }) {
       for (const e of list) {
         if (e.name.startsWith('.') || e.name.startsWith('~$') || SKIP.has(e.name)) continue
         const p = path.join(dir, e.name)
-        if (e.isDirectory()) { if (depth < 3) queue.push([p, depth + 1]) } else if (e.isFile() && opens(e.name)) found.push({ file: p, r })
+        const ext = path.extname(e.name).toLowerCase()
+        const apple = APPLE.has(ext) && !!OTHER[ext] // a Mac's Keynote, Pages or Numbers, maybe a package
+        if (e.isDirectory() && !apple) { if (depth < 3) queue.push([p, depth + 1]) } else if ((e.isFile() || apple) && lists(e.name)) found.push({ file: p, r })
       }
     }
   }
@@ -215,11 +230,12 @@ async function look(roots, { signal, until, budget }) {
     if (signal?.aborted || out.length >= 1500) break
     if (Date.now() > until + 1500) { late = true; break }
     const ext = path.extname(x.file).toLowerCase()
-    let kind = kindOf(x.file)
+    let kind = kindOf(x.file) || otherKind(x.file)
     if (MARKDOWN.has(ext)) kind = heads++ < HEADS ? kindOf(x.file, await headOf(x.file)) : x.r.code ? null : kind
-    if (x.r.code && !OFFICE.includes(ext) && kind !== 'deck') { skipped++; continue }
+    if (x.r.code && !OFFICE.includes(ext) && !OTHER[ext] && kind !== 'deck') { skipped++; continue }
     const st = await fsp.stat(x.file).catch(() => null)
-    if (st) out.push({ file: x.file, used: null, changed: st.mtimeMs, kind })
+    if (!st || (APPLE.has(ext) && !st.isDirectory() && !(await headOf(x.file)).startsWith('PK'))) continue
+    out.push({ file: x.file, used: null, changed: st.mtimeMs, kind })
   }
   return { list: out, skipped, late }
 }
@@ -229,8 +245,9 @@ let finding = null
 // roots: your agents' folders and your places ([{ root, dir, label }]), so a file in one opens
 // through it (and Ask an agent finds the agent working there); own: Studio's own folder (decks made
 // from meetings, new files with nowhere else to go). Back: { files, sources, errors, at, capped,
-// skipped }, each file { root, path, name, kind, ext, dir, at, used, where, area }; capped: how many
-// of a kind there were, when more than PER_KIND; skipped: files in projects' code not listed.
+// skipped }, each file { root, path, name, kind, ext, dir, at, used, where, area }, with opens: false
+// for a kind Studio doesn't open; capped: how many of a kind there were, when more than PER_KIND;
+// skipped: files in projects' code not listed.
 export async function found({ roots = [], own = null, home = os.homedir(), signal, fresh = false } = {}) {
   if (!fresh && cache && Date.now() - cache.at < 60_000) return cache.value
   if (finding) return finding
@@ -275,11 +292,11 @@ export async function found({ roots = [], own = null, home = os.homedir(), signa
       if (!x.file) continue
       const file = path.resolve(x.file)
       const isOwn = ownDir && file.startsWith(ownDir + path.sep)
-      if (!opens(file) || (!isOwn && hiddenPath(file, home)) || path.basename(file).startsWith('~$')) continue
+      if (!lists(file) || (!isOwn && hiddenPath(file, home)) || path.basename(file).startsWith('~$')) continue
       const at = Math.max(x.used || 0, x.changed || 0)
       if (!at) continue
       const was = by.get(file)
-      const kind = x.kind || was?.kind || kindOf(file)
+      const kind = x.kind || was?.kind || kindOf(file) || otherKind(file)
       if (!was || at > was.at) by.set(file, { file, at, used: x.used || was?.used || null, kind })
       else if (!was.kind || x.kind) was.kind = kind
     }
@@ -302,7 +319,7 @@ export async function found({ roots = [], own = null, home = os.homedir(), signa
         root = `found:${key}`
         rel = name
       }
-      return { root, path: rel, name, kind: x.kind, ext: path.extname(name).toLowerCase(), dir: tilde(dir, home), at: new Date(x.at).toISOString(), used: !!x.used, where: r?.own ? null : r?.label || null, area: areaOf(x.file, home, r) }
+      return { root, path: rel, name, kind: x.kind, ext: path.extname(name).toLowerCase(), dir: tilde(dir, home), at: new Date(x.at).toISOString(), used: !!x.used, where: r?.own ? null : r?.label || null, area: areaOf(x.file, home, r), ...(opens(name) ? {} : { opens: false }) }
     })
     // Two projects or places of the same name, in two folders: each named with its folder too.
     const dirsOf = new Map()
