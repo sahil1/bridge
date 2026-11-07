@@ -2,6 +2,31 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
+## 3.12.0
+
+The parts you use every day, made right: edit what you dictated on its card, Studio finds your documents and presentations wherever they are, Memory as a page of its own, routines that run by themselves, Home that keeps to the computer you're on, and a usage chip half the width.
+
+### What's new
+
+- **Edit what you said right on the dictation card.** Click the words or Edit, change them, then ⌘↩ (Ctrl+Enter) to send or paste, or Esc to put them back. A dictation you kept can be edited in Dictations too; it's marked Edited and what was heard stays a click away. Put a name right ("ack me" to "Acme") and you're asked whether to remember it, so it's written that way from then on, in dictation and in meetings. Nothing is kept until you say so, and Undo takes it back.
+- **Dictation knows your names.** Whisper now listens for the names in meeting memory, as Parakeet already did, and Tidy what I say and edit by voice are told who and what the names you said are.
+- **Studio finds your documents and presentations wherever they are** (a beta feature): Word, PowerPoint, Excel and PDF files of any age, in iCloud Drive and your cloud drives (OneDrive, Google Drive, Dropbox, Box) too. Before, it looked only at recent files and skipped every cloud drive, so a project's code could fill the list. They're listed by kind and by where they are, with search. Studio has Files and Preview, as an agent's tab has; Preview opens a file in its own editor, New is in the header, and files Studio can't open (.doc, .xls, .ppt, Keynote, Pages, Numbers) are listed with Open in app.
+- **Memory, a page of its own** (a new beta feature): the people, organizations, projects and words from your meetings and dictations, in collections, each with the meetings and dictations it came from. Names written alike are offered to merge, and a tidy lists the entries that add little for you to look over. About You is a few lines made from it on this computer (who you are, what you work on, who you deal with most), given to the models writing your notes and tidying your dictation, and to Chief of Staff; edit it or switch it off.
+- **Meeting memory keeps the names worth keeping.** Summaries no longer add places, languages, days, months or everyday words, and a name is kept only when there's something to know about it or speech to text gets it wrong.
+- **Routines run by themselves** (a new beta feature, Scheduled Routines): set when in words ("every weekday at 9") or pick it, with the next runs shown. Make a routine from any message you sent, Run now, Pause, and see each run's result; one that fails, or couldn't run, says why. History › Commands keeps what you asked your agents and Chief of Staff, on this computer for 90 days, and when you ask the same thing at a steady time it offers to make it a routine.
+- **Home keeps to the computer you're on** (a beta feature). The "need you" count, the Home badge and Home itself count this computer; each other computer is one line you can open. Opening something on another computer says the window switched, with Back.
+- **Switching computers opens what you were on there**, instead of Home every time.
+- **Tab Groups** (a new beta feature): the tabs above your agents grouped as the sidebar has them, each space under its name and other computers' agents at the end. A group's name folds it away.
+- **The usage chip is half the width**: the provider's mark, the account new agents use and the limit closest to running out. A model's own limit (Fable's week) shows only once it's running out, and each account's model limits are listed in its menu.
+
+### Fixes
+
+- **Opening Chief of Staff when it isn't running starts it**, from Home, the calendar or another computer's Home; it used to do nothing on a computer.
+- **An agent's tab is named as the sidebar names it** (Windows): a tab could read "Administrator: C:\Windows\…\powershell.exe".
+- **The calendar, Open brief, a meeting and a whiteboard open on the computer on screen**, not the one the page came from, when you're looking at another computer.
+- **Home's count stays the same when you pick a kind** (Agents, Meetings…).
+- **The usage chip showed the wrong limit** on a plan without a five-hour window, and didn't say when a model's own limit was running out.
+
 ## 3.11.1
 
 Fixes: Studio no longer takes its own save for someone else's, which could reload the editor and lose what you were doing; views that closed as they opened; dictation's first press on a busy computer; agents forgotten on a quick restart; and views that couldn't load while your computer was out of reach.
