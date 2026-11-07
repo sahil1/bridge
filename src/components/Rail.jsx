@@ -55,9 +55,12 @@ export function groupByWorkspace(fleet) {
 const rowCwd = (r) => (r.kind === 'agent' ? r.agent.cwd : r.tab?.panes.find((p) => !p.agent)?.cwd || r.tab?.panes[0]?.cwd)
 // On its own branch (a worktree Bridge AI made): { repo, branch, base }, else null.
 const rowTree = (r) => (r.kind === 'agent' ? r.agent.worktree : (r.tab?.panes.find((p) => !p.agent) || r.tab?.panes[0])?.worktree) || null
-const rowName = (r) => (r.kind === 'agent'
-  ? (r.agent.chief ? (r.agent.thread && !r.agent.thread.main ? r.agent.title : t('Chief of Staff')) : r.agent.tab && !/^\d+$/.test(r.agent.tab) ? r.agent.tab : r.agent.title || t('agent'))
-  : (r.tab.label && !/^\d+$/.test(r.tab.label) ? r.tab.label : t('shell')))
+// What an agent is called wherever it's listed: the tab's name you gave it (not a bare number), else
+// its own title; a Chief of Staff thread by its topic. One rule, so the sidebar, Dictations and the
+// dictation window can't name it differently (on Windows a terminal's title can be the shell's own,
+// "Administrator: C:\Windows\…").
+export const agentName = (a) => (a.chief ? (a.thread && !a.thread.main ? a.title : t('Chief of Staff')) : a.tab && !/^\d+$/.test(a.tab) ? a.tab : a.title || t('agent'))
+const rowName = (r) => (r.kind === 'agent' ? agentName(r.agent) : (r.tab.label && !/^\d+$/.test(r.tab.label) ? r.tab.label : t('shell')))
 
 // own: it works on its own branch, in a worktree Bridge AI made.
 function GitBit({ g, own }) {

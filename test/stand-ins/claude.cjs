@@ -41,6 +41,8 @@
 //                                           (with the command), then it works a moment and is done
 //   claude --session-id <id> "title <words>"  names its session in the terminal's title, as Claude
 //                                           Code does ("✳ <words>")
+//   claude --session-id <id> "shell title"  its terminal's title a shell's own, as a Windows terminal's
+//                                           can be ("Administrator: C:\Windows\…\powershell.exe")
 //   claude -p <prompt>                      answers once and exits, as Claude Code's print mode does,
 //                                           on the config folder it's run for: AI Assist's ask gets one
 //                                           suggestion as JSON, anything else meeting notes. With
@@ -97,6 +99,7 @@ const resumed = opt('--resume')
 const id = opt('--session-id') || resumed
 const screenOnly = message === 'screen only'
 if (message.startsWith('title ')) process.stdout.write(`\x1b]0;✳ ${message.slice(6)}\x07`)
+if (message === 'shell title') process.stdout.write('\x1b]0;Administrator: C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\x07')
 const rule = '─'.repeat(60)
 // Its screen, as Claude Code draws it: working, with its footer, or done. low: at the bottom, as
 // under a conversation it resumed.

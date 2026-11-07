@@ -69,6 +69,10 @@ try {
   const agentOf = async (pred) => ((await kit.api('/fleet')).agents || []).find(pred)
   const pay = await until(() => agentOf((a) => a.paneId === one.paneId), 30000, 500)
   ok(!!pay, 'a stand-in agent, payments')
+  // One whose terminal has a shell's title, as a Windows terminal's can: it goes by its tab's name.
+  const ledger = await kit.api('/agents/launch', { kind: 'claude', cwd: dir, label: 'Ledger', newSpace: 'Ledger', prompt: 'shell title' })
+  const shellTitled = await until(async () => { const x = await agentOf((y) => y.paneId === ledger.paneId); return /^Administrator: C:\\Windows/.test(x?.title || '') && x }, 30000, 300)
+  ok(!!shellTitled, 'and Ledger, whose terminal has a shell\'s title', (await agentOf((y) => y.paneId === ledger.paneId))?.title)
   // On Windows a stand-in's name is its terminal's title, which changes as it runs: an agent is told
   // by its pane, and its name only checked to be there.
 
@@ -386,6 +390,13 @@ try {
     const toast = await until(async () => { const x = await p.locator('.dc-toast').innerText().catch(() => ''); return asked.length > before2 && /Queued for .+, next in line/.test(x) && x }, 4000, 100)
     ok(!!toast && !/Sent to/.test(toast), 'Send to an agent that\'s busy: "Queued for" it, next in line, not "Sent to"', toast || await p.locator('.dc-toast').innerText().catch(() => ''))
     askedAnswer = { ok: true }
+    // Ledger, named by its tab in the menu and in what it says, not by its terminal's title.
+    await first.locator('button', { hasText: 'Send to an agent' }).click()
+    const pick = first.locator(`.dc-menu button[data-pane="${ledger.paneId}"]`)
+    const named = (await pick.innerText().catch(() => '')).trim()
+    await pick.click()
+    const toLedger = await until(async () => { const x = await p.locator('.dc-toast').innerText().catch(() => ''); return /Sent to Ledger/.test(x) && x }, 4000, 100)
+    ok(named === 'Ledger' && !!toLedger && !/Administrator/.test(toLedger), 'an agent whose terminal has a shell\'s title: "Ledger" in the menu and "Sent to Ledger", as the sidebar names it', { named, toast: toLedger || await p.locator('.dc-toast').innerText().catch(() => '') })
     // Paste again: into the app it was said in.
     const sl = v.locator('.dc-row', { hasText: 'Check the invoices light' }).first()
     await sl.locator('.dc-head').click()
