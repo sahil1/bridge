@@ -3,6 +3,7 @@ import Icon from '../Icon.jsx'
 import { api, usePoll, onThisComputer } from '../../api.js'
 import { useSettings, SaveNote } from './General.jsx'
 import { MemoryPanel } from '../meetings/tools.jsx'
+import { useTrial } from '../../trials.js'
 import { t } from '../../i18n/index.js'
 import { MEETING_KEYS } from '../../../shared/mentions.js'
 import '../meetings/meetings.css'
@@ -130,8 +131,9 @@ function RoomVoices({ v, m, set, refresh }) {
 const openProviders = () => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'providers' } }))
 const openVoice = () => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'voice' } }))
 
-export default function Meetings() {
+export default function Meetings({ onOpenAgent }) {
   const { s, save, note } = useSettings()
+  const memoryPage = useTrial('memory') // Memory, a page of its own (a beta feature)
   const sp = usePoll('/speech', 3000)
   const [models, setModels] = useState(null)
   const [vocab, setVocab] = useState(null)
@@ -204,7 +206,9 @@ export default function Meetings() {
       <section className="st-sec">
         <h4>Names and terms</h4>
         <p className="muted small">Meeting memory keeps the people, companies and jargon from your meetings: how they're spelled, how they get misheard, who they are. The speech engine listens for them, transcripts show them fixed, and notes get them right. It grows as you fix words and as summaries are written.</p>
-        <div className="st-row"><button type="button" className="btn small" onClick={() => setMemory(true)}><Icon name="book" size={12} /> Meeting memory</button></div>
+        <div className="st-row">{memoryPage
+          ? <button type="button" className="btn small" onClick={() => onOpenAgent?.('view:memory')}><Icon name="book" size={12} /> {t('Open Memory')}</button>
+          : <button type="button" className="btn small" onClick={() => setMemory(true)}><Icon name="book" size={12} /> Meeting memory</button>}</div>
         {memory && <MemoryPanel onClose={() => setMemory(false)} />}
         <p className="muted small">More words to listen for, if you like (the meeting's title and invitees are added by themselves):</p>
         <input className="st-input" value={vocab ?? ''} onChange={(e) => setVocab(e.target.value)} onBlur={() => vocab !== (m.vocabulary || '') && set({ vocabulary: vocab.trim() })} placeholder="e.g. Kubernetes, OKRs" aria-label="More words to listen for" />

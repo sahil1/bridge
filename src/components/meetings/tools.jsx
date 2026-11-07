@@ -4,6 +4,7 @@ import Icon from '../Icon.jsx'
 import { api, refetch } from '../../api.js'
 import { t, tx, locale } from '../../i18n/index.js'
 import { usePersisted } from '../layout.jsx'
+import { useTrial } from '../../trials.js'
 import { openMeeting } from './recording.jsx'
 
 // Tools for meetings: meeting memory (the names and terms in your meetings, how they get misheard,
@@ -94,14 +95,14 @@ export function FixWord({ id, from: from0 = '', onClose, onDone }) {
 // As it grows (dozens of meetings bring hundreds of names) it's in groups that fold, each saying how
 // many it has: by the series of meetings a name comes up in (the one-off meetings together), by the
 // month it last came up, or A to Z. A search and a filter narrow it; a name's meetings open from it.
-const MEM_BY = [['series', tx('By meeting')], ['month', tx('By month')], ['az', tx('A–Z')]]
+export const MEM_BY = [['series', tx('By meeting')], ['month', tx('By month')], ['az', tx('A–Z')]]
 const MEM_ONLY = [['all', tx('All')], ['you', tx('Yours')], ['learned', tx('Learned')], ['note', tx('With a note')], ['heard', tx('Misheard')]]
 const ONLY = { all: () => true, you: (x) => x.source === 'you', learned: (x) => x.source !== 'you', note: (x) => !!x.note, heard: (x) => x.heard.length > 0 }
 // With no more than this many shown, every group is open.
 const MEM_OPEN = 30
-const shortDay = (iso) => new Date(iso).toLocaleDateString(locale(), { month: 'short', day: 'numeric', year: new Date(iso).getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined })
+export const shortDay = (iso) => new Date(iso).toLocaleDateString(locale(), { month: 'short', day: 'numeric', year: new Date(iso).getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined })
 
-function memGroups(list, seen, by) {
+export function memGroups(list, seen, by) {
   const ms = (x) => (x.meetings || []).map((id) => seen[id] && { id, ...seen[id] }).filter(Boolean).sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt)))
   const groups = new Map()
   const into = (key, label, x, m) => {
@@ -176,7 +177,15 @@ function MemTerm({ x, seen, onSave, onRemove, onOpen }) {
   )
 }
 
+// With Memory on (a beta feature), memory is a page of its own (memory/Memory.jsx): what would open
+// this dialog opens the page instead.
+export const openMemory = () => window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: 'view:memory' } }))
 export function MemoryPanel({ onClose }) {
+  const page = useTrial('memory')
+  useEffect(() => { if (page) { openMemory(); onClose() } }, [page]) // eslint-disable-line react-hooks/exhaustive-deps
+  return page ? null : <MemoryDialog onClose={onClose} />
+}
+function MemoryDialog({ onClose }) {
   const [terms, setTerms] = useState(null)
   const [seen, setSeen] = useState({}) // meeting id -> { title, startedAt, series }
   const [q, setQ] = useState('')
