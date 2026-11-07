@@ -115,7 +115,16 @@ export async function promptSafe(rt, paneId, text, agent) {
     try { screen = await rt.read(paneId, 30) } catch { /* couldn't read the screen: send as before */ }
   }
   if (screen != null) {
-    const left = draftIn(screen)
+    let left = draftIn(screen)
+    // No input box: looked at again before it's taken as covered. A terminal on Windows (ConPTY)
+    // hands over a repaint in pieces, so a read can land on the cleared screen before the box is
+    // drawn again; held then, a message to a free agent waited, said "a menu or dialog is open".
+    for (const ms of [150, 300]) {
+      if (left !== null) break
+      await sleep(ms)
+      try { screen = await rt.read(paneId, 30) } catch { break }
+      left = draftIn(screen)
+    }
     // Pasting while a panel or menu covers the box loses the message, so hold it instead.
     if (left === null) throw new NotAtPrompt(coverName(screen))
     if (left) {
