@@ -446,7 +446,8 @@ const LANDING = `<!doctype html><html lang="en"><head><meta charset="utf-8"><met
 body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--ink);font:15px/1.55 system-ui,-apple-system,sans-serif}main{max-width:460px;padding:32px 20px}h1{font-size:20px;margin:14px 0 8px}p{color:var(--ink2);margin:0 0 12px}a{color:inherit}</style></head>
 <body><main><img src="/mark.svg" alt="" width="44" height="44"><h1>Bridge AI relay</h1>
 <p>This relay lets Bridge AI on a phone reach Bridge AI on a computer, from anywhere. Everything between them is end-to-end encrypted, so the relay passes it on without being able to read it.</p>
-<p>There's nothing to do here: Bridge AI sets it up for you (Settings › Devices), for a Bold Bridge account that may use it. To run your own relay instead, see <a href="https://github.com/sahil1/bridge">github.com/sahil1/bridge</a>.</p></main></body></html>`
+<p>There's nothing to do here: Bridge AI sets it up for you (Settings › Devices), for a Bold Bridge account that may use it. To run your own relay instead, see <a href="https://github.com/sahil1/bridge">github.com/sahil1/bridge</a>.</p>
+<p>Each computer on it has an address of its own here, and what that address shows comes from that computer. To report one that's misused (phishing, malware): <a href="mailto:abuse@boldbridge.ai">abuse@boldbridge.ai</a>.</p></main></body></html>`
 
 // One per relay: holds your computer's connection and the phones'. Uses WebSocket hibernation,
 // so while nobody is talking it isn't running (and isn't billed).

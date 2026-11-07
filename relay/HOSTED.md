@@ -123,7 +123,10 @@ belongs to the relay.
   adding `boldbridge.app` under the private domains, as its guidelines say (the domain registered
   well ahead: two years at least), and the TXT record they check it by, `_psl.boldbridge.app`, whose
   value is the pull request's address (`"https://github.com/publicsuffix/list/pull/<number>"`). Keep
-  the record while the entry is on the list. Nothing waits on it: the relay goes live without it.
+  the record while the entry is on the list. Nothing waits on it: the relay goes live without it. The
+  list turns down small projects (under about 2,000 people) and wants a role address that answers
+  within 30 days and an abuse contact on `https://boldbridge.app/` (The address for reports, below),
+  so it may say no until the relay is that big.
 - [ ] **Workers Paid** (owner; Workers & Pages › Plans, $5 a month): the accounts service needs it
   already. [wrangler.hosted.toml](wrangler.hosted.toml) says `WORKERS_PAID = "1"`.
 - [ ] **The settings** (owner): `ACCOUNTS_PUBLIC_KEY` in wrangler.hosted.toml, the public key
@@ -159,6 +162,9 @@ belongs to the relay.
   secrets and routes. Whoever has the account can serve every phone a changed page.
 - [ ] **Pairing links open the apps** (owner; below), so a phone with the app never runs the
   relay's copy of the page.
+- [ ] **The address for reports** (owner; boldbridge.ai › Email › Email Routing › Routing rules):
+  `abuse@boldbridge.ai` to your inbox. `https://boldbridge.app/` names it, so whoever finds a
+  phishing page at one computer's address can report it (Taking one address down).
 - [ ] **Check it**: `https://boldbridge.app/` shows the page, `https://boldbridge.app/_relay/health`
   answers `{"ok":true,...}`, `https://abc.boldbridge.app/` is a 404, a `POST
   https://boldbridge.app/_relay/register` with no token answers 401 saying it needs an account, and
@@ -387,6 +393,18 @@ it under Settings › Variables in the dashboard. Then:
 A deploy closes every connection anyway, so it takes effect at once. Nothing is deleted. To turn it
 back on, set `HOSTED_OFF = "0"` and deploy; computers are back within about half an hour, or at once
 when Bridge AI restarts.
+
+## Taking one address down
+
+Each computer's address shows what that computer serves, so a report to abuse@boldbridge.ai (a fake
+sign-in page at `x7k2….boldbridge.app`, say) wants an answer the same day: blocklists that hear of
+it may flag the whole of boldbridge.app. The relay can't see the page (it's end-to-end encrypted),
+so check the report's screenshot or open the address. Then, in the admin view: Relay › the account
+› Suspend, with the report as the reason (it's kept in the account's history). If the admin view
+can't be reached, or the address should stop before the Worker runs: boldbridge.app › Security ›
+WAF › Custom rules › Create rule, Hostname equals `x7k2….boldbridge.app`, action Block, Deploy. It
+works within seconds, with no deploy, and the rest of the relay carries on. The Free plan has five
+custom rules; past a few, put the names in one rule's list (Hostname is in {…}).
 
 ## What it keeps, and what it counts
 

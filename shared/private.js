@@ -21,8 +21,9 @@ export const SECRETS = [
 export const GENERIC_USER = new Set(['you', 'me', 'user', 'username', 'name', 'runner', 'example', 'shared', 'public', 'yourname', 'your-name', '<you>', 'jane', 'john', 'alice', 'bob', 'admin', 'default', 'bridge', 'web_user'])
 // A home folder and the user it's named for (the first group).
 export const HOME_PATH = /(?:\/Users\/|\/home\/|[A-Za-z]:\\\\?Users\\\\?)([A-Za-z0-9._-]+)/
-// Addresses made to be public, or the companies whose tools Bridge AI runs.
-export const ALLOW_EMAIL = /(noreply|no-reply)@|@(users\.noreply\.github\.com|example\.(com|org)|anthropic\.com|openai\.com)$|^git@github\.com$/i
+// Addresses made to be public (the project's own role addresses too, not a person's), or the
+// companies whose tools Bridge AI runs.
+export const ALLOW_EMAIL = /(noreply|no-reply)@|@(users\.noreply\.github\.com|example\.(com|org)|anthropic\.com|openai\.com)$|^git@github\.com$|^(abuse|security|support|hello|privacy)@boldbridge\.ai$/i
 export const EMAIL = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b/
 // A machine on someone's tailnet (a name that only says what it is, like your-mac.tail1234.ts.net, aside).
 export const TAILNET = /\b[a-z0-9-]+\.[a-z0-9-]+\.ts\.net\b/i
