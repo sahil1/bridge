@@ -8,7 +8,7 @@ import PermissionFix from './PermissionFix.jsx'
 import { t, tx, locale } from '../i18n/index.js'
 import { keyLabel } from '../../shared/dictation/keys.js'
 import { LiveWords } from '../dictation/Pill.jsx'
-import { useDictation, registerBox, noteBoxFocus, press, release, finish, cancel, dismiss, retry, settings, keysPlatform, dictationKey, listeningHint } from '../dictation/controller.js'
+import { useDictation, registerBox, noteBoxFocus, press, release, finish, cancel, dismiss, retry, settings, keysPlatform, dictationKey, listeningHint, eventTime } from '../dictation/controller.js'
 import { useBusy } from '../busy.js'
 
 // Drafts survive navigation and reloads: one per agent, kept in this browser.
@@ -448,8 +448,8 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
   const micDown = (e) => {
     if (e.button !== 0 || dict.phase === 'working') return
     e.preventDefault()
-    press({ kind: 'composer', id, caret: caretNow() })
-    const up = () => { window.removeEventListener('pointerup', up, true); window.removeEventListener('pointercancel', up, true); release() }
+    press({ kind: 'composer', id, caret: caretNow() }, eventTime(e))
+    const up = (u) => { window.removeEventListener('pointerup', up, true); window.removeEventListener('pointercancel', up, true); release(eventTime(u)) }
     window.addEventListener('pointerup', up, true)
     window.addEventListener('pointercancel', up, true)
   }

@@ -124,7 +124,9 @@ try {
   const hold = async (ms = 1500, key, mods) => { await down(key, mods); await listens(p); await sleep(ms); await up(key, mods) }
   // The key pressed where it should do nothing: held as long, with nothing to wait for.
   const holdNothing = async (ms) => { await down(); await sleep(ms); await up() }
-  const tap = async (key, mods) => { await down(key, mods); await up(key, mods) }
+  // Down and up in one go, as a tap is: not two calls apart, which a busy test machine can stretch
+  // past a tap's 300 ms.
+  const tap = (key = 'Space', mods = MODS) => p.keyboard.press([...mods, key].join('+'))
   const heardNow = () => sent.length
 
   await p.locator('.tab-main', { hasText: 'payments' }).first().click({ timeout: 20000 })

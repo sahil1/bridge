@@ -143,6 +143,10 @@ let pressAt = 0
 let voiceOk = 0 // when /voice last said voice notes are ready
 let lastAudio = null // { blob, target }, to try again
 
+// When a key or pointer event happened, on Date.now()'s clock, not when it's handled: on a busy page
+// that can be long after (WebKit holds a key's let go till the page is free), making a tap a hold.
+export const eventTime = (e) => Date.now() - Math.max(0, performance.now() - (e?.timeStamp ?? performance.now()))
+
 // The key (or the mic button) going down: starts listening, or ends hands-free listening.
 export async function press(target, at = Date.now()) {
   if (paused) return
