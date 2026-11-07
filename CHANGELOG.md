@@ -2,6 +2,22 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
+## 3.11.1
+
+Fixes: Studio no longer takes its own save for someone else's, which could reload the editor and lose what you were doing; views that closed as they opened; dictation's first press on a busy computer; agents forgotten on a quick restart; and views that couldn't load while your computer was out of reach.
+
+### Fixes
+
+- **Studio never takes its own save for someone else's.** Saving while Studio was looking at whether the file had changed on disk could load the editor again (a deck back on its first slide, a picture being added or what you'd typed meanwhile lost, and "Another app changed it" said), or offer a conflict that wasn't one; a big file could even be kept as a version "from outside" half written. Whiteboards had the same fault ("This drawing was changed somewhere else"). A real change from an agent or another app is still shown as before.
+- **A view opened just as your agents' list updated stays open.** Everything, the Agent Map, Dictations, Meetings, a whiteboard or another computer's agent, opened in that moment, closed again at once: See everything or the map from the devices menu did nothing, now and then, on a busy computer.
+- **Dictation listens from the first sound.** It said it was listening before the microphone's sound came, so a key held on a busy computer, or with a Bluetooth headset that takes a moment to switch to its mic, ended as "Recording too short". A tap and a hold are told apart by when you let go, even when the page is busy.
+- **Agents still reopening when Bridge AI stops again come back next time.** Quitting or restarting in the first moments after a start forgot the agents not yet reopened, without a word.
+- **A view that couldn't load while your computer was out of reach opens once it's back.** On a phone or in Safari, a dropped link at the wrong moment left Settings (or another view) broken until a reload, and Try again showed the same error.
+- **Meeting Insights' 90 days are 90 days after a clock change.** For the three months after the clocks went back or forward, for an hour of each day, the range was a day short or long, and the weekday averages with it.
+- **A message to an agent that's free isn't held while its screen redraws** (Windows).
+- **A slide dropped in the deck's strip goes where you dropped it**, however quickly.
+- **Links to Bridge AI's old website address keep the page they pointed at** (they could land on boldbridge.ai's front page).
+
 ## 3.11.0
 
 Studio for real work: Word files as pages and saved exactly, sheets like Excel, a slides editor, PDFs with Signature Assist, and the files you use from anywhere on its home. The calendar and mail stay read only and gain Assist: Prep before a meeting, replies in your own voice, and free times from your calendar. Meeting Insights for months of meetings, Usage split by account, a Home that's easier to follow, and whiteboards that draw Mermaid as written.
