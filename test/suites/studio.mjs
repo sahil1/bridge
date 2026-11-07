@@ -278,7 +278,11 @@ try {
   ok(!!(await until(async () => { const x = await p.locator('.sd-status').innerText(); return /1 sheet/.test(x) && /Excel workbook/.test(x) }, 5000)) && !(await bare(p)).length, 'a sheet: its status line says how many sheets and what it is; no bare controls', { status: await p.locator('.sd-status').innerText(), bare: await bare(p) })
   await shot(p, `${tag}studio-sheet`)
   // Quick: a window with a sheet open, left alone, keeps its main thread free and asks the server
-  // little (the change watcher, every few seconds). Generous, for a slow CI computer.
+  // little (the change watcher, every few seconds). Generous, for a slow CI computer. Watched for 20 s
+  // and held to 90 a minute over the time it was really watched: the whole window's own looks (calls
+  // every 2.5 s, the agents' previews every 5 s, devices, what needs you) come to about 13 in any
+  // 10 s, and the once-a-minute ones landing together in a 10 s window on a slow computer took it
+  // past 15 there without asking any more a minute.
   const reqs = []
   const count = (r) => { if (new URL(r.url()).pathname.startsWith('/api/')) reqs.push(new URL(r.url()).pathname) }
   const cdp = which === 'chromium' ? await w.ctx.newCDPSession(p) : null
@@ -286,13 +290,16 @@ try {
   const busy = async () => (cdp ? (await cdp.send('Performance.getMetrics')).metrics.find((m) => m.name === 'TaskDuration').value : 0)
   await sleep(1500)
   const b0 = await busy()
+  const w0 = Date.now()
   p.on('request', count)
-  await sleep(10_000)
+  await sleep(20_000)
   p.off('request', count)
-  const share = Math.round(((await busy()) - b0) * 100) / 10
+  const secs = (Date.now() - w0) / 1000
+  const share = Math.round((((await busy()) - b0) * 1000) / secs) / 10
   if (cdp) ok(share < 8, `a window with a sheet open, idle, keeps its main thread free (${share}% busy)`, share)
   const looks = reqs.filter((x) => x === '/api/studio/changed').length
-  ok(looks <= 2 && reqs.length <= 15, `and asks the server little: whether the file changed ${looks} time${looks === 1 ? '' : 's'} in 10 s, ${reqs.length} requests in all (at most 90 a minute, as everywhere)`, [...new Set(reqs)])
+  const each = Object.fromEntries([...new Set(reqs)].map((x) => [x, reqs.filter((y) => y === x).length]))
+  ok(looks <= 3 && reqs.length <= Math.floor((90 * secs) / 60), `and asks the server little: whether the file changed ${looks} time${looks === 1 ? '' : 's'} in ${Math.round(secs)} s, ${reqs.length} requests in all (at most 90 a minute, as everywhere)`, each)
   // A cell picked by its name, as in Excel's name box (the mouse would need the grid's sizes).
   const goTo = async (a1) => {
     await p.evaluate(() => { const i = [...document.querySelectorAll('.sd-univer input')].find((x) => /^[A-Z]+[0-9]+(:[A-Z]+[0-9]+)?$/.test(x.value)); document.querySelectorAll('[data-name-box]').forEach((x) => x.removeAttribute('data-name-box')); i?.setAttribute('data-name-box', '1') })
