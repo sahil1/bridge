@@ -329,7 +329,8 @@ try {
   const deskBar = (p) => p.evaluate(() => {
     const bar = document.querySelector('.topbar')
     const br = bar.getBoundingClientRect()
-    const name = (e) => `${(e.getAttribute('aria-label') || e.innerText || e.className).trim().replace(/\s+/g, ' ').slice(0, 40)} <${e.tagName.toLowerCase()}.${String(e.className).split(' ')[0]}>`
+    // An icon (SVG) has no innerText, and its className isn't a string: its class attribute is.
+    const name = (e) => `${(e.getAttribute('aria-label') || e.innerText || e.textContent || e.getAttribute('class') || '').trim().replace(/\s+/g, ' ').slice(0, 40)} <${e.tagName.toLowerCase()}.${(e.getAttribute('class') || '').split(' ')[0]}>`
     const inPop = (e) => e.closest('.status-pop, .acct-pop, .update-pop, .rec-menu, .menu')
     const out = { over: bar.scrollWidth - bar.clientWidth, past: [], squeezed: [], broken: [] }
     for (const e of bar.querySelectorAll('*')) {
@@ -364,6 +365,19 @@ try {
     out.fit = [...bar.classList].filter((c) => c.startsWith('fit-')).length
     return out
   })
+  // The bar once it's done giving way: it fits itself on the frame after anything in it changes size,
+  // and the Status button's count is drawn after that (which can change what fits again), so it's
+  // read when two looks, two frames apart, agree.
+  const settledBar = async (p) => {
+    let was = null
+    for (let i = 0; i < 20; i++) {
+      const x = await deskBar(p)
+      if (was && JSON.stringify(x) === JSON.stringify(was)) return x
+      was = x
+      await p.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
+    }
+    return was
+  }
   const statusRows = async (p) => {
     const pop = p.locator('.status-pop')
     if (!(await pop.count())) await p.locator('.topbar .status-btn').click()
@@ -375,8 +389,7 @@ try {
     return text
   }
   const checkBar = async (p, t) => {
-    await p.waitForTimeout(500)
-    const bar = await deskBar(p)
+    const bar = await settledBar(p)
     ok(bar.over <= 0 && !bar.past.length, `${t}: nothing runs past the bar`, { over: bar.over, past: bar.past })
     ok(!bar.squeezed.length && !bar.broken.length, `${t}: nothing narrower than what it says, nothing on two lines`, { squeezed: bar.squeezed, broken: bar.broken })
     ok(bar.name === LONG_NAME, `${t}: a long computer name is whole on hover`, { name: bar.name })
@@ -533,8 +546,8 @@ try {
     ok(!!bar, 'switched there: the update back in the bar, the clock out of it', bar?.has)
     // Pinned again, an update with no room is counted on Status.
     await p.setViewportSize({ width: 900, height: 900 })
-    bar = await until(async () => { const x = await deskBar(p); return x.pinned.includes('update') && !x.has.update && x }, 4000)
-    ok(!!bar && bar.count === 1, 'at 900, the pinned update with no room is counted on Status', bar && { count: bar.count, has: bar.has })
+    bar = await settledBar(p)
+    ok(bar.pinned.includes('update') && !bar.has.update && bar.count === 1, 'at 900, the pinned update with no room is counted on Status', { count: bar.count, has: bar.has })
     ok(errors.filter((e) => !/herdr|WebSocket|socket/i.test(e)).length === 0, 'pins: no page errors', errors)
     await ctx.close()
   }
