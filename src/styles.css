@@ -741,6 +741,15 @@ a.btn:not(.primary), a.btn:not(.primary):visited { color: var(--ink); text-decor
 .ws-tab:hover .ws-tab-x, .ws-tab.main .ws-tab-x, .ws-tab.side .ws-tab-x { opacity: 1; }
 .ws-tab-x:hover { background: var(--pane-3); color: var(--ink); }
 .ws-tab-tools { display: flex; align-items: center; gap: 4px; padding-bottom: 4px; }
+/* Tab Groups (a beta feature): a group's name before its tabs (a space, or another of your
+   computers), which folds them away to that name and how many. */
+.ws-group { flex: none; align-self: flex-end; display: inline-flex; align-items: center; gap: 5px; height: 22px; max-width: 160px; margin: 0 1px 5px 9px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--line); background: var(--pane-2); color: var(--ink-3); font-size: 11px; font-weight: 600; }
+.ws-group:first-child { margin-left: 0; }
+.ws-group:hover { color: var(--ink); }
+.ws-group.folded { color: var(--ink-2); background: var(--pane); }
+.ws-group.device { border-style: dashed; }
+.ws-group-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-group-n { font-variant-numeric: tabular-nums; color: var(--ink-2); }
 .win-btn.on { background: var(--accent-soft); color: var(--accent); }
 .win-btn:disabled { opacity: .35; cursor: default; }
 .group { flex: 1; min-height: 0; display: flex; flex-direction: column; border-radius: var(--r); }
