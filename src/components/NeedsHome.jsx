@@ -303,7 +303,7 @@ function Notice({ tone = 'info', icon = 'info', role, className = '', children }
 // here; anything else is that computer's own page, so this window switches to it, and says so.
 const switches = (it) => !onShown(it) && (it.kind === 'meeting' || it.kind === 'board' || (it.kind === 'task' && !it.chief))
 function openWords(it) {
-  if (switches(it)) return { label: t('Open on {name}', { name: it.device }), title: t('Shows {name} in this window, at it. What you have open here is kept, and Back brings you to it.', { name: it.device }) }
+  if (switches(it)) return { label: t('Open on {name}', { name: it.device }), title: it.kind === 'task' ? t("Shows {name} in this window, at its Chief of Staff (started, as it isn't running). What you have open here is kept, and Back brings you to it.", { name: it.device }) : t('Shows {name} in this window, at it. What you have open here is kept, and Back brings you to it.', { name: it.device }) }
   return { label: t('Open'), title: onShown(it) ? undefined : t('Opens in a tab here, from {name}', { name: it.device }) }
 }
 

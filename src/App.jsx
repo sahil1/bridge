@@ -408,6 +408,8 @@ function App() {
   wsRef.current = W
   openAgentRef.current = openAgent
   const openFilesRef = useRef(null)
+  const startChiefRef = useRef(null)
+  const wideRef = useRef(wide)
   useEffect(() => {
     // "chief" (the home-screen shortcut) means whichever agent is the chief of staff.
     const on = (e) => {
@@ -417,9 +419,10 @@ function App() {
       if (id === 'chief') {
         const all = fleetRef.current?.agents || []
         id = (all.find((a) => a.chief && a.thread?.main) || all.find((a) => a.chief))?.paneId
-        // No chief running: show where to start one (the phone's Chief tab; on a wide screen the
-        // main area already offers it).
-        if (!id) { setMtab('mate'); return }
+        // No chief running: on a phone, its Chief tab, which offers to start one; on a computer it's
+        // started, as the sidebar's Chief of Staff row does, and opens at its Chat, where its tasks
+        // are (Home's Open on one of them, here or switched to from another computer).
+        if (!id) { if (wideRef.current) startChiefRef.current?.(); else setMtab('mate'); return }
       }
       if (!id) return
       if (id === 'view:map') { openMapRef.current?.(); return }
@@ -621,6 +624,11 @@ function App() {
   }, [fleet, termFor]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const mateLaunch = useLaunchMate(openAgent)
+  const startChief = async () => {
+    try { const r = await api('/chief/launch', { method: 'POST' }); showChat(r.paneId); openAgent(r.paneId) } catch (e) { window.alert(t("Chief of Staff couldn't start: {why}", { why: e.message })) }
+  }
+  startChiefRef.current = startChief
+  wideRef.current = wide
   const meetings = useMeetings()
   // The computer updated while this page was open: the new one loads by itself when nothing's under
   // way, or a line under the top bar says so with Reload (src/fresh.js).

@@ -243,6 +243,12 @@ try {
     await venue.locator('button', { hasText: 'Open on Desk' }).click()
     const sw = p.locator('.ask-banner.switched')
     ok(!!(await until(async () => p.url().includes(`/m/${deskAt}/`) && /This window shows Desk now, to open Chief of Staff/.test(await sw.innerText().catch(() => '')), 20000)), 'Open on Desk switches this window to Desk, and says so with the way back', await sw.innerText().catch(() => p.url()))
+    // And it's at the task: Desk's Chief of Staff (not running, so started), at its Chat, with the
+    // task and what it needs on its list. Looked at once the page has settled.
+    const deskTasks = p.locator('.ct-tray')
+    const atTask = await until(async () => /Chief of Staff/.test(await p.locator('.ws-tab.main').innerText().catch(() => '')) && /Book the venue/.test(await deskTasks.innerText().catch(() => '')) && /Which week suits you\?/.test(await deskTasks.innerText().catch(() => '')) && !(await p.locator('.rail .skeleton-rows').count()), 30000)
+    ok(!!atTask, "on Desk, its Chief of Staff is open at its Chat, with the task and what it needs on its list (not the New page)", [await p.locator('.ws-tabs').innerText().catch(() => ''), await deskTasks.innerText().catch(() => 'no task list')])
+    await p.waitForTimeout(500)
     await shot(p, `${tag}home-switched`)
     await sw.locator('button', { hasText: 'Back to Studio' }).click()
     ok(!!(await until(async () => !p.url().includes('/m/') && /2 things need you/.test(await p.locator('.work.maxed .hm').innerText().catch(() => '')), 20000)), 'Back to Studio: its Home as it was, this computer first')
