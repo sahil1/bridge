@@ -351,7 +351,7 @@ const rootOf = async (pane) => {
 // ---------- Beta features ----------
 // Still being finished, so hidden until turned on in Settings › About & Updates › Beta Features
 // (trials: { studio: true } in the config; src/trials.js). Their routes answer only then.
-const TRIALS = ['studio', 'home', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights', 'signature-assist']
+const TRIALS = ['studio', 'home', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights', 'signature-assist', 'tab-groups']
 const trialOn = (id) => cfg.trials?.[id] === true
 const trialOff = (id, label) => (req, res, next) => (trialOn(id) ? next() : res.status(404).json({ error: `${label} is a beta feature. Turn it on in Settings › About & Updates › Beta Features.`, trial: id }))
 
