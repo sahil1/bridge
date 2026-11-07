@@ -7,9 +7,10 @@
 // with stand-in Claude Code agents working, asking, done and idle: Studio's map lists every
 // computer's agents by project with their state, what they're doing, their model and subagents,
 // and the Chief of Staff's hand-off; Laptop closed shows as offline with what it last said, also
-// after Studio restarts; one click opens Desk's agent in a tab on Studio. Then 34 agents on four
-// computers and the cloud (made up): side by side on a desktop, nothing spilling out of its lane,
-// in a light and a dark theme, and one lane under another at phone width.
+// after Studio restarts; the map opened just as an agent shows up stays open; one click opens
+// Desk's agent in a tab on Studio. Then 34 agents on four computers and the cloud (made up): side
+// by side on a desktop, nothing spilling out of its lane, in a light and a dark theme, and one lane
+// under another at phone width.
 import fs from 'node:fs'
 import path from 'node:path'
 import { startKit, startRelay, checks, until, browser, page, shot, noServiceWorker, OUT, TEST } from '../lib/harness.mjs'
@@ -129,11 +130,19 @@ try {
   ok(fix?.project === 'billing-api' && fix.status === 'working' && !!fix.since && !!fix.statusSince, "Studio's map: Desk's agent working, in its project, with when it started", fix)
   ok(fix?.subagents?.items?.some((s) => /Look for rounding/.test(s.title)), 'with the subagent it has going', fix?.subagents)
   ok(deskLane?.agents.find((x) => x.name === 'Refunds')?.model === 'claude-opus-5-5', 'and the model it was started on', deskLane?.agents.map((x) => [x.name, x.model]))
-  // Answered on Desk: done, and since when.
-  const pub = await until(async () => (await c.api('/needs-you')).items.find((i) => i.paneId === fin.paneId && i.qid), 20000)
-  await c.api('/needs-you/answer', { paneId: pub.paneId, seq: pub.seq, qid: pub.qid, n: '1' })
+  // Answered on Desk: done, and since when. The inbox's answer says whether it took; one refused
+  // (the question changed, or still there after the key) is answered again from a fresh look, as
+  // the inbox lets you. On a busy Windows runner the first one now and then doesn't take.
+  const tries = []
+  await until(async () => {
+    const pub = (await c.api('/needs-you')).items.find((i) => i.paneId === fin.paneId && i.qid)
+    if (!pub) return tries.length > 0 // gone since: it took after all
+    const r = await c.api('/needs-you/answer', { paneId: pub.paneId, seq: pub.seq, qid: pub.qid, n: '1' })
+    tries.push(r.ok ? 'ok' : r.why)
+    return r.ok
+  }, 30000, 600)
   const doneNow = await until(async () => (await laneOf(a, 'Desk'))?.agents.find((x) => x.paneId === fin.paneId && x.status === 'done'), 30000, 600)
-  ok(!!doneNow && Date.parse(doneNow.statusSince) > Date.parse(doneNow.since), 'an agent that finished: done since a moment ago, started before', doneNow)
+  ok(!!doneNow && Date.parse(doneNow.statusSince) > Date.parse(doneNow.since), 'an agent that finished: done since a moment ago, started before', doneNow || { answered: tries })
   const studio = await until(async () => { const d = (await mapOf(a)).find((x) => x.here); return d?.agents.find((x) => x.paneId === mine.paneId)?.from?.length ? d : null }, 20000)
   ok(studio?.name === 'Studio' && studio.agents.find((x) => x.paneId === mine.paneId)?.from.join() === 'Main', 'this computer first, with who handed each agent its work', studio?.agents.map((x) => [x.name, x.from]))
   const laptop = await until(async () => (await laneOf(a, 'Laptop'))?.agents?.some((x) => x.name === 'Meeting notes'), 30000, 600)
@@ -153,6 +162,25 @@ try {
   await until(async () => (await laneOf(a, 'Desk'))?.online, 30000)
 
   // ---------- in the app ----------
+  // The map opened in the moment an agent shows up in the sidebar (the fleet just in, the app not
+  // done with it yet) stays open. It used to close again at once, which a busy machine made likely.
+  {
+    const r = await page(b, a.url, { mode: 'light', theme: 'sky' })
+    await r.p.waitForSelector('.rail-nav-btn', { timeout: 20000 })
+    await r.p.evaluate(() => {
+      const mo = new MutationObserver(() => {
+        if (!document.querySelector('.rail')?.innerText.includes('Price check')) return
+        mo.disconnect()
+        window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: 'view:map' } }))
+      })
+      mo.observe(document.querySelector('.rail'), { childList: true, subtree: true, characterData: true })
+    })
+    await launch(a, 'shop', 'idle', 'Price check')
+    await r.p.locator('.am').waitFor({ timeout: 20000 }).catch(() => {})
+    await r.p.waitForTimeout(1500) // the app done with that fleet
+    ok(await r.p.locator('.work.maxed .am').isVisible(), 'the map opened just as an agent shows up in the sidebar stays open', await r.p.evaluate(() => document.querySelector('.ws-tabs')?.innerText ?? 'no tabs'))
+    await r.ctx.close()
+  }
   const s = await page(b, a.url, { mode: 'light', theme: 'sky' })
   await s.p.waitForSelector('.rail-nav-btn', { timeout: 20000 })
   await s.p.locator('.mc-chip').click()
