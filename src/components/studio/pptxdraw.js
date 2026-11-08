@@ -8,8 +8,8 @@ import { css, fontCss, esc } from './pptxdoc.js'
 
 // What every drawn slide needs besides its own styles (bullets hang in their paragraph's indent).
 export const SLIDE_CSS = `.px-slide{position:relative;overflow:hidden;box-sizing:border-box;line-height:normal;text-align:left;color:#000;-webkit-font-smoothing:antialiased;font-kerning:normal}
-.px-slide *{box-sizing:border-box}
-.px-slide p{margin:0;padding:0}
+.px-slide *,.px-editing *{box-sizing:border-box}
+.px-slide p,.px-editing p{margin:0;padding:0}
 .px-o{position:absolute}
 .px-o>svg{position:absolute;inset:0;overflow:visible}
 .px-tx{position:absolute;display:flex;flex-direction:column;overflow:visible}

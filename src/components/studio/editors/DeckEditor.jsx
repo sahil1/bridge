@@ -5,8 +5,9 @@ import { t } from '../../../i18n/index.js'
 import { textOf, base64 } from '../files.js'
 import { keys, withKeys } from '../keys.js'
 import * as D from '../deck.js'
-import { slidesOf, pptxOf, deckFromPptx } from '../pptx.js'
+import { slidesOf, pptxOf } from '../pptx.js'
 import { Slide, Menu, LayoutGallery, ThemeGallery, Present, AiPanel, DeckFind, LAYOUT_LABEL, sampleOf, useSize } from './DeckParts.jsx'
+import SlidesEditor from './SlidesEditor.jsx'
 import '../deck.css'
 
 // A deck, edited as slides: the slides down the side (added, duplicated, deleted, dragged into
@@ -14,16 +15,11 @@ import '../deck.css'
 // part is empty), its speaker notes under it, layouts and themes (your design packs, and Studio's
 // own), pictures, presenting full screen, and AI that writes a deck, a slide or a new one and shows
 // it before it's taken. Every change is the deck's Markdown (Marp's format), which can be shown and
-// typed beside it. A PowerPoint opens the same way (its text, pictures, notes and theme) and is
-// saved as one. packs: the design packs. onStats: the status line's "Slide 2 of 9".
-export default function DeckEditor({ file, data, onDirty, onStats, handle, readOnly = false, packs = [], onOpen }) {
-  const pptx = file.ext === '.pptx'
-  const [start, setStart] = useState(() => (pptx ? null : { md: textOf(data), media: [], look: null, skipped: 0 }))
-  const [err, setErr] = useState(null)
-  useEffect(() => { if (pptx) deckFromPptx(data, file.name).then(setStart, (e) => setErr(e.message)) }, []) // eslint-disable-line react-hooks/exhaustive-deps
-  if (err) return <div className="sd-empty" role="alert"><Icon name="alert" size={20} /><b>{t("Couldn't read its slides: {error}", { error: err })}</b><span className="muted small">{t('Ask an agent to change it, or open it in PowerPoint or Keynote.')}</span></div>
-  if (!start) return <div className="sd-empty sd-loading" role="status"><Icon name="refresh" size={16} className="spin" /><span className="muted">{t('Opening {name}…', { name: file.name })}</span></div>
-  return <Deck file={file} start={start} pptx={pptx} onDirty={onDirty} onStats={onStats} handle={handle} readOnly={readOnly} packs={packs} onOpen={onOpen} />
+// typed beside it. A PowerPoint opens as itself instead (SlidesEditor.jsx). packs: the design
+// packs. onStats: the status line's "Slide 2 of 9".
+export default function DeckEditor(props) {
+  if (props.file.ext === '.pptx') return <SlidesEditor {...props} />
+  return <Deck {...props} start={{ md: textOf(props.data), media: [], look: null, skipped: 0 }} pptx={false} />
 }
 
 // Slides copied (⌘C) from a Markdown deck: their Markdown, for a paste here or in another deck.

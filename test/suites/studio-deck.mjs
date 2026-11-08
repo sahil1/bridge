@@ -5,15 +5,20 @@
 // on its own lines; a PowerPoint made of it with a layout per kind of slide, placeholders for its
 // titles and text, notes, pictures, its look in its theme, and every paragraph's properties once
 // (or PowerPoint offers to repair it); and read back into the same deck (a round trip, twice); a
-// PowerPoint made elsewhere read too. The server: a picture saved beside a deck; AI writing a deck
-// from what it's about or a document, rewriting a slide, adding one; no model, said.
+// PowerPoint made elsewhere read too; a skipped slide. A PowerPoint as itself (pptxdoc.js and the
+// rest): read and drawn as PowerPoint draws it, saved unchanged byte for byte, its words changed
+// in their runs, and changed and saved with only what changed written.
+// The server: a picture saved beside a deck; AI writing a deck from what it's about or a document,
+// rewriting a slide, adding one; no model, said.
 // The page: the slides down the side and the slide in the middle; typing a title right on the
 // slide, and a point (Enter for the next, Tab in a level); "Click to add title" where a slide has
 // none; a new slide in a layout, duplicated, moved by dragging and by keys, deleted, undone; its
 // layout and theme from the galleries; a picture; speaker notes; the grid of every slide;
 // presenting full screen, next and back, the presenter's view; AI writing a deck shown before it's
-// taken; the PowerPoint, and a PowerPoint opened, changed and saved as one; the Markdown kept as
-// it was where it wasn't touched. At 1440 wide and on a 390 phone, light and dark.
+// taken; the PowerPoint; slides picked together, copied, skipped; find and replace; zoom; the
+// Markdown kept as it was where it wasn't touched. A PowerPoint edited as itself: typed in place,
+// shapes, pictures and a table put in and handled, copied, undone; presented; saved over itself
+// keeping everything it didn't change. At 1440 wide and on a 390 phone, light and dark.
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
@@ -169,6 +174,81 @@ try {
   ok(/<p:sld show="0"/.test(await skipPptx.file('ppt/slides/slide2.xml').async('string')) && !/show="0"/.test(await skipPptx.file('ppt/slides/slide1.xml').async('string')) && D.isSkipped((await P.deckFromPptx(await skipPptx.generateAsync({ type: 'uint8array' }))).md.split('---').at(-1)), 'and hidden in its PowerPoint, read back as skipped')
   ok(D.withListKind('a\n- b\n  1. c', 0, 'bullet') === '- a\n- b\n  1. c' && D.withListKind('a\n- b\n  1. c', 1, 'number') === 'a\n1. b\n  1. c' && D.withListKind('a\n- b\n  1. c', 2, null) === 'a\n- b\nc' && D.findInDeck(st, 'now').length === 1, 'a line made a bullet, a number or a paragraph; words found in the slides')
 
+  // ---------- A PowerPoint as itself (pptxdoc.js, pptxdraw.js, pptxtext.js) ----------
+  const X = await import(pathToFileURL(path.join(ROOT, 'src/components/studio/pptxdoc.js')).href)
+  const R = await import(pathToFileURL(path.join(ROOT, 'src/components/studio/pptxdraw.js')).href)
+  const T = await import(pathToFileURL(path.join(ROOT, 'src/components/studio/pptxtext.js')).href)
+  const { deckPptx, boardSlides } = await import(pathToFileURL(path.join(ROOT, 'test/lib/deckfile.mjs')).href)
+  const parts = async (bytes) => { const z = await JSZip.loadAsync(bytes); const out = {}; for (const [n, f] of Object.entries(z.files)) if (!f.dir) out[n] = Buffer.from(await f.async('uint8array')); return out }
+  {
+    const board = await deckPptx({ slides: boardSlides(64) })
+    let t0 = Date.now()
+    const doc = await X.readPptx(board)
+    doc.urlOf = (p) => `blob:${p}`
+    const views = doc.slides.map((s) => X.slideView(doc, s))
+    const readMs = Date.now() - t0
+    ok(doc.slides.length === 64 && doc.slides[12].hidden && doc.slides[0].notes.text === 'Welcome everyone.\nThank the board for the time.' && readMs < 3000, 'a 64-slide PowerPoint read: its slides, the hidden one, notes', { slides: doc.slides.length, readMs })
+    const title = views[1].objs[0], body = views[1].objs[1]
+    ok(Math.round(title.x) === 88 && Math.round(title.w) === 1104 && title.text.paras[0].runs[0].font === 'Georgia' && title.text.paras[0].runs[0].color.hex === '1F2A44' && title.text.paras[0].runs[0].sz === 40, 'a placeholder in its layout\'s place, the master\'s title style, the theme\'s heading font and colour', { x: title.x, w: title.w, run: title.text.paras[0].runs[0] })
+    ok(body.text.paras.map((p) => p.bullet?.text || '').join('') === '•––••' && body.text.paras[1].lvl === 1 && body.text.paras[0].runs[0].font === 'Arial' && body.text.paras[0].runs[0].sz === 26, 'points with the master\'s bullets for each level, in the body font', body.text.paras.map((p) => [p.lvl, p.bullet?.text]))
+    ok(views[1].under.length === 1 && views[1].under[0].fill.color.hex === '2E6BD9', 'the master\'s own shape under every slide (its accent band)')
+    const flow = views[4].objs
+    ok(flow.length === 8 && flow[1].geom.prst === 'roundRect' && flow[1].fill.color.hex === '1E4FA7' && flow[1].text.paras[0].runs[0].color.hex === 'FFFFFF' && flow[4].rot === 15 && flow[5].kind === 'cxn' && flow[5].line.tail?.type === 'triangle' && flow[7].flipH, 'shapes: each kind, a theme colour made darker, a style\'s line, turned, flipped, a line with an arrowhead', flow.map((o) => `${o.kind}:${o.geom?.prst}`))
+    ok(views[5].objs[1].kind === 'grp' && views[5].objs[1].kids.length === 3 && views[6].objs[1].img.crop.l === 0.05 && views[6].objs[1].img.crop.b === 0.1, 'a group of three; a picture cropped')
+    const tbl = views[7].objs[1].table
+    ok(tbl.rows.length === 4 && tbl.cols.length === 3 && tbl.rows[0].cells[0].text.paras[0].runs[0].b && tbl.rows[0].cells[0].fill.color.hex === '7A9A3A', 'a table in its style: a header row in the accent, bold', { fill: tbl.rows[0].cells[0].fill })
+    const chart = views[8].objs[1].chart
+    ok(chart.type === 'col' && chart.series.length === 2 && chart.series[1].values.join() === '3.6,4.1,4.4,5.2' && chart.cats.join() === 'Q1,Q2,Q3,Q4', 'a chart from the values it keeps', chart)
+    ok(R.missingIn(views[9]).diagrams === 1 && views[10].objs[1].text.paras.map((p) => p.bullet?.text || '').join('|') === '•|•|•|•|1.|2.' && views[11].objs[1].text.paras[0].runs[0].sz === 11.25, 'a diagram it can\'t draw, counted; numbered points; words shrunk to fit as the file says', views[10].objs[1].text.paras.map((p) => p.bullet?.text))
+    const html = R.slideHtml(views[4], { number: 5 })
+    ok((html.match(/data-o="/g) || []).length === 8 && /rotate\(15deg\)/.test(html) && /marker-end/.test(html) && /scale\(-1,1\)/.test(html) && /#1E4FA7/.test(html) && /width:1280px;height:720px/.test(html), 'drawn: every shape where it is, turned, flipped, filled, with its arrowhead', html.length)
+    ok(/<img[^>]+blob:ppt\/media\/image1\.png/.test(R.slideHtml(views[6])) && (R.slideHtml(views[8]).match(/<rect/g) || []).length >= 8 && /<table class="px-table"/.test(R.slideHtml(views[7])), 'a picture, a chart\'s bars and a table drawn')
+    // Saved with nothing changed: every part as it was, byte for byte.
+    const before = await parts(board)
+    const same = await parts(await X.writePptx(doc, doc.slides))
+    ok(Object.keys(before).length === Object.keys(same).length && Object.keys(before).every((n) => same[n]?.equals(before[n])), 'saved unchanged: every part byte for byte the same')
+    // Words typed, a run made bold, Enter, a word replaced.
+    let tm = X.textAt(doc.slides[1].objs[1], {})
+    tm = T.insertText(tm, { p: 0, o: 5 }, null, ' exactly').t
+    ok(T.paraText(tm.paras[0]) === 'Where exactly we are' && tm.paras[0].runs.length === 1, 'typed: into the run it\'s in, in its look')
+    tm = T.formatRange(tm, { p: 0, o: 6 }, { p: 0, o: 13 }, { b: true })
+    ok(tm.paras[0].runs.length === 3 && /\sb="1"/.test(tm.paras[0].runs[1].rPr) && tm.paras[0].runs[1].text === 'exactly' && !/\sb="1"/.test(tm.paras[0].runs[0].rPr), 'a stretch made bold: its own run, the rest as it was', tm.paras[0].runs)
+    let sp = T.splitPara(tm, { p: 0, o: 13 }, null)
+    ok(sp.t.paras.length === tm.paras.length + 1 && T.paraText(sp.t.paras[1]) === ' we are' && sp.t.paras[1].pPr === tm.paras[0].pPr && sp.caret.p === 1, 'Enter: the paragraph split, the new one in its look')
+    ok(T.paraText(T.joinBack(sp.t, 1).t.paras[0]) === 'Where exactly we are', 'Backspace at its start: joined back')
+    const rep = T.replaceAll(tm, 'exactly we', 'now', {})
+    ok(rep.n === 1 && T.paraText(rep.t.paras[0]) === 'Where now are', 'replaced across two runs')
+    // Changed: words, a shape moved and one taken off, a text box, a new slide, a copy with its
+    // chart, one hidden, two swapped, notes; saved and read back.
+    const s2 = X.withTextAt(doc.slides[1], { at: 1 }, tm)
+    let s5 = X.changeObj(doc.slides[4], 1, (xml) => X.withXfrm(xml, { x: 300, y: 400, w: 250, h: 125 }))
+    s5 = X.addObjs(X.removeObjs(s5, [7]), [X.textBoxXml({ x: 100, y: 600, w: 400, h: 40 }, 'Added here')])
+    const fresh = X.newSlide(doc, doc.slides[1].layout)
+    const chartCopy = X.copySlide(doc, doc.slides[8])
+    const list = [doc.slides[0], X.withNotes(s2, 'New notes'), doc.slides[3], doc.slides[2], s5, ...doc.slides.slice(5, 63), fresh, chartCopy, X.withHidden(doc.slides[63], true)]
+    t0 = Date.now()
+    const saved = await X.writePptx(doc, list)
+    const writeMs = Date.now() - t0
+    const after = await parts(saved)
+    const changed = Object.keys(after).filter((n) => !before[n]?.equals(after[n]))
+    const kept = ['ppt/slideMasters/slideMaster1.xml', 'ppt/theme/theme1.xml', 'ppt/charts/chart1.xml', 'ppt/slideLayouts/slideLayout2.xml', 'ppt/slides/slide1.xml', 'ppt/slides/slide9.xml', 'ppt/media/image1.png']
+    ok(kept.every((n) => after[n]?.equals(before[n])) && changed.every((n) => /^(ppt\/slides\/|ppt\/notesSlides\/|ppt\/charts\/|ppt\/presentation\.xml|ppt\/_rels\/presentation|\[Content_Types\])/.test(n)) && writeMs < 3000, 'saved: only what changed is written; masters, layouts, theme, charts and the slides not touched as they were', { changed, writeMs })
+    const back = await X.readPptx(saved)
+    back.urlOf = () => null
+    const bv = back.slides.map((s) => X.slideView(back, s))
+    const plainAt = (v, i) => X.plainOf(v.objs[i].textModel)
+    ok(back.slides.length === 66 && /Where exactly we are/.test(plainAt(bv[1], 1)) && back.slides[1].notes.text === 'New notes' && /Section|Results/.test(plainAt(bv[3], 0)) && /Before and after/.test(plainAt(bv[2], 0)), 'read back: the words, the notes, the two swapped', back.slides.slice(0, 4).map((s, i) => plainAt(bv[i], 0)))
+    ok(Math.round(bv[4].objs[1].x) === 300 && bv[4].objs.length === 8 && /Added here/.test(plainAt(bv[4], 7)) && bv[63].objs.every((o) => o.empty) && bv[63].objs.length === 2 && bv[64].objs[1].chart?.series.length === 2 && back.slides[65].hidden, 'a shape moved, one gone, a text box; a new slide\'s empty placeholders; the copy\'s chart its own', { x: bv[4].objs[1].x, n: bv[4].objs.length })
+    ok(Object.keys(after).filter((n) => /^ppt\/charts\/chart\d+\.xml$/.test(n)).length === 2 && back.slides.filter((s) => s.hidden).length === 2, 'the copied chart a part of its own; the hidden slides hidden')
+    // Every slide's things have ids of their own (or PowerPoint repairs it).
+    const idsOk = back.slides.every((s) => { const ids = (s.objs.join('').match(/<p:cNvPr\b[^>]*\bid="(\d+)"/g) || []).map((x) => /id="(\d+)"/.exec(x)[1]); return new Set(ids).size === ids.length })
+    const sldIds = [...after['ppt/presentation.xml'].toString().matchAll(/<p:sldId id="(\d+)"/g)].map((m) => m[1])
+    const types = after['[Content_Types].xml'].toString()
+    ok(idsOk && new Set(sldIds).size === 66 && Object.keys(after).filter((n) => /^ppt\/(slides|notesSlides|charts)\/[^/]+\.xml$/.test(n)).every((n) => types.includes(`PartName="/${n}"`)), 'ids unique on each slide and in the presentation; every new part in the content types')
+    // An animation that names a shape taken off goes with it; the slide's others stay.
+    const timed = { ...doc.slides[4], tail: `<p:timing><p:tnLst><p:par><p:cTn id="1"><p:spTgt spid="${/<p:cNvPr id="(\d+)"/.exec(doc.slides[4].objs[7])[1]}"/></p:cTn></p:par></p:tnLst></p:timing>${doc.slides[4].tail}` }
+    ok(X.animationsLost(X.removeObjs(timed, [7])) && !X.animationsLost(X.removeObjs(timed, [6])), 'an animation naming a shape taken off goes; one that doesn\'t stays')
+  }
 
   // ---------- The server ----------
   await api('/setup', { name: 'Tester' })
@@ -395,63 +475,191 @@ try {
   ok(!!(await until(async () => /6 of 6/.test(await p.locator('.sd-present-n').innerText()), 2000, 50)), 'presenting from the beginning (⌘⇧↵), the skipped slide passed over', await p.locator('.sd-present-n').innerText())
   await p.keyboard.press('Escape')
   await until(async () => (await p.locator('.sd-present').count()) === 0, 3000, 50)
-  // A PowerPoint, opened as slides: its text, pictures, notes and theme; changed and saved as one.
-  await open(p, 'theirs.pptx')
-  await until(async () => (await thumbs.count()) === 6 && /Q4 pitch/.test(await canvas.innerText().catch(() => '')), 20000, 200)
-  ok((await thumbs.count()) === 6 && /PowerPoint, shown with its text/.test(await p.locator('.sd-deck-said').innerText()) && /d9502b/i.test(await p.locator('.sd-deck2 > style').innerText()), 'a PowerPoint opens as its six slides, in its own theme, saying what\'s shown')
-  await thumbs.nth(1).locator('.sd-thumb-btn').click()
-  ok(!!(await until(async () => (await canvas.locator('figure, img').count()) > 0 || /blob:/.test(await p.locator('.sd-canvas').innerHTML()), 5000, 100)), 'its picture on its slide')
-  await shot(p, `${tag}deck-pptx`)
-  // A title typed on its first slide.
-  const retitle = async (words) => {
-    await thumbs.nth(0).locator('.sd-thumb-btn').click()
-    await canvas.locator('h1.sd-ed').click()
+  // ---------- A PowerPoint, edited as itself ----------
+  {
+    // Studio's own PowerPoint (made from a Markdown deck) opens as its slides, as PowerPoint draws them.
+    const objs = p.locator('.px-canvas .px-draw > .px-slide > [data-o]')
+    const openPptx = (name) => until(async () => { await open(p, name); return p.locator('.px-canvas [data-o]').first().waitFor({ timeout: 3000 }).then(() => true, () => false) }, 30000, 200)
+    ok(!!(await openPptx('theirs.pptx')) && (await thumbs.count()) === 6 && /Q4 pitch/.test(await p.locator('.px-canvas').innerText()), 'a PowerPoint Studio made opens as its six slides, as itself')
+    await thumbs.nth(1).locator('.sd-thumb-btn').click()
+    ok(!!(await until(async () => (await p.locator('.px-canvas img').count()) > 0, 5000, 100)), 'its picture on its slide')
+    // A board deck as PowerPoint writes one: 20 slides on its own masters, layouts and theme.
+    fs.writeFileSync(path.join(dir, 'board.pptx'), await deckPptx({ slides: boardSlides(20) }))
+    const boardWas = await parts(fs.readFileSync(path.join(dir, 'board.pptx')))
+    ok(!!(await openPptx('board.pptx')) && !!(await until(async () => (await thumbs.count()) === 20, 10000, 100)), 'a PowerPoint\'s 20 slides down the side')
+    ok(await thumbs.nth(12).evaluate((x) => x.classList.contains('skipped')) && /1 thing on its slides isn't shown/.test(await p.locator('.sd-deck-said').innerText()), 'its hidden slide shown as skipped; what Studio can\'t draw said, and kept')
+    const go = async (i) => { await thumbs.nth(i).locator('.sd-thumb-btn').click(); await sleep(100) }
+    await go(4)
+    ok((await objs.count()) === 8 && /Order/.test(await p.locator('.px-canvas').innerText()), 'its shapes where they are, each one there to pick')
+    await shot(p, `${tag}deck-pptx`)
+    // A title: one click in it, typed, made bold; its thumbnail follows.
+    await go(1)
+    const tb = await objs.nth(0).boundingBox()
+    await p.mouse.click(tb.x + tb.width * 0.2, tb.y + tb.height / 2)
+    await p.locator('.px-edit-body').waitFor({ timeout: 3000 })
+    await p.locator('.px-edit-body').evaluate((e) => { const r = document.createRange(); r.selectNodeContents(e); r.collapse(false); const s = getSelection(); s.removeAllRanges(); s.addRange(r) })
+    await p.keyboard.type(' for 2026')
+    ok(!!(await until(async () => /Agenda for 2026/.test(await thumbs.nth(1).innerText()), 3000, 50)), 'typed in its title, where it is: the thumbnail follows')
     await p.keyboard.press(`${MOD}+a`)
-    await p.keyboard.type(words)
+    await p.keyboard.press(`${MOD}+b`)
+    ok(/font-weight:\s*700/.test(await p.locator('.px-edit-body span').first().getAttribute('style')) && (await p.locator('.px-format button[aria-label="Bold"]').getAttribute('aria-pressed')) === 'true', 'made bold (⌘B), shown on its button')
     await p.keyboard.press('Escape')
+    // Its points: Enter for a new one, Tab under the one before, numbered.
+    const bb = await objs.nth(1).boundingBox()
+    await p.mouse.click(bb.x + 120, bb.y + 16)
+    await p.locator('.px-edit-body').waitFor({ timeout: 3000 })
+    await p.keyboard.press(`${MOD}+End`).catch(() => {})
+    await p.locator('.px-edit-body p').last().evaluate((e) => { const r = document.createRange(); r.selectNodeContents(e); r.collapse(false); const s = getSelection(); s.removeAllRanges(); s.addRange(r) })
+    await p.keyboard.press('Enter')
+    await p.keyboard.type('Budget')
+    await p.keyboard.press('Tab')
+    const bud = () => p.locator('.px-edit-body p', { hasText: 'Budget' })
+    ok(!!(await until(async () => (await bud().getAttribute('data-bu')) === '–', 2000, 50)), 'Enter: a new point; Tab: under the one before, with its level\'s bullet', await bud().getAttribute('data-bu'))
+    await p.keyboard.press(`${MOD}+Shift+7`)
+    ok(/^1\./.test(await bud().getAttribute('data-bu') || ''), 'numbered (⌘⇧7)', await bud().getAttribute('data-bu'))
+    // More than fits: the placeholder's words shrink, as PowerPoint's and Google's do.
+    for (let i = 0; i < 9; i++) { await p.keyboard.press('Enter'); await p.keyboard.type(`More to say ${i + 1}`) }
+    await sleep(300)
+    await p.keyboard.press('Escape')
+    const fit = await until(async () => { const px = await objs.nth(1).locator('span').first().evaluate((x) => parseFloat(x.style.fontSize)); return px < 34 && px }, 3000, 50)
+    ok(!!fit, 'words that outgrow their placeholder shrink to fit (26 pt was 34.7 px)', fit)
+    await p.keyboard.press('Escape')
+    // A shape: put in, picked, sized by a handle, turned, coloured, moved with guides, duplicated.
+    await go(13)
+    const n0 = await objs.count()
+    await p.locator('.px-row button[aria-label="Shape"]').click()
+    await p.locator('.px-shape-grid button[aria-label="Oval"]').click()
+    ok(!!(await until(async () => (await objs.count()) === n0 + 1 && (await p.locator('.px-frame .px-handle').count()) === 9, 2000, 50)), 'a shape put in, picked, with its handles')
+    const f0 = await p.locator('.px-frame').first().boundingBox()
+    const se = await p.locator('.px-frame .px-handle.se').boundingBox()
+    await p.mouse.move(se.x + 4, se.y + 4); await p.mouse.down(); await p.mouse.move(se.x + 54, se.y + 34, { steps: 4 }); await p.mouse.up()
+    const f1 = await p.locator('.px-frame').first().boundingBox()
+    ok(Math.abs(f1.width - f0.width - 50) < 4 && Math.abs(f1.height - f0.height - 30) < 4, 'sized from its corner', [f0, f1])
+    const rot = await p.locator('.px-frame .px-handle.rot').boundingBox()
+    await p.mouse.move(rot.x + 4, rot.y + 4); await p.mouse.down(); await p.mouse.move(f1.x + f1.width / 2 + 200, f1.y + f1.height / 2, { steps: 4 }); await p.mouse.up()
+    ok(/rotate\(90deg\)/.test(await p.locator('.px-frame').first().evaluate((x) => x.style.transform)), 'turned by its handle, settling on 90°')
+    await p.locator('.px-format button[aria-label="Fill colour"]').click()
+    await p.locator('.sd-drop .sd-sw[aria-label="#6AA84F"]').click()
+    ok(/#6AA84F/i.test(await objs.last().innerHTML()), 'filled in a colour')
+    const c0 = await p.locator('.px-frame').first().boundingBox()
+    await p.mouse.move(c0.x + c0.width / 2, c0.y + c0.height / 2); await p.mouse.down(); await p.mouse.move(c0.x + c0.width / 2 - 90, c0.y + c0.height / 2 - 20, { steps: 6 })
+    await sleep(60)
+    const guided = await p.locator('.px-guide').count()
+    await shot(p, `${tag}deck-pptx-drag`)
+    await p.mouse.up()
+    const c1 = await p.locator('.px-frame').first().boundingBox()
+    ok(c1.x < c0.x - 60 && guided > 0, 'moved by dragging, a guide shown where it lines up', { guided })
+    await p.keyboard.press('Shift+ArrowRight')
+    const c2 = await p.locator('.px-frame').first().boundingBox()
+    ok(c2.x > c1.x && c2.x - c1.x < 4, 'nudged a pixel (⇧→)')
+    await p.keyboard.press(`${MOD}+d`)
+    ok(!!(await until(async () => (await objs.count()) === n0 + 2, 2000, 50)), 'duplicated (⌘D)')
+    await p.keyboard.press('Delete')
+    ok(!!(await until(async () => (await objs.count()) === n0 + 1, 2000, 50)), 'deleted (Delete)')
+    // A picture: put in, cropped by its edge.
+    await p.locator('.px-row input[type=file]').first().setInputFiles({ name: 'team.png', mimeType: 'image/png', buffer: PNG })
+    ok(!!(await until(async () => (await objs.count()) === n0 + 2, 5000, 50)), 'a picture put on the slide')
+    await objs.last().dblclick()
+    const ce = await p.locator('.px-frame.crop .px-handle.e').boundingBox()
+    await p.mouse.move(ce.x + 2, ce.y + 6); await p.mouse.down(); await p.mouse.move(ce.x - 30, ce.y + 6, { steps: 3 }); await p.mouse.up()
+    await p.keyboard.press('Escape')
+    const iw = await objs.last().locator('img').evaluate((x) => [x.offsetWidth, x.parentElement.offsetWidth])
+    ok(iw[0] > iw[1] + 10, 'cropped: the picture runs past its box', iw)
+    // A table: put in, its cell typed in.
+    await p.locator('.px-row button[aria-label="Table"]').click()
+    await p.locator('.sd-grid-cell').nth(9).click()
+    const tbl = p.locator('.px-canvas [data-o]:has(table)').last()
+    await tbl.locator('td').first().click()
+    await p.keyboard.type('Plan')
+    await p.keyboard.press('Escape')
+    ok(!!(await until(async () => /Plan/.test(await tbl.innerText()) && (await tbl.locator('tr').count()) === 2, 2000, 50)), 'a table put in, a cell typed in')
+    // Copied to another slide; undone; redone.
+    await go(4)
+    await objs.nth(1).click()
+    await p.keyboard.press(`${MOD}+c`)
+    await go(13)
+    const n1 = await objs.count()
+    await p.locator('.px-canvas').click({ position: { x: 4, y: 4 } })
+    await p.keyboard.press(`${MOD}+v`)
+    ok(!!(await until(async () => (await objs.count()) === n1 + 1 && /Order/.test(await p.locator('.px-canvas').innerText()), 2000, 50)), 'a shape copied (⌘C) onto another slide (⌘V)')
+    await p.keyboard.press(`${MOD}+z`)
+    ok(!!(await until(async () => (await objs.count()) === n1, 2000, 50)), 'undone (⌘Z)')
+    await p.keyboard.press(`${MOD}+Shift+z`)
+    ok(!!(await until(async () => (await objs.count()) === n1 + 1, 2000, 50)), 'redone (⌘⇧Z)')
+    await shot(p, `${tag}deck-pptx-things`)
+    // Slides: picked together, copied, pasted at the end; one skipped from its menu.
+    await go(1)
+    await thumbs.nth(2).locator('.sd-thumb-btn').click({ modifiers: ['Shift'] })
+    ok((await p.locator('.sd-strip .sd-thumb.picked').count()) === 2, 'two slides picked together (⇧-click)')
+    await p.keyboard.press(`${MOD}+c`)
+    await go(19)
+    await p.keyboard.press(`${MOD}+v`)
+    ok(!!(await until(async () => (await thumbs.count()) === 22 && /Agenda for 2026/.test(await thumbs.nth(20).innerText()), 2000, 50)), 'copied and pasted after the last (⌘C ⌘V)')
+    await thumbs.nth(21).click({ button: 'right' })
+    await p.locator('.sd-ctx .menu-item', { hasText: 'Skip when presenting' }).click()
+    ok(await thumbs.nth(21).evaluate((x) => x.classList.contains('skipped')), 'skipped from its menu')
+    // Write with AI: a slide written, shown first, then added on the file's own layout.
+    await go(2)
+    await p.locator('.px-row button[aria-label="Write with AI"]').click()
+    await p.locator('.sd-ai-modes button', { hasText: 'New slide' }).click()
+    await p.locator('.sd-ai textarea').fill('what we do next')
+    await p.locator('.sd-ai button', { hasText: 'Write it' }).click()
+    await p.locator('.sd-ai-result .sd-slide').first().waitFor({ timeout: 15000 })
+    await p.locator('.sd-ai button', { hasText: 'Add it' }).click()
+    ok(!!(await until(async () => (await thumbs.count()) === 23 && /Next steps/.test(await thumbs.nth(3).innerText()), 3000, 50)) && /Ship it/.test(await p.locator('.px-canvas').innerText()) && (await objs.count()) === 2, 'Write with AI: a new slide shown first, then added after this one on the file\'s own layout, its title and points in its placeholders')
+    await p.locator('.sd-ai-head button[aria-label="Close"]').click()
+    await p.keyboard.press(`${MOD}+z`)
+    await until(async () => (await thumbs.count()) === 22, 3000, 50)
+    // Speaker notes; find and replace across the deck.
+    await go(2)
+    await p.locator('.sd-notes-box').fill('Keep it short')
+    await p.locator('.sd-notes-head').click()
+    await p.locator('.sd-notes-head').click()
+    await p.locator('.px-canvas').click({ position: { x: 4, y: 4 } })
+    await p.keyboard.press(`${MOD}+Shift+h`)
+    await p.locator('.sd-findbar input[aria-label="Find"]').fill('Revenue up')
+    ok(!!(await until(async () => /of 6/.test(await p.locator('.sd-find-count').innerText()), 2000, 50)), 'find across the deck (⌘⇧H): counted', await p.locator('.sd-find-count').innerText())
+    await p.locator('.sd-findbar input[aria-label="Replace with"]').fill('Sales up')
+    await p.locator('.sd-findbar button', { hasText: 'Replace all' }).click()
+    ok(/Replaced 6 matches/.test((await p.locator('.sd-note').allInnerTexts()).join(' ')) && /Sales up/.test(await thumbs.nth(15).innerText()), 'replaced in every slide')
+    await p.keyboard.press('Escape')
+    // Presenting: a number and Enter goes there, a skipped slide is passed over.
+    await go(10)
+    await p.locator('.px-canvas').click({ position: { x: 4, y: 4 } })
+    await p.keyboard.press(`${MOD}+Enter`)
+    await p.locator('.sd-present').waitFor({ timeout: 5000 })
+    await p.keyboard.press('ArrowRight')
+    await p.keyboard.press('ArrowRight')
+    ok(!!(await until(async () => /14 of 22/.test(await p.locator('.sd-present-n').innerText()), 2000, 50)), 'presenting: the skipped slide 13 passed over', await p.locator('.sd-present-n').innerText())
+    await p.keyboard.type('3')
+    await p.keyboard.press('Enter')
+    await p.locator('.sd-present-bar button[aria-label="Presenter view"]').click()
+    ok(!!(await until(async () => /3 of 22/.test(await p.locator('.sd-present-n').innerText()) && /Keep it short/.test(await p.locator('.sd-presenter').innerText()), 2000, 50)), 'a number and Enter goes there; the presenter\'s view with its notes')
+    await shot(p, `${tag}deck-pptx-presenter`)
+    await p.keyboard.press('Escape')
+    await until(async () => (await p.locator('.sd-present').count()) === 0, 3000, 50)
+    // Saved over itself, with no question: only what changed is written.
+    ok(/only the slides you change are written/.test(await (async () => { await p.locator('.sd-status button[title="What saving keeps"]').click(); const x = await p.locator('.sd-note-bar').innerText(); await p.locator('.sd-status button[title="What saving keeps"]').click(); return x })()), 'what saving keeps, said in the status line')
+    await p.keyboard.press(`${MOD}+s`)
+    ok(!!(await until(async () => /Saved/.test(await p.locator('.sd-status .sd-state').innerText()), 10000, 50)) && (await p.locator('.sd-conflict').count()) === 0, 'saved with ⌘S, into the file, without asking')
+    const boardNow = await parts(fs.readFileSync(path.join(dir, 'board.pptx')))
+    const changedNow = Object.keys(boardNow).filter((n) => !boardWas[n]?.equals(boardNow[n]))
+    ok(['ppt/slideMasters/slideMaster1.xml', 'ppt/theme/theme1.xml', 'ppt/charts/chart1.xml', 'ppt/slideLayouts/slideLayout1.xml', 'ppt/slides/slide1.xml', 'ppt/slides/slide9.xml'].every((n) => boardNow[n]?.equals(boardWas[n])), 'the masters, layouts, theme, chart and slides not touched: byte for byte as they were', changedNow)
+    // Every part written is XML a reader takes (as the browser reads it).
+    const bad = await p.evaluate((xs) => xs.filter(([, x]) => new DOMParser().parseFromString(x, 'application/xml').getElementsByTagName('parsererror').length).map(([n]) => n), changedNow.filter((n) => /\.(xml|rels)$/.test(n)).map((n) => [n, boardNow[n].toString()]))
+    ok(!bad.length, 'every part written well-formed XML', bad)
+    const reread = await X.readPptx(fs.readFileSync(path.join(dir, 'board.pptx')))
+    reread.urlOf = () => null
+    const rv = reread.slides.map((s) => X.slideView(reread, s))
+    ok(reread.slides.length === 22 && /Agenda for 2026/.test(X.plainOf(rv[1].objs[0].textModel)) && /Budget/.test(X.plainOf(rv[1].objs[1].textModel)) && reread.slides[2].notes.text === 'Keep it short' && reread.slides[21].hidden && rv[13].objs.some((o) => o.kind === 'table') && rv[13].objs.some((o) => o.kind === 'pic'), 'read back: the words, the new point, notes, the skipped copy, the table and picture', reread.slides.length)
+    // A Markdown deck of it, beside it; this slide as a picture.
+    await p.locator('.px-row button[aria-label="Export"]').click()
+    await p.locator('.sd-tool-menu .menu-item', { hasText: 'Markdown deck, beside it' }).click()
+    ok(!!(await until(() => fs.existsSync(path.join(dir, 'board.md')) && /# Agenda for 2026/.test(fs.readFileSync(path.join(dir, 'board.md'), 'utf8')), 10000, 100)), 'Export: a Markdown deck of it, beside it')
+    await p.locator('.px-row button[aria-label="Export"]').click()
+    await p.locator('.sd-tool-menu .menu-item', { hasText: 'This slide as a picture' }).click()
+    ok(!!(await until(async () => /saved as a picture/.test((await p.locator('.sd-note').allInnerTexts()).join(' ')), 8000, 100)), 'Export: this slide as a picture', (await p.locator('.sd-note').allInnerTexts()).join(' '))
   }
-  const dialog = p.locator('.sd-conflict[role="alertdialog"]')
-  const original = fs.readFileSync(path.join(dir, 'theirs.pptx'))
-  const read = (name) => P.deckFromPptx(fs.readFileSync(path.join(dir, name)), name).catch(() => null)
-  await retitle('Their pitch')
-  // Export as a Markdown deck, with its picture beside it.
-  await p.locator('.sd-deck-tools button[aria-label="Export"]').click()
-  await p.locator('.sd-tool-menu .menu-item', { hasText: 'Markdown deck, beside it' }).click()
-  const asMd = await until(() => fs.existsSync(path.join(dir, 'theirs.md')) && fs.readFileSync(path.join(dir, 'theirs.md'), 'utf8'), 10000, 200)
-  ok(!!asMd && /^---\nmarp: true/.test(asMd) && /# Their pitch/.test(asMd) && /!\[bg right:42%\]\(images\/theirs-1\.png\)/.test(asMd) && fs.existsSync(path.join(dir, 'images', 'theirs-1.png')), 'Export as a Markdown deck: beside it, its picture beside it too', asMd)
-  // Its first save: a copy unless you say otherwise, since it's redrawn in Studio's layouts.
-  await p.locator('.pane-head button', { hasText: 'Save' }).click()
-  await dialog.waitFor({ timeout: 5000 })
-  const choices = await dialog.locator('button').evaluateAll((bs) => bs.map((x) => `${x.innerText.trim()}${x.classList.contains('primary') ? ' (primary)' : ''}`))
-  ok(/writes the PowerPoint again/.test(await dialog.innerText()) && choices.join() === 'Save as a copy (primary),Replace the original,Not now', 'its first save: Save as a copy first, Replace the original second, saying what replacing loses', choices)
-  await shot(p, `${tag}deck-pptx-save`)
-  await dialog.locator('button', { hasText: 'Save as a copy' }).click()
-  const copy = await until(async () => fs.existsSync(path.join(dir, 'theirs (Studio).pptx')) && (await read('theirs (Studio).pptx')), 10000, 300)
-  ok(!!copy && /# Their pitch/.test(copy.md) && copy.media.length === 1 && /<!-- Say the numbers -->/.test(copy.md) && copy.look.colors.accent === '#d9502b' && fs.readFileSync(path.join(dir, 'theirs.pptx')).equals(original), 'Save as a copy: "theirs (Studio).pptx" beside it, with the change, its picture, notes and theme; the original\'s bytes untouched', copy && copy.md.slice(0, 200))
-  ok(!!(await until(async () => (await p.locator('.sd-file .pane-head h2').innerText()) === 'theirs (Studio).pptx' && /Their pitch/.test(await canvas.innerText().catch(() => '')), 10000, 200)), 'and the copy opens, to carry on in', await p.locator('.sd-file .pane-head h2').innerText())
-  await retitle('Their pitch, again')
-  await p.locator('.pane-head button', { hasText: 'Save' }).click()
-  const toCopy = await until(async () => { const x = await read('theirs (Studio).pptx'); return x && /# Their pitch, again/.test(x.md) }, 10000, 300)
-  ok(!!toCopy && (await dialog.count()) === 0, 'the copy saves to itself, without asking')
-  // Asked again on the original: another copy is (Studio 2); Replace asks once, then saves over it.
-  await opened(p, 'theirs.pptx')
-  await until(async () => /Q4 pitch/.test(await canvas.innerText().catch(() => '')), 10000, 200)
-  await retitle('Second try')
-  await p.locator('.pane-head button', { hasText: 'Save' }).click()
-  await dialog.waitFor({ timeout: 5000 })
-  await dialog.locator('button', { hasText: 'Save as a copy' }).click()
-  ok(!!(await until(async () => /# Second try/.test((await read('theirs (Studio 2).pptx'))?.md || ''), 10000, 300)) && fs.readFileSync(path.join(dir, 'theirs.pptx')).equals(original), 'a second copy: "theirs (Studio 2).pptx", the original still untouched')
-  await opened(p, 'theirs.pptx')
-  await until(async () => /Q4 pitch/.test(await canvas.innerText().catch(() => '')), 10000, 200)
-  await retitle('Replaced here')
-  await p.locator('.pane-head button', { hasText: 'Save' }).click()
-  await dialog.waitFor({ timeout: 5000 })
-  await dialog.locator('button', { hasText: 'Replace the original' }).click()
-  const replaced = await until(async () => { const x = await read('theirs.pptx'); return x && /# Replaced here/.test(x.md) && x }, 10000, 300)
-  ok(!!replaced && replaced.media.length === 1 && /<!-- Say the numbers -->/.test(replaced.md), 'Replace the original: saved over it, its picture and notes still there')
-  await retitle('Replaced twice')
-  await p.locator('.pane-head button', { hasText: 'Save' }).click()
-  ok(!!(await until(async () => /# Replaced twice/.test((await read('theirs.pptx'))?.md || ''), 10000, 300)) && (await dialog.count()) === 0, 'and from then on it saves over it without asking again')
   ok(w.errors.length === 0, 'no page errors', w.errors)
   // Studio's own save isn't a change from outside. A look at whether the file changed, sent just
   // before a save and answered after it, saw the save: the deck was loaded again (back to slide 1,
@@ -503,6 +711,10 @@ try {
   await dk.p.locator('.sd-deck-tools button[aria-label="Write with AI"]').click()
   await sleep(200)
   await shot(dk.p, `${tag}deck-ai-dark`)
+  ok(!!(await until(async () => { await open(dk.p, 'board.pptx'); return dk.p.locator('.px-canvas [data-o]').first().waitFor({ timeout: 3000 }).then(() => true, () => false) }, 30000, 200)), 'dark: a PowerPoint opens, its slides white as they are')
+  await dk.p.locator('.px-canvas [data-o]').nth(1).click()
+  await sleep(200)
+  await shot(dk.p, `${tag}deck-pptx-dark`)
   // On a phone: the slide across the screen, back and next under it, every slide in the grid;
   // everything a whole 40 px target, and nothing wider than the screen. Light and dark.
   for (const mode of ['light', 'dark']) {
@@ -524,19 +736,14 @@ try {
     await shot(ph.p, `${tag}deck-phone-grid-${mode}`)
     await ph.p.locator('.sd-sorter .sd-thumb-btn').nth(0).click()
     if (mode === 'light') {
-      // A PowerPoint's first save, on a phone: the copy first, every choice a whole target.
-      ok(!!(await opened(ph.p, 'pitch.pptx')), 'phone: a PowerPoint opens')
-      const head = ph.p.locator('.sd-canvas section[id] h1.sd-ed')
-      await head.click()
-      await head.evaluate((e) => { const r = document.createRange(); r.selectNodeContents(e); r.collapse(false); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r) })
-      await ph.p.keyboard.type(' too')
-      await ph.p.locator('.sd-canvas section[id] h1.sd-ed').evaluate((e) => e.blur())
-      await ph.p.locator('.pane-head button[aria-label="Save"]').click()
-      await ph.p.locator('.sd-conflict[role="alertdialog"]').waitFor({ timeout: 5000 })
-      f = await phoneFaults(ph.p, '.sd-conflict')
-      ok(!Object.keys(f).length, 'phone: the save dialog fits, each choice a whole 40 px target', f)
-      await shot(ph.p, `${tag}deck-phone-pptx-save`)
-      await ph.p.locator('.sd-conflict button', { hasText: 'Not now' }).click()
+      // A PowerPoint on a phone: the slide across the screen, the next a tap away, fitting.
+      ok(!!(await until(async () => { await open(ph.p, 'board.pptx'); return ph.p.locator('.px-canvas [data-o]').first().waitFor({ timeout: 3000 }).then(() => true, () => false) }, 30000, 200)), 'phone: a PowerPoint opens')
+      await sleep(300)
+      f = await phoneFaults(ph.p, '.sd-file')
+      ok(!Object.keys(f).length, 'phone: a PowerPoint fits, each control a whole 40 px target', f)
+      await ph.p.locator('.sd-nav button[aria-label="Next"]').click()
+      ok(!!(await until(async () => /2 of 22/.test(await ph.p.locator('.sd-nav').innerText()), 3000, 100)), 'phone: its next slide')
+      await shot(ph.p, `${tag}deck-phone-pptx`)
       ok(!!(await opened(ph.p, 'pitch.md')), 'phone: back to the deck')
       await ph.p.locator('.sd-deck-tools button[aria-label="Write with AI"]').click()
       await ph.p.locator('.sd-ai textarea').waitFor({ timeout: 5000 })
