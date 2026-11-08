@@ -2362,7 +2362,7 @@ app.get('/api/relay', wrap((req) => ({ ...relay.status(), here: req.headers['x-b
 // looking at this device through that one); nothing else.
 const viaMachine = (req) => relay.isMachine(req.headers['x-bridge-relay'])
 const notByMachine = (req) => { if (viaMachine(req)) throw Object.assign(new Error('Another device can\'t do that'), { status: 403 }) }
-app.get('/api/machines', wrap(async () => ({ here: { ...machines.here(), about: { ...(await machines.about()), runtime: rt.name } }, machines: machines.list(), strays: machines.strays(), asks: relay.status().asks, canBeLinked: !!relay.relayUrl() })))
+app.get('/api/machines', wrap(async () => ({ here: { ...machines.here(), about: { ...(await machines.about()), runtime: rt.name } }, machines: machines.list(), strays: machines.strays(), asks: relay.status().asks, canBeLinked: !!relay.relayUrl(), hostedAvailable: relay.status().hostedAvailable })))
 // This device's name, as your devices and phones show it: set here, or from one of your other
 // devices (through its link). '' goes back to the computer's own name.
 relay.useName(() => cfg.deviceName)

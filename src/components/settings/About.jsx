@@ -62,11 +62,12 @@ function Updates() {
   // Updating by itself works in the desktop app on a Mac or Windows only (install() there), so it's
   // offered only there: not from source, in a browser or on a phone.
   const canAuto = !!window.bridgeApp?.desktop && raw?.how === 'app'
-  // Early Access: a code from a link (?early=), or the quiet link below opens it.
+  // Early Access: a code from a link (?early=), or the quiet link below opens it. Only in a build that
+  // takes codes (offered): elsewhere a link's code is dropped and nothing about it shows.
   const [link] = useState(earlyFromLink)
   const [joining, setJoining] = useState(!!link)
   const early = raw?.early
-  const earlyShown = !!early && (joining || early.on || !!early.problem)
+  const earlyShown = !!early && ((joining && early.offered) || early.on || !!early.problem)
 
   return (
     <>

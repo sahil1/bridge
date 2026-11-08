@@ -919,6 +919,15 @@ try {
       await ctx.close()
     }
     {
+      // A tester's link opened on a build with no key: nothing about Early Access, the code dropped.
+      const { ctx, p } = await page(b, `${nk.url}/?early=${encodeURIComponent(codeFor('Sam'))}`, { mode: 'light', theme: 'sky', before: desktop })
+      const shown = await until(async () => /Check for new versions/.test(await p.locator('.modal.settings').innerText().catch(() => '')), 10000)
+      await p.waitForTimeout(1000)
+      const text = await p.locator('.modal.settings').innerText().catch(() => '')
+      ok(!!shown && await early(p).count() === 0 && !/early-access|Early Access/i.test(text) && !/early=/.test(await p.evaluate(() => location.href)), 'a build with no key, opened from a tester\'s ?early= link: nothing about Early Access shows, and the code is taken off the address', text.slice(0, 400))
+      await ctx.close()
+    }
+    {
       // The staged release, in a computer outside it: Up to date, until a person checks.
       hub.list = [rel2('v99.0.0', { rollout: 10 })]
       await st.api('/settings', { updates: { bucket: 37 } }, 'PATCH')

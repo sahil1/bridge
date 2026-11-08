@@ -546,7 +546,9 @@ export function MachinesSettings({ embedded = false, focus = false }) {
         </form>
         {data.canBeLinked && !machineId
           ? <p className="muted small">{t('To link this device from another one, choose Pair a device at the top of this page and use its link or code there.')}</p>
-          : !data.canBeLinked && <p className="muted small">{t("Other devices reach this one through its relay, which isn't set up yet: sign in to Cloudflare (or use Bridge AI's relay) at the top of this page. It can still link to them.")}</p>}
+          : !data.canBeLinked && <p className="muted small">{data.hostedAvailable
+            ? t("Other devices reach this one through its relay, which isn't set up yet: sign in to Cloudflare (or use Bridge AI's relay) at the top of this page. It can still link to them.")
+            : t("Other devices reach this one through its relay, which isn't set up yet: sign in to Cloudflare at the top of this page. It can still link to them.")}</p>}
         {msg && <p className={`small ${msg.error ? 'error-text' : 'muted'}`}>{msg.text}</p>}
       </section>
     </Wrap>

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import Icon from '../Icon.jsx'
 import { api, usePoll, onThisComputer } from '../../api.js'
 import { useSettings, SaveNote } from './General.jsx'
+import { useTrial } from '../../trials.js'
 import { openMemory } from '../meetings/tools.jsx'
 import { t } from '../../i18n/index.js'
 import { MEETING_KEYS } from '../../../shared/mentions.js'
@@ -138,6 +139,7 @@ export default function Meetings({ onOpenAgent }) {
   const [instr, setInstr] = useState(null)
   // Prep Assist needs the calendar: only where there's one (a Mac).
   const calendar = usePoll('/config', 10 * 60 * 1000).data?.calendar === true
+  const home = useTrial('home') // Home, a beta feature: named only when it's there
   useEffect(() => { api('/chat/models').then((r) => setModels(r.models || [])).catch(() => setModels([])) }, [])
   const m = s?.effective?.meetings || {}
   useEffect(() => { if (s) { setVocab(m.vocabulary || ''); setInstr(m.instructions || '') } }, [s]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -244,7 +246,8 @@ export default function Meetings({ onOpenAgent }) {
         </label>
         {calendar && <label className="st-check">
           <input type="checkbox" checked={m.prep !== false} onChange={(e) => set({ prep: e.target.checked })} />
-          <span><b>{t('Prep Assist before each meeting')}</b> <span className="muted small">{t("Fifteen minutes before a meeting with other people, the model that writes your notes suggests goals and questions from who's coming, last time with them, the invite and your mail with them. Off, it does this only when you ask, from the meeting in Calendar or Home.")}{window.bridgeApp?.desktop && ` ${t('In the desktop app, the floating card shows them ten minutes before, with Join.')}`}</span></span>
+          <span><b>{t('Prep Assist before each meeting')}</b> <span className="muted small">{home ? t("Fifteen minutes before a meeting with other people, the model that writes your notes suggests goals and questions from who's coming, last time with them, the invite and your mail with them. Off, it does this only when you ask, from the meeting in Calendar or Home.")
+            : t("Fifteen minutes before a meeting with other people, the model that writes your notes suggests goals and questions from who's coming, last time with them, the invite and your mail with them. Off, it does this only when you ask, from the meeting in Calendar.")}{window.bridgeApp?.desktop && ` ${t('In the desktop app, the floating card shows them ten minutes before, with Join.')}`}</span></span>
         </label>}
         <label className="st-check">
           <input type="checkbox" checked={m.nameSpeakers !== false} onChange={(e) => set({ nameSpeakers: e.target.checked })} />
