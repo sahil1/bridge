@@ -301,7 +301,10 @@ try {
   ok(!!(await until(async () => (await homeOf(a)).items.find((i) => i.id === `board:${drawn.id}`)?.group === 'ready', 6000)), 'and changed by an agent again, it is')
 
   // ---------- in the app, on a desktop ----------
-  // The next meeting in 25 minutes, or sooner late in the evening, so it's still today.
+  // The next meeting in 25 minutes, or sooner late in the evening, so it's still today. In a day's
+  // last three minutes there's no room for one before midnight: the next day is waited for.
+  const left = new Date().setHours(24, 0, 0, 0) - Date.now()
+  if (left < 3 * 6e4) await sleep(left + 1000)
   const soonIn = Math.max(1, Math.min(25, Math.floor((new Date().setHours(24, 0, 0, 0) - Date.now()) / 6e4 / 2)))
   const soon = new Date(Date.now() + soonIn * 6e4)
   const inAbout = (x) => { const m = /In (\d+) min/.exec(x); return !!m && Math.abs(+m[1] - soonIn) <= 2 }
