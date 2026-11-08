@@ -52,7 +52,7 @@ const PATHS = {
   'a:studio': { phone: 'More › Studio', shows: '.sd-home' },
   'a:files': { phone: 'More › Files', shows: '.fx' },
   'a:map': { phone: 'More › Agent Map', shows: '.am' },
-  'a:needs': { phone: 'More › Needs you', shows: '.ny-panel' },
+  'a:needs': { phone: 'More › Needs You', shows: '.ny-panel' },
   'a:history': { phone: 'More › History', shows: '.modal.history' },
   'a:cloud': { phone: 'Search › New cloud agent' },
   'a:chat': { phone: 'Search › New chat' },

@@ -983,9 +983,9 @@ try {
       await waiting.locator('.ny-qclear').click()
       ok(/Clear 2\? Each comes back when it has something new/.test(await waiting.locator('.ny-qsure').innerText()), 'Clear all asks once more, for the two agents\' it can', await waiting.locator('.ny-qhead').innerText())
       await waiting.locator('.ny-qsure button', { hasText: 'Cancel' }).click()
-      // The inbox (⌘K's Needs you) says the same: what needs you now ranked, the quiet ones folded.
+      // The inbox (⌘K's Needs You) says the same: what needs you now ranked, the quiet ones folded.
       await p.keyboard.press('ControlOrMeta+K')
-      await p.locator('.palette input').fill('Needs you')
+      await p.locator('.palette input').fill('Needs You')
       await p.locator('.pal-item[data-id="a:needs"]').click()
       const panel = p.locator('.ny-panel')
       await panel.waitFor({ timeout: 8000 })

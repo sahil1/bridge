@@ -15,6 +15,7 @@ import { AssistHead } from '../AiAssist.jsx'
 import PermissionFix from '../PermissionFix.jsx'
 import { BASE, machineId } from '../../api.js'
 import { onComputer, REVEAL, fileOp } from '../FileExtras.jsx'
+import { fmtSize as sizeOf } from './fsapi.js'
 import { t, tx, locale } from '../../i18n/index.js'
 import './assist.css'
 
@@ -29,13 +30,8 @@ async function call(machine, p, { method = 'GET', body } = {}) {
 }
 
 const fmtNum = (n) => new Intl.NumberFormat(locale()).format(n || 0)
-function fmtSize(n) {
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let x = n || 0
-  let i = 0
-  while (x >= 1024 && i < units.length - 1) { x /= 1024; i++ }
-  return `${new Intl.NumberFormat(locale(), { maximumFractionDigits: i && x < 10 ? 1 : 0 }).format(x)} ${units[i]}`
-}
+// Sizes as the rest of Files writes them.
+const fmtSize = (n) => sizeOf(n || 0)
 const fmtDay = (ms) => new Date(ms).toLocaleDateString(locale(), { year: 'numeric', month: 'short', day: 'numeric' })
 const baseName = (rel) => rel.split('/').pop()
 const parentOf = (rel) => rel.split('/').slice(0, -1).join('/')

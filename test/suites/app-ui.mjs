@@ -61,9 +61,9 @@ try {
     const titled = (x) => x.split(/\s+/).every((w, i) => (i > 0 && /^(a|an|and|as|at|by|for|in|of|on|or|the|to|&)$/.test(w)) || !/^\p{Ll}/u.test(w))
     ok(navs.length > 5 && navs.every(titled), `${t}: Settings' section names are in Title Case`, navs)
     await p.locator('.st-nav-item', { hasText: 'Devices' }).click()
-    const heads = await until(async () => { const h = (await p.locator('.st-body h4').allInnerTexts()).map((x) => x.trim()); return h.includes('Your devices') && h }, 6000)
+    const heads = await until(async () => { const h = (await p.locator('.st-body h4').allInnerTexts()).map((x) => x.trim()); return h.includes('Your Devices') && h }, 6000)
     const at = (re) => (heads || []).findIndex((h) => re.test(h))
-    ok(heads && at(/relay|Tailscale/i) >= 0 && at(/relay|Tailscale/i) < at(/^Your devices$/) && at(/^Your devices$/) < at(/^Notifications on this device$/), `${t}: connect first, then your devices, then notifications`, heads)
+    ok(heads && at(/relay|Tailscale/i) >= 0 && at(/relay|Tailscale/i) < at(/^Your Devices$/) && at(/^Your Devices$/) < at(/^Notifications on this device$/), `${t}: connect first, then your devices, then notifications`, heads)
     await p.keyboard.press('Escape')
     // The devices menu's way in (section "machines") opens it at your devices.
     await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'machines' } })))

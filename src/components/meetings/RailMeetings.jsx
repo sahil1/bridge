@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import Icon from '../Icon.jsx'
 import { usePoll } from '../../api.js'
 import { usePersisted } from '../layout.jsx'
-import { clock } from './recording.jsx'
+import { length } from './recording.jsx'
 import { day, timeOf, useSelection, BulkBar } from './bulk.jsx'
 import { useMeetingMenu, foldersOf } from './actions.jsx'
 import { t, locale } from '../../i18n/index.js'
@@ -89,7 +89,7 @@ export default function RailMeetings({ selected, onOpen }) {
     const live = x.status === 'recording' || x.status === 'paused'
     return (
       <button type="button" key={x.id} className={`rm-row${on ? ' on' : ''}${sel.has(x.id) ? ' picked' : ''}`} aria-pressed={sel.has(x.id) || undefined}
-        title={`${x.title}\n${shortDate(x.startedAt)} ${timeOf(x.startedAt)}${x.seconds ? ` · ${clock(x.seconds)}` : ''}\n${t('⌘-click to pick several, right-click for more')}`}
+        title={`${x.title}\n${shortDate(x.startedAt)} ${timeOf(x.startedAt)}${x.seconds ? ` · ${length(x.seconds)}` : ''}\n${t('⌘-click to pick several, right-click for more')}`}
         onClick={(e) => {
           if (e.metaKey || e.ctrlKey || e.shiftKey) { e.preventDefault(); toggle(x.id, { range: e.shiftKey }); return }
           clear(); onOpen(x.id)

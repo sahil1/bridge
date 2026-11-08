@@ -5,7 +5,7 @@ import { Menu } from '../Rail.jsx'
 import { api, usePoll, onThisComputer, refetch } from '../../api.js'
 import { t, tx, locale } from '../../i18n/index.js'
 import { usePersisted, Handle, PaneHeader, useMedia } from '../layout.jsx'
-import { useMeetings, clock, ScreenButton, SectionButton } from './recording.jsx'
+import { useMeetings, clock, length, ScreenButton, SectionButton } from './recording.jsx'
 import { byDay, timeOf, useSelection, BulkBar } from './bulk.jsx'
 import { useMeetingMenu, foldersOf, ConfirmDelete, FolderPick, chiefSaid } from './actions.jsx'
 import { AskPanel, md } from './ask.jsx'
@@ -304,7 +304,7 @@ export function MeetingsHome({ onOpen }) {
                 <button type="button" className="mt-row-open" onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey) { toggle(x.id, { range: e.shiftKey }); return } onOpen?.(x.id) }} onContextMenu={(e) => menu.open(e, x)}>
                   <span className="mt-row-main">
                     <b>{hit?.where === 'title' ? <Marked text={x.title} terms={hits.terms} /> : x.title}</b>
-                    <span className="muted small">{timeOf(x.startedAt)} · {x.status === 'recording' ? t('recording') : x.status === 'paused' ? t('paused') : clock(x.seconds || 0)}{x.event?.attendees?.length ? ` · ${t('{n} people', { n: x.event.attendees.length })}` : ''}{!place && x.folder ? <span className="mt-in"> · <Icon name="folder" size={10} /> {x.folder}</span> : null}</span>
+                    <span className="muted small">{timeOf(x.startedAt)} · {x.status === 'recording' ? t('recording') : x.status === 'paused' ? t('paused') : length(x.seconds)}{x.event?.attendees?.length ? ` · ${t('{n} people', { n: x.event.attendees.length })}` : ''}{!place && x.folder ? <span className="mt-in"> · <Icon name="folder" size={10} /> {x.folder}</span> : null}</span>
                     {hit?.snippet && <span className="mt-hit small"><b>{hit.where === 'transcript' ? `${hit.who} ${hit.t}` : t(WHERE[hit.where])}</b> <Marked text={hit.snippet} terms={hits.terms} /></span>}
                   </span>
                   {x.status === 'recording' && <span className="rec-dot" aria-label={t('Recording')} />}
@@ -817,7 +817,7 @@ export function MeetingPage({ id, onBack }) {
     heard && { label: t('Work out who said each line'), hint: t('From names said, the screen and who was invited'), disabled: busy === 'who', run: nameAll },
     canTell && voiced && { label: t('Work out who each voice is'), hint: t('From names said and who was invited'), disabled: busy === 'who' || !!working, run: nameAll },
     (lines.length > 0 || data.summary) && { label: t('Ask about this meeting'), hint: t("What was decided, who's doing what, a follow-up email"), run: asking },
-    studio && done && (data.summary || lines.length > 0) && { label: t('Make a deck'), hint: t('Written by the notes model, opened in Studio'), disabled: busy === 'deck', run: makeDeck },
+    studio && done && (data.summary || lines.length > 0) && { label: t('Make a deck'), hint: t('Written by the model that writes your notes, opened in Studio'), disabled: busy === 'deck', run: makeDeck },
   ]
 
   // When it was, who was there and where it's saved: under the name on a wide screen, at the top of
@@ -827,7 +827,7 @@ export function MeetingPage({ id, onBack }) {
       {when != null
         ? <input className="mt-inline" type="datetime-local" value={when} autoFocus onChange={(e) => setWhen(e.target.value)} onBlur={saveWhen} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setWhen(null) }} aria-label={t('When the meeting was')} />
         : <button type="button" className="sub-where mt-when" onClick={() => setWhen(localInput(data.startedAt))} title={t('When it was. Click to change')}>
-          {new Date(data.startedAt).toLocaleString(locale(), { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}{done || data.seconds ? ` · ${clock(data.seconds || 0)}` : ''}
+          {new Date(data.startedAt).toLocaleString(locale(), { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}{done || data.seconds ? ` · ${length(data.seconds)}` : ''}
         </button>}
       {people != null
         ? <input className="mt-inline mt-people-in" value={people} autoFocus placeholder={t('Names, with commas')} onChange={(e) => setPeople(e.target.value)} onBlur={savePeople} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setPeople(null) }} aria-label={t('Who was there')} />

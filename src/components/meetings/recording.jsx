@@ -270,6 +270,13 @@ export function MeetingsProvider({ children }) {
 }
 
 export const clock = (s) => { const t = Math.max(0, Math.round(s)); const h = Math.floor(t / 3600); const m = Math.floor((t % 3600) / 60); const ss = String(t % 60).padStart(2, '0'); return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}` }
+// How long a meeting was, in words ("16 min", "1 h 5 min"), so it doesn't read as a time of day.
+export const length = (s) => {
+  const n = Math.max(0, Math.round(s || 0))
+  if (n < 60) return t('{n} s', { n })
+  const m = Math.round(n / 60)
+  return m < 60 ? t('{n} min', { n: m }) : m % 60 ? t('{h} h {m} min', { h: Math.floor(m / 60), m: m % 60 }) : t('{n} h', { n: m / 60 })
+}
 
 // A line to add a thought to the meeting's notes without going to it. Enter adds it.
 export function QuickNote({ id, className = '', autoFocus = false, onAdded }) {

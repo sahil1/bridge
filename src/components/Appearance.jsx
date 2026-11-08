@@ -112,7 +112,7 @@ export default function Appearance({ focus = null }) {
     <div className="appearance">
 
         <section className="ap-sec">
-          <h4>{t('Color mode')}</h4>
+          <h4>{t('Color Mode')}</h4>
           <p className="muted small">{t('Choose light or dark, or follow your system.')}</p>
           <div className="ap-modes">
             {MODES.map((m) => (
@@ -160,8 +160,8 @@ export default function Appearance({ focus = null }) {
 
         <section className="ap-sec ap-rows">
           <div className="ap-row">
-            <div><h4>{t('Text size')}</h4><p className="muted small">{t('Chat, the message box and the terminal. ⌘+ and ⌘− zoom everything.')}</p></div>
-            <Seg label={t('Text size')} value={a.text} options={TEXT_SIZES} onChange={(v) => save({ text: v })} />
+            <div><h4>{t('Text Size')}</h4><p className="muted small">{t('Chat, the message box and the terminal. ⌘+ and ⌘− zoom everything.')}</p></div>
+            <Seg label={t('Text Size')} value={a.text} options={TEXT_SIZES} onChange={(v) => save({ text: v })} />
           </div>
           <div className="ap-row">
             <div><h4>{t('Density')}</h4><p className="muted small">{t('Compact fits more messages and sidebar rows.')}</p></div>
