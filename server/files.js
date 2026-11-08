@@ -4,12 +4,14 @@
 // until you answer its prompt, and a blocking one would freeze the whole server meanwhile.
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { Worker } from 'node:worker_threads'
 import { OFFICE } from './office.js'
 import { loginPath } from './agents.js'
 import { gitReady, NO_GIT } from './gitready.js'
+import { DATA } from './paths.js'
 
 const HIDDEN = new Set(['.git', 'node_modules', '.DS_Store', '__pycache__', '.venv', 'venv', '.next', 'dist', '.cache', '.turbo'])
 const MAX_TEXT = 1024 * 1024
@@ -21,12 +23,25 @@ const VIDEO = { '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/quickti
 const AUDIO = { '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.wav': 'audio/wav', '.flac': 'audio/flac', '.ogg': 'audio/ogg', '.oga': 'audio/ogg', '.opus': 'audio/ogg', '.weba': 'audio/webm', '.aif': 'audio/aiff', '.aiff': 'audio/aiff', '.caf': 'audio/x-caf' }
 export const typeOf = (name) => { const ext = path.extname(String(name)).toLowerCase(); return IMAGE[ext] || PDF[ext] || VIDEO[ext] || AUDIO[ext] || null }
 
+// Kept out whatever the root (Files' home folder and drives too): Bridge AI's own folder, which
+// holds the keys your devices' links are made with, and your keys' folders. An agent working in one
+// of them (the chief of staff's folder is in Bridge AI's) still has its own folder.
+// Compared as their real paths (links followed), as what's asked for is.
+const HOME = os.homedir()
+let keptOut = null
+const keptOutDirs = () => (keptOut ||= Promise.all([DATA, ...['.ssh', '.gnupg', path.join('Library', 'Keychains')].map((d) => path.join(HOME, d))]
+  .map((d) => fsp.realpath(d).catch(() => path.resolve(d)))))
+const within = (p, dir) => p === dir || p.startsWith(dir.endsWith(path.sep) ? dir : dir + path.sep)
+
 export async function safePath(root, rel = '') {
   const realRoot = await fsp.realpath(root)
   const target = path.resolve(realRoot, rel.replace(/^\/+/, ''))
   let real
-  try { real = await fsp.realpath(target) } catch { throw new Error('Not found') }
-  if (real !== realRoot && !real.startsWith(realRoot + path.sep)) throw new Error('Outside the agent folder')
+  // macOS turning Bridge AI away (EPERM) is said as that, so the app can say how to allow it.
+  try { real = await fsp.realpath(target) } catch (e) { throw e.code === 'EPERM' || e.code === 'EACCES' ? e : new Error('Not found') }
+  // A drive's root (/, C:\) already ends in its separator.
+  if (!within(real, realRoot)) throw new Error('Outside the agent folder')
+  if ((await keptOutDirs()).some((k) => within(real, k) && !within(realRoot, k))) throw Object.assign(new Error('Bridge AI keeps out of this folder: it holds keys'), { code: 'keptOut' })
   return { real, realRoot, rel: path.relative(realRoot, real) }
 }
 const exists = (p) => fsp.access(p).then(() => true, () => false)

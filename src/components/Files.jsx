@@ -31,7 +31,7 @@ import { isDiagramFile, addMermaidButtons, whiteboards as studioHere } from './w
 import { useTrial } from '../trials.js'
 import { useBusy } from '../busy.js'
 // The kinds of file Studio opens (server/studio.js).
-const STUDIO_OPENS = /\.(docx|md|markdown|txt|xlsx|xlsm|csv|tsv|pptx|pdf|html?)$/i
+export const STUDIO_OPENS = /\.(docx|md|markdown|txt|xlsx|xlsm|csv|tsv|pptx|pdf|html?)$/i
 
 Object.entries({ javascript, typescript, python, json, bash, css, xml, markdown, yaml, sql, go, rust, java, ini, diff: diffLang, dockerfile })
   .forEach(([n, l]) => hljs.registerLanguage(n, l))
@@ -116,7 +116,7 @@ function QuickOpen({ pane, onPick, onClose }) {
 }
 
 // ---------- viewers ----------
-function Code({ text, ext }) {
+export function Code({ text, ext }) {
   const html = useMemo(() => {
     const lang = LANG[ext]
     try {
@@ -136,7 +136,8 @@ function Code({ text, ext }) {
   )
 }
 
-function Markdown({ text, pane, filePath, onOpenPath }) {
+// base: the computer the file is on (Files' Quick Look shows another computer's files too).
+export function Markdown({ text, pane, filePath, onOpenPath, base = BASE }) {
   const ref = useRef(null)
   const html = useMemo(() => {
     const body = text.replace(/^---\n[\s\S]*?\n---\n/, '') // hide YAML frontmatter
@@ -148,12 +149,12 @@ function Markdown({ text, pane, filePath, onOpenPath }) {
     const dir = parentOf(filePath)
     el.querySelectorAll('img').forEach((img) => {
       const src = img.getAttribute('src') || ''
-      if (src && !/^(https?:|data:|\/api\/|\/m\/)/.test(src)) img.src = `${BASE}/api/agents/${enc(pane)}/raw?path=${enc(normalize(`${dir}/${src}`))}`
+      if (src && !/^(https?:|data:|\/api\/|\/m\/)/.test(src)) img.src = `${base}/api/agents/${enc(pane)}/raw?path=${enc(normalize(`${dir}/${src}`))}`
     })
     el.querySelectorAll('a').forEach((a) => { if (/^https?:/.test(a.getAttribute('href') || '')) { a.target = '_blank'; a.rel = 'noreferrer' } })
     // Mermaid in it opens as a whiteboard.
     if (FileDrawing) addMermaidButtons(el, (filePath.split(/[\\/]/).pop() || '').replace(/\.(md|markdown)$/i, ''))
-  }, [html, pane, filePath])
+  }, [html, pane, filePath, base])
   const onClick = (e) => {
     const a = e.target.closest('a')
     const href = a?.getAttribute('href')
@@ -175,16 +176,16 @@ function normalize(p) {
 // The page itself, sandboxed: its scripts run, but it can't reach this app (an opaque origin,
 // which the server refuses for any API call). From disk, or from the text you're editing.
 const SANDBOX = 'allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms allow-modals'
-const siteUrl = (pane, p) => `${BASE}/api/agents/${enc(pane)}/site/${p.split('/').map(enc).join('/')}`
-function HtmlView({ pane, filePath, text, reload = 0 }) {
+const siteUrl = (pane, p, base = BASE) => `${base}/api/agents/${enc(pane)}/site/${p.split('/').map(enc).join('/')}`
+export function HtmlView({ pane, filePath, text, reload = 0, base = BASE }) {
   // While editing, show the draft (after a short pause in typing). A <base> makes its relative
   // links (styles, scripts, images) load from the file's folder, as they would from disk.
   const [doc, setDoc] = useState(text)
   useEffect(() => { if (text == null) return; const t = setTimeout(() => setDoc(text), 300); return () => clearTimeout(t) }, [text])
-  if (text == null) return <iframe key={reload} className="html-view" src={siteUrl(pane, filePath)} title={filePath} sandbox={SANDBOX} />
+  if (text == null) return <iframe key={reload} className="html-view" src={siteUrl(pane, filePath, base)} title={filePath} sandbox={SANDBOX} />
   const dir = parentOf(filePath)
-  const base = `<base href="${siteUrl(pane, dir ? `${dir}/` : '')}">`
-  const html = /<head[^>]*>/i.test(doc || '') ? doc.replace(/<head[^>]*>/i, (m) => m + base) : base + (doc || '')
+  const baseTag = `<base href="${siteUrl(pane, dir ? `${dir}/` : '', base)}">`
+  const html = /<head[^>]*>/i.test(doc || '') ? doc.replace(/<head[^>]*>/i, (m) => m + baseTag) : baseTag + (doc || '')
   return <iframe className="html-view" srcDoc={html} title={filePath} sandbox={SANDBOX} />
 }
 
