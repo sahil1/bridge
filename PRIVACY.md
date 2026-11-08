@@ -24,7 +24,8 @@ meetings), the local model (Gemma 4 E2B, 2.8 GB) only when you click Download fo
 Model Providers (one download from Hugging Face; what you give it is read on your computer by
 llama.cpp, which runs there and answers only Bridge AI, and is never sent anywhere), a check on
 GitHub for a newer version, which you can turn off in Settings › About &
-Updates (and, when you choose to update, the new version from GitHub; with an early-access code,
+Updates (and the new version from GitHub, when you update, or by itself while you're away in the
+desktop app on a Mac or Windows unless you turn that off there too; with an early-access code,
 the check asks for the list of recent releases, and the code is checked on your computer and never
 sent), and, unless you turn them off, usage stats and crash reports to the project (below). Its fonts and icons are part of the app, so nothing is fetched to draw
 it. On Windows and Linux, the desktop app's spell check gets the dictionaries for your languages
@@ -102,9 +103,10 @@ Memory keeps the names and terms from your meetings and dictations on your compu
 `~/.bridge-ai/meetings/memory.json`: how each is spelled and misheard, a note on who or what it is,
 and the meetings and dictations it came up in. About You is a few lines made from it on your
 computer (your name, your organization, what you work on, the people and organizations that come up
-most), or written by you. Until you switch it off on the Memory page, it goes with what the model
-that writes your meeting notes is told, and its names with what the model that tidies your
-dictation is told: a model on your computer keeps them there; any other gets them. It's also put in
+most), or written by you. Until you switch it off on the Memory page, it goes with what the models
+you use for meetings are told (writing notes, Who spoke, cleaning up the transcript, AI Assist and
+your questions about meetings), and its names with what the model that tidies your dictation is
+told: a model on your computer keeps them there; any other gets them. It's also put in
 the Chief of Staff's folder (`about-you.md`) for it to read, so its agent's provider gets it as it
 gets the rest of what the Chief of Staff reads. Switched off, no model is given it and that file is
 deleted.
@@ -145,6 +147,16 @@ the folder picker); it keeps each place's path in `~/.bridge-ai/places.json`, no
 looks in none of them until you open it. A file you copy to another of your computers, or send from
 your phone, goes end-to-end encrypted over the same link as everything else (the relay sees only
 how much goes), and lands only in the folder you pick on the computer it goes to.
+
+With Files on (a beta feature, off until you turn it on), it also shows your home folder, your cloud
+drives and this computer's drives, read-only, to you and to your own linked computers and paired
+phones over that same encrypted link. Bridge AI's own folder and your keys' folders (`~/.ssh`,
+`~/.gnupg`, Keychains) are never shown, and on a Mac, Desktop, Documents, Downloads and iCloud Drive
+aren't read until you open one. AI Assist in Files looks at the folder you ask it about on your computer,
+and reads a file's contents only to tell whether two files of the same size are the same; nothing
+about it leaves the computer unless you choose Suggest how to organize it, which sends that folder's file and folder
+names, sizes and dates (never what's in a file) to the model you pick for it, and says which model
+and where it runs first. A model on your computer keeps them there.
 
 AI Assist's Sign this (Sign PDFs, a beta feature in Studio, off until you turn it on) keeps the
 signature and initials you draw as two pictures in `~/.bridge-ai/studio/signatures`, readable by you

@@ -29,7 +29,7 @@
 .mnote { position: absolute; z-index: 40; left: 50%; bottom: 14px; transform: translateX(-50%); max-width: calc(100% - 32px); display: flex; align-items: center; gap: 12px; padding: 8px 14px; border-radius: 10px; background: var(--ink); color: var(--pane); font-size: 12.5px; box-shadow: var(--shadow-lg); }
 .mnote .link-btn { color: inherit; white-space: nowrap; }
 .mnote kbd { background: transparent; color: inherit; border-color: color-mix(in srgb, currentColor 40%, transparent); }
-.mnote.bad { background: var(--critical); color: #fff; }
+.mnote.bad { background: var(--critical-fill); color: #fff; }
 
 /* The keys. */
 .mkeys-back { position: absolute; inset: 0; z-index: 50; display: grid; place-items: center; padding: 16px; background: color-mix(in srgb, var(--ink) 18%, transparent); }
@@ -83,7 +83,7 @@
 .mdays .fchip { border: 1px solid var(--line-2); }
 .mdays .fchip.on { background: var(--accent-soft); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
 .st-mail .st-input.mtime { width: 120px; }
-.st-mail .btn.danger { background: var(--critical); border-color: transparent; color: #fff; }
+.st-mail .btn.danger { background: var(--critical-fill); border-color: transparent; color: #fff; }
 
 /* On a phone: whole targets, and fields iOS doesn't zoom into. No keys to show. */
 .app.narrow .mlist-keys { display: none; }

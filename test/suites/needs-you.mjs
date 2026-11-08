@@ -197,7 +197,9 @@ try {
   // once, and answering one leaves the other (told apart by id alone, both went, or one showed twice).
   {
     const twin = (machine, device, about) => ({ id: 'w4:p6@2', paneId: 'w4:p6', seq: 2, type: 'permission', text: 'Do you want to proceed?', about, qid: 'q-twin', answers: [{ n: '1', title: 'Yes' }, { n: '3', title: 'No' }], machine, device, online: true, since: new Date().toISOString(), agent: { title: about, kind: 'claude', kindLabel: 'Claude Code', project: 'docs', chief: false } })
-    const list = { items: [twin(null, 'Studio', 'git push --tags'), twin(desk.id, 'Desk', 'npm run release')], devices: [{ id: null, name: 'Studio', online: true }, { id: desk.id, name: 'Desk', online: true }] }
+    // (And one waiting for days, folded away.)
+    const old = { ...twin(null, 'Studio', 'npm run migrate'), id: 'w9:p1@1', paneId: 'w9:p1', seq: 1, qid: 'q-old', since: new Date(Date.now() - 5 * 864e5).toISOString() }
+    const list = { items: [twin(null, 'Studio', 'git push --tags'), twin(desk.id, 'Desk', 'npm run release'), old], devices: [{ id: null, name: 'Studio', online: true }, { id: desk.id, name: 'Desk', online: true }] }
     const v = await page(b, a.url, { mode: 'light', theme: 'sky', before: async (cx) => {
       await noServiceWorker(cx)
       await cx.route(/\/api\/needs-you(\?|$)/, (r) => r.fulfill({ json: list }))
@@ -210,6 +212,11 @@ try {
     ok(!!(await until(async () => (await count('git push --tags')) === 1 && (await count('npm run release')) === 1, 8000, 200)), 'the same pane and wait on two devices: two items, each shown once', await pn.innerText().catch(() => ''))
     await pn.locator('.ny-item', { hasText: 'npm run release' }).locator('.ny-acts button', { hasText: /^Yes$/ }).click()
     ok(!!(await until(async () => (await count('npm run release')) === 0, 5000, 100)) && (await count('git push --tags')) === 1, "answering Desk's leaves Studio's, which has the same id", await pn.innerText().catch(() => ''))
+    // Its Clear says where it still waits, naming nothing of Home (a beta feature, off here).
+    await pn.locator('.ny-fold').click()
+    await pn.locator('.ny-qrow', { hasText: 'npm run migrate' }).locator('.ny-qmain').click({ timeout: 5000 }).catch(() => {})
+    const clearTip = await pn.locator('.ny-qcard').locator('button', { hasText: 'Clear' }).getAttribute('title', { timeout: 5000 }).catch(() => null)
+    ok(/still waits, in the sidebar/.test(clearTip || '') && !/Everything/.test(clearTip || ''), 'one waiting for days, folded: Clear says it still waits in the sidebar, and names no Everything while Home is off', clearTip)
     ok(v.errors.length === 0, 'no page errors with the same id on two devices', v.errors)
     await v.ctx.close()
   }

@@ -120,6 +120,11 @@ for (const [what, m, release, want] of RULES) {
 // ---------- Updating by itself while you're away: the rules ----------
 // shared/autoupdate.js, as the server and the desktop app ask it: what each waits for at a moment.
 const au = await import('../../shared/autoupdate.js')
+// As PRIVACY.md and SECURITY.md say: not only when you update, but by itself in the desktop app.
+{
+  const doc = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8').replace(/\s+/g, ' ')
+  ok(/by itself while you're away in the desktop app on a Mac or Windows unless you turn that off/.test(doc('PRIVACY.md')) && /by itself while you're away unless you turn that off/.test(doc('SECURITY.md')), 'PRIVACY.md and SECURITY.md say the desktop app updates by itself while you\'re away, unless turned off', null)
+}
 const HOUR = 60 * 60 * 1000
 const NOW = Date.parse('2026-11-06T03:00:00Z')
 const ago = (h) => new Date(NOW - h * HOUR).toISOString()
@@ -730,10 +735,10 @@ try {
     })
     const ghcPort = await freePort()
     await new Promise((r) => ghc.listen(ghcPort, '127.0.0.1', r))
-    const chKit = async (name, { how = 'app', bucket, key = KEY } = {}) => {
+    const chKit = async (name, { how = 'app', bucket, key = KEY, setUp = true } = {}) => {
       const k = await startKit(`updates-${name}`, { env: { BRIDGE_RELEASES_API: `http://127.0.0.1:${ghcPort}/repos/sahil1/bridge/releases/latest`, BRIDGE_INSTALL_HOW: how, BRIDGE_EARLY_ACCESS_KEY: key, BRIDGE_MACHINE: JSON.stringify({ platform: 'darwin', arch: 'arm64', os: '14.6', docker: how === 'docker' }) }, config: bucket != null ? { updates: { bucket } } : {} })
       kits.push(k)
-      await k.api('/setup', { name: 'Tester' })
+      if (setUp) await k.api('/setup', { name: 'Tester' })
       return k
     }
     const refused = (p) => p.then((x) => ({ ok: true, x }), (e) => ({ error: e.message }))
@@ -900,6 +905,21 @@ try {
       ok(cut(errors).length === 0, 'no page errors', errors)
       await ctx.close()
     }
+    {
+      // The same link on a cold first load: a computer not set up yet, in a browser just started that
+      // has never opened Bridge AI (no tour done, nothing kept). Settings opens more than once as the
+      // page settles (setup's steps), and the code is still there, filled in, under setup.
+      const fresh = await chKit('early-cold', { setUp: false })
+      const kim = codeFor('Kim', { days: 30 })
+      // (As a person's browser is: none of the test browser's stand-in microphone flags.)
+      const cold = await (await import('playwright-core'))[which].launch()
+      const ctx = await cold.newContext({ viewport: { width: 1440, height: 900 } })
+      const p = await ctx.newPage()
+      await p.goto(`${fresh.url}/?early=${encodeURIComponent(kim)}`)
+      const filled = await until(async () => (await early(p).locator('input').inputValue().catch(() => '')) === kim, 15000)
+      ok(!!filled && (await p.locator('.wiz').count()) === 1 && !/early=/.test(await p.evaluate(() => location.href)), 'a cold first load from a tester\'s link, before setup: the code kept and filled in, and taken off the address', { filled: !!filled, wizard: await p.locator('.wiz').count(), at: await p.evaluate(() => location.href) })
+      await cold.close()
+    }
     await ek.api('/settings', { earlyAccess: { code: codeFor('Kim', { days: 1, now: Date.now() - 3 * 24 * HOUR }) } }, 'PATCH')
     await ek.api('/updates?refresh=1')
     {
@@ -916,6 +936,15 @@ try {
       await about(p)
       const shown = await until(async () => /Check for new versions/.test(await p.locator('.modal.settings').innerText().catch(() => '')), 10000)
       ok(!!shown && await p.locator('.ab-early-ask').count() === 0 && await early(p).count() === 0, `${what}: no early-access link`)
+      await ctx.close()
+    }
+    {
+      // A tester's link opened on a build with no key: nothing about Early Access, the code dropped.
+      const { ctx, p } = await page(b, `${nk.url}/?early=${encodeURIComponent(codeFor('Sam'))}`, { mode: 'light', theme: 'sky', before: desktop })
+      const shown = await until(async () => /Check for new versions/.test(await p.locator('.modal.settings').innerText().catch(() => '')), 10000)
+      await p.waitForTimeout(1000)
+      const text = await p.locator('.modal.settings').innerText().catch(() => '')
+      ok(!!shown && await early(p).count() === 0 && !/early-access|Early Access/i.test(text) && !/early=/.test(await p.evaluate(() => location.href)), 'a build with no key, opened from a tester\'s ?early= link: nothing about Early Access shows, and the code is taken off the address', text.slice(0, 400))
       await ctx.close()
     }
     {

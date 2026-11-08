@@ -126,7 +126,7 @@ try {
   await part('off, then on', async () => {
     const side = await ask(desk.url, '/files/sidebar')
     const home = await ask(desk.url, `/agents/${HOME}/files`)
-    ok(side.s === 404 && side.j.trial === 'files' && /Beta Features/.test(side.j.error) && home.s === 404 && /Beta Features/.test(home.j.error), 'off, Files\' routes and its roots say it\'s a beta feature and where to turn it on', { side, home })
+    ok(side.s === 404 && side.j.trial === 'files' && /Beta Features/.test(side.j.error) && home.s === 404 && home.j.trial === 'files' && home.j.error === side.j.error, 'off, Files\' routes and its roots say it\'s a beta feature and where to turn it on, in the same words', { side, home })
     await desk.api('/settings', { trials: { files: true } }, 'PATCH')
     ok((await ask(desk.url, '/files/sidebar')).s === 200, 'turned on in Settings, they answer')
   })
@@ -405,6 +405,13 @@ try {
     ok(await a.waitFor({ timeout: 4000 }).then(() => true, () => false) && (await a.getAttribute('data-root')) === 'home' && (await a.getAttribute('data-rel')) === 'Projects' && /Projects/.test(await a.locator('.fa-where').innerText().catch(() => '')) && await a.locator('.fa-promise').isVisible(), 'Assist opens beside the folder, for the folder on screen, saying it only looks', { root: await a.getAttribute('data-root').catch(() => null), rel: await a.getAttribute('data-rel').catch(() => null) })
     await until(async () => (await a.locator('.fa-state').count()) === 0, 8000)
     await snap('assist')
+    // Beside it, the folder drops columns to fit, as it does on a narrow window, rather than scrolling sideways.
+    for (const width of [1280, 1440]) {
+      await p.setViewportSize({ width, height: 900 })
+      await sleep(300)
+      const fit = await p.locator('.fx-body').evaluate((e) => ({ sideways: e.scrollWidth - e.clientWidth, width: e.clientWidth }))
+      ok(fit.sideways <= 1, `${width} wide: beside it, the folder's columns fit, with nothing to scroll sideways to`, fit)
+    }
     await wand.click()
     await p.locator('.ai-menu button', { hasText: 'Look over this folder' }).click()
     ok(!!(await until(async () => (await p.locator('.fx-assist').count()) === 0, 4000)), 'picked again, Look over this folder closes it')

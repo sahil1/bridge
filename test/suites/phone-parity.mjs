@@ -212,6 +212,14 @@ try {
       if (r.shows && !(await ph.p.locator(r.shows).first().waitFor({ timeout: 8000 }).then(() => true, () => false))) bad.push(`${r.phone}: ${r.shows} doesn't show`)
     }
     ok(!bad.length, `${width}: every path is there on the phone and opens its place (${routes.length} of them)`, bad)
+    // More itself: every row whole, what each holds said in full, nothing cut off.
+    await ph.p.goto(kit.url)
+    await ph.p.waitForSelector('.tabbar button', { timeout: 20000 })
+    await ph.p.locator('.tabbar button', { hasText: 'More' }).click()
+    await ph.p.locator('.tabbar button', { hasText: 'More' }).click()
+    await ph.p.locator('.m-more-row', { hasText: 'Memory' }).waitFor({ timeout: 8000 }).catch(() => {})
+    const moreFaults = await phoneFaults(ph.p, '.m-body')
+    ok(!Object.keys(moreFaults).length, `${width}: More fits, each row's words whole (Memory's too)`, moreFaults)
 
     // ---------- Settings, as a phone's settings ----------
     await ph.p.goto(kit.url)

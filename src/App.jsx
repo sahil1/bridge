@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import SoundButton from './components/SoundButton.jsx'
 import StatusMenu, { UsageChip, WeatherChip, ClockChip } from './components/StatusMenu.jsx'
 import Icon, { StatusDot } from './components/Icon.jsx'
-import { useAppearance } from './appearance.js'
+import { useAppearance, fillFor } from './appearance.js'
 import { usePins } from './pins.js'
 import ErrorBoundary, { Quiet } from './components/ErrorBoundary.jsx'
 import { CrashNotice } from './components/CrashReport.jsx'
@@ -57,7 +57,8 @@ function useRuntimeTheme() {
   useEffect(() => {
     api('/runtime-theme').then((t) => {
       const root = document.documentElement.style
-      if (t.red) root.setProperty('--needs', t.red)
+      // (Badges are white on --needs-fill: a shade of it dark enough to read.)
+      if (t.red) { root.setProperty('--needs', t.red); if (fillFor(t.red).on === '#ffffff') root.setProperty('--needs-fill', fillFor(t.red).fill) }
       if (t.teal) root.setProperty('--done', t.teal)
       if (t.yellow) root.setProperty('--working', t.yellow)
     }).catch(() => {})

@@ -132,7 +132,7 @@
 .sd-w table.bd td, .sd-w table.bd th { border: 1px solid #000; }
 .sd-w td > :is(p, h1, h2, h3, h4, h5, h6) { min-height: 1em; }
 .sd-w .selectedCell::after { content: ''; position: absolute; inset: 0; background: rgb(66 133 244 / .18); pointer-events: none; }
-.sd-w .column-resize-handle { position: absolute; top: 0; right: -2px; bottom: -2px; width: 4px; background: var(--accent); pointer-events: none; }
+.sd-w .column-resize-handle { position: absolute; top: 0; right: -2px; bottom: -2px; width: 4px; background: var(--accent-fill); pointer-events: none; }
 .sd-w.resize-cursor, .sd-w .resize-cursor { cursor: col-resize; }
 /* What Studio keeps as it is: drawn, marked, not edited here. */
 .sd-w .sd-xbl { position: relative; margin: 2px -6px; padding: 18px 6px 4px; border-radius: 4px; box-shadow: inset 0 0 0 1px rgb(0 0 0 / .08); background: rgb(0 0 0 / .015); }

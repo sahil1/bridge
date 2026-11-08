@@ -246,8 +246,8 @@ function AboutYou({ a, me, elsewhere, onChange }) {
           : <p className="muted small mm-you-text">{t('Nothing to go on yet: it\'s made from the people, organizations and projects memory has, once your meetings and dictations bring some. Or write it yourself.')}</p>}
       <p className="muted small mm-you-where">
         {!on ? t('Off: no model and not Chief of Staff is given it.')
-          : elsewhere ? t('While it\'s on, the model that writes your meeting notes and the one that tidies your dictation are given it, and Chief of Staff reads it. It\'s made and kept on {name}.', { name: elsewhere })
-            : t('While it\'s on, the model that writes your meeting notes and the one that tidies your dictation are given it, and Chief of Staff reads it. It\'s made and kept on this computer.')}
+          : elsewhere ? t('While it\'s on, the models you use for meetings (notes, Who spoke, cleanup, AI Assist and your questions) and the one that tidies your dictation are given it, and Chief of Staff reads it. It\'s made and kept on {name}.', { name: elsewhere })
+            : t('While it\'s on, the models you use for meetings (notes, Who spoke, cleanup, AI Assist and your questions) and the one that tidies your dictation are given it, and Chief of Staff reads it. It\'s made and kept on this computer.')}
         {!me && ` ${t('Your name, in Settings › General, starts it off.')}`}
       </p>
       {err && <p className="error-text small" role="alert">{err}</p>}
@@ -363,11 +363,10 @@ function Tidy({ list: these, byId, act }) {
 }
 
 // People: the ones you meet that memory doesn't have (Meeting Insights), the most met first, each
-// one click from memory. With Meeting Insights off, it says what it would add.
+// one click from memory. With Meeting Insights off (a beta feature), nothing of it shows.
 function Met({ people, insights, act }) {
   const [all, setAll] = useState(false)
-  if (!insights) return <p className="mm-note muted small" role="status"><Icon name="info" size={13} /> {t('Only the people memory has are here. With Meeting Insights on (Settings › About & Updates › Beta Features), everyone you meet is here too.')}</p>
-  if (!people.length) return null
+  if (!insights || !people.length) return null
   const shown = all ? people : people.slice(0, 30)
   return (
     <section className="mm-met" aria-label={t('People You Meet')}>

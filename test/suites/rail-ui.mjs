@@ -5,7 +5,9 @@
 // it, ⌘K has one entry for it, and the tour points at the row. Then a few hundred meetings over a
 // year: the last week by day, two days open, older ones under Earlier by week and month, all
 // folding; the one recording and the one open stay in sight when their group is folded; what's
-// folded is kept after a reload; and the list stays short and quick however many there are.
+// folded is kept after a reload; and the list stays short and quick however many there are. On a
+// 1280x800 window with it and Dictations' list long, the sidebar's top scrolls on its own, Spaces
+// stays in view, and the window is never pushed up past the top bar.
 import fs from 'node:fs'
 import path from 'node:path'
 import { startKit, checks, until, browser, page, shot, TEST } from '../lib/harness.mjs'
@@ -152,6 +154,19 @@ try {
   await p.waitForTimeout(500)
   const again = await p.evaluate(() => [...document.querySelectorAll('.rail-meetings .rm-day-head, .rail-meetings .rm-span-head')].filter((e) => e.getAttribute('aria-expanded') === 'true').map((e) => e.innerText.replace(/\s+/g, ' ').trim()))
   ok(!again.some((x) => /^today/i.test(x)) && again.some((x) => /^yesterday/i.test(x)) && again.some((x) => /^earlier/i.test(x)) && again.length === 3, 'after a reload, what was open or folded stays so', again)
+  // A 1280x800 window, Meetings' list that long and Dictations' open under it: the top of the sidebar
+  // scrolls on its own, Spaces stays in view, and bringing its last row into view (as the keyboard or
+  // the app does) never pushes the whole window up past the top bar.
+  for (let i = 0; i < 14; i++) await kit.api('/dictations', { text: `Remind me about the launch, part ${i}`, ms: 1500 })
+  await p.setViewportSize({ width: 1280, height: 800 })
+  const dictFold = p.locator('.rail-nav-row', { has: p.locator('.rail-nav-btn', { hasText: 'Dictations' }) }).locator('.rail-nav-fold')
+  await dictFold.waitFor({ timeout: 20000 }).catch(() => {})
+  if (await dictFold.getAttribute('aria-expanded').catch(() => null) === 'false') await dictFold.click()
+  await until(() => p.locator('.rail-nav .rail-meetings').nth(1).locator('.rm-row').count(), 10000)
+  await p.locator('.rail-nav-btn', { hasText: 'Memory' }).scrollIntoViewIfNeeded()
+  const fit = await p.evaluate(() => ({ bar: Math.round(document.querySelector('.topbar').getBoundingClientRect().top), page: document.scrollingElement.scrollTop, spaces: Math.round(document.querySelector('.rail-head').getBoundingClientRect().bottom), height: innerHeight, nav: [document.querySelector('.rail-nav').scrollHeight, document.querySelector('.rail-nav').clientHeight] }))
+  ok(fit.bar === 0 && fit.page === 0 && fit.spaces < fit.height && fit.nav[0] > fit.nav[1], '1280x800 with both lists long: the sidebar\'s top scrolls on its own, Spaces stays in view, and the window stays put under the top bar', fit)
+  await shot(p, `${tag}rail-lists-1280`)
   // WebKit counts a request the reload cut off (the presence ping, the live feed) as a page error.
   ok(errors.filter((e) => !/\/api\/\S+ due to access control checks/.test(e)).length === 0, 'no page errors', errors)
   await ctx.close()

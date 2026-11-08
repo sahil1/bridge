@@ -53,6 +53,10 @@ try {
   // A beta feature: off to start with, its routes refused and nothing leading to it, until it's
   // turned on (Settings › About & Updates › Beta Features, checked on the page below).
   ok((await api('/config')).trials?.studio === false && /beta feature/.test((await err('/studio/recent'))?.message || ''), 'Studio is a beta feature, off to start with: its routes say how to turn it on', (await api('/config')).trials)
+  // And the file routes on its own roots (its folder, and a folder its home found a file in): the same
+  // answer, with nothing made in the data folder meanwhile.
+  const offRoots = await Promise.all(['studio', 'found:abc'].map((r) => fetch(`${kit.url}/api/agents/${encodeURIComponent(r)}/files?path=`).then(async (x) => ({ status: x.status, ...(await x.json()) }))))
+  ok(offRoots.every((x) => x.status === 404 && x.trial === 'studio' && /^Studio is a beta feature\. Turn it on in Settings › About & Updates › Beta Features\.$/.test(x.error)) && !fs.existsSync(path.join(kit.data, 'studio', 'files')), 'off, its own folders\' file routes are refused as its routes are, and nothing is made for them', offRoots)
   await api('/settings', { trials: { studio: true } }, 'PATCH')
   ok((await api('/config')).trials?.studio === true && Array.isArray((await api('/studio/recent')).files), 'turned on, it answers')
   // ---------- The files ----------

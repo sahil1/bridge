@@ -12,5 +12,8 @@ export function takeEarlyLink() {
   try { history.replaceState(history.state, '', `${location.pathname}${q.size ? `?${q}` : ''}${location.hash}`) } catch { /* kept as it was */ }
   return true
 }
-// The code from the link, once.
-export const earlyFromLink = () => { const c = held; held = null; return c }
+// The code from the link, until it's been used: Settings can open more than once as the page
+// settles on a first load (setup's steps, the tour), and each time it's there, until Join or Cancel
+// (or this build takes no codes) is done with it.
+export const earlyFromLink = () => held
+export const doneWithEarlyLink = () => { held = null }

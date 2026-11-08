@@ -8,7 +8,7 @@ Say what the problem is, how to reproduce it, and what someone could do with it.
 
 ## Supported versions
 
-Only the latest release gets security fixes. Bridge AI tells you when a newer version is out and updates itself when you say so (Settings › About & Updates). Running `install.sh` (or `install.ps1` on Windows) again also updates it.
+Only the latest release gets security fixes. Bridge AI tells you when a newer version is out and updates when you say so, or, in the desktop app on a Mac or Windows, by itself while you're away unless you turn that off (Settings › About & Updates). Running `install.sh` (or `install.ps1` on Windows) again also updates it.
 
 ## How Bridge AI protects you
 

@@ -1,6 +1,7 @@
 // The app as a whole, on any platform and in the browser named by BRIDGE_TEST_BROWSER (Chromium,
 // or WebKit, the engine of Safari and the iPhone app): it loads in a light colour theme, a dark one
-// and at phone width without page errors or sideways scrolling; the sidebar, ⌘K and Settings
+// and at phone width without page errors or sideways scrolling; in every theme it ships, light and
+// dark, its text is 4.5:1 or more against what's behind it and a filled control 3:1 (WCAG AA); the sidebar, ⌘K and Settings
 // open (its section names in Title Case); and a New terminal runs a command typed into it. Its
 // views fetched ahead while the computer can't be reached: once it's back, Settings opens with its
 // look, and a view opened meanwhile says it hit an error, then opens with Try again. And
@@ -60,6 +61,12 @@ try {
     // Names are in Title Case (Model Providers, About & Updates, Chief of Staff), short joining words aside.
     const titled = (x) => x.split(/\s+/).every((w, i) => (i > 0 && /^(a|an|and|as|at|by|for|in|of|on|or|the|to|&)$/.test(w)) || !/^\p{Ll}/u.test(w))
     ok(navs.length > 5 && navs.every(titled), `${t}: Settings' section names are in Title Case`, navs)
+    // README.md's table of Settings has a row for each of them (Mail's row says it's a Mac's), and
+    // none for a section that isn't there (Account, until Bold Bridge accounts are switched on).
+    const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8')
+    const table = readme.slice(readme.indexOf('| Section | What\'s there |'))
+    const rows = [...table.slice(0, table.search(/\n\n/)).matchAll(/^\| ([^|]+?) \|/gm)].map((m) => m[1]).filter((x) => !/^(Section|-+)$/.test(x))
+    ok(navs.every((x) => rows.includes(x)) && rows.every((x) => navs.includes(x) || x === 'Mail'), `${t}: README.md's Settings table has a row for each section, and only those`, { rows, navs })
     await p.locator('.st-nav-item', { hasText: 'Devices' }).click()
     const heads = await until(async () => { const h = (await p.locator('.st-body h4').allInnerTexts()).map((x) => x.trim()); return h.includes('Your Devices') && h }, 6000)
     const at = (re) => (heads || []).findIndex((h) => re.test(h))
@@ -101,6 +108,72 @@ try {
   await shot(ph.p, `${tag}phone`)
   ok(ph.errors.length === 0, 'phone: no page errors', ph.errors)
   await ph.ctx.close()
+
+  // ---------- Contrast, in every theme it ships, light and dark (WCAG AA) ----------
+  // Text 4.5:1 or more against what's behind it, and a filled control 3:1 against the pane it's on:
+  // quiet (muted) text on each pane, a link on each and on its own soft fill (a picked tab), a primary
+  // button, a badge, the need-you chip in the top bar, your message, error text, the status chips and
+  // tags, and the sidebar's quiet text on the theme's frame. Each is the app's own styles, put on the
+  // page as it draws them.
+  {
+    const themes = [...fs.readFileSync(path.join(ROOT, 'src', 'appearance.js'), 'utf8').matchAll(/\{ id: '([a-z]+)', name: '[^']+', chrome:/g)].map((m) => m[1])
+    const probes = [
+      ...['--pane', '--pane-2', '--pane-3'].map((v) => [`quiet text on ${v.slice(2)}`, '.work', `<div style="background:var(${v})"><span class="muted">Nov 8</span></div>`, '.muted', 4.5]),
+      ...['--pane', '--pane-2', '--pane-3'].map((v) => [`a link on ${v.slice(2)}`, '.work', `<div style="background:var(${v})"><span style="color:var(--accent)">Open</span></div>`, 'span', 4.5]),
+      ['a picked tab (a link on its soft fill)', '.work', '<div style="background:var(--pane-2)"><div class="st-nav-item on">General</div></div>', '.st-nav-item', 4.5],
+      ['a primary button', '.work', '<div style="background:var(--pane)"><button class="btn primary">Save</button></div>', 'button', 4.5, 3],
+      ['a badge', '.work', '<div style="background:var(--pane)"><span class="mc-needs">4</span></div>', 'span', 4.5, 3],
+      ['the need-you chip', '.top-right', '<button class="needs-chip">4 need you</button>', 'button', 4.5],
+      ['your message', '.work', '<div style="background:var(--pane)"><div class="msg user"><div class="msg-text">Ship it</div></div></div>', '.msg-text', 4.5],
+      ['error text', '.work', '<div style="background:var(--pane-2)"><p class="error-text">It failed</p></div>', 'p', 4.5],
+      ['a good chip', '.work', '<div style="background:var(--pane)"><span class="st-chip good">Up to date</span></div>', 'span', 4.5],
+      ['a warning chip', '.work', '<div style="background:var(--pane)"><span class="st-chip warn">Off</span></div>', 'span', 4.5],
+      ['a Done tag', '.work', '<div style="background:var(--pane)"><span class="state-tag st-done">Done</span></div>', 'span', 4.5],
+      ['the sidebar\'s quiet text', '.rail', '<span class="rail-label">Spaces</span>', 'span', 4.5],
+      ['the sidebar\'s rows', '.rail', '<button class="rail-nav-btn">Memory</button>', 'button', 4.5],
+    ]
+    const failed = []
+    for (const theme of themes) {
+      for (const mode of ['light', 'dark']) {
+        const { ctx, p } = await page(b, kit.url, { mode, theme })
+        await p.waitForSelector('.work', { timeout: 15000 }).catch(() => {})
+        const got = await p.evaluate((probes) => {
+          const parse = (c) => {
+            const n = String(c).match(/-?[\d.]+(e-?\d+)?/g)?.map(Number) || []
+            if (/^color\(/.test(c)) return [n[0] * 255, n[1] * 255, n[2] * 255, n.length > 3 ? n[3] : 1]
+            return [n[0], n[1], n[2], n.length > 3 ? n[3] : 1]
+          }
+          const over = (top, under) => [0, 1, 2].map((i) => top[i] * top[3] + under[i] * (1 - top[3])).concat(1)
+          const lum = (c) => { const [r, g, bl] = c.slice(0, 3).map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4 }); return 0.2126 * r + 0.7152 * g + 0.0722 * bl }
+          const ratio = (a, c) => { const x = lum(a), y = lum(c); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05) }
+          // What's behind an element: its own background and every one under it, see-through ones blended.
+          const behind = (e, self = true) => {
+            const layers = []
+            for (let x = self ? e : e.parentElement; x; x = x.parentElement) { const c = parse(getComputedStyle(x).backgroundColor); if (c[3] > 0) { layers.push(c); if (c[3] >= 1) break } }
+            let col = [255, 255, 255, 1]
+            for (const l of layers.reverse()) col = over(l, col)
+            return col
+          }
+          return probes.map(([what, where, html, sel, need, ui]) => {
+            const host = document.querySelector(where)
+            if (!host) return { what, missing: where }
+            const box = document.createElement('div')
+            box.innerHTML = html
+            host.append(box)
+            const e = box.querySelector(sel)
+            const bg = behind(e)
+            const text = Math.round(ratio(over(parse(getComputedStyle(e).color), bg), bg) * 100) / 100
+            const fill = ui ? Math.round(ratio(bg, behind(e, false)) * 100) / 100 : null
+            box.remove()
+            return { what, text, need, fill, ui }
+          })
+        }, probes)
+        for (const x of got) if (x.missing || x.text < x.need || (x.ui && x.fill < x.ui)) failed.push(`${theme} ${mode}: ${x.what} ${x.missing ? `(no ${x.missing})` : `${x.text}:1${x.ui ? `, its fill ${x.fill}:1` : ''}`}`)
+        await ctx.close()
+      }
+    }
+    ok(themes.length >= 12 && !failed.length, `every theme (${themes.length}), light and dark: text 4.5:1 or more and filled controls 3:1 against what they're on`, failed)
+  }
 
   // ---------- Out of reach as it fetches its views ahead ----------
   // (A phone opened as its link to the computer drops a moment, or the computer starting again.) The
