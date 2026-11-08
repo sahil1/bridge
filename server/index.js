@@ -365,6 +365,9 @@ app.get('/api/previews', wrap(async () => {
 // Any pane works here (agents and plain shells); the root is that pane's folder. A place you
 // added to Files (place:<id>) works the same way, its folder the root.
 const rootOf = async (pane) => {
+  // Studio's (a beta feature): its own folder and the folders its home found your files in, only
+  // while it's on, as its routes are.
+  if (studioRoot(pane) && !trialOn('studio')) throw Object.assign(new Error(STUDIO_OFF), { status: 404, code: 'trial' })
   // Studio's own folder: decks made from meetings, and new files with no folder of yours to go in.
   if (pane === 'studio') { const d = path.join(DATA, 'studio', 'files'); fs.mkdirSync(d, { recursive: true }); return d }
   if (String(pane).startsWith('place:')) {
@@ -392,6 +395,10 @@ const TRIALS = ['studio', 'home', 'dictation-cleanup', 'usage-everywhere', 'meet
 const trialOn = (id) => cfg.trials?.[id] === true
 const trialOff = (id, label) => (req, res, next) => (trialOn(id) ? next() : res.status(404).json({ error: `${label} is a beta feature. Turn it on in Settings › About & Updates › Beta Features.`, trial: id }))
 const FILES_OFF = 'Files is a beta feature. Turn it on in Settings › About & Updates › Beta Features.'
+const STUDIO_OFF = 'Studio is a beta feature. Turn it on in Settings › About & Updates › Beta Features.'
+const studioRoot = (pane) => pane === 'studio' || String(pane).startsWith('found:')
+// The file routes on Studio's roots (/api/agents/studio/..., found:<id>) answer as Studio's own do.
+app.use('/api/agents/:pane', (req, res, next) => (studioRoot(req.params.pane) ? trialOff('studio', 'Studio')(req, res, next) : next()))
 
 // ---------- Files (explorer.js) ----------
 // Your folders as Finder shows them: its sidebar, a folder's listing, Get Info, a folder's size and a
