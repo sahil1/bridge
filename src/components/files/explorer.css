@@ -52,7 +52,7 @@
 
 /* ---------- the folder ---------- */
 .fx-panes { display: flex; min-height: 0; min-width: 0; }
-.fx-body { flex: 1; min-width: 0; overflow: auto; outline: none; position: relative; }
+.fx-body { flex: 1; min-width: 0; overflow: auto; outline: none; position: relative; container-type: inline-size; }
 .fx-body.cols { overflow: hidden; display: flex; flex-direction: column; }
 .fx-foot { min-height: 26px; padding: 4px 12px; border-top: 1px solid var(--line); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fx-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -76,8 +76,10 @@ button.fx-th:hover { color: var(--ink); }
 .fx-row:nth-child(even) { background: color-mix(in srgb, var(--ink) 2.5%, transparent); }
 .fx-row.on, .fx-row.on:nth-child(even) { background: var(--accent); }
 .fx-row.on .fx-td, .fx-row.on svg, .fx-row.on .fx-mark { color: var(--on-accent); }
-/* Fewer columns as the folder narrows: kind goes, then the date. */
-@container (max-width: 640px) { .fx-list { --cols: minmax(140px, 1fr) 150px 80px; } .fx-list.with-where { --cols: minmax(120px, 1fr) 80px minmax(100px, .8fr); } .fx-c-kind { display: none; } .with-where .fx-c-mtime { display: none; } }
+/* Fewer columns as the folder narrows (its own width, so also beside Assist or Get Info): kind goes,
+   then the date. Each list's columns, with a row's margins, are a little wider than these. */
+@container (max-width: 660px) { .fx-list { --cols: minmax(140px, 1fr) 150px 80px; } .fx-c-kind { display: none; } }
+@container (max-width: 710px) { .fx-list.with-where { --cols: minmax(120px, 1fr) 80px minmax(100px, .8fr); } .with-where .fx-c-kind, .with-where .fx-c-mtime { display: none; } }
 @container (max-width: 440px) { .fx-list { --cols: minmax(0, 1fr) 76px; } .fx-list.with-where { --cols: minmax(0, 1fr) minmax(80px, .7fr); } .fx-c-mtime { display: none; } .with-where .fx-c-size { display: none; } }
 
 /* Icons: a tile each, a picture of pictures and PDFs. */

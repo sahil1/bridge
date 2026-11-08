@@ -400,6 +400,13 @@ try {
     ok(await a.waitFor({ timeout: 4000 }).then(() => true, () => false) && (await a.getAttribute('data-root')) === 'home' && (await a.getAttribute('data-rel')) === 'Projects' && /Projects/.test(await a.locator('.fa-where').innerText().catch(() => '')) && await a.locator('.fa-promise').isVisible(), 'Assist opens beside the folder, for the folder on screen, saying it only looks', { root: await a.getAttribute('data-root').catch(() => null), rel: await a.getAttribute('data-rel').catch(() => null) })
     await until(async () => (await a.locator('.fa-state').count()) === 0, 8000)
     await snap('assist')
+    // Beside it, the folder drops columns to fit, as it does on a narrow window, rather than scrolling sideways.
+    for (const width of [1280, 1440]) {
+      await p.setViewportSize({ width, height: 900 })
+      await sleep(300)
+      const fit = await p.locator('.fx-body').evaluate((e) => ({ sideways: e.scrollWidth - e.clientWidth, width: e.clientWidth }))
+      ok(fit.sideways <= 1, `${width} wide: beside it, the folder's columns fit, with nothing to scroll sideways to`, fit)
+    }
     await p.locator('.fx-bar button', { hasText: 'Assist' }).click()
   })
   await part('a folder macOS asks about', async () => {
