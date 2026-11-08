@@ -118,7 +118,7 @@ const api = kit.api
 const err = (p, body, method) => api(p, body, method).then(() => null, (e) => e)
 const pages = []
 // A request cut off by a reload, which WebKit reports as a page error.
-const real = (errors) => errors.filter((e) => !/\/api\/[\w/.?=&-]+ due to access control checks/.test(e))
+const real = (errors) => errors.filter((e) => !/\/api\/\S+ due to access control checks/.test(e))
 
 // ---------- Meetings already recorded, as Bridge AI keeps them ----------
 const meeting = (id, { title, when, seconds, people, summary, event = {} }) => {

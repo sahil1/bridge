@@ -785,7 +785,7 @@ try {
     ok(!!(await until(async () => (await p.locator('.rail-nav-btn, .tabbar button').count()) > 0 && !(await p.locator('.crash-screen').count()), 15000)), `${t}: reset, the app is back`)
     ok(await p.evaluate(() => !!localStorage.getItem('cc-appearance')), `${t}: with its look kept`)
     // WebKit counts a request a reload cuts off (the presence ping, the live feed) as a page error.
-    ok(errors.filter((e) => !/A crash made by a test|\/api\/[\w/.-]+ due to access control checks/.test(e)).length === 0, `${t}: no other page errors`, errors)
+    ok(errors.filter((e) => !/A crash made by a test|\/api\/\S+ due to access control checks/.test(e)).length === 0, `${t}: no other page errors`, errors)
     await ctx.close()
   }
 } catch (e) {

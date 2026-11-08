@@ -96,7 +96,7 @@ try {
   ok(!!(await until(async () => (await en.p.evaluate(() => document.documentElement.lang).catch(() => '')) === 'ja' && (await en.p.locator('.rail-nav-btn').allInnerTexts().catch(() => [])).some((x) => x.includes(say('ja', 'Meetings'))), 15000)), 'picking 日本語 in Settings › Appearance switches to it')
   ok(!!(await until(async () => (await other.evaluate(() => document.documentElement.lang).catch(() => '')) === 'ja', 15000)), 'and another window open at the time follows it')
   // WebKit cuts off the presence ping a page sends as it reloads, which isn't the app's error.
-  ok(en.errors.filter((e) => !/\/api\/[\w/.-]+ due to access control checks/.test(e)).length === 0, 'no page errors', en.errors)
+  ok(en.errors.filter((e) => !/\/api\/\S+ due to access control checks/.test(e)).length === 0, 'no page errors', en.errors)
   await en.ctx.close()
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)

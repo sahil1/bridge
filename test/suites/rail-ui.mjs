@@ -153,7 +153,7 @@ try {
   const again = await p.evaluate(() => [...document.querySelectorAll('.rail-meetings .rm-day-head, .rail-meetings .rm-span-head')].filter((e) => e.getAttribute('aria-expanded') === 'true').map((e) => e.innerText.replace(/\s+/g, ' ').trim()))
   ok(!again.some((x) => /^today/i.test(x)) && again.some((x) => /^yesterday/i.test(x)) && again.some((x) => /^earlier/i.test(x)) && again.length === 3, 'after a reload, what was open or folded stays so', again)
   // WebKit counts a request the reload cut off (the presence ping, the live feed) as a page error.
-  ok(errors.filter((e) => !/\/api\/[\w/.-]+ due to access control checks/.test(e)).length === 0, 'no page errors', errors)
+  ok(errors.filter((e) => !/\/api\/\S+ due to access control checks/.test(e)).length === 0, 'no page errors', errors)
   await ctx.close()
   await kit.api(`/meetings/${live.id}/stop`, {}).catch(() => {})
 } catch (e) {

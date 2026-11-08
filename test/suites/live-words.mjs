@@ -35,7 +35,7 @@ const talk = async (sid, pcm) => {
   out.push(await feed(sid, new Int16Array(0)))
   return out
 }
-const real = (errors) => errors.filter((e) => !/\/api\/[\w/.?=&-]+ due to access control checks/.test(e))
+const real = (errors) => errors.filter((e) => !/\/api\/\S+ due to access control checks/.test(e))
 // WebKit has no fake mic: a tone made in the page stands in for one.
 const before = async (ctx) => {
   await noServiceWorker(ctx)

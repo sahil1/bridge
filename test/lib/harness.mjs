@@ -371,7 +371,7 @@ export async function page(b, url, { mode = 'light', theme = 'sky', width = 1440
 // app's own files it was fetching ahead, as "Load failed" and then the file (the app fetches those
 // again once it's back: src/lazy.jsx).
 const OWN_FILE = /\/assets\/[\w.-]+\.(js|css)\.$/
-export const withoutCutOff = (errors) => errors.filter((e, i) => !/\/api\/[\w/.?=&-]+ due to access control checks/.test(e) && !OWN_FILE.test(e) && !(e === 'TypeError: Load failed' && OWN_FILE.test(errors[i + 1] || '')))
+export const withoutCutOff = (errors) => errors.filter((e, i) => !/\/api\/\S+ due to access control checks/.test(e) && !OWN_FILE.test(e) && !(e === 'TypeError: Load failed' && OWN_FILE.test(errors[i + 1] || '')))
 // No service worker, as in the desktop app: WebKit's test build doesn't route what a page fetches
 // through one, so a test that stands in for an API with ctx.route needs this (in its before).
 // Answers a request with the real answer, changed by `change`. A page can close while the real

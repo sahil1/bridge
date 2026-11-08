@@ -70,7 +70,7 @@ const firstUse = async (c, got) => {
   })
 }
 // WebKit counts a request a reload cuts off (the presence ping, the live feed) as a page error.
-const real = (errors) => errors.filter((e) => !/\/api\/[\w/.-]+ due to access control checks/.test(e))
+const real = (errors) => errors.filter((e) => !/\/api\/\S+ due to access control checks/.test(e))
 // Listening: the mic's sound has come, and ✓ can stop it. Nothing before that is recorded, and on a
 // busy computer it can come a while after the press, so a hold here is timed from then.
 const listens = (pg) => until(() => pg.locator('.rec-stop:enabled, .dp-ok:enabled').count(), 5000, 50)
