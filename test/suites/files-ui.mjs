@@ -147,7 +147,8 @@ try {
   await part('a folder', async () => {
     const home = await desk.api('/files/list?root=home&path=')
     const names = home.entries.map((e) => e.name)
-    ok(['Projects', 'Pictures', 'notes.txt', 'big.bin'].every((n) => names.includes(n)) && !names.includes('.secret-note') && !names.includes('.ssh') && !names.includes('Library'), 'the home folder, as Finder lists it: no hidden files (nor your Library on a Mac)', names)
+    // Finder hides your Library; elsewhere a folder named Library is any other folder.
+    ok(['Projects', 'Pictures', 'notes.txt', 'big.bin'].every((n) => names.includes(n)) && !names.includes('.secret-note') && !names.includes('.ssh') && names.includes('Library') === !IS_MAC, `the home folder, as ${IS_MAC ? 'Finder' : 'the file manager'} lists it: no hidden files (${IS_MAC ? 'nor your Library' : 'a folder named Library shown'})`, names)
     const txt = home.entries.find((e) => e.name === 'notes.txt')
     ok(txt && txt.size === 12 && txt.mtime > 0 && txt.dir === false && home.top && home.full, 'each with its size and when it changed', txt)
     if (IS_MAC) { const d = home.entries.find((e) => e.name === 'Desktop'); ok(d?.dir && d.size == null && d.mtime == null && d.guard === 'Desktop', 'Desktop listed without a look into it (no size or date until it\'s opened)', d) }
@@ -199,12 +200,12 @@ try {
     const o = await ask(desk.url, `/agents/${HOME}/fileop`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ op: 'open', path: 'Pictures/sky.png' }) })
     const r = await ask(desk.url, `/agents/${HOME}/fileop`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ op: 'reveal', path: 'notes.txt' }) })
     const got = opened()
-    ok(o.s === 200 && got.some((a) => a.at(-1) === fs.realpathSync(path.join(h, 'Pictures', 'sky.png'))), 'Open in its app opens it on this computer (a stand-in)', { o, got })
-    ok(r.s === 200 && got.some((a) => (IS_MAC ? a[0] === '-R' && a[1] === fs.realpathSync(path.join(h, 'notes.txt')) : a[0] === fs.realpathSync(h))), 'Show in Finder shows it there', { r, got })
+    ok(o.s === 200 && got.some((a) => a.at(-1) === fs.realpathSync.native(path.join(h, 'Pictures', 'sky.png'))), 'Open in its app opens it on this computer (a stand-in)', { o, got })
+    ok(r.s === 200 && got.some((a) => (IS_MAC ? a[0] === '-R' && a[1] === fs.realpathSync.native(path.join(h, 'notes.txt')) : a[0] === fs.realpathSync.native(h))), 'Show in Finder shows it there', { r, got })
   })
   await part('Get Info and a folder\'s size', async () => {
     const i = await desk.api('/files/info?root=home&path=notes.txt')
-    ok(i.name === 'notes.txt' && i.size === 12 && i.dir === false && i.modified > 0 && i.where === '~' && i.writable === true && i.full === fs.realpathSync(path.join(h, 'notes.txt')), 'Get Info: its size, where, when it changed, and that you can change it', i)
+    ok(i.name === 'notes.txt' && i.size === 12 && i.dir === false && i.modified > 0 && i.where === '~' && i.writable === true && i.full === fs.realpathSync.native(path.join(h, 'notes.txt')), 'Get Info: its size, where, when it changed, and that you can change it', i)
     const s = await desk.api('/files/size?root=home&path=Projects%2Fsite')
     ok(s.size === siteBytes && s.files === 4 && s.folders === 1 && !s.partial, `a folder's size, worked out when asked: ${siteBytes} bytes in 4 files`, s)
     const all = await desk.api('/files/size?root=home&path=')
@@ -388,7 +389,7 @@ try {
     const before = opened().length
     await p.locator('.fx-side-row[data-label="Pictures"]').first().click()
     await p.locator('.fx-row[data-name="sea.png"]').dblclick()
-    const got = await until(() => opened().slice(before).find((a) => a.at(-1) === fs.realpathSync(path.join(h, 'Pictures', 'sea.png'))), 8000)
+    const got = await until(() => opened().slice(before).find((a) => a.at(-1) === fs.realpathSync.native(path.join(h, 'Pictures', 'sea.png'))), 8000)
     ok(!!got && /Opened sea\.png in its app/.test(await p.locator('.fx-toast').innerText().catch(() => '')), 'a double-click on a picture opens it in its own app (a stand-in), and says so', opened())
   })
   await part('Assist', async () => {

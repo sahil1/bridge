@@ -47,6 +47,9 @@ const err = (message, status, code) => Object.assign(new Error(message), { statu
 const under = (p, dir) => p === dir || p.startsWith(dir.endsWith(path.sep) ? dir : dir + path.sep)
 const slash = (p) => p.split(path.sep).join('/')
 export const tilde = (p) => (under(p, HOME) ? `~${p.slice(HOME.length)}` : p)
+// Where a folder is, said from your home folder (~) when it's in it: home is the home folder as its
+// real path, which is how what's in it is named (links followed, Windows' own spelling of it).
+const whereIs = (p, home) => (home && under(p, home) ? `~${p.slice(home.length)}` : tilde(p))
 
 // ---------- What macOS asks about, and the cloud drives ----------
 // The folder macOS asks about that p is in: Desktop, Documents, Downloads, iCloud Drive, or a drive
@@ -327,7 +330,7 @@ export function list(root, dir, rel, { hidden = false } = {}) {
 // was made, changed and last opened, and whether you can change it.
 export function info(root, dir, rel) {
   return within(`info\n${dir}\n${rel}`, async () => {
-    const { real, rel: r } = await safePath(dir, rel).catch((e) => { throw said(e) })
+    const { real, realRoot, rel: r } = await safePath(dir, rel).catch((e) => { throw said(e) })
     const st = await fsp.stat(real).catch((e) => { throw said(e) })
     const lst = await fsp.lstat(path.resolve(dir, String(rel || '').replace(/^\/+/, ''))).catch(() => null)
     const writable = await fsp.access(real, 2).then(() => true, () => false) // W_OK
@@ -335,7 +338,7 @@ export function info(root, dir, rel) {
     const folder = st.isDirectory() && !isPackage(name)
     const cloud = cloudOf(real)
     return {
-      root, path: slash(r), name, full: real, where: tilde(path.dirname(real)), dir: folder, ...(st.isDirectory() && isPackage(name) ? { pkg: true } : {}),
+      root, path: slash(r), name, full: real, where: whereIs(path.dirname(real), root === 'home' ? realRoot : null), dir: folder, ...(st.isDirectory() && isPackage(name) ? { pkg: true } : {}),
       size: folder ? null : st.size, created: st.birthtimeMs || null, modified: st.mtimeMs, opened: st.atimeMs, writable,
       ...(lst?.isSymbolicLink() ? { link: true } : {}), ...(guardOf(real) ? { guard: guardOf(real) } : {}), ...(cloud ? { cloud: true } : {}),
       ...(cloud && !IS_WIN && !st.isDirectory() && st.size > 0 && st.blocks === 0 ? { offline: true } : {}),
