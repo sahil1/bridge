@@ -151,19 +151,29 @@ export function ThemeGallery({ packs, own, current, onPick, onClose }) {
 export const LOOK_NAMES = [tx('Paper'), tx('Ember'), tx('Forest'), tx('Cream'), tx('Graphite'), tx('Midnight')]
 
 // ---------- Presenting ----------
-// Full screen (where the browser can), a slide at a time: arrows, space and page keys move, B goes
-// black, Esc stops. The presenter's view: this slide, the next, its notes and the time.
-export function Present({ slides, notes, start = 0, presenter: p0 = false, onClose, onAt }) {
-  const [at, setAt] = useState(Math.max(0, Math.min(slides.length - 1, start)))
+// Full screen (where the browser can), a slide at a time: arrows, space and page keys move, a
+// number and Enter goes to that slide, B goes black and W white, Esc stops. Skipped slides are
+// passed over. The presenter's view: this slide, the next, its notes and a clock that can pause.
+// render(slide, w): a slide drawn at width w (Marp's by default); aspect: its width over height.
+const marpSlide = (svg, w) => <Slide svg={svg} w={w} />
+export function Present({ slides, notes, start = 0, presenter: p0 = false, onClose, onAt, render = marpSlide, aspect = W / H, skip = [] }) {
+  const n = slides.length
+  const shown = useCallback((i) => !skip[i], [skip])
+  const firstShown = (i, d = 1) => { for (let j = i; j >= 0 && j < n; j += d) if (shown(j)) return j; return Math.max(0, Math.min(n - 1, i)) }
+  const [at, setAt] = useState(() => firstShown(Math.max(0, Math.min(n - 1, start))))
   const [presenter, setPresenter] = useState(p0)
-  const [black, setBlack] = useState(false)
+  const [black, setBlack] = useState(null) // 'black' or 'white'
   const [bar, setBar] = useState(true)
   const [t0, setT0] = useState(() => Date.now())
   const [now, setNow] = useState(() => Date.now())
+  const [paused, setPaused] = useState(null) // when the clock was paused
+  const [typed, setTyped] = useState('') // a slide's number, typed to go to it
   const ref = useRef(null)
   const [stage, size] = useSize()
-  const n = slides.length
-  const go = useCallback((d) => { setBlack(false); setAt((x) => Math.max(0, Math.min(n - 1, x + d))) }, [n])
+  const go = useCallback((d) => {
+    setBlack(null)
+    setAt((x) => { for (let j = x + d; j >= 0 && j < n; j += d) if (shown(j)) return j; return x })
+  }, [n, shown])
   useEffect(() => { onAt?.(at) }, [at, onAt])
   useEffect(() => {
     const el = ref.current
@@ -177,16 +187,20 @@ export function Present({ slides, notes, start = 0, presenter: p0 = false, onClo
   useEffect(() => {
     const key = (e) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return
+      if (/^[0-9]$/.test(e.key)) { e.preventDefault(); setTyped((x) => `${x}${e.key}`.slice(-4)); return }
+      if (e.key === 'Enter' && typed) { e.preventDefault(); const i = Number(typed) - 1; if (i >= 0 && i < n) { setBlack(null); setAt(i) } setTyped(''); return }
+      setTyped('')
       if (['ArrowRight', 'ArrowDown', 'PageDown', ' ', 'Enter', 'n'].includes(e.key)) { e.preventDefault(); go(1) }
       else if (['ArrowLeft', 'ArrowUp', 'PageUp', 'Backspace', 'p'].includes(e.key)) { e.preventDefault(); go(-1) }
-      else if (e.key === 'Home') setAt(0)
-      else if (e.key === 'End') setAt(n - 1)
-      else if (e.key === 'b' || e.key === '.') setBlack((x) => !x)
+      else if (e.key === 'Home') setAt(firstShown(0))
+      else if (e.key === 'End') setAt(firstShown(n - 1, -1))
+      else if (e.key === 'b' || e.key === '.') setBlack((x) => (x === 'black' ? null : 'black'))
+      else if (e.key === 'w' || e.key === ',') setBlack((x) => (x === 'white' ? null : 'white'))
       else if (e.key === 'Escape') { e.preventDefault(); onClose() }
     }
     window.addEventListener('keydown', key)
     return () => window.removeEventListener('keydown', key)
-  }, [go, n, onClose])
+  }, [go, n, onClose, typed]) // eslint-disable-line react-hooks/exhaustive-deps
   // The controls go after a moment without the mouse moving.
   useEffect(() => {
     let id = setTimeout(() => setBar(false), 2600)
@@ -201,32 +215,81 @@ export function Present({ slides, notes, start = 0, presenter: p0 = false, onClo
   const swipeStart = (e) => { touch.current = e.touches[0]?.clientX ?? null }
   const swipeEnd = (e) => { const x = e.changedTouches[0]?.clientX; if (touch.current != null && x != null && Math.abs(x - touch.current) > 50) go(x < touch.current ? 1 : -1); touch.current = null }
   const mmss = (ms) => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` }
-  const fit = (w, h) => Math.max(40, Math.floor(Math.min(w, (h * W) / H)))
+  const fit = (w, h) => Math.max(40, Math.floor(Math.min(w, h * aspect)))
   const note = notes[at] || ''
+  let next = at + 1
+  while (next < n && !shown(next)) next++
+  const elapsed = (paused ?? now) - t0
+  const pause = () => { if (paused) { setT0((x) => x + (Date.now() - paused)); setPaused(null); setNow(Date.now()) } else setPaused(Date.now()) }
   return (
     <div className={`sd-present${presenter ? ' presenter' : ''}${bar ? ' bar' : ''}`} ref={ref} role="dialog" aria-label={t('Presenting')}>
       <div className="sd-present-stage" ref={stage} onClick={presenter ? undefined : tap} onTouchStart={swipeStart} onTouchEnd={swipeEnd}>
-        {black ? <div className="sd-present-black" /> : size.w > 0 && <Slide svg={slides[at]} w={fit(presenter ? size.w * 0.64 : size.w, size.h - (presenter ? 0 : 0))} />}
+        {black ? <div className={`sd-present-black${black === 'white' ? ' white' : ''}`} /> : size.w > 0 && render(slides[at], fit(presenter ? size.w * 0.64 : size.w, size.h))}
         {presenter && (
           <aside className="sd-presenter">
-            <div className="sd-presenter-time"><b>{mmss(now - t0)}</b><button type="button" className="ghost-btn" onClick={() => { setT0(Date.now()); setNow(Date.now()) }}>{t('Restart the clock')}</button><span className="muted">{new Date(now).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span></div>
-            <small className="muted">{at + 1 < n ? t('Next') : t('The last slide')}</small>
-            {at + 1 < n && <Slide svg={slides[at + 1]} w={Math.min(320, Math.floor(size.w * 0.3))} />}
+            <div className="sd-presenter-time">
+              <b>{mmss(elapsed)}</b>
+              <button type="button" className="ghost-btn" onClick={pause}>{paused ? t('Carry on') : t('Pause')}</button>
+              <button type="button" className="ghost-btn" onClick={() => { setT0(Date.now()); setNow(Date.now()); setPaused(null) }}>{t('Restart the clock')}</button>
+              <span className="muted">{new Date(now).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
+            </div>
+            <small className="muted">{next < n ? t('Next') : t('The last slide')}</small>
+            {next < n && render(slides[next], Math.min(320, Math.floor(size.w * 0.3)))}
             <small className="muted">{t('Speaker notes')}</small>
             <p className="sd-presenter-notes">{note || <span className="muted">{t('No notes on this slide.')}</span>}</p>
           </aside>
         )}
       </div>
+      {typed && <div className="sd-present-typed" role="status">{t('Go to slide {n}', { n: typed })}</div>}
       <div className="sd-present-bar">
-        <button type="button" className="win-btn" onClick={() => go(-1)} aria-label={t('Back')} title={t('Back (←)')} disabled={at === 0}><Icon name="chevron" size={16} className="flip" /></button>
+        <button type="button" className="win-btn" onClick={() => go(-1)} aria-label={t('Back')} title={t('Back (←)')} disabled={at === firstShown(0)}><Icon name="chevron" size={16} className="flip" /></button>
         <span className="sd-present-n">{t('{n} of {count}', { n: at + 1, count: n })}</span>
-        <button type="button" className="win-btn" onClick={() => go(1)} aria-label={t('Next')} title={t('Next (→)')} disabled={at >= n - 1}><Icon name="chevron" size={16} /></button>
+        <button type="button" className="win-btn" onClick={() => go(1)} aria-label={t('Next')} title={t('Next (→)')} disabled={next >= n}><Icon name="chevron" size={16} /></button>
         <span className="sd-present-sep" />
         <button type="button" className={`win-btn${presenter ? ' on' : ''}`} onClick={() => setPresenter((x) => !x)} aria-pressed={presenter} aria-label={t('Presenter view')} title={t('Presenter view: the next slide, notes and a clock')}><Icon name="panel-right" size={15} /></button>
-        <button type="button" className={`win-btn${black ? ' on' : ''}`} onClick={() => setBlack((x) => !x)} aria-pressed={black} aria-label={t('Black screen')} title={t('Black screen (B)')}><Icon name="moon" size={15} /></button>
+        <button type="button" className={`win-btn${black === 'black' ? ' on' : ''}`} onClick={() => setBlack((x) => (x === 'black' ? null : 'black'))} aria-pressed={black === 'black'} aria-label={t('Black screen')} title={t('Black screen (B)')}><Icon name="moon" size={15} /></button>
         <button type="button" className="win-btn" onClick={onClose} aria-label={t('Stop presenting')} title={t('Stop presenting (Esc)')}><Icon name="x" size={16} /></button>
       </div>
       {!presenter && note && bar && <p className="sd-present-notes">{note}</p>}
+    </div>
+  )
+}
+
+// ---------- Find and replace ----------
+// Under a deck's toolbar: what to find, how many there are and which this is, the next and the one
+// before (Enter, ⇧Enter), and with replace on, what to put in its place, one or all.
+// find: { count, at } from the editor; on: { find(q, matchCase), go(d), replace(to), replaceAll(to) }.
+export function DeckFind({ count, at, replace: withReplace, on, onClose }) {
+  const [q, setQ] = useState('')
+  const [to, setTo] = useState('')
+  const [matchCase, setMatchCase] = useState(false)
+  const box = useRef(null)
+  useEffect(() => { box.current?.focus(); box.current?.select() }, [withReplace])
+  useEffect(() => { on.find(q, matchCase) }, [q, matchCase]) // eslint-disable-line react-hooks/exhaustive-deps
+  const keys = (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose() }
+    else if (e.key === 'Enter') { e.preventDefault(); on.go(e.shiftKey ? -1 : 1) }
+  }
+  return (
+    <div className="sd-findbar" role="search" aria-label={t('Find and replace')}>
+      <div className="sd-find-row">
+        <Icon name="search" size={14} />
+        <input ref={box} value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={keys} placeholder={t('Find in the deck')} aria-label={t('Find')} />
+        <span className="muted small sd-find-count" role="status">{q ? (count ? t('{n} of {count}', { n: at + 1, count }) : t('No matches')) : ''}</span>
+        <button type="button" className="win-btn" onClick={() => on.go(-1)} disabled={!count} aria-label={t('Previous match')} title={t('Previous match (⇧Enter)')}><Icon name="up" size={14} /></button>
+        <button type="button" className="win-btn" onClick={() => on.go(1)} disabled={!count} aria-label={t('Next match')} title={t('Next match (Enter)')}><Icon name="down" size={14} /></button>
+        <label className="sd-find-case small"><input type="checkbox" checked={matchCase} onChange={(e) => setMatchCase(e.target.checked)} /> {t('Match case')}</label>
+        <span className="sd-grow" />
+        <button type="button" className="win-btn" onClick={onClose} aria-label={t('Close')} title={t('Close (Esc)')}><Icon name="x" size={13} /></button>
+      </div>
+      {withReplace && (
+        <div className="sd-find-row">
+          <Icon name="edit" size={14} />
+          <input value={to} onChange={(e) => setTo(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); onClose() } else if (e.key === 'Enter') { e.preventDefault(); on.replace(to) } }} placeholder={t('Replace with')} aria-label={t('Replace with')} />
+          <button type="button" className="btn small" onClick={() => on.replace(to)} disabled={!count}>{t('Replace')}</button>
+          <button type="button" className="btn small" onClick={() => on.replaceAll(to)} disabled={!count}>{t('Replace all')}</button>
+        </div>
+      )}
     </div>
   )
 }

@@ -38,7 +38,8 @@ import { takeEarlyLink } from './earlyLink.js'
 import CloudHome from './components/CloudHome.jsx'
 import SessionSwitcher from './components/Sessions.jsx'
 import { MachineMenu, AskBanner, SwitchedHere, useMachines, goMachine, isRemote, remoteOf, openRemote } from './components/Machines.jsx'
-import { useNeedsYou, NeedsYouChip, NeedsYouPanel, waitingOn } from './components/NeedsYou.jsx'
+import { useNeedsYou, NeedsYouChip, NeedsYouPanel, waitingOn, quietPanes } from './components/NeedsYou.jsx'
+import { isQuiet } from '../shared/focus.js'
 import AgentMap from './components/AgentMap.jsx'
 import NeedsHome, { Everything, useHome, needCount } from './components/NeedsHome.jsx'
 import More from './components/More.jsx'
@@ -166,6 +167,8 @@ const STUDIO = 'view:studio:'
 const studioId = (f) => `${STUDIO}${encodeURIComponent(f.root)}:${encodeURIComponent(f.path)}`
 const studioOf = (id) => { const [r, p] = id.slice(STUDIO.length).split(':'); return { root: decodeURIComponent(r || ''), path: decodeURIComponent(p || '') } }
 const isView = (id) => typeof id === 'string' && id.startsWith('view:')
+// Typing in a Studio document, where ⌘K is a link and ⌘, subscript, as in Google Docs and Word.
+const writingDoc = (e) => !!e.target?.closest?.('.sd-doc .ProseMirror')
 
 // The recording of a meeting lives above everything else, so it goes on while you move around.
 export default function Root() {
@@ -188,8 +191,6 @@ function App() {
   studioOnRef.current = studioOn
   // So is Home: with it on, it's where the app opens, and what needs you opens there.
   const homeOn = conf?.trials?.home === true
-  // And Memory as a page of its own (memory/Memory.jsx); off, meeting memory is Meetings' dialog.
-  const memoryOn = conf?.trials?.memory === true
   const routinesOn = conf?.trials?.routines === true
   // Onboarding stays up from the first sign that setup is needed until you close it, so its last
   // screen (how Bridge AI works) isn't swept away the moment setup is saved.
@@ -211,9 +212,10 @@ function App() {
   const [mobileAgent, setMobileAgent] = useState(null)
   const [mobileMeeting, setMobileMeeting] = useState(null) // the meeting open in the phone's Meetings tab
   // What the phone's More tab shows: its list (null), Terminals ('terminals'), or a view (Whiteboards,
-  // a whiteboard, the agent map, Dictations). Terminals had a tab of its own until 3.8.3.
-  const [moreView, setMoreView] = useState(() => (mtab === 'herdr' ? 'terminals' : null))
-  useEffect(() => { if (mtab === 'herdr') setMtab('more') }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  // a whiteboard, the agent map, Dictations, Memory). Kept, as a computer keeps its tabs, so a reload
+  // comes back to it. Terminals had a tab of its own until 3.8.3.
+  const [moreView, setMoreView] = usePersisted('cc-more-view', null)
+  useEffect(() => { if (mtab === 'herdr') { setMtab('more'); setMoreView('terminals') } }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const [homeView, setHomeView] = useState('home') // the phone's Home tab: Home, or Everything
   // With Home on, the phone's Today is in More (Home has what's coming up); off, Home's tab goes.
   useEffect(() => {
@@ -270,17 +272,20 @@ function App() {
   // The chief of staff: Main, of its threads (each thread is a chief of its own).
   const mate = agents.find((a) => a.chief && a.thread?.main) || agents.find((a) => a.chief)
   const mateShown = byId[mateId]?.chief ? byId[mateId] : mate
-  const needsYou = agents.filter((a) => a.status === 'blocked')
   // The needs-you inbox: what waits on you on every device (NeedsYou.jsx). The chip counts this
-  // window's agents waiting from its live feed, and the other devices' from the inbox. inbox: null
-  // when closed, else { focus }.
+  // window's agents waiting from its live feed, and the other devices' from the inbox; neither
+  // counts one whose wait has gone quiet (shared/focus.js), which the inbox and Home fold away.
+  // inbox: null when closed, else { focus }.
   const [inbox, setInbox] = useState(null)
   const ny = useNeedsYou({ fleet, open: !!inbox, on: !cloudOnly })
+  const hushed = quietPanes(ny.data, machineId || null)
+  const needsYou = agents.filter((a) => a.status === 'blocked' && !hushed.has(a.paneId))
   const waiting = waitingOn(ny.data, { here: needsYou.length, shown: machineId || null })
   // The computer this window shows: one computer's work at a time. The chip, the sidebar and the
   // phone's tab count what waits on you here (with Home on, its count: Chief of Staff's tasks too);
-  // the devices menu's chip counts the rest, so the two add up to the window's title.
-  const toReview = (ny.data?.items || []).filter((i) => (i.type === 'review' || i.type === 'failed') && i.online && (i.machine || null) === (machineId || null)).length
+  // the devices menu's chip counts the rest, so the two add up to the window's title (and the Dock's
+  // badge, which is the title's).
+  const toReview = (ny.data?.items || []).filter((i) => (i.type === 'review' || i.type === 'failed') && i.online && (i.machine || null) === (machineId || null) && !isQuiet(i)).length
   const homeCount = useHome(homeOn && !cloudOnly, 12000)
   const homeNeeds = homeOn && homeCount.data ? needCount(homeCount.data) : null
   const needN = homeNeeds ? homeNeeds.here : needsYou.length
@@ -376,9 +381,12 @@ function App() {
       return
     }
     setW((w) => {
+      // In the tab it replaces: where that one was, or, when that one was behind another (a meeting
+      // opened from Memory while Meetings waits in a tab), to the front as any tab opened is.
       if (replace && w.tabs.includes(replace) && !w.tabs.includes(paneId)) {
         const tabs = w.tabs.map((t) => (t === replace ? paneId : t))
-        return { ...w, tabs, active: w.active === replace ? paneId : w.active, side: w.side === replace ? paneId : w.side }
+        if (w.active === replace || w.side === replace) return { ...w, tabs, active: w.active === replace ? paneId : w.active, side: w.side === replace ? paneId : w.side }
+        w = { ...w, tabs }
       }
       const tabs = w.tabs.includes(paneId) ? w.tabs : [...w.tabs, paneId]
       if (toSide || (w.split && w.group === 'side')) return { ...w, tabs, side: paneId, split: true, group: 'side' }
@@ -648,8 +656,11 @@ function App() {
   // The computer updated while this page was open: the new one loads by itself when nothing's under
   // way, or a line under the top bar says so with Reload (src/fresh.js).
   const fresh = useFresh({ hold: !!meetings?.rec })
-  useHotkey(useCallback((e) => (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k', []), () => setPalette((p) => !p))
-  useHotkey(useCallback((e) => (e.metaKey || e.ctrlKey) && e.key === ',', []), () => setSettings((v) => (v ? null : 'all')))
+  // ⌘K, but where something on the page has it for its own (a sheet's Insert link, as in Google
+  // Sheets and Excel, or a document's link while you write in it): there the top bar's search opens
+  // this. ⌘, likewise, but in a document, where it's subscript.
+  useHotkey(useCallback((e) => (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && !writingDoc(e) && !e.target?.closest?.('[data-own-keys~="mod+k"]'), []), () => setPalette((p) => !p))
+  useHotkey(useCallback((e) => (e.metaKey || e.ctrlKey) && e.key === ',' && !writingDoc(e), []), () => setSettings((v) => (v ? null : 'all')))
   useHotkey(useCallback((e) => (e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'f', []), () => setHistory((v) => !v))
   // ⌥1 and ⌥2 alone: with ⌘ (or Ctrl) they're a document's Heading 1 and 2, in Studio.
   useHotkey(useCallback((e) => e.altKey && !e.metaKey && !e.ctrlKey && (e.code === 'Digit1' || e.code === 'Digit2'), []), (e) => setView(e.code === 'Digit1' ? 'command' : 'herdr'))
@@ -699,7 +710,7 @@ function App() {
     insightsOn && { id: 'a:insights', label: t('Meeting Insights'), icon: 'trend', keywords: 'meetings stats hours talk time share words week kind', run: () => meetingsTab('insights') },
     insightsOn && { id: 'a:people', label: t('People You Meet'), icon: 'users', keywords: 'people attendees contacts who met meetings together', run: () => meetingsTab('people') },
     { id: 'a:dictations', label: t('Dictations'), icon: 'wave', keywords: 'dictation history voice said typed pasted wispr macwhisper', run: () => openAgent('view:dictations') },
-    memoryOn && { id: 'a:memory', label: t('Memory'), icon: 'book', keywords: 'memory people organizations organisations companies projects products terms names words misheard about me persona context', run: () => openAgent('view:memory') },
+    { id: 'a:memory', label: t('Memory'), icon: 'book', keywords: 'memory people organizations organisations companies projects products terms names words misheard about me about you persona context meeting memory', run: () => openAgent('view:memory') },
     StudioHome && studioOn && { id: 'a:studio', label: t('Studio'), icon: 'layers', keywords: 'studio document word docx sheet excel xlsx spreadsheet deck slides powerpoint pptx pdf page html artifact markdown design pack', run: () => openAgent('view:studio') },
     WhiteboardsHome && { id: 'a:boards', label: t('Whiteboards'), icon: 'shapes', keywords: 'whiteboard board excalidraw draw sketch diagram flowchart architecture sequence org chart mermaid drawio canvas', run: () => openAgent('view:whiteboards') },
     { id: 'a:map', label: t('Agent Map'), icon: 'grid', keywords: 'what is running where devices computers machines all agents overview cloud subagents', run: openMap },
@@ -785,7 +796,7 @@ function App() {
       <div className="top-left">
       <img className="mark" src={`${import.meta.env.BASE_URL}mark.svg`} alt="Bridge AI" width="24" height="24" />
       {railBtn}
-      {!cloudOnly && <Quiet name="Devices menu"><MachineMenu phone={!wide} elsewhere={homeNeeds ? needElse : null} /></Quiet>}
+      {!cloudOnly && <Quiet name="Devices menu"><MachineMenu phone={!wide} elsewhere={homeNeeds || ny.data ? needElse : null} /></Quiet>}
       {wide && liveView && (
         <nav className="view-tabs" role="tablist" aria-label={t('View')}>
           <button role="tab" aria-selected={view === 'command'} className={view === 'command' ? 'on' : ''} onClick={() => setView('command')} title="Alt+1" aria-label="Bridge">
@@ -865,7 +876,7 @@ function App() {
           controls={wide ? { maximized: !!L.max, onMaximize: () => set({ max: L.max ? null : 'main' }) } : null} /></section>
         : id === 'view:meetings' ? <section className="pane view-pane"><MeetingsHome onOpen={(mid) => openAgent(`view:meeting:${mid}`, wide ? { replace: 'view:meetings' } : {})} /></section>
           : id === 'view:dictations' ? <section className="pane view-pane"><Dictations /></section>
-          : id === 'view:memory' ? <section className="pane view-pane">{memoryOn ? <Memory /> : <TrialOff name={t('Memory')} />}</section>
+          : id === 'view:memory' ? <section className="pane view-pane"><Memory /></section>
             : id === 'view:whiteboards' && WhiteboardsHome ? <section className="pane view-pane"><WhiteboardsHome onOpen={(bid) => openAgent(`${BOARD}${bid}`, wide ? { replace: 'view:whiteboards' } : {})} /></section>
               : id.startsWith(BOARD) && WhiteboardPage ? <section className="pane view-pane"><WhiteboardPage id={id.slice(BOARD.length)} onBack={() => openAgent('view:whiteboards', { replace: id })} /></section>
                 : id.startsWith('view:studio') && !studioOn ? <section className="pane view-pane"><TrialOff name={t('Studio')} /></section>
@@ -904,7 +915,7 @@ function App() {
       { id: 'terminals', icon: 'terminal', label: t('Terminals'), hint: t("Every agent's terminal, live"), run: () => setMoreView('terminals') },
       { id: 'map', icon: 'grid', label: t('Agent Map'), hint: t("What's running on each of your computers"), run: () => setMoreView('view:map') },
       { id: 'dictations', icon: 'wave', label: t('Dictations'), hint: t("Everything you've dictated"), run: () => setMoreView('view:dictations') },
-      memoryOn && { id: 'memory', icon: 'book', label: t('Memory'), hint: t('People, organizations and words from your meetings and dictations'), run: () => setMoreView('view:memory') },
+      { id: 'memory', icon: 'book', label: t('Memory'), hint: t('People, organizations and words from your meetings and dictations'), run: () => setMoreView('view:memory') },
       { id: 'needs', icon: 'bell', label: t('Needs you'), hint: t("What's waiting on you, on every device"), count: waiting, run: () => setInbox({}) },
       { id: 'history', icon: 'clock', label: t('History'), hint: t('Every conversation, and closed agents'), run: () => setHistory(true) },
       { id: 'settings', icon: 'settings', label: t('Settings'), hint: t('Devices, voice, appearance and more'), run: () => setSettings('all') },

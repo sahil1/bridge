@@ -120,10 +120,13 @@ export function SwitchedHere() {
 }
 
 // A device's agents in a few words. Its counts are null until its summary is in (a device that has
-// just connected, or one on an older version), which reads as nothing to say.
+// just connected, or one on an older version), which reads as nothing to say. An agent whose wait
+// has gone quiet (quiet: shared/focus.js, counted by that device) doesn't need you now: said apart.
+const needing = (c) => Math.max(0, (c?.blocked || 0) - (c?.quiet || 0))
 const counts = (c) => {
-  const { blocked, working } = c || {}
-  return [blocked && (blocked === 1 ? t('{n} needs you', { n: blocked }) : t('{n} need you', { n: blocked })), working && t('{n} working', { n: working })].filter(Boolean).join(' · ')
+  const { working, quiet } = c || {}
+  const blocked = needing(c)
+  return [blocked && (blocked === 1 ? t('{n} needs you', { n: blocked }) : t('{n} need you', { n: blocked })), working && t('{n} working', { n: working }), quiet && t('{n} quiet', { n: quiet })].filter(Boolean).join(' · ')
 }
 
 // ---------- the top bar ----------
@@ -151,7 +154,7 @@ export function MachineMenu({ phone = false, elsewhere = null }) {
   const linked = (data?.machines || []).filter((m) => m.state === 'linked')
   if (!data || (!linked.length && !machineId && !app)) return null
   const cur = machineId ? linked.find((m) => m.id === machineId) : null
-  const needs = elsewhere ?? linked.filter((m) => m.id !== machineId).reduce((n, m) => n + (m.counts?.blocked || 0), 0)
+  const needs = elsewhere ?? linked.filter((m) => m.id !== machineId).reduce((n, m) => n + needing(m.counts), 0)
   // The computers this phone is paired with, besides the one it's connected to.
   const paired = app ? (relayComputers.list?.() || []).filter((c) => !c.current && bare(c.relay) !== bare(data.here.relay)) : []
   const pairedTo = (m) => paired.find((c) => bare(c.relay) === bare(m.relay))
@@ -222,7 +225,7 @@ export function RailMachines() {
     ...(data?.machines || []).filter((m) => m.state === 'linked' && m.id !== machineId),
   ]
   if (!rows.length) return null
-  const needs = rows.reduce((n, m) => n + (m.counts?.blocked || 0), 0)
+  const needs = rows.reduce((n, m) => n + needing(m.counts), 0)
   return (
     <div className="rail-machines">
       <div className="rail-nav-row">

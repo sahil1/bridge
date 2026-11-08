@@ -997,7 +997,9 @@ app.whenReady().then(() => {
   powerMonitor.on('shutdown', shuttingDown) // macOS, Linux
   // Voice notes need the mic; allow it for the app's own page only, asked by the page itself and not
   // by a frame in it (a project's app in Preview, another device's agent). Copying works in those too.
-  const ASK = new Set(['media', 'display-capture', 'notifications', 'geolocation'])
+  // Reading the clipboard too, for Paste and Paste Special in Studio's menus (⌘V works without it):
+  // what's read stays in the page, on this computer.
+  const ASK = new Set(['media', 'display-capture', 'notifications', 'geolocation', 'clipboard-read'])
   session.defaultSession.setPermissionRequestHandler((wc, perm, cb, d = {}) => {
     const u = d.requestingUrl || wc.getURL()
     cb(perm === 'clipboard-sanitized-write' ? isLocal(u) : ASK.has(perm) && d.isMainFrame !== false && ownPage(u))

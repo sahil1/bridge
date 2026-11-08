@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import Icon from '../Icon.jsx'
 import { Menu } from '../FileExtras.jsx'
 import { api, refetch, onThisComputer } from '../../api.js'
-import { Dialog, FixWord, MemoryPanel, TranscribeAgain } from './tools.jsx'
+import { Dialog, FixWord, TranscribeAgain, openMemory } from './tools.jsx'
 import { t } from '../../i18n/index.js'
 
 // What can be done to a meeting from a list (right-click a meeting in the sidebar or on the
@@ -118,7 +118,7 @@ export function useMeetingMenu({ list, onOpen, onGone }) {
     'sep',
     { icon: 'edit', label: t('Fix a word everywhere'), run: () => setDialog({ kind: 'fix', items: [m] }) },
     m.status === 'done' && { icon: 'refresh', label: t('Transcribe again…'), run: () => setDialog({ kind: 'again', items: [m] }) },
-    { icon: 'book', label: t('Meeting memory'), run: () => setDialog({ kind: 'memory', items: [m] }) },
+    { icon: 'book', label: t('Open Memory'), run: openMemory },
     'sep',
     { icon: 'folder', label: m.folder ? t('Move to another folder…') : t('Move to a folder…'), run: () => setDialog({ kind: 'folder', items: [m] }) },
     !live(m) && (m.archived
@@ -134,7 +134,6 @@ export function useMeetingMenu({ list, onOpen, onGone }) {
       {menu && <Menu x={menu.x} y={menu.y} items={items(menu.m)} onClose={close} />}
       {dialog?.kind === 'fix' && <FixWord id={dialog.items[0].id} onClose={shut} onDone={(text) => { say(text); refetch('/meetings') }} />}
       {dialog?.kind === 'again' && <TranscribeAgain ids={dialog.items.map((x) => x.id)} onClose={shut} onDone={say} />}
-      {dialog?.kind === 'memory' && <MemoryPanel onClose={shut} />}
       {dialog?.kind === 'folder' && <FolderPick items={dialog.items} folders={foldersOf(list)} onClose={shut} onDone={say} />}
       {dialog?.kind === 'delete' && <ConfirmDelete items={dialog.items} onClose={shut} onDone={(action, r) => { if (action === 'delete') { onGone?.(r.done); say(deleted(r.done.length)) } else say(archivedN(r.done.length)) }} />}
     </>

@@ -52,22 +52,32 @@ async function locate(root, rel) {
 const indexOf = (real) => path.join(VERSIONS, keyOf(real), 'index.json')
 const versionsOf = async (real) => (await readJSON(indexOf(real), { path: real, versions: [] })).versions
 // The file as it is now, kept as a version unless the newest one is the same. by: you, agent (with
-// its name), outside (changed by something else), restored.
+// its name), outside (changed by something else), restored. auto: saved as you typed (a document
+// saves itself): one version for each few minutes of typing, the newest of them, so typing for
+// an hour keeps a handful, not hundreds; a save of yours (Save, ⌘S) keeps the one it's at.
+const MERGE_MS = 10 * 60_000
 const snapping = new Map() // real -> promise: one at a time per file
-function snapshot(real, by, { name = null, buf = null } = {}) {
+function snapshot(real, by, { name = null, buf = null, auto = false } = {}) {
   const run = (snapping.get(real) || Promise.resolve()).then(async () => {
     const data = buf || await fsp.readFile(real)
     const h = hash(data)
     const idx = await readJSON(indexOf(real), { path: real, versions: [] })
-    if (idx.versions[0]?.hash === h) return idx.versions[0]
+    const top = idx.versions[0]
+    if (top?.hash === h) {
+      if (by === 'you' && buf && !auto && top.auto) { delete top.auto; delete top.since; writeFileAtomic(indexOf(real), JSON.stringify(idx, null, 1)) }
+      return top
+    }
     const dir = path.dirname(indexOf(real))
     await fsp.mkdir(dir, { recursive: true })
     const id = `${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`
     const file = `${id}${path.extname(real).toLowerCase()}`
     await fsp.writeFile(path.join(dir, file), data)
-    const v = { id, at: new Date().toISOString(), by, ...(name ? { name: String(name).slice(0, 80) } : {}), size: data.length, hash: h, file }
+    const at = new Date().toISOString()
+    const merge = auto && by === 'you' && top?.by === 'you' && top.auto && Date.now() - Date.parse(top.since || top.at) < MERGE_MS
+    const v = { id, at, by, ...(name ? { name: String(name).slice(0, 80) } : {}), size: data.length, hash: h, file, ...(auto ? { auto: true, since: merge ? top.since || top.at : at } : {}) }
     idx.path = real
-    idx.versions = [v, ...idx.versions]
+    if (merge) await fsp.rm(path.join(dir, top.file), { force: true }).catch(() => {})
+    idx.versions = merge ? [v, ...idx.versions.slice(1)] : [v, ...idx.versions]
     for (const old of idx.versions.splice(KEEP)) await fsp.rm(path.join(dir, old.file), { force: true }).catch(() => {})
     writeFileAtomic(indexOf(real), JSON.stringify(idx, null, 1))
     prune().catch(() => {})
@@ -202,8 +212,8 @@ function inTurn(real, fn) {
 }
 
 // Saved from Studio: only if nobody changed it since you opened it (mtime: what you loaded),
-// unless force. What was there is kept first, if it isn't already.
-export async function save(root, rel, buf, { mtime, force = false } = {}) {
+// unless force. What was there is kept first, if it isn't already. auto: saved as you typed.
+export async function save(root, rel, buf, { mtime, force = false, auto = false } = {}) {
   if (!Buffer.isBuffer(buf)) throw new Error('Expected the file')
   if (buf.length > MAX_BYTES) throw new Error('Too big to save (80 MB at most)')
   const { real } = await locate(root, rel)
@@ -215,7 +225,7 @@ export async function save(root, rel, buf, { mtime, force = false } = {}) {
     const w = whoChanged(real)
     await snapshot(real, w.by, { name: w.name })
     await fsp.writeFile(real, buf)
-    await snapshot(real, 'you', { buf })
+    await snapshot(real, 'you', { buf, auto })
     const after = await fsp.stat(real)
     return { mtime: after.mtimeMs, size: after.size, versions: shown(await versionsOf(real)) }
   })

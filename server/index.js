@@ -103,6 +103,8 @@ import * as asks from './asks.js'
 import * as needsYou from './needsyou.js'
 import * as agentMap from './agentmap.js'
 import * as home from './home.js'
+import * as engagedJs from './engaged.js'
+import { blocking, isQuiet } from '../shared/focus.js'
 
 ensureDir(DATA)
 // Meetings, transcripts, settings and keys: for you only, not other people with an account on this
@@ -184,6 +186,18 @@ cloud.routes(app, { pushFleet: () => pushFleet() })
 
 // When each agent started and since when it's in its state, for the agent map (agentmap.js).
 const runs = agentMap.make({ rt, cfg })
+// When you were last on each agent, project and space (engaged.js): what needs you now comes first.
+// touched(pane): you on that agent, from a route that has only its pane (typing in its terminal
+// sends every key, so it's looked up at most every half minute); with the agent, at once.
+const engaged = engagedJs.make({ describe: (cwd) => worktrees.describe(cwd), chats: path.join(DATA, 'chats') })
+const touchedAt = new Map()
+function touched(paneId, a = null) {
+  const now = Date.now()
+  if (a) { touchedAt.set(paneId, now); return engaged.agent(a, now) }
+  if (!paneId || now - (touchedAt.get(paneId) || 0) < 30000) return
+  touchedAt.set(paneId, now)
+  findAgent(String(paneId)).then((x) => engaged.agent(x, now), () => {})
+}
 // Tabs you renamed: their agents go by that name everywhere (the header, the tabs, notifications),
 // over the title an agent gives its own session ("✳ Fix the login page").
 const NAMED_TABS = path.join(DATA, 'named-tabs.json')
@@ -283,6 +297,9 @@ app.post('/api/panes/:pane/input', wrap(async (req) => {
     answered.set(req.params.pane, { setup: req.body.setup, at: Date.now() })
   }
   await rt.input(req.params.pane, steps)
+  // You typing in it, or answering its question's card (a first-run screen the page answers by
+  // itself isn't you).
+  if (!req.body?.setup) touched(req.params.pane)
   return { ok: true }
 }))
 
@@ -299,9 +316,12 @@ app.get('/api/agents/:pane/transcript/earlier', wrap(async (req) => earlier(awai
 app.get('/api/agents/:pane/transcript/diffs', wrap(async (req) => replyDiffs(await findAgent(req.params.pane), String(req.query.calls || '').split(',').filter(Boolean))))
 // The same, live: pushed the moment the agent writes to its transcript file, so a reply shows up
 // as soon as it lands instead of at the next poll. A slow sweep also catches a new session (/clear).
+// Its chat opened is you on it (engaged.js); the page reconnecting (after Bridge AI restarted, say)
+// isn't: the first message has an id, which the browser sends back when it connects again.
 app.get('/api/agents/:pane/transcript/live', (req, res) => {
   res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' })
   res.flushHeaders()
+  const opened = !req.headers['last-event-id']
   let file = null, watcher = null, timer = null, last = '', busy = false, again = false, closed = false
   const push = async () => {
     if (closed) return
@@ -309,8 +329,9 @@ app.get('/api/agents/:pane/transcript/live', (req, res) => {
     busy = true
     try {
       const a = await findAgent(req.params.pane)
+      if (!last && opened) touched(a.paneId, a)
       const out = JSON.stringify(transcript(a))
-      if (out !== last) { last = out; res.write(`data: ${out}\n\n`) }
+      if (out !== last) { res.write(`${last ? '' : 'id: 1\n'}data: ${out}\n\n`); last = out }
       const f = a.sessionId && caps(a.kind).chat ? locate(a.kind, a.sessionId, a.cwd) : null
       if (f !== file) {
         watcher?.close(); watcher = null; file = f
@@ -357,7 +378,9 @@ const rootOf = async (pane) => {
 // ---------- Beta features ----------
 // Still being finished, so hidden until turned on in Settings › About & Updates › Beta Features
 // (trials: { studio: true } in the config; src/trials.js). Their routes answer only then.
-const TRIALS = ['studio', 'home', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights', 'signature-assist', 'tab-groups', 'memory', 'routines']
+// One that's no longer a beta stays in older configs, read by nothing (memory: Memory, now a page
+// for everyone).
+const TRIALS = ['studio', 'home', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights', 'signature-assist', 'tab-groups', 'routines']
 const trialOn = (id) => cfg.trials?.[id] === true
 const trialOff = (id, label) => (req, res, next) => (trialOn(id) ? next() : res.status(404).json({ error: `${label} is a beta feature. Turn it on in Settings › About & Updates › Beta Features.`, trial: id }))
 
@@ -371,7 +394,7 @@ app.delete('/api/studio/recent', wrap((req) => { const q = sq(req); return studi
 app.get('/api/studio/open', wrap(async (req) => { const q = sq(req); return studio.open(await rootOf(q.root), q.path, { rootId: q.root, label: String(req.query.where || '') || null }) }))
 // A save over a change made meanwhile is a 409, so the page offers theirs or yours.
 app.put('/api/studio/file', express.raw({ type: () => true, limit: '80mb' }), async (req, res) => {
-  try { const q = sq(req); res.json(await studio.save(await rootOf(q.root), q.path, req.body, { mtime: req.query.mtime, force: req.query.force === '1' })) } catch (e) { res.status(e.conflict ? 409 : 502).json({ error: e.message, ...(e.conflict ? { conflict: true } : {}) }) }
+  try { const q = sq(req); res.json(await studio.save(await rootOf(q.root), q.path, req.body, { mtime: req.query.mtime, force: req.query.force === '1', auto: req.query.auto === '1' })) } catch (e) { res.status(e.conflict ? 409 : 502).json({ error: e.message, ...(e.conflict ? { conflict: true } : {}) }) }
 })
 app.get('/api/studio/changed', wrap(async (req) => { const q = sq(req); return studio.changed(await rootOf(q.root), q.path, req.query.since) }))
 app.get('/api/studio/versions', wrap(async (req) => { const q = sq(req); return studio.versions(await rootOf(q.root), q.path) }))
@@ -646,6 +669,7 @@ app.post('/api/agents/:pane/servers/:port/stop', wrap(async (req) => servers.sto
 
 app.post('/api/agents/:pane/focus', wrap(async (req) => {
   await rt.focusAgent(req.params.pane)
+  touched(req.params.pane)
   return { ok: true }
 }))
 
@@ -722,6 +746,8 @@ app.post('/api/agents/:pane/prompt', wrap(async (req) => {
     })
     insights.noteSent(pane, text)
     noteTyped(req.body, agent)
+    // Typed by you (Chief of Staff's `bridge send` comes this way too, unmarked).
+    if (req.body?.typed && agent) touched(pane, agent)
     // A side question: its answer is in a panel, not the chat, so bring it back here.
     if (!r.queued && agent && caps(agent.kind).btw && /^\/btw\s/.test(text)) return { ...r, btw: (await btwAnswer(rt, pane, text)) || null }
     return r
@@ -733,6 +759,7 @@ app.post('/api/agents/:pane/keys', wrap(async (req) => {
   const keys = (req.body?.keys || []).map(String)
   if (!keys.length || !keys.every((k) => ALLOWED_KEYS.test(k))) throw new Error('Unsupported key')
   await rt.keys(req.params.pane, keys)
+  touched(req.params.pane)
   return { ok: true }
 }))
 
@@ -794,7 +821,7 @@ app.post('/api/agents/:pane/queue', wrap(async (req) => {
   return onlyOnce(cid, async () => {
     const item = queue.add(req.params.pane, text, { cid })
     pushFleet()
-    if (req.body?.typed) findAgent(req.params.pane).then((a) => noteTyped(req.body, a), () => {})
+    if (req.body?.typed) findAgent(req.params.pane).then((a) => { noteTyped(req.body, a); touched(a.paneId, a) }, () => {})
     return { ...item, queued: true, position: queue.placeOf(req.params.pane, item.id) }
   })
 }))
@@ -835,7 +862,7 @@ app.post('/api/agents/:pane/steer', wrap(async (req) => {
     await rt.keys(req.params.pane, ['esc'])
     const item = queue.add(req.params.pane, text, { now: true, cid: cidOf(req) })
     pushFleet()
-    if (req.body?.typed) findAgent(req.params.pane).then((a) => noteTyped(req.body, a), () => {})
+    if (req.body?.typed) findAgent(req.params.pane).then((a) => { noteTyped(req.body, a); touched(a.paneId, a) }, () => {})
     return { ...item, steered: true, queued: true, position: queue.placeOf(req.params.pane, item.id) }
   })
 }))
@@ -875,6 +902,8 @@ app.post('/api/agents/launch', wrap(async (req) => {
   const b = req.body || {}
   const out = await launchFrom(b)
   if (b.typed && b.prompt) noteTyped({ typed: b.typed, text: b.prompt }, { kind: b.kind || cfg.defaultAgent || 'claude', title: b.label, cwd: await places.resolveDir(b.cwd).catch(() => String(b.cwd || '')), paneId: out?.paneId })
+  // A new agent you started (New, Home's box): you're working in that folder.
+  if (b.typed) places.resolveDir(b.cwd).then((dir) => engaged.folder(dir), () => {})
   return out
 }))
 // New agent's choices (also a meeting's action item, meetwork.js): which agent, in which folder,
@@ -1213,6 +1242,8 @@ app.post('/api/chief/tasks/:id/reply', wrap(async (req) => {
   if (!it) throw Object.assign(new Error(`No task ${req.params.id} on the list`), { status: 404 })
   const r = await tellChief(`About task ${it.id}, "${it.title}"${it.needs ? `, which waits on me for: ${it.needs}` : ''}\n\n${text}\n\n(Keep the task current with \`node bin/bridge task\`.)`)
   if (!r.sent) throw Object.assign(new Error(r.error || 'The chief of staff isn\'t running. Start it, then send this again.'), { code: 'chief_off' })
+  engaged.task(it.id)
+  homeList.forget()
   return { ok: true, ...r }
 }))
 
@@ -1440,7 +1471,7 @@ app.post('/api/dictation/tidy', async (req, res) => {
     const into = typeof req.body?.app === 'string' ? req.body.app.slice(0, 80) : null
     // The local model still loading (started as the key went down, after a while unused): 2 s more.
     const more = model === llm.ID && llm.loading() ? 2000 : 0
-    // With About you on (Memory, a beta feature), the names in it, so they come out spelled right.
+    // With About you on (Memory), the names in it, so they come out spelled right.
     const out = await dictation.tidy({ text: req.body?.text, app: into, model, reply: (id, msgs, o) => chatModels.reply(id, msgs, { ...o, feature: 'dictation' }), more, names: meetMemory.personaNames() })
     res.json({ ...out, model, by: tidyLabel(model) })
   } catch (e) { res.status(e.status || 502).json({ error: e.message, code: e.code || 'failed' }) }
@@ -1451,8 +1482,8 @@ app.post('/api/dictation/tidy', async (req, res) => {
 dictations.configure(cfg, { agent: (id) => { const a = lastFleet?.agents?.find((x) => x.paneId === id); return a ? { name: a.chief ? 'Chief of Staff' : a.title || a.tab || a.workspace || '', chief: !!a.chief } : null } })
 const said = (fn) => async (req, res) => { try { res.json(await fn(req)) } catch (e) { res.status(e.status || 502).json({ error: e.message }) } }
 app.get('/api/dictations', said((req) => dictations.list({ q: String(req.query.q || ''), before: req.query.before || null, limit: req.query.limit })))
-// With Memory on, the names said in each one kept go on memory's names (memoryview.js said).
-const toMemory = (r) => { if (r?.kept && r.id && meetMemory.pageOn()) dictations.get(r.id).then((d) => memoryView.said(d)).catch(() => {}); return r }
+// The names said in each one kept go on memory's names (memoryview.js said).
+const toMemory = (r) => { if (r?.kept && r.id) dictations.get(r.id).then((d) => memoryView.said(d)).catch(() => {}); return r }
 app.post('/api/dictations', said(async (req) => toMemory(await (req.body?.restore ? dictations.add(req.body.restore, { restore: true }) : (counts.add('dictations.saved'), dictations.add(req.body || {}))))))
 app.delete('/api/dictations', said(() => dictations.clear()))
 app.get('/api/dictations/icons/:bundle', async (req, res) => {
@@ -1475,7 +1506,6 @@ setInterval(() => dictations.tidy().catch(() => {}), 6 * 60 * 60 * 1000).unref()
 
 // ---------- Meeting notes (meetings.js; speech engines in speech.js) ----------
 meetings.configure(cfg)
-meetMemory.configure(cfg)
 memoryView.configure(cfg, { chief: CHIEF_DIR })
 memoryView.keepFresh()
 voices.configure(cfg)
@@ -1618,9 +1648,8 @@ app.get('/api/meetings/memory', wrap(() => {
 app.post('/api/meetings/memory', wrap((req) => meetMemory.add({ term: req.body?.term, heard: req.body?.heard, note: req.body?.note, kind: req.body?.kind })))
 app.patch('/api/meetings/memory/:tid', wrap((req) => meetMemory.update(req.params.tid, req.body || {})))
 app.delete('/api/meetings/memory/:tid', wrap((req) => meetMemory.remove(req.params.tid)))
-// Memory as a page (memoryview.js), a beta feature: its collections, what looks the same (merged
-// or kept apart), what looks like it adds little (taken out or kept, as you pick), and About you.
-app.use('/api/memory', trialOff('memory', 'Memory'))
+// Memory as a page (memoryview.js): its collections, what looks the same (merged or kept apart),
+// what looks like it adds little (taken out or kept, as you pick), and About you.
 app.get('/api/memory', wrap(() => memoryView.view()))
 app.post('/api/memory/merge', wrap((req) => meetMemory.merge(String(req.body?.into || ''), String(req.body?.from || ''))))
 app.post('/api/memory/apart', wrap((req) => meetMemory.apart(String(req.body?.a || ''), String(req.body?.b || ''))))
@@ -1921,12 +1950,14 @@ app.post('/api/panes/:pane/text', wrap(async (req) => {
   if (text && req.body?.enter) await typeLine(req.params.pane, text, { fresh: false })
   else if (text) await rt.text(req.params.pane, text)
   else if (req.body?.enter) await rt.paneKeys(req.params.pane, ['enter'])
+  touched(req.params.pane)
   return { ok: true }
 }))
 app.post('/api/panes/:pane/keys', wrap(async (req) => {
   const keys = (req.body?.keys || []).map(String)
   if (!keys.length || !keys.every((k) => ALLOWED_KEYS.test(k))) throw new Error('Unsupported key')
   await rt.paneKeys(req.params.pane, keys)
+  touched(req.params.pane)
   return { ok: true }
 }))
 
@@ -2282,7 +2313,10 @@ relay.whenPaired((d) => notify.send({ kind: 'machine', title: `${d.name} is pair
 machines.useSummary(async ({ home: withHome = false } = {}) => {
   const f = await fleetView()
   const needs = await waiting.items().catch(() => [])
-  return { runtime: rt.name, counts: f.counts, agents: await runs.agents(f, { cloudSaid: cloud.previews() }), needs, ...(withHome ? { home: await homeList.items().catch(() => null) } : {}) }
+  // quiet: the agents waiting on you whose wait has gone quiet (shared/focus.js), not counted as
+  // needing you in the devices menu.
+  const quiet = needs.filter((i) => blocking(i) && isQuiet(i)).length
+  return { runtime: rt.name, counts: { ...f.counts, quiet }, agents: await runs.agents(f, { cloudSaid: cloud.previews() }), needs, ...(withHome ? { home: await homeList.items().catch(() => null) } : {}) }
 })
 machines.askHome(() => trialOn('home'))
 // The agent map: every computer's agents, this one's from here and the others' from what each last
@@ -2300,7 +2334,7 @@ app.get('/api/agent-map', wrap(async (req) => {
 // The inbox: this device's items and your other devices' (from what each last said, asked again
 // while you're looking). Each is answered on its own device: an item here with the routes below, one
 // elsewhere with the same routes at /m/<id>/ (machines.js), which reach that device.
-const waiting = needsYou.make({ rt, fleet: fleetView })
+const waiting = needsYou.make({ rt, fleet: fleetView, engaged })
 app.get('/api/needs-you', wrap(async (req) => {
   const fresh = String(req.query.fresh || '')
   await machines.fresh(fresh ? { only: fresh, maxAge: 0, wait: 4000 } : { maxAge: req.query.live ? 2500 : 6000 })
@@ -2316,7 +2350,7 @@ app.get('/api/needs-you', wrap(async (req) => {
 }))
 app.post('/api/needs-you/answer', wrap(async (req) => {
   const r = await waiting.answer(req.body || {})
-  if (r.ok) pushFleet()
+  if (r.ok) { pushFleet(); touched(String(req.body?.paneId || '')) }
   return r
 }))
 app.post('/api/needs-you/clear', wrap((req) => waiting.clear(req.body?.id)))
@@ -2327,7 +2361,7 @@ app.post('/api/needs-you/clear', wrap((req) => waiting.clear(req.body?.id)))
 // Needs you. A device that sends only what needs you (an older Bridge AI, or Home's list not come
 // yet) says so (partial), so Home can say why its meetings and tasks aren't there. One row per
 // thing across them all (home.tidy): the same task on two of them is one.
-const homeList = home.make({ waiting, tasks: chiefTasks, meetings, unsent: (id) => meetWork.unsent(id), boards, chief: async () => mainChief(await fleetView())?.paneId || null })
+const homeList = home.make({ waiting, tasks: chiefTasks, meetings, unsent: (id) => meetWork.unsent(id), boards, chief: async () => mainChief(await fleetView())?.paneId || null, engaged })
 app.get('/api/home', trialOff('home', 'Home'), wrap(async (req) => {
   await machines.fresh({ maxAge: req.query.live ? 2500 : 8000 })
   const name = relay.thisName()
@@ -2667,7 +2701,7 @@ function applyConfig() {
   routines.scheduling(trialOn('routines'))
   weather = makeWeather(cfg)
   prepareChief(cfg)
-  memoryView.sync() // About you in Chief of Staff's folder, as Memory and About you are
+  memoryView.sync() // About you in Chief of Staff's folder, as About you is
   // The herdr session in view (the sidebar's session menu, Settings), at once.
   if (rt.name === 'herdr') {
     const before = herdrSession()

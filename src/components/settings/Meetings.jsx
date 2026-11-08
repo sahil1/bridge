@@ -2,8 +2,7 @@ import { useEffect, useState } from 'react'
 import Icon from '../Icon.jsx'
 import { api, usePoll, onThisComputer } from '../../api.js'
 import { useSettings, SaveNote } from './General.jsx'
-import { MemoryPanel } from '../meetings/tools.jsx'
-import { useTrial } from '../../trials.js'
+import { openMemory } from '../meetings/tools.jsx'
 import { t } from '../../i18n/index.js'
 import { MEETING_KEYS } from '../../../shared/mentions.js'
 import '../meetings/meetings.css'
@@ -133,12 +132,10 @@ const openVoice = () => window.dispatchEvent(new CustomEvent('bridge-open-settin
 
 export default function Meetings({ onOpenAgent }) {
   const { s, save, note } = useSettings()
-  const memoryPage = useTrial('memory') // Memory, a page of its own (a beta feature)
   const sp = usePoll('/speech', 3000)
   const [models, setModels] = useState(null)
   const [vocab, setVocab] = useState(null)
   const [instr, setInstr] = useState(null)
-  const [memory, setMemory] = useState(false)
   // Prep Assist needs the calendar: only where there's one (a Mac).
   const calendar = usePoll('/config', 10 * 60 * 1000).data?.calendar === true
   useEffect(() => { api('/chat/models').then((r) => setModels(r.models || [])).catch(() => setModels([])) }, [])
@@ -205,11 +202,8 @@ export default function Meetings({ onOpenAgent }) {
 
       <section className="st-sec">
         <h4>Names and terms</h4>
-        <p className="muted small">Meeting memory keeps the people, companies and jargon from your meetings: how they're spelled, how they get misheard, who they are. The speech engine listens for them, transcripts show them fixed, and notes get them right. It grows as you fix words and as summaries are written.</p>
-        <div className="st-row">{memoryPage
-          ? <button type="button" className="btn small" onClick={() => onOpenAgent?.('view:memory')}><Icon name="book" size={12} /> {t('Open Memory')}</button>
-          : <button type="button" className="btn small" onClick={() => setMemory(true)}><Icon name="book" size={12} /> Meeting memory</button>}</div>
-        {memory && <MemoryPanel onClose={() => setMemory(false)} />}
+        <p className="muted small">{t("Memory keeps the people, organizations and words from your meetings and dictations: how they're spelled, how they get misheard, who and what they are. The speech engine listens for them, transcripts show them fixed, and notes get them right. It grows as you fix words and as summaries are written.")}</p>
+        <div className="st-row"><button type="button" className="btn small" onClick={() => (onOpenAgent ? onOpenAgent('view:memory') : openMemory())}><Icon name="book" size={12} /> {t('Open Memory')}</button></div>
         <p className="muted small">More words to listen for, if you like (the meeting's title and invitees are added by themselves):</p>
         <input className="st-input" value={vocab ?? ''} onChange={(e) => setVocab(e.target.value)} onBlur={() => vocab !== (m.vocabulary || '') && set({ vocabulary: vocab.trim() })} placeholder="e.g. Kubernetes, OKRs" aria-label="More words to listen for" />
       </section>
@@ -234,7 +228,7 @@ export default function Meetings({ onOpenAgent }) {
         </label>
         <label className="st-check">
           <input type="checkbox" checked={m.cleanup ?? m.autoSummary !== false} onChange={(e) => set({ cleanup: e.target.checked })} />
-          <span><b>Clean up the transcript when a meeting ends</b> <span className="muted small">The model fixes misheard words and names from what the meeting is about (its invite, files and meeting memory) and leaves out words nobody said. Each fixed line says what was heard, and Undo puts it back.</span></span>
+          <span><b>Clean up the transcript when a meeting ends</b> <span className="muted small">The model fixes misheard words and names from what the meeting is about (its invite, files and Memory) and leaves out words nobody said. Each fixed line says what was heard, and Undo puts it back.</span></span>
         </label>
         <label className="st-check">
           <input type="checkbox" checked={m.assist === true} onChange={(e) => set({ assist: e.target.checked })} />

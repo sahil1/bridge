@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Icon, { StatusDot } from './Icon.jsx'
-import { NeedsItem, onDevice } from './NeedsYou.jsx'
+import { NeedsItem, onDevice, Why, QuietFold } from './NeedsYou.jsx'
 import { useAgentMap } from './AgentMap.jsx'
 import { useCalendar, shortTitle } from './Agenda.jsx'
 import { PrepCard } from './meetings/prep.jsx'
@@ -8,6 +8,7 @@ import { ago } from './Machines.jsx'
 import { api, hostApi, machineId } from '../api.js'
 import { t, tx, locale } from '../i18n/index.js'
 import { sentTo } from '../sendbox.js'
+import { split, isQuiet, compare, TOP, QUIET_DAYS } from '../../shared/focus.js'
 import './needshome.css'
 
 // Home (a beta feature, `home`): Needs you as the place the app opens at, on a computer and a
@@ -22,11 +23,15 @@ import './needshome.css'
 // or by kind. Anything you pin goes to the top, as a card like the ones waiting on you, and stays
 // there until you unpin it. Everything opens every item on every computer, in lanes as the Agent
 // Map has them: by device, or by kind.
+//
+// What needs you is in the order shared/focus.js gives it (how much it holds up, and how recently
+// you or it were on it), the first few said with why ("Blocking", "You were on this 12 min ago").
+// What has been quiet for 3 days or more is folded under Waiting on You by project and not counted,
+// here, in the top bar's chip, the badges or the window's title; pinned, it counts.
 
 const KINDS = [['all', tx('All')], ['agent', tx('Agents')], ['meeting', tx('Meetings')], ['chief', tx('Chief of Staff')], ['board', tx('Whiteboards')]]
 // Chief of Staff's own questions count with its tasks.
 const kindOf = (i) => (i.kind === 'task' || (i.kind === 'agent' && i.agent?.chief) ? 'chief' : i.kind)
-const RANK = { permission: 0, question: 1, failed: 2 }
 const DAY = 864e5
 // The last day's finished work shown before Show all: a morning's worth, not the whole pile.
 const CAP = 6
@@ -86,10 +91,12 @@ const SHOWN = machineId || 'here'
 const devOf = (i) => i.machine || 'here'
 export const onShown = (i) => devOf(i) === SHOWN
 // What needs you, for the top bar, the sidebar and the tab's count: questions, permissions, failed
-// runs and tasks waiting on you, on devices that can hear an answer. here: on the computer this
-// window shows; elsewhere: on your others, which are said apart so they don't crowd this one.
+// runs and tasks waiting on you, on devices that can hear an answer, and not gone quiet (unless
+// pinned). here: on the computer this window shows; elsewhere: on your others, which are said apart
+// so they don't crowd this one.
 export function needCount(data) {
-  const all = (data?.items || []).filter((i) => i.group === 'needs' && i.online)
+  const pinned = new Set((data?.pins || []).map((p) => p.id))
+  const all = (data?.items || []).filter((i) => i.group === 'needs' && i.online && (pinned.has(i.uid) || !isQuiet(i)))
   const here = all.filter(onShown).length
   return { here, elsewhere: all.length - here }
 }
@@ -181,13 +188,15 @@ function useDevicePick() {
   const pick = (x) => { setV(x); try { localStorage.setItem('cc-home-device', JSON.stringify(x)) } catch { /* no storage */ } }
   return [v, pick]
 }
-// What needs you first: a permission, a question, a failed run, then a task that waits on you, the
-// one waiting longest first; then what's ready to look at, newest first; then what's coming up.
+// What needs you first, in shared/focus.js's order (how much it holds up, then how recently you or
+// it were on it); then what's ready to look at, newest first; then what's coming up.
 const GROUP = { needs: 0, ready: 1, coming: 2 }
-const urgent = (x, y) => (GROUP[x.group] ?? 3) - (GROUP[y.group] ?? 3)
-  || (x.group === 'needs' ? (x.kind === 'task') - (y.kind === 'task') || (RANK[x.type] ?? 9) - (RANK[y.type] ?? 9) || time(x) - time(y) : time(y) - time(x))
-const ORDER = { newest: (x, y) => time(y) - time(x) || urgent(x, y), oldest: (x, y) => time(x) - time(y) || urgent(x, y) }
-const sortBy = (list, by) => [...list].sort(ORDER[by] || urgent)
+function sortBy(list, by) {
+  const focused = compare()
+  const urgent = (x, y) => (GROUP[x.group] ?? 3) - (GROUP[y.group] ?? 3) || (x.group === 'needs' ? focused(x, y) : time(y) - time(x))
+  const order = by === 'newest' ? (x, y) => time(y) - time(x) || urgent(x, y) : by === 'oldest' ? (x, y) => time(x) - time(y) || urgent(x, y) : urgent
+  return [...list].sort(order)
+}
 const KIND_ICON = { agent: 'bot', meeting: 'mic', chief: 'helm', board: 'shapes' }
 // By computer or by kind: a group for each, this computer first or in the tabs' order.
 function groupsOf(rows, by, devices) {
@@ -227,9 +236,10 @@ function DeviceChip({ it }) {
 // The heading's count: everything that needs you on every computer (offline ones too, as Waiting on
 // You has them), with a ring like the Status menu's, filled by the share you can answer now (on a
 // computer that's on) and the rest in a quieter tone. Pointed at, reached by the keyboard or tapped,
-// what's in it: on each computer and by kind. Escape, a tap elsewhere or a second tap puts it away.
+// what's in it: on each computer and by kind, and how many more have gone quiet (not counted).
+// Escape, a tap elsewhere or a second tap puts it away.
 const NEED_KINDS = [['permission', tx('Permissions')], ['question', tx('Questions')], ['failed', tx('Failed')], ['task', tx('Chief of Staff tasks')]]
-function NeedCount({ list, devices }) {
+function NeedCount({ list, devices, quiet = 0 }) {
   const [hover, setHover] = useState(false)
   const [focus, setFocus] = useState(false)
   const [stuck, setStuck] = useState(false)
@@ -277,6 +287,7 @@ function NeedCount({ list, devices }) {
               {kinds.map(({ k, label, n }) => <dd key={k}><span className="hm-tip-name">{t(label)}</span><b>{n}</b></dd>)}
             </dl>
           </div>
+          {quiet > 0 && <p className="hm-tip-quiet">{quiet === 1 ? t('1 more has been quiet for {d}+ days: folded under Waiting on You, not counted.', { d: QUIET_DAYS }) : t('{n} more have been quiet for {d}+ days: folded under Waiting on You, not counted.', { n: quiet, d: QUIET_DAYS })}</p>}
         </div>
       )}
     </div>
@@ -307,8 +318,9 @@ function openWords(it) {
   return { label: t('Open'), title: onShown(it) ? undefined : t('Opens in a tab here, from {name}', { name: it.device }) }
 }
 
-// A task of the Chief of Staff's waiting on you: what it needs, a reply to it, or open the Chief.
-function TaskWaiting({ it, onOpenChief, onGone, setNote, pin }) {
+// A task of the Chief of Staff's waiting on you: what it needs, since when (it last changed), a reply
+// to it, or open the Chief. top: one of the first few that need you now, said with why.
+function TaskWaiting({ it, onOpenChief, onGone, setNote, pin, top = false }) {
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [open, setOpen] = useState(false)
@@ -324,14 +336,16 @@ function TaskWaiting({ it, onOpenChief, onGone, setNote, pin }) {
     } catch (x) { setNote({ id: it.id, text: why(x, it.device) }) } finally { setBusy(false) }
   }
   return (
-    <article className={`ny-item hm-task ${off ? 'off' : ''}`} aria-label={t('Chief of Staff task: {title}', { title: it.task.title })}>
+    <article className={`ny-item hm-task ${off ? 'off' : ''} ${top ? 'top' : ''}`} aria-label={t('Chief of Staff task: {title}', { title: it.task.title })}>
       <div className="ny-top">
         <StatusDot status="blocked" size={8} />
         <span className="ny-kind">{t('Chief of Staff task')}</span>
+        {(it.since || it.at) && <span className="ny-age" title={new Date(it.since || it.at).toLocaleString(locale())}>{ago(it.since || it.at)}</span>}
         <span className="ny-grow" />
         <DeviceChip it={it} />
         {pin}
       </div>
+      {top && <Why it={it} />}
       <p className="ny-text">{it.task.needs || t('Waiting on you')}</p>
       <div className="ny-meta"><Icon name="helm" size={11} /><b className="hm-clamp">{it.task.title}</b></div>
       <div className="ny-acts">
@@ -556,8 +570,9 @@ function TaskRow({ it, lead, multi, phone, onOpenChief, pin }) {
 
 // The other computers' things while Home shows this one's: a line each (how many, and what needs you
 // there first), opened one at a time to see them and answer them right here, as yours are. rows:
-// { d, key, list, needs, ready, coming } for each; cards, list, task: how Home shows each kind.
-function Away({ rows, open, setOpen, cards, list, task, onShowAll }) {
+// { d, key, list, needs, quiet, ready, coming } for each; cards, list, task, quiet: how Home shows
+// each kind (what has gone quiet there is said quietly on its line, and folded when it's opened).
+function Away({ rows, open, setOpen, cards, list, task, quiet, onShowAll }) {
   const total = rows.reduce((n, r) => n + r.list.length, 0)
   const head = rows.length === 1 ? (total === 1 ? t('1 more on another computer') : t('{n} more on another computer', { n: total })) : t('{n} more on {m} other computers', { n: total, m: rows.length })
   return (
@@ -574,6 +589,7 @@ function Away({ rows, open, setOpen, cards, list, task, onShowAll }) {
             r.needs.length > 0 && (r.needs.length === 1 ? t('1 needs you') : t('{n} need you', { n: r.needs.length })),
             r.ready.length > 0 && t('{n} ready to look at', { n: r.ready.length }),
             r.coming.length > 0 && t('{n} coming up', { n: r.coming.length }),
+            r.quiet.length > 0 && t('{n} quiet', { n: r.quiet.length }),
           ].filter(Boolean)
           return (
             <li key={r.key} className={`hm-away-row ${r.needs.length ? 'needs' : ''} ${r.d.online ? '' : 'off'} ${on ? 'open' : ''}`}>
@@ -590,6 +606,7 @@ function Away({ rows, open, setOpen, cards, list, task, onShowAll }) {
                   {r.needs.length > 0 && cards(r.needs)}
                   {r.ready.length > 0 && list(r.ready)}
                   {r.coming.length > 0 && <ul className="hm-list">{r.coming.map(task)}</ul>}
+                  {r.quiet.length > 0 && quiet(r.quiet)}
                 </div>
               )}
             </li>
@@ -598,6 +615,12 @@ function Away({ rows, open, setOpen, cards, list, task, onShowAll }) {
       </ul>
     </section>
   )
+}
+
+// What has gone quiet on one of your other computers, folded under its line until you open it.
+function QuietThere(props) {
+  const [open, setOpen] = useState(false)
+  return <QuietFold {...props} open={open} setOpen={setOpen} />
 }
 
 // Home itself. phone: the phone's Home tab. onOpen(item): an agent wherever it runs; onOpenMeeting,
@@ -615,6 +638,7 @@ export default function NeedsHome({ phone = false, calendar = false, onOpen, onO
   const [older, setOlder] = useState(false) // what's older than a day, unfolded
   const [todo, setTodo] = useState(false) // the Chief of Staff's tasks with no day, unfolded
   const [sure, setSure] = useState(false) // Clear all older, asked once more
+  const [quietOpen, setQuietOpen] = useState(false) // what has gone quiet, unfolded
   const [read, markRead] = useRead()
   const pins = usePins(data, refresh, setNote)
   useEffect(() => { if (!note) return; const id = setTimeout(() => setNote(null), 6000); return () => clearTimeout(id) }, [note])
@@ -644,9 +668,15 @@ export default function NeedsHome({ phone = false, calendar = false, onOpen, onO
   const away = focus ? all.filter((i) => !onShown(i) && !isPinned(i) && ofKind(i)) : []
   const awayBy = devices.filter((d) => (d.id || 'here') !== SHOWN).map((d) => {
     const list = away.filter((i) => devOf(i) === (d.id || 'here'))
-    return { d, key: d.id || 'here', list, needs: sortBy(list.filter((i) => i.group === 'needs'), sort), ready: sortBy(list.filter((i) => i.group === 'ready'), sort), coming: list.filter((i) => i.group === 'coming' && i.kind === 'task') }
+    const waits = split(list.filter((i) => i.group === 'needs'))
+    return { d, key: d.id || 'here', list, needs: sortBy(waits.now, sort), quiet: waits.quiet, ready: sortBy(list.filter((i) => i.group === 'ready'), sort), coming: list.filter((i) => i.group === 'coming' && i.kind === 'task') }
   }).filter((x) => x.list.length || (x.d.partial && x.d.online))
-  const needs = sortBy(rest.filter((i) => i.group === 'needs'), sort)
+  // What needs you now, in the order picked, the first few of it (in shared/focus.js's order,
+  // whatever the order picked) said with why; what has gone quiet folded under it.
+  const waits = split(rest.filter((i) => i.group === 'needs'))
+  const needs = sortBy(waits.now, sort)
+  const quiet = waits.quiet
+  const top = new Set(waits.now.slice(0, TOP).map((i) => i.uid))
   // Ready to look at: newest first (or as picked); the last day's few, then Show all; anything older folded away.
   const ready = sortBy(rest.filter((i) => i.group === 'ready'), sort)
   const recent = ready.filter((i) => Date.now() - time(i) < DAY)
@@ -667,9 +697,10 @@ export default function NeedsHome({ phone = false, calendar = false, onOpen, onO
   const inOrder = (list) => (sort === 'newest' || sort === 'oldest' ? sortBy(list, sort) : sort === 'device' ? [...list].sort((x, y) => devAt(x) - devAt(y)) : list)
   const doing = inOrder(tasks.filter((i) => !i.task.due && i.task.status === 'doing'))
   const todos = inOrder(tasks.filter((i) => !i.task.due && i.task.status !== 'doing'))
-  // Everything that needs you on the computers shown, on or not, of every kind (the heading counts it
-  // all, whichever kind is picked below it).
-  const needing = all.filter((i) => onDev(i) && i.group === 'needs')
+  // Everything that needs you now on the computers shown, on or not, of every kind (the heading
+  // counts it all, whichever kind is picked below it); not what has gone quiet, unless it's pinned.
+  const needing = all.filter((i) => onDev(i) && i.group === 'needs' && (isPinned(i) || !isQuiet(i)))
+  const quietHere = all.filter((i) => onDev(i) && i.group === 'needs' && !isPinned(i) && isQuiet(i)).length
   const onGone = (it, said) => {
     setGone((g) => ({ ...g, [it.uid]: Date.now() }))
     if (said) setNote({ text: `${said} · ${it.agent?.title || it.task?.title || ''}` })
@@ -700,11 +731,14 @@ export default function NeedsHome({ phone = false, calendar = false, onOpen, onO
   const row = (it) => <ReadyItem key={it.uid} it={it} multi={multi} phone={phone} read={read.has(it.uid)} open={openId === it.uid} onToggle={() => setOpenId(openId === it.uid ? null : it.uid)} onRead={() => markRead(it.uid)} h={h} pin={pinOf(it)} />
   const rows = (list) => <ul className="hm-list hm-ready">{list.map(row)}</ul>
   // A card for each: the inbox's own for an agent waiting (with its own id: Clear and the answers
-  // take it), a task's, or the one for anything else that's pinned.
-  const card = (it) => (it.group === 'needs' && it.kind === 'task' ? <TaskWaiting key={it.uid} it={it} onOpenChief={onOpenChief} onGone={onGone} setNote={setNote} pin={pinOf(it)} />
-    : it.group === 'needs' ? <NeedsItem key={it.uid} it={{ ...it, id: it.nid || it.id }} onOpen={onOpen} onGone={(x, said) => onGone(it, said)} setNote={setNote} pin={pinOf(it)} />
+  // take it), a task's, or the one for anything else that's pinned. quiet: one opened in the quiet
+  // fold, which Clear can take off the list whatever it is.
+  const card = (it, quiet = false) => (it.group === 'needs' && it.kind === 'task' ? <TaskWaiting key={it.uid} it={it} top={top.has(it.uid)} onOpenChief={onOpenChief} onGone={onGone} setNote={setNote} pin={pinOf(it)} />
+    : it.group === 'needs' ? <NeedsItem key={it.uid} it={{ ...it, id: it.nid || it.id }} top={top.has(it.uid)} quiet={quiet} onOpen={onOpen} onGone={(x, said) => onGone(it, said)} setNote={setNote} pin={pinOf(it)} />
       : <ItemCard key={it.uid} it={it} phone={phone} onRead={() => markRead(it.uid)} h={h} pin={pinOf(it)} />)
-  const cards = (list) => <div className="hm-grid">{list.map(card)}</div>
+  const cards = (list) => <div className="hm-grid">{list.map((it) => card(it))}</div>
+  // The quiet fold's rows, each opening to its card; Clear all takes each agent's off its device's list.
+  const quietProps = { uid: (i) => i.uid, multi: multi && device === 'all', card: (it) => card(it, true), onClearAll: clearAll }
   const lead = (i) => {
     const late = i.task.due < today
     const on = i.task.status === 'doing'
@@ -721,7 +755,7 @@ export default function NeedsHome({ phone = false, calendar = false, onOpen, onO
         <header className="hm-head">
           <div className="hm-title">
             {/* Until the list has come (or when it can't), no count: "Nothing needs you" would be a guess. */}
-            {!data ? <h2>{t('Home')}</h2> : <NeedCount list={needing} devices={devices} />}
+            {!data ? <h2>{t('Home')}</h2> : <NeedCount list={needing} devices={devices} quiet={quietHere} />}
             <p className="muted">{date}{data && <><span className="hm-sep"> · </span><span className="hm-where">{where}</span></>}</p>
           </div>
           <button type="button" className="btn small hm-every" onClick={onEverything}>{t('See everything')} <Icon name="chevron" size={11} /></button>
@@ -793,15 +827,16 @@ export default function NeedsHome({ phone = false, calendar = false, onOpen, onO
                 {grouped(pinned, sort, devices, cards)}
               </section>
             )}
-            {(showAll || needs.length > 0) && (
+            {(showAll || needs.length > 0 || quiet.length > 0) && (
               <section className="hm-sec hm-waiting" aria-label={t('Waiting on You')}>
                 <h3>{t('Waiting on You')}{needs.length > 0 && <span className="fcount">{needs.length}</span>}<span className="hm-hint">{t('your answer starts them again')}</span></h3>
                 {needs.length > 0 ? grouped(needs, sort, devices, cards)
                   : pinnedOf('needs') ? <p className="muted small hm-none">{t('Pinned, at the top.')}</p>
                     : <div className="hm-empty"><Icon name="check" size={16} /><span>{focus ? t('Nothing needs you on this computer right now.') : t('Nothing needs you right now.')}</span></div>}
+                <QuietFold items={quiet} open={quietOpen} setOpen={setQuietOpen} {...quietProps} />
               </section>
             )}
-            {awayBy.length > 0 && <Away rows={awayBy} open={awayOpen} setOpen={setAwayOpen} cards={cards} list={rows} task={(i) => taskRow(i, i.task.due ? lead(i) : i.task.status === 'doing' ? { text: t('On it'), cls: 'doing' } : null)} onShowAll={() => setDevice('all')} />}
+            {awayBy.length > 0 && <Away rows={awayBy} open={awayOpen} setOpen={setAwayOpen} cards={cards} list={rows} task={(i) => taskRow(i, i.task.due ? lead(i) : i.task.status === 'doing' ? { text: t('On it'), cls: 'doing' } : null)} quiet={(list) => <QuietThere items={list} {...quietProps} multi={false} />} onShowAll={() => setDevice('all')} />}
             <div className="hm-cols">
               {(showAll || ready.length > 0) && (
                 <section className="hm-sec" aria-label={t('Ready to Look At')}>
@@ -909,7 +944,9 @@ export function Everything({ phone = false, onOpenAgent, onOpenMeeting, onOpenBo
   }, [devices, home.data])
   const counts = Object.fromEntries(LANES.map(([k]) => [k, things.filter((x) => x.lane === k).length]))
   const shown = things.filter((x) => (kind === 'all' || x.lane === kind) && (!mine || x.needs))
-  const needN = things.filter((x) => x.needs && x.online).length
+  // What needs you now, as Home counts it: one that has gone quiet is here too, said to be quiet.
+  const hush = (x) => x.needs && x.lane !== 'agent' && isQuiet(x)
+  const needN = things.filter((x) => x.needs && x.online && !hush(x)).length
   const open = (x) => {
     if (x.lane === 'agent') return onOpenAgent(x)
     if (x.lane === 'needs') return onOpenAgent({ ...x, a: { paneId: x.paneId, name: x.agent?.title, kind: x.agent?.kind } })
@@ -927,9 +964,9 @@ export function Everything({ phone = false, onOpenAgent, onOpenMeeting, onOpenBo
   const item = (x, showDev) => {
     const l = line(x)
     return (
-      <button key={x.uid || x.id} type="button" className={`ey-item ${x.needs ? 'needs' : ''}`} onClick={() => open(x)} disabled={!x.online} title={x.online ? t('Open') : t('{name} is offline', { name: x.device })}>
+      <button key={x.uid || x.id} type="button" className={`ey-item ${x.needs && !hush(x) ? 'needs' : ''}`} onClick={() => open(x)} disabled={!x.online} title={x.online ? t('Open') : t('{name} is offline', { name: x.device })}>
         {l.dot ? <StatusDot status={x.online ? l.dot : 'unknown'} size={8} /> : <span className="hm-ico"><Icon name={l.icon} size={12} /></span>}
-        <span className="ey-text"><b>{l.title}</b>{(l.sub || showDev) && <small>{showDev ? [x.device, l.sub].filter(Boolean).join(' · ') : l.sub}</small>}</span>
+        <span className="ey-text"><b>{l.title}</b>{(l.sub || showDev) && <small>{showDev ? [x.device, l.sub].filter(Boolean).join(' · ') : l.sub}</small>}{hush(x) && <em className="ey-quiet">{t('Quiet for {n}+ days', { n: QUIET_DAYS })}</em>}</span>
       </button>
     )
   }

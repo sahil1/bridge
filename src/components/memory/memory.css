@@ -1,24 +1,63 @@
-/* Memory, a page of its own (Memory.jsx). Its names use Meetings' dialog's rows (meetings.css). */
+/* Memory, a page of its own (Memory.jsx): the collections, a search and the names fill the pane, with
+   About You and what there is to look over in a column beside them. In a narrow pane (a phone), one
+   column: the collections and the search first, then About You and the rest, then the names. Its
+   names use meetings.css's rows. */
 .mm-view { display: grid; grid-template-rows: auto minmax(0, 1fr); grid-template-columns: minmax(0, 1fr); height: 100%; min-height: 0; min-width: 0; background: var(--pane); }
 .mm-count { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mm-home { min-height: 0; overflow: auto; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 14px; width: 100%; max-width: 900px; margin: 0 auto; padding: 18px clamp(14px, 3vw, 32px) 72px; }
-.mm-lede { margin: 0; max-width: 72ch; }
+.mm-scroll { min-height: 0; overflow: auto; container-type: inline-size; }
+.mm-page { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 12px 32px; align-items: start; width: 100%; max-width: 1180px; margin: 0 auto; padding: 6px clamp(14px, 3vw, 32px) 72px; }
+.mm-main { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 12px; min-width: 0; }
+.mm-side { display: grid; gap: 12px; min-width: 0; padding-top: 12px; }
+/* Nothing beside it yet (still loading, or memory couldn't be read): the one column. */
+.mm-page.solo { grid-template-columns: minmax(0, 1fr); max-width: 820px; }
+.mm-how { margin: 0; padding: 0 2px; line-height: 1.5; }
 
-/* About You, what may be the same, what adds little, and adding one: cards. */
+/* The collections and the search, kept at the top while the names scroll under them. */
+.mm-tools { position: sticky; top: 0; z-index: 2; display: grid; gap: 8px; padding: 12px 0 10px; background: var(--pane); box-shadow: 0 1px 0 var(--line); }
+.mm-colls button svg { color: var(--ink-3); }
+.mm-colls button.on svg { color: var(--accent); }
+.mm-find { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.mm-find .mt-search { flex: 1 1 220px; min-width: 0; }
+.mm-none { margin: 0; }
+.mm-empty { display: grid; justify-items: center; gap: 6px; margin-top: 12px; padding: 32px 16px; text-align: center; border-radius: 14px; border: 1px dashed var(--line-2); color: var(--ink-2); }
+.mm-empty p { margin: 0; max-width: 480px; line-height: 1.5; }
+.mm-empty > svg { color: var(--ink-3); margin-bottom: 4px; }
+.mm-cant > svg { color: var(--warning, var(--ink-3)); }
+.mm-cant .btn { margin-top: 6px; }
+
+/* About You, what to look over and adding one: cards. */
 .mm-card { display: grid; gap: 8px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--pane-2); min-width: 0; }
 .mm-card p { margin: 0; }
 .mm-card-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; min-width: 0; }
 .mm-card-head > svg { color: var(--ink-3); flex: none; }
 .mm-card-head b { font-weight: 600; font-size: 13.5px; }
-.mm-head-btn { margin-left: auto; }
-.mm-by { min-width: 0; }
 .mm-switch { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; font-size: 12.5px; color: var(--ink-2); cursor: pointer; }
 .mm-switch input { accent-color: var(--accent); width: 16px; height: 16px; margin: 0; }
-.mm-you-text { white-space: pre-wrap; line-height: 1.5; font-size: 13.5px; overflow-wrap: anywhere; }
+.mm-you-text { white-space: pre-wrap; line-height: 1.5; font-size: 13px; overflow-wrap: anywhere; }
+/* Its first lines, the rest with Show all. */
+.mm-you-text.clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 6; overflow: hidden; }
+.mm-you-more { color: var(--ink-2); }
 .mm-you.off .mm-you-text:not(.muted) { color: var(--ink-3); }
-.mm-you-edit { width: 100%; min-height: 120px; resize: vertical; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--pane); color: var(--ink); font: 13.5px/1.5 var(--font); }
+.mm-you-where { line-height: 1.45; }
+.mm-you-edit { width: 100%; min-height: 140px; resize: vertical; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--pane); color: var(--ink); font: 13px/1.5 var(--font); }
 .mm-you-edit:focus { outline: none; border-color: color-mix(in srgb, var(--accent) 50%, var(--line-2)); }
 .mm-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.mm-by { min-width: 0; margin-left: auto; }
+
+/* What there is to look over: a line each until it's opened. */
+.mm-looks { display: grid; gap: 8px; }
+.mm-look { gap: 10px; padding: 0; }
+.mm-look > :not(.mm-look-head) { margin: 0 14px; }
+.mm-look > :last-child:not(.mm-look-head) { margin-bottom: 12px; }
+.mm-look-head { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 42px; padding: 8px 12px 8px 14px; border-radius: 12px; color: var(--ink); text-align: left; font: 13px var(--font); }
+.mm-look-head:hover, .mm-look-head:focus-visible { background: color-mix(in srgb, var(--ink) 4%, transparent); outline: none; }
+.mm-look-head > svg:first-child { flex: none; color: var(--ink-3); }
+.mm-look-what { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 1px 10px; }
+.mm-look-what b { font-weight: 600; }
+/* Under what it is, in the column beside the names; at the end of the line when there's room. */
+.mm-look-go { flex: none; color: var(--accent); font-size: 12.5px; }
+.mm-look-chev { flex: none; color: var(--ink-3); transition: transform .15s; }
+.mm-look.open .mm-look-chev { transform: rotate(90deg); }
 .mm-rows { display: grid; gap: 2px; max-height: 360px; overflow: auto; padding: 2px 0; }
 .mm-same-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 6px 8px; border-radius: 8px; background: var(--pane); }
 .mm-same-what { flex: 1 1 200px; min-width: 0; font-size: 13px; overflow-wrap: anywhere; }
@@ -26,28 +65,20 @@
 .mm-tidy-row { padding: 5px 8px; border-radius: 8px; }
 .mm-tidy-row:hover { background: var(--pane); }
 .mm-tidy-row b { font-weight: 600; overflow-wrap: anywhere; }
-.mm-add { grid-template-columns: 1fr auto 1.2fr 1fr auto; align-items: center; gap: 6px; }
+.mm-add { grid-template-columns: 1fr auto 1.2fr 1fr auto; align-items: center; gap: 6px; margin-top: 12px; }
 .mm-add :is(input, select), .mm-edit :is(input, select) { height: 32px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--pane); color: var(--ink); font: 13px var(--font); outline: none; min-width: 0; }
 .mm-add :is(input, select):focus, .mm-edit :is(input, select):focus { border-color: color-mix(in srgb, var(--accent) 50%, var(--line-2)); }
 .mm-add .error-text { grid-column: 1 / -1; margin: 0; }
 
-/* The collections, the search and how they're grouped. */
-.mm-tools { display: grid; gap: 8px; }
-.mm-colls button svg { color: var(--ink-3); }
-.mm-colls button.on svg { color: var(--accent); }
-.mm-find { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.mm-find .mt-search { flex: 1 1 220px; min-width: 0; }
-.mm-empty { display: grid; justify-items: center; gap: 4px; padding: 32px 16px; text-align: center; border-radius: 14px; border: 1px dashed var(--line-2); color: var(--ink-2); }
-.mm-empty p { margin: 0; max-width: 460px; }
-.mm-empty > svg { color: var(--ink-3); margin-bottom: 6px; }
-
-/* One name: what it is, then its kind, yours or learned, where it came from and Edit. */
+/* One name: what it is, then its kind, yours or learned, where it came from and Edit; on a narrow
+   pane, Edit beside its name and the rest under it. */
 .mm-item { padding: 6px 4px 6px 22px; border-radius: 8px; }
 .mm-item:hover { background: var(--pane-2); }
 .mm-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
 /* Its tags go under it when the two don't fit side by side. */
 .mm-line > .mt-mem-what { flex: 1 1 260px; }
 .mm-tags { display: inline-flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 6px; flex: 0 1 auto; min-width: 0; margin-left: auto; }
+.mm-pen { flex: none; }
 .mm-kind { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line-2); color: var(--ink-2); white-space: nowrap; }
 .mm-kind.guess { border-style: dashed; color: var(--ink-3); }
 .mm-from { white-space: nowrap; color: var(--ink-2); }
@@ -69,16 +100,35 @@
 .mm-note { display: flex; align-items: flex-start; gap: 7px; margin: 0; padding: 9px 12px; border-radius: 10px; background: var(--pane-2); }
 .mm-note svg { flex: none; margin-top: 1px; }
 
+/* A narrow pane: one column, in the order it's read. The collections and the search first; while
+   you search, the names straight under it. */
+@container (max-width: 880px) {
+  .mm-page { grid-template-columns: minmax(0, 1fr); padding-top: 14px; }
+  .mm-main, .mm-side { display: contents; }
+  .mm-main > *, .mm-side > * { order: 5; }
+  .mm-main > .mm-add { order: 0; margin-top: 0; }
+  .mm-main > .mm-tools { order: 1; position: static; padding: 0; box-shadow: none; }
+  .mm-side > .mm-you { order: 2; }
+  .mm-side > .mm-looks { order: 3; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); align-items: start; }
+  .mm-look-go { margin-left: auto; }
+  .mm-side > .mm-how { order: 9; margin-top: 8px; }
+  .mm-you-text.clamp { -webkit-line-clamp: 3; }
+  .mm-page.finding :is(.mm-you, .mm-looks, .mm-how) { display: none; }
+}
+@container (max-width: 560px) {
+  .mm-line > .mt-mem-what { flex: 1 1 0; }
+  .mm-pen { order: 1; }
+  .mm-tags { order: 2; flex-basis: 100%; justify-content: flex-start; margin-left: 0; }
+}
 @media (max-width: 700px) {
-  .mm-tags { justify-content: flex-start; margin-left: 0; }
   .mm-add, .mm-edit { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .mm-add > input:first-child { grid-column: 1 / -1; }
 }
 /* On a phone: whole targets, and fields iOS doesn't zoom into. */
-.app.narrow .mm-home { padding-bottom: 96px; }
+.app.narrow .mm-page { padding-bottom: 96px; }
 .app.narrow .mm-view :is(.mt-search, .mm-add input, .mm-add select, .mm-edit input, .mm-edit select, .mm-you-edit) { font-size: 16px; }
 .app.narrow .mm-view :is(.mt-search, .mm-add input, .mm-add select, .mm-edit input, .mm-edit select) { height: 40px; }
-.app.narrow .mm-view :is(.btn, .ghost-btn, .mt-places button, .seg button, .mt-fold-head, .mt-mem-meeting, .mm-switch, .mm-tidy-row) { min-height: 40px; }
+.app.narrow .mm-view :is(.btn, .ghost-btn, .link-btn, .mt-places button, .seg button, .mt-fold-head, .mt-mem-meeting, .mm-switch, .mm-tidy-row, .mm-look-head) { min-height: 40px; }
 .app.narrow .mm-view .seg.small-seg { display: flex; width: 100%; }
 .app.narrow .mm-view .seg.small-seg button { flex: 1 1 0; justify-content: center; }
 .app.narrow .mm-view :is(.mm-pen, .mm-switch) { min-width: 44px; justify-content: center; }

@@ -262,35 +262,18 @@ html.is-float, html.is-float body, html.is-float #root { background: transparent
 .mt-line-edit-acts { display: flex; gap: 6px; }
 .mt-selfix { position: absolute; z-index: 20; box-shadow: var(--shadow-lg, 0 8px 22px rgb(0 0 0 / .18)); }
 
-/* Dialogs: Fix a word, Transcribe again, Meeting memory. */
+/* Dialogs: Fix a word, Transcribe again. */
 .mt-dialog-back { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: 16px; background: rgb(0 0 0 / .32); }
 .mt-dialog { display: grid; gap: 12px; width: min(460px, 100%); max-height: calc(100vh - 32px); overflow: auto; padding: 16px; border-radius: 16px; border: 1px solid var(--line-2); background: var(--pane); color: var(--ink); box-shadow: 0 20px 50px rgb(0 0 0 / .3); }
-.mt-dialog.wide { width: min(760px, 100%); }
 .mt-dialog > header { display: flex; align-items: center; justify-content: space-between; font-size: 15px; }
 .mt-fix { display: grid; gap: 10px; }
 .mt-fix > label:not(.st-check) { display: grid; gap: 4px; font-size: 12.5px; color: var(--ink-2); }
-.mt-fix input:not([type="checkbox"]), .mt-fix select, .mt-mem-add input, .mt-mem-row input { height: 32px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--pane); color: var(--ink); font: 13px var(--font); outline: none; min-width: 0; }
-.mt-fix input:focus, .mt-mem-add input:focus, .mt-mem-row input:focus { border-color: color-mix(in srgb, var(--accent) 50%, var(--line-2)); }
+.mt-fix input:not([type="checkbox"]), .mt-fix select { height: 32px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--pane); color: var(--ink); font: 13px var(--font); outline: none; min-width: 0; }
+.mt-fix input:focus { border-color: color-mix(in srgb, var(--accent) 50%, var(--line-2)); }
 .mt-fix p { margin: 0; }
 .mt-dialog-acts { display: flex; justify-content: flex-end; gap: 8px; }
-.mt-mem-about { margin: -4px 0 0; }
-.mt-mem-add { display: grid; grid-template-columns: 1fr 1.2fr 1fr auto; gap: 6px; }
-.mt-mem-list { display: grid; gap: 4px; }
-.mt-mem-row { display: grid; grid-template-columns: 1fr 1.2fr 1fr auto auto; gap: 6px; align-items: center; }
-.mt-mem-row input { border-color: transparent; background: var(--pane-2); }
-.mt-mem-row .mt-mem-term { font-weight: 600; }
 .mt-mem-src { min-width: 56px; text-align: center; font-size: 11px; padding: 1px 7px; border-radius: 999px; background: var(--pane-3); color: var(--ink-3); }
 .mt-mem-src.you { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
-@media (max-width: 640px) {
-  .mt-mem-add { grid-template-columns: 1fr 1fr; }
-  /* Name and heard as, then the note and whose it is; remove at the end of the first row. */
-  .mt-mem-row { grid-template-columns: 1fr 1fr auto; grid-template-areas: "term heard del" "note src ."; padding: 6px 0; border-bottom: 1px solid var(--line); }
-  .mt-mem-row > :nth-child(1) { grid-area: term; }
-  .mt-mem-row > :nth-child(2) { grid-area: heard; }
-  .mt-mem-row > :nth-child(3) { grid-area: note; }
-  .mt-mem-row > :nth-child(4) { grid-area: src; justify-self: start; }
-  .mt-mem-row > :nth-child(5) { grid-area: del; }
-}
 
 /* Settings › Meetings › Save notes: a folder, subfolders and a file name for each kind of note. */
 .st-group { display: grid; gap: 6px; padding: 10px 12px; border-radius: 10px; background: var(--pane-2); }
@@ -993,7 +976,7 @@ button.mt-from-chip:hover { color: var(--ink); border-color: color-mix(in srgb, 
 .mi-written li span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .mi-merge { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .mi-merge-pick { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font-size: 13px; }
-/* Groups that fold (tools.jsx Fold): a person's meetings, People, meeting memory. */
+/* Groups that fold (tools.jsx Fold): a person's meetings, People, Memory's names. */
 .mt-fold { border-top: 1px solid var(--line); }
 .mt-fold:first-child { border-top: 0; }
 .mt-fold-head { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 6px 6px; border-radius: 8px; color: var(--ink); text-align: left; font: 600 13px var(--font); }
@@ -1004,28 +987,20 @@ button.mt-from-chip:hover { color: var(--ink); border-color: color-mix(in srgb, 
 .mt-fold-n { flex: none; padding: 1px 7px; border-radius: 999px; background: var(--pane-3); color: var(--ink-2); font-size: 11px; font-weight: 600; }
 .mt-fold-extra { flex: none; margin-left: auto; font-weight: 400; }
 .mt-fold-body { padding: 0 0 8px; }
-/* Meeting memory, grouped: a name on a line with how it's heard and its note, its meetings under it. */
-.mt-mem-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.mt-mem-tools .mt-search { flex: 1 1 220px; min-width: 0; }
-.mt-mem-only { margin: 0; }
-.mt-mem-list { gap: 0; }
+/* Memory's names (memory/Memory.jsx), grouped: a name on a line with how it's heard and its note,
+   its meetings under it. */
+.mt-mem-list { display: grid; gap: 0; }
 .mt-mem-group { display: grid; gap: 1px; }
-.mt-mem-group .mt-mem-row { padding-left: 22px; }
-.mt-mem-item { padding: 5px 4px 5px 22px; border-radius: 8px; }
-.mt-mem-item:hover { background: var(--pane-2); }
-.mt-mem-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .mt-mem-what { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; font-size: 13px; }
 .mt-mem-what b { font-weight: 600; overflow-wrap: anywhere; }
 .mt-mem-heard { color: var(--ink-3); }
 .mt-mem-heard i { white-space: nowrap; margin-left: 4px; padding: 0 6px; border-radius: 6px; background: var(--pane-3); color: var(--ink-2); font-style: normal; }
 .mt-mem-note { overflow-wrap: anywhere; }
-.mt-mem-in { flex: none; white-space: nowrap; color: var(--ink-2); }
 .mt-mem-meetings { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 0 2px; }
 .mt-mem-meeting { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; min-width: 0; padding: 3px 8px; border-radius: 7px; border: 1px solid var(--line); color: var(--ink-2); text-align: left; }
 .mt-mem-meeting > span:first-of-type { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mt-mem-meeting > .muted { flex: none; }
 .mt-mem-meeting:hover, .mt-mem-meeting:focus-visible { background: var(--pane-2); color: var(--ink); outline: none; }
-.mt-mem-latest { justify-self: start; margin: 0 0 4px 22px; }
 .mt-mem-more { justify-self: start; margin-left: 16px; }
 /* Meeting Insights turned itself on: said once, over the list. */
 .mt-insights-on { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--series-1) 35%, var(--line)); background: color-mix(in srgb, var(--series-1) 7%, var(--pane)); }
@@ -1052,10 +1027,3 @@ button.mt-from-chip:hover { color: var(--ink); border-color: color-mix(in srgb, 
 .app.narrow .mt-insights-on { flex-wrap: wrap; }
 .app.narrow .mt-insights-acts { width: 100%; justify-content: flex-end; }
 .app.narrow .mt-insights-acts :is(.btn, .ghost-btn) { min-height: 40px; min-width: 40px; justify-content: center; font-size: 13px; }
-@media (max-width: 899px) {
-  .mt-dialog :is(.mt-fold-head, .mt-mem-meeting, .mt-mem-in, .mt-mem-only button, .mt-mem-tools .seg button) { min-height: 40px; }
-  .mt-mem-tools .seg { display: flex; width: 100%; }
-  .mt-mem-tools .seg button { flex: 1 1 0; justify-content: center; }
-  .mt-mem-item, .mt-mem-group .mt-mem-row { padding-left: 4px; }
-  .mt-mem-latest { margin-left: 4px; }
-}

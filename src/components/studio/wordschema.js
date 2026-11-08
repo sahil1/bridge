@@ -1,4 +1,4 @@
-import { Node, Mark, Extension } from '@tiptap/core'
+import { Node, Mark, Extension, InputRule } from '@tiptap/core'
 import Document from '@tiptap/extension-document'
 import Text from '@tiptap/extension-text'
 import HardBreak from '@tiptap/extension-hard-break'
@@ -45,8 +45,22 @@ export const WordParagraph = Node.create({
   addOptions() { return { doc: null } },
   addAttributes() { return PARA },
   parseHTML() {
-    const own = (el) => ({ s: el.getAttribute('data-s') || null, al: el.getAttribute('data-al') || null, num: el.getAttribute('data-num') ? Number(el.getAttribute('data-num')) : null, lvl: el.getAttribute('data-lvl') ? Number(el.getAttribute('data-lvl')) : null })
-    const heading = (n) => (el) => (el.getAttribute('data-s') ? own(el) : { s: this.options.doc?.headingStyle?.(n) || null })
+    // A list paragraph: its own list when it's this document's (copied within it), else one of its
+    // kind (data-list: from another document, or a list pasted in; paste.js), each pasted list its own.
+    const listOf = (el) => {
+      const d = this.options.doc
+      const n = el.getAttribute('data-num') ? Number(el.getAttribute('data-num')) : null
+      const kind = el.getAttribute('data-list')
+      const lvl = Math.max(0, Math.min(8, Number(el.getAttribute('data-lvl')) || 0))
+      if (n != null && (n === 0 || !d?.hasNum || d.hasNum(n))) return { num: n, lvl: n ? lvl : null }
+      // In a style that's a list here (List Bullet), its style says so.
+      const s = el.getAttribute('data-s')
+      if (!kind || !d?.listNum || (s && d.get?.(s) && d.styleNum(s))) return { num: null, lvl: null }
+      const id = el.getAttribute('data-lid')
+      return { num: id && kind === 'number' ? d.pastedNum(kind, id) : d.listNum(kind), lvl }
+    }
+    const own = (el) => ({ s: el.getAttribute('data-s') || null, al: el.getAttribute('data-al') || null, ...listOf(el) })
+    const heading = (n) => (el) => ({ ...own(el), s: el.getAttribute('data-s') || this.options.doc?.headingStyle?.(n) || null })
     return [{ tag: 'p', getAttrs: own }, ...[1, 2, 3, 4, 5, 6].map((n) => ({ tag: `h${n}`, getAttrs: heading(n) }))]
   },
   renderHTML({ node }) {
@@ -55,6 +69,9 @@ export const WordParagraph = Node.create({
     const s = a.s || d?.styles?.normal || null
     const level = d?.levelOf?.(s)
     const tag = level != null && level < 6 ? `h${level + 1}` : 'p'
+    // Its list's kind, for what's copied out of it (another app gets a list: paste.js).
+    const numId = a.num === 0 ? null : a.num ?? d?.styleNum?.(s) ?? null
+    const kind = numId ? d?.listKind?.(numId, a.lvl || 0) : null
     const css = []
     if (a.al && ALIGN[a.al]) css.push(`text-align:${ALIGN[a.al]}`)
     const lh = lineCss(a.ln)
@@ -67,7 +84,7 @@ export const WordParagraph = Node.create({
     }
     if (a.ir != null) css.push(`margin-right:${tw(a.ir)}px`)
     if (a.mz && !node.content.size) css.push(`font-size:${a.mz / 2}pt`)
-    return [tag, { ...(s ? { 'data-s': s } : {}), ...(a.al ? { 'data-al': a.al } : {}), ...(a.num != null ? { 'data-num': a.num, 'data-lvl': a.lvl || 0 } : {}), ...(css.length ? { style: css.join(';') } : {}) }, 0]
+    return [tag, { ...(s ? { 'data-s': s } : {}), ...(a.al ? { 'data-al': a.al } : {}), ...(a.num != null ? { 'data-num': a.num, 'data-lvl': a.lvl || 0 } : {}), ...(kind ? { 'data-list': kind, ...(a.num == null ? { 'data-lvl': a.lvl || 0 } : {}) } : {}), ...(css.length ? { style: css.join(';') } : {}) }, 0]
   },
 })
 
@@ -275,19 +292,42 @@ const WordCell = TableCell.extend({
 })
 
 // Enter after a heading starts a paragraph in the style the heading names next (Normal), as Word
-// does; Enter or Backspace in an empty list item takes it out of the list.
+// does; Enter or Backspace in an empty list item takes it out of the list, and Enter after a ticked
+// item starts one that isn't. Typed at the start of a paragraph, as Google Docs and Word take them:
+// "- " or "* " starts a bulleted list, "1. " a numbered one (going on from one just above), "[] " a
+// checklist; Backspace straight after puts back what was typed.
+const listed = (p) => p.attrs.num != null && p.attrs.num !== 0
 const WordKeys = Extension.create({
   name: 'wordKeys',
   addOptions() { return { doc: null } },
+  addInputRules() {
+    const d = this.options.doc
+    const rule = (find, kind) => new InputRule({
+      find,
+      handler: ({ state, range }) => {
+        const $from = state.doc.resolve(range.from)
+        const p = $from.parent
+        if (p.type.name !== 'paragraph' || listed(p) || !d?.listNum) return null
+        const i = $from.index($from.depth - 1)
+        const above = i > 0 ? $from.node($from.depth - 1).child(i - 1) : null
+        const was = above?.type.name === 'paragraph' && listed(above) ? d.listKind(above.attrs.num, above.attrs.lvl) : null
+        const same = was === kind || (kind === 'check' && was === 'checked')
+        const num = same && was === kind ? above.attrs.num : d.listNum(kind, { fresh: true })
+        state.tr.delete(range.from, range.to).setNodeMarkup($from.before(), null, { ...p.attrs, num, lvl: same ? above.attrs.lvl || 0 : 0 })
+        return undefined
+      },
+    })
+    return [rule(/^\s*[-*•]\s$/, 'bullet'), rule(/^\d{1,3}[.)]\s$/, 'number'), rule(/^\[ ?\]\s$/, 'check')]
+  },
   addKeyboardShortcuts() {
     const plain = { s: null, ppr: '', al: null, ln: null, sb: null, sa: null, il: null, ir: null, fi: null, num: null, lvl: null }
-    const listed = (p) => p.attrs.num != null && p.attrs.num !== 0
     return {
       Enter: ({ editor }) => {
         const { $from, empty } = editor.state.selection
         const p = $from.parent
         if (p.type.name !== 'paragraph' || !empty) return false
         if (listed(p) && !p.content.size) return editor.commands.updateAttributes('paragraph', { num: this.options.doc?.styleNum?.(p.attrs.s) ? 0 : null, lvl: null })
+        if (listed(p) && this.options.doc?.listKind?.(p.attrs.num, p.attrs.lvl) === 'checked') return editor.chain().splitBlock().updateAttributes('paragraph', { num: this.options.doc.listNum('check') }).run()
         if ($from.parentOffset !== p.content.size) return false
         const d = this.options.doc
         const s = p.attrs.s || d?.styles?.normal
@@ -296,6 +336,7 @@ const WordKeys = Extension.create({
         return editor.chain().splitBlock().updateAttributes('paragraph', { ...plain, s: next === d.styles.normal ? null : next }).run()
       },
       Backspace: ({ editor }) => {
+        if (editor.commands.undoInputRule()) return true
         const { $from, empty } = editor.state.selection
         const p = $from.parent
         if (!empty || $from.parentOffset !== 0 || p.type.name !== 'paragraph' || !listed(p)) return false

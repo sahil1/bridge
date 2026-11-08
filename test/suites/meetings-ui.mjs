@@ -211,7 +211,7 @@ process.stdout.write('@@EV@@Pricing review (Work)\\u00a6' + d.getFullYear() + '-
   await p.waitForSelector('.ctx-menu', { timeout: 4000 }).catch(() => {})
   ok(await solid(p, '.ctx-menu'), 'the right-click menu is solid over the coloured sidebar')
   const items = await p.locator('.ctx-menu button').allInnerTexts()
-  ok(['Open', 'Save as Markdown', 'Fix a word everywhere', 'Meeting memory', 'Move to a folder…', 'Archive', 'Delete meeting…'].every((t) => items.includes(t)), 'right-click a meeting: its menu, with folders and the archive', items)
+  ok(['Open', 'Save as Markdown', 'Fix a word everywhere', 'Open Memory', 'Move to a folder…', 'Archive', 'Delete meeting…'].every((t) => items.includes(t)), 'right-click a meeting: its menu, with folders and the archive', items)
   await shot(p, `${tag}rail-menu`)
   await p.locator('.ctx-menu button', { hasText: 'Move to a folder…' }).click()
   ok((await p.locator('.mt-folder-opt').allInnerTexts()).map((x) => x.trim()).join('|') === 'Planning|Vendors', 'Move to a folder offers the folders in use', await p.locator('.mt-folder-opt').allInnerTexts())

@@ -237,29 +237,30 @@ export function StudioHome({ onOpen }) {
 
 // ---------- One file ----------
 // Saved with ⌘S or Save, only over the version you loaded; a change from an agent or another app
-// while it's open is shown at once when you've changed nothing, and offered when you have.
+// while it's open is shown at once when you've changed nothing, and offered when you have. A
+// document saves itself a moment after you stop typing, as Google Docs does: nothing to remember,
+// nothing lost. Its saves for a few minutes are one version (server/studio.js), and Save or ⌘S
+// keeps one of its own.
+const SAVES_ITSELF = new Set(['doc'])
+const AUTO_MS = 1200
 const WHO = { you: tx('You'), agent: tx('An agent'), outside: tx('Changed outside Studio'), restored: tx('Put back'), opened: tx('When it was first opened here') }
 // Nothing in a Word or an Excel file is lost by saving it here, so neither is warned about before
 // its first save; an editor still says what one change can't keep (warn.text).
 const RISKY = {}
-// A PowerPoint is written again from its slides in Studio's layouts (editors/DeckEditor.jsx).
-RISKY['.pptx'] = tx('Saving here writes the PowerPoint again from its slides as Studio shows them: their titles, text, lists, pictures, tables, notes and theme, in Studio\'s layouts. Its own shapes, charts, animations and exact positions aren\'t kept; the file as it was stays in its versions, and Ask an agent changes it in place.')
 // An Excel file is written back into itself: what changed here, and the rest as it was.
 const SHEET_KEEPS = tx('Saved into the Excel file itself: what you change here is written in, and everything else in it (charts, pictures, pivot tables, comments, macros) stays as it was. Anything a change can\'t keep is said before it\'s saved.')
 // What saving keeps, in each kind of file: said under the file (its kind, in the status line). The
 // editors offer only what's kept.
 const KEEPS = {
   '.docx': tx('Saving here writes only what you changed. Everything else in the file (its styles, headers and footers, comments, tracked changes, fields and page setup) stays exactly as it was, and the file as it was stays in its versions.'), '.xlsx': SHEET_KEEPS, '.xlsm': SHEET_KEEPS,
-  '.md': tx('Saved as Markdown, as written: headings, bold, italic, strikethrough, code, lists, quotes, links, tables and pictures. Markdown has no underline or colours, so they aren\'t offered.'),
+  '.md': tx('Saved as Markdown, as written: headings, bold, italic, strikethrough, code, lists, checklists, quotes, links, tables and pictures (a picture you put in is saved beside it, in images). Markdown has no underline or colours, so they aren\'t offered.'),
   '.txt': tx('Saved as plain text, as it is.'),
-  '.csv': tx('Saved as a {kind} file in its own separator, encoding and line endings: the first sheet\'s values, each line you didn\'t change written as it was. Formulas (saved as their results), formats and other sheets aren\'t part of a {kind} file.'),
+  '.csv': tx('Saved as a {kind} file in its own separator, encoding and line endings: the first sheet\'s values as they show (a number in its format, like 1,200.50, 15% or 2026-04-01), each line you didn\'t change written as it was. Formulas (saved as their results), other formats and other sheets aren\'t part of a {kind} file.'),
   deck: tx('Saved as a Markdown deck, as written: slides between lines of ---. PowerPoint and PDF make a copy beside it.'),
-  '.pptx': tx('Saved as a PowerPoint, written again from its slides in Studio\'s layouts: their titles, text, lists, pictures, tables, notes and theme. Export makes a Markdown deck of it beside it.'),
+  '.pptx': tx('Saved into the PowerPoint itself: only the slides you change are written, and everything else in it (its masters, layouts, theme, charts, animations and comments) stays exactly as it was. The file as it was stays in its versions.'),
   '.pdf': tx('Shown here, not edited: Ask an agent to change it, or the file it was made from.'),
   '.html': tx('Saved as it\'s written: one HTML file that works on its own.'),
 }
-// A PowerPoint whose saves go over it: one you chose to replace, or a copy Studio made. Asked once.
-const replaces = (f, yes = false) => { const k = `cc-studio-pptx:${f.root}\n${f.path}`; try { if (yes) localStorage.setItem(k, '1'); return !!localStorage.getItem(k) } catch { return yes } }
 const keepsOf = (kind, ext) => {
   if (kind === 'deck' && ext !== '.pptx') return t(KEEPS.deck)
   if (ext === '.csv' || ext === '.tsv') return t(KEEPS['.csv'], { kind: ext.slice(1).toUpperCase() })
@@ -309,6 +310,29 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
   const wrote = useRef(0) // made so far
   useEffect(() => { metaRef.current = meta }, [meta])
   useEffect(() => { dirtyRef.current = dirty }, [dirty])
+  // Saving as you go (a document): each change counted, so one made while a save is on its way
+  // isn't taken as saved; the save waiting for typing to stop; one asked for while another's on
+  // its way, made after it. Not while a change from elsewhere waits for you to pick.
+  const edits = useRef(0)
+  // The file on the page now (null once the page is gone), for a save that ends after it's left.
+  const shownFile = useRef(f)
+  useEffect(() => { shownFile.current = f; return () => { shownFile.current = null } }, [f])
+  const autoAt = useRef(null)
+  const inFlight = useRef(false)
+  const queued = useRef(null) // 'you' (Save, ⌘S) or 'auto'
+  const saveRef = useRef(null)
+  const conflictRef = useRef(null)
+  useEffect(() => { conflictRef.current = conflict }, [conflict])
+  const later = useCallback((ms = AUTO_MS) => {
+    clearTimeout(autoAt.current)
+    autoAt.current = setTimeout(() => { autoAt.current = null; saveRef.current?.({ auto: true }) }, ms)
+  }, [])
+  const edited = useCallback((v) => {
+    setDirty(v)
+    if (!v) return
+    edits.current++
+    if (SAVES_ITSELF.has(metaRef.current?.kind) && !conflictRef.current) later()
+  }, [later])
   const packs = useDesignPacks()
   const folders = useFolders()
   const load = useCallback(async () => {
@@ -353,43 +377,62 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
     window.addEventListener('focus', back)
     return () => { clearInterval(id); window.removeEventListener('focus', back) }
   }, [f, load])
-  const save = useCallback(async ({ force = false, ok = false } = {}) => {
+  const save = useCallback(async ({ force = false, ok = false, auto = false, leaving = false } = {}) => {
     if (!handle.current || !meta || READ_ONLY(meta.kind, meta.ext)) return
-    // A PowerPoint is redrawn in Studio's layouts: asked once per file, its copy the default.
-    if (meta.ext === '.pptx' && !ok && !replaces(f)) { setWarn(meta.ext); return }
-    if (RISKY[meta.ext] && !ok && meta.ext !== '.pptx') { try { if (!localStorage.getItem(`cc-studio-said${meta.ext}`)) { setWarn(meta.ext); return } } catch { /* say it again next time */ } }
-    setSaving(true); setNote(null)
+    // One at a time: asked while one's on its way, it's made after it. Leaving the file, what's in
+    // it now is taken at once and saved after the one on its way.
+    if (inFlight.current && !leaving) { queued.current = auto && queued.current !== 'you' ? 'auto' : 'you'; return }
+    if (auto && !leaving) { clearTimeout(autoAt.current); autoAt.current = null; if (conflictRef.current || !dirtyRef.current) return }
+    if (RISKY[meta.ext] && !ok) { try { if (!localStorage.getItem(`cc-studio-said${meta.ext}`)) { setWarn(meta.ext); return } } catch { /* say it again next time */ } }
+    // The file left is saved out of sight: the page shows the next one's state.
+    if (!leaving) setSaving(true)
+    if (!auto) setNote(null)
     writing.current++
+    const ahead = inFlight.current // the save on its way: the file's time once it's made
+    let finish
+    const mine = new Promise((r) => { finish = r })
+    inFlight.current = mine
+    const n = edits.current
+    const mtime = metaRef.current?.mtime ?? meta.mtime
     try {
       // An editor that can't keep everything in the file says what, before it's saved (a sheet).
-      let bytes = await handle.current.save()
+      const taking = handle.current.save()
+      const was = ahead ? await ahead : null
+      let bytes = await taking
       if (bytes && typeof bytes === 'object' && Array.isArray(bytes.notKept)) {
         if (bytes.notKept.length && !ok) { setWarn({ text: t('Saving here can\'t keep {what}. Save anyway? The file as it is now stays in its versions.', { what: bytes.notKept.join('; ') }) }); return }
         bytes = bytes.bytes
       }
-      const r = await saveFile(f, bytes, { mtime: meta.mtime, force })
+      const r = await saveFile(f, bytes, { mtime: was ?? mtime, force, auto })
+      finish(r.mtime)
+      // The page went on to another file meanwhile: what it shows now isn't this one's.
+      if (shownFile.current !== f) return
       metaRef.current = { ...metaRef.current, mtime: r.mtime, size: r.size, versions: r.versions }
       setMeta((m) => ({ ...m, mtime: r.mtime, size: r.size, versions: r.versions }))
-      setDirty(false); setConflict(null)
-      setNote({ text: t('Saved.'), brief: true })
+      // Changed again while it saved: still unsaved, and saved again in a moment.
+      if (edits.current === n) setDirty(false)
+      else if (SAVES_ITSELF.has(meta.kind)) later()
+      setConflict(null)
+      if (auto) setNote((x) => (x?.error ? null : x))
+      else setNote({ text: t('Saved.'), brief: true })
     } catch (e) {
-      if (e.conflict) setConflict({ who: t('Something else'), mtime: null })
+      // Left by then: said all the same, the page being gone.
+      if (shownFile.current !== f) window.alert(e.conflict ? t('{name} changed elsewhere while you were editing it, so your last changes weren\'t saved over it. Open it to see.', { name: meta.name }) : t("Couldn't save {name}: {error}", { name: meta.name, error: e.message }))
+      else if (e.conflict) setConflict({ who: t('Something else'), mtime: null })
       else setNote({ text: t("Couldn't save it: {error}", { error: e.message }), error: true })
-    } finally { writing.current--; wrote.current++; setSaving(false) }
-  }, [f, meta])
-  // Saved as a copy beside it ("<name> (Studio).pptx", never over another), which opens and is
-  // saved to from then on; this one goes back to the file as it is.
-  const saveCopy = async () => {
-    setWarn(null); setSaving(true); setNote(null)
-    try {
-      const bytes = await handle.current.save()
-      const r = await api('/studio/new', { method: 'POST', body: { root, dir: rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : '', name: `${(meta?.name || rel.split('/').pop()).replace(/\.pptx$/i, '')} (Studio).pptx`, data: base64(bytes) } })
-      replaces({ root, path: r.path }, true)
-      await load()
-      setNote({ text: t('Saved as {name}, a copy beside the original, which is as it was.', { name: r.name }) })
-      onOpen?.({ root, path: r.path })
-    } catch (e) { setNote({ text: t("Couldn't save it: {error}", { error: e.message }), error: true }) } finally { setSaving(false) }
-  }
+    } finally {
+      finish(null)
+      writing.current--; wrote.current++
+      if (!leaving) setSaving(false)
+      if (inFlight.current === mine) inFlight.current = null
+      const q = queued.current
+      queued.current = null
+      if (q && shownFile.current === f) setTimeout(() => saveRef.current?.({ auto: q === 'auto' }), 0)
+    }
+  }, [f, meta, later])
+  useEffect(() => { saveRef.current = save }, [save])
+  // Leaving the file (another opened here, or Studio's Files) with a save still waiting: made now.
+  useEffect(() => () => { if (autoAt.current) { clearTimeout(autoAt.current); autoAt.current = null; saveRef.current?.({ auto: true, leaving: true }) } }, [f])
   useEffect(() => {
     const key = (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') { e.preventDefault(); save() } }
     window.addEventListener('keydown', key)
@@ -458,15 +501,7 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
           <button type="button" className="btn small" onClick={() => save({ force: true, ok: true })}>{t('Save mine over it')}</button>
         </div>
       )}
-      {warn === '.pptx' && (
-        <div className="sd-bar sd-conflict" role="alertdialog">
-          <span>{t(RISKY[warn])}</span>
-          <button type="button" className="btn small primary" onClick={saveCopy} title={t('A copy beside it, which opens here; the original stays as it is')}>{t('Save as a copy')}</button>
-          <button type="button" className="btn small" onClick={() => { replaces(f, true); setWarn(null); save({ ok: true }) }}>{t('Replace the original')}</button>
-          <button type="button" className="ghost-btn" onClick={() => setWarn(null)}>{t('Not now')}</button>
-        </div>
-      )}
-      {warn && warn !== '.pptx' && (
+      {warn && (
         <div className="sd-bar sd-conflict" role="alertdialog">
           <span>{typeof warn === 'string' ? t(RISKY[warn]) : warn.text}</span>
           <button type="button" className="btn small primary" onClick={() => { try { if (typeof warn === 'string') localStorage.setItem(`cc-studio-said${warn}`, '1') } catch { /* asks again next time */ } setWarn(null); save({ ok: true }) }}>{t('Save')}</button>
@@ -476,7 +511,7 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
       <div className={`sd-body${panel ? ' with-panel' : ''}`}>
         <div className="sd-editor">
           {!meta || !data ? opening
-            : <Suspense fallback={opening}><Editor key={gen} file={{ ...meta, root, path: rel }} data={data} onDirty={setDirty} onStats={setStats} handle={handle} packs={packs.list} onOpen={onOpen} /></Suspense>}
+            : <Suspense fallback={opening}><Editor key={gen} file={{ ...meta, root, path: rel }} data={data} onDirty={edited} onStats={setStats} handle={handle} packs={packs.list} onOpen={onOpen} /></Suspense>}
         </div>
         {panel === 'versions' && meta && <Versions f={f} ext={meta.ext} versions={meta.versions} onRestore={restore} onClose={() => setPanel(null)} />}
       </div>
