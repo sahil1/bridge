@@ -8,10 +8,13 @@
 // is typed; Yes goes in once; finished work follows, and Clear takes it off until it has something
 // new. In the app: the top bar's chip counts both devices and opens the inbox; Yes, More answers…
 // and Yes to all answer agents on the other device; at phone width it's the whole screen, nothing
-// wider than the phone; and a phone notification's link opens it at its agent.
+// wider than the phone; and a phone notification's link opens it at its agent. Last, when you were
+// last on an agent (its chat opened, not a reconnect; a message typed to another in its project), and
+// without Home a wait quiet for days left out of the chip, the devices menu and the title, folded in
+// the inbox.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, startRelay, checks, until, browser, page, shot, noServiceWorker, OUT, TEST } from '../lib/harness.mjs'
+import { startKit, startRelay, checks, until, browser, page, shot, noServiceWorker, changeAnswer, OUT, TEST } from '../lib/harness.mjs'
 
 const { ok, done } = checks('needs-you')
 
@@ -52,11 +55,15 @@ for (const [k, v] of Object.entries(was)) { if (v === undefined) delete process.
   const review = ny.itemOf(agent({ status: 'done' }), { p: { text: 'Fixed the rounding; all 40 tests pass.' } })
   ok(review.type === 'review' && review.text === 'Fixed the rounding; all 40 tests pass.' && fin.type === 'review' && fin.pr === 'https://github.com/acme/shop/pull/7', 'finished work, with what it said last, and a cloud agent\'s pull request', [review, fin])
   ok(ny.itemOf(agent({ status: 'working' })) === null && ny.itemOf(agent({ status: 'idle' })) === null && ny.itemOf({ ...agent({}), shellTab: true }) === null, 'nothing for an agent at work, one idle, or a terminal')
-  const t0 = Date.parse('2026-10-31T10:00:00Z')
+  // Times by the minute, counted back from now (minutes ago).
+  const t0 = Date.now() - 10 * 60000
   const when = (m) => new Date(t0 + m * 60000).toISOString()
   const mix = [{ ...review, since: when(9) }, { ...failed, since: when(1) }, { ...pick, since: when(5) }, { ...perm, since: when(8) }, { ...plan, since: when(2) }]
-  ok(ny.order(mix).map((i) => i.type).join() === 'permission,permission,question,failed,review' && ny.order(mix)[0] === mix[4], 'most urgent first: permissions (the longest waiting first), questions, failed runs, finished work', ny.order(mix).map((i) => `${i.type} ${i.since}`))
+  ok(ny.order(mix).map((i) => i.type).join() === 'permission,question,permission,failed,review' && ny.order(mix)[0] === mix[3], 'most urgent first (shared/focus.js): what stops an agent (a permission or a question, the most recently active first), then a failed run, then finished work', ny.order(mix).map((i) => `${i.type} ${i.since}`))
   ok(ny.order(mix, 'newest').map((i) => i.since).join() === [9, 8, 5, 2, 1].map(when).join(), 'or the newest first', ny.order(mix, 'newest').map((i) => i.since))
+  const days = (d) => new Date(Date.now() - d * 864e5).toISOString()
+  const stale = [{ ...perm, id: 'old@1', since: days(4), active: days(4) }, { ...review, since: when(9) }, { ...pick, since: days(1), active: when(5) }]
+  ok(ny.order(stale).map((i) => i.id).join() === [pick.id, review.id, 'old@1'].join(), 'a permission nobody has been near for four days goes after finished work from minutes ago; a question waiting a day that you were on 5 min ago leads', ny.order(stale).map((i) => [i.type, i.since, i.active]))
   const old = ny.fromAgents([{ paneId: 'a', status: 'blocked', title: 'Docs', kind: 'claude' }, { paneId: 'b', status: 'working', title: 'API' }, { paneId: 'c', status: 'done', title: 'Site' }])
   ok(old.length === 2 && old[0].type === 'question' && !old[0].answers && old[1].type === 'review', 'a device on an older Bridge AI: who waits on you and what finished, with nothing to answer from here', old)
   // A needs-you notification: it opens the inbox at its agent, and says what else waits.
@@ -94,7 +101,7 @@ const launch = async (k, project, prompt, label) => {
   fs.mkdirSync(dir, { recursive: true })
   return k.api('/agents/launch', { kind: 'claude', cwd: dir, label, newSpace: project, prompt })
 }
-const itemFor = (k, pane, pred = () => true) => until(async () => (await k.api('/needs-you')).items.find((i) => i.paneId === pane && pred(i)), 30000, 400)
+const itemFor = (k, pane, pred = () => true) => until(async () => (await k.api('/needs-you')).items.find((i) => i.paneId === pane && !i.machine && pred(i)), 30000, 400)
 
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
@@ -140,7 +147,7 @@ try {
     const mine = r.items.filter((i) => i.machine === desk.id && i.qid)
     return mine.length >= 2 ? r : null
   }, 40000, 500)
-  const migrate = there?.items.find((i) => i.paneId === two.paneId)
+  const migrate = there?.items.find((i) => i.paneId === two.paneId && i.machine === desk.id)
   ok(migrate?.device === 'Desk' && migrate.online && migrate.about === 'npm run migrate' && migrate.agent.project === 'api-server', "Studio's inbox lists what waits on Desk, with the device and the project", migrate)
   ok(there?.devices.map((d) => d.name).join() === 'Studio,Desk', 'and says which devices it heard from', there?.devices)
   // Answered on Desk, through Studio (the inbox's way: /m/<id>/ reaches that device).
@@ -235,7 +242,7 @@ try {
 
   // ---------- a phone ----------
   const seven = await launch(c, 'web', 'ask npm run lint', 'Lint')
-  const lint = await until(async () => (await a.api('/needs-you')).items.find((i) => i.paneId === seven.paneId && i.qid), 40000, 500)
+  const lint = await until(async () => (await a.api('/needs-you')).items.find((i) => i.paneId === seven.paneId && i.machine === desk.id && i.qid), 40000, 500)
   const eight = await launch(a, 'shop', 'ask rm -rf dist', 'Clean')
   const mine = await itemFor(a, eight.paneId, (i) => i.qid)
   for (const w of [320, 390]) {
@@ -263,6 +270,70 @@ try {
   ok(!!(await until(() => answers(a).some((x) => x.command === 'rm -rf dist' && x.key === '3'), 15000)), 'and No answers it from there', answers(a))
   await n.ctx.close()
   ok(mine?.machine === null, 'that agent is the sending computer\'s own')
+
+  // ---------- when you were last on it (server/engaged.js) ----------
+  // An agent asking that nobody has been near: active since it began waiting. Its chat opened: you
+  // were on it then; the page reconnecting isn't you. A message you typed to another agent in the
+  // same project: you were in its project, and that's when it was last active.
+  const nine = await launch(a, 'ledger', 'ask npm run reconcile', 'Reconcile')
+  const ledger = await itemFor(a, nine.paneId, (i) => i.qid)
+  ok(!!ledger && !ledger.seen?.you && !ledger.seen?.project && ledger.active === ledger.since, 'an agent asking that nobody has been near: active since it began waiting', ledger)
+  const openChat = async (headers = {}) => {
+    const stop = new AbortController()
+    const r = await fetch(`${a.url}/api/agents/${encodeURIComponent(nine.paneId)}/transcript/live`, { headers, signal: stop.signal })
+    const { value } = await r.body.getReader().read()
+    stop.abort()
+    return new TextDecoder().decode(value || new Uint8Array())
+  }
+  const seenOf = async () => (await a.api('/needs-you')).items.find((i) => i.paneId === nine.paneId && !i.machine)
+  const opened = await openChat()
+  const onIt = await until(async () => (await seenOf())?.seen?.you, 8000, 300)
+  ok(/^id: 1\n/.test(opened) && !!onIt && (await seenOf()).active === onIt, "its chat opened: you were on it, and it's active since (the stream's first message has an id, which a reconnect sends back)", opened.slice(0, 30))
+  await new Promise((r) => setTimeout(r, 1200))
+  await openChat({ 'Last-Event-ID': '1' })
+  await new Promise((r) => setTimeout(r, 1500))
+  ok((await seenOf())?.seen?.you === onIt, 'the page reconnecting (after Bridge AI restarted, say) is not you on it', (await seenOf())?.seen)
+  const ten = await launch(a, 'ledger', 'idle', 'Ledger notes')
+  await a.api(`/agents/${encodeURIComponent(ten.paneId)}/queue`, { text: 'Thanks, that is all for now.', typed: 'message' })
+  const inLedger = await until(async () => { const x = await seenOf(); return x?.seen?.project && Date.parse(x.seen.project) > Date.parse(onIt) && x }, 8000, 300)
+  ok(!!inLedger && inLedger.active === inLedger.seen.project && inLedger.seen.you === onIt, 'a message you typed to another agent in the same project: you were in its project, so it was active then', inLedger?.seen)
+
+  // ---------- without Home: what has gone quiet isn't counted ----------
+  // Another agent asks on Studio, its wait made four days old in the list (as one nobody has been
+  // near since would be): the chip, the devices menu and the window's title leave it out, the inbox
+  // folds it under Quiet for 3+ days, and Yes to all leaves it alone.
+  const eleven = await launch(a, 'old-site', 'ask npm run purge', 'Purge')
+  const purge = await itemFor(a, eleven.paneId, (i) => i.qid)
+  const blockedHere = (await a.api('/fleet')).agents.filter((x) => x.status === 'blocked').length
+  const fourDays = new Date(Date.now() - 4 * 864e5).toISOString()
+  const asks = (i) => (i.type === 'permission' || i.type === 'question') && i.online
+  const onDesk = (await a.api('/needs-you')).items.filter((i) => asks(i) && i.machine).length
+  const s2 = await page(b, a.url, { mode: 'light', theme: 'sky', before: async (cx) => {
+    await noServiceWorker(cx)
+    await changeAnswer(cx, /\/api\/needs-you(\?|$)/, (real) => ({ ...real, items: real.items.map((i) => (i.paneId === eleven.paneId ? { ...i, since: fourDays, active: fourDays } : i)) }))
+  } })
+  const chip2 = s2.p.locator('.top-right .needs-chip')
+  const counted = async () => ({ here: num(await chip2.innerText().catch(() => '')), there: num(await s2.p.locator('.mc-chip .mc-needs').innerText().catch(() => '')), title: await s2.p.title() })
+  const shown = await until(async () => { const x = await counted(); return x.here === blockedHere - 1 && x.there === onDesk && x.title.startsWith(`(${blockedHere - 1 + onDesk}) `) && x }, 20000, 400)
+  ok(!!purge && blockedHere >= 2 && !!shown, `the chip counts the ${blockedHere - 1} asking on Studio now, not the one quiet for days; the devices menu Desk's ${onDesk}; the window's title (and the Dock's badge) both`, await counted())
+  await chip2.click()
+  const quietPanel = s2.p.locator('.ny-panel')
+  await quietPanel.waitFor({ timeout: 10000 })
+  await until(async () => /Quiet for 3\+ days/.test(await quietPanel.innerText()), 10000)
+  const waitingNow = await quietPanel.locator('.ny-group').first().innerText()
+  ok(!/npm run purge/.test(waitingNow) && /npm run reconcile/.test(waitingNow) && (await quietPanel.locator('.ny-item.top').count()) >= 1, 'the inbox: the one asking now first, set apart with why; not the quiet one', waitingNow)
+  ok(/Quiet for 3\+ days\s*1/.test(await quietPanel.locator('.ny-fold').innerText()) && /not counted/.test(await quietPanel.locator('.ny-qhint').innerText()) && !/npm run purge/.test(await quietPanel.locator('.ny-batch').innerText().catch(() => '')), 'the quiet one folded at the end, said to be not counted, and not among Yes to all', await quietPanel.locator('.ny-quiet').innerText())
+  await quietPanel.locator('.ny-fold').click()
+  await quietPanel.locator('.ny-qrow', { hasText: 'Purge' }).locator('.ny-qmain').click()
+  const purgeCard = quietPanel.locator('.ny-qrow', { hasText: 'Purge' }).locator('.ny-item')
+  ok(/npm run purge/.test(await purgeCard.innerText()) && await purgeCard.locator('button', { hasText: /^No$/ }).isVisible() && /old-site/.test(await quietPanel.locator('.ny-qgroup h4').first().innerText()), 'unfolded, under its project; opened, its card, to answer as ever', await quietPanel.locator('.ny-quiet').innerText())
+  await quietPanel.locator('.ny-quiet').evaluate((e) => e.scrollIntoView({ block: 'start' }))
+  await shot(s2.p, `${tag}needs-you-quiet-desktop`)
+  await purgeCard.locator('button', { hasText: /^No$/ }).click()
+  ok(!!(await until(() => answers(a).some((x) => x.command === 'npm run purge' && x.key === '3'), 15000)), 'and No answers it on Studio', answers(a))
+  ok(s2.errors.length === 0, 'quiet: no page errors', s2.errors)
+  await s2.ctx.close()
+  await a.api('/needs-you/answer', { paneId: nine.paneId, seq: ledger.seq, qid: ledger.qid, n: '3' })
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
 } finally {

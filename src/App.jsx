@@ -38,7 +38,8 @@ import { takeEarlyLink } from './earlyLink.js'
 import CloudHome from './components/CloudHome.jsx'
 import SessionSwitcher from './components/Sessions.jsx'
 import { MachineMenu, AskBanner, SwitchedHere, useMachines, goMachine, isRemote, remoteOf, openRemote } from './components/Machines.jsx'
-import { useNeedsYou, NeedsYouChip, NeedsYouPanel, waitingOn } from './components/NeedsYou.jsx'
+import { useNeedsYou, NeedsYouChip, NeedsYouPanel, waitingOn, quietPanes } from './components/NeedsYou.jsx'
+import { isQuiet } from '../shared/focus.js'
 import AgentMap from './components/AgentMap.jsx'
 import NeedsHome, { Everything, useHome, needCount } from './components/NeedsHome.jsx'
 import More from './components/More.jsx'
@@ -269,17 +270,20 @@ function App() {
   // The chief of staff: Main, of its threads (each thread is a chief of its own).
   const mate = agents.find((a) => a.chief && a.thread?.main) || agents.find((a) => a.chief)
   const mateShown = byId[mateId]?.chief ? byId[mateId] : mate
-  const needsYou = agents.filter((a) => a.status === 'blocked')
   // The needs-you inbox: what waits on you on every device (NeedsYou.jsx). The chip counts this
-  // window's agents waiting from its live feed, and the other devices' from the inbox. inbox: null
-  // when closed, else { focus }.
+  // window's agents waiting from its live feed, and the other devices' from the inbox; neither
+  // counts one whose wait has gone quiet (shared/focus.js), which the inbox and Home fold away.
+  // inbox: null when closed, else { focus }.
   const [inbox, setInbox] = useState(null)
   const ny = useNeedsYou({ fleet, open: !!inbox, on: !cloudOnly })
+  const hushed = quietPanes(ny.data, machineId || null)
+  const needsYou = agents.filter((a) => a.status === 'blocked' && !hushed.has(a.paneId))
   const waiting = waitingOn(ny.data, { here: needsYou.length, shown: machineId || null })
   // The computer this window shows: one computer's work at a time. The chip, the sidebar and the
   // phone's tab count what waits on you here (with Home on, its count: Chief of Staff's tasks too);
-  // the devices menu's chip counts the rest, so the two add up to the window's title.
-  const toReview = (ny.data?.items || []).filter((i) => (i.type === 'review' || i.type === 'failed') && i.online && (i.machine || null) === (machineId || null)).length
+  // the devices menu's chip counts the rest, so the two add up to the window's title (and the Dock's
+  // badge, which is the title's).
+  const toReview = (ny.data?.items || []).filter((i) => (i.type === 'review' || i.type === 'failed') && i.online && (i.machine || null) === (machineId || null) && !isQuiet(i)).length
   const homeCount = useHome(homeOn && !cloudOnly, 12000)
   const homeNeeds = homeOn && homeCount.data ? needCount(homeCount.data) : null
   const needN = homeNeeds ? homeNeeds.here : needsYou.length
@@ -787,7 +791,7 @@ function App() {
       <div className="top-left">
       <img className="mark" src={`${import.meta.env.BASE_URL}mark.svg`} alt="Bridge AI" width="24" height="24" />
       {railBtn}
-      {!cloudOnly && <Quiet name="Devices menu"><MachineMenu phone={!wide} elsewhere={homeNeeds ? needElse : null} /></Quiet>}
+      {!cloudOnly && <Quiet name="Devices menu"><MachineMenu phone={!wide} elsewhere={homeNeeds || ny.data ? needElse : null} /></Quiet>}
       {wide && liveView && (
         <nav className="view-tabs" role="tablist" aria-label={t('View')}>
           <button role="tab" aria-selected={view === 'command'} className={view === 'command' ? 'on' : ''} onClick={() => setView('command')} title="Alt+1" aria-label="Bridge">

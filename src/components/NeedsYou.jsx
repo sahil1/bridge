@@ -5,6 +5,7 @@ import { hostApi } from '../api.js'
 import { ago } from './Machines.jsx'
 import { t, tx } from '../i18n/index.js'
 import { sentTo } from '../sendbox.js'
+import { split, reason, isQuiet, activeAt, projectOf, QUIET_DAYS, TOP } from '../../shared/focus.js'
 import './needsyou.css'
 
 // The needs-you inbox: everything waiting on you, on this computer, your other devices and the
@@ -12,6 +13,10 @@ import './needsyou.css'
 // asking a question, failed runs and finished work, each answered right there: Yes or No, a reply,
 // the question's full card, or open it. The top bar's needs-you chip opens it, and so does a phone
 // notification about an agent that needs you.
+//
+// What needs you now first, by how much it holds up and how recently you or it were on it, the
+// first few said with why; what has been quiet for days folded at the end by project, not counted
+// (shared/focus.js has the rule, the same for Home, the chip, the badges and the window's title).
 //
 // The list comes from the device this page is served from (it knows where each device is); each
 // answer goes to the device the agent is on, at /m/<id>/ through this one (server/machines.js).
@@ -25,10 +30,13 @@ export async function onDevice(machine, path, body) {
 }
 
 const isAsk = (i) => i.type === 'permission' || i.type === 'question'
-// What counts on the chip: what stops an agent until you answer, on a device that can hear you.
-// The device this window shows counts from its own live feed (here: its agents waiting), which is
-// quicker than the list; the others from the list.
-export const waitingOn = (data, { here = 0, shown = null } = {}) => here + (data?.items || []).filter((i) => isAsk(i) && i.online && (i.machine || null) !== shown).length
+// What counts on the chip: what stops an agent until you answer, on a device that can hear you,
+// and hasn't gone quiet. The device this window shows counts from its own live feed (here: its
+// agents waiting, less quietPanes), which is quicker than the list; the others from the list.
+export const waitingOn = (data, { here = 0, shown = null } = {}) => here + (data?.items || []).filter((i) => isAsk(i) && i.online && (i.machine || null) !== shown && !isQuiet(i)).length
+// The agents waiting on the computer this window shows whose wait has gone quiet, by pane: its live
+// feed knows they wait, the list knows they're quiet. One the list doesn't have yet counts.
+export const quietPanes = (data, shown = null) => new Set((data?.items || []).filter((i) => isAsk(i) && (i.machine || null) === shown && isQuiet(i)).map((i) => i.paneId))
 
 // The list, from the device this page comes from: every few seconds while it's open, less often
 // otherwise, and straight away when this window's agents change.
@@ -77,13 +85,11 @@ const TYPE = {
   failed: { label: tx('Failed'), status: 'unknown' },
   review: { label: tx('Finished'), status: 'done' },
 }
-const GROUPS = [['ask', tx('Waiting on you')], ['failed', tx('Failed')], ['review', tx('To review')]]
-const groupOf = (i) => (isAsk(i) ? 'ask' : i.type)
-const sorted = (items, by) => {
-  const time = (i) => Date.parse(i.since || 0) || 0
-  const rank = { permission: 0, question: 1, failed: 2, review: 3 }
-  return [...items].sort(by === 'newest' ? (x, y) => time(y) - time(x) : (x, y) => (rank[x.type] ?? 9) - (rank[y.type] ?? 9) || time(x) - time(y))
-}
+// Most urgent: what waits on you (asks and failed runs, in the order shared/focus.js gives them),
+// then finished work to review, newest first.
+const GROUPS = [['ask', tx('Waiting on you')], ['review', tx('To review')]]
+const groupOf = (i) => (i.type === 'review' ? 'review' : 'ask')
+const since = (i) => Date.parse(i.since || 0) || 0
 const why = (r, device) => (r?.why === 'not-taken' ? t("That didn't take. Open it to answer.")
   : r?.why === 'changed' ? t("It isn't asking that any more.")
     : r?.status === 404 ? t('Update Bridge AI on {name} to answer from here.', { name: device })
@@ -109,9 +115,97 @@ function LiveQuestion({ it, onDone }) {
   return <div className="ny-live"><Question q={q} send={send} busy={busy} /></div>
 }
 
+// Why one of the first few is there (shared/focus.js reason): it stops an agent until you answer,
+// and what of it was latest: you on it, in its project or space, a reply to a task, or that it's new
+// (when its waiting is what's latest, its age on the line above says when).
+export function Why({ it }) {
+  const r = reason(it)
+  const when = r.at ? ago(r.at) : ''
+  const a = it.agent || {}
+  const words = r.by === 'you' ? t('You were on this {when}', { when })
+    : r.by === 'project' ? t('You were in {name} {when}', { name: a.project || a.workspace || a.title || t('its project'), when })
+      : r.by === 'space' ? t('You were in {name} {when}', { name: a.workspace || a.project || a.title || t('its space'), when })
+        : r.by === 'replied' ? t('You replied {when}', { when })
+          : r.by === 'new' && r.at && Date.now() - Date.parse(r.at) < 36e5 ? t('New')
+            : null
+  if (!r.blocking && !words) return null
+  return (
+    <p className="ny-why">
+      {r.blocking && <span className="ny-block" title={t('The agent has stopped until you answer')}>{t('Blocking')}</span>}
+      {words && <span>{words}</span>}
+    </p>
+  )
+}
+
+// What has gone quiet (shared/focus.js): nothing on it from you or from it for 3 days or more. Not
+// counted anywhere; folded here, under its project, at the end of what waits on you (the inbox,
+// Home). Never dropped: a row opens to its card, to answer or open it as ever, and Clear takes an
+// agent's off the list until it has something new (Clear all, asked once more, every one that can).
+// card(it): the card a row opens to; uid(it): an item's id with its device's; focus: one to open to
+// (a notification's).
+export function QuietFold({ items, open, setOpen, card, uid, multi = false, onClearAll = null, focus = null }) {
+  const [one, setOne] = useState(focus)
+  const [sure, setSure] = useState(false)
+  useEffect(() => { if (focus) { setOne(focus); setOpen(true) } }, [focus]) // eslint-disable-line react-hooks/exhaustive-deps
+  if (!items.length) return null
+  const groups = []
+  for (const it of items) {
+    const name = projectOf(it) ?? t('Chief of Staff')
+    const g = groups.find((x) => x.name === name)
+    if (g) g.rows.push(it)
+    else groups.push({ name, rows: [it] })
+  }
+  const clearable = items.filter((i) => i.kind !== 'task' && i.online !== false && !i.old && i.seq != null)
+  const row = (it) => {
+    const id = uid(it)
+    const on = one === id
+    const task = it.kind === 'task'
+    const ty = TYPE[it.type] || TYPE.question
+    const title = task ? it.task.title : it.agent?.title || t('Agent')
+    const sub = task ? it.task.needs || t('Waiting on you') : it.text || (it.type === 'failed' ? t('The run failed.') : t('Waiting on you. Open it to answer.'))
+    const last = activeAt(it)
+    return (
+      <li key={id} className={`ny-qrow ${on ? 'open' : ''} ${it.online === false ? 'off' : ''}`}>
+        <button type="button" className="ny-qmain" aria-expanded={on} onClick={() => setOne(on ? null : id)}>
+          <span className="ny-qico">{task ? <Icon name="helm" size={12} /> : <StatusDot status={ty.status} size={8} />}</span>
+          <span className="ny-qbody">
+            <span className="ny-ql1"><b>{title}</b><span className="ny-qwhat">{task ? t('Chief of Staff task') : t(ty.label)}</span></span>
+            <span className="ny-qsub">{sub}</span>
+          </span>
+          <span className="ny-qwhen">
+            {multi && <span className="ny-qdev"><Icon name="laptop" size={10} />{it.device}</span>}
+            {last > 0 && <time dateTime={new Date(last).toISOString()} title={t('Last active {when}', { when: new Date(last).toLocaleString() })}>{ago(new Date(last).toISOString())}</time>}
+          </span>
+        </button>
+        {on && <div className="ny-qcard">{card(it)}</div>}
+      </li>
+    )
+  }
+  return (
+    <section className="ny-quiet" aria-label={t('Quiet for {n}+ days', { n: QUIET_DAYS })}>
+      <div className="ny-qhead">
+        <button type="button" className="ny-fold" aria-expanded={open} onClick={() => { setOpen(!open); setSure(false) }}>
+          <Icon name="chevron" size={12} />{t('Quiet for {n}+ days', { n: QUIET_DAYS })}<span className="fcount">{items.length}</span>
+        </button>
+        <span className="ny-qhint">{t('not counted: nothing new from you or them in {n} days', { n: QUIET_DAYS })}</span>
+        {open && onClearAll && clearable.length > 0 && (sure
+          ? <span className="ny-qsure">{t('Clear {n}? Each comes back when it has something new.', { n: clearable.length })}<button type="button" className="btn small" onClick={() => { setSure(false); onClearAll(clearable) }}><Icon name="check" size={12} /> {t('Clear')}</button><button type="button" className="ghost-btn" onClick={() => setSure(false)}>{t('Cancel')}</button></span>
+          : <button type="button" className="ghost-btn ny-qclear" onClick={() => setSure(true)}><Icon name="check" size={12} /> {t('Clear all')}</button>)}
+      </div>
+      {open && groups.map((g) => (
+        <div key={g.name} className="ny-qgroup">
+          <h4><Icon name="folder" size={11} />{g.name}<span className="fcount">{g.rows.length}</span></h4>
+          <ul className="ny-qlist">{g.rows.map(row)}</ul>
+        </div>
+      ))}
+    </section>
+  )
+}
+
 // One thing waiting, answered right there (the inbox, and Home: NeedsHome.jsx). pin: Home's Pin
-// button, at the end of its top line.
-export function NeedsItem({ it, focused, onOpen, onGone, setNote, pin = null }) {
+// button, at the end of its top line. top: one of the first few that need you now, said with why;
+// quiet: one in the quiet fold, which Clear can take off the list whatever it is.
+export function NeedsItem({ it, focused, onOpen, onGone, setNote, pin = null, top = false, quiet = false }) {
   const [mode, setMode] = useState(focused && isAsk(it) && !it.answers?.length && !it.old ? 'live' : null) // 'reply' | 'live'
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
@@ -155,7 +249,7 @@ export function NeedsItem({ it, focused, onOpen, onGone, setNote, pin = null }) 
   const project = a.project && String(a.project).trim().toLowerCase() !== String(a.title || '').trim().toLowerCase() ? a.project : null
   const what = it.text || (it.type === 'review' ? null : it.type === 'failed' ? t('The run failed.') : t('Waiting on you. Open it to answer.'))
   return (
-    <article ref={ref} className={`ny-item t-${it.type} ${off ? 'off' : ''} ${focused ? 'focus' : ''}`} aria-label={`${t(ty.label)}: ${a.title}`}>
+    <article ref={ref} className={`ny-item t-${it.type} ${off ? 'off' : ''} ${focused ? 'focus' : ''} ${top ? 'top' : ''}`} aria-label={`${t(ty.label)}: ${a.title}`}>
       <div className="ny-top">
         <StatusDot status={ty.status} size={8} />
         <span className="ny-kind">{it.limit ? t('Usage limit') : t(ty.label)}</span>
@@ -166,6 +260,7 @@ export function NeedsItem({ it, focused, onOpen, onGone, setNote, pin = null }) 
         </span>
         {pin}
       </div>
+      {top && <Why it={it} />}
       {what && <p className={`ny-text ${it.type === 'review' ? 'said' : ''}`}>{what}</p>}
       {it.about && <code className="ny-about">{it.about}</code>}
       <div className="ny-meta">
@@ -182,7 +277,7 @@ export function NeedsItem({ it, focused, onOpen, onGone, setNote, pin = null }) 
         {canReply && <button type="button" className="ghost-btn" aria-expanded={mode === 'reply'} onClick={() => setMode(mode === 'reply' ? null : 'reply')}><Icon name="chat" size={12} /> {t('Reply')}</button>}
         {it.pr && <a className="ghost-btn" href={it.pr} target="_blank" rel="noopener noreferrer"><Icon name="external" size={12} /> {t('Pull request')}</a>}
         <span className="ny-grow" />
-        {!off && (it.type === 'review' || it.type === 'failed') && !it.old && <button type="button" className="ghost-btn" onClick={clear} title={t('Take it off the list until it has something new')}><Icon name="check" size={12} /> {t('Clear')}</button>}
+        {!off && (it.type === 'review' || it.type === 'failed' || quiet) && !it.old && <button type="button" className="ghost-btn" onClick={clear} title={isAsk(it) ? t('Take it off the list until it has something new. The agent still waits, in the sidebar and Everything.') : t('Take it off the list until it has something new')}><Icon name="check" size={12} /> {t('Clear')}</button>}
         <button type="button" className="ghost-btn strong" onClick={() => onOpen(it)} disabled={off}><Icon name="open" size={12} /> {t('Open')}</button>
       </div>
       {mode === 'reply' && (
@@ -205,6 +300,7 @@ export function NeedsYouPanel({ data, refresh, phone = false, focus = null, onCl
   const [note, setNote] = useState(null) // { id, text } or { text }
   const [sure, setSure] = useState(false) // Yes to all, asked once more
   const [busy, setBusy] = useState(false)
+  const [quietOpen, setQuietOpen] = useState(false) // what has gone quiet, unfolded
   const box = useRef(null)
   useEffect(() => {
     const key = (e) => { if (e.key === 'Escape') onClose() }
@@ -219,7 +315,11 @@ export function NeedsYouPanel({ data, refresh, phone = false, focus = null, onCl
   const uid = (i) => `${i.machine || 'here'}|${i.id}`
   const all = (data?.items || []).filter((i) => !gone[uid(i)])
   const devices = (data?.devices || []).filter((d) => all.some((i) => (i.machine || null) === d.id))
-  const items = sorted(device === 'all' ? all : all.filter((i) => (i.machine || 'here') === device), by)
+  // What needs you now (ranked, or newest first) and what has gone quiet, folded at the end; the
+  // first few of what waits on you said with why.
+  const { now: live, quiet } = split(device === 'all' ? all : all.filter((i) => (i.machine || 'here') === device))
+  const items = by === 'newest' ? [...live].sort((x, y) => since(y) - since(x)) : [...live.filter((i) => groupOf(i) === 'ask'), ...live.filter((i) => groupOf(i) === 'review').sort((x, y) => since(y) - since(x))]
+  const top = new Set(live.filter((i) => groupOf(i) === 'ask').slice(0, TOP).map(uid))
   // Answered: off the list here at once, and the device it's on asked again as it moves on.
   const onGone = (it, said, soft = false) => {
     if (!soft) setGone((g) => ({ ...g, [uid(it)]: Date.now() }))
@@ -227,7 +327,8 @@ export function NeedsYouPanel({ data, refresh, phone = false, focus = null, onCl
     const q = it.machine ? `?fresh=${encodeURIComponent(it.machine)}` : ''
     for (const ms of [0, 1500, 4000]) setTimeout(() => refresh(q), ms)
   }
-  // Yes to every permission asked here and now (each still checked against its own question).
+  // Yes to every permission asked here and now (each still checked against its own question); not
+  // one that has gone quiet, which you'd want to look at again first.
   const yesable = items.filter((i) => i.type === 'permission' && i.online && !i.old && i.answers?.[0] && (i.answers[0].n === 'approve' || /^yes\b/i.test(i.answers[0].title)))
   const yesAll = async () => {
     setBusy(true)
@@ -249,8 +350,20 @@ export function NeedsYouPanel({ data, refresh, phone = false, focus = null, onCl
   }
   const focused = focus?.paneId ? all.find((i) => i.paneId === focus.paneId && (i.machine || null) === (focus.machine || null)) : null
   const focusId = focused ? uid(focused) : null
-  const waiting = all.filter((i) => isAsk(i) && i.online).length
-  const list = (rows) => rows.map((it) => <NeedsItem key={uid(it)} it={it} focused={uid(it) === focusId} onOpen={onOpen} onGone={onGone} setNote={setNote} />)
+  const waiting = all.filter((i) => isAsk(i) && i.online && !isQuiet(i)).length
+  const list = (rows) => rows.map((it) => <NeedsItem key={uid(it)} it={it} focused={uid(it) === focusId} top={top.has(uid(it))} onOpen={onOpen} onGone={onGone} setNote={setNote} />)
+  // Clear all that have gone quiet, each on its own device: off the list at once, and back with a
+  // note for any its device couldn't clear.
+  const clearQuiet = async (list) => {
+    setGone((g) => ({ ...g, ...Object.fromEntries(list.map((i) => [uid(i), Date.now()])) }))
+    const missed = []
+    await Promise.all(list.map((i) => onDevice(i.machine, '/needs-you/clear', { id: i.id }).catch(() => missed.push(i))))
+    if (missed.length) setGone((g) => { const n = { ...g }; for (const i of missed) delete n[uid(i)]; return n })
+    setNote({ text: missed.length ? t("Cleared {n}; {m} couldn't be cleared from here. Open them instead.", { n: list.length - missed.length, m: missed.length }) : t('Cleared {n}', { n: list.length }) })
+    refresh('')
+  }
+  const quietFold = <QuietFold items={quiet} open={quietOpen} setOpen={setQuietOpen} uid={uid} multi={devices.length > 1} focus={focusId && quiet.some((i) => uid(i) === focusId) ? focusId : null} onClearAll={clearQuiet}
+    card={(it) => <NeedsItem it={it} focused={uid(it) === focusId} quiet onOpen={onOpen} onGone={onGone} setNote={setNote} />} />
   return (
     <div className={`ny-panel ${phone ? 'phone' : ''}`} ref={box} role="dialog" aria-label={t('Needs you')}>
       <header className="ny-head">
@@ -283,7 +396,7 @@ export function NeedsYouPanel({ data, refresh, phone = false, focus = null, onCl
       <div className="ny-list">
         {!data && <div className="skeleton-rows pad"><div /><div /></div>}
         {data && !items.length && (
-          <div className="ny-empty"><Icon name="check" size={20} /><p>{t('Nothing needs you right now.')}</p><small className="muted">{t('Questions, permissions, failed runs and finished work from all your devices show here.')}</small></div>
+          <div className="ny-empty"><Icon name="check" size={20} /><p>{t('Nothing needs you right now.')}</p><small className="muted">{quiet.length ? t('Only what has been quiet for a while, folded below.') : t('Questions, permissions, failed runs and finished work from all your devices show here.')}</small></div>
         )}
         {by === 'urgent'
           ? GROUPS.map(([g, label]) => {
@@ -296,6 +409,7 @@ export function NeedsYouPanel({ data, refresh, phone = false, focus = null, onCl
             )
           })
           : list(items)}
+        {quietFold}
       </div>
     </div>
   )

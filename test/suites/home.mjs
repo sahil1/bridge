@@ -25,7 +25,11 @@
 // buttons at the bottom, each with its icon; sorted what needs you first, oldest first, by computer
 // and by kind, the order kept; pinned to the top (a row, a to-do, a question, a whiteboard that isn't
 // news), kept on the computer and seen from a phone, a pin that can't be saved said, unpinned back
-// where it was. Then loading, nothing at all, and a look that fails.
+// where it was. What needs you now and what has gone quiet (shared/focus.js): without a server, a
+// busy, mixed-age state in order, the 3-day edge, why; when you were last on an agent, its project
+// and space (engaged.js); the inbox's items and Home's tasks with it. In the app, a mixed-age day:
+// every count the six that need you now, the order, the first three with why, the quiet ones folded
+// by project, opened, cleared; the inbox the same. Then loading, nothing at all, and a look that fails.
 // On a phone at 375 and 430: Home is the first tab and where it opens, Today is in More, Home and
 // Everything fit the phone with every control a whole 40 px target.
 // It holds on any day at any hour: BRIDGE_TEST_CLOCK ("Sat 00:30", "Sun 23:50", "16:05") runs this
@@ -55,6 +59,9 @@ process.env.BRIDGE_HOME = path.join(scratch, 'data')
 process.env.HOME = path.join(scratch, 'home')
 const homeJs = await import('../../server/home.js')
 const needsJs = await import('../../server/needsyou.js')
+const engagedJs = await import('../../server/engaged.js')
+const chiefJs = await import('../../server/chieftasks.js')
+const focus = await import('../../shared/focus.js')
 for (const [k, v] of Object.entries(was)) { if (v === undefined) delete process.env[k]; else process.env[k] = v }
 {
   const day = 864e5
@@ -134,6 +141,90 @@ for (const [k, v] of Object.entries(was)) { if (v === undefined) delete process.
   ok(again.pins().length === 200, 'the newest 200 pins are kept', again.pins().length)
   for (const x of again.pins()) again.pin(x.id, false)
   await sleep(700)
+}
+
+// ---------- what needs you now, and what has gone quiet (shared/focus.js) ----------
+// A busy, mixed-age state by the test's clock: waits of minutes and of days, some in projects you
+// used an hour ago, some in ones nobody has touched for a week, a task replied to just now.
+{
+  const now = Date.now()
+  const minAgo = (m) => new Date(now - m * 6e4).toISOString()
+  const dayAgo = (d) => minAgo(d * 1440)
+  const it = (id, type, since, seen = {}, more = {}) => ({ id, type, since, seen, active: focus.latest(since, seen.you, seen.project, seen.space, seen.replied, seen.changed), agent: { title: id, project: more.project || null }, ...more })
+  const busy = [
+    it('task-4d', null, dayAgo(4), { changed: dayAgo(4) }, { kind: 'task' }),
+    it('ask-1h', 'question', dayAgo(1.5), { project: minAgo(55) }, { project: 'shop' }),
+    it('perm-new', 'permission', minAgo(3)),
+    it('perm-week', 'permission', dayAgo(4.2), { you: dayAgo(8), project: dayAgo(8) }, { project: 'old-prototype' }),
+    it('failed-40', 'failed', minAgo(40)),
+    it('task-replied', null, dayAgo(2), { changed: dayAgo(2), replied: minAgo(20) }, { kind: 'task' }),
+    it('task-20h', null, minAgo(20 * 60), { changed: minAgo(20 * 60) }, { kind: 'task' }),
+    it('older-device', 'question', null),
+  ]
+  const { now: live, quiet } = focus.split(busy, { now })
+  ok(live.map((i) => i.id).join() === 'perm-new,ask-1h,older-device,failed-40,task-replied,task-20h' && quiet.map((i) => i.id).join() === 'perm-week,task-4d', 'now: a permission just asked, a question in a project you used an hour ago (waiting a day and a half), one from a computer too old to say when, a run that failed 40 min ago, a task replied to 20 min ago, one from yesterday; quiet: a permission in a project untouched for a week, a task untouched for four days', { live: live.map((i) => `${i.id} ${focus.score(i, now)}`), quiet: quiet.map((i) => i.id) })
+  ok(live.findIndex((i) => i.id === 'ask-1h') < live.findIndex((i) => i.id === 'task-replied') && focus.isQuiet(busy[0], now), 'an agent blocked in a project you used an hour ago comes before a Chief of Staff task, and one untouched for four days is quiet')
+  ok(focus.QUIET_DAYS === 3 && !focus.isQuiet({ since: dayAgo(2.9) }, now) && focus.isQuiet({ since: dayAgo(3.01) }, now) && !focus.isQuiet({ since: dayAgo(5), active: dayAgo(1) }, now) && !focus.isQuiet({}, now), 'quiet after 3 days with nothing from you or it; anything since (active) makes it count again; one with no time at all is never quiet')
+  ok(focus.split(busy, { now, keep: (i) => i.id === 'task-4d' }).now.some((i) => i.id === 'task-4d'), 'one you pinned is never quiet')
+  const why = (id) => focus.reason(busy.find((i) => i.id === id))
+  ok(why('ask-1h').blocking && why('ask-1h').by === 'project' && why('ask-1h').at === minAgo(55) && why('task-replied').by === 'replied' && !why('task-replied').blocking && why('perm-new').by === 'new' && why('perm-new').blocking, 'why each is first: blocking, and what was latest (you in its project, your reply, a new wait)', [why('ask-1h'), why('task-replied'), why('perm-new')])
+  ok(needsJs.order(busy.filter((i) => !i.kind)).map((i) => i.id).join() === 'perm-new,ask-1h,older-device,failed-40,perm-week', "the inbox's order is the same: what needs you now, then what's quiet", needsJs.order(busy.filter((i) => !i.kind)).map((i) => i.id))
+
+  // When you were last on an agent, its project and its space (engaged.js), kept for 30 days.
+  const file = path.join(scratch, 'engaged.json')
+  const shop = path.join(scratch, 'code', 'shop')
+  const tree = path.join(scratch, 'trees', 'shop-fix')
+  const chats = path.join(scratch, 'chats')
+  const describe = (cwd) => (cwd === tree ? { repo: shop } : null)
+  const e = engagedJs.make({ file, describe, chats })
+  const ag = (paneId, cwd, workspaceId = 'ws1') => ({ paneId, cwd, workspaceId })
+  const t1 = now - 55 * 6e4
+  e.agent(ag('w1:p1', shop), t1)
+  e.agent(ag('w1:p1', shop), t1 - 6e5) // an earlier one doesn't move it back
+  e.agent(ag('w3:p1', chats, 'chats'), t1)
+  e.agent(ag('w4:p1', path.join(scratch, 'code', 'gone')), now - 31 * 864e5)
+  e.task('9', now - 20 * 6e4)
+  const iso = (t) => new Date(t).toISOString()
+  const sib = e.of(ag('w1:p2', shop))
+  const branch = e.of(ag('w2:p1', tree, 'ws2'))
+  ok(e.of(ag('w1:p1', shop)).you === iso(t1) && sib.you === null && sib.project === iso(t1) && sib.space === iso(t1), 'you on an agent: it, its project (another agent in the same folder) and its space', sib)
+  ok(branch.project === iso(t1) && branch.space === null && e.of(ag('w1:p1', path.join(scratch, 'code', 'other'))).you === null, 'an agent on its own branch is in the repo it belongs to; a pane number used again in another folder is another agent', branch)
+  ok(e.of(ag('w3:p2', chats, 'x')).project === null && e.taskOf('9') === iso(now - 20 * 6e4), 'a New chat has no project to be in; a reply to a task is kept by its number')
+  await sleep(1700)
+  const e2 = engagedJs.make({ file, describe, chats })
+  ok(e2.of(ag('w1:p1', shop)).you === iso(t1) && e2.taskOf('9') && e2.of(ag('w4:p1', path.join(scratch, 'code', 'gone'))).you === null, 'kept when Bridge AI starts again, and what is older than 30 days forgotten', JSON.parse(fs.readFileSync(file, 'utf8')))
+
+  // The inbox's items say when you were last on each agent, and the one quiet for days goes last.
+  fs.mkdirSync(path.join(scratch, 'data', 'cache'), { recursive: true })
+  fs.writeFileSync(path.join(scratch, 'data', 'cache', 'needs-you.json'), JSON.stringify({ cleared: [], since: { 'w1:p5@4': dayAgo(1.5), 'w5:p1@2': dayAgo(4) } }))
+  const fleet = { agents: [
+    { paneId: 'w5:p1', seq: 2, status: 'blocked', kind: 'codex', kindLabel: 'Codex', cwd: path.join(scratch, 'code', 'old-prototype'), workspaceId: 'ws5', tab: 'proto', asking: { title: 'Drop the old cache?', count: 1 } },
+    { paneId: 'w1:p5', seq: 4, status: 'blocked', kind: 'codex', kindLabel: 'Codex', cwd: shop, workspaceId: 'ws1', tab: 'api', asking: { title: 'Keep the old API?', count: 1 } },
+  ] }
+  const w = needsJs.make({ rt: { read: async () => '' }, fleet: async () => fleet, engaged: e })
+  const got = await w.items()
+  ok(got.map((i) => i.id).join() === 'w1:p5@4,w5:p1@2' && got[0].seen.project === iso(t1) && got[0].active === iso(t1) && got[1].active === got[1].since && focus.isQuiet(got[1], now), 'the inbox: a question in the project you were in 55 min ago first, active since then; one waiting four days in a project nobody touched, last and quiet', got.map((i) => [i.id, i.since, i.seen, i.active]))
+
+  // A task's last change, to the minute, kept on its line (chieftasks.js); Home's task that waits on
+  // you is active since then, or since your reply.
+  const tasksDir = path.join(scratch, 'chief')
+  const list = chiefJs.makeTasks(tasksDir)
+  const venue = list.add('Book the venue for the offsite')
+  ok(venue.changed === null, 'a new task has no change yet')
+  const waitingNow = list.update(venue.id, { status: 'waiting', needs: 'Which week suits you?' })
+  const minute = /^(\d{4}-\d\d-\d\dT\d\d:\d\d)$/.exec(waitingNow.changed || '')
+  ok(!!minute && Math.abs(Date.parse(minute[1]) - now) < 120e3 && fs.readFileSync(list.file, 'utf8').includes(`changed:${waitingNow.changed}`), 'waiting on you: when it changed, to the minute in this computer\'s time, on its line', waitingNow)
+  const md = path.join(tasksDir, 'state', 'tasks.md')
+  const old = `${ymd(new Date(now - 4 * 864e5))}T09:15`
+  fs.writeFileSync(md, fs.readFileSync(md, 'utf8').replace(`changed:${waitingNow.changed}`, `changed:${old}`))
+  ok(list.update(venue.id, { needs: 'Which week suits you?' }).changed === old && list.update(venue.id, { needs: 'Which of the two weeks?' }).changed !== old, 'the same again is no change; what it needs changing is', list.list().items[0])
+  list.update(venue.id, { status: 'done' })
+  ok(!/changed:/.test(fs.readFileSync(md, 'utf8')) && list.list().items[0].changed === null, 'done: no change kept')
+  const tk = (id, changed, added = ymd(new Date(now - 6 * 864e5))) => ({ id, title: `Task ${id}`, status: 'waiting', needs: 'Which one?', added, changed })
+  const ht = homeJs.make({ waiting: { items: async () => [] }, tasks: { list: () => ({ items: [tk('7', old), tk('8', null), tk('9', old)] }) }, meetings: { list: () => [] }, unsent: () => [], boards: { list: async () => ({ boards: [] }) }, chief: async () => null, engaged: e })
+  const hi = await ht.items()
+  const hb = (id) => hi.find((i) => i.id === `task:${id}`)
+  ok(focus.isQuiet(hb('7'), now) && hb('7').since === new Date(old).toISOString() && focus.isQuiet(hb('8'), now) && !focus.isQuiet(hb('9'), now) && hb('9').seen.replied === iso(now - 20 * 6e4) && hb('9').active === hb('9').seen.replied, "Home's tasks that wait on you: one unchanged for four days and one only added six days ago are quiet; one you replied to 20 min ago isn't", hi.map((i) => [i.id, i.since, i.active]))
 }
 
 clock.real()
@@ -807,6 +898,142 @@ try {
     await ctx.close()
   }
   for (const id of ['here|meeting:bm1', `${deskId}|task:c2`, 'travel-laptop|agent:n3@1', 'here|board:bb3']) await a.api('/home-pins', { id, on: false })
+
+  // ---------- what needs you now, and what has gone quiet ----------
+  // A mixed-age day on Studio and Desk, by the test's clock: waits of minutes, an hour and days, a
+  // question in a project you were in 50 minutes ago, ones in projects nobody has touched for a week,
+  // a task you replied to 20 minutes ago and tasks untouched for days. Home's and the inbox's answers
+  // are swapped for it (each item with when you or it were last on it, as its computer says).
+  const mAgo = (m) => new Date(Date.now() - m * 6e4).toISOString()
+  const dAgo = (d) => mAgo(d * 1440)
+  const newest = (...vs) => new Date(Math.max(...vs.filter(Boolean).map((v) => Date.parse(v)))).toISOString()
+  const mixDevs = [{ id: null, name: 'Studio', here: true, online: true }, { id: deskId, name: 'Desk', online: true, partial: false }]
+  const waitOf = (id, type, since, agentOf, seen = {}, more = {}) => {
+    const machine = more.machine ?? null
+    return { id, paneId: id.split('@')[0], seq: 1, type, since, seen, active: newest(since, seen.you, seen.project), text: more.text || `About ${agentOf.project || agentOf.title}?`, agent: { kind: 'claude', kindLabel: 'Claude Code', chief: false, ...agentOf }, machine, device: machine ? 'Desk' : 'Studio', online: true, ...(type === 'permission' ? { about: more.about || 'npm run deploy', qid: `q-${id}`, answers: [{ n: '1', title: 'Yes' }, { n: '3', title: 'No' }] } : {}), ...more }
+  }
+  const mixNeeds = [
+    waitOf('m1@1', 'permission', mAgo(3), { title: 'deploy', project: 'shop' }, {}, { about: 'npm run deploy -- --prod' }),
+    waitOf('m2@1', 'question', dAgo(1.5), { title: 'billing', project: 'billing-api' }, { project: mAgo(50) }, { text: 'Round the totals per line or per invoice?' }),
+    waitOf('m3@1', 'failed', mAgo(40), { title: 'web', project: 'web' }, {}, { text: 'npm ERR! the build failed in packages/web' }),
+    waitOf('m4@1', 'question', mAgo(25), { title: 'Chief of Staff · Launch', project: null, chief: true }, {}, { text: 'Send the release notes to the testers now?' }),
+    waitOf('m5@1', 'permission', dAgo(4.2), { title: 'prototype', project: 'old-prototype' }, { you: dAgo(8), project: dAgo(8) }, { about: 'rm -rf build && npm run bundle' }),
+    waitOf('m6@1', 'failed', dAgo(5), { title: 'infra', project: 'infra' }, {}, { text: 'terraform apply failed: the state lock is held' }),
+    waitOf('m7@1', 'question', dAgo(3.5), { title: 'docs', project: 'docs-site' }, {}, { text: 'Keep the old URLs as redirects?' }),
+    waitOf('m8@1', 'permission', mAgo(10), { title: 'onboarding', project: 'app' }, {}, { machine: deskId, about: 'npm run migrate' }),
+    waitOf('m9@1', 'failed', dAgo(3.4), { title: 'tests', project: 'api' }, {}, { machine: deskId, text: 'The tests timed out after 10 minutes.' }),
+    waitOf('m10@1', 'review', mAgo(15), { title: 'copy', project: 'site' }, {}, { text: 'Done: the pricing page copy is in.' }),
+  ]
+  const mixTask = (id, title, needs, changed, replied = null, machine = null) => ({ id: `task:${id}`, kind: 'task', group: 'needs', at: changed, since: changed, seen: { changed, replied }, active: newest(changed, replied), task: { id, title, status: 'waiting', needs, added: ymd(new Date(Date.parse(changed))), changed, due: null }, chief: null, machine, device: machine ? 'Desk' : 'Studio', online: true })
+  const mixHome = [
+    ...mixNeeds.map((i) => ({ ...i, id: `agent:${i.id}`, nid: i.id, kind: 'agent', group: i.type === 'review' ? 'ready' : 'needs', at: i.since })),
+    mixTask('41', 'Send Priya the revised quote', 'Which of the two price sheets goes with it?', mAgo(180), mAgo(20)),
+    mixTask('42', 'Draft the Q1 budget', 'Which of the two headcount plans?', mAgo(20 * 60)),
+    mixTask('37', 'Book flights for the offsite', 'Which dates work for you?', dAgo(4)),
+    mixTask('33', 'Renew the design tool licences', 'Keep all six seats, or drop to four?', dAgo(6)),
+    mixTask('12', 'Choose a logo for the beta page', 'Which of the three?', dAgo(5), null, deskId),
+  ]
+  const cleared = []
+  const mixDay = async (c2) => {
+    await noServiceWorker(c2)
+    await c2.route(/\/api\/calendar(\?|$)/, (r) => r.fulfill({ json: { today: [], tomorrow: [], fetchedAt: new Date().toISOString() } }))
+    await changeAnswer(c2, /\/api\/home(\?|$)/, (real) => ({ ...real, items: mixHome.filter((i) => !cleared.includes(i.nid)), devices: mixDevs, pins: [] }))
+    await c2.route(/\/api\/needs-you(\?|$)/, (r) => r.fulfill({ json: { items: mixNeeds.filter((i) => !cleared.includes(i.id)), devices: mixDevs.map(({ id, name, online }) => ({ id, name, online })) } }))
+    await c2.route(/\/api\/needs-you\/clear$/, (r) => { cleared.push(r.request().postDataJSON()?.id); return r.fulfill({ json: { ok: true } }) })
+  }
+  const mixLoaded = (hm) => until(async () => /Send Priya/.test(await hm.innerText().catch(() => '')) && /Quiet for 3\+ days/.test(await hm.innerText().catch(() => '')), 20000)
+  const labels = (loc) => loc.evaluateAll((xs) => xs.map((x) => x.getAttribute('aria-label')))
+  for (const [mode, theme] of [['light', 'sky'], ['dark', 'midnight']]) {
+    const { ctx, p, errors } = await pageAt(b, a.url, { mode, theme, width: 1440, height: 1300, before: mixDay })
+    const hm = p.locator('.hm')
+    ok(!!(await mixLoaded(hm)), `a mixed-age day, ${mode}: Home opens with it`, await hm.innerText().catch(() => ''))
+    await p.waitForTimeout(800)
+    const waiting = hm.locator('.hm-sec[aria-label="Waiting on You"]')
+    const order = await labels(waiting.locator('.hm-grid > .ny-item'))
+    if (mode === 'light') {
+      // What needs you now, on Studio: six, and the five gone quiet only where they're folded.
+      ok(/^6 things need you/.test(await hm.locator('.hm-title h2').innerText()) && /Waiting on You\s*6/.test(await waiting.locator('h3').innerText()), 'the heading and Waiting on You count the six that need you now, not the five quiet for days', [await hm.locator('.hm-title h2').innerText(), await waiting.locator('h3').innerText()])
+      ok(order.join('|') === 'Permission: deploy|Question: Chief of Staff · Launch|Question: billing|Failed: web|Chief of Staff task: Send Priya the revised quote|Chief of Staff task: Draft the Q1 budget', 'in order: what stops an agent and is fresh first (a permission just asked, a question 25 min old, one a day and a half old in a project you were in 50 min ago), then the run that failed 40 min ago, the task you replied to, the one from yesterday', order)
+      const tops = await labels(waiting.locator('.ny-item.top'))
+      const whys = await waiting.locator('.ny-item.top .ny-why').allInnerTexts()
+      ok(tops.length === 3 && tops.join('|') === order.slice(0, 3).join('|') && whys.every((x) => /Blocking/.test(x)) && /You were in billing-api 5\d min ago/.test(whys[2]) && /New/.test(whys[0]), 'the first three set apart, each with why: blocking, new, you were in its project 50 min ago', whys)
+      ok(/3 h ago/.test(await waiting.locator('.hm-task', { hasText: 'Send Priya' }).locator('.ny-age').innerText()), "a task that waits on you says since when", await waiting.locator('.hm-task', { hasText: 'Send Priya' }).innerText())
+      // Where it's folded, the quiet count, quietly: not in the chip, the badges or the title.
+      const fold = waiting.locator('.ny-fold')
+      ok(/Quiet for 3\+ days\s*5/.test(await fold.innerText()) && (await fold.getAttribute('aria-expanded')) === 'false' && !(await waiting.locator('.ny-qrow').count()) && /not counted/.test(await waiting.locator('.ny-qhint').innerText()), 'the five quiet for 3 days or more: folded under it, with how many, said to be not counted', await waiting.locator('.ny-quiet').innerText())
+      ok(!!(await until(async () => /^6\s*need you/.test((await p.locator('.topbar .needs-chip').innerText()).trim()) && (await p.locator('.rail-home .mc-needs').innerText()).trim() === '6' && (await p.locator('.mc-chip .mc-needs').innerText().catch(() => '')).trim() === '1' && /^\(7\) Bridge AI/.test(await p.title()), 8000)), "the top bar's chip and the sidebar's Home count the six, the devices menu's chip Desk's one, the window's title (and so the Dock's badge) the seven", [await p.locator('.topbar .needs-chip').innerText(), await p.locator('.rail-home').innerText(), await p.locator('.mc-chip').innerText().catch(() => ''), await p.title()])
+      const desk = hm.locator('.hm-away-row', { hasText: 'Desk' })
+      ok(/1 needs you · 2 quiet/.test(await desk.innerText()), "Desk's line: one needs you, two quiet", await desk.innerText())
+      await hm.locator('.hm-count').hover()
+      ok(!!(await until(async () => /5 more have been quiet for 3\+ days/.test(await p.locator('#hm-count-tip').innerText().catch(() => '')), 4000)), "pointed at, the count says how many more have gone quiet and where they are", await p.locator('#hm-count-tip').innerText().catch(() => ''))
+      await p.mouse.move(5, 900)
+      await shot(p, `${tag}home-mixed-1440-light`)
+      // Unfolded: by project, the most recent first; a row opens to its card, to answer or clear.
+      await fold.click()
+      const groups = await waiting.locator('.ny-qgroup h4').evaluateAll((hs) => hs.map((h) => `${[...h.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join('').trim()} ${h.querySelector('.fcount')?.textContent}`))
+      ok(groups.join('|') === 'docs-site 1|old-prototype 1|infra 1|Chief of Staff 2', 'unfolded: under each project, Chief of Staff\'s together', groups)
+      const proto = waiting.locator('.ny-qrow', { hasText: 'prototype' })
+      await proto.locator('.ny-qmain').click()
+      const card = proto.locator('.ny-item')
+      ok(await card.isVisible() && /rm -rf build/.test(await card.innerText()) && await card.locator('button', { hasText: /^Yes$/ }).isVisible() && await card.locator('button', { hasText: 'Clear' }).isVisible(), 'a quiet row opens to its card: still there to answer, or to clear', await card.innerText().catch(() => ''))
+      await shot(p, `${tag}home-mixed-1440-quiet-open`, { fullPage: true })
+      await card.locator('button', { hasText: 'Clear' }).click()
+      ok(!!(await until(async () => cleared.includes('m5@1') && !(await waiting.locator('.ny-qrow', { hasText: 'prototype' }).count()) && /Quiet for 3\+ days\s*4/.test(await fold.innerText()), 8000)) && /^6 things need you/.test(await hm.locator('.hm-title h2').innerText()), 'Clear takes it off its computer\'s list; four quiet, still six that need you', await waiting.locator('.ny-quiet').innerText())
+      // Clear all, asked once more, takes the agents' (the tasks are Chief of Staff's to change).
+      await waiting.locator('.ny-qclear').click()
+      ok(/Clear 2\? Each comes back when it has something new/.test(await waiting.locator('.ny-qsure').innerText()), 'Clear all asks once more, for the two agents\' it can', await waiting.locator('.ny-qhead').innerText())
+      await waiting.locator('.ny-qsure button', { hasText: 'Cancel' }).click()
+      // The inbox (⌘K's Needs you) says the same: what needs you now ranked, the quiet ones folded.
+      await p.keyboard.press('ControlOrMeta+K')
+      await p.locator('.palette input').fill('Needs you')
+      await p.locator('.pal-item[data-id="a:needs"]').click()
+      const panel = p.locator('.ny-panel')
+      await panel.waitFor({ timeout: 8000 })
+      // (The inbox asks again as it opens: the one cleared on Home is gone from it then.)
+      await until(async () => /Quiet for 3\+ days\s*3/.test(await panel.innerText()), 8000)
+      const inbox = await labels(panel.locator('.ny-group').first().locator('.ny-item'))
+      ok(inbox.join('|') === 'Permission: deploy|Permission: onboarding|Question: Chief of Staff · Launch|Question: billing|Failed: web' && (await panel.locator('.ny-count').innerText()) === '4' && /Quiet for 3\+ days\s*3/.test(await panel.locator('.ny-fold').innerText()), "the inbox: the same order across both computers, four asking now in its count, the three agents' gone quiet folded", [inbox, await panel.locator('.ny-head').innerText(), await panel.locator('.ny-fold').innerText()])
+      ok(/Yes to all 2/.test(await panel.locator('.ny-batch').innerText()), 'Yes to all is for the two asking now, never the one quiet for days', await panel.locator('.ny-batch').innerText())
+      await panel.locator('.ny-fold').click()
+      await panel.locator('.ny-quiet').evaluate((e) => e.scrollIntoView({ block: 'start' }))
+      await shot(p, `${tag}home-mixed-inbox-1440`)
+      await p.keyboard.press('Escape')
+      // Everything has the quiet ones too, said to be quiet.
+      await hm.locator('.hm-every').click()
+      const ey = p.locator('.ey')
+      await until(async () => (await ey.locator('.ey-quiet').count()) > 0, 10000)
+      ok((await ey.locator('.ey-item.needs .ey-quiet').count()) === 0 && (await ey.locator('.ey-quiet').count()) >= 4, 'Everything lists the quiet ones too, said to be quiet and not marked as needing you', await ey.locator('.ey-quiet').count())
+    } else {
+      await shot(p, `${tag}home-mixed-1440-dark`)
+      await waiting.locator('.ny-fold').click()
+      await waiting.locator('.ny-qrow', { hasText: 'Book flights' }).locator('.ny-qmain').click()
+      ok(/Which dates work for you/.test(await waiting.locator('.ny-qrow', { hasText: 'Book flights' }).locator('.hm-task').innerText().catch(() => '')), "dark: a quiet task opens to its card, Reply and Open", await waiting.locator('.ny-quiet').innerText())
+      await shot(p, `${tag}home-mixed-1440-dark-quiet-open`, { fullPage: true })
+    }
+    ok(errors.length === 0, `a mixed-age day, ${mode}: no page errors`, errors)
+    await ctx.close()
+  }
+  for (const width of [390, 430]) {
+    const { ctx, p, errors } = await pageAt(b, a.url, { phone: true, mode: width === 430 ? 'dark' : 'light', theme: width === 430 ? 'midnight' : 'sky', before: mixDay })
+    await p.setViewportSize({ width, height: 860 })
+    const hm = p.locator('.hm')
+    ok(!!(await mixLoaded(hm)), `a mixed-age day, phone ${width}: Home opens with it`)
+    await p.waitForTimeout(800)
+    const tab = (await p.locator('.tabbar button', { hasText: 'Home' }).locator('.badge').innerText().catch(() => '')).trim()
+    ok(tab === '6' && /^6 things need you/.test(await hm.locator('.hm-title h2').innerText()) && /^6$/.test((await p.locator('.top-right .needs-chip').innerText()).trim().split(/\s/)[0]), `phone ${width}: the Home tab, the heading and the chip count the six`, [tab, await hm.locator('.hm-title h2').innerText()])
+    await shot(p, `${tag}home-mixed-phone-${width}`)
+    const waiting = hm.locator('.hm-sec[aria-label="Waiting on You"]')
+    await waiting.locator('.ny-fold').click()
+    await waiting.locator('.ny-qrow', { hasText: 'docs' }).locator('.ny-qmain').click()
+    await p.waitForTimeout(400)
+    const f = await phoneFaults(p, '.hm')
+    ok(!Object.keys(f).length, `phone ${width}: the quiet ones unfolded and one opened fit (every control a whole 40 px target)`, f)
+    await waiting.locator('.ny-quiet').evaluate((e) => e.scrollIntoView({ block: 'start' }))
+    await p.waitForTimeout(300)
+    await shot(p, `${tag}home-mixed-phone-${width}-quiet`)
+    ok(errors.length === 0, `a mixed-age day, phone ${width}: no page errors`, errors)
+    await ctx.close()
+  }
 
   // Nothing at all, and while it loads: each part says so, none is a blank. Then a list it had, and
   // a look that fails: it says it couldn't update and keeps what it had.

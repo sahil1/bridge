@@ -133,10 +133,11 @@ try {
   ok(deskLane?.agents.find((x) => x.name === 'Refunds')?.model === 'claude-opus-5-5', 'and the model it was started on', deskLane?.agents.map((x) => [x.name, x.model]))
   // Answered on Desk: done, and since when. The inbox's answer says whether it took; one refused
   // (the question changed, or still there after the key) is answered again from a fresh look, as
-  // the inbox lets you. On a busy Windows runner the first one now and then doesn't take.
+  // the inbox lets you. On a busy Windows runner the first one now and then doesn't take. Desk's own
+  // (machine null): its list has Studio's too, and each computer numbers its panes alike.
   const tries = []
   await until(async () => {
-    const pub = (await c.api('/needs-you')).items.find((i) => i.paneId === fin.paneId && i.qid)
+    const pub = (await c.api('/needs-you')).items.find((i) => i.paneId === fin.paneId && !i.machine && i.qid)
     if (!pub) return tries.length > 0 // gone since: it took after all
     const r = await c.api('/needs-you/answer', { paneId: pub.paneId, seq: pub.seq, qid: pub.qid, n: '1' })
     tries.push(r.ok ? 'ok' : r.why)

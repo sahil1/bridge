@@ -26,8 +26,14 @@
 .ny-item { margin: 0 0 8px; padding: 10px 12px; border-radius: 11px; border: 1px solid var(--line); background: var(--pane-2); min-width: 0; }
 .ny-item.t-permission, .ny-item.t-question { border-color: color-mix(in srgb, var(--needs) 40%, transparent); background: color-mix(in srgb, var(--needs) 5%, var(--pane-2)); }
 .ny-item.t-failed { border-color: color-mix(in srgb, var(--critical) 40%, transparent); }
+/* One of the first few that need you now (shared/focus.js): a stripe down its edge, and why. */
+.ny-item.top { box-shadow: inset 3px 0 0 var(--needs); }
 .ny-item.focus { box-shadow: 0 0 0 2px var(--accent); }
+.ny-item.top.focus { box-shadow: inset 3px 0 0 var(--needs), 0 0 0 2px var(--accent); }
 .ny-item.off { opacity: .62; }
+.ny-why { display: flex; align-items: center; flex-wrap: wrap; gap: 3px 8px; margin: 6px 0 0; font-size: 12px; font-weight: 550; color: var(--ink-2); min-width: 0; }
+.ny-why > span:last-child:not(.ny-block) { min-width: 0; overflow-wrap: anywhere; }
+.ny-block { flex: none; display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 5px; background: color-mix(in srgb, var(--needs) 14%, transparent); color: var(--needs); font-size: 11px; font-weight: 650; letter-spacing: .01em; }
 .ny-top { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--ink-3); min-width: 0; }
 .ny-kind { font-weight: 650; color: var(--ink-2); }
 .t-permission .ny-kind, .t-question .ny-kind { color: var(--needs); }
@@ -53,6 +59,49 @@
 .ny-empty small { max-width: 300px; }
 .ny-panel.phone .ny-item { padding: 12px; }
 .ny-panel.phone .ny-acts .btn.small, .ny-panel.phone .ny-acts .ghost-btn { min-height: 36px; }
+
+/* What has gone quiet: one quiet line, folded; opened, short rows under their project, each opening
+   to its card. The inbox and Home have it alike. */
+.ny-quiet { margin-top: 12px; min-width: 0; }
+.ny-qhead { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 8px; min-width: 0; }
+.ny-fold { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px 5px 6px; border-radius: 8px; font: 500 12.5px var(--font); color: var(--ink-2); }
+.ny-fold:hover { background: var(--pane-2); color: var(--ink); }
+.ny-fold:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ny-fold .icon { transition: transform .15s; color: var(--ink-3); }
+.ny-fold[aria-expanded="true"] .icon { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .ny-fold .icon { transition: none; } }
+.ny-qhint { flex: 1 1 180px; min-width: 0; font-size: 12px; color: var(--ink-3); }
+.ny-qclear { margin-left: auto; color: var(--ink-2); font-weight: 500; }
+.ny-qsure { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-left: auto; font-size: 12.5px; color: var(--ink-2); }
+.ny-qgroup { margin-top: 8px; min-width: 0; }
+.ny-qgroup h4 { display: flex; align-items: center; gap: 6px; min-width: 0; margin: 0 4px 5px; font-size: 12px; font-weight: 650; color: var(--ink-2); overflow-wrap: anywhere; }
+.ny-qgroup h4 > .icon { flex: none; color: var(--ink-3); }
+.ny-qlist { list-style: none; margin: 0; padding: 3px; display: grid; gap: 1px; border-radius: 12px; border: 1px solid var(--line); background: var(--pane); min-width: 0; }
+.ny-qrow { border-radius: 9px; min-width: 0; }
+.ny-qrow:hover, .ny-qrow:focus-within, .ny-qrow.open { background: var(--pane-2); }
+.ny-qrow.off { opacity: .62; }
+.ny-qmain { display: flex; align-items: flex-start; gap: 10px; width: 100%; min-width: 0; padding: 8px 10px; border-radius: 9px; color: inherit; font: inherit; text-align: left; }
+.ny-qmain:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ny-qico { flex: none; display: grid; place-items: center; width: 18px; height: 20px; color: var(--ink-3); }
+.ny-qbody { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.ny-ql1 { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
+.ny-ql1 b { min-width: 0; font-size: 13px; font-weight: 550; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ny-qwhat { flex: none; font-size: 11.5px; color: var(--ink-3); }
+.ny-qsub { font-size: 12.5px; line-height: 1.45; color: var(--ink-3); overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.ny-qrow.open .ny-qsub { display: none; }
+.ny-qwhen { flex: none; display: inline-flex; align-items: center; gap: 8px; margin-top: 1px; font-size: 11.5px; color: var(--ink-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ny-qdev { display: inline-flex; align-items: center; gap: 3px; color: var(--ink-2); }
+.ny-qcard { padding: 0 6px 6px; min-width: 0; }
+.ny-qcard > .ny-item { margin: 0; background: var(--pane); }
+/* On a phone: every control a whole 40 px target, the row's words wrapping rather than cut off. */
+:is(.ny-panel.phone, .hm.phone) .ny-fold { min-height: 40px; }
+:is(.ny-panel.phone, .hm.phone) .ny-qhint { flex-basis: 100%; padding: 0 0 4px 26px; }
+:is(.ny-panel.phone, .hm.phone) .ny-qmain { min-height: 44px; flex-wrap: wrap; padding: 10px 8px; }
+:is(.ny-panel.phone, .hm.phone) .ny-qwhen { flex-basis: 100%; padding-left: 28px; }
+:is(.ny-panel.phone, .hm.phone) .ny-ql1 { flex-wrap: wrap; row-gap: 0; }
+:is(.ny-panel.phone, .hm.phone) .ny-ql1 b { white-space: normal; overflow-wrap: anywhere; }
+:is(.ny-panel.phone, .hm.phone) .ny-quiet :is(.ghost-btn, .btn.small) { min-height: 40px; min-width: 40px; }
+:is(.ny-panel.phone, .hm.phone) .ny-qcard { padding: 0 2px 4px; }
 @media (max-width: 420px) {
   .ny-head h2 { font-size: 14px; }
   .ny-device { max-width: 52%; }
