@@ -6,6 +6,7 @@ import { usePoll } from '../api.js'
 import Usage, { fmtTokens } from './Usage.jsx'
 import { acctColor, NOT_KNOWN } from './AccountMenu.jsx'
 import UsageEverywhere from './UsageEverywhere.jsx'
+import { PhoneUsage } from './StatusMenu.jsx'
 import { useTrial } from '../trials.js'
 import { t, tx, locale, midSentence } from '../i18n/index.js'
 
@@ -234,7 +235,9 @@ function PlanUsage() {
   )
 }
 
-export default function UsageStats() {
+// phone: a phone's Usage, which starts with what the desktop's usage chip says (its top bar has no
+// room for the chip).
+export default function UsageStats({ phone = false }) {
   const [provider, setProvider] = usePersisted('cc-stats-agent', 'all')
   const [range, setRange] = usePersisted('cc-stats-range', '30')
   const [metric, setMetric] = usePersisted('cc-stats-metric', 'tokens')
@@ -290,6 +293,7 @@ export default function UsageStats() {
 
   return (
     <div className="ustats">
+      {phone && <PhoneUsage />}
       <PlanUsage />
       {everywhere && <UsageEverywhere />}
       <div className="us-bar">

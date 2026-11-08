@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import Icon from './Icon.jsx'
 import AccountMenu, { listed, setDefault, lapsed, asList, nameOf as accountName, AcctDot, limitsOf, limitWords, statusText } from './AccountMenu.jsx'
+import { addAccount } from './AddAccount.jsx'
 import { AgentIcon } from './settings/ProviderIcon.jsx'
 import UpdateChip from './UpdateChip.jsx'
 import RestartChip from './RestartChip.jsx'
@@ -148,6 +149,62 @@ export function UsageChip({ quota, primary, onUsage, onAddAccount }) {
           onAdd={onAddAccount} extra={[{ icon: 'gauge', label: t('Usage details'), run: onUsage }]} />
       )}
     </div>
+  )
+}
+
+// Usage at a glance, as the chip is with the least room: the account's color and the one figure,
+// or why there's none. The phone's More has it on Usage's row.
+export function UsageGlance({ quota, primary }) {
+  const u = usageOf(quota, primary)
+  if (!u) return null
+  return <span className="usage-glance">{u.act && <AcctDot a={u.act} />}<Tight u={u} /></span>
+}
+
+// Usage on a phone, at the top of its Usage view: the phone's top bar keeps to what needs you now,
+// and a phone has no hover, so what the chip shows and says on hover is said here. Where new agents
+// start (the provider's mark, the account in its color, Auto's pick), the one figure, that limit in
+// words with when it starts again, then every other limit, or why there are none. With accounts
+// listed it opens the chip's account menu under it, in the page (each account's windows and its
+// models' limits, where new agents start, Sign in, Add another account). Plan usage off says so;
+// Usage's card under it says why, with Turn on.
+export function PhoneUsage() {
+  const { data: quota } = usePoll('/quota', 5 * 60 * 1000)
+  const [primary] = useShared('cc-primary', 'claude')
+  const [open, setOpen] = useState(false)
+  const wrap = useRef(null)
+  const u = usageOf(quota, primary)
+  if (!u) return null
+  const menu = u.groups.length > 0
+  const shown = menu ? listed(u.groups, primary) : []
+  const says = u.off ? [] : usageSays(u).slice(1)
+  const head = (
+    <>
+      {u.off ? <Icon name="gauge" size={18} /> : <AgentIcon kind={primary} size={24} name={u.name} />}
+      <span className="usage-now-who">
+        <small>{u.act ? t('New {agent} agents start on', { agent: u.name }) : t('{name} usage', { name: u.name })}</small>
+        {u.act && (
+          <span className="usage-now-acct">
+            <AcctDot a={u.act} /><b>{accountName(u.act)}</b>
+            {u.auto && <span className="best-tag">{t('auto')}</span>}
+          </span>
+        )}
+        {menu && <span className="usage-now-go">{t('Switch account or see each limit')}</span>}
+      </span>
+      <Tight u={u} />
+    </>
+  )
+  return (
+    <section className="usage-now" ref={wrap} aria-label={t('Usage now')}>
+      {menu
+        ? <button type="button" className="usage-now-head" onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open}>{head}<Icon name="down" size={13} className="caret" /></button>
+        : <div className="usage-now-head">{head}</div>}
+      {u.auto && <p className="usage-now-says">{t('Auto starts new agents here now: it has the most left')}</p>}
+      {says.length > 0 && <ul className="usage-now-says">{says.map((line) => <li key={line}>{line}</li>)}</ul>}
+      {open && (
+        <AccountMenu groups={shown.length ? shown : u.groups.slice(0, 1)} anchor={wrap} className="inline" off={!!quota?.off} onClose={() => setOpen(false)} onPick={(kind, id) => setDefault(u.groups, kind, id)}
+          onAdd={addAccount} />
+      )}
+    </section>
   )
 }
 

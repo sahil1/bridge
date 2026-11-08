@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import Icon from './Icon.jsx'
-import { usePersisted, useShared, useWidth } from './layout.jsx'
+import { usePersisted, useShared, useWidth, useMedia } from './layout.jsx'
 import { api, usePoll, fmtTime, settingsChanged, refetch, useFleet } from '../api.js'
 import SignInButton, { openSettings } from './SignIn.jsx'
 import { Menu } from './Rail.jsx'
@@ -308,11 +308,15 @@ function ProviderRow({ p, open, onToggle, best, isPrimary, onMakePrimary }) {
   )
 }
 
-// Which agent the top bar's usage chip shows: this one, or a click puts it there.
+// Which agent the top bar's usage chip shows: this one, or a click puts it there. A phone's top bar
+// has no room for the chip, so there it's the agent its Usage starts with (and More's row shows).
 function TopBarPick({ on, onClick }) {
+  const bar = useMedia('(min-width: 900px)') // the desktop's top bar (App.jsx's wide)
+  const label = bar ? (on ? t('In top bar') : t('Show in top bar')) : on ? t('Shown first') : t('Show first')
+  const title = bar ? (on ? t('Shown in the top bar') : t('Show in the top bar')) : on ? t('Shown first in Usage, and on its row in More') : t('Show it first in Usage, and on its row in More')
   return (
-    <button type="button" className={`top-pick ${on ? 'on' : ''}`} onClick={onClick} title={on ? t('Shown in the top bar') : t('Show in the top bar')} aria-pressed={on}>
-      <Icon name="pin" size={12} /> {on ? t('In top bar') : t('Show in top bar')}
+    <button type="button" className={`top-pick ${on ? 'on' : ''}`} onClick={onClick} title={title} aria-pressed={on}>
+      <Icon name="pin" size={12} /> {label}
     </button>
   )
 }
@@ -543,6 +547,7 @@ function AddProvider({ kinds }) {
 export const USAGE_OFF_WHY = tx('To show it, Bridge AI asks each provider with the sign-in your agents already use on this computer. Some providers, Anthropic among them, don\'t allow other apps to use their sign-ins, so it stays off unless you turn it on. Cost and token stats come from files on this computer and work either way.')
 
 function UsageOff() {
+  const bar = useMedia('(min-width: 900px)') // the desktop's top bar (App.jsx's wide); a phone's has no usage
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
   const turnOn = async () => {
@@ -552,7 +557,7 @@ function UsageOff() {
   }
   return (
     <div className="usage-off">
-      <p>{t('See how much of each plan is left (Claude, Codex and the others), here and in the top bar.')}</p>
+      <p>{bar ? t('See how much of each plan is left (Claude, Codex and the others), here and in the top bar.') : t('See how much of each plan is left (Claude, Codex and the others), here and on Usage in More.')}</p>
       <p className="muted small">{t(USAGE_OFF_WHY)}</p>
       {err && <p className="error-text">{err}</p>}
       <button type="button" className="btn small" onClick={turnOn} disabled={busy}>{busy ? t('Reading your plans…') : t('Turn on')}</button>

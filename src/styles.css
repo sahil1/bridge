@@ -2678,6 +2678,18 @@ button.ue-row:hover { background: var(--pane-2); }
 /* Phone: the numbers say it; the bar's room goes to the names. */
 .app.narrow .acct-pop .acct-left .u-bar { display: none; }
 .app.narrow .acct-pop.top { position: fixed; top: calc(50px + var(--safe-top) + 6px); left: max(12px, env(safe-area-inset-left)); right: max(12px, env(safe-area-inset-right)); width: auto; max-height: calc(100dvh - 50px - var(--safe-top) - 84px); }
+/* In the page, under what opened it (the phone's Usage), rather than over it. */
+.acct-pop.inline { position: static; width: auto; max-height: none; overflow: visible; padding: 6px 0 0; border-width: 1px 0 0; border-radius: 0; background: none; box-shadow: none; animation: none; }
+/* Phone: each row a whole target (the model picker's are bigger still), a long name on more lines
+   rather than cut, and Set as default a line of its own under its account. */
+.app.narrow .acct-pop .acct-item { min-height: 44px; }
+.app.narrow .acct-pop .acct-name { flex-wrap: wrap; white-space: normal; }
+.app.narrow .acct-pop .acct-nm { overflow-wrap: anywhere; }
+.app.narrow .acct-pop .acct-row.can-set .acct-set { position: static; grid-column: 1 / -1; justify-self: start; min-height: 40px; margin: -8px 0 0 32px; padding: 0 6px; }
+.app.narrow .acct-pop :is(.acct-act, .acct-under .link-btn) { min-height: 40px; }
+/* In the page on a phone: each account's figures on a line under its name, as Usage's rows have them. */
+.app.narrow .acct-pop.inline .acct-item { grid-template-columns: 16px minmax(0, 1fr); row-gap: 3px; }
+.app.narrow .acct-pop.inline .acct-item > .acct-left { grid-column: 2; justify-self: start; }
 /* In the New agent dialog: a select-like button, the menu under it at its width. */
 .acct-btn { display: flex; align-items: center; gap: 8px; width: 100%; height: 36px; padding: 0 10px; border-radius: 9px; border: 1px solid var(--line-2); background: var(--pane-2); color: var(--ink); font-size: 13.5px; text-align: left; font-variant-numeric: tabular-nums; }
 .acct-btn:focus-visible, .acct-btn[aria-expanded="true"] { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); outline: none; }
@@ -2742,9 +2754,32 @@ button.ue-row:hover { background: var(--pane-2); }
 /* Usage pinned to the bar (UsageChip): the provider's mark, the account's color and name, and one
    figure. The mark's own name on hover would hide the chip's, so the pointer goes through it. */
 .usage-pin { gap: 6px; }
-.usage-pin .pv-tile { display: inline-grid; place-items: center; flex: none; pointer-events: none; box-shadow: inset 0 0 0 1px rgb(0 0 0 / .06); }
-.usage-pin .pv-tile svg { display: block; }
+.usage-pin .pv-tile, .usage-now .pv-tile { display: inline-grid; place-items: center; flex: none; pointer-events: none; box-shadow: inset 0 0 0 1px rgb(0 0 0 / .06); }
+.usage-pin .pv-tile svg, .usage-now .pv-tile svg { display: block; }
 .usage-tight { display: inline-flex; align-items: baseline; gap: 3px; }
+/* Usage on a phone (PhoneUsage): what the chip says, in words, at the top of Usage, with its
+   account menu opening under it. */
+.usage-now { display: grid; gap: 4px; padding: 6px 12px 10px; border-radius: 12px; background: var(--pane); border: 1px solid var(--line); }
+.usage-now-head { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 52px; padding: 4px 0; text-align: left; color: var(--ink); }
+.usage-now-head > .icon { flex: none; color: var(--ink-3); }
+.usage-now-who { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.usage-now-who small { font-size: 12px; color: var(--ink-3); }
+.usage-now-acct { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 6px; min-width: 0; font-size: 15px; }
+.usage-now-acct b { min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+.usage-now-acct .best-tag { flex: none; }
+.usage-now-go { font-size: 12px; color: var(--accent); }
+.usage-now-head > .usage-tight, .usage-now-head > .muted { flex: none; font-size: 15px; }
+.usage-now-head > .muted { font-size: 13px; }
+.usage-now .usage-tight small { color: var(--ink-3); font-size: 12px; }
+.usage-now-head .caret { flex: none; }
+.usage-now-head[aria-expanded="true"] .caret { transform: rotate(180deg); }
+.usage-now-says { margin: 0; padding: 0 0 0 34px; list-style: none; display: grid; gap: 2px; font-size: 12.5px; line-height: 1.4; color: var(--ink-3); }
+ul.usage-now-says li:first-child { color: var(--ink-2); }
+.usage-now > .acct-pop { margin-top: 4px; }
+/* The phone's More: Usage's row ends with the account's color and the figure, as the chip does. */
+.m-more-side { flex: none; display: inline-flex; align-items: center; font-size: 13.5px; color: var(--ink-2); }
+.usage-glance { display: inline-flex; align-items: center; gap: 6px; }
+.usage-glance small { color: var(--ink-3); font-size: 11.5px; }
 /* A figure running low: on the warning's or the critical color, in the text's own color, so a
    small number stays easy to read on any theme's chip (the colors as text are too faint on a light
    frame, Sky's or Sand's). */
@@ -2771,6 +2806,17 @@ button.ue-row:hover { background: var(--pane-2); }
 .acct-color:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
 .acct-color-taken { position: absolute; right: 0; bottom: 0; width: 9px; height: 9px; border-radius: 50%; background: var(--pane); box-shadow: 0 0 0 1px var(--line-2); }
 .app.narrow .acct-swatch { width: 40px; height: 40px; }
+/* Usage on a phone: an account's name has the row's width, with its windows' figures on the line
+   under it, rather than the name cut short; an agent's count of accounts goes under its name. */
+.app.narrow .acct-u-head { grid-template-columns: minmax(0, 1fr) auto; row-gap: 3px; }
+.app.narrow .acct-u-head > :is(.acct-left, .prov-status) { grid-row: 2; grid-column: 1; justify-self: start; text-align: left; }
+.app.narrow .acct-u-head > .caret { grid-row: 1 / span 2; grid-column: 2; }
+.app.narrow .prov-name.grp { flex-wrap: wrap; row-gap: 0; }
+/* And every control in it (its view in More, Today's Usage tab and card) a whole 40 px target, its
+   menus 16 px (iOS zooms into smaller), as Every Provider's are. */
+.app.narrow :is(.ustats, .usage-card) :is(.seg button, .icon-btn) { min-height: 40px; min-width: 40px; justify-content: center; }
+.app.narrow :is(.ustats, .usage-card) :is(.top-pick, .ghost-btn, .btn.small, .link, button.us-row, .acct-auto) { min-height: 40px; }
+.app.narrow .ustats .us-select { height: 40px; font-size: 16px; }
 .app.narrow .acct-colors { grid-template-columns: repeat(4, 40px); }
 .app.narrow .acct-color { width: 40px; height: 40px; }
 .seg-part.low { box-shadow: inset 0 0 0 1px var(--critical); }
