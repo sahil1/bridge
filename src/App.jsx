@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import SoundButton from './components/SoundButton.jsx'
-import StatusMenu, { UsageChip, WeatherChip, ClockChip } from './components/StatusMenu.jsx'
+import StatusMenu, { UsageChip, UsageGlance, WeatherChip, ClockChip } from './components/StatusMenu.jsx'
 import Icon, { StatusDot } from './components/Icon.jsx'
 import { useAppearance } from './appearance.js'
 import { usePins } from './pins.js'
@@ -10,7 +10,7 @@ import Rail, { agentName } from './components/Rail.jsx'
 import Board from './components/Board.jsx'
 import Dock from './components/Dock.jsx'
 import Console, { MateEmpty, showChat } from './components/Console.jsx'
-import { Settings, Onboarding, HerdrView, Terminals, ShellTab, MeetingsHome, MeetingPage, Dictations, Memory, WhiteboardsHome, WhiteboardPage, StudioHome, StudioPage, Explorer, preloadViews } from './lazy.jsx'
+import { Settings, Onboarding, HerdrView, Terminals, ShellTab, MeetingsHome, MeetingPage, Dictations, Memory, WhiteboardsHome, WhiteboardPage, StudioHome, StudioPage, Explorer, UsageStats, preloadViews } from './lazy.jsx'
 import Home from './components/Home.jsx'
 import { FirstRunAnswers } from './components/FirstRun.jsx'
 import { MeetingsProvider, RecordingPill, CallPrompt, useMeetings } from './components/meetings/recording.jsx'
@@ -594,6 +594,8 @@ function App() {
 
   // The phone's Today: its own tab, or in More with Home on.
   const phoneToday = () => { if (homeOn) { setMtab('more'); setMoreView('today') } else setMtab('today') }
+  // The phone's Usage: a row of its own in More, Home on or off.
+  const phoneUsage = () => { setMtab('more'); setMoreView('usage') }
   const showCard = (id) => {
     store.set(`cc-card-${id}`, true)
     setView('command')
@@ -608,7 +610,7 @@ function App() {
   const showToday = (tab, detail) => {
     setView('command')
     setTodayTab(tab)
-    if (!wide) phoneToday()
+    if (!wide) { if (tab === 'usage') phoneUsage(); else phoneToday() }
     else set({ dockMin: false, todayOpen: true, max: 'dock' })
     if (detail) setTimeout(() => openToday(tab, detail), 60)
   }
@@ -747,8 +749,9 @@ function App() {
     { id: 'a:markets', label: t('Markets & news'), icon: 'trend', keywords: 'fed rates treasury mortgage stocks headlines tech', run: () => showToday('markets') },
     { id: 'a:routines', label: t('Show routines'), icon: 'repeat', run: () => showCard('repeat') },
     routinesOn && { id: 'a:new-routine', label: t('New routine…'), icon: 'repeat', keywords: 'schedule scheduled recurring repeat every day weekday week cron automation task later', run: () => setRoutineDraft({}) },
-    { id: 'a:usage', label: t('Show usage'), icon: 'gauge', keywords: 'quota tokens cost', run: () => showCard('gauge') },
-    { id: 'a:stats', label: t('Usage stats and history'), icon: 'gauge', keywords: 'stats heatmap tokens cost models projects', run: () => openToday('usage') },
+    // On a phone, both open More › Usage: plan usage first, then the stats.
+    { id: 'a:usage', label: t('Show usage'), icon: 'gauge', keywords: 'quota tokens cost', run: () => (wide ? showCard('gauge') : phoneUsage()) },
+    { id: 'a:stats', label: t('Usage stats and history'), icon: 'gauge', keywords: 'stats heatmap tokens cost models projects', run: () => (wide ? openToday('usage') : phoneUsage()) },
     { id: 'a:tour', label: t('Take the tour'), icon: 'sparkle', keywords: 'help guide walkthrough intro getting started how', run: takeTour },
   ].filter(Boolean)
   // The phone's Cloud agents: only what it has.
@@ -914,6 +917,8 @@ function App() {
       : [['mate', 'helm', t('Chief')], ['agents', 'grid', t('Agents')], ['meetings', 'mic', t('Meetings')], ['today', 'today', t('Today')], ['more', 'more', t('More')]]
     const moreRows = [
       homeOn && { id: 'today', icon: 'today', label: t('Today'), hint: t('Calendar, mail, markets and usage'), run: () => setMoreView('today') },
+      // The usage chip's account and figure (the desktop's top bar has it; a phone's has no room).
+      { id: 'usage', icon: 'gauge', label: t('Usage'), hint: t('Plans, limits and history'), side: <UsageGlance quota={quota.data} primary={primary} />, run: () => setMoreView('usage') },
       WhiteboardsHome && { id: 'whiteboards', icon: 'shapes', label: t('Whiteboards'), hint: t('Draw by hand, or describe a diagram'), run: () => setMoreView('view:whiteboards') },
       StudioHome && studioOn && { id: 'studio', icon: 'layers', label: t('Studio'), hint: t('Documents, sheets, decks and pages'), run: () => setMoreView('view:studio') },
       Explorer && filesOn && { id: 'files', icon: 'folder', label: t('Files'), hint: t('Every folder on your computers'), run: () => setMoreView('view:files') },
@@ -958,7 +963,8 @@ function App() {
                 {/* A whiteboard has its own way back, to the list of them. */}
                 {!moreView.startsWith(BOARD) && !moreView.startsWith(STUDIO) && <button type="button" className="ghost-btn m-view-back" onClick={() => setMoreView(null)}><Icon name="back" size={14} /> {t('More')}</button>}
                 {moreView === 'terminals' ? <Terminals key={fleet?.session || ''} onChat={(id) => openAgent(id)} />
-                  : moreView === 'today' ? <div className="m-today"><TodayTabs tab={todayTab} setTab={setTodayTab} compact /><div className={`m-today-body tab-${todayTab}`}><TodayBody onOpenAgent={openAgent} tab={todayTab} setTab={setTodayTab} stackClass="m-stack" /></div></div>
+                  : moreView === 'today' ? <div className="m-today"><TodayTabs tab={todayTab} setTab={setTodayTab} compact /><div className={`m-today-body tab-${todayTab}`}><TodayBody phone onOpenAgent={openAgent} tab={todayTab} setTab={setTodayTab} stackClass="m-stack" /></div></div>
+                    : moreView === 'usage' ? <ErrorBoundary name="Usage"><UsageStats phone /></ErrorBoundary>
                     : viewFor(moreView)}
               </div>
             )
@@ -966,7 +972,7 @@ function App() {
           {mtab === 'today' && (
             <div className="m-today">
               <TodayTabs tab={todayTab} setTab={setTodayTab} compact />
-              <div className={`m-today-body tab-${todayTab}`}><TodayBody onOpenAgent={openAgent} tab={todayTab} setTab={setTodayTab} stackClass="m-stack" /></div>
+              <div className={`m-today-body tab-${todayTab}`}><TodayBody phone onOpenAgent={openAgent} tab={todayTab} setTab={setTodayTab} stackClass="m-stack" /></div>
             </div>
           )}
         </main>

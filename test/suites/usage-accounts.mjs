@@ -430,6 +430,180 @@ try {
     ok(w.errors.length === 0, `${t}: no page errors`, w.errors)
   }
 
+  // ---------- Usage on a phone, as the desktop's chip has it ----------
+  // The phone's top bar has no room for the usage chip, so More has a row of its own for Usage, with
+  // the chip's account color and figure, and Usage starts with what the chip says, in words (a phone
+  // has no hover): where new agents start, the figure that matters, that limit and when it resets,
+  // every other limit; then the chip's account menu under it, to see each account's and model's
+  // limits and switch where new agents start. As the owner's plan had it: Main with no 5-hour window,
+  // its week 29% left and a model's own week (Fable) untouched; then Fable about to run out, Auto, a
+  // sign-in that ran out and plan usage off. The same words and colors as the desktop's chip; at 375
+  // and 430 px, light and dark, nothing in the whole of Usage cut off, past the screen's edge or
+  // smaller than a whole target.
+  {
+    const at = (h) => new Date(Date.now() + h * 3600e3).toISOString()
+    const soon = at(2), later = at(50)
+    const five = (pct) => ({ id: 'five_hour', kind: 'session', label: 'session', percentRemaining: pct, resetsAt: soon })
+    const week = (pct) => ({ id: 'seven_day', kind: 'weekly', label: 'week', percentRemaining: pct, resetsAt: later })
+    const fable = (pct) => ({ id: 'model:fable', kind: 'model', label: 'Fable week', percentRemaining: pct, resetsAt: later })
+    // Plan usage as each case has it, laid over the server's own list (so a switch shows). Off, the
+    // server's own answer: its accounts, and nothing read.
+    const plan = ({ main = [week(29), fable(100)], auto = false, lapsed = false, off = false } = {}) => async () => {
+      const live = await kit.api('/quota')
+      if (off) return { ...live, providers: [], off: true }
+      const W = { [MAIN]: main, [WORK]: [five(80), week(70)], [SIDE]: [five(6), week(30)] }
+      const read = (a) => (lapsed && a.id === MAIN ? { usable: false, status: 'error', error: 'Claude access token expired', percentRemaining: null, windows: [] }
+        : { usable: true, status: 'fresh', percentRemaining: Math.min(...W[a.id].map((w) => w.percentRemaining)), windows: W[a.id] })
+      return {
+        generatedAt: new Date().toISOString(), bestNow: 'claude',
+        providers: [{ provider: 'claude', usable: true, status: 'fresh', plan: 'max', percentRemaining: 29, windows: main }],
+        accounts: live.accounts.filter((g) => g.kind === 'claude').map((g) => ({ ...g, ...(auto ? { setting: 'auto', pick: MAIN } : {}),
+          accounts: g.accounts.map((a) => ({ ...a, ...(auto ? { active: a.id === MAIN } : {}), signedIn: true, plan: 'max', ...read(a) })) })),
+      }
+    }
+    const withPlan = (answer) => async (c) => { await noServiceWorker(c); await c.route(/\/api\/quota(\?|$)/, async (r) => r.fulfill({ json: await answer() })) }
+    // (What isn't there is null at once, rather than waited for.)
+    const attr = async (l, a) => ((await l.count()) ? l.first().getAttribute(a) : null)
+    const text = async (l) => ((await l.count()) ? (await l.first().innerText()).replace(/\s+/g, ' ').trim() : '')
+    // The desktop's chip, as the top bar has it: its words, each line on hover, its figure's level.
+    const chipOf = async (answer) => {
+      const w = await page(b, kit.url, { width: 1440, before: withPlan(answer) })
+      pages.push(w)
+      const chip = w.p.locator('.topbar .x-usage .usage-chip')
+      await until(() => chip.locator('.u-pct, .muted').count(), 15000)
+      const said = { text: await text(chip), lines: (await chip.getAttribute('title')).split('\n'), level: await attr(chip.locator('.u-pct'), 'class') }
+      await w.ctx.close()
+      return said
+    }
+    // The phone's More, and Usage's row in it: its name, what's under it, and the figure at its end.
+    const more = async (p) => {
+      await p.locator('.tabbar button', { hasText: 'More' }).click()
+      await p.locator('.tabbar button', { hasText: 'More' }).click()
+      const row = p.locator('.m-more-row', { hasText: /^Usage/ })
+      await row.waitFor({ timeout: 10000 })
+      await until(() => row.locator('.m-more-side .usage-tight, .m-more-side .muted').count(), 10000)
+      return {
+        row,
+        name: await text(row.locator('.m-more-text b')), hint: await text(row.locator('.m-more-text span')), side: await text(row.locator('.m-more-side')),
+        level: await attr(row.locator('.m-more-side .u-pct'), 'class'),
+        dot: (await row.locator('.m-more-side .acct-dot').count()) ? await bg(row.locator('.m-more-side .acct-dot')) : null,
+      }
+    }
+    // Usage on the phone, opened from its row: what its first card says.
+    const usageNow = async (p, r) => {
+      await r.row.click()
+      const now = p.locator('.m-more-view .ustats > .usage-now')
+      await now.waitFor({ timeout: 15000 })
+      const fig = now.locator('.usage-now-head .u-pct')
+      return {
+        now,
+        tab: (await p.locator('.tabbar button.on').innerText()).trim(), back: await p.locator('.m-more-view > .m-view-back', { hasText: 'More' }).isVisible(),
+        who: await text(now.locator('.usage-now-who small')), acct: await text(now.locator('.usage-now-acct')),
+        figure: await text(now.locator('.usage-now-head > :is(.usage-tight, .muted)')), level: await attr(fig, 'class'),
+        lines: (await now.locator('.usage-now-says').allInnerTexts()).flatMap((x) => x.split('\n')).map((x) => x.trim()).filter(Boolean),
+      }
+    }
+    // The whole of Usage at once (a screen tall enough for all of it): what doesn't fit a phone.
+    const whole = async (p, width) => {
+      await p.setViewportSize({ width, height: 7000 })
+      await sleep(600)
+      const f = await phoneFaults(p, '.m-more-view')
+      await p.setViewportSize({ width, height: 860 })
+      await sleep(300)
+      return f
+    }
+    const owner = await chipOf(plan())
+    ok(owner.text === 'Main 29% wk' && /t-warning/.test(owner.level || '') && /^29% of the week left, Week resets /.test(owner.lines[1] || '') && /^Fable week: 100% left, Resets /.test(owner.lines[2] || ''),
+      '(the desktop\'s chip: Main and its week\'s 29%, in the warning\'s color, each limit on hover)', owner)
+
+    for (const [width, look] of [[375, { mode: 'light', theme: 'sky' }], [430, { mode: 'dark', theme: 'midnight' }]]) {
+      const t = `phone usage ${width} ${look.mode}`
+      const w = await page(b, kit.url, { ...look, phone: true, before: withPlan(plan()) })
+      pages.push(w)
+      const p = w.p
+      await p.setViewportSize({ width, height: 860 })
+      await p.waitForSelector('.tabbar button', { timeout: 15000 })
+      const r = await more(p)
+      const blue = await series(p, 1) // Main's color
+      ok(r.name === 'Usage' && r.hint === 'Plans, limits and history' && r.side === '29% wk' && /t-warning/.test(r.level || '') && r.dot === blue,
+        `${t}: More has a row of its own for Usage, ending in the chip's figure (29% wk, in the warning's color) and Main's color`, r)
+      const rb = await r.row.boundingBox()
+      ok(rb.height >= 44 && rb.x >= 0 && rb.x + rb.width <= width, `${t}: the row is a whole target, within the screen`, rb)
+      await shot(p, `${tag}phone-usage-more-${look.mode}-${width}`)
+      const u = await usageNow(p, r)
+      ok(u.tab === 'More' && u.back, `${t}: it opens Usage in More, with Back to More (not through Today)`, u)
+      ok(u.who === 'New Claude agents start on' && u.acct === 'Main' && u.figure === '29% wk' && (u.level || '') === (owner.level || '-'),
+        `${t}: Usage starts with where new agents start (Main) and the chip's figure, in its color`, u)
+      ok(u.lines.join('\n') === owner.lines.slice(1, -1).join('\n'), `${t}: then the chip's hover in words: the week's limit and when it resets, the Fable week's`, { phone: u.lines, chip: owner.lines })
+      ok(await u.now.locator('.usage-now-head .pv-tile').count() === 1 && await bg(u.now.locator('.usage-now-head .acct-dot')) === blue, `${t}: with the provider's mark and Main's color, as the chip has`)
+      await shot(p, `${tag}phone-usage-${look.mode}-${width}`)
+      // The account menu, under it: each account's windows, the Fable week under Main, Side nearly out.
+      await u.now.locator('button.usage-now-head').click()
+      const menu = u.now.locator('.acct-pop.inline')
+      await menu.waitFor({ timeout: 5000 })
+      const rows = await menu.evaluate((m) => [...m.querySelectorAll('.acct-row')].map((x) => ({ name: x.querySelector('.acct-nm')?.textContent, text: x.innerText.replace(/\s+/g, ' '), star: !!x.querySelector('.acct-check.is-default svg'), h: Math.round(x.querySelector('.acct-item').getBoundingClientRect().height) })))
+      const byName = Object.fromEntries(rows.map((x) => [x.name, x]))
+      ok(rows.map((x) => x.name).join() === 'Main,Work,Side' && byName.Main.star && /Fable week: 100% left/.test(byName.Main.text) && /29% wk left/.test(byName.Main.text) && /80% 5h left 70% wk left/.test(byName.Work.text) && /Set as default/.test(byName.Work.text),
+        `${t}: a tap opens the chip's account menu under it: each account's windows, the star on Main with its Fable week, Set as default on the others`, rows)
+      ok(await menu.locator('.acct-row', { has: p.locator('.acct-nm', { hasText: /^Side$/ }) }).locator('.acct-left .t-critical').innerText() === '6%' && rows.every((x) => x.h >= 44), `${t}: Side's 6% in the critical color, every account a whole row`, rows)
+      await sleep(300)
+      await shot(p, `${tag}phone-usage-menu-${look.mode}-${width}`)
+      const f = await whole(p, width)
+      ok(!Object.keys(f).length, `${t}: the whole of Usage, its menu open, fits the phone: nothing wider, past its edge, sideways or cut off, every target whole and uncovered`, f)
+      if (look.mode === 'light') {
+        // Switched from there: new agents start on Work, here and on the server.
+        await menu.locator('.acct-row', { has: p.locator('.acct-nm', { hasText: /^Work$/ }) }).locator('.acct-item').click()
+        const moved = await until(async () => (await claudeOf()).setting === WORK && await text(u.now.locator('.usage-now-acct')) === 'Work' && !(await menu.count()), 10000)
+        ok(!!moved, `${t}: tapping Work makes it where new agents start, and Usage says so`, { setting: (await claudeOf()).setting, says: await text(u.now.locator('.usage-now-acct')) })
+        await kit.api('/accounts/active/claude', { id: MAIN })
+      }
+      ok(!w.errors.length, `${t}: no page errors`, w.errors)
+      await w.ctx.close()
+    }
+
+    // A model's limit about to run out, Auto, a sign-in that ran out and plan usage off: on the
+    // phone, each as the desktop's chip says it.
+    const cases = [
+      { name: 'Fable 7% left', o: { main: [five(62), week(41), fable(7)] }, look: { mode: 'dark', theme: 'midnight' }, width: 430 },
+      { name: 'Auto', o: { auto: true }, look: { mode: 'light', theme: 'sky' }, width: 375 },
+      { name: 'sign-in expired', o: { lapsed: true }, look: { mode: 'light', theme: 'sky' }, width: 375 },
+      { name: 'usage off', o: { off: true }, look: { mode: 'dark', theme: 'midnight' }, width: 375 },
+    ]
+    for (const c of cases) {
+      const t = `phone usage, ${c.name}`
+      const chip = await chipOf(plan(c.o))
+      const w = await page(b, kit.url, { ...c.look, phone: true, before: withPlan(plan(c.o)) })
+      pages.push(w)
+      const p = w.p
+      await p.setViewportSize({ width: c.width, height: 860 })
+      await p.waitForSelector('.tabbar button', { timeout: 15000 })
+      const r = await more(p)
+      const u = await usageNow(p, r)
+      // The chip's figure (or why there's none), past its account's name.
+      const fig = chip.text.replace(/^Main /, '')
+      ok(r.side === fig && u.figure === fig && (r.level || '') === (chip.level || '') && (u.level || '') === (chip.level || ''), `${t}: More's row and Usage say what the chip does (${fig}), in its color`, { chip, row: r, usage: u })
+      if (c.o.off) ok(!u.lines.length && /Turn on/.test(await p.locator('.m-more-view .usage-off').innerText().catch(() => '')), `${t}: plan usage off, with the card under it saying why and Turn on`, u)
+      else ok(u.lines.filter((x) => !/^Auto starts/.test(x)).join('\n') === chip.lines.slice(1, -1).join('\n'), `${t}: the chip's hover, in words`, { phone: u.lines, chip: chip.lines })
+      await u.now.locator('button.usage-now-head').click()
+      const menu = u.now.locator('.acct-pop.inline')
+      await menu.waitFor({ timeout: 5000 })
+      const mainRow = menu.locator('.acct-row', { has: p.locator('.acct-nm', { hasText: /^Main$/ }) })
+      if (c.o.main) ok(/Fable week: 7% left/.test(await mainRow.innerText()) && await mainRow.locator('.acct-models .t-critical').count() === 1 && /^Fable week: 7% left, Resets /.test(u.lines[0] || ''), `${t}: first in words, and under Main in the menu in the critical color`, { lines: u.lines, row: await mainRow.innerText() })
+      if (c.o.auto) ok(u.acct === 'Main auto' && u.lines[0] === 'Auto starts new agents here now: it has the most left' && await menu.locator('.acct-item.auto[aria-checked="true"]').count() === 1, `${t}: Auto's pick said so, and Auto ticked in the menu`, { u, menu: await menu.innerText() })
+      if (c.o.lapsed) {
+        const signIn = mainRow.locator('.acct-act')
+        const sb = await signIn.boundingBox().catch(() => null)
+        ok(u.lines[0] === 'Usage: sign-in expired (Claude access token expired)' && /Sign-in expired/.test(await mainRow.innerText()) && sb?.height >= 40, `${t}: why there's no figure, and Main's Sign in in the menu, a whole target`, { lines: u.lines, row: await mainRow.innerText(), sb })
+      }
+      await sleep(300)
+      await shot(p, `${tag}phone-usage-${c.name.replace(/\W+/g, '-').toLowerCase()}`)
+      const f = await whole(p, c.width)
+      ok(!Object.keys(f).length, `${t}: the whole of Usage fits the phone`, f)
+      ok(!w.errors.length, `${t}: no page errors`, w.errors)
+      await w.ctx.close()
+    }
+  }
+
   // With Home on and its page opened first, Usage's heatmap: square, in its levels' colors.
   {
     await kit.api('/settings', { trials: { home: true } }, 'PATCH')

@@ -62,8 +62,9 @@ export function TodayTabs({ tab, setTab, compact }) {
   )
 }
 
-// The tab bodies, shared by the desktop panel and the phone's Today tab.
-export function TodayBody({ wide, onOpenAgent, tab, setTab, stackClass = 'dock-scroll' }) {
+// The tab bodies, shared by the desktop panel and the phone's Today tab (phone: Usage starts with
+// what the desktop's usage chip says).
+export function TodayBody({ wide, phone = false, onOpenAgent, tab, setTab, stackClass = 'dock-scroll' }) {
   const [mailId, setMailId] = useState(null)
   const [focus, setFocus] = useState(null) // { date, event, at }: a day in the calendar, and an event on it to open
   const here = useMailHere()
@@ -80,7 +81,7 @@ export function TodayBody({ wide, onOpenAgent, tab, setTab, stackClass = 'dock-s
   if (tab === 'calendar') return <CalendarView onOpenAgent={onOpenAgent} focus={focus} />
   if (tab === 'mail' && here) return <MailView onOpenAgent={onOpenAgent} openId={mailId} />
   if (tab === 'markets') return <MarketsView />
-  if (tab === 'usage') return <UsageStats />
+  if (tab === 'usage') return <UsageStats phone={phone} />
   return (
     <div className={`${stackClass} ${wide ? 'wide' : ''}`}>
       <Agenda onOpenAgent={onOpenAgent} />
