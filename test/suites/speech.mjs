@@ -230,6 +230,7 @@ try {
   // A meeting, transcribed by Parakeet.
   await kit.api('/settings', { meetings: { engine: 'local', autoSummary: false, cleanup: false } }, 'PATCH')
   const A = await kit.api('/meetings', { title: 'Parakeet sync', call: false })
+  const asked = sherpaLog(kit).length
   const tone = wav(2.5).subarray(44)
   const silence = Buffer.alloc(16000 * 2 * 2)
   let seq = 0
@@ -237,7 +238,10 @@ try {
   await kit.api(`/meetings/${A.id}/stop`, {})
   const got = await until(async () => { const m = await kit.api(`/meetings/${A.id}`); return m.status === 'done' && m.transcript.length && m }, 20000)
   ok(!!got && got.transcript[0].text === 'Open the work tree in Claude Code.' && got.transcript[0].engine === 'Parakeet', 'a meeting on this computer is transcribed by Parakeet, with meeting memory\'s spelling', got?.transcript)
-  ok(sherpaLog(kit).filter((l) => l.seconds != null).at(-1)?.hotwords.includes('Kubernetes'), 'and the meeting\'s words to listen for')
+  // Its stretch, and the live words heard while it was said (every second and a half), each with
+  // them: either can be the last the engine is asked.
+  const heard = sherpaLog(kit).slice(asked).filter((l) => l.seconds != null)
+  ok(heard.length > 0 && heard.every((l) => l.hotwords.includes('Kubernetes')), 'and the meeting\'s words to listen for, its live words too', heard.map((l) => ({ seconds: l.seconds, hotwords: l.hotwords })))
 
   // Remove: gone from the disk and from memory; the next voice note asks for the download again.
   await kit.api('/speech/models/parakeet-v3', null, 'DELETE')

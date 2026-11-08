@@ -361,9 +361,7 @@ async function run(job) {
     const before = lines(job.id).filter((l) => l.src === job.src && speech.spoken(l.text)).slice(-2).map((l) => memory.fix(speech.spoken(l.text))).join(' ').slice(-200)
     // The names in the files that go with it (a resume, a deck) too: fileTerms.
     const hint = [m.title, ...(m.event?.attendees || []).slice(0, 12), cfg.meetings?.vocabulary, m.fileTerms, memory.hint(200)].filter(Boolean).join(', ').slice(0, 440)
-    // An engine that takes names to listen for rather than a prompt (Parakeet) gets them one by one.
-    const words = [...(m.event?.attendees || []).slice(0, 12), ...String(cfg.meetings?.vocabulary || '').split(','), ...String(m.fileTerms || '').split(',')]
-    const r = await speech.transcribe(wav(job.pcm), { cfg: job.cfg || cfg, language: job.language || m.language || cfg.meetings?.language, prompt: [hint, before].filter(Boolean).join('. '), words })
+    const r = await speech.transcribe(wav(job.pcm), { cfg: job.cfg || cfg, language: job.language || m.language || cfg.meetings?.language, prompt: [hint, before].filter(Boolean).join('. '), words: listenFor(m) })
     const text = speech.spoken(r.text)
     if (text && !/^(thank you\.?|thanks for watching!?|you)$/i.test(text)) {
       const line = { src: job.src, t0: round(job.t0), t1: round(job.t1), text, engine: r.engine }
@@ -386,6 +384,10 @@ async function run(job) {
     patchMeta(job.id, { error: e.message })
   }
 }
+// The names an engine that takes them rather than a prompt (Parakeet) listens for, one by one: who
+// was invited, Settings' words and the names in the files that go with it. A stretch's live words
+// listen for the same, so a name isn't spelled one way as it's said and another once its line is in.
+const listenFor = (m) => [...(m.event?.attendees || []).slice(0, 12), ...String(cfg.meetings?.vocabulary || '').split(','), ...String(m.fileTerms || '').split(',')]
 const round = (s) => Math.round(s * 100) / 100
 function append(id, line) { fs.appendFileSync(path.join(dirOf(id), 'transcript.jsonl'), `${JSON.stringify(line)}\n`) }
 const waiting = (id) => [...queue, ...running].filter((j) => j.id === id).length
@@ -482,7 +484,7 @@ export async function audio(id, src, buf, seq) {
   const samples = new Int16Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + even))
   s.finder.push(samples)
   if (s.finder.frames.length && s.finder.voiced >= 5) { s.talkingAt = Date.now(); s.stretch = s.finder.frames[0].t }
-  hearSoFar(id, s)
+  hearSoFar(m, s)
   s.samples += samples.length
   let peak = 0
   for (let i = 0; i < samples.length; i += 8) { const v = Math.abs(samples[i]); if (v > peak) peak = v }
@@ -499,7 +501,7 @@ export async function audio(id, src, buf, seq) {
 // under the transcript before the stretch ends (its last 12 seconds in a long one). They go once
 // the stretch's own line is in. Not with a speech service, which is sent only the stretches.
 const SO_FAR_MS = 1500
-function hearSoFar(id, s) {
+function hearSoFar(m, s) {
   const f = s.finder.frames
   if (!f.length || s.finder.voiced < 10 || s.hearing || Date.now() - (s.heardAt || 0) < SO_FAR_MS || running.length || queue.length) return
   if (speech.engineOf(cfg) !== 'local') return
@@ -509,7 +511,7 @@ function hearSoFar(id, s) {
   const pcm = new Int16Array(last.length * FRAME)
   last.forEach((p, i) => pcm.set(p.f, i * FRAME))
   const t0 = round(f[0].t / RATE)
-  livewords.stretch(pcm, { cfg }).then((text) => {
+  livewords.stretch(pcm, { cfg, words: listenFor(m) }).then((text) => {
     // Unless its line came in meanwhile: its words so far.
     if ((s.lineTo || 0) <= t0) s.partial = text ? { t0, text, cut: last.length < f.length } : null
   }, () => {}).finally(() => { s.hearing = false })
