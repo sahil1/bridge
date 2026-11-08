@@ -7,10 +7,9 @@
 import fs from 'node:fs'
 import { register } from 'node:module'
 import { DatabaseSync } from 'node:sqlite'
-import { pathToFileURL } from 'node:url'
-import path from 'node:path'
 
-const stub = pathToFileURL(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'stand-ins', 'cloudflare-workers.mjs')).href
+// (Resolved as a URL, so a Windows path's drive letter isn't taken for part of the path.)
+const stub = new URL('../stand-ins/cloudflare-workers.mjs', import.meta.url).href
 register(`data:text/javascript,${encodeURIComponent(`export async function resolve(s, c, next) { return s === 'cloudflare:workers' ? { url: ${JSON.stringify(stub)}, shortCircuit: true } : next(s, c) }`)}`)
 
 export function d1() {
