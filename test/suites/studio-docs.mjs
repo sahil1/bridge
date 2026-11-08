@@ -276,11 +276,13 @@ try {
   ok(!!(await until(async () => (await p.locator('.sd-outline-item.on').innerText().catch(() => '')) === 'Next steps', 3000, 100)), 'a heading tapped in the outline is where you are')
 
   // ---------- Saved, exactly ----------
+  // A document saves itself a moment after typing stops; ⌘S saves it at once, as here.
+  const saveNow = () => p.keyboard.press(`${MOD}+s`)
   const was = await partsOf(file('report.docx'))
   await caret(p, 'We ship the pricing page')
   await p.keyboard.type(' Agreed.')
-  ok(/Unsaved changes/.test(await p.locator('.sd-status').innerText()), 'typed: unsaved changes')
-  await p.locator('.pane-head button', { hasText: 'Save' }).click()
+  ok(/Unsaved changes|Saving/.test(await p.locator('.sd-status').innerText()), 'typed: unsaved changes')
+  await saveNow()
   const now = await until(async () => { const x = await partsOf(file('report.docx')); return /Agreed/.test(x['word/document.xml']) && x }, 10000)
   ok(!!now && changed(was, now).join() === 'word/document.xml', 'saved: only the document part changed; styles, numbering, comments, footnotes, header, footer, settings and the picture as they were, byte for byte', now && changed(was, now))
   const gone = paras(was['word/document.xml']).filter((x) => !now['word/document.xml'].includes(x))
@@ -289,7 +291,7 @@ try {
   // Typed and taken back, saved: the file as it was before.
   await caret(p, 'Agreed.')
   for (let i = 0; i < 8; i++) await p.keyboard.press('Backspace')
-  await p.locator('.pane-head button', { hasText: 'Save' }).click()
+  await saveNow()
   const back = await until(async () => { const x = await partsOf(file('report.docx')); return !/Agreed/.test(x['word/document.xml']) && x }, 10000)
   ok(!!back && !changed(was, back).length, 'the edit taken back and saved: every part exactly as it was', back && changed(was, back))
 
@@ -333,11 +335,13 @@ try {
   const bullet = !!(await until(async () => /^[•●◦▪■]$/.test(await line().getAttribute('data-mk') || ''), 3000, 100))
   await btn('Numbered list').click()
   ok(bullet && !!(await until(async () => /^\d+\.$/.test(await line().getAttribute('data-mk') || ''), 3000, 100)), 'a bulleted list, then numbered')
-  await p.locator('.pane-head button', { hasText: 'Save' }).click()
+  await saveNow()
   const fmt = await until(async () => { const x = (await partsOf(file('report.docx')))['word/document.xml']; const q = paras(x).find((y) => /Toggle me/.test(y)); return q && /<w:numPr>/.test(q) && q }, 10000)
   ok(!!fmt && /<w:jc w:val="center"\/>/.test(fmt) && /w:line="480"/.test(fmt) && /<w:color w:val="CC0000"\/>/.test(fmt) && /<w:highlight w:val="yellow"\/>/.test(fmt) && /w:ascii="Calibri Light"/.test(fmt) && /<w:sz w:val="24"\/>/.test(fmt) && /<w:strike\/>/.test(fmt), 'saved as Word has them: alignment, spacing, colour, highlight, font, size, strikethrough and the list', fmt)
 
   // ---------- Pictures, tables, header ----------
+  // The file as it is before them (each change saves itself as it's made).
+  const before = await partsOf(file('report.docx'))
   await caret(p, 'Toggle me')
   await p.keyboard.press('Enter')
   await tb.locator('input[type="file"]').setInputFiles({ name: 'chart.png', mimeType: 'image/png', buffer: chartPng(120, 70) })
@@ -372,8 +376,7 @@ try {
   await shot(p, `${tag}studio-docs-header`)
   await p.locator('.sd-hf button', { hasText: 'Done' }).click()
   ok(!!(await until(async () => /\(draft\)/.test(await p.locator('.sd-pb-top .sd-pb-head').innerText().catch(() => '')), 5000, 100)), 'the header changed, on every page')
-  const before = await partsOf(file('report.docx'))
-  await p.locator('.pane-head button', { hasText: 'Save' }).click()
+  await saveNow()
   const after = await until(async () => { const x = await partsOf(file('report.docx')); return Object.values(x).some((v) => /\(draft\)/.test(v)) && x }, 10000)
   const parts = after ? changed(before, after) : []
   const stylesKept = after && (after['word/styles.xml'] === before['word/styles.xml'] || after['word/styles.xml'].replace(/<w:style [^>]*w:styleId="TableGrid"[\s\S]*?<\/w:style>/, '') === before['word/styles.xml'])

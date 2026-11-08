@@ -667,7 +667,9 @@ function withAttrs(rawXml, name, set, scope) {
 }
 
 export class Writer {
-  constructor(model) { this.m = model; this.scope = { ...NS, ...model.ns } }
+  // A new picture's id counts on from the file's own, the same way each save, so a file saved again
+  // as it is comes out the same.
+  constructor(model) { this.m = model; this.scope = { ...NS, ...model.ns }; this.docPr = model.added.next.docPr }
   relsAdd(from, type, target, external = false) {
     const key = `${from}\n${type}\n${target}`
     const a = this.m.added.rels
@@ -783,7 +785,7 @@ export class Writer {
       this.m.added.media.set(key, media)
     }
     const rid = this.relsAdd(part.path, 'image', relTarget(part.path, media.path))
-    const id = ++this.m.added.next.docPr
+    const id = ++this.docPr
     const A = NS.a, PIC = NS.pic
     return `<w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:docPr id="${id}" name="Picture ${id}"${a.alt ? ` descr="${esc(a.alt)}"` : ''}/><wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a="${A}" noChangeAspect="1"/></wp:cNvGraphicFramePr><a:graphic xmlns:a="${A}"><a:graphicData uri="${PIC}"><pic:pic xmlns:pic="${PIC}"><pic:nvPicPr><pic:cNvPr id="${id}" name="Picture ${id}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${rid}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing>`
   }
@@ -906,17 +908,43 @@ export function builtinStyle(id, theme = { fonts: {}, colors: {} }) {
   return stylesOf(`<w:styles xmlns:w="${NS.w}">${x}</w:styles>`, theme).list[0]
 }
 
-// Lists: a numbering definition for bullets or numbers, added when the document has none.
-export function listNum(m, bullets) {
+// Lists: a numbering definition for bullets, numbers or a checklist (a bullet that's a box, ticked
+// or not: how a checklist is kept in a Word file), added when the document has none. kind: 'bullet',
+// 'number', 'check' or 'checked' (true and false are bullets and numbers, as before). fresh: numbers
+// that start again at 1, as a new list does, rather than going on from the document's last one.
+export const CHECK = { check: '☐', checked: '☑' }
+export function listKindOf(m, numId, lvl = 0) {
+  const l = m.numbering.abs.get(m.numbering.nums.get(numId)?.abs)?.levels?.[lvl || 0]
+  if (!l) return null
+  if (l.fmt !== 'bullet') return 'number'
+  return l.text === CHECK.check ? 'check' : l.text === CHECK.checked || l.text === '☒' ? 'checked' : 'bullet'
+}
+export function listNum(m, kind, { fresh = false } = {}) {
+  if (kind === true) kind = 'bullet'
+  if (kind === false || !kind) kind = 'number'
+  let found = null
   for (const [id, n] of m.numbering.nums) {
-    const l0 = m.numbering.abs.get(n.abs)?.levels?.[0]
-    if (l0 && (bullets ? l0.fmt === 'bullet' : l0.fmt === 'decimal') && !m.numbering.abs.get(n.abs).link) return id
+    const a = m.numbering.abs.get(n.abs)
+    const l0 = a?.levels?.[0]
+    if (!l0 || a.link) continue
+    const k = listKindOf(m, id)
+    if (k === kind && (kind !== 'number' || l0.fmt === 'decimal')) { found = { id, abs: n.abs }; break }
+  }
+  if (found && !(fresh && kind === 'number')) return found.id
+  // Numbers that start again: the same list's look, counted from 1 (a num of its own).
+  if (found) {
+    const id = ++m.added.next.num
+    m.added.nums.push(`<w:num w:numId="${id}"><w:abstractNumId w:val="${found.abs}"/><w:lvlOverride w:ilvl="0"><w:startOverride w:val="1"/></w:lvlOverride></w:num>`)
+    m.numbering.nums.set(id, { abs: found.abs, starts: { 0: 1 } })
+    return id
   }
   const abs = ++m.added.next.abs
   const id = ++m.added.next.num
-  const marks = ['•', 'o', '▪', '•', 'o', '▪', '•', 'o', '▪']
+  const marks = kind === 'check' || kind === 'checked' ? Array(9).fill(CHECK[kind]) : ['•', 'o', '▪', '•', 'o', '▪', '•', 'o', '▪']
+  const bullets = kind !== 'number'
   const fmts = ['decimal', 'lowerLetter', 'lowerRoman']
-  const levels = Array.from({ length: 9 }, (_, i) => ({ fmt: bullets ? 'bullet' : fmts[i % 3], text: bullets ? marks[i] : `%${i + 1}.`, start: 1, left: 720 * (i + 1), hanging: 360, font: bullets && marks[i] === 'o' ? 'Courier New' : null }))
+  const fontOf = (t) => (t === 'o' ? 'Courier New' : t === CHECK.check || t === CHECK.checked ? 'Segoe UI Symbol' : null)
+  const levels = Array.from({ length: 9 }, (_, i) => ({ fmt: bullets ? 'bullet' : fmts[i % 3], text: bullets ? marks[i] : `%${i + 1}.`, start: 1, left: 720 * (i + 1), hanging: 360, font: bullets ? fontOf(marks[i]) : null }))
   const xml = `<w:abstractNum w:abstractNumId="${abs}"><w:multiLevelType w:val="hybridMultilevel"/>${levels.map((l, i) => `<w:lvl w:ilvl="${i}"><w:start w:val="1"/><w:numFmt w:val="${l.fmt}"/><w:lvlText w:val="${esc(l.text)}"/><w:lvlJc w:val="left"/><w:pPr><w:ind w:left="${l.left}" w:hanging="360"/></w:pPr>${l.font ? `<w:rPr><w:rFonts w:ascii="${l.font}" w:hAnsi="${l.font}" w:cs="${l.font}"/></w:rPr>` : ''}</w:lvl>`).join('')}</w:abstractNum>`
   m.added.abs.push(xml)
   m.added.nums.push(`<w:num w:numId="${id}"><w:abstractNumId w:val="${abs}"/></w:num>`)
@@ -928,10 +956,30 @@ export function listNum(m, bullets) {
 // A header or footer part, new: its paragraphs' XML.
 const HF_NS = `xmlns:w="${NS.w}" xmlns:r="${NS.r}" xmlns:wp="${NS.wp}" xmlns:a="${NS.a}" xmlns:pic="${NS.pic}"`
 
+// The section's page set (Page setup): its size and which way it's turned, and its margins; what
+// else the section says as written. p: as pageOf reads it (twips).
+const SECT_BEFORE = /<w:(headerReference|footerReference|footnotePr|endnotePr|type)\b[^>]*?(\/>|>[\s\S]*?<\/w:\1>)/g
+function withPage(x, p, scope) {
+  if (/^<w:sectPr\b[^>]*\/>$/.test(x)) x = x.replace(/\s*\/>$/, '></w:sectPr>')
+  const put = (tag, attrs, after) => {
+    const re = new RegExp(`<w:${tag}\\b[^>]*?(/>|>[\\s\\S]*?</w:${tag}>)`)
+    const had = re.exec(x)
+    const el = withAttrs(had ? had[0] : '', tag, attrs, scope)
+    if (had) { x = x.replace(had[0], el); return }
+    const at = after()
+    x = x.slice(0, at) + el + x.slice(at)
+  }
+  const afterStart = () => x.indexOf('>') + 1
+  const afterRefs = () => { let end = afterStart(); for (const m of x.matchAll(SECT_BEFORE)) end = Math.max(end, m.index + m[0].length); return end }
+  put('pgSz', { 'w:w': p.w, 'w:h': p.h, 'w:orient': p.orient === 'landscape' ? 'landscape' : null }, afterRefs)
+  put('pgMar', { 'w:top': p.top, 'w:right': p.right, 'w:bottom': p.bottom, 'w:left': p.left, 'w:header': p.header ?? 720, 'w:footer': p.footer ?? 720, 'w:gutter': p.gutter ?? 0 }, () => { const m = /<w:pgSz\b[^>]*?\/>/.exec(x); return m ? m.index + m[0].length : afterRefs() })
+  return x
+}
+
 // The Word file again: the body (and any header or footer changed) written, every other part as it
-// was. hf: { [part path]: json } the headers and footers edited; addHf: { header, footer } JSON of
-// ones made new; page: { margins… } changed. Bytes back.
-export async function writeDocx(m, json, { hf = {}, make = {} } = {}) {
+// was. hf: { [part path]: json } the headers and footers edited; make: { header, footer } JSON of
+// ones made new; page: the page's size and margins, set in Page setup. Bytes back.
+export async function writeDocx(m, json, { hf = {}, make = {}, page = null } = {}) {
   const w = new Writer(m)
   const zip = m.zip
   const write = (part, body, sect = null) => {
@@ -940,6 +988,9 @@ export async function writeDocx(m, json, { hf = {}, make = {} } = {}) {
     return part.head + body + tail
   }
   m.added.parts = m.added.parts || {}
+  // A part is written only when it isn't what the file has now (as read, or as saved last).
+  m.written = m.written || {}
+  const put = (path, x, was) => { if (x !== (m.written[path] ?? was)) { zip.file(path, x); m.written[path] = x } }
   // A header or footer made new: a part of its own, related to the document, named first in the
   // section's properties (where Word wants it).
   let sect = m.main.sect?.raw ?? null
@@ -950,7 +1001,7 @@ export async function writeDocx(m, json, { hf = {}, make = {} } = {}) {
     m.added.made = { ...(m.added.made || {}), [which]: path }
     const tag = which === 'header' ? 'hdr' : 'ftr'
     const part = { path, head: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:${tag} ${HF_NS}>`, tail: `</w:${tag}>`, raws: new Map(), fp: new Map(), xml: '' }
-    zip.file(path, part.head + w.blocks(make[which].content || [], part) + part.tail)
+    put(path, part.head + w.blocks(make[which].content || [], part) + part.tail)
     const rid = w.relsAdd(m.docPath, which, relTarget(m.docPath, path))
     m.added.parts[path] = which
     const ref = `<w:${which}Reference w:type="default" r:id="${rid}"/>`
@@ -958,12 +1009,10 @@ export async function writeDocx(m, json, { hf = {}, make = {} } = {}) {
     else if (/\/>$/.test(sect) && !/<\/w:sectPr>$/.test(sect)) sect = sect.replace(/\s*\/>$/, `>${ref}</w:sectPr>`)
     else sect = sect.replace(/^(<w:sectPr\b[^>]*>)/, `$1${ref}`)
   }
+  if (page) sect = withPage(sect || '<w:sectPr></w:sectPr>', page, w.scope)
   const body = w.blocks(json.content || [], m.main)
   let doc = write(m.main, body, m.main.sect && sect !== m.main.sect.raw ? sect : null)
   if (sect && !m.main.sect) doc = doc.replace(/(<\/w:body>)/, `${sect}$1`)
-  // A part is written only when it isn't what the file has now (as read, or as saved last).
-  m.written = m.written || {}
-  const put = (path, x, was) => { if (x !== (m.written[path] ?? was)) { zip.file(path, x); m.written[path] = x } }
   // A prefix the new XML uses (w:, r:, wp:) that the document declares under another name, or not at all.
   if (doc !== m.main.xml) doc = doc.replace(/^([\s\S]*?<[\w.-]*:?document\b)([^>]*)>/, (all, a, b) => `${a}${b}${['w', 'r', 'wp'].filter((p) => !new RegExp(`\\sxmlns:${p}=`).test(b)).map((p) => ` xmlns:${p}="${NS[p]}"`).join('')}>`)
   put(m.docPath, doc, m.main.xml)
@@ -978,13 +1027,14 @@ export async function writeDocx(m, json, { hf = {}, make = {} } = {}) {
     m.added.parts[m.numberingPath] = 'numbering'
   }
   // Pictures added, the relationships to them (and to links and parts), styles the document now uses.
-  for (const md of m.added.media.values()) zip.file(md.path, md.data, { base64: true })
+  // Each written only when it's new or changed, so saving a file again as it is gives the same bytes.
+  for (const md of m.added.media.values()) if (!zip.file(md.path)) zip.file(md.path, md.data, { base64: true })
   const byPart = new Map()
   for (const r of m.added.rels.values()) { if (!byPart.has(r.from)) byPart.set(r.from, []); byPart.get(r.from).push(r) }
   for (const [from, list] of byPart) {
     const was = m.relsXml[from] || '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>'
     const add = list.filter((r) => !was.includes(`Id="${r.id}"`)).map((r) => `<Relationship Id="${r.id}" Type="${r.type}" Target="${esc(r.target)}"${r.external ? ' TargetMode="External"' : ''}/>`).join('')
-    zip.file(relsPath(from), was.replace(/<\/Relationships>\s*$/, `${add}</Relationships>`))
+    put(relsPath(from), was.replace(/<\/Relationships>\s*$/, `${add}</Relationships>`), was)
   }
   if (m.added.styles.size && m.stylesPath) {
     const s = await zip.file(m.stylesPath)?.async('string')

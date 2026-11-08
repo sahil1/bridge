@@ -394,7 +394,7 @@ app.delete('/api/studio/recent', wrap((req) => { const q = sq(req); return studi
 app.get('/api/studio/open', wrap(async (req) => { const q = sq(req); return studio.open(await rootOf(q.root), q.path, { rootId: q.root, label: String(req.query.where || '') || null }) }))
 // A save over a change made meanwhile is a 409, so the page offers theirs or yours.
 app.put('/api/studio/file', express.raw({ type: () => true, limit: '80mb' }), async (req, res) => {
-  try { const q = sq(req); res.json(await studio.save(await rootOf(q.root), q.path, req.body, { mtime: req.query.mtime, force: req.query.force === '1' })) } catch (e) { res.status(e.conflict ? 409 : 502).json({ error: e.message, ...(e.conflict ? { conflict: true } : {}) }) }
+  try { const q = sq(req); res.json(await studio.save(await rootOf(q.root), q.path, req.body, { mtime: req.query.mtime, force: req.query.force === '1', auto: req.query.auto === '1' })) } catch (e) { res.status(e.conflict ? 409 : 502).json({ error: e.message, ...(e.conflict ? { conflict: true } : {}) }) }
 })
 app.get('/api/studio/changed', wrap(async (req) => { const q = sq(req); return studio.changed(await rootOf(q.root), q.path, req.query.since) }))
 app.get('/api/studio/versions', wrap(async (req) => { const q = sq(req); return studio.versions(await rootOf(q.root), q.path) }))
