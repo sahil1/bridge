@@ -667,7 +667,9 @@ function withAttrs(rawXml, name, set, scope) {
 }
 
 export class Writer {
-  constructor(model) { this.m = model; this.scope = { ...NS, ...model.ns } }
+  // A new picture's id counts on from the file's own, the same way each save, so a file saved again
+  // as it is comes out the same.
+  constructor(model) { this.m = model; this.scope = { ...NS, ...model.ns }; this.docPr = model.added.next.docPr }
   relsAdd(from, type, target, external = false) {
     const key = `${from}\n${type}\n${target}`
     const a = this.m.added.rels
@@ -783,7 +785,7 @@ export class Writer {
       this.m.added.media.set(key, media)
     }
     const rid = this.relsAdd(part.path, 'image', relTarget(part.path, media.path))
-    const id = ++this.m.added.next.docPr
+    const id = ++this.docPr
     const A = NS.a, PIC = NS.pic
     return `<w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:docPr id="${id}" name="Picture ${id}"${a.alt ? ` descr="${esc(a.alt)}"` : ''}/><wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a="${A}" noChangeAspect="1"/></wp:cNvGraphicFramePr><a:graphic xmlns:a="${A}"><a:graphicData uri="${PIC}"><pic:pic xmlns:pic="${PIC}"><pic:nvPicPr><pic:cNvPr id="${id}" name="Picture ${id}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${rid}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing>`
   }
@@ -940,6 +942,9 @@ export async function writeDocx(m, json, { hf = {}, make = {} } = {}) {
     return part.head + body + tail
   }
   m.added.parts = m.added.parts || {}
+  // A part is written only when it isn't what the file has now (as read, or as saved last).
+  m.written = m.written || {}
+  const put = (path, x, was) => { if (x !== (m.written[path] ?? was)) { zip.file(path, x); m.written[path] = x } }
   // A header or footer made new: a part of its own, related to the document, named first in the
   // section's properties (where Word wants it).
   let sect = m.main.sect?.raw ?? null
@@ -950,7 +955,7 @@ export async function writeDocx(m, json, { hf = {}, make = {} } = {}) {
     m.added.made = { ...(m.added.made || {}), [which]: path }
     const tag = which === 'header' ? 'hdr' : 'ftr'
     const part = { path, head: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:${tag} ${HF_NS}>`, tail: `</w:${tag}>`, raws: new Map(), fp: new Map(), xml: '' }
-    zip.file(path, part.head + w.blocks(make[which].content || [], part) + part.tail)
+    put(path, part.head + w.blocks(make[which].content || [], part) + part.tail)
     const rid = w.relsAdd(m.docPath, which, relTarget(m.docPath, path))
     m.added.parts[path] = which
     const ref = `<w:${which}Reference w:type="default" r:id="${rid}"/>`
@@ -961,9 +966,6 @@ export async function writeDocx(m, json, { hf = {}, make = {} } = {}) {
   const body = w.blocks(json.content || [], m.main)
   let doc = write(m.main, body, m.main.sect && sect !== m.main.sect.raw ? sect : null)
   if (sect && !m.main.sect) doc = doc.replace(/(<\/w:body>)/, `${sect}$1`)
-  // A part is written only when it isn't what the file has now (as read, or as saved last).
-  m.written = m.written || {}
-  const put = (path, x, was) => { if (x !== (m.written[path] ?? was)) { zip.file(path, x); m.written[path] = x } }
   // A prefix the new XML uses (w:, r:, wp:) that the document declares under another name, or not at all.
   if (doc !== m.main.xml) doc = doc.replace(/^([\s\S]*?<[\w.-]*:?document\b)([^>]*)>/, (all, a, b) => `${a}${b}${['w', 'r', 'wp'].filter((p) => !new RegExp(`\\sxmlns:${p}=`).test(b)).map((p) => ` xmlns:${p}="${NS[p]}"`).join('')}>`)
   put(m.docPath, doc, m.main.xml)
@@ -978,13 +980,14 @@ export async function writeDocx(m, json, { hf = {}, make = {} } = {}) {
     m.added.parts[m.numberingPath] = 'numbering'
   }
   // Pictures added, the relationships to them (and to links and parts), styles the document now uses.
-  for (const md of m.added.media.values()) zip.file(md.path, md.data, { base64: true })
+  // Each written only when it's new or changed, so saving a file again as it is gives the same bytes.
+  for (const md of m.added.media.values()) if (!zip.file(md.path)) zip.file(md.path, md.data, { base64: true })
   const byPart = new Map()
   for (const r of m.added.rels.values()) { if (!byPart.has(r.from)) byPart.set(r.from, []); byPart.get(r.from).push(r) }
   for (const [from, list] of byPart) {
     const was = m.relsXml[from] || '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>'
     const add = list.filter((r) => !was.includes(`Id="${r.id}"`)).map((r) => `<Relationship Id="${r.id}" Type="${r.type}" Target="${esc(r.target)}"${r.external ? ' TargetMode="External"' : ''}/>`).join('')
-    zip.file(relsPath(from), was.replace(/<\/Relationships>\s*$/, `${add}</Relationships>`))
+    put(relsPath(from), was.replace(/<\/Relationships>\s*$/, `${add}</Relationships>`), was)
   }
   if (m.added.styles.size && m.stylesPath) {
     const s = await zip.file(m.stylesPath)?.async('string')

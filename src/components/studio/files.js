@@ -14,10 +14,11 @@ export async function bytesOf(url) {
 export const textOf = (buf) => new TextDecoder().decode(buf)
 
 // Saved as bytes (Word, Excel, PowerPoint) or text, only over the version you loaded (mtime)
-// unless force: { mtime, versions } back, or an error with conflict: true.
-export async function saveFile(f, data, { mtime, force = false } = {}) {
+// unless force: { mtime, versions } back, or an error with conflict: true. auto: saved as you type
+// (its version made one with the last few minutes' others).
+export async function saveFile(f, data, { mtime, force = false, auto = false } = {}) {
   const body = typeof data === 'string' ? new TextEncoder().encode(data) : data
-  const r = await fetch(`${BASE}/api/studio/file?${q(f)}&mtime=${encodeURIComponent(mtime ?? '')}${force ? '&force=1' : ''}`, { method: 'PUT', headers: { 'content-type': 'application/octet-stream' }, body, credentials: 'same-origin' })
+  const r = await fetch(`${BASE}/api/studio/file?${q(f)}&mtime=${encodeURIComponent(mtime ?? '')}${force ? '&force=1' : ''}${auto ? '&auto=1' : ''}`, { method: 'PUT', headers: { 'content-type': 'application/octet-stream' }, body, credentials: 'same-origin' })
   const j = await r.json().catch(() => ({}))
   if (!r.ok) throw Object.assign(new Error(j.error || `Couldn't save it (${r.status})`), { conflict: r.status === 409 })
   return j
