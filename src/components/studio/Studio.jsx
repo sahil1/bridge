@@ -252,7 +252,7 @@ const KEEPS = {
   '.docx': tx('Saving here writes only what you changed. Everything else in the file (its styles, headers and footers, comments, tracked changes, fields and page setup) stays exactly as it was, and the file as it was stays in its versions.'), '.xlsx': SHEET_KEEPS, '.xlsm': SHEET_KEEPS,
   '.md': tx('Saved as Markdown, as written: headings, bold, italic, strikethrough, code, lists, quotes, links, tables and pictures. Markdown has no underline or colours, so they aren\'t offered.'),
   '.txt': tx('Saved as plain text, as it is.'),
-  '.csv': tx('Saved as a {kind} file in its own separator, encoding and line endings: the first sheet\'s values, each line you didn\'t change written as it was. Formulas (saved as their results), formats and other sheets aren\'t part of a {kind} file.'),
+  '.csv': tx('Saved as a {kind} file in its own separator, encoding and line endings: the first sheet\'s values as they show (a number in its format, like 1,200.50, 15% or 2026-04-01), each line you didn\'t change written as it was. Formulas (saved as their results), other formats and other sheets aren\'t part of a {kind} file.'),
   deck: tx('Saved as a Markdown deck, as written: slides between lines of ---. PowerPoint and PDF make a copy beside it.'),
   '.pptx': tx('Saved as a PowerPoint, written again from its slides in Studio\'s layouts: their titles, text, lists, pictures, tables, notes and theme. Export makes a Markdown deck of it beside it.'),
   '.pdf': tx('Shown here, not edited: Ask an agent to change it, or the file it was made from.'),

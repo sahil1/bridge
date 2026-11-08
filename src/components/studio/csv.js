@@ -4,6 +4,7 @@
 // line endings and its last newline are found when it opens and kept when it's saved. Each field
 // keeps its own text and quotes unless it was changed, so a file saved with nothing changed is the
 // same bytes, and a change shows in a diff as just that change.
+import { getNumfmtParseValueFilter, numfmt } from '@univerjs/presets'
 
 export const SEPARATORS = { ',': 'comma', ';': 'semicolon', '\t': 'tab', '|': 'pipe' }
 // What it can be read as. Studio can write all but the last ones back; those are saved as UTF-8,
@@ -95,10 +96,37 @@ export function sniffSeparator(text, fallback = ',') {
   return best
 }
 
-// A number only when it's written the way a number writes itself back: "120" and "-3.5" are
-// numbers; "007", "1,200", "1e5" and long IDs stay text, so nothing changes when it's saved.
+// A number only when it's written the way a number writes itself back, so it adds up and sorts as
+// one and nothing changes when it's saved: "120", "-3.5", "3.70", "1,200.50", "10%", "$4.00" and
+// "2026-01-05" are numbers (dates too), each with the format that writes it as it was (Univer's
+// own reading of what's typed); "007", long IDs, "1e5" and anything else stay text.
 const NUM = /^-?(0|[1-9]\d{0,14})(\.\d{1,15})?$/
-export const asCell = (v) => (NUM.test(v) && String(Number(v)) === v ? { v: Number(v), t: 2 } : { v, t: 1 })
+const MAYBE = /^[-+]?[$€£¥₹]?[-+]?\d[\d,.]*(%|[-/:. ]\d[\d\-/:. ]*(\s?[AaPp][Mm])?)?$/
+// The format a number written this way has: its decimals, thousands, percent and currency sign.
+const SHAPE = /^-?([$€£¥₹]?)-?(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d+))?(%?)$/
+const shapeOf = (v) => { const m = SHAPE.exec(v); return m && `${m[1]}${m[2].includes(',') ? '#,##0' : '0'}${m[3] ? `.${'0'.repeat(m[3].length)}` : ''}${m[4]}` }
+const writes = (pattern, n, v) => { try { return numfmt.format(pattern, n) === v } catch { return false } }
+export function asCell(v) {
+  if (NUM.test(v) && String(Number(v)) === v) return { v: Number(v), t: 2 }
+  if (v.length > 40 || !MAYBE.test(v) || /^-?0\d+$/.test(v)) return { v, t: 1 }
+  const read = getNumfmtParseValueFilter(v)
+  if (!read || typeof read.v !== 'number' || !Number.isFinite(read.v)) return { v, t: 1 }
+  for (const pattern of [read.z, shapeOf(v)]) {
+    if (pattern && writes(pattern, read.v, v)) return { v: read.v, t: 2, s: { n: { pattern } } }
+  }
+  return { v, t: 1 }
+}
+// A cell's value as the file writes it: as it shows, in its number format (15%, 1,200.50,
+// 2026-04-01), a number with no format as itself (to 15 digits, as Excel writes one), true and
+// false as Excel writes them. styles: the workbook's, for a cell whose style is by name.
+export function textOf(cell, styles) {
+  if (!cell || cell.v == null) return ''
+  if (cell.t === 3) return cell.v ? 'TRUE' : 'FALSE'
+  if (typeof cell.v !== 'number') return String(cell.v)
+  const pattern = (typeof cell.s === 'string' ? styles?.[cell.s] : cell.s)?.n?.pattern
+  if (pattern && !/^general$/i.test(pattern)) { try { return numfmt.format(pattern, cell.v) } catch { /* as itself */ } }
+  return String(Number(cell.v.toPrecision(15)))
+}
 
 // How a file is read: what was found (or picked) and the fields as written, to write back.
 export function readCsv(buf, { ext = '.csv', sep: pickSep = null, enc: pickEnc = null } = {}) {

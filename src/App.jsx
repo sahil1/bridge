@@ -654,7 +654,9 @@ function App() {
   // The computer updated while this page was open: the new one loads by itself when nothing's under
   // way, or a line under the top bar says so with Reload (src/fresh.js).
   const fresh = useFresh({ hold: !!meetings?.rec })
-  useHotkey(useCallback((e) => (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k', []), () => setPalette((p) => !p))
+  // ⌘K, but where something on the page has it for its own (a sheet's Insert link, as in Google
+  // Sheets and Excel): there the top bar's search opens this.
+  useHotkey(useCallback((e) => (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && !e.target?.closest?.('[data-own-keys~="mod+k"]'), []), () => setPalette((p) => !p))
   useHotkey(useCallback((e) => (e.metaKey || e.ctrlKey) && e.key === ',', []), () => setSettings((v) => (v ? null : 'all')))
   useHotkey(useCallback((e) => (e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'f', []), () => setHistory((v) => !v))
   // ⌥1 and ⌥2 alone: with ⌘ (or Ctrl) they're a document's Heading 1 and 2, in Studio.
