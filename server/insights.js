@@ -17,7 +17,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import readline from 'node:readline'
+import { StringDecoder } from 'node:string_decoder'
 import { DATA, dataFile, ensureDir } from './paths.js'
 import { CLAUDE_EDITS, codexPatch, codexFailed } from './edits.js'
 import { adapter } from './agents.js'
@@ -144,9 +144,32 @@ const ask = (s, text) => {
   else s.prompts[3] = t // the first three and the latest
 }
 
+// Each line of a log, read a piece at a time, so the server answers everything else between pieces.
+// readline's iterator handed over all it had read ahead in one go: a 2 MB conversation held the
+// server up for 76 ms here, and a slow Mac (CI's) for 300 ms and more, while the first look at
+// Usage or Insights read a month of them.
+const PIECE = 64 * 1024
 async function lines(file, each) {
-  const rl = readline.createInterface({ input: fs.createReadStream(file, { encoding: 'utf8' }), crlfDelay: Infinity })
-  for await (const line of rl) if (line) each(line)
+  const fh = await fs.promises.open(file, 'r')
+  try {
+    const text = new StringDecoder('utf8')
+    const buf = Buffer.alloc(PIECE)
+    let part = [] // a line longer than a piece, until its end comes
+    const line = (l) => { if (l.endsWith('\r')) l = l.slice(0, -1); if (l) each(l) }
+    for (;;) {
+      const { bytesRead } = await fh.read(buf, 0, PIECE, null)
+      const got = bytesRead ? text.write(buf.subarray(0, bytesRead)) : text.end()
+      const cut = got.split('\n')
+      if (cut.length > 1) {
+        line(part.join('') + cut[0])
+        part = []
+        for (let i = 1; i < cut.length - 1; i++) line(cut[i])
+      }
+      part.push(cut.at(-1))
+      if (!bytesRead) break
+    }
+    line(part.join(''))
+  } finally { await fh.close() }
 }
 
 const NOISE = /^<(command-|local-command|system-reminder|task-notification|bash-|user-prompt-submit-hook)/
