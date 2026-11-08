@@ -164,7 +164,7 @@ if (IS_MAC) {
 // open it), or at a week.
 const LAYOUT = { railW: 232, railOpen: true, dockW: 380, dockMin: false, boardH: 280, boardMin: false, sideW: 560, max: 'dock', todayOpen: true }
 const open = async (look = {}) => {
-  const pg = await page(b, kit.url, { width: 1440, height: 900, ...look, store: { 'cc-layout': LAYOUT, 'cc-today-tab': 'calendar', 'cc-cal-mode': 'week', ...(look.store || {}) }, before: setUp })
+  const pg = await page(b, kit.url, { width: 1440, height: 900, ...look, store: { 'cc-layout': LAYOUT, 'cc-today-tab': 'calendar', 'cc-cal-mode': 'week', ...(look.store || {}) }, before: async (c) => { await setUp(c); await look.before?.(c) } })
   pages.push(pg)
   await pg.p.waitForSelector(look.phone ? '.tabbar' : '.calv', { timeout: 20000 }).catch(() => {})
   return pg
@@ -277,6 +277,18 @@ try {
   ok(asked(/^Prepare me for a meeting: "Design review with Ines"/).length === 2 && p3.suggest.items.length > 0, 'Again: asked afresh')
 
   // ---------- The app, with a model: 1440, light and dark ----------
+  // How it's shown slow to come: the week is read once, from the Monday it's set to start on, never
+  // first as this browser's language starts it (it then moved, its events gone in between).
+  {
+    const from = []
+    const { p } = await open({ before: async (c) => {
+      c.on('request', (r) => { if (/\/api\/calendar\/range\?/.test(r.url())) from.push(new URL(r.url()).searchParams.get('from')) })
+      await c.route(/\/api\/calendar\/view$/, async (r) => { await sleep(1500); await r.continue().catch(() => {}) })
+    } })
+    await until(() => p.locator('.tg-ev').count(), 15000)
+    ok(from.length > 0 && from.every((d) => new Date(`${d}T12:00`).getDay() === 1), 'the week is read once it\'s known which day it starts on, never first as the browser\'s language starts it', from)
+    await p.context().close()
+  }
   for (const mode of ['light', 'dark']) {
     const { p, errors } = await open({ mode })
     await until(() => p.locator('.tg-ev').count(), 15000)
