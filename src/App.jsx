@@ -41,7 +41,7 @@ import { MachineMenu, AskBanner, SwitchedHere, useMachines, goMachine, isRemote,
 import { useNeedsYou, NeedsYouChip, NeedsYouPanel, waitingOn, quietPanes } from './components/NeedsYou.jsx'
 import { isQuiet } from '../shared/focus.js'
 import AgentMap from './components/AgentMap.jsx'
-import NeedsHome, { Everything, useHome, needCount } from './components/NeedsHome.jsx'
+import NeedsHome, { Everything, useHome, needCount, editHome } from './components/NeedsHome.jsx'
 import More from './components/More.jsx'
 import RemoteAgent from './components/RemoteAgent.jsx'
 import Dictation from './dictation/Dictation.jsx'
@@ -708,6 +708,7 @@ function App() {
   const paletteActions = [
     homeOn && { id: 'a:homeview', label: t('Home'), icon: 'home', keywords: 'needs you waiting answer ready review coming up today next meeting tasks inbox start', run: openHome },
     homeOn && { id: 'a:everything', label: t('Everything'), icon: 'grid', keywords: 'all every item device computer meetings tasks whiteboards agents lanes', run: openEverything },
+    homeOn && { id: 'a:edithome', label: t('Edit Home'), icon: 'edit', keywords: 'arrange reorder order move hide show sections layout customize organize home screen wiggle', run: () => { editHome(); openHome() } },
     { id: 'a:home', label: t('New…'), icon: 'plus', keywords: 'new thread start build project agent chat what should we build', run: openNew },
     { id: 'a:new', label: t('New agent with all the options…'), icon: 'bot', keywords: 'launch start claude codex gemini copilot opencode project dialog compare account', run: () => setNewAgent({ mode: 'project' }) },
     { id: 'a:record', label: t('Record a meeting'), icon: 'mic', keywords: 'meeting notes transcript record call granola minutes', run: () => meetings?.start().catch(() => openAgent('view:meetings')) },
