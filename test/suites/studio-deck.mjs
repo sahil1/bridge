@@ -5,9 +5,11 @@
 // on its own lines; a PowerPoint made of it with a layout per kind of slide, placeholders for its
 // titles and text, notes, pictures, its look in its theme, and every paragraph's properties once
 // (or PowerPoint offers to repair it); and read back into the same deck (a round trip, twice); a
-// PowerPoint made elsewhere read too; a skipped slide. A PowerPoint as itself (pptxdoc.js and the
-// rest): read and drawn as PowerPoint draws it, saved unchanged byte for byte, its words changed
-// in their runs, and changed and saved with only what changed written.
+// PowerPoint made elsewhere read too; a skipped slide; a picture of every common kind, and crafted
+// ones that made image-size up to 2.0.2 loop forever, in a process killed if it hangs. A
+// PowerPoint as itself (pptxdoc.js and the rest): read and drawn as PowerPoint draws it, saved
+// unchanged byte for byte, its words changed in their runs, and changed and saved with only what
+// changed written.
 // The server: a picture saved beside a deck; AI writing a deck from what it's about or a document,
 // rewriting a slide, adding one; no model, said.
 // The page: the slides down the side and the slide in the middle; typing a title right on the
@@ -22,6 +24,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
+import { spawnSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import { startKit, startModel, checks, until, sleep, browser, page, shot, phoneFaults, noServiceWorker, ROOT } from '../lib/harness.mjs'
 
@@ -157,6 +160,35 @@ try {
   ok(back.media.length === 1 && back.media[0].bytes.length === PNG.length && back.look.colors.accent === '#d9502b' && back.look.fonts.heading === 'Georgia', 'and its picture, and its look', { media: back.media.map((x) => x.id), look: back.look })
   const again = await P.deckFromPptx(await P.pptxOf(P.slidesOf(back.md), back.look, { image: async () => `data:image/png;base64,${PNG.toString('base64')}` }), 'Q4 pitch.pptx')
   ok(again.md === back.md, 'written and read again: the same deck', again.md)
+  // Pictures of every common kind, and crafted ones that made image-size up to 2.0.2 (a picture
+  // sizer pptxgenjs brings) loop forever: an ICNS entry, a JPEG XL jxlp box and a HEIF ispe box of
+  // size 0. Each run in a process of its own, killed if it doesn't finish, so a hang fails here.
+  const be32 = (n) => { const x = Buffer.alloc(4); x.writeUInt32BE(n); return x }
+  const box = (name, body) => Buffer.concat([be32(8 + body.length), Buffer.from(name), body])
+  const CRAFTED = {
+    icns: Buffer.concat([Buffer.from('icns'), be32(64), Buffer.from('ic07'), be32(8), Buffer.from('ic08'), be32(0), Buffer.alloc(40)]),
+    jxl: Buffer.concat([box('JXL ', Buffer.from([13, 10, 135, 10])), box('ftyp', Buffer.from('jxl \0\0\0\0jxl ', 'latin1')), be32(0), Buffer.from('jxlp'), Buffer.alloc(24)]),
+    heic: Buffer.concat([box('ftyp', Buffer.from('heic\0\0\0\0mif1heic', 'latin1')), box('meta', Buffer.concat([be32(0), box('iprp', box('ipco', Buffer.concat([be32(0), Buffer.from('ispe'), Buffer.alloc(12)])))]))]),
+  }
+  const PICS = {
+    'a.png': `data:image/png;base64,${PNG.toString('base64')}`,
+    'a.jpg': 'data:image/jpeg;base64,/9j/2wBDABALDA4MChAODQ4SERATGCgaGBYWGDEjJR0oOjM9PDkzODdASFxOQERXRTc4UG1RV19iZ2hnPk1xeXBkeFxlZ2P/2wBDARESEhgVGC8aGi9jQjhCY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2P/wAARCAAQABgDASIAAhEBAxEB/8QAFgABAQEAAAAAAAAAAAAAAAAAAAQF/8QAHBAAAQQDAQAAAAAAAAAAAAAAEQAFE2ESFSNC/8QAFgEBAQEAAAAAAAAAAAAAAAAABAMF/8QAHhEAAQEJAAAAAAAAAAAAAAAAABITIiMxUWFigZH/2gAMAwEAAhEDEQA/ALGhq2cvaKMeciTdI7tWsi7SyHziALtGh11kvGWQesQDVo7uuzi4xRn1kSKpAcRc2YzbHVOzM1ERSEn/2Q==',
+    'a.gif': 'data:image/gif;base64,R0lGODdhGAAQAJEAAAAAANlQK////wAAACH5BAkAAAMALAAAAAAYABAAAAIdjI+py+0PYxO0UmmsxUFX7l1YKICh6aEax7bu2xYAOw==',
+    'a.webp': 'data:image/webp;base64,UklGRmYAAABXRUJQVlA4IFoAAAAQBACdASoYABAAPtFUo0uoJKMhsAgBABoJagC7LoAs//JQAHXOQw+oAAD51ohvwG0JH+V657Psw1K/MBFX83j//VUGNowUzWdH2PcBXydkeZWZvm9JnXPfAAA=',
+    'a.svg': `data:image/svg+xml;base64,${fs.readFileSync(path.join(ROOT, 'public', 'icon.svg')).toString('base64')}`,
+    ...Object.fromEntries(Object.entries(CRAFTED).map(([k, v]) => [`a.${k}`, `data:image/${k};base64,${v.toString('base64')}`])),
+  }
+  const picDeck = `---\nmarp: true\n---\n\n${Object.keys(PICS).map((n) => `# ${n}\n\n- a point\n\n![bg right:42%](${n})`).join('\n\n---\n\n')}\n`
+  const picMade = spawnSync(process.execPath, ['--input-type=module', '-e', `import { pptxOf, slidesOf } from ${JSON.stringify(pathToFileURL(path.join(ROOT, 'src/components/studio/pptx.js')).href)}
+let s = ''; for await (const c of process.stdin) s += c
+const { deck, pics } = JSON.parse(s)
+process.stdout.write(Buffer.from(await pptxOf(slidesOf(deck), null, { image: async (src) => pics[src] || null })).toString('base64'))`], { input: JSON.stringify({ deck: picDeck, pics: PICS }), timeout: 30_000, encoding: 'utf8', maxBuffer: 64 << 20 })
+  const picZip = picMade.status === 0 ? await JSZip.loadAsync(Buffer.from(picMade.stdout, 'base64')).catch(() => null) : null
+  const picMedia = picZip ? Object.keys(picZip.files).filter((n) => /^ppt\/media\/.+\.\w+$/.test(n)).map((n) => n.split('.').pop()) : []
+  ok(!!picZip && ['png', 'jpeg', 'gif', 'webp', 'svg', 'icns', 'jxl', 'heic'].every((x) => picMedia.includes(x)), 'a PowerPoint with a picture of every common kind, and crafted ICNS, JPEG XL and HEIF ones, made in seconds with each in it', { status: picMade.status, signal: picMade.signal, error: picMade.error?.code, stderr: picMade.stderr?.slice(0, 400), media: picMedia })
+  const sized = spawnSync(process.execPath, ['-e', `const m = require('image-size'), f = m.imageSize || m
+for (const [k, v] of Object.entries(${JSON.stringify(Object.fromEntries(Object.entries(CRAFTED).map(([k, v]) => [k, v.toString('base64')])))})) { try { f(Buffer.from(v, 'base64')); console.log(k, 'sized') } catch (e) { console.log(k, e.message) } }`], { cwd: ROOT, timeout: 10_000, encoding: 'utf8' })
+  ok(sized.status === 0 && sized.stdout.trim().split('\n').length === 3, 'image-size itself turns the crafted pictures down at once rather than looping (2.0.3 or later, set in package.json\'s overrides)', { status: sized.status, signal: sized.signal, error: sized.error?.code, out: sized.stdout, stderr: sized.stderr?.slice(0, 400) })
   // A PowerPoint made elsewhere: text boxes and PowerPoint's own layout names.
   const PptxGenJS = require('pptxgenjs')
   const other = new PptxGenJS()
