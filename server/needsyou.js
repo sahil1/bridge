@@ -9,12 +9,18 @@
 // given for (checked against the question on its screen, as a notification's buttons are), and an
 // item you clear stays cleared until that agent has something new.
 //
+// Each item says when you were last on its agent, its project and its space (seen, engaged.js), and
+// from that and since when it has waited, when it or you were last active on it (active): what
+// needs you now comes first, and what has been quiet for days is folded and not counted
+// (shared/focus.js says how).
+//
 // Kept in the cache folder (needs-you.json): what you cleared, and since when each item has waited.
 import fs from 'node:fs'
 import path from 'node:path'
 import { cacheFile, writeFileAtomic } from './paths.js'
 import { question, pick } from './notify.js'
 import { preview } from './transcripts.js'
+import { latest, rank } from '../shared/focus.js'
 
 const FILE = cacheFile('needs-you.json')
 const MAX = 60
@@ -61,14 +67,13 @@ export function itemOf(a, { q = null, p = null } = {}) {
   return { ...head, type: 'review', text: said || null, pr: a.cloud?.prUrl || null }
 }
 
-// Most urgent first: what stops an agent until you answer (permission, then questions), then
-// runs that failed, then finished work; within each, the one that has waited longest. newest: by
-// when each began, newest first.
-const RANK = { permission: 0, question: 1, failed: 2, review: 3 }
+// Most urgent first: what needs you now before what has gone quiet, each by how much it holds up
+// (a permission or a question stops an agent, then a failed run, then finished work) and how
+// recently it or you were active on it (shared/focus.js). newest: by when each began, newest first.
 export const urgent = (i) => i.type === 'permission' || i.type === 'question'
 export function order(items, by = 'urgent') {
   const at = (i) => Date.parse(i.since || 0) || 0
-  return [...items].sort(by === 'newest' ? (x, y) => at(y) - at(x) : (x, y) => (RANK[x.type] ?? 9) - (RANK[y.type] ?? 9) || at(x) - at(y))
+  return by === 'newest' ? [...items].sort((x, y) => at(y) - at(x)) : rank(items)
 }
 
 // What a device on an older Bridge AI says about its agents (no items of its own): who waits on
@@ -79,7 +84,8 @@ export function fromAgents(agents) {
     : null)).filter(Boolean)
 }
 
-export function make({ rt, fleet }) {
+// engaged: engaged.js's, for when you were last on each agent (none: nothing known).
+export function make({ rt, fleet, engaged = null }) {
   let kept = { cleared: [], since: {} }
   try { const d = JSON.parse(fs.readFileSync(FILE, 'utf8')); kept = { cleared: Array.isArray(d.cleared) ? d.cleared : [], since: d.since && typeof d.since === 'object' ? d.since : {} } } catch { /* none yet */ }
   let timer = null
@@ -122,7 +128,7 @@ export function make({ rt, fleet }) {
         p = said.get(key)
       }
       const it = itemOf(a, { q: a.status === 'blocked' ? await questionOf(a) : null, p })
-      if (it) out.push(it)
+      if (it) out.push({ ...it, seen: engaged?.of(a) || null })
     }
     const ids = new Set(out.map((i) => i.id))
     const now = new Date().toISOString()
@@ -133,7 +139,7 @@ export function make({ rt, fleet }) {
     if (cleared.length !== kept.cleared.length) { kept.cleared = cleared; dirty = true }
     for (const m of [asked, said]) for (const k of m.keys()) if (!ids.has(k)) m.delete(k)
     if (dirty) save()
-    return order(out.filter((i) => !kept.cleared.includes(i.id)).map((i) => ({ ...i, since: kept.since[i.id] }))).slice(0, MAX)
+    return order(out.filter((i) => !kept.cleared.includes(i.id)).map((i) => ({ ...i, since: kept.since[i.id], active: latest(kept.since[i.id], i.seen?.you, i.seen?.project, i.seen?.space) }))).slice(0, MAX)
   }
   // This computer's items. Asked for by the inbox, the top bar and your other devices at once, so
   // one look serves them all for a moment.

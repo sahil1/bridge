@@ -15,12 +15,18 @@
 // One row per thing (tidy): the same task twice on the list (a meeting's action items handed on
 // again) or on two of your computers is one row, and so is a cloud agent seen from both.
 //
+// What needs you says when it or you were last active on it (active), as the needs-you inbox's do
+// (needsyou.js): for a task that waits on you, the latest of when it last changed (chieftasks.js) and
+// when you last replied to it here (engaged.js). Home puts what needs you now first and folds what
+// has been quiet for days (shared/focus.js says how).
+//
 // Kept in the cache folder (home.json): when you last opened or saved each whiteboard, and what you
 // pinned to the top of Home (by its id there: its device's and its own), so it stays there on every
 // page and phone this computer serves.
 import fs from 'node:fs'
 import path from 'node:path'
 import { cacheFile, writeFileAtomic } from './paths.js'
+import { latest } from '../shared/focus.js'
 
 const FILE = cacheFile('home.json')
 const DAY = 86400e3
@@ -93,8 +99,9 @@ export function tidy(items) {
 
 // waiting: needsyou.make's; tasks: chieftasks.makeTasks's; meetings: meetings.js; unsent(id): a
 // meeting's action items not handed on (meetwork.js); boards: boards.js; chief(): the Chief of
-// Staff's main pane, or null when it isn't running (a reply to a task goes there).
-export function make({ waiting, tasks, meetings, unsent, boards, chief }) {
+// Staff's main pane, or null when it isn't running (a reply to a task goes there); engaged:
+// engaged.js's, for when you last replied to a task here.
+export function make({ waiting, tasks, meetings, unsent, boards, chief, engaged = null }) {
   let kept = { boards: {}, pins: {} }
   try {
     const d = JSON.parse(fs.readFileSync(FILE, 'utf8'))
@@ -121,7 +128,10 @@ export function make({ waiting, tasks, meetings, unsent, boards, chief }) {
         if (x.done && within(x.done, 2 * DAY)) out.push({ id: `task:${x.id}`, kind: 'task', group: x.outcome || x.link ? 'ready' : null, task, chief: chiefPane, at: iso(x.done) })
         continue
       }
-      out.push({ id: `task:${x.id}`, kind: 'task', group: x.status === 'waiting' ? 'needs' : 'coming', task, chief: chiefPane, at: iso(x.added) })
+      // Since it last changed (a task written before that was kept: the day it was added).
+      const since = iso(x.changed) || iso(x.added)
+      const seen = { changed: iso(x.changed), replied: engaged?.taskOf(x.id) || null }
+      out.push({ id: `task:${x.id}`, kind: 'task', group: x.status === 'waiting' ? 'needs' : 'coming', task: { ...task, changed: x.changed || null }, chief: chiefPane, at: since, since, seen, active: latest(since, seen.replied) })
     }
     const one = tidy(out)
     return [...one.filter((i) => i.group !== null).slice(0, 24), ...one.filter((i) => i.group === null).slice(0, 8)]
