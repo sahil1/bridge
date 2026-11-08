@@ -234,9 +234,9 @@ const notes = (extra) => {
 fs.mkdirSync(OUT, { recursive: true })
 const withApk = notes(['--android'])
 const without = notes([])
-ok(/`Bridge-AI-android\.apk`: open it on your phone to install it, or to update the one you have\. It isn't on Google Play yet\./.test(withApk) && /<!-- macOS [\d.]+ or later -->\n$/.test(withApk) &&
+ok(/`Bridge-AI-android\.apk`: open it on your phone to install it, or to update the one you have\. It isn't on Google Play yet\./.test(withApk) && /<!-- macOS [\d.]+ or later -->\n(\n<!-- rollout: \d+ -->\n)?$/.test(withApk) &&
   /The Mac app needs macOS/.test(without) && !without.includes('Bridge-AI-android.apk') && withApk.replace(/The Android app is[^\n]*\n\n/, '') === without,
-'with the APK in the release, its notes say how to install it (still ending with the line the update check reads); without it, they\'re the same but for that', withApk.slice(-400))
+'with the APK in the release, its notes say how to install it (still ending with the lines the update check reads: the macOS one, and the rollout\'s when there is one); without it, they\'re the same but for that', withApk.slice(-400))
 
 // ---------- Google Play, later ----------
 const play = read('mobile', 'android', 'PLAY.md')

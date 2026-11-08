@@ -63,7 +63,8 @@ try {
     ok(navs.length > 5 && navs.every(titled), `${t}: Settings' section names are in Title Case`, navs)
     // README.md's table of Settings has a row for each of them (Mail's row says it's a Mac's), and
     // none for a section that isn't there (Account, until Bold Bridge accounts are switched on).
-    const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8')
+    // (Windows' checkout writes its lines with \r\n: read as \n, so the table ends at its blank line.)
+    const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8').replace(/\r\n/g, '\n')
     const table = readme.slice(readme.indexOf('| Section | What\'s there |'))
     const rows = [...table.slice(0, table.search(/\n\n/)).matchAll(/^\| ([^|]+?) \|/gm)].map((m) => m[1]).filter((x) => !/^(Section|-+)$/.test(x))
     ok(navs.every((x) => rows.includes(x)) && rows.every((x) => navs.includes(x) || x === 'Mail'), `${t}: README.md's Settings table has a row for each section, and only those`, { rows, navs })
