@@ -306,10 +306,12 @@ try {
   const soon = new Date(Date.now() + soonIn * 6e4)
   const inAbout = (x) => { const m = /In (\d+) min/.exec(x); return !!m && Math.abs(+m[1] - soonIn) <= 2 }
   const cal = { today: [{ id: 'e1', title: 'Acme renewal sync', canceled: false, calendar: 'Work', start: soon.toISOString(), end: new Date(+soon + 30 * 6e4).toISOString(), allDay: false, attendees: [], attendeeCount: 3, links: [{ url: 'https://example.com/sow', name: 'SOW draft' }, { url: 'https://example.com/pricing', name: 'Pricing v3' }] }], tomorrow: [], fetchedAt: new Date().toISOString() }
+  // late: ms the settings take to come, after what needs you has (a slow start).
+  const late = { ms: 0 }
   const desk = async (c2) => {
     await noServiceWorker(c2)
     await c2.route(/\/api\/calendar(\?|$)/, (r) => r.fulfill({ json: cal }))
-    await changeAnswer(c2, /\/api\/config(\?|$)/, (real) => ({ ...real, calendar: true }))
+    await changeAnswer(c2, /\/api\/config(\?|$)/, async (real) => { await sleep(late.ms); return { ...real, calendar: true } })
   }
   {
     const { ctx, p, errors } = await pageAt(b, a.url, { mode: 'light', theme: 'sky', width: 1440, before: desk })
@@ -403,11 +405,15 @@ try {
     await p.locator('.mc-menu .mc-item', { hasText: 'Studio' }).click()
     const onBoard = async () => !p.url().includes('/m/') && /Auth flow v2/.test(await p.locator('.ws-tab.main').innerText().catch(() => '')) && !(await p.locator('.work.maxed .hm').count())
     ok(!!(await until(onBoard, 20000)), 'and back to Studio: the whiteboard is open again, not Home', p.url())
+    // Reloaded with the settings slow to come: the chip, clicked as soon as it's there, still opens
+    // Home (before it waited for them, it opened the inbox).
+    late.ms = 2500
     await p.reload()
     ok(!!(await until(onBoard, 20000)), 'and the same after a reload')
     // Back to Home from the top bar's chip, and from the sidebar.
     await p.locator('.topbar .needs-chip').click()
-    ok(!!(await until(() => hm.isVisible(), 5000)) && !(await p.locator('.ny-panel').count()), "the top bar's needs-you chip opens Home")
+    late.ms = 0
+    ok(!!(await until(() => hm.isVisible(), 5000)) && !(await p.locator('.ny-panel').count()), "the top bar's needs-you chip opens Home, even clicked before the settings are in")
     await p.keyboard.press('Escape')
     await p.locator('.ws-tab', { hasText: 'Auth flow v2' }).click()
     await p.locator('.rail-nav-btn.rail-home').click()
