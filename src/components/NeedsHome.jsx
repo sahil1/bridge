@@ -9,6 +9,7 @@ import { api, hostApi, machineId } from '../api.js'
 import { t, tx, locale } from '../i18n/index.js'
 import { sentTo } from '../sendbox.js'
 import { split, isQuiet, compare, TOP, QUIET_DAYS } from '../../shared/focus.js'
+import { arrange, isDefault, equal, reorder } from '../../shared/homelayout.js'
 import './needshome.css'
 
 // Home (a beta feature, `home`): Needs you as the place the app opens at, on a computer and a
@@ -28,6 +29,10 @@ import './needshome.css'
 // you or it were on it), the first few said with why ("Blocking", "You were on this 12 min ago").
 // What has been quiet for 3 days or more is folded under Waiting on You by project and not counted,
 // here, in the top bar's chip, the badges or the window's title; pinned, it counts.
+//
+// The sections are in the order you arranged them (Edit Home, as an iPhone's home screen is
+// arranged): this computer's first by default, your other computers last. One you hid is still
+// counted, and what needs you in it is said where it was.
 
 const KINDS = [['all', tx('All')], ['agent', tx('Agents')], ['meeting', tx('Meetings')], ['chief', tx('Chief of Staff')], ['board', tx('Whiteboards')]]
 // Chief of Staff's own questions count with its tasks.
@@ -170,6 +175,234 @@ function usePins(data, refresh, setNote) {
     }
   }
   return { has, toggle }
+}
+
+// Home's sections by name, as Edit Home lists them.
+const SECTION = {
+  waiting: { name: tx('Waiting on You'), icon: 'bell' },
+  ready: { name: tx('Ready to Look At'), icon: 'check' },
+  coming: { name: tx('Coming Up'), icon: 'calendar' },
+  chief: { name: tx("Chief of Staff's Tasks"), icon: 'helm' },
+  away: { name: tx('On Other Computers'), icon: 'laptop' },
+}
+// Short lists that sit side by side when they're next to each other and there's room.
+const SIDE = ['ready', 'coming', 'chief']
+
+// How the sections are arranged: kept on the computer this page comes from (server/home.js), one
+// for its own window and one for phones. Changed here at once and saved in turn; one that couldn't
+// be saved goes back to what the computer has and says why.
+function useArrangement(data, refresh, setNote, phone) {
+  const which = phone ? 'phone' : 'computer'
+  const saved = useMemo(() => arrange(data?.layouts?.[which]), [data, which])
+  const [mine, setMine] = useState(null) // until the list says so too
+  useEffect(() => setMine((m) => (m && equal(m, saved) ? null : m)), [saved])
+  const queue = useRef(Promise.resolve())
+  const put = (next, body) => {
+    setMine(next)
+    queue.current = queue.current
+      .then(() => hostApi('/home-layout', { method: 'POST', body: { for: which, ...body } }))
+      .then(() => refresh(), (e) => { setMine(null); setNote({ text: t("Couldn't save how Home is arranged: {why}", { why: e.message }) }) })
+  }
+  const now = mine || saved
+  return {
+    ...now,
+    set: (a) => put(arrange(a), { order: a.order, hidden: a.hidden }),
+    reset: () => put(arrange(null), { reset: true }),
+  }
+}
+
+// ⌘K's Edit Home: Home opens in it, or is already open and goes into it.
+let editNext = false
+export function editHome() {
+  editNext = true
+  window.dispatchEvent(new CustomEvent('bridge-home-edit'))
+}
+
+// A long press on a section's name, with a finger or a pen (a mouse has Edit in the header): Edit
+// Home, as on an iPhone. A finger that moves is scrolling, not pressing.
+function useLongPress(on) {
+  const timer = useRef(null)
+  const from = useRef(null)
+  const stop = () => { clearTimeout(timer.current); timer.current = null }
+  const off = () => { stop(); from.current = null }
+  useEffect(() => stop, [])
+  return {
+    onPointerDown: (e) => {
+      if (e.pointerType === 'mouse' || e.target.closest('button, a, select, input')) return
+      from.current = { x: e.clientX, y: e.clientY }
+      stop()
+      timer.current = setTimeout(() => { timer.current = null; on() }, 500)
+    },
+    onPointerMove: (e) => { if (timer.current && Math.hypot(e.clientX - from.current.x, e.clientY - from.current.y) > 10) stop() },
+    onPointerUp: off,
+    onPointerCancel: off,
+    onPointerLeave: off,
+    // (Held, a phone would offer to copy the words instead.)
+    onContextMenu: (e) => { if (from.current) e.preventDefault() },
+  }
+}
+
+// Edit Home: the sections as tiles in their order, wiggling as an iPhone's apps do while you arrange
+// them (with Reduce Motion they keep still, outlined instead). Drag one to move it, with a finger or
+// a mouse, or use its Move Up and Move Down (the keyboard's way); − hides it, and the hidden ones are
+// under the rest with + to bring each back where it was. Hiding Waiting on You is asked once more.
+// Reset puts the first order back; Done or Esc leaves. Each change is kept at once. said: what's in
+// each section now; others: whether there are other computers (On Other Computers is only for them);
+// focus: put the keyboard on Done.
+function EditHome({ arr, said, others, phone, focus = true, onDone }) {
+  const [sure, setSure] = useState(null) // the section whose hiding is asked once more
+  const [drag, setDrag] = useState(null) // { id, from, to, dy, h }
+  const [told, setTold] = useState('') // what moved, for a screen reader
+  const list = useRef(null)
+  const done = useRef(null)
+  const focusAfter = useRef(null)
+  const cancel = useRef(null)
+  const name = (id) => t(SECTION[id].name)
+  const listed = arr.order.filter((id) => id !== 'away' || others)
+  const on = listed.filter((id) => !arr.hidden.includes(id))
+  const off = listed.filter((id) => arr.hidden.includes(id))
+  // From Edit or ⌘K, the keyboard goes to Done (Edit is gone); not from a long press.
+  useEffect(() => { if (focus) done.current?.focus() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  // Esc: a drag put back, else done (not while a field or a dialog has it).
+  useEffect(() => {
+    const key = (e) => {
+      if (e.key !== 'Escape' || e.defaultPrevented || e.target.closest?.('input, textarea, select, [role="dialog"], .modal, .palette')) return
+      if (cancel.current) cancel.current()
+      else if (sure) setSure(null)
+      else onDone()
+    }
+    window.addEventListener('keydown', key)
+    return () => window.removeEventListener('keydown', key)
+  }, [onDone, sure])
+  // After Move Up or Move Down, the focus stays on the section's own button (or its other one at an end).
+  useEffect(() => {
+    const f = focusAfter.current
+    if (!f) return
+    focusAfter.current = null
+    const tile = list.current?.querySelector(`[data-sec="${f.id}"]`)
+    const btn = tile?.querySelector(`.hm-tile-${f.dir}:not(:disabled)`) || tile?.querySelector('.hm-tile-moves button:not(:disabled)')
+    btn?.focus()
+  })
+  const move = (id, to) => {
+    const ids = on.filter((x) => x !== id)
+    ids.splice(to, 0, id)
+    arr.set({ order: reorder(arr.order, ids), hidden: arr.hidden })
+    setTold(t('{name} moved: {n} of {m}', { name: name(id), n: to + 1, m: on.length }))
+  }
+  const step = (id, dir) => {
+    focusAfter.current = { id, dir }
+    move(id, on.indexOf(id) + (dir === 'up' ? -1 : 1))
+  }
+  // Its tile goes from one list to the other: the keyboard, if it was on it, to Done.
+  const away = (id) => { if (document.activeElement?.closest?.('[data-sec]')?.dataset.sec === id) done.current?.focus() }
+  const hide = (id) => {
+    away(id)
+    setSure(null)
+    arr.set({ order: arr.order, hidden: [...arr.hidden, id] })
+    setTold(t('{name} hidden', { name: name(id) }))
+  }
+  const show = (id) => {
+    away(id)
+    arr.set({ order: arr.order, hidden: arr.hidden.filter((x) => x !== id) })
+    setTold(t('{name} is back on Home', { name: name(id) }))
+  }
+  // Dragged: it follows the finger or the pointer, the rest make room, and it goes where it's let go.
+  const down = (e, id) => {
+    if ((e.pointerType === 'mouse' && e.button !== 0) || e.target.closest('button, .hm-tile-sure') || drag) return
+    const tiles = [...list.current.querySelectorAll(':scope > .hm-tile')]
+    const rects = tiles.map((x) => x.getBoundingClientRect())
+    const from = on.indexOf(id)
+    const mid = rects.map((r) => r.top + r.height / 2)
+    const h = rects.length > 1 ? (from > 0 ? rects[from].top - rects[from - 1].top : rects[1].top - rects[0].top) : 0
+    const y0 = e.clientY
+    let at = null
+    try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* a pointer that's gone */ }
+    const moveTo = (ev) => {
+      if (ev.pointerId !== e.pointerId) return
+      const dy = ev.clientY - y0
+      if (!at && Math.abs(dy) < 4) return
+      ev.preventDefault()
+      const c = mid[from] + dy
+      at = { id, from, to: mid.filter((m, i) => i !== from && m < c).length, dy, h }
+      setDrag(at)
+    }
+    const end = (ev, put = true) => {
+      if (ev && ev.pointerId !== e.pointerId) return
+      window.removeEventListener('pointermove', moveTo)
+      window.removeEventListener('pointerup', end)
+      window.removeEventListener('pointercancel', drop)
+      cancel.current = null
+      setDrag(null)
+      if (put && at && at.to !== from) move(id, at.to)
+    }
+    const drop = (ev) => end(ev, false)
+    cancel.current = () => end(null, false)
+    window.addEventListener('pointermove', moveTo, { passive: false })
+    window.addEventListener('pointerup', end)
+    window.addEventListener('pointercancel', drop)
+  }
+  const shift = (i) => {
+    if (!drag) return 0
+    if (i === drag.from) return drag.dy
+    if (drag.from < drag.to && i > drag.from && i <= drag.to) return -drag.h
+    if (drag.to < drag.from && i >= drag.to && i < drag.from) return drag.h
+    return 0
+  }
+  return (
+    <div className="hm-edit" data-esc>
+      <header className="hm-head hm-edit-head">
+        <div className="hm-title"><h2>{t('Edit Home')}</h2></div>
+        <div className="hm-edit-acts">
+          <button type="button" className="btn small hm-reset" onClick={() => { arr.reset(); setSure(null); setTold(t('Home is back in its first order')) }} disabled={isDefault(arr)} title={t('Every section back, in the first order')}><Icon name="undo" size={12} /> {t('Reset')}</button>
+          <button type="button" ref={done} className="btn small primary hm-done" onClick={onDone}><Icon name="check" size={12} /> {t('Done')}</button>
+        </div>
+        <p className="muted hm-edit-sub">{phone ? t("Drag a section to move it, or − to hide it. This phone's Home: a computer's window keeps its own.") : t("Drag a section to move it, or use its arrows; − hides it. This window's Home: a phone keeps its own.")}</p>
+      </header>
+      <ol ref={list} className={`hm-arrange ${drag ? 'moving' : ''}`} aria-label={t('Sections on Home, in order')}>
+        {on.map((id, i) => (
+          <li key={id} data-sec={id} className={`hm-tile ${drag?.id === id ? 'dragging' : ''}`} style={drag ? { transform: `translateY(${shift(i)}px)` } : undefined} onPointerDown={(e) => down(e, id)} aria-label={name(id)}>
+            <div className="hm-tile-in" style={{ '--n': i }}>
+              <button type="button" className="hm-tile-badge minus" onClick={() => (id === 'waiting' ? setSure(sure === id ? null : id) : hide(id))} aria-label={t('Hide {name}', { name: name(id) })} title={t('Hide {name}', { name: name(id) })}><span><Icon name="minus" size={11} /></span></button>
+              <Icon name="grip" size={14} className="hm-tile-grip" />
+              <span className="hm-tile-ico"><Icon name={SECTION[id].icon} size={14} /></span>
+              <span className="hm-tile-text"><b>{name(id)}</b>{said[id] && <small>{said[id]}</small>}</span>
+              <span className="hm-tile-moves">
+                <button type="button" className="ghost-btn hm-tile-up" disabled={i === 0} onClick={() => step(id, 'up')} aria-label={t('Move {name} up', { name: name(id) })} title={t('Move Up')}><Icon name="up" size={13} /></button>
+                <button type="button" className="ghost-btn hm-tile-down" disabled={i === on.length - 1} onClick={() => step(id, 'down')} aria-label={t('Move {name} down', { name: name(id) })} title={t('Move Down')}><Icon name="down" size={13} /></button>
+              </span>
+            </div>
+            {sure === id && (
+              <div className="hm-tile-sure" role="group" aria-label={t('Hide {name}?', { name: name(id) })}>
+                <p>{t('Hide Waiting on You? What needs you still counts in the top bar and the heading, and Home says how many wait where it was.')}</p>
+                <span className="hm-tile-sure-acts">
+                  <button type="button" className="btn small" onClick={() => hide(id)}><Icon name="eye-off" size={12} /> {t('Hide')}</button>
+                  <button type="button" className="ghost-btn" onClick={() => setSure(null)}>{t('Cancel')}</button>
+                </span>
+              </div>
+            )}
+          </li>
+        ))}
+      </ol>
+      {!on.length && <p className="muted small hm-none">{t('Every section is hidden: bring one back below.')}</p>}
+      {off.length > 0 && (
+        <section className="hm-sec hm-hidden" aria-label={t('Hidden')}>
+          <h3>{t('Hidden')}<span className="fcount">{off.length}</span><span className="hm-hint">{t('still counted in what needs you')}</span></h3>
+          <ul className="hm-arrange hm-off">
+            {off.map((id) => (
+              <li key={id} data-sec={id} className="hm-tile off" aria-label={name(id)}>
+                <div className="hm-tile-in">
+                  <button type="button" className="hm-tile-badge plus" onClick={() => show(id)} aria-label={t('Show {name} on Home', { name: name(id) })} title={t('Show {name} on Home', { name: name(id) })}><span><Icon name="plus" size={11} /></span></button>
+                  <span className="hm-tile-ico"><Icon name={SECTION[id].icon} size={14} /></span>
+                  <span className="hm-tile-text"><b>{name(id)}</b>{said[id] && <small>{said[id]}</small>}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      <p className="hm-said" aria-live="polite">{told}</p>
+    </div>
+  )
 }
 
 // The order, picked once and kept in this browser: what needs you first, newest, oldest, or in a
@@ -572,12 +805,13 @@ function TaskRow({ it, lead, multi, phone, onOpenChief, pin }) {
 // there first), opened one at a time to see them and answer them right here, as yours are. rows:
 // { d, key, list, needs, quiet, ready, coming } for each; cards, list, task, quiet: how Home shows
 // each kind (what has gone quiet there is said quietly on its line, and folded when it's opened).
-function Away({ rows, open, setOpen, cards, list, task, quiet, onShowAll }) {
+// press: a long press on its name, for Edit Home.
+function Away({ rows, open, setOpen, cards, list, task, quiet, onShowAll, press }) {
   const total = rows.reduce((n, r) => n + r.list.length, 0)
   const head = rows.length === 1 ? (total === 1 ? t('1 more on another computer') : t('{n} more on another computer', { n: total })) : t('{n} more on {m} other computers', { n: total, m: rows.length })
   return (
     <section className="hm-sec hm-away" aria-label={t('On Other Computers')}>
-      <h3>
+      <h3 {...press}>
         {t('On Other Computers')}<span className="hm-hint">{head}</span>
         <span className="ny-grow" />
         <button type="button" className="ghost-btn hm-away-all" onClick={onShowAll} title={t('Show every computer\'s things together (the Device menu above)')}><Icon name="laptop" size={12} /> {t('Show all together')}</button>
@@ -641,6 +875,25 @@ export default function NeedsHome({ phone = false, calendar = false, onOpen, onO
   const [quietOpen, setQuietOpen] = useState(false) // what has gone quiet, unfolded
   const [read, markRead] = useRead()
   const pins = usePins(data, refresh, setNote)
+  const arr = useArrangement(data, refresh, setNote, phone)
+  // Edit Home: from Edit in the header, a long press on a section's name, or ⌘K (now or as Home opens).
+  const [editing, setEditing] = useState(() => editNext)
+  const [pressed, setPressed] = useState(false) // went into it by a long press: the finger, not the keyboard
+  const editBtn = useRef(null)
+  const edit = useCallback((on, press = false) => {
+    if (on) setKind('all')
+    setEditing(on)
+    setPressed(press)
+    // Back from it, the keyboard is where it was (Edit, on a computer).
+    if (!on) setTimeout(() => editBtn.current?.focus(), 0)
+  }, [])
+  useEffect(() => {
+    editNext = false
+    const go = () => { editNext = false; edit(true) }
+    window.addEventListener('bridge-home-edit', go)
+    return () => window.removeEventListener('bridge-home-edit', go)
+  }, [edit])
+  const press = useLongPress(() => edit(true, true))
   useEffect(() => { if (!note) return; const id = setTimeout(() => setNote(null), 6000); return () => clearTimeout(id) }, [note])
   const cal = useComing(calendar)
   const devices = data?.devices || []
@@ -749,164 +1002,210 @@ export default function NeedsHome({ phone = false, calendar = false, onOpen, onO
   const showAll = kind === 'all'
   const shownRecent = more ? recent : recent.slice(0, CAP)
   const pinnedOf = (g) => pinned.some((i) => i.group === g)
+  // Each section as it shows; what's in each, for Edit Home; and what needs you in one you hid, said
+  // where it was (it's counted all the same).
+  const awayNeeds = awayBy.reduce((n, r) => n + r.needs.length, 0)
+  const comingN = coming.reduce((n, d) => n + d.rows.length, 0)
+  const tasksN = doing.length + todos.length
+  const said = !data ? {} : {
+    waiting: [needs.length === 1 ? t('1 needs you') : needs.length ? t('{n} need you', { n: needs.length }) : t('Nothing needs you right now'), quiet.length > 0 && t('{n} quiet', { n: quiet.length })].filter(Boolean).join(' · '),
+    ready: ready.length === 1 ? t('1 ready to look at') : ready.length ? t('{n} ready to look at', { n: ready.length }) : t('Nothing new to look at'),
+    coming: comingN === 1 ? t('1 coming up') : comingN ? t('{n} coming up', { n: comingN }) : t('Nothing coming up'),
+    chief: tasksN === 1 ? t('1 task on its list') : tasksN ? t('{n} tasks on its list', { n: tasksN }) : t("Nothing on Chief of Staff's list"),
+    away: !focus ? t("Shown while Home shows this computer's things") : awayNeeds === 1 ? t('1 needs you there') : awayNeeds ? t('{n} need you there', { n: awayNeeds })
+      : awayBy.length === 1 ? t('1 other computer') : t('{n} other computers', { n: awayBy.length }),
+  }
+  const blocks = {
+    waiting: (showAll || needs.length > 0 || quiet.length > 0) && (
+      <section key="waiting" className="hm-sec hm-waiting" aria-label={t('Waiting on You')}>
+        <h3 {...press}>{t('Waiting on You')}{needs.length > 0 && <span className="fcount">{needs.length}</span>}<span className="hm-hint">{t('your answer starts them again')}</span></h3>
+        {needs.length > 0 ? grouped(needs, sort, devices, cards)
+          : pinnedOf('needs') ? <p className="muted small hm-none">{t('Pinned, at the top.')}</p>
+            : <div className="hm-empty"><Icon name="check" size={16} /><span>{focus ? t('Nothing needs you on this computer right now.') : t('Nothing needs you right now.')}</span></div>}
+        <QuietFold items={quiet} open={quietOpen} setOpen={setQuietOpen} {...quietProps} />
+      </section>
+    ),
+    away: awayBy.length > 0 && <Away key="away" rows={awayBy} open={awayOpen} setOpen={setAwayOpen} cards={cards} list={rows} task={(i) => taskRow(i, i.task.due ? lead(i) : i.task.status === 'doing' ? { text: t('On it'), cls: 'doing' } : null)} quiet={(list) => <QuietThere items={list} {...quietProps} multi={false} />} onShowAll={() => setDevice('all')} press={press} />,
+    ready: (showAll || ready.length > 0) && (
+      <section key="ready" className="hm-sec" aria-label={t('Ready to Look At')}>
+        <h3 {...press}>
+          {t('Ready to Look At')}{ready.length > 0 && <span className="fcount">{ready.length}</span>}
+          <span className="ny-grow" />
+          {readOnes.length > 0 && <button type="button" className="ghost-btn hm-clear-read" onClick={() => clearAll(readOnes)} title={t('Take the finished work you\'ve opened off the list until each has something new')}><Icon name="check" size={12} /> {t('Clear read · {n}', { n: readOnes.length })}</button>}
+        </h3>
+        {recent.length > 0 && grouped(shownRecent, sort, devices, rows)}
+        {recent.length > CAP && (
+          <button type="button" className="hm-more-btn" aria-expanded={more} onClick={() => setMore(!more)}><Icon name={more ? 'up' : 'down'} size={12} />{more ? t('Show fewer') : t('Show all {n}', { n: recent.length })}</button>
+        )}
+        {!recent.length && old.length > 0 && <p className="muted small hm-none">{t('Nothing new in the last day.')}</p>}
+        {old.length > 0 && (
+          <div className="hm-fold-box">
+            <div className="hm-fold-row">
+              <button type="button" className="hm-fold" aria-expanded={older} onClick={() => { setOlder(!older); setSure(false) }}>
+                <Icon name="chevron" size={12} />{t('Older than a day')}<span className="fcount">{old.length}</span>
+              </button>
+              {old.some(clearable) && (sure
+                ? <span className="hm-sure">{t('Clear {n}? Each comes back when it has something new.', { n: old.filter(clearable).length })}<button type="button" className="btn small" onClick={() => clearAll(old.filter(clearable))}><Icon name="check" size={12} /> {t('Clear')}</button><button type="button" className="ghost-btn" onClick={() => setSure(false)}>{t('Cancel')}</button></span>
+                : <button type="button" className="ghost-btn hm-clear-old" onClick={() => setSure(true)}><Icon name="check" size={12} /> {t('Clear all')}</button>)}
+            </div>
+            {older && grouped(old, sort, devices, rows)}
+          </div>
+        )}
+        {!ready.length && (pinnedOf('ready') ? <p className="muted small hm-none">{t('Pinned, at the top.')}</p> : (
+          <div className="hm-none">
+            <p>{t('Nothing new to look at.')}</p>
+            <small className="muted">{t('Finished work, meeting notes and whiteboards an agent changed show here.')}</small>
+          </div>
+        ))}
+      </section>
+    ),
+    coming: (showAll || kind === 'meeting' || coming.length > 0) && (
+      <section key="coming" className="hm-sec" aria-label={t('Coming Up')}>
+        <h3 {...press}>{t('Coming Up')}</h3>
+        {coming.map((d) => (
+          <div key={d.key} className="hm-day">
+            <h4>{d.label}</h4>
+            <ul className="hm-list">
+              {d.rows.map((i) => (i.event
+                ? <EventRow key={i.uid} e={i.event} now={cal.now} next={i === coming[0].rows.find((x) => x.event)} onOpenMeeting={onOpenMeeting} onCalendar={onCalendar} />
+                : taskRow(i, lead(i))))}
+            </ul>
+          </div>
+        ))}
+        {cal.loading && !coming.length && <p className="muted small hm-none">{t('Looking at your calendar…')}</p>}
+        {cal.error && <p className="muted small hm-none">{t('Your calendar: {why}', { why: cal.error })} <button type="button" className="link-btn" onClick={onCalendar}>{t('Set up')}</button></p>}
+        {!coming.length && !cal.error && !cal.loading && <p className="muted small hm-none">{calendar ? t('Nothing on your calendar for the rest of today or tomorrow, and no task with a day.') : t('No task with a day coming up.')}</p>}
+      </section>
+    ),
+    chief: (showAll || kind === 'chief') && (
+      <section key="chief" className="hm-sec" aria-label={t("Chief of Staff's Tasks")}>
+        <h3 {...press}>{t("Chief of Staff's Tasks")}{doing.length + todos.length > 0 && <span className="fcount">{doing.length + todos.length}</span>}</h3>
+        {doing.length > 0 && <ul className="hm-list">{doing.map((i) => taskRow(i, { text: t('On it'), cls: 'doing' }))}</ul>}
+        {todos.length > 0 && (
+          <div className="hm-fold-box">
+            <button type="button" className="hm-fold" aria-expanded={todo} onClick={() => setTodo(!todo)}>
+              <Icon name="chevron" size={12} />{todos.length === 1 ? t('1 to do, with no day set') : t('{n} to do, with no day set', { n: todos.length })}
+            </button>
+            {todo && <ul className="hm-list">{todos.map((i) => taskRow(i, null))}</ul>}
+          </div>
+        )}
+        {!doing.length && !todos.length && <p className="muted small hm-none">{tasks.length ? t('Each of its tasks has a day: they\'re under Coming Up.') : pinned.some((i) => i.kind === 'task') ? t('Pinned, at the top.') : t('Nothing on Chief of Staff\'s list.')}</p>}
+      </section>
+    ),
+  }
+  const hiddenSaid = {
+    waiting: needs.length > 0 && (needs.length === 1 ? t('Waiting on You is hidden: 1 needs you.') : t('Waiting on You is hidden: {n} need you.', { n: needs.length })),
+    away: awayNeeds > 0 && (awayNeeds === 1 ? t('On Other Computers is hidden: 1 needs you there.') : t('On Other Computers is hidden: {n} need you there.', { n: awayNeeds })),
+  }
+  const showSec = (id) => arr.set({ order: arr.order, hidden: arr.hidden.filter((x) => x !== id) })
+  // In the order arranged: the short lists side by side when they're next to each other.
+  const runs = []
+  for (const id of arr.order) {
+    const hid = arr.hidden.includes(id)
+    const el = hid
+      ? hiddenSaid[id] && <Notice key={id} tone="needs" icon="eye-off" className="hm-hid">{hiddenSaid[id]}<button type="button" className="link-btn" onClick={() => showSec(id)}>{t('Show it')}</button></Notice>
+      : blocks[id]
+    if (!el) continue
+    const side = !hid && SIDE.includes(id)
+    if (side && runs.at(-1)?.side) runs.at(-1).els.push(el)
+    else runs.push({ side, els: [el] })
+  }
+  const hiddenNames = arr.hidden.filter((id) => id !== 'away' || multi).map((id) => t(SECTION[id].name))
+  const andList = (xs) => { try { return new Intl.ListFormat(locale(), { type: 'conjunction' }).format(xs) } catch { return xs.join(', ') } }
   return (
-    <div className={`hm by-${sort} ${phone ? 'phone' : ''}`}>
+    <div className={`hm by-${sort} ${phone ? 'phone' : ''} ${editing ? 'editing' : ''}`}>
       <div className="hm-in">
-        <header className="hm-head">
-          <div className="hm-title">
-            {/* Until the list has come (or when it can't), no count: "Nothing needs you" would be a guess. */}
-            {!data ? <h2>{t('Home')}</h2> : <NeedCount list={needing} devices={devices} quiet={quietHere} />}
-            <p className="muted">{date}{data && <><span className="hm-sep"> · </span><span className="hm-where">{where}</span></>}</p>
-          </div>
-          <button type="button" className="btn small hm-every" onClick={onEverything}>{t('See everything')} <Icon name="chevron" size={11} /></button>
-        </header>
-        {/* What to show (a kind, a computer) and in what order, once there's something to show. */}
-        {data && (all.length > 0 || multi) && (
-          <div className="hm-bar">
-            {(count('all') > 0 || kind !== 'all') && (
-              <div className="chips hm-kinds" role="tablist" aria-label={t('Kind')}>
-                {KINDS.map(([id, label]) => {
-                  const n = count(id)
-                  if (id !== 'all' && !n && kind !== id) return null
-                  return <button key={id} type="button" role="tab" aria-selected={kind === id} className={`fchip ${kind === id ? 'on' : ''}`} onClick={() => setKind(kind === id ? 'all' : id)}>{t(label)}<span className="fcount">{n}</span></button>
-                })}
-              </div>
-            )}
-            <div className="hm-tools">
-              {all.length > 0 && (
-                <label className="hm-pick" title={t('Sort')}>
-                  <Icon name="sort" size={13} />
-                  <select className="hm-sort" value={sort} onChange={(e) => setSort(e.target.value)} aria-label={t('Sort')}>
-                    {SORTS.map(([id, label]) => <option key={id} value={id}>{t(label)}</option>)}
-                  </select>
-                  <Icon name="down" size={12} />
-                </label>
-              )}
-              {multi && (
-                <label className="hm-pick" title={t('Device')}>
-                  <Icon name="laptop" size={13} />
-                  <select className="hm-device" value={device} onChange={(e) => setDevice(e.target.value)} aria-label={t('Device')}>
-                    <option value="this">{t('This computer')}</option>
-                    <option value="all">{t('All devices')}</option>
-                    {devices.filter((d) => (d.id || 'here') !== SHOWN).map((d) => <option key={d.id || 'here'} value={d.id || 'here'}>{d.online ? d.name : t('{name} (offline)', { name: d.name })}</option>)}
-                  </select>
-                  <Icon name="down" size={12} />
-                </label>
-              )}
-            </div>
-          </div>
-        )}
-        {(error || partial.length > 0) && (
-          <div className="hm-notices">
-            {error && (
-              <Notice tone="error" icon="alert" role="alert" className="hm-err">
-                {data ? t("Home couldn't update: {why}. This is what it had last.", { why: error }) : t("Home couldn't load: {why}", { why: error })}
-                <button type="button" className="link-btn" onClick={refresh}>{t('Try again')}</button>
-              </Notice>
-            )}
-            {partial.length > 0 && (
-              <Notice className="hm-partial">
-                {partial.map((d) => <span key={d.id} className="ny-device"><Icon name="laptop" size={11} />{d.name}</span>)}
-                {partial.length === 1 ? t('Only what needs you, for now: update Bridge AI on it to see its meetings, tasks and whiteboards here.') : t('Only what needs you, for now: update Bridge AI on them to see their meetings, tasks and whiteboards here.')}
-              </Notice>
-            )}
-          </div>
-        )}
-        {!data && !error && (
-          <div className="hm-loading" role="status" aria-label={t('Loading what needs you on each computer…')}>
-            <div className="hm-skel hm-skel-h" />
-            <div className="hm-grid"><div className="hm-skel hm-skel-card" /><div className="hm-skel hm-skel-card" /></div>
-            <div className="hm-skel hm-skel-list" />
-          </div>
-        )}
-        {data && (
+        {editing ? <EditHome arr={arr} said={said} others={multi} phone={phone} focus={!pressed} onDone={() => edit(false)} /> : (
           <>
-            {pinned.length > 0 && (
-              <section className="hm-sec hm-pinned" aria-label={t('Pinned')}>
-                <h3><Icon name="pin" size={13} />{t('Pinned')}<span className="fcount">{pinned.length}</span><span className="hm-hint">{t('at the top until you unpin it')}</span></h3>
-                {grouped(pinned, sort, devices, cards)}
-              </section>
-            )}
-            {(showAll || needs.length > 0 || quiet.length > 0) && (
-              <section className="hm-sec hm-waiting" aria-label={t('Waiting on You')}>
-                <h3>{t('Waiting on You')}{needs.length > 0 && <span className="fcount">{needs.length}</span>}<span className="hm-hint">{t('your answer starts them again')}</span></h3>
-                {needs.length > 0 ? grouped(needs, sort, devices, cards)
-                  : pinnedOf('needs') ? <p className="muted small hm-none">{t('Pinned, at the top.')}</p>
-                    : <div className="hm-empty"><Icon name="check" size={16} /><span>{focus ? t('Nothing needs you on this computer right now.') : t('Nothing needs you right now.')}</span></div>}
-                <QuietFold items={quiet} open={quietOpen} setOpen={setQuietOpen} {...quietProps} />
-              </section>
-            )}
-            {awayBy.length > 0 && <Away rows={awayBy} open={awayOpen} setOpen={setAwayOpen} cards={cards} list={rows} task={(i) => taskRow(i, i.task.due ? lead(i) : i.task.status === 'doing' ? { text: t('On it'), cls: 'doing' } : null)} quiet={(list) => <QuietThere items={list} {...quietProps} multi={false} />} onShowAll={() => setDevice('all')} />}
-            <div className="hm-cols">
-              {(showAll || ready.length > 0) && (
-                <section className="hm-sec" aria-label={t('Ready to Look At')}>
-                  <h3>
-                    {t('Ready to Look At')}{ready.length > 0 && <span className="fcount">{ready.length}</span>}
-                    <span className="ny-grow" />
-                    {readOnes.length > 0 && <button type="button" className="ghost-btn hm-clear-read" onClick={() => clearAll(readOnes)} title={t('Take the finished work you\'ve opened off the list until each has something new')}><Icon name="check" size={12} /> {t('Clear read · {n}', { n: readOnes.length })}</button>}
-                  </h3>
-                  {recent.length > 0 && grouped(shownRecent, sort, devices, rows)}
-                  {recent.length > CAP && (
-                    <button type="button" className="hm-more-btn" aria-expanded={more} onClick={() => setMore(!more)}><Icon name={more ? 'up' : 'down'} size={12} />{more ? t('Show fewer') : t('Show all {n}', { n: recent.length })}</button>
-                  )}
-                  {!recent.length && old.length > 0 && <p className="muted small hm-none">{t('Nothing new in the last day.')}</p>}
-                  {old.length > 0 && (
-                    <div className="hm-fold-box">
-                      <div className="hm-fold-row">
-                        <button type="button" className="hm-fold" aria-expanded={older} onClick={() => { setOlder(!older); setSure(false) }}>
-                          <Icon name="chevron" size={12} />{t('Older than a day')}<span className="fcount">{old.length}</span>
-                        </button>
-                        {old.some(clearable) && (sure
-                          ? <span className="hm-sure">{t('Clear {n}? Each comes back when it has something new.', { n: old.filter(clearable).length })}<button type="button" className="btn small" onClick={() => clearAll(old.filter(clearable))}><Icon name="check" size={12} /> {t('Clear')}</button><button type="button" className="ghost-btn" onClick={() => setSure(false)}>{t('Cancel')}</button></span>
-                          : <button type="button" className="ghost-btn hm-clear-old" onClick={() => setSure(true)}><Icon name="check" size={12} /> {t('Clear all')}</button>)}
-                      </div>
-                      {older && grouped(old, sort, devices, rows)}
-                    </div>
-                  )}
-                  {!ready.length && (pinnedOf('ready') ? <p className="muted small hm-none">{t('Pinned, at the top.')}</p> : (
-                    <div className="hm-none">
-                      <p>{t('Nothing new to look at.')}</p>
-                      <small className="muted">{t('Finished work, meeting notes and whiteboards an agent changed show here.')}</small>
-                    </div>
-                  ))}
-                </section>
-              )}
-              <div className="hm-side">
-                {(showAll || kind === 'meeting' || coming.length > 0) && (
-                  <section className="hm-sec" aria-label={t('Coming Up')}>
-                    <h3>{t('Coming Up')}</h3>
-                    {coming.map((d) => (
-                      <div key={d.key} className="hm-day">
-                        <h4>{d.label}</h4>
-                        <ul className="hm-list">
-                          {d.rows.map((i) => (i.event
-                            ? <EventRow key={i.uid} e={i.event} now={cal.now} next={i === coming[0].rows.find((x) => x.event)} onOpenMeeting={onOpenMeeting} onCalendar={onCalendar} />
-                            : taskRow(i, lead(i))))}
-                        </ul>
-                      </div>
-                    ))}
-                    {cal.loading && !coming.length && <p className="muted small hm-none">{t('Looking at your calendar…')}</p>}
-                    {cal.error && <p className="muted small hm-none">{t('Your calendar: {why}', { why: cal.error })} <button type="button" className="link-btn" onClick={onCalendar}>{t('Set up')}</button></p>}
-                    {!coming.length && !cal.error && !cal.loading && <p className="muted small hm-none">{calendar ? t('Nothing on your calendar for the rest of today or tomorrow, and no task with a day.') : t('No task with a day coming up.')}</p>}
-                  </section>
+            <header className="hm-head">
+              <div className="hm-title">
+                {/* Until the list has come (or when it can't), no count: "Nothing needs you" would be a guess. */}
+                {!data ? <h2>{t('Home')}</h2> : <NeedCount list={needing} devices={devices} quiet={quietHere} />}
+                <p className="muted">{date}{data && <><span className="hm-sep"> · </span><span className="hm-where">{where}</span></>}</p>
+              </div>
+              {/* On a phone, a long press on a section's name (and ⌘K) instead. */}
+              {!phone && <button type="button" ref={editBtn} className="btn small hm-edit-btn" onClick={() => edit(true)} aria-label={t('Edit Home')} title={t('Move sections, or hide them')}><Icon name="edit" size={12} /> {t('Edit')}</button>}
+              <button type="button" className="btn small hm-every" onClick={onEverything}>{t('See everything')} <Icon name="chevron" size={11} /></button>
+            </header>
+            {/* What to show (a kind, a computer) and in what order, once there's something to show. */}
+            {data && (all.length > 0 || multi) && (
+              <div className="hm-bar">
+                {(count('all') > 0 || kind !== 'all') && (
+                  <div className="chips hm-kinds" role="tablist" aria-label={t('Kind')}>
+                    {KINDS.map(([id, label]) => {
+                      const n = count(id)
+                      if (id !== 'all' && !n && kind !== id) return null
+                      return <button key={id} type="button" role="tab" aria-selected={kind === id} className={`fchip ${kind === id ? 'on' : ''}`} onClick={() => setKind(kind === id ? 'all' : id)}>{t(label)}<span className="fcount">{n}</span></button>
+                    })}
+                  </div>
                 )}
-                {(showAll || kind === 'chief') && (
-                  <section className="hm-sec" aria-label={t("Chief of Staff's Tasks")}>
-                    <h3>{t("Chief of Staff's Tasks")}{doing.length + todos.length > 0 && <span className="fcount">{doing.length + todos.length}</span>}</h3>
-                    {doing.length > 0 && <ul className="hm-list">{doing.map((i) => taskRow(i, { text: t('On it'), cls: 'doing' }))}</ul>}
-                    {todos.length > 0 && (
-                      <div className="hm-fold-box">
-                        <button type="button" className="hm-fold" aria-expanded={todo} onClick={() => setTodo(!todo)}>
-                          <Icon name="chevron" size={12} />{todos.length === 1 ? t('1 to do, with no day set') : t('{n} to do, with no day set', { n: todos.length })}
-                        </button>
-                        {todo && <ul className="hm-list">{todos.map((i) => taskRow(i, null))}</ul>}
-                      </div>
-                    )}
-                    {!doing.length && !todos.length && <p className="muted small hm-none">{tasks.length ? t('Each of its tasks has a day: they\'re under Coming Up.') : pinned.some((i) => i.kind === 'task') ? t('Pinned, at the top.') : t('Nothing on Chief of Staff\'s list.')}</p>}
-                  </section>
+                <div className="hm-tools">
+                  {all.length > 0 && (
+                    <label className="hm-pick" title={t('Sort')}>
+                      <Icon name="sort" size={13} />
+                      <select className="hm-sort" value={sort} onChange={(e) => setSort(e.target.value)} aria-label={t('Sort')}>
+                        {SORTS.map(([id, label]) => <option key={id} value={id}>{t(label)}</option>)}
+                      </select>
+                      <Icon name="down" size={12} />
+                    </label>
+                  )}
+                  {multi && (
+                    <label className="hm-pick" title={t('Device')}>
+                      <Icon name="laptop" size={13} />
+                      <select className="hm-device" value={device} onChange={(e) => setDevice(e.target.value)} aria-label={t('Device')}>
+                        <option value="this">{t('This computer')}</option>
+                        <option value="all">{t('All devices')}</option>
+                        {devices.filter((d) => (d.id || 'here') !== SHOWN).map((d) => <option key={d.id || 'here'} value={d.id || 'here'}>{d.online ? d.name : t('{name} (offline)', { name: d.name })}</option>)}
+                      </select>
+                      <Icon name="down" size={12} />
+                    </label>
+                  )}
+                </div>
+              </div>
+            )}
+            {(error || partial.length > 0) && (
+              <div className="hm-notices">
+                {error && (
+                  <Notice tone="error" icon="alert" role="alert" className="hm-err">
+                    {data ? t("Home couldn't update: {why}. This is what it had last.", { why: error }) : t("Home couldn't load: {why}", { why: error })}
+                    <button type="button" className="link-btn" onClick={refresh}>{t('Try again')}</button>
+                  </Notice>
+                )}
+                {partial.length > 0 && (
+                  <Notice className="hm-partial">
+                    {partial.map((d) => <span key={d.id} className="ny-device"><Icon name="laptop" size={11} />{d.name}</span>)}
+                    {partial.length === 1 ? t('Only what needs you, for now: update Bridge AI on it to see its meetings, tasks and whiteboards here.') : t('Only what needs you, for now: update Bridge AI on them to see their meetings, tasks and whiteboards here.')}
+                  </Notice>
                 )}
               </div>
-            </div>
+            )}
+            {!data && !error && (
+              <div className="hm-loading" role="status" aria-label={t('Loading what needs you on each computer…')}>
+                <div className="hm-skel hm-skel-h" />
+                <div className="hm-grid"><div className="hm-skel hm-skel-card" /><div className="hm-skel hm-skel-card" /></div>
+                <div className="hm-skel hm-skel-list" />
+              </div>
+            )}
+            {data && (
+              <div className="hm-secs">
+                {pinned.length > 0 && (
+                  <section className="hm-sec hm-pinned" aria-label={t('Pinned')}>
+                    <h3 {...press}><Icon name="pin" size={13} />{t('Pinned')}<span className="fcount">{pinned.length}</span><span className="hm-hint">{t('at the top until you unpin it')}</span></h3>
+                    {grouped(pinned, sort, devices, cards)}
+                  </section>
+                )}
+                {runs.map((r) => (r.els.length > 1
+                  ? <div key={`cols-${r.els[0].key}`} className="hm-cols">{r.els[0]}<div className="hm-side">{r.els.slice(1)}</div></div>
+                  : r.els[0]))}
+                {hiddenNames.length > 0 && (
+                  <p className="muted small hm-hidden-foot">
+                    <Icon name="eye-off" size={12} />
+                    <span>{t('Hidden from Home: {names}.', { names: andList(hiddenNames) })}</span>
+                    <button type="button" className="link-btn" onClick={() => edit(true)}>{t('Edit Home')}</button>
+                  </p>
+                )}
+              </div>
+            )}
           </>
         )}
         {note && <p className="hm-toast" role="status">{note.text}</p>}

@@ -141,6 +141,30 @@ for (const [k, v] of Object.entries(was)) { if (v === undefined) delete process.
   ok(again.pins().length === 200, 'the newest 200 pins are kept', again.pins().length)
   for (const x of again.pins()) again.pin(x.id, false)
   await sleep(700)
+
+  // How Home's sections are arranged (Edit Home, shared/homelayout.js): this computer's first and
+  // the others last by default; a kept one made whole (known sections, each once, one added since
+  // in its place); one for the computer's window and one for phones, kept when Bridge AI starts
+  // again; Reset is the default; anything else is refused with why.
+  const L = await import('../../shared/homelayout.js')
+  const DEF = 'waiting,ready,coming,chief,away'
+  ok(L.SECTIONS.join() === DEF && L.arrange(null).order.join() === DEF && !L.arrange(null).hidden.length, 'by default: Waiting on You, Ready to Look At, Coming Up, Chief of Staff\'s Tasks, and On Other Computers last', L.arrange(null))
+  const odd = L.arrange({ order: ['away', 'nope', 'ready', 'away', 'waiting', 'coming'], hidden: ['coming', 'nope', 'coming'] })
+  ok(odd.order.join() === 'away,ready,waiting,coming,chief' && odd.hidden.join() === 'coming', 'a kept one made whole: unknown and repeated ones out, one it never named (added since) after the one before it by default', odd)
+  ok(L.reorder(['waiting', 'ready', 'coming', 'chief', 'away'], ['chief', 'waiting', 'ready', 'away']).join() === 'chief,waiting,ready,coming,away', 'moving the shown ones: a hidden one stays after the one it was after')
+  ok(again.layouts().computer.order.join() === DEF && again.layouts().phone.order.join() === DEF, 'never arranged: the default for both', again.layouts())
+  again.layout('computer', { order: ['coming', 'waiting', 'ready', 'chief', 'away'], hidden: ['ready'] })
+  ok(again.layouts().computer.order[0] === 'coming' && again.layouts().computer.hidden.join() === 'ready' && again.layouts().phone.order.join() === DEF, "the computer's window arranged: the phone's untouched", again.layouts())
+  again.layout('phone', { order: ['chief', 'waiting', 'ready', 'coming', 'away'], hidden: [] })
+  await sleep(700)
+  const later = homeJs.make({ waiting: { items: async () => [] }, tasks: { list: () => ({ items: [] }) }, meetings: { list: () => [] }, unsent: () => [], boards: { list: async () => ({ boards: [] }) }, chief: async () => null })
+  ok(later.layouts().computer.order[0] === 'coming' && later.layouts().computer.hidden.join() === 'ready' && later.layouts().phone.order[0] === 'chief', 'each kept when Bridge AI starts again', later.layouts())
+  later.layout('computer', { reset: true })
+  later.layout('phone', { order: L.SECTIONS, hidden: [] })
+  ok(later.layouts().computer.order.join() === DEF && !later.layouts().computer.hidden.length && later.layouts().phone.order.join() === DEF, 'Reset, or the first order again: the default', later.layouts())
+  const refused = (() => { try { later.layout('watch', {}); return null } catch (e) { return e } })()
+  ok(/computer or phone/.test(refused?.message || ''), 'an arrangement for something else is refused, with why', refused?.message)
+  await sleep(700)
 }
 
 // ---------- what needs you now, and what has gone quiet (shared/focus.js) ----------
@@ -898,6 +922,242 @@ try {
     await ctx.close()
   }
   for (const id of ['here|meeting:bm1', `${deskId}|task:c2`, 'travel-laptop|agent:n3@1', 'here|board:bb3']) await a.api('/home-pins', { id, on: false })
+
+  // ---------- Edit Home: arranged as an iPhone's home screen is ----------
+  // The same busy day, this computer first. By default this computer's sections come first and On
+  // Other Computers last. Edit Home (Edit in the header, ⌘K, a long press on a section's name on a
+  // phone): the sections wiggle (still and outlined with Reduce Motion), dragged with a mouse or a
+  // finger, or moved with Move Up and Move Down from the keyboard; − hides one (Waiting on You asked
+  // once more), + brings it back; Done or Esc leaves, Reset puts the first order back. Kept on the
+  // computer, after a reload, and a phone's apart from the computer's window. Hidden, what needs you
+  // is still counted, and said where it was.
+  const LAYOUT = ['waiting', 'ready', 'coming', 'chief', 'away']
+  const NAMES = { waiting: 'Waiting on You', ready: 'Ready to Look At', coming: 'Coming Up', chief: "Chief of Staff's Tasks", away: 'On Other Computers' }
+  const kept = async (which) => (await a.api('/home')).layouts?.[which]
+  const sections = (p) => p.locator('.hm-secs .hm-sec').evaluateAll((xs) => xs.map((x) => x.getAttribute('aria-label')))
+  const tiles = (p) => p.locator('.hm-edit ol.hm-arrange > .hm-tile').evaluateAll((xs) => xs.map((x) => x.dataset.sec))
+  const hiddenTiles = (p) => p.locator('.hm-edit .hm-hidden .hm-tile').evaluateAll((xs) => xs.map((x) => x.dataset.sec))
+  const tile = (p, id) => p.locator(`.hm-edit .hm-tile[data-sec="${id}"]`)
+  // (The tiles wiggle, so a click doesn't wait for one to keep still.)
+  const tap = (l) => l.click({ force: true })
+  const centre = async (l) => { const r = await l.boundingBox(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 } }
+  // A finger on the screen: in Chromium its own touch events, as a phone's screen sends them; in
+  // WebKit, which Playwright gives no touch to hold or drag with, the pointer events a finger makes.
+  const finger = async (p, ctx, pts, hold = 0) => {
+    if (which === 'chromium') {
+      const cdp = await ctx.newCDPSession(p)
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [pts[0]] })
+      await p.waitForTimeout(hold)
+      for (const pt of pts.slice(1)) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [pt] }); await p.waitForTimeout(16) }
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+      await cdp.detach()
+      return
+    }
+    await p.evaluate(async ({ pts, hold }) => {
+      const target = document.elementFromPoint(pts[0].x, pts[0].y)
+      const send = (type, { x, y }) => target.dispatchEvent(new PointerEvent(type, { pointerId: 21, pointerType: 'touch', isPrimary: true, clientX: x, clientY: y, button: type === 'pointermove' ? -1 : 0, buttons: type === 'pointerup' ? 0 : 1, bubbles: true, cancelable: true }))
+      send('pointerdown', pts[0])
+      await new Promise((r) => setTimeout(r, hold))
+      for (const pt of pts.slice(1)) { send('pointermove', pt); await new Promise((r) => setTimeout(r, 16)) }
+      send('pointerup', pts.at(-1))
+    }, { pts, hold })
+  }
+  // The busy day, with a save of the arrangement that fails on cue.
+  let failLayout = false
+  const arrangeDay = async (c2) => {
+    await busyDay(c2)
+    await c2.route(/\/api\/home-layout$/, (r) => (failLayout ? r.fulfill({ status: 500, json: { error: 'the disk is full' } }) : r.fallback()))
+  }
+  // From the middle of one tile to just above another, in steps.
+  const dragPath = async (p, from, to) => {
+    const s = await centre(tile(p, from).locator('.hm-tile-in'))
+    const r = await tile(p, to).locator('.hm-tile-in').boundingBox()
+    const end = { x: s.x, y: r.y + 4 }
+    return [s, ...Array.from({ length: 10 }, (_, i) => ({ x: s.x, y: Math.round(s.y + ((end.y - s.y) * (i + 1)) / 10) }))]
+  }
+  ok(JSON.stringify(await kept('computer')) === JSON.stringify({ order: LAYOUT, hidden: [] }) && JSON.stringify(await kept('phone')) === JSON.stringify({ order: LAYOUT, hidden: [] }), 'never arranged: the default, for the computer and for phones', (await a.api('/home')).layouts)
+  {
+    const { ctx, p, errors } = await pageAt(b, a.url, { mode: 'light', theme: 'sky', width: 1440, height: 1200, before: arrangeDay })
+    const hm = p.locator('.hm')
+    await until(async () => (await hm.locator('.hm-away-row').count()) === 3, 20000)
+    await p.waitForTimeout(400)
+    // This computer first: everything about it, then the others, last on the page too.
+    const first = await sections(p)
+    const lowest = await p.evaluate(() => Math.max(...[...document.querySelectorAll('.hm-secs .hm-sec:not(.hm-away)')].map((x) => x.getBoundingClientRect().bottom)))
+    const awayTop = (await hm.locator('.hm-away').boundingBox()).y
+    ok(first.join('|') === LAYOUT.map((id) => NAMES[id]).join('|') && awayTop >= lowest, 'by default, this computer first: Waiting on You, Ready to Look At, Coming Up and Chief of Staff\'s Tasks, then On Other Computers last, below them all', [first, awayTop, lowest])
+    // Edit in the header: Edit Home, its tiles wiggling, the keyboard on Done.
+    const edit = hm.locator('.hm-edit-btn')
+    ok(await edit.isVisible() && (await edit.getAttribute('aria-label')) === 'Edit Home', 'a computer has Edit in Home\'s header')
+    await edit.click()
+    const ed = hm.locator('.hm-edit')
+    ok(!!(await until(() => ed.isVisible(), 4000)) && (await tiles(p)).join('|') === LAYOUT.join('|') && (await p.evaluate(() => document.activeElement?.innerText.trim())) === 'Done', 'Edit opens Edit Home: a tile for each section in its order, the keyboard on Done', await tiles(p))
+    const wiggle = await tile(p, 'waiting').locator('.hm-tile-in').evaluate((e) => getComputedStyle(e).animationName)
+    ok(wiggle === 'hm-wiggle', 'the tiles wiggle gently', wiggle)
+    ok(/1 needs you|3 need you/.test(await tile(p, 'waiting').innerText()) && /3 other computers|need you there/.test(await tile(p, 'away').innerText()), 'each tile says what\'s in it', [await tile(p, 'waiting').innerText(), await tile(p, 'away').innerText()])
+    await shot(p, `${tag}home-edit-1440-light`)
+    // Done leaves, the keyboard back on Edit; Esc leaves too.
+    await hm.locator('.hm-done').click()
+    ok(!!(await until(async () => !(await ed.count()) && (await p.evaluate(() => document.activeElement?.classList.contains('hm-edit-btn'))), 4000)), 'Done leaves Edit Home, the keyboard back on Edit')
+    await edit.click()
+    await ed.waitFor({ timeout: 4000 })
+    await p.keyboard.press('Escape')
+    ok(!!(await until(async () => !(await ed.count()) && await p.locator('.work.maxed .hm').isVisible(), 4000)), 'Esc leaves it too (and Home stays full size)')
+    // ⌘K's Edit Home: from Home, and from another view (Home opens in it).
+    const cmdK = async () => { await p.keyboard.press('ControlOrMeta+K'); await p.locator('.palette input').fill('Edit Home'); await p.locator('.pal-item[data-id="a:edithome"]').click() }
+    await cmdK()
+    ok(!!(await until(() => ed.isVisible(), 4000)), '⌘K\'s Edit Home, with Home open')
+    await p.keyboard.press('Escape')
+    await hm.locator('.hm-every').click()
+    await p.locator('.ey').waitFor({ timeout: 8000 })
+    await cmdK()
+    ok(!!(await until(() => p.locator('.hm-edit').isVisible(), 6000)), 'and from another view: Home opens in Edit Home')
+    // Dragged with a mouse: Coming Up to the top.
+    const from = await centre(tile(p, 'coming').locator('.hm-tile-in'))
+    const over = (await tile(p, 'waiting').locator('.hm-tile-in').boundingBox()).y + 4
+    await p.mouse.move(from.x, from.y)
+    await p.mouse.down()
+    await p.mouse.move(from.x, from.y - 20, { steps: 3 })
+    await p.mouse.move(from.x, over, { steps: 10 })
+    ok(await tile(p, 'coming').evaluate((e) => e.classList.contains('dragging')), 'a tile dragged with the mouse follows it')
+    await shot(p, `${tag}home-edit-dragging`)
+    await p.mouse.up()
+    const dragged = ['coming', 'waiting', 'ready', 'chief', 'away']
+    ok(!!(await until(async () => (await tiles(p)).join() === dragged.join() && (await kept('computer'))?.order.join() === dragged.join(), 5000)), 'dragged with a mouse to the top: there, and kept on the computer', [await tiles(p), await kept('computer')])
+    // The keyboard: Move Up, and the focus stays with it.
+    await tile(p, 'chief').locator('.hm-tile-up').focus()
+    await p.keyboard.press('Enter')
+    const keyed = ['coming', 'waiting', 'chief', 'ready', 'away']
+    ok(!!(await until(async () => (await tiles(p)).join() === keyed.join(), 4000)) && (await p.evaluate(() => document.activeElement?.getAttribute('aria-label'))) === "Move Chief of Staff's Tasks up" && /Chief of Staff's Tasks moved: 3 of 5/.test(await hm.locator('.hm-said').innerText()), 'Move Up from the keyboard: it moves, the focus stays on it, and a screen reader hears where it went', [await tiles(p), await p.evaluate(() => document.activeElement?.getAttribute('aria-label')), await hm.locator('.hm-said').innerText()])
+    await tile(p, 'coming').locator('.hm-tile-down').focus()
+    await p.keyboard.press('Enter')
+    ok(!!(await until(async () => (await tiles(p)).join() === 'waiting,coming,chief,ready,away', 4000)) && (await p.evaluate(() => document.activeElement?.getAttribute('aria-label'))) === 'Move Coming Up down', 'and Move Down', await tiles(p))
+    ok(await tile(p, 'waiting').locator('.hm-tile-up').isDisabled() && await tile(p, 'away').locator('.hm-tile-down').isDisabled(), 'the first can\'t go up, nor the last down')
+    // − hides one, + brings it back where it was.
+    await tap(tile(p, 'coming').locator('.hm-tile-badge'))
+    ok(!!(await until(async () => (await tiles(p)).join() === 'waiting,chief,ready,away' && (await hiddenTiles(p)).join() === 'coming', 4000)), '− hides Coming Up: under Hidden', [await tiles(p), await hiddenTiles(p)])
+    await tap(tile(p, 'coming').locator('.hm-tile-badge.plus'))
+    ok(!!(await until(async () => (await tiles(p)).join() === 'waiting,coming,chief,ready,away' && !(await hiddenTiles(p)).length, 4000)), '+ brings it back, where it was', await tiles(p))
+    // Waiting on You is asked once more; Cancel keeps it.
+    await tap(tile(p, 'waiting').locator('.hm-tile-badge'))
+    const sure = tile(p, 'waiting').locator('.hm-tile-sure')
+    ok(/Hide Waiting on You\? What needs you still counts/.test(await sure.innerText().catch(() => '')) && (await tiles(p))[0] === 'waiting', 'hiding Waiting on You is asked once more', await sure.innerText().catch(() => ''))
+    await tap(sure.locator('button', { hasText: 'Cancel' }))
+    ok(!(await sure.count()) && (await tiles(p))[0] === 'waiting', 'Cancel keeps it')
+    await tap(tile(p, 'waiting').locator('.hm-tile-badge'))
+    await tap(sure.locator('button', { hasText: 'Hide' }))
+    await tap(tile(p, 'away').locator('.hm-tile-badge'))
+    ok(!!(await until(async () => (await hiddenTiles(p)).join() === 'waiting,away' && (await kept('computer'))?.hidden.join() === 'waiting,away', 5000)), 'Hide: Waiting on You is hidden, and so is On Other Computers', [await hiddenTiles(p), await kept('computer')])
+    await shot(p, `${tag}home-edit-hidden`)
+    await hm.locator('.hm-done').click()
+    // Hidden, still counted: the heading, the top bar's chip and the sidebar's Home say 3, and
+    // where Waiting on You was, how many need you.
+    const hid = hm.locator('.hm-hid')
+    await until(() => hid.first().isVisible(), 4000)
+    const notes = await hid.allInnerTexts()
+    ok(/Waiting on You is hidden: 3 need you\./.test(notes[0]) && /On Other Computers is hidden: 5 need you there\./.test(notes[1]) && !(await hm.locator('.hm-sec[aria-label="Waiting on You"]').count()), 'hidden: where each was, how many need you there', notes)
+    ok(/^3 things need you/.test(await hm.locator('.hm-title h2').innerText()) && /^3\s*need you/.test((await p.locator('.topbar .needs-chip').innerText()).trim()) && (await p.locator('.rail-home .mc-needs').innerText()).trim() === '3', 'and nothing hidden from the counts: the heading, the top bar\'s chip and the sidebar\'s Home still say 3', [await hm.locator('.hm-title h2').innerText(), await p.locator('.topbar .needs-chip').innerText()])
+    ok(/Hidden from Home: Waiting on You and On Other Computers\./.test(await hm.locator('.hm-hidden-foot').innerText()), 'and at the foot, what is hidden, with Edit Home', await hm.locator('.hm-hidden-foot').innerText().catch(() => ''))
+    ok((await sections(p)).join('|') === "Coming Up|Chief of Staff's Tasks|Ready to Look At", 'the rest in the order arranged', await sections(p))
+    await shot(p, `${tag}home-arranged-hidden`)
+    // Kept after a reload.
+    await p.reload()
+    await until(async () => (await hm.locator('.hm-hid').count()) === 2, 20000)
+    ok((await sections(p)).join('|') === "Coming Up|Chief of Staff's Tasks|Ready to Look At" && (await hm.locator('.hm-hid').count()) === 2, 'after a reload, arranged as it was', await sections(p))
+    // Show it, where it's said, brings it back in its place.
+    await hm.locator('.hm-hid', { hasText: 'Waiting on You' }).locator('button', { hasText: 'Show it' }).click()
+    ok(!!(await until(async () => (await sections(p))[0] === 'Waiting on You' && (await kept('computer'))?.hidden.join() === 'away', 5000)), 'Show it brings Waiting on You back, in its place', await sections(p))
+    // A change that can't be saved goes back, and says why.
+    failLayout = true
+    await hm.locator('.hm-hidden-foot button', { hasText: 'Edit Home' }).click()
+    await tap(tile(p, 'chief').locator('.hm-tile-badge'))
+    ok(!!(await until(async () => /Couldn't save how Home is arranged: the disk is full/.test(await hm.locator('.hm-toast').innerText().catch(() => '')) && !(await hiddenTiles(p)).includes('chief'), 6000)), "a change that can't be saved goes back, and says why", [await hm.locator('.hm-toast').innerText().catch(() => ''), await hiddenTiles(p)])
+    failLayout = false
+    // Reset: the first order, nothing hidden.
+    await tap(hm.locator('.hm-reset'))
+    ok(!!(await until(async () => (await tiles(p)).join() === LAYOUT.join() && !(await hiddenTiles(p)).length && JSON.stringify(await kept('computer')) === JSON.stringify({ order: LAYOUT, hidden: [] }), 5000)) && await hm.locator('.hm-reset').isDisabled(), 'Reset puts the first order back, nothing hidden, and is done', [await tiles(p), await kept('computer')])
+    // Arranged once more, for the phone to see it doesn't share it.
+    await tile(p, 'ready').locator('.hm-tile-up').focus()
+    await p.keyboard.press('Enter')
+    await until(async () => (await kept('computer'))?.order[0] === 'ready', 5000)
+    await p.keyboard.press('Escape')
+    // (A reload cuts off what the page was asking, which WebKit reports as an error.)
+    ok(errors.filter((e) => !/due to access control checks/.test(e)).length === 0, 'Edit Home: no page errors', errors)
+    await ctx.close()
+  }
+  {
+    // Dark, and with Reduce Motion: still, with a clear outline instead.
+    const { ctx, p, errors } = await pageAt(b, a.url, { mode: 'dark', theme: 'midnight', width: 1440, height: 1000, before: busyDay })
+    await p.emulateMedia({ reducedMotion: 'reduce' })
+    await p.locator('.hm-edit-btn').click({ timeout: 20000 })
+    await p.locator('.hm-edit').waitFor({ timeout: 4000 })
+    const still = await tile(p, 'ready').locator('.hm-tile-in').evaluate((e) => { const c = getComputedStyle(e); return { anim: c.animationName, outline: c.outlineStyle } })
+    ok(still.anim === 'none' && still.outline === 'dashed' && (await tiles(p))[0] === 'ready', 'Reduce Motion: no wiggle, a clear outline instead (and the computer\'s order as it was left)', still)
+    await shot(p, `${tag}home-edit-1440-dark-reduced`)
+    await p.emulateMedia({ reducedMotion: 'no-preference' })
+    await p.waitForTimeout(400)
+    await shot(p, `${tag}home-edit-1440-dark`)
+    ok(errors.length === 0, 'Edit Home, dark: no page errors', errors)
+    await ctx.close()
+  }
+  // A phone: a long press on a section's name (a tap or a scroll isn't one), a finger to drag, its
+  // own arrangement apart from the computer's window; it fits at 375 and 430, light and dark.
+  for (const width of [375, 430]) {
+    const { ctx, p, errors } = await pageAt(b, a.url, { phone: true, mode: width === 430 ? 'dark' : 'light', theme: width === 430 ? 'midnight' : 'sky', before: busyDay })
+    await p.setViewportSize({ width, height: 860 })
+    const hm = p.locator('.hm')
+    await until(async () => (await hm.locator('.hm-away-row').count()) === 3, 20000)
+    await p.waitForTimeout(400)
+    ok(!(await hm.locator('.hm-edit-btn').count()), `phone ${width}: no Edit button (a long press instead)`)
+    if (width === 375) ok((await sections(p)).join('|') === LAYOUT.map((id) => NAMES[id]).join('|'), 'phone: its own arrangement, the default, though the computer\'s was changed', await sections(p))
+    const name = hm.locator('.hm-sec[aria-label="Ready to Look At"] h3')
+    await name.scrollIntoViewIfNeeded()
+    const head = await centre(name)
+    await finger(p, ctx, [head], 120)
+    await p.waitForTimeout(600)
+    ok(!(await hm.locator('.hm-edit').count()), `phone ${width}: a tap on a section's name isn't a long press`)
+    await finger(p, ctx, [head, { x: head.x, y: head.y - 20 }, { x: head.x, y: head.y - 40 }], 80)
+    await p.waitForTimeout(600)
+    ok(!(await hm.locator('.hm-edit').count()), `phone ${width}: nor is a finger scrolling`)
+    await name.scrollIntoViewIfNeeded()
+    const head2 = await centre(name)
+    await finger(p, ctx, [head2], 700)
+    ok(!!(await until(() => hm.locator('.hm-edit').isVisible(), 4000)), `phone ${width}: a long press on a section's name opens Edit Home`)
+    const wiggle = await tile(p, 'ready').locator('.hm-tile-in').evaluate((e) => getComputedStyle(e).animationName)
+    ok(wiggle === 'hm-wiggle-narrow', `phone ${width}: wiggling`, wiggle)
+    if (width === 375) {
+      // A finger drags Chief of Staff's Tasks to the top: the phone's arrangement, not the computer's.
+      await finger(p, ctx, await dragPath(p, 'chief', 'waiting'), 0)
+      const phoneOrder = ['chief', 'waiting', 'ready', 'coming', 'away']
+      ok(!!(await until(async () => (await tiles(p)).join() === phoneOrder.join() && (await kept('phone'))?.order.join() === phoneOrder.join(), 5000)) && (await kept('computer'))?.order[0] === 'ready', 'a finger drags Chief of Staff\'s Tasks to the top: kept for phones, the computer\'s window as it was', [await tiles(p), await kept('phone'), await kept('computer')])
+    }
+    // Everything out: one hidden, Waiting on You asked once more.
+    await tap(tile(p, 'coming').locator('.hm-tile-badge'))
+    await tap(tile(p, 'waiting').locator('.hm-tile-badge'))
+    await p.waitForTimeout(400)
+    const f = await phoneFaults(p, '.hm')
+    ok(!Object.keys(f).length, `phone ${width}: Edit Home fits, every control a whole 40 px target, the badges too`, f)
+    await shot(p, `${tag}home-edit-phone-${width}`)
+    await tap(tile(p, 'waiting').locator('.hm-tile-sure button', { hasText: 'Cancel' }))
+    await tap(hm.locator('.hm-done'))
+    ok(!!(await until(async () => !(await hm.locator('.hm-edit').count()) && !(await sections(p)).includes('Coming Up'), 4000)), `phone ${width}: Done, arranged`, await sections(p))
+    await shot(p, `${tag}home-arranged-phone-${width}`)
+    if (width === 375) {
+      await p.reload()
+      await until(async () => (await hm.locator('.hm-away-row').count()) === 3, 20000)
+      ok((await sections(p))[0] === "Chief of Staff's Tasks" && !(await sections(p)).includes('Coming Up'), 'phone: kept after a reload', await sections(p))
+      // ⌘K's Edit Home is in the phone's search too.
+      await p.locator('.search-btn').click()
+      await p.locator('.palette input').fill('Edit Home')
+      await p.locator('.pal-item[data-id="a:edithome"]').click()
+      ok(!!(await until(() => hm.locator('.hm-edit').isVisible(), 4000)), "phone: search's Edit Home opens it")
+      await tap(tile(p, 'coming').locator('.hm-tile-badge.plus'))
+      await until(async () => !(await kept('phone'))?.hidden.length, 4000)
+    }
+    ok(errors.filter((e) => !/due to access control checks/.test(e)).length === 0, `Edit Home, phone ${width}: no page errors`, errors)
+    await ctx.close()
+  }
+  for (const w of ['computer', 'phone']) await a.api('/home-layout', { for: w, reset: true })
 
   // ---------- what needs you now, and what has gone quiet ----------
   // A mixed-age day on Studio and Desk, by the test's clock: waits of minutes, an hour and days, a

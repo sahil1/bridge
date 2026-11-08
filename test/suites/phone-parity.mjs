@@ -40,6 +40,7 @@ const PATHS = {
   // ⌘K's actions (App.jsx paletteActions).
   'a:homeview': { phone: 'Home', shows: '.hm', trial: 'home' },
   'a:everything': { phone: 'Home › See everything', shows: '.ey', trial: 'home' },
+  'a:edithome': { phone: 'Search › Edit Home', trial: 'home' },
   'a:home': { phone: 'Agents › New', shows: '.home-title' },
   'a:new': { phone: 'Agents › New › More options', shows: '.modal.new-agent' },
   'a:record': { phone: 'Meetings', shows: '.m-meetings button:has-text("Start recording")' },
@@ -343,6 +344,25 @@ try {
       if (r.shows && !(await ph.p.locator(r.shows).first().waitFor({ timeout: 8000 }).then(() => true, () => false))) bad.push(`${r.phone}: ${r.shows} doesn't show`)
     }
     ok(!bad.length, `Home on: each of its paths, and Today from More, is there on the phone and opens its place (${routes.length} of them)`, bad)
+    // The desktop's Edit in Home's header: on a phone, a long press on a section's name (as on an
+    // iPhone's home screen), besides Search's Edit Home above. It fits the phone.
+    // (Opened again, it's at the tab it last showed: Home's tapped.)
+    await ph.p.goto(kit.url)
+    await ph.p.waitForSelector('.tabbar button', { timeout: 20000 })
+    await until(async () => (await tabNames()).join('|') === HOME_TABS.join('|'), 10000)
+    await follow(ph.p, 'Home', HOME_TABS)
+    const name = ph.p.locator('.hm .hm-sec h3').first()
+    await name.waitFor({ timeout: 15000 })
+    const box = await name.boundingBox()
+    const finger = { pointerType: 'touch', pointerId: 5, isPrimary: true, clientX: box.x + 12, clientY: box.y + box.height / 2 }
+    await name.dispatchEvent('pointerdown', finger)
+    await ph.p.waitForTimeout(700)
+    await name.dispatchEvent('pointerup', finger).catch(() => {})
+    const edit = !!(await until(() => ph.p.locator('.hm-edit').isVisible(), 4000))
+    const f = edit ? await phoneFaults(ph.p, '.hm') : {}
+    ok(edit && !Object.keys(f).length && !(await ph.p.locator('.hm-edit-btn').count()), 'Home on: a long press on a section\'s name is the phone\'s Edit Home, and it fits', { edit, f })
+    await shot(ph.p, `${tag}phone-edit-home`)
+    await ph.p.locator('.hm-done').click({ force: true })
     ok(!ph.errors.filter((e) => !/\/api\/\S+ due to access control checks|^TypeError: Importing a module script failed\.$/.test(e)).length, 'Home on: no page errors', ph.errors)
     await ph.ctx.close()
   }
