@@ -37,6 +37,12 @@ export function loadPdfjs() {
   return loading
 }
 
+// Only as much of a PDF as its first page needs, asked for in parts (the file route answers Range):
+// Files' pictures of PDFs, which mustn't read a whole big file for one.
+export function openPdfAt(lib, url) {
+  return lib.getDocument({ url, disableAutoFetch: true, disableStream: true, rangeChunkSize: 65536, BinaryDataFactory: BuiltIn, cMapUrl: 'cmaps/', standardFontDataUrl: 'standard_fonts/', wasmUrl: 'wasm/' })
+}
+
 // Opening a PDF's bytes (copied: pdf.js hands them to its worker). onPassword(retry, wrong): it's
 // locked with a password, asked of you.
 export function openPdf(lib, data, { onPassword } = {}) {

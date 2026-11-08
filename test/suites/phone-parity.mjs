@@ -35,6 +35,7 @@ const PATHS = {
   'view:memory': { phone: 'More › Memory', shows: '.mm-page' },
   'view:whiteboards': { phone: 'More › Whiteboards', shows: '.wb-home' },
   'view:studio': { phone: 'More › Studio', shows: '.sd-home' },
+  'view:files': { phone: 'More › Files', shows: '.fx' },
   'view:map': { phone: 'Agents › Map', shows: '.am' },
   // ⌘K's actions (App.jsx paletteActions).
   'a:homeview': { phone: 'Home', shows: '.hm', trial: 'home' },
@@ -49,6 +50,7 @@ const PATHS = {
   'a:memory': { phone: 'More › Memory', shows: '.mm-page' },
   'a:boards': { phone: 'More › Whiteboards', shows: '.wb-home' },
   'a:studio': { phone: 'More › Studio', shows: '.sd-home' },
+  'a:files': { phone: 'More › Files', shows: '.fx' },
   'a:map': { phone: 'More › Agent Map', shows: '.am' },
   'a:needs': { phone: 'More › Needs you', shows: '.ny-panel' },
   'a:history': { phone: 'More › History', shows: '.modal.history' },
@@ -105,6 +107,7 @@ const PATHS = {
   'rail:Memory': { phone: 'More › Memory', shows: '.mm-page' },
   'rail:Whiteboards': { phone: 'More › Whiteboards', shows: '.wb-home' },
   'rail:Studio': { phone: 'More › Studio', shows: '.sd-home' },
+  'rail:Files': { phone: 'More › Files', shows: '.fx' },
   'rail:New space': { phone: 'Search › New agent with all the options' },
   'rail:New terminal': { phone: 'Search › New terminal' },
   'rail:History': { phone: 'More › History', shows: '.modal.history' },
@@ -131,7 +134,7 @@ for (const [what, ids] of [['view', views], ['⌘K action', actions], ['Settings
   ok(!missing(ids).length, `every desktop ${what} has a way in on a phone, or says why not (add it to PATHS here)`, missing(ids))
 }
 
-const kit = await startKit('phone-parity', { config: { trials: { studio: true, 'meeting-insights': true, routines: true } } }) // the beta features on: their ways in are checked too
+const kit = await startKit('phone-parity', { config: { trials: { studio: true, 'meeting-insights': true, routines: true, files: true } } }) // the beta features on: their ways in are checked too
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
 try {

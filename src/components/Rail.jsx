@@ -137,6 +137,7 @@ function HoverCard({ row, rect, git, preview }) {
 // With Home on (a beta feature), Home is the first row, with what needs you on every device (needs).
 export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpen, onOpenInHerdr, onOpenFiles, onNewAgent, onNewTerminal, onHistory, onMeetings, onDictations, recording, needs = 0 }) {
   const studio = useTrial('studio') // a beta feature (src/trials.js)
+  const files = useTrial('files') // so is Files, every folder on your computers
   const home = useTrial('home')
   const [launching, setLaunching] = useState(false)
   const [error, setError] = useState(null)
@@ -297,6 +298,7 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
         <button className={`mini-nav ${selected === 'view:memory' ? 'on' : ''}`} onClick={() => onOpen('view:memory')} aria-label={t('Memory')} title={t('Memory')}><Icon name="book" size={15} /></button>
         {whiteboards && <button className={`mini-nav ${String(selected || '').startsWith('view:whiteboard') ? 'on' : ''}`} onClick={() => onOpen('view:whiteboards')} aria-label={t('Whiteboards')} title={t('Whiteboards')}><Icon name="shapes" size={15} /></button>}
         {whiteboards && studio && <button className={`mini-nav ${String(selected || '').startsWith('view:studio') ? 'on' : ''}`} onClick={() => onOpen('view:studio')} aria-label={t('Studio')} title={t('Studio')}><Icon name="layers" size={15} /></button>}
+        {whiteboards && files && <button className={`mini-nav ${selected === 'view:files' ? 'on' : ''}`} onClick={() => onOpen('view:files')} aria-label={t('Files')} title={t('Files')}><Icon name="folder" size={15} /></button>}
         <div className="rail-mini">
           {groups.filter((g) => rowsOf(g).length).map((g) => (
             <div key={g.id} className="mini-ws">
@@ -392,6 +394,12 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
         {whiteboards && studio && (
           <div className="rail-nav-row">
             <button className={`rail-nav-btn ${String(selected || '').startsWith('view:studio') ? 'on' : ''}`} onClick={() => onOpen('view:studio')}><Icon name="layers" size={14} /> {t('Studio')}</button>
+          </div>
+        )}
+        {/* Files: every folder on this computer and your others, as Finder shows them. */}
+        {whiteboards && files && (
+          <div className="rail-nav-row">
+            <button className={`rail-nav-btn ${selected === 'view:files' ? 'on' : ''}`} onClick={() => onOpen('view:files')}><Icon name="folder" size={14} /> {t('Files')}</button>
           </div>
         )}
         <Quiet name="Devices"><RailMachines /></Quiet>

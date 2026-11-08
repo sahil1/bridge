@@ -80,6 +80,7 @@ import * as studio from './studio.js'
 import * as signing from './signing.js'
 import * as doctext from './doctext.js'
 import * as studioFound from './studiofound.js'
+import * as explorer from './explorer.js'
 import { terminals, openAttach, openCommand } from './terminal.js'
 import { mcpRoutes } from './mcp.js'
 import * as notify from './notify.js'
@@ -371,6 +372,11 @@ const rootOf = async (pane) => {
   }
   // A folder Studio's home found one of your files in (studiofound.js).
   if (String(pane).startsWith('found:')) return studioFound.foundDir(String(pane).slice(6))
+  // Files (a beta feature): your home folder (home) and this computer's drives (drive:<key>).
+  if (explorer.isFilesRoot(pane)) {
+    if (!trialOn('files')) throw Object.assign(new Error(FILES_OFF), { status: 404, code: 'trial' })
+    return explorer.rootDir(String(pane))
+  }
   const p = ((await rt.fleet()).panes || []).find((x) => x.paneId === pane)
   if (!p) throw new Error(`No pane ${pane}`)
   return p.cwd
@@ -380,9 +386,69 @@ const rootOf = async (pane) => {
 // (trials: { studio: true } in the config; src/trials.js). Their routes answer only then.
 // One that's no longer a beta stays in older configs, read by nothing (memory: Memory, now a page
 // for everyone).
-const TRIALS = ['studio', 'home', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights', 'signature-assist', 'tab-groups', 'routines']
+const TRIALS = ['studio', 'home', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights', 'signature-assist', 'tab-groups', 'routines', 'files']
 const trialOn = (id) => cfg.trials?.[id] === true
 const trialOff = (id, label) => (req, res, next) => (trialOn(id) ? next() : res.status(404).json({ error: `${label} is a beta feature. Turn it on in Settings › About & Updates › Beta Features.`, trial: id }))
+const FILES_OFF = 'Files is a beta feature. Turn it on in Settings › About & Updates › Beta Features.'
+
+// ---------- Files (explorer.js) ----------
+// Your folders as Finder shows them: its sidebar, a folder's listing, Get Info, a folder's size and a
+// search, answered only while the beta is on. The home folder and the drives are roots for the
+// agents' file routes too (the viewer, Open in its app, Show in Finder), only to read for now:
+// anything that would change a file through them is refused here, before it reaches those routes.
+// From another of your devices, a folder macOS hasn't asked about isn't read (explorer.notFromAfar).
+app.use('/api/files', trialOff('files', 'Files'))
+const LOOK_ONLY = new Set(['reveal', 'open'])
+app.use('/api/agents/:pane', async (req, res, next) => {
+  if (!explorer.isFilesRoot(req.params.pane)) return next()
+  if (!['GET', 'HEAD'].includes(req.method) && !(req.method === 'POST' && req.path === '/fileop' && LOOK_ONLY.has(req.body?.op))) {
+    return res.status(403).json({ error: 'Files only looks for now: nothing is renamed, moved or deleted from it yet.', code: 'readOnly' })
+  }
+  try {
+    if (!trialOn('files')) throw Object.assign(new Error(FILES_OFF), { status: 404, code: 'trial' })
+    const site = /^\/site\//.test(req.path)
+    const rel = site ? decodeURIComponent(req.path.slice(6)) : String(req.query.path ?? req.body?.path ?? '')
+    explorer.notFromAfar(await explorer.lexical(req.params.pane, rel), { here: !req.headers['x-bridge-relay'] })
+    // A page's own files (the HTML preview) are asked for from its sandbox, which this server sees
+    // as another site; Bridge AI's preview says where it is (the page here). Anything else asking
+    // for one through these roots (another site, which would learn what's on your disks) is refused.
+    // Your devices' requests come through their link, which no web page can use.
+    if (site && !req.headers['x-bridge-relay'] && req.headers['sec-fetch-site'] === 'cross-site' && !sameServer(req)) return res.status(403).json({ error: 'Not from another site' })
+    next()
+  } catch (e) { res.status(e.status || 502).json({ error: e.message, ...(e.code ? { code: e.code } : {}) }) }
+})
+// A request a page of this server's made: its Referer is this server.
+const sameServer = (req) => { try { return new URL(req.headers.referer || '').host === req.headers.host } catch { return false } }
+const fsq = (req) => ({ root: String(req.query.root || ''), path: String(req.query.path || '') })
+const fsWrap = (fn) => async (req, res) => {
+  try { res.json(await fn(req, res)) } catch (e) { if (!res.headersSent) res.status(e.status >= 400 && e.status < 600 ? e.status : 502).json({ error: e.message, ...(typeof e.code === 'string' ? { code: e.code } : {}), ...(e.guard ? { guard: e.guard } : {}) }) }
+}
+// What a request is on: a root it may read, the folder it's in, and refused if it's a folder macOS
+// hasn't asked about and you're on another device.
+const fsAt = async (req) => {
+  const q = fsq(req)
+  if (!q.root) throw Object.assign(new Error('Which folder?'), { status: 400 })
+  const dir = await rootOf(q.root).catch((e) => { throw Object.assign(e, { status: e.status || 404 }) })
+  const at = path.resolve(dir, q.path.replace(/^\/+/, ''))
+  explorer.notFromAfar(at, { here: !req.headers['x-bridge-relay'] })
+  return { ...q, dir, guard: explorer.guardOf(at) }
+}
+// Stopped when you leave (a search, a folder's size).
+const leaving = (req, res) => { const ctl = new AbortController(); res.on('close', () => { if (!res.writableEnded) ctl.abort() }); return ctl.signal }
+app.get('/api/files/sidebar', fsWrap(async () => {
+  const fleet = lastFleet || await fleetView().catch(() => null)
+  return explorer.sidebar({
+    projects: (fleet?.agents || []).filter((a) => a.cwd && !a.chief && !a.plainChat && !a.cloudOnly).map((a) => ({ dir: a.cwd, label: a.workspace || null })),
+    places: places.pickedPlaces().map((p) => ({ id: p.id, dir: places.placeOf(p.id)?.path, label: p.name })).filter((p) => p.dir),
+  })
+}))
+app.get('/api/files/list', fsWrap(async (req) => {
+  const q = await fsAt(req)
+  return explorer.list(q.root, q.dir, q.path, { hidden: req.query.hidden === '1' }).catch((e) => { throw Object.assign(e, q.guard ? { guard: q.guard } : {}) })
+}))
+app.get('/api/files/info', fsWrap(async (req) => { const q = await fsAt(req); return explorer.info(q.root, q.dir, q.path) }))
+app.get('/api/files/size', fsWrap(async (req, res) => { const q = await fsAt(req); return explorer.size(q.dir, q.path, { signal: leaving(req, res) }) }))
+app.get('/api/files/search', fsWrap(async (req, res) => { const q = await fsAt(req); return explorer.search(q.root, q.dir, q.path, String(req.query.q || '').slice(0, 100), { hidden: req.query.hidden === '1', signal: leaving(req, res) }) }))
 
 // ---------- Studio (studio.js) ----------
 // Its files are named as Files names them: root (an agent's pane, or place:<id>) and a path in it.

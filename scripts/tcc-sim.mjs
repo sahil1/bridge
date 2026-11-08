@@ -2,6 +2,8 @@
 // Desktop folder" prompt waits. Load with: node --import ./scripts/tcc-sim.mjs server/index.js
 //   SIM_PROTECTED=dir1:dir2   folders to treat as protected (and everything inside them)
 //   SIM_MS=20000              how long each call is held
+//   SIM_DENY=dir1:dir2        folders you said Don't Allow to: every call into one fails with
+//                             EPERM at once, as macOS answers once you've said no
 // A blocking (sync) call on a protected path freezes the whole process for SIM_MS, exactly like the
 // real prompt, and logs "[tcc-sim] FROZE <call>(<path>)" with a stack. A non-blocking (async) call
 // is only delayed, so only the request that made it waits.
@@ -14,6 +16,9 @@ const real = (p) => { try { return fs.realpathSync.native(p) } catch { return p 
 const DIRS = String(process.env.SIM_PROTECTED || '').split(':').filter(Boolean).flatMap((d) => [d, real(d)])
 const pathOf = (p) => (p instanceof URL ? p.pathname : Buffer.isBuffer(p) ? p.toString() : typeof p === 'string' ? p : '')
 const hit = (p) => { const s = pathOf(p); return !!s && DIRS.some((d) => s === d || s.startsWith(d + '/')) }
+const DENIED = String(process.env.SIM_DENY || '').split(':').filter(Boolean).flatMap((d) => [d, real(d)])
+const denied = (p) => { const s = pathOf(p); return !!s && DENIED.some((d) => s === d || s.startsWith(d + '/')) }
+const no = (call, p) => Object.assign(new Error(`EPERM: operation not permitted, ${call} '${pathOf(p)}'`), { code: 'EPERM', errno: -1, syscall: call, path: pathOf(p) })
 const freeze = (call, p) => {
   console.error(`[tcc-sim] FROZE ${call}(${pathOf(p)})\n${new Error().stack.split('\n').slice(3, 9).join('\n')}`)
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, MS)
@@ -24,7 +29,7 @@ const SYNC = ['readdirSync', 'statSync', 'lstatSync', 'readFileSync', 'existsSyn
 for (const name of SYNC) {
   const orig = fs[name]
   if (!orig) continue
-  const wrapped = function (p, ...rest) { if (hit(p) || (name.match(/^(rename|copyFile|cp)Sync$/) && hit(rest[0]))) freeze(name, p); return orig.call(this, p, ...rest) }
+  const wrapped = function (p, ...rest) { if (denied(p)) throw no(name, p); if (hit(p) || (name.match(/^(rename|copyFile|cp)Sync$/) && hit(rest[0]))) freeze(name, p); return orig.call(this, p, ...rest) }
   if (orig.native) wrapped.native = function (p, ...rest) { if (hit(p)) freeze(`${name}.native`, p); return orig.native.call(this, p, ...rest) }
   fs[name] = wrapped
 }
@@ -34,9 +39,15 @@ const ASYNC = ['readdir', 'stat', 'lstat', 'readFile', 'realpath', 'opendir', 'a
 const held = (call, p) => { if (process.env.SIM_LOG) console.error(`[tcc-sim] HELD ${call}(${pathOf(p)})`) }
 for (const name of ASYNC) {
   const orig = fs.promises[name]
-  if (orig) fs.promises[name] = async function (p, ...rest) { if (hit(p)) { held(name, p); await hold() } return orig.call(this, p, ...rest) }
+  if (orig) fs.promises[name] = async function (p, ...rest) { if (denied(p)) { held(name, p); throw no(name, p) } if (hit(p)) { held(name, p); await hold() } return orig.call(this, p, ...rest) }
   const cb = fs[name]
-  if (cb) fs[name] = function (p, ...rest) { if (!hit(p)) return cb.call(this, p, ...rest); held(name, p); setTimeout(() => cb.call(this, p, ...rest), MS) }
+  if (cb) {
+    fs[name] = function (p, ...rest) {
+      if (denied(p)) { held(name, p); const done = rest.findLast((x) => typeof x === 'function'); return setImmediate(() => done?.(no(name, p))) }
+      if (!hit(p)) return cb.call(this, p, ...rest)
+      held(name, p); setTimeout(() => cb.call(this, p, ...rest), MS)
+    }
+  }
 }
 // A program started synchronously in a protected folder blocks the server until it ends.
 for (const name of ['execFileSync', 'execSync', 'spawnSync']) {
@@ -49,4 +60,4 @@ for (const name of ['execFileSync', 'execSync', 'spawnSync']) {
   }
 }
 syncBuiltinESMExports()
-console.error(`[tcc-sim] protecting ${DIRS.length ? [...new Set(DIRS)].join(', ') : '(nothing)'} for ${MS} ms per call`)
+console.error(`[tcc-sim] protecting ${DIRS.length ? [...new Set(DIRS)].join(', ') : '(nothing)'} for ${MS} ms per call${DENIED.length ? `; denied: ${[...new Set(DENIED)].join(', ')}` : ''}`)

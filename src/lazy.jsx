@@ -89,6 +89,11 @@ const studio = import.meta.env.MODE !== 'demo' && import.meta.env.MODE !== 'clou
 export const StudioHome = studio && wrap(studio, 'StudioHome')
 export const StudioPage = studio && wrap(studio, 'StudioPage')
 
+// Files (a beta feature: every folder on your computers, as Finder shows them) loads only when it's
+// opened; not in the demo or the phone apps' Cloud agents.
+const files = import.meta.env.MODE !== 'demo' && import.meta.env.MODE !== 'cloud' ? () => import('./components/files/Explorer.jsx') : null
+export const Explorer = files && wrap(files)
+
 // Not while the page is offline (it waits until it's back on); if some didn't come (the computer out
 // of reach for a moment), they're fetched again a little later.
 const AGAIN_MS = 30000
