@@ -149,7 +149,7 @@ const runOne = (j, attempt) => new Promise((resolve) => {
   const p = spawn(process.execPath, [path.join(ROOT, 'test', 'suites', `${j.name}.mjs`)], { cwd: ROOT, env: { ...process.env, BRIDGE_TEST_BROWSER: j.engine || '' }, stdio: ['ignore', out, out] })
   // Too long: stopped with everything it started (its server, its browser). Playwright catches a
   // plain stop to close its browser first, and a test stuck waiting would then never end.
-  const limit = setTimeout(() => { fs.appendFileSync(log, '\nFAIL took more than 5 minutes, so it was stopped\n'); stopTree(p.pid) }, 5 * 60_000)
+  const limit = setTimeout(() => { fs.appendFileSync(log, '\nFAIL took more than 5 minutes, so it was stopped\n'); stopTree(p) }, 5 * 60_000)
   p.on('exit', (code) => {
     clearTimeout(limit)
     const text = fs.readFileSync(log, 'utf8')

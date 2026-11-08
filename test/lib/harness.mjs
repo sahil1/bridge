@@ -74,31 +74,41 @@ export function freePort() {
   })
 }
 
-// Windows: every process under pid, as taskkill /T finds them, while they still have it as parent.
+// Windows: every process under pid, by the parent each was started by. A process keeps its
+// parent's number after that parent ends, and Windows soon hands the number to another process, so
+// one started before the process it names as its parent isn't that one's: it's left out.
 function startedBy(pid) {
-  const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId)" }'], { encoding: 'utf8', windowsHide: true })
+  const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId) $(if ($_.CreationDate) { $_.CreationDate.ToFileTimeUtc() } else { 0 })" }'], { encoding: 'utf8', windowsHide: true })
   const kids = new Map()
+  const made = new Map()
   for (const line of (r.stdout || '').split(/\r?\n/)) {
-    const [p, parent] = line.trim().split(/\s+/).map(Number)
-    if (p && p !== parent) kids.set(parent, [...(kids.get(parent) || []), p])
+    const [p, parent, at] = line.trim().split(/\s+/).map(Number)
+    if (!p) continue
+    made.set(p, at || 0)
+    if (p !== parent) kids.set(parent, [...(kids.get(parent) || []), p])
   }
+  const before = (k, p) => made.get(k) > 0 && made.get(p) > 0 && made.get(k) < made.get(p)
   const all = new Set()
-  const walk = (p) => { for (const k of kids.get(p) || []) if (!all.has(k)) { all.add(k); walk(k) } }
+  const walk = (p) => { for (const k of kids.get(p) || []) if (!all.has(k) && !before(k, p)) { all.add(k); walk(k) } }
   walk(pid)
   return [...all]
 }
 
-// Stops a process and everything it started. itselfFirst: the process, then what it started, as a
+// Stops a process a test started (its ChildProcess) and everything it started. One that has ended
+// already is left alone: its number can belong to another process by now (Windows hands numbers out
+// again at once), and taskkill /T would stop that one and all it started, another test's lane among
+// them, which then ends with no word of why. itselfFirst: the process, then what it started, as a
 // server quitting goes before its agents; stopped together, a server could see an agent's terminal
 // end before it hears it's stopping, and take the agent off its list to reopen. Windows: the server
 // at once (taskkill /F), then the rest. macOS and Linux: only the server's SIGTERM here (it saves
 // its list, then ends its terminals); what it started is handed back, to stop once it's gone.
-export function stopTree(pid, { itselfFirst = false } = {}) {
-  if (!pid) return []
+export function stopTree(child, { itselfFirst = false } = {}) {
+  const pid = child?.pid
+  if (!pid || child.exitCode !== null || child.signalCode !== null) return []
   if (IS_WIN && itselfFirst) {
     const rest = startedBy(pid)
     spawnSync('taskkill', ['/pid', String(pid), '/F'], { stdio: 'ignore' })
-    if (rest.length) spawnSync('taskkill', ['/F', '/T', ...rest.flatMap((p) => ['/pid', String(p)])], { stdio: 'ignore' })
+    if (rest.length) spawnSync('taskkill', ['/F', ...rest.flatMap((p) => ['/pid', String(p)])], { stdio: 'ignore' })
     return []
   }
   if (IS_WIN) { spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' }); return [] }
@@ -164,14 +174,14 @@ export async function startKit(name, { env = {}, config = {}, node = process.exe
   const run = async () => {
     server = spawn(node, [path.join(ROOT, 'server', 'index.js')], { cwd: ROOT, env: { ...base, ...more }, stdio: ['ignore', log, log] })
     const up = await until(async () => (await fetch(`${url}/api/config`)).ok, 60000, 250)
-    if (!up) { stopTree(server.pid); throw new Error(`the server didn't start on ${port}: ${fs.readFileSync(path.join(dir, 'server.log'), 'utf8').slice(-1500)}`) }
+    if (!up) { stopTree(server); throw new Error(`the server didn't start on ${port}: ${fs.readFileSync(path.join(dir, 'server.log'), 'utf8').slice(-1500)}`) }
   }
   await run()
   // Bridge AI quit and opened again, on the same folders (what it kept, it keeps).
   const restart = async () => {
     const was = server
     const gone = new Promise((r) => (was.exitCode != null ? r() : was.once('exit', r)))
-    const rest = stopTree(was.pid, { itselfFirst: true })
+    const rest = stopTree(was, { itselfFirst: true })
     await gone
     for (const p of rest) { try { process.kill(p, 'SIGTERM') } catch { /* gone */ } }
     await until(async () => !(await fetch(`${url}/api/config`).then(() => true, () => false)), 10000, 100)
@@ -184,7 +194,7 @@ export async function startKit(name, { env = {}, config = {}, node = process.exe
     if (!r.ok) throw Object.assign(new Error(j.error || `HTTP ${r.status}`), { status: r.status, j })
     return j
   }
-  return { port, url, dir, home, data, bin, api, program, restart, stop: () => stopTree(server.pid), log: () => fs.readFileSync(path.join(dir, 'server.log'), 'utf8') }
+  return { port, url, dir, home, data, bin, api, program, restart, stop: () => stopTree(server), log: () => fs.readFileSync(path.join(dir, 'server.log'), 'utf8') }
 }
 
 // A Mac with or without Apple's command line developer tools, whatever this one has: a stand-in
@@ -221,7 +231,7 @@ export async function startRelay(name) {
     url, port, token,
     relayFile: { url, token },
     freeze: () => ctl('freeze'), thaw: () => ctl('thaw'), drop: () => ctl('drop'), state: () => ctl('state'),
-    stop: () => stopTree(p.pid),
+    stop: () => stopTree(p),
   }
 }
 
@@ -252,7 +262,7 @@ export async function startAccounts(name, { relayMax } = {}) {
     call: (method, p2, body, token) => fetch(`${url}${p2}`, { method, headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: body ? JSON.stringify(body) : undefined }).then(json),
     clock: (ms) => fetch(`${url}/_test/clock`, { method: 'POST', body: JSON.stringify({ shift: ms }) }).then((r) => r.json()),
     mailFails: (code) => fetch(`${url}/_test/mail-fails`, { method: 'POST', body: JSON.stringify({ code }) }).then((r) => r.json()),
-    stop: () => stopTree(p.pid),
+    stop: () => stopTree(p),
   }
 }
 
@@ -282,7 +292,7 @@ export async function startHostedRelay(name, settings = {}, accounts = null) {
     use: (a, n) => post('/_test/use', { a, n }).then((r) => r.json()),
     clock: (ms) => post('/_test/clock', { shift: ms }).then((r) => r.json()),
     state: () => post('/_test/state', {}).then((r) => r.json()),
-    stop: () => stopTree(p.pid),
+    stop: () => stopTree(p),
   }
 }
 
@@ -305,7 +315,7 @@ export async function startModel(name) {
   // What it was sent to transcribe: { stt: n, bytes, prompt } each, oldest first.
   const heard = () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : '').split('\n').filter(Boolean)
     .map((l) => { try { return JSON.parse(l) } catch { return null } }).filter((x) => x?.stt)
-  return { port, url, asked, requests, heard, stop: () => stopTree(p.pid) }
+  return { port, url, asked, requests, heard, stop: () => stopTree(p) }
 }
 
 // A stand-in Ollama or LM Studio (stand-ins/local-model.mjs) on a port of its own, serving the models
@@ -323,7 +333,7 @@ export async function startLocalModel(name, kind, list) {
   const url = `http://127.0.0.1:${port}`
   if (!await until(async () => (await fetch(`${url}${kind === 'lmstudio' ? '/v1/models' : '/api/tags'}`)).ok, 15000, 200)) throw new Error(`the stand-in ${kind} didn't start`)
   const sent = () => (fs.existsSync(`${base}.log`) ? fs.readFileSync(`${base}.log`, 'utf8') : '').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean)
-  return { port, url, set, sent, stop: () => stopTree(p.pid) }
+  return { port, url, set, sent, stop: () => stopTree(p) }
 }
 
 // The browser (Playwright's Chromium unless BRIDGE_TEST_BROWSER says webkit), with a fake mic.

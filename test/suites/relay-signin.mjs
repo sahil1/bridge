@@ -75,7 +75,7 @@ try {
   e = await signIn({ wait: 1500 })
   ok(!alive(left.pid), 'the one left waiting is stopped')
   ok(e === 'Timed out waiting for authorization code, please try again.' && !logins()[before].includes('--callback-port'), 'and this sign-in waits on 8976 as usual', { e, args: logins()[before] })
-  stopTree(left.pid)
+  stopTree(left)
 
   // 3. The port taken by something that isn't ours: another free port.
   const other = net.createServer()
