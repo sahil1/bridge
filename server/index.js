@@ -86,6 +86,7 @@ import * as notify from './notify.js'
 import * as push from './push.js'
 import * as phone from './phone.js'
 import * as relay from './relay.js'
+import * as account from './account.js'
 import * as machines from './machines.js'
 import { machine } from './machine.js'
 import { osVersion, chipOf, memoryRange, coreRange } from './system.js'
@@ -155,7 +156,8 @@ const wrap = (fn) => async (req, res) => {
     res.json(await fn(req, res))
   } catch (err) {
     // code: what the app can offer a fix for (EPERM, noBrew, calendarAccess...).
-    res.status(502).json({ error: err.message, ...(typeof err.code === 'string' ? { code: err.code } : {}) })
+    // data: what else the app needs to help (the account's devices when it has as many as it takes...).
+    res.status(502).json({ error: err.message, ...(typeof err.code === 'string' ? { code: err.code } : {}), ...(err.data && typeof err.data === 'object' ? err.data : {}) })
   }
 }
 // Your folders are only ever checked without blocking: macOS can hold the first look into Desktop
@@ -2354,6 +2356,98 @@ app.delete('/api/relay/devices/:id', wrap((req) => { if (req.headers['x-bridge-r
 // Messages a phone sent while this computer was offline, still on the phone (server/inbox.js).
 app.post('/api/relay/inbox', wrap((req) => relay.fromPhone(req.headers['x-bridge-relay'], req.body)))
 
+// ---------- Your Bold Bridge account (account.js) ----------
+// Only once the accounts service exists (account.available()). Here or from a paired phone; another
+// of your devices may only ask whether this one is signed in, and hand it a grant to sign it in
+// (linked computers follow). An Early Access code from the account goes in the settings as a pasted
+// one does (from: 'account'), unless this computer left Early Access, or has a code of its own.
+account.use({
+  name: () => relay.thisName(),
+  os: () => machines.OS,
+  early: (code) => {
+    const was = cfg.earlyAccess
+    if (code) {
+      if (was?.left || was?.code === code || (was?.code && was.from !== 'account' && earlyAccess.readCode(was.code).ok)) return
+      afterChange(settings.patch({ earlyAccess: { code, from: 'account' } }))
+    } else if (was?.from === 'account') afterChange(settings.patch({ earlyAccess: null }))
+  },
+  changed: ({ relay: tokenChanged }) => { if (tokenChanged) relay.accountChanged() },
+})
+earlyAccess.useAccountsKey(account.accountsKey)
+relay.useAccount(account)
+const accountOn = () => { if (!account.available()) throw Object.assign(new Error('Bold Bridge accounts aren\'t available in this version of Bridge AI.'), { code: 'account-none' }) }
+// The account as Settings › Account shows it, with what only this computer knows: whether it left
+// the account's Early Access (earlyLeft), whether it can take pre-releases at all (earlyHere), and
+// whether it's on Bridge AI's relay (relayHere).
+const accountView = async (p) => {
+  const s = await p
+  return s?.available ? { ...s, earlyLeft: !!cfg.earlyAccess?.left, earlyHere: updates.canEarly(), relayHere: !!relay.status().hosted } : s
+}
+const yours = (fn) => wrap((req) => { notByMachine(req); return accountView(fn(req)) })
+app.get('/api/account', yours((req) => (req.query.fresh === '1' && account.available() ? account.refresh() : account.status())))
+app.post('/api/account/code', yours((req) => { accountOn(); return account.sendCode(req.body?.email) }))
+app.post('/api/account/cancel', yours(() => account.cancelCode()))
+// Signed in by hand: from then on, linked computers may sign this one in again.
+app.post('/api/account/verify', yours((req) => { accountOn(); account.follow(); return account.verify({ email: req.body?.email, code: req.body?.code, replace: req.body?.replace }) }))
+app.post('/api/account/request', yours((req) => { accountOn(); return account.request(req.body?.kind, req.body?.note) }))
+app.delete('/api/account/devices/:id', yours((req) => { accountOn(); return account.removeDevice(req.params.id) }))
+app.post('/api/account/signout', yours(() => account.signOut()))
+app.delete('/api/account', yours((req) => { accountOn(); return account.deleteAccount(req.body?.email) }))
+// Early Access again on this computer, after leaving it (About & Updates): the account's code back.
+app.post('/api/account/early', yours(() => {
+  if (cfg.earlyAccess?.from === 'account') afterChange(settings.patch({ earlyAccess: null }))
+  return account.refresh()
+}))
+// Signed in by another of your computers: kept, or signed out and not again that way.
+app.post('/api/account/followed', yours((req) => account.followed(req.body?.keep === true)))
+app.post('/api/account/follow', yours(() => account.follow()))
+// Your other computers (linked to this one), and whether each is signed in: to offer signing them
+// in too. One that's offline, or too old to say, is listed as such.
+async function othersOf() {
+  const me = account.status().account
+  const linked = machines.list().filter((m) => m.state === 'linked')
+  return Promise.all(linked.map(async (m) => {
+    const base = { id: m.id, name: m.name }
+    if (!m.online) return { ...base, state: 'offline' }
+    try {
+      const b = await machines.callOn(m.id, 'GET', '/api/account/brief', undefined, 8000)
+      return { ...base, state: !b?.available ? 'none' : b.signedIn ? (b.account === me?.id ? 'signed-in' : 'other') : b.declined ? 'declined' : 'not-signed-in' }
+    } catch (e) { return { ...base, state: /\b404\b|Cannot GET/.test(e.message) ? 'old' : 'offline' } }
+  }))
+}
+app.get('/api/account/others', wrap(async (req) => { notByMachine(req); return { others: account.status().signedIn ? await othersOf() : [] } }))
+// Sign them in too: a grant from the account for each, handed over its link. Each says how it went.
+app.post('/api/account/others', wrap(async (req) => {
+  notByMachine(req)
+  accountOn()
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String) : []
+  const results = []
+  for (const id of ids) {
+    const m = machines.list().find((x) => x.id === id && x.state === 'linked')
+    if (!m) { results.push({ id, ok: false, text: 'It isn\'t linked to this computer any more.' }); continue }
+    try {
+      const { grant } = await account.grant()
+      const r = await machines.callOn(m.id, 'POST', '/api/account/offer', { grant }, 30000)
+      results.push({ id, name: m.name, ...r })
+    } catch (e) { results.push({ id, name: m.name, ok: false, why: e.code === 'offline' ? 'offline' : 'error', text: e.message }) }
+  }
+  return { results, others: await othersOf() }
+}))
+// Asked by another of your devices: whether this one is signed in, and to which account (its id).
+app.get('/api/account/brief', wrap(() => {
+  const s = account.status()
+  return { available: !!s.available, signedIn: !!s.signedIn, account: s.account?.id || null, declined: !!s.declined }
+}))
+// Handed a grant by another of your computers, over the link between them: signed in with it,
+// unless this one is signed in already or said not to be. It says so, here and on your phones.
+app.post('/api/account/offer', wrap(async (req) => {
+  if (!viaMachine(req)) throw Object.assign(new Error('Only another of your computers hands this one a sign-in'), { status: 403 })
+  const by = relay.deviceOf(req.headers['x-bridge-relay'])?.name || 'Another of your computers'
+  const r = await account.redeem({ grant: req.body?.grant, by })
+  if (r.ok) notify.send({ kind: 'machine', title: `${by} signed this computer in to Bold Bridge`, body: `As ${account.status().account?.email}. If you'd rather it weren't, sign it out in Settings › Account.`, url: '/#settings/account', tag: 'account-followed' }).catch(() => {})
+  return r
+}))
+
 // For bug reports: facts about this install, nothing personal (no names, emails, paths, location).
 app.get('/api/diagnostics', wrap(async () => {
   const [agents, subs, ph] = await Promise.all([installed().catch(() => []), subscriptions().catch(() => []), phone.status(cfg.port).catch(() => ({}))])
@@ -2420,14 +2514,19 @@ app.post('/api/updates/early', wrap(async (req) => {
   const r = earlyAccess.readCode(code)
   if (!r.ok) throw Object.assign(new Error(earlyAccess.whyNot(r)), { code: `early-${r.why}` })
   if (!updates.canEarly()) throw new Error(updates.how() === 'docker' ? 'Early Access is for the desktop app. Bridge AI in Docker updates by its image\'s tag, which stays on regular releases.' : 'Early Access is for the desktop app. Bridge AI from a clone already runs the newest code there is (git pull).')
+  settings.patch({ earlyAccess: null }) // (a code of your own, not the account's: nothing of that kept)
   afterChange(settings.patch({ earlyAccess: { code } }))
   const u = await updates.status({ force: true, disabled: cfg.updates?.check === false })
   // Taken back in a release's notes, which only the list of releases says.
   if (u.early.problem === 'revoked') { afterChange(settings.patch({ earlyAccess: null })); throw Object.assign(new Error(earlyAccess.whyNot({ why: 'revoked', for: r.for })), { code: 'early-revoked' }) }
   return u
 }))
+// Left, with a code from your Bold Bridge account: kept as left, so the account doesn't put it back
+// (Settings › Account has Join again).
 app.delete('/api/updates/early', wrap(async () => {
+  const fromAccount = cfg.earlyAccess?.from === 'account'
   afterChange(settings.patch({ earlyAccess: null }))
+  if (fromAccount) afterChange(settings.patch({ earlyAccess: { from: 'account', left: true } }))
   return updates.status({ force: true, disabled: cfg.updates?.check === false })
 }))
 // auto: by itself while you're away, asked by the desktop app on this computer only.
@@ -2447,7 +2546,7 @@ function rolloutBucket() {
   try { afterChange(settings.patch({ updates: { bucket: n } })) } catch { cfg.updates = { ...cfg.updates, bucket: n } }
   return n
 }
-updates.useSettings(() => ({ on: cfg.updates?.auto !== false, checks: cfg.updates?.check !== false, code: cfg.earlyAccess?.code || null, bucket: rolloutBucket() }))
+updates.useSettings(() => ({ on: cfg.updates?.auto !== false, checks: cfg.updates?.check !== false, code: cfg.earlyAccess?.code || null, from: cfg.earlyAccess?.from || null, left: !!cfg.earlyAccess?.left, bucket: rolloutBucket() }))
 // What an update would cut short: this computer's agents working or waiting on you (a cloud agent
 // runs elsewhere, and other devices' agents on them), a meeting recording, being transcribed or its
 // notes being written, and a dictation being heard (its live words, or its recording being turned
@@ -2539,7 +2638,7 @@ app.get('/api/version', async (req, res) => res.json({ version: VERSION, build: 
 app.get('/api/config', (req, res) => res.json({
   version: VERSION,
   name: cfg.name || '', location: cfg.location?.label || null, hasMortgage: !!cfg.mortgage,
-  runtime: { name: rt.name, ...rt.caps, attach: !!rt.attach, ...(rt.name === 'herdr' ? { session: herdrSession() } : { keep: cfg.keepAgents !== false }), ...(fellBack() ? { fellBack: fellBack() } : {}) }, platform: process.platform, mail: IS_MAC, calendar: IS_MAC,
+  runtime: { name: rt.name, ...rt.caps, attach: !!rt.attach, ...(rt.name === 'herdr' ? { session: herdrSession() } : { keep: cfg.keepAgents !== false }), ...(fellBack() ? { fellBack: fellBack() } : {}) }, platform: process.platform, mail: IS_MAC, calendar: IS_MAC, accounts: account.available(),
   defaultAgent: cfg.defaultAgent || 'claude', chiefKind: cfg.chief?.kind || 'claude', setupDone: !!cfg.setupDone, simple: !!cfg.simple,
   // Settings › Voice › Dictation; Tidy what I say only while its trial is on.
   dictation: trialOn('dictation-cleanup') || !cfg.dictation?.tidy ? cfg.dictation || {} : { ...cfg.dictation, tidy: false },
@@ -3062,6 +3161,7 @@ server.listen(cfg.port, cfg.host, () => {
   subscriptions().catch(() => {})
   quota().catch(() => {})
   relay.start(`http://127.0.0.1:${cfg.port}`)
+  account.start()
   phone.status(cfg.port).then(tailnetSaid).catch(() => {})
   machines.start()
   transfers.resume() // copies that were going carry on

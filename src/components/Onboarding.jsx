@@ -4,15 +4,15 @@ import AgentMark from './settings/agentMark.jsx'
 import { api, settingsChanged, refetch, viaRelay } from '../api.js'
 import SignInButton, { InstallAgentButton, canSignIn } from './SignIn.jsx'
 import { SetupList, useSetupPlan, alreadyLine } from './SetupAll.jsx'
-import { usePhoneOffer, PhonePick, PhoneDone } from './OnboardingPhone.jsx'
+import { usePhoneOffer, PhonePick } from './OnboardingPhone.jsx'
 import { runProgress } from '../setupPlan.js'
 import { t, tx } from '../i18n/index.js'
 
 // First run, in three short steps: how much Bridge AI sets up by itself (just Node.js for the agents,
 // which asks for no password and nothing to allow; everything it uses, in the background while you
-// carry on, with what needs you said where you are; or later, from Settings › General), your phone
-// (through Bridge AI's relay, once there is one: on unless unticked, with the code to pair it shown
-// right there, or why it couldn't) and whether it stays awake for your phone, your AI
+// carry on, with what needs you said where you are; or later, from Settings › General), where to set
+// up your phone (Settings › Devices, once Bridge AI's relay exists: setup asks for nothing) and
+// whether it stays awake for your phone, your AI
 // (any plan you sign in with, what's on this computer signed in or not, with Install and Sign in
 // right there; or an API key, or a model running on this computer: any one is enough), then your
 // projects (the folders your agents already worked in, the likely ones ticked). Nothing has to be
@@ -102,8 +102,7 @@ export default function Onboarding({ onDone }) {
   const [level, setLevel] = useState('basic')
   const [awake, setAwake] = useState(null) // { can, on }: keep this computer awake for your phone (server/relay.js)
   const [started, setStarted] = useState(null) // the level set going
-  const phone = usePhoneOffer() // Bridge AI's relay for your phone, when it's offered
-  const [phoneOn, setPhoneOn] = useState(false) // ...set going (PhoneDone: the code to pair, or why not)
+  const phone = usePhoneOffer() // where to set up your phone, when Bridge AI's relay is offered
   const setup = useSetupPlan()
   const load = () => api('/setup').then(setD).catch((e) => setErr(e.message))
   const recheck = () => api('/subscriptions?refresh=1').then((list) => setD((x) => x && ({
@@ -168,11 +167,7 @@ export default function Onboarding({ onDone }) {
   const startSetup = async () => {
     // Only when it was changed: untouched, it follows the default (on once a phone can reach this computer).
     if (awake?.can && !awake.on) api('/relay/awake', { method: 'POST', body: { on: false } }).catch(() => {})
-    // Your phone: its relay set up here, and its code shown in place before going on (the next
-    // Continue). Whatever comes of it, setup carries on.
-    const withPhone = phone.offer && phone.use && !phoneOn
-    if (withPhone) setPhoneOn(true)
-    if (started || nothing || allHere) { setStarted((x) => x || 'later'); if (!withPhone) setStep(1); return }
+    if (started || nothing || allHere) { setStarted((x) => x || 'later'); setStep(1); return }
     setErr(null)
     try { await setup.run(level); setStarted(level) } catch (e) { setErr(e.message) }
   }
@@ -213,10 +208,8 @@ export default function Onboarding({ onDone }) {
                 ))}
               </ul>
               </>
-              : started === 'later' && phoneOn ? null
               : <SetupList plan={setup.plan} reload={setup.load} only={started === 'basic' ? 'basic' : null} onRetry={() => setup.run(started).catch((e) => setErr(e.message))} />}
-            {phone.offer && !started && <PhonePick phone={phone} />}
-            {phoneOn && <PhoneDone />}
+            {phone.offer && !started && <PhonePick />}
             {awake?.can && !started && (
               <label className="wiz-awake">
                 <input type="checkbox" checked={awake.on} onChange={(e) => setAwake({ ...awake, on: e.target.checked })} />

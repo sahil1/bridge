@@ -110,8 +110,9 @@ function Updates() {
   )
 }
 
-// Early Access: pre-releases for testers, joined with a code the project made for them. Joined, it
-// says who it's for and when it ends, with Leave Early Access; a code that stopped working says why
+// Early Access: pre-releases for testers, joined with a code the project made for them, or by itself
+// with a tester's Bold Bridge account (Settings › Account). Joined, it says who it's for and when it
+// ends (or that it's the account's, renewed by itself), with Leave Early Access; a code that stopped working says why
 // (ended, taken back), and this computer is on regular releases again, never put back to an older
 // version. A code that's wrong when pasted says why too (server/earlyaccess.js).
 const day = (iso) => new Date(iso).toLocaleDateString(locale(), { day: 'numeric', month: 'long', year: 'numeric' })
@@ -165,12 +166,12 @@ function EarlyAccess({ u, code: fromLink, onDone, onChange }) {
       <h4>{t('Early Access')}</h4>
       {e.on ? (
         <>
-          <div className="st-row"><span className="st-chip good"><Icon name="check" size={11} /> {t('On for {name}', { name: e.for })}</span></div>
-          <p className="muted small">{t("This computer gets pre-releases of Bridge AI as soon as they're out, before everyone else, to try new things and say what's wrong. Its usage stats and crash reports say they're from {name}'s Early Access.", { name: e.for })}</p>
-          <p className="muted small ab-early-code">{e.until ? t('Code made on {made}, good until {until}.', { made: day(e.made), until: day(e.until) }) : t('Code made on {made}, with no end date.', { made: day(e.made) })}</p>
+          <div className="st-row"><span className="st-chip good"><Icon name="check" size={11} /> {e.fromAccount ? t('On with your Bold Bridge account') : t('On for {name}', { name: e.for })}</span></div>
+          <p className="muted small">{e.fromAccount ? t("This computer gets pre-releases of Bridge AI as soon as they're out, before everyone else, to try new things and say what's wrong. Its usage stats and crash reports say they're from your account's Early Access (by its id, never your email).") : t("This computer gets pre-releases of Bridge AI as soon as they're out, before everyone else, to try new things and say what's wrong. Its usage stats and crash reports say they're from {name}'s Early Access.", { name: e.for })}</p>
+          <p className="muted small ab-early-code">{e.fromAccount ? t('Your account renews it by itself while it has Early Access.') : e.until ? t('Code made on {made}, good until {until}.', { made: day(e.made), until: day(e.until) }) : t('Code made on {made}, with no end date.', { made: day(e.made) })}</p>
           {state?.error && <p className="st-note bad ab-early-error"><Icon name="alert" size={13} /> {state.error}</p>}
           <div className="st-row"><button type="button" className="btn small" disabled={state === 'leaving'} onClick={leave}><Icon name="x" size={13} /> {t('Leave Early Access')}</button></div>
-          <p className="muted small">{t('Leaving keeps the version you have: Bridge AI stays on it until a regular release is newer.')}</p>
+          <p className="muted small">{t('Leaving keeps the version you have: Bridge AI stays on it until a regular release is newer.')}{e.fromAccount && ` ${t('To join again, open Settings › Account.')}`}</p>
         </>
       ) : e.problem ? (
         <>

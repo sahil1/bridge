@@ -18,7 +18,7 @@ import { machine, atLeast } from './machine.js'
 import { serverWhy, releaseWhy, RETRY_HOURS, INSTALL_MINUTES } from '../shared/autoupdate.js'
 import { newer, compare, isPre, RELEASE_VERSION } from '../shared/version.js'
 import { rolloutOf, inRollout, revokedIn, shown } from '../shared/rollout.js'
-import { readCode, publicKey } from './earlyaccess.js'
+import { readCode, anyKey } from './earlyaccess.js'
 
 const REPO = 'sahil1/bridge'
 // BRIDGE_RELEASES_API (tests): where the latest release is asked for. Early Access asks for the
@@ -81,7 +81,7 @@ async function check(force = false) {
 // Early Access: on with a code that checks out, where this copy installs its updates itself (the
 // desktop app) or shows the one command that does (Linux's). From a clone it's git pull, and the
 // Docker image is pulled by its tag: neither takes a pre-release, so neither is offered it.
-export const canEarly = () => !!publicKey() && ['app', 'app-linux'].includes(how())
+export const canEarly = () => anyKey() && ['app', 'app-linux'].includes(how())
 function earlyCode() {
   const { code } = settings()
   if (!code || !canEarly()) return null
@@ -91,12 +91,14 @@ function earlyCode() {
 // For Settings › About & Updates: whether Early Access can be joined here (offered) and, with a
 // code, who it's for and when it ends, or why it doesn't work (problem: expired, revoked, forged,
 // malformed; none, a build that takes no codes; unsupported, a copy that can't take pre-releases).
+// A code from your Bold Bridge account (account.js) says so (fromAccount): it's renewed by itself, and
+// one left on this computer is kept as left.
 function earlyView(s) {
-  const { code } = settings()
-  if (!code) return { offered: canEarly(), on: false }
+  const { code, from, left } = settings()
+  if (!code) return { offered: canEarly(), on: false, ...(left ? { left: true } : {}) }
   const r = readCode(code, { revoked: s?.revoked || [] })
-  const info = r.id ? { id: r.id, for: r.for, made: r.made, until: r.until } : {}
-  if (!canEarly()) return { offered: false, on: false, ...info, problem: publicKey() ? 'unsupported' : 'none' }
+  const info = { ...(r.id ? { id: r.id, for: r.for, made: r.made, until: r.until } : {}), ...(from === 'account' ? { fromAccount: true } : {}) }
+  if (!canEarly()) return { offered: false, on: false, ...info, problem: anyKey() ? 'unsupported' : 'none' }
   return { offered: true, on: r.ok, ...info, ...(r.ok ? {} : { problem: r.why }) }
 }
 // The channel this computer is on now, and for Early Access who the code is for: what the usage

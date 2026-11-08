@@ -17,6 +17,12 @@ export const REVOKED = []
 
 // BRIDGE_EARLY_ACCESS_KEY (tests): a public key of their own instead of the one built in.
 export const publicKey = () => process.env.BRIDGE_EARLY_ACCESS_KEY ?? PUBLIC_KEY
+// A tester's Bold Bridge account hands this computer a code of its own (server/account.js), signed by
+// the accounts service's key, which the server gives here (useAccountsKey): codes signed with
+// either key are good. With neither, Early Access isn't offered.
+let accountsKey = () => ''
+export const useAccountsKey = (fn) => { accountsKey = fn }
+export const anyKey = () => !!publicKey() || !!accountsKey()
 
 // Who a code is for: letters and numbers, with spaces, dots, apostrophes and dashes between, up to
 // 32. It goes with the usage stats (PRIVACY.md), so it's a name the owner picks, never an email.
@@ -53,13 +59,14 @@ export const publicOf = (privateKey) => crypto.createPublicKey(privateKey).expor
 //   expired    past its end
 //   revoked    taken back (REVOKED, or the ids in revoked)
 export function readCode(code, { now = Date.now(), revoked = [], key = publicKey() } = {}) {
-  if (!key) return { ok: false, why: 'none' }
+  const keys = [key, accountsKey()].filter(Boolean)
+  if (!keys.length) return { ok: false, why: 'none' }
   const m = CODE.exec(String(code || '').replace(/\s+/g, ''))
   let d = null
   try { d = m && JSON.parse(Buffer.from(m[1], 'base64url').toString('utf8')) } catch { d = null }
   if (!d || typeof d.id !== 'string' || !labelOk(d.for) || !Number.isInteger(d.made) || (d.until != null && !Number.isInteger(d.until))) return { ok: false, why: 'malformed' }
   let signed = false
-  try { signed = crypto.verify(null, Buffer.from(m[1]), keyOf(key), Buffer.from(m[2], 'base64url')) } catch { signed = false }
+  for (const k of keys) { try { signed ||= crypto.verify(null, Buffer.from(m[1]), keyOf(k), Buffer.from(m[2], 'base64url')) } catch { /* not this one */ } }
   if (!signed) return { ok: false, why: 'forged' }
   const info = { id: d.id, for: d.for, made: new Date(d.made * 1000).toISOString(), until: d.until != null ? new Date(d.until * 1000).toISOString() : null }
   if ([...REVOKED, ...revoked].includes(d.id)) return { ok: false, why: 'revoked', ...info }

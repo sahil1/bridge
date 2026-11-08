@@ -1,0 +1,23 @@
+/* Settings › Account (Account.jsx): your Bold Bridge account. */
+.acct .acct-form { gap: 8px; }
+.acct .acct-email { width: min(320px, 100%); }
+.acct .acct-code { width: 9.5em; letter-spacing: .18em; }
+.acct .acct-sent { margin: 0; }
+.acct .acct-mail { overflow-wrap: anywhere; }
+.acct .acct-problem { margin: 0; }
+.acct .acct-followed { justify-content: space-between; }
+.acct .acct-followed > span:first-of-type { flex: 1; min-width: 200px; }
+.acct-use { display: grid; gap: 10px; max-width: 460px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--pane-2); }
+.acct-use > p { margin: 0; }
+.acct .ph-devices li .btn { margin-left: auto; }
+.acct .acct-others .st-chip { margin-left: auto; }
+.acct .acct-delete .st-input { width: min(280px, 100%); }
+.acct .btn.danger { color: var(--critical); border-color: color-mix(in srgb, var(--critical) 40%, var(--line-2)); }
+.acct .btn.danger:not(:disabled):hover { background: color-mix(in srgb, var(--critical) 10%, transparent); }
+.acct .st-row.between { justify-content: space-between; }
+@media (max-width: 760px) {
+  /* A phone: a whole 40 px target each, and fields iOS doesn't zoom into. */
+  .acct .st-input { font-size: 16px; height: 40px; }
+  .acct .btn, .acct .ghost-btn, .acct .link-btn { min-height: 40px; min-width: 40px; }
+  .acct .acct-form > .btn, .acct .acct-delete .btn { flex: 1 1 auto; justify-content: center; }
+}
