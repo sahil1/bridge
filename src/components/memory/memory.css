@@ -133,4 +133,6 @@
 .app.narrow .mm-view .seg.small-seg button { flex: 1 1 0; justify-content: center; }
 .app.narrow .mm-view :is(.mm-pen, .mm-switch) { min-width: 44px; justify-content: center; }
 .app.narrow .mm-view :is(.mm-item, .mm-edit) { padding-left: 6px; }
+/* A meeting's whole name, on as many lines as it takes, rather than cut off. */
+.app.narrow .mm-view :is(.mt-fold-name, .mt-mem-meeting > span:first-of-type) { white-space: normal; overflow-wrap: anywhere; }
 .app.narrow .mm-view .mm-tidy-row { align-items: center; }

@@ -989,8 +989,8 @@ button.mt-from-chip:hover { color: var(--ink); border-color: color-mix(in srgb, 
 .mt-fold-body { padding: 0 0 8px; }
 /* Memory's names (memory/Memory.jsx), grouped: a name on a line with how it's heard and its note,
    its meetings under it. */
-.mt-mem-list { display: grid; gap: 0; }
-.mt-mem-group { display: grid; gap: 1px; }
+.mt-mem-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; } /* never wider than its column, whatever a row holds */
+.mt-mem-group { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; }
 .mt-mem-what { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; font-size: 13px; }
 .mt-mem-what b { font-weight: 600; overflow-wrap: anywhere; }
 .mt-mem-heard { color: var(--ink-3); }

@@ -102,9 +102,10 @@ Memory keeps the names and terms from your meetings and dictations on your compu
 `~/.bridge-ai/meetings/memory.json`: how each is spelled and misheard, a note on who or what it is,
 and the meetings and dictations it came up in. About You is a few lines made from it on your
 computer (your name, your organization, what you work on, the people and organizations that come up
-most), or written by you. Until you switch it off on the Memory page, it goes with what the model
-that writes your meeting notes is told, and its names with what the model that tidies your
-dictation is told: a model on your computer keeps them there; any other gets them. It's also put in
+most), or written by you. Until you switch it off on the Memory page, it goes with what the models
+you use for meetings are told (writing notes, Who spoke, cleaning up the transcript, AI Assist and
+your questions about meetings), and its names with what the model that tidies your dictation is
+told: a model on your computer keeps them there; any other gets them. It's also put in
 the Chief of Staff's folder (`about-you.md`) for it to read, so its agent's provider gets it as it
 gets the rest of what the Chief of Staff reads. Switched off, no model is given it and that file is
 deleted.

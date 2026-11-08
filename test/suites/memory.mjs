@@ -25,7 +25,7 @@
 // one kept and the rest taken out, a pair merged under the name picked and one kept apart, a kind
 // changed, a dictation opened from a name, About You edited and switched off and on, the tab and its
 // collection kept across a reload; People with the people you meet (Meeting Insights on), one kept
-// in memory, and saying what's missing with it off. Every way in opens the page, never a dialog:
+// in memory, and nothing of it with it off. Every way in opens the page, never a dialog:
 // Meetings' Memory, a meeting's menu, ⌘K and Settings › Meetings. A window showing another computer
 // (Desk, its own server, reached at /m/desk/ as Bridge AI does): Desk's memory, said to be Desk's;
 // each computer keeping its own Memory tab and collection as the window goes from one to the other;
@@ -33,7 +33,7 @@
 // every target whole, and still Memory after a reload.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, startModel, checks, until, browser, page, shot, phoneFaults, withoutCutOff, changeAnswer, OUT } from '../lib/harness.mjs'
+import { startKit, startModel, checks, until, browser, page, shot, phoneFaults, withoutCutOff, changeAnswer, noServiceWorker, OUT, ROOT } from '../lib/harness.mjs'
 
 const { ok, done } = checks('memory')
 const DAY = 864e5
@@ -270,9 +270,14 @@ try {
   ok(!/About me, from my memory/.test(s0) && !/Names this person often says/.test(await tidied('um send it to priya shah')), 'and neither model is given it', s0.slice(0, 300))
   await home.locator('.mm-you .mm-switch input').check()
   await until(async () => /While it's on/.test(await home.locator('.mm-you').innerText()), 8000)
-  // People: with Meeting Insights off it says what's missing; on, the people you meet, one kept.
+  // Where it goes, as it goes: with what every model for meetings is told (memory.about() is in each),
+  // said the same on the page and in PRIVACY.md.
+  const says = await home.locator('.mm-you').innerText()
+  ok(/the models you use for meetings \(notes, Who spoke, cleanup, AI Assist and your questions\) and the one that tidies your dictation/.test(says) && /goes with what the models\s+you use for meetings are told/.test(fs.readFileSync(path.join(ROOT, 'PRIVACY.md'), 'utf8')), 'About You says where it goes, every model for meetings and the one tidying dictation, as PRIVACY.md does', says)
+  // People: with Meeting Insights off (a beta feature) nothing of it shows; on, the people you meet, one kept.
   await home.locator('.mm-colls button[data-coll="person"]').click()
-  ok(/Only the people memory has are here/.test(await home.locator('.mm-note').innerText().catch(() => '')), 'People, with Meeting Insights off: what it would add')
+  await home.locator('.mm-colls button[data-coll="person"][aria-selected="true"]').waitFor({ timeout: 5000 }).catch(() => {})
+  ok(!(await home.locator('.mm-met').count()) && !/Meeting Insights/i.test(await home.innerText()), 'People, with Meeting Insights off: only the people memory has, and nothing about the beta feature', await home.innerText().catch(() => ''))
   await api('/settings', { trials: { 'meeting-insights': true } }, 'PATCH')
   await p.reload()
   ok(!!(await until(async () => await front(p) === 'view:memory' && await picked(p) === 'person', 10000)), 'a reload keeps its tab in front, at the collection it was at', { front: await front(p), picked: await picked(p) })
@@ -364,7 +369,10 @@ try {
   await shot(dark.p, `${tag}memory-dark`)
   ok(!real(dark.errors).length, 'dark: no page errors', dark.errors)
   for (const [w, mode] of [[375, 'light'], [430, 'dark']]) {
-    const ph = await page(b, kit.url, { mode, phone: true })
+    // Meetings named at length, as a customer call's invite often is: its group's name is cut to fit,
+    // never making the page wider than the phone.
+    const long = (ctx) => changeAnswer(ctx, /\/api\/memory(\?|$)/, (real) => ({ ...real, meetings: Object.fromEntries(Object.entries(real.meetings || {}).map(([k, m]) => [k, { ...m, title: `${m.title}: renewal, pricing and the expansion into the EMEA region` }])) }))
+    const ph = await page(b, kit.url, { mode, phone: true, before: async (ctx) => { await noServiceWorker(ctx); await long(ctx) } })
     pages.push(ph)
     await ph.p.setViewportSize({ width: w, height: 844 })
     await ph.p.locator('.tabbar button', { hasText: 'More' }).click()
@@ -374,7 +382,7 @@ try {
     ok(t0.y < 380 && t0.y + t0.height <= 844 && y0.y > t0.y, `${w} px: the collections and the search on the first screen, About You under them`, { tools: t0, you: y0 })
     await shot(ph.p, `${tag}memory-phone-${w}-${mode}`)
     let faults = await phoneFaults(ph.p, '.mm-view')
-    ok(!Object.keys(faults).length, `${w} px: it fits, every target whole`, faults)
+    ok(!Object.keys(faults).length, `${w} px: it fits, every target whole, meetings with long names too`, faults)
     await ph.p.locator('.mm-item').first().scrollIntoViewIfNeeded()
     await ph.p.locator('.mm-item[data-term="Priya Shah"] .mm-from').click()
     faults = await phoneFaults(ph.p, '.mm-view')
