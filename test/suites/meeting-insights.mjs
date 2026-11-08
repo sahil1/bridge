@@ -18,8 +18,8 @@
 // signals each with its basis, a kind picked; People with its map of who meets whom, its groups and
 // a picker that finds someone as you type; a person's page with the next meeting once, linking to a
 // meeting, a merge through the picker and a split. Then half a year of meetings with 130 made-up
-// people and 160 names in meeting memory: the same pages and meeting memory grouped, folded and
-// searched, in a light and a dark theme, and on 375, 390 and 430 px phones, each fitting the screen.
+// people and 160 names in memory: the same pages, and Memory's page grouped, folded and searched,
+// in a light and a dark theme, and on 375, 390 and 430 px phones, each fitting the screen.
 // Last, a computer of its own with Meeting Insights never set: on by itself at the fifth meeting,
 // said once on Meetings with Turn off, shown in Beta Features, and not on again once turned off.
 import fs from 'node:fs'
@@ -468,28 +468,25 @@ try {
   ok(pf.length >= 3 && (await p.locator('.mi-person .mt-fold.open').count()) === 1 && (await p.locator('.mi-person .mt-search').count()) === 1 && (await p.locator('.mi-person .mi-mrow').count()) === 12 && /^Show all \d+/.test(await p.locator('.mi-person .mt-fold.open .mi-all').innerText()),
     'a person with many meetings: by series, only the first open with a dozen of its meetings and Show all, and a search', pf)
   await whole(p, `${tag}scale-person`)
-  // Meeting memory: 160 names, in folded groups.
+  // Memory: 160 names on its page (from Meetings' Memory), in folded groups.
   await openMeetings()
   await p.locator('.mt-view .pane-head button', { hasText: 'Memory' }).click()
-  const mem = p.locator('.mt-dialog')
+  const mem = p.locator('.mm-page')
   await mem.locator('.mt-fold').first().waitFor({ timeout: 8000 })
   const memHeads = (await mem.locator('.mt-fold-head').allInnerTexts()).map((x) => x.replace(/\s+/g, ' ').trim())
-  ok(memHeads.length >= 4 && /^Weekly payments sync \d+ in \d+ meetings$|^\S.* \d+ in \d+ meetings?$/.test(memHeads[0]) && (await mem.locator('.mt-fold.open').count()) === 1 && (await mem.locator('.mt-mem-item').count()) < 160,
-    'meeting memory with 160 names: in groups by the series they come up in, each with how many and in how many meetings, only the first open', memHeads)
+  ok(memHeads.length >= 4 && /^Weekly payments sync \d+ in \d+ meetings$|^\S.* \d+ in \d+ meetings?$/.test(memHeads[0]) && (await mem.locator('.mt-fold.open').count()) === 1 && (await mem.locator('.mm-item').count()) < 160 && !(await p.locator('.mt-dialog').count()),
+    'Memory with 160 names, a page rather than a dialog: in groups by the series they come up in, each with how many and in how many meetings, only the first open', memHeads)
   await shot(p, `${tag}scale-memory-groups`)
-  await mem.locator('.mt-mem-only button', { hasText: 'With a note' }).click()
-  ok(!!(await until(async () => (await mem.locator('.mt-mem-note').count()) === 14 && (await mem.locator('.mt-mem-item').count()) === 14, 5000)), 'filtered: the 14 with a note, every group open with that few')
-  await mem.locator('.mt-mem-only button', { hasText: 'All' }).first().click()
-  await mem.locator('.mt-mem-tools .seg button', { hasText: 'By month' }).click()
+  await mem.locator('.mm-find .seg button', { hasText: 'By month' }).click()
   ok(!!(await until(async () => /^\w+ \d{4} \d+/.test((await mem.locator('.mt-fold-head').first().innerText()).replace(/\s+/g, ' ')), 5000)), 'by month')
-  await mem.locator('.mt-mem-tools .seg button', { hasText: 'By meeting' }).click()
-  await mem.locator('.mt-search').fill('ledger')
-  ok(!!(await until(async () => (await mem.locator('.mt-mem-item').count()) === 1, 5000)), 'a search finds one among them')
-  await mem.locator('.mt-mem-item .mt-mem-in').click()
-  ok((await mem.locator('.mt-mem-meeting:not(.mt-mem-latest)').count()) >= 1, 'and lists the meetings it came up in')
+  await mem.locator('.mm-find .seg button', { hasText: 'By meeting' }).click()
+  await mem.locator('.mm-find .mt-search').fill('ledger')
+  ok(!!(await until(async () => (await mem.locator('.mm-item').count()) === 1, 5000)), 'a search finds one among them')
+  await mem.locator('.mm-item .mm-from').click()
+  ok((await mem.locator('.mm-item .mt-mem-meeting').count()) >= 1, 'and lists the meetings it came up in')
   await shot(p, `${tag}scale-memory`)
-  await mem.locator('.mt-mem-item .mt-mem-meeting').first().click()
-  ok(!!(await until(async () => !(await p.locator('.mt-dialog').count()) && (await p.locator('.mt-title').count()) > 0, 8000)), 'one opens its meeting')
+  await mem.locator('.mm-item .mt-mem-meeting').first().click()
+  ok(!!(await until(async () => (await p.locator('.mt-title').count()) > 0, 8000)), 'one opens its meeting')
   // The same in a dark theme.
   const dark = await page(b, kit.url, { mode: 'dark', store: { 'cc-rail-meetings': true, 'cc-mi-range': '180' } })
   pages.push(dark)
@@ -529,9 +526,9 @@ try {
     if (width === 390) {
       await ph.p.locator('.m-meetings .seg button[data-view="list"]').click()
       await ph.p.locator('.m-meetings button', { hasText: 'Memory' }).first().click()
-      await ph.p.locator('.mt-dialog .mt-fold').first().waitFor({ timeout: 8000 })
-      f = await phoneFaults(ph.p, '.mt-dialog')
-      ok(!Object.keys(f).length, `${width} ${mode}: meeting memory fits`, f)
+      await ph.p.locator('.mm-page .mt-fold').first().waitFor({ timeout: 8000 })
+      f = await phoneFaults(ph.p, '.mm-view')
+      ok(!Object.keys(f).length && !(await ph.p.locator('.mt-dialog').count()), `${width} ${mode}: Meetings' Memory opens its page, which fits`, f)
       await shot(ph.p, `${tag}memory-phone-${width}-${mode}`)
     }
     ok(!real(ph.errors).length, `${width}: no page errors`, ph.errors)
