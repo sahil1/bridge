@@ -270,6 +270,11 @@ try {
   await shot(p, `${tag}studio-writing-focus`)
   await p.keyboard.press('Escape')
   ok(!!(await until(async () => !(await inFocus()), 3000, 100)), 'Esc: out of Focus')
+  // And ⌘/ lists its key with the others.
+  await p.keyboard.press(`${MOD}+Slash`)
+  const keysText = await p.locator('.sd-modal[aria-label="Keyboard shortcuts"]').innerText({ timeout: 5000 }).catch(() => '')
+  ok(/Focus: the page alone, Esc to leave/.test(keysText), `${MOD === 'Meta' ? '⌘/' : 'Ctrl+/'}: Focus is among the keyboard shortcuts`, keysText.slice(-400))
+  await p.keyboard.press('Escape')
 
   // Page setup: turned, on A4, a smaller left margin; saved into the file's section.
   const before = await partsOf(file('report.docx'))

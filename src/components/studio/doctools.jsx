@@ -302,7 +302,8 @@ const SHORTCUTS = (word) => [
     [tx('Undo'), ['mod', 'z']], [tx('Redo'), ['mod', 'shift', 'z'], ['mod', 'y']], [tx('Select all'), ['mod', 'a']],
     [tx('Paste without formatting'), ['mod', 'shift', 'v']],
     [tx('Find'), ['mod', 'f']], [tx('Next or previous match'), ['mod', 'g'], ['mod', 'shift', 'g']], [tx('Find and replace'), ['mod', 'shift', 'h']],
-    [tx('Word count'), ['mod', 'shift', 'c']], [tx('Print, or save as PDF'), ['mod', 'p']], [tx('Save now (it saves itself as you type)'), ['mod', 's']], [tx('Keyboard shortcuts'), ['mod', '/']],
+    [tx('Word count'), ['mod', 'shift', 'c']], [tx('Print, or save as PDF'), ['mod', 'p']], [tx('Save now (it saves itself as you type)'), ['mod', 's']],
+    [tx('Focus: the page alone, Esc to leave'), ['mod', 'alt', 'f']], [tx('Keyboard shortcuts'), ['mod', '/']],
   ]],
 ]
 export function Shortcuts({ word, onClose }) {
