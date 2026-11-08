@@ -12,6 +12,7 @@ import { OFFICE } from './office.js'
 import { loginPath } from './agents.js'
 import { gitReady, NO_GIT } from './gitready.js'
 import { DATA } from './paths.js'
+import { openToRead } from './openread.js'
 
 const HIDDEN = new Set(['.git', 'node_modules', '.DS_Store', '__pycache__', '.venv', 'venv', '.next', 'dist', '.cache', '.turbo'])
 const MAX_TEXT = 1024 * 1024
@@ -76,7 +77,7 @@ export async function readFile(root, rel) {
   if (VIDEO[ext]) return { ...base, kind: 'video', type: VIDEO[ext] }
   if (AUDIO[ext]) return { ...base, kind: 'audio', type: AUDIO[ext] }
   if (OFFICE[ext]) return { ...base, kind: 'office', office: OFFICE[ext] }
-  const fh = await fsp.open(real, 'r')
+  const fh = await openToRead(real)
   const len = Math.min(st.size, MAX_TEXT)
   const buf = Buffer.alloc(len)
   await fh.read(buf, 0, len, 0).finally(() => fh.close())
@@ -109,6 +110,38 @@ export async function rawFile(root, rel) {
   const { real } = await safePath(root, rel)
   const ext = path.extname(real).toLowerCase()
   return { file: real, name: path.basename(real), type: typeOf(real) || 'application/octet-stream', media: !!(VIDEO[ext] || AUDIO[ext]) }
+}
+
+// Sends a file of yours as it is, read as openToRead reads (Express's sendFile can't be told to):
+// a part of it when asked (Range: 206, or 416 saying how long it is past its end), 304 when the
+// browser has it already, and as fast as the other end takes it.
+export async function serveFile(req, res, file) {
+  const fh = await openToRead(file)
+  let handed = false
+  try {
+    const st = await fh.stat()
+    if (st.isDirectory()) throw Object.assign(new Error('Is a folder'), { code: 'EISDIR' })
+    const size = st.size
+    res.set({ 'Accept-Ranges': 'bytes', 'Last-Modified': st.mtime.toUTCString(), ETag: `W/"${size.toString(16)}-${Math.floor(st.mtimeMs).toString(16)}"` })
+    if (!res.get('Cache-Control')) res.set('Cache-Control', 'public, max-age=0')
+    if (req.fresh) return void res.status(304).end()
+    let start = 0
+    let end = size - 1
+    const ifRange = req.headers['if-range']
+    const ranges = req.headers.range && (!ifRange || ifRange === res.get('ETag') || ifRange === res.get('Last-Modified')) ? req.range(size, { combine: true }) : null
+    if (ranges === -1) return void res.status(416).set('Content-Range', `bytes */${size}`).json({ error: 'That part of the file isn\'t there' })
+    const part = Array.isArray(ranges) && ranges.type === 'bytes' && ranges.length === 1
+    if (part) ({ start, end } = ranges[0])
+    const len = size ? end - start + 1 : 0
+    res.status(part ? 206 : 200).set('Content-Length', String(len))
+    if (part) res.set('Content-Range', `bytes ${start}-${end}/${size}`)
+    if (req.method === 'HEAD' || !len) return void res.end()
+    const stream = fh.createReadStream({ start, end, highWaterMark: 64 * 1024 })
+    handed = true
+    res.on('close', () => stream.destroy())
+    stream.on('error', () => res.destroy())
+    stream.pipe(res)
+  } finally { if (!handed) await fh.close().catch(() => {}) }
 }
 
 // ---------- Copying to another of your devices (transfers.js) ----------
@@ -144,8 +177,7 @@ export async function copyList(root, rel) {
 
 // A file's SHA-256, worked out off the server's main thread (a worker reads it as it goes), and
 // kept while the file doesn't change: what a copy is checked against where it lands.
-// keepTimes: read it without touching its "last opened" time where the system lets a reader say so
-// (Linux), as Files Assist does. signal: stops reading it.
+// Read as openread.js reads, without counting as opening it. signal: stops reading it.
 const HASHER = `
 const { parentPort, workerData } = require('node:worker_threads')
 const fs = require('node:fs')
@@ -154,18 +186,18 @@ const read = (flags) => fs.createReadStream(workerData.file, { flags, highWaterM
   .on('data', (c) => h.update(c))
   .on('end', () => parentPort.postMessage({ sha: h.digest('hex') }))
   .on('error', (e) => (flags !== 'r' && e.code === 'EPERM' ? read('r') : parentPort.postMessage({ error: e.message, code: e.code })))
-read(workerData.keepTimes && fs.constants.O_NOATIME ? fs.constants.O_RDONLY | fs.constants.O_NOATIME : 'r')
+read(fs.constants.O_NOATIME ? fs.constants.O_RDONLY | fs.constants.O_NOATIME : 'r')
 `
 let hashing = 0
 const hashQueue = []
-export async function hashFile(file, { signal, keepTimes = false } = {}) {
+export async function hashFile(file, { signal } = {}) {
   // Two at a time: each reads a whole file.
   if (hashing >= 2) await new Promise((r) => hashQueue.push(r))
   hashing++
   try {
     signal?.throwIfAborted()
     return await new Promise((resolve, reject) => {
-      const w = new Worker(HASHER, { eval: true, workerData: { file, keepTimes } })
+      const w = new Worker(HASHER, { eval: true, workerData: { file } })
       const stop = () => { w.terminate(); reject(Object.assign(new Error('Stopped'), { code: 'ABORT_ERR' })) }
       signal?.addEventListener('abort', stop, { once: true })
       const off = () => signal?.removeEventListener('abort', stop)

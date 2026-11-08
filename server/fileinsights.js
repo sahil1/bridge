@@ -1,5 +1,5 @@
 // Files Assist (with Files, a beta feature): what takes room in a folder you asked about and the
-// folders in it, and how it could be tidier. It only looks. Nothing here renames, moves, deletes or
+// folders in it, and how it could be tidier. It's read-only. Nothing here renames, moves, deletes or
 // writes anything in your folders: there's no call in this file that could (no write, rename,
 // removal or change of times), and the panel's buttons only open a file or show it in Finder.
 // What's in a file is read for one thing, to tell whether two files of the same size are the same
@@ -11,12 +11,12 @@
 // question. So a look only starts when you ask about a folder, and folders like those that turn up
 // inside it are left out (ask about one itself). Every read has a time limit, so a slow network
 // drive or a question nobody answers is said rather than waited on for ever.
-import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { safePath, hashFile } from './files.js'
+import { openToRead } from './openread.js'
 import { mayLook, noteAsked } from './projects.js'
 import { inPicked } from './places.js'
 
@@ -335,7 +335,7 @@ async function compare(scan) {
       // A big file can take a while; one that takes far longer than its size needs is left.
       const ms = Math.max(READ_MS, (f.size / (10 * MB)) * 1000)
       const one = AbortSignal.any ? AbortSignal.any([signal, AbortSignal.timeout(ms)]) : signal
-      try { f.sha = f.size <= SMALL ? await hashHere(abs, one) : await hashFile(abs, { signal: one, keepTimes: true }) } catch (e) {
+      try { f.sha = f.size <= SMALL ? await hashHere(abs, one) : await hashFile(abs, { signal: one }) } catch (e) {
         if (signal.aborted) return
         unreadable(scan, f.rel, one.aborted ? { code: 'ETIMEDOUT' } : e)
       }
@@ -344,11 +344,10 @@ async function compare(scan) {
     await new Promise((r) => setImmediate(r))
   }
 }
-// Read without touching its "last opened" time where the system lets a reader say so (Linux), so a
-// look doesn't make a forgotten file look recently used.
-const NOATIME = fs.constants.O_NOATIME ? fs.constants.O_RDONLY | fs.constants.O_NOATIME : null
+// Read without counting as opening it (openread.js), so a look doesn't make a forgotten file look
+// recently used.
 async function hashHere(file, signal) {
-  const fh = await (NOATIME ? fsp.open(file, NOATIME).catch(() => fsp.open(file, 'r')) : fsp.open(file, 'r'))
+  const fh = await openToRead(file)
   try {
     const h = crypto.createHash('sha256')
     const buf = Buffer.allocUnsafe(256 * 1024)

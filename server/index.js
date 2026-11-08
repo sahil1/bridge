@@ -605,14 +605,12 @@ app.get('/api/agents/:pane/raw', async (req, res) => {
     // away as another site.
     res.set({ 'Content-Type': type, 'Content-Security-Policy': media ? "default-src 'none'; media-src 'self'" : "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox", 'X-Content-Type-Options': 'nosniff' })
     if (req.query.download === '1') res.attachment(name)
-    res.sendFile(file, { dotfiles: 'allow' }, (err) => { // a file under .github/ or the like (the path is already checked)
-      if (!err || res.headersSent) return
-      // A part past its end: 416, saying how long it is.
-      if (err.status === 416) return res.status(416).set(err.headers || {}).json({ error: 'That part of the file isn\'t there' })
-      res.status(404).json({ error: err.code === 'EISDIR' ? 'Is a folder' : 'Not found' })
-    })
+    // Read without counting as opening it (files.serveFile): a part when asked, 416 past its end.
+    await files.serveFile(req, res, file)
   } catch (err) {
-    res.status(404).json({ error: err.message })
+    if (res.headersSent) return res.destroy()
+    res.removeHeader('Content-Disposition')
+    res.status(404).json({ error: err.code === 'EISDIR' ? 'Is a folder' : err.code === 'ENOENT' ? 'Not found' : err.message })
   }
 })
 
@@ -653,8 +651,9 @@ app.get('/api/agents/:pane/site/*rest', async (req, res) => {
     const rel = [].concat(req.params.rest || []).join('/')
     const { file, type, html } = await files.siteFile(await rootOf(req.params.pane), rel)
     res.set({ 'Content-Type': type, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store', 'Content-Security-Policy': html ? 'sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms allow-modals' : "sandbox; default-src 'none'" })
-    res.sendFile(file, { dotfiles: 'allow' })
+    await files.serveFile(req, res, file)
   } catch (err) {
+    if (res.headersSent) return res.destroy()
     res.status(404).json({ error: err.message })
   }
 })

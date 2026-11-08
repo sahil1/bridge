@@ -19,7 +19,6 @@
 //   the panel in Files: the findings with Open (which opens the file in Files), Ask AI, light, dark,
 //   a phone, and the waiting message.
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { pathToFileURL } from 'node:url'
@@ -111,8 +110,10 @@ function makeMess(dir) {
   }
   settle(dir)
   if (!IS_WIN && !root) for (const n of ['movie.mp4', 'movie 2.mp4']) fs.chmodSync(path.join(dir, 'Cloud', n), 0)
+  // A link out to a folder beside it (not the system's temporary folder, which isn't the test's).
   let link = false
-  try { fs.symlinkSync(os.tmpdir(), path.join(dir, 'Shortcut'), 'dir'); link = true } catch { /* no links here */ }
+  fs.mkdirSync(path.join(path.dirname(dir), 'Elsewhere'), { recursive: true })
+  try { fs.symlinkSync(path.join(path.dirname(dir), 'Elsewhere'), path.join(dir, 'Shortcut'), IS_WIN ? 'junction' : 'dir'); link = true } catch { /* no links here */ }
   let locked = false
   if (!IS_WIN && !root) { put(dir, 'Locked/secret.txt', 'x'); fs.chmodSync(path.join(dir, 'Locked'), 0); locked = true }
   return { hardLink, sparse, link, locked }
@@ -138,7 +139,7 @@ async function openFiles(p, pane) {
   const opens = [...src.matchAll(/\.open\(([^)]*)\)/g)].map((m) => m[1]).filter((a) => !/,\s*(?:'r'|NOATIME)\s*$/.test(a))
   const imports = [...src.matchAll(/^import .* from '\.\/(\w+)\.js'$/gm)].map((m) => m[0])
   ok(!writes.length && !opens.length, 'Files Assist\'s server code has no call that writes, renames, removes or changes a file\'s times, and opens files only to read', { writes, opens })
-  ok(imports.every((l) => /\{ safePath, hashFile \} from '\.\/files\.js'|\{ mayLook, noteAsked \} from '\.\/projects\.js'|\{ inPicked \} from '\.\/places\.js'/.test(l)), 'and uses only reading from the rest of the server (safePath, hashFile)', imports)
+  ok(imports.every((l) => /\{ safePath, hashFile \} from '\.\/files\.js'|\{ openToRead \} from '\.\/openread\.js'|\{ mayLook, noteAsked \} from '\.\/projects\.js'|\{ inPicked \} from '\.\/places\.js'/.test(l)), 'and uses only reading from the rest of the server (safePath, hashFile, openToRead)', imports)
 }
 
 const { b, which } = await browser()
@@ -287,7 +288,7 @@ try {
         const panel = p.locator('.fa-panel')
         await panel.locator('.fa-tiles').waitFor({ timeout: 30000 })
         const text = await panel.innerText()
-        ok(/Looks only; changes nothing/.test(text), `${name}: it says at the top that it looks only and changes nothing`)
+        ok(/^Read-only\b/m.test(text), `${name}: it says at the top that it's read-only`, text.slice(0, 200))
         const heads = await panel.locator('h3').allInnerTexts()
         ok(['Duplicates', 'Large Files', 'Old and Forgotten', 'Organization', 'Ask AI', 'Not Looked At'].every((h) => heads.some((x) => x.trim() === h)) && /3 copies of beach/.test(text) && /trip\.mov/.test(text) && /Installers in Downloads/.test(text) && /12 screenshots in Old Desktop/.test(text) && /36 files straight in Inbox/.test(text) && /3 versions of Report/.test(text),
           `${name}: each finding in its section, with what to do`, text.slice(0, 600))
@@ -380,6 +381,9 @@ try {
 
   // ---------- A folder macOS asks about (scripts/tcc-sim.mjs) ----------
   await part('a protected folder', async () => {
+    // Held as a network drive or macOS's question holds a read; the app's waiting notice is the same
+    // off a Mac (Linux here), so Windows has nothing more to show.
+    if (IS_WIN) { skip('a folder whose first read is held', 'the slow-folder stand-in (scripts/tcc-sim.mjs) takes POSIX paths'); return }
     const HOLD = 4000
     const tk = await startKit('files-assist-tcc', {
       config: { trials: { files: true } },

@@ -1,6 +1,6 @@
 // Files Assist: the panel beside Files for the folder on screen. It looks at the folder and the
 // folders in it (server/fileinsights.js) and says what takes room and how it could be tidier, each
-// with what to do about it. It only looks: its buttons open a file in Files or show it in Finder,
+// with what to do about it. It's read-only: its buttons open a file in Files or show it in Finder,
 // nothing else, and moving, renaming and deleting stay yours to do. Ask AI sends the folder's
 // names, sizes and dates (never what's in a file) to the model picked for it, and says which model
 // that is and where it runs before anything is sent.
@@ -102,7 +102,7 @@ export default function Assist({ root, rel = '', machine = null, onOpen, onClose
         {onClose && <button type="button" className="win-btn" onClick={onClose} title={t('Close Files Assist')} aria-label={t('Close Files Assist')}><Icon name="x" size={13} /></button>}
       </header>
       <div className="fa-body" ref={bodyRef}>
-        <p className="fa-promise"><Icon name="eye" size={13} /> <span><b>{t('Looks only; changes nothing.')}</b> {t('Nothing here moves, renames or deletes a file: what to do with each stays yours to do.')}</span></p>
+        <p className="fa-promise"><Icon name="eye" size={13} /> <span><b>{t('Read-only')}</b> {t('Nothing here moves, renames or deletes a file: what to do with each stays yours to do.')}</span></p>
         {err && <Problem err={err} machine={machine} where={where} onAgain={() => look(true)} />}
         {!scan && !err && <p className="fa-state muted"><Icon name="refresh" size={13} className="spin" /> {t('Starting to look…')}</p>}
         {scan?.state === 'running' && <Progress scan={scan} onStop={stop} />}
