@@ -155,7 +155,11 @@ try {
   phone.on('pageerror', (e) => errors.push(e.message))
   await phone.goto(`${ra.url}/#pair=${code}`, { waitUntil: 'commit' })
   const app = () => phone.frames().find((f) => f !== phone.mainFrame() && f.url().startsWith(ra.url))
-  ok(!!(await until(() => app()?.evaluate(() => fetch('/api/version').then((r) => r.ok)), 30000, 200)), 'the phone is paired and Bridge AI is open in it')
+  // Not open: what the relay's page says instead (still pairing, offline, turned away), and the
+  // phone's part goes no further.
+  const opened = await until(() => app()?.evaluate(() => fetch('/api/version').then((r) => r.ok)), 30000, 200)
+  ok(!!opened, 'the phone is paired and Bridge AI is open in it', opened ? undefined : await phone.locator('body').innerText().catch((e) => e.message))
+  if (!opened) throw new Error('the phone didn\'t open Bridge AI')
   const fromPhone = (u, range) => app().evaluate(async ({ u, range }) => {
     const r = await fetch(u, { headers: range ? { range } : {} })
     const buf = new Uint8Array(await r.arrayBuffer())
