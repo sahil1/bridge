@@ -114,7 +114,7 @@ function nest(doc, root) {
 // Pasted HTML, as the editor should read it. paras: a Word file's editor; quote: its Quote style's
 // id when it has one; title: its Title's.
 export function cleanPaste(html, { paras = true, quote = null, title = null } = {}) {
-  if (!/<(ul|ol|li|blockquote)\b|mso-list|class="?Mso(Title|Quote)/i.test(html)) return html
+  if (!/<(ul|ol|li|blockquote|h[1-6])\b|mso-list|class="?Mso(Title|Quote)/i.test(html)) return html
   const doc = new DOMParser().parseFromString(html, 'text/html')
   const body = doc.body
   const id = `p${++pastes}-${Date.now().toString(36)}`
@@ -153,6 +153,17 @@ export function cleanPaste(html, { paras = true, quote = null, title = null } = 
       q.replaceWith(...out)
     }
     for (const p of body.querySelectorAll('p.MsoQuote')) if (quote) p.setAttribute('data-s', quote)
+    // A heading (a title, a quote) from another app takes the document's own look for it: the font,
+    // size and colour that app wrote on each of its words (Google Docs writes them on every one) are
+    // left out, its bold, italics and links kept. One copied in Studio (the editor marks its copies)
+    // keeps all of its own.
+    if (!body.querySelector('[data-pm-slice]')) {
+      const styled = ':is(h1, h2, h3, h4, h5, h6, p[data-s])'
+      for (const el of body.querySelectorAll(`${styled}, ${styled} :is([style], font)`)) {
+        for (const k of ['font-family', 'font-size', 'color', 'font']) el.style?.removeProperty(k)
+        if (el.tagName === 'FONT') for (const a of ['face', 'size', 'color']) el.removeAttribute(a)
+      }
+    }
   } else if (wordLists) nest(doc, body)
   return body.innerHTML
 }
