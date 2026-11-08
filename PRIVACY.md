@@ -35,7 +35,9 @@ publisher's terms: Node.js from nodejs.org, a coding agent from its maker's own 
 npm, Homebrew from GitHub, and on a Mac, Apple's developer tools from Apple. Links in Bridge AI (where
 to get a key, a provider's documentation, a pull request, a stock's quote) open in your browser;
 Bridge AI doesn't fetch them itself. Claude Code's own /insights report, which Bridge AI shows as
-Claude Code wrote it, may load its fonts from Google Fonts in that view.
+Claude Code wrote it, may load its fonts from Google Fonts in that view. A picture in what you paste
+into a Studio document from a web page or Google Docs is copied in from where it is, as the page
+you copied from loads it, so the file keeps it.
 
 When something in Bridge AI crashes, it keeps a note of it on your computer (in `~/.bridge-ai`; the
 desktop app also keeps what its server printed, in `logs/server.log`) and offers **Report on

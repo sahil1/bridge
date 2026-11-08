@@ -39,6 +39,9 @@ const GLYPH = {
   'size-down': <><path d="m3 18 5-12 5 12M4.7 14h6.6" /><path d="M15 9h6" /></>,
   words: <><path d="M4 7h16M4 12h10M4 17h7" /><path d="M17 14v6M14 17h6" /></>,
   style: <><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z" /></>,
+  checklist: <><rect x="3" y="4" width="6" height="6" rx="1" /><path d="m4.5 7 1 1 2-2" /><rect x="3" y="14" width="6" height="6" rx="1" /><path d="M13 7h8M13 17h8" /></>,
+  printer: <><path d="M6 9V3h12v6" /><rect x="3" y="9" width="18" height="8" rx="2" /><path d="M7 14h10v7H7z" /></>,
+  page: <><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" /><path d="M14 3v6h6M8 13h8M8 17h5" /></>,
 }
 export function Glyph({ name, size = 16 }) {
   if (!GLYPH[name]) return <Icon name={name} size={size} />
@@ -153,6 +156,12 @@ export function FindBar({ editor, replace: withReplace, onClose }) {
   useEffect(() => { input.current?.focus(); input.current?.select() }, [])
   const s = findKey.getState(editor.state) || { list: [], index: -1 }
   const close = () => { find.set(editor, { q: '' }); onClose(); editor.commands.focus() }
+  // ⌘G and ⇧⌘G go to the next match and the one before, in the box or on the page while it's open.
+  useEffect(() => {
+    const k = (e) => { if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'g') { e.preventDefault(); e.stopPropagation(); find.step(editor, e.shiftKey ? -1 : 1) } }
+    window.addEventListener('keydown', k, true)
+    return () => window.removeEventListener('keydown', k, true)
+  }, [editor])
   const key = (e) => {
     if (e.key === 'Escape') { e.preventDefault(); close() }
     if (e.key === 'Enter') { e.preventDefault(); find.step(editor, e.shiftKey ? -1 : 1) }
@@ -268,6 +277,50 @@ export function WordCount({ editor, pages, onClose }) {
           <dt>{t('Paragraphs')}</dt><dd>{n(c.paragraphs)}</dd>
           <dt>{t('Reading time')}</dt><dd>{c.words < 238 ? t('Under a minute') : t('{n} min', { n: Math.round(c.words / 238) })}</dd>
         </dl>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
+// ---------- Keyboard shortcuts ----------
+// The shortcuts a document has (⌘/ shows them, as in Google Docs), this computer's way (⌘ on a Mac,
+// Ctrl elsewhere), and what's typed to start a list. word: a Word file's (fonts, alignment, pages).
+const SHORTCUTS = (word) => [
+  [tx('Text'), [
+    [tx('Bold'), ['mod', 'b']], [tx('Italic'), ['mod', 'i']], ...(word ? [[tx('Underline'), ['mod', 'u']]] : []), [tx('Strikethrough'), ['mod', 'shift', 'x']],
+    ...(word ? [[tx('Superscript'), ['mod', '.']], [tx('Subscript'), ['mod', ',']], [tx('Bigger text'), ['mod', 'shift', '>']], [tx('Smaller text'), ['mod', 'shift', '<']]] : [[tx('Inline code'), ['mod', 'e']]]),
+    ...(word ? [[tx('Clear formatting'), ['mod', '\\']]] : []), [tx('Insert link'), ['mod', 'k']],
+  ]],
+  [tx('Paragraphs'), [
+    [tx('Normal text'), ['mod', 'alt', '0']], [tx('Heading 1, 2 or 3'), ['mod', 'alt', '1–3']],
+    [tx('Bulleted list'), ['mod', 'shift', '8']], [tx('Numbered list'), ['mod', 'shift', '7']], [tx('Checklist'), ['mod', 'shift', '9']],
+    [tx('A list a level in, or out'), ['Tab'], ['shift', 'Tab']],
+    ...(word ? [[tx('Left, center, right, justified'), ['mod', 'shift', 'L']], [tx('Increase or decrease indent'), ['mod', ']'], ['mod', '[']], [tx('Page break'), ['mod', '↩']]] : [[tx('Quote'), ['mod', 'shift', 'b']], [tx('Code block'), ['mod', 'alt', 'c']]]),
+  ]],
+  [tx('The document'), [
+    [tx('Undo'), ['mod', 'z']], [tx('Redo'), ['mod', 'shift', 'z'], ['mod', 'y']], [tx('Select all'), ['mod', 'a']],
+    [tx('Paste without formatting'), ['mod', 'shift', 'v']],
+    [tx('Find'), ['mod', 'f']], [tx('Next or previous match'), ['mod', 'g'], ['mod', 'shift', 'g']], [tx('Find and replace'), ['mod', 'shift', 'h']],
+    [tx('Word count'), ['mod', 'shift', 'c']], [tx('Print, or save as PDF'), ['mod', 'p']], [tx('Save now (it saves itself as you type)'), ['mod', 's']], [tx('Keyboard shortcuts'), ['mod', '/']],
+  ]],
+]
+export function Shortcuts({ word, onClose }) {
+  useEffect(() => { const k = (e) => { if (e.key === 'Escape') onClose() }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k) }, [onClose])
+  const show = (k) => (k.length === 1 && !['mod', 'shift', 'alt'].includes(k[0]) ? k[0] : withKeys('', ...k).replace(/^ \(|\)$/g, '').replace('TAB', 'Tab'))
+  return createPortal(
+    <div className="sd-modal" role="dialog" aria-label={t('Keyboard shortcuts')} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="sd-count sd-shortcuts">
+        <div className="sd-panel-head"><b>{t('Keyboard shortcuts')}</b><span className="sd-grow" /><button type="button" className="win-btn" onClick={onClose} aria-label={t('Close')}><Icon name="x" size={13} /></button></div>
+        <div className="sd-shortcuts-body">
+          {SHORTCUTS(word).map(([group, rows]) => (
+            <section key={group}>
+              <h4>{t(group)}</h4>
+              <dl>{rows.map(([label, ...ks]) => <div key={label}><dt>{t(label)}</dt><dd>{ks.map((k, i) => <kbd key={i}>{show(k)}</kbd>)}</dd></div>)}</dl>
+            </section>
+          ))}
+          <p className="muted small">{t('Typed at the start of a line: "- " or "* " starts a bulleted list, "1. " a numbered one, "[] " a checklist. Backspace straight after takes it back.')}</p>
+        </div>
       </div>
     </div>,
     document.body,

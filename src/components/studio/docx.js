@@ -2,7 +2,7 @@ import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, Ta
 import { docxStyles } from './look.js'
 
 // A new Word file, from a document as a Tiptap JSON: headings, paragraphs with bold, italic,
-// underline, strikethrough, code and links, bulleted and numbered lists (nested), tables, quotes (in
+// underline, strikethrough, code and links, bulleted and numbered lists (nested), checklists, tables, quotes (in
 // Word's Quote style), code blocks, rules and pictures. Studio makes a new document with it; a Word
 // file that's already there is saved by ooxml.js, which keeps all of it. look: the fonts, sizes and
 // colours to give it (look.js).
@@ -53,6 +53,18 @@ function blocks(nodes = [], ctx = { list: null, level: 0 }) {
         }
         break
       }
+      // A checklist: each item's box, ticked or not, as a list's bullet (how Word keeps one).
+      case 'taskList': {
+        const level = ctx.list ? ctx.level + 1 : 0
+        for (const item of n.content || []) {
+          const ref = item.attrs?.checked ? 'checked' : 'check'
+          for (const [i, c] of (item.content || []).entries()) {
+            if (c.type === 'paragraph') out.push(new Paragraph({ children: runs(c.content), ...(i === 0 ? { numbering: { reference: ref, level } } : { indent: { left: 720 * (level + 1) } }) }))
+            else out.push(...blocks([c], { list: ref, level }))
+          }
+        }
+        break
+      }
       case 'blockquote': for (const p of n.content || []) { if (p.type === 'paragraph') out.push(new Paragraph({ style: 'Quote', children: runs(p.content) })); else out.push(...blocks([p], ctx)) } break
       case 'codeBlock': for (const line of (n.content?.map((t) => t.text).join('') || '').split('\n')) out.push(new Paragraph({ children: [new TextRun({ text: line, font: 'Menlo', size: 20 })] })); break
       case 'horizontalRule': out.push(new Paragraph({ border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: 'BBBBBB', space: 1 } }, children: [] })); break
@@ -80,6 +92,8 @@ export async function docxOf(json, look = null) {
     numbering: { config: [
       { reference: 'bullets', levels: levels(LevelFormat.BULLET, (l) => ['•', '◦', '▪', '•', '◦', '▪'][l]) },
       { reference: 'numbers', levels: levels(LevelFormat.DECIMAL, (l) => `%${l + 1}.`) },
+      { reference: 'check', levels: levels(LevelFormat.BULLET, () => '☐') },
+      { reference: 'checked', levels: levels(LevelFormat.BULLET, () => '☑') },
     ] },
     sections: [{ children: blocks(json?.content || []) }],
   })

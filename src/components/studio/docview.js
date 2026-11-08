@@ -1,7 +1,7 @@
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { DOMSerializer, Fragment } from '@tiptap/pm/model'
-import { builtinStyle } from './ooxml.js'
+import { builtinStyle, listKindOf, listNum } from './ooxml.js'
 import { tw, lineCss, fontStack, hlCss } from './wordschema.js'
 
 // How a Word file looks in Studio's page view: its styles as CSS, its lists' numbers and bullets,
@@ -22,10 +22,21 @@ export function docInfo(m) {
     const n = /^heading (\d)$/i.exec(s.name || '')
     return n ? Number(n[1]) - 1 : null
   }
+  // A list pasted in: each of its own (a numbered one counted from 1), by the id the paste gave it.
+  const pasted = new Map()
   return {
     styles, offer, get, levelOf,
     headingStyle: (n) => [...styles.list, ...offer.values()].find((s) => s.type === 'paragraph' && levelOf(s.id) === n - 1)?.id || null,
     styleNum: (id) => get(id)?.look?.para?.numId ?? null,
+    // What kind of list a paragraph is in (bullet, number, check, checked), and one of a kind to use.
+    listKind: (num, lvl) => (num ? listKindOf(m, num, lvl) : null),
+    hasNum: (num) => m.numbering.nums.has(num),
+    listNum: (kind, o) => listNum(m, kind, o),
+    pastedNum: (kind, id) => {
+      const key = `${id}:${kind}`
+      if (!pasted.has(key)) pasted.set(key, listNum(m, kind, { fresh: true }))
+      return pasted.get(key)
+    },
     comments: m.comments, footnotes: m.footnotes, endnotes: m.endnotes,
   }
 }

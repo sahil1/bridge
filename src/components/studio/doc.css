@@ -189,6 +189,49 @@
 .sd-ask-diff ins { color: #0b7a4b; text-decoration: none; background: color-mix(in srgb, #30a46c 16%, transparent); border-radius: 2px; }
 .sd-ask-card-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 
+/* A link the cursor's in: its address, and Copy, Change and Remove (as Google Docs shows it). */
+.sd-link-pop { position: fixed; z-index: 160; display: flex; align-items: center; gap: 4px; max-width: min(420px, calc(100vw - 16px)); padding: 4px 4px 4px 10px; border-radius: 10px; background: var(--pane); box-shadow: 0 0 0 1px var(--line), 0 8px 24px rgb(0 0 0 / .16); }
+.sd-link-pop > svg { flex: none; color: var(--ink-3); }
+.sd-link-pop a { flex: 1; min-width: 0; padding: 0 6px; overflow: hidden; color: var(--accent); font: 13px var(--font); text-overflow: ellipsis; white-space: nowrap; }
+.sd-link-pop .sd-tool { flex: none; width: 30px; height: 30px; border-radius: 6px; }
+.sd-print-frame { position: fixed; right: 0; bottom: 0; width: 1px; height: 1px; border: 0; opacity: 0; pointer-events: none; }
+.sd-doc .sd-doc-said { border-top: 1px solid var(--line); border-bottom: 0; box-shadow: 0 1px 0 var(--line); }
+
+/* A checklist: its box is the bullet, clicked to tick it; a ticked item is crossed out and greyed,
+   as Google Docs shows it. */
+.sd-w :is(p, h1, h2, h3, h4, h5, h6):is([data-mk="☐"], [data-mk="☑"])::before { cursor: pointer; font-family: 'Segoe UI Symbol', 'Apple Symbols', 'Menlo', sans-serif; }
+.sd-w [data-mk="☑"] { color: #80868b; text-decoration: line-through; }
+.sd-md ul[data-type="taskList"] { list-style: none; padding-left: .2em; }
+.sd-md ul[data-type="taskList"] li { display: flex; align-items: flex-start; gap: .5em; }
+.sd-md ul[data-type="taskList"] li > label { flex: none; margin-top: .3em; }
+.sd-md ul[data-type="taskList"] li > label input { width: 15px; height: 15px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.sd-md ul[data-type="taskList"] li > div { flex: 1; min-width: 0; }
+.sd-md ul[data-type="taskList"] li[data-checked="true"] > div { color: var(--ink-3); text-decoration: line-through; }
+.sd-md img { max-width: 100%; height: auto; }
+
+/* Page setup. */
+.sd-page-setup { width: min(380px, 100%); }
+.sd-setup-body { display: grid; gap: 14px; padding: 12px 16px 4px; }
+.sd-setup-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; margin: 0; padding: 0; border: 0; }
+.sd-setup-row legend { padding: 0; margin-bottom: 6px; width: 100%; }
+.sd-radio { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.sd-setup-body select, .sd-setup-margins input { width: 100%; height: 32px; padding: 0 10px; border: 1px solid var(--line-2, var(--line)); border-radius: 8px; background: var(--pane); color: var(--ink); font: 13px var(--font); }
+.sd-setup-margins { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px 8px; }
+.sd-setup-margins > span { grid-column: 1 / -1; }
+.sd-setup-body p { margin: 0; line-height: 1.45; }
+.sd-setup-acts { padding: 12px 16px 16px; }
+
+/* Keyboard shortcuts (⌘/). */
+.sd-shortcuts { width: min(520px, 100%); max-height: 86vh; display: grid; grid-template-rows: auto minmax(0, 1fr); }
+.sd-shortcuts-body { overflow: auto; padding: 4px 16px 16px; }
+.sd-shortcuts-body h4 { margin: 12px 0 6px; font: 600 11px var(--font); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.sd-count .sd-shortcuts-body dl { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; margin: 0; padding: 0; }
+.sd-shortcuts-body dl > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.sd-shortcuts-body dt { color: var(--ink-2); }
+.sd-shortcuts-body dd { display: flex; gap: 6px; margin: 0; }
+.sd-shortcuts-body kbd { padding: 1px 6px; border-radius: 5px; background: var(--pane-2); box-shadow: inset 0 0 0 1px var(--line-2, var(--line)); font: 500 12px var(--font); white-space: nowrap; }
+.sd-shortcuts-body p { margin: 12px 0 0; line-height: 1.45; }
+
 /* The word count. */
 .sd-count { width: min(340px, 100%); border-radius: 14px; background: var(--pane); box-shadow: 0 0 0 1px var(--line), 0 18px 50px rgb(0 0 0 / .28); overflow: hidden; }
 .sd-count dl { display: grid; grid-template-columns: 1fr auto; gap: 8px 16px; margin: 0; padding: 12px 16px 16px; font-size: 13px; }
@@ -226,6 +269,11 @@
 .app.narrow .sd-ask-model select { height: 40px; font-size: 16px; }
 .app.narrow .sd-ask-card .btn.small, .app.narrow .sd-ask-card .ghost-btn { height: 40px; }
 .app.narrow .sd-outline-item { padding: 11px 10px; font-size: 14px; }
+.app.narrow .sd-link-pop .sd-tool { width: 40px; height: 40px; }
+.app.narrow .sd-link-pop a { line-height: 40px; }
+.app.narrow .sd-setup-body select, .app.narrow .sd-setup-margins input { height: 40px; font-size: 16px; }
+.app.narrow .sd-setup-margins { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.app.narrow .sd-radio { min-height: 40px; }
 .app.narrow .sd-doc .sd-group + .sd-group { margin-left: 0; padding-left: 0; border-left: 0; }
 .app.narrow .sd-sw-grid { grid-template-columns: repeat(10, 24px); }
 .app.narrow .sd-sw { width: 24px; height: 24px; }
