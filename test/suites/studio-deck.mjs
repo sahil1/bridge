@@ -16,8 +16,8 @@
 // slide, and a point (Enter for the next, Tab in a level); "Click to add title" where a slide has
 // none; a new slide in a layout, duplicated, moved by dragging and by keys, deleted, undone; its
 // layout and theme from the galleries; a picture; speaker notes; the grid of every slide;
-// presenting full screen, next and back, the presenter's view; AI writing a deck shown before it's
-// taken; the PowerPoint; slides picked together, copied, skipped; find and replace; zoom; the
+// presenting full screen, next and back, the presenter's view; AI Assist (the header's, and Rewrite
+// on the slide) writing a deck shown before it's taken; the PowerPoint; slides picked together, copied, skipped; find and replace; zoom; the
 // Markdown kept as it was where it wasn't touched. A PowerPoint edited as itself: typed in place,
 // shapes, pictures and a table put in and handled, copied, undone; presented; saved over itself
 // keeping everything it didn't change; in Focus, its slide bigger, Esc letting go of the shapes
@@ -425,7 +425,16 @@ for (const [k, v] of Object.entries(${JSON.stringify(Object.fromEntries(Object.e
   await shot(p, `${tag}deck-presenter`)
   await p.keyboard.press('Escape')
   ok(!!(await until(async () => (await p.locator('.sd-present').count()) === 0, 5000, 100)), 'Esc: back to editing')
-  // Write with AI: a slide rewritten, shown first, kept; then a whole deck, shown first, put after.
+  // AI Assist: its menu at the right end of the header; a slide rewritten from the slide's own
+  // Rewrite, shown first, kept; then a whole deck, shown first, put after.
+  const wand = p.locator('.sd-file .pane-head .pane-extras button[aria-label="AI Assist"]')
+  ok(await wand.evaluate((e) => !e.nextElementSibling) && !(await p.locator('.sd-deck-tools button[aria-label="Write with AI"]').count()), 'AI Assist at the right end of the header, and none of its own in the deck\'s toolbar')
+  await wand.click()
+  const verbs = await p.locator('.ai-menu .ai-item-label').allInnerTexts()
+  ok(JSON.stringify(verbs) === JSON.stringify(['Write the deck', 'Rewrite this slide', 'Add a slide after this one']), 'a deck\'s AI Assist: Write the deck, Rewrite this slide, Add a slide after this one', verbs)
+  await shot(p, `${tag}deck-ai-menu`)
+  await p.keyboard.press('Escape')
+  ok(await p.locator('.sd-pill .sd-pill-ai').count() === 2, 'on the slide, inline: the wand with Rewrite and Add a slide after')
   await p.locator('.sd-pill button', { hasText: 'Rewrite' }).click()
   await p.locator('.sd-ai textarea').fill('as big numbers')
   await p.locator('.sd-ai button', { hasText: 'Rewrite it' }).click()
@@ -445,7 +454,7 @@ for (const [k, v] of Object.entries(${JSON.stringify(Object.fromEntries(Object.e
   await p.keyboard.press('Escape')
   await p.locator('.sd-deck-tools button[aria-label="Undo"]').click()
   ok(!!(await until(async () => (await thumbs.count()) === 6, 3000, 100)), 'and Undo takes them back out')
-  await p.locator('.sd-ai-head button[aria-label="Close"]').click()
+  await p.locator('.sd-ai-head button[aria-label="Close AI Assist"]').click()
   // The Markdown, beside the slides, typed in.
   await p.locator('.sd-deck-tools button[aria-label="Markdown"]').click()
   const mdBox = p.locator('.sd-deck-md')
@@ -532,6 +541,7 @@ for (const [k, v] of Object.entries(${JSON.stringify(Object.fromEntries(Object.e
     const deckFocus = () => p.locator('.sd-file.focus').count().then((n) => n === 1)
     ok(!!(await until(async () => (await deckFocus()) && (await slideW()) > w0 + 40, 3000, 100)), 'a PowerPoint in Focus: its slide bigger, in the whole window', { w0, w1: await slideW() })
     await shot(p, `${tag}deck-pptx-focus`)
+    ok(await p.locator('.sd-file.focus .sd-status button[aria-label="AI Assist"]').isVisible(), 'in Focus, AI Assist is in the status line, the header being out of sight')
     await p.locator('.px-stage').focus()
     await p.keyboard.press(`${MOD}+a`)
     const picks = () => p.locator('.px-sel .px-frame:not(.hover)').count()
@@ -647,16 +657,17 @@ for (const [k, v] of Object.entries(${JSON.stringify(Object.fromEntries(Object.e
     await thumbs.nth(21).click({ button: 'right' })
     await p.locator('.sd-ctx .menu-item', { hasText: 'Skip when presenting' }).click()
     ok(await thumbs.nth(21).evaluate((x) => x.classList.contains('skipped')), 'skipped from its menu')
-    // Write with AI: a slide written, shown first, then added on the file's own layout.
+    // AI Assist's Add a slide after this one: a slide written, shown first, then added on the file's own layout.
     await go(2)
-    await p.locator('.px-row button[aria-label="Write with AI"]').click()
-    await p.locator('.sd-ai-modes button', { hasText: 'New slide' }).click()
+    await p.locator('.sd-file .pane-head button[aria-label="AI Assist"]').click()
+    await p.locator('.ai-menu button', { hasText: 'Add a slide after this one' }).click()
+    ok(await p.locator('.sd-ai-modes button[aria-selected="true"]', { hasText: 'New slide' }).count() === 1, 'AI Assist\'s Add a slide after this one opens its panel on New slide')
     await p.locator('.sd-ai textarea').fill('what we do next')
     await p.locator('.sd-ai button', { hasText: 'Write it' }).click()
     await p.locator('.sd-ai-result .sd-slide').first().waitFor({ timeout: 15000 })
     await p.locator('.sd-ai button', { hasText: 'Add it' }).click()
-    ok(!!(await until(async () => (await thumbs.count()) === 23 && /Next steps/.test(await thumbs.nth(3).innerText()), 3000, 50)) && /Ship it/.test(await p.locator('.px-canvas').innerText()) && (await objs.count()) === 2, 'Write with AI: a new slide shown first, then added after this one on the file\'s own layout, its title and points in its placeholders')
-    await p.locator('.sd-ai-head button[aria-label="Close"]').click()
+    ok(!!(await until(async () => (await thumbs.count()) === 23 && /Next steps/.test(await thumbs.nth(3).innerText()), 3000, 50)) && /Ship it/.test(await p.locator('.px-canvas').innerText()) && (await objs.count()) === 2, 'AI Assist: a new slide shown first, then added after this one on the file\'s own layout, its title and points in its placeholders')
+    await p.locator('.sd-ai-head button[aria-label="Close AI Assist"]').click()
     await p.keyboard.press(`${MOD}+z`)
     await until(async () => (await thumbs.count()) === 22, 3000, 50)
     // Speaker notes; find and replace across the deck.
@@ -757,7 +768,9 @@ for (const [k, v] of Object.entries(${JSON.stringify(Object.fromEntries(Object.e
   ok(!!(await opened(dk.p, 'pitch.md')), 'dark: the deck opens')
   await sleep(400)
   await shot(dk.p, `${tag}deck-1440-dark`)
-  await dk.p.locator('.sd-deck-tools button[aria-label="Write with AI"]').click()
+  await dk.p.locator('.sd-file .pane-head button[aria-label="AI Assist"]').click()
+  await shot(dk.p, `${tag}deck-ai-menu-dark`)
+  await dk.p.locator('.ai-menu button', { hasText: 'Write the deck' }).click()
   await sleep(200)
   await shot(dk.p, `${tag}deck-ai-dark`)
   ok(!!(await until(async () => { await open(dk.p, 'board.pptx'); return dk.p.locator('.px-canvas [data-o]').first().waitFor({ timeout: 3000 }).then(() => true, () => false) }, 30000, 200)), 'dark: a PowerPoint opens, its slides white as they are')
@@ -794,12 +807,16 @@ for (const [k, v] of Object.entries(${JSON.stringify(Object.fromEntries(Object.e
       ok(!!(await until(async () => /2 of 22/.test(await ph.p.locator('.sd-nav').innerText()), 3000, 100)), 'phone: its next slide')
       await shot(ph.p, `${tag}deck-phone-pptx`)
       ok(!!(await opened(ph.p, 'pitch.md')), 'phone: back to the deck')
-      await ph.p.locator('.sd-deck-tools button[aria-label="Write with AI"]').click()
+      await ph.p.locator('.sd-file .pane-head button[aria-label="AI Assist"]').click()
+      f = await phoneFaults(ph.p, '.ai-menu')
+      ok(!Object.keys(f).length, 'phone: AI Assist\'s menu fits, every choice a whole target', f)
+      await shot(ph.p, `${tag}deck-phone-ai-menu`)
+      await ph.p.locator('.ai-menu button', { hasText: 'Write the deck' }).click()
       await ph.p.locator('.sd-ai textarea').waitFor({ timeout: 5000 })
       f = await phoneFaults(ph.p, '.sd-ai')
-      ok(!Object.keys(f).length, 'phone: Write with AI over the slide, fitting, its fields 16 px', f)
+      ok(!Object.keys(f).length, 'phone: AI Assist over the slide, fitting, its fields 16 px', f)
       await shot(ph.p, `${tag}deck-phone-ai`)
-      await ph.p.locator('.sd-ai-head button[aria-label="Close"]').click()
+      await ph.p.locator('.sd-ai-head button[aria-label="Close AI Assist"]').click()
       await ph.p.locator('.sd-deck-tools button[aria-label="Present"]').click()
       await ph.p.locator('.sd-present').waitFor({ timeout: 5000 })
       await ph.p.locator('.sd-present-stage').tap({ position: { x: 300, y: 300 } })

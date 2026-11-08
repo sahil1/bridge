@@ -6,7 +6,7 @@ import { textOf, base64 } from '../files.js'
 import { keys, withKeys } from '../keys.js'
 import * as D from '../deck.js'
 import { slidesOf, pptxOf } from '../pptx.js'
-import { Slide, Menu, LayoutGallery, ThemeGallery, Present, AiPanel, DeckFind, LAYOUT_LABEL, sampleOf, useSize } from './DeckParts.jsx'
+import { Slide, Menu, LayoutGallery, ThemeGallery, Present, AiPanel, deckAssist, DeckFind, LAYOUT_LABEL, sampleOf, useSize } from './DeckParts.jsx'
 import SlidesEditor from './SlidesEditor.jsx'
 import '../deck.css'
 
@@ -504,6 +504,7 @@ function Deck({ file, start, pptx, onDirty, onStats, handle, readOnly, packs, on
       const text = sel && !sel.isCollapsed && canvasRef.current?.contains(sel.anchorNode) ? sel.toString() : D.slideText(st, at)
       return text ? { text, where: t('slide {n}', { n: at + 1 }) } : null
     },
+    assist: () => (readOnly ? [] : deckAssist(show.ai, aiMode, (m) => (show.ai && aiMode === m ? setShow((s) => ({ ...s, ai: false })) : openAi(m)))),
   }
   const saveBeside = async (kind) => {
     setBusy(kind); setMsg(null)
@@ -683,7 +684,6 @@ html,body{margin:0;background:#fff}div.marpit>svg{display:block;width:100vw;heig
         {missing && <span className="muted small sd-tool-note" title={t('This deck names a design pack you don\'t have, so it uses your default.')}><Icon name="info" size={12} /> {t('No pack "{name}"', { name: named })}</span>}
         <span className="sd-grow" />
         <div className="sd-group">
-          {!readOnly && tool(t('Write with AI'), 'sparkle', () => setShow((s) => ({ ...s, ai: !s.ai })), { label: true, on: show.ai, tip: t('Write a deck, rewrite a slide or add one, with AI: you see it before it\'s taken') })}
           {tool(t('Find and replace'), 'search', () => { flush(); setFind({ replace: true, n: Date.now() }) }, { tip: withKeys(t('Find and replace'), 'mod', 'f') })}
           {!narrow && <span className="menu-anchor">
             {tool(t('Zoom'), 'maximize', () => setMenu(menu === 'zoom' ? null : 'zoom'), { label: true, tip: t('Zoom: {n}', { n: zoom === 'fit' ? t('Fit') : `${Math.round(zoom * 100)}%` }), more: { 'aria-haspopup': 'menu', 'aria-expanded': menu === 'zoom' } })}
@@ -730,8 +730,8 @@ html,body{margin:0;background:#fff}div.marpit>svg{display:block;width:100vw;heig
             <div className={`sd-stage${k > fitK + 0.001 ? ' zoomed' : ''}`} ref={stageEl} tabIndex={-1} onDragOver={(e) => { if ([...(e.dataTransfer?.types || [])].includes('Files')) e.preventDefault() }} onDrop={onCanvasDrop} onMouseDown={(e) => { if (e.target === e.currentTarget) { flush(); setPicked(false) } }}>
               {!readOnly && !phone && (
                 <div className="sd-pill" role="toolbar" aria-label={t('This slide')}>
-                  <button type="button" onClick={() => openAi('slide')} title={t('Rewrite this slide with AI')}><Icon name="sparkle" size={12} /> {t('Rewrite')}</button>
-                  <button type="button" onClick={() => openAi('add')} title={t('A new slide after this one, written with AI')}><Icon name="plus" size={12} /> {t('Slide after')}</button>
+                  <button type="button" className="sd-pill-ai" onClick={() => openAi('slide')} title={t('AI Assist: rewrite this slide, shown before it\'s kept')}><Icon name="wand" size={12} /> {t('Rewrite')}</button>
+                  <button type="button" className="sd-pill-ai" onClick={() => openAi('add')} title={t('AI Assist: write a new slide after this one, shown before it\'s added')}><Icon name="wand" size={12} /> {t('Add a slide after')}</button>
                   <span className="menu-anchor"><button type="button" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setCtx({ i: at, x: r.left, y: r.bottom + 4 }) }} title={t('More for this slide')} aria-label={t('More for this slide')}><Icon name="more" size={13} /></button></span>
                 </div>
               )}

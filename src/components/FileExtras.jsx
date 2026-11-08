@@ -147,7 +147,7 @@ export function menuItems(entry, act, { onMention, send = false, copyHere = null
   const dir = !!entry.dir
   const root = entry.path === ''
   return [
-    dir && assist && { label: t('Files Assist'), icon: 'sparkle', run: () => assist(entry) },
+    dir && assist && { label: t('Look over this folder'), icon: 'wand', title: t('AI Assist'), run: () => assist(entry) },
     dir && assist && 'sep',
     dir && { label: 'New file…', icon: 'file', run: () => act('newFile', entry) },
     dir && { label: 'New folder…', icon: 'folder', run: () => act('newFolder', entry) },

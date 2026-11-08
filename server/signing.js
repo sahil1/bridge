@@ -1,4 +1,4 @@
-// Signature Assist (a beta feature, under Studio): a PDF you're asked to sign, explained in plain
+// AI Assist's Sign this (Sign PDFs, a beta feature): a PDF you're asked to sign, explained in plain
 // words by the model you pick, then your drawn signature, initials and today's date put where you
 // approve, in a new copy: <its folder>/_signed/<name> (signed).pdf. The original isn't touched.
 // Your signature and initials are pictures you drew, kept only here, in <data>/studio/signatures,
@@ -60,7 +60,7 @@ export const imageFile = async (which) => { check(which); await fsp.access(pngOf
 async function pdfAt(root, rel) {
   const { real, realRoot } = await safePath(root, rel)
   const st = await fsp.stat(real)
-  if (!st.isFile() || path.extname(real).toLowerCase() !== '.pdf') throw new Error('Signature Assist signs PDFs')
+  if (!st.isFile() || path.extname(real).toLowerCase() !== '.pdf') throw new Error('Only a PDF can be signed here')
   if (st.size > MAX_PDF) throw new Error('Too big to sign here (80 MB at most)')
   return { real, realRoot, bytes: await fsp.readFile(real) }
 }
@@ -230,7 +230,7 @@ async function budget(model) {
 }
 export async function explain(root, rel, { pages: given, total, model, lang } = {}) {
   const { real } = await safePath(root, rel)
-  if (path.extname(real).toLowerCase() !== '.pdf') throw new Error('Signature Assist reads PDFs')
+  if (path.extname(real).toLowerCase() !== '.pdf') throw new Error('Only a PDF can be read for signing')
   const info = await modelInfo(model)
   if (!info) throw Object.assign(new Error('No model to read it with. Sign in to an agent, or add an API key or a local model in Settings › Model Providers.'), { code: 'no_model' })
   let pages = (Array.isArray(given) ? given : []).slice(0, 2000).map((p, i) => ({ n: Number(p?.n) || i + 1, text: String(p?.text || '').slice(0, 60_000) }))
@@ -270,15 +270,15 @@ export async function explain(root, rel, { pages: given, total, model, lang } = 
   let r = await helpers.reply(info.id, msgs, o)
   let v = parsed(r.text)
   if (!v) { r = await helpers.reply(info.id, msgs, { ...o, json: SCHEMA }); v = parsed(r.text) }
-  if (!v) throw new Error(`${info.label} answered, but not in a form Signature Assist can read. Try again, or pick another model.`)
+  if (!v) throw new Error(`${info.label} answered, but not in a form Bridge AI can read. Try again, or pick another model.`)
   return { model: info, explained: tidy(v, all || pages.length), pagesRead: scanned ? all || 1 : read, pagesAll: scanned ? all || 1 : all, cut, scanned, at: new Date().toISOString() }
 }
 
 // ---------- Routes ----------
 // Under Studio's own (/api/studio), so both beta features must be on.
 export function routes(app, { wrap, rootOf, sq, trialOff }) {
-  app.use('/api/studio/signature', trialOff('signature-assist', 'Signature Assist'))
-  app.use('/api/studio/sign', trialOff('signature-assist', 'Signature Assist'))
+  app.use('/api/studio/signature', trialOff('signature-assist', 'Sign PDFs'))
+  app.use('/api/studio/sign', trialOff('signature-assist', 'Sign PDFs'))
   app.get('/api/studio/sign/setup', wrap(async (req) => ({ ...(await mine()), model: await modelInfo(String(req.query.model || '') || null), readsScans: !!helpers.scanText })))
   app.get('/api/studio/signature/:which', async (req, res) => {
     try { res.set({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); res.type('image/png').sendFile(await imageFile(req.params.which), { dotfiles: 'allow' }) } catch { res.status(404).json({ error: 'Not drawn yet' }) }

@@ -124,7 +124,7 @@ async function resolveDest(to = {}, { here = false } = {}) {
   }
   if (where === 'pane' || where === 'place') {
     // Files' home folder and drives only look for now (explorer.js): nothing is copied into them.
-    if (where === 'pane' && isFilesRoot(to.pane)) throw fail('Files only looks for now: pick an agent\'s folder or a place to copy into.', { status: 403 })
+    if (where === 'pane' && isFilesRoot(to.pane)) throw fail('Files is read-only for now: pick an agent\'s folder or a place to copy into.', { status: 403 })
     let root
     if (where === 'place') { const p = placeOf(String(to.place || '')); if (!p) throw fail('That place isn\'t in Files any more', { status: 404 }); root = p.path } else root = await rootOf(String(to.pane || '')).catch(() => { throw fail('That agent isn\'t there any more', { status: 404 }) })
     const { real } = await files.safePath(root, String(to.dir || '')).catch((e) => { throw fail(e.message, { status: 404 }) })

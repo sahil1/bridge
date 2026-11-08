@@ -44,11 +44,10 @@
 .fx-search:focus-within { border-color: color-mix(in srgb, var(--accent) 55%, var(--line-2)); }
 .fx-search input { flex: 1; min-width: 0; border: 0; background: none; outline: none; color: var(--ink); font: 13px var(--font); }
 .fx-search-x { display: inline-flex; color: var(--ink-3); }
-.fx-assist-btn.on { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
-/* A narrower folder: the search gets smaller, then the view buttons and Assist give way to it. */
+/* A narrower folder: the search gets smaller, then AI Assist keeps only its wand. */
 @container (max-width: 760px) { .fx-search { width: 150px; } }
 .fx-main { container-type: inline-size; }
-@container (max-width: 620px) { .fx-assist-btn { display: none; } }
+@container (max-width: 620px) { .fx-assist-btn .ai-assist-label { display: none; } .fx-assist-btn.btn.small { padding: 0 7px; } }
 
 /* ---------- the folder ---------- */
 .fx-panes { display: flex; min-height: 0; min-width: 0; }
@@ -117,9 +116,10 @@ button.fx-th:hover { color: var(--ink); }
 .fx-empty { border: 0; }
 .fx-search-note { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 8px 18px; color: var(--ink-2); border-bottom: 1px solid var(--line); }
 
-/* Get Info and Assist, beside the folder. */
+/* Get Info and AI Assist, beside the folder. */
 .fx-info { flex: none; width: 300px; min-width: 0; overflow-y: auto; border-left: 1px solid var(--line); background: var(--pane); }
-/* Files Assist (Assist.jsx, assist.css): beside the folder in .fa-dock; on a phone, in its place. */
+/* AI Assist's Look over this folder (Assist.jsx, assist.css): beside the folder in .fa-dock; on a
+   phone, in its place. */
 .fx-assist { min-height: 0; display: flex; flex-direction: column; background: var(--pane); }
 .fx-info { display: grid; align-content: start; gap: 10px; padding: 12px 14px 20px; }
 .fx-info-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; }
@@ -168,7 +168,7 @@ button.fx-th:hover { color: var(--ink); }
 .fx.narrow .fx-row { min-height: 48px; margin: 0 4px; }
 .fx.narrow .fx-tr { min-height: 48px; }
 .fx.narrow .fx-th { height: 40px; min-width: 40px; }
-.fx.narrow .fx-assist-btn { display: inline-flex; min-height: 40px; }
+.fx.narrow .fx-assist-btn { min-height: 40px; }
 .fx.narrow .fx-info { position: absolute; inset: 0; z-index: 4; width: auto; border: 0; }
 .fx.narrow .fx-assist { height: 100%; }
 @media (max-width: 640px) {

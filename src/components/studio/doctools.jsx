@@ -328,10 +328,11 @@ export function Shortcuts({ word, onClose }) {
 }
 
 // ---------- Change it in place ----------
-// Words picked, then Ask AI: rewrite, shorten, expand, fix, or what you say. The model's version is
-// shown against yours (what goes struck out, what's new marked) until you take it, try again or
-// leave it. The model is the one picked for Studio, else the one the app reaches first
-// (server/studiofound.js), and said with the answer.
+// Words picked, then AI Assist (by the words, or at the right end of the page's header): rewrite,
+// shorten, expand, fix, or what you say. The model's version is shown against yours (what goes
+// struck out, what's new marked) until you take it, try again or leave it. The model is the one
+// picked for Studio, else the one the app reaches first (server/studiofound.js), and said with the
+// answer.
 export const ASKS = [
   { id: 'rewrite', label: tx('Rewrite'), text: 'Rewrite this so it reads better. Keep what it says.' },
   { id: 'shorten', label: tx('Shorten'), text: 'Make this shorter. Keep what matters.' },
@@ -349,9 +350,19 @@ export function wordDiff(a, b) {
   return out
 }
 
+// AI Assist's menu in the page's header: the same changes, for the words picked. hook: AskInPlace's.
+export const askItems = (hook) => {
+  const picked = !!hook.current?.picked()
+  return [
+    !picked && { note: t('Pick the words to change first.') },
+    ...ASKS.map((a) => ({ label: t(a.label), disabled: !picked, run: () => hook.current?.ask(a.text, t(a.label)) })),
+  ]
+}
+
 // selection(): { from, to, text, before, after } what's picked and around it; apply(range, text):
-// the new words put in. Shown over the page, by the words picked.
-export function AskInPlace({ editor, file, selection, apply, scroller }) {
+// the new words put in. Shown over the page, by the words picked. hook: a ref given { ask, picked }
+// for AI Assist in the page's header.
+export function AskInPlace({ editor, file, selection, apply, scroller, hook }) {
   const [box, setBox] = useState(null) // where it's drawn: { left, top, bottom }
   const [menu, setMenu] = useState(false)
   const [own, setOwn] = useState('')
@@ -407,6 +418,7 @@ export function AskInPlace({ editor, file, selection, apply, scroller }) {
       if (!c.signal.aborted) setJob({ ...base, busy: false, error: e.message, code: e.code || e.data?.code || null })
     }
   }
+  if (hook) hook.current = { ask, picked: () => !!selection()?.text.trim() }
   const done = () => { ctl.current?.abort(); setJob(null); editor?.commands.focus() }
   const take = (below = false) => { apply(job.range, job.out, below); setJob(null) }
   useEffect(() => {
@@ -422,9 +434,9 @@ export function AskInPlace({ editor, file, selection, apply, scroller }) {
     <div className="sd-ask-place" ref={ref} style={{ left: box.left, top: job ? Math.min(box.bottom + 8, window.innerHeight - 260) : top }} onMouseDown={(e) => { if (!e.target.closest('input, textarea, select')) e.preventDefault() }}>
       {!job && (
         <div className="sd-bubble" role="toolbar" aria-label={t('Picked words')}>
-          <button type="button" className={`sd-bubble-ai${menu ? ' on' : ''}`} onClick={() => setMenu((x) => !x)} aria-expanded={menu} aria-haspopup="menu" title={t('Have AI change the words you picked')}><Icon name="sparkle" size={13} /> {t('Ask AI')}<Glyph name="chevron-down" size={11} /></button>
+          <button type="button" className={`sd-bubble-ai${menu ? ' on' : ''}`} onClick={() => setMenu((x) => !x)} aria-expanded={menu} aria-haspopup="menu" title={t('AI Assist: change the words you picked')}><Icon name="wand" size={13} /> {t('AI Assist')}<Glyph name="chevron-down" size={11} /></button>
           {menu && (
-            <div className="sd-drop sd-ask-menu" role="menu" aria-label={t('Ask AI')}>
+            <div className="sd-drop sd-ask-menu" role="menu" aria-label={t('AI Assist')}>
               {ASKS.map((a) => <Item key={a.id} label={t(a.label)} run={() => ask(a.text, t(a.label))} />)}
               <form className="sd-ask-own" onSubmit={(e) => { e.preventDefault(); if (own.trim()) ask(own.trim(), own.trim()) }}>
                 <input value={own} onChange={(e) => setOwn(e.target.value)} placeholder={t('Or say how to change it…')} aria-label={t('How to change it')} />
@@ -445,7 +457,7 @@ export function AskInPlace({ editor, file, selection, apply, scroller }) {
       )}
       {job && (
         <div className="sd-ask-card" role="dialog" aria-label={t('Suggested change')}>
-          <div className="sd-ask-card-head"><Icon name="sparkle" size={13} /><b>{job.label}</b><span className="sd-grow" />{job.by && <small className="muted" title={t('The model that wrote it')}>{job.by}</small>}</div>
+          <div className="sd-ask-card-head"><Icon name="wand" size={13} className="sd-ask-wand" /><b>{job.label}</b><span className="sd-grow" />{job.by && <small className="muted" title={t('The model that wrote it')}>{job.by}</small>}</div>
           {job.busy && <p className="sd-ask-busy muted small" role="status"><Icon name="refresh" size={12} className="spin" /> {t('Writing…')}</p>}
           {job.error && (
             <div className="sd-ask-err" role="alert">

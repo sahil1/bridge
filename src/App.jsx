@@ -666,7 +666,7 @@ function App() {
   useHotkey(useCallback((e) => (e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'f', []), () => setHistory((v) => !v))
   // ⌥1 and ⌥2 alone: with ⌘ (or Ctrl) they're a document's Heading 1 and 2, in Studio.
   useHotkey(useCallback((e) => e.altKey && !e.metaKey && !e.ctrlKey && (e.code === 'Digit1' || e.code === 'Digit2'), []), (e) => setView(e.code === 'Digit1' ? 'command' : 'herdr'))
-  // (Not while something open says Esc is its own, data-esc: Mail's Reply Assist, say; and an event
+  // (Not while something open says Esc is its own, data-esc: Mail's AI Assist, say; and an event
   // open in the calendar, or its menu, closes first: Escape is its, then the panel's.)
   useHotkey(useCallback((e) => e.key === 'Escape' && !e.target.closest?.('.xterm, textarea, input, .quick-open, .tour, .excalidraw, .find-bar') && !document.querySelector('[data-esc], .calv .cal-detail, .calv-menu'), []), () => set({ max: null }))
 
@@ -717,7 +717,7 @@ function App() {
     Explorer && filesOn && { id: 'a:files', label: t('Files'), icon: 'folder', keywords: 'files finder explorer folders browse desktop documents downloads home drive disk icloud onedrive dropbox quick look get info', run: () => openAgent('view:files') },
     WhiteboardsHome && { id: 'a:boards', label: t('Whiteboards'), icon: 'shapes', keywords: 'whiteboard board excalidraw draw sketch diagram flowchart architecture sequence org chart mermaid drawio canvas', run: () => openAgent('view:whiteboards') },
     { id: 'a:map', label: t('Agent Map'), icon: 'grid', keywords: 'what is running where devices computers machines all agents overview cloud subagents', run: openMap },
-    { id: 'a:needs', label: t('Needs you'), icon: 'bell', keywords: 'inbox waiting approve allow permission questions answer review finished failed devices', run: () => setInbox({}) },
+    { id: 'a:needs', label: t('Needs You'), icon: 'bell', keywords: 'inbox waiting approve allow permission questions answer review finished failed devices', run: () => setInbox({}) },
     { id: 'a:history', label: t('Search history and closed agents…'), icon: 'clock', keywords: 'search find transcript conversation closed archived resume old past', run: () => setHistory(true) },
     { id: 'a:cloud', label: t('New cloud agent…'), icon: 'cloud', keywords: 'cursor copilot jules claude managed remote github repo pull request', run: () => setNewAgent({ mode: 'cloud' }) },
     { id: 'a:chat', label: t('New chat…'), icon: 'chat', keywords: 'plain vanilla talk ask claude codex gemini assistant', run: () => setNewAgent({ mode: 'chat' }) },
@@ -742,7 +742,7 @@ function App() {
     // Mail's keys, taught here: each action with its key beside it. Mail is only where it can be read.
     wide && conf?.mail && { id: 'a:mail-done', label: t('Mail: Done'), icon: 'check', hint: 'E', keywords: 'mail email archive done finished mark inbox zero clear', run: () => { showToday('mail'); mailDo('done') } },
     wide && conf?.mail && { id: 'a:mail-later', label: t('Mail: Remind me…'), icon: 'clock', hint: 'H', keywords: 'mail email snooze later remind reminder set aside nobody answers follow up', run: () => { showToday('mail'); mailDo('later') } },
-    wide && conf?.mail && { id: 'a:mail-reply', label: t('Mail: Reply Assist'), icon: 'edit', hint: 'R', keywords: 'mail email reply draft answer write respond voice tone schedule free times', run: () => { showToday('mail'); mailDo('reply') } },
+    wide && conf?.mail && { id: 'a:mail-reply', label: t('Mail: Draft a reply'), icon: 'wand', hint: 'R', keywords: 'mail email reply draft answer write respond voice tone schedule free times ai assist', run: () => { showToday('mail'); mailDo('reply') } },
     wide && conf?.mail && { id: 'a:mail-keys', label: t('Mail: every key'), icon: 'keyboard', hint: '?', keywords: 'mail email keys keyboard shortcuts hotkeys j k next previous', run: () => { showToday('mail'); mailDo('keys') } },
     { id: 'a:markets', label: t('Markets & news'), icon: 'trend', keywords: 'fed rates treasury mortgage stocks headlines tech', run: () => showToday('markets') },
     { id: 'a:routines', label: t('Show routines'), icon: 'repeat', run: () => showCard('repeat') },
@@ -924,7 +924,7 @@ function App() {
       { id: 'map', icon: 'grid', label: t('Agent Map'), hint: t("What's running on each of your computers"), run: () => setMoreView('view:map') },
       { id: 'dictations', icon: 'wave', label: t('Dictations'), hint: t("Everything you've dictated"), run: () => setMoreView('view:dictations') },
       { id: 'memory', icon: 'book', label: t('Memory'), hint: t('People, organizations and words from your meetings and dictations'), run: () => setMoreView('view:memory') },
-      { id: 'needs', icon: 'bell', label: t('Needs you'), hint: t("What's waiting on you, on every device"), count: waiting, run: () => setInbox({}) },
+      { id: 'needs', icon: 'bell', label: t('Needs You'), hint: t("What's waiting on you, on every device"), count: waiting, run: () => setInbox({}) },
       { id: 'history', icon: 'clock', label: t('History'), hint: t('Every conversation, and closed agents'), run: () => setHistory(true) },
       { id: 'settings', icon: 'settings', label: t('Settings'), hint: t('Devices, voice, appearance and more'), run: () => setSettings('all') },
     ].filter(Boolean)

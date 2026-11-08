@@ -1956,7 +1956,7 @@ export function assist(id, { now = false, model } = {}) {
     // A model on this computer: the files and the latest lines within what its context holds, and
     // no examples to copy (it's held to a schema instead).
     const local = isLocal(use)
-    try { await roomy(use, 'AI Assist') } catch (e) { writeFileAtomic(assistFile(id), JSON.stringify({ ...a, at: new Date().toISOString(), error: e.message }, null, 1)); throw e }
+    try { await roomy(use, 'suggestions while it records') } catch (e) { writeFileAtomic(assistFile(id), JSON.stringify({ ...a, at: new Date().toISOString(), error: e.message }, null, 1)); throw e }
     const size = local ? await budget(use, text, { answer: 1024 }) : null
     const { text: notes, shown } = notesFor(filled(readText(path.join(dirOf(id), 'notes.md')), m.sections), m.captures || [])
     const more = await extras(id, { ...m, captures: (m.captures || []).slice(-6) }, local ? Math.min(24_000, Math.floor(size / 4)) : 24_000, { shown })

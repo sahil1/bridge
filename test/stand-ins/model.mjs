@@ -10,7 +10,7 @@
 //   "bridge ay eye" to "Bridge AI", rewrites a line that says "rewrite me" (which meetings.js
 //   turns down), and leaves out "Thanks for watching" and "drop me please"; Assist suggests a
 //   question about what the files say (or the invite, without them) and a check of the last thing
-//   said. Prep Assist, before a meeting: a goal from the invite, a follow-up on what's still open
+//   said. AI Assist's meeting prep, before a meeting: a goal from the invite, a follow-up on what's still open
 //   and a question about the newest email, from what it was sent.
 //   Edit by voice ("Instruction: … Text: …"): the text with "teh" spelled right and its first letter a
 //   capital, in quotes and a code fence (which Bridge AI takes off).
@@ -26,7 +26,7 @@
 //   Refine ("You drew a diagram for"): labels the first arrow without a label, saying so, and says
 //   {"ok":true} once every arrow has one. "Change it": Start renamed Begin, Ship coloured red, a
 //   Cache box beside the first shape with an arrow to it; its review says ok.
-//   Signature Assist's "Explain this document": a mutual NDA between Northwind Labs and Contoso
+//   AI Assist's Sign this, "Explain this document": a mutual NDA between Northwind Labs and Contoso
 //   Ltd, a fee, a renewal worth a look on page 1 ("renews automatically").
 //   Studio's decks: a deck of four slides (its title from what it's about, or the document's first
 //   line), a slide rewritten as big numbers ("Rewritten"), a new slide of next steps.
@@ -35,9 +35,9 @@
 //   /api/chat answering as Ollama does (its message, pictures as base64 in `images`) with the same
 //   answers as above, logged with path '/api/chat'.
 //   Mail's How You Write: a profile saying how many emails and meeting lines it read, with the first
-//   email as its example. Reply Assist: a reply in a code fence (which Bridge AI takes off) with the
+//   email as its example. AI Assist's Draft a reply: a reply in a code fence (which Bridge AI takes off) with the
 //   free times it was given, a nudge, and the draft shorter, warmer or more direct.
-//   Files Assist's Ask AI ("Suggest how to organize this folder."): a Screenshots folder with the
+//   Ask a Model in AI Assist's look at a folder ("Suggest how to organize this folder."): a Screenshots folder with the
 //   first screenshot in the list it was sent as its example, an Installers folder, and two steps.
 //   Anything else: "echo: <the last thing said>".
 //   A key of sk-bad is turned down (HTTP 401), as a provider would.
@@ -60,7 +60,7 @@ const ARCH = { direction: 'LR', groups: [{ id: 'aws', label: 'AWS us-east-1', ki
 const NET = { direction: 'TB', groups: [{ id: 'lan', label: 'Office LAN', kind: 'vpc' }], nodes: [{ id: 'inet', label: 'Internet', shape: 'internet' }, { id: 'fw', label: 'Firewall', shape: 'firewall' }, { id: 'sw', label: 'Switch', shape: 'switch', group: 'lan' }, { id: 'srv', label: 'File server', shape: 'server', group: 'lan' }, { id: 'pc', label: 'Desktops', shape: 'client', group: 'lan' }],
   edges: [{ from: 'inet', to: 'fw', label: 'WAN' }, { from: 'fw', to: 'sw', label: '1 Gbps' }, { from: 'sw', to: 'srv', label: 'LAN' }, { from: 'sw', to: 'pc', label: 'LAN' }] }
 
-// Files Assist's suggestion, from the names it was sent.
+// AI Assist's suggestion for a folder, from the names it was sent.
 function filesPlan(text) {
   const names = [...text.matchAll(/^(\S[^\n]*?)  \d/gm)].map((x) => x[1])
   const shot = names.find((n) => /screenshot/i.test(n)) || names[0] || ''
@@ -85,7 +85,7 @@ function answer(b) {
     return say(JSON.stringify({ ok: false, ...spec, changes: [`Labelled the arrow from ${name(bare.from)} to ${name(bare.to)} with HTTP, so it says what goes along it.`] }))
   }
   if (/^You changed this diagram as asked:/.test(first)) return say('{"ok":true}')
-  // Signature Assist's "What you're signing": a mutual NDA, in the shape it asks for.
+  // AI Assist's Sign this, "What you're signing": a mutual NDA, in the shape it asks for.
   if (/^Explain this document, which I have been asked to sign\./.test(first)) {
     return say(`\`\`\`json\n${JSON.stringify({ kind: 'Mutual NDA', what: 'Two companies agree to keep what they share with each other secret for two years.', parties: [{ name: 'Northwind Labs', role: 'shares and receives' }, { name: 'Contoso Ltd', role: 'shares and receives' }], money: ['A fee of $1,200 a year, paid by Contoso Ltd'], dates: ['Starts on signing; lasts two years'], obligations: ['Keep the other side\'s information secret', 'Return or destroy it when asked'], renewal: 'It renews by itself every year unless either side says no 30 days before.', termination: 'Either side can end it with 30 days\' notice.', watch: [{ what: 'It renews by itself unless you say no in time.', page: 1, quote: 'renews automatically' }] })}\n\`\`\``)
   }
@@ -127,7 +127,7 @@ function answer(b) {
     if (lastSaid) items.push({ kind: 'check', text: `Check: "${lastSaid.slice(0, 40)}"`, why: 'Just said' })
     return say(JSON.stringify({ items }))
   }
-  // Prep Assist, before a meeting: a goal from the invite, a follow-up on what's still open from last
+  // AI Assist's meeting prep, before a meeting: a goal from the invite, a follow-up on what's still open from last
   // time (theirs first), and a question about the newest email with them, each from what it was sent.
   if (/^Prepare me for a meeting:/.test(last)) {
     const invite = /^The invite says: (.+)$/m.exec(last)?.[1]
@@ -194,7 +194,7 @@ function answer(b) {
     const profile = [`Greets with "${/\bHey\b/.test(last) ? 'Hey' : 'Hi'}" and the first name`, /Cheers/.test(last) ? 'Signs off with "Cheers"' : 'Signs off with their name', 'Short replies, two or three sentences', `Read ${emails} emails and ${lines} meeting lines`]
     return say(JSON.stringify({ profile, examples: emails ? ['E1'] : [] }))
   }
-  // Reply Assist: a reply, a nudge, or the draft so far shorter, warmer or more direct. The times it
+  // AI Assist's Draft a reply: a reply, a nudge, or the draft so far shorter, warmer or more direct. The times it
   // was given go in as they were said.
   if (/reply to the email below|Write a short, friendly follow-up/.test(last)) {
     const first = (/The email[^(]*\(from "?([^\s<"]+)/.exec(last)?.[1] || 'there')

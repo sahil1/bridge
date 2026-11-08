@@ -19,7 +19,7 @@ import { docInfo, wordCss, listPlugin, commentPlugin, pagePlugin, pageOf, hfRend
 import { findPlugin } from '../search.js'
 import { cleanPaste, listsOut } from '../paste.js'
 import { keys } from '../keys.js'
-import { Tool, Drop, Item, Glyph, Swatches, Markers, markerCss, FindBar, Outline, useHeadings, WordCount, Shortcuts, AskInPlace, countWords, fontHere, COMMON_FONTS, SIZES } from '../doctools.jsx'
+import { Tool, Drop, Item, Glyph, Swatches, Markers, markerCss, FindBar, Outline, useHeadings, WordCount, Shortcuts, AskInPlace, askItems, countWords, fontHere, COMMON_FONTS, SIZES } from '../doctools.jsx'
 import '../doc.css'
 
 // A document. A Word file is edited as Word has it (ooxml.js): its pages at their size and margins,
@@ -46,7 +46,7 @@ export default function DocEditor({ file, data, onDirty, onStats, handle, readOn
     return () => { on = false; for (const u of urls) URL.revokeObjectURL(u) }
   }, [data]) // eslint-disable-line react-hooks/exhaustive-deps
   if (!start) return <div className="sd-empty sd-loading" role="status"><Icon name="refresh" size={16} className="spin" /><span className="muted">{t('Opening…')}</span></div>
-  if (start.error) return <div className="sd-empty" role="alert"><Icon name="alert" size={18} /><b>{t("Couldn't read this Word file: {error}", { error: start.error })}</b><span className="muted small">{t('The file is as it was. Download it to open it in Word, or put back an earlier version.')}</span></div>
+  if (start.error) return <div className="sd-empty" role="alert"><Icon name="alert" size={18} /><b>{t("Couldn't read this Word file: {error}", { error: start.error })}</b><span className="muted small">{t('The file is as it was. Download it to open it in Word, or restore an earlier version.')}</span></div>
   if (plain) return <PlainText text={start.text} onDirty={onDirty} onStats={onStats} handle={handle} readOnly={readOnly} />
   if (md) return <MarkdownDoc file={file} text={start.text} onDirty={onDirty} onStats={onStats} handle={handle} readOnly={readOnly} onOpen={onOpen} />
   return <WordDoc file={file} model={start.model} onDirty={onDirty} onStats={onStats} handle={handle} readOnly={readOnly} onOpen={onOpen} />
@@ -230,7 +230,7 @@ function useStatus(editor, onStats, pages, openCount) {
     return () => { clearTimeout(id); editor.off('update', tell); editor.off('selectionUpdate', tell) }
   }, [editor, onStats, pages?.total, pages?.current, openCount]) // eslint-disable-line react-hooks/exhaustive-deps
 }
-// What's picked and the text around it, for Ask AI; and the change put in, a paragraph for each
+// What's picked and the text around it, for AI Assist; and the change put in, a paragraph for each
 // paragraph of it, in the look of where it goes.
 function pickedOf(editor) {
   const { from, to, empty } = editor.state.selection
@@ -260,7 +260,7 @@ function putIn(editor, range, text, below, paraAttrs) {
 }
 
 // A document's frame: its toolbar and bars, then the outline, the desk with the page, and a side
-// panel; Ask AI over the page.
+// panel; AI Assist over the page.
 function useFindKeys(setFinding, setCount, print, setHelp) {
   const printRef = useRef(print)
   printRef.current = print
@@ -395,8 +395,10 @@ function WordDoc({ file, model, onDirty, onStats, handle, readOnly, onOpen }) {
   const [linking, setLinking] = useState(null)
   const [exporting, setExporting] = useState(false)
   const [settingUp, setSettingUp] = useState(false)
+  const asking = useRef(null) // AskInPlace's, for AI Assist in the page's header
 
   handle.current = {
+    assist: () => (readOnly ? [] : askItems(asking)),
     save: async () => {
       const edits = {}
       const make = {}
@@ -773,7 +775,7 @@ function WordDoc({ file, model, onDirty, onStats, handle, readOnly, onOpen }) {
         </div>
         {showComments && <Comments editor={editor} comments={comments} onClose={() => setShowComments(false)} />}
       </div>
-      {!readOnly && <AskInPlace editor={editor} file={file} scroller={desk} selection={() => pickedOf(editor)} apply={(range, text, below) => { touched.current = true; putIn(editor, range, text, below, (a) => ({ ...a, x: null, pa: '' })) }} />}
+      {!readOnly && <AskInPlace editor={editor} file={file} scroller={desk} hook={asking} selection={() => pickedOf(editor)} apply={(range, text, below) => { touched.current = true; putIn(editor, range, text, below, (a) => ({ ...a, x: null, pa: '' })) }} />}
       {counting && <WordCount editor={editor} pages={flow ? null : pages.total} onClose={() => setCount(false)} />}
       {editingHf && <HfEditor which={editingHf} info={info} model={model} page={page} css={css} scope={scope} value={hf} onClose={() => setEditingHf(null)} onDone={(next) => { touched.current = true; setHf(next); hfRef.current = next; stamp.current++; setEditingHf(null); onDirty(true); again.current?.() }} />}
       {helping && <Shortcuts word onClose={() => { setHelp(false); editor.commands.focus() }} />}
@@ -1113,7 +1115,9 @@ function MarkdownDoc({ file, text, onDirty, onStats, handle, readOnly, onOpen })
   const [linking, setLinking] = useState(null)
   const [exporting, setExporting] = useState(false)
   const picker = useRef(null)
+  const asking = useRef(null) // AskInPlace's, for AI Assist in the page's header
   handle.current = {
+    assist: () => (readOnly ? [] : askItems(asking)),
     save: async () => editor.storage.markdown.getMarkdown(),
     selection: () => {
       if (!editor) return null
@@ -1264,7 +1268,7 @@ function MarkdownDoc({ file, text, onDirty, onStats, handle, readOnly, onOpen })
           <EditorContent editor={editor} className="sd-page md" style={{ '--sd-ph': JSON.stringify(t('Write here…')) }} />
         </div>
       </div>
-      {!readOnly && <AskInPlace editor={editor} file={file} scroller={desk} selection={() => pickedOf(editor)} apply={(range, txt, below) => { touched.current = true; putIn(editor, range, txt, below, () => undefined) }} />}
+      {!readOnly && <AskInPlace editor={editor} file={file} scroller={desk} hook={asking} selection={() => pickedOf(editor)} apply={(range, txt, below) => { touched.current = true; putIn(editor, range, txt, below, () => undefined) }} />}
       {counting && <WordCount editor={editor} pages={null} onClose={() => setCount(false)} />}
       {helping && <Shortcuts word={false} onClose={() => { setHelp(false); editor.commands.focus() }} />}
       {!readOnly && linking == null && <LinkBubble editor={editor} href={s.href} scroller={desk} onEdit={() => setLinking(s.href || '')} onRemove={() => c().extendMarkRange('link').unsetLink().run()} />}

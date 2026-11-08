@@ -16,8 +16,9 @@ import './meetings.css'
 // instead (Settings › Meetings), a click on the bar opens and closes it. On a Mac it can move to the
 // menu bar for the meeting, out of the way of a screen you share. When a call starts: Take notes.
 // When it ends: Stop or keep recording. Otherwise (Settings › Meetings › Always): what needs you.
-// With AI Assist on, its newest suggestion shows under the bar, open or not, since you're looking
-// at the call: ✓ puts it in your notes, ✕ waves it away. Ten minutes before a meeting with other
+// With AI Assist's Suggest what to ask on, its newest suggestion shows under the bar, open or not,
+// since you're looking at the call: ✓ puts it in your notes, ✕ dismisses it. Its switch is the
+// wand and its verb, inline: the card is a window of its own, its size its content's, so no menu. Ten minutes before a meeting with other
 // people: its prep (who's coming, last time, goals to go in with), Join, and the whole of it.
 // Drag it from anywhere that isn't a button.
 // The recording itself is in the main window; this one asks it over a BroadcastChannel, and asks
@@ -218,7 +219,7 @@ export default function FloatCard() {
                 ? <button type="button" className="btn small" onClick={() => op('resume')}><Icon name="mic" size={12} /> {t('Resume')}</button>
                 : <button type="button" className="btn small" onClick={() => op('pause')}><Icon name="pause" size={12} /> {t('Pause')}</button>)}
               <button type="button" className="btn small" onClick={() => op('section')} title={t('Start the next part of the meeting here, like a lap. The transcript, your notes and the summary get a heading for each part.')}><Icon name="flag" size={12} /> {t('New section')}</button>
-              <button type="button" className={`btn small${m?.assist ? ' on' : ''}`} aria-pressed={!!m?.assist} onClick={() => act(() => setAssist(r.id, !m?.assist))} title={m?.assist ? t('AI Assist is on: it suggests what to ask or check next. Click to turn it off') : t('Turn on AI Assist: while it records, it suggests what to ask or check next, from what\'s said and the files')}><Icon name="bulb" size={12} /> {t('Assist')}</button>
+              <button type="button" className={`btn small fc-ai${m?.assist ? ' on' : ''}`} aria-pressed={!!m?.assist} onClick={() => act(() => setAssist(r.id, !m?.assist))} title={m?.assist ? t('AI Assist is suggesting what to ask or check next. Click to stop') : t('AI Assist: while it records, suggest what to ask or check next, from what\'s said and the files')}><Icon name="wand" size={12} /> {t('Suggest what to ask')}</button>
               <button type="button" className="btn small danger-soft" onClick={() => op('stop')}><Icon name="stop" size={12} /> {t('Stop')}</button>
               {here && (screen
                 ? <>

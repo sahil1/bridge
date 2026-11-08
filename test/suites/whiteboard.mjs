@@ -27,6 +27,12 @@ import { spawnSync } from 'node:child_process'
 import { startKit, startModel, checks, until, sleep, browser, page, shot, noServiceWorker, ROOT, TEST } from '../lib/harness.mjs'
 
 const { ok, done } = checks('whiteboard')
+// AI Assist, at the right end of a board's header (or a diagram file's bar), and one of its verbs:
+// Draw this or Change it.
+const assist = async (pg, verb = 'Draw this', bar = '.wb-view .pane-extras') => {
+  await pg.locator(`${bar} button[aria-label="AI Assist"]`).click()
+  await pg.locator('.ai-menu button', { hasText: verb }).click()
+}
 
 // The built app passes the check the release runs before packaging it: Excalidraw's own service
 // settings (excalidraw.com, its Firebase key) are left out of the build, source maps too.
@@ -218,7 +224,14 @@ try {
   await again.goto(kit.url)
   await again.waitForSelector('.excalidraw canvas', { timeout: 30000 })
   ok(await until(() => again.locator('.wb-view .pane-titles h2', { hasText: 'Untitled' }).count(), 5000), 'opened again, the board is open again')
-  await again.getByRole('button', { name: /Draw this/ }).first().click()
+  const wand = again.locator('.wb-view .pane-extras button[aria-label="AI Assist"]')
+  ok(await wand.evaluate((e) => e.parentElement.lastElementChild === e.nextElementSibling && e.nextElementSibling?.classList.contains('menu-anchor')), 'AI Assist at the right end of the board\'s header, with only More after it')
+  await wand.click()
+  const verbs = await again.locator('.ai-menu .ai-item-label').allInnerTexts()
+  ok(JSON.stringify(verbs) === JSON.stringify(['Draw this', 'Change it']) && await again.locator('.ai-menu button', { hasText: 'Change it' }).isEnabled(), 'a board\'s AI Assist: Draw this and Change it, Change it offered with a shape on the board', verbs)
+  await shot(again, `${tag}whiteboard-ai-menu`)
+  await again.locator('.ai-menu button', { hasText: 'Change it' }).click()
+  ok(await until(() => again.locator('.wb-draw [role="tab"][aria-selected="true"]', { hasText: 'Change it' }).count(), 5000) && /AI Assist/.test(await again.locator('.wb-draw-head').innerText()), 'Change it opens AI Assist\'s panel on Change it')
   ok(await until(() => again.locator('.wb-draw [role="tab"]', { hasText: 'Change it' }).isEnabled(), 5000) && live(readBoard('Untitled')).length === 1, 'with its shape (Change it is offered) and its file as it was', readBoard('Untitled'))
   await shot(again, `${tag}whiteboard-hand`)
   ok(!againErrors.length, 'no page errors opening it again', againErrors)
@@ -306,7 +319,7 @@ try {
 
   await openFile('design.excalidraw')
   await p.waitForSelector('.viewer .wb-file .excalidraw canvas', { timeout: 30000 })
-  await p.locator('.wb-file-bar').getByRole('button', { name: /Draw this/ }).click()
+  await assist(p, 'Draw this', '.wb-file-bar')
   await p.locator('.wb-draw [role="tab"]', { hasText: 'Draw this' }).click()
   await p.locator('.wb-draw textarea').fill('Draw the checkout')
   await p.locator('.wb-draw').getByRole('button', { name: 'Draw', exact: true }).click()
@@ -420,9 +433,11 @@ try {
   await ph.p.locator('.wb-card', { hasText: board }).click()
   await ph.p.waitForSelector('.excalidraw canvas', { timeout: 30000 })
   ok(await until(() => ph.p.locator('.excalidraw.excalidraw--mobile').count(), 5000), 'a board opens with Excalidraw\'s phone tools')
-  await ph.p.locator('.wb-view .pane-extras button[aria-label="Draw this"]').click()
+  await ph.p.locator('.wb-view .pane-extras button[aria-label="AI Assist"]').click()
+  await shot(ph.p, `${tag}whiteboard-phone-ai-menu`)
+  await ph.p.locator('.ai-menu button', { hasText: 'Draw this' }).click()
   await ph.p.waitForSelector('.wb-draw textarea')
-  ok(await fits(ph.p), 'and it and Draw this fit the screen')
+  ok(await fits(ph.p), 'and it and AI Assist\'s Draw this fit the screen')
   await shot(ph.p, `${tag}whiteboard-phone-board`)
   ok(!ph.errors.length, 'no page errors on a phone', ph.errors)
   await ph.ctx.close()

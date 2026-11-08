@@ -8,8 +8,9 @@ import { findPlaces } from './find.js'
 import { pageData, pagesText } from './read.js'
 import { SignatureCard } from './Signatures.jsx'
 import { KIND } from './Marks.jsx'
+import { AssistHead } from '../../AiAssist.jsx'
 
-// Signature Assist, beside a PDF: one step at a time, as calm as AI Assist in a meeting.
+// AI Assist's Sign this, beside a PDF: one step at a time, as calm as its suggestions in a meeting.
 //   1. What you're signing: the model you pick reads its text and says, in plain words, what it is,
 //      who's in it, the money, the dates, what you'd agree to, renewal and ending it, and what's
 //      worth a closer look (each a tap from its page). It says which model read it, and that the
@@ -55,14 +56,10 @@ export default function SignAssist({ file, pdf, setup, marks, setMarks, picked, 
     save: null,
   }
   return (
-    <aside className="sd-sign" aria-label={t('Signature Assist')}>
-      <div className="sd-panel-head sd-sign-head">
-        <Icon name="signature" size={14} />
-        <b>{t('Signature Assist')}</b>
+    <aside className="sd-sign" aria-label={t('AI Assist')}>
+      <AssistHead className="sd-panel-head sd-sign-head" what={t('Sign this')} onClose={onClose}>
         <span className="sd-beta">{t('Beta')}</span>
-        <span className="sd-grow" />
-        <button type="button" className="win-btn" onClick={onClose} aria-label={t('Close Signature Assist')} title={t('Close')}><Icon name="x" size={13} /></button>
-      </div>
+      </AssistHead>
       <div className="sd-sign-body" ref={body}>
         <ol className="sd-steps">
           {STEPS.map(([id, title], i) => {
@@ -85,7 +82,7 @@ export default function SignAssist({ file, pdf, setup, marks, setMarks, picked, 
             )
           })}
         </ol>
-        <p className="muted small sd-sign-honest"><Icon name="info" size={11} /> {t('Signature Assist puts a picture of the signature you drew on the page: a simple electronic signature. It isn\'t a certificate-based digital signature, so it doesn\'t lock the PDF or prove who signed it.')}</p>
+        <p className="muted small sd-sign-honest"><Icon name="info" size={11} /> {t('AI Assist puts a picture of the signature you drew on the page: a simple electronic signature. It isn\'t a certificate-based digital signature, so it doesn\'t lock the PDF or prove who signed it.')}</p>
       </div>
     </aside>
   )
@@ -171,7 +168,7 @@ function Explain({ file, pdf, setup, said, onSaid, onPoint, onNext, onSkip }) {
       )}
       {err && <p className="error-text small" role="alert">{t("Couldn't explain it: {error}", { error: err })}</p>}
       <div className="sd-step-acts">
-        <button type="button" className="btn small primary" onClick={explain} disabled={!use || !!busy}>{busy ? <><Icon name="refresh" size={12} className="spin" /> {busy}</> : <><Icon name="sparkle" size={12} /> {err ? t('Try again') : t('Explain it')}</>}</button>
+        <button type="button" className="btn small primary" onClick={explain} disabled={!use || !!busy}>{busy ? <><Icon name="refresh" size={12} className="spin" /> {busy}</> : <><Icon name="wand" size={12} /> {err ? t('Try again') : t('Explain it')}</>}</button>
         <button type="button" className="ghost-btn" onClick={onSkip} disabled={!!busy}>{t('Skip this')}</button>
       </div>
     </div>

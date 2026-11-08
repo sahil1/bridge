@@ -19,14 +19,15 @@ import Sidebar, { named } from './Sidebar.jsx'
 import { ListView, IconView, ColumnView, Thumb } from './views.jsx'
 import QuickLook from './QuickLook.jsx'
 import Info from './Info.jsx'
-import Assist from './Assist.jsx'
+import Assist, { folderAssist } from './Assist.jsx'
+import AiAssist from '../AiAssist.jsx'
 import { baseOf, getJson, postJson, useFolder, sorted, enc, joinFull, parentOf, nameOf, kindName, fmtSize, fmtWhen, WHERE_KEY } from './fsapi.js'
 import './explorer.css'
 
 const HOME = { machine: null, root: 'home', path: '' }
 const VIEWS = [['list', 'list', tx('As list')], ['icons', 'grid', tx('As icons')], ['columns', 'columns', tx('As columns')]]
 const ASKED_ABOUT = ['Desktop', 'Documents', 'Downloads']
-const SOON = () => t('Files only looks for now: renaming, moving and deleting are coming.')
+const SOON = () => t('Read-only for now: renaming, moving and deleting are coming.')
 const readWhere = () => { try { const w = JSON.parse(localStorage.getItem(WHERE_KEY)); return w?.root ? { machine: w.machine || null, root: String(w.root), path: String(w.path || '') } : HOME } catch { return HOME } }
 const keepWhere = (w) => { try { localStorage.setItem(WHERE_KEY, JSON.stringify({ machine: w.machine, root: w.root, path: w.path })) } catch { /* not kept */ } }
 const typingIn = (el) => !!el?.closest?.('input, textarea, select, [contenteditable="true"], .fx-ql, .fx-info, .fx-assist')
@@ -78,7 +79,9 @@ export default function Explorer() {
   const [sort, setSort] = usePersisted('cc-fx-sort', { by: 'name', desc: false })
   const [hidden, setHidden] = usePersisted('cc-fx-hidden', false)
   const [sideW, setSideW] = usePersisted('cc-fx-side-w', 210)
-  const [assist, setAssist] = usePersisted('cc-fx-assist', false)
+  const [assist, setAssist] = usePersisted('cc-fx-assist', false) // AI Assist's Look over this folder
+  const [assistAt, setAssistAt] = useState(null) // { id, n }: the section it opened at
+  const showAssist = (at) => { setAssist(at !== false); setAssistAt(at ? { id: at, n: Date.now() } : null) }
   const [sel, setSel] = useState(null)
   const [ql, setQl] = useState(false)
   const [info, setInfo] = useState(null) // the entry Get Info is on
@@ -424,18 +427,18 @@ export default function Explorer() {
                 </div>
                 <button type="button" className={`win-btn ${hidden ? 'on' : ''}`} onClick={() => setHidden(!hidden)} aria-pressed={hidden} aria-label={hidden ? t('Hide hidden files') : t('Show hidden files')} title={`${hidden ? t('Hide hidden files') : t('Show hidden files')} (⌘⇧.)`}><Icon name={hidden ? 'eye' : 'eye-off'} size={13} /></button>
                 <button type="button" className="win-btn" onClick={() => setInfo(current || folderEntry)} aria-label={t('Get Info')} title={t('Get Info (⌘I)')}><Icon name="info" size={13} /></button>
-                <button type="button" className={`btn small fx-assist-btn ${assist ? 'on' : ''}`} onClick={() => setAssist(!assist)} aria-pressed={assist} title={t('What\'s worth knowing about this folder')}><Icon name="sparkle" size={12} /> {t('Assist')}</button>
+                <AiAssist className="btn small fx-assist-btn" compact={narrow} on={!!assist} items={() => folderAssist(!!assist, showAssist)} />
               </div>
             </div>
             <div className="fx-panes">
               <div className={`fx-body ${view === 'columns' && !narrow && !searching ? 'cols' : ''}`} ref={mainRef} tabIndex={0}
                 onContextMenu={(e) => { if (e.target.closest('.fx-row, .fx-tile, .fx-crow')) return; e.preventDefault(); onMenu(folderEntry, e) }}
                 onMouseDown={(e) => { if (!e.target.closest('.fx-row, .fx-tile, .fx-crow, button, input, a')) setSel(null) }}>
-                {narrow && assist ? <div className="fx-assist" data-root={loc.root} data-rel={loc.path || ''}><Assist root={loc.root} rel={loc.path} machine={machine} onOpen={(p) => { setAssist(false); showPath(p) }} onClose={() => setAssist(false)} /></div> : body()}
+                {narrow && assist ? <div className="fx-assist" data-root={loc.root} data-rel={loc.path || ''}><Assist root={loc.root} rel={loc.path} machine={machine} at={assistAt} onOpen={(p) => { setAssist(false); showPath(p) }} onClose={() => setAssist(false)} /></div> : body()}
               </div>
               {info && <Info base={base} root={loc.root} entry={info} cloud={cloud} onClose={() => { setInfo(null); mainRef.current?.focus() }} onOpen={() => { const e = info; setInfo(null); openEntry(e) }}
                 openLabel={info.path === loc.path ? null : openLabel(info)} onReveal={here ? () => reveal(info) : null} revealLabel={revealLabel} onCopy={copy} />}
-              {assist && !narrow && <div className="fa-dock fx-assist" data-root={loc.root} data-rel={loc.path || ''}><Assist root={loc.root} rel={loc.path} machine={machine} onOpen={showPath} onClose={() => setAssist(false)} /></div>}
+              {assist && !narrow && <div className="fa-dock fx-assist" data-root={loc.root} data-rel={loc.path || ''}><Assist root={loc.root} rel={loc.path} machine={machine} at={assistAt} onOpen={showPath} onClose={() => setAssist(false)} /></div>}
             </div>
             <footer className="fx-foot muted small" role="status">{status}</footer>
           </section>

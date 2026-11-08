@@ -179,7 +179,7 @@ export default function Relay({ way, setWay, onOffer }) {
   const isoOf = (n) => (n ? new Date(n).toISOString() : null)
   const used = use && { window: { messages: use.window.messages, resetsAt: isoOf(use.window.resetsAt) }, week: { messages: use.week.messages, resetsAt: isoOf(use.week.resetsAt) } }
   // Phones (and a browser) paired here. Your other computers connect the same way, but they're
-  // under Your devices, where unlinking one tells it too (removing it here left it half linked).
+  // under Your Devices, where unlinking one tells it too (removing it here left it half linked).
   const phones = (st.devices || []).filter((d) => d.kind !== 'computer')
   return (
     <section className="st-sec">
@@ -299,7 +299,7 @@ function Computers() {
   }
   return (
     <>
-      <h4>Your computers</h4>
+      <h4>Your Computers</h4>
       <ul className="ph-devices">
         {list.map((c) => (
           <li key={c.relay}>

@@ -194,18 +194,18 @@ try {
   }
   {
     const { ctx, text } = await about(none)
-    ok(/Report a problem/.test(text) && !/Usage counts/.test(text), 'no endpoint: About & Updates says nothing about usage counts', text.slice(-400))
+    ok(/Report a problem/.test(text) && !/Usage counts/i.test(text), 'no endpoint: About & Updates says nothing about usage counts', text.slice(-400))
     await ctx.close()
   }
   {
     const { ctx, text } = await about(dnt, /Off on this computer/)
-    ok(/Usage counts/.test(text) && /Off on this computer: DO_NOT_TRACK is set\./.test(text) && !/Share anonymous usage counts/.test(text), 'DO_NOT_TRACK: a line saying it\'s off, and no switch', text.slice(-400))
+    ok(/Usage Counts/.test(text) && /Off on this computer: DO_NOT_TRACK is set\./.test(text) && !/Share anonymous usage counts/.test(text), 'DO_NOT_TRACK: a line saying it\'s off, and no switch', text.slice(-400))
     await ctx.close()
   }
   {
     const { ctx, p, text } = await about(later, /Share anonymous usage counts/)
     const box = p.locator('label', { hasText: 'Share anonymous usage counts' }).locator('input')
-    ok(/Usage counts/.test(text) && await box.count() === 1 && !(await box.isChecked()), 'with an endpoint: the switch, off', text.slice(-600))
+    ok(/Usage Counts/.test(text) && await box.count() === 1 && !(await box.isChecked()), 'with an endpoint: the switch, off', text.slice(-600))
     const heads = await p.locator('.st-body .st-sec > h4').allInnerTexts()
     ok(heads.at(-1) === 'Beta Features', 'Beta Features is the last thing on the page', heads)
     await p.locator('button', { hasText: 'See exactly what would be sent' }).click()

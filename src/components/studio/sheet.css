@@ -1,4 +1,4 @@
-/* A sheet (editors/SheetEditor.jsx): Univer's ribbon, formula bar, grid and sheet tabs, with Ask AI
+/* A sheet (editors/SheetEditor.jsx): Univer's ribbon, formula bar, grid and sheet tabs, with AI Assist
    and Charts beside it, and a CSV's separator and encoding above it. */
 .sh-body { position: relative; flex: 1; min-height: 0; display: flex; }
 .sh-body > .sd-univer { flex: 1; min-width: 0; min-height: 0; }
@@ -13,7 +13,7 @@
 .sh-csv select { height: 26px; padding: 0 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--pane); color: var(--ink); font: inherit; }
 .sh-csv-eol { margin-left: auto; }
 
-/* Ask AI and Charts: a panel at the side of the sheet. */
+/* AI Assist and Charts: a panel at the side of the sheet. */
 .sh-side[hidden] { display: none; }
 .sh-side { flex: none; width: 320px; display: flex; flex-direction: column; min-width: 0; min-height: 0; border-left: 1px solid var(--line); background: var(--pane); }
 .sh-side .sd-panel-head { position: static; gap: 6px; }
@@ -88,6 +88,7 @@
 .app.narrow .sh-send, .app.narrow .sh-acts .btn, .app.narrow .sh-acts .ghost-btn { height: 40px; padding: 0 16px; }
 .app.narrow .sh-wait .link-btn, .app.narrow .sh-fig .link-btn { min-height: 40px; }
 .sh-ribbon-icon { color: var(--accent); }
+.sh-ai-icon { color: var(--ai); }
 
 /* A new sheet with nothing in it: how to start, over the grid, out of the way of the cells. */
 .sh-start { position: absolute; left: 50%; bottom: 64px; transform: translateX(-50%); z-index: 50; display: flex; align-items: center; gap: 12px; width: min(560px, calc(100% - 32px)); box-sizing: border-box; padding: 12px 12px 12px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--pane); box-shadow: 0 8px 28px rgba(0, 0, 0, .12); }

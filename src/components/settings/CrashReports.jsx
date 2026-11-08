@@ -4,7 +4,7 @@ import { api } from '../../api.js'
 import { t } from '../../i18n/index.js'
 import './counts.css'
 
-// Settings › About & Updates › Crash reports (server/crashes.js): on unless you turn it off, and
+// Settings › About & Updates › Crash Reports (server/crashes.js): on unless you turn it off, and
 // shown only where it can work (the project has a crash server, and DO_NOT_TRACK isn't set). On, a
 // crash's report goes to the project by itself: the same text Report on GitHub shows, with names,
 // folders, emails and keys taken out. Each report sent can be read here, as it went.
@@ -28,7 +28,7 @@ export default function CrashReports() {
   }
   return (
     <section className="st-sec">
-      <h4>{t('Crash reports')}</h4>
+      <h4>{t('Crash Reports')}</h4>
       {s.refused ? <p className="muted small">{t('Off on this computer: {setting} is set.', { setting: s.refused })}</p> : (
         <>
           <label className="ph-check"><input type="checkbox" checked={!!s.send} disabled={busy} onChange={toggle} /> {t('Send crash reports by themselves')}</label>

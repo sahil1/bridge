@@ -141,7 +141,7 @@ export function askText({ rel, kind, instruction, selection, where, propose = fa
 }
 
 // ---------- A change shown before it's made ----------
-// Asked "in place" (a sheet's Ask AI), the agent doesn't edit the file: it writes the change as
+// Asked "in place" (a sheet's AI Assist), the agent doesn't edit the file: it writes the change as
 // JSON beside it (a dot file in the same folder, where any agent may write), Studio shows it on
 // the open file, and you keep it or not. Taken once: read, then deleted.
 const proposalName = (rel) => `.${path.basename(rel)}.studio-change.json`

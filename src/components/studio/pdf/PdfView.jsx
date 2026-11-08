@@ -13,9 +13,9 @@ import './pdf.css'
 // A PDF, drawn by pdf.js at the screen's own sharpness: its pages in a column, their thumbnails
 // beside them, zoom (to the width, the whole page, a percentage; ⌘ and the wheel, or a pinch), find
 // in its text with every match marked, the page you're on and a way to any other, and its text
-// to select and copy (or to Ask an agent about). Links in it open in a tab of their own. Read
-// only: Studio doesn't change a PDF. With Signature Assist on (a beta feature), Sign explains it
-// and signs a copy (SignAssist.jsx).
+// to select and copy (or to Ask an agent about). Links in it open in a tab of their own.
+// Read-only: Studio doesn't change a PDF. With Sign PDFs on (a beta feature), AI Assist's Sign this
+// explains it and signs a copy (SignAssist.jsx).
 const SignAssist = lazy(() => import('./SignAssist.jsx'))
 const narrow = () => typeof matchMedia === 'function' && matchMedia('(max-width: 700px)').matches
 const ZOOMS = [['page-width', tx('Fit width')], ['page-fit', tx('Whole page')], ['0.5', '50%'], ['0.75', '75%'], ['1', '100%'], ['1.25', '125%'], ['1.5', '150%'], ['2', '200%'], ['3', '300%'], ['4', '400%']]
@@ -132,9 +132,10 @@ export default function PdfView({ file, data, onStats, handle, onOpen }) {
 
   useEffect(() => { onStats?.({ text: pages === 1 ? t('1 page') : t('{n} pages', { n: pages }) }) }, [pages, onStats])
 
-  // What you selected, for Ask an agent, with the page it's on.
+  // What you selected, for Ask an agent, with the page it's on; and AI Assist's Sign this.
   handle.current = {
     save: null,
+    assist: () => (signOn ? [{ label: t('Sign this'), hint: t('What you\'re signing in plain words, then your signature where it goes, in a signed copy'), on: signing, disabled: state.phase !== 'ready', run: () => { setSigning(!signing); if (signing) setPicked(null) } }] : []),
     selection: () => {
       const s = window.getSelection?.()
       const text = String(s || '').trim()
@@ -248,7 +249,6 @@ export default function PdfView({ file, data, onStats, handle, onOpen }) {
         {!phone && findRow}
         {phone && <button type="button" className={`sd-tool${findOpen ? ' on' : ''}`} onClick={() => (findOpen ? closeFind() : openFind())} aria-pressed={findOpen} title={t('Find in the PDF')} aria-label={t('Find in the PDF')} disabled={!ready}><Icon name="search" size={14} /></button>}
         <span className="sd-grow" />
-        {signOn && <button type="button" className={`btn small sd-pdf-sign${signing ? ' on' : ''}`} onClick={() => setSigning(!signing)} aria-pressed={signing} disabled={!ready} title={t('Signature Assist: what you\'re signing, then your signature where it goes, in a signed copy')}><Icon name="signature" size={13} /> <span className="sd-btn-label">{t('Sign')}</span></button>}
         {!phone && <a className="btn small" href={rawUrl(file)} target="_blank" rel="noreferrer" title={t('Open it in a tab of its own, in the browser\'s viewer')} aria-label={t('Open on its own')}><Icon name="external" size={12} /> <span className="sd-btn-label">{t('Open on its own')}</span></a>}
       </div>
       {phone && findOpen && <div className="sd-toolbar sd-pdf-findbar">{findRow}</div>}

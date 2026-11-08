@@ -1,9 +1,9 @@
-// Files Assist (with Files, a beta feature): what takes room in a folder you asked about and the
+// AI Assist in Files (a beta feature): what takes room in a folder you asked about and the
 // folders in it, and how it could be tidier. It's read-only. Nothing here renames, moves, deletes or
 // writes anything in your folders: there's no call in this file that could (no write, rename,
 // removal or change of times), and the panel's buttons only open a file or show it in Finder.
 // What's in a file is read for one thing, to tell whether two files of the same size are the same
-// (their SHA-256), and never leaves the computer. Ask AI sends names, sizes and dates, to the model
+// (their SHA-256), and never leaves the computer. Ask a Model sends names, sizes and dates, to the model
 // picked for it.
 //
 // A look runs in the background, a folder at a time, with no blocking call: macOS holds the first
@@ -145,7 +145,7 @@ export function start({ root, rel = '', dir, fresh = false, here = true }) {
   const full = path.resolve(dir, rel)
   const guard = guardOf(full)
   if (!here && guard && !mayLook(full) && !inPicked(full)) {
-    throw fail(`macOS asks before Bridge AI looks in ${guard} on ${helpers.computer()}, and nobody may be there to answer. Use Files Assist there first, on that computer.`, 'ask', 403)
+    throw fail(`macOS asks before Bridge AI looks in ${guard} on ${helpers.computer()}, and nobody may be there to answer. Use AI Assist there first, on that computer.`, 'ask', 403)
   }
   const scan = {
     // guard: the folder macOS asks about that it's in; asking: one it hasn't asked about yet.
@@ -502,7 +502,7 @@ export function view(scan) {
   }
 }
 
-// ---------- Ask AI: names, sizes and dates, to the model picked for it ----------
+// ---------- Ask a Model: names, sizes and dates, to the model picked for it ----------
 // The folder as a list of names: its folders (with what's in them) two deep, and the files in it
 // and in the folders straight inside it, up to so many. Never what's in a file.
 const LIST_FILES = 300
@@ -551,7 +551,7 @@ export const askText = (list) => [
 ].join('\n\n')
 
 const shape = (m) => ({ id: m.id, label: m.label, provider: m.provider || null, local: !!helpers.isLocal(m.id), builtin: !!m.builtin })
-// The model Ask AI uses: the one picked for it, else the local model built in once it's
+// The model Ask a Model uses: the one picked for it, else the local model built in once it's
 // downloaded. Nothing else is picked for you: a model elsewhere gets the names only once you say so.
 export async function modelInfo() {
   const list = await helpers.models().catch(() => [])
@@ -575,7 +575,7 @@ export async function ask(id, { model } = {}) {
   if (scan.ask?.state === 'running') return view(scan)
   const info = model ? await pickModel(model) : await modelInfo()
   const use = info.model
-  if (!use) throw fail('Pick a model for Ask AI first.', 'pick', 400)
+  if (!use) throw fail('Pick a model to ask first.', 'pick', 400)
   const text = askText(scan.listing.text)
   scan.ask = { state: 'running', model: use, at: Date.now(), sent: { files: scan.listing.files, folders: scan.listing.folders, text: scan.listing.text } }
   const mine = scan.ask

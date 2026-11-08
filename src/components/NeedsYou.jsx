@@ -365,10 +365,10 @@ export function NeedsYouPanel({ data, refresh, phone = false, focus = null, onCl
   const quietFold = <QuietFold items={quiet} open={quietOpen} setOpen={setQuietOpen} uid={uid} multi={devices.length > 1} focus={focusId && quiet.some((i) => uid(i) === focusId) ? focusId : null} onClearAll={clearQuiet}
     card={(it) => <NeedsItem it={it} focused={uid(it) === focusId} quiet onOpen={onOpen} onGone={onGone} setNote={setNote} />} />
   return (
-    <div className={`ny-panel ${phone ? 'phone' : ''}`} ref={box} role="dialog" aria-label={t('Needs you')}>
+    <div className={`ny-panel ${phone ? 'phone' : ''}`} ref={box} role="dialog" aria-label={t('Needs You')}>
       <header className="ny-head">
         {phone && <button type="button" className="win-btn" onClick={onClose} aria-label={t('Back')}><Icon name="back" size={18} /></button>}
-        <h2>{t('Needs you')}{waiting > 0 && <span className="ny-count">{waiting}</span>}</h2>
+        <h2>{t('Needs You')}{waiting > 0 && <span className="ny-count">{waiting}</span>}</h2>
         <span className="ny-grow" />
         <div className="ny-sort" role="radiogroup" aria-label={t('Order')}>
           <button type="button" role="radio" aria-checked={by === 'urgent'} className={`fchip ${by === 'urgent' ? 'on' : ''}`} onClick={() => pickSort('urgent')}>{t('Most urgent')}</button>

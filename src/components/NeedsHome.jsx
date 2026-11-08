@@ -507,8 +507,9 @@ function ItemCard({ it, phone, onRead, h, pin }) {
 }
 
 // A meeting coming up: when, the brief from the last in the series (for the next one), the files in
-// its invite, Join, and Prep for one with other people (Prep Assist: who's coming, last time, your
-// mail with them, goals to go in with), the whole of it in the calendar.
+// its invite, Join, and Prepare for one with other people (AI Assist's Prepare for this meeting:
+// who's coming, last time, your mail with them, goals to go in with), the whole of it in the
+// calendar.
 function EventRow({ e, now, next, onOpenMeeting, onCalendar }) {
   const brief = useBrief(next ? e : null)
   const [prep, setPrep] = useState(false)
@@ -528,7 +529,7 @@ function EventRow({ e, now, next, onOpenMeeting, onCalendar }) {
         <b>{e.title}</b>
         {(when || said) && <span className="hm-item-sub">{[when, said].filter(Boolean).join(' · ')}</span>}
         {e.links?.length > 0 && <span className="hm-links">{e.links.slice(0, 4).map((x, i) => <a key={i} href={x.url} target="_blank" rel="noreferrer"><Icon name="file" size={11} />{shortTitle(x.name || x.url, 40)}</a>)}</span>}
-        {others && <button type="button" className={`link-btn hm-prep-btn${prep ? ' on' : ''}`} aria-expanded={prep} onClick={() => setPrep(!prep)} title={t("Who's coming, last time with them, your mail with them and goals to go in with")}><Icon name="bulb" size={11} /> {prep ? t('Hide prep') : t('Prep')}</button>}
+        {others && <button type="button" className={`link-btn hm-prep-btn${prep ? ' on' : ''}`} aria-expanded={prep} onClick={() => setPrep(!prep)} title={t("AI Assist: who's coming, last time with them, your mail with them and goals to go in with")}><Icon name="wand" size={11} /> {prep ? t('Hide prep') : t('Prepare')}</button>}
       </div>
       {(e.join || next) && (
         <div className="hm-ev-acts">

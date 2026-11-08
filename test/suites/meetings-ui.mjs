@@ -242,7 +242,7 @@ process.stdout.write('@@EV@@Pricing review (Work)\\u00a6' + d.getFullYear() + '-
   await p.locator('.mt-places button', { hasText: 'Archived' }).click()
   ok(!!(await until(async () => (await p.locator('.mt-row').count()) === 1, 4000)), 'Archived lists the archived one')
   await p.locator('.mt-row-open', { hasText: 'Vendor call' }).click({ button: 'right' })
-  await p.locator('.ctx-menu button', { hasText: 'Take out of the archive' }).click()
+  await p.locator('.ctx-menu button', { hasText: 'Unarchive' }).click()
   ok(!!(await until(async () => (await p.locator('.mt-places button').allInnerTexts()).map((x) => x.trim()).join('|') === 'All|Planning|Vendors', 6000)), 'taken out of the archive from its menu')
 
   // Asking about your meetings: the answer's [1] opens the meeting it came from, and whatever else the
@@ -286,7 +286,7 @@ process.stdout.write('@@EV@@Pricing review (Work)\\u00a6' + d.getFullYear() + '-
   ok(await p.locator('.mt-dialog', { hasText: 'Delete this meeting?' }).isVisible().catch(() => false), 'Delete asks first on a meeting\'s own menu too')
   await p.locator('.mt-dialog button', { hasText: 'Cancel' }).click()
 
-  // ---------- A transcript cleaned up, AI Assist, and files you got for a meeting ----------
+  // ---------- A transcript cleaned up, AI Assist, suggestions and files you got for a meeting ----------
   const openMeeting = async (title) => {
     await p.locator('.rail-nav-btn', { hasText: 'Meetings' }).click()
     await p.locator('.mt-places button', { hasText: 'All' }).click()
@@ -316,6 +316,19 @@ process.stdout.write('@@EV@@Pricing review (Work)\\u00a6' + d.getFullYear() + '-
   await fixedLine.hover()
   await fixedLine.locator('button', { hasText: 'Undo' }).click()
   ok(!!(await until(async () => (await p.locator('.mt-transcript .mt-line', { hasText: 'demo bridge ay eye' }).count()) === 1, 6000)), 'Undo puts the line back as heard')
+  // AI Assist at the right end of the header, before ⋯: what a model does for a finished meeting.
+  const wand = p.locator('.mt-view .pane-head button[aria-label="AI Assist"]')
+  ok(await wand.evaluate((e) => !!e.nextElementSibling?.classList.contains('menu-anchor') && !e.nextElementSibling.nextElementSibling), 'AI Assist at the right end of the meeting\'s header, with only ⋯ after it')
+  await wand.click()
+  const did = await p.locator('.ai-menu .ai-item-label').allInnerTexts()
+  ok(['Write the summary', 'Clean up the transcript again', 'Ask about this meeting'].every((x) => did.includes(x)) && !did.includes('Suggest what to ask'), 'a finished meeting\'s AI Assist: the summary, the cleanup again, a question about it; no suggestions once it\'s over', did)
+  await shot(p, `${tag}meeting-ai-menu`)
+  await p.locator('.ai-menu button', { hasText: 'Ask about this meeting' }).click()
+  ok(!!(await until(() => p.evaluate(() => !!document.activeElement?.closest?.('.mt-askbox')), 3000)), 'Ask about this meeting puts the cursor in its question box')
+  await p.locator('button[aria-label="More actions"]').click()
+  const more = await p.locator('.menu .menu-item').allInnerTexts()
+  ok(!more.some((x) => /Clean up the transcript|Work out who|Make a deck/.test(x)) && more.some((x) => /Undo the cleanup/.test(x)), 'the ⋯ menu leaves what a model does to AI Assist', more)
+  await p.keyboard.press('Escape')
 
   // ---------- Your notes while it records, then the summary and its action items ----------
   // A meeting recording (elsewhere): My notes stays in view beside what's picked. Once it ends, the
@@ -328,7 +341,7 @@ process.stdout.write('@@EV@@Pricing review (Work)\\u00a6' + d.getFullYear() + '-
   const notesBox = p.locator('.mt-cols.pinned .mt-mynotes .mt-mine')
   ok(!!(await until(() => notesBox.isVisible(), 8000)), 'a meeting recording in another window: My notes in view too')
   await p.locator('.seg button[data-view="assist"]').click()
-  ok(await notesBox.isVisible() && await p.locator('.mt-cols.pinned .mt-assist').isVisible(), 'Assist picked: beside your notes, not instead of them')
+  ok(await notesBox.isVisible() && await p.locator('.mt-cols.pinned .mt-assist').isVisible(), 'Suggestions picked: beside your notes, not instead of them')
   await p.locator('.seg button[data-view="transcript"]').click()
   await api(`/meetings/${U.id}/stop`, {})
   await until(async () => (await api(`/meetings/${U.id}`)).status === 'done', 10000)
@@ -457,7 +470,8 @@ process.exit(1)`)
     await shot(p, `${tag}meetings-next-since`, { clip: { x: 0, y: 0, width: 1440, height: 420 } })
   } else skip('since last time on the Take notes card', 'the calendar is macOS Calendar')
 
-  // While a meeting records: the Assist tab, Suggest now, ✓ into your notes; and a file you got for it
+  // While a meeting records: AI Assist's Suggest what to ask (ticked in its menu), the Suggestions
+  // tab, Suggest now, ✓ into your notes; and a file you got for it
   // (on a Mac, once you ask to look: macOS asks first).
   fs.mkdirSync(path.join(kit.home, 'Downloads'), { recursive: true })
   fs.writeFileSync(path.join(kit.home, 'Downloads', 'Mara_Lind_Resume.pdf'), 'x')
@@ -466,7 +480,12 @@ process.exit(1)`)
   await openMeeting('Interview - Mara Lind')
   await p.locator('.seg button[data-view="assist"]').click({ timeout: 5000 }).catch(() => {})
   await p.locator('.mt-assist-on input').click({ timeout: 5000 }).catch(() => {}) // on once the server says so
-  ok(!!(await until(async () => (await api(`/meetings/${I.id}`)).assist === true && await p.locator('.mt-assist-on input').isChecked(), 5000)), 'the Assist tab turns AI Assist on')
+  ok(!!(await until(async () => (await api(`/meetings/${I.id}`)).assist === true && await p.locator('.mt-assist-on input').isChecked(), 5000)), 'the Suggestions tab turns Suggest what to ask on')
+  await p.locator('.mt-view .pane-head button[aria-label="AI Assist"]').click()
+  const live = await p.locator('.ai-menu').innerText()
+  ok(/Suggest what to ask/.test(live) && await p.locator('.ai-menu [aria-checked="true"]', { hasText: 'Suggest what to ask' }).count() === 1 && !(await p.locator('.mt-recbar button', { hasText: /Assist/ }).count()), 'while it records, the meeting\'s AI Assist has Suggest what to ask, ticked; the recording bar has no switch of its own', live)
+  await shot(p, `${tag}meeting-ai-menu-recording`)
+  await p.keyboard.press('Escape')
   await p.locator('.mt-assist button', { hasText: 'Suggest now' }).click({ timeout: 5000 }).catch(() => {})
   const tip = p.locator('.mt-assist .mt-tip.question').first()
   ok(!!(await until(async () => (await p.locator('.mt-assist .mt-tip').count()) >= 2, 10000)) && /Ask what they hope/.test(await tip.innerText({ timeout: 1000 }).catch(() => '')) && /The invite/.test(await tip.innerText({ timeout: 1000 }).catch(() => '')), 'Suggest now: suggestions, each saying what to do and what it\'s from', { page: await p.locator('.mt-assist').innerText().catch(() => ''), server: await api(`/meetings/${I.id}`).then((x) => ({ items: x.assistItems, error: x.assistError, assist: x.assist, status: x.status })) })
@@ -498,7 +517,7 @@ process.exit(1)`)
   await p.setViewportSize({ width: 1100, height: 600 })
   await p.waitForTimeout(400)
   const colsHigh = await p.locator('.mt-page > .mt-cols').first().evaluate((e) => e.getBoundingClientRect().height).catch(() => 0)
-  ok(colsHigh >= 239, 'a short window: Assist and your notes keep room to read in (the page scrolls)', { colsHigh })
+  ok(colsHigh >= 239, 'a short window: Suggestions and your notes keep room to read in (the page scrolls)', { colsHigh })
   await p.setViewportSize({ width: 1440, height: 900 })
   await resume.locator('button', { hasText: 'Add' }).click({ timeout: 5000 }).catch(() => {})
   ok(!!(await until(async () => ((await api(`/meetings/${I.id}`)).links || []).some((l) => /Mara_Lind_Resume\.pdf$/.test(l.path || '')), 5000)), 'Add links it to the meeting')
