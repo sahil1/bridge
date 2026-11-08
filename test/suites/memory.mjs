@@ -1,4 +1,4 @@
-// Memory as a page of its own, a beta feature (memory), in the browser named by BRIDGE_TEST_BROWSER.
+// Memory, a page of its own for everyone, in the browser named by BRIDGE_TEST_BROWSER.
 // First what meeting memory keeps (server/meetmemory.js, in this process, on a folder of its own): a
 // summary's names by kind, leaving out places, languages, days, months and everyday words (in other
 // languages' words too), a first name alone, and a name speech to text spelled right by itself that
@@ -6,28 +6,34 @@
 // misheard and one a meeting says who or what it is; the older form of the block (names) still read.
 // The names memory has, said in a dictation (any case, a hyphen for a space), get that dictation, and
 // nothing new comes from one; a dictation gone is taken off. Two merged: one name, the other kept as
-// another way it's written, that a summary then finds it by.
+// another way it's written, that a summary then finds it by. About You first in what a model is
+// told, and not once it's switched off.
 //
-// Then a server with Memory off and a memory with a bit of everything in it: its routes answer 404
-// saying how to turn it on, meeting memory's own routes are as they were, Meetings' Memory opens the
-// dialog and the sidebar has no Memory. On (Settings › About & Updates › Beta Features): the
-// sidebar's Memory under Dictations, live. Each name's kind (yours, or a guess from an invite or its
-// note), the dictations it came up in (ones from before Memory was on and one after), what looks the
-// same, what looks like it adds little and why (never yours, a person or a name with a mishearing),
-// and About You made from it (your name and organization, what you work on, the people and
+// Then a server whose settings still have Memory's old beta switch, off, and a memory with a bit of
+// everything in it: no such beta feature (not in /config, not in Beta Features), its routes answer,
+// meeting memory's own routes are as they were, and the sidebar has Memory under Dictations. Each
+// name's kind (yours, or a guess from an invite or its note), the dictations it came up in (one
+// kept before memory was first looked at and one after), what looks the same, what looks like it
+// adds little and why (never yours, a person or a name with a mishearing), and About You made from
+// it, on without being asked (your name and organization, what you work on, the people and
 // organizations you deal with most), in Chief of Staff's folder too. The model writing notes and
 // the one tidying dictation are given it (the names, for tidying); yours once you write it; off,
 // neither is, and Chief of Staff's copy is gone.
 //
-// In the app, light and dark at 1440: the page from the sidebar, the collections and their counts,
-// a search, the tidy-up looked over with one kept and the rest taken out, a pair merged under the
-// name picked and one kept apart, a kind changed, a dictation opened from a name, About You edited
-// and switched off and on, Meetings' Memory and Settings › Meetings opening the page; People with
-// the people you meet (Meeting Insights on), one kept in memory, and saying what's missing with it
-// off. On 375 and 430 px phones from More: nothing wider than the phone, every target whole.
+// In the app, light and dark at 1440: the page in a tab of its own from the sidebar, the collections
+// and the search at the top with About You beside them, their counts, the tidy-up looked over with
+// one kept and the rest taken out, a pair merged under the name picked and one kept apart, a kind
+// changed, a dictation opened from a name, About You edited and switched off and on, the tab and its
+// collection kept across a reload; People with the people you meet (Meeting Insights on), one kept
+// in memory, and saying what's missing with it off. Every way in opens the page, never a dialog:
+// Meetings' Memory, a meeting's menu, ⌘K and Settings › Meetings. A window showing another computer
+// (Desk, its own server, reached at /m/desk/ as Bridge AI does): Desk's memory, said to be Desk's;
+// each computer keeping its own Memory tab and collection as the window goes from one to the other;
+// Desk away, said, with Try again. On 375 and 430 px phones from More: nothing wider than the phone,
+// every target whole, and still Memory after a reload.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, startModel, checks, until, browser, page, shot, phoneFaults, withoutCutOff, OUT } from '../lib/harness.mjs'
+import { startKit, startModel, checks, until, browser, page, shot, phoneFaults, withoutCutOff, changeAnswer, OUT } from '../lib/harness.mjs'
 
 const { ok, done } = checks('memory')
 const DAY = 864e5
@@ -39,7 +45,6 @@ const ago = (days) => new Date(Date.now() - days * DAY).toISOString()
   fs.rmSync(home, { recursive: true, force: true })
   process.env.BRIDGE_HOME = home
   const m = await import('../../server/meetmemory.js')
-  m.configure({ trials: { memory: true } })
   const plain = Object.fromEntries(['India', 'Allemagne', 'Europe', 'German', 'Hindi', 'Indian', 'Monday', 'Mittwoch', 'March', 'Q3', 'FY25', '2025', 'CEO', 'API', '$5M', 'Acme', 'Priya Shah', 'Kubernetes'].map((w) => [w, m.plain(w)]))
   ok(plain.India === 'place' && plain.Allemagne === 'place' && plain.Europe === 'place' && plain.German === 'language' && plain.Hindi === 'language' && plain.Indian === 'language'
     && plain.Monday === 'time' && plain.Mittwoch === 'time' && plain.March === 'time' && plain.Q3 === 'time' && plain.FY25 === 'time' && plain['2025'] === 'time'
@@ -70,12 +75,12 @@ const ago = (days) => new Date(Date.now() - days * DAY).toISOString()
   ok(merged.length === 1 && merged[0].also.includes('Dan') && merged[0].note === 'runs the depot' && ['m1', 'm3', 'm4'].every((x) => merged[0].meetings.includes(x)), 'two merged: one name with both meetings and the note, the other written another way, and found by it', merged)
   ok(/Dan Ruiz: runs the depot/.test(m.about('I spoke to Dan')) && m.about('nothing here') === '', 'and the notes know it by either name; with nothing to say, nothing')
   m.setDraft('I\'m Tester.\nThe people I deal with most: Dan Ruiz.', ['Dan Ruiz'])
-  ok(/^About me, from my memory in Bridge AI:\nI'm Tester\.\nThe people I deal with most: Dan Ruiz\./.test(m.about('nothing here')) && m.personaNames().join() === 'Dan Ruiz', 'About you goes first, line by line, with Memory on')
-  m.configure({ trials: { memory: false } })
-  ok(m.about('nothing here') === '' && !m.personaNames().length, 'and not with Memory off')
+  ok(/^About me, from my memory in Bridge AI:\nI'm Tester\.\nThe people I deal with most: Dan Ruiz\./.test(m.about('nothing here')) && m.personaNames().join() === 'Dan Ruiz', 'About you goes first, line by line, with nothing to turn on')
+  m.setAboutYou({ on: false })
+  ok(m.about('nothing here') === '' && !m.personaNames().length, 'and not once it\'s switched off')
 }
 
-// ---------- A server, Memory off and then on ----------
+// ---------- A server, its settings from when Memory was a beta feature ----------
 const model = await startModel('memory')
 const me = 'Tester'
 const meetingIn = (data, id, { title, when, seconds = 1800, people = [], lines = [], summary }) => {
@@ -117,7 +122,16 @@ const seed = ({ data }) => {
   meetingIn(data, 'old', { title: 'Old offsite', when: ago(70), people: ['Tester'] })
   return {}
 }
-const kit = await startKit('memory', { env: seed })
+// Settings from a computer that had Memory's beta switch, and turned it off.
+const kit = await startKit('memory', { env: seed, config: { trials: { memory: false } } })
+// Another computer, Desk, with a memory of its own.
+const desk = await startKit('memory-desk', {
+  env: ({ data }) => {
+    fs.mkdirSync(path.join(data, 'meetings'), { recursive: true })
+    fs.writeFileSync(path.join(data, 'meetings', 'memory.json'), JSON.stringify({ terms: [term('Kestrel', { source: 'you', kind: 'project', note: 'our robot arm' }), term('Fabrikam', { note: 'customer, buys the arms' })] }, null, 2))
+    return {}
+  },
+})
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
 const api = kit.api
@@ -135,41 +149,46 @@ const tidied = async (text) => {
   await api('/dictation/tidy', { text }).catch(() => {})
   return JSON.stringify(model.requests().slice(n))
 }
+// Which tab is in front, and which collection is picked.
+const front = (p) => p.locator('.ws-tab.main').first().getAttribute('data-pane', { timeout: 1000 }).catch(() => null)
+const picked = (p) => p.locator('.mm-colls button[aria-selected="true"]').first().getAttribute('data-coll', { timeout: 1000 }).catch(() => null)
 
 try {
   await api('/setup', { name: me })
+  await desk.api('/setup', { name: me })
   await api('/providers/openai', { values: { OPENAI_API_KEY: 'sk-test', OPENAI_BASE_URL: `${model.url}/v1` } }, 'PUT')
   // Meeting Insights off to start with (it would turn itself on at the fifth meeting).
   await api('/settings', { meetings: { engine: 'openai', model: 'openai:gpt-5', autoSummary: false, cleanup: false }, dictation: { tidyModel: 'openai:gpt-5' }, trials: { 'dictation-cleanup': true, 'meeting-insights': false } }, 'PATCH')
-  // A dictation from before Memory was on.
+  // A dictation from before memory is first looked at.
   await api('/dictations', { text: 'Send the Atlas numbers to Priya Shah before the Northwind call', ms: 2400 })
 
-  // ---------- Off ----------
-  const off = await api('/memory').then(() => null, (e) => e)
-  ok(off?.status === 404 && /Memory is a beta feature\. Turn it on in Settings › About & Updates › Beta Features/.test(off.message), 'off: its routes answer 404 saying how to turn it on', off?.message)
+  // ---------- For everyone ----------
+  const conf = await api('/config')
+  ok(!('memory' in conf.trials) && JSON.parse(fs.readFileSync(path.join(kit.data, 'config.json'), 'utf8')).trials?.memory === false, 'no beta feature: /config has no such trial, though these settings still say it was off', conf.trials)
+  let v = await api('/memory')
+  ok(v.terms.length === TERMS.length, 'its routes answer all the same')
   const before = (await api('/meetings/memory')).terms
   ok(before.length === TERMS.length && before.some((x) => x.term === 'India'), 'meeting memory\'s own routes are as they were')
-  let s0 = await summaryOf('a1')
-  ok(!/About me, from my memory/.test(s0) && /Atlas: our billing app/.test(s0), 'the notes get memory\'s names and not About you', s0.slice(0, 600))
-  ok(!/Names this person often says/.test(await tidied('um send it to priya shah')), 'nor does tidying')
-  const desk = await page(b, kit.url, { mode: 'light' })
-  pages.push(desk)
-  const p = desk.p
-  await p.locator('.rail-nav-btn', { hasText: 'Meetings' }).first().click()
-  await p.locator('.mt-view .pane-head button.btn', { hasText: 'Memory' }).click()
-  ok(!!(await until(() => p.locator('.mt-dialog[aria-label="Meeting memory"]').count(), 8000)) && !(await p.locator('.rail-nav-btn', { hasText: /^\s*Memory\s*$/ }).count()), 'off: Meetings\' Memory is its dialog, and the sidebar has no Memory')
-  await p.keyboard.press('Escape')
-
-  // ---------- On ----------
-  await api('/settings', { trials: { memory: true } }, 'PATCH')
-  ok(!!(await until(() => p.locator('.rail-nav-btn', { hasText: /^\s*Memory\s*$/ }).count(), 8000)), 'on: Memory is in the sidebar at once')
+  const deskPage = await page(b, kit.url, { mode: 'light' })
+  pages.push(deskPage)
+  const p = deskPage.p
+  ok(!!(await until(() => p.locator('.rail-nav-btn', { hasText: /^\s*Memory\s*$/ }).count(), 15000)), 'Memory is in the sidebar')
+  // (Dictations shows there once the sidebar has heard there's one.)
+  await until(() => p.locator('.rail-nav-btn', { hasText: 'Dictations' }).count(), 8000)
   const order = await p.locator('.rail-nav .rail-nav-btn').allInnerTexts()
   ok(order.findIndex((x) => /Memory/.test(x)) === order.findIndex((x) => /Dictations/.test(x)) + 1, 'under Dictations, the two it learns from above it', order)
-  // A dictation once it's on.
+  await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'about' } })))
+  const betas = p.locator('.modal.settings .st-sec', { has: p.locator('h4', { hasText: 'Beta Features' }) })
+  await betas.locator('.st-check').first().waitFor({ timeout: 8000 })
+  const listed = (await betas.locator('.st-check b').allInnerTexts()).map((x) => x.trim())
+  ok(listed.includes('Studio') && !listed.includes('Memory'), 'and Beta Features doesn\'t list it', listed)
+  await p.keyboard.press('Escape')
+  await until(async () => !(await p.locator('.modal.settings').count()), 5000)
+  // A dictation after.
   await api('/dictations', { text: 'Ask open-ai about the Atlas invoice', ms: 1800 })
-  let v = await until(async () => { const r = await api('/memory'); const atlas = r.terms.find((x) => x.term === 'Atlas'); return atlas?.dictations.length === 2 ? r : null }, 8000)
+  v = await until(async () => { const r = await api('/memory'); const atlas = r.terms.find((x) => x.term === 'Atlas'); return atlas?.dictations.length === 2 ? r : null }, 8000)
   const by = (n) => v.terms.find((x) => x.term === n)
-  ok(!!v, 'the dictations, from before Memory was on and since, are on the names they say', v?.terms.map((x) => [x.term, x.dictations.length]))
+  ok(!!v, 'the dictations, from before memory was first looked at and since, are on the names they say', v?.terms.map((x) => [x.term, x.dictations.length]))
   ok(by('Priya Shah').kind === 'person' && by('Priya Shah').guessed && by('Northwind').kind === 'org' && by('Acme').kind === 'org' && by('Atlas').kind === 'project' && !by('Atlas').guessed && by('Kanban board').kind === 'term' && by('Jordan').kind === 'person' && by('Open AI').dictations.length === 1,
     'each one\'s kind: yours, a summary\'s, or a guess from the invites and its note', v.terms.map((x) => [x.term, x.kind, x.guessed]))
   const why = Object.fromEntries(v.little.map((x) => [v.terms.find((t) => t.id === x.id).term, x.why]))
@@ -178,19 +197,28 @@ try {
   ok(pairs.includes('Priya Shah|Priya') && pairs.some((x) => /^(Open AI\|OpenAI|OpenAI\|Open AI)$/.test(x)) && pairs.length === 2, 'what looks the same: written alike, and a first name with the whole one (kept first)', pairs)
   const draft = v.aboutYou.text
   ok(v.aboutYou.on && !v.aboutYou.yours && /^I'm Tester, at Acme\.$/m.test(draft) && /^What I work on: Atlas \(our billing app\)\.$/m.test(draft) && /^The people I deal with most: Priya Shah \(head of data at Northwind\)/m.test(draft) && /^The organizations I deal with most: Northwind \(customer, buys the enterprise plan\)/m.test(draft) && !/India|Monday/.test(draft),
-    'About You made from it: your name and company, your work, the people and organizations most', draft)
+    'About You made from it, and on without being asked: your name and company, your work, the people and organizations most', draft)
   ok(!!(await until(() => read(chiefFile())?.includes(draft), 5000)) && /# About Tester\n\nWhat Bridge AI knows about Tester, made on this computer/.test(read(chiefFile())), 'and it\'s in Chief of Staff\'s folder', read(chiefFile()))
   const chiefMd = read(path.join(kit.data, 'chief', 'CLAUDE.md')) || ''
   ok(/When there's an `about-you\.md` in this folder/.test(chiefMd), 'which Chief of Staff is told to read', chiefMd.slice(0, 300))
-  s0 = await summaryOf('a1')
-  ok(s0.includes(`About me, from my memory in Bridge AI:\n${draft}`), 'the model writing notes is given it', s0.slice(0, 900))
+  let s0 = await summaryOf('a1')
+  ok(s0.includes(`About me, from my memory in Bridge AI:\n${draft}`) && /Atlas: our billing app/.test(s0), 'the model writing notes is given it, with memory\'s names', s0.slice(0, 900))
   const tidy0 = await tidied('um send it to priya shah')
   ok(/Names this person often says, spelled the way they write them[^"]*Acme, Atlas, Priya Shah/.test(tidy0), 'and the one tidying dictation, the names in it', tidy0.slice(0, 600))
 
   // ---------- In the app ----------
   await p.locator('.rail-nav-btn', { hasText: /^\s*Memory\s*$/ }).click()
-  const home = p.locator('.mm-home')
-  ok(!!(await until(() => home.locator('.mm-you .mm-you-text').count(), 10000)) && (await home.locator('.mm-you .mm-you-text').innerText()).includes('Priya Shah (head of data at Northwind)'), 'the page: About You first, as it was made')
+  const home = p.locator('.mm-page')
+  ok(!!(await until(() => home.locator('.mm-you .mm-you-text').count(), 10000)) && (await home.locator('.mm-you .mm-you-text').innerText()).includes('Priya Shah (head of data at Northwind)'), 'the page, with About You as it was made')
+  ok(await front(p) === 'view:memory' && !(await p.locator('.mt-dialog').count()), 'in a tab of its own, not a dialog', await front(p))
+  // The first screen: the collections and the search at the top, About You and what to look over
+  // beside them, the explanation out of the way.
+  const box = async (sel) => home.locator(sel).first().boundingBox()
+  const [tools, you, looks, how] = [await box('.mm-tools'), await box('.mm-you'), await box('.mm-looks'), await box('.mm-how')]
+  const pane = await p.locator('.mm-view').boundingBox()
+  ok(tools.y - pane.y < 90 && you.x >= tools.x + tools.width && Math.abs(you.y - tools.y) < 40 && looks.y + looks.height < pane.y + pane.height && how.y > looks.y && (await home.locator('.mm-item').count()) > 0 && (await home.locator('.mm-item').first().boundingBox()).y < pane.y + 260,
+    'the first screen: the collections and the search at the top, the names right under them, About You and what to look over beside them, and the explanation after those', { tools, you, looks, how, pane })
+  ok(you.height < 360 && (await home.locator('.mm-look').evaluateAll((xs) => xs.every((x) => x.getBoundingClientRect().height < 70))), 'About You and what to look over each compact', { you: you.height })
   const counts = Object.fromEntries(await home.locator('.mm-colls button').evaluateAll((bs) => bs.map((x) => [x.dataset.coll, Number(x.querySelector('.num').textContent)])))
   ok(counts.all === TERMS.length && counts.person === 3 && counts.org === 2 && counts.project === 1, 'the collections, each with how many', counts)
   await shot(p, `${tag}memory-light`)
@@ -247,7 +275,7 @@ try {
   ok(/Only the people memory has are here/.test(await home.locator('.mm-note').innerText().catch(() => '')), 'People, with Meeting Insights off: what it would add')
   await api('/settings', { trials: { 'meeting-insights': true } }, 'PATCH')
   await p.reload()
-  await home.locator('.mm-colls button[data-coll="person"]').click()
+  ok(!!(await until(async () => await front(p) === 'view:memory' && await picked(p) === 'person', 10000)), 'a reload keeps its tab in front, at the collection it was at', { front: await front(p), picked: await picked(p) })
   ok(!!(await until(() => home.locator('.mm-met-row[data-person="Dan Ruiz"]').count(), 10000)) && !(await home.locator('.mm-met-row[data-person="Priya Shah"]').count()), 'on: the people you meet that memory doesn\'t have', await home.locator('.mm-met').innerText().catch(() => ''))
   await home.locator('.mm-met-row[data-person="Dan Ruiz"] button').click()
   ok(!!(await until(async () => (await home.locator('.mm-item[data-term="Dan Ruiz"]').count()) && !(await home.locator('.mm-met-row[data-person="Dan Ruiz"]').count()), 8000)), 'one kept in memory, as a person')
@@ -255,20 +283,84 @@ try {
   ok(dan?.kind === 'person' && ['n1', 'n2', 'n3'].every((x) => dan.meetings.includes(x)), 'with the meetings you met in', dan)
   await home.locator('.mm-colls button[data-coll="all"]').click()
   await shot(p, `${tag}memory-after`)
-  // Meetings' Memory, and Settings › Meetings, open the page.
-  await p.locator('.rail-nav-btn', { hasText: 'Meetings' }).first().click()
+
+  // ---------- Every way in opens the page ----------
+  const away = async () => {
+    await p.locator('.rail-nav-btn', { hasText: 'Meetings' }).first().click()
+    await until(async () => await front(p) === 'view:meetings', 5000)
+  }
+  const opened = () => until(async () => await front(p) === 'view:memory' && (await home.isVisible()) && !(await p.locator('.mt-dialog, .modal.settings, .ctx-menu').count()), 8000)
+  await away()
   await p.locator('.mt-view .pane-head button.btn', { hasText: 'Memory' }).click()
-  ok(!!(await until(async () => (await home.isVisible()) && !(await p.locator('.mt-dialog').count()), 8000)), 'on: Meetings\' Memory opens the page, not the dialog')
+  ok(!!(await opened()), 'Meetings\' Memory opens the page, not a dialog')
+  await away()
+  await p.locator('.mt-view .mt-row-open', { hasText: 'Atlas planning' }).click({ button: 'right' })
+  await p.locator('.ctx-menu button', { hasText: 'Open Memory' }).click()
+  ok(!!(await opened()), 'and a meeting\'s menu, Open Memory')
+  await away()
+  await p.keyboard.press('ControlOrMeta+K')
+  await p.locator('.palette input').fill('memory')
+  await p.locator('.pal-item[data-id="a:memory"]').click()
+  ok(!!(await opened()), 'and ⌘K')
+  await away()
   await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'meetings' } })))
   await p.locator('.modal.settings button', { hasText: 'Open Memory' }).click()
-  ok(!!(await until(async () => (await home.isVisible()) && !(await p.locator('.modal.settings').count()), 8000)), 'and Settings › Meetings\' Open Memory, closing Settings')
-  ok(!real(desk.errors).length, 'no page errors', desk.errors)
+  ok(!!(await opened()), 'and Settings › Meetings\' Open Memory, closing Settings')
+  ok(!real(deskPage.errors).length, 'no page errors', deskPage.errors)
+
+  // ---------- A window showing Desk ----------
+  // As Bridge AI shows another of your computers: at /m/desk/, the page from here and every request
+  // it makes passed on to Desk (machines.js proxy), with Desk among your computers.
+  const DESK = { id: 'desk', name: 'Desk', relay: null, os: 'darwin', version: '3.12.0', state: 'linked', online: true, lastSeen: new Date().toISOString(), addedAt: ago(30), code: null, error: null, counts: {}, agents: [], needs: null, at: null, home: null, about: null, systemName: 'Desk', safety: null }
+  const both = await page(b, kit.url, { mode: 'light', before: async (ctx) => {
+    await changeAnswer(ctx, `${kit.url}/api/machines`, (r) => ({ ...r, machines: [...(r.machines || []), DESK] }))
+    await ctx.route(/\/m\/desk\//, async (r) => {
+      const u = new URL(r.request().url())
+      const rest = u.pathname.slice('/m/desk'.length)
+      if (rest === '/api/events') return r.abort()
+      const res = await r.fetch({ url: `${rest.startsWith('/api/') ? desk.url : kit.url}${rest}${u.search}` }).catch(() => null)
+      return res ? r.fulfill({ response: res }) : r.abort()
+    })
+  } })
+  pages.push(both)
+  const q = both.p
+  const mm = q.locator('.mm-page')
+  // Here: Memory at People.
+  await q.waitForSelector('.rail-nav-btn', { timeout: 15000 })
+  await q.locator('.rail-nav-btn', { hasText: /^\s*Memory\s*$/ }).click()
+  await mm.locator('.mm-colls button[data-coll="person"]').click()
+  ok(!!(await until(async () => await picked(q) === 'person' && /On this computer/.test(await q.locator('.mm-view .pane-sub').innerText()), 8000)), 'here: this computer\'s memory, at People')
+  // Desk: its own memory, said to be Desk's.
+  await q.goto(`${kit.url}/m/desk/`)
+  await q.waitForSelector('.rail-nav-btn', { timeout: 15000 })
+  ok(await front(q) !== 'view:memory', 'Desk\'s window has tabs of its own')
+  await q.locator('.rail-nav-btn', { hasText: /^\s*Memory\s*$/ }).click()
+  ok(!!(await until(async () => (await mm.locator('.mm-item[data-term="Kestrel"]').count()) === 1 && !(await mm.locator('.mm-item[data-term="Atlas"]').count()) && /On Desk/.test(await q.locator('.mm-view .pane-sub').innerText()), 10000)), 'Desk\'s window: Desk\'s memory, and it says so', await q.locator('.mm-view .pane-sub').innerText().catch(() => ''))
+  ok(/made and kept on Desk/.test(await mm.locator('.mm-you').innerText()), 'with About You made on Desk', await mm.locator('.mm-you').innerText())
+  await mm.locator('.mm-colls button[data-coll="project"]').click()
+  await until(async () => await picked(q) === 'project', 5000)
+  await shot(q, `${tag}memory-desk`)
+  // Back here, then Desk again: each where it was.
+  await q.goto(`${kit.url}/`)
+  ok(!!(await until(async () => await front(q) === 'view:memory' && await picked(q) === 'person' && (await mm.locator('.mm-item[data-term="Priya Shah"]').count()) === 1, 10000)), 'back to this computer: Memory in front, at People, its own names')
+  await q.goto(`${kit.url}/m/desk/`)
+  ok(!!(await until(async () => await front(q) === 'view:memory' && await picked(q) === 'project' && (await mm.locator('.mm-item[data-term="Kestrel"]').count()) === 1, 10000)), 'and Desk again: its Memory, at Projects & Products')
+  // Desk away: said, with Try again, and its memory once it's back.
+  const gone = (r) => r.fulfill({ status: 503, json: { error: 'Desk isn\'t connected', offline: true } })
+  await q.context().route(/\/m\/desk\/api\/memory$/, gone)
+  await q.reload()
+  ok(!!(await until(async () => /Memory on Desk can't be shown right now\.[\s\S]*Desk isn't connected/.test(await mm.locator('.mm-cant').innerText().catch(() => '')), 10000)), 'Desk away: it says Desk\'s memory can\'t be shown, and why', await mm.innerText().catch(() => ''))
+  await shot(q, `${tag}memory-desk-away`)
+  await q.context().unroute(/\/m\/desk\/api\/memory$/, gone)
+  await mm.locator('.mm-cant button', { hasText: 'Try again' }).click()
+  ok(!!(await until(async () => (await mm.locator('.mm-item[data-term="Kestrel"]').count()) === 1, 10000)), 'and Try again shows it once Desk is back')
+  ok(!real(both.errors).length, 'no page errors in either window', both.errors)
 
   // ---------- Dark, and phones ----------
   const dark = await page(b, kit.url, { mode: 'dark', store: { 'cc-mm-coll': 'person' } })
   pages.push(dark)
   await dark.p.locator('.rail-nav-btn', { hasText: /^\s*Memory\s*$/ }).click()
-  await until(() => dark.p.locator('.mm-home .mm-item').count(), 10000)
+  await until(() => dark.p.locator('.mm-page .mm-item').count(), 10000)
   await shot(dark.p, `${tag}memory-dark`)
   ok(!real(dark.errors).length, 'dark: no page errors', dark.errors)
   for (const [w, mode] of [[375, 'light'], [430, 'dark']]) {
@@ -277,16 +369,25 @@ try {
     await ph.p.setViewportSize({ width: w, height: 844 })
     await ph.p.locator('.tabbar button', { hasText: 'More' }).click()
     await ph.p.locator('.m-more-row[data-id="memory"]').click()
-    ok(!!(await until(() => ph.p.locator('.mm-home .mm-you').count(), 10000)), `${w} px: Memory from More`)
+    ok(!!(await until(() => ph.p.locator('.mm-page .mm-you').count(), 10000)), `${w} px: Memory from More`)
+    const [t0, y0] = [await ph.p.locator('.mm-tools').boundingBox(), await ph.p.locator('.mm-you').boundingBox()]
+    ok(t0.y < 380 && t0.y + t0.height <= 844 && y0.y > t0.y, `${w} px: the collections and the search on the first screen, About You under them`, { tools: t0, you: y0 })
     await shot(ph.p, `${tag}memory-phone-${w}-${mode}`)
-    await ph.p.locator('.mm-item').first().scrollIntoViewIfNeeded()
-    await ph.p.locator('.mm-item[data-term="Priya Shah"] .mm-from').click()
     let faults = await phoneFaults(ph.p, '.mm-view')
     ok(!Object.keys(faults).length, `${w} px: it fits, every target whole`, faults)
+    await ph.p.locator('.mm-item').first().scrollIntoViewIfNeeded()
+    await ph.p.locator('.mm-item[data-term="Priya Shah"] .mm-from').click()
+    faults = await phoneFaults(ph.p, '.mm-view')
+    ok(!Object.keys(faults).length, `${w} px: and with a name's meetings open`, faults)
     await shot(ph.p, `${tag}memory-phone-${w}-${mode}-names`)
     await ph.p.locator('.mm-item .mm-pen').first().click()
     faults = await phoneFaults(ph.p, '.mm-view')
     ok(!Object.keys(faults).length, `${w} px: and editing one, with fields that don't zoom`, faults)
+    await ph.p.locator('.mm-edit button', { hasText: 'Done' }).click()
+    await ph.p.locator('.mm-find input').fill('priya')
+    ok(!!(await until(async () => !(await ph.p.locator('.mm-you').isVisible()) && (await ph.p.locator('.mm-item[data-term="Priya Shah"]').isVisible()), 5000)), `${w} px: while searching, the names right under the search`)
+    await ph.p.reload()
+    ok(!!(await until(() => ph.p.locator('.m-more-view .mm-page').isVisible(), 10000)) && (await ph.p.locator('.tabbar button.on').innerText()).trim() === 'More', `${w} px: still Memory after a reload`)
     ok(!real(ph.errors).length, `${w} px: no page errors`, ph.errors)
   }
 } catch (e) {
@@ -296,6 +397,7 @@ try {
   for (const w of pages) await w.ctx.close().catch(() => {})
   await b.close()
   kit.stop()
+  desk.stop()
   model.stop()
 }
 process.exit(done().fail ? 1 : 0)

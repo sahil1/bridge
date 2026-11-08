@@ -1,21 +1,23 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import Icon from '../Icon.jsx'
 import { PaneHeader, usePersisted } from '../layout.jsx'
-import { api, usePoll, refetch } from '../../api.js'
+import { api, usePoll, refetch, machineId } from '../../api.js'
 import { t, tx } from '../../i18n/index.js'
 import { Fold, MEM_BY, memGroups, shortDay } from '../meetings/tools.jsx'
 import { openMeeting } from '../meetings/recording.jsx'
 import { openDictations } from '../dictations/shared.jsx'
+import { useMachines } from '../Machines.jsx'
 import '../meetings/meetings.css'
 import './memory.css'
 
-// Memory, a page of its own (a beta feature: memory; server/memoryview.js), under Dictations in the
-// sidebar and in the phone's More: what Bridge AI has learned from your meetings and dictations.
-// About You at the top (a few lines made from it, or as you wrote them, on or off), then what looks
-// the same (merged, or kept apart) and what looks like it adds little (for you to look over), then
-// the collections: People (memory's and, with Meeting Insights on, the people you meet), Organizations,
-// Projects & Products and Terms, each name with how it's misheard, its note, and the meetings and
-// dictations it came up in (each opens). Search, group, add, edit and delete as in Meetings' dialog.
+// Memory, a page of its own (server/memoryview.js), under Dictations in the sidebar and in the
+// phone's More: what Bridge AI has learned from your meetings and dictations. The collections and a
+// search come first: People (memory's and, with Meeting Insights on, the people you meet),
+// Organizations, Projects & Products and Terms, each name with how it's misheard, its note, and the
+// meetings and dictations it came up in (each opens). Beside them (under them, on a phone): About
+// You (a few lines made from it, or as you wrote them, on or off) and what there is to look over,
+// what looks the same (merged, or kept apart) and what looks like it adds little. In a window that
+// shows another of your computers, it's that computer's memory, and it says so.
 const COLLECTIONS = [['all', tx('All'), 'book'], ['person', tx('People'), 'users'], ['org', tx('Organizations'), 'layers'], ['project', tx('Projects & Products'), 'shapes'], ['term', tx('Terms'), 'quote']]
 const KINDS = [['person', tx('Person')], ['org', tx('Organization')], ['project', tx('Project or product')], ['term', tx('Term')]]
 const KIND = Object.fromEntries(KINDS)
@@ -25,8 +27,15 @@ const OPEN = 30
 const list = (s) => s.split(',').map((x) => x.trim()).filter(Boolean)
 const newest = (a, b) => String(b.startedAt || b.at).localeCompare(String(a.startedAt || a.at))
 
+// The computer this window shows, when it's another of yours (/m/<id>/): its name.
+function useElsewhere() {
+  const { data } = useMachines(60_000, !!machineId)
+  return machineId ? data?.machines?.find((m) => m.id === machineId)?.name || t('that computer') : null
+}
+
 export default function Memory() {
   const { data, error, refresh } = usePoll('/memory', 60000)
+  const elsewhere = useElsewhere()
   const [q, setQ] = useState('')
   const [coll, setColl] = usePersisted('cc-mm-coll', 'all')
   const [by, setBy] = usePersisted('cc-mm-by', 'series')
@@ -47,55 +56,82 @@ export default function Memory() {
   const groups = useMemo(() => memGroups(shown, seen, by), [shown.map((x) => `${x.id}:${x.updatedAt}:${x.kind}`).join('|'), seen, by]) // eslint-disable-line react-hooks/exhaustive-deps
   const every = !!s || shown.length <= OPEN
   const count = (k) => (k === 'all' ? terms.length : terms.filter((x) => x.kind === k).length) + (k === 'person' ? data?.people?.length || 0 : 0)
+  const any = terms.length > 0 || data?.people?.length > 0
+  const how = t('What Bridge AI has learned from your meetings and dictations: who and what comes up, how it\'s spelled and misheard, and what it is. Speech to text listens for these, and your notes know who and what they are. It grows as meetings are summarized and as you fix words.')
   return (
     <div className="mm-view">
-      <PaneHeader icon="book" title={t('Memory')} subtitle={<span className="mm-count">{data ? (terms.length === 1 ? t('{n} name', { n: 1 }) : t('{n} names', { n: terms.length })) : t('Memory')} · {t('On this computer')}</span>}>
-        <button type="button" className="btn small" aria-expanded={adding} onClick={() => setAdding((v) => !v)}><Icon name="plus" size={13} /> {t('Add')}</button>
+      <PaneHeader icon="book" title={t('Memory')} subtitle={<span className="mm-count">{data ? (terms.length === 1 ? t('{n} name', { n: 1 }) : t('{n} names', { n: terms.length })) : t('Memory')} · {elsewhere ? t('On {name}', { name: elsewhere }) : t('On this computer')}</span>}>
+        <button type="button" className="btn small" aria-expanded={adding} disabled={!data} onClick={() => setAdding((v) => !v)}><Icon name="plus" size={13} /> {t('Add')}</button>
       </PaneHeader>
-      <div className="mm-home">
-        <p className="muted small mm-lede">{t('What Bridge AI has learned from your meetings and dictations: who and what comes up, how it\'s spelled and misheard, and what it is. Speech to text listens for these, and your notes know who and what they are. It grows as meetings are summarized and as you fix words.')}</p>
-        {data && !data.dictationsKept && <p className="mm-note muted small" role="status"><Icon name="info" size={13} /> {t('Dictation history is off, so the names you say in dictations aren\'t counted here. Turn it on in Settings › Voice.')}</p>}
-        {error && !data && <p className="error-text small" role="alert">{error}</p>}
-        {!data && !error && <div className="skeleton-rows"><div /><div /><div /></div>}
-        {data && <AboutYou a={data.aboutYou} me={data.me} onChange={refresh} />}
-        {adding && <AddOne kind={coll === 'all' ? 'term' : coll} onDone={() => { setAdding(false); refresh() }} />}
-        {data?.same?.length > 0 && <Same pairs={data.same} byId={byId} act={act} />}
-        {data?.little?.length > 0 && <Tidy list={data.little} byId={byId} act={act} />}
-        {err && <p className="error-text small" role="alert">{err}</p>}
-        {data && (
-          <div className="mm-tools">
-            <div className="mt-places mm-colls" role="tablist" aria-label={t('Collections')}>
-              {COLLECTIONS.map(([k, label, icon]) => <button key={k} type="button" role="tab" data-coll={k} aria-selected={coll === k} className={coll === k ? 'on' : ''} onClick={() => setColl(k)}><Icon name={icon} size={12} /> {t(label)} <span className="muted num">{count(k)}</span></button>)}
-            </div>
-            <div className="mm-find">
-              <input className="mt-search" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={terms.length === 1 ? t('Find a name') : t('Find a name among {n}', { n: terms.length })} aria-label={t('Find a name')} />
-              <div className="seg small-seg" role="tablist" aria-label={t('Group by')}>
-                {MEM_BY.map(([k, l]) => <button key={k} type="button" role="tab" aria-selected={by === k} className={by === k ? 'on' : ''} onClick={() => setBy(k)}>{t(l)}</button>)}
+      <div className="mm-scroll">
+        <div className={`mm-page${s ? ' finding' : ''}${data ? '' : ' solo'}`}>
+          <div className="mm-main">
+            {adding && <AddOne kind={coll === 'all' ? 'term' : coll} onDone={() => { setAdding(false); refresh() }} />}
+            {data && any && (
+              <div className="mm-tools">
+                <div className="mt-places mm-colls" role="tablist" aria-label={t('Collections')}>
+                  {COLLECTIONS.map(([k, label, icon]) => <button key={k} type="button" role="tab" data-coll={k} aria-selected={coll === k} className={coll === k ? 'on' : ''} onClick={() => setColl(k)}><Icon name={icon} size={12} /> {t(label)} <span className="muted num">{count(k)}</span></button>)}
+                </div>
+                <div className="mm-find">
+                  <input className="mt-search" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={terms.length === 1 ? t('Find a name') : t('Find a name among {n}', { n: terms.length })} aria-label={t('Find a name')} />
+                  <div className="seg small-seg" role="tablist" aria-label={t('Group by')}>
+                    {MEM_BY.map(([k, l]) => <button key={k} type="button" role="tab" aria-selected={by === k} className={by === k ? 'on' : ''} onClick={() => setBy(k)}>{t(l)}</button>)}
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
-        )}
-        {data && !terms.length && !met.length && (
-          <div className="mm-empty">
-            <Icon name="book" size={22} />
-            <p><b>{t('Nothing in memory yet.')}</b></p>
-            <p className="muted small">{t('It fills as your meetings are summarized and as you fix a misheard word with Remember on. Or add a name yourself.')}</p>
-          </div>
-        )}
-        {data && terms.length > 0 && !shown.length && <p className="muted small">{s ? t('Nothing matches "{q}".', { q: q.trim() }) : t('None of these yet.')}</p>}
-        <div className="mt-mem-list mm-list">
-          {groups.map((g, i) => (
-            <Fold key={`${by}:${g.key}`} id={`mm-${g.key}`} count={g.items.length} open={g.key in open ? open[g.key] : every || i === 0} onToggle={(v) => setOpen((o) => ({ ...o, [g.key]: v }))}
-              label={<>{by === 'series' && !g.key.startsWith(':') && <Icon name="repeat" size={11} className="muted" />}{g.label}</>}
-              extra={g.meetings.length > 0 && (g.meetings.length === 1 ? t('in {n} meeting', { n: 1 }) : t('in {n} meetings', { n: g.meetings.length }))}>
-              <div className="mt-mem-group">
-                {(full[g.key] || every ? g.items : g.items.slice(0, OPEN)).map((x) => <Item key={x.id} x={x} seen={seen} dicts={data.dictations} onSave={save} onRemove={remove} />)}
-                {!every && g.items.length > OPEN && <button type="button" className="ghost-btn mt-mem-more" onClick={() => setFull((f) => ({ ...f, [g.key]: !f[g.key] }))}>{full[g.key] ? t('Show fewer') : t('Show all {n}', { n: g.items.length })} <Icon name={full[g.key] ? 'up' : 'down'} size={11} /></button>}
+            )}
+            {data && !data.dictationsKept && <p className="mm-note muted small" role="status"><Icon name="info" size={13} /> {t('Dictation history is off, so the names you say in dictations aren\'t counted here. Turn it on in Settings › Voice.')}</p>}
+            {err && <p className="error-text small" role="alert">{err}</p>}
+            {/* Memory couldn't be read (the computer this window shows is away, say): said, with Try
+                again. Once it's been read, a look that fails says so above what it showed. */}
+            {error && !data && (
+              <div className="mm-empty mm-cant" role="alert">
+                <Icon name="alert" size={22} />
+                <p><b>{elsewhere ? t('Memory on {name} can\'t be shown right now.', { name: elsewhere }) : t('Memory can\'t be shown right now.')}</b></p>
+                <p className="muted small">{error}</p>
+                <button type="button" className="btn small" onClick={() => refresh()}><Icon name="refresh" size={12} /> {t('Try again')}</button>
               </div>
-            </Fold>
-          ))}
+            )}
+            {error && data && <p className="mm-note muted small" role="status"><Icon name="alert" size={13} /> {t('Couldn\'t look at memory again just now ({error}), so this is how it was.', { error })}</p>}
+            {!data && !error && <div className="skeleton-rows"><div /><div /><div /></div>}
+            {data && !any && (
+              <div className="mm-empty">
+                <Icon name="book" size={22} />
+                <p><b>{t('Nothing in memory yet.')}</b></p>
+                <p className="muted small">{how}</p>
+                <p className="muted small">{t('It fills as your meetings are summarized and as you fix a misheard word with Remember on. Or add a name yourself.')}</p>
+              </div>
+            )}
+            {data && terms.length > 0 && !shown.length && <p className="muted small mm-none">{s ? t('Nothing matches "{q}".', { q: q.trim() }) : t('None of these yet.')}</p>}
+            {groups.length > 0 && (
+              <div className="mt-mem-list mm-list">
+                {groups.map((g, i) => (
+                  <Fold key={`${by}:${g.key}`} id={`mm-${g.key}`} count={g.items.length} open={g.key in open ? open[g.key] : every || i === 0} onToggle={(v) => setOpen((o) => ({ ...o, [g.key]: v }))}
+                    label={<>{by === 'series' && !g.key.startsWith(':') && <Icon name="repeat" size={11} className="muted" />}{g.label}</>}
+                    extra={g.meetings.length > 0 && (g.meetings.length === 1 ? t('in {n} meeting', { n: 1 }) : t('in {n} meetings', { n: g.meetings.length }))}>
+                    <div className="mt-mem-group">
+                      {(full[g.key] || every ? g.items : g.items.slice(0, OPEN)).map((x) => <Item key={x.id} x={x} seen={seen} dicts={data.dictations} onSave={save} onRemove={remove} />)}
+                      {!every && g.items.length > OPEN && <button type="button" className="ghost-btn mt-mem-more" onClick={() => setFull((f) => ({ ...f, [g.key]: !f[g.key] }))}>{full[g.key] ? t('Show fewer') : t('Show all {n}', { n: g.items.length })} <Icon name={full[g.key] ? 'up' : 'down'} size={11} /></button>}
+                    </div>
+                  </Fold>
+                ))}
+              </div>
+            )}
+            {data && coll === 'person' && <Met people={met} insights={data.insights} act={act} />}
+          </div>
+          {data && (
+            <div className="mm-side">
+              <AboutYou a={data.aboutYou} me={data.me} elsewhere={elsewhere} onChange={refresh} />
+              {(data.same?.length > 0 || data.little?.length > 0) && (
+                <div className="mm-looks">
+                  {data.same?.length > 0 && <Same pairs={data.same} byId={byId} act={act} />}
+                  {data.little?.length > 0 && <Tidy list={data.little} byId={byId} act={act} />}
+                </div>
+              )}
+              {any && <p className="muted small mm-how">{how}</p>}
+            </div>
+          )}
         </div>
-        {data && coll === 'person' && <Met people={met} insights={data.insights} act={act} />}
       </div>
     </div>
   )
@@ -142,8 +178,8 @@ function Item({ x, seen, dicts, onSave, onRemove }) {
           <span className={`mm-kind ${x.kind}${x.guessed ? ' guess' : ''}`} title={x.guessed ? t('A guess, from its note and your meetings. Edit it to say what it is.') : undefined}>{t(KIND[x.kind])}</span>
           <span className={`mt-mem-src ${x.source}`}>{x.source === 'you' ? t('yours') : t('learned')}</span>
           {from && <button type="button" className="ghost-btn mm-from small" aria-expanded={shown} onClick={() => setShown((v) => !v)}>{from}</button>}
-          <button type="button" className="ghost-btn mm-pen" onClick={() => setEdit(true)} aria-label={t('Edit {name}', { name: x.term })} title={t('Edit')}><Icon name="edit" size={13} /></button>
         </span>
+        <button type="button" className="ghost-btn mm-pen" onClick={() => setEdit(true)} aria-label={t('Edit {name}', { name: x.term })} title={t('Edit')}><Icon name="edit" size={13} /></button>
       </div>
       {shown && (
         <div className="mt-mem-meetings">
@@ -165,12 +201,14 @@ function around(text, names) {
   return `${from > 0 ? '…' : ''}${cut}${from + 80 < s.length ? '…' : ''}`
 }
 
-// About You: what it says, where it came from, on or off, and your own words for it.
-function AboutYou({ a, me, onChange }) {
+// About You: what it says (its first lines, and the rest when you ask), on or off, which models are
+// given it, where it came from, and your own words for it.
+function AboutYou({ a, me, elsewhere, onChange }) {
   const [editing, setEditing] = useState(false)
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
+  const [whole, setWhole] = useState(false)
   // On or off at once, and back as it was if that couldn't be saved.
   const [on, setOn] = useState(a.on)
   useEffect(() => setOn(a.on), [a.on])
@@ -180,12 +218,23 @@ function AboutYou({ a, me, onChange }) {
     try { await api('/memory/about', { method: 'POST', body }); setEditing(false); onChange() } catch (e) { setErr(e.message); setOn(a.on) } finally { setBusy(false) }
   }
   const made = a.at ? t('Made from memory, {date}', { date: shortDay(a.at) }) : t('Made from memory')
+  // More than its first few lines fit: those, and Show all (looked at again as the page's width changes).
+  const box = useRef(null)
+  const [more, setMore] = useState(false)
+  useLayoutEffect(() => {
+    const el = box.current
+    if (!el || whole) return
+    const look = () => setMore(el.scrollHeight > el.clientHeight + 1)
+    look()
+    const ro = new ResizeObserver(look)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [a.text, editing, whole])
   return (
     <section className={`mm-card mm-you${on ? '' : ' off'}`} aria-label={t('About You')}>
       <div className="mm-card-head">
-        <Icon name="users" size={14} />
+        <Icon name="user" size={14} />
         <b>{t('About You')}</b>
-        <span className="muted small mm-by">{a.yours ? t('As you wrote it') : made}</span>
         <label className="mm-switch">
           <input type="checkbox" role="switch" checked={on} disabled={busy} onChange={(e) => save({ on: e.target.checked })} aria-label={t('Use About You')} />
           <span>{on ? t('On') : t('Off')}</span>
@@ -193,12 +242,12 @@ function AboutYou({ a, me, onChange }) {
       </div>
       {editing
         ? <textarea className="mm-you-edit" value={text} onChange={(e) => setText(e.target.value)} rows={6} autoFocus aria-label={t('About You')} placeholder={t('Who you are, what you work on, the people and organizations you deal with most')} />
-        : a.text ? <p className="mm-you-text">{a.text}</p>
+        : a.text ? <p ref={box} className={`mm-you-text${whole ? '' : ' clamp'}`}>{a.text}</p>
           : <p className="muted small mm-you-text">{t('Nothing to go on yet: it\'s made from the people, organizations and projects memory has, once your meetings and dictations bring some. Or write it yourself.')}</p>}
       <p className="muted small mm-you-where">
-        {on
-          ? t('While it\'s on, the model that writes your meeting notes and the one that tidies your dictation are given it, and Chief of Staff reads it. It\'s made and kept on this computer.')
-          : t('Off: no model and not Chief of Staff is given it.')}
+        {!on ? t('Off: no model and not Chief of Staff is given it.')
+          : elsewhere ? t('While it\'s on, the model that writes your meeting notes and the one that tidies your dictation are given it, and Chief of Staff reads it. It\'s made and kept on {name}.', { name: elsewhere })
+            : t('While it\'s on, the model that writes your meeting notes and the one that tidies your dictation are given it, and Chief of Staff reads it. It\'s made and kept on this computer.')}
         {!me && ` ${t('Your name, in Settings › General, starts it off.')}`}
       </p>
       {err && <p className="error-text small" role="alert">{err}</p>}
@@ -208,7 +257,9 @@ function AboutYou({ a, me, onChange }) {
           <button type="button" className="ghost-btn" onClick={() => setEditing(false)}>{t('Cancel')}</button>
         </> : <>
           <button type="button" className="btn small" onClick={() => { setText(a.text || ''); setEditing(true) }}><Icon name="edit" size={12} /> {t('Edit')}</button>
+          {a.text && (more || whole) && <button type="button" className="ghost-btn mm-you-more" aria-expanded={whole} onClick={() => setWhole((v) => !v)}>{whole ? t('Show less') : t('Show all')}</button>}
           {a.yours && a.draft && <button type="button" className="ghost-btn" disabled={busy} onClick={() => save({ text: '' })}>{t('Use the one made from memory')}</button>}
+          <span className="muted small mm-by">{a.yours ? t('As you wrote it') : made}</span>
         </>}
       </div>
     </section>
@@ -238,6 +289,21 @@ function AddOne({ kind, onDone }) {
   )
 }
 
+// Something to look over, in a line: what and how many, opened to look them over (with what it's
+// about), and shut again.
+function Look({ kind, icon, label, title, open, onOpen, children }) {
+  return (
+    <section className={`mm-card mm-look mm-${kind}${open ? ' open' : ''}`} aria-label={label}>
+      <button type="button" className="mm-look-head" aria-expanded={open} onClick={() => onOpen(!open)}>
+        <Icon name={icon} size={14} />
+        <span className="mm-look-what"><b>{title}</b> <span className="mm-look-go">{open ? t('Hide') : t('Look them over')}</span></span>
+        <Icon name="chevron" size={11} className="mm-look-chev" />
+      </button>
+      {open && children}
+    </section>
+  )
+}
+
 // Two that look like the same one: merged under the name you pick (the other kept as another way
 // it's written), or said not to be.
 function Same({ pairs, byId, act }) {
@@ -245,28 +311,22 @@ function Same({ pairs, byId, act }) {
   const rows = pairs.map(([a, b]) => [byId[a], byId[b]]).filter(([a, b]) => a && b)
   if (!rows.length) return null
   return (
-    <section className="mm-card mm-same" aria-label={t('May Be the Same')}>
-      <div className="mm-card-head">
-        <Icon name="split" size={14} />
-        <b>{rows.length === 1 ? t('{n} pair may be the same', { n: 1 }) : t('{n} pairs may be the same', { n: rows.length })}</b>
-        <button type="button" className="btn small mm-head-btn" aria-expanded={open} onClick={() => setOpen((v) => !v)}>{open ? t('Hide') : t('Look them over')}</button>
-      </div>
+    <Look kind="same" icon="split" label={t('May Be the Same')} open={open} onOpen={setOpen}
+      title={rows.length === 1 ? t('{n} pair may be the same', { n: 1 }) : t('{n} pairs may be the same', { n: rows.length })}>
       <p className="muted small">{t('Written alike, or one is the start of the other. Merged, the one you keep gets the other\'s meetings, dictations and note, and the other spelling stays as another way it\'s written.')}</p>
-      {open && (
-        <div className="mm-rows">
-          {rows.map(([a, b]) => (
-            <div key={`${a.id}:${b.id}`} className="mm-same-row" data-pair={`${a.term}|${b.term}`}>
-              <span className="mm-same-what">{t('"{a}" and "{b}"', { a: a.term, b: b.term })}</span>
-              <span className="mm-same-acts">
-                <button type="button" className="btn small" onClick={() => act(() => api('/memory/merge', { method: 'POST', body: { into: a.id, from: b.id } }))}>{t('Keep "{name}"', { name: a.term })}</button>
-                <button type="button" className="btn small" onClick={() => act(() => api('/memory/merge', { method: 'POST', body: { into: b.id, from: a.id } }))}>{t('Keep "{name}"', { name: b.term })}</button>
-                <button type="button" className="ghost-btn" onClick={() => act(() => api('/memory/apart', { method: 'POST', body: { a: a.id, b: b.id } }))}>{t('Not the same')}</button>
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
+      <div className="mm-rows">
+        {rows.map(([a, b]) => (
+          <div key={`${a.id}:${b.id}`} className="mm-same-row" data-pair={`${a.term}|${b.term}`}>
+            <span className="mm-same-what">{t('"{a}" and "{b}"', { a: a.term, b: b.term })}</span>
+            <span className="mm-same-acts">
+              <button type="button" className="btn small" onClick={() => act(() => api('/memory/merge', { method: 'POST', body: { into: a.id, from: b.id } }))}>{t('Keep "{name}"', { name: a.term })}</button>
+              <button type="button" className="btn small" onClick={() => act(() => api('/memory/merge', { method: 'POST', body: { into: b.id, from: a.id } }))}>{t('Keep "{name}"', { name: b.term })}</button>
+              <button type="button" className="ghost-btn" onClick={() => act(() => api('/memory/apart', { method: 'POST', body: { a: a.id, b: b.id } }))}>{t('Not the same')}</button>
+            </span>
+          </div>
+        ))}
+      </div>
+    </Look>
   )
 }
 
@@ -281,30 +341,24 @@ function Tidy({ list: these, byId, act }) {
   const kept = rows.filter((x) => off.has(x.id)).map((x) => x.id)
   const flip = (id) => setOff((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
   return (
-    <section className="mm-card mm-tidy" aria-label={t('Tidy Up')}>
-      <div className="mm-card-head">
-        <Icon name="sparkle" size={14} />
-        <b>{rows.length === 1 ? t('{n} looks like it adds little', { n: 1 }) : t('{n} look like they add little', { n: rows.length })}</b>
-        <button type="button" className="btn small mm-head-btn" aria-expanded={open} onClick={() => setOpen((v) => !v)}>{open ? t('Hide') : t('Look them over')}</button>
-      </div>
+    <Look kind="tidy" icon="sparkle" label={t('Tidy Up')} open={open} onOpen={setOpen}
+      title={rows.length === 1 ? t('{n} looks like it adds little', { n: 1 }) : t('{n} look like they add little', { n: rows.length })}>
       <p className="muted small">{t('Places, languages, days and everyday words that speech to text spells right anyway, and terms that came up once a while ago with nothing to fix. Summaries no longer add these. Nothing goes until you say.')}</p>
-      {open && <>
-        <div className="mm-rows mm-tidy-list">
-          {rows.map((x) => (
-            <label key={x.id} className="st-check mm-tidy-row" data-term={x.t.term}>
-              <input type="checkbox" checked={!off.has(x.id)} onChange={() => flip(x.id)} />
-              <span><b>{x.t.term}</b> <span className="muted small">{t(WHY[x.why] || WHY.common)}</span></span>
-            </label>
-          ))}
-        </div>
-        <div className="mm-acts">
-          <button type="button" className="btn small primary" disabled={!out.length} onClick={() => act(() => api('/memory/tidy', { method: 'POST', body: { remove: out, keep: kept } }))}>
-            {!kept.length ? (out.length === 1 ? t('Take it out') : t('Take out all {n}', { n: out.length })) : out.length === 1 ? t('Take out {n}, keep the rest', { n: 1 }) : t('Take out {n}, keep the rest', { n: out.length })}
-          </button>
-          <button type="button" className="ghost-btn" onClick={() => act(() => api('/memory/tidy', { method: 'POST', body: { keep: rows.map((x) => x.id) } }))}>{t('Keep them all')}</button>
-        </div>
-      </>}
-    </section>
+      <div className="mm-rows mm-tidy-list">
+        {rows.map((x) => (
+          <label key={x.id} className="st-check mm-tidy-row" data-term={x.t.term}>
+            <input type="checkbox" checked={!off.has(x.id)} onChange={() => flip(x.id)} />
+            <span><b>{x.t.term}</b> <span className="muted small">{t(WHY[x.why] || WHY.common)}</span></span>
+          </label>
+        ))}
+      </div>
+      <div className="mm-acts">
+        <button type="button" className="btn small primary" disabled={!out.length} onClick={() => act(() => api('/memory/tidy', { method: 'POST', body: { remove: out, keep: kept } }))}>
+          {!kept.length ? (out.length === 1 ? t('Take it out') : t('Take out all {n}', { n: out.length })) : out.length === 1 ? t('Take out {n}, keep the rest', { n: 1 }) : t('Take out {n}, keep the rest', { n: out.length })}
+        </button>
+        <button type="button" className="ghost-btn" onClick={() => act(() => api('/memory/tidy', { method: 'POST', body: { keep: rows.map((x) => x.id) } }))}>{t('Keep them all')}</button>
+      </div>
+    </Look>
   )
 }
 

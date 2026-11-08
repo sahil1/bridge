@@ -96,6 +96,17 @@ Settings › Voice › Dictation turns the history off (then nothing new is kept
 deleting one deletes it from the disk, not just from the list. A dictation refused because a
 password field had the keyboard isn't kept.
 
+Memory keeps the names and terms from your meetings and dictations on your computer, in
+`~/.bridge-ai/meetings/memory.json`: how each is spelled and misheard, a note on who or what it is,
+and the meetings and dictations it came up in. About You is a few lines made from it on your
+computer (your name, your organization, what you work on, the people and organizations that come up
+most), or written by you. Until you switch it off on the Memory page, it goes with what the model
+that writes your meeting notes is told, and its names with what the model that tidies your
+dictation is told: a model on your computer keeps them there; any other gets them. It's also put in
+the Chief of Staff's folder (`about-you.md`) for it to read, so its agent's provider gets it as it
+gets the rest of what the Chief of Staff reads. Switched off, no model is given it and that file is
+deleted.
+
 With Scheduled Routines on (a beta feature), what you type into Bridge AI's boxes (an agent's or the
 Chief of Staff's message box, New, the Tasks panel, an answer in Needs You) is kept on your computer,
 in `~/.bridge-ai/commands`, for History › Commands and to suggest a routine when you ask the same

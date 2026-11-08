@@ -1,8 +1,8 @@
-// Memory as a page of its own (a beta feature: memory; src/components/memory/Memory.jsx): what
-// meeting memory (meetmemory.js) holds, put in collections (People, Organizations, Projects &
-// Products, Terms), with the meetings and dictations each came up in, the people you meet (Meeting
-// Insights, when it's on) beside the ones memory has, what looks the same, what looks like it adds
-// little (for you to look over: nothing goes by itself), and About you.
+// Memory as a page of its own (src/components/memory/Memory.jsx): what meeting memory (meetmemory.js)
+// holds, put in collections (People, Organizations, Projects & Products, Terms), with the meetings
+// and dictations each came up in, the people you meet (Meeting Insights, when it's on) beside the
+// ones memory has, what looks the same, what looks like it adds little (for you to look over:
+// nothing goes by itself), and About you.
 //
 // About you: a few lines made here from what memory holds (your name, your organization, what you
 // work on, the people and organizations that come up most), or as you wrote it. While it's on it
@@ -152,8 +152,8 @@ function draft(items, people, all) {
 }
 
 // Chief of Staff's copy, in its folder (chief.js makes it): there while About you is on, gone when
-// it's off or Memory is. One at a time, each as About you is when its turn comes, so an older one
-// can't take out what a newer one wrote.
+// it's off. One at a time, each as About you is when its turn comes, so an older one can't take out
+// what a newer one wrote.
 let chiefChain = Promise.resolve()
 function syncChief() {
   chiefChain = chiefChain.then(writeChief, writeChief)
@@ -236,11 +236,10 @@ export async function setAboutYou(body = {}) {
   return r
 }
 
-// The dictations since the last look, for the names said in them (meetmemory.js mentions): once
-// Memory is on, the ones from before too, then each as it's kept.
+// The dictations since the last look, for the names said in them (meetmemory.js mentions): the
+// first time, the ones from before too, then each as it's kept.
 let catching = null
 export function catchUp() {
-  if (!memory.pageOn()) return Promise.resolve(0)
   catching ||= (async () => {
     const since = memory.dictationsAt()
     const got = []
@@ -258,14 +257,14 @@ export function catchUp() {
 }
 // One just kept: its names at once, once the ones before it have been looked at.
 export function said(d) {
-  if (!memory.pageOn() || !d?.id) return Promise.resolve(0)
+  if (!d?.id) return Promise.resolve(0)
   return memory.dictationsAt() ? Promise.resolve(memory.mentions([d])) : catchUp()
 }
 
-// Memory or About you turned on or off, or your name changed: Chief of Staff's copy follows, and
-// About you is made the first time Memory is on.
+// Settings changed (your name, say): Chief of Staff's copy follows, and About you is made if it
+// hasn't been yet.
 export function sync() {
-  if (memory.pageOn() && !memory.aboutYou().at) view().catch(() => {})
+  if (!memory.aboutYou().at) view().catch(() => {})
   return syncChief().catch(() => {})
 }
 // Made again when memory has changed (a summary, a fix, a dictation), so About you keeps up without
@@ -273,7 +272,7 @@ export function sync() {
 let last = -1
 export function keepFresh() {
   const look = () => {
-    if (!memory.pageOn() || memory.changed() === last) return
+    if (memory.changed() === last) return
     view().then(() => { last = memory.changed() }, () => {})
   }
   setTimeout(look, 2 * 60 * 1000).unref?.()
