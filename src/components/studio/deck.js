@@ -227,6 +227,9 @@ function compose(st, texts) {
   return `${head ? `${head}\n\n` : ''}${body}\n`
 }
 const all = (st) => st.slides.map((_, i) => slideText(st, i))
+// Every slide's Markdown, and the deck put back together from them (some taken out, copied in).
+export const slideTexts = all
+export const withSlideTexts = (st, texts) => compose(st, texts.length ? texts : [''])
 export const moveSlide = (st, from, to) => { const t = all(st); const [x] = t.splice(from, 1); t.splice(to, 0, x); return compose(st, t) }
 export const insertSlides = (st, after, texts) => { const t = all(st); t.splice(after + 1, 0, ...texts); return compose(st, t) }
 export const removeSlide = (st, i) => { const t = all(st); t.splice(i, 1); return compose(st, t.length ? t : ['']) }
@@ -279,6 +282,19 @@ export function withNotes(text, notes) {
   const lines = trimBlank(kept.filter((l, i) => l.trim() || (kept[i - 1] || '').trim()))
   const n = String(notes || '').trim().replace(/--+>/g, '—>')
   return [...lines, ...(n ? ['', `<!-- ${n} -->`] : [])].join('\n')
+}
+// Skipped when presenting, as PowerPoint and Google Slides skip a hidden slide: a class of skip on
+// it (<!-- _class: skip -->), which Marp's own tools draw as any other slide and never take for a
+// note.
+export const isSkipped = (text) => String(text).split('\n').some((l) => { const m = CLASS_LINE.exec(l); return m && m[1].split(/\s+/).includes('skip') })
+export function withSkip(text, on) {
+  const lines = String(text).split('\n')
+  const i = lines.findIndex((l) => CLASS_LINE.test(l))
+  const classes = i >= 0 ? CLASS_LINE.exec(lines[i])[1].split(/\s+/).filter((c) => c && c !== 'skip') : []
+  if (on) classes.push('skip')
+  if (i >= 0) { if (classes.length) lines[i] = `<!-- _class: ${classes.join(' ')} -->`; else lines.splice(i, 1) }
+  else if (on) lines.unshift(`<!-- _class: ${classes.join(' ')} -->`, '')
+  return trimBlank(lines).join('\n')
 }
 // The picture on it: { line (within the slide), src, alt, bg }.
 export function pictureOf(text) {
@@ -435,6 +451,37 @@ export function indentLine(md, n, out = false) {
   }
   return md
 }
+
+// A line made a bulleted point (bullet), a numbered one (number), or back to a paragraph (null).
+export function withListKind(md, n, kind) {
+  const lines = String(md).split('\n')
+  const l = lines[n]
+  if (l == null || /^\s*#{1,6}\s/.test(l) || /^\s*>/.test(l)) return md
+  const m = ITEM.exec(l)
+  const words = m ? l.slice(m[0].length) : l.replace(/^\s+/, '')
+  const indent = m ? m[1] : ''
+  lines[n] = kind === 'bullet' ? `${indent}- ${words}` : kind === 'number' ? `${indent}1. ${words}` : words
+  return lines.join('\n')
+}
+export const listKindOf = (line) => { const m = ITEM.exec(line || ''); return !m ? null : /\d/.test(m[2]) ? 'number' : 'bullet' }
+// Where q is in a deck's slides (not its front matter): [{ si, line, start, end }].
+export function findInDeck(st, q, { matchCase = false } = {}) {
+  const out = []
+  if (!q) return out
+  const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), matchCase ? 'g' : 'gi')
+  st.slides.forEach((s, si) => {
+    for (let n = s.start; n < s.end; n++) {
+      const l = st.lines[n]
+      if (/^\s*<!--.*-->\s*$/.test(l)) continue
+      re.lastIndex = 0
+      let m
+      while ((m = re.exec(l))) { out.push({ si, line: n, start: m.index, end: m.index + m[0].length }); if (!m[0].length) re.lastIndex++ }
+    }
+  })
+  return out
+}
+// One found stretch replaced (its line's own place), or every one in the slides.
+export function replaceInDeck(md, m, to) { const lines = String(md).split('\n'); const l = lines[m.line]; lines[m.line] = l.slice(0, m.start) + to + l.slice(m.end); return lines.join('\n') }
 
 // ---------- A deck to start from ----------
 // A title slide with its title; "Click to add subtitle" shows where the subtitle goes.

@@ -5,8 +5,9 @@ import { t } from '../../../i18n/index.js'
 import { textOf, base64 } from '../files.js'
 import { keys, withKeys } from '../keys.js'
 import * as D from '../deck.js'
-import { slidesOf, pptxOf, deckFromPptx } from '../pptx.js'
-import { Slide, Menu, LayoutGallery, ThemeGallery, Present, AiPanel, LAYOUT_LABEL, sampleOf, useSize } from './DeckParts.jsx'
+import { slidesOf, pptxOf } from '../pptx.js'
+import { Slide, Menu, LayoutGallery, ThemeGallery, Present, AiPanel, DeckFind, LAYOUT_LABEL, sampleOf, useSize } from './DeckParts.jsx'
+import SlidesEditor from './SlidesEditor.jsx'
 import '../deck.css'
 
 // A deck, edited as slides: the slides down the side (added, duplicated, deleted, dragged into
@@ -14,17 +15,16 @@ import '../deck.css'
 // part is empty), its speaker notes under it, layouts and themes (your design packs, and Studio's
 // own), pictures, presenting full screen, and AI that writes a deck, a slide or a new one and shows
 // it before it's taken. Every change is the deck's Markdown (Marp's format), which can be shown and
-// typed beside it. A PowerPoint opens the same way (its text, pictures, notes and theme) and is
-// saved as one. packs: the design packs. onStats: the status line's "Slide 2 of 9".
-export default function DeckEditor({ file, data, onDirty, onStats, handle, readOnly = false, packs = [], onOpen }) {
-  const pptx = file.ext === '.pptx'
-  const [start, setStart] = useState(() => (pptx ? null : { md: textOf(data), media: [], look: null, skipped: 0 }))
-  const [err, setErr] = useState(null)
-  useEffect(() => { if (pptx) deckFromPptx(data, file.name).then(setStart, (e) => setErr(e.message)) }, []) // eslint-disable-line react-hooks/exhaustive-deps
-  if (err) return <div className="sd-empty" role="alert"><Icon name="alert" size={20} /><b>{t("Couldn't read its slides: {error}", { error: err })}</b><span className="muted small">{t('Ask an agent to change it, or open it in PowerPoint or Keynote.')}</span></div>
-  if (!start) return <div className="sd-empty sd-loading" role="status"><Icon name="refresh" size={16} className="spin" /><span className="muted">{t('Opening {name}…', { name: file.name })}</span></div>
-  return <Deck file={file} start={start} pptx={pptx} onDirty={onDirty} onStats={onStats} handle={handle} readOnly={readOnly} packs={packs} onOpen={onOpen} />
+// typed beside it. A PowerPoint opens as itself instead (SlidesEditor.jsx). packs: the design
+// packs. onStats: the status line's "Slide 2 of 9".
+export default function DeckEditor(props) {
+  if (props.file.ext === '.pptx') return <SlidesEditor {...props} />
+  return <Deck {...props} start={{ md: textOf(props.data), media: [], look: null, skipped: 0 }} pptx={false} />
 }
+
+// Slides copied (⌘C) from a Markdown deck: their Markdown, for a paste here or in another deck.
+let mdClip = null
+const ZOOMS = [0.5, 0.75, 1, 1.5, 2]
 
 const ghostWords = () => ({ title: t('Click to add title'), subtitle: t('Click to add subtitle'), text: t('Click to add text'), quote: t('Click to add a quote') })
 const isPhone = () => typeof matchMedia === 'function' && matchMedia('(max-width: 700px)').matches
@@ -97,6 +97,10 @@ function Deck({ file, start, pptx, onDirty, onStats, handle, readOnly, packs, on
   const dragFrom = useRef(null) // the slide being dragged
   const [picked, setPicked] = useState(false) // the slide's picture, picked
   const [grid, setGrid] = useState(false) // every slide at once
+  const [strip, setStrip] = useState(() => new Set()) // slides picked in the strip besides this one
+  const [find, setFind] = useState(null) // find and replace: { replace }
+  const [found, setFound] = useState({ list: [], at: 0 })
+  const [zoom, setZoom] = useState('fit')
   const [narrow, setNarrow] = useState(isPhone)
   useEffect(() => {
     if (typeof matchMedia !== 'function') return undefined
@@ -230,7 +234,27 @@ function Deck({ file, start, pptx, onDirty, onStats, handle, readOnly, packs, on
     next = D.withFront(next, 'pack', l === own ? null : l.isDefault && !l.builtIn ? null : l.name)
     change(next)
   }
-  const go = (i) => { flush(); setCur(Math.max(0, Math.min(count - 1, i))); if (view !== mdRef.current) setView(mdRef.current) }
+  const go = (i, { extend = false, toggle = false } = {}) => {
+    flush()
+    const n = Math.max(0, Math.min(count - 1, i))
+    if (toggle) setStrip((p) => { const x = new Set(p); x.add(at); if (x.has(n) && n !== at) x.delete(n); else x.add(n); return x })
+    else if (extend) { const a = Math.min(at, n), b = Math.max(at, n); setStrip(new Set(Array.from({ length: b - a + 1 }, (_, j) => a + j))) }
+    else setStrip(new Set())
+    setCur(n)
+    if (view !== mdRef.current) setView(mdRef.current)
+  }
+  // The slides picked in the strip (this one, and any picked with it).
+  const pickedList = () => [...new Set([...strip, at])].filter((i) => i < count).sort((a, b) => a - b)
+  const removePicked = () => {
+    const s = fresh(), list = new Set(pickedList())
+    if (list.size >= s.slides.length) { remove(at); return }
+    change(D.withSlideTexts(s, D.slideTexts(s).filter((_, i) => !list.has(i))), { go: Math.max(0, Math.min(Math.min(...list), s.slides.length - list.size - 1)) })
+    setStrip(new Set())
+  }
+  const duplicatePicked = () => { const list = pickedList(); if (list.length < 2) { duplicate(); return } const s = fresh(); const t0 = D.slideTexts(s); const copies = list.map((i) => t0[i]); t0.splice(list.at(-1) + 1, 0, ...copies); change(D.withSlideTexts(s, t0), { go: list.at(-1) + 1 }); setStrip(new Set(copies.map((_, j) => list.at(-1) + 1 + j))) }
+  const copySlides = () => { const s = fresh(); const t0 = D.slideTexts(s); const texts = pickedList().map((i) => t0[i]); mdClip = { texts, text: texts.join('\n\n---\n\n') }; try { navigator.clipboard?.writeText?.(mdClip.text).catch(() => {}) } catch { /* the copy here still works */ } }
+  const pasteSlides = () => { if (!mdClip || readOnly) return; const s = fresh(); change(D.insertSlides(s, at, mdClip.texts), { go: at + 1 }); setStrip(new Set(mdClip.texts.map((_, j) => at + 1 + j))) }
+  const skipPicked = (on) => { const s = fresh(); const list = new Set(pickedList()); change(D.withSlideTexts(s, D.slideTexts(s).map((x, i) => (list.has(i) ? D.withSkip(x, on) : x)))) }
   const open = (i) => { go(i); setGrid(false) }
 
   // ---------- Pictures ----------
@@ -342,6 +366,10 @@ function Deck({ file, start, pptx, onDirty, onStats, handle, readOnly, packs, on
     if (mod && !e.shiftKey && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); return }
     if (mod && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) { e.preventDefault(); redo(); return }
     if (mod && ['b', 'i'].includes(e.key.toLowerCase()) && !e.shiftKey) { e.preventDefault(); document.execCommand(e.key.toLowerCase() === 'b' ? 'bold' : 'italic'); onCanvasInput(e); return }
+    if (mod && e.shiftKey && e.code === 'KeyX') { e.preventDefault(); document.execCommand('strikeThrough'); onCanvasInput(e); return }
+    if (mod && e.shiftKey && (e.code === 'Digit7' || e.code === 'Digit8')) { e.preventDefault(); listToggle(el, e.code === 'Digit8' ? 'bullet' : 'number'); return }
+    // Markdown has no underline: said, rather than shown and then lost when it's saved.
+    if (mod && !e.shiftKey && e.key.toLowerCase() === 'u') { e.preventDefault(); setMsg({ text: t('Markdown has no underline, so a Markdown deck can\'t keep one: use bold or italics, or make it a PowerPoint (Export).') }); return }
     if (e.key === 'Tab' && item) {
       e.preventDefault()
       const off = caretIn(el) ?? 0
@@ -400,6 +428,16 @@ function Deck({ file, start, pptx, onDirty, onStats, handle, readOnly, packs, on
       }
     }
   }
+  // A block made a bulleted or numbered point, or back to a paragraph when it's one already.
+  function listToggle(el, kind) {
+    if (!el?.dataset.ln || /^h[1-6]$/.test(el.localName)) return
+    const off = caretIn(el) ?? 0
+    commit(el)
+    const [a] = lnOf(el)
+    const now = D.listKindOf(mdRef.current.split('\n')[a])
+    change(D.withListKind(mdRef.current, a, now === kind ? null : kind), { focus: { ln: a, at: off } })
+  }
+  const listFocused = (kind) => { const el = document.activeElement?.closest?.('.sd-ed'); if (el && canvasRef.current?.contains(el)) listToggle(el, kind) }
   const onCanvasPaste = (e) => {
     if (!edAt(e.target)) return
     const pic = [...(e.clipboardData?.files || [])].find((f) => f.type.startsWith('image/'))
@@ -421,20 +459,26 @@ function Deck({ file, start, pptx, onDirty, onStats, handle, readOnly, packs, on
       const inText = e.target.closest?.('input, textarea, select, [contenteditable="true"]')
       const mod = e.metaKey || e.ctrlKey
       const k = e.key.toLowerCase()
-      if (mod && k === 'enter') { e.preventDefault(); setPresent({ at, presenter: e.shiftKey }); return }
+      if (mod && k === 'enter') { e.preventDefault(); flush(); setPresent({ at: e.shiftKey ? 0 : at, presenter: false }); return }
       if (e.key === 'F5') { e.preventDefault(); setPresent({ at: e.shiftKey ? at : 0, presenter: false }); return }
+      if (mod && !e.shiftKey && k === 'f' && !e.target.closest?.('.sd-findbar')) { e.preventDefault(); flush(); setFind((f) => ({ replace: f?.replace || false, n: Date.now() })); return }
+      if (mod && e.shiftKey && k === 'h') { e.preventDefault(); flush(); setFind({ replace: true, n: Date.now() }); return }
       if (inText || readOnly) return
       if (!e.target.closest?.('.sd-deck2')) return
       if (mod && k === 'z' && !e.shiftKey) { e.preventDefault(); undo() }
       else if (mod && (k === 'y' || (k === 'z' && e.shiftKey))) { e.preventDefault(); redo() }
-      else if (mod && k === 'd') { e.preventDefault(); duplicate() }
+      else if (mod && k === 'd') { e.preventDefault(); duplicatePicked() }
+      else if (mod && (k === 'c' || k === 'x') && e.target.closest?.('.sd-strip, .sd-sorter')) { copySlides(); if (k === 'x') removePicked() }
+      else if (mod && k === 'v' && e.target.closest?.('.sd-strip, .sd-sorter, .sd-stage')) { e.preventDefault(); pasteSlides() }
+      else if (mod && k === 'a' && e.target.closest?.('.sd-strip, .sd-sorter')) { e.preventDefault(); setStrip(new Set(Array.from({ length: count }, (_, j) => j))) }
+      else if (mod && e.altKey && (e.code === 'Equal' || e.code === 'Minus' || e.code === 'Digit0')) { e.preventDefault(); stepZoom(e.code === 'Equal' ? 1 : e.code === 'Minus' ? -1 : 0) }
       else if (mod && k === 'm') { e.preventDefault(); addSlide() }
       else if (mod && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) { e.preventDefault(); move(at, at + (e.key === 'ArrowUp' ? -1 : 1)) }
-      else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); go(at - 1) }
-      else if (e.key === 'ArrowDown' || e.key === 'ArrowRight' || e.key === 'PageDown') { e.preventDefault(); go(at + 1) }
+      else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); go(at - 1, { extend: e.shiftKey }) }
+      else if (e.key === 'ArrowDown' || e.key === 'ArrowRight' || e.key === 'PageDown') { e.preventDefault(); go(at + 1, { extend: e.shiftKey }) }
       else if (e.key === 'Home') { e.preventDefault(); go(0) }
       else if (e.key === 'End') { e.preventDefault(); go(count - 1) }
-      else if ((e.key === 'Delete' || e.key === 'Backspace') && e.target.closest?.('.sd-strip')) { e.preventDefault(); remove() }
+      else if ((e.key === 'Delete' || e.key === 'Backspace') && e.target.closest?.('.sd-strip, .sd-sorter')) { e.preventDefault(); removePicked() }
       else if ((e.key === 'Delete' || e.key === 'Backspace') && picked) { e.preventDefault(); removePicture() }
     }
     window.addEventListener('keydown', key)
@@ -515,7 +559,51 @@ html,body{margin:0;background:#fff}div.marpit>svg{display:block;width:100vw;heig
   // On a phone the slide is as wide as the screen, with what's under it right under it.
   const phone = narrow || (stage.w > 0 && stage.w < 560)
   const pad = phone ? 12 : 28
-  const k = Math.max(0.1, narrow ? (stage.w - pad * 2) / D.W : Math.min((stage.w - pad * 2) / D.W, (stage.h - pad * 2) / D.H))
+  const fitK = Math.max(0.1, narrow ? (stage.w - pad * 2) / D.W : Math.min((stage.w - pad * 2) / D.W, (stage.h - pad * 2) / D.H))
+  const k = zoom === 'fit' || narrow ? fitK : zoom
+  const stepZoom = (d) => { if (!d) { setZoom('fit'); return } const now = zoom === 'fit' ? fitK : zoom; setZoom(d > 0 ? ZOOMS.find((z) => z > now + 0.01) || ZOOMS.at(-1) : [...ZOOMS].reverse().find((z) => z < now - 0.01) || ZOOMS[0]) }
+  // ---------- Find and replace ----------
+  const finder = useRef({ q: '', matchCase: false })
+  // The match on its slide: its block's words picked, once the slide is drawn.
+  const showMatch = (m) => {
+    setCur(m.si); setStrip(new Set())
+    if (view !== mdRef.current) setView(mdRef.current)
+    setTimeout(() => {
+      const els = [...(canvasRef.current?.querySelectorAll('section[id] .sd-ed') || [])]
+      const el = els.find((x) => { const [a, b] = lnOf(x); return m.line >= a && m.line < b })
+      if (!el) return
+      const q = finder.current.q
+      const text = el.textContent
+      const i = (finder.current.matchCase ? text : text.toLowerCase()).indexOf(finder.current.matchCase ? q : q.toLowerCase())
+      if (i < 0) { placeCaret(el, 0); return }
+      placeCaret(el, i)
+      const sel = window.getSelection()
+      for (let j = 0; j < q.length; j++) sel.modify?.('extend', 'forward', 'character')
+    }, 60)
+  }
+  const findOn = {
+    find: (q, matchCase) => { finder.current = { q, matchCase }; const list = D.findInDeck(fresh(), q, { matchCase }); const i = Math.max(0, list.findIndex((m) => m.si >= at)); setFound({ list, at: i }); if (list[i]) { setCur(list[i].si); if (view !== mdRef.current) setView(mdRef.current) } },
+    go: (d) => { const { list, at: i } = found; if (!list.length) return; const n = (i + d + list.length) % list.length; setFound({ list, at: n }); showMatch(list[n]) },
+    replace: (to) => {
+      const m = found.list[found.at]
+      if (!m) return
+      flush()
+      change(D.replaceInDeck(mdRef.current, m, to))
+      const list = D.findInDeck(D.structure(mdRef.current, renderer.render(mdRef.current).maps), finder.current.q, finder.current)
+      const i = Math.min(found.at, Math.max(0, list.length - 1))
+      setFound({ list, at: i })
+      if (list[i]) showMatch(list[i])
+    },
+    replaceAll: (to) => {
+      flush()
+      const list = D.findInDeck(fresh(), finder.current.q, finder.current)
+      let next = mdRef.current
+      for (const m of [...list].reverse()) next = D.replaceInDeck(next, m, to)
+      if (list.length) change(next)
+      setFound({ list: [], at: 0 })
+      setMsg({ text: list.length === 1 ? t('Replaced 1 match.') : t('Replaced {n} matches.', { n: list.length }) })
+    },
+  }
   const previews = useMemo(() => {
     if (menu !== 'layout' && menu !== 'new') return null
     const out = previewer.render(D.LAYOUTS.map((id) => sampleOf(id)).join('\n\n---\n\n'))
@@ -533,17 +621,21 @@ html,body{margin:0;background:#fff}div.marpit>svg{display:block;width:100vw;heig
     { label: t('Move up'), icon: 'up', run: () => move(i, i - 1), disabled: i === 0, keys: keys('mod', '↑') },
     { label: t('Move down'), icon: 'down', run: () => move(i, i + 1), disabled: i >= count - 1, keys: keys('mod', '↓') },
     '-',
+    { label: t('Copy'), icon: 'copy', run: copySlides, keys: keys('mod', 'c') },
+    { label: t('Paste'), icon: 'clipboard', run: pasteSlides, disabled: !mdClip, keys: keys('mod', 'v') },
+    D.isSkipped(D.slideText(st, i)) ? { label: t('Don\'t skip'), icon: 'eye', run: () => skipPicked(false) } : { label: t('Skip when presenting'), icon: 'eye-off', run: () => skipPicked(true) },
+    '-',
     { label: t('Present from here'), icon: 'play', run: () => setPresent({ at: i, presenter: false }) },
     '-',
-    { label: t('Delete the slide'), icon: 'trash', run: () => remove(i), danger: true, disabled: count <= 1 && !D.slideText(st, 0) },
+    { label: pickedList().length > 1 ? t('Delete {n} slides', { n: pickedList().length }) : t('Delete the slide'), icon: 'trash', run: () => (pickedList().length > 1 ? removePicked() : remove(i)), danger: true, disabled: count <= 1 && !D.slideText(st, 0) },
   ]
 
   // A slide in the strip or the grid: picked by a click, dragged into order, its menu on a right click.
   const thumb = (svg, i, w, pick) => (
-    <Thumb key={i} i={i} svg={svg} w={w} on={i === at} readOnly={readOnly}
+    <Thumb key={i} i={i} svg={svg} w={w} on={i === at} picked={strip.has(i)} skipped={D.isSkipped(D.slideText(st, i))} readOnly={readOnly}
       drop={drag && drag.to === i ? (drag.before ? 'before' : 'after') : null}
       onPick={pick}
-      onMenu={(e) => { e.preventDefault(); go(i); setCtx({ i, x: e.clientX, y: e.clientY }) }}
+      onMenu={(e) => { e.preventDefault(); if (!strip.has(i)) go(i); setCtx({ i, x: e.clientX, y: e.clientY }) }}
       onDragStart={() => { dragFrom.current = i; setDrag({ to: i, before: true }) }}
       onDragOver={(before) => setDrag((d) => (d ? { ...d, to: i, before } : d))}
       // Where it goes is read from the drop itself: a drop can come before the last dragover is drawn.
@@ -583,12 +675,20 @@ html,body{margin:0;background:#fff}div.marpit>svg{display:block;width:100vw;heig
           <div className="sd-group sd-marks">
             {tool(t('Bold'), 'bold', () => document.execCommand('bold'), { tip: withKeys(t('Bold'), 'mod', 'b') })}
             {tool(t('Italic'), 'italic', () => document.execCommand('italic'), { tip: withKeys(t('Italic'), 'mod', 'i') })}
+            {tool(t('Strikethrough'), 'strike', () => document.execCommand('strikeThrough'), { tip: withKeys(t('Strikethrough'), 'shift', 'mod', 'x') })}
+            {tool(t('Bulleted list'), 'list', () => listFocused('bullet'), { tip: withKeys(t('Bulleted list'), 'shift', 'mod', '8') })}
+            {tool(t('Numbered list'), 'list-ordered', () => listFocused('number'), { tip: withKeys(t('Numbered list'), 'shift', 'mod', '7') })}
           </div>
         )}
         {missing && <span className="muted small sd-tool-note" title={t('This deck names a design pack you don\'t have, so it uses your default.')}><Icon name="info" size={12} /> {t('No pack "{name}"', { name: named })}</span>}
         <span className="sd-grow" />
         <div className="sd-group">
           {!readOnly && tool(t('Write with AI'), 'sparkle', () => setShow((s) => ({ ...s, ai: !s.ai })), { label: true, on: show.ai, tip: t('Write a deck, rewrite a slide or add one, with AI: you see it before it\'s taken') })}
+          {tool(t('Find and replace'), 'search', () => { flush(); setFind({ replace: true, n: Date.now() }) }, { tip: withKeys(t('Find and replace'), 'mod', 'f') })}
+          {!narrow && <span className="menu-anchor">
+            {tool(t('Zoom'), 'maximize', () => setMenu(menu === 'zoom' ? null : 'zoom'), { label: true, tip: t('Zoom: {n}', { n: zoom === 'fit' ? t('Fit') : `${Math.round(zoom * 100)}%` }), more: { 'aria-haspopup': 'menu', 'aria-expanded': menu === 'zoom' } })}
+            {menu === 'zoom' && <Menu label={t('Zoom')} className="right" onClose={() => setMenu(null)} items={[{ label: t('Fit'), icon: zoom === 'fit' ? 'check' : 'dot', run: () => setZoom('fit'), keys: keys('alt', 'mod', '0') }, ...ZOOMS.map((z) => ({ label: `${Math.round(z * 100)}%`, icon: zoom === z ? 'check' : 'dot', run: () => setZoom(z) }))]} />}
+          </span>}
           {tool(t('Grid'), 'grid', () => { flush(); setGrid((x) => !x) }, { label: true, on: grid, tip: t('Every slide at once, to see the whole deck and drag slides into order') })}
           {!pptx && tool(t('Markdown'), 'code', () => { flush(); setShow((s) => ({ ...s, md: !s.md })) }, { label: true, on: show.md, tip: t('The deck as Markdown, beside the slides') })}
         </div>
@@ -597,9 +697,9 @@ html,body{margin:0;background:#fff}div.marpit>svg{display:block;width:100vw;heig
             <button type="button" className="btn small primary sd-present-btn" onClick={() => { flush(); setPresent({ at, presenter: false }) }} title={withKeys(t('Present from this slide'), 'mod', 'enter')} aria-label={t('Present')}><Icon name="play" size={12} /> <span className="sd-btn-label">{t('Present')}</span></button>
             <button type="button" className={`sd-tool caret${menu === 'present' ? ' on' : ''}`} onClick={() => setMenu(menu === 'present' ? null : 'present')} aria-label={t('More ways to present')} title={t('More ways to present')} aria-haspopup="menu" aria-expanded={menu === 'present'}><Icon name="down" size={12} /></button>
             {menu === 'present' && <Menu label={t('Present')} className="right" onClose={() => setMenu(null)} items={[
-              { label: t('From the beginning'), icon: 'play', run: () => setPresent({ at: 0, presenter: false }), keys: 'F5' },
+              { label: t('From the beginning'), icon: 'play', run: () => setPresent({ at: 0, presenter: false }), keys: keys('shift', 'mod', '↵') },
               { label: t('From this slide'), icon: 'play', run: () => setPresent({ at, presenter: false }), keys: keys('mod', '↵') },
-              { label: t('Presenter view'), icon: 'panel-right', run: () => setPresent({ at, presenter: true }), keys: keys('shift', 'mod', '↵') },
+              { label: t('Presenter view'), icon: 'panel-right', run: () => setPresent({ at, presenter: true }) },
             ]} />}
           </span>
           <span className="menu-anchor">
@@ -611,22 +711,23 @@ html,body{margin:0;background:#fff}div.marpit>svg{display:block;width:100vw;heig
           </span>
         </div>
       </div>
+      {find && <DeckFind key={find.n} count={found.list.length} at={found.at} replace={find.replace} on={findOn} onClose={() => { setFind(null); setFound({ list: [], at: 0 }) }} />}
       {msg && <p className={`small sd-note${msg.error ? ' error-text' : ''}`} role={msg.error ? 'alert' : 'status'}>{msg.text} {msg.open && <button type="button" className="link-btn" onClick={() => onOpen?.({ root: file.root, path: msg.open })}>{t('Open it')}</button>} <button type="button" className="link-btn" onClick={() => setMsg(null)}>{t('Close')}</button></p>}
       {pptx && <p className="small sd-note sd-deck-said"><Icon name="info" size={12} /> {t('A PowerPoint, shown with its text, lists, pictures, tables, notes and theme in Studio\'s layouts.')} {start.skipped > 0 && t('{n} things on its slides (charts, diagrams, video) aren\'t shown.', { n: start.skipped })} {t('Saving writes it again from what\'s here; the file as it was stays in its versions.')}</p>}
       <div className="sd-deck-body">
         <ol className="sd-strip" ref={stripRef} aria-label={t('Slides')}>
-          {full.slides.map((svg, i) => thumb(svg, i, 160, () => go(i)))}
+          {full.slides.map((svg, i) => thumb(svg, i, 160, (e) => go(i, { extend: e.shiftKey, toggle: e.metaKey || e.ctrlKey })))}
           {!readOnly && <li className="sd-strip-add"><button type="button" className="ghost-btn" onClick={() => addSlide('content', count - 1)} title={t('New slide at the end')}><Icon name="plus" size={13} /> {t('New slide')}</button></li>}
         </ol>
         {ctx && <div className="sd-ctx" style={{ left: ctx.x, top: ctx.y }}><Menu label={t('Slide {n}', { n: ctx.i + 1 })} onClose={() => setCtx(null)} items={slideMenu(ctx.i)} /></div>}
         {grid ? (
           <div className="sd-sorter" aria-label={t('Every slide')}>
-            <ol>{full.slides.map((svg, i) => thumb(svg, i, 0, () => open(i)))}</ol>
+            <ol>{full.slides.map((svg, i) => thumb(svg, i, 0, (e) => (e.shiftKey || e.metaKey || e.ctrlKey ? go(i, { extend: e.shiftKey, toggle: e.metaKey || e.ctrlKey }) : open(i))))}</ol>
             {!readOnly && <p><button type="button" className="ghost-btn" onClick={() => { addSlide('content', count - 1); setGrid(false) }}><Icon name="plus" size={13} /> {t('New slide')}</button></p>}
           </div>
         ) : (
           <div className="sd-work">
-            <div className="sd-stage" ref={stageEl} tabIndex={-1} onDragOver={(e) => { if ([...(e.dataTransfer?.types || [])].includes('Files')) e.preventDefault() }} onDrop={onCanvasDrop} onMouseDown={(e) => { if (e.target === e.currentTarget) { flush(); setPicked(false) } }}>
+            <div className={`sd-stage${k > fitK + 0.001 ? ' zoomed' : ''}`} ref={stageEl} tabIndex={-1} onDragOver={(e) => { if ([...(e.dataTransfer?.types || [])].includes('Files')) e.preventDefault() }} onDrop={onCanvasDrop} onMouseDown={(e) => { if (e.target === e.currentTarget) { flush(); setPicked(false) } }}>
               {!readOnly && !phone && (
                 <div className="sd-pill" role="toolbar" aria-label={t('This slide')}>
                   <button type="button" onClick={() => openAi('slide')} title={t('Rewrite this slide with AI')}><Icon name="sparkle" size={12} /> {t('Rewrite')}</button>
@@ -675,22 +776,22 @@ html,body{margin:0;background:#fff}div.marpit>svg{display:block;width:100vw;heig
         )}
         {show.ai && !readOnly && <AiPanel file={file} getSlides={slideTexts} at={at} mode={aiMode} setMode={setAiMode} draw={drawSlides} onKeep={keepAi} onClose={() => setShow((s) => ({ ...s, ai: false }))} />}
       </div>
-      {present && <Present slides={full.slides} notes={full.notes.map((n) => n.join('\n\n'))} start={present.at} presenter={present.presenter} onAt={setCur} onClose={() => setPresent(null)} />}
+      {present && <Present slides={full.slides} notes={full.notes.map((n) => n.join('\n\n'))} skip={st.slides.map((_, i) => D.isSkipped(D.slideText(st, i)))} start={present.at} presenter={present.presenter} onAt={setCur} onClose={() => setPresent(null)} />}
     </div>
   )
 }
 
 // A slide in the strip: its number, its drawing; dragged to move it, its menu on a right click.
 // Focused when it's clicked (Safari doesn't focus a button it's clicked on), for ⌘D and Delete.
-const Thumb = memo(function Thumb({ i, svg, w, on, readOnly, drop, onPick, onMenu, onDragStart, onDragOver, onDrop, onDragEnd }) {
+const Thumb = memo(function Thumb({ i, svg, w, on, picked, skipped, readOnly, drop, onPick, onMenu, onDragStart, onDragOver, onDrop, onDragEnd }) {
   return (
-    <li className={`sd-thumb${on ? ' on' : ''}${drop ? ` drop-${drop}` : ''}`} draggable={!readOnly}
-      onClick={(e) => { e.currentTarget.querySelector('.sd-thumb-btn')?.focus({ preventScroll: true }); onPick() }} onContextMenu={readOnly ? undefined : onMenu}
+    <li className={`sd-thumb${on ? ' on' : ''}${picked ? ' picked' : ''}${skipped ? ' skipped' : ''}${drop ? ` drop-${drop}` : ''}`} draggable={!readOnly}
+      onClick={(e) => { e.currentTarget.querySelector('.sd-thumb-btn')?.focus({ preventScroll: true }); onPick(e) }} onContextMenu={readOnly ? undefined : onMenu}
       onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(i)); onDragStart() }}
       onDragOver={(e) => { e.preventDefault(); const r = e.currentTarget.getBoundingClientRect(); onDragOver(e.clientY < r.top + r.height / 2) }}
       onDrop={(e) => { e.preventDefault(); const r = e.currentTarget.getBoundingClientRect(); onDrop(e.clientY < r.top + r.height / 2) }} onDragEnd={onDragEnd}>
-      <span className="sd-thumb-n">{i + 1}</span>
-      <button type="button" className="sd-thumb-btn" aria-current={on ? 'true' : undefined} aria-label={t('Slide {n}', { n: i + 1 })} title={t('Slide {n}', { n: i + 1 })}><Slide svg={svg} w={w} /></button>
+      <span className="sd-thumb-n">{i + 1}{skipped && <Icon name="eye-off" size={12} />}</span>
+      <button type="button" className="sd-thumb-btn" aria-current={on ? 'true' : undefined} aria-selected={on || picked} aria-label={skipped ? t('Slide {n}, skipped', { n: i + 1 }) : t('Slide {n}', { n: i + 1 })} title={skipped ? t('Slide {n}: skipped when presenting', { n: i + 1 }) : t('Slide {n}', { n: i + 1 })}><Slide svg={svg} w={w} /></button>
       {!readOnly && <button type="button" className="sd-thumb-more" onClick={(e) => { e.stopPropagation(); onMenu(e) }} aria-label={t('More for slide {n}', { n: i + 1 })} title={t('More for slide {n}', { n: i + 1 })}><Icon name="more" size={13} /></button>}
     </li>
   )

@@ -77,6 +77,11 @@
 /* The slide being edited, on the app's grey, its words typed right on it. */
 .sd-work { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-width: 0; min-height: 0; }
 .sd-stage { position: relative; display: grid; place-items: center; min-height: 0; overflow: hidden; padding-top: 32px; background: var(--pane-3); outline: none; }
+/* Zoomed in past the window: the slide scrolls, from any edge. */
+.sd-stage.zoomed { display: flex; overflow: auto; padding: 32px 28px 28px; }
+.sd-stage.zoomed > .sd-canvas { flex: none; margin: auto; }
+.sd-thumb.picked .sd-thumb-btn { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent), 0 2px 6px rgb(0 0 0 / .12); }
+.sd-thumb.skipped .sd-thumb-btn { opacity: .45; }
 .sd-canvas { position: relative; overflow: hidden; border-radius: 3px; background: #fff; box-shadow: 0 0 0 1px rgb(0 0 0 / .06), 0 2px 4px rgb(0 0 0 / .06), 0 12px 32px rgb(0 0 0 / .14); }
 .sd-canvas .sd-ed { outline: none; cursor: text; border-radius: 6px; transition: box-shadow .1s; }
 .sd-canvas .sd-ed:hover { box-shadow: 0 0 0 calc(1.5px / var(--k, 1)) color-mix(in srgb, var(--accent) 45%, transparent); }
@@ -180,6 +185,56 @@
 .sd-presenter > .sd-slide { box-shadow: 0 0 0 1px #333; opacity: .92; }
 .sd-presenter-notes { margin: 0; font: 19px/1.55 var(--font); color: #f2f2f2; white-space: pre-wrap; }
 .sd-print-frame { position: fixed; right: 0; bottom: 0; width: 1px; height: 1px; border: 0; opacity: 0; pointer-events: none; }
+.sd-present-black.white { background: #fff; }
+.sd-present-typed { position: absolute; right: 24px; top: 20px; padding: 6px 12px; border-radius: 8px; background: rgb(30 30 30 / .88); color: #fff; font: 600 15px var(--font); font-variant-numeric: tabular-nums; }
+/* Find and replace: its Match case. */
+.sd-find-case { display: inline-flex; align-items: center; gap: 5px; margin-left: 6px; color: var(--ink-2); white-space: nowrap; }
+
+/* A PowerPoint, edited as itself (SlidesEditor.jsx): the slide drawn at its own size and scaled,
+   what's picked outlined with handles in the screen's px over it, guides where a moved thing
+   snaps, the words being typed right where they are, and the toolbar's menus. */
+.px-in { all: initial; position: relative; display: block; transform-origin: 0 0; }
+.px-slide-box { position: relative; overflow: hidden; background: #fff; }
+.px-slide-box > .px-in { position: absolute; top: 0; left: 0; pointer-events: none; }
+.sd-slides .sd-stage.px-stage { display: flex; overflow: auto; padding: 28px; place-items: initial; }
+.sd-slides .px-canvas { position: relative; flex: none; margin: auto; overflow: visible; touch-action: none; user-select: none; -webkit-user-select: none; }
+.px-canvas > .px-in { overflow: hidden; }
+.px-canvas [data-o] { cursor: move; }
+.px-canvas .px-editing, .px-canvas .px-editing * { cursor: text; }
+.px-edit-body { outline: none; user-select: text; -webkit-user-select: text; caret-color: currentColor; min-height: 1em; }
+.px-sel { position: absolute; inset: 0; pointer-events: none; }
+.px-frame { position: absolute; box-shadow: 0 0 0 1.5px var(--accent); transform-origin: 50% 50%; }
+.px-frame.hover { box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent); }
+.px-frame.editing { box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 70%, transparent); }
+.px-frame.group { box-shadow: 0 0 0 1px var(--accent); outline: 1px dashed color-mix(in srgb, var(--accent) 60%, transparent); outline-offset: 3px; }
+.px-handle { position: absolute; width: 9px; height: 9px; margin: -5px 0 0 -5px; border-radius: 2px; background: #fff; box-shadow: 0 0 0 1.5px var(--accent); pointer-events: auto; }
+.px-handle.nw { left: 0; top: 0; cursor: nwse-resize; } .px-handle.n { left: 50%; top: 0; cursor: ns-resize; } .px-handle.ne { left: 100%; top: 0; cursor: nesw-resize; }
+.px-handle.e { left: 100%; top: 50%; cursor: ew-resize; } .px-handle.se { left: 100%; top: 100%; cursor: nwse-resize; } .px-handle.s { left: 50%; top: 100%; cursor: ns-resize; }
+.px-handle.sw { left: 0; top: 100%; cursor: nesw-resize; } .px-handle.w { left: 0; top: 50%; cursor: ew-resize; }
+.px-handle.rot { left: 50%; top: -24px; border-radius: 50%; cursor: grab; }
+.px-handle.rot::after { content: ''; position: absolute; left: 4px; top: 9px; width: 1.5px; height: 15px; background: var(--accent); }
+.px-frame.crop .px-handle { width: 14px; height: 4px; margin: -2px 0 0 -7px; border-radius: 1px; background: #111; box-shadow: 0 0 0 1px #fff; }
+.px-frame.crop .px-handle.e, .px-frame.crop .px-handle.w { width: 4px; height: 14px; margin: -7px 0 0 -2px; }
+.px-crop-ghost { position: absolute; outline: 1px dashed rgb(0 0 0 / .5); background: rgb(0 0 0 / .06); pointer-events: none; }
+.px-guide { position: absolute; background: #e8467c; pointer-events: none; }
+.px-marquee { position: absolute; border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.sd-thumb-n > svg { display: block; margin: 3px 0 0 auto; color: var(--ink-3); }
+.sd-slides .sd-sorter .sd-thumb-btn .px-slide-box { width: 100% !important; height: auto !important; }
+/* Its toolbar in two rows that stay put: the deck's tools, then the format of what's picked. */
+.sd-slides .sd-slides-tools { flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 0; padding: 4px 10px; }
+.px-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; min-height: 36px; }
+.px-row.px-format { min-height: 38px; border-top: 1px solid var(--line); }
+.px-hint { padding: 0 6px; line-height: 1.4; }
+.sd-slides .sd-drop-btn { display: inline-flex; align-items: center; gap: 2px; width: auto; padding: 0 4px 0 6px; }
+.sd-slides .sd-drop-btn.has-text { gap: 6px; padding: 0 6px 0 9px; border: 1px solid transparent; font: 500 12.5px var(--font); color: var(--ink); }
+.sd-slides .sd-drop-btn.has-text:hover:not(:disabled) { border-color: var(--line-2, var(--line)); background: var(--pane); }
+.sd-slides .sd-size-drop .sd-drop-text { width: 28px; text-align: center; font-variant-numeric: tabular-nums; }
+.sd-slides .sd-zoom-drop .sd-drop-text { width: 34px; }
+.sd-slides .sd-drop { z-index: 60; }
+.px-shape-grid { display: grid; grid-template-columns: repeat(4, 40px); gap: 2px; padding: 2px; }
+.px-shape-grid .sd-item { justify-content: center; padding: 4px; min-height: 34px; }
+.px-layouts.sd-gallery { position: static; width: 448px; box-shadow: none; padding: 4px; }
+.menu.px-layouts.sd-gallery { position: absolute; box-shadow: 0 0 0 1px var(--line), 0 12px 32px rgb(0 0 0 / .18); padding: 10px 10px 8px; }
 
 /* A phone: the slide across the screen with back and next under it, every slide a tap away in the
    grid, Write with AI and the Markdown over the slide, each thing you tap a whole 40px target. */
@@ -217,3 +272,10 @@
 .app.narrow .sd-gallery-grid > button { min-height: 40px; }
 .app.narrow .sd-sorter .ghost-btn { min-height: 40px; }
 .app.narrow .sd-present-bar .win-btn { width: 44px; height: 44px; }
+.app.narrow .sd-slides .sd-drop-btn { min-width: 40px; height: 40px; }
+.app.narrow .sd-slides .sd-stage.px-stage { padding: 12px 0; }
+.app.narrow .sd-slides .px-row { gap: 2px; }
+.app.narrow .sd-slides .sd-size { gap: 0; }
+.app.narrow .sd-findbar .win-btn, .app.narrow .sd-findbar .btn.small { min-width: 40px; min-height: 40px; }
+.app.narrow .sd-findbar input { font-size: 16px; height: 40px; }
+.app.narrow .sd-find-case { min-height: 40px; }
