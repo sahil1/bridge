@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createUniver, LocaleType, mergeLocales } from '@univerjs/presets'
-import { UniverSheetsCorePreset, IconManager, SheetsUIMenuSchema, SheetsNumfmtUIMenuSchema } from '@univerjs/preset-sheets-core'
+import { UniverSheetsCorePreset, IconManager, SheetsUIMenuSchema } from '@univerjs/preset-sheets-core'
 import { UniverSheetsSortPreset } from '@univerjs/preset-sheets-sort'
 import { UniverSheetsFilterPreset } from '@univerjs/preset-sheets-filter'
 import { UniverSheetsConditionalFormattingPreset, SheetsConditionalFormattingUIMenuSchema } from '@univerjs/preset-sheets-conditional-formatting'
@@ -74,12 +74,12 @@ const OPS = {
 }
 
 // The ribbon's tools for what a CSV can't hold: fonts, colours, borders, alignment, merged cells,
-// number formats, conditional formats and validation.
+// conditional formats and validation. A number's format it keeps: it's how the number is written
+// (1,200.50, 15%, 2026-04-01).
 const itemsOf = (schema, tab, group) => Object.keys(schema?.[tab]?.[group] || schema?.[group] || {})
 const CSV_HIDDEN = [
   ...itemsOf(SheetsUIMenuSchema, 'ribbon.start', 'ribbon.start.format'),
   ...itemsOf(SheetsUIMenuSchema, 'ribbon.start', 'ribbon.start.layout'),
-  ...itemsOf(SheetsNumfmtUIMenuSchema, 'ribbon.start', 'ribbon.start.number'),
   ...itemsOf(SheetsConditionalFormattingUIMenuSchema, 'ribbon.data', 'ribbon.data.rules'),
   ...itemsOf(SheetsDataValidationUIMenuSchema, 'ribbon.data', 'ribbon.data.rules'),
 ]
@@ -150,13 +150,16 @@ export default function SheetEditor({ file, data, onDirty, onStats, handle, read
       // Ask AI first in the ribbon. A CSV keeps only values, so the tools for formats, merged
       // cells, conditional formats and validation aren't offered there (as the other editors do).
       const menu = { 'ribbon.start.ai': { order: -1 } }
-      if (wb.kind === 'csv') for (const id of CSV_HIDDEN) menu[id] = { hidden: true }
+      const csv = wb.kind === 'csv'
+      if (csv) for (const id of CSV_HIDDEN) menu[id] = { hidden: true }
       made = createUniver({
         locale: LOCALE_TYPE[code],
         locales: { [LOCALE_TYPE[code]]: words },
         darkMode: dark(),
         presets: [
-          UniverSheetsCorePreset({ container: host.current, header: !readOnly, toolbar: !readOnly, ribbonType: narrow ? 'simple' : 'grid', menu, footer: { sheetBar: true, statisticBar: !narrow, menus: false, zoomSlider: !narrow } }),
+          // A CSV's text that looks like a number ("007", a long ID) is text on purpose, and kept
+          // so: not marked as a number stored as text.
+          UniverSheetsCorePreset({ container: host.current, header: !readOnly, toolbar: !readOnly, ribbonType: narrow ? 'simple' : 'grid', menu, footer: { sheetBar: true, statisticBar: !narrow, menus: false, zoomSlider: !narrow }, disableTextFormatMark: csv, disableTextFormatAlert: csv }),
           UniverSheetsSortPreset(), UniverSheetsFilterPreset(), UniverSheetsConditionalFormattingPreset(),
           UniverSheetsDataValidationPreset(), UniverSheetsFindReplacePreset(), UniverSheetsHyperLinkPreset(), UniverSheetsNotePreset(),
         ],

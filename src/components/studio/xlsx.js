@@ -2,7 +2,7 @@
 // one sheet of values, read and written back as it's written (csv.js). An Excel file is read and
 // written by xlsxbook.js: written back into itself, so what wasn't changed here (charts,
 // pictures, pivot tables, comments, macros, its own XML) stays exactly as it was.
-import { readCsv, writeCsv, writesBack, asCell } from './csv.js'
+import { readCsv, writeCsv, writesBack, asCell, textOf } from './csv.js'
 import { t, tx } from '../../i18n/index.js'
 
 const isCsv = (ext) => ext === '.csv' || ext === '.tsv'
@@ -38,11 +38,16 @@ export async function readSheet(buf, name, ext, opts = {}) {
     const sh = Object.values(w.data.sheets)[0]
     let cols = 0
     const widest = []
+    // A number's format once for every cell written that way (1,200.50, 15%, a date).
+    const styleOf = {}
+    const named = (s) => { const k = s.n.pattern; if (!styleOf[k]) { styleOf[k] = `n${Object.keys(styleOf).length}`; w.data.styles[styleOf[k]] = s } return styleOf[k] }
     csv.rows.forEach((r, i) => {
       cols = Math.max(cols, r.length)
       r.forEach((f, j) => {
         if (f.v === '') return
-        ;(sh.cellData[i] ||= {})[j] = asCell(f.v)
+        const cell = asCell(f.v)
+        if (cell.s) cell.s = named(cell.s)
+        ;(sh.cellData[i] ||= {})[j] = cell
         if (i < 1000) widest[j] = Math.max(widest[j] || 0, Math.min(48, f.v.length))
       })
     })
@@ -74,7 +79,7 @@ export async function writeSheet(book, now, { ops = [], charts = [] } = {}) {
       const cells = sh.cellData?.[r] || {}
       const cols = Object.keys(cells).map(Number).filter((c) => filled(cells[c]))
       const end = cols.length ? Math.max(...cols) : -1
-      lines.push(Array.from({ length: end + 1 }, (_, c) => textOf(cells[c])))
+      lines.push(Array.from({ length: end + 1 }, (_, c) => textOf(cells[c], now.styles)))
     }
     const out = writeCsv(book.csv, lines)
     const kind = book.csv.sep === '\t' ? 'TSV' : 'CSV'
@@ -113,12 +118,6 @@ function sayWhy(m) {
   if (on && WHY[on[1]]) return t('{what} on {sheet}', { what: t(WHY[on[1]]), sheet: on[2] })
   for (const [re, say] of WHY_ON) { const x = re.exec(m); if (x) return t(say, { a: x[1] || '', b: x[2] || '' }).replace(/ {2,}/g, ' ') }
   return m
-}
-// A cell as a CSV has it: its value (a formula's result), true and false as Excel writes them.
-function textOf(cell) {
-  if (!cell || cell.v == null) return ''
-  if (cell.t === 3) return cell.v ? 'TRUE' : 'FALSE'
-  return String(cell.v)
 }
 
 // A new Excel file (Studio's New › Sheet): an empty workbook, with what's given written in.
