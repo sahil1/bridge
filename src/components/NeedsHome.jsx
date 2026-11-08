@@ -983,7 +983,11 @@ export function Everything({ phone = false, onOpenAgent, onOpenMeeting, onOpenBo
           {onBack && <button type="button" className="ghost-btn m-view-back" onClick={onBack}><Icon name="back" size={14} /> {t('Home')}</button>}
           <div className="hm-title">
             <h2>{t('Everything')}</h2>
-            <p className="muted">{t('{n} things on {m} computers · {k} need you', { n: things.length, m: devices.length || 1, k: needN })}</p>
+            <p className="muted">{[
+              devices.length > 1 ? (things.length === 1 ? t('1 thing on {m} computers', { m: devices.length }) : t('{n} things on {m} computers', { n: things.length, m: devices.length }))
+                : things.length === 1 ? t('1 thing on this computer') : t('{n} things on this computer', { n: things.length }),
+              needN === 1 ? t('{n} needs you', { n: needN }) : t('{n} need you', { n: needN }),
+            ].join(' · ')}</p>
           </div>
           <div className="ey-seg" role="tablist" aria-label={t('Lanes')}>
             <button type="button" role="tab" aria-selected={by === 'device'} className={by === 'device' ? 'on' : ''} onClick={() => pick('device')}>{t('By device')}</button>

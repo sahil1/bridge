@@ -418,6 +418,8 @@ try {
     ok(!!(await until(() => ey.isVisible(), 8000)), 'See everything opens Everything')
     const lanes = await until(async () => { const n = await ey.locator('.ey-lane-head b').allInnerTexts(); return n.length === 2 && n }, 10000)
     ok(lanes && lanes[0] === 'Studio' && lanes[1] === 'Desk', 'a lane per computer, this one first', lanes)
+    const count = await ey.locator('.ey-head p').innerText()
+    ok(/^\d+ things on 2 computers · (1 needs you|(0|[2-9]|\d\d+) need you)$/.test(count), 'under its heading, how many things on how many computers, and how many need you, each said as one or many', count)
     // (Its agents come from the Agent Map's list, which can come a moment after Home's.)
     await until(async () => /Deploy/.test(await ey.locator('.ey-lane').first().innerText()), 10000)
     const studioLane = await ey.locator('.ey-lane').first().innerText()
