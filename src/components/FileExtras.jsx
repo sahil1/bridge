@@ -139,10 +139,12 @@ export function Menu({ x, y, items, onClose, className = '' }) {
 // What the menu offers for a file or folder. `act(op, entry)` does it.
 // send: another device is linked, so it can be sent there; copyHere: its label, when this is another
 // device's file in a computer's window (Copy to this computer).
-export function menuItems(entry, act, { onMention, send = false, copyHere = null } = {}) {
+export function menuItems(entry, act, { onMention, send = false, copyHere = null, assist = null } = {}) {
   const dir = !!entry.dir
   const root = entry.path === ''
   return [
+    dir && assist && { label: t('Files Assist'), icon: 'sparkle', run: () => assist(entry) },
+    dir && assist && 'sep',
     dir && { label: 'New file…', icon: 'file', run: () => act('newFile', entry) },
     dir && { label: 'New folder…', icon: 'folder', run: () => act('newFolder', entry) },
     dir && { label: t('Send files from this device…'), icon: 'upload', run: () => act('upload', entry) },
