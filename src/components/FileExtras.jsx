@@ -13,19 +13,21 @@ const LOOPBACK = /^(localhost|127\.0\.0\.1|\[::1\])$/
 export const onComputer = typeof location !== 'undefined' && LOOPBACK.test(location.hostname)
 const platform = typeof navigator !== 'undefined' ? navigator.userAgent : ''
 export const REVEAL = /Mac/.test(platform) ? 'Reveal in Finder' : /Windows/.test(platform) ? 'Show in Explorer' : 'Show in file manager'
-const OPENABLE = /\.(pdf|docx?|odt|rtf|pptx?|odp|key|xlsx|xlsm|xls|ods|numbers|pages|csv|tsv|txt|md|png|jpe?g|gif|webp|svg|heic|tiff?|bmp|mp4|mov|m4v|webm|mp3|m4a|wav|aac|flac|zip|epub)$/i
+export const OPENABLE = /\.(pdf|docx?|odt|rtf|pptx?|odp|key|xlsx|xlsm|xls|ods|numbers|pages|csv|tsv|txt|md|png|jpe?g|gif|webp|svg|heic|tiff?|bmp|mp4|mov|m4v|webm|mp3|m4a|wav|aac|flac|zip|epub)$/i
 const APP = { document: 'Word', slides: 'PowerPoint', sheet: 'Excel' }
 
 export const fileOp = (pane, op, path, name) => api(`/agents/${enc(pane)}/fileop`, { method: 'POST', body: { op, path, name } })
 
 // ---------- Office files ----------
-export function OfficeView({ pane, f }) {
-  return f.office === 'sheet' ? <SheetView pane={pane} f={f} /> : <DocView pane={pane} f={f} />
+// base: the computer the file is on, when it isn't this window's (Files' Quick Look on another).
+const getAt = (base, p) => (base == null ? api(p) : fetch(`${base}/api${p}`).then(async (r) => { const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`); return d }))
+export function OfficeView({ pane, f, base = null }) {
+  return f.office === 'sheet' ? <SheetView pane={pane} f={f} base={base} /> : <DocView pane={pane} f={f} base={base} />
 }
 
 // A document or deck: laid out as a PDF by LibreOffice; without it, the text in the file.
-function DocView({ pane, f }) {
-  const url = `${BASE}/api/agents/${enc(pane)}/office/pdf?path=${enc(f.path)}&v=${f.mtime}`
+function DocView({ pane, f, base }) {
+  const url = `${base ?? BASE}/api/agents/${enc(pane)}/office/pdf?path=${enc(f.path)}&v=${f.mtime}`
   const [st, setSt] = useState({ busy: true })
   useEffect(() => {
     let live = true
@@ -40,14 +42,14 @@ function DocView({ pane, f }) {
   }, [url])
   if (st.busy) return <div className="viewer-empty"><Icon name="refresh" size={20} className="spin" /><p className="muted small">Getting {f.name} ready…</p></div>
   if (st.pdf) return <iframe className="pdf-view" src={url} title={f.name} />
-  return <Outline pane={pane} f={f} note={st.needs === 'libreoffice'
+  return <Outline pane={pane} f={f} base={base} note={st.needs === 'libreoffice'
     ? <>This is the text in the file. To see it laid out as in {APP[f.office]}, install <a href="https://www.libreoffice.org/download/download/" target="_blank" rel="noreferrer">LibreOffice</a> (free); Bridge AI uses it in the background.</>
     : <>Couldn't lay this file out ({st.error}). Here's the text in it.</>} />
 }
 
-function Outline({ pane, f, note }) {
+function Outline({ pane, f, note, base }) {
   const [d, setD] = useState(null)
-  useEffect(() => { api(`/agents/${enc(pane)}/office/outline?path=${enc(f.path)}`).then(setD).catch((e) => setD({ error: e.message })) }, [pane, f.path, f.mtime])
+  useEffect(() => { getAt(base, `/agents/${enc(pane)}/office/outline?path=${enc(f.path)}`).then(setD).catch((e) => setD({ error: e.message })) }, [pane, f.path, f.mtime, base])
   return (
     <div className="office-outline">
       <p className="office-note small"><Icon name="info" size={12} /> <span>{note}</span></p>
@@ -68,10 +70,10 @@ function Outline({ pane, f, note }) {
 // A spreadsheet or CSV as a table: a tab per sheet, column letters and row numbers.
 const colName = (i) => { let s = ''; for (i++; i > 0; i = Math.floor((i - 1) / 26)) s = String.fromCharCode(65 + ((i - 1) % 26)) + s; return s }
 const NUM = /^-?[\d,.]+%?$/
-function SheetView({ pane, f }) {
+function SheetView({ pane, f, base }) {
   const [d, setD] = useState(null)
   const [at, setAt] = useState(0)
-  useEffect(() => { setD(null); api(`/agents/${enc(pane)}/office/sheet?path=${enc(f.path)}`).then(setD).catch((e) => setD({ error: e.message })) }, [pane, f.path, f.mtime])
+  useEffect(() => { setD(null); getAt(base, `/agents/${enc(pane)}/office/sheet?path=${enc(f.path)}`).then(setD).catch((e) => setD({ error: e.message })) }, [pane, f.path, f.mtime, base])
   if (!d) return <div className="viewer-empty"><Icon name="refresh" size={20} className="spin" /><p className="muted small">Reading {f.name}…</p></div>
   if (d.error) return <div className="viewer-empty"><Icon name="alert" size={22} /><p>{d.error}</p></div>
   const s = d.sheets[Math.min(at, d.sheets.length - 1)]
@@ -100,8 +102,9 @@ function SheetView({ pane, f }) {
 }
 
 // ---------- menu ----------
-// items: [{ label, icon, run, danger, hint }] or 'sep'.
-export function Menu({ x, y, items, onClose, className = '' }) {
+// items: [{ label, icon, run, danger, hint, disabled }] or 'sep'. One that's disabled is shown and
+// can't be picked (something coming, say). heading: a line above them (what they're for).
+export function Menu({ x, y, items, onClose, className = '', heading = null }) {
   const ref = useRef(null)
   const [pos, setPos] = useState({ left: x, top: y })
   useLayoutEffect(() => {
@@ -115,20 +118,21 @@ export function Menu({ x, y, items, onClose, className = '' }) {
     window.addEventListener('keydown', key, true)
     window.addEventListener('blur', onClose)
     window.addEventListener('resize', onClose)
-    ref.current?.querySelector('button')?.focus()
+    ref.current?.querySelector('button:not(:disabled)')?.focus()
     return () => { window.removeEventListener('mousedown', down, true); window.removeEventListener('keydown', key, true); window.removeEventListener('blur', onClose); window.removeEventListener('resize', onClose) }
   }, [onClose])
   const onKey = (e) => {
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
     e.preventDefault()
-    const bs = [...ref.current.querySelectorAll('button')]
+    const bs = [...ref.current.querySelectorAll('button:not(:disabled)')]
     const i = bs.indexOf(document.activeElement)
     bs[(i + (e.key === 'ArrowDown' ? 1 : -1) + bs.length) % bs.length]?.focus()
   }
   return createPortal(
     <div className={`ctx-menu ${className}`} ref={ref} role="menu" style={pos} onKeyDown={onKey} onContextMenu={(e) => e.preventDefault()}>
+      {heading && <div className="ctx-heading" title={heading}>{heading}</div>}
       {items.filter(Boolean).map((it, i) => (it === 'sep' ? <div key={i} className="ctx-sep" role="separator" />
-        : <button key={i} role="menuitem" className={it.danger ? 'danger' : ''} onClick={() => { onClose(); it.run() }}>
+        : <button key={i} role="menuitem" className={it.danger ? 'danger' : ''} disabled={!!it.disabled} title={it.title} onClick={() => { if (it.disabled) return; onClose(); it.run() }}>
             <Icon name={it.icon || 'dot'} size={13} /><span>{it.label}</span>{it.hint && <kbd>{it.hint}</kbd>}
           </button>))}
     </div>,
@@ -139,10 +143,12 @@ export function Menu({ x, y, items, onClose, className = '' }) {
 // What the menu offers for a file or folder. `act(op, entry)` does it.
 // send: another device is linked, so it can be sent there; copyHere: its label, when this is another
 // device's file in a computer's window (Copy to this computer).
-export function menuItems(entry, act, { onMention, send = false, copyHere = null } = {}) {
+export function menuItems(entry, act, { onMention, send = false, copyHere = null, assist = null } = {}) {
   const dir = !!entry.dir
   const root = entry.path === ''
   return [
+    dir && assist && { label: t('Files Assist'), icon: 'sparkle', run: () => assist(entry) },
+    dir && assist && 'sep',
     dir && { label: 'New file…', icon: 'file', run: () => act('newFile', entry) },
     dir && { label: 'New folder…', icon: 'folder', run: () => act('newFolder', entry) },
     dir && { label: t('Send files from this device…'), icon: 'upload', run: () => act('upload', entry) },

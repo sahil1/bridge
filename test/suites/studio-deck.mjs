@@ -18,7 +18,8 @@
 // taken; the PowerPoint; slides picked together, copied, skipped; find and replace; zoom; the
 // Markdown kept as it was where it wasn't touched. A PowerPoint edited as itself: typed in place,
 // shapes, pictures and a table put in and handled, copied, undone; presented; saved over itself
-// keeping everything it didn't change. At 1440 wide and on a 390 phone, light and dark.
+// keeping everything it didn't change; in Focus, its slide bigger, Esc letting go of the shapes
+// picked before it leaves. At 1440 wide and on a 390 phone, light and dark.
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
@@ -492,6 +493,22 @@ try {
     await go(4)
     ok((await objs.count()) === 8 && /Order/.test(await p.locator('.px-canvas').innerText()), 'its shapes where they are, each one there to pick')
     await shot(p, `${tag}deck-pptx`)
+    // In Focus: the slide bigger in the middle; Esc lets go of the shapes picked first, then leaves.
+    const slideW = async () => (await p.locator('.px-canvas').boundingBox())?.width || 0
+    const w0 = await slideW()
+    await p.keyboard.press(`${MOD}+Alt+f`)
+    const deckFocus = () => p.locator('.sd-file.focus').count().then((n) => n === 1)
+    ok(!!(await until(async () => (await deckFocus()) && (await slideW()) > w0 + 40, 3000, 100)), 'a PowerPoint in Focus: its slide bigger, in the whole window', { w0, w1: await slideW() })
+    await shot(p, `${tag}deck-pptx-focus`)
+    await p.locator('.px-stage').focus()
+    await p.keyboard.press(`${MOD}+a`)
+    const picks = () => p.locator('.px-sel .px-frame:not(.hover)').count()
+    ok(!!(await until(async () => (await picks()) > 0, 2000, 100)), 'its shapes picked (⌘A)')
+    await p.keyboard.press('Escape')
+    await sleep(300)
+    ok(await deckFocus() && (await picks()) === 0, 'Esc lets go of them, and stays in Focus', { focus: await deckFocus(), picks: await picks(), at: await p.evaluate(() => document.activeElement?.className) })
+    await p.keyboard.press('Escape')
+    ok(!!(await until(async () => !(await deckFocus()), 3000, 100)), 'Esc again: out of Focus')
     // A title: one click in it, typed, made bold; its thumbnail follows.
     await go(1)
     const tb = await objs.nth(0).boundingBox()

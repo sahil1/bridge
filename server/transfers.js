@@ -30,9 +30,11 @@ import { randomBytes, createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { dataFile, ensureDir, writeFileAtomic, HOME, IS_MAC, IS_WIN } from './paths.js'
 import * as files from './files.js'
+import { openToRead } from './openread.js'
 import * as machines from './machines.js'
 import { placeOf, inPicked, pickedPlaces } from './places.js'
 import { mayLook, noteAsked } from './projects.js'
+import { isFilesRoot } from './explorer.js'
 import { thisName } from './relay.js'
 
 const FILE = dataFile('transfers.json')
@@ -121,6 +123,8 @@ async function resolveDest(to = {}, { here = false } = {}) {
     return { dir: d, label: 'Downloads', protectedRoot: !mayLook(d) }
   }
   if (where === 'pane' || where === 'place') {
+    // Files' home folder and drives only look for now (explorer.js): nothing is copied into them.
+    if (where === 'pane' && isFilesRoot(to.pane)) throw fail('Files only looks for now: pick an agent\'s folder or a place to copy into.', { status: 403 })
     let root
     if (where === 'place') { const p = placeOf(String(to.place || '')); if (!p) throw fail('That place isn\'t in Files any more', { status: 404 }); root = p.path } else root = await rootOf(String(to.pane || '')).catch(() => { throw fail('That agent isn\'t there any more', { status: 404 }) })
     const { real } = await files.safePath(root, String(to.dir || '')).catch((e) => { throw fail(e.message, { status: 404 }) })
@@ -529,7 +533,7 @@ async function push(job, ctl) {
 }
 
 async function pushFile(job, ctl, file, i, f, have, base) {
-  const fh = await fsp.open(file, 'r')
+  const fh = await openToRead(file) // a copy doesn't count as opening it (openread.js)
   try {
     let next = null
     const readAt = async (at) => { const n = Math.min(PIECE, f.size - at); const b = Buffer.alloc(n); const { bytesRead } = await fh.read(b, 0, n, at); return b.subarray(0, bytesRead) }

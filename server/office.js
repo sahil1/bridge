@@ -11,6 +11,7 @@ import zlib from 'node:zlib'
 import { execFile } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import { CACHE, IS_MAC, IS_WIN, ensureDir } from './paths.js'
+import { readWhole, copyOut } from './openread.js'
 
 export const OFFICE = {
   '.docx': 'document', '.doc': 'document', '.odt': 'document', '.rtf': 'document',
@@ -24,7 +25,7 @@ const MAX_ENTRY = 60 * 1024 * 1024 // unpacked size of one part of the file
 // ---------- zip (docx, pptx and xlsx are zip files of XML) ----------
 // Read without blocking: the file is in your folders, where macOS can hold a read while it asks you.
 async function unzip(file) {
-  const buf = await fsp.readFile(file)
+  const buf = await readWhole(file)
   let eocd = -1
   for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65557); i--) if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break }
   if (eocd < 0) throw new Error("This file isn't in the newer Office format, or it's damaged")
@@ -126,7 +127,7 @@ async function readXlsx(file) {
 }
 
 async function readCsv(file, sep) {
-  const text = (await fsp.readFile(file, 'utf8')).replace(/^\uFEFF/, '')
+  const text = (await readWhole(file, 'utf8')).replace(/^\uFEFF/, '')
   const rows = []
   let row = []
   let cell = ''
@@ -158,7 +159,7 @@ export async function sheet(file) {
 }
 // Some "CSV" files use semicolons (Excel in many European settings).
 async function sepOf(file) {
-  const head = (await fsp.readFile(file, 'utf8')).slice(0, 4000).split(/\r?\n/)[0] || ''
+  const head = (await readWhole(file, 'utf8')).slice(0, 4000).split(/\r?\n/)[0] || ''
   return (head.match(/;/g) || []).length > (head.match(/,/g) || []).length ? ';' : ','
 }
 
@@ -216,12 +217,14 @@ export async function convert(file, to = 'pdf') {
     const work = fs.mkdtempSync(path.join(dir, 'job-'))
     // Its own profile, so it works while you have LibreOffice open.
     const profile = pathToFileURL(ensureDir(path.join(dir, 'profile'))).href
-    execFile(bin, [`-env:UserInstallation=${profile}`, '--headless', '--norestore', '--nologo', '--convert-to', to, '--outdir', work, file], { timeout: 120000 }, (err) => {
+    // LibreOffice lays out a copy here, read as openread.js reads, so showing it isn't opening it.
+    const copy = path.join(work, `in-${path.basename(file)}`)
+    copyOut(file, copy).then(() => execFile(bin, [`-env:UserInstallation=${profile}`, '--headless', '--norestore', '--nologo', '--convert-to', to, '--outdir', work, copy], { timeout: 120000 }, (err) => {
       const made = fs.readdirSync(work).find((n) => n.toLowerCase().endsWith(`.${to}`))
       if (made) fs.renameSync(path.join(work, made), out)
       fs.rmSync(work, { recursive: true, force: true })
       if (made) { prune(dir); resolve(out) } else reject(new Error(err?.killed ? 'LibreOffice took too long with this file' : "LibreOffice couldn't open this file"))
-    })
+    }), (e) => { fs.rmSync(work, { recursive: true, force: true }); reject(new Error(`Couldn't read the file: ${e.message}`)) })
   })
   const p = queue.then(run, run)
   queue = p.catch(() => {})

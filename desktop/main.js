@@ -299,6 +299,15 @@ ipcMain.handle('bridge:pick-files', async (e) => {
 // While a meeting watches a shared screen, the window keeps its timers on time even when it's
 // hidden behind the call, so a new slide is noticed.
 ipcMain.handle('bridge:watching', (e, on) => { if (fromApp(e) && e.sender === win?.webContents) win.webContents.setBackgroundThrottling(!on); return true })
+// Studio's Focus: the window the page is in made full screen, or back (on: true or false), or
+// whether it is (no on). The app's own pages only, and only their own window.
+ipcMain.handle('bridge:full-screen', (e, on) => {
+  const w = fromApp(e) ? BrowserWindow.fromWebContents(e.sender) : null
+  if (!w || w.isDestroyed()) return null
+  if (typeof on !== 'boolean') return w.isFullScreen()
+  if (w.isFullScreenable()) w.setFullScreen(on)
+  return on
+})
 // Seconds since you last touched the computer, so a window left in front while you're away
 // doesn't keep your phone quiet.
 ipcMain.handle('bridge:idle', (e) => (fromApp(e) ? powerMonitor.getSystemIdleTime() : null))

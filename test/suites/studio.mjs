@@ -17,10 +17,15 @@
 // more, one cell changed and saved: every other part the same bytes, and read back the same. A CSV
 // in semicolons with a BOM and Windows line endings, saved back the same but for the one field.
 // On phones, a sheet and Ask AI fitting; a sheet in the dark look.
+// Focus: each kind (a Word file, Markdown, a sheet, a deck, a page, a PDF) given the whole window
+// with its toolbar and status line; its key, Esc (not while a menu's open) and ⌘. leaving; a save
+// that can't be made said in it; kept for each kind after a reload; the browser's full screen with
+// it, and the desktop app's (its preload stood in for) with a strip for the window's buttons out of
+// full screen; on 375 and 430 px phones the bars out of sight too; in the dark.
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
-import { startKit, startModel, checks, until, sleep, browser, page, shot, phoneFaults, TEST, ROOT } from '../lib/harness.mjs'
+import { startKit, startModel, checks, until, sleep, browser, page, shot, phoneFaults, withoutCutOff, noServiceWorker, TEST, ROOT } from '../lib/harness.mjs'
 
 const require = createRequire(path.join(ROOT, 'package.json'))
 const { ok, done } = checks('studio')
@@ -174,7 +179,10 @@ try {
   ok((await api(`/studio/open?root=studio&path=${encodeURIComponent(dk.path)}`)).kind === 'deck', 'and it opens in Studio as a deck')
 
   // ---------- The page ----------
-  const w = await page(b, kit.url, { width: 1400, height: 900 })
+  // A full disk, when a test asks for one: saves refused as the server would. Set before the page
+  // opens, with no service worker in the way, as WebKit routes nothing else.
+  let diskFull = false
+  const w = await page(b, kit.url, { width: 1400, height: 900, before: async (ctx) => { await noServiceWorker(ctx); await ctx.route('**/api/studio/file?**', (r) => (diskFull && r.request().method() === 'PUT' ? r.fulfill({ status: 502, contentType: 'application/json', body: JSON.stringify({ error: 'The disk is full' }) }) : r.fallback())) } })
   pages.push(w)
   const p = w.p
   await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
@@ -505,7 +513,129 @@ try {
   const pdf = await until(async () => (await p.locator('.sd-pdf .pdfViewer .page canvas').count()) > 0, 15000)
   ok(!!pdf && !!(await until(async () => /Read only/.test(await p.locator('.sd-status').innerText()), 5000)) && (await p.locator('.pane-head button', { hasText: 'Save' }).count()) === 0 && !(await bare(p)).length, 'a PDF: drawn in the page; read only, no Save', { pdf, status: await p.locator('.sd-status').innerText().catch(() => ''), bare: await bare(p) })
   await shot(p, `${tag}studio-pdf`)
-  ok(w.errors.length === 0, 'no page errors', w.errors)
+
+  // ---------- Focus ----------
+  // Each kind of file given the whole window: the app's sidebar, top bar and tabs and Studio's
+  // header out of sight, the editor's toolbar and the status line (its state, and the way out)
+  // kept. From the header's button; left by Leave Focus.
+  const focused = () => p.locator('.sd-file.focus').count().then((n) => n === 1)
+  const wholeWindow = (pg = p) => pg.evaluate(() => {
+    const el = document.querySelector('.sd-file.focus')
+    const r = el?.getBoundingClientRect()
+    const mine = (x, y) => !!document.elementFromPoint(x, y)?.closest('.sd-file.focus')
+    return !!r && r.left === 0 && r.top === 0 && Math.round(r.width) === innerWidth && Math.round(r.height) === innerHeight && mine(4, 4) && mine(innerWidth - 4, innerHeight - 4) && mine(innerWidth / 2, 4)
+      && !el.querySelector('.pane-head') && !!el.querySelector('.sd-status .sd-state') && !!el.querySelector('.sd-status .sd-focus-leave')
+  })
+  const focusBtn = p.locator('.sd-file .pane-head .sd-focus-btn')
+  ok(/^Focus: the page alone, in the whole window \((⌥⌘F|Ctrl\+Alt\+F)\)$/.test(await focusBtn.getAttribute('title')), "the header's Focus, with its key in its tooltip", await focusBtn.getAttribute('title'))
+  for (const [name, ready, what, toolbar] of [['plan.docx', '.sd-w', 'a Word file', '.sd-doc-tools'], ['notes.md', '.sd-page .ProseMirror', 'a Markdown file', '.sd-doc-tools'], ['budget.xlsx', '.sd-univer canvas', 'a sheet', '.sd-univer'], ['pitch.md', '.sd-strip .sd-thumb', 'a deck', '.sd-deck-tools'], ['dash.html', '.sd-code', 'a page', '.sd-page-ed .sd-toolbar'], ['report.pdf', '.sd-pdf .pdfViewer .page canvas', 'a PDF', '.sd-pdf-bar']]) {
+    await until(async () => { if (!(await p.locator('.sd-file .pane-head h2', { hasText: name }).count())) await open(name); return (await p.locator(ready).count()) > 0 }, 30000, 300)
+    await sleep(400)
+    await focusBtn.click()
+    ok(!!(await until(() => wholeWindow(), 3000, 100)) && await p.locator(`.sd-file.focus ${toolbar}`).first().isVisible(), `${what} in Focus: the whole window, its toolbar and the status line there, the app's bars and Studio's header not`)
+    await shot(p, `${tag}studio-focus-${name.replace(/\W/g, '-')}`)
+    await p.locator('.sd-focus-leave').click()
+    ok(!!(await until(async () => !(await focused()) && await p.locator('.sd-file .pane-head h2', { hasText: name }).isVisible(), 3000, 100)), `${what}: Leave Focus, and the app and the header are back`)
+  }
+  // The key (⌥⌘F; ⇧⌘F is the app's search), and Esc and ⌘. leaving, as they do in Word and Google
+  // Docs, but not while something on the page has the key for its own (a menu open).
+  await open('notes.md')
+  await until(async () => /Notes/.test(await pm.innerText().catch(() => '')), 15000)
+  await pm.click()
+  await p.keyboard.press(`${MOD}+Alt+f`)
+  ok(!!(await until(focused, 3000, 100)) && !/f$/i.test(await pm.innerText()), 'its key gives the page the whole window, and types nothing')
+  await p.locator('.sd-doc-tools button[aria-label="Text style"]').click().catch(() => {})
+  const menuOpen = await p.locator('.sd-drop[role="menu"]').count()
+  await p.keyboard.press('Escape')
+  await sleep(300)
+  const afterMenu = { menuOpen, focused: await focused(), menus: await p.locator('.sd-drop[role="menu"]').count() }
+  ok(afterMenu.menuOpen === 1 && afterMenu.focused && afterMenu.menus === 0, 'Esc with a menu open closes the menu, and stays in Focus', afterMenu)
+  await pm.click()
+  await p.keyboard.press('Escape')
+  ok(!!(await until(async () => !(await focused()), 3000, 100)), 'Esc, writing in it: out of Focus')
+  await p.keyboard.press(`${MOD}+Alt+f`)
+  await until(focused, 3000, 100)
+  await p.keyboard.press(`${MOD}+Period`)
+  ok(!!(await until(async () => !(await focused()), 3000, 100)), `${MOD === 'Meta' ? '⌘.' : 'Ctrl+.'}: out of Focus`)
+  // A save that can't be made is said in Focus too (the disk said to be full).
+  await p.keyboard.press(`${MOD}+Alt+f`)
+  await until(focused, 3000, 100)
+  diskFull = true
+  await pm.click()
+  await p.keyboard.press(process.platform === 'darwin' ? 'Meta+End' : 'Control+End')
+  await p.keyboard.type(' In Focus.')
+  const fullDisk = await until(async () => {
+    const bar = p.locator('.sd-file.focus .sd-note-bar.bad')
+    const r = await bar.boundingBox().catch(() => null)
+    return !!r && r.y >= 0 && /Couldn't save it: The disk is full/.test(await bar.innerText()) && /Couldn't save/.test(await p.locator('.sd-status .sd-state').innerText()) && p.evaluate(({ x, y }) => !!document.elementFromPoint(x, y)?.closest('.sd-note-bar'), { x: r.x + 30, y: r.y + r.height / 2 })
+  }, 10000, 200)
+  ok(!!fullDisk, "in Focus, a save that couldn't be made says why, over the page, and the status line says so", await p.locator('.sd-status').innerText().catch(() => ''))
+  await shot(p, `${tag}studio-focus-cant-save`)
+  diskFull = false
+  await p.keyboard.press(`${MOD}+s`)
+  ok(!!(await until(() => fs.readFileSync(path.join(dir, 'notes.md'), 'utf8').includes('In Focus.'), 8000)) && !!(await until(async () => /Saved/.test(await p.locator('.sd-status .sd-state').innerText()), 5000)), 'and ⌘S saves it once it can')
+  // Kept for each kind, after a reload too: a document opens in Focus again, a sheet doesn't.
+  await p.reload()
+  await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
+  ok(!!(await until(async () => { if (!(await p.locator('.sd-file .pane-head h2, .sd-file.focus').count())) await open('notes.md'); return (await focused()) && /In Focus\./.test(await pm.innerText().catch(() => '')) }, 20000, 300)), 'after a reload, a document opens in Focus again')
+  await open('plan.docx')
+  ok(!!(await until(async () => (await p.locator('.sd-w').count()) > 0 && await focused(), 15000)), 'and so does another document (Focus is kept for each kind of editor)')
+  await open('budget.xlsx')
+  ok(!!(await until(async () => (await p.locator('.sd-univer canvas').count()) > 0 && !(await focused()), 20000)), 'a sheet, out of Focus as it was left')
+  await open('plan.docx')
+  await until(focused, 15000)
+  // Full screen with it, in a browser once it's asked for (Esc there is the browser's own, taking
+  // the page out of full screen): Full screen makes it so, leaving Focus ends it, the next Focus is
+  // full screen too, and leaving full screen another way leaves Focus.
+  await p.locator('.sd-focus-leave').click()
+  await until(async () => !(await focused()), 3000, 100)
+  await focusBtn.click()
+  await until(focused, 3000, 100)
+  const isFull = () => p.evaluate(() => !!document.fullscreenElement)
+  ok(await p.locator('.sd-focus-full').getAttribute('aria-pressed') === 'false' && !(await isFull()), "in a browser, Focus isn't full screen until that's asked for")
+  await p.locator('.sd-focus-full').click()
+  if (await until(isFull, 2000, 100)) {
+    ok(!!(await until(async () => (await p.locator('.sd-focus-full').getAttribute('aria-pressed')) === 'true' && await focused(), 2000, 100)), 'Full screen: the page full screen, still in Focus, and the button says so')
+    await p.locator('.sd-focus-leave').click()
+    ok(!!(await until(async () => !(await focused()) && !(await isFull()), 3000, 100)), 'Leave Focus: out of full screen too')
+    await focusBtn.click()
+    ok(!!(await until(async () => (await focused()) && await isFull(), 3000, 100)), 'the next Focus full screen as well, as it was left')
+    await p.evaluate(() => document.exitFullscreen())
+    ok(!!(await until(async () => !(await focused()) && !(await isFull()), 3000, 100)), 'out of full screen another way (Esc, in a browser): out of Focus too')
+  } else ok(!!(await until(async () => /didn't let the page go full screen/.test(await p.locator('.sd-note-bar').innerText().catch(() => '')), 3000, 100)) && await focused(), `this ${which} build keeps a page out of full screen: it says so, still in Focus`)
+  // (WebKit reports what the reload cut off as page errors: not the page's.)
+  ok(withoutCutOff(w.errors).length === 0, 'no page errors', w.errors)
+
+  // The desktop app (its preload stood in for, on a Mac): Focus makes the window full screen through
+  // it, its window buttons get a strip of their own when it isn't, and leaving full screen with the
+  // window's own button leaves Focus.
+  const app = await page(b, kit.url, {
+    width: 1400, height: 900, before: (ctx) => ctx.addInitScript(() => {
+      let full = false
+      window.__full = []
+      const now = (v) => { full = v; setTimeout(() => window.dispatchEvent(new Event('resize')), 30) }
+      window.bridgeApp = { desktop: true, platform: 'darwin', fullScreen: async (on) => { if (typeof on !== 'boolean') return full; window.__full.push(on); now(on); return on }, byItsButton: () => now(false) }
+    }),
+  })
+  pages.push(app)
+  await app.p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
+  const appFocused = () => app.p.locator('.sd-file.focus').count().then((n) => n === 1)
+  await until(async () => { if (!(await app.p.locator('.sd-file .pane-head h2').count())) await app.p.evaluate(({ root }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: 'notes.md' } })), { root }); return (await app.p.locator('.sd-page .ProseMirror').count()) > 0 }, 30000, 300)
+  await app.p.locator('.sd-file .pane-head .sd-focus-btn').click()
+  ok(!!(await until(async () => (await appFocused()) && JSON.stringify(await app.p.evaluate(() => window.__full)) === '[true]' && await app.p.locator('.sd-focus-title').count() === 0, 3000, 100)) && await wholeWindow(app.p), 'the desktop app: Focus makes its window full screen, with no title strip there')
+  await app.p.locator('.sd-focus-full').click()
+  ok(!!(await until(async () => JSON.stringify(await app.p.evaluate(() => window.__full)) === '[true,false]' && (await app.p.locator('.sd-focus-title').innerText().catch(() => '')) === 'notes.md' && await appFocused(), 3000, 100)), 'out of full screen, still in Focus: a strip with its name for the window\'s buttons, to move it by')
+  await shot(app.p, `${tag}studio-focus-desktop-window`)
+  await app.p.locator('.sd-focus-full').click()
+  await until(async () => (await app.p.locator('.sd-focus-title').count()) === 0, 3000, 100)
+  await sleep(600) // the window seen full screen, as it is once it's gone there
+  await app.p.evaluate(() => window.bridgeApp.byItsButton())
+  ok(!!(await until(async () => !(await appFocused()), 3000, 100)), "the window taken out of full screen by its own button: out of Focus")
+  await app.p.locator('.sd-file .pane-head .sd-focus-btn').click()
+  await until(appFocused, 3000, 100)
+  await app.p.locator('.sd-focus-leave').click()
+  ok(!!(await until(async () => !(await appFocused()) && JSON.stringify(await app.p.evaluate(() => window.__full)) === '[true,false,true,true,false]', 3000, 100)), 'Leave Focus: the window out of full screen as well', await app.p.evaluate(() => window.__full))
+  ok(app.errors.length === 0, 'the desktop app: no page errors', app.errors)
   // On a phone, 375 and 430 px: Studio from More, its home and a document fitting the screen.
   for (const width of [375, 430]) {
     const ph = await page(b, kit.url, { phone: true })
@@ -525,6 +655,15 @@ try {
     f = await phoneFaults(ph.p, '.sd-file')
     ok(!Object.keys(f).length && await ph.p.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), `phone ${width}: a document fits, its toolbar wrapping rather than scrolling sideways, each button a whole 40 px target`, f)
     await shot(ph.p, `${tag}studio-phone-${width}`)
+    // Focus on a phone: the app's top bar and tabs out of sight too, each control still a whole target.
+    await ph.p.locator('.sd-status .sd-focus-narrow').click()
+    const phoneWhole = await until(() => wholeWindow(ph.p), 3000, 100)
+    await sleep(300)
+    f = await phoneFaults(ph.p, '.sd-file')
+    ok(!!phoneWhole && !Object.keys(f).length, `phone ${width}: Focus gives the document the whole screen, the top bar and tabs out of sight, each control a whole target`, f)
+    await shot(ph.p, `${tag}studio-focus-phone-${width}`)
+    await ph.p.locator('.sd-focus-leave').click()
+    ok(!!(await until(async () => (await ph.p.locator('.sd-file.focus').count()) === 0 && await ph.p.locator('nav.tabbar').isVisible(), 3000, 100)), `phone ${width}: Leave Focus, the tabs back`)
     // Its versions over the editor (the header still there), and Ask an agent, fitting too.
     await ph.p.locator('.pane-head button[aria-label="Versions"]').click()
     await ph.p.locator('.sd-panel .sd-versions li').first().waitFor({ timeout: 5000 })
@@ -541,7 +680,10 @@ try {
     await ph.p.evaluate(({ root }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: 'budget.xlsx' } })), { root })
     ok(!!(await until(async () => (await ph.p.locator('.sd-univer canvas').count()) > 0 && /Budget/.test(await ph.p.locator('.sd-univer').innerText().catch(() => '')), 30000)), `phone ${width}: a sheet opens, with its tabs`)
     await sleep(600)
-    ok(await ph.p.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), `phone ${width}: the sheet fits the screen`)
+    // (Its page as wide as the screen too, whatever its header holds: a name and its buttons once
+    // made it wider, and Ask AI with it.)
+    const sheetFits = await ph.p.evaluate(() => ({ doc: document.documentElement.scrollWidth, file: Math.round(document.querySelector('.sd-file').getBoundingClientRect().right), head: Math.round(document.querySelector('.sd-file .pane-head').getBoundingClientRect().right), w: innerWidth }))
+    ok(sheetFits.doc <= sheetFits.w + 1 && sheetFits.file <= sheetFits.w && sheetFits.head <= sheetFits.w, `phone ${width}: the sheet fits the screen, its page and header too`, sheetFits)
     await shot(ph.p, `${tag}studio-sheet-phone-${width}`)
     await ph.p.locator('.pane-head button[aria-label="Ask an agent"]').click()
     await ph.p.locator('.sh-ask textarea').waitFor({ timeout: 5000 })
@@ -560,6 +702,15 @@ try {
   await night.p.locator('.sd-univer [data-u-command="bridge.sheet.ask-ai"]').click()
   await night.p.locator('.sh-ask').waitFor({ timeout: 5000 })
   await shot(night.p, `${tag}studio-sheet-dark`)
+  await night.p.locator('.sh-ask button[aria-label="Close"]').click()
+  await night.p.keyboard.press(`${MOD}+Alt+f`)
+  ok(!!(await until(() => wholeWindow(night.p), 3000, 100)), 'dark: a sheet in Focus')
+  await shot(night.p, `${tag}studio-focus-sheet-dark`)
+  await until(async () => { await night.p.evaluate(({ root }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: 'plan.docx' } })), { root }); return (await night.p.locator('.sd-w').count()) > 0 }, 20000, 500)
+  await night.p.keyboard.press(`${MOD}+Alt+f`)
+  ok(!!(await until(() => wholeWindow(night.p), 3000, 100)), 'dark: a Word file in Focus')
+  await sleep(400)
+  await shot(night.p, `${tag}studio-focus-word-dark`)
   ok(night.errors.length === 0, 'dark: no page errors', night.errors)
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)

@@ -29,9 +29,10 @@ import { locale, t } from '../i18n/index.js'
 import { FileDrawing } from '../lazy.jsx'
 import { isDiagramFile, addMermaidButtons, whiteboards as studioHere } from './whiteboard/links.js'
 import { useTrial } from '../trials.js'
+import Assist from './files/Assist.jsx'
 import { useBusy } from '../busy.js'
 // The kinds of file Studio opens (server/studio.js).
-const STUDIO_OPENS = /\.(docx|md|markdown|txt|xlsx|xlsm|csv|tsv|pptx|pdf|html?)$/i
+export const STUDIO_OPENS = /\.(docx|md|markdown|txt|xlsx|xlsm|csv|tsv|pptx|pdf|html?)$/i
 
 Object.entries({ javascript, typescript, python, json, bash, css, xml, markdown, yaml, sql, go, rust, java, ini, diff: diffLang, dockerfile })
   .forEach(([n, l]) => hljs.registerLanguage(n, l))
@@ -116,7 +117,7 @@ function QuickOpen({ pane, onPick, onClose }) {
 }
 
 // ---------- viewers ----------
-function Code({ text, ext }) {
+export function Code({ text, ext }) {
   const html = useMemo(() => {
     const lang = LANG[ext]
     try {
@@ -136,7 +137,8 @@ function Code({ text, ext }) {
   )
 }
 
-function Markdown({ text, pane, filePath, onOpenPath }) {
+// base: the computer the file is on (Files' Quick Look shows another computer's files too).
+export function Markdown({ text, pane, filePath, onOpenPath, base = BASE }) {
   const ref = useRef(null)
   const html = useMemo(() => {
     const body = text.replace(/^---\n[\s\S]*?\n---\n/, '') // hide YAML frontmatter
@@ -148,12 +150,12 @@ function Markdown({ text, pane, filePath, onOpenPath }) {
     const dir = parentOf(filePath)
     el.querySelectorAll('img').forEach((img) => {
       const src = img.getAttribute('src') || ''
-      if (src && !/^(https?:|data:|\/api\/|\/m\/)/.test(src)) img.src = `${BASE}/api/agents/${enc(pane)}/raw?path=${enc(normalize(`${dir}/${src}`))}`
+      if (src && !/^(https?:|data:|\/api\/|\/m\/)/.test(src)) img.src = `${base}/api/agents/${enc(pane)}/raw?path=${enc(normalize(`${dir}/${src}`))}`
     })
     el.querySelectorAll('a').forEach((a) => { if (/^https?:/.test(a.getAttribute('href') || '')) { a.target = '_blank'; a.rel = 'noreferrer' } })
     // Mermaid in it opens as a whiteboard.
     if (FileDrawing) addMermaidButtons(el, (filePath.split(/[\\/]/).pop() || '').replace(/\.(md|markdown)$/i, ''))
-  }, [html, pane, filePath])
+  }, [html, pane, filePath, base])
   const onClick = (e) => {
     const a = e.target.closest('a')
     const href = a?.getAttribute('href')
@@ -175,16 +177,16 @@ function normalize(p) {
 // The page itself, sandboxed: its scripts run, but it can't reach this app (an opaque origin,
 // which the server refuses for any API call). From disk, or from the text you're editing.
 const SANDBOX = 'allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms allow-modals'
-const siteUrl = (pane, p) => `${BASE}/api/agents/${enc(pane)}/site/${p.split('/').map(enc).join('/')}`
-function HtmlView({ pane, filePath, text, reload = 0 }) {
+const siteUrl = (pane, p, base = BASE) => `${base}/api/agents/${enc(pane)}/site/${p.split('/').map(enc).join('/')}`
+export function HtmlView({ pane, filePath, text, reload = 0, base = BASE }) {
   // While editing, show the draft (after a short pause in typing). A <base> makes its relative
   // links (styles, scripts, images) load from the file's folder, as they would from disk.
   const [doc, setDoc] = useState(text)
   useEffect(() => { if (text == null) return; const t = setTimeout(() => setDoc(text), 300); return () => clearTimeout(t) }, [text])
-  if (text == null) return <iframe key={reload} className="html-view" src={siteUrl(pane, filePath)} title={filePath} sandbox={SANDBOX} />
+  if (text == null) return <iframe key={reload} className="html-view" src={siteUrl(pane, filePath, base)} title={filePath} sandbox={SANDBOX} />
   const dir = parentOf(filePath)
-  const base = `<base href="${siteUrl(pane, dir ? `${dir}/` : '')}">`
-  const html = /<head[^>]*>/i.test(doc || '') ? doc.replace(/<head[^>]*>/i, (m) => m + base) : base + (doc || '')
+  const baseTag = `<base href="${siteUrl(pane, dir ? `${dir}/` : '', base)}">`
+  const html = /<head[^>]*>/i.test(doc || '') ? doc.replace(/<head[^>]*>/i, (m) => m + baseTag) : baseTag + (doc || '')
   return <iframe className="html-view" srcDoc={html} title={filePath} sandbox={SANDBOX} />
 }
 
@@ -453,6 +455,10 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
   const [toast, setToast] = useState(null)
   const say = (text) => { setToast(text); setTimeout(() => setToast((t) => (t === text ? null : t)), 2200) }
   const [automation, setAutomation] = useState(false) // macOS said no to Finder (Trash on older macOS)
+  // Files Assist for a folder here ('' is the root), with Files (a beta feature).
+  const assistOn = useTrial('files')
+  const [assist, setAssist] = useState(null)
+  useEffect(() => setAssist(null), [pane])
   const onMenu = useCallback((entry, e) => setMenu({ x: e.clientX, y: e.clientY, entry }), [])
   const closeMenu = useCallback(() => setMenu(null), [])
   // Phones and narrow panes: one column. The tree fills it; a file opens full width with a back button.
@@ -571,6 +577,7 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
           <button className="win-btn" onClick={() => { pickFor.current = ''; pickRef.current?.click() }} title={t('Send files from this device')} aria-label={t('Send files from this device')}><Icon name="upload" size={13} /></button>
           <input ref={pickRef} type="file" multiple hidden onChange={(e) => { const l = [...(e.target.files || [])]; e.target.value = ''; if (l.length) setPicked({ list: l, dir: pickFor.current }) }} data-testid="send-files" />
           <button className="win-btn" onClick={() => setQuick(true)} title="Go to file (⌘P)" aria-label="Go to file"><Icon name="search" size={13} /></button>
+          {assistOn && <button className={`win-btn ${assist != null ? 'on' : ''}`} onClick={() => setAssist(assist != null ? null : '')} title={t('Files Assist: duplicates, big and forgotten files, a tidier layout')} aria-label={t('Files Assist')} aria-pressed={assist != null}><Icon name="sparkle" size={13} /></button>}
           <button className={`win-btn ${showHidden ? 'on' : ''}`} onClick={() => setShowHidden(!showHidden)} title={showHidden ? 'Hide dotfiles' : 'Show dotfiles'} aria-label="Toggle hidden files"><Icon name={showHidden ? 'eye' : 'eye-off'} size={13} /></button>
           <button className="win-btn" onClick={() => setExpanded(new Set())} title="Collapse all" aria-label="Collapse all"><Icon name="shrink" size={13} /></button>
         </div>
@@ -610,7 +617,13 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
             </div>
           )}
       </section>
-      {menu && <Menu x={menu.x} y={menu.y} items={menuItems(menu.entry, act, { onMention: place ? null : onMention, send: linked, copyHere: canCopyHere ? copyHereLabel() : null })} onClose={closeMenu} />}
+      {assist != null && (
+        <div className="fa-dock">
+          <Assist key={`${pane}\n${assist}`} root={pane} rel={assist} machine={null} onClose={() => setAssist(null)}
+            onOpen={({ rel, dir }) => { if (dir) { if (rel) open(rel, true) } else open(rel); if (narrow) setAssist(null) }} />
+        </div>
+      )}
+      {menu && <Menu x={menu.x} y={menu.y} items={menuItems(menu.entry, act, { onMention: place ? null : onMention, send: linked, copyHere: canCopyHere ? copyHereLabel() : null, assist: assistOn ? (e) => setAssist(e.path) : null })} onClose={closeMenu} />}
       {placesAt && <PlacesMenu x={placesAt.x} y={placesAt.y} agentName={agent.cwd.split(/[\\/]/).pop()} agentPath={agent.cwd.replace(/^\/Users\/[^/]+/, '~')} current={placeId} places={places}
         onPick={setPlaceId} onAdded={(p, gone) => { refreshPlaces(); if (p) setPlaceId(p.id); if (gone && gone.id === placeId) setPlaceId(null) }} onClose={() => setPlacesAt(null)} />}
       {send && <SendDialog src={send.src} here={send.here} onClose={() => setSend(null)} />}

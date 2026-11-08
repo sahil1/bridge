@@ -4,12 +4,15 @@
 // until you answer its prompt, and a blocking one would freeze the whole server meanwhile.
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { Worker } from 'node:worker_threads'
 import { OFFICE } from './office.js'
 import { loginPath } from './agents.js'
 import { gitReady, NO_GIT } from './gitready.js'
+import { DATA } from './paths.js'
+import { openToRead } from './openread.js'
 
 const HIDDEN = new Set(['.git', 'node_modules', '.DS_Store', '__pycache__', '.venv', 'venv', '.next', 'dist', '.cache', '.turbo'])
 const MAX_TEXT = 1024 * 1024
@@ -21,12 +24,25 @@ const VIDEO = { '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/quickti
 const AUDIO = { '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.wav': 'audio/wav', '.flac': 'audio/flac', '.ogg': 'audio/ogg', '.oga': 'audio/ogg', '.opus': 'audio/ogg', '.weba': 'audio/webm', '.aif': 'audio/aiff', '.aiff': 'audio/aiff', '.caf': 'audio/x-caf' }
 export const typeOf = (name) => { const ext = path.extname(String(name)).toLowerCase(); return IMAGE[ext] || PDF[ext] || VIDEO[ext] || AUDIO[ext] || null }
 
+// Kept out whatever the root (Files' home folder and drives too): Bridge AI's own folder, which
+// holds the keys your devices' links are made with, and your keys' folders. An agent working in one
+// of them (the chief of staff's folder is in Bridge AI's) still has its own folder.
+// Compared as their real paths (links followed), as what's asked for is.
+const HOME = os.homedir()
+let keptOut = null
+const keptOutDirs = () => (keptOut ||= Promise.all([DATA, ...['.ssh', '.gnupg', path.join('Library', 'Keychains')].map((d) => path.join(HOME, d))]
+  .map((d) => fsp.realpath(d).catch(() => path.resolve(d)))))
+const within = (p, dir) => p === dir || p.startsWith(dir.endsWith(path.sep) ? dir : dir + path.sep)
+
 export async function safePath(root, rel = '') {
   const realRoot = await fsp.realpath(root)
   const target = path.resolve(realRoot, rel.replace(/^\/+/, ''))
   let real
-  try { real = await fsp.realpath(target) } catch { throw new Error('Not found') }
-  if (real !== realRoot && !real.startsWith(realRoot + path.sep)) throw new Error('Outside the agent folder')
+  // macOS turning Bridge AI away (EPERM) is said as that, so the app can say how to allow it.
+  try { real = await fsp.realpath(target) } catch (e) { throw e.code === 'EPERM' || e.code === 'EACCES' ? e : new Error('Not found') }
+  // A drive's root (/, C:\) already ends in its separator.
+  if (!within(real, realRoot)) throw new Error('Outside the agent folder')
+  if ((await keptOutDirs()).some((k) => within(real, k) && !within(realRoot, k))) throw Object.assign(new Error('Bridge AI keeps out of this folder: it holds keys'), { code: 'keptOut' })
   return { real, realRoot, rel: path.relative(realRoot, real) }
 }
 const exists = (p) => fsp.access(p).then(() => true, () => false)
@@ -61,7 +77,7 @@ export async function readFile(root, rel) {
   if (VIDEO[ext]) return { ...base, kind: 'video', type: VIDEO[ext] }
   if (AUDIO[ext]) return { ...base, kind: 'audio', type: AUDIO[ext] }
   if (OFFICE[ext]) return { ...base, kind: 'office', office: OFFICE[ext] }
-  const fh = await fsp.open(real, 'r')
+  const fh = await openToRead(real)
   const len = Math.min(st.size, MAX_TEXT)
   const buf = Buffer.alloc(len)
   await fh.read(buf, 0, len, 0).finally(() => fh.close())
@@ -94,6 +110,38 @@ export async function rawFile(root, rel) {
   const { real } = await safePath(root, rel)
   const ext = path.extname(real).toLowerCase()
   return { file: real, name: path.basename(real), type: typeOf(real) || 'application/octet-stream', media: !!(VIDEO[ext] || AUDIO[ext]) }
+}
+
+// Sends a file of yours as it is, read as openToRead reads (Express's sendFile can't be told to):
+// a part of it when asked (Range: 206, or 416 saying how long it is past its end), 304 when the
+// browser has it already, and as fast as the other end takes it.
+export async function serveFile(req, res, file) {
+  const fh = await openToRead(file)
+  let handed = false
+  try {
+    const st = await fh.stat()
+    if (st.isDirectory()) throw Object.assign(new Error('Is a folder'), { code: 'EISDIR' })
+    const size = st.size
+    res.set({ 'Accept-Ranges': 'bytes', 'Last-Modified': st.mtime.toUTCString(), ETag: `W/"${size.toString(16)}-${Math.floor(st.mtimeMs).toString(16)}"` })
+    if (!res.get('Cache-Control')) res.set('Cache-Control', 'public, max-age=0')
+    if (req.fresh) return void res.status(304).end()
+    let start = 0
+    let end = size - 1
+    const ifRange = req.headers['if-range']
+    const ranges = req.headers.range && (!ifRange || ifRange === res.get('ETag') || ifRange === res.get('Last-Modified')) ? req.range(size, { combine: true }) : null
+    if (ranges === -1) return void res.status(416).set('Content-Range', `bytes */${size}`).json({ error: 'That part of the file isn\'t there' })
+    const part = Array.isArray(ranges) && ranges.type === 'bytes' && ranges.length === 1
+    if (part) ({ start, end } = ranges[0])
+    const len = size ? end - start + 1 : 0
+    res.status(part ? 206 : 200).set('Content-Length', String(len))
+    if (part) res.set('Content-Range', `bytes ${start}-${end}/${size}`)
+    if (req.method === 'HEAD' || !len) return void res.end()
+    const stream = fh.createReadStream({ start, end, highWaterMark: 64 * 1024 })
+    handed = true
+    res.on('close', () => stream.destroy())
+    stream.on('error', () => res.destroy())
+    stream.pipe(res)
+  } finally { if (!handed) await fh.close().catch(() => {}) }
 }
 
 // ---------- Copying to another of your devices (transfers.js) ----------
@@ -129,25 +177,32 @@ export async function copyList(root, rel) {
 
 // A file's SHA-256, worked out off the server's main thread (a worker reads it as it goes), and
 // kept while the file doesn't change: what a copy is checked against where it lands.
+// Read as openread.js reads, without counting as opening it. signal: stops reading it.
 const HASHER = `
 const { parentPort, workerData } = require('node:worker_threads')
+const fs = require('node:fs')
 const h = require('node:crypto').createHash('sha256')
-require('node:fs').createReadStream(workerData.file, { highWaterMark: 1 << 20 })
+const read = (flags) => fs.createReadStream(workerData.file, { flags, highWaterMark: 1 << 20 })
   .on('data', (c) => h.update(c))
   .on('end', () => parentPort.postMessage({ sha: h.digest('hex') }))
-  .on('error', (e) => parentPort.postMessage({ error: e.message, code: e.code }))
+  .on('error', (e) => (flags !== 'r' && e.code === 'EPERM' ? read('r') : parentPort.postMessage({ error: e.message, code: e.code })))
+read(fs.constants.O_NOATIME ? fs.constants.O_RDONLY | fs.constants.O_NOATIME : 'r')
 `
 let hashing = 0
 const hashQueue = []
-export async function hashFile(file) {
+export async function hashFile(file, { signal } = {}) {
   // Two at a time: each reads a whole file.
   if (hashing >= 2) await new Promise((r) => hashQueue.push(r))
   hashing++
   try {
+    signal?.throwIfAborted()
     return await new Promise((resolve, reject) => {
       const w = new Worker(HASHER, { eval: true, workerData: { file } })
-      w.once('message', (m) => { w.terminate(); if (m.error) reject(Object.assign(new Error(m.error), { code: m.code })); else resolve(m.sha) })
-      w.once('error', reject)
+      const stop = () => { w.terminate(); reject(Object.assign(new Error('Stopped'), { code: 'ABORT_ERR' })) }
+      signal?.addEventListener('abort', stop, { once: true })
+      const off = () => signal?.removeEventListener('abort', stop)
+      w.once('message', (m) => { off(); w.terminate(); if (m.error) reject(Object.assign(new Error(m.error), { code: m.code })); else resolve(m.sha) })
+      w.once('error', (e) => { off(); reject(e) })
     })
   } finally { hashing--; hashQueue.shift()?.() }
 }

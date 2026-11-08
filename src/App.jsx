@@ -10,7 +10,7 @@ import Rail, { agentName } from './components/Rail.jsx'
 import Board from './components/Board.jsx'
 import Dock from './components/Dock.jsx'
 import Console, { MateEmpty, showChat } from './components/Console.jsx'
-import { Settings, Onboarding, HerdrView, Terminals, ShellTab, MeetingsHome, MeetingPage, Dictations, Memory, WhiteboardsHome, WhiteboardPage, StudioHome, StudioPage, preloadViews } from './lazy.jsx'
+import { Settings, Onboarding, HerdrView, Terminals, ShellTab, MeetingsHome, MeetingPage, Dictations, Memory, WhiteboardsHome, WhiteboardPage, StudioHome, StudioPage, Explorer, preloadViews } from './lazy.jsx'
 import Home from './components/Home.jsx'
 import { FirstRunAnswers } from './components/FirstRun.jsx'
 import { MeetingsProvider, RecordingPill, CallPrompt, useMeetings } from './components/meetings/recording.jsx'
@@ -146,7 +146,7 @@ function useFit(onFold) {
 // Views that open in tabs beside the agents: Home (start something new), Meetings, a meeting,
 // Dictations, Whiteboards and a whiteboard, and the agent map (what runs on which of your computers).
 // With Home on (a trial): Home (what needs you, NeedsHome.jsx) and Everything.
-const VIEWS = { 'view:home': { title: tx('Home'), icon: 'home' }, 'view:everything': { title: tx('Everything'), icon: 'grid' }, 'view:new': { title: tx('New'), icon: 'plus' }, 'view:meetings': { title: tx('Meetings'), icon: 'mic' }, 'view:dictations': { title: tx('Dictations'), icon: 'wave' }, 'view:memory': { title: tx('Memory'), icon: 'book' }, 'view:whiteboards': { title: tx('Whiteboards'), icon: 'shapes' }, 'view:studio': { title: tx('Studio'), icon: 'layers' }, 'view:map': { title: tx('Agent Map'), icon: 'grid' } }
+const VIEWS = { 'view:home': { title: tx('Home'), icon: 'home' }, 'view:everything': { title: tx('Everything'), icon: 'grid' }, 'view:new': { title: tx('New'), icon: 'plus' }, 'view:meetings': { title: tx('Meetings'), icon: 'mic' }, 'view:dictations': { title: tx('Dictations'), icon: 'wave' }, 'view:memory': { title: tx('Memory'), icon: 'book' }, 'view:whiteboards': { title: tx('Whiteboards'), icon: 'shapes' }, 'view:studio': { title: tx('Studio'), icon: 'layers' }, 'view:files': { title: tx('Files'), icon: 'folder' }, 'view:map': { title: tx('Agent Map'), icon: 'grid' } }
 // A whiteboard's tab is named as the board is (its id).
 const BOARD = 'view:whiteboard:'
 // A Studio file's tab: its root (an agent's pane, or place:<id>) and path, each encoded. A
@@ -189,6 +189,8 @@ function App() {
   const insightsOn = conf?.trials?.['meeting-insights'] === true
   const studioOnRef = useRef(studioOn)
   studioOnRef.current = studioOn
+  // Files, every folder on your computers as Finder shows them (a beta feature too).
+  const filesOn = conf?.trials?.files === true
   // So is Home: with it on, it's where the app opens, and what needs you opens there.
   const homeOn = conf?.trials?.home === true
   const routinesOn = conf?.trials?.routines === true
@@ -375,7 +377,7 @@ function App() {
       // Meetings, a meeting and Dictations open in the phone's own Meetings tab; Whiteboards and a
       // whiteboard in its More tab.
       if (typeof paneId === 'string' && (paneId.startsWith('view:meeting') || paneId === 'view:dictations')) { setMtab('meetings'); setMobileMeeting(paneId === 'view:meetings' ? null : paneId); return }
-      if (typeof paneId === 'string' && (paneId.startsWith('view:whiteboard') || paneId.startsWith('view:studio') || paneId === 'view:memory')) { setMtab('more'); setMoreView(paneId); return }
+      if (typeof paneId === 'string' && (paneId.startsWith('view:whiteboard') || paneId.startsWith('view:studio') || paneId === 'view:memory' || paneId === 'view:files')) { setMtab('more'); setMoreView(paneId); return }
       if (paneId === 'view:home' || paneId === 'view:everything') { setMtab('home'); setHomeView(paneId === 'view:home' ? 'home' : 'everything'); return }
       if (a?.chief) { setMtab('mate'); setMobileAgent(null); setMateId(paneId) } else { setMtab('agents'); setMobileAgent(paneId) }
       return
@@ -712,6 +714,7 @@ function App() {
     { id: 'a:dictations', label: t('Dictations'), icon: 'wave', keywords: 'dictation history voice said typed pasted wispr macwhisper', run: () => openAgent('view:dictations') },
     { id: 'a:memory', label: t('Memory'), icon: 'book', keywords: 'memory people organizations organisations companies projects products terms names words misheard about me about you persona context meeting memory', run: () => openAgent('view:memory') },
     StudioHome && studioOn && { id: 'a:studio', label: t('Studio'), icon: 'layers', keywords: 'studio document word docx sheet excel xlsx spreadsheet deck slides powerpoint pptx pdf page html artifact markdown design pack', run: () => openAgent('view:studio') },
+    Explorer && filesOn && { id: 'a:files', label: t('Files'), icon: 'folder', keywords: 'files finder explorer folders browse desktop documents downloads home drive disk icloud onedrive dropbox quick look get info', run: () => openAgent('view:files') },
     WhiteboardsHome && { id: 'a:boards', label: t('Whiteboards'), icon: 'shapes', keywords: 'whiteboard board excalidraw draw sketch diagram flowchart architecture sequence org chart mermaid drawio canvas', run: () => openAgent('view:whiteboards') },
     { id: 'a:map', label: t('Agent Map'), icon: 'grid', keywords: 'what is running where devices computers machines all agents overview cloud subagents', run: openMap },
     { id: 'a:needs', label: t('Needs you'), icon: 'bell', keywords: 'inbox waiting approve allow permission questions answer review finished failed devices', run: () => setInbox({}) },
@@ -879,6 +882,7 @@ function App() {
           : id === 'view:memory' ? <section className="pane view-pane"><Memory /></section>
             : id === 'view:whiteboards' && WhiteboardsHome ? <section className="pane view-pane"><WhiteboardsHome onOpen={(bid) => openAgent(`${BOARD}${bid}`, wide ? { replace: 'view:whiteboards' } : {})} /></section>
               : id.startsWith(BOARD) && WhiteboardPage ? <section className="pane view-pane"><WhiteboardPage id={id.slice(BOARD.length)} onBack={() => openAgent('view:whiteboards', { replace: id })} /></section>
+                : id === 'view:files' ? <section className="pane view-pane">{filesOn && Explorer ? <Explorer /> : <TrialOff name={t('Files')} />}</section>
                 : id.startsWith('view:studio') && !studioOn ? <section className="pane view-pane"><TrialOff name={t('Studio')} /></section>
                 : id === 'view:studio' && StudioHome ? <section className="pane view-pane"><StudioHome onOpen={(f) => openAgent(studioId(f), wide ? { replace: 'view:studio' } : {})} /></section>
                   : id.startsWith(STUDIO) && StudioPage ? <section className="pane view-pane"><StudioPage {...studioOf(id)} onBack={() => openAgent('view:studio', { replace: id })} onOpen={(f, o) => openAgent(studioId(f), o?.replace ? { replace: id } : {})} /></section>
@@ -912,6 +916,7 @@ function App() {
       homeOn && { id: 'today', icon: 'today', label: t('Today'), hint: t('Calendar, mail, markets and usage'), run: () => setMoreView('today') },
       WhiteboardsHome && { id: 'whiteboards', icon: 'shapes', label: t('Whiteboards'), hint: t('Draw by hand, or describe a diagram'), run: () => setMoreView('view:whiteboards') },
       StudioHome && studioOn && { id: 'studio', icon: 'layers', label: t('Studio'), hint: t('Documents, sheets, decks and pages'), run: () => setMoreView('view:studio') },
+      Explorer && filesOn && { id: 'files', icon: 'folder', label: t('Files'), hint: t('Every folder on your computers'), run: () => setMoreView('view:files') },
       { id: 'terminals', icon: 'terminal', label: t('Terminals'), hint: t("Every agent's terminal, live"), run: () => setMoreView('terminals') },
       { id: 'map', icon: 'grid', label: t('Agent Map'), hint: t("What's running on each of your computers"), run: () => setMoreView('view:map') },
       { id: 'dictations', icon: 'wave', label: t('Dictations'), hint: t("Everything you've dictated"), run: () => setMoreView('view:dictations') },

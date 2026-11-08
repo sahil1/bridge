@@ -3012,6 +3012,11 @@ button.ue-row:hover { background: var(--pane-2); }
 .ctx-menu button.danger { color: var(--critical); }
 .ctx-menu button.danger:hover, .ctx-menu button.danger:focus-visible { background: var(--critical); color: #fff; }
 .ctx-sep { height: 1px; margin: 4px 6px; background: var(--line); }
+/* Something coming, shown so you know where it'll be, not to be picked yet. */
+.ctx-menu button:disabled { color: var(--ink-3); cursor: default; }
+.ctx-menu button:disabled:hover { background: none; color: var(--ink-3); }
+.ctx-menu button:disabled svg { opacity: .6; }
+.ctx-heading { padding: 6px 10px 4px; font-size: 11.5px; color: var(--ink-3); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .name-dialog { width: min(420px, 100%); }
 .name-dialog .input { width: 100%; height: 34px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--pane-2); color: var(--ink); font: inherit; }
 .name-dialog .input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }

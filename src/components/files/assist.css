@@ -1,0 +1,88 @@
+/* Files Assist: the panel beside Files. It fills what it's put in; .fa-dock is Files' place for it. */
+.fa-panel { height: 100%; min-height: 0; display: flex; flex-direction: column; background: var(--pane); color: var(--ink); }
+.fa-head { flex: none; display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 0 6px 0 12px; border-bottom: 1px solid var(--line); color: var(--accent); }
+.fa-title { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; }
+.fa-title h2 { margin: 0; font-size: 13px; font-weight: 600; color: var(--ink); white-space: nowrap; }
+.fa-where { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--ink-3); }
+.fa-body { flex: 1; min-height: 0; overflow: auto; padding: 12px 14px 20px; display: grid; gap: 14px; align-content: start; }
+.fa-body p { margin: 0; }
+.fa-promise { display: flex; gap: 8px; align-items: flex-start; padding: 9px 11px; border-radius: var(--r-sm); background: var(--accent-soft); color: var(--ink-2); font-size: 12px; line-height: 1.45; }
+.fa-promise svg { flex: none; margin-top: 2px; color: var(--accent); }
+.fa-promise b { color: var(--ink); font-weight: 600; }
+.fa-state { display: flex; align-items: center; gap: 7px; font-size: 12.5px; }
+.fa-progress { display: grid; gap: 9px; justify-items: start; padding: 11px 12px; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: var(--pane-2); font-size: 12.5px; }
+.fa-progress p { display: flex; align-items: center; gap: 7px; }
+.fa-wait { align-items: flex-start !important; color: var(--warning); line-height: 1.45; }
+.fa-wait svg { flex: none; margin-top: 2px; }
+.fa-wait span { color: var(--ink-2); }
+.fa-problem { display: grid; gap: 8px; justify-items: start; }
+.fa-note-box { display: flex; gap: 7px; align-items: flex-start; font-size: 12px; color: var(--ink-2); }
+.fa-note-box svg { flex: none; margin-top: 2px; }
+
+.fa-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.fa-tile { display: grid; gap: 3px; justify-items: start; text-align: left; padding: 8px 10px; border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--pane-2); transition: background .12s; }
+.fa-tile:hover { background: var(--pane-3); }
+.fa-tile-label { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--ink-3); }
+.fa-tile b { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.fa-section { display: grid; gap: 8px; scroll-margin-top: 8px; }
+.fa-section h3 { margin: 0; display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--ink); padding-top: 12px; border-top: 1px solid var(--line); }
+.fa-section h3 svg { color: var(--ink-3); }
+.fa-section h4 { margin: 4px 0 0; font-size: 12px; font-weight: 600; color: var(--ink-2); }
+.fa-lead { font-size: 12px; color: var(--ink-2); line-height: 1.45; }
+.fa-group { display: grid; gap: 5px; padding: 8px 10px; border-radius: var(--r-sm); background: var(--pane-2); border: 1px solid var(--line); }
+.fa-group-head { font-size: 12px; display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: baseline; }
+.fa-group-head b { font-weight: 600; overflow-wrap: anywhere; }
+.fa-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
+.fa-row { display: flex; align-items: center; gap: 7px; min-height: 30px; padding: 2px 2px 2px 4px; border-radius: 7px; }
+.fa-row:hover { background: var(--pane-3); }
+.fa-row-icon { flex: none; color: var(--ink-3); }
+.fa-row-main { flex: 1; min-width: 0; display: grid; }
+.fa-name { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fa-path { font-size: 11px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fa-size { flex: none; font-size: 11.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.fa-acts { flex: none; display: inline-flex; gap: 1px; }
+.fa-act { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 6px; color: var(--ink-3); }
+.fa-act:hover { background: var(--pane); color: var(--accent); }
+.fa-do { display: flex; gap: 6px; align-items: flex-start; font-size: 11.5px; color: var(--ink-2); line-height: 1.45; }
+.fa-do svg { flex: none; margin-top: 2px; color: var(--warning); }
+.fa-more { justify-self: start; font-size: 12px; }
+.fa-suggest { display: grid; gap: 4px; }
+.fa-suggest ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px; }
+.fa-suggest li { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 99px; border: 1px dashed var(--line-2); font-size: 11.5px; }
+.fa-suggest li svg { color: var(--ink-3); }
+
+.fa-model { display: grid; gap: 8px; }
+.fa-privacy { display: flex; gap: 7px; align-items: flex-start; font-size: 12px; line-height: 1.45; color: var(--ink-2); }
+.fa-privacy svg { flex: none; margin-top: 2px; color: var(--ink-3); }
+.fa-privacy.here svg { color: var(--good); }
+.fa-privacy.away svg { color: var(--warning); }
+.fa-pick { display: grid; gap: 3px; }
+.fa-pick select { height: 30px; padding: 0 8px; border-radius: 7px; border: 1px solid var(--line-2); background: var(--pane-2); color: var(--ink); font: inherit; font-size: 12.5px; min-width: 0; max-width: 100%; }
+.fa-ask { justify-self: start; }
+.fa-answer { display: grid; gap: 8px; padding: 10px 12px; border-radius: var(--r-sm); border: 1px solid var(--line-2); background: var(--pane-2); font-size: 12.5px; line-height: 1.5; }
+.fa-plan { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.fa-plan li { display: flex; flex-wrap: wrap; gap: 3px 6px; align-items: baseline; }
+.fa-plan li svg { color: var(--accent); align-self: center; }
+.fa-examples { flex-basis: 100%; padding-left: 19px; font-size: 11.5px; color: var(--ink-3); overflow-wrap: anywhere; }
+.fa-steps { margin: 0; padding-left: 20px; display: grid; gap: 3px; }
+.fa-text { white-space: pre-wrap; }
+.fa-sent summary { cursor: pointer; font-size: 12px; color: var(--ink-2); }
+.fa-sent pre { margin: 6px 0 0; max-height: 220px; overflow: auto; padding: 8px; border-radius: 7px; background: var(--pane); border: 1px solid var(--line); font: 11px/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.fa-skipped { margin: 0; padding-left: 18px; display: grid; gap: 5px; font-size: 12px; color: var(--ink-2); line-height: 1.45; overflow-wrap: anywhere; }
+.fa-foot { padding-top: 8px; border-top: 1px solid var(--line); }
+
+/* Files' place for it: a column beside the viewer, or the whole pane where there's only room for one. */
+.fa-dock { flex: none; width: 380px; min-height: 0; border-left: 1px solid var(--line); display: flex; flex-direction: column; }
+.files-view.narrow .fa-dock { position: absolute; inset: 0; width: auto; border-left: 0; z-index: 6; }
+
+/* A finger's room for every control on a phone. */
+@media (max-width: 640px), (pointer: coarse) {
+  .fa-panel .win-btn, .fa-act { width: 40px; height: 40px; }
+  .fa-panel .btn.small { height: 40px; padding: 0 14px; }
+  .fa-tile { min-height: 48px; }
+  .fa-row { min-height: 44px; }
+  .fa-more, .fa-note-box .link-btn { min-height: 40px; }
+  .fa-pick select { height: 40px; font-size: 16px; }
+  .fa-sent summary { min-height: 40px; display: flex; align-items: center; }
+}

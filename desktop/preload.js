@@ -2,8 +2,9 @@
 // picture of part of its own window (the Preview tab's app), lets an agent open in a window of its
 // own, says how long since you last used the computer, restarts the app, picks a folder or files in
 // Finder, says where a dropped file is, helps you allow what macOS asks about (asking it, seeing
-// it, and forgetting an answer that doesn't take), sets up the dictation key and its window, and
-// says what an update would lose in the window. Nothing else is exposed.
+// it, and forgetting an answer that doesn't take), sets up the dictation key and its window, makes
+// its own window full screen for Studio's Focus, and says what an update would lose in the window.
+// Nothing else is exposed.
 const { contextBridge, ipcRenderer, webUtils } = require('electron')
 // Another of your devices, shown through this one (/m/<id>/): its pages get windows and nothing
 // of this computer's (no Finder, files, mic, screen or floating card), as on a phone.
@@ -72,6 +73,8 @@ else contextBridge.exposeInMainWorld('bridgeApp', {
   pickFiles: () => ipcRenderer.invoke('bridge:pick-files'),
   pathOf: (file) => { try { return webUtils.getPathForFile(file) || null } catch { return null } },
   watching: (on) => ipcRenderer.invoke('bridge:watching', !!on),
+  // Studio's Focus: this window full screen (true) or back (false), or whether it is (nothing).
+  fullScreen: (on) => ipcRenderer.invoke('bridge:full-screen', typeof on === 'boolean' ? on : null),
   // Dictation's key from other apps (Settings › Voice), and its window (?dictate=1): what was
   // pressed before it was ready, its size, whether it's listening (Esc is held for it then), hiding,
   // copying, and the keyboard while its words are edited there (taken, then given back). Pasting

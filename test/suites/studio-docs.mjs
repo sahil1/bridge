@@ -12,11 +12,16 @@
 // Recent, by kind and by where they are, with a search through all of them; a project's code
 // listing only its documents and decks; the newest of each kind; a folder added. Preview beside
 // Files, as an agent's tab has them: the file open in its own editor, a whiteboard on its own page.
+// Open in Word: which apps this computer has (Windows' registry, Linux's PATH and a Mac's
+// Applications folders and Spotlight, each with stand-ins, run here whatever this computer is; then
+// this computer's through the server), the app for each kind and none for a page, opening it there
+// (open -a, LibreOffice), what's saved there shown and never saved over, a save that can't be made
+// said in Focus, and in another computer's window said to open on the file's computer.
 // On a phone: what to show picked from one list, the home and a Word file as one column, fitting.
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
-import { startKit, startModel, checks, until, sleep, browser, page, shot, phoneFaults, solid, TEST, ROOT } from '../lib/harness.mjs'
+import { startKit, startModel, checks, until, sleep, browser, page, shot, phoneFaults, solid, noServiceWorker, TEST, ROOT } from '../lib/harness.mjs'
 import { richDocx, chartPng } from '../lib/wordfile.mjs'
 
 const require = createRequire(path.join(ROOT, 'package.json'))
@@ -24,12 +29,33 @@ const JSZip = require('jszip')
 const { ok, skip, done } = checks('studio-docs')
 const kit = await startKit('studio-docs', { env: { CLAUDE_STAND_IN_TYPED: '1' } })
 kit.program('claude', fs.readFileSync(path.join(TEST, 'stand-ins', 'claude.cjs'), 'utf8'))
+// The apps that open what Studio edits (server/studioapps.js), as each system says where they are,
+// and LibreOffice standing in for itself (what it was asked to open, in soffice.log). On a Mac: Word
+// in /Applications (the kit's: BRIDGE_APPLICATIONS) found by its name, Excel in a folder in it found
+// only by Spotlight (its bundle id), Keynote in ~/Applications, PowerPoint said by Spotlight to be
+// where it isn't any more and Pages in the Trash, neither offered. On Windows: the registry's App
+// Paths (a stand-in reg) with Word, and PowerPoint where it isn't. On Linux: LibreOffice on the PATH.
+const SYS_APPS = path.join(kit.dir, 'Applications')
+const MAC_APPS = { word: path.join(SYS_APPS, 'Microsoft Word.app'), excel: path.join(SYS_APPS, 'Microsoft Office', 'Microsoft Excel.app'), keynote: path.join(kit.home, 'Applications', 'Keynote.app') }
+const SPOT_APPS = [`${MAC_APPS.excel}   kMDItemCFBundleIdentifier = com.microsoft.Excel`, `${path.join(SYS_APPS, 'Microsoft PowerPoint.app')}   kMDItemCFBundleIdentifier = com.microsoft.Powerpoint`, `${path.join(kit.home, '.Trash', 'Pages.app')}   kMDItemCFBundleIdentifier = com.apple.iWork.Pages`].join('\n')
+const appsAsked = path.join(kit.home, 'mdfind-apps.log')
+const winWord = path.join(kit.dir, 'Program Files', 'Microsoft Office', 'root', 'Office16', 'WINWORD.EXE')
+const sofficeLog = path.join(kit.home, 'soffice.log')
+if (process.platform === 'darwin') for (const a of Object.values(MAC_APPS)) fs.mkdirSync(path.join(a, 'Contents'), { recursive: true })
+if (process.platform === 'win32') {
+  fs.mkdirSync(path.dirname(winWord), { recursive: true })
+  fs.writeFileSync(winWord, '')
+  const key = 'HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths'
+  const said = ['', `${key}\\Winword.exe`, `    (Default)    REG_SZ    ${winWord}`, `    Path    REG_SZ    ${path.dirname(winWord)}\\`, '', `${key}\\POWERPNT.EXE`, `    (Default)    REG_SZ    "${path.join(path.dirname(winWord), 'POWERPNT.EXE')}"`, ''].join('\r\n')
+  kit.program('reg', `if(/^HKLM\\\\SOFTWARE\\\\Microsoft/i.test(process.argv[3]||''))process.stdout.write(${JSON.stringify(said)});else process.exit(1)`)
+}
+if (process.platform === 'linux') kit.program('soffice', `require('fs').appendFileSync(${JSON.stringify(sofficeLog)},process.argv.slice(2).join(' | ')+'\\n')`)
 // Spotlight, standing in: the kit's home's documents as mdfind prints them, each run noted. When
 // each changed is the file's own time; one that changed in the last 60 days was opened yesterday,
 // an older one not lately (as Spotlight has it: no date). A .key file is Keynote's only when it's a
 // zip, as Spotlight tells by its kind.
 const asked = path.join(kit.home, 'mdfind.log')
-kit.program('mdfind', `const fs=require('fs'),path=require('path');fs.appendFileSync(${JSON.stringify(asked)},process.argv.slice(2).join(' ')+'\\n');const home=${JSON.stringify(kit.home)};const out=[];const at=(ms)=>new Date(ms).toISOString().replace('T',' ').replace(/\\.\\d+Z$/,' +0000');const walk=(d)=>{for(const e of fs.readdirSync(d,{withFileTypes:true})){if(e.name.startsWith('.'))continue;const p=path.join(d,e.name);if(e.isDirectory())walk(p);else if(/\\.(docx|xlsx|pptx|pdf|doc|xls|ppt|odt|ods|odp|key)$/.test(e.name)&&!(/\\.key$/.test(e.name)&&fs.readFileSync(p).toString('latin1',0,2)!=='PK')){const m=fs.statSync(p).mtimeMs;out.push(p+'   kMDItemLastUsedDate = '+(Date.now()-m<60*864e5?at(Date.now()-864e5):'(null)')+'   kMDItemFSContentChangeDate = '+at(m))}}};walk(home);console.log(out.join('\\n'))`)
+kit.program('mdfind', `const fs=require('fs'),path=require('path');if(process.argv.some((a)=>a.includes('kMDItemCFBundleIdentifier =='))){fs.appendFileSync(${JSON.stringify(appsAsked)},process.argv.slice(2).join(' | ')+'\\n');console.log(${JSON.stringify(SPOT_APPS)});process.exit(0)}fs.appendFileSync(${JSON.stringify(asked)},process.argv.slice(2).join(' ')+'\\n');const home=${JSON.stringify(kit.home)};const out=[];const at=(ms)=>new Date(ms).toISOString().replace('T',' ').replace(/\\.\\d+Z$/,' +0000');const walk=(d)=>{for(const e of fs.readdirSync(d,{withFileTypes:true})){if(e.name.startsWith('.'))continue;const p=path.join(d,e.name);if(e.isDirectory())walk(p);else if(/\\.(docx|xlsx|pptx|pdf|doc|xls|ppt|odt|ods|odp|key)$/.test(e.name)&&!(/\\.key$/.test(e.name)&&fs.readFileSync(p).toString('latin1',0,2)!=='PK')){const m=fs.statSync(p).mtimeMs;out.push(p+'   kMDItemLastUsedDate = '+(Date.now()-m<60*864e5?at(Date.now()-864e5):'(null)')+'   kMDItemFSContentChangeDate = '+at(m))}}};walk(home);console.log(out.join('\\n'))`)
 // Opening a file in its own app, standing in for macOS's open and Linux's xdg-open: what it was asked to open.
 const opened = path.join(kit.home, 'opened.log')
 for (const n of ['open', 'xdg-open']) kit.program(n, `require('fs').appendFileSync(${JSON.stringify(opened)},process.argv.slice(2).join(' ')+'\\n')`)
@@ -159,6 +185,62 @@ try {
   ok(/Pick the words/.test((await api('/studio/rewrite', { text: ' ', instruction: 'x' }).catch((e) => e)).message || ''), 'nothing picked: it says so')
   const writer = await api('/studio/writer')
   ok(writer.model?.id === 'openai:gpt-5' && writer.picked && writer.models.some((m) => m.id === 'openai:gpt-5'), 'which model writes, and the others to pick from', writer)
+
+  // ---------- Which apps open what (server/studioapps.js) ----------
+  // The look itself, for each kind of computer whatever this one is, with each system's stand-ins:
+  // Windows' registry (reg, its default value named in German and one with %ProgramFiles% in
+  // quotes), Linux's PATH, a Mac's Applications folders and Spotlight.
+  const unit = path.join(kit.dir, 'apps-unit')
+  fs.mkdirSync(path.join(unit, 'home', 'Applications'), { recursive: true })
+  const homeWas = process.env.BRIDGE_HOME
+  process.env.BRIDGE_HOME = path.join(unit, 'data')
+  const studioApps = await import('../../server/studioapps.js')
+  if (homeWas === undefined) delete process.env.BRIDGE_HOME; else process.env.BRIDGE_HOME = homeWas
+  const office = path.join(unit, 'Program Files', 'Microsoft Office', 'root', 'Office16')
+  fs.mkdirSync(office, { recursive: true })
+  for (const n of ['WINWORD.EXE', 'POWERPNT.EXE']) fs.writeFileSync(path.join(office, n), '')
+  const regKey = 'HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths'
+  const regSaid = ['', `${regKey}\\excel.exe`, `    (Standard)    REG_SZ    ${path.join(office, 'EXCEL.EXE')}`, '', `${regKey}\\Winword.exe`, `    (Standard)    REG_SZ    ${path.join(office, 'WINWORD.EXE')}`, `    Path    REG_SZ    ${office}`, '', `${regKey}\\POWERPNT.EXE`, `    (Default)    REG_EXPAND_SZ    "%OfficeHere%${path.sep}POWERPNT.EXE"`, ''].join('\r\n')
+  ok(JSON.stringify(studioApps.registryApps(regSaid, { OfficeHere: office })) === JSON.stringify({ 'excel.exe': path.join(office, 'EXCEL.EXE'), 'winword.exe': path.join(office, 'WINWORD.EXE'), 'powerpnt.exe': path.join(office, 'POWERPNT.EXE') }), "Windows: the registry's App Paths read, whatever the default value is called and quoted or with %ProgramFiles% in it", studioApps.registryApps(regSaid, { OfficeHere: office }))
+  fs.writeFileSync(path.join(unit, 'reg.cjs'), `if(/^HKLM\\\\SOFTWARE\\\\Microsoft/i.test(process.argv[3]||''))process.stdout.write(${JSON.stringify(regSaid)});else process.exit(1)`)
+  const onWin = await studioApps.look({ platform: 'win32', env: { ...process.env, BRIDGE_REG: path.join(unit, 'reg.cjs'), OfficeHere: office } })
+  ok(JSON.stringify(onWin) === JSON.stringify({ word: path.join(office, 'WINWORD.EXE'), powerpoint: path.join(office, 'POWERPNT.EXE') }), 'Windows: Word and PowerPoint, where the registry says they are; Excel, said but not there, not offered', onWin)
+  ok(JSON.stringify(await studioApps.look({ platform: 'win32', env: { ...process.env, BRIDGE_REG: path.join(unit, 'nothing.cjs') } })) === '{}', 'Windows: no registry to ask, no app')
+  const unitBin = path.join(unit, 'bin')
+  fs.mkdirSync(unitBin, { recursive: true })
+  // Named as Linux has it (no .cmd, whatever system this is), and soffice.cmd beside it, which
+  // Linux wouldn't run.
+  const lo = path.join(unitBin, 'libreoffice')
+  fs.writeFileSync(lo, '#!/bin/sh\n', { mode: 0o755 })
+  fs.writeFileSync(path.join(unitBin, 'soffice.cmd'), '@echo off\r\n', { mode: 0o755 })
+  const onLinux = await studioApps.look({ platform: 'linux', PATH: [path.join(unit, 'none'), unitBin].join(path.delimiter) })
+  ok(onLinux.libreoffice === lo && JSON.stringify(await studioApps.look({ platform: 'linux', PATH: path.join(unit, 'none') })) === '{}', 'Linux: LibreOffice on the PATH (as libreoffice, not a soffice.cmd), and none without it', onLinux)
+  fs.mkdirSync(path.join(unit, 'Apps', 'Pages.app'), { recursive: true })
+  fs.mkdirSync(path.join(unit, 'Apps', 'iWork', 'Numbers.app'), { recursive: true })
+  const spotSaid = '/Applications/iWork/Numbers.app   kMDItemCFBundleIdentifier = com.apple.iWork.Numbers\n/Volumes/Backup/.Trashes/501/Keynote.app   kMDItemCFBundleIdentifier = com.apple.iWork.Keynote\n/Applications/Big.app/Contents/Microsoft Word.app   kMDItemCFBundleIdentifier = com.microsoft.Word\n'
+  ok(JSON.stringify(studioApps.spotlightApps(spotSaid)) === JSON.stringify([{ path: '/Applications/iWork/Numbers.app', bundle: 'com.apple.iWork.Numbers' }]), "a Mac: Spotlight's apps read, not one in the Trash or inside another app", studioApps.spotlightApps(spotSaid))
+  if (process.platform !== 'win32') {
+    const spotUnit = `${path.join(unit, 'Apps', 'iWork', 'Numbers.app')}   kMDItemCFBundleIdentifier = com.apple.iWork.Numbers\n${path.join(unit, 'home', '.Trash', 'Keynote.app')}   kMDItemCFBundleIdentifier = com.apple.iWork.Keynote\n`
+    fs.mkdirSync(path.join(unit, 'mdbin'), { recursive: true })
+    fs.writeFileSync(path.join(unit, 'mdbin', 'mdfind'), `#!/bin/sh\nprintf '%s' '${spotUnit}'\n`, { mode: 0o755 })
+    const onMac = await studioApps.look({ platform: 'darwin', home: path.join(unit, 'home'), env: { BRIDGE_APPLICATIONS: path.join(unit, 'Apps'), PATH: path.join(unit, 'mdbin') } })
+    ok(JSON.stringify(onMac) === JSON.stringify({ pages: path.join(unit, 'Apps', 'Pages.app'), numbers: path.join(unit, 'Apps', 'iWork', 'Numbers.app') }), 'a Mac: Pages in Applications by its name, Numbers in a folder in it by Spotlight; nothing else', onMac)
+  } else skip("a Mac's look with Spotlight standing in", 'the stand-in mdfind is a shell script')
+  // This computer's, through the server: the app for each kind of file Studio opens.
+  const appsHere = await until(async () => { const r = await api('/studio/apps'); return r.looked && r }, 10000, 200)
+  const by = Object.fromEntries(Object.entries(appsHere?.apps || {}).map(([e, a]) => [e, a.name]))
+  const wantApps = { darwin: { '.docx': 'Word', '.xlsx': 'Excel', '.xlsm': 'Excel', '.csv': 'Excel', '.tsv': 'Excel', '.pptx': 'Keynote' }, win32: { '.docx': 'Word' }, linux: { '.docx': 'LibreOffice', '.xlsx': 'LibreOffice', '.xlsm': 'LibreOffice', '.csv': 'LibreOffice', '.tsv': 'LibreOffice', '.pptx': 'LibreOffice' } }[process.platform]
+  ok(JSON.stringify(by) === JSON.stringify(wantApps), { darwin: "a Mac: Word for documents, Excel (found by Spotlight) for sheets, and for decks Keynote, as PowerPoint isn't where Spotlight said and Pages is in the Trash", win32: 'Windows: Word for documents, from the registry; nothing for sheets or decks (PowerPoint isn\'t where it says)', linux: 'Linux: LibreOffice for documents, sheets and decks' }[process.platform], appsHere)
+  if (process.platform === 'darwin') ok(fs.readFileSync(appsAsked, 'utf8').split('\n')[0].startsWith(`-onlyin | ${SYS_APPS} | -onlyin | ${path.join(kit.home, 'Applications')} | -attr | kMDItemCFBundleIdentifier`), 'Spotlight is asked only about the Applications folders', fs.readFileSync(appsAsked, 'utf8'))
+  // Opening: only from a window on this computer, and only for a kind with an app.
+  const openIn = (f, headers = {}) => fetch(`${kit.url}/api/studio/open-in`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(f) }).then(async (r) => ({ status: r.status, ...(await r.json()) }))
+  const logs = () => [opened, sofficeLog].map((x) => (fs.existsSync(x) ? fs.readFileSync(x, 'utf8') : '')).join('')
+  const logsBefore = logs()
+  const far = await openIn(F('report.docx'), { 'x-bridge-relay': 'far' })
+  ok(far.status >= 400 && /on your computer/.test(far.error || '') && logs() === logsBefore, 'asked from another computer or a phone: refused, nothing opened', far)
+  const noApp = await openIn(F('notes.md'))
+  ok(noApp.status >= 400 && /No app on this computer opens this kind of file here/.test(noApp.error || '') && logs() === logsBefore, 'a kind with no app of its own (Markdown): refused, saying so', noApp)
+  ok((await openIn(F('../../outside.docx'))).status >= 400 && logs() === logsBefore, 'nothing outside its folder')
 
   // ---------- Studio's home ----------
   const w = await page(b, kit.url, { width: 1440, height: 900 })
@@ -425,6 +507,83 @@ try {
   ok(!!(await until(async () => /Anthropic key/.test(await p.locator('.sd-ask-card [role="alert"]').innerText().catch(() => '')), 10000)), 'a model that can\'t answer says why', await p.locator('.sd-ask-card').innerText().catch(() => ''))
   await p.locator('.sd-ask-card button', { hasText: 'Discard' }).click()
 
+  // ---------- Open in Word ----------
+  // The header offers the app this computer has for the file's kind, else its usual app, else
+  // nothing. It opens on this computer, Studio keeps watching, and what's saved there comes back as
+  // a change from outside, never saved over.
+  const openBtn = p.locator('.sd-file .pane-head .sd-open-in')
+  ok(!!(await until(async () => (await openBtn.innerText().catch(() => '')).trim() === 'Open in app', 5000, 100)) && await openBtn.getAttribute('aria-label') === 'Open in its usual app', 'Markdown: Open in app, its usual one', await openBtn.innerText().catch(() => ''))
+  fs.writeFileSync(file('page.html'), '<!doctype html><title>Page</title><h1>Page</h1>')
+  await p.evaluate(({ root }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: 'page.html' } })), { root })
+  ok(!!(await until(async () => (await p.locator('.sd-page-ed').count()) === 1, 15000)) && await openBtn.count() === 0 && await p.locator('.sd-status .sd-open-in-narrow').count() === 0, 'a page: no app to open it in (it has Open on its own)')
+  fs.writeFileSync(file('brief.docx'), await richDocx({ pages: 1 }))
+  await p.evaluate(({ root }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: 'brief.docx' } })), { root })
+  await until(async () => (await p.locator('.sd-pb').count()) > 0 && /brief\.docx/.test(await p.locator('.sd-file .pane-head h2').innerText().catch(() => '')), 20000)
+  const appName = process.platform === 'linux' ? 'LibreOffice' : 'Word'
+  ok(!!(await until(async () => (await openBtn.innerText().catch(() => '')).trim() === `Open in ${appName}`, 5000, 100)) && /Studio keeps watching it/.test(await openBtn.getAttribute('title')), `a Word file: Open in ${appName}, the app this computer has for it`, await openBtn.innerText().catch(() => ''))
+  await shot(p, `${tag}studio-docs-open-in`)
+  const briefReal = fs.realpathSync(file('brief.docx'))
+  if (process.platform !== 'win32') {
+    await openBtn.click()
+    const said = await until(() => { const x = logs(); return x.includes('brief.docx') && x }, 5000)
+    ok(!!said && said.includes(process.platform === 'darwin' ? `-a ${MAC_APPS.word} ${briefReal}` : `--writer | ${briefReal}`), process.platform === 'darwin' ? 'opened in Word itself (open -a, stood in for)' : 'opened in LibreOffice Writer (stood in for)', said)
+    ok(!!(await until(async () => new RegExp(`Opening it in ${appName}\\. What you save there shows here`).test(await p.locator('.sd-note-bar').innerText().catch(() => '')), 3000, 100)), 'and Studio says so')
+  } else skip(`Open in ${appName} opens it`, "Windows starts Word's own program, which has no stand-in here")
+  // Word saves it: Studio shows that version, said to be another app's, and doesn't save over it.
+  const wordSaves = async (text) => {
+    const z = await JSZip.loadAsync(fs.readFileSync(file('brief.docx')))
+    z.file('word/document.xml', (await z.file('word/document.xml').async('string')).replace('<w:body>', `<w:body><w:p><w:r><w:t>${text}</w:t></w:r></w:p>`))
+    fs.writeFileSync(file('brief.docx'), await z.generateAsync({ type: 'nodebuffer' }))
+    return fs.readFileSync(file('brief.docx'))
+  }
+  const fromWord = await wordSaves('Edited in Word.')
+  ok(!!(await until(async () => /Edited in Word\./.test(await doc.innerText().catch(() => '')) && /Another app changed it: this is its new version/.test(await p.locator('.sd-note-bar').innerText().catch(() => '')), 15000)), `saved in ${appName}: Studio shows its version, saying another app changed it`)
+  await sleep(2500)
+  ok(Buffer.compare(fs.readFileSync(file('brief.docx')), fromWord) === 0, `and leaves the file as ${appName} saved it`)
+  // In Focus a save that can't be made still says so: typed here while Word saved it again.
+  await p.keyboard.press(`${MOD}+Alt+f`)
+  ok(!!(await until(async () => (await p.locator('.sd-file.focus').count()) === 1, 3000, 100)), 'Focus, by its key')
+  await caret(p, 'Edited in Word.')
+  await p.keyboard.type(' And here.')
+  const again = await wordSaves('Word again.')
+  const barShown = await until(async () => {
+    const c = p.locator('.sd-file.focus .sd-conflict')
+    const r = await c.boundingBox().catch(() => null)
+    if (!r) return false
+    const onTop = await p.evaluate(({ x, y }) => !!document.elementFromPoint(x, y)?.closest('.sd-conflict'), { x: r.x + 20, y: r.y + r.height / 2 })
+    return onTop && r.y >= 0 && r.y + r.height <= 900 && /Changed elsewhere/.test(await p.locator('.sd-status .sd-state').innerText())
+  }, 15000, 200)
+  ok(!!barShown, 'in Focus: changed in Word while typed here, the bar saying so is on the page, and the status line says Changed elsewhere', await p.locator('.sd-status').innerText().catch(() => ''))
+  await shot(p, `${tag}studio-docs-focus-conflict`)
+  ok(Buffer.compare(fs.readFileSync(file('brief.docx')), again) === 0, "and Word's save isn't written over")
+  await p.locator('.sd-conflict button', { hasText: 'Show theirs' }).click()
+  ok(!!(await until(async () => /Word again\./.test(await doc.innerText()) && !/And here\./.test(await doc.innerText()), 10000)), "Show theirs: Word's version")
+  await p.locator('.sd-focus-leave').click()
+  ok(!!(await until(async () => (await p.locator('.sd-file.focus').count()) === 0 && await p.locator('.sd-file .pane-head').count() === 1, 3000, 100)), 'Leave Focus: the header back')
+
+  // ---------- Another computer's window ----------
+  // This computer's Studio seen in another one's window (/m/<id>/, its requests coming through that
+  // computer, as the relay's do): the apps are this computer's, so Open in Word says it opens here,
+  // on the file's computer, and nothing opens.
+  const there = await page(b, `${kit.url}/m/far/`, {
+    width: 1440, height: 900, before: async (ctx) => { await noServiceWorker(ctx); await ctx.route(/\/m\/far\//, async (r) => {
+      if (r.request().headers().accept === 'text/event-stream') return r.abort()
+      const u = new URL(r.request().url())
+      const res = await r.fetch({ url: `${kit.url}${u.pathname.slice('/m/far'.length)}${u.search}`, headers: { ...r.request().headers(), 'x-bridge-relay': 'far' } })
+      return r.fulfill({ response: res })
+    }) },
+  })
+  pages.push(there)
+  const logsThen = logs()
+  await until(async () => { if (!(await there.p.locator('.sd-file .pane-head h2', { hasText: 'brief.docx' }).count())) await there.p.evaluate(({ root }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: 'brief.docx' } })), { root }); return there.p.locator('.sd-pb').first().waitFor({ timeout: 2000 }).then(() => true, () => false) }, 30000, 300)
+  const farBtn = there.p.locator('.sd-file .pane-head .sd-open-in')
+  ok(!!(await until(async () => (await farBtn.innerText().catch(() => '')).trim() === `Open in ${appName}`, 5000, 100)) && /opens on the computer it's on/.test(await farBtn.getAttribute('title').catch(() => '')), `another computer's window: Open in ${appName} (the file's computer has it), said to open there`, await farBtn.innerText().catch(() => ''))
+  await farBtn.click()
+  ok(!!(await until(async () => new RegExp(`${appName} opens it on the computer it's on`).test(await there.p.locator('.sd-note-bar').innerText().catch(() => '')), 3000, 100)), 'tapped: it says so, in place of opening it')
+  await sleep(500)
+  ok(logs() === logsThen, 'and nothing opens, there or here')
+  await shot(there.p, `${tag}studio-docs-open-in-elsewhere`)
+
   // ---------- Dark ----------
   const dark = await page(b, kit.url, { width: 1440, height: 900, mode: 'dark' })
   pages.push(dark)
@@ -482,6 +641,7 @@ try {
   await sleep(600)
   f = await phoneFaults(ph.p, '.sd-file')
   ok(!Object.keys(f).length && (await ph.p.locator('.sd-pb').count()) === 0 && await ph.p.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'phone: a Word file as one column, no pages, fitting the screen', f)
+  ok(await ph.p.locator('.sd-status .sd-open-in-narrow').isVisible() && !(await ph.p.locator('.sd-file .pane-head .sd-open-in').isVisible()) && /Open in (Word|LibreOffice)/.test(await ph.p.locator('.sd-status .sd-open-in-narrow').getAttribute('aria-label')), "phone: Open in Word in the status line (the header has no room), a whole target")
   await shot(ph.p, `${tag}studio-docs-word-phone`)
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)

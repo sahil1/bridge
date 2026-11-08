@@ -18,13 +18,13 @@ const CLAUDE = () => path.join(process.env.CLAUDE_CONFIG_DIR || path.join(HOME, 
 const CODEX = () => path.join(process.env.CODEX_HOME || path.join(HOME, '.codex'), 'sessions')
 const FILE = dataFile('projects.json')
 
-// macOS asks before anything looks into Desktop, Documents, Downloads or a removable or network drive,
-// and the first look waits for your answer. A first start mustn't ask: until work has started in one
+// macOS asks before anything looks into Desktop, Documents, Downloads, iCloud Drive or a removable or
+// network drive, and the first look waits for your answer. A first start mustn't ask: until work has started in one
 // of them (which asks anyway, as the agent opens there), folders in it are listed from the agents'
 // history without a look. Kept in asked-folders.json; an older install, which looked already, counts
 // as asked. Meetings look in Downloads and on the Desktop for files you got for one the same way
 // (mayLook), once you've asked them to.
-const PROTECTED = process.platform === 'darwin' ? [...['Desktop', 'Documents', 'Downloads'].map((d) => path.join(HOME, d)), '/Volumes'] : []
+const PROTECTED = process.platform === 'darwin' ? [...['Desktop', 'Documents', 'Downloads', path.join('Library', 'Mobile Documents')].map((d) => path.join(HOME, d)), '/Volumes'] : []
 const rootOf = (p) => PROTECTED.find((r) => p === r || p.startsWith(r + path.sep)) || null
 const ASKED = dataFile('asked-folders.json')
 const saveAsked = () => { try { fs.mkdirSync(path.dirname(ASKED), { recursive: true }); fs.writeFileSync(ASKED, JSON.stringify([...asked])) } catch { /* read-only disk */ } }
