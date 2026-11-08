@@ -23,7 +23,7 @@ Memory for everyone, what needs you now ahead of what has gone quiet, and Studio
 
 - **The sidebar's top scrolls on its own** when Meetings' and Dictations' lists make it taller than the window. On a 1280x800 screen, Studio, Files and your spaces were out of reach, and bringing one into view pushed the window up past the top bar.
 - **A Markdown list of plain and checklist items is kept as written** in Studio: each plain item opened as an empty checkbox with the item under it, and was saved so.
-- **Muted text in dark mode is readable**: 4.5:1 or more on every pane.
+- **Text reads in every theme, light and dark**: 4.5:1 or more against what's behind it, quiet text, links, buttons and badges included.
 - **Memory fits a phone** with meetings that have long names.
 - **Everything says "on this computer"** with one computer, not "on 1 computers".
 - **Redo is Ctrl+Shift+Z in a sheet on Windows and Linux** too, and a heading pasted into a Word file looks like its own headings.
