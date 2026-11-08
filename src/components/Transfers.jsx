@@ -12,9 +12,9 @@ import './transfers.css'
 const MB = 1048576
 const fmtSize = (n) => (n >= 1073741824 ? `${(n / 1073741824).toFixed(1)} GB` : n >= MB ? `${(n / MB).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`)
 const enc = encodeURIComponent
-// Bridge AI's hosted relay carries this much a day for each computer (relay/HOSTED.md), with
-// everything else that computer does; a copy bigger than BIG through it says so first.
-const HOSTED_DAY = 512 * MB
+// What passes through Bridge AI's hosted relay counts towards the account's allowance there (every 8
+// hours and a week, relay/HOSTED.md), with everything else its computers do; a copy bigger than BIG
+// through it says so first.
 const BIG = 64 * MB
 const LOOPBACK = /^(localhost|127\.0\.0\.1|\[::1\])$/
 // This window is on the computer it comes from (the desktop app, or a browser there): "this
@@ -61,9 +61,8 @@ function HostedNote({ hosted, total, device }) {
   if (!hosted || !(total > BIG)) return null
   return (
     <p className="xfer-note small" role="note"><Icon name="info" size={12} /> <span>
-      {t('This goes through Bridge AI\'s relay, which carries 512 MB a day for {name}, with everything else it does.', { name: device })}
-      {total > HOSTED_DAY ? ` ${t('At {size}, it stops when the day\'s allowance runs out and carries on after it resets.', { size: fmtSize(total) })}` : ''}
-      {` ${t('For big files, use a relay on your own Cloudflare account (free, no daily limit), or Tailscale.')}`}
+      {t('This goes through Bridge AI\'s relay, and counts towards your Bold Bridge account\'s allowance there, with everything else {name} does (Settings › Account shows what\'s left). If it runs out, the copy stops and carries on once it resets.', { name: device })}
+      {` ${t('For big files, use a relay on your own Cloudflare account (free, no allowance), or Tailscale.')}`}
     </span></p>
   )
 }

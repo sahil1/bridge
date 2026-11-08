@@ -1,0 +1,46 @@
+# Bold Bridge accounts (README.md). From the repo, signed in to the project's Cloudflare account
+# (npx wrangler@4.149.0 login):
+#   npx wrangler@4.149.0 d1 create bridge-accounts     (once; put its database_id below)
+#   npx wrangler@4.149.0 deploy -c account/wrangler.toml
+name = "bridge-accounts"
+main = "worker.js"
+compatibility_date = "2025-06-01"
+workers_dev = false
+preview_urls = false
+
+# Its one public name. The admin view and the relay reach it through service bindings to its Internal
+# entrypoint instead, which only they can reach (README.md, How the admin view and the relay bind to it).
+routes = [
+  { pattern = "accounts.boldbridge.ai", custom_domain = true },
+]
+
+# Accounts, devices, requests and the relay's counts; the Worker makes the tables itself.
+[[d1_databases]]
+binding = "DB"
+database_name = "bridge-accounts"
+database_id = "put-the-id-from-d1-create-here"
+
+# Cloudflare's Email Service, for codes and notices (README.md: the sending domain is onboarded first).
+[[send_email]]
+name = "EMAIL"
+
+# Once a day: codes, grants and the hour's counts that ran out go, and the relay's use by day after
+# 90 days.
+[triggers]
+crons = ["23 4 * * *"]
+
+[vars]
+FROM = "accounts@boldbridge.ai" # private-ok: the service's own sending address
+# Who gets a short email for each request (comma separated); empty, they're only in the admin view.
+ADMINS = ""
+# The website, whose form may ask for Early Access or the relay (/v1/request-public).
+SITE = "https://boldbridge.ai"
+# How many accounts Bridge AI's relay takes: the same number as its MAX_ACCOUNTS
+# (relay/wrangler.hosted.toml). Past it, approving another account's relay is refused as full.
+RELAY_MAX_ACCOUNTS = "500"
+# Secrets, never here (npx wrangler@4.149.0 secret put <name> -c account/wrangler.toml):
+#   SIGNING_KEY  the Ed25519 private key every token is signed with (account/key.js makes it)
+
+# No logs: nothing about a request (its IP address included) is kept by the Worker.
+[observability]
+enabled = false

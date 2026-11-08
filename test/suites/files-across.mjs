@@ -11,7 +11,7 @@
 //   one, and once picked it's read like an agent's folder;
 //   on a Mac, a copy from elsewhere into Downloads waits for macOS's question to have been asked
 //   there instead of bringing it up on a screen nobody may be at;
-//   a big copy through Bridge AI's hosted relay says so first (512 MB a day);
+//   a big copy through Bridge AI's hosted relay says so first (it counts towards the account's allowance);
 //   in the app: Copy to this computer and Send to… from Files, a file dragged in from another
 //   device's Files, the copy's progress and where it landed (Show in Finder), Places in Files, and
 //   on a phone (390 wide) photos and videos sent from it into the project, with their progress and
@@ -260,7 +260,7 @@ try {
     await pg.locator('.ctx-menu button', { hasText: 'Copy to this computer' }).click()
     const note = pg.locator('.xfer-dialog .xfer-note')
     const said = await note.innerText({ timeout: 15000 }).catch(() => '')
-    ok(/Bridge AI's relay, which carries 512 MB a day for Studio/.test(said) && /your own Cloudflare account/.test(said) && /Tailscale/.test(said) && /100\.0 MB/.test(await pg.locator('.xfer-dialog .xfer-what').innerText()), 'a 100 MB copy through Bridge AI\'s hosted relay: the dialog says it carries 512 MB a day, and suggests your own relay or Tailscale', said)
+    ok(/Bridge AI's relay, and counts towards your Bold Bridge account's allowance there, with everything else Studio does/.test(said) && /your own Cloudflare account/.test(said) && /Tailscale/.test(said) && /100\.0 MB/.test(await pg.locator('.xfer-dialog .xfer-what').innerText()), 'a 100 MB copy through Bridge AI\'s hosted relay: the dialog says it counts towards the account\'s allowance, and suggests your own relay or Tailscale', said)
     await shot(pg, `${tag}files-across-hosted`)
     await pg.locator('.xfer-dialog button', { hasText: 'Cancel' }).click()
   })

@@ -740,8 +740,19 @@ export async function exchange(id, { method = 'GET', u, headers = [], body = nul
     r.started.then(async () => { if (body) { await r.write(body, { bulk: true }); await r.end() } }).catch((e) => { clearTimeout(t); failed = e; reject(e); nudge() })
   })
 }
-// Whether the link to that device goes through Bridge AI's hosted relay, which carries so much a
-// day for each computer (relay/HOSTED.md): a big copy says so first.
+// An API call on that device, through the link (index.js: whether it's signed in to your Bold
+// Bridge account, and a grant to sign it in): its answer, or why not (code offline when it isn't
+// reachable just now).
+export async function callOn(id, method, u, body, ms = 15000) {
+  const m = byId(id)
+  if (!m || m.state !== 'linked') throw Object.assign(new Error('That device isn\'t linked to this one any more'), { status: 404 })
+  const l = links.get(m.id)
+  if (!l?.session) throw Object.assign(new Error(`${m.name} is offline`), { code: 'offline' })
+  return l.call(method, u, body, ms)
+}
+
+// Whether the link to that device goes through Bridge AI's hosted relay, which carries only so much
+// for each account (relay/HOSTED.md): a big copy says so first.
 export function viaHosted(id) {
   const base = hostedBase()
   const r = byId(id)?.relay

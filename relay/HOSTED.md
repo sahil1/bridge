@@ -5,18 +5,29 @@ person can still put a relay on their own Cloudflare account, or use Tailscale.
 
 The hosted relay is the same Worker as everyone's own relay ([worker.js](worker.js)), run once by
 the project for many computers, so someone with no Cloudflare account can reach their computer from
-their phone with one click. It goes on **boldbridge.app**, a domain of its own (`<domain>` below).
-With `HOSTED` unset the Worker is a personal relay exactly as before (no limits, no plans, no
-stats); with `HOSTED=1` it works like this:
+their phone with one click. It's for Bold Bridge accounts that may use it ([account/API.md](../account/API.md)):
+an account asks for it, an admin approves it, and its computers get relay tokens. It goes on
+**boldbridge.app**, a domain of its own (`<domain>` below). With `HOSTED` unset the Worker is a
+personal relay exactly as before (no limits, no accounts, no stats); with `HOSTED=1` it works like
+this:
 
-- `https://<domain>/` is a small page saying what the relay is. `POST https://<domain>/_relay/register`
-  gives a computer, once, `{ id, url, token }`: an id of 12 lowercase letters and digits, its own
-  address `https://<id>.<domain>`, and a token only that computer has. It takes `MAX_COMPUTERS`
-  (100) at once; past that it answers that it's full for now, and the app offers the other ways
-  (What happens at a limit).
-- Each computer gets its own Durable Object (`idFromName(id)`), which keeps only a SHA-256 hash of
-  the token, and its plan (`free` to start with, see Plans). The computer connects to `/_relay/host`
-  at its address with `Authorization: Bearer <token>`; a wrong or missing token gets 403.
+- `https://<domain>/` is a small page saying what the relay is. `POST https://<domain>/_relay/register`,
+  with `Authorization: Bearer <relay token>`, gives a computer `{ id, url, token }`: an id of 12
+  lowercase letters and digits, its own address `https://<id>.<domain>`, and a token only that
+  computer has. The relay token says which account and device it is; the relay checks its signature
+  and end with the accounts service's public key (`ACCOUNTS_PUBLIC_KEY`), offline, and asks the
+  accounts service whether the account may use it. One address per device: the same device
+  registering again gets the same address back, with a new token. It takes `MAX_ACCOUNTS` (500)
+  accounts at once; past that, an account's first computer is told it's full for now, and the app
+  offers the other ways (What happens at a limit).
+- Each computer gets its own Durable Object, a Hub (`idFromName(id)`), which keeps only a SHA-256 hash
+  of the token, and which account and device it's for. The computer connects to `/_relay/host` at
+  its address with `Authorization: Bearer <token>` and a relay token in `X-Relay-Token` (Bridge AI
+  sends a fresh one each time); a wrong or missing computer token gets 403, a missing, ended or
+  another account's relay token a message saying so.
+- Each account gets a Durable Object of its own, an Account (`idFromName(a)`), which keeps its use
+  across its computers in an 8-hour window and a week, like Claude's, and what the accounts service
+  last said of it.
 - Phones work exactly as with a relay of your own: they open the computer's address, pair, and
   everything past the handshake is end-to-end encrypted between phone and computer (in a browser,
   by the page the relay serves; the iPhone app has its own). One address per
@@ -33,37 +44,46 @@ stats); with `HOSTED=1` it works like this:
 
 ## Switching it on in the app
 
-It's hidden until it's switched on. The one switch is [server/hosted.js](../server/hosted.js):
+It's hidden until it's switched on, and it needs Bold Bridge accounts switched on too
+([account/README.md](../account/README.md)). The one switch is [server/hosted.js](../server/hosted.js):
 
 ```js
 export const HOSTED_URL = 'https://boldbridge.app'
 ```
 
-While that's empty, the option doesn't show in Settings, first-run setup or `bridge-ai help`, and
-nothing changes for anyone. The `relay-hosted` test fails if it's set while PRIVACY.md and TERMS.md
-lack the hosted relay's sections (below), and if PRIVACY.md describes a hosted relay while it's
-empty, so the switch and the policy go out together. To try it on one computer before shipping,
-put this in that computer's `~/.bridge-ai/config.json` instead:
+While that's empty, or `ACCOUNTS_URL` in server/account.js is, the option doesn't show in Settings,
+first-run setup or `bridge-ai help`, and nothing changes for anyone. The `relay-hosted` test fails if
+it's set while `ACCOUNTS_URL` isn't, or while PRIVACY.md and TERMS.md lack the hosted relay's
+sections (below), and if PRIVACY.md describes a hosted relay while it's empty, so the switch and the
+policy go out together. To try it on one computer before shipping, put this in that computer's
+`~/.bridge-ai/config.json` instead (with the accounts service's too):
 
 ```json
 "relay": { "hostedUrl": "https://boldbridge.app" }
 ```
 
 Then Settings › Devices starts with a choice of three ways (Bridge AI's relay, your own
-Cloudflare, Tailscale), first-run setup offers "Use Bridge AI on your phone" through it (ticked
-unless you untick it; the next Continue shows the pairing code, or why it couldn't), and
-`bridge-ai relay setup --hosted` works from a terminal. Moving between the ways works too; phones
-pair again after a move to another relay, and the app says so. The tests never reach it:
-`BRIDGE_HOSTED_URL` stands in for `HOSTED_URL`, and the test kits set it empty (a test that wants a
-hosted relay runs `test/stand-ins/hosted-relay.mjs` and points `relay.hostedUrl` at it).
+Cloudflare, Tailscale). Bridge AI's relay says what's missing, with the button that fixes it: sign in
+to your Bold Bridge account (Settings › Account), ask for the relay, or wait for the request; once
+it's approved, Use Bridge AI's relay. First-run setup asks for nothing: it says that Settings ›
+Devices sets the phone up. `bridge-ai relay setup --hosted` works from a terminal once the account
+has the relay, and says to sign in first otherwise. Moving between the ways works too; phones pair
+again after a move to another relay, and the app says so. The tests never reach it:
+`BRIDGE_HOSTED_URL` and `BRIDGE_ACCOUNTS_URL` stand in for the two switches, and the test kits set
+them empty (a test that wants them runs `test/stand-ins/hosted-relay.mjs` and
+`test/stand-ins/accounts.mjs`, and points `relay.hostedUrl` and `account.url` at them).
 
 ## Going live
 
-About 30 minutes, most of it waiting for the domain and the certificate. Every step is for the
+About 30 minutes, most of it waiting for the domain and the certificate, after the accounts
+service is live ([account/README.md](../account/README.md), Going live). Every step is for the
 project's owner, on the project's Cloudflare account; nothing here is done by the app or by CI.
 Keep the relay on a domain of its own (not a name under boldbridge.ai): every name under it
 belongs to the relay.
 
+- [ ] **The accounts service** (owner): live first, with its key made (`node account/key.js`). The
+  relay binds to it (`ACCOUNTS`, the Worker `bridge-accounts`, its entrypoint `Internal`) and
+  can't be deployed before it.
 - [ ] **The domain on Cloudflare** (owner). Bought with Cloudflare Registrar, boldbridge.app is a
   zone already. Bought elsewhere: Cloudflare dashboard › Add a domain › `boldbridge.app` › the Free
   plan, then at the registrar change its nameservers to the two Cloudflare gives, and wait until
@@ -76,12 +96,13 @@ belongs to the relay.
   default) covers `boldbridge.app` and `*.boldbridge.app`; carry on while it goes Active (often 5 to
   15 minutes). Edge Certificates lists both names once it is. (Nothing goes to an origin, so the
   SSL/TLS mode doesn't matter.)
-- [ ] **Workers Paid** (owner; Workers & Pages › Plans, $5 a month). Workers Free stops the relay
-  for everyone once a day's allowance is gone (Cost), so it's for trying it only.
-  [wrangler.hosted.toml](wrangler.hosted.toml) already says `WORKERS_PAID = "1"`.
-- [ ] **The numbers** (owner): `MAX_COMPUTERS` (100) and `RELAY_DAILY_REQUESTS` (500000) in
-  wrangler.hosted.toml are what bound the bill (Cost); change them there before deploying if you
-  want others. The domain is in it already (both routes and `HOSTED_DOMAIN`).
+- [ ] **Workers Paid** (owner; Workers & Pages › Plans, $5 a month): the accounts service needs it
+  already. [wrangler.hosted.toml](wrangler.hosted.toml) says `WORKERS_PAID = "1"`.
+- [ ] **The settings** (owner): `ACCOUNTS_PUBLIC_KEY` in wrangler.hosted.toml, the public key
+  (`node account/key.js --public`). `MAX_ACCOUNTS` (500) and `RELAY_DAILY_REQUESTS` (5000000) are
+  what bound the bill (Cost); change them there before deploying if you want others, and keep the
+  accounts service's `RELAY_MAX_ACCOUNTS` the same as `MAX_ACCOUNTS`. The domain is in it already
+  (both routes and `HOSTED_DOMAIN`).
 - [ ] **Deploy** (owner, from the repo, on the computer releases are made on):
 
   ```sh
@@ -92,7 +113,7 @@ belongs to the relay.
   npx wrangler@4.149.0 secret put STATS_TOKEN -c relay/wrangler.hosted.toml    # paste it
   ```
 
-  The STATS_TOKEN reads `/_relay/stats`. `PLAN_TOKEN` waits until there's a paid plan (Plans).
+  The STATS_TOKEN reads `/_relay/stats`.
 - [ ] **A rate limiting rule** (owner; boldbridge.app › Security › WAF › Rate limiting rules; the
   Free plan has one): URI Path wildcard `/*`, counted by IP, 200 requests in 10 seconds, Block for
   10 seconds. It stops one address flooding the relay before the Worker runs, where nothing is
@@ -100,65 +121,67 @@ belongs to the relay.
 - [ ] **A billing alert** (owner; Manage Account › Notifications › Add › Usage-based billing, for
   Workers and Durable Objects), so a surprise shows early.
 - [ ] **Check it**: `https://boldbridge.app/` shows the page, `https://boldbridge.app/_relay/health`
-  answers `{"ok":true,...}`, `https://abc.boldbridge.app/` is a 404, and
+  answers `{"ok":true,...}`, `https://abc.boldbridge.app/` is a 404, a `POST
+  https://boldbridge.app/_relay/register` with no token answers 401 saying it needs an account, and
   `curl -s -H "Authorization: Bearer <STATS_TOKEN>" https://boldbridge.app/_relay/stats` answers
-  today's counts with `"computers":{"registered":0,"max":100}`.
-- [ ] **Try it** on one computer with the config.json override above: Settings › Devices › Bridge
-  AI's relay › Use Bridge AI's relay, then Pair a device. Settings says "Free plan: up to 200,000
-  messages or 512 MB a day"; `/_relay/stats` says one computer registered.
+  today's counts with `"accounts":{"on":0,"max":500}`.
+- [ ] **Try it** on one computer with the config.json overrides above (the relay's and the accounts
+  service's): sign in in Settings › Account, ask for the relay, approve it in the admin view, then
+  Settings › Devices › Bridge AI's relay › Use Bridge AI's relay, and Pair a device. Settings shows
+  the account's use in the 8-hour window and the week; `/_relay/stats` says one account on it.
 - [ ] **Ship it**: keep (or cherry-pick) the commit that switches it on ("Switch on Bridge AI's
   hosted relay at boldbridge.app"): it sets `HOSTED_URL` in server/hosted.js and puts the policy text
-  below into PRIVACY.md and TERMS.md (the drafts at the end of this file). Then run `npm test --
-  relay-hosted relay-hosted-ui privacy-hosts`, and release. Without that commit nothing in the app
-  changes.
+  below into PRIVACY.md and TERMS.md (the drafts at the end of this file), with accounts switched on
+  already or in the same release. Then run `npm test -- relay-hosted relay-hosted-ui privacy-hosts`,
+  and release. Without that commit nothing in the app changes.
 
 ## Settings
 
 All in `[vars]` of wrangler.hosted.toml (or Settings › Variables in the dashboard). Each limit is
-per computer unless it says otherwise, and is the free plan's (Plans).
+per computer unless it says it's per account or for the whole relay.
 
 | Variable | Default | What it does, and why that default |
 | --- | --- | --- |
 | `HOSTED` | | `1` turns on everything here. Unset, the Worker is a personal relay. |
 | `HOSTED_DOMAIN` | | The domain, without `https://`: `boldbridge.app`. |
+| `ACCOUNTS_PUBLIC_KEY` | | The accounts service's public key, which every relay token is checked with. Empty, no computer can register or connect. |
 | `HOSTED_OFF` | `0` | The kill switch (below). |
 | `MAX_PHONES` | `16` | Connections to one computer at once: the same as a personal relay. Strangers who haven't paired make room for paired phones. |
 | `MAX_MESSAGE_KB` | `256` | One message. Bridge AI's largest is 192 KB (a piece of a big file) plus a little; notes for an offline computer are 64 KB at most. |
 | `MESSAGES_PER_SECOND` | `200` | Incoming messages a second, on average, with `MESSAGE_BURST` at once. A phone watching an agent's terminal, the busiest normal use, sends and gets about 4 a second; opening the app for the first time is about 150 in a few seconds. This only stops floods. |
 | `MESSAGE_BURST` | `2000` | How many may come at once before `MESSAGES_PER_SECOND` applies. |
-| `DAILY_MESSAGES` | `200000` | Incoming messages a day (UTC). This is what Cloudflare bills. About 12 hours of a phone watching a terminal, or far more of anything else. |
-| `DAILY_MB` | `512` | Data a day (UTC). Bytes aren't billed; this stops the relay being used as a general tunnel. A busy hour is about 5 MB. |
-| `IDLE_DAYS` | `90` | A computer whose Bridge AI hasn't connected for this long is deleted, with everything kept for it. |
-| `REGISTER_PER_IP` | `10` | New computers a day from one network (an IPv4 address, or an IPv6 /64), for every plan. Enough for a household or an office, small enough to stop someone scripting it. |
-| `REGISTER_PER_DAY` | `1000` | New computers a day in all: a ceiling on what a determined abuser can create. Raise it as people use it. |
-| `MAX_COMPUTERS` | `100` | Computers registered at once, in all. Past it, registering answers that the relay is full for now, and the app offers your own Cloudflare and Tailscale instead. A place is given back when a computer stops using the relay, or is removed after `IDLE_DAYS`. `0` takes no new computers. With `RELAY_DAILY_REQUESTS`, what keeps the bill near $5 a month (Cost). |
-| `RELAY_DAILY_REQUESTS` | `500000` | The whole relay's Cloudflare requests a day, as `/_relay/stats` counts them. Reached, the relay stops for every computer until 00:00 UTC, saying so; at the defaults, the most it can add to Workers Paid's $5 is about $2.55 a month (Cost). Everyday use of 100 computers comes to well under half of it. |
-| `PLANS` | `{}` | Plans other than free, each with the limits it raises (Plans). None yet. |
+| `IDLE_DAYS` | `90` | A computer whose Bridge AI hasn't connected for this long is deleted, with everything kept for it; an account with no computer on it and no use for this long, too. |
+| `ACCOUNT_WINDOW_HOURS` | `8` | Per account: the window's length. It starts at the account's first message after the last window ended, as Claude's do, so an account that's quiet has none running. |
+| `ACCOUNT_WINDOW_MESSAGES` | `150000` | Per account, across its computers: incoming messages in a window, which is what Cloudflare bills. More than a phone watching a terminal for all 8 hours (about 16,000 an hour). |
+| `ACCOUNT_WEEK_MESSAGES` | `1000000` | Per account: incoming messages in a week, the weeks running on from the account's first use. About 60 hours of watching a terminal, or 400 of chat. |
+| `MAX_ACCOUNTS` | `500` | Accounts with a computer on the relay, in all. Past it, an account's first computer is told the relay is full for now, and the app offers your own Cloudflare and Tailscale instead; the admin view can't approve one more (the accounts service's `RELAY_MAX_ACCOUNTS`, the same number). An account's place is given back when its last computer stops using the relay, or is removed after `IDLE_DAYS`. `0` takes no new accounts. With the account limits, what keeps the bill under $50 a month (Cost). |
+| `RELAY_DAILY_REQUESTS` | `5000000` | The whole relay's Cloudflare requests a day, as `/_relay/stats` counts them: the backstop. Reached, the relay stops for every computer until 00:00 UTC, saying so. 500 accounts at their limits come to about 4.2 million a day, so it's met only past those, and at the defaults it holds the bill under about $44 a month whatever `MAX_ACCOUNTS` is (Cost). |
 | `WORKERS_PAID` | `1` | The account is on Workers Paid (it must be before going live), so `/_relay/stats` measures use against its allowance. `0` while trying it on Workers Free. |
 
-Two secrets, set with `npx wrangler@4.149.0 secret put <name> -c relay/wrangler.hosted.toml` and
-never written in the file. Without one, its address isn't there at all (404); with a wrong one, 403.
+One secret, set with `npx wrangler@4.149.0 secret put STATS_TOKEN -c relay/wrangler.hosted.toml` and
+never written in the file. Without it, its address isn't there at all (404); with a wrong one, 403.
 
 | Secret | What it opens |
 | --- | --- |
 | `STATS_TOKEN` | `GET https://<domain>/_relay/stats` (Watching it) |
-| `PLAN_TOKEN` | `POST https://<domain>/_relay/plan`, which puts a computer on a plan (Plans) |
+
+And one binding to another Worker: `ACCOUNTS`, the accounts service's `Internal` entrypoint, for
+`GET /internal/status?a=` (whether an account may use the relay) and `POST /internal/usage` (its
+use, for Settings › Account and the admin view).
 
 ### Why these limits
 
 They follow what Cloudflare bills (Cost): incoming WebSocket messages, as requests at 20 to 1, are
-nearly all of it, so the daily allowance is counted in messages; Durable Object duration is billed
-only while a Hub runs code, which the rate and size limits bound; data isn't billed, so `DAILY_MB`
-only keeps the relay from becoming a tunnel; connections are cheap, so `MAX_PHONES` protects a
-computer's paired phones from strangers rather than the bill. At the defaults, the most one computer
-can cost is about $0.08 a month (its allowance used up every day), and a typical one (an hour or two
-of phone use a day) well under a cent. They're generous on purpose: the free plan is what makes the
-phone stick, and nobody should meet a limit in normal use.
+nearly all of it, so the allowance is counted in messages, per account, across its computers;
+Durable Object duration is billed only while a Hub runs code, which the rate and size limits bound;
+data isn't billed, so there's no limit on it (a computer can't be used as a general tunnel anyway:
+each message must come from a phone paired with it); connections are cheap, so `MAX_PHONES`
+protects a computer's paired phones from strangers rather than the bill. An account at its limits
+every week costs about $0.06 a month past what's included; a typical one (an hour or two of phone
+use a day) under a cent. They're generous on purpose: nobody should meet one in normal use.
 
-Per-computer limits alone don't bound the bill: 100 computers each using up its allowance every
-day would come to about $9.80 a month, and 250 to about $29.50. So the relay has two of its own,
-`MAX_COMPUTERS` and `RELAY_DAILY_REQUESTS`, and with them the most it can cost is about $7.55 a
-month (Cost).
+Per-account limits alone don't bound the bill; with `MAX_ACCOUNTS` they do, and
+`RELAY_DAILY_REQUESTS` bounds it if `MAX_ACCOUNTS` is raised (Cost).
 
 ### What happens at a limit
 
@@ -172,107 +195,73 @@ without a word.
 - **Too many connected**: with `MAX_PHONES` paired phones and tabs connected (strangers make room
   first), one more is told so ("Bridge AI's relay takes 16 connections to one computer at once…")
   and tries again a minute later; the computer is told a phone was turned away, and why.
-- **Today's allowance used up**: both ends are told, "The hosted relay's daily limit for this
-  computer is used up (200,000 messages or 512 MB a day on the free plan). It resets at 00:00 UTC.
-  For no limits, put the relay on your own Cloudflare account." The phone shows it (in place of
-  Bridge AI, or on a bar if it's open) and waits until the reset; Settings on the computer shows it,
-  in its own time zone, with a link to set up its own Cloudflare. The computer stays connected,
-  quietly, so phones are back the moment the day resets (00:00 UTC).
+- **The account's window or week used up**: every computer of the account, and its phones, hear
+  `{ t: "limit", why: "window" | "week", until }`, with words: "This computer's Bold Bridge account
+  has used its allowance on Bridge AI's relay for now (150,000 messages in 8 hours). It resets at
+  14:32 UTC. For no limits, put the relay on your own Cloudflare account." Phones are let go and
+  turned away with the same words until then; the phone shows it (in place of Bridge AI, or on a bar
+  if it's open) and waits. Settings › Devices on the computer says it in its own time zone, with a
+  link to set up its own Cloudflare, and shows the use as the usage chip shows a plan's. The
+  computers stay connected, quietly, so phones are back the moment it resets. Each computer's Hub
+  tells the Account what it carried every 1,000 messages (more often as the allowance runs low, and
+  every 3 minutes while anything passes), and the Account tells all the account's Hubs at once when
+  it's reached, so an account can go a little over, never by much.
+- **The account itself**: suspended, no longer allowed the relay, or deleted (`why: "suspended" |
+  "relay" | "deleted"`), its computers and phones are told so and let go, and the computers wait 10
+  minutes before asking again. Bridge AI says the same in Settings › Devices and Settings › Account.
+  A computer connecting without a relay token, or with one that ended or is another account's, is
+  told `why: "token"`; Bridge AI gets a new one from the account and connects again.
 - **The whole relay's day** (`RELAY_DAILY_REQUESTS`): the same for every computer on the relay,
   in these words: "Bridge AI's relay has carried all it can for today, for every computer on it. It
   starts again at 00:00 UTC. For no limits, put the relay on your own Cloudflare account, or use
   Tailscale." The registry works it out from the tallies (below) and says so in answer to each, so
   each computer hears it with its next tally (its next connection, or within 1,000 messages).
   Registering still works (it costs next to nothing); a new computer hears it when it connects.
-- **A computer that sends on after its day**: once today's allowance (its own or the relay's) is
-  used up, its messages go nowhere, but Cloudflare bills each one that arrives. Bridge AI sends next
-  to none then (its phones were let go), so past 1,000 its connection is closed with "Bridge AI's
-  relay let this computer go until 00:00 UTC…", and turned away with the same words until then.
-  Bridge AI waits until then before trying again.
-- **Registration**: past either day's limit, `register` answers 429 with a message the app shows;
-  with `MAX_COMPUTERS` registered, 503 with `why: "full"`: "Bridge AI's relay is full for now: it
-  has as many computers as it can take. Put a relay on your own Cloudflare account instead (it's
-  free), or use Tailscale." The app says so in its own words wherever the relay is offered:
-  Settings › Devices marks it "Full for now" among the ways and offers your own Cloudflare and
-  Tailscale (each a click) and Try again, and picks your own Cloudflare for the next hour; first-run
-  setup says it's full and that Settings › Devices has the other ways, and carries on;
-  `bridge-ai relay setup --hosted` prints it with `bridge-ai relay setup` and `bridge-ai start
-  phone`, and fails. A computer already on the relay isn't affected.
+- **A computer that sends on while its phones are stopped**: its messages go nowhere, but
+  Cloudflare bills each one that arrives. Bridge AI sends next to none then (its phones were let
+  go), so past 1,000 its connection is closed with "Bridge AI's relay let this computer go until
+  14:32 UTC…", and turned away with the same words until then. Bridge AI waits until then before
+  trying again.
+- **Registration**: without an account's relay token, 401 with `why: "token"`; an account that's
+  suspended, isn't allowed the relay or was deleted, 403 with that `why`; with `MAX_ACCOUNTS`
+  accounts on the relay, an account's first computer gets 503 with `why: "full"`: "Bridge AI's relay
+  is full for now: it has as many accounts as it can take. Put a relay on your own Cloudflare
+  account instead (it's free), or use Tailscale." The app says so in its own words wherever the
+  relay is offered: Settings › Devices marks it "Full for now" among the ways and offers your own
+  Cloudflare and Tailscale (each a click) and Try again, and picks your own Cloudflare for the next
+  hour; `bridge-ai relay setup --hosted` prints it with `bridge-ai relay setup` and `bridge-ai start
+  phone`, and fails. An account already on the relay isn't affected.
 
-The daily counts are kept in each computer's Durable Object, saved every 100 messages or 256 KB
-and whenever a connection ends. A Durable Object put to sleep in between forgets at most that much,
-so the counts can come out a little low, never high.
+The counts are kept by the Account, saved with each tally, and by each Hub (its day's, for the
+stats), saved every 100 messages or 256 KB and whenever a connection ends. A Durable Object put to
+sleep in between forgets at most that much, so the counts can come out a little low, never high.
 
-**How the computers are counted.** The registry (one Durable Object, which takes one request at a
+**How the accounts are counted.** The registry (one Durable Object, which takes one request at a
 time, so two registrations can't both take the last place) keeps an entry for each registered
-computer, `c:<id>`, with when it registered and the last day it was in use. A registration is
-counted in before its Hub is made, and given back if that fails. When a Hub is removed (Stop using
-the relay, or `IDLE_DAYS` unused) it tells the registry, and its place is free at once. If that
-message is lost, the registry's daily alarm finds it within a few days: it asks each computer it
-counts that hasn't been in use for two days (200 a day at most, those asked longest ago first)
-whether its Hub is still there, and lets go of those that aren't. A computer in use that the
-registry somehow lost is counted again with its first tally of a day. Workers KV would be cheaper to
-read but is eventually consistent, so a cap kept there could be passed; a Durable Object costs one
-request per registration.
+computer, `c:<id>`, with its account, when it registered and the last day it was in use; an account
+is on the relay while it has one. A registration is counted in before its Hub is made, and given
+back if that fails. When a Hub is removed (Stop using the relay, `IDLE_DAYS` unused, or its account
+deleted) it tells the registry and its Account, and the place is free at once. If that message is
+lost, the registry's daily alarm finds it within a few days: it asks each computer it counts that
+hasn't been in use for two days (200 a day at most, those asked longest ago first) whether its Hub
+is still there, and lets go of those that aren't. Workers KV would be cheaper to read but is
+eventually consistent, so a cap kept there could be passed.
+
+**How the account is asked.** The Account asks the accounts service about the account
+(`/internal/status`) when a computer registers or connects, when a phone connects, and with a
+tally while anything passes, at most once a minute; a suspension is heard within a minute of the
+account's next use. It reports the account's use (`/internal/usage`) every 5 minutes while the
+account uses the relay, and once a day otherwise; an account the service no longer has is
+forgotten then, with its computers' Hubs. If the service can't be reached, what it said last stands
+for a while, then the relay carries on (the account's tokens say it was allowed).
 
 ## Plans
 
-Every computer is on a plan, kept by its Hub (`meta.plan`, `free` when it registers). Its limits
-are looked up by plan: the free plan's are the settings above, and any other plan is an entry in
-`PLANS` with only what it raises, the free plan's applying to the rest:
-
-```toml
-PLANS = '{"plus":{"dayMessages":2000000,"dayMB":10240,"phones":32,"idleDays":365}}'
-```
-
-A plan can raise `dayMessages`, `dayMB`, `phones`, `messageKB`, `rate`, `burst` and `idleDays`.
-Registration limits are the relay's own. A plan taken out of `PLANS` falls back to the free plan's
-limits for the computers on it (their plan stays written down, so putting it back restores them).
-So a paid plan later is one entry here and a way to set it, not a change to the relay.
-
-**What a paid plan would raise**, and why only these:
-
-- **The daily allowance** (`dayMessages`, `dayMB`): the free plan's is about 12 hours a day of a
-  phone watching a terminal. The people who'd pay are those who watch agents all day, or copy big
-  files between computers through the relay. Ten times the free plan costs the project at most
-  about $0.80 a month for a computer that uses all of it every day, and counts ten times as much
-  towards `RELAY_DAILY_REQUESTS`.
-- **Phones and tabs at once** (`phones`): a team watching one computer's agents.
-- **How long an unused address is kept** (`idleDays`): a year rather than 90 days.
-- Not the size and rate limits, which protect the relay rather than ration it, and never what's
-  kept or seen: a paid plan's traffic is end-to-end encrypted and counted exactly as a free one's.
-- Later, if it's wanted: a name of your own (`yourname.<domain>`), which needs the registry to map
-  names to ids.
-
-**How a computer is put on a plan** (the hook):
-
-```sh
-curl -s -X POST https://<domain>/_relay/plan -H "Authorization: Bearer <PLAN_TOKEN>" \
-  -H 'content-type: application/json' -d '{"id":"<computer id>","plan":"plus"}'
-```
-
-It answers `{ id, plan, limits, today }`. The new limits apply at once; the computer hears its plan
-(Settings › Devices says "Plus plan: up to …"), and a day's limit the old plan had reached is lifted
-if the new one's isn't. `{"id":"…"}` alone says which plan a computer is on, its limits and today's
-use; `"plan":"free"` moves it back. A plan that isn't free or in `PLANS` is refused (400, naming the
-plans there are). Each change is counted (`plan` below).
-
-The same hook can hold back a computer that's misusing it, which TERMS.md allows: a plan with no
-allowance, `"held":{"dayMessages":0,"dayMB":0}`, set the same way, and its phones are told the
-daily limit is used up.
-
-**What billing would add** (not built):
-
-1. A way to pay that's tied to the computer. Its id is public (it's in its address), so a checkout
-   can't trust an id it's given: Bridge AI would ask its Hub, with its token, for a short-lived
-   code, and open the checkout (Stripe Checkout or Paddle, on boldbridge.ai) with it.
-2. A small Worker for the payment provider's webhook, holding `PLAN_TOKEN`: the plan on payment,
-   `free` when it's cancelled or a renewal fails.
-3. Upgrade and Manage beside the plan line in Settings › Devices, and the dialog for a big copy
-   between computers (`src/components/Transfers.jsx`), which assumes the free plan's 512 MB, reading
-   the plan the relay sends instead.
-4. TERMS.md: the price, renewals and refunds. PRIVACY.md: the payment provider, and what it keeps
-   (name, email, card). The relay itself still keeps only the id and the plan.
+There are no plans: every account has the same limits, the settings above. A paid plan later would
+be the account's, kept by the accounts service and said in its answer to `/internal/status` (the
+limits it raises), with the Account using them in place of the settings; the relay keeps no money
+matters of its own. Holding back an account that misuses the relay is the admin view's: suspend it,
+and the relay hears within a minute.
 
 ## The kill switch
 
@@ -291,41 +280,45 @@ when Bridge AI restarts.
 
 ## What it keeps, and what it counts
 
-Per computer, in its Durable Object: its id, the token's hash, the Bridge AI version it registered
-with, its plan, when it registered and connected last, its paired phones as ids made from each
-phone's key (as a personal relay keeps them), today's counts, which of its paired phones were
-counted this week (by those ids), and messages a phone sent while the computer was offline, sealed
-so the relay can't read them, for 7 days at most. Forget on the computer (Stop using the relay)
-deletes all of it at once; otherwise it goes after `IDLE_DAYS`.
+Per computer, in its Hub: its id, the token's hash, its account's and device's ids, the Bridge AI
+version it registered with, when it registered and connected last, its paired phones as ids made
+from each phone's key (as a personal relay keeps them), today's counts, which of its paired phones
+were counted this week (by those ids), and messages a phone sent while the computer was offline,
+sealed so the relay can't read them, for 7 days at most. Forget on the computer (Stop using the
+relay) deletes all of it at once; otherwise it goes after `IDLE_DAYS`, or when its account is
+deleted.
+
+Per account, in its Account: when it was first used, its messages in the current window and week,
+each of the last three days' total, its computers' addresses by device, and what the accounts
+service last said of it. Gone within a day of the account being deleted, or after `IDLE_DAYS` with
+no computer on it and no use. The accounts service keeps what the Account reports (account/README.md).
 
 The registry, a Durable Object of its own, keeps:
 
-- for registration limits, today's count per network, under a hash of the network's address and
-  the date, deleted the next day and never leaving that object;
-- for `MAX_COMPUTERS`, each registered computer's id with when it registered, the last day it was
-  in use and the last day the registry asked after it, gone when the computer is (How the computers
-  are counted);
+- for `MAX_ACCOUNTS`, each registered computer's id with its account's id, when it registered, the
+  last day it was in use and the last day the registry asked after it, gone when the computer is
+  (How the accounts are counted);
 - for `/_relay/stats`, each day's totals: computers set up and refused, computers in use,
   connections, messages, bytes, limits reached, when the relay reached `RELAY_DAILY_REQUESTS`, and
-  that day's ten busiest computers by id with their plan and use. Kept 35 days. Each computer's
-  Hub adds its share with each connection, each limit reached, every 1,000 messages or 4 MB, and
-  when a connection ends (about one request in 50 on top of what it relays); a Hub put to sleep in
-  between forgets at most that much, so these too can come out a little low, never high.
+  that day's ten busiest computers by id with their use. Kept 35 days. Each computer's Hub adds its
+  share with each connection, each limit reached, every 1,000 messages or 4 MB, and when a
+  connection ends; a Hub put to sleep in between forgets at most that much, so these too can come
+  out a little low, never high.
 
 **Counts for the project**, with a Workers Analytics Engine binding (`STATS`; leave it out of the
 config and nothing is counted). Each is one data point with the computer's id as its index, and
-nothing else: no IP addresses, no content, no user agents, no phone identifiers, no names.
+nothing else: no IP addresses, no content, no user agents, no phone identifiers, no names, no
+account ids.
 
 | `blob1` | Written when | Also |
 | --- | --- | --- |
-| `register` | a computer registers | `blob2`: its Bridge AI version |
+| `register` | a computer registers | `blob2`: its Bridge AI version; `blob3`: `again` when it's the same device registering again |
 | `computer` | a computer connects | `blob2`: its Bridge AI version |
 | `phone` | one of a computer's paired phones connects for the first time this week (weeks start Monday, UTC) | `blob2`: the week, as its Monday's date |
 | `usage` | every 100 messages or 256 KB, and when a connection ends | `double1`: bytes, `double2`: messages, both incoming |
-| `limit` | a limit turns something away | `blob2`: `size`, `rate`, `phones`, `day`, `all` (the whole relay's day) or `shut` (let go for sending on past its day) |
-| `plan` | a computer is put on a plan | `blob2`: the plan |
-| `removed` | a computer's data is deleted | `blob2`: `forget` or `idle` |
-| `refused` | a registration is refused (index empty) | `blob2`: `ip`, `all` or `full` |
+| `limit` | a limit turns something away | `blob2`: `size`, `rate`, `phones`, `window`, `week`, `all` (the whole relay's day), `shut` (let go for sending on while stopped), `suspended`, `relay`, `deleted` or `token` |
+| `removed` | a computer's data is deleted | `blob2`: `forget`, `idle` or `account` |
+| `refused` | a registration is refused (index empty) | `blob2`: `token`, `full`, `suspended`, `relay` or `deleted` |
 
 The version comes from the computer (`X-Bridge-Version` when it connects, `version` when it
 registers) and is kept only if it looks like `2.4.0`. Analytics Engine keeps data for three months.
@@ -354,6 +347,8 @@ SELECT toStartOfDay(timestamp) AS day, sum(_sample_interval * double2) AS messag
 WHERE blob1 = 'usage' AND index1 = '<id>' AND timestamp > NOW() - INTERVAL '7' DAY GROUP BY day
 ```
 
+Each account's use is in the admin view (from the accounts service), by day.
+
 Cloudflare also sees what any site it serves sees (IP addresses, times, sizes), under its own
 policy. Workers Logs stay off (`[observability] enabled = false` in wrangler.hosted.toml), so request
 details aren't stored in the account; `wrangler tail` shows them live, IP addresses included.
@@ -377,6 +372,7 @@ October 2026) and [Analytics Engine](https://developers.cloudflare.com/analytics
 
 Billable use is rounded up to the next million before the rate applies, so the first request or
 GB-s past what's included costs a whole million's worth: $0.15 for requests, $12.50 for duration.
+Calls through a service binding (the relay asking the accounts service) aren't billed as requests.
 Workers Free has 100,000 requests a day (Workers and Durable Objects each) and 13,000 GB-s a day,
 and stops for everyone when they're gone.
 
@@ -396,67 +392,67 @@ requests, $0.00012 past what's included. Duration, at a generous 3 ms per messag
 one object, 6 GB-s or $0.00008. **About $0.0002 an hour, roughly 5,000 phone-hours per dollar**,
 and about a fifth of that on the chat view.
 
-**One computer at the most it can use** (its 200,000 messages every day): 10,000 requests for the
-messages, 200 for its tallies to the registry, 288 for keepalives and about 300 for connections,
-so about 10,800 Durable Object requests a day, 324,000 a month; about 75 GB-s of duration a day;
-about 2,100 rows written and 1,000 Workers requests a day. About $0.08 a month at Paid rates, before
-what's included.
+**One account at the most it can use**: the week binds before the window does (150,000 every 8
+hours would be 3.15 million a week), so 1,000,000 messages a week, about 4.29 million in a 30-day
+month. In Durable Object requests a month: 214,300 for the messages, 8,600 for the tallies (one to
+the registry and one to the Account every 1,000), 8,600 for the Account's reports (an alarm every 5
+minutes), 43,200 for keepalives if all five of its devices are computers connected around the
+clock, and about 9,000 for connections: about 284,000. Duration: 4.29 million messages at 3 ms is
+about 1,650 GB-s. Rows written: about 51,000 (each Hub's day every 100 messages, the Account and the
+registry with each tally). About $0.06 a month at Paid rates, before what's included.
 
-**The whole relay at its worst**: every computer using up its allowance every day of a 30-day
-month. Without the relay's own ceiling, that's the computers times the above; with
-`RELAY_DAILY_REQUESTS` at 500,000, it's that ceiling:
+**The whole relay at its worst**: every one of `MAX_ACCOUNTS` accounts using its week, every week,
+with five computers connected all month:
 
-| `MAX_COMPUTERS` | Without the ceiling: requests, duration | Bill a month | With the ceiling | Bill a month |
-| --- | --- | --- | --- | --- |
-| 50 | 16.2 million, 112,500 GB-s | $5 + $2.40 = **$7.40** | 15.4 million, about 110,000 GB-s | $5 + $2.25 = **$7.25** |
-| 100 | 32.4 million, 225,000 GB-s | $5 + $4.80 = **$9.80** | 15.9 million, about 110,000 GB-s | $5 + $2.25 = **$7.25** |
-| 250 | 81 million, 562,500 GB-s | $5 + $12.00 + $12.50 = **$29.50** | 17.2 million, about 110,000 GB-s | $5 + $2.55 = **$7.55** |
+| `MAX_ACCOUNTS` | Durable Object requests | Duration | Bill a month |
+| --- | --- | --- | --- |
+| 100 | 28.4 million | 165,000 GB-s (within the 400,000) | $5 + $4.20 = **$9.20** |
+| 250 | 71 million | 412,500 GB-s | $5 + $10.50 + $12.50 = **$28.00** |
+| 500 | 142 million | 825,000 GB-s | $5 + $21.15 + $12.50 = **$38.65** |
 
-In every row, Workers requests (7.5 million at most), CPU, rows written (16 million at most) and
-storage stay within what's included. Analytics Engine's data points would pass its 10 million at
-250 computers without the ceiling (15 million: $1.25 a month, once it's billed).
+In every row, Workers requests (under 5 million), CPU, rows written (26 million at 500) and storage
+stay within what's included. Analytics Engine's data points would pass its 10 million at 500
+accounts (21 million: $2.75 a month, once it's billed), still under $50.
 
-**How the ceiling bounds it.** `RELAY_DAILY_REQUESTS` counts what `/_relay/stats` counts: one
-request for every 20 messages, one for every 1,000 (the tallies), and three for each connection or
-registration. 500,000 a day is at most 15 million a month, and at most 9.8 million messages a day.
-On top of it come the keepalives, which nothing but Cloudflare sees (288 a day for each connected
-computer: up to 0.86 million a month at 100 computers, 2.2 million at 250), and what each computer
-sends before it hears the relay's day is over (under 1,000 messages each). Those 9.8 million
-messages a day are about 110,000 GB-s a month at 3 ms each (still inside the included 400,000 at
-10 ms each), and about 4 million rows written. So at the defaults the bill stays under about $7.55
-a month whatever `MAX_COMPUTERS` is, and each 100,000 a day of `RELAY_DAILY_REQUESTS` adds at most
-3 million requests a month, $0.45. `MAX_COMPUTERS` keeps the keepalives and storage small and says
-how many people it's for.
+**How the backstop bounds it.** `RELAY_DAILY_REQUESTS` counts what `/_relay/stats` counts: one
+request for every 20 messages, two for every 1,000 (the tallies), and three for each connection or
+registration. 500 accounts at their limits come to about 4.2 million a day of it, under the 5
+million, so it's never met by them. Should `MAX_ACCOUNTS` be raised, 5 million a day is at most 150
+million a month, and at most 96 million messages a day; with the keepalives of 2,500 computers (21.6
+million a month) and the Accounts' alarms (4.3 million), that's 176 million requests and about 1.1
+million GB-s: $5 + $26.25 + $12.50, about **$43.75** a month, whatever `MAX_ACCOUNTS` is. Each
+1,000,000 a day more of it adds at most 30 million requests a month, $4.50, and more duration.
 
 **Everyday use** is far below that: an hour or two of phone use a day is about 2,000 requests for
-a computer, keepalives included, so 100 computers come to about 200,000 a day (40% of the ceiling)
-and 6 million a month: about $0.75 on top of the $5.
+a computer, keepalives included, so 500 accounts with a computer each come to about 1 million a day
+and 30 million a month: about $4.35 on top of the $5.
 
 **What the limits can't stop.** A request is billed once it reaches the Worker, before the relay can
 turn it away, so someone sending floods of requests (to made-up names, or connecting to one
 computer's address over and over) costs $0.30 a million past the included 10 million, and $0.15 a
 million more for each that wakes a Hub. The rate limiting rule in Going live blocks those at
 Cloudflare before the Worker, where nothing is billed (only requests that reach a Worker are). A
-computer's own connection can't run on past its day (it's let go after 1,000 messages that go
-nowhere). The billing alert says if anything gets through, and the kill switch stops it all.
+computer's own connection can't run on past its account's limits (it's let go after 1,000 messages
+that go nowhere). Registering needs an account an admin approved. The billing alert says if anything
+gets through, and the kill switch stops it all.
 
-Storage is tiny (a few kilobytes per computer, plus up to 512 KB of waiting messages per phone for
-a week, plus a few kilobytes a day for the registry's counts) and within the included 5 GB.
+Storage is tiny (a few kilobytes per computer and per account, plus up to 512 KB of waiting
+messages per phone for a week, plus a few kilobytes a day for the registry's counts) and within
+the included 5 GB.
 
-**When it's time for Workers Paid**: before telling anyone (Going live). On Workers Free,
-`/_relay/stats`' `note` says when a day passes 50,000 requests, half of Free's 100,000 (keepalives
-aren't in it: about 175 connected computers' come to another 50,000). On Workers Paid
-(`WORKERS_PAID = "1"`), it says when the month passes the included million and roughly what the
-rest costs; `requests.ceiling` is `RELAY_DAILY_REQUESTS`, and a day's `ceilingAt` says when the
-relay reached it. If that happens often, look at `top` for computers near their allowance every
-day, and decide between raising it (at most $0.45 a month for each 100,000 a day) and the free
-plan's numbers.
+**When it's time for Workers Paid**: before going live (Going live; the accounts service needs it
+too). On Workers Free, `/_relay/stats`' `note` says when a day passes 50,000 requests, half of
+Free's 100,000. On Workers Paid (`WORKERS_PAID = "1"`), it says when the month passes the included
+million and roughly what the rest costs; `requests.ceiling` is `RELAY_DAILY_REQUESTS`, and a day's
+`ceilingAt` says when the relay reached it. If that happens, look at `top` for computers far above
+the rest, and at their accounts in the admin view.
 
 ## Updating it
 
 Same as going live: build and deploy. Any computer's or phone's connection drops and comes back
 within seconds. Computers on the hosted relay never try to update it themselves (they do for a
-relay on your own account). Keep `[[migrations]]` as it is: the class and its tag don't change.
+relay on your own account). Keep `[[migrations]]` as they are: `v1` made the Hub class and `v2` the
+Account class; a class added later is a `v3`.
 
 ## Watching it
 
@@ -467,31 +463,31 @@ curl -s -H "Authorization: Bearer <STATS_TOKEN>" "https://boldbridge.app/_relay/
 ```
 
 It answers the last 7 days (up to 35 with `?days=`), today (UTC) first. Each day has `registered`
-and `refused` (computers set up, and turned away by the registration limits), `computers` (those
-that connected or relayed anything), `connections` (`computers`, `phones`), `messages` and `bytes`
-(incoming, relayed), `limits` (how many times each was reached; `full` counts registrations turned
-away by `MAX_COMPUTERS`, `all` the computers stopped by `RELAY_DAILY_REQUESTS`, `shut` those let go
-for sending on past their day), `ceilingAt` (when the relay reached `RELAY_DAILY_REQUESTS`, or
-null), `requests` (an estimate of what that comes to in Cloudflare requests, without keepalives),
-and `top`: the day's ten busiest computers by id, with their plan, `messages`, `bytes` and
-`ofAllowance` (1 is all of it). With them, `computers` (`registered` now, of `max`), `requests` for
-today and this month with the `ceiling`, and a `note` on Workers Free or Paid. Nothing in it is an
-IP address, a token or anything that passed through.
+and `refused` (computers set up, and turned away at registering), `computers` (those that connected
+or relayed anything), `connections` (`computers`, `phones`), `messages` and `bytes` (incoming,
+relayed), `limits` (how many times each was reached: `window` and `week` the accounts' limits,
+`full` registrations turned away by `MAX_ACCOUNTS`, `all` the computers stopped by
+`RELAY_DAILY_REQUESTS`, `shut` those let go for sending on while stopped, `account` those stopped
+for their account, and `rate`, `size`, `phones`), `ceilingAt` (when the relay reached
+`RELAY_DAILY_REQUESTS`, or null), `requests` (an estimate of what that comes to in Cloudflare
+requests, without keepalives), and `top`: the day's ten busiest computers by id, with their
+`messages` and `bytes`. With them, `accounts` (`on` the relay now, of `max`), `computers`
+(registered now), `requests` for today and this month with the `ceiling`, and a `note` on Workers
+Free or Paid. Nothing in it is an IP address, a token, an account or anything that passed through.
 
-**Full, or near it**: `computers.registered` close to `max` with `limits.full` above 0 means people
-are being turned away. Raise `MAX_COMPUTERS` knowing the Cost table above (the ceiling keeps the
-bill where it is, so more computers mean each gets less on a busy day), or leave it.
+**Full, or near it**: `accounts.on` close to `max` with `limits.full` above 0 means people are being
+turned away. Raise `MAX_ACCOUNTS` (and the accounts service's `RELAY_MAX_ACCOUNTS`) knowing the Cost
+table above, or leave it.
 
-**A runaway computer** is one at the top of `top` with `ofAllowance` at 1 day after day, or far above
-the next. The limits already stop it costing more than its allowance; the last query above shows its
-week. If it's misuse, hold it back with a plan (Plans) and, if need be, block its network with a WAF
-rule.
+**A heavy account** is in the admin view, sorted by the week's use. The limits already stop it
+costing more than its allowance. If it's misuse, suspend it there and, if need be, block its
+network with a WAF rule.
 
 **Cloudflare's dashboard** has the exact figures:
 
 - Workers & Pages › bridge-relay › Metrics: requests, errors, CPU time.
-- Storage & Databases › Durable Objects › bridge-relay's Hub: requests, duration and storage. These
-  are what's billed; `/_relay/stats` is the estimate to read beside them.
+- Storage & Databases › Durable Objects › bridge-relay's Hub and Account: requests, duration and
+  storage. These are what's billed; `/_relay/stats` is the estimate to read beside them.
 - Manage Account › Billing › Billable usage: what this month will cost.
 - The Analytics Engine queries above: computers, phones, versions, data, limits hit.
 - `npx wrangler@4.149.0 tail -c relay/wrangler.hosted.toml` for live errors (it shows IP addresses;
@@ -505,23 +501,27 @@ does Bridge AI, though macOS and Windows don't look such names up themselves), s
 
 ```sh
 node relay/build.js /tmp/relay/worker.js
-# a wrangler.toml beside it like wrangler.hosted.toml, with main = "worker.js", no routes, and
-# HOSTED_DOMAIN = "localhost"
+# a wrangler.toml beside it like wrangler.hosted.toml, with main = "worker.js", no routes,
+# HOSTED_DOMAIN = "localhost", and the accounts service running under wrangler dev too (its
+# Worker named bridge-accounts, so the binding finds it)
 npx wrangler@4.149.0 dev --local --port 8795
 ```
 
-Then point a test Bridge AI at it with `"relay": { "hostedUrl": "http://localhost:8795" }` in its
-config.json (plain http is allowed only for localhost and 127.0.0.1). Never point a computer you
-use at a test relay. `npm test -- relay-hosted` runs the Worker in Node with every limit, plans and
-the stats, with nothing reaching Cloudflare, and `npm test -- relay-hosted-ui` shows the app's side
-of a full relay (Settings › Devices, first-run setup, `bridge-ai relay setup --hosted`) against it.
+Then point a test Bridge AI at both with `"relay": { "hostedUrl": "http://localhost:8795" }` and
+`"account": { "url": "http://localhost:<its port>", "publicKey": "…" }` in its config.json (plain
+http is allowed only for localhost and 127.0.0.1). Never point a computer you use at a test relay.
+`npm test -- relay-hosted` runs the Worker in Node with every limit, the accounts' windows and weeks
+and the stats, with nothing reaching Cloudflare, and `npm test -- relay-hosted-ui` shows the app's
+side (Settings › Devices with an account and without, a relay that's full, an account's limit
+reached and reset, first-run setup, `bridge-ai relay setup --hosted`) against the stand-ins.
 
 ## Policy text to add when it goes live
 
-Paste these in the same change that sets `HOSTED_URL`, with `<domain>` filled in. Until then
-PRIVACY.md and TERMS.md stay as they are, and stay true for everyone who runs their own relay. The
-`relay-hosted` test keeps these in step: each "Replace" must still be word for word in its file,
-and pasted in, they must say what the relay sees, keeps, counts and limits.
+Paste these in the same change that sets `HOSTED_URL`, with `<domain>` filled in, once the accounts
+service's (account/README.md) are in or with them. Until then PRIVACY.md and TERMS.md stay as they
+are, and stay true for everyone who runs their own relay. The `relay-hosted` test keeps these in
+step: each "Replace" must still be word for word in its file, and pasted in, they must say what the
+relay sees, keeps, counts and limits.
 
 ### PRIVACY.md: the opening paragraph
 
@@ -531,7 +531,7 @@ Replace
 > your computer, a relay on your own Cloudflare account, and the phone apps for iPhone and Android.
 > The app on your computer sends the project anonymous usage stats and crash reports (below), which
 > you can turn off in Settings › About & Updates; nothing else goes to the project or its author. The
-> relay and the phone apps send the project nothing. There is no account and no ads.
+> relay and the phone apps send the project nothing.
 
 with
 
@@ -541,7 +541,7 @@ with
 > usage stats and crash reports (below), which you can turn off in Settings › About & Updates. If you
 > choose Bridge AI's relay, your phone and computer talk through it, end-to-end encrypted, and it
 > keeps only what it needs to work (below). Nothing else goes to the project or its author. A relay of
-> your own and the phone apps send the project nothing. There is no account and no ads.
+> your own and the phone apps send the project nothing.
 
 ### PRIVACY.md: in "Usage stats"
 
@@ -559,9 +559,10 @@ with
 > ## Bridge AI's relay (optional)
 >
 > If you'd rather not set up a relay of your own, you can choose Bridge AI's relay in Settings ›
-> Devices. It's the same relay ([relay/worker.js](relay/worker.js)), run by the project on its own
-> Cloudflare account at `<domain>`, so the project's Cloudflare account carries your traffic instead
-> of yours. Cloudflare processes it for the project.
+> Devices. It comes with a Bold Bridge account (above), by request. It's the same relay
+> ([relay/worker.js](relay/worker.js)), run by the project on its own Cloudflare account at
+> `<domain>`, so the project's Cloudflare account carries your traffic instead of yours. Cloudflare
+> processes it for the project.
 >
 > **What it can read: nothing past the handshake.** Everything between your phone and your computer
 > is end-to-end encrypted, so the relay passes on bytes it can't read. That holds as long as the page
@@ -571,14 +572,15 @@ with
 > and computer, when they connect, and how much they send.
 >
 > **What it keeps for your computer**: a random id (its address there), a hash of the token your
-> computer uses to connect (never the token), the Bridge AI version it was set up with, its plan,
-> when it registered and last connected, today's message and data counts (for the limits), and, as
-> any relay does, your paired phones as ids made from their keys (and which of them connected this
-> week), and messages from your phone waiting for your computer, sealed so it can't read them, for 7
-> days at most. To limit sign-ups, it also keeps how many computers were set up from each network
-> today, under a hash of the network's address and the date, deleted the next day. And because it
-> takes a limited number of computers at once, it keeps a list of the computers on it, by their
-> random ids, with when each was set up and last used.
+> computer uses to connect (never the token), your account's and this device's ids, the Bridge AI
+> version it was set up with, when it registered and last connected, today's message and data counts,
+> and, as any relay does, your paired phones as ids made from their keys (and which of them connected
+> this week), and messages from your phone waiting for your computer, sealed so it can't read them,
+> for 7 days at most. **For your account**: its messages in each 8-hour window and each week, across
+> your computers (for its limits), which it reports to your Bold Bridge account every few minutes
+> while you use it. And because it takes a limited number of accounts at once, it keeps a list of the
+> computers on it, by their random ids and their accounts' ids, with when each was set up and last
+> used.
 >
 > **What it counts, for the project**: when a computer registers and connects (with its Bridge AI
 > version), how many paired phones connect each week, how much data passes, when a limit is reached,
@@ -586,21 +588,22 @@ with
 > computer's random id only: no IP addresses, no content, no names. The full list is in
 > [relay/HOSTED.md](relay/HOSTED.md).
 >
-> **Its limits**: it's free, with a daily allowance for each computer (200,000 messages or 512 MB,
-> starting again at 00:00 UTC; Settings › Devices shows it) and limits that stop floods (how big one
-> message can be, how many come at once, how many phones and tabs are connected at once). It takes a
-> limited number of computers, and when it's full, Bridge AI says so and offers the other ways (a
-> relay of your own, or Tailscale). It also has a daily limit for all the computers on it together;
-> if that's reached, it stops for everyone until 00:00 UTC. When a limit is reached, your phone and
-> Settings › Devices say which, and when it ends. The limits may change, and paid plans with higher
-> ones may come; anything a paid plan would keep or send elsewhere (to take payment) will be said
-> here first.
+> **Its limits**: it's free, with an allowance for each account, across its computers: so many
+> messages in each 8-hour window and each week, like Claude's (Settings › Account and Settings ›
+> Devices show them), and limits that stop floods (how big one message can be, how many come at
+> once, how many phones and tabs are connected at once). It takes a limited number of accounts, and
+> when it's full, Bridge AI says so and offers the other ways (a relay of your own, or Tailscale). It
+> also has a daily limit for all the computers on it together; if that's reached, it stops for
+> everyone until 00:00 UTC. When a limit is reached, your phone and Settings › Devices say which, and
+> when it ends. The limits may change, and paid plans with higher ones may come; anything a paid plan
+> would keep or send elsewhere (to take payment) will be said here first.
 >
 > **Stop using it** (Settings › Devices › Stop using the relay) and your computer's data there is
 > deleted at once (should that message not arrive, its id leaves the list of computers within a few
-> days). A computer that hasn't connected for 90 days is deleted the same way. Everything else in
-> this policy, including what Cloudflare sees, applies to it as to a relay of your own, except that
-> it's the project's Cloudflare account.
+> days). A computer that hasn't connected for 90 days is deleted the same way, and deleting your Bold
+> Bridge account deletes your account's counts and its computers there within a day. Everything else
+> in this policy, including what Cloudflare sees, applies to it as to a relay of your own, except
+> that it's the project's Cloudflare account.
 
 ### TERMS.md: the opening paragraph
 
@@ -631,14 +634,15 @@ with
 > ## Bridge AI's relay
 >
 > The project offers an optional relay, so your phone can reach your computer without a Cloudflare
-> account of your own. It's free, with fair-use limits for each computer (a daily allowance of
-> messages and data, and limits that stop floods). It takes a limited number of computers, so it may
-> be full when you ask, and it has a daily limit for all of them together, past which it stops for
-> everyone until the next day. The project may change those limits or offer paid plans with higher
-> ones; it will say so here and in the app before charging for anything. It's provided as is, like
-> the rest of Bridge AI: it may be slow, be full, go down, change, or stop, with or without notice.
-> If you need it to be dependable, set up a relay on your own Cloudflare account instead.
+> account of your own. It comes with a Bold Bridge account, by request, and the project may say no.
+> It's free, with fair-use limits for each account (an allowance of messages every 8 hours and each
+> week, and limits that stop floods). It takes a limited number of accounts, so it may be full when
+> you ask, and it has a daily limit for all of them together, past which it stops for everyone until
+> the next day. The project may change those limits or offer paid plans with higher ones; it will say
+> so here and in the app before charging for anything. It's provided as is, like the rest of Bridge
+> AI: it may be slow, be full, go down, change, or stop, with or without notice. If you need it to be
+> dependable, set up a relay on your own Cloudflare account instead.
 >
 > Use it only for Bridge AI, as Bridge AI uses it. Don't use it to pass on anything else, to get
 > around its limits, to disturb other people's use of it, or for anything unlawful. The project may
-> remove a computer from it, hold it back, or block a network, if it's misused.
+> remove a computer from it, suspend the account, or block a network, if it's misused.

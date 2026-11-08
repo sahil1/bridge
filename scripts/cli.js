@@ -11,7 +11,8 @@
 // These ask the running server, which does the work (server/relay.js), exactly as Settings does:
 //   bridge-ai status                is it running, which agents, the relay and paired phones
 //   bridge-ai relay setup           put your relay on Cloudflare with an API token
-//                                   (--hosted: Bridge AI's relay instead, once it exists: server/hosted.js)
+//                                   (--hosted: Bridge AI's relay instead, once it exists: server/hosted.js;
+//                                   it needs your Bold Bridge account, signed in in Settings › Account)
 //   bridge-ai relay [update|forget] update the relay, or stop using it
 //   bridge-ai pair                  pair a phone: QR code, link and code
 //   bridge-ai phones [remove <name>]  paired phones, or remove one
@@ -21,6 +22,7 @@ import readline from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import { loadConfig, IS_WIN, IS_MAC } from '../server/paths.js'
 import { hostedBase } from '../server/hosted.js'
+import { accountsBase } from '../server/account.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const cfg = loadConfig()
@@ -217,7 +219,8 @@ async function switching(before, to, args) {
   if (!/^y/i.test(await ask('Go ahead? (y/N) '))) process.exit(0)
 }
 
-// Bridge AI's relay: nothing to sign in to; the server gets this computer an address on it.
+// Bridge AI's relay: the server gets this computer an address on it, with your Bold Bridge account
+// (signed in in Settings › Account, and allowed the relay; if not, it says what's missing).
 async function hostedSetup(args) {
   const before = await api('/relay')
   if (before.busy) throw new Error(`Bridge AI is busy with the relay: ${before.busy}`)
@@ -229,13 +232,17 @@ async function hostedSetup(args) {
     await api('/relay/deploy', { method: 'POST', body: { method: 'hosted' } })
   } catch (e) {
     // Full for now: the other ways, as Settings › Devices offers them.
-    if (e.code === 'hostedFull') e.message += `\n\nOther ways to reach this computer from your phone:\n  bridge-ai relay setup     a relay on your own Cloudflare account (free)\n  bridge-ai start phone     through Tailscale, if it's on this computer and your phone`
+    const others = `\n\nOther ways to reach this computer from your phone:\n  bridge-ai relay setup     a relay on your own Cloudflare account (free)\n  bridge-ai start phone     through Tailscale, if it's on this computer and your phone`
+    if (e.code === 'hostedFull' || e.code === 'accountStopped' || e.code === 'accountSuspended') e.message += others
+    // No account signed in here, or it hasn't the relay yet: where to sign in or ask for it.
+    else if (e.code === 'accountSignIn') e.message = `Sign in first. ${e.message}\nOpen Bridge AI (bridge-ai open), then Settings › Account; once your account has the relay, run this again.${others}`
+    else if (/^account/.test(e.code || '')) e.message += `\nOpen Bridge AI (bridge-ai open), then Settings › Account.${others}`
     throw e
   }
   let s = await api('/relay')
   for (let i = 0; i < 15 && !s.online; i++) { await sleep(1000); s = await api('/relay') }
   console.log(`\nRelay: ${relayLine(s)}`)
-  console.log(DIM('Bridge AI\'s relay passes your phone\'s connection on, end-to-end encrypted: it can\'t read it, but sees IP addresses, and when and how much. It has a daily allowance per computer.'))
+  console.log(DIM('Bridge AI\'s relay passes your phone\'s connection on, end-to-end encrypted: it can\'t read it, but sees IP addresses, and when and how much. Your account has an allowance every 8 hours and each week.'))
   if (s.online) console.log('Next, pair your phone: bridge-ai pair')
 }
 
@@ -381,8 +388,9 @@ const run = {
 
   bridge-ai status              is it running, which agents, the relay and paired phones
   bridge-ai relay setup         put your phone relay on Cloudflare with an API token
-                                (asks for it, or reads CLOUDFLARE_API_TOKEN or stdin)${hostedBase() ? `
-  bridge-ai relay setup --hosted  use Bridge AI's relay instead: no account needed` : ''}
+                                (asks for it, or reads CLOUDFLARE_API_TOKEN or stdin)${hostedBase() && accountsBase() ? `
+  bridge-ai relay setup --hosted  use Bridge AI's relay instead, with your Bold Bridge account
+                                (sign in first: Settings › Account)` : ''}
   bridge-ai relay [update|forget]  update the relay, or stop using it
   bridge-ai pair [--stop]       pair a phone: shows a QR code, the link and the code
   bridge-ai phones [remove <name>]  paired phones, or remove one`),

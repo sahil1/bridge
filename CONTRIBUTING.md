@@ -73,7 +73,9 @@ own on its own Cloudflare account:
   nothing. People still see what would be sent and turn it off in one click.
 - **The relay**: anyone can put one on their own Cloudflare account from Settings › Devices. One
   for many computers is [relay/HOSTED.md](relay/HOSTED.md), switched on by `HOSTED_URL` in
-  `server/hosted.js`.
+  `server/hosted.js`, for accounts of your own.
+- **Accounts** (for Early Access and the hosted relay): [account/](account/README.md), switched on by
+  `ACCOUNTS_URL` and `ACCOUNTS_PUBLIC_KEY` in `server/account.js`. Empty, nothing about accounts shows.
 - **The privacy policy**: `npm test -- privacy-hosts` fails when the code contacts a host PRIVACY.md
   doesn't cover, so a new one goes in PRIVACY.md (by name, or under a category it states) in the
   same change.
@@ -115,6 +117,11 @@ For the project's owner, or a fork's: what `npm run release` puts out, and who i
   `http://127.0.0.1:7420/?early=<code>` in a browser to have it filled in. It's for the desktop app
   (and Linux's package); a copy run from a clone or in Docker isn't offered it. `--check <code>`
   says what a code says.
+- **Testers with a Bold Bridge account.** Once accounts are live (account/README.md), a tester asks
+  for Early Access in Settings › Account (or the website's form), you say yes in the admin view, and
+  their computers take a code from the account by themselves, renewed while they have it, for the
+  account's id (usage stats never carry an email). Saying no, or suspending the account, ends it
+  within 6 hours. The paste-a-code way above stays for anyone without an account.
 - **Taking a code back.** `npm run early-access -- --revoke <id>` writes it in the newest release's
   notes, which computers on Early Access read at each check. For good, add the id to `REVOKED` in
   `server/earlyaccess.js` before the next release. A code made with `--days` ends by itself.

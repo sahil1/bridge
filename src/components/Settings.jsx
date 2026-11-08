@@ -9,6 +9,7 @@ import Mcp from './settings/Mcp.jsx'
 import ConfigFile from './settings/ConfigFile.jsx'
 import Phone from './settings/Phone.jsx'
 import About from './settings/About.jsx'
+import Account from './settings/Account.jsx'
 import Meetings from './settings/Meetings.jsx'
 import Mail from './settings/Mail.jsx'
 import Voice from './settings/Voice.jsx'
@@ -21,7 +22,8 @@ import { t, tx } from '../i18n/index.js'
 // One Settings window, Slack style: sections down the left, one scrolling panel on the right.
 // On a phone it's a phone's settings: the list of sections, each opening full width under a bar
 // with ‹ Settings (back to the list), its name, and the one close. A section marked mac is only
-// where it can work: Mail, where Bridge AI reads Apple Mail (the computer shown is a Mac).
+// where it can work: Mail, where Bridge AI reads Apple Mail (the computer shown is a Mac). One marked
+// accounts is only once Bold Bridge accounts exist (server/account.js): Account.
 export const SECTIONS = [
   { id: 'general', label: tx('General'), icon: 'home', hint: tx('Name, default agent and model, location') },
   { id: 'agents', label: tx('Agents'), icon: 'bot', hint: tx('Installed agents and sign-in') },
@@ -31,6 +33,7 @@ export const SECTIONS = [
   { id: 'mail', label: tx('Mail'), icon: 'mail', hint: tx('How You Write, for Reply Assist, and your working hours'), mac: true },
   { id: 'mcp', label: tx('MCP Servers'), icon: 'tool', hint: tx('Tools your agents can use') },
   { id: 'phone', label: tx('Devices'), icon: 'phone', hint: tx('Your phone and your other computers, through your relay or Tailscale; what to notify you about') },
+  { id: 'account', label: tx('Account'), icon: 'user', hint: tx('Your Bold Bridge account, for Early Access and Bridge AI\'s relay'), accounts: true },
   { id: 'appearance', label: tx('Appearance'), icon: 'palette', hint: tx('Theme, text size, density') },
   { id: 'config', label: tx('Config File'), icon: 'braces', hint: tx('Every setting, as JSON') },
   { id: 'about', label: tx('About & Updates'), icon: 'info', hint: tx('Version, updates, beta features, the tour, reporting a problem') },
@@ -56,7 +59,7 @@ const sectionFor = (section, sections) => {
 
 export default function Settings({ section = 'all', onClose, onOpenAgent }) {
   const conf = usePoll(cloudOnly ? null : '/config', 10 * 60 * 1000).data
-  const sections = cloudOnly ? PHONE : SECTIONS.filter((s) => !s.mac || conf?.mail)
+  const sections = cloudOnly ? PHONE : SECTIONS.filter((s) => (!s.mac || conf?.mail) && (!s.accounts || conf?.accounts))
   const phone = useMedia('(max-width: 760px)')
   const to = sectionFor(section, sections)
   const [at, setAt] = useState(to || sections[0].id)
@@ -101,6 +104,7 @@ export default function Settings({ section = 'all', onClose, onOpenAgent }) {
     {at === 'config' && <ConfigFile />}
     {at === 'phone' && <Phone focus={section === 'machines' ? 'machines' : null} />}
     {at === 'about' && <About />}
+    {at === 'account' && <Account />}
     {at === 'cloud' && <CloudKeys focus="cloud" bare />}
     </ErrorBoundary>
     </SettingsAt.Provider>

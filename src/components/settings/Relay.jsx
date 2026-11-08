@@ -1,17 +1,20 @@
 import { useEffect, useRef, useState } from 'react'
 import Icon from '../Icon.jsx'
-import { InstallNode } from '../SignIn.jsx'
+import { InstallNode, openSettings } from '../SignIn.jsx'
+import { RelayUse } from './Account.jsx'
 import { api, viaRelay, relayComputers } from '../../api.js'
 import { t, locale } from '../../i18n/index.js'
 
 // Settings › Devices › "From anywhere": your own relay on your Cloudflare account
 // (server/relay.js). Optional: Bridge AI works the same without it.
 //
-// Once Bridge AI's own relay exists (server/hosted.js), it's offered too, as the easiest of three
-// ways, and this starts with a choice (the way picked is kept by Phone.jsx, which shows Tailscale's
-// section). Until then it's exactly the relay section it always was.
+// Once Bridge AI's own relay exists (server/hosted.js) with Bold Bridge accounts (server/account.js),
+// it's offered too, as the easiest of three ways, and this starts with a choice (the way picked is
+// kept by Phone.jsx, which shows Tailscale's section). It needs your account signed in here and
+// allowed the relay: what's missing is said, with the button that fixes it (sign in, ask for it).
+// Until then it's exactly the relay section it always was.
 const WAYS = [
-  { id: 'hosted', title: 'Bridge AI\'s relay', text: 'Easiest. No account, one click.', tag: 'Recommended' },
+  { id: 'hosted', title: 'Bridge AI\'s relay', text: 'Easiest. With your Bold Bridge account, one click.', tag: 'Recommended' },
   { id: 'cloudflare', title: 'Your own Cloudflare', text: 'Everything on your own free account.' },
   { id: 'tailscale', title: 'Tailscale', text: 'If you already use it.' },
 ]
@@ -30,14 +33,25 @@ export default function Relay({ way, setWay, onOffer }) {
   useEffect(() => { load(); return () => clearInterval(timer.current) }, [])
   const offer = !!st?.hostedAvailable && !viaRelay
   useEffect(() => { onOffer?.(offer) }, [offer]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Your Bold Bridge account, for Bridge AI's relay: signed in, and allowed it? (Asked of the account
+  // as this opens, so a request approved since shows.)
+  const [acct, setAcct] = useState(null)
+  const [asking, setAsking] = useState(false)
+  useEffect(() => { if (offer) api('/account?fresh=1').then(setAcct).catch(() => setAcct(null)) }, [offer, st?.hosted])
+  const askRelay = async () => {
+    setAsking(true); setErr(null)
+    try { setAcct(await api('/account/request', { method: 'POST', body: { kind: 'relay' } })) } catch (e) { setErr(e.message) } finally { setAsking(false) }
+  }
   // While deploying, while the relay is still connecting (so Pair a device turns on by itself), and
   // while a code is shown (to see the phone arrive), keep the status fresh.
   const waiting = !!(st?.configured && !st?.online)
   useEffect(() => {
     clearInterval(timer.current)
     if (working || st?.busy || st?.pairing || waiting) timer.current = setInterval(load, 1500)
+    // On Bridge AI's relay: its account's use, and a limit reached, as they change.
+    else if (st?.hosted) timer.current = setInterval(load, 5000)
     return () => clearInterval(timer.current)
-  }, [working, st?.busy, !!st?.pairing, waiting]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [working, st?.busy, !!st?.pairing, waiting, !!st?.hosted]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // (Bridge AI's relay being full is said by its own box, from st.hostedFull, not an error line.)
   const run = async (path, body) => {
@@ -58,7 +72,7 @@ export default function Relay({ way, setWay, onOffer }) {
     const r = await run('/relay/deploy', { method: 'hosted' })
     setWorking(false)
     if (r) { setChanging(false); setWay?.(null) }
-    else setWay?.((w) => w || 'hosted') // turned away (full for now): it stays picked, saying why
+    else { setWay?.((w) => w || 'hosted'); api('/account').then(setAcct).catch(() => {}) } // turned away: it stays picked, saying why
   }
 
   if (!st) return <section className="st-sec"><h4>From anywhere</h4><div className="skeleton-rows"><div /></div></section>
@@ -127,15 +141,15 @@ export default function Relay({ way, setWay, onOffer }) {
         </div>
         {pick === 'hosted' && (
           <div className="relay-box">
-            <p className="small">A relay run by the Bridge AI project passes your phone's connection on to this computer. There's nothing to sign up for or set up.</p>
+            <p className="small">{t('A relay run by Bold Bridge passes your phone\'s connection on to this computer. It comes with a Bold Bridge account, by request; nothing to set up.')}</p>
             <ul className="ph-facts">
               <li><b>What it can see:</b> the IP addresses of your phone and this computer, and when and how much data passes. Never what you do: everything between them is end-to-end encrypted.</li>
-              <li><b>Fair use:</b> each computer has a daily allowance, plenty for normal use. If it runs out, it resets the next day.</li>
+              <li><b>{t('Fair use:')}</b> {t('your account has an allowance every 8 hours and each week, across its computers, plenty for normal use. Settings › Account shows it.')}</li>
               <li><b>Open source:</b> the relay's code is <a href={CODE} target="_blank" rel="noreferrer">on GitHub</a>. If you'd rather not use the project's, pick your own Cloudflare instead.</li>
             </ul>
             {current === 'hosted' ? <p className="muted small"><Icon name="check" size={12} /> This is how your phone connects now.</p>
               : busy ? <p className="st-note"><Icon name="refresh" size={13} className="spin" /> {st.busy || 'Working…'}</p>
-              : full || <div className="st-row"><button type="button" className="btn primary" onClick={useHosted}><Icon name="phone" size={14} /> Use Bridge AI's relay</button></div>}
+              : <Needs acct={acct} asking={asking} onAsk={askRelay}>{full || <div className="st-row"><button type="button" className="btn primary" onClick={useHosted}><Icon name="phone" size={14} /> Use Bridge AI's relay</button></div>}</Needs>}
           </div>
         )}
         {pick === 'cloudflare' && (
@@ -154,13 +168,16 @@ export default function Relay({ way, setWay, onOffer }) {
   // What Bridge AI's relay said last: today's limit reached (this computer's, or the whole relay's),
   // a phone turned away for now, or it's switched off ('gone' has its own way back, below).
   const resetAt = st.limit && new Date(st.limit.until).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' })
-  const limitText = st.limit?.why === 'day' ? `The hosted relay's daily limit for this computer is used up. It resets at ${resetAt}. For no limits, put the relay on your own Cloudflare account.`
+  const resetOn = st.limit && new Date(st.limit.until).toLocaleString(locale(), { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })
+  const limitText = st.limit?.why === 'window' ? t('Your Bold Bridge account has used its allowance on Bridge AI\'s relay for now, so your phones can\'t reach your computers through it. It resets at {time}. For no limits, put the relay on your own Cloudflare account.', { time: resetAt })
+    : st.limit?.why === 'week' ? t('Your Bold Bridge account has used this week\'s allowance on Bridge AI\'s relay, so your phones can\'t reach your computers through it. It resets on {date}. For no limits, put the relay on your own Cloudflare account.', { date: resetOn })
     : st.limit?.why === 'all' ? t('Bridge AI\'s relay has carried all it can today, for every computer on it. It starts again at {time}. For no limits, put the relay on your own Cloudflare account.', { time: resetAt })
     : st.limit && st.limit.why !== 'gone' ? st.limit.text : null
-  // ...and the plan this computer is on there, with its daily allowance.
-  const plan = st.hosted && st.plan?.dayMessages != null && st.plan?.dayMB != null ? st.plan : null
-  const planVars = plan && { plan: plan.plan, messages: plan.dayMessages.toLocaleString(locale()), mb: plan.dayMB.toLocaleString(locale()), time: new Date(plan.resets || Date.UTC(2000, 0, 1)).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' }) }
-  const planText = plan && (plan.plan === 'free' ? t('Free plan: up to {messages} messages or {mb} MB a day through the relay, starting again each day at {time}.', planVars) : t('{plan} plan: up to {messages} messages or {mb} MB a day through the relay, starting again each day at {time}.', planVars))
+  // ...and its account's use there, in the window and the week, as the usage chip shows a plan's.
+  const use = st.hosted && st.use?.window?.limit ? st.use : null
+  const useLimits = use && { window: { hours: use.window.hours || 8, messages: use.window.limit }, week: { messages: use.week.limit } }
+  const isoOf = (n) => (n ? new Date(n).toISOString() : null)
+  const used = use && { window: { messages: use.window.messages, resetsAt: isoOf(use.window.resetsAt) }, week: { messages: use.week.messages, resetsAt: isoOf(use.week.resetsAt) } }
   // Phones (and a browser) paired here. Your other computers connect the same way, but they're
   // under Your devices, where unlinking one tells it too (removing it here left it half linked).
   const phones = (st.devices || []).filter((d) => d.kind !== 'computer')
@@ -168,7 +185,7 @@ export default function Relay({ way, setWay, onOffer }) {
     <section className="st-sec">
       <h4>{st.hosted ? 'From anywhere, through Bridge AI\'s relay' : 'From anywhere, through your own relay'}</h4>
       {st.hosted
-        ? <p className="muted small">Your phone reaches this computer through a relay run by the Bridge AI project. Everything between them is end-to-end encrypted, so the relay can't read it: it sees IP addresses, and when and how much data passes. Each computer has a fair-use daily allowance.</p>
+        ? <p className="muted small">{t('Your phone reaches this computer through a relay run by Bold Bridge, for your Bold Bridge account. Everything between them is end-to-end encrypted, so the relay can\'t read it: it sees IP addresses, and when and how much data passes. Your account has a fair-use allowance every 8 hours and each week.')}</p>
         : <p className="muted small">Your phone reaches this computer through a small relay on your own free Cloudflare account. No VPN and no app to keep running: Bridge AI connects to it whenever it's open. Everything between phone and computer is end-to-end encrypted, so neither the relay nor Cloudflare can read it.</p>}
 
       {!st.configured ? cloudflare : (
@@ -180,9 +197,9 @@ export default function Relay({ way, setWay, onOffer }) {
             <code className="small">{st.url.replace(/^https:\/\//, '')}</code>
             {st.account && <span className="muted small">on {st.account}</span>}
           </div>
-          {planText && <p className="muted small">{planText}</p>}
+          {use && <RelayUse used={used} limits={useLimits} />}
           {st.busy && <p className="st-note"><Icon name="refresh" size={13} className="spin" /> {st.busy}</p>}
-          {limitText && <p className="st-note warn"><Icon name="alert" size={13} /> {limitText} {(st.limit.why === 'day' || st.limit.why === 'all') && <button type="button" className="link-btn" onClick={() => { setChanging(true); setWay?.('cloudflare') }}>Use your own Cloudflare</button>}</p>}
+          {limitText && <p className="st-note warn"><Icon name="alert" size={13} /> {limitText} {['window', 'week', 'all', 'suspended', 'relay', 'deleted'].includes(st.limit.why) && <button type="button" className="link-btn" onClick={() => { setChanging(true); setWay?.('cloudflare') }}>{t('Use your own Cloudflare')}</button>}{st.limit.why === 'token' && <button type="button" className="link-btn" onClick={() => openSettings('account')}>{t('Open Settings › Account')}</button>}</p>}
           {st.limit?.why === 'gone' && !busy && (full || <div className="st-row"><button type="button" className="btn primary" onClick={useHosted}><Icon name="refresh" size={13} /> Set up Bridge AI's relay again</button><span className="muted small">Phones you paired pair again afterwards.</span></div>)}
           {st.needsUpdate && !st.busy && <p className="st-note warn"><Icon name="alert" size={13} /> Your relay is older than this Bridge AI. <button type="button" className="link-btn" onClick={() => run('/relay/update')}>Update it</button></p>}
 
@@ -217,7 +234,21 @@ export default function Relay({ way, setWay, onOffer }) {
   )
 }
 
-// Bridge AI's relay turned this computer away: it takes so many computers at once, and has them.
+// What Bridge AI's relay needs before this computer can use it: your Bold Bridge account signed in
+// here, and allowed the relay. What's missing is said, with the button that fixes it (sign in, ask
+// for it); asked, it says so; given, what's inside (Use Bridge AI's relay) shows.
+function Needs({ acct, asking, onAsk, children }) {
+  if (!acct) return <div className="skeleton-rows"><div /></div>
+  const a = acct.signedIn ? acct.account : null
+  const say = (text, button) => <div className="st-note relay-needs" role="status"><Icon name="info" size={13} /> <span>{text}</span>{button}</div>
+  if (!a) return say(t('Bridge AI\'s relay comes with a Bold Bridge account: sign in with your email, then ask for it.'), <button type="button" className="btn small primary" onClick={() => openSettings('account')}><Icon name="user" size={13} /> {t('Sign in')}</button>)
+  if (a.status === 'suspended') return say(t('Your Bold Bridge account is suspended, so it can\'t use Bridge AI\'s relay for now. Your own Cloudflare or Tailscale still work.'))
+  if (a.relay === 'requested') return say(t('You asked for Bridge AI\'s relay ({email}). Bold Bridge emails you when it\'s on, and then it\'s one click here.', { email: a.email }))
+  if (a.relay !== 'approved') return say(a.relay === 'declined' ? t('Your request for Bridge AI\'s relay was declined. You can ask again, or use your own Cloudflare or Tailscale.') : t('Your Bold Bridge account ({email}) doesn\'t have Bridge AI\'s relay yet. It\'s by request.', { email: a.email }), <button type="button" className="btn small primary" disabled={asking} onClick={onAsk}>{asking ? t('Asking…') : a.relay === 'declined' ? t('Ask again') : t('Request access')}</button>)
+  return children
+}
+
+// Bridge AI's relay turned this computer away: it takes so many accounts at once, and has them.
 // The other two ways, one click each (onWay picks one), or try again later. In Settings › Devices,
 // and in first-run setup without the buttons (Settings has them).
 export function HostedFull({ onWay, onRetry, busy }) {

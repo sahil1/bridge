@@ -136,9 +136,9 @@ export async function startKit(name, { env = {}, config = {}, node = process.exe
   const base = {
     PATH, BRIDGE_PATH: PATH, HOME: home, BRIDGE_HOME: data, BRIDGE_PORT: String(port), BRIDGE_RUNTIME: 'builtin',
     // No usage stats or crash server unless a test gives one, so no test can reach the project's
-    // (both are on unless turned off). Nor Bridge AI's hosted relay: a test gives a stand-in in its
-    // config.json (relay.hostedUrl), or there's none.
-    BRIDGE_COUNTS_URL: '', BRIDGE_CRASHES_URL: '', BRIDGE_HOSTED_URL: '',
+    // (both are on unless turned off). Nor Bridge AI's hosted relay, nor Bold Bridge's accounts: a
+    // test gives a stand-in in its config.json (relay.hostedUrl, account.url), or there's none.
+    BRIDGE_COUNTS_URL: '', BRIDGE_CRASHES_URL: '', BRIDGE_HOSTED_URL: '', BRIDGE_ACCOUNTS_URL: '', BRIDGE_ACCOUNTS_KEY: '',
     BRIDGE_FIX_DRYRUN: '1', LANG: 'en_US.UTF-8', TMPDIR: os.tmpdir(), USER: os.userInfo().username,
     BRIDGE_SUMMARY_RETRY_MS: '4000', BRIDGE_MODEL_RETRY_MS: '200',
     // No test ever runs a real installer or downloads Node.js: a stand-in installer runs instead
@@ -225,11 +225,45 @@ export async function startRelay(name) {
   }
 }
 
+// Bold Bridge's accounts service, stood in for (stand-ins/accounts.mjs: account/worker.js itself,
+// with SQLite and a mailbox), signed with a key made for this run. A kit uses it with
+// accountConfig(), in its config ("account": { url, publicKey }). code(email): the last code
+// emailed there; admin(method, path, body): a call through the service binding, as the admin view
+// makes it; clock(ms): its clock that far ahead; mailFails(code): sending fails ('' stops it).
+export async function startAccounts(name, { relayMax } = {}) {
+  const port = await freePort()
+  const { privateKey } = crypto.generateKeyPairSync('ed25519')
+  const publicKey = privateKey.export({ format: 'jwk' }).x
+  const log = path.join(OUT, 'kits', `${name}-accounts-${port}.log`)
+  const mailLog = path.join(OUT, 'kits', `${name}-accounts-${port}-mail.jsonl`)
+  fs.mkdirSync(path.dirname(log), { recursive: true })
+  const out = fs.openSync(log, 'w')
+  const p = spawn(process.execPath, ['--no-warnings', path.join(TEST, 'stand-ins', 'accounts.mjs'), String(port), mailLog], { stdio: ['ignore', out, out], env: { ...process.env, BRIDGE_TEST_SIGNING_KEY: privateKey.export({ type: 'pkcs8', format: 'pem' }), ...(relayMax != null ? { BRIDGE_TEST_RELAY_MAX: String(relayMax) } : {}) } })
+  const url = `http://127.0.0.1:${port}`
+  if (!await until(async () => (await fetch(`${url}/_test/mail`)).ok, 15000, 150)) throw new Error(`the accounts stand-in didn't start: ${fs.readFileSync(log, 'utf8').slice(-800)}`)
+  const json = (r) => r.json().then((j) => ({ status: r.status, ...j }))
+  const mail = () => fetch(`${url}/_test/mail`).then((r) => r.json())
+  return {
+    url, port, publicKey, privateKey,
+    accountConfig: { url, publicKey },
+    mail,
+    code: async (email) => { const m = (await mail()).filter((x) => x.to === email).at(-1); return /\b(\d{6})\b/.exec(m?.text || '')?.[1] || null },
+    admin: (method, p2, body) => fetch(`${url}/_test/bound${p2}`, { method, headers: { 'content-type': 'application/json', 'x-admin-email': 'admin@example.com' }, body: body ? JSON.stringify(body) : undefined }).then(json),
+    call: (method, p2, body, token) => fetch(`${url}${p2}`, { method, headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: body ? JSON.stringify(body) : undefined }).then(json),
+    clock: (ms) => fetch(`${url}/_test/clock`, { method: 'POST', body: JSON.stringify({ shift: ms }) }).then((r) => r.json()),
+    mailFails: (code) => fetch(`${url}/_test/mail-fails`, { method: 'POST', body: JSON.stringify({ code }) }).then((r) => r.json()),
+    stop: () => stopTree(p.pid),
+  }
+}
+
 // Bridge AI's hosted relay, stood in for (stand-ins/hosted-relay.mjs: the real Worker with HOSTED
-// on, at localhost), with these settings. A kit uses it with "relay": { "hostedUrl": url } in its
-// config. vars() changes its settings from then on; register() registers a computer, as the app does;
+// on, at localhost), with these settings, and an accounts stand-in (startAccounts) to check relay
+// tokens with and ask. A kit uses it with "relay": { "hostedUrl": url } in its config. vars() changes
+// its settings from then on; register(token) registers a computer, as the app does (with an
+// account's relay token); use(a, n) counts n messages to an account; clock(ms) moves its clock;
 // down() makes computers' addresses unreachable, up() reachable again.
-export async function startHostedRelay(name, settings = {}) {
+export async function startHostedRelay(name, settings = {}, accounts = null) {
+  if (accounts) settings = { ACCOUNTS_URL: accounts.url, ACCOUNTS_PUBLIC_KEY: accounts.publicKey, ...settings }
   const port = await freePort()
   const log = path.join(OUT, 'kits', `${name}-hosted-relay-${port}.log`)
   fs.mkdirSync(path.dirname(log), { recursive: true })
@@ -243,8 +277,11 @@ export async function startHostedRelay(name, settings = {}) {
     vars: (v) => post('/_test/vars', v).then((r) => r.json()),
     down: () => post('/_test/down', {}).then((r) => r.json()),
     up: () => post('/_test/up', {}).then((r) => r.json()),
-    register: () => post('/_relay/register', { version: '3.9.2' }).then(async (r) => ({ status: r.status, ...(await r.json()) })),
+    register: (token) => fetch(`${at}/_relay/register`, { method: 'POST', headers: { 'content-type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify({ version: '3.9.2' }) }).then(async (r) => ({ status: r.status, ...(await r.json()) })),
     stats: (token) => fetch(`${at}/_relay/stats`, { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()),
+    use: (a, n) => post('/_test/use', { a, n }).then((r) => r.json()),
+    clock: (ms) => post('/_test/clock', { shift: ms }).then((r) => r.json()),
+    state: () => post('/_test/state', {}).then((r) => r.json()),
     stop: () => stopTree(p.pid),
   }
 }

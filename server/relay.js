@@ -15,8 +15,9 @@
 // computer; it takes them as soon as it's connected again (inbox.js opens, checks and sends each).
 //
 // Or, with no Cloudflare account at all, Bridge AI's own relay (relay/HOSTED.md): the same relay,
-// run by the project for many computers, each with an address of its own. It's offered only once
-// hosted.js says where it is.
+// run by the project for many computers, each with an address of its own, for a Bold Bridge
+// account that may use it (account.js gives the relay token it registers and connects with). It's
+// offered only once hosted.js says where it is and Bold Bridge accounts exist.
 //
 // Your other devices connect the same way a phone does (machines.js): with a one-time code from
 // invite() (when one device links another, or introduces two), or by asking. An ask waits here
@@ -89,7 +90,7 @@ const OFF_NET_TRY = 5000
 const NO_NET = /ENOTFOUND|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|ENETDOWN|EADDRNOTAVAIL/
 let failed = null // how the last try failed: { code } when nothing answered, { status } when the relay did
 let limit = null // what Bridge AI's relay last said about its limits: { why, text, until }
-let plan = null // and this computer's plan there: { plan, dayMessages, dayMB, phones, resets }
+let use = null // and this computer's account's use there: { window, week }, each { messages, limit, resetsAt }
 let hostedFull = null // Bridge AI's relay turned this computer away as full: { at, text }, said for an hour
 let pinger = null
 let hostKey = null // { privateKey, public }
@@ -103,6 +104,11 @@ const askTries = [] // when each ask (or a new commit for one) came, over the la
 const denied = new Map() // device key -> until when its asks are turned away
 let onAsk = () => {} // tells you a device is asking (index.js)
 const ASK_MINUTES = 15
+// Your Bold Bridge account (account.js, given by index.js): whether there are accounts at all, and
+// the relay token for Bridge AI's relay.
+let acct = null
+export const useAccount = (a) => { acct = a }
+const accountsOn = () => !!acct?.available()
 
 // ---------- this computer's key ----------
 async function key() {
@@ -157,10 +163,10 @@ export function status() {
     method: conf.hosted ? 'hosted' : conf.cf?.method || null,
     account: conf.hosted ? null : conf.cf?.accountName || null,
     hosted: !!conf.hosted, // on Bridge AI's relay
-    hostedAvailable: !!hostedBase(), // Bridge AI's relay is offered at all
+    hostedAvailable: !!hostedBase() && accountsOn(), // Bridge AI's relay is offered at all (it needs an account)
     hostedFull: hostedFull && hostedFull.at > Date.now() - 3600000 ? hostedFull.text : null, // ...but it was full just now
     limit: limit && limit.until > Date.now() ? limit : null,
-    plan: conf.hosted ? plan : null,
+    use: conf.hosted ? use : null,
     needsUpdate: !!(!conf.hosted && online && relayBuild && relayBuild !== relayCode().build),
     devices: (conf.devices || []).map(({ id, name, kind, relay, addedAt, lastSeen }) => ({ id, name, kind: kind || 'phone', relay: relay || null, addedAt, lastSeen, connected: live.has(id) })),
     asks: [...asks.values()].filter((a) => a.code && a.at > Date.now() - ASK_MINUTES * 60000).map(({ id, name, os, relay, at, code }) => ({ id, name, os, relay, at, code })),
@@ -185,8 +191,20 @@ function connect() {
   if (link && link.readyState <= 1) return
   // One still closing is let go first, with its phones' sessions.
   if (link) { const old = link; link = null; clearInterval(pinger); try { old.terminate() } catch { /* closed */ } for (const c of conns.values()) c.end(); conns.clear() }
+  // Bridge AI's relay needs a relay token from the account too: without one (signed out, or the
+  // account no longer has the relay), it isn't asked, and Settings says why; it's tried again when
+  // the account changes (accountChanged), or in a few minutes.
+  const relayToken = conf.hosted ? acct?.relayTokenNow() : null
+  if (conf.hosted && !relayToken) {
+    const st = acct?.relayState() || {}
+    lastError = !st.signedIn ? 'Bridge AI\'s relay needs this computer signed in to your Bold Bridge account (Settings › Account).' : st.status === 'suspended' ? 'Your Bold Bridge account is suspended, so Bridge AI\'s relay doesn\'t carry this computer for now.' : st.relay !== 'approved' ? 'Your Bold Bridge account doesn\'t have Bridge AI\'s relay any more. Use your own Cloudflare or Tailscale, in Settings › Devices.' : 'Getting a pass for Bridge AI\'s relay from your Bold Bridge account…'
+    limit = { why: 'token', text: lastError, until: Date.now() + 5 * 60000 }
+    if (st.signedIn && st.relay === 'approved') acct?.relayToken().then((t) => { if (t) connect() }).catch(() => {})
+    retry = setTimeout(connect, 5 * 60000)
+    return
+  }
   // (Bridge AI's relay hears which version this is, for its counts: HOSTED.md.)
-  const ws = new WebSocket(`${conf.url.replace(/^http/, 'ws').replace(/\/$/, '')}/_relay/host`, { headers: { Authorization: `Bearer ${conf.token}`, ...(conf.hosted ? { 'X-Bridge-Version': VERSION } : {}) }, handshakeTimeout: 15000, ...(onThisComputer(conf.url) ? { lookup: loopback } : {}) })
+  const ws = new WebSocket(`${conf.url.replace(/^http/, 'ws').replace(/\/$/, '')}/_relay/host`, { headers: { Authorization: `Bearer ${conf.token}`, ...(conf.hosted ? { 'X-Bridge-Version': VERSION, 'X-Relay-Token': relayToken } : {}) }, handshakeTimeout: 15000, ...(onThisComputer(conf.url) ? { lookup: loopback } : {}) })
   link = ws
   failed = null
   let heard = Date.now() // when the relay last sent anything
@@ -217,7 +235,7 @@ function connect() {
     heard = Date.now()
     if (!isBinary) {
       const s = String(data)
-      if (s[0] === '{') try { const m = JSON.parse(s); if (m.t === 'note' && m.note) onNote(m.box, m.note); else if (m.t === 'limit') onLimit(m); else if (m.t === 'plan') onPlan(m) } catch { /* not ours */ }
+      if (s[0] === '{') try { const m = JSON.parse(s); if (m.t === 'note' && m.note) onNote(m.box, m.note); else if (m.t === 'limit') onLimit(m); else if (m.t === 'use') onUse(m) } catch { /* not ours */ }
       return
     }
     const b = new Uint8Array(data)
@@ -251,29 +269,45 @@ function connect() {
     conns.clear()
     link = null
     if (!conf.url || !conf.token) return
-    // Bridge AI's relay said to wait (it's switched off, doesn't know this computer, or let it go for
-    // the day for sending on past its limits): until then.
-    const wait = conf.hosted && limit?.until > Date.now() && ['off', 'gone', 'shut'].includes(limit.why) ? limit.until - Date.now() + Math.random() * 60000 : 0
+    // Bridge AI's relay said to wait (it's switched off, doesn't know this computer, let it go for
+    // sending on while its phones were stopped, or its account is stopped): until then. Its pass from
+    // the account was turned down: a new one first.
+    if (conf.hosted && limit?.why === 'token' && failed?.status !== 403) acct?.refresh().catch(() => {})
+    const wait = conf.hosted && limit?.until > Date.now() && ['off', 'gone', 'shut', 'suspended', 'relay', 'deleted', 'token'].includes(limit.why) ? limit.until - Date.now() + Math.random() * 60000 : 0
     const offNet = !wait && failed?.code && (!conf.hosted || NO_NET.test(failed.code))
     retry = setTimeout(connect, offNet ? Math.min(backoff, OFF_NET_TRY) + Math.random() * 500 : Math.max(backoff, wait))
     backoff = Math.min(backoff * 2, 60000)
   })
 }
 
-// Bridge AI's relay says this computer has used up today's allowance (phones are turned away until
-// it resets), that it turned one of its phones away for now (too much at once, too many connected),
-// or that it's switched off. Shown in Settings.
+// Bridge AI's relay says this computer's account has used its allowance for now (its 8-hour window,
+// or its week: phones are turned away until it resets), that the whole relay has carried all it can
+// today, that it turned one of its phones away for now (too much at once, too many connected), that
+// the account is stopped (suspended, no relay any more, deleted, no pass), or that it's switched
+// off. Shown in Settings.
 function onLimit(m) {
   if (!conf.hosted) return
-  limit = { why: String(m.why || ''), text: String(m.text || '').slice(0, 400), until: Math.min(Number(m.until) || 0, Date.now() + 26 * 3600000) }
+  limit = { why: String(m.why || ''), text: String(m.text || '').slice(0, 400), until: Math.min(Number(m.until) || 0, Date.now() + 8 * 24 * 3600000) }
+  // The account's own say: asked again, so Settings › Account shows it too.
+  if (['suspended', 'relay', 'deleted'].includes(limit.why)) acct?.refresh().catch(() => {})
 }
-// ...and which plan this computer is on there, with its daily allowance (Settings says it). A new
-// plan lifts a day's limit the old one had reached; if the new one's is reached too, it says so next.
-function onPlan(m) {
+// ...and its account's use there, in the window and the week (Settings shows it as the usage chip
+// does). A window or week that reset lifts its limit.
+function onUse(m) {
   if (!conf.hosted) return
   const n = (v) => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : null)
-  plan = { plan: String(m.plan || 'free').slice(0, 24), dayMessages: n(m.dayMessages), dayMB: n(m.dayMB), phones: n(m.phones), resets: n(m.resets) }
-  if (limit?.why === 'day') limit = null
+  const part = (w) => ({ messages: n(w?.messages) ?? 0, limit: n(w?.limit), hours: n(w?.hours), resetsAt: w?.resetsAt ? n(w.resetsAt) : null })
+  use = { window: part(m.window), week: part(m.week), at: Date.now() }
+  acct?.relayUse(use)
+  if (['window', 'week'].includes(limit?.why) && use[limit.why].messages <= (use[limit.why].limit ?? Infinity)) limit = null
+}
+// The account changed (signed in or out, the relay given or taken away, a new pass): on Bridge AI's
+// relay, connected again with it.
+export function accountChanged() {
+  if (!conf.hosted || !conf.url) return
+  if (limit?.why === 'token') limit = null
+  disconnect()
+  connect()
 }
 
 function disconnect() {
@@ -887,33 +921,56 @@ async function deployWith(token, account) {
 }
 
 // ---------- Bridge AI's hosted relay ----------
-// No account and no deploying: the relay gives this computer an address of its own and a token
-// (once), and Bridge AI connects to it as to any relay. The project keeps it up to date.
+// No Cloudflare account and no deploying: with a Bold Bridge account that may use it, the relay
+// gives this computer an address of its own and a token, and Bridge AI connects to it as to any
+// relay. The same computer (the same device on the account) gets the same address back. The project
+// keeps it up to date.
+// What's missing, said where the relay is offered (Settings › Devices, setup, the command line),
+// with the code the app offers a fix for: sign in, ask for it, wait for it, or nothing to be done.
+function needsAccount(st) {
+  const say = (code, text) => { throw Object.assign(new Error(text), { code }) }
+  if (!st.signedIn) say('accountSignIn', 'Bridge AI\'s relay comes with a Bold Bridge account. Sign in first, in Settings › Account: it takes your email and a code.')
+  if (st.status === 'suspended') say('accountSuspended', 'Your Bold Bridge account is suspended, so it can\'t use Bridge AI\'s relay for now. Your own Cloudflare or Tailscale still work.')
+  if (st.relay === 'requested') say('accountRequested', 'You\'ve asked for Bridge AI\'s relay, and the request is waiting. Bold Bridge emails you when it\'s on.')
+  if (st.relay === 'declined') say('accountDeclined', 'Your request for Bridge AI\'s relay was declined. Ask again in Settings › Account, or use your own Cloudflare or Tailscale.')
+  if (st.relay !== 'approved') say('accountRequest', 'Your Bold Bridge account doesn\'t have Bridge AI\'s relay yet. Ask for it in Settings › Devices or Settings › Account.')
+}
 async function useHosted() {
   const where = hostedBase()
-  if (!where) throw new Error('Bridge AI\'s relay isn\'t available yet. Use your own Cloudflare account, or Tailscale.')
+  if (!where || !accountsOn()) throw new Error('Bridge AI\'s relay isn\'t available yet. Use your own Cloudflare account, or Tailscale.')
   if (conf.hosted && conf.url && limit?.why !== 'gone') return status() // (gone: it forgot this computer, so again)
+  needsAccount(acct.relayState())
   busy = 'Setting up Bridge AI\'s relay…'
   try {
-    const res = await fetch(`${where}/_relay/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version: VERSION }), signal: AbortSignal.timeout(20000) })
-    const d = await res.json().catch(() => ({}))
-    // Full (it takes so many computers at once): said wherever it's offered, with the other ways.
+    const ask = async () => {
+      const token = await acct.relayToken()
+      if (!token) needsAccount({ ...acct.relayState(), relay: acct.relayState().relay === 'approved' ? 'none' : acct.relayState().relay })
+      const res = await fetch(`${where}/_relay/register`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ version: VERSION }), signal: AbortSignal.timeout(20000) })
+      return { res, d: await res.json().catch(() => ({})) }
+    }
+    let { res, d } = await ask()
+    // Its pass ran out on the way (or the clock here is off): the account's newest, once.
+    if (d.why === 'token' && d.token === 'expired') { await acct.refresh(); ({ res, d } = await ask()) }
+    // Full (it takes so many accounts at once): said wherever it's offered, with the other ways.
     if (d.why === 'full') {
       hostedFull = { at: Date.now(), text: String(d.error || 'Bridge AI\'s relay is full for now.').slice(0, 400) }
       throw Object.assign(new Error(hostedFull.text), { code: 'hostedFull' })
     }
+    if (['suspended', 'relay', 'deleted'].includes(d.why)) { acct.refresh().catch(() => {}); throw Object.assign(new Error(d.error), { code: 'accountStopped' }) }
     if (!res.ok || !d.id || !d.url || !d.token) throw new Error(d.error || `Bridge AI's relay answered ${res.status}. Try again in a minute.`)
     hostedFull = null
     let ok = false
     try { const u = new URL(d.url); ok = u.protocol === new URL(where).protocol && u.host === `${d.id}.${new URL(where).host}` } catch { /* not a URL */ }
     if (!ok) throw new Error('Bridge AI\'s relay gave an address that isn\'t its own')
     // From another relay: its phones pair again with this one (each relay is its own address).
-    leave()
+    if (conf.url !== d.url.replace(/\/$/, '')) leave()
     conf = { ...conf, url: d.url.replace(/\/$/, ''), token: d.token, hosted: { id: d.id, at: new Date().toISOString() } }
+    limit = null
     save()
+    disconnect()
     connect()
   } catch (e) {
-    if (e.code === 'hostedFull') throw e // said by status().hostedFull (for an hour), not as an error
+    if (['hostedFull', 'accountStopped'].includes(e.code) || /^account/.test(e.code || '')) throw e // said in place, not as an error
     lastError = e.name === 'TimeoutError' ? 'Bridge AI\'s relay didn\'t answer. Try again in a minute.' : /fetch failed|ENOTFOUND|ECONNREFUSED/.test(e.message) ? 'Can\'t reach Bridge AI\'s relay. Check the internet connection and try again.' : e.message
     throw new Error(lastError)
   } finally {
@@ -931,7 +988,7 @@ function leave() {
   conns.clear()
   pairing = null
   limit = null
-  plan = null
+  use = null
   relayBuild = null
   // (Which Worker was yours on Cloudflare stays, so going back to it updates that one.)
   conf = { key: was.key, awake: was.awake, ...(was.leaving ? { leaving: was.leaving } : {}), ...(was.cf?.script ? { cf: { account: was.cf.account, accountName: was.cf.accountName, script: was.cf.script } } : {}) }
@@ -1046,7 +1103,7 @@ export async function update() {
 export function forget() {
   if (conf.hosted) unregister(conf)
   limit = null
-  plan = null
+  use = null
   disconnect()
   for (const c of conns.values()) c.end()
   conns.clear()

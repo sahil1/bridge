@@ -55,7 +55,7 @@ function PaceBar({ w, level, pace = true }) {
   )
 }
 
-function WindowRow({ w }) {
+export function WindowRow({ w }) {
   const h = health(w)
   const runsOut = w.pace?.projectedExhaustedAt && w.resetsAt && new Date(w.pace.projectedExhaustedAt) < new Date(w.resetsAt)
   return (

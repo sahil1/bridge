@@ -65,8 +65,8 @@ export async function api(path, opts = {}) {
   })
   const data = await res.json().catch(() => ({}))
   // code: set when the app can offer a fix (EPERM, noBrew, calendarAccess...). status: there was an
-  // answer (a failed fetch has none).
-  if (!res.ok) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), { status: res.status }, data.code ? { code: data.code } : {})
+  // answer (a failed fetch has none). data: all of it (what came with it: the account's devices...).
+  if (!res.ok) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), { status: res.status, data }, data.code ? { code: data.code } : {})
   return data
 }
 
