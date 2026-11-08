@@ -8,7 +8,7 @@ import * as P from '../pptxdoc.js'
 import * as X from '../pptxtext.js'
 import { slideHtml, SLIDE_CSS, paraAttrs, runCss, missingIn } from '../pptxdraw.js'
 import { Item, Swatches, Glyph, COMMON_FONTS, SIZES, fontHere } from '../doctools.jsx'
-import { Menu, Present, DeckFind, AiPanel, useSize } from './DeckParts.jsx'
+import { Menu, Present, DeckFind, AiPanel, deckAssist, useSize } from './DeckParts.jsx'
 import { deckRenderer, PLAIN } from '../deck.js'
 import { slidesOf } from '../pptx.js'
 import '../deck.css'
@@ -1048,6 +1048,7 @@ function Slides({ doc, file, onDirty, onStats, handle, readOnly = false, onOpen 
       const text = s && !s.isCollapsed && canvasRef.current?.contains(s.anchorNode) ? s.toString() : P.textsOf(slidesRef.current[curRef.current]).map((x) => P.plainOf(x.t)).join('\n')
       return text ? { text, where: t('slide {n}', { n: curRef.current + 1 }) } : null
     },
+    assist: () => (readOnly ? [] : deckAssist(aiOpen, aiMode, (m) => { if (aiOpen && aiMode === m) setAiOpen(false); else { setAiMode(m); setAiOpen(true) } })),
   }
   const printPdf = () => {
     flushTyping()
@@ -1177,7 +1178,6 @@ function Slides({ doc, file, onDirty, onStats, handle, readOnly = false, onOpen 
         )}
         <span className="sd-grow" />
         <div className="sd-group">
-          {!readOnly && <Btn name={t('Write with AI')} icon="sparkle" on={aiOpen} run={() => setAiOpen((x) => !x)} tip={t('Write a deck, rewrite a slide or add one, with AI: you see it before it\'s taken')} />}
           <Btn name={t('Find and replace')} icon="search" run={() => setFind({ replace: true, n: Date.now() })} k={['mod', 'f']} />
           <Btn name={t('Grid')} icon="grid" on={grid} run={() => { flushTyping(); setEdit(null); setGrid((x) => !x) }} tip={t('Every slide at once, to see the whole deck and drag slides into order')} />
         </div>

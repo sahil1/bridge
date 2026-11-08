@@ -28,6 +28,12 @@ import { spawnSync } from 'node:child_process'
 import { startKit, startModel, checks, until, sleep, browser, page, shot, ROOT } from '../lib/harness.mjs'
 
 const { ok, done } = checks('whiteboard-v2')
+// AI Assist, at the right end of a board's header (or a diagram file's bar), and one of its verbs:
+// Draw this or Change it.
+const assist = async (pg, verb = 'Draw this', bar = '.wb-view .pane-extras') => {
+  await pg.locator(`${bar} button[aria-label="AI Assist"]`).click()
+  await pg.locator('.ai-menu button', { hasText: verb }).click()
+}
 const model = await startModel('whiteboard-v2')
 const kit = await startKit('whiteboard-v2', { env: { OLLAMA_HOST: model.url, LM_STUDIO_BASE_URL: `${model.url}/v1` } })
 const { b, which } = await browser()
@@ -405,7 +411,7 @@ try {
 
   await part('PDF export', async () => {
     const early = pdfCode.length
-    await p.locator('.wb-draw .win-btn[aria-label="Close"]').click().catch(() => {})
+    await p.locator('.wb-draw .win-btn[aria-label="Close AI Assist"]').click().catch(() => {})
     await p.getByRole('button', { name: 'Export' }).click()
     const dl = await download('Export as PDF')
     const out = path.join(kit.dir, 'board.pdf')
@@ -494,8 +500,8 @@ try {
   await part('versions from another time', async () => {
     // The board opened again (after other boards): its last Refine is still there to pick from.
     await openBoard(board)
-    if (await p.locator('.wb-draw').count()) await p.locator('.wb-draw .win-btn[aria-label="Close"]').click()
-    await p.getByRole('button', { name: 'Draw this' }).first().click()
+    if (await p.locator('.wb-draw').count()) await p.locator('.wb-draw .win-btn[aria-label="Close AI Assist"]').click()
+    await assist(p)
     const head = p.locator('.wb-rounds-head', { hasText: 'Last Refine' })
     ok(await until(() => head.count(), 5000) && (await p.locator('.wb-versions .chip').allInnerTexts()).join('|') === 'Draft|Round 1|Round 2' && /4 calls/.test(await head.innerText()), 'opened again later, Draw this shows the board\'s last Refine, its versions and what it cost', await p.locator('.wb-draw').innerText().catch(() => ''))
     const rds = () => texts(readBoard(board)).filter((x) => x === 'RDS').length
@@ -509,7 +515,7 @@ try {
 
   await part('a model on this computer, in the app', async () => {
     const before = model.requests().length
-    if (!(await p.locator('.wb-draw').count())) await p.getByRole('button', { name: 'Draw this' }).first().click()
+    if (!(await p.locator('.wb-draw').count())) await assist(p)
     await p.locator('.wb-draw [role="tab"]', { hasText: 'Draw this' }).click()
     await p.locator('.wb-draw select.wb-model').selectOption('ollama:llama3.1:8b')
     const said = await p.locator('.wb-privacy').innerText()

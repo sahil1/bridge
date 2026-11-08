@@ -13,6 +13,7 @@ import { FixWord, TranscribeAgain, useChatModels, NOTE_LANGS, Dialog, openMemory
 import { Menu as AtMenu } from '../FileExtras.jsx'
 import { FilesPane, linkFiles } from './context.jsx'
 import { AssistPane, setAssist } from './assist.jsx'
+import AiAssist from '../AiAssist.jsx'
 import PermissionFix from '../PermissionFix.jsx'
 import { MicFix } from '../Composer.jsx'
 import { sendPicture, pictureUrl } from './screen.js'
@@ -76,8 +77,8 @@ function AskScreen() {
 }
 
 // The controls while this meeting records. The call's level comes from the server (data.levels).
-// Assist turns AI Assist on or off (onAssist: then shows it).
-function RecordingBar({ id, data, onAssist }) {
+// AI Assist's Suggest what to ask is in the meeting's header, with the rest of what AI Assist does.
+function RecordingBar({ id, data }) {
   const m = useMeetings()
   // A phone stops the mic of an app that isn't in front, or once its screen locks.
   const phone = useMedia('(pointer: coarse)') || !!window.bridgeNative || !!window.bridgeAndroid
@@ -94,8 +95,6 @@ function RecordingBar({ id, data, onAssist }) {
       {m.screen && <span className="mt-watching small" title={t('A picture is kept each time {name} changes', { name: m.screen.label })}><Icon name="eye" size={12} /> {m.screen.label}</span>}
       {data?.sections?.length > 0 && <span className="mt-watching small" title={t("The part of the meeting it's in now")}><Icon name="flag" size={12} /> {data.sections[data.sections.length - 1].title}</span>}
       <span className="mt-grow" />
-      <button type="button" className={`btn small mt-assist-btn${data?.assist ? ' on' : ''}`} aria-pressed={!!data?.assist} onClick={() => setAssist(id, !data?.assist).then(() => onAssist?.(!data?.assist), () => {})}
-        title={data?.assist ? t('AI Assist is on: it suggests what to ask or check next. Click to turn it off') : t('Turn on AI Assist: while it records, it suggests what to ask or check next, from what\'s said and the files')}><Icon name="bulb" size={13} /> {t('Assist')}</button>
       <ScreenButton m={m} />
       <SectionButton m={m} />
       {r.paused
@@ -359,7 +358,7 @@ function Line({ l, id, me, onSaved, onError, onWho }) {
       {l.key && edit == null && (
         <span className="mt-line-acts">
           {l.edited && <button type="button" className="link-btn small" onClick={() => put(null)} title={t('Heard: {text}', { text: l.heard })}>{t('Undo')}</button>}
-          {!l.edited && (l.cleaned || l.dropped) && <button type="button" className="link-btn small" onClick={unclean} title={t('Heard: {text}', { text: l.heard })}>{l.dropped ? t('Put back') : t('Undo')}</button>}
+          {!l.edited && (l.cleaned || l.dropped) && <button type="button" className="link-btn small" onClick={unclean} title={t('Heard: {text}', { text: l.heard })}>{l.dropped ? t('Restore') : t('Undo')}</button>}
           <button type="button" className="ghost-btn" onClick={() => setNote('')} aria-label={t('Add a note here')} title={t('Add a note at {time}', { time: clock(l.t0) })}><Icon name="plus" size={12} /></button>
           <button type="button" className="ghost-btn" onClick={() => setEdit(l.text)} aria-label={t('Edit this line')} title={t('Edit this line')}><Icon name="edit" size={12} /></button>
         </span>
@@ -407,7 +406,7 @@ function SectionHead({ id, s, i, onChange, onError }) {
         : <button type="button" className="mt-sec-name" onClick={() => setName(s.title)} title={t('Click to rename')}>{s.title}</button>}
       <span className="mt-t">{clock(s.t)}</span>
       <span className="mt-grow" />
-      <button type="button" className="ghost-btn" onClick={remove} aria-label={t('Take out {name}', { name: s.title })} title={t('Take this section out. What was said in it goes to the section before.')}><Icon name="x" size={12} /></button>
+      <button type="button" className="ghost-btn" onClick={remove} aria-label={t('Remove {name}', { name: s.title })} title={t('Remove this section. What was said in it goes to the section before.')}><Icon name="x" size={12} /></button>
     </div>
   )
 }
@@ -495,7 +494,7 @@ function WrittenFrom({ from, onView }) {
 // ⋯), then the view: the summary, your notes, the transcript or its files, with the transcript
 // beside the first three on a wide screen. Each has its own Copy. While it records, your notes stay
 // in view whatever else you look at: beside it on a wide screen, above it on a phone.
-const VIEWS = [['summary', 'sparkle', tx('Summary')], ['assist', 'bulb', tx('Assist')], ['mine', 'edit', tx('My notes')], ['transcript', 'chat', tx('Transcript')], ['files', 'paperclip', tx('Files')]]
+const VIEWS = [['summary', 'sparkle', tx('Summary')], ['assist', 'bulb', tx('Suggestions')], ['mine', 'edit', tx('My notes')], ['transcript', 'chat', tx('Transcript')], ['files', 'paperclip', tx('Files')]]
 const here = onThisComputer
 const tilde = (p) => String(p || '').replace(/^\/Users\/[^/]+/, '~')
 // For <input type="datetime-local">: the time where you are.
@@ -541,6 +540,7 @@ export function MeetingPage({ id, onBack }) {
   const [dropping, setDropping] = useState(false)
   const mineRef = useRef(null)
   const colsRef = useRef(null)
+  const pageRef = useRef(null)
   const saveT = useRef(null)
   const known = useRef(null) // the notes as the server last had them
   const listRef = useRef(null)
@@ -735,7 +735,7 @@ export function MeetingPage({ id, onBack }) {
   const done = data.status === 'done'
   const recording = isRecording
   // While it records, your notes are always shown, so the views are what goes with them: the
-  // transcript, or AI Assist's suggestions when it's on. After, the summary once it's being written.
+  // transcript, or AI Assist's suggestions when they're on. After, the summary once it's being written.
   const showing = recording
     ? (view && view !== 'mine' ? view : data.assist ? 'assist' : 'transcript')
     : view || (data.summary || data.summarizing || data.summaryError ? 'summary' : 'mine')
@@ -789,7 +789,7 @@ export function MeetingPage({ id, onBack }) {
     { icon: 'edit', label: t('Only this line…'), run: () => setNaming({ l, name: '' }) },
     (l.name || l.me) && { icon: 'undo', label: t('Back to Speaker {n}', { n: l.voice }), run: () => nameVoice(l.voice, { name: null }) },
     'sep',
-    { icon: 'sparkle', label: t('Work out who each voice is'), run: nameAll },
+    { icon: 'wand', label: t('Work out who each voice is'), run: nameAll },
   ]
   const whoItems = (l) => (l.voice ? voiceItems(l) : [
     ...names.filter((x) => x !== l.name).slice(0, 12).map((x) => ({ icon: 'users', label: x, run: () => nameLine(l, x) })),
@@ -797,7 +797,7 @@ export function MeetingPage({ id, onBack }) {
     l.name && 'sep',
     l.name && { icon: 'undo', label: l.src === 'them' ? t('Back to Them') : t('Back to You'), run: () => nameLine(l, null) },
     heard && 'sep',
-    heard && { icon: 'sparkle', label: t('Work out who said each line'), run: nameAll },
+    heard && { icon: 'wand', label: t('Work out who said each line'), run: nameAll },
     canTell && !voiced && 'sep',
     canTell && !voiced && { icon: 'users', label: t('Tell the voices apart'), run: tellVoices },
   ])
@@ -806,6 +806,19 @@ export function MeetingPage({ id, onBack }) {
       : data.summaryError ? ['blocked', t('Notes later')] : ['done', t('Done')]
   const who = data.event?.attendees || []
   const savedDir = data.saved ? tilde(data.saved.replace(/\/[^/]+$/, '')) : null
+  // AI Assist, at the header's right end (before ⋯): suggestions while it records, then the
+  // summary, the transcript's cleanup, who said what, a question about it and a deck of it.
+  const asking = () => { const box = pageRef.current?.querySelector('.mt-askbox input'); box?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); box?.focus({ preventScroll: true }) }
+  const suggesting = () => act('assist', async () => { const on = !data.assist; await setAssist(id, on); if (on) setView('assist') })
+  const assists = () => [
+    recording && { label: t('Suggest what to ask'), hint: t('While it records: what to ask, raise or check next, from what\'s said, the invite and the files'), on: !!data.assist, run: suggesting },
+    !recording && lines.length > 0 && { label: data.summary ? t('Write the summary again') : t('Write the summary'), hint: t('With the language, model and template under Summary'), disabled: busy === 'summary' || data.summarizing, run: summarize },
+    done && lines.length > 0 && { label: data.cleanedAt ? t('Clean up the transcript again') : t('Clean up the transcript'), hint: t('Misheard words and names fixed, and what nobody said left out'), disabled: busy === 'clean', run: cleanUp },
+    heard && { label: t('Work out who said each line'), hint: t('From names said, the screen and who was invited'), disabled: busy === 'who', run: nameAll },
+    canTell && voiced && { label: t('Work out who each voice is'), hint: t('From names said and who was invited'), disabled: busy === 'who' || !!working, run: nameAll },
+    (lines.length > 0 || data.summary) && { label: t('Ask about this meeting'), hint: t("What was decided, who's doing what, a follow-up email"), run: asking },
+    studio && done && (data.summary || lines.length > 0) && { label: t('Make a deck'), hint: t('Written by the notes model, opened in Studio'), disabled: busy === 'deck', run: makeDeck },
+  ]
 
   // When it was, who was there and where it's saved: under the name on a wide screen, at the top of
   // the page on a phone.
@@ -860,26 +873,24 @@ export function MeetingPage({ id, onBack }) {
       </div>
       {wide && !recording && showing !== 'transcript' && <button type="button" className={`win-btn${split ? ' on' : ''}`} onClick={() => setSplit(!split)} aria-pressed={split} aria-label={split ? t('Hide the transcript beside it') : t('Show the transcript beside it')} title={split ? t('Hide the transcript beside it') : t('Show the transcript beside it')}><Icon name="panel-right" size={14} /></button>}
       <button type="button" className="win-btn mt-hb" onClick={save} disabled={busy === 'save'} aria-label={t('Save')} title={t('Save as Markdown in your notes folder')}><Icon name="download" size={14} /></button>
+      <AiAssist className="btn small mt-ai-btn" compact={phone} on={recording && !!data.assist} items={assists} />
       <span className="menu-anchor">
         <button type="button" className="win-btn" onClick={() => setMenu(!menu)} aria-label={t('More actions')} title={t('More')}><Icon name="more" size={14} /></button>
         {menu && <Menu onClose={() => setMenu(false)} items={[
           { icon: 'download', label: t('Save as Markdown'), run: save },
           data.saved && here() && { icon: 'folder-open', label: t('Show saved notes in Finder'), run: reveal },
           atActions(data.summary) && { icon: 'helm', label: t('Send action items to Chief of Staff'), run: toChief },
-          studio && done && (data.summary || lines.length > 0) && { icon: 'screen', label: t('Make a deck'), run: makeDeck },
           '-',
           { icon: 'edit', label: t('Fix a word everywhere'), run: () => setFix({ from: '' }) },
           done && { icon: 'refresh', label: t('Transcribe again…'), run: () => setDialog('again') },
-          done && lines.length > 0 && { icon: 'sparkle', label: data.cleanedAt ? t('Clean up the transcript again') : t('Clean up the transcript'), run: cleanUp },
           done && data.cleanedAt && { icon: 'undo', label: t('Undo the cleanup'), run: uncleanAll },
           data.pending > 0 && { icon: 'refresh', label: t('Transcribe the missed parts again'), run: () => act('retry', () => api(`/meetings/${encodeURIComponent(id)}/retry`, { method: 'POST' })) },
           { icon: 'book', label: t('Open Memory'), run: openMemory },
-          heard && { icon: 'users', label: t('Work out who said each line'), run: nameAll },
-          canTell && { icon: 'users', label: voiced ? t('Work out who each voice is') : t('Tell the voices apart'), run: voiced ? nameAll : tellVoices },
+          canTell && !voiced && { icon: 'users', label: t('Tell the voices apart'), run: tellVoices },
           '-',
           { icon: 'folder', label: data.folder ? t('In "{folder}": move…', { folder: data.folder }) : t('Move to a folder…'), run: () => setDialog('folder') },
           !live && data.status !== 'recording' && data.status !== 'paused' && (data.archived
-            ? { icon: 'archive', label: t('Take out of the archive'), run: () => archive(false) }
+            ? { icon: 'archive', label: t('Unarchive'), run: () => archive(false) }
             : { icon: 'archive', label: t('Archive'), run: () => archive(true) }),
           { icon: 'trash', label: t('Delete meeting…'), danger: true, run: remove },
         ]} />}
@@ -951,7 +962,7 @@ export function MeetingPage({ id, onBack }) {
       <div className="mt-phead mt-toolbar">
         {done && (
           <div className="mt-tools" role="group" aria-label={t('The summary')}>
-            <button type="button" className="mt-tool lead" onClick={summarize} disabled={busy === 'summary' || data.summarizing}><Icon name="sparkle" size={13} /> {data.summary ? t('Regenerate') : t('Summarize')}</button>
+            <button type="button" className="mt-tool lead" onClick={summarize} disabled={busy === 'summary' || data.summarizing}><Icon name="wand" size={13} /> {data.summary ? t('Regenerate') : t('Summarize')}</button>
             <label className="mt-tool" title={t('The language the notes are written in')}><small>{t('Language')}</small>
               <select value={o.language} onChange={(e) => setOpts({ ...o, language: e.target.value })} aria-label={t('Language of the notes')}>{NOTE_LANGS.map(([v, l]) => <option key={v} value={v}>{v === 'auto' ? t('Auto') : t(l)}</option>)}</select>
             </label>
@@ -1000,7 +1011,7 @@ export function MeetingPage({ id, onBack }) {
       {data.summary && data.summaryNote && !data.summarizing && <p className="muted small">{data.summaryNote.replace(/[a-z]+:[\w./:-]+/gi, (x) => modelName(models, x))}</p>}
     </section>
   ) : showing === 'mine' ? mine : showing === 'assist' ? (
-    <section className="mt-notes" aria-label={t('AI Assist')}><AssistPane id={id} data={data} onChange={refresh} onMsg={setMsg} /></section>
+    <section className="mt-notes" aria-label={t('Suggestions')}><AssistPane id={id} data={data} onChange={refresh} onMsg={setMsg} /></section>
   ) : showing === 'files' ? (
     <section className="mt-notes" aria-label={t('Files')}><FilesPane id={id} data={data} onChange={refresh} onMsg={setMsg} shots={shots} pictureUrl={pictureUrl} onOpenPic={openPic} /></section>
   ) : null
@@ -1008,9 +1019,9 @@ export function MeetingPage({ id, onBack }) {
   return (
     <div className="mt-view">
       {head}
-      <div className={`mt-page${dropping ? ' dropping' : ''}`} onDragOver={(e) => { if ([...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); setDropping(true) } }} onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDropping(false) }} onDrop={onDrop}>
+      <div ref={pageRef} className={`mt-page${dropping ? ' dropping' : ''}`} onDragOver={(e) => { if ([...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); setDropping(true) } }} onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDropping(false) }} onDrop={onDrop}>
         {phone && <div className="mt-meta">{meta}</div>}
-        <RecordingBar id={id} data={data} onAssist={(on) => { refresh(); if (on) setView('assist') }} />
+        <RecordingBar id={id} data={data} />
         {(recording || Date.now() - Date.parse(data.startedAt) < 36 * 3600e3) && <SinceLastTime path={`/meetings/${encodeURIComponent(id)}/since`} onOpen={(mid) => window.dispatchEvent(new CustomEvent('bridge-open-meeting', { detail: { id: mid } }))} />}
         {(data.status === 'recording' || data.status === 'paused') && <SpeechSetup recording />}
         {!live && (data.status === 'recording' || data.status === 'paused') && <p className="muted small">{t('This meeting is recording in another window.')}</p>}

@@ -5,18 +5,19 @@
 // version by them; an older version put back keeps the one before too; a new file never
 // overwrites; design packs. The page: Studio's home with New and Recent; a Markdown file edited
 // and saved; a Word file's text; a sheet, still saved until a value's typed in, then saved with it; a deck drawn, and its PowerPoint beside it; a page drawn
-// as it's typed; versions and Put back; Ask an agent queueing the change for the agent you pick.
+// as it's typed; versions and Restore; Ask an agent queueing the change for the agent you pick.
 // The editors finished: a Markdown file's toolbar (only what Markdown keeps), a Word file in its own
 // look saved with every other part as it was (its editor in full is studio-docs.mjs); the header's
 // kind, size and folder never cut off; the status line; each kind saying what it is and what it
 // can't do; on 375 and 430 px phones, Studio's home and a document fitting.
-// A sheet: Excel's ribbon with Ask AI first, the name box and tabs; Ask AI on the cells picked,
-// the agent told to answer with the change, which is shown on the sheet before it's made, kept and
-// saved, or put back; a summary beside it; a chart drawn first, then in Charts and saved as an
+// A sheet: Excel's ribbon, the name box and tabs; AI Assist at the right end of the header with a
+// sheet's verbs; its panel on the cells picked, the agent told to answer with the change, which is
+// shown on the sheet before it's made, kept and saved, or discarded; a summary beside it; a chart
+// drawn first, then in Charts and saved as an
 // Excel chart; an answer that isn't JSON said. An Excel file with a chart, a note, a dropdown and
 // more, one cell changed and saved: every other part the same bytes, and read back the same. A CSV
 // in semicolons with a BOM and Windows line endings, saved back the same but for the one field.
-// On phones, a sheet and Ask AI fitting; a sheet in the dark look.
+// On phones, a sheet and AI Assist's panel fitting; a sheet in the dark look.
 // Focus: each kind (a Word file, Markdown, a sheet, a deck, a page, a PDF) given the whole window
 // with its toolbar and status line; its key, Esc (not while a menu's open) and ⌘. leaving; a save
 // that can't be made said in it; kept for each kind after a reload; the browser's full screen with
@@ -329,20 +330,29 @@ try {
   const cellsOf = async () => { try { const x = new ExcelJS.Workbook(); await x.xlsx.readFile(path.join(dir, 'budget.xlsx')); const s = x.getWorksheet('Budget'); return { B3: s.getCell('B3').value, B4: s.getCell('B4').value, A1bold: !!s.getCell('A1').font?.bold } } catch { return null } }
   const sheetSaved = await until(async () => { const c = await cellsOf(); return c?.B3 === 950 && c.B4?.formula === 'SUM(B2:B3)' && c.B4.result === 1070 && c.A1bold && (await sheetState()) === 'Saved' && c }, 10000)
   ok(!!sheetSaved && !(await p.locator('.sd-conflict[role="alertdialog"]').count()), 'saved: the file has the value, its total worked out again (1070), and its bold heading; the status line says Saved, with nothing to warn of first', { cells: await cellsOf(), state: await sheetState() })
-  // The ribbon as Excel's: Ask AI first, then the clipboard, fonts, alignment and number formats;
-  // the formula bar with its name box; the sheet's tabs; Charts under Insert.
+  // The ribbon as Excel's: the clipboard, fonts, alignment and number formats; the formula bar
+  // with its name box; the sheet's tabs; Charts under Insert. AI Assist isn't in it but at the
+  // right end of the page's header, as everywhere.
   const ribbon = await p.evaluate(() => {
     const u = document.querySelector('.sd-univer')
     const cmd = (id) => !!u.querySelector(`[data-u-command="${id}"]`)
     return { ask: cmd('bridge.sheet.ask-ai'), first: u.querySelector('[data-u-command]')?.getAttribute('data-u-command'), tabs: [...u.querySelectorAll('[role="tablist"] [role="tab"], [data-u-comp="ribbon-tab"]')].map((e) => e.textContent.trim()).filter(Boolean), names: [...u.querySelectorAll('input')].map((i) => i.value), sheets: u.innerText.includes('Budget') }
   })
-  ok(ribbon.ask && ribbon.first === 'bridge.sheet.ask-ai' && ribbon.names.some((v) => /^[A-Z]+\d+$/.test(v)) && ribbon.sheets, 'a sheet\'s ribbon: Ask AI first; the formula bar\'s name box; its sheet\'s tab', ribbon)
+  ok(!ribbon.ask && ribbon.names.some((v) => /^[A-Z]+\d+$/.test(v)) && ribbon.sheets, 'a sheet\'s ribbon: Excel\'s, with no AI button of its own; the formula bar\'s name box; its sheet\'s tab', ribbon)
+  const wand = p.locator('.pane-head .pane-extras button[aria-label="AI Assist"]')
+  ok(await wand.evaluate((e) => !e.nextElementSibling), 'AI Assist is at the right end of the header')
+  await wand.click()
+  const verbs = await p.locator('.ai-menu .ai-item-label').allInnerTexts()
+  ok(JSON.stringify(verbs) === JSON.stringify(['Write a formula', 'Clean this column', 'Summarize these cells', 'Make a chart', 'Ask about these cells']), 'a sheet\'s AI Assist: Write a formula, Clean this column, Summarize these cells, Make a chart, Ask about these cells', verbs)
+  await shot(p, `${tag}studio-sheet-ai-menu`)
+  await p.keyboard.press('Escape')
+  ok(!(await p.locator('.ai-menu').count()), 'Esc closes its menu')
   const sheetCell = async (file, sheet, a1) => { const x = new ExcelJS.Workbook(); await x.xlsx.load(fs.readFileSync(path.join(dir, file))); return x.getWorksheet(sheet).getCell(a1).value }
-  // Ask an agent on a sheet: Ask AI beside it, about the cells picked, to the agent at work there.
+  // Ask an agent on a sheet: AI Assist's panel beside it, about the cells picked, to the agent at work there.
   await goTo('B2')
   await p.locator('.pane-head button', { hasText: 'Ask an agent' }).click()
   const askAi = p.locator('.sh-ask')
-  ok(!!(await until(async () => /B2/.test(await askAi.locator('.sh-picked').innerText().catch(() => '')) && /on Budget/.test(await askAi.innerText()) && /1 cell/.test(await askAi.innerText()), 5000)), 'Ask an agent on a sheet: Ask AI beside it, about the cell picked (B2 on Budget)', await askAi.innerText().catch(() => ''))
+  ok(!!(await until(async () => /B2/.test(await askAi.locator('.sh-picked').innerText().catch(() => '')) && /on Budget/.test(await askAi.innerText()) && /1 cell/.test(await askAi.innerText()), 5000)), 'Ask an agent on a sheet: AI Assist\'s panel beside it, about the cell picked (B2 on Budget)', await askAi.innerText().catch(() => ''))
   ok(!!(await until(async () => (await askAi.locator('.sh-to select').inputValue()) === agent.paneId, 5000)), 'and it goes to the agent at work there unless you pick another', await askAi.locator('.sh-to select').inputValue().catch(() => ''))
   ok(JSON.stringify(await askAi.locator('.sh-chip').allInnerTexts()) === JSON.stringify(['Write a formula', 'Clean this column', 'Summarise', 'Chart this']) && !(await bare(p)).length, 'its quick asks: a formula, a cleaned-up column, a summary, a chart; no bare controls', { chips: await askAi.locator('.sh-chip').allInnerTexts(), bare: await bare(p) })
   await shot(p, `${tag}studio-sheet-ask`)
@@ -355,7 +365,7 @@ try {
   await askAi.locator('.sh-send').click()
   const proposed = (x) => /In budget\.xlsx: Write a formula/.test(x) && /Don't change the file itself/.test(x) && /\.budget\.xlsx\.studio-change\.json/.test(x) && /B2 on Budget/.test(x) && /120/.test(x)
   const told = await until(async () => proposed(typed()) || Object.values((await api('/fleet')).queue || {}).flat().some((i) => proposed(i.text || '')), 20000)
-  ok(!!told && /Asked/.test(await askAi.locator('.sh-wait').innerText().catch(() => '')), 'sent: the cell and its value, and to write the change beside the file rather than make it; Ask AI waits for it', { typed: typed().slice(-600), wait: await askAi.innerText().catch(() => '') })
+  ok(!!told && /Asked/.test(await askAi.locator('.sh-wait').innerText().catch(() => '')), 'sent: the cell and its value, and to write the change beside the file rather than make it; AI Assist waits for it', { typed: typed().slice(-600), wait: await askAi.innerText().catch(() => '') })
   const change = path.join(dir, '.budget.xlsx.studio-change.json')
   fs.writeFileSync(change, JSON.stringify({ summary: 'Doubled each cost in column C', sheet: 'Budget', cells: { C1: 'Doubled', C2: '=B2*2', C3: '=B3*2' } }))
   const shown = p.locator('.sh-change')
@@ -366,16 +376,16 @@ try {
   await p.locator('.pane-head button', { hasText: 'Save' }).click()
   const c2 = await until(async () => { const v = await sheetCell('budget.xlsx', 'Budget', 'C2').catch(() => null); return v?.formula ? v : null }, 10000)
   ok(c2?.formula === 'B2*2' && c2.result === 240 && (await sheetCell('budget.xlsx', 'Budget', 'C1')) === 'Doubled', 'kept and saved: the formulas in the file, with their results', c2)
-  // Another, put back: the cells as they were.
+  // Another, discarded: the cells as they were.
   await askAi.locator('textarea').fill('Rename the first column')
   await askAi.locator('.sh-send').click()
   await until(async () => /Asked/.test(await askAi.locator('.sh-wait').innerText().catch(() => '')), 10000)
   fs.writeFileSync(change, JSON.stringify({ summary: 'Renamed it', cells: { A1: 'Thing' } }))
   await until(async () => (await shown.count()) > 0, 10000)
-  await shown.locator('button', { hasText: 'Put back' }).click()
+  await shown.locator('button', { hasText: 'Discard' }).click()
   await p.locator('.pane-head button', { hasText: 'Save' }).click().catch(() => {})
   await sleep(1500)
-  ok((await sheetCell('budget.xlsx', 'Budget', 'A1')) === 'Item', 'put back: nothing of it is left in the file', await sheetCell('budget.xlsx', 'Budget', 'A1'))
+  ok((await sheetCell('budget.xlsx', 'Budget', 'A1')) === 'Item', 'discarded: nothing of it is left in the file', await sheetCell('budget.xlsx', 'Budget', 'A1'))
   // Summarise: an answer, said beside the sheet; nothing to keep.
   await askAi.locator('.sh-chip', { hasText: 'Summarise' }).click()
   await askAi.locator('.sh-send').click()
@@ -408,14 +418,17 @@ try {
   ok(!!(await until(async () => /<autoFilter ref="A1:C3"/.test(await sheetXml()), 10000)), 'Data › Filter on the cells picked: saved as an Excel filter on them', (await sheetXml()).slice(-600))
   await p.locator('.sd-univer [role="tab"]', { hasText: 'Start' }).click()
   // A change that can't be read is said, not dropped.
-  await p.locator('.sd-univer [data-u-command="bridge.sheet.ask-ai"]').click({ timeout: 3000 }).catch(async () => { await p.locator('.sd-univer [role="tab"]', { hasText: 'Start' }).first().click(); await p.locator('.sd-univer [data-u-command="bridge.sheet.ask-ai"]').click() })
+  if (!(await askAi.isVisible())) {
+    await p.locator('.pane-head button[aria-label="AI Assist"]').click()
+    await p.locator('.ai-menu button', { hasText: 'Ask about these cells' }).click()
+  }
   await askAi.locator('textarea').fill('Anything')
   await askAi.locator('.sh-send').click()
   await until(async () => /Asked/.test(await askAi.locator('.sh-wait').innerText().catch(() => '')), 10000)
   fs.writeFileSync(change, '{ not json')
   ok(!!(await until(async () => /isn't JSON Studio can read/.test(await askAi.locator('.sh-wait.bad').innerText().catch(() => '')), 10000)), "an agent's change that isn't JSON: said so", await askAi.innerText().catch(() => ''))
   await askAi.locator('.sh-wait.bad button', { hasText: 'OK' }).click()
-  await p.locator('.sh-ask button[aria-label="Close"]').click()
+  await p.locator('.sh-ask button[aria-label="Close AI Assist"]').click()
   // An Excel file's round trip: opened, one cell changed, saved, opened again. Everything else in
   // it is the same bytes (its chart, its drawing, its styles, the other sheet), and what's read
   // back is what was there, with the one change.
@@ -444,7 +457,7 @@ try {
   await open('people.csv')
   const csvBar = p.locator('.sh-csv')
   ok(!!(await until(async () => (await csvBar.locator('select').first().inputValue().catch(() => '')) === ';' && (await csvBar.locator('select').nth(1).inputValue()) === 'utf-8-bom' && /Windows line endings/.test(await csvBar.innerText()), 15000)), "a CSV: its separator (semicolons), encoding (UTF-8 with a BOM) and line endings found, and said", await csvBar.innerText().catch(() => ''))
-  ok(!(await p.locator('.sd-univer [data-u-command="sheet.command.set-range-bold"]').count()) && (await p.locator('.sd-univer [data-u-command="bridge.sheet.ask-ai"]').count()) === 1, "and its ribbon offers no formats, which a CSV can't keep")
+  ok(!(await p.locator('.sd-univer [data-u-command="sheet.command.set-range-bold"]').count()) && (await p.locator('.sd-univer [data-u-command="bridge.sheet.print-button"]').count()) === 1, "and its ribbon offers no formats, which a CSV can't keep")
   await shot(p, `${tag}studio-sheet-csv`)
   await sleep(500)
   await goTo('B2')
@@ -511,7 +524,7 @@ try {
   // save, and it says so.
   await open('report.pdf')
   const pdf = await until(async () => (await p.locator('.sd-pdf .pdfViewer .page canvas').count()) > 0, 15000)
-  ok(!!pdf && !!(await until(async () => /Read only/.test(await p.locator('.sd-status').innerText()), 5000)) && (await p.locator('.pane-head button', { hasText: 'Save' }).count()) === 0 && !(await bare(p)).length, 'a PDF: drawn in the page; read only, no Save', { pdf, status: await p.locator('.sd-status').innerText().catch(() => ''), bare: await bare(p) })
+  ok(!!pdf && !!(await until(async () => /Read-only/.test(await p.locator('.sd-status').innerText()), 5000)) && (await p.locator('.pane-head button', { hasText: 'Save' }).count()) === 0 && !(await bare(p)).length, 'a PDF: drawn in the page; read only, no Save', { pdf, status: await p.locator('.sd-status').innerText().catch(() => ''), bare: await bare(p) })
   await shot(p, `${tag}studio-pdf`)
 
   // ---------- Focus ----------
@@ -668,7 +681,7 @@ try {
     await ph.p.locator('.pane-head button[aria-label="Versions"]').click()
     await ph.p.locator('.sd-panel .sd-versions li').first().waitFor({ timeout: 5000 })
     f = await phoneFaults(ph.p, '.sd-panel')
-    ok(!Object.keys(f).length && await ph.p.locator('.pane-head h2').isVisible(), `phone ${width}: Versions fits, each Compare, Open and Put back a whole target, under the file's header`, f)
+    ok(!Object.keys(f).length && await ph.p.locator('.pane-head h2').isVisible(), `phone ${width}: Versions fits, each Compare, Open and Restore a whole target, under the file's header`, f)
     await shot(ph.p, `${tag}studio-versions-phone-${width}`)
     await ph.p.locator('.sd-panel button[aria-label="Close"]').click()
     await ph.p.locator('.pane-head button[aria-label="Ask an agent"]').click()
@@ -676,33 +689,40 @@ try {
     f = await phoneFaults(ph.p, '.sd-ask')
     ok(!Object.keys(f).length, `phone ${width}: Ask an agent fits, its fields at 16 px`, f)
     await ph.p.locator('.sd-ask button', { hasText: 'Cancel' }).click()
-    // A sheet: the grid with its tabs, and Ask AI over it from the bottom, fitting.
+    // A sheet: the grid with its tabs, and AI Assist's panel over it from the bottom, fitting.
     await ph.p.evaluate(({ root }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: 'budget.xlsx' } })), { root })
     ok(!!(await until(async () => (await ph.p.locator('.sd-univer canvas').count()) > 0 && /Budget/.test(await ph.p.locator('.sd-univer').innerText().catch(() => '')), 30000)), `phone ${width}: a sheet opens, with its tabs`)
     await sleep(600)
     // (Its page as wide as the screen too, whatever its header holds: a name and its buttons once
-    // made it wider, and Ask AI with it.)
+    // made it wider, and AI Assist's panel with it.)
     const sheetFits = await ph.p.evaluate(() => ({ doc: document.documentElement.scrollWidth, file: Math.round(document.querySelector('.sd-file').getBoundingClientRect().right), head: Math.round(document.querySelector('.sd-file .pane-head').getBoundingClientRect().right), w: innerWidth }))
     ok(sheetFits.doc <= sheetFits.w + 1 && sheetFits.file <= sheetFits.w && sheetFits.head <= sheetFits.w, `phone ${width}: the sheet fits the screen, its page and header too`, sheetFits)
     await shot(ph.p, `${tag}studio-sheet-phone-${width}`)
-    await ph.p.locator('.pane-head button[aria-label="Ask an agent"]').click()
+    await ph.p.locator('.pane-head button[aria-label="AI Assist"]').click()
+    f = await phoneFaults(ph.p, '.ai-menu')
+    ok(!Object.keys(f).length, `phone ${width}: AI Assist's menu fits the phone, every choice a whole target`, f)
+    await shot(ph.p, `${tag}studio-sheet-ai-menu-phone-${width}`)
+    await ph.p.locator('.ai-menu button', { hasText: 'Write a formula' }).click()
     await ph.p.locator('.sh-ask textarea').waitFor({ timeout: 5000 })
+    ok(/^Write a formula for the cells I picked that/.test(await ph.p.locator('.sh-ask textarea').inputValue()), `phone ${width}: Write a formula opens AI Assist's panel with it started`)
     f = await phoneFaults(ph.p, '.sh-side')
-    ok(!Object.keys(f).length, `phone ${width}: Ask AI fits over the sheet, each button a whole target, its fields at 16 px`, f)
+    ok(!Object.keys(f).length, `phone ${width}: AI Assist's panel fits over the sheet, each button a whole target, its fields at 16 px`, f)
     await shot(ph.p, `${tag}studio-sheet-ask-phone-${width}`)
-    await ph.p.locator('.sh-ask button[aria-label="Close"]').click()
+    await ph.p.locator('.sh-ask button[aria-label="Close AI Assist"]').click()
   }
-  // Dark: a sheet in the app's dark look, Ask AI beside it.
+  // Dark: a sheet in the app's dark look, AI Assist's panel beside it.
   const night = await page(b, kit.url, { width: 1440, height: 900, mode: 'dark' })
   pages.push(night)
   await night.p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
   // Asked again until it opens (a page just loaded may not be listening yet).
   await until(async () => { if (!(await night.p.locator('.sd-univer').count())) await night.p.evaluate(({ root }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: 'ledger.xlsx' } })), { root }); return (await night.p.locator('.sd-univer canvas').count()) > 0 }, 30000, 1000)
   await sleep(1200)
-  await night.p.locator('.sd-univer [data-u-command="bridge.sheet.ask-ai"]').click()
+  await night.p.locator('.pane-head button[aria-label="AI Assist"]').click()
+  await shot(night.p, `${tag}studio-sheet-ai-menu-dark`)
+  await night.p.locator('.ai-menu button', { hasText: 'Ask about these cells' }).click()
   await night.p.locator('.sh-ask').waitFor({ timeout: 5000 })
   await shot(night.p, `${tag}studio-sheet-dark`)
-  await night.p.locator('.sh-ask button[aria-label="Close"]').click()
+  await night.p.locator('.sh-ask button[aria-label="Close AI Assist"]').click()
   await night.p.keyboard.press(`${MOD}+Alt+f`)
   ok(!!(await until(() => wholeWindow(night.p), 3000, 100)), 'dark: a sheet in Focus')
   await shot(night.p, `${tag}studio-focus-sheet-dark`)

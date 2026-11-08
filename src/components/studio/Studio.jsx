@@ -14,6 +14,7 @@ import { useFocus, canFullScreen } from './focus.js'
 import { useBusy } from '../../busy.js'
 import { useTrial } from '../../trials.js'
 import { YourFiles } from './HomeFiles.jsx'
+import AiAssist from '../AiAssist.jsx'
 import './studio.css'
 import './home.css'
 
@@ -29,7 +30,8 @@ const EDITORS = {
   page: lazy(() => import('./editors/PageEditor.jsx')),
   pdf: lazy(() => import('./pdf/PdfView.jsx')),
 }
-// Signature Assist's signature and initials, on the home page while it's on (a beta feature).
+// Your signature and initials for AI Assist's Sign this, on the home page while Sign PDFs is on (a
+// beta feature).
 const SignatureHome = lazy(() => import('./pdf/Signatures.jsx'))
 const ICON = { doc: 'doc', sheet: 'grid', deck: 'screen', pdf: 'file', page: 'code', board: 'shapes' }
 const KIND_LABEL = { doc: tx('Document'), sheet: tx('Sheet'), deck: tx('Deck'), pdf: tx('PDF'), page: tx('Page'), board: tx('Whiteboard') }
@@ -41,6 +43,8 @@ const KIND_OF = {
 }
 const kindName = (kind, ext) => (kind === 'deck' && (ext === '.md' || ext === '.markdown') ? t('Markdown deck') : t(KIND_OF[ext] || KIND_LABEL[kind] || 'Studio'))
 const READ_ONLY = (kind) => kind === 'pdf'
+// The kinds with AI Assist (a plain-text file has none; a PDF has it with Sign PDFs on).
+const ASSISTS = new Set(['doc', 'sheet', 'deck'])
 export const openStudio = (f) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: f }))
 const when = (iso) => new Date(iso).toLocaleString(locale(), { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 const sizeOf = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`)
@@ -244,7 +248,7 @@ export function StudioHome({ onOpen }) {
 // keeps one of its own.
 const SAVES_ITSELF = new Set(['doc'])
 const AUTO_MS = 1200
-const WHO = { you: tx('You'), agent: tx('An agent'), outside: tx('Changed outside Studio'), restored: tx('Put back'), opened: tx('When it was first opened here') }
+const WHO = { you: tx('You'), agent: tx('An agent'), outside: tx('Changed outside Studio'), restored: tx('Restored'), opened: tx('When it was first opened here') }
 // Nothing in a Word or an Excel file is lost by saving it here, so neither is warned about before
 // its first save; an editor still says what one change can't keep (warn.text).
 const RISKY = {}
@@ -460,6 +464,7 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
   // doesn't update by itself meanwhile (busy.js).
   useEffect(() => { if (!dirty) return; const q = (e) => { e.preventDefault(); e.returnValue = '' }; window.addEventListener('beforeunload', q); return () => window.removeEventListener('beforeunload', q) }, [dirty])
   useBusy('studio', dirty)
+  const signOn = useTrial('signature-assist') // AI Assist's Sign this on a PDF (Sign PDFs, a beta feature)
   // Focus (focus.js): the page alone in the whole window, kept for each kind of editor.
   const focus = useFocus(meta?.kind, { onRefused: () => setNote({ text: t("This browser didn't let the page go full screen. Focus still gives it the whole window."), info: true }) })
   const apps = useApps()
@@ -480,10 +485,10 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
     } catch (e) { setNote({ text: app ? t("Couldn't open it in {app}: {error}", { app, error: e.message }) : t("Couldn't open it in its app: {error}", { error: e.message }), bad: true }) }
   }
   const restore = async (id) => {
-    if (dirty && !window.confirm(t('Put this version back? Your unsaved changes here are lost (what\'s in the file now is kept as a version).'))) return
+    if (dirty && !window.confirm(t('Restore this version? Your unsaved changes here are lost (what\'s in the file now is kept as a version).'))) return
     writing.current++
     try { await restoreVersion(f, id); await load() } finally { writing.current--; wrote.current++ }
-    setNote({ text: t('Put back. What was there is kept as a version too.') })
+    setNote({ text: t('Restored. What was there is kept as a version too.') })
   }
 
   const name = meta?.name || rel.split('/').pop()
@@ -507,9 +512,14 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
   }
   const Editor = kind ? EDITORS[kind] : null
   const readOnly = !!meta && READ_ONLY(meta.kind, meta.ext)
+  // AI Assist at the header's right end (in Focus, the status line's), with what the editor offers
+  // as it opens (its handle's assist()): a document's words picked, a sheet's cells, a deck's
+  // slides, a PDF to sign.
+  const assists = !!meta && (readOnly ? kind === 'pdf' && signOn : ASSISTS.has(kind) && meta.ext !== '.txt')
+  const assist = assists && ((cls, more) => <AiAssist items={() => handle.current?.assist?.() || []} className={cls} {...more} />)
   const opening = <div className="sd-empty sd-loading" role="status"><Icon name="refresh" size={16} className="spin" /><span className="muted">{t('Opening {name}…', { name })}</span></div>
   const versions = meta?.versions?.length || 0
-  const state = saving ? { text: t('Saving…'), cls: 'busy' } : note?.error ? { text: t("Couldn't save"), cls: 'bad' } : conflict ? { text: t('Changed elsewhere'), cls: 'bad' } : dirty ? { text: t('Unsaved changes'), cls: 'dirty' } : readOnly ? { text: t('Read only'), cls: '' } : { text: t('Saved'), cls: 'ok' }
+  const state = saving ? { text: t('Saving…'), cls: 'busy' } : note?.error ? { text: t("Couldn't save"), cls: 'bad' } : conflict ? { text: t('Changed elsewhere'), cls: 'bad' } : dirty ? { text: t('Unsaved changes'), cls: 'dirty' } : readOnly ? { text: t('Read-only'), cls: '' } : { text: t('Saved'), cls: 'ok' }
   const openName = opener ? t('Open in {app}', { app: opener.name }) : t('Open in app')
   const openTip = !HERE ? t("It opens on the computer it's on") : opener ? t('Open it in {app} on this computer. Studio keeps watching it and shows what you save there.', { app: opener.name }) : t('Open it in its usual app on this computer. Studio keeps watching it and shows what you save there.')
   const openBtn = (cls, size) => meta && (opener || usual) && <button type="button" className={cls} onClick={openIn} title={openTip} aria-label={opener ? openName : t('Open in its usual app')}><Icon name="external" size={size} /> <span className="sd-btn-label">{openName}</span></button>
@@ -527,11 +537,12 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
           </>}>
           {tabs}
           {kind && !readOnly && <button type="button" className={`btn small sd-head-btn${dirty ? ' primary' : ''}`} onClick={() => save()} disabled={saving || !dirty} title={withKeys(dirty ? t('Save') : t('Saved: nothing new to save'), 'mod', 's')} aria-label={saving ? t('Saving…') : dirty ? t('Save') : t('Saved')}><Icon name="check" size={12} /> <span className="sd-btn-label">{saving ? t('Saving…') : dirty ? t('Save') : t('Saved')}</span></button>}
-          <button type="button" className="btn small sd-head-btn" onClick={() => (handle.current?.ask ? handle.current.ask() : setAsk({ selection: handle.current?.selection?.() || null }))} disabled={!meta} title={t('Have one of your agents change it: pick the part first, or describe it')} aria-label={t('Ask an agent')}><Icon name="sparkle" size={12} /> <span className="sd-btn-label">{t('Ask an agent')}</span></button>
+          <button type="button" className="btn small sd-head-btn" onClick={() => (handle.current?.ask ? handle.current.ask() : setAsk({ selection: handle.current?.selection?.() || null }))} disabled={!meta} title={t('Have one of your agents change it: pick the part first, or describe it')} aria-label={t('Ask an agent')}><Icon name="bot" size={12} /> <span className="sd-btn-label">{t('Ask an agent')}</span></button>
           {openBtn('btn small sd-head-btn sd-open-in', 12)}
           <button type="button" className={`win-btn${panel === 'versions' ? ' on' : ''}`} onClick={() => setPanel(panel === 'versions' ? null : 'versions')} aria-pressed={panel === 'versions'} title={t('Versions: yours, your agents\' and changes from outside')} aria-label={t('Versions')} disabled={!meta}><Icon name="clock" size={14} /></button>
-          <a className="win-btn" href={rawUrl(f)} download={name} title={t('Download {name}', { name })} aria-label={t('Download')}><Icon name="download" size={14} /></a>
+          <a className="win-btn sd-dl-btn" href={rawUrl(f)} download={name} title={t('Download {name}', { name })} aria-label={t('Download')}><Icon name="download" size={14} /></a>
           <button type="button" className="win-btn sd-focus-btn" onClick={focus.enter} disabled={!meta} title={focusTip} aria-label={t('Focus')}><Icon name="focus" size={14} /></button>
+          {assist && assist('btn small sd-head-btn', { labelClass: 'sd-btn-label' })}
         </PaneHeader>
       )}
       {note && (
@@ -573,10 +584,12 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
           <button type="button" className={`sd-status-btn sd-kind-btn${note?.keeps ? ' on' : ''}`} onClick={() => setNote(note?.keeps ? null : { text: keepsOf(kind, meta.ext), info: true, keeps: true })} aria-pressed={!!note?.keeps} title={t('What saving keeps')} aria-label={t('{kind}: what saving keeps', { kind: kindName(kind, meta.ext) })}><Icon name="info" size={12} /> <span className="sd-btn-label">{kindName(kind, meta.ext)}</span></button>
           <button type="button" className="sd-status-btn vers" onClick={() => setPanel(panel === 'versions' ? null : 'versions')} title={t('Versions: yours, your agents\' and changes from outside')}><Icon name="clock" size={12} /> {versions === 1 ? t('1 version') : t('{n} versions', { n: versions })}</button>
           {openBtn('sd-status-btn sd-open-in-narrow', 12)}
+          <a className="sd-status-btn sd-dl-narrow" href={rawUrl(f)} download={name} title={t('Download {name}', { name })} aria-label={t('Download')}><Icon name="download" size={12} /></a>
           {!focus.on && <button type="button" className="sd-status-btn sd-focus-narrow" onClick={focus.enter} title={focusTip} aria-label={t('Focus')}><Icon name="focus" size={12} /></button>}
           <span className="sd-grow" />
           <span className={`sd-state ${state.cls}`} title={meta.mtime ? t('The file last changed {when}', { when: when(meta.mtime) }) : undefined}><i aria-hidden="true" />{state.text}</span>
           {focus.on && <>
+            {assist && assist('sd-status-btn sd-focus-ai', { compact: true, size: 12 })}
             {dirty && !readOnly && !SAVES_ITSELF.has(kind) && <button type="button" className="sd-status-btn sd-focus-save" onClick={() => save()} disabled={saving} title={withKeys(t('Save'), 'mod', 's')} aria-label={t('Save')}><Icon name="check" size={12} /> <span className="sd-btn-label">{t('Save')}</span></button>}
             {canFullScreen() && <button type="button" className={`sd-status-btn sd-focus-full${focus.full ? ' on' : ''}`} onClick={focus.toggleFull} aria-pressed={focus.full} title={focus.full ? t('Out of full screen, still in Focus') : t('Full screen')} aria-label={t('Full screen')}><Icon name={focus.full ? 'shrink' : 'maximize'} size={12} /> <span className="sd-btn-label">{t('Full screen')}</span></button>}
             <button type="button" className="sd-status-btn sd-focus-leave" onClick={focus.leave} title={leaveTip} aria-label={t('Leave Focus')}><Icon name="focus" size={12} /> <span className="sd-btn-label">{t('Leave Focus')}</span></button>
@@ -601,7 +614,7 @@ function Versions({ f, ext, versions, onRestore, onClose }) {
             {i === 0 ? <small className="muted">{t('Now')}</small> : <span className="sd-v-acts">
               {comparable(ext) && <button type="button" className="link-btn" onClick={() => setCompare(v)}>{t('Compare')}</button>}
               <a className="link-btn" href={versionUrl(f, v.id)} target="_blank" rel="noreferrer">{t('Open')}</a>
-              <button type="button" className="link-btn" onClick={() => onRestore(v.id)}>{t('Put back')}</button>
+              <button type="button" className="link-btn" onClick={() => onRestore(v.id)}>{t('Restore')}</button>
             </span>}
           </li>
         ))}

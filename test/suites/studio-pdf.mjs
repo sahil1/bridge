@@ -1,15 +1,16 @@
-// Studio's PDFs and Signature Assist, in the browser named by BRIDGE_TEST_BROWSER. PDFs made here
+// Studio's PDFs and AI Assist's Sign this, in the browser named by BRIDGE_TEST_BROWSER. PDFs made here
 // with pdf-lib: an agreement (a page of terms, then a page with a form's signature field and date
 // field), a letter with "Signature: ____" and "Date: ____" in its text, a page with no text, and a
-// locked one. The server: Signature Assist is a beta feature under Studio, off to start with; a
+// locked one. The server: Sign PDFs is a beta feature under Studio, off to start with; a
 // signature kept only for you, and removed; the explanation asked of the model picked, with the
 // document's text; a signed copy in _signed, the picture on the right page where it was put, the
 // form's date field filled and its signature field done with, never over a copy that's there, the
 // original untouched; a locked PDF and a mark off the page refused, saying why. The page: the PDF
 // drawn by pdf.js with thumbnails, its text to select, find with matches marked, pages and zoom;
-// Sign, step by step: what you're signing (and which model read it), a signature drawn on the pad,
+// AI Assist's Sign this (at the right end of the header), step by step: what you're signing (and
+// which model read it), a signature drawn on the pad,
 // the places found on their pages (the form's fields, the words next to a line), approved, and the
-// signed copy saved and opened; in Focus, its pages with the whole window, still read only; on a
+// signed copy saved and opened; in Focus, its pages with the whole window, still read-only; on a
 // phone, all of it fitting.
 import fs from 'node:fs'
 import path from 'node:path'
@@ -21,6 +22,11 @@ import { startKit, startModel, checks, until, sleep, browser, page, shot, phoneF
 const require = createRequire(path.join(ROOT, 'package.json'))
 const { PDFDocument, StandardFonts, PDFName, PDFString, PDFSignature, PDFTextField, PDFRawStream, decodePDFRawStream, PDFArray } = require('pdf-lib')
 const { ok, skip, done } = checks('studio-pdf')
+// AI Assist's Sign this, from the right end of the PDF's header.
+const signThis = async (pg) => {
+  await pg.locator('.sd-file .pane-head button[aria-label="AI Assist"]').click()
+  await pg.locator('.ai-menu button', { hasText: 'Sign this' }).click()
+}
 // No Ollama or LM Studio of this computer's own: the models are only the stand-in, once it's added.
 const kit = await startKit('studio-pdf', { env: { OLLAMA_HOST: 'http://127.0.0.1:9', LM_STUDIO_BASE_URL: 'http://127.0.0.1:9/v1' } })
 const model = await startModel('studio-pdf')
@@ -103,7 +109,7 @@ try {
   const before = sha(path.join(dir, 'agreement.pdf'))
 
   // ---------- The server ----------
-  ok((await api('/config')).trials?.['signature-assist'] === false && /Signature Assist is a beta feature/.test((await err('/studio/sign/setup'))?.message || ''), 'Signature Assist is a beta feature, off to start with: its routes say how to turn it on')
+  ok((await api('/config')).trials?.['signature-assist'] === false && /Sign PDFs is a beta feature/.test((await err('/studio/sign/setup'))?.message || ''), 'Sign PDFs is a beta feature, off to start with: its routes say how to turn it on')
   await api('/settings', { trials: { 'signature-assist': true } }, 'PATCH')
   // No model yet: it says so, and where to add one, rather than nothing.
   const none = await api('/studio/sign/setup')
@@ -158,7 +164,7 @@ try {
   const sharp = await until(() => p.locator('.sd-pdf .pdfViewer .page canvas').first().evaluate((c) => { const r = c.width / c.getBoundingClientRect().width; return Number.isFinite(r) && r > 0 ? r : null }), 8000) || 0
   ok(sharp >= (await p.evaluate(() => devicePixelRatio)) - 0.05, `drawn at the screen's sharpness (${sharp.toFixed(2)} pixels a CSS pixel)`)
   ok(!!(await until(async () => /Northwind Labs/.test(await p.locator('.sd-pdf .textLayer').first().innerText().catch(() => '')), 10000)), 'its text is there to select, over the page')
-  ok(!!(await until(async () => /2 pages/.test(await p.locator('.sd-status').innerText()) && /Read only/.test(await p.locator('.sd-status').innerText()), 5000)), 'the status line: 2 pages, read only', await p.locator('.sd-status').innerText())
+  ok(!!(await until(async () => /2 pages/.test(await p.locator('.sd-status').innerText()) && /Read-only/.test(await p.locator('.sd-status').innerText()), 5000)), 'the status line: 2 pages, read-only', await p.locator('.sd-status').innerText())
   await p.locator('.sd-pdf-find input').fill('renews')
   ok(!!(await until(async () => /1 of 1/.test(await p.locator('.sd-pdf-hits').innerText()) && (await p.locator('.sd-pdf .textLayer .highlight').count()) > 0, 8000)), 'Find: the match counted and marked on the page', await p.locator('.sd-pdf-hits').innerText())
   await p.locator('.sd-pdf-find input').fill('')
@@ -169,18 +175,24 @@ try {
   await p.locator('.sd-pdf-zoomsel').selectOption('page-width')
   ok(!!wide, 'zoom: 200% makes the page twice as wide (816 px at 100%)', wide)
   await shot(p, `${tag}studio-pdf-view`)
-  // In Focus: the whole window for its pages, still said to be read only; Esc leaves.
+  // In Focus: the whole window for its pages, still said to be read-only; Esc leaves.
   const viewW = () => p.locator('.sd-pdf-scroll').evaluate((e) => e.getBoundingClientRect().width)
   const vw0 = await viewW()
   await p.locator('.sd-file .pane-head .sd-focus-btn').click()
   const pdfFocus = () => p.locator('.sd-file.focus').count().then((n) => n === 1)
-  ok(!!(await until(async () => (await pdfFocus()) && (await viewW()) > vw0 + 100, 5000, 100)) && /Read only/.test(await p.locator('.sd-file.focus .sd-status').innerText()), 'a PDF in Focus: its pages have the whole window, and it still says read only', { vw0, vw1: await viewW() })
+  ok(!!(await until(async () => (await pdfFocus()) && (await viewW()) > vw0 + 100, 5000, 100)) && /Read-only/.test(await p.locator('.sd-file.focus .sd-status').innerText()), 'a PDF in Focus: its pages have the whole window, and it still says read-only', { vw0, vw1: await viewW() })
   await shot(p, `${tag}studio-pdf-focus`)
   await p.keyboard.press('Escape')
   ok(!!(await until(async () => !(await pdfFocus()), 3000, 100)), 'Esc: out of Focus')
-  // ---------- Signature Assist ----------
-  await p.locator('.sd-pdf-sign').click()
+  // ---------- AI Assist's Sign this ----------
+  const wand = p.locator('.sd-file .pane-head .pane-extras button[aria-label="AI Assist"]')
+  ok(await wand.evaluate((e) => !e.nextElementSibling) && !(await p.locator('.sd-pdf-bar button', { hasText: /^\s*Sign\s*$/ }).count()), 'AI Assist at the right end of the header, and no Sign of its own in the PDF\'s toolbar')
+  await wand.click()
+  ok(/Sign this/.test(await p.locator('.ai-menu').innerText()), 'its menu on a PDF: Sign this', await p.locator('.ai-menu').innerText().catch(() => ''))
+  await shot(p, `${tag}studio-pdf-ai-menu`)
+  await p.locator('.ai-menu button', { hasText: 'Sign this' }).click()
   await p.locator('.sd-sign').waitFor({ timeout: 10000 })
+  ok(/AI Assist/.test(await p.locator('.sd-sign-head').innerText()) && /Sign this/.test(await p.locator('.sd-sign-head').innerText()), 'its panel says it\'s AI Assist, signing this', await p.locator('.sd-sign-head').innerText().catch(() => ''))
   ok(/gpt-5/.test(await p.locator('.sd-model select').evaluate((s) => s.options[s.selectedIndex]?.text || '')) && /Its text goes to gpt-5/.test(await p.locator('.sd-sent').innerText()), "What you're signing: it says which model reads it, and that the text goes to it", await p.locator('.sd-sign').innerText())
   await shot(p, `${tag}studio-sign-start`)
   await p.locator('.sd-explain button', { hasText: 'Explain it' }).click()
@@ -228,7 +240,7 @@ try {
   await shot(p, `${tag}studio-sign-opened`)
   // The letter: its places only in its words, beside the lines.
   await openIn(p, root, 'letter.pdf')
-  if (!(await p.locator('.sd-sign').count())) await p.locator('.sd-pdf-sign').click()
+  if (!(await p.locator('.sd-sign').count())) await signThis(p)
   await p.locator('.sd-step-head', { hasText: 'Where to sign' }).click()
   const lm = await until(async () => { const m = await marks(); return m.length === 2 ? m : null }, 15000)
   const ls = lm?.find((m) => m.kind === 'signature'), ld = lm?.find((m) => m.kind === 'date')
@@ -260,20 +272,20 @@ try {
   } else skip('before it knows, nothing half-ready', 'WebKit takes no route added after the page opened')
   // Read once it knows what's drawn (it asks the server after it shows).
   await p.locator('.sd-sign-home[aria-busy="false"]').waitFor({ timeout: 10000 })
-  ok((await p.locator('.sd-sign-home .sd-sigcard img').count()) === 1 && /Kept only on this computer/.test(await p.locator('.sd-sign-home').innerText()) && (await p.locator('.sd-sign-home button[aria-label="Remove your signature"]').count()) === 1, "Studio's home: Signature Assist, your signature and initials, where they're kept, and Remove", await p.locator('.sd-sign-home').innerText())
+  ok((await p.locator('.sd-sign-home .sd-sigcard img').count()) === 1 && /Kept only on this computer/.test(await p.locator('.sd-sign-home').innerText()) && (await p.locator('.sd-sign-home button[aria-label="Remove your signature"]').count()) === 1, "Studio's home: Your Signature, your signature and initials, where they're kept, and Remove", await p.locator('.sd-sign-home').innerText())
   await p.locator('.sd-sign-home').scrollIntoViewIfNeeded()
   await shot(p, `${tag}studio-sign-home`)
   // Settings: part of Studio, so off with it, saying so.
   await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'about' } })))
   const trial = (name) => p.locator('.st-check', { has: p.locator('b', { hasText: new RegExp(`^${name}$`) }) })
-  await trial('Signature Assist').waitFor({ timeout: 15000 })
+  await trial('Sign PDFs').waitFor({ timeout: 15000 })
   await until(async () => !(await trial('Studio').locator('input').isDisabled()), 10000)
-  ok(await trial('Signature Assist').locator('input').isChecked(), 'Settings › About & Updates › Beta Features: Signature Assist, on')
+  ok(await trial('Sign PDFs').locator('input').isChecked() && /AI Assist's Sign this/.test(await trial('Sign PDFs').innerText()), 'Settings › About & Updates › Beta Features: Sign PDFs, on, saying it\'s AI Assist\'s Sign this')
   await trial('Studio').locator('input').uncheck()
-  ok(!!(await until(async () => (await trial('Signature Assist').locator('input').isDisabled()) && !(await trial('Signature Assist').locator('input').isChecked()) && /It needs Studio on/.test(await trial('Signature Assist').innerText()), 5000)), 'Studio off: Signature Assist off too, saying it needs Studio', await trial('Signature Assist').innerText())
+  ok(!!(await until(async () => (await trial('Sign PDFs').locator('input').isDisabled()) && !(await trial('Sign PDFs').locator('input').isChecked()) && /It needs Studio on/.test(await trial('Sign PDFs').innerText()), 5000)), 'Studio off: Sign PDFs off too, saying it needs Studio', await trial('Sign PDFs').innerText())
   await shot(p, `${tag}studio-sign-trial`)
   await trial('Studio').locator('input').check()
-  ok(!!(await until(async () => !(await trial('Signature Assist').locator('input').isDisabled()) && await trial('Signature Assist').locator('input').isChecked(), 5000)), 'and back on with it')
+  ok(!!(await until(async () => !(await trial('Sign PDFs').locator('input').isDisabled()) && await trial('Sign PDFs').locator('input').isChecked(), 5000)), 'and back on with it')
   await p.locator('button[aria-label="Close settings"]').click()
   ok(w.errors.length === 0, 'no page errors', w.errors)
   // Dark.
@@ -281,7 +293,7 @@ try {
   pages.push(dk)
   await dk.p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
   ok(!!(await openIn(dk.p, root, 'letter.pdf')), 'dark: the PDF is drawn', { errors: dk.errors })
-  await dk.p.locator('.sd-pdf-sign').click()
+  await signThis(dk.p)
   await dk.p.locator('.sd-step-head', { hasText: 'Where to sign' }).click()
   await until(async () => (await dk.p.locator('.sd-mark').count()) === 2, 15000)
   await sleep(400)
@@ -298,13 +310,13 @@ try {
     let f = await phoneFaults(ph.p, '.sd-file')
     ok(!Object.keys(f).length && fit <= 390 && fit > 300, `phone, ${mode}: the page fits the screen's width (${Math.round(fit)} px), and so does everything around it, each control a whole 40 px target`, f)
     await shot(ph.p, `${tag}studio-pdf-phone-${mode}`)
-    await ph.p.locator('.sd-pdf-sign').click()
+    await signThis(ph.p)
     await ph.p.locator('.sd-sign').waitFor({ timeout: 10000 })
     await ph.p.locator('.sd-step-head', { hasText: 'Where to sign' }).click()
     await until(async () => (await ph.p.locator('.sd-mark').count()) === 2, 15000)
     await sleep(500)
     f = await phoneFaults(ph.p, '.sd-sign')
-    ok(!Object.keys(f).length, `phone, ${mode}: Signature Assist fits under the PDF, each control a whole 40 px target, each field 16 px`, f)
+    ok(!Object.keys(f).length, `phone, ${mode}: AI Assist's Sign this fits under the PDF, each control a whole 40 px target, each field 16 px`, f)
     await shot(ph.p, `${tag}studio-sign-phone-${mode}`)
     ok(ph.errors.length === 0, `phone, ${mode}: no page errors`, ph.errors)
   }

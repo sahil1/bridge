@@ -3,7 +3,8 @@ import Icon from './Icon.jsx'
 import { usePersisted, useWidth } from './layout.jsx'
 import { api, usePoll } from '../api.js'
 import { CalendarSetup, joined } from './Agenda.jsx'
-import { PrepCard, InviteFiles } from './meetings/prep.jsx'
+import { PrepCard, InviteFiles, usePrep } from './meetings/prep.jsx'
+import AiAssist from './AiAssist.jsx'
 import { openToday } from './today.js'
 import { t, tx, locale } from '../i18n/index.js'
 
@@ -13,8 +14,8 @@ import { t, tx, locale } from '../i18n/index.js'
 // it or brings it back. The week starts on the day your language has it (or the one you pick), and
 // the grids show your working hours at least, the rest shaded. Your answer to each invite shows as
 // Calendar has it. An event's panel has the invite's files and links, the notes of a meeting already
-// recorded, and Prep Assist for one coming up. It only reads: nothing here adds, moves, changes or
-// answers an event; that stays in your calendar app.
+// recorded, and AI Assist's Prepare for this meeting for one coming up. It's read-only: nothing here
+// adds, moves, changes or answers an event; that stays in your calendar app.
 const DAY = 864e5
 const pad = (n) => String(n).padStart(2, '0')
 const isoDay = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
@@ -208,6 +209,15 @@ function EventDetail({ e, color, now, onClose, onOpenAgent }) {
   const past = Date.parse(e.end) <= now
   const others = e.attendeeCount > 1 || (e.attendees || []).length > 1
   const openMeeting = (id) => onOpenAgent?.(`view:meeting:${id}`)
+  // AI Assist (at the right end of the event's buttons) for one coming up with other people: its
+  // prep, with goals and questions from the model asked for now if there are none yet.
+  const prepping = !past && !e.allDay && !e.canceled && others
+  const p = usePrep(prepping ? e : null)
+  const prepRef = useRef(null)
+  const prepare = () => {
+    prepRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    if (p.data?.writer && !p.data.suggest?.items?.length && !p.data.making && !p.busy) p.suggest(false)
+  }
   return (
     <div className="cal-detail" role="dialog" aria-label={e.title} style={{ '--c': color }}>
       <div className="cal-detail-head">
@@ -229,7 +239,8 @@ function EventDetail({ e, color, now, onClose, onOpenAgent }) {
       )}
       <div className="cal-detail-actions">
         {e.join && !past && <a className="join-btn strong" href={e.join} target="_blank" rel="noreferrer" onClick={() => joined(e)}><Icon name="video" size={12} /> {t('Join')}</a>}
-        {!past && !e.allDay && <button className="btn small" onClick={prep} disabled={busy} title={t('An agent reads your mail with them, your notes and your tracker, and writes you a brief. It sends nothing.')}><Icon name="sparkle" size={12} /> {busy ? t('Starting…') : t('Prep with agent')}</button>}
+        {!past && !e.allDay && <button className="btn small" onClick={prep} disabled={busy} title={t('An agent reads your mail with them, your notes and your tracker, and writes you a brief. It sends nothing.')}><Icon name="bot" size={12} /> {busy ? t('Starting…') : t('Prep with agent')}</button>}
+        {prepping && <><span className="grow" /><AiAssist className="btn small cal-ai-btn" items={() => [{ label: t('Prepare for this meeting'), hint: t('Who\'s coming, last time with them, your mail with them, and goals and questions to go in with'), run: prepare }]} /></>}
       </div>
       {msg && <p className="small muted">{msg}</p>}
       {(e.agenda || e.links?.length > 0) && (
@@ -239,7 +250,7 @@ function EventDetail({ e, color, now, onClose, onOpenAgent }) {
         </div>
       )}
       {e.recorded && <RecordedNotes id={e.recorded.id} onOpen={() => openMeeting(e.recorded.id)} />}
-      {!past && !e.allDay && !e.canceled && others && <PrepCard e={e} invite={false} onOpenMeeting={openMeeting} onOpenMail={(id) => openToday('mail', { mailId: id })} />}
+      {prepping && <div ref={prepRef}><PrepCard e={e} prep={p} invite={false} onOpenMeeting={openMeeting} onOpenMail={(id) => openToday('mail', { mailId: id })} /></div>}
       {e.attendees?.length > 0 && (
         <div className="cal-sec cal-detail-people">
           <h5>{e.attendeeCount === 1 ? t('1 Attendee') : t('{n} Attendees', { n: e.attendeeCount })}</h5>

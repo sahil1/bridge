@@ -91,7 +91,7 @@ export function FolderPick({ items, folders, onClose, onDone }) {
         </form>
         {err && <p className="error-text small">{err}</p>}
         <div className="mt-dialog-acts">
-          {items.some((x) => x.folder) && <button type="button" className="ghost-btn" disabled={busy} onClick={() => go(null)}>{now ? t('Take out of "{folder}"', { folder: now }) : t('Take out of its folder')}</button>}
+          {items.some((x) => x.folder) && <button type="button" className="ghost-btn" disabled={busy} onClick={() => go(null)}>{now ? t('Remove from "{folder}"', { folder: now }) : t('Remove from its folder')}</button>}
           <button type="button" className="ghost-btn" onClick={onClose}>{t('Cancel')}</button>
         </div>
       </div>
@@ -122,7 +122,7 @@ export function useMeetingMenu({ list, onOpen, onGone }) {
     'sep',
     { icon: 'folder', label: m.folder ? t('Move to another folder…') : t('Move to a folder…'), run: () => setDialog({ kind: 'folder', items: [m] }) },
     !live(m) && (m.archived
-      ? { icon: 'archive', label: t('Take out of the archive'), run: () => run(async () => { await api(`/meetings/${id(m)}`, { method: 'PATCH', body: { archived: false } }); refetch('/meetings'); say(t('{title} is back in the list.', { title: m.title })) }) }
+      ? { icon: 'archive', label: t('Unarchive'), run: () => run(async () => { await api(`/meetings/${id(m)}`, { method: 'PATCH', body: { archived: false } }); refetch('/meetings'); say(t('{title} is back in the list.', { title: m.title })) }) }
       : { icon: 'archive', label: t('Archive'), run: () => run(async () => { await api(`/meetings/${id(m)}`, { method: 'PATCH', body: { archived: true } }); refetch('/meetings'); say(t("Archived {title}. It's under Archived, and left out of search.", { title: m.title })) }) }),
     !live(m) && { icon: 'trash', label: t('Delete meeting…'), danger: true, run: () => setDialog({ kind: 'delete', items: [m] }) },
   ]

@@ -5,7 +5,7 @@ import { useSettings, SaveNote } from './General.jsx'
 import { locale, t } from '../../i18n/index.js'
 import '../mail/mail.css'
 
-// Settings › Mail, where Mail is read (a Mac): How You Write, the profile Reply Assist writes in
+// Settings › Mail, where Mail is read (a Mac): How You Write, the profile AI Assist writes replies in
 // your voice from (server mailassist.js), to read, change, learn again or clear; and Scheduling
 // Assist's working hours, the time kept clear around meetings and how many times it offers.
 // Bridge AI only reads mail: nothing here changes Mail.
@@ -36,7 +36,7 @@ function HowYouWrite() {
     <>
       <p className="muted small">{v.learntAt
         ? t('Learnt on {date} from {replies} emails you sent and {lines} things you said in {meetings} meetings, by {model}.', { date: when(v.learntAt), replies: f?.replies ?? 0, lines: f?.lines ?? 0, meetings: f?.meetings ?? 0, model: v.modelLabel || v.model })
-        : v.profile ? t('Written by you.') : t('Not learnt yet. Reply Assist offers to learn it the first time you use it, or Learn now here.')}
+        : v.profile ? t('Written by you.') : t('Not learnt yet. AI Assist offers to learn it the first time it drafts a reply, or Learn now here.')}
         {v.editedAt ? ` ${t('Changed by you on {date}.', { date: when(v.editedAt) })}` : ''}</p>
       {(v.profile || text) && (
         <>
@@ -57,7 +57,7 @@ function HowYouWrite() {
         </div>
       )}
       <div className="st-row">
-        <button type="button" className="btn small" onClick={learn} disabled={!!busy || v.learning || !v.now}><Icon name="sparkle" size={12} /> {busy === 'learn' || v.learning ? t('Learning…') : v.learntAt || v.profile ? t('Learn again') : t('Learn now')}</button>
+        <button type="button" className="btn small" onClick={learn} disabled={!!busy || v.learning || !v.now}><Icon name="wand" size={12} /> {busy === 'learn' || v.learning ? t('Learning…') : v.learntAt || v.profile ? t('Learn again') : t('Learn now')}</button>
         {(v.profile || v.examples.length > 0) && (sure
           ? <><button type="button" className="btn small danger" onClick={clear} disabled={!!busy}>{t('Clear it')}</button><button type="button" className="ghost-btn" onClick={() => setSure(false)}>{t('Keep it')}</button></>
           : <button type="button" className="ghost-btn" onClick={() => setSure(true)} disabled={!!busy}><Icon name="trash" size={12} /> {t('Clear')}</button>)}
@@ -87,17 +87,17 @@ export default function Mail() {
       <SaveNote note={note} />
       <section className="st-sec">
         <h4>{t('How You Write')}</h4>
-        <p className="muted small">{t('Reply Assist drafts replies in your own tone and language from this: a few lines on how you write, and some of your own replies as examples. Read it, change it, or clear it.')}</p>
+        <p className="muted small">{t('AI Assist drafts replies in your own tone and language from this: a few lines on how you write, and some of your own replies as examples. Read it, change it, or clear it.')}</p>
         <HowYouWrite />
         <label className="st-check">
           <input type="checkbox" checked={mail.learn !== false} onChange={(e) => save({ mail: { learn: e.target.checked } })} />
-          <span><b>{t('Learn it again now and then')}</b> <span className="muted small">{t("Once a week or so, while you use Reply Assist, from the mail and meetings you have then. Not once you've changed it yourself.")}</span></span>
+          <span><b>{t('Learn it again now and then')}</b> <span className="muted small">{t("Once a week or so, while AI Assist drafts your replies, from the mail and meetings you have then. Not once you've changed it yourself.")}</span></span>
         </label>
       </section>
 
       <section className="st-sec">
-        <h4>{t('Scheduling Assist')}</h4>
-        <p className="muted small">{t('When an email asks to meet, Reply Assist offers free times from your calendar, read only: nothing is held or added. They fit these hours, and the other side\'s working day when their time zone is known.')}</p>
+        <h4>{t('Find a Time')}</h4>
+        <p className="muted small">{t('When an email asks to meet, AI Assist offers free times from your calendar, read-only: nothing is held or added. They fit these hours, and the other side\'s working day when their time zone is known.')}</p>
         <div className="st-row mdays" role="group" aria-label={t('Working days')}>
           <span>{t('Working days')}</span>
           {order.map((d) => {
@@ -132,7 +132,7 @@ export default function Mail() {
       </section>
 
       <section className="st-sec">
-        <h4>{t('Read Only')}</h4>
+        <h4>{t('Read-Only')}</h4>
         <p className="muted small">{t('Bridge AI reads Mail and never changes it: it doesn\'t send, archive, flag, move or delete mail, or put drafts in your mailbox. Done and Remind me are kept by Bridge AI, and you send replies from your own mail app.')}</p>
       </section>
     </div>

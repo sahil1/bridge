@@ -4,6 +4,7 @@ import { usePersisted, useWidth } from './layout.jsx'
 import { api, apiUrl, usePoll, fmtRelative, refetch, viaRelay } from '../api.js'
 import PermissionFix, { useRecheck } from './PermissionFix.jsx'
 import { ReplyAssist } from './mail/ReplyAssist.jsx'
+import AiAssist from './AiAssist.jsx'
 import { takeMailDo } from './today.js'
 import { locale, t, tx } from '../i18n/index.js'
 import './mail/mail.css'
@@ -248,7 +249,7 @@ const KEYS = [
   ['J  K', tx('Next and previous conversation')],
   ['E', tx('Done, or not done')],
   ['H', tx('Remind me')],
-  ['R', tx('Reply Assist: a reply drafted in your voice')],
+  ['R', tx('AI Assist: draft a reply in your voice')],
   ['Z', tx('Undo')],
   ['Enter', tx('Open')],
   ['Esc', tx('Back, or close')],
@@ -294,7 +295,13 @@ function Reader({ id, summary, onBack, onOpenAgent, onRule, rules, onOpen, onDon
   const isMuted = rules?.mute?.includes(addr)
   const link = mailLink(m.mid)
   const nudge = !!m.mine
-  const panel = assist && <ReplyAssist id={id} data={data} nudge={nudge} onClose={() => setAssist(false)} beside={wideAssist} />
+  const panel = assist && <ReplyAssist id={id} data={data} nudge={nudge} times={assist === 'times'} onClose={() => setAssist(false)} beside={wideAssist} />
+  // AI Assist, at the right end of the email's buttons: a reply (or, for one you sent, a nudge) and
+  // free times. Picked again, each closes its panel.
+  const assists = () => [
+    { label: nudge ? t('Draft a nudge') : t('Draft a reply'), hint: t('In your own words, to copy or open in your mail app'), keys: 'R', on: assist === 'reply', run: () => setAssist(assist === 'reply' ? false : 'reply') },
+    !nudge && { label: t('Find a time'), hint: t('Free times from your calendar, to put in a reply'), on: assist === 'times', run: () => setAssist(assist === 'times' ? false : 'times') },
+  ]
   return (
     <div className={`mreader-wrap ${assist && wideAssist ? 'with-assist' : ''}`} data-esc={onBack ? '' : undefined}>
       <article className="mreader">
@@ -318,9 +325,8 @@ function Reader({ id, summary, onBack, onOpenAgent, onRule, rules, onOpen, onDon
             </button>
             {remind && <RemindMenu mine={nudge} onPick={(when) => { setRemind(false); onLater(when) }} onClose={() => setRemind(false)} />}
           </span>
-          <button type="button" className={`btn small ${assist ? 'on' : 'primary'}`} onClick={() => setAssist(!assist)} aria-expanded={!!assist}>
-            <Icon name="edit" size={12} /> {nudge ? t('Draft a nudge') : t('Reply Assist')} <kbd>R</kbd>
-          </button>
+          <span className="grow" />
+          <AiAssist className="btn small mreader-ai-btn" on={!!assist} items={assists} />
         </div>
         {m.nudge && <p className="muted small">{t('Reminds you {when} if nobody answers.', { when: fmtWhen(m.nudge) })}</p>}
 
@@ -413,7 +419,7 @@ export default function MailView({ onOpenAgent, openId }) {
   const ref = useRef(null)
   const setRef = useCallback((el) => { ref.current = el; measure(el) }, [measure])
   const narrow = width > 0 && width < 760
-  // Reply Assist beside the email once there's room for the list, the email and it.
+  // AI Assist's reply beside the email once there's room for the list, the email and it.
   const wideAssist = width >= 1100
   const search = useRef(null)
 
@@ -520,7 +526,7 @@ export default function MailView({ onOpenAgent, openId }) {
     if (!summary) { openFirst(); flash(t('Open a message first, then press {key}.', { key: { done: 'E', later: 'H', reply: 'R' }[what] || '' })); return }
     if (what === 'done') doDone()
     if (what === 'later') setRemind(true)
-    if (what === 'reply') setAssist(true)
+    if (what === 'reply') setAssist('reply')
   }
   const fromMenu = useRef(doFromMenu)
   fromMenu.current = doFromMenu
@@ -544,7 +550,7 @@ export default function MailView({ onOpenAgent, openId }) {
     const go = (i) => { const x = order[Math.max(0, Math.min(order.length - 1, i))]; if (x) { setSel(x.id); setTimeout(() => ref.current?.querySelector('.mrow.on')?.scrollIntoView({ block: 'nearest' }), 0) } }
     const handled = () => { e.preventDefault(); e.stopPropagation() }
     if (keys) { if (k === 'Escape' || k === '?') { handled(); setKeys(false) } return }
-    if (k === 'j' || k === 'ArrowDown') { handled(); go(at < 0 ? 0 : at + 1) } else if (k === 'k' || k === 'ArrowUp') { handled(); go(at < 0 ? 0 : at - 1) } else if (k === 'Enter' && !e.target.closest('button, a')) { handled(); openFirst() } else if (k === 'e') { handled(); if (summary) doDone(); else flash(t('Open a message first, then press {key}.', { key: 'E' })) } else if (k === 'h') { handled(); if (summary) setRemind((x) => !x); else flash(t('Open a message first, then press {key}.', { key: 'H' })) } else if (k === 'r') { handled(); if (summary) setAssist(true); else flash(t('Open a message first, then press {key}.', { key: 'R' })) } else if (k === 'z') { handled(); if (undo.current) doUndo(); else flash(t('Nothing to undo.')) } else if (k === '/') { handled(); search.current?.focus() } else if (k === '?') { handled(); setKeys(true) } else if (k === 'Escape') {
+    if (k === 'j' || k === 'ArrowDown') { handled(); go(at < 0 ? 0 : at + 1) } else if (k === 'k' || k === 'ArrowUp') { handled(); go(at < 0 ? 0 : at - 1) } else if (k === 'Enter' && !e.target.closest('button, a')) { handled(); openFirst() } else if (k === 'e') { handled(); if (summary) doDone(); else flash(t('Open a message first, then press {key}.', { key: 'E' })) } else if (k === 'h') { handled(); if (summary) setRemind((x) => !x); else flash(t('Open a message first, then press {key}.', { key: 'H' })) } else if (k === 'r') { handled(); if (summary) setAssist('reply'); else flash(t('Open a message first, then press {key}.', { key: 'R' })) } else if (k === 'z') { handled(); if (undo.current) doUndo(); else flash(t('Nothing to undo.')) } else if (k === '/') { handled(); search.current?.focus() } else if (k === '?') { handled(); setKeys(true) } else if (k === 'Escape') {
       if (remind) { handled(); setRemind(false) } else if (assist) { handled(); setAssist(false) } else if (narrow && sel) { handled(); setSel(null) }
     } else if (k === 'Tab' && (e.target === document.body || e.target.closest('.mrow, .mlist-tabs'))) {
       handled()
@@ -637,7 +643,7 @@ export default function MailView({ onOpenAgent, openId }) {
       )}
       {showReader && (
         <Reader id={sel} summary={summary} onBack={narrow ? () => setSel(null) : null} onOpenAgent={onOpenAgent} onRule={setRule} rules={data?.rules} onOpen={setSel}
-          onDone={doDone} onUndone={doDone} onLater={doLater} assist={assist && !!sel} setAssist={setAssist} remind={remind} setRemind={setRemind} wideAssist={wideAssist} />
+          onDone={doDone} onUndone={doDone} onLater={doLater} assist={sel ? assist : false} setAssist={setAssist} remind={remind} setRemind={setRemind} wideAssist={wideAssist} />
       )}
       {note && (
         <div className={`mnote ${note.error ? 'bad' : ''}`} role="status">

@@ -30,7 +30,7 @@ export const SECTIONS = [
   { id: 'providers', label: tx('Model Providers'), icon: 'layers', hint: tx('API keys, clouds, local models, cloud agents') },
   { id: 'voice', label: tx('Voice'), icon: 'mic', hint: tx('Speech to text on this computer, and dictation') },
   { id: 'meetings', label: tx('Meetings'), icon: 'mic', hint: tx('How meetings are transcribed and summarized') },
-  { id: 'mail', label: tx('Mail'), icon: 'mail', hint: tx('How You Write, for Reply Assist, and your working hours'), mac: true },
+  { id: 'mail', label: tx('Mail'), icon: 'mail', hint: tx('How You Write, for the replies AI Assist drafts, and your working hours'), mac: true },
   { id: 'mcp', label: tx('MCP Servers'), icon: 'tool', hint: tx('Tools your agents can use') },
   { id: 'phone', label: tx('Devices'), icon: 'phone', hint: tx('Your phone and your other computers, through your relay or Tailscale; what to notify you about') },
   { id: 'account', label: tx('Account'), icon: 'user', hint: tx('Your Bold Bridge account, for Early Access and Bridge AI\'s relay'), accounts: true },

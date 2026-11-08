@@ -2,9 +2,11 @@ import { useCallback, useEffect, useState } from 'react'
 import Icon from '../Icon.jsx'
 import { api, fmtTime } from '../../api.js'
 import { t, tx, locale } from '../../i18n/index.js'
+import { AssistHead } from '../AiAssist.jsx'
 import './prep.css'
 
-// Prep Assist, before a meeting, as AI Assist is during one (server/meetprep.js): who's coming (the
+// AI Assist's Prepare for this meeting, before a meeting, as its suggestions are during one
+// (server/meetprep.js): who's coming (the
 // people you've met before and the ones new to your meetings), what happened last time with them
 // (the summary and what's still open, yours and theirs), the invite's agenda and files, your mail
 // with them, and a few goals or questions from the model that writes your notes, each with what
@@ -84,7 +86,7 @@ function Suggestions({ p, prep, compact, onSettings }) {
       <div className="prep-acts">
         {d.writer && (items.length || s?.error
           ? <button type="button" className="ghost-btn" disabled={working} onClick={() => prep(true)}><Icon name="refresh" size={12} /> {working ? t('Thinking…') : s?.error ? t('Try again') : t('Again')}</button>
-          : <button type="button" className="btn small primary" disabled={working} onClick={() => prep(false)}><Icon name="bulb" size={12} /> {working ? t('Thinking…') : t('Suggest goals and questions')}</button>)}
+          : <button type="button" className="btn small primary" disabled={working} onClick={() => prep(false)}><Icon name="wand" size={12} /> {working ? t('Thinking…') : t('Suggest goals and questions')}</button>)}
         {d.writer && !items.length && !s?.error && !compact && <span className="muted small">{d.auto ? t('With {model}, from what\'s here. It also does this by itself 15 minutes before.', { model: d.writer.label }) : t('With {model}, from what\'s here.', { model: d.writer.label })}</span>}
       </div>
     </div>
@@ -180,21 +182,19 @@ export function InviteFiles({ agenda, files, compact }) {
 // The card itself. e: the event; invite: with its agenda and files (the calendar's panel shows them
 // itself); onOpenMeeting(id): a recorded meeting's notes; onOpenMail(id): a message in Today ›
 // Mail; onOpenEvent: all of it, in the calendar (compact only); onSettings: Settings › Model Providers
-// (null where there's no Settings to open, as in the floating card's own window).
-export function PrepCard({ e, size = 'full', invite = true, onOpenMeeting, onOpenMail, onOpenEvent, onSettings = openSettings }) {
-  const p = usePrep(e)
+// (null where there's no Settings to open, as in the floating card's own window); prep: usePrep's,
+// when what holds the card has it too (the calendar's AI Assist asks for suggestions through it).
+export function PrepCard({ e, size = 'full', invite = true, prep = null, onOpenMeeting, onOpenMail, onOpenEvent, onSettings = openSettings }) {
+  const own = usePrep(prep ? null : e)
+  const p = prep || own
   const compact = size !== 'full'
   const d = p.data
   const ready = !!(d?.suggest?.items?.length || d?.making || p.busy)
   return (
-    <section className={`prep ${compact ? 'compact' : ''}`} aria-label={t('Prep Assist')}>
-      <div className="prep-head">
-        <Icon name="bulb" size={13} />
-        <b>{t('Prep Assist')}</b>
-        {d?.making && <span className="muted small">{t('Thinking…')}</span>}
-        <span className="prep-grow" />
+    <section className={`prep ${compact ? 'compact' : ''}`} aria-label={t('AI Assist')}>
+      <AssistHead className="prep-head" what={d?.making ? t('Thinking…') : t('Prepare for this meeting')}>
         {compact && onOpenEvent && <button type="button" className="ghost-btn" onClick={onOpenEvent}>{t('Open in Calendar')} <Icon name="chevron" size={10} /></button>}
-      </div>
+      </AssistHead>
       {!d && !p.error && <div className="skeleton-rows"><div /><div /></div>}
       {p.error && <p className="error-text small">{p.error} <button type="button" className="link-btn" onClick={p.load}>{t('Try again')}</button></p>}
       {d && (compact ? (

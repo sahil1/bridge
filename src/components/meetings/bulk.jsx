@@ -91,10 +91,10 @@ export function BulkBar({ selection, compact = false, onDeleted, list = [] }) {
         <b className="mt-bulk-n">{t('{n} picked', { n })}</b>
         {btn('save', 'download', t('Save as notes'))}
         {btn('chief', 'helm', t('Send action items to Chief of Staff'))}
-        {btn('summarize', 'sparkle', t('Summarize again'))}
+        {btn('summarize', 'wand', t('Summarize again'))}
         <button type="button" className={compact ? 'ghost-btn' : 'btn small'} onClick={() => setAgain(true)} disabled={!!busy || !n} title={t('Transcribe again')} aria-label={t('Transcribe again')}><Icon name="refresh" size={12} />{!compact && ` ${t('Transcribe again')}`}</button>
         <button type="button" className={compact ? 'ghost-btn' : 'btn small'} onClick={() => setDialog('folder')} disabled={!!busy || !n} title={t('Move to a folder')} aria-label={t('Move to a folder')}><Icon name="folder" size={12} />{!compact && ` ${t('Folder')}`}</button>
-        {allArchived ? btn('unarchive', 'archive', t('Take out of the archive')) : btn('archive', 'archive', t('Archive'))}
+        {allArchived ? btn('unarchive', 'archive', t('Unarchive')) : btn('archive', 'archive', t('Archive'))}
         <button type="button" className={compact ? 'ghost-btn' : 'btn small'} onClick={() => setDialog('delete')} disabled={!!busy || !n} title={t('Delete')} aria-label={t('Delete')}><Icon name="trash" size={12} />{!compact && ` ${t('Delete')}`}</button>
         <button type="button" className="ghost-btn mt-bulk-x" onClick={() => { clear(); setMsg(null) }} aria-label={t('Unpick all')} title={t('Unpick all')}><Icon name="x" size={12} /></button>
       </>}

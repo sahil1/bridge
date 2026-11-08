@@ -521,7 +521,8 @@ button.mt-who:not(:disabled):hover { text-decoration: underline dotted; text-und
 .mt-tip .mt-t { padding-top: 2px; }
 .mt-tip-acts { display: inline-flex; gap: 2px; }
 .mt-tip-acts .ghost-btn { height: 22px; padding: 0 6px; }
-.mt-assist-btn.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--line-2)); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.mt-assist-wand, .mt-ask-wand, .mt-tool.lead > .icon, .fc-ai > .icon { flex: none; color: var(--ai); }
+.fc-ai.on { border-color: color-mix(in srgb, var(--ai) 35%, transparent); background: var(--ai-soft); }
 
 /* Files that look like they go with the meeting. */
 .mt-recent { display: grid; gap: 6px; padding-top: 8px; border-top: 1px solid var(--line); }
@@ -663,9 +664,14 @@ button.mt-from-chip:hover { color: var(--ink); border-color: color-mix(in srgb, 
 .app.narrow .mt-view .pane-head .seg { order: 5; flex: 1 0 100%; display: flex; padding: 3px; border-radius: 11px; }
 .app.narrow .mt-view .pane-head .seg button { flex: 1 1 0; min-width: 0; flex-direction: column; justify-content: center; gap: 1px; height: 44px; padding: 0 2px; border-radius: 8px; }
 .app.narrow .mt-view .pane-head .seg button span { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; line-height: 1.2; }
+/* AI Assist at the right end of the views' row, so the name keeps its room on the first. */
+.app.narrow .mt-view .pane-head .mt-ai-btn { order: 6; align-self: center; }
+.app.narrow .mt-view .pane-head:has(.mt-ai-btn) .seg { flex-basis: calc(100% - 46px); }
+.app.narrow .mt-view .pane-head:has(.mt-ai-btn) .seg button { flex: 1 1 auto; padding: 0 4px; }
 /* A phone on its side has the width but not the height: the views go beside the name. */
 @media (orientation: landscape) and (max-height: 520px) {
   .app.narrow .mt-view .pane-head .seg { order: 0; flex: none; }
+  .app.narrow .mt-view .pane-head .mt-ai-btn { order: 0; }
   .app.narrow .mt-view .pane-head .seg button { flex: none; flex-direction: row; gap: 6px; height: 40px; padding: 0 12px; }
   .app.narrow .mt-view .pane-head .seg button span { font-size: 12.5px; }
 }

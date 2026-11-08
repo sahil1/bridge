@@ -1,4 +1,5 @@
-// The calendar (Today › Calendar, server/calendar.js) and Prep Assist (server/meetprep.js), in the
+// The calendar (Today › Calendar, server/calendar.js) and AI Assist's Prepare for this meeting
+// (server/meetprep.js), in the
 // browser named BRIDGE_TEST_BROWSER, through a stand-in for Bridge AI's calendar helper
 // (native/bridgecal; not on Windows, where the stand-in is a script it can't start). A realistic week
 // on four calendars (one with no colour of its own): a standup every day, meetings that overlap, a
@@ -11,7 +12,8 @@
 // one takes it off the grid and off the Schedule, kept on the server, and a click brings it back;
 // week start and working hours; tasks on their day; your answer to each invite shown, never changed;
 // the event panel's parts (the invite's files and agenda, the recorded meeting's notes and action
-// items, Prep Assist); Prep with no model (all the rest, and how to add one), then with the stand-in
+// items, the prep, AI Assist at the right end of its buttons); the prep with no model (all the rest,
+// and how to add one), then with the stand-in
 // model: what it's sent and what's shown, kept, Again, by itself shortly before, and on the floating
 // card. The calendar helper is only ever asked to read. Screenshots at 1440 and on a 390 phone,
 // light and dark. It holds on any day at any time: BRIDGE_TEST_CLOCK=HH:MM (or "Fri 16:05", that day
@@ -24,7 +26,7 @@ import { startKit, startModel, checks, until, sleep, browser, page, shot, phoneF
 
 const { ok, skip, done } = checks('calendar')
 if (IS_WIN) {
-  skip('the calendar and Prep Assist', 'the stand-in calendar helper is a script Windows can\'t start')
+  skip('the calendar and its meeting prep', 'the stand-in calendar helper is a script Windows can\'t start')
   process.exit(done().fail ? 1 : 0)
 }
 
@@ -215,7 +217,7 @@ try {
   const tk = await api(`/calendar/tasks?from=${from}&to=${ymd(at(13, 12))}`)
   ok(tk.tasks.some((x) => x.title.startsWith('Book the offsite') && x.due === ymd(wed)) && tk.tasks.some((x) => /tomorrow/.test(x.title) && x.due === ymd(NOW + DAY)) && !tk.tasks.some((x) => /wiki/.test(x.title)), 'the tasks that name a day, on that day; one with none isn\'t on the calendar', tk.tasks)
 
-  // ---------- Prep Assist with no model ----------
+  // ---------- Meeting prep with no model ----------
   const p0 = await api('/prep', { event: soonEv })
   ok(p0.writer === null && !p0.suggest && p0.people.known.map((x) => x.name).sort().join() === 'Leo Brandt,Maya Okafor' && p0.people.new.join() === 'Ravi Menon', "no model: who's coming, the people you've met (Meeting Insights' People) and the one who's new", p0.people)
   ok(p0.last?.title === 'Northwind pricing sync' && p0.last.why === 'series' && p0.last.summary[0] === 'Maya wants a three-year term if the price holds.' && p0.last.yours.map((x) => x.text).join() === 'You: send the revised quote to Maya' && p0.last.theirs.map((x) => x.text).join() === 'Maya: confirm the seat count', 'last time: the summary, and what\'s still open both ways (not what was done)', p0.last)
@@ -234,8 +236,17 @@ try {
     const card = p.locator('.cal-detail .prep')
     await until(async () => /Ines Varga/.test(await card.innerText().catch(() => '')), 15000)
     const text = await card.innerText().catch(() => '')
-    ok(/Who's Coming/i.test(text) && /Ines Varga/.test(text) && /2 meetings · last /.test(text) && /Design review with Ines/.test(text) && /The empty states need work/.test(text) && /Ines: mock up the empty states/.test(text), "the panel's Prep Assist with no model: who's coming, last time and what's still open", text)
+    ok(/Who's Coming/i.test(text) && /Ines Varga/.test(text) && /2 meetings · last /.test(text) && /Design review with Ines/.test(text) && /The empty states need work/.test(text) && /Ines: mock up the empty states/.test(text), "the panel's prep with no model: who's coming, last time and what's still open", text)
     ok(/need a model to write them/.test(text) && await card.locator('button', { hasText: 'Add a model' }).count() === 1 && !(await card.locator('button', { hasText: 'Suggest goals' }).count()), 'and how to add a model, with no Suggest button', text)
+    // AI Assist at the right end of the event's buttons, its prep headed as AI Assist's; Prepare for
+    // this meeting with no model shows the prep and asks nothing.
+    const wand = p.locator('.cal-detail-actions button[aria-label="AI Assist"]')
+    const head = await card.locator('.prep-head').innerText().catch(() => '')
+    ok(await wand.evaluate((e) => !e.nextElementSibling).catch(() => false) && /AI Assist/.test(head) && /Prepare for this meeting/.test(head), "AI Assist at the right end of the event's buttons, and the prep under it says it's AI Assist's", head)
+    await wand.click()
+    await p.locator('.ai-menu button', { hasText: 'Prepare for this meeting' }).click()
+    await sleep(300)
+    ok(!asked(/Prepare me for a meeting/).length && await card.isVisible(), 'with no model, Prepare for this meeting shows the prep and sends nothing')
     const panel = await p.locator('.cal-detail').innerText()
     ok(/From the Invite/i.test(panel) && /Walk through onboarding v2/.test(panel) && /Google Doc/.test(panel) && /Not answered yet/.test(panel) && /Change it in your calendar app/.test(panel), "the panel: the invite's agenda and its file, and your answer (not answered yet), to change in your calendar app", panel)
     ok(!(await p.locator('.cal-detail').locator('button', { hasText: /^(Accept|Decline|Maybe|Delete|Edit|Move|Reply)/ }).count()), 'nothing in it answers, edits or moves the event')
@@ -353,6 +364,14 @@ try {
     const ag = await p.locator('.cal-detail .cal-sec .prep-agenda').innerText().catch(() => '')
     ok(say === `Agree on: ${laterEv.agenda}` && hover?.startsWith(say) && ag === laterEv.agenda, `${mode}: the goal shows whole (the agenda ending at a word, with "…"), all of it on hover too`, { say, hover, ag })
     await shot(p, `${tag}calendar-prep-${mode}`)
+    // AI Assist's Prepare for this meeting: its suggestions are there already, so nothing more is asked.
+    const n1 = asked(/^Prepare me for a meeting:/).length
+    await p.locator('.cal-detail-actions button[aria-label="AI Assist"]').click()
+    ok(/Prepare for this meeting/.test(await p.locator('.ai-menu').innerText().catch(() => '')), `${mode}: AI Assist's menu in the event's panel: Prepare for this meeting`)
+    await shot(p, `${tag}calendar-ai-menu-${mode}`)
+    await p.locator('.ai-menu button', { hasText: 'Prepare for this meeting' }).click()
+    await sleep(300)
+    ok(asked(/^Prepare me for a meeting:/).length === n1, `${mode}: with its suggestions there, Prepare for this meeting asks the model nothing more`)
     // A meeting earlier today that was recorded: its notes.
     {
       await openEvent(p, RECORDED)
@@ -388,7 +407,7 @@ try {
     const card = p.locator('.cal-detail .prep')
     await until(async () => /Wer kommt/i.test(await card.innerText().catch(() => '')), 15000)
     const de = await p.locator('.cal-detail').innerText().catch(() => '')
-    ok(/Wer kommt/i.test(de) && /Ziele und Fragen/i.test(de) && /Ines Varga/.test(de), 'and the panel and its Prep Assist in German', de)
+    ok(/Wer kommt/i.test(de) && /Ziele und Fragen/i.test(de) && /Ines Varga/.test(de), 'and the panel and its prep in German', de)
     await shot(p, `${tag}calendar-prep-de`)
     ok(real(errors).length === 0, 'German: no page errors', errors)
     await p.context().close()
@@ -411,7 +430,7 @@ try {
     await shot(card, `${tag}calendar-float`)
     ok(real(errors).length === 0, 'the card: no page errors', errors)
     await api('/settings', { meetings: { prep: false } }, 'PATCH')
-    ok((await api('/calls')).soon === null, 'Prep Assist before meetings off: the card shows no meeting before it starts')
+    ok((await api('/calls')).soon === null, 'Prepare for each meeting off: the card shows no meeting before it starts')
     await api('/settings', { meetings: { prep: true } }, 'PATCH')
     await p.context().close()
   }

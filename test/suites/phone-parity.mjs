@@ -5,7 +5,7 @@
 // it a phone path (a row in the More tab, src/components/More.jsx, or a place in another tab) and
 // add it here. Each path is then followed on a phone, 375 and 430 px wide: every tap is there, and
 // the place opens. Then Whiteboards on the phone: the list, a board opened from it (with its own way
-// back), and Draw this; a phone that had the old Terminals tab open gets Terminals in More.
+// back), and AI Assist's Draw this; a phone that had the old Terminals tab open gets Terminals in More.
 //
 // Then Settings, as a phone's settings: it opens at the list of every section (a whole row each,
 // with its icon and what's in it), a section opens full width under ‹ Settings and its name, with
@@ -76,7 +76,7 @@ const PATHS = {
   'a:mail-done': { phone: 'Today › Mail', mac: true },
   'a:mail-later': { phone: 'Today › Mail', mac: true },
   'a:mail-reply': { phone: 'Today › Mail', mac: true },
-  'a:mail-keys': { none: 'Keys are for a keyboard; on a phone the open message has Done, Remind me and Reply Assist as buttons' },
+  'a:mail-keys': { none: 'Keys are for a keyboard; on a phone the open message has Done, Remind me and AI Assist as buttons' },
   'a:markets': { phone: 'Today › Markets' },
   'a:routines': { phone: 'Search › Show routines' },
   'a:new-routine': { phone: 'Search › New routine' },
@@ -294,15 +294,16 @@ try {
     ok(await ph.p.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), `${width}: nothing wider than the phone`)
     await shot(ph.p, `${tag}phone-more-${width}`)
 
-    // Whiteboards: the list, a board from it, its own way back, and Draw this.
+    // Whiteboards: the list, a board from it, its own way back, and AI Assist's Draw this.
     await ph.p.locator('.m-more-row', { hasText: 'Whiteboards' }).click()
     await ph.p.waitForSelector('.wb-home', { timeout: 15000 })
     ok(await ph.p.locator('.m-more-view > .m-view-back', { hasText: 'More' }).isVisible(), `${width}: Whiteboards opens in More, with Back to More`)
     await ph.p.locator('.wb-card', { hasText: board }).click()
     ok(!!(await until(() => ph.p.locator('.excalidraw canvas').count(), 30000)), `${width}: a board opens from the list, in More`)
     ok((await ph.p.locator('.tabbar button.on').innerText()).trim() === 'More' && !(await ph.p.locator('.m-more-view > .m-view-back').count()), `${width}: still in More, with the board's own way back only`)
-    await ph.p.locator('.wb-view .pane-extras button[aria-label="Draw this"]').click()
-    ok(!!(await until(() => ph.p.locator('.wb-draw textarea').isVisible(), 8000)), `${width}: Draw this opens on the board`)
+    await ph.p.locator('.wb-view .pane-extras button[aria-label="AI Assist"]').click()
+    await ph.p.locator('.ai-menu button', { hasText: 'Draw this' }).click()
+    ok(!!(await until(() => ph.p.locator('.wb-draw textarea').isVisible(), 8000)), `${width}: AI Assist's Draw this opens on the board`)
     await shot(ph.p, `${tag}phone-board-${width}`)
     await ph.p.locator('.wb-view button[aria-label="All whiteboards"]').click()
     ok(!!(await until(() => ph.p.locator('.wb-home').isVisible(), 8000)), `${width}: and its Back goes to the list`)

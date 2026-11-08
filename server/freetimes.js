@@ -1,4 +1,4 @@
-// Scheduling Assist: when an email asks to meet ("when are you free", "can we find a time"), a few
+// AI Assist's Find a time: when an email asks to meet ("when are you free", "find a time"), a few
 // free times from your calendar, read only. Within your working hours (Settings › Mail), clear of
 // your meetings by a buffer (more for one somewhere you'd travel to), as long as the email asks
 // for, and inside the other side's working day too when their time zone is known (their email's

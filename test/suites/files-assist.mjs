@@ -1,4 +1,4 @@
-// Files Assist, beside Files (a beta feature): what takes room in a folder and how it could be
+// AI Assist's Look over this folder, beside Files (a beta feature): what takes room in a folder and how it could be
 // tidier, with nothing in the folder changed. A made-up folder ("Mess") with a bit of everything:
 // the same photo in three places (and a hard link, which isn't a copy), two files of the same size
 // that differ, big videos, a year-old tax return, installers and an unpacked archive in Downloads,
@@ -9,15 +9,15 @@
 //   each finding, with what it's based on; the folder's listing and every file's times exactly as
 //   they were after every look and ask; the files in the cloud left out and said, never read;
 //   a look kept (asked again, the same one), a fresh one, and Stop part way through a big folder;
-//   Ask AI: the local model built in by default (stand-in llama-server), saying it's on this
+//   Ask a Model: the local model built in by default (stand-in llama-server), saying it's on this
 //   computer; a model elsewhere only once picked, saying where the names go; names, sizes and dates
 //   sent, never what's in a file;
 //   another computer's folder through the link (Studio, its own server and relay): looked at there,
 //   its beta switch said when off, its model said to be its own, a look that stops at its limit;
 //   a folder macOS asks about (scripts/tcc-sim.mjs): the server never frozen, the look waiting and
 //   saying why, then done;
-//   the panel in Files: the findings with Open (which opens the file in Files), Ask AI, light, dark,
-//   a phone, and the waiting message.
+//   the panel in Files, from AI Assist's menu at the right end of Files' bar: the findings with Open
+//   (which opens the file in Files), Ask a Model, light, dark, a phone, and the waiting message.
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
@@ -121,10 +121,10 @@ function makeMess(dir) {
 const notes = () => 'Meeting notes.\n'.repeat(150)
 const unlock = (dir) => { for (const p of ['Locked', 'Cloud/movie.mp4', 'Cloud/movie 2.mp4']) { try { fs.chmodSync(path.join(dir, ...p.split('/')), 0o755) } catch { /* not made */ } } }
 
-// The agent's Files in a page, at its folder ('' its root), with Files Assist opened from its bar.
+// The agent's Files in a page, at its folder ('' its root), with AI Assist at the right end of its bar.
 async function openFiles(p, pane) {
   await p.waitForFunction(() => !!document.querySelector('.app'), null, { timeout: 30000 }).catch(() => {})
-  const bar = p.locator('.tree-head button[aria-label="Files Assist"]')
+  const bar = p.locator('.tree-head button[aria-label="AI Assist"]')
   for (let i = 0; i < 15 && !(await bar.isVisible().catch(() => false)); i++) {
     await p.evaluate((id) => { window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: id } })); window.dispatchEvent(new CustomEvent('cc-set-view', { detail: { paneId: id, view: 'files' } })) }, pane)
     await bar.waitFor({ timeout: 1000 }).catch(() => {})
@@ -132,13 +132,13 @@ async function openFiles(p, pane) {
   return bar
 }
 
-// No write path: nothing in Files Assist's server code could change a folder, whatever it's asked.
+// No write path: nothing in the server code of AI Assist in Files could change a folder, whatever it's asked.
 {
   const src = fs.readFileSync(path.join(ROOT, 'server', 'fileinsights.js'), 'utf8').replace(/^\s*\/\/.*$/gm, '')
   const writes = src.match(/\b(?:fsp?|fs\.promises)\.(?:write\w*|append\w*|rename\w*|rm\w*|unlink\w*|mkdir\w*|copy\w*|cp\w*|utimes\w*|lutimes\w*|chmod\w*|chown\w*|truncate\w*|symlink\w*|link\w*|create\w*Stream)\b/g) || []
   const opens = [...src.matchAll(/\.open\(([^)]*)\)/g)].map((m) => m[1]).filter((a) => !/,\s*(?:'r'|NOATIME)\s*$/.test(a))
   const imports = [...src.matchAll(/^import .* from '\.\/(\w+)\.js'$/gm)].map((m) => m[0])
-  ok(!writes.length && !opens.length, 'Files Assist\'s server code has no call that writes, renames, removes or changes a file\'s times, and opens files only to read', { writes, opens })
+  ok(!writes.length && !opens.length, 'AI Assist in Files has no call in its server code that writes, renames, removes or changes a file\'s times, and opens files only to read', { writes, opens })
   ok(imports.every((l) => /\{ safePath, hashFile \} from '\.\/files\.js'|\{ openToRead \} from '\.\/openread\.js'|\{ mayLook, noteAsked \} from '\.\/projects\.js'|\{ inPicked \} from '\.\/places\.js'/.test(l)), 'and uses only reading from the rest of the server (safePath, hashFile, openToRead)', imports)
 }
 
@@ -243,9 +243,9 @@ try {
     ok(gone.status === 404 && /no longer kept/.test(gone.message), 'a look no longer kept says so', gone.message)
   })
 
-  await part('Ask AI', async () => {
+  await part('Ask a Model', async () => {
     const m = await api('/files/assist/model')
-    ok(m.model?.id === 'bridge:gemma-4-e2b' && m.model.local && m.model.builtin && !m.picked, 'Ask AI uses the local model built in by default, on this computer', m.model)
+    ok(m.model?.id === 'bridge:gemma-4-e2b' && m.model.local && m.model.builtin && !m.picked, 'Ask a Model uses the local model built in by default, on this computer', m.model)
     const others = m.models.filter((x) => !x.builtin)
     ok(others.some((x) => x.local && x.id.startsWith('ollama:')) && others.some((x) => !x.local && x.id.startsWith('openai:')), 'the others offered, each said to be on this computer or not', others)
     const id = v.id
@@ -283,14 +283,17 @@ try {
       const { ctx, p, errors } = await page(b, kit.url, look)
       try {
         const bar = await openFiles(p, pane)
-        ok(await bar.isVisible(), `${name}: Files Assist is in Files' bar with the beta switch on`)
+        ok(await bar.isVisible() && await bar.evaluate((e) => !e.nextElementSibling), `${name}: AI Assist is at the right end of Files' bar with the beta switch on`)
         await bar.click()
+        const menu = p.locator('.ai-menu')
+        ok(/Look over this folder/.test(await menu.innerText()), `${name}: AI Assist's menu has Look over this folder`, await menu.innerText().catch(() => ''))
+        await menu.locator('button', { hasText: 'Look over this folder' }).click()
         const panel = p.locator('.fa-panel')
         await panel.locator('.fa-tiles').waitFor({ timeout: 30000 })
         const text = await panel.innerText()
         ok(/^Read-only\b/m.test(text), `${name}: it says at the top that it's read-only`, text.slice(0, 200))
         const heads = await panel.locator('h3').allInnerTexts()
-        ok(['Duplicates', 'Large Files', 'Old and Forgotten', 'Organization', 'Ask AI', 'Not Looked At'].every((h) => heads.some((x) => x.trim() === h)) && /3 copies of beach/.test(text) && /trip\.mov/.test(text) && /Installers in Downloads/.test(text) && /12 screenshots in Old Desktop/.test(text) && /36 files straight in Inbox/.test(text) && /3 versions of Report/.test(text),
+        ok(['Duplicates', 'Large Files', 'Old and Forgotten', 'Organization', 'Ask a Model', 'Not Looked At'].every((h) => heads.some((x) => x.trim() === h)) && /3 copies of beach/.test(text) && /trip\.mov/.test(text) && /Installers in Downloads/.test(text) && /12 screenshots in Old Desktop/.test(text) && /36 files straight in Inbox/.test(text) && /3 versions of Report/.test(text),
           `${name}: each finding in its section, with what to do`, text.slice(0, 600))
         ok(/only in the cloud, not on this computer/.test(text) && /node_modules/.test(text), `${name}: what it left out, and why`, text.slice(-600))
         const faults = await p.evaluate(() => document.documentElement.scrollWidth - innerWidth)
@@ -302,11 +305,11 @@ try {
         await shot(p, `files-assist-${tag}${look.mode}${look.phone ? '-phone' : ''}`)
         if (!look.phone && look.mode === 'light') {
           for (const sec of ['old', 'organize', 'skipped']) { await panel.locator(`#fa-${sec}`).evaluate((e) => e.scrollIntoView({ block: 'start' })); await shot(p, `files-assist-${tag}${sec}`) }
-          // Ask AI: which model, and that it's on this computer, before anything is sent.
+          // Ask a Model: which model, and that it's on this computer, before anything is sent.
           const ask = panel.locator('#fa-ask')
           await ask.locator('.fa-privacy').waitFor({ timeout: 15000 })
           const said = await ask.innerText()
-          ok(/on this computer\. Nothing leaves it/.test(said) && /Ask Gemma/i.test(said), 'Ask AI says which model gets the names and that it\'s on this computer', said)
+          ok(/on this computer\. Nothing leaves it/.test(said) && /Ask Gemma/i.test(said), 'Ask a Model says which model gets the names and that it\'s on this computer', said)
           await ask.locator('button.fa-ask').click()
           await ask.locator('.fa-answer').waitFor({ timeout: 30000 })
           const answer = await ask.innerText()
@@ -316,12 +319,12 @@ try {
           // Open: the file in Files' viewer.
           await panel.locator('#fa-large .fa-row', { hasText: 'trip.mov' }).locator('button').first().click()
           ok(await p.locator('.viewer .crumbs b', { hasText: 'trip.mov' }).first().waitFor({ timeout: 10000 }).then(() => true, () => false), 'Open shows the file in Files')
-          // A folder's own Files Assist, from its menu.
+          // A folder's own look, from its menu: the wand and Look over this folder.
           await p.locator('.tree-row', { hasText: 'Inbox' }).first().click({ button: 'right' })
-          await p.locator('.ctx-menu button, .ctx-menu [role=menuitem]', { hasText: 'Files Assist' }).first().click()
+          await p.locator('.ctx-menu button, .ctx-menu [role=menuitem]', { hasText: 'Look over this folder' }).first().click()
           await p.locator('.fa-where', { hasText: 'Inbox' }).waitFor({ timeout: 10000 })
           await panel.locator('.fa-tiles').waitFor({ timeout: 30000 })
-          ok(/36 files straight in Inbox/.test(await panel.innerText()), 'a folder\'s menu opens Files Assist for that folder')
+          ok(/36 files straight in Inbox/.test(await panel.innerText()), 'a folder\'s menu opens AI Assist\'s look at that folder')
         }
         if (look.phone) {
           await panel.locator('#fa-large .fa-row', { hasText: 'raw.mov' }).locator('button').first().click()
@@ -363,7 +366,7 @@ try {
     const sm = await M('/files/assist/model')
     ok(sm.status === 200 && sm.model === null && sm.computer === 'Studio', 'Studio has no model of its own to ask: none picked for you, said to be Studio\'s', sm)
     const na = await M(`/files/insights/${r.id}/ask`, {})
-    ok(na.status === 400 && na.code === 'pick', 'Ask AI there asks you to pick one first', na)
+    ok(na.status === 400 && na.code === 'pick', 'Ask a Model there asks you to pick one first', na)
     ok(same(was, snapshot(shared)).length === 0, 'nothing in Studio\'s folder changed', same(was, snapshot(shared)))
     // Its Desktop, which macOS hasn't asked about there: not looked in from here, where nobody at
     // Studio would see the question; on Studio itself, it is.
@@ -425,6 +428,7 @@ try {
     try {
       const bar = await openFiles(p, pane)
       await bar.click()
+      await p.locator('.ai-menu button', { hasText: 'Look over this folder' }).click()
       const wait = p.locator('.fa-panel .fa-wait')
       ok(await wait.waitFor({ timeout: 15000 }).then(() => true, () => false), 'the panel says it\'s waiting')
       const said = await wait.innerText().catch(() => '')

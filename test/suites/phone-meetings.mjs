@@ -6,7 +6,7 @@
 //
 // Then every meeting screen fits a phone, 375 px wide in a light theme and 430 px in a dark one: the
 // list; a meeting recording from the phone (the recording bar, My notes, the transcript with a
-// section, AI Assist and its suggestions); a finished one (the summary and its choices, the action
+// section, AI Assist's menu in the header, its Suggest what to ask and the suggestions); a finished one (the summary and its choices, the action
 // items with Start an agent open, Written from, the transcript with a line tapped, the ⋯ menu); and a
 // room's speakers named from a list. On each: nothing wider than the phone or past its edge, nothing
 // scrolling sideways or cut off, every button, link, tick and field a whole 40 px target that
@@ -161,7 +161,7 @@ try {
     await tab.locator('.mt-row-open').first().waitFor({ timeout: 10000 })
     await fits('the meetings', 'meetings-list')
 
-    // Recording, from the phone: the bar, My notes, the transcript (a section in it), AI Assist.
+    // Recording, from the phone: the bar, My notes, the transcript (a section in it), AI Assist's suggestions.
     await tab.locator('button', { hasText: 'Start recording' }).first().click()
     ok(!!(await until(() => tab.locator('.mt-recbar').isVisible(), 15000)), `${at}: recording from the phone`)
     const rid = (await kit.api('/meetings')).meetings.find((x) => x.status === 'recording')?.id
@@ -171,7 +171,7 @@ try {
       await fits('recording: the bar, My notes and the transcript', 'meeting-recording')
       const bar = await box(p, '.m-meetings .mt-recbar')
       const btns = await tab.locator('.mt-recbar .btn').evaluateAll((els) => els.map((e) => { const r = e.getBoundingClientRect(); return { t: e.innerText.trim(), h: Math.round(r.height), l: r.left, r: r.right } }))
-      ok(btns.length >= 4 && btns.every((x) => x.h >= 40 && x.l >= bar.left && x.r <= bar.right), `${at}: the recording bar's buttons each a whole 40 px, inside it`, btns)
+      ok(btns.length >= 3 && btns.every((x) => x.h >= 40 && x.l >= bar.left && x.r <= bar.right), `${at}: the recording bar's buttons each a whole 40 px, inside it`, btns)
       const notes = await box(p, '.m-meetings .mt-mynotes.pinned .mt-mine')
       ok(notes && notes.h >= 120 && notes.w >= w - 60, `${at}: a big My notes box while it records`, notes)
       await tab.locator('.mt-recbar button', { hasText: 'New section' }).click()
@@ -180,15 +180,21 @@ try {
       await tab.locator('.mt-transcript .mt-sec').first().scrollIntoViewIfNeeded()
       await fits('recording, with a section')
       fs.writeFileSync(path.join(kit.data, 'meetings', rid, 'assist.json'), JSON.stringify({ items: [{ id: 'a1', t: 30, kind: 'question', text: 'Who signs off on the landing page copy, and by when?', why: 'Legal was mentioned without an owner', state: 'new' }, { id: 'a2', t: 42, kind: 'check', text: 'Is the pricing page in the checklist too?', why: 'From the deck', state: 'new' }], at: new Date().toISOString(), upTo: 0, error: null }))
-      if ((await tab.locator('.mt-recbar .mt-assist-btn').getAttribute('aria-pressed')) !== 'true') await tab.locator('.mt-recbar .mt-assist-btn').click()
+      await tab.locator('.pane-head button[aria-label="AI Assist"]').click()
+      const menuFaults = await phoneFaults(p, '.ai-menu')
+      ok(!Object.keys(menuFaults).length, `${at}: AI Assist's menu in the header fits, every choice a whole target`, menuFaults)
+      await shot(p, `${tag}phone-meeting-ai-menu-${w}-${look.mode}`)
+      const pick = p.locator('.ai-menu button', { hasText: 'Suggest what to ask' })
+      if ((await pick.getAttribute('aria-checked')) !== 'true') await pick.click()
+      else await p.keyboard.press('Escape')
       await tab.locator('.seg button[data-view="assist"]').click()
       ok(!!(await until(() => tab.locator('.mt-tip').first().isVisible(), 8000)), `${at}: AI Assist's suggestions while it records`)
       await tab.locator('.mt-assist').scrollIntoViewIfNeeded()
-      await fits('AI Assist')
+      await fits('Suggestions')
       await tab.locator('.mt-tip').last().scrollIntoViewIfNeeded()
       const tip = await tab.locator('.mt-tip').first().evaluate((e) => ({ text: e.querySelector('.mt-tip-text').getBoundingClientRect().width, all: e.getBoundingClientRect().width }))
       ok(tip.text >= tip.all * 0.8, `${at}: a suggestion's words get the width, its buttons over them`, tip)
-      await fits('AI Assist\'s suggestions', 'meeting-assist')
+      await fits('the suggestions', 'meeting-assist')
       await tab.locator('.mt-recbar button', { hasText: 'Stop' }).click()
       await ended(rid)
       await kit.api(`/meetings/${rid}`, null, 'DELETE')

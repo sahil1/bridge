@@ -1,6 +1,6 @@
 /* Documents in Studio: the toolbar and its menus, the desk and the page on it (a Word file's pages
    at their size, white as printed in a dark look too), the outline and comments beside it, find
-   and replace, and Ask AI over the page. The app's colours, so light and dark both look right;
+   and replace, and AI Assist over the page. The app's colours, so light and dark both look right;
    the page's own are the document's. */
 .sd-doc { --desk: color-mix(in srgb, var(--ink) 6%, var(--pane-2)); display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); height: 100%; min-height: 0; background: var(--desk); }
 .sd-doc .sd-doc-head { position: relative; z-index: 2; background: var(--pane); }
@@ -169,18 +169,18 @@
 .sd-hf-ed.ProseMirror { min-height: 32px; padding: 0; box-shadow: none; }
 .sd-modal:has(.sd-hf) { grid-template-columns: minmax(0, 760px); }
 
-/* Ask AI, by the words picked: a button, its menu, and then the change, to take or leave. */
+/* AI Assist, by the words picked: a button, its menu, and then the change, to take or leave. */
 .sd-ask-place { position: fixed; z-index: 160; width: max-content; max-width: min(520px, calc(100vw - 16px)); }
 .sd-bubble { position: relative; display: inline-flex; padding: 3px; border-radius: 10px; background: var(--pane); box-shadow: 0 0 0 1px var(--line), 0 8px 24px rgb(0 0 0 / .16); }
-.sd-bubble-ai { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: 7px; color: #6d4aff; font: 600 12.5px var(--font); }
-.sd-bubble-ai:hover, .sd-bubble-ai.on { background: color-mix(in srgb, #6d4aff 10%, var(--pane)); }
+.sd-bubble-ai { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: 7px; color: var(--ai); font: 600 12.5px var(--font); }
+.sd-bubble-ai:hover, .sd-bubble-ai.on { background: var(--ai-soft); }
 .sd-ask-menu { top: calc(100% + 6px); min-width: 260px; }
 .sd-ask-own { display: flex; gap: 6px; padding: 6px 4px 2px; border-top: 1px solid var(--line); margin-top: 4px; }
 .sd-ask-own input { flex: 1; min-width: 0; height: 30px; padding: 0 9px; border: 1px solid var(--line-2, var(--line)); border-radius: 7px; background: var(--pane); color: var(--ink); font: 13px var(--font); }
 .sd-ask-model { display: flex; align-items: center; gap: 8px; padding: 6px 6px 2px; }
 .sd-ask-model select { flex: 1; min-width: 0; height: 28px; padding: 0 6px; border: 1px solid var(--line-2, var(--line)); border-radius: 7px; background: var(--pane); color: var(--ink); font: 12.5px var(--font); }
 .sd-ask-card { display: grid; gap: 10px; width: min(480px, calc(100vw - 16px)); padding: 12px 14px; border-radius: 12px; background: var(--pane); box-shadow: 0 0 0 1px var(--line), 0 14px 40px rgb(0 0 0 / .22); }
-.sd-ask-card-head { display: flex; align-items: center; gap: 7px; color: #6d4aff; font-size: 12.5px; }
+.sd-ask-card-head { display: flex; align-items: center; gap: 7px; color: var(--ai); font-size: 12.5px; }
 .sd-ask-card-head b { color: var(--ink); font-weight: 600; }
 .sd-ask-busy { display: flex; align-items: center; gap: 6px; margin: 0; }
 .sd-ask-err p { margin: 0 0 4px; }

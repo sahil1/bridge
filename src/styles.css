@@ -15,6 +15,8 @@
   --ink-3: #8a92a3;
   --accent: #2f6fe0;
   --accent-soft: rgba(47, 111, 224, .1);
+  --ai: #6d4aff; /* AI Assist's wand (AiAssist.jsx) */
+  --ai-soft: rgba(109, 74, 255, .1);
   --on-accent: #ffffff;
   /* herdr status language (overridden from ~/.config/herdr/config.toml at runtime) */
   --needs: #2f6fe0;
@@ -54,6 +56,8 @@
     --ink-3: #6f7788;
     --accent: #4e82ef;
     --accent-soft: rgba(78, 130, 239, .14);
+    --ai: #a490ff;
+    --ai-soft: rgba(164, 144, 255, .14);
     --needs: #4e82ef;
     --done: #4e82ef;
     --working: #a78bfa;
@@ -81,6 +85,8 @@
   --ink-3: #6f7788;
   --accent: #4e82ef;
   --accent-soft: rgba(78, 130, 239, .14);
+  --ai: #a490ff;
+  --ai-soft: rgba(164, 144, 255, .14);
   --needs: #4e82ef;
   --done: #4e82ef;
   --working: #a78bfa;

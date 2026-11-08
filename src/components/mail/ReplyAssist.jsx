@@ -3,17 +3,19 @@ import Icon from '../Icon.jsx'
 import { api, usePoll } from '../../api.js'
 import { usePersisted } from '../layout.jsx'
 import { CalendarSetup } from '../Agenda.jsx'
+import { AssistHead } from '../AiAssist.jsx'
 import { locale, t, tx } from '../../i18n/index.js'
 
-// Reply Assist, like Meetings' AI Assist: beside the open email, a reply drafted in your own tone
-// and language by the model you picked for meeting notes (server mailassist.js), from your How You
-// Write profile (Settings › Mail). Change it here, make it Shorter, Warmer or More direct, then Copy
-// it or Open in your mail app, which opens a new message there with it in, to send yourself. It
-// says which model wrote it and what went to that model, word for word on request. Bridge AI never
-// sends, and never puts anything in your mailbox.
+// AI Assist's Draft a reply: beside the open email, a reply drafted in your own tone and language by
+// the model you picked for meeting notes (server mailassist.js), from your How You Write profile
+// (Settings › Mail). Change it here, make it Shorter, Warmer or More direct, then Copy it or Open in
+// your mail app, which opens a new message there with it in, to send yourself. It says which model
+// wrote it and what went to that model, word for word on request. Bridge AI never sends, and never
+// puts anything in your mailbox.
 //
-// Scheduling Assist: when the email asks to meet, or you ask, a few free times from your calendar
-// (read only) in your working hours and theirs, to put in the draft or copy. Nothing is held.
+// Find a time: when the email asks to meet, or you ask (times: opened for that, with no draft until
+// you ask), a few free times from your calendar (read-only) in your working hours and theirs, to put
+// in the draft or copy. Nothing is held.
 const TWEAKS = [['shorter', tx('Shorter')], ['warmer', tx('Warmer')], ['direct', tx('More direct')]]
 export const openMailSettings = () => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'mail' } }))
 const openProviders = () => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'providers' } }))
@@ -52,7 +54,7 @@ function Scheduling({ id, asked, onUse, busy }) {
   if (st.error) {
     return (
       <div className="massist-times">
-        <b className="small">{t('Scheduling Assist')}</b>
+        <b className="small">{t('Find a time')}</b>
         {st.code ? <CalendarSetup error={st.error} code={st.code} onCheck={load} /> : <p className="error-text small">{t("Couldn't read your calendar: {error}", { error: st.error })}</p>}
       </div>
     )
@@ -67,7 +69,7 @@ function Scheduling({ id, asked, onUse, busy }) {
   return (
     <div className="massist-times">
       <div className="massist-row">
-        <b className="small"><Icon name="calendar" size={12} /> {t('Scheduling Assist')}</b>
+        <b className="small"><Icon name="calendar" size={12} /> {t('Find a time')}</b>
         <span className="muted small">{asked ? t('They ask to meet for {n} minutes.', { n: st.minutes }) : t('{n} minutes', { n: st.minutes })}</span>
       </div>
       {st.slots.length ? (
@@ -86,7 +88,7 @@ function Scheduling({ id, asked, onUse, busy }) {
         </ul>
       ) : <p className="small">{t('No free {n} minutes in your working hours in the next two weeks.', { n: st.minutes })}</p>}
       {st.theirs && st.both === false && <p className="muted small">{t("Your working hours and theirs ({zone}) don't meet, so these are in yours.", { zone: st.theirs.label })}</p>}
-      <p className="muted small">{t('From your calendar, read only: {days}, {from} to {to}, {buffer} minutes clear of other meetings ({travel} around one somewhere else){theirs}. Nothing is held or added.', {
+      <p className="muted small">{t('From your calendar, read-only: {days}, {from} to {to}, {buffer} minutes clear of other meetings ({travel} around one somewhere else){theirs}. Nothing is held or added.', {
         days: s.days.map((d) => new Date(2023, 0, 1 + d).toLocaleDateString(locale(), { weekday: 'short' })).join(' '), from: hhmm(s.start), to: hhmm(s.end), buffer: s.buffer, travel: s.travel,
         theirs: st.theirs ? t(', and in their working day ({zone})', { zone: st.theirs.label }) : '',
       })} <button type="button" className="link-btn" onClick={openMailSettings}>{t('Working hours')}</button></p>
@@ -111,7 +113,7 @@ function whatWent(r) {
   return r.local ? t('Sent to {model}, on this computer: {what}. Nothing left it.', { model: r.modelLabel, what }) : t('Sent to {model}: {what}.', { model: r.modelLabel, what })
 }
 
-export function ReplyAssist({ id, data, nudge, onClose, beside }) {
+export function ReplyAssist({ id, data, nudge, times = false, onClose, beside }) {
   const voice = usePoll('/mail/voice', 5 * 60 * 1000)
   // Looked at afresh as it opens (a model added since, a profile learnt elsewhere) before deciding.
   const [fresh, setFresh] = useState(false)
@@ -125,7 +127,8 @@ export function ReplyAssist({ id, data, nudge, onClose, beside }) {
   const [showSent, setShowSent] = useState(false)
   const [copied, setCopied] = useState(false)
   const [findTimes, setFindTimes] = useState(false)
-  useEffect(() => { const d = drafts.get(id); setRes(d || null); setText(d?.text || ''); setErr(null); setShowSent(false); setFindTimes(false) }, [id])
+  useEffect(() => { const d = drafts.get(id); setRes(d || null); setText(d?.text || ''); setErr(null); setShowSent(false); setFindTimes(times) }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (times) setFindTimes(true) }, [times])
   useEffect(() => { if (res) drafts.set(id, { ...res, text }) }, [id, res, text])
 
   const write = async (body = {}, what = 'draft') => {
@@ -143,11 +146,12 @@ export function ReplyAssist({ id, data, nudge, onClose, beside }) {
     try { await api('/mail/voice/learn', { method: 'POST' }); await voice.refresh(); setBusy(null); write({ voice: true }) } catch (e) { setErr({ message: e.message, code: e.code }); setBusy(null); voice.refresh() }
   }
   // Learning first, the first time, unless you'd rather not; then a draft straight away.
-  const intro = !!v && !v.profile && v.learn && !skip && !!v.now && !res
+  // Opened for Find a time, the times come first, and a draft when you ask for one.
+  const intro = !times && !!v && !v.profile && v.learn && !skip && !!v.now && !res
   useEffect(() => {
-    if (!v || res || busy || err || intro) return
+    if (!v || res || busy || err || intro || times) return
     write()
-  }, [id, !!v, intro]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [id, !!v, intro, times]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const copy = async () => {
     try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 2000) } catch { setErr({ message: t("Couldn't copy. Select the text and copy it yourself.") }) }
@@ -155,21 +159,18 @@ export function ReplyAssist({ id, data, nudge, onClose, beside }) {
   const who = res?.reply?.to?.[0]
   const asks = !nudge && (data?.meet?.asks || findTimes)
   return (
-    <aside className={`massist ${beside ? 'beside' : ''}`} aria-label={t('Reply Assist')} data-esc>
-      <div className="massist-head">
-        <b><Icon name="edit" size={13} /> {nudge ? t('Nudge') : t('Reply Assist')}</b>
-        <span className="muted small grow" title={res?.modelLabel || v?.now?.label || undefined}>{res ? t('By {model}', { model: res.modelLabel }) : v?.now ? t('Uses {model}, the model for your meeting notes', { model: v.now.label }) : ''}</span>
-        <button type="button" className="icon-btn" onClick={onClose} aria-label={t('Close Reply Assist')}><Icon name="x" size={13} /></button>
-      </div>
+    <aside className={`massist ${beside ? 'beside' : ''}`} aria-label={t('AI Assist')} data-esc>
+      <AssistHead className="massist-head" what={nudge ? t('Draft a nudge') : times && !res ? t('Find a time') : t('Draft a reply')} onClose={onClose} />
+      {(res || v?.now) && <p className="muted small massist-by" title={res?.modelLabel || v?.now?.label || undefined}>{res ? t('By {model}', { model: res.modelLabel }) : t('Uses {model}, the model for your meeting notes', { model: v.now.label })}</p>}
 
       {intro && (
         <div className="massist-intro">
-          <p className="small">{t("Reply Assist drafts a reply in your own words. To learn how you write, it reads your replies in Mail's Sent folders and what you said in recorded meetings (the lines Who spoke marks as yours) from the last four months.")}</p>
+          <p className="small">{t("AI Assist drafts a reply in your own words. To learn how you write, it reads your replies in Mail's Sent folders and what you said in recorded meetings (the lines Who spoke marks as yours) from the last four months.")}</p>
           <p className="small">{v.now.local
             ? t('Up to 40 of each go to {model}, which runs on this computer, and a short How You Write profile is kept here, for you to read, change or clear in Settings › Mail.', { model: v.now.label })
             : t('Up to 40 of each go to {model} once, and a short How You Write profile is kept on this computer, for you to read, change or clear in Settings › Mail.', { model: v.now.label })}</p>
           <div className="massist-acts">
-            <button type="button" className="btn small primary" onClick={learn} disabled={!!busy}><Icon name="sparkle" size={12} /> {busy === 'learn' ? t('Learning how you write…') : t('Learn how I write')}</button>
+            <button type="button" className="btn small primary" onClick={learn} disabled={!!busy}><Icon name="wand" size={12} /> {busy === 'learn' ? t('Learning how you write…') : t('Learn how I write')}</button>
             <button type="button" className="ghost-btn" onClick={() => { setSkip(true); write({ voice: false }) }} disabled={!!busy}>{t('Draft without it')}</button>
           </div>
         </div>
@@ -210,7 +211,8 @@ export function ReplyAssist({ id, data, nudge, onClose, beside }) {
       )}
 
       {asks ? <Scheduling id={id} asked={!!data?.meet?.asks} busy={busy} onUse={(times, theirs) => write({ times, theirs }, 'times')} />
-        : !nudge && <button type="button" className="ghost-btn massist-find" onClick={() => setFindTimes(true)}><Icon name="calendar" size={12} /> {t('Find free times')}</button>}
+        : !nudge && <button type="button" className="ghost-btn massist-find" onClick={() => setFindTimes(true)}><Icon name="calendar" size={12} /> {t('Find a time')}</button>}
+      {times && !res && !busy && !err && v && <button type="button" className="ghost-btn massist-find" onClick={() => write()}><Icon name="wand" size={12} /> {t('Draft a reply')}</button>}
 
       <p className="muted small massist-foot">
         {v?.profile ? t('Written in your voice, from How You Write.') : t('Not using How You Write.')} <button type="button" className="link-btn" onClick={openMailSettings}>{t('How You Write')}</button>

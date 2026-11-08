@@ -136,7 +136,7 @@ export default function Meetings({ onOpenAgent }) {
   const [models, setModels] = useState(null)
   const [vocab, setVocab] = useState(null)
   const [instr, setInstr] = useState(null)
-  // Prep Assist needs the calendar: only where there's one (a Mac).
+  // Preparing for meetings needs the calendar: only where there's one (a Mac).
   const calendar = usePoll('/config', 10 * 60 * 1000).data?.calendar === true
   useEffect(() => { api('/chat/models').then((r) => setModels(r.models || [])).catch(() => setModels([])) }, [])
   const m = s?.effective?.meetings || {}
@@ -232,10 +232,10 @@ export default function Meetings({ onOpenAgent }) {
         </label>
         <label className="st-check">
           <input type="checkbox" checked={m.assist === true} onChange={(e) => set({ assist: e.target.checked })} />
-          <span><b>AI Assist in every meeting</b> <span className="muted small">While a meeting records, the model reads along and suggests what to ask or check next, from what's said, the invite and the files that go with it. Assist on a meeting turns it on or off there, and for the meetings after.</span></span>
+          <span><b>Suggest what to ask, in every meeting</b> <span className="muted small">While a meeting records, AI Assist reads along with the model that writes your notes and suggests what to ask or check next, from what's said, the invite and the files that go with it. AI Assist › Suggest what to ask on a meeting turns it on or off there, and for the meetings after.</span></span>
         </label>
-        <label className="st-row" title="The slider on Assist, while a meeting records, changes it too">
-          <span>How often AI Assist suggests something</span>
+        <label className="st-row" title="The slider on a meeting's Suggestions, while it records, changes it too">
+          <span>How often it suggests something</span>
           <select className="st-input" value={['low', 'high'].includes(m.assistLevel) ? m.assistLevel : 'medium'} onChange={(e) => set({ assistLevel: e.target.value })} aria-label="How often AI Assist suggests something">
             <option value="low">Low: one thing, every few minutes, only when something stands out</option>
             <option value="medium">Medium: up to three, about once a minute</option>
@@ -244,7 +244,7 @@ export default function Meetings({ onOpenAgent }) {
         </label>
         {calendar && <label className="st-check">
           <input type="checkbox" checked={m.prep !== false} onChange={(e) => set({ prep: e.target.checked })} />
-          <span><b>{t('Prep Assist before each meeting')}</b> <span className="muted small">{t("Fifteen minutes before a meeting with other people, the model that writes your notes suggests goals and questions from who's coming, last time with them, the invite and your mail with them. Off, it does this only when you ask, from the meeting in Calendar or Home.")}{window.bridgeApp?.desktop && ` ${t('In the desktop app, the floating card shows them ten minutes before, with Join.')}`}</span></span>
+          <span><b>{t('Prepare for each meeting')}</b> <span className="muted small">{t("Fifteen minutes before a meeting with other people, AI Assist suggests goals and questions, with the model that writes your notes, from who's coming, last time with them, the invite and your mail with them. Off, it does this only when you ask, with AI Assist on the meeting in Calendar, or Prepare on Home.")}{window.bridgeApp?.desktop && ` ${t('In the desktop app, the floating card shows them ten minutes before, with Join.')}`}</span></span>
         </label>}
         <label className="st-check">
           <input type="checkbox" checked={m.nameSpeakers !== false} onChange={(e) => set({ nameSpeakers: e.target.checked })} />

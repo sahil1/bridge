@@ -17,6 +17,7 @@ import '@univerjs/preset-sheets-find-replace/lib/index.css'
 import '@univerjs/preset-sheets-hyper-link/lib/index.css'
 import '@univerjs/preset-sheets-note/lib/index.css'
 import Icon from '../../Icon.jsx'
+import { AssistHead } from '../../AiAssist.jsx'
 import { api as call, useFleet } from '../../../api.js'
 import { t, tx, currentLang } from '../../../i18n/index.js'
 import { withKeys } from '../keys.js'
@@ -30,11 +31,12 @@ import '../sheet.css'
 // A sheet: Univer (Apache-2.0, what GenOffice's Sheets is built on too) with its ribbon, formula
 // bar, sheet tabs, number formats, freeze, sort, filter, conditional formatting, data validation,
 // find and replace, links and notes; read from and written back to the file's own kind (xlsx.js), in the
-// app's light or dark look and its language where Univer has it. Ask AI (the ribbon's first
-// button, or the page's Ask an agent) sends the cells picked to one of your agents, which answers
-// with the change rather than making it: it's shown on the sheet, and kept or not. Charts the file
-// has are drawn beside it, from its cells. handle: save() gives { bytes, notKept }, selection() the
-// cells picked ("B2:D9 on Budget") with their values, ask() opens Ask AI.
+// app's light or dark look and its language where Univer has it. AI Assist (the page's header, or
+// Ask about these cells on a right-click) sends the cells picked to one of your agents, which
+// answers with the change rather than making it: it's shown on the sheet, and kept or not. The
+// page's Ask an agent opens it too. Charts the file has are drawn beside it, from its cells. handle:
+// save() gives { bytes, notKept }, selection() the cells picked ("B2:D9 on Budget") with their
+// values, ask() opens AI Assist's panel, assist() what AI Assist offers here.
 const dark = () => { const m = document.documentElement.getAttribute('data-theme'); return m ? m === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches }
 const narrowNow = () => typeof matchMedia === 'function' && matchMedia('(max-width: 700px)').matches
 
@@ -113,7 +115,7 @@ export default function SheetEditor({ file, data, onDirty, onStats, handle, read
   const univer = useRef(null) // the facade, univerAPI
   const book = useRef(null) // what was read (xlsx.js readSheet)
   const ops = useRef([])
-  const [added, setAdded] = useState([]) // charts made here (Insert › Chart, Ask AI), written in on save
+  const [added, setAdded] = useState([]) // charts made here (Insert › Chart, AI Assist), written in on save
   const [msg, setMsg] = useState(null) // what Print or Insert › Chart couldn't do, and why
   const [picked, setPicked] = useState({ sep: null, enc: null }) // a CSV's separator and encoding, when picked
   const [info, setInfo] = useState(null) // { lost, charts, csv }
@@ -123,7 +125,8 @@ export default function SheetEditor({ file, data, onDirty, onStats, handle, read
   const [sel, setSel] = useState(null) // { a1, sheet, sheetId, rows, cols }
   const [isDark, setDark] = useState(dark)
   const [empty, setEmpty] = useState(false) // a new sheet with nothing in it yet
-  const [asked, setAsked] = useState(false) // Ask AI opened once: kept from then on
+  const [asked, setAsked] = useState(false) // AI Assist's panel opened once: kept from then on
+  const [preset, setPreset] = useState(null) // { q, n }: what AI Assist's menu picked, to start the panel with
   useEffect(() => { if (panel === 'ask') setAsked(true) }, [panel])
   const dirty = useRef(false)
   const setPanelRef = useRef(setPanel)
@@ -198,9 +201,9 @@ html,body{margin:0;background:#fff;color:#000}body{padding:0}table{border-collap
       const n = wb.data.sheetOrder.length
       onStats?.({ text: n === 1 ? t('1 sheet') : t('{n} sheets', { n }) })
       const narrow = narrowNow()
-      // Ask AI first in the ribbon. A CSV keeps only values, so the tools for formats, merged
-      // cells, conditional formats and validation aren't offered there (as the other editors do).
-      const menu = { 'ribbon.start.ai': { order: -1 } }
+      // A CSV keeps only values, so the tools for formats, merged cells, conditional formats and
+      // validation aren't offered there (as the other editors do).
+      const menu = {}
       const csv = wb.kind === 'csv'
       if (csv) for (const id of CSV_HIDDEN) menu[id] = { hidden: true }
       made = createUniver({
@@ -219,20 +222,20 @@ html,body{margin:0;background:#fff;color:#000}body{padding:0}table{border-collap
       })
       const u = made.univerAPI
       univer.current = u
-      // Ask AI and Charts, as the ribbon's own buttons (Ask AI first, as large as Paste).
+      // Charts and Print as the ribbon's own buttons, and AI Assist's Ask about these cells on a
+      // right-click (AI Assist itself is at the right end of the page's header).
       if (!readOnly) {
         try {
           const icons = made.univer.__getInjector().get(IconManager)
-          icons.register('BridgeAskAiIcon', ({ style }) => <Icon name="sparkle" size={style?.width || 16} className="sh-ribbon-icon" />)
+          icons.register('BridgeAiAssistIcon', ({ style }) => <Icon name="wand" size={style?.width || 16} className="sh-ribbon-icon sh-ai-icon" />)
           icons.register('BridgeChartsIcon', ({ style }) => <Icon name="trend" size={style?.width || 16} className="sh-ribbon-icon" />)
           icons.register('BridgeChartIcon', ({ style }) => <Icon name="bar-chart" size={style?.width || 16} />)
           icons.register('BridgePrintIcon', ({ style }) => <Icon name="printer" size={style?.width || 16} />)
-          u.createMenu({ id: 'bridge.sheet.ask-ai', title: t('Ask AI'), tooltip: t('Ask one of your agents about the cells you picked: a formula, a cleaned-up column, a summary or a chart. You see the change before it\'s made.'), icon: 'BridgeAskAiIcon', action: () => setPanelRef.current('ask'), order: -10, gridLayout: { row: 1, column: 1, rowSpan: 2, showLabel: true } }).appendTo(['ribbon.start', 'ribbon.start.ai'])
           // Print beside undo and redo, as in Google Sheets' toolbar.
           u.createMenu({ id: 'bridge.sheet.print-button', title: t('Print'), tooltip: withKeys(t('Print, or save as PDF'), 'mod', 'p'), icon: 'BridgePrintIcon', action: () => printRef.current(), order: 5 }).appendTo(['ribbon.start', 'ribbon.start.history'])
           if (!csv) u.createMenu({ id: 'bridge.sheet.insert-chart', title: t('Chart'), tooltip: t('A chart of the cells you picked: their labels and numbers, with the headings above them. Saved as an Excel chart.'), icon: 'BridgeChartIcon', action: () => chartRef.current('column'), order: -1, gridLayout: { row: 1, column: 1, rowSpan: 2, showLabel: true } }).appendTo(['ribbon.insert', 'ribbon.insert.charts'])
           u.createMenu({ id: 'bridge.sheet.charts', title: t('Charts'), tooltip: t('The charts in this file, drawn from its cells'), icon: 'BridgeChartsIcon', action: () => setPanelRef.current((p) => (p === 'charts' ? null : 'charts')), order: 0, gridLayout: { row: 1, column: 1, rowSpan: 2, showLabel: true } }).appendTo(['ribbon.insert', 'ribbon.insert.charts'])
-          u.createMenu({ id: 'bridge.sheet.ask-ai-here', title: t('Ask AI about these cells'), icon: 'BridgeAskAiIcon', action: () => setPanelRef.current('ask'), order: -10 }).appendTo('contextMenu.mainArea')
+          u.createMenu({ id: 'bridge.sheet.ask-ai-here', title: t('Ask about these cells'), tooltip: t('AI Assist: ask one of your agents about the cells you picked. You see the change before it\'s made.'), icon: 'BridgeAiAssistIcon', action: () => setPanelRef.current('ask'), order: -10 }).appendTo('contextMenu.mainArea')
         } catch { /* a Univer without these menus: Ask an agent in the page's header still opens it */ }
       }
       u.createWorkbook(wb.data)
@@ -250,7 +253,7 @@ html,body{margin:0;background:#fff;color:#000}body{padding:0}table{border-collap
       let settled = false
       const settle = setTimeout(() => { settled = true }, 600)
       offs.push({ dispose: () => clearTimeout(settle) })
-      // What's picked, for Ask AI (a moment after it stops changing): however it's picked (the
+      // What's picked, for AI Assist (a moment after it stops changing): however it's picked (the
       // mouse, the keys, the name box) it's set by the same operation.
       let tick = null
       const look = () => { clearTimeout(tick); tick = setTimeout(() => on && setSel(selectionOf(u)), 120) }
@@ -282,6 +285,10 @@ html,body{margin:0;background:#fff;color:#000}body{padding:0}table{border-collap
       } catch { return null }
     },
     ask: () => setPanel('ask'),
+    assist: () => [
+      ...QUICK.map((q) => ({ label: t(q.verb), hint: t(q.hint), run: () => { setPreset({ q, n: Date.now() }); setPanel('ask') } })),
+      { label: t('Ask about these cells'), hint: t('Anything: "a column for the total of each row", "which month spent most?"'), on: panel === 'ask', run: () => setPanel(panel === 'ask' ? null : 'ask') },
+    ],
   }
 
   // A CSV read again another way: the file isn't changed until it's saved.
@@ -292,7 +299,7 @@ html,body{margin:0;background:#fff;color:#000}body{padding:0}table{border-collap
   }
   const sheetCharts = useMemo(() => [...(info?.charts || []), ...added.map((c) => ({ ...c, added: true }))], [info, added])
 
-  if (err) return <div className="sd-empty" role="alert"><Icon name="alert" size={18} /><b>{t("Couldn't read this sheet: {error}", { error: err })}</b><span className="muted small">{t('The file is as it was. Download it to open it in Excel, or put back an earlier version.')}</span></div>
+  if (err) return <div className="sd-empty" role="alert"><Icon name="alert" size={18} /><b>{t("Couldn't read this sheet: {error}", { error: err })}</b><span className="muted small">{t('The file is as it was. Download it to open it in Excel, or restore an earlier version.')}</span></div>
   return (
     <div className={`sd-sheet${panel ? ' with-side' : ''}`}>
       {info?.csv && !readOnly && <CsvBar csv={info.csv} ext={file.ext} onPick={repick} />}
@@ -313,13 +320,13 @@ html,body{margin:0;background:#fff;color:#000}body{padding:0}table{border-collap
           <div className="sh-start" role="note">
             <Icon name="grid" size={18} />
             <span><b>{t('An empty sheet')}</b><small className="muted">{t('Type in any cell or paste a table, or have an agent start it: "a budget for a team of five".')}</small></span>
-            <button type="button" className="btn small" onClick={() => setPanel('ask')}><Icon name="sparkle" size={12} /> {t('Ask AI')}</button>
+            <button type="button" className="btn small" onClick={() => setPanel('ask')}><Icon name="wand" size={12} /> {t('Start this sheet')}</button>
             <button type="button" className="win-btn" onClick={() => setEmpty(false)} aria-label={t('Close')} title={t('Close')}><Icon name="x" size={12} /></button>
           </div>
         )}
-        {/* Ask AI stays as it was (waiting for an answer, say) while Charts is open instead. */}
-        {asked && <AskPanel hidden={panel !== 'ask'} onShow={() => setPanel('ask')} file={file} univer={univer} sel={sel} dark={isDark} onDirty={changed} onChart={(c) => setAdded((a) => [...a, { ...c, id: `c${Date.now().toString(36)}` }])} onClose={() => setPanel(null)} />}
-        {panel === 'charts' && <ChartsPanel charts={sheetCharts} univer={univer} sel={sel} dark={isDark} csv={!!info?.csv} onInsert={insertChart} onEdit={editChart} onAsk={() => setPanel('ask')} onClose={() => setPanel(null)} />}
+        {/* AI Assist's panel stays as it was (waiting for an answer, say) while Charts is open instead. */}
+        {asked && <AskPanel hidden={panel !== 'ask'} preset={preset} onShow={() => setPanel('ask')} file={file} univer={univer} sel={sel} dark={isDark} onDirty={changed} onChart={(c) => setAdded((a) => [...a, { ...c, id: `c${Date.now().toString(36)}` }])} onClose={() => setPanel(null)} />}
+        {panel === 'charts' && <ChartsPanel charts={sheetCharts} univer={univer} sel={sel} dark={isDark} csv={!!info?.csv} onInsert={insertChart} onEdit={editChart} onAsk={() => { setPreset({ q: QUICK.find((q) => q.id === 'chart'), n: Date.now() }); setPanel('ask') }} onClose={() => setPanel(null)} />}
       </div>
       {!ready && <div className="sd-empty sd-loading sd-over" role="status"><Icon name="refresh" size={16} className="spin" /><span className="muted">{t('Opening {name}…', { name: file.name })}</span></div>}
     </div>
@@ -359,19 +366,20 @@ function CsvBar({ csv, ext, onPick }) {
   )
 }
 
-// ---------- Ask AI ----------
+// ---------- AI Assist ----------
 // The cells picked, what to do with them (a formula, a cleaned-up column, a summary, a chart, or
 // anything said), to the agent working in the file's folder, another there, or a new one. Its
 // answer comes back as a change (studio.takeProposal), shown on the sheet marked out, to keep or
-// put back; an answer to a question is shown here.
+// discard; an answer to a question is shown here. preset: what AI Assist's menu picked, put in to
+// finish or send.
 const QUICK = [
-  { id: 'formula', icon: 'braces', label: tx('Write a formula'), text: tx('Write a formula for the cells I picked that ') },
-  { id: 'clean', icon: 'check', label: tx('Clean this column'), text: tx('Clean up the values in the column I picked: trim spaces, write the same thing the same way, fix obvious typos and formats, and keep what each one means.') },
-  { id: 'summary', icon: 'list', label: tx('Summarise'), text: tx('Summarise the cells I picked in a few sentences: totals, the highest and lowest, and anything unusual.') },
-  { id: 'chart', icon: 'trend', label: tx('Chart this'), text: tx('Make a chart of the cells I picked that shows them best.') },
+  { id: 'formula', icon: 'braces', label: tx('Write a formula'), verb: tx('Write a formula'), hint: tx('For the cells you pick'), text: tx('Write a formula for the cells I picked that ') },
+  { id: 'clean', icon: 'check', label: tx('Clean this column'), verb: tx('Clean this column'), hint: tx('Spaces, spellings and formats made the same'), text: tx('Clean up the values in the column I picked: trim spaces, write the same thing the same way, fix obvious typos and formats, and keep what each one means.') },
+  { id: 'summary', icon: 'list', label: tx('Summarise'), verb: tx('Summarize these cells'), hint: tx('Totals, the highest and lowest, anything unusual'), text: tx('Summarise the cells I picked in a few sentences: totals, the highest and lowest, and anything unusual.') },
+  { id: 'chart', icon: 'trend', label: tx('Chart this'), verb: tx('Make a chart'), hint: tx('Of the cells you pick, shown before it\'s added'), text: tx('Make a chart of the cells I picked that shows them best.') },
 ]
 const WAIT_MS = 20 * 60_000
-function AskPanel({ hidden, onShow, file, univer, sel, dark, onDirty, onChart, onClose }) {
+function AskPanel({ hidden, preset, onShow, file, univer, sel, dark, onDirty, onChart, onClose }) {
   const { fleet } = useFleet()
   const here = fleet?.agents?.find((a) => a.paneId === file.root)
   const agents = (fleet?.agents || []).filter((a) => !a.chief && !a.plainChat && !a.cloudOnly && a.kind !== 'chat' && (!here || a.cwd === here.cwd))
@@ -459,11 +467,12 @@ function AskPanel({ hidden, onShow, file, univer, sel, dark, onDirty, onChart, o
     setState({ step: 'idle' })
   }
   const quick = (q) => { setText(t(q.text)); setTimeout(() => { box.current?.focus(); const n = box.current?.value.length || 0; box.current?.setSelectionRange(n, n) }, 0) }
+  useEffect(() => { if (preset && state.step !== 'sending' && state.step !== 'waiting') quick(preset.q) }, [preset?.n]) // eslint-disable-line react-hooks/exhaustive-deps
   const busy = state.step === 'sending' || state.step === 'waiting'
   const p = state.proposal
   return (
-    <aside className="sh-side sh-ask" aria-label={t('Ask AI')} hidden={hidden}>
-      <div className="sd-panel-head"><Icon name="sparkle" size={13} /><b>{t('Ask AI')}</b><span className="sd-grow" /><button type="button" className="win-btn" onClick={() => { if (state.step === 'shown') putBack(); onClose() }} aria-label={t('Close')} title={t('Close')}><Icon name="x" size={13} /></button></div>
+    <aside className="sh-side sh-ask" aria-label={t('AI Assist')} hidden={hidden}>
+      <AssistHead className="sd-panel-head" what={t('Ask about these cells')} onClose={() => { if (state.step === 'shown') putBack(); onClose() }} />
       <div className="sh-side-body">
         <p className="sh-picked">{sel ? <><b>{sel.a1}</b> <span className="muted">{t('on {sheet}', { sheet: sel.sheet })} · {sel.rows * sel.cols === 1 ? t('1 cell') : t('{n} cells', { n: (sel.rows * sel.cols).toLocaleString() })}</span></> : <span className="muted">{t('Pick the cells to ask about, or ask about the whole sheet.')}</span>}</p>
         {state.step !== 'shown' && <>
@@ -500,7 +509,7 @@ function AskPanel({ hidden, onShow, file, univer, sel, dark, onDirty, onChart, o
             {state.chart && <figure className="sh-fig"><figcaption>{state.chart.spec.title || t('Chart')}</figcaption><SheetChart chart={state.chart.view} dark={dark} /></figure>}
             {p.answer && !state.before.length && !state.chart
               ? <div className="sh-acts"><button type="button" className="btn small" onClick={() => navigator.clipboard?.writeText(String(p.answer))}><Icon name="copy" size={12} /> {t('Copy')}</button><button type="button" className="ghost-btn" onClick={() => setState({ step: 'idle' })}>{t('Done')}</button></div>
-              : <div className="sh-acts"><button type="button" className="btn small primary" onClick={keep}><Icon name="check" size={12} /> {t('Keep')}</button><button type="button" className="btn small" onClick={putBack}>{state.before.length ? t('Put back') : t('Leave it')}</button></div>}
+              : <div className="sh-acts"><button type="button" className="btn small primary" onClick={keep}><Icon name="check" size={12} /> {t('Keep')}</button><button type="button" className="btn small" onClick={putBack}>{t('Discard')}</button></div>}
           </div>
         )}
       </div>
@@ -527,10 +536,10 @@ function chartFrom(sheet, c) {
 }
 
 // ---------- Charts ----------
-// The file's charts on the sheet in view (and ones made here, by Insert › Chart or Ask AI), drawn
-// from its cells as they are now; each picks its cells when its name is clicked. One made here
-// has its kind and title to change, and goes with Remove; the file's own are changed in Excel,
-// or by Ask AI.
+// The file's charts on the sheet in view (and ones made here, by Insert › Chart or AI Assist),
+// drawn from its cells as they are now; each picks its cells when its name is clicked. One made
+// here has its kind and title to change, and goes with Remove; the file's own are changed in Excel,
+// or by AI Assist.
 function ChartsPanel({ charts, univer, sel, dark, csv, onInsert, onEdit, onAsk, onClose }) {
   const here = charts.filter((c) => !sel || c.sheet === sel.sheetId || c.sheetName === sel.sheet)
   const view = (c) => {
@@ -557,7 +566,7 @@ function ChartsPanel({ charts, univer, sel, dark, csv, onInsert, onEdit, onAsk, 
     <aside className="sh-side sh-charts" aria-label={t('Charts')}>
       <div className="sd-panel-head"><Icon name="trend" size={13} /><b>{t('Charts')}</b><span className="muted small">{sel ? t('on {sheet}', { sheet: sel.sheet }) : ''}</span><span className="sd-grow" /><button type="button" className="win-btn" onClick={onClose} aria-label={t('Close')} title={t('Close')}><Icon name="x" size={13} /></button></div>
       <div className="sh-side-body">
-        {!here.length && <div className="sh-none"><Icon name="trend" size={18} /><b>{t('No charts on this sheet')}</b><span className="muted small">{csv ? t('Pick the cells to chart, then Chart this in Ask AI: you see it before it\'s added, and it\'s saved as an Excel chart.') : t('Pick the cells to chart (their labels and numbers, with the headings above them), then Insert chart. It\'s saved as an Excel chart.')}</span><span className="sh-acts">{!csv && <button type="button" className="btn small primary" onClick={() => onInsert('column')}><Icon name="bar-chart" size={12} /> {t('Insert chart')}</button>}<button type="button" className="btn small" onClick={onAsk}><Icon name="sparkle" size={12} /> {t('Ask AI')}</button></span></div>}
+        {!here.length && <div className="sh-none"><Icon name="trend" size={18} /><b>{t('No charts on this sheet')}</b><span className="muted small">{csv ? t('Pick the cells to chart, then Make a chart: you see it before it\'s added, and it\'s saved as an Excel chart.') : t('Pick the cells to chart (their labels and numbers, with the headings above them), then Insert chart. It\'s saved as an Excel chart.')}</span><span className="sh-acts">{!csv && <button type="button" className="btn small primary" onClick={() => onInsert('column')}><Icon name="bar-chart" size={12} /> {t('Insert chart')}</button>}<button type="button" className="btn small" onClick={onAsk}><Icon name="wand" size={12} /> {t('Make a chart')}</button></span></div>}
         {here.map((c, i) => {
           const v = view(c)
           return (

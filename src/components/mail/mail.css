@@ -1,4 +1,4 @@
-/* Mail's Done and Remind me, its keys, Reply Assist and Scheduling Assist (MailView.jsx,
+/* Mail's Done and Remind me, its keys, AI Assist's Draft a reply and Find a time (MailView.jsx,
    mail/ReplyAssist.jsx), and Settings › Mail. */
 .mailv { position: relative; }
 .mailv.assisting { grid-template-columns: minmax(300px, 360px) minmax(0, 1fr); }
@@ -41,13 +41,12 @@
 .mkeys dd { margin: 0; color: var(--ink-2); }
 .mkeys p { margin: 0; line-height: 1.45; }
 
-/* Reply Assist, beside the email or under its buttons. */
+/* AI Assist's Draft a reply, beside the email or under its buttons. */
 .massist { display: grid; gap: 10px; align-content: start; padding: 12px; border-radius: 12px; background: var(--pane-2); border: 1px solid var(--line); min-width: 0; }
 .massist.beside { border-radius: 0; border-width: 0 0 0 1px; background: var(--pane); padding: 16px; overflow-y: auto; min-height: 0; }
 .massist p { margin: 0; line-height: 1.45; }
-.massist-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.massist-head > b { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; white-space: nowrap; }
-.massist-head .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.massist-head { font-size: 13px; }
+.massist-by { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .massist-intro { display: grid; gap: 8px; }
 .massist-busy { display: flex; align-items: center; gap: 6px; }
 .massist-err { display: grid; gap: 6px; justify-items: start; }
@@ -60,7 +59,7 @@
 .massist-find { justify-self: start; }
 .massist-foot { padding-top: 6px; border-top: 1px solid var(--line); }
 
-/* Scheduling Assist's free times. */
+/* AI Assist's Find a time: free times. */
 .massist-times { display: grid; gap: 8px; padding: 10px; border-radius: 10px; background: var(--pane); border: 1px solid var(--line); }
 .massist.beside .massist-times { background: var(--pane-2); }
 .massist-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }

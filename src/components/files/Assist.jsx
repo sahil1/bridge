@@ -1,15 +1,17 @@
-// Files Assist: the panel beside Files for the folder on screen. It looks at the folder and the
-// folders in it (server/fileinsights.js) and says what takes room and how it could be tidier, each
-// with what to do about it. It's read-only: its buttons open a file in Files or show it in Finder,
-// nothing else, and moving, renaming and deleting stay yours to do. Ask AI sends the folder's
-// names, sizes and dates (never what's in a file) to the model picked for it, and says which model
-// that is and where it runs before anything is sent.
+// AI Assist's Look over this folder: the panel beside Files for the folder on screen. It looks at
+// the folder and the folders in it (server/fileinsights.js) and says what takes room and how it
+// could be tidier, each with what to do about it. It's read-only: its buttons open a file in Files
+// or show it in Finder, nothing else, and moving, renaming and deleting stay yours to do. Ask a
+// Model sends the folder's names, sizes and dates (never what's in a file) to the model picked for
+// it, and says which model that is and where it runs before anything is sent.
 //   root, rel   the folder, as the file routes name it: an agent's pane or place:<id>, a path in it
 //   machine     another of your computers' id (the look runs there, through the link), or null
+//   at          { id, n }: a section to go to once it's there ('ask', for Suggest how to organize it)
 //   onOpen      ({ root, rel, dir }) opens that file or folder in Files
 //   onClose     closes the panel (optional)
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Icon from '../Icon.jsx'
+import { AssistHead } from '../AiAssist.jsx'
 import PermissionFix from '../PermissionFix.jsx'
 import { BASE, machineId } from '../../api.js'
 import { onComputer, REVEAL, fileOp } from '../FileExtras.jsx'
@@ -52,7 +54,14 @@ const SECTIONS = [
 ]
 const SHOWN = 5
 
-export default function Assist({ root, rel = '', machine = null, onOpen, onClose }) {
+// What AI Assist offers for a folder in Files. open: the panel is open; show(at): opens it (at:
+// the section to go to), or closes it.
+export const folderAssist = (open, show) => [
+  { label: t('Look over this folder'), hint: t('Duplicates, big and forgotten files, a tidier layout'), on: open, run: () => show(open ? false : null) },
+  { label: t('Suggest how to organize it'), hint: t('From its names, sizes and dates, by a model you pick'), run: () => show('ask') },
+]
+
+export default function Assist({ root, rel = '', machine = null, at = null, onOpen, onClose }) {
   const [scan, setScan] = useState(null)
   const [err, setErr] = useState(null)
   const asked = useRef('')
@@ -89,18 +98,14 @@ export default function Assist({ root, rel = '', machine = null, onOpen, onClose
   const where = machine && scan?.computer ? scan.computer : null
   const bodyRef = useRef(null)
   const jump = (id) => bodyRef.current?.querySelector(`#fa-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  const found = !!scan?.found
+  useEffect(() => { if (at?.id && found) jump(at.id) }, [at?.n, found]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <aside className="fa-panel" aria-label={t('Files Assist')}>
-      <header className="fa-head">
-        <Icon name="sparkle" size={15} />
-        <div className="fa-title">
-          <h2>{t('Files Assist')}</h2>
-          <span className="fa-where" title={rel || name}>{where ? t('{folder} on {computer}', { folder: name, computer: where }) : name}</span>
-        </div>
+    <aside className="fa-panel" aria-label={t('AI Assist')}>
+      <AssistHead className="fa-head" what={<span className="fa-where">{where ? t('{folder} on {computer}', { folder: name, computer: where }) : name}</span>} whatTitle={rel || name} onClose={onClose}>
         <button type="button" className="win-btn" onClick={() => look(true)} disabled={scan?.state === 'running'} title={t('Look again')} aria-label={t('Look again')}><Icon name="refresh" size={13} /></button>
-        {onClose && <button type="button" className="win-btn" onClick={onClose} title={t('Close Files Assist')} aria-label={t('Close Files Assist')}><Icon name="x" size={13} /></button>}
-      </header>
+      </AssistHead>
       <div className="fa-body" ref={bodyRef}>
         <p className="fa-promise"><Icon name="eye" size={13} /> <span><b>{t('Read-only')}</b> {t('Nothing here moves, renames or deletes a file: what to do with each stays yours to do.')}</span></p>
         {err && <Problem err={err} machine={machine} where={where} onAgain={() => look(true)} />}
@@ -149,7 +154,7 @@ function Progress({ scan, onStop }) {
 function Problem({ err, machine, where, onAgain }) {
   const on = where || t('that computer')
   const text = err.trial && machine ? t('Files is a beta feature on {computer} too. Turn it on there in Settings › About & Updates › Beta Features.', { computer: on })
-    : err.status === 404 && machine && !err.code ? t('Update Bridge AI on {computer} to use Files Assist there.', { computer: on })
+    : err.status === 404 && machine && !err.code ? t('Update Bridge AI on {computer} to use AI Assist there.', { computer: on })
     : err.message
   return <div className="fa-problem"><p className="error-text">{text}</p><button type="button" className="btn small" onClick={onAgain}><Icon name="refresh" size={12} /> {t('Try again')}</button></div>
 }
@@ -377,7 +382,7 @@ function Organize({ o, here, act, reveal }) {
   )
 }
 
-// ---------- Ask AI ----------
+// ---------- Ask a Model ----------
 function AskAI({ scan, machine, where, onScan }) {
   const [info, setInfo] = useState(null)
   const [err, setErr] = useState(null)
@@ -391,7 +396,7 @@ function AskAI({ scan, machine, where, onScan }) {
   const place = where || info?.computer
   const onIt = machine ? t('on {computer}, where the folder is', { computer: place || t('that computer') }) : t('on this computer')
   return (
-    <Section id="ask" title={t('Ask AI')} icon="sparkle" lead={t('A model suggests how to organize this folder from its file and folder names, sizes and dates. It never sees what\'s in a file.')}>
+    <Section id="ask" title={t('Ask a Model')} icon="wand" lead={t('A model suggests how to organize this folder from its file and folder names, sizes and dates. It never sees what\'s in a file.')}>
       {!info && !err && <p className="muted small">{t('Finding the models you can ask…')}</p>}
       {info && (
         <div className="fa-model">
@@ -408,14 +413,14 @@ function AskAI({ scan, machine, where, onScan }) {
           {info.models.length > 0 && (
             <label className="fa-pick">
               <span className="small muted">{t('Model')}</span>
-              <select value={m?.id || ''} onChange={(e) => pick(e.target.value)} aria-label={t('Model for Ask AI')}>
+              <select value={m?.id || ''} onChange={(e) => pick(e.target.value)} aria-label={t('The model to ask')}>
                 {!m && <option value="">{t('Pick a model…')}</option>}
                 {info.models.map((x) => <option key={x.id} value={x.id}>{x.local ? t('{model}, on {computer}', { model: x.label, computer: machine ? place || t('that computer') : t('this computer') }) : t('{model}, {provider}', { model: x.label, provider: x.provider || '' })}</option>)}
               </select>
             </label>
           )}
           <button type="button" className="btn small primary fa-ask" disabled={!m || running} onClick={go}>
-            <Icon name={running ? 'refresh' : 'sparkle'} size={12} className={running ? 'spin' : ''} /> {running ? t('Asking {model}…', { model: m?.label || '' }) : a ? t('Ask again') : m ? t('Ask {model}', { model: m.label }) : t('Ask AI')}
+            <Icon name={running ? 'refresh' : 'wand'} size={12} className={running ? 'spin' : ''} /> {running ? t('Asking {model}…', { model: m?.label || '' }) : a ? t('Ask again') : m ? t('Ask {model}', { model: m.label }) : t('Ask AI')}
           </button>
         </div>
       )}
@@ -458,13 +463,13 @@ function Skipped({ list: items }) {
   const line = (s) => {
     switch (s.kind) {
       case 'cloud': return plural(s.count, 'One file is only in the cloud, not on this computer, so it wasn\'t read: reading it would download it.', '{n} files are only in the cloud, not on this computer, so they weren\'t read: reading one would download it.') + (s.examples?.length ? ` (${list(s.examples.map(baseName))})` : '')
-      case 'protected': return t('Folders macOS asks about before any app looks inside were left out: {list}. Open one and use Files Assist there.', { list: list(s.paths) })
+      case 'protected': return t('Folders macOS asks about before any app looks inside were left out: {list}. Open one and use AI Assist there.', { list: list(s.paths) })
       case 'tools': return t('Folders kept by tools were left out: {list}.', { list: list(s.names) })
       case 'disk': return t('Folders on another disk were left out: {list}.', { list: list(s.paths) })
       case 'unreadable': return plural(s.count, 'One couldn\'t be read: {list}.', '{n} couldn\'t be read: {list}.', { list: list(s.paths.map((p) => `${p.rel} (${t(WHY[p.why] || WHY.error)})`)) })
       case 'unhashed': return plural(s.count, 'One file wasn\'t compared, to keep the look short.', '{n} files of the same size ({size}) weren\'t compared, to keep the look short.', { size: fmtSize(s.bytes) })
       case 'deep': return t('Folders more than {n} deep were left out.', { n: s.depth })
-      case 'limit': return t('It stopped after {n} files. Use Files Assist on a folder inside this one to see more of it.', { n: fmtNum(s.files) })
+      case 'limit': return t('It stopped after {n} files. Use AI Assist on a folder inside this one to see more of it.', { n: fmtNum(s.files) })
       case 'links': return plural(s.count, 'One link wasn\'t followed.', '{n} links weren\'t followed.')
       case 'hidden': return plural(s.count, 'One hidden file or folder was left out.', '{n} hidden files and folders were left out.')
       default: return null

@@ -91,7 +91,7 @@ export function AskPanel({ path, body, placeholder, suggestions = [], onOpen, cl
     <div className={`mt-ask ${className}`}>
       {answers.map((a) => <Answer key={a.key} a={a} onOpen={onOpen} />)}
       <form onSubmit={(e) => { e.preventDefault(); ask(q) }} className="mt-askbox">
-        <Icon name="sparkle" size={14} className="muted" />
+        <Icon name="wand" size={14} className="mt-ask-wand" />
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={placeholder} aria-label={placeholder} />
         <button type="submit" className="ghost-btn" disabled={!q.trim()} aria-label={t('Ask')}><Icon name="send" size={14} /></button>
       </form>
