@@ -66,8 +66,10 @@ const nameKey = (s) => [...partsOf(s)].sort().join(' ')
 const isMe = (name) => !!me() && (meetings.sameName(name, me()) || (String(name).includes('@') && meetings.sameName(String(name).split('@')[0], me())))
 // The people Meeting Insights knows, asked at most once a minute (it reads every meeting once, then
 // only those that changed). null when it can't say.
+// Meeting Insights is a beta feature: while it's off, nobody is said to be met before or new.
 let known = { at: 0, list: null }
 async function people() {
+  if (cfg.trials?.['meeting-insights'] !== true) return null
   if (known.list && Date.now() - known.at < 60e3) return known.list
   try {
     const r = await within(insights.list(), 8000, 'Meeting Insights')
@@ -173,7 +175,7 @@ function ask(e, p) {
     me() ? `I'm ${me()}.` : '',
     who.known.length || who.new.length ? `Invited, besides me: ${[...who.known.map((x) => x.name), ...who.new].join(', ')}${who.more ? ` and ${who.more} more` : ''}.` : 'No one else is invited.',
     who.known.length ? `People I've met before:\n${who.known.map((x) => `- ${x.name}: ${x.meetings} meeting${x.meetings === 1 ? '' : 's'}${x.last ? `, last ${day(x.last)}` : ''}${x.about ? `; ${x.about}` : ''}${x.topics.length ? `; we talk about ${x.topics.join(', ')}` : ''}`).join('\n')}` : '',
-    who.new.length ? `New to my meetings: ${who.new.join(', ')}.` : '',
+    who.new.length && who.insights ? `New to my meetings: ${who.new.join(', ')}.` : '',
     e.agenda ? `The invite says: ${e.agenda}` : '',
     e.links.length ? `Files in the invite: ${e.links.map((l) => l.name || l.url).join(', ')}.` : '',
     p.last ? `Last time, "${p.last.title}" on ${day(p.last.startedAt)}${p.last.summary.length ? `:\n${p.last.summary.map((x) => `- ${x}`).join('\n')}` : '.'}` : 'There is no earlier meeting like this one in my notes.',

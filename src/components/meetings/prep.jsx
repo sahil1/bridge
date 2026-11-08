@@ -91,12 +91,14 @@ function Suggestions({ p, prep, compact, onSettings }) {
   )
 }
 
+// insights: whether Meeting Insights (a beta feature) knew who's been in your meetings. Without it,
+// who's invited is all that's said: nobody met before, nobody new.
 function People({ people, compact }) {
-  const { known, new: fresh, more } = people
+  const { known, new: fresh, more, insights = true } = people
   if (!known.length && !fresh.length) return <p className="muted small">{t('No one else is invited.')}</p>
   if (compact) {
     const n = known.length + fresh.length + more
-    const said = [n === 1 ? t('1 invited') : t('{n} invited', { n }), known.length ? (known.length === 1 ? t('1 you\'ve met') : t('{n} you\'ve met', { n: known.length })) : null, fresh.length ? t('{n} new to your meetings', { n: fresh.length }) : null].filter(Boolean).join(' · ')
+    const said = [n === 1 ? t('1 invited') : t('{n} invited', { n }), known.length ? (known.length === 1 ? t('1 you\'ve met') : t('{n} you\'ve met', { n: known.length })) : null, fresh.length && insights ? t('{n} new to your meetings', { n: fresh.length }) : null].filter(Boolean).join(' · ')
     return <p className="prep-line small" title={[...known.map((x) => x.name), ...fresh].join(', ')}>{said}</p>
   }
   return (
@@ -110,7 +112,7 @@ function People({ people, compact }) {
           </span>
         </div>
       ))}
-      {fresh.length > 0 && <p className="prep-new small"><span className="prep-badge">{t('New')}</span> {fresh.join(', ')}{more ? ` ${t('and {n} more', { n: more })}` : ''}</p>}
+      {fresh.length > 0 && <p className="prep-new small">{insights && <><span className="prep-badge">{t('New')}</span> </>}{fresh.join(', ')}{more ? ` ${t('and {n} more', { n: more })}` : ''}</p>}
       {!fresh.length && more > 0 && <p className="muted small">{t('and {n} more', { n: more })}</p>}
     </div>
   )

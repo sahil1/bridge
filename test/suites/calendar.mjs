@@ -4,7 +4,8 @@
 // on four calendars (one with no colour of its own): a standup every day, meetings that overlap, a
 // two-day all-day event, one you organised, one you said maybe to, one you declined, one not answered
 // yet, the weekend's family events; today, a meeting starting in eight minutes with people you've met
-// and one you haven't, one later with the files in its invite, one this morning that was recorded,
+// and one you haven't (known from Meeting Insights, a beta feature: with it off, only who's invited
+// is said), one later with the files in its invite, one this morning that was recorded,
 // and a focus block with no one else. Three earlier meetings recorded, Chief of Staff's tasks that
 // name a day, and on a Mac, Mail with a thread from one of them and one you sent that's had no reply.
 // Checks: each calendar keeps its colour from week to week (its own, or one from its name); hiding
@@ -216,6 +217,12 @@ try {
   ok(tk.tasks.some((x) => x.title.startsWith('Book the offsite') && x.due === ymd(wed)) && tk.tasks.some((x) => /tomorrow/.test(x.title) && x.due === ymd(NOW + DAY)) && !tk.tasks.some((x) => /wiki/.test(x.title)), 'the tasks that name a day, on that day; one with none isn\'t on the calendar', tk.tasks)
 
   // ---------- Prep Assist with no model ----------
+  // With Meeting Insights off (a beta feature, and what knows who's been in your meetings), who's
+  // invited is all it says: nobody met before, nobody new, here or in what a model would be told.
+  await api('/settings', { trials: { 'meeting-insights': false } }, 'PATCH')
+  const pOff = await api('/prep', { event: soonEv })
+  ok(pOff.people.insights === false && !pOff.people.known.length && pOff.people.new.length === 3, 'Meeting Insights off: who\'s coming, with nobody said to be met before or new', pOff.people)
+  await api('/settings', { trials: { 'meeting-insights': true } }, 'PATCH')
   const p0 = await api('/prep', { event: soonEv })
   ok(p0.writer === null && !p0.suggest && p0.people.known.map((x) => x.name).sort().join() === 'Leo Brandt,Maya Okafor' && p0.people.new.join() === 'Ravi Menon', "no model: who's coming, the people you've met (Meeting Insights' People) and the one who's new", p0.people)
   ok(p0.last?.title === 'Northwind pricing sync' && p0.last.why === 'series' && p0.last.summary[0] === 'Maya wants a three-year term if the price holds.' && p0.last.yours.map((x) => x.text).join() === 'You: send the revised quote to Maya' && p0.last.theirs.map((x) => x.text).join() === 'Maya: confirm the seat count', 'last time: the summary, and what\'s still open both ways (not what was done)', p0.last)
