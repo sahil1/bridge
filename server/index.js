@@ -414,7 +414,7 @@ app.use('/api/agents/:pane', async (req, res, next) => {
     return res.status(403).json({ error: 'Files only looks for now: nothing is renamed, moved or deleted from it yet.', code: 'readOnly' })
   }
   try {
-    if (!trialOn('files')) throw Object.assign(new Error(FILES_OFF), { status: 404, code: 'trial' })
+    if (!trialOn('files')) return res.status(404).json({ error: FILES_OFF, code: 'trial', trial: 'files' })
     const site = /^\/site\//.test(req.path)
     const rel = site ? decodeURIComponent(req.path.slice(6)) : String(req.query.path ?? req.body?.path ?? '')
     explorer.notFromAfar(await explorer.lexical(req.params.pane, rel), { here: !req.headers['x-bridge-relay'] })

@@ -126,7 +126,7 @@ try {
   await part('off, then on', async () => {
     const side = await ask(desk.url, '/files/sidebar')
     const home = await ask(desk.url, `/agents/${HOME}/files`)
-    ok(side.s === 404 && side.j.trial === 'files' && /Beta Features/.test(side.j.error) && home.s === 404 && /Beta Features/.test(home.j.error), 'off, Files\' routes and its roots say it\'s a beta feature and where to turn it on', { side, home })
+    ok(side.s === 404 && side.j.trial === 'files' && /Beta Features/.test(side.j.error) && home.s === 404 && home.j.trial === 'files' && home.j.error === side.j.error, 'off, Files\' routes and its roots say it\'s a beta feature and where to turn it on, in the same words', { side, home })
     await desk.api('/settings', { trials: { files: true } }, 'PATCH')
     ok((await ask(desk.url, '/files/sidebar')).s === 200, 'turned on in Settings, they answer')
   })
