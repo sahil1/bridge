@@ -101,57 +101,72 @@ async function boxOf(d) {
 }
 
 // ---------- Bridge AI's hosted relay (HOSTED=1) ----------
-// One relay for many computers. https://<domain>/ is a small page and POST /_relay/register, which
-// gives a computer its own address, https://<id>.<domain> (one level down, so Cloudflare's free
-// certificate covers it), its own Hub (idFromName(id)) and a token. The Hub keeps only a hash of
-// the token. Phones then work exactly as with a relay of your own: one address per computer, so
-// each keeps its own pairing and service worker. Any other name answers 404.
+// One relay for many computers, each signed in to a Bold Bridge account that may use it
+// (account/API.md). https://<domain>/ is a small page and POST /_relay/register, which takes the
+// account's relay token and gives that computer its own address, https://<id>.<domain> (one level
+// down, so Cloudflare's free certificate covers it), its own Hub (idFromName(id)) and a token. The
+// Hub keeps only a hash of the token. Phones then work exactly as with a relay of your own: one
+// address per computer, so each keeps its own pairing and service worker. Each account's use, across
+// its computers, is kept by an Account of its own (idFromName(a)). Any other name answers 404.
 const on = (v) => v === true || v === '1' || v === 'true'
 const B32 = 'abcdefghijklmnopqrstuvwxyz234567'
 // Names a computer never gets (the project may want them for itself).
 const RESERVED = new Set(['www', 'api', 'relay', 'admin', 'app', 'mail', 'status', 'docs', 'help', 'support', 'static', 'cdn', 'assets', 'auth', 'login', 'dashboard', 'blog'])
 const sha = async (s) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))].map((b) => b.toString(16).padStart(2, '0')).join('')
+const HOUR = 3600 * 1000
 const utcDay = (t = Date.now()) => new Date(t).toISOString().slice(0, 10)
 const nextDay = (t = Date.now()) => Date.parse(utcDay(t)) + DAY
 const version = (v) => (/^\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(String(v || '')) ? String(v) : 'unknown')
 
 // Every limit, from the Worker's settings (wrangler.hosted.toml [vars]); HOSTED.md says why each
-// default is what it is. Those are the free plan's. A computer on another plan (its Hub's meta.plan,
-// set by POST /_relay/plan) gets what PLANS says that plan raises, e.g.
-// PLANS = '{"plus":{"dayMessages":2000000,"dayMB":10240}}', and the free plan's for the rest.
-const PLAN_LIMITS = ['phones', 'messageKB', 'rate', 'burst', 'dayMB', 'dayMessages', 'idleDays']
-function plans(env) {
-  try { const p = JSON.parse(env.PLANS || '{}'); return p && typeof p === 'object' && !Array.isArray(p) ? p : {} } catch { return {} }
-}
-const planOk = (env, plan) => plan === 'free' || (/^[a-z][a-z0-9-]{0,23}$/.test(String(plan)) && Object.hasOwn(plans(env), plan))
-function limits(env, plan = 'free') {
+// default is what it is. The window, the week and MAX_ACCOUNTS are per account; the rest per
+// computer, but for RELAY_DAILY_REQUESTS, the whole relay's.
+function limits(env) {
   const n = (k, d) => (env[k] != null && env[k] !== '' && Number.isFinite(Number(env[k])) ? Number(env[k]) : d)
-  const free = {
+  return {
     phones: n('MAX_PHONES', MAX_PHONES), // connections to one computer at once
     messageKB: n('MAX_MESSAGE_KB', 256), // one message
     rate: n('MESSAGES_PER_SECOND', 200), // incoming messages to one computer, on average…
     burst: n('MESSAGE_BURST', 2000), // …with this many at once
-    dayMB: n('DAILY_MB', 512), // a computer's daily allowance (UTC days), in data…
-    dayMessages: n('DAILY_MESSAGES', 200000), // …and in messages, which is what Cloudflare bills
     idleDays: n('IDLE_DAYS', 90), // a computer not seen this long is deleted
-  }
-  const more = plan !== 'free' && planOk(env, plan) ? plans(env)[plan] : null
-  for (const k of PLAN_LIMITS) if (more && Number.isFinite(Number(more[k])) && more[k] !== '' && more[k] !== null) free[k] = Number(more[k])
-  return {
-    plan: more ? plan : 'free',
-    ...free,
-    perIp: n('REGISTER_PER_IP', 10), // new computers a day from one network
-    perDay: n('REGISTER_PER_DAY', 1000), // new computers a day, in all
-    computers: n('MAX_COMPUTERS', 100), // computers registered at once, in all
-    dayRequests: n('RELAY_DAILY_REQUESTS', 500000), // the whole relay's Cloudflare requests a day, as /_relay/stats counts them
+    windowHours: n('ACCOUNT_WINDOW_HOURS', 8), // an account's window, from its first message after the last one ended…
+    windowMessages: n('ACCOUNT_WINDOW_MESSAGES', 150000), // …and the messages it may send in it, which is what Cloudflare bills
+    weekMessages: n('ACCOUNT_WEEK_MESSAGES', 1000000), // and in a week, the weeks running on from its first use
+    accounts: n('MAX_ACCOUNTS', 500), // accounts with a computer on the relay, in all
+    dayRequests: n('RELAY_DAILY_REQUESTS', 5000000), // the whole relay's Cloudflare requests a day, as /_relay/stats counts them
   }
 }
-// What a computer is told about its plan (and Settings shows): its name and daily allowance.
-const planOf = (lim) => ({ t: 'plan', plan: lim.plan, dayMessages: lim.dayMessages, dayMB: lim.dayMB, phones: lim.phones, resets: nextDay() })
 // The kill switch: HOSTED_OFF=1 (or a message of your own) refuses new computers and connections.
 // (Said to a phone, it also says where to change that: on the computer.)
 const OFF_TEXT = 'Bridge AI\'s relay is switched off for now. To keep using your phone, put a relay on your own Cloudflare account, or use Tailscale'
 const offText = (env, phone) => (!env.HOSTED_OFF || env.HOSTED_OFF === '0' || env.HOSTED_OFF === 'false' ? null : on(env.HOSTED_OFF) ? `${OFF_TEXT}${phone ? ' (Settings › Devices, on the computer)' : ' instead'}.` : String(env.HOSTED_OFF).slice(0, 300))
+
+// What a phone (and the computer) is told when the relay stops carrying it for now, with when it
+// can go on (`end`). The account's own: window, week, and the account itself (suspended, relay,
+// deleted, token).
+const ACCOUNT_WHY = new Set(['suspended', 'relay', 'deleted', 'token'])
+const REFUSED_MS = 10 * 60000 // how long a computer whose account is stopped waits before it asks again
+const OWN = 'For no limits, put the relay on your own Cloudflare account (Settings › Devices, on the computer).'
+const OTHER = 'A relay on your own Cloudflare account, or Tailscale, still works (Settings › Devices, on the computer).'
+function limitText(why, l, end) {
+  const n = (x) => x.toLocaleString('en-US')
+  const d = new Date(end)
+  const at = d.toISOString().slice(11, 16)
+  const when = utcDay(end) === utcDay() ? `${at} UTC` : `${d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' })}, ${at} UTC`
+  return {
+    window: `This computer's Bold Bridge account has used its allowance on Bridge AI's relay for now (${n(l.windowMessages)} messages in ${l.windowHours} hours). It resets at ${when}. ${OWN}`,
+    week: `This computer's Bold Bridge account has used this week's allowance on Bridge AI's relay (${n(l.weekMessages)} messages a week). It resets on ${when}. ${OWN}`,
+    all: `Bridge AI's relay has carried all it can for today, for every computer on it. It starts again at ${at} UTC. For no limits, put the relay on your own Cloudflare account (Settings › Devices, on the computer), or use Tailscale.`,
+    shut: `Bridge AI's relay let this computer go until ${when}: it kept sending after its phones were stopped (over ${n(HOST_SLACK)} messages that had nowhere to go). Phones can connect again then. ${OWN}`,
+    rate: 'Too much at once for Bridge AI\'s relay. Connecting again in a moment.',
+    size: `That was too big for Bridge AI's relay (over ${l.messageKB} KB at once). Connecting again in a moment.`,
+    phones: `Bridge AI's relay takes ${l.phones} connections to one computer at once, and this computer has that many paired phones and tabs connected. Close Bridge AI on one you're not using; this one tries again in a minute.`,
+    suspended: `This computer's Bold Bridge account is suspended, so Bridge AI's relay doesn't carry it for now. ${OTHER}`,
+    relay: `This computer's Bold Bridge account doesn't have Bridge AI's relay any more. ${OTHER}`,
+    deleted: `This computer's Bold Bridge account was deleted, so Bridge AI's relay doesn't carry it any more. ${OTHER}`,
+    token: 'Bridge AI\'s relay needs this computer signed in to a Bold Bridge account that may use it (Settings › Account, on the computer). It connects again once it is.',
+  }[why]
+}
 
 // A computer's id: 10 random base32 characters and 2 of checksum, so a made-up name is turned away
 // here, without waking a Hub.
@@ -160,25 +175,30 @@ async function newId() { const s = [...crypto.getRandomValues(new Uint8Array(10)
 const idOk = async (s) => /^[a-z2-7]{12}$/.test(s) && !RESERVED.has(s) && (await check(s.slice(0, 10))) === s.slice(10)
 
 // The registry's counts for /_relay/stats: one day's, kept 35 days, with its busiest computers.
-// limits.full: registrations turned away because MAX_COMPUTERS were registered; limits.all:
-// computers stopped because the whole relay reached RELAY_DAILY_REQUESTS (at ceilingAt);
-// limits.shut: computers let go for sending on past their day.
+// limits.full: registrations turned away because MAX_ACCOUNTS accounts had a computer on it;
+// limits.all: computers stopped because the whole relay reached RELAY_DAILY_REQUESTS (at ceilingAt);
+// limits.shut: computers let go for sending on while stopped; limits.account: computers stopped for
+// their account (suspended, no relay any more, deleted, or no relay token).
 const KEEP_STATS_DAYS = 35
 const TOP = 10
-const blankDay = () => ({ registered: 0, refused: 0, computers: 0, connections: { computers: 0, phones: 0 }, messages: 0, bytes: 0, limits: { day: 0, rate: 0, size: 0, phones: 0, full: 0, all: 0, shut: 0 }, top: [], ceilingAt: null })
+const blankDay = () => ({ registered: 0, refused: 0, computers: 0, connections: { computers: 0, phones: 0 }, messages: 0, bytes: 0, limits: { window: 0, week: 0, rate: 0, size: 0, phones: 0, full: 0, all: 0, shut: 0, account: 0 }, top: [], ceilingAt: null })
 // What a day's counts come to in Cloudflare requests: incoming messages at 20 to 1 (and a tally
-// every 1,000), and about three for each connection or computer set up (the Worker, its Hub, and
-// the tally or the registry). Keepalives aren't in it.
-const requestsOf = (s) => Math.ceil(s.messages / 20 + s.messages / 1000) + 3 * (s.connections.computers + s.connections.phones + s.registered + s.refused)
-// Messages a computer may go on sending once today's allowance is used up (they go nowhere), before
-// its own connection is closed until the day resets: Cloudflare bills each one that arrives.
+// to the registry and one to the account every 1,000), and about three for each connection or
+// computer set up (the Worker, its Hub, and the tally or the registry). Keepalives aren't in it.
+const requestsOf = (s) => Math.ceil(s.messages / 20 + s.messages / 500) + 3 * (s.connections.computers + s.connections.phones + s.registered + s.refused)
+// Messages a computer may go on sending once its phones are stopped (they go nowhere), before its
+// own connection is closed until they may go on: Cloudflare bills each one that arrives.
 const HOST_SLACK = 1000
 
 const hub = (env, id) => env.HUB.get(env.HUB.idFromName(id))
 // A question for the registry (gate, left, tally, stats), and its answer.
 const registry = (env, what, body) => hub(env, 'registry').fetch(`https://hub/_hosted/${what}`, body ? { method: 'POST', body: JSON.stringify(body) } : {}).then((r) => r.json())
+// A word with an account's Account (check, tally, computer, left), and its answer.
+const toAccount = (env, a, what, body) => env.ACCOUNT.get(env.ACCOUNT.idFromName(a)).fetch(`https://account/_account/${what}`, { method: 'POST', body: JSON.stringify({ ...body, a }) }).then((r) => r.json())
 const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
 const notFound = () => new Response('Not found', { status: 404 })
+const REPORT_MS = 5 * 60000 // how often an Account reports its use while it's used
+const STATUS_MS = 60000 // how long an Account keeps what the accounts service said
 
 // Anonymous counts for the project (Workers Analytics Engine, if bound as STATS): by computer id
 // only. HOSTED.md lists every one.
@@ -208,6 +228,25 @@ async function registered(env, id) {
   return ok
 }
 
+// An account's relay token (account/API.md, Tokens): base64url of { k: 'relay', a, d, iat, exp } and
+// its Ed25519 signature, checked here with the accounts service's public key (ACCOUNTS_PUBLIC_KEY),
+// with nothing asked of anyone. { ok, a, d } or { ok: false, why: none | forged | expired }.
+const unb64 = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (s.length % 4)) % 4)), (c) => c.charCodeAt(0))
+let accountsKey = null // [the setting, its CryptoKey]
+async function relayToken(env, header) {
+  const m = /^Bearer ([A-Za-z0-9_-]{10,800})\.([A-Za-z0-9_-]{86})$/.exec(String(header || ''))
+  if (!m || !env.ACCOUNTS_PUBLIC_KEY) return { ok: false, why: 'none' }
+  let p = null
+  try {
+    if (accountsKey?.[0] !== env.ACCOUNTS_PUBLIC_KEY) accountsKey = [env.ACCOUNTS_PUBLIC_KEY, await crypto.subtle.importKey('raw', unb64(env.ACCOUNTS_PUBLIC_KEY), { name: 'Ed25519' }, false, ['verify'])]
+    if (!(await crypto.subtle.verify({ name: 'Ed25519' }, accountsKey[1], unb64(m[2]), new TextEncoder().encode(m[1])))) return { ok: false, why: 'forged' }
+    p = JSON.parse(new TextDecoder().decode(unb64(m[1])))
+  } catch { return { ok: false, why: 'forged' } }
+  if (p?.k !== 'relay' || !/^[a-z0-9]{12}$/.test(String(p.a)) || !/^[a-z0-9]{12}$/.test(String(p.d)) || !Number.isInteger(p.exp)) return { ok: false, why: 'forged' }
+  if (p.exp * 1000 <= Date.now()) return { ok: false, why: 'expired' }
+  return { ok: true, a: p.a, d: p.d }
+}
+
 async function hosted(req, env) {
   const url = new URL(req.url)
   const p = url.pathname
@@ -218,7 +257,6 @@ async function hosted(req, env) {
     if (p === '/_relay/register') return req.method === 'POST' ? register(req, env, url) : new Response('Use POST', { status: 405 })
     if (p === '/_relay/health') return health()
     if (p === '/_relay/stats') return stats(req, env, url)
-    if (p === '/_relay/plan') return setPlan(req, env)
     if (p === '/') return new Response(LANDING, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'public, max-age=3600', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; frame-ancestors 'none'", 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' } })
     if (p === '/mark.svg') return page(req, url)
     return notFound()
@@ -229,22 +267,26 @@ async function hosted(req, env) {
     if (req.headers.get('Upgrade') !== 'websocket') return new Response('Expected a WebSocket', { status: 426 })
     const off = offText(env, p === '/_relay/link')
     if (off) return refuse({ t: 'limit', why: 'off', text: off, until: Date.now() + 30 * 60000 }, 4009)
-    return hub(env, id).fetch(req) // the Hub checks the computer's token
+    return hub(env, id).fetch(req) // the Hub checks the computer's token, and its account
   }
   if (p === '/_relay/forget') return req.method === 'POST' ? hub(env, id).fetch(req) : new Response('Use POST', { status: 405 })
   if (p === '/_relay/health') return health()
   return page(req, url)
 }
 
-// POST /_relay/register: { version } in, { id, url, token } out, once. Limited per network and per
-// day (the registry: a Hub of its own, keeping a count per day under a hash of the network's address
-// and that day, gone the next day), and to MAX_COMPUTERS registered at once: the registry keeps each
-// computer's id until its Hub is removed. A refusal says why ({ error, why }), and the app shows it.
-const REFUSED = {
-  ip: 'Too many computers were set up from this network today. Try again tomorrow, or put a relay on your own Cloudflare account.',
-  all: 'Bridge AI\'s relay isn\'t taking more computers today. Try again tomorrow, or put a relay on your own Cloudflare account.',
-  full: 'Bridge AI\'s relay is full for now: it has as many computers as it can take. Put a relay on your own Cloudflare account instead (it\'s free), or use Tailscale.',
+// POST /_relay/register: Authorization: Bearer <relay token>, { version } in, { id, url, token } out.
+// The token says which account and device this is: an account that may use the relay (asked of its
+// Account, which asks the accounts service), and one address per device, so the same device
+// registering again gets the same address back (with a new token). A device new to the relay is
+// counted in by the registry (a Hub of its own, one request at a time, so the cap holds however many
+// register at once): its account's first takes one of MAX_ACCOUNTS places. A refusal says why ({
+// error, why }), and the app shows it.
+const NO_TOKEN = {
+  none: 'Bridge AI\'s relay needs this computer signed in to a Bold Bridge account that may use it (Settings › Account).',
+  forged: 'That pass for Bridge AI\'s relay doesn\'t check out. Sign in to your Bold Bridge account again (Settings › Account).',
+  expired: 'This computer\'s pass for Bridge AI\'s relay ran out. Bridge AI gets a new one from your Bold Bridge account by itself; try again in a minute.',
 }
+const FULL = 'Bridge AI\'s relay is full for now: it has as many accounts as it can take. Put a relay on your own Cloudflare account instead (it\'s free), or use Tailscale.'
 async function register(req, env, url) {
   const off = offText(env)
   if (off) return json({ error: off, why: 'off' }, 503)
@@ -252,37 +294,38 @@ async function register(req, env, url) {
   // JSON only, so a web page elsewhere can't make your browser register computers (it would need
   // to ask first, and nothing here answers that).
   if (!/^application\/json\b/i.test(req.headers.get('Content-Type') || '')) return json({ error: 'Send JSON' }, 415)
-  const lim = limits(env)
+  const t = await relayToken(env, req.headers.get('Authorization'))
+  if (!t.ok) { count(env, '', 'refused', ['token']); return json({ error: NO_TOKEN[t.why], why: 'token', token: t.why }, 401) }
   let body = {}
   try { body = JSON.parse(await req.text()) } catch { /* nothing said */ }
   const v = version(body?.version)
-  let ip = req.headers.get('CF-Connecting-IP') || ''
-  if (ip.includes(':')) { // IPv6: its /64, which one home or server usually has to itself
-    const [a, b = ''] = ip.toLowerCase().split('::')
-    const head = a ? a.split(':') : []
-    const tail = b ? b.split(':') : []
-    ip = [...head, ...Array(Math.max(0, 8 - head.length - tail.length)).fill('0'), ...tail].slice(0, 4).map((x) => x.replace(/^0+(?=.)/, '')).join(':')
-  }
-  const day = utcDay()
-  const key = (await sha(`bridge register ${day} ${ip}`)).slice(0, 32)
+  const acc = await toAccount(env, t.a, 'check', { d: t.d }).catch(() => null)
+  if (!acc) return json({ error: 'Bridge AI\'s relay couldn\'t check your account just now. Try again in a minute.' }, 503)
+  if (acc.refused) { count(env, '', 'refused', [acc.refused.why]); return json({ error: limitText(acc.refused.why, limits(env), Date.now()), why: acc.refused.why }, 403) }
   const token = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
   const hash = await sha(token)
+  const init = (id) => hub(env, id).fetch('https://hub/_hosted/init', { method: 'POST', body: JSON.stringify({ id, hash, version: v, a: t.a, d: t.d }) })
+  const done = (id) => {
+    known.set(id, { ok: true, until: Date.now() + 300000 })
+    return json({ id, url: `${url.protocol}//${id}.${url.host}`, token })
+  }
+  // This device has an address here: the same one, with a new token.
+  if (acc.id && (await idOk(acc.id)) && (await init(acc.id)).ok) { count(env, acc.id, 'register', [v, 'again']); return done(acc.id) }
+  const lim = limits(env)
   for (let i = 0; i < 4; i++) {
     const id = await newId()
     if (RESERVED.has(id)) continue
-    // The registry counts the computer in (or turns it away) before its Hub exists, one at a time,
-    // so the cap holds however many register at once.
-    const gate = await registry(env, 'gate', { key, day, perIp: lim.perIp, perDay: lim.perDay, max: lim.computers, id })
+    const gate = await registry(env, 'gate', { a: t.a, id, max: lim.accounts })
     if (gate.why === 'taken') continue // an id it has already (vanishingly unlikely): another
     if (!gate.ok) {
       count(env, '', 'refused', [gate.why])
-      return json({ error: REFUSED[gate.why], why: gate.why }, gate.why === 'full' ? 503 : 429)
+      return json({ error: FULL, why: 'full' }, 503)
     }
-    const r = await hub(env, id).fetch('https://hub/_hosted/init', { method: 'POST', body: JSON.stringify({ id, hash, version: v }) })
-    if (r.ok) {
-      known.set(id, { ok: true, until: Date.now() + 300000 })
+    const r = await init(id)
+    if (r.status === 201) {
+      await toAccount(env, t.a, 'computer', { d: t.d, id }).catch(() => {})
       count(env, id, 'register', [v])
-      return json({ id, url: `${url.protocol}//${id}.${url.host}`, token })
+      return done(id)
     }
     await registry(env, 'left', { id }).catch(() => {}) // its place back (the registry's daily look finds it otherwise)
     if (r.status !== 409) break
@@ -290,8 +333,8 @@ async function register(req, env, url) {
   return json({ error: 'Couldn\'t set up an address. Try again in a minute.' }, 500)
 }
 
-// For whoever runs it, each behind a secret of its own (wrangler secret put): without one, the
-// address isn't there at all (404); with a wrong one, 403.
+// For whoever runs it, behind a secret of its own (wrangler secret put): without one, the address
+// isn't there at all (404); with a wrong one, 403.
 async function admin(req, secret) {
   if (!secret) return notFound()
   return (await tokenOk(req.headers.get('Authorization'), secret)) ? null : json({ error: 'Not allowed' }, 403)
@@ -299,14 +342,14 @@ async function admin(req, secret) {
 
 // GET /_relay/stats (STATS_TOKEN): the last days' counts, kept by the registry: computers set up,
 // connections, messages and data, limits reached, and today's busiest computers by id, with what
-// that comes to in Cloudflare requests. Nothing about what passed through, or who.
-// ?days=N (up to 35, default 7).
+// that comes to in Cloudflare requests, and how many accounts have a computer on it of how many it
+// takes. Nothing about what passed through, or who. ?days=N (up to 35, default 7).
 async function stats(req, env, url) {
   const no = await admin(req, env.STATS_TOKEN)
   if (no) return no
   const days = Math.min(35, Math.max(1, Number(url.searchParams.get('days')) || 7))
   const out = await registry(env, 'stats')
-  return json({ ...advice(out.days, env), ...out, computers: { registered: out.computers, max: limits(env).computers }, days: out.days.slice(0, days) })
+  return json({ ...advice(out.days, env), ...out, accounts: { on: out.accounts, max: limits(env).accounts }, days: out.days.slice(0, days) })
 }
 
 // What the counts mean for Cloudflare's bill (HOSTED.md, Cost): incoming messages are billed as
@@ -327,30 +370,12 @@ function advice(days, env) {
     : today > FREE_REQUESTS / 2 ? 'Over half of Workers Free\'s 100,000 requests a day: move to Workers Paid ($5 a month) now. When Free runs out, the relay stops for everyone until 00:00 UTC.' : 'Within Workers Free\'s 100,000 requests a day. Move to Workers Paid before telling anyone, or once a day passes 50,000.'
   return { requests: { today, month: monthRequests, workers: paid ? 'paid' : 'free', ceiling: limits(env).dayRequests }, note }
 }
-
-// POST /_relay/plan (PLAN_TOKEN): { id, plan } puts a computer on a plan ('free', or one of PLANS);
-// { id } alone says which it's on. The hook for paid plans: whatever takes payment calls this.
-async function setPlan(req, env) {
-  const no = await admin(req, env.PLAN_TOKEN)
-  if (no) return no
-  if (req.method !== 'POST') return new Response('Use POST', { status: 405 })
-  let b = {}
-  try { b = JSON.parse(await req.text()) } catch { /* nothing said */ }
-  if (!(await idOk(String(b?.id || '')))) return json({ error: 'No such computer' }, 404)
-  if (b.plan != null && !planOk(env, b.plan)) return json({ error: `No such plan. There are: ${['free', ...Object.keys(plans(env))].join(', ')}` }, 400)
-  const r = await hub(env, b.id).fetch('https://hub/_hosted/plan', { method: 'POST', body: JSON.stringify({ plan: b.plan ?? null }) })
-  if (r.status === 404) return json({ error: 'No such computer' }, 404)
-  const out = await r.json()
-  if (b.plan != null) count(env, b.id, 'plan', [out.plan])
-  return json(out)
-}
-
 const LANDING = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Bridge AI relay</title><meta name="robots" content="noindex">
 <style>:root{color-scheme:light dark;--bg:#fafaf9;--ink:#1c1917;--ink2:#57534e;--line:#e7e5e4}@media (prefers-color-scheme:dark){:root{--bg:#0c0a09;--ink:#f5f5f4;--ink2:#a8a29e;--line:#292524}}
 body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--ink);font:15px/1.55 system-ui,-apple-system,sans-serif}main{max-width:460px;padding:32px 20px}h1{font-size:20px;margin:14px 0 8px}p{color:var(--ink2);margin:0 0 12px}a{color:inherit}</style></head>
 <body><main><img src="/mark.svg" alt="" width="44" height="44"><h1>Bridge AI relay</h1>
 <p>This relay lets Bridge AI on a phone reach Bridge AI on a computer, from anywhere. Everything between them is end-to-end encrypted, so the relay passes it on without being able to read it.</p>
-<p>There's nothing to do here: Bridge AI sets it up by itself (Settings › Devices). To run your own relay instead, see <a href="https://github.com/sahil1/bridge">github.com/sahil1/bridge</a>.</p></main></body></html>`
+<p>There's nothing to do here: Bridge AI sets it up for you (Settings › Devices), for a Bold Bridge account that may use it. To run your own relay instead, see <a href="https://github.com/sahil1/bridge">github.com/sahil1/bridge</a>.</p></main></body></html>`
 
 // One per relay: holds your computer's connection and the phones'. Uses WebSocket hibernation,
 // so while nobody is talking it isn't running (and isn't billed).
@@ -380,7 +405,7 @@ export class Hub {
       ctx.blockConcurrencyWhile(async () => {
         this.meta = (await ctx.storage.get('meta')) || null
         this.day = (await ctx.storage.get('day')) || null
-        if (this.meta?.plan) this.lim = limits(env, this.meta.plan)
+        this.shutUntil = (await ctx.storage.get('shut')) || 0
       })
     }
   }
@@ -475,7 +500,7 @@ export class Hub {
 
   async webSocketClose(ws, code) {
     await this.gone(ws, code)
-    if (this.lim && this.day) { await this.saveDay(true); this.tally() }
+    if (this.lim && this.day) { await this.saveDay(true); this.tally(); this.tallyAccount() }
   }
 
   async webSocketError(ws) {
@@ -587,11 +612,13 @@ export class Hub {
 
   // ---------- Bridge AI's hosted relay: one computer ----------
   // What a computer's Hub keeps beyond what a relay of your own does: meta { id, hash (of its token),
-  // at, v, plan }, last (when its computer last connected), day { d, bytes, msgs } (today's use,
-  // UTC) and wk (which of its paired phones were counted this week, by box). The registry is a Hub
-  // of its own and keeps only today's g:<day>:<network> counts, s:<day>, each day's counts for
-  // /_relay/stats (35 days), and c:<id>, each registered computer's id with when it registered and
-  // the last day it was in use (for MAX_COMPUTERS).
+  // at, v, a (its account), d (its device) }, last (when its computer last connected), day { d,
+  // bytes, msgs } (today's use, UTC, for the counts), shut (until when its computer is turned away for
+  // sending on past its account's limits) and wk (which of its paired phones were counted this week,
+  // by box). Its account's use is the Account's (below), which it tells what it carried and asks
+  // whether to go on. The registry is a Hub of its own and keeps only s:<day>, each day's counts for
+  // /_relay/stats (35 days), and c:<id>, each registered computer's id with its account, when it
+  // registered and the last day it was in use (for MAX_ACCOUNTS).
   async gate(req, url) {
     const p = url.pathname
     if (p === '/_hosted/check') return new Response(null, { status: this.meta ? 204 : 404 })
@@ -600,15 +627,25 @@ export class Hub {
     if (p === '/_hosted/tally') return this.tallied(await req.json())
     if (p === '/_hosted/stats') return this.statsOf()
     if (p === '/_hosted/init') {
-      if (this.meta) return new Response('Taken', { status: 409 })
-      const { id, hash, version: v } = await req.json()
-      this.meta = { id, hash, at: Date.now(), v, plan: 'free' }
+      const { id, hash, version: v, a, d } = await req.json()
+      if (this.meta && (this.meta.a !== a || this.meta.d !== d)) return new Response('Taken', { status: 409 })
+      // The same device registering again: the same address, with a new token (the old one stops
+      // working, and its connection is let go).
+      const again = !!this.meta
+      this.meta = { ...(this.meta || { id, at: Date.now() }), hash, v, a, d }
       await this.ctx.storage.put('meta', this.meta)
-      await this.ctx.storage.setAlarm(Date.now() + this.lim.idleDays * DAY)
-      return new Response('Created', { status: 201 })
+      if (again) for (const w of this.ctx.getWebSockets('host')) try { w.close(4000, 'replaced') } catch { /* gone */ }
+      else await this.ctx.storage.setAlarm(Date.now() + this.lim.idleDays * DAY)
+      return new Response(again ? 'Again' : 'Created', { status: again ? 200 : 201 })
     }
     if (!this.meta) return notFound()
-    if (p === '/_hosted/plan') return this.plan(await req.json())
+    // From its Account: a limit reached, or lifted, or the account itself stopped.
+    if (p === '/_hosted/account') { this.acctSaid(await req.json()); return new Response(null, { status: 204 }) }
+    if (p === '/_hosted/remove') {
+      count(this.env, this.meta.id, 'removed', ['account'])
+      await this.remove(4008, 'account deleted')
+      return new Response(null, { status: 204 })
+    }
     if (p === '/_relay/forget') {
       if (!(await this.tokenOk(req))) return new Response('Not allowed', { status: 403 })
       count(this.env, this.meta.id, 'removed', ['forget'])
@@ -617,10 +654,19 @@ export class Hub {
     }
     if (p === '/_relay/host') {
       if (!(await this.tokenOk(req))) return new Response('Not allowed', { status: 403 })
-      // Let go for the rest of the day for sending on past its limits: told so again, with when.
-      return this.today().shut ? refuse(this.limit('shut'), 4005) : null
+      // ...and a relay token from its account, not past its end (Bridge AI sends a fresh one each time).
+      const t = await relayToken(this.env, `Bearer ${req.headers.get('X-Relay-Token') || ''}`)
+      if (!t.ok || t.a !== this.meta.a) { this.limited('token'); return refuse(this.limit('token'), 4009) }
+      const s = await this.askAccount('check')
+      if (s.refused) return refuse(this.limit(s.refused.why), 4009)
+      // Let go for sending on past its account's limits: told so again, with when.
+      return this.shutUntil > Date.now() ? refuse(this.limit('shut'), 4005) : null
     }
-    if (p === '/_relay/link') { const why = this.overWhy(this.today()); return why ? refuse(this.limit(why), 4005) : null }
+    if (p === '/_relay/link') {
+      if (!this.acct || Date.now() - this.acct.at > 60000) await this.askAccount('check')
+      const why = this.blocked()
+      return why ? refuse(this.limit(why), 4005) : null
+    }
     return notFound()
   }
 
@@ -634,31 +680,55 @@ export class Hub {
     return d === 0
   }
 
-  // The computer connected: it hears its plan (Settings shows it), and today's limit if it's used up.
+  // The computer connected: it hears its account's use (Settings shows it), and that phones are
+  // stopped for now if they are.
   async hostIn(ws, req) {
     count(this.env, this.meta.id, 'computer', [version(req.headers.get('X-Bridge-Version'))])
     await this.ctx.storage.put('last', Date.now())
     if (!(await this.ctx.storage.getAlarm())) await this.ctx.storage.setAlarm(Date.now() + this.lim.idleDays * DAY)
-    ws.send(JSON.stringify(planOf(this.lim)))
+    if (this.use) { ws.send(JSON.stringify({ t: 'use', ...this.use })); this.useSent = Date.now() }
     this.pendOf(this.today().d).computers++
     this.tally()
-    const why = this.overWhy(this.today())
+    const why = this.blocked()
     if (why) ws.send(JSON.stringify(this.limit(why)))
   }
 
-  // POST /_relay/plan, through the Worker: this computer's plan, set ({ plan }) or only asked.
-  // Its limits change at once, and its computer hears the new plan.
-  async plan({ plan }) {
-    if (plan != null) {
-      this.meta = { ...this.meta, plan: String(plan) }
-      await this.ctx.storage.put('meta', this.meta)
-      this.lim = limits(this.env, this.meta.plan)
-      const h = this.host()
-      const why = this.overWhy(this.today())
-      if (h) try { h.send(JSON.stringify(planOf(this.lim))); if (why) h.send(JSON.stringify(this.limit(why))) } catch { /* gone */ }
+  // ---------- its account ----------
+  // Its Account asked (check), or told what this computer carried since (tally, n messages); what it
+  // says is acted on. Not answering (it's being deployed, say): this carries on as it was, and the
+  // count goes with the next.
+  async askAccount(what, n = 0) {
+    try {
+      const s = await toAccount(this.env, this.meta.a, what, { d: this.meta.d, id: this.meta.id, n })
+      this.acctSaid(s)
+      return s
+    } catch {
+      if (n) this.acctPend = (this.acctPend || 0) + n
+      return {}
     }
-    const d = this.today()
-    return json({ id: this.meta.id, plan: this.lim.plan, limits: Object.fromEntries(PLAN_LIMITS.map((k) => [k, this.lim[k]])), today: { day: d.d, messages: d.msgs, bytes: d.bytes } })
+  }
+  tallyAccount() {
+    const n = this.acctPend || 0
+    if (!n || !this.meta?.a) return
+    this.acctPend = 0
+    this.acctAt = Date.now()
+    this.askAccount('tally', n)
+  }
+  // What the Account said: { refused: { why } } (suspended, no relay, deleted), { limit: { why, until } }
+  // (its window or week used up), left (messages to go), use (for the computer's Settings).
+  acctSaid(s) {
+    const now = Date.now()
+    const why = s?.refused?.why || s?.limit?.why || null
+    const was = this.acct?.why || null
+    this.acct = { why, until: s?.refused ? now + REFUSED_MS : s?.limit?.until || 0, left: Number.isFinite(s?.left) ? s.left : null, at: now }
+    const h = this.host()
+    // Its computer hears the account's use: at a limit, when one is lifted, and once a minute at most.
+    if (s?.use) {
+      this.use = s.use
+      if (h && (why !== was || !this.useSent || now - this.useSent > 60000)) { try { h.send(JSON.stringify({ t: 'use', ...s.use })) } catch { /* gone */ } this.useSent = now }
+    }
+    if (why && this.told !== why) this.stopPhones(why).catch(() => {})
+    else if (!why && this.told && this.told !== 'all') this.told = null // reset, or raised
   }
 
   // A phone said which it is: counted once a week if it's one of this computer's paired phones.
@@ -682,10 +752,15 @@ export class Hub {
     return this.day
   }
 
-  // Whether today's allowance is used up: this computer's own ('day'), or the whole relay's
-  // ('all': RELAY_DAILY_REQUESTS, which the registry says in answer to a tally).
-  overWhy(day) { return day.bytes > this.lim.dayMB * 1048576 || day.msgs > this.lim.dayMessages ? 'day' : day.capped ? 'all' : null }
-  over(day) { return !!this.overWhy(day) }
+  // What stops this computer's phones for now: its account's limits ('window', 'week'), the account
+  // itself ('suspended', 'relay', 'deleted'), or the whole relay's day ('all', RELAY_DAILY_REQUESTS,
+  // which the registry says in answer to a tally). Until when.
+  blocked(now = Date.now()) {
+    const a = this.acct
+    if (a?.why && a.until > now) return a.why
+    return this.today(now).capped ? 'all' : null
+  }
+  blockedUntil(now = Date.now()) { const a = this.acct; return a?.why && a.until > now ? a.until : nextDay(now) }
 
   // Saved every 100 messages or 256 KB, and when a connection ends: in between it's only in memory,
   // so a Hub put to sleep forgets at most that much.
@@ -715,26 +790,27 @@ export class Hub {
     const mine = day?.d === p.d ? day : null
     const first = !!mine && !mine.tallied // its first today: one more computer in use today
     if (first) { mine.tallied = true; this.ctx.storage.put('day', mine).catch(() => {}) }
-    const total = mine && { msgs: mine.msgs, bytes: mine.bytes, of: Math.max(mine.msgs / this.lim.dayMessages, mine.bytes / (this.lim.dayMB * 1048576)) }
-    const body = { d: p.d, id: this.meta.id, plan: this.lim.plan, msgs: p.msgs, bytes: p.bytes, computers: p.computers, phones: p.phones, limits: p.limits, first, total }
+    const total = mine && { msgs: mine.msgs, bytes: mine.bytes }
+    const body = { d: p.d, id: this.meta.id, a: this.meta.a, msgs: p.msgs, bytes: p.bytes, computers: p.computers, phones: p.phones, limits: p.limits, first, total }
     // The answer says whether the whole relay has reached RELAY_DAILY_REQUESTS today.
     registry(this.env, 'tally', body).then((a) => (a?.over ? this.ceiling(p.d) : null)).catch(() => {})
   }
 
-  // The whole relay reached its ceiling for the day: as at this computer's own daily limit, its
+  // The whole relay reached its ceiling for the day: as at its account's limits, this computer's
   // phones are let go until 00:00 UTC, and its computer is told and stays connected for then.
   async ceiling(d) {
     const day = this.today()
     if (day.d !== d || day.capped || !this.meta) return
     day.capped = true
-    if (day.told) await this.ctx.storage.put('day', day) // already over its own: its phones were let go then
-    else await this.dayOver(day)
+    await this.ctx.storage.put('day', day)
+    if (!this.told) await this.stopPhones('all')
   }
 
-  // Each message in: counted, and turned away if it's too big, too many at once, or past today's
-  // allowance. A phone's own is turned away by closing that phone; so is a computer's message for
-  // a phone (its link can't carry on with a piece missing). The computer's own text messages (about
-  // notes) only count. A computer that sends on regardless is let go for the day (dropped below).
+  // Each message in: counted (for the day, and towards its account's allowance), and turned away if
+  // it's too big, too many at once, or its phones are stopped for now. A phone's own is turned away by
+  // closing that phone; so is a computer's message for a phone (its link can't carry on with a piece
+  // missing). The computer's own text messages (about notes) only count. A computer that sends on
+  // regardless is let go until then (dropped below).
   async meter(ws, msg) {
     const now = Date.now()
     const size = typeof msg === 'string' ? msg.length : msg.byteLength
@@ -745,6 +821,10 @@ export class Hub {
     const pend = this.pendOf(day.d)
     pend.bytes += size
     if (++pend.msgs >= 1000 || pend.bytes >= 4194304) this.tally()
+    // Its account hears every 1,000 messages, every 3 minutes while any pass (so a suspension is
+    // heard then too), and more often as the allowance runs low, so its other computers' use counts.
+    this.acctPend = (this.acctPend || 0) + 1
+    if (this.acctPend >= Math.max(1, Math.min(1000, Math.floor((this.acct?.left ?? 10000) / 10))) || now - (this.acctAt || 0) > 180000) this.tallyAccount()
     const housekeeping = fromHost && typeof msg === 'string'
     const phone = !fromHost ? ws : !housekeeping && size >= 5 ? this.ctx.getWebSockets(`p${new DataView(msg).getUint32(1)}`)[0] : null
     // For a phone that's just been let go: nowhere to go (its computer hears it's gone).
@@ -754,46 +834,40 @@ export class Hub {
     this.tokAt = now
     if (!housekeeping && this.tokens < 1) return this.cut(phone, 'rate', now + 10000)
     this.tokens--
-    if (this.over(day)) {
-      if (!day.told) await this.dayOver(day)
-      return housekeeping || this.dropped(fromHost, day)
+    const why = this.blocked(now)
+    if (why) {
+      if (this.told !== why) await this.stopPhones(why)
+      return housekeeping || this.dropped(fromHost)
     }
-    if (day.told) day.told = false // the allowance was raised since
+    if (this.told) this.told = null // reset, or raised, since
+    this.drops = 0
     await this.saveDay()
     return true
   }
 
-  // A message from the computer after today's allowance was used up, which goes nowhere. Cloudflare
-  // bills each one that arrives all the same, so past HOST_SLACK of them the computer's connection is
-  // closed, and turned away until 00:00 UTC (saying so). Bridge AI sends next to none then: its
-  // phones were let go. (Too big and too much at once count towards the allowance, so they end here
-  // too.) Always false: the message isn't passed on.
-  async dropped(fromHost, day) {
+  // A message from the computer while its phones are stopped, which goes nowhere. Cloudflare bills
+  // each one that arrives all the same, so past HOST_SLACK of them the computer's connection is
+  // closed, and turned away until they may go on (saying so). Bridge AI sends next to none then: its
+  // phones were let go. (Too big and too much at once count too, so they end here as well.) Always
+  // false: the message isn't passed on.
+  async dropped(fromHost) {
     if (!fromHost) return false
-    day.drops = (day.drops || 0) + 1
-    if (day.drops <= HOST_SLACK || day.shut) return false
-    day.shut = true
-    await this.ctx.storage.put('day', day)
+    this.drops = (this.drops || 0) + 1
+    if (this.drops <= HOST_SLACK || this.shutUntil > Date.now()) return false
+    this.shutUntil = this.blockedUntil()
+    this.drops = 0
+    await this.ctx.storage.put('shut', this.shutUntil)
     this.limited('shut')
     const h = this.host()
     if (h) try { h.send(JSON.stringify(this.limit('shut'))); h.close(4005, 'limit') } catch { /* gone */ }
     return false
   }
 
-  // What a phone is told at a limit (and the computer, for a day's), with when it can carry on.
+  // What a phone is told at a limit (and the computer, for its account's), with when it can carry on.
   limit(why, until) {
-    const reset = nextDay()
-    const at = new Date(reset).toISOString().slice(11, 16)
-    const l = this.lim
-    const text = {
-      day: `The hosted relay's daily limit for this computer is used up (${l.dayMessages.toLocaleString('en-US')} messages or ${l.dayMB.toLocaleString('en-US')} MB a day on the ${l.plan} plan). It resets at ${at} UTC. For no limits, put the relay on your own Cloudflare account (Settings › Devices, on the computer).`,
-      all: `Bridge AI's relay has carried all it can for today, for every computer on it. It starts again at ${at} UTC. For no limits, put the relay on your own Cloudflare account (Settings › Devices, on the computer), or use Tailscale.`,
-      shut: `Bridge AI's relay let this computer go until ${at} UTC: it kept sending after today's allowance was used up (over ${HOST_SLACK.toLocaleString('en-US')} messages that had nowhere to go). Phones can connect again then. For no limits, put the relay on your own Cloudflare account.`,
-      rate: 'Too much at once for Bridge AI\'s relay. Connecting again in a moment.',
-      size: `That was too big for Bridge AI's relay (over ${l.messageKB} KB at once). Connecting again in a moment.`,
-      phones: `Bridge AI's relay takes ${l.phones} connections to one computer at once, and this computer has that many paired phones and tabs connected. Close Bridge AI on one you're not using; this one tries again in a minute.`,
-    }[why]
-    return { t: 'limit', why, plan: l.plan, text, until: ['day', 'all', 'shut'].includes(why) ? reset : until }
+    const now = Date.now()
+    const end = why === 'shut' ? Math.max(this.shutUntil || 0, now) : ['window', 'week', 'all'].includes(why) ? this.blockedUntil(now) : ACCOUNT_WHY.has(why) ? now + REFUSED_MS : until
+    return { t: 'limit', why, text: limitText(why, this.lim, end), until: end }
   }
 
   // ...and what the computer is told when one of its phones was turned away (Settings shows it).
@@ -802,15 +876,16 @@ export class Hub {
     const text = {
       rate: 'A phone sent more at once than Bridge AI\'s relay takes, so it was disconnected for a few seconds. It connects again by itself.',
       size: `A message between a phone and this computer was over ${l.messageKB} KB, more than Bridge AI's relay takes at once, so that phone was disconnected. It connects again by itself.`,
-      phones: `A phone was turned away: Bridge AI's relay takes ${l.phones} connections to this computer at once (the ${l.plan} plan), and that many paired phones and tabs were connected. Close Bridge AI on one you're not using.`,
+      phones: `A phone was turned away: Bridge AI's relay takes ${l.phones} connections to this computer at once, and that many paired phones and tabs were connected. Close Bridge AI on one you're not using.`,
     }[why]
-    try { this.host()?.send(JSON.stringify({ t: 'limit', why, plan: l.plan, text, until })) } catch { /* gone */ }
+    try { this.host()?.send(JSON.stringify({ t: 'limit', why, text, until })) } catch { /* gone */ }
   }
 
   limited(why) {
     count(this.env, this.meta.id, 'limit', [why])
     const p = this.pendOf(this.today().d)
-    p.limits[why] = (p.limits[why] || 0) + 1
+    const k = ACCOUNT_WHY.has(why) ? 'account' : why
+    p.limits[k] = (p.limits[k] || 0) + 1
     this.tally()
   }
 
@@ -822,7 +897,7 @@ export class Hub {
     return false
   }
 
-  // Every connection to this computer is a paired phone's or tab's, as many as its plan takes at
+  // Every connection to this computer is a paired phone's or tab's, as many as the relay takes at
   // once: this one is turned away, saying so, and the computer hears it too.
   full() {
     const until = Date.now() + 60000
@@ -831,23 +906,24 @@ export class Hub {
     return refuse(this.limit('phones', until), 4005)
   }
 
-  // Today's allowance is used up (this computer's, or the whole relay's): both ends hear so, phones
-  // are let go until it resets, and the computer stays connected (quietly), ready for then.
-  async dayOver(day) {
-    day.told = true
+  // Its phones are stopped for now (its account's window or week used up, or the whole relay's day):
+  // both ends hear so, phones are let go until then, and the computer stays connected (quietly),
+  // ready for then. The account itself stopped (suspended, no relay any more, deleted): the computer
+  // is let go too, and waits before it tries again.
+  async stopPhones(why) {
+    this.told = why
     await this.saveDay(true)
-    await this.ctx.storage.put('day', day)
-    const why = this.overWhy(day) || 'day'
     this.limited(why)
     const m = JSON.stringify(this.limit(why))
-    for (const w of this.ctx.getWebSockets()) try { w.send(m); if (!this.ctx.getTags(w).includes('host')) w.close(4005, 'limit') } catch { /* gone */ }
+    const all = ACCOUNT_WHY.has(why)
+    for (const w of this.ctx.getWebSockets()) try { w.send(m); if (all || !this.ctx.getTags(w).includes('host')) w.close(all ? 4009 : 4005, 'limit') } catch { /* gone */ }
   }
 
-  // Forgotten by its computer, or not seen for IDLE_DAYS: everything this Hub kept goes, and the
-  // registry counts one computer fewer (MAX_COMPUTERS).
+  // Forgotten by its computer, not seen for IDLE_DAYS, or its account deleted: everything this Hub
+  // kept goes, and the registry and its Account count one computer fewer.
   async remove(code, why) {
     const all = this.ctx.getWebSockets()
-    const id = this.meta?.id
+    const { id, a, d } = this.meta || {}
     this.meta = null
     this.day = null
     this.pend = null
@@ -856,49 +932,52 @@ export class Hub {
     for (const w of all) try { w.close(code, why) } catch { /* gone */ }
     // If this doesn't arrive, the registry's daily look finds it gone.
     if (id) await registry(this.env, 'left', { id }).catch(() => {})
+    if (id && a) await toAccount(this.env, a, 'left', { d, id }).catch(() => {})
   }
 
   // ---------- the registry ----------
-  // How many computers are registered: its c:<id> entries, counted once each time the registry
-  // starts and kept in step after that (one request at a time, so it can't miss one).
+  // The accounts with a computer registered, and how many each: from its c:<id> entries, counted once
+  // each time the registry starts and kept in step after that (one request at a time, so it can't
+  // miss one).
   async counted() {
-    if (this.computerCount == null) this.computerCount = (await this.ctx.storage.list({ prefix: 'c:' })).size
-    return this.computerCount
+    if (!this.accts) {
+      this.accts = new Map()
+      for (const c of (await this.ctx.storage.list({ prefix: 'c:' })).values()) if (c.a) this.accts.set(c.a, (this.accts.get(c.a) || 0) + 1)
+    }
+    return this.accts
   }
 
-  // A computer registering (register() above): turned away past the day's limits or MAX_COMPUTERS,
-  // otherwise counted in, under the id it's about to get.
-  async admit({ key, day, perIp, perDay, max, id }) {
+  // A computer registering (register() above): turned away when it's the first of an account and
+  // MAX_ACCOUNTS accounts have one already, otherwise counted in, under the id it's about to get.
+  async admit({ a, id, max }) {
     const st = this.ctx.storage
-    if (!/^[a-z2-7]{12}$/.test(String(id))) return json({ ok: false, why: 'bad' }, 400)
+    if (!/^[a-z2-7]{12}$/.test(String(id)) || !/^[a-z0-9]{12}$/.test(String(a))) return json({ ok: false, why: 'bad' }, 400)
     if (await st.get(`c:${id}`)) return json({ ok: false, why: 'taken' })
-    const mine = (await st.get(`g:${day}:${key}`)) || 0
-    const all = (await st.get(`g:${day}`)) || 0
+    const day = utcDay()
     const s = (await st.get(`s:${day}`)) || blankDay()
-    const n = await this.counted()
-    const why = mine >= perIp ? 'ip' : all >= perDay ? 'all' : n >= max ? 'full' : null
-    if (why) s.refused++
-    else s.registered++
-    if (why === 'full') s.limits.full = (s.limits.full || 0) + 1
-    await st.put({ ...(why ? {} : { [`g:${day}:${key}`]: mine + 1, [`g:${day}`]: all + 1, [`c:${id}`]: { at: Date.now(), seen: day } }), [`s:${day}`]: s, registry: true })
-    if (!why) this.computerCount = n + 1
+    const accts = await this.counted()
+    const why = !accts.has(a) && accts.size >= max ? 'full' : null
+    if (why) { s.refused++; s.limits.full = (s.limits.full || 0) + 1 } else s.registered++
+    await st.put({ ...(why ? {} : { [`c:${id}`]: { a, at: Date.now(), seen: day } }), [`s:${day}`]: s, registry: true })
+    if (!why) accts.set(a, (accts.get(a) || 0) + 1)
     if (!(await st.getAlarm())) await st.setAlarm(nextDay() + 60000)
     return json(why ? { ok: false, why } : { ok: true })
   }
 
-  // A computer removed (its Hub's remove(), or a registration that didn't finish): one fewer.
+  // A computer removed (its Hub's remove(), or a registration that didn't finish): one fewer, and an
+  // account with none left counts no more.
   async left({ id }) {
     const st = this.ctx.storage
-    if (await st.get(`c:${String(id)}`)) {
+    const c = await st.get(`c:${String(id)}`)
+    if (c) {
       await st.delete(`c:${id}`)
-      if (this.computerCount != null) this.computerCount--
+      if (this.accts && c.a) { const n = (this.accts.get(c.a) || 1) - 1; if (n > 0) this.accts.set(c.a, n); else this.accts.delete(c.a) }
     }
     return json({ ok: true })
   }
 
   // A computer's tally (tally() above), added to its day's counts; the day's busiest computers by
-  // id, with how much of their allowance they used, kept beside them. The answer says whether the
-  // whole relay is past RELAY_DAILY_REQUESTS today.
+  // id kept beside them. The answer says whether the whole relay is past RELAY_DAILY_REQUESTS today.
   async tallied(t) {
     if (!/^\d{4}-\d\d-\d\d$/.test(String(t?.d))) return json({ ok: false }, 400)
     const st = this.ctx.storage
@@ -915,7 +994,7 @@ export class Hub {
     if (t.total && valid) {
       const top = s.top.filter((x) => x.id !== t.id)
       if (top.length < TOP || n(t.total.msgs) > top[top.length - 1].messages) {
-        top.push({ id: t.id, plan: String(t.plan || 'free').slice(0, 24), messages: n(t.total.msgs), bytes: n(t.total.bytes), ofAllowance: Math.round(n(t.total.of) * 1000) / 1000 })
+        top.push({ id: t.id, messages: n(t.total.msgs), bytes: n(t.total.bytes) })
         s.top = top.sort((a, b) => b.messages - a.messages).slice(0, TOP)
       } else s.top = top
     }
@@ -923,8 +1002,9 @@ export class Hub {
     // In use today: the day it was last seen (and counted, if it somehow wasn't).
     const c = t.first && valid ? await st.get(`c:${t.id}`) : null
     if (t.first && valid && c?.seen !== t.d) {
-      if (!c && this.computerCount != null) this.computerCount++
-      await st.put(`c:${t.id}`, { at: c?.at || Date.now(), seen: t.d })
+      const a = c?.a || (/^[a-z0-9]{12}$/.test(String(t.a)) ? t.a : null)
+      if (!c && a && this.accts) this.accts.set(a, (this.accts.get(a) || 0) + 1)
+      await st.put(`c:${t.id}`, { a, at: c?.at || Date.now(), seen: t.d })
     }
     await st.put({ [k]: s, registry: true })
     if (!(await st.getAlarm())) await st.setAlarm(nextDay() + 60000)
@@ -932,7 +1012,7 @@ export class Hub {
   }
 
   // The last 35 days' counts, today first, each with what it comes to in Cloudflare requests
-  // (requestsOf), and how many computers are registered.
+  // (requestsOf), and how many computers and accounts are registered.
   async statsOf() {
     const st = this.ctx.storage
     const days = []
@@ -941,16 +1021,14 @@ export class Hub {
       const s = (await st.get(`s:${day}`)) || blankDay()
       days.push({ day, ...s, requests: requestsOf(s) })
     }
-    return json({ days, computers: await this.counted() })
+    return json({ days, computers: (await st.list({ prefix: 'c:' })).size, accounts: (await this.counted()).size })
   }
 
   async hostedAlarm() {
     const st = this.ctx.storage
-    if (await st.get('registry')) { // the registry: past days' counts go, and stats after 35 days
-      const today = `g:${utcDay()}`
+    if (await st.get('registry')) { // the registry: stats after 35 days go
       const keep = `s:${utcDay(Date.now() - (KEEP_STATS_DAYS - 1) * DAY)}`
-      const old = [...(await st.list({ prefix: 'g:' })).keys()].filter((k) => k !== today && !k.startsWith(`${today}:`))
-      old.push(...[...(await st.list({ prefix: 's:' })).keys()].filter((k) => k < keep))
+      const old = [...(await st.list({ prefix: 's:' })).keys()].filter((k) => k < keep)
       for (let i = 0; i < old.length; i += 128) await st.delete(old.slice(i, i + 128))
       await this.sweep()
       await st.setAlarm(nextDay() + 60000)
@@ -971,8 +1049,8 @@ export class Hub {
 
   // Once a day, the registry asks each computer it counts that hasn't been in use for two days
   // whether its Hub is still there: one removed without the registry hearing (left() didn't arrive)
-  // stops counting against MAX_COMPUTERS. 200 a day at most (one request each), those asked longest
-  // ago first.
+  // stops counting (and its account, with none left, against MAX_ACCOUNTS). 200 a day at most (one
+  // request each), those asked longest ago first.
   async sweep() {
     const st = this.ctx.storage
     const quiet = utcDay(Date.now() - 2 * DAY)
@@ -986,5 +1064,166 @@ export class Hub {
         if (c) await st.put(k, { ...c, asked: utcDay() })
       }
     }
+  }
+}
+
+// ---------- Bridge AI's hosted relay: one account ----------
+// One per account (the ACCOUNT binding, idFromName(a)): its use in its 8-hour window and its week,
+// across its computers; the relay address of each of its devices (one each); and what the accounts
+// service last said of it. Its Hubs tell it what they carried and ask it whether to go on, and it
+// tells them all at once when a limit is reached or the account is stopped. It reports its use to
+// the accounts service (the ACCOUNTS service binding) every few minutes while it's used, and asks
+// about the account at most once a minute: a suspension is heard within a minute of its next use.
+// Kept, as s: { a, first (its first message ever, which its weeks start from), win { start, msgs },
+// week { start, msgs }, days { day: msgs } (the last few, for the accounts service), last (its last
+// use), computers { device: computer id }, status { status, relay, at }, told }.
+export class Account {
+  constructor(ctx, env) {
+    this.ctx = ctx
+    this.env = env
+    this.lim = limits(env)
+    ctx.blockConcurrencyWhile(async () => { this.s = (await ctx.storage.get('s')) || null })
+  }
+
+  async fetch(req) {
+    const p = new URL(req.url).pathname
+    let b = {}
+    try { b = await req.json() } catch { /* nothing said */ }
+    if (!/^[a-z0-9]{12}$/.test(String(b?.a))) return json({ error: 'No account' }, 400)
+    this.s ||= { a: b.a, first: null, win: null, week: null, days: {}, last: null, computers: {}, status: null, told: null }
+    const s = this.s
+    if (p === '/_account/computer') { s.computers[b.d] = b.id; await this.save(); return json({ ok: true }) }
+    if (p === '/_account/left') { if (s.computers[b.d] === b.id) delete s.computers[b.d]; if (s.first != null || Object.keys(s.computers).length) await this.save(); else { this.s = null; await this.ctx.storage.delete('s') } return json({ ok: true }) }
+    if (p === '/_account/check' || p === '/_account/tally') return json(await this.answer(b))
+    return notFound()
+  }
+
+  // What a Hub (or a computer registering) is told: refused { why } (the account is suspended, has no
+  // relay any more, or was deleted), limit { why, until } (its window or week used up), left (messages
+  // to go), use, and the address of the device asking, if it has one.
+  async answer(b) {
+    const s = this.s
+    const now = Date.now()
+    const n = Math.max(0, Math.floor(Number(b.n) || 0))
+    if (n) this.add(n, now)
+    const out = this.said(now, await this.status(now), b.id || null)
+    if (n) await this.reportSoon()
+    await this.save()
+    return { ...out, id: s.computers[b.d] || null }
+  }
+
+  // The answer for now, and its other computers told at once when it changed.
+  said(now, st, except = null) {
+    const s = this.s
+    const refused = st.status === 'suspended' ? 'suspended' : st.status === 'gone' ? 'deleted' : st.relay && st.relay !== 'approved' ? 'relay' : null
+    const over = refused ? null : this.over(now)
+    const out = { ...(refused ? { refused: { why: refused } } : {}), ...(over ? { limit: over } : {}), left: this.left(now), use: this.use(now) }
+    const told = refused || over?.why || null
+    if (told !== s.told) {
+      s.told = told
+      for (const id of new Set(Object.values(s.computers))) if (id !== except) hub(this.env, id).fetch('https://hub/_hosted/account', { method: 'POST', body: JSON.stringify(out) }).catch(() => {})
+    }
+    return out
+  }
+
+  // What the accounts service says of the account: asked at most once a minute. Can't ask just now:
+  // what it said last stands a little longer, or it's let through (its tokens say it was allowed).
+  async status(now) {
+    const s = this.s
+    if (s.status && now - s.status.at < STATUS_MS) return s.status
+    if (!this.env.ACCOUNTS) return (s.status = { status: 'active', relay: 'approved', at: now })
+    try {
+      const r = await this.env.ACCOUNTS.fetch(`https://accounts/internal/status?a=${s.a}`)
+      if (!r.ok) throw new Error(`answered ${r.status}`)
+      const j = await r.json()
+      s.status = { status: String(j.status), relay: j.relay || null, at: now }
+    } catch {
+      s.status = { status: 'active', relay: 'approved', ...s.status, at: now - STATUS_MS + 15000 }
+    }
+    return s.status
+  }
+
+  add(n, now) {
+    const s = this.s
+    s.first ??= now
+    s.last = now
+    if (!s.win || now >= s.win.start + this.lim.windowHours * HOUR) s.win = { start: now, msgs: 0 } // from the first message after the last window ended
+    s.win.msgs += n
+    s.week = this.weekOf(now)
+    s.week.msgs += n
+    const d = utcDay(now)
+    s.days[d] = (s.days[d] || 0) + n
+    for (const k of Object.keys(s.days)) if (k < utcDay(now - 3 * DAY)) delete s.days[k]
+  }
+  // The week now: weeks run on from the account's first use, a week at a time.
+  weekOf(now) {
+    const s = this.s
+    if (s.first == null) return { start: null, msgs: 0 }
+    const start = s.first + Math.floor((now - s.first) / (7 * DAY)) * 7 * DAY
+    return s.week?.start === start ? s.week : { start, msgs: 0 }
+  }
+  over(now) {
+    const l = this.lim
+    const wk = this.weekOf(now)
+    const w = this.s.win
+    if (wk.start != null && wk.msgs > l.weekMessages) return { why: 'week', until: wk.start + 7 * DAY }
+    if (w && now < w.start + l.windowHours * HOUR && w.msgs > l.windowMessages) return { why: 'window', until: w.start + l.windowHours * HOUR }
+    return null
+  }
+  left(now) {
+    const l = this.lim
+    const w = this.s.win
+    const inWindow = w && now < w.start + l.windowHours * HOUR ? w.msgs : 0
+    return Math.max(0, Math.min(l.windowMessages - inWindow, l.weekMessages - this.weekOf(now).msgs))
+  }
+  // Its use, as the computer's Settings and the accounts service show it.
+  use(now) {
+    const l = this.lim
+    const w = this.s.win
+    const live = w && now < w.start + l.windowHours * HOUR
+    const wk = this.weekOf(now)
+    return {
+      window: { messages: live ? w.msgs : 0, limit: l.windowMessages, hours: l.windowHours, resetsAt: live ? w.start + l.windowHours * HOUR : null },
+      week: { messages: wk.msgs, limit: l.weekMessages, resetsAt: wk.start != null ? wk.start + 7 * DAY : null },
+    }
+  }
+
+  async save() { if (this.s) await this.ctx.storage.put('s', this.s) }
+  async reportSoon() {
+    const at = await this.ctx.storage.getAlarm()
+    if (!at || at > Date.now() + REPORT_MS) await this.ctx.storage.setAlarm(Date.now() + REPORT_MS)
+  }
+
+  // Every few minutes while it's used: its use to the accounts service (for Bridge AI's Settings and
+  // the admin view), whose answer says how the account is. Otherwise once a day, so an account
+  // deleted is forgotten here within a day (and its computers' addresses with it), as is one with no
+  // computer here and no use for IDLE_DAYS.
+  async alarm() {
+    const s = this.s
+    if (!s) return
+    const now = Date.now()
+    let st = null
+    if (this.env.ACCOUNTS) {
+      const u = this.use(now)
+      const at = (t) => (t ? new Date(t).toISOString() : null)
+      try {
+        const r = await this.env.ACCOUNTS.fetch('https://accounts/internal/usage', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ a: s.a, window: { messages: u.window.messages, resetsAt: at(u.window.resetsAt) }, week: { messages: u.week.messages, resetsAt: at(u.week.resetsAt) }, days: s.days, limits: { window: { hours: this.lim.windowHours, messages: this.lim.windowMessages }, week: { messages: this.lim.weekMessages } } }),
+        })
+        if (r.ok) st = await r.json()
+      } catch { /* tried again in a few minutes */ }
+    }
+    if (st) s.status = { status: String(st.status), relay: st.relay || null, at: now }
+    if (st?.status === 'gone' || (!Object.keys(s.computers).length && (s.last || 0) < now - this.lim.idleDays * DAY)) {
+      for (const id of new Set(Object.values(s.computers))) hub(this.env, id).fetch('https://hub/_hosted/remove', { method: 'POST' }).catch(() => {})
+      this.s = null
+      await this.ctx.storage.deleteAlarm()
+      await this.ctx.storage.deleteAll()
+      return
+    }
+    if (st) this.said(now, s.status)
+    await this.save()
+    await this.ctx.storage.setAlarm(now + (st || !this.env.ACCOUNTS ? DAY : REPORT_MS))
   }
 }
