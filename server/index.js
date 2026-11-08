@@ -82,6 +82,7 @@ import * as signing from './signing.js'
 import * as doctext from './doctext.js'
 import * as studioFound from './studiofound.js'
 import * as explorer from './explorer.js'
+import * as studioApps from './studioapps.js'
 import { terminals, openAttach, openCommand } from './terminal.js'
 import { mcpRoutes } from './mcp.js'
 import * as notify from './notify.js'
@@ -456,7 +457,9 @@ app.get('/api/files/search', fsWrap(async (req, res) => { const q = await fsAt(r
 // Ask an agent sends the change to the agent you pick (pane), or starts one in the file's folder.
 app.use('/api/studio', trialOff('studio', 'Studio'))
 const sq = (req) => ({ root: String(req.query.root || req.body?.root || ''), path: String(req.query.path || req.body?.path || '') })
-app.get('/api/studio/recent', wrap(async () => ({ files: await studio.recentFiles() })))
+// Studio's home asking for your files starts the look for the apps that open them, so it's done by
+// the time a file opens (studioapps.js).
+app.get('/api/studio/recent', wrap(async () => { studioApps.warm(); return { files: await studio.recentFiles() } }))
 app.delete('/api/studio/recent', wrap((req) => { const q = sq(req); return studio.forget(q.root, q.path) }))
 app.get('/api/studio/open', wrap(async (req) => { const q = sq(req); return studio.open(await rootOf(q.root), q.path, { rootId: q.root, label: String(req.query.where || '') || null }) }))
 // A save over a change made meanwhile is a 409, so the page offers theirs or yours.
@@ -520,6 +523,17 @@ app.get('/api/studio/found', async (req, res) => {
     res.json(await studioFound.found({ roots, own: path.join(DATA, 'studio', 'files'), signal: ctl.signal, fresh: req.query.fresh === '1' }))
   } catch (e) { if (!res.headersSent) res.status(502).json({ error: e.message }) }
 })
+// Open in Word (Excel, PowerPoint, else Pages, Numbers, Keynote or LibreOffice), for Studio's
+// header: which app opens each kind here (studioapps.js, looked for once), and opening a file in
+// it, only from a window on this computer. Studio goes on watching the file meanwhile.
+app.get('/api/studio/apps', wrap(() => studioApps.forStudio()))
+app.post('/api/studio/open-in', wrap(async (req) => {
+  hereOnly(req, 'Open it in its app')
+  const q = sq(req)
+  const { real, realRoot } = await files.safePath(await rootOf(q.root), q.path)
+  if (real === realRoot || !studio.opens(real)) throw Object.assign(new Error('Studio opens only its own kinds of file in their apps'), { status: 400 })
+  return studioApps.openIn(real)
+}))
 // Edit in place: part of a document rewritten as asked, by the model picked for Studio (Settings:
 // studio.model), else the one the app reaches first (your agent's sign-in, a key, one on this
 // computer). writer: which that is, and the others to pick from.

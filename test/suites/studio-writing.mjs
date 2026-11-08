@@ -9,7 +9,8 @@
 // checklists (⇧⌘9, ticked with a click, kept as Word keeps them); the link the cursor is in, with
 // Copy, Change and Remove; ⇧⌘X, ⇧⌘> and ⇧⌘<, ⌘G; lists copied out as lists. Page setup saved into
 // the file; Print (⌘P) as its pages; a Markdown copy of the Word file. In Markdown: checklists, a
-// picture pasted (saved beside it), Word's lists pasted, and a Word copy of it. In the dark too.
+// picture pasted (saved beside it), Word's lists pasted, and a Word copy of it. Written in Focus
+// (⌘. still superscript, saved as you type, Esc out). In the dark too.
 import fs from 'node:fs'
 import path from 'node:path'
 import http from 'node:http'
@@ -248,6 +249,23 @@ try {
   await until(async () => / Lima/.test(await xml()), 6000, 150)
   const v3 = mine(await versions('report.docx'))
   ok(v1 === 1 && v2 === 1 && v3 === 2, 'its saves as you type kept as one version, and ⌘S keeps the one it saved', { v1, v2, v3 })
+  // Written in Focus, as in Google Docs' full screen or Word's Focus: ⌘. is still superscript (it
+  // doesn't leave), saving as you type goes on and says so, and Esc leaves.
+  await caret('Next dashed')
+  await p.keyboard.press(`${MOD}+Alt+f`)
+  const inFocus = () => p.locator('.sd-file.focus').count().then((n) => n === 1)
+  ok(!!(await until(inFocus, 3000, 100)), 'Focus, by its key, while writing')
+  await p.keyboard.type(' Bogota')
+  await p.keyboard.press(`${MOD}+Period`)
+  await p.keyboard.type('2')
+  await p.keyboard.press(`${MOD}+Period`)
+  await sleep(300)
+  const sup = await para('Bogota2')
+  ok(await inFocus() && !!sup?.marks.includes('va'), `${MOD === 'Meta' ? '⌘.' : 'Ctrl+.'} while writing: superscript, as in Google Docs and Word, still in Focus`, sup)
+  ok(!!(await until(async () => /Bogota/.test(await xml()), 6000, 150)) && !!(await until(async () => /Saved/.test(await p.locator('.sd-file.focus .sd-status .sd-state').innerText()), 5000, 100)), 'in Focus it saves as you type, and the status line says Saved')
+  await shot(p, `${tag}studio-writing-focus`)
+  await p.keyboard.press('Escape')
+  ok(!!(await until(async () => !(await inFocus()), 3000, 100)), 'Esc: out of Focus')
 
   // Page setup: turned, on A4, a smaller left margin; saved into the file's section.
   const before = await partsOf(file('report.docx'))
