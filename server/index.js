@@ -2783,8 +2783,13 @@ function closeWhenDone(paneId, done, until = Date.now() + 15 * 60 * 1000, { anyS
   }, 4000).unref?.()
 }
 
-// Node.js, installed here for what needs it when this computer has none (nodejs.js).
-const nodeStatus = async () => ({ have: !!(await which('npx', await loginPath())), ours: nodejs.ours(), canInstall: nodejs.canInstall, job: nodejs.progress() })
+// Node.js, installed here for what needs it when this computer has none (nodejs.js). How the
+// install is going is read first: a look for npx begun just before it ended can miss it, and with
+// the install read after that look, the answer said it was done and Node.js wasn't found.
+const nodeStatus = async () => {
+  const job = nodejs.progress()
+  return { have: !!(await which('npx', await loginPath())), ours: nodejs.ours(), canInstall: nodejs.canInstall, job }
+}
 app.get('/api/tools/node', wrap(nodeStatus))
 app.post('/api/tools/node', wrap(async () => {
   nodejs.install(() => { forgetLoginPath(); clearInstalledCache(); pushFleet() })
