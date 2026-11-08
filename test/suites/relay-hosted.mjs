@@ -251,7 +251,7 @@ try {
     await until(() => p1.said('limit').length && p2.said('limit').length, 3000, 20)
     const told = p2.said('limit')[0] || p1.said('limit')[0]
     const until8 = told?.until
-    ok(told?.why === 'window' && until8 >= start + 8 * HOUR && until8 < start + 8 * HOUR + 60000 && /used its allowance on Bridge AI's relay for now \(50 messages in 8 hours\)/.test(told.text) && /resets at \d\d:\d\d UTC/.test(told.text) && /your own Cloudflare account/.test(told.text), 'past the window\'s 50 messages across both computers, the phone is told: the allowance, when it resets (8 hours from the first message), how to have no limits', told)
+    ok(told?.why === 'window' && until8 >= start + 8 * HOUR && until8 < start + 8 * HOUR + 60000 && /used its allowance on Bridge AI's relay for now \(50 messages in 8 hours\)/.test(told.text) && /resets at (?:[A-Z][a-z]{2} \d{1,2} [A-Z][a-z]{2}, )?\d\d:\d\d UTC/.test(told.text) && /your own Cloudflare account/.test(told.text), 'past the window\'s 50 messages across both computers, the phone is told: the allowance, when it resets (8 hours from the first message), how to have no limits', told)
     ok(p1.said('limit')[0]?.why === 'window' && p1.closed?.[0] === 4005 && p2.closed?.[0] === 4005, 'both computers\' phones are let go, not only the one that went past it', [p1.closed, p2.closed])
     ok(h1.said('limit').some((m) => m.why === 'window') && h2.said('limit').some((m) => m.why === 'window') && h1.readyState === 1 && h2.readyState === 1, 'both computers are told, and stay connected for when it resets', [h1.said('limit').length, h2.said('limit').length])
     const used = h2.said('use').at(-1)
@@ -455,7 +455,7 @@ try {
     ok(host.readyState === 1 && !host.said('limit').some((m) => m.why === 'shut'), 'a few messages from the computer after its phones were stopped (what was on its way) change nothing: it stays connected', host.said('limit'))
     for (let i = 0; i < 1000; i++) await r.say(c, host, frame(1, pid, new Uint8Array(16)))
     const shut = host.said('limit').find((m) => m.why === 'shut')
-    ok(shut && /let this computer go until \d\d:\d\d UTC/.test(shut.text) && shut.until === resets && host.closed?.[0] === 4005, 'past 1,000 that had nowhere to go (each billed), its connection is closed, saying why and until when (the window\'s end)', shut)
+    ok(shut && /let this computer go until (?:[A-Z][a-z]{2} \d{1,2} [A-Z][a-z]{2}, )?\d\d:\d\d UTC/.test(shut.text) && shut.until === resets && host.closed?.[0] === 4005, 'past 1,000 that had nowhere to go (each billed), its connection is closed, saying why and until when (the window\'s end)', shut)
     const again = await r.computer(c)
     ok(again instanceof End && again.got[0]?.why === 'shut' && again.closed?.[0] === 4005, 'connecting again before then, it\'s turned away with the same words', again.got)
     r.env.HUB.restart(c.id)
