@@ -37,8 +37,9 @@ export const HELD = ['studio', 'file', 'draft', 'board', 'dictating', 'playing']
 //   unsupported  not the desktop app on a Mac or Windows (from source, Docker, Linux's package)
 //   unchecked    the last check didn't reach GitHub, so the release may have been pulled since
 //   held         the newest needs a newer macOS than this Mac has
-//   none         nothing newer
-//   prerelease   a pre-release
+//   none         nothing newer (or a staged release not out to this computer yet)
+//   prerelease   a pre-release, unless this computer is on Early Access (u.channel), which asked
+//                for them
 //   young        out less than RELEASE_HOURS (or GitHub didn't say when it came out)
 export function releaseWhy({ u = {}, on = true, checks = true, now = Date.now() } = {}) {
   if (!on) return ['off']
@@ -47,7 +48,7 @@ export function releaseWhy({ u = {}, on = true, checks = true, now = Date.now() 
   if (u.error) return ['unchecked']
   if (u.held) return ['held']
   if (!u.available || !u.latest) return ['none']
-  if (u.prerelease || /-/.test(u.latest)) return ['prerelease']
+  if ((u.prerelease || /-/.test(u.latest)) && u.channel !== 'early') return ['prerelease']
   const at = Date.parse(u.publishedAt || '')
   if (!Number.isFinite(at) || now - at < RELEASE_HOURS * HOUR) return ['young']
   return []

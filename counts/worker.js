@@ -62,6 +62,15 @@ export const TABLES = [
     arch TEXT NOT NULL, install TEXT NOT NULL, kind TEXT NOT NULL, fingerprint TEXT NOT NULL, title TEXT NOT NULL,
     what TEXT NOT NULL, details TEXT NOT NULL)`,
   'CREATE INDEX IF NOT EXISTS crash_reports_by_group ON crash_reports (fingerprint, day)',
+  // The update channel (stable, or early for Early Access with who the code is for, '' on Stable)
+  // and the rollout bucket (0-99, -1 when not said), kept with the version and nothing else: each
+  // version's installs a week, and a day with whether they crashed, so a pre-release or a release
+  // part way out can be compared with the rest. A crash report's channel, by its id.
+  `CREATE TABLE IF NOT EXISTS channels (week TEXT NOT NULL, app TEXT NOT NULL, channel TEXT NOT NULL, tester TEXT NOT NULL,
+    rollout INTEGER NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (week, app, channel, tester, rollout))`,
+  `CREATE TABLE IF NOT EXISTS daily_channels (day TEXT NOT NULL, app TEXT NOT NULL, channel TEXT NOT NULL, tester TEXT NOT NULL,
+    rollout INTEGER NOT NULL, crashed INTEGER NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (day, app, channel, tester, rollout, crashed))`,
+  'CREATE TABLE IF NOT EXISTS crash_channels (id TEXT PRIMARY KEY, channel TEXT NOT NULL, tester TEXT NOT NULL)',
 ]
 const ready = new WeakMap() // a database whose tables are made
 function tables(db) {
@@ -104,7 +113,7 @@ export function check(r, now = new Date()) {
   if (r.week > weekOf(new Date(+now + DAY)) || r.week < weekOf(new Date(+now - KEEP_NONCES_DAYS * DAY))) return { error: 'Not a recent week' }
   const about = {}
   for (const [k, allowed] of Object.entries(ONE_OF)) about[k] = r[k] == null ? 'unknown' : allowed.includes(r[k]) ? r[k] : 'other'
-  about.app = typeof r.app === 'string' && /^\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(r.app) ? r.app : 'other'
+  about.app = versionOf(r.app)
   about.daysActive = Number.isInteger(r.daysActive) && r.daysActive >= 0 && r.daysActive <= 7 ? r.daysActive : -1
   const counts = {}
   let dropped = 0
@@ -125,10 +134,20 @@ export function check(r, now = new Date()) {
     if (AGENTS.has(k)) dims.push(['agent', k])
     else dropped++
   }
-  return { week: r.week, nonce: r.nonce, about, counts, dims, dropped }
+  return { week: r.week, nonce: r.nonce, about, counts, dims, dropped, channel: channelOf(r) }
 }
 // A system's version or a chip's family, as the app writes them, or "other".
 const textOf = (v) => (typeof v === 'string' && /^[A-Za-z][\w .,()+-]{0,39}$/.test(v) ? v : 'other')
+// Bridge AI's version: 3.12.0, or a pre-release of one (3.13.0-beta.1), else "other".
+const versionOf = (v) => (typeof v === 'string' && /^\d{1,3}\.\d{1,3}\.\d{1,3}(-(alpha|beta|rc)\.\d{1,3})?$/.test(v) ? v : 'other')
+// The update channel, who an early-access code is for (a name the project gave its tester), and
+// the rollout bucket. A report from before there were channels says none of them ('unknown').
+export function channelOf(r) {
+  const channel = r.channel == null ? 'unknown' : ['stable', 'early'].includes(r.channel) ? r.channel : 'other'
+  const tester = channel !== 'early' || r.tester == null ? '' : typeof r.tester === 'string' && /^[\p{L}\p{N}][\p{L}\p{N} .'_-]{0,31}$/u.test(r.tester) ? r.tester : 'other'
+  const rollout = Number.isInteger(r.rollout) && r.rollout >= 0 && r.rollout <= 99 ? r.rollout : -1
+  return { channel, tester, rollout }
+}
 const VALUES = SCHEMA.values || {}
 const FEATURES = SCHEMA.features || {}
 const AGENTS = new Set(SCHEMA.agents || [])
@@ -156,6 +175,8 @@ async function take(req, env) {
     ...Object.entries(r.counts).map(([name, bucket]) => db.prepare(`INSERT INTO counts (week, name, bucket, os, install_age, n)
       VALUES (?, ?, ?, ?, ?, 1) ON CONFLICT DO UPDATE SET n = n + 1`).bind(r.week, name, bucket, a.os, a.installAge)),
     ...r.dims.map(([dim, value]) => db.prepare('INSERT INTO dims (week, dim, value, n) VALUES (?, ?, ?, 1) ON CONFLICT DO UPDATE SET n = n + 1').bind(r.week, dim, value)),
+    db.prepare('INSERT INTO channels (week, app, channel, tester, rollout, n) VALUES (?, ?, ?, ?, ?, 1) ON CONFLICT DO UPDATE SET n = n + 1')
+      .bind(r.week, a.app, r.channel.channel, r.channel.tester, r.channel.rollout),
   ])
   return json({ ok: true, ...(r.dropped ? { dropped: r.dropped } : {}) })
 }
@@ -169,11 +190,10 @@ export function checkDay(r, now = new Date()) {
   if (typeof r.day !== 'string' || !DAY_RE.test(r.day) || Number.isNaN(Date.parse(r.day))) return { error: 'No day' }
   // A day that's over, from the last two weeks (a day either side for the sender's time zone).
   if (r.day > new Date(+now + DAY).toISOString().slice(0, 10) || r.day < new Date(+now - 15 * DAY).toISOString().slice(0, 10)) return { error: 'Not a recent day' }
-  const version = (v) => (typeof v === 'string' && /^\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(v) ? v : 'other')
   return {
-    day: r.day, nonce: r.nonce, app: version(r.app), from: r.from == null ? null : version(r.from),
+    day: r.day, nonce: r.nonce, app: versionOf(r.app), from: r.from == null ? null : versionOf(r.from),
     os: ONE_OF.os.includes(r.os) ? r.os : 'other', install: ONE_OF.install.includes(r.install) ? r.install : 'other',
-    crashed: r.crashed === true ? 1 : 0, starts: BUCKETS.has(r.starts) ? r.starts : 'other',
+    crashed: r.crashed === true ? 1 : 0, starts: BUCKETS.has(r.starts) ? r.starts : 'other', channel: channelOf(r),
   }
 }
 async function takeDay(req, env) {
@@ -193,6 +213,8 @@ async function takeDay(req, env) {
   await db.batch([
     db.prepare('INSERT INTO daily (day, app, os, install, crashed, starts, n) VALUES (?, ?, ?, ?, ?, ?, 1) ON CONFLICT DO UPDATE SET n = n + 1').bind(r.day, r.app, r.os, r.install, r.crashed, r.starts),
     ...(r.from && r.from !== r.app ? [db.prepare('INSERT INTO daily_updates (day, app, from_app, n) VALUES (?, ?, ?, 1) ON CONFLICT DO UPDATE SET n = n + 1').bind(r.day, r.app, r.from)] : []),
+    db.prepare('INSERT INTO daily_channels (day, app, channel, tester, rollout, crashed, n) VALUES (?, ?, ?, ?, ?, ?, 1) ON CONFLICT DO UPDATE SET n = n + 1')
+      .bind(r.day, r.app, r.channel.channel, r.channel.tester, r.channel.rollout, r.crashed),
   ])
   return json({ ok: true })
 }
@@ -220,8 +242,9 @@ export function checkCrash(r) {
   const clean = (s, n) => scrub(String(s || '')).slice(0, n)
   return {
     kind: r.kind,
-    app: typeof r.app === 'string' && /^\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(r.app) ? r.app : 'other',
+    app: versionOf(r.app),
     os: one('os', ONE_OF.os), arch: one('arch', ONE_OF.arch), install: one('install', ONE_OF.install),
+    channel: channelOf(r),
     title: clean(r.title, 200), what: clean(r.what, 2000), details: clean(r.details, 12000),
   }
 }
@@ -244,8 +267,11 @@ async function takeCrash(req, env) {
   if (today >= cap) return json({ ok: false, error: 'Enough reports for today' }, 429)
   const id = hex(crypto.getRandomValues(new Uint8Array(8)))
   const fp = await fingerprint(r.kind, r.title, r.details)
-  await db.prepare('INSERT INTO crash_reports (id, day, app, os, arch, install, kind, fingerprint, title, what, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .bind(id, day, r.app, r.os, r.arch, r.install, r.kind, fp, r.title, r.what, r.details).run()
+  await db.batch([
+    db.prepare('INSERT INTO crash_reports (id, day, app, os, arch, install, kind, fingerprint, title, what, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .bind(id, day, r.app, r.os, r.arch, r.install, r.kind, fp, r.title, r.what, r.details),
+    db.prepare('INSERT INTO crash_channels (id, channel, tester) VALUES (?, ?, ?)').bind(id, r.channel.channel, r.channel.tester),
+  ])
   return json({ ok: true })
 }
 
@@ -282,5 +308,6 @@ export default {
     await env.DB.prepare('DELETE FROM seen WHERE day < ?').bind(new Date(Date.now() - KEEP_NONCES_DAYS * DAY).toISOString().slice(0, 10)).run()
     const days = Math.max(1, Number((await settingsOf(env)).crashDays ?? KEEP_CRASHES_DAYS) || KEEP_CRASHES_DAYS)
     await env.DB.prepare('DELETE FROM crash_reports WHERE day < ?').bind(new Date(Date.now() - days * DAY).toISOString().slice(0, 10)).run()
+    await env.DB.prepare('DELETE FROM crash_channels WHERE id NOT IN (SELECT id FROM crash_reports)').run()
   },
 }

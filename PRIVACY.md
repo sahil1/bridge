@@ -24,7 +24,9 @@ meetings), the local model (Gemma 4 E2B, 2.8 GB) only when you click Download fo
 Model Providers (one download from Hugging Face; what you give it is read on your computer by
 llama.cpp, which runs there and answers only Bridge AI, and is never sent anywhere), a check on
 GitHub for a newer version, which you can turn off in Settings › About &
-Updates (and, when you choose to update, the new version from GitHub), and, unless you turn them off, usage stats and crash reports to the project (below). Its fonts and icons are part of the app, so nothing is fetched to draw
+Updates (and, when you choose to update, the new version from GitHub; with an early-access code,
+the check asks for the list of recent releases, and the code is checked on your computer and never
+sent), and, unless you turn them off, usage stats and crash reports to the project (below). Its fonts and icons are part of the app, so nothing is fetched to draw
 it. On Windows and Linux, the desktop app's spell check gets the dictionaries for your languages
 once, from Google, as Chrome does; nothing you type goes with them (a Mac uses its own).
 
@@ -168,7 +170,11 @@ and not yet sent. The phone apps and the relay send nothing of the kind.
 Two reports go to the project's server, `counts.boldbridge.ai`, run on Cloudflare; its code is
 [counts/worker.js](counts/worker.js) in this repo:
 
-- **Once a week**, after the week is over: Bridge AI's version; your operating system and its
+- **Once a week**, after the week is over: Bridge AI's version; its update channel (Stable, or
+  Early Access for testers) and, on Early Access, who the code is for: the first name or nickname
+  the project gave that tester when it made the code; its rollout bucket, a number from 0 to 99
+  picked at random once and kept in your settings, which decides how soon a release that goes out
+  a few computers at a time reaches yours; your operating system and its
   version (macOS 15.1, Windows 11, Ubuntu 24.04); your chip's family (Apple M2 Pro, Intel Core i7,
   never the exact part); memory and CPU cores, as ranges; how it's installed; its layout; how many
   phones are paired and other computers linked, as counts; which features are on (the agent the
@@ -181,20 +187,23 @@ Two reports go to the project's server, `counts.boldbridge.ai`, run on Cloudflar
   kind, meetings recorded, dictations, files sent between your computers, crashes and the rest), as
   ranges ("2-5").
 - **Once a day**, after the day is over: the version it ran, the one it updated from that day if it
-  did, the operating system and how it's installed, how many times it started (a range), and whether
-  something crashed.
+  did, its update channel, rollout bucket and early-access tester as above, the operating system and
+  how it's installed, how many times it started (a range), and whether something crashed.
 
-Neither has a name, an ID for you or your computer (a random number new with each report lets the
-server count a report once), a file, folder, project, repo or branch name, anything you typed or
-said, anything from your agents, an email address, a host name, or an exact time. The full list of
+Neither has your name (on Early Access, the tester's name is the one the project chose for the
+code it gave them), an ID for you or your computer (a random number new with each report lets the
+server count a report once; the rollout bucket is shared with about one computer in a hundred), a
+file, folder, project, repo or branch name, anything you typed or said, anything from your agents,
+an email address, a host name, or an exact time. The full list of
 what can be sent, with every value it can take, is `shared/telemetry-schema.json`; adding to it is
 a public change. **See exactly what would be sent** shows the next report as it would go, and a
 copy of each report sent is kept in `~/.bridge-ai/telemetry/sent`.
 
 The server sees your IP address when a report arrives, as any website does; it doesn't read or
 store it, and its logs are off. It keeps only totals: how many reports said each thing (a version, a
-system, a feature on, a count's range), each answer counted on its own rather than together, never a
-report as it came, and each report's random number for ten weeks, so one sent twice counts once.
+system, a feature on, a count's range), each answer counted on its own rather than together (the
+update channel, tester and rollout bucket are kept with the version, and with whether it crashed
+that day, and nothing else), never a report as it came, and each report's random number for ten weeks, so one sent twice counts once.
 Because reports carry no ID, one already sent can't be found again to delete. If the project stops
 collecting, Bridge AI turns them off and says so.
 
@@ -209,8 +218,9 @@ token once, when you click it.
 ## Crash reports (on unless you turn them off)
 
 When something in Bridge AI crashes, its report (the same text **Report on GitHub** shows you: what
-crashed, the error and where in Bridge AI's code, its version, your system, the settings that change
-how it runs, and the last lines of its log, with your name, your projects' and computers' names,
+crashed, the error and where in Bridge AI's code, its version and update channel (on Early Access,
+with the tester's name the project chose), your system, the settings that change how it runs, and
+the last lines of its log, with your name, your projects' and computers' names,
 folders, emails, keys and network addresses taken out on your computer) can go to the project, to
 help fix it. That happens by itself unless you turn off **Send crash reports by themselves** in
 Settings › About & Updates, and when you click **Send

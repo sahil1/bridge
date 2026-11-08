@@ -78,6 +78,49 @@ own on its own Cloudflare account:
   doesn't cover, so a new one goes in PRIVACY.md (by name, or under a category it states) in the
   same change.
 
+## Releases, betas and rollouts
+
+For the project's owner, or a fork's: what `npm run release` puts out, and who is offered it.
+
+- **A release for everyone.** Set the version in `package.json` and `desktop/package.json` (3.13.0),
+  write its `## 3.13.0` section in CHANGELOG.md, merge to main, then `npm run release`. Everyone on
+  Stable is offered it at once. `npm run release -- --dry-run` says who it goes to.
+- **A few computers at a time.** Put `<!-- rollout: 10 -->` on a line of its own in that CHANGELOG
+  section (GitHub doesn't show it). The release starts at 10%: each computer has a bucket from 0 to
+  99, picked at random once and kept in its settings, and those under 10 are offered it. Early
+  Access, and anyone who clicks Check now, get it anyway. Watch that version's crashes and day
+  reports (channel `stable`, bucket under 10), then `npm run rollout -- 3.13.0 50`, then `100`
+  (everyone; the line goes). `npm run rollout -- 3.13.0` says where it's at. A computer sees a
+  change at its next check, within 6 hours.
+- **Pausing.** `npm run rollout -- 3.13.0 0`: nobody else is offered it, Early Access included, not
+  even by Check now, and it isn't installed by itself. Computers that have it keep it; put it right
+  with a 3.13.1, or raise the percentage again to carry on.
+- **A beta, for Early Access.** Set the version to a pre-release, `3.13.0-beta.1` in both
+  package.json files, give it a `## 3.13.0-beta.1` section in CHANGELOG.md (a few lines is enough),
+  and `npm run release`. GitHub marks it a pre-release, so it's never the latest release: not the
+  website's download, not the installers' default, not Docker's `latest` or `3.13` (only
+  `ghcr.io/sahil1/bridge:3.13.0-beta.1`), and the phone apps' store builds are made by hand as
+  always. Only computers on Early Access are offered it, and they install it by themselves while
+  you're away as they would any release. The next ones are `-beta.2`, `-rc.1`.
+- **Promoting a beta.** Set the version to `3.13.0`, with its full CHANGELOG section (and a rollout
+  line if you like), and release it as above. A release is newer than its betas, so testers on
+  3.13.0-beta.2 are offered 3.13.0 too.
+- **Early-access codes.** Once: `node scripts/early-access-code.js --new-key` makes your key pair.
+  The private key stays in `~/.config/bridge-ai/early-access-key.pem` (keep a copy in a password
+  manager; never commit it), and the public key it prints goes in `server/earlyaccess.js`
+  (`PUBLIC_KEY`). Until a build has one, Early Access isn't shown anywhere. Then a code for each
+  tester: `npm run early-access -- Sam --days 60` (no `--days`: it doesn't end). The name goes with
+  their usage stats and crash reports (PRIVACY.md), so make it a first name or nickname, never an
+  email. They paste the code in Settings › About & Updates › Have an early-access code?, or open
+  `http://127.0.0.1:7420/?early=<code>` in a browser to have it filled in. It's for the desktop app
+  (and Linux's package); a copy run from a clone or in Docker isn't offered it. `--check <code>`
+  says what a code says.
+- **Taking a code back.** `npm run early-access -- --revoke <id>` writes it in the newest release's
+  notes, which computers on Early Access read at each check. For good, add the id to `REVOKED` in
+  `server/earlyaccess.js` before the next release. A code made with `--days` ends by itself.
+- **Leaving.** Bridge AI never goes back to an older version: a tester who leaves Early Access, or
+  whose code ends, stays on the beta they have until a regular release is newer.
+
 ## Before you open a pull request
 
 - `npm run build` passes, and `npm test` (the tests for what you changed; `test/README.md` says what each covers). CI runs every test on macOS, Windows and Linux.

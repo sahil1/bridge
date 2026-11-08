@@ -2,6 +2,7 @@ import express from 'express'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { randomInt } from 'node:crypto'
 import { transcript, earlier, replyDiffs, markUndone, preview, locate, imageFrom } from './transcripts.js'
 import { listSubagents, runningFor, forgetExcept } from './subagents.js'
 import { ttyHandler } from './tty.js'
@@ -92,6 +93,7 @@ import * as transfers from './transfers.js'
 import { mediaNamed } from '../shared/media.js'
 import * as counts from './counts.js'
 import * as updates from './updates.js'
+import * as earlyAccess from './earlyaccess.js'
 import * as crashes from './crashes.js'
 import * as cloud from './cloud.js'
 import { makeModels, forLaunch } from './models.js'
@@ -2377,7 +2379,8 @@ counts.configure(cfg, {
     const phones = relay.status().devices.filter((d) => d.kind === 'phone').length
     const onOff = (v) => (v ? 'on' : 'off')
     return {
-      app: VERSION, os: { darwin: 'mac', win32: 'windows' }[process.platform] || 'linux', osVersion: await osVersion(m), arch: process.arch,
+      app: VERSION, ...updates.channelNow(), rollout: rolloutBucket(),
+      os: { darwin: 'mac', win32: 'windows' }[process.platform] || 'linux', osVersion: await osVersion(m), arch: process.arch,
       chip: chipOf(os.cpus()[0]?.model, process.arch), memory: memoryRange(os.totalmem() / 2 ** 30), cores: coreRange(os.cpus().length),
       install: process.versions.electron ? 'desktop' : process.env.BRIDGE_DOCKER ? 'docker' : 'source',
       layout: cfg.simple ? 'simple' : 'everything', runtime: rt.name, phone: phones ? 'paired' : 'none',
@@ -2406,7 +2409,27 @@ app.get('/api/counts/sent/:week', wrap((req) => counts.sentReport(req.params.wee
 // is on, once a minute however many windows say so.
 app.post('/api/counts/active', wrap(() => counts.activity()))
 
-app.get('/api/updates', wrap((req) => updates.status({ force: req.query.refresh === '1', disabled: cfg.updates?.check === false })))
+// refresh=1: a person asked (Check now, Check for Updates…), so GitHub is asked now, and a release
+// out to some computers and not this one yet is offered here too.
+app.get('/api/updates', wrap((req) => updates.status({ force: req.query.refresh === '1', byHand: req.query.refresh === '1', disabled: cfg.updates?.check === false })))
+// Early Access (updates.js, earlyaccess.js): a tester's code, checked and kept in the settings, and
+// this computer takes pre-releases from then on. Leave Early Access takes it out, and the version
+// here stays until Stable passes it. A code that doesn't work says why.
+app.post('/api/updates/early', wrap(async (req) => {
+  const code = String(req.body?.code || '').replace(/\s+/g, '')
+  const r = earlyAccess.readCode(code)
+  if (!r.ok) throw Object.assign(new Error(earlyAccess.whyNot(r)), { code: `early-${r.why}` })
+  if (!updates.canEarly()) throw new Error(updates.how() === 'docker' ? 'Early Access is for the desktop app. Bridge AI in Docker updates by its image\'s tag, which stays on regular releases.' : 'Early Access is for the desktop app. Bridge AI from a clone already runs the newest code there is (git pull).')
+  afterChange(settings.patch({ earlyAccess: { code } }))
+  const u = await updates.status({ force: true, disabled: cfg.updates?.check === false })
+  // Taken back in a release's notes, which only the list of releases says.
+  if (u.early.problem === 'revoked') { afterChange(settings.patch({ earlyAccess: null })); throw Object.assign(new Error(earlyAccess.whyNot({ why: 'revoked', for: r.for })), { code: 'early-revoked' }) }
+  return u
+}))
+app.delete('/api/updates/early', wrap(async () => {
+  afterChange(settings.patch({ earlyAccess: null }))
+  return updates.status({ force: true, disabled: cfg.updates?.check === false })
+}))
 // auto: by itself while you're away, asked by the desktop app on this computer only.
 app.post('/api/updates/install', wrap((req) => {
   if (req.body?.auto === true && !fromHere(req)) throw Object.assign(new Error('Only the desktop app updates by itself'), { status: 403 })
@@ -2414,7 +2437,17 @@ app.post('/api/updates/install', wrap((req) => {
 }))
 // Updating by itself while you're away (updates.js autoView): whether it's the time, and what it
 // waits for. The desktop app says what it waits for itself (POST, from this computer).
-updates.useSettings(() => ({ on: cfg.updates?.auto !== false, checks: cfg.updates?.check !== false }))
+// This computer's bucket for staged rollouts (updates.js): 0-99, picked at random the first time
+// it's needed and kept in the settings, so a release out to 10% reaches the same tenth of computers
+// first however often they check.
+function rolloutBucket() {
+  const b = cfg.updates?.bucket
+  if (Number.isInteger(b) && b >= 0 && b < 100) return b
+  const n = randomInt(100)
+  try { afterChange(settings.patch({ updates: { bucket: n } })) } catch { cfg.updates = { ...cfg.updates, bucket: n } }
+  return n
+}
+updates.useSettings(() => ({ on: cfg.updates?.auto !== false, checks: cfg.updates?.check !== false, code: cfg.earlyAccess?.code || null, bucket: rolloutBucket() }))
 // What an update would cut short: this computer's agents working or waiting on you (a cloud agent
 // runs elsewhere, and other devices' agents on them), a meeting recording, being transcribed or its
 // notes being written, and a dictation being heard (its live words, or its recording being turned
@@ -2477,7 +2510,7 @@ async function personalNames() {
 // Crash reports to the project (crashes.js): off unless turned on, or one at a time with Send to
 // Bold Bridge, as the person left its text.
 crashes.configure(cfg, {
-  about: async () => ({ version: VERSION, settings: crashSettings(), names: await personalNames() }),
+  about: async () => ({ version: VERSION, ...updates.channelNow(), settings: crashSettings(), names: await personalNames() }),
   save: (p) => afterChange(settings.patch(p)),
 })
 app.get('/api/crashes/sending', wrap(() => crashes.sending()))

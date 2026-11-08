@@ -13,7 +13,7 @@ project. Each Bridge AI with sharing on sends it one report per week, once the w
 
 - **Checks it against the public list.** A name that isn't on it, or a value that isn't one of its
   ranges, is dropped. Something unknown about the install (an operating system, a version that
-  isn't `x.y.z`) is kept as `other`, or `unknown` when the report doesn't say. A report that isn't
+  isn't `x.y.z` or a pre-release of one, `x.y.z-beta.n`) is kept as `other`, or `unknown` when the report doesn't say. A report that isn't
   JSON, has no nonce, or isn't for one of the last ten weeks is turned away (400), and so is one over
   16 KB (413).
 - **Counts it once.** Its nonce (random, new for each report) is kept for ten weeks; the same nonce
@@ -47,6 +47,12 @@ made-up weeks. That's the cost of having no IDs. A Cloudflare rate limiting rule
   starts, n) and `daily_updates` (day, version, the version it came from, n): installs on each
   version each day, crash-free days, and adoption of each release. Counted once by its nonce, as
   the week's.
+- **The update channel**, with the version and nothing else: `channels` (week, version, channel,
+  tester, bucket, n) and `daily_channels` (day, version, channel, tester, bucket, crashed, n).
+  The channel is `stable` or `early` (Early Access, the pre-releases), the tester is who an
+  early-access code is for (the name the project gave them; empty on Stable), and the bucket is the
+  computer's for staged rollouts (0-99, `-1` when not said). So a pre-release, or a release part
+  way out, can be compared with the rest; a report from before channels says `unknown`.
 
 ## Changed from the admin view
 
@@ -68,7 +74,8 @@ The same Worker answers at `https://crashes.boldbridge.ai` (`POST /v1/report`, J
   with line numbers and other numbers taken out, so the same crash in another version or another
   place in a file is one group.
 - **Kept 90 days** in `crash_reports` (id, day, version, system, kind, fingerprint, title, what,
-  details), then deleted by the daily cron. No IP, no ID for the sender.
+  details), with its channel and tester in `crash_channels` (id, channel, tester), then deleted by
+  the daily cron. No IP, no ID for the sender.
 - **At most `CRASHES_PER_DAY` a day** (1,000): past that, 429, and Bridge AI lets the report go.
 - **`CRASHES_OFF`** answers every report `{ stop: true, why }`, as `COUNTS_OFF` does for the counts:
   Bridge AI turns crash reports off and shows why.

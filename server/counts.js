@@ -6,19 +6,22 @@
 // sent yet.
 //
 // Two reports, each only the names and values on the public list (shared/telemetry-schema.json):
-// - a week's (<data>/telemetry/<week>.json), sent once the week is over: the install (version,
-//   system and its version, chip, memory, cores, how it's installed, other computers linked and
-//   phones paired, as counts), the features it has on, the agents installed, the counts of what was
+// - a week's (<data>/telemetry/<week>.json), sent once the week is over: the install (version, its
+//   update channel and rollout bucket, and on Early Access who the code is for; system and its
+//   version, chip, memory, cores, how it's installed, other computers linked and phones paired, as
+//   counts), the features it has on, the agents installed, the counts of what was
 //   used, days used, and time in use and running (a window of it in front, with someone typing,
 //   clicking or touching it in the last two minutes: the window says so once a minute; and how long
 //   it ran at all), each as a range ("1-5 hours"), never minutes or times of day.
 // - a day's (<data>/telemetry/days/<day>.json), sent the next day: the version that day (and the
-//   one before it, the day it updated), the OS and how it's installed, how many times it started,
-//   and whether it crashed, so each version's adoption and crash-free days can be seen.
-// A copy of each report sent stays in telemetry/sent. Neither ever has a name, a path, a repo or
-// branch, a prompt, a transcript, what an agent wrote, an email, a host, an account, an exact time,
-// or an ID for you or this computer: each report's nonce is new, so the same install can't be
-// followed from one report to the next.
+//   one before it, the day it updated), its channel, bucket and tester as the week's has them, the
+//   OS and how it's installed, how many times it started, and whether it crashed, so each version's
+//   adoption and crash-free days can be seen, on each channel and at each step of a rollout.
+// A copy of each report sent stays in telemetry/sent. Neither ever has a name (an early-access
+// code's is the one the project gave its tester), a path, a repo or branch, a prompt, a transcript,
+// what an agent wrote, an email, a host, an account, an exact time, or an ID for you or this
+// computer: each report's nonce is new. The rollout bucket is one of a hundred, shared with about
+// one computer in a hundred.
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
@@ -156,7 +159,7 @@ export function report(w) {
   return {
     schema: SCHEMA.schema,
     week: w.week,
-    app: c.app, os: c.os, osVersion: c.osVersion, arch: c.arch, chip: c.chip, memory: c.memory, cores: c.cores,
+    app: c.app, ...channelOf(c), os: c.os, osVersion: c.osVersion, arch: c.arch, chip: c.chip, memory: c.memory, cores: c.cores,
     install: c.install, layout: c.layout, runtime: c.runtime, phone: c.phone, phones: c.phones, computers: c.computers,
     installAge: w.installAge || null,
     daysActive: w.days.length,
@@ -168,6 +171,10 @@ export function report(w) {
     nonce: w.nonce,
   }
 }
+// The update channel (stable or early), for Early Access who the code is for (a name the project
+// picked for its tester), and the staged rollout's bucket (0-99, random): each version's counts and
+// crashes, told apart by channel and by how soon it reached a computer.
+const channelOf = (c) => ({ channel: c.channel === 'early' ? 'early' : 'stable', tester: c.channel === 'early' && c.tester ? String(c.tester).slice(0, 32) : null, rollout: Number.isInteger(c.rollout) ? c.rollout : null })
 // Only the features on the public list, each with one of its values.
 const FEATURES = SCHEMA.features || {}
 const AGENT_KINDS = new Set(SCHEMA.agents || [])
@@ -270,7 +277,7 @@ const LAST = path.join(DIR, 'version.json') // the version this computer ran las
 // The day a moment is in, on this computer's calendar: '2026-11-04'.
 export const dayOf = (d = now()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 let day = null // { day, app, from, starts, crashed, nonce, about }
-const sys = (c) => ({ os: c.os, arch: c.arch, install: c.install })
+const sys = (c) => ({ os: c.os, arch: c.arch, install: c.install, ...channelOf(c) })
 async function currentDay() {
   const d = dayOf()
   if (day?.day !== d) {
@@ -299,7 +306,7 @@ export async function crashed() { if (!sharing()) return; const d = await curren
 // A day's report, exactly as it's sent.
 export function dayReport(d) {
   const c = d.about || {}
-  return { schema: SCHEMA.schema, day: d.day, app: d.app, from: d.from || null, os: c.os, arch: c.arch, install: c.install, starts: bucket(d.starts), crashed: !!d.crashed, nonce: d.nonce }
+  return { schema: SCHEMA.schema, day: d.day, app: d.app, from: d.from || null, ...channelOf(c), os: c.os, arch: c.arch, install: c.install, starts: bucket(d.starts), crashed: !!d.crashed, nonce: d.nonce }
 }
 const dayEndpoint = () => { const w = endpoint(); try { return /\/v1\/week$/.test(w) ? w.replace(/\/v1\/week$/, '/v1/day') : new URL('/v1/day', w).href } catch { return null } }
 // Each day that's over goes, once; one that can't is tried again, and forgotten after two weeks.

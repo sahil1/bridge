@@ -171,7 +171,7 @@ let fromApp = null // { version, at, states: { microphone: 'ok', ... } }
 const STATES = new Set(['ok', 'ask', 'denied', 'restricted', 'restart', 'unknown'])
 export function appReport({ version, states } = {}) {
   const ok = Object.fromEntries(Object.entries(states && typeof states === 'object' ? states : {}).filter(([k, v]) => PANES[k]?.app && STATES.has(v)))
-  fromApp = { version: /^\d+\.\d+\.\d+$/.test(String(version)) ? String(version) : null, at: Date.now(), states: ok }
+  fromApp = { version: /^\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$/.test(String(version)) ? String(version) : null, at: Date.now(), states: ok }
   return { ok: true }
 }
 const appSaid = (pane) => (fromApp && Date.now() - fromApp.at < 3 * 60 * 1000 ? fromApp.states[pane] ?? null : null)

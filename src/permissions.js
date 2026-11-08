@@ -54,11 +54,10 @@ export function useRecheck(fn, every = 0, enabled = true) {
 // The desktop app around this page, when the page is this computer's own: another device's page
 // shown in this window, or a phone, gets none of it (desktop/preload.js).
 export const desktopApp = () => (!machineId && !viaRelay && window.bridgeApp?.desktop ? window.bridgeApp : null)
-// Its version, from its user agent ("BridgeAI/3.7.1", as Electron writes every app's): every version
-// has said it, so an old one can be told it's old.
-export const appVersion = () => (desktopApp() ? /\bBridgeAI\/(\d+\.\d+\.\d+)\b/.exec(navigator.userAgent)?.[1] || null : null)
-const parts = (v) => String(v).replace(/^v/, '').split('-')[0].split('.').map((n) => Number(n) || 0)
-export const newer = (a, b) => { const x = parts(a); const y = parts(b); for (let i = 0; i < 3; i++) { if (x[i] !== y[i]) return x[i] > y[i] } return false }
+// Its version, from its user agent ("BridgeAI/3.7.1", or a pre-release's "BridgeAI/3.13.0-beta.1",
+// as Electron writes every app's): every version has said it, so an old one can be told it's old.
+export const appVersion = () => (desktopApp() ? /\bBridgeAI\/(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)(?=\s|$)/.exec(navigator.userAgent)?.[1] || null : null)
+export { newer } from '../shared/version.js'
 
 // The desktop app's side of one permission: { status, ask, reset } (reset null where the app can't),
 // null where it isn't the app's to ask or there's no app here, or 'update' when the app is too old to.

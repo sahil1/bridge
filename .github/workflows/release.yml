@@ -3,7 +3,8 @@
 # test fails. The Android app (android.yml) is built alongside and goes in when it's built and
 # signed; without the release key, or when its build fails, the release goes out without it (the
 # run says why), and android-apk.yml adds it afterwards.
-#   Pushing a tag v<version> (npm run release does this) builds and publishes that release.
+#   Pushing a tag v<version> (npm run release does this) builds and publishes that release; a
+#   pre-release's tag (v3.13.0-beta.1) publishes a pre-release, for Early Access only.
 #   Running it by hand (Actions › Release › Run workflow) only builds and tests; the installers
 #   are attached to the run so you can try them.
 name: Release
@@ -183,9 +184,15 @@ jobs:
         with:
           subject-path: out/Bridge-AI-*
 
+      # A pre-release version (v3.13.0-beta.1) is published as a pre-release and never as the latest
+      # release: GitHub's latest (which the website, the installers' downloads and Stable's update
+      # check use) stays on the last regular one, and only Early Access is offered it.
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          gh release create "$GITHUB_REF_NAME" --title "Bridge AI $VERSION" --notes-file notes.md out/Bridge-AI-* out/SHA256SUMS.txt
+          case "$VERSION" in
+            *-*) gh release create "$GITHUB_REF_NAME" --title "Bridge AI $VERSION" --notes-file notes.md --prerelease --latest=false out/Bridge-AI-* out/SHA256SUMS.txt ;;
+            *) gh release create "$GITHUB_REF_NAME" --title "Bridge AI $VERSION" --notes-file notes.md out/Bridge-AI-* out/SHA256SUMS.txt ;;
+          esac

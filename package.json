@@ -21,6 +21,8 @@
     "icons:brands": "node scripts/brand-icons.js",
     "icons:boards": "node scripts/board-icons.js",
     "release": "node scripts/release.js",
+    "rollout": "node scripts/rollout.js",
+    "early-access": "node scripts/early-access-code.js",
     "calltap": "node scripts/calltap.js",
     "check:private": "node scripts/check-private.js",
     "test": "node test/run.mjs",
