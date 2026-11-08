@@ -118,7 +118,9 @@ button.fx-th:hover { color: var(--ink); }
 .fx-search-note { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 8px 18px; color: var(--ink-2); border-bottom: 1px solid var(--line); }
 
 /* Get Info and Assist, beside the folder. */
-.fx-info, .fx-assist { flex: none; width: 300px; min-width: 0; overflow-y: auto; border-left: 1px solid var(--line); background: var(--pane); }
+.fx-info { flex: none; width: 300px; min-width: 0; overflow-y: auto; border-left: 1px solid var(--line); background: var(--pane); }
+/* Files Assist (Assist.jsx, assist.css): beside the folder in .fa-dock; on a phone, in its place. */
+.fx-assist { min-height: 0; display: flex; flex-direction: column; background: var(--pane); }
 .fx-info { display: grid; align-content: start; gap: 10px; padding: 12px 14px 20px; }
 .fx-info-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; }
 .fx-info-head .fx-thumb.big { width: 56px; height: 56px; }
@@ -133,11 +135,6 @@ button.fx-th:hover { color: var(--ink); }
 .fx-info-skip { display: block; margin-top: 2px; }
 .fx-info-acts { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 4px; border-top: 1px solid var(--line); }
 .fx-info-soon { margin: 0; }
-.fx-assist { display: grid; align-content: start; }
-.fx-assist-head { display: flex; align-items: center; gap: 6px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
-.fx-assist-head svg { color: var(--accent); }
-.fx-assist-soon { display: grid; gap: 8px; padding: 14px; }
-.fx-assist-soon p { margin: 0; line-height: 1.5; }
 
 /* Quick Look, over the folder. */
 .fx-ql-back { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; padding: 24px; background: color-mix(in srgb, #000 35%, transparent); animation: fade-in .1s ease; }
@@ -173,7 +170,7 @@ button.fx-th:hover { color: var(--ink); }
 .fx.narrow .fx-th { height: 40px; min-width: 40px; }
 .fx.narrow .fx-assist-btn { display: inline-flex; min-height: 40px; }
 .fx.narrow .fx-info { position: absolute; inset: 0; z-index: 4; width: auto; border: 0; }
-.fx.narrow .fx-assist { width: auto; border: 0; }
+.fx.narrow .fx-assist { height: 100%; }
 @media (max-width: 640px) {
   .fx-ql-back { padding: 0; }
   .fx-ql { width: 100%; height: 100%; border-radius: 0; }

@@ -396,7 +396,9 @@ try {
     await p.locator('.fx-row[data-name="Projects"]').dblclick()
     await p.locator('.fx-bar button', { hasText: 'Assist' }).click()
     const a = p.locator('.fx-assist')
-    ok(await a.waitFor({ timeout: 4000 }).then(() => true, () => false) && (await a.getAttribute('data-root')) === 'home' && (await a.getAttribute('data-rel')) === 'Projects', 'Assist opens beside the folder, for the folder on screen', { root: await a.getAttribute('data-root').catch(() => null), rel: await a.getAttribute('data-rel').catch(() => null) })
+    ok(await a.waitFor({ timeout: 4000 }).then(() => true, () => false) && (await a.getAttribute('data-root')) === 'home' && (await a.getAttribute('data-rel')) === 'Projects' && /Projects/.test(await a.locator('.fa-where').innerText().catch(() => '')) && await a.locator('.fa-promise').isVisible(), 'Assist opens beside the folder, for the folder on screen, saying it only looks', { root: await a.getAttribute('data-root').catch(() => null), rel: await a.getAttribute('data-rel').catch(() => null) })
+    await until(async () => (await a.locator('.fa-state').count()) === 0, 8000)
+    await snap('assist')
     await p.locator('.fx-bar button', { hasText: 'Assist' }).click()
   })
   await part('a folder macOS asks about', async () => {

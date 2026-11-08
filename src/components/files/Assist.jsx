@@ -178,7 +178,7 @@ function Tiles({ found, onJump }) {
   const tidy = o.loose.length + o.versions.length + o.copies.length + o.empty.length + o.chains.length
   const val = {
     duplicates: found.duplicates.count ? fmtSize(found.duplicates.wasted) : t('None'),
-    large: fmtNum(found.large.files.length + found.large.folders.length),
+    large: found.large.files.length + found.large.folders.length ? fmtNum(found.large.files.length + found.large.folders.length) : t('None'),
     old: found.old.count || found.old.installers.length || found.old.archives.length || found.old.screenshots.length ? fmtSize(found.old.bytes + found.old.installers.reduce((n, f) => n + f.size, 0)) : t('None'),
     organize: tidy ? fmtNum(tidy) : t('None'),
   }

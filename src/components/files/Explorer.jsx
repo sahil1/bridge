@@ -431,11 +431,11 @@ export default function Explorer() {
               <div className={`fx-body ${view === 'columns' && !narrow && !searching ? 'cols' : ''}`} ref={mainRef} tabIndex={0}
                 onContextMenu={(e) => { if (e.target.closest('.fx-row, .fx-tile, .fx-crow')) return; e.preventDefault(); onMenu(folderEntry, e) }}
                 onMouseDown={(e) => { if (!e.target.closest('.fx-row, .fx-tile, .fx-crow, button, input, a')) setSel(null) }}>
-                {narrow && assist ? <Assist root={loc.root} rel={loc.path} machine={machine} onOpen={(p) => { setAssist(false); showPath(p) }} /> : body()}
+                {narrow && assist ? <div className="fx-assist" data-root={loc.root} data-rel={loc.path || ''}><Assist root={loc.root} rel={loc.path} machine={machine} onOpen={(p) => { setAssist(false); showPath(p) }} onClose={() => setAssist(false)} /></div> : body()}
               </div>
               {info && <Info base={base} root={loc.root} entry={info} cloud={cloud} onClose={() => { setInfo(null); mainRef.current?.focus() }} onOpen={() => { const e = info; setInfo(null); openEntry(e) }}
                 openLabel={info.path === loc.path ? null : openLabel(info)} onReveal={here ? () => reveal(info) : null} revealLabel={revealLabel} onCopy={copy} />}
-              {assist && !narrow && <Assist root={loc.root} rel={loc.path} machine={machine} onOpen={showPath} />}
+              {assist && !narrow && <div className="fa-dock fx-assist" data-root={loc.root} data-rel={loc.path || ''}><Assist root={loc.root} rel={loc.path} machine={machine} onOpen={showPath} onClose={() => setAssist(false)} /></div>}
             </div>
             <footer className="fx-foot muted small" role="status">{status}</footer>
           </section>
