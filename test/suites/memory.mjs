@@ -274,6 +274,19 @@ try {
   // said the same on the page and in PRIVACY.md.
   const says = await home.locator('.mm-you').innerText()
   ok(/the models you use for meetings \(notes, Who spoke, cleanup, AI Assist and your questions\) and the one that tidies your dictation/.test(says) && /goes with what the models\s+you use for meetings are told/.test(fs.readFileSync(path.join(ROOT, 'PRIVACY.md'), 'utf8')), 'About You says where it goes, every model for meetings and the one tidying dictation, as PRIVACY.md does', says)
+  // At 1280, About You beside the list: each name's Edit stays on its name's line, never on one of its own.
+  // (All of them, found by a letter most have, so every group is open.)
+  await p.setViewportSize({ width: 1280, height: 800 })
+  await home.locator('.mm-colls button[data-coll="all"]').click()
+  await home.locator('.mm-find input').fill('a')
+  await p.waitForTimeout(500)
+  const rows = await home.locator('.mm-item').evaluateAll((els) => els.filter((e) => e.getBoundingClientRect().height).map((e) => {
+    const name = e.querySelector('.mt-mem-what b').getBoundingClientRect(), pen = e.querySelector('.mm-pen').getBoundingClientRect()
+    return { term: e.dataset.term, lone: Math.abs((pen.top + pen.bottom) / 2 - (name.top + name.bottom) / 2) > 14 }
+  }))
+  ok(rows.length >= 5 && !rows.some((x) => x.lone) && !!(await home.locator('.mm-you').isVisible()), '1280 wide, About You beside it: each name\'s Edit on its line, none alone on a line of its own', { n: rows.length, lone: rows.filter((x) => x.lone), you: await home.locator('.mm-you').isVisible() })
+  await home.locator('.mm-find input').fill('')
+  await p.setViewportSize({ width: 1440, height: 900 })
   // People: with Meeting Insights off (a beta feature) nothing of it shows; on, the people you meet, one kept.
   await home.locator('.mm-colls button[data-coll="person"]').click()
   await home.locator('.mm-colls button[data-coll="person"][aria-selected="true"]').waitFor({ timeout: 5000 }).catch(() => {})

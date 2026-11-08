@@ -115,7 +115,10 @@
   .mm-you-text.clamp { -webkit-line-clamp: 3; }
   .mm-page.finding :is(.mm-you, .mm-looks, .mm-how) { display: none; }
 }
-@container (max-width: 560px) {
+/* The list's own width (it's narrower than the page with About You beside it): Edit beside the name
+   and its tags under it, before Edit would wrap onto a line of its own. */
+.mm-list { container-type: inline-size; }
+@container (max-width: 640px) {
   .mm-line > .mt-mem-what { flex: 1 1 0; }
   .mm-pen { order: 1; }
   .mm-tags { order: 2; flex-basis: 100%; justify-content: flex-start; margin-left: 0; }
