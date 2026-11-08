@@ -257,9 +257,10 @@ try {
     const log = fs.readFileSync(path.join(kit.dir, 'llama.log'), 'utf8')
     const sent = log.split('\n').filter((l) => l.includes('organize this folder')).join('\n')
     ok(sent.includes('Inbox/private.txt') && sent.includes('Videos/trip.mov') && !sent.includes(SECRET) && !sent.includes('Meeting notes.'), 'the model got names, sizes and dates, never what\'s in a file', sent.slice(0, 300))
-    // As PRIVACY.md says: what Files shows, what Assist reads, and what Ask AI sends where.
+    // As PRIVACY.md says: what Files shows, what AI Assist reads in it, and what Suggest how to
+    // organize it sends where.
     const policy = fs.readFileSync(path.join(ROOT, 'PRIVACY.md'), 'utf8').replace(/\s+/g, ' ')
-    ok(/With Files on \(a beta feature/.test(policy) && /Files Assist looks at the folder you ask it about on your computer/.test(policy) && /Ask AI, which sends that folder's file and folder names, sizes and dates \(never what's in a file\) to the model you pick/.test(policy), 'PRIVACY.md says what Files shows, what Files Assist reads, and what Ask AI sends to which model', null)
+    ok(/With Files on \(a beta feature/.test(policy) && /AI Assist in Files looks at the folder you ask it about on your computer/.test(policy) && /Suggest how to organize it, which sends that folder's file and folder names, sizes and dates \(never what's in a file\) to the model you pick/.test(policy), 'PRIVACY.md says what Files shows, what AI Assist reads there, and what Suggest how to organize it sends to which model', null)
     // A model elsewhere: only once it's picked, and the names go there.
     const cloud = others.find((x) => !x.local)
     const picked = await api('/files/assist/model', { model: cloud.id }, 'PUT')
