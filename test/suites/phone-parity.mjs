@@ -90,6 +90,8 @@ const PATHS = {
   'settings:mail': { phone: 'Settings › Mail', mac: true },
   'settings:mcp': { phone: 'Settings › MCP Servers' },
   'settings:phone': { phone: 'Settings › Devices' },
+  // (There only once Bold Bridge accounts exist, server/account.js: account-ui follows it on a phone.)
+  'settings:account': { phone: 'Settings › Account', accounts: true },
   'settings:appearance': { phone: 'Settings › Appearance' },
   'settings:config': { phone: 'Settings › Config File' },
   'settings:about': { phone: 'Settings › About & Updates' },
@@ -194,7 +196,7 @@ try {
     await ph.p.waitForSelector('.tabbar button', { timeout: 20000 })
     const tabs = (await ph.p.locator('.tabbar button').allInnerTexts()).map((x) => x.trim())
     ok(tabs.join('|') === TABS.join('|'), `${width}: five tabs, the last one More`, tabs)
-    const routes = [...new Map(Object.values(PATHS).filter((x) => x.phone && !x.trial && (!x.mac || IS_MAC)).map((x) => [`${x.phone}|${x.shows || ''}`, x])).values()]
+    const routes = [...new Map(Object.values(PATHS).filter((x) => x.phone && !x.trial && !x.accounts && (!x.mac || IS_MAC)).map((x) => [`${x.phone}|${x.shows || ''}`, x])).values()]
     const bad = []
     for (const r of routes) {
       await ph.p.goto(kit.url)
