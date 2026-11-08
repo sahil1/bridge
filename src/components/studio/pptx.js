@@ -96,7 +96,7 @@ function slideFrom(ts, notes, paginate) {
   let subtitle = null
   const next = rest[0]
   if (titleBlock && next && ((next.h && next.h === titleBlock.h + 1) || (next.p && ['title', 'section', 'picture'].includes(layout)))) { subtitle = next.runs; rest.shift() }
-  return { layout, title: titleBlock?.runs || null, subtitle, blocks: rest, pictures, notes: notes.join('\n\n'), number: paginate }
+  return { layout, title: titleBlock?.runs || null, subtitle, blocks: rest, pictures, notes: notes.join('\n\n'), number: paginate, hidden: classes.includes('skip') }
 }
 const sideOf = (alt) => (isBg(alt) ? { bg: true, side: /\bright\b/.test(alt) ? 'right' : /\bleft\b/.test(alt) ? 'left' : 'full' } : { bg: false, side: 'inline' })
 
@@ -271,7 +271,7 @@ export async function pptxOf(slides, look = null, { image = async () => null, ti
     if (s.notes) slide.addNotes(s.notes)
   }
   const bytes = new Uint8Array(await p.write({ outputType: 'arraybuffer' }))
-  return withTheme(bytes, c, fonts)
+  return withTheme(bytes, c, fonts, slides.map((s) => !!s.hidden))
 }
 // Two columns: at the second ### heading, else a list's items in two halves, else the blocks.
 function split(blocks) {
@@ -283,14 +283,18 @@ function split(blocks) {
 }
 // The file's theme in the deck's colours and fonts, so what's added in PowerPoint matches, and
 // Studio reads its look back.
-async function withTheme(bytes, c, fonts) {
+async function withTheme(bytes, c, fonts, hidden = []) {
   const JSZip = (await import('jszip')).default
   const zip = await JSZip.loadAsync(bytes)
   // PptxGenJS gives each run of a paragraph its paragraph's properties again; a paragraph has them
   // once, first, or PowerPoint offers to repair the file.
   for (const name of Object.keys(zip.files).filter((n) => /^ppt\/(slides|slideLayouts|notesSlides)\/[^/]+\.xml$/.test(n))) {
     const xml = await zip.file(name).async('string')
-    zip.file(name, xml.replace(/<a:p>([\s\S]*?)<\/a:p>/g, (m, body) => { let n = 0; return `<a:p>${body.replace(/<a:pPr\b[^>]*?(?:\/>|>[\s\S]*?<\/a:pPr>)/g, (x) => (n++ ? '' : x))}</a:p>` }))
+    let out = xml.replace(/<a:p>([\s\S]*?)<\/a:p>/g, (m, body) => { let n = 0; return `<a:p>${body.replace(/<a:pPr\b[^>]*?(?:\/>|>[\s\S]*?<\/a:pPr>)/g, (x) => (n++ ? '' : x))}</a:p>` })
+    // A slide skipped when presenting is hidden in PowerPoint too.
+    const n = /^ppt\/slides\/slide(\d+)\.xml$/.exec(name)?.[1]
+    if (n && hidden[Number(n) - 1]) out = out.replace(/<p:sld\b/, '<p:sld show="0"')
+    zip.file(name, out)
   }
   const f = zip.file('ppt/theme/theme1.xml')
   if (!f) return zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' })
@@ -452,7 +456,8 @@ export async function deckFromPptx(buf, name = 'Deck') {
     if (!layout) layout = !texts.length && !pics.length && title && subtitle ? 'title' : pics.length && !texts.length ? 'picture' : pics.length ? 'image' : !texts.length && title ? 'section' : 'content'
     if ((layout === 'content' || layout === 'cols') && pics.length) layout = 'image'
     const lines = []
-    if (layout !== 'content') lines.push(`<!-- _class: ${layout} -->`, '')
+    const skip = /<p:sld\b[^>]*\sshow="0"/.test(await read(sp) || '')
+    if (layout !== 'content' || skip) lines.push(`<!-- _class: ${[layout === 'content' ? '' : layout, skip ? 'skip' : ''].filter(Boolean).join(' ')} -->`, '')
     // Our own Section and Title slides keep their words in their title and subtitle.
     // A title is bold by its layout, not by its words.
     const words = (box) => box.paras.map((p) => unbold(p.md)).join(' ')

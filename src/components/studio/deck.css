@@ -77,6 +77,11 @@
 /* The slide being edited, on the app's grey, its words typed right on it. */
 .sd-work { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-width: 0; min-height: 0; }
 .sd-stage { position: relative; display: grid; place-items: center; min-height: 0; overflow: hidden; padding-top: 32px; background: var(--pane-3); outline: none; }
+/* Zoomed in past the window: the slide scrolls, from any edge. */
+.sd-stage.zoomed { display: flex; overflow: auto; padding: 32px 28px 28px; }
+.sd-stage.zoomed > .sd-canvas { flex: none; margin: auto; }
+.sd-thumb.picked .sd-thumb-btn { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent), 0 2px 6px rgb(0 0 0 / .12); }
+.sd-thumb.skipped .sd-thumb-btn { opacity: .45; }
 .sd-canvas { position: relative; overflow: hidden; border-radius: 3px; background: #fff; box-shadow: 0 0 0 1px rgb(0 0 0 / .06), 0 2px 4px rgb(0 0 0 / .06), 0 12px 32px rgb(0 0 0 / .14); }
 .sd-canvas .sd-ed { outline: none; cursor: text; border-radius: 6px; transition: box-shadow .1s; }
 .sd-canvas .sd-ed:hover { box-shadow: 0 0 0 calc(1.5px / var(--k, 1)) color-mix(in srgb, var(--accent) 45%, transparent); }
@@ -180,6 +185,10 @@
 .sd-presenter > .sd-slide { box-shadow: 0 0 0 1px #333; opacity: .92; }
 .sd-presenter-notes { margin: 0; font: 19px/1.55 var(--font); color: #f2f2f2; white-space: pre-wrap; }
 .sd-print-frame { position: fixed; right: 0; bottom: 0; width: 1px; height: 1px; border: 0; opacity: 0; pointer-events: none; }
+.sd-present-black.white { background: #fff; }
+.sd-present-typed { position: absolute; right: 24px; top: 20px; padding: 6px 12px; border-radius: 8px; background: rgb(30 30 30 / .88); color: #fff; font: 600 15px var(--font); font-variant-numeric: tabular-nums; }
+/* Find and replace: its Match case. */
+.sd-find-case { display: inline-flex; align-items: center; gap: 5px; margin-left: 6px; color: var(--ink-2); white-space: nowrap; }
 
 /* A phone: the slide across the screen with back and next under it, every slide a tap away in the
    grid, Write with AI and the Markdown over the slide, each thing you tap a whole 40px target. */
@@ -217,3 +226,6 @@
 .app.narrow .sd-gallery-grid > button { min-height: 40px; }
 .app.narrow .sd-sorter .ghost-btn { min-height: 40px; }
 .app.narrow .sd-present-bar .win-btn { width: 44px; height: 44px; }
+.app.narrow .sd-findbar .win-btn, .app.narrow .sd-findbar .btn.small { min-width: 40px; min-height: 40px; }
+.app.narrow .sd-findbar input { font-size: 16px; height: 40px; }
+.app.narrow .sd-find-case { min-height: 40px; }
