@@ -1,6 +1,7 @@
 // The app as a whole, on any platform and in the browser named by BRIDGE_TEST_BROWSER (Chromium,
 // or WebKit, the engine of Safari and the iPhone app): it loads in a light colour theme, a dark one
-// and at phone width without page errors or sideways scrolling; the sidebar, ⌘K and Settings
+// (its quiet, muted text 4.5:1 or more on every pane) and at phone width without page errors or
+// sideways scrolling; the sidebar, ⌘K and Settings
 // open (its section names in Title Case); and a New terminal runs a command typed into it. Its
 // views fetched ahead while the computer can't be reached: once it's back, Settings opens with its
 // look, and a view opened meanwhile says it hit an error, then opens with Try again. And
@@ -44,6 +45,27 @@ try {
     await p.waitForSelector('.rail-nav-btn', { timeout: 15000 }).catch(() => {})
     const nav = await p.locator('.rail-nav-btn').allInnerTexts()
     ok(['New', 'Chief of Staff', 'Meetings'].every((x) => nav.some((n) => n.includes(x))), `${t}: the sidebar has New, Chief of Staff and Meetings`, nav)
+    // In the dark, the quiet (muted) text that dates, counts and hints are in reads at 4.5:1 or more
+    // on every pane it sits on.
+    if (look.mode === 'dark') {
+      const ratios = await p.evaluate(() => {
+        const rgb = (c) => c.match(/\d+(\.\d+)?/g).slice(0, 3).map(Number)
+        const lum = (c) => { const [r, g, bl] = rgb(c).map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4 }); return 0.2126 * r + 0.7152 * g + 0.0722 * bl }
+        const probe = document.createElement('span')
+        probe.className = 'muted'
+        document.querySelector('.work, #root').append(probe)
+        const fg = getComputedStyle(probe).color
+        const out = {}
+        for (const v of ['--pane', '--pane-2', '--pane-3']) {
+          probe.style.background = `var(${v})`
+          const a = lum(fg), c = lum(getComputedStyle(probe).backgroundColor)
+          out[v] = Math.round(((Math.max(a, c) + 0.05) / (Math.min(a, c) + 0.05)) * 100) / 100
+        }
+        probe.remove()
+        return out
+      })
+      ok(Object.values(ratios).every((r) => r >= 4.5), `${t}: muted text 4.5:1 or more on every pane`, ratios)
+    }
     ok(await p.locator('.rail-nav-row .rail-rec').isVisible(), `${t}: and the record button`)
     await p.keyboard.press('ControlOrMeta+K')
     ok(!!(await until(async () => (await p.locator('[role="dialog"] input').count()) > 0, 4000)), `${t}: ⌘K opens the palette`)

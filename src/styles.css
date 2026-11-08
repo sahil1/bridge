@@ -51,7 +51,7 @@
     --line-2: rgba(255, 255, 255, .12);
     --ink: #e9ebf0;
     --ink-2: #a9b0bf;
-    --ink-3: #6f7788;
+    --ink-3: #8a92a3; /* 4.5:1 or more on every dark pane: small, quiet text is still read */
     --accent: #4e82ef;
     --accent-soft: rgba(78, 130, 239, .14);
     --needs: #4e82ef;
@@ -78,7 +78,7 @@
   --line-2: rgba(255, 255, 255, .12);
   --ink: #e9ebf0;
   --ink-2: #a9b0bf;
-  --ink-3: #6f7788;
+  --ink-3: #8a92a3; /* 4.5:1 or more on every dark pane: small, quiet text is still read */
   --accent: #4e82ef;
   --accent-soft: rgba(78, 130, 239, .14);
   --needs: #4e82ef;
