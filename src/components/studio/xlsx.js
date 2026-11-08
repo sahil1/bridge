@@ -85,6 +85,7 @@ export async function writeSheet(book, now, { ops = [], charts = [] } = {}) {
     const kind = book.csv.sep === '\t' ? 'TSV' : 'CSV'
     const notKept = []
     if (now.sheetOrder.length > 1) notKept.push(t('the other sheets (a {kind} file is one sheet)', { kind }))
+    if (charts.length) notKept.push(t('its charts (a {kind} file has none)', { kind }))
     if (!writesBack(book.csv.enc)) notKept.push(t('its encoding, {enc} (it\'s saved as UTF-8)', { enc: book.csv.enc }))
     if (!out.fits) notKept.push(t('letters Windows-1252 has no place for (each is saved as ?)'))
     return { bytes: out.bytes, notKept }

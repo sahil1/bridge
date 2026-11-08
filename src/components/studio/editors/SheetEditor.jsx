@@ -23,6 +23,7 @@ import { withKeys } from '../keys.js'
 import { readSheet, writeSheet, kindWords } from '../xlsx.js'
 import { ENCODINGS } from '../csv.js'
 import SheetChart, { chartOfGrid } from '../sheetchart.jsx'
+import { googleKeys } from '../sheetkeys.js'
 import { sheetCells, formulaErrorWords } from '../sheetcells.js'
 import '../sheet.css'
 
@@ -75,8 +76,8 @@ const OPS = {
 }
 
 // The ribbon's tools for what a CSV can't hold: fonts, colours, borders, alignment, merged cells,
-// conditional formats and validation. A number's format it keeps: it's how the number is written
-// (1,200.50, 15%, 2026-04-01).
+// conditional formats and validation (and Insert › Chart isn't made for one). A number's format
+// it keeps: it's how the number is written (1,200.50, 15%, 2026-04-01).
 const itemsOf = (schema, tab, group) => Object.keys(schema?.[tab]?.[group] || schema?.[group] || {})
 const CSV_HIDDEN = [
   ...itemsOf(SheetsUIMenuSchema, 'ribbon.start', 'ribbon.start.format'),
@@ -84,6 +85,8 @@ const CSV_HIDDEN = [
   ...itemsOf(SheetsConditionalFormattingUIMenuSchema, 'ribbon.data', 'ribbon.data.rules'),
   ...itemsOf(SheetsDataValidationUIMenuSchema, 'ribbon.data', 'ribbon.data.rules'),
 ]
+// The kinds of chart Insert › Chart makes, each saved as Excel's own.
+const CHART_KINDS = { column: tx('Column'), bar: tx('Bar'), line: tx('Line'), pie: tx('Pie') }
 
 const colName = (c) => { let s = ''; for (let n = c + 1; n > 0; n = Math.floor((n - 1) / 26)) s = String.fromCharCode(65 + ((n - 1) % 26)) + s; return s }
 // The cells picked, as an agent reads them: column letters across, row numbers down, a formula
@@ -110,7 +113,8 @@ export default function SheetEditor({ file, data, onDirty, onStats, handle, read
   const univer = useRef(null) // the facade, univerAPI
   const book = useRef(null) // what was read (xlsx.js readSheet)
   const ops = useRef([])
-  const [added, setAdded] = useState([]) // charts kept from Ask AI, written in on save
+  const [added, setAdded] = useState([]) // charts made here (Insert › Chart, Ask AI), written in on save
+  const [msg, setMsg] = useState(null) // what Print or Insert › Chart couldn't do, and why
   const [picked, setPicked] = useState({ sep: null, enc: null }) // a CSV's separator and encoding, when picked
   const [info, setInfo] = useState(null) // { lost, charts, csv }
   const [err, setErr] = useState(null)
@@ -125,6 +129,52 @@ export default function SheetEditor({ file, data, onDirty, onStats, handle, read
   const setPanelRef = useRef(setPanel)
   setPanelRef.current = setPanel
   const changed = useCallback((d) => { dirty.current = d; onDirty(d) }, [onDirty])
+
+  // Printed from a page of its own: the sheet in view as it shows (Univer's own copy of its cells,
+  // formats and all), to the system's Print, where Save as PDF is too.
+  const print = () => {
+    try {
+      const sheet = univer.current?.getActiveWorkbook()?.getActiveSheet()
+      const rows = (sheet?.getLastRow() ?? -1) + 1, cols = (sheet?.getLastColumn() ?? -1) + 1
+      if (!sheet || rows < 1 || cols < 1) { setMsg({ text: t('There\'s nothing on {sheet} to print yet.', { sheet: sheet?.getSheetName() || t('this sheet') }) }); return }
+      const html = sheet.getRange(0, 0, rows, cols).generateHTML()
+      const f = document.createElement('iframe')
+      f.className = 'sh-print-frame'
+      f.setAttribute('aria-hidden', 'true')
+      f.srcdoc = `<!doctype html><meta charset="utf-8"><title>${`${file.name} · ${sheet.getSheetName()}`.replace(/[<&]/g, '')}</title><style>
+html,body{margin:0;background:#fff;color:#000}body{padding:0}table{border-collapse:collapse;width:auto!important}td{border:0.5pt solid #d4d4d4;padding:2px 4px;vertical-align:bottom}
+@page{margin:12mm}</style>${html}`
+      // Print's dialog has the page while it's open; then the keys are the sheet's again.
+      const back = document.activeElement
+      f.onload = () => { setTimeout(() => { try { f.contentWindow.focus(); f.contentWindow.print() } finally { f.blur(); back?.focus?.(); setTimeout(() => f.remove(), 60_000) } }, 200) }
+      document.body.appendChild(f)
+      setMsg(null)
+    } catch (e) { setMsg({ text: t("Couldn't print it: {error}", { error: e.message }), error: true }) }
+  }
+  const printRef = useRef(print)
+  printRef.current = print
+
+  // Insert › Chart: the cells picked, drawn in Charts beside the sheet at once, its kind and title
+  // changed there, and saved as an Excel chart. What can't be charted says why.
+  const insertChart = (type) => {
+    try {
+      const sheet = univer.current?.getActiveWorkbook()?.getActiveSheet()
+      const range = sheet?.getSelection()?.getActiveRange()
+      if (!range || range.getWidth() * range.getHeight() < 2) throw new Error(t('pick the cells to chart first: their labels and numbers, with the headings above them'))
+      // A whole row or column picked: as far as its cells go.
+      const r0 = range.getRow(), c0 = range.getColumn()
+      const r1 = Math.min(r0 + range.getHeight() - 1, sheet.getLastRow()), c1 = Math.min(c0 + range.getWidth() - 1, sheet.getLastColumn())
+      if (r1 < r0 || c1 < c0 || (r1 === r0 && c1 === c0)) throw new Error(t('pick the cells to chart first: their labels and numbers, with the headings above them'))
+      const { spec } = chartFrom(sheet, { range: `${colName(c0)}${r0 + 1}:${colName(c1)}${r1 + 1}`, type, title: '' })
+      setAdded((a) => [...a, { ...spec, id: `c${Date.now().toString(36)}` }])
+      changed(true)
+      setMsg(null)
+      setPanel('charts')
+    } catch (e) { setMsg({ text: t("Couldn't make a chart: {error}", { error: e.message }), error: true }) }
+  }
+  const chartRef = useRef(insertChart)
+  chartRef.current = insertChart
+  const editChart = (id, change) => { setAdded((a) => (change ? a.map((c) => (c.id === id ? { ...c, ...change } : c)) : a.filter((c) => c.id !== id))); changed(true) }
 
   // The app's light or dark look, followed while it's open.
   useEffect(() => {
@@ -175,13 +225,20 @@ export default function SheetEditor({ file, data, onDirty, onStats, handle, read
           const icons = made.univer.__getInjector().get(IconManager)
           icons.register('BridgeAskAiIcon', ({ style }) => <Icon name="sparkle" size={style?.width || 16} className="sh-ribbon-icon" />)
           icons.register('BridgeChartsIcon', ({ style }) => <Icon name="trend" size={style?.width || 16} className="sh-ribbon-icon" />)
+          icons.register('BridgeChartIcon', ({ style }) => <Icon name="bar-chart" size={style?.width || 16} />)
+          icons.register('BridgePrintIcon', ({ style }) => <Icon name="printer" size={style?.width || 16} />)
           u.createMenu({ id: 'bridge.sheet.ask-ai', title: t('Ask AI'), tooltip: t('Ask one of your agents about the cells you picked: a formula, a cleaned-up column, a summary or a chart. You see the change before it\'s made.'), icon: 'BridgeAskAiIcon', action: () => setPanelRef.current('ask'), order: -10, gridLayout: { row: 1, column: 1, rowSpan: 2, showLabel: true } }).appendTo(['ribbon.start', 'ribbon.start.ai'])
+          // Print beside undo and redo, as in Google Sheets' toolbar.
+          u.createMenu({ id: 'bridge.sheet.print-button', title: t('Print'), tooltip: withKeys(t('Print, or save as PDF'), 'mod', 'p'), icon: 'BridgePrintIcon', action: () => printRef.current(), order: 5 }).appendTo(['ribbon.start', 'ribbon.start.history'])
+          if (!csv) u.createMenu({ id: 'bridge.sheet.insert-chart', title: t('Chart'), tooltip: t('A chart of the cells you picked: their labels and numbers, with the headings above them. Saved as an Excel chart.'), icon: 'BridgeChartIcon', action: () => chartRef.current('column'), order: -1, gridLayout: { row: 1, column: 1, rowSpan: 2, showLabel: true } }).appendTo(['ribbon.insert', 'ribbon.insert.charts'])
           u.createMenu({ id: 'bridge.sheet.charts', title: t('Charts'), tooltip: t('The charts in this file, drawn from its cells'), icon: 'BridgeChartsIcon', action: () => setPanelRef.current((p) => (p === 'charts' ? null : 'charts')), order: 0, gridLayout: { row: 1, column: 1, rowSpan: 2, showLabel: true } }).appendTo(['ribbon.insert', 'ribbon.insert.charts'])
           u.createMenu({ id: 'bridge.sheet.ask-ai-here', title: t('Ask AI about these cells'), icon: 'BridgeAskAiIcon', action: () => setPanelRef.current('ask'), order: -10 }).appendTo('contextMenu.mainArea')
         } catch { /* a Univer without these menus: Ask an agent in the page's header still opens it */ }
       }
       u.createWorkbook(wb.data)
-      // What's typed keeps no colour of its own (sheetcells.js).
+      // The keys Google Sheets users reach for (sheetkeys.js), and what's typed keeping no colour of
+      // its own (sheetcells.js).
+      try { offs.push(googleKeys(made.univer, u, { container: host.current, onPrint: () => printRef.current(), onSay: (text) => on && setMsg({ text, error: true }) })) } catch { /* Univer's own keys still work */ }
       try { offs.push(sheetCells(made.univer)) } catch { /* cells as Univer has them */ }
       setEmpty(!readOnly && Object.values(wb.data.sheets).every((s) => !Object.keys(s.cellData || {}).length))
       setReady(true)
@@ -202,6 +259,8 @@ export default function SheetEditor({ file, data, onDirty, onStats, handle, read
         const op = OPS[cmd.id]
         if (op && cmd.params?.subUnitId) ops.current.push({ sheet: cmd.params.subUnitId, ...op(cmd.params) })
         if (cmd.id === 'sheet.operation.set-selections' || cmd.id === 'sheet.command.set-worksheet-activate') look()
+        // A sheet added, copied or deleted: the status line counts them again.
+        if (cmd.id === 'sheet.mutation.insert-sheet' || cmd.id === 'sheet.mutation.remove-sheet') { const k = u.getActiveWorkbook()?.getSheets().length || 0; onStats?.({ text: k === 1 ? t('1 sheet') : t('{n} sheets', { n: k }) }) }
       }))
       look()
     }, (e) => on && setErr(e.message))
@@ -247,8 +306,9 @@ export default function SheetEditor({ file, data, onDirty, onStats, handle, read
           {info.charts.length > 0 && <button type="button" className="link-btn" onClick={() => setPanel('charts')}>{t('Charts')}</button>}
         </p>
       )}
+      {msg && <p className={`small sd-note sh-note${msg.error ? ' error-text' : ''}`} role={msg.error ? 'alert' : 'status'}><Icon name={msg.error ? 'alert' : 'info'} size={12} /><span>{msg.text}</span><button type="button" className="link-btn" onClick={() => setMsg(null)}>{t('OK')}</button></p>}
       <div className="sh-body">
-        <div ref={host} className="sd-univer" />
+        <div ref={host} className="sd-univer" data-own-keys="mod+k" />
         {empty && ready && !panel && (
           <div className="sh-start" role="note">
             <Icon name="grid" size={18} />
@@ -258,8 +318,8 @@ export default function SheetEditor({ file, data, onDirty, onStats, handle, read
           </div>
         )}
         {/* Ask AI stays as it was (waiting for an answer, say) while Charts is open instead. */}
-        {asked && <AskPanel hidden={panel !== 'ask'} onShow={() => setPanel('ask')} file={file} univer={univer} sel={sel} dark={isDark} onDirty={changed} onChart={(c) => setAdded((a) => [...a, c])} onClose={() => setPanel(null)} />}
-        {panel === 'charts' && <ChartsPanel charts={sheetCharts} univer={univer} sel={sel} dark={isDark} onAsk={() => setPanel('ask')} onClose={() => setPanel(null)} />}
+        {asked && <AskPanel hidden={panel !== 'ask'} onShow={() => setPanel('ask')} file={file} univer={univer} sel={sel} dark={isDark} onDirty={changed} onChart={(c) => setAdded((a) => [...a, { ...c, id: `c${Date.now().toString(36)}` }])} onClose={() => setPanel(null)} />}
+        {panel === 'charts' && <ChartsPanel charts={sheetCharts} univer={univer} sel={sel} dark={isDark} csv={!!info?.csv} onInsert={insertChart} onEdit={editChart} onAsk={() => setPanel('ask')} onClose={() => setPanel(null)} />}
       </div>
       {!ready && <div className="sd-empty sd-loading sd-over" role="status"><Icon name="refresh" size={16} className="spin" /><span className="muted">{t('Opening {name}…', { name: file.name })}</span></div>}
     </div>
@@ -460,21 +520,23 @@ function chartFrom(sheet, c) {
   if (!/^[A-Z]{1,3}[1-9]\d*:[A-Z]{1,3}[1-9]\d*$/.test(ref)) throw new Error(t('"{ref}" isn\'t a range of cells', { ref: String(c.range) }))
   const range = sheet.getRange(ref)
   const type = CHART_TYPES.includes(c.type) ? c.type : 'column'
-  const view = chartOfGrid(range.getValues().map((r) => r.map((v) => (v == null ? '' : v))), type, String(c.title || ''))
+  const view = chartOfGrid(cellValues(sheet, range), type, String(c.title || ''))
   if (!view.series.length) throw new Error(t('there are no numbers in {ref} to chart', { ref }))
   const spec = { sheet: sheet.getSheetId(), sheetName: sheet.getSheetName(), type, title: String(c.title || ''), ref, at: { col: range.getColumn() + range.getWidth() + 1, row: range.getRow() }, size: { cols: 8, rows: 16 } }
   return { spec, view }
 }
 
 // ---------- Charts ----------
-// The file's charts on the sheet in view (and ones kept from Ask AI), drawn from its cells as they
-// are now; each picks its cells when its name is clicked. A chart is changed in Excel, or by Ask AI.
-function ChartsPanel({ charts, univer, sel, dark, onAsk, onClose }) {
+// The file's charts on the sheet in view (and ones made here, by Insert › Chart or Ask AI), drawn
+// from its cells as they are now; each picks its cells when its name is clicked. One made here
+// has its kind and title to change, and goes with Remove; the file's own are changed in Excel,
+// or by Ask AI.
+function ChartsPanel({ charts, univer, sel, dark, csv, onInsert, onEdit, onAsk, onClose }) {
   const here = charts.filter((c) => !sel || c.sheet === sel.sheetId || c.sheetName === sel.sheet)
   const view = (c) => {
     try {
       const u = univer.current
-      if (c.added) return chartOfGrid(u.getActiveWorkbook().getSheetBySheetId(c.sheet).getRange(c.ref).getValues().map((r) => r.map((v) => (v == null ? '' : v))), c.type, c.title)
+      if (c.added) { const s = u.getActiveWorkbook().getSheetBySheetId(c.sheet); return chartOfGrid(cellValues(s, s.getRange(c.ref)), c.type, c.title) }
       // Its series' cells as they are now, where Studio can read them; else the numbers saved with it.
       const series = c.series.map((s) => { const live = refValues(u, s.valRef); return { name: s.name, vals: live ? live.map((v) => (v === '' ? NaN : Number(v))) : s.vals } })
       const cats = refValues(u, c.series[0]?.catRef) || c.series[0]?.cats || []
@@ -495,19 +557,37 @@ function ChartsPanel({ charts, univer, sel, dark, onAsk, onClose }) {
     <aside className="sh-side sh-charts" aria-label={t('Charts')}>
       <div className="sd-panel-head"><Icon name="trend" size={13} /><b>{t('Charts')}</b><span className="muted small">{sel ? t('on {sheet}', { sheet: sel.sheet }) : ''}</span><span className="sd-grow" /><button type="button" className="win-btn" onClick={onClose} aria-label={t('Close')} title={t('Close')}><Icon name="x" size={13} /></button></div>
       <div className="sh-side-body">
-        {!here.length && <div className="sh-none"><Icon name="trend" size={18} /><b>{t('No charts on this sheet')}</b><span className="muted small">{t('Pick the cells to chart, then Chart this in Ask AI: you see it before it\'s added, and it\'s saved as an Excel chart.')}</span><button type="button" className="btn small" onClick={onAsk}><Icon name="sparkle" size={12} /> {t('Ask AI')}</button></div>}
+        {!here.length && <div className="sh-none"><Icon name="trend" size={18} /><b>{t('No charts on this sheet')}</b><span className="muted small">{csv ? t('Pick the cells to chart, then Chart this in Ask AI: you see it before it\'s added, and it\'s saved as an Excel chart.') : t('Pick the cells to chart (their labels and numbers, with the headings above them), then Insert chart. It\'s saved as an Excel chart.')}</span><span className="sh-acts">{!csv && <button type="button" className="btn small primary" onClick={() => onInsert('column')}><Icon name="bar-chart" size={12} /> {t('Insert chart')}</button>}<button type="button" className="btn small" onClick={onAsk}><Icon name="sparkle" size={12} /> {t('Ask AI')}</button></span></div>}
         {here.map((c, i) => {
           const v = view(c)
           return (
-            <figure key={i} className="sh-fig">
+            <figure key={c.id || i} className="sh-fig">
               <figcaption><button type="button" className="link-btn" onClick={() => pick(c)} title={t('Pick its cells')}>{c.title || v?.series?.[0]?.name || t('Chart {n}', { n: i + 1 })}</button>{c.added && <small className="muted"> · {t('added, saved with the file')}</small>}</figcaption>
               {v ? <SheetChart chart={v} dark={dark} /> : <small className="muted">{t('This kind of chart can\'t be drawn here; it\'s kept in the file as it is.')}</small>}
+              {c.added && c.id && (
+                <div className="sh-fig-tools">
+                  <select value={c.type} onChange={(e) => onEdit(c.id, { type: e.target.value })} aria-label={t('Kind of chart')} title={t('Kind of chart')}>
+                    {Object.entries(CHART_KINDS).map(([k, label]) => <option key={k} value={k}>{t(label)}</option>)}
+                  </select>
+                  <input value={c.title} onChange={(e) => onEdit(c.id, { title: e.target.value })} placeholder={t('Title')} aria-label={t('Chart title')} />
+                  <button type="button" className="link-btn" onClick={() => onEdit(c.id, null)}>{t('Remove')}</button>
+                </div>
+              )}
             </figure>
           )
         })}
+        {here.length > 0 && !csv && <p className="muted small sh-more">{t('Another chart: pick its cells, then Insert › Chart.')}</p>}
       </div>
     </aside>
   )
+}
+// A range's values as they are, not as they show: 900 for $900.00, 0.45 for 45% (a formula's its
+// result), '' for an empty cell.
+function cellValues(sheet, range) {
+  const ws = sheet.getSheet()
+  const r0 = range.getRow(), c0 = range.getColumn()
+  const at = (r, c) => { const x = ws.getCellRaw(r, c); return x?.v ?? x?.p?.body?.dataStream?.replace(/\r\n$/, '') ?? '' }
+  return Array.from({ length: range.getHeight() }, (_, i) => Array.from({ length: range.getWidth() }, (_, j) => at(r0 + i, c0 + j)))
 }
 // A reference's values ('Budget'!$C$5:$C$16), read from the sheet as it is now.
 function refValues(u, ref) {
@@ -518,6 +598,6 @@ function refValues(u, ref) {
     const name = bang >= 0 ? at.slice(0, bang).replace(/^'|'$/g, '').replace(/''/g, "'") : null
     const sheet = name ? u.getActiveWorkbook().getSheetByName(name) : u.getActiveWorkbook().getActiveSheet()
     if (!sheet) return null
-    return sheet.getRange(at.slice(bang + 1)).getValues().flat().map((v) => (v == null ? '' : v))
+    return cellValues(sheet, sheet.getRange(at.slice(bang + 1))).flat()
   } catch { return null }
 }
