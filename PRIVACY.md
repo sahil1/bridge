@@ -146,6 +146,16 @@ looks in none of them until you open it. A file you copy to another of your comp
 your phone, goes end-to-end encrypted over the same link as everything else (the relay sees only
 how much goes), and lands only in the folder you pick on the computer it goes to.
 
+With Files on (a beta feature, off until you turn it on), it also shows your home folder, your cloud
+drives and this computer's drives, read only, to you and to your own linked computers and paired
+phones over that same encrypted link. Bridge AI's own folder and your keys' folders (`~/.ssh`,
+`~/.gnupg`, Keychains) are never shown, and on a Mac, Desktop, Documents, Downloads and iCloud Drive
+aren't read until you open one. Files Assist looks at the folder you ask it about on your computer,
+and reads a file's contents only to tell whether two files of the same size are the same; nothing
+about it leaves the computer unless you click Ask AI, which sends that folder's file and folder
+names, sizes and dates (never what's in a file) to the model you pick for it, and says which model
+and where it runs first. A model on your computer keeps them there.
+
 Signature Assist (a beta feature in Studio, off until you turn it on) keeps the signature and
 initials you draw as two pictures in `~/.bridge-ai/studio/signatures`, readable by you only; they're
 never sent to a model or anywhere else, and removing one deletes it from the disk. A PDF you sign

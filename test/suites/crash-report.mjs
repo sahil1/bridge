@@ -297,7 +297,7 @@ try {
     await until(async () => /Crash reports/.test(await p2.locator('.st-body').innerText().catch(() => '')), 8000)
     const box = p2.locator('label', { hasText: 'Send crash reports by themselves' }).locator('input')
     const text = await p2.locator('.st-body').innerText().catch(() => '')
-    ok(await box.isChecked().catch(() => false) && /Kept for 90 days/.test(text) && /On unless you turn it off/.test(text) && new RegExp(`127\\.0\\.0\\.1:${port}`).test(text), 'Settings › About & Updates: Crash reports, on, saying where they go, for how long, and that they\'re on unless turned off', text.slice(-700))
+    ok(await box.isChecked().catch(() => false) && /Kept for 90 days/.test(text) && /On unless you turn it off/.test(text) && /update channel/.test(text) && new RegExp(`127\\.0\\.0\\.1:${port}`).test(text), 'Settings › About & Updates: Crash reports, on, saying where they go, what they carry (the update channel too), for how long, and that they\'re on unless turned off', text.slice(-700))
     await p2.locator('.st-sec:has(h4:text("Crash reports")) .link-btn').first().click()
     const doc = await until(async () => { const x = await p2.locator('.st-sec:has(h4:text("Crash reports")) .counts-doc').innerText().catch(() => ''); return /"kind": "ui"/.test(x) && x }, 5000)
     ok(!!doc && /y is null/.test(doc), 'each report sent can be read there, as it went', doc)

@@ -82,6 +82,12 @@ try {
     // Names are in Title Case (Model Providers, About & Updates, Chief of Staff), short joining words aside.
     const titled = (x) => x.split(/\s+/).every((w, i) => (i > 0 && /^(a|an|and|as|at|by|for|in|of|on|or|the|to|&)$/.test(w)) || !/^\p{Ll}/u.test(w))
     ok(navs.length > 5 && navs.every(titled), `${t}: Settings' section names are in Title Case`, navs)
+    // README.md's table of Settings has a row for each of them (Mail's row says it's a Mac's), and
+    // none for a section that isn't there (Account, until Bold Bridge accounts are switched on).
+    const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8')
+    const table = readme.slice(readme.indexOf('| Section | What\'s there |'))
+    const rows = [...table.slice(0, table.search(/\n\n/)).matchAll(/^\| ([^|]+?) \|/gm)].map((m) => m[1]).filter((x) => !/^(Section|-+)$/.test(x))
+    ok(navs.every((x) => rows.includes(x)) && rows.every((x) => navs.includes(x) || x === 'Mail'), `${t}: README.md's Settings table has a row for each section, and only those`, { rows, navs })
     await p.locator('.st-nav-item', { hasText: 'Devices' }).click()
     const heads = await until(async () => { const h = (await p.locator('.st-body h4').allInnerTexts()).map((x) => x.trim()); return h.includes('Your devices') && h }, 6000)
     const at = (re) => (heads || []).findIndex((h) => re.test(h))

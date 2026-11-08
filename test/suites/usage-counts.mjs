@@ -206,6 +206,7 @@ try {
     const { ctx, p, text } = await about(later, /Share anonymous usage counts/)
     const box = p.locator('label', { hasText: 'Share anonymous usage counts' }).locator('input')
     ok(/Usage counts/.test(text) && await box.count() === 1 && !(await box.isChecked()), 'with an endpoint: the switch, off', text.slice(-600))
+    ok(/update channel and its rollout bucket/.test(text), 'saying all a report carries, its update channel and rollout bucket too', text.slice(-900))
     const heads = await p.locator('.st-body .st-sec > h4').allInnerTexts()
     ok(heads.at(-1) === 'Beta Features', 'Beta Features is the last thing on the page', heads)
     await p.locator('button', { hasText: 'See exactly what would be sent' }).click()
