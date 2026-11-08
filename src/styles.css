@@ -3201,7 +3201,7 @@ table.sheet tbody tr:hover td { background: var(--pane-2); }
 .m-more-ico { flex: none; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 9px; background: var(--accent-soft); color: var(--accent); }
 .m-more-text { flex: 1; min-width: 0; display: grid; gap: 1px; }
 .m-more-text b { font-size: 15px; font-weight: 600; }
-.m-more-text span { font-size: 12.5px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-more-text span { font-size: 12.5px; color: var(--ink-3); overflow-wrap: anywhere; } /* on two lines rather than cut off */
 .m-more-count { position: static; flex: none; }
 /* A place opened from More fills the tab under Back to the list, a whole 40px target (a whiteboard
    has its own way back, so it's alone there). */
