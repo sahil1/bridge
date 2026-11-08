@@ -37,6 +37,8 @@
 //   Mail's How You Write: a profile saying how many emails and meeting lines it read, with the first
 //   email as its example. Reply Assist: a reply in a code fence (which Bridge AI takes off) with the
 //   free times it was given, a nudge, and the draft shorter, warmer or more direct.
+//   Files Assist's Ask AI ("Suggest how to organize this folder."): a Screenshots folder with the
+//   first screenshot in the list it was sent as its example, an Installers folder, and two steps.
 //   Anything else: "echo: <the last thing said>".
 //   A key of sk-bad is turned down (HTTP 401), as a provider would.
 import http from 'node:http'
@@ -57,6 +59,13 @@ const ARCH = { direction: 'LR', groups: [{ id: 'aws', label: 'AWS us-east-1', ki
   edges: [{ from: 'users', to: 'lb', label: 'HTTPS' }, { from: 'lb', to: 'app1' }, { from: 'lb', to: 'app2' }, { from: 'app1', to: 'db', label: 'SQL' }, { from: 'app2', to: 'db', label: 'SQL' }] }
 const NET = { direction: 'TB', groups: [{ id: 'lan', label: 'Office LAN', kind: 'vpc' }], nodes: [{ id: 'inet', label: 'Internet', shape: 'internet' }, { id: 'fw', label: 'Firewall', shape: 'firewall' }, { id: 'sw', label: 'Switch', shape: 'switch', group: 'lan' }, { id: 'srv', label: 'File server', shape: 'server', group: 'lan' }, { id: 'pc', label: 'Desktops', shape: 'client', group: 'lan' }],
   edges: [{ from: 'inet', to: 'fw', label: 'WAN' }, { from: 'fw', to: 'sw', label: '1 Gbps' }, { from: 'sw', to: 'srv', label: 'LAN' }, { from: 'sw', to: 'pc', label: 'LAN' }] }
+
+// Files Assist's suggestion, from the names it was sent.
+function filesPlan(text) {
+  const names = [...text.matchAll(/^(\S[^\n]*?)  \d/gm)].map((x) => x[1])
+  const shot = names.find((n) => /screenshot/i.test(n)) || names[0] || ''
+  return `\`\`\`json\n${JSON.stringify({ summary: 'Put the screenshots in a folder of their own and clear out the installers.', folders: [{ name: 'Screenshots', holds: 'Every screenshot, by year', examples: [shot] }, { name: 'Installers', holds: 'Apps to install, until they are', examples: [] }], steps: ['Make a Screenshots folder and move the screenshots in.', 'Delete the installers of apps you have installed.'] })}\n\`\`\``
+}
 
 function answer(b) {
   const m = b.messages || []
@@ -80,6 +89,7 @@ function answer(b) {
   if (/^Explain this document, which I have been asked to sign\./.test(first)) {
     return say(`\`\`\`json\n${JSON.stringify({ kind: 'Mutual NDA', what: 'Two companies agree to keep what they share with each other secret for two years.', parties: [{ name: 'Northwind Labs', role: 'shares and receives' }, { name: 'Contoso Ltd', role: 'shares and receives' }], money: ['A fee of $1,200 a year, paid by Contoso Ltd'], dates: ['Starts on signing; lasts two years'], obligations: ['Keep the other side\'s information secret', 'Return or destroy it when asked'], renewal: 'It renews by itself every year unless either side says no 30 days before.', termination: 'Either side can end it with 30 days\' notice.', watch: [{ what: 'It renews by itself unless you say no in time.', page: 1, quote: 'renews automatically' }] })}\n\`\`\``)
   }
+  if (/^Suggest how to organize this folder\./.test(first)) return say(filesPlan(first))
   const tail = m.at(-1)
   const file = /EDIT (\S+)/.exec(last)?.[1]
   if (b.tools && file && tail.role === 'user') return call(`r${m.length}`, 'read_file', { path: file })

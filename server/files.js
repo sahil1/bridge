@@ -144,25 +144,33 @@ export async function copyList(root, rel) {
 
 // A file's SHA-256, worked out off the server's main thread (a worker reads it as it goes), and
 // kept while the file doesn't change: what a copy is checked against where it lands.
+// keepTimes: read it without touching its "last opened" time where the system lets a reader say so
+// (Linux), as Files Assist does. signal: stops reading it.
 const HASHER = `
 const { parentPort, workerData } = require('node:worker_threads')
+const fs = require('node:fs')
 const h = require('node:crypto').createHash('sha256')
-require('node:fs').createReadStream(workerData.file, { highWaterMark: 1 << 20 })
+const read = (flags) => fs.createReadStream(workerData.file, { flags, highWaterMark: 1 << 20 })
   .on('data', (c) => h.update(c))
   .on('end', () => parentPort.postMessage({ sha: h.digest('hex') }))
-  .on('error', (e) => parentPort.postMessage({ error: e.message, code: e.code }))
+  .on('error', (e) => (flags !== 'r' && e.code === 'EPERM' ? read('r') : parentPort.postMessage({ error: e.message, code: e.code })))
+read(workerData.keepTimes && fs.constants.O_NOATIME ? fs.constants.O_RDONLY | fs.constants.O_NOATIME : 'r')
 `
 let hashing = 0
 const hashQueue = []
-export async function hashFile(file) {
+export async function hashFile(file, { signal, keepTimes = false } = {}) {
   // Two at a time: each reads a whole file.
   if (hashing >= 2) await new Promise((r) => hashQueue.push(r))
   hashing++
   try {
+    signal?.throwIfAborted()
     return await new Promise((resolve, reject) => {
-      const w = new Worker(HASHER, { eval: true, workerData: { file } })
-      w.once('message', (m) => { w.terminate(); if (m.error) reject(Object.assign(new Error(m.error), { code: m.code })); else resolve(m.sha) })
-      w.once('error', reject)
+      const w = new Worker(HASHER, { eval: true, workerData: { file, keepTimes } })
+      const stop = () => { w.terminate(); reject(Object.assign(new Error('Stopped'), { code: 'ABORT_ERR' })) }
+      signal?.addEventListener('abort', stop, { once: true })
+      const off = () => signal?.removeEventListener('abort', stop)
+      w.once('message', (m) => { off(); w.terminate(); if (m.error) reject(Object.assign(new Error(m.error), { code: m.code })); else resolve(m.sha) })
+      w.once('error', (e) => { off(); reject(e) })
     })
   } finally { hashing--; hashQueue.shift()?.() }
 }

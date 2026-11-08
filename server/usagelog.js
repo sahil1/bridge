@@ -12,7 +12,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { dataFile } from './paths.js'
 
-export const FEATURES = ['chat', 'meetings', 'assist', 'board', 'dictation', 'voice-edit', 'insights', 'pr', 'consult', 'studio', 'mail']
+export const FEATURES = ['chat', 'meetings', 'assist', 'board', 'dictation', 'voice-edit', 'insights', 'pr', 'consult', 'studio', 'mail', 'files']
 const DIR = () => dataFile('usage')
 const MONTHS = 13
 const MAX = Number(process.env.BRIDGE_USAGE_LOG_MAX) || 32 * 1024 * 1024

@@ -13,6 +13,7 @@ import { usageStats } from './usagestats.js'
 import { everywhere } from './usageall.js'
 import * as usagelog from './usagelog.js'
 import * as files from './files.js'
+import * as fileInsights from './fileinsights.js'
 import * as pr from './pr.js'
 import * as office from './office.js'
 import * as accounts from './accounts.js'
@@ -671,6 +672,14 @@ app.get('/api/agents/:pane/hash', tx(async (req) => files.sha256Of(await rootOf(
 app.get('/api/places', tx(() => ({ places: places.pickedPlaces() })))
 app.post('/api/places', tx((req) => { hereOnly(req, 'Add a place'); return places.addPlace(req.body?.path) }))
 app.delete('/api/places/:id', tx((req) => places.removePlace(req.params.id)))
+// Files Assist (fileinsights.js, with Files): a look at a folder you asked about, in the background,
+// that only ever reads. Ask AI sends names, sizes and dates to the model picked for it (filesAssist.model),
+// else the local model built in once it's downloaded; never one elsewhere unless you pick it.
+fileInsights.setHelpers({
+  models: () => chatModels.models(), reply: (id, msgs, o) => chatModels.reply(id, msgs, o), isLocal: (id) => chatModels.isLocal(id),
+  picked: () => cfg.filesAssist?.model || null, save: (id) => afterChange(settings.patch({ filesAssist: id ? { model: id } : null })), computer: () => relay.thisName(),
+})
+fileInsights.routes(app, { rootOf, trialOff, here: (req) => fromHere(req) })
 // The copies this computer runs, and the ones others are making to it.
 app.get('/api/transfers', tx(() => transfers.list()))
 app.post('/api/transfers', tx((req) => { counts.add('files.sent'); return transfers.start(req.body || {}, { here: fromHere(req) }) }))
