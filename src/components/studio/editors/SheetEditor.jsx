@@ -23,6 +23,7 @@ import { withKeys } from '../keys.js'
 import { readSheet, writeSheet, kindWords } from '../xlsx.js'
 import { ENCODINGS } from '../csv.js'
 import SheetChart, { chartOfGrid } from '../sheetchart.jsx'
+import { sheetCells, formulaErrorWords } from '../sheetcells.js'
 import '../sheet.css'
 
 // A sheet: Univer (Apache-2.0, what GenOffice's Sheets is built on too) with its ribbon, formula
@@ -55,7 +56,7 @@ async function univerWords() {
     const load = Object.entries(g).find(([k]) => k.endsWith(`/${code}.js`))?.[1] || Object.entries(g).find(([k]) => k.endsWith('/en-US.js'))?.[1]
     return load ? load().then((m) => m.default || m) : {}
   }))
-  return { code, words: mergeLocales(...packs) }
+  return { code, words: mergeLocales(...packs, formulaErrorWords()) }
 }
 
 // Office's fonts, drawn by their stand-ins where they aren't installed (sheet.css), ready before the
@@ -156,6 +157,8 @@ export default function SheetEditor({ file, data, onDirty, onStats, handle, read
         locale: LOCALE_TYPE[code],
         locales: { [LOCALE_TYPE[code]]: words },
         darkMode: dark(),
+        // Undo goes back as far as a day's work, not Univer's 50 steps.
+        undoRedoHistoryLimit: 500,
         presets: [
           // A CSV's text that looks like a number ("007", a long ID) is text on purpose, and kept
           // so: not marked as a number stored as text.
@@ -178,6 +181,8 @@ export default function SheetEditor({ file, data, onDirty, onStats, handle, read
         } catch { /* a Univer without these menus: Ask an agent in the page's header still opens it */ }
       }
       u.createWorkbook(wb.data)
+      // What's typed keeps no colour of its own (sheetcells.js).
+      try { offs.push(sheetCells(made.univer)) } catch { /* cells as Univer has them */ }
       setEmpty(!readOnly && Object.values(wb.data.sheets).every((s) => !Object.keys(s.cellData || {}).length))
       setReady(true)
       if (readOnly) u.getActiveWorkbook()?.setEditable?.(false)
