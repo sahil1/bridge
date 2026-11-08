@@ -2,19 +2,16 @@ import { useState } from 'react'
 import Icon from '../components/Icon.jsx'
 import { api } from '../api.js'
 import { t } from '../i18n/index.js'
-import { useTrial } from '../trials.js'
 import { wordsChanged } from './controller.js'
 import './dictation.css'
 
 // Offered once you've put a name right in what you said (on the dictation window's card, or in
-// Dictations; shared/dictation/corrected.js finds it): kept in meeting memory if you say so, so it's
-// written that way from then on wherever it's heard as it was, in dictation and in meetings, and
-// listened for (server/dictation.js remember). Nothing is kept until you click Remember; Undo takes
-// it back, and Memory (Meetings › Memory without its page) has it to change or remove later. fix:
-// { heard, term }; dictation: the one it was put right in, when known, so Memory lists it there;
-// onKept: remembered; onClose: Not now, or undone.
+// Dictations; shared/dictation/corrected.js finds it): kept in Memory if you say so, so it's written
+// that way from then on wherever it's heard as it was, in dictation and in meetings, and listened for
+// (server/dictation.js remember). Nothing is kept until you click Remember; Undo takes it back, and
+// Memory has it to change or remove later. fix: { heard, term }; dictation: the one it was put right
+// in, when known, so Memory lists it there; onKept: remembered; onClose: Not now, or undone.
 export default function Remember({ fix, dictation = null, onKept, onClose, className = '' }) {
-  const page = useTrial('memory')
   const [kept, setKept] = useState(null) // the server's answer, which Undo needs
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
@@ -34,7 +31,7 @@ export default function Remember({ fix, dictation = null, onKept, onClose, class
         </>
       ) : (
         <>
-          <p className="remember-q"><span><b>{t('Remember "{term}"?', fix)}</b> {page ? t('Heard as "{heard}", it\'s written "{term}" from now on, in dictation and meetings. You can change it in Memory.', fix) : t('Heard as "{heard}", it\'s written "{term}" from now on, in dictation and meetings. You can change it in Meetings › Memory.', fix)}</span></p>
+          <p className="remember-q"><span><b>{t('Remember "{term}"?', fix)}</b> {t('Heard as "{heard}", it\'s written "{term}" from now on, in dictation and meetings. You can change it in Memory.', fix)}</span></p>
           <span className="remember-acts">
             <button type="button" className="comp-text-btn" onClick={onClose} disabled={busy}>{t('Not now')}</button>
             <button type="button" className="btn small primary" onClick={yes} disabled={busy}>{t('Remember')}</button>

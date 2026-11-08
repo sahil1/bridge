@@ -188,8 +188,6 @@ function App() {
   studioOnRef.current = studioOn
   // So is Home: with it on, it's where the app opens, and what needs you opens there.
   const homeOn = conf?.trials?.home === true
-  // And Memory as a page of its own (memory/Memory.jsx); off, meeting memory is Meetings' dialog.
-  const memoryOn = conf?.trials?.memory === true
   const routinesOn = conf?.trials?.routines === true
   // Onboarding stays up from the first sign that setup is needed until you close it, so its last
   // screen (how Bridge AI works) isn't swept away the moment setup is saved.
@@ -211,9 +209,10 @@ function App() {
   const [mobileAgent, setMobileAgent] = useState(null)
   const [mobileMeeting, setMobileMeeting] = useState(null) // the meeting open in the phone's Meetings tab
   // What the phone's More tab shows: its list (null), Terminals ('terminals'), or a view (Whiteboards,
-  // a whiteboard, the agent map, Dictations). Terminals had a tab of its own until 3.8.3.
-  const [moreView, setMoreView] = useState(() => (mtab === 'herdr' ? 'terminals' : null))
-  useEffect(() => { if (mtab === 'herdr') setMtab('more') }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  // a whiteboard, the agent map, Dictations, Memory). Kept, as a computer keeps its tabs, so a reload
+  // comes back to it. Terminals had a tab of its own until 3.8.3.
+  const [moreView, setMoreView] = usePersisted('cc-more-view', null)
+  useEffect(() => { if (mtab === 'herdr') { setMtab('more'); setMoreView('terminals') } }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const [homeView, setHomeView] = useState('home') // the phone's Home tab: Home, or Everything
   // With Home on, the phone's Today is in More (Home has what's coming up); off, Home's tab goes.
   useEffect(() => {
@@ -376,9 +375,12 @@ function App() {
       return
     }
     setW((w) => {
+      // In the tab it replaces: where that one was, or, when that one was behind another (a meeting
+      // opened from Memory while Meetings waits in a tab), to the front as any tab opened is.
       if (replace && w.tabs.includes(replace) && !w.tabs.includes(paneId)) {
         const tabs = w.tabs.map((t) => (t === replace ? paneId : t))
-        return { ...w, tabs, active: w.active === replace ? paneId : w.active, side: w.side === replace ? paneId : w.side }
+        if (w.active === replace || w.side === replace) return { ...w, tabs, active: w.active === replace ? paneId : w.active, side: w.side === replace ? paneId : w.side }
+        w = { ...w, tabs }
       }
       const tabs = w.tabs.includes(paneId) ? w.tabs : [...w.tabs, paneId]
       if (toSide || (w.split && w.group === 'side')) return { ...w, tabs, side: paneId, split: true, group: 'side' }
@@ -699,7 +701,7 @@ function App() {
     insightsOn && { id: 'a:insights', label: t('Meeting Insights'), icon: 'trend', keywords: 'meetings stats hours talk time share words week kind', run: () => meetingsTab('insights') },
     insightsOn && { id: 'a:people', label: t('People You Meet'), icon: 'users', keywords: 'people attendees contacts who met meetings together', run: () => meetingsTab('people') },
     { id: 'a:dictations', label: t('Dictations'), icon: 'wave', keywords: 'dictation history voice said typed pasted wispr macwhisper', run: () => openAgent('view:dictations') },
-    memoryOn && { id: 'a:memory', label: t('Memory'), icon: 'book', keywords: 'memory people organizations organisations companies projects products terms names words misheard about me persona context', run: () => openAgent('view:memory') },
+    { id: 'a:memory', label: t('Memory'), icon: 'book', keywords: 'memory people organizations organisations companies projects products terms names words misheard about me about you persona context meeting memory', run: () => openAgent('view:memory') },
     StudioHome && studioOn && { id: 'a:studio', label: t('Studio'), icon: 'layers', keywords: 'studio document word docx sheet excel xlsx spreadsheet deck slides powerpoint pptx pdf page html artifact markdown design pack', run: () => openAgent('view:studio') },
     WhiteboardsHome && { id: 'a:boards', label: t('Whiteboards'), icon: 'shapes', keywords: 'whiteboard board excalidraw draw sketch diagram flowchart architecture sequence org chart mermaid drawio canvas', run: () => openAgent('view:whiteboards') },
     { id: 'a:map', label: t('Agent Map'), icon: 'grid', keywords: 'what is running where devices computers machines all agents overview cloud subagents', run: openMap },
@@ -865,7 +867,7 @@ function App() {
           controls={wide ? { maximized: !!L.max, onMaximize: () => set({ max: L.max ? null : 'main' }) } : null} /></section>
         : id === 'view:meetings' ? <section className="pane view-pane"><MeetingsHome onOpen={(mid) => openAgent(`view:meeting:${mid}`, wide ? { replace: 'view:meetings' } : {})} /></section>
           : id === 'view:dictations' ? <section className="pane view-pane"><Dictations /></section>
-          : id === 'view:memory' ? <section className="pane view-pane">{memoryOn ? <Memory /> : <TrialOff name={t('Memory')} />}</section>
+          : id === 'view:memory' ? <section className="pane view-pane"><Memory /></section>
             : id === 'view:whiteboards' && WhiteboardsHome ? <section className="pane view-pane"><WhiteboardsHome onOpen={(bid) => openAgent(`${BOARD}${bid}`, wide ? { replace: 'view:whiteboards' } : {})} /></section>
               : id.startsWith(BOARD) && WhiteboardPage ? <section className="pane view-pane"><WhiteboardPage id={id.slice(BOARD.length)} onBack={() => openAgent('view:whiteboards', { replace: id })} /></section>
                 : id.startsWith('view:studio') && !studioOn ? <section className="pane view-pane"><TrialOff name={t('Studio')} /></section>
@@ -904,7 +906,7 @@ function App() {
       { id: 'terminals', icon: 'terminal', label: t('Terminals'), hint: t("Every agent's terminal, live"), run: () => setMoreView('terminals') },
       { id: 'map', icon: 'grid', label: t('Agent Map'), hint: t("What's running on each of your computers"), run: () => setMoreView('view:map') },
       { id: 'dictations', icon: 'wave', label: t('Dictations'), hint: t("Everything you've dictated"), run: () => setMoreView('view:dictations') },
-      memoryOn && { id: 'memory', icon: 'book', label: t('Memory'), hint: t('People, organizations and words from your meetings and dictations'), run: () => setMoreView('view:memory') },
+      { id: 'memory', icon: 'book', label: t('Memory'), hint: t('People, organizations and words from your meetings and dictations'), run: () => setMoreView('view:memory') },
       { id: 'needs', icon: 'bell', label: t('Needs you'), hint: t("What's waiting on you, on every device"), count: waiting, run: () => setInbox({}) },
       { id: 'history', icon: 'clock', label: t('History'), hint: t('Every conversation, and closed agents'), run: () => setHistory(true) },
       { id: 'settings', icon: 'settings', label: t('Settings'), hint: t('Devices, voice, appearance and more'), run: () => setSettings('all') },

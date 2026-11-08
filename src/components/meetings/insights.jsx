@@ -15,7 +15,7 @@ const RANGES = [['30', tx('30 days')], ['90', tx('90 days')], ['180', tx('6 mont
 export const KINDS = { one_on_one: tx('1:1s'), customer: tx('Customer calls'), standup: tx('Standups'), interview: tx('Interviews'), brainstorm: tx('Brainstorms'), recurring: tx('Recurring'), group: tx('Group meetings'), other: tx('Other') }
 const KIND_WHY = {
   one_on_one: tx('One other person invited or named on the transcript, or 1:1 in its name.'),
-  customer: tx("Someone invited from another company (an email domain that isn't yours, or a customer in meeting memory), or Customer call picked."),
+  customer: tx("Someone invited from another company (an email domain that isn't yours, or a customer in Memory), or Customer call picked."),
   standup: tx('Standup in its name, or picked.'),
   interview: tx('Interview in its name, or picked.'),
   brainstorm: tx('Brainstorm in its name, or picked.'),

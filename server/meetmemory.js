@@ -1,15 +1,15 @@
 // Meeting memory: the names and terms that come up in your meetings (people, companies, products,
 // jargon), how speech to text mishears them, and a note on each ("my company", "LAM's buyer").
-// It's yours to edit (Meetings › Memory) and it grows by itself: a word you fix in a transcript
+// It's yours to edit (on Memory's page) and it grows by itself: a word you fix in a transcript
 // with Remember on is kept, and each summary adds the names it found and the mishearings it spotted.
 //
 // It's used three ways: the speech engine is told how to spell them; transcripts show them fixed
 // (transcript.jsonl keeps what was heard, so a fix can be undone); and the model writing notes or
 // answering questions is told who and what they are.
 //
-// With Memory on (a beta feature: memory), it's a page of its own (memoryview.js): each name has a
-// kind (a person, an organization, a project or product, a term) and the dictations it came up in
-// as well as the meetings, and an "About you" made from it goes with what the models are told.
+// Its page (memoryview.js) gives each name a kind (a person, an organization, a project or product, a
+// term) and the dictations it came up in as well as the meetings, and an "About you" made from it
+// goes with what the models are told.
 //
 // Kept in <data>/meetings/memory.json: { terms: [{ id, term, kind, heard: [], also: [], note,
 // source: you | learned, seen, meetings: [ids], dictations: [ids], keep, updatedAt }], apart:
@@ -28,10 +28,6 @@ let rest = { apart: [], aboutYou: null, dictationsAt: null } // the rest of the 
 let version = 0 // goes up with every change, so cached transcripts know to look again
 let matcher = null
 let namer = null
-let cfg = {}
-export const configure = (c) => { cfg = c || {} }
-// The beta feature that makes memory a page, with kinds, dictations and About you (index.js TRIALS).
-export const pageOn = () => cfg.trials?.memory === true
 
 function load() {
   if (terms) return terms
@@ -78,7 +74,7 @@ export function add({ term, heard = [], note = '', kind = null, also = [] } = {}
   for (const t of load()) if (low(t.term) !== low(name)) t.heard = t.heard.filter((h) => !vs.some((v) => low(v) === low(h)))
   let t = find(name)
   if (!t) {
-    if (load().length >= MAX) throw new Error('Meeting memory is full; remove some names first')
+    if (load().length >= MAX) throw new Error('Memory is full; remove some names first')
     t = { id: crypto.randomBytes(4).toString('hex'), term: name, heard: [], note: '', source, seen: 0, meetings: [], updatedAt: null }
     terms.push(t)
   }
@@ -99,12 +95,12 @@ export function add({ term, heard = [], note = '', kind = null, also = [] } = {}
 // Your edit of one: its spelling, how it's misheard, its note, its kind. Edited by you, it's yours.
 export function update(id, { term, heard, note, kind } = {}) {
   const t = load().find((x) => x.id === id)
-  if (!t) throw new Error('No such name in meeting memory')
+  if (!t) throw new Error('No such name in memory')
   if (term != null) {
     const name = clean(term, 60)
     if (name.length < 2) throw new Error('A name or term, please')
     const other = find(name)
-    if (other && other !== t) throw new Error(`"${other.term}" is in meeting memory already`)
+    if (other && other !== t) throw new Error(`"${other.term}" is in memory already`)
     t.term = name
   }
   if (heard != null) {
@@ -125,7 +121,7 @@ export function update(id, { term, heard, note, kind } = {}) {
 export function remove(id) {
   const n = load().length
   terms = load().filter((t) => t.id !== id)
-  if (terms.length === n) throw new Error('No such name in meeting memory')
+  if (terms.length === n) throw new Error('No such name in memory')
   rest.apart = rest.apart.filter((p) => !p.includes(id))
   store()
   return { ok: true }
@@ -153,7 +149,7 @@ export function keep(ids) {
 // and dictations.
 export function merge(into, from) {
   const a = load().find((x) => x.id === into), b = load().find((x) => x.id === from)
-  if (!a || !b) throw new Error('No such name in meeting memory')
+  if (!a || !b) throw new Error('No such name in memory')
   if (a === b) throw new Error('That\'s the same one')
   a.also = variants([...(a.also || []), b.term, ...(b.also || [])], a.term)
   a.heard = variants([...a.heard, ...b.heard], a.term)
@@ -173,7 +169,7 @@ export function merge(into, from) {
 }
 // Two that look alike but aren't the same: never offered as the same again.
 export function apart(a, b) {
-  if (!load().some((x) => x.id === a) || !load().some((x) => x.id === b)) throw new Error('No such name in meeting memory')
+  if (!load().some((x) => x.id === a) || !load().some((x) => x.id === b)) throw new Error('No such name in memory')
   if (!rest.apart.some((p) => p.includes(a) && p.includes(b))) { rest.apart.push([a, b]); store({ quiet: true }) }
   return { ok: true }
 }
@@ -222,9 +218,8 @@ export function about(text, max = 40) {
 
 // ---------- About you ----------
 // A few lines on who you are, what you work on and who you deal with most, made from memory on this
-// computer (memoryview.js writes the draft) or written by you, and used while Memory is on and it
-// isn't switched off: with what the models writing notes and tidying dictation are told, and in
-// Chief of Staff's folder.
+// computer (memoryview.js writes the draft) or written by you, and used unless it's switched off:
+// with what the models writing notes and tidying dictation are told, and in Chief of Staff's folder.
 export function aboutYou() {
   load()
   const a = rest.aboutYou || {}
@@ -232,7 +227,7 @@ export function aboutYou() {
 }
 export function persona() {
   load()
-  return pageOn() && !rest.aboutYou?.off ? String(rest.aboutYou?.text ?? rest.aboutYou?.draft ?? '').trim().slice(0, 2000) : ''
+  return !rest.aboutYou?.off ? String(rest.aboutYou?.text ?? rest.aboutYou?.draft ?? '').trim().slice(0, 2000) : ''
 }
 // Yours: text (empty, or the draft as it is, goes back to the one made from memory) and on.
 export function setAboutYou({ text, on } = {}) {

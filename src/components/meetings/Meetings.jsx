@@ -9,7 +9,7 @@ import { useMeetings, clock, ScreenButton, SectionButton } from './recording.jsx
 import { byDay, timeOf, useSelection, BulkBar } from './bulk.jsx'
 import { useMeetingMenu, foldersOf, ConfirmDelete, FolderPick, chiefSaid } from './actions.jsx'
 import { AskPanel, md } from './ask.jsx'
-import { FixWord, MemoryPanel, TranscribeAgain, useChatModels, NOTE_LANGS, Dialog } from './tools.jsx'
+import { FixWord, TranscribeAgain, useChatModels, NOTE_LANGS, Dialog, openMemory } from './tools.jsx'
 import { Menu as AtMenu } from '../FileExtras.jsx'
 import { FilesPane, linkFiles } from './context.jsx'
 import { AssistPane, setAssist } from './assist.jsx'
@@ -206,7 +206,6 @@ export function MeetingsHome({ onOpen }) {
   const archivedN = all.filter((x) => x.archived).length
   useEffect(() => { if (data && place && (place === ':archived' ? !archivedN : !folders.includes(place))) setPlace('') }, [data, place, archivedN, folders.join('|')]) // eslint-disable-line react-hooks/exhaustive-deps
   const hits = useSearch(q, place === ':archived')
-  const [memory, setMemory] = useState(false)
   // Insights and People beside the list (a beta feature, insights.jsx). ⌘K opens either, through
   // the tab kept here and bridge-meetings-tab for a list already open.
   const insightsOn = useTrial('meeting-insights')
@@ -250,11 +249,10 @@ export function MeetingsHome({ onOpen }) {
             ))}
           </div>
         )}
-        <button type="button" className="btn small" onClick={() => setMemory(true)} title={t("The names and terms in your meetings: how they're spelled, how they get misheard, who they are")}><Icon name="book" size={13} /> {t('Memory')}</button>
+        <button type="button" className="btn small" onClick={openMemory} title={t('People, organizations and words from your meetings and dictations')}><Icon name="book" size={13} /> {t('Memory')}</button>
         {!m?.rec && <button type="button" className="btn small primary" onClick={() => go({})}><Icon name="mic" size={13} /> {t('Start recording')}</button>}
       </PaneHeader>
     <div className="mt-home">
-      {memory && <MemoryPanel onClose={() => setMemory(false)} />}
       {autoOn && insightsOn && <InsightsOn n={autoOn.meetings} onShow={() => { setTab('insights'); setPerson(null) }} />}
       {tab === 'insights' && <InsightsView onPerson={(pid) => { setTab('people'); setPerson(pid) }} onOpen={onOpen} onPeople={() => { setTab('people'); setPerson(null) }} />}
       {tab === 'people' && <PeopleView onOpen={onOpen} person={person} setPerson={setPerson} />}
@@ -533,7 +531,7 @@ export function MeetingPage({ id, onBack }) {
   const [menu, setMenu] = useState(false)
   const [fix, setFix] = useState(null) // { from } while fixing a word
   const [sel, setSel] = useState(null) // { text, top, left }: words picked in the transcript
-  const [dialog, setDialog] = useState(null) // 'again' | 'memory' | 'delete' | 'folder'
+  const [dialog, setDialog] = useState(null) // 'again' | 'calendar' | 'delete' | 'folder'
   const [whoAt, setWhoAt] = useState(null) // { x, y, l }: the menu for who said a line
   const [naming, setNaming] = useState(null) // { l, name }: a name typed for a line
   const [events, setEvents] = useState(null) // calendar events around when it was recorded
@@ -875,7 +873,7 @@ export function MeetingPage({ id, onBack }) {
           done && lines.length > 0 && { icon: 'sparkle', label: data.cleanedAt ? t('Clean up the transcript again') : t('Clean up the transcript'), run: cleanUp },
           done && data.cleanedAt && { icon: 'undo', label: t('Undo the cleanup'), run: uncleanAll },
           data.pending > 0 && { icon: 'refresh', label: t('Transcribe the missed parts again'), run: () => act('retry', () => api(`/meetings/${encodeURIComponent(id)}/retry`, { method: 'POST' })) },
-          { icon: 'book', label: t('Meeting memory'), run: () => setDialog('memory') },
+          { icon: 'book', label: t('Open Memory'), run: openMemory },
           heard && { icon: 'users', label: t('Work out who said each line'), run: nameAll },
           canTell && { icon: 'users', label: voiced ? t('Work out who each voice is') : t('Tell the voices apart'), run: voiced ? nameAll : tellVoices },
           '-',
@@ -1026,7 +1024,6 @@ export function MeetingPage({ id, onBack }) {
         {(lines.length > 0 || data.summary) && <AskPanel key={id} path={`/meetings/${encodeURIComponent(id)}/ask`} placeholder={t('Ask about this meeting')} suggestions={done ? ASK_ONE : []} />}
         {fix && <FixWord id={id} from={fix.from} onClose={() => setFix(null)} onDone={(t) => { setMsg({ text: t }); refresh() }} />}
         {dialog === 'again' && <TranscribeAgain ids={[id]} onClose={() => setDialog(null)} onDone={(t) => { setMsg({ text: t }); refresh() }} />}
-        {dialog === 'memory' && <MemoryPanel onClose={() => { setDialog(null); refresh() }} />}
         {dialog === 'calendar' && (
           <Dialog title={t('Your calendar')} onClose={() => setDialog(null)}>
             <PermissionFix pane="calendars" onCheck={() => { setCalAgain((n) => n + 1); refetch('/calendar') }}><p className="small">{t('With your calendar, a meeting takes its name and people from its invite as it starts recording, so the transcript can say who said what. Your events stay on this Mac.')}</p></PermissionFix>

@@ -179,7 +179,7 @@ export default function Dictation() {
           {/* Picked on another computer, and pasting can't work on this one: said once here. */}
           {pasting && status && !paste && <p className="st-note"><Icon name="info" size={13} /> {t('Pasting where you\'re typing can\'t work on this computer, so what you say goes to the agent you looked at last.')}</p>}
           <label className="st-check"><input type="checkbox" checked={d.cleanup !== false} onChange={(e) => set({ cleanup: e.target.checked })} />
-            <span><b>{t('Light cleanup')}</b> <span className="muted small">{t('Drops "um" and "uh" and words said twice, starts with a capital and ends with a full stop, and spells the names of your agents, projects, branches and meeting memory the way they\'re written. No AI model, nothing sent anywhere.')}</span></span></label>
+            <span><b>{t('Light cleanup')}</b> <span className="muted small">{t('Drops "um" and "uh" and words said twice, starts with a capital and ends with a full stop, and spells the names of your agents, projects and branches, and the names in Memory, the way they\'re written. No AI model, nothing sent anywhere.')}</span></span></label>
           <label className="st-check"><input type="checkbox" checked={d.atFiles !== false} onChange={(e) => set({ atFiles: e.target.checked })} />
             <span><b>{t('Mention files by saying them')}</b> <span className="muted small">{t('"at payments dot ts" becomes @payments.ts in the message box.')}</span></span></label>
           {/* Shown where a speech model sherpa-onnx runs is picked (Parakeet): hidden with Whisper or

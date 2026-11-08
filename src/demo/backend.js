@@ -582,6 +582,22 @@ export function createDemo({ everything = true } = {}) {
   on('POST', '/meetings/memory', () => needs('Changing meeting memory'))
   on('PATCH', '/meetings/memory/:tid', () => needs('Changing meeting memory'))
   on('DELETE', '/meetings/memory/:tid', () => needs('Changing meeting memory'))
+  // Memory's page: the same names in its collections, with the demo's meetings, and About You.
+  on('GET', '/memory', () => {
+    const at = (id) => S.meetings.find((m) => m.id === id)
+    const seen = Object.fromEntries(['demo-launch', 'demo-1on1'].filter(at).map((id) => [id, { title: at(id).title, startedAt: at(id).startedAt, series: null }]))
+    const ids = Object.keys(seen)
+    const terms = [
+      { id: 'm1', term: 'Acme', kind: 'org', heard: ['Ack me'], also: [], note: 'our company', source: 'you', seen: 6, meetings: ids, dictations: [], updatedAt: null, guessed: false },
+      { id: 'm2', term: 'Priya', kind: 'person', heard: [], also: [], note: 'checkout lead', source: 'learned', seen: 3, meetings: ids.slice(0, 1), dictations: [], updatedAt: null, guessed: false },
+      { id: 'm4', term: 'Dana', kind: 'person', heard: [], also: [], note: 'my manager', source: 'learned', seen: 2, meetings: ids.slice(1), dictations: [], updatedAt: null, guessed: true },
+      { id: 'm3', term: 'billing-api', kind: 'project', heard: ['billing API'], also: [], note: '', source: 'learned', seen: 2, meetings: ids.slice(0, 1), dictations: [], updatedAt: null, guessed: true },
+    ]
+    const text = `${S.cfg.name ? `I'm ${S.cfg.name}, at Acme.` : 'I work at Acme.'}\nWhat I work on: billing-api.\nThe people I deal with most: Priya (checkout lead), Dana (my manager).`
+    return { terms, meetings: seen, dictations: {}, people: null, insights: false, me: S.cfg.name || null, dictationsKept: true, same: [], little: [], aboutYou: { text, draft: text, yours: false, on: true, at: null } }
+  })
+  on('POST', '/memory/:what', () => needs('Changing memory'))
+  on('POST', '/memory/people/keep', () => needs('Changing memory'))
   on('GET', '/meetings/saving', () => ({ folder: `${HOME}/Documents/Meeting notes`, noteSub: '{year}/{month}/{day}', noteName: '{title}-summary', transcriptFolder: `${HOME}/Documents/Meeting notes`, transcriptSub: '{year}/{month}/{day}', transcriptName: '{title}-transcript', what: 'both', frontmatter: true, you: 'You', them: 'Them', keep: true, example: [`${HOME}/Documents/Meeting notes/2026/10/26/Weekly sync-summary.md`, `${HOME}/Documents/Meeting notes/2026/10/26/Weekly sync-transcript.md`], misplaced: 0 }))
   on('POST', '/meetings/move-saved', () => needs('Moving saved notes'))
   on('POST', '/meetings/:id/note', () => needs('Adding to a meeting\'s notes'))
