@@ -656,7 +656,7 @@ try {
     ok(!Object.keys(f).length && await ph.p.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), `phone ${width}: a document fits, its toolbar wrapping rather than scrolling sideways, each button a whole 40 px target`, f)
     await shot(ph.p, `${tag}studio-phone-${width}`)
     // Focus on a phone: the app's top bar and tabs out of sight too, each control still a whole target.
-    await ph.p.locator('.sd-file .pane-head .sd-focus-btn').click()
+    await ph.p.locator('.sd-status .sd-focus-narrow').click()
     const phoneWhole = await until(() => wholeWindow(ph.p), 3000, 100)
     await sleep(300)
     f = await phoneFaults(ph.p, '.sd-file')
@@ -680,7 +680,10 @@ try {
     await ph.p.evaluate(({ root }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: 'budget.xlsx' } })), { root })
     ok(!!(await until(async () => (await ph.p.locator('.sd-univer canvas').count()) > 0 && /Budget/.test(await ph.p.locator('.sd-univer').innerText().catch(() => '')), 30000)), `phone ${width}: a sheet opens, with its tabs`)
     await sleep(600)
-    ok(await ph.p.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), `phone ${width}: the sheet fits the screen`)
+    // (Its page as wide as the screen too, whatever its header holds: a name and its buttons once
+    // made it wider, and Ask AI with it.)
+    const sheetFits = await ph.p.evaluate(() => ({ doc: document.documentElement.scrollWidth, file: Math.round(document.querySelector('.sd-file').getBoundingClientRect().right), head: Math.round(document.querySelector('.sd-file .pane-head').getBoundingClientRect().right), w: innerWidth }))
+    ok(sheetFits.doc <= sheetFits.w + 1 && sheetFits.file <= sheetFits.w && sheetFits.head <= sheetFits.w, `phone ${width}: the sheet fits the screen, its page and header too`, sheetFits)
     await shot(ph.p, `${tag}studio-sheet-phone-${width}`)
     await ph.p.locator('.pane-head button[aria-label="Ask an agent"]').click()
     await ph.p.locator('.sh-ask textarea').waitFor({ timeout: 5000 })

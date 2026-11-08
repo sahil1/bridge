@@ -514,6 +514,7 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
   const openTip = !HERE ? t("It opens on the computer it's on") : opener ? t('Open it in {app} on this computer. Studio keeps watching it and shows what you save there.', { app: opener.name }) : t('Open it in its usual app on this computer. Studio keeps watching it and shows what you save there.')
   const openBtn = (cls, size) => meta && (opener || usual) && <button type="button" className={cls} onClick={openIn} title={openTip} aria-label={opener ? openName : t('Open in its usual app')}><Icon name="external" size={size} /> <span className="sd-btn-label">{openName}</span></button>
   const leaveTip = t('Leave Focus (Esc or {key})', { key: keys('mod', '.') })
+  const focusTip = withKeys(t('Focus: the page alone, in the whole window'), 'mod', 'alt', 'f')
   return (
     <div className={`sd-file${focus.on ? ' focus sd-focus' : ''}`} data-esc={focus.on ? '' : undefined}>
       {/* In Focus, Studio's header folds away (on a Mac's desktop app, out of full screen, a strip
@@ -530,7 +531,7 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
           {openBtn('btn small sd-head-btn sd-open-in', 12)}
           <button type="button" className={`win-btn${panel === 'versions' ? ' on' : ''}`} onClick={() => setPanel(panel === 'versions' ? null : 'versions')} aria-pressed={panel === 'versions'} title={t('Versions: yours, your agents\' and changes from outside')} aria-label={t('Versions')} disabled={!meta}><Icon name="clock" size={14} /></button>
           <a className="win-btn" href={rawUrl(f)} download={name} title={t('Download {name}', { name })} aria-label={t('Download')}><Icon name="download" size={14} /></a>
-          <button type="button" className="win-btn sd-focus-btn" onClick={focus.enter} disabled={!meta} title={withKeys(t('Focus: the page alone, in the whole window'), 'alt', 'mod', 'f')} aria-label={t('Focus')}><Icon name="focus" size={14} /></button>
+          <button type="button" className="win-btn sd-focus-btn" onClick={focus.enter} disabled={!meta} title={focusTip} aria-label={t('Focus')}><Icon name="focus" size={14} /></button>
         </PaneHeader>
       )}
       {note && (
@@ -563,15 +564,16 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
         {panel === 'versions' && meta && <Versions f={f} ext={meta.ext} versions={meta.versions} onRestore={restore} onClose={() => setPanel(null)} />}
       </div>
       {/* The status line: what the editor counts, what kind of file it is (tapped: what saving keeps),
-          how many versions are kept, and whether it's saved. On a phone, Open in its app here (the
-          header has no room). In Focus, Save (for a kind that doesn't save itself), full screen and
+          how many versions are kept, and whether it's saved. On a phone, Open in its app and Focus here
+          (the header has no room), and the kind as its icon (the header says it). In Focus, Save (for a kind that doesn't save itself), full screen and
           the way out. */}
       {meta && (
         <footer className="sd-status">
           {stats && (stats.open ? <button type="button" className="sd-status-btn sd-stat" title={stats.title || undefined} onClick={stats.open}>{stats.text}</button> : <span className="sd-stat" title={stats.title || undefined}>{stats.text}</span>)}
-          <button type="button" className={`sd-status-btn sd-kind-btn${note?.keeps ? ' on' : ''}`} onClick={() => setNote(note?.keeps ? null : { text: keepsOf(kind, meta.ext), info: true, keeps: true })} aria-pressed={!!note?.keeps} title={t('What saving keeps')}><Icon name="info" size={12} /> {kindName(kind, meta.ext)}</button>
+          <button type="button" className={`sd-status-btn sd-kind-btn${note?.keeps ? ' on' : ''}`} onClick={() => setNote(note?.keeps ? null : { text: keepsOf(kind, meta.ext), info: true, keeps: true })} aria-pressed={!!note?.keeps} title={t('What saving keeps')} aria-label={t('{kind}: what saving keeps', { kind: kindName(kind, meta.ext) })}><Icon name="info" size={12} /> <span className="sd-btn-label">{kindName(kind, meta.ext)}</span></button>
           <button type="button" className="sd-status-btn vers" onClick={() => setPanel(panel === 'versions' ? null : 'versions')} title={t('Versions: yours, your agents\' and changes from outside')}><Icon name="clock" size={12} /> {versions === 1 ? t('1 version') : t('{n} versions', { n: versions })}</button>
           {openBtn('sd-status-btn sd-open-in-narrow', 12)}
+          {!focus.on && <button type="button" className="sd-status-btn sd-focus-narrow" onClick={focus.enter} title={focusTip} aria-label={t('Focus')}><Icon name="focus" size={12} /></button>}
           <span className="sd-grow" />
           <span className={`sd-state ${state.cls}`} title={meta.mtime ? t('The file last changed {when}', { when: when(meta.mtime) }) : undefined}><i aria-hidden="true" />{state.text}</span>
           {focus.on && <>

@@ -208,10 +208,13 @@ try {
   ok(JSON.stringify(await studioApps.look({ platform: 'win32', env: { ...process.env, BRIDGE_REG: path.join(unit, 'nothing.cjs') } })) === '{}', 'Windows: no registry to ask, no app')
   const unitBin = path.join(unit, 'bin')
   fs.mkdirSync(unitBin, { recursive: true })
-  const lo = path.join(unitBin, process.platform === 'win32' ? 'libreoffice.cmd' : 'libreoffice')
-  fs.writeFileSync(lo, process.platform === 'win32' ? '@echo off\r\n' : '#!/bin/sh\n', { mode: 0o755 })
+  // Named as Linux has it (no .cmd, whatever system this is), and soffice.cmd beside it, which
+  // Linux wouldn't run.
+  const lo = path.join(unitBin, 'libreoffice')
+  fs.writeFileSync(lo, '#!/bin/sh\n', { mode: 0o755 })
+  fs.writeFileSync(path.join(unitBin, 'soffice.cmd'), '@echo off\r\n', { mode: 0o755 })
   const onLinux = await studioApps.look({ platform: 'linux', PATH: [path.join(unit, 'none'), unitBin].join(path.delimiter) })
-  ok(onLinux.libreoffice === lo && JSON.stringify(await studioApps.look({ platform: 'linux', PATH: path.join(unit, 'none') })) === '{}', 'Linux: LibreOffice on the PATH (as libreoffice), and none without it', onLinux)
+  ok(onLinux.libreoffice === lo && JSON.stringify(await studioApps.look({ platform: 'linux', PATH: path.join(unit, 'none') })) === '{}', 'Linux: LibreOffice on the PATH (as libreoffice, not a soffice.cmd), and none without it', onLinux)
   fs.mkdirSync(path.join(unit, 'Apps', 'Pages.app'), { recursive: true })
   fs.mkdirSync(path.join(unit, 'Apps', 'iWork', 'Numbers.app'), { recursive: true })
   const spotSaid = '/Applications/iWork/Numbers.app   kMDItemCFBundleIdentifier = com.apple.iWork.Numbers\n/Volumes/Backup/.Trashes/501/Keynote.app   kMDItemCFBundleIdentifier = com.apple.iWork.Keynote\n/Applications/Big.app/Contents/Microsoft Word.app   kMDItemCFBundleIdentifier = com.microsoft.Word\n'

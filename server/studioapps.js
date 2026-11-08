@@ -11,11 +11,12 @@
 // itself (open -a on a Mac, its program elsewhere), only on this computer and only for a kind of
 // file it opens. Studio keeps watching the file, so what you save there comes back to Studio as a
 // change from outside.
+import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { execFile, spawn } from 'node:child_process'
 import { HOME, NODE } from './paths.js'
-import { loginPath, which } from './agents.js'
+import { loginPath } from './agents.js'
 
 // Studio's kinds each app opens, in the order they're offered: Microsoft's, then Apple's, then
 // LibreOffice. A Markdown file, a page or a PDF opens in its usual app instead.
@@ -105,9 +106,19 @@ async function onWindows({ env }) {
 }
 
 // ---------- Linux ----------
+// A program on the PATH as Linux finds one: a file of that very name that runs (no Windows-style
+// .exe or .cmd after it, also when a test looks as Linux on another system).
+async function onPath(bin, PATH) {
+  for (const dir of String(PATH || '').split(path.delimiter)) {
+    if (!dir) continue
+    const p = path.join(dir, bin)
+    try { if ((await fsp.stat(p)).isFile()) { await fsp.access(p, fs.constants.X_OK); return p } } catch { /* not here */ }
+  }
+  return null
+}
 async function onLinux({ PATH }) {
   for (const b of APPS.find((a) => a.id === 'libreoffice').bins) {
-    const p = await which(b, PATH)
+    const p = await onPath(b, PATH)
     if (p) return { libreoffice: p }
   }
   return {}
