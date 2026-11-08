@@ -85,7 +85,7 @@ export default function Marks({ pdf, layout, marks, setMarks, picked, setPicked,
         change(m.id, (x) => ({ x: Math.max(page[0], Math.min(page[2] - x.w, x.x + d[0])), y: Math.max(page[1], Math.min(page[3] - x.h, x.y + d[1])), field: null, moved: true }))
       } else if (e.key === 'Enter') { e.preventDefault(); onApprove(m.id) }
       else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); remove(m.id) }
-      else if (e.key === 'Escape') setPicked(null)
+      else if (e.key === 'Escape') { e.preventDefault(); setPicked(null) }
     }
     window.addEventListener('keydown', key)
     return () => window.removeEventListener('keydown', key)

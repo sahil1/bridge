@@ -98,6 +98,31 @@
 .sd-state.busy > i { background: var(--accent); opacity: 1; }
 .sd-state.bad { color: var(--critical); }
 .sd-state.bad > i { background: var(--critical); opacity: 1; }
+/* Open in its app: in the header on a computer, in the status line in the phone layout (the
+   header has no room there). */
+.sd-open-in-narrow { display: none; }
+.app.narrow .sd-open-in-narrow { display: inline-flex; }
+.app.narrow .sd-file .sd-open-in { display: none; }
+
+/* Focus (focus.js): the file's page over the whole window, the app's sidebar, top bar and tabs and
+   Studio's header out of sight. The editor's toolbar a little tighter, the page in the middle as
+   each editor has it, and the status line as ever (saving, a change from elsewhere and notes all
+   show), with Save, full screen and the way out at its end. Sized by the window, not the pane it
+   came from, so what gives way for room does so by the window. Under the app's dialogs and
+   menus (Settings, ⌘K), which open over it. */
+.sd-file.focus { position: fixed; inset: 0; z-index: 90; height: auto; container-type: inline-size; }
+.sd-file.focus .sd-toolbar { min-height: 38px; padding-top: 3px; padding-bottom: 3px; }
+.sd-file.focus .sd-status { padding-right: 6px; }
+.sd-focus-leave { color: var(--ink-2); }
+.sd-focus-save { color: var(--accent); font-weight: 600; }
+/* A Mac's desktop app out of full screen: a title strip for the window's buttons, to move it by. */
+.sd-focus-title { display: flex; align-items: center; justify-content: center; height: 30px; min-width: 0; padding: 0 84px; border-bottom: 1px solid var(--line); background: var(--pane); color: var(--ink-2); font: 500 12.5px var(--font); -webkit-app-region: drag; user-select: none; }
+.sd-focus-title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* On a phone: clear of the notch and the home bar, the status line's words left to its icons. */
+.app.narrow .sd-file.focus { padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+.app.narrow .sd-status .sd-btn-label { display: none; }
+.app.narrow .sd-status :is(.sd-open-in-narrow, .sd-focus-save, .sd-focus-full, .sd-focus-leave) { min-width: 40px; justify-content: center; gap: 0; }
+.app.narrow .sd-file.focus .sd-status .sd-kind-btn { display: none; }
 
 /* A toolbar over an editor: groups of buttons, each group set off by a line. */
 .sd-toolbar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-height: 42px; padding: 6px 12px; border-bottom: 1px solid var(--line); background: var(--pane); }

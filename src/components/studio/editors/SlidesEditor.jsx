@@ -922,7 +922,8 @@ function Slides({ doc, file, onDirty, onStats, handle, readOnly = false, onOpen 
       if (mod) return
       if (s.length && (e.key === 'Delete' || e.key === 'Backspace')) { e.preventDefault(); removeSel(); return }
       if (s.length && e.key.startsWith('Arrow')) { e.preventDefault(); const n = e.shiftKey ? 1 : 8; nudge(e.key === 'ArrowLeft' ? -n : e.key === 'ArrowRight' ? n : 0, e.key === 'ArrowUp' ? -n : e.key === 'ArrowDown' ? n : 0); return }
-      if (e.key === 'Escape') { if (crop != null) setCrop(null); else setSel([]); return }
+      // Esc lets go of the crop, then of what's picked; with nothing picked it's Focus's (focus.js).
+      if (e.key === 'Escape') { if (crop != null || s.length) e.preventDefault(); if (crop != null) setCrop(null); else setSel([]); return }
       if (e.key === 'Tab' && viewOf(slidesRef.current[curRef.current]).objs.length) { e.preventDefault(); const all = viewOf(slidesRef.current[curRef.current]).objs.map((o) => o.at); const i = all.indexOf(s[0]); setSel([all[(i + (e.shiftKey ? -1 : 1) + all.length) % all.length]]); return }
       if (e.key === 'Enter' && s.length === 1) { e.preventDefault(); startEdit(s[0], { start: { all: true } }); return }
       // A letter typed with a shape picked goes in its words.

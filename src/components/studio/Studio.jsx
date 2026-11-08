@@ -1,15 +1,16 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Icon from '../Icon.jsx'
-import { api, usePoll, useFleet } from '../../api.js'
+import { api, usePoll, useFleet, onThisComputer } from '../../api.js'
 import { PaneHeader, useMedia, store } from '../layout.jsx'
 import { WhiteboardPage } from '../../lazy.jsx'
-import { Menu } from '../FileExtras.jsx'
+import { Menu, fileOp } from '../FileExtras.jsx'
 import { t, tx, locale } from '../../i18n/index.js'
 import { openFile, bytesOf, rawUrl, versionUrl, saveFile, changedSince, restoreVersion, base64, extOf } from './files.js'
 import { useDesignPacks, PacksSection, packFor } from './packs.jsx'
 import { lineDiff, textFor, comparable } from './diff.js'
 import { fontCss, lookOfPack } from './look.js'
-import { withKeys } from './keys.js'
+import { withKeys, keys } from './keys.js'
+import { useFocus, canFullScreen } from './focus.js'
 import { useBusy } from '../../busy.js'
 import { useTrial } from '../../trials.js'
 import { YourFiles } from './HomeFiles.jsx'
@@ -267,6 +268,23 @@ const keepsOf = (kind, ext) => {
   return t(KEEPS[{ '.markdown': '.md', '.htm': '.html' }[ext] || ext] || KEEPS['.txt'])
 }
 
+// Open in Word (Excel, PowerPoint; else Pages, Numbers or Keynote; else LibreOffice) where the
+// computer the file is on has it (server/studioapps.js, which looks once), else in its usual app
+// for a kind that has one (server/files.js openDefault). Either opens it on that computer, so only
+// from a window there: elsewhere (a phone, another computer's window) it says so. The apps are
+// asked for again in a moment while that computer is still looking.
+const USUAL = new Set(['.pdf', '.docx', '.pptx', '.xlsx', '.xlsm', '.csv', '.tsv', '.txt', '.md'])
+const HERE = typeof window !== 'undefined' && onThisComputer()
+function useApps() {
+  const [soon, setSoon] = useState(true)
+  const { data } = usePoll('/studio/apps', soon ? 1500 : 30 * 60_000)
+  useEffect(() => { if (data?.looked) setSoon(false) }, [data])
+  return data?.apps || {}
+}
+// The desktop app on a Mac draws its window's buttons over the page's top left corner: in Focus,
+// out of full screen, a strip of its own for them, which moves the window as a title bar does.
+const MAC_APP = typeof window !== 'undefined' && !!window.bridgeApp?.desktop && window.bridgeApp.platform === 'darwin'
+
 // Preview: a file in its own editor, or a whiteboard (root board, its name as the path) on
 // Whiteboards' own page.
 export function StudioPage(props) {
@@ -442,6 +460,25 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
   // doesn't update by itself meanwhile (busy.js).
   useEffect(() => { if (!dirty) return; const q = (e) => { e.preventDefault(); e.returnValue = '' }; window.addEventListener('beforeunload', q); return () => window.removeEventListener('beforeunload', q) }, [dirty])
   useBusy('studio', dirty)
+  // Focus (focus.js): the page alone in the whole window, kept for each kind of editor.
+  const focus = useFocus(meta?.kind, { onRefused: () => setNote({ text: t("This browser didn't let the page go full screen. Focus still gives it the whole window."), info: true }) })
+  const apps = useApps()
+  const opener = meta ? apps[meta.ext] || null : null
+  const usual = !!meta && !opener && USUAL.has(meta.ext)
+  const openIn = async () => {
+    const app = opener?.name
+    if (!HERE) { setNote({ text: app ? t("{app} opens it on the computer it's on: open it there, in Bridge AI on that computer.", { app }) : t("Its app opens it on the computer it's on: open it there, in Bridge AI on that computer."), info: true }); return }
+    // What's changed here goes into the file first, so the app opens it as it is now. A save that
+    // can't be made says why, and it isn't opened.
+    if (dirtyRef.current && !READ_ONLY(meta.kind)) { await save(); if (dirtyRef.current || conflictRef.current) return }
+    try {
+      const r = opener ? await api('/studio/open-in', { method: 'POST', body: f }) : await fileOp(root, 'open', rel)
+      // Looked at every few seconds while it may be changed there (and at once on coming back), so
+      // what's saved there shows here as a change from outside, never saved over.
+      quick.current = Math.max(quick.current, Date.now() + 30 * 60_000)
+      setNote({ text: opener ? t('Opening it in {app}. What you save there shows here.', { app: r?.app || app }) : t('Opening it in its usual app. What you save there shows here.'), brief: true })
+    } catch (e) { setNote({ text: app ? t("Couldn't open it in {app}: {error}", { app, error: e.message }) : t("Couldn't open it in its app: {error}", { error: e.message }), bad: true }) }
+  }
   const restore = async (id) => {
     if (dirty && !window.confirm(t('Put this version back? Your unsaved changes here are lost (what\'s in the file now is kept as a version).'))) return
     writing.current++
@@ -473,23 +510,33 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
   const opening = <div className="sd-empty sd-loading" role="status"><Icon name="refresh" size={16} className="spin" /><span className="muted">{t('Opening {name}…', { name })}</span></div>
   const versions = meta?.versions?.length || 0
   const state = saving ? { text: t('Saving…'), cls: 'busy' } : note?.error ? { text: t("Couldn't save"), cls: 'bad' } : conflict ? { text: t('Changed elsewhere'), cls: 'bad' } : dirty ? { text: t('Unsaved changes'), cls: 'dirty' } : readOnly ? { text: t('Read only'), cls: '' } : { text: t('Saved'), cls: 'ok' }
+  const openName = opener ? t('Open in {app}', { app: opener.name }) : t('Open in app')
+  const openTip = !HERE ? t("It opens on the computer it's on") : opener ? t('Open it in {app} on this computer. Studio keeps watching it and shows what you save there.', { app: opener.name }) : t('Open it in its usual app on this computer. Studio keeps watching it and shows what you save there.')
+  const openBtn = (cls, size) => meta && (opener || usual) && <button type="button" className={cls} onClick={openIn} title={openTip} aria-label={opener ? openName : t('Open in its usual app')}><Icon name="external" size={size} /> <span className="sd-btn-label">{openName}</span></button>
+  const leaveTip = t('Leave Focus (Esc or {key})', { key: keys('mod', '.') })
   return (
-    <div className="sd-file">
-      <PaneHeader icon={ICON[kind] || 'layers'} title={name} leading={back(ICON[kind] || 'layers')}
-        subtitle={<>
-          <span className="sd-sub-kind">{meta ? `${kindName(kind, meta.ext)} · ${sizeOf(meta.size)}` : t('Opening…')}</span>
-          {at && <span className="path-chip sd-sub-where" title={`${at.label} · ${at.full}`}><Icon name="folder" size={10} /> <span>{at.path}</span></span>}
-        </>}>
-        {tabs}
-        {kind && !readOnly && <button type="button" className={`btn small sd-head-btn${dirty ? ' primary' : ''}`} onClick={() => save()} disabled={saving || !dirty} title={withKeys(dirty ? t('Save') : t('Saved: nothing new to save'), 'mod', 's')} aria-label={saving ? t('Saving…') : dirty ? t('Save') : t('Saved')}><Icon name="check" size={12} /> <span className="sd-btn-label">{saving ? t('Saving…') : dirty ? t('Save') : t('Saved')}</span></button>}
-        <button type="button" className="btn small sd-head-btn" onClick={() => (handle.current?.ask ? handle.current.ask() : setAsk({ selection: handle.current?.selection?.() || null }))} disabled={!meta} title={t('Have one of your agents change it: pick the part first, or describe it')} aria-label={t('Ask an agent')}><Icon name="sparkle" size={12} /> <span className="sd-btn-label">{t('Ask an agent')}</span></button>
-        <button type="button" className={`win-btn${panel === 'versions' ? ' on' : ''}`} onClick={() => setPanel(panel === 'versions' ? null : 'versions')} aria-pressed={panel === 'versions'} title={t('Versions: yours, your agents\' and changes from outside')} aria-label={t('Versions')} disabled={!meta}><Icon name="clock" size={14} /></button>
-        <a className="win-btn" href={rawUrl(f)} download={name} title={t('Download {name}', { name })} aria-label={t('Download')}><Icon name="download" size={14} /></a>
-      </PaneHeader>
+    <div className={`sd-file${focus.on ? ' focus sd-focus' : ''}`} data-esc={focus.on ? '' : undefined}>
+      {/* In Focus, Studio's header folds away (on a Mac's desktop app, out of full screen, a strip
+          for the window's buttons instead). */}
+      {focus.on ? MAC_APP && !focus.full && <div className="sd-focus-title" title={name}><span>{name}</span></div> : (
+        <PaneHeader icon={ICON[kind] || 'layers'} title={name} leading={back(ICON[kind] || 'layers')}
+          subtitle={<>
+            <span className="sd-sub-kind">{meta ? `${kindName(kind, meta.ext)} · ${sizeOf(meta.size)}` : t('Opening…')}</span>
+            {at && <span className="path-chip sd-sub-where" title={`${at.label} · ${at.full}`}><Icon name="folder" size={10} /> <span>{at.path}</span></span>}
+          </>}>
+          {tabs}
+          {kind && !readOnly && <button type="button" className={`btn small sd-head-btn${dirty ? ' primary' : ''}`} onClick={() => save()} disabled={saving || !dirty} title={withKeys(dirty ? t('Save') : t('Saved: nothing new to save'), 'mod', 's')} aria-label={saving ? t('Saving…') : dirty ? t('Save') : t('Saved')}><Icon name="check" size={12} /> <span className="sd-btn-label">{saving ? t('Saving…') : dirty ? t('Save') : t('Saved')}</span></button>}
+          <button type="button" className="btn small sd-head-btn" onClick={() => (handle.current?.ask ? handle.current.ask() : setAsk({ selection: handle.current?.selection?.() || null }))} disabled={!meta} title={t('Have one of your agents change it: pick the part first, or describe it')} aria-label={t('Ask an agent')}><Icon name="sparkle" size={12} /> <span className="sd-btn-label">{t('Ask an agent')}</span></button>
+          {openBtn('btn small sd-head-btn sd-open-in', 12)}
+          <button type="button" className={`win-btn${panel === 'versions' ? ' on' : ''}`} onClick={() => setPanel(panel === 'versions' ? null : 'versions')} aria-pressed={panel === 'versions'} title={t('Versions: yours, your agents\' and changes from outside')} aria-label={t('Versions')} disabled={!meta}><Icon name="clock" size={14} /></button>
+          <a className="win-btn" href={rawUrl(f)} download={name} title={t('Download {name}', { name })} aria-label={t('Download')}><Icon name="download" size={14} /></a>
+          <button type="button" className="win-btn sd-focus-btn" onClick={focus.enter} disabled={!meta} title={withKeys(t('Focus: the page alone, in the whole window'), 'alt', 'mod', 'f')} aria-label={t('Focus')}><Icon name="focus" size={14} /></button>
+        </PaneHeader>
+      )}
       {note && (
-        <div className={`sd-bar sd-note-bar${note.error ? ' bad' : ''}`} role={note.error ? 'alert' : 'status'}>
+        <div className={`sd-bar sd-note-bar${note.error || note.bad ? ' bad' : ''}`} role={note.error || note.bad ? 'alert' : 'status'}>
           {note.info && <Icon name="info" size={13} />}
-          {note.error && <Icon name="alert" size={13} />}
+          {(note.error || note.bad) && <Icon name="alert" size={13} />}
           <span>{note.text}</span>
           <button type="button" className="win-btn" onClick={() => setNote(null)} aria-label={t('Close')} title={t('Close')}><Icon name="x" size={12} /></button>
         </div>
@@ -516,14 +563,22 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
         {panel === 'versions' && meta && <Versions f={f} ext={meta.ext} versions={meta.versions} onRestore={restore} onClose={() => setPanel(null)} />}
       </div>
       {/* The status line: what the editor counts, what kind of file it is (tapped: what saving keeps),
-          how many versions are kept, and whether it's saved. */}
+          how many versions are kept, and whether it's saved. On a phone, Open in its app here (the
+          header has no room). In Focus, Save (for a kind that doesn't save itself), full screen and
+          the way out. */}
       {meta && (
         <footer className="sd-status">
           {stats && (stats.open ? <button type="button" className="sd-status-btn sd-stat" title={stats.title || undefined} onClick={stats.open}>{stats.text}</button> : <span className="sd-stat" title={stats.title || undefined}>{stats.text}</span>)}
-          <button type="button" className={`sd-status-btn${note?.info ? ' on' : ''}`} onClick={() => setNote(note?.info ? null : { text: keepsOf(kind, meta.ext), info: true })} aria-pressed={!!note?.info} title={t('What saving keeps')}><Icon name="info" size={12} /> {kindName(kind, meta.ext)}</button>
+          <button type="button" className={`sd-status-btn sd-kind-btn${note?.keeps ? ' on' : ''}`} onClick={() => setNote(note?.keeps ? null : { text: keepsOf(kind, meta.ext), info: true, keeps: true })} aria-pressed={!!note?.keeps} title={t('What saving keeps')}><Icon name="info" size={12} /> {kindName(kind, meta.ext)}</button>
           <button type="button" className="sd-status-btn vers" onClick={() => setPanel(panel === 'versions' ? null : 'versions')} title={t('Versions: yours, your agents\' and changes from outside')}><Icon name="clock" size={12} /> {versions === 1 ? t('1 version') : t('{n} versions', { n: versions })}</button>
+          {openBtn('sd-status-btn sd-open-in-narrow', 12)}
           <span className="sd-grow" />
           <span className={`sd-state ${state.cls}`} title={meta.mtime ? t('The file last changed {when}', { when: when(meta.mtime) }) : undefined}><i aria-hidden="true" />{state.text}</span>
+          {focus.on && <>
+            {dirty && !readOnly && !SAVES_ITSELF.has(kind) && <button type="button" className="sd-status-btn sd-focus-save" onClick={() => save()} disabled={saving} title={withKeys(t('Save'), 'mod', 's')} aria-label={t('Save')}><Icon name="check" size={12} /> <span className="sd-btn-label">{t('Save')}</span></button>}
+            {canFullScreen() && <button type="button" className={`sd-status-btn sd-focus-full${focus.full ? ' on' : ''}`} onClick={focus.toggleFull} aria-pressed={focus.full} title={focus.full ? t('Out of full screen, still in Focus') : t('Full screen')} aria-label={t('Full screen')}><Icon name={focus.full ? 'shrink' : 'maximize'} size={12} /> <span className="sd-btn-label">{t('Full screen')}</span></button>}
+            <button type="button" className="sd-status-btn sd-focus-leave" onClick={focus.leave} title={leaveTip} aria-label={t('Leave Focus')}><Icon name="focus" size={12} /> <span className="sd-btn-label">{t('Leave Focus')}</span></button>
+          </>}
         </footer>
       )}
       {ask && <AskAgent f={f} meta={meta} selection={ask.selection} onClose={() => setAsk(null)} onSent={(r) => { setAsk(null); quick.current = Date.now() + 15 * 60_000; setNote({ text: r.queued ? t('Queued for {name}. Studio shows the change once it saves the file.', { name: r.name }) : t('Sent to {name}. Studio shows the change once it saves the file.', { name: r.name }) }) }} />}

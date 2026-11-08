@@ -9,7 +9,8 @@
 // drawn by pdf.js with thumbnails, its text to select, find with matches marked, pages and zoom;
 // Sign, step by step: what you're signing (and which model read it), a signature drawn on the pad,
 // the places found on their pages (the form's fields, the words next to a line), approved, and the
-// signed copy saved and opened; on a phone, all of it fitting.
+// signed copy saved and opened; in Focus, its pages with the whole window, still read only; on a
+// phone, all of it fitting.
 import fs from 'node:fs'
 import path from 'node:path'
 import zlib from 'node:zlib'
@@ -168,6 +169,15 @@ try {
   await p.locator('.sd-pdf-zoomsel').selectOption('page-width')
   ok(!!wide, 'zoom: 200% makes the page twice as wide (816 px at 100%)', wide)
   await shot(p, `${tag}studio-pdf-view`)
+  // In Focus: the whole window for its pages, still said to be read only; Esc leaves.
+  const viewW = () => p.locator('.sd-pdf-scroll').evaluate((e) => e.getBoundingClientRect().width)
+  const vw0 = await viewW()
+  await p.locator('.sd-file .pane-head .sd-focus-btn').click()
+  const pdfFocus = () => p.locator('.sd-file.focus').count().then((n) => n === 1)
+  ok(!!(await until(async () => (await pdfFocus()) && (await viewW()) > vw0 + 100, 5000, 100)) && /Read only/.test(await p.locator('.sd-file.focus .sd-status').innerText()), 'a PDF in Focus: its pages have the whole window, and it still says read only', { vw0, vw1: await viewW() })
+  await shot(p, `${tag}studio-pdf-focus`)
+  await p.keyboard.press('Escape')
+  ok(!!(await until(async () => !(await pdfFocus()), 3000, 100)), 'Esc: out of Focus')
   // ---------- Signature Assist ----------
   await p.locator('.sd-pdf-sign').click()
   await p.locator('.sd-sign').waitFor({ timeout: 10000 })

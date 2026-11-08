@@ -150,7 +150,13 @@ export async function startKit(name, { env = {}, config = {}, node = process.exe
     // Parakeet is a stand-in for sherpa-onnx's addon (stand-ins/sherpa.cjs), so no test loads one.
     BRIDGE_MODELS_URL: 'http://127.0.0.1:9',
     BRIDGE_SHERPA: path.join(TEST, 'stand-ins', 'sherpa.cjs'),
+    // Nor the computer's own apps, which Studio offers to open a file in (server/studioapps.js): a
+    // Mac's Applications folder is one of the kit's, and Windows' registry a stand-in that knows
+    // none (a test writes its own bin/reg.cjs to give some).
+    BRIDGE_APPLICATIONS: path.join(dir, 'Applications'),
+    BRIDGE_REG: path.join(bin, 'reg.cjs'),
   }
+  program('reg', '')
   // Nor the Mac's own call's-sound recorder (native/calltap, in a checkout that built it): a
   // stand-in instead (stand-ins/calltap.cjs, its loudness in bin/calltap.json). Only on a Mac, as
   // in the app: elsewhere a meeting records the mic only.

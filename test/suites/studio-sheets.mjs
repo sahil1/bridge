@@ -9,7 +9,8 @@
 // what's typed keeps no colour of its own, and a word added to a cell keeps it plain text; a
 // formula's error says why when its cell is picked; Insert › Chart of the cells picked, its kind and title
 // changed beside the sheet, saved as Excel's own chart; the status line counting a sheet added;
-// light and dark; no page errors.
+// Focus keeping the sheet's keys (Esc ends a cell's typing first, ⌘K still its link); light and
+// dark; no page errors.
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
@@ -172,6 +173,29 @@ try {
   const printed = await until(async () => p.locator('iframe.sh-print-frame').last().evaluate((f) => f.contentDocument?.body?.innerText || '').catch(() => ''), 5000)
   ok(/Item\s+Cost\s+Qty/.test(printed || '') && /Total\s+1975/.test(printed || ''), '⌘P (and Print beside undo and redo): the sheet\'s cells as they show, to print or save as PDF', (printed || '').slice(0, 200))
   ok((await p.locator('.sd-univer [data-u-command="bridge.sheet.print-button"]').count()) === 1, 'Print is in the ribbon beside undo and redo')
+
+  // ---------- Focus ----------
+  // A sheet in Focus keeps its keys: Focus's own types nothing into the cell picked, Esc while a
+  // cell is typed in puts it back and stays in Focus, ⌘K is still the sheet's link, and Esc with a
+  // cell picked leaves.
+  const sheetFocus = () => p.locator('.sd-file.focus').count().then((n) => n === 1)
+  ok(await save(), 'saved', unsaved)
+  await goTo('A2')
+  await p.keyboard.press(`${MOD}+Alt+f`)
+  ok(!!(await until(sheetFocus, 3000, 100)) && (await sheetState()) === 'Saved', 'a sheet: Focus by its key, nothing typed into the cell', await sheetState())
+  await p.keyboard.type('Draft')
+  await sleep(200)
+  await p.keyboard.press('Escape')
+  await sleep(400)
+  ok(await sheetFocus() && (await sheetState()) === 'Saved', 'Esc while a cell is typed in: the cell put back, still in Focus', await sheetState())
+  await goTo('A2'); await p.keyboard.press(`${MOD}+k`); await sleep(500)
+  const linkInFocus = { palette: await p.locator('.palette').count(), field: await p.locator('input[placeholder="Enter link"]').count() }
+  await shot(p, `${tag}studio-sheets-focus`)
+  await p.keyboard.press('Escape'); await sleep(150); await p.locator('button', { hasText: /^Cancel$/ }).first().click({ timeout: 1000 }).catch(() => {})
+  ok(linkInFocus.palette === 0 && linkInFocus.field === 1 && await sheetFocus(), "⌘K in Focus: still the sheet's link", linkInFocus)
+  await goTo('A2')
+  await p.keyboard.press('Escape')
+  ok(!!(await until(async () => !(await sheetFocus()), 3000, 100)), 'Esc with a cell picked: out of Focus')
 
   // ---------- Undo, and what's typed ----------
   // 70 values typed into H1 one after another, each undone, then each redone.
