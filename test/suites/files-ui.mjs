@@ -193,7 +193,7 @@ try {
     // Nor copied into: a copy from Laptop into Desk's home folder stops, saying so.
     const job = await desk.api('/transfers', { from: lapOnDesk.id, src: { pane: 'home', path: 'Notes/todo.md' }, into: { where: 'pane', pane: 'home' } })
     const after = await until(async () => (await desk.api('/transfers')).jobs?.find((j) => j.id === job.id && j.state !== 'going'), 15000, 300)
-    ok(after && after.state !== 'done' && /only looks/.test(after.error || '') && !fs.existsSync(path.join(h, 'todo.md')), 'nor is a copy made into them', after)
+    ok(after && after.state !== 'done' && /read-only/.test(after.error || '') && !fs.existsSync(path.join(h, 'todo.md')), 'nor is a copy made into them', after)
   })
   await part('open in its app, show in Finder', async () => {
     if (IS_WIN) { skip('Open in its app and Show in Explorer', 'Explorer can\'t be stood in for'); return }

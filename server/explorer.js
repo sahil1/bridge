@@ -11,7 +11,7 @@
 // can't: the server's guard (guard.js) turns other sites away, and a page's files (the HTML preview)
 // are served from these roots only to Bridge AI's own preview. Kept out whatever the root:
 // Bridge AI's own folder (it holds the link's keys) and your keys' folders (files.js KEPT_OUT). A
-// root is only ever one of these (rootDir); anything else is refused. And Files only looks for now:
+// root is only ever one of these (rootDir); anything else is refused. And Files is read-only for now:
 // nothing renames, moves or deletes through these roots (index.js refuses it).
 //
 // macOS asks before an app reads Desktop, Documents, Downloads, iCloud Drive or a removable or

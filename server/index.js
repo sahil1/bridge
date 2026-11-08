@@ -404,7 +404,7 @@ const LOOK_ONLY = new Set(['reveal', 'open'])
 app.use('/api/agents/:pane', async (req, res, next) => {
   if (!explorer.isFilesRoot(req.params.pane)) return next()
   if (!['GET', 'HEAD'].includes(req.method) && !(req.method === 'POST' && req.path === '/fileop' && LOOK_ONLY.has(req.body?.op))) {
-    return res.status(403).json({ error: 'Files only looks for now: nothing is renamed, moved or deleted from it yet.', code: 'readOnly' })
+    return res.status(403).json({ error: 'Files is read-only for now: nothing is renamed, moved or deleted from it yet.', code: 'readOnly' })
   }
   try {
     if (!trialOn('files')) throw Object.assign(new Error(FILES_OFF), { status: 404, code: 'trial' })

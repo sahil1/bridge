@@ -26,7 +26,7 @@ import './explorer.css'
 const HOME = { machine: null, root: 'home', path: '' }
 const VIEWS = [['list', 'list', tx('As list')], ['icons', 'grid', tx('As icons')], ['columns', 'columns', tx('As columns')]]
 const ASKED_ABOUT = ['Desktop', 'Documents', 'Downloads']
-const SOON = () => t('Files only looks for now: renaming, moving and deleting are coming.')
+const SOON = () => t('Read-only for now: renaming, moving and deleting are coming.')
 const readWhere = () => { try { const w = JSON.parse(localStorage.getItem(WHERE_KEY)); return w?.root ? { machine: w.machine || null, root: String(w.root), path: String(w.path || '') } : HOME } catch { return HOME } }
 const keepWhere = (w) => { try { localStorage.setItem(WHERE_KEY, JSON.stringify({ machine: w.machine, root: w.root, path: w.path })) } catch { /* not kept */ } }
 const typingIn = (el) => !!el?.closest?.('input, textarea, select, [contenteditable="true"], .fx-ql, .fx-info, .fx-assist')
