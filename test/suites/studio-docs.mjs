@@ -4,8 +4,9 @@
 // a bookmark, a link) opened as pages, edited and saved back with everything it didn't change
 // exactly as it was, part by part and paragraph by paragraph; its toolbar (styles, fonts, sizes,
 // colours, highlight, alignment, spacing, lists), pictures put in and resized, tables, its header
-// edited, find and replace, the outline, the word count; Ask AI in place on a Markdown file (the
-// change shown before it's taken, and a model that can't answer saying why). Studio's Files: your
+// edited, find and replace, the outline, the word count; AI Assist on a Markdown file, by the words
+// picked and at the right end of the header (the change shown before it's taken, and a model that
+// can't answer saying why). Studio's Files: your
 // files from wherever they are (Spotlight on a Mac, the recently used list on Linux, a look in the
 // usual and cloud drive folders elsewhere, your places, your agents' folders and Studio's own),
 // each with its folder, when it changed and Open, looked for only once Studio is opened; shown by
@@ -486,24 +487,32 @@ try {
   await p.keyboard.press('Escape')
   ok(w.errors.length === 0, 'no page errors', w.errors)
 
-  // ---------- Ask AI, in place (Markdown) ----------
+  // ---------- AI Assist, by the words picked and in the header (Markdown) ----------
   await p.evaluate(({ root }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: 'notes.md' } })), { root })
   const md = p.locator('.sd-page .ProseMirror')
   await until(async () => /teh plan/.test(await md.innerText().catch(() => '')), 15000)
+  const wand = p.locator('.sd-file .pane-head .pane-extras button[aria-label="AI Assist"]')
+  ok(await wand.evaluate((e) => !e.nextElementSibling), 'AI Assist at the right end of the header')
+  await wand.click()
+  const unpicked = await p.locator('.ai-menu').innerText()
+  ok(/Pick the words to change first/.test(unpicked) && /Rewrite/.test(unpicked) && /Fix spelling and grammar/.test(unpicked) && await p.locator('.ai-menu .ai-item:not(:disabled)').count() === 0, 'a document\'s AI Assist: Rewrite, Shorten, Fix spelling and grammar… for the words picked, and says so while none are', unpicked)
+  await p.keyboard.press('Escape')
   await md.locator('p', { hasText: 'teh plan' }).click({ clickCount: 3 })
   await p.mouse.move(5, 5)
+  ok(/AI Assist/.test(await p.locator('.sd-bubble-ai').innerText()), 'by the words picked, inline: the wand and AI Assist')
   await p.locator('.sd-bubble-ai').click()
-  ok(!!(await until(async () => (await p.locator('.sd-ask-model select').inputValue().catch(() => '')) === 'openai:gpt-5', 5000, 100)), 'Ask AI: which model writes, there to change')
+  ok(!!(await until(async () => (await p.locator('.sd-ask-model select').inputValue().catch(() => '')) === 'openai:gpt-5', 5000, 100)), 'AI Assist: which model writes, there to change')
   await p.locator('.sd-ask-menu .sd-item', { hasText: 'Fix spelling and grammar' }).click()
-  ok(!!(await until(async () => (await p.locator('.sd-ask-diff del').count()) > 0 && /the/.test(await p.locator('.sd-ask-diff ins').allInnerTexts().then((x) => x.join(' '))), 15000)), 'Ask AI: the change shown against your words before it\'s taken', await p.locator('.sd-ask-card').innerText().catch(() => ''))
+  ok(!!(await until(async () => (await p.locator('.sd-ask-diff del').count()) > 0 && /the/.test(await p.locator('.sd-ask-diff ins').allInnerTexts().then((x) => x.join(' '))), 15000)), 'AI Assist: the change shown against your words before it\'s taken', await p.locator('.sd-ask-card').innerText().catch(() => ''))
   ok(/gpt-5/.test(await p.locator('.sd-ask-card-head').innerText()), 'and which model wrote it')
   await shot(p, `${tag}studio-docs-ask`)
   await p.locator('.sd-ask-card button', { hasText: 'Replace' }).click()
   ok(!!(await until(async () => /This is the plan/.test(await md.innerText()), 3000, 100)) && /Unsaved/.test(await p.locator('.sd-status').innerText()), 'Replace: taken, as a change to save')
   await api('/settings', { studio: { model: 'anthropic:claude-test' } }, 'PATCH')
   await pickAll(p, 'fail on purpose', '.sd-page .ProseMirror')
-  await p.locator('.sd-bubble-ai').click()
-  await p.locator('.sd-ask-menu .sd-item', { hasText: 'Shorten' }).click()
+  // From the header's AI Assist this time: the same change, for the words picked.
+  await wand.click()
+  await p.locator('.ai-menu button', { hasText: 'Shorten' }).click()
   ok(!!(await until(async () => /Anthropic key/.test(await p.locator('.sd-ask-card [role="alert"]').innerText().catch(() => '')), 10000)), 'a model that can\'t answer says why', await p.locator('.sd-ask-card').innerText().catch(() => ''))
   await p.locator('.sd-ask-card button', { hasText: 'Discard' }).click()
 

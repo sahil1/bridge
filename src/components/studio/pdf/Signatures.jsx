@@ -4,13 +4,13 @@ import { api, BASE } from '../../../api.js'
 import { t, tx, locale } from '../../../i18n/index.js'
 import SignPad from './SignPad.jsx'
 
-// Your signature and initials for Signature Assist: drawn once, kept only on this computer, in
+// Your signature and initials for AI Assist's Sign this: drawn once, kept only on this computer, in
 // Bridge AI's data folder (server/signing.js), and removed whenever you like. Studio's home shows
-// them; a PDF's Signature Assist asks for one when it needs it.
+// them; Sign this on a PDF asks for one when it needs it.
 export const KEPT = tx('Kept only on this computer, in Bridge AI\'s data folder. It\'s never sent to a model or anywhere else.')
 export const sigUrl = (which, at) => `${BASE}/api/studio/signature/${which}?v=${encodeURIComponent(at || '')}`
 
-// What Signature Assist has to go on: { signature, initials, model, readsScans }, null until it's
+// What Sign this has to go on: { signature, initials, model, readsScans }, null until it's
 // come (asked once on is true).
 export function useSignSetup(on = true) {
   const [data, setData] = useState(null)
@@ -75,8 +75,8 @@ export default function SignatureHome() {
   const setup = useSignSetup()
   return (
     <section className="sd-sec sd-sign-home" aria-busy={!setup.data && !setup.err}>
-      <h3>{t('Signature Assist')}</h3>
-      <p className="muted small">{t('Draw your signature and initials once. Then open a PDF you\'re asked to sign and press Sign: it says what you\'re signing in plain words, finds where your signature goes, and saves a signed copy in a _signed folder beside it.')}</p>
+      <h3>{t('Your Signature')}</h3>
+      <p className="muted small">{t('Draw your signature and initials once. Then open a PDF you\'re asked to sign and pick AI Assist › Sign this: it says what you\'re signing in plain words, finds where your signature goes, and saves a signed copy in a _signed folder beside it.')}</p>
       {setup.err && !setup.data
         ? <p className="error-text small" role="alert">{setup.err} <button type="button" className="link-btn" onClick={setup.refresh}>{t('Try again')}</button></p>
         : (

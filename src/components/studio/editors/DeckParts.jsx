@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import Icon from '../../Icon.jsx'
+import { AssistHead } from '../../AiAssist.jsx'
 import { api } from '../../../api.js'
 import { t, tx } from '../../../i18n/index.js'
 import { base64 } from '../files.js'
@@ -300,6 +301,14 @@ export function DeckFind({ count, at, replace: withReplace, on, onClose }) {
 // or not. getSlides(): the deck's slides as Markdown. draw(texts): the slides drawn in the deck's
 // look. onKeep({ mode, slides, at, how }).
 const MODES = [['deck', tx('Whole deck')], ['slide', tx('This slide')], ['add', tx('New slide')]]
+const DOING = { deck: tx('Write the deck'), slide: tx('Rewrite this slide'), add: tx('Add a slide after this one') }
+// What AI Assist offers in a deck: this panel, in each of its ways. open: it's open, in mode;
+// show(mode): opens it that way, or closes it when it's open that way already.
+export const deckAssist = (open, mode, show) => [
+  { label: t(DOING.deck), hint: t('From what you say or a document, shown before it\'s used'), on: open && mode === 'deck', run: () => show('deck') },
+  { label: t(DOING.slide), hint: t('Shorter, clearer, as big numbers…'), on: open && mode === 'slide', run: () => show('slide') },
+  { label: t(DOING.add), hint: t('A summary, next steps, questions…'), on: open && mode === 'add', run: () => show('add') },
+]
 const QUICK = { slide: [tx('Shorter'), tx('Clearer'), tx('As big numbers'), tx('Add speaker notes')], add: [tx('A summary of the deck'), tx('Next steps'), tx('Questions to ask')], deck: [] }
 const DOCS = new Set(['doc', 'pdf', 'page', 'sheet'])
 export function AiPanel({ file, getSlides, at, mode, setMode, draw, onKeep, onClose }) {
@@ -345,12 +354,8 @@ export function AiPanel({ file, getSlides, at, mode, setMode, draw, onKeep, onCl
   const modelName = (id) => models?.find((m) => m.id === id)?.label || id
   const quick = QUICK[mode] || []
   return (
-    <aside className="sd-ai" aria-label={t('Write with AI')}>
-      <div className="sd-ai-head">
-        <b><Icon name="sparkle" size={14} /> {t('Write with AI')}</b>
-        <span className="sd-grow" />
-        <button type="button" className="win-btn" onClick={onClose} aria-label={t('Close')} title={t('Close')}><Icon name="x" size={13} /></button>
-      </div>
+    <aside className="sd-ai" aria-label={t('AI Assist')}>
+      <AssistHead className="sd-ai-head" what={t(DOING[mode] || DOING.deck)} onClose={onClose} />
       <div className="seg sd-ai-modes" role="tablist" aria-label={t('What to write')}>
         {MODES.map(([id, label]) => <button key={id} type="button" role="tab" aria-selected={mode === id} className={mode === id ? 'on' : ''} onClick={() => { setMode(id); setResult(null); setErr(null) }}>{t(label)}</button>)}
       </div>
@@ -393,7 +398,7 @@ export function AiPanel({ file, getSlides, at, mode, setMode, draw, onKeep, onCl
               <button type="button" className="ghost-btn" onClick={() => busy.abort.abort()}>{t('Stop')}</button>
             </div>
           ) : (
-            <button type="submit" className="btn small primary sd-ai-go"><Icon name="sparkle" size={12} /> {mode === 'deck' ? t('Write the deck') : mode === 'slide' ? t('Rewrite it') : t('Write it')}</button>
+            <button type="submit" className="btn small primary sd-ai-go"><Icon name="wand" size={12} /> {mode === 'deck' ? t('Write the deck') : mode === 'slide' ? t('Rewrite it') : t('Write it')}</button>
           )}
         </form>
       )}

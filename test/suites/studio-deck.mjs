@@ -5,17 +5,19 @@
 // on its own lines; a PowerPoint made of it with a layout per kind of slide, placeholders for its
 // titles and text, notes, pictures, its look in its theme, and every paragraph's properties once
 // (or PowerPoint offers to repair it); and read back into the same deck (a round trip, twice); a
-// PowerPoint made elsewhere read too; a skipped slide. A PowerPoint as itself (pptxdoc.js and the
-// rest): read and drawn as PowerPoint draws it, saved unchanged byte for byte, its words changed
-// in their runs, and changed and saved with only what changed written.
+// PowerPoint made elsewhere read too; a skipped slide; a picture of every common kind, and crafted
+// ones that made image-size up to 2.0.2 loop forever, in a process killed if it hangs. A
+// PowerPoint as itself (pptxdoc.js and the rest): read and drawn as PowerPoint draws it, saved
+// unchanged byte for byte, its words changed in their runs, and changed and saved with only what
+// changed written.
 // The server: a picture saved beside a deck; AI writing a deck from what it's about or a document,
 // rewriting a slide, adding one; no model, said.
 // The page: the slides down the side and the slide in the middle; typing a title right on the
 // slide, and a point (Enter for the next, Tab in a level); "Click to add title" where a slide has
 // none; a new slide in a layout, duplicated, moved by dragging and by keys, deleted, undone; its
 // layout and theme from the galleries; a picture; speaker notes; the grid of every slide;
-// presenting full screen, next and back, the presenter's view; AI writing a deck shown before it's
-// taken; the PowerPoint; slides picked together, copied, skipped; find and replace; zoom; the
+// presenting full screen, next and back, the presenter's view; AI Assist (the header's, and Rewrite
+// on the slide) writing a deck shown before it's taken; the PowerPoint; slides picked together, copied, skipped; find and replace; zoom; the
 // Markdown kept as it was where it wasn't touched. A PowerPoint edited as itself: typed in place,
 // shapes, pictures and a table put in and handled, copied, undone; presented; saved over itself
 // keeping everything it didn't change; in Focus, its slide bigger, Esc letting go of the shapes
@@ -23,6 +25,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
+import { spawnSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import { startKit, startModel, checks, until, sleep, browser, page, shot, phoneFaults, noServiceWorker, ROOT } from '../lib/harness.mjs'
 
@@ -158,6 +161,35 @@ try {
   ok(back.media.length === 1 && back.media[0].bytes.length === PNG.length && back.look.colors.accent === '#d9502b' && back.look.fonts.heading === 'Georgia', 'and its picture, and its look', { media: back.media.map((x) => x.id), look: back.look })
   const again = await P.deckFromPptx(await P.pptxOf(P.slidesOf(back.md), back.look, { image: async () => `data:image/png;base64,${PNG.toString('base64')}` }), 'Q4 pitch.pptx')
   ok(again.md === back.md, 'written and read again: the same deck', again.md)
+  // Pictures of every common kind, and crafted ones that made image-size up to 2.0.2 (a picture
+  // sizer pptxgenjs brings) loop forever: an ICNS entry, a JPEG XL jxlp box and a HEIF ispe box of
+  // size 0. Each run in a process of its own, killed if it doesn't finish, so a hang fails here.
+  const be32 = (n) => { const x = Buffer.alloc(4); x.writeUInt32BE(n); return x }
+  const box = (name, body) => Buffer.concat([be32(8 + body.length), Buffer.from(name), body])
+  const CRAFTED = {
+    icns: Buffer.concat([Buffer.from('icns'), be32(64), Buffer.from('ic07'), be32(8), Buffer.from('ic08'), be32(0), Buffer.alloc(40)]),
+    jxl: Buffer.concat([box('JXL ', Buffer.from([13, 10, 135, 10])), box('ftyp', Buffer.from('jxl \0\0\0\0jxl ', 'latin1')), be32(0), Buffer.from('jxlp'), Buffer.alloc(24)]),
+    heic: Buffer.concat([box('ftyp', Buffer.from('heic\0\0\0\0mif1heic', 'latin1')), box('meta', Buffer.concat([be32(0), box('iprp', box('ipco', Buffer.concat([be32(0), Buffer.from('ispe'), Buffer.alloc(12)])))]))]),
+  }
+  const PICS = {
+    'a.png': `data:image/png;base64,${PNG.toString('base64')}`,
+    'a.jpg': 'data:image/jpeg;base64,/9j/2wBDABALDA4MChAODQ4SERATGCgaGBYWGDEjJR0oOjM9PDkzODdASFxOQERXRTc4UG1RV19iZ2hnPk1xeXBkeFxlZ2P/2wBDARESEhgVGC8aGi9jQjhCY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2P/wAARCAAQABgDASIAAhEBAxEB/8QAFgABAQEAAAAAAAAAAAAAAAAAAAQF/8QAHBAAAQQDAQAAAAAAAAAAAAAAEQAFE2ESFSNC/8QAFgEBAQEAAAAAAAAAAAAAAAAABAMF/8QAHhEAAQEJAAAAAAAAAAAAAAAAABITIiMxUWFigZH/2gAMAwEAAhEDEQA/ALGhq2cvaKMeciTdI7tWsi7SyHziALtGh11kvGWQesQDVo7uuzi4xRn1kSKpAcRc2YzbHVOzM1ERSEn/2Q==',
+    'a.gif': 'data:image/gif;base64,R0lGODdhGAAQAJEAAAAAANlQK////wAAACH5BAkAAAMALAAAAAAYABAAAAIdjI+py+0PYxO0UmmsxUFX7l1YKICh6aEax7bu2xYAOw==',
+    'a.webp': 'data:image/webp;base64,UklGRmYAAABXRUJQVlA4IFoAAAAQBACdASoYABAAPtFUo0uoJKMhsAgBABoJagC7LoAs//JQAHXOQw+oAAD51ohvwG0JH+V657Psw1K/MBFX83j//VUGNowUzWdH2PcBXydkeZWZvm9JnXPfAAA=',
+    'a.svg': `data:image/svg+xml;base64,${fs.readFileSync(path.join(ROOT, 'public', 'icon.svg')).toString('base64')}`,
+    ...Object.fromEntries(Object.entries(CRAFTED).map(([k, v]) => [`a.${k}`, `data:image/${k};base64,${v.toString('base64')}`])),
+  }
+  const picDeck = `---\nmarp: true\n---\n\n${Object.keys(PICS).map((n) => `# ${n}\n\n- a point\n\n![bg right:42%](${n})`).join('\n\n---\n\n')}\n`
+  const picMade = spawnSync(process.execPath, ['--input-type=module', '-e', `import { pptxOf, slidesOf } from ${JSON.stringify(pathToFileURL(path.join(ROOT, 'src/components/studio/pptx.js')).href)}
+let s = ''; for await (const c of process.stdin) s += c
+const { deck, pics } = JSON.parse(s)
+process.stdout.write(Buffer.from(await pptxOf(slidesOf(deck), null, { image: async (src) => pics[src] || null })).toString('base64'))`], { input: JSON.stringify({ deck: picDeck, pics: PICS }), timeout: 30_000, encoding: 'utf8', maxBuffer: 64 << 20 })
+  const picZip = picMade.status === 0 ? await JSZip.loadAsync(Buffer.from(picMade.stdout, 'base64')).catch(() => null) : null
+  const picMedia = picZip ? Object.keys(picZip.files).filter((n) => /^ppt\/media\/.+\.\w+$/.test(n)).map((n) => n.split('.').pop()) : []
+  ok(!!picZip && ['png', 'jpeg', 'gif', 'webp', 'svg', 'icns', 'jxl', 'heic'].every((x) => picMedia.includes(x)), 'a PowerPoint with a picture of every common kind, and crafted ICNS, JPEG XL and HEIF ones, made in seconds with each in it', { status: picMade.status, signal: picMade.signal, error: picMade.error?.code, stderr: picMade.stderr?.slice(0, 400), media: picMedia })
+  const sized = spawnSync(process.execPath, ['-e', `const m = require('image-size'), f = m.imageSize || m
+for (const [k, v] of Object.entries(${JSON.stringify(Object.fromEntries(Object.entries(CRAFTED).map(([k, v]) => [k, v.toString('base64')])))})) { try { f(Buffer.from(v, 'base64')); console.log(k, 'sized') } catch (e) { console.log(k, e.message) } }`], { cwd: ROOT, timeout: 10_000, encoding: 'utf8' })
+  ok(sized.status === 0 && sized.stdout.trim().split('\n').length === 3, 'image-size itself turns the crafted pictures down at once rather than looping (2.0.3 or later, set in package.json\'s overrides)', { status: sized.status, signal: sized.signal, error: sized.error?.code, out: sized.stdout, stderr: sized.stderr?.slice(0, 400) })
   // A PowerPoint made elsewhere: text boxes and PowerPoint's own layout names.
   const PptxGenJS = require('pptxgenjs')
   const other = new PptxGenJS()
@@ -393,7 +425,16 @@ try {
   await shot(p, `${tag}deck-presenter`)
   await p.keyboard.press('Escape')
   ok(!!(await until(async () => (await p.locator('.sd-present').count()) === 0, 5000, 100)), 'Esc: back to editing')
-  // Write with AI: a slide rewritten, shown first, kept; then a whole deck, shown first, put after.
+  // AI Assist: its menu at the right end of the header; a slide rewritten from the slide's own
+  // Rewrite, shown first, kept; then a whole deck, shown first, put after.
+  const wand = p.locator('.sd-file .pane-head .pane-extras button[aria-label="AI Assist"]')
+  ok(await wand.evaluate((e) => !e.nextElementSibling) && !(await p.locator('.sd-deck-tools button[aria-label="Write with AI"]').count()), 'AI Assist at the right end of the header, and none of its own in the deck\'s toolbar')
+  await wand.click()
+  const verbs = await p.locator('.ai-menu .ai-item-label').allInnerTexts()
+  ok(JSON.stringify(verbs) === JSON.stringify(['Write the deck', 'Rewrite this slide', 'Add a slide after this one']), 'a deck\'s AI Assist: Write the deck, Rewrite this slide, Add a slide after this one', verbs)
+  await shot(p, `${tag}deck-ai-menu`)
+  await p.keyboard.press('Escape')
+  ok(await p.locator('.sd-pill .sd-pill-ai').count() === 2, 'on the slide, inline: the wand with Rewrite and Add a slide after')
   await p.locator('.sd-pill button', { hasText: 'Rewrite' }).click()
   await p.locator('.sd-ai textarea').fill('as big numbers')
   await p.locator('.sd-ai button', { hasText: 'Rewrite it' }).click()
@@ -413,7 +454,7 @@ try {
   await p.keyboard.press('Escape')
   await p.locator('.sd-deck-tools button[aria-label="Undo"]').click()
   ok(!!(await until(async () => (await thumbs.count()) === 6, 3000, 100)), 'and Undo takes them back out')
-  await p.locator('.sd-ai-head button[aria-label="Close"]').click()
+  await p.locator('.sd-ai-head button[aria-label="Close AI Assist"]').click()
   // The Markdown, beside the slides, typed in.
   await p.locator('.sd-deck-tools button[aria-label="Markdown"]').click()
   const mdBox = p.locator('.sd-deck-md')
@@ -500,6 +541,7 @@ try {
     const deckFocus = () => p.locator('.sd-file.focus').count().then((n) => n === 1)
     ok(!!(await until(async () => (await deckFocus()) && (await slideW()) > w0 + 40, 3000, 100)), 'a PowerPoint in Focus: its slide bigger, in the whole window', { w0, w1: await slideW() })
     await shot(p, `${tag}deck-pptx-focus`)
+    ok(await p.locator('.sd-file.focus .sd-status button[aria-label="AI Assist"]').isVisible(), 'in Focus, AI Assist is in the status line, the header being out of sight')
     await p.locator('.px-stage').focus()
     await p.keyboard.press(`${MOD}+a`)
     const picks = () => p.locator('.px-sel .px-frame:not(.hover)').count()
@@ -615,16 +657,17 @@ try {
     await thumbs.nth(21).click({ button: 'right' })
     await p.locator('.sd-ctx .menu-item', { hasText: 'Skip when presenting' }).click()
     ok(await thumbs.nth(21).evaluate((x) => x.classList.contains('skipped')), 'skipped from its menu')
-    // Write with AI: a slide written, shown first, then added on the file's own layout.
+    // AI Assist's Add a slide after this one: a slide written, shown first, then added on the file's own layout.
     await go(2)
-    await p.locator('.px-row button[aria-label="Write with AI"]').click()
-    await p.locator('.sd-ai-modes button', { hasText: 'New slide' }).click()
+    await p.locator('.sd-file .pane-head button[aria-label="AI Assist"]').click()
+    await p.locator('.ai-menu button', { hasText: 'Add a slide after this one' }).click()
+    ok(await p.locator('.sd-ai-modes button[aria-selected="true"]', { hasText: 'New slide' }).count() === 1, 'AI Assist\'s Add a slide after this one opens its panel on New slide')
     await p.locator('.sd-ai textarea').fill('what we do next')
     await p.locator('.sd-ai button', { hasText: 'Write it' }).click()
     await p.locator('.sd-ai-result .sd-slide').first().waitFor({ timeout: 15000 })
     await p.locator('.sd-ai button', { hasText: 'Add it' }).click()
-    ok(!!(await until(async () => (await thumbs.count()) === 23 && /Next steps/.test(await thumbs.nth(3).innerText()), 3000, 50)) && /Ship it/.test(await p.locator('.px-canvas').innerText()) && (await objs.count()) === 2, 'Write with AI: a new slide shown first, then added after this one on the file\'s own layout, its title and points in its placeholders')
-    await p.locator('.sd-ai-head button[aria-label="Close"]').click()
+    ok(!!(await until(async () => (await thumbs.count()) === 23 && /Next steps/.test(await thumbs.nth(3).innerText()), 3000, 50)) && /Ship it/.test(await p.locator('.px-canvas').innerText()) && (await objs.count()) === 2, 'AI Assist: a new slide shown first, then added after this one on the file\'s own layout, its title and points in its placeholders')
+    await p.locator('.sd-ai-head button[aria-label="Close AI Assist"]').click()
     await p.keyboard.press(`${MOD}+z`)
     await until(async () => (await thumbs.count()) === 22, 3000, 50)
     // Speaker notes; find and replace across the deck.
@@ -725,7 +768,9 @@ try {
   ok(!!(await opened(dk.p, 'pitch.md')), 'dark: the deck opens')
   await sleep(400)
   await shot(dk.p, `${tag}deck-1440-dark`)
-  await dk.p.locator('.sd-deck-tools button[aria-label="Write with AI"]').click()
+  await dk.p.locator('.sd-file .pane-head button[aria-label="AI Assist"]').click()
+  await shot(dk.p, `${tag}deck-ai-menu-dark`)
+  await dk.p.locator('.ai-menu button', { hasText: 'Write the deck' }).click()
   await sleep(200)
   await shot(dk.p, `${tag}deck-ai-dark`)
   ok(!!(await until(async () => { await open(dk.p, 'board.pptx'); return dk.p.locator('.px-canvas [data-o]').first().waitFor({ timeout: 3000 }).then(() => true, () => false) }, 30000, 200)), 'dark: a PowerPoint opens, its slides white as they are')
@@ -762,12 +807,16 @@ try {
       ok(!!(await until(async () => /2 of 22/.test(await ph.p.locator('.sd-nav').innerText()), 3000, 100)), 'phone: its next slide')
       await shot(ph.p, `${tag}deck-phone-pptx`)
       ok(!!(await opened(ph.p, 'pitch.md')), 'phone: back to the deck')
-      await ph.p.locator('.sd-deck-tools button[aria-label="Write with AI"]').click()
+      await ph.p.locator('.sd-file .pane-head button[aria-label="AI Assist"]').click()
+      f = await phoneFaults(ph.p, '.ai-menu')
+      ok(!Object.keys(f).length, 'phone: AI Assist\'s menu fits, every choice a whole target', f)
+      await shot(ph.p, `${tag}deck-phone-ai-menu`)
+      await ph.p.locator('.ai-menu button', { hasText: 'Write the deck' }).click()
       await ph.p.locator('.sd-ai textarea').waitFor({ timeout: 5000 })
       f = await phoneFaults(ph.p, '.sd-ai')
-      ok(!Object.keys(f).length, 'phone: Write with AI over the slide, fitting, its fields 16 px', f)
+      ok(!Object.keys(f).length, 'phone: AI Assist over the slide, fitting, its fields 16 px', f)
       await shot(ph.p, `${tag}deck-phone-ai`)
-      await ph.p.locator('.sd-ai-head button[aria-label="Close"]').click()
+      await ph.p.locator('.sd-ai-head button[aria-label="Close AI Assist"]').click()
       await ph.p.locator('.sd-deck-tools button[aria-label="Present"]').click()
       await ph.p.locator('.sd-present').waitFor({ timeout: 5000 })
       await ph.p.locator('.sd-present-stage').tap({ position: { x: 300, y: 300 } })

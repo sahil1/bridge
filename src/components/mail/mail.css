@@ -1,4 +1,4 @@
-/* Mail's Done and Remind me, its keys, Reply Assist and Scheduling Assist (MailView.jsx,
+/* Mail's Done and Remind me, its keys, AI Assist's Draft a reply and Find a time (MailView.jsx,
    mail/ReplyAssist.jsx), and Settings › Mail. */
 .mailv { position: relative; }
 .mailv.assisting { grid-template-columns: minmax(300px, 360px) minmax(0, 1fr); }
@@ -29,7 +29,7 @@
 .mnote { position: absolute; z-index: 40; left: 50%; bottom: 14px; transform: translateX(-50%); max-width: calc(100% - 32px); display: flex; align-items: center; gap: 12px; padding: 8px 14px; border-radius: 10px; background: var(--ink); color: var(--pane); font-size: 12.5px; box-shadow: var(--shadow-lg); }
 .mnote .link-btn { color: inherit; white-space: nowrap; }
 .mnote kbd { background: transparent; color: inherit; border-color: color-mix(in srgb, currentColor 40%, transparent); }
-.mnote.bad { background: var(--critical); color: #fff; }
+.mnote.bad { background: var(--critical-fill); color: #fff; }
 
 /* The keys. */
 .mkeys-back { position: absolute; inset: 0; z-index: 50; display: grid; place-items: center; padding: 16px; background: color-mix(in srgb, var(--ink) 18%, transparent); }
@@ -41,13 +41,12 @@
 .mkeys dd { margin: 0; color: var(--ink-2); }
 .mkeys p { margin: 0; line-height: 1.45; }
 
-/* Reply Assist, beside the email or under its buttons. */
+/* AI Assist's Draft a reply, beside the email or under its buttons. */
 .massist { display: grid; gap: 10px; align-content: start; padding: 12px; border-radius: 12px; background: var(--pane-2); border: 1px solid var(--line); min-width: 0; }
 .massist.beside { border-radius: 0; border-width: 0 0 0 1px; background: var(--pane); padding: 16px; overflow-y: auto; min-height: 0; }
 .massist p { margin: 0; line-height: 1.45; }
-.massist-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.massist-head > b { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; white-space: nowrap; }
-.massist-head .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.massist-head { font-size: 13px; }
+.massist-by { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .massist-intro { display: grid; gap: 8px; }
 .massist-busy { display: flex; align-items: center; gap: 6px; }
 .massist-err { display: grid; gap: 6px; justify-items: start; }
@@ -60,7 +59,7 @@
 .massist-find { justify-self: start; }
 .massist-foot { padding-top: 6px; border-top: 1px solid var(--line); }
 
-/* Scheduling Assist's free times. */
+/* AI Assist's Find a time: free times. */
 .massist-times { display: grid; gap: 8px; padding: 10px; border-radius: 10px; background: var(--pane); border: 1px solid var(--line); }
 .massist.beside .massist-times { background: var(--pane-2); }
 .massist-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
@@ -84,7 +83,7 @@
 .mdays .fchip { border: 1px solid var(--line-2); }
 .mdays .fchip.on { background: var(--accent-soft); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
 .st-mail .st-input.mtime { width: 120px; }
-.st-mail .btn.danger { background: var(--critical); border-color: transparent; color: #fff; }
+.st-mail .btn.danger { background: var(--critical-fill); border-color: transparent; color: #fff; }
 
 /* On a phone: whole targets, and fields iOS doesn't zoom into. No keys to show. */
 .app.narrow .mlist-keys { display: none; }

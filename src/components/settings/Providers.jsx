@@ -371,9 +371,9 @@ function BuiltinModel({ onChange }) {
         </span>
       </div>
       {going && <span className="vs-bar" role="progressbar" aria-valuenow={dl.percent} aria-valuemin={0} aria-valuemax={100} aria-label={t('Downloading {model}', { model: s.model.label })}><span style={{ width: `${dl.percent}%` }} /></span>}
-      <p className="muted small">{t('Free, private and works offline. Good at rewriting text, edit by voice, questions about a meeting and notes for short meetings; weaker than your cloud model at long meetings and diagrams.')}</p>
+      <p className="muted small">{t('Free, private and works offline. Good at rewriting text, Edit by voice, questions about a meeting and notes for short meetings; weaker than your cloud model at long meetings and diagrams.')}</p>
       <p className="muted small">{s.have
-        ? t('In every model list, marked on this computer. Bridge AI picks it by itself only for edit by voice, or when there\'s no other model: Claude and your other models come first.')
+        ? t('In every model list, marked on this computer. Bridge AI picks it by itself only for Edit by voice, or when there\'s no other model: Claude and your other models come first.')
         : t('Downloaded once from Hugging Face, only when you click Download. What you give it never leaves this computer.')}</p>
       {dl?.error && <p className="pv-note pv-err">{dl.error}</p>}
       {err && <p className="pv-note pv-err">{err}</p>}

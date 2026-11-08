@@ -180,8 +180,8 @@ export function MachineMenu({ phone = false, elsewhere = null }) {
         <Icon name="down" size={11} />
       </button>
       {open && (
-        <div className={`menu left mc-menu ${phone ? 'phone' : ''}`} role="menu" aria-label={t('Your devices')}>
-          <div className="mc-head">{t('Your devices')}</div>
+        <div className={`menu left mc-menu ${phone ? 'phone' : ''}`} role="menu" aria-label={t('Your Devices')}>
+          <div className="mc-head">{t('Your Devices')}</div>
           {row('here', data.here.name, `${OS_LABEL[data.here.os] || ''}${machineId ? '' : ` · ${t('this one')}`}`, true, !machineId, () => pick(null))}
           {linked.map((m) => row(m.id, m.name, [OS_LABEL[m.os], m.online ? counts(m.counts) || t('Online') : m.lastSeen ? t('Offline, seen {when}', { when: ago(m.lastSeen) }) : t('Offline')].filter(Boolean).join(' · '), m.online, m.id === machineId, () => go(m), m.id))}
           {paired.filter((c) => !linked.some((m) => bare(m.relay) === bare(c.relay))).map((c) => row(c.relay, c.name, t('Paired on this phone'), null, false, close(() => relayComputers.open(c.relay))))}
@@ -460,7 +460,7 @@ export function MachinesSettings({ embedded = false, focus = false }) {
   return (
     <Wrap {...(embedded ? {} : { className: 'st-sections' })}>
       <section className="st-sec" id="st-machines" ref={setTop}>
-        <h4>{t('Your devices')}</h4>
+        <h4>{t('Your Devices')}</h4>
         {machineId && <p className="small">{t('These are the links of {name}, the device this window runs on.', { name: data.here.name })}</p>}
         <p className="muted small">{t("Link your other computers running Bridge AI (Mac, Windows or Linux) and switch between them from the top bar, with each one's agents in the sidebar. A phone paired with any of them reaches them all. Each device is reached through its own relay, end-to-end encrypted.")}</p>
         <div className="mch-list">
@@ -546,7 +546,9 @@ export function MachinesSettings({ embedded = false, focus = false }) {
         </form>
         {data.canBeLinked && !machineId
           ? <p className="muted small">{t('To link this device from another one, choose Pair a device at the top of this page and use its link or code there.')}</p>
-          : !data.canBeLinked && <p className="muted small">{t("Other devices reach this one through its relay, which isn't set up yet: sign in to Cloudflare (or use Bridge AI's relay) at the top of this page. It can still link to them.")}</p>}
+          : !data.canBeLinked && <p className="muted small">{data.hostedAvailable
+            ? t("Other devices reach this one through its relay, which isn't set up yet: sign in to Cloudflare (or use Bridge AI's relay) at the top of this page. It can still link to them.")
+            : t("Other devices reach this one through its relay, which isn't set up yet: sign in to Cloudflare at the top of this page. It can still link to them.")}</p>}
         {msg && <p className={`small ${msg.error ? 'error-text' : 'muted'}`}>{msg.text}</p>}
       </section>
     </Wrap>

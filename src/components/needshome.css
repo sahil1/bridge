@@ -18,6 +18,7 @@
 .hm.phone .hm-tip { min-width: 0; width: calc(100vw - 24px); }
 .hm.phone .hm-where { display: block; }
 .hm-every { flex: none; gap: 4px; height: 28px; margin-top: 2px; }
+.hm-edit-btn { flex: none; gap: 5px; height: 28px; margin: 2px -8px 0 0; }
 /* The count: everything that needs you, and a ring (the Status menu's, larger) filled by what you
    can answer now; the rest, on a computer that's off, in a quieter tone. What's in it below it. */
 .hm-count-box { position: relative; }
@@ -56,6 +57,8 @@
 .hm-notice > .icon { flex: none; margin-top: 2px; color: var(--ink-3); }
 .hm-notice.error { border-color: color-mix(in srgb, var(--critical) 35%, transparent); background: color-mix(in srgb, var(--critical) 6%, var(--pane)); color: var(--ink); }
 .hm-notice.error > .icon { color: var(--critical); }
+.hm-notice.needs { border-color: color-mix(in srgb, var(--needs) 35%, transparent); background: color-mix(in srgb, var(--needs) 6%, var(--pane)); color: var(--ink); }
+.hm-notice.needs > .icon { color: var(--needs); }
 .hm-notice-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .hm-notice-text .ny-device { display: inline-flex; vertical-align: 1px; max-width: 100%; margin-right: 6px; font-size: 11.5px; }
 .hm-notice-text .link-btn { margin-left: 8px; }
@@ -73,7 +76,9 @@
 .hm-sec h3 { display: flex; align-items: center; gap: 8px; min-height: 26px; margin: 0 2px 8px; font-size: 14px; font-weight: 650; }
 .hm-sec h3 > .icon { color: var(--accent); }
 .hm-hint { min-width: 0; font-weight: 450; font-size: 12.5px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hm-pinned { margin-bottom: 26px; }
+/* The sections, one under another in the order arranged (Edit Home), with the same room between. */
+.hm-secs { display: grid; grid-template-columns: minmax(0, 1fr); gap: 26px; }
+.hm.phone .hm-secs { gap: 22px; }
 /* By computer or by kind: each group under a quiet heading of its own. */
 .hm-group + .hm-group { margin-top: 14px; }
 .hm-ghead { display: flex; align-items: center; gap: 6px; min-width: 0; margin: 0 4px 6px; font-size: 12px; font-weight: 650; color: var(--ink-2); }
@@ -118,7 +123,6 @@
 .hm-pin:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .hm-quick .hm-pin, .hm-item-acts .hm-pin { width: 26px; height: 26px; margin: 0; }
 /* Your other computers while Home shows this one's: a line each, opened one at a time. */
-.hm-away { margin-top: 22px; }
 .hm-away h3 .hm-away-all { flex: none; gap: 5px; }
 .hm-away-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .hm-away-row { min-width: 0; border-radius: 11px; border: 1px solid var(--line); background: var(--pane); }
@@ -140,7 +144,7 @@
 .hm.phone .hm-away-sub { flex-basis: 100%; padding-left: 34px; white-space: normal; }
 .hm.phone .hm-away-items { padding: 4px 8px 0; }
 .hm.phone .hm-away-show { display: none; }
-.hm-cols { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 26px 32px; align-items: start; margin-top: 26px; }
+.hm-cols { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 26px 32px; align-items: start; }
 .hm-side { display: grid; gap: 26px; min-width: 0; align-content: start; }
 @container (max-width: 860px) { .hm-cols { grid-template-columns: minmax(0, 1fr); } }
 .hm-empty { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-radius: 11px; border: 1px dashed var(--line-2); color: var(--good); font-size: 13px; }
@@ -149,6 +153,69 @@
 .hm-none p { margin: 0 0 2px; font-size: 13px; color: var(--ink-2); }
 .hm-none small { font-size: 12px; }
 .hm-ico { flex: none; display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 7px; background: var(--pane-3); color: var(--ink-2); }
+
+/* The sections you hid, said at the foot, with the way to bring them back. */
+.hm-hidden-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; margin: 0 2px; }
+.hm-hidden-foot > .icon { flex: none; color: var(--ink-3); }
+.hm-hidden-foot .link-btn { font-size: inherit; }
+
+/* Edit Home: the sections as tiles in their order, wiggling as an iPhone's apps do while you arrange
+   them (with Reduce Motion they keep still, outlined instead). Each is dragged by any part of it but
+   its buttons, so a finger doesn't scroll the page instead. A − at a tile's corner hides it; the
+   hidden ones are under the rest, with a + to bring each back. */
+.hm-edit-head { align-items: center; }
+.hm-edit-head .hm-title { flex: 1 1 auto; }
+.hm-edit-sub { flex: 1 1 100%; margin: -6px 0 0; font-size: 13px; line-height: 1.45; }
+.hm-edit-acts { flex: none; display: flex; align-items: center; gap: 8px; }
+.hm-edit-acts .btn { gap: 5px; height: 28px; }
+.hm-arrange { list-style: none; max-width: 760px; margin: 0; padding: 10px 0 0 10px; display: grid; gap: 12px; }
+.hm-tile { position: relative; min-width: 0; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.hm-tile.dragging { z-index: 3; }
+.hm-tile-in { position: relative; display: flex; align-items: center; gap: 10px; min-height: 60px; padding: 9px 8px 9px 14px; border-radius: 14px; border: 1px solid var(--line-2); background: var(--pane-2); cursor: grab; }
+/* Gently, each a little out of step with the next; a wide tile turns less for the same sway at its
+   ends. With Reduce Motion, still, and outlined so it's clear they can be moved. */
+@keyframes hm-wiggle { from { transform: rotate(-.3deg); } to { transform: rotate(.3deg); } }
+@keyframes hm-wiggle-narrow { from { transform: rotate(-.6deg); } to { transform: rotate(.6deg); } }
+@media (prefers-reduced-motion: no-preference) {
+  .hm-tile:not(.off, .dragging) .hm-tile-in { animation: hm-wiggle .28s ease-in-out infinite alternate; animation-delay: calc(var(--n, 0) * -.11s); }
+  .hm.phone .hm-tile:not(.off, .dragging) .hm-tile-in { animation-name: hm-wiggle-narrow; }
+  .hm-arrange.moving > .hm-tile:not(.dragging) { transition: transform .18s ease; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hm-tile:not(.off) .hm-tile-in { outline: 2px dashed var(--accent); outline-offset: 3px; }
+}
+.hm-tile.dragging .hm-tile-in { cursor: grabbing; background: var(--pane); border-color: color-mix(in srgb, var(--accent) 45%, var(--line-2)); box-shadow: 0 14px 30px rgb(0 0 0 / .18); transform: scale(1.015); }
+.hm-tile.off .hm-tile-in { cursor: default; background: var(--pane); border-style: dashed; }
+.hm-tile-grip { flex: none; color: var(--ink-3); }
+.hm-tile-ico { flex: none; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; background: var(--accent-soft); color: var(--accent); }
+.hm-tile.off .hm-tile-ico { background: var(--pane-3); color: var(--ink-3); }
+.hm-tile-text { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.hm-tile-text b { font-size: 14px; font-weight: 650; overflow-wrap: anywhere; }
+.hm-tile-text small { font-size: 12.5px; line-height: 1.4; color: var(--ink-2); overflow-wrap: anywhere; }
+.hm-tile.off .hm-tile-text b { font-weight: 550; color: var(--ink-2); }
+.hm-tile-moves { flex: none; display: flex; gap: 2px; }
+.hm-tile-moves .ghost-btn { justify-content: center; width: 32px; height: 32px; padding: 0; }
+.hm-tile-moves .ghost-btn:disabled { opacity: .3; cursor: default; background: none; }
+.hm-tile-moves .ghost-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
+/* The badge, as an iPhone has it: a small circle on the tile's corner, in a bigger target. */
+.hm-tile-badge { position: absolute; z-index: 2; top: -12px; left: -12px; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; }
+.hm-tile-badge > span { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: color-mix(in srgb, var(--ink) 62%, var(--pane)); color: var(--pane); box-shadow: 0 1px 4px rgb(0 0 0 / .22); }
+.hm-tile-badge.plus > span { background: var(--accent); color: var(--on-accent); }
+.hm-tile-badge:hover > span { filter: brightness(1.15); }
+.hm-tile-badge:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* Hiding Waiting on You, asked once more under its tile. */
+.hm-tile-sure { display: grid; gap: 8px; margin-top: 8px; padding: 10px 12px; border-radius: 11px; border: 1px solid color-mix(in srgb, var(--warning) 40%, var(--line)); background: color-mix(in srgb, var(--warning) 7%, var(--pane)); font-size: 12.5px; }
+.hm-tile-sure p { margin: 0; line-height: 1.45; color: var(--ink); }
+.hm-tile-sure-acts { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.hm-tile-sure-acts .btn { gap: 5px; }
+.hm-hidden { max-width: 770px; margin-top: 26px; }
+.hm-said { position: absolute; width: 1px; height: 1px; margin: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.hm.phone .hm-arrange { padding: 16px 0 0 16px; gap: 16px; }
+.hm.phone .hm-tile-in { gap: 8px; padding: 6px 4px 6px 12px; }
+.hm.phone .hm-tile-badge { top: -18px; left: -18px; width: 40px; height: 40px; }
+.hm.phone .hm-tile-moves .ghost-btn { width: 40px; height: 40px; }
+.hm.phone .hm-edit-acts .btn { height: 40px; }
+.hm.phone .hm-hidden { margin-top: 22px; }
 
 /* What you did, said for a few seconds at the foot of the window: nothing above it moves. */
 .hm-toast { position: sticky; bottom: 14px; z-index: 5; width: fit-content; max-width: min(560px, 100%); margin: 18px auto 0; padding: 9px 14px; border-radius: 10px; background: var(--ink); color: var(--pane); font-size: 12.5px; line-height: 1.45; box-shadow: 0 8px 24px rgb(0 0 0 / .18); overflow-wrap: anywhere; }
@@ -245,6 +312,8 @@
 .hm.phone .hm-pick select { width: 100%; max-width: none; height: 40px; font-size: 16px; }
 .hm.phone .hm-kinds { gap: 2px 4px; }
 .hm.phone .hm-sec h3 { flex-wrap: wrap; row-gap: 0; }
+/* A section's name is held for Edit Home: not picked up as words to copy. */
+.hm.phone .hm-sec h3 { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .hm.phone .hm-hint { white-space: normal; }
 .hm.phone .hm-grid .ny-item:not(.hm-task) .ny-meta { flex-wrap: wrap; }
 .hm.phone .hm-grid .ny-meta > * { white-space: normal; overflow-wrap: anywhere; text-overflow: clip; }
@@ -257,7 +326,6 @@
 .hm.phone .ny-reply input { height: 40px; font-size: 16px; }
 .hm.phone .ny-reply .btn { min-height: 40px; }
 .hm.phone .hm-cols, .hm.phone .hm-side { gap: 22px; }
-.hm.phone .hm-cols { margin-top: 22px; }
 
 /* Everything: a lane per computer (or per kind), as the Agent Map has them. */
 .ey { padding: 18px 20px 28px; }

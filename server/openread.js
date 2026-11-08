@@ -1,6 +1,6 @@
 // Reading one of your files without it counting as opening it, where the system lets a reader say
 // so (Linux's O_NOATIME, for a file that's yours). What Files shows (a picture's thumbnail, a video
-// played, a document read or laid out, a copy sent to another device) and what Files Assist reads
+// played, a document read or laid out, a copy sent to another device) and what AI Assist reads
 // leave a forgotten file looking forgotten, and change nothing about it. Elsewhere (macOS notes a
 // read only after a change, Windows doesn't by default), or for someone else's file, it's an
 // ordinary read.

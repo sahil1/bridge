@@ -18,16 +18,25 @@ import { holderOf, contents } from './holders.js'
 import { ITEMS } from '../../../shared/whiteboard/catalog.js'
 import { openBoard, openBoards } from './links.js'
 import { NameDialog } from '../FileExtras.jsx'
+import AiAssist from '../AiAssist.jsx'
 import { useBusy } from '../../busy.js'
 import './whiteboard.css'
 
 // Whiteboards: the list (WhiteboardsHome), one board (WhiteboardPage), and a diagram file in an
 // agent's Files tab drawn as a board (FileDrawing). The boards are files in ~/.bridge-ai/boards
 // (server/boards.js); a board saves itself a moment after each change. Around the drawing (Canvas,
-// Excalidraw in Bridge AI's look) are Bridge AI's own parts: the Shapes panel, Draw this with
-// Refine, Auto-layout, Export (PNG, SVG, PDF) and the whiteboard's settings.
+// Excalidraw in Bridge AI's look) are Bridge AI's own parts: the Shapes panel, AI Assist (Draw this
+// and Change it, with Refine), Auto-layout, Export (PNG, SVG, PDF) and the whiteboard's settings.
 
 const enc = encodeURIComponent
+// What AI Assist offers on a board: its panel, to draw something new or change what's there.
+// open: the panel is open; drawn: something's on the board; show(mode): opens the panel that way.
+const drawAssist = (open, drawn, show) => [
+  { label: t('Draw this'), hint: t('A diagram from what you describe, a meeting or a document'), run: () => show('draw') },
+  { label: t('Change it'), hint: drawn ? t('The whole board, or the shapes you select') : t('Once there\'s something on the board'), disabled: !drawn, run: () => show('change') },
+  open && 'sep',
+  open && { label: t('Close AI Assist'), run: () => show(null) },
+]
 const fileOp = (pane, op, path, name) => api(`/agents/${enc(pane)}/fileop`, { method: 'POST', body: { op, path, name } })
 
 // A small menu under a button: a click outside or Escape closes it. title: a line above the
@@ -315,6 +324,7 @@ export function WhiteboardPage({ id, onBack, backLabel = null, tabs = null, onRe
   const [start, setStart] = useState(() => { const s = startOn.get(id); startOn.delete(id); return s || null })
   const wide = useMedia('(min-width: 700px)')
   const [panel, setPanel] = useState(start ? 'draw' : null) // draw | settings
+  const [want, setWant] = useState(null) // { mode, n }: Draw this or Change it, from AI Assist's menu
   // The Shapes panel: open beside the board on a computer (as you left it); on a phone, where it
   // covers the board, only when asked for.
   const [shapesWide, setShapesWide] = usePersisted('cc-board-shapes', true)
@@ -415,7 +425,6 @@ export function WhiteboardPage({ id, onBack, backLabel = null, tabs = null, onRe
         leading={onBack ? <button type="button" className="win-btn" onClick={onBack} aria-label={backLabel || t('All whiteboards')} title={backLabel || t('All whiteboards')}><Icon name="back" size={15} /></button> : null}>
         {tabs}
         <button type="button" className={`btn small${shapes ? ' on' : ''}`} onClick={() => setShapes(!shapes)} aria-pressed={!!shapes} disabled={!d.board.api} title={t('Shapes')}><Icon name="shapes" size={12} /> {wide ? t('Shapes') : ''}</button>
-        <button type="button" className={`btn small${panel === 'draw' ? '' : ' primary'}`} onClick={() => setPanel(panel === 'draw' ? null : 'draw')} aria-pressed={panel === 'draw'} disabled={!d.board.api} aria-label={t('Draw this')} title={t('Draw this')}><Icon name="sparkle" size={12} /> {wide ? t('Draw this') : ''}</button>
         {/* On a phone, Auto-layout and Export are in the More menu, so the header fits. */}
         {wide && <span className="menu-anchor">
           <button type="button" className="win-btn" onClick={() => setMenu(menu === 'layout' ? null : 'layout')} aria-label={t('Auto-layout')} title={t('Auto-layout')} disabled={!d.board.api}><Icon name="grid" size={14} /></button>
@@ -441,6 +450,7 @@ export function WhiteboardPage({ id, onBack, backLabel = null, tabs = null, onRe
           )} />}
         </span>}
         <button type="button" className={`win-btn${panel === 'settings' ? ' on' : ''}`} onClick={() => setPanel(panel === 'settings' ? null : 'settings')} aria-label={t('Whiteboard Settings')} title={t('Whiteboard Settings')} aria-pressed={panel === 'settings'}><Icon name="settings" size={14} /></button>
+        <AiAssist className="btn small wb-ai-btn" compact={!wide} on={panel === 'draw'} disabled={!d.board.api} items={() => drawAssist(panel === 'draw', !!count.n, (mode) => { if (mode) { setWant({ mode, n: Date.now() }); setPanel('draw') } else setPanel(null) })} />
         <span className="menu-anchor">
           <button type="button" className="win-btn" onClick={() => setMenu(menu === 'more' ? null : 'more')} aria-label={t('More')} title={t('More')}><Icon name="more" size={14} /></button>
           {menu === 'more' && <Menu onClose={() => setMenu(null)} items={[
@@ -471,11 +481,11 @@ export function WhiteboardPage({ id, onBack, backLabel = null, tabs = null, onRe
               <p className="muted small">{t('Draw with the tools above, add shapes from the panel, or describe a diagram and let a model draw it.')}</p>
               <div className="wb-ask-row">
                 {!shapes && <button type="button" className="btn small" onClick={() => setShapes(true)}><Icon name="shapes" size={12} /> {t('Shapes')}</button>}
-                <button type="button" className="btn small primary" onClick={() => setPanel('draw')}><Icon name="sparkle" size={12} /> {t('Draw this')}</button>
+                <button type="button" className="btn small primary" onClick={() => { setWant({ mode: 'draw', n: Date.now() }); setPanel('draw') }}><Icon name="wand" size={12} /> {t('Draw this')}</button>
               </div>
             </div>
           )}
-          {panel === 'draw' && d.board.api && <div className="wb-draw-wrap"><DrawPanel board={d.board} start={start} onStarted={() => setStart(null)} onClose={() => setPanel(null)} compact={!wide} boardId={id} look={boardLook} prefs={prefs} onDrawn={drawn} /></div>}
+          {panel === 'draw' && d.board.api && <div className="wb-draw-wrap"><DrawPanel board={d.board} start={start} want={want} onStarted={() => setStart(null)} onClose={() => setPanel(null)} compact={!wide} boardId={id} look={boardLook} prefs={prefs} onDrawn={drawn} /></div>}
           {panel === 'settings' && <div className="wb-draw-wrap"><BoardSettings look={boardLook} onLook={pickLook} prefs={prefs} onPrefs={setPrefs} onClose={() => setPanel(null)} /></div>}
         </div>
       </div>
@@ -564,7 +574,7 @@ export function WhiteboardsHome({ onOpen }) {
               {KINDS.map(([id, label]) => <button type="button" key={id} role="radio" aria-checked={kind === id} className={`chip${kind === id ? ' on' : ''}`} onClick={() => setKind(id)}>{t(label)}</button>)}
             </div>
             <span className="wb-grow" />
-            <button type="submit" className="btn small primary" disabled={busy || !text.trim() || (m.loaded && !m.models.length)}><Icon name="sparkle" size={12} /> {t('Draw')}</button>
+            <button type="submit" className="btn small primary" disabled={busy || !text.trim() || (m.loaded && !m.models.length)}><Icon name="wand" size={12} /> {t('Draw')}</button>
           </div>
           {m.loaded && !m.models.length
             ? <p className="small muted">{t('No model to draw with yet: sign in to an agent (Claude Code, Codex…) or add a key in Settings › Model Providers. You can still draw by hand.')}</p>
@@ -624,6 +634,7 @@ export function FileDrawing({ pane, f, onSaved, onOpenPath }) {
   }, [pane, f.path, kind, own])
   const d = useDrawing(`${pane}\n${f.path}\n${version}`, store)
   const [panel, setPanel] = useState(false)
+  const [want, setWant] = useState(null) // { mode, n }: Draw this or Change it, from AI Assist's menu
   const [err, setErr] = useState(null)
   const [done, setDone] = useState(null)
   const base = f.name.replace(/\.(excalidraw|mmd|mermaid|drawio|dio)(\.(json|xml))?$/i, '')
@@ -653,7 +664,7 @@ export function FileDrawing({ pane, f, onSaved, onOpenPath }) {
         <span className="wb-grow" />
         {!own && <button type="button" className="btn small" onClick={saveBeside} disabled={!d.board.api} title={t('Saves the drawing as {name} next to this file', { name: `${base}.excalidraw` })}>{t('Save as .excalidraw')}</button>}
         <button type="button" className="btn small" onClick={done ? () => openBoard(done) : toBoards} disabled={!d.board.api}><Icon name="shapes" size={12} /> {done ? t('Open in Whiteboards') : t('Add to Whiteboards')}</button>
-        <button type="button" className={`btn small${panel ? ' on' : ''}`} onClick={() => setPanel(!panel)} disabled={!d.board.api} aria-pressed={panel}><Icon name="sparkle" size={12} /> {t('Draw this')}</button>
+        <AiAssist className="btn small wb-ai-btn" on={panel} disabled={!d.board.api} items={() => drawAssist(panel, true, (mode) => { if (mode) { setWant({ mode, n: Date.now() }); setPanel(true) } else setPanel(false) })} />
       </div>
       {d.conflict && <Conflict onTheirs={() => d.takeTheirs().catch((e) => setErr(e.message))} onMine={() => d.flush(true)} />}
       {err && <p className="error-text small wb-err" role="alert">{err}</p>}
@@ -661,7 +672,7 @@ export function FileDrawing({ pane, f, onSaved, onOpenPath }) {
         {d.error ? <div className="wb-wait"><p className="error-text small" role="alert">{d.error}</p></div>
           : d.ready ? <Canvas key={version} initial={d.ready.initial} onApi={d.onApi} onChange={d.onChange} onSave={() => d.flush(true)} name={base} look={d.ready.look} />
             : <div className="wb-wait" aria-busy="true"><span className="muted small">{t('Opening the whiteboard…')}</span></div>}
-        {panel && d.board.api && <div className="wb-draw-wrap"><DrawPanel board={d.board} onClose={() => setPanel(false)} compact look={d.ready?.look} /></div>}
+        {panel && d.board.api && <div className="wb-draw-wrap"><DrawPanel board={d.board} want={want} onClose={() => setPanel(false)} compact look={d.ready?.look} /></div>}
       </div>
     </div>
   )

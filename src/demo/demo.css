@@ -6,7 +6,7 @@
   display: flex; align-items: center; gap: 10px; font: 500 12px/1 var(--font); color: var(--ink-2);
   background: color-mix(in srgb, var(--accent) 9%, var(--pane)); border-bottom: 1px solid var(--line);
 }
-.demo-tag { flex: none; padding: 3px 7px; border-radius: 6px; background: var(--accent); color: var(--on-accent); font-weight: 700; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; }
+.demo-tag { flex: none; padding: 3px 7px; border-radius: 6px; background: var(--accent-fill); color: var(--on-accent); font-weight: 700; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; }
 .demo-what { color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .demo-grow { flex: 1; }
 .demo-bar a { flex: none; color: var(--accent); text-decoration: none; font-weight: 600; white-space: nowrap; }

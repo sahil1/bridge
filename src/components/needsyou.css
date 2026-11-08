@@ -13,7 +13,7 @@
 .ny-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px 8px 16px; border-bottom: 1px solid var(--line); flex: none; }
 .ny-panel.phone .ny-head { padding: 8px 12px; min-height: 52px; }
 .ny-head h2 { margin: 0; font-size: 15px; font-weight: 650; display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
-.ny-count { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--needs); color: #fff; font-size: 11.5px; font-weight: 700; display: inline-grid; place-items: center; }
+.ny-count { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--needs-fill); color: #fff; font-size: 11.5px; font-weight: 700; display: inline-grid; place-items: center; }
 .ny-grow { flex: 1; min-width: 0; }
 .ny-sort { display: flex; gap: 2px; }
 .ny-devices { padding: 8px 12px 0; flex: none; flex-wrap: wrap; }

@@ -138,9 +138,26 @@ try {
     await later(p)
     await p.waitForSelector('.wiz-agents li')
     const gem = p.locator('.wiz-agents li', { hasText: 'Gemini CLI' })
+    // The card asks how it's going every second, and an answer with nothing going and no Node.js
+    // says "Node.js is installed, but Bridge AI can't find it". Asked here many times at once, from
+    // once the install is under way: none may say so.
+    const asked = { going: 0, lost: [], on: true }
+    const watch = (async () => {
+      while (asked.on) {
+        await Promise.all(Array.from({ length: 4 }, async () => {
+          const at = Date.now()
+          const s = await kit.api('/tools/node').catch(() => null)
+          if (s?.job) asked.going ||= Date.now()
+          else if (s && asked.going && at > asked.going && !s.have) asked.lost.push(s)
+        }))
+      }
+    })()
     await gem.locator('button', { hasText: 'Install Node.js' }).click({ timeout: 8000 })
     const node = await until(async () => { const s = await kit.api('/tools/node'); return s.have && !s.job && s }, 90000)
+    asked.on = false
+    await watch
     ok(node?.ours === NODE_V, 'Install Node.js: it\'s installed in Bridge AI\'s own folder, and found', node || (await kit.api('/tools/node')))
+    ok(!!asked.going && !asked.lost.length, 'and while it installs, it never says it\'s done and can\'t find it', { going: !!asked.going, lost: asked.lost.slice(0, 2) })
     ok(!!(await until(async () => /^Install\b(?! Node)(?! ·)/.test((await gem.locator('.signin').innerText().catch(() => '')).trim()), 12000)), 'and the agent\'s card moves on to installing it', await gem.innerText())
     await shot(p, `${tag}new-desktop-2b-node`)
     // Then the agent, through npm: with Bridge AI's own download cache (npm's shared one can hold

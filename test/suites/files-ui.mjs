@@ -126,7 +126,7 @@ try {
   await part('off, then on', async () => {
     const side = await ask(desk.url, '/files/sidebar')
     const home = await ask(desk.url, `/agents/${HOME}/files`)
-    ok(side.s === 404 && side.j.trial === 'files' && /Beta Features/.test(side.j.error) && home.s === 404 && /Beta Features/.test(home.j.error), 'off, Files\' routes and its roots say it\'s a beta feature and where to turn it on', { side, home })
+    ok(side.s === 404 && side.j.trial === 'files' && /Beta Features/.test(side.j.error) && home.s === 404 && home.j.trial === 'files' && home.j.error === side.j.error, 'off, Files\' routes and its roots say it\'s a beta feature and where to turn it on, in the same words', { side, home })
     await desk.api('/settings', { trials: { files: true } }, 'PATCH')
     ok((await ask(desk.url, '/files/sidebar')).s === 200, 'turned on in Settings, they answer')
   })
@@ -193,7 +193,7 @@ try {
     // Nor copied into: a copy from Laptop into Desk's home folder stops, saying so.
     const job = await desk.api('/transfers', { from: lapOnDesk.id, src: { pane: 'home', path: 'Notes/todo.md' }, into: { where: 'pane', pane: 'home' } })
     const after = await until(async () => (await desk.api('/transfers')).jobs?.find((j) => j.id === job.id && j.state !== 'going'), 15000, 300)
-    ok(after && after.state !== 'done' && /only looks/.test(after.error || '') && !fs.existsSync(path.join(h, 'todo.md')), 'nor is a copy made into them', after)
+    ok(after && after.state !== 'done' && /read-only/.test(after.error || '') && !fs.existsSync(path.join(h, 'todo.md')), 'nor is a copy made into them', after)
   })
   await part('open in its app, show in Finder', async () => {
     if (IS_WIN) { skip('Open in its app and Show in Explorer', 'Explorer can\'t be stood in for'); return }
@@ -392,15 +392,29 @@ try {
     const got = await until(() => opened().slice(before).find((a) => a.at(-1) === fs.realpathSync.native(path.join(h, 'Pictures', 'sea.png'))), 8000)
     ok(!!got && /Opened sea\.png in its app/.test(await p.locator('.fx-toast').innerText().catch(() => '')), 'a double-click on a picture opens it in its own app (a stand-in), and says so', opened())
   })
-  await part('Assist', async () => {
+  await part('AI Assist', async () => {
     await p.locator('.fx-side-row[data-label="Home"]').click()
     await p.locator('.fx-row[data-name="Projects"]').dblclick()
-    await p.locator('.fx-bar button', { hasText: 'Assist' }).click()
+    const wand = p.locator('.fx-bar button[aria-label="AI Assist"]')
+    ok(await wand.evaluate((e) => !e.nextElementSibling), 'AI Assist is at the right end of the folder\'s bar')
+    await wand.click()
+    const items = await p.locator('.ai-menu button').allInnerTexts()
+    ok(items.some((x) => /^Look over this folder/.test(x)) && items.some((x) => /^Suggest how to organize it/.test(x)), 'its menu: Look over this folder and Suggest how to organize it', items)
+    await p.locator('.ai-menu button', { hasText: 'Look over this folder' }).click()
     const a = p.locator('.fx-assist')
     ok(await a.waitFor({ timeout: 4000 }).then(() => true, () => false) && (await a.getAttribute('data-root')) === 'home' && (await a.getAttribute('data-rel')) === 'Projects' && /Projects/.test(await a.locator('.fa-where').innerText().catch(() => '')) && await a.locator('.fa-promise').isVisible(), 'Assist opens beside the folder, for the folder on screen, saying it only looks', { root: await a.getAttribute('data-root').catch(() => null), rel: await a.getAttribute('data-rel').catch(() => null) })
     await until(async () => (await a.locator('.fa-state').count()) === 0, 8000)
     await snap('assist')
-    await p.locator('.fx-bar button', { hasText: 'Assist' }).click()
+    // Beside it, the folder drops columns to fit, as it does on a narrow window, rather than scrolling sideways.
+    for (const width of [1280, 1440]) {
+      await p.setViewportSize({ width, height: 900 })
+      await sleep(300)
+      const fit = await p.locator('.fx-body').evaluate((e) => ({ sideways: e.scrollWidth - e.clientWidth, width: e.clientWidth }))
+      ok(fit.sideways <= 1, `${width} wide: beside it, the folder's columns fit, with nothing to scroll sideways to`, fit)
+    }
+    await wand.click()
+    await p.locator('.ai-menu button', { hasText: 'Look over this folder' }).click()
+    ok(!!(await until(async () => (await p.locator('.fx-assist').count()) === 0, 4000)), 'picked again, Look over this folder closes it')
   })
   await part('a folder macOS asks about', async () => {
     if (!sim) { skip('a folder macOS asks about, or slow to answer', 'the stand-in for macOS\'s guarded folders takes POSIX paths'); return }

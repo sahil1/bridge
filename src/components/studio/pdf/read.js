@@ -1,4 +1,4 @@
-// What Signature Assist reads from a PDF open in pdf.js: each page's text (for the model to
+// What AI Assist's Sign this reads from a PDF open in pdf.js: each page's text (for the model to
 // explain), and its words with where they are, the lines drawn on it and its form fields (for
 // find.js), all in the page's own points.
 

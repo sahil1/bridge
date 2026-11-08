@@ -20,7 +20,7 @@
 .home-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .home-chip:hover:not(:disabled), .home-chip[aria-expanded="true"] { background: var(--pane-2); color: var(--ink); }
 .home-chip:disabled { cursor: default; opacity: .7; }
-.home-send { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; border: 0; background: var(--accent); color: var(--on-accent, #fff); cursor: pointer; }
+.home-send { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; border: 0; background: var(--accent-fill); color: var(--on-accent, #fff); cursor: pointer; }
 .home-send:disabled { background: var(--pane-3, var(--line-2)); color: var(--ink-3); cursor: default; }
 .home-under { display: flex; align-items: center; gap: 8px; padding: 0 6px; min-height: 26px; }
 .home-where { display: inline-flex; align-items: center; gap: 5px; border: 0; background: none; color: var(--ink-3); font: 12px var(--font); cursor: pointer; padding: 3px 4px; border-radius: 6px; }

@@ -1,4 +1,4 @@
-// Prep Assist: before a meeting, what you'd want in front of you, the way AI Assist helps during one
+// Meeting prep (AI Assist): what you'd want in front of you before a meeting, as it helps during one
 // (meetings.js). For a meeting coming up: who's coming (the people you've met before, from Meeting
 // Insights' People, and the ones new to your meetings), what happened last time with them (the
 // summary, and the action items still open both ways: meetwork.js's since), the invite's agenda and
@@ -6,7 +6,7 @@
 // goals or questions written by the model that writes your meeting notes, each saying what it's
 // based on and which model said it. All but the suggestions is there without a model.
 // Suggestions are made when you ask, or by themselves shortly before a meeting with other people
-// (unless Settings › Meetings › Prep Assist is off), and kept in <data>/cache/meeting-prep.json, so
+// (unless Settings › Meetings says not to), and kept in <data>/cache/meeting-prep.json, so
 // each meeting is asked about once; Again asks afresh. Read only: nothing here writes to a calendar
 // or to mail, or answers an invite.
 import fs from 'node:fs'
@@ -66,8 +66,10 @@ const nameKey = (s) => [...partsOf(s)].sort().join(' ')
 const isMe = (name) => !!me() && (meetings.sameName(name, me()) || (String(name).includes('@') && meetings.sameName(String(name).split('@')[0], me())))
 // The people Meeting Insights knows, asked at most once a minute (it reads every meeting once, then
 // only those that changed). null when it can't say.
+// Meeting Insights is a beta feature: while it's off, nobody is said to be met before or new.
 let known = { at: 0, list: null }
 async function people() {
+  if (cfg.trials?.['meeting-insights'] !== true) return null
   if (known.list && Date.now() - known.at < 60e3) return known.list
   try {
     const r = await within(insights.list(), 8000, 'Meeting Insights')
@@ -173,7 +175,7 @@ function ask(e, p) {
     me() ? `I'm ${me()}.` : '',
     who.known.length || who.new.length ? `Invited, besides me: ${[...who.known.map((x) => x.name), ...who.new].join(', ')}${who.more ? ` and ${who.more} more` : ''}.` : 'No one else is invited.',
     who.known.length ? `People I've met before:\n${who.known.map((x) => `- ${x.name}: ${x.meetings} meeting${x.meetings === 1 ? '' : 's'}${x.last ? `, last ${day(x.last)}` : ''}${x.about ? `; ${x.about}` : ''}${x.topics.length ? `; we talk about ${x.topics.join(', ')}` : ''}`).join('\n')}` : '',
-    who.new.length ? `New to my meetings: ${who.new.join(', ')}.` : '',
+    who.new.length && who.insights ? `New to my meetings: ${who.new.join(', ')}.` : '',
     e.agenda ? `The invite says: ${e.agenda}` : '',
     e.links.length ? `Files in the invite: ${e.links.map((l) => l.name || l.url).join(', ')}.` : '',
     p.last ? `Last time, "${p.last.title}" on ${day(p.last.startedAt)}${p.last.summary.length ? `:\n${p.last.summary.map((x) => `- ${x}`).join('\n')}` : '.'}` : 'There is no earlier meeting like this one in my notes.',
@@ -213,7 +215,7 @@ export function suggest(raw, { again = false } = {}) {
       if (!v) { r = await helpers.reply(w.id, msgs, { ...o, json: SCHEMA }).catch(() => r); v = parsed(r.text) }
       entry.items = (v?.items || []).filter((x) => x && typeof x.text === 'string' && x.text.trim()).slice(0, 4)
         .map((x) => ({ kind: KINDS.has(x.kind) ? x.kind : 'goal', text: clip(x.text, 400), why: clip(x.why, 240) || null }))
-      if (!v) entry.error = `${w.label} answered, but not in a form Prep Assist can read. Try again.`
+      if (!v) entry.error = `${w.label} answered, but not in a form Bridge AI can read. Try again.`
       else if (!entry.items.length) entry.error = `${w.label} found nothing to suggest from what there is.`
     } catch (x) {
       entry.error = x.message || String(x)
@@ -257,7 +259,7 @@ const hidden = () => new Set(Array.isArray(cfg.calendar?.hidden) ? cfg.calendar.
 // so this never waits on the calendar, and it never asks macOS for it either.
 const todays = () => { const d = helpers.calendar?.(); return d ? [...(d.today || []), ...(d.tomorrow || [])] : [] }
 // The next meeting with other people that starts within ten minutes, for the floating card, unless
-// Prep Assist before meetings is off.
+// Prepare for each meeting is off.
 export function soon(now = Date.now()) {
   if (cfg.meetings?.prep === false) return null
   const hide = hidden()
@@ -267,7 +269,7 @@ export function soon(now = Date.now()) {
   return { ...e, suggestions: kept?.items?.length || 0 }
 }
 // Every minute: a meeting with other people starting within fifteen minutes gets its suggestions,
-// once, when there's a model and Prep Assist isn't turned off.
+// once, when there's a model and Prepare for each meeting isn't turned off.
 let timer = null
 export function start(every = Number(process.env.BRIDGE_PREP_EVERY_MS || 60e3)) {
   clearInterval(timer)

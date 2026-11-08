@@ -10,7 +10,7 @@
 .aa-steps li.now { color: var(--ink); font-weight: 600; }
 .aa-steps li.did { color: var(--ink-2); }
 .aa-num { display: inline-grid; place-items: center; flex: none; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--line-2); font: 600 10.5px var(--font); }
-.aa-steps li.now .aa-num { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
+.aa-steps li.now .aa-num { border-color: var(--accent-fill); background: var(--accent-fill); color: var(--on-accent); }
 .aa-steps li.did .aa-num { border-color: color-mix(in srgb, var(--good) 45%, transparent); color: var(--good); }
 
 .aa-suggest { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; margin-top: -6px; }

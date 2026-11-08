@@ -315,7 +315,7 @@ try {
   await row.waitFor({ timeout: 15000 })
   let text = await row.innerText()
   ok(/Local model on this computer/.test(text) && /Gemma 4 E2B by Google, 2\.8 GB, Apache-2\.0/.test(text) && /Download \(2\.8 GB\)/.test(text), 'Settings › Model Providers: "Local model on this computer", Gemma 4 E2B, its size and licence, and Download', text)
-  ok(/rewriting text, edit by voice, questions about a meeting/.test(text) && /only when you click Download/.test(text), 'with what it\'s good for, and that it downloads only when asked', text)
+  ok(/rewriting text, Edit by voice, questions about a meeting/.test(text) && /only when you click Download/.test(text), 'with what it\'s good for, and that it downloads only when asked', text)
   await row.scrollIntoViewIfNeeded()
   await shot(p, `${which}-builtin-1-offered`)
   files.slow = 40

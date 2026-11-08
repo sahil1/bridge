@@ -155,7 +155,7 @@ function eventOf({ title, calendar, start, end, allDay, location, url, notes, at
     join: joinLink(url) || joinLink(notes),
     attendees: attendees.slice(0, 12).map((a) => (a.includes('@') ? a.split('@')[0] : a)),
     attendeeCount: attendees.length,
-    // Their addresses, for Prep Assist to find your mail with them and the people you've met.
+    // Their addresses, for AI Assist's prep to find your mail with them and the people you've met.
     emails: emails.filter((x) => /^[^\s@]+@[^\s@]+$/.test(x) && !notPerson(x)).slice(0, 50).map((x) => x.toLowerCase()),
     agenda: agendaOf(notes),
     links: docLinks(url, notes),
@@ -211,7 +211,7 @@ export function makeCalendar(cfg) {
     return cache
   }
   // Today's and tomorrow's as last read for the app, or null: no read of its own, so what looks in
-  // the background (Prep Assist) never waits on the calendar or asks macOS for it.
+  // the background (AI Assist's prep) never waits on the calendar or asks macOS for it.
   get.cached = () => cache
   // Any span up to a year, for the week, month and year views. Long spans skip notes and
   // attendees (the year view only needs titles and times).

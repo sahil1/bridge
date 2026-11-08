@@ -16,7 +16,7 @@
 .hs-caret.flip-up { transform: rotate(-90deg); }
 .hs-badge {
   flex: none; display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 5px; border-radius: 9px;
-  background: var(--needs); color: #fff; font: 700 10px var(--font); font-variant-numeric: tabular-nums;
+  background: var(--needs-fill); color: #fff; font: 700 10px var(--font); font-variant-numeric: tabular-nums;
 }
 .hs-trigger .hs-badge { margin-left: auto; }
 .hs-trigger .hs-badge + .hs-caret { margin-left: 0; }

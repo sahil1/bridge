@@ -17,7 +17,7 @@
 // Windows), so they reach a computer's address on the stand-in the way Bridge AI does everywhere.
 // First-run setup on a new computer asks for nothing: with the hosted relay there, it says Settings ›
 // Devices sets the phone up, and nothing is asked of the relay or the accounts service; with no
-// hosted relay, it says nothing about it.
+// hosted relay, it says nothing about it, and nor does Settings › Devices once set up.
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -195,10 +195,17 @@ try {
   await h.p.waitForSelector('.wiz-levels, .sa-all', { timeout: 20000 })
   await h.p.waitForTimeout(1500)
   ok(!(await h.p.locator('.wiz-phone').count()) && !(await none.api('/relay')).hostedAvailable && !(await none.api('/account')).available, 'with no hosted relay and no accounts, first-run setup says nothing about it', null)
+  // Nor does Settings › Devices, all of it, Link a device included, once set up.
+  await none.api('/setup', { name: 'Tester' })
+  await h.p.reload()
+  await h.p.waitForSelector('.rail-nav-btn', { timeout: 20000 })
+  await devices(h.p)
+  const devText = await until(async () => { const x = await h.p.locator('.modal.settings').innerText().catch(() => ''); return /Link a device/.test(x) && /isn't set up yet/.test(x) && x }, 10000)
+  ok(!!devText && !/Bridge AI's relay|Bold Bridge/.test(devText) && /sign in to Cloudflare at the top of this page/.test(devText), 'and Settings › Devices names no hosted relay and no account anywhere, Link a device included', devText && devText.slice(-600))
   const noAcc = await fresh('noacc', { relay: { hostedUrl: hr.url } })
   ok(!(await noAcc.api('/relay')).hostedAvailable, 'and a hosted relay with no Bold Bridge accounts isn\'t offered at all (it can\'t work without one)')
 
-  const errs = pages.flatMap((x) => x.errors).filter((e) => !/\/api\/[\w/.?=&-]+ due to access control checks|WebSocket|_relay/.test(e))
+  const errs = pages.flatMap((x) => x.errors).filter((e) => !/\/api\/\S+ due to access control checks|WebSocket|_relay/.test(e))
   ok(errs.length === 0, 'no page errors', errs)
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)

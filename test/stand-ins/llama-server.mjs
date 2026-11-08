@@ -12,7 +12,7 @@
 // Answers: edit by voice (the text in capitals), meeting notes, who said what (JSON when held to a
 // schema), dictation to tidy (tidied as a model that keeps to its instructions would: "you know" and
 // "I mean" out, a phrase said twice kept once, a capital and a full stop; "take your time" in it
-// answers after 8 s, "fail on purpose" with an error), Files Assist's Ask AI (a folder of documents,
+// answers after 8 s, "fail on purpose" with an error), Ask a Model in AI Assist's look at a folder (a folder of documents,
 // as JSON), anything else "built-in answer". A prompt with "CRASH ONCE" stops the process
 // mid-request the first time (a file beside the log remembers), as a crash would.
 import http from 'node:http'

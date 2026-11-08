@@ -55,6 +55,32 @@ export const luminance = (hex) => {
 }
 export const validHex = (s) => /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(String(s || '').trim())
 
+// Contrast, as WCAG measures it: text 4.5:1 or more on what it's on. A theme's colors are kept as far
+// as that allows, each moved toward black or white only until it reads.
+export const contrast = (a, b) => { const x = luminance(a), y = luminance(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05) }
+const hexOf = (c) => `#${c.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('')}`
+const mixed = (a, b, t) => hexOf(rgb(a).map((v, i) => v * (1 - t) + rgb(b)[i] * t))
+const toward = (c, to, ok) => { for (let i = 0; i <= 100; i++) { const x = mixed(c, to, i / 100); if (ok(x)) return x } return to }
+// What text sits on (styles.css): pane, pane-2, pane-3 and the window behind them, light and dark.
+const PANES = { light: ['#ffffff', '#f6f7f9', '#eceef2', '#eef0f3'], dark: ['#16191f', '#1c2027', '#242932', '#0f1115'] }
+// How much accent its soft fill (a picked tab, a chip) has.
+const SOFT = { light: 0.11, dark: 0.16 }
+// Links and accented text: 4.5:1 on every pane, and on its own soft fill over the two lightest (4.6
+// here, as the browser's blend of that fill can round a little differently).
+export const textAccent = (c, dark) => {
+  const m = dark ? 'dark' : 'light'
+  return toward(c, dark ? '#ffffff' : '#000000', (x) => PANES[m].every((p, i) => contrast(x, p) >= 4.6 && (i > 1 || contrast(x, mixed(p, x, SOFT[m])) >= 4.6)))
+}
+// A filled control (a primary button, a badge, your message): its text 4.5:1 on it. White text, on
+// the color made darker as far as that takes; a very light color keeps dark text instead.
+export function fillFor(c) {
+  if (luminance(c) > 0.5 && contrast('#12151b', c) >= 4.5) return { fill: c, on: '#12151b' }
+  return { fill: toward(c, '#000000', (x) => contrast('#ffffff', x) >= 4.6), on: '#ffffff' }
+}
+// The frame's quiet text, ink at an alpha over the chrome: as see-through as still reads at 4.5:1,
+// on the frame's darkest (or lightest) fill too.
+const alphaFor = (ink, under, from) => { for (let a = from; a < 1; a += 0.02) if (contrast(mixed(under, ink, a), under) >= 4.5) return Math.round(a * 100) / 100; return 1 }
+
 // The colors a theme resolves to in the current mode, or null for the plain Bridge look.
 export function resolve(a, dark = isDark(a.mode)) {
   const t = a.theme === 'custom'
@@ -65,7 +91,7 @@ export function resolve(a, dark = isDark(a.mode)) {
   return { chrome: pick(t.chrome), accent: pick(t.accent) }
 }
 
-const FRAME_VARS = ['--chrome', '--chrome-ink', '--chrome-ink-2', '--chrome-ink-3', '--chrome-line', '--chrome-line-2', '--chrome-fill', '--chrome-fill-2', '--chrome-fill-3', '--accent', '--accent-soft', '--on-accent', '--user-bubble']
+const FRAME_VARS = ['--chrome', '--chrome-ink', '--chrome-ink-2', '--chrome-ink-3', '--chrome-line', '--chrome-line-2', '--chrome-fill', '--chrome-fill-2', '--chrome-fill-3', '--accent', '--accent-fill', '--accent-soft', '--on-accent', '--user-bubble']
 
 export function apply(a = load()) {
   const root = document.documentElement
@@ -78,20 +104,28 @@ export function apply(a = load()) {
   if (c) {
     const lightFrame = luminance(c.chrome) > 0.4
     const ink = lightFrame ? '18 21 27' : '255 255 255'
+    const inkHex = lightFrame ? '#12151b' : '#ffffff'
+    // (Measured on the frame's selected row, its most inked fill.)
+    const under = mixed(c.chrome, inkHex, lightFrame ? 0.1 : 0.16)
+    const quiet = alphaFor(inkHex, under, lightFrame ? 0.52 : 0.6)
     root.setAttribute('data-chrome', lightFrame ? 'light' : 'dark')
     s.setProperty('--chrome', c.chrome)
-    s.setProperty('--chrome-ink', lightFrame ? '#12151b' : '#ffffff')
-    s.setProperty('--chrome-ink-2', `rgb(${ink} / ${lightFrame ? 0.74 : 0.82})`)
-    s.setProperty('--chrome-ink-3', `rgb(${ink} / ${lightFrame ? 0.52 : 0.6})`)
+    s.setProperty('--chrome-ink', inkHex)
+    s.setProperty('--chrome-ink-2', `rgb(${ink} / ${Math.max(lightFrame ? 0.74 : 0.82, Math.min(1, quiet + 0.14))})`)
+    s.setProperty('--chrome-ink-3', `rgb(${ink} / ${quiet})`)
     s.setProperty('--chrome-line', `rgb(${ink} / .1)`)
     s.setProperty('--chrome-line-2', `rgb(${ink} / .18)`)
     s.setProperty('--chrome-fill', `rgb(${ink} / ${lightFrame ? 0.07 : 0.1})`)
     s.setProperty('--chrome-fill-2', `rgb(${ink} / ${lightFrame ? 0.05 : 0.07})`)
     s.setProperty('--chrome-fill-3', `rgb(${ink} / ${lightFrame ? 0.1 : 0.16})`)
-    s.setProperty('--accent', c.accent)
-    s.setProperty('--accent-soft', `color-mix(in srgb, ${c.accent} ${isDark(a.mode) ? 16 : 11}%, transparent)`)
-    s.setProperty('--on-accent', luminance(c.accent) > 0.5 ? '#12151b' : '#ffffff')
-    s.setProperty('--user-bubble', isDark(a.mode) ? `color-mix(in srgb, ${c.accent} 82%, #000)` : c.accent)
+    const dark = isDark(a.mode)
+    const accent = textAccent(c.accent, dark)
+    const { fill, on } = fillFor(c.accent)
+    s.setProperty('--accent', accent)
+    s.setProperty('--accent-fill', fill)
+    s.setProperty('--accent-soft', `color-mix(in srgb, ${accent} ${(dark ? SOFT.dark : SOFT.light) * 100}%, transparent)`)
+    s.setProperty('--on-accent', on)
+    s.setProperty('--user-bubble', on === '#ffffff' && dark ? `color-mix(in srgb, ${fill} 88%, #000)` : fill)
   } else {
     root.removeAttribute('data-chrome')
   }

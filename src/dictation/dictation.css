@@ -35,7 +35,7 @@ button.dp-to:hover { background: var(--pane-2); color: var(--ink); }
 .dp-x, .dp-ok { flex: none; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; color: var(--ink-3); }
 .dp-x:hover { background: var(--pane-2); color: var(--ink); }
 .dp-ok { background: var(--ink); color: var(--pane); }
-.dp-ok:hover:not(:disabled) { background: var(--accent); color: #fff; }
+.dp-ok:hover:not(:disabled) { background: var(--accent-fill); color: #fff; }
 .dp-ok:disabled { opacity: .35; }
 .dp-what { max-width: 330px; padding: 7px 12px 7px 0; color: var(--ink-2); line-height: 1.35; white-space: normal; }
 .dp-working .dp-what, .dp-done .dp-what { color: var(--ink); }

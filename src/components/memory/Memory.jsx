@@ -246,8 +246,8 @@ function AboutYou({ a, me, elsewhere, onChange }) {
           : <p className="muted small mm-you-text">{t('Nothing to go on yet: it\'s made from the people, organizations and projects memory has, once your meetings and dictations bring some. Or write it yourself.')}</p>}
       <p className="muted small mm-you-where">
         {!on ? t('Off: no model and not Chief of Staff is given it.')
-          : elsewhere ? t('While it\'s on, the model that writes your meeting notes and the one that tidies your dictation are given it, and Chief of Staff reads it. It\'s made and kept on {name}.', { name: elsewhere })
-            : t('While it\'s on, the model that writes your meeting notes and the one that tidies your dictation are given it, and Chief of Staff reads it. It\'s made and kept on this computer.')}
+          : elsewhere ? t('While it\'s on, the models you use for meetings (notes, Who spoke, cleanup, AI Assist and your questions) and the one that tidies your dictation are given it, and Chief of Staff reads it. It\'s made and kept on {name}.', { name: elsewhere })
+            : t('While it\'s on, the models you use for meetings (notes, Who spoke, cleanup, AI Assist and your questions) and the one that tidies your dictation are given it, and Chief of Staff reads it. It\'s made and kept on this computer.')}
         {!me && ` ${t('Your name, in Settings › General, starts it off.')}`}
       </p>
       {err && <p className="error-text small" role="alert">{err}</p>}
@@ -296,7 +296,7 @@ function Look({ kind, icon, label, title, open, onOpen, children }) {
     <section className={`mm-card mm-look mm-${kind}${open ? ' open' : ''}`} aria-label={label}>
       <button type="button" className="mm-look-head" aria-expanded={open} onClick={() => onOpen(!open)}>
         <Icon name={icon} size={14} />
-        <span className="mm-look-what"><b>{title}</b> <span className="mm-look-go">{open ? t('Hide') : t('Look them over')}</span></span>
+        <span className="mm-look-what"><b>{title}</b> <span className="mm-look-go">{open ? t('Hide') : t('Review')}</span></span>
         <Icon name="chevron" size={11} className="mm-look-chev" />
       </button>
       {open && children}
@@ -341,7 +341,7 @@ function Tidy({ list: these, byId, act }) {
   const kept = rows.filter((x) => off.has(x.id)).map((x) => x.id)
   const flip = (id) => setOff((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
   return (
-    <Look kind="tidy" icon="sparkle" label={t('Tidy Up')} open={open} onOpen={setOpen}
+    <Look kind="tidy" icon="trash" label={t('Tidy Up')} open={open} onOpen={setOpen}
       title={rows.length === 1 ? t('{n} looks like it adds little', { n: 1 }) : t('{n} look like they add little', { n: rows.length })}>
       <p className="muted small">{t('Places, languages, days and everyday words that speech to text spells right anyway, and terms that came up once a while ago with nothing to fix. Summaries no longer add these. Nothing goes until you say.')}</p>
       <div className="mm-rows mm-tidy-list">
@@ -354,7 +354,7 @@ function Tidy({ list: these, byId, act }) {
       </div>
       <div className="mm-acts">
         <button type="button" className="btn small primary" disabled={!out.length} onClick={() => act(() => api('/memory/tidy', { method: 'POST', body: { remove: out, keep: kept } }))}>
-          {!kept.length ? (out.length === 1 ? t('Take it out') : t('Take out all {n}', { n: out.length })) : out.length === 1 ? t('Take out {n}, keep the rest', { n: 1 }) : t('Take out {n}, keep the rest', { n: out.length })}
+          {!kept.length ? (out.length === 1 ? t('Remove it') : t('Remove all {n}', { n: out.length })) : t('Remove {n}, keep the rest', { n: out.length })}
         </button>
         <button type="button" className="ghost-btn" onClick={() => act(() => api('/memory/tidy', { method: 'POST', body: { keep: rows.map((x) => x.id) } }))}>{t('Keep them all')}</button>
       </div>
@@ -363,11 +363,10 @@ function Tidy({ list: these, byId, act }) {
 }
 
 // People: the ones you meet that memory doesn't have (Meeting Insights), the most met first, each
-// one click from memory. With Meeting Insights off, it says what it would add.
+// one click from memory. With Meeting Insights off (a beta feature), nothing of it shows.
 function Met({ people, insights, act }) {
   const [all, setAll] = useState(false)
-  if (!insights) return <p className="mm-note muted small" role="status"><Icon name="info" size={13} /> {t('Only the people memory has are here. With Meeting Insights on (Settings › About & Updates › Beta Features), everyone you meet is here too.')}</p>
-  if (!people.length) return null
+  if (!insights || !people.length) return null
   const shown = all ? people : people.slice(0, 30)
   return (
     <section className="mm-met" aria-label={t('People You Meet')}>

@@ -1,5 +1,5 @@
-// Mail's read-only help (server/mail.js, mailassist.js, freetimes.js). Everywhere: Scheduling
-// Assist's time-finding on a seeded calendar (working hours and days, a buffer around meetings and
+// Mail's read-only help (server/mail.js, mailassist.js, freetimes.js). Everywhere: AI Assist's
+// Find a time on a seeded calendar (working hours and days, a buffer around meetings and
 // more around one somewhere else, a booked day and a day away, the length asked for, the other
 // side's working day, and theirs and yours not meeting); How You Write from recorded meetings (your
 // lines as Who spoke marks them: your mic on a call, your voice in a room, not the call's side,
@@ -53,7 +53,7 @@ const wall = (iso, zone) => {
 const clear = (s) => EVENTS.filter((x) => !x.canceled && !x.allDay).every((x) => { const p = (x.location ? 30 : 15) * 60e3; return Date.parse(s.end) <= Date.parse(x.start) - p || Date.parse(s.start) >= Date.parse(x.end) + p })
 const inHours = (s, from = 9 * 60) => { const a = wall(s.start, ZONE), b = wall(s.end, ZONE); return a.wd >= 1 && a.wd <= 5 && a.mins >= from && b.mins <= 17 * 60 && a.day === b.day }
 
-// ---------- Scheduling Assist's time-finding, on every system ----------
+// ---------- Find a time's time-finding, on every system ----------
 {
   ok(asksToMeet('Could we find a time next week for a 45 minute call about the rollout?') && asksToMeet('When are you free on Thursday?') && !asksToMeet('Could you send me the budget sheet please?'), 'an email asking to meet is told from one that doesn\'t')
   ok(minutesAsked('a 45 minute call') === 45 && minutesAsked('half an hour') === 30 && minutesAsked('an hour') === 60 && minutesAsked('a quick chat') === null, 'how long they ask for: 45 minutes, half an hour, an hour, or not said')
@@ -200,7 +200,7 @@ INSERT INTO messages VALUES (141, 0, 0, 0, ${t2 + 6}, ${t2 + 1}, 1, 1, 91, 141, 
 
   // ---------- With no model ----------
   let e = await err('/mail/1/draft', {})
-  ok(e?.j?.code === 'no_model' && /No model to write with/.test(e.message) && /Model Providers/.test(e.message), 'no model: Reply Assist says so, and where to add one', e?.j)
+  ok(e?.j?.code === 'no_model' && /No model to write with/.test(e.message) && /Model Providers/.test(e.message), 'no model: Draft a reply says so, and where to add one', e?.j)
   e = await err('/mail/voice/learn', {})
   ok(e?.j?.code === 'no_model', 'and so does learning How You Write', e?.j)
   let v = await api('/mail/voice')
@@ -222,7 +222,7 @@ INSERT INTO messages VALUES (141, 0, 0, 0, ${t2 + 6}, ${t2 + 1}, 1, 1, 91, 141, 
   v = await api('/mail/voice', { profile: '- Writes short, friendly replies\n- Signs off "Cheers"', examples: [...v.examples, { text: 'Hey Lee, works for me. Cheers' }] }, 'PUT')
   ok(v.profile === '- Writes short, friendly replies\n- Signs off "Cheers"' && v.examples.length === 2 && !!v.editedAt, 'changed by you: the profile and an example added', v)
 
-  // ---------- Reply Assist ----------
+  // ---------- Draft a reply ----------
   let d = await api('/mail/1/draft', {})
   const asked = model.requests().filter((x) => DRAFT_ASK.test(JSON.stringify(x.messages))).at(-1)
   const user = asked?.messages.find((x) => x.role === 'user')?.content || ''
@@ -243,9 +243,9 @@ INSERT INTO messages VALUES (141, 0, 0, 0, ${t2 + 6}, ${t2 + 1}, 1, 1, 91, 141, 
   d = await api('/mail/130/draft', { nudge: true })
   ok(/Just checking in/.test(d.draft) && d.reply.to[0]?.address === 'kim@example.com', 'a nudge for mail nobody answered, to who you sent it to', d)
 
-  // ---------- Scheduling Assist ----------
+  // ---------- Find a time ----------
   e = await err('/mail/3/times')
-  ok(e?.j?.code === 'calendarAccess', 'with the calendar not allowed, Scheduling Assist says so (to allow it)', e?.j)
+  ok(e?.j?.code === 'calendarAccess', 'with the calendar not allowed, Find a time says so (to allow it)', e?.j)
   fs.writeFileSync(path.join(kit.bin, 'bridgecal.json'), JSON.stringify({ status: 'granted', events: EVENTS }))
   let t = await api('/mail/3/times')
   const theirDay = (s) => { const x = new Date(Date.parse(s.start) + t.theirs.offset * 60000); return { h: x.getUTCHours() + x.getUTCMinutes() / 60, wd: x.getUTCDay() } }

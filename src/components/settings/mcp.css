@@ -42,7 +42,7 @@
 .mcp-menu button.danger { color: var(--critical); }
 .mcp-confirm { display: grid; gap: 6px; padding: 10px 12px; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--critical) 5%, transparent); border-radius: 0 0 var(--r-sm) var(--r-sm); }
 .mcp-confirm p { margin: 0; font-size: 12.5px; color: var(--ink); }
-.btn.mcp-danger { background: var(--critical); border-color: transparent; color: #fff; }
+.btn.mcp-danger { background: var(--critical-fill); border-color: transparent; color: #fff; }
 .btn.mcp-danger:hover { filter: brightness(1.08); }
 
 .mcp-results { list-style: none; margin: 0; padding: 8px 12px; display: grid; gap: 4px; border-top: 1px solid var(--line); }

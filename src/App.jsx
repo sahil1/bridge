@@ -1,8 +1,8 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import SoundButton from './components/SoundButton.jsx'
-import StatusMenu, { UsageChip, WeatherChip, ClockChip } from './components/StatusMenu.jsx'
+import StatusMenu, { UsageChip, UsageGlance, WeatherChip, ClockChip } from './components/StatusMenu.jsx'
 import Icon, { StatusDot } from './components/Icon.jsx'
-import { useAppearance } from './appearance.js'
+import { useAppearance, fillFor } from './appearance.js'
 import { usePins } from './pins.js'
 import ErrorBoundary, { Quiet } from './components/ErrorBoundary.jsx'
 import { CrashNotice } from './components/CrashReport.jsx'
@@ -10,7 +10,7 @@ import Rail, { agentName } from './components/Rail.jsx'
 import Board from './components/Board.jsx'
 import Dock from './components/Dock.jsx'
 import Console, { MateEmpty, showChat } from './components/Console.jsx'
-import { Settings, Onboarding, HerdrView, Terminals, ShellTab, MeetingsHome, MeetingPage, Dictations, Memory, WhiteboardsHome, WhiteboardPage, StudioHome, StudioPage, Explorer, preloadViews } from './lazy.jsx'
+import { Settings, Onboarding, HerdrView, Terminals, ShellTab, MeetingsHome, MeetingPage, Dictations, Memory, WhiteboardsHome, WhiteboardPage, StudioHome, StudioPage, Explorer, UsageStats, preloadViews } from './lazy.jsx'
 import Home from './components/Home.jsx'
 import { FirstRunAnswers } from './components/FirstRun.jsx'
 import { MeetingsProvider, RecordingPill, CallPrompt, useMeetings } from './components/meetings/recording.jsx'
@@ -41,7 +41,7 @@ import { MachineMenu, AskBanner, SwitchedHere, useMachines, goMachine, isRemote,
 import { useNeedsYou, NeedsYouChip, NeedsYouPanel, waitingOn, quietPanes } from './components/NeedsYou.jsx'
 import { isQuiet } from '../shared/focus.js'
 import AgentMap from './components/AgentMap.jsx'
-import NeedsHome, { Everything, useHome, needCount } from './components/NeedsHome.jsx'
+import NeedsHome, { Everything, useHome, needCount, editHome } from './components/NeedsHome.jsx'
 import More from './components/More.jsx'
 import RemoteAgent from './components/RemoteAgent.jsx'
 import Dictation from './dictation/Dictation.jsx'
@@ -57,7 +57,8 @@ function useRuntimeTheme() {
   useEffect(() => {
     api('/runtime-theme').then((t) => {
       const root = document.documentElement.style
-      if (t.red) root.setProperty('--needs', t.red)
+      // (Badges are white on --needs-fill: a shade of it dark enough to read.)
+      if (t.red) { root.setProperty('--needs', t.red); if (fillFor(t.red).on === '#ffffff') root.setProperty('--needs-fill', fillFor(t.red).fill) }
       if (t.teal) root.setProperty('--done', t.teal)
       if (t.yellow) root.setProperty('--working', t.yellow)
     }).catch(() => {})
@@ -594,6 +595,8 @@ function App() {
 
   // The phone's Today: its own tab, or in More with Home on.
   const phoneToday = () => { if (homeOn) { setMtab('more'); setMoreView('today') } else setMtab('today') }
+  // The phone's Usage: a row of its own in More, Home on or off.
+  const phoneUsage = () => { setMtab('more'); setMoreView('usage') }
   const showCard = (id) => {
     store.set(`cc-card-${id}`, true)
     setView('command')
@@ -608,7 +611,7 @@ function App() {
   const showToday = (tab, detail) => {
     setView('command')
     setTodayTab(tab)
-    if (!wide) phoneToday()
+    if (!wide) { if (tab === 'usage') phoneUsage(); else phoneToday() }
     else set({ dockMin: false, todayOpen: true, max: 'dock' })
     if (detail) setTimeout(() => openToday(tab, detail), 60)
   }
@@ -666,7 +669,7 @@ function App() {
   useHotkey(useCallback((e) => (e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'f', []), () => setHistory((v) => !v))
   // ⌥1 and ⌥2 alone: with ⌘ (or Ctrl) they're a document's Heading 1 and 2, in Studio.
   useHotkey(useCallback((e) => e.altKey && !e.metaKey && !e.ctrlKey && (e.code === 'Digit1' || e.code === 'Digit2'), []), (e) => setView(e.code === 'Digit1' ? 'command' : 'herdr'))
-  // (Not while something open says Esc is its own, data-esc: Mail's Reply Assist, say; and an event
+  // (Not while something open says Esc is its own, data-esc: Mail's AI Assist, say; and an event
   // open in the calendar, or its menu, closes first: Escape is its, then the panel's.)
   useHotkey(useCallback((e) => e.key === 'Escape' && !e.target.closest?.('.xterm, textarea, input, .quick-open, .tour, .excalidraw, .find-bar') && !document.querySelector('[data-esc], .calv .cal-detail, .calv-menu'), []), () => set({ max: null }))
 
@@ -705,6 +708,7 @@ function App() {
   const paletteActions = [
     homeOn && { id: 'a:homeview', label: t('Home'), icon: 'home', keywords: 'needs you waiting answer ready review coming up today next meeting tasks inbox start', run: openHome },
     homeOn && { id: 'a:everything', label: t('Everything'), icon: 'grid', keywords: 'all every item device computer meetings tasks whiteboards agents lanes', run: openEverything },
+    homeOn && { id: 'a:edithome', label: t('Edit Home'), icon: 'edit', keywords: 'arrange reorder order move hide show sections layout customize organize home screen wiggle', run: () => { editHome(); openHome() } },
     { id: 'a:home', label: t('New…'), icon: 'plus', keywords: 'new thread start build project agent chat what should we build', run: openNew },
     { id: 'a:new', label: t('New agent with all the options…'), icon: 'bot', keywords: 'launch start claude codex gemini copilot opencode project dialog compare account', run: () => setNewAgent({ mode: 'project' }) },
     { id: 'a:record', label: t('Record a meeting'), icon: 'mic', keywords: 'meeting notes transcript record call granola minutes', run: () => meetings?.start().catch(() => openAgent('view:meetings')) },
@@ -717,7 +721,7 @@ function App() {
     Explorer && filesOn && { id: 'a:files', label: t('Files'), icon: 'folder', keywords: 'files finder explorer folders browse desktop documents downloads home drive disk icloud onedrive dropbox quick look get info', run: () => openAgent('view:files') },
     WhiteboardsHome && { id: 'a:boards', label: t('Whiteboards'), icon: 'shapes', keywords: 'whiteboard board excalidraw draw sketch diagram flowchart architecture sequence org chart mermaid drawio canvas', run: () => openAgent('view:whiteboards') },
     { id: 'a:map', label: t('Agent Map'), icon: 'grid', keywords: 'what is running where devices computers machines all agents overview cloud subagents', run: openMap },
-    { id: 'a:needs', label: t('Needs you'), icon: 'bell', keywords: 'inbox waiting approve allow permission questions answer review finished failed devices', run: () => setInbox({}) },
+    { id: 'a:needs', label: t('Needs You'), icon: 'bell', keywords: 'inbox waiting approve allow permission questions answer review finished failed devices', run: () => setInbox({}) },
     { id: 'a:history', label: t('Search history and closed agents…'), icon: 'clock', keywords: 'search find transcript conversation closed archived resume old past', run: () => setHistory(true) },
     { id: 'a:cloud', label: t('New cloud agent…'), icon: 'cloud', keywords: 'cursor copilot jules claude managed remote github repo pull request', run: () => setNewAgent({ mode: 'cloud' }) },
     { id: 'a:chat', label: t('New chat…'), icon: 'chat', keywords: 'plain vanilla talk ask claude codex gemini assistant', run: () => setNewAgent({ mode: 'chat' }) },
@@ -742,13 +746,14 @@ function App() {
     // Mail's keys, taught here: each action with its key beside it. Mail is only where it can be read.
     wide && conf?.mail && { id: 'a:mail-done', label: t('Mail: Done'), icon: 'check', hint: 'E', keywords: 'mail email archive done finished mark inbox zero clear', run: () => { showToday('mail'); mailDo('done') } },
     wide && conf?.mail && { id: 'a:mail-later', label: t('Mail: Remind me…'), icon: 'clock', hint: 'H', keywords: 'mail email snooze later remind reminder set aside nobody answers follow up', run: () => { showToday('mail'); mailDo('later') } },
-    wide && conf?.mail && { id: 'a:mail-reply', label: t('Mail: Reply Assist'), icon: 'edit', hint: 'R', keywords: 'mail email reply draft answer write respond voice tone schedule free times', run: () => { showToday('mail'); mailDo('reply') } },
+    wide && conf?.mail && { id: 'a:mail-reply', label: t('Mail: Draft a reply'), icon: 'wand', hint: 'R', keywords: 'mail email reply draft answer write respond voice tone schedule free times ai assist', run: () => { showToday('mail'); mailDo('reply') } },
     wide && conf?.mail && { id: 'a:mail-keys', label: t('Mail: every key'), icon: 'keyboard', hint: '?', keywords: 'mail email keys keyboard shortcuts hotkeys j k next previous', run: () => { showToday('mail'); mailDo('keys') } },
     { id: 'a:markets', label: t('Markets & news'), icon: 'trend', keywords: 'fed rates treasury mortgage stocks headlines tech', run: () => showToday('markets') },
     { id: 'a:routines', label: t('Show routines'), icon: 'repeat', run: () => showCard('repeat') },
     routinesOn && { id: 'a:new-routine', label: t('New routine…'), icon: 'repeat', keywords: 'schedule scheduled recurring repeat every day weekday week cron automation task later', run: () => setRoutineDraft({}) },
-    { id: 'a:usage', label: t('Show usage'), icon: 'gauge', keywords: 'quota tokens cost', run: () => showCard('gauge') },
-    { id: 'a:stats', label: t('Usage stats and history'), icon: 'gauge', keywords: 'stats heatmap tokens cost models projects', run: () => openToday('usage') },
+    // On a phone, both open More › Usage: plan usage first, then the stats.
+    { id: 'a:usage', label: t('Show usage'), icon: 'gauge', keywords: 'quota tokens cost', run: () => (wide ? showCard('gauge') : phoneUsage()) },
+    { id: 'a:stats', label: t('Usage stats and history'), icon: 'gauge', keywords: 'stats heatmap tokens cost models projects', run: () => (wide ? openToday('usage') : phoneUsage()) },
     { id: 'a:tour', label: t('Take the tour'), icon: 'sparkle', keywords: 'help guide walkthrough intro getting started how', run: takeTour },
   ].filter(Boolean)
   // The phone's Cloud agents: only what it has.
@@ -816,13 +821,15 @@ function App() {
       </button>
       <div className="top-right">
         <Quiet name="Recording"><RecordingPill /></Quiet>
+        {/* What needs you opens Home when it's on, so the chip waits for the settings that say:
+            clicked before they were in (just after a reload), it opened the inbox instead. */}
         {cloudOnly
           ? needsYou.length > 0 && (
             <button className="needs-chip" onClick={() => openAgent(needsYou[0].paneId)} aria-label={needsYou.length === 1 ? t('{n} needs you', { n: needsYou.length }) : t('{n} need you', { n: needsYou.length })}>
               <StatusDot status="blocked" size={8} /> {needsYou.length}<span className="needs-word"> {needsYou.length === 1 ? t('needs you') : t('need you')}</span>
             </button>
           )
-          : <NeedsYouChip count={needN} elsewhere={needElse} review={wide ? toReview : 0} open={!!inbox} onClick={() => (homeOn ? openHome() : setInbox(inbox ? null : {}))} />}
+          : conf && <NeedsYouChip count={needN} elsewhere={needElse} review={wide ? toReview : 0} open={!!inbox} onClick={() => (homeOn ? openHome() : setInbox(inbox ? null : {}))} />}
         {!cloudOnly && wide && (
           <>
             <Quiet name="Next meeting"><NextMeetingChip onClick={() => showCard('calendar')} recording={meetings?.rec?.title || null} /></Quiet>
@@ -869,9 +876,10 @@ function App() {
       : it.chief ? openOn(it.machine, it.chief, { device: it.device, title: t('Chief of Staff') }) : goMachine(it.machine, { agent: 'chief', back: t('Chief of Staff') })),
     onCalendar: () => showCard('calendar'),
   }
+  // Home off says how to turn it on, once the settings say it's off (until they're in, nothing).
   const viewFor = (id, { onBack } = {}) => (
     <ErrorBoundary key={id} name="This view" resetKey={id}>
-      {(id === 'view:home' || id === 'view:everything') && !homeOn ? <section className="pane view-pane"><TrialOff name={t('Home')} /></section>
+      {(id === 'view:home' || id === 'view:everything') && !homeOn ? <section className="pane view-pane">{conf && <TrialOff name={t('Home')} />}</section>
         : id === 'view:home' ? <section className="pane view-pane"><NeedsHome {...homeProps} onEverything={openEverything} /></section>
         : id === 'view:everything' ? <section className="pane view-pane"><Everything {...homeProps} onOpenAgent={(x) => openOn(x.machine, x.a.paneId, { device: x.device, title: x.a.name || x.a.title, kind: x.a.kind })} onBack={wide ? null : () => setHomeView('home')} /></section>
         : id === 'view:new' ? <Home fleet={fleet} onLaunched={fromHome} onMore={(init) => setNewAgent(init)} />
@@ -914,6 +922,8 @@ function App() {
       : [['mate', 'helm', t('Chief')], ['agents', 'grid', t('Agents')], ['meetings', 'mic', t('Meetings')], ['today', 'today', t('Today')], ['more', 'more', t('More')]]
     const moreRows = [
       homeOn && { id: 'today', icon: 'today', label: t('Today'), hint: t('Calendar, mail, markets and usage'), run: () => setMoreView('today') },
+      // The usage chip's account and figure (the desktop's top bar has it; a phone's has no room).
+      { id: 'usage', icon: 'gauge', label: t('Usage'), hint: t('Plans, limits and history'), side: <UsageGlance quota={quota.data} primary={primary} />, run: () => setMoreView('usage') },
       WhiteboardsHome && { id: 'whiteboards', icon: 'shapes', label: t('Whiteboards'), hint: t('Draw by hand, or describe a diagram'), run: () => setMoreView('view:whiteboards') },
       StudioHome && studioOn && { id: 'studio', icon: 'layers', label: t('Studio'), hint: t('Documents, sheets, decks and pages'), run: () => setMoreView('view:studio') },
       Explorer && filesOn && { id: 'files', icon: 'folder', label: t('Files'), hint: t('Every folder on your computers'), run: () => setMoreView('view:files') },
@@ -921,7 +931,7 @@ function App() {
       { id: 'map', icon: 'grid', label: t('Agent Map'), hint: t("What's running on each of your computers"), run: () => setMoreView('view:map') },
       { id: 'dictations', icon: 'wave', label: t('Dictations'), hint: t("Everything you've dictated"), run: () => setMoreView('view:dictations') },
       { id: 'memory', icon: 'book', label: t('Memory'), hint: t('People, organizations and words from your meetings and dictations'), run: () => setMoreView('view:memory') },
-      { id: 'needs', icon: 'bell', label: t('Needs you'), hint: t("What's waiting on you, on every device"), count: waiting, run: () => setInbox({}) },
+      { id: 'needs', icon: 'bell', label: t('Needs You'), hint: t("What's waiting on you, on every device"), count: waiting, run: () => setInbox({}) },
       { id: 'history', icon: 'clock', label: t('History'), hint: t('Every conversation, and closed agents'), run: () => setHistory(true) },
       { id: 'settings', icon: 'settings', label: t('Settings'), hint: t('Devices, voice, appearance and more'), run: () => setSettings('all') },
     ].filter(Boolean)
@@ -958,7 +968,8 @@ function App() {
                 {/* A whiteboard has its own way back, to the list of them. */}
                 {!moreView.startsWith(BOARD) && !moreView.startsWith(STUDIO) && <button type="button" className="ghost-btn m-view-back" onClick={() => setMoreView(null)}><Icon name="back" size={14} /> {t('More')}</button>}
                 {moreView === 'terminals' ? <Terminals key={fleet?.session || ''} onChat={(id) => openAgent(id)} />
-                  : moreView === 'today' ? <div className="m-today"><TodayTabs tab={todayTab} setTab={setTodayTab} compact /><div className={`m-today-body tab-${todayTab}`}><TodayBody onOpenAgent={openAgent} tab={todayTab} setTab={setTodayTab} stackClass="m-stack" /></div></div>
+                  : moreView === 'today' ? <div className="m-today"><TodayTabs tab={todayTab} setTab={setTodayTab} compact /><div className={`m-today-body tab-${todayTab}`}><TodayBody phone onOpenAgent={openAgent} tab={todayTab} setTab={setTodayTab} stackClass="m-stack" /></div></div>
+                    : moreView === 'usage' ? <ErrorBoundary name="Usage"><UsageStats phone /></ErrorBoundary>
                     : viewFor(moreView)}
               </div>
             )
@@ -966,7 +977,7 @@ function App() {
           {mtab === 'today' && (
             <div className="m-today">
               <TodayTabs tab={todayTab} setTab={setTodayTab} compact />
-              <div className={`m-today-body tab-${todayTab}`}><TodayBody onOpenAgent={openAgent} tab={todayTab} setTab={setTodayTab} stackClass="m-stack" /></div>
+              <div className={`m-today-body tab-${todayTab}`}><TodayBody phone onOpenAgent={openAgent} tab={todayTab} setTab={setTodayTab} stackClass="m-stack" /></div>
             </div>
           )}
         </main>

@@ -4,8 +4,10 @@
 // the desktop has a place that isn't listed here, so nothing new can ship on the desktop alone: give
 // it a phone path (a row in the More tab, src/components/More.jsx, or a place in another tab) and
 // add it here. Each path is then followed on a phone, 375 and 430 px wide: every tap is there, and
-// the place opens. Then Whiteboards on the phone: the list, a board opened from it (with its own way
-// back), and Draw this; a phone that had the old Terminals tab open gets Terminals in More.
+// the place opens. Usage has a row of its own in More (Home on or off), opening it straight away, not
+// through Today, and ⌘K's Show usage and Usage stats and history open it there on a phone. Then
+// Whiteboards on the phone: the list, a board opened from it (with its own way back), and AI Assist's Draw this;
+// a phone that had the old Terminals tab open gets Terminals in More.
 //
 // Then Settings, as a phone's settings: it opens at the list of every section (a whole row each,
 // with its icon and what's in it), a section opens full width under ‹ Settings and its name, with
@@ -40,6 +42,7 @@ const PATHS = {
   // ⌘K's actions (App.jsx paletteActions).
   'a:homeview': { phone: 'Home', shows: '.hm', trial: 'home' },
   'a:everything': { phone: 'Home › See everything', shows: '.ey', trial: 'home' },
+  'a:edithome': { phone: 'Search › Edit Home', trial: 'home' },
   'a:home': { phone: 'Agents › New', shows: '.home-title' },
   'a:new': { phone: 'Agents › New › More options', shows: '.modal.new-agent' },
   'a:record': { phone: 'Meetings', shows: '.m-meetings button:has-text("Start recording")' },
@@ -52,7 +55,7 @@ const PATHS = {
   'a:studio': { phone: 'More › Studio', shows: '.sd-home' },
   'a:files': { phone: 'More › Files', shows: '.fx' },
   'a:map': { phone: 'More › Agent Map', shows: '.am' },
-  'a:needs': { phone: 'More › Needs you', shows: '.ny-panel' },
+  'a:needs': { phone: 'More › Needs You', shows: '.ny-panel' },
   'a:history': { phone: 'More › History', shows: '.modal.history' },
   'a:cloud': { phone: 'Search › New cloud agent' },
   'a:chat': { phone: 'Search › New chat' },
@@ -76,12 +79,12 @@ const PATHS = {
   'a:mail-done': { phone: 'Today › Mail', mac: true },
   'a:mail-later': { phone: 'Today › Mail', mac: true },
   'a:mail-reply': { phone: 'Today › Mail', mac: true },
-  'a:mail-keys': { none: 'Keys are for a keyboard; on a phone the open message has Done, Remind me and Reply Assist as buttons' },
+  'a:mail-keys': { none: 'Keys are for a keyboard; on a phone the open message has Done, Remind me and AI Assist as buttons' },
   'a:markets': { phone: 'Today › Markets' },
   'a:routines': { phone: 'Search › Show routines' },
   'a:new-routine': { phone: 'Search › New routine' },
-  'a:usage': { phone: 'Today › Usage' },
-  'a:stats': { phone: 'Today › Usage' },
+  'a:usage': { phone: 'More › Usage', shows: '.m-more-view .ustats' },
+  'a:stats': { phone: 'More › Usage', shows: '.m-more-view .ustats' },
   'a:tour': { phone: 'Search › Take the tour' },
   // Settings' sections (Settings.jsx SECTIONS).
   'settings:general': { phone: 'Settings › General' },
@@ -190,9 +193,11 @@ try {
     await p.locator('.tabbar button', { hasText: first }).click()
     await p.locator('.tabbar button', { hasText: first }).click()
     for (const name of rest) {
-      const btn = p.locator(`.m-body button:visible, .m-body a:visible`, { hasText: name }).first()
-      if (!(await btn.waitFor({ timeout: 4000 }).then(() => true, () => false))) return `no "${name}" to tap`
-      await btn.click()
+      const btn = p.locator(`.m-body button:visible, .m-body a:visible`, { hasText: name })
+      if (!(await btn.first().waitFor({ timeout: 4000 }).then(() => true, () => false))) return `no "${name}" to tap`
+      // A row of More by its name, before anything else that has the word in it (Today's "…and usage").
+      const row = p.locator('.m-body .m-more-row:visible', { has: p.locator('.m-more-text > b', { hasText: new RegExp(`^${name}$`) }) })
+      await ((await row.count()) ? row : btn).first().click()
     }
     return null
   }
@@ -212,6 +217,28 @@ try {
       if (r.shows && !(await ph.p.locator(r.shows).first().waitFor({ timeout: 8000 }).then(() => true, () => false))) bad.push(`${r.phone}: ${r.shows} doesn't show`)
     }
     ok(!bad.length, `${width}: every path is there on the phone and opens its place (${routes.length} of them)`, bad)
+    // More itself: every row whole, what each holds said in full, nothing cut off.
+    await ph.p.goto(kit.url)
+    await ph.p.waitForSelector('.tabbar button', { timeout: 20000 })
+    await ph.p.locator('.tabbar button', { hasText: 'More' }).click()
+    await ph.p.locator('.tabbar button', { hasText: 'More' }).click()
+    await ph.p.locator('.m-more-row', { hasText: 'Memory' }).waitFor({ timeout: 8000 }).catch(() => {})
+    const moreFaults = await phoneFaults(ph.p, '.m-body')
+    ok(!Object.keys(moreFaults).length, `${width}: More fits, each row's words whole (Memory's too)`, moreFaults)
+
+    // ⌘K's usage on a phone: More › Usage, from another tab.
+    const notThere = []
+    for (const label of ['Show usage', 'Usage stats and history']) {
+      await ph.p.goto(kit.url)
+      await ph.p.waitForSelector('.tabbar button', { timeout: 20000 })
+      await ph.p.locator('.tabbar button', { hasText: 'Chief' }).click()
+      await ph.p.locator('.search-btn').click()
+      await ph.p.locator('.palette input').fill(label)
+      await ph.p.locator('.pal-item', { hasText: label }).first().click({ timeout: 4000 }).catch(() => {})
+      const there = await until(async () => (await ph.p.locator('.tabbar button.on').innerText()).trim() === 'More' && ph.p.locator('.m-more-view .ustats').isVisible(), 8000)
+      if (!there) notThere.push(label)
+    }
+    ok(!notThere.length, `${width}: ⌘K's Show usage and Usage stats and history open Usage in More`, notThere)
 
     // ---------- Settings, as a phone's settings ----------
     await ph.p.goto(kit.url)
@@ -291,18 +318,20 @@ try {
     await ph.p.waitForSelector('.m-more-row')
     const rows = await ph.p.evaluate(() => [...document.querySelectorAll('.m-more-row')].map((e) => { const r = e.getBoundingClientRect(); return { name: e.querySelector('b').innerText, h: Math.round(r.height), inside: r.left >= 0 && r.right <= window.innerWidth } }))
     ok(rows.length >= 6 && rows.every((r) => r.h >= 44 && r.inside), `${width}: More's rows are each at least 44 px tall, within the screen`, rows)
+    ok(rows[0]?.name === 'Usage' && !rows.some((r) => r.name === 'Today'), `${width}: Usage is More's first row (Today is a tab of its own)`, rows.map((r) => r.name))
     ok(await ph.p.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), `${width}: nothing wider than the phone`)
     await shot(ph.p, `${tag}phone-more-${width}`)
 
-    // Whiteboards: the list, a board from it, its own way back, and Draw this.
+    // Whiteboards: the list, a board from it, its own way back, and AI Assist's Draw this.
     await ph.p.locator('.m-more-row', { hasText: 'Whiteboards' }).click()
     await ph.p.waitForSelector('.wb-home', { timeout: 15000 })
     ok(await ph.p.locator('.m-more-view > .m-view-back', { hasText: 'More' }).isVisible(), `${width}: Whiteboards opens in More, with Back to More`)
     await ph.p.locator('.wb-card', { hasText: board }).click()
     ok(!!(await until(() => ph.p.locator('.excalidraw canvas').count(), 30000)), `${width}: a board opens from the list, in More`)
     ok((await ph.p.locator('.tabbar button.on').innerText()).trim() === 'More' && !(await ph.p.locator('.m-more-view > .m-view-back').count()), `${width}: still in More, with the board's own way back only`)
-    await ph.p.locator('.wb-view .pane-extras button[aria-label="Draw this"]').click()
-    ok(!!(await until(() => ph.p.locator('.wb-draw textarea').isVisible(), 8000)), `${width}: Draw this opens on the board`)
+    await ph.p.locator('.wb-view .pane-extras button[aria-label="AI Assist"]').click()
+    await ph.p.locator('.ai-menu button', { hasText: 'Draw this' }).click()
+    ok(!!(await until(() => ph.p.locator('.wb-draw textarea').isVisible(), 8000)), `${width}: AI Assist's Draw this opens on the board`)
     await shot(ph.p, `${tag}phone-board-${width}`)
     await ph.p.locator('.wb-view button[aria-label="All whiteboards"]').click()
     ok(!!(await until(() => ph.p.locator('.wb-home').isVisible(), 8000)), `${width}: and its Back goes to the list`)
@@ -330,7 +359,8 @@ try {
     const tabs = await tabNames()
     ok(tabs.join('|') === HOME_TABS.join('|'), 'Home on: Home is the first tab, Today is not a tab', tabs)
     ok(!!(await until(() => ph.p.locator('.hm').isVisible(), 10000)), 'and the phone opens at Home')
-    const today = [['More › Today', '.m-more-view .m-today'], ['More › Today › Calendar', '.m-more-view .m-today'], ...(IS_MAC ? [['More › Today › Mail', '.m-more-view .m-today']] : [])].map(([phone, shows]) => ({ phone, shows }))
+    const today = [['More › Today', '.m-more-view .m-today'], ['More › Today › Calendar', '.m-more-view .m-today'], ...(IS_MAC ? [['More › Today › Mail', '.m-more-view .m-today']] : []),
+      ['More › Usage', '.m-more-view > .ustats']].map(([phone, shows]) => ({ phone, shows }))
     const routes = [...new Map([...Object.values(PATHS).filter((x) => x.trial === 'home'), ...today].map((x) => [`${x.phone}|${x.shows || ''}`, x])).values()]
     const bad = []
     for (const r of routes) {
@@ -342,7 +372,31 @@ try {
       if (why) { bad.push(`${r.phone}: ${why}`); continue }
       if (r.shows && !(await ph.p.locator(r.shows).first().waitFor({ timeout: 8000 }).then(() => true, () => false))) bad.push(`${r.phone}: ${r.shows} doesn't show`)
     }
-    ok(!bad.length, `Home on: each of its paths, and Today from More, is there on the phone and opens its place (${routes.length} of them)`, bad)
+    ok(!bad.length, `Home on: each of its paths, and Today and Usage from More, is there on the phone and opens its place (${routes.length} of them)`, bad)
+    await ph.p.locator('.tabbar button', { hasText: 'More' }).click()
+    await ph.p.locator('.tabbar button', { hasText: 'More' }).click()
+    await ph.p.waitForSelector('.m-more-row')
+    const names = (await ph.p.locator('.m-more-row .m-more-text > b').allInnerTexts()).map((x) => x.trim())
+    ok(names[0] === 'Today' && names[1] === 'Usage', 'Home on: More has Today, then Usage, a row of its own', names)
+    // The desktop's Edit in Home's header: on a phone, a long press on a section's name (as on an
+    // iPhone's home screen), besides Search's Edit Home above. It fits the phone.
+    // (Opened again, it's at the tab it last showed: Home's tapped.)
+    await ph.p.goto(kit.url)
+    await ph.p.waitForSelector('.tabbar button', { timeout: 20000 })
+    await until(async () => (await tabNames()).join('|') === HOME_TABS.join('|'), 10000)
+    await follow(ph.p, 'Home', HOME_TABS)
+    const name = ph.p.locator('.hm .hm-sec h3').first()
+    await name.waitFor({ timeout: 15000 })
+    const box = await name.boundingBox()
+    const finger = { pointerType: 'touch', pointerId: 5, isPrimary: true, clientX: box.x + 12, clientY: box.y + box.height / 2 }
+    await name.dispatchEvent('pointerdown', finger)
+    await ph.p.waitForTimeout(700)
+    await name.dispatchEvent('pointerup', finger).catch(() => {})
+    const edit = !!(await until(() => ph.p.locator('.hm-edit').isVisible(), 4000))
+    const f = edit ? await phoneFaults(ph.p, '.hm') : {}
+    ok(edit && !Object.keys(f).length && !(await ph.p.locator('.hm-edit-btn').count()), 'Home on: a long press on a section\'s name is the phone\'s Edit Home, and it fits', { edit, f })
+    await shot(ph.p, `${tag}phone-edit-home`)
+    await ph.p.locator('.hm-done').click({ force: true })
     ok(!ph.errors.filter((e) => !/\/api\/\S+ due to access control checks|^TypeError: Importing a module script failed\.$/.test(e)).length, 'Home on: no page errors', ph.errors)
     await ph.ctx.close()
   }

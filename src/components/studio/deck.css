@@ -1,5 +1,5 @@
 /* A deck: the toolbar; the slides down the side; the slide in the middle on the app's grey, with its
-   speaker notes under it; the Markdown and Write with AI beside it; the grid of every slide; and
+   speaker notes under it; the Markdown and AI Assist beside it; the grid of every slide; and
    presenting. The app's colours (--pane, --ink, --line, --accent), so light and dark both look right.
    The slides are Marp's drawings, 1280 by 720, scaled. */
 .sd-deck2 { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--pane); }
@@ -26,7 +26,7 @@
 .sd-tool.caret { width: 20px; margin-left: -2px; }
 .sd-split { gap: 0; }
 .sd-split .sd-present-btn { border-top-right-radius: 0; border-bottom-right-radius: 0; }
-.sd-split .sd-present-btn + .sd-tool.caret { width: 24px; height: 28px; border-radius: 0 7px 7px 0; background: var(--accent); color: var(--on-accent, #fff); margin-left: 1px; }
+.sd-split .sd-present-btn + .sd-tool.caret { width: 24px; height: 28px; border-radius: 0 7px 7px 0; background: var(--accent-fill); color: var(--on-accent, #fff); margin-left: 1px; }
 .sd-split .sd-present-btn + .sd-tool.caret:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 85%, #000); color: var(--on-accent, #fff); }
 .sd-present-btn { height: 28px; }
 .sd-tool-menu.right, .sd-gallery.right { left: auto; right: 0; }
@@ -66,7 +66,7 @@
 .sd-thumb-more { position: absolute; top: 9px; right: 8px; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; background: rgb(255 255 255 / .92); color: #333; box-shadow: 0 1px 3px rgb(0 0 0 / .2); opacity: 0; transition: opacity .12s; }
 .sd-thumb:hover .sd-thumb-more, .sd-thumb-more:focus-visible, .sd-thumb.on .sd-thumb-more { opacity: 1; }
 @media (hover: none) { .sd-thumb-more { opacity: 1; } }
-.sd-thumb.drop-before::before, .sd-thumb.drop-after::after { content: ''; position: absolute; left: 30px; right: 4px; height: 3px; border-radius: 2px; background: var(--accent); }
+.sd-thumb.drop-before::before, .sd-thumb.drop-after::after { content: ''; position: absolute; left: 30px; right: 4px; height: 3px; border-radius: 2px; background: var(--accent-fill); }
 .sd-thumb.drop-before::before { top: -2px; }
 .sd-thumb.drop-after::after { bottom: -2px; }
 .sd-strip-add { padding: 8px 4px 0 30px; }
@@ -103,6 +103,7 @@
 .sd-pill button { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 9px; border-radius: 7px; color: var(--ink-2); font: 500 12px var(--font); white-space: nowrap; }
 .sd-pill button:hover { background: var(--pane-3); color: var(--ink); }
 .sd-pill button svg { color: var(--accent); }
+.sd-pill .sd-pill-ai svg { color: var(--ai); }
 /* Under the slide on a phone: back, which slide, next, and every slide. */
 .sd-nav { display: none; }
 
@@ -131,11 +132,10 @@
 .sd-sorter .sd-thumb-more { top: 6px; right: 6px; }
 .sd-sorter .sd-thumb.drop-before::before, .sd-sorter .sd-thumb.drop-after::after { left: 0; right: 0; }
 
-/* Write with AI, beside the slides. */
+/* AI Assist, beside the slides. */
 .sd-ai { display: flex; flex-direction: column; gap: 12px; min-width: 0; min-height: 0; overflow-y: auto; padding: 12px 14px 20px; border-left: 1px solid var(--line); background: var(--pane); }
 .sd-ai-head { display: flex; align-items: center; gap: 6px; margin: -2px -6px 0 0; }
 .sd-ai-head b { display: inline-flex; align-items: center; gap: 7px; font-size: 13.5px; font-weight: 600; }
-.sd-ai-head b svg { color: var(--accent); }
 .sd-ai-modes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .sd-ai-modes button { justify-content: center; white-space: nowrap; }
 .sd-ai-form { display: grid; gap: 10px; }
@@ -212,7 +212,7 @@
 .px-handle.e { left: 100%; top: 50%; cursor: ew-resize; } .px-handle.se { left: 100%; top: 100%; cursor: nwse-resize; } .px-handle.s { left: 50%; top: 100%; cursor: ns-resize; }
 .px-handle.sw { left: 0; top: 100%; cursor: nesw-resize; } .px-handle.w { left: 0; top: 50%; cursor: ew-resize; }
 .px-handle.rot { left: 50%; top: -24px; border-radius: 50%; cursor: grab; }
-.px-handle.rot::after { content: ''; position: absolute; left: 4px; top: 9px; width: 1.5px; height: 15px; background: var(--accent); }
+.px-handle.rot::after { content: ''; position: absolute; left: 4px; top: 9px; width: 1.5px; height: 15px; background: var(--accent-fill); }
 .px-frame.crop .px-handle { width: 14px; height: 4px; margin: -2px 0 0 -7px; border-radius: 1px; background: #111; box-shadow: 0 0 0 1px #fff; }
 .px-frame.crop .px-handle.e, .px-frame.crop .px-handle.w { width: 4px; height: 14px; margin: -7px 0 0 -2px; }
 .px-crop-ghost { position: absolute; outline: 1px dashed rgb(0 0 0 / .5); background: rgb(0 0 0 / .06); pointer-events: none; }
@@ -237,7 +237,7 @@
 .menu.px-layouts.sd-gallery { position: absolute; box-shadow: 0 0 0 1px var(--line), 0 12px 32px rgb(0 0 0 / .18); padding: 10px 10px 8px; }
 
 /* A phone: the slide across the screen with back and next under it, every slide a tap away in the
-   grid, Write with AI and the Markdown over the slide, each thing you tap a whole 40px target. */
+   grid, AI Assist and the Markdown over the slide, each thing you tap a whole 40px target. */
 @media (max-width: 700px) {
   .sd-deck-body, .sd-deck2.with-md .sd-deck-body, .sd-deck2.with-ai .sd-deck-body, .sd-deck2.with-md.with-ai .sd-deck-body { grid-template-columns: minmax(0, 1fr); position: relative; }
   .sd-deck-body > .sd-strip { display: none; }

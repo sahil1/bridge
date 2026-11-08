@@ -14,7 +14,7 @@
 .cloud-ask { display: flex; align-items: center; gap: 12px; padding: 0 12px 11px; }
 .cloud-ask p { margin: 0; flex: 1; min-width: 0; font-size: 13px; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
 .cloud-composer textarea:disabled { opacity: .55; }
-.chat-event.ev-info .ev-dot { background: var(--accent); }
+.chat-event.ev-info .ev-dot { background: var(--accent-fill); }
 .cloud-console .tool-summary:disabled { cursor: default; opacity: 1; }
 
 /* Sidebar rows */

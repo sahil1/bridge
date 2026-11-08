@@ -45,7 +45,7 @@
 /* Deleted (with Undo), or what a button did, for a moment at the bottom. */
 .dc-toast { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 30; display: flex; align-items: center; gap: 12px; max-width: calc(100% - 32px); padding: 8px 14px; border-radius: 12px; background: var(--ink); color: var(--pane); font-size: 12.5px; box-shadow: var(--shadow-lg, 0 8px 28px rgb(0 0 0 / .18)); animation: dp-in .16s ease-out; }
 .dc-toast .link-btn { color: inherit; font-weight: 600; text-decoration: underline; }
-.dc-toast.error { background: var(--critical); color: #fff; }
+.dc-toast.error { background: var(--critical-fill); color: #fff; }
 .app.narrow .dc-body { padding-left: 12px; }
 .app.narrow .dc-home { padding-bottom: 96px; }
 /* On a phone: whole targets, and a search box iOS doesn't zoom into. */

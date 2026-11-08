@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import Icon from '../Icon.jsx'
+import { AssistHead } from '../AiAssist.jsx'
 import { usePersisted } from '../layout.jsx'
 import { api, usePoll, fmtRelative } from '../../api.js'
 import { t, tx } from '../../i18n/index.js'
@@ -63,10 +64,11 @@ const say = (issues) => issues.map((x) => t(ISSUE[x.kind] || x.kind, { n: x.n })
 // ({ prompt, kind, from, model, refine }), drawn straight away. boardId: the board's name, to keep
 // its rounds by. look: the board's look. prefs: what the whiteboard has learnt (colours, spacing,
 // direction). onDrawn({ ids, direction }): after a model has drawn, for learning from the edits
-// that follow.
-export default function DrawPanel({ board, start, onStarted, onClose, compact = false, boardId = null, look = 'clean', prefs = null, onDrawn }) {
+// that follow. want: { mode, n }, the way AI Assist's menu asked for (Draw this or Change it).
+export default function DrawPanel({ board, start, want = null, onStarted, onClose, compact = false, boardId = null, look = 'clean', prefs = null, onDrawn }) {
   const els = board.api?.getSceneElements() || []
-  const [mode, setMode] = useState(start ? 'draw' : els.length ? 'change' : 'draw')
+  const [mode, setMode] = useState(start ? 'draw' : want?.mode || (els.length ? 'change' : 'draw'))
+  useEffect(() => { if (want?.mode) setMode(want.mode) }, [want?.n]) // eslint-disable-line react-hooks/exhaustive-deps
   const [text, setText] = useState(start?.prompt || '')
   const [kind, setKind] = usePersisted('cc-board-kind', 'auto')
   const [refine, setRefine] = usePersisted('cc-board-refine', 2)
@@ -302,14 +304,13 @@ export default function DrawPanel({ board, start, onStarted, onClose, compact = 
   const cur = run?.rounds[run.at]
   const was = past?.rounds[past.pick]
   return (
-    <form ref={form} className={`wb-draw${compact ? ' compact' : ''}`} onSubmit={go} aria-label={t('Draw with a model')}>
-      <div className="wb-draw-head">
+    <form ref={form} className={`wb-draw${compact ? ' compact' : ''}`} onSubmit={go} aria-label={t('AI Assist')}>
+      <AssistHead className="wb-draw-head" onClose={onClose}>
         <div className="seg small-seg" role="tablist">
-          <button type="button" role="tab" aria-selected={mode === 'draw'} className={mode === 'draw' ? 'on' : ''} onClick={() => setMode('draw')}><Icon name="sparkle" size={12} /> {t('Draw this')}</button>
+          <button type="button" role="tab" aria-selected={mode === 'draw'} className={mode === 'draw' ? 'on' : ''} onClick={() => setMode('draw')}><Icon name="shapes" size={12} /> {t('Draw this')}</button>
           <button type="button" role="tab" aria-selected={mode === 'change'} className={mode === 'change' ? 'on' : ''} onClick={() => setMode('change')} disabled={!scene.n}><Icon name="edit" size={12} /> {t('Change it')}</button>
         </div>
-        {onClose && <button type="button" className="win-btn" onClick={onClose} aria-label={t('Close')} title={t('Close')}><Icon name="x" size={13} /></button>}
-      </div>
+      </AssistHead>
       <textarea ref={box} rows={compact ? 2 : 3} value={text} onChange={(e) => setText(e.target.value)} disabled={busy}
         placeholder={mode === 'draw' ? t('A 3-tier web app on AWS, how a pull request gets merged, our office network, who reports to whom…') : sel ? t('What to change in the {n} selected', { n: sel }) : t('What to change: rename a box, add a step, colour the risky parts red…')}
         onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) go(e) }} aria-label={mode === 'draw' ? t('What to draw') : t('What to change')} />
@@ -343,7 +344,7 @@ export default function DrawPanel({ board, start, onStarted, onClose, compact = 
         <span className="wb-grow" />
         {busy && run && <button type="button" className="btn small" onClick={() => { stopRef.current = true }}>{t('Stop')}</button>}
         <button type="submit" className="btn small primary" disabled={busy || noModel || (!text.trim() && !(mode === 'draw' && from && fromId))}>
-          <Icon name={busy ? 'refresh' : 'sparkle'} size={12} className={busy ? 'spin' : ''} /> {busy ? (mode === 'draw' ? t('Drawing…') : t('Changing…')) : mode === 'draw' ? t('Draw') : t('Change')}
+          <Icon name={busy ? 'refresh' : 'wand'} size={12} className={busy ? 'spin' : ''} /> {busy ? (mode === 'draw' ? t('Drawing…') : t('Changing…')) : mode === 'draw' ? t('Draw') : t('Change')}
         </button>
       </div>
       {noModel

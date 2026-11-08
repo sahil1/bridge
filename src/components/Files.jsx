@@ -30,6 +30,7 @@ import { FileDrawing } from '../lazy.jsx'
 import { isDiagramFile, addMermaidButtons, whiteboards as studioHere } from './whiteboard/links.js'
 import { useTrial } from '../trials.js'
 import Assist from './files/Assist.jsx'
+import AiAssist from './AiAssist.jsx'
 import { useBusy } from '../busy.js'
 // The kinds of file Studio opens (server/studio.js).
 export const STUDIO_OPENS = /\.(docx|md|markdown|txt|xlsx|xlsm|csv|tsv|pptx|pdf|html?)$/i
@@ -455,7 +456,7 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
   const [toast, setToast] = useState(null)
   const say = (text) => { setToast(text); setTimeout(() => setToast((t) => (t === text ? null : t)), 2200) }
   const [automation, setAutomation] = useState(false) // macOS said no to Finder (Trash on older macOS)
-  // Files Assist for a folder here ('' is the root), with Files (a beta feature).
+  // AI Assist's Look over this folder, for a folder here ('' is the root), with Files (a beta feature).
   const assistOn = useTrial('files')
   const [assist, setAssist] = useState(null)
   useEffect(() => setAssist(null), [pane])
@@ -577,9 +578,9 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
           <button className="win-btn" onClick={() => { pickFor.current = ''; pickRef.current?.click() }} title={t('Send files from this device')} aria-label={t('Send files from this device')}><Icon name="upload" size={13} /></button>
           <input ref={pickRef} type="file" multiple hidden onChange={(e) => { const l = [...(e.target.files || [])]; e.target.value = ''; if (l.length) setPicked({ list: l, dir: pickFor.current }) }} data-testid="send-files" />
           <button className="win-btn" onClick={() => setQuick(true)} title="Go to file (⌘P)" aria-label="Go to file"><Icon name="search" size={13} /></button>
-          {assistOn && <button className={`win-btn ${assist != null ? 'on' : ''}`} onClick={() => setAssist(assist != null ? null : '')} title={t('Files Assist: duplicates, big and forgotten files, a tidier layout')} aria-label={t('Files Assist')} aria-pressed={assist != null}><Icon name="sparkle" size={13} /></button>}
           <button className={`win-btn ${showHidden ? 'on' : ''}`} onClick={() => setShowHidden(!showHidden)} title={showHidden ? 'Hide dotfiles' : 'Show dotfiles'} aria-label="Toggle hidden files"><Icon name={showHidden ? 'eye' : 'eye-off'} size={13} /></button>
           <button className="win-btn" onClick={() => setExpanded(new Set())} title="Collapse all" aria-label="Collapse all"><Icon name="shrink" size={13} /></button>
+          {assistOn && <AiAssist className="win-btn" compact on={assist != null} items={() => [{ label: t('Look over this folder'), hint: t('Duplicates, big and forgotten files, a tidier layout'), on: assist != null, run: () => setAssist(assist != null ? null : '') }]} />}
         </div>
         <div className={`tree-scroll ${dropAt ? 'drop-on' : ''}`} onContextMenu={(e) => { e.preventDefault(); onMenu({ path: '', name: rootName, dir: true }, e) }} {...rootDrops}>
           {root.error && root.errorCode === 'EPERM' && protectedFolder(cwd)

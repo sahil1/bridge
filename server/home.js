@@ -20,13 +20,15 @@
 // when you last replied to it here (engaged.js). Home puts what needs you now first and folds what
 // has been quiet for days (shared/focus.js says how).
 //
-// Kept in the cache folder (home.json): when you last opened or saved each whiteboard, and what you
+// Kept in the cache folder (home.json): when you last opened or saved each whiteboard, what you
 // pinned to the top of Home (by its id there: its device's and its own), so it stays there on every
-// page and phone this computer serves.
+// page and phone this computer serves, and how you arranged Home's sections (Edit Home), one for this
+// computer's window and one for phones (shared/homelayout.js).
 import fs from 'node:fs'
 import path from 'node:path'
 import { cacheFile, writeFileAtomic } from './paths.js'
 import { latest } from '../shared/focus.js'
+import { arrange, isDefault, FOR } from '../shared/homelayout.js'
 
 const FILE = cacheFile('home.json')
 const DAY = 86400e3
@@ -102,11 +104,12 @@ export function tidy(items) {
 // Staff's main pane, or null when it isn't running (a reply to a task goes there); engaged:
 // engaged.js's, for when you last replied to a task here.
 export function make({ waiting, tasks, meetings, unsent, boards, chief, engaged = null }) {
-  let kept = { boards: {}, pins: {} }
+  let kept = { boards: {}, pins: {}, layouts: {} }
   try {
     const d = JSON.parse(fs.readFileSync(FILE, 'utf8'))
     if (d?.boards && typeof d.boards === 'object') kept.boards = d.boards
     if (d?.pins && typeof d.pins === 'object') kept.pins = d.pins
+    if (d?.layouts && typeof d.layouts === 'object') kept.layouts = d.layouts
   } catch { /* none yet */ }
   let timer = null
   const save = () => { clearTimeout(timer); timer = setTimeout(() => { try { fs.mkdirSync(path.dirname(FILE), { recursive: true }); writeFileAtomic(FILE, JSON.stringify(kept)) } catch { /* next change */ } }, 500); timer.unref?.() }
@@ -193,5 +196,17 @@ export function make({ waiting, tasks, meetings, unsent, boards, chief, engaged 
     save()
     return { pins: pins() }
   }
-  return { items, looked, forget, pins, pin }
+
+  // How Home's sections are arranged, for this computer's window and for phones: each whole (the
+  // default when it was never arranged, or was put back).
+  const layouts = () => Object.fromEntries(FOR.map((k) => [k, arrange(kept.layouts[k])]))
+  function layout(which, { order, hidden, reset } = {}) {
+    if (!FOR.includes(which)) throw new Error('Say which Home to arrange: computer or phone')
+    const a = arrange({ order, hidden })
+    if (reset || isDefault(a)) delete kept.layouts[which]
+    else kept.layouts[which] = { ...a, at: Date.now() }
+    save()
+    return { layouts: layouts() }
+  }
+  return { items, looked, forget, pins, pin, layouts, layout }
 }

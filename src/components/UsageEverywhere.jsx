@@ -10,8 +10,8 @@ import { t, tx, locale } from '../i18n/index.js'
 // key has a price and the time a model took on this computer. A provider whose numbers can't be read,
 // or that keeps none, says so on its row. It all stays on this computer.
 const FEATURES = {
-  chat: tx('Chat'), meetings: tx('Meeting notes'), assist: tx('AI Assist'), board: tx('Whiteboards'), dictation: tx('Dictation cleanup'),
-  'voice-edit': tx('Edit by voice'), studio: tx('Studio'), insights: tx('Insights'), pr: tx('Pull requests'), consult: tx('Questions from agents'), mail: tx('Reply Assist'), files: tx('Files Assist'), agents: tx("Agents' own work"), other: tx('Other'),
+  chat: tx('Chat'), meetings: tx('Meeting notes'), assist: tx('AI Assist in meetings'), board: tx('Whiteboards'), dictation: tx('Dictation cleanup'),
+  'voice-edit': tx('Edit by voice'), studio: tx('Studio'), insights: tx('Insights'), pr: tx('Pull requests'), consult: tx('Questions from agents'), mail: tx('AI Assist in Mail'), files: tx('AI Assist in Files'), agents: tx("Agents' own work"), other: tx('Other'),
 }
 const VIA = { agent: tx('agent'), key: tx('API key'), cloud: tx('cloud'), local: tx('on this computer') }
 const VIA_ICON = { agent: 'bot', key: 'unlock', cloud: 'cloud', local: 'laptop' }

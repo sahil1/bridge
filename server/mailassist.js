@@ -1,4 +1,4 @@
-// Reply Assist and How You Write: a reply to an open email drafted in your own voice and language,
+// AI Assist's Draft a reply and How You Write: an open email's reply in your own voice and language,
 // by the model you picked for meeting notes, for you to change, copy and send from your own mail
 // app. Nothing here sends mail or writes to Mail: the model only gives back text.
 //
@@ -6,7 +6,7 @@
 // learnt from mail you sent (Mail's Sent folders, read on this computer as the inbox is) and from
 // what you said in recorded meetings (the lines Who spoke marks as yours). It's kept in
 // ~/.bridge-ai/mail/voice.json, shown in Settings › Mail to read, change or clear, and learnt again
-// now and then while you use Reply Assist (not once you've changed it yourself).
+// now and then while AI Assist drafts your replies (not once you've changed it yourself).
 import fs from 'node:fs'
 import path from 'node:path'
 import { dataFile, writeFileAtomic } from './paths.js'
@@ -126,7 +126,7 @@ export function makeMailAssist({ cfg, mail, calendar, meetings, chat, zone }) {
       const j = objectIn(r.text)
       const bullets = Array.isArray(j?.profile) ? j.profile.map((x) => String(x).trim()).filter(Boolean)
         : String(r.text || '').split('\n').map((x) => x.replace(/^\s*[-*•]\s*/, '').trim()).filter((x) => x && !/^[{}[\]]/.test(x))
-      if (!bullets.length) throw fail(`${chat.describe(use)} answered, but not with a profile Reply Assist can read. Try Learn again.`)
+      if (!bullets.length) throw fail(`${chat.describe(use)} answered, but not with a profile Bridge AI can read. Try Learn again.`)
       const picked = (Array.isArray(j?.examples) ? j.examples : []).map((x) => Number(/(\d+)/.exec(String(x))?.[1]) - 1).filter((n) => sent.items[n])
       const chosen = (picked.length ? [...new Set(picked)].map((n) => sent.items[n]) : [...sent.items].sort((a, b) => a.text.length - b.text.length).slice(0, 3)).slice(0, 3)
       const v = {

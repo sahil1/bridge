@@ -2,6 +2,42 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
+## 3.13.0
+
+AI Assist, one wand wherever a model helps; Memory for everyone; Home that puts what needs you now first, with this computer ahead and arranged your way; Studio's documents, sheets and decks doing what Google's do, with Focus and Open in Word, Excel or PowerPoint; and Files, a Finder for all your computers, a new beta feature.
+
+<!-- rollout: 10 -->
+
+### What's new
+
+- **AI Assist, the same everywhere:** wherever a model can help, one button with a magic wand at the right end of the header or toolbar, and what it can do there in plain words. In a meeting: Suggest what to ask, Write the summary, Clean up the transcript, Work out who said each line, Ask about this meeting. In Mail: Draft a reply and Find a time. In the calendar: Prepare for this meeting. In Studio: Rewrite, Write a formula, Make a chart, Write the deck, Sign this. On a whiteboard: Draw this. In Files: Look over this folder. Ask an agent, which hands a file to a coding agent, stays its own button.
+- **Memory is for everyone**, no longer a beta feature: a page of its own, never a dialog, from the sidebar, Meetings, a meeting's menu, ⌘K and Settings › Meetings. Collections and search come first, About You and the review beside them, and it keeps its place after a reload. About You is on unless you switch it off: a few lines made on this computer from your memory, given to the models you use for meetings and dictation (which may be cloud models), and read by Chief of Staff.
+- **What needs you now comes first** (Home, a beta feature, and every count). A permission or a question first, then failed runs, then tasks, the ones you were on most recently ahead; the top three say why. Anything quiet for 3 days or more is folded away by project and left out of every count (the badge, the window title, the Dock, the phone), and Yes to all never answers one of them.
+- **Home puts this computer first, and you can arrange it:** your other computers come last, and Edit Home (a long press on a phone) lets you drag sections into your own order and hide the ones you don't use, as on an iPhone's home screen. A hidden section's items still count, and Home says so.
+- **Studio's documents work as Google Docs does** (a beta feature): they save as you type; lists, checklists and pictures paste in from Google Docs, Word and the web; list shortcuts, ⌘K for a link, with a bubble to open, copy, change or remove it, Print and PDF, and page setup saved into a Word file.
+- **Studio's sheets too:** a CSV's amounts, percents and dates are numbers, so totals add up, and they're saved as they show; about 20 of the keys Google Sheets users reach for; undo goes 500 steps back; Insert › Chart, saved as a real Excel chart; Print; and Paste and Paste Special in the desktop app.
+- **A PowerPoint is edited as itself**, its masters, layouts, shapes, charts and fonts kept, and only the slides you change are written back, so there's no copy to save it as. Shapes, text, pictures and tables, align and group, skip a slide, find and replace, zoom, and present.
+- **Focus** in every Studio editor (⌥⌘F, or Ctrl+Alt+F): the page alone, and the desktop app full screen; Esc leaves.
+- **Open in Word, Excel or PowerPoint** when one is installed (otherwise Pages, Numbers or Keynote, then LibreOffice). What you save there comes back to Studio, never written over.
+- **Files** (a new beta feature): every folder on your computers as Finder shows them, in a list, icons or columns, with Quick Look, Get Info and search. Read-only for now: nothing is renamed, moved or deleted. On a Mac, Desktop, Documents, Downloads and iCloud Drive aren't read until you open them. AI Assist's Look over this folder finds duplicates, large and forgotten files, installers, piles of screenshots and messy folders, read-only; Suggest how to organize it sends names, sizes and dates, never what's in a file, to the model you pick, and says where it runs first.
+- **Usage on a phone has its own row in More**, with what the desktop's usage chip shows: the account new agents start on, the limit closest to running out and when it resets, each model's own limits, and switching the account.
+- **Usage stats and crash reports say the update channel**, and usage stats a rollout bucket, a number picked at random once: a release can go out to a few computers at a time, and Check now gets it anyway.
+- **Standard words:** Read-only, Restore, Unarchive, Remove and Review where the app had its own phrases, section names in Title Case, and a meeting's length as "16 min".
+
+### Fixes
+
+- **Text reads in every theme, light and dark**: 4.5:1 or more against what's behind it, quiet text, links, buttons and badges included.
+- **The sidebar's top scrolls on its own** when Meetings' and Dictations' lists make it taller than the window. On a 1280x800 screen, Studio, Files and your spaces were out of reach, and bringing one into view pushed the window up past the top bar.
+- **A Markdown list of plain and checklist items is kept as written** in Studio: each plain item opened as an empty checkbox, and was saved so.
+- **Dictation's Not now never hides the next dictation** started straight after it, losing its words.
+- **A meeting's live words listen for the names of the people invited** and your own words, as its full transcript does.
+- **Node.js finishing its install is found:** the agent's card no longer said it couldn't find what had just been installed.
+- **The need-you chip opens Home** right after a reload, and the calendar no longer shows an empty week for a moment.
+- **The server answers while Insights reads months of conversations**, a piece at a time.
+- **Memory fits a phone** with meetings that have long names, and Everything says "on this computer" with one computer, not "on 1 computers".
+- **Redo is Ctrl+Shift+Z in a sheet on Windows and Linux** too, and a heading pasted into a Word file looks like its own headings.
+- **Security:** image-size, KaTeX and uuid are on their fixed versions.
+
 ## 3.12.0
 
 The parts you use every day, made right: edit what you dictated on its card, Studio finds your documents and presentations wherever they are, Memory as a page of its own, routines that run by themselves, Home that keeps to the computer you're on, and a usage chip half the width.
