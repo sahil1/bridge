@@ -9,7 +9,8 @@
 // checklists (⇧⌘9, ticked with a click, kept as Word keeps them); the link the cursor is in, with
 // Copy, Change and Remove; ⇧⌘X, ⇧⌘> and ⇧⌘<, ⌘G; lists copied out as lists. Page setup saved into
 // the file; Print (⌘P) as its pages; a Markdown copy of the Word file. In Markdown: checklists, a
-// picture pasted (saved beside it), Word's lists pasted, and a Word copy of it. Written in Focus
+// picture pasted (saved beside it), Word's lists pasted, a list of plain and checklist items shown and
+// saved as written, and a Word copy of it. Written in Focus
 // (⌘. still superscript, saved as you type, Esc out). In the dark too.
 import fs from 'node:fs'
 import path from 'node:path'
@@ -53,6 +54,9 @@ try {
   fs.writeFileSync(path.join(dir, 'report.docx'), await richDocx({ pages: 2 }))
   fs.writeFileSync(path.join(dir, 'other.docx'), await richDocx({ pages: 1 }))
   fs.writeFileSync(path.join(dir, 'notes.md'), '# Notes\n\nA first line.\n')
+  // A list of plain items and checklist items together, as people write them by hand.
+  const MIXED = '# Northwind\n\n- Renewal in March\n- [ ] Send the pricing doc\n- [x] Book the call\n- Ask about seats\n\nShip it.\n'
+  fs.writeFileSync(path.join(dir, 'mixed.md'), MIXED)
   const root = `place:${(await kit.api('/places', { path: dir })).place.id}`
   const file = (n) => path.join(dir, n)
   const w = await page(b, kit.url, { width: 1440, height: 900 })
@@ -340,6 +344,17 @@ try {
   ok(!!(await until(async () => /Saved as notes\.docx, beside it/.test(await p.locator('.sd-doc-said').innerText().catch(() => '')), 10000, 150)), 'a Word copy, saved beside it, and said')
   const wc = fs.existsSync(file('notes.docx')) ? await partsOf(file('notes.docx')) : {}
   ok(/Buy milk/.test(wc['word/document.xml'] || '') && /<w:drawing>/.test(wc['word/document.xml'] || '') && /w:lvlText w:val="☑"/.test(wc['word/numbering.xml'] || '') && Object.keys(wc).some((k) => /^word\/media\//.test(k)), 'with its checklist (ticked and not) and its picture in it', Object.keys(wc))
+  // A list with checklist items among plain ones: shown as written (no empty box for a plain item),
+  // and saved as it was.
+  const mix = p.locator('.sd-file', { has: p.locator('.pane-head', { hasText: 'mixed.md' }) })
+  ok(!!(await open('mixed.md', '.sd-file:has(.pane-head :text("mixed.md")) .sd-page .ProseMirror li')), 'a Markdown file with a mixed list opens')
+  const rows = await mix.locator('.sd-page .ProseMirror li').evaluateAll((els) => els.map((e) => `${e.hasAttribute('data-checked') ? `[${e.getAttribute('data-checked') === 'true' ? 'x' : ' '}] ` : ''}${((e.querySelector(':scope > div') || e).querySelector('p')?.innerText || '').trim()}`))
+  ok(JSON.stringify(rows) === JSON.stringify(['Renewal in March', '[ ] Send the pricing doc', '[x] Book the call', 'Ask about seats']), 'a list with checklist items among plain ones: each item as written, no empty box for a plain one', rows)
+  await mix.locator('.sd-page .ProseMirror p', { hasText: 'Ship it.' }).click()
+  await p.keyboard.press('End')
+  await p.keyboard.type(' Today.')
+  const mixed = await until(() => { const x = fs.readFileSync(file('mixed.md'), 'utf8'); return /Today\./.test(x) && x }, 8000, 200)
+  ok(!!mixed && mixed.includes('- Renewal in March\n- [ ] Send the pricing doc\n- [x] Book the call\n- Ask about seats\n'), 'and saved as it was written, one list, after typing elsewhere in it', mixed)
   ok(w.errors.length === 0, 'no page errors', w.errors)
 
   // ---------- Dark ----------

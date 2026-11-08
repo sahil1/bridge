@@ -7,7 +7,7 @@ import { Selection } from '@tiptap/pm/state'
 import StarterKit from '@tiptap/starter-kit'
 import Image from '@tiptap/extension-image'
 import { Table, TableRow, TableCell, TableHeader } from '@tiptap/extension-table'
-import { TaskList, TaskItem } from '@tiptap/extension-list'
+import { BulletList, TaskList, TaskItem } from '@tiptap/extension-list'
 import { Markdown } from 'tiptap-markdown'
 import Icon from '../../Icon.jsx'
 import { t, locale } from '../../../i18n/index.js'
@@ -1030,6 +1030,26 @@ function HfEditor({ which, info, model, page, css, scope, value, onClose, onDone
 // picture beside the file (images/chart.png, as Markdown names it) is shown, and named again.
 // html: a table Markdown can't write (cells merged, no heading row) written as HTML, which Markdown
 // keeps, rather than left out (for a Word file's Markdown copy).
+// Markdown's list with checklist items among plain ones, split into runs of each (see mdExtensions).
+function splitMixedLists(el) {
+  for (const list of [...el.querySelectorAll('.contains-task-list')]) {
+    const runs = []
+    for (const li of [...list.children]) {
+      const task = li.classList.contains('task-list-item')
+      if (runs.at(-1)?.task === task) runs.at(-1).items.push(li)
+      else runs.push({ task, items: [li] })
+    }
+    if (runs.length < 2) continue
+    let n = Number(list.getAttribute('start')) || 1
+    list.replaceWith(...runs.map(({ task, items }) => {
+      const part = list.ownerDocument.createElement(task ? 'ul' : list.tagName)
+      if (task) { part.className = 'contains-task-list'; part.setAttribute('data-type', 'taskList') } else if (list.tagName === 'OL' && n !== 1) part.setAttribute('start', String(n))
+      n += items.length
+      part.append(...items)
+      return part
+    }))
+  }
+}
 function mdExtensions(srcs = null, { html = false } = {}) {
   // A picture is a block of its own: written on its own line, so what comes next isn't run into it.
   const block = { markdown: { serialize(state, node) { state.write(`![${state.esc(node.attrs.alt || '')}](${String(node.attrs.src || '').replace(/[()]/g, '\\$&').replace(/\s/g, '%20')}${node.attrs.title ? ` "${String(node.attrs.title).replace(/"/g, '\\"')}"` : ''})`); state.closeBlock(node) }, parse: {} } }
@@ -1042,16 +1062,30 @@ function mdExtensions(srcs = null, { html = false } = {}) {
   })
   // Strikethrough also as Google Docs and Word have it (⇧⌘X); a checklist written tight, as the
   // other lists are (- [ ] one line after another).
+  // A list with checklist items among plain ones ("- Renewal" then "- [ ] Send the doc"), as Markdown
+  // reads one: its plain items a plain list and its checklist items a checklist, one after the other.
+  // Left as one checklist, each plain item became an empty box with the item under it, and was saved
+  // so (and a numbered one lost its number).
   const Keys = Extension.create({
     name: 'mdKeys',
     addKeyboardShortcuts: () => ({ 'Mod-Shift-x': ({ editor }) => editor.commands.toggleStrike() }),
     addGlobalAttributes: () => [{ types: ['taskList'], attributes: { tight: { default: true, parseHTML: (el) => el.getAttribute('data-tight') === 'true' || !el.querySelector('p'), renderHTML: (a) => (a.tight ? { 'data-tight': 'true' } : {}) } } }],
+    addStorage: () => ({ markdown: { parse: { updateDOM: splitMixedLists } } }),
+  })
+  // ...and written back as one list again: a plain list and a checklist that follow each other, both
+  // tight, with no blank line between them (which would make them one loose list).
+  const together = (a, b) => !!a && a.attrs?.tight !== false && b.attrs?.tight !== false && ((a.type.name === 'bulletList' && b.type.name === 'taskList') || (a.type.name === 'taskList' && b.type.name === 'bulletList'))
+  const asOne = (node) => node.extend({
+    addStorage() {
+      return { ...this.parent?.(), markdown: { serialize(state, n) { if (together(state.closed, n)) state.flushClose(1); state.renderList(n, '  ', () => '- ') } } }
+    },
   })
   return [
     // A link is followed from its bubble or the link bar (Open), not by a click while you write.
-    StarterKit.configure({ link: { openOnClick: false, enableClickSelection: true, defaultProtocol: 'https' }, underline: false }),
+    StarterKit.configure({ link: { openOnClick: false, enableClickSelection: true, defaultProtocol: 'https' }, underline: false, bulletList: false }),
+    asOne(BulletList),
     Picture.configure({ allowBase64: true }), Table.configure({ resizable: false }), TableRow, TableHeader, TableCell,
-    TaskList, TaskItem.configure({ nested: true }), Keys,
+    asOne(TaskList), TaskItem.configure({ nested: true }), Keys,
     Markdown.configure({ html, tightLists: true, linkify: true }),
   ]
 }
