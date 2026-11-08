@@ -140,7 +140,7 @@ try {
     const pub = (await c.api('/needs-you')).items.find((i) => i.paneId === fin.paneId && !i.machine && i.qid)
     if (!pub) return tries.length > 0 // gone since: it took after all
     const r = await c.api('/needs-you/answer', { paneId: pub.paneId, seq: pub.seq, qid: pub.qid, n: '1' })
-    tries.push(r.ok ? 'ok' : r.why)
+    tries.push(r.ok ? 'ok' : [r.why, r.what].filter(Boolean).join(': '))
     return r.ok
   }, 30000, 600)
   const doneNow = await until(async () => (await laneOf(a, 'Desk'))?.agents.find((x) => x.paneId === fin.paneId && x.status === 'done'), 30000, 600)
