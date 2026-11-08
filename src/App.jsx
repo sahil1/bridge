@@ -166,6 +166,8 @@ const STUDIO = 'view:studio:'
 const studioId = (f) => `${STUDIO}${encodeURIComponent(f.root)}:${encodeURIComponent(f.path)}`
 const studioOf = (id) => { const [r, p] = id.slice(STUDIO.length).split(':'); return { root: decodeURIComponent(r || ''), path: decodeURIComponent(p || '') } }
 const isView = (id) => typeof id === 'string' && id.startsWith('view:')
+// Typing in a Studio document, where ⌘K is a link and ⌘, subscript, as in Google Docs and Word.
+const writingDoc = (e) => !!e.target?.closest?.('.sd-doc .ProseMirror')
 
 // The recording of a meeting lives above everything else, so it goes on while you move around.
 export default function Root() {
@@ -648,8 +650,8 @@ function App() {
   // The computer updated while this page was open: the new one loads by itself when nothing's under
   // way, or a line under the top bar says so with Reload (src/fresh.js).
   const fresh = useFresh({ hold: !!meetings?.rec })
-  useHotkey(useCallback((e) => (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k', []), () => setPalette((p) => !p))
-  useHotkey(useCallback((e) => (e.metaKey || e.ctrlKey) && e.key === ',', []), () => setSettings((v) => (v ? null : 'all')))
+  useHotkey(useCallback((e) => (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && !writingDoc(e), []), () => setPalette((p) => !p))
+  useHotkey(useCallback((e) => (e.metaKey || e.ctrlKey) && e.key === ',' && !writingDoc(e), []), () => setSettings((v) => (v ? null : 'all')))
   useHotkey(useCallback((e) => (e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'f', []), () => setHistory((v) => !v))
   // ⌥1 and ⌥2 alone: with ⌘ (or Ctrl) they're a document's Heading 1 and 2, in Studio.
   useHotkey(useCallback((e) => e.altKey && !e.metaKey && !e.ctrlKey && (e.code === 'Digit1' || e.code === 'Digit2'), []), (e) => setView(e.code === 'Digit1' ? 'command' : 'herdr'))
