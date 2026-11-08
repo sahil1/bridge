@@ -96,7 +96,7 @@
 .sd-state.ok > i { background: var(--good, var(--done)); opacity: 1; }
 .sd-state.dirty { color: var(--ink-2); }
 .sd-state.dirty > i { background: var(--warning); opacity: 1; }
-.sd-state.busy > i { background: var(--accent); opacity: 1; }
+.sd-state.busy > i { background: var(--accent-fill); opacity: 1; }
 .sd-state.bad { color: var(--critical); }
 .sd-state.bad > i { background: var(--critical); opacity: 1; }
 /* Open in its app and Focus: in the header on a computer, in the status line in the phone layout

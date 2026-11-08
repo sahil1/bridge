@@ -26,7 +26,7 @@
 .sd-tool.caret { width: 20px; margin-left: -2px; }
 .sd-split { gap: 0; }
 .sd-split .sd-present-btn { border-top-right-radius: 0; border-bottom-right-radius: 0; }
-.sd-split .sd-present-btn + .sd-tool.caret { width: 24px; height: 28px; border-radius: 0 7px 7px 0; background: var(--accent); color: var(--on-accent, #fff); margin-left: 1px; }
+.sd-split .sd-present-btn + .sd-tool.caret { width: 24px; height: 28px; border-radius: 0 7px 7px 0; background: var(--accent-fill); color: var(--on-accent, #fff); margin-left: 1px; }
 .sd-split .sd-present-btn + .sd-tool.caret:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 85%, #000); color: var(--on-accent, #fff); }
 .sd-present-btn { height: 28px; }
 .sd-tool-menu.right, .sd-gallery.right { left: auto; right: 0; }
@@ -66,7 +66,7 @@
 .sd-thumb-more { position: absolute; top: 9px; right: 8px; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; background: rgb(255 255 255 / .92); color: #333; box-shadow: 0 1px 3px rgb(0 0 0 / .2); opacity: 0; transition: opacity .12s; }
 .sd-thumb:hover .sd-thumb-more, .sd-thumb-more:focus-visible, .sd-thumb.on .sd-thumb-more { opacity: 1; }
 @media (hover: none) { .sd-thumb-more { opacity: 1; } }
-.sd-thumb.drop-before::before, .sd-thumb.drop-after::after { content: ''; position: absolute; left: 30px; right: 4px; height: 3px; border-radius: 2px; background: var(--accent); }
+.sd-thumb.drop-before::before, .sd-thumb.drop-after::after { content: ''; position: absolute; left: 30px; right: 4px; height: 3px; border-radius: 2px; background: var(--accent-fill); }
 .sd-thumb.drop-before::before { top: -2px; }
 .sd-thumb.drop-after::after { bottom: -2px; }
 .sd-strip-add { padding: 8px 4px 0 30px; }
@@ -212,7 +212,7 @@
 .px-handle.e { left: 100%; top: 50%; cursor: ew-resize; } .px-handle.se { left: 100%; top: 100%; cursor: nwse-resize; } .px-handle.s { left: 50%; top: 100%; cursor: ns-resize; }
 .px-handle.sw { left: 0; top: 100%; cursor: nesw-resize; } .px-handle.w { left: 0; top: 50%; cursor: ew-resize; }
 .px-handle.rot { left: 50%; top: -24px; border-radius: 50%; cursor: grab; }
-.px-handle.rot::after { content: ''; position: absolute; left: 4px; top: 9px; width: 1.5px; height: 15px; background: var(--accent); }
+.px-handle.rot::after { content: ''; position: absolute; left: 4px; top: 9px; width: 1.5px; height: 15px; background: var(--accent-fill); }
 .px-frame.crop .px-handle { width: 14px; height: 4px; margin: -2px 0 0 -7px; border-radius: 1px; background: #111; box-shadow: 0 0 0 1px #fff; }
 .px-frame.crop .px-handle.e, .px-frame.crop .px-handle.w { width: 4px; height: 14px; margin: -7px 0 0 -2px; }
 .px-crop-ghost { position: absolute; outline: 1px dashed rgb(0 0 0 / .5); background: rgb(0 0 0 / .06); pointer-events: none; }

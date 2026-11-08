@@ -95,7 +95,7 @@
 .mt-lines { overflow: auto; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 8px; min-height: 0; max-height: 100%; padding-right: 4px; }
 .mt-line { display: grid; grid-template-columns: auto auto 1fr; gap: 2px 8px; margin: 0; font-size: 13.5px; line-height: 1.5; }
 .mt-who { font-weight: 600; font-size: 12px; color: var(--accent); }
-.mt-line.them .mt-who { color: #8e4ec6; }
+.mt-line.them .mt-who { color: color-mix(in srgb, #8e4ec6 65%, var(--ink)); } /* toward the ink, to read in either mode */
 .mt-t { font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; padding-top: 2px; }
 .mt-text { grid-column: 1 / -1; color: var(--ink); }
 /* Live words: what someone is still saying, quieter than the lines that are in. */
@@ -331,7 +331,7 @@ html.is-float, html.is-float body, html.is-float #root { background: transparent
 .mt-mail-file .link-btn, .mt-mail-file .muted { margin-left: auto; }
 .mt-page { position: relative; }
 .mt-page.dropping { outline: 2px dashed color-mix(in srgb, var(--accent) 60%, transparent); outline-offset: -6px; }
-.mt-drop { position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 40; display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 12px; background: var(--accent); color: #fff; font: 500 13px var(--font); box-shadow: var(--shadow-lg); pointer-events: none; }
+.mt-drop { position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 40; display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 12px; background: var(--accent-fill); color: #fff; font: 500 13px var(--font); box-shadow: var(--shadow-lg); pointer-events: none; }
 
 @media (max-width: 760px) {
   .mt-cols, .mt-cols.sized { grid-template-columns: minmax(0, 1fr); }
@@ -352,7 +352,7 @@ html.is-float, html.is-float body, html.is-float #root { background: transparent
 .fc-level i { width: 3px; border-radius: 1px; background: var(--line-2); }
 .fc-level i:nth-child(1) { height: 4px; } .fc-level i:nth-child(2) { height: 6px; } .fc-level i:nth-child(3) { height: 8px; }
 .fc-level i:nth-child(4) { height: 10px; } .fc-level i:nth-child(5) { height: 12px; } .fc-level i:nth-child(6) { height: 14px; }
-.fc-level i.on { background: var(--accent); }
+.fc-level i.on { background: var(--accent-fill); }
 .fc-level small { margin-left: 4px; font-size: 11px; color: var(--ink-3); align-self: center; }
 .fc-share { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 6px; font-size: 11px; color: var(--ink-2); white-space: nowrap; }
 .fc-share b { font-weight: 550; }
@@ -451,7 +451,7 @@ span.mt-when { cursor: default; }
 .mt-first-foot { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
 
 /* 3.0.3: sections, who said it, folders and the archive, record now */
-.btn.danger { background: var(--critical); border-color: transparent; color: #fff; }
+.btn.danger { background: var(--critical-fill); border-color: transparent; color: #fff; }
 .btn.danger:hover { filter: brightness(1.06); }
 .rec-said { white-space: nowrap; }
 .mt-sec { display: flex; align-items: center; gap: 7px; margin: 10px 0 2px; padding: 6px 4px 5px; border-bottom: 1px solid var(--line-2); color: var(--ink); }
