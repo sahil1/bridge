@@ -309,22 +309,26 @@ export default function Hud() {
     const r = document.caretRangeFromPoint?.(e.clientX, e.clientY)
     startEdit(r && e.currentTarget.contains(r.startContainer) ? r.startOffset : null)
   }
+  // Kept, then the window goes, unless the key was pressed again meanwhile: the new dictation is
+  // the window's now, and it isn't hidden or written over from under it.
   const answer = async (yes) => {
+    const g = press0.current
     setOffer(false)
     const patch = yes ? { to: 'paste', offeredPaste: true } : { offeredPaste: true }
     const next = { ...(conf || {}), ...patch }
     setConf(next)
     configure(next)
     await api('/settings', { method: 'PATCH', body: { dictation: patch } }).then(settingsChanged, () => {})
-    if (!yes) { later(400); return }
+    if (!yes) { if (g === press0.current) later(400); return }
     const now = await app().dictateConfigure?.(next).catch(() => null)
     if (now) setSt(now)
     // A Mac: macOS asks now (Accessibility), with the tile beside System Settings.
     if (now?.paste?.asks === 'accessibility' && !now.paste.allowed) {
       await askAccess()
+      if (g !== press0.current) return
       setDone(t('Turn on Bridge AI under Accessibility when macOS asks, and it pastes from next time.'))
       later(6000)
-    } else { setDone(t('From next time, it\'s pasted where you\'re typing.')); later(2500) }
+    } else if (g === press0.current) { setDone(t('From next time, it\'s pasted where you\'re typing.')); later(2500) }
   }
   const label = keyLabel(dictationKey(conf), keysPlatform())
   // Pasting where you're typing, allowed: no agent to pick while it listens.

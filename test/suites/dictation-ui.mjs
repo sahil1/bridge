@@ -791,9 +791,17 @@ try {
   }
 
   // ---------- The dictation window, pasting where you're typing ----------
-  // The desktop app simulated: what it says about pasting, and its answer to a paste.
+  // The desktop app simulated: what it says about pasting, and its answer to a paste. late: ms the
+  // window waits for the answer to a change of settings it makes (kept on the server at once).
+  const late = { ms: 0 }
   const pasteHud = (status, answer) => page(b, `${kit.url}/?dictate=1`, { store: { 'cc-ws': { tabs: [one.paneId], active: one.paneId } }, before: async (c) => {
     await before(c)
+    await c.route(/\/api\/settings$/, async (r) => {
+      if (r.request().method() !== 'PATCH' || !late.ms) return r.continue()
+      const res = await r.fetch()
+      await sleep(late.ms)
+      await r.fulfill({ response: res }).catch(() => {})
+    })
     await c.addInitScript(([st, ans]) => {
       window.__hud = { phases: [], copied: [], hidden: 0, pasted: [], asked: 0, configured: [] }
       window.bridgeApp = {
@@ -991,13 +999,19 @@ try {
     await h.locator('.hud button', { hasText: 'Copy' }).click({ timeout: 5000 }).catch(() => {})
     const offer = h.locator('.hud-offer')
     ok(!!(await until(() => offer.isVisible(), 3000, 100)) && !/macOS asks/.test(await offer.innerText()), 'asked where there\'s nothing to allow too, without the line about macOS')
+    // Its answer slow to come back, with the key pressed again meanwhile: the window used to go 400 ms
+    // after the answer came, in the middle of the new dictation, and take its words with it.
+    late.ms = 800
     await offer.locator('button', { hasText: 'Not now' }).click({ timeout: 5000 }).catch(() => {})
     const kept = !!(await until(async () => { const d = (await kit.api('/settings')).effective?.dictation || {}; return d.offeredPaste === true && d.to == null }, 5000, 100)) && await h.evaluate(() => window.__hud.asked) === 0
+    const hid = await h.evaluate(() => window.__hud.hidden)
     await talk(h, 'and again')
-    await until(async () => (await h.locator('.hud-text').innerText().catch(() => '')) === 'And again.', 8000, 100)
+    const heard = !!(await until(async () => (await h.locator('.hud-text').innerText().catch(() => '')) === 'And again.', 8000, 100))
+    const stayed = heard && await h.evaluate(() => window.__hud.hidden) === hid
+    late.ms = 0
     await h.locator('.hud button', { hasText: 'Copy' }).click({ timeout: 5000 }).catch(() => {})
     const never = !!(await until(async () => /Copied/.test(await hudText(h)), 3000, 100)) && (await sleep(400), await offer.count() === 0)
-    ok(kept && never, 'Not now: kept (the text still goes to the agent), and never asked again', { kept, never })
+    ok(kept && stayed && never, 'Not now: kept (the text still goes to the agent), the next dictation not hidden when it\'s kept, and never asked again', { kept, stayed, never })
     await hc.close()
   }
   await kit.api('/settings', { dictation: { offeredPaste: null } }, 'PATCH')
