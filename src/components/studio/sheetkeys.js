@@ -13,6 +13,7 @@
 //   ⌘\                           clear the formatting
 //   ⇧⌘7                          a border round what's picked
 //   ⇧⌘H                          find and replace (⌘H hides the app on a Mac)
+//   Ctrl+Shift+Z                 redo on Windows and Linux too (Ctrl+Y is Univer's)
 //   ⇧F2                          a note on the cell
 //   ⌘/                           every shortcut (Univer's list, which has these too)
 //   ⌘P                           print, or save as PDF
@@ -169,6 +170,9 @@ export function googleKeys(univer, u, { container, onPrint, onSay } = {}) {
     { id: 'ui.operation.open-replace-dialog', binding: KeyCode.H | MOD | SHIFT, description: t('Find and replace'), ...group },
     { id: 'sheet.operation.add-note-popup', binding: KeyCode.F2 | SHIFT, description: t('Add a note'), ...group },
     { id: 'base-ui.operation.toggle-shortcut-panel', binding: SLASH | MOD },
+    // Redo is Ctrl+Y and Ctrl+Shift+Z on Windows and Linux, as in Google Sheets: Univer has the
+    // second only on a Mac (⇧⌘Z).
+    ...(MAC ? [] : [{ id: 'univer.command.redo', binding: KeyCode.Z | MOD | SHIFT }]),
     { id: 'bridge.sheet.print', binding: KeyCode.P | MOD, description: t('Print, or save as PDF'), ...group },
   ]
   // ⌘\ is also Univer's own key for its list of shortcuts: Google Sheets clears the formatting

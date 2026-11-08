@@ -182,11 +182,12 @@ try {
   ok(await save(), 'saved', unsaved)
   const h1 = async () => { const x = new ExcelJS.Workbook(); await x.xlsx.readFile(path.join(dir, 'budget.xlsx')); return x.getWorksheet('Budget').getCell('H1').value }
   const undone = await h1()
-  for (let i = 0; i < 70; i++) await p.keyboard.press(`${MOD}+Shift+z`)
+  // Redone with both of redo's keys, on every system: ⇧⌘Z and ⌘Y (Ctrl+Shift+Z and Ctrl+Y).
+  for (let i = 0; i < 70; i++) await p.keyboard.press(i % 2 ? `${MOD}+y` : `${MOD}+Shift+z`)
   await sleep(300)
   ok(await save(), 'saved', unsaved)
   const redone = await h1()
-  ok(undone == null && redone === 70, 'undo goes back 70 steps (Univer alone kept 50), and redo forward again', { undone, redone })
+  ok(undone == null && redone === 70, 'undo goes back 70 steps (Univer alone kept 50), and redo (both its keys) forward again', { undone, redone })
   await goTo('H1'); await p.keyboard.press('Delete')
   // A word added to a cell's text, and a new cell typed in: plain text, in no colour of its own.
   await goTo('A3'); await p.keyboard.press('F2'); await p.keyboard.type(' work'); await p.keyboard.press('Enter')
