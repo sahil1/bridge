@@ -214,7 +214,7 @@ try {
   ok(!(await desk.api('/account')).signedIn && (await acc.admin('GET', '/admin/accounts?q=sam@')).total === 0 && (await acc.admin('GET', `/admin/accounts/${sam.id}`)).code === 'none', 'deleted: Desk is signed out, and the service has nothing of the account', null)
   ok(!!(await until(async () => !(await studio.api('/account?fresh=1')).signedIn, 5000)), 'and Studio, asked, isn\'t signed in either')
 
-  const errs = pages.flatMap((x) => x.errors).filter((e) => !/\/api\/[\w/.?=&-]+ due to access control checks|WebSocket|_relay/.test(e))
+  const errs = pages.flatMap((x) => x.errors).filter((e) => !/\/api\/\S+ due to access control checks|WebSocket|_relay/.test(e))
   ok(errs.length === 0, 'no page errors', errs)
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)

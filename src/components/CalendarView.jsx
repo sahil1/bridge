@@ -121,10 +121,11 @@ function useNow(ms = 60000) {
 }
 
 // How it's shown (server: calendar.js viewOf), the same on each of your devices. save(patch): shown
-// at once, put back with why when it couldn't be kept.
+// at once, put back with why when it couldn't be kept. known: it has come (or couldn't be read, and
+// the defaults stand).
 const VIEW = { weekStart: null, workStart: 9, workEnd: 17, hidden: [], tasks: true }
 function useView() {
-  const { data, refresh } = usePoll('/calendar/view', 10 * 60 * 1000)
+  const { data, error: unread, refresh } = usePoll('/calendar/view', 10 * 60 * 1000)
   const [mine, setMine] = useState(null)
   const [error, setError] = useState(null)
   const v = { ...VIEW, ...(data || {}), ...(mine || {}) }
@@ -134,7 +135,7 @@ function useView() {
     try { await api('/calendar/view', { method: 'PATCH', body: patch }); await refresh() } catch (x) { setError(x.message) }
     setMine(null)
   }
-  return { view: { ...v, ws: v.weekStart ?? localWeekStart() }, save, error }
+  return { view: { ...v, ws: v.weekStart ?? localWeekStart() }, save, error, known: !!data || !!unread }
 }
 
 // What a task says about when, and where it is.
@@ -558,12 +559,15 @@ export default function CalendarView({ onOpenAgent, focus }) {
   const [seen, setSeen] = usePersisted('cc-cal-colors', {}) // calendar -> colour, for one hidden this week
   const [ref, width] = useWidth()
   const now = useNow()
-  const { view, save, error: viewError } = useView()
+  const { view, save, error: viewError, known } = useView()
   const anchor = parseDay(anchorIso)
   const range = rangeFor(mode, anchor, view.ws)
   const from = isoDay(range[0]), to = isoDay(range[1])
-  const { data, error, errorCode, loading, refresh } = usePoll(`/calendar/range?from=${from}&to=${to}`, 5 * 60 * 1000)
-  const { data: taskData } = usePoll(view.tasks && mode !== 'year' ? `/calendar/tasks?from=${from}&to=${to}` : null, 2 * 60 * 1000)
+  // The days are read once how it's shown is known: before, the week was drawn as the browser's
+  // language starts it, then the day you set it to start on, its events gone in between, and
+  // hidden calendars showed for a moment.
+  const { data, error, errorCode, loading, refresh } = usePoll(known ? `/calendar/range?from=${from}&to=${to}` : null, 5 * 60 * 1000)
+  const { data: taskData } = usePoll(known && view.tasks && mode !== 'year' ? `/calendar/tasks?from=${from}&to=${to}` : null, 2 * 60 * 1000)
   const all = useMemo(() => (data?.from === from ? data.events : []), [data, from])
   const tasks = useMemo(() => (view.tasks && mode !== 'year' ? (taskData?.tasks || []).map((x) => ({ ...x, kind: 'task', id: `task:${x.id}` })) : []), [taskData, view.tasks, mode])
   const hidden = useMemo(() => new Set(view.hidden), [view.hidden.join('\n')]) // eslint-disable-line react-hooks/exhaustive-deps

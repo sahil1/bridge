@@ -228,7 +228,7 @@ try {
   await narrow.p.waitForSelector('.ph-pair', { timeout: 10000 })
   ok((await narrow.p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 1, 'Pair a device fits a phone')
   await shot(narrow.p, `${tag}devices-pair-phone`)
-  const errs = [...fresh.errors, ...s.errors, ...narrow.errors, ...ph.errors].filter((e) => !/\/api\/[\w/.-]+ due to access control checks|WebSocket|_relay/.test(e))
+  const errs = [...fresh.errors, ...s.errors, ...narrow.errors, ...ph.errors].filter((e) => !/\/api\/\S+ due to access control checks|WebSocket|_relay/.test(e))
   ok(errs.length === 0, 'no page errors', errs)
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)

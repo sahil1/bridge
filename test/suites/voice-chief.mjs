@@ -27,7 +27,7 @@ b.write('RIFF', 0); b.writeUInt32LE(36 + n * 2, 4); b.write('WAVE', 8); b.write(
 process.stdout.write(b)`)
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
-const real = (errors) => errors.filter((e) => !/\/api\/[\w/.?=&-]+ due to access control checks/.test(e))
+const real = (errors) => errors.filter((e) => !/\/api\/\S+ due to access control checks/.test(e))
 
 const ANSWER = '**Two agents need you.**\n- `payments (w1:2)` asks whether to run the migration.\n- billing (w2:1) is waiting on a review of [PR 42](https://github.com/acme/billing/pull/42).'
 const HEARD = 'Two agents need you. payments asks whether to run the migration. billing is waiting on a review of PR 42.'

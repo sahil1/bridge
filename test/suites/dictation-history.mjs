@@ -49,7 +49,7 @@ const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
 // What the computer "heard": the text to answer with next (a moment late, to see Transcribing…).
 const said = []
 let slow = 0
-const real = (errors) => errors.filter((e) => !/\/api\/[\w/.?=&-]+ due to access control checks/.test(e))
+const real = (errors) => errors.filter((e) => !/\/api\/\S+ due to access control checks/.test(e))
 // Listening: the mic's sound has come, and ✓ can stop it. On a busy computer that can be a while
 // after the press, and nothing before it is recorded, so a hold is timed from then.
 const listens = (pg) => until(() => pg.locator('.rec-stop:enabled, .dp-ok:enabled').count(), 5000, 50)

@@ -151,11 +151,14 @@ const runOne = (j, attempt) => new Promise((resolve) => {
   const p = spawn(process.execPath, [path.join(ROOT, 'test', 'suites', `${j.name}.mjs`)], { cwd: ROOT, env: { ...process.env, BRIDGE_TEST_BROWSER: j.engine || '' }, stdio: ['ignore', out, out] })
   // Too long: stopped with everything it started (its server, its browser). Playwright catches a
   // plain stop to close its browser first, and a test stuck waiting would then never end.
-  const limit = setTimeout(() => { fs.appendFileSync(log, '\nFAIL took more than 5 minutes, so it was stopped\n'); stopTree(p.pid) }, 5 * 60_000)
-  p.on('exit', (code) => {
+  const limit = setTimeout(() => { fs.appendFileSync(log, '\nFAIL took more than 5 minutes, so it was stopped\n'); stopTree(p) }, 5 * 60_000)
+  p.on('exit', (code, signal) => {
     clearTimeout(limit)
     const text = fs.readFileSync(log, 'utf8')
-    const last = text.trim().split('\n').reverse().find((l) => /: \d+ passed, \d+ failed/.test(l)) || '(no result: see the log)'
+    // One that ended with nothing to say: how it ended (stopped from outside, a crash, Windows'
+    // 3221225786 for a console that went away), so the next one says what happened.
+    const how = signal ? `stopped by ${signal}` : `exit code ${code}`
+    const last = text.trim().split('\n').reverse().find((l) => /: \d+ passed, \d+ failed/.test(l)) || (text.trim() ? `(no result, ${how}: see the log)` : `(no output at all, ${how})`)
     resolve({ ok: code === 0, ms: Date.now() - t0, line: last.replace(/^[\w-]+: /, ''), fails: text.split('\n').filter((l) => l.startsWith('FAIL ')), log })
   })
 })
@@ -173,7 +176,7 @@ await Promise.all(Array.from({ length: Math.min(lanes, jobs.length) }, async () 
       else r = { ...again, first: r }
     }
     results.push({ j, r })
-    console.log(`${r.ok ? (r.flaky ? 'FLAKY' : 'ok   ') : 'FAIL '} ${j.label}: ${r.line} (${Math.round(r.ms / 1000)} s)${r.flaky ? `: failed once (${r.flaky.fails.slice(0, 2).join('; ').slice(0, 200)}), passed on its own` : ''}`)
+    console.log(`${r.ok ? (r.flaky ? 'FLAKY' : 'ok   ') : 'FAIL '} ${j.label}: ${r.line} (${Math.round(r.ms / 1000)} s)${r.flaky ? `: failed once (${(r.flaky.fails.length ? r.flaky.fails.slice(0, 2).join('; ') : r.flaky.line).slice(0, 200)}), passed on its own` : ''}`)
     if (!r.ok) for (const f of r.fails.slice(0, 8)) console.log(`        ${f.slice(0, 300)}`)
   }
 }))

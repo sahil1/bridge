@@ -816,13 +816,15 @@ function App() {
       </button>
       <div className="top-right">
         <Quiet name="Recording"><RecordingPill /></Quiet>
+        {/* What needs you opens Home when it's on, so the chip waits for the settings that say:
+            clicked before they were in (just after a reload), it opened the inbox instead. */}
         {cloudOnly
           ? needsYou.length > 0 && (
             <button className="needs-chip" onClick={() => openAgent(needsYou[0].paneId)} aria-label={needsYou.length === 1 ? t('{n} needs you', { n: needsYou.length }) : t('{n} need you', { n: needsYou.length })}>
               <StatusDot status="blocked" size={8} /> {needsYou.length}<span className="needs-word"> {needsYou.length === 1 ? t('needs you') : t('need you')}</span>
             </button>
           )
-          : <NeedsYouChip count={needN} elsewhere={needElse} review={wide ? toReview : 0} open={!!inbox} onClick={() => (homeOn ? openHome() : setInbox(inbox ? null : {}))} />}
+          : conf && <NeedsYouChip count={needN} elsewhere={needElse} review={wide ? toReview : 0} open={!!inbox} onClick={() => (homeOn ? openHome() : setInbox(inbox ? null : {}))} />}
         {!cloudOnly && wide && (
           <>
             <Quiet name="Next meeting"><NextMeetingChip onClick={() => showCard('calendar')} recording={meetings?.rec?.title || null} /></Quiet>
@@ -869,9 +871,10 @@ function App() {
       : it.chief ? openOn(it.machine, it.chief, { device: it.device, title: t('Chief of Staff') }) : goMachine(it.machine, { agent: 'chief', back: t('Chief of Staff') })),
     onCalendar: () => showCard('calendar'),
   }
+  // Home off says how to turn it on, once the settings say it's off (until they're in, nothing).
   const viewFor = (id, { onBack } = {}) => (
     <ErrorBoundary key={id} name="This view" resetKey={id}>
-      {(id === 'view:home' || id === 'view:everything') && !homeOn ? <section className="pane view-pane"><TrialOff name={t('Home')} /></section>
+      {(id === 'view:home' || id === 'view:everything') && !homeOn ? <section className="pane view-pane">{conf && <TrialOff name={t('Home')} />}</section>
         : id === 'view:home' ? <section className="pane view-pane"><NeedsHome {...homeProps} onEverything={openEverything} /></section>
         : id === 'view:everything' ? <section className="pane view-pane"><Everything {...homeProps} onOpenAgent={(x) => openOn(x.machine, x.a.paneId, { device: x.device, title: x.a.name || x.a.title, kind: x.a.kind })} onBack={wide ? null : () => setHomeView('home')} /></section>
         : id === 'view:new' ? <Home fleet={fleet} onLaunched={fromHome} onMore={(init) => setNewAgent(init)} />

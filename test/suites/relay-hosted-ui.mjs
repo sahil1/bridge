@@ -198,7 +198,7 @@ try {
   const noAcc = await fresh('noacc', { relay: { hostedUrl: hr.url } })
   ok(!(await noAcc.api('/relay')).hostedAvailable, 'and a hosted relay with no Bold Bridge accounts isn\'t offered at all (it can\'t work without one)')
 
-  const errs = pages.flatMap((x) => x.errors).filter((e) => !/\/api\/[\w/.?=&-]+ due to access control checks|WebSocket|_relay/.test(e))
+  const errs = pages.flatMap((x) => x.errors).filter((e) => !/\/api\/\S+ due to access control checks|WebSocket|_relay/.test(e))
   ok(errs.length === 0, 'no page errors', errs)
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)

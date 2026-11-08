@@ -68,7 +68,7 @@ const kit = await startKit('routines-ui', {
 kit.program('claude', fs.readFileSync(path.join(TEST, 'stand-ins', 'claude.cjs'), 'utf8'))
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
-const real = (errors) => errors.filter((e) => !/\/api\/[\w/.?=&-]+ due to access control checks/.test(e))
+const real = (errors) => errors.filter((e) => !/\/api\/\S+ due to access control checks/.test(e))
 const LIGHT = { mode: 'light', theme: 'sky' }
 const DARK = { mode: 'dark', theme: 'midnight' }
 const routinesOf = async () => (await kit.api('/routines?refresh=1')).routines

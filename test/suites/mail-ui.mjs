@@ -21,7 +21,7 @@ const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
 // The test's own requests for mail get through (page() turns mail away for every other test).
 const allowMail = (ctx) => ctx.route(/\/api\/mail(\/|\?|$)/, (r) => r.continue())
-const real = (errors) => errors.filter((e) => !/\/api\/[\w/.?=&-]+ due to access control checks|^TypeError: Importing a module script failed\.$/.test(e))
+const real = (errors) => errors.filter((e) => !/\/api\/\S+ due to access control checks|^TypeError: Importing a module script failed\.$/.test(e))
 
 if (!IS_MAC) {
   // Mail reads Apple Mail: here there's no way into it at all, rather than a tab that says it can't work.

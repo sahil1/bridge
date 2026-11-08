@@ -154,13 +154,15 @@ export async function answer(t) {
 
 // Type one of a question's simple answers (n), if the agent is still waiting on that same question
 // (qid, and seq: the wait it was asked in). The needs-you inbox answers this way too (needsyou.js).
+// Turned down, it says what changed (what): the agent's gone, isn't waiting (its state), waits
+// anew, asks something else, or has no such answer.
 export async function pick(paneId, { seq, qid, n }) {
-  if (!rt) return { ok: false, why: 'changed' }
+  if (!rt) return { ok: false, why: 'changed', what: 'gone' }
   const a = (await rt.fleet()).agents.find((x) => x.paneId === paneId)
-  if (!a || a.status !== 'blocked' || (seq != null && a.seq !== seq)) return { ok: false, why: 'changed' }
+  if (!a || a.status !== 'blocked' || (seq != null && a.seq !== seq)) return { ok: false, why: 'changed', what: !a ? 'gone' : a.status !== 'blocked' ? a.status : 'another wait' }
   const q = question(await rt.read(paneId, 60))
   const o = q?.id === qid && q.simple?.find((x) => x.n === n)
-  if (!o) return { ok: false, why: 'changed' }
+  if (!o) return { ok: false, why: 'changed', what: q?.id !== qid ? 'another question' : 'no such answer' }
   await rt.input(paneId, o.steps || [{ keys: [n] }])
   // Still asking the same thing a moment later: the keys didn't take. Over to the app.
   await new Promise((r) => setTimeout(r, 800))

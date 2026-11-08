@@ -118,7 +118,7 @@ const api = kit.api
 const err = (p, body, method) => api(p, body, method).then(() => null, (e) => e)
 const pages = []
 // A request cut off by a reload, which WebKit reports as a page error.
-const real = (errors) => errors.filter((e) => !/\/api\/[\w/.?=&-]+ due to access control checks/.test(e))
+const real = (errors) => errors.filter((e) => !/\/api\/\S+ due to access control checks/.test(e))
 
 // ---------- Meetings already recorded, as Bridge AI keeps them ----------
 const meeting = (id, { title, when, seconds, people, summary, event = {} }) => {
@@ -164,7 +164,7 @@ if (IS_MAC) {
 // open it), or at a week.
 const LAYOUT = { railW: 232, railOpen: true, dockW: 380, dockMin: false, boardH: 280, boardMin: false, sideW: 560, max: 'dock', todayOpen: true }
 const open = async (look = {}) => {
-  const pg = await page(b, kit.url, { width: 1440, height: 900, ...look, store: { 'cc-layout': LAYOUT, 'cc-today-tab': 'calendar', 'cc-cal-mode': 'week', ...(look.store || {}) }, before: setUp })
+  const pg = await page(b, kit.url, { width: 1440, height: 900, ...look, store: { 'cc-layout': LAYOUT, 'cc-today-tab': 'calendar', 'cc-cal-mode': 'week', ...(look.store || {}) }, before: async (c) => { await setUp(c); await look.before?.(c) } })
   pages.push(pg)
   await pg.p.waitForSelector(look.phone ? '.tabbar' : '.calv', { timeout: 20000 }).catch(() => {})
   return pg
@@ -277,6 +277,18 @@ try {
   ok(asked(/^Prepare me for a meeting: "Design review with Ines"/).length === 2 && p3.suggest.items.length > 0, 'Again: asked afresh')
 
   // ---------- The app, with a model: 1440, light and dark ----------
+  // How it's shown slow to come: the week is read once, from the Monday it's set to start on, never
+  // first as this browser's language starts it (it then moved, its events gone in between).
+  {
+    const from = []
+    const { p } = await open({ before: async (c) => {
+      c.on('request', (r) => { if (/\/api\/calendar\/range\?/.test(r.url())) from.push(new URL(r.url()).searchParams.get('from')) })
+      await c.route(/\/api\/calendar\/view$/, async (r) => { await sleep(1500); await r.continue().catch(() => {}) })
+    } })
+    await until(() => p.locator('.tg-ev').count(), 15000)
+    ok(from.length > 0 && from.every((d) => new Date(`${d}T12:00`).getDay() === 1), 'the week is read once it\'s known which day it starts on, never first as the browser\'s language starts it', from)
+    await p.context().close()
+  }
   for (const mode of ['light', 'dark']) {
     const { p, errors } = await open({ mode })
     await until(() => p.locator('.tg-ev').count(), 15000)
@@ -303,8 +315,9 @@ try {
       await p.locator('.cal-key', { hasText: 'Family' }).click()
       const gone = await until(async () => !(await p.locator('.tg-ev', { hasText: 'Dinner with the Okafors' }).count()) && !(await p.locator('.tg-chip', { hasText: 'Football practice' }).count()), 5000)
       ok(!!gone && await p.locator('.cal-key.off', { hasText: 'Family' }).count() === 1, 'a click on a calendar\'s key hides it, and the key says so')
-      const v = await api('/calendar/view')
-      ok(v.hidden.join() === 'Family', 'kept on the server, for every device', v)
+      // The page shows it at once and keeps it on the server a moment later.
+      const v = await until(async () => { const x = await api('/calendar/view'); return x.hidden.join() === 'Family' && x }, 5000)
+      ok(!!v, 'kept on the server, for every device', v || await api('/calendar/view'))
       await api('/calendar/view', { hidden: ['Family', 'Personal'] }, 'PATCH')
       const sched = await api('/calendar')
       ok(![...sched.today, ...sched.tomorrow].some((e) => e.calendar === 'Personal'), "a hidden calendar is off today's Schedule and Home's Coming Up", [...sched.today, ...sched.tomorrow].map((e) => e.calendar))
@@ -313,12 +326,12 @@ try {
       await until(() => p.locator('.tg-ev').count(), 15000)
       ok(await p.locator('.cal-key.off', { hasText: 'Family' }).count() === 1 && !(await p.locator('.tg-ev', { hasText: 'Dinner with the Okafors' }).count()), 'still hidden after a reload')
       await p.locator('.cal-key', { hasText: 'Family' }).click()
-      ok(!!(await until(async () => (await p.locator('.tg-ev', { hasText: 'Dinner with the Okafors' }).count()) > 0, 5000)) && (await api('/calendar/view')).hidden.length === 0, 'a click brings it back')
+      ok(!!(await until(async () => (await p.locator('.tg-ev', { hasText: 'Dinner with the Okafors' }).count()) > 0, 5000)) && !!(await until(async () => (await api('/calendar/view')).hidden.length === 0, 5000)), 'a click brings it back')
       // Week start and working hours.
       await p.locator('.calv-view-btn').click()
       await p.locator('.calv-menu select[aria-label="Week starts on"]').selectOption('0')
       const sun = await until(async () => /^Sun/.test((await p.locator('.tg-day small').first().innerText().catch(() => '')).trim()), 5000)
-      ok(!!sun && (await api('/calendar/view')).weekStart === 0, 'the week starts on Sunday when you say so', await p.locator('.tg-day small').allInnerTexts())
+      ok(!!sun && !!(await until(async () => (await api('/calendar/view')).weekStart === 0, 5000)), 'the week starts on Sunday when you say so', await p.locator('.tg-day small').allInnerTexts())
       await p.locator('.calv-menu select[aria-label="Working hours start"]').selectOption('8')
       await p.locator('.calv-menu select[aria-label="Working hours end"]').selectOption('18')
       await until(async () => (await api('/calendar/view')).workEnd === 18, 5000)

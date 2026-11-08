@@ -182,7 +182,9 @@ try {
   await kit.api(`/meetings/${C.id}/speakers`, {})
   const named = await until(async () => { const tr = (await kit.api(`/meetings/${C.id}`)).transcript.filter((l) => l.src === 'them' && l.text); return tr.every((l) => (l.voice === 1 ? l.name === 'Priya Shah' : l.name === 'Dan Ruiz')) && tr }, 10000)
   ok(!!named, 'and named once a voice, from who was invited: every line of theirs', (await kit.api(`/meetings/${C.id}`)).transcript.map((l) => [l.voice, l.name]))
-  st = await tryApi(kit, '/meetings/voices')
+  // Learned after the call's voices are told apart, from your lines heard again: that can still be
+  // going once they're named.
+  st = await until(async () => { const x = await tryApi(kit, '/meetings/voices'); return x.mine === true && x }, 10000) || await tryApi(kit, '/meetings/voices')
   ok(st.mine === true && st.learn === true && st.calls === true, 'your voice is learned from your mic on the call, by itself', st)
   // A room after, with you (220 Hz) and someone else (440 Hz).
   const R4 = await record(kit, 'Whiteboard', [1, 2, 1, 2])
