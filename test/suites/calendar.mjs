@@ -491,7 +491,7 @@ try {
     await p.context().close()
   }
 
-  // ---------- Read only ----------
+  // ---------- Read-only ----------
   const calls = fs.readFileSync(path.join(kit.bin, 'bridgecal.log'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
   ok(calls.length > 0 && calls.every((a) => a.length === 0 || a[0] === 'status' || a[0] === 'events'), 'the calendar helper was only ever asked whether it may read, and to read', [...new Set(calls.map((a) => a[0] || '(ask)'))])
 } catch (e) {

@@ -193,7 +193,7 @@ try {
   ok(kl(/^Sure, and/).text.endsWith('(my edit).') && !kl(/^Sure, and/).cleaned, 'a line you edited stays yours', kl(/^Sure, and/))
   await kit.api(`/meetings/${K.id}/cleanup/undo`, { key: kl(/Thanks for watching/).key })
   k = await kit.api(`/meetings/${K.id}`)
-  ok(!kl(/Thanks for watching/).dropped && kl(/demo bridge/).cleaned, 'Put back keeps that one line', kl(/Thanks for watching/))
+  ok(!kl(/Thanks for watching/).dropped && kl(/demo bridge/).cleaned, 'Restore keeps that one line', kl(/Thanks for watching/))
   await kit.api(`/meetings/${K.id}/cleanup/undo`, {})
   k = await kit.api(`/meetings/${K.id}`)
   ok(!k.transcript.some((l) => l.cleaned || l.dropped) && !k.cleanedAt, 'Undo the cleanup: back to what was heard', k.transcript.map((l) => l.text))
