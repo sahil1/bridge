@@ -11,7 +11,7 @@ import { t, tx, locale } from '../../i18n/index.js'
 import { TRIALS } from '../../trials.js'
 import { AWAY_MINUTES, RELEASE_HOURS, waitingLong } from '../../../shared/autoupdate.js'
 import { isPre } from '../../../shared/version.js'
-import { earlyFromLink } from '../../earlyLink.js'
+import { earlyFromLink, doneWithEarlyLink } from '../../earlyLink.js'
 
 const REPO = 'https://github.com/sahil1/bridge'
 
@@ -68,6 +68,8 @@ function Updates() {
   const [joining, setJoining] = useState(!!link)
   const early = raw?.early
   const earlyShown = !!early && ((joining && early.offered) || early.on || !!early.problem)
+  // A link's code in a build that takes none is dropped.
+  useEffect(() => { if (early && !early.offered) doneWithEarlyLink() }, [early?.offered]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <>
@@ -106,7 +108,7 @@ function Updates() {
         </>
       )}
     </section>
-    {earlyShown && <EarlyAccess u={raw} code={link} onDone={() => setJoining(false)} onChange={() => load(false)} />}
+    {earlyShown && <EarlyAccess u={raw} code={link} onDone={() => { doneWithEarlyLink(); setJoining(false) }} onChange={() => load(false)} onJoined={doneWithEarlyLink} />}
     </>
   )
 }
@@ -131,13 +133,13 @@ function whyNot(err, code) {
   if (err.code === 'early-none') return t("This version of Bridge AI doesn't take early-access codes.")
   return err.message
 }
-function EarlyAccess({ u, code: fromLink, onDone, onChange }) {
+function EarlyAccess({ u, code: fromLink, onDone, onChange, onJoined }) {
   const e = u.early
   const [code, setCode] = useState(fromLink || '')
   const [state, setState] = useState(null) // joining | leaving | { error }
   const join = async () => {
     setState('joining')
-    try { await api('/updates/early', { method: 'POST', body: { code } }); setCode(''); setState(null); onChange() } catch (err) { setState({ error: whyNot(err, code) }) }
+    try { await api('/updates/early', { method: 'POST', body: { code } }); setCode(''); setState(null); onJoined?.(); onChange() } catch (err) { setState({ error: whyNot(err, code) }) }
   }
   // Left: the section goes, and the version line says the version here stays until Stable passes it.
   const leave = async () => {

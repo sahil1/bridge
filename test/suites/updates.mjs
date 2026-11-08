@@ -735,10 +735,10 @@ try {
     })
     const ghcPort = await freePort()
     await new Promise((r) => ghc.listen(ghcPort, '127.0.0.1', r))
-    const chKit = async (name, { how = 'app', bucket, key = KEY } = {}) => {
+    const chKit = async (name, { how = 'app', bucket, key = KEY, setUp = true } = {}) => {
       const k = await startKit(`updates-${name}`, { env: { BRIDGE_RELEASES_API: `http://127.0.0.1:${ghcPort}/repos/sahil1/bridge/releases/latest`, BRIDGE_INSTALL_HOW: how, BRIDGE_EARLY_ACCESS_KEY: key, BRIDGE_MACHINE: JSON.stringify({ platform: 'darwin', arch: 'arm64', os: '14.6', docker: how === 'docker' }) }, config: bucket != null ? { updates: { bucket } } : {} })
       kits.push(k)
-      await k.api('/setup', { name: 'Tester' })
+      if (setUp) await k.api('/setup', { name: 'Tester' })
       return k
     }
     const refused = (p) => p.then((x) => ({ ok: true, x }), (e) => ({ error: e.message }))
@@ -904,6 +904,21 @@ try {
       ok(!!(await until(async () => /On for Sam/.test(await early(p).innerText().catch(() => '')), 8000)), 'Join: on for Sam')
       ok(cut(errors).length === 0, 'no page errors', errors)
       await ctx.close()
+    }
+    {
+      // The same link on a cold first load: a computer not set up yet, in a browser just started that
+      // has never opened Bridge AI (no tour done, nothing kept). Settings opens more than once as the
+      // page settles (setup's steps), and the code is still there, filled in, under setup.
+      const fresh = await chKit('early-cold', { setUp: false })
+      const kim = codeFor('Kim', { days: 30 })
+      // (As a person's browser is: none of the test browser's stand-in microphone flags.)
+      const cold = await (await import('playwright-core'))[which].launch()
+      const ctx = await cold.newContext({ viewport: { width: 1440, height: 900 } })
+      const p = await ctx.newPage()
+      await p.goto(`${fresh.url}/?early=${encodeURIComponent(kim)}`)
+      const filled = await until(async () => (await early(p).locator('input').inputValue().catch(() => '')) === kim, 15000)
+      ok(!!filled && (await p.locator('.wiz').count()) === 1 && !/early=/.test(await p.evaluate(() => location.href)), 'a cold first load from a tester\'s link, before setup: the code kept and filled in, and taken off the address', { filled: !!filled, wizard: await p.locator('.wiz').count(), at: await p.evaluate(() => location.href) })
+      await cold.close()
     }
     await ek.api('/settings', { earlyAccess: { code: codeFor('Kim', { days: 1, now: Date.now() - 3 * 24 * HOUR }) } }, 'PATCH')
     await ek.api('/updates?refresh=1')
