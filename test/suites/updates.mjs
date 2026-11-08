@@ -120,6 +120,11 @@ for (const [what, m, release, want] of RULES) {
 // ---------- Updating by itself while you're away: the rules ----------
 // shared/autoupdate.js, as the server and the desktop app ask it: what each waits for at a moment.
 const au = await import('../../shared/autoupdate.js')
+// As PRIVACY.md and SECURITY.md say: not only when you update, but by itself in the desktop app.
+{
+  const doc = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8').replace(/\s+/g, ' ')
+  ok(/by itself while you're away in the desktop app on a Mac or Windows unless you turn that off/.test(doc('PRIVACY.md')) && /by itself while you're away unless you turn that off/.test(doc('SECURITY.md')), 'PRIVACY.md and SECURITY.md say the desktop app updates by itself while you\'re away, unless turned off', null)
+}
 const HOUR = 60 * 60 * 1000
 const NOW = Date.parse('2026-11-06T03:00:00Z')
 const ago = (h) => new Date(NOW - h * HOUR).toISOString()

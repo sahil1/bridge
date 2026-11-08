@@ -24,7 +24,8 @@ meetings), the local model (Gemma 4 E2B, 2.8 GB) only when you click Download fo
 Model Providers (one download from Hugging Face; what you give it is read on your computer by
 llama.cpp, which runs there and answers only Bridge AI, and is never sent anywhere), a check on
 GitHub for a newer version, which you can turn off in Settings › About &
-Updates (and, when you choose to update, the new version from GitHub; with an early-access code,
+Updates (and the new version from GitHub, when you update, or by itself while you're away in the
+desktop app on a Mac or Windows unless you turn that off there too; with an early-access code,
 the check asks for the list of recent releases, and the code is checked on your computer and never
 sent), and, unless you turn them off, usage stats and crash reports to the project (below). Its fonts and icons are part of the app, so nothing is fetched to draw
 it. On Windows and Linux, the desktop app's spell check gets the dictionaries for your languages
