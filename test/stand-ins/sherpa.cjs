@@ -79,4 +79,28 @@ class SpeakerEmbeddingExtractor {
   }
 }
 
-module.exports = { OfflineRecognizer, SpeakerEmbeddingExtractor }
+// The natural voice (Supertonic 3, for voicespeak.js): ten voices, and for each word a tenth of a
+// second of a quiet tone at 44.1 kHz (each voice its own pitch). Loading checks the model's files are
+// there and is logged as { loadTts: folder, threads }; each request as { tts: text, sid, speed,
+// lang }. A file called fail in the model's folder makes every request fail.
+class GenerationConfig { constructor(o = {}) { Object.assign(this, o) } }
+class OfflineTts {
+  constructor(config) {
+    const s = config.model.supertonic
+    for (const f of [s.durationPredictor, s.textEncoder, s.vectorEstimator, s.vocoder, s.ttsJson, s.unicodeIndexer, s.voiceStyle]) if (!fs.existsSync(f)) throw new Error(`stand-in: no such file ${f}`)
+    this.dir = path.dirname(s.vocoder)
+    this.numSpeakers = 10
+    this.sampleRate = 44100
+    log({ loadTts: path.basename(this.dir), threads: config.model.numThreads })
+  }
+  static async createAsync(config) { return new OfflineTts(config) }
+  async generateAsync({ text, generationConfig: g = {} }) {
+    if (fs.existsSync(path.join(this.dir, 'fail'))) throw new Error('stand-in: the voice failed')
+    log({ tts: text, sid: g.sid, speed: Math.round(g.speed * 100) / 100, lang: g.extra?.lang })
+    const n = Math.round(String(text).split(/\s+/).length * 0.1 * this.sampleRate)
+    const hz = 120 + 20 * (g.sid || 0)
+    return { samples: Float32Array.from({ length: n }, (_, i) => 0.1 * Math.sin((2 * Math.PI * hz * i) / this.sampleRate)), sampleRate: this.sampleRate }
+  }
+}
+
+module.exports = { OfflineRecognizer, SpeakerEmbeddingExtractor, OfflineTts, GenerationConfig }
