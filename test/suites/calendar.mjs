@@ -511,8 +511,11 @@ try {
     const listed = await p.locator('.hm-ev-main > b').allInnerTexts()
     ok(listed.length > 1 && new Set(listed).size === listed.length, 'Coming Up lists each meeting once', listed)
     await shot(p, `${tag}calendar-home`)
-    await row.locator('button', { hasText: 'Open in Calendar' }).click()
-    ok(!!(await until(async () => /Northwind pricing sync/.test(await p.locator('.cal-detail h4').innerText().catch(() => '')), 10000)), 'Open in Calendar opens the meeting there, with its panel')
+    // View Calendar, as it's Bridge AI's own: "Open in" is for another app (Open in Calendar, Open in Word).
+    const opens = opener.opened().length
+    ok(!(await row.locator('button', { hasText: /^\s*Open in /i }).count()), "Coming Up's way to the calendar isn't called Open in, as it doesn't leave Bridge AI", await row.locator('button').allInnerTexts())
+    await row.locator('button', { hasText: 'View Calendar' }).click()
+    ok(!!(await until(async () => /Northwind pricing sync/.test(await p.locator('.cal-detail h4').innerText().catch(() => '')), 10000)) && opener.opened().length === opens, "View Calendar opens the meeting in Today › Calendar, with its panel (not the Mac's Calendar)")
     ok(real(errors).length === 0, 'Home: no page errors', errors)
     await p.context().close()
     await api('/settings', { trials: { home: false } }, 'PATCH')
