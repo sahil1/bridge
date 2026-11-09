@@ -4,7 +4,8 @@
 // change made meanwhile is refused; a change from outside, or from an agent asked, is kept as a
 // version by them; an older version put back keeps the one before too; a new file never
 // overwrites; design packs. The page: Studio's home with New and Recent; a Markdown file edited
-// and saved; a Word file's text; a sheet, still saved until a value's typed in, then saved with it; a deck drawn, and its PowerPoint beside it; a page drawn
+// and saved (the header saying Saved in words, and a document, which saves itself, no Save button
+// to press as it's typed in); a Word file's text; a sheet, still saved until a value's typed in, then saved with it; a deck drawn, and its PowerPoint beside it; a page drawn
 // as it's typed; versions and Restore; Ask an agent queueing the change for the agent you pick.
 // The editors finished: a Markdown file's toolbar (only what Markdown keeps), a Word file in its own
 // look saved with every other part as it was (its editor in full is studio-docs.mjs); the header's
@@ -224,10 +225,18 @@ try {
   const mdTools = await p.locator('.sd-doc-tools button').evaluateAll((bs) => bs.map((b) => b.getAttribute('aria-label')))
   ok(!mdTools.includes('Underline') && mdTools.includes('Inline code') && mdTools.includes('Code block'), "a Markdown file's toolbar: code and code blocks, and no underline (Markdown has none)", mdTools)
   ok(!!(await until(async () => { const x = await p.locator('.sd-status').innerText(); return /^\d+ words?/.test(x) && /Markdown/.test(x) && /Saved/.test(x) }, 5000)) && /^Markdown · \d+ KB$/.test(await p.locator('.sd-sub-kind').innerText()), 'its header says Markdown and its size; its status line its words, and Saved', await p.locator('.sd-status').innerText())
+  // Saved, said quietly in the header (words, not a button that looks turned off).
+  const saySaved = () => p.locator('.sd-file .pane-head').evaluate((h) => ({ text: h.querySelector('.sd-save-state')?.innerText.trim() || '', buttons: [...h.querySelectorAll('button')].filter((b) => /^(Save|Saved|Saving…)$/.test(b.innerText.trim())).map((b) => b.innerText.trim()) }))
+  let said = await saySaved()
+  ok(said.text === 'Saved' && !said.buttons.length, 'the header says Saved in words, not as a button', said)
   await pm.click()
   await p.keyboard.press(process.platform === 'darwin' ? 'Meta+End' : 'Control+End')
   await p.keyboard.type(' Edited here.')
-  await p.locator('.pane-head button', { hasText: 'Save' }).click()
+  // A document saves itself as you stop typing: no Save to press in its header meanwhile (⌘S still
+  // saves at once).
+  said = await saySaved()
+  ok(!said.buttons.length && /^(Saving…|Saved)$/.test(said.text), 'typing in a document: the header says Saving…, with no Save button to press', said)
+  await p.keyboard.press(`${MOD}+s`)
   ok(!!(await until(() => fs.readFileSync(path.join(dir, 'notes.md'), 'utf8').includes('Edited here.'), 8000)) && /^# Notes/.test(fs.readFileSync(path.join(dir, 'notes.md'), 'utf8')), 'typed and saved: still Markdown, with the change', fs.readFileSync(path.join(dir, 'notes.md'), 'utf8'))
   await p.locator('button[aria-label="Versions"]').click()
   // The save is kept as your version just after the file is written, so the list can show the
@@ -266,7 +275,7 @@ try {
   await p.locator('.sd-w p', { hasText: 'Ship the pricing page' }).click()
   await p.keyboard.press('End')
   await p.keyboard.type(' Agreed.')
-  await p.locator('.pane-head button', { hasText: 'Save' }).click()
+  await p.keyboard.press(`${MOD}+s`)
   ok(!(await p.locator('.sd-conflict[role="alertdialog"]').count()), "a Word file saves at once: nothing to warn about, as it keeps everything")
   const kept = await until(async () => { const x = await partsOf(path.join(dir, 'plan.docx')); return /Agreed/.test(x['word/document.xml']) && x }, 10000)
   const changedParts = kept ? Object.keys({ ...was, ...kept }).filter((k) => was[k] !== kept[k]) : null

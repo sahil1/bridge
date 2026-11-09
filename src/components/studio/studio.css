@@ -4,9 +4,15 @@
 .sd-home { min-height: 0; overflow: auto; padding: 20px 26px 40px; background: var(--pane); }
 .sd-home > * { max-width: 1040px; }
 .sd-home-say { margin: 0 0 16px; line-height: 1.5; }
+/* Studio's headers (its home, a file's page; a whiteboard's, in whiteboard.css, the same): every
+   control one height, 30px, as the toolbar's under them are, so a row of them lines up top and
+   bottom. */
+:is(.sd-home-view, .sd-file) > .pane-head .btn.small { height: 30px; padding: 0 11px; gap: 6px; font-size: 12.5px; border-radius: 8px; }
+:is(.sd-home-view, .sd-file) > .pane-head .win-btn { width: 30px; height: 30px; }
+:is(.sd-home-view, .sd-file) > .pane-head .sd-tabs button { height: 24px; }
 /* Files and Preview in the header: their words while there's room (there are only two), then icons. */
 @container (max-width: 880px) { .pane-head .sd-tabs span { display: inline; } .pane-head .sd-tabs button { padding: 0 10px; } }
-@container (max-width: 620px) { .pane-head .sd-tabs span { display: none; } .pane-head .sd-tabs button { padding: 0 8px; } }
+@container (max-width: 760px) { .pane-head .sd-tabs span { display: none; } .pane-head .sd-tabs button { padding: 0 8px; } }
 .app.narrow .pane-head .sd-tabs button { min-width: 40px; min-height: 40px; justify-content: center; padding: 0 12px; }
 .app.narrow .pane-head .sd-tabs span { display: inline; font-size: 13px; }
 /* New beside them: its word while there's room, its menu's rows a whole target on a phone (the menu
@@ -70,9 +76,23 @@
 .pane-sub .sd-sub-kind { flex: none; white-space: nowrap; }
 .pane-sub .sd-sub-where { flex: 0 1 auto; }
 .sd-head-btn .sd-btn-label:empty { display: none; }
+/* Its controls in the order you use them: Files and Preview; whether it's saved (quiet words, not a
+   button: Save itself only while there's something to save); Ask an agent and Open in its app;
+   versions, download and Focus, icons together; AI Assist last. As the pane narrows, Ask an agent
+   and Open in its app keep only their icons first, then Files and Preview, then the rest (each
+   one's name in its tooltip), so the file's name keeps its room. */
+.sd-file .pane-head .sd-tabs { margin-right: 4px; }
+.sd-save-state { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 4px; color: var(--ink-3); font: 500 12.5px var(--font); white-space: nowrap; cursor: default; }
+.sd-save-state > svg { flex: none; }
+.sd-head-icons { display: inline-flex; align-items: center; gap: 2px; }
+@container (max-width: 1000px) {
+  .sd-file .pane-head :is(.sd-ask-btn, .sd-open-in) .sd-btn-label { display: none; }
+  .sd-file .pane-head :is(.sd-ask-btn, .sd-open-in) { width: 30px; padding: 0; gap: 0; }
+}
 @container (max-width: 620px) {
   .sd-file .sd-btn-label { display: none; }
-  .sd-file .pane-head .btn.small { padding: 0 9px; gap: 0; }
+  .sd-file .pane-head .btn.small { width: 30px; padding: 0; gap: 0; }
+  .sd-file .pane-head .sd-save-state { padding: 0 7px; }
   .pane-sub .sd-sub-where { display: none; }
 }
 /* Empty, opening and couldn't: said in the middle of where the file would be. */
@@ -126,11 +146,31 @@
 .app.narrow .sd-status :is(.sd-kind-btn, .sd-open-in-narrow, .sd-focus-narrow, .sd-dl-narrow, .sd-focus-save, .sd-focus-full, .sd-focus-leave) { min-width: 40px; justify-content: center; gap: 0; }
 .app.narrow .sd-file.focus .sd-status .sd-kind-btn { display: none; }
 
-/* A toolbar over an editor: groups of buttons, each group set off by a line. */
-.sd-toolbar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-height: 42px; padding: 6px 12px; border-bottom: 1px solid var(--line); background: var(--pane); }
+/* A toolbar over an editor, the same in every kind: a row 42px high of 30px controls, in groups,
+   each group set off by a short line (as Google Docs' and PowerPoint's are). A button with words
+   (Open on its own) and a segmented choice (Both, Code, Page) the same 30px. */
+.sd-toolbar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; flex-wrap: wrap; gap: 4px; min-height: 42px; padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--pane); }
 .sd-group { display: inline-flex; align-items: center; gap: 2px; }
-.sd-group + .sd-group { padding-left: 6px; border-left: 1px solid var(--line); }
-.sd-grow + .sd-group { border-left: 0; padding-left: 0; }
+.sd-group + .sd-group { margin-left: 2px; padding-left: 7px; background: linear-gradient(var(--line), var(--line)) 0 50% / 1px 18px no-repeat; }
+.sd-grow + .sd-group { margin-left: 0; padding-left: 0; background: none; }
+.sd-toolbar .btn.small { height: 30px; padding: 0 11px; gap: 6px; font-size: 12.5px; border-radius: 8px; }
+.sd-toolbar .seg { padding: 2px; }
+.sd-toolbar .seg button { height: 24px; }
+/* A split button (New slide, Present): what it does, and a caret beside it for the other ways to do
+   it. Two halves of one button: the same height, touching, rounded only on the outside, a hairline
+   between them; each half lit on its own when pointed at, the caret while its menu is open.
+   Present's is filled with the accent, the same in both halves (its words --on-accent, which reads
+   at WCAG AA on --accent-fill in every theme). */
+.sd-split { display: inline-flex; align-items: stretch; border-radius: 7px; }
+.sd-split > .sd-tool { height: 30px; margin: 0; }
+.sd-split > .sd-tool:first-child { border-radius: 7px 0 0 7px; }
+.sd-split > .sd-tool.caret { position: relative; width: 22px; border-radius: 0 7px 7px 0; }
+.sd-split > .sd-tool.caret::before { content: ''; position: absolute; left: 0; top: 7px; bottom: 7px; width: 1px; }
+.sd-split:hover > .sd-tool.caret::before, .sd-split:focus-within > .sd-tool.caret::before, .sd-split > .sd-tool.caret.on::before { background: var(--line-2, var(--line)); }
+.sd-split.primary > .sd-tool, .sd-split.primary > .sd-tool:hover:not(:disabled), .sd-split.primary > .sd-tool.on { background: var(--accent-fill); color: var(--on-accent, #fff); }
+.sd-split.primary > .sd-tool:hover:not(:disabled) { filter: brightness(1.08); }
+.sd-split.primary > .sd-tool.caret.on { filter: brightness(.9); }
+.sd-split.primary > .sd-tool.caret::before { background: color-mix(in srgb, var(--on-accent, #fff) 38%, transparent); }
 .sd-tool { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 7px; color: var(--ink-2); transition: background .12s, color .12s; }
 .sd-tool:hover:not(:disabled) { background: var(--pane-3); color: var(--ink); }
 .sd-tool.on { background: var(--accent-soft); color: var(--accent); }
@@ -285,8 +325,16 @@
 .app.narrow .sd-file .pane-head .win-btn { width: 40px; height: 40px; }
 .app.narrow .sd-file .pane-head .btn.small { width: 40px; height: 40px; padding: 0; gap: 0; }
 .app.narrow .sd-file .pane-extras { gap: 2px; }
+/* There, Ask an agent an icon as the clock beside it is (AI Assist keeps its button, as everywhere,
+   and Save its colour while there's something to save), and whether it's saved left to the status
+   line, which says it. */
+.app.narrow .sd-file .pane-head .sd-ask-btn { border-color: transparent; background: none; color: var(--ink-2); }
+.app.narrow .sd-file .pane-head .sd-save-state { display: none; }
 .app.narrow .sd-toolbar { gap: 4px; padding: 4px 8px; }
-.app.narrow .sd-group + .sd-group { padding-left: 0; border-left: 0; }
+.app.narrow .sd-group + .sd-group { margin-left: 0; padding-left: 0; background: none; }
+/* Its groups give way there, so the rows fill up a button at a time rather than a group at a time
+   (a lone row of two buttons at the end). */
+.app.narrow .sd-toolbar:not(.sd-pdf-bar) .sd-group:not(.sd-marks) { display: contents; }
 .app.narrow .sd-toolbar .sd-grow { display: none; }
 .app.narrow .sd-tool { width: 40px; height: 40px; }
 .app.narrow .sd-style { height: 40px; font-size: 16px; }

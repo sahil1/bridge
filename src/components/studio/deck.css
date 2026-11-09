@@ -17,18 +17,11 @@
 .sd-slide-in svg[data-marpit-svg], .sd-canvas-in svg[data-marpit-svg] { display: block; width: 1280px; height: 720px; }
 .sd-slide-in { position: absolute; top: 0; left: 0; pointer-events: none; }
 
-/* The toolbar: buttons with their names where there's room. */
-.sd-deck-tools { z-index: 5; gap: 4px; padding: 6px 10px; }
-.sd-deck-tools .sd-group { gap: 2px; }
-.sd-deck-tools .sd-group + .sd-group { padding-left: 4px; margin-left: 2px; }
+/* The toolbar: buttons with their names where there's room (New slide and Present are split
+   buttons, studio.css). */
+.sd-deck-tools { z-index: 5; }
 .sd-tool.wide { display: inline-flex; align-items: center; gap: 6px; width: auto; padding: 0 9px 0 8px; }
 .sd-tool-label { font: 500 12.5px var(--font); white-space: nowrap; }
-.sd-tool.caret { width: 20px; margin-left: -2px; }
-.sd-split { gap: 0; }
-.sd-split .sd-present-btn { border-top-right-radius: 0; border-bottom-right-radius: 0; }
-.sd-split .sd-present-btn + .sd-tool.caret { width: 24px; height: 28px; border-radius: 0 7px 7px 0; background: var(--accent-fill); color: var(--on-accent, #fff); margin-left: 1px; }
-.sd-split .sd-present-btn + .sd-tool.caret:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 85%, #000); color: var(--on-accent, #fff); }
-.sd-present-btn { height: 28px; }
 .sd-tool-menu.right, .sd-gallery.right { left: auto; right: 0; }
 .sd-tool-menu .menu-item.on { color: var(--accent); }
 .sd-menu-label { flex: 1; }
@@ -220,16 +213,21 @@
 .px-marquee { position: absolute; border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .sd-thumb-n > svg { display: block; margin: 3px 0 0 auto; color: var(--ink-3); }
 .sd-slides .sd-sorter .sd-thumb-btn .px-slide-box { width: 100% !important; height: auto !important; }
-/* Its toolbar in two rows that stay put: the deck's tools, then the format of what's picked. */
-.sd-slides .sd-slides-tools { flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 0; padding: 4px 10px; }
-.px-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; min-height: 36px; }
-.px-row.px-format { min-height: 38px; border-top: 1px solid var(--line); }
-.px-hint { padding: 0 6px; line-height: 1.4; }
+/* Its toolbar in two rows that stay put, each as high as any editor's toolbar: the deck's tools,
+   then the format of what's picked (greyed while there's nothing to format, so the slide doesn't
+   jump when something is picked). On a phone the format row only while it has something in it. */
+.sd-slides .sd-slides-tools { flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 0; padding: 0 10px; }
+.px-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; min-height: 42px; padding: 6px 0; }
+.px-row.px-format { border-top: 1px solid var(--line); }
+.app.narrow .sd-slides .px-format:not(:has(> .sd-group:not(.sd-marks))) { display: none; }
+/* How to start, over the slide (in the space above it) while nothing on it is picked: not a row of
+   its own, and out of the way of a click. */
+.px-hint { position: absolute; top: 6px; left: 0; right: 0; z-index: 1; margin: 0; padding: 0 16px; line-height: 16px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
 .sd-slides .sd-drop-btn { display: inline-flex; align-items: center; gap: 2px; width: auto; padding: 0 4px 0 6px; }
 .sd-slides .sd-drop-btn.has-text { gap: 6px; padding: 0 6px 0 9px; border: 1px solid transparent; font: 500 12.5px var(--font); color: var(--ink); }
 .sd-slides .sd-drop-btn.has-text:hover:not(:disabled) { border-color: var(--line-2, var(--line)); background: var(--pane); }
 .sd-slides .sd-size-drop .sd-drop-text { width: 28px; text-align: center; font-variant-numeric: tabular-nums; }
-.sd-slides .sd-zoom-drop .sd-drop-text { width: 34px; }
+.sd-slides .sd-zoom-drop .sd-drop-text { width: 34px; text-align: center; font-variant-numeric: tabular-nums; }
 .sd-slides .sd-drop { z-index: 60; }
 .px-shape-grid { display: grid; grid-template-columns: repeat(4, 40px); gap: 2px; padding: 2px; }
 .px-shape-grid .sd-item { justify-content: center; padding: 4px; min-height: 34px; }
@@ -261,8 +259,6 @@
 .app.narrow .sd-deck-tools .sd-tool.wide .sd-tool-label { display: none; }
 .app.narrow .sd-deck-tools .sd-tool.caret { width: 40px; margin: 0; }
 .app.narrow .sd-deck-tools .sd-marks { display: none; }
-.app.narrow .sd-split .sd-present-btn { height: 40px; }
-.app.narrow .sd-split .sd-present-btn + .sd-tool.caret { height: 40px; }
 .app.narrow .sd-strip-add .ghost-btn, .app.narrow .sd-ai .btn.small, .app.narrow .sd-ai .ghost-btn, .app.narrow .sd-chip, .app.narrow .sd-pic-bar .btn.small { min-height: 40px; }
 .app.narrow .sd-ai textarea, .app.narrow .sd-ai-field select { font-size: 16px; }
 .app.narrow .sd-ai-field select { height: 40px; }
@@ -274,7 +270,9 @@
 .app.narrow .sd-present-bar .win-btn { width: 44px; height: 44px; }
 .app.narrow .sd-slides .sd-drop-btn { min-width: 40px; height: 40px; }
 .app.narrow .sd-slides .sd-stage.px-stage { padding: 12px 0; }
-.app.narrow .sd-slides .px-row { gap: 2px; }
+.app.narrow .sd-slides .px-row { gap: 2px; min-height: 0; padding: 0; }
+.app.narrow .sd-slides .px-row.px-format { padding-top: 4px; margin-top: 4px; }
+.app.narrow .sd-slides .px-hint { display: none; }
 .app.narrow .sd-slides .sd-size { gap: 0; }
 .app.narrow .sd-findbar .win-btn, .app.narrow .sd-findbar .btn.small { min-width: 40px; min-height: 40px; }
 .app.narrow .sd-findbar input { font-size: 16px; height: 40px; }

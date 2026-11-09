@@ -104,6 +104,12 @@
 .wb-name-edit { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
 .wb-name-input { min-width: 0; width: 100%; max-width: 360px; font: inherit; font-weight: inherit; color: var(--ink); padding: 1px 6px; margin-left: -6px; border-radius: 6px; border: 1px solid var(--accent); background: var(--pane); outline: 2px solid var(--accent-soft); }
 .wb-view .pane-head .btn.on, .wb-view .pane-head .win-btn.on { background: var(--accent-soft); color: var(--accent); }
+/* Its header's controls one height, 30px, as Studio's file headers are (it opens in Studio's
+   Preview too); on a phone each a whole 40px target, icons only. */
+.wb-view > .pane-head .btn.small { height: 30px; padding: 0 11px; gap: 6px; font-size: 12.5px; border-radius: 8px; }
+.wb-view > .pane-head .win-btn { width: 30px; height: 30px; }
+.wb-view > .pane-head .sd-tabs button { height: 24px; }
+.app.narrow .wb-view > .pane-head :is(.btn.small, .win-btn) { min-width: 40px; height: 40px; padding: 0; justify-content: center; }
 .menu-title { padding: 6px 10px 2px; }
 .wb-export-opts { display: grid; gap: 6px; padding: 6px 10px 8px; }
 .wb-export-opts label { display: flex; align-items: center; gap: 6px; }
