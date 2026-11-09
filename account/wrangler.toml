@@ -1,5 +1,5 @@
-# Bold Bridge accounts (README.md). From the repo, signed in to the project's Cloudflare account
-# (npx wrangler@4.149.0 login):
+# Bold Bridge accounts (README.md). From the repo, with the project's deploy token in
+# CLOUDFLARE_API_TOKEN (README.md, The account and the domains):
 #   npx wrangler@4.149.0 d1 create bridge-accounts     (once; put its database_id below)
 #   npx wrangler@4.149.0 deploy -c account/wrangler.toml
 name = "bridge-accounts"

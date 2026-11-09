@@ -35,8 +35,10 @@ keeps with the relay, Bridge AI (server/account.js, Settings › Account) and th
   token); its requests; its history (what was done, by whom, with a note); the relay's last report of
   its use and its use by day (90 days). Codes are kept as hashes until used or ended; codes sent in
   the last hour, under a hash of the email and of the network, for an hour; wrong codes, under a hash
-  of the email, for a day. Never anything from the
-  person's computer. The Worker's logs are off (`[observability]` in [wrangler.toml](wrangler.toml)).
+  of the email, for a day. Never anything from the person's computer. The Worker's logs are off
+  (`[observability]` in [wrangler.toml](wrangler.toml)), so it keeps no log of requests; Cloudflare
+  keeps its own for the zone, as for any site (its analytics, and the rate limiting rule's security
+  events: each request it blocked, with its IP address and path, for a while).
 - **Deleting an account** (`DELETE /v1/account`) deletes all of that at once. The relay forgets its own
   counts within a day.
 
@@ -84,8 +86,10 @@ in the file: `SIGNING_KEY`, the Ed25519 private key every token is signed with, 
 ## Going live
 
 In this order, on the project's Cloudflare account, from the repo on the computer releases are made
-on, signed in to Cloudflare (`npx wrangler@4.149.0 login`), with boldbridge.ai already a zone there.
-The relay ([relay/HOSTED.md](../relay/HOSTED.md)) goes live after this, since it binds to it.
+on, with boldbridge.ai already a zone there, and the account and the domains set up as below first
+(The account and the domains): wrangler deploys with the scoped API token
+(`CLOUDFLARE_API_TOKEN=<it> npx wrangler@4.149.0 …`), not `wrangler login`. The relay
+([relay/HOSTED.md](../relay/HOSTED.md)) goes live after this, since it binds to it.
 
 1. **Workers Paid** (Workers & Pages › Plans, $5 a month): Email Service sends to anyone only on
    Workers Paid. The relay needs it anyway.
@@ -134,6 +138,43 @@ The relay ([relay/HOSTED.md](../relay/HOSTED.md)) goes live after this, since it
     `ACCOUNTS_PUBLIC_KEY` to the public key, and paste the policy text below into PRIVACY.md and
     TERMS.md, in the same commit. Then `npm test -- account-service relay-hosted privacy-hosts`, and
     release. Until that commit, nothing about accounts shows in the app.
+13. **Turnstile, once there's a site key** (owner, then a change here): Cloudflare › Turnstile › Add
+    widget, for the hostname `boldbridge.ai`, Managed. Its site key goes in the website's form; its
+    secret key becomes a Worker secret here (`TURNSTILE_SECRET`); and worker.js then checks the
+    form's token (`cf-turnstile-response`) with Turnstile's siteverify before `/v1/request-public`
+    sends a code, refusing one that doesn't pass. Bridge AI's own sign-in (Settings › Account, which
+    calls `/v1/code`) is served by each computer itself, not boldbridge.ai, so it needs a widget
+    of its own thought through first; until then it rests on the limits and the rate rule (step 7).
+
+### The account and the domains
+
+Before the steps above, and kept up after, since whoever has the Cloudflare account or a domain can
+sign anyone in, or serve every phone a changed relay page:
+
+- **The Cloudflare account**: every member signs in with a hardware security key (Manage Account ›
+  Members, two-factor required for all, each member's own key added under My Profile ›
+  Authentication). Deploys use an API token made for them (My Profile › API Tokens › Create, from
+  the Edit Cloudflare Workers template with D1 Edit added, for this account and the boldbridge.ai
+  and boldbridge.app zones only), kept in a password manager and given to wrangler as
+  `CLOUDFLARE_API_TOKEN`, rather than `wrangler login`, which can do anything on the account. And
+  alerts from the Audit Log for Worker deploys, secrets and routes changing (Manage Account ›
+  Notifications, or a Logpush job of the Audit Log to somewhere watched), so a change nobody meant
+  to make is seen the same day.
+- **DNSSEC and the registrar lock** on boldbridge.ai (and boldbridge.app, HOSTED.md): DNS ›
+  Settings › DNSSEC › Enable (with Cloudflare Registrar the DS record goes to the registry by
+  itself; elsewhere, add it at the registrar), and the registrar lock on, so neither domain can be
+  moved away or answered by anyone else.
+- **CAA records** on boldbridge.ai: one `CAA @ 0 issue "<authority>"` for each certificate authority
+  Cloudflare's Universal SSL uses (its docs list them: at the time of writing `letsencrypt.org`,
+  `pki.goog` and `ssl.com`), and `CAA @ 0 iodef "mailto:<your email>"`. Then check SSL/TLS › Edge
+  Certificates still shows each certificate Active.
+- **HSTS** on boldbridge.ai, subdomains included: SSL/TLS › Edge Certificates › HTTP Strict
+  Transport Security › Enable, Max Age 12 months, Apply HSTS policy to subdomains on (every name
+  under boldbridge.ai serves HTTPS: the website, accounts, the admin view). boldbridge.app is
+  HTTPS-only already (`.app` is preloaded).
+- **Branch protection on the private repo's `main`**, since a push to it deploys the admin view:
+  GitHub › the repo › Settings › Branches › a rule for `main` (a pull request needed, no force
+  pushes, no deleting it).
 
 ## Cost
 

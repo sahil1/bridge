@@ -1,10 +1,13 @@
 // Bold Bridge's accounts service (account/worker.js, account/API.md), run in Node with SQLite for D1
 // and a mailbox for the Email Service, signed with a key made here, so nothing reaches Cloudflare.
-// Where it is (accounts.boldbridge.ai, its logs off, a browser sent to the policy). Codes: a code
-// emailed, wrong ones counted down to the fifth (then it's done), one that ran out after 10 minutes,
+// Where it is (accounts.boldbridge.ai, its logs off, a browser sent to the policy; the relay's
+// binding reaching /internal only). Codes: a code emailed, wrong ones counted down to the fifth (then
+// it's done), five checked at most of guesses sent at once, the right one signing in once, 20 wrong
+// in a day stopping the email's codes for a day, one that ran out after 10 minutes,
 // a new one replacing the last, 5 an hour for an email and 20 for a network (IPv4 /24, IPv6 /48) with
 // when to try again, throwaway domains refused naming the domain, an email that couldn't be sent
-// said and not counted. Signing in: one account per email (case and spaces aside), a device token
+// said and not counted, and a suspended account's email answered as anyone's. Signing in: one
+// account per email (case and spaces aside), each device after the first emailed about, a device token
 // that checks out with the public key, ends at its end, is renewed past half its life (the old one
 // working until the new one's used), and ends at once when signed out or removed. Five devices: the
 // sixth refused with the list, and the same code removing one to make room. Grants: one-time, 5
@@ -15,7 +18,9 @@
 // requests closed, emailed false when it couldn't go), the relay full at RELAY_MAX_ACCOUNTS (409),
 // suspending and restoring only with a note, inviting, removing a device. The relay's tokens and the
 // Early Access code (read by server/earlyaccess.js with the public key, for the account's id), each
-// given only while allowed; suspension stopping everything; the relay's status and usage reports.
+// given only while allowed; suspension stopping everything; the relay's status (and a device's, once
+// removed) and usage reports. Changing the signing key: each token says which key signed it, the
+// old key's still taken (OLD_KEYS) and replaced by /v1/me, then refused once it's dropped.
 // Deleting the account (its email typed again) leaves nothing of it. Nothing kept is an IP address
 // or a code. And the one switch: server/account.js's ACCOUNTS_URL set only with PRIVACY.md and
 // TERMS.md saying what an account keeps and how to delete it; README.md's drafts quote the policy as

@@ -103,6 +103,25 @@ belongs to the relay.
   default) covers `boldbridge.app` and `*.boldbridge.app`; carry on while it goes Active (often 5 to
   15 minutes). Edge Certificates lists both names once it is. (Nothing goes to an origin, so the
   SSL/TLS mode doesn't matter.)
+- [ ] **DNSSEC and the registrar lock** (owner): boldbridge.app › DNS › Settings › DNSSEC › Enable.
+  With Cloudflare Registrar the DS record goes to the registry by itself; bought elsewhere, add the
+  DS record it shows at the registrar. And the registrar lock on (Cloudflare Registrar: Domain
+  Registration › Manage Domains › boldbridge.app, Registrar Lock; elsewhere, its transfer lock), so
+  the domain, and with it every computer's address, can't be moved away or answered by anyone else.
+- [ ] **CAA records** (owner; DNS › Records): one `CAA @ 0 issue "<authority>"` for each
+  certificate authority Cloudflare's Universal SSL uses (its docs list them: at the time of writing
+  `letsencrypt.org`, `pki.goog` and `ssl.com`), and `CAA @ 0 iodef "mailto:<your email>"`, so no
+  other authority issues a certificate for the relay's names, and one asked to is told where to
+  report it. Then check SSL/TLS › Edge Certificates still shows the certificate Active (Cloudflare
+  adds what Universal SSL needs itself once there's any CAA record).
+- [ ] **The Public Suffix List** (owner, on GitHub and here; weeks for the list, then months for
+  browsers): until boldbridge.app is on it, browsers take every computer's address for the same
+  site, so one account's page could frame another's, or set a cookie for all of them. Apply to the
+  list's private section: a pull request to [publicsuffix/list](https://github.com/publicsuffix/list)
+  adding `boldbridge.app` under the private domains, as its guidelines say (the domain registered
+  well ahead: two years at least), and the TXT record they check it by, `_psl.boldbridge.app`, whose
+  value is the pull request's address (`"https://github.com/publicsuffix/list/pull/<number>"`). Keep
+  the record while the entry is on the list. Nothing waits on it: the relay goes live without it.
 - [ ] **Workers Paid** (owner; Workers & Pages › Plans, $5 a month): the accounts service needs it
   already. [wrangler.hosted.toml](wrangler.hosted.toml) says `WORKERS_PAID = "1"`.
 - [ ] **The settings** (owner): `ACCOUNTS_PUBLIC_KEY` in wrangler.hosted.toml, the public key
@@ -113,7 +132,7 @@ belongs to the relay.
 - [ ] **Deploy** (owner, from the repo, on the computer releases are made on):
 
   ```sh
-  npx wrangler@4.149.0 login                       # the project's Cloudflare account
+  export CLOUDFLARE_API_TOKEN=<the deploy token>   # account/README.md, The account and the domains
   node relay/build.js relay/dist/worker.js
   npx wrangler@4.149.0 deploy -c relay/wrangler.hosted.toml
   openssl rand -base64 32 | npx wrangler@4.149.0 secret put ID_SECRET -c relay/wrangler.hosted.toml
@@ -132,6 +151,10 @@ belongs to the relay.
   billed (Cost, What the limits can't stop). Bridge AI's own use is far below it.
 - [ ] **A billing alert** (owner; Manage Account › Notifications › Add › Usage-based billing, for
   Workers and Durable Objects), so a surprise shows early.
+- [ ] **The Cloudflare account itself** (owner): as in account/README.md, Going live, The account
+  and the domains: a hardware key for every member, deploys with an API token scoped to the
+  project's Workers (not `wrangler login`), and alerts from the Audit Log for Worker deploys,
+  secrets and routes. Whoever has the account can serve every phone a changed page.
 - [ ] **Check it**: `https://boldbridge.app/` shows the page, `https://boldbridge.app/_relay/health`
   answers `{"ok":true,...}`, `https://abc.boldbridge.app/` is a 404, a `POST
   https://boldbridge.app/_relay/register` with no token answers 401 saying it needs an account, and
@@ -398,8 +421,11 @@ WHERE blob1 = 'usage' AND index1 = '<id>' AND timestamp > NOW() - INTERVAL '7' D
 Each account's use is in the admin view (from the accounts service), by day.
 
 Cloudflare also sees what any site it serves sees (IP addresses, times, sizes), under its own
-policy. Workers Logs stay off (`[observability] enabled = false` in wrangler.hosted.toml), so request
-details aren't stored in the account; `wrangler tail` shows them live, IP addresses included.
+policy. Workers Logs stay off (`[observability] enabled = false` in wrangler.hosted.toml), so the
+Worker keeps no log of requests, but that isn't all of it: the zone's own analytics (Analytics &
+Logs) keep request counts by country, path and status, and the WAF's security events keep each
+request the rate limiting rule blocked, with its IP address, path and user agent, for a while, as
+Cloudflare does for every zone; and `wrangler tail` shows requests live, IP addresses included.
 
 ## Cost
 
