@@ -55,7 +55,7 @@ try {
     if (process.platform !== 'darwin') {
       const r = await k.api('/mail')
       ok(r.available === false && r.reason === 'notMac', 'not a Mac: the inbox says it reads Apple Mail on macOS', r)
-      ok(JSON.stringify(await k.api('/open-in')) === '{}' && /Mac/.test((await refused('/mail/1/open')).error || '') && !opener.opened().length, 'not a Mac: no Mail to open in, and nothing opens', opener.opened())
+      ok(JSON.stringify(await k.api('/open-in')) === '{}' && /macOS/.test((await refused('/mail/1/open')).error || '') && !opener.opened().length, 'not a Mac: no Mail to open in, and nothing opens', opener.opened())
       break
     }
     const dir = path.join(k.home, 'Library', 'Mail', 'V10', 'MailData')
