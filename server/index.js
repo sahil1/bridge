@@ -91,6 +91,7 @@ import * as notify from './notify.js'
 import * as push from './push.js'
 import * as phone from './phone.js'
 import * as relay from './relay.js'
+import * as relaycheck from './relaycheck.js'
 import * as account from './account.js'
 import * as machines from './machines.js'
 import { machine } from './machine.js'
@@ -2385,6 +2386,9 @@ app.post('/api/phone', wrap((req) => (req.body?.enabled ? phone.enable(cfg.port)
 // but can't pair more phones, remove one, or change where the relay is.
 const onComputer = (req) => { if (req.headers['x-bridge-relay']) throw Object.assign(new Error('Do this in Bridge AI on your computer'), { status: 403 }) }
 app.get('/api/relay', wrap((req) => ({ ...relay.status(), here: req.headers['x-bridge-relay'] || null })))
+// On Bridge AI's relay: whether the phone page it serves is a release's (relaycheck.js). Asking checks
+// again when the last check is a while old, without waiting for it.
+app.get('/api/relay/pagecheck', wrap((req) => relaycheck.ask({ now: req.query.now === '1' })))
 
 // ---------- Your other devices (machines.js) ----------
 // Linking and unlinking: you, here or on a paired phone. Another device can link back, ask for a
@@ -3330,6 +3334,7 @@ server.listen(cfg.port, cfg.host, () => {
   subscriptions().catch(() => {})
   quota().catch(() => {})
   relay.start(`http://127.0.0.1:${cfg.port}`)
+  relaycheck.start()
   account.start()
   phone.status(cfg.port).then(tailnetSaid).catch(() => {})
   machines.start()

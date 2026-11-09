@@ -128,6 +128,19 @@ try {
   ok(!(await k.api('/relay')).hostedFull && !!(await until(async () => (await k.api('/relay')).online, 15000)), 'it no longer says it was full, and connects with its account\'s relay token', (await k.api('/relay')).error)
   const use = s.p.locator('.acct-use')
   ok(!!(await until(async () => { const x = await use.innerText(); return /8-hour window/i.test(x) && /this week/i.test(x) && /100%/.test(x) }, 15000)), 'Settings shows the account\'s use, the 8-hour window and the week, as the usage chip shows a plan\'s', await use.innerText().catch(() => ''))
+  // The phone page it serves to browsers, checked against this version's (server/relaycheck.js).
+  const check = s.p.locator('[data-check="page"]')
+  ok(!!(await until(async () => /phone page is Bridge AI [\d.]+(-[\w.]+)?'s, unchanged \(checked /.test(await check.innerText().catch(() => '')), 15000)), 'Settings › Devices says the phone page the relay serves is this version\'s, unchanged, and when it checked', await check.innerText().catch(() => ''))
+  const shellJs = fs.readFileSync(path.join(ROOT, 'relay', 'web', 'shell.js'), 'utf8')
+  await hr.page({ name: 'shell.js', text: `${shellJs}\n// changed for everyone\n` })
+  await check.locator('button', { hasText: 'Check again' }).click()
+  const changed = s.p.locator('.st-note.warn[data-check="page"]')
+  ok(!!(await changed.waitFor({ timeout: 15000 }).then(() => true, () => false)) && /isn't Bridge AI [\d.]+(-[\w.]+)?'s: shell\.js differs/.test(await changed.innerText()) && /iPhone and Android apps carry their own copy and aren't affected/.test(await changed.innerText()) && await changed.locator('button', { hasText: 'Use your own Cloudflare' }).count() === 1 && await changed.locator('a', { hasText: 'Report it' }).count() === 1, 'a page changed for everyone: said plainly, which file, that the apps aren\'t affected, with your own Cloudflare and Report it', await changed.innerText().catch(() => ''))
+  await changed.scrollIntoViewIfNeeded()
+  await shot(s.p, `${tag}relay-hosted-page-changed`)
+  await hr.page({ name: 'shell.js', text: shellJs })
+  await changed.locator('button', { hasText: 'Check again' }).click()
+  ok(!!(await until(async () => !(await changed.count()) && /unchanged/.test(await check.innerText().catch(() => '')), 15000)), 'put back: Check again says it\'s unchanged again', await check.innerText().catch(() => ''))
   // The account's window used up, by its other computers.
   await hr.use(me.account.id, 60)
   const limit = s.p.locator('.st-note.warn', { hasText: 'used its allowance' })
@@ -204,6 +217,7 @@ try {
   await devices(h.p)
   const devText = await until(async () => { const x = await h.p.locator('.modal.settings').innerText().catch(() => ''); return /Link a device/.test(x) && /isn't set up yet/.test(x) && x }, 10000)
   ok(!!devText && !/Bridge AI's relay|Bold Bridge/.test(devText) && /sign in to Cloudflare at the top of this page/.test(devText), 'and Settings › Devices names no hosted relay and no account anywhere, Link a device included', devText && devText.slice(-600))
+  ok(!(await h.p.locator('[data-check="page"]').count()) && (await none.api('/relay/pagecheck')).on === false, 'nor checks a phone page: there\'s no hosted relay in use', await none.api('/relay/pagecheck'))
   const noAcc = await fresh('noacc', { relay: { hostedUrl: hr.url } })
   ok(!(await noAcc.api('/relay')).hostedAvailable, 'and a hosted relay with no Bold Bridge accounts isn\'t offered at all (it can\'t work without one)')
 

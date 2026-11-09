@@ -207,6 +207,7 @@ export default function Relay({ way, setWay, onOffer }) {
           {limitText && <p className="st-note warn"><Icon name="alert" size={13} /> {limitText} {['window', 'week', 'all', 'suspended', 'relay', 'deleted'].includes(st.limit.why) && <button type="button" className="link-btn" onClick={() => { setChanging(true); setWay?.('cloudflare') }}>{t('Use your own Cloudflare')}</button>}{st.limit.why === 'token' && <button type="button" className="link-btn" onClick={() => openSettings('account')}>{t('Open Settings › Account')}</button>}</p>}
           {st.limit?.why === 'gone' && !busy && (full || <div className="st-row"><button type="button" className="btn primary" onClick={useHosted}><Icon name="refresh" size={13} /> Set up Bridge AI's relay again</button><span className="muted small">Phones you paired pair again afterwards.</span></div>)}
           {st.needsUpdate && !st.busy && <p className="st-note warn"><Icon name="alert" size={13} /> Your relay is older than this Bridge AI. <button type="button" className="link-btn" onClick={() => run('/relay/update')}>Update it</button></p>}
+          {st.hosted && <PageCheck onOwn={() => { setChanging(true); setWay?.('cloudflare') }} />}
 
           {st.pairing ? <PairCode p={st.pairing} onStop={() => run('/relay/pair', { stop: true })} /> : (
             <div className="st-row">
@@ -251,6 +252,54 @@ function Needs({ acct, asking, onAsk, children }) {
   if (a.relay === 'requested') return say(t('You asked for Bridge AI\'s relay ({email}). Bold Bridge emails you when it\'s on, and then it\'s one click here.', { email: a.email }))
   if (a.relay !== 'approved') return say(a.relay === 'declined' ? t('Your request for Bridge AI\'s relay was declined. You can ask again, or use your own Cloudflare or Tailscale.') : t('Your Bold Bridge account ({email}) doesn\'t have Bridge AI\'s relay yet. It\'s by request.', { email: a.email }), <button type="button" className="btn small primary" disabled={asking} onClick={onAsk}>{asking ? t('Asking…') : a.relay === 'declined' ? t('Ask again') : t('Request access')}</button>)
   return children
+}
+
+// On Bridge AI's relay: whether the phone page it serves to browsers is a release's own
+// (server/relaycheck.js, once a day and as this opens). The last check is said quietly; a page that
+// differs is said plainly, with what to do: phones in a browser run that page, the apps don't.
+const REPORT = 'https://github.com/sahil1/bridge/security/advisories/new'
+function PageCheck({ onOwn }) {
+  const [c, setC] = useState(null)
+  const timer = useRef(null)
+  const gone = useRef(false)
+  // now: Check again, at once; while a check is under way, asked again until it's done.
+  const ask = (now = false) => {
+    clearTimeout(timer.current)
+    api(`/relay/pagecheck${now ? '?now=1' : ''}`).then((x) => {
+      if (gone.current) return
+      setC(x)
+      if (x.checking) timer.current = setTimeout(ask, 1500)
+    }).catch(() => {})
+  }
+  useEffect(() => { gone.current = false; ask(); return () => { gone.current = true; clearTimeout(timer.current) } }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  if (!c?.on) return null
+  const again = <button type="button" className="link-btn" disabled={c.checking} onClick={() => ask(true)}>{c.checking ? t('Checking…') : t('Check again')}</button>
+  const when = c.at ? new Date(c.at).toLocaleString(locale(), { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : null
+  if (c.why) {
+    return (
+      <div className="st-note warn" role="alert" data-check="page">
+        <p><Icon name="alert" size={13} /> {c.why === 'unreleased'
+          ? t('Bridge AI\'s relay says its phone page is from Bridge AI {version}, which isn\'t a release.', { version: c.version })
+          : c.differs.length === 1 ? t('Bridge AI\'s relay is serving a phone page that isn\'t Bridge AI {version}\'s: {file} differs.', { version: c.version, file: c.differs[0] })
+            : t('Bridge AI\'s relay is serving a phone page that isn\'t Bridge AI {version}\'s: {files} differ.', { version: c.version, files: c.differs.join(', ') })}
+        {' '}{t('A phone in a browser runs that page, so it could read what you do there; the iPhone and Android apps carry their own copy and aren\'t affected. Use the apps, or a relay on your own Cloudflare, until this is explained, and please report it.')}</p>
+        <div className="st-row">
+          <button type="button" className="btn small" onClick={onOwn}>{t('Use your own Cloudflare')}</button>
+          <a className="ghost-btn" href={REPORT} target="_blank" rel="noreferrer">{t('Report it')}</a>
+          {again}
+        </div>
+      </div>
+    )
+  }
+  if (c.error && !c.version) return <p className="muted small" data-check="page">{t('Couldn\'t check the phone page Bridge AI\'s relay serves ({error}). It tries again tomorrow, and when you open this.', { error: c.error })} {again}</p>
+  if (!c.at) return <p className="muted small" data-check="page"><Icon name="refresh" size={12} className="spin" /> {t('Checking the phone page Bridge AI\'s relay serves…')}</p>
+  return (
+    <p className="muted small" data-check="page" title={t('Once a day, and when you open this, this computer checks that the page Bridge AI\'s relay serves to phones in a browser is a released version\'s, unchanged. The iPhone and Android apps carry their own copy.')}>
+      <Icon name="check" size={12} /> {c.error
+        ? t('The relay\'s phone page was Bridge AI {version}\'s, unchanged, when last checked. Couldn\'t check again just now ({error}).', { version: c.version, error: c.error })
+        : t('The relay\'s phone page is Bridge AI {version}\'s, unchanged (checked {when}).', { version: c.version, when })} {again}
+    </p>
+  )
 }
 
 // Bridge AI's relay turned this computer away: it takes so many accounts at once, and has them.

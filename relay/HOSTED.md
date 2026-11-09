@@ -491,7 +491,12 @@ the rest, and at their accounts in the admin view.
 
 ## Updating it
 
-Same as going live: build and deploy. Any computer's or phone's connection drops and comes back
+Same as going live: build and deploy, from the release's tag (`git checkout v<version>`), so the
+page it serves is that release's. A computer on the relay checks (once a day, and when Settings ›
+Devices opens) that the page files the relay serves are those of the version `/_relay/health` says
+it runs, compared with its own copy when that's its own version and with the release's on GitHub
+otherwise, and Settings › Devices says so if they differ (server/relaycheck.js). A build from
+between releases would show as changed. Any computer's or phone's connection drops and comes back
 within seconds. Computers on the hosted relay never try to update it themselves (they do for a
 relay on your own account). Keep `[[migrations]]` as they are: `v1` made the Hub class and `v2` the
 Account class; a class added later is a `v3`.
