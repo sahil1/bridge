@@ -45,10 +45,10 @@ export default function Permissions() {
   if (!items.length) return null
   const device = fix?.device
   return (
-    <section className="st-sec st-perms" id="permissions">
+    <section className="st-sec st-perms" id="permissions" data-setting="permissions">
       <h4>{t('Permissions')}</h4>
       <p className="muted small">{here
-        ? t('What Bridge AI may use on this computer, and whether it\'s allowed. Each is asked for the first time something needs it; nothing here asks until you click.')
+        ? t('Each is asked for the first time something needs it; nothing here asks until you click.')
         : t('What Bridge AI may use on {device}, and whether it\'s allowed there. A permission is allowed on the computer it\'s for.', { device: device || t('that computer') })}</p>
       {/* A restart asked for here comes back here (src/permissions.js). */}
       <SettingsAt.Provider value="permissions">
