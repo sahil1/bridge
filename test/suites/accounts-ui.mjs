@@ -302,6 +302,7 @@ try {
     await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'accounts' } })))
     const sec = p.locator('#pv-accounts')
     await sec.waitFor({ timeout: 15000 })
+    ok(!(await p.locator('.pv > .pv-loading').count()), `${t}: Settings' accounts show once your agents above them are in, not before, to move down under the pointer as they come`)
     const sRow = (name) => sec.locator('.pv-acct', { has: p.locator('.pv-acct-title', { hasText: new RegExp(`^${name}`) }) }).first()
     ok(!(await sRow('Your usual login').count()), `${t}: Settings doesn't list it`)
     await sec.locator('button', { hasText: 'Show your usual login' }).click()
