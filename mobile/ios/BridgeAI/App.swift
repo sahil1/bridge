@@ -22,6 +22,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         window.makeKeyAndVisible()
         self.window = window
         if let url = connectionOptions.urlContexts.first?.url { controller.loadViewIfNeeded(); controller.open(url) }
+        if let link = connectionOptions.userActivities.first(where: { $0.activityType == NSUserActivityTypeBrowsingWeb })?.webpageURL { controller.loadViewIfNeeded(); controller.openLink(link) }
         if connectionOptions.shortcutItem?.type == Self.cloud { controller.loadViewIfNeeded(); controller.openCloud() }
     }
 
@@ -35,6 +36,12 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     func scene(_ scene: UIScene, openURLContexts contexts: Set<UIOpenURLContext>) {
         if let url = contexts.first?.url { (window?.rootViewController as? WebViewController)?.open(url) }
+    }
+
+    // A pairing link on Bridge AI's relay, from the camera or a web page (a Universal Link: project.yml).
+    func scene(_ scene: UIScene, continue userActivity: NSUserActivity) {
+        guard userActivity.activityType == NSUserActivityTypeBrowsingWeb, let link = userActivity.webpageURL else { return }
+        (window?.rootViewController as? WebViewController)?.openLink(link)
     }
 
     // A little time in the background to carry the last changes to the lock screen card, then it
