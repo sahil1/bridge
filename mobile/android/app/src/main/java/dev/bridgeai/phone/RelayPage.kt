@@ -39,7 +39,9 @@ object RelayPage {
         "svg" to "image/svg+xml",
     )
 
-    // The page's Content-Security-Policy, the same as the relay sends with it (relay/worker.js).
+    // The page's Content-Security-Policy, the same as a relay of your own sends with it
+    // (relay/worker.js). Bridge AI's relay names its own addresses in connect-src instead, which
+    // this copy, serving every relay, can't.
     const val CSP = "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; connect-src 'self' wss: ws:; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'"
 
     // The relay's own addresses the page asks over plain https (/_relay/link is a WebSocket, which

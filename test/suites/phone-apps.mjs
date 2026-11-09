@@ -53,8 +53,11 @@ try {
   const own = Object.fromEntries([...page.matchAll(/^\s+"(\/[^"]*)" to "([^"]+)",$/gm)].map((m) => [m[1], m[2]]))
   const served = Object.keys(files).every((n) => own[`/${n}`] === n) && own['/'] === 'index.html' && Object.values(own).every((n) => n in files)
   ok(served, 'the app serves each of those files at the address the relay serves it at, / as index.html, and no other', own)
-  const csp = /'Content-Security-Policy': "([^"]+)"/.exec(worker)?.[1]
-  ok(!!csp && page.includes(`const val CSP = "${csp}"`) && /if \(name == "index\.html"\) headers\["Content-Security-Policy"\] = CSP/.test(page), 'with the relay\'s own Content-Security-Policy on the page', csp)
+  // As a relay of your own sends it: Bridge AI's relay names its own addresses in connect-src
+  // instead, which the app's copy, serving every relay, can't.
+  const line = worker.split('\n').find((l) => /'Content-Security-Policy': `default-src 'self'/.test(l)) || ''
+  const csp = line.slice(line.indexOf('`') + 1, line.lastIndexOf('`')).replace(/\$\{domain \?[\s\S]*?: 'wss: ws:'\}/, 'wss: ws:')
+  ok(!!csp && !csp.includes('${') && page.includes(`const val CSP = "${csp}"`) && /if \(name == "index\.html"\) headers\["Content-Security-Policy"\] = CSP/.test(page), 'with the relay\'s own Content-Security-Policy on the page (as a relay of your own sends it)', csp)
   ok(/private val RELAYS_OWN = setOf\("\/_relay\/health"\)/.test(page) && /if \(path in RELAYS_OWN\) return null/.test(page) && /if \(name == null \|\| \(method != null && method != "GET"\)\) return missing\(\)/.test(page) && /404, "Not found"/.test(page), 'only /_relay/health goes to the relay; anything else at a relay\'s address is a 404 from the app (the WebSocket never comes here)', null)
   ok(/RelayPage\.isRelay\(this@MainActivity, request\.url\) -> RelayPage\.serve\(/.test(main) && /setServiceWorkerClient\(object : ServiceWorkerClient\(\)/.test(main) && /if \(RelayPage\.isRelay\(app, request\.url\)\) RelayPage\.serve\(app, request\.url, request\.method\)/.test(main), 'for the page and its service worker alike (sw.js, link-sw.js), at your relays\' addresses only', null)
   ok(/fun originOf/.test(page) && /relay = RelayPage\.originOf\(uri\)/.test(main), 'a relay is known by its origin, the same way the page and the app name it', null)
