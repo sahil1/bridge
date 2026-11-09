@@ -133,11 +133,6 @@ function RoomVoices({ v, m, set, refresh }) {
     </section>
   )
 }
-// The model notes are written with when none is picked, as the server picks it (server/index.js
-// pickMeetingModel): your Claude sign-in first, then another sign-in, a key, your cloud, a model on
-// this computer (yours before the one built in).
-const VIA_ORDER = ['sign-in', 'key', 'cloud', 'local']
-const rank = (x) => (x.id === 'cli:claude' ? -1 : VIA_ORDER.indexOf(x.via) + (x.builtin ? 0.5 : 0))
 // Settings › Model Providers at its speech services, where their keys go; Settings › Voice.
 const openSpeechKeys = () => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'providers-speech' } }))
 const openVoice = () => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'voice' } }))
@@ -146,12 +141,13 @@ export default function Meetings({ onOpenAgent }) {
   const { s, save, note } = useSettings()
   const sp = usePoll('/speech', 3000)
   const [models, setModels] = useState(null)
+  const [auto, setAuto] = useState(null) // the model Automatic is, as the server picks it (server/index.js pickMeetingModel)
   const [vocab, setVocab] = useState(null)
   const [instr, setInstr] = useState(null)
   // Preparing for meetings needs the calendar: only where there's one (a Mac).
   const calendar = usePoll('/config', 10 * 60 * 1000).data?.calendar === true
   const home = useTrial('home') // Home, a beta feature: named only when it's there
-  useEffect(() => { api('/chat/models').then((r) => setModels(r.models || [])).catch(() => setModels([])) }, [])
+  useEffect(() => { api('/chat/models').then((r) => { setModels(r.models || []); setAuto(r.automatic || null) }).catch(() => setModels([])) }, [])
   const m = s?.effective?.meetings || {}
   useEffect(() => { if (s) { setVocab(m.vocabulary || ''); setInstr(m.instructions || '') } }, [s]) // eslint-disable-line react-hooks/exhaustive-deps
   if (!s || !sp.data) return <div className="skeleton-rows"><div /><div /><div /></div>
@@ -173,7 +169,7 @@ export default function Meetings({ onOpenAgent }) {
   const others = d.services.filter((x) => !mine.includes(x))
   // The model that writes the notes, and with it cleans up, names who spoke and prepares: which, and
   // where it runs, said where each is turned on (what it reads leaves this computer unless it's local).
-  const notes = !models ? null : m.model ? models.find((x) => x.id === m.model) || null : [...models].sort((a, b) => rank(a) - rank(b))[0] || null
+  const notes = models && (m.model || auto) ? models.find((x) => x.id === (m.model || auto)) || null : null
   const by = notes ? (notes.via === 'local' ? t('{model}, on this computer', { model: notes.label }) : t('{model}, at {provider}', { model: notes.label, provider: notes.provider })) : null
   const prepWhy = home ? t("Fifteen minutes before a meeting with other people, AI Assist suggests goals and questions, with the model that writes your notes, from who's coming, last time with them, the invite and your mail with them. Off, it does this only when you ask, with AI Assist on the meeting in Calendar, or Prepare on Home.")
     : t("Fifteen minutes before a meeting with other people, AI Assist suggests goals and questions, with the model that writes your notes, from who's coming, last time with them, the invite and your mail with them. Off, it does this only when you ask, with AI Assist on the meeting in Calendar.")
@@ -239,7 +235,8 @@ export default function Meetings({ onOpenAgent }) {
 
       <section className="st-sec" data-setting="notes-model">
         <h4>Notes are written by</h4>
-        <p className="muted small" data-notes-where>{!models ? '\u00a0' : !notes ? t('No model to write them yet: sign in to an agent, or add one in Settings › Model Providers.')
+        <p className="muted small" data-notes-where>{!models ? '\u00a0' : m.model && !notes ? t("{model} can't be used just now, so the next model that can writes them.", { model: m.model })
+          : !notes ? t('No model to write them yet: sign in to an agent, or add one in Settings › Model Providers.')
           : notes.via === 'local' ? t('{model} runs on this computer: what it reads stays here.', { model: notes.label })
             : t('{model}, at {provider}: the transcript, and what each one below reads, go there.', { model: notes.label, provider: notes.provider })}</p>
         <select className="st-input" value={m.model || ''} onChange={(e) => set({ model: e.target.value || null })} aria-label="Model for meeting notes">

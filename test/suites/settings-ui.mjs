@@ -196,6 +196,10 @@ try {
     await kit.api('/providers/openai', { values: { OPENAI_API_KEY: 'sk-test', OPENAI_BASE_URL: `${model.url}/v1` } }, 'PUT')
     await at('meetings')
     ok(!!(await until(async () => /, at OpenAI: the transcript, and what each one below reads, go there\./.test(await where()), 10000)), 'with a key: which model writes the notes, and that what it and each one below reads goes to OpenAI', await where())
+    // The one the server picks for Automatic (pickMeetingModel), as it says: the page only shows it.
+    const chat = await kit.api('/chat/models')
+    const auto = chat.models.find((x) => x.id === chat.automatic)
+    ok(!!auto && (await where()).startsWith(`${auto.label}, at ${auto.provider}:`), 'Automatic is the model the server says it is', { automatic: chat.automatic, where: await where() })
     if (IS_MAC) {
       const prep = await p.locator('.modal.settings [data-setting="prep"] .muted').innerText()
       ok(/reads the invite and your mail with the people invited, with .+, at OpenAI\./.test(prep), 'Prepare for each meeting: it reads your mail with the people invited, with that model, at OpenAI', prep)

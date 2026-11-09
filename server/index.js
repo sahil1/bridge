@@ -3146,8 +3146,13 @@ app.post('/api/signin/:kind', wrap(async (req) => {
 // A plain chat: an agent with no project, like talking to Claude or Codex directly. Chats share
 // one empty folder (each is its own session), so the agent asks to trust it only once.
 const CHAT_NOTE = `# Chat\n\nThis is a plain conversation with the user, not a project. Answer directly and helpfully. There are no project files here; only read or change files elsewhere if the user asks.\n`
-// kind 'chat': Bridge AI's own chat with any model (chatmodels.js), on the model picked.
-app.get('/api/chat/models', wrap(async (req) => ({ models: await chatModels.models({ fresh: !!req.query.refresh }), runtime: rt.name })))
+// kind 'chat': Bridge AI's own chat with any model (chatmodels.js), on the model picked. automatic:
+// the one meeting notes are written with when none is picked (pickMeetingModel), for Settings ›
+// Meetings to say which it is and where it runs.
+app.get('/api/chat/models', wrap(async (req) => {
+  const models = await chatModels.models({ fresh: !!req.query.refresh })
+  return { models, runtime: rt.name, automatic: await pickMeetingModel() }
+}))
 app.post('/api/chats', wrap(async (req) => {
   const kind = String(req.body?.kind || cfg.defaultAgent || 'claude')
   if (kind !== 'chat' && !(await installed()).some((k) => k.kind === kind)) throw notInstalled(kind)
