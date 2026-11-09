@@ -50,8 +50,10 @@ export default {
 const health = () => new Response(JSON.stringify({ ok: true, build: RELAY_BUILD }), { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
 
 // The page and its files. Anything else is Bridge AI itself, which the page's service worker
-// fetches from your computer; reaching here means the page isn't open yet.
-function page(req, url) {
+// fetches from your computer; reaching here means the page isn't open yet. On the hosted relay
+// (domain), the page connects only to the relay's own addresses: its computer's, and the others'
+// on it, whose relays the Android app asks whether they're on (relay/web/shell.js, otherState).
+function page(req, url, domain = null) {
   const p = url.pathname
   const name = p === '/' ? 'index.html' : p.slice(1)
   const f = FILES[name]
@@ -67,7 +69,11 @@ function page(req, url) {
     ETag: `"${RELAY_BUILD}"`,
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer',
-    ...(name === 'index.html' ? { 'Content-Security-Policy': "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; connect-src 'self' wss: ws:; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'" } : {}),
+    ...(name === 'index.html' ? {
+      'Content-Security-Policy': `default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; connect-src 'self' ${domain ? `${url.protocol === 'http:' ? 'ws' : 'wss'}://*.${domain}${url.port ? `:${url.port}` : ''}` : 'wss: ws:'}; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'`,
+      // No other site's window keeps a hold on this one (window.opener), whoever opened it.
+      'Cross-Origin-Opener-Policy': 'same-origin',
+    } : {}),
   }
   // (Cloudflare marks the tag weak, W/, when it compresses the file on the way.)
   const has = (req.headers.get('If-None-Match') || '').split(',').some((t) => t.trim().replace(/^W\//, '') === headers.ETag)
@@ -168,11 +174,19 @@ function limitText(why, l, end) {
   }[why]
 }
 
-// A computer's id: 10 random base32 characters and 2 of checksum, so a made-up name is turned away
-// here, without waking a Hub.
-async function check(s) { const h = await sha(`bridge relay id ${s}`); const v = parseInt(h.slice(0, 3), 16) >> 2; return B32[v >> 5] + B32[v & 31] }
-async function newId() { const s = [...crypto.getRandomValues(new Uint8Array(10))].map((b) => B32[b & 31]).join(''); return s + (await check(s)) }
-const idOk = async (s) => /^[a-z2-7]{12}$/.test(s) && !RESERVED.has(s) && (await check(s.slice(0, 10))) === s.slice(10)
+// A computer's id: 10 random base32 characters and 2 of checksum, an HMAC keyed with a secret of the
+// relay's own (ID_SECRET), so only the relay can make a name that passes, and a made-up one is turned
+// away here, without waking a Hub (but for one in 1,024). Ids made before the checksum was keyed don't
+// pass any more (HOSTED.md, Settings).
+let idKey = null // [the secret, its CryptoKey]
+async function check(env, s) {
+  if (idKey?.[0] !== env.ID_SECRET) idKey = [env.ID_SECRET, await crypto.subtle.importKey('raw', new TextEncoder().encode(env.ID_SECRET), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])]
+  const h = new Uint8Array(await crypto.subtle.sign('HMAC', idKey[1], new TextEncoder().encode(`bridge relay id ${s}`)))
+  const v = ((h[0] << 8) | h[1]) >> 6
+  return B32[v >> 5] + B32[v & 31]
+}
+async function newId(env) { const s = [...crypto.getRandomValues(new Uint8Array(10))].map((b) => B32[b & 31]).join(''); return s + (await check(env, s)) }
+const idOk = async (env, s) => /^[a-z2-7]{12}$/.test(s) && !RESERVED.has(s) && (await check(env, s.slice(0, 10))) === s.slice(10)
 
 // The registry's counts for /_relay/stats: one day's, kept 35 days, with its busiest computers.
 // limits.full: registrations turned away because MAX_ACCOUNTS accounts had a computer on it;
@@ -189,6 +203,10 @@ const requestsOf = (s) => Math.ceil(s.messages / 20 + s.messages / 500) + 3 * (s
 // Messages a computer may go on sending once its phones are stopped (they go nowhere), before its
 // own connection is closed until they may go on: Cloudflare bills each one that arrives.
 const HOST_SLACK = 1000
+// What a connection the computer hasn't vouched for may send (and be sent) before it's closed
+// (Hub.stranger): messages, bytes and milliseconds from its first message, and a bucket of its own
+// (BURST at once, then RATE a second). A paired phone sends one or two before it's vouched for.
+const STRANGER = { MSGS: 32, BYTES: 64 * 1024, MS: 20000, BURST: 16, RATE: 8 }
 
 const hub = (env, id) => env.HUB.get(env.HUB.idFromName(id))
 // A question for the registry (gate, left, tally, stats), and its answer.
@@ -228,19 +246,34 @@ async function registered(env, id) {
   return ok
 }
 
-// An account's relay token (account/API.md, Tokens): base64url of { k: 'relay', a, d, iat, exp } and
-// its Ed25519 signature, checked here with the accounts service's public key (ACCOUNTS_PUBLIC_KEY),
-// with nothing asked of anyone. { ok, a, d } or { ok: false, why: none | forged | expired }.
+// An account's relay token (account/API.md, Tokens): base64url of { k: 'relay', a, d, iat, exp, kid }
+// and its Ed25519 signature, checked here with the accounts service's public keys, with nothing asked
+// of anyone. ACCOUNTS_PUBLIC_KEY holds one or more, comma separated, so the service's key can be
+// changed (account/README.md, Changing the signing key): a token's kid says which signed it (the
+// start of a hash of the key, as account/worker.js's keyId); one without a kid, from before tokens
+// had one, is checked with the first. { ok, a, d } or { ok: false, why: none | forged | expired }.
 const unb64 = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (s.length % 4)) % 4)), (c) => c.charCodeAt(0))
-let accountsKey = null // [the setting, its CryptoKey]
+const b64u = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+let accountsKeys = null // [the setting, [{ kid, key }], in its order]
+async function publicKeys(setting) {
+  if (accountsKeys?.[0] !== setting) {
+    const list = []
+    for (const x of String(setting).split(',').map((s) => s.trim()).filter(Boolean)) {
+      try { list.push({ kid: b64u(await crypto.subtle.digest('SHA-256', unb64(x))).slice(0, 8), key: await crypto.subtle.importKey('raw', unb64(x), { name: 'Ed25519' }, false, ['verify']) }) } catch { /* not a key: left out */ }
+    }
+    accountsKeys = [setting, list]
+  }
+  return accountsKeys[1]
+}
 async function relayToken(env, header) {
   const m = /^Bearer ([A-Za-z0-9_-]{10,800})\.([A-Za-z0-9_-]{86})$/.exec(String(header || ''))
-  if (!m || !env.ACCOUNTS_PUBLIC_KEY) return { ok: false, why: 'none' }
+  const keys = env.ACCOUNTS_PUBLIC_KEY ? await publicKeys(env.ACCOUNTS_PUBLIC_KEY) : []
+  if (!m || !keys.length) return { ok: false, why: 'none' }
   let p = null
   try {
-    if (accountsKey?.[0] !== env.ACCOUNTS_PUBLIC_KEY) accountsKey = [env.ACCOUNTS_PUBLIC_KEY, await crypto.subtle.importKey('raw', unb64(env.ACCOUNTS_PUBLIC_KEY), { name: 'Ed25519' }, false, ['verify'])]
-    if (!(await crypto.subtle.verify({ name: 'Ed25519' }, accountsKey[1], unb64(m[2]), new TextEncoder().encode(m[1])))) return { ok: false, why: 'forged' }
     p = JSON.parse(new TextDecoder().decode(unb64(m[1])))
+    const k = p?.kid == null ? keys[0] : keys.find((x) => x.kid === p.kid)
+    if (!k || !(await crypto.subtle.verify({ name: 'Ed25519' }, k.key, unb64(m[2]), new TextEncoder().encode(m[1])))) return { ok: false, why: 'forged' }
   } catch { return { ok: false, why: 'forged' } }
   if (p?.k !== 'relay' || !/^[a-z0-9]{12}$/.test(String(p.a)) || !/^[a-z0-9]{12}$/.test(String(p.d)) || !Number.isInteger(p.exp)) return { ok: false, why: 'forged' }
   if (p.exp * 1000 <= Date.now()) return { ok: false, why: 'expired' }
@@ -252,6 +285,7 @@ async function hosted(req, env) {
   const p = url.pathname
   const domain = String(env.HOSTED_DOMAIN || '').toLowerCase().replace(/^\.+|\.+$/g, '')
   if (!domain) return new Response('HOSTED_DOMAIN isn\'t set', { status: 500 })
+  if (!env.ID_SECRET) return new Response('ID_SECRET isn\'t set (HOSTED.md, Going live)', { status: 500 })
   const host = url.hostname.toLowerCase()
   if (host === domain) {
     if (p === '/_relay/register') return req.method === 'POST' ? register(req, env, url) : new Response('Use POST', { status: 405 })
@@ -262,16 +296,19 @@ async function hosted(req, env) {
     return notFound()
   }
   const id = host.endsWith(`.${domain}`) ? host.slice(0, -domain.length - 1) : ''
-  if (!(await idOk(id)) || !(await registered(env, id))) return notFound()
-  if (p === '/_relay/host' || p === '/_relay/link') {
+  if (!(await idOk(env, id))) return notFound()
+  const sock = p === '/_relay/host' || p === '/_relay/link'
+  // Switched off: said before anything is asked of a Hub.
+  const off = sock && req.headers.get('Upgrade') === 'websocket' ? offText(env, p === '/_relay/link') : null
+  if (off) return refuse({ t: 'limit', why: 'off', text: off, until: Date.now() + 30 * 60000 }, 4009)
+  if (!(await registered(env, id))) return notFound()
+  if (sock) {
     if (req.headers.get('Upgrade') !== 'websocket') return new Response('Expected a WebSocket', { status: 426 })
-    const off = offText(env, p === '/_relay/link')
-    if (off) return refuse({ t: 'limit', why: 'off', text: off, until: Date.now() + 30 * 60000 }, 4009)
     return hub(env, id).fetch(req) // the Hub checks the computer's token, and its account
   }
   if (p === '/_relay/forget') return req.method === 'POST' ? hub(env, id).fetch(req) : new Response('Use POST', { status: 405 })
   if (p === '/_relay/health') return health()
-  return page(req, url)
+  return page(req, url, domain)
 }
 
 // POST /_relay/register: Authorization: Bearer <relay token>, { version } in, { id, url, token } out.
@@ -285,6 +322,7 @@ const NO_TOKEN = {
   none: 'Bridge AI\'s relay needs this computer signed in to a Bold Bridge account that may use it (Settings › Account).',
   forged: 'That pass for Bridge AI\'s relay doesn\'t check out. Sign in to your Bold Bridge account again (Settings › Account).',
   expired: 'This computer\'s pass for Bridge AI\'s relay ran out. Bridge AI gets a new one from your Bold Bridge account by itself; try again in a minute.',
+  removed: 'This computer isn\'t on your Bold Bridge account any more (it was removed, or signed out). Sign in again (Settings › Account).',
 }
 const FULL = 'Bridge AI\'s relay is full for now: it has as many accounts as it can take. Put a relay on your own Cloudflare account instead (it\'s free), or use Tailscale.'
 async function register(req, env, url) {
@@ -301,7 +339,12 @@ async function register(req, env, url) {
   const v = version(body?.version)
   const acc = await toAccount(env, t.a, 'check', { d: t.d }).catch(() => null)
   if (!acc) return json({ error: 'Bridge AI\'s relay couldn\'t check your account just now. Try again in a minute.' }, 503)
-  if (acc.refused) { count(env, '', 'refused', [acc.refused.why]); return json({ error: limitText(acc.refused.why, limits(env), Date.now()), why: acc.refused.why }, 403) }
+  if (acc.refused) {
+    count(env, '', 'refused', [acc.refused.why])
+    // This device isn't on the account any more: its relay token, still good for days, isn't enough.
+    if (acc.refused.why === 'token') return json({ error: NO_TOKEN.removed, why: 'token', token: 'removed' }, 401)
+    return json({ error: limitText(acc.refused.why, limits(env), Date.now()), why: acc.refused.why }, 403)
+  }
   const token = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
   const hash = await sha(token)
   const init = (id) => hub(env, id).fetch('https://hub/_hosted/init', { method: 'POST', body: JSON.stringify({ id, hash, version: v, a: t.a, d: t.d }) })
@@ -310,10 +353,10 @@ async function register(req, env, url) {
     return json({ id, url: `${url.protocol}//${id}.${url.host}`, token })
   }
   // This device has an address here: the same one, with a new token.
-  if (acc.id && (await idOk(acc.id)) && (await init(acc.id)).ok) { count(env, acc.id, 'register', [v, 'again']); return done(acc.id) }
+  if (acc.id && (await idOk(env, acc.id)) && (await init(acc.id)).ok) { count(env, acc.id, 'register', [v, 'again']); return done(acc.id) }
   const lim = limits(env)
   for (let i = 0; i < 4; i++) {
-    const id = await newId()
+    const id = await newId(env)
     if (RESERVED.has(id)) continue
     const gate = await registry(env, 'gate', { a: t.a, id, max: lim.accounts })
     if (gate.why === 'taken') continue // an id it has already (vanishingly unlikely): another
@@ -406,6 +449,9 @@ export class Hub {
         this.meta = (await ctx.storage.get('meta')) || null
         this.day = (await ctx.storage.get('day')) || null
         this.shutUntil = (await ctx.storage.get('shut')) || 0
+        // What the registry and its Account hadn't heard yet, saved with the day (saveDay).
+        this.pend = (await ctx.storage.get('pend')) || null
+        this.acctPend = (await ctx.storage.get('acct')) || 0
       })
     }
   }
@@ -437,7 +483,7 @@ export class Hub {
       const id = crypto.getRandomValues(new Uint32Array(1))[0]
       this.ctx.acceptWebSocket(server, ['phone', `p${id}`])
       server.serializeAttachment({ id, at: Date.now() })
-      if (this.lim) { this.pendOf(this.today().d).phones++; this.tally() }
+      if (this.lim) this.connected()
       const h = await this.live()
       // q: this relay keeps notes (older pages ignore it).
       server.send(JSON.stringify({ host: !!h, seen: (await this.ctx.storage.get('seen')) || null, q: 1 }))
@@ -456,7 +502,7 @@ export class Hub {
       const ph = this.ctx.getWebSockets(`p${id}`)[0]
       if (!ph) { if (b[0] !== OP.CLOSE) ws.send(frame(OP.CLOSE, id)); return }
       if (b[0] === OP.DATA) ph.send(b.subarray(5))
-      else if (b[0] === OP.OK) ph.serializeAttachment({ ...ph.deserializeAttachment(), ok: true })
+      else if (b[0] === OP.OK) this.vouch(ph)
       else if (b[0] === OP.CLOSE) try { ph.close(4003, 'closed by the computer') } catch { /* gone */ }
       return
     }
@@ -500,7 +546,22 @@ export class Hub {
 
   async webSocketClose(ws, code) {
     await this.gone(ws, code)
-    if (this.lim && this.day) { await this.saveDay(true); this.tally(); this.tallyAccount() }
+    if (this.lim && this.day) {
+      await this.saveDay(true)
+      // (A stranger's connection ending waits for the next tally: connected(), below.)
+      if (this.ctx.getTags(ws).includes('host') || ws.deserializeAttachment()?.ok) this.tally()
+      this.tallyAccount()
+    }
+  }
+
+  // The computer vouched for a connection (OK): one of its paired phones or tabs, never the one
+  // dropped to make room. On the hosted relay, from then on it's metered as its account's, and its
+  // connection goes to the registry (meter, connected).
+  vouch(ws) {
+    const a = ws.deserializeAttachment() || {}
+    if (a.ok) return
+    ws.serializeAttachment({ ...a, ok: true })
+    if (this.lim) this.tally()
   }
 
   async webSocketError(ws) {
@@ -540,7 +601,7 @@ export class Hub {
     const a = ws.deserializeAttachment() || {}
     if (m.t === 'box' && ID.test(m.box || '')) {
       ws.serializeAttachment({ ...a, box: m.box })
-      if (this.lim) await this.phoneIn(m.box)
+      if (this.lim) await this.phoneIn(ws, m.box)
       await this.purge()
       const waiting = [...(await st.list({ prefix: `n:${m.box}:` })).values()].map((n) => n.note.id)
       const receipts = [...(await st.list({ prefix: `r:${m.box}:` })).values()].map((r) => r.note)
@@ -654,9 +715,10 @@ export class Hub {
     }
     if (p === '/_relay/host') {
       if (!(await this.tokenOk(req))) return new Response('Not allowed', { status: 403 })
-      // ...and a relay token from its account, not past its end (Bridge AI sends a fresh one each time).
+      // ...and a relay token from its account and its device, not past its end (Bridge AI sends a
+      // fresh one each time), the device still on the account (askAccount).
       const t = await relayToken(this.env, `Bearer ${req.headers.get('X-Relay-Token') || ''}`)
-      if (!t.ok || t.a !== this.meta.a) { this.limited('token'); return refuse(this.limit('token'), 4009) }
+      if (!t.ok || t.a !== this.meta.a || (t.d !== this.meta.d && !(await this.moved(t.d)))) { this.limited('token'); return refuse(this.limit('token'), 4009) }
       const s = await this.askAccount('check')
       if (s.refused) return refuse(this.limit(s.refused.why), 4009)
       // Let go for sending on past its account's limits: told so again, with when.
@@ -668,6 +730,17 @@ export class Hub {
       return why ? refuse(this.limit(why), 4005) : null
     }
     return notFound()
+  }
+
+  // This computer signed in to its account again, so it's another device there now: its address goes
+  // with it if its Account says the device it was made for is off the account, and the new one is on
+  // it with no address of its own here. Otherwise it's turned away.
+  async moved(d) {
+    const r = await toAccount(this.env, this.meta.a, 'move', { d: this.meta.d, to: d, id: this.meta.id }).catch(() => null)
+    if (!r?.ok) return false
+    this.meta = { ...this.meta, d }
+    await this.ctx.storage.put('meta', this.meta)
+    return true
   }
 
   async tokenOk(req) {
@@ -712,6 +785,7 @@ export class Hub {
     if (!n || !this.meta?.a) return
     this.acctPend = 0
     this.acctAt = Date.now()
+    this.ctx.storage.put('acct', 0).catch(() => {}) // (saved as told, so a Hub woken again doesn't tell it twice)
     this.askAccount('tally', n)
   }
   // What the Account said: { refused: { why } } (suspended, no relay, deleted), { limit: { why, until } }
@@ -731,10 +805,12 @@ export class Hub {
     else if (!why && this.told && this.told !== 'all') this.told = null // reset, or raised
   }
 
-  // A phone said which it is: counted once a week if it's one of this computer's paired phones.
-  async phoneIn(box) {
+  // A phone said which it is: if it's one of this computer's paired phones (its box on the list the
+  // computer gave), it's vouched for by that, as by OK, and counted once a week.
+  async phoneIn(ws, box) {
     const st = this.ctx.storage
     if (!(await st.get('roster'))?.includes(box)) return
+    this.vouch(ws)
     const w = Math.floor((Date.now() / DAY + 3) / 7) // weeks start on Monday
     const wk = (await st.get('wk')) || {}
     if (wk.w === w && wk.boxes.includes(box)) return
@@ -762,25 +838,39 @@ export class Hub {
   }
   blockedUntil(now = Date.now()) { const a = this.acct; return a?.why && a.until > now ? a.until : nextDay(now) }
 
-  // Saved every 100 messages or 256 KB, and when a connection ends: in between it's only in memory,
-  // so a Hub put to sleep forgets at most that much.
+  // Saved every 100 messages or 256 KB, and when a connection ends, with what the registry and its
+  // Account haven't heard yet (pend, acctPend): in between it's only in memory, so a Hub put to sleep
+  // (as it is whenever nothing passes for a few seconds) forgets at most that much.
   async saveDay(force) {
     const d = this.day
-    if (!d || (d.bytes === d.sb && d.msgs === d.sm)) return
+    const more = d && (d.bytes !== d.sb || d.msgs !== d.sm)
+    if (!d || (!more && !(force && this.unsaved))) return
     if (!force && d.bytes - d.sb < 262144 && d.msgs - d.sm < 100) return
-    count(this.env, this.meta?.id, 'usage', [], [d.bytes - d.sb, d.msgs - d.sm])
+    if (more) count(this.env, this.meta?.id, 'usage', [], [d.bytes - d.sb, d.msgs - d.sm])
     d.sb = d.bytes
     d.sm = d.msgs
-    await this.ctx.storage.put('day', d)
+    this.unsaved = false
+    await this.ctx.storage.put({ day: d, pend: this.pend || null, acct: this.acctPend || 0 })
   }
 
-  // This computer's use since its last tally, for the registry's counts (/_relay/stats): sent with
-  // each connection, a limit reached, every 1,000 messages or 4 MB, and when a connection ends. In
-  // between it's only in memory, so the counts can come out a little low, never high. Counting never
-  // gets in the way: a tally that doesn't arrive is let go.
+  // This computer's use since its last tally, for the registry's counts (/_relay/stats): sent when
+  // its computer connects, when it vouches for a phone, with a limit reached, every 1,000 messages,
+  // 4 MB or 100 connections, and when the computer's or a paired phone's connection ends. A
+  // stranger's connection goes with the next of those, never on its own, so connecting over and over
+  // doesn't each time ask the registry, the one Hub for the whole relay. Saved with the day (saveDay)
+  // until it's sent, so the counts can come out a little low, never high. Counting never gets in the
+  // way: a tally that doesn't arrive is let go.
   pendOf(d) {
     if (this.pend && this.pend.d !== d) this.tally()
     return (this.pend ||= { d, msgs: 0, bytes: 0, computers: 0, phones: 0, limits: {} })
+  }
+
+  // A phone connected (or anyone at all: it's vouched for later, if it is).
+  connected() {
+    const p = this.pendOf(this.today().d)
+    p.phones++
+    this.unsaved = true
+    if (p.phones >= 100) this.tally()
   }
 
   tally(day = this.day) {
@@ -789,7 +879,9 @@ export class Hub {
     this.pend = null
     const mine = day?.d === p.d ? day : null
     const first = !!mine && !mine.tallied // its first today: one more computer in use today
-    if (first) { mine.tallied = true; this.ctx.storage.put('day', mine).catch(() => {}) }
+    if (first) mine.tallied = true
+    // (Saved as sent, so a Hub woken again doesn't send it twice.)
+    this.ctx.storage.put({ pend: null, ...(first ? { day: mine } : {}) }).catch(() => {})
     const total = mine && { msgs: mine.msgs, bytes: mine.bytes }
     const body = { d: p.d, id: this.meta.id, a: this.meta.a, msgs: p.msgs, bytes: p.bytes, computers: p.computers, phones: p.phones, limits: p.limits, first, total }
     // The answer says whether the whole relay has reached RELAY_DAILY_REQUESTS today.
@@ -810,7 +902,8 @@ export class Hub {
   // it's too big, too many at once, or its phones are stopped for now. A phone's own is turned away by
   // closing that phone; so is a computer's message for a phone (its link can't carry on with a piece
   // missing). The computer's own text messages (about notes) only count. A computer that sends on
-  // regardless is let go until then (dropped below).
+  // regardless is let go until then (dropped below). A connection the computer hasn't vouched for has
+  // an allowance of its own (stranger, below), and costs its account nothing.
   async meter(ws, msg) {
     const now = Date.now()
     const size = typeof msg === 'string' ? msg.length : msg.byteLength
@@ -821,12 +914,15 @@ export class Hub {
     const pend = this.pendOf(day.d)
     pend.bytes += size
     if (++pend.msgs >= 1000 || pend.bytes >= 4194304) this.tally()
+    const housekeeping = fromHost && typeof msg === 'string'
+    const phone = !fromHost ? ws : !housekeeping && size >= 5 ? this.ctx.getWebSockets(`p${new DataView(msg).getUint32(1)}`)[0] : null
+    // A stranger's message, or the computer's data for one (its answer to a hello: OK and CLOSE are
+    // the computer's own say).
+    if (phone && !phone.deserializeAttachment()?.ok && (!fromHost || new Uint8Array(msg)[0] === OP.DATA)) return this.stranger(phone, size, now)
     // Its account hears every 1,000 messages, every 3 minutes while any pass (so a suspension is
     // heard then too), and more often as the allowance runs low, so its other computers' use counts.
     this.acctPend = (this.acctPend || 0) + 1
     if (this.acctPend >= Math.max(1, Math.min(1000, Math.floor((this.acct?.left ?? 10000) / 10))) || now - (this.acctAt || 0) > 180000) this.tallyAccount()
-    const housekeeping = fromHost && typeof msg === 'string'
-    const phone = !fromHost ? ws : !housekeeping && size >= 5 ? this.ctx.getWebSockets(`p${new DataView(msg).getUint32(1)}`)[0] : null
     // For a phone that's just been let go: nowhere to go (its computer hears it's gone).
     if (fromHost && phone && phone.readyState !== 1) return false
     if (!housekeeping && size > this.lim.messageKB * 1024) return this.cut(phone, 'size', now + 5000)
@@ -841,6 +937,28 @@ export class Hub {
     }
     if (this.told) this.told = null // reset, or raised, since
     this.drops = 0
+    await this.saveDay()
+    return true
+  }
+
+  // A connection the computer hasn't vouched for: anyone with the address can connect, so as far as
+  // the relay can tell it's a stranger's until the computer says otherwise (vouch). It has STRANGER's
+  // allowance, its own (its messages and the computer's to it, from its first, and a bucket of its
+  // own), never its account's or the computer's MESSAGES_PER_SECOND. Past any of it, it's closed:
+  // the computer hears only that it closed, nothing is said, and nothing is counted as a limit (a
+  // paired phone is vouched for with its first message or two, so it never gets here).
+  async stranger(ws, size, now) {
+    if (ws.readyState !== 1) return false
+    const a = ws.deserializeAttachment() || {}
+    const s = a.s || { n: 0, b: 0, at: now, tk: STRANGER.BURST, t: now }
+    const tk = Math.min(STRANGER.BURST, s.tk + ((now - s.t) * STRANGER.RATE) / 1000)
+    const next = { n: s.n + 1, b: s.b + size, at: s.at, tk: tk - 1, t: now }
+    if (next.n > STRANGER.MSGS || next.b > STRANGER.BYTES || now - s.at > STRANGER.MS || tk < 1) {
+      try { ws.close(4005, 'not vouched for') } catch { /* gone */ }
+      try { if (a.id != null) this.host()?.send(frame(OP.CLOSE, a.id)) } catch { /* gone */ }
+      return false
+    }
+    ws.serializeAttachment({ ...a, s: next })
     await this.saveDay()
     return true
   }
@@ -1076,7 +1194,8 @@ export class Hub {
 // about the account at most once a minute: a suspension is heard within a minute of its next use.
 // Kept, as s: { a, first (its first message ever, which its weeks start from), win { start, msgs },
 // week { start, msgs }, days { day: msgs } (the last few, for the accounts service), last (its last
-// use), computers { device: computer id }, status { status, relay, at }, told }.
+// use), computers { device: computer id }, status { status, relay, at }, devs { device: { on, at } }
+// (whether each device asking is still on the account), told }.
 export class Account {
   constructor(ctx, env) {
     this.ctx = ctx
@@ -1095,22 +1214,46 @@ export class Account {
     if (p === '/_account/computer') { s.computers[b.d] = b.id; await this.save(); return json({ ok: true }) }
     if (p === '/_account/left') { if (s.computers[b.d] === b.id) delete s.computers[b.d]; if (s.first != null || Object.keys(s.computers).length) await this.save(); else { this.s = null; await this.ctx.storage.delete('s') } return json({ ok: true }) }
     if (p === '/_account/check' || p === '/_account/tally') return json(await this.answer(b))
+    if (p === '/_account/move') return json(await this.move(b))
     return notFound()
   }
 
   // What a Hub (or a computer registering) is told: refused { why } (the account is suspended, has no
-  // relay any more, or was deleted), limit { why, until } (its window or week used up), left (messages
-  // to go), use, and the address of the device asking, if it has one.
+  // relay any more, or was deleted; or 'token', the device asking isn't on it any more), limit { why,
+  // until } (its window or week used up), left (messages to go), use, and the address of the device
+  // asking, if it has one.
   async answer(b) {
     const s = this.s
     const now = Date.now()
     const n = Math.max(0, Math.floor(Number(b.n) || 0))
     if (n) this.add(n, now)
-    const out = this.said(now, await this.status(now), b.id || null)
+    const out = this.said(now, await this.status(now, b.d), b.id || null)
     if (n) await this.reportSoon()
     await this.save()
+    // A device removed from the account (or signed out there) is turned away on its own, as a computer
+    // without a relay token is, the next time it asks: not when its relay token ends, days later.
+    if (!out.refused && this.offAccount(b.d)) return { ...out, refused: { why: 'token' }, id: null }
     return { ...out, id: s.computers[b.d] || null }
   }
+
+  // A computer signed in again as a new device (to): its address moves to it (Hub.moved), only when
+  // the device it was made for (d) is off the account, the new one is on it, and has no other address.
+  async move(b) {
+    const s = this.s
+    const now = Date.now()
+    const to = String(b.to || '')
+    if (!/^[a-z0-9]{12}$/.test(to) || !/^[a-z2-7]{12}$/.test(String(b.id))) return { ok: false }
+    await this.status(now, b.d)
+    await this.status(now, to)
+    const ok = this.offAccount(b.d) && s.devs?.[to]?.on === true && (!s.computers[to] || s.computers[to] === b.id)
+    if (ok) {
+      if (s.computers[b.d] === b.id) delete s.computers[b.d]
+      s.computers[to] = b.id
+      await this.save()
+    }
+    return { ok }
+  }
+  offAccount(d) { return !!d && this.s.devs?.[d]?.on === false }
 
   // The answer for now, and its other computers told at once when it changed.
   said(now, st, except = null) {
@@ -1126,19 +1269,25 @@ export class Account {
     return out
   }
 
-  // What the accounts service says of the account: asked at most once a minute. Can't ask just now:
-  // what it said last stands a little longer, or it's let through (its tokens say it was allowed).
-  async status(now) {
+  // What the accounts service says of the account, and of the device asking (d: whether it's still
+  // on the account), each asked at most once a minute. Can't ask just now: what it said last stands a
+  // little longer, or it's let through (its tokens say it was allowed).
+  async status(now, d = null) {
     const s = this.s
-    if (s.status && now - s.status.at < STATUS_MS) return s.status
+    d = /^[a-z0-9]{12}$/.test(String(d)) ? String(d) : null
+    const dev = d && s.devs?.[d]
+    if (s.status && now - s.status.at < STATUS_MS && (!d || (dev && now - dev.at < STATUS_MS))) return s.status
     if (!this.env.ACCOUNTS) return (s.status = { status: 'active', relay: 'approved', at: now })
+    s.devs = Object.fromEntries(Object.entries(s.devs || {}).filter(([, v]) => now - v.at < DAY))
     try {
-      const r = await this.env.ACCOUNTS.fetch(`https://accounts/internal/status?a=${s.a}`)
+      const r = await this.env.ACCOUNTS.fetch(`https://accounts/internal/status?a=${s.a}${d ? `&d=${d}` : ''}`)
       if (!r.ok) throw new Error(`answered ${r.status}`)
       const j = await r.json()
       s.status = { status: String(j.status), relay: j.relay || null, at: now }
+      if (d) s.devs[d] = { on: typeof j.device === 'boolean' ? j.device : null, at: now }
     } catch {
       s.status = { status: 'active', relay: 'approved', ...s.status, at: now - STATUS_MS + 15000 }
+      if (d) s.devs[d] = { on: dev?.on ?? null, at: now - STATUS_MS + 15000 }
     }
     return s.status
   }

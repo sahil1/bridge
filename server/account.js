@@ -24,14 +24,20 @@ import { dataFile, ensureDir, writeFileAtomic, loadConfig } from './paths.js'
 // empty, so none reaches the project's).
 export const ACCOUNTS_URL = ''
 // Its public key (account/key.js --public), which an Early Access code from the account is checked
-// with. BRIDGE_ACCOUNTS_KEY, or "account": { "publicKey" } in config.json, stands in for it.
+// with: one, or several separated by commas while the service's key is being changed (the new one
+// added before the service signs with it, the old one kept until what it signed has ended:
+// account/README.md, Changing the signing key). BRIDGE_ACCOUNTS_KEY, or "account": { "publicKey" }
+// in config.json (a string, or a list), stands in for it.
 export const ACCOUNTS_PUBLIC_KEY = ''
 
 export function accountsBase() {
   const u = String(loadConfig().account?.url ?? process.env.BRIDGE_ACCOUNTS_URL ?? ACCOUNTS_URL).trim().replace(/\/+$/, '')
   return /^https:\/\/[a-z0-9.-]+$|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(u) ? u : null
 }
-export const accountsKey = () => String(loadConfig().account?.publicKey ?? process.env.BRIDGE_ACCOUNTS_KEY ?? ACCOUNTS_PUBLIC_KEY).trim()
+// Its public keys, as a list.
+export const accountsKeys = () => [].concat(loadConfig().account?.publicKey ?? process.env.BRIDGE_ACCOUNTS_KEY ?? ACCOUNTS_PUBLIC_KEY).flatMap((k) => String(k ?? '').split(',')).map((k) => k.trim()).filter(Boolean)
+// ...and as one setting, comma separated (server/earlyaccess.js tries each).
+export const accountsKey = () => accountsKeys().join(',')
 export const available = () => !!accountsBase()
 
 const FILE = dataFile('account.json')

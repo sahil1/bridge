@@ -14,7 +14,15 @@
 // none taken. The use is reported to the accounts service; an account it no longer has is forgotten,
 // with its computers. RELAY_DAILY_REQUESTS: past it, the phones and computers on the relay are told
 // it has carried all it can today, phones let go until 00:00 UTC. A computer that sends on while its
-// phones are stopped is let go until then. A relay of your own (HOSTED unset) has none of it.
+// phones are stopped is let go until then. A connection the computer hasn't vouched for (no OK, no
+// box of its own) has 32 messages, 64 KB, 20 seconds and a bucket of its own, costs the account
+// nothing, and is closed past them with nothing said or counted; the owner's phone carries on through
+// a flood of them, and they don't each ask the registry. A Hub put to sleep keeps what its account
+// and the registry haven't heard yet. Made-up addresses (the checksum keyed with ID_SECRET) wake no
+// Hub, and the kill switch is said first; tokens say which key signed them (a list of keys taken);
+// a device removed from its account loses the relay within a minute, and one signed in again keeps
+// its address; the page's CSP reaches only the relay's addresses. A relay of your own (HOSTED unset)
+// has none of it.
 // Cost watching: GET /_relay/stats, behind STATS_TOKEN (and not there at all without one), gives
 // each day's computers, connections, messages, data and limits reached, the busiest computers by id,
 // the requests that comes to and when to move to Workers Paid, and how many accounts are on it of how
@@ -116,19 +124,22 @@ function namespace(env, Class = worker.Hub) {
 }
 
 // The accounts service, as the relay's binding reaches it: each account's status (active and
-// allowed the relay unless set here), and the usage reports it was sent.
+// allowed the relay unless set here), its devices (on it unless removed here), and the usage
+// reports it was sent.
 function accountsService() {
   const status = new Map()
+  const removed = new Set()
   const reports = []
   const asked = []
   return {
-    status, reports, asked,
+    status, removed, reports, asked,
     async fetch(input, init) {
       const r = input instanceof Request ? input : new Request(input, init)
       const u = new URL(r.url)
       const a = u.searchParams.get('a') || (r.method === 'POST' ? (await r.clone().json()).a : null)
+      const d = u.searchParams.get('d')
       const st = status.get(a) || { status: 'active', relay: 'approved', tester: 'none' }
-      if (u.pathname === '/internal/status') { asked.push(a); return Response.json(st) }
+      if (u.pathname === '/internal/status') { asked.push(a); return Response.json({ ...st, ...(d ? { device: !removed.has(d) } : {}) }) }
       if (u.pathname === '/internal/usage') { reports.push(await r.json()); return Response.json(st) }
       return new Response('Not found', { status: 404 })
     },
@@ -138,21 +149,33 @@ function accountsService() {
 // Relay tokens, as the accounts service signs them, with a key of the test's own.
 const { privateKey } = crypto.generateKeyPairSync('ed25519')
 const PUBLIC = privateKey.export({ format: 'jwk' }).x
-const relayToken = (a, d, { exp = Math.floor(Date.now() / 1000) + 7 * 86400, k = 'relay', key = privateKey } = {}) => {
-  const text = Buffer.from(JSON.stringify({ k, a, d, iat: exp - 7 * 86400, exp })).toString('base64url')
+const relayToken = (a, d, { exp = Math.floor(Date.now() / 1000) + 7 * 86400, k = 'relay', key = privateKey, kid } = {}) => {
+  const text = Buffer.from(JSON.stringify({ k, a, d, iat: exp - 7 * 86400, exp, ...(kid ? { kid } : {}) })).toString('base64url')
   return `${text}.${crypto.sign(null, Buffer.from(text), key).toString('base64url')}`
 }
+// A key's id, as the accounts service puts it in each token (account/worker.js, keyId).
+const kidOf = (x) => crypto.createHash('sha256').update(Buffer.from(x, 'base64url')).digest().toString('base64url').slice(0, 8)
 let n = 0
 const newAccount = () => `acct${String(++n).padStart(8, '0')}`
 const newDevice = () => `dev${String(++n).padStart(9, '0')}`
 
 const DOMAIN = 'relay.test'
 const IP = '203.0.113.9'
+const ID_SECRET = 'test-id-secret'
+// A computer's id from 10 characters, its checksum keyed with secret (the relay's ID_SECRET), or
+// with none, as it was worked out before (a plain hash anyone could make).
+const B32 = 'abcdefghijklmnopqrstuvwxyz234567'
+const idFrom = (s, secret = ID_SECRET) => {
+  const h = secret ? crypto.createHmac('sha256', secret).update(`bridge relay id ${s}`).digest() : crypto.createHash('sha256').update(`bridge relay id ${s}`).digest()
+  const v = secret ? ((h[0] << 8) | h[1]) >> 6 : parseInt(h.toString('hex').slice(0, 3), 16) >> 2
+  return s + B32[v >> 5] + B32[v & 31]
+}
+const tenChars = () => [...crypto.randomBytes(10)].map((b) => B32[b & 31]).join('')
 // A hosted relay with these settings, and what it counted for Analytics Engine.
 function relay(vars = {}) {
   const points = []
   const accounts = accountsService()
-  const env = { HOSTED: '1', HOSTED_DOMAIN: DOMAIN, ACCOUNTS_PUBLIC_KEY: PUBLIC, ACCOUNTS: accounts, STATS: { writeDataPoint: (p) => points.push(p) }, ...vars }
+  const env = { HOSTED: '1', HOSTED_DOMAIN: DOMAIN, ID_SECRET, ACCOUNTS_PUBLIC_KEY: PUBLIC, ACCOUNTS: accounts, STATS: { writeDataPoint: (p) => points.push(p) }, ...vars }
   env.HUB = namespace(env)
   env.ACCOUNT = namespace(env, worker.Account)
   const call = (url, init = {}) => worker.default.fetch(new Request(url, init), env)
@@ -165,13 +188,16 @@ function relay(vars = {}) {
     return r.upgrade ? r.webSocket.server : r
   }
   const computer = async (c, rt = c.rt) => socket(c.id, '/_relay/host', { Authorization: `Bearer ${c.token}`, 'X-Bridge-Version': '3.9.2', ...(rt ? { 'X-Relay-Token': rt } : {}) })
-  const phone = (c) => socket(c.id, '/_relay/link')
+  // A phone connecting, paired: its computer vouches for it (as Bridge AI does with OK, once it has
+  // proved its key), so what it sends is its account's. stranger(c): one nobody vouches for.
+  const stranger = (c) => socket(c.id, '/_relay/link')
+  const phone = async (c) => { const s = await stranger(c); if (s instanceof End && s.readyState === 1) env.HUB.of(c.id).hub.vouch(s); return s }
   const hubOf = (c) => env.HUB.of(c.id).hub
   const say = (c, end, m) => hubOf(c).webSocketMessage(end, m)
   const ends = (c, end, code = 1000) => { end.readyState = 3; return hubOf(c).webSocketClose(end, code) }
   // What its Account holds for account a, once anything has reached it.
   const account = (a) => env.ACCOUNT.of(a)
-  return { env, points, accounts, call, registerWith, register, computer, phone, hubOf, say, ends, account }
+  return { env, points, accounts, call, registerWith, register, computer, phone, stranger, hubOf, say, ends, account }
 }
 const bytes = (size) => new Uint8Array(size).fill(7).buffer
 const frame = (op, id, payload = new Uint8Array(0)) => { const b = new Uint8Array(payload); const out = new Uint8Array(5 + b.byteLength); out[0] = op; new DataView(out.buffer).setUint32(1, id); out.set(b, 5); return out.buffer }
@@ -214,6 +240,58 @@ try {
     ok(second.id && second.id !== c.id, 'another device of the account: another address', second.id)
     const meta = r.env.HUB.of(c.id).store.get('meta')
     ok(meta.a === a && meta.d === d && !JSON.stringify(meta).includes(again.token), 'a Hub keeps which account and device it\'s for, and a hash of the token, never the token', meta)
+  }
+
+  // ---------- Made-up addresses wake nothing, and the kill switch is said first ----------
+  {
+    const r = relay()
+    const c = await r.register()
+    ok(c.id === idFrom(c.id.slice(0, 10)), 'a computer\'s id ends in a checksum keyed with the relay\'s own secret (ID_SECRET)', c.id)
+    let woken = 0
+    const get = r.env.HUB.get
+    r.env.HUB.get = (n) => { if (!r.env.HUB.of(n)) woken++; return get(n) }
+    const statuses = new Set()
+    for (let i = 0; i < 100; i++) {
+      const s = tenChars()
+      for (const made of [idFrom(s, null), idFrom(s, 'someone else\'s secret')]) {
+        if (made === idFrom(s)) continue // (one in 1,024 passes by chance)
+        statuses.add((await r.call(`https://${made}.${DOMAIN}/`)).status)
+        statuses.add((await r.call(`https://${made}.${DOMAIN}/_relay/link`, { headers: { Upgrade: 'websocket' } })).status)
+      }
+    }
+    ok(woken === 0 && [...statuses].join() === '404', '200 made-up addresses, with the checksum anyone could work out before or one keyed with another secret: each a plain 404, and not one Hub woken', { woken, statuses: [...statuses] })
+    const real = await r.call(`https://${c.id}.${DOMAIN}/`)
+    ok(real.status === 200, 'while the relay\'s own address still answers', real.status)
+    const csp = real.headers.get('content-security-policy') || ''
+    ok(/connect-src 'self' wss:\/\/\*\.relay\.test;/.test(csp) && !/ wss: | ws:/.test(csp) && real.headers.get('cross-origin-opener-policy') === 'same-origin', 'its page connects only to the relay\'s own addresses (connect-src), and keeps other sites\' windows off it (Cross-Origin-Opener-Policy)', { csp, coop: real.headers.get('cross-origin-opener-policy') })
+    r.env.HOSTED_OFF = '1'
+    const unknown = idFrom(tenChars())
+    const off = await r.call(`https://${unknown}.${DOMAIN}/_relay/link`, { headers: { Upgrade: 'websocket' } })
+    const offHost = await r.call(`https://${unknown}.${DOMAIN}/_relay/host`, { headers: { Upgrade: 'websocket' } })
+    ok(off.webSocket?.server?.got?.[0]?.why === 'off' && offHost.webSocket?.server?.got?.[0]?.why === 'off' && woken === 0, 'switched off (HOSTED_OFF): a connection is told so before any Hub is asked whether the address is registered', { woken, said: off.webSocket?.server?.got?.[0] })
+    delete r.env.HOSTED_OFF
+    const noSecret = await worker.default.fetch(new Request(`https://${DOMAIN}/`), { ...r.env, ID_SECRET: '' })
+    ok(noSecret.status === 500 && /ID_SECRET isn't set/.test(await noSecret.text()), 'without ID_SECRET the hosted relay answers nothing but that it isn\'t set', noSecret.status)
+  }
+
+  // ---------- Tokens say which key signed them, so the key can be changed ----------
+  {
+    const next = crypto.generateKeyPairSync('ed25519').privateKey
+    const NEXT = next.export({ format: 'jwk' }).x
+    const r = relay({ ACCOUNTS_PUBLIC_KEY: `${PUBLIC}, ${NEXT}` })
+    const status = async (t) => { const x = await r.registerWith(t); return x.status === 200 ? 200 : (await x.json()).token }
+    const one = () => [newAccount(), newDevice()]
+    const got = {
+      old: await status(relayToken(...one(), { kid: kidOf(PUBLIC) })),
+      next: await status(relayToken(...one(), { key: next, kid: kidOf(NEXT) })),
+      before: await status(relayToken(...one())),
+      beforeNext: await status(relayToken(...one(), { key: next })),
+      swapped: await status(relayToken(...one(), { kid: kidOf(NEXT) })),
+      unknown: await status(relayToken(...one(), { kid: 'AAAAAAAA' })),
+    }
+    ok(got.old === 200 && got.next === 200, 'with two keys in ACCOUNTS_PUBLIC_KEY (comma separated), a token signed with either, saying which (kid), is taken', got)
+    ok(got.before === 200 && got.beforeNext === 'forged', 'one from before tokens said which key is checked with the first key only', got)
+    ok(got.swapped === 'forged' && got.unknown === 'forged', 'one whose kid names the other key, or none of them, is refused as forged', got)
   }
 
   // ---------- Connecting needs a relay token of its account ----------
@@ -323,6 +401,43 @@ try {
     shift = 0
   }
 
+  // ---------- A device removed from the account loses the relay then, not when its token ends ----------
+  {
+    shift = 0
+    const r = relay()
+    const a = newAccount()
+    const c = await r.register(a)
+    const keep = await r.register(a)
+    const host = await r.computer(c)
+    const other = await r.computer(keep)
+    const ph = await r.phone(c)
+    await r.say(c, host, frame(OK, ph.att.id))
+    r.accounts.removed.add(c.d)
+    shift += 61000 // (what the service said is kept a minute)
+    const late = await r.phone(c)
+    await until(() => host.closed, 2000, 20)
+    ok(late.got?.[0]?.why === 'token' && /signed in to a Bold Bridge account/.test(late.got[0].text) && host.said('limit').some((m) => m.why === 'token') && host.closed?.[0] === 4009 && ph.closed, 'removed from the account: within a minute its computer is told (as one without a relay token) and let go, with its phones, and a phone connecting is turned away', { late: late.got?.[0], host: host.closed, ph: ph.closed })
+    const again = await r.computer(c)
+    ok(again.got?.[0]?.why === 'token' && again.closed?.[0] === 4009, 'its relay token, still days from its end, no longer connects it', again.got)
+    const reg = await r.registerWith(c.rt)
+    const regJ = await reg.json()
+    ok(reg.status === 401 && regJ.token === 'removed' && /isn't on your Bold Bridge account any more/.test(regJ.error), 'nor registers it: 401, saying it isn\'t on the account any more', regJ)
+    ok(other.readyState === 1 && !other.said('limit').length && (await r.phone(keep)).readyState === 1, 'the account\'s other computer carries on', other.said('limit'))
+    // Only the device an address was made for connects to it: another of the account's, with an
+    // address of its own, is turned away.
+    const wrong = await r.computer(keep, relayToken(a, c.d))
+    const swapped = await r.computer(c, keep.rt)
+    ok(wrong.got?.[0]?.why === 'token' && swapped.got?.[0]?.why === 'token', 'a computer connects only with a relay token of the device its address was made for', [wrong.got?.[0]?.why, swapped.got?.[0]?.why])
+    // Signed in again on the same computer (a new device): its address moves with it.
+    const d2 = newDevice()
+    shift += 61000
+    const back = await r.computer(c, relayToken(a, d2))
+    ok(back instanceof End && back.readyState === 1 && !back.said('limit').length && r.env.HUB.of(c.id).store.get('meta').d === d2, 'signed in again (a new device, the old one off the account): it connects to its address, which is now the new device\'s', back.got)
+    const same = await r.register(a, d2)
+    ok(same.id === c.id && r.account(a).store.get('s').computers[d2] === c.id && !(c.d in r.account(a).store.get('s').computers), 'and registering as the new device gives the same address back', { same: same.id, was: c.id })
+    shift = 0
+  }
+
   // ---------- MAX_ACCOUNTS ----------
   {
     const r = relay({ MAX_ACCOUNTS: '2', STATS_TOKEN: 'stats-secret-for-tests' })
@@ -413,6 +528,123 @@ try {
     ok(/sent more at once than Bridge AI's relay takes/.test(host.said('limit').find((m) => m.why === 'rate')?.text || ''), 'and the computer hears it', host.said('limit'))
   }
 
+  // ---------- A connection the computer hasn't vouched for: an allowance of its own ----------
+  {
+    shift = 0
+    const r = relay({ ACCOUNT_WINDOW_MESSAGES: '3000', MESSAGE_BURST: '2000' })
+    const c = await r.register()
+    const host = await r.computer(c)
+    // The owner's phone, vouched for by the computer itself (OK), as Bridge AI does once its key checks out.
+    const owner = await r.stranger(c)
+    await r.say(c, owner, bytes(200)) // (its hello)
+    await r.say(c, host, frame(OK, owner.att.id))
+    ok(owner.att.ok === true, 'the computer vouches for its phone with OK', owner.att)
+    const used = () => r.account(c.a)?.store.get('s')?.win?.msgs || 0
+    // Strangers: 33 messages each, connecting again when let go, 3,000 in all.
+    let sent = 0
+    let conns = 0
+    let s = null
+    const closes = []
+    while (sent < 3000) {
+      if (!s || s.readyState !== 1) { if (s) closes.push(s.closed); s = await r.stranger(c); conns++ }
+      await r.say(c, s, bytes(16))
+      sent++
+    }
+    for (let i = 0; i < 5; i++) await r.say(c, owner, bytes(16))
+    await r.ends(c, owner) // (what it carried goes to the Account as it ends)
+    await settle()
+    ok(conns >= 3000 / 33 && closes.every((x) => x?.[0] === 4005) && closes.length >= 80, 'a stranger connection (no OK) is closed past 32 messages, however many times it connects', { conns, closes: closes.length })
+    ok(owner.closed?.[1] !== 'limit' && !owner.said('limit').length && !host.said('limit').length, 'the owner\'s phone carried on through it all, and nobody was told of a limit', { owner: owner.said('limit'), host: host.said('limit') })
+    ok(used() <= 10, 'and the account\'s allowance counted only the owner\'s phone (3,000 strangers\' messages cost it nothing)', used())
+    ok(!r.points.some((p) => p.blobs[0] === 'limit'), 'a stranger let go isn\'t counted as a limit reached', r.points.filter((p) => p.blobs[0] === 'limit').map((p) => p.blobs))
+    ok(host.got.filter((m) => m instanceof Uint8Array && m[0] === 3).length >= closes.length, 'the computer hears only that each one closed (OP.CLOSE)', host.got.filter((m) => m instanceof Uint8Array && m[0] === 3).length)
+    // Its bytes, and its time.
+    const big = await r.stranger(c)
+    await r.say(c, big, bytes(40 * 1024))
+    await r.say(c, big, bytes(40 * 1024))
+    ok(big.closed?.[0] === 4005, 'past 64 KB, a stranger is closed', big.closed)
+    const slow = await r.stranger(c)
+    await r.say(c, slow, bytes(16))
+    shift += 21000
+    await r.say(c, slow, bytes(16))
+    ok(slow.closed?.[0] === 4005, '...and 20 seconds after its first message', slow.closed)
+    shift = 0
+    // ...and its bucket: 16 at once, then 8 a second.
+    const fast = await r.stranger(c)
+    let n = 0
+    const was = Date.now
+    const frozen = was()
+    Date.now = () => frozen
+    while (fast.readyState === 1 && n < 30) { await r.say(c, fast, bytes(8)); n++ }
+    Date.now = was
+    ok(n === 17 && fast.closed?.[0] === 4005, 'and 16 messages at once, then 8 a second (a bucket of its own): the 17th at once closes it', n)
+    // What the computer sends a stranger counts on the stranger's allowance too.
+    const fed = await r.stranger(c)
+    let m = 0
+    while (fed.readyState === 1 && m < 40) { await r.say(c, host, frame(1, fed.att.id, new Uint8Array(8))); m++ }
+    ok(fed.closed?.[0] === 4005 && m <= 33 && used() <= 10, 'the computer\'s data for a stranger counts on its allowance, not the account\'s', { m, used: used() })
+  }
+
+  // ---------- ...and a paired phone is vouched for by its box, with its computer offline ----------
+  {
+    const r = relay()
+    const c = await r.register()
+    const host = await r.computer(c)
+    const box = 'AAAAAAAAAAAAAAAAAAAAAA'
+    await r.say(c, host, JSON.stringify({ t: 'take', boxes: [box] }))
+    await r.ends(c, host)
+    const ph = await r.stranger(c)
+    await r.say(c, ph, JSON.stringify({ t: 'box', box }))
+    for (let i = 0; i < 60; i++) await r.say(c, ph, JSON.stringify({ t: 'got', ids: [] }))
+    ok(ph.readyState === 1 && ph.att.ok === true, 'a phone whose box is on its computer\'s list is vouched for by it: with the computer offline it goes on (leaving notes), past 32 messages', { state: ph.readyState, ok: ph.att.ok })
+    const other = await r.stranger(c)
+    await r.say(c, other, JSON.stringify({ t: 'box', box: 'BBBBBBBBBBBBBBBBBBBBBB' }))
+    for (let i = 0; i < 40 && other.readyState === 1; i++) await r.say(c, other, JSON.stringify({ t: 'got', ids: [] }))
+    ok(other.closed?.[0] === 4005, 'one whose box isn\'t on it is a stranger still', other.closed)
+  }
+
+  // ---------- The registry isn't asked for each stranger's connection ----------
+  {
+    const r = relay()
+    const c = await r.register()
+    await r.computer(c)
+    await settle()
+    let asked = 0
+    const reg = r.env.HUB.get('registry')
+    const f = reg.fetch
+    reg.fetch = (...a) => { asked++; return f(...a) }
+    for (let i = 0; i < 100; i++) { const s = await r.stranger(c); await r.ends(c, s) }
+    await settle()
+    ok(asked <= 1, '100 stranger connections, each ended: the registry is asked once at most (their count goes with the next tally)', asked)
+    const ph = await r.phone(c)
+    await r.ends(c, ph)
+    await settle()
+    ok(asked >= 2 && asked <= 3, 'a paired phone\'s connection is told it, as before', asked)
+  }
+
+  // ---------- A Hub put to sleep forgets next to nothing of what its account used ----------
+  {
+    const r = relay({ STATS_TOKEN: 'stats-secret-for-tests' })
+    const c = await r.register()
+    let carried = 0
+    for (let cycle = 0; cycle < 5; cycle++) {
+      await r.computer(c)
+      const ph = await r.phone(c)
+      for (let i = 0; i < 990; i++) { await r.say(c, ph, bytes(16)); carried++ }
+      await settle()
+      r.env.HUB.restart(c.id) // put to sleep and woken, as hibernation does: only what was saved is left
+    }
+    const host = await r.computer(c)
+    const ph = await r.phone(c)
+    await r.ends(c, ph)
+    await r.ends(c, host)
+    await settle()
+    const acc = await r.account(c.a).fetch('https://account/_account/check', { method: 'POST', body: JSON.stringify({ a: c.a }) }).then((x) => x.json())
+    ok(acc.use.window.messages >= carried - 5 * 100 && acc.use.window.messages <= carried, '5 times 990 messages, the Hub put to sleep after each: its account counts all but at most 99 each time, never more than were carried', { carried, counted: acc.use.window.messages })
+    const day = await until(async () => { const d = (await (await r.call(`https://${DOMAIN}/_relay/stats`, { headers: { Authorization: 'Bearer stats-secret-for-tests' } })).json()).days[0]; return d.messages >= carried - 500 ? d : null }, 3000, 50)
+    ok(day && day.messages <= carried, 'and the relay\'s day counts them the same way', day?.messages)
+  }
+
   // ---------- RELAY_DAILY_REQUESTS: the whole relay's ceiling for a day ----------
   {
     const r = relay({ RELAY_DAILY_REQUESTS: '100', STATS_TOKEN: 'stats-secret-for-tests' })
@@ -426,7 +658,7 @@ try {
     const told1 = await until(() => p1.said('limit')[0], 5000, 20)
     ok(told1?.why === 'all' && /carried all it can for today, for every computer on it/.test(told1.text) && told1.until === midnight() && /your own Cloudflare account/.test(told1.text) && /Tailscale/.test(told1.text) && p1.closed?.[0] === 4005, 'past the ceiling, a phone is told the relay has carried all it can today for everyone, when it starts again and the other ways, and is let go', told1)
     ok(h1.said('limit').some((m) => m.why === 'all') && h1.readyState === 1, 'its computer is told too, and stays connected for then', h1.said('limit'))
-    // The other computer hears it with its next tally (a phone connecting is one).
+    // The other computer hears it with its next tally (a paired phone connecting is one).
     const p3 = await r.phone(two)
     const told2 = await until(() => [...p2.said('limit'), ...p3.said('limit')].find((m) => m.why === 'all'), 5000, 20)
     ok(!!told2 && h2.said('limit').some((m) => m.why === 'all') && h2.readyState === 1, 'every other computer on the relay hears it too, with its next tally, and its phones are let go', { p2: p2.said('limit'), p3: p3.said('limit') })
@@ -478,6 +710,8 @@ try {
     const s = await worker.default.fetch(new Request('https://own.example.workers.dev/_relay/stats', { headers: { Authorization: 'Bearer s' } }), env)
     const reg = await worker.default.fetch(new Request('https://own.example.workers.dev/_relay/register', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }), env)
     ok(s.status === 404 && reg.status === 404, 'and has no stats or registering to ask for', [s.status, reg.status])
+    const own = await worker.default.fetch(new Request('https://own.example.workers.dev/'), env)
+    ok(/connect-src 'self' wss: ws:;/.test(own.headers.get('content-security-policy') || '') && own.headers.get('cross-origin-opener-policy') === 'same-origin', 'its page may still reach your other computers\' relays, wherever they are, and keeps other sites\' windows off it too', own.headers.get('content-security-policy'))
   }
 
   // ---------- Cost watching: /_relay/stats ----------
@@ -531,7 +765,7 @@ try {
     const vars = Object.fromEntries([...toml.slice(toml.indexOf('[vars]')).matchAll(/^([A-Z_]+) = "([^"]*)"/gm)].map((m) => [m[1], m[2]]))
     const missing = Object.entries(vars).filter(([k, v]) => !new RegExp(`^\\| \`${k}\` \\| ${v === '' || ['HOSTED', 'HOSTED_DOMAIN'].includes(k) ? '' : `\`${v.replace(/[{}]/g, '\\$&')}\``}`, 'm').test(md))
     ok(Object.keys(vars).length >= 14 && !missing.length && ['ACCOUNT_WINDOW_HOURS', 'ACCOUNT_WINDOW_MESSAGES', 'ACCOUNT_WEEK_MESSAGES', 'MAX_ACCOUNTS', 'ACCOUNTS_PUBLIC_KEY'].every((k) => k in vars), 'every setting in wrangler.hosted.toml is in HOSTED.md\'s table, with the same default, the account limits among them', missing)
-    ok(/STATS_TOKEN/.test(md) && /\[observability\]\nenabled = false/.test(toml) && /class_name = "Account"/.test(toml) && /tag = "v2"\nnew_sqlite_classes = \["Account"\]/.test(toml), 'and its secret, the Account class with its migration, and the Worker\'s logs off', null)
+    ok(/^\| `ID_SECRET` \|/m.test(md) && /secret put ID_SECRET/.test(md) && /#   ID_SECRET /.test(toml) && /STATS_TOKEN/.test(md) && /\[observability\]\nenabled = false/.test(toml) && /class_name = "Account"/.test(toml) && /tag = "v2"\nnew_sqlite_classes = \["Account"\]/.test(toml), 'and its secrets (ID_SECRET in Going live), the Account class with its migration, and the Worker\'s logs off', null)
     ok(/\| 500 \| 142 million \| 825,000 GB-s \| \$5 \+ \$21\.15 \+ \$12\.50 = \*\*\$38\.65\*\* \|/.test(md) && /about \*\*\$43\.75\*\* a month/.test(md), 'the cost of 500 accounts at their limits ($38.65) and the backstop\'s most ($43.75) are both under $50', null)
   }
 

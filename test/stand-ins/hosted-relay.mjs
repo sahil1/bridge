@@ -4,7 +4,8 @@
 // switched off), with nothing leaving the machine. Its domain is localhost (it listens on 127.0.0.1,
 // and takes that as localhost too), so a computer's address is <id>.localhost. Relay tokens are
 // checked with ACCOUNTS_PUBLIC_KEY (the harness's test key), and ACCOUNTS_URL is the accounts
-// stand-in, which the ACCOUNTS binding reaches (stand-ins/accounts.mjs, /_test/bound/...).
+// stand-in, which the ACCOUNTS binding reaches through its Relay entrypoint (stand-ins/accounts.mjs,
+// /_test/relay/...).
 //   node hosted-relay.mjs <port> [its settings as JSON, e.g. '{"MAX_ACCOUNTS":"1"}']
 //   POST /_test/vars   more settings (JSON), from then on
 //   POST /_test/down   computers' addresses can't be reached (each connection dropped), as with no
@@ -49,7 +50,7 @@ class End {
 globalThis.WebSocketPair = class { constructor() { const server = new End(); return { 0: { server }, 1: server } } }
 const worker = await import('../../relay/worker.js')
 
-const env = { HOSTED: '1', HOSTED_DOMAIN: 'localhost', ...JSON.parse(vars) }
+const env = { HOSTED: '1', HOSTED_DOMAIN: 'localhost', ID_SECRET: 'the stand-in\'s own', ...JSON.parse(vars) }
 // One object per name, each taking its requests one at a time (as Cloudflare's input gates do).
 function namespace(Class) {
   const objs = new Map()
@@ -95,13 +96,14 @@ function namespace(Class) {
 }
 env.HUB = namespace(worker.Hub)
 env.ACCOUNT = namespace(worker.Account)
-// The service binding to the accounts service: its stand-in, by the way only a binding reaches it.
+// The service binding to the accounts service: its stand-in, by the way only the relay's binding
+// reaches it.
 if (env.ACCOUNTS_URL) {
   env.ACCOUNTS = {
     fetch: async (input, init) => {
       const r = input instanceof Request ? input : new Request(input, init)
       const u = new URL(r.url)
-      return fetch(`${env.ACCOUNTS_URL}/_test/bound${u.pathname}${u.search}`, { method: r.method, headers: r.headers, body: ['GET', 'HEAD'].includes(r.method) ? undefined : await r.arrayBuffer() })
+      return fetch(`${env.ACCOUNTS_URL}/_test/relay${u.pathname}${u.search}`, { method: r.method, headers: r.headers, body: ['GET', 'HEAD'].includes(r.method) ? undefined : await r.arrayBuffer() })
     },
   }
 }
