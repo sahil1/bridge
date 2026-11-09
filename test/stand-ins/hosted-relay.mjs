@@ -13,6 +13,8 @@
 //   POST /_test/use    { a, n }: n messages counted to account a, as its other computers' Hubs would
 //                      tell its Account (each of its computers hears what that comes to)
 //   GET  /_test/state  how many computers are connected
+//   POST /_test/page   { name, text, version }: the phone page's file name served as text instead (a
+//                      page changed by whoever runs the relay), and the version it says it runs
 import http from 'node:http'
 import { WebSocketServer } from 'ws'
 import { bundle } from '../../relay/build.js'
@@ -21,9 +23,10 @@ const [port, vars = '{}'] = process.argv.slice(2)
 const realNow = Date.now
 let shift = 0
 Date.now = () => realNow() + shift
-const { build, code } = bundle()
+const { build, version, code } = bundle()
 globalThis.FILES = JSON.parse(code.slice('const FILES = '.length, code.indexOf('\nconst RELAY_BUILD')))
 globalThis.RELAY_BUILD = build
+globalThis.RELAY_VERSION = version
 globalThis.WebSocketRequestResponsePair = class { constructor(req, res) { this.req = req; this.res = res } }
 const OrigResponse = globalThis.Response
 globalThis.Response = class extends OrigResponse {
@@ -119,6 +122,10 @@ const server = http.createServer(async (req, res) => {
     if (req.url === '/_test/vars') Object.assign(env, said)
     if (req.url === '/_test/down' || req.url === '/_test/up') down = req.url === '/_test/down'
     if (req.url === '/_test/clock') shift = Number(said.shift) || 0
+    if (req.url === '/_test/page') {
+      if (said.name) globalThis.FILES[said.name] = { text: said.text }
+      if (said.version !== undefined) globalThis.RELAY_VERSION = said.version
+    }
     if (req.url === '/_test/use') out = await env.ACCOUNT.get(said.a).fetch('https://account/_account/tally', { method: 'POST', body: JSON.stringify({ a: said.a, n: said.n }) }).then((r) => r.json())
     if (req.url === '/_test/state') out = { computers: env.HUB.all().reduce((n, o) => n + o.ctx.getWebSockets('host').length, 0) }
     res.setHeader('content-type', 'application/json')

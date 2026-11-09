@@ -15,7 +15,7 @@
 // The same code also runs Bridge AI's hosted relay, for people who'd rather not set up their own:
 // with HOSTED=1 it serves many computers, one per subdomain, each with its own Hub and its own
 // limits. See HOSTED.md. Without HOSTED, none of that code runs.
-/* global FILES, RELAY_BUILD */
+/* global FILES, RELAY_BUILD, RELAY_VERSION */
 
 const TYPES = { html: 'text/html; charset=utf-8', js: 'text/javascript; charset=utf-8', webmanifest: 'application/manifest+json', png: 'image/png', svg: 'image/svg+xml' }
 const MAX_PHONES = 16
@@ -33,7 +33,7 @@ const QUIET_MS = 40 * 1000
 
 export default {
   async fetch(req, env) {
-    if (on(env.HOSTED)) return hosted(req, env)
+    if (on(env.HOSTED)) return appLinks(req, env) || hosted(req, env)
     const url = new URL(req.url)
     const p = url.pathname
     if (p === '/_relay/host' || p === '/_relay/link') {
@@ -47,7 +47,35 @@ export default {
   },
 }
 
-const health = () => new Response(JSON.stringify({ ok: true, build: RELAY_BUILD }), { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
+// version: the Bridge AI release the page's files are from (relay/build.js), which a computer on
+// Bridge AI's relay checks them against (server/relaycheck.js).
+const health = () => new Response(JSON.stringify({ ok: true, build: RELAY_BUILD, version: typeof RELAY_VERSION === 'string' ? RELAY_VERSION : null }), { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
+
+// ---------- Pairing links open the phone apps (Bridge AI's hosted relay) ----------
+// With the iPhone or Android app installed, a pairing link (https://<id>.<domain>/#pair=…, the QR
+// code the computer shows) opens the app, which carries its own copy of the page, rather than this
+// page in a browser. iOS asks for /.well-known/apple-app-site-association and Android for
+// /.well-known/assetlinks.json (at <domain> itself, for the apps' *.<domain>; answered under every
+// name here alike), and each names the app that may open the links. From the Worker's settings
+// (HOSTED.md, Going live): APPLE_APP_ID (<team id>.<bundle id>), ANDROID_PACKAGE, and
+// ANDROID_CERT_SHA256 (its signing certificate's SHA-256, AB:CD:…; several comma-separated). Unset,
+// nothing is served, as on a relay of your own.
+const listOf = (v) => String(v || '').split(',').map((x) => x.trim()).filter(Boolean)
+function appLinks(req, env) {
+  const p = new URL(req.url).pathname
+  if (p === '/.well-known/apple-app-site-association') {
+    const ids = listOf(env.APPLE_APP_ID).filter((x) => /^[A-Z0-9]{10}\.[A-Za-z0-9.-]+$/.test(x))
+    // Only a pairing link: the page's own address with #pair=… (and nothing else on the relay).
+    return ids.length ? wellKnown({ applinks: { details: [{ appIDs: ids, components: [{ '/': '/', '#': 'pair=*', comment: 'A pairing link' }] }] } }) : null
+  }
+  if (p === '/.well-known/assetlinks.json') {
+    const pkg = String(env.ANDROID_PACKAGE || '').trim()
+    const certs = listOf(env.ANDROID_CERT_SHA256).map((x) => x.toUpperCase()).filter((x) => /^([0-9A-F]{2}:){31}[0-9A-F]{2}$/.test(x))
+    return /^[a-z][\w]*(\.[a-z][\w]*)+$/i.test(pkg) && certs.length ? wellKnown([{ relation: ['delegate_permission/common.handle_all_urls'], target: { namespace: 'android_app', package_name: pkg, sha256_cert_fingerprints: certs } }]) : null
+  }
+  return null
+}
+const wellKnown = (body) => new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=3600', 'X-Content-Type-Options': 'nosniff' } })
 
 // The page and its files. Anything else is Bridge AI itself, which the page's service worker
 // fetches from your computer; reaching here means the page isn't open yet.

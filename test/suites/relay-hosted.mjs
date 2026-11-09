@@ -42,9 +42,10 @@ const HOUR = 3600000
 const DAY = 864e5
 
 // ---------- what Cloudflare gives a Worker ----------
-const { build, code } = bundle()
+const { build, version, code } = bundle()
 globalThis.FILES = JSON.parse(code.slice('const FILES = '.length, code.indexOf('\nconst RELAY_BUILD')))
 globalThis.RELAY_BUILD = build
+globalThis.RELAY_VERSION = version
 globalThis.WebSocketRequestResponsePair = class { constructor(req, res) { this.req = req; this.res = res } }
 const OrigResponse = globalThis.Response
 globalThis.Response = class extends OrigResponse {
@@ -478,6 +479,35 @@ try {
     const s = await worker.default.fetch(new Request('https://own.example.workers.dev/_relay/stats', { headers: { Authorization: 'Bearer s' } }), env)
     const reg = await worker.default.fetch(new Request('https://own.example.workers.dev/_relay/register', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }), env)
     ok(s.status === 404 && reg.status === 404, 'and has no stats or registering to ask for', [s.status, reg.status])
+  }
+
+  // ---------- Pairing links open the apps (/.well-known), and the page's version ----------
+  {
+    const AASA = '/.well-known/apple-app-site-association'
+    const LINKS = '/.well-known/assetlinks.json'
+    const CERT = Array.from({ length: 32 }, (_, i) => (i * 7).toString(16).padStart(2, '0').toUpperCase()).join(':')
+    const none = relay({ APPLE_APP_ID: '', ANDROID_PACKAGE: '', ANDROID_CERT_SHA256: '' })
+    const c0 = await none.register()
+    const unset = await Promise.all([`https://${DOMAIN}${AASA}`, `https://${DOMAIN}${LINKS}`, `https://${c0.id}.${DOMAIN}${AASA}`, `https://${c0.id}.${DOMAIN}${LINKS}`].map((u) => none.call(u).then((x) => x.status)))
+    ok(unset.every((s) => s === 404), 'with the apps unset, neither file is served, at the domain or at a computer\'s address', unset)
+    const r = relay({ APPLE_APP_ID: 'K6QK66LQDM.dev.bridge-ai.phone', ANDROID_PACKAGE: 'dev.bridgeai.phone', ANDROID_CERT_SHA256: CERT.toLowerCase() })
+    const c = await r.register()
+    const aasa = await r.call(`https://${DOMAIN}${AASA}`)
+    const aj = await aasa.json()
+    ok(aasa.status === 200 && /^application\/json/.test(aasa.headers.get('content-type')) && JSON.stringify(aj) === JSON.stringify({ applinks: { details: [{ appIDs: ['K6QK66LQDM.dev.bridge-ai.phone'], components: [{ '/': '/', '#': 'pair=*', comment: 'A pairing link' }] }] } }), 'set, iOS gets the iPhone app for pairing links alone (the page\'s address with #pair=), as JSON', aj)
+    const links = await r.call(`https://${DOMAIN}${LINKS}`)
+    const lj = await links.json()
+    ok(links.status === 200 && JSON.stringify(lj) === JSON.stringify([{ relation: ['delegate_permission/common.handle_all_urls'], target: { namespace: 'android_app', package_name: 'dev.bridgeai.phone', sha256_cert_fingerprints: [CERT] } }]), 'and Android the Android app with its certificate\'s SHA-256 (in capitals, as Android compares it)', lj)
+    const there = await Promise.all([`https://${c.id}.${DOMAIN}${AASA}`, `https://${c.id}.${DOMAIN}${LINKS}`].map((u) => r.call(u).then((x) => x.text())))
+    ok(there[0] === JSON.stringify(aj) && there[1] === JSON.stringify(lj), 'the same at a computer\'s address', there.map((x) => x.slice(0, 60)))
+    const bad = relay({ APPLE_APP_ID: 'not an app', ANDROID_PACKAGE: 'dev.bridgeai.phone', ANDROID_CERT_SHA256: 'AB:CD' })
+    const badSt = await Promise.all([AASA, LINKS].map((p) => bad.call(`https://${DOMAIN}${p}`).then((x) => x.status)))
+    ok(badSt.every((s) => s === 404), 'a setting that isn\'t an app id or a SHA-256 serves nothing', badSt)
+    const own = await Promise.all([AASA, LINKS].map((p) => worker.default.fetch(new Request(`https://own.example.workers.dev${p}`), { APPLE_APP_ID: 'K6QK66LQDM.dev.bridge-ai.phone', ANDROID_PACKAGE: 'dev.bridgeai.phone', ANDROID_CERT_SHA256: CERT }).then((x) => x.status)))
+    ok(own.every((s) => s === 404), 'and a relay of your own serves neither, set or not: its links open the browser', own)
+    const health = await Promise.all([`https://${DOMAIN}/_relay/health`, `https://${c.id}.${DOMAIN}/_relay/health`].map((u) => r.call(u).then((x) => x.json())))
+    const ownHealth = await worker.default.fetch(new Request('https://own.example.workers.dev/_relay/health'), {}).then((x) => x.json())
+    ok([...health, ownHealth].every((h) => h.ok && h.build === build && h.version === version), 'every relay says which Bridge AI version its page is from, for the computer\'s check (server/relaycheck.js)', [...health, ownHealth])
   }
 
   // ---------- Cost watching: /_relay/stats ----------
