@@ -324,7 +324,8 @@ try {
     const from = logLines().length
     await sec.locator('button', { hasText: 'Test' }).click()
     ok(!!(await until(() => p.evaluate(() => window.__played > 0), 8000, 100)), 'Test: made on the computer, played here')
-    const heard = spoken(from)
+    // The next piece is made while the first plays: waited for, not read the moment the first is heard.
+    const heard = (await until(() => { const h = spoken(from); return h.length >= 2 && h }, 8000, 100)) || spoken(from)
     ok(heard[0]?.tts === 'Two agents need you.' && heard[1]?.tts === 'The payments agent is asking whether to run the migration.' && heard[0].lang === 'en' && heard[0].sid === 0 && heard[0].speed === 1.2, 'a sentence at a time, the first on its own, in the app\'s language, at the usual pace', heard)
     ok(await p.evaluate(() => window.__said.filter((x) => x.text.trim()).length) === 0, 'and the device\'s own voice said nothing')
     // Advanced: which of its ten, and the speed with it.
