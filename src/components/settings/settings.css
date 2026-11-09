@@ -1,0 +1,51 @@
+/* Settings' Advanced, its rows, and a setting found from ⌘K or a link (Advanced.jsx). */
+.st-adv { margin-top: 14px; border-top: 1px solid var(--line); }
+.st-adv > summary { list-style: none; display: flex; align-items: center; gap: 7px; min-height: 40px; padding: 8px 0; cursor: pointer; font-size: 13px; font-weight: 600; color: var(--ink-2); border-radius: 8px; }
+.st-adv > summary::-webkit-details-marker { display: none; }
+.st-adv > summary:hover { color: var(--ink); }
+.st-adv > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.st-adv > summary .icon { flex: none; color: var(--ink-3); transition: transform .15s; }
+.st-adv[open] > summary .icon { transform: rotate(90deg); }
+.st-adv-what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; color: var(--ink-3); }
+.st-adv-parts { display: grid; gap: 4px; }
+.st-adv-part { display: grid; gap: 4px; min-width: 0; }
+.st-adv-part:first-child > :first-child { border-top: 0; padding-top: 2px; }
+.st-adv-part > .ap-sec, .st-adv-part > .pv-sec { padding-top: 12px; }
+
+/* A row: the name and one short line, the control beside them. */
+.st-line { display: flex; align-items: center; gap: 8px 16px; flex-wrap: wrap; min-width: 0; }
+.st-line-text { flex: 1 1 220px; min-width: 0; display: grid; gap: 1px; }
+.st-line-label { font-size: 13.5px; font-weight: 600; }
+.st-line-ctl { flex: 0 1 auto; min-width: 0; max-width: 100%; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.st-line-ctl > .st-input { width: min(300px, 100%); }
+.st-sec > * + .st-line { margin-top: 6px; }
+
+/* Checkboxes with a name and a short line beside them, in every section. */
+.st-check { display: flex; align-items: flex-start; gap: 9px; font-size: 13px; line-height: 1.45; cursor: pointer; }
+.st-check input { margin-top: 3px; flex: none; }
+
+/* Found: marked for a moment. */
+.st-found { animation: st-found 2.4s ease-out; border-radius: 10px; }
+@keyframes st-found { 0%, 35% { background: var(--accent-soft); box-shadow: 0 0 0 6px var(--accent-soft); } 100% { background: transparent; box-shadow: 0 0 0 6px transparent; } }
+
+@media (max-width: 760px) {
+  .st-line-ctl { flex-basis: 100%; }
+  .st-line-ctl > .st-input { width: 100%; }
+}
+
+/* Parts that left their section's own styles behind for Advanced. */
+.st-dictation-more .st-row > span:first-child { min-width: 120px; font-size: 13px; }
+.st-dictation-more .st-note { margin: 0; }
+.st-adv-part textarea.st-input { height: auto; padding: 8px 11px; resize: vertical; font-family: var(--font); }
+
+/* A fold inside a section (Voice's Whisper models). */
+.st-fold > summary { list-style: none; display: flex; align-items: center; gap: 6px; min-height: 32px; cursor: pointer; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.st-fold > summary::-webkit-details-marker { display: none; }
+.st-fold > summary:hover { color: var(--ink); }
+.st-fold > summary .icon { color: var(--ink-3); transition: transform .15s; }
+.st-fold[open] > summary .icon { transform: rotate(90deg); }
+.st-fold[open] > summary { margin-bottom: 4px; }
+.st-wand { display: flex; align-items: center; gap: 6px; }
+@media (max-width: 760px) {
+  .st-adv-what { white-space: normal; }
+}

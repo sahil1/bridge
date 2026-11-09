@@ -328,6 +328,8 @@ You rarely need to edit the file by hand. **Settings** (the gear in the top bar,
 | Config File | Your `config.json`, editable, checked before it's saved, with the effective settings and defaults beside it |
 | About & Updates | The version and updates, Beta Features, the tour, usage stats and crash reports, and reporting a problem |
 
+Each section shows what most people change first, with a line on each at most. The rest is under **Advanced** at the section's end: closed until you open it, then kept open or closed for that section. ⌘K finds any setting, Advanced or not, and opens Settings at it.
+
 ## What's in the app
 
 - **AI Assist**: wherever a model can help with what's open, the same button with a magic wand at the right end of the header or toolbar, and a menu of what it can do there, in plain verbs. In Mail: Draft a reply and Find a time. In the calendar: Prepare for this meeting. In a meeting: Suggest what to ask while it records, Write the summary, Clean up the transcript, Work out who said each line, Ask about this meeting and Make a deck. In Studio: a document's Rewrite, Shorten and Fix spelling and grammar for the words picked, a sheet's Write a formula and Make a chart, a deck's Write the deck and Rewrite this slide, and a PDF's Sign this. In Files: Look over this folder. On a whiteboard: Draw this and Change it. Each says which model it uses and what goes to it, and shows you what it wrote before anything changes. Handing work to a coding agent (Ask an agent, Start an agent) is separate.
