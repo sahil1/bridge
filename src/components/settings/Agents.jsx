@@ -4,10 +4,13 @@ import AgentMark from './agentMark.jsx'
 import { api } from '../../api.js'
 import SignInButton, { canSignIn } from '../SignIn.jsx'
 import { useRecheck } from '../PermissionFix.jsx'
+import { Advanced } from './Advanced.jsx'
+import { t } from '../../i18n/index.js'
 
 // Settings › Agents: every agent CLI Bridge AI knows, whether it's installed and signed in,
 // and one click to install it (in a terminal tab you can watch) or start it.
-// Their own sign-in, from here (SignIn.jsx); the others sign in the first time they open.
+// Their own sign-in, from here (SignIn.jsx); the others sign in the first time they open. Under
+// Advanced: the models the Chief of Staff can consult.
 
 export default function Agents({ onOpenAgent }) {
   const [list, setList] = useState(null)
@@ -48,15 +51,16 @@ export default function Agents({ onOpenAgent }) {
   return (
     <div className="st-sections">
       <div className="st-row between">
-        <p className="muted small">Bridge AI uses the agents' own sign-ins and subscriptions; it never sees your passwords or tokens.</p>
+        <p className="muted small">{t("Bridge AI uses the agents' own sign-ins and subscriptions; it never sees your passwords or tokens.")}</p>
         <button type="button" className="ghost-btn" onClick={load}><Icon name="refresh" size={12} /> Refresh</button>
       </div>
       {msg?.error && <p className="st-note bad"><Icon name="alert" size={13} /> {msg.error}</p>}
       {msg?.ok && <p className="st-note ok"><Icon name="terminal" size={13} /> {msg.ok} {msg.paneId && <button className="link-btn" onClick={() => onOpenAgent?.(msg.paneId)}>Open it</button>}</p>}
       {consult && consult.length > 0 && (
-        <section className="st-consult">
-          <h4>Your chief of staff can consult</h4>
-          <p className="muted small">One-off questions to other models for second opinions, live news or long documents (<code>bridge ask</code>). Most use the subscriptions you're already signed in with; others need a key under Model Providers.</p>
+        <Advanced order={10}>
+        <section className="st-consult" data-setting="consult">
+          <h4>{t('Your Chief of Staff can consult')}</h4>
+          <p className="muted small" title={t("One-off questions to other models for second opinions, live news or long documents (bridge ask). Most use the subscriptions you're already signed in with; others need a key under Model Providers.")}>{t('Other models, for second opinions, live news or long documents.')}</p>
           <div className="st-consult-list">
             {consult.map((c) => (
               <span key={c.id} className={`st-consult-chip ${c.available ? 'on' : ''}`} title={`${c.good}\n${c.available ? `Via ${c.route}` : `To set up: ${c.route}`}`}>
@@ -65,20 +69,21 @@ export default function Agents({ onOpenAgent }) {
             ))}
           </div>
         </section>
+        </Advanced>
       )}
-      <ul className="st-agents">
+      <ul className="st-agents" data-setting="agent-list">
         {sorted.map((a) => {
           const sub = subs[a.kind]
           const state = !a.installed ? { t: 'Not installed', c: '' } : sub?.signedIn === true ? { t: `Signed in${sub.method ? ` · ${sub.method}` : ''}${sub.account ? ` · ${sub.account}` : ''}`, c: 'good' } : sub?.signedIn === false ? { t: 'Installed, not signed in', c: 'warn' } : { t: 'Installed', c: 'good' }
           return (
-            <li key={a.kind} className={`st-agent-row ${a.installed ? '' : 'off'}`}>
+            <li key={a.kind} className={`st-agent-row ${a.installed ? '' : 'off'}`} data-setting={`agent-${a.kind}`}>
               <AgentMark kind={a.kind} label={a.label} size={34} />
               <div className="st-agent-text">
                 <b>{a.label}</b>
                 <span className={`st-chip ${state.c}`}>{state.t}</span>
                 {!a.installed && a.install && <code className="st-cmd" title="Install command">{a.install}</code>}
                 {a.installed && sub?.signedIn === false && sub.hint && !canSignIn(a.kind) && <span className="muted small">{sub.hint}</span>}
-                <span className="st-caps muted small">{a.caps?.chat ? 'Chat and terminal' : 'Terminal'}{a.caps?.subagents ? ' · subagents' : ''}{a.caps?.commands ? ' · slash commands' : ''}</span>
+                <span className="st-caps muted small" title={[a.caps?.subagents && 'subagents', a.caps?.commands && 'slash commands'].filter(Boolean).join(' · ') || undefined}>{a.caps?.chat ? 'Chat and terminal' : 'Terminal'}</span>
               </div>
               <div className="st-agent-acts">
                 {a.installed && sub?.signedIn === false && canSignIn(a.kind)

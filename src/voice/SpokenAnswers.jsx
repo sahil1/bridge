@@ -105,8 +105,8 @@ export default function SpokenAnswers() {
       )}
       {!c && !going && <p className="st-note"><Icon name="info" size={13} /> {nat ? t('This device has no voice to read answers with, so they stay in the chat until you pick Natural voice.') : t('This device has no voice to read answers with, so they stay in the chat. On Linux, installing eSpeak NG (espeak-ng) adds one.')}</p>}
       {nat?.have && (
-        <details className="st-adv st-natural">
-          <summary>{t('Advanced')}</summary>
+        <details className="st-fold st-natural">
+          <summary><Icon name="chevron" size={12} />{t('Natural voice options')}</summary>
           <div className="st-row"><span>{t('Natural voice')}</span>
             <select className="st-input" value={String(Number(p.natural) || 0)} onChange={(e) => pick({ natural: Number(e.target.value) })} aria-label={t('Natural voice')}>
               {Array.from({ length: nat.voices || 10 }, (_, i) => <option key={i} value={String(i)}>{i < 5 ? t('Female {n}', { n: i + 1 }) : t('Male {n}', { n: i - 4 })}</option>)}

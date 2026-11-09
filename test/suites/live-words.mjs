@@ -12,7 +12,7 @@
 //   for that dictation, the words come when you let go, and Settings says so once.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, startSpeechModels, checks, until, sleep, browser, page, shot, noServiceWorker, TEST } from '../lib/harness.mjs'
+import { startKit, startSpeechModels, checks, until, sleep, browser, page, shot, noServiceWorker, TEST, advanced } from '../lib/harness.mjs'
 
 const { ok, done } = checks('live-words')
 const models = await startSpeechModels('live-words')
@@ -172,11 +172,12 @@ try {
   {
     const { ctx, p } = await page(b, kit.url, { before })
     await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
-    await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'voice' } })))
-    const sec = p.locator('.st-dictation')
-    await sec.waitFor({ timeout: 10000 })
+    // Straight to it, as ⌘K's Settings entry goes: it's under Voice's Advanced, opened to show it.
+    await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'live-words' } })))
+    const sec = p.locator('.modal.settings')
+    await sec.locator('.st-dictation').waitFor({ timeout: 10000 })
     const box = sec.locator('label.st-check', { hasText: 'Show the words as you talk' })
-    ok(!!(await until(() => box.isVisible(), 5000, 100)) && await box.locator('input').isChecked(), 'Settings › Voice › Dictation: "Show the words as you talk", on')
+    ok(!!(await until(() => box.isVisible(), 5000, 100)) && await box.locator('input').isChecked(), 'Settings › Voice › Advanced: "Show the words as you talk", on')
     await box.locator('input').click()
     ok(!!(await until(async () => (await kit.api('/dictation/live')).why === 'off', 5000, 100)), 'turned off: kept')
     await ctx.close()
@@ -206,8 +207,8 @@ try {
     const { ctx, p } = await page(b, kit.url, { before })
     await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
     await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'voice' } })))
-    const sec = p.locator('.st-dictation')
-    await sec.waitFor({ timeout: 10000 })
+    await p.locator('.st-dictation').waitFor({ timeout: 10000 })
+    const sec = await advanced(p)
     ok(!!(await until(async () => /too slowly to show the words as you talk/.test(await sec.innerText()), 5000, 100)) && await sec.locator('label.st-check', { hasText: 'Show the words as you talk' }).count() === 0, 'Settings says so once, with no switch that can\'t work here', await sec.innerText())
     await ctx.close()
   }

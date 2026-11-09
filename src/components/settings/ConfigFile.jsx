@@ -3,9 +3,11 @@ import Icon from '../Icon.jsx'
 import { api, settingsChanged } from '../../api.js'
 import { SaveNote } from './General.jsx'
 import { useBusy } from '../../busy.js'
+import { Advanced } from './Advanced.jsx'
+import { t } from '../../i18n/index.js'
 
-// Settings › Config file: your config.json as text, checked before it's saved, plus the full
-// effective settings (defaults merged with yours) and the defaults, for reference.
+// Settings › Config file: your config.json as text, checked before it's saved; under Advanced, the
+// full effective settings (defaults merged with yours) and the defaults, for reference.
 export default function ConfigFile() {
   const [s, setS] = useState(null)
   const [text, setText] = useState('')
@@ -24,12 +26,12 @@ export default function ConfigFile() {
   }
 
   return (
-    <div className="st-sections">
+    <div className="st-sections" data-setting="config-file">
       <div className="st-row between">
         <code className="st-path" title={s.file}>{s.file}</code>
         <button type="button" className="ghost-btn" onClick={() => navigator.clipboard?.writeText(s.file).catch(() => {})}><Icon name="copy" size={12} /> Copy path</button>
       </div>
-      <p className="muted small">Only what you set goes here; everything else comes from the defaults. Most changes apply right away; {s.restartKeys.join(', ')} apply after a restart. API keys don't belong here: add them under Model Providers.</p>
+      <p className="muted small" title={t('Only what you set goes here; everything else comes from the defaults. Most changes apply right away; {keys} apply after a restart.', { keys: s.restartKeys.join(', ') })}>{t("Only what you set; the rest comes from the defaults. API keys don't belong here: add them under Model Providers.")}</p>
       <textarea className="st-code" value={text} onChange={(e) => { setText(e.target.value); setNote(null) }} spellCheck={false} rows={16} aria-label="config.json" />
       <div className="st-row between">
         <span className={parseError ? 'error-text' : 'muted small'}>{parseError ? `Not valid yet: ${parseError}` : dirty ? 'Valid JSON, not saved' : 'Saved'}</span>
@@ -39,11 +41,16 @@ export default function ConfigFile() {
         </span>
       </div>
       <SaveNote note={note} />
-      <div className="seg ap-seg">
-        <button type="button" className={view === 'effective' ? 'on' : ''} onClick={() => setView(view === 'effective' ? null : 'effective')}>Effective settings</button>
-        <button type="button" className={view === 'defaults' ? 'on' : ''} onClick={() => setView(view === 'defaults' ? null : 'defaults')}>Defaults</button>
-      </div>
-      {view && <pre className="st-code ro">{JSON.stringify(view === 'effective' ? s.effective : s.defaults, null, 2)}</pre>}
+      <Advanced order={10}>
+        <section className="st-sec" data-setting="config-effective">
+          <h4>{t('Effective Settings and Defaults')}</h4>
+          <div className="seg ap-seg">
+            <button type="button" className={view === 'effective' ? 'on' : ''} onClick={() => setView(view === 'effective' ? null : 'effective')}>Effective settings</button>
+            <button type="button" className={view === 'defaults' ? 'on' : ''} onClick={() => setView(view === 'defaults' ? null : 'defaults')}>Defaults</button>
+          </div>
+          {view && <pre className="st-code ro">{JSON.stringify(view === 'effective' ? s.effective : s.defaults, null, 2)}</pre>}
+        </section>
+      </Advanced>
     </div>
   )
 }

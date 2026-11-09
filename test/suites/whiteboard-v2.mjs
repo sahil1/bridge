@@ -25,7 +25,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import zlib from 'node:zlib'
 import { spawnSync } from 'node:child_process'
-import { startKit, startModel, checks, until, sleep, browser, page, shot, ROOT } from '../lib/harness.mjs'
+import { startKit, startModel, checks, until, sleep, browser, page, shot, ROOT, advanced } from '../lib/harness.mjs'
 
 const { ok, done } = checks('whiteboard-v2')
 // AI Assist, at the right end of a board's header (or a diagram file's bar), and one of its verbs:
@@ -530,7 +530,7 @@ try {
   })
 
   await part('the credit in About', async () => {
-    await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'about' } })))
+    await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'license' } })))
     const credit = p.getByText('Whiteboards are drawn with Excalidraw (MIT License).').first()
     ok(await until(() => credit.isVisible(), 8000) && await p.locator('a[href$="/blob/main/NOTICE"]').count(), 'Settings › About & Updates credits Excalidraw, beside the link to NOTICE')
   })

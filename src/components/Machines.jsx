@@ -472,12 +472,12 @@ export function MachinesSettings({ embedded = false, focus = false }) {
   const strays = data.strays || []
   return (
     <Wrap {...(embedded ? {} : { className: 'st-sections' })}>
-      <section className="st-sec" id="st-machines" ref={setTop}>
+      <section className="st-sec" id="st-machines" data-setting="machines" ref={setTop}>
         <h4>{t('Your Devices')}</h4>
         {machineId && (readOnly
           ? <p className="small">{t("These are the links of {name}, the device this window runs on. A window showing another device can't change them: link, rename and unlink in a window showing {name}.", { name: data.here.name })} <button type="button" className="ghost-btn small" onClick={() => goMachine(null)}>{t('Go to {name}', { name: data.here.name })}</button></p>
           : <p className="small">{t('These are the links of {name}, the device this window runs on.', { name: data.here.name })}</p>)}
-        <p className="muted small">{t("Link your other computers running Bridge AI (Mac, Windows or Linux) and switch between them from the top bar, with each one's agents in the sidebar. A phone paired with any of them reaches them all. Each device is reached through its own relay, end-to-end encrypted.")}</p>
+        <p className="muted small" title={t("Link your other computers running Bridge AI (Mac, Windows or Linux) and switch between them from the top bar, with each one's agents in the sidebar. A phone paired with any of them reaches them all. Each device is reached through its own relay, end-to-end encrypted.")}>{t('Your other computers running Bridge AI, each reached through its own relay, end-to-end encrypted.')}</p>
         <div className="mch-list">
           <div className="mch-row here">
             <span className="mc-dot on" />
@@ -554,9 +554,9 @@ export function MachinesSettings({ embedded = false, focus = false }) {
         </section>
       )}
 
-      {!readOnly && <section className="st-sec">
+      {!readOnly && <section className="st-sec" data-setting="link-device">
         <h4>{t('Link a device')}</h4>
-        <p className="muted small">{t('On the other device, open Settings › Devices and choose Pair a device. Paste its link here, or type its address and code. Its address alone asks instead, and waits for you to allow it there.')}</p>
+        <p className="muted small" title={t('On the other device, open Settings › Devices and choose Pair a device. Paste its link here, or type its address and code. Its address alone asks instead, and waits for you to allow it there.')}>{t('On the other device, choose Pair a device in Settings › Devices, then paste its link here.')}</p>
         <form className="mch-add" onSubmit={add}>
           <input className="st-input" value={link} onChange={(e) => setLink(e.target.value)} placeholder={t('Link, or address and code')} aria-label={t("The other device's link")} />
           <button type="submit" className="btn primary" disabled={!link.trim() || !!busy}>{busy === 'add' ? t('Linking…') : t('Link')}</button>

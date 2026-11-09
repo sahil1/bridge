@@ -14,7 +14,7 @@
 // a phone: nothing past its edge, every target whole, fields iOS doesn't zoom into.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, startRelay, startAccounts, checks, until, browser, page, shot, phoneFaults } from '../lib/harness.mjs'
+import { startKit, startRelay, startAccounts, checks, until, browser, page, shot, phoneFaults, advanced } from '../lib/harness.mjs'
 
 const { ok, done } = checks('account-ui')
 const kits = []
@@ -203,7 +203,9 @@ try {
   ok(!Object.keys(signFaults).length, 'signing in on a phone fits too, with a field iOS doesn\'t zoom into', signFaults)
   await shot(phF.p, `${tag}account-signin-phone`)
   await phF.ctx.close()
-  await d.p.locator('.acct-leave button', { hasText: 'Delete account…' }).click()
+  // Under Account's Advanced.
+  await advanced(d.p)
+  await d.p.locator('.acct-del button', { hasText: 'Delete account…' }).click()
   const del = d.p.locator('.acct-delete')
   await del.locator('input').fill('someone@example.com')
   ok(await del.locator('button', { hasText: 'Delete account' }).isDisabled(), 'Delete account stays off until the account\'s email is typed')

@@ -704,7 +704,8 @@ try {
     await p.keyboard.press(process.platform === 'darwin' ? 'Meta+End' : 'Control+End')
     await p.keyboard.type(' More.')
     ok(!!(await until(async () => same(await busy(), ['studio']), 5000)), 'Studio with an unsaved change: busy, the document', await busy())
-    await p.locator('.pane-head button', { hasText: 'Save' }).click()
+    // A document saves itself, with no Save in its header; ⌘S saves it now.
+    await p.keyboard.press(process.platform === 'darwin' ? 'Meta+s' : 'Control+s')
     ok(!!(await until(async () => same(await busy(), []), 8000)), 'saved: nothing again', await busy())
     const box = p.locator('.composer textarea:visible').first()
     await until(async () => {

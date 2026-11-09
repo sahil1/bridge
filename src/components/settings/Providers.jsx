@@ -1,5 +1,7 @@
 // Settings › Providers: which agents are signed in, and the model providers Bridge AI can hand
-// keys for. Cards in a grid by group; clicking one opens its editor in place.
+// keys for. Cards in a grid by group; clicking one opens its editor in place. The model labs and
+// the models on this computer first; under Advanced, cloud agents' keys, the clouds, hosted open
+// models, more models and speech to text services.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, refetch, settingsChanged } from '../../api.js'
 import Icon from '../Icon.jsx'
@@ -9,7 +11,11 @@ import { addAccount } from '../AddAccount.jsx'
 import ProviderIcon, { AgentIcon } from './ProviderIcon.jsx'
 import { GROUPS, AGENT_LABEL, providerChip, agentChip } from './providerCatalog.js'
 import CloudKeys from './CloudKeys.jsx'
+import { Advanced } from './Advanced.jsx'
 import './providers.css'
+
+// The groups that are under Advanced, and where.
+const LATER = { clouds: 40, hosted: 50, speech: 60 }
 
 function Chip({ tone, children, title }) {
   return <span className={`pv-chip pv-chip-${tone}`} title={title}>{children}</span>
@@ -143,8 +149,7 @@ function AccountRow({ a, kind, auto, only, slots, others, onChange, onUp, onDown
   )
 }
 
-function AccountsSection({ focus, ready }) {
-  const ref = useRef(null)
+function AccountsSection() {
   const [kinds, setKinds] = useState(null)
   const [err, setErr] = useState(null)
   // Only the newest check counts: one that started before a Remove can answer after it.
@@ -162,9 +167,6 @@ function AccountsSection({ focus, ready }) {
     window.addEventListener('bridge-accounts-changed', f)
     return () => { window.removeEventListener('focus', f); window.removeEventListener('bridge-accounts-changed', f) }
   }, [load])
-  // Opened from Add account: scroll here once this list and the agents above it are in.
-  const shown = !!kinds && ready
-  useEffect(() => { if (focus === 'accounts' && shown) ref.current?.scrollIntoView({ block: 'start', behavior: 'smooth' }) }, [focus, shown])
   const [showErr, setShowErr] = useState(null)
   const showUsual = async (kind) => {
     setShowErr(null)
@@ -181,10 +183,10 @@ function AccountsSection({ focus, ready }) {
   const list = (kinds || []).filter((k) => k.installed)
   if (!list.length) return null
   return (
-    <section className="pv-sec" id="pv-accounts" ref={ref}>
+    <section className="pv-sec" id="pv-accounts" data-setting="accounts">
       <div className="pv-head">
         <h4>{t('Accounts')}</h4>
-        <span className="muted small">{t('Your sign-ins for each agent, each with its own name. New agents start on your default (the star), or with Auto on, on the one with the most left.')}</span>
+        <span className="muted small">{t('New agents start on the default (the star), or with Auto, on the one with the most left.')}</span>
         <button type="button" className="ghost-btn pv-head-btn" onClick={() => load(true)} aria-label={t('Check accounts again')}><Icon name="refresh" size={12} />{t('Recheck')}</button>
       </div>
       {list.map((k) => (
@@ -202,7 +204,7 @@ function AccountsSection({ focus, ready }) {
           {showErr && <p className="pv-msg bad" role="status"><Icon name="alert" size={12} />{showErr}</p>}
         </div>
       ))}
-      <p className="pv-note">{t("Sign in uses whichever account your browser is signed in to, so switch accounts there first (or open the link it prints in a private window). Each account keeps only its own login; settings, skills and session history are shared with your usual setup, so they share one cost and token history, which Usage splits by account where it can tell which one ran what. Removing your usual login only takes it off this list: the agent stays signed in to it for the terminal. Agents already running keep the account they started with; the model chip in an agent's message box can continue its conversation on another account.")}</p>
+      <p className="pv-note" title={t("Sign in uses whichever account your browser is signed in to, so switch accounts there first (or open the link it prints in a private window). Each account keeps only its own login; settings, skills and session history are shared with your usual setup, so they share one cost and token history, which Usage splits by account where it can tell which one ran what. Removing your usual login only takes it off this list: the agent stays signed in to it for the terminal. Agents already running keep the account they started with; the model chip in an agent's message box can continue its conversation on another account.")}>{t('Sign in uses the account your browser is signed in to, so switch there first.')}</p>
     </section>
   )
 }
@@ -371,10 +373,11 @@ function BuiltinModel({ onChange }) {
         </span>
       </div>
       {going && <span className="vs-bar" role="progressbar" aria-valuenow={dl.percent} aria-valuemin={0} aria-valuemax={100} aria-label={t('Downloading {model}', { model: s.model.label })}><span style={{ width: `${dl.percent}%` }} /></span>}
-      <p className="muted small">{t('Free, private and works offline. Good at rewriting text, Edit by voice, questions about a meeting and notes for short meetings; weaker than your cloud model at long meetings and diagrams.')}</p>
-      <p className="muted small">{s.have
+      <p className="muted small" title={`${t('Free, private and works offline. Good at rewriting text, Edit by voice, questions about a meeting and notes for short meetings; weaker than your cloud model at long meetings and diagrams.')} ${s.have
         ? t('In every model list, marked on this computer. Bridge AI picks it by itself only for Edit by voice, or when there\'s no other model: Claude and your other models come first.')
-        : t('Downloaded once from Hugging Face, only when you click Download. What you give it never leaves this computer.')}</p>
+        : t('Downloaded once from Hugging Face, only when you click Download. What you give it never leaves this computer.')}`}>{s.have
+        ? t('In every model list; used by itself only when there\'s no other. What you give it never leaves this computer.')
+        : t('Free and offline, downloaded only when you click Download. What you give it never leaves this computer.')}</p>
       {dl?.error && <p className="pv-note pv-err">{dl.error}</p>}
       {err && <p className="pv-note pv-err">{err}</p>}
     </div>
@@ -443,7 +446,7 @@ function Card({ p, open, onToggle, children }) {
   )
 }
 
-export default function Providers({ focus }) {
+export default function Providers() {
   const [providers, setProviders] = useState(null)
   const [subs, setSubs] = useState(null)
   const [err, setErr] = useState(null)
@@ -473,14 +476,13 @@ export default function Providers({ focus }) {
 
   return (
     <div className="pv">
-      <p className="pv-intro muted small">
-        Sign in to an agent with its own subscription, or add API keys for the providers below. Keys are stored
-        on this computer in your Bridge AI data folder (readable only by you) and handed to the agents Bridge AI starts.
+      <p className="pv-intro muted small" title={t('Sign in to an agent with its own subscription, or add API keys for the providers below. Keys are stored on this computer in your Bridge AI data folder (readable only by you) and handed to the agents Bridge AI starts.')}>
+        {t('Keys stay on this computer, readable only by you, and go to the agents Bridge AI starts.')}
       </p>
 
       <AgentsStrip subs={subs} error={subsErr} onRefresh={() => loadSubs(true)} refreshing={refreshing} />
-      <AccountsSection focus={focus} ready={!!subs || !!subsErr} />
-      <CloudKeys focus={focus} />
+      <AccountsSection />
+      <Advanced order={30}><CloudKeys /></Advanced>
 
       {err && <p className="pv-note pv-err">Couldn't load providers: {err} <button type="button" className="ghost-btn" onClick={loadProviders}>Retry</button></p>}
       {!providers && !err && <div className="pv-grid" aria-busy="true">{[0, 1, 2, 3, 4, 5].map((i) => <div key={i} className="pv-card pv-skel-card" />)}</div>}
@@ -491,9 +493,9 @@ export default function Providers({ focus }) {
           {GROUPS.map((g) => {
             const items = providers.filter((p) => p.group === g.id)
             if (!items.length) return null
-            return (
-              <section key={g.id} className="pv-sec">
-                <h4 className="pv-group">{g.name}</h4>
+            const group = (
+              <section key={g.id} className="pv-sec" data-setting={`providers-${g.id}`}>
+                <h4 className="pv-group">{t(g.name)}</h4>
                 {g.id === 'local' && <BuiltinModel onChange={() => setLocalStamp((n) => n + 1)} />}
                 <div className="pv-grid">
                   {items.map((p) => (
@@ -503,15 +505,19 @@ export default function Providers({ focus }) {
                   ))}
                 </div>
                 {g.id === 'local' && <LocalModels stamp={`${items.filter((p) => p.status === 'connected').map((p) => p.id).join()}:${localStamp}`} />}
-                {g.id === 'labs' && more != null && (
-                  <div className="pv-extra">
-                    <label className="ph-check small"><input type="checkbox" checked={more} onChange={(e) => showMore(e.target.checked)} /><span>Show more models (Qwen Code, DeepSeek, Kimi, GLM)</span></label>
-                    <p className="muted small">{more ? 'They show as agents, providers and models you can pick.' : 'Off: they\'re left out of the agents, providers and models you can pick, and keys saved for them aren\'t used.'}</p>
-                  </div>
-                )}
               </section>
             )
+            return LATER[g.id] ? <Advanced key={g.id} order={LATER[g.id]}>{group}</Advanced> : group
           })}
+          {more != null && (
+            <Advanced order={55}>
+              <section className="pv-sec pv-extra" data-setting="more-models">
+                <h4 className="pv-group">{t('More Models')}</h4>
+                <label className="ph-check small"><input type="checkbox" checked={more} onChange={(e) => showMore(e.target.checked)} /><span>{t('Show more models (Qwen Code, DeepSeek, Kimi, GLM)')}</span></label>
+                <p className="muted small">{more ? t('They show as agents, providers and models you can pick.') : t('Off: they\'re left out, and keys saved for them aren\'t used.')}</p>
+              </section>
+            </Advanced>
+          )}
         </>
       )}
     </div>

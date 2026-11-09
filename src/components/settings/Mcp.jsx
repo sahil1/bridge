@@ -334,7 +334,7 @@ export default function Mcp() {
   return (
     <div className="mcp">
       <div className="mcp-intro">
-        <p className="muted small">Tools your agents can call: browsers, GitHub, docs search, databases and more. Servers added here go to each agent's own config, for all projects.</p>
+        <p className="muted small" title="Tools your agents can call: browsers, GitHub, docs search, databases and more. Servers added here go to each agent's own config, for all projects.">Tools your agents can call, added to each agent's own config for all projects.</p>
         {!adding && <button type="button" className="btn small primary" onClick={() => setAdding({ start: null })} disabled={!data}><Icon name="plus" size={13} />Add server</button>}
       </div>
 
