@@ -13,7 +13,8 @@ import { t } from '../i18n/index.js'
 export const RATE = 16000
 
 // Posts { pcm } about once a second (an ArrayBuffer of Int16 samples), { level } (the loudest since
-// the last, 0 to 1) about ten times a second, and { flushed } after a 'flush' has sent what it had.
+// the last, 0 to 1) about ten times a second, and { flushed } after a 'flush' has sent what it had
+// (a { flush: name } is answered { flushed: name }).
 export const WORKLET = `
 class Pcm extends AudioWorkletProcessor {
   constructor() {
@@ -27,7 +28,7 @@ class Pcm extends AudioWorkletProcessor {
     this.acc = 0
     this.cnt = 0
     this.pos = 0
-    this.port.onmessage = (e) => { if (e.data === 'flush') { this.send(); this.port.postMessage({ flushed: true }) } }
+    this.port.onmessage = (e) => { const f = e.data === 'flush' || e.data?.flush; if (f) { this.send(); this.port.postMessage({ flushed: f }) } }
   }
   send() {
     if (!this.n) return
@@ -85,6 +86,8 @@ export const microphone = async () => {
   return navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } })
 }
 
+const FLUSH_MS = 5000
+
 // Records a stream until stop() (the samples, an Int16Array) or cancel(). onLevel(0..1) for a meter.
 // onPcm(samples): each piece as it comes, every `every` ms (live words: dictation/controller.js).
 // sounding: settles once the sound starts coming, which can be a while after this returns (the
@@ -108,7 +111,7 @@ export async function startPcm(stream, { onLevel, onPcm, every = 0 } = {}) {
   node.port.onmessage = (e) => {
     if (e.data.level != null) { heard(); onLevel?.(e.data.level) }
     else if (e.data.pcm) { const c = new Int16Array(e.data.pcm); chunks.push(c); onPcm?.(c) }
-    else if (e.data.flushed) flushed?.()
+    else if (e.data.flushed) flushed?.(e.data.flushed)
   }
   input.connect(node)
   if (ctx.state !== 'running') ctx.resume().catch(() => {})
@@ -128,8 +131,13 @@ export async function startPcm(stream, { onLevel, onPcm, every = 0 } = {}) {
     get seconds() { return (performance.now() - started) / 1000 },
     async stop() {
       if (done) return new Int16Array(0)
-      // What the worklet still holds, then everything in order.
-      await new Promise((resolve) => { flushed = resolve; node.port.postMessage('flush'); setTimeout(resolve, 600) })
+      // What the worklet still holds (up to a second), then everything in order: once it answers
+      // this flush, not live words' last one, which can come just after. It answers at once,
+      // suspended or not, but a busy page takes the answer late, and WebKit runs a timer that's due
+      // ahead of an answer that's waiting: a short wait lost the end of what was said, or all of a
+      // short one ("Recording too short"). So the wait is only for a worklet that's gone.
+      clearInterval(tick)
+      await new Promise((resolve) => { flushed = (f) => { if (f === 'stop') resolve() }; node.port.postMessage({ flush: 'stop' }); setTimeout(resolve, FLUSH_MS) })
       end()
       const out = new Int16Array(chunks.reduce((n, c) => n + c.length, 0))
       let o = 0

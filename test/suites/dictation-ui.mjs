@@ -15,6 +15,7 @@
 //   (Wayland), not offered, and taken; changes go to the app; its key handed to the page in front.
 //   The desktop app's dictation window (?dictate=1): the level while you talk, then the text, Send to
 //   the agent you last looked at or one picked, Copy, Esc, and a press from before it was ready;
+//   the mic's sound coming late; a let go with the page busy for a moment (all that was said kept);
 //   for a window of Bridge AI's showing another of your devices, the words into that window's page
 //   (or left on the card when it had nowhere to put them, saying so); the agent you looked at last,
 //   kept by whichever window you looked at it in, or said to be gone with nobody picked;
@@ -842,6 +843,23 @@ try {
     said.push('held from when it listened')
     await key(h, 'down'); await listens(h); await sleep(1300); await key(h, 'up')
     ok(!!(await until(async () => (await h.locator('.hud-text').innerText().catch(() => '')) === 'Held from when it listened.', 8000, 100)) && real(he).length === 0, 'and held from when it listens: the words, not "Recording too short"', [await h.locator('.hud').innerText().catch(() => ''), he])
+    await hc.close()
+  }
+  {
+    // The page busy for a moment as you let go (on a busy computer): what was said, all of it, not
+    // "Recording too short" or its end cut off.
+    const { ctx: hc, p: h, errors: he } = await hudPage()
+    await h.waitForSelector('.hud', { timeout: 10000 })
+    said.push('said as it got busy')
+    await key(h, 'down'); await listens(h); await sleep(800)
+    await h.evaluate(() => {
+      window.dispatchEvent(new CustomEvent('bridge-dictate-key', { detail: { type: 'up', at: Date.now() } }))
+      setTimeout(() => { const end = performance.now() + 900; while (performance.now() < end) { /* busy */ } })
+    })
+    const wav = await until(() => h.evaluate(() => window.__wavs.at(-1)), 8000, 100)
+    ok(!!(await until(async () => (await h.locator('.hud-text').innerText().catch(() => '')) === 'Said as it got busy.', 8000, 100)) && wav?.length > 44 + 16000 * 0.6 * 2 && real(he).length === 0, 'the page busy as you let go: the words, all of them (not "Recording too short", nor the end cut off)', [await h.locator('.hud').innerText().catch(() => ''), wav?.length, he])
+    // Never heard (when that fails): not left for the next dictation to be answered with.
+    said.splice(0)
     await hc.close()
   }
 
