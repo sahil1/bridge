@@ -116,34 +116,49 @@ const minutes = (s) => (s <= 60 ? 'a minute' : `${Math.ceil(s / 60)} minutes`)
 
 // ---------- Signing ----------
 // SIGNING_KEY is the private key as PKCS #8 PEM (account/key.js makes it); its public half, which
-// the relay and Bridge AI hold, is worked out from it here.
-let keys = null // [the secret, { priv, pub, x }]
+// the relay and Bridge AI hold, is worked out from it here. Each token says which key signed it (kid,
+// keyId of its public half), so the key can be changed without anyone signing in again (README.md,
+// Changing the signing key): OLD_KEYS, the public halves of keys signed with before (comma
+// separated), are still taken for the tokens they signed until those end. A token without a kid,
+// from before tokens had one, is checked with SIGNING_KEY's.
+export const keyId = async (x) => b64u(await crypto.subtle.digest('SHA-256', unb64(x))).slice(0, 8)
+let keys = null // [the settings, { priv, pub, x, kid, all: kid -> public key }]
 async function keysOf(env) {
   const pem = String(env.SIGNING_KEY || '')
-  if (keys?.[0] === pem) return keys[1]
+  const old = String(env.OLD_KEYS || '')
+  if (keys?.[0] === `${pem}\n${old}`) return keys[1]
   if (!pem) throw new Error('SIGNING_KEY isn\'t set (README.md, Going live)')
   const der = Uint8Array.from(atob(pem.replace(/-----[^-]+-----/g, '').replace(/\s+/g, '')), (c) => c.charCodeAt(0))
   const priv = await crypto.subtle.importKey('pkcs8', der, { name: 'Ed25519' }, true, ['sign'])
   const { x } = await crypto.subtle.exportKey('jwk', priv)
   const pub = await crypto.subtle.importKey('jwk', { kty: 'OKP', crv: 'Ed25519', x }, { name: 'Ed25519' }, false, ['verify'])
-  keys = [pem, { priv, pub, x }]
+  const kid = await keyId(x)
+  const all = new Map([[kid, pub]])
+  for (const o of old.split(',').map((s) => s.trim()).filter(Boolean)) {
+    try { all.set(await keyId(o), await crypto.subtle.importKey('raw', unb64(o), { name: 'Ed25519' }, false, ['verify'])) } catch { /* not a key: left out */ }
+  }
+  keys = [`${pem}\n${old}`, { priv, pub, x, kid, all }]
   return keys[1]
 }
 const signText = async (env, text) => b64u(await crypto.subtle.sign({ name: 'Ed25519' }, (await keysOf(env)).priv, enc.encode(text)))
-// A token: base64url(JSON payload) + "." + base64url(its signature).
+// A token: base64url(JSON payload, with the kid of the key that signs it) + "." + base64url(its
+// signature).
 async function sign(env, payload) {
-  const text = b64u(enc.encode(JSON.stringify(payload)))
+  const text = b64u(enc.encode(JSON.stringify({ ...payload, kid: (await keysOf(env)).kid })))
   return `${text}.${await signText(env, text)}`
 }
-// A token's payload when it's signed here, of this kind, and not past its end; else null.
+// A token's payload when it's signed here (by the key its kid names), of this kind, and not past its
+// end; else null.
 export async function readToken(env, token, kind) {
   const m = /^([A-Za-z0-9_-]{10,800})\.([A-Za-z0-9_-]{86})$/.exec(String(token || ''))
   if (!m) return null
-  let good = false
-  try { good = await crypto.subtle.verify({ name: 'Ed25519' }, (await keysOf(env)).pub, unb64(m[2]), enc.encode(m[1])) } catch { good = false }
-  if (!good) return null
   let p = null
   try { p = JSON.parse(new TextDecoder().decode(unb64(m[1]))) } catch { return null }
+  const k = await keysOf(env)
+  const key = p?.kid == null ? k.pub : k.all.get(String(p.kid))
+  let good = false
+  try { good = !!key && await crypto.subtle.verify({ name: 'Ed25519' }, key, unb64(m[2]), enc.encode(m[1])) } catch { good = false }
+  if (!good) return null
   return p?.k === kind && ID.test(p.a) && ID.test(p.d) && Number.isInteger(p.exp) && p.exp * 1000 > Date.now() ? p : null
 }
 const seconds = (t) => Math.floor(t / 1000)
@@ -473,8 +488,9 @@ async function v1(req, env, url) {
     const { acct, dev, p: tok, hash } = await signedIn(req, env)
     const now = Date.now()
     const ok = acct.status === 'active'
-    // Past half its life, a new device token; the one this came with works until the new one is used.
-    const renew = ok && seconds(now) > tok.iat + (DEVICE_DAYS * 86400) / 2 ? await deviceToken(env, acct.id, dev.id, now) : null
+    // Past half its life, or signed with a key before this one (or before tokens said which), a new
+    // device token; the one this came with works until the new one is used.
+    const renew = ok && (seconds(now) > tok.iat + (DEVICE_DAYS * 86400) / 2 || tok.kid !== (await keysOf(env)).kid) ? await deviceToken(env, acct.id, dev.id, now) : null
     await db.batch([
       db.prepare('UPDATE devices SET last_seen = ? WHERE id = ?').bind(now, dev.id),
       ...(renew ? [db.prepare('UPDATE devices SET token_hash = ?, prev_hash = ? WHERE id = ?').bind(await sha(renew), hash, dev.id)] : []),

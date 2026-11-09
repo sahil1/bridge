@@ -76,6 +76,7 @@ All in `[vars]` of [wrangler.toml](wrangler.toml).
 | `ADMINS` | | Emails (comma separated) that get a short note for each request. Empty: requests are only in the admin view. |
 | `SITE` | `https://boldbridge.ai` | The website, whose form may ask for Early Access or the relay (`/v1/request-public`, the only route open to another origin). |
 | `RELAY_MAX_ACCOUNTS` | `500` | The relay's `MAX_ACCOUNTS`, the same number: approving the relay for one account more is refused as full. `GET /admin/stats` says it as `relayMax`. |
+| `OLD_KEYS` | | The public halves of keys the service signed with before, comma separated: the device tokens they signed still work until they end, and `GET /v1/me` replaces each with one the new key signs. Empty but while the key is being changed (Changing the signing key). |
 
 One secret, set with `npx wrangler@4.149.0 secret put SIGNING_KEY -c account/wrangler.toml` and never
 in the file: `SIGNING_KEY`, the Ed25519 private key every token is signed with, as PKCS #8 PEM.
@@ -144,6 +145,29 @@ reports each account's use every 5 minutes while it's used: at most 4.3 million 
 accounts, through the service binding, which isn't billed as requests. Email Service includes 3,000
 emails a month, then $0.35 a thousand: codes are at most 5 an hour per email, so a flood of
 sign-ins costs little, and the WAF rule above stops one network sending it.
+
+## Changing the signing key
+
+Each token says which key signed it (`kid`, API.md, Tokens), and everything that checks one takes a
+list, so the key can be changed without anyone signing in again: if it may have been seen, or now
+and then.
+
+1. **A new key**, kept beside the old: `node account/key.js --key ~/.config/bridge-ai/accounts-key-2.pem`
+   (and a copy in a password manager), and its public half: `node account/key.js --key
+   ~/.config/bridge-ai/accounts-key-2.pem --public`.
+2. **Everything that checks tokens takes both**, the old key first: the relay's
+   `ACCOUNTS_PUBLIC_KEY = "<old>,<new>"` (deploy it, HOSTED.md), and in Bridge AI,
+   `ACCOUNTS_PUBLIC_KEY = '<old>,<new>'` in server/account.js, in a release. Wait until most
+   computers have that release (the Early Access codes the new key signs are checked there).
+3. **The service signs with the new one**: `OLD_KEYS = "<old>"` in wrangler.toml and deploy, then
+   `npx wrangler@4.149.0 secret put SIGNING_KEY -c account/wrangler.toml < ~/.config/bridge-ai/accounts-key-2.pem`.
+   From then on each device's next `GET /v1/me` (within 6 hours, or when Settings › Account opens)
+   gives it a device token, relay token and Early Access code the new key signed.
+4. **The old one goes** once what it signed has ended: relay tokens after 7 days, Early Access codes
+   after 30, device tokens after 180 (a device not seen for that long signs in again). Take it out of
+   `OLD_KEYS`, the relay's `ACCOUNTS_PUBLIC_KEY` and server/account.js's, and delete its file. If it
+   was taken out because it may have been seen, don't wait: take it out of all three at once, and
+   devices that haven't asked since sign in again.
 
 ## Running your own
 

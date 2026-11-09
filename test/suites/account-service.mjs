@@ -63,6 +63,9 @@ const service = (more = {}) => {
   return { env, mail, call, codeFor, device, signIn, rows }
 }
 const payload = (t) => JSON.parse(Buffer.from(String(t).split('.')[0], 'base64url').toString('utf8'))
+// A key's id, as the service puts it in each token (keyId), and a token signed with key.
+const kidOf = (x) => crypto.createHash('sha256').update(Buffer.from(x, 'base64url')).digest().toString('base64url').slice(0, 8)
+const signed = (p, key) => { const text = Buffer.from(JSON.stringify(p)).toString('base64url'); return `${text}.${crypto.sign(null, Buffer.from(text), key).toString('base64url')}` }
 const verifies = (t) => { const [p, s] = String(t).split('.'); return crypto.verify(null, Buffer.from(p), crypto.createPublicKey({ key: { kty: 'OKP', crv: 'Ed25519', x: PUBLIC }, format: 'jwk' }), Buffer.from(s, 'base64url')) }
 
 try {
@@ -186,7 +189,7 @@ try {
     const a = await s.signIn('sam@example.com', 'Studio')
     ok(/^[a-z0-9]{12}$/.test(a.account?.id) && a.account.email === 'sam@example.com' && a.account.tester === 'none' && a.account.relay === 'none' && a.account.status === 'active' && a.device?.name === 'Studio' && a.device.kind === 'computer' && a.device.thisOne, 'the first sign-in makes the account: its id, email, flags and status, and this device', a)
     const t = payload(a.deviceToken)
-    ok(verifies(a.deviceToken) && t.k === 'device' && t.a === a.account.id && t.d === a.device.id && t.exp - t.iat === 180 * 86400, 'a device token: signed with the key, the account and device, 180 days', t)
+    ok(verifies(a.deviceToken) && t.k === 'device' && t.a === a.account.id && t.d === a.device.id && t.exp - t.iat === 180 * 86400 && t.kid === kidOf(PUBLIC), 'a device token: signed with the key, saying which (kid), the account and device, 180 days', t)
     const notices = () => s.mail.sent.filter((m) => m.to === 'sam@example.com' && /new sign-in/.test(m.subject))
     ok(!notices().length, 'the sign-in that makes the account emails no notice of itself')
     const again = await s.signIn('SAM@example.com ', 'Desk')
@@ -225,6 +228,31 @@ try {
     ok(rm.status === 200 && !rm.j.devices.some((d) => d.name === 'Air') && rm.j.devices.find((d) => d.thisOne)?.name === 'Studio', 'Remove: another of the account\'s devices goes', rm.j?.devices?.map((d) => d.name))
     const out = await s.call('/v1/signout', { method: 'POST', token: renew.j.deviceToken })
     ok(out.j?.ok && (await s.call('/v1/me', { token: renew.j.deviceToken })).status === 401 && (await s.call('/v1/me', { token: a.deviceToken })).status === 401, 'Sign out: this device\'s tokens end at once', out.j)
+  }
+
+  // ---------- Changing the signing key ----------
+  {
+    const s = service()
+    const a = await s.signIn('kim@example.com', 'Studio')
+    await s.call(`/admin/accounts/${a.account.id}`, { method: 'POST', bound: true, body: { relay: 'approved', tester: 'yes' } })
+    const next = crypto.generateKeyPairSync('ed25519').privateKey
+    const NEXT = next.export({ format: 'jwk' }).x
+    s.env.SIGNING_KEY = next.export({ type: 'pkcs8', format: 'pem' })
+    s.env.OLD_KEYS = PUBLIC
+    const me = (await s.call('/v1/me', { token: a.deviceToken })).j
+    const byNext = (t) => { const [p, g] = String(t).split('.'); return crypto.verify(null, Buffer.from(p), crypto.createPublicKey({ key: { kty: 'OKP', crv: 'Ed25519', x: NEXT }, format: 'jwk' }), Buffer.from(g, 'base64url')) }
+    ok(me?.account && payload(me.deviceToken || '').kid === kidOf(NEXT) && byNext(me.deviceToken) && payload(me.relay?.token || '').kid === kidOf(NEXT) && byNext(me.relay.token), 'a new signing key, the old one\'s public half in OLD_KEYS: a device token the old key signed still works, and /v1/me hands back tokens the new one signed, saying so', { device: payload(me?.deviceToken || 'e30'), relay: payload(me?.relay?.token || 'e30') })
+    earlyAccess.useAccountsKey(() => `${PUBLIC}, ${NEXT}`)
+    ok(earlyAccess.readCode(me.earlyAccess?.code, { key: '' }).ok, 'and Bridge AI, given both public keys (comma separated), takes the Early Access code the new one signed')
+    earlyAccess.useAccountsKey(() => '')
+    s.env.OLD_KEYS = ''
+    ok((await s.call('/v1/me', { token: a.deviceToken })).status === 401 && (await s.call('/v1/me', { token: me.deviceToken })).status === 200, 'once the old key is dropped from OLD_KEYS, what it signed is refused; the new tokens work', null)
+    // A token from before tokens said which key signed them: checked with the signing key, and replaced.
+    const t = payload(me.deviceToken)
+    const bare = signed({ k: 'device', a: t.a, d: t.d, iat: t.iat, exp: t.exp }, next)
+    s.env.DB.sql.prepare('UPDATE devices SET token_hash = ? WHERE id = ?').run(crypto.createHash('sha256').update(bare).digest('hex'), t.d)
+    const old = await s.call('/v1/me', { token: bare })
+    ok(old.status === 200 && payload(old.j.deviceToken || 'e30').kid === kidOf(NEXT), 'one with no kid (from before) is checked with the signing key, and /v1/me replaces it with one that says', payload(old.j.deviceToken || 'e30'))
   }
 
   // ---------- Linked computers follow: grants ----------

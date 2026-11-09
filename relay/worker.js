@@ -242,19 +242,34 @@ async function registered(env, id) {
   return ok
 }
 
-// An account's relay token (account/API.md, Tokens): base64url of { k: 'relay', a, d, iat, exp } and
-// its Ed25519 signature, checked here with the accounts service's public key (ACCOUNTS_PUBLIC_KEY),
-// with nothing asked of anyone. { ok, a, d } or { ok: false, why: none | forged | expired }.
+// An account's relay token (account/API.md, Tokens): base64url of { k: 'relay', a, d, iat, exp, kid }
+// and its Ed25519 signature, checked here with the accounts service's public keys, with nothing asked
+// of anyone. ACCOUNTS_PUBLIC_KEY holds one or more, comma separated, so the service's key can be
+// changed (account/README.md, Changing the signing key): a token's kid says which signed it (the
+// start of a hash of the key, as account/worker.js's keyId); one without a kid, from before tokens
+// had one, is checked with the first. { ok, a, d } or { ok: false, why: none | forged | expired }.
 const unb64 = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (s.length % 4)) % 4)), (c) => c.charCodeAt(0))
-let accountsKey = null // [the setting, its CryptoKey]
+const b64u = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+let accountsKeys = null // [the setting, [{ kid, key }], in its order]
+async function publicKeys(setting) {
+  if (accountsKeys?.[0] !== setting) {
+    const list = []
+    for (const x of String(setting).split(',').map((s) => s.trim()).filter(Boolean)) {
+      try { list.push({ kid: b64u(await crypto.subtle.digest('SHA-256', unb64(x))).slice(0, 8), key: await crypto.subtle.importKey('raw', unb64(x), { name: 'Ed25519' }, false, ['verify']) }) } catch { /* not a key: left out */ }
+    }
+    accountsKeys = [setting, list]
+  }
+  return accountsKeys[1]
+}
 async function relayToken(env, header) {
   const m = /^Bearer ([A-Za-z0-9_-]{10,800})\.([A-Za-z0-9_-]{86})$/.exec(String(header || ''))
-  if (!m || !env.ACCOUNTS_PUBLIC_KEY) return { ok: false, why: 'none' }
+  const keys = env.ACCOUNTS_PUBLIC_KEY ? await publicKeys(env.ACCOUNTS_PUBLIC_KEY) : []
+  if (!m || !keys.length) return { ok: false, why: 'none' }
   let p = null
   try {
-    if (accountsKey?.[0] !== env.ACCOUNTS_PUBLIC_KEY) accountsKey = [env.ACCOUNTS_PUBLIC_KEY, await crypto.subtle.importKey('raw', unb64(env.ACCOUNTS_PUBLIC_KEY), { name: 'Ed25519' }, false, ['verify'])]
-    if (!(await crypto.subtle.verify({ name: 'Ed25519' }, accountsKey[1], unb64(m[2]), new TextEncoder().encode(m[1])))) return { ok: false, why: 'forged' }
     p = JSON.parse(new TextDecoder().decode(unb64(m[1])))
+    const k = p?.kid == null ? keys[0] : keys.find((x) => x.kid === p.kid)
+    if (!k || !(await crypto.subtle.verify({ name: 'Ed25519' }, k.key, unb64(m[2]), new TextEncoder().encode(m[1])))) return { ok: false, why: 'forged' }
   } catch { return { ok: false, why: 'forged' } }
   if (p?.k !== 'relay' || !/^[a-z0-9]{12}$/.test(String(p.a)) || !/^[a-z0-9]{12}$/.test(String(p.d)) || !Number.isInteger(p.exp)) return { ok: false, why: 'forged' }
   if (p.exp * 1000 <= Date.now()) return { ok: false, why: 'expired' }

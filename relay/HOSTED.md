@@ -152,7 +152,7 @@ per computer unless it says it's per account or for the whole relay.
 | --- | --- | --- |
 | `HOSTED` | | `1` turns on everything here. Unset, the Worker is a personal relay. |
 | `HOSTED_DOMAIN` | | The domain, without `https://`: `boldbridge.app`. |
-| `ACCOUNTS_PUBLIC_KEY` | | The accounts service's public key, which every relay token is checked with. Empty, no computer can register or connect. |
+| `ACCOUNTS_PUBLIC_KEY` | | The accounts service's public key, which every relay token is checked with; while its key is being changed, the old and the new, comma separated, the old first (a token says which key signed it: account/README.md, Changing the signing key). Empty, no computer can register or connect. |
 | `HOSTED_OFF` | `0` | The kill switch (below). |
 | `MAX_PHONES` | `16` | Connections to one computer at once: the same as a personal relay. Strangers who haven't paired make room for paired phones. |
 | `MAX_MESSAGE_KB` | `256` | One message. Bridge AI's largest is 192 KB (a piece of a big file) plus a little; notes for an offline computer are 64 KB at most. |

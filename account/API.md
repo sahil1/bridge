@@ -44,20 +44,25 @@ Three parts keep to this file:
 
 Signed with Ed25519 by the accounts service (secret `SIGNING_KEY`); anyone holding the public key
 (`ACCOUNTS_PUBLIC_KEY`, in the relay's settings and Bridge AI's code) can check one offline.
-Each is `base64url(JSON payload) + "." + base64url(signature)`.
+Each is `base64url(JSON payload) + "." + base64url(signature)`, and says which key signed it: `kid`,
+the first 8 characters of the base64url SHA-256 of the key's 32 public bytes. So the key can be
+changed without anyone signing in again: the relay's `ACCOUNTS_PUBLIC_KEY` and Bridge AI's take
+several keys, comma separated, and the service takes tokens its earlier keys signed (`OLD_KEYS`)
+until they end (README.md, Changing the signing key). A token without a `kid`, from before tokens
+had one, is checked with the first key only (the service's own: `SIGNING_KEY`'s).
 
 | Token | Payload | Lasts | Used for |
 | --- | --- | --- | --- |
-| **Device token** | `{ k: "device", a, d, iat, exp }` | 180 days, renewed by `GET /v1/me` | every call to the accounts service from that device |
-| **Relay token** | `{ k: "relay", a, d, iat, exp }` | 7 days, renewed by `GET /v1/me` | a computer registering with, and connecting to, the relay |
+| **Device token** | `{ k: "device", a, d, iat, exp, kid }` | 180 days, renewed by `GET /v1/me` (and at once when another key signed it) | every call to the accounts service from that device |
+| **Relay token** | `{ k: "relay", a, d, iat, exp, kid }` | 7 days, renewed by `GET /v1/me` | a computer registering with, and connecting to, the relay |
 | **Early Access code** | the format of `server/earlyaccess.js` (#158), label = the account's id | 30 days, renewed by `GET /v1/me` | the updater's Early Access channel |
 
 `a` is the account id, `d` the device id (both 12 lowercase letters and digits). A device token is
 also kept hashed (SHA-256) in D1, so signing out or removing a device ends it before it expires.
 `iat` and `exp` are in seconds. The Early Access code's label is the account's id, not its email:
 server/earlyaccess.js takes only letters, digits and a few marks in a label, and the label goes with
-the usage stats, which never carry an email. Bridge AI checks a code with either the owner's key
-(`PUBLIC_KEY`) or `ACCOUNTS_PUBLIC_KEY`.
+the usage stats, which never carry an email. Bridge AI checks a code with the owner's key
+(`PUBLIC_KEY`) or any of `ACCOUNTS_PUBLIC_KEY`'s.
 
 ## The API
 

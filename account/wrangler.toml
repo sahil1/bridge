@@ -39,6 +39,9 @@ SITE = "https://boldbridge.ai"
 # How many accounts Bridge AI's relay takes: the same number as its MAX_ACCOUNTS
 # (relay/wrangler.hosted.toml). Past it, approving another account's relay is refused as full.
 RELAY_MAX_ACCOUNTS = "500"
+# The public halves of keys SIGNING_KEY was before (comma separated): tokens they signed are still
+# taken until they end, while devices move to the new key (README.md, Changing the signing key).
+OLD_KEYS = ""
 # Secrets, never here (npx wrangler@4.149.0 secret put <name> -c account/wrangler.toml):
 #   SIGNING_KEY  the Ed25519 private key every token is signed with (account/key.js makes it)
 

@@ -138,10 +138,12 @@ function accountsService() {
 // Relay tokens, as the accounts service signs them, with a key of the test's own.
 const { privateKey } = crypto.generateKeyPairSync('ed25519')
 const PUBLIC = privateKey.export({ format: 'jwk' }).x
-const relayToken = (a, d, { exp = Math.floor(Date.now() / 1000) + 7 * 86400, k = 'relay', key = privateKey } = {}) => {
-  const text = Buffer.from(JSON.stringify({ k, a, d, iat: exp - 7 * 86400, exp })).toString('base64url')
+const relayToken = (a, d, { exp = Math.floor(Date.now() / 1000) + 7 * 86400, k = 'relay', key = privateKey, kid } = {}) => {
+  const text = Buffer.from(JSON.stringify({ k, a, d, iat: exp - 7 * 86400, exp, ...(kid ? { kid } : {}) })).toString('base64url')
   return `${text}.${crypto.sign(null, Buffer.from(text), key).toString('base64url')}`
 }
+// A key's id, as the accounts service puts it in each token (account/worker.js, keyId).
+const kidOf = (x) => crypto.createHash('sha256').update(Buffer.from(x, 'base64url')).digest().toString('base64url').slice(0, 8)
 let n = 0
 const newAccount = () => `acct${String(++n).padStart(8, '0')}`
 const newDevice = () => `dev${String(++n).padStart(9, '0')}`
@@ -256,6 +258,26 @@ try {
     delete r.env.HOSTED_OFF
     const noSecret = await worker.default.fetch(new Request(`https://${DOMAIN}/`), { ...r.env, ID_SECRET: '' })
     ok(noSecret.status === 500 && /ID_SECRET isn't set/.test(await noSecret.text()), 'without ID_SECRET the hosted relay answers nothing but that it isn\'t set', noSecret.status)
+  }
+
+  // ---------- Tokens say which key signed them, so the key can be changed ----------
+  {
+    const next = crypto.generateKeyPairSync('ed25519').privateKey
+    const NEXT = next.export({ format: 'jwk' }).x
+    const r = relay({ ACCOUNTS_PUBLIC_KEY: `${PUBLIC}, ${NEXT}` })
+    const status = async (t) => { const x = await r.registerWith(t); return x.status === 200 ? 200 : (await x.json()).token }
+    const one = () => [newAccount(), newDevice()]
+    const got = {
+      old: await status(relayToken(...one(), { kid: kidOf(PUBLIC) })),
+      next: await status(relayToken(...one(), { key: next, kid: kidOf(NEXT) })),
+      before: await status(relayToken(...one())),
+      beforeNext: await status(relayToken(...one(), { key: next })),
+      swapped: await status(relayToken(...one(), { kid: kidOf(NEXT) })),
+      unknown: await status(relayToken(...one(), { kid: 'AAAAAAAA' })),
+    }
+    ok(got.old === 200 && got.next === 200, 'with two keys in ACCOUNTS_PUBLIC_KEY (comma separated), a token signed with either, saying which (kid), is taken', got)
+    ok(got.before === 200 && got.beforeNext === 'forged', 'one from before tokens said which key is checked with the first key only', got)
+    ok(got.swapped === 'forged' && got.unknown === 'forged', 'one whose kid names the other key, or none of them, is refused as forged', got)
   }
 
   // ---------- Connecting needs a relay token of its account ----------
