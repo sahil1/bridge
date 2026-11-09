@@ -616,8 +616,9 @@ try {
     const quick = (row) => row.locator('.hm-quick').evaluate((e) => getComputedStyle(e).opacity)
     ok(await quick(roadmap) === '0', 'what you can do with a row is out of the way until you point at it', await quick(roadmap))
     await roadmap.hover()
-    await p.waitForTimeout(250)
-    ok(await quick(roadmap) === '1' && /Pull request/.test(await roadmap.locator('.hm-quick').innerText()) && /Clear/.test(await roadmap.locator('.hm-quick').innerText()) && /Open/.test(await roadmap.locator('.hm-quick').innerText()), 'and pointed at: its pull request, Clear and Open', await roadmap.locator('.hm-quick').innerText())
+    // (They fade in, which a busy computer can take a while to finish.)
+    const pointed = async () => { const x = await roadmap.locator('.hm-quick').innerText(); return await quick(roadmap) === '1' && /Pull request/.test(x) && /Clear/.test(x) && /Open/.test(x) }
+    ok(!!(await until(pointed, 3000, 100)), 'and pointed at: its pull request, Clear and Open', [await quick(roadmap), await roadmap.locator('.hm-quick').innerText()])
     await shot(p, `${tag}home-morning-1440-hover`)
     // Opened: the whole of what it said, and what you can do with it.
     await roadmap.locator('.hm-item-main').click()
