@@ -180,7 +180,7 @@ const open = async (look = {}) => {
 }
 // Each page runs at the test's time, as the server does.
 const setUp = async (c) => { await noServiceWorker(c); if (CLOCK) await c.clock.install({ time: Date.now() + OFFSET }) }
-const openEvent = (p, e) => p.evaluate((d) => window.dispatchEvent(new CustomEvent('bridge-open-event', { detail: d })), { date: ymd(e.start), id: `${e.title}|${e.start}` })
+const openEvent = (p, e, { busy = 0 } = {}) => p.evaluate(({ d, busy }) => { window.dispatchEvent(new CustomEvent('bridge-open-event', { detail: d })); for (const t = Date.now(); Date.now() - t < busy;); }, { d: { date: ymd(e.start), id: `${e.title}|${e.start}` }, busy })
 const keyColors = (p) => p.evaluate(() => Object.fromEntries([...document.querySelectorAll('.cal-key:not(.task)')].map((k) => [k.innerText.trim(), k.style.getPropertyValue('--c').trim()])))
 const asked = (re) => model.asked(re)
 
@@ -552,9 +552,11 @@ try {
   }
 
   // ---------- A phone, light and dark ----------
+  // The event asked for on a busy phone (held up for a moment as it's asked, which once kept its
+  // Today from opening until after the event was said, and the sheet never came).
   for (const mode of ['light', 'dark']) {
     const { p, errors } = await open({ mode, phone: true })
-    await openEvent(p, LATER)
+    await openEvent(p, LATER, { busy: 200 })
     const sheet = p.locator('.cal-sheet')
     await until(async () => /wrote these/.test(await sheet.innerText().catch(() => '')), 15000)
     ok(/Ines Varga/.test(await sheet.innerText().catch(() => '')), `phone, ${mode}: the event opens in a sheet with its prep`)
