@@ -12,24 +12,27 @@ import { TRIALS } from '../../trials.js'
 import { AWAY_MINUTES, RELEASE_HOURS, waitingLong } from '../../../shared/autoupdate.js'
 import { isPre } from '../../../shared/version.js'
 import { earlyFromLink, doneWithEarlyLink } from '../../earlyLink.js'
+import { Advanced } from './Advanced.jsx'
 
 const REPO = 'https://github.com/sahil1/bridge'
 
 // Settings › About & Updates: which version you have, whether there's a newer one (and updating
-// to it, now or by itself while you're away), Early Access for testers with a code, the tour
-// again, what to include when you report a problem, usage stats and crash reports, and last, the
-// features on trial.
+// to it, now or by itself while you're away), Early Access for testers with a code, reporting a
+// problem, usage stats and crash reports, and last, the features on trial. Under Advanced: the
+// tour again, the details a report includes, and the license and credits.
 // Every action here is the same small button (btn small, a 13 px icon); the one that matters most
 // in a section is primary.
 export default function About() {
   return (
     <div className="st-sections">
       <Updates />
-      <section className="st-sec">
-        <h4>{t('Tour')}</h4>
-        <p className="muted small">{t('A quick look at the main parts of Bridge AI, the same one you saw after setup.')}</p>
-        <div className="st-row"><button type="button" className="btn small" onClick={startTour}><Icon name="sparkle" size={13} /> {t('Take the tour')}</button></div>
-      </section>
+      <Advanced order={10}>
+        <section className="st-sec" data-setting="tour">
+          <h4>{t('Tour')}</h4>
+          <p className="muted small">{t('A quick look at the main parts of Bridge AI, the same one you saw after setup.')}</p>
+          <div className="st-row"><button type="button" className="btn small" onClick={startTour}><Icon name="sparkle" size={13} /> {t('Take the tour')}</button></div>
+        </section>
+      </Advanced>
       <Report />
       <UsageCounts />
       <CrashReports />
@@ -73,7 +76,7 @@ function Updates() {
 
   return (
     <>
-    <section className="st-sec">
+    <section className="st-sec" data-setting="version">
       <h4>{t('Version')}</h4>
       {!u ? <div className="skeleton-rows"><div /></div> : (
         <>
@@ -227,7 +230,7 @@ function ByItself({ u, checks }) {
   const when = a?.done && new Date(a.done.at).toLocaleString(locale(), { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })
   return (
     <>
-      <label className="st-check ab-auto"><input type="checkbox" checked={on} disabled={!s || !checks} onChange={(e) => set(e.target.checked)} />
+      <label className="st-check ab-auto" data-setting="auto-update"><input type="checkbox" checked={on} disabled={!s || !checks} onChange={(e) => set(e.target.checked)} />
         <span><b>{t("Update by itself while you're away")}</b> <span className="muted small">{checks
           ? t("Once a new version has been out {hours} hours: while you're away (no keyboard or mouse for {minutes} minutes, or the screen locked), with nothing running or unsaved, and plugged in.", { hours: RELEASE_HOURS, minutes: AWAY_MINUTES })
           : t('It needs Check for new versions on.')}</span></span></label>
@@ -237,7 +240,19 @@ function ByItself({ u, checks }) {
   )
 }
 
-// Beta features (src/trials.js): each hidden until it's turned on here, for this computer.
+// Beta features (src/trials.js): each hidden until it's turned on here, for this computer. Each
+// says what it is in a line (all of it on hover).
+const SHORT = {
+  studio: tx('Documents, sheets, decks and PDFs, edited here or by your agents.'),
+  home: tx('Where Bridge AI opens: what needs you on every computer, and what\'s coming up.'),
+  'dictation-cleanup': tx('Dictation from other apps tidied by a model before it\'s pasted.'),
+  'usage-everywhere': tx('The tokens each provider and model used, in Today › Usage. It stays on this computer.'),
+  'meeting-insights': tx('Your meetings added up, and the people you meet. It turns on by itself once 5 meetings are recorded here.'),
+  'tab-groups': tx('The tabs above your agents, grouped as the sidebar has them.'),
+  routines: tx('Routines that run by themselves at the time you set, and History › Commands.'),
+  files: tx('Every folder on this computer and your others, as Finder shows them. Read-only for now.'),
+  'signature-assist': tx('In Studio, AI Assist\'s Sign this on a PDF you\'re asked to sign.'),
+}
 function Trials() {
   const { s, save } = useSettings()
   const [mine, setMine] = useState({}) // as you set it, at once; saved behind it
@@ -247,15 +262,15 @@ function Trials() {
   const { data: conf } = usePoll('/config', 10 * 60 * 1000)
   const auto = conf?.trialsAuto || {}
   return (
-    <section className="st-sec">
+    <section className="st-sec" data-setting="beta">
       <h4>{t('Beta Features')}</h4>
-      <p className="muted small">{t("New parts of Bridge AI, in beta. Each stays hidden until you turn it on here, and turning it off hides it again; what you made with it stays where it is.")}</p>
+      <p className="muted small" title={t("New parts of Bridge AI, in beta. Each stays hidden until you turn it on here, and turning it off hides it again; what you made with it stays where it is.")}>{t('Each stays hidden until you turn it on here.')}</p>
       {TRIALS.map((x) => {
         // One that's part of another works only with that one on, and says so.
         const needs = x.needs && !on(x.needs) ? TRIALS.find((y) => y.id === x.needs) : null
         return (
           <label key={x.id} className="st-check"><input type="checkbox" checked={on(x.id) && !needs} disabled={!s || !!needs} onChange={(e) => set(x.id, e.target.checked)} />
-            <span><b>{t(x.label)}</b> <span className="muted small">{t(x.hint)}</span>{needs && <span className="muted small"> {t('It needs {name} on.', { name: t(needs.label) })}</span>}{auto[x.id] && on(x.id) && <span className="muted small ab-auto-on"> {t('Turned on by itself on {date}, once there were meetings to add up.', { date: new Date(auto[x.id]).toLocaleDateString(locale(), { month: 'long', day: 'numeric' }) })}</span>}</span></label>
+            <span title={t(x.hint)}><b>{t(x.label)}</b> <span className="muted small">{SHORT[x.id] ? t(SHORT[x.id]) : t(x.hint)}</span>{needs && <span className="muted small"> {t('It needs {name} on.', { name: t(needs.label) })}</span>}{auto[x.id] && on(x.id) && <span className="muted small ab-auto-on"> {t('Turned on by itself on {date}, once there were meetings to add up.', { date: new Date(auto[x.id]).toLocaleDateString(locale(), { month: 'long', day: 'numeric' }) })}</span>}</span></label>
         )
       })}
     </section>
@@ -270,19 +285,27 @@ function Report() {
   const copy = () => navigator.clipboard?.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000) }).catch(() => {})
   const issue = `${REPO}/issues/new?template=bug.yml&diagnostics=${encodeURIComponent(text)}`
   return (
-    <section className="st-sec">
+    <section className="st-sec" data-setting="report">
       <h4>{t('Report a problem or suggest something')}</h4>
-      <p className="muted small">{t('Bridge AI is open source. Problems and ideas go in GitHub issues. Include the details below; they say which version and system you have, and nothing about you (no names, emails, folders or location).')}</p>
-      {d && <pre className="st-code ro ab-diag">{text}</pre>}
+      <p className="muted small" title={t('Bridge AI is open source. Problems and ideas go in GitHub issues. Include the details below; they say which version and system you have, and nothing about you (no names, emails, folders or location).')}>{t('In GitHub issues, with your version and system, and nothing about you.')}</p>
       <div className="st-row">
         <a className="btn small primary" href={issue} target="_blank" rel="noreferrer"><Icon name="alert" size={13} /> {t('Report a problem')}</a>
         <a className="btn small" href={`${REPO}/issues/new?template=feature.yml`} target="_blank" rel="noreferrer"><Icon name="sparkle" size={13} /> {t('Suggest an idea')}</a>
         <button type="button" className="btn small" disabled={!d} onClick={copy}><Icon name={copied ? 'check' : 'copy'} size={13} /> {copied ? t('Copied') : t('Copy details')}</button>
       </div>
-      <p className="muted small">{t('Free and open source under the Apache License 2.0, as is, with no warranty. Not affiliated with Anthropic, OpenAI, Google, GitHub or the other companies whose tools it works with.')} <a href={`${REPO}/blob/main/TERMS.md`} target="_blank" rel="noreferrer">{t('Terms')}</a> · <a href={`${REPO}/blob/main/PRIVACY.md`} target="_blank" rel="noreferrer">{t('Privacy')}</a> · <a href={`${REPO}/blob/main/LICENSE`} target="_blank" rel="noreferrer">{t('License')}</a> · <a href={`${REPO}/blob/main/NOTICE`} target="_blank" rel="noreferrer">{t('Notices')}</a></p>
-      <p className="muted small">{t('If Bridge AI is useful to you, a star on GitHub helps other people find it.')} <a href={REPO} target="_blank" rel="noreferrer">{t('Star Bridge AI on GitHub')}</a></p>
-      {/* The open-source parts Bridge AI is built with are in NOTICE; the one you see most is named. */}
-      <p className="muted small">{t('Whiteboards are drawn with Excalidraw (MIT License).')} <a href="https://github.com/excalidraw/excalidraw" target="_blank" rel="noreferrer">github.com/excalidraw/excalidraw</a></p>
+      <Advanced order={20}>
+        <section className="st-sec" data-setting="report-details">
+          <h4>{t('Details for a Report')}</h4>
+          {d && <pre className="st-code ro ab-diag">{text}</pre>}
+        </section>
+        <section className="st-sec" data-setting="license">
+          <h4>{t('License and Credits')}</h4>
+          <p className="muted small">{t('Free and open source under the Apache License 2.0, as is, with no warranty. Not affiliated with Anthropic, OpenAI, Google, GitHub or the other companies whose tools it works with.')} <a href={`${REPO}/blob/main/TERMS.md`} target="_blank" rel="noreferrer">{t('Terms')}</a> · <a href={`${REPO}/blob/main/PRIVACY.md`} target="_blank" rel="noreferrer">{t('Privacy')}</a> · <a href={`${REPO}/blob/main/LICENSE`} target="_blank" rel="noreferrer">{t('License')}</a> · <a href={`${REPO}/blob/main/NOTICE`} target="_blank" rel="noreferrer">{t('Notices')}</a></p>
+          <p className="muted small">{t('If Bridge AI is useful to you, a star on GitHub helps other people find it.')} <a href={REPO} target="_blank" rel="noreferrer">{t('Star Bridge AI on GitHub')}</a></p>
+          {/* The open-source parts Bridge AI is built with are in NOTICE; the one you see most is named. */}
+          <p className="muted small">{t('Whiteboards are drawn with Excalidraw (MIT License).')} <a href="https://github.com/excalidraw/excalidraw" target="_blank" rel="noreferrer">github.com/excalidraw/excalidraw</a></p>
+        </section>
+      </Advanced>
     </section>
   )
 }

@@ -31,8 +31,8 @@ export default function CrashReports() {
       <h4>{t('Crash Reports')}</h4>
       {s.refused ? <p className="muted small">{t('Off on this computer: {setting} is set.', { setting: s.refused })}</p> : (
         <>
-          <label className="ph-check"><input type="checkbox" checked={!!s.send} disabled={busy} onChange={toggle} /> {t('Send crash reports by themselves')}</label>
-          <p className="muted small">{t('When something in Bridge AI crashes, its report goes to {host}: what crashed, the error and where in Bridge AI\'s code, the version, your system and the last lines of its log, the same text Report on GitHub shows. Names, folders, emails and keys are taken out first. Kept for 90 days, with no ID for you or this computer. On unless you turn it off.', { host: s.to })} {t('It also says its update channel.')}</p>
+          <label className="ph-check" data-setting="crash-reports"><input type="checkbox" checked={!!s.send} disabled={busy} onChange={toggle} /> {t('Send crash reports by themselves')}</label>
+          <p className="muted small" title={`${t('When something in Bridge AI crashes, its report goes to {host}: what crashed, the error and where in Bridge AI\'s code, the version, your system and the last lines of its log, the same text Report on GitHub shows. Names, folders, emails and keys are taken out first. Kept for 90 days, with no ID for you or this computer. On unless you turn it off.', { host: s.to })} ${t('It also says its update channel.')}`}>{t('To {host}, with names, folders, emails and keys taken out, and no ID. Kept for 90 days.', { host: s.to })}</p>
           {s.stopped && <p className="st-note"><Icon name="info" size={13} /><span>{t('The project asked Bridge AI to stop sending crash reports: {why}', { why: s.stopped })}</span></p>}
           {s.sent?.length > 0 && (
             <div className="st-row">
