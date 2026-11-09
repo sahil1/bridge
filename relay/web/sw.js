@@ -18,6 +18,9 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(req.url)
   if (url.origin !== location.origin || url.pathname.startsWith('/_relay/')) return
   const nav = req.mode === 'navigate'
+  // A page is only ever opened, never sent a form from elsewhere: another site's form posting to
+  // this address would run as you on your computer.
+  if (nav && req.method !== 'GET') { e.respondWith(new Response('Not allowed', { status: 405, headers: { 'Content-Type': 'text/plain', ...FRAMES } })); return }
   if (nav && req.destination !== 'iframe') {
     // The relay page itself (with ?agent=… and the like, which it passes on to the app).
     if (url.pathname === '/' || url.pathname === '/index.html') return
@@ -50,6 +53,18 @@ async function shell() {
 }
 
 const NO_BODY = new Set([101, 103, 204, 205, 304])
+// Every page passed on here may be put in a frame only by this address's own pages: another
+// computer's address on the same relay is the same site to a browser, and could otherwise frame
+// yours (or a page of yours framed by another site could be clicked through unseen).
+const FRAMES = { 'Content-Security-Policy': "frame-ancestors 'self'", 'X-Frame-Options': 'SAMEORIGIN' }
+function framed(head, req) {
+  const h = new Headers(head.h)
+  if (req.mode === 'navigate' || /html|xml|svg/i.test(h.get('content-type') || '')) {
+    h.append('Content-Security-Policy', FRAMES['Content-Security-Policy'])
+    h.set('X-Frame-Options', FRAMES['X-Frame-Options'])
+  }
+  return h
+}
 
 async function tunnel(req, url) {
   const s = await shell()
@@ -88,7 +103,7 @@ async function tunnel(req, url) {
       const m = e.data
       if (m.head) {
         answered = true
-        resolve(new Response(NO_BODY.has(m.head.s) || req.method === 'HEAD' ? null : stream, { status: m.head.s, headers: m.head.h }))
+        resolve(new Response(NO_BODY.has(m.head.s) || req.method === 'HEAD' ? null : stream, { status: m.head.s, headers: framed(m.head, req) }))
       } else if (m.chunk) {
         queue.push(new Uint8Array(m.chunk))
         poke()
@@ -107,7 +122,7 @@ async function tunnel(req, url) {
 
 function offline(req, why) {
   if (req.mode === 'navigate') {
-    return new Response(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><body style="font:15px -apple-system,system-ui,sans-serif;display:grid;place-items:center;min-height:90vh;text-align:center;color:#888;background:transparent"><p>${String(why).replace(/[<&]/g, '')}</p></body>`, { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+    return new Response(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><body style="font:15px -apple-system,system-ui,sans-serif;display:grid;place-items:center;min-height:90vh;text-align:center;color:#888;background:transparent"><p>${String(why).replace(/[<&]/g, '')}</p></body>`, { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8', ...FRAMES } })
   }
   return new Response(JSON.stringify({ error: why }), { status: 503, headers: { 'Content-Type': 'application/json' } })
 }
