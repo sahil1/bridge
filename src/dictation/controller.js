@@ -8,8 +8,10 @@
 // relay's end-to-end encrypted link like every other request. The text is tidied
 // (shared/dictation/clean.js, with the names the computer knows) and put where you were: the message
 // box (at its cursor), a terminal tab (typed, without Enter), any other field; with nothing focused,
-// the message box of the agent on screen. The desktop app's floating window (Hud.jsx) shows it
-// instead, to edit, send or copy.
+// the message box of the agent on screen. Another device's agent in a tab here (RemoteAgent.jsx):
+// handed to its page, which puts them where they'd have gone had they been said there (take), never
+// in a box of this device's. The desktop app's floating window (Hud.jsx) shows it instead, to edit,
+// send or copy.
 import { useSyncExternalStore } from 'react'
 import { api, apiUrl, settingsChanged, viaRelay } from '../api.js'
 import { startPcm, microphone, wav, RATE, micRefused, micBlocked } from '../audio/pcm.js'
@@ -63,7 +65,9 @@ export const pause = (on) => { paused = !!on }
 export const isPaused = () => paused
 
 // ---------- Where the text goes ----------
-// Message boxes say they're there (Composer.jsx): { insert(text, caret), visible() }.
+// Message boxes say they're there (Composer.jsx): { insert(text, caret), visible() }. So does
+// another device's agent in a tab (RemoteAgent.jsx): { frame: true, name, insert(text), visible() },
+// its insert false when its page didn't take them.
 const boxes = new Map()
 let lastBox = null
 let onScreen = () => null // the agent on screen (App.jsx)
@@ -115,14 +119,31 @@ function typeInto(el, text, sel) {
 function deliver(target, text, at) {
   if (!target || target.kind === 'hud') return true
   if (target.kind === 'ask') { const f = asks.get(target.id); if (f) f(text, { at }); return !!f }
-  if (target.kind === 'composer' && boxes.get(target.id)) { boxes.get(target.id).insert(text, target.caret); return true }
+  if (target.kind === 'composer' && boxes.get(target.id)) return boxes.get(target.id).insert(text, target.caret) !== false
   // Typed into the terminal, without Enter (Terminal.jsx and LiveShell.jsx listen for this).
   if (target.kind === 'terminal' && target.el?.isConnected) { target.el.dispatchEvent(new CustomEvent('bridge-type', { detail: text })); return true }
   if (target.kind === 'field' && target.el?.isConnected) { typeInto(target.el, text, target.sel); return true }
   // What you were in has gone: the message box on screen.
   const b = fallbackBox()
-  if (b) { boxes.get(b).insert(text); return true }
+  if (b) return boxes.get(b).insert(text) !== false
   return false
+}
+// Words heard for this page by another: the page of a window showing this device's agent in a tab
+// (handOver), or the desktop app's dictation window, for its window showing this device
+// (desktop/dictation.js). Put where they'd have gone had they been heard here. Whether they were.
+export function take(text) {
+  const target = typeof text === 'string' && text.trim() ? targetFromFocus() : null
+  return !!target && target.kind !== 'password' && deliver(target, text)
+}
+// ...and handed to the page in a frame here (another device's agent: RemoteAgent.jsx). false when it
+// had nowhere to put them, or is a Bridge AI from before it could take them.
+export function handOver(frame, text) {
+  try {
+    const w = frame?.contentWindow
+    const d = { text, put: false }
+    w.dispatchEvent(new w.CustomEvent('bridge-dictated', { detail: d }))
+    return d.put === true
+  } catch { return false }
 }
 
 // ---------- Names to spell right (server/dictation.js), kept a minute ----------
@@ -367,7 +388,8 @@ function keep(at, target, put, said, blob) {
   if (target?.kind === 'ask') { if (put) { body.how = 'sent'; body.agent = { id: target.id, chief: true } } } else if (target?.kind === 'hud') { if (target.app) body.app = target.app } else {
     // Put nowhere (what it was for had gone): kept all the same, as said in Bridge AI.
     if (put) body.how = 'typed'
-    if (put && target.kind === 'composer') body.agent = { id: target.id }
+    // Another device's agent: by the name its tab has here (this device doesn't know it).
+    if (put && target.kind === 'composer') body.agent = { id: target.id, ...(boxes.get(target.id)?.name ? { name: boxes.get(target.id).name } : {}) }
     else body.place = target?.kind === 'terminal' ? 'terminal' : 'field'
   }
   const p = api('/dictations', { method: 'POST', body }).then(async (r) => {
