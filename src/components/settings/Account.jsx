@@ -13,6 +13,7 @@ import { WindowRow } from '../Usage.jsx'
 import { openSettings } from '../SignIn.jsx'
 import { api } from '../../api.js'
 import { t, locale } from '../../i18n/index.js'
+import { Advanced } from './Advanced.jsx'
 import './account.css'
 
 const day = (iso) => (iso ? new Date(iso).toLocaleDateString(locale(), { day: 'numeric', month: 'short', year: 'numeric' }) : '')
@@ -64,7 +65,7 @@ function SignIn({ st, onIn }) {
   return (
     <section className="st-sec acct-in">
       <h4>{t('Sign in to Bold Bridge')}</h4>
-      <p className="muted small">{t('A Bold Bridge account is for Early Access and Bridge AI\'s relay; Bridge AI works the same without one. There\'s no password: Bold Bridge emails you a 6-digit code.')}</p>
+      <p className="muted small">{t('For Early Access and Bridge AI\'s relay; Bridge AI works the same without one. There\'s no password: you\'re emailed a code.')}</p>
       {st.signedOut && <p className="st-note warn acct-out"><Icon name="alert" size={13} /> {st.signedOut.why}</p>}
       {step === 'email' ? (
         <form className="st-row acct-form" onSubmit={(e) => { e.preventDefault(); if (email.trim()) send() }}>
@@ -99,7 +100,7 @@ function SignIn({ st, onIn }) {
           </ul>
         </div>
       )}
-      <p className="muted small">{t('What Bold Bridge keeps: your email, the names of the devices you sign in on, and what you ask for. Never anything from this computer: your agents, meetings, mail and files stay here.')}</p>
+      <p className="muted small" title={t('What Bold Bridge keeps: your email, the names of the devices you sign in on, and what you ask for. Never anything from this computer: your agents, meetings, mail and files stay here.')}>{t('Bold Bridge keeps your email, your devices\' names and what you ask for. Never anything from this computer.')}</p>
     </section>
   )
 }
@@ -292,18 +293,26 @@ function Leave({ st, act, busy, load }) {
       {warning && <p className="st-note warn"><Icon name="alert" size={13} /> {warning}</p>}
       <div className="st-row">
         <button type="button" className="btn small" disabled={!!busy} onClick={out}><Icon name="x" size={13} /> {t('Sign out')}</button>
-        {!deleting && <button type="button" className="ghost-btn" onClick={() => setDeleting(true)}>{t('Delete account…')}</button>}
       </div>
-      {deleting && (
-        <form className="relay-box acct-delete" onSubmit={(e) => { e.preventDefault(); if (typed.trim()) del() }}>
-          <p className="small"><b>{t('Delete your Bold Bridge account?')}</b> {t('Your account, its devices and requests, and the relay\'s counts for it are deleted, and every device is signed out. Early Access and Bridge AI\'s relay stop. This can\'t be undone. Type your email to say so.')}</p>
-          <div className="st-row">
-            <input className="st-input" type="email" value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={st.account.email} aria-label={t('Your email, to delete the account')} autoComplete="off" spellCheck={false} />
-            <button type="submit" className="btn small danger" disabled={!!busy || typed.trim().toLowerCase() !== st.account.email}>{busy === 'delete' ? t('Deleting…') : t('Delete account')}</button>
-            <button type="button" className="ghost-btn" onClick={() => { setDeleting(false); setTyped('') }}>{t('Cancel')}</button>
-          </div>
-        </form>
-      )}
+      {/* Rarely wanted, and for good: under Advanced. */}
+      <Advanced order={10}>
+        <div className="st-sections acct">
+          <section className="st-sec acct-del" data-setting="delete-account">
+            <h4>{t('Delete Account')}</h4>
+            {!deleting && <div className="st-row"><button type="button" className="ghost-btn" onClick={() => setDeleting(true)}>{t('Delete account…')}</button></div>}
+            {deleting && (
+              <form className="relay-box acct-delete" onSubmit={(e) => { e.preventDefault(); if (typed.trim()) del() }}>
+                <p className="small"><b>{t('Delete your Bold Bridge account?')}</b> {t('Your account, its devices and requests, and the relay\'s counts for it are deleted, and every device is signed out. Early Access and Bridge AI\'s relay stop. This can\'t be undone. Type your email to say so.')}</p>
+                <div className="st-row">
+                  <input className="st-input" type="email" value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={st.account.email} aria-label={t('Your email, to delete the account')} autoComplete="off" spellCheck={false} />
+                  <button type="submit" className="btn small danger" disabled={!!busy || typed.trim().toLowerCase() !== st.account.email}>{busy === 'delete' ? t('Deleting…') : t('Delete account')}</button>
+                  <button type="button" className="ghost-btn" onClick={() => { setDeleting(false); setTyped('') }}>{t('Cancel')}</button>
+                </div>
+              </form>
+            )}
+          </section>
+        </div>
+      </Advanced>
     </section>
   )
 }
