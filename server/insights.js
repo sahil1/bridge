@@ -144,26 +144,30 @@ const ask = (s, text) => {
   else s.prompts[3] = t // the first three and the latest
 }
 
-// Each line of a log, read a piece at a time, so the server answers everything else between pieces.
-// readline's iterator handed over all it had read ahead in one go: a 2 MB conversation held the
-// server up for 76 ms here, and a slow Mac (CI's) for 300 ms and more, while the first look at
-// Usage or Insights read a month of them.
-const PIECE = 64 * 1024
+// Each line of a log, read a megabyte at a time and taken SLICE ms at a time, so the server answers
+// everything else in between. readline's iterator handed over all it had read ahead in one go (a
+// 2 MB conversation held the server up for 76 ms, and a slow Mac for 300 ms); a read of 64 KB at a
+// time gave the server a turn per 64 KB, and on a busy server each turn waits for all else: 12 MB
+// of logs took 6 s on CI's Mac while two windows opened.
+const PIECE = 1024 * 1024
+const SLICE = 10
 async function lines(file, each) {
   const fh = await fs.promises.open(file, 'r')
   try {
     const text = new StringDecoder('utf8')
     const buf = Buffer.alloc(PIECE)
     let part = [] // a line longer than a piece, until its end comes
-    const line = (l) => { if (l.endsWith('\r')) l = l.slice(0, -1); if (l) each(l) }
+    let from = performance.now()
+    const line = (l) => { if (l.endsWith('\r')) l = l.slice(0, -1); if (l) each(l); return performance.now() - from > SLICE }
+    const turn = async () => { await new Promise(setImmediate); from = performance.now() }
     for (;;) {
       const { bytesRead } = await fh.read(buf, 0, PIECE, null)
       const got = bytesRead ? text.write(buf.subarray(0, bytesRead)) : text.end()
       const cut = got.split('\n')
       if (cut.length > 1) {
-        line(part.join('') + cut[0])
+        if (line(part.join('') + cut[0])) await turn()
         part = []
-        for (let i = 1; i < cut.length - 1; i++) line(cut[i])
+        for (let i = 1; i < cut.length - 1; i++) if (line(cut[i])) await turn()
       }
       part.push(cut.at(-1))
       if (!bytesRead) break
