@@ -233,7 +233,10 @@ try {
 
   await part('stop', async () => {
     const many = path.join(kit.home, 'Many')
-    for (let d = 0; d < 40; d++) { fs.mkdirSync(path.join(many, `d${d}`), { recursive: true }); for (let i = 0; i < 400; i++) fs.writeFileSync(path.join(many, `d${d}`, `f${i}.txt`), `${d}-${i}`) }
+    // Written without holding up this script: held longer than the server keeps an idle connection
+    // (5 s, as a Mac in CI can take for 16,000 files), the next request goes out on the connection
+    // the server closed meanwhile, and fails ("fetch failed") with the server still there.
+    for (let d = 0; d < 40; d++) { fs.mkdirSync(path.join(many, `d${d}`), { recursive: true }); await Promise.all(Array.from({ length: 400 }, (_, i) => fs.promises.writeFile(path.join(many, `d${d}`, `f${i}.txt`), `${d}-${i}`))) }
     const pl = (await api('/places', { path: many })).place
     const s = await api('/files/insights', { root: `place:${pl.id}`, rel: '' })
     await api(`/files/insights/${s.id}`, null, 'DELETE')
