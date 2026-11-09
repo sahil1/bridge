@@ -16,9 +16,10 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
 import android.view.WindowManager
-import android.webkit.JavascriptInterface
 import android.webkit.JsResult
 import android.webkit.PermissionRequest
+import android.webkit.ServiceWorkerClient
+import android.webkit.ServiceWorkerController
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -34,16 +35,23 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
+import androidx.webkit.JavaScriptReplyProxy
+import androidx.webkit.ScriptHandler
+import androidx.webkit.WebMessageCompat
 import androidx.webkit.WebViewAssetLoader
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import com.google.zxing.integration.android.IntentIntegrator
 import com.journeyapps.barcodescanner.CaptureActivity
 import org.json.JSONArray
 import org.json.JSONObject
 
-// The Android app: your relay's phone page (relay/web) in a WebView. Android's WebView runs the
-// page's service worker, so it works as it does in Chrome: pairing, the end-to-end encrypted link
-// to your computer, and Bridge AI from it. Before the first pairing it asks for the QR code, which
-// says which relay to open.
+// The Android app: the phone page (relay/web) in a WebView, at your relay's address but from the
+// app's own copy (RelayPage), so the code that does the encrypting never comes from the relay.
+// Android's WebView runs the page's service worker, so it works as it does in Chrome: pairing, the
+// end-to-end encrypted link to your computer, and Bridge AI from it. Before the first pairing it
+// asks for the QR code, which says which relay to open; a pairing link on Bridge AI's relay opens
+// the app too (an App Link), and is used the same way.
 //
 // It can be paired with several computers, each with its own relay. Each relay is its own site in
 // the WebView, so each keeps its own pairing; the app keeps the list and which one is showing.
@@ -78,12 +86,15 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         fitKeyboard()
+        servePageToServiceWorkers()
         // For testing on an emulator, which can't scan: adb shell am start -n dev.bridgeai.phone/.MainActivity --es pair <link>
         val testLink = if (BuildConfig.DEBUG) intent.getStringExtra("pair") else null
         if (testLink != null) return usePairingLink(testLink)
         // ...and --es cloudMock 127.0.0.1 points Cloud agents at stand-in providers (TestHosts).
         if (BuildConfig.DEBUG) TestHosts.remember(this, intent)
         CloudCheck.schedule(this)
+        // A pairing link on Bridge AI's relay, opened from the camera or a browser (an App Link).
+        pairingLinkIn(intent)?.let { return openLink(it) }
         // A cloud agent's notification, or the Cloud agents shortcut.
         if (intent.hasExtra(CLOUD_AGENT) || intent.action == CLOUD_ACTION) return openCloud(intent.getStringExtra(CLOUD_AGENT))
         // ...and --es open demo goes straight to a bundled UI.
@@ -98,6 +109,7 @@ class MainActivity : Activity() {
     // A tap on the agents notification while the app is open.
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        pairingLinkIn(intent)?.let { return openLink(it) }
         if (intent.hasExtra(CLOUD_AGENT) || intent.action == CLOUD_ACTION) return openCloud(intent.getStringExtra(CLOUD_AGENT))
         val id = intent.getStringExtra(AgentsService.AGENT) ?: return
         val w = web ?: return
@@ -106,6 +118,27 @@ class MainActivity : Activity() {
 
     // ...or that opened it: shown once the page is there.
     private var pendingAgent: String? = null
+
+    // A pairing link Android handed the app (AndroidManifest.xml): https://<id>.<hosted domain>/ with
+    // #pair=…, only on Bridge AI's relay, which says the app may open them (/.well-known/assetlinks.json).
+    // A relay of your own opens in the browser as before; its QR code is scanned in the app.
+    private fun pairingLinkIn(intent: Intent?): String? {
+        val uri = intent?.takeIf { it.action == Intent.ACTION_VIEW }?.data ?: return null
+        val host = uri.host?.lowercase() ?: return null
+        return uri.toString().takeIf { uri.scheme == "https" && host.endsWith(".$HOSTED_DOMAIN") }
+    }
+
+    // ...which pairs, as a scanned code does; one without a code, to a computer already paired,
+    // opens it.
+    private fun openLink(link: String) {
+        val uri = Uri.parse(link)
+        val origin = RelayPage.originOf(uri)
+        if (!(uri.fragment ?: "").contains("pair=") && origin != null && isKnown(origin)) {
+            relay = origin
+            return openPage(origin)
+        }
+        usePairingLink(link)
+    }
 
     // From Android 15 the app draws under the bars and the keyboard (edge-to-edge), and adjustResize
     // no longer makes room for the keyboard. So the screen ends where the keyboard begins, for the
@@ -210,6 +243,7 @@ class MainActivity : Activity() {
         leavePage()
         showingBundled = true
         val w = web ?: makeWebView().also { web = it; setContentView(it) }
+        offerBridge(w)
         w.loadUrl("https://$BUNDLED_HOST/assets/$name/index.html")
     }
 
@@ -225,6 +259,7 @@ class MainActivity : Activity() {
         leavePage()
         showingBundled = true
         val page = web ?: makeWebView().also { web = it; setContentView(it) }
+        offerBridge(page)
         page.loadUrl(if (agent != null) "${CloudBridge.PAGE}?agent=${Uri.encode(agent)}" else CloudBridge.PAGE)
     }
 
@@ -273,7 +308,7 @@ class MainActivity : Activity() {
             else AlertDialog.Builder(this).setMessage("That isn't a Bridge AI pairing code.").setPositiveButton("OK", null).show()
             return
         }
-        relay = "${uri.scheme}://${uri.host}${if (uri.port > 0) ":${uri.port}" else ""}"
+        relay = RelayPage.originOf(uri)
         openPage(text)
     }
 
@@ -281,11 +316,26 @@ class MainActivity : Activity() {
     private fun openPage(url: String) {
         showingBundled = false
         val w = web ?: makeWebView().also { web = it; setContentView(it) }
+        offerBridge(w)
         w.loadUrl(url)
+    }
+
+    // The page's service worker asks for its own files too (sw.js, link-sw.js): the same answers as
+    // the page gets.
+    private fun servePageToServiceWorkers() {
+        val app = applicationContext
+        ServiceWorkerController.getInstance().setServiceWorkerClient(object : ServiceWorkerClient() {
+            override fun shouldInterceptRequest(request: WebResourceRequest): WebResourceResponse? =
+                if (RelayPage.isRelay(app, request.url)) RelayPage.serve(app, request.url, request.method) else null
+        })
     }
 
     private fun makeWebView(): PageView {
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
+        // A new WebView: the channel to the app is offered to it afresh (offerBridge).
+        bridgeAt = null
+        bridgeScript = null
+        pageReply = null
         return PageView(this).apply {
             setBackgroundColor(Color.parseColor("#0B0D11"))
             settings.javaScriptEnabled = true
@@ -296,7 +346,6 @@ class MainActivity : Activity() {
             settings.mediaPlaybackRequiresUserGesture = false
             // The page tells the app from Chrome by this, and Bridge AI names the phone "Android (app)".
             settings.userAgentString = "${settings.userAgentString} BridgeAIApp/${BuildConfig.VERSION_NAME}"
-            addJavascriptInterface(Bridge(), "bridgeAndroid")
             // Cloud agents' keys and requests, for the Cloud agents page's address only.
             CloudBridge.attach(this, CloudBridge(this@MainActivity, onKeys = { onCloudKeys() }))
             webViewClient = object : WebViewClient() {
@@ -314,10 +363,11 @@ class MainActivity : Activity() {
                     view.evaluateJavascript("window.bridgeOpenAgent && window.bridgeOpenAgent(${JSONObject.quote(id)})", null)
                 }
 
-                // The bundled UIs' files, from the app.
-                override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? = when (request.url.host) {
-                    BUNDLED_HOST -> bundled.shouldInterceptRequest(request.url)
-                    CloudBridge.HOST -> CloudBridge.serve(cloudPages, request.url)
+                // The bundled UIs' files, and the phone page's, from the app.
+                override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? = when {
+                    request.url.host == BUNDLED_HOST -> bundled.shouldInterceptRequest(request.url)
+                    request.url.host == CloudBridge.HOST -> CloudBridge.serve(cloudPages, request.url)
+                    RelayPage.isRelay(this@MainActivity, request.url) -> RelayPage.serve(this@MainActivity, request.url, request.method)
                     else -> null
                 }
 
@@ -368,70 +418,133 @@ class MainActivity : Activity() {
         }
     }
 
-    // What the page can ask of the app.
-    inner class Bridge {
-        @JavascriptInterface
-        fun scan() = runOnUiThread { startScan() }
+    // ---------- what the page can ask of the app (window.bridgeAndroid) ----------
+    // Offered only to the app's own pages: the phone page at the relay showing now, and the UIs
+    // bundled in the app. WebView gives a message channel (a WebMessageListener) to those addresses
+    // alone, and a small script there (bridgeJs) makes it the calls the page knows (relay/web/shell.js).
+    // The app answers the phone page only in its main frame: a frame inside it (Bridge AI from your
+    // computer, an agent's page, another computer's) can only say a meeting is recording, and a page
+    // anywhere else gets nothing at all. A bundled UI can only go back to the start screen. Needs a
+    // WebView from the last few years; on an older one the page works as it does in Chrome.
+    private var bridgeAt: String? = null // the relay the channel is offered to now ("" for none)
+    private var bridgeScript: ScriptHandler? = null
+    private var pageReply: JavaScriptReplyProxy? = null // the phone page showing now, to tell it of changes
+    private val bridgeOn by lazy { WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER) && WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT) }
 
-        @JavascriptInterface
-        fun computers(): String = computers.toString()
-
-        // The page showing now is connected to its computer (paired): it's on the list.
-        @JavascriptInterface
-        fun paired() = runOnUiThread { remember(null) }
-
-        // ...and says what that computer is called.
-        @JavascriptInterface
-        fun name(name: String) = runOnUiThread { remember(name.take(60)) }
-
-        @JavascriptInterface
-        fun open(url: String) = runOnUiThread { if (isKnown(url)) { relay = url; openPage(url) } }
-
-        @JavascriptInterface
-        fun pair(link: String) = runOnUiThread { usePairingLink(link) }
-
-        // The agents at work, for the lock screen (AgentsService).
-        @JavascriptInterface
-        fun activity(state: String) = runOnUiThread {
-            if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED && !askedNotifications) {
-                askedNotifications = true
-                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), NOTIFY)
+    // Before a page loads: the channel for the relay showing now, and the script with what the page
+    // reads at once (your computers, the bundled UIs it can open).
+    private fun offerBridge(w: WebView) {
+        if (!bridgeOn) return
+        val own = relay
+        val rules = setOfNotNull(own, BUNDLED_ORIGIN, CloudBridge.ORIGIN)
+        runCatching {
+            if (bridgeAt != (own ?: "")) {
+                if (bridgeAt != null) WebViewCompat.removeWebMessageListener(w, PORT)
+                WebViewCompat.addWebMessageListener(w, PORT, rules, PageBridge())
+                bridgeAt = own ?: ""
             }
-            lastActivity = state
-            AgentsService.show(applicationContext, state)
-            // While agents are on the lock screen, the page keeps running so it stays current.
-            web?.keepRunning = !runCatching { JSONObject(state).optBoolean("ended") }.getOrDefault(true)
+            bridgeScript?.remove()
+            bridgeScript = WebViewCompat.addDocumentStartJavaScript(w, bridgeJs(own), rules)
+        }.onFailure {
+            runCatching { WebViewCompat.removeWebMessageListener(w, PORT) }
+            bridgeAt = null
+            bridgeScript = null
         }
+    }
 
-        // A meeting recording: the screen stays on, since Android stops the mic of an app that isn't in front.
-        @JavascriptInterface
-        fun recording(on: Boolean) = runOnUiThread {
-            if (on) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    private fun bridgeJs(own: String?): String {
+        val bundledUis = JSONArray().apply { if (CloudBridge.available(this@MainActivity)) put(CLOUD) }.toString()
+        return """
+            (() => {
+              const port = window.$PORT
+              if (!port || window.bridgeAndroid) return
+              const post = (type, more) => port.postMessage(JSON.stringify(Object.assign({ type }, more)))
+              const recording = (on) => post('recording', { on: !!on })
+              if (window !== window.top) { window.bridgeAndroid = { recording }; return }
+              if (location.origin !== ${JSONObject.quote(own ?: "")}) { window.bridgeAndroid = { home: () => post('home'), recording }; return }
+              let list = ${computers}
+              port.addEventListener('message', (e) => { try { const m = JSON.parse(e.data); if (Array.isArray(m.computers)) list = m.computers } catch (_) {} })
+              window.bridgeAndroid = {
+                computers: () => JSON.stringify(list),
+                bundled: () => ${JSONObject.quote(bundledUis)},
+                scan: () => post('scan'),
+                paired: () => post('paired'),
+                name: (name) => post('name', { name: String(name) }),
+                open: (url) => post('open', { url: String(url) }),
+                pair: (link) => post('pair', { link: String(link) }),
+                forget: (url) => post('forget', { url: String(url) }),
+                activity: (state) => post('activity', { state: String(state) }),
+                openBundled: (name) => post('openBundled', { name: String(name) }),
+                recording,
+              }
+              post('hello')
+            })()
+        """.trimIndent()
+    }
+
+    // The list changed: the page showing now hears it, and the next one gets it from the start.
+    private fun tellPage() {
+        pageReply?.let { r -> runCatching { r.postMessage(JSONObject().put("computers", computers).toString()) } }
+        web?.let { offerBridge(it) }
+    }
+
+    private inner class PageBridge : WebViewCompat.WebMessageListener {
+        override fun onPostMessage(view: WebView, message: WebMessageCompat, sourceOrigin: Uri, isMainFrame: Boolean, reply: JavaScriptReplyProxy) {
+            if (view !== web) return
+            val m = runCatching { JSONObject(message.data ?: return) }.getOrNull() ?: return
+            val type = m.optString("type")
+            val origin = RelayPage.originOf(sourceOrigin)
+            // A meeting recording: the screen stays on, since Android stops the mic of an app that isn't in front.
+            if (type == "recording") {
+                if (m.optBoolean("on")) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                return
+            }
+            if (!isMainFrame) return
+            // Back to the start screen (or your computer's page), from a bundled UI: the demo's
+            // "Pair a computer", Cloud agents' computer button.
+            if (origin == BUNDLED_ORIGIN || origin == CloudBridge.ORIGIN) {
+                if (type == "home" && showingBundled) leaveBundled()
+                return
+            }
+            if (origin == null || origin != relay) return
+            when (type) {
+                "hello" -> { pageReply = reply; tellPage() }
+                "scan" -> startScan()
+                // The page showing now is connected to its computer (paired): it's on the list...
+                "paired" -> remember(null)
+                // ...and says what that computer is called.
+                "name" -> remember(m.optString("name").take(60))
+                "open" -> m.optString("url").let { url -> if (isKnown(url)) { relay = url; openPage(url) } }
+                "pair" -> usePairingLink(m.optString("link"))
+                "activity" -> activity(m.optString("state"))
+                "forget" -> forget(m.optString("url"))
+                // The UIs bundled in the app that the phone page can open (Cloud agents; the demo is
+                // on the app's own start screen).
+                "openBundled" -> if (m.optString("name") == CLOUD) openCloud(null)
+            }
         }
+    }
 
-        // Forget a computer: off the list, and its relay's pairing off this phone.
-        @JavascriptInterface
-        fun forget(url: String) = runOnUiThread {
-            computers = without(url)
-            WebStorage.getInstance().deleteOrigin(url)
-            if (url != relay) return@runOnUiThread
-            val next = computers.optJSONObject(0)?.optString("relay")
-            relay = next
-            if (next != null) openPage(next) else showStart(null)
+    // The agents at work, for the lock screen (AgentsService).
+    private fun activity(state: String) {
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED && !askedNotifications) {
+            askedNotifications = true
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), NOTIFY)
         }
+        lastActivity = state
+        AgentsService.show(applicationContext, state)
+        // While agents are on the lock screen, the page keeps running so it stays current.
+        web?.keepRunning = !runCatching { JSONObject(state).optBoolean("ended") }.getOrDefault(true)
+    }
 
-        // Back to the start screen (or your computer's page), from a bundled UI: the demo's
-        // "Pair a computer", Cloud agents' computer button.
-        @JavascriptInterface
-        fun home() = runOnUiThread { if (showingBundled) leaveBundled() }
-
-        // The UIs bundled in the app that the phone page can open (Cloud agents; the demo is on
-        // the app's own start screen), and opening one.
-        @JavascriptInterface
-        fun bundled(): String = JSONArray().apply { if (CloudBridge.available(this@MainActivity)) put(CLOUD) }.toString()
-
-        @JavascriptInterface
-        fun openBundled(name: String) = runOnUiThread { if (name == CLOUD) openCloud(null) }
+    // Forget a computer: off the list, and its relay's pairing off this phone.
+    private fun forget(url: String) {
+        computers = without(url)
+        WebStorage.getInstance().deleteOrigin(url)
+        if (url != relay) return tellPage()
+        val next = computers.optJSONObject(0)?.optString("relay")
+        relay = next
+        if (next != null) openPage(next) else showStart(null)
     }
 
     private var askedNotifications = false
@@ -444,6 +557,7 @@ class MainActivity : Activity() {
         val c = known ?: JSONObject().put("relay", url).also { list.put(it) }
         if (name != null) c.put("name", name)
         computers = list
+        tellPage()
     }
 
     private fun isKnown(url: String) = (0 until computers.length()).any { computers.getJSONObject(it).optString("relay") == url }
@@ -553,6 +667,12 @@ class MainActivity : Activity() {
         private const val CLOUD_NOTIFY = 4
         // The app's own address for what it serves itself (WebViewAssetLoader's default).
         private const val BUNDLED_HOST = "appassets.androidplatform.net"
+        private const val BUNDLED_ORIGIN = "https://$BUNDLED_HOST"
+        // The channel to the app, as the page sees it before bridgeJs makes it window.bridgeAndroid.
+        private const val PORT = "bridgeAndroidPort"
+        // Bridge AI's hosted relay (relay/wrangler.hosted.toml HOSTED_DOMAIN): its pairing links
+        // open the app (AndroidManifest.xml).
+        private const val HOSTED_DOMAIN = "boldbridge.app"
     }
 }
 

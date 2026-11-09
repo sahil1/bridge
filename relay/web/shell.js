@@ -5,7 +5,8 @@
 //
 // In the iPhone app (mobile/ios) there's no service worker: the app serves this page itself and
 // hands each request the frame makes to bridgeTunnel() below (window.bridgeNative is the app). The
-// Android app (mobile/android) opens the relay page as it is, adding window.bridgeAndroid.
+// Android app (mobile/android) serves its own copy of this page at the relay's address, where its
+// service worker runs as in Chrome, adding window.bridgeAndroid.
 //
 // The apps can be paired with several computers, each with its own relay: they keep the list, and
 // this page shows it (on the waiting screens, and to Bridge AI's Settings as bridgeRelay.computers).
@@ -24,7 +25,7 @@ const $ = (id) => document.getElementById(id)
 // so its banner goes with it, and comes back with it (showApp).
 const show = (id) => { for (const s of ['pair', 'wait', 'home']) $(s).hidden = s !== id; if (id) { $('app').hidden = true; $('away').hidden = true; bar(null); listOthers(); offerDemo() } }
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-// The iPhone app; the Android app opens this page as it is, and says so in its user agent.
+// The iPhone app; the Android app runs this same page, and says so in its user agent.
 const native = window.bridgeNative || null
 const inApp = !!native || /BridgeAIApp\//.test(navigator.userAgent)
 const standalone = inApp || matchMedia('(display-mode: standalone)').matches || navigator.standalone === true

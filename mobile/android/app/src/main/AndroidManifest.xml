@@ -30,6 +30,16 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- A pairing link on Bridge AI's relay (https://<id>.boldbridge.app/#pair=…, the QR code
+                 the computer shows) opens the app, which pairs as with a code it scanned. Android
+                 checks the relay says so (/.well-known/assetlinks.json at boldbridge.app; relay/HOSTED.md,
+                 Going live). A relay of your own isn't here: its links open in the browser. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="*.boldbridge.app" android:path="/" />
+            </intent-filter>
             <!-- Long-press the icon: Cloud agents. -->
             <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
         </activity>
