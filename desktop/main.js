@@ -813,9 +813,12 @@ const FLOAT_STATE = path.join(app.getPath('userData'), 'float.json')
 let float = null
 let floatHiddenFor = null // what was on the card when you hid it: it stays hidden until that changes
 let floatKey = null
-// Kept out of pictures of the screen (Settings › Meetings, on unless turned off): the meeting's own
-// (Watch a screen) and a screen you share on a call. Off, a screenshot of it shows it.
-let floatPrivate = true
+// Kept out of pictures of the screen while you share or record it (desktop/floatshare.js).
+const floatShare = require('./floatshare.js').make({
+  bin: process.env.BRIDGE_CALLWATCH || (fs.existsSync(path.join(ROOT, 'native', 'bin', 'callwatch')) ? path.join(ROOT, 'native', 'bin', 'callwatch') : null),
+  mac: IS_MAC,
+  onChange: () => { if (float && !float.isDestroyed()) float.setContentProtection(floatShare.hidden()) },
+})
 function floatAt(w, h) {
   try {
     // Where you left it, kept whole on that screen (it was moved while small, say).
@@ -837,7 +840,7 @@ function showFloat() {
   })
   float.setAlwaysOnTop(true, 'floating')
   float.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
-  float.setContentProtection(floatPrivate)
+  float.setContentProtection(floatShare.hidden())
   // Join and an invite's files, from a meeting's prep: in their own apps, as from the main window.
   float.webContents.setWindowOpenHandler(({ url }) => { if (!isLocal(url)) openOutside(url); return { action: 'deny' } })
   float.webContents.on('will-navigate', (e) => e.preventDefault())
@@ -846,21 +849,18 @@ function showFloat() {
   float.once('ready-to-show', () => float?.showInactive())
   float.loadURL(`${URL_BASE}/?float=1`)
 }
-const hideFloat = () => { if (float && !float.isDestroyed() && float.isVisible()) float.hide() }
+const hideFloat = () => { floatShare.stop(); if (float && !float.isDestroyed() && float.isVisible()) float.hide() }
 async function watchCalls() {
   for (;;) {
     try {
       const c = await fetch(`${URL_BASE}/api/calls`, { signal: AbortSignal.timeout(3000) }).then((r) => (r.ok ? r.json() : null))
       if (c) {
         const mode = c.float === 'menubar' && !IS_MAC ? 'meetings' : c.float || 'meetings'
-        if (floatPrivate !== (c.floatPrivate !== false)) {
-          floatPrivate = c.floatPrivate !== false
-          if (float && !float.isDestroyed()) float.setContentProtection(floatPrivate)
-        }
         // A meeting with other people starting within ten minutes: the card shows its prep.
         floatKey = c.recording ? `rec:${c.recording.id}:${c.recording.callEnded || ''}` : c.prompt ? `call:${c.prompt.app}:${c.prompt.at}` : c.soon ? `soon:${c.soon.id}` : 'idle'
         const want = mode === 'always' || (mode === 'meetings' && floatKey !== 'idle')
         const card = want && floatHiddenFor !== floatKey
+        floatShare.set(c.floatHide, card)
         if (card) showFloat()
         else hideFloat()
         // The menu bar: instead of the card (Settings), or for a meeting whose card you moved there.
@@ -1024,7 +1024,7 @@ app.on('child-process-gone', (_e, d) => { if (!quitting) crashes.note(crashes.fr
 app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus() } })
 app.on('activate', () => { if (!win) createWindow(); else win.show() })
 app.on('window-all-closed', () => { win = null })
-app.on('will-quit', () => globalShortcut.unregisterAll())
+app.on('will-quit', () => { globalShortcut.unregisterAll(); floatShare.stop() })
 
 // The computer is shutting down or restarting: the server keeps the open agents, and which were in
 // the middle of something, to reopen afterwards, before their terminals end (Windows warns Bridge

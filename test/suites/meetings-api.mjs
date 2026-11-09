@@ -88,12 +88,13 @@ try {
     await kit.api(`/meetings/${C.id}/stop`, {})
   }
 
-  // The floating card is kept out of screenshots and screen sharing unless that's turned off in
-  // Settings › Meetings (the desktop app reads it from /api/calls).
-  ok((await kit.api('/calls')).floatPrivate === true, 'the floating card: kept out of screenshots, to begin with')
-  await kit.api('/settings', { meetings: { floatPrivate: false } }, 'PATCH')
-  ok((await kit.api('/calls')).floatPrivate === false, 'and in them once that\'s turned off')
-  await kit.api('/settings', { meetings: { floatPrivate: true } }, 'PATCH')
+  // When the floating card is kept out of screenshots and screen sharing (Settings › Meetings; the
+  // desktop app reads it from /api/calls, desktop/floatshare.js).
+  ok((await kit.api('/calls')).floatHide === 'sharing', 'the floating card: kept out of a screen you share, to begin with')
+  await kit.api('/settings', { meetings: { floatHide: 'never' } }, 'PATCH')
+  ok((await kit.api('/calls')).floatHide === 'never', 'in every picture once that\'s turned off')
+  await kit.api('/settings', { meetings: { floatHide: 'bogus' } }, 'PATCH')
+  ok((await kit.api('/calls')).floatHide === 'sharing', 'and anything else is the first choice')
 
   // ---------- Notes about sound, not words ----------
   // An engine's "[END]" or "(keyboard clicking)" for a stretch without words: no line, and not

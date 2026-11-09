@@ -197,6 +197,19 @@ try {
     const page0 = await ask(studio, `/m/${deskM.id}/`, { port: deskPort, headers: doc })
     ok(page0.status === 200 && String(page0.headers['content-security-policy']).includes(`frame-ancestors 'self' http://127.0.0.1:${port} http://localhost:${port}`), 'at Desk\'s port, Desk\'s page, which only Studio\'s page (or itself) may put in a frame', page0.headers['content-security-policy'])
     ok((await ask(studio, `/m/${deskM.id}/api/config`, { port: deskPort })).status === 200, 'and Desk\'s API')
+    // The app's own files there come from Studio when it has the very file (its name has a hash of
+    // what's in it), not through Desk's relay: even with that relay stuck. Desk's page and API don't.
+    const asset = /src="\.?\/assets\/([^"]+\.js)"/.exec(fs.readFileSync(path.join(ROOT, 'dist', 'index.html'), 'utf8'))?.[1]
+    await rd.freeze()
+    const t0 = Date.now()
+    const own = asset ? await ask(studio, `/m/${deskM.id}/assets/${asset}`, { port: deskPort }) : null
+    const took = Date.now() - t0
+    await rd.thaw()
+    // (A stuck relay drops what it's sent: the link to Desk is made again before going on.)
+    await until(async () => (await ask(studio, `/m/${deskM.id}/api/config`, { port: deskPort })).status === 200, 30000, 500)
+    ok(own?.status === 200 && took < 3000 && /immutable/.test(own.headers['cache-control'] || '') && own.headers['x-content-type-options'] === 'nosniff' && own.text.length > 1000, 'the app\'s own files at Desk\'s port: from Studio, with Desk\'s relay stuck', { asset, status: own?.status, took })
+    const notOurs = await ask(studio, `/m/${deskM.id}/assets/not-ours-AbCd1234.js`, { port: deskPort })
+    ok(notOurs.status === 200 && /text\/html/.test(notOurs.headers['content-type'] || '') && !/immutable/.test(notOurs.headers['cache-control'] || ''), 'one Studio hasn\'t got: asked of Desk (which has none either, and answers with its page)', notOurs.status)
     const refused = await ask(studio, '/api/config', { port: deskPort })
     ok(refused.status === 403 && /Switch this window to Studio to do this/.test(refused.body?.error || '') && refused.body?.code === 'machinePage', 'Studio\'s API there: refused, saying where to do it', refused.body)
     const tries = [['POST', '/api/agents/launch', { kind: 'claude', cwd: work, label: 'Nope', prompt: 'idle' }], ['PATCH', '/api/settings', { name: 'Taken' }], ['POST', `/api/panes/${encodeURIComponent(chief)}/input`, { text: 'echo hi\r' }], ['GET', '/api/files?root=home'], ['POST', '/api/machines/asks/x', { allow: true }], ['DELETE', `/api/machines/${deskM.id}`], ['POST', '/api/relay/pair', {}], ['GET', `/api/agents/${encodeURIComponent(chief)}/screen`], ['POST', '/api/transfers', { to: deskM.id, src: { pane: chief, path: 'x' }, into: { where: 'downloads' } }], ['POST', '/api/transfers', { from: 'someone', src: { pane: 'p', path: 'x' }, into: { where: 'downloads' } }], ['GET', `/api/transfers/plan?to=${deskM.id}&pane=${chief}&path=x`]]
@@ -326,9 +339,17 @@ try {
     // Studio's look, changed after the page opened: Desk's page gets it from Studio's.
     await p.evaluate(() => localStorage.setItem('cc-appearance', JSON.stringify({ mode: 'dark', theme: 'midnight', text: 'm' })))
     await p.locator('.mc-chip').click()
+    // While Desk's page comes, the devices menu says it's switching to Desk: noted (in what Studio's
+    // page keeps for this tab) the moment it does, and read back on Studio's page below.
+    await p.evaluate(() => new MutationObserver(() => { const c = document.querySelector('.mc-chip.going'); if (c && /Desk/.test(c.textContent)) sessionStorage.setItem('test-going', String(performance.now())) }).observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true }))
+    const picked = await p.evaluate(() => performance.now())
     await p.locator('.mc-menu .mc-item', { hasText: 'Desk' }).first().click()
     await until(() => isMachine(p.url()), 20000, 100)
     await p.waitForSelector('.mc-chip', { timeout: 45000 })
+    // There, what a page asks in the background waits until what's on screen has been asked.
+    await sleep(2500)
+    const bg = await p.evaluate(() => performance.getEntriesByType('resource').filter((e) => /\/api\/(updates|crashes|insights|ideas|routines|previews)(\?|$)/.test(e.name)).map((e) => Math.round(e.startTime)))
+    ok(bg.length > 0 && bg.every((t) => t >= 1400), 'its background requests (updates, crash reports, ideas…) start after the page\'s first 1.5 s', bg)
     ok(p.url().startsWith(`${deskOrigin}/m/${deskM.id}/`) && !p.url().includes('#'), 'switched to Desk: Desk\'s page at Desk\'s port', p.url())
     ok(await p.evaluate(() => document.documentElement.getAttribute('data-theme')) === 'dark', 'with the look Studio\'s page passed it', await p.evaluate(() => document.documentElement.getAttribute('data-theme')))
     ok(/Desk/.test(await p.locator('.mc-chip').innerText()), 'its devices menu (Studio\'s list of your devices) works there', await p.locator('.mc-chip').innerText())
@@ -339,6 +360,9 @@ try {
     await shot(p, `${tag}device-isolation-settings`)
     await note.locator('button', { hasText: 'Go to Studio' }).click()
     ok(!!(await until(() => p.url().startsWith(`http://127.0.0.1:${port}/`), 20000, 100)), 'and Go to Studio: Studio\'s own page, at its own address', p.url())
+    await p.waitForSelector('.mc-chip', { timeout: 30000 })
+    const saw = Number(await p.evaluate(() => sessionStorage.getItem('test-going')))
+    ok(saw > picked && saw - picked < 1000, 'Desk picked: the devices menu said it was switching to Desk, at once, while Desk\'s page came', { picked, saw })
     ok(real(s.errors).length === 0, 'no page errors', s.errors)
     await s.ctx.close()
   }

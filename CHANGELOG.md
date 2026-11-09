@@ -2,6 +2,31 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
+## 3.13.1
+
+What you told us about 3.13.0, made better: the floating meeting card redone, Memory where you use it, Settings in fewer words, dictation that goes where you are, voices that sound like people, Studio's toolbars, switching computers in a moment, and another computer's pages kept apart from this one.
+
+### What's new
+
+- **The floating meeting card, redone:** while recording, one slim bar (the dot, the time, the meeting and Pause) that stays put when it opens. Open, it shows what's being said, one row for how loud each side is and how much each has talked, your note, Suggest what to ask, and New section beside a red Stop. A meeting about to start is half the height, with Join under its title and its goals and questions in one panel.
+- **The card hides from screen sharing only while you share:** on a Mac it stays out of a screen you share or record, and your screenshots show it (Settings › Meetings › Hide it from screen sharing: While I share my screen, Always, or Never). On Windows, where the app can't tell, it's on or off.
+- **Switching to another computer is quicker:** the app's own files come from this computer when it has them, rather than through the relay, and what's on screen is asked for first. With a relay 150 ms away, the other computer's page shows in about a third of a second instead of a second and a half. The devices menu says it's switching the moment you pick.
+- **Memory is in Meetings and Dictations**, no longer in the sidebar: each shows what came up there, with All memory beside it.
+- **Settings in fewer words:** each section shows what most people change first, in a line each, and the rest under Advanced at its end. ⌘K finds any setting. What's on by itself and sends what it reads off the computer, or costs money, is never under Advanced.
+- **Dictation goes where you are:** to the agent you looked at last on any of your computers ("To Chief of Staff on Desk"), into another computer's agent in a tab, and into a window showing another computer, never to this computer's Chief of Staff in their place.
+- **Spoken answers in a natural voice:** the most natural voice the device has (Premium, then Enhanced), and on the computer, Supertonic 3, when you ask for it (a 145 MB download, only then). It stops the moment you talk.
+- **Open in Mail and Open in Calendar** show the very message or event in the Mac's own app, and say why when they can't. "Open in" always means another app now, so Home's Coming Up says View Calendar.
+- **Studio's headers and toolbars look and behave as one app:** Present and New slide as one split button, Saved said in words, every toolbar one height.
+
+### Fixes
+
+- **Security:** another computer's pages shown here (a tab, a window switched to it, one of its agents popped out) are at an address of their own, a port on 127.0.0.1, and reach nothing of this computer but what it passes them: not its powers in the desktop app, its microphone, its API, its terminals or what it saves in the browser.
+- **Security:** an old Studio version of a page or an SVG opens sandboxed: it ran its script as the app, with everything the app can do there.
+- **Edit Home opens as Home was left**, waiting for the computer's arrangement: on a slow computer or a phone it could open in the first order and save over yours.
+- **A sheet opened after a document starts at its top**, not under a blank band.
+- **A suspended account is said the same way in Settings › Devices**, however the computer heard it first.
+- **A long folder path wraps on a phone** in Settings.
+
 ## 3.13.0
 
 AI Assist, one wand wherever a model helps; Memory for everyone; Home that puts what needs you now first, with this computer ahead and arranged your way; Studio's documents, sheets and decks doing what Google's do, with Focus and Open in Word, Excel or PowerPoint; and Files, a Finder for all your computers, a new beta feature.

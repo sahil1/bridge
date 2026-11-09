@@ -253,6 +253,8 @@ try {
   await part('Files in the sidebar', async () => {
     await p.locator('.rail-nav-btn', { hasText: 'Files' }).click()
     ok(await p.locator('.fx .fx-row[data-name="Projects"]').waitFor({ timeout: 15000 }).then(() => true, () => false), 'Files opens from the sidebar, at your home folder')
+    // Its sidebar comes on its own (/api/files/sidebar), after the folder now and then (Windows in CI).
+    await p.locator('.fx-side-sec h3', { hasText: 'Favorites' }).waitFor({ timeout: 15000 }).catch(() => {})
     const sections = await p.locator('.fx-side-sec h3').allInnerTexts()
     const sideRows = await p.locator('.fx-side-row').evaluateAll((els) => els.map((e) => e.dataset.label || e.dataset.computer))
     ok(['Favorites', 'Projects', 'Places', 'Locations'].every((s) => sections.includes(s)) && sideRows.includes('Home') && sideRows.includes('Pictures') && sideRows.includes('Laptop') && (!IS_MAC || ['Desktop', 'Documents', 'Downloads', 'iCloud Drive', 'OneDrive'].every((n) => sideRows.includes(n))), 'its sidebar: Favorites, cloud drives, Projects, Places and Locations (drives, and Laptop)', { sections, sideRows })

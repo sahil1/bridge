@@ -69,8 +69,18 @@ export const api = (path, opts) => call(apiUrl(path), opts)
 // The same on one of your devices by this computer's id for it (null: this one), through /m/<id>/
 // as a window showing it does: the dictation window, sending to an agent you looked at there.
 export const apiOn = (machine, path, opts) => call(`${machine ? `/m/${machine}` : ''}/api${path}`, opts)
+// What a page asks for in the background (an update, crash reports, what's set up, the lists a
+// menu or a dialog needs): asked at a low priority, so where requests wait their turn (a window
+// switched to another computer: six at a time, each a trip through its relay) what's on screen is
+// asked first. Where nothing waits, it changes nothing. There, in the page's first moments, they
+// wait until what's on screen has been asked for.
+const LATER = /\/api\/(updates|crashes|insights|ideas|routines|previews|chat\/models|setup\/plan|fix|presence|agent-kinds)(\/|\?|$)/
+const SETTLE = 1500
 async function call(url, opts = {}) {
+  const later = LATER.test(url)
+  if (later && machineId && apart && performance.now() < SETTLE) await new Promise((r) => setTimeout(r, SETTLE - performance.now()))
   const res = await fetch(url, {
+    ...(later ? { priority: 'low' } : {}),
     ...opts,
     headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
     body: opts.body ? JSON.stringify(opts.body) : undefined,
