@@ -106,7 +106,8 @@ export default function AskOutLoud({ agent, onSend }) {
     window.addEventListener('pointerup', up, true)
     window.addEventListener('pointercancel', up, true)
   }
-  const line = listening ? t('Listening… let go when you\'re done')
+  // Tapped, or let go before the mic was on: it listens on till it's pressed again.
+  const line = listening ? (dict.mode === 'free' ? t('Listening… press {key} again when you\'re done', { key: t('Ask out loud') }) : t('Listening… let go when you\'re done'))
     : dict.phase === 'working' ? t('Turning it into text…')
       : state === 'sending' ? t('Asking…')
         : state?.queued ? sentTo(state.queued, t('Chief of Staff'))

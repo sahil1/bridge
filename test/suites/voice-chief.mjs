@@ -9,7 +9,8 @@
 //   let go, what was said goes to it marked "(Asked out loud)"; once it's answered, the answer is
 //   read aloud for the ear (no Markdown, pane ids or links' addresses) by the device's own voice,
 //   never the internet one; Stop, Again. Its instructions say how to answer out loud. Kept in the
-//   history as sent to the Chief of Staff. On a phone, held with a finger.
+//   history as sent to the Chief of Staff. Tapped: it listens on, saying to press it again. On a
+//   phone, held with a finger.
 //   Interrupting: Esc stops it at once, and so does pressing Ask out loud again (before it listens).
 //   Settings › Voice › Spoken Answers: this device's own voices, the most natural first and picked
 //   (Premium, then Enhanced, then the rest; novelty voices left out; Chrome's two of one name once),
@@ -217,6 +218,22 @@ try {
   }
   const kept = await until(async () => (await kit.api('/dictations?limit=20')).items.find((x) => x.text === "What's blocked." || x.text === "What's blocked?"), 5000, 200)
   ok(kept?.how === 'sent' && kept.agent?.chief === true, 'kept in the history as sent to the Chief of Staff', kept)
+  // Tapped (Enter on it, or let go before the mic was on): it listens on, and says to press it again
+  // rather than to let go; pressed again, what was said goes.
+  {
+    const { ctx, p, errors } = await open(LOCAL, { said: 'anything new' })
+    await toChief(p)
+    await p.locator('.ask-btn').focus()
+    await p.keyboard.press('Enter')
+    await listens(p)
+    const line = await p.locator('.ask-line').innerText()
+    ok(/Listening… press Ask out loud again when you're done/.test(line), 'tapped: it listens on, and says to press Ask out loud again when you\'re done (not to let go)', line)
+    await sleep(1200)
+    await p.keyboard.press('Enter')
+    ok(!!(await until(() => prompts.at(-1) === '(Asked out loud) Anything new.', 8000, 100)), 'pressed again: what was said goes to the Chief of Staff', prompts.at(-1))
+    ok(real(errors).length === 0, 'no page errors', errors)
+    await ctx.close()
+  }
 
   // Settings › Voice › Spoken Answers: this device's own voices, a speed, Test.
   {
