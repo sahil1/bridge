@@ -156,7 +156,7 @@ app.use(pages.http)
 // Each request timed, for how Bridge AI itself is doing (perf.js).
 app.use(perf.timing)
 // Your other devices' Bridge AI, through this one (machines.js), before anything reads the body.
-app.use('/m', (req, res) => machines.proxy(req, res, { frames: pages.frames }))
+app.use('/m', (req, res) => machines.proxy(req, res, { frames: pages.frames, ui: UI_DIR }))
 // Saving a file from the viewer can send more than the usual 1 MB.
 const jsonSmall = express.json({ limit: '1mb' })
 const jsonFile = express.json({ limit: '6mb' })
