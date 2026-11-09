@@ -1795,7 +1795,7 @@ app.get('/api/calls', wrap(() => {
   const soon = rec || prompt ? null : meetPrep.soon()
   return {
     soon,
-    ...calls.now(), detect: cfg.meetings?.detect !== false, float: cfg.meetings?.floatCard || 'meetings', floatHover: cfg.meetings?.floatHover !== false, floatPrivate: cfg.meetings?.floatPrivate !== false,
+    ...calls.now(), detect: cfg.meetings?.detect !== false, float: cfg.meetings?.floatCard || 'meetings', floatHover: cfg.meetings?.floatHover !== false, floatHide: ['always', 'never'].includes(cfg.meetings?.floatHide) ? cfg.meetings.floatHide : 'sharing',
     prompt: rec ? null : prompt,
     recording: rec && { id: rec.id, title: rec.title, status: rec.status, startedAt: rec.startedAt, seconds: Math.round(meetings.elapsed(rec.id) || 0), talking: meetings.talking(rec.id), callApps: rec.callApps || [], callEnded: rec.callEnded || null, callEndedApp: rec.callEndedApp || null, endWhy: rec.endWhy || (rec.callEnded ? 'call' : null), stopsAt: rec.stopsAt || null, callQuiet: meetings.callQuiet(rec.id) },
   }
