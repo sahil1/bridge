@@ -319,8 +319,7 @@ app.get('/api/agents/:pane/subagents', wrap(async (req) => {
   const a = await findAgent(req.params.pane)
   if (!caps(a.kind).subagents) return { items: [], tasks: [] }
   // The terminal's footer says which shells and monitors are still running, and shows subagents its logs don't.
-  const screen = await rt.read(req.params.pane, 60).catch(() => '')
-  return listSubagents(a.sessionId ? locate('claude', a.sessionId, a.cwd) : null, screen)
+  return listSubagents(a.sessionId ? locate('claude', a.sessionId, a.cwd) : null, () => rt.read(req.params.pane, 60).catch(() => ''))
 }))
 app.get('/api/agents/:pane/transcript', wrap(async (req) => transcript(await findAgent(req.params.pane))))
 app.get('/api/agents/:pane/transcript/earlier', wrap(async (req) => earlier(await findAgent(req.params.pane), Number(req.query.before), String(req.query.after || '') || null, Math.min(200, Number(req.query.want) || 60))))
