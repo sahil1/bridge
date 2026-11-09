@@ -131,7 +131,7 @@ try {
       ['a warning chip', '.work', '<div style="background:var(--pane)"><span class="st-chip warn">Off</span></div>', 'span', 4.5],
       ['a Done tag', '.work', '<div style="background:var(--pane)"><span class="state-tag st-done">Done</span></div>', 'span', 4.5],
       ['the sidebar\'s quiet text', '.rail', '<span class="rail-label">Spaces</span>', 'span', 4.5],
-      ['the sidebar\'s rows', '.rail', '<button class="rail-nav-btn">Memory</button>', 'button', 4.5],
+      ['the sidebar\'s rows', '.rail', '<button class="rail-nav-btn">Dictations</button>', 'button', 4.5],
     ]
     const failed = []
     for (const theme of themes) {

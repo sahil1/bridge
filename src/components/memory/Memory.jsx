@@ -1,44 +1,61 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import Icon from '../Icon.jsx'
-import { PaneHeader, usePersisted } from '../layout.jsx'
+import { usePersisted } from '../layout.jsx'
 import { api, usePoll, refetch, machineId } from '../../api.js'
 import { t, tx } from '../../i18n/index.js'
 import { Fold, MEM_BY, memGroups, shortDay } from '../meetings/tools.jsx'
+import { memoryAll, setMemoryAll } from './open.js'
 import { openMeeting } from '../meetings/recording.jsx'
 import { openDictations } from '../dictations/shared.jsx'
 import { useMachines } from '../Machines.jsx'
 import '../meetings/meetings.css'
 import './memory.css'
 
-// Memory, a page of its own (server/memoryview.js), under Dictations in the sidebar and in the
-// phone's More: what Bridge AI has learned from your meetings and dictations. The collections and a
-// search come first: People (memory's and, with Meeting Insights on, the people you meet),
-// Organizations, Projects & Products and Terms, each name with how it's misheard, its note, and the
-// meetings and dictations it came up in (each opens). Beside them (under them, on a phone): About
-// You (a few lines made from it, or as you wrote them, on or off) and what there is to look over,
+// Memory (server/memoryview.js), a page in Meetings and in Dictations, a tab of each beside their
+// lists: what Bridge AI has learned from your meetings and dictations. Each shows what came up there,
+// and the names you added yourself (speech to text listens for those in both), until you pick All
+// memory; the counts follow. The collections and a search come first: People (memory's and, with
+// Meeting Insights on, the people you meet, who come from meetings), Organizations, Projects &
+// Products and Terms, each name with how it's misheard, its note, and the meetings and dictations it
+// came up in (each opens). Beside them (under them, on a phone): About You (a few lines made from
+// all of memory, in either place, or as you wrote them, on or off) and what there is to look over,
 // what looks the same (merged, or kept apart) and what looks like it adds little. In a window that
 // shows another of your computers, it's that computer's memory, and it says so.
 const COLLECTIONS = [['all', tx('All'), 'book'], ['person', tx('People'), 'users'], ['org', tx('Organizations'), 'layers'], ['project', tx('Projects & Products'), 'shapes'], ['term', tx('Terms'), 'quote']]
 const KINDS = [['person', tx('Person')], ['org', tx('Organization')], ['project', tx('Project or product')], ['term', tx('Term')]]
 const KIND = Object.fromEntries(KINDS)
 const WHY = { place: tx('A place'), language: tx('A language or nationality'), time: tx('A day, month or year'), common: tx('An everyday word or acronym'), once: tx('Came up once, over a month ago, with nothing to fix') }
+// Where it is, and what it says of what came up there.
+const HERE = {
+  meetings: { label: tx('From meetings'), find: tx('Nothing from meetings matches "{q}".'), none: tx('None of these from meetings yet.'), icon: 'mic', empty: tx('Nothing in memory has come up in a meeting yet.'), fills: tx('It fills as your meetings are summarized and as you fix a misheard word with Remember on.') },
+  dictations: { label: tx('From dictations'), find: tx('Nothing from dictations matches "{q}".'), none: tx('None of these from dictations yet.'), icon: 'wave', empty: tx('Nothing in memory has come up in a dictation yet.'), fills: tx('A name memory has counts here once you say it in a dictation.') },
+}
 // With no more than this many shown, every group is open.
 const OPEN = 30
 const list = (s) => s.split(',').map((x) => x.trim()).filter(Boolean)
 const newest = (a, b) => String(b.startedAt || b.at).localeCompare(String(a.startedAt || a.at))
 
 // The computer this window shows, when it's another of yours (/m/<id>/): its name.
-function useElsewhere() {
+export function useElsewhere() {
   const { data } = useMachines(60_000, !!machineId)
   return machineId ? data?.machines?.find((m) => m.id === machineId)?.name || t('that computer') : null
 }
 
-export default function Memory() {
+// from: where it is, 'meetings' or 'dictations'.
+export default function Memory({ from = 'meetings' }) {
   const { data, error, refresh } = usePoll('/memory', 60000)
   const elsewhere = useElsewhere()
   const [q, setQ] = useState('')
   const [coll, setColl] = usePersisted('cc-mm-coll', 'all')
-  const [by, setBy] = usePersisted('cc-mm-by', 'series')
+  // Most of what's said in dictations came up in no meeting: A to Z there to start with.
+  const [by, setBy] = usePersisted(from === 'dictations' ? 'cc-mm-by-dictations' : 'cc-mm-by', from === 'dictations' ? 'az' : 'series')
+  const [all, setAll] = useState(() => memoryAll(from))
+  useEffect(() => {
+    const on = (e) => { if (e.detail?.from === from) setAll(e.detail.all) }
+    window.addEventListener('bridge-memory-all', on)
+    return () => window.removeEventListener('bridge-memory-all', on)
+  }, [from])
+  const showAll = (v) => setMemoryAll(from, v)
   const [open, setOpen] = useState({})
   const [full, setFull] = useState({})
   const [adding, setAdding] = useState(false)
@@ -49,89 +66,124 @@ export default function Memory() {
   const act = async (fn) => { setErr(null); try { await fn(); refresh(); refetch('/meetings') } catch (e) { setErr(e.message) } }
   const save = (x, patch) => act(() => api(`/meetings/memory/${x.id}`, { method: 'PATCH', body: patch }))
   const remove = (x) => act(() => api(`/meetings/memory/${x.id}`, { method: 'DELETE' }))
+  // What came up here, and what you added; everything with All memory. The people you meet come
+  // from meetings' invites and transcripts.
+  const ours = (x) => all || x.source === 'you' || (from === 'dictations' ? x.dictations : x.meetings || []).length > 0
+  const here = terms.filter(ours)
+  const people = all || from === 'meetings' ? data?.people || [] : []
   const s = q.trim().toLowerCase()
   const match = (x) => !s || `${x.term} ${x.heard.join(' ')} ${x.also.join(' ')} ${x.note}`.toLowerCase().includes(s)
-  const shown = terms.filter((x) => coll === 'all' || x.kind === coll).filter(match)
-  const met = (data?.people || []).filter((p) => !s || `${p.name} ${p.also.join(' ')}`.toLowerCase().includes(s))
+  const inColl = (x) => coll === 'all' || x.kind === coll
+  const shown = here.filter(inColl).filter(match)
+  // As many again in all of memory: said, with the way to them, rather than nothing.
+  const beyond = all ? 0 : terms.filter((x) => !ours(x) && inColl(x) && match(x)).length
+  const met = people.filter((p) => !s || `${p.name} ${p.also.join(' ')}`.toLowerCase().includes(s))
   const groups = useMemo(() => memGroups(shown, seen, by), [shown.map((x) => `${x.id}:${x.updatedAt}:${x.kind}`).join('|'), seen, by]) // eslint-disable-line react-hooks/exhaustive-deps
   const every = !!s || shown.length <= OPEN
-  const count = (k) => (k === 'all' ? terms.length : terms.filter((x) => x.kind === k).length) + (k === 'person' ? data?.people?.length || 0 : 0)
+  const count = (k) => (k === 'all' ? here.length : here.filter((x) => x.kind === k).length) + (k === 'person' ? people.length : 0)
   const any = terms.length > 0 || data?.people?.length > 0
+  const anyHere = here.length > 0 || people.length > 0
+  // What there is to look over, of what's shown: a pair when either one is.
+  const mine = new Set(here.map((x) => x.id))
+  const same = (data?.same || []).filter((p) => p.some((id) => mine.has(id)))
+  const little = (data?.little || []).filter((x) => mine.has(x.id))
+  const at = HERE[from] || HERE.meetings
+  const names = here.length === terms.length ? (terms.length === 1 ? t('{n} name', { n: 1 }) : t('{n} names', { n: terms.length })) : t('{n} of {total} names', { n: here.length, total: terms.length })
   const how = t('What Bridge AI has learned from your meetings and dictations: who and what comes up, how it\'s spelled and misheard, and what it is. Speech to text listens for these, and your notes know who and what they are. It grows as meetings are summarized and as you fix words.')
   return (
-    <div className="mm-view">
-      <PaneHeader icon="book" title={t('Memory')} subtitle={<span className="mm-count">{data ? (terms.length === 1 ? t('{n} name', { n: 1 }) : t('{n} names', { n: terms.length })) : t('Memory')} · {elsewhere ? t('On {name}', { name: elsewhere }) : t('On this computer')}</span>}>
-        <button type="button" className="btn small" aria-expanded={adding} disabled={!data} onClick={() => setAdding((v) => !v)}><Icon name="plus" size={13} /> {t('Add')}</button>
-      </PaneHeader>
-      <div className="mm-scroll">
-        <div className={`mm-page${s ? ' finding' : ''}${data ? '' : ' solo'}`}>
-          <div className="mm-main">
-            {adding && <AddOne kind={coll === 'all' ? 'term' : coll} onDone={() => { setAdding(false); refresh() }} />}
-            {data && any && (
-              <div className="mm-tools">
-                <div className="mt-places mm-colls" role="tablist" aria-label={t('Collections')}>
-                  {COLLECTIONS.map(([k, label, icon]) => <button key={k} type="button" role="tab" data-coll={k} aria-selected={coll === k} className={coll === k ? 'on' : ''} onClick={() => setColl(k)}><Icon name={icon} size={12} /> {t(label)} <span className="muted num">{count(k)}</span></button>)}
-                </div>
-                <div className="mm-find">
-                  <input className="mt-search" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={terms.length === 1 ? t('Find a name') : t('Find a name among {n}', { n: terms.length })} aria-label={t('Find a name')} />
-                  <div className="seg small-seg" role="tablist" aria-label={t('Group by')}>
-                    {MEM_BY.map(([k, l]) => <button key={k} type="button" role="tab" aria-selected={by === k} className={by === k ? 'on' : ''} onClick={() => setBy(k)}>{t(l)}</button>)}
-                  </div>
-                </div>
-              </div>
-            )}
-            {data && !data.dictationsKept && <p className="mm-note muted small" role="status"><Icon name="info" size={13} /> {t('Dictation history is off, so the names you say in dictations aren\'t counted here. Turn it on in Settings › Voice.')}</p>}
-            {err && <p className="error-text small" role="alert">{err}</p>}
-            {/* Memory couldn't be read (the computer this window shows is away, say): said, with Try
-                again. Once it's been read, a look that fails says so above what it showed. */}
-            {error && !data && (
-              <div className="mm-empty mm-cant" role="alert">
-                <Icon name="alert" size={22} />
-                <p><b>{elsewhere ? t('Memory on {name} can\'t be shown right now.', { name: elsewhere }) : t('Memory can\'t be shown right now.')}</b></p>
-                <p className="muted small">{error}</p>
-                <button type="button" className="btn small" onClick={() => refresh()}><Icon name="refresh" size={12} /> {t('Try again')}</button>
-              </div>
-            )}
-            {error && data && <p className="mm-note muted small" role="status"><Icon name="alert" size={13} /> {t('Couldn\'t look at memory again just now ({error}), so this is how it was.', { error })}</p>}
-            {!data && !error && <div className="skeleton-rows"><div /><div /><div /></div>}
-            {data && !any && (
-              <div className="mm-empty">
-                <Icon name="book" size={22} />
-                <p><b>{t('Nothing in memory yet.')}</b></p>
-                <p className="muted small">{how}</p>
-                <p className="muted small">{t('It fills as your meetings are summarized and as you fix a misheard word with Remember on. Or add a name yourself.')}</p>
-              </div>
-            )}
-            {data && terms.length > 0 && !shown.length && <p className="muted small mm-none">{s ? t('Nothing matches "{q}".', { q: q.trim() }) : t('None of these yet.')}</p>}
-            {groups.length > 0 && (
-              <div className="mt-mem-list mm-list">
-                {groups.map((g, i) => (
-                  <Fold key={`${by}:${g.key}`} id={`mm-${g.key}`} count={g.items.length} open={g.key in open ? open[g.key] : every || i === 0} onToggle={(v) => setOpen((o) => ({ ...o, [g.key]: v }))}
-                    label={<>{by === 'series' && !g.key.startsWith(':') && <Icon name="repeat" size={11} className="muted" />}{g.label}</>}
-                    extra={g.meetings.length > 0 && (g.meetings.length === 1 ? t('in {n} meeting', { n: 1 }) : t('in {n} meetings', { n: g.meetings.length }))}>
-                    <div className="mt-mem-group">
-                      {(full[g.key] || every ? g.items : g.items.slice(0, OPEN)).map((x) => <Item key={x.id} x={x} seen={seen} dicts={data.dictations} onSave={save} onRemove={remove} />)}
-                      {!every && g.items.length > OPEN && <button type="button" className="ghost-btn mt-mem-more" onClick={() => setFull((f) => ({ ...f, [g.key]: !f[g.key] }))}>{full[g.key] ? t('Show fewer') : t('Show all {n}', { n: g.items.length })} <Icon name={full[g.key] ? 'up' : 'down'} size={11} /></button>}
-                    </div>
-                  </Fold>
-                ))}
-              </div>
-            )}
-            {data && coll === 'person' && <Met people={met} insights={data.insights} act={act} />}
-          </div>
-          {data && (
-            <div className="mm-side">
-              <AboutYou a={data.aboutYou} me={data.me} elsewhere={elsewhere} onChange={refresh} />
-              {(data.same?.length > 0 || data.little?.length > 0) && (
-                <div className="mm-looks">
-                  {data.same?.length > 0 && <Same pairs={data.same} byId={byId} act={act} />}
-                  {data.little?.length > 0 && <Tidy list={data.little} byId={byId} act={act} />}
-                </div>
-              )}
-              {any && <p className="muted small mm-how">{how}</p>}
+    <div className="mm-view" data-from={from}>
+      <div className={`mm-page${s ? ' finding' : ''}${data ? '' : ' solo'}`}>
+        {/* Which memory, how many names and whose, and Add. */}
+        <div className="mm-bar">
+          {data && any && (
+            <div className="seg small-seg mm-scope" role="tablist" aria-label={t('Which memory')}>
+              <button type="button" role="tab" data-scope="here" aria-selected={!all} className={all ? '' : 'on'} onClick={() => showAll(false)}><Icon name={at.icon} size={12} /> {t(at.label)}</button>
+              <button type="button" role="tab" data-scope="all" aria-selected={all} className={all ? 'on' : ''} onClick={() => showAll(true)}><Icon name="book" size={12} /> {t('All memory')}</button>
             </div>
           )}
+          <span className="muted small mm-count">{data ? names : t('Memory')} · {elsewhere ? t('On {name}', { name: elsewhere }) : t('On this computer')}</span>
+          <button type="button" className="btn small mm-add-btn" aria-expanded={adding} disabled={!data} onClick={() => setAdding((v) => !v)}><Icon name="plus" size={13} /> {t('Add')}</button>
         </div>
+        <div className="mm-main">
+          {adding && <AddOne kind={coll === 'all' ? 'term' : coll} onDone={() => { setAdding(false); refresh() }} />}
+          {data && anyHere && (
+            <div className="mm-tools">
+              <div className="mt-places mm-colls" role="tablist" aria-label={t('Collections')}>
+                {COLLECTIONS.map(([k, label, icon]) => <button key={k} type="button" role="tab" data-coll={k} aria-selected={coll === k} className={coll === k ? 'on' : ''} onClick={() => setColl(k)}><Icon name={icon} size={12} /> {t(label)} <span className="muted num">{count(k)}</span></button>)}
+              </div>
+              <div className="mm-find">
+                <input className="mt-search" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={here.length === 1 ? t('Find a name') : t('Find a name among {n}', { n: here.length })} aria-label={t('Find a name')} />
+                <div className="seg small-seg" role="tablist" aria-label={t('Group by')}>
+                  {MEM_BY.map(([k, l]) => <button key={k} type="button" role="tab" aria-selected={by === k} className={by === k ? 'on' : ''} onClick={() => setBy(k)}>{t(l)}</button>)}
+                </div>
+              </div>
+            </div>
+          )}
+          {data && !data.dictationsKept && (all || from === 'dictations') && <p className="mm-note muted small" role="status"><Icon name="info" size={13} /> {t('Dictation history is off, so the names you say in dictations aren\'t counted here. Turn it on in Settings › Voice.')}</p>}
+          {err && <p className="error-text small" role="alert">{err}</p>}
+          {/* Memory couldn't be read (the computer this window shows is away, say): said, with Try
+              again. Once it's been read, a look that fails says so above what it showed. */}
+          {error && !data && (
+            <div className="mm-empty mm-cant" role="alert">
+              <Icon name="alert" size={22} />
+              <p><b>{elsewhere ? t('Memory on {name} can\'t be shown right now.', { name: elsewhere }) : t('Memory can\'t be shown right now.')}</b></p>
+              <p className="muted small">{error}</p>
+              <button type="button" className="btn small" onClick={() => refresh()}><Icon name="refresh" size={12} /> {t('Try again')}</button>
+            </div>
+          )}
+          {error && data && <p className="mm-note muted small" role="status"><Icon name="alert" size={13} /> {t('Couldn\'t look at memory again just now ({error}), so this is how it was.', { error })}</p>}
+          {!data && !error && <div className="skeleton-rows"><div /><div /><div /></div>}
+          {data && !any && (
+            <div className="mm-empty">
+              <Icon name="book" size={22} />
+              <p><b>{t('Nothing in memory yet.')}</b></p>
+              <p className="muted small">{how}</p>
+              <p className="muted small">{t('It fills as your meetings are summarized and as you fix a misheard word with Remember on. Or add a name yourself.')}</p>
+            </div>
+          )}
+          {/* Memory has names, none of them from here yet: said, with the way to all of them. */}
+          {data && any && !anyHere && (
+            <div className="mm-empty mm-none-here">
+              <Icon name={at.icon} size={22} />
+              <p><b>{t(at.empty)}</b></p>
+              <p className="muted small">{t(at.fills)}</p>
+              <button type="button" className="btn small" onClick={() => showAll(true)}><Icon name="book" size={12} /> {t('Show all memory')}</button>
+            </div>
+          )}
+          {data && here.length > 0 && !shown.length && (
+            <p className="muted small mm-none">
+              {s ? (all ? t('Nothing matches "{q}".', { q: q.trim() }) : t(at.find, { q: q.trim() })) : (all ? t('None of these yet.') : t(at.none))}
+              {beyond > 0 && <> {beyond === 1 ? t('All memory has one.') : t('All memory has {n}.', { n: beyond })} <button type="button" className="link-btn" onClick={() => showAll(true)}>{t('Show all memory')}</button></>}
+            </p>
+          )}
+          {groups.length > 0 && (
+            <div className="mt-mem-list mm-list">
+              {groups.map((g, i) => (
+                <Fold key={`${by}:${g.key}`} id={`mm-${g.key}`} count={g.items.length} open={g.key in open ? open[g.key] : every || i === 0} onToggle={(v) => setOpen((o) => ({ ...o, [g.key]: v }))}
+                  label={<>{by === 'series' && !g.key.startsWith(':') && <Icon name="repeat" size={11} className="muted" />}{g.label}</>}
+                  extra={g.meetings.length > 0 && (g.meetings.length === 1 ? t('in {n} meeting', { n: 1 }) : t('in {n} meetings', { n: g.meetings.length }))}>
+                  <div className="mt-mem-group">
+                    {(full[g.key] || every ? g.items : g.items.slice(0, OPEN)).map((x) => <Item key={x.id} x={x} seen={seen} dicts={data.dictations} onSave={save} onRemove={remove} />)}
+                    {!every && g.items.length > OPEN && <button type="button" className="ghost-btn mt-mem-more" onClick={() => setFull((f) => ({ ...f, [g.key]: !f[g.key] }))}>{full[g.key] ? t('Show fewer') : t('Show all {n}', { n: g.items.length })} <Icon name={full[g.key] ? 'up' : 'down'} size={11} /></button>}
+                  </div>
+                </Fold>
+              ))}
+            </div>
+          )}
+          {data && coll === 'person' && <Met people={met} insights={data.insights} act={act} />}
+        </div>
+        {data && (
+          <div className="mm-side">
+            <AboutYou a={data.aboutYou} me={data.me} elsewhere={elsewhere} scoped={!all} onChange={refresh} />
+            {(same.length > 0 || little.length > 0) && (
+              <div className="mm-looks">
+                {same.length > 0 && <Same pairs={same} byId={byId} act={act} />}
+                {little.length > 0 && <Tidy list={little} byId={byId} act={act} />}
+              </div>
+            )}
+            {any && <p className="muted small mm-how">{how}</p>}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -202,8 +254,9 @@ function around(text, names) {
 }
 
 // About You: what it says (its first lines, and the rest when you ask), on or off, which models are
-// given it, where it came from, and your own words for it.
-function AboutYou({ a, me, elsewhere, onChange }) {
+// given it, where it came from, and your own words for it. scoped: the page shows only what came up
+// in meetings or in dictations, while About You is made from all of memory, so it says so.
+function AboutYou({ a, me, elsewhere, scoped, onChange }) {
   const [editing, setEditing] = useState(false)
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
@@ -217,7 +270,8 @@ function AboutYou({ a, me, elsewhere, onChange }) {
     if ('on' in body) setOn(body.on)
     try { await api('/memory/about', { method: 'POST', body }); setEditing(false); onChange() } catch (e) { setErr(e.message); setOn(a.on) } finally { setBusy(false) }
   }
-  const made = a.at ? t('Made from memory, {date}', { date: shortDay(a.at) }) : t('Made from memory')
+  const made = scoped ? (a.at ? t('Made from all your memory, {date}', { date: shortDay(a.at) }) : t('Made from all your memory'))
+    : a.at ? t('Made from memory, {date}', { date: shortDay(a.at) }) : t('Made from memory')
   // More than its first few lines fit: those, and Show all (looked at again as the page's width changes).
   const box = useRef(null)
   const [more, setMore] = useState(false)
