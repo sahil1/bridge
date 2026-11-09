@@ -768,9 +768,14 @@ function App() {
     const id = wide ? W.active : mtab === 'mate' ? mateShown?.paneId : mtab === 'agents' ? mobileAgent : null
     return id && byId[id] && !byId[id].view && !byId[id].shellTab ? id : null
   }
+  // ...and which device it's on, for the dictation window's "the agent I looked at last": another
+  // device's in a tab by this computer's id for it (none: this one), this window's own by the device
+  // it shows.
+  const shownA = byId[onScreen()] || null
+  const looking = !shownA ? null : shownA.remote ? { machine: shownA.remote.machine, pane: shownA.remote.pane, name: shownA.title } : { machine: machineId, pane: shownA.paneId, name: agentName(shownA) }
   const overlays = (
     <>
-      {!cloudOnly && <Dictation conf={conf?.dictation} onScreen={onScreen} />}
+      {!cloudOnly && <Dictation conf={conf?.dictation} onScreen={onScreen} looking={looking} />}
       {palette && <Palette fleet={fleet} activeId={wide ? W.active : mobileAgent} onClose={() => setPalette(false)} onOpen={openAgent} onOpenFile={openFiles} actions={actions} />}
       {settings && <Settings section={settings} onClose={closeSettings} onOpenAgent={openAgent} />}
       {(fleet?.agents || []).filter((a) => a.chief && a.setup).map((a) => <FirstRunAnswers key={a.paneId} agent={a} />)}

@@ -2,12 +2,12 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import Icon, { StatusDot } from '../components/Icon.jsx'
 import { VoiceSetup, MicFix } from '../components/Composer.jsx'
 import { agentName } from '../components/Rail.jsx'
-import { api, settingsChanged } from '../api.js'
+import { api, apiOn, settingsChanged } from '../api.js'
 import { useRecheck } from '../permissions.js'
 import { store } from '../components/layout.jsx'
 import { keyLabel } from '../../shared/dictation/keys.js'
 import { corrections } from '../../shared/dictation/corrected.js'
-import { useDictation, configure, press, release, finish, cancel, dismiss, retry, keysPlatform, dictationKey, amend, forget } from './controller.js'
+import { useDictation, configure, press, release, finish, cancel, dismiss, retry, keysPlatform, dictationKey, amend, forget, lookedAt } from './controller.js'
 import { Morph, Listening, Working, Done } from './Pill.jsx'
 import { untidiedWhy, TidyNeeds } from './Tidy.jsx'
 import Remember from './Remember.jsx'
@@ -37,7 +37,15 @@ import './dictation.css'
 // a model first ("Tidying…"), and pasted tidied; when it isn't (too slow, an error, an answer that
 // wasn't what you said, no model yet) it's pasted as you said it, and the pill says why for a
 // moment, or with no model yet, the card offers the local model in one click. On the card, Use what
-// I said swaps in the words from before tidying.
+// I said swaps in the words from before tidying. The agent you looked at last can be on another of
+// your devices (a window showing it, or its agent in a tab): Send goes there, through it; gone from
+// it, or that device out of reach, the card says so and waits for you to pick, never sending to
+// another agent (this computer's Chief of Staff) in its place.
+// The key pressed in a window of Bridge AI's showing another of your devices (whose page can't use
+// this computer's microphone): it listens for that window, and the words go into its page, where
+// they'd have gone had it heard them itself (the desktop app hands them over); "Added where you were
+// typing" for a moment, and it's gone. With nowhere to put them there, they stay on the card, to
+// copy or send, saying so.
 // The desktop app tells it when the key goes down and up (bridge-dictate-key events, as in the main
 // window); a press from before it was ready comes from hudReady(). The window keeps its width and
 // top, and grows down to fit (hudSize); on a Mac and Windows, clicks go through it except on the
@@ -53,6 +61,8 @@ const WHY = {
   secure: () => t('Secure input is on (a password field, or Secure Keyboard Entry), so it wasn\'t pasted.'),
   moved: () => t('Another app is in front now, so it wasn\'t pasted.'),
   focus: () => t('Bridge AI was in front, so it wasn\'t pasted.'),
+  // A window of Bridge AI's showing another device, with no field or agent there to put them in.
+  window: () => t('Nowhere to put it in that window.'),
   // Windows and Linux: Ctrl+V pressed with Alt still down would be another shortcut.
   held: () => t('A key was still held down, so it wasn\'t pasted. Let go of the keys once you\'ve said it.'),
   failed: () => t('Couldn\'t paste it there.'),
@@ -64,10 +74,12 @@ export default function Hud() {
   const [st, setSt] = useState(null) // the desktop app's status: { paste: { can, allowed, asks, … } }
   const [agents, setAgents] = useState([])
   const [to, setTo] = useState(undefined) // a pane id, or null for "pick one"
+  const [gone, setGone] = useState(null) // the agent you looked at last, no longer there: { name, device, away }
   const [picking, setPicking] = useState(false)
   const [done, setDone] = useState(null) // what was done with the text, said for a moment
   const [err, setErr] = useState(null)
   const [into, setInto] = useState(null) // the app it's pasted into, by name (a Mac)
+  const [toWindow, setToWindow] = useState(false) // for a window of Bridge AI's showing another device
   const [pasting, setPasting] = useState(false)
   const [why, setWhy] = useState(null) // why it wasn't pasted
   const [offer, setOffer] = useState(false) // paste it next time?
@@ -94,16 +106,31 @@ export default function Hud() {
 
   const loadStatus = () => app().dictateStatus?.().then((x) => { if (x) setSt(x) }, () => {})
   // Who it's for when it opens: the setting's choice (read again each time: it may have changed in
-  // Settings since this window opened), among the agents running now.
+  // Settings since this window opened), among the agents running now. The agent you looked at last
+  // (controller.js lookAt; before that, this computer's window's) on another device is asked of that
+  // device, and listed first as "… on Desk"; not running any more, wherever it was: said, with
+  // nobody picked.
   const pickTarget = async () => {
-    const [f, c] = await Promise.all([api('/fleet').catch(() => null), api('/config').catch(() => null)])
+    const g = press0.current
+    const seen = lookedAt()
+    const far = seen?.machine ? seen : null
+    const [f, c, there, macs] = await Promise.all([
+      api('/fleet').catch(() => null), api('/config').catch(() => null),
+      far ? apiOn(far.machine, '/fleet').catch(() => null) : null, far ? api('/machines').catch(() => null) : null,
+    ])
+    if (g !== press0.current) return
     const d = c?.dictation || conf || {}
     if (c) { setConf(d); configure(d) }
-    const list = f ? f.agents || [] : agents
-    setAgents(list)
-    const chief = list.find((a) => a.chief && a.thread?.main) || list.find((a) => a.chief)
-    const looked = list.find((a) => a.paneId === store.get('cc-ws', {})?.active)
-    setTo(d.to === 'ask' ? null : d.to === 'chief' ? (chief || looked)?.paneId ?? null : (looked || chief)?.paneId ?? null)
+    const list = f ? f.agents || [] : agents.filter((a) => !a.remote)
+    const device = far ? macs?.machines?.find((m) => m.id === far.machine)?.name || '' : ''
+    const a = far ? there?.agents?.find((x) => x.paneId === far.pane) : null
+    const theirs = a ? { ...a, paneId: `remote:${far.machine}:${far.pane}`, remote: { machine: far.machine, pane: far.pane }, device } : null
+    setAgents(theirs ? [theirs, ...list] : list)
+    const chief = list.find((x) => x.chief && x.thread?.main) || list.find((x) => x.chief)
+    const looked = far ? theirs : list.find((x) => x.paneId === (seen ? seen.pane : store.get('cc-ws', {})?.active))
+    const missing = d.to !== 'ask' && d.to !== 'chief' && seen && !looked ? { name: seen.name, device, away: !!far && !there } : null
+    setGone(missing)
+    setTo(d.to === 'ask' || missing ? null : d.to === 'chief' ? (chief || looked)?.paneId ?? null : (looked || chief)?.paneId ?? null)
   }
   useEffect(() => {
     document.title = t('Dictation')
@@ -113,23 +140,24 @@ export default function Hud() {
   // The key, from the desktop app (or a test). app, bundle: the app in front, when the desktop app
   // knows it.
   useEffect(() => {
-    const begin = (at, name, bundle) => {
+    const begin = (at, name, bundle, win = false) => {
       clearTimeout(timer.current); clearTimeout(going.current); setLeaving(false)
       setDone(null); setErr(null); setPicking(false); setWhy(null); setOffer(false); setPasting(false); setAllowed(false); setEditing(false); setEdited(null); setAsSaid(false); setDraft(null); setFixes([])
-      setInto(name || null)
+      setInto(win ? null : name || null)
+      setToWindow(!!win)
       setShown((n) => n + 1)
       press0.current++
       fresh.current = true
-      press({ kind: 'hud', app: name || bundle ? { name: name || '', bundle: bundle || '' } : null }, at); pickTarget(); loadStatus()
+      press(win ? { kind: 'hud', window: true, app: null } : { kind: 'hud', app: name || bundle ? { name: name || '', bundle: bundle || '' } : null }, at); pickTarget(); loadStatus()
     }
     const on = (e) => {
       const d = e.detail || {}
-      if (d.type === 'down') begin(d.at, d.app, d.bundle)
+      if (d.type === 'down') begin(d.at, d.app, d.bundle, d.into === true)
       else if (d.type === 'up') release(d.at)
       else if (d.type === 'cancel') { cancel(); hide() }
     }
     window.addEventListener('bridge-dictate-key', on)
-    app().hudReady?.().then((p) => { if (p?.down) { begin(p.down, p.app, p.bundle); if (p.up) release(p.up) } }).catch(() => {})
+    app().hudReady?.().then((p) => { if (p?.down) { begin(p.down, p.app, p.bundle, p.into === true); if (p.up) release(p.up) } }).catch(() => {})
     return () => window.removeEventListener('bridge-dictate-key', on)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (s.setup || s.note) fresh.current = false }, [s.setup, s.note])
@@ -180,6 +208,7 @@ export default function Hud() {
     pasted.current = r.at
     const now = fresh.current
     fresh.current = false
+    if (now && toWindow) { intoWindow(r); return }
     if (now && st?.edit?.on && app().hudSelection) { setEditing(true); editOr(r); return }
     if (!pasteOn || !now) return
     if (!st.paste.allowed) { setWhy('accessibility'); return }
@@ -203,6 +232,21 @@ export default function Hud() {
       setEditing(false)
       pasteIt({ ...r, text: x.text }, { change: true })
     } catch (e) { if (g === press0.current) { setEditing(false); setErr(e.message) } }
+  }
+  // For a window of Bridge AI's showing another device: into its page, as if it had heard them.
+  function intoWindow(r) {
+    const g = press0.current
+    setPasting(true)
+    setWhy(null)
+    const gone = () => { if (g === press0.current) { setPasting(false); setWhy('window') } }
+    ;(app().hudInto ? app().hudInto(r.text) : Promise.reject(new Error('no window'))).then((x) => {
+      if (!x?.put) return gone()
+      amend(r, { how: 'typed' })
+      if (g !== press0.current) return
+      setPasting(false)
+      setDone(t('Added where you were typing'))
+      later(900)
+    }, gone)
   }
   // change: the selection rewritten (edit by voice). back: from the card, so the app it goes into is
   // brought back to the front first. fx: names you put right in your edit of the words (kept as you
@@ -245,7 +289,9 @@ export default function Hud() {
     setAllowed(true)
     loadStatus()
   }, 2500, why === 'accessibility')
-  const agentOf = (a) => ({ id: a.paneId, name: agentName(a), ...(a.chief ? { chief: true } : {}) })
+  // An agent by name, with its device when it's another's ("Chief of Staff on Desk").
+  const named = (a) => (a.remote ? t('{name} on {device}', { name: agentName(a), device: a.device || t('your other device') }) : agentName(a))
+  const agentOf = (a) => ({ id: a.paneId, name: named(a), ...(a.chief && !a.remote ? { chief: true } : {}) })
   // What became of the words, for the history: and your edit of them, when they went edited.
   const how = (o) => ({ ...o, ...(mine ? { text: words } : {}) })
   // Done with the words: the keyboard back to the app you were in, and a name you put right offered.
@@ -259,11 +305,12 @@ export default function Hud() {
       // As the message box does: your computer types it in, or holds it while the agent is busy, and
       // its answer says which.
       const r = s.result
-      const got = await api(`/agents/${pid}/prompt`, { method: 'POST', body: { text: words } })
+      const body = { method: 'POST', body: { text: words } }
+      const got = await (target.remote ? apiOn(target.remote.machine, `/agents/${encodeURIComponent(target.remote.pane)}/prompt`, body) : api(`/agents/${pid}/prompt`, body))
       amend(r, how({ how: got?.queued ? 'queued' : 'sent', agent: agentOf(target) }))
       if (g !== press0.current) return
       const ask = went()
-      setDone(sentTo(got, agentName(target)))
+      setDone(sentTo(got, named(target)))
       later(ask ? 20000 : 1200)
     } catch (e) { if (g === press0.current) setErr(e.message) }
   }
@@ -331,8 +378,8 @@ export default function Hud() {
     } else if (g === press0.current) { setDone(t('From next time, it\'s pasted where you\'re typing.')); later(2500) }
   }
   const label = keyLabel(dictationKey(conf), keysPlatform())
-  // Pasting where you're typing, allowed: no agent to pick while it listens.
-  const intoApp = pasteOn && st?.paste?.allowed && !why
+  // Pasting where you're typing, allowed, or for a window of Bridge AI's: no agent to pick while it listens.
+  const intoApp = (toWindow || (pasteOn && st?.paste?.allowed)) && !why
   // Paste on the card: once Accessibility was turned on while the words waited, or after a paste
   // that didn't go and may now (another app was in front, a key still held, Bridge AI in front).
   const again = pasteOn && !!st?.paste?.allowed && ['moved', 'held', 'failed', 'focus'].includes(why)
@@ -348,13 +395,14 @@ export default function Hud() {
     <span className="dp-to hud-into" title={t('Pasted where you\'re typing')}>{into ? t('Into {app}', { app: into }) : t('Where you\'re typing')}</span>
   ) : (
     <button type="button" className="dp-to hud-to-btn" data-pane={target?.paneId || ''} onClick={() => setPicking((v) => !v)} aria-haspopup="menu" aria-expanded={picking}>
-      <span>{target ? t('To {name}', { name: agentName(target) }) : t('Pick an agent')}</span> <Icon name="down" size={11} />
+      <span>{target ? t('To {name}', { name: named(target) }) : t('Pick an agent')}</span> <Icon name="down" size={11} />
     </button>
   )
   // What shows: the pill while it listens, transcribes, pastes, or says what became of the words;
   // the card for the words to send or copy, a note, or the speech model to download.
   const listening = s.phase === 'opening' || s.phase === 'listening'
-  const autoPaste = !!s.result && (pasteOn || edited != null) && !!st?.paste?.allowed && !why && (pasting || (fresh.current && pasted.current !== s.result.at))
+  const handsOver = toWindow || ((pasteOn || edited != null) && !!st?.paste?.allowed)
+  const autoPaste = !!s.result && handsOver && !why && (pasting || (fresh.current && pasted.current !== s.result.at))
   const view = listening ? 'listening' : s.phase === 'working' ? 'working' : s.result && (editing || (autoPaste && !done)) ? 'pasting'
     : done && !offer && !err && !needsModel && !fixes.length ? 'done' : s.result ? 'card' : s.note || s.setup ? 'note' : 'idle'
   const card = view === 'card' || view === 'note'
@@ -375,6 +423,11 @@ export default function Hud() {
               ? <textarea ref={area} className="hud-edit" value={draft} rows={1} spellCheck aria-label={t('What you said')} onChange={(e) => { setDraft(e.target.value); fit(e.target) }} onKeyDown={onKey} onPointerDown={() => app().hudKeyboard?.(true)} />
               : <p className={`hud-text${done ? '' : ' editable'}`} onClick={done ? undefined : clickAt} title={done ? undefined : t('Click to edit')}>{words}</p>}
             {err && <p className="error-text small">{err}</p>}
+            {gone && !intoApp && !done && !target && (
+              <p className="hud-why small" role="status"><Icon name="info" size={12} /> {gone.away
+                ? t('Can\'t reach {device} now to send it to {name}.', { device: gone.device || t('your other device'), name: gone.name || t('the agent') })
+                : gone.device ? t('{name} isn\'t running on {device} any more.', { name: gone.name || t('The agent'), device: gone.device }) : t('{name} isn\'t running any more.', { name: gone.name || t('The agent') })}</p>
+            )}
             {why && <p className="hud-why small" role="status"><Icon name="info" size={12} /> {WHY[why]()}{why === 'accessibility' && (app().permission || app().pasteAsk) ? <> <button type="button" className="link-btn" onClick={askAccess}>{t('Allow it')}</button></> : null}</p>}
             {allowed && !done && <p className="hud-why small" role="status"><Icon name="check" size={12} /> {t('Accessibility is on. Click where you were typing, then Paste.')}</p>}
             {s.result?.by != null && edited == null && draft == null && (
@@ -432,7 +485,7 @@ export default function Hud() {
         <div className="hud-menu" role="menu" ref={menu}>
           {agents.map((a) => (
             <button key={a.paneId} type="button" role="menuitem" data-pane={a.paneId} className={a.paneId === to ? 'on' : ''} onClick={() => { setTo(a.paneId); setPicking(false) }}>
-              {a.chief ? <Icon name="helm" size={12} /> : <StatusDot status={a.status} size={7} />} <span>{agentName(a)}</span>
+              {a.chief ? <Icon name="helm" size={12} /> : <StatusDot status={a.status} size={7} />} <span>{named(a)}</span>
             </button>
           ))}
           {!agents.length && <p className="muted small">{t('No agents are running.')}</p>}
