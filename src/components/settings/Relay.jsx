@@ -204,9 +204,11 @@ export default function Relay({ way, setWay, onOffer }) {
           {st.limit?.why === 'gone' && !busy && (full || <div className="st-row"><button type="button" className="btn primary" onClick={useHosted}><Icon name="refresh" size={13} /> Set up Bridge AI's relay again</button><span className="muted small">Phones you paired pair again afterwards.</span></div>)}
           {st.needsUpdate && !st.busy && <p className="st-note warn"><Icon name="alert" size={13} /> Your relay is older than this Bridge AI. <button type="button" className="link-btn" onClick={() => run('/relay/update')}>Update it</button></p>}
 
+          {/* A code pairs one device: once it has, its QR code goes, and another is a click away. */}
           {st.pairing ? <PairCode p={st.pairing} onStop={() => run('/relay/pair', { stop: true })} /> : (
             <div className="st-row">
-              <button type="button" className="btn primary" disabled={!st.online} onClick={() => run('/relay/pair')}><Icon name="link" size={14} /> {t('Pair a device')}</button>
+              {st.paired && <span className="st-chip good" role="status"><Icon name="check" size={11} /> {t('{name} paired', { name: st.paired.name })}</span>}
+              <button type="button" className={st.paired ? 'btn' : 'btn primary'} disabled={!st.online} onClick={() => run('/relay/pair')}><Icon name={st.paired ? 'plus' : 'link'} size={14} /> {st.paired ? t('Add another device') : t('Pair a device')}</button>
               {!st.online && <span className="muted small">Waiting for the relay to connect.</span>}
             </div>
           )}
@@ -216,7 +218,10 @@ export default function Relay({ way, setWay, onOffer }) {
               {phones.map((d) => (
                 <li key={d.id}>
                   <Icon name="phone" size={14} /><span>{d.name}</span>
+                  {d.fresh && <span className="st-chip">{t('New')}</span>}
                   <span className="muted small">{d.connected ? 'connected now' : d.lastSeen ? `last used ${new Date(d.lastSeen).toLocaleString(locale(), { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : ''}</span>
+                  {/* Just paired: Keep it (yours), as the app's notice offers too. */}
+                  {d.fresh && <button type="button" className="ghost-btn" onClick={async () => { setErr(null); try { setSt(await api(`/relay/devices/${encodeURIComponent(d.id)}/keep`, { method: 'POST' })); window.dispatchEvent(new Event('bridge-machines')) } catch (e) { setErr(e.message) } }}>{t('Keep')}</button>}
                   <button type="button" className="ghost-btn" onClick={async () => { if (window.confirm(`Remove ${d.name}? It won't be able to reach this computer until you pair it again.`)) { setErr(null); try { setSt(await api(`/relay/devices/${encodeURIComponent(d.id)}`, { method: 'DELETE' })) } catch (e) { setErr(e.message) } } }}>Remove</button>
                 </li>
               ))}
@@ -328,7 +333,7 @@ function PairCode({ p, onStop, forPhone = false }) {
       <div className="ph-qr" aria-label={t('QR code to pair a device')} dangerouslySetInnerHTML={{ __html: p.qr }} />
       <div className="ph-pair-text">
         <ol className="ph-steps">
-          <li><b>{t('A phone:')}</b> {t('scan this with its camera, or in the Bridge AI app. Then add it to your Home Screen (iPhone: Share › Add to Home Screen; Android: ⋮ › Install app), open it from there, and type the code again if it asks.')}</li>
+          <li><b>{t('A phone:')}</b> {t('scan this with its camera, or in the Bridge AI app. To use it like an app in a browser, add it to the Home Screen (iPhone: Share › Add to Home Screen; Android: ⋮ › Install app) and pair it there. A code pairs one device.')}</li>
           {!forPhone && <li><b>{t('Another computer:')}</b> {t('in Bridge AI there, open Settings › Devices › Link a device, and paste the link or type the address and code.')}</li>}
           {!forPhone && <li><b>{t('Or let your phone link them:')}</b> {t('scan this with the Bridge AI app on a phone that\'s paired with the other computer, and it offers to link the two.')}</li>}
         </ol>
@@ -336,7 +341,7 @@ function PairCode({ p, onStop, forPhone = false }) {
           <span className="muted small">{t('Address')}</span><code>{host}</code>
           <span className="muted small">{t('Code')}</span><b className="mono">{p.code}</b>
         </div>
-        <p className="muted small">{left === 1 ? t('The code works for 1 more minute, for up to 3 devices.') : t('The code works for {n} more minutes, for up to 3 devices.', { n: left })}</p>
+        <p className="muted small">{left === 1 ? t('The code works for 1 more minute, for one device.') : t('The code works for {n} more minutes, for one device.', { n: left })}</p>
         <div className="st-row">
           <button type="button" className="ghost-btn" onClick={copy}><Icon name={copied ? 'check' : 'copy'} size={12} /> {copied ? t('Copied') : t('Copy link')}</button>
           <button type="button" className="ghost-btn" onClick={onStop}>{t('Done')}</button>
