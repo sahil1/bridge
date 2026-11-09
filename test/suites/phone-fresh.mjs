@@ -219,6 +219,7 @@ try {
   const errors = []
   p.on('pageerror', (e) => errors.push(e.message))
   await p.goto(`${relay.url}/#pair=${code}`)
+  await p.locator('#pair-go').click({ timeout: 15000 }) // a pairing link asks first: one tap
   const frame = () => p.frames().find((f) => f !== p.mainFrame() && f.url().startsWith(relay.url))
   ok(!!(await until(() => frame()?.locator('#old').count(), 30000)), 'paired: the phone page shows the computer\'s UI, an older one')
   await p.evaluate(() => { window.__same = true })

@@ -33,15 +33,27 @@ export function devices() {
   return state().devices.map((dev) => ({ id: dev.id, label: dev.label, addedAt: dev.addedAt, lastOk: dev.lastOk, here: isHere(dev) }))
 }
 
-export function subscribe(sub, label, here = false) {
+// device: the paired phone (or other computer) it came through (relay.js), so removing that one
+// stops its notifications too (forgetDevice); none for this computer's own browser, or Tailscale.
+export function subscribe(sub, label, here = false, device = null) {
   if (!sub?.endpoint || !sub?.keys?.p256dh || !sub?.keys?.auth) throw new Error('Not a push subscription')
   if (!/^https:\/\//.test(sub.endpoint)) throw new Error('Push endpoints must be https')
   const d = state()
   const id = Buffer.from(sub.endpoint).toString('base64url').slice(-16)
   d.devices = d.devices.filter((x) => x.sub.endpoint !== sub.endpoint)
-  d.devices.push({ id, label: String(label || 'Device').slice(0, 60), here: !!here, addedAt: new Date().toISOString(), sub: { endpoint: sub.endpoint, keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth } } })
+  d.devices.push({ id, label: String(label || 'Device').slice(0, 60), here: !!here, ...(device ? { device: String(device).slice(0, 40) } : {}), addedAt: new Date().toISOString(), sub: { endpoint: sub.endpoint, keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth } } })
   write(d)
   return { id }
+}
+
+// A paired device removed: the notifications it turned on go with it.
+export function forgetDevice(device) {
+  if (!device) return { removed: 0 }
+  const d = state()
+  const before = d.devices.length
+  d.devices = d.devices.filter((x) => x.device !== device)
+  if (d.devices.length !== before) write(d)
+  return { removed: before - d.devices.length }
 }
 
 export function unsubscribe({ id, endpoint }) {
