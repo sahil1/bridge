@@ -17,18 +17,26 @@
 //                        hears it end, even when the computer gives up on it), and it can't connect
 //                        again until POST /_test/back. Then, as a real network does, a connection the
 //                        computer still has carries on, and one it closed meanwhile is heard closing
+//   POST /_test/tamper?name=…&kind=…&relay=…   a relay that rewrites what a hello says in the clear
+//                        (a phone's or a device's, every one from now on)
+//   POST /_test/forge?as=refuse&why=not-paired   a relay that answers every hello itself, in the
+//                        clear: a refusal, or (as=welcome) a welcome with keys of its own; the
+//                        computer never hears the hello
+//   POST /_test/honest   neither, as before
 //   POST /_test/count    start counting again
 //   GET  /_test/state    how many computers and phones are connected, the phones' messages each way
 //                        (up, down and their bytes) and the bytes of the page's files (page)
 import http from 'node:http'
+import { createECDH } from 'node:crypto'
 import { WebSocketServer } from 'ws'
 import { bundle } from '../../relay/build.js'
 
 const [port, token] = process.argv.slice(2)
-const { build, code } = bundle()
+const { build, version, code } = bundle()
 // The bundle starts with its files and build; the worker after them is a module of its own.
 globalThis.FILES = JSON.parse(code.slice('const FILES = '.length, code.indexOf('\nconst RELAY_BUILD')))
 globalThis.RELAY_BUILD = build
+globalThis.RELAY_VERSION = version
 
 // ---------- what Cloudflare gives a Worker ----------
 globalThis.WebSocketRequestResponsePair = class { constructor(req, res) { this.req = req; this.res = res } }
@@ -91,6 +99,11 @@ const env = { HOST_TOKEN: token, HUB: { idFromName: () => 'hub', get: () => hub 
 
 let frozen = false
 let away = false // the computer has no network (POST /_test/away)
+let tamper = null // fields a hello is rewritten with (POST /_test/tamper)
+let forge = null // what the relay answers a hello with itself (POST /_test/forge)
+const frame = (obj) => Buffer.concat([Buffer.from([0]), Buffer.from(JSON.stringify(obj))])
+const helloIn = (data) => { const b = Buffer.from(data); if (b[0] !== 0) return null; try { const m = JSON.parse(b.subarray(1).toString()); return m?.t === 'hello' ? m : null } catch { return null } }
+const someKey = () => createECDH('prime256v1').generateKeys().toString('base64url')
 // The network between the relay and each end (POST /_test/net), and what went over it.
 const net = { ms: 0, host: 0, kbps: 0 }
 const sent = { up: 0, down: 0, upBytes: 0, downBytes: 0, page: 0 }
@@ -150,6 +163,9 @@ const server = http.createServer(async (req, res) => {
         if (was !== 3 || sockets.has(w)) hub.webSocketClose(w, w.closedAs).catch(() => {}).finally(() => sockets.delete(w))
       }
     }
+    else if (what.startsWith('tamper')) tamper = Object.fromEntries(new URL(req.url, 'http://x').searchParams)
+    else if (what.startsWith('forge')) { const q = new URL(req.url, 'http://x').searchParams; forge = { as: q.get('as') || 'refuse', why: q.get('why') || 'not-paired' } }
+    else if (what === 'honest') { tamper = null; forge = null }
     else if (what === 'count') Object.assign(sent, { up: 0, down: 0, upBytes: 0, downBytes: 0, page: 0 })
     else if (what === 'drop') for (const w of sockets) try { w.real?.terminate() } catch { /* gone */ }
     res.setHeader('content-type', 'application/json')
@@ -179,6 +195,10 @@ server.on('upgrade', async (req, socket, head) => {
     const wire = pipe(end)
     real.on('message', (data, isBinary) => {
       if (frozen || end.dead) return
+      // What a relay in between could do to a hello: answer it itself, or change it on the way.
+      const hello = isBinary && !isHost(end) && (tamper || forge) ? helloIn(data) : null
+      if (hello && forge) return real.send(forge.as === 'welcome' ? frame({ t: 'welcome', e: someKey(), h: someKey(), ping: 1 }) : frame({ t: 'refuse', why: forge.why }))
+      if (hello && tamper) data = frame({ ...hello, ...tamper })
       const text = isBinary ? null : String(data)
       const msg = isBinary ? new Uint8Array(data).buffer : text
       wire(size(msg), () => {

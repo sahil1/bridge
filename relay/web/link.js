@@ -10,6 +10,10 @@
 // paired phone (D) can work them out. The first time a phone pairs, the one-time code from the
 // computer proves each side to the other (an HMAC over the handshake), so the relay can't step in.
 // Messages that wait in the relay while the computer is offline are sealed on their own: see notes.
+//
+// Nothing that travels in the clear is believed: the relay can change it. What a phone or device
+// says about itself (its name; for a computer, where it's reached) comes again in its first sealed
+// record (ABOUT), and only that counts; and only a sealed record (GONE) says it was removed.
 const subtle = globalThis.crypto.subtle
 const ALG = { name: 'ECDH', namedCurve: 'P-256' }
 const enc = new TextEncoder()
@@ -72,11 +76,13 @@ async function sessionKeys(ikm, th, mine) {
 }
 
 // Phone, step 1. `device` is its own key pair; `pair` ({ id, secret }) only the first time.
+// Its name goes in the clear too, for a computer from before ABOUT. seal: this end takes its
+// removal only sealed (GONE), so a computer tells it that way rather than refusing it in the clear.
 export async function phoneHello(device, pair, name) {
   const eph = await newKey(true)
   const e = await rawPublic(eph)
   const d = await rawPublic(device)
-  const hello = { t: 'hello', v: 1, e: b64u(e), d: b64u(d), name: String(name || '').slice(0, 60) }
+  const hello = { t: 'hello', v: 1, e: b64u(e), d: b64u(d), name: String(name || '').slice(0, 60), seal: 1 }
   if (pair) hello.pair = { id: pair.id, proof: b64u(await mac(await pairKey(pair.secret), 'phone', cat(e, d))) }
   return { hello, eph, e, d }
 }
@@ -188,7 +194,13 @@ export async function openNote(me, from, note, dir) {
 
 // ---------- what goes inside: requests, responses and sockets ----------
 // [kind][stream id, 4 bytes][body]. JSON bodies for headers; raw bytes for content.
-export const K = { REQ: 1, BODY: 2, END: 3, HEAD: 4, ERR: 5, CANCEL: 6, WS_OPEN: 7, WS_MSG: 8, WS_CLOSE: 9, WS_OPENED: 10, PING: 11, PONG: 12, MORE: 13 }
+// ABOUT: a phone's or device's first record, what it says about itself ({ name, kind, relay, os,
+// version }). The computer keeps the name, and a computer's relay (so it follows a move); a kind
+// only when it's paired, never after. A computer from before ignores it.
+// GONE: from the computer, to a phone or device it removed: the only word that unpairs it. A
+// refusal in the clear (or a key that isn't the computer's) could be the relay's, so it changes
+// nothing kept.
+export const K = { REQ: 1, BODY: 2, END: 3, HEAD: 4, ERR: 5, CANCEL: 6, WS_OPEN: 7, WS_MSG: 8, WS_CLOSE: 9, WS_OPENED: 10, PING: 11, PONG: 12, MORE: 13, ABOUT: 14, GONE: 15 }
 export const CHUNK = 192 * 1024
 // An answer comes no faster than whoever asked takes it in (a video that's paused, a download to a
 // slow disk), so a big one never piles up in memory on the way. A request says how much may be on

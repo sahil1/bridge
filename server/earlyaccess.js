@@ -18,8 +18,9 @@ export const REVOKED = []
 // BRIDGE_EARLY_ACCESS_KEY (tests): a public key of their own instead of the one built in.
 export const publicKey = () => process.env.BRIDGE_EARLY_ACCESS_KEY ?? PUBLIC_KEY
 // A tester's Bold Bridge account hands this computer a code of its own (server/account.js), signed by
-// the accounts service's key, which the server gives here (useAccountsKey): codes signed with
-// either key are good. With neither, Early Access isn't offered.
+// the accounts service's key, which the server gives here (useAccountsKey; several, comma separated,
+// while that key is being changed): codes signed with any of them are good. With none, Early Access
+// isn't offered.
 let accountsKey = () => ''
 export const useAccountsKey = (fn) => { accountsKey = fn }
 export const anyKey = () => !!publicKey() || !!accountsKey()
@@ -59,7 +60,7 @@ export const publicOf = (privateKey) => crypto.createPublicKey(privateKey).expor
 //   expired    past its end
 //   revoked    taken back (REVOKED, or the ids in revoked)
 export function readCode(code, { now = Date.now(), revoked = [], key = publicKey() } = {}) {
-  const keys = [key, accountsKey()].filter(Boolean)
+  const keys = [key, ...String(accountsKey() || '').split(',')].map((k) => String(k || '').trim()).filter(Boolean)
   if (!keys.length) return { ok: false, why: 'none' }
   const m = CODE.exec(String(code || '').replace(/\s+/g, ''))
   let d = null

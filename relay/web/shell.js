@@ -5,7 +5,8 @@
 //
 // In the iPhone app (mobile/ios) there's no service worker: the app serves this page itself and
 // hands each request the frame makes to bridgeTunnel() below (window.bridgeNative is the app). The
-// Android app (mobile/android) opens the relay page as it is, adding window.bridgeAndroid.
+// Android app (mobile/android) serves its own copy of this page at the relay's address, where its
+// service worker runs as in Chrome, adding window.bridgeAndroid.
 //
 // The apps can be paired with several computers, each with its own relay: they keep the list, and
 // this page shows it (on the waiting screens, and to Bridge AI's Settings as bridgeRelay.computers).
@@ -24,7 +25,7 @@ const $ = (id) => document.getElementById(id)
 // so its banner goes with it, and comes back with it (showApp).
 const show = (id) => { for (const s of ['pair', 'wait', 'home']) $(s).hidden = s !== id; if (id) { $('app').hidden = true; $('away').hidden = true; bar(null); listOthers(); offerDemo() } }
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-// The iPhone app; the Android app opens this page as it is, and says so in its user agent.
+// The iPhone app; the Android app runs this same page, and says so in its user agent.
 const native = window.bridgeNative || null
 const inApp = !!native || /BridgeAIApp\//.test(navigator.userAgent)
 const standalone = inApp || matchMedia('(display-mode: standalone)').matches || navigator.standalone === true
@@ -256,6 +257,7 @@ let readyWaiters = []
 let appShown = false
 let relayKeeps = false // this relay keeps notes for the computer (offline.js)
 let away = false // showing what the computer last sent: it's offline, or the relay can't be reached
+let unchecked = false // turned away, or answered with another key: said, and tried again (refused)
 const streams = new Map() // id -> { onHead, onChunk, onEnd, onError }
 let nextId = 1
 let inbox = Promise.resolve()
@@ -319,7 +321,7 @@ function awayBanner(on = true) {
   if (!on) return
   bar(null)
   const relayDown = ws?.readyState !== 1 || !heardStatus
-  $('away-title').textContent = silent ? `${thisComputer()} isn't answering.` : relayDown ? 'Can\'t reach your relay right now.' : `${thisComputer()} is offline${hostSeen ? ` since ${when(hostSeen)}` : ''}.`
+  $('away-title').textContent = unchecked ? `Can't connect to ${thisComputer() === 'Your computer' ? 'your computer' : thisComputer()}: the answer through the relay couldn't be checked.` : silent ? `${thisComputer()} isn't answering.` : relayDown ? 'Can\'t reach your relay right now.' : `${thisComputer()} is offline${hostSeen ? ` since ${when(hostSeen)}` : ''}.`
   $('away-text').textContent = `Showing what it last sent. Messages you send ${relayKeeps && !relayDown && !silent ? 'go out when it\'s back' : 'wait on this phone until it\'s back'}.`
   // The way to your other computers, Cloud Agents and the demo, in the apps.
   $('away-more').hidden = !others().length && !bundledUis.length
@@ -540,7 +542,8 @@ async function notThere() {
 function whyWaiting() {
   const name = thisComputer()
   const it = name === 'Your computer' ? 'your computer' : name
-  if (heardStatus && !hostOnline) waitScreen(`${name} is offline`, `${hostSeen ? `Offline since ${when(hostSeen)}. ` : ''}It opens here as soon as it's back on, with Bridge AI running.`, true)
+  if (unchecked) waitScreen(`Can't connect to ${it}`, uncheckedText(), true)
+  else if (heardStatus && !hostOnline) waitScreen(`${name} is offline`, `${hostSeen ? `Offline since ${when(hostSeen)}. ` : ''}It opens here as soon as it's back on, with Bridge AI running.`, true)
   else if (heardStatus) waitScreen(`${name} isn't answering`, 'It\'s online, but hasn\'t answered yet. Bridge AI keeps trying.', true)
   else waitScreen(`Can't reach ${it}`, 'Its relay doesn\'t answer: check this phone\'s connection. Bridge AI keeps trying.', true)
 }
@@ -585,11 +588,14 @@ async function onData(buf) {
     waiting = null
     if (msg?.t === 'refuse') return refused(msg.why)
     let done
-    try { done = await phoneFinish(state, paired.device, msg, { hostKey: paired.hostKey, pair }) } catch (e) { return refused(e.message) }
+    try { done = await phoneFinish(state, paired.device, msg, { hostKey: paired.hostKey, pair }) } catch (e) { return refused(paired.hostKey ? 'not-checked' : e.message) }
     clearTimeout(helloTimer)
     session = done.session
+    // First, sealed: what this phone says about itself (the computer believes nothing in the clear).
+    send(K.ABOUT, 0, { name: deviceName() }).catch(() => {})
     answers = msg.ping === 1
     silent = false
+    unchecked = false
     heardComputer()
     backoff = FIRST_TRY
     if (!paired.hostKey) {
@@ -613,6 +619,7 @@ async function onData(buf) {
   heardComputer()
   if (kind === K.PING) return send(K.PONG, 0)
   if (kind === K.PONG) return
+  if (kind === K.GONE) return removedThere()
   const s = streams.get(id)
   if (!s) return
   if (kind === K.HEAD) s.onHead?.(json(body))
@@ -624,25 +631,61 @@ async function onData(buf) {
   else if (kind === K.WS_CLOSE) { streams.delete(id); s.onClose?.(json(body)) }
 }
 
+// A code that didn't work gets one answer, whatever was wrong with it (a computer from before
+// said which).
+const BAD_CODE = 'That code didn\'t work: it may be mistyped, used or expired. Make a new one on the computer (Pair a device).'
 const WHY = {
-  'not-paired': 'This phone isn\'t paired with the computer (or was removed). Pair it again.',
-  'code-expired': 'That code has expired or was used up. Make a new one on the computer.',
-  'wrong-code': 'That code isn\'t right. Check it and try again.',
+  'not-paired': 'Your computer doesn\'t know this phone. Pair it with a code from Pair a device on the computer.',
+  'code-expired': BAD_CODE,
+  'wrong-code': BAD_CODE,
   unsupported: 'Update Bridge AI on your computer, then try again.',
 }
+// Turned away. Pairing with a code: why, on the pairing screen. Paired already: the refusal came in
+// the clear, or with a key that isn't your computer's, and the relay could have sent either, so it
+// changes nothing kept (the pairing, what waits to go out): it says so and keeps trying. Only your
+// Forget, or your computer saying so sealed (removedThere), unpairs this phone.
+const uncheckedText = () => `The answer through the relay couldn't be checked, so nothing on this phone was changed. Bridge AI keeps trying. If ${thisComputer() === 'Your computer' ? 'your computer' : thisComputer()} was set up again, scan a new code from it to pair again.`
 async function refused(why) {
   dropSession()
+  clearTimeout(helloTimer)
+  if (paired?.hostKey) {
+    unchecked = true
+    if (appShown && !$('app').hidden) bar(uncheckedText(), true)
+    else whyWaiting()
+    // Its connection is let go (the relay may hold it open), and another tried in a while.
+    abandon()
+    retryTimer = setTimeout(connect, backoff)
+    backoff = Math.min(backoff * 2, LAST_TRY)
+    return
+  }
   awayBanner(false)
   bar(null)
-  // Removed on the computer: what this phone kept for it goes too.
-  if (paired?.hostKey) { await pairing.del(); await offline.clear(); paired = null }
-  else paired = null
+  paired = null
   code = null
   appShown = false
   $('app').src = 'about:blank' // stop the app asking for things it can no longer get
   show('pair')
   $('pair-err').hidden = false
   $('pair-err').textContent = WHY[why] || why
+}
+// Your computer removed this phone, and said so sealed (GONE): the pairing goes, and what this
+// phone kept for it.
+async function removedThere() {
+  const name = thisComputer() === 'Your computer' ? 'your computer' : thisComputer()
+  dropSession()
+  abandon()
+  awayBanner(false)
+  bar(null)
+  await pairing.del()
+  await offline.clear()
+  paired = null
+  code = null
+  unchecked = false
+  appShown = false
+  $('app').src = 'about:blank'
+  show('pair')
+  $('pair-err').hidden = false
+  $('pair-err').textContent = `This phone was removed on ${name}. To use it again, pair it with a new code from Pair a device there.`
 }
 
 function dropSession(msg) {
@@ -665,7 +708,7 @@ let outbox = Promise.resolve()
 function send(kind, id, body) {
   const s = session
   if (!s) return Promise.reject(new Error(offlineText()))
-  if (!unanswered && kind !== K.PONG && kind !== K.PING && kind !== K.MORE && kind !== K.CANCEL) unanswered = Date.now()
+  if (!unanswered && kind !== K.PONG && kind !== K.PING && kind !== K.MORE && kind !== K.CANCEL && kind !== K.ABOUT) unanswered = Date.now()
   const p = outbox.then(async () => { const rec = await s.seal(pack(kind, id, body)); if (session === s) ws.send(rec) })
   outbox = p.catch(() => {})
   return p
@@ -1133,6 +1176,24 @@ $('pair-form').onsubmit = async (e) => {
 $('code').oninput = (e) => { if (/[:/.]/.test(e.target.value)) return; const v = normCode(e.target.value).slice(0, 20); e.target.value = formatCode(v) }
 $('scan').onclick = () => (native ? native.post({ type: 'scan' }) : window.bridgeAndroid.scan())
 
+// A pairing link opened (the QR code, or a link from anywhere) asks first, "Pair with <name>?",
+// with its code ready: one tap pairs. So a page that opens such a link can't pair this phone with a
+// computer that isn't yours. The name comes with the link, after the code (what the computer is
+// called; none from an older one, or an app that reads only the code).
+function askPair(c, name) {
+  const who = String(name || '').trim().slice(0, 60)
+  const host = (() => { try { return new URL(relay).host } catch { return relay } })()
+  $('pair').querySelector('h1').textContent = who ? `Pair with ${who}?` : 'Pair with this computer?'
+  $('pair-intro').textContent = `This link pairs this phone with ${who || 'a computer'} (${host}), so it can use Bridge AI there. Pair only if it's yours.${isIOS && !standalone ? ' To use it like an app, add Bridge AI to your Home Screen first (Share › Add to Home Screen) and pair there: each code pairs one device.' : ''}`
+  $('pair-how').textContent = ''
+  $('code').value = formatCode(c)
+  $('pair-go').textContent = 'Pair'
+  // Paired already (with another computer, or before): Not now keeps it as it is.
+  $('pair-cancel').hidden = !paired
+  show('pair')
+}
+$('pair-cancel').onclick = () => { history.replaceState(null, '', location.pathname + location.search); location.reload() }
+
 // The iPhone app: a relay from a pairing link. A different relay is a different computer.
 function setRelay(origin) {
   if (origin === relay) return
@@ -1155,9 +1216,10 @@ async function start() {
   paired = (await pairing.get()) || null
   offline.tidy().catch(() => {})
   // A code you just scanned pairs this phone afresh, even if it was paired before (a new
-  // computer, or after it was removed).
-  const fromLink = new URLSearchParams(location.hash.slice(1)).get('pair')
-  if (fromLink && normCode(fromLink) !== paired?.code) { code = normCode(fromLink); paired = null }
+  // computer, or after it was removed): once you say so (askPair).
+  const hash = new URLSearchParams(location.hash.slice(1))
+  const fromLink = hash.get('pair')
+  if (fromLink && normCode(fromLink) !== paired?.code && relay) return askPair(normCode(fromLink), hash.get('name'))
   if (!relay) { // the iPhone app before its first pairing: the link says which relay, a code alone doesn't
     linkOnly()
     show('pair')
@@ -1173,3 +1235,29 @@ async function start() {
 start().catch((e) => waitScreen('Something went wrong', e.message, true))
 // A pairing link opened while this page is already open: start over with its code.
 addEventListener('hashchange', () => { if (/[#&]pair=/.test(location.hash)) location.reload() })
+
+// ---------- Bridge AI's hosted relay, in a browser: whose code this page is ----------
+// Kept apart from the rest. On Bridge AI's relay (boldbridge.app, or <id>.localhost when it's tried
+// on a computer: relay/HOSTED.md), a browser runs this page as the relay serves it, so the
+// encryption rests on the relay serving it unchanged. The iPhone and Android apps carry their own
+// copy. So before pairing, one line says so, with the apps a tap away, until it's dismissed. Never
+// in the apps, and never on a relay of your own.
+function hostedNote() {
+  const KEY = 'bridge-hosted-note'
+  if (inApp || !/\.(boldbridge\.app|localhost)$/i.test(location.hostname)) return
+  try { if (localStorage.getItem(KEY) === '1') return } catch { /* no storage: it shows */ }
+  const link = (text, href) => Object.assign(document.createElement('a'), { textContent: text, href, target: '_blank', rel: 'noreferrer' })
+  const note = Object.assign(document.createElement('p'), { id: 'hosted-note' })
+  note.setAttribute('role', 'note')
+  note.style.cssText = 'display:flex;gap:8px;align-items:flex-start;text-align:left;font-size:13px;margin:14px 0 0;padding:8px 6px 8px 12px;border:1px solid var(--line);border-radius:10px'
+  const text = document.createElement('span')
+  text.append('In a browser, the code that encrypts this page comes from Bridge AI\'s relay. The ', link('iPhone', 'https://boldbridge.ai/phone'), ' and ', link('Android', 'https://boldbridge.ai/#android'), ' apps carry their own.')
+  for (const a of text.querySelectorAll('a')) a.style.color = 'inherit'
+  const close = Object.assign(document.createElement('button'), { type: 'button', textContent: '×', title: 'Dismiss' })
+  close.setAttribute('aria-label', 'Dismiss')
+  close.style.cssText = 'flex:none;height:24px;width:24px;padding:0;border-radius:6px;background:transparent;color:var(--muted);font-size:18px;line-height:1'
+  close.onclick = () => { note.remove(); try { localStorage.setItem(KEY, '1') } catch { /* for now, then */ } }
+  note.append(text, close)
+  $('pair').querySelector('p')?.after(note)
+}
+hostedNote()

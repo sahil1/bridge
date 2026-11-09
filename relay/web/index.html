@@ -72,11 +72,12 @@
     <div>
       <img src="/icon-512.png" alt="" />
       <h1>Pair with your computer</h1>
-      <p>Bridge AI runs on your computer. On it, open <b>Settings › Devices</b>, click <b>Pair a device</b>, and scan the code with this phone's camera. <span id="pair-how">Or type the code here:</span></p>
+      <p><span id="pair-intro">Bridge AI runs on your computer. On it, open <b>Settings › Devices</b>, click <b>Pair a device</b>, and scan the code with this phone's camera.</span> <span id="pair-how">Or type the code here:</span></p>
       <form id="pair-form">
         <button id="scan" type="button" hidden>Scan the QR code</button>
         <input id="code" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABCD-EFGH-JKMN-PQRS-TVWX" aria-label="Pairing code or link" />
-        <button type="submit">Pair</button>
+        <button id="pair-go" type="submit">Pair</button>
+        <button id="pair-cancel" class="ghost" type="button" hidden>Not now</button>
       </form>
       <p id="pair-err" class="err" hidden></p>
       <div class="others" hidden></div>
@@ -120,7 +121,7 @@
       <p>Now add Bridge AI to your Home Screen so it opens like an app and can notify you:</p>
       <ol>
         <li>Tap <b>Share</b>, then <b>Add to Home Screen</b>.</li>
-        <li>Open Bridge AI from the Home Screen. If it asks, enter the same code again (it works for 15 minutes).</li>
+        <li>Open Bridge AI from the Home Screen and pair it there too: each code pairs one device, so choose <b>Add another device</b> on your computer for a new one.</li>
       </ol>
       <p><button id="skip" class="ghost" type="button">Use it in Safari for now</button></p>
     </div>

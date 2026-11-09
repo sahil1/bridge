@@ -347,6 +347,7 @@ try {
     const phone = await pctx.newPage()
     phone.on('pageerror', (e) => errors.push(e.message))
     await phone.goto(`${ra.url}/#pair=${code}`, { waitUntil: 'commit' })
+    await phone.locator('#pair-go').click({ timeout: 15000 }) // a pairing link asks first: one tap
     const app = () => phone.frames().find((f) => f !== phone.mainFrame() && f.url().startsWith(ra.url))
     // Not open: what the relay's page says instead (still pairing, offline, turned away), and the
     // phone's part goes no further.

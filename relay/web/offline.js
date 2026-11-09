@@ -268,8 +268,9 @@ export async function fromRelay(m) {
     if (!it) return
     delete it.putting
     if (m.ok) it.on = 'relay'
-    else if (m.why === 'not-paired') settle(it, { ok: false, why: 'not-paired', text: 'this phone isn\'t paired with your computer anymore' })
-    // Full: it stays here, and goes over the link once both are online.
+    // Not taken (the relay doesn't list this phone as paired, or it's full): it stays here, and goes
+    // over the link once both are online, where your computer's own answer, sealed, says what became
+    // of it. The relay's word alone fails nothing.
   } else if (m.t === 'receipt') await receipts([m.note])
   await persist()
   changed()

@@ -21,8 +21,9 @@ Three parts keep to this file:
 ## Rules
 
 - **Sign-in is an email and a 6-digit code**, sent from `accounts@boldbridge.ai` by Cloudflare's <!-- private-ok: the service's own sending address -->
-  Email Service (`send_email` binding). No passwords. A code lasts 10 minutes and allows 5 tries;
-  an email gets at most 5 codes an hour, a network (IPv4 /24, IPv6 /48) at most 20. Throwaway email
+  Email Service (`send_email` binding). No passwords. A code lasts 10 minutes and allows 5 tries,
+  however many are sent at once, and signs in once; an email gets at most 5 codes an hour, a network
+  (IPv4 /24, IPv6 /48) at most 20, and after 20 wrong codes in a day, none for a day. Throwaway email
   domains (a list in the Worker) are refused, saying why.
 - **One account per email**, compared lowercase and trimmed. An email's first sign-in makes it.
 - **At most 5 devices per account**, any mix of computers and phones. A sixth sign-in is refused
@@ -31,27 +32,37 @@ Three parts keep to this file:
   `approved`, `declined`). **Early Access is by request or invitation** (`tester`: `none`,
   `requested`, `yes`, `declined`). An admin can also invite an email that has no account yet: the
   account is made, marked, and the email says so.
-- **Suspended** (`status: suspended`) stops everything for the account at once: no relay token
-  works, no Early Access code is handed out, and signing in says it's suspended.
+- **Suspended** (`status: suspended`) stops the account using what it has, though not all in the
+  same moment: `GET /v1/me` hands out no relay token or Early Access code from then on (Bridge AI
+  drops the code it has when it next asks, within 6 hours); the relay hears of it within a minute of
+  the account's next use and lets its computers and phones go (a relay token handed out before still
+  checks out until it ends, so it's the relay asking that stops it); grants and requests are refused;
+  and a code asked for isn't sent (the email says it's suspended, and the answer is the same as for
+  any email). An Early Access code copied off a computer works until it ends (30 days).
 
 ## Tokens
 
 Signed with Ed25519 by the accounts service (secret `SIGNING_KEY`); anyone holding the public key
 (`ACCOUNTS_PUBLIC_KEY`, in the relay's settings and Bridge AI's code) can check one offline.
-Each is `base64url(JSON payload) + "." + base64url(signature)`.
+Each is `base64url(JSON payload) + "." + base64url(signature)`, and says which key signed it: `kid`,
+the first 8 characters of the base64url SHA-256 of the key's 32 public bytes. So the key can be
+changed without anyone signing in again: the relay's `ACCOUNTS_PUBLIC_KEY` and Bridge AI's take
+several keys, comma separated, and the service takes tokens its earlier keys signed (`OLD_KEYS`)
+until they end (README.md, Changing the signing key). A token without a `kid`, from before tokens
+had one, is checked with the first key only (the service's own: `SIGNING_KEY`'s).
 
 | Token | Payload | Lasts | Used for |
 | --- | --- | --- | --- |
-| **Device token** | `{ k: "device", a, d, iat, exp }` | 180 days, renewed by `GET /v1/me` | every call to the accounts service from that device |
-| **Relay token** | `{ k: "relay", a, d, iat, exp }` | 7 days, renewed by `GET /v1/me` | a computer registering with, and connecting to, the relay |
+| **Device token** | `{ k: "device", a, d, iat, exp, kid }` | 180 days, renewed by `GET /v1/me` (and at once when another key signed it) | every call to the accounts service from that device |
+| **Relay token** | `{ k: "relay", a, d, iat, exp, kid }` | 7 days, renewed by `GET /v1/me` | a computer registering with, and connecting to, the relay |
 | **Early Access code** | the format of `server/earlyaccess.js` (#158), label = the account's id | 30 days, renewed by `GET /v1/me` | the updater's Early Access channel |
 
 `a` is the account id, `d` the device id (both 12 lowercase letters and digits). A device token is
 also kept hashed (SHA-256) in D1, so signing out or removing a device ends it before it expires.
 `iat` and `exp` are in seconds. The Early Access code's label is the account's id, not its email:
 server/earlyaccess.js takes only letters, digits and a few marks in a label, and the label goes with
-the usage stats, which never carry an email. Bridge AI checks a code with either the owner's key
-(`PUBLIC_KEY`) or `ACCOUNTS_PUBLIC_KEY`.
+the usage stats, which never carry an email. Bridge AI checks a code with the owner's key
+(`PUBLIC_KEY`) or any of `ACCOUNTS_PUBLIC_KEY`'s.
 
 ## The API
 
@@ -61,14 +72,21 @@ HTTP status. A device token goes in `Authorization: Bearer <token>`.
 ### Signing in
 
 `POST /v1/code { email }` sends a code. `200 { sent: true }`. Errors: `invalid`, `throwaway`,
-`too-many` (with `retryAfter` seconds), `suspended`, and `unsent` (502) when the email couldn't be
-sent (nothing is counted then).
+`too-many` (with `retryAfter` seconds), `stopped` (429, with `retryAfter`: 20 wrong codes for the
+email today), and `unsent` (502) when the email couldn't be sent (nothing is counted then). A
+suspended account's email gets the same `200 { sent: true }` as any other, so the answer doesn't say
+whether an email has an account; the email it's sent says the account is suspended, with no code.
+
+Each device signed in after an account's first is said in an email to the account ("A new sign-in
+to your Bold Bridge account": which device, and when), whether by a code or a grant.
 
 `POST /v1/verify { email, code, device: { name, kind: "computer" | "phone", platform }, replace? }`
 checks it and adds the device. `200 { account, device, deviceToken }`. Errors: `wrong` (with
-`triesLeft`), `expired` (also after the fifth wrong try), `devices` (409, with `devices: [...]`),
-`suspended`. A `devices` refusal leaves the code good, so the same code with `replace: <device id>`
-removes that device and adds this one in its place.
+`triesLeft`), `expired` (also after the fifth wrong try, and for a code used already), `stopped`
+(the email's 20th wrong code today), `devices` (409, with `devices: [...]`), `suspended` (a code
+sent before the account was suspended). A `devices` refusal
+leaves the code good, so the same code with `replace: <device id>` removes that device and adds this
+one in its place.
 
 `account` is `{ id, email, tester, relay, status, createdAt }`; a `device` is
 `{ id, name, kind, platform, createdAt, lastSeen, thisOne }`.
@@ -141,9 +159,11 @@ history as `by`; without it, `400 admin`.
 | `POST /admin/invite { email, tester: "yes", note? }` | `{ account, created, emailed }`: makes the account if it's new, marks it, and emails an invitation (`relay: "approved"` works too) |
 | `DELETE /admin/accounts/:id/devices/:dev` | `{ devices }` |
 
-`used` and `limits` are as in `GET /v1/me`. The relay uses the same entrypoint for `GET
-/internal/status?a=` (`{ status: "active" | "suspended" | "gone", relay, tester }`) and `POST
-/internal/usage` (below).
+`used` and `limits` are as in `GET /v1/me`. The relay binds to an entrypoint of its own, `Relay`
+(`entrypoint = "Relay"`), which answers only `/internal/...`, never `/admin/...`: `GET
+/internal/status?a=&d=` (`{ status: "active" | "suspended" | "gone", relay, tester, device }`, where
+`device`, there only when `d` is asked about, is whether that device is still on the account) and
+`POST /internal/usage` (below).
 
 ## The relay's side
 
@@ -151,8 +171,14 @@ history as `by`; without it, `400 admin`.
   The relay checks the signature and expiry offline and keeps `{ a, d }` with the computer. One relay
   address per device: registering again with the same `d` gives the same address back.
 - **Connecting** (`/_relay/host`) needs the computer's own token, as now, and a relay token that
-  hasn't expired, in `X-Relay-Token`, for the same account. Bridge AI sends a fresh one each time it
-  connects.
+  hasn't expired, in `X-Relay-Token`, for the same account and device. Bridge AI sends a fresh one
+  each time it connects. A computer signed in again (a new device on the account) keeps its address
+  if the device it was made for is off the account and the new one has none of its own.
+- **A device removed from the account** (or signed out) loses the relay then, not when its relay
+  token ends: the relay asks `GET /internal/status?a=&d=` about the device when its computer
+  registers or connects, when a phone connects, and with its tallies (keeping the answer a minute),
+  and once `device` is false, that computer and its phones are let go with `{ t: "limit", why:
+  "token" }`, and registering is refused (`401`, `token: "removed"`).
 - **Each account's use** is kept by a Durable Object per account (`idFromName(a)`), fed by the
   account's Hubs as they tally messages. Limits are the relay's settings:
 

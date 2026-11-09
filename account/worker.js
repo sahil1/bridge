@@ -14,14 +14,16 @@
 // for it. Never anything from the person's computer. The IP address is read only to limit codes per
 // network, kept an hour as a hash of its network, and the Worker's logs are off (wrangler.toml).
 //
-// The admin view and the relay reach /admin/... and /internal/... through service bindings to its
-// Internal entrypoint, which nothing on the internet can reach; the public address has only /v1/....
+// The admin view reaches /admin/... (and /internal/...) through a service binding to its Internal
+// entrypoint, and the relay only /internal/... through its Relay entrypoint; nothing on the internet
+// can reach either, and the public address has only /v1/....
 import { WorkerEntrypoint } from 'cloudflare:workers'
 
 const HOUR = 3600 * 1000
 const DAY = 24 * HOUR
 const CODE_MINUTES = 10
 const CODE_TRIES = 5
+const WRONG_PER_DAY = 20 // wrong codes for an email in a day, past which it gets none for a day
 const CODES_PER_EMAIL = 5 // an hour
 const CODES_PER_NETWORK = 20 // an hour
 const FORMS_PER_NETWORK = 5 // requests from the website's form, an hour
@@ -65,6 +67,9 @@ export const TABLES = [
   // Codes sent in the last hour, by a hash of the email and of the network (gone after an hour).
   'CREATE TABLE IF NOT EXISTS sent (key TEXT NOT NULL, at INTEGER NOT NULL)',
   'CREATE INDEX IF NOT EXISTS sent_by_key ON sent (key, at)',
+  // Wrong codes in the last day, and when an email was stopped for a day, by a hash of the email.
+  'CREATE TABLE IF NOT EXISTS misses (key TEXT NOT NULL, at INTEGER NOT NULL)',
+  'CREATE INDEX IF NOT EXISTS misses_by_key ON misses (key, at)',
   'CREATE TABLE IF NOT EXISTS grants (hash TEXT PRIMARY KEY, account TEXT NOT NULL, device TEXT NOT NULL, expires INTEGER NOT NULL)',
   `CREATE TABLE IF NOT EXISTS requests (id TEXT PRIMARY KEY, account TEXT NOT NULL, kind TEXT NOT NULL, note TEXT NOT NULL, os TEXT NOT NULL,
     via TEXT NOT NULL, state TEXT NOT NULL, created_at INTEGER NOT NULL, decided_at INTEGER, decided_by TEXT)`,
@@ -111,34 +116,49 @@ const minutes = (s) => (s <= 60 ? 'a minute' : `${Math.ceil(s / 60)} minutes`)
 
 // ---------- Signing ----------
 // SIGNING_KEY is the private key as PKCS #8 PEM (account/key.js makes it); its public half, which
-// the relay and Bridge AI hold, is worked out from it here.
-let keys = null // [the secret, { priv, pub, x }]
+// the relay and Bridge AI hold, is worked out from it here. Each token says which key signed it (kid,
+// keyId of its public half), so the key can be changed without anyone signing in again (README.md,
+// Changing the signing key): OLD_KEYS, the public halves of keys signed with before (comma
+// separated), are still taken for the tokens they signed until those end. A token without a kid,
+// from before tokens had one, is checked with SIGNING_KEY's.
+export const keyId = async (x) => b64u(await crypto.subtle.digest('SHA-256', unb64(x))).slice(0, 8)
+let keys = null // [the settings, { priv, pub, x, kid, all: kid -> public key }]
 async function keysOf(env) {
   const pem = String(env.SIGNING_KEY || '')
-  if (keys?.[0] === pem) return keys[1]
+  const old = String(env.OLD_KEYS || '')
+  if (keys?.[0] === `${pem}\n${old}`) return keys[1]
   if (!pem) throw new Error('SIGNING_KEY isn\'t set (README.md, Going live)')
   const der = Uint8Array.from(atob(pem.replace(/-----[^-]+-----/g, '').replace(/\s+/g, '')), (c) => c.charCodeAt(0))
   const priv = await crypto.subtle.importKey('pkcs8', der, { name: 'Ed25519' }, true, ['sign'])
   const { x } = await crypto.subtle.exportKey('jwk', priv)
   const pub = await crypto.subtle.importKey('jwk', { kty: 'OKP', crv: 'Ed25519', x }, { name: 'Ed25519' }, false, ['verify'])
-  keys = [pem, { priv, pub, x }]
+  const kid = await keyId(x)
+  const all = new Map([[kid, pub]])
+  for (const o of old.split(',').map((s) => s.trim()).filter(Boolean)) {
+    try { all.set(await keyId(o), await crypto.subtle.importKey('raw', unb64(o), { name: 'Ed25519' }, false, ['verify'])) } catch { /* not a key: left out */ }
+  }
+  keys = [`${pem}\n${old}`, { priv, pub, x, kid, all }]
   return keys[1]
 }
 const signText = async (env, text) => b64u(await crypto.subtle.sign({ name: 'Ed25519' }, (await keysOf(env)).priv, enc.encode(text)))
-// A token: base64url(JSON payload) + "." + base64url(its signature).
+// A token: base64url(JSON payload, with the kid of the key that signs it) + "." + base64url(its
+// signature).
 async function sign(env, payload) {
-  const text = b64u(enc.encode(JSON.stringify(payload)))
+  const text = b64u(enc.encode(JSON.stringify({ ...payload, kid: (await keysOf(env)).kid })))
   return `${text}.${await signText(env, text)}`
 }
-// A token's payload when it's signed here, of this kind, and not past its end; else null.
+// A token's payload when it's signed here (by the key its kid names), of this kind, and not past its
+// end; else null.
 export async function readToken(env, token, kind) {
   const m = /^([A-Za-z0-9_-]{10,800})\.([A-Za-z0-9_-]{86})$/.exec(String(token || ''))
   if (!m) return null
-  let good = false
-  try { good = await crypto.subtle.verify({ name: 'Ed25519' }, (await keysOf(env)).pub, unb64(m[2]), enc.encode(m[1])) } catch { good = false }
-  if (!good) return null
   let p = null
   try { p = JSON.parse(new TextDecoder().decode(unb64(m[1]))) } catch { return null }
+  const k = await keysOf(env)
+  const key = p?.kid == null ? k.pub : k.all.get(String(p.kid))
+  let good = false
+  try { good = !!key && await crypto.subtle.verify({ name: 'Ed25519' }, key, unb64(m[2]), enc.encode(m[1])) } catch { good = false }
+  if (!good) return null
   return p?.k === kind && ID.test(p.a) && ID.test(p.d) && Number.isInteger(p.exp) && p.exp * 1000 > Date.now() ? p : null
 }
 const seconds = (t) => Math.floor(t / 1000)
@@ -189,8 +209,11 @@ function networkOf(req) {
   return [...head, ...Array(Math.max(0, 8 - head.length - tail.length)).fill('0'), ...tail].slice(0, 3).map((x) => x.replace(/^0+(?=.)/, '')).join(':')
 }
 // The limits a code is sent under, as keys of the sent table: this email, this network and, for the
-// website's form, its own. Past one: refused, saying when to try again.
+// website's form, its own. Past one: refused, saying when to try again. An email stopped for a day
+// (WRONG_PER_DAY wrong codes) gets none until then.
 async function mayCode(db, req, email, now, form) {
+  const until = await stoppedUntil(db, email, now)
+  if (until > now) stopped(until, now)
   const net = networkOf(req)
   const limits = [[`e:${(await sha(`email ${email}`)).slice(0, 32)}`, CODES_PER_EMAIL, 'this email'], [`n:${(await sha(`net ${net}`)).slice(0, 32)}`, CODES_PER_NETWORK, 'this network']]
   if (form) limits.push([`f:${(await sha(`form ${net}`)).slice(0, 32)}`, FORMS_PER_NETWORK, 'this network'])
@@ -203,19 +226,28 @@ async function mayCode(db, req, email, now, form) {
   }
   return limits.map(([k]) => k)
 }
+// A suspended account's email is answered as any other's (whoever asked can't tell it has an
+// account, or that it's suspended), under the same limits; the email itself says it's suspended,
+// with no code in it.
 async function sendCode(req, env, email, purpose, data = null) {
   const db = env.DB
   const now = Date.now()
   const acct = await byEmail(db, email)
-  if (acct?.status === 'suspended') suspended()
+  const off = acct?.status === 'suspended'
   const keys = await mayCode(db, req, email, now, purpose === 'request')
   const code = sixDigits()
-  await db.prepare('INSERT INTO codes (email, hash, expires, tries, purpose, data) VALUES (?, ?, ?, 0, ?, ?) ON CONFLICT (email) DO UPDATE SET hash = excluded.hash, expires = excluded.expires, tries = 0, purpose = excluded.purpose, data = excluded.data')
-    .bind(email, await sha(`code ${email} ${code}`), now + CODE_MINUTES * 60000, purpose, data ? JSON.stringify(data) : null).run()
+  if (off) await db.prepare('DELETE FROM codes WHERE email = ?').bind(email).run()
+  else {
+    await db.prepare('INSERT INTO codes (email, hash, expires, tries, purpose, data) VALUES (?, ?, ?, 0, ?, ?) ON CONFLICT (email) DO UPDATE SET hash = excluded.hash, expires = excluded.expires, tries = 0, purpose = excluded.purpose, data = excluded.data')
+      .bind(email, await sha(`code ${email} ${code}`), now + CODE_MINUTES * 60000, purpose, data ? JSON.stringify(data) : null).run()
+  }
   try {
-    await mail(env, email, `${code} is your Bold Bridge code`, purpose === 'request'
-      ? `To confirm your request for ${WHAT[data.kind]}, enter this code on boldbridge.ai:\n\n${code}\n\nIt works for ${CODE_MINUTES} minutes. If you didn't ask, ignore this email: nothing happens without the code.\n\nBold Bridge`
-      : `Your code to sign in to Bold Bridge is:\n\n${code}\n\nIt works for ${CODE_MINUTES} minutes. If you didn't ask for it, ignore this email: nobody can sign in without the code.\n\nBold Bridge`)
+    if (off) await mail(env, email, 'Your Bold Bridge account is suspended', 'Someone, probably you, asked for a code for your Bold Bridge account. It\'s suspended, so there\'s no code to sign in with for now. If you think that\'s a mistake, reply to this email.\n\nBold Bridge')
+    else {
+      await mail(env, email, `${code} is your Bold Bridge code`, purpose === 'request'
+        ? `To confirm your request for ${WHAT[data.kind]}, enter this code on boldbridge.ai:\n\n${code}\n\nIt works for ${CODE_MINUTES} minutes. If you didn't ask, ignore this email: nothing happens without the code.\n\nBold Bridge`
+        : `Your code to sign in to Bold Bridge is:\n\n${code}\n\nIt works for ${CODE_MINUTES} minutes. If you didn't ask for it, ignore this email: nobody can sign in without the code.\n\nBold Bridge`)
+    }
   } catch (e) {
     await db.prepare('DELETE FROM codes WHERE email = ?').bind(email).run()
     refuse(502, 'unsent', `The email with your code couldn't be sent just now (${e.message}). Try again in a minute.`)
@@ -226,21 +258,64 @@ async function sendCode(req, env, email, purpose, data = null) {
     db.prepare('INSERT INTO daily (day, what, n) VALUES (?, \'codes\', 1) ON CONFLICT DO UPDATE SET n = n + 1').bind(iso(now).slice(0, 10)),
   ])
 }
-// The code waiting for this email, checked: each wrong one is a try, and the fifth ends it.
+// The code waiting for this email, checked. A wrong one is a try, counted in the same statement that
+// finds it wrong (and only while it has tries left and hasn't run out), so guesses sent all at once
+// can't each find it untried: five are checked at most, and the fifth ends it. A wrong one counts
+// towards the email's day too (missed). The right one is used up by used(): a delete that must find
+// it, so the same code can't sign in twice at once.
 async function checkCode(db, email, code, purpose) {
   const now = Date.now()
-  const row = await db.prepare('SELECT * FROM codes WHERE email = ?').bind(email).first()
-  const gone = () => db.prepare('DELETE FROM codes WHERE email = ?').bind(email).run()
-  if (!row || row.purpose !== purpose) refuse(400, 'expired', 'There\'s no code waiting for this email: it ran out, or a newer one was sent. Ask for a new one.')
-  if (row.expires <= now) { await gone(); refuse(400, 'expired', `That code ran out (a code lasts ${CODE_MINUTES} minutes). Ask for a new one.`) }
   const given = String(code ?? '').replace(/\s+/g, '')
-  if (!/^\d{6}$/.test(given) || (await sha(`code ${email} ${given}`)) !== row.hash) {
-    const left = CODE_TRIES - row.tries - 1
-    if (left <= 0) { await gone(); refuse(400, 'expired', `That was the ${CODE_TRIES === 5 ? 'fifth' : `${CODE_TRIES}th`} wrong try, so the code no longer works. Ask for a new one.`) }
-    await db.prepare('UPDATE codes SET tries = tries + 1 WHERE email = ?').bind(email).run()
+  const hash = /^\d{6}$/.test(given) ? await sha(`code ${email} ${given}`) : ''
+  const wrong = await db.prepare('UPDATE codes SET tries = tries + 1 WHERE email = ? AND purpose = ? AND tries < ? AND expires > ? AND hash != ? RETURNING tries')
+    .bind(email, purpose, CODE_TRIES, now, hash).first()
+  if (wrong) {
+    const left = CODE_TRIES - wrong.tries
+    if (await missed(db, email, now)) stopped(now + DAY, now, true)
+    if (left <= 0) {
+      await db.prepare('DELETE FROM codes WHERE email = ? AND tries >= ?').bind(email, CODE_TRIES).run()
+      refuse(400, 'expired', `That was the ${CODE_TRIES === 5 ? 'fifth' : `${CODE_TRIES}th`} wrong try, so the code no longer works. Ask for a new one.`)
+    }
     refuse(400, 'wrong', `That code isn't right. ${left === 1 ? '1 more try' : `${left} more tries`} with this one.`, { triesLeft: left })
   }
-  return { row, used: gone }
+  const row = await db.prepare('SELECT hash, data FROM codes WHERE email = ? AND purpose = ? AND tries < ? AND expires > ? AND hash = ?')
+    .bind(email, purpose, CODE_TRIES, now, hash).first()
+  if (!row) {
+    // Why not, said as well as it can be: none (or one for something else), ran out, or used up.
+    const was = await db.prepare('SELECT expires, purpose FROM codes WHERE email = ?').bind(email).first()
+    if (!was || was.purpose !== purpose) refuse(400, 'expired', 'There\'s no code waiting for this email: it ran out, or a newer one was sent. Ask for a new one.')
+    await db.prepare('DELETE FROM codes WHERE email = ? AND expires = ?').bind(email, was.expires).run()
+    if (was.expires <= now) refuse(400, 'expired', `That code ran out (a code lasts ${CODE_MINUTES} minutes). Ask for a new one.`)
+    refuse(400, 'expired', `That code has had its ${CODE_TRIES} tries, so it no longer works. Ask for a new one.`)
+  }
+  const used = async () => {
+    const r = await db.prepare('DELETE FROM codes WHERE email = ? AND hash = ?').bind(email, row.hash).run()
+    if (r?.meta?.changes !== 1) refuse(400, 'expired', 'That code was used already, or a newer one was sent. Ask for a new one.')
+  }
+  return { row, used }
+}
+
+// Wrong codes for an email, kept a day under a hash of it. The WRONG_PER_DAY-th stops it for a day
+// (its waiting code goes too): whoever is guessing has had their tries at a million, and the person
+// whose email it is can still use the devices they're signed in on. true: stopped now.
+const missKey = async (email) => (await sha(`wrong ${email}`)).slice(0, 32)
+async function missed(db, email, now) {
+  const k = await missKey(email)
+  await db.prepare('INSERT INTO misses (key, at) VALUES (?, ?)').bind(`w:${k}`, now).run()
+  const n = (await db.prepare('SELECT COUNT(*) AS n FROM misses WHERE key = ? AND at > ?').bind(`w:${k}`, now - DAY).first())?.n || 0
+  if (n < WRONG_PER_DAY) return false
+  await db.batch([db.prepare('INSERT INTO misses (key, at) VALUES (?, ?)').bind(`x:${k}`, now), db.prepare('DELETE FROM codes WHERE email = ?').bind(email)])
+  return true
+}
+// Until when an email is stopped (0: it isn't).
+async function stoppedUntil(db, email, now) {
+  const r = await db.prepare('SELECT MAX(at) AS at FROM misses WHERE key = ? AND at > ?').bind(`x:${await missKey(email)}`, now - DAY).first()
+  return r?.at ? r.at + DAY : 0
+}
+function stopped(until, now, already = false) {
+  const retryAfter = Math.max(1, Math.ceil((until - now) / 1000))
+  const when = retryAfter <= 3600 ? minutes(retryAfter) : `${Math.ceil(retryAfter / 3600)} hours`
+  refuse(429, 'stopped', `${already ? `That's ${WRONG_PER_DAY} wrong codes for this email today, so no more` : `There were ${WRONG_PER_DAY} wrong codes for this email today, so no more`} go to it for now. Try again in ${when}; where you're signed in already, nothing changes.`, { retryAfter })
 }
 
 // ---------- Accounts and devices ----------
@@ -274,13 +349,15 @@ function deviceOf(d) {
 }
 // A device added to the account (a sign-in, or a grant redeemed): at most MAX_DEVICES, past which
 // it's refused with the list, so one can be removed first (replace: the id of one to remove and
-// put this one in its place, with the same code or grant).
-async function addDevice(env, acct, device, replace = null) {
+// put this one in its place, with the same code or grant). claim uses up the code or grant once
+// there's room, before anything is written: a second sign-in with it at the same moment finds it gone.
+async function addDevice(env, acct, device, replace = null, claim = null) {
   const db = env.DB
   active(acct)
   const list = await devicesOf(db, acct.id)
   const out = replace && list.find((x) => x.id === replace)
   if (list.length >= MAX_DEVICES && !out) refuse(409, 'devices', `Your account has ${MAX_DEVICES} devices, as many as it takes. Remove one to sign in here.`, { devices: list.map((x) => deviceView(x)) })
+  if (claim) await claim()
   const id = newId()
   const now = Date.now()
   const token = await deviceToken(env, acct.id, id, now)
@@ -289,6 +366,14 @@ async function addDevice(env, acct, device, replace = null) {
     db.prepare('INSERT INTO devices (id, account, name, kind, platform, created_at, last_seen, token_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(id, acct.id, device.name, device.kind, device.platform, now, now, await sha(token)),
     noted(db, acct.id, 'self', `signed in on ${device.name} (${device.kind}, ${device.platform})`),
   ])
+  // The account's email hears of each device signed in after its first, so one that wasn't the
+  // person's own doing doesn't go unseen. Not sent: written in its history, and the sign-in stands.
+  if (list.length) {
+    const at = new Date(now)
+    const when = `${at.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })}, ${at.toISOString().slice(11, 16)} UTC`
+    await mail(env, acct.email, 'A new sign-in to your Bold Bridge account', `"${device.name}" (a ${device.kind}, ${device.platform}) was signed in to your Bold Bridge account (${acct.email}) on ${when}.\n\nIf that was you, there's nothing to do. If it wasn't, remove it in Bridge AI on one of your computers (Settings › Account), and change your email's password: whoever signed in had a code sent to this email, or one of your computers signed in already.\n\nBold Bridge`)
+      .catch(() => noted(db, acct.id, 'service', `the email about ${device.name} signing in couldn't be sent`).run())
+  }
   return { account: accountView(acct), device: deviceView({ id, ...device, created_at: now, last_seen: now }, id), deviceToken: token }
 }
 
@@ -375,9 +460,7 @@ async function v1(req, env, url) {
     const device = deviceOf(b.device)
     const { used } = await checkCode(db, email, b.code, 'signin')
     const acct = (await byEmail(db, email)) || (await create(db, email))
-    const out = await addDevice(env, acct, device, b.replace) // the code stays, refused for devices, to pick one to replace
-    await used()
-    return json(out)
+    return json(await addDevice(env, acct, device, b.replace, used)) // the code stays, refused for devices, to pick one to replace
   }
   if (p === '/v1/grant' && post) {
     const { acct, dev } = await signedIn(req, env)
@@ -398,16 +481,16 @@ async function v1(req, env, url) {
     if (!g || g.expires <= Date.now()) refuse(400, 'expired', `That sign-in from your other computer ran out (it lasts ${GRANT_MINUTES} minutes). Sign in here with your email instead, in Settings › Account.`)
     const acct = await byId(db, g.account)
     if (!acct) refuse(400, 'expired', 'That account isn\'t there any more.')
-    const out = await addDevice(env, acct, device, b.replace)
-    await db.prepare('DELETE FROM grants WHERE hash = ?').bind(hash).run()
-    return json(out)
+    const claim = async () => { if ((await db.prepare('DELETE FROM grants WHERE hash = ?').bind(hash).run())?.meta?.changes !== 1) refuse(400, 'expired', 'That sign-in from your other computer was used already. Sign in here with your email instead, in Settings › Account.') }
+    return json(await addDevice(env, acct, device, b.replace, claim))
   }
   if (p === '/v1/me' && req.method === 'GET') {
     const { acct, dev, p: tok, hash } = await signedIn(req, env)
     const now = Date.now()
     const ok = acct.status === 'active'
-    // Past half its life, a new device token; the one this came with works until the new one is used.
-    const renew = ok && seconds(now) > tok.iat + (DEVICE_DAYS * 86400) / 2 ? await deviceToken(env, acct.id, dev.id, now) : null
+    // Past half its life, or signed with a key before this one (or before tokens said which), a new
+    // device token; the one this came with works until the new one is used.
+    const renew = ok && (seconds(now) > tok.iat + (DEVICE_DAYS * 86400) / 2 || tok.kid !== (await keysOf(env)).kid) ? await deviceToken(env, acct.id, dev.id, now) : null
     await db.batch([
       db.prepare('UPDATE devices SET last_seen = ? WHERE id = ?').bind(now, dev.id),
       ...(renew ? [db.prepare('UPDATE devices SET token_hash = ?, prev_hash = ? WHERE id = ?').bind(await sha(renew), hash, dev.id)] : []),
@@ -483,14 +566,14 @@ async function requestPublic(req, env) {
 }
 
 // ---------- /admin and /internal: the admin view and the relay, through a service binding ----------
-// Only through the Internal entrypoint below, which a service binding names and the internet can't
-// reach; the public address refuses both (404). /internal is the relay's (account/API.md, The relay's
-// side); /admin the admin view's, each call saying which admin is asking (X-Admin-Email), which goes
-// in the account's history.
+// Only through the entrypoints below, which a service binding names and the internet can't reach;
+// the public address refuses both (404). /internal is the relay's (account/API.md, The relay's side),
+// through Relay, which has nothing else; /admin the admin view's, through Internal, each call saying
+// which admin is asking (X-Admin-Email), which goes in the account's history.
 async function inside(req, env, url) {
   const db = env.DB
   const p = url.pathname
-  if (p === '/internal/status' && req.method === 'GET') return json(await statusOf(db, url.searchParams.get('a')))
+  if (p === '/internal/status' && req.method === 'GET') return json(await statusOf(db, url.searchParams.get('a'), url.searchParams.get('d')))
   if (p === '/internal/usage' && req.method === 'POST') return json(await usage(db, await body(req)))
   if (!p.startsWith('/admin/')) return new Response('Not found\n', { status: 404 })
   const by = clean(req.headers.get('X-Admin-Email'))
@@ -623,10 +706,15 @@ async function change(env, acct, b, by, { invite = false } = {}) {
 const EARLY_ON = 'Bridge AI on your computers picks it up by itself within a few hours, or straight away when you open Settings › Account: from then on they get new versions before everyone else. To leave, open Settings › About & Updates.'
 const RELAY_ON = 'In Bridge AI on your computer, open Settings › Devices, pick Bridge AI\'s relay, then pair your phone.'
 
-// For the relay: whether an account may use it ('gone': there's no such account any more).
-async function statusOf(db, a) {
+// For the relay: whether an account may use it ('gone': there's no such account any more), and with
+// d, whether that device is still on it (device: false once it's removed or signed out, so the relay
+// lets it go then, not when its relay token ends).
+async function statusOf(db, a, d = null) {
   const acct = ID.test(String(a)) ? await byId(db, a) : null
-  return acct ? { status: acct.status, relay: acct.relay, tester: acct.tester } : { status: 'gone' }
+  if (!acct) return { status: 'gone' }
+  const out = { status: acct.status, relay: acct.relay, tester: acct.tester }
+  if (d != null) out.device = ID.test(String(d)) && !!(await db.prepare('SELECT id FROM devices WHERE id = ? AND account = ?').bind(String(d), acct.id).first())
+  return out
 }
 // The relay's report of an account's use: { a, window: { messages, resetsAt }, week, days: { day:
 // messages }, limits }, kept for GET /v1/me and the admin view. Answered with the account's status,
@@ -656,8 +744,9 @@ const cors = (env) => ({ 'access-control-allow-origin': env.SITE || 'https://bol
 // Nothing to read here: a browser opening the address goes to what the privacy policy says.
 const PRIVACY = 'https://boldbridge.ai/privacy#your-bold-bridge-account-optional'
 
-// A request, from the internet (only /v1, and / to the policy) or through the binding (only /admin
-// and /internal): refusals answered with their words, anything else with a sentence of its own.
+// A request, from the internet (only /v1, and / to the policy) or through a binding (bound: 'admin',
+// /admin and /internal; 'relay', /internal only): refusals answered with their words, anything else
+// with a sentence of its own.
 async function answer(req, env, bound) {
   const url = new URL(req.url)
   const form = !bound && url.pathname === '/v1/request-public'
@@ -665,7 +754,7 @@ async function answer(req, env, bound) {
   try {
     if (form && req.method === 'OPTIONS') return new Response(null, { status: 204, headers: extra })
     if (!bound && url.pathname === '/' && (req.method === 'GET' || req.method === 'HEAD')) return new Response(null, { status: 301, headers: { location: PRIVACY, 'cache-control': 'public, max-age=3600' } })
-    const mine = bound ? /^\/(admin|internal)\//.test(url.pathname) : url.pathname.startsWith('/v1/')
+    const mine = bound === 'relay' ? url.pathname.startsWith('/internal/') : bound ? /^\/(admin|internal)\//.test(url.pathname) : url.pathname.startsWith('/v1/')
     if (!mine) return new Response('Not found\n', { status: 404 })
     await tables(env.DB)
     const r = bound ? await inside(req, env, url) : await v1(req, env, url)
@@ -677,16 +766,21 @@ async function answer(req, env, bound) {
   }
 }
 
-// What the admin view and the relay bind to (services: { binding = "ACCOUNTS", service =
-// "bridge-accounts", entrypoint = "Internal" }): /admin and /internal, at any address.
+// What the admin view binds to (services: { binding = "ACCOUNTS", service = "bridge-accounts",
+// entrypoint = "Internal" }): /admin and /internal, at any address.
 export class Internal extends WorkerEntrypoint {
-  fetch(req) { return answer(req, this.env, true) }
+  fetch(req) { return answer(req, this.env, 'admin') }
+}
+// What the relay binds to (the same, with entrypoint = "Relay"): /internal only, so the relay, or
+// anyone who takes over its Worker, can't reach the admin routes.
+export class Relay extends WorkerEntrypoint {
+  fetch(req) { return answer(req, this.env, 'relay') }
 }
 
 export default {
   fetch: (req, env) => answer(req, env, false),
-  // Once a day: codes, grants and the hour's counts that ran out go, and the relay's use by day
-  // after 90 days.
+  // Once a day: codes, grants, the hour's counts and the day's wrong codes that ran out go, and the
+  // relay's use by day after 90 days.
   async scheduled(_event, env) {
     const db = env.DB
     await tables(db)
@@ -695,6 +789,7 @@ export default {
       db.prepare('DELETE FROM codes WHERE expires < ?').bind(now),
       db.prepare('DELETE FROM grants WHERE expires < ?').bind(now),
       db.prepare('DELETE FROM sent WHERE at < ?').bind(now - HOUR),
+      db.prepare('DELETE FROM misses WHERE at < ?').bind(now - DAY),
       db.prepare('DELETE FROM usage_days WHERE day < ?').bind(iso(now - KEEP_USE_DAYS * DAY).slice(0, 10)),
       db.prepare('DELETE FROM daily WHERE day < ?').bind(iso(now - 400 * DAY).slice(0, 10)),
     ])

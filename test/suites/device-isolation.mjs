@@ -168,6 +168,18 @@ try {
   await studio.api('/machines', { link: `${rd.url} ${pairing.code}` })
   const deskM = await until(async () => (await studio.api('/machines')).machines.find((x) => x.name === 'Desk' && x.online), 30000, 300)
   ok(!!deskM, 'Studio is linked with Desk')
+  // Linked with Desk's code, Studio reaches Desk and no other computer through it until it's kept on
+  // Desk: no code of Desk's to hand on, no third computer introduced to it.
+  {
+    const studioOnDesk = (await desk.api('/relay')).devices.find((d) => d.kind === 'computer')
+    const invite = () => ask(studio, `/m/${deskM.id}/api/machines/invite`, { method: 'POST', body: {} })
+    const notYet = await invite()
+    const intro = await ask(studio, `/m/${deskM.id}/api/machines`, { method: 'POST', body: { link: 'http://127.0.0.1:9/#pair=AAAA-BBBB-CCCC-DDDD-EEEE', via: 'intro' } })
+    ok(studioOnDesk?.fresh && notYet.status >= 400 && /^Keep Studio in Bridge AI on Desk first/.test(notYet.body?.error || '') && intro.status >= 400 && /^Keep Studio/.test(intro.body?.error || ''), 'Studio, linked with Desk\'s code and not kept there yet: Desk gives it no code to hand on, and takes no introduction from it', [notYet.body, intro.body])
+    await desk.api(`/relay/devices/${studioOnDesk.id}/keep`, {})
+    const kept = await invite()
+    ok(kept.status === 200 && /#pair=/.test(kept.body?.link || ''), 'kept on Desk: it can', kept.status)
+  }
   const port = new URL(studio.url).port
   // Desk's port on Studio, as Studio's own page is told (and kept in Studio's machines.json).
   deskPort = await until(async () => (await studio.api('/machines')).machines.find((x) => x.id === deskM.id)?.port, 15000, 200)

@@ -101,15 +101,42 @@ abstract class BuildBundledUis : DefaultTask() {
     }
 }
 
+// The phone page itself (relay/web), as a relay serves it, into the app's assets under relay/:
+// the app serves this copy at your relay's address (RelayPage.kt), so the page that does the
+// encrypting never comes from the relay. `node relay/build.js --page` writes it.
+abstract class BuildRelayPage : DefaultTask() {
+    @get:InputFiles @get:PathSensitive(PathSensitivity.RELATIVE) abstract val sources: ConfigurableFileCollection
+    @get:Internal abstract val repo: DirectoryProperty
+    @get:OutputDirectory abstract val outputDir: DirectoryProperty
+    @get:Inject abstract val exec: ExecOperations
+
+    @TaskAction
+    fun build() {
+        val out = outputDir.get().asFile
+        out.deleteRecursively()
+        // node from your login shell, as for the bundled UIs above.
+        exec.exec {
+            workingDir = repo.get().asFile
+            commandLine(System.getenv("SHELL") ?: "/bin/sh", "-lic", "node relay/build.js --page '${out.resolve("relay")}'")
+        }
+    }
+}
+
 androidComponents {
     onVariants { variant ->
-        val task = tasks.register<BuildBundledUis>("build${variant.name.replaceFirstChar(Char::uppercase)}BundledUis") {
-            val root = rootProject.layout.projectDirectory.dir("../..")
+        val name = variant.name.replaceFirstChar(Char::uppercase)
+        val root = rootProject.layout.projectDirectory.dir("../..")
+        val task = tasks.register<BuildBundledUis>("build${name}BundledUis") {
             names.set(bundledUis)
             repo.set(root)
             sources.from(root.dir("src"), root.dir("shared"), listOf("index.html", "vite.config.js", "package.json", "public/mark.svg").map(root::file))
         }
         variant.sources.assets?.addGeneratedSourceDirectory(task, BuildBundledUis::outputDir)
+        val page = tasks.register<BuildRelayPage>("build${name}RelayPage") {
+            repo.set(root)
+            sources.from(root.dir("relay/web"), listOf("relay/build.js", "package.json", "public/icon-512.png", "public/apple-touch-icon.png", "public/mark.svg").map(root::file))
+        }
+        variant.sources.assets?.addGeneratedSourceDirectory(page, BuildRelayPage::outputDir)
     }
 }
 

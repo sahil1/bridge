@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import Icon, { StatusDot } from './Icon.jsx'
-import { api, hostApi, machineId, machineUrl, apart, relayComputers, phoneApp } from '../api.js'
+import { api, hostApi, machineId, machineUrl, apart, relayComputers, phoneApp, viaRelay } from '../api.js'
 import { passOn } from '../passed.js'
 import { t, tx, locale } from '../i18n/index.js'
 
@@ -290,23 +290,49 @@ export function RailMachines() {
 }
 
 // ---------- another device asking to link with the one shown ----------
+// And, on the computer itself, a phone or computer that just paired with Pair a device's code:
+// Keep (it's yours) or Remove, without stopping anything meanwhile. A computer you keep meets your
+// other computers then (server/machines.js).
 export function AskBanner() {
   const [asks, setAsks] = useState([])
+  const [fresh, setFresh] = useState([])
   const [err, setErr] = useState(null)
+  const own = !machineId && !viaRelay
   useEffect(() => {
-    const load = () => api('/machines').then((d) => setAsks(d.asks || [])).catch(() => {})
+    const load = () => api('/machines').then((d) => { setAsks(d.asks || []); setFresh(own ? d.newDevices || [] : []) }).catch(() => {})
     load()
     const t = setInterval(() => { if (!document.hidden) load() }, 5000)
     window.addEventListener('bridge-machines', load)
     return () => { clearInterval(t); window.removeEventListener('bridge-machines', load) }
-  }, [])
-  if (!asks.length) return relayComputers ? <LinkOffer /> : null
+  }, [own])
+  if (!asks.length && !fresh.length) return relayComputers ? <LinkOffer /> : null
   const answer = async (id, allow) => {
     setErr(null)
     try { setAsks((await api(`/machines/asks/${encodeURIComponent(id)}`, { method: 'POST', body: { allow } })).asks || []); machinesChanged() } catch (e) { setErr(e.message) }
   }
+  const settle = async (d, keep) => {
+    setErr(null)
+    try {
+      if (keep) await api(`/relay/devices/${encodeURIComponent(d.id)}/keep`, { method: 'POST' })
+      // A computer linked back to: unlinked too (which tells it), not left half linked.
+      else if (d.machine) await api(`/machines/${encodeURIComponent(d.machine)}`, { method: 'DELETE' })
+      else await api(`/relay/devices/${encodeURIComponent(d.id)}`, { method: 'DELETE' })
+      setFresh((f) => f.filter((x) => x.id !== d.id))
+      machinesChanged()
+    } catch (e) { setErr(e.message) }
+  }
   return (
     <div className="ask-banner" role="alert">
+      {fresh.map((d) => (
+        <div key={d.id} className="ask-row new-device">
+          <Icon name={d.kind === 'computer' ? 'laptop' : 'phone'} size={14} />
+          <span>{d.kind === 'computer' ? t('{name} linked with this computer. Keep it if it\'s yours: it then meets your other computers too.', { name: d.name }) : t('{name} paired with this computer. Keep it if it\'s yours.', { name: d.name })}</span>
+          <span className="ask-btns">
+            <button type="button" className="btn small primary" onClick={() => settle(d, true)}>{t('Keep')}</button>
+            <button type="button" className="btn small" onClick={() => settle(d, false)}>{t('Remove')}</button>
+          </span>
+        </div>
+      ))}
       {asks.map((a) => (
         <div key={a.id} className="ask-row">
           <Icon name="link" size={14} />
@@ -486,6 +512,8 @@ export function MachinesSettings({ embedded = false, focus = false }) {
     machinesChanged()
   }
   const strays = data.strays || []
+  // One that linked with this device's code and isn't kept yet (the app's notice says so too).
+  const newOf = (m) => (data.newDevices || []).find((d) => d.machine === m.id) || null
   // A window showing another device at its port: these are the links of the computer it runs on, to read.
   const readOnly = !!data.machinePage
   return (
@@ -519,6 +547,7 @@ export function MachinesSettings({ embedded = false, focus = false }) {
                 {m.error && m.state === 'linked' && !m.online && !fixes[m.id] && <small className="muted">{m.error}</small>}
                 {m.state === 'changed' && <small className="muted">{t('{name} doesn\'t have the key it was linked with: it was set up again, or something is in between. On {name}, choose Pair a device and paste its link in Link a device below, to check it\'s really {name}.', { name: m.name })}</small>}
                 {m.state === 'removed' && <small className="muted">{t('{name} forgot this device. Link again asks it; allow it there after checking both show the same six digits.', { name: m.name })}</small>}
+                {newOf(m) && <small className="muted">{t('Linked with this device\'s code. Keep it if it\'s yours, and it meets your other computers too.')}</small>}
                 {fixes[m.id] === 'checking' && <small className="muted"><Icon name="refresh" size={11} className="spin" /> {t('Checking each step to {name}…', { name: m.name })}</small>}
                 {fixes[m.id] && fixes[m.id] !== 'checking' && (
                   <ul className="mch-fix" aria-label={t('What Fix found')}>
@@ -533,6 +562,7 @@ export function MachinesSettings({ embedded = false, focus = false }) {
                 {m.state === 'linked' && <button type="button" className="ghost-btn small" aria-expanded={shown === m.id} onClick={() => setShown(shown === m.id ? null : m.id)}>{t('Details')}</button>}
                 {m.state === 'asking' && relayComputers?.list?.().some((c) => c.relay === m.relay) && <button type="button" className="btn small" onClick={() => relayComputers.open(m.relay)}>{t('Go to {name}', { name: m.name })}</button>}
                 {!readOnly && <>
+                  {newOf(m) && <button type="button" className="btn small primary" disabled={!!busy} onClick={() => run('keep', () => hostApi(`/relay/devices/${encodeURIComponent(newOf(m).id)}/keep`, { method: 'POST' }))}>{t('Keep')}</button>}
                   {m.state === 'linked' && !m.online && <button type="button" className="btn small" disabled={fixes[m.id] === 'checking'} onClick={() => fix(m)}>{t('Fix')}</button>}
                   {['denied', 'expired'].includes(m.state) && <button type="button" className="btn small" disabled={!!busy} onClick={() => askAgain(m)}>{t('Ask again')}</button>}
                   {m.state === 'removed' && <button type="button" className="btn small primary" disabled={!!busy} onClick={() => askAgain(m)}>{t('Link again')}</button>}

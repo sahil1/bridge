@@ -4,7 +4,8 @@
 // switched off), with nothing leaving the machine. Its domain is localhost (it listens on 127.0.0.1,
 // and takes that as localhost too), so a computer's address is <id>.localhost. Relay tokens are
 // checked with ACCOUNTS_PUBLIC_KEY (the harness's test key), and ACCOUNTS_URL is the accounts
-// stand-in, which the ACCOUNTS binding reaches (stand-ins/accounts.mjs, /_test/bound/...).
+// stand-in, which the ACCOUNTS binding reaches through its Relay entrypoint (stand-ins/accounts.mjs,
+// /_test/relay/...).
 //   node hosted-relay.mjs <port> [its settings as JSON, e.g. '{"MAX_ACCOUNTS":"1"}']
 //   POST /_test/vars   more settings (JSON), from then on
 //   POST /_test/down   computers' addresses can't be reached (each connection dropped), as with no
@@ -13,6 +14,8 @@
 //   POST /_test/use    { a, n }: n messages counted to account a, as its other computers' Hubs would
 //                      tell its Account (each of its computers hears what that comes to)
 //   GET  /_test/state  how many computers are connected
+//   POST /_test/page   { name, text, version }: the phone page's file name served as text instead (a
+//                      page changed by whoever runs the relay), and the version it says it runs
 import http from 'node:http'
 import { WebSocketServer } from 'ws'
 import { bundle } from '../../relay/build.js'
@@ -21,9 +24,10 @@ const [port, vars = '{}'] = process.argv.slice(2)
 const realNow = Date.now
 let shift = 0
 Date.now = () => realNow() + shift
-const { build, code } = bundle()
+const { build, version, code } = bundle()
 globalThis.FILES = JSON.parse(code.slice('const FILES = '.length, code.indexOf('\nconst RELAY_BUILD')))
 globalThis.RELAY_BUILD = build
+globalThis.RELAY_VERSION = version
 globalThis.WebSocketRequestResponsePair = class { constructor(req, res) { this.req = req; this.res = res } }
 const OrigResponse = globalThis.Response
 globalThis.Response = class extends OrigResponse {
@@ -49,7 +53,7 @@ class End {
 globalThis.WebSocketPair = class { constructor() { const server = new End(); return { 0: { server }, 1: server } } }
 const worker = await import('../../relay/worker.js')
 
-const env = { HOSTED: '1', HOSTED_DOMAIN: 'localhost', ...JSON.parse(vars) }
+const env = { HOSTED: '1', HOSTED_DOMAIN: 'localhost', ID_SECRET: 'the stand-in\'s own', ...JSON.parse(vars) }
 // One object per name, each taking its requests one at a time (as Cloudflare's input gates do).
 function namespace(Class) {
   const objs = new Map()
@@ -95,13 +99,14 @@ function namespace(Class) {
 }
 env.HUB = namespace(worker.Hub)
 env.ACCOUNT = namespace(worker.Account)
-// The service binding to the accounts service: its stand-in, by the way only a binding reaches it.
+// The service binding to the accounts service: its stand-in, by the way only the relay's binding
+// reaches it.
 if (env.ACCOUNTS_URL) {
   env.ACCOUNTS = {
     fetch: async (input, init) => {
       const r = input instanceof Request ? input : new Request(input, init)
       const u = new URL(r.url)
-      return fetch(`${env.ACCOUNTS_URL}/_test/bound${u.pathname}${u.search}`, { method: r.method, headers: r.headers, body: ['GET', 'HEAD'].includes(r.method) ? undefined : await r.arrayBuffer() })
+      return fetch(`${env.ACCOUNTS_URL}/_test/relay${u.pathname}${u.search}`, { method: r.method, headers: r.headers, body: ['GET', 'HEAD'].includes(r.method) ? undefined : await r.arrayBuffer() })
     },
   }
 }
@@ -119,6 +124,10 @@ const server = http.createServer(async (req, res) => {
     if (req.url === '/_test/vars') Object.assign(env, said)
     if (req.url === '/_test/down' || req.url === '/_test/up') down = req.url === '/_test/down'
     if (req.url === '/_test/clock') shift = Number(said.shift) || 0
+    if (req.url === '/_test/page') {
+      if (said.name) globalThis.FILES[said.name] = { text: said.text }
+      if (said.version !== undefined) globalThis.RELAY_VERSION = said.version
+    }
     if (req.url === '/_test/use') out = await env.ACCOUNT.get(said.a).fetch('https://account/_account/tally', { method: 'POST', body: JSON.stringify({ a: said.a, n: said.n }) }).then((r) => r.json())
     if (req.url === '/_test/state') out = { computers: env.HUB.all().reduce((n, o) => n + o.ctx.getWebSockets('host').length, 0) }
     res.setHeader('content-type', 'application/json')

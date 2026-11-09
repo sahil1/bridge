@@ -10,9 +10,13 @@
 // a tab on Studio (Desk's own view of it), with Desk's page in another window keeping its own tabs;
 // Details shows what Desk is, with the security code Desk shows for itself; and Desk is renamed
 // from Studio (on Desk itself), Studio renamed, and both back to their own names.
+// A code pairs one device: once a phone has paired with it, its QR code goes, Studio says which
+// device paired with Keep and Remove (without stopping anything), and Add another device makes a new
+// one.
 import fs from 'node:fs'
 import path from 'node:path'
 import { startKit, startRelay, checks, until, browser, page, shot, noServiceWorker, changeAnswer, TEST } from '../lib/harness.mjs'
+import { linkAs } from '../lib/linkclient.mjs'
 
 const { ok, done } = checks('devices-ui')
 const relays = []
@@ -89,6 +93,25 @@ try {
   ok(/Another computer/.test(await s.p.locator('.ph-pair').innerText()) && /A phone/.test(await s.p.locator('.ph-pair').innerText()), 'for a phone or another computer')
   await s.p.locator('.ph-pair').scrollIntoViewIfNeeded()
   await shot(s.p, `${tag}devices-pair`)
+  // A phone pairs with it (spoken for here, as phones pair now).
+  const pocket = await linkAs(ra.url, { code, name: 'Pocket', about: { name: 'Pocket' } })
+  await pocket.request?.('GET', '/api/version')
+  pocket.close?.()
+  const another = s.p.locator('button', { hasText: 'Add another device' })
+  await another.waitFor({ timeout: 10000 }).catch(() => {})
+  ok(!(await s.p.locator('.ph-pair').count()) && /Pocket paired/.test(await s.p.locator('[data-setting="relay"]').innerText()) && await another.count() === 1, 'a code pairs one device: once Pocket has paired, its QR code goes, saying so, with Add another device', await s.p.locator('[data-setting="relay"]').innerText())
+  const told = s.p.locator('.ask-banner .new-device', { hasText: 'Pocket' })
+  await told.waitFor({ timeout: 10000 }).catch(() => {})
+  ok(/Pocket paired with this computer/.test(await told.innerText().catch(() => '')) && await told.locator('button', { hasText: 'Keep' }).count() === 1 && await told.locator('button', { hasText: 'Remove' }).count() === 1, 'and Studio says a new device paired, with Keep and Remove', await told.innerText().catch(() => ''))
+  await shot(s.p, `${tag}devices-new-device`)
+  // (Settings is open over the notice: its list of phones offers Keep too.)
+  const listed = s.p.locator('.ph-devices li', { hasText: 'Pocket' })
+  ok(/New/.test(await listed.innerText().catch(() => '')) && await listed.locator('button', { hasText: 'Keep' }).count() === 1, 'Settings › Devices lists it as new, with Keep beside Remove', await listed.innerText().catch(() => ''))
+  await listed.locator('button', { hasText: 'Keep' }).click()
+  ok(!!(await until(async () => !(await told.count()) && !(await a.api('/relay')).devices.find((d) => d.name === 'Pocket')?.fresh && !(await listed.locator('button', { hasText: 'Keep' }).count()), 10000)), 'Keep: it stays, and the notice goes')
+  await another.click()
+  await s.p.waitForSelector('.ph-pair', { timeout: 10000 })
+  ok((await s.p.locator('.ph-code .mono').innerText()).trim() !== code, 'Add another device: a new code')
 
   // ---------- a phone paired with both offers to link them ----------
   // The phone app's page: Bridge AI from Desk inside it, and the computers the phone is paired with.

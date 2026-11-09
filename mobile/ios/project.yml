@@ -72,6 +72,16 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         TARGETED_DEVICE_FAMILY: "1,2"
         GENERATE_INFOPLIST_FILE: NO
+    # A pairing link on Bridge AI's relay (https://<id>.boldbridge.app/#pair=…, the QR code the
+    # computer shows) opens the app instead of Safari (a Universal Link), so the page that does the
+    # encrypting is the app's own; the relay names the app in /.well-known/apple-app-site-association
+    # (relay/HOSTED.md, Going live). The App ID needs the Associated Domains capability, which Xcode
+    # adds when it signs (Automatic). A relay of your own isn't here: its links open in Safari.
+    entitlements:
+      path: BridgeAI/BridgeAI.entitlements
+      properties:
+        com.apple.developer.associated-domains:
+          - applinks:*.boldbridge.app
     dependencies:
       - target: Widgets
         embed: true

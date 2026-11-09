@@ -1,10 +1,13 @@
 // Bold Bridge's accounts service (account/worker.js, account/API.md), run in Node with SQLite for D1
 // and a mailbox for the Email Service, signed with a key made here, so nothing reaches Cloudflare.
-// Where it is (accounts.boldbridge.ai, its logs off, a browser sent to the policy). Codes: a code
-// emailed, wrong ones counted down to the fifth (then it's done), one that ran out after 10 minutes,
+// Where it is (accounts.boldbridge.ai, its logs off, a browser sent to the policy; the relay's
+// binding reaching /internal only). Codes: a code emailed, wrong ones counted down to the fifth (then
+// it's done), five checked at most of guesses sent at once, the right one signing in once, 20 wrong
+// in a day stopping the email's codes for a day, one that ran out after 10 minutes,
 // a new one replacing the last, 5 an hour for an email and 20 for a network (IPv4 /24, IPv6 /48) with
 // when to try again, throwaway domains refused naming the domain, an email that couldn't be sent
-// said and not counted. Signing in: one account per email (case and spaces aside), a device token
+// said and not counted, and a suspended account's email answered as anyone's. Signing in: one
+// account per email (case and spaces aside), each device after the first emailed about, a device token
 // that checks out with the public key, ends at its end, is renewed past half its life (the old one
 // working until the new one's used), and ends at once when signed out or removed. Five devices: the
 // sixth refused with the list, and the same code removing one to make room. Grants: one-time, 5
@@ -15,7 +18,9 @@
 // requests closed, emailed false when it couldn't go), the relay full at RELAY_MAX_ACCOUNTS (409),
 // suspending and restoring only with a note, inviting, removing a device. The relay's tokens and the
 // Early Access code (read by server/earlyaccess.js with the public key, for the account's id), each
-// given only while allowed; suspension stopping everything; the relay's status and usage reports.
+// given only while allowed; suspension stopping everything; the relay's status (and a device's, once
+// removed) and usage reports. Changing the signing key: each token says which key signed it, the
+// old key's still taken (OLD_KEYS) and replaced by /v1/me, then refused once it's dropped.
 // Deleting the account (its email typed again) leaves nothing of it. Nothing kept is an IP address
 // or a code. And the one switch: server/account.js's ACCOUNTS_URL set only with PRIVACY.md and
 // TERMS.md saying what an account keeps and how to delete it; README.md's drafts quote the policy as
@@ -44,10 +49,12 @@ const service = (more = {}) => {
   const mail = mailbox()
   const env = { DB: d1(), EMAIL: mail, FROM: 'accounts@example.com', ADMINS: 'admins@example.com', SITE: 'https://boldbridge.example', RELAY_MAX_ACCOUNTS: '500', SIGNING_KEY: privateKey.export({ type: 'pkcs8', format: 'pem' }), ...more }
   const internal = new worker.Internal({}, env)
-  // A request from the internet (from ip), or through the binding (bound), as the admin view makes it.
-  const call = async (p, { method = 'GET', body, token, ip = '203.0.113.7', bound = false, admin = 'admin@example.com', headers = {} } = {}) => {
+  const relayBound = new worker.Relay({}, env)
+  // A request from the internet (from ip), or through the admin view's binding (bound), as it makes
+  // it, or the relay's (relay).
+  const call = async (p, { method = 'GET', body, token, ip = '203.0.113.7', bound = false, relay = false, admin = 'admin@example.com', headers = {} } = {}) => {
     const req = new Request(`https://accounts.boldbridge.ai${p}`, { method, headers: { ...(body !== undefined ? { 'content-type': 'application/json' } : {}), ...(token ? { authorization: `Bearer ${token}` } : {}), ...(ip ? { 'CF-Connecting-IP': ip } : {}), ...(bound && admin ? { 'X-Admin-Email': admin } : {}), ...headers }, body: body !== undefined ? JSON.stringify(body) : undefined })
-    const r = bound ? await internal.fetch(req) : await worker.default.fetch(req, env)
+    const r = relay ? await relayBound.fetch(req) : bound ? await internal.fetch(req) : await worker.default.fetch(req, env)
     return { status: r.status, headers: r.headers, j: await r.clone().json().catch(() => null), text: await r.text() }
   }
   const codeFor = (email) => /\b(\d{6})\b/.exec(mail.sent.filter((m) => m.to === email).at(-1)?.text || '')?.[1]
@@ -61,6 +68,9 @@ const service = (more = {}) => {
   return { env, mail, call, codeFor, device, signIn, rows }
 }
 const payload = (t) => JSON.parse(Buffer.from(String(t).split('.')[0], 'base64url').toString('utf8'))
+// A key's id, as the service puts it in each token (keyId), and a token signed with key.
+const kidOf = (x) => crypto.createHash('sha256').update(Buffer.from(x, 'base64url')).digest().toString('base64url').slice(0, 8)
+const signed = (p, key) => { const text = Buffer.from(JSON.stringify(p)).toString('base64url'); return `${text}.${crypto.sign(null, Buffer.from(text), key).toString('base64url')}` }
 const verifies = (t) => { const [p, s] = String(t).split('.'); return crypto.verify(null, Buffer.from(p), crypto.createPublicKey({ key: { kty: 'OKP', crv: 'Ed25519', x: PUBLIC }, format: 'jwk' }), Buffer.from(s, 'base64url')) }
 
 try {
@@ -69,7 +79,7 @@ try {
     const toml = read('account', 'wrangler.toml')
     ok(/pattern = "accounts\.boldbridge\.ai", custom_domain = true/.test(toml) && /workers_dev = false/.test(toml) && /preview_urls = false/.test(toml) && /\[observability\]\nenabled = false/.test(toml), 'wrangler.toml: accounts.boldbridge.ai only (no workers.dev, no previews), with the Worker\'s logs off')
     ok(/binding = "DB"/.test(toml) && /\[\[send_email\]\]\nname = "EMAIL"/.test(toml) && /crons = /.test(toml) && /^RELAY_MAX_ACCOUNTS = "500"/m.test(toml), 'its database, Email Service, the daily clean-up and RELAY_MAX_ACCOUNTS')
-    ok(/binding = "ACCOUNTS"\nservice = "bridge-accounts"\nentrypoint = "Internal"/.test(read('relay', 'wrangler.hosted.toml')), 'the relay binds to its Internal entrypoint')
+    ok(/binding = "ACCOUNTS"\nservice = "bridge-accounts"\nentrypoint = "Relay"/.test(read('relay', 'wrangler.hosted.toml')), 'the relay binds to its Relay entrypoint, not the admin view\'s')
     const s = service()
     const page = await s.call('/')
     ok(page.status === 301 && /boldbridge\.ai\/privacy#your-bold-bridge-account-optional/.test(page.headers.get('location')), 'its own address shows nothing: a browser goes to the privacy policy', page.headers.get('location'))
@@ -77,6 +87,8 @@ try {
     const internal = await s.call('/internal/status?a=aaaaaaaaaaaa')
     ok(admin.status === 404 && internal.status === 404, 'the admin view\'s and the relay\'s routes aren\'t on the internet, whatever a request says', [admin.status, internal.status])
     ok((await s.call('/v1/me', { bound: true })).status === 404, 'and the binding has only those')
+    const viaRelay = await Promise.all(['/internal/status?a=aaaaaaaaaaaa', '/admin/stats', '/admin/accounts', '/v1/me'].map((p) => s.call(p, { relay: true, headers: { 'X-Admin-Email': 'admin@example.com' } })))
+    ok(viaRelay[0].status === 200 && viaRelay[0].j.status === 'gone' && viaRelay.slice(1).every((x) => x.status === 404), 'the relay\'s binding reaches /internal and nothing else: no admin route, whatever it says', viaRelay.map((x) => x.status))
   }
 
   // ---------- Codes ----------
@@ -103,6 +115,38 @@ try {
     r = await s.call('/v1/verify', { method: 'POST', body: { email: 'sam@example.com', code: '000000', device: dev } })
     const right = await s.call('/v1/verify', { method: 'POST', body: { email: 'sam@example.com', code: s.codeFor('sam@example.com'), device: dev } })
     ok(r.j.code === 'expired' && /fifth wrong try/.test(r.j.error) && right.j.code === 'expired', 'the fifth wrong try ends it, saying so: even the right code is too late then', [r.j, right.j])
+    // Guesses sent all at once (from many networks): five are checked at most, however they
+    // interleave, and the right one sent after them is too late.
+    const race = service()
+    await race.call('/v1/code', { method: 'POST', body: { email: 'race@example.com' } })
+    const real = race.codeFor('race@example.com')
+    const guesses = Array.from({ length: 60 }, (_, i) => String((Number(real) + 1 + i) % 1e6).padStart(6, '0'))
+    const burst = await Promise.all([...guesses, real].map((g, i) => race.call('/v1/verify', { method: 'POST', body: { email: 'race@example.com', code: g, device: dev }, ip: `198.51.${i}.9` })))
+    const checked = burst.filter((x) => x.j?.code === 'wrong' || /fifth wrong try/.test(x.j?.error || '')).length
+    ok(checked <= 5 && !burst.some((x) => x.j?.deviceToken) && !race.rows('devices').length, '61 guesses at one code at once: 5 checked at most, the rest refused, and the right one, sent last, doesn\'t sign in', { checked, codes: [...new Set(burst.map((x) => x.j?.code))] })
+    // The right code twice at once: one sign-in.
+    await race.call('/v1/code', { method: 'POST', body: { email: 'twice@example.com' } })
+    const once = race.codeFor('twice@example.com')
+    const both = await Promise.all(['Studio', 'Desk'].map((n) => race.call('/v1/verify', { method: 'POST', body: { email: 'twice@example.com', code: once, device: race.device(n) } })))
+    ok(both.filter((x) => x.j?.deviceToken).length === 1 && both.some((x) => x.j?.code === 'expired') && race.rows('devices').length === 1, 'the right code sent twice at once signs in once: the other is told it\'s no good now', both.map((x) => x.j?.code || x.status))
+    // 20 wrong codes for an email in a day: no more codes for it for a day.
+    const wrongOf = (c) => String((Number(c) + 1) % 1e6).padStart(6, '0')
+    const g = service()
+    let last = null
+    for (let c = 0; c < 4; c++) {
+      await g.call('/v1/code', { method: 'POST', body: { email: 'guess@example.com' } })
+      for (let i = 0; i < 5; i++) last = await g.call('/v1/verify', { method: 'POST', body: { email: 'guess@example.com', code: wrongOf(g.codeFor('guess@example.com')), device: dev } })
+    }
+    ok(last.status === 429 && last.j.code === 'stopped' && /20 wrong codes for this email today/.test(last.j.error) && last.j.retryAfter > 86000 && /24 hours/.test(last.j.error), 'the 20th wrong code for an email in a day: said, with when it may have codes again (a day)', last.j)
+    const mailed = g.mail.sent.length
+    const asked = await g.call('/v1/code', { method: 'POST', body: { email: 'guess@example.com' } })
+    ok(asked.status === 429 && asked.j.code === 'stopped' && asked.j.retryAfter > 86000 && g.mail.sent.length === mailed && !g.rows('codes').length, 'then no code goes to it, saying until when, and none is waiting', asked.j)
+    ok(!JSON.stringify(g.rows('misses')).includes('guess@'), 'what\'s kept for it is a hash of the email', g.rows('misses').slice(0, 2))
+    shift += DAY + MIN
+    ok((await g.call('/v1/code', { method: 'POST', body: { email: 'guess@example.com' } })).status === 200, 'a day on, it has codes again')
+    await worker.default.scheduled({}, g.env)
+    ok(!g.rows('misses').length, 'and the daily clean-up takes what ran out')
+    shift = 0
     await s.call('/v1/code', { method: 'POST', body: { email: 'sam@example.com' } })
     const first = s.codeFor('sam@example.com')
     await s.call('/v1/code', { method: 'POST', body: { email: 'sam@example.com' } })
@@ -150,9 +194,13 @@ try {
     const a = await s.signIn('sam@example.com', 'Studio')
     ok(/^[a-z0-9]{12}$/.test(a.account?.id) && a.account.email === 'sam@example.com' && a.account.tester === 'none' && a.account.relay === 'none' && a.account.status === 'active' && a.device?.name === 'Studio' && a.device.kind === 'computer' && a.device.thisOne, 'the first sign-in makes the account: its id, email, flags and status, and this device', a)
     const t = payload(a.deviceToken)
-    ok(verifies(a.deviceToken) && t.k === 'device' && t.a === a.account.id && t.d === a.device.id && t.exp - t.iat === 180 * 86400, 'a device token: signed with the key, the account and device, 180 days', t)
+    ok(verifies(a.deviceToken) && t.k === 'device' && t.a === a.account.id && t.d === a.device.id && t.exp - t.iat === 180 * 86400 && t.kid === kidOf(PUBLIC), 'a device token: signed with the key, saying which (kid), the account and device, 180 days', t)
+    const notices = () => s.mail.sent.filter((m) => m.to === 'sam@example.com' && /new sign-in/.test(m.subject))
+    ok(!notices().length, 'the sign-in that makes the account emails no notice of itself')
     const again = await s.signIn('SAM@example.com ', 'Desk')
     ok(again.account.id === a.account.id, 'one account per email: signing in again, however it\'s typed, is the same account', again.account)
+    const notice = notices().at(-1)
+    ok(notices().length === 1 && /"Desk" \(a computer, mac\) was signed in to your Bold Bridge account \(sam@example\.com\) on \d{1,2} \w+ \d{4}, \d\d:\d\d UTC/.test(notice.text) && /remove it in Bridge AI/.test(notice.text) && !/\b\d{6}\b/.test(notice.text), 'another device signed in: the account\'s email hears which, and when, and what to do if it wasn\'t them', notice?.text)
     const me = await s.call('/v1/me', { token: a.deviceToken })
     ok(me.status === 200 && me.j.devices.length === 2 && me.j.devices.find((d) => d.thisOne)?.name === 'Studio' && me.j.earlyAccess === null && me.j.relay === null && !me.j.deviceToken, '/v1/me: the account, its devices (this one marked), and nothing given yet', me.j)
     const forged = `${a.deviceToken.split('.')[0]}.${Buffer.alloc(64).toString('base64url')}`
@@ -187,6 +235,31 @@ try {
     ok(out.j?.ok && (await s.call('/v1/me', { token: renew.j.deviceToken })).status === 401 && (await s.call('/v1/me', { token: a.deviceToken })).status === 401, 'Sign out: this device\'s tokens end at once', out.j)
   }
 
+  // ---------- Changing the signing key ----------
+  {
+    const s = service()
+    const a = await s.signIn('kim@example.com', 'Studio')
+    await s.call(`/admin/accounts/${a.account.id}`, { method: 'POST', bound: true, body: { relay: 'approved', tester: 'yes' } })
+    const next = crypto.generateKeyPairSync('ed25519').privateKey
+    const NEXT = next.export({ format: 'jwk' }).x
+    s.env.SIGNING_KEY = next.export({ type: 'pkcs8', format: 'pem' })
+    s.env.OLD_KEYS = PUBLIC
+    const me = (await s.call('/v1/me', { token: a.deviceToken })).j
+    const byNext = (t) => { const [p, g] = String(t).split('.'); return crypto.verify(null, Buffer.from(p), crypto.createPublicKey({ key: { kty: 'OKP', crv: 'Ed25519', x: NEXT }, format: 'jwk' }), Buffer.from(g, 'base64url')) }
+    ok(me?.account && payload(me.deviceToken || '').kid === kidOf(NEXT) && byNext(me.deviceToken) && payload(me.relay?.token || '').kid === kidOf(NEXT) && byNext(me.relay.token), 'a new signing key, the old one\'s public half in OLD_KEYS: a device token the old key signed still works, and /v1/me hands back tokens the new one signed, saying so', { device: payload(me?.deviceToken || 'e30'), relay: payload(me?.relay?.token || 'e30') })
+    earlyAccess.useAccountsKey(() => `${PUBLIC}, ${NEXT}`)
+    ok(earlyAccess.readCode(me.earlyAccess?.code, { key: '' }).ok, 'and Bridge AI, given both public keys (comma separated), takes the Early Access code the new one signed')
+    earlyAccess.useAccountsKey(() => '')
+    s.env.OLD_KEYS = ''
+    ok((await s.call('/v1/me', { token: a.deviceToken })).status === 401 && (await s.call('/v1/me', { token: me.deviceToken })).status === 200, 'once the old key is dropped from OLD_KEYS, what it signed is refused; the new tokens work', null)
+    // A token from before tokens said which key signed them: checked with the signing key, and replaced.
+    const t = payload(me.deviceToken)
+    const bare = signed({ k: 'device', a: t.a, d: t.d, iat: t.iat, exp: t.exp }, next)
+    s.env.DB.sql.prepare('UPDATE devices SET token_hash = ? WHERE id = ?').run(crypto.createHash('sha256').update(bare).digest('hex'), t.d)
+    const old = await s.call('/v1/me', { token: bare })
+    ok(old.status === 200 && payload(old.j.deviceToken || 'e30').kid === kidOf(NEXT), 'one with no kid (from before) is checked with the signing key, and /v1/me replaces it with one that says', payload(old.j.deviceToken || 'e30'))
+  }
+
   // ---------- Linked computers follow: grants ----------
   {
     const s = service()
@@ -198,6 +271,9 @@ try {
     ok(r.status === 200 && r.j.account.id === a.account.id && r.j.device.name === 'Desk' && verifies(r.j.deviceToken), 'another computer redeems it: signed in to the same account, no email', r.j?.device)
     const twice = await s.call('/v1/redeem', { method: 'POST', body: { grant: g.j.grant, device: s.device('Laptop') } })
     ok(twice.j.code === 'expired', 'used once, it\'s done', twice.j)
+    const g1 = (await s.call('/v1/grant', { method: 'POST', token: a.deviceToken })).j.grant
+    const pair = await Promise.all(['Laptop', 'Air'].map((n) => s.call('/v1/redeem', { method: 'POST', body: { grant: g1, device: s.device(n) } })))
+    ok(pair.filter((x) => x.status === 200).length === 1 && pair.some((x) => x.j?.code === 'expired'), 'two computers redeeming the same grant at once: one signs in, the other is told it\'s no good now', pair.map((x) => x.j?.code || x.status))
     const g2 = (await s.call('/v1/grant', { method: 'POST', token: a.deviceToken })).j.grant
     shift = 6 * MIN
     const late = await s.call('/v1/redeem', { method: 'POST', body: { grant: g2, device: s.device('Laptop') } })
@@ -253,7 +329,14 @@ try {
     await s.call(`/admin/accounts/${a.account.id}`, { method: 'POST', bound: true, body: { status: 'suspended', note: 'Sharing it' } })
     const sus = (await s.call('/v1/me', { token: a.deviceToken })).j
     ok(sus.account.status === 'suspended' && sus.relay === null && sus.earlyAccess === null, 'suspended: /v1/me says so, with no relay token and no Early Access code', sus)
-    ok((await s.call('/v1/code', { method: 'POST', body: { email: 'ana@example.com' } })).j.code === 'suspended' && (await s.call('/v1/grant', { method: 'POST', token: a.deviceToken })).j.code === 'suspended' && (await s.call('/v1/request', { method: 'POST', token: a.deviceToken, body: { kind: 'early' } })).j.code === 'suspended', 'signing in, a grant and a request each say it\'s suspended')
+    ok((await s.call('/v1/grant', { method: 'POST', token: a.deviceToken })).j.code === 'suspended' && (await s.call('/v1/request', { method: 'POST', token: a.deviceToken, body: { kind: 'early' } })).j.code === 'suspended', 'a grant and a request each say it\'s suspended')
+    // Asking for a code: the same answer as for any email, so whoever asked can't tell; the email
+    // itself says it's suspended, with no code, and none is waiting.
+    const asks = await Promise.all(['ana@example.com', 'nobody-yet@example.com'].map((email) => s.call('/v1/code', { method: 'POST', body: { email } })))
+    const form = await s.call('/v1/request-public', { method: 'POST', body: { email: 'ana@example.com', kind: 'early' }, ip: '192.0.2.77' })
+    const toAna = s.mail.sent.filter((m) => m.to === 'ana@example.com').slice(-2)
+    ok(asks.every((x) => x.status === 200 && JSON.stringify(x.j) === '{"sent":true}') && form.status === 200 && JSON.stringify(form.j) === '{"sent":true}', 'a code for a suspended account\'s email (from Bridge AI or the website) is answered as for anyone\'s', [asks.map((x) => x.j), form.j])
+    ok(toAna.length === 2 && toAna.every((m) => /suspended/.test(m.subject) && !/\b\d{6}\b/.test(m.text)) && !s.rows('codes').some((c) => c.email === 'ana@example.com'), 'its email says it\'s suspended, with no code, and none is waiting', toAna.map((m) => m.subject))
     const st = (await s.call(`/internal/status?a=${a.account.id}`, { bound: true, admin: null })).j
     ok(st.status === 'suspended' && st.relay === 'approved', 'the relay asks (/internal/status) and hears it', st)
     ok((await s.call(`/admin/accounts/${a.account.id}`, { method: 'POST', bound: true, body: { status: 'active' } })).status === 400, 'restoring without a note is refused too')
@@ -293,8 +376,13 @@ try {
     const day = (await s.call(`/admin/accounts/${a.account.id}`, { bound: true })).j.usage
     ok(day[0]?.messages === 5000, 'and the use by day is in the account\'s view', day)
     const devs = (await s.call(`/admin/accounts/${a.account.id}`, { bound: true })).j.devices
-    const gone = await s.call(`/admin/accounts/${a.account.id}/devices/${devs.find((d) => d.name === 'Phone').id}`, { method: 'DELETE', bound: true })
+    const phoneId = devs.find((d) => d.name === 'Phone').id
+    const before = (await s.call(`/internal/status?a=${a.account.id}&d=${phoneId}`, { relay: true })).j
+    const gone = await s.call(`/admin/accounts/${a.account.id}/devices/${phoneId}`, { method: 'DELETE', bound: true })
     ok(gone.j.devices.length === 1 && (await s.call('/v1/me', { token: phone.deviceToken })).status === 401, 'DELETE /admin/accounts/:id/devices/:dev: gone, and signed out there', gone.j)
+    const after = (await s.call(`/internal/status?a=${a.account.id}&d=${phoneId}`, { relay: true })).j
+    const other = (await s.call(`/internal/status?a=${a.account.id}&d=${devs.find((d) => d.name === 'Studio').id}`, { relay: true })).j
+    ok(before.device === true && after.device === false && after.status === 'active' && other.device === true && !('device' in (await s.call(`/internal/status?a=${a.account.id}`, { relay: true })).j), '/internal/status?a=&d= says whether that device is still on the account (removed: no), so the relay lets it go then', { before, after, other })
     // Deleting the account.
     const wrong = await s.call('/v1/account', { method: 'DELETE', token: a.deviceToken, body: { email: 'other@example.com' } })
     ok(wrong.j.code === 'mismatch', 'deleting needs the account\'s email typed again', wrong.j)

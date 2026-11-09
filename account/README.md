@@ -11,10 +11,14 @@ keeps with the relay, Bridge AI (server/account.js, Settings › Account) and th
 ## What it does
 
 - **Sign-in is an email and a 6-digit code**, sent from `accounts@boldbridge.ai` by Cloudflare's <!-- private-ok: the service's own sending address -->
-  Email Service. A code lasts 10 minutes and allows 5 tries; an email gets at most 5 codes an hour, a
-  network (IPv4 /24, IPv6 /48) at most 20, and the website's form 5 requests an hour per network.
-  `THROWAWAY` in worker.js is a short list of throwaway domains, refused, saying why. An email's first
-  sign-in makes its account.
+  Email Service. A code lasts 10 minutes and allows 5 tries, each wrong one counted in the same
+  statement that checks it (so guesses sent all at once are held to 5 too), and the right one is used
+  up once; an email gets at most 5 codes an hour, a network (IPv4 /24, IPv6 /48) at most 20, and the
+  website's form 5 requests an hour per network. After 20 wrong codes in a day, an email gets no codes
+  for a day (where it's signed in already, nothing changes). `THROWAWAY` in worker.js is a short list
+  of throwaway domains, refused, saying why. An email's first sign-in makes its account, and each
+  device signed in after that is said in an email to it. A suspended account's email is answered as
+  any other's (whoever asked can't tell), and the email says it's suspended, with no code.
 - **At most 5 devices**, computers and phones. A sixth sign-in is refused with the list, and the same
   code can then remove one to make room.
 - **Tokens**, signed with Ed25519 (`SIGNING_KEY`): a device token (180 days), a relay token for a
@@ -30,19 +34,24 @@ keeps with the relay, Bridge AI (server/account.js, Settings › Account) and th
   made; its devices (name, computer or phone, platform, when added and last seen, a hash of the
   token); its requests; its history (what was done, by whom, with a note); the relay's last report of
   its use and its use by day (90 days). Codes are kept as hashes until used or ended; codes sent in
-  the last hour, under a hash of the email and of the network, for an hour. Never anything from the
-  person's computer. The Worker's logs are off (`[observability]` in [wrangler.toml](wrangler.toml)).
+  the last hour, under a hash of the email and of the network, for an hour; wrong codes, under a hash
+  of the email, for a day. Never anything from the person's computer. The Worker's logs are off
+  (`[observability]` in [wrangler.toml](wrangler.toml)), so it keeps no log of requests; Cloudflare
+  keeps its own for the zone, as for any site (its analytics, and the rate limiting rule's security
+  events: each request it blocked, with its IP address and path, for a while).
 - **Deleting an account** (`DELETE /v1/account`) deletes all of that at once. The relay forgets its own
   counts within a day.
 
-The tables are made the first time they're needed. Once a day (the cron), codes, grants and the
-hour's counts that ran out go, and the relay's use by day after 90 days.
+The tables are made the first time they're needed. Once a day (the cron), codes, grants, the hour's
+counts and the day's wrong codes that ran out go, and the relay's use by day after 90 days.
 
 ## How the admin view and the relay bind to it
 
 Only the public routes (`/v1/...`) are on `accounts.boldbridge.ai`; `/admin/...` and `/internal/...`
-answer 404 there. Both are on the Worker's named entrypoint, `Internal`, which a service binding can
-name and nothing on the internet can reach. Any address works through it (the host isn't looked at).
+answer 404 there. They're on the Worker's named entrypoints, which a service binding can name and
+nothing on the internet can reach: `Internal` (the admin view's: `/admin` and `/internal`) and
+`Relay` (the relay's: `/internal` only, so a relay Worker that was taken over still can't reach the
+admin routes). Any address works through them (the host isn't looked at).
 
 - **The admin view** (boldbridge.ai/admin, in the private repo), in its own wrangler config:
 
@@ -56,8 +65,8 @@ name and nothing on the internet can reach. Any address works through it (the ho
   and calls `env.ACCOUNTS.fetch('https://accounts.boldbridge.ai/admin/…', { headers: { 'X-Admin-Email': <the signed-in admin> } })`.
   Whoever can deploy a Worker on the project's Cloudflare account can bind to it, so that's who
   the admin routes are open to; the admin view decides which signed-in people are admins.
-- **The relay** ([relay/wrangler.hosted.toml](../relay/wrangler.hosted.toml)) has the same binding,
-  for `GET /internal/status?a=` and `POST /internal/usage`.
+- **The relay** ([relay/wrangler.hosted.toml](../relay/wrangler.hosted.toml)) binds to `Relay`
+  instead (`entrypoint = "Relay"`), for `GET /internal/status?a=&d=` and `POST /internal/usage`.
 
 ## Settings
 
@@ -69,6 +78,7 @@ All in `[vars]` of [wrangler.toml](wrangler.toml).
 | `ADMINS` | | Emails (comma separated) that get a short note for each request. Empty: requests are only in the admin view. |
 | `SITE` | `https://boldbridge.ai` | The website, whose form may ask for Early Access or the relay (`/v1/request-public`, the only route open to another origin). |
 | `RELAY_MAX_ACCOUNTS` | `500` | The relay's `MAX_ACCOUNTS`, the same number: approving the relay for one account more is refused as full. `GET /admin/stats` says it as `relayMax`. |
+| `OLD_KEYS` | | The public halves of keys the service signed with before, comma separated: the device tokens they signed still work until they end, and `GET /v1/me` replaces each with one the new key signs. Empty but while the key is being changed (Changing the signing key). |
 
 One secret, set with `npx wrangler@4.149.0 secret put SIGNING_KEY -c account/wrangler.toml` and never
 in the file: `SIGNING_KEY`, the Ed25519 private key every token is signed with, as PKCS #8 PEM.
@@ -76,8 +86,10 @@ in the file: `SIGNING_KEY`, the Ed25519 private key every token is signed with, 
 ## Going live
 
 In this order, on the project's Cloudflare account, from the repo on the computer releases are made
-on, signed in to Cloudflare (`npx wrangler@4.149.0 login`), with boldbridge.ai already a zone there.
-The relay ([relay/HOSTED.md](../relay/HOSTED.md)) goes live after this, since it binds to it.
+on, with boldbridge.ai already a zone there, and the account and the domains set up as below first
+(The account and the domains): wrangler deploys with the scoped API token
+(`CLOUDFLARE_API_TOKEN=<it> npx wrangler@4.149.0 …`), not `wrangler login`. The relay
+([relay/HOSTED.md](../relay/HOSTED.md)) goes live after this, since it binds to it.
 
 1. **Workers Paid** (Workers & Pages › Plans, $5 a month): Email Service sends to anyone only on
    Workers Paid. The relay needs it anyway.
@@ -101,17 +113,23 @@ The relay ([relay/HOSTED.md](../relay/HOSTED.md)) goes live after this, since it
    ```
 
    The custom domain makes the DNS record and certificate for `accounts.boldbridge.ai` itself.
-7. **Check it**: `https://accounts.boldbridge.ai/` sends a browser to the privacy policy;
+7. **The rate limiting rule** (required, before anyone is told the address): boldbridge.ai ›
+   Security › WAF › Rate limiting rules › Create rule. When incoming requests match: Hostname equals
+   `accounts.boldbridge.ai`. With the same characteristics: IP. When rate exceeds 30 requests per
+   10 seconds, Block for 10 seconds (the Free plan's one rule does it). The Worker's own limits (5
+   tries a code, 20 wrong codes a day for an email, codes an hour for an email and a network) are
+   counted in D1, after the Worker has run; this turns a burst from one address away before it does,
+   where nothing is billed, and keeps a burst of guesses from reaching D1 at all. Bridge AI's own use
+   is far below it.
+8. **Check it**: `https://accounts.boldbridge.ai/` sends a browser to the privacy policy;
    `curl -s -X POST https://accounts.boldbridge.ai/v1/code -H 'content-type: application/json' -d '{"email":"x"}'`
    answers `{"error":"That doesn't look like an email address…","code":"invalid"}`;
    `https://accounts.boldbridge.ai/admin/stats` is a 404. Then ask for a code to your own email, and
-   it arrives.
-8. **The public key in the relay**: `ACCOUNTS_PUBLIC_KEY` in relay/wrangler.hosted.toml (`node
+   it arrives. 40 requests in a few seconds from one computer (`for i in $(seq 40); do curl -s -o
+   /dev/null -w '%{http_code} ' https://accounts.boldbridge.ai/; done`) end in 429s: the rule is on.
+9. **The public key in the relay**: `ACCOUNTS_PUBLIC_KEY` in relay/wrangler.hosted.toml (`node
    account/key.js --public` prints it again), and go live with the relay (HOSTED.md).
-9. **The admin view**: its binding, as above, and deploy it.
-10. **Optional, against floods**: Security › WAF › Rate limiting rules, one for the hostname
-    `accounts.boldbridge.ai`: 30 requests in 10 seconds from one IP, then block for 10 seconds (the
-    Worker's own limits are per hour; this stops a burst before it's billed).
+10. **The admin view**: its binding, as above, and deploy it.
 11. **Try it on one computer** before shipping, with this in that computer's
     `~/.bridge-ai/config.json`: `"account": { "url": "https://accounts.boldbridge.ai", "publicKey": "<the public key>" }`.
     Settings › Account appears; sign in, ask for Early Access, approve it in the admin view, and
@@ -120,6 +138,43 @@ The relay ([relay/HOSTED.md](../relay/HOSTED.md)) goes live after this, since it
     `ACCOUNTS_PUBLIC_KEY` to the public key, and paste the policy text below into PRIVACY.md and
     TERMS.md, in the same commit. Then `npm test -- account-service relay-hosted privacy-hosts`, and
     release. Until that commit, nothing about accounts shows in the app.
+13. **Turnstile, once there's a site key** (owner, then a change here): Cloudflare › Turnstile › Add
+    widget, for the hostname `boldbridge.ai`, Managed. Its site key goes in the website's form; its
+    secret key becomes a Worker secret here (`TURNSTILE_SECRET`); and worker.js then checks the
+    form's token (`cf-turnstile-response`) with Turnstile's siteverify before `/v1/request-public`
+    sends a code, refusing one that doesn't pass. Bridge AI's own sign-in (Settings › Account, which
+    calls `/v1/code`) is served by each computer itself, not boldbridge.ai, so it needs a widget
+    of its own thought through first; until then it rests on the limits and the rate rule (step 7).
+
+### The account and the domains
+
+Before the steps above, and kept up after, since whoever has the Cloudflare account or a domain can
+sign anyone in, or serve every phone a changed relay page:
+
+- **The Cloudflare account**: every member signs in with a hardware security key (Manage Account ›
+  Members, two-factor required for all, each member's own key added under My Profile ›
+  Authentication). Deploys use an API token made for them (My Profile › API Tokens › Create, from
+  the Edit Cloudflare Workers template with D1 Edit added, for this account and the boldbridge.ai
+  and boldbridge.app zones only), kept in a password manager and given to wrangler as
+  `CLOUDFLARE_API_TOKEN`, rather than `wrangler login`, which can do anything on the account. And
+  alerts from the Audit Log for Worker deploys, secrets and routes changing (Manage Account ›
+  Notifications, or a Logpush job of the Audit Log to somewhere watched), so a change nobody meant
+  to make is seen the same day.
+- **DNSSEC and the registrar lock** on boldbridge.ai (and boldbridge.app, HOSTED.md): DNS ›
+  Settings › DNSSEC › Enable (with Cloudflare Registrar the DS record goes to the registry by
+  itself; elsewhere, add it at the registrar), and the registrar lock on, so neither domain can be
+  moved away or answered by anyone else.
+- **CAA records** on boldbridge.ai: one `CAA @ 0 issue "<authority>"` for each certificate authority
+  Cloudflare's Universal SSL uses (its docs list them: at the time of writing `letsencrypt.org`,
+  `pki.goog` and `ssl.com`), and `CAA @ 0 iodef "mailto:<your email>"`. Then check SSL/TLS › Edge
+  Certificates still shows each certificate Active.
+- **HSTS** on boldbridge.ai, subdomains included: SSL/TLS › Edge Certificates › HTTP Strict
+  Transport Security › Enable, Max Age 12 months, Apply HSTS policy to subdomains on (every name
+  under boldbridge.ai serves HTTPS: the website, accounts, the admin view). boldbridge.app is
+  HTTPS-only already (`.app` is preloaded).
+- **Branch protection on the private repo's `main`**, since a push to it deploys the admin view:
+  GitHub › the repo › Settings › Branches › a rule for `main` (a pull request needed, no force
+  pushes, no deleting it).
 
 ## Cost
 
@@ -131,6 +186,29 @@ reports each account's use every 5 minutes while it's used: at most 4.3 million 
 accounts, through the service binding, which isn't billed as requests. Email Service includes 3,000
 emails a month, then $0.35 a thousand: codes are at most 5 an hour per email, so a flood of
 sign-ins costs little, and the WAF rule above stops one network sending it.
+
+## Changing the signing key
+
+Each token says which key signed it (`kid`, API.md, Tokens), and everything that checks one takes a
+list, so the key can be changed without anyone signing in again: if it may have been seen, or now
+and then.
+
+1. **A new key**, kept beside the old: `node account/key.js --key ~/.config/bridge-ai/accounts-key-2.pem`
+   (and a copy in a password manager), and its public half: `node account/key.js --key
+   ~/.config/bridge-ai/accounts-key-2.pem --public`.
+2. **Everything that checks tokens takes both**, the old key first: the relay's
+   `ACCOUNTS_PUBLIC_KEY = "<old>,<new>"` (deploy it, HOSTED.md), and in Bridge AI,
+   `ACCOUNTS_PUBLIC_KEY = '<old>,<new>'` in server/account.js, in a release. Wait until most
+   computers have that release (the Early Access codes the new key signs are checked there).
+3. **The service signs with the new one**: `OLD_KEYS = "<old>"` in wrangler.toml and deploy, then
+   `npx wrangler@4.149.0 secret put SIGNING_KEY -c account/wrangler.toml < ~/.config/bridge-ai/accounts-key-2.pem`.
+   From then on each device's next `GET /v1/me` (within 6 hours, or when Settings › Account opens)
+   gives it a device token, relay token and Early Access code the new key signed.
+4. **The old one goes** once what it signed has ended: relay tokens after 7 days, Early Access codes
+   after 30, device tokens after 180 (a device not seen for that long signs in again). Take it out of
+   `OLD_KEYS`, the relay's `ACCOUNTS_PUBLIC_KEY` and server/account.js's, and delete its file. If it
+   was taken out because it may have been seen, don't wait: take it out of all three at once, and
+   devices that haven't asked since sign in again.
 
 ## Running your own
 
@@ -206,7 +284,8 @@ with
 > relay, and whether the account is suspended; your requests and their notes; what was changed on
 > the account and by whom; and, if you use Bridge AI's relay, its counts for your account (messages
 > in each 8-hour window and each week, and each day's total, kept 90 days). To limit codes, it keeps
-> for an hour how many were sent to each email and from each network, under a hash of each. Never
+> for an hour how many were sent to each email and from each network, and for a day the wrong codes
+> entered for each email, under a hash of each. Never
 > anything from your computer: your agents, meetings, mail, files and what you type stay there.
 >
 > **What goes with it**: your email, when you sign in or ask for something; the codes and notices

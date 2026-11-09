@@ -149,6 +149,8 @@ export async function startKit(name, { env = {}, config = {}, node = process.exe
     // (both are on unless turned off). Nor Bridge AI's hosted relay, nor Bold Bridge's accounts: a
     // test gives a stand-in in its config.json (relay.hostedUrl, account.url), or there's none.
     BRIDGE_COUNTS_URL: '', BRIDGE_CRASHES_URL: '', BRIDGE_HOSTED_URL: '', BRIDGE_ACCOUNTS_URL: '', BRIDGE_ACCOUNTS_KEY: '',
+    // Nor GitHub for a release's phone page (relaycheck.js): a test gives a stand-in, or there's none.
+    BRIDGE_RELAY_SOURCE: 'http://127.0.0.1:9',
     BRIDGE_FIX_DRYRUN: '1', LANG: 'en_US.UTF-8', TMPDIR: os.tmpdir(), USER: os.userInfo().username,
     BRIDGE_SUMMARY_RETRY_MS: '4000', BRIDGE_MODEL_RETRY_MS: '200',
     // No test ever runs a real installer or downloads Node.js: a stand-in installer runs instead
@@ -277,7 +279,7 @@ export async function startAccounts(name, { relayMax } = {}) {
 // tokens with and ask. A kit uses it with "relay": { "hostedUrl": url } in its config. vars() changes
 // its settings from then on; register(token) registers a computer, as the app does (with an
 // account's relay token); use(a, n) counts n messages to an account; clock(ms) moves its clock;
-// down() makes computers' addresses unreachable, up() reachable again.
+// down() makes computers' addresses unreachable, up() reachable again; page() changes the phone page.
 export async function startHostedRelay(name, settings = {}, accounts = null) {
   if (accounts) settings = { ACCOUNTS_URL: accounts.url, ACCOUNTS_PUBLIC_KEY: accounts.publicKey, ...settings }
   const port = await freePort()
@@ -298,6 +300,8 @@ export async function startHostedRelay(name, settings = {}, accounts = null) {
     use: (a, n) => post('/_test/use', { a, n }).then((r) => r.json()),
     clock: (ms) => post('/_test/clock', { shift: ms }).then((r) => r.json()),
     state: () => post('/_test/state', {}).then((r) => r.json()),
+    // A phone page file served as text instead ({ name, text }), and the version it says ({ version }).
+    page: (change) => post('/_test/page', change).then((r) => r.json()),
     stop: () => stopTree(p),
   }
 }

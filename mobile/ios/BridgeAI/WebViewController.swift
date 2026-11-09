@@ -200,6 +200,13 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKUIDel
     // Cloud agents, from the Home Screen quick action.
     func openCloud() { if CloudBridge.available() { openBundled("cloud") } }
 
+    // A pairing link on Bridge AI's relay that iOS handed the app (a Universal Link, project.yml):
+    // it pairs as a scanned code does. iOS opens only links the relay says are the app's
+    // (https://<id>.boldbridge.app/ with #pair=…).
+    func openLink(_ link: URL) {
+        if !usePairingLink(link.absoluteString) { alert("That isn't a Bridge AI pairing code. On your computer, open Settings › Devices and click Pair a device.") }
+    }
+
     // The lock screen card was tapped (bridgeai://agent?id=<pane>): show that agent.
     func open(_ url: URL) {
         guard url.scheme == "bridgeai", url.host == "agent",

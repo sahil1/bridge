@@ -3,7 +3,7 @@ import Icon from '../Icon.jsx'
 import { InstallNode, openSettings } from '../SignIn.jsx'
 import { RelayUse } from './Account.jsx'
 import { api, viaRelay, relayComputers } from '../../api.js'
-import { t, locale } from '../../i18n/index.js'
+import { t, tx, locale } from '../../i18n/index.js'
 import { Advanced } from './Advanced.jsx'
 
 // Settings › Devices › "From anywhere": your own relay on your Cloudflare account
@@ -14,10 +14,14 @@ import { Advanced } from './Advanced.jsx'
 // kept by Phone.jsx, which shows Tailscale's section). It needs your account signed in here and
 // allowed the relay: what's missing is said, with the button that fixes it (sign in, ask for it).
 // Until then it's exactly the relay section it always was.
+//
+// What Bridge AI's relay can see is said as it is: with the iPhone or Android app, never what you
+// do, since the app carries the code that does the encrypting; in a phone's browser that code comes
+// from the relay (relay/web/shell.js says so there too).
 const WAYS = [
-  { id: 'hosted', title: 'Bridge AI\'s relay', text: 'Easiest. With your Bold Bridge account, one click.', tag: 'Recommended' },
-  { id: 'cloudflare', title: 'Your own Cloudflare', text: 'Everything on your own free account.' },
-  { id: 'tailscale', title: 'Tailscale', text: 'If you already use it.' },
+  { id: 'hosted', title: tx('Bridge AI\'s relay'), text: tx('Easiest, with the iPhone or Android app. One click with your Bold Bridge account.'), tag: tx('Recommended') },
+  { id: 'cloudflare', title: tx('Your own Cloudflare'), text: tx('Everything on your own free account.') },
+  { id: 'tailscale', title: tx('Tailscale'), text: tx('If you already use it.') },
 ]
 const CODE = 'https://github.com/sahil1/bridge/tree/main/relay'
 
@@ -135,8 +139,8 @@ export default function Relay({ way, setWay, onOffer }) {
         <div className="ph-ways" role="radiogroup" aria-label="How your phone reaches this computer">
           {WAYS.map((w) => (
             <button key={w.id} type="button" role="radio" aria-checked={pick === w.id} className={`ph-way ${pick === w.id ? 'on' : ''}`} onClick={() => setWay?.(w.id)}>
-              <span className="ph-way-head"><b>{w.title}</b>{current === w.id ? <span className="st-chip">In use</span> : w.id === 'hosted' && st.hostedFull ? <span className="st-chip warn">{t('Full for now')}</span> : w.tag && !current && <span className="st-chip good">{w.tag}</span>}</span>
-              <span className="muted small">{w.text}</span>
+              <span className="ph-way-head"><b>{t(w.title)}</b>{current === w.id ? <span className="st-chip">In use</span> : w.id === 'hosted' && st.hostedFull ? <span className="st-chip warn">{t('Full for now')}</span> : w.tag && !current && <span className="st-chip good">{t(w.tag)}</span>}</span>
+              <span className="muted small">{t(w.text)}</span>
             </button>
           ))}
         </div>
@@ -144,7 +148,7 @@ export default function Relay({ way, setWay, onOffer }) {
           <div className="relay-box">
             <p className="small">{t('A relay run by Bold Bridge passes your phone\'s connection on to this computer. It comes with a Bold Bridge account, by request; nothing to set up.')}</p>
             <ul className="ph-facts">
-              <li><b>What it can see:</b> the IP addresses of your phone and this computer, and when and how much data passes. Never what you do: everything between them is end-to-end encrypted.</li>
+              <li><b>{t('What it can see:')}</b> {t('the IP addresses of your phone and this computer, and when and how much data passes. With the iPhone or Android app, never what you do: everything between them is end-to-end encrypted by code the app carries. In a phone\'s browser, that code comes from the relay.')}</li>
               <li><b>{t('Fair use:')}</b> {t('your account has an allowance every 8 hours and each week, across its computers, plenty for normal use. Settings › Account shows it.')}</li>
               <li><b>Open source:</b> the relay's code is <a href={CODE} target="_blank" rel="noreferrer">on GitHub</a>. If you'd rather not use the project's, pick your own Cloudflare instead.</li>
             </ul>
@@ -186,7 +190,7 @@ export default function Relay({ way, setWay, onOffer }) {
     <section className="st-sec" data-setting="relay">
       <h4>{st.hosted ? 'From anywhere, through Bridge AI\'s relay' : 'From anywhere, through your own relay'}</h4>
       {st.hosted
-        ? <p className="muted small" title={t('Your phone reaches this computer through a relay run by Bold Bridge, for your Bold Bridge account. Everything between them is end-to-end encrypted, so the relay can\'t read it: it sees IP addresses, and when and how much data passes. Your account has a fair-use allowance every 8 hours and each week.')}>{t('End-to-end encrypted: the relay sees IP addresses and how much data passes, never what you do.')}</p>
+        ? <p className="muted small" title={t('Your phone reaches this computer through a relay run by Bold Bridge, for your Bold Bridge account. Everything between them is end-to-end encrypted: the relay sees IP addresses, and when and how much data passes. With the iPhone or Android app it can\'t read the rest, since the app carries the code that does the encrypting; in a phone\'s browser that code comes from the relay. Your account has a fair-use allowance every 8 hours and each week.')}>{t('End-to-end encrypted: the relay sees IP addresses and how much data passes. With the phone apps, never what you do; in a browser, the page\'s code comes from the relay.')}</p>
         : <p className="muted small" title="Your phone reaches this computer through a small relay on your own free Cloudflare account. No VPN and no app to keep running: Bridge AI connects to it whenever it's open. Everything between phone and computer is end-to-end encrypted, so neither the relay nor Cloudflare can read it.">On your own free Cloudflare account, end-to-end encrypted: neither the relay nor Cloudflare can read it.</p>}
 
       {!st.configured ? cloudflare : (
@@ -203,10 +207,13 @@ export default function Relay({ way, setWay, onOffer }) {
           {limitText && <p className="st-note warn"><Icon name="alert" size={13} /> {limitText} {['window', 'week', 'all', 'suspended', 'relay', 'deleted'].includes(st.limit.why) && <button type="button" className="link-btn" onClick={() => { setChanging(true); setWay?.('cloudflare') }}>{t('Use your own Cloudflare')}</button>}{st.limit.why === 'token' && <button type="button" className="link-btn" onClick={() => openSettings('account')}>{t('Open Settings › Account')}</button>}</p>}
           {st.limit?.why === 'gone' && !busy && (full || <div className="st-row"><button type="button" className="btn primary" onClick={useHosted}><Icon name="refresh" size={13} /> Set up Bridge AI's relay again</button><span className="muted small">Phones you paired pair again afterwards.</span></div>)}
           {st.needsUpdate && !st.busy && <p className="st-note warn"><Icon name="alert" size={13} /> Your relay is older than this Bridge AI. <button type="button" className="link-btn" onClick={() => run('/relay/update')}>Update it</button></p>}
+          {st.hosted && <PageCheck onOwn={() => { setChanging(true); setWay?.('cloudflare') }} />}
 
+          {/* A code pairs one device: once it has, its QR code goes, and another is a click away. */}
           {st.pairing ? <PairCode p={st.pairing} onStop={() => run('/relay/pair', { stop: true })} /> : (
             <div className="st-row">
-              <button type="button" className="btn primary" disabled={!st.online} onClick={() => run('/relay/pair')}><Icon name="link" size={14} /> {t('Pair a device')}</button>
+              {st.paired && <span className="st-chip good" role="status"><Icon name="check" size={11} /> {t('{name} paired', { name: st.paired.name })}</span>}
+              <button type="button" className={st.paired ? 'btn' : 'btn primary'} disabled={!st.online} onClick={() => run('/relay/pair')}><Icon name={st.paired ? 'plus' : 'link'} size={14} /> {st.paired ? t('Add another device') : t('Pair a device')}</button>
               {!st.online && <span className="muted small">Waiting for the relay to connect.</span>}
             </div>
           )}
@@ -216,7 +223,10 @@ export default function Relay({ way, setWay, onOffer }) {
               {phones.map((d) => (
                 <li key={d.id}>
                   <Icon name="phone" size={14} /><span>{d.name}</span>
+                  {d.fresh && <span className="st-chip">{t('New')}</span>}
                   <span className="muted small">{d.connected ? 'connected now' : d.lastSeen ? `last used ${new Date(d.lastSeen).toLocaleString(locale(), { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : ''}</span>
+                  {/* Just paired: Keep it (yours), as the app's notice offers too. */}
+                  {d.fresh && <button type="button" className="ghost-btn" onClick={async () => { setErr(null); try { setSt(await api(`/relay/devices/${encodeURIComponent(d.id)}/keep`, { method: 'POST' })); window.dispatchEvent(new Event('bridge-machines')) } catch (e) { setErr(e.message) } }}>{t('Keep')}</button>}
                   <button type="button" className="ghost-btn" onClick={async () => { if (window.confirm(`Remove ${d.name}? It won't be able to reach this computer until you pair it again.`)) { setErr(null); try { setSt(await api(`/relay/devices/${encodeURIComponent(d.id)}`, { method: 'DELETE' })) } catch (e) { setErr(e.message) } } }}>Remove</button>
                 </li>
               ))}
@@ -247,6 +257,54 @@ function Needs({ acct, asking, onAsk, children }) {
   if (a.relay === 'requested') return say(t('You asked for Bridge AI\'s relay ({email}). Bold Bridge emails you when it\'s on, and then it\'s one click here.', { email: a.email }))
   if (a.relay !== 'approved') return say(a.relay === 'declined' ? t('Your request for Bridge AI\'s relay was declined. You can ask again, or use your own Cloudflare or Tailscale.') : t('Your Bold Bridge account ({email}) doesn\'t have Bridge AI\'s relay yet. It\'s by request.', { email: a.email }), <button type="button" className="btn small primary" disabled={asking} onClick={onAsk}>{asking ? t('Asking…') : a.relay === 'declined' ? t('Ask again') : t('Request access')}</button>)
   return children
+}
+
+// On Bridge AI's relay: whether the phone page it serves to browsers is a release's own
+// (server/relaycheck.js, once a day and as this opens). The last check is said quietly; a page that
+// differs is said plainly, with what to do: phones in a browser run that page, the apps don't.
+const REPORT = 'https://github.com/sahil1/bridge/security/advisories/new'
+function PageCheck({ onOwn }) {
+  const [c, setC] = useState(null)
+  const timer = useRef(null)
+  const gone = useRef(false)
+  // now: Check again, at once; while a check is under way, asked again until it's done.
+  const ask = (now = false) => {
+    clearTimeout(timer.current)
+    api(`/relay/pagecheck${now ? '?now=1' : ''}`).then((x) => {
+      if (gone.current) return
+      setC(x)
+      if (x.checking) timer.current = setTimeout(ask, 1500)
+    }).catch(() => {})
+  }
+  useEffect(() => { gone.current = false; ask(); return () => { gone.current = true; clearTimeout(timer.current) } }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  if (!c?.on) return null
+  const again = <button type="button" className="link-btn" disabled={c.checking} onClick={() => ask(true)}>{c.checking ? t('Checking…') : t('Check again')}</button>
+  const when = c.at ? new Date(c.at).toLocaleString(locale(), { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : null
+  if (c.why) {
+    return (
+      <div className="st-note warn" role="alert" data-check="page">
+        <p><Icon name="alert" size={13} /> {c.why === 'unreleased'
+          ? t('Bridge AI\'s relay says its phone page is from Bridge AI {version}, which isn\'t a release.', { version: c.version })
+          : c.differs.length === 1 ? t('Bridge AI\'s relay is serving a phone page that isn\'t Bridge AI {version}\'s: {file} differs.', { version: c.version, file: c.differs[0] })
+            : t('Bridge AI\'s relay is serving a phone page that isn\'t Bridge AI {version}\'s: {files} differ.', { version: c.version, files: c.differs.join(', ') })}
+        {' '}{t('A phone in a browser runs that page, so it could read what you do there; the iPhone and Android apps carry their own copy and aren\'t affected. Use the apps, or a relay on your own Cloudflare, until this is explained, and please report it.')}</p>
+        <div className="st-row">
+          <button type="button" className="btn small" onClick={onOwn}>{t('Use your own Cloudflare')}</button>
+          <a className="ghost-btn" href={REPORT} target="_blank" rel="noreferrer">{t('Report it')}</a>
+          {again}
+        </div>
+      </div>
+    )
+  }
+  if (c.error && !c.version) return <p className="muted small" data-check="page">{t('Couldn\'t check the phone page Bridge AI\'s relay serves ({error}). It tries again tomorrow, and when you open this.', { error: c.error })} {again}</p>
+  if (!c.at) return <p className="muted small" data-check="page"><Icon name="refresh" size={12} className="spin" /> {t('Checking the phone page Bridge AI\'s relay serves…')}</p>
+  return (
+    <p className="muted small" data-check="page" title={t('Once a day, and when you open this, this computer checks that the page Bridge AI\'s relay serves to phones in a browser is a released version\'s, unchanged. The iPhone and Android apps carry their own copy.')}>
+      <Icon name="check" size={12} /> {c.error
+        ? t('The relay\'s phone page was Bridge AI {version}\'s, unchanged, when last checked. Couldn\'t check again just now ({error}).', { version: c.version, error: c.error })
+        : t('The relay\'s phone page is Bridge AI {version}\'s, unchanged (checked {when}).', { version: c.version, when })} {again}
+    </p>
+  )
 }
 
 // Bridge AI's relay turned this computer away: it takes so many accounts at once, and has them.
@@ -328,7 +386,7 @@ function PairCode({ p, onStop, forPhone = false }) {
       <div className="ph-qr" aria-label={t('QR code to pair a device')} dangerouslySetInnerHTML={{ __html: p.qr }} />
       <div className="ph-pair-text">
         <ol className="ph-steps">
-          <li><b>{t('A phone:')}</b> {t('scan this with its camera, or in the Bridge AI app. Then add it to your Home Screen (iPhone: Share › Add to Home Screen; Android: ⋮ › Install app), open it from there, and type the code again if it asks.')}</li>
+          <li><b>{t('A phone:')}</b> {t('scan this with its camera, or in the Bridge AI app. To use it like an app in a browser, add it to the Home Screen (iPhone: Share › Add to Home Screen; Android: ⋮ › Install app) and pair it there. A code pairs one device.')}</li>
           {!forPhone && <li><b>{t('Another computer:')}</b> {t('in Bridge AI there, open Settings › Devices › Link a device, and paste the link or type the address and code.')}</li>}
           {!forPhone && <li><b>{t('Or let your phone link them:')}</b> {t('scan this with the Bridge AI app on a phone that\'s paired with the other computer, and it offers to link the two.')}</li>}
         </ol>
@@ -336,7 +394,7 @@ function PairCode({ p, onStop, forPhone = false }) {
           <span className="muted small">{t('Address')}</span><code>{host}</code>
           <span className="muted small">{t('Code')}</span><b className="mono">{p.code}</b>
         </div>
-        <p className="muted small">{left === 1 ? t('The code works for 1 more minute, for up to 3 devices.') : t('The code works for {n} more minutes, for up to 3 devices.', { n: left })}</p>
+        <p className="muted small">{left === 1 ? t('The code works for 1 more minute, for one device.') : t('The code works for {n} more minutes, for one device.', { n: left })}</p>
         <div className="st-row">
           <button type="button" className="ghost-btn" onClick={copy}><Icon name={copied ? 'check' : 'copy'} size={12} /> {copied ? t('Copied') : t('Copy link')}</button>
           <button type="button" className="ghost-btn" onClick={onStop}>{t('Done')}</button>
