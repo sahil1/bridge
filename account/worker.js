@@ -162,7 +162,11 @@ export async function readToken(env, token, kind) {
   return p?.k === kind && ID.test(p.a) && ID.test(p.d) && Number.isInteger(p.exp) && p.exp * 1000 > Date.now() ? p : null
 }
 const seconds = (t) => Math.floor(t / 1000)
-const deviceToken = (env, a, d, now) => sign(env, { k: 'device', a, d, iat: seconds(now), exp: seconds(now) + DEVICE_DAYS * 86400 })
+const deviceToken = (env, a, d, now, iat = seconds(now)) => sign(env, { k: 'device', a, d, iat, exp: iat + DEVICE_DAYS * 86400 })
+// A renewed one starts at the beginning of its day, so the same one comes back all that day: the
+// one it replaces, used again (its answer lost, or two asks at once), gets that one again, rather
+// than another put in its place that signs out the device holding the first.
+const renewedToken = (env, a, d, now) => deviceToken(env, a, d, now, Math.floor(seconds(now) / 86400) * 86400)
 // The relay token and the Early Access code start at the beginning of a half of their life, so the
 // same one comes back until it's past half its life, and then a new one: renewed by GET /v1/me with
 // nothing kept here (Ed25519 signs the same text the same way).
@@ -490,7 +494,7 @@ async function v1(req, env, url) {
     const ok = acct.status === 'active'
     // Past half its life, or signed with a key before this one (or before tokens said which), a new
     // device token; the one this came with works until the new one is used.
-    const renew = ok && (seconds(now) > tok.iat + (DEVICE_DAYS * 86400) / 2 || tok.kid !== (await keysOf(env)).kid) ? await deviceToken(env, acct.id, dev.id, now) : null
+    const renew = ok && (seconds(now) > tok.iat + (DEVICE_DAYS * 86400) / 2 || tok.kid !== (await keysOf(env)).kid) ? await renewedToken(env, acct.id, dev.id, now) : null
     await db.batch([
       db.prepare('UPDATE devices SET last_seen = ? WHERE id = ?').bind(now, dev.id),
       ...(renew ? [db.prepare('UPDATE devices SET token_hash = ?, prev_hash = ? WHERE id = ?').bind(await sha(renew), hash, dev.id)] : []),
