@@ -128,9 +128,8 @@ export function memGroups(list, seen, by) {
   return out.sort((a, b) => (a.key.startsWith(':')) - (b.key.startsWith(':')) || (a.key === ':none') - (b.key === ':none') || b.items.length - a.items.length)
 }
 
-// Memory is a page of its own (memory/Memory.jsx), opened from Meetings, a meeting's menu and
-// Settings › Meetings as from the sidebar.
-export const openMemory = () => window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: 'view:memory' } }))
+// Where Memory opens (memory/open.js), for a meeting's menu and Settings › Meetings.
+export { openMemory } from '../memory/open.js'
 
 // Transcribe one meeting, or several, again from their audio: with another engine or speech model,
 // or another language. The transcript they had is kept beside it.

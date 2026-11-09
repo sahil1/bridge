@@ -295,7 +295,6 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
         {!fleet?.down && <button className={`mini-nav ${chiefOn ? 'on' : ''}`} data-tour="chief" onClick={goChief} disabled={launching} aria-label={t('Chief of Staff')} title={`${t('Chief of Staff')}\n${chiefWhat}`}><Icon name="helm" size={15} />{(chief?.status === 'blocked' || threads.some((a) => a.status === 'blocked')) && <span className="mini-needs" />}</button>}
         <button className={`mini-nav ${String(selected || '').startsWith('view:meeting') ? 'on' : ''}`} onClick={() => onMeetings?.()} aria-label={recording ? t('Meetings (recording)') : t('Meetings')} title={t('Meetings')}><Icon name="mic" size={15} />{recording && <span className="rec-dot mini-rec" />}</button>
         {anyDictation && <button className={`mini-nav ${selected === 'view:dictations' ? 'on' : ''}`} onClick={() => onDictations?.()} aria-label={t('Dictations')} title={t('Dictations')}><Icon name="wave" size={15} /></button>}
-        <button className={`mini-nav ${selected === 'view:memory' ? 'on' : ''}`} onClick={() => onOpen('view:memory')} aria-label={t('Memory')} title={t('Memory')}><Icon name="book" size={15} /></button>
         {whiteboards && <button className={`mini-nav ${String(selected || '').startsWith('view:whiteboard') ? 'on' : ''}`} onClick={() => onOpen('view:whiteboards')} aria-label={t('Whiteboards')} title={t('Whiteboards')}><Icon name="shapes" size={15} /></button>}
         {whiteboards && studio && <button className={`mini-nav ${String(selected || '').startsWith('view:studio') ? 'on' : ''}`} onClick={() => onOpen('view:studio')} aria-label={t('Studio')} title={t('Studio')}><Icon name="layers" size={15} /></button>}
         {whiteboards && files && <button className={`mini-nav ${selected === 'view:files' ? 'on' : ''}`} onClick={() => onOpen('view:files')} aria-label={t('Files')} title={t('Files')}><Icon name="folder" size={15} /></button>}
@@ -382,10 +381,6 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
           </div>
         )}
         {anyDictation && dictOpen && <Quiet name="Dictations list"><RailDictations /></Quiet>}
-        {/* Memory: what Meetings and Dictations, above it, have taught Bridge AI. */}
-        <div className="rail-nav-row">
-          <button className={`rail-nav-btn ${selected === 'view:memory' ? 'on' : ''}`} onClick={() => onOpen('view:memory')}><Icon name="book" size={14} /> {t('Memory')}</button>
-        </div>
         {whiteboards && (
           <div className="rail-nav-row">
             <button className={`rail-nav-btn ${String(selected || '').startsWith('view:whiteboard') ? 'on' : ''}`} onClick={() => onOpen('view:whiteboards')}><Icon name="shapes" size={14} /> {t('Whiteboards')}</button>

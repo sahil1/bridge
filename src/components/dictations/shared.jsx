@@ -49,10 +49,10 @@ export function Glyph({ r, size = 28, bare = false }) {
   return <span className="dc-glyph dc-glyph-icon" style={{ width: size, height: size }} aria-hidden="true"><Icon name={name} size={Math.round(size * 0.52)} /></span>
 }
 
-// Opens Dictations (App.jsx), with that one open when given.
-let wanted = null
+// Opens Dictations (App.jsx) at its list, with that one open when given.
+let wanted = null // { id }
 export const takeWanted = () => { const w = wanted; wanted = null; return w }
 export function openDictations(id = null) {
-  wanted = id
+  wanted = { id }
   window.dispatchEvent(new CustomEvent('bridge-open-dictations', { detail: { id } }))
 }

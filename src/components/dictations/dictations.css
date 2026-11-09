@@ -55,6 +55,22 @@
 .app.narrow .dc-view :is(.dc-said, .dc-heard) { display: inline-flex; align-items: center; }
 .app.narrow .dc-where { flex-wrap: wrap; row-gap: 0; }
 .app.narrow .dc-where b { white-space: normal; overflow-wrap: anywhere; }
+/* The header on a phone, as Meetings' is: the name, its count and Settings on one row, then
+   Dictations and Memory as a row of their own, an icon over each name. */
+.app.narrow .dc-view .pane-head { flex-wrap: wrap; height: auto; min-height: 52px; gap: 4px 6px; padding: 6px max(10px, env(safe-area-inset-right)) 6px max(14px, env(safe-area-inset-left)); }
+.app.narrow .dc-view .pane-title { flex: 1 1 0; min-width: 0; }
+.app.narrow .dc-view .pane-extras { display: contents; }
+.app.narrow .dc-view .pane-head .pane-icon { display: none; }
+.app.narrow .dc-view .pane-titles h2 { font-size: 16px; }
+.app.narrow .dc-view .pane-head .btn.small { height: 40px; padding: 0 11px; font-size: 13px; }
+.app.narrow .dc-view .pane-head .seg { order: 5; flex: 1 0 100%; display: flex; padding: 3px; border-radius: 11px; }
+.app.narrow .dc-view .pane-head .seg button { flex: 1 1 0; min-width: 0; flex-direction: column; justify-content: center; gap: 1px; height: 44px; padding: 0 2px; border-radius: 8px; }
+.app.narrow .dc-view .pane-head .seg button span { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; line-height: 1.2; }
+@media (orientation: landscape) and (max-height: 520px) {
+  .app.narrow .dc-view .pane-head .seg { order: 0; flex: none; }
+  .app.narrow .dc-view .pane-head .seg button { flex: none; flex-direction: row; gap: 6px; height: 40px; padding: 0 12px; }
+  .app.narrow .dc-view .pane-head .seg button span { font-size: 12.5px; }
+}
 
 /* The sidebar: a day's heading, then its dictations, each with its icon. */
 .rd-day { margin: 6px 0 2px 25px; font: 600 10.5px var(--font); letter-spacing: .05em; text-transform: uppercase; color: var(--ink-3); }
