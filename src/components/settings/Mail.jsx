@@ -8,8 +8,8 @@ import '../mail/mail.css'
 
 // Settings › Mail, where Mail is read (a Mac): How You Write, the profile AI Assist writes replies in
 // your voice from (server mailassist.js), to read, change, learn again or clear; and Scheduling
-// Assist's working days and hours; under Advanced, learning it again by itself, the time kept clear
-// around meetings and how many times it offers. Bridge AI only reads mail: nothing here changes Mail.
+// Assist's working days and hours; under Advanced, the time kept clear around meetings and how many
+// times it offers. Bridge AI only reads mail: nothing here changes Mail.
 const DEFAULT = { days: [1, 2, 3, 4, 5], start: '09:00', end: '17:00', buffer: 15, travel: 30, count: 3 }
 const openProviders = () => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'providers' } }))
 const when = (iso) => (iso ? new Date(iso).toLocaleDateString(locale(), { day: 'numeric', month: 'short', year: 'numeric' }) : '')
@@ -93,16 +93,12 @@ export default function Mail() {
         <h4>{t('How You Write')}</h4>
         <p className="muted small" title={t('AI Assist drafts replies in your own tone and language from this: a few lines on how you write, and some of your own replies as examples. Read it, change it, or clear it.')}>{t('AI Assist drafts replies in your tone from this. Read it, change it, or clear it.')}</p>
         <HowYouWrite />
+        {/* On unless turned off, and it reads your mail again for that model: said here, not under Advanced. */}
+        <label className="st-check" data-setting="mail-learn">
+          <input type="checkbox" checked={mail.learn !== false} onChange={(e) => save({ mail: { learn: e.target.checked } })} />
+          <span title={t("Once a week or so, while AI Assist drafts your replies, from the mail and meetings you have then. Not once you've changed it yourself.")}><b>{t('Learn it again now and then')}</b> <span className="muted small">{t("Once a week or so, read again the same way, unless you've changed it yourself.")}</span></span>
+        </label>
       </section>
-      <Advanced order={10}>
-        <section className="st-sec" data-setting="mail-learn">
-          <h4>{t('Learning How You Write')}</h4>
-          <label className="st-check">
-            <input type="checkbox" checked={mail.learn !== false} onChange={(e) => save({ mail: { learn: e.target.checked } })} />
-            <span title={t("Once a week or so, while AI Assist drafts your replies, from the mail and meetings you have then. Not once you've changed it yourself.")}><b>{t('Learn it again now and then')}</b> <span className="muted small">{t("Once a week or so, unless you've changed it yourself.")}</span></span>
-          </label>
-        </section>
-      </Advanced>
 
       <section className="st-sec" data-setting="find-a-time">
         <h4>{t('Find a Time')}</h4>

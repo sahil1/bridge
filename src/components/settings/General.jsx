@@ -11,8 +11,8 @@ import SetupAll from '../SetupAll.jsx'
 import Permissions from './Permissions.jsx'
 import { Advanced, Line } from './Advanced.jsx'
 
-// Settings › General: who you are, which agent and model to use by default, the layout and where
-// you are; under Advanced, the Chief of Staff's agent, plan usage, what Bridge AI is allowed on this
+// Settings › General: who you are, which agent and model to use by default, picking up unfinished
+// work (it has agents carry on by themselves), the layout and where you are; under Advanced, the Chief of Staff's agent, plan usage, what Bridge AI is allowed on this
 // computer (Permissions), Command History, and the terminal and where agents run.
 export function useSettings() {
   const [s, setS] = useState(null)
@@ -97,6 +97,16 @@ export default function General({ onGo, onOpenAgent }) {
           : <p className="muted small">{t("{agent} picks its model in its own settings; Bridge AI can't set it from here yet.", { agent: defAgent.label })}</p>)}
       </section>
 
+      {/* On unless turned off, and it has an agent carry on by itself: said here, not under Advanced. */}
+      {eff.runtime !== 'herdr' && (
+        <section className="st-sec">
+          <label className="st-check" data-setting="resume-work" title={t('An agent stopped in the middle of something (an update that had to restart its terminal, a crash, the computer restarting) reopens its conversation and is told to carry on from where it left off. Off: it reopens and waits for you.')}>
+            <input type="checkbox" checked={eff.resumeWork !== false} onChange={(e) => save({ resumeWork: e.target.checked })} />
+            <span><b>{t('Pick up unfinished work after an update, a crash or a restart')}</b> <span className="muted small">{t('The agent is told to carry on, on its own plan or key.')}</span></span>
+          </label>
+        </section>
+      )}
+
       <section className="st-sec" data-setting="layout">
         <Line label={t('Layout')} hint={t('Simple: your Chief of Staff and your agents. Everything: every panel.')}
           title={t('Simple keeps the screen to your chief of staff and your agents: the Today panel waits behind one button, and the Agents board shows up once you have agents. Everything shows every panel.')}>
@@ -139,8 +149,6 @@ export default function General({ onGo, onOpenAgent }) {
             <>
               <label className="ph-check small" data-setting="keep-agents" title={t('They carry on through updates and restarts, and Bridge AI picks them up as they are when it starts. Off: they stop with it, and Claude Code and Codex resume their conversations next time.')}>
                 <input type="checkbox" checked={eff.keepAgents !== false} onChange={(e) => save({ keepAgents: e.target.checked })} /> {t('Keep agents running when Bridge AI quits')}</label>
-              <label className="ph-check small" data-setting="resume-work" title={t('An agent stopped in the middle of something (an update that had to restart its terminal, a crash, the computer restarting) reopens its conversation and is told to carry on from where it left off. Off: it reopens and waits for you.')}>
-                <input type="checkbox" checked={eff.resumeWork !== false} onChange={(e) => save({ resumeWork: e.target.checked })} /> {t('Pick up unfinished work after an update, a crash or a restart')}</label>
             </>
           )}
         </section>

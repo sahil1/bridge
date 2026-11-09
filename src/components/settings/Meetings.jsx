@@ -10,8 +10,10 @@ import { Advanced, Line } from './Advanced.jsx'
 import '../meetings/meetings.css'
 
 // Settings › Meetings: which engine turns speech into text (on this computer, or a service you have
-// a key for), the language, names and terms, the model that writes the notes, calls and their sound,
-// and saving them as Markdown. Under Advanced: the other speech services, AI Assist in meetings, who
+// a key for), the language, names and terms, the model that writes the notes and what it does by
+// itself (the summary, cleaning up, naming who spoke, preparing: on unless turned off, and what each
+// reads goes to that model, so which and where it runs is said there), calls and their sound, and
+// saving them as Markdown. Under Advanced: the other speech services, suggesting what to ask, who
 // spoke, the key that mentions a meeting in a message, the floating card, and where and how notes
 // are saved. Server: speech.js, meetings.js.
 const LANGS = [['auto', 'Detect it'], ['en', 'English'], ['es', 'Spanish'], ['fr', 'French'], ['de', 'German'], ['it', 'Italian'], ['pt', 'Portuguese'], ['nl', 'Dutch'], ['hi', 'Hindi'], ['zh', 'Chinese'], ['ja', 'Japanese'], ['ko', 'Korean'], ['ar', 'Arabic'], ['ru', 'Russian'], ['pl', 'Polish'], ['tr', 'Turkish'], ['sv', 'Swedish'], ['uk', 'Ukrainian']]
@@ -131,6 +133,11 @@ function RoomVoices({ v, m, set, refresh }) {
     </section>
   )
 }
+// The model notes are written with when none is picked, as the server picks it (server/index.js
+// pickMeetingModel): your Claude sign-in first, then another sign-in, a key, your cloud, a model on
+// this computer (yours before the one built in).
+const VIA_ORDER = ['sign-in', 'key', 'cloud', 'local']
+const rank = (x) => (x.id === 'cli:claude' ? -1 : VIA_ORDER.indexOf(x.via) + (x.builtin ? 0.5 : 0))
 // Settings › Model Providers at its speech services, where their keys go; Settings › Voice.
 const openSpeechKeys = () => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'providers-speech' } }))
 const openVoice = () => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'voice' } }))
@@ -164,6 +171,10 @@ export default function Meetings({ onOpenAgent }) {
   )
   const mine = d.services.filter((x) => x.ready || d.engine === x.id)
   const others = d.services.filter((x) => !mine.includes(x))
+  // The model that writes the notes, and with it cleans up, names who spoke and prepares: which, and
+  // where it runs, said where each is turned on (what it reads leaves this computer unless it's local).
+  const notes = !models ? null : m.model ? models.find((x) => x.id === m.model) || null : [...models].sort((a, b) => rank(a) - rank(b))[0] || null
+  const by = notes ? (notes.via === 'local' ? t('{model}, on this computer', { model: notes.label }) : t('{model}, at {provider}', { model: notes.label, provider: notes.provider })) : null
   const prepWhy = home ? t("Fifteen minutes before a meeting with other people, AI Assist suggests goals and questions, with the model that writes your notes, from who's coming, last time with them, the invite and your mail with them. Off, it does this only when you ask, with AI Assist on the meeting in Calendar, or Prepare on Home.")
     : t("Fifteen minutes before a meeting with other people, AI Assist suggests goals and questions, with the model that writes your notes, from who's coming, last time with them, the invite and your mail with them. Off, it does this only when you ask, with AI Assist on the meeting in Calendar.")
 
@@ -228,7 +239,9 @@ export default function Meetings({ onOpenAgent }) {
 
       <section className="st-sec" data-setting="notes-model">
         <h4>Notes are written by</h4>
-        <p className="muted small">{t('It gets the transcript, and the invite and files that go with the meeting.')}</p>
+        <p className="muted small" data-notes-where>{!models ? '\u00a0' : !notes ? t('No model to write them yet: sign in to an agent, or add one in Settings › Model Providers.')
+          : notes.via === 'local' ? t('{model} runs on this computer: what it reads stays here.', { model: notes.label })
+            : t('{model}, at {provider}: the transcript, and what each one below reads, go there.', { model: notes.label, provider: notes.provider })}</p>
         <select className="st-input" value={m.model || ''} onChange={(e) => set({ model: e.target.value || null })} aria-label="Model for meeting notes">
           <option value="">Automatic (your Claude sign-in first, then a key or a local model)</option>
           {(models || []).map((x) => <option key={x.id} value={x.id}>{x.label} ({x.provider})</option>)}
@@ -237,6 +250,21 @@ export default function Meetings({ onOpenAgent }) {
           <input type="checkbox" checked={m.autoSummary !== false} onChange={(e) => set({ autoSummary: e.target.checked })} />
           <span><b>Write the summary when a meeting ends</b> <span className="muted small">Otherwise, Summarize on the meeting when you want it.</span></span>
         </label>
+        {/* On unless turned off, and each sends what it reads to that model: said here, not under Advanced. */}
+        <label className="st-check" data-setting="transcript-cleanup">
+          <input type="checkbox" checked={m.cleanup ?? m.autoSummary !== false} onChange={(e) => set({ cleanup: e.target.checked })} />
+          <span title="The model fixes misheard words and names from what the meeting is about (its invite, files and Memory) and leaves out words nobody said. Each fixed line says what was heard, and Undo puts it back."><b>Clean up the transcript when a meeting ends</b> <span className="muted small">{t('Misheard words fixed from the invite, its files and Memory; Undo puts a line back.')}</span></span>
+        </label>
+        <label className="st-check" data-setting="name-speakers">
+          <input type="checkbox" checked={m.nameSpeakers !== false} onChange={(e) => set({ nameSpeakers: e.target.checked })} />
+          <span title="Before the first summary, the model works out who said each of Them's lines from names said, the invite and the screen. On a Mac, a watched screen is read while the call talks, and those pictures aren't kept. With one other person invited, it's them. In a room, the voices told apart are named the same way."><b>Name who spoke on the call</b> <span className="muted small">{t('From names said, the invite and what the call shows on screen, before the first summary.')}</span></span>
+        </label>
+        {calendar && <label className="st-check" data-setting="prep">
+          <input type="checkbox" checked={m.prep !== false} onChange={(e) => set({ prep: e.target.checked })} />
+          <span title={`${prepWhy}${window.bridgeApp?.desktop ? ` ${t('In the desktop app, the floating card shows them ten minutes before, with Join.')}` : ''}`}><b>{t('Prepare for each meeting')}</b> <span className="muted small">{by
+            ? t('Fifteen minutes before, AI Assist reads the invite and your mail with the people invited, with {by}.', { by })
+            : t('Fifteen minutes before, AI Assist reads the invite and your mail with the people invited, with the model above.')}</span></span>
+        </label>}
       </section>
 
       <section className="st-sec" data-setting="calls">
@@ -266,10 +294,6 @@ export default function Meetings({ onOpenAgent }) {
         <section className="st-sec" data-setting="meeting-assist">
           <h4 className="st-wand"><Icon name="wand" size={13} /> {t('AI Assist')}</h4>
           <label className="st-check">
-            <input type="checkbox" checked={m.cleanup ?? m.autoSummary !== false} onChange={(e) => set({ cleanup: e.target.checked })} />
-            <span title="The model fixes misheard words and names from what the meeting is about (its invite, files and Memory) and leaves out words nobody said. Each fixed line says what was heard, and Undo puts it back."><b>Clean up the transcript when a meeting ends</b> <span className="muted small">{t('Misheard words and names fixed; Undo puts a line back.')}</span></span>
-          </label>
-          <label className="st-check">
             <input type="checkbox" checked={m.assist === true} onChange={(e) => set({ assist: e.target.checked })} />
             <span title="While a meeting records, AI Assist reads along with the model that writes your notes and suggests what to ask or check next, from what's said, the invite and the files that go with it. AI Assist › Suggest what to ask on a meeting turns it on or off there, and for the meetings after."><b>Suggest what to ask, in every meeting</b> <span className="muted small">{t('While a meeting records, what to ask or check next.')}</span></span>
           </label>
@@ -280,14 +304,6 @@ export default function Meetings({ onOpenAgent }) {
               <option value="medium">Medium: up to three, about once a minute</option>
               <option value="high">High: up to three, about every 30 seconds</option>
             </select>
-          </label>
-          {calendar && <label className="st-check" data-setting="prep">
-            <input type="checkbox" checked={m.prep !== false} onChange={(e) => set({ prep: e.target.checked })} />
-            <span title={`${prepWhy}${window.bridgeApp?.desktop ? ` ${t('In the desktop app, the floating card shows them ten minutes before, with Join.')}` : ''}`}><b>{t('Prepare for each meeting')}</b> <span className="muted small">{t('Goals and questions, fifteen minutes before a meeting with other people.')}</span></span>
-          </label>}
-          <label className="st-check">
-            <input type="checkbox" checked={m.nameSpeakers !== false} onChange={(e) => set({ nameSpeakers: e.target.checked })} />
-            <span title="Before the first summary, the model works out who said each of Them's lines from names said, the invite and the screen. On a Mac, a watched screen is read while the call talks, and those pictures aren't kept. With one other person invited, it's them. In a room, the voices told apart are named the same way."><b>Name who spoke on the call</b> <span className="muted small">{t("From names said, the invite and the screen, before the first summary.")}</span></span>
           </label>
           <textarea className="st-input" rows={2} value={instr ?? ''} onChange={(e) => setInstr(e.target.value)} onBlur={() => instr !== (m.instructions || '') && set({ instructions: instr.trim() })} placeholder="e.g. Keep it under ten bullets. Note any numbers mentioned." aria-label={t('Your own instructions for every summary')} title={t('Your own instructions for every summary, if you like')} />
         </section>

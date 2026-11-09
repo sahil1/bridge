@@ -4,23 +4,27 @@
 // closed), across Settings closed and opened and a reload, and closed again stays closed. ⌘K finds
 // a setting under Advanced (and none while nothing's typed): Settings opens at it, Advanced opened
 // to show it near the top, and that opening isn't kept. A link to one (bridge-open-settings) does
-// the same. Nothing was lost: every setting that was there before Advanced (each control by its
+// the same. What's on unless turned off and sends what it reads off the computer is never under
+// Advanced: Meetings' cleanup, naming who spoke and preparing (with which model writes the notes and
+// where it runs said there: none yet, then a key's), Mail's learning again, General's picking up
+// unfinished work. Nothing was lost: every setting that was there before Advanced (each control by its
 // name) is still in its section, Advanced opened. At phone width (375 px), dark: Meetings with
 // Advanced open, nothing wider than the screen or cut off, and Advanced a whole 40 px target.
-import { startKit, checks, until, browser, page, shot, phoneFaults, advanced, withoutCutOff, IS_MAC } from '../lib/harness.mjs'
+import { startKit, startModel, checks, until, browser, page, shot, phoneFaults, advanced, withoutCutOff, IS_MAC } from '../lib/harness.mjs'
 
 const { ok, done } = checks('settings-ui')
 const kit = await startKit('settings-ui')
+const model = await startModel('settings-ui')
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
 
 // What each section shows first (not under Advanced).
 const FIRST = {
-  General: ['Your name', 'Default agent', 'Layout', 'Location'],
+  General: ['Your name', 'Default agent', 'Pick up unfinished work', 'Layout', 'Location'],
   'Model Providers': ['Your agents', /model labs/i, /run locally/i],
   Voice: ['Speech to text', 'Talk to your agents'],
-  Meetings: ['Transcribe with', 'Language', 'Names and terms', 'Notes are written by', 'Write the summary when a meeting ends', 'Record the other side of calls', 'Notice calls', 'Save every meeting as Markdown'],
-  Mail: ['How You Write', 'Working days', 'Working hours', 'Read-Only'],
+  Meetings: ['Transcribe with', 'Language', 'Names and terms', 'Notes are written by', 'Write the summary when a meeting ends', 'Clean up the transcript when a meeting ends', 'Name who spoke on the call', ...(IS_MAC ? ['Prepare for each meeting'] : []), 'Record the other side of calls', 'Notice calls', 'Save every meeting as Markdown'],
+  Mail: ['How You Write', 'Learn it again now and then', 'Working days', 'Working hours', 'Read-Only'],
   'MCP Servers': ['Add server'],
   Devices: ['Your Devices', 'What to notify about', 'An agent needs you'],
   Appearance: ['Color Mode', 'Theme', 'Text Size', 'Language'],
@@ -171,6 +175,37 @@ try {
     await ctx.close()
   }
 
+  // ---------- What's on and sends what it reads off the computer: never under Advanced ----------
+  {
+    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky' })
+    await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
+    const at = async (section) => { await p.evaluate((s) => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: s } })), section); await p.locator('.modal.settings .st-sections').first().waitFor({ timeout: 8000 }); await settled(p) }
+    const first = async (id) => (await p.locator(`.modal.settings [data-setting="${id}"]`).isVisible()) && !(await p.locator(`.modal.settings .st-adv [data-setting="${id}"]`).count())
+    const where = () => p.locator('.modal.settings [data-notes-where]').innerText().catch(() => '')
+    await at('meetings')
+    for (const id of ['transcript-cleanup', 'name-speakers', ...(IS_MAC ? ['prep'] : [])]) ok(await first(id), `Meetings: ${id}, on unless turned off and read by the notes' model, first, not under Advanced`)
+    ok(/No model to write them yet/.test(await where()), 'with no model: said where notes are written', await where())
+    await at('general')
+    ok(await first('resume-work') && /carry on, on its own plan or key/.test(await p.locator('[data-setting="resume-work"]').innerText()), 'General: Pick up unfinished work first, saying the agent carries on on its own plan or key')
+    if (IS_MAC) {
+      await at('mail')
+      ok(await first('mail-learn'), 'Mail: Learn it again now and then first, below what says where it goes')
+    }
+    await p.locator('button[aria-label="Close settings"]').click()
+    // A key: Automatic is then that model, and where it runs is said.
+    await kit.api('/providers/openai', { values: { OPENAI_API_KEY: 'sk-test', OPENAI_BASE_URL: `${model.url}/v1` } }, 'PUT')
+    await at('meetings')
+    ok(!!(await until(async () => /, at OpenAI: the transcript, and what each one below reads, go there\./.test(await where()), 10000)), 'with a key: which model writes the notes, and that what it and each one below reads goes to OpenAI', await where())
+    if (IS_MAC) {
+      const prep = await p.locator('.modal.settings [data-setting="prep"] .muted').innerText()
+      ok(/reads the invite and your mail with the people invited, with .+, at OpenAI\./.test(prep), 'Prepare for each meeting: it reads your mail with the people invited, with that model, at OpenAI', prep)
+    }
+    await p.locator('.modal.settings [data-setting="notes-model"]').scrollIntoViewIfNeeded()
+    await shot(p, `${tag}settings-ui-notes-model`)
+    ok(errors.length === 0, 'no page errors', errors)
+    await ctx.close()
+  }
+
   // ---------- A phone, dark ----------
   {
     const { ctx, p, errors } = await page(b, kit.url, { mode: 'dark', theme: 'midnight', phone: true })
@@ -195,5 +230,6 @@ try {
 } finally {
   await b.close()
   kit.stop()
+  model.stop()
 }
 process.exit(done().fail ? 1 : 0)

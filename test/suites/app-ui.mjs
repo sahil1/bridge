@@ -53,7 +53,7 @@ try {
     await p.waitForSelector('.modal.settings', { timeout: 5000 }).catch(() => {})
     ok(await solid(p, '.modal.settings'), `${t}: Settings opens, solid`)
     await p.locator('.st-nav-item', { hasText: 'Meetings' }).click()
-    ok(!!(await until(async () => /Write the summary when a meeting ends/.test(await p.locator('.st-body').innerText()), 5000)), `${t}: Settings › Meetings`)
+    ok(!!(await until(async () => /Name who spoke on the call/.test(await p.locator('.st-body').innerText()), 5000)), `${t}: Settings › Meetings`)
     await shot(p, `${tag}settings-${t}`)
     // Devices: one tab for the relay, the phone, your other devices and notifications.
     const navs = (await p.locator('.st-nav-item').allInnerTexts()).map((x) => x.trim())
