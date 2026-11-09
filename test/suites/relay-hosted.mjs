@@ -14,7 +14,15 @@
 // none taken. The use is reported to the accounts service; an account it no longer has is forgotten,
 // with its computers. RELAY_DAILY_REQUESTS: past it, the phones and computers on the relay are told
 // it has carried all it can today, phones let go until 00:00 UTC. A computer that sends on while its
-// phones are stopped is let go until then. A relay of your own (HOSTED unset) has none of it.
+// phones are stopped is let go until then. A connection the computer hasn't vouched for (no OK, no
+// box of its own) has 32 messages, 64 KB, 20 seconds and a bucket of its own, costs the account
+// nothing, and is closed past them with nothing said or counted; the owner's phone carries on through
+// a flood of them, and they don't each ask the registry. A Hub put to sleep keeps what its account
+// and the registry haven't heard yet. Made-up addresses (the checksum keyed with ID_SECRET) wake no
+// Hub, and the kill switch is said first; tokens say which key signed them (a list of keys taken);
+// a device removed from its account loses the relay within a minute, and one signed in again keeps
+// its address; the page's CSP reaches only the relay's addresses. A relay of your own (HOSTED unset)
+// has none of it.
 // Cost watching: GET /_relay/stats, behind STATS_TOKEN (and not there at all without one), gives
 // each day's computers, connections, messages, data and limits reached, the busiest computers by id,
 // the requests that comes to and when to move to Workers Paid, and how many accounts are on it of how
@@ -180,13 +188,16 @@ function relay(vars = {}) {
     return r.upgrade ? r.webSocket.server : r
   }
   const computer = async (c, rt = c.rt) => socket(c.id, '/_relay/host', { Authorization: `Bearer ${c.token}`, 'X-Bridge-Version': '3.9.2', ...(rt ? { 'X-Relay-Token': rt } : {}) })
-  const phone = (c) => socket(c.id, '/_relay/link')
+  // A phone connecting, paired: its computer vouches for it (as Bridge AI does with OK, once it has
+  // proved its key), so what it sends is its account's. stranger(c): one nobody vouches for.
+  const stranger = (c) => socket(c.id, '/_relay/link')
+  const phone = async (c) => { const s = await stranger(c); if (s instanceof End && s.readyState === 1) env.HUB.of(c.id).hub.vouch(s); return s }
   const hubOf = (c) => env.HUB.of(c.id).hub
   const say = (c, end, m) => hubOf(c).webSocketMessage(end, m)
   const ends = (c, end, code = 1000) => { end.readyState = 3; return hubOf(c).webSocketClose(end, code) }
   // What its Account holds for account a, once anything has reached it.
   const account = (a) => env.ACCOUNT.of(a)
-  return { env, points, accounts, call, registerWith, register, computer, phone, hubOf, say, ends, account }
+  return { env, points, accounts, call, registerWith, register, computer, phone, stranger, hubOf, say, ends, account }
 }
 const bytes = (size) => new Uint8Array(size).fill(7).buffer
 const frame = (op, id, payload = new Uint8Array(0)) => { const b = new Uint8Array(payload); const out = new Uint8Array(5 + b.byteLength); out[0] = op; new DataView(out.buffer).setUint32(1, id); out.set(b, 5); return out.buffer }
@@ -517,6 +528,123 @@ try {
     ok(/sent more at once than Bridge AI's relay takes/.test(host.said('limit').find((m) => m.why === 'rate')?.text || ''), 'and the computer hears it', host.said('limit'))
   }
 
+  // ---------- A connection the computer hasn't vouched for: an allowance of its own ----------
+  {
+    shift = 0
+    const r = relay({ ACCOUNT_WINDOW_MESSAGES: '3000', MESSAGE_BURST: '2000' })
+    const c = await r.register()
+    const host = await r.computer(c)
+    // The owner's phone, vouched for by the computer itself (OK), as Bridge AI does once its key checks out.
+    const owner = await r.stranger(c)
+    await r.say(c, owner, bytes(200)) // (its hello)
+    await r.say(c, host, frame(OK, owner.att.id))
+    ok(owner.att.ok === true, 'the computer vouches for its phone with OK', owner.att)
+    const used = () => r.account(c.a)?.store.get('s')?.win?.msgs || 0
+    // Strangers: 33 messages each, connecting again when let go, 3,000 in all.
+    let sent = 0
+    let conns = 0
+    let s = null
+    const closes = []
+    while (sent < 3000) {
+      if (!s || s.readyState !== 1) { if (s) closes.push(s.closed); s = await r.stranger(c); conns++ }
+      await r.say(c, s, bytes(16))
+      sent++
+    }
+    for (let i = 0; i < 5; i++) await r.say(c, owner, bytes(16))
+    await r.ends(c, owner) // (what it carried goes to the Account as it ends)
+    await settle()
+    ok(conns >= 3000 / 33 && closes.every((x) => x?.[0] === 4005) && closes.length >= 80, 'a stranger connection (no OK) is closed past 32 messages, however many times it connects', { conns, closes: closes.length })
+    ok(owner.closed?.[1] !== 'limit' && !owner.said('limit').length && !host.said('limit').length, 'the owner\'s phone carried on through it all, and nobody was told of a limit', { owner: owner.said('limit'), host: host.said('limit') })
+    ok(used() <= 10, 'and the account\'s allowance counted only the owner\'s phone (3,000 strangers\' messages cost it nothing)', used())
+    ok(!r.points.some((p) => p.blobs[0] === 'limit'), 'a stranger let go isn\'t counted as a limit reached', r.points.filter((p) => p.blobs[0] === 'limit').map((p) => p.blobs))
+    ok(host.got.filter((m) => m instanceof Uint8Array && m[0] === 3).length >= closes.length, 'the computer hears only that each one closed (OP.CLOSE)', host.got.filter((m) => m instanceof Uint8Array && m[0] === 3).length)
+    // Its bytes, and its time.
+    const big = await r.stranger(c)
+    await r.say(c, big, bytes(40 * 1024))
+    await r.say(c, big, bytes(40 * 1024))
+    ok(big.closed?.[0] === 4005, 'past 64 KB, a stranger is closed', big.closed)
+    const slow = await r.stranger(c)
+    await r.say(c, slow, bytes(16))
+    shift += 21000
+    await r.say(c, slow, bytes(16))
+    ok(slow.closed?.[0] === 4005, '...and 20 seconds after its first message', slow.closed)
+    shift = 0
+    // ...and its bucket: 16 at once, then 8 a second.
+    const fast = await r.stranger(c)
+    let n = 0
+    const was = Date.now
+    const frozen = was()
+    Date.now = () => frozen
+    while (fast.readyState === 1 && n < 30) { await r.say(c, fast, bytes(8)); n++ }
+    Date.now = was
+    ok(n === 17 && fast.closed?.[0] === 4005, 'and 16 messages at once, then 8 a second (a bucket of its own): the 17th at once closes it', n)
+    // What the computer sends a stranger counts on the stranger's allowance too.
+    const fed = await r.stranger(c)
+    let m = 0
+    while (fed.readyState === 1 && m < 40) { await r.say(c, host, frame(1, fed.att.id, new Uint8Array(8))); m++ }
+    ok(fed.closed?.[0] === 4005 && m <= 33 && used() <= 10, 'the computer\'s data for a stranger counts on its allowance, not the account\'s', { m, used: used() })
+  }
+
+  // ---------- ...and a paired phone is vouched for by its box, with its computer offline ----------
+  {
+    const r = relay()
+    const c = await r.register()
+    const host = await r.computer(c)
+    const box = 'AAAAAAAAAAAAAAAAAAAAAA'
+    await r.say(c, host, JSON.stringify({ t: 'take', boxes: [box] }))
+    await r.ends(c, host)
+    const ph = await r.stranger(c)
+    await r.say(c, ph, JSON.stringify({ t: 'box', box }))
+    for (let i = 0; i < 60; i++) await r.say(c, ph, JSON.stringify({ t: 'got', ids: [] }))
+    ok(ph.readyState === 1 && ph.att.ok === true, 'a phone whose box is on its computer\'s list is vouched for by it: with the computer offline it goes on (leaving notes), past 32 messages', { state: ph.readyState, ok: ph.att.ok })
+    const other = await r.stranger(c)
+    await r.say(c, other, JSON.stringify({ t: 'box', box: 'BBBBBBBBBBBBBBBBBBBBBB' }))
+    for (let i = 0; i < 40 && other.readyState === 1; i++) await r.say(c, other, JSON.stringify({ t: 'got', ids: [] }))
+    ok(other.closed?.[0] === 4005, 'one whose box isn\'t on it is a stranger still', other.closed)
+  }
+
+  // ---------- The registry isn't asked for each stranger's connection ----------
+  {
+    const r = relay()
+    const c = await r.register()
+    await r.computer(c)
+    await settle()
+    let asked = 0
+    const reg = r.env.HUB.get('registry')
+    const f = reg.fetch
+    reg.fetch = (...a) => { asked++; return f(...a) }
+    for (let i = 0; i < 100; i++) { const s = await r.stranger(c); await r.ends(c, s) }
+    await settle()
+    ok(asked <= 1, '100 stranger connections, each ended: the registry is asked once at most (their count goes with the next tally)', asked)
+    const ph = await r.phone(c)
+    await r.ends(c, ph)
+    await settle()
+    ok(asked >= 2 && asked <= 3, 'a paired phone\'s connection is told it, as before', asked)
+  }
+
+  // ---------- A Hub put to sleep forgets next to nothing of what its account used ----------
+  {
+    const r = relay({ STATS_TOKEN: 'stats-secret-for-tests' })
+    const c = await r.register()
+    let carried = 0
+    for (let cycle = 0; cycle < 5; cycle++) {
+      await r.computer(c)
+      const ph = await r.phone(c)
+      for (let i = 0; i < 990; i++) { await r.say(c, ph, bytes(16)); carried++ }
+      await settle()
+      r.env.HUB.restart(c.id) // put to sleep and woken, as hibernation does: only what was saved is left
+    }
+    const host = await r.computer(c)
+    const ph = await r.phone(c)
+    await r.ends(c, ph)
+    await r.ends(c, host)
+    await settle()
+    const acc = await r.account(c.a).fetch('https://account/_account/check', { method: 'POST', body: JSON.stringify({ a: c.a }) }).then((x) => x.json())
+    ok(acc.use.window.messages >= carried - 5 * 100 && acc.use.window.messages <= carried, '5 times 990 messages, the Hub put to sleep after each: its account counts all but at most 99 each time, never more than were carried', { carried, counted: acc.use.window.messages })
+    const day = await until(async () => { const d = (await (await r.call(`https://${DOMAIN}/_relay/stats`, { headers: { Authorization: 'Bearer stats-secret-for-tests' } })).json()).days[0]; return d.messages >= carried - 500 ? d : null }, 3000, 50)
+    ok(day && day.messages <= carried, 'and the relay\'s day counts them the same way', day?.messages)
+  }
+
   // ---------- RELAY_DAILY_REQUESTS: the whole relay's ceiling for a day ----------
   {
     const r = relay({ RELAY_DAILY_REQUESTS: '100', STATS_TOKEN: 'stats-secret-for-tests' })
@@ -530,7 +658,7 @@ try {
     const told1 = await until(() => p1.said('limit')[0], 5000, 20)
     ok(told1?.why === 'all' && /carried all it can for today, for every computer on it/.test(told1.text) && told1.until === midnight() && /your own Cloudflare account/.test(told1.text) && /Tailscale/.test(told1.text) && p1.closed?.[0] === 4005, 'past the ceiling, a phone is told the relay has carried all it can today for everyone, when it starts again and the other ways, and is let go', told1)
     ok(h1.said('limit').some((m) => m.why === 'all') && h1.readyState === 1, 'its computer is told too, and stays connected for then', h1.said('limit'))
-    // The other computer hears it with its next tally (a phone connecting is one).
+    // The other computer hears it with its next tally (a paired phone connecting is one).
     const p3 = await r.phone(two)
     const told2 = await until(() => [...p2.said('limit'), ...p3.said('limit')].find((m) => m.why === 'all'), 5000, 20)
     ok(!!told2 && h2.said('limit').some((m) => m.why === 'all') && h2.readyState === 1, 'every other computer on the relay hears it too, with its next tally, and its phones are let go', { p2: p2.said('limit'), p3: p3.said('limit') })

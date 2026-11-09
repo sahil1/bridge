@@ -203,6 +203,10 @@ const requestsOf = (s) => Math.ceil(s.messages / 20 + s.messages / 500) + 3 * (s
 // Messages a computer may go on sending once its phones are stopped (they go nowhere), before its
 // own connection is closed until they may go on: Cloudflare bills each one that arrives.
 const HOST_SLACK = 1000
+// What a connection the computer hasn't vouched for may send (and be sent) before it's closed
+// (Hub.stranger): messages, bytes and milliseconds from its first message, and a bucket of its own
+// (BURST at once, then RATE a second). A paired phone sends one or two before it's vouched for.
+const STRANGER = { MSGS: 32, BYTES: 64 * 1024, MS: 20000, BURST: 16, RATE: 8 }
 
 const hub = (env, id) => env.HUB.get(env.HUB.idFromName(id))
 // A question for the registry (gate, left, tally, stats), and its answer.
@@ -445,6 +449,9 @@ export class Hub {
         this.meta = (await ctx.storage.get('meta')) || null
         this.day = (await ctx.storage.get('day')) || null
         this.shutUntil = (await ctx.storage.get('shut')) || 0
+        // What the registry and its Account hadn't heard yet, saved with the day (saveDay).
+        this.pend = (await ctx.storage.get('pend')) || null
+        this.acctPend = (await ctx.storage.get('acct')) || 0
       })
     }
   }
@@ -476,7 +483,7 @@ export class Hub {
       const id = crypto.getRandomValues(new Uint32Array(1))[0]
       this.ctx.acceptWebSocket(server, ['phone', `p${id}`])
       server.serializeAttachment({ id, at: Date.now() })
-      if (this.lim) { this.pendOf(this.today().d).phones++; this.tally() }
+      if (this.lim) this.connected()
       const h = await this.live()
       // q: this relay keeps notes (older pages ignore it).
       server.send(JSON.stringify({ host: !!h, seen: (await this.ctx.storage.get('seen')) || null, q: 1 }))
@@ -495,7 +502,7 @@ export class Hub {
       const ph = this.ctx.getWebSockets(`p${id}`)[0]
       if (!ph) { if (b[0] !== OP.CLOSE) ws.send(frame(OP.CLOSE, id)); return }
       if (b[0] === OP.DATA) ph.send(b.subarray(5))
-      else if (b[0] === OP.OK) ph.serializeAttachment({ ...ph.deserializeAttachment(), ok: true })
+      else if (b[0] === OP.OK) this.vouch(ph)
       else if (b[0] === OP.CLOSE) try { ph.close(4003, 'closed by the computer') } catch { /* gone */ }
       return
     }
@@ -539,7 +546,22 @@ export class Hub {
 
   async webSocketClose(ws, code) {
     await this.gone(ws, code)
-    if (this.lim && this.day) { await this.saveDay(true); this.tally(); this.tallyAccount() }
+    if (this.lim && this.day) {
+      await this.saveDay(true)
+      // (A stranger's connection ending waits for the next tally: connected(), below.)
+      if (this.ctx.getTags(ws).includes('host') || ws.deserializeAttachment()?.ok) this.tally()
+      this.tallyAccount()
+    }
+  }
+
+  // The computer vouched for a connection (OK): one of its paired phones or tabs, never the one
+  // dropped to make room. On the hosted relay, from then on it's metered as its account's, and its
+  // connection goes to the registry (meter, connected).
+  vouch(ws) {
+    const a = ws.deserializeAttachment() || {}
+    if (a.ok) return
+    ws.serializeAttachment({ ...a, ok: true })
+    if (this.lim) this.tally()
   }
 
   async webSocketError(ws) {
@@ -579,7 +601,7 @@ export class Hub {
     const a = ws.deserializeAttachment() || {}
     if (m.t === 'box' && ID.test(m.box || '')) {
       ws.serializeAttachment({ ...a, box: m.box })
-      if (this.lim) await this.phoneIn(m.box)
+      if (this.lim) await this.phoneIn(ws, m.box)
       await this.purge()
       const waiting = [...(await st.list({ prefix: `n:${m.box}:` })).values()].map((n) => n.note.id)
       const receipts = [...(await st.list({ prefix: `r:${m.box}:` })).values()].map((r) => r.note)
@@ -763,6 +785,7 @@ export class Hub {
     if (!n || !this.meta?.a) return
     this.acctPend = 0
     this.acctAt = Date.now()
+    this.ctx.storage.put('acct', 0).catch(() => {}) // (saved as told, so a Hub woken again doesn't tell it twice)
     this.askAccount('tally', n)
   }
   // What the Account said: { refused: { why } } (suspended, no relay, deleted), { limit: { why, until } }
@@ -782,10 +805,12 @@ export class Hub {
     else if (!why && this.told && this.told !== 'all') this.told = null // reset, or raised
   }
 
-  // A phone said which it is: counted once a week if it's one of this computer's paired phones.
-  async phoneIn(box) {
+  // A phone said which it is: if it's one of this computer's paired phones (its box on the list the
+  // computer gave), it's vouched for by that, as by OK, and counted once a week.
+  async phoneIn(ws, box) {
     const st = this.ctx.storage
     if (!(await st.get('roster'))?.includes(box)) return
+    this.vouch(ws)
     const w = Math.floor((Date.now() / DAY + 3) / 7) // weeks start on Monday
     const wk = (await st.get('wk')) || {}
     if (wk.w === w && wk.boxes.includes(box)) return
@@ -813,25 +838,39 @@ export class Hub {
   }
   blockedUntil(now = Date.now()) { const a = this.acct; return a?.why && a.until > now ? a.until : nextDay(now) }
 
-  // Saved every 100 messages or 256 KB, and when a connection ends: in between it's only in memory,
-  // so a Hub put to sleep forgets at most that much.
+  // Saved every 100 messages or 256 KB, and when a connection ends, with what the registry and its
+  // Account haven't heard yet (pend, acctPend): in between it's only in memory, so a Hub put to sleep
+  // (as it is whenever nothing passes for a few seconds) forgets at most that much.
   async saveDay(force) {
     const d = this.day
-    if (!d || (d.bytes === d.sb && d.msgs === d.sm)) return
+    const more = d && (d.bytes !== d.sb || d.msgs !== d.sm)
+    if (!d || (!more && !(force && this.unsaved))) return
     if (!force && d.bytes - d.sb < 262144 && d.msgs - d.sm < 100) return
-    count(this.env, this.meta?.id, 'usage', [], [d.bytes - d.sb, d.msgs - d.sm])
+    if (more) count(this.env, this.meta?.id, 'usage', [], [d.bytes - d.sb, d.msgs - d.sm])
     d.sb = d.bytes
     d.sm = d.msgs
-    await this.ctx.storage.put('day', d)
+    this.unsaved = false
+    await this.ctx.storage.put({ day: d, pend: this.pend || null, acct: this.acctPend || 0 })
   }
 
-  // This computer's use since its last tally, for the registry's counts (/_relay/stats): sent with
-  // each connection, a limit reached, every 1,000 messages or 4 MB, and when a connection ends. In
-  // between it's only in memory, so the counts can come out a little low, never high. Counting never
-  // gets in the way: a tally that doesn't arrive is let go.
+  // This computer's use since its last tally, for the registry's counts (/_relay/stats): sent when
+  // its computer connects, when it vouches for a phone, with a limit reached, every 1,000 messages,
+  // 4 MB or 100 connections, and when the computer's or a paired phone's connection ends. A
+  // stranger's connection goes with the next of those, never on its own, so connecting over and over
+  // doesn't each time ask the registry, the one Hub for the whole relay. Saved with the day (saveDay)
+  // until it's sent, so the counts can come out a little low, never high. Counting never gets in the
+  // way: a tally that doesn't arrive is let go.
   pendOf(d) {
     if (this.pend && this.pend.d !== d) this.tally()
     return (this.pend ||= { d, msgs: 0, bytes: 0, computers: 0, phones: 0, limits: {} })
+  }
+
+  // A phone connected (or anyone at all: it's vouched for later, if it is).
+  connected() {
+    const p = this.pendOf(this.today().d)
+    p.phones++
+    this.unsaved = true
+    if (p.phones >= 100) this.tally()
   }
 
   tally(day = this.day) {
@@ -840,7 +879,9 @@ export class Hub {
     this.pend = null
     const mine = day?.d === p.d ? day : null
     const first = !!mine && !mine.tallied // its first today: one more computer in use today
-    if (first) { mine.tallied = true; this.ctx.storage.put('day', mine).catch(() => {}) }
+    if (first) mine.tallied = true
+    // (Saved as sent, so a Hub woken again doesn't send it twice.)
+    this.ctx.storage.put({ pend: null, ...(first ? { day: mine } : {}) }).catch(() => {})
     const total = mine && { msgs: mine.msgs, bytes: mine.bytes }
     const body = { d: p.d, id: this.meta.id, a: this.meta.a, msgs: p.msgs, bytes: p.bytes, computers: p.computers, phones: p.phones, limits: p.limits, first, total }
     // The answer says whether the whole relay has reached RELAY_DAILY_REQUESTS today.
@@ -861,7 +902,8 @@ export class Hub {
   // it's too big, too many at once, or its phones are stopped for now. A phone's own is turned away by
   // closing that phone; so is a computer's message for a phone (its link can't carry on with a piece
   // missing). The computer's own text messages (about notes) only count. A computer that sends on
-  // regardless is let go until then (dropped below).
+  // regardless is let go until then (dropped below). A connection the computer hasn't vouched for has
+  // an allowance of its own (stranger, below), and costs its account nothing.
   async meter(ws, msg) {
     const now = Date.now()
     const size = typeof msg === 'string' ? msg.length : msg.byteLength
@@ -872,12 +914,15 @@ export class Hub {
     const pend = this.pendOf(day.d)
     pend.bytes += size
     if (++pend.msgs >= 1000 || pend.bytes >= 4194304) this.tally()
+    const housekeeping = fromHost && typeof msg === 'string'
+    const phone = !fromHost ? ws : !housekeeping && size >= 5 ? this.ctx.getWebSockets(`p${new DataView(msg).getUint32(1)}`)[0] : null
+    // A stranger's message, or the computer's data for one (its answer to a hello: OK and CLOSE are
+    // the computer's own say).
+    if (phone && !phone.deserializeAttachment()?.ok && (!fromHost || new Uint8Array(msg)[0] === OP.DATA)) return this.stranger(phone, size, now)
     // Its account hears every 1,000 messages, every 3 minutes while any pass (so a suspension is
     // heard then too), and more often as the allowance runs low, so its other computers' use counts.
     this.acctPend = (this.acctPend || 0) + 1
     if (this.acctPend >= Math.max(1, Math.min(1000, Math.floor((this.acct?.left ?? 10000) / 10))) || now - (this.acctAt || 0) > 180000) this.tallyAccount()
-    const housekeeping = fromHost && typeof msg === 'string'
-    const phone = !fromHost ? ws : !housekeeping && size >= 5 ? this.ctx.getWebSockets(`p${new DataView(msg).getUint32(1)}`)[0] : null
     // For a phone that's just been let go: nowhere to go (its computer hears it's gone).
     if (fromHost && phone && phone.readyState !== 1) return false
     if (!housekeeping && size > this.lim.messageKB * 1024) return this.cut(phone, 'size', now + 5000)
@@ -892,6 +937,28 @@ export class Hub {
     }
     if (this.told) this.told = null // reset, or raised, since
     this.drops = 0
+    await this.saveDay()
+    return true
+  }
+
+  // A connection the computer hasn't vouched for: anyone with the address can connect, so as far as
+  // the relay can tell it's a stranger's until the computer says otherwise (vouch). It has STRANGER's
+  // allowance, its own (its messages and the computer's to it, from its first, and a bucket of its
+  // own), never its account's or the computer's MESSAGES_PER_SECOND. Past any of it, it's closed:
+  // the computer hears only that it closed, nothing is said, and nothing is counted as a limit (a
+  // paired phone is vouched for with its first message or two, so it never gets here).
+  async stranger(ws, size, now) {
+    if (ws.readyState !== 1) return false
+    const a = ws.deserializeAttachment() || {}
+    const s = a.s || { n: 0, b: 0, at: now, tk: STRANGER.BURST, t: now }
+    const tk = Math.min(STRANGER.BURST, s.tk + ((now - s.t) * STRANGER.RATE) / 1000)
+    const next = { n: s.n + 1, b: s.b + size, at: s.at, tk: tk - 1, t: now }
+    if (next.n > STRANGER.MSGS || next.b > STRANGER.BYTES || now - s.at > STRANGER.MS || tk < 1) {
+      try { ws.close(4005, 'not vouched for') } catch { /* gone */ }
+      try { if (a.id != null) this.host()?.send(frame(OP.CLOSE, a.id)) } catch { /* gone */ }
+      return false
+    }
+    ws.serializeAttachment({ ...a, s: next })
     await this.saveDay()
     return true
   }

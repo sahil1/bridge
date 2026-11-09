@@ -39,6 +39,10 @@ this:
   passes by chance; each request still reaches the Worker, and is billed as one (the rate limiting
   rule in Going live stops a flood of them first). An id the relay made and then removed wakes its
   Hub once, which says it's gone, and the Worker remembers that for 30 seconds.
+- Pairing is checked by Bridge AI on the computer, not by the relay. The relay passes on what
+  reaches a computer's address and hears only the computer's word (OK) that a connection is one of
+  its own; until then, the connection is a stranger's, with a small allowance of its own that costs
+  the account nothing (What happens at a limit).
 - Addresses are one level below the domain because Cloudflare's free Universal SSL certificate
   covers `<domain>` and `*.<domain>`, not deeper. That's also why it needs a domain of its own: under
   boldbridge.ai, `<id>.relay.boldbridge.ai` is two levels down, which only a paid Advanced
@@ -190,20 +194,35 @@ it) and `POST /internal/usage` (its use, for Settings › Account and the admin 
 They follow what Cloudflare bills (Cost): incoming WebSocket messages, as requests at 20 to 1, are
 nearly all of it, so the allowance is counted in messages, per account, across its computers;
 Durable Object duration is billed only while a Hub runs code, which the rate and size limits bound;
-data isn't billed, so there's no limit on it (a computer can't be used as a general tunnel anyway:
-each message must come from a phone paired with it); connections are cheap, so `MAX_PHONES`
-protects a computer's paired phones from strangers rather than the bill. An account at its limits
-every week costs about $0.06 a month past what's included; a typical one (an hour or two of phone
-use a day) under a cent. They're generous on purpose: nobody should meet one in normal use.
+data isn't billed, so there's no limit on it; connections are cheap, so `MAX_PHONES` protects a
+computer's paired phones from strangers rather than the bill. The relay can't tell what it carries,
+or who's paired: pairing is checked by Bridge AI on the computer, not by the relay, which only hears
+the computer vouch for a connection (OK) once the phone has proved its key. So the relay doesn't
+stop a computer and a phone paired with it carrying anything they like, within the account's
+allowance; what it does stop is anyone else using that allowance: a connection the computer hasn't
+vouched for has a small allowance of its own (What happens at a limit) and costs the account
+nothing. An account at its limits every week costs about $0.06 a month past what's included; a
+typical one (an hour or two of phone use a day) under a cent. They're generous on purpose: nobody
+should meet one in normal use.
 
 Per-account limits alone don't bound the bill; with `MAX_ACCOUNTS` they do, and
 `RELAY_DAILY_REQUESTS` bounds it if `MAX_ACCOUNTS` is raised (Cost).
 
 ### What happens at a limit
 
-Each is said in place, on the phone and on the computer, with when it ends. Nothing is cut off
-without a word.
+Each is said in place, on the phone and on the computer, with when it ends. Nothing a computer or
+a paired phone uses is cut off without a word; a connection the computer hasn't vouched for is
+(the first below).
 
+- **A connection the computer hasn't vouched for**: anyone with a computer's address can connect,
+  and until the computer vouches for the connection (OK, once a phone has proved its key) or it says
+  it's one of the computer's paired phones (its box, on the list the computer gave), it's a
+  stranger's as far as the relay can tell. It gets an allowance of its own: 32 messages, 64 KB, and
+  20 seconds from its first message, counting what it sends and what the computer sends it, at 8 a
+  second after the first 16, and none of it counts against the account or the computer's own
+  `MESSAGES_PER_SECOND`. Past any of it, it's closed: the computer hears only that it closed, nothing
+  is said to it, Settings shows nothing, and nothing is counted as a limit. A paired phone is vouched
+  for with its first message or two (its hello, or its box), so it never meets this.
 - **Too big, or too many at once**: that phone's connection is closed with a message (the phone
   shows "Too much at once for Bridge AI's relay. Connecting again in a moment.") and it reconnects
   5 or 10 seconds later. A computer's message for a phone counts against that phone. The computer
@@ -238,7 +257,8 @@ without a word.
   in these words: "Bridge AI's relay has carried all it can for today, for every computer on it. It
   starts again at 00:00 UTC. For no limits, put the relay on your own Cloudflare account, or use
   Tailscale." The registry works it out from the tallies (below) and says so in answer to each, so
-  each computer hears it with its next tally (its next connection, or within 1,000 messages).
+  each computer hears it with its next tally (its computer or a paired phone connecting, or within
+  1,000 messages).
   Registering still works (it costs next to nothing); a new computer hears it when it connects.
 - **A computer that sends on while its phones are stopped**: its messages go nowhere, but
   Cloudflare bills each one that arrives. Bridge AI sends next to none then (its phones were let
@@ -256,8 +276,10 @@ without a word.
   phone`, and fails. An account already on the relay isn't affected.
 
 The counts are kept by the Account, saved with each tally, and by each Hub (its day's, for the
-stats), saved every 100 messages or 256 KB and whenever a connection ends. A Durable Object put to
-sleep in between forgets at most that much, so the counts can come out a little low, never high.
+stats, with what its Account and the registry haven't heard yet), saved every 100 messages or 256 KB
+and whenever a connection ends, and saved as heard once they've heard it. A Durable Object put to
+sleep in between (as a Hub is whenever nothing passes for a few seconds) forgets at most that much,
+so the counts can come out a little low, never high.
 
 **How the accounts are counted.** The registry (one Durable Object, which takes one request at a
 time, so two registrations can't both take the last place) keeps an entry for each registered
@@ -292,9 +314,9 @@ Set `HOSTED_OFF = "1"` (or a sentence of your own, shown instead of the default)
 it under Settings › Variables in the dashboard. Then:
 
 - `register` answers 503 with the message;
-- every connection, computer or phone, gets the message and is closed. Phones show "Bridge AI's
-  relay is switched off for now. To keep using your phone, put a relay on your own Cloudflare
-  account, or use Tailscale"; Settings on each computer shows the same;
+- every connection, computer or phone, gets the message and is closed, before any Hub is asked
+  anything. Phones show "Bridge AI's relay is switched off for now. To keep using your phone, put a
+  relay on your own Cloudflare account, or use Tailscale"; Settings on each computer shows the same;
 - computers wait 30 minutes (and a bit, so they don't all come at once) before trying again.
 
 A deploy closes every connection anyway, so it takes effect at once. Nothing is deleted. To turn it
@@ -324,9 +346,12 @@ The registry, a Durable Object of its own, keeps:
 - for `/_relay/stats`, each day's totals: computers set up and refused, computers in use,
   connections, messages, bytes, limits reached, when the relay reached `RELAY_DAILY_REQUESTS`, and
   that day's ten busiest computers by id with their use. Kept 35 days. Each computer's Hub adds its
-  share with each connection, each limit reached, every 1,000 messages or 4 MB, and when a
-  connection ends; a Hub put to sleep in between forgets at most that much, so these too can come
-  out a little low, never high.
+  share when its computer connects, when the computer vouches for a phone, with each limit reached,
+  every 1,000 messages, 4 MB or 100 connections, and when the computer's or a paired phone's
+  connection ends: a stranger's connection (one never vouched for) is counted with the next of
+  those, never on its own, so connecting over and over doesn't each time ask the registry, which
+  takes one request at a time for the whole relay. What it hasn't sent yet is saved with its day, so
+  these too can come out a little low, never high.
 
 **Counts for the project**, with a Workers Analytics Engine binding (`STATS`; leave it out of the
 config and nothing is counted). Each is one data point with the computer's id as its index, and
