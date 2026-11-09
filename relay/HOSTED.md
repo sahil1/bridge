@@ -82,7 +82,7 @@ Keep the relay on a domain of its own (not a name under boldbridge.ai): every na
 belongs to the relay.
 
 - [ ] **The accounts service** (owner): live first, with its key made (`node account/key.js`). The
-  relay binds to it (`ACCOUNTS`, the Worker `bridge-accounts`, its entrypoint `Internal`) and
+  relay binds to it (`ACCOUNTS`, the Worker `bridge-accounts`, its entrypoint `Relay`) and
   can't be deployed before it.
 - [ ] **The domain on Cloudflare** (owner). Bought with Cloudflare Registrar, boldbridge.app is a
   zone already. Bought elsewhere: Cloudflare dashboard › Add a domain › `boldbridge.app` › the Free
@@ -165,9 +165,10 @@ never written in the file. Without it, its address isn't there at all (404); wit
 | --- | --- |
 | `STATS_TOKEN` | `GET https://<domain>/_relay/stats` (Watching it) |
 
-And one binding to another Worker: `ACCOUNTS`, the accounts service's `Internal` entrypoint, for
-`GET /internal/status?a=` (whether an account may use the relay) and `POST /internal/usage` (its
-use, for Settings › Account and the admin view).
+And one binding to another Worker: `ACCOUNTS`, the accounts service's `Relay` entrypoint, which
+answers `/internal` and nothing else (never the admin view's `/admin`), for `GET
+/internal/status?a=&d=` (whether an account may use the relay, and whether that device is still on
+it) and `POST /internal/usage` (its use, for Settings › Account and the admin view).
 
 ### Why these limits
 

@@ -154,9 +154,11 @@ history as `by`; without it, `400 admin`.
 | `POST /admin/invite { email, tester: "yes", note? }` | `{ account, created, emailed }`: makes the account if it's new, marks it, and emails an invitation (`relay: "approved"` works too) |
 | `DELETE /admin/accounts/:id/devices/:dev` | `{ devices }` |
 
-`used` and `limits` are as in `GET /v1/me`. The relay uses the same entrypoint for `GET
-/internal/status?a=` (`{ status: "active" | "suspended" | "gone", relay, tester }`) and `POST
-/internal/usage` (below).
+`used` and `limits` are as in `GET /v1/me`. The relay binds to an entrypoint of its own, `Relay`
+(`entrypoint = "Relay"`), which answers only `/internal/...`, never `/admin/...`: `GET
+/internal/status?a=&d=` (`{ status: "active" | "suspended" | "gone", relay, tester, device }`, where
+`device`, there only when `d` is asked about, is whether that device is still on the account) and
+`POST /internal/usage` (below).
 
 ## The relay's side
 

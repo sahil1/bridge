@@ -44,10 +44,12 @@ const service = (more = {}) => {
   const mail = mailbox()
   const env = { DB: d1(), EMAIL: mail, FROM: 'accounts@example.com', ADMINS: 'admins@example.com', SITE: 'https://boldbridge.example', RELAY_MAX_ACCOUNTS: '500', SIGNING_KEY: privateKey.export({ type: 'pkcs8', format: 'pem' }), ...more }
   const internal = new worker.Internal({}, env)
-  // A request from the internet (from ip), or through the binding (bound), as the admin view makes it.
-  const call = async (p, { method = 'GET', body, token, ip = '203.0.113.7', bound = false, admin = 'admin@example.com', headers = {} } = {}) => {
+  const relayBound = new worker.Relay({}, env)
+  // A request from the internet (from ip), or through the admin view's binding (bound), as it makes
+  // it, or the relay's (relay).
+  const call = async (p, { method = 'GET', body, token, ip = '203.0.113.7', bound = false, relay = false, admin = 'admin@example.com', headers = {} } = {}) => {
     const req = new Request(`https://accounts.boldbridge.ai${p}`, { method, headers: { ...(body !== undefined ? { 'content-type': 'application/json' } : {}), ...(token ? { authorization: `Bearer ${token}` } : {}), ...(ip ? { 'CF-Connecting-IP': ip } : {}), ...(bound && admin ? { 'X-Admin-Email': admin } : {}), ...headers }, body: body !== undefined ? JSON.stringify(body) : undefined })
-    const r = bound ? await internal.fetch(req) : await worker.default.fetch(req, env)
+    const r = relay ? await relayBound.fetch(req) : bound ? await internal.fetch(req) : await worker.default.fetch(req, env)
     return { status: r.status, headers: r.headers, j: await r.clone().json().catch(() => null), text: await r.text() }
   }
   const codeFor = (email) => /\b(\d{6})\b/.exec(mail.sent.filter((m) => m.to === email).at(-1)?.text || '')?.[1]
@@ -69,7 +71,7 @@ try {
     const toml = read('account', 'wrangler.toml')
     ok(/pattern = "accounts\.boldbridge\.ai", custom_domain = true/.test(toml) && /workers_dev = false/.test(toml) && /preview_urls = false/.test(toml) && /\[observability\]\nenabled = false/.test(toml), 'wrangler.toml: accounts.boldbridge.ai only (no workers.dev, no previews), with the Worker\'s logs off')
     ok(/binding = "DB"/.test(toml) && /\[\[send_email\]\]\nname = "EMAIL"/.test(toml) && /crons = /.test(toml) && /^RELAY_MAX_ACCOUNTS = "500"/m.test(toml), 'its database, Email Service, the daily clean-up and RELAY_MAX_ACCOUNTS')
-    ok(/binding = "ACCOUNTS"\nservice = "bridge-accounts"\nentrypoint = "Internal"/.test(read('relay', 'wrangler.hosted.toml')), 'the relay binds to its Internal entrypoint')
+    ok(/binding = "ACCOUNTS"\nservice = "bridge-accounts"\nentrypoint = "Relay"/.test(read('relay', 'wrangler.hosted.toml')), 'the relay binds to its Relay entrypoint, not the admin view\'s')
     const s = service()
     const page = await s.call('/')
     ok(page.status === 301 && /boldbridge\.ai\/privacy#your-bold-bridge-account-optional/.test(page.headers.get('location')), 'its own address shows nothing: a browser goes to the privacy policy', page.headers.get('location'))
@@ -77,6 +79,8 @@ try {
     const internal = await s.call('/internal/status?a=aaaaaaaaaaaa')
     ok(admin.status === 404 && internal.status === 404, 'the admin view\'s and the relay\'s routes aren\'t on the internet, whatever a request says', [admin.status, internal.status])
     ok((await s.call('/v1/me', { bound: true })).status === 404, 'and the binding has only those')
+    const viaRelay = await Promise.all(['/internal/status?a=aaaaaaaaaaaa', '/admin/stats', '/admin/accounts', '/v1/me'].map((p) => s.call(p, { relay: true, headers: { 'X-Admin-Email': 'admin@example.com' } })))
+    ok(viaRelay[0].status === 200 && viaRelay[0].j.status === 'gone' && viaRelay.slice(1).every((x) => x.status === 404), 'the relay\'s binding reaches /internal and nothing else: no admin route, whatever it says', viaRelay.map((x) => x.status))
   }
 
   // ---------- Codes ----------
@@ -339,8 +343,13 @@ try {
     const day = (await s.call(`/admin/accounts/${a.account.id}`, { bound: true })).j.usage
     ok(day[0]?.messages === 5000, 'and the use by day is in the account\'s view', day)
     const devs = (await s.call(`/admin/accounts/${a.account.id}`, { bound: true })).j.devices
-    const gone = await s.call(`/admin/accounts/${a.account.id}/devices/${devs.find((d) => d.name === 'Phone').id}`, { method: 'DELETE', bound: true })
+    const phoneId = devs.find((d) => d.name === 'Phone').id
+    const before = (await s.call(`/internal/status?a=${a.account.id}&d=${phoneId}`, { relay: true })).j
+    const gone = await s.call(`/admin/accounts/${a.account.id}/devices/${phoneId}`, { method: 'DELETE', bound: true })
     ok(gone.j.devices.length === 1 && (await s.call('/v1/me', { token: phone.deviceToken })).status === 401, 'DELETE /admin/accounts/:id/devices/:dev: gone, and signed out there', gone.j)
+    const after = (await s.call(`/internal/status?a=${a.account.id}&d=${phoneId}`, { relay: true })).j
+    const other = (await s.call(`/internal/status?a=${a.account.id}&d=${devs.find((d) => d.name === 'Studio').id}`, { relay: true })).j
+    ok(before.device === true && after.device === false && after.status === 'active' && other.device === true && !('device' in (await s.call(`/internal/status?a=${a.account.id}`, { relay: true })).j), '/internal/status?a=&d= says whether that device is still on the account (removed: no), so the relay lets it go then', { before, after, other })
     // Deleting the account.
     const wrong = await s.call('/v1/account', { method: 'DELETE', token: a.deviceToken, body: { email: 'other@example.com' } })
     ok(wrong.j.code === 'mismatch', 'deleting needs the account\'s email typed again', wrong.j)

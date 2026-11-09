@@ -550,14 +550,14 @@ async function requestPublic(req, env) {
 }
 
 // ---------- /admin and /internal: the admin view and the relay, through a service binding ----------
-// Only through the Internal entrypoint below, which a service binding names and the internet can't
-// reach; the public address refuses both (404). /internal is the relay's (account/API.md, The relay's
-// side); /admin the admin view's, each call saying which admin is asking (X-Admin-Email), which goes
-// in the account's history.
+// Only through the entrypoints below, which a service binding names and the internet can't reach;
+// the public address refuses both (404). /internal is the relay's (account/API.md, The relay's side),
+// through Relay, which has nothing else; /admin the admin view's, through Internal, each call saying
+// which admin is asking (X-Admin-Email), which goes in the account's history.
 async function inside(req, env, url) {
   const db = env.DB
   const p = url.pathname
-  if (p === '/internal/status' && req.method === 'GET') return json(await statusOf(db, url.searchParams.get('a')))
+  if (p === '/internal/status' && req.method === 'GET') return json(await statusOf(db, url.searchParams.get('a'), url.searchParams.get('d')))
   if (p === '/internal/usage' && req.method === 'POST') return json(await usage(db, await body(req)))
   if (!p.startsWith('/admin/')) return new Response('Not found\n', { status: 404 })
   const by = clean(req.headers.get('X-Admin-Email'))
@@ -690,10 +690,15 @@ async function change(env, acct, b, by, { invite = false } = {}) {
 const EARLY_ON = 'Bridge AI on your computers picks it up by itself within a few hours, or straight away when you open Settings › Account: from then on they get new versions before everyone else. To leave, open Settings › About & Updates.'
 const RELAY_ON = 'In Bridge AI on your computer, open Settings › Devices, pick Bridge AI\'s relay, then pair your phone.'
 
-// For the relay: whether an account may use it ('gone': there's no such account any more).
-async function statusOf(db, a) {
+// For the relay: whether an account may use it ('gone': there's no such account any more), and with
+// d, whether that device is still on it (device: false once it's removed or signed out, so the relay
+// lets it go then, not when its relay token ends).
+async function statusOf(db, a, d = null) {
   const acct = ID.test(String(a)) ? await byId(db, a) : null
-  return acct ? { status: acct.status, relay: acct.relay, tester: acct.tester } : { status: 'gone' }
+  if (!acct) return { status: 'gone' }
+  const out = { status: acct.status, relay: acct.relay, tester: acct.tester }
+  if (d != null) out.device = ID.test(String(d)) && !!(await db.prepare('SELECT id FROM devices WHERE id = ? AND account = ?').bind(String(d), acct.id).first())
+  return out
 }
 // The relay's report of an account's use: { a, window: { messages, resetsAt }, week, days: { day:
 // messages }, limits }, kept for GET /v1/me and the admin view. Answered with the account's status,
@@ -723,8 +728,9 @@ const cors = (env) => ({ 'access-control-allow-origin': env.SITE || 'https://bol
 // Nothing to read here: a browser opening the address goes to what the privacy policy says.
 const PRIVACY = 'https://boldbridge.ai/privacy#your-bold-bridge-account-optional'
 
-// A request, from the internet (only /v1, and / to the policy) or through the binding (only /admin
-// and /internal): refusals answered with their words, anything else with a sentence of its own.
+// A request, from the internet (only /v1, and / to the policy) or through a binding (bound: 'admin',
+// /admin and /internal; 'relay', /internal only): refusals answered with their words, anything else
+// with a sentence of its own.
 async function answer(req, env, bound) {
   const url = new URL(req.url)
   const form = !bound && url.pathname === '/v1/request-public'
@@ -732,7 +738,7 @@ async function answer(req, env, bound) {
   try {
     if (form && req.method === 'OPTIONS') return new Response(null, { status: 204, headers: extra })
     if (!bound && url.pathname === '/' && (req.method === 'GET' || req.method === 'HEAD')) return new Response(null, { status: 301, headers: { location: PRIVACY, 'cache-control': 'public, max-age=3600' } })
-    const mine = bound ? /^\/(admin|internal)\//.test(url.pathname) : url.pathname.startsWith('/v1/')
+    const mine = bound === 'relay' ? url.pathname.startsWith('/internal/') : bound ? /^\/(admin|internal)\//.test(url.pathname) : url.pathname.startsWith('/v1/')
     if (!mine) return new Response('Not found\n', { status: 404 })
     await tables(env.DB)
     const r = bound ? await inside(req, env, url) : await v1(req, env, url)
@@ -744,10 +750,15 @@ async function answer(req, env, bound) {
   }
 }
 
-// What the admin view and the relay bind to (services: { binding = "ACCOUNTS", service =
-// "bridge-accounts", entrypoint = "Internal" }): /admin and /internal, at any address.
+// What the admin view binds to (services: { binding = "ACCOUNTS", service = "bridge-accounts",
+// entrypoint = "Internal" }): /admin and /internal, at any address.
 export class Internal extends WorkerEntrypoint {
-  fetch(req) { return answer(req, this.env, true) }
+  fetch(req) { return answer(req, this.env, 'admin') }
+}
+// What the relay binds to (the same, with entrypoint = "Relay"): /internal only, so the relay, or
+// anyone who takes over its Worker, can't reach the admin routes.
+export class Relay extends WorkerEntrypoint {
+  fetch(req) { return answer(req, this.env, 'relay') }
 }
 
 export default {

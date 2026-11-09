@@ -8,8 +8,9 @@ compatibility_date = "2025-06-01"
 workers_dev = false
 preview_urls = false
 
-# Its one public name. The admin view and the relay reach it through service bindings to its Internal
-# entrypoint instead, which only they can reach (README.md, How the admin view and the relay bind to it).
+# Its one public name. The admin view and the relay reach it through service bindings instead, to its
+# Internal and Relay entrypoints, which only they can reach (README.md, How the admin view and the
+# relay bind to it).
 routes = [
   { pattern = "accounts.boldbridge.ai", custom_domain = true },
 ]

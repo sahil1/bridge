@@ -35,12 +35,13 @@ new_sqlite_classes = ["Hub"]
 tag = "v2"
 new_sqlite_classes = ["Account"]
 
-# The accounts service (account/), reached directly, never over the internet: whether an account
-# may use the relay, and its use reported to it.
+# The accounts service (account/), reached directly, never over the internet, through its Relay
+# entrypoint, which has only /internal (never the admin view's /admin): whether an account and one of
+# its devices may use the relay, and its use reported to it.
 [[services]]
 binding = "ACCOUNTS"
 service = "bridge-accounts"
-entrypoint = "Internal"
+entrypoint = "Relay"
 
 # The anonymous counts (HOSTED.md lists them). Leave this out and nothing is counted.
 [[analytics_engine_datasets]]

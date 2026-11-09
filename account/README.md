@@ -46,8 +46,10 @@ counts and the day's wrong codes that ran out go, and the relay's use by day aft
 ## How the admin view and the relay bind to it
 
 Only the public routes (`/v1/...`) are on `accounts.boldbridge.ai`; `/admin/...` and `/internal/...`
-answer 404 there. Both are on the Worker's named entrypoint, `Internal`, which a service binding can
-name and nothing on the internet can reach. Any address works through it (the host isn't looked at).
+answer 404 there. They're on the Worker's named entrypoints, which a service binding can name and
+nothing on the internet can reach: `Internal` (the admin view's: `/admin` and `/internal`) and
+`Relay` (the relay's: `/internal` only, so a relay Worker that was taken over still can't reach the
+admin routes). Any address works through them (the host isn't looked at).
 
 - **The admin view** (boldbridge.ai/admin, in the private repo), in its own wrangler config:
 
@@ -61,8 +63,8 @@ name and nothing on the internet can reach. Any address works through it (the ho
   and calls `env.ACCOUNTS.fetch('https://accounts.boldbridge.ai/admin/…', { headers: { 'X-Admin-Email': <the signed-in admin> } })`.
   Whoever can deploy a Worker on the project's Cloudflare account can bind to it, so that's who
   the admin routes are open to; the admin view decides which signed-in people are admins.
-- **The relay** ([relay/wrangler.hosted.toml](../relay/wrangler.hosted.toml)) has the same binding,
-  for `GET /internal/status?a=` and `POST /internal/usage`.
+- **The relay** ([relay/wrangler.hosted.toml](../relay/wrangler.hosted.toml)) binds to `Relay`
+  instead (`entrypoint = "Relay"`), for `GET /internal/status?a=&d=` and `POST /internal/usage`.
 
 ## Settings
 
