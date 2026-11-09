@@ -1520,11 +1520,15 @@ app.post('/api/dictation/live/:sid', express.raw({ type: () => true, limit: '4mb
   try { res.json(await livewords.feed(req.params.sid, req.body, { cfg, words: dictation.hints(dictationSources) })) } catch (e) { res.status(e.status || 502).json({ error: e.message }) }
 })
 app.delete('/api/dictation/live/:sid', wrap((req) => livewords.end(req.params.sid)))
-// Answers read aloud where the device has no voice of its own (voicespeak.js): eSpeak NG here.
+// Answers read aloud by this computer (voicespeak.js): the natural voice once it's downloaded, or
+// eSpeak NG where the device has no voice of its own. Its download is asked for in Settings › Voice.
 app.get('/api/voice/speak', wrap(() => voicespeak.status()))
 app.post('/api/voice/speak', async (req, res) => {
-  try { res.type('audio/wav').send(await voicespeak.speak(req.body?.text, { lang: String(req.body?.lang || 'en') })) } catch (e) { res.status(e.status || 502).json({ error: e.message }) }
+  const b = req.body || {}
+  try { res.type('audio/wav').send(await voicespeak.speak(b.text, { lang: String(b.lang || 'en'), engine: b.engine === 'natural' ? 'natural' : 'espeak', voice: Number(b.voice) || 0, rate: Number(b.rate) || 1 })) } catch (e) { res.status(e.status || 502).json({ error: e.message }) }
 })
+app.post('/api/voice/natural', wrap(() => voicespeak.download()))
+app.delete('/api/voice/natural', wrap(() => voicespeak.remove()))
 // Edit by voice: the selected text rewritten as you said, by the model picked for it. Only from the
 // computer itself (the dictation window), never through the relay.
 // None picked: the local model built in, once it's downloaded (the text stays on this computer).

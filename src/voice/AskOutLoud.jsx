@@ -11,15 +11,16 @@ import './voice.css'
 // want to know ("what's blocked?"), and hear the answer. What you said goes to the Chief of Staff as
 // any message does (dictation/controller.js turns it into text on your computer), marked "(Asked out
 // loud)" so it answers for the ear (chief/INSTRUCTIONS.md); its answer, once it's done working, is
-// read aloud by a voice on this device (speak.js). Nothing goes anywhere the Chief of Staff's own
-// messages don't. Shown only where this device has a voice to read with.
+// read aloud by a voice on this device, or the natural voice your computer makes (speak.js). Asking
+// again (pressing Ask out loud, or the dictation key), Esc or Stop stops it at once. Nothing goes
+// anywhere the Chief of Staff's own messages don't. Shown only where there's a voice to read with.
 const QUIET = { phase: 'idle' }
 const WAIT_MS = 10 * 60_000
 export const MARK = '(Asked out loud)'
 
 export default function AskOutLoud({ agent, onSend }) {
   const pid = agent.paneId
-  const [voice, setVoice] = useState(null) // how(): { system } or { espeak } or {}
+  const [voice, setVoice] = useState(null) // how(): { system, natural, espeak }
   useEffect(() => {
     let on = true
     const check = () => how().then((h) => { if (on) setVoice(h) })
@@ -30,6 +31,7 @@ export default function AskOutLoud({ agent, onSend }) {
   const dict = useDictation((s) => (s.target?.kind === 'ask' && s.target.id === pid ? s : QUIET))
   const [state, setState] = useState(null) // null | 'sending' | { queued: its answer } | 'waiting' | 'speaking' | 'heard' | { error }
   const [answer, setAnswer] = useState(null) // the last one heard, to hear again
+  const [note, setNote] = useState(null) // the natural voice didn't work, so this device's read it: why
   const speaking = useRef(null)
   const status = useRef(agent.status)
   status.current = agent.status
@@ -37,13 +39,20 @@ export default function AskOutLoud({ agent, onSend }) {
 
   const speak = (text) => {
     speaking.current?.stop()
+    setNote(null)
     let s
     try { s = say(forEar(text, t('There\'s more in the chat.'))) } catch { setState({ error: t('Couldn\'t read it aloud. It\'s in the chat.') }); return }
     speaking.current = s
     setState('speaking')
-    s.done.then(() => { if (speaking.current === s) { speaking.current = null; setState('heard') } })
+    s.done.then((ok) => {
+      if (speaking.current !== s) return
+      speaking.current = null
+      // Nothing heard, and not because it was stopped: why, and where the answer is.
+      if (!ok && !s.stopped) setState({ error: s.error ? t('Couldn\'t read it aloud ({why}). It\'s in the chat.', { why: s.error }) : t('Couldn\'t read it aloud. It\'s in the chat.') })
+      else { setState('heard'); if (s.note) setNote(t('The natural voice didn\'t read it ({why}), so this device\'s own voice did.', { why: s.note })) }
+    })
   }
-  const stop = () => { speaking.current?.stop(); speaking.current = null; setState(answer ? 'heard' : null) }
+  const stop = () => { speaking.current?.stop(); speaking.current = null; setState((x) => (x === 'speaking' ? (answer ? 'heard' : null) : x)) }
   // What was said: sent (or held while it's busy, which it says, and the dictation is kept as), then
   // the answer waited for (its last reply after the question, once it's done working) and read aloud.
   const ask = async (text, said) => {
@@ -74,12 +83,23 @@ export default function AskOutLoud({ agent, onSend }) {
   }
   useEffect(() => registerAsk(pid, (text, said) => ask(text, said)), [pid]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => { run.current++; speaking.current?.stop() }, [])
+  // Talking again stops it: the mic opening anywhere (Ask out loud, the dictation key), so it never
+  // hears the answer, and Esc.
+  const talking = useDictation((s) => s.phase === 'opening' || s.phase === 'listening')
+  useEffect(() => { if (talking && speaking.current) stop() }, [talking]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (state !== 'speaking') return undefined
+    const esc = (e) => { if (e.key === 'Escape') stop() }
+    window.addEventListener('keydown', esc)
+    return () => window.removeEventListener('keydown', esc)
+  }, [state]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!voice?.system && !voice?.espeak) return null
+  if (!voice?.system?.length && !voice?.natural?.have && !voice?.espeak) return null
   const listening = dict.phase === 'opening' || dict.phase === 'listening'
   const down = (e) => {
     if (e.button !== 0 || dict.phase === 'working') return
     e.preventDefault()
+    stop()
     unlock()
     press({ kind: 'ask', id: pid }, eventTime(e))
     const up = (u) => { window.removeEventListener('pointerup', up, true); window.removeEventListener('pointercancel', up, true); release(eventTime(u)) }
@@ -93,11 +113,12 @@ export default function AskOutLoud({ agent, onSend }) {
         : state === 'waiting' ? t('The Chief of Staff is working on it…')
           : state === 'speaking' ? t('Reading the answer aloud…')
             : state?.error ? state.error
-              : t('Hold and ask, say "what\'s blocked?", and hear the answer.')
+              : state === 'heard' && note ? note
+                : t('Hold and ask, say "what\'s blocked?", and hear the answer.')
   return (
     <div className={`ask-bar${listening ? ' on' : ''}`} role="group" aria-label={t('Ask out loud')}>
       <button type="button" className={`ask-btn${listening ? ' on' : ''}`} onPointerDown={down}
-        onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && !e.repeat) { e.preventDefault(); unlock(); press({ kind: 'ask', id: pid }); release(Date.now()) } }}
+        onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && !e.repeat) { e.preventDefault(); stop(); unlock(); press({ kind: 'ask', id: pid }); release(Date.now()) } }}
         aria-pressed={listening} title={t('Hold to ask the Chief of Staff out loud; the answer is read to you')}>
         <Icon name={listening ? 'wave' : 'mic'} size={14} /> <span>{t('Ask out loud')}</span>
       </button>

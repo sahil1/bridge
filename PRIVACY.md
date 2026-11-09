@@ -87,7 +87,10 @@ is read.
 
 When you ask the Chief of Staff out loud, what you said goes to it as any message you type does,
 and its answer is read to you by a voice on the device you're using (its own voices, never one
-fetched from the internet), or, on a device with none, by eSpeak NG on your computer.
+fetched from the internet), by the natural voice made on your computer if you pick it in Settings ›
+Voice (Supertonic 3, one download from Hugging Face when you ask for it; the answer is read on your
+computer and its sound goes only to the device you're using), or, on a device with none, by eSpeak
+NG on your computer.
 
 What you dictate is kept on your computer, in `~/.bridge-ai/dictations`, so you can find it again
 under Dictations: the words as they were put in and as they were heard, when, for how long, and

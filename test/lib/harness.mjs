@@ -482,7 +482,8 @@ export const solid = async (p, sel) => {
 }
 
 // Speech models from this computer instead of Hugging Face: a small fake model's files (for
-// Parakeet and Parakeet English, and one file for Whisper base, English), served with ranges, and
+// Parakeet and Parakeet English, the natural voice's (voice), and one file for Whisper base,
+// English), served with ranges, and
 // the file (BRIDGE_SPEECH_MODELS) that gives the server their sizes and checksums. Whisper's has
 // the wrong checksum, so its download is thrown away. env: what a kit needs to use them (with no Mac speech standing in,
 // and the stand-in engine's log in the kit's folder: sherpa.log). cut: the next encoder download
@@ -491,16 +492,19 @@ export const solid = async (p, sel) => {
 export async function startSpeechModels(name) {
   const fake = (n, seed) => { const b = Buffer.alloc(n); for (let i = 0; i < n; i++) b[i] = (i * 31 + seed * 7) & 255; return b }
   const files = { 'tokens.txt': Buffer.from('<unk> 0\n▁the 1\n▁work 2\n'), 'decoder.int8.onnx': fake(40_000, 1), 'joiner.int8.onnx': fake(30_000, 2), 'encoder.int8.onnx': fake(1_500_000, 3) }
+  // And the natural voice that reads answers aloud (Supertonic 3), in files of its own names.
+  const voice = { 'tts.json': Buffer.from('{}'), 'unicode_indexer.bin': fake(2_000, 5), 'voice.bin': fake(3_000, 6), 'duration_predictor.int8.onnx': fake(20_000, 7), 'text_encoder.int8.onnx': fake(200_000, 8), 'vocoder.int8.onnx': fake(150_000, 9), 'vector_estimator.int8.onnx': fake(600_000, 10) }
   const whisper = fake(300_000, 4)
   const sha = (b) => crypto.createHash('sha256').update(b).digest('hex')
-  const sherpa = Object.entries(files).map(([n, b]) => ({ name: n, bytes: b.length, sha256: sha(b) }))
+  const list = (o) => Object.entries(o).map(([n, b]) => ({ name: n, bytes: b.length, sha256: sha(b) }))
+  const sherpa = list(files)
   const catalog = path.join(OUT, 'kits', `${name}-speech-models.json`)
   fs.mkdirSync(path.dirname(catalog), { recursive: true })
-  fs.writeFileSync(catalog, JSON.stringify({ 'parakeet-v3': { files: sherpa }, 'parakeet-en': { files: sherpa }, 'base.en-q5_1': { files: [{ name: 'ggml-base.en-q5_1.bin', bytes: whisper.length, sha256: '0'.repeat(64) }] } }))
-  const me = { asked: [], cut: 0, slow: 0, files, sha }
+  fs.writeFileSync(catalog, JSON.stringify({ 'parakeet-v3': { files: sherpa }, 'parakeet-en': { files: sherpa }, 'supertonic-3': { files: list(voice) }, 'base.en-q5_1': { files: [{ name: 'ggml-base.en-q5_1.bin', bytes: whisper.length, sha256: '0'.repeat(64) }] } }))
+  const me = { asked: [], cut: 0, slow: 0, files, voice, sha }
   const srv = http.createServer(async (req, res) => {
     const [, model, file] = req.url.split('/')
-    const body = files[file] || (file === 'ggml-base.en-q5_1.bin' ? whisper : null)
+    const body = files[file] || voice[file] || (file === 'ggml-base.en-q5_1.bin' ? whisper : null)
     me.asked.push({ model, name: file, range: req.headers.range || null })
     if (!body) { res.writeHead(404); res.end(); return }
     const m = /bytes=(\d+)-/.exec(req.headers.range || '')
