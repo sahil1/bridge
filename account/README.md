@@ -11,10 +11,12 @@ keeps with the relay, Bridge AI (server/account.js, Settings › Account) and th
 ## What it does
 
 - **Sign-in is an email and a 6-digit code**, sent from `accounts@boldbridge.ai` by Cloudflare's <!-- private-ok: the service's own sending address -->
-  Email Service. A code lasts 10 minutes and allows 5 tries; an email gets at most 5 codes an hour, a
-  network (IPv4 /24, IPv6 /48) at most 20, and the website's form 5 requests an hour per network.
-  `THROWAWAY` in worker.js is a short list of throwaway domains, refused, saying why. An email's first
-  sign-in makes its account.
+  Email Service. A code lasts 10 minutes and allows 5 tries, each wrong one counted in the same
+  statement that checks it (so guesses sent all at once are held to 5 too), and the right one is used
+  up once; an email gets at most 5 codes an hour, a network (IPv4 /24, IPv6 /48) at most 20, and the
+  website's form 5 requests an hour per network. After 20 wrong codes in a day, an email gets no codes
+  for a day (where it's signed in already, nothing changes). `THROWAWAY` in worker.js is a short list
+  of throwaway domains, refused, saying why. An email's first sign-in makes its account.
 - **At most 5 devices**, computers and phones. A sixth sign-in is refused with the list, and the same
   code can then remove one to make room.
 - **Tokens**, signed with Ed25519 (`SIGNING_KEY`): a device token (180 days), a relay token for a
@@ -30,13 +32,14 @@ keeps with the relay, Bridge AI (server/account.js, Settings › Account) and th
   made; its devices (name, computer or phone, platform, when added and last seen, a hash of the
   token); its requests; its history (what was done, by whom, with a note); the relay's last report of
   its use and its use by day (90 days). Codes are kept as hashes until used or ended; codes sent in
-  the last hour, under a hash of the email and of the network, for an hour. Never anything from the
+  the last hour, under a hash of the email and of the network, for an hour; wrong codes, under a hash
+  of the email, for a day. Never anything from the
   person's computer. The Worker's logs are off (`[observability]` in [wrangler.toml](wrangler.toml)).
 - **Deleting an account** (`DELETE /v1/account`) deletes all of that at once. The relay forgets its own
   counts within a day.
 
-The tables are made the first time they're needed. Once a day (the cron), codes, grants and the
-hour's counts that ran out go, and the relay's use by day after 90 days.
+The tables are made the first time they're needed. Once a day (the cron), codes, grants, the hour's
+counts and the day's wrong codes that ran out go, and the relay's use by day after 90 days.
 
 ## How the admin view and the relay bind to it
 
@@ -101,17 +104,23 @@ The relay ([relay/HOSTED.md](../relay/HOSTED.md)) goes live after this, since it
    ```
 
    The custom domain makes the DNS record and certificate for `accounts.boldbridge.ai` itself.
-7. **Check it**: `https://accounts.boldbridge.ai/` sends a browser to the privacy policy;
+7. **The rate limiting rule** (required, before anyone is told the address): boldbridge.ai ›
+   Security › WAF › Rate limiting rules › Create rule. When incoming requests match: Hostname equals
+   `accounts.boldbridge.ai`. With the same characteristics: IP. When rate exceeds 30 requests per
+   10 seconds, Block for 10 seconds (the Free plan's one rule does it). The Worker's own limits (5
+   tries a code, 20 wrong codes a day for an email, codes an hour for an email and a network) are
+   counted in D1, after the Worker has run; this turns a burst from one address away before it does,
+   where nothing is billed, and keeps a burst of guesses from reaching D1 at all. Bridge AI's own use
+   is far below it.
+8. **Check it**: `https://accounts.boldbridge.ai/` sends a browser to the privacy policy;
    `curl -s -X POST https://accounts.boldbridge.ai/v1/code -H 'content-type: application/json' -d '{"email":"x"}'`
    answers `{"error":"That doesn't look like an email address…","code":"invalid"}`;
    `https://accounts.boldbridge.ai/admin/stats` is a 404. Then ask for a code to your own email, and
-   it arrives.
-8. **The public key in the relay**: `ACCOUNTS_PUBLIC_KEY` in relay/wrangler.hosted.toml (`node
+   it arrives. 40 requests in a few seconds from one computer (`for i in $(seq 40); do curl -s -o
+   /dev/null -w '%{http_code} ' https://accounts.boldbridge.ai/; done`) end in 429s: the rule is on.
+9. **The public key in the relay**: `ACCOUNTS_PUBLIC_KEY` in relay/wrangler.hosted.toml (`node
    account/key.js --public` prints it again), and go live with the relay (HOSTED.md).
-9. **The admin view**: its binding, as above, and deploy it.
-10. **Optional, against floods**: Security › WAF › Rate limiting rules, one for the hostname
-    `accounts.boldbridge.ai`: 30 requests in 10 seconds from one IP, then block for 10 seconds (the
-    Worker's own limits are per hour; this stops a burst before it's billed).
+10. **The admin view**: its binding, as above, and deploy it.
 11. **Try it on one computer** before shipping, with this in that computer's
     `~/.bridge-ai/config.json`: `"account": { "url": "https://accounts.boldbridge.ai", "publicKey": "<the public key>" }`.
     Settings › Account appears; sign in, ask for Early Access, approve it in the admin view, and
@@ -206,7 +215,8 @@ with
 > relay, and whether the account is suspended; your requests and their notes; what was changed on
 > the account and by whom; and, if you use Bridge AI's relay, its counts for your account (messages
 > in each 8-hour window and each week, and each day's total, kept 90 days). To limit codes, it keeps
-> for an hour how many were sent to each email and from each network, under a hash of each. Never
+> for an hour how many were sent to each email and from each network, and for a day the wrong codes
+> entered for each email, under a hash of each. Never
 > anything from your computer: your agents, meetings, mail, files and what you type stay there.
 >
 > **What goes with it**: your email, when you sign in or ask for something; the codes and notices

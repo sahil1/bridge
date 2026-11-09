@@ -103,6 +103,38 @@ try {
     r = await s.call('/v1/verify', { method: 'POST', body: { email: 'sam@example.com', code: '000000', device: dev } })
     const right = await s.call('/v1/verify', { method: 'POST', body: { email: 'sam@example.com', code: s.codeFor('sam@example.com'), device: dev } })
     ok(r.j.code === 'expired' && /fifth wrong try/.test(r.j.error) && right.j.code === 'expired', 'the fifth wrong try ends it, saying so: even the right code is too late then', [r.j, right.j])
+    // Guesses sent all at once (from many networks): five are checked at most, however they
+    // interleave, and the right one sent after them is too late.
+    const race = service()
+    await race.call('/v1/code', { method: 'POST', body: { email: 'race@example.com' } })
+    const real = race.codeFor('race@example.com')
+    const guesses = Array.from({ length: 60 }, (_, i) => String((Number(real) + 1 + i) % 1e6).padStart(6, '0'))
+    const burst = await Promise.all([...guesses, real].map((g, i) => race.call('/v1/verify', { method: 'POST', body: { email: 'race@example.com', code: g, device: dev }, ip: `198.51.${i}.9` })))
+    const checked = burst.filter((x) => x.j?.code === 'wrong' || /fifth wrong try/.test(x.j?.error || '')).length
+    ok(checked <= 5 && !burst.some((x) => x.j?.deviceToken) && !race.rows('devices').length, '61 guesses at one code at once: 5 checked at most, the rest refused, and the right one, sent last, doesn\'t sign in', { checked, codes: [...new Set(burst.map((x) => x.j?.code))] })
+    // The right code twice at once: one sign-in.
+    await race.call('/v1/code', { method: 'POST', body: { email: 'twice@example.com' } })
+    const once = race.codeFor('twice@example.com')
+    const both = await Promise.all(['Studio', 'Desk'].map((n) => race.call('/v1/verify', { method: 'POST', body: { email: 'twice@example.com', code: once, device: race.device(n) } })))
+    ok(both.filter((x) => x.j?.deviceToken).length === 1 && both.some((x) => x.j?.code === 'expired') && race.rows('devices').length === 1, 'the right code sent twice at once signs in once: the other is told it\'s no good now', both.map((x) => x.j?.code || x.status))
+    // 20 wrong codes for an email in a day: no more codes for it for a day.
+    const wrongOf = (c) => String((Number(c) + 1) % 1e6).padStart(6, '0')
+    const g = service()
+    let last = null
+    for (let c = 0; c < 4; c++) {
+      await g.call('/v1/code', { method: 'POST', body: { email: 'guess@example.com' } })
+      for (let i = 0; i < 5; i++) last = await g.call('/v1/verify', { method: 'POST', body: { email: 'guess@example.com', code: wrongOf(g.codeFor('guess@example.com')), device: dev } })
+    }
+    ok(last.status === 429 && last.j.code === 'stopped' && /20 wrong codes for this email today/.test(last.j.error) && last.j.retryAfter > 86000 && /24 hours/.test(last.j.error), 'the 20th wrong code for an email in a day: said, with when it may have codes again (a day)', last.j)
+    const mailed = g.mail.sent.length
+    const asked = await g.call('/v1/code', { method: 'POST', body: { email: 'guess@example.com' } })
+    ok(asked.status === 429 && asked.j.code === 'stopped' && asked.j.retryAfter > 86000 && g.mail.sent.length === mailed && !g.rows('codes').length, 'then no code goes to it, saying until when, and none is waiting', asked.j)
+    ok(!JSON.stringify(g.rows('misses')).includes('guess@'), 'what\'s kept for it is a hash of the email', g.rows('misses').slice(0, 2))
+    shift += DAY + MIN
+    ok((await g.call('/v1/code', { method: 'POST', body: { email: 'guess@example.com' } })).status === 200, 'a day on, it has codes again')
+    await worker.default.scheduled({}, g.env)
+    ok(!g.rows('misses').length, 'and the daily clean-up takes what ran out')
+    shift = 0
     await s.call('/v1/code', { method: 'POST', body: { email: 'sam@example.com' } })
     const first = s.codeFor('sam@example.com')
     await s.call('/v1/code', { method: 'POST', body: { email: 'sam@example.com' } })
@@ -198,6 +230,9 @@ try {
     ok(r.status === 200 && r.j.account.id === a.account.id && r.j.device.name === 'Desk' && verifies(r.j.deviceToken), 'another computer redeems it: signed in to the same account, no email', r.j?.device)
     const twice = await s.call('/v1/redeem', { method: 'POST', body: { grant: g.j.grant, device: s.device('Laptop') } })
     ok(twice.j.code === 'expired', 'used once, it\'s done', twice.j)
+    const g1 = (await s.call('/v1/grant', { method: 'POST', token: a.deviceToken })).j.grant
+    const pair = await Promise.all(['Laptop', 'Air'].map((n) => s.call('/v1/redeem', { method: 'POST', body: { grant: g1, device: s.device(n) } })))
+    ok(pair.filter((x) => x.status === 200).length === 1 && pair.some((x) => x.j?.code === 'expired'), 'two computers redeeming the same grant at once: one signs in, the other is told it\'s no good now', pair.map((x) => x.j?.code || x.status))
     const g2 = (await s.call('/v1/grant', { method: 'POST', token: a.deviceToken })).j.grant
     shift = 6 * MIN
     const late = await s.call('/v1/redeem', { method: 'POST', body: { grant: g2, device: s.device('Laptop') } })

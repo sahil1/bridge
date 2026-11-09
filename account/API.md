@@ -21,8 +21,9 @@ Three parts keep to this file:
 ## Rules
 
 - **Sign-in is an email and a 6-digit code**, sent from `accounts@boldbridge.ai` by Cloudflare's <!-- private-ok: the service's own sending address -->
-  Email Service (`send_email` binding). No passwords. A code lasts 10 minutes and allows 5 tries;
-  an email gets at most 5 codes an hour, a network (IPv4 /24, IPv6 /48) at most 20. Throwaway email
+  Email Service (`send_email` binding). No passwords. A code lasts 10 minutes and allows 5 tries,
+  however many are sent at once, and signs in once; an email gets at most 5 codes an hour, a network
+  (IPv4 /24, IPv6 /48) at most 20, and after 20 wrong codes in a day, none for a day. Throwaway email
   domains (a list in the Worker) are refused, saying why.
 - **One account per email**, compared lowercase and trimmed. An email's first sign-in makes it.
 - **At most 5 devices per account**, any mix of computers and phones. A sixth sign-in is refused
@@ -61,14 +62,16 @@ HTTP status. A device token goes in `Authorization: Bearer <token>`.
 ### Signing in
 
 `POST /v1/code { email }` sends a code. `200 { sent: true }`. Errors: `invalid`, `throwaway`,
-`too-many` (with `retryAfter` seconds), `suspended`, and `unsent` (502) when the email couldn't be
-sent (nothing is counted then).
+`too-many` (with `retryAfter` seconds), `stopped` (429, with `retryAfter`: 20 wrong codes for the
+email today), `suspended`, and `unsent` (502) when the email couldn't be sent (nothing is counted
+then).
 
 `POST /v1/verify { email, code, device: { name, kind: "computer" | "phone", platform }, replace? }`
 checks it and adds the device. `200 { account, device, deviceToken }`. Errors: `wrong` (with
-`triesLeft`), `expired` (also after the fifth wrong try), `devices` (409, with `devices: [...]`),
-`suspended`. A `devices` refusal leaves the code good, so the same code with `replace: <device id>`
-removes that device and adds this one in its place.
+`triesLeft`), `expired` (also after the fifth wrong try, and for a code used already), `stopped`
+(the email's 20th wrong code today), `devices` (409, with `devices: [...]`), `suspended`. A
+`devices` refusal leaves the code good, so the same code with `replace: <device id>` removes that
+device and adds this one in its place.
 
 `account` is `{ id, email, tester, relay, status, createdAt }`; a `device` is
 `{ id, name, kind, platform, createdAt, lastSeen, thisOne }`.

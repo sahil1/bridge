@@ -14,14 +14,16 @@
 // for it. Never anything from the person's computer. The IP address is read only to limit codes per
 // network, kept an hour as a hash of its network, and the Worker's logs are off (wrangler.toml).
 //
-// The admin view and the relay reach /admin/... and /internal/... through service bindings to its
-// Internal entrypoint, which nothing on the internet can reach; the public address has only /v1/....
+// The admin view reaches /admin/... (and /internal/...) through a service binding to its Internal
+// entrypoint, and the relay only /internal/... through its Relay entrypoint; nothing on the internet
+// can reach either, and the public address has only /v1/....
 import { WorkerEntrypoint } from 'cloudflare:workers'
 
 const HOUR = 3600 * 1000
 const DAY = 24 * HOUR
 const CODE_MINUTES = 10
 const CODE_TRIES = 5
+const WRONG_PER_DAY = 20 // wrong codes for an email in a day, past which it gets none for a day
 const CODES_PER_EMAIL = 5 // an hour
 const CODES_PER_NETWORK = 20 // an hour
 const FORMS_PER_NETWORK = 5 // requests from the website's form, an hour
@@ -65,6 +67,9 @@ export const TABLES = [
   // Codes sent in the last hour, by a hash of the email and of the network (gone after an hour).
   'CREATE TABLE IF NOT EXISTS sent (key TEXT NOT NULL, at INTEGER NOT NULL)',
   'CREATE INDEX IF NOT EXISTS sent_by_key ON sent (key, at)',
+  // Wrong codes in the last day, and when an email was stopped for a day, by a hash of the email.
+  'CREATE TABLE IF NOT EXISTS misses (key TEXT NOT NULL, at INTEGER NOT NULL)',
+  'CREATE INDEX IF NOT EXISTS misses_by_key ON misses (key, at)',
   'CREATE TABLE IF NOT EXISTS grants (hash TEXT PRIMARY KEY, account TEXT NOT NULL, device TEXT NOT NULL, expires INTEGER NOT NULL)',
   `CREATE TABLE IF NOT EXISTS requests (id TEXT PRIMARY KEY, account TEXT NOT NULL, kind TEXT NOT NULL, note TEXT NOT NULL, os TEXT NOT NULL,
     via TEXT NOT NULL, state TEXT NOT NULL, created_at INTEGER NOT NULL, decided_at INTEGER, decided_by TEXT)`,
@@ -189,8 +194,11 @@ function networkOf(req) {
   return [...head, ...Array(Math.max(0, 8 - head.length - tail.length)).fill('0'), ...tail].slice(0, 3).map((x) => x.replace(/^0+(?=.)/, '')).join(':')
 }
 // The limits a code is sent under, as keys of the sent table: this email, this network and, for the
-// website's form, its own. Past one: refused, saying when to try again.
+// website's form, its own. Past one: refused, saying when to try again. An email stopped for a day
+// (WRONG_PER_DAY wrong codes) gets none until then.
 async function mayCode(db, req, email, now, form) {
+  const until = await stoppedUntil(db, email, now)
+  if (until > now) stopped(until, now)
   const net = networkOf(req)
   const limits = [[`e:${(await sha(`email ${email}`)).slice(0, 32)}`, CODES_PER_EMAIL, 'this email'], [`n:${(await sha(`net ${net}`)).slice(0, 32)}`, CODES_PER_NETWORK, 'this network']]
   if (form) limits.push([`f:${(await sha(`form ${net}`)).slice(0, 32)}`, FORMS_PER_NETWORK, 'this network'])
@@ -226,21 +234,64 @@ async function sendCode(req, env, email, purpose, data = null) {
     db.prepare('INSERT INTO daily (day, what, n) VALUES (?, \'codes\', 1) ON CONFLICT DO UPDATE SET n = n + 1').bind(iso(now).slice(0, 10)),
   ])
 }
-// The code waiting for this email, checked: each wrong one is a try, and the fifth ends it.
+// The code waiting for this email, checked. A wrong one is a try, counted in the same statement that
+// finds it wrong (and only while it has tries left and hasn't run out), so guesses sent all at once
+// can't each find it untried: five are checked at most, and the fifth ends it. A wrong one counts
+// towards the email's day too (missed). The right one is used up by used(): a delete that must find
+// it, so the same code can't sign in twice at once.
 async function checkCode(db, email, code, purpose) {
   const now = Date.now()
-  const row = await db.prepare('SELECT * FROM codes WHERE email = ?').bind(email).first()
-  const gone = () => db.prepare('DELETE FROM codes WHERE email = ?').bind(email).run()
-  if (!row || row.purpose !== purpose) refuse(400, 'expired', 'There\'s no code waiting for this email: it ran out, or a newer one was sent. Ask for a new one.')
-  if (row.expires <= now) { await gone(); refuse(400, 'expired', `That code ran out (a code lasts ${CODE_MINUTES} minutes). Ask for a new one.`) }
   const given = String(code ?? '').replace(/\s+/g, '')
-  if (!/^\d{6}$/.test(given) || (await sha(`code ${email} ${given}`)) !== row.hash) {
-    const left = CODE_TRIES - row.tries - 1
-    if (left <= 0) { await gone(); refuse(400, 'expired', `That was the ${CODE_TRIES === 5 ? 'fifth' : `${CODE_TRIES}th`} wrong try, so the code no longer works. Ask for a new one.`) }
-    await db.prepare('UPDATE codes SET tries = tries + 1 WHERE email = ?').bind(email).run()
+  const hash = /^\d{6}$/.test(given) ? await sha(`code ${email} ${given}`) : ''
+  const wrong = await db.prepare('UPDATE codes SET tries = tries + 1 WHERE email = ? AND purpose = ? AND tries < ? AND expires > ? AND hash != ? RETURNING tries')
+    .bind(email, purpose, CODE_TRIES, now, hash).first()
+  if (wrong) {
+    const left = CODE_TRIES - wrong.tries
+    if (await missed(db, email, now)) stopped(now + DAY, now, true)
+    if (left <= 0) {
+      await db.prepare('DELETE FROM codes WHERE email = ? AND tries >= ?').bind(email, CODE_TRIES).run()
+      refuse(400, 'expired', `That was the ${CODE_TRIES === 5 ? 'fifth' : `${CODE_TRIES}th`} wrong try, so the code no longer works. Ask for a new one.`)
+    }
     refuse(400, 'wrong', `That code isn't right. ${left === 1 ? '1 more try' : `${left} more tries`} with this one.`, { triesLeft: left })
   }
-  return { row, used: gone }
+  const row = await db.prepare('SELECT hash, data FROM codes WHERE email = ? AND purpose = ? AND tries < ? AND expires > ? AND hash = ?')
+    .bind(email, purpose, CODE_TRIES, now, hash).first()
+  if (!row) {
+    // Why not, said as well as it can be: none (or one for something else), ran out, or used up.
+    const was = await db.prepare('SELECT expires, purpose FROM codes WHERE email = ?').bind(email).first()
+    if (!was || was.purpose !== purpose) refuse(400, 'expired', 'There\'s no code waiting for this email: it ran out, or a newer one was sent. Ask for a new one.')
+    await db.prepare('DELETE FROM codes WHERE email = ? AND expires = ?').bind(email, was.expires).run()
+    if (was.expires <= now) refuse(400, 'expired', `That code ran out (a code lasts ${CODE_MINUTES} minutes). Ask for a new one.`)
+    refuse(400, 'expired', `That code has had its ${CODE_TRIES} tries, so it no longer works. Ask for a new one.`)
+  }
+  const used = async () => {
+    const r = await db.prepare('DELETE FROM codes WHERE email = ? AND hash = ?').bind(email, row.hash).run()
+    if (r?.meta?.changes !== 1) refuse(400, 'expired', 'That code was used already, or a newer one was sent. Ask for a new one.')
+  }
+  return { row, used }
+}
+
+// Wrong codes for an email, kept a day under a hash of it. The WRONG_PER_DAY-th stops it for a day
+// (its waiting code goes too): whoever is guessing has had their tries at a million, and the person
+// whose email it is can still use the devices they're signed in on. true: stopped now.
+const missKey = async (email) => (await sha(`wrong ${email}`)).slice(0, 32)
+async function missed(db, email, now) {
+  const k = await missKey(email)
+  await db.prepare('INSERT INTO misses (key, at) VALUES (?, ?)').bind(`w:${k}`, now).run()
+  const n = (await db.prepare('SELECT COUNT(*) AS n FROM misses WHERE key = ? AND at > ?').bind(`w:${k}`, now - DAY).first())?.n || 0
+  if (n < WRONG_PER_DAY) return false
+  await db.batch([db.prepare('INSERT INTO misses (key, at) VALUES (?, ?)').bind(`x:${k}`, now), db.prepare('DELETE FROM codes WHERE email = ?').bind(email)])
+  return true
+}
+// Until when an email is stopped (0: it isn't).
+async function stoppedUntil(db, email, now) {
+  const r = await db.prepare('SELECT MAX(at) AS at FROM misses WHERE key = ? AND at > ?').bind(`x:${await missKey(email)}`, now - DAY).first()
+  return r?.at ? r.at + DAY : 0
+}
+function stopped(until, now, already = false) {
+  const retryAfter = Math.max(1, Math.ceil((until - now) / 1000))
+  const when = retryAfter <= 3600 ? minutes(retryAfter) : `${Math.ceil(retryAfter / 3600)} hours`
+  refuse(429, 'stopped', `${already ? `That's ${WRONG_PER_DAY} wrong codes for this email today, so no more` : `There were ${WRONG_PER_DAY} wrong codes for this email today, so no more`} go to it for now. Try again in ${when}; where you're signed in already, nothing changes.`, { retryAfter })
 }
 
 // ---------- Accounts and devices ----------
@@ -274,13 +325,15 @@ function deviceOf(d) {
 }
 // A device added to the account (a sign-in, or a grant redeemed): at most MAX_DEVICES, past which
 // it's refused with the list, so one can be removed first (replace: the id of one to remove and
-// put this one in its place, with the same code or grant).
-async function addDevice(env, acct, device, replace = null) {
+// put this one in its place, with the same code or grant). claim uses up the code or grant once
+// there's room, before anything is written: a second sign-in with it at the same moment finds it gone.
+async function addDevice(env, acct, device, replace = null, claim = null) {
   const db = env.DB
   active(acct)
   const list = await devicesOf(db, acct.id)
   const out = replace && list.find((x) => x.id === replace)
   if (list.length >= MAX_DEVICES && !out) refuse(409, 'devices', `Your account has ${MAX_DEVICES} devices, as many as it takes. Remove one to sign in here.`, { devices: list.map((x) => deviceView(x)) })
+  if (claim) await claim()
   const id = newId()
   const now = Date.now()
   const token = await deviceToken(env, acct.id, id, now)
@@ -375,9 +428,7 @@ async function v1(req, env, url) {
     const device = deviceOf(b.device)
     const { used } = await checkCode(db, email, b.code, 'signin')
     const acct = (await byEmail(db, email)) || (await create(db, email))
-    const out = await addDevice(env, acct, device, b.replace) // the code stays, refused for devices, to pick one to replace
-    await used()
-    return json(out)
+    return json(await addDevice(env, acct, device, b.replace, used)) // the code stays, refused for devices, to pick one to replace
   }
   if (p === '/v1/grant' && post) {
     const { acct, dev } = await signedIn(req, env)
@@ -398,9 +449,8 @@ async function v1(req, env, url) {
     if (!g || g.expires <= Date.now()) refuse(400, 'expired', `That sign-in from your other computer ran out (it lasts ${GRANT_MINUTES} minutes). Sign in here with your email instead, in Settings › Account.`)
     const acct = await byId(db, g.account)
     if (!acct) refuse(400, 'expired', 'That account isn\'t there any more.')
-    const out = await addDevice(env, acct, device, b.replace)
-    await db.prepare('DELETE FROM grants WHERE hash = ?').bind(hash).run()
-    return json(out)
+    const claim = async () => { if ((await db.prepare('DELETE FROM grants WHERE hash = ?').bind(hash).run())?.meta?.changes !== 1) refuse(400, 'expired', 'That sign-in from your other computer was used already. Sign in here with your email instead, in Settings › Account.') }
+    return json(await addDevice(env, acct, device, b.replace, claim))
   }
   if (p === '/v1/me' && req.method === 'GET') {
     const { acct, dev, p: tok, hash } = await signedIn(req, env)
@@ -685,8 +735,8 @@ export class Internal extends WorkerEntrypoint {
 
 export default {
   fetch: (req, env) => answer(req, env, false),
-  // Once a day: codes, grants and the hour's counts that ran out go, and the relay's use by day
-  // after 90 days.
+  // Once a day: codes, grants, the hour's counts and the day's wrong codes that ran out go, and the
+  // relay's use by day after 90 days.
   async scheduled(_event, env) {
     const db = env.DB
     await tables(db)
@@ -695,6 +745,7 @@ export default {
       db.prepare('DELETE FROM codes WHERE expires < ?').bind(now),
       db.prepare('DELETE FROM grants WHERE expires < ?').bind(now),
       db.prepare('DELETE FROM sent WHERE at < ?').bind(now - HOUR),
+      db.prepare('DELETE FROM misses WHERE at < ?').bind(now - DAY),
       db.prepare('DELETE FROM usage_days WHERE day < ?').bind(iso(now - KEEP_USE_DAYS * DAY).slice(0, 10)),
       db.prepare('DELETE FROM daily WHERE day < ?').bind(iso(now - 400 * DAY).slice(0, 10)),
     ])
