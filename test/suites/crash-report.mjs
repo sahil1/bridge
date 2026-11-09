@@ -296,8 +296,10 @@ try {
     await p2.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'about' } })))
     await until(async () => /Crash Reports/.test(await p2.locator('.st-body').innerText().catch(() => '')), 8000)
     const box = p2.locator('label', { hasText: 'Send crash reports by themselves' }).locator('input')
+    // Where they go and for how long, in a line; all of it on hover.
     const text = await p2.locator('.st-body').innerText().catch(() => '')
-    ok(await box.isChecked().catch(() => false) && /Kept for 90 days/.test(text) && /On unless you turn it off/.test(text) && /update channel/.test(text) && new RegExp(`127\\.0\\.0\\.1:${port}`).test(text), 'Settings › About & Updates: Crash reports, on, saying where they go, what they carry (the update channel too), for how long, and that they\'re on unless turned off', text.slice(-700))
+    const all = await p2.locator('.st-sec:has(h4:text("Crash Reports")) p[title]').first().getAttribute('title').catch(() => '')
+    ok(await box.isChecked().catch(() => false) && /Kept for 90 days/.test(text) && new RegExp(`127\\.0\\.0\\.1:${port}`).test(text) && /On unless you turn it off/.test(all) && /update channel/.test(all), 'Settings › About & Updates: Crash reports, on, saying where they go and for how long, and on hover what they carry (the update channel too) and that they\'re on unless turned off', [text.slice(-700), all])
     await p2.locator('.st-sec:has(h4:text("Crash Reports")) .link-btn').first().click()
     const doc = await until(async () => { const x = await p2.locator('.st-sec:has(h4:text("Crash Reports")) .counts-doc').innerText().catch(() => ''); return /"kind": "ui"/.test(x) && x }, 5000)
     ok(!!doc && /y is null/.test(doc), 'each report sent can be read there, as it went', doc)

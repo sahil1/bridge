@@ -527,3 +527,12 @@ export async function startSpeechModels(name) {
   me.stop = () => srv.close()
   return me
 }
+
+// Settings' Advanced, at the end of the section that's showing (src/components/settings/Advanced.jsx),
+// opened as a click on it opens it, if it isn't open already. Its locator.
+export async function advanced(p) {
+  const d = p.locator('.modal.settings details.st-adv')
+  await d.locator('summary').waitFor({ timeout: 8000 })
+  if (!(await d.evaluate((x) => x.open))) await d.locator('summary').click()
+  return d
+}

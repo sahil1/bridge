@@ -29,7 +29,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import http from 'node:http'
 import crypto from 'node:crypto'
-import { startKit, startModel, checks, until, sleep, OUT, TEST, freePort, browser, page, shot, noServiceWorker } from '../lib/harness.mjs'
+import { startKit, startModel, checks, until, sleep, OUT, TEST, freePort, browser, page, shot, noServiceWorker, advanced } from '../lib/harness.mjs'
 
 const { ok, done } = checks('dictation-cleanup')
 const STAND_IN = path.join(TEST, 'stand-ins', 'llama-server.mjs')
@@ -224,12 +224,14 @@ try {
   const voice = async (k) => {
     const w = await page(b, k.url, { before: asApp })
     await w.p.waitForSelector('.rail-nav-btn, body', { timeout: 30000 }).catch(() => {})
-    const s = w.p.locator('.st-dictation')
+    const dict = w.p.locator('.st-dictation')
     await until(async () => {
       if (!(await w.p.locator('.modal.settings').count())) await w.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'voice' } })))
-      return (await s.count()) > 0
+      return (await dict.count()) > 0
     }, 30000, 1000)
     await sleep(500)
+    // Tidy what I say is under Voice's Advanced.
+    const s = await advanced(w.p)
     return { ...w, s }
   }
   const tidyBox = (s) => s.locator('.dict-tidy')

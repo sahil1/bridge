@@ -16,6 +16,8 @@ import Voice from './settings/Voice.jsx'
 import CloudKeys from './settings/CloudKeys.jsx'
 import ErrorBoundary from './ErrorBoundary.jsx'
 import { SettingsAt } from './settings/where.js'
+import { AdvancedFrame, reveal } from './settings/Advanced.jsx'
+import { SETTINGS } from './settings/search.js'
 import { cloudOnly, usePoll } from '../api.js'
 import { t, tx } from '../i18n/index.js'
 
@@ -23,7 +25,8 @@ import { t, tx } from '../i18n/index.js'
 // On a phone it's a phone's settings: the list of sections, each opening full width under a bar
 // with ‹ Settings (back to the list), its name, and the one close. A section marked mac is only
 // where it can work: Mail, where Bridge AI reads Apple Mail (the computer shown is a Mac). One marked
-// accounts is only once Bold Bridge accounts exist (server/account.js): Account.
+// accounts is only once Bold Bridge accounts exist (server/account.js): Account. Each section shows
+// what most people change first, and the rest under Advanced at its end (settings/Advanced.jsx).
 export const SECTIONS = [
   { id: 'general', label: tx('General'), icon: 'home', hint: tx('Name, default agent and model, location') },
   { id: 'agents', label: tx('Agents'), icon: 'bot', hint: tx('Installed agents and sign-in') },
@@ -46,14 +49,14 @@ const PHONE = [
 ]
 
 // section: where Settings opens. "all" is Settings itself: the list on a phone, General on a wider
-// screen. A section's id opens it (on a phone with ‹ Settings back to the list), and so do these:
-// "accounts" and "cloud" open Model providers at its Accounts or Cloud agents list; "machines"
-// opens Devices at your devices (they were two sections, and linking machines needs the
-// relay set up on the phone one); "permissions" opens General at its Permissions; "topbar" opens
-// Appearance at In the Top Bar (from the Status menu).
-const LEADS = { accounts: 'providers', cloud: 'providers', machines: 'phone', permissions: 'general', commands: 'general', topbar: 'appearance' }
+// screen. A section's id opens it (on a phone with ‹ Settings back to the list), and so does one
+// setting's (search.js: "accounts", "cloud", "permissions", "commands", "topbar" and the rest),
+// which opens its section at it, with Advanced opened when it's in there (reveal). "machines"
+// opens Devices at your devices (they were two sections, and linking machines needs the relay set
+// up on the phone one).
+const settingOf = (section) => (cloudOnly ? null : SETTINGS.find((x) => x.id === section) || null)
 const sectionFor = (section, sections) => {
-  const to = cloudOnly ? (section === 'all' ? null : section === 'appearance' ? 'appearance' : 'cloud') : LEADS[section] || section
+  const to = cloudOnly ? (section === 'all' ? null : section === 'appearance' ? 'appearance' : 'cloud') : settingOf(section)?.section || section
   return sections.some((s) => s.id === to) ? to : null
 }
 
@@ -66,11 +69,17 @@ export default function Settings({ section = 'all', onClose, onOpenAgent }) {
   const [list, setList] = useState(!to) // on a phone: the list of sections, rather than one of them
   const go = (id) => { setAt(id); setList(false) }
   useEffect(() => { if (to) go(to) }, [to]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (to && settingOf(section)) reveal(section, settingOf(section).near) }, [section]) // eslint-disable-line react-hooks/exhaustive-deps
   // A link to a section from inside Settings (Meetings' Model Providers), even to the one it opened at.
   const shown = useRef(sections)
   shown.current = sections
   useEffect(() => {
-    const on = (e) => { const s = sectionFor(e.detail?.section, shown.current); if (s) go(s) }
+    const on = (e) => {
+      const s = sectionFor(e.detail?.section, shown.current)
+      if (!s) return
+      go(s)
+      if (settingOf(e.detail.section)) reveal(e.detail.section, settingOf(e.detail.section).near)
+    }
     window.addEventListener('bridge-open-settings', on)
     return () => window.removeEventListener('bridge-open-settings', on)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -93,19 +102,21 @@ export default function Settings({ section = 'all', onClose, onOpenAgent }) {
   const body = (
     <SettingsAt.Provider value={at}>
     <ErrorBoundary key={at} name={t(cur.label)} resetKey={at}>
-    {at === 'general' && <General onGo={go} focus={section === 'permissions' || section === 'commands' ? section : null} onOpenAgent={(id) => { onOpenAgent?.(id); onClose() }} />}
+    <AdvancedFrame section={at}>
+    {at === 'general' && <General onGo={go} onOpenAgent={(id) => { onOpenAgent?.(id); onClose() }} />}
     {at === 'agents' && <Agents onOpenAgent={(id) => { onOpenAgent?.(id); onClose() }} />}
-    {at === 'providers' && <Providers focus={section === 'accounts' || section === 'cloud' ? section : null} onOpenAgent={(id) => { onOpenAgent?.(id); onClose() }} />}
+    {at === 'providers' && <Providers onOpenAgent={(id) => { onOpenAgent?.(id); onClose() }} />}
     {at === 'voice' && <Voice />}
     {at === 'meetings' && <Meetings onOpenAgent={(id) => { onOpenAgent?.(id); onClose() }} />}
     {at === 'mail' && <Mail />}
     {at === 'mcp' && <Mcp />}
-    {at === 'appearance' && <Appearance focus={section === 'topbar' ? 'topbar' : null} />}
+    {at === 'appearance' && <Appearance />}
     {at === 'config' && <ConfigFile />}
     {at === 'phone' && <Phone focus={section === 'machines' ? 'machines' : null} />}
     {at === 'about' && <About />}
     {at === 'account' && <Account />}
     {at === 'cloud' && <CloudKeys focus="cloud" bare />}
+    </AdvancedFrame>
     </ErrorBoundary>
     </SettingsAt.Provider>
   )

@@ -1,16 +1,19 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import Icon from '../Icon.jsx'
 import { api, usePoll, viaRelay, relayComputers } from '../../api.js'
 import Relay, { KeepAwake } from './Relay.jsx'
 import { MachinesSettings } from '../Machines.jsx'
 import { useSettings, SaveNote } from './General.jsx'
 import { pushSupport, pushState, enablePush, disablePush, isIOS } from '../../pwa.js'
-import { locale } from '../../i18n/index.js'
+import { locale, t } from '../../i18n/index.js'
+import { Advanced } from './Advanced.jsx'
 
 // Settings › Devices: open Bridge AI on your phone (through your own relay, or through
 // Tailscale, as a Home Screen app), link your other computers (through each one's relay: the same
 // sign-in, so it's one place), and choose what you get notified about, on which devices. All
 // optional; Bridge AI works on this computer without any of it. focus: 'machines' starts there.
+// Under Advanced: Tailscale (until it's the way picked, or on), keeping this computer awake, the
+// rest of what to notify about, and the devices that get notifications.
 export default function Phone({ focus = null }) {
   // With Bridge AI's relay offered, Relay starts with a choice of three ways; Tailscale's section
   // shows when it's the one picked (or already on).
@@ -33,7 +36,7 @@ function PhoneAccess({ quiet, picked }) {
   // Opened through the phone link already: nothing to set up from here.
   if (location.hostname.endsWith('.ts.net')) {
     return (
-      <section className="st-sec">
+      <section className="st-sec" data-setting="tailscale">
         <h4>Use on your phone</h4>
         <p className="muted small"><Icon name="check" size={12} /> You're connected to your computer through Tailscale. If you haven't yet, add Bridge AI to your Home Screen so it opens like an app: iPhone, Share › Add to Home Screen; Android, ⋮ › Install app.</p>
       </section>
@@ -56,11 +59,14 @@ function PhoneSetup({ quiet, picked }) {
   }
   const link = err?.match(/https:\/\/\S+/)?.[0]
   if (quiet && !st?.enabled) return null
+  // Not the way picked, and not on: under Advanced.
+  const Where = picked || st?.enabled ? Fragment : Advanced
 
   return (
-    <section className="st-sec">
+    <Where {...(Where === Advanced ? { order: 10 } : {})}>
+    <section className="st-sec" data-setting="tailscale">
       <h4>{picked ? 'Through Tailscale' : 'Or through Tailscale'}</h4>
-      <p className="muted small">If you already use <a href="https://tailscale.com" target="_blank" rel="noreferrer">Tailscale</a>, a free private network between your own devices, your phone can open Bridge AI through it instead. Nothing is opened to the internet, and only devices signed in to your Tailscale account can reach it. Tailscale has to be connected on both the phone and this computer.</p>
+      <p className="muted small" title="If you already use Tailscale, a free private network between your own devices, your phone can open Bridge AI through it instead. Nothing is opened to the internet, and only devices signed in to your Tailscale account can reach it. Tailscale has to be connected on both the phone and this computer.">If you use <a href="https://tailscale.com" target="_blank" rel="noreferrer">Tailscale</a>, your phone can reach Bridge AI over it instead. Nothing is opened to the internet.</p>
       {!st ? <div className="skeleton-rows"><div /></div>
         : !st.installed ? (
           <ol className="ph-steps">
@@ -95,6 +101,7 @@ function PhoneSetup({ quiet, picked }) {
       {err && <p className="st-note bad"><Icon name="alert" size={13} /> {link ? <>Tailscale needs HTTPS switched on for your account first (once). <a href={link} target="_blank" rel="noreferrer">Turn it on</a>, then try again.</> : err}</p>}
       {st && !st.enabled && <div><button type="button" className="ghost-btn" onClick={load}><Icon name="refresh" size={12} /> Check again</button></div>}
     </section>
+    </Where>
   )
 }
 
@@ -112,7 +119,7 @@ function ThisDevice() {
   const test = () => run(() => api('/push/test', { method: 'POST' }), 'Sent. It shows up in a few seconds (not while Bridge AI is in front).')
 
   return (
-    <section className="st-sec">
+    <section className="st-sec" data-setting="this-device">
       <h4>Notifications on this device</h4>
       {relayComputers ? <p className="muted small">Notifications aren't in the Bridge AI app yet. To get them today, open your relay's address in {isIOS() ? 'Safari' : 'Chrome'}, pair it with a new code, and add it to your Home Screen.</p>
         : support.why === 'desktop' ? <DesktopNotes onMsg={setMsg} />
@@ -174,7 +181,7 @@ function WhatToSend() {
   const muted = (fleet.data?.agents || []).filter((a) => a.muted)
   const unmute = async (a) => { await api(`/agents/${encodeURIComponent(a.paneId)}/mute`, { method: 'POST', body: { muted: false } }).catch(() => {}); fleet.refresh() }
   return (
-    <section className="st-sec">
+    <section className="st-sec" data-setting="notify">
       <h4>What to notify about</h4>
       <label className="ph-check"><input type="checkbox" checked={n.needsYou !== false} onChange={(e) => set('needsYou', e.target.checked)} /> An agent needs you (a question, a permission)</label>
       <label className="ph-check"><input type="checkbox" checked={n.finished !== false} onChange={(e) => set('finished', e.target.checked)} /> An agent finished</label>
@@ -184,25 +191,28 @@ function WhatToSend() {
           {[5, 10, 15, 25].map((p) => <option key={p} value={p}>{p}% or less left</option>)}
         </select>
       </label>
-      <label className="ph-check"><input type="checkbox" checked={n.actions !== false} onChange={(e) => set('actions', e.target.checked)} /> Answer buttons for simple questions (yes or no, or two short choices)</label>
-      <p className="muted small">Where the phone shows them: Android and Chrome on a computer, not iPhone. A button only answers if the agent is still asking the same thing; otherwise Bridge AI opens.</p>
-      <label className="ph-check"><input type="checkbox" checked={!!n.phoneAtComputer} onChange={(e) => set('phoneAtComputer', e.target.checked)} /> Notify my phone even when I'm at the computer</label>
-      <p className="muted small">Otherwise your phone stays quiet while Bridge AI is in front on this computer, or you typed or clicked in it in the last 2 minutes. This computer's own notifications don't change.</p>
-      {muted.length > 0 && (
-        <>
-          <p className="muted small">Muted (an agent's ⋯ menu): no notifications from these until you unmute them.</p>
-          <ul className="ph-devices">
-            {muted.map((a) => (
-              <li key={a.paneId}>
-                <Icon name="bell-off" size={14} /><span>{a.chief ? 'Chief of Staff' : a.title || a.tab || a.workspace}</span>
-                <span className="muted small">{a.workspace}</span>
-                <button type="button" className="ghost-btn" onClick={() => unmute(a)}>Unmute</button>
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
       <SaveNote note={note} />
+      <Advanced order={30}>
+        <section className="st-sec" data-setting="notify-more">
+          <h4>{t('Notifications')}</h4>
+          <label className="ph-check" title="Where the phone shows them: Android and Chrome on a computer, not iPhone. A button only answers if the agent is still asking the same thing; otherwise Bridge AI opens."><input type="checkbox" checked={n.actions !== false} onChange={(e) => set('actions', e.target.checked)} /> Answer buttons for simple questions (yes or no, or two short choices)</label>
+          <label className="ph-check" title="Otherwise your phone stays quiet while Bridge AI is in front on this computer, or you typed or clicked in it in the last 2 minutes. This computer's own notifications don't change."><input type="checkbox" checked={!!n.phoneAtComputer} onChange={(e) => set('phoneAtComputer', e.target.checked)} /> Notify my phone even when I'm at the computer</label>
+          {muted.length > 0 && (
+            <>
+              <p className="muted small">Muted (an agent's ⋯ menu): no notifications from these until you unmute them.</p>
+              <ul className="ph-devices">
+                {muted.map((a) => (
+                  <li key={a.paneId}>
+                    <Icon name="bell-off" size={14} /><span>{a.chief ? 'Chief of Staff' : a.title || a.tab || a.workspace}</span>
+                    <span className="muted small">{a.workspace}</span>
+                    <button type="button" className="ghost-btn" onClick={() => unmute(a)}>Unmute</button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </section>
+      </Advanced>
     </section>
   )
 }
@@ -214,7 +224,8 @@ function Devices() {
   if (!list?.length) return null
   const remove = async (id) => { await api('/push/unsubscribe', { method: 'POST', body: { id } }).catch(() => {}); load() }
   return (
-    <section className="st-sec">
+    <Advanced order={40}>
+    <section className="st-sec" data-setting="notify-devices">
       <h4>Devices getting notifications</h4>
       <ul className="ph-devices">
         {list.map((d) => (
@@ -226,5 +237,6 @@ function Devices() {
         ))}
       </ul>
     </section>
+    </Advanced>
   )
 }

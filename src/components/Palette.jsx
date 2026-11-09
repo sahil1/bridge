@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Icon, { StatusDot } from './Icon.jsx'
 import { tildePath } from './Rail.jsx'
-import { api } from '../api.js'
+import { api, cloudOnly, usePoll } from '../api.js'
 import { t, locale } from '../i18n/index.js'
+import { findable, placeOf } from './settings/search.js'
 
 // A chief of staff's thread other than Main goes by its topic.
 const chiefName = (a) => (a.thread && !a.thread.main ? `${t('Chief of Staff')} · ${a.title}` : t('Chief of Staff'))
 
 // ⌘K: jump to any agent or tab, run a routine, open a file in the current agent's
-// folder, or run an action. Fuzzy, keyboard-first; full screen on the phone.
+// folder, run an action, or open one setting (Settings opens at it, Advanced too: search.js).
+// Fuzzy, keyboard-first; full screen on the phone.
 function score(q, text) {
   if (!q) return 1
   const t = text.toLowerCase()
@@ -37,6 +39,7 @@ export default function Palette({ fleet, activeId, onClose, onOpen, onOpenFile, 
   const [flash, setFlash] = useState(null)
   const inputRef = useRef(null)
   const listRef = useRef(null)
+  const conf = usePoll(cloudOnly ? null : '/config', 10 * 60 * 1000).data
   // Where file search looks: the open agent's folder, or the open shell tab's first pane.
   const active = (() => {
     const a = fleet?.agents?.find((x) => x.paneId === activeId)
@@ -75,6 +78,12 @@ export default function Palette({ fleet, activeId, onClose, onOpen, onOpenFile, 
         run: async () => { await api(`/routines/${r.id}/run`, { method: 'POST' }).then((o) => { setFlash(t('{name} started', { name: r.name })); if (o.paneId) setTimeout(() => onOpen(o.paneId), 1200) }).catch((e) => setFlash(e.message)); return 'keep' } })
     }
     for (const a of actions) out.push({ ...a, group: t('Actions'), text: `${a.label} ${a.keywords || ''}` })
+    // Settings, once something's typed: the best few.
+    if (ql && !cloudOnly) {
+      const found = findable(conf).map((x) => ({ id: `s:${x.id}`, group: t('Settings'), label: t(x.label), sub: t('Settings › {section}', { section: placeOf(x) }), icon: 'settings', text: `${t(x.label)} ${x.label} ${placeOf(x)} ${x.keywords}`,
+        run: () => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: x.id } })) }))
+      out.push(...found.map((it) => ({ ...it, score: score(ql, it.text) })).filter((it) => it.score > 0).sort((a, b) => b.score - a.score).slice(0, 6))
+    }
     for (const f of files) out.push({ id: `f:${f}`, group: active?.label ? t('Files in {name}', { name: active.label }) : t('Files in folder'), label: f.split('/').pop(), sub: f, icon: 'file', text: f, score: 30, run: () => onOpenFile(active.id, f) })
     const scored = out.map((it) => ({ ...it, s: it.score ?? score(ql, it.text) })).filter((it) => it.s > 0)
     if (!ql) return scored.slice(0, 60)
@@ -82,7 +91,7 @@ export default function Palette({ fleet, activeId, onClose, onOpen, onOpenFile, 
     const best = {}
     for (const it of scored) best[it.group] = Math.max(best[it.group] || 0, it.s)
     return scored.sort((a, b) => (best[b.group] - best[a.group]) || (a.group === b.group ? b.s - a.s : a.group.localeCompare(b.group))).slice(0, 40)
-  }, [fleet, routines, files, q, actions]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fleet, routines, files, q, actions, conf]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { setSel(0) }, [q])
   useEffect(() => { listRef.current?.querySelector('.pal-item.on')?.scrollIntoView({ block: 'nearest' }) }, [sel])
