@@ -83,6 +83,7 @@ import * as doctext from './doctext.js'
 import * as studioFound from './studiofound.js'
 import * as explorer from './explorer.js'
 import * as studioApps from './studioapps.js'
+import * as openIn from './openin.js'
 import { terminals, openAttach, openCommand } from './terminal.js'
 import { mcpRoutes } from './mcp.js'
 import * as notify from './notify.js'
@@ -2070,6 +2071,11 @@ app.get('/api/calendar', wrap(async (req) => {
 }))
 // Join clicked on an event, on any of your devices: the call that starts next is likely for it.
 app.post('/api/calendar/joined', wrap((req) => callEvent.noteJoin(req.body?.id)))
+// Open in Mail and Open in Calendar (openin.js): the message or event itself in the Mac's own app,
+// to answer it there. Which of the two this Mac has, said only to a window on it (elsewhere, a
+// phone or another computer, there's nothing to open there), and opening only from one.
+app.get('/api/open-in', wrap((req) => (fromHere(req) ? openIn.here() : {})))
+app.post('/api/calendar/open', wrap((req) => { hereOnly(req, 'Open it in Calendar'); return openIn.openEvent(req.body || {}) }))
 app.get('/api/mail', wrap((req) => mail(req.query.refresh === '1')))
 // New mail as Mail's index changes: a line each time, for the app to look again at once.
 app.get('/api/mail/live', (req, res) => {
@@ -2082,6 +2088,7 @@ app.get('/api/mail/live', (req, res) => {
   req.on('close', () => { clearInterval(ping); stop() })
 })
 app.get('/api/mail/message/:id', wrap(async (req) => { const m = await mail.message(req.params.id); return { ...m, meet: meetHint(m) } }))
+app.post('/api/mail/:id/open', wrap(async (req) => { hereOnly(req, 'Open it in Mail'); return openIn.openMessage(await mail.messageId(req.params.id)) }))
 app.post('/api/mail/rules', wrap((req) => { const r = setRule(req.body?.address, req.body?.rule); mail.invalidate(); return r }))
 // Done, Remind me and "remind me if nobody answers", kept by Bridge AI: Mail is left as it is.
 app.post('/api/mail/mark', wrap((req) => { const r = setMark(req.body || {}); mail.invalidate(); return r }))

@@ -2,12 +2,18 @@
 // differently: one with every column this macOS has (Apple Intelligence's summaries, each message's
 // Message-ID), and one without them, as on another version of macOS. Both list the inbox, rank it
 // and open a message; neither says "no such column". The index is made up, in the server's own
-// home folder (Library/Mail), with sqlite3, as Mail would have it. Mail is Mac only, so elsewhere
-// this checks the inbox says so.
+// home folder (Library/Mail), with sqlite3, as Mail would have it. Open in Mail on both: the
+// message itself in Mail by its Message-ID (the index's, or on the older Mac the one in its file),
+// through a stand-in for macOS's open and a Mail in the kit's own Applications folder; refused,
+// saying why and opening nothing, from a phone or another computer, for a message with no
+// Message-ID, with no Mail on the Mac, and for one Mail has deleted since, and what macOS said when
+// open fails. Mail is Mac only, so elsewhere this checks the inbox says so, and that there's nothing
+// to open in.
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { startKit, checks } from '../lib/harness.mjs'
+import { openStandIn } from '../stand-ins/mailbox.mjs'
 
 const { ok, done } = checks('mail')
 const now = Math.floor(Date.now() / 1000)
@@ -41,21 +47,56 @@ try {
     const which = newer ? 'every column' : 'an older macOS'
     const k = await startKit(`mail-${newer ? 'new' : 'old'}`)
     kits.push(k)
+    // What Open in Mail opens, stood in for; and asked as from a phone or another computer (through
+    // the relay, x-bridge-relay).
+    const opener = openStandIn(k, ['Mail'])
+    const far = (p, method = 'GET') => fetch(`${k.url}/api${p}`, { method, headers: { 'content-type': 'application/json', 'x-bridge-relay': 'far' }, body: method === 'POST' ? '{}' : undefined }).then(async (r) => ({ status: r.status, ...(await r.json()) }))
+    const refused = (p) => k.api(p, {}).then((r) => ({ ok: false, r }), (e) => ({ error: e.message }))
     if (process.platform !== 'darwin') {
       const r = await k.api('/mail')
       ok(r.available === false && r.reason === 'notMac', 'not a Mac: the inbox says it reads Apple Mail on macOS', r)
+      ok(JSON.stringify(await k.api('/open-in')) === '{}' && /Mac/.test((await refused('/mail/1/open')).error || '') && !opener.opened().length, 'not a Mac: no Mail to open in, and nothing opens', opener.opened())
       break
     }
     const dir = path.join(k.home, 'Library', 'Mail', 'V10', 'MailData')
     fs.mkdirSync(dir, { recursive: true })
     const made = spawnSync('sqlite3', [path.join(dir, 'Envelope Index')], { input: index(newer), encoding: 'utf8' })
     ok(made.status === 0, `${which}: the made-up index is there`, made.stderr)
+    // The older Mac's index keeps no Message-ID: the message's own file has it (Open in Mail).
+    const mid = newer ? 'a1@example.com' : 'old1@example.com'
+    if (!newer) {
+      const raw = ['From: Dana Lee <dana@example.com>', 'To: Me <me@example.com>', 'Subject: Can you review the launch plan by today?', `Message-ID: <${mid}>`, '', 'Hi, can you?', ''].join('\r\n')
+      const d = path.join(k.home, 'Library', 'Mail', 'V10', 'ABC', 'Inbox.mbox', '0A1B2C3D-0000-4000-8000-00000000AB12', 'Data', 'Messages')
+      fs.mkdirSync(d, { recursive: true })
+      fs.writeFileSync(path.join(d, '1.emlx'), `${Buffer.byteLength(raw)}\n${raw}<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict/></plist>\n`)
+    }
     const r = await k.api('/mail?refresh=1').catch((e) => ({ error: e.message }))
     ok(!r.error && r.available !== false, `${which}: the inbox reads, with no error`, r.error || r.reason)
     const subjects = (r.messages || []).map((m) => m.subject)
     ok(subjects.includes('Can you review the launch plan by today?') && subjects.length === 2, `${which}: and lists the messages`, subjects)
     const opened = await k.api('/mail/message/1').catch((e) => ({ error: e.message }))
     ok(!opened.error && opened.id === 1, `${which}: a message opens`, opened.error)
+
+    // ---------- Open in Mail ----------
+    ok((await k.api('/mail/message/1')).mid === mid, `${which}: an opened message says the Message-ID Mail finds it by (${newer ? "the index's" : 'from its file'})`, (await k.api('/mail/message/1')).mid)
+    ok(JSON.stringify(await k.api('/open-in')) === '{"mail":{"name":"Mail"}}', `${which}: Mail is on this Mac (Calendar isn't, here)`, await k.api('/open-in'))
+    const fromFar = await far('/mail/1/open', 'POST')
+    ok(JSON.stringify(await far('/open-in')) === '{"status":200}' && fromFar.status >= 400 && /on your computer/.test(fromFar.error || '') && !opener.opened().length, `${which}: from a phone or another computer, no Mail to open in, and asked anyway, refused and nothing opens`, fromFar)
+    const r1 = await k.api('/mail/1/open', {}).catch((e) => ({ error: e.message }))
+    ok(r1.ok && r1.app === 'Mail' && JSON.stringify(opener.opened()) === JSON.stringify([`-a ${opener.apps.Mail} message://${encodeURIComponent(`<${mid}>`)}`]), `${which}: Open in Mail opens Mail itself at the message, by its Message-ID`, { r1, opened: opener.opened() })
+    const none = await refused('/mail/2/open')
+    ok(/no Message-ID for Mail to find it by/.test(none.error || '') && opener.opened().length === 1, `${which}: a message with no Message-ID: refused, saying why`, none)
+    opener.fail('LSOpenURLsWithRole() failed with error -10814 for the URL message://x.')
+    const failed = await refused('/mail/1/open')
+    ok(/^macOS said: LSOpenURLsWithRole\(\) failed with error -10814/.test(failed.error || ''), `${which}: open failing says what macOS said`, failed)
+    opener.fail(null)
+    fs.rmSync(opener.apps.Mail, { recursive: true })
+    const noMail = await refused('/mail/1/open')
+    ok(JSON.stringify(await k.api('/open-in')) === '{}' && /Mail isn't on this Mac/.test(noMail.error || '') && opener.opened().length === 1, `${which}: no Mail on the Mac: nothing to open in, and asked anyway, it says so`, noMail)
+    fs.mkdirSync(opener.apps.Mail)
+    spawnSync('sqlite3', [path.join(dir, 'Envelope Index'), 'UPDATE messages SET deleted = 1 WHERE ROWID = 1'])
+    const gone = await refused('/mail/1/open')
+    ok(/Mail doesn't have it any more/.test(gone.error || '') && opener.opened().length === 1, `${which}: one Mail has deleted since: refused, saying so`, gone)
   }
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)

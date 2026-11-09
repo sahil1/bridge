@@ -1759,6 +1759,8 @@ button.yg-day:hover { box-shadow: 0 0 0 1.5px var(--accent); }
 .cal-detail p { margin: 0; }
 .cal-detail-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .cal-detail-actions:empty { display: none; }
+/* AI Assist at the right end, on a line of its own too when the buttons wrap. */
+.cal-detail-actions .cal-ai-btn { margin-left: auto; }
 .cal-answer { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; align-self: flex-start; font-size: 12px; font-weight: 550; padding: 3px 10px; border-radius: 999px; color: var(--good); background: color-mix(in srgb, var(--good) 12%, transparent); }
 .cal-answer small { font-weight: 450; color: var(--ink-3); }
 .cal-answer.tentative { color: var(--warning); background: color-mix(in srgb, var(--warning) 13%, transparent); }

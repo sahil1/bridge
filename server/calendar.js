@@ -3,8 +3,9 @@
 // already synced there, so there's no sign-in and nothing leaves the Mac.
 // Meeting notes carry Teams passcodes and organizer links; only the join link and the
 // short agenda above the Teams boilerplate are kept. With bridgecal, each event also has its
-// calendar's colour, a lasting id, your answer to it, who organised it and the addresses of who's
-// invited. It only reads: nothing here adds, changes or answers an event.
+// calendar's colour, a lasting id, this Mac's own id for it (for Open in Calendar, openin.js) and
+// whether it repeats, your answer to it, who organised it and the addresses of who's invited. It
+// only reads: nothing here adds, changes or answers an event.
 import { execFile } from 'node:child_process'
 import { tool, calBin } from './fixes.js'
 import { notPerson } from './notpeople.js'
@@ -135,12 +136,16 @@ const HEX = /^#[0-9a-f]{6}$/i
 // Its people only: a room, a shared calendar, a list or a mailbox like schedule@ invited with them
 // isn't someone at it (told while its address is still whole). id: the title and start, as before
 // (callevent.js and meetings keep it); uid: the event's own lasting id with its start, when the
-// calendar has one, so a renamed event is still itself.
-function eventOf({ title, calendar, start, end, allDay, location, url, notes, attendees: all = [], emails = [], canceled = false, color, uid, response, organizer }) {
+// calendar has one, so a renamed event is still itself. local: this Mac's id for it in its calendar
+// store, and repeats: whether it's one of a series, which Open in Calendar finds it by (bridgecal's;
+// none from icalBuddy, so no Open in Calendar).
+function eventOf({ title, calendar, start, end, allDay, location, url, notes, attendees: all = [], emails = [], canceled = false, color, uid, local, repeats, response, organizer }) {
   const attendees = all.filter((a) => !notPerson(a))
   return {
     id: `${title}|${start.toISOString()}`,
     uid: uid ? `${uid}|${start.toISOString()}` : null,
+    local: typeof local === 'string' && local && local.length <= 255 ? local : null,
+    repeats: repeats === true,
     color: HEX.test(color || '') ? color.toLowerCase() : null,
     response: ANSWERS.has(response) ? response : null,
     organizer: organizer ? (organizer.includes('@') ? organizer.split('@')[0] : organizer) : null,

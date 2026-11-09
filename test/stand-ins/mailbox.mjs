@@ -9,7 +9,8 @@
 //   Meetings: a call (your mic's lines are yours), a room with voices told apart (voice 1 is you),
 //   and a room nobody told apart.
 // makeMailbox(kit) -> { V, INDEX, sqlite(q), emlx(folder, id, headers), who(n), rfc(unix, off), LOCAL, now }
-// (it seeds the meetings too)
+// (it seeds the meetings too). openStandIn(kit): macOS's open and the Mac's Mail and Calendar,
+// stood in for, for Open in Mail and Open in Calendar.
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -118,4 +119,23 @@ process.exit(cmd === 'events' ? 3 : 0)`)
   fs.writeFileSync(path.join(bin, 'bridgecal'), `#!/bin/sh\nexec "${process.execPath}" "${path.join(bin, 'bridgecal.cjs')}" "$@"\n`, { mode: 0o755 })
   fs.writeFileSync(path.join(bin, 'bridgecal.json'), JSON.stringify({ status: 'denied', events: [] }))
   return path.join(bin, 'bridgecal')
+}
+
+// A stand-in for macOS's open in a kit's bin folder, and Mail and Calendar in the kit's own
+// Applications folder (BRIDGE_APPLICATIONS), for Open in Mail and Open in Calendar
+// (server/openin.js): what it was asked to open, a line each in open.log; failing as macOS does,
+// its words on stderr, while fail(words) holds. The computer's own Mail and Calendar never open.
+export function openStandIn(kit, apps = ['Mail', 'Calendar']) {
+  const log = path.join(kit.home, 'open.log')
+  const fails = path.join(kit.home, 'open-fails.txt')
+  kit.program('open', `const fs = require('node:fs')
+if (fs.existsSync(${JSON.stringify(fails)})) { process.stderr.write(fs.readFileSync(${JSON.stringify(fails)}, 'utf8')); process.exit(1) }
+fs.appendFileSync(${JSON.stringify(log)}, process.argv.slice(2).join(' ') + '\\n')`)
+  const at = Object.fromEntries(apps.map((a) => [a, path.join(kit.dir, 'Applications', `${a}.app`)]))
+  for (const p of Object.values(at)) fs.mkdirSync(path.join(p, 'Contents'), { recursive: true })
+  return {
+    apps: at,
+    opened: () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').split('\n').filter(Boolean) : []),
+    fail: (said) => (said ? fs.writeFileSync(fails, said) : fs.rmSync(fails, { force: true })),
+  }
 }
