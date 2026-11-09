@@ -5,12 +5,12 @@ import { useEffect, useRef, useState } from 'react'
 import Icon from './Icon.jsx'
 import { usePersisted } from './layout.jsx'
 import { api, usePoll, viaRelay, BASE } from '../api.js'
-import { atThisComputer } from '../../shared/machinehost.js'
 
 const enc = encodeURIComponent
 // On this computer the app is at localhost; from a phone (over Tailscale) it's this computer's
 // address, which works only if the server listens on more than localhost.
-const remote = typeof location !== 'undefined' && !atThisComputer(location.hostname)
+const LOOPBACK = /^(localhost|127\.0\.0\.1|\[::1\])$/
+const remote = typeof location !== 'undefined' && !LOOPBACK.test(location.hostname)
 const urlOf = (port, p = '/') => `http://${remote ? location.hostname : 'localhost'}:${port}${p.startsWith('/') ? p : `/${p}`}`
 
 // A picture of the preview, for the agent. The desktop app takes it from its own window; a

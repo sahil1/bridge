@@ -145,8 +145,11 @@ const macro = makeMacro()
 const news = makeNews(cfg)
 
 const guard = makeGuard(cfg, { tailnetOwner: phone.tailnetOwner })
-// Another of your computers' pages, at addresses of their own here, and what they may ask of this one.
-const pages = machinePages.make({ thisName: () => relay.thisName(), nameOf: (id) => machines.list().find((m) => m.id === id)?.name || null })
+// Another of your computers' pages, each at a port of its own here, and what they may ask of this one.
+const pages = machinePages.make({
+  port: cfg.port, host: cfg.host, thisName: () => relay.thisName(), linked: () => machines.list().filter((m) => m.state === 'linked'),
+  nameOf: (id) => machines.list().find((m) => m.id === id)?.name || null, portOf: machines.portOf, keepPort: machines.keepPort,
+})
 const app = express()
 app.use(guard.http)
 app.use(pages.http)
@@ -2339,9 +2342,8 @@ notify.use(push.channel)
 notify.useRuntime(rt)
 // A finished agent whose last words name a video or a sound in its folder: its notification opens it.
 notify.useLastFile((a) => { try { return mediaNamed(preview(a)?.text || '', a.cwd) } catch { return null } })
-// This computer itself, not a phone (through the relay, or Tailscale's name for it). A window showing
-// another computer here is on it too, for what that page may ask of this one (machinepages.js).
-const fromHere = (req) => !req.headers['x-bridge-relay'] && (/^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i.test(req.headers.host || '') || !!req.machinePage)
+// This computer itself, not a phone (through the relay, or Tailscale's name for it).
+const fromHere = (req) => !req.headers['x-bridge-relay'] && /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i.test(req.headers.host || '')
 // Quotas: checked every 10 minutes while a notification channel is on.
 setInterval(() => { if (notify.active()) quota().then((q) => notify.onQuota(q, cfg), () => {}) }, 10 * 60 * 1000)
 
@@ -2390,7 +2392,9 @@ app.get('/api/relay', wrap((req) => ({ ...relay.status(), here: req.headers['x-b
 // looking at this device through that one); nothing else.
 const viaMachine = (req) => relay.isMachine(req.headers['x-bridge-relay'])
 const notByMachine = (req) => { if (viaMachine(req)) throw Object.assign(new Error('Another device can\'t do that'), { status: 403 }) }
-app.get('/api/machines', wrap(async () => ({ here: { ...machines.here(), about: { ...(await machines.about()), runtime: rt.name } }, machines: machines.list(), strays: machines.strays(), asks: relay.status().asks, canBeLinked: !!relay.relayUrl(), hostedAvailable: relay.status().hostedAvailable })))
+// port: where each one's pages are for the page asking (machinepages.js; null: at /m/<id>/ beside
+// it). machinePage: the page asking is one of theirs, at its port, which can't change these.
+app.get('/api/machines', wrap(async (req) => ({ here: { ...machines.here(), about: { ...(await machines.about()), runtime: rt.name } }, machines: machines.list().map((m) => ({ ...m, port: pages.portFor(req, m.id) })), machinePage: req.machinePage || null, strays: machines.strays(), asks: relay.status().asks, canBeLinked: !!relay.relayUrl(), hostedAvailable: relay.status().hostedAvailable })))
 // This device's name, as your devices and phones show it: set here, or from one of your other
 // devices (through its link). '' goes back to the computer's own name.
 relay.useName(() => cfg.deviceName)
@@ -3310,13 +3314,14 @@ const upgrades = [
   ...(rt.name === 'herdr' ? [['/api/tty', ttyHandler()]] : []),
   ...(rt.attach ? [['/api/panes/', attachHandler(rt)]] : []),
 ]
-server.on('upgrade', async (req, socket, head) => {
+const onUpgrade = async (req, socket, head) => {
   if (!(await guard.upgrade(req)) || !pages.upgrade(req)) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); return socket.destroy() }
   if (machines.isMachinePath(req.url)) return machines.upgrade(req, socket, head) // a terminal on another of your devices
   const hit = upgrades.find(([prefix]) => req.url.startsWith(prefix))
   if (!hit) return socket.destroy()
   hit[1](req, socket, head)
-})
+}
+server.on('upgrade', onUpgrade)
 server.listen(cfg.port, cfg.host, () => {
   console.log(`Bridge AI on http://${cfg.host}:${cfg.port} (runtime: ${rt.name}, data: ${DATA})`)
   if (!/^(127\.0\.0\.1|localhost|::1)$/.test(cfg.host)) console.log(`Listening on ${cfg.host}, not 127.0.0.1: anyone who can reach port ${cfg.port} can drive your agents. In Docker, publish it as 127.0.0.1:${cfg.port}:${cfg.port} only.`)
@@ -3328,6 +3333,7 @@ server.listen(cfg.port, cfg.host, () => {
   account.start()
   phone.status(cfg.port).then(tailnetSaid).catch(() => {})
   machines.start()
+  pages.start(app, onUpgrade) // each linked computer's port, for its pages
   transfers.resume() // copies that were going carry on
   counts.start()
   crashes.started().catch(() => {})

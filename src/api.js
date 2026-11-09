@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { locale, t } from './i18n/index.js'
-import { atThisComputer, machineOfHost, machineOrigin, hostOrigin } from '../shared/machinehost.js'
 
 // Opened on a phone through your own relay (relay/): the app runs inside the relay's page, which
 // carries its requests to your computer over an end-to-end encrypted link.
@@ -52,17 +51,13 @@ export const BASE = onMachine ? `/m/${onMachine[1]}` : ''
 // An address on the device shown: apiUrl('/files?x') is /api/files?x, or /m/<id>/api/files?x.
 export const apiUrl = (p) => `${BASE}/api${p}`
 // A page of one of your devices, by this computer's id for it (null: this computer), at rest ("/",
-// "/?window=…"): another device's at an address of its own while this page is on this computer (the
-// desktop app, or a browser here), so to the browser it's another site with nothing of this page's
-// (shared/machinehost.js); through a phone, Tailscale or another name for this computer, at /m/<id>/
-// here as before. apart: they're at addresses of their own, so what they need of this page is passed
-// to them (passed.js). Known from this page: this computer's own (its server is as new as it is), or
-// one already at such an address. Another device's page at /m/<id>/ on this computer's own address
-// was sent by a Bridge AI from before these, which has none.
-export const apart = import.meta.env.MODE !== 'demo' && !viaRelay && atThisComputer(location.hostname) && (!machineId || !!machineOfHost(location.host))
-export const machineUrl = (id, rest = '/') => (id
-  ? `${apart ? machineOrigin(id, location.port) : ''}/m/${id}${rest}`
-  : `${apart && machineOfHost(location.host) ? hostOrigin(location.port) : ''}${rest}`)
+// "/?window=…"). Asked for here, this computer's server sends another device's to a port of its own
+// while this page is on this computer (the desktop app, or a browser here), so to the browser it's
+// another site with nothing of this page's, and back again (server/machinepages.js); through a phone,
+// Tailscale or another name for this computer it's at /m/<id>/ here as before. apart: so what it
+// needs of this page is passed to it (passed.js).
+export const apart = import.meta.env.MODE !== 'demo' && !viaRelay
+export const machineUrl = (id, rest = '/') => `${id ? `/m/${id}` : ''}${rest}`
 // Bridge AI on the computer it runs on (the desktop app, or a browser there), not a phone, and
 // not another device shown through this one: Finder, file paths and the mic are this computer's.
 export const onThisComputer = () => !machineId && !viaRelay && (!!window.bridgeApp?.desktop || ['127.0.0.1', 'localhost'].includes(location.hostname))

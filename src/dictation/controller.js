@@ -19,7 +19,6 @@
 // with no such page around it can't use this computer's microphone at all, and says so (noMic).
 import { useSyncExternalStore } from 'react'
 import { api, apiUrl, settingsChanged, viaRelay, embedded, machineId } from '../api.js'
-import { LOOPBACK } from '../../shared/machinehost.js'
 import { store } from '../components/layout.jsx'
 import { startPcm, microphone, wav, RATE, micRefused, micBlocked } from '../audio/pcm.js'
 import { clean, makeNames } from '../../shared/dictation/clean.js'
@@ -79,7 +78,13 @@ export const isPaused = () => paused
 const boxes = new Map()
 let lastBox = null
 let onScreen = () => null // the agent on screen (App.jsx)
-export function registerBox(id, box) { boxes.set(id, box); return () => { if (boxes.get(id) === box) boxes.delete(id) } }
+export function registerBox(id, box) {
+  boxes.set(id, box)
+  // Another device's page in a tab: told this page is here, in case it said hello before its address
+  // was known here (Between a tab's page and this one, below).
+  if (box.frame) setTimeout(() => toTab(box, 'host', hostSays()))
+  return () => { if (boxes.get(id) === box) boxes.delete(id) }
+}
 export const noteBoxFocus = (id) => { lastBox = id }
 export const setOnScreen = (fn) => { onScreen = fn || (() => null) }
 export const box = (id) => boxes.get(id) || null
@@ -150,7 +155,7 @@ export function take(text) {
 }
 
 // ---------- Between a tab's page and this one ----------
-// Another device's agent in a tab here is that device's page, at an address of its own (api.js
+// Another device's agent in a tab here is that device's page, at a port of its own (api.js
 // machineUrl): another site, which can't reach into this page, nor this one into it. So the two only
 // talk in messages, each checked for the window and the address it came from, of these kinds, and
 // nothing else of either page goes to the other:
@@ -234,15 +239,15 @@ if (typeof window !== 'undefined' && !embedded) {
 // listen itself, whatever starts it here (the key, the mic button, Ask out loud): that window's page
 // does, as it does for the desktop app's key (in the desktop app only the app's own pages may use
 // the microphone), and the words come back here, to go where this page would have put them (give).
-// That window's page is the computer's showing this device, at one of its own addresses there;
-// they talk in messages (above). host: its dictation, once it says it listens for this page; lent:
+// That window's page is the computer's showing this device, at its own address there (127.0.0.1 or
+// localhost, at another port: only it may frame this page); they talk in messages (above). host: its dictation, once it says it listens for this page; lent:
 // the one listening for a press made here, which then has the key's let go, Esc, Enter and the state.
 let around = null // { origin, listens, app }: that window's page, once it says it's there
 let mirror = { phase: 'idle', mode: null } // how its listening for this page is going
 let pending = null // what this page's press was for: { ask, sentence, give }
 let pressed = 0
 let stated = 0
-const aroundAt = (o) => { try { const u = new URL(o); return u.origin === location.origin || (u.protocol === 'http:' && LOOPBACK.has(u.hostname) && u.port === location.port) } catch { return false } }
+const aroundAt = (o) => { try { const u = new URL(o); return u.origin === location.origin || (u.protocol === 'http:' && /^(127\.0\.0\.1|localhost|\[::1\])$/.test(u.hostname)) } catch { return false } }
 const toHost = (type, more = {}) => { try { window.parent.postMessage({ [MSG]: type, ...more }, around?.origin || '*') } catch { /* gone */ } }
 const relayed = {
   press: (at, from) => {
@@ -264,7 +269,8 @@ function fromHost(e) {
   const d = e.data
   if (e.source !== window.parent || !d || typeof d !== 'object' || !FROM_HOST.has(d[MSG]) || !aroundAt(e.origin)) return
   const type = d[MSG]
-  if (type === 'host') { around = { origin: e.origin, listens: d.listens === true, app: d.app === true }; return }
+  // The first time: hello again, in case the first was before that page knew where this one is.
+  if (type === 'host') { const first = !around; around = { origin: e.origin, listens: d.listens === true, app: d.app === true }; if (first) toHost('hello'); return }
   if (e.origin !== around?.origin) return
   if (type === 'state') { stated = pressed; mirror = { phase: PHASES.has(d.phase) ? d.phase : 'idle', mode: d.mode === 'free' || d.mode === 'hold' ? d.mode : null }; return }
   const text = typeof d.text === 'string' ? d.text.slice(0, 200_000) : ''
@@ -585,7 +591,7 @@ export async function forget(result) {
 // this device's, one showing another device (/m/<id>/), or another device's agent in a tab here.
 // Each window says which is on screen while it has the focus (Dictation.jsx). { machine: that
 // device's id on this one (null: this one), pane, name, at }. A window of the desktop app showing
-// another device is that device's page, at its own address, whose saved state the dictation window
+// another device is that device's page, at its own port, whose saved state the dictation window
 // can't read: it tells the app too, which says which device it is (desktop/dictation.js), and the
 // dictation window takes whichever was looked at last (latest).
 export const lookAt = (l) => {

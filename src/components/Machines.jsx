@@ -2,7 +2,6 @@ import { Fragment, useEffect, useRef, useState } from 'react'
 import Icon, { StatusDot } from './Icon.jsx'
 import { api, hostApi, machineId, machineUrl, apart, relayComputers, phoneApp } from '../api.js'
 import { passOn } from '../passed.js'
-import { machineOfHost } from '../../shared/machinehost.js'
 import { t, tx, locale } from '../i18n/index.js'
 
 // Your other devices (server/machines.js): Macs, Windows and Linux computers running Bridge AI,
@@ -361,11 +360,10 @@ export const onFor = (s) => (s >= 86400 ? (Math.floor(s / 86400) === 1 ? t('{n} 
     : t('{n} min', { n: Math.max(1, Math.round(s / 60)) }))
 // What's known about a device (its system, chip, memory, versions, relay, security code), and its
 // name to change. The name is changed on that device itself, so it's the same everywhere: in its
-// own Bridge AI, on your other devices and on your phones. here: this device.
-// A window showing another device at its own address (api.js machineUrl) only reads the links of the
-// computer it runs on: that page can't change them (server/machinepages.js), so it doesn't offer to.
-const readOnly = !!machineOfHost(typeof location !== 'undefined' ? location.host : '')
-function DeviceDetails({ m, here = false, onChanged }) {
+// own Bridge AI, on your other devices and on your phones. here: this device. readOnly: a window
+// showing another device at its port only reads the links of the computer it runs on (that page
+// can't change them: server/machinepages.js), so it doesn't offer to.
+function DeviceDetails({ m, here = false, readOnly = false, onChanged }) {
   const [name, setName] = useState(m.name)
   const [st, setSt] = useState(null) // 'saving' | 'saved' | { error }
   useEffect(() => { if (st !== 'saving') setName(m.name) }, [m.name]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -470,6 +468,8 @@ export function MachinesSettings({ embedded = false, focus = false }) {
     machinesChanged()
   }
   const strays = data.strays || []
+  // A window showing another device at its port: these are the links of the computer it runs on, to read.
+  const readOnly = !!data.machinePage
   return (
     <Wrap {...(embedded ? {} : { className: 'st-sections' })}>
       <section className="st-sec" id="st-machines" data-setting="machines" ref={setTop}>
@@ -483,7 +483,7 @@ export function MachinesSettings({ embedded = false, focus = false }) {
             <span className="mc-dot on" />
             <div className="mch-main"><b>{data.here.name}</b><small className="muted">{OS_LABEL[data.here.os]} · Bridge AI {data.here.version} · {t('this device')}</small></div>
             <span className="mch-btns"><button type="button" className="ghost-btn small" aria-expanded={shown === 'here'} onClick={() => setShown(shown === 'here' ? null : 'here')}>{t('Details')}</button></span>
-            {shown === 'here' && <DeviceDetails m={data.here} here onChanged={() => { refresh(); machinesChanged() }} />}
+            {shown === 'here' && <DeviceDetails m={data.here} here readOnly={readOnly} onChanged={() => { refresh(); machinesChanged() }} />}
           </div>
           {list.map((m) => (
             <div key={m.id} className="mch-row">
@@ -521,7 +521,7 @@ export function MachinesSettings({ embedded = false, focus = false }) {
                   <button type="button" className="ghost-btn small" disabled={!!busy} onClick={() => run('remove', () => hostApi(`/machines/${encodeURIComponent(m.id)}`, { method: 'DELETE' }))}>{m.state === 'linked' ? t('Unlink') : t('Remove')}</button>
                 </>}
               </span>
-              {shown === m.id && <DeviceDetails m={m} onChanged={() => { refresh(); machinesChanged() }} />}
+              {shown === m.id && <DeviceDetails m={m} readOnly={readOnly} onChanged={() => { refresh(); machinesChanged() }} />}
             </div>
           ))}
           {!readOnly && strays.map((d) => (

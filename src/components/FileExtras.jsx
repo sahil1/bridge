@@ -5,12 +5,12 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import Icon from './Icon.jsx'
 import { api, BASE } from '../api.js'
-import { atThisComputer } from '../../shared/machinehost.js'
 import { t } from '../i18n/index.js'
 
 const enc = encodeURIComponent
+const LOOPBACK = /^(localhost|127\.0\.0\.1|\[::1\])$/
 // Show in Finder and Open act on the computer running Bridge AI, so they're only offered there.
-export const onComputer = typeof location !== 'undefined' && atThisComputer(location.hostname)
+export const onComputer = typeof location !== 'undefined' && LOOPBACK.test(location.hostname)
 const platform = typeof navigator !== 'undefined' ? navigator.userAgent : ''
 export const REVEAL = /Mac/.test(platform) ? 'Reveal in Finder' : /Windows/.test(platform) ? 'Show in Explorer' : 'Show in file manager'
 export const OPENABLE = /\.(pdf|docx?|odt|rtf|pptx?|odp|key|xlsx|xlsm|xls|ods|numbers|pages|csv|tsv|txt|md|png|jpe?g|gif|webp|svg|heic|tiff?|bmp|mp4|mov|m4v|webm|mp3|m4a|wav|aac|flac|zip|epub)$/i

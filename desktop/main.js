@@ -109,9 +109,19 @@ function saveBounds() {
   try { fs.writeFileSync(STATE, JSON.stringify({ ...win.getNormalBounds(), maximized: win.isMaximized() })) } catch { /* ignore */ }
 }
 
-// The app's own pages, and another computer's at its own address (senders.js). isLocal: anything
-// this app's server serves, at either.
-const pages = senders.create(PORT)
+// The app's own pages, and another computer's at its own port (senders.js), which the server keeps
+// in machines.json (server/machinepages.js): read again whenever it changes. isLocal: anything this
+// app's server serves, at either.
+const MACHINES = path.join(DATA, 'machines.json')
+let ports = { at: 0, map: {} }
+const machinePorts = () => {
+  try {
+    const at = fs.statSync(MACHINES).mtimeMs
+    if (at !== ports.at) ports = { at, map: Object.fromEntries((JSON.parse(fs.readFileSync(MACHINES, 'utf8')).machines || []).filter((m) => m.state === 'linked' && Number.isInteger(m.port)).map((m) => [m.id, m.port])) }
+  } catch { /* none linked yet */ }
+  return ports.map
+}
+const pages = senders.create(PORT, { ports: machinePorts })
 const isLocal = pages.local
 // Every message from a page is checked first: only this computer's own page, but for what a window
 // showing another computer needs too, and the Allow access tile's own (senders.js MACHINE, SELF).
@@ -214,13 +224,13 @@ function saveDeviceBounds(key, w) {
   if (w.isDestroyed() || w.isMinimized()) return
   try { fs.writeFileSync(DEVICE_STATE, JSON.stringify({ ...deviceBounds(), [key]: { ...w.getNormalBounds(), maximized: w.isMaximized() } })) } catch { /* ignore */ }
 }
-// The app's own pages. Another device's pages (at their own address: senders.js) only get windows
+// The app's own pages. Another device's pages (at their own port: senders.js) only get windows
 // (fromAny), and a page an agent made (/api/...) gets nothing.
 const fromApp = (e) => pages.own(e)
 const fromAny = (e) => !!pages.from(e)
 ipc.handle('bridge:popout', (e, { paneId, title, machine } = {}) => {
   if (!fromAny(e) || typeof paneId !== 'string' || !paneId || paneId.length > 200) return false
-  // An agent on another of your devices (machines.js) opens through it too, at its own address. A
+  // An agent on another of your devices (machines.js) opens through it too, at its own port. A
   // window showing that device pops out only its own.
   const sent = pages.from(e)
   if (sent.kind === 'machine') machine = sent.machine
@@ -254,7 +264,8 @@ ipc.handle('bridge:focus-main', (e) => {
   return true
 })
 // One of your other devices (server/machines.js) in a window of its own, beside this one's, at its
-// own address. pass: what the page asking passes to it, after the # (src/passed.js).
+// own port (asked of this computer's address, which sends it there). pass: what the page asking
+// passes to it, after the # (src/passed.js).
 ipc.handle('bridge:open-machine', (e, { id = null, agent = null, pass = '' } = {}) => {
   if (!fromAny(e) || (id != null && !/^[A-Za-z0-9_-]{1,20}$/.test(String(id))) || (agent != null && (typeof agent !== 'string' || agent.length > 200))) return false
   const key = id || ''

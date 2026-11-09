@@ -2,19 +2,16 @@
 // 127.0.0.1, but a web page open in your browser can still reach 127.0.0.1: by opening a WebSocket
 // (browsers don't stop that cross-site), by loading a link or a picture from it, or by pointing its
 // own domain at 127.0.0.1 (DNS rebinding). So:
-//   - the Host must be this device, your Tailscale name, or the address another of your computers'
-//     pages have here (shared/machinehost.js; machinepages.js says what they may ask for);
+//   - the Host must be this device or your Tailscale name;
 //   - a browser's Origin must be the very page it's on: the same host and port as the request. Another
-//     app on localhost (a project's dev server in Preview, say), another *.ts.net site, or another
-//     computer's page asking this computer's address isn't;
+//     app on localhost (a project's dev server in Preview, say), another computer's page at its own
+//     port here (machinepages.js), or another *.ts.net site isn't;
 //   - a request a page on another site sent (Sec-Fetch-Site) can't reach /api, or another computer's
 //     API through this one (/m/<id>/api), links and pictures too, except the files of an HTML
 //     preview, which load from its sandbox and can't be read back;
 //   - through Tailscale (a *.ts.net name), only you: Tailscale says who's asking (Tailscale-User-Login,
 //     which it sets itself), and it has to be who this computer belongs to. Someone else on the
 //     tailnet, a shared or tagged device, or a visitor through Funnel isn't.
-
-import { machineOfHost } from '../shared/machinehost.js'
 
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]', '::1'])
 const DEFAULT_PORT = { 'http:': '80', 'https:': '443' }
@@ -27,7 +24,7 @@ export function makeGuard(cfg = {}, { tailnetOwner = async () => null } = {}) {
   const hostOk = (host) => {
     if (!host) return false
     const name = host.toLowerCase().replace(/:\d+$/, '')
-    return LOOPBACK.has(name) || name.endsWith('.ts.net') || extra.has(name) || !!machineOfHost(name)
+    return LOOPBACK.has(name) || name.endsWith('.ts.net') || extra.has(name)
   }
   // The Host as a browser writes an origin's host: lower case, without the scheme's own port.
   const asOrigin = (host, scheme) => {

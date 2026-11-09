@@ -1,23 +1,14 @@
 // Which page something comes from, for the app to decide what it may do (main.js, dictation.js):
 //   own      this computer's own page, at the app's address (not another computer's pages, nor a
 //            page an agent made at /api/...);
-//   machine  another of your computers' page, shown through this one at an address of its own
-//            (m-<id in hex>.localhost, as shared/machinehost.js, which this copies), at /m/<id>/;
+//   machine  another of your computers' page, shown through this one at its own port on this
+//            computer (server/machinepages.js, which keeps the ports in machines.json), at /m/<id>/;
 //   null     anything else (a data: page, a site, a project's app).
 // A message to the app counts only from the main frame of one of its windows: its preload is only
 // there, so one from a frame in it (another computer's agent in a tab, a project's app in Preview)
 // comes from a page that got past its own. Each channel takes this computer's own page, and the few
 // a window showing another computer needs take that too (guard).
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]'])
-const ID = /^[A-Za-z0-9_-]{1,20}$/
-const hex = (s) => [...s].map((c) => c.charCodeAt(0).toString(16).padStart(2, '0')).join('')
-const machineHost = (id) => (ID.test(String(id)) ? `m-${hex(String(id))}.localhost` : null)
-function machineOfHost(host) {
-  const m = /^m-((?:[0-9a-f]{2}){1,20})\.localhost$/i.exec(String(host || ''))
-  if (!m) return null
-  const id = m[1].toLowerCase().match(/../g).map((h) => String.fromCharCode(parseInt(h, 16))).join('')
-  return ID.test(id) ? id : null
-}
 
 // What a window showing another computer needs of the app: windows (an agent in one of its own, this
 // computer's main one, a device in one of its own), saying what an update would lose in it, and the
@@ -26,19 +17,22 @@ function machineOfHost(host) {
 const MACHINE = ['bridge:popout', 'bridge:focus-main', 'bridge:focus-popout', 'bridge:open-machine', 'bridge:busy-said', 'bridge:looking']
 const SELF = ['bridge:tile-drag', 'bridge:tile-close']
 
-function create(port) {
-  const parse = (u) => { try { const x = new URL(u); return Number(x.port) === port && x.protocol === 'http:' ? x : null } catch { return null } }
+// port: the app's page's. ports(): each linked computer's, by its id ({ id: port }).
+function create(port, { ports = () => ({}) } = {}) {
+  const parse = (u) => { try { const x = new URL(u); return x.protocol === 'http:' && LOOPBACK.has(x.hostname) ? x : null } catch { return null } }
+  const machineAt = (p) => Object.entries(ports()).find(([, q]) => q === p)?.[0] || null
   // What a page at u is: { kind: 'own' | 'machine', machine } or null.
   const of = (u) => {
     const x = parse(u)
     if (!x) return null
-    if (LOOPBACK.has(x.hostname)) return /^\/(m|api)\//.test(x.pathname) ? null : { kind: 'own', machine: null }
-    const id = machineOfHost(x.hostname)
+    const p = Number(x.port)
+    if (p === port) return /^\/(m|api)\//.test(x.pathname) ? null : { kind: 'own', machine: null }
+    const id = machineAt(p)
     return id && x.pathname.startsWith(`/m/${id}/`) ? { kind: 'machine', machine: id } : null
   }
-  // Anything this app's server serves, at either kind of address: where links and the app's own
+  // Anything this app's server serves, at its port or a computer's: where links and the app's own
   // navigation may go, and copying may come from.
-  const local = (u) => { const x = parse(u); return !!x && (LOOPBACK.has(x.hostname) || !!machineOfHost(x.hostname)) }
+  const local = (u) => { const x = parse(u); return !!x && (Number(x.port) === port || !!machineAt(Number(x.port))) }
   // The page an IPC message came from, if it's the main frame of its window.
   const from = (e) => { const f = e?.senderFrame; return f && !f.parent ? of(f.url) : null }
   const own = (e) => from(e)?.kind === 'own'
@@ -59,9 +53,9 @@ function create(port) {
   // computer, whose permissions are that computer's). Copying, for any page of the app's server.
   const ASK = new Set(['media', 'display-capture', 'notifications', 'geolocation', 'clipboard-read'])
   const permits = (perm, { url, mainFrame = true } = {}) => (perm === 'clipboard-sanitized-write' ? local(url) : ASK.has(perm) && mainFrame !== false && of(url)?.kind === 'own')
-  // Another computer's page, at its address here: rest is its path there ("/?window=…").
-  const machineUrl = (id, rest = '/') => `http://${machineHost(id)}:${port}/m/${id}${rest}`
+  // Another computer's page, for a window: asked of the app's address, which sends it to its port.
+  const machineUrl = (id, rest = '/') => `http://127.0.0.1:${port}/m/${id}${rest}`
   return { of, local, from, own, guard, permits, machineUrl }
 }
 
-module.exports = { create, machineHost, machineOfHost, MACHINE, SELF }
+module.exports = { create, MACHINE, SELF }

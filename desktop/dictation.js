@@ -14,7 +14,7 @@
 //                  listening and the next stops it (GNOME asks once; sway has no portal: none)
 // With one of Bridge AI's windows in front, the key goes to that page (as if pressed there);
 // otherwise to the dictation window, shown without taking the keyboard from the app you're in. A
-// window of Bridge AI's showing another of your devices (/m/<id>/, at its own address: senders.js)
+// window of Bridge AI's showing another of your devices (/m/<id>/, at its own port: senders.js)
 // is that device's page, which can't use this computer's microphone (main.js): the dictation window
 // listens for it, and hands the words to that page (bridge:hud-into), which puts them where they'd
 // have gone had it heard them itself (src/dictation/controller.js take). Such a page leaves the key

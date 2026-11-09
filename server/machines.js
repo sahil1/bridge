@@ -428,6 +428,13 @@ export function list() {
   })
 }
 export const here = () => ({ name: relay.thisName(), systemName: relay.systemName(), os: OS, version: VERSION, relay: relay.relayUrl(), safety: safety(relay.publicKey()) })
+// The port its pages have on this computer (machinepages.js), kept with it so what they save in the
+// browser stays theirs across restarts (the desktop app reads it here too: desktop/main.js).
+export const portOf = (id) => byId(id)?.port || null
+export function keepPort(id, port) {
+  const m = byId(id)
+  if (m && m.port !== port) { m.port = port; save() }
+}
 
 // A device's security code: a short fingerprint of its key, the same on each of your devices that
 // shows it, so you can check a device is the one it says.
