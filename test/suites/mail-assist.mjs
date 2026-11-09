@@ -298,7 +298,7 @@ try {
   // ---------- No write path, on every system ----------
   ok(!runs().some((x) => x.osascript), 'osascript never ran: Mail was never scripted', runs().filter((x) => x.osascript))
   // In the code: nothing scripts Mail, and an agent working on mail is told it's read only.
-  const code = ['mail.js', 'mailparse.js', 'mailassist.js', 'freetimes.js', 'index.js'].map((f) => [f, fs.readFileSync(path.join(ROOT, 'server', f), 'utf8').replace(/\r\n/g, '\n')])
+  const code = ['mail.js', 'mailparse.js', 'mailassist.js', 'freetimes.js', 'openin.js', 'index.js'].map((f) => [f, fs.readFileSync(path.join(ROOT, 'server', f), 'utf8').replace(/\r\n/g, '\n')])
   const scripts = code.filter(([, s]) => /tell application "Mail"|Application\(['"]Mail['"]\)|\b(?:set (?:read|flagged|junk mail|deleted) status|make new outgoing message|send outgoing|move \w+ to mailbox)\b/i.test(s)).map(([f]) => f)
   ok(!scripts.length, 'no server code scripts Mail (no tell application "Mail", no read, flag, junk, delete, move or send)', scripts)
   const index = code.find(([f]) => f === 'index.js')[1]

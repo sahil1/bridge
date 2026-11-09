@@ -183,7 +183,8 @@ export function InviteFiles({ agenda, files, compact }) {
 
 // The card itself. e: the event; invite: with its agenda and files (the calendar's panel shows them
 // itself); onOpenMeeting(id): a recorded meeting's notes; onOpenMail(id): a message in Today ›
-// Mail; onOpenEvent: all of it, in the calendar (compact only); onSettings: Settings › Model Providers
+// Mail; onOpenEvent: all of it, in Today › Calendar (compact only: View Calendar, as "Open in" is
+// for another app, as in Open in Word); onSettings: Settings › Model Providers
 // (null where there's no Settings to open, as in the floating card's own window); prep: usePrep's,
 // when what holds the card has it too (the calendar's AI Assist asks for suggestions through it).
 export function PrepCard({ e, size = 'full', invite = true, prep = null, onOpenMeeting, onOpenMail, onOpenEvent, onSettings = openSettings }) {
@@ -195,7 +196,7 @@ export function PrepCard({ e, size = 'full', invite = true, prep = null, onOpenM
   return (
     <section className={`prep ${compact ? 'compact' : ''}`} aria-label={t('AI Assist')}>
       <AssistHead className="prep-head" what={d?.making ? t('Thinking…') : t('Prepare for this meeting')}>
-        {compact && onOpenEvent && <button type="button" className="ghost-btn" onClick={onOpenEvent}>{t('Open in Calendar')} <Icon name="chevron" size={10} /></button>}
+        {compact && onOpenEvent && <button type="button" className="ghost-btn" onClick={onOpenEvent}>{t('View Calendar')} <Icon name="chevron" size={10} /></button>}
       </AssistHead>
       {!d && !p.error && <div className="skeleton-rows"><div /><div /></div>}
       {p.error && <p className="error-text small">{p.error} <button type="button" className="link-btn" onClick={p.load}>{t('Try again')}</button></p>}

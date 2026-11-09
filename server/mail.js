@@ -9,7 +9,7 @@
 //
 // Read only, always: nothing here sends, archives, flags, moves or deletes mail, or puts a draft in
 // Mail. Done and Remind me are kept by Bridge AI (~/.bridge-ai/mail/marks.json) and leave Mail as
-// it is; you answer from your own mail app.
+// it is; you answer from your own mail app, where Open in Mail (openin.js) shows the message.
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -402,9 +402,32 @@ export function makeMail(cfg = {}) {
     if (!value.partial) { bodies.set(n, { at: Date.now(), value }); if (bodies.size > 80) bodies.delete(bodies.keys().next().value) }
     return value
   }
+  // A message's row in Mail's index: its conversation, mailbox, whether it's deleted, and its
+  // Message-ID where the index keeps one (not on every macOS).
+  const rowOf = async (n) => {
+    const x = parts(await shapeOf(idx.file))
+    const [row] = await sql(idx.file, `SELECT m.ROWID AS id, m.deleted, ${x.col('m', 'conversation_id', 'conv')}, ${x.col('g', 'message_id_header', 'mid')}, mb.url AS mailbox
+      FROM messages m JOIN mailboxes mb ON mb.ROWID = m.mailbox ${x.g ? 'LEFT JOIN message_global_data g ON g.ROWID = m.global_message_id' : ''} WHERE m.ROWID = ${n}`)
+    return row
+  }
+  // The Message-ID Open in Mail finds a message by (openin.js), as Mail has it now: the index's,
+  // else the one in its file. Refused, saying why, when Mail doesn't have it any more or it has none.
+  get.messageId = async (id) => {
+    if (process.platform !== 'darwin') throw new Error(SETUP.notMac)
+    if (!idx?.file) idx = findIndex()
+    if (idx.error) throw new Error(SETUP[idx.error])
+    const n = Number(id)
+    if (!Number.isInteger(n)) throw new Error('Bad message id')
+    const row = await rowOf(n)
+    if (!row || row.deleted) throw new Error("Mail doesn't have it any more: it was deleted or moved since")
+    let mid = row.mid
+    if (!mid) { const file = emlxPath(idx.root, row.mailbox, n); try { mid = file && readEmlx(file).messageId } catch { /* unreadable: none */ } }
+    if (!mid) throw new Error('It has no Message-ID for Mail to find it by')
+    return String(mid).replace(/^<|>$/g, '')
+  }
   async function readMessage(n) {
     const x = parts(await shapeOf(idx.file))
-    const [row] = await sql(idx.file, `SELECT m.ROWID AS id, ${x.col('m', 'conversation_id', 'conv')}, mb.url AS mailbox FROM messages m JOIN mailboxes mb ON mb.ROWID = m.mailbox WHERE m.ROWID = ${n}`)
+    const row = await rowOf(n)
     if (!row) throw new Error('Message not found')
     const file = emlxPath(idx.root, row.mailbox, n)
     let body = null
@@ -425,6 +448,8 @@ export function makeMail(cfg = {}) {
       replyTo: body?.replyTo || null,
       date: body?.date || null,
       subject: body?.subject || null,
+      // What Open in Mail finds it by: none, and there's no Open in Mail.
+      mid: row.mid ? String(row.mid).replace(/^<|>$/g, '') : body?.messageId || null,
       latest: split.latest ? split.latest.slice(0, 20000) : null,
       quoted: split.quoted ? split.quoted.slice(0, 20000) : null,
       attachments: body?.attachments || [],

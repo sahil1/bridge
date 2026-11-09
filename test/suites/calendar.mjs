@@ -13,7 +13,10 @@
 // one takes it off the grid and off the Schedule, kept on the server, and a click brings it back;
 // week start and working hours; tasks on their day; your answer to each invite shown, never changed;
 // the event panel's parts (the invite's files and agenda, the recorded meeting's notes and action
-// items, the prep, AI Assist at the right end of its buttons); the prep with no model (all the rest,
+// items, the prep, AI Assist at the right end of its buttons); Open in Calendar (this Mac's id for an
+// event and whether it repeats, Calendar's link to it opened in Calendar itself, both stood in for,
+// saying so or what macOS said; none for an event with no id here, from a phone or another computer,
+// or off a Mac); the prep with no model (all the rest,
 // and how to add one), then with the stand-in
 // model: what it's sent and what's shown, kept, Again, by itself shortly before, and on the floating
 // card. The calendar helper is only ever asked to read. Screenshots at 1440 and on a 390 phone,
@@ -24,6 +27,7 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import { startKit, startModel, checks, until, sleep, browser, page, shot, phoneFaults, noServiceWorker, changeAnswer, IS_WIN, IS_MAC, TEST } from '../lib/harness.mjs'
+import { openStandIn } from '../stand-ins/mailbox.mjs'
 
 const { ok, skip, done } = checks('calendar')
 if (IS_WIN) {
@@ -52,7 +56,7 @@ const COLORS = { Work: '#1badf8', Personal: '#63da38', 'Team Rota': '', Family: 
 const ev = (title, calendar, start, end, more = {}) => ({ title, calendar, start: start.toISOString(), end: end.toISOString(), allDay: false, location: '', canceled: false, color: COLORS[calendar], uid: `uid-${title.toLowerCase().replace(/\W+/g, '-')}`, response: 'accepted', url: '', notes: '', attendees: [], emails: [], ...more })
 const team = ['Tester', 'Maya Okafor', 'Leo Brandt']
 const week = (off) => [
-  ...[0, 1, 2, 3, 4].map((d) => ev('Daily standup', 'Work', at(off + d, 9, 30), at(off + d, 9, 45), { uid: 'uid-standup', attendees: team, emails: ['maya.okafor@example.org', 'leo.brandt@example.org'] })),
+  ...[0, 1, 2, 3, 4].map((d) => ev('Daily standup', 'Work', at(off + d, 9, 30), at(off + d, 9, 45), { uid: 'uid-standup', local: 'EK-STANDUP', repeats: true, attendees: team, emails: ['maya.okafor@example.org', 'leo.brandt@example.org'] })),
   ev('Northwind renewal review', 'Work', at(off, 10), at(off, 11), { attendees: [...team, 'Ravi Menon'] }),
   ev('Design crit', 'Work', at(off, 10, 30), at(off, 11, 30), { response: 'tentative', attendees: ['Tester', 'Ines Varga'] }),
   { ...ev('Offsite prep', 'Team Rota', at(off + 1, 0), at(off + 3, 0)), allDay: true, response: '' },
@@ -63,14 +67,14 @@ const week = (off) => [
   ev('Dinner with the Okafors', 'Family', at(off + 6, 18), at(off + 6, 19, 30), { response: '' }),
 ]
 const SOON = ev('Northwind pricing sync', 'Work', mins(8), mins(38), {
-  uid: 'uid-np-sync', organizer: 'Maya Okafor',
+  uid: 'uid-np-sync', local: 'EK-SOON', organizer: 'Maya Okafor',
   attendees: ['Tester', 'Maya Okafor', 'Leo Brandt', 'Ravi Menon'],
   emails: ['tester@example.com', 'maya.okafor@example.org', 'leo.brandt@example.org', 'ravi.menon@example.org'],
   notes: 'Agree the renewal price and the seat count for Q1.\n\nhttps://northwind.sharepoint.com/:p:/s/sales/renewal-deck.pptx\n________________\nMicrosoft Teams meeting\nJoin: https://teams.microsoft.com/l/meetup-join/19%3ameeting_abc',
 })
 // Its invite says a lot in one line: longer than the agenda the calendar keeps.
 const LONG_AGENDA = 'Walk through onboarding v2 before it goes to engineering, then agree which of the three empty-state designs ships first, who writes the copy for the welcome screens, and whether the import step can wait for the second release without hurting activation in the pilot accounts.'
-const LATER = ev('Design review with Ines', 'Work', mins(180), mins(225), { response: 'none', attendees: ['Tester', 'Ines Varga'], notes: `${LONG_AGENDA}\nhttps://docs.google.com/document/d/onboarding-v2/edit` })
+const LATER = ev('Design review with Ines', 'Work', mins(180), mins(225), { local: 'EK-LATER', response: 'none', attendees: ['Tester', 'Ines Varga'], notes: `${LONG_AGENDA}\nhttps://docs.google.com/document/d/onboarding-v2/edit` })
 const RECORDED = ev('Quarterly planning', 'Work', mins(-180), mins(-120), { attendees: ['Tester', 'Maya Okafor', 'Ines Varga'] })
 const FOCUS = ev('Focus time', 'Personal', mins(300), mins(360), { response: '' })
 const DECLINED = ev('Budget office hours', 'Work', mins(60), mins(90), { response: 'declined', attendees: ['Tester', 'Pat Lin'] })
@@ -115,6 +119,8 @@ process.exit(cmd === 'events' ? 3 : 0)`)
 const shifted = CLOCK ? { NODE_OPTIONS: `--import=${pathToFileURL(path.join(TEST, 'stand-ins', 'clock.mjs')).href}`, BRIDGE_TEST_CLOCK_OFFSET: String(OFFSET) } : {}
 const kit = await startKit('calendar', { env: ({ bin }) => ({ BRIDGE_CALASK: helper(bin), BRIDGE_PREP_EVERY_MS: '1000', OLLAMA_HOST: 'http://127.0.0.1:9', LM_STUDIO_BASE_URL: 'http://127.0.0.1:9/v1', ...shifted }) })
 const model = await startModel('calendar')
+// Calendar on this Mac and macOS's open, for Open in Calendar: stood in for.
+const opener = openStandIn(kit, ['Calendar'])
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
 const api = kit.api
@@ -189,6 +195,24 @@ try {
   ok(by('Daily standup').color === '#1badf8' && by('Lunch with Sam').color === '#63da38' && by('Offsite prep').color === null && by('Football practice').color === '#ff9500', "each event carries its calendar's own colour, and none for a calendar that has none", wk.events.map((e) => [e.title, e.calendar, e.color]).slice(0, 12))
   ok(by('Design crit').response === 'tentative' && by('Vendor pitch: Contoso').response === 'declined' && by('Week wrap').response === 'none' && by('Lunch with Sam').response === 'organizer' && by('Northwind renewal review').response === 'accepted' && by('Offsite prep').response === null, 'your answer to each invite, as Calendar has it', wk.events.map((e) => [e.title, e.response]).slice(0, 12))
   ok(by('Daily standup').uid === `uid-standup|${by('Daily standup').start}` && by('Vendor pitch: Contoso').organizer === 'Pat Lin', 'a lasting id (a repeat\'s, with its start) and who organised it', [by('Daily standup').uid, by('Vendor pitch: Contoso').organizer])
+  // Open in Calendar (server/openin.js): Calendar's link to the event, by this Mac's id for it and,
+  // for one of a series, when that day's starts, opened in Calendar itself.
+  const su = by('Daily standup')
+  ok(su.local === 'EK-STANDUP' && su.repeats === true && by('Northwind renewal review').local === null && by('Northwind renewal review').repeats === false, "this Mac's own id for an event and whether it repeats (none when the helper gives none)", [su.local, su.repeats, by('Northwind renewal review').local])
+  if (IS_MAC) {
+    ok(JSON.stringify(await api('/open-in')) === '{"calendar":{"name":"Calendar"}}', 'Calendar is on this Mac', await api('/open-in'))
+    const r = await api('/calendar/open', { local: su.local, start: su.start, allDay: false, repeats: true })
+    const stamp = new Date(su.start).toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z')
+    ok(r.ok && r.app === 'Calendar' && opener.opened().at(-1) === `-a ${opener.apps.Calendar} ical://ekevent/${stamp}/EK-STANDUP?method=show&options=more`, "one of a series: Calendar's link with when that day's starts (in UTC), opened in Calendar itself", opener.opened())
+    await api('/calendar/open', { local: 'EK-SOON', start: SOON.start })
+    ok(opener.opened().at(-1) === `-a ${opener.apps.Calendar} ical://ekevent/EK-SOON?method=show&options=more`, 'one on its own: by its id alone', opener.opened())
+    const n = opener.opened().length
+    const noId = await err('/calendar/open', { start: SOON.start })
+    const far = (p, body) => fetch(`${kit.url}/api${p}`, { method: body ? 'POST' : 'GET', headers: { 'content-type': 'application/json', 'x-bridge-relay': 'far' }, body: body ? JSON.stringify(body) : undefined }).then((x) => x.json())
+    const farOpen = await far('/calendar/open', { local: 'EK-SOON', start: SOON.start })
+    const farApps = await far('/open-in')
+    ok(/no id for this event/.test(noId?.message || '') && /on your computer/.test(farOpen.error || '') && JSON.stringify(farApps) === '{}' && opener.opened().length === n, 'refused, saying why and opening nothing: an event with no id here, and from a phone or another computer (which has nothing to open in)', { noId: noId?.message, farOpen, farApps })
+  } else ok(JSON.stringify(await api('/open-in')) === '{}' && /Mac's own app/.test((await err('/calendar/open', { local: 'EK-SOON', start: SOON.start }))?.message || '') && !opener.opened().length, 'not a Mac: no Calendar to open in, and asked anyway, it says so')
   // The recorded one's day (this week's, or Sunday's just before it, run just after midnight).
   const recDay = await api(`/calendar/range?from=${ymd(RECORDED.start)}&to=${ymd(RECORDED.start)}`)
   const rec = by('Quarterly planning', recDay.events)
@@ -258,6 +282,20 @@ try {
     ok(/From the Invite/i.test(panel) && /Walk through onboarding v2/.test(panel) && /Google Doc/.test(panel) && /Not answered yet/.test(panel) && /Change it in your calendar app/.test(panel), "the panel: the invite's agenda and its file, and your answer (not answered yet), to change in your calendar app", panel)
     ok(!(await p.locator('.cal-detail').locator('button', { hasText: /^(Accept|Decline|Maybe|Delete|Edit|Move|Reply)/ }).count()), 'nothing in it answers, edits or moves the event')
     await shot(p, `${tag}calendar-no-model`)
+    // Open in Calendar, beside Prep with agent (AI Assist still last): the event itself in Calendar
+    // on this Mac, saying so, or what macOS said; none for an event with no id here, or off a Mac.
+    const inCal = p.locator('.cal-detail-actions .cal-open-in')
+    if (IS_MAC) {
+      ok((await inCal.innerText().catch(() => '')).trim() === 'Open in Calendar' && /to answer or change it there/.test(await inCal.getAttribute('title')) && await wand.evaluate((e) => !e.nextElementSibling).catch(() => false), "the event's panel has Open in Calendar, to answer or change it there, with AI Assist still at the right end", await p.locator('.cal-detail-actions').innerText().catch(() => ''))
+      await inCal.click()
+      ok(!!(await until(() => opener.opened().at(-1) === `-a ${opener.apps.Calendar} ical://ekevent/EK-LATER?method=show&options=more`, 5000)) && !!(await until(async () => /^Opening it in Calendar\./.test(await p.locator('.cal-opened').innerText().catch(() => '')), 3000)), 'Open in Calendar opens that very event in Calendar, and says so', opener.opened().at(-1))
+      opener.fail('LSOpenURLsWithRole() failed with error -10814 for the URL ical://x.')
+      await inCal.click()
+      ok(!!(await until(async () => /Couldn't open it in Calendar: macOS said: LSOpenURLsWithRole\(\) failed with error -10814/.test(await p.locator('.cal-opened[role="alert"]').innerText().catch(() => '')), 3000)), "Calendar didn't open it: it says what macOS said", await p.locator('.cal-opened').innerText().catch(() => ''))
+      opener.fail(null)
+      await openEvent(p, FOCUS)
+      ok(!!(await until(async () => /Focus time/.test(await p.locator('.cal-detail h4').innerText().catch(() => '')), 8000)) && !(await inCal.count()), 'an event with no id here: no Open in Calendar')
+    } else ok(!(await inCal.count()), 'not a Mac: no Open in Calendar')
     ok(real(errors).length === 0, 'no page errors', errors)
     await p.context().close()
   }
@@ -473,8 +511,11 @@ try {
     const listed = await p.locator('.hm-ev-main > b').allInnerTexts()
     ok(listed.length > 1 && new Set(listed).size === listed.length, 'Coming Up lists each meeting once', listed)
     await shot(p, `${tag}calendar-home`)
-    await row.locator('button', { hasText: 'Open in Calendar' }).click()
-    ok(!!(await until(async () => /Northwind pricing sync/.test(await p.locator('.cal-detail h4').innerText().catch(() => '')), 10000)), 'Open in Calendar opens the meeting there, with its panel')
+    // View Calendar, as it's Bridge AI's own: "Open in" is for another app (Open in Calendar, Open in Word).
+    const opens = opener.opened().length
+    ok(!(await row.locator('button', { hasText: /^\s*Open in /i }).count()), "Coming Up's way to the calendar isn't called Open in, as it doesn't leave Bridge AI", await row.locator('button').allInnerTexts())
+    await row.locator('button', { hasText: 'View Calendar' }).click()
+    ok(!!(await until(async () => /Northwind pricing sync/.test(await p.locator('.cal-detail h4').innerText().catch(() => '')), 10000)) && opener.opened().length === opens, "View Calendar opens the meeting in Today › Calendar, with its panel (not the Mac's Calendar)")
     ok(real(errors).length === 0, 'Home: no page errors', errors)
     await p.context().close()
     await api('/settings', { trials: { home: false } }, 'PATCH')

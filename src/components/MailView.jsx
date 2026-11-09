@@ -6,13 +6,15 @@ import PermissionFix, { useRecheck } from './PermissionFix.jsx'
 import { ReplyAssist } from './mail/ReplyAssist.jsx'
 import AiAssist from './AiAssist.jsx'
 import { takeMailDo } from './today.js'
+import { useOpenIn } from './openin.js'
 import { locale, t, tx } from '../i18n/index.js'
 import './mail/mail.css'
 
 // Mail triage over the Mac Mail app's local index: what needs you, automated items that want
 // action, threads waiting on someone else, what you set aside, and an agent that can act on any
-// message. Read only: Done and Remind me are kept by Bridge AI and leave Mail as it is, and Reply
-// Assist drafts text for you to send from your own mail app. Every action has a key (? lists them,
+// message. Read only: Done and Remind me are kept by Bridge AI and leave Mail as it is, Reply
+// Assist drafts text for you to send from your own mail app, and Open in Mail shows the message in
+// Mail on this Mac, to answer it there. Every action has a key (? lists them,
 // ⌘K teaches them), the next few messages are read ahead of you, and new mail shows as soon as
 // Mail's index changes.
 const isPhone = () => /iPhone|iPad|Android/i.test(navigator.userAgent)
@@ -53,7 +55,6 @@ function MailNotSetUp({ text, onCheck }) {
 }
 
 export const outlookUrl = () => (isPhone() ? 'ms-outlook://' : 'https://outlook.office.com/mail/')
-const mailLink = (mid) => (mid && !isPhone() ? `message://%3c${encodeURIComponent(mid)}%3e` : null)
 
 // New mail the moment Mail's index changes (server: /api/mail/live), while anything shows mail on
 // a computer that reads it: one stream for all of them, which has every view of /mail look again.
@@ -269,8 +270,9 @@ function KeysSheet({ onClose }) {
   )
 }
 
-function Reader({ id, summary, onBack, onOpenAgent, onRule, rules, onOpen, onDone, onLater, onUndone, assist, setAssist, remind, setRemind, wideAssist }) {
+function Reader({ id, summary, onBack, onOpenAgent, onRule, rules, onOpen, onDone, onLater, onUndone, assist, setAssist, remind, setRemind, wideAssist, onNote }) {
   const { data, error } = useMessage(id)
+  const apps = useOpenIn()
   const [quoted, setQuoted] = useState(false)
   const [ask, setAsk] = useState('')
   const [busy, setBusy] = useState(null)
@@ -293,7 +295,12 @@ function Reader({ id, summary, onBack, onOpenAgent, onRule, rules, onOpen, onDon
   const from = m.mine ? t('You') : m.from || (data?.from || '').replace(/\s*<[^>]+>/, '').replace(/"/g, '')
   const isVip = rules?.vip?.includes(addr)
   const isMuted = rules?.mute?.includes(addr)
-  const link = mailLink(m.mid)
+  // Open in Mail: the message itself, in Mail on this Mac, to answer it there. Where Mail is, for a
+  // message with a Message-ID for Mail to find it by; what came of it said either way.
+  const inMail = !!apps.mail && !!(data?.mid || m.mid)
+  const openInMail = async () => {
+    try { await api(`/mail/${id}/open`, { method: 'POST' }); onNote(t('Opening it in Mail.')) } catch (e) { onNote(t("Couldn't open it in Mail: {error}", { error: e.message }), { error: true }) }
+  }
   const nudge = !!m.mine
   const panel = assist && <ReplyAssist id={id} data={data} nudge={nudge} times={assist === 'times'} onClose={() => setAssist(false)} beside={wideAssist} />
   // AI Assist, at the right end of the email's buttons: a reply (or, for one you sent, a nudge) and
@@ -378,7 +385,7 @@ function Reader({ id, summary, onBack, onOpenAgent, onRule, rules, onOpen, onDon
         </div>
 
         <footer className="mreader-foot">
-          {link && <a className="ghost-btn" href={link}><Icon name="mail" size={12} /> {t('Open in Mail')}</a>}
+          {inMail && <button type="button" className="ghost-btn mreader-open" onClick={openInMail} title={t('Open it in Mail on this Mac, to answer it there. Bridge AI never sends.')}><Icon name="external" size={12} /> {t('Open in Mail')}</button>}
           <a className="ghost-btn" href={outlookUrl()} target="_blank" rel="noreferrer"><Icon name="external" size={12} /> Outlook</a>
           <span className="grow" />
           {addr && !m.mine && <button className={`ghost-btn ${isVip ? 'strong' : ''}`} onClick={() => onRule(addr, isVip ? 'none' : 'vip')} title={t('Always rank this sender as important')}>
@@ -643,7 +650,7 @@ export default function MailView({ onOpenAgent, openId }) {
       )}
       {showReader && (
         <Reader id={sel} summary={summary} onBack={narrow ? () => setSel(null) : null} onOpenAgent={onOpenAgent} onRule={setRule} rules={data?.rules} onOpen={setSel}
-          onDone={doDone} onUndone={doDone} onLater={doLater} assist={sel ? assist : false} setAssist={setAssist} remind={remind} setRemind={setRemind} wideAssist={wideAssist} />
+          onDone={doDone} onUndone={doDone} onLater={doLater} assist={sel ? assist : false} setAssist={setAssist} remind={remind} setRemind={setRemind} wideAssist={wideAssist} onNote={flash} />
       )}
       {note && (
         <div className={`mnote ${note.error ? 'bad' : ''}`} role="status">

@@ -10,10 +10,11 @@
 //                      the events from the start of <from> to the end of <to> (YYYY-MM-DD, this
 //                      Mac's time zone) as JSON, leaving out the calendars named after them. light:
 //                      without notes, link and attendees (the year view). Each has its calendar's
-//                      own colour (as Calendar shows it), a lasting id, and your answer to it
-//                      (accepted, tentative, declined, none yet; organizer when it's yours). Read
-//                      only: nothing here adds, changes or answers an event. Without full access it
-//                      prints the status word instead and exits 3.
+//                      own colour (as Calendar shows it), a lasting id, this Mac's own id for it
+//                      and whether it repeats (what Calendar's link to it takes: Open in Calendar),
+//                      and your answer to it (accepted, tentative, declined, none yet; organizer
+//                      when it's yours). Read only: nothing here adds, changes or answers an
+//                      event. Without full access it prints the status word instead and exits 3.
 // The reading used to be icalBuddy's; on current macOS it sees no calendars even with full access.
 //   swiftc -O -target arm64-apple-macos14.0 native/bridgecal.swift -o native/bin/bridgecal
 import EventKit
@@ -96,6 +97,10 @@ if args.first == "events" {
         "color": hex(e.calendar?.cgColor) ?? "",
         // The same in every span asked for: a repeat's occurrences share it, so with its start.
         "uid": e.calendarItemExternalIdentifier ?? e.eventIdentifier ?? "",
+        // Calendar's own link to it (ical://ekevent) goes by this, and for one of a series (or
+        // one moved out of it) by when that day's starts too.
+        "local": e.calendarItemIdentifier,
+        "repeats": e.hasRecurrenceRules || e.isDetached,
         "response": answer(e) ?? "",
       ]
       if !light {

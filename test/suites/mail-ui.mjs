@@ -2,7 +2,10 @@
 // stand-in model. The keys: J and K through the list with the next messages read ahead (the next
 // one opens with nothing more asked of the server), E for Done and Z to undo it, H for Remind me
 // (Tomorrow morning, then in Later saying when it's back), ? for every key, and ⌘K's mail actions
-// with their keys beside them. New mail shows as Mail's index changes. AI Assist at the right end
+// with their keys beside them. New mail shows as Mail's index changes. Open in Mail opens that very
+// message in Mail on this Mac (the kit's own Mail and macOS's open, stood in for), one you sent too,
+// says so, and says what macOS said when it doesn't open; in another computer's window (or a phone,
+// through the relay) there's none. AI Assist at the right end
 // of the email's buttons, Draft a reply (or R): with no model it says so and where to add one; with
 // one, it offers to learn How You Write first, then drafts in your voice, says which model and what
 // went to it (word for word on request), Shorter changes it, Copy copies it and Open in your mail
@@ -14,8 +17,8 @@
 // Inbox card in Today, on a computer or a phone, no Settings › Mail and nothing for mail in ⌘K.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, startModel, checks, until, browser, page, shot, phoneFaults, IS_MAC } from '../lib/harness.mjs'
-import { makeMailbox, calendarStandIn } from '../stand-ins/mailbox.mjs'
+import { startKit, startModel, checks, until, browser, page, shot, phoneFaults, noServiceWorker, IS_MAC } from '../lib/harness.mjs'
+import { makeMailbox, calendarStandIn, openStandIn } from '../stand-ins/mailbox.mjs'
 
 const { ok, done } = checks('mail-ui')
 const { b, which } = await browser()
@@ -77,6 +80,7 @@ const model = await startModel('mail-ui')
 const LOG = path.join(kit.bin, 'osascript.log')
 kit.program('osascript', `require('node:fs').appendFileSync(${JSON.stringify(LOG)}, process.argv.slice(2).join(' ') + '\\n')`)
 const box = makeMailbox(kit)
+const opener = openStandIn(kit)
 const pages = []
 try {
   await kit.api('/setup', { name: 'Sam Tester' })
@@ -177,8 +181,53 @@ try {
 INSERT INTO messages VALUES (150, 0, 0, 0, ${t2}, ${t2 - 1}, 1, 1, 95, 150, NULL, 15, 0); INSERT INTO recipients (message, address, type) VALUES (150, 2, 0);`)
   box.emlx('Inbox', 150, { from: box.who(1), to: box.who(2), subject: 'Fresh one from Dana', date: box.rfc(t2, box.LOCAL), body: 'Just landed.' })
   ok(!!(await until(async () => (await subjects(p)).includes('Fresh one from Dana'), 15000)), 'new mail shows as Mail\'s index changes, without a refresh', await subjects(p))
+
+  // ---------- Open in Mail ----------
+  // The message itself in Mail on this Mac, to answer it there: one sent to you, one you sent, and
+  // what macOS said when it doesn't open.
+  const inMail = p.locator('.mreader-foot button', { hasText: 'Open in Mail' })
+  const link = (n) => `-a ${opener.apps.Mail} message://${encodeURIComponent(`<m${n}@example.com>`)}`
+  const said = () => p.locator('.mnote').innerText().catch(() => '')
+  await row(p, 'launch plan').click()
+  await inMail.waitFor({ timeout: 8000 })
+  ok(/to answer it there/.test(await inMail.getAttribute('title')), 'an email has Open in Mail, to answer it there', await inMail.getAttribute('title'))
+  await inMail.click()
+  ok(!!(await until(() => opener.opened().includes(link(1)), 5000)) && !!(await until(async () => /^Opening it in Mail\./.test(await said()), 3000)), 'Open in Mail opens that very message in Mail, and says so', { opened: opener.opened(), toast: await said() })
+  await shot(p, `${tag}mail-open-in-1440`)
+  await p.locator('.mlist-tabs button', { hasText: 'Waiting' }).click()
+  await row(p, 'Contract for the pilot').click()
+  await inMail.waitFor({ timeout: 8000 })
+  await inMail.click()
+  ok(!!(await until(() => opener.opened().includes(link(130)), 5000)), 'and one you sent, from Waiting', opener.opened())
+  opener.fail('LSOpenURLsWithRole() failed with error -600 for the URL message://x.')
+  await inMail.click()
+  ok(!!(await until(async () => /Couldn't open it in Mail: macOS said: LSOpenURLsWithRole\(\) failed with error -600/.test(await said()) && (await p.locator('.mnote.bad').count()) === 1, 3000)), "Mail didn't open it: it says what macOS said", await said())
+  opener.fail(null)
+  ok(!(await p.locator('.mreader a[href^="message:"]').count()), 'no message: link left for the browser to open, unchecked')
   ok(!real(errors).length, 'no page errors', errors)
   await pages.pop().ctx.close()
+
+  // Another computer's window (this Mac's Mail seen through it, its requests through that computer
+  // as the relay's are, which a phone's are too): the message, with no Open in Mail, as Mail would
+  // open out of sight on this Mac.
+  {
+    const opens = opener.opened().length
+    const there = await page(b, `${kit.url}/m/far/`, {
+      // A request still on its way when the window closes is let go.
+      before: async (ctx) => { await noServiceWorker(ctx); await ctx.route(/\/m\/far\//, async (r) => {
+        if (r.request().headers().accept === 'text/event-stream') return r.abort()
+        const u = new URL(r.request().url())
+        try { return await r.fulfill({ response: await r.fetch({ url: `${kit.url}${u.pathname.slice('/m/far'.length)}${u.search}`, headers: { ...r.request().headers(), 'x-bridge-relay': 'far' } }) }) } catch { /* closed */ }
+      }) },
+    })
+    pages.push(there)
+    await openMail(there.p)
+    await row(there.p, 'launch plan').click()
+    await there.p.waitForSelector('.mreader .mreader-body', { timeout: 8000 })
+    ok(!(await there.p.locator('.mreader-foot button', { hasText: 'Open in Mail' }).count()) && opener.opened().length === opens, "another computer's window: the email, with no Open in Mail", await there.p.locator('.mreader-foot').innerText().catch(() => ''))
+    await there.ctx.unrouteAll({ behavior: 'ignoreErrors' })
+    await pages.pop().ctx.close()
+  }
 
   // ---------- AI Assist's Draft a reply, with the model for meeting notes ----------
   await kit.api('/providers/openai', { values: { OPENAI_API_KEY: 'sk-test', OPENAI_BASE_URL: `${model.url}/v1` } }, 'PUT')

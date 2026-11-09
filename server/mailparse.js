@@ -125,6 +125,7 @@ export function readEmlx(file) {
     replyTo: decodeWords(headers['reply-to']),
     date: headers.date,
     subject: decodeWords(headers.subject),
+    messageId: /<?([^<>\s]+@[^<>\s]+)>?/.exec(headers['message-id'] || '')?.[1] || null,
     text,
     attachments: acc.attachments.filter((a) => !/^image\d{3}\.(png|jpe?g|gif)$/i.test(a)),
     inlineImages: acc.inline,
