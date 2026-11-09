@@ -3,7 +3,7 @@
 // from (your notes, the screen, the files, the invite); folders and the archive;
 // search and questions; saved Markdown; looks at the screen while the call talks (read by a
 // stand-in for native/bridgeocr, which isn't run on Windows); action items turned into agents and
-// Chief of Staff's tasks, and since last time. The calendar is macOS Calendar, and
+// Chief of Staff's tasks, and since last time; whether the floating card shows in screenshots. The calendar is macOS Calendar, and
 // the call's sound is recorded on a Mac (a stand-in for native/calltap there), so their parts are
 // Mac-only.
 import fs from 'node:fs'
@@ -87,6 +87,13 @@ try {
     ok(!!(await until(async () => (await kit.api('/calls')).recording?.talking === null, 10000)), 'and not once they stop')
     await kit.api(`/meetings/${C.id}/stop`, {})
   }
+
+  // The floating card is kept out of screenshots and screen sharing unless that's turned off in
+  // Settings › Meetings (the desktop app reads it from /api/calls).
+  ok((await kit.api('/calls')).floatPrivate === true, 'the floating card: kept out of screenshots, to begin with')
+  await kit.api('/settings', { meetings: { floatPrivate: false } }, 'PATCH')
+  ok((await kit.api('/calls')).floatPrivate === false, 'and in them once that\'s turned off')
+  await kit.api('/settings', { meetings: { floatPrivate: true } }, 'PATCH')
 
   // ---------- Notes about sound, not words ----------
   // An engine's "[END]" or "(keyboard clicking)" for a stretch without words: no line, and not

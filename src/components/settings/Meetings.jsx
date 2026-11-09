@@ -339,6 +339,12 @@ export default function Meetings({ onOpenAgent }) {
                 <span><b>Open it when I point at it</b> <span className="muted small">Otherwise it stays a slim bar until you click it.</span></span>
               </label>
             )}
+            {card && (
+              <label className="st-check">
+                <input type="checkbox" checked={m.floatPrivate !== false} onChange={(e) => set({ floatPrivate: e.target.checked })} />
+                <span><b>{t('Keep it out of screenshots and screen sharing')}</b> <span className="muted small">{t("So a call you share your screen on doesn't see it. Turn this off to take a screenshot of it.")}</span></span>
+              </label>
+            )}
           </section>
         </Advanced>
       )}
