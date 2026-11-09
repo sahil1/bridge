@@ -41,14 +41,15 @@ let last = { on: false }
 let running = null
 let timer = null
 
-// One GET, its body as bytes. A relay at <name>.localhost (Bridge AI's relay tried on this computer,
-// HOSTED.md) is reached on this computer, as server/relay.js does, whatever the system's resolver says.
+// One GET, its body as bytes, uncompressed (so what's hashed is the file itself). A relay at
+// <name>.localhost (Bridge AI's relay tried on this computer, HOSTED.md) is reached on this
+// computer, as server/relay.js does, whatever the system's resolver says.
 const loopback = (host, opts, cb) => (opts?.all ? cb(null, [{ address: '127.0.0.1', family: 4 }]) : cb(null, '127.0.0.1', 4))
 function get(url) {
   return new Promise((resolve, reject) => {
     const u = new URL(url)
     const local = /\.localhost$/i.test(u.hostname)
-    const req = (u.protocol === 'https:' ? https : http).get(u, { headers: { 'User-Agent': 'bridge-ai', 'Cache-Control': 'no-cache' }, timeout: 10000, ...(local ? { lookup: loopback } : {}) }, (res) => {
+    const req = (u.protocol === 'https:' ? https : http).get(u, { headers: { 'User-Agent': 'bridge-ai', 'Cache-Control': 'no-cache', 'Accept-Encoding': 'identity' }, timeout: 10000, ...(local ? { lookup: loopback } : {}) }, (res) => {
       const parts = []
       res.on('data', (c) => parts.push(c))
       res.on('end', () => (res.statusCode === 200 ? resolve(Buffer.concat(parts)) : reject(Object.assign(new Error(`${u.host} answered ${res.statusCode}`), { status: res.statusCode }))))
