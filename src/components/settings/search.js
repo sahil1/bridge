@@ -63,7 +63,7 @@ export const SETTINGS = [
     ['meeting-assist', tx('AI Assist in meetings'), 'ai assist suggest what to ask how often instructions summary'],
     ['who-spoke', tx('Who Spoke'), 'speakers voices room learn my voice remember voices names from the call screen recording', { near: 'meeting-assist' }],
     ['mention-meeting', tx('Mention a Meeting'), 'mention meeting key @ message'],
-    ['float-card', tx('The floating card'), 'floating card menu bar pause stop hover screenshot screen sharing hidden', { when: 'desktop' }],
+    ['float-card', tx('The floating card'), 'floating card menu bar pause stop hover screenshot screen sharing recording hidden', { when: 'desktop' }],
     ['save-notes', tx('Save notes as Markdown'), 'folder subfolders file name pattern front matter yaml speakers obsidian granola'],
   ]),
   ...at('mail', [

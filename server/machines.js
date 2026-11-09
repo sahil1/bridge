@@ -847,15 +847,30 @@ const offlinePage = (name, why) => `<!doctype html><meta charset="utf-8"><meta n
 <div><h2>${name} isn't reachable</h2><p>${why}</p><p class="muted">Trying again every few seconds.</p><p><a href="/">Back to this device</a></p></div>`
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
 
+// The app's own built files (dist/assets) have a hash of what's in them in their name, so one this
+// computer has is the very file that device would send. Given from here, a window switched to it
+// waits on the link only for its page and what it asks of it, not for 70 files more (each a trip
+// through its relay, six at a time): the first switch, and the first after an update, as quick
+// as the rest.
+const ASSET = /^\/assets\/([\w.-]+-[\w-]{8}\.(?:js|mjs|css|woff2|wasm|svg|png|webp))$/
+const mine = (ui, u) => {
+  const f = ui && ASSET.exec(u)
+  if (!f) return Promise.resolve(null)
+  return fs.promises.stat(path.join(ui, 'assets', f[1])).then((s) => (s.isFile() ? f[1] : null), () => null)
+}
+
 // frames(req): what may show its pages in a frame, on this computer (machinepages.js): this
 // computer's page (its tabs), never another site. Through a phone, its relay page frames them.
-export async function proxy(req, res, { frames = null } = {}) {
+// ui: the folder of this computer's own page (dist), whose files stand in for that device's.
+export async function proxy(req, res, { frames = null, ui = null } = {}) {
   const hit = MPATH.exec(req.originalUrl || req.url)
   const m = hit && byId(hit[1])
   const page = req.method === 'GET' && /text\/html/.test(req.headers.accept || '')
   if (!m || m.state !== 'linked') return page ? res.status(404).type('html').send(offlinePage('That device', 'It isn\'t linked to this one.')) : res.status(404).json({ error: 'No such device' })
   // Not on behalf of another device: one hop only.
   if (relay.isMachine(req.headers['x-bridge-relay'])) return res.status(403).json({ error: 'Not through another device' })
+  const own = (req.method === 'GET' || req.method === 'HEAD') && await mine(ui, hit[2] || '/')
+  if (own) return res.sendFile(own, { root: path.join(ui, 'assets'), headers: { 'Cache-Control': 'public, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff' } })
   const l = linkOf(m)
   const away = (why) => (page ? res.status(503).type('html').send(offlinePage(esc(m.name), esc(why))) : res.status(503).json({ error: why, offline: true }))
   try { await l.ready(page ? 20000 : 12000) } catch (e) { return away(e.message) }

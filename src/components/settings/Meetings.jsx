@@ -154,6 +154,8 @@ export default function Meetings({ onOpenAgent }) {
   const d = sp.data
   const set = (patch) => save({ meetings: patch }).then(() => sp.refresh())
   const mac = window.bridgeApp?.platform === 'darwin'
+  const win = window.bridgeApp?.platform === 'win32'
+  const hide = ['sharing', 'always', 'never'].includes(m.floatHide) ? m.floatHide : 'sharing'
   const card = !['off', 'menubar'].includes(m.floatCard) || (m.floatCard === 'menubar' && !mac)
   const model = d.local.models.find((x) => x.id === d.local.model)
   const pickFolder = window.bridgeApp?.pickFolder
@@ -325,7 +327,7 @@ export default function Meetings({ onOpenAgent }) {
             <Line label={t('The floating card')} hint={card
               ? t('Over your other windows: the recording, with Pause and Stop, and Take notes when a call starts.')
               : m.floatCard === 'menubar' && mac ? t('The time in the menu bar while a meeting records. It stays out of a window you share.') : t('Nothing over your other windows.')}
-              title={card && mac ? t('Sharing your screen? Most sharing apps show it, so move it to the menu bar from the card first.') : undefined}>
+>
               <select className="st-input" value={m.floatCard === 'menubar' && !mac ? 'meetings' : m.floatCard || 'meetings'} onChange={(e) => set({ floatCard: e.target.value })} aria-label="The floating card">
                 <option value="meetings">During calls and meetings</option>
                 <option value="always">Always, with what needs you</option>
@@ -339,9 +341,23 @@ export default function Meetings({ onOpenAgent }) {
                 <span><b>Open it when I point at it</b> <span className="muted small">Otherwise it stays a slim bar until you click it.</span></span>
               </label>
             )}
-            {card && (
+            {/* Kept out of pictures of the screen (desktop/main.js): on a Mac, only while something
+                shares or records it, so a call doesn't see it and your screenshots do; elsewhere the
+                app can't tell, so it's on or off. Linux can't keep a window out of them at all. */}
+            {card && mac && (
+              <Line label={t('Hide it from screen sharing')} hint={hide === 'sharing'
+                ? t('While you share or record your screen, a call or a recording never sees it. Your screenshots do.')
+                : hide === 'always' ? t('Never in a share, a recording or a screenshot.') : t('Anyone you share your screen with sees it.')}>
+                <select className="st-input" value={hide} onChange={(e) => set({ floatHide: e.target.value })} aria-label={t('Hide it from screen sharing')}>
+                  <option value="sharing">{t('While I share my screen')}</option>
+                  <option value="always">{t('Always, screenshots too')}</option>
+                  <option value="never">{t('Never')}</option>
+                </select>
+              </Line>
+            )}
+            {card && win && (
               <label className="st-check">
-                <input type="checkbox" checked={m.floatPrivate !== false} onChange={(e) => set({ floatPrivate: e.target.checked })} />
+                <input type="checkbox" checked={hide !== 'never'} onChange={(e) => set({ floatHide: e.target.checked ? 'always' : 'never' })} />
                 <span><b>{t('Keep it out of screenshots and screen sharing')}</b> <span className="muted small">{t("So a call you share your screen on doesn't see it. Turn this off to take a screenshot of it.")}</span></span>
               </label>
             )}

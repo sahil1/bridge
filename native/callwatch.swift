@@ -23,6 +23,15 @@
 //                                      screen (the call's), for the names it shows as people talk.
 //                                      Never asks: {"ok":true} or {"error":"not-allowed"|"no-window"}
 //
+//   callwatch sharing                  whether something is sharing or recording the screen now (a
+//                                      call you share it on, a recording app), as the window server
+//                                      says, asking nothing: a line at the start and on each change,
+//     {"sharing":true}                 until stdout closes or the process that started it goes.
+//     {"sharing":null}                 once, then it exits, when this macOS doesn't say.
+//                                      A screenshot (⌘⇧3, 4 or 5) isn't sharing: what starts while
+//                                      macOS's screenshot tool is open doesn't count. Ended once it
+//                                      has stopped for a second and a half (a blip isn't the end).
+//
 //   swiftc -O -target arm64-apple-macos14.0 native/callwatch.swift -o native/bin/callwatch
 import AppKit
 import ApplicationServices
@@ -141,6 +150,32 @@ if args.first == "windows" {
   let (by, windows) = windowTitles(Array(args.dropFirst()))
   print("{\"by\":\(by.map(quote) ?? "null"),\"windows\":[" + windows.map { "{\"bundle\":\(quote($0.bundle)),\"title\":\(quote($0.title))}" }.joined(separator: ",") + "]}")
   exit(0)
+}
+if args.first == "sharing" {
+  // CGSIsScreenWatcherPresent: the window server's own word on whether anything is capturing the
+  // screen, which macOS has no public call for (what Focus's "when sharing the screen" goes by).
+  typealias Present = @convention(c) () -> Bool
+  guard let sym = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "CGSIsScreenWatcherPresent") else {
+    print("{\"sharing\":null}")
+    exit(0)
+  }
+  let present = unsafeBitCast(sym, to: Present.self)
+  let parent = getppid()
+  var sharing = false
+  var said: Bool? = nil
+  var quiet = 0
+  while true {
+    let watched = present()
+    let shooting = !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.screencaptureui").isEmpty
+    if watched && !shooting { sharing = true; quiet = 0 } else if !watched { quiet += 1; if quiet >= 6 { sharing = false } }
+    if sharing != said {
+      said = sharing
+      print("{\"sharing\":\(sharing)}")
+      fflush(stdout)
+    }
+    if getppid() != parent { exit(0) }
+    RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.25))
+  }
 }
 let parent = getppid()
 var last = ""

@@ -1,7 +1,7 @@
 {
   "name": "bridge-ai-desktop",
   "productName": "Bridge AI",
-  "version": "3.13.0",
+  "version": "3.13.1",
   "description": "Bridge AI as a desktop app for macOS, Windows and Linux",
   "license": "Apache-2.0",
   "author": "Bold Bridge",
@@ -32,6 +32,7 @@
       "contextmenu.js",
       "permissions.js",
       "floatfit.js",
+      "floatshare.js",
       "senders.js",
       "package.json",
       "!node_modules/uiohook-napi/{libuiohook,src,binding.gyp}{,/**}"

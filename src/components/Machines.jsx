@@ -73,7 +73,7 @@ const demoUrl = (id, agent) => {
 // something that's on that device (Home, Everything, a phone's inbox), what in a few words: the page
 // there says this window switched, with the way back to this one (SwitchedHere). Another device's
 // page is at an address of its own (api.js machineUrl), so what it needs of this one goes with it
-// (passed.js).
+// (passed.js). True when this window goes there.
 const BACK = 'cc-switched'
 export function goMachine(id, { agent, own = false, back = null } = {}) {
   const demo = import.meta.env.MODE === 'demo'
@@ -81,8 +81,9 @@ export function goMachine(id, { agent, own = false, back = null } = {}) {
   const prefs = !!id && apart
   const recording = document.documentElement.dataset.recording === '1'
   if (own || recording) {
-    if (window.bridgeApp?.openMachine) return window.bridgeApp.openMachine(id, agent || null, passOn({ prefs }).slice(1))
-    return window.open(demo ? demoUrl(id, agent) : `${machineUrl(id, rest)}${passOn({ prefs })}`, '_blank')
+    if (window.bridgeApp?.openMachine) window.bridgeApp.openMachine(id, agent || null, passOn({ prefs }).slice(1))
+    else window.open(demo ? demoUrl(id, agent) : `${machineUrl(id, rest)}${passOn({ prefs })}`, '_blank')
+    return false
   }
   let was = null
   if (back) {
@@ -92,6 +93,7 @@ export function goMachine(id, { agent, own = false, back = null } = {}) {
     if (demo) { try { sessionStorage.setItem(BACK, JSON.stringify(was)) } catch { /* no storage */ } }
   }
   location.assign(demo ? demoUrl(id, agent) : `${machineUrl(id, rest)}${passOn({ prefs, back: was })}`)
+  return true
 }
 
 // This window switched to the device it shows to open something there: a line under the top bar
@@ -148,7 +150,18 @@ const bare = (u) => String(u || '').replace(/\/+$/, '')
 export function MachineMenu({ phone = false, elsewhere = null }) {
   const { data } = useMachines()
   const [open, setOpen] = useState(false)
+  // The device this window is switching to, said on the chip from the moment it's picked: its page
+  // comes through its relay, and until it's here this one stays as it was.
+  const [going, setGoing] = useState(null)
   const ref = useRef(null)
+  useEffect(() => {
+    if (!going) return
+    // Back from the browser's cache (Back), or the switch went nowhere: the chip as it was.
+    const show = (e) => { if (e.persisted) setGoing(null) }
+    const t = setTimeout(() => setGoing(null), 20000)
+    window.addEventListener('pageshow', show)
+    return () => { clearTimeout(t); window.removeEventListener('pageshow', show) }
+  }, [going])
   useEffect(() => {
     if (!open) return
     const down = (e) => { if (!ref.current?.contains(e.target)) setOpen(false) }
@@ -165,8 +178,13 @@ export function MachineMenu({ phone = false, elsewhere = null }) {
   // The computers this phone is paired with, besides the one it's connected to.
   const paired = app ? (relayComputers.list?.() || []).filter((c) => !c.current && bare(c.relay) !== bare(data.here.relay)) : []
   const pairedTo = (m) => paired.find((c) => bare(c.relay) === bare(m.relay))
-  const pick = (id, own) => { setOpen(false); if (own || id !== machineId) goMachine(id, { own }) }
-  const go = (m) => { const c = pairedTo(m); if (c && m.id !== machineId) { setOpen(false); relayComputers.open(c.relay) } else pick(m.id) }
+  const nameOf = (id) => (id ? linked.find((m) => m.id === id)?.name : data.here.name) || ''
+  const pick = (id, own) => {
+    setOpen(false)
+    if (!own && id === machineId) return
+    if (goMachine(id, { own })) setGoing(nameOf(id))
+  }
+  const go = (m) => { const c = pairedTo(m); if (c && m.id !== machineId) { setOpen(false); setGoing(m.name); relayComputers.open(c.relay) } else pick(m.id) }
   const row = (key, name, sub, on, here, onClick, id) => (
     <div key={key} className={`mc-row ${here ? 'on' : ''}`}>
       <button type="button" role="menuitem" className="mc-item" onClick={onClick}>
@@ -180,10 +198,10 @@ export function MachineMenu({ phone = false, elsewhere = null }) {
   const close = (fn) => () => { setOpen(false); fn() }
   return (
     <div className="mc-wrap" ref={ref}>
-      <button type="button" className={`mc-chip ${machineId ? 'remote' : ''}`} onClick={() => setOpen(!open)} aria-haspopup="menu" aria-expanded={open} title={t('Your devices')}>
-        <Icon name="laptop" size={phone ? 16 : 13} />
-        <span className="mc-name" title={cur ? cur.name : data.here.name}>{cur ? cur.name : data.here.name}</span>
-        {needs > 0 && <span className="mc-needs" title={needs === 1 ? t('{n} on your other devices needs you', { n: needs }) : t('{n} on your other devices need you', { n: needs })}>{needs}</span>}
+      <button type="button" className={`mc-chip ${machineId ? 'remote' : ''} ${going ? 'going' : ''}`} onClick={() => setOpen(!open)} aria-haspopup="menu" aria-expanded={open} title={going ? t('Switching to {name}…', { name: going }) : t('Your devices')}>
+        <Icon name={going ? 'refresh' : 'laptop'} size={phone ? 16 : 13} className={going ? 'spin' : undefined} />
+        <span className="mc-name" title={cur ? cur.name : data.here.name} aria-live="polite">{going || (cur ? cur.name : data.here.name)}</span>
+        {needs > 0 && !going && <span className="mc-needs" title={needs === 1 ? t('{n} on your other devices needs you', { n: needs }) : t('{n} on your other devices need you', { n: needs })}>{needs}</span>}
         <Icon name="down" size={11} />
       </button>
       {open && (
