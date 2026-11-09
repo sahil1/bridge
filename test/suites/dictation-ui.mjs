@@ -30,7 +30,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { startKit, checks, until, sleep, browser, page, shot, noServiceWorker, TEST, IS_WIN } from '../lib/harness.mjs'
+import { startKit, checks, until, sleep, browser, page, shot, noServiceWorker, TEST, IS_WIN, advanced } from '../lib/harness.mjs'
 
 const { ok, skip, done } = checks('dictation-ui')
 const kit = await startKit('dictation-ui', { env: { CLAUDE_STAND_IN: 'fresh' } })
@@ -551,7 +551,9 @@ try {
   await kit.api('/settings', { dictation: { background: true, to: null, edit: null, editModel: null } }, 'PATCH')
   {
     const d = await editApp({ ...HELD, platform: 'darwin', background: true, paste: { can: true, via: 'bridgekeys', asks: 'accessibility', allowed: false }, edit: { can: true, via: 'bridgekeys', asks: 'accessibility', on: false } })
-    const s = await voice(d.p)
+    // Edit by voice is under Voice's Advanced.
+    await voice(d.p)
+    const s = await advanced(d.p)
     const box = s.locator('.dict-edit input')
     ok(await box.count() === 1 && !(await box.isChecked()) && await s.locator('.dict-edit-model').count() === 0, 'a Mac: Edit by voice offered, off until it\'s turned on', await s.innerText())
     await box.click()
@@ -565,7 +567,8 @@ try {
     await shot(d.p, `${tag}settings-edit-by-voice`)
     await d.ctx.close()
     const w = await editApp({ mode: 'hold', via: 'uiohook', key: 'Control+Alt+Space', active: true, platform: 'win32', background: true, paste: { can: true, via: 'keytap', asks: null, allowed: true }, edit: { can: false, why: 'UI Automation' } })
-    const ws = await voice(w.p)
+    await voice(w.p)
+    const ws = await advanced(w.p)
     ok(await ws.locator('.dict-edit').count() === 0, 'Windows (not yet): not offered')
     await w.ctx.close()
   }

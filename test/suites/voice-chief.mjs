@@ -14,7 +14,7 @@
 //   in the chat.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, checks, until, sleep, browser, page, shot, noServiceWorker, TEST } from '../lib/harness.mjs'
+import { startKit, checks, until, sleep, browser, page, shot, noServiceWorker, TEST, advanced } from '../lib/harness.mjs'
 
 const { ok, done } = checks('voice-chief')
 const kit = await startKit('voice-chief', { env: ({ bin }) => ({ CLAUDE_STAND_IN: 'fresh', BRIDGE_ESPEAK: path.join(bin, 'espeak-ng.cjs') }) })
@@ -125,7 +125,8 @@ try {
   {
     const { ctx, p } = await open(LOCAL)
     await p.waitForSelector('.rail-nav-btn', { timeout: 20000 })
-    await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'voice' } })))
+    // Under Voice's Advanced: a link to it opens it there.
+    await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'spoken-answers' } })))
     const sec = p.locator('.st-voice-out')
     await sec.waitFor({ timeout: 10000 })
     const names = await sec.locator('select').first().locator('option').allInnerTexts()
@@ -157,7 +158,7 @@ try {
     await p.locator('textarea[data-composer]').first().waitFor({ timeout: 15000 })
     await sleep(800)
     ok(await p.locator('.ask-bar').count() === 0, 'with no voice anywhere: Ask out loud isn\'t offered')
-    await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'voice' } })))
+    await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'spoken-answers' } })))
     const sec = p.locator('.st-voice-out')
     await sec.waitFor({ timeout: 10000 })
     ok(/stay in the chat/.test(await sec.innerText()), 'and Settings says answers stay in the chat', await sec.innerText())

@@ -26,7 +26,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
-import { startKit, startModel, checks, until, sleep, browser, page, shot, phoneFaults, withoutCutOff, noServiceWorker, TEST, ROOT } from '../lib/harness.mjs'
+import { startKit, startModel, checks, until, sleep, browser, page, shot, phoneFaults, withoutCutOff, noServiceWorker, TEST, ROOT, advanced } from '../lib/harness.mjs'
 
 const require = createRequire(path.join(ROOT, 'package.json'))
 const { ok, done } = checks('studio')
@@ -199,6 +199,7 @@ try {
   // The switch is off and disabled until the settings have come (a slow computer shows that first).
   await until(async () => !(await trial.isDisabled()), 10000)
   ok(await trial.isChecked(), 'Settings › About & Updates › Beta Features: Studio, on')
+  await advanced(p)
   const sizes = await p.locator('.st-sections .st-sec .btn').evaluateAll((bs) => [...new Set(bs.map((x) => Math.round(x.getBoundingClientRect().height)))])
   ok(sizes.length === 1, `every button on About & Updates is one size (${sizes.join(', ')} px)`, sizes)
   await shot(p, `${tag}studio-trial`)
