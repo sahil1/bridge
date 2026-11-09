@@ -50,8 +50,10 @@ export default {
 const health = () => new Response(JSON.stringify({ ok: true, build: RELAY_BUILD }), { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
 
 // The page and its files. Anything else is Bridge AI itself, which the page's service worker
-// fetches from your computer; reaching here means the page isn't open yet.
-function page(req, url) {
+// fetches from your computer; reaching here means the page isn't open yet. On the hosted relay
+// (domain), the page connects only to the relay's own addresses: its computer's, and the others'
+// on it, whose relays the Android app asks whether they're on (relay/web/shell.js, otherState).
+function page(req, url, domain = null) {
   const p = url.pathname
   const name = p === '/' ? 'index.html' : p.slice(1)
   const f = FILES[name]
@@ -67,7 +69,11 @@ function page(req, url) {
     ETag: `"${RELAY_BUILD}"`,
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer',
-    ...(name === 'index.html' ? { 'Content-Security-Policy': "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; connect-src 'self' wss: ws:; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'" } : {}),
+    ...(name === 'index.html' ? {
+      'Content-Security-Policy': `default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; connect-src 'self' ${domain ? `${url.protocol === 'http:' ? 'ws' : 'wss'}://*.${domain}${url.port ? `:${url.port}` : ''}` : 'wss: ws:'}; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'`,
+      // No other site's window keeps a hold on this one (window.opener), whoever opened it.
+      'Cross-Origin-Opener-Policy': 'same-origin',
+    } : {}),
   }
   // (Cloudflare marks the tag weak, W/, when it compresses the file on the way.)
   const has = (req.headers.get('If-None-Match') || '').split(',').some((t) => t.trim().replace(/^W\//, '') === headers.ETag)
@@ -283,7 +289,7 @@ async function hosted(req, env) {
   }
   if (p === '/_relay/forget') return req.method === 'POST' ? hub(env, id).fetch(req) : new Response('Use POST', { status: 405 })
   if (p === '/_relay/health') return health()
-  return page(req, url)
+  return page(req, url, domain)
 }
 
 // POST /_relay/register: Authorization: Bearer <relay token>, { version } in, { id, url, token } out.

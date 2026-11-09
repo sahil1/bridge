@@ -246,6 +246,8 @@ try {
     ok(woken === 0 && [...statuses].join() === '404', '200 made-up addresses, with the checksum anyone could work out before or one keyed with another secret: each a plain 404, and not one Hub woken', { woken, statuses: [...statuses] })
     const real = await r.call(`https://${c.id}.${DOMAIN}/`)
     ok(real.status === 200, 'while the relay\'s own address still answers', real.status)
+    const csp = real.headers.get('content-security-policy') || ''
+    ok(/connect-src 'self' wss:\/\/\*\.relay\.test;/.test(csp) && !/ wss: | ws:/.test(csp) && real.headers.get('cross-origin-opener-policy') === 'same-origin', 'its page connects only to the relay\'s own addresses (connect-src), and keeps other sites\' windows off it (Cross-Origin-Opener-Policy)', { csp, coop: real.headers.get('cross-origin-opener-policy') })
     r.env.HOSTED_OFF = '1'
     const unknown = idFrom(tenChars())
     const off = await r.call(`https://${unknown}.${DOMAIN}/_relay/link`, { headers: { Upgrade: 'websocket' } })
@@ -518,6 +520,8 @@ try {
     const s = await worker.default.fetch(new Request('https://own.example.workers.dev/_relay/stats', { headers: { Authorization: 'Bearer s' } }), env)
     const reg = await worker.default.fetch(new Request('https://own.example.workers.dev/_relay/register', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }), env)
     ok(s.status === 404 && reg.status === 404, 'and has no stats or registering to ask for', [s.status, reg.status])
+    const own = await worker.default.fetch(new Request('https://own.example.workers.dev/'), env)
+    ok(/connect-src 'self' wss: ws:;/.test(own.headers.get('content-security-policy') || '') && own.headers.get('cross-origin-opener-policy') === 'same-origin', 'its page may still reach your other computers\' relays, wherever they are, and keeps other sites\' windows off it too', own.headers.get('content-security-policy'))
   }
 
   // ---------- Cost watching: /_relay/stats ----------
