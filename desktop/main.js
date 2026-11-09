@@ -8,16 +8,7 @@ const { app, BrowserWindow, Menu, Tray, shell, globalShortcut, Notification, ses
 const dictation = require('./dictation.js')
 const contextMenu = require('./contextmenu.js')
 const permissions = require('./permissions.js')
-
-// A picture of part of the window (the Preview tab's app), for sending to an agent. Only this
-// window, only a rectangle of it, only when the page asks.
-ipcMain.handle('bridge:capture', async (e, r) => {
-  if (!fromApp(e)) return null
-  const w = BrowserWindow.fromWebContents(e.sender)
-  if (!w || !r) return null
-  const rect = { x: Math.max(0, Math.round(r.x)), y: Math.max(0, Math.round(r.y)), width: Math.max(1, Math.round(r.width)), height: Math.max(1, Math.round(r.height)) }
-  return (await w.webContents.capturePage(rect)).toPNG().toString('base64')
-})
+const senders = require('./senders.js')
 const { execFile } = require('node:child_process')
 const fs = require('node:fs')
 const os = require('node:os')
@@ -118,7 +109,32 @@ function saveBounds() {
   try { fs.writeFileSync(STATE, JSON.stringify({ ...win.getNormalBounds(), maximized: win.isMaximized() })) } catch { /* ignore */ }
 }
 
-const isLocal = (u) => { try { const x = new URL(u); return (x.hostname === '127.0.0.1' || x.hostname === 'localhost') && Number(x.port) === PORT } catch { return false } }
+// The app's own pages, and another computer's at its own port (senders.js), which the server keeps
+// in machines.json (server/machinepages.js): read again whenever it changes. isLocal: anything this
+// app's server serves, at either.
+const MACHINES = path.join(DATA, 'machines.json')
+let ports = { at: 0, map: {} }
+const machinePorts = () => {
+  try {
+    const at = fs.statSync(MACHINES).mtimeMs
+    if (at !== ports.at) ports = { at, map: Object.fromEntries((JSON.parse(fs.readFileSync(MACHINES, 'utf8')).machines || []).filter((m) => m.state === 'linked' && Number.isInteger(m.port)).map((m) => [m.id, m.port])) }
+  } catch { /* none linked yet */ }
+  return ports.map
+}
+const pages = senders.create(PORT, { ports: machinePorts })
+const isLocal = pages.local
+// Every message from a page is checked first: only this computer's own page, but for what a window
+// showing another computer needs too, and the Allow access tile's own (senders.js MACHINE, SELF).
+const ipc = pages.guard(ipcMain, { refused: (ch, e) => console.warn(`Refused ${ch} from ${e?.senderFrame?.url || 'a frame that has gone'}: not this computer's own page`) })
+// A picture of part of the window (the Preview tab's app), for sending to an agent. Only this
+// window, only a rectangle of it, only when the page asks.
+ipc.handle('bridge:capture', async (e, r) => {
+  if (!fromApp(e)) return null
+  const w = BrowserWindow.fromWebContents(e.sender)
+  if (!w || !r) return null
+  const rect = { x: Math.max(0, Math.round(r.x)), y: Math.max(0, Math.round(r.y)), width: Math.max(1, Math.round(r.width)), height: Math.max(1, Math.round(r.height)) }
+  return (await w.webContents.capturePage(rect)).toPNG().toString('base64')
+})
 // Links out of the app open in their own apps, but only web, mail and Mail's message links: file:,
 // smb: and other schemes can mount a network share or start a program.
 const OUTSIDE = new Set(['http:', 'https:', 'mailto:', 'message:'])
@@ -208,16 +224,18 @@ function saveDeviceBounds(key, w) {
   if (w.isDestroyed() || w.isMinimized()) return
   try { fs.writeFileSync(DEVICE_STATE, JSON.stringify({ ...deviceBounds(), [key]: { ...w.getNormalBounds(), maximized: w.isMaximized() } })) } catch { /* ignore */ }
 }
-// The app's own pages. Another device's pages (/m/<id>/) only get windows (fromAny), and a page an
-// agent made (/api/...) gets nothing.
-const ownPage = (u) => { try { return isLocal(u) && !/^\/(m|api)\//.test(new URL(u).pathname) } catch { return false } }
-const fromApp = (e) => ownPage(e.senderFrame?.url || e.sender.getURL())
-const fromAny = (e) => { const u = e.senderFrame?.url || e.sender.getURL(); return isLocal(u) && !/^\/api\//.test(new URL(u).pathname) }
-ipcMain.handle('bridge:popout', (e, { paneId, title, machine } = {}) => {
+// The app's own pages. Another device's pages (at their own port: senders.js) only get windows
+// (fromAny), and a page an agent made (/api/...) gets nothing.
+const fromApp = (e) => pages.own(e)
+const fromAny = (e) => !!pages.from(e)
+ipc.handle('bridge:popout', (e, { paneId, title, machine } = {}) => {
   if (!fromAny(e) || typeof paneId !== 'string' || !paneId || paneId.length > 200) return false
-  // An agent on another of your devices (machines.js) opens through it too.
-  const prefix = machine && /^[A-Za-z0-9_-]{1,20}$/.test(machine) ? `/m/${machine}` : ''
-  if (prefix) paneId = `${machine}:${paneId}`
+  // An agent on another of your devices (machines.js) opens through it too, at its own port. A
+  // window showing that device pops out only its own.
+  const sent = pages.from(e)
+  if (sent.kind === 'machine') machine = sent.machine
+  const on = machine && /^[A-Za-z0-9_-]{1,20}$/.test(machine) ? machine : null
+  if (on) paneId = `${on}:${paneId}`
   const have = pops.get(paneId)
   if (have && !have.isDestroyed()) { have.show(); have.focus(); return true }
   const at = win && !win.isDestroyed() ? win.getBounds() : null
@@ -234,22 +252,25 @@ ipcMain.handle('bridge:popout', (e, { paneId, title, machine } = {}) => {
   w.once('ready-to-show', () => w.show())
   w.webContents.setWindowOpenHandler(({ url }) => { if (!isLocal(url)) openOutside(url); return { action: 'deny' } })
   w.webContents.on('will-navigate', (ev, url) => { if (!isLocal(url)) { ev.preventDefault(); openOutside(url) } })
-  w.loadURL(`${URL_BASE}${prefix}/?window=${encodeURIComponent(prefix ? paneId.slice(machine.length + 1) : paneId)}`)
+  w.loadURL(on ? pages.machineUrl(on, `/?window=${encodeURIComponent(paneId.slice(on.length + 1))}`) : `${URL_BASE}/?window=${encodeURIComponent(paneId)}`)
   pops.set(paneId, w)
   w.on('closed', () => { if (pops.get(paneId) === w) pops.delete(paneId) })
   return true
 })
-ipcMain.handle('bridge:focus-main', (e) => {
+ipc.handle('bridge:focus-main', (e) => {
   if (!fromAny(e)) return false
   if (!win || win.isDestroyed()) createWindow()
   else { win.show(); win.focus() }
   return true
 })
-// One of your other devices (server/machines.js) in a window of its own, beside this one's.
-ipcMain.handle('bridge:open-machine', (e, { id = null, agent = null } = {}) => {
+// One of your other devices (server/machines.js) in a window of its own, beside this one's, at its
+// own port (asked of this computer's address, which sends it there). pass: what the page asking
+// passes to it, after the # (src/passed.js).
+ipc.handle('bridge:open-machine', (e, { id = null, agent = null, pass = '' } = {}) => {
   if (!fromAny(e) || (id != null && !/^[A-Za-z0-9_-]{1,20}$/.test(String(id))) || (agent != null && (typeof agent !== 'string' || agent.length > 200))) return false
   const key = id || ''
-  const page = `${URL_BASE}${id ? `/m/${id}` : ''}/${agent ? `?agent=${encodeURIComponent(agent)}` : ''}`
+  const rest = `/${agent ? `?agent=${encodeURIComponent(agent)}` : ''}${typeof pass === 'string' && /^[\w%.~*'()!=&+-]{1,8000}$/.test(pass) ? `#${pass}` : ''}`
+  const page = id ? pages.machineUrl(id, rest) : `${URL_BASE}${rest}`
   const have = machineWins.get(key)
   // Open already: brought to the front, and opened again if what it shows is an error (its device
   // wasn't reachable then), rather than left on it.
@@ -282,7 +303,7 @@ ipcMain.handle('bridge:open-machine', (e, { id = null, agent = null } = {}) => {
 // A folder for a new agent, or one to add to Files' Places, picked in Finder rather than typed: on
 // a Mac, picking it there is what lets Bridge AI into it, so macOS usually asks nothing more. Its
 // path, or null if you cancel.
-ipcMain.handle('bridge:pick-folder', async (e, start, o) => {
+ipc.handle('bridge:pick-folder', async (e, start, o) => {
   if (!fromApp(e)) return null
   const owner = BrowserWindow.fromWebContents(e.sender) || win
   const place = !!o?.place
@@ -290,7 +311,7 @@ ipcMain.handle('bridge:pick-folder', async (e, start, o) => {
   return r.canceled ? null : r.filePaths[0] || null
 })
 // Files to link to a meeting, where they are (meetings read them when they write the notes).
-ipcMain.handle('bridge:pick-files', async (e) => {
+ipc.handle('bridge:pick-files', async (e) => {
   if (!fromApp(e)) return null
   const owner = BrowserWindow.fromWebContents(e.sender) || win
   const r = await dialog.showOpenDialog(owner, { title: 'Files for this meeting', buttonLabel: 'Link', properties: ['openFile', 'multiSelections'] })
@@ -298,10 +319,10 @@ ipcMain.handle('bridge:pick-files', async (e) => {
 })
 // While a meeting watches a shared screen, the window keeps its timers on time even when it's
 // hidden behind the call, so a new slide is noticed.
-ipcMain.handle('bridge:watching', (e, on) => { if (fromApp(e) && e.sender === win?.webContents) win.webContents.setBackgroundThrottling(!on); return true })
+ipc.handle('bridge:watching', (e, on) => { if (fromApp(e) && e.sender === win?.webContents) win.webContents.setBackgroundThrottling(!on); return true })
 // Studio's Focus: the window the page is in made full screen, or back (on: true or false), or
 // whether it is (no on). The app's own pages only, and only their own window.
-ipcMain.handle('bridge:full-screen', (e, on) => {
+ipc.handle('bridge:full-screen', (e, on) => {
   const w = fromApp(e) ? BrowserWindow.fromWebContents(e.sender) : null
   if (!w || w.isDestroyed()) return null
   if (typeof on !== 'boolean') return w.isFullScreen()
@@ -310,11 +331,11 @@ ipcMain.handle('bridge:full-screen', (e, on) => {
 })
 // Seconds since you last touched the computer, so a window left in front while you're away
 // doesn't keep your phone quiet.
-ipcMain.handle('bridge:idle', (e) => (fromApp(e) ? powerMonitor.getSystemIdleTime() : null))
+ipc.handle('bridge:idle', (e) => (fromApp(e) ? powerMonitor.getSystemIdleTime() : null))
 // Restart Bridge AI, server too: what you allow in System Settings (Full Disk Access, say) only
 // reaches processes started after. The relaunched app starts the server again. Agents keep
 // running in the terminal host meanwhile, unless Keep agents running is off.
-ipcMain.handle('bridge:restart', (e) => {
+ipc.handle('bridge:restart', (e) => {
   if (!fromApp(e)) return false
   app.relaunch()
   stopServer()
@@ -414,14 +435,14 @@ async function showTile(pane) {
   tile = t
   return true
 }
-ipcMain.handle('bridge:fix-tile', (e, pane) => (fromApp(e) && typeof pane === 'string' ? showTile(pane) : false))
-ipcMain.handle('bridge:fix-tile-close', (e) => { if (fromApp(e)) closeTile(); return true })
+ipc.handle('bridge:fix-tile', (e, pane) => (fromApp(e) && typeof pane === 'string' ? showTile(pane) : false))
+ipc.handle('bridge:fix-tile-close', (e) => { if (fromApp(e)) closeTile(); return true })
 // Only the tile may start the drag, and only of the app itself.
-ipcMain.on('bridge:tile-drag', (e) => {
+ipc.on('bridge:tile-drag', (e) => {
   if (!tile || e.sender !== tile.win.webContents || !TILE_STEPS[tile.pane]?.drag) return
   e.sender.startDrag({ file: BUNDLE, icon: tile.icon })
 })
-ipcMain.on('bridge:tile-close', (e) => { if (tile && e.sender === tile.win.webContents) closeTile() })
+ipc.on('bridge:tile-close', (e) => { if (tile && e.sender === tile.win.webContents) closeTile() })
 // ---------- Permissions the app itself asks for (permissions.js) ----------
 // The microphone, Accessibility (pasting where you're typing) and notifications: macOS's own question
 // first, System Settings and the tile when it has none to ask, and Reset and ask again for an answer
@@ -444,7 +465,7 @@ let loneKey = false // a lone key (Fn, the right ⌥) is the dictation key, so I
 const listenAsk = (cmd) => new Promise((resolve) => execFile(process.env.BRIDGE_KEYS || path.join(ROOT, 'native', 'bin', 'bridgekeys'), [cmd], { timeout: 10000 }, (err, out) => {
   try { resolve(!!JSON.parse(String(out).trim().split('\n').pop()).allowed) } catch { resolve(false) }
 }))
-ipcMain.handle('bridge:perm', async (e, { op, kind } = {}) => {
+ipc.handle('bridge:perm', async (e, { op, kind } = {}) => {
   if (!fromApp(e)) return null
   if (op === 'kinds') return perms.kinds()
   if (typeof kind !== 'string' || !perms.kinds().includes(kind)) return null
@@ -475,10 +496,10 @@ function onFixAsk(a) {
   tellMain(`window.__bridgePermAsk = ${JSON.stringify(ask)}; window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'permissions' } })); window.dispatchEvent(new CustomEvent('bridge-permission-ask'))`, true).catch(() => {})
 }
 // Whether macOS lets the app use the mic: granted, denied, restricted or not-determined.
-ipcMain.handle('bridge:media-access', (e, kind) => (fromApp(e) && kind === 'microphone' && IS_MAC ? systemPreferences.getMediaAccessStatus('microphone') : null))
+ipc.handle('bridge:media-access', (e, kind) => (fromApp(e) && kind === 'microphone' && IS_MAC ? systemPreferences.getMediaAccessStatus('microphone') : null))
 // The mic, asked of macOS before the page opens it (src/audio/pcm.js askMic): the first time, macOS
 // asks its own question, where opening the mic alone can be turned down with no question at all.
-ipcMain.handle('bridge:media-ask', async (e, kind) => {
+ipc.handle('bridge:media-ask', async (e, kind) => {
   if (!fromApp(e) || kind !== 'microphone' || !IS_MAC) return null
   if (systemPreferences.getMediaAccessStatus('microphone') === 'not-determined') await systemPreferences.askForMediaAccess('microphone').catch(() => false)
   reportPerms()
@@ -487,7 +508,7 @@ ipcMain.handle('bridge:media-ask', async (e, kind) => {
 // macOS's answer about the mic forgotten (tccutil, for this app only), then asked again. For an
 // answer kept from a version signed differently (up to 3.4.2), which can show as allowed in System
 // Settings and still block the mic.
-ipcMain.handle('bridge:media-reset', async (e, kind) => {
+ipc.handle('bridge:media-reset', async (e, kind) => {
   if (!fromApp(e) || kind !== 'microphone' || !IS_MAC) return null
   const id = bundleId()
   if (id) await new Promise((resolve) => execFile('/usr/bin/tccutil', ['reset', 'Microphone', id], { timeout: 10000 }, () => resolve()))
@@ -496,12 +517,12 @@ ipcMain.handle('bridge:media-reset', async (e, kind) => {
   return systemPreferences.getMediaAccessStatus('microphone')
 })
 // A notification to see whether macOS shows them (it doesn't say when they're turned off).
-ipcMain.handle('bridge:notify-test', (e) => {
+ipc.handle('bridge:notify-test', (e) => {
   if (!fromApp(e) || !Notification.isSupported()) return false
   new Notification({ title: 'Bridge AI', body: 'Notifications are on. You\'ll see one when an agent needs you or finishes.' }).show()
   return true
 })
-ipcMain.handle('bridge:focus-popout', (e, paneId) => {
+ipc.handle('bridge:focus-popout', (e, paneId) => {
   const w = fromAny(e) && pops.get(paneId)
   if (!w || w.isDestroyed()) return false
   w.show(); w.focus()
@@ -560,9 +581,7 @@ async function notifyFor(a) {
   })
   n.on('click', () => {
     if (!win) return
-    if (win.isMinimized()) win.restore()
-    win.show(); win.focus()
-    win.webContents.executeJavaScript(`window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: ${JSON.stringify(a.paneId)}, view: ${JSON.stringify(blocked ? 'chat' : undefined)} } }))`).catch(() => {})
+    tellMain(`window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: ${JSON.stringify(a.paneId)}, view: ${JSON.stringify(blocked ? 'chat' : undefined)} } }))`, true).catch(() => {})
     live.delete(a.paneId)
   })
   n.on('close', () => live.delete(a.paneId))
@@ -711,7 +730,7 @@ let locked = false
 let wokeAt = 0
 let asked = 0
 const asking = new Map() // id -> { wc, done }
-ipcMain.on('bridge:busy-said', (e, id, answer) => { const a = asking.get(id); if (a && e.sender === a.wc) a.done(Array.isArray(answer) ? answer.slice(0, 20) : null) })
+ipc.on('bridge:busy-said', (e, id, answer) => { const a = asking.get(id); if (a && e.sender === a.wc) a.done(Array.isArray(answer) ? answer.slice(0, 20) : null) })
 function askWindow(w) {
   return new Promise((resolve) => {
     const id = ++asked
@@ -909,7 +928,7 @@ function setTray(c, instead) {
   tray.setContextMenu(Menu.buildFromTemplate(items))
 }
 const fromFloat = (e) => !!float && !float.isDestroyed() && e.sender === float.webContents
-ipcMain.on('bridge:float-size', (e, w, h, low) => {
+ipc.on('bridge:float-size', (e, w, h, low) => {
   if (!fromFloat(e) || !Number.isFinite(w) || !Number.isFinite(h)) return
   // As tall as the card, up to the screen's height (opened, with AI Assist's suggestion, it's taller
   // than a fixed 420 was, and was cut off; the card scrolls what's under its bar past that).
@@ -924,10 +943,10 @@ ipcMain.on('bridge:float-size', (e, w, h, low) => {
   const { x, y } = floatPlace(b, n, a, low)
   if (x !== n.x || y !== n.y) float.setPosition(x, y)
 })
-ipcMain.handle('bridge:float-hide', (e) => { if (!fromFloat(e)) return false; floatHiddenFor = floatKey; hideFloat(); return true })
+ipc.handle('bridge:float-hide', (e) => { if (!fromFloat(e)) return false; floatHiddenFor = floatKey; hideFloat(); return true })
 // Dragged from anywhere on it: kept whole on the screen it's over. (null, null): let go, so it's
 // remembered there.
-ipcMain.on('bridge:float-move', (e, x, y) => {
+ipc.on('bridge:float-move', (e, x, y) => {
   if (!fromFloat(e)) return
   const b = float.getBounds()
   if (x == null || y == null) {
@@ -951,10 +970,16 @@ ipcMain.on('bridge:float-move', (e, x, y) => {
   float.setPosition(Math.round(Math.max(a.x, Math.min(x, a.x + a.width - b.width))), Math.round(Math.max(a.y, Math.min(y, a.y + a.height - b.height))))
 })
 // The main window, made if it was closed and loaded, for something the card asks of it.
+// Switched to another of your computers, it's that one's page: what's for this computer (a meeting,
+// an ask to allow something, an agent's notification) brings this computer's back first, rather
+// than telling the other's.
 async function mainReady() {
   if (!win || win.isDestroyed()) {
     await createWindow()
     await new Promise((r) => setTimeout(r, 1500)) // the page sets itself up
+  } else if (pages.of(win.webContents.getURL())?.kind === 'machine') {
+    await win.loadURL(URL_BASE).catch(() => {})
+    await new Promise((r) => setTimeout(r, 1500))
   }
   return win
 }
@@ -965,19 +990,19 @@ const tellMain = async (js, show, gesture = false) => {
   return w.webContents.executeJavaScript(js, gesture).catch(() => {})
 }
 // Watch a screen, from the card: the main window records, so it asks which screen.
-ipcMain.handle('bridge:float-watch', async (e) => {
+ipc.handle('bridge:float-watch', async (e) => {
   if (!fromFloat(e)) return false
   await tellMain(`window.dispatchEvent(new CustomEvent('bridge-watch-screen'))`, false, true)
   return true
 })
 // Take notes for the call: the recording runs in the main window (it has the mic), shown or not.
-ipcMain.handle('bridge:float-start', async (e, { app: callApp } = {}) => {
+ipc.handle('bridge:float-start', async (e, { app: callApp } = {}) => {
   if (!fromFloat(e) || typeof callApp !== 'string' || callApp.length > 60) return false
   await tellMain(`window.dispatchEvent(new CustomEvent('bridge-meeting-start', { detail: { app: ${JSON.stringify(callApp)} } }))`, false)
   return true
 })
 // event: a calendar event's day and id, to open it in Today › Calendar with its prep.
-ipcMain.handle('bridge:float-open', async (e, { meeting, meetings, paneId, event } = {}) => {
+ipc.handle('bridge:float-open', async (e, { meeting, meetings, paneId, event } = {}) => {
   if (!fromFloat(e)) return false
   if (event && typeof event.date === 'string' && /^\d{4}-\d\d-\d\d$/.test(event.date) && typeof event.id === 'string' && event.id.length < 400) await tellMain(`window.dispatchEvent(new CustomEvent('bridge-open-event', { detail: ${JSON.stringify({ date: event.date, id: event.id })} }))`, true)
   else if (meetings === true) await tellMain(`window.dispatchEvent(new CustomEvent('bridge-open-meeting', { detail: { list: true } }))`, true)
@@ -985,7 +1010,7 @@ ipcMain.handle('bridge:float-open', async (e, { meeting, meetings, paneId, event
   else if (typeof paneId === 'string' && paneId.length < 200) await tellMain(`window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: ${JSON.stringify(paneId)}, view: 'chat' } }))`, true)
   return true
 })
-ipcMain.handle('bridge:recording', (e, on) => { if (fromApp(e) && e.sender === win?.webContents) recording = !!on; return true })
+ipc.handle('bridge:recording', (e, on) => { if (fromApp(e) && e.sender === win?.webContents) recording = !!on; return true })
 
 app.on('before-quit', () => { quitting = true })
 // The graphics process went away (Chromium starts it again): written down, to offer a report.
@@ -1005,19 +1030,18 @@ function shuttingDown() {
 app.whenReady().then(() => {
   powerMonitor.on('shutdown', shuttingDown) // macOS, Linux
   // Voice notes need the mic; allow it for the app's own page only, asked by the page itself and not
-  // by a frame in it (a project's app in Preview, another device's agent). Copying works in those too.
-  // Reading the clipboard too, for Paste and Paste Special in Studio's menus (⌘V works without it):
-  // what's read stays in the page, on this computer.
-  const ASK = new Set(['media', 'display-capture', 'notifications', 'geolocation', 'clipboard-read'])
+  // by a frame in it (a project's app in Preview, another device's agent) nor a window showing another
+  // device (senders.js permits). Copying works in those too. Reading the clipboard too, for Paste and
+  // Paste Special in Studio's menus (⌘V works without it): what's read stays in the page, on this
+  // computer.
   session.defaultSession.setPermissionRequestHandler((wc, perm, cb, d = {}) => {
-    const u = d.requestingUrl || wc.getURL()
-    cb(perm === 'clipboard-sanitized-write' ? isLocal(u) : ASK.has(perm) && d.isMainFrame !== false && ownPage(u))
+    cb(pages.permits(perm, { url: d.requestingUrl || wc.getURL(), mainFrame: d.isMainFrame !== false }))
   })
   // Watching a screen in a meeting: macOS's own picker (macOS 15 and later), where you pick the
   // window being shared. Before macOS 15: the whole main screen, which macOS asks to allow (Screen
   // Recording) the first time.
   session.defaultSession.setDisplayMediaRequestHandler((req, cb) => {
-    if (!ownPage(req.frame?.url || '')) return cb({})
+    if (!req.frame || req.frame.parent || !pages.permits('display-capture', { url: req.frame.url })) return cb({})
     desktopCapturer.getSources({ types: ['screen'] }).then((s) => cb(s[0] ? { video: s[0] } : {}), () => cb({}))
   }, { useSystemPicker: true })
   // Right-click: spelling suggestions, Cut, Copy and Paste, in every window from here on.
@@ -1034,7 +1058,9 @@ app.whenReady().then(() => {
   // Each time the key is set: whether pasting can work and whether a lone key is picked, which is
   // what Accessibility and Input Monitoring are asked for.
   const onStatus = (v) => { canPaste = !!v?.paste?.can; loneKey = !!v?.lone && /^(Fn|RightAlt)$/.test(v.key || ''); reportPerms() }
-  dictation.start({ electron, ROOT, DATA, URL_BASE, preload: path.join(__dirname, 'preload.js'), isOurs: ours, askAccess: showTile, trusted: fromApp, perms, onStatus })
+  // Its messages from pages are checked as the rest are (ipc).
+  const parts = { app, BrowserWindow, globalShortcut, screen, ipcMain: ipc, clipboard: electron.clipboard, systemPreferences, shell, nativeImage }
+  dictation.start({ electron: parts, ROOT, DATA, URL_BASE, preload: path.join(__dirname, 'preload.js'), isOurs: ours, askAccess: showTile, trusted: fromApp, pageOf: pages.of, sentFrom: pages.from, perms, onStatus })
     .catch((e) => console.error('dictation:', e.message))
   // What the app is allowed: told once a minute (the server forgets it after three), and whenever you
   // come back to one of its windows (System Settings is where it changes).

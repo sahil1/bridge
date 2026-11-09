@@ -50,6 +50,14 @@ export const machineId = onMachine ? onMachine[1] : null
 export const BASE = onMachine ? `/m/${onMachine[1]}` : ''
 // An address on the device shown: apiUrl('/files?x') is /api/files?x, or /m/<id>/api/files?x.
 export const apiUrl = (p) => `${BASE}/api${p}`
+// A page of one of your devices, by this computer's id for it (null: this computer), at rest ("/",
+// "/?window=…"). Asked for here, this computer's server sends another device's to a port of its own
+// while this page is on this computer (the desktop app, or a browser here), so to the browser it's
+// another site with nothing of this page's, and back again (server/machinepages.js); through a phone,
+// Tailscale or another name for this computer it's at /m/<id>/ here as before. apart: so what it
+// needs of this page is passed to it (passed.js).
+export const apart = import.meta.env.MODE !== 'demo' && !viaRelay
+export const machineUrl = (id, rest = '/') => `${id ? `/m/${id}` : ''}${rest}`
 // Bridge AI on the computer it runs on (the desktop app, or a browser there), not a phone, and
 // not another device shown through this one: Finder, file paths and the mic are this computer's.
 export const onThisComputer = () => !machineId && !viaRelay && (!!window.bridgeApp?.desktop || ['127.0.0.1', 'localhost'].includes(location.hostname))

@@ -8,6 +8,7 @@ import { listSubagents, runningFor, forgetExcept } from './subagents.js'
 import { ttyHandler } from './tty.js'
 import { attachHandler } from './attach.js'
 import { makeGuard } from './guard.js'
+import * as machinePages from './machinepages.js'
 import { usage } from './usage.js'
 import { usageStats } from './usagestats.js'
 import { everywhere } from './usageall.js'
@@ -144,12 +145,18 @@ const macro = makeMacro()
 const news = makeNews(cfg)
 
 const guard = makeGuard(cfg, { tailnetOwner: phone.tailnetOwner })
+// Another of your computers' pages, each at a port of its own here, and what they may ask of this one.
+const pages = machinePages.make({
+  port: cfg.port, host: cfg.host, thisName: () => relay.thisName(), linked: () => machines.list().filter((m) => m.state === 'linked'),
+  nameOf: (id) => machines.list().find((m) => m.id === id)?.name || null, portOf: machines.portOf, keepPort: machines.keepPort,
+})
 const app = express()
 app.use(guard.http)
+app.use(pages.http)
 // Each request timed, for how Bridge AI itself is doing (perf.js).
 app.use(perf.timing)
 // Your other devices' Bridge AI, through this one (machines.js), before anything reads the body.
-app.use('/m', (req, res) => machines.proxy(req, res))
+app.use('/m', (req, res) => machines.proxy(req, res, { frames: pages.frames }))
 // Saving a file from the viewer can send more than the usual 1 MB.
 const jsonSmall = express.json({ limit: '1mb' })
 const jsonFile = express.json({ limit: '6mb' })
@@ -703,7 +710,12 @@ fileInsights.setHelpers({
 fileInsights.routes(app, { rootOf, trialOff, here: (req) => fromHere(req) })
 // The copies this computer runs, and the ones others are making to it.
 app.get('/api/transfers', tx(() => transfers.list()))
-app.post('/api/transfers', tx((req) => { counts.add('files.sent'); return transfers.start(req.body || {}, { here: fromHere(req) }) }))
+app.post('/api/transfers', tx((req) => {
+  // From a window showing another computer (machinepages.js): only that computer's files copied here.
+  if (req.machinePage && (req.body?.from !== req.machinePage || req.body?.to)) throw Object.assign(new Error(machinePages.elsewhere(relay.thisName())), { status: 403, code: 'machinePage' })
+  counts.add('files.sent')
+  return transfers.start(req.body || {}, { here: fromHere(req) })
+}))
 app.post('/api/transfers/clear', tx(() => transfers.clear()))
 app.post('/api/transfers/:id/stop', tx((req) => transfers.stop(req.params.id)))
 app.post('/api/transfers/:id/retry', tx((req) => transfers.retry(req.params.id)))
@@ -2380,7 +2392,9 @@ app.get('/api/relay', wrap((req) => ({ ...relay.status(), here: req.headers['x-b
 // looking at this device through that one); nothing else.
 const viaMachine = (req) => relay.isMachine(req.headers['x-bridge-relay'])
 const notByMachine = (req) => { if (viaMachine(req)) throw Object.assign(new Error('Another device can\'t do that'), { status: 403 }) }
-app.get('/api/machines', wrap(async () => ({ here: { ...machines.here(), about: { ...(await machines.about()), runtime: rt.name } }, machines: machines.list(), strays: machines.strays(), asks: relay.status().asks, canBeLinked: !!relay.relayUrl(), hostedAvailable: relay.status().hostedAvailable })))
+// port: where each one's pages are for the page asking (machinepages.js; null: at /m/<id>/ beside
+// it). machinePage: the page asking is one of theirs, at its port, which can't change these.
+app.get('/api/machines', wrap(async (req) => ({ here: { ...machines.here(), about: { ...(await machines.about()), runtime: rt.name } }, machines: machines.list().map((m) => ({ ...m, port: pages.portFor(req, m.id) })), machinePage: req.machinePage || null, strays: machines.strays(), asks: relay.status().asks, canBeLinked: !!relay.relayUrl(), hostedAvailable: relay.status().hostedAvailable })))
 // This device's name, as your devices and phones show it: set here, or from one of your other
 // devices (through its link). '' goes back to the computer's own name.
 relay.useName(() => cfg.deviceName)
@@ -3300,13 +3314,14 @@ const upgrades = [
   ...(rt.name === 'herdr' ? [['/api/tty', ttyHandler()]] : []),
   ...(rt.attach ? [['/api/panes/', attachHandler(rt)]] : []),
 ]
-server.on('upgrade', async (req, socket, head) => {
-  if (!(await guard.upgrade(req))) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); return socket.destroy() }
+const onUpgrade = async (req, socket, head) => {
+  if (!(await guard.upgrade(req)) || !pages.upgrade(req)) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); return socket.destroy() }
   if (machines.isMachinePath(req.url)) return machines.upgrade(req, socket, head) // a terminal on another of your devices
   const hit = upgrades.find(([prefix]) => req.url.startsWith(prefix))
   if (!hit) return socket.destroy()
   hit[1](req, socket, head)
-})
+}
+server.on('upgrade', onUpgrade)
 server.listen(cfg.port, cfg.host, () => {
   console.log(`Bridge AI on http://${cfg.host}:${cfg.port} (runtime: ${rt.name}, data: ${DATA})`)
   if (!/^(127\.0\.0\.1|localhost|::1)$/.test(cfg.host)) console.log(`Listening on ${cfg.host}, not 127.0.0.1: anyone who can reach port ${cfg.port} can drive your agents. In Docker, publish it as 127.0.0.1:${cfg.port}:${cfg.port} only.`)
@@ -3318,6 +3333,7 @@ server.listen(cfg.port, cfg.host, () => {
   account.start()
   phone.status(cfg.port).then(tailnetSaid).catch(() => {})
   machines.start()
+  pages.start(app, onUpgrade) // each linked computer's port, for its pages
   transfers.resume() // copies that were going carry on
   counts.start()
   crashes.started().catch(() => {})

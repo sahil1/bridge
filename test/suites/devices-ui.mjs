@@ -153,7 +153,10 @@ try {
   const remoteTab = s.p.locator('.ws-tab', { hasText: 'Desk' })
   await remoteTab.waitFor({ timeout: 10000 })
   const frame = s.p.locator('.remote-frame')
-  ok((await frame.getAttribute('src')) === `/m/${deskId}/?window=${encodeURIComponent(launched.paneId)}` && /On Desk/.test(await s.p.innerText('.remote-bar')), 'Desk\'s agent in the sidebar opens in a tab here, with Desk\'s own view of it', await frame.getAttribute('src'))
+  // Sent to Desk's own port here (server/machinepages.js), with what Studio passes it after the #.
+  const deskAt = `http://127.0.0.1:${(await a.api('/machines')).machines.find((m) => m.id === deskId)?.port}`
+  const deskFrame = () => s.p.frames().find((f) => f.url().startsWith(`${deskAt}/m/${deskId}/`))
+  ok((await frame.getAttribute('src')).startsWith(`/m/${deskId}/?window=${encodeURIComponent(launched.paneId)}#`) && !!(await until(deskFrame, 15000, 200)) && /On Desk/.test(await s.p.innerText('.remote-bar')), 'Desk\'s agent in the sidebar opens in a tab here, with Desk\'s own view of it, at Desk\'s own port', [await frame.getAttribute('src'), s.p.frames().map((f) => f.url())])
   const inside = s.p.frameLocator('.remote-frame')
   await inside.locator('.solo', { hasText: 'Desk work' }).waitFor({ timeout: 30000 }).catch(() => {})
   ok(/Desk work/.test(await inside.locator('.solo').innerText().catch(() => '')), 'its view works inside the tab: the agent, its chat and message box', await inside.locator('body').innerText().catch(() => ''))
@@ -164,7 +167,8 @@ try {
   await other2.goto(`${a.url}/m/${deskId}/`)
   await other2.waitForSelector('.rail-nav-btn', { timeout: 20000 })
   await other2.waitForTimeout(1500)
-  const keys = await s.p.evaluate((id) => ({ here: JSON.parse(localStorage.getItem('cc-ws') || '{}').tabs || [], desk: !!localStorage.getItem(`cc-ws@${id}`) }), deskId)
+  ok(other2.url().startsWith(`${deskAt}/m/${deskId}/`), 'Desk\'s page in another window: at Desk\'s own port too', other2.url())
+  const keys = { here: await s.p.evaluate(() => JSON.parse(localStorage.getItem('cc-ws') || '{}').tabs || []), desk: await other2.evaluate((id) => !!localStorage.getItem(`cc-ws@${id}`), deskId) }
   ok(keys.here.some((x) => x.startsWith('remote:')) && keys.desk, 'Desk\'s page in another window keeps its tabs apart: Studio\'s are as they were', keys)
   const look = (pg) => pg.evaluate(() => ({ mode: document.documentElement.getAttribute('data-theme'), chrome: document.documentElement.style.getPropertyValue('--chrome') }))
   const [lookHere, lookDesk] = [await look(s.p), await look(other2)]

@@ -428,6 +428,13 @@ export function list() {
   })
 }
 export const here = () => ({ name: relay.thisName(), systemName: relay.systemName(), os: OS, version: VERSION, relay: relay.relayUrl(), safety: safety(relay.publicKey()) })
+// The port its pages have on this computer (machinepages.js), kept with it so what they save in the
+// browser stays theirs across restarts (the desktop app reads it here too: desktop/main.js).
+export const portOf = (id) => byId(id)?.port || null
+export function keepPort(id, port) {
+  const m = byId(id)
+  if (m && m.port !== port) { m.port = port; save() }
+}
 
 // A device's security code: a short fingerprint of its key, the same on each of your devices that
 // shows it, so you can check a device is the one it says.
@@ -776,7 +783,9 @@ setInterval(() => {
 // ---------- /m/<id>/...: that device's Bridge AI, through here ----------
 const PASS = new Set(['content-type', 'accept', 'accept-language', 'range', 'if-range', 'if-none-match', 'if-modified-since', 'cache-control', 'last-event-id'])
 // (Its length comes only when the answer comes as it is: a download's progress, a video's player.)
-const HOP = new Set(['connection', 'keep-alive', 'transfer-encoding', 'content-encoding', 'set-cookie'])
+// Nor what would reach past its own pages where they share this computer's address (through a
+// phone, Tailscale): a service worker over all of them, or clearing what this computer's page saves.
+const HOP = new Set(['connection', 'keep-alive', 'transfer-encoding', 'content-encoding', 'set-cookie', 'service-worker-allowed', 'clear-site-data'])
 const MPATH = /^\/m\/([A-Za-z0-9_-]{1,20})(\/.*)?$/
 // A page of that device while it isn't reachable: it says so, and tries again every few seconds
 // by itself, so the window opens it as soon as the device is back (it used to sit there, or show
@@ -786,7 +795,9 @@ const offlinePage = (name, why) => `<!doctype html><meta charset="utf-8"><meta n
 <div><h2>${name} isn't reachable</h2><p>${why}</p><p class="muted">Trying again every few seconds.</p><p><a href="/">Back to this device</a></p></div>`
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
 
-export async function proxy(req, res) {
+// frames(req): what may show its pages in a frame, on this computer (machinepages.js): this
+// computer's page (its tabs), never another site. Through a phone, its relay page frames them.
+export async function proxy(req, res, { frames = null } = {}) {
   const hit = MPATH.exec(req.originalUrl || req.url)
   const m = hit && byId(hit[1])
   const page = req.method === 'GET' && /text\/html/.test(req.headers.accept || '')
@@ -832,6 +843,7 @@ export async function proxy(req, res) {
           // Its own paths, as they are here.
           res.setHeader(k, k.toLowerCase() === 'location' && String(v).startsWith('/') ? `/m/${m.id}${v}` : v)
         }
+        if (frames && !req.headers['x-bridge-relay'] && /text\/html/i.test(res.getHeader('content-type') || '')) res.setHeader('Content-Security-Policy', [res.getHeader('Content-Security-Policy'), frames(req)].flat().filter(Boolean))
       },
       onChunk: (c) => {
         if (res.write(c)) return grant(c.byteLength)

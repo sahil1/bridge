@@ -45,6 +45,9 @@ const SET_BY_YOU = {
   'server/machines.js': 'relay', // another of your computers, through its relay
   'server/phone.js': 'tailscale', // this computer's name on your tailnet
   'server/index.js': 'self', // the address Bridge AI itself listens on
+  // ...and the ports another of your computers' pages have on it
+  'server/machinepages.js': 'self',
+  'desktop/senders.js': 'self',
   'shared/cloud/cursor.js': 'cloudAgents', // a repo's address Cursor gave, read for its name
 }
 // Web addresses in the code that are names, never fetched.

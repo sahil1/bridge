@@ -4,16 +4,19 @@
 // own domain at 127.0.0.1 (DNS rebinding). So:
 //   - the Host must be this device or your Tailscale name;
 //   - a browser's Origin must be the very page it's on: the same host and port as the request. Another
-//     app on localhost (a project's dev server in Preview, say) or another *.ts.net site isn't;
-//   - a request a page on another site sent (Sec-Fetch-Site) can't reach /api, links and pictures
-//     too, except the files of an HTML preview, which load from its sandbox and can't be read back;
+//     app on localhost (a project's dev server in Preview, say), another computer's page at its own
+//     port here (machinepages.js), or another *.ts.net site isn't;
+//   - a request a page on another site sent (Sec-Fetch-Site) can't reach /api, or another computer's
+//     API through this one (/m/<id>/api), links and pictures too, except the files of an HTML
+//     preview, which load from its sandbox and can't be read back;
 //   - through Tailscale (a *.ts.net name), only you: Tailscale says who's asking (Tailscale-User-Login,
 //     which it sets itself), and it has to be who this computer belongs to. Someone else on the
 //     tailnet, a shared or tagged device, or a visitor through Funnel isn't.
 
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]', '::1'])
 const DEFAULT_PORT = { 'http:': '80', 'https:': '443' }
-const PREVIEW_FILES = /^\/api\/agents\/[^/]+\/site\//
+const API = /^(\/m\/[A-Za-z0-9_-]{1,20})?\/api\//
+const PREVIEW_FILES = /^(\/m\/[A-Za-z0-9_-]{1,20})?\/api\/agents\/[^/]+\/site\//
 
 // tailnetOwner: () => this computer's Tailscale login, or null (phone.js).
 export function makeGuard(cfg = {}, { tailnetOwner = async () => null } = {}) {
@@ -49,7 +52,7 @@ export function makeGuard(cfg = {}, { tailnetOwner = async () => null } = {}) {
   const http = async (req, res, next) => {
     if (!hostOk(req.headers.host)) return res.status(403).json({ error: 'Host not allowed' })
     if (!originOk(req.headers.origin, req.headers.host)) return res.status(403).json({ error: 'Origin not allowed' })
-    if (req.path.startsWith('/api/') && elsewhere(req) && !(req.method === 'GET' && PREVIEW_FILES.test(req.path))) return res.status(403).json({ error: 'Not from another site' })
+    if (API.test(req.path) && elsewhere(req) && !(req.method === 'GET' && PREVIEW_FILES.test(req.path))) return res.status(403).json({ error: 'Not from another site' })
     if (!(await you(req))) return res.status(403).json({ error: 'Through Tailscale, Bridge AI answers only the person this computer belongs to. Sign in to Tailscale as them on this device.' })
     next()
   }
