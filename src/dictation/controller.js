@@ -304,14 +304,15 @@ async function transcribe(id) {
 }
 
 // ---------- Tidy what I say (a trial: dictation-cleanup) ----------
-// From another app (the dictation window), with it on in Settings › Voice › Dictation: the words go
-// to the computer to be tidied by a model before they're pasted or sent (server/dictation.js tidy).
+// From another app (the dictation window; not for a window of Bridge AI's it listens for, which is
+// as if said in Bridge AI), with it on in Settings › Voice › Dictation: the words go to the computer
+// to be tidied by a model before they're pasted or sent (server/dictation.js tidy).
 // The server gives it a few seconds; this waits a little longer for the answer, then stops waiting
 // too. Nothing is lost either way: { text, by } tidied, or { code, error, local } and the words go
 // as you said them, the dictation window saying why (Tidy.jsx). null: not tidied, nothing to say
 // (the trial was turned off meanwhile).
 const TIDY_WAIT = 12_000
-export const tidyFor = (target) => cfg.tidy === true && target?.kind === 'hud'
+export const tidyFor = (target) => cfg.tidy === true && target?.kind === 'hud' && !target.window
 async function tidyWords(text, target) {
   set({ tidying: true })
   const stop = new AbortController()

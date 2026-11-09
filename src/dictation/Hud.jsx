@@ -38,6 +38,11 @@ import './dictation.css'
 // wasn't what you said, no model yet) it's pasted as you said it, and the pill says why for a
 // moment, or with no model yet, the card offers the local model in one click. On the card, Use what
 // I said swaps in the words from before tidying.
+// The key pressed in a window of Bridge AI's showing another of your devices (whose page can't use
+// this computer's microphone): it listens for that window, and the words go into its page, where
+// they'd have gone had it heard them itself (the desktop app hands them over); "Added where you were
+// typing" for a moment, and it's gone. With nowhere to put them there, they stay on the card, to
+// copy or send, saying so.
 // The desktop app tells it when the key goes down and up (bridge-dictate-key events, as in the main
 // window); a press from before it was ready comes from hudReady(). The window keeps its width and
 // top, and grows down to fit (hudSize); on a Mac and Windows, clicks go through it except on the
@@ -53,6 +58,8 @@ const WHY = {
   secure: () => t('Secure input is on (a password field, or Secure Keyboard Entry), so it wasn\'t pasted.'),
   moved: () => t('Another app is in front now, so it wasn\'t pasted.'),
   focus: () => t('Bridge AI was in front, so it wasn\'t pasted.'),
+  // A window of Bridge AI's showing another device, with no field or agent there to put them in.
+  window: () => t('Nowhere to put it in that window.'),
   // Windows and Linux: Ctrl+V pressed with Alt still down would be another shortcut.
   held: () => t('A key was still held down, so it wasn\'t pasted. Let go of the keys once you\'ve said it.'),
   failed: () => t('Couldn\'t paste it there.'),
@@ -68,6 +75,7 @@ export default function Hud() {
   const [done, setDone] = useState(null) // what was done with the text, said for a moment
   const [err, setErr] = useState(null)
   const [into, setInto] = useState(null) // the app it's pasted into, by name (a Mac)
+  const [toWindow, setToWindow] = useState(false) // for a window of Bridge AI's showing another device
   const [pasting, setPasting] = useState(false)
   const [why, setWhy] = useState(null) // why it wasn't pasted
   const [offer, setOffer] = useState(false) // paste it next time?
@@ -113,23 +121,24 @@ export default function Hud() {
   // The key, from the desktop app (or a test). app, bundle: the app in front, when the desktop app
   // knows it.
   useEffect(() => {
-    const begin = (at, name, bundle) => {
+    const begin = (at, name, bundle, win = false) => {
       clearTimeout(timer.current); clearTimeout(going.current); setLeaving(false)
       setDone(null); setErr(null); setPicking(false); setWhy(null); setOffer(false); setPasting(false); setAllowed(false); setEditing(false); setEdited(null); setAsSaid(false); setDraft(null); setFixes([])
-      setInto(name || null)
+      setInto(win ? null : name || null)
+      setToWindow(!!win)
       setShown((n) => n + 1)
       press0.current++
       fresh.current = true
-      press({ kind: 'hud', app: name || bundle ? { name: name || '', bundle: bundle || '' } : null }, at); pickTarget(); loadStatus()
+      press(win ? { kind: 'hud', window: true, app: null } : { kind: 'hud', app: name || bundle ? { name: name || '', bundle: bundle || '' } : null }, at); pickTarget(); loadStatus()
     }
     const on = (e) => {
       const d = e.detail || {}
-      if (d.type === 'down') begin(d.at, d.app, d.bundle)
+      if (d.type === 'down') begin(d.at, d.app, d.bundle, d.into === true)
       else if (d.type === 'up') release(d.at)
       else if (d.type === 'cancel') { cancel(); hide() }
     }
     window.addEventListener('bridge-dictate-key', on)
-    app().hudReady?.().then((p) => { if (p?.down) { begin(p.down, p.app, p.bundle); if (p.up) release(p.up) } }).catch(() => {})
+    app().hudReady?.().then((p) => { if (p?.down) { begin(p.down, p.app, p.bundle, p.into === true); if (p.up) release(p.up) } }).catch(() => {})
     return () => window.removeEventListener('bridge-dictate-key', on)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (s.setup || s.note) fresh.current = false }, [s.setup, s.note])
@@ -180,6 +189,7 @@ export default function Hud() {
     pasted.current = r.at
     const now = fresh.current
     fresh.current = false
+    if (now && toWindow) { intoWindow(r); return }
     if (now && st?.edit?.on && app().hudSelection) { setEditing(true); editOr(r); return }
     if (!pasteOn || !now) return
     if (!st.paste.allowed) { setWhy('accessibility'); return }
@@ -203,6 +213,21 @@ export default function Hud() {
       setEditing(false)
       pasteIt({ ...r, text: x.text }, { change: true })
     } catch (e) { if (g === press0.current) { setEditing(false); setErr(e.message) } }
+  }
+  // For a window of Bridge AI's showing another device: into its page, as if it had heard them.
+  function intoWindow(r) {
+    const g = press0.current
+    setPasting(true)
+    setWhy(null)
+    const gone = () => { if (g === press0.current) { setPasting(false); setWhy('window') } }
+    ;(app().hudInto ? app().hudInto(r.text) : Promise.reject(new Error('no window'))).then((x) => {
+      if (!x?.put) return gone()
+      amend(r, { how: 'typed' })
+      if (g !== press0.current) return
+      setPasting(false)
+      setDone(t('Added where you were typing'))
+      later(900)
+    }, gone)
   }
   // change: the selection rewritten (edit by voice). back: from the card, so the app it goes into is
   // brought back to the front first. fx: names you put right in your edit of the words (kept as you
@@ -331,8 +356,8 @@ export default function Hud() {
     } else if (g === press0.current) { setDone(t('From next time, it\'s pasted where you\'re typing.')); later(2500) }
   }
   const label = keyLabel(dictationKey(conf), keysPlatform())
-  // Pasting where you're typing, allowed: no agent to pick while it listens.
-  const intoApp = pasteOn && st?.paste?.allowed && !why
+  // Pasting where you're typing, allowed, or for a window of Bridge AI's: no agent to pick while it listens.
+  const intoApp = (toWindow || (pasteOn && st?.paste?.allowed)) && !why
   // Paste on the card: once Accessibility was turned on while the words waited, or after a paste
   // that didn't go and may now (another app was in front, a key still held, Bridge AI in front).
   const again = pasteOn && !!st?.paste?.allowed && ['moved', 'held', 'failed', 'focus'].includes(why)
@@ -354,7 +379,8 @@ export default function Hud() {
   // What shows: the pill while it listens, transcribes, pastes, or says what became of the words;
   // the card for the words to send or copy, a note, or the speech model to download.
   const listening = s.phase === 'opening' || s.phase === 'listening'
-  const autoPaste = !!s.result && (pasteOn || edited != null) && !!st?.paste?.allowed && !why && (pasting || (fresh.current && pasted.current !== s.result.at))
+  const handsOver = toWindow || ((pasteOn || edited != null) && !!st?.paste?.allowed)
+  const autoPaste = !!s.result && handsOver && !why && (pasting || (fresh.current && pasted.current !== s.result.at))
   const view = listening ? 'listening' : s.phase === 'working' ? 'working' : s.result && (editing || (autoPaste && !done)) ? 'pasting'
     : done && !offer && !err && !needsModel && !fixes.length ? 'done' : s.result ? 'card' : s.note || s.setup ? 'note' : 'idle'
   const card = view === 'card' || view === 'note'

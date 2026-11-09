@@ -82,6 +82,8 @@ else contextBridge.exposeInMainWorld('bridgeApp', {
   // brought to the front first), whether it's allowed (a Mac's Accessibility), and asking for it.
   dictateStatus: () => ipcRenderer.invoke('bridge:dictate-status'),
   hudPaste: (text, o) => ipcRenderer.invoke('bridge:hud-paste', String(text), { back: o?.back === true }),
+  // ...or, for a window of Bridge AI's showing another of your devices, into that window's page.
+  hudInto: (text) => ipcRenderer.invoke('bridge:hud-into', String(text)),
   // Edit by voice: what was selected where you were typing, read as the key was let go.
   hudSelection: () => ipcRenderer.invoke('bridge:hud-selection'),
   pasteAccess: () => ipcRenderer.invoke('bridge:paste-access'),

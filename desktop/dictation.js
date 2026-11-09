@@ -13,7 +13,11 @@
 //   Wayland        globalShortcut through the desktop's portal: a press only, so a tap starts
 //                  listening and the next stops it (GNOME asks once; sway has no portal: none)
 // With one of Bridge AI's windows in front, the key goes to that page (as if pressed there);
-// otherwise to the dictation window, shown without taking the keyboard from the app you're in.
+// otherwise to the dictation window, shown without taking the keyboard from the app you're in. A
+// window of Bridge AI's showing another of your devices (/m/<id>/) is that device's page, which
+// can't use this computer's microphone (main.js): the dictation window listens for it, and hands
+// the words to that page (bridge:hud-into), which puts them where they'd have gone had it heard
+// them itself (src/dictation/controller.js take).
 //
 // "Where I'm typing" (Settings › Voice, off until you pick it): the dictation window, once it has
 // the text, asks for it to be pasted into the app you were in (pasteInto in platform.js says how,
@@ -297,6 +301,7 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, askAccess, tru
   let status = { mode: null }
   let settings = {}
   let route = null // where the key's press went: a page's webContents, or 'hud'
+  let into = null // ...and with 'hud', the window of ours showing another device it's for (its webContents)
   let heardByPage = false // the key is one the page hears itself even from here (the right Alt)
   let hud = null
   let pending = null // a press from before the dictation window's page was ready
@@ -309,35 +314,45 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, askAccess, tru
   const say = (wc, detail) => { if (wc && !wc.isDestroyed()) wc.executeJavaScript(`window.dispatchEvent(new CustomEvent('bridge-dictate-key', { detail: ${JSON.stringify(detail)} }))`).catch(() => {}) }
   const toHud = (detail) => {
     if (!ready) {
-      if (detail.type === 'down') pending = { down: detail.at, up: null, app: detail.app || null, bundle: detail.bundle || null }
+      if (detail.type === 'down') pending = { down: detail.at, up: null, app: detail.app || null, bundle: detail.bundle || null, into: !!detail.into }
       else if (detail.type === 'up' && pending) pending.up = detail.at
       else if (detail.type === 'cancel') { pending = null; hideHud() }
       return
     }
     say(hud?.webContents, detail)
   }
+  // Another of your devices' page (/m/<id>/...), shown in a window of ours.
+  const elsewhere = (w) => { try { return /^\/m\/[A-Za-z0-9_-]{1,20}\//.test(new URL(w.webContents.getURL()).pathname) } catch { return false } }
   // info: what the Mac's helper says was in front ({ app, bundle, path, pid, secure }).
   function onDown(at, info) {
     const w = BrowserWindow.getFocusedWindow()
-    // The right Alt as the key reaches the page in front too (a lone key isn't kept from it): it hears it itself.
-    if (w && w !== hud && isOurs(w) && heardByPage) { route = null; return }
-    if (w && w !== hud && isOurs(w)) { route = w.webContents; say(route, { type: 'down', at }); return }
+    const mine = !!w && w !== hud && isOurs(w)
+    into = null
+    if (mine && !elsewhere(w)) {
+      // The right Alt as the key reaches the page in front too (a lone key isn't kept from it): it hears it itself.
+      if (heardByPage) { route = null; return }
+      route = w.webContents
+      say(route, { type: 'down', at })
+      return
+    }
     route = 'hud'
+    // A window of ours showing another device: the words are for it, not for an app to paste into.
+    if (mine) { into = w.webContents; front = null }
     // Pressed while the window had the keyboard (its words being edited): Bridge AI is in front only
     // for that, so the words are for the app the last ones were for, and the keyboard goes back there.
-    if (keyboard) giveKeys()
+    else if (keyboard) giveKeys()
     else {
       const bundle = typeof info?.bundle === 'string' && BUNDLE.test(info.bundle) ? info.bundle : ''
       front = Number.isInteger(info?.pid) ? { app: typeof info.app === 'string' ? info.app.slice(0, 80) : '', bundle, pid: info.pid } : null
       if (bundle) keepIcon(bundle, info.path).catch(() => {})
     }
     showHud()
-    toHud({ type: 'down', at, ...(front?.app ? { app: front.app } : {}), ...(front?.bundle ? { bundle: front.bundle } : {}) })
+    toHud({ type: 'down', at, ...(into ? { into: true } : {}), ...(front?.app ? { app: front.app } : {}), ...(front?.bundle ? { bundle: front.bundle } : {}) })
   }
   function onUp(at) {
     // Edit by voice: what's selected in the app you were in, read now (the dictation window never
     // takes the keyboard, so it's still selected); the window asks for it once it has your words.
-    sel = route === 'hud' && editOn() ? readSelection(front?.pid) : null
+    sel = route === 'hud' && !into && editOn() ? readSelection(front?.pid) : null
     if (route === 'hud') toHud({ type: 'up', at })
     else if (route) say(route, { type: 'up', at })
   }
@@ -412,6 +427,14 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, askAccess, tru
   ipcMain.on('bridge:hud-pointer', (e, on) => { if (fromHud(e) && CLICK_THROUGH) hud.setIgnoreMouseEvents?.(!on, { forward: true }) })
   ipcMain.on('bridge:hud-phase', (e, phase) => { if (fromHud(e)) holdEsc(phase === 'opening' || phase === 'listening' || phase === 'working') })
   ipcMain.handle('bridge:hud-hide', async (e) => { if (fromHud(e)) { await giveKeys(); hideHud() } return true })
+  // The words it heard for a window of ours showing another device: to that window's page, which puts
+  // them where its focus is, else in its agent's message box. { put }: false when that window has
+  // gone, or had nowhere to put them (or is a Bridge AI from before it could take them).
+  ipcMain.handle('bridge:hud-into', async (e, text) => {
+    if (!fromHud(e) || typeof text !== 'string' || !text.trim() || !into || into.isDestroyed()) return { put: false }
+    const js = `(() => { const d = { text: ${JSON.stringify(text.slice(0, 200_000))}, put: false }; window.dispatchEvent(new CustomEvent('bridge-dictated', { detail: d })); return d.put === true })()`
+    return { put: await into.executeJavaScript(js).then((x) => x === true, () => false) }
+  })
   // ---------- The words on the card, edited there ----------
   // The dictation window never takes the keyboard by itself. To edit the words on its card (click
   // them, or Edit), the page asks for it: on a Mac the window is let take it for that (it can't

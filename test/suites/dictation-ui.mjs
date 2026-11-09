@@ -15,6 +15,8 @@
 //   (Wayland), not offered, and taken; changes go to the app; its key handed to the page in front.
 //   The desktop app's dictation window (?dictate=1): the level while you talk, then the text, Send to
 //   the agent you last looked at or one picked, Copy, Esc, and a press from before it was ready;
+//   for a window of Bridge AI's showing another of your devices, the words into that window's page
+//   (or left on the card when it had nowhere to put them, saying so);
 //   the words edited on its card (Edit, a click on them, Esc, ⌘↩ sending what you typed, the
 //   keyboard taken and given back), kept as edited, and the name put right offered to meeting
 //   memory (Remember, Undo, Not now), light and dark.
@@ -716,6 +718,34 @@ try {
     await kit.api('/settings', { dictation: { to: null } }, 'PATCH')
     const phases = await h.evaluate(() => window.__hud.phases)
     ok(phases.includes('listening') && phases.includes('result'), 'it tells the desktop app when it listens (Esc is held then) and when it\'s done', phases)
+    ok(real(he).length === 0, 'no page errors', he)
+    await hc.close()
+  }
+  // For a window of Bridge AI's showing another of your devices (its page can't use this computer's
+  // microphone): the window listens for it, and the words go into that window's page; with nowhere to
+  // put them there, they stay on the card, saying so.
+  {
+    const { ctx: hc, p: h, errors: he } = await hudPage()
+    await h.waitForSelector('.hud', { timeout: 10000 })
+    await h.evaluate(() => { window.__hud.into = []; window.__hud.put = true; window.bridgeApp.hudInto = async (x) => { window.__hud.into.push(x); return { put: window.__hud.put } } })
+    const winKey = (type) => h.evaluate((tp) => window.dispatchEvent(new CustomEvent('bridge-dictate-key', { detail: { type: tp, at: Date.now(), ...(tp === 'down' ? { into: true } : {}) } })), type)
+    const np = prompts.length
+    said.push('for the other window')
+    await winKey('down')
+    await listens(h)
+    ok(/Where you're typing/.test(await h.locator('.hud').innerText()) && !(await h.locator('.hud-to-btn').count()), 'a window of Bridge AI\'s showing another device: the dictation window listens for it, with no agent to pick', await h.locator('.hud').innerText())
+    await sleep(1300)
+    await winKey('up')
+    ok(!!(await until(() => h.evaluate(() => window.__hud.into.at(-1) === 'For the other window.'), 8000, 100)), 'let go: the words go into that window\'s page', await h.evaluate(() => window.__hud.into))
+    ok(!!(await until(async () => /Added where you were typing/.test(await h.locator('.hud').innerText().catch(() => '')), 4000, 100)) && !!(await until(() => h.evaluate(() => window.__hud.hidden > 0), 4000, 100)) && prompts.length === np, '"Added where you were typing", then it hides, and nothing is sent to an agent', await h.locator('.hud').innerText().catch(() => ''))
+    const kept = await until(async () => (await kit.api('/dictations?limit=20')).items.find((x) => x.text === 'For the other window.' && x.how === 'typed'), 5000, 200)
+    ok(!!kept && !kept.agent && !kept.app, 'kept as typed in Bridge AI', kept)
+    await h.evaluate(() => { window.__hud.put = false })
+    said.push('nowhere for these')
+    await winKey('down'); await listens(h); await sleep(1300); await winKey('up')
+    ok(!!(await until(async () => (await h.locator('.hud-text').innerText().catch(() => '')) === 'Nowhere for these.' && /Nowhere to put it in that window/.test(await h.locator('.hud').innerText()), 8000, 100)) && await h.locator('.hud button', { hasText: 'Copy' }).isVisible() && prompts.length === np, 'nowhere to put them there: the words stay on the card to copy or send, saying so, and nothing is sent', await h.locator('.hud').innerText().catch(() => ''))
+    await sleep(400)
+    await shot(h, `${tag}dictation-window-for-window`)
     ok(real(he).length === 0, 'no page errors', he)
     await hc.close()
   }
