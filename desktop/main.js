@@ -813,6 +813,9 @@ const FLOAT_STATE = path.join(app.getPath('userData'), 'float.json')
 let float = null
 let floatHiddenFor = null // what was on the card when you hid it: it stays hidden until that changes
 let floatKey = null
+// Kept out of pictures of the screen (Settings › Meetings, on unless turned off): the meeting's own
+// (Watch a screen) and a screen you share on a call. Off, a screenshot of it shows it.
+let floatPrivate = true
 function floatAt(w, h) {
   try {
     // Where you left it, kept whole on that screen (it was moved while small, say).
@@ -834,8 +837,7 @@ function showFloat() {
   })
   float.setAlwaysOnTop(true, 'floating')
   float.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
-  // Not in pictures of the screen: the meeting's own (Watch a screen) or a screen you share on a call.
-  float.setContentProtection(true)
+  float.setContentProtection(floatPrivate)
   // Join and an invite's files, from a meeting's prep: in their own apps, as from the main window.
   float.webContents.setWindowOpenHandler(({ url }) => { if (!isLocal(url)) openOutside(url); return { action: 'deny' } })
   float.webContents.on('will-navigate', (e) => e.preventDefault())
@@ -851,6 +853,10 @@ async function watchCalls() {
       const c = await fetch(`${URL_BASE}/api/calls`, { signal: AbortSignal.timeout(3000) }).then((r) => (r.ok ? r.json() : null))
       if (c) {
         const mode = c.float === 'menubar' && !IS_MAC ? 'meetings' : c.float || 'meetings'
+        if (floatPrivate !== (c.floatPrivate !== false)) {
+          floatPrivate = c.floatPrivate !== false
+          if (float && !float.isDestroyed()) float.setContentProtection(floatPrivate)
+        }
         // A meeting with other people starting within ten minutes: the card shows its prep.
         floatKey = c.recording ? `rec:${c.recording.id}:${c.recording.callEnded || ''}` : c.prompt ? `call:${c.prompt.app}:${c.prompt.at}` : c.soon ? `soon:${c.soon.id}` : 'idle'
         const want = mode === 'always' || (mode === 'meetings' && floatKey !== 'idle')

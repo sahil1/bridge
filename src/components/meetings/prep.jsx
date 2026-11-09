@@ -221,3 +221,59 @@ export function PrepCard({ e, size = 'full', invite = true, prep = null, onOpenM
     </section>
   )
 }
+
+// Shortly before a meeting, on the floating card: what to go in with, at a glance. The goals and
+// questions (three at most, all of each on hover), who's coming and last time in a line each, which
+// model wrote them, and the rest in Today › Calendar (onOpenEvent: View Calendar). With no
+// suggestions yet, the invite's agenda, and Suggest (or how to add a model) as the panel has it.
+export function PrepGlance({ e, onOpenEvent }) {
+  const p = usePrep(e)
+  const d = p.data
+  const s = d?.suggest
+  const items = (s?.items || []).slice(0, 3)
+  const working = !!(d?.making || p.busy)
+  const people = d?.people
+  const n = people ? people.known.length + people.new.length + people.more : 0
+  const met = people?.known.length || 0
+  const fresh = people?.insights !== false ? people?.new.length || 0 : 0
+  const who = n ? [n === 1 ? t('1 invited') : t('{n} invited', { n }), met ? (met === 1 ? t('1 you\'ve met') : t('{n} you\'ve met', { n: met })) : null, fresh ? t('{n} new to your meetings', { n: fresh }) : null].filter(Boolean).join(' · ') : null
+  const last = d?.last
+  const open = last ? last.yours.length + last.theirs.length : 0
+  // Last time in a series is the same meeting: its date and what's still open, before its name.
+  const lastSaid = last && (last.title === e.title
+    ? (open ? t('Last time, {date}: {n} still open', { date: day(last.startedAt), n: open }) : t('Last time, {date}', { date: day(last.startedAt) }))
+    : (open ? t('Last time: {title}, {date} · {n} still open', { title: last.title, date: day(last.startedAt), n: open }) : t('Last time: {title}, {date}', { title: last.title, date: day(last.startedAt) })))
+  return (
+    <section className="prep-glance" aria-label={t('AI Assist')}>
+      {!d && !p.error && <div className="skeleton-rows"><div /><div /></div>}
+      {p.error && <p className="error-text small">{p.error} <button type="button" className="link-btn" onClick={p.load}>{t('Try again')}</button></p>}
+      {d && (
+        <>
+          {(items.length > 0 || working) && (
+            <div className="pg-sug">
+              <span className="pg-head"><Icon name="wand" size={12} /> {working && !items.length ? t('Thinking…') : t('Goals and Questions')}</span>
+              {items.map((x, i) => (
+                <p key={i} className={`pg-item prep-tip-text ${x.kind}`} title={x.why ? `${x.text}\n${x.why}` : x.text}><span className="pg-kind">{t(PREP_KIND[x.kind] || PREP_KIND.goal)}</span> {x.text}</p>
+              ))}
+            </div>
+          )}
+          <div className="pg-facts">
+            {who && <p className="pg-fact prep-line" title={[...people.known.map((x) => x.name), ...people.new].join(', ')}><Icon name="users" size={12} /><span>{who}</span></p>}
+            {lastSaid && <p className="pg-fact prep-line" title={lastSaid}><Icon name="clock" size={12} /><span>{lastSaid}</span></p>}
+            {!items.length && d.agenda && <p className="pg-fact prep-line" title={d.agenda}><Icon name="doc" size={12} /><span>{t('The invite: {text}', { text: d.agenda })}</span></p>}
+          </div>
+          {s?.error && <p className="error-text small">{t("Couldn't suggest anything: {error}", { error: s.error })}</p>}
+          {!items.length && !working && (d.writer
+            ? <button type="button" className="btn small pg-suggest" onClick={() => p.suggest(!!s?.error)}><Icon name="wand" size={12} /> {s?.error ? t('Try again') : t('Suggest goals and questions')}</button>
+            : <p className="pg-none">{t('Suggested goals and questions need a model to write them. Add one in Settings › Model Providers, or sign in to an agent.')}</p>)}
+          {(items.length > 0 || onOpenEvent) && (
+            <div className="pg-foot">
+              {items.length > 0 && <span className="pg-by">{t('By {model} at {time}', { model: s.label || s.model, time: fmtTime(s.at) })}</span>}
+              {onOpenEvent && <button type="button" className="fc-link" onClick={onOpenEvent}>{t('View Calendar')} <Icon name="chevron" size={10} /></button>}
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  )
+}

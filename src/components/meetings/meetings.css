@@ -17,7 +17,7 @@
 .rec-menu-acts > .error-text, .rec-screen > .error-text { flex-basis: 100%; }
 /* Capture and the eye that stops watching go together. */
 .rec-screen { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.rec-menu-links, .fc-links { display: flex; justify-content: space-between; gap: 8px; font-size: 12.5px; }
+.rec-menu-links { display: flex; justify-content: space-between; gap: 8px; font-size: 12.5px; }
 .quick-note { display: grid; gap: 3px; }
 .quick-note input { min-width: 0; height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--pane-2); color: var(--ink); font: 13px var(--font); outline: none; }
 .quick-note input:focus { border-color: color-mix(in srgb, var(--accent) 50%, var(--line-2)); background: var(--pane); }
@@ -99,7 +99,7 @@
 .mt-t { font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; padding-top: 2px; }
 .mt-text { grid-column: 1 / -1; color: var(--ink); }
 /* Live words: what someone is still saying, quieter than the lines that are in. */
-.mt-so-far .mt-text, .fc-said-line.so-far { color: var(--ink-2); }
+.mt-so-far .mt-text { color: var(--ink-2); }
 .mt-hint { margin: 6px 0; }
 
 .mt-ask { display: grid; gap: 8px; border-top: 1px solid var(--line); padding-top: 10px; }
@@ -195,45 +195,125 @@
 @media (max-width: 640px) { .call-prompt { top: 62px; } }
 
 /* The floating card (FloatCard.jsx, ?float=1): the window is transparent; the card is what shows,
-   and dragging it anywhere but its buttons moves the window. */
+   and dragging it anywhere but its buttons and boxes moves the window (desktop app). */
 html.is-float, html.is-float body, html.is-float #root { background: transparent !important; overflow: hidden; }
 .float-root { padding: 12px; width: max-content; }
 /* No border: a hairline ring and a shadow small enough to fit in the window's 12px around the card
    (a bigger one was cut off at the window's edge, a hard dark line around the card). */
-.float-card { display: grid; gap: 8px; width: 300px; padding: 8px 12px; border-radius: 16px; background: var(--pane); color: var(--ink); box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 9%, transparent), 0 2px 8px rgb(0 0 0 / .16); font: 13px var(--font); user-select: none; transition: box-shadow .12s, transform .12s; }
-.float-card.dragging, .float-card.dragging * { cursor: grabbing !important; }
-.float-card.dragging { box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 12%, transparent), 0 3px 9px rgb(0 0 0 / .22); }
-.fc-warn { color: var(--warning); }
-.fc-line.fc-quiet { color: var(--ink-2); display: block; -webkit-line-clamp: unset; overflow: visible; }
-.fc-quiet b { color: var(--warning); }
-/* Slim and open, the bar stays where it is (same width and padding), so what you point at doesn't
-   move: it opens below, or above when the card sits low on the screen (and grows upward). */
-.float-card.slim { gap: 0; border-radius: 12px; }
+.float-card { --fc-them: #8e4ec6; --fc-rec: #e5484d; display: grid; gap: 8px; width: 300px; padding: 8px 12px; border-radius: 14px; background: var(--pane); color: var(--ink); box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 10%, transparent), 0 4px 10px -2px rgb(0 0 0 / .22), 0 1px 2px rgb(0 0 0 / .08); font: 13px/1.4 var(--font); user-select: none; transition: box-shadow .12s; }
+html[data-theme="dark"] .float-card { --fc-them: #b98fe8; --fc-rec: #f2555a; box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 14%, transparent), 0 4px 10px -2px rgb(0 0 0 / .5); }
+.in-bridge-app .float-card { cursor: grab; }
+.in-bridge-app .float-card:active, .float-card.dragging, .float-card.dragging * { cursor: grabbing !important; }
+.float-card button, .float-card a { cursor: pointer; }
+.float-card input { cursor: text; }
+.float-card.dragging { box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 12%, transparent), 0 5px 11px -2px rgb(0 0 0 / .3); }
+.float-card p { margin: 0; }
+/* Slim and open, the bar stays where it is (same width, padding and buttons), so what you point at
+   doesn't move: the rest opens below, or above when the card sits low on the screen (and grows upward). */
 .float-card.up .fc-more { order: -1; }
 /* Open, it fits on the screen: the bar and AI Assist's suggestion stay, and what's under them
    scrolls past the screen's height (--fc-more-max, from FloatCard.jsx). */
 .float-card .fc-more { max-height: var(--fc-more-max, 560px); overflow-y: auto; overscroll-behavior: contain; grid-auto-rows: max-content; }
-.fc-grip { flex: none; display: grid; place-items: center; width: 16px; height: 22px; margin-left: -4px; border-radius: 5px; color: var(--ink-3); cursor: grab; }
-.fc-grip:hover { background: var(--pane-2); color: var(--ink-2); }
-.fc-more { display: grid; gap: 8px; }
-.fc-x.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
-.fc-note input { height: 28px; }
-.fc-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.fc-head.fc-click { cursor: pointer; }
-.fc-time { font-variant-numeric: tabular-nums; }
-.fc-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; }
-.fc-accent { color: var(--accent); }
-/* The header's buttons, easy to see over a busy screen: ink, not grey, on a faint plate. */
-.fc-x { flex: none; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 7px; color: var(--ink-2); background: color-mix(in srgb, var(--ink) 5%, transparent); }
-.fc-x:hover { background: var(--pane-3, var(--pane-2)); color: var(--ink); }
-.fc-x:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.fc-tip .fc-x { background: none; }
-.fc-line { margin: 0; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.fc-acts { display: flex; align-items: center; gap: 6px; }
+.fc-more { display: grid; gap: 10px; padding: 2px 0 4px; }
 .fc-grow { flex: 1; }
-.fc-agent { display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 6px; border-radius: 7px; color: var(--ink-2); text-align: left; }
-.fc-agent:hover { background: var(--pane-2); color: var(--ink); }
-.fc-agent span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The bar: the recording's dot, how long, what; Pause or Resume. Other cards: a badge for what it's
+   about, a title and a line under it. */
+.fc-head { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 28px; margin-right: -6px; }
+.fc-head.fc-click { cursor: pointer; }
+.fc-dot { flex: none; display: grid; place-items: center; width: 14px; height: 14px; }
+.float-card .rec-dot { width: 8px; height: 8px; background: var(--fc-rec); opacity: 1; box-shadow: 0 0 0 0 color-mix(in srgb, var(--fc-rec) 45%, transparent); animation: fc-rec 2s ease-out infinite; }
+@keyframes fc-rec { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--fc-rec) 45%, transparent); } 70%, 100% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--fc-rec) 0%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .float-card .rec-dot { animation: none; } }
+.fc-dot.paused .rec-dot { background: var(--ink-3); box-shadow: none; animation: none; }
+.fc-time { flex: none; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.fc-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; color: var(--ink-2); }
+.fc-ask { align-items: flex-start; gap: 10px; padding-top: 2px; }
+.fc-ask .fc-title { flex: none; display: block; color: var(--ink); font-weight: 600; }
+.fc-ask-text { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.fc-sub { font-size: 12px; line-height: 1.35; color: var(--ink-2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.fc-sub b { font-weight: 600; color: var(--ink); }
+.fc-badge { flex: none; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; color: var(--accent); background: var(--accent-soft); }
+.fc-badge.fc-mark { background: var(--pane-2); }
+.fc-sub-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.fc-sub-row .fc-sub { flex: 1; min-width: 0; }
+.fc-join { flex: none; text-decoration: none; display: inline-flex; align-items: center; gap: 5px; margin: 2px 0 0; }
+.fc-ask .fc-x { margin-top: 3px; }
+/* Its buttons: icons, plain until pointed at. */
+.fc-x { flex: none; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 7px; color: var(--ink-2); }
+.fc-x:hover { background: var(--pane-2); color: var(--ink); }
+.fc-x:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.fc-x.on { color: var(--accent); background: var(--accent-soft); }
+.fc-warn, .fc-warn:hover { color: var(--warning); }
+.fc-play, .fc-play:hover { color: var(--accent); }
+.fc-line { line-height: 1.4; }
+
+/* AI Assist's newest suggestion, under the bar, open or not. */
+.fc-tip { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 4px; padding: 7px 4px 8px 10px; border-radius: 10px; background: var(--ai-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ai) 16%, transparent); }
+.fc-tip-kind { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; color: var(--ai); }
+.fc-tip.check .fc-tip-kind { color: var(--warning); }
+.fc-tip-text { grid-column: 1; font-size: 12.5px; line-height: 1.4; color: var(--ink); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.fc-tip-acts { grid-column: 2; grid-row: 1 / span 2; display: inline-flex; align-self: start; margin-top: -3px; }
+.fc-tip .fc-x { width: 24px; height: 24px; }
+.fc-tip .fc-x:hover { background: color-mix(in srgb, var(--ai) 12%, transparent); }
+
+/* A call that ended, or one with no sound: what happened, and what to do. */
+.fc-banner { display: grid; gap: 8px; justify-items: start; padding: 9px 10px; border-radius: 10px; background: var(--pane-2); }
+.fc-banner p { font-size: 12.5px; line-height: 1.4; color: var(--ink-2); }
+.fc-banner b { font-weight: 600; color: var(--ink); }
+.fc-banner.fc-quiet { background: color-mix(in srgb, var(--warning) 12%, var(--pane)); }
+
+/* What's being said: when it ends, the last few lines, and how loud and how much each side talks. */
+.fc-live { display: grid; gap: 8px; }
+.fc-info { font-size: 11.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fc-said { display: grid; gap: 5px; }
+.fc-said p { font-size: 12.5px; line-height: 1.4; }
+.fc-said-line { color: var(--ink); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.fc-said-line b { font-weight: 600; color: var(--accent); margin-right: 2px; }
+.fc-said-line.them b { color: var(--fc-them); }
+.fc-said-line.so-far { color: var(--ink-3); }
+.fc-said-none { color: var(--ink-3); }
+.fc-talk { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 500; color: var(--ink-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fc-who { display: inline-flex; align-items: center; gap: 6px; }
+.fc-share { flex: 1; height: 4px; border-radius: 2px; background: linear-gradient(to right, var(--accent) var(--you), var(--fc-them) var(--you)); }
+.fc-share.none { background: var(--line-2); }
+.fc-mic-only { margin-left: auto; font-size: 11px; }
+.fc-level { display: inline-flex; align-items: flex-end; gap: 1.5px; height: 12px; }
+.fc-level i { width: 2.5px; border-radius: 1px; background: var(--line-2); }
+.fc-level i:nth-child(1) { height: 4px; } .fc-level i:nth-child(2) { height: 6px; } .fc-level i:nth-child(3) { height: 8px; }
+.fc-level i:nth-child(4) { height: 10px; } .fc-level i:nth-child(5) { height: 12px; }
+.fc-who.you .fc-level i.on { background: var(--accent); }
+.fc-who.them .fc-level i.on { background: var(--fc-them); }
+
+.fc-note input { width: 100%; height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--pane-2); color: var(--ink); font: 12.5px var(--font); }
+.fc-note input:focus { outline: none; border-color: var(--accent); background: var(--pane); }
+.fc-note small { display: block; margin-top: 4px; font-size: 11.5px; }
+
+/* Suggest what to ask and watching the shared screen: on or off, as chips. */
+.fc-modes { display: flex; flex-wrap: wrap; gap: 6px; }
+.fc-chip { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border-radius: 13px; border: 1px solid var(--line); background: var(--pane); color: var(--ink-2); font: 500 12px var(--font); white-space: nowrap; }
+.fc-chip:hover { background: var(--pane-2); color: var(--ink); }
+.fc-chip.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, transparent); background: var(--accent-soft); }
+.fc-chip.fc-ai > .icon { color: var(--ai); }
+.fc-chip.fc-ai.on { color: var(--ai); border-color: color-mix(in srgb, var(--ai) 35%, transparent); background: var(--ai-soft); }
+
+.fc-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.fc-acts.fc-end { justify-content: flex-end; }
+.fc-acts .btn { gap: 5px; }
+.float-card .fc-stop, .float-card .fc-stop:hover { color: #fff; background: var(--fc-rec); border-color: transparent; }
+.float-card .fc-stop:hover { filter: brightness(1.06); }
+
+/* The way out: to the meeting or every meeting, and the card's own pin and menu bar buttons. */
+.fc-links { display: flex; align-items: center; gap: 14px; margin-right: -6px; padding-top: 8px; border-top: 1px solid var(--line); }
+.fc-link { display: inline-flex; align-items: center; gap: 3px; height: 24px; font-size: 12px; font-weight: 500; color: var(--accent); }
+.fc-link:hover { text-decoration: underline; text-underline-offset: 2px; }
+
+/* Between meetings, what needs you. */
+.fc-agents { display: grid; gap: 1px; margin: 0 -6px; }
+.fc-agent { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 6px 0 8px; border-radius: 8px; color: var(--ink); text-align: left; font-size: 12.5px; }
+.fc-agent span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fc-agent > .icon { color: var(--ink-3); }
+.fc-agent:hover { background: var(--pane-2); }
 
 /* A meeting's toolbar, like Meetily's: Regenerate, the notes' language, model and template; Save, Copy. */
 .mt-tools { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 9px; background: var(--pane-2); }
@@ -338,36 +418,6 @@ html.is-float, html.is-float body, html.is-float #root { background: transparent
   .mt-cols > .handle, .mt-thide { display: none; }
   .mt-cols > .mt-transcript { padding-left: 0; }
 }
-
-/* The floating card, open: levels, who's talked, the last minutes as bars, the last things said.
-   It moves when dragged from anywhere but its buttons and boxes (desktop app). */
-.in-bridge-app .float-card { cursor: grab; }
-.in-bridge-app .float-card:active { cursor: grabbing; }
-.float-card button, .float-card input, .float-card a { cursor: pointer; }
-.float-card input { cursor: text; }
-.fc-play { color: var(--accent); }
-.fc-viz { display: grid; gap: 6px; padding: 6px 8px; border-radius: 10px; background: var(--pane-2); }
-.fc-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.fc-level { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; }
-.fc-level i { width: 3px; border-radius: 1px; background: var(--line-2); }
-.fc-level i:nth-child(1) { height: 4px; } .fc-level i:nth-child(2) { height: 6px; } .fc-level i:nth-child(3) { height: 8px; }
-.fc-level i:nth-child(4) { height: 10px; } .fc-level i:nth-child(5) { height: 12px; } .fc-level i:nth-child(6) { height: 14px; }
-.fc-level i.on { background: var(--accent-fill); }
-.fc-level small { margin-left: 4px; font-size: 11px; color: var(--ink-3); align-self: center; }
-.fc-share { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 6px; font-size: 11px; color: var(--ink-2); white-space: nowrap; }
-.fc-share b { font-weight: 550; }
-.fc-share i { height: 5px; border-radius: 3px; background: linear-gradient(to right, var(--accent) var(--you), #8e4ec6 var(--you)); }
-.fc-spark { display: block; width: 100%; height: 30px; }
-.fc-spark .axis { stroke: var(--line-2); stroke-width: 1; }
-.fc-spark .you { fill: var(--accent); }
-.fc-spark .them { fill: #8e4ec6; }
-.fc-said { display: grid; gap: 3px; }
-.fc-said p { margin: 0; font-size: 12px; line-height: 1.35; }
-.fc-said-line { color: var(--ink-2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.fc-said-line b { color: var(--accent); font-weight: 600; margin-right: 2px; }
-.fc-said-line.them b { color: #8e4ec6; }
-.fc-info { margin: 0; font-size: 11.5px; }
-.fc-acts { flex-wrap: wrap; }
 
 /* 3.0: a meeting and the list of them in a tab, with a header like an agent's (layout.jsx
    PaneHeader): the name, when, who and where the notes are, changed or opened in place. */
@@ -514,15 +564,14 @@ button.mt-who:not(:disabled):hover { text-decoration: underline dotted; text-und
 .mt-assist-sort select { height: 26px; border: 1px solid var(--line); border-radius: 7px; background: var(--pane); color: var(--ink); font: 500 12.5px var(--font); padding: 0 6px; }
 .mt-tip { display: grid; grid-template-columns: auto 1fr auto auto; align-items: start; gap: 4px 10px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--pane-2); }
 .mt-tip.kept { opacity: .7; }
-.mt-tip-kind, .fc-tip-kind { font-size: 10.5px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--accent); padding-top: 2px; }
-.mt-tip.check .mt-tip-kind, .fc-tip.check .fc-tip-kind { color: var(--warning); }
+.mt-tip-kind { font-size: 10.5px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--accent); padding-top: 2px; }
+.mt-tip.check .mt-tip-kind { color: var(--warning); }
 .mt-tip-text { display: grid; gap: 2px; font-size: 13.5px; line-height: 1.45; min-width: 0; }
 .mt-tip-text small { font-size: 11.5px; line-height: 1.35; }
 .mt-tip .mt-t { padding-top: 2px; }
 .mt-tip-acts { display: inline-flex; gap: 2px; }
 .mt-tip-acts .ghost-btn { height: 22px; padding: 0 6px; }
-.mt-assist-wand, .mt-ask-wand, .mt-tool.lead > .icon, .fc-ai > .icon { flex: none; color: var(--ai); }
-.fc-ai.on { border-color: color-mix(in srgb, var(--ai) 35%, transparent); background: var(--ai-soft); }
+.mt-assist-wand, .mt-ask-wand, .mt-tool.lead > .icon { flex: none; color: var(--ai); }
 
 /* Files that look like they go with the meeting. */
 .mt-recent { display: grid; gap: 6px; padding-top: 8px; border-top: 1px solid var(--line); }
@@ -531,12 +580,6 @@ button.mt-who:not(:disabled):hover { text-decoration: underline dotted; text-und
 .mt-recent-name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; max-width: 100%; }
 .mt-recent-file .btn { margin-left: auto; }
 .mt-recent-look { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; }
-
-/* The floating card: AI Assist's newest suggestion, under the bar. */
-.fc-tip { display: grid; grid-template-columns: auto 1fr auto auto; align-items: start; gap: 6px; margin-top: 6px; padding: 6px 8px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 9%, var(--pane-2)); }
-.fc-tip-text { font-size: 12.5px; line-height: 1.35; color: var(--ink); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-.fc-tip .fc-x { width: 20px; height: 20px; }
-.fc-acts .btn.on { color: var(--accent); }
 
 /* While it records: your notes, always in view, beside what's picked on a wide screen and above it
    on a phone, with their name and what they're for over them. */
