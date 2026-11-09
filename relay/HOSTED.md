@@ -29,9 +29,11 @@ this:
   across its computers in an 8-hour window and a week, like Claude's, and what the accounts service
   last said of it.
 - Phones work exactly as with a relay of your own: they open the computer's address, pair, and
-  everything past the handshake is end-to-end encrypted between phone and computer (in a browser,
-  by the page the relay serves; the iPhone app has its own). One address per
-  computer keeps each pairing, service worker and saved copy apart, as before.
+  everything past the handshake is end-to-end encrypted between phone and computer. In a browser
+  that's done by the page the relay serves, and the page says so before pairing; the iPhone and
+  Android apps carry their own copy, and a pairing link opens them when they're installed (Pairing
+  links open the apps, below). One address per computer keeps each pairing, service worker and
+  saved copy apart, as before.
 - Any other name under the domain gets a plain 404: names that aren't an id (ids end in two
   checksum characters, so a made-up name is turned away without waking anything), reserved names
   (www, api, relay, admin and a few more), names two levels down, and ids that aren't registered
@@ -606,10 +608,14 @@ with
 >
 > **What it can read: nothing past the handshake.** Everything between your phone and your computer
 > is end-to-end encrypted, so the relay passes on bytes it can't read. That holds as long as the page
-> doing the encrypting is the one Bridge AI wrote: the iPhone app has it built in, but in a phone's
-> browser the page comes from the relay, so whoever runs the relay could change it. On a relay that
-> isn't yours, use the iPhone app. What it sees, as any server does: the IP addresses of your phone
-> and computer, when they connect, and how much they send.
+> doing the encrypting is the one Bridge AI wrote: the iPhone and Android apps have it built in, and
+> a pairing link opens them when they're installed, but in a phone's browser the page comes from the
+> relay, so whoever runs the relay could change it (the page says so before pairing). On a relay
+> that isn't yours, use the iPhone or Android app. Your computer checks the page the relay serves
+> once a day, and when you open Settings › Devices, against Bridge AI's own for the version the
+> relay says it runs (its own copy, or that release's from GitHub), and Settings › Devices says so
+> if they differ; nothing is sent but those requests. What it sees, as any server does: the IP
+> addresses of your phone and computer, when they connect, and how much they send.
 >
 > **What it keeps for your computer**: a random id (its address there), a hash of the token your
 > computer uses to connect (never the token), your account's and this device's ids, the Bridge AI

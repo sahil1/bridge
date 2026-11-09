@@ -285,7 +285,7 @@ Everything between your phone and your computer is end-to-end encrypted. Each pa
 own key, kept on the phone, and each connection makes fresh keys. The relay passes on bytes it
 can't read. In a phone's browser, the page that does the encrypting comes from the relay itself, so
 this rests on the relay serving it unchanged: on your own relay that's you; on a relay someone else
-runs, use the iPhone app, which has the page built in. It stores when your computer was last online, and the messages you send from your phone
+runs, use the iPhone or Android app, which have the page built in. It stores when your computer was last online, and the messages you send from your phone
 while your computer is offline (to an agent, or an answer to its question), until your computer is
 back to take them. Each of those is sealed on the phone for your computer, so the relay can't read
 or change it, and it's deleted once your computer has it, or after 7 days. The relay also keeps,
@@ -303,8 +303,9 @@ Tailscale's privacy policy.
 
 ## The phone apps
 
-The iPhone and Android apps show Bridge AI from your computer, through your relay. They have no
-account. Apart from Cloud Agents (below), they send nothing anywhere but to your relay and, through
+The iPhone and Android apps show Bridge AI from your computer, through your relay. Each carries its
+own copy of the relay's phone page, so the code that does the encrypting never comes from the relay.
+They have no account. Apart from Cloud Agents (below), they send nothing anywhere but to your relay and, through
 it, end to end to your computer.
 
 - **What they keep**: the list of computers you paired and each one's pairing (the phone's key),
