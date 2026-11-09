@@ -7,7 +7,7 @@
 // the same. Nothing was lost: every setting that was there before Advanced (each control by its
 // name) is still in its section, Advanced opened. At phone width (375 px), dark: Meetings with
 // Advanced open, nothing wider than the screen or cut off, and Advanced a whole 40 px target.
-import { startKit, checks, until, browser, page, shot, phoneFaults, advanced, IS_MAC } from '../lib/harness.mjs'
+import { startKit, checks, until, browser, page, shot, phoneFaults, advanced, withoutCutOff, IS_MAC } from '../lib/harness.mjs'
 
 const { ok, done } = checks('settings-ui')
 const kit = await startKit('settings-ui')
@@ -166,7 +166,8 @@ try {
     // And, from inside Settings, to one in another section.
     await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'providers-speech' } })))
     ok(!!(await until(async () => /Model Providers/.test(await p.locator('.st-nav-item.on').innerText().catch(() => '')) && await p.locator('.modal.settings [data-setting="providers-speech"]').isVisible(), 8000)), 'from inside Settings, a link to the speech services\' keys: Model Providers, Advanced opened at them')
-    ok(errors.length === 0, 'no page errors', errors)
+    // (WebKit counts a request a reload cuts off as a page error.)
+    ok(withoutCutOff(errors).length === 0, 'no page errors', errors)
     await ctx.close()
   }
 
