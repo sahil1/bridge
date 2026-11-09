@@ -27,7 +27,9 @@ const windows = {
   // How the page says what an update would lose in it (above).
   answerBusy: (fn) => { busyAnswer = typeof fn === 'function' ? fn : null },
 }
-if (machine) contextBridge.exposeInMainWorld('bridgeApp', { platform: process.platform, desktop: false, machine, ...windows })
+// dictates: the app listens for the dictation key in its window (desktop/dictation.js), as its page
+// can't use this computer's microphone, so the page leaves the key to it.
+if (machine) contextBridge.exposeInMainWorld('bridgeApp', { platform: process.platform, desktop: false, machine, dictates: true, ...windows })
 else contextBridge.exposeInMainWorld('bridgeApp', {
   platform: process.platform,
   desktop: true,

@@ -16,7 +16,8 @@
 //   The desktop app's dictation window (?dictate=1): the level while you talk, then the text, Send to
 //   the agent you last looked at or one picked, Copy, Esc, and a press from before it was ready;
 //   for a window of Bridge AI's showing another of your devices, the words into that window's page
-//   (or left on the card when it had nowhere to put them, saying so);
+//   (or left on the card when it had nowhere to put them, saying so); the agent you looked at last,
+//   kept by whichever window you looked at it in, or said to be gone with nobody picked;
 //   the words edited on its card (Edit, a click on them, Esc, ⌘↩ sending what you typed, the
 //   keyboard taken and given back), kept as edited, and the name put right offered to meeting
 //   memory (Remember, Undo, Not now), light and dark.
@@ -746,6 +747,27 @@ try {
     ok(!!(await until(async () => (await h.locator('.hud-text').innerText().catch(() => '')) === 'Nowhere for these.' && /Nowhere to put it in that window/.test(await h.locator('.hud').innerText()), 8000, 100)) && await h.locator('.hud button', { hasText: 'Copy' }).isVisible() && prompts.length === np, 'nowhere to put them there: the words stay on the card to copy or send, saying so, and nothing is sent', await h.locator('.hud').innerText().catch(() => ''))
     await sleep(400)
     await shot(h, `${tag}dictation-window-for-window`)
+    ok(real(he).length === 0, 'no page errors', he)
+    await hc.close()
+  }
+  // The agent you looked at last, kept by whichever window you looked at it in (here billing, after
+  // payments in this computer's window): the dictation window is for it; not running any more, it
+  // says so and waits for you to pick, never another agent (the Chief of Staff) in its place.
+  {
+    const { ctx: hc, p: h, errors: he } = await hudPage()
+    await h.waitForSelector('.hud', { timeout: 10000 })
+    const look = (l) => h.evaluate((x) => localStorage.setItem('cc-looked', JSON.stringify({ ...x, at: Date.now() })), l)
+    const chip = h.locator('.hud-to-btn')
+    await look({ machine: null, pane: two.paneId, name: 'billing' })
+    said.push('for billing')
+    await key(h, 'down'); await listens(h); await sleep(1300); await key(h, 'up')
+    ok(!!(await until(async () => (await chip.getAttribute('data-pane').catch(() => '')) === two.paneId, 5000, 100)), 'the agent you looked at last, kept by the window you looked at it in: the dictation window is for it', await h.locator('.hud').innerText().catch(() => ''))
+    await look({ machine: null, pane: 'w99:p99', name: 'Old notes' })
+    const np = prompts.length
+    said.push('for old notes')
+    await key(h, 'down'); await listens(h); await sleep(1300); await key(h, 'up')
+    ok(!!(await until(async () => /Old notes isn't running any more/.test(await h.locator('.hud').innerText().catch(() => '')), 8000, 100)) && /Pick an agent/.test(await chip.innerText()) && await h.locator('.hud button', { hasText: 'Send' }).isDisabled() && (await h.locator('.hud-text').innerText()) === 'For old notes.' && prompts.length === np, 'not running any more: it says so, nobody is picked (not the Chief of Staff), and the words stay to send or copy', await h.locator('.hud').innerText().catch(() => ''))
+    await h.evaluate(() => localStorage.removeItem('cc-looked'))
     ok(real(he).length === 0, 'no page errors', he)
     await hc.close()
   }

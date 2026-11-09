@@ -57,8 +57,12 @@ export const onThisComputer = () => !machineId && !viaRelay && (!!window.bridgeA
 // A WebSocket to this server (the live terminal), through the relay's link when there is one.
 export const openSocket = (path) => (relayPage ? new relayPage.WebSocket(`${BASE}${path}`) : new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${BASE}${path}`))
 
-export async function api(path, opts = {}) {
-  const res = await fetch(apiUrl(path), {
+export const api = (path, opts) => call(apiUrl(path), opts)
+// The same on one of your devices by this computer's id for it (null: this one), through /m/<id>/
+// as a window showing it does: the dictation window, sending to an agent you looked at there.
+export const apiOn = (machine, path, opts) => call(`${machine ? `/m/${machine}` : ''}/api${path}`, opts)
+async function call(url, opts = {}) {
+  const res = await fetch(url, {
     ...opts,
     headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
     body: opts.body ? JSON.stringify(opts.body) : undefined,

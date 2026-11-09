@@ -3,7 +3,8 @@
 // with it next to this device's agents without switching. Only the tabs in view are drawn, so at
 // most two of these are open at once. Tab ids: remote:<device id, or "here">:<pane id>.
 // Dictation here, with the focus in it or nothing focused and it on screen: the words are handed to
-// its page, which puts them where they'd have gone had they been said there (dictation/controller.js).
+// its page, which puts them where they'd have gone had they been said there; and what's started in
+// it (its mic button, Ask out loud) this page listens for, giving it the words (dictation/controller.js).
 import { useEffect, useRef } from 'react'
 import Icon from './Icon.jsx'
 import { goMachine } from './Machines.jsx'
@@ -18,6 +19,7 @@ export default function RemoteAgent({ a }) {
   useEffect(() => registerBox(a.paneId, {
     frame: true,
     name: a.title,
+    win: () => frame.current?.contentWindow || null,
     visible: () => !!frame.current?.getClientRects().length,
     insert: (text) => handOver(frame.current, text),
   }), [a.paneId, a.title])

@@ -17,7 +17,9 @@
 // window of Bridge AI's showing another of your devices (/m/<id>/) is that device's page, which
 // can't use this computer's microphone (main.js): the dictation window listens for it, and hands
 // the words to that page (bridge:hud-into), which puts them where they'd have gone had it heard
-// them itself (src/dictation/controller.js take).
+// them itself (src/dictation/controller.js take). Such a page leaves the key to the app (preload.js
+// dictates), so with the key from any app off it's heard there all the same, before the page gets it
+// (before-input-event), with this computer's key.
 //
 // "Where I'm typing" (Settings › Voice, off until you pick it): the dictation window, once it has
 // the text, asks for it to be pasted into the app you were in (pasteInto in platform.js says how,
@@ -323,9 +325,9 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, askAccess, tru
   }
   // Another of your devices' page (/m/<id>/...), shown in a window of ours.
   const elsewhere = (w) => { try { return /^\/m\/[A-Za-z0-9_-]{1,20}\//.test(new URL(w.webContents.getURL()).pathname) } catch { return false } }
-  // info: what the Mac's helper says was in front ({ app, bundle, path, pid, secure }).
-  function onDown(at, info) {
-    const w = BrowserWindow.getFocusedWindow()
+  // info: what the Mac's helper says was in front ({ app, bundle, path, pid, secure }). w: the window
+  // it was pressed in, when it's known (else the one in front).
+  function onDown(at, info, w = BrowserWindow.getFocusedWindow()) {
     const mine = !!w && w !== hud && isOurs(w)
     into = null
     if (mine && !elsewhere(w)) {
@@ -361,6 +363,37 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, askAccess, tru
     if (route === 'hud') toHud({ type: 'cancel' })
     else if (route) say(route, { type: 'cancel' })
   }
+
+  // ---------- The key in a window showing another device, with the key from any app off ----------
+  // Heard before its page gets it, and listened for as above. While the key from any app is on, the
+  // system hands that key over instead (onDown), so it's never heard twice. The key as the app's own
+  // pages have it then: Fn never reaches a window, so the usual one.
+  let downIn = null // the window it went down in, till it's let go
+  function inWindow(w, ev, input) {
+    if (!lib || settings.on === false || w.isDestroyed?.() || !isOurs(w) || !elsewhere(w)) return
+    const key = settings.key && settings.key !== 'Fn' ? settings.key : lib.defaultKey(facts.platform)
+    const k = lib.parseKey(key, facts.platform)
+    if (!k || (status.active && (status.fallback || status.key) === key)) return
+    const e = { code: input.code, altKey: !!input.alt, ctrlKey: !!input.control, metaKey: !!input.meta, shiftKey: !!input.shift }
+    if (input.type === 'keyDown' && lib.isKeyDown(e, k)) {
+      // A lone key (the right Alt) isn't kept from the page: it's AltGr on many keyboards.
+      if (!k.lone) ev.preventDefault()
+      if (input.isAutoRepeat || downIn) return
+      downIn = w
+      onDown(Date.now(), null, w)
+    } else if (input.type === 'keyDown' && k.lone && downIn === w && input.code !== 'ControlLeft') {
+      // Another key while the lone one is held (a character typed with it): not dictation after all.
+      downIn = null
+      onCancel()
+    } else if (input.type === 'keyUp' && downIn === w && lib.isKeyUp(e, k)) {
+      if (!k.lone) ev.preventDefault()
+      downIn = null
+      onUp(Date.now())
+    }
+  }
+  const watch = (w) => w.webContents?.on?.('before-input-event', (ev, input) => inWindow(w, ev, input))
+  for (const w of BrowserWindow.getAllWindows?.() || []) watch(w)
+  electron.app?.on?.('browser-window-created', (_e, w) => watch(w))
 
   // ---------- The dictation window ----------
   // A pill in the middle at the top of the screen you're on, just under the menu bar (and a Mac's

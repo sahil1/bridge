@@ -12,8 +12,13 @@
 // handed to its page, which puts them where they'd have gone had they been said there (take), never
 // in a box of this device's. The desktop app's floating window (Hud.jsx) shows it instead, to edit,
 // send or copy.
+//
+// This device's page in a tab of another device's window doesn't listen itself: that window's page
+// does, and gives the words back (lent, below). Another device's page in the desktop app with no
+// such page around it can't use this computer's microphone at all, and says so (noMic).
 import { useSyncExternalStore } from 'react'
-import { api, apiUrl, settingsChanged, viaRelay } from '../api.js'
+import { api, apiUrl, settingsChanged, viaRelay, embedded, machineId } from '../api.js'
+import { store } from '../components/layout.jsx'
 import { startPcm, microphone, wav, RATE, micRefused, micBlocked } from '../audio/pcm.js'
 import { clean, makeNames } from '../../shared/dictation/clean.js'
 import { defaultKey, keyLabel } from '../../shared/dictation/keys.js'
@@ -38,7 +43,8 @@ let st = { phase: 'idle', mode: null, target: null, level: 0, levels: QUIET, liv
 const subs = new Set()
 // Done with listening (the text is in, or it isn't coming): its live words go with it.
 const set = (p) => { st = { ...st, ...p, ...(p.phase === 'idle' ? { live: '', tidying: false } : {}) }; for (const f of subs) f() }
-export const getState = () => st
+// ...or, while the window this page is in listens for a press made here, that one's (lent).
+export const getState = () => hosted()?.state() || st
 export const subscribe = (f) => { subs.add(f); return () => subs.delete(f) }
 // select: what a component needs of it, so one that isn't recording isn't drawn again ten times a
 // second for the level (it must give back the same value while nothing it needs has changed).
@@ -66,8 +72,8 @@ export const isPaused = () => paused
 
 // ---------- Where the text goes ----------
 // Message boxes say they're there (Composer.jsx): { insert(text, caret), visible() }. So does
-// another device's agent in a tab (RemoteAgent.jsx): { frame: true, name, insert(text), visible() },
-// its insert false when its page didn't take them.
+// another device's agent in a tab (RemoteAgent.jsx): { frame: true, name, win(), insert(text),
+// visible() }, its insert false when its page didn't take them.
 const boxes = new Map()
 let lastBox = null
 let onScreen = () => null // the agent on screen (App.jsx)
@@ -119,6 +125,8 @@ function typeInto(el, text, sel) {
 function deliver(target, text, at) {
   if (!target || target.kind === 'hud') return true
   if (target.kind === 'ask') { const f = asks.get(target.id); if (f) f(text, { at }); return !!f }
+  // Listened for the page in a tab here: given back to it, to put where it would have.
+  if (target.kind === 'frame') { try { return target.give(text, at) !== false } catch { return false } }
   if (target.kind === 'composer' && boxes.get(target.id)) return boxes.get(target.id).insert(text, target.caret) !== false
   // Typed into the terminal, without Enter (Terminal.jsx and LiveShell.jsx listen for this).
   if (target.kind === 'terminal' && target.el?.isConnected) { target.el.dispatchEvent(new CustomEvent('bridge-type', { detail: text })); return true }
@@ -145,6 +153,27 @@ export function handOver(frame, text) {
     return d.put === true
   } catch { return false }
 }
+
+// ---------- In a tab of another device's window ----------
+// This device's page in a tab of another device's window (embedded: RemoteAgent.jsx there) doesn't
+// listen itself, whatever starts it here (the key, the mic button, Ask out loud): that window's page
+// does, as it does for the desktop app's key (in the desktop app only the app's own pages may use
+// the microphone), and the words come back here, to go where this page would have put them (give).
+// host: that page's dictation (window.bridgeDictation: Dictation.jsx), when it has one; lent: the
+// one listening for a press made here, which then has the key's let go, Esc, Enter and the state.
+const host = () => { try { return (embedded && window.parent.bridgeDictation) || null } catch { return null } }
+let lent = null
+const hosted = () => (lent && lent.state().phase !== 'idle' ? lent : null)
+// ...and there, a press from such a page (its window): for its tab, the words given back to it.
+export function lentTarget({ from, give, ask, sentence }) {
+  const id = [...boxes].find(([, b]) => b.frame && b.win?.() === from)?.[0] || null
+  return { kind: 'frame', id, give, ask: !!ask, sentence: sentence !== false }
+}
+// Another device's page in the desktop app with nothing around it to listen for it (a window showing
+// that device, or a tab of one from before it could): the app lets only its own pages use this
+// computer's microphone, so it isn't asked. In a window showing that device the dictation key works
+// all the same: the app listens for it there (desktop/dictation.js).
+const noMic = () => !!machineId && (!!window.bridgeApp?.machine || (() => { try { return embedded && !!window.parent.bridgeApp } catch { return false } })())
 
 // ---------- Names to spell right (server/dictation.js), kept a minute ----------
 let wordsAt = 0
@@ -173,10 +202,24 @@ export const eventTime = (e) => Date.now() - Math.max(0, performance.now() - (e?
 // The key (or the mic button) going down: starts listening, or ends hands-free listening.
 export async function press(target, at = Date.now()) {
   if (paused) return
+  // In a tab of another device's window: that window's page listens (above).
+  const h = host()
+  if (h && (h.state().phase !== 'idle' || (target && target.kind !== 'password'))) {
+    lent = h
+    h.press(at, target ? { from: window, ask: target.kind === 'ask', sentence: target.sentence, give: (text, when) => deliver(target, text, when) } : null)
+    return
+  }
+  lent = null
   if (st.phase === 'listening' || st.phase === 'opening') { if (st.mode === 'free') finish(); return }
   if (st.phase === 'working') return
   if (!target) { set({ note: t('Click where the words should go, or open an agent, then try again.'), target: null }); return }
   if (target.kind === 'password') { set({ note: t("Can't dictate into a password field."), target: null }); return }
+  if (noMic()) {
+    set({ target, note: target.kind === 'ask'
+      ? t("Another computer's window can't use this computer's microphone, so Ask out loud can't listen here. Hold the dictation key to say it in the message box instead.")
+      : t("Another computer's window can't use this computer's microphone. Hold the dictation key instead: the words go where you're typing here.") })
+    return
+  }
   const id = ++seq
   pressAt = at
   set({ phase: 'opening', mode: 'hold', target, level: 0, levels: QUIET, live: '', since: Date.now(), note: null, setup: null, result: null, retry: false, offer: null })
@@ -222,12 +265,16 @@ export async function press(target, at = Date.now()) {
 // The key let go: held long enough, that's the end; a tap (or let go before the mic was on) keeps
 // listening.
 export function release(at = Date.now()) {
+  const h = hosted()
+  if (h) { h.release(at); return }
   if (st.mode !== 'hold' || (st.phase !== 'opening' && st.phase !== 'listening')) return
   if (st.phase === 'opening' || at - pressAt < HOLD_MS) set({ mode: 'free' })
   else finish()
 }
 
 export function cancel() {
+  const h = hosted()
+  if (h) { h.cancel(); return }
   seq++
   rec?.pcm.cancel()
   rec?.live?.end()
@@ -238,6 +285,8 @@ export const dismiss = () => set({ note: null, setup: null, retry: false, result
 
 // Stop listening, turn it into text, put it where it goes.
 export async function finish() {
+  const h = hosted()
+  if (h) { await h.finish(); return }
   if (st.phase === 'opening') { cancel(); return }
   if (st.phase !== 'listening' || !rec) return
   const { pcm, id, live } = rec
@@ -386,11 +435,12 @@ const kept = new Map() // the words' time (result.at) -> its id, once kept (a pr
 function keep(at, target, put, said, blob) {
   if (cfg.history === false) return
   const body = { ...said, how: null }
-  if (target?.kind === 'ask') { if (put) { body.how = 'sent'; body.agent = { id: target.id, chief: true } } } else if (target?.kind === 'hud') { if (target.app) body.app = target.app } else {
+  const tab = target?.id ? boxes.get(target.id) : null
+  if (target?.kind === 'ask' || (target?.kind === 'frame' && target.ask)) { if (put) { body.how = 'sent'; body.agent = { id: target.id, chief: true } } } else if (target?.kind === 'hud') { if (target.app) body.app = target.app } else {
     // Put nowhere (what it was for had gone): kept all the same, as said in Bridge AI.
     if (put) body.how = 'typed'
     // Another device's agent: by the name its tab has here (this device doesn't know it).
-    if (put && target.kind === 'composer') body.agent = { id: target.id, ...(boxes.get(target.id)?.name ? { name: boxes.get(target.id).name } : {}) }
+    if (put && (target.kind === 'composer' || (target.kind === 'frame' && tab))) body.agent = { id: target.id, ...(tab?.name ? { name: tab.name } : {}) }
     else body.place = target?.kind === 'terminal' ? 'terminal' : 'field'
   }
   const p = api('/dictations', { method: 'POST', body }).then(async (r) => {
@@ -413,6 +463,14 @@ export async function forget(result) {
   kept.delete(result?.at)
   if (id) await api(`/dictations/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {})
 }
+
+// ---------- The agent you looked at last ----------
+// For the dictation window's "the agent I looked at last" (Hud.jsx), from whichever window it was in:
+// this device's, one showing another device (/m/<id>/), or another device's agent in a tab here.
+// Each window says which is on screen while it has the focus (Dictation.jsx). { machine: that
+// device's id on this one (null: this one), pane, name, at }.
+export const lookAt = (l) => { if (l?.pane) store.set('cc-looked', { machine: l.machine || null, pane: l.pane, name: l.name || '', at: Date.now() }) }
+export const lookedAt = () => store.get('cc-looked', null)
 
 // ---------- The key from any app ----------
 // Off until you say yes (shared/dictation/platform.js). In the desktop app, where this computer lets
