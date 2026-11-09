@@ -305,8 +305,8 @@ Tailscale's privacy policy.
 
 The iPhone and Android apps show Bridge AI from your computer, through your relay. Each carries its
 own copy of the relay's phone page, so the code that does the encrypting never comes from the relay.
-They have no account. Apart from Cloud Agents (below), they send nothing anywhere but to your relay and, through
-it, end to end to your computer.
+They have no account. Apart from Cloud Agents (below), they send nothing anywhere but to your relay
+and, through it, end to end to your computer.
 
 - **What they keep**: the list of computers you paired and each one's pairing (the phone's key),
   on the phone only. iPhone keeps them in the Keychain, on this device only. Android keeps them in
