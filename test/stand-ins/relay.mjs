@@ -32,10 +32,11 @@ import { WebSocketServer } from 'ws'
 import { bundle } from '../../relay/build.js'
 
 const [port, token] = process.argv.slice(2)
-const { build, code } = bundle()
+const { build, version, code } = bundle()
 // The bundle starts with its files and build; the worker after them is a module of its own.
 globalThis.FILES = JSON.parse(code.slice('const FILES = '.length, code.indexOf('\nconst RELAY_BUILD')))
 globalThis.RELAY_BUILD = build
+globalThis.RELAY_VERSION = version
 
 // ---------- what Cloudflare gives a Worker ----------
 globalThis.WebSocketRequestResponsePair = class { constructor(req, res) { this.req = req; this.res = res } }

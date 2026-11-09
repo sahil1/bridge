@@ -178,6 +178,8 @@ version, and test on an emulator.
   needs Bridge AI on a computer. The "webview of a website without permission" rule is about other
   people's sites; this opens only your own relay.
 - **The JavaScript bridge.** Play flags a WebView with a JavaScript interface that loads untrusted
-  pages. Release builds load only `https` pages on the paired relay and open everything else in
-  the browser. A later hardening: androidx.webkit's `addWebMessageListener` limited to the relay's
-  origin, so frames from other sites inside the page can't reach `window.bridgeAndroid`.
+  pages. There's none: `window.bridgeAndroid` is androidx.webkit's `addWebMessageListener`, offered
+  only to the paired relay showing now and the app's own bundled pages, and answered only from the
+  main frame, so frames from other sites inside the page can't reach it. The phone page itself is
+  the app's own copy (`RelayPage.kt`); release builds load only `https` pages on the paired relay
+  and open everything else in the browser.

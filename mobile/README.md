@@ -1,17 +1,31 @@
 # Bridge AI for iPhone and Android
 
 The phone apps show Bridge AI from your computer through your own relay (Settings › Devices on the
-computer), the same way the relay's page does in Safari or Chrome, end-to-end encrypted. Both use the relay's own phone page (`relay/web`), so pairing and the link work the same
-everywhere.
+computer), the same way the relay's page does in Safari or Chrome, end-to-end encrypted. Both carry
+their own copy of the relay's phone page (`relay/web`), so pairing and the link work the same
+everywhere, and the code that does the encrypting never comes from the relay: a relay (or whoever
+runs it) that served a changed page could read everything, which in a browser it could.
 
 - **iPhone** (`ios/`): the app serves the phone page itself and carries Bridge AI's requests over
   the encrypted link (`Tunnel.swift`), because iOS apps can't run a service worker for an address
   that's different for every relay.
-- **Android** (`android/`): opens your relay's page in a WebView, which runs its service worker as
-  Chrome does.
+- **Android** (`android/`): serves its own copy at your relay's address (`RelayPage.kt`; the build
+  writes it into the app's assets with `node relay/build.js --page`), so the WebView runs the
+  page's service worker as Chrome does and each relay keeps its own site. Only the relay's own
+  addresses reach the relay (the WebSocket, its health); anything else there gets a 404 from the
+  app, never the relay's answer.
 
 Pair by scanning the QR code from Pair a device on the computer, or by pasting the link from Copy
-link.
+link. On Bridge AI's relay, the pairing link opens the app when it's installed, from the phone's
+camera or a browser (a Universal Link on iPhone, an App Link on Android; `relay/HOSTED.md`,
+Pairing links open the apps); a relay of your own opens the browser, and the apps scan its code.
+
+What the page can ask of the app goes only from the app's own page. On iPhone, the app takes
+messages from its main frame (and from Bridge AI's frame only that a meeting is recording, and a
+file to save). On Android, `window.bridgeAndroid` is a message channel (androidx.webkit's
+`addWebMessageListener`) offered only to the relay showing now and the bundled UIs' addresses,
+answered only from the main frame: a frame inside the page (an agent's preview, another computer's
+page) can only say a meeting is recording.
 
 ## The demo
 
@@ -108,7 +122,7 @@ encrypted to the computer, which turns it into text. In the app that's WKWebView
   top (`requestMediaCapturePermissionFor`, granted for the app's own page and Bridge AI in it). The
   bundled UIs never record (the demo stands in for the mic), so they're refused.
 - Bridge AI runs in a frame of the phone page, and it gets a `window.bridgeNative` of its own
-  (`{ platform: 'ios', post }`), the way Android's `bridgeAndroid` reaches every frame. Through it a
+  (`{ platform: 'ios', post }`), as Android's frames get a `bridgeAndroid` of their own. Through it a
   meeting that's recording keeps the screen on (`{ type: 'recording' }`, the only message the app
   takes from a frame), since a locked iPhone stops the page's microphone.
 - Recordings and photos are sent as Blobs, which don't reach an app's own scheme handler: a small

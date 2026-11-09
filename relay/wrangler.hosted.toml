@@ -75,6 +75,13 @@ RELAY_DAILY_REQUESTS = "5000000"
 # "1": the account is on Workers Paid (it must be before going live), so /_relay/stats measures
 # against its allowance. "0" while trying it on Workers Free.
 WORKERS_PAID = "1"
+# Pairing links open the phone apps when they're installed (HOSTED.md, Going live): the iPhone app,
+# as <team id>.<bundle id> (mobile/ios/project.yml), and the Android app's package
+# (mobile/android/app/build.gradle.kts) with its release key's SHA-256 (npm run android:key prints
+# it; several comma-separated). Android's is served only once ANDROID_CERT_SHA256 is set.
+APPLE_APP_ID = "K6QK66LQDM.dev.bridge-ai.phone"
+ANDROID_PACKAGE = "dev.bridgeai.phone"
+ANDROID_CERT_SHA256 = ""
 # Secrets, never here (npx wrangler@4.149.0 secret put <name> -c relay/wrangler.hosted.toml):
 #   ID_SECRET    keys the checksum at the end of every computer's id; unset, the relay answers 500
 #   STATS_TOKEN  reads GET /_relay/stats; unset, it isn't there at all

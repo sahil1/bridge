@@ -29,9 +29,11 @@ this:
   across its computers in an 8-hour window and a week, like Claude's, and what the accounts service
   last said of it.
 - Phones work exactly as with a relay of your own: they open the computer's address, pair, and
-  everything past the handshake is end-to-end encrypted between phone and computer (in a browser,
-  by the page the relay serves; the iPhone app has its own). One address per
-  computer keeps each pairing, service worker and saved copy apart, as before.
+  everything past the handshake is end-to-end encrypted between phone and computer. In a browser
+  that's done by the page the relay serves, and the page says so before pairing; the iPhone and
+  Android apps carry their own copy, and a pairing link opens them when they're installed (Pairing
+  links open the apps, below). One address per computer keeps each pairing, service worker and
+  saved copy apart, as before.
 - Any other name under the domain gets a plain 404: names that aren't an id, reserved names (www,
   api, relay, admin and a few more), names two levels down, and ids that aren't registered (or were
   removed). Ids end in two checksum characters keyed with a secret only the relay has (`ID_SECRET`),
@@ -155,6 +157,8 @@ belongs to the relay.
   and the domains: a hardware key for every member, deploys with an API token scoped to the
   project's Workers (not `wrangler login`), and alerts from the Audit Log for Worker deploys,
   secrets and routes. Whoever has the account can serve every phone a changed page.
+- [ ] **Pairing links open the apps** (owner; below), so a phone with the app never runs the
+  relay's copy of the page.
 - [ ] **Check it**: `https://boldbridge.app/` shows the page, `https://boldbridge.app/_relay/health`
   answers `{"ok":true,...}`, `https://abc.boldbridge.app/` is a 404, a `POST
   https://boldbridge.app/_relay/register` with no token answers 401 saying it needs an account, and
@@ -169,6 +173,41 @@ belongs to the relay.
   below into PRIVACY.md and TERMS.md (the drafts at the end of this file), with accounts switched on
   already or in the same release. Then run `npm test -- relay-hosted relay-hosted-ui privacy-hosts`,
   and release. Without that commit nothing in the app changes.
+
+### Pairing links open the apps
+
+A pairing link is `https://<id>.boldbridge.app/#pair=…` (the QR code Pair a device shows). Opened
+in a browser, the page that does the encrypting comes from the relay; the iPhone and Android apps
+carry their own. So with an app installed, the link opens the app instead (a Universal Link on
+iPhone, an App Link on Android), and the app pairs as it does with a code it scanned. Each phone
+system asks the relay first whether the app may open its links: the Worker answers
+`/.well-known/apple-app-site-association` and `/.well-known/assetlinks.json` from its settings
+(`APPLE_APP_ID`, `ANDROID_PACKAGE`, `ANDROID_CERT_SHA256`; Settings below), and answers nothing for
+one that isn't set. The apps claim `*.boldbridge.app` (`mobile/ios/project.yml`,
+`mobile/android/app/src/main/AndroidManifest.xml`); iPhone opens only links with `#pair=`, Android
+any link to a computer's address (one with no code opens that computer if it's paired). A relay of
+your own isn't covered and works as before: its link opens the browser, and the apps scan its code
+themselves.
+
+- [ ] **Apple** (owner; developer.apple.com › Certificates, Identifiers & Profiles › Identifiers ›
+  `dev.bridge-ai.phone`): Associated Domains on. Xcode turns it on itself when it signs the app
+  (`npm run mobile:ios:release` lets it); check it's ticked there, and that the profile it made
+  lists it. `APPLE_APP_ID` is set already: `K6QK66LQDM.dev.bridge-ai.phone` (the team in
+  project.yml, then the bundle id).
+- [ ] **Android** (owner): `ANDROID_CERT_SHA256` in wrangler.hosted.toml, the SHA-256 of the release
+  key's certificate, as `npm run android:key` printed it (`AB:CD:…`; `apksigner verify --print-certs
+  Bridge-AI-android.apk` shows it too). Play signs with the same key (mobile/android/PLAY.md); if
+  Play Console › App integrity ever shows a different app signing key, add its SHA-256 after a
+  comma. `ANDROID_PACKAGE` is set already: `dev.bridgeai.phone`. Deploy again.
+- [ ] **Check them**: `curl -s https://boldbridge.app/.well-known/apple-app-site-association` and
+  `curl -s https://boldbridge.app/.well-known/assetlinks.json` answer JSON naming the apps (the same
+  under any `<id>.boldbridge.app`). Apple reads it through its own CDN, a few hours later:
+  `curl -s https://app-site-association.cdn-apple.com/a/v1/boldbridge.app`. Google's check:
+  `https://digitalassetlinks.googleapis.com/v1/statements:list?source.web.site=https://boldbridge.app&relation=delegate_permission/common.handle_all_urls`.
+- [ ] **Try them** with the apps' release builds installed: Pair a device on a computer on the relay,
+  and scan the code with the phone's camera. It opens the app, which pairs. On Android,
+  `adb shell pm get-app-links dev.bridgeai.phone` says `boldbridge.app: verified` (Android checks
+  when the app is installed; reinstall after changing the settings).
 
 ## Settings
 
@@ -192,6 +231,9 @@ per computer unless it says it's per account or for the whole relay.
 | `MAX_ACCOUNTS` | `500` | Accounts with a computer on the relay, in all. Past it, an account's first computer is told the relay is full for now, and the app offers your own Cloudflare and Tailscale instead; the admin view can't approve one more (the accounts service's `RELAY_MAX_ACCOUNTS`, the same number). An account's place is given back when its last computer stops using the relay, or is removed after `IDLE_DAYS`. `0` takes no new accounts. With the account limits, what keeps the bill under $50 a month (Cost). |
 | `RELAY_DAILY_REQUESTS` | `5000000` | The whole relay's Cloudflare requests a day, as `/_relay/stats` counts them: the backstop. Reached, the relay stops for every computer until 00:00 UTC, saying so. 500 accounts at their limits come to about 4.2 million a day, so it's met only past those, and at the defaults it holds the bill under about $44 a month whatever `MAX_ACCOUNTS` is (Cost). |
 | `WORKERS_PAID` | `1` | The account is on Workers Paid (it must be before going live), so `/_relay/stats` measures use against its allowance. `0` while trying it on Workers Free. |
+| `APPLE_APP_ID` | `K6QK66LQDM.dev.bridge-ai.phone` | The iPhone app, as `<team id>.<bundle id>` (`mobile/ios/project.yml`), named in `/.well-known/apple-app-site-association`, so a pairing link opens the app when it's installed (Pairing links open the apps, below). Empty, that file isn't served. |
+| `ANDROID_PACKAGE` | `dev.bridgeai.phone` | The Android app's package, named in `/.well-known/assetlinks.json` with `ANDROID_CERT_SHA256`, for the same on Android. |
+| `ANDROID_CERT_SHA256` | | The SHA-256 of the certificate the Android app is signed with (the release key: `npm run android:key` prints it, `AB:CD:…`); several comma-separated (a debug build's, while trying it). Empty, `assetlinks.json` isn't served. |
 
 Two secrets, each set with `npx wrangler@4.149.0 secret put <name> -c relay/wrangler.hosted.toml` and
 never written in the file.
@@ -523,7 +565,12 @@ the rest, and at their accounts in the admin view.
 
 ## Updating it
 
-Same as going live: build and deploy. Any computer's or phone's connection drops and comes back
+Same as going live: build and deploy, from the release's tag (`git checkout v<version>`), so the
+page it serves is that release's. A computer on the relay checks (once a day, and when Settings ›
+Devices opens) that the page files the relay serves are those of the version `/_relay/health` says
+it runs, compared with its own copy when that's its own version and with the release's on GitHub
+otherwise, and Settings › Devices says so if they differ (server/relaycheck.js). A build from
+between releases would show as changed. Any computer's or phone's connection drops and comes back
 within seconds. Computers on the hosted relay never try to update it themselves (they do for a
 relay on your own account). Keep `[[migrations]]` as they are: `v1` made the Hub class and `v2` the
 Account class; a class added later is a `v3`.
@@ -640,10 +687,14 @@ with
 >
 > **What it can read: nothing past the handshake.** Everything between your phone and your computer
 > is end-to-end encrypted, so the relay passes on bytes it can't read. That holds as long as the page
-> doing the encrypting is the one Bridge AI wrote: the iPhone app has it built in, but in a phone's
-> browser the page comes from the relay, so whoever runs the relay could change it. On a relay that
-> isn't yours, use the iPhone app. What it sees, as any server does: the IP addresses of your phone
-> and computer, when they connect, and how much they send.
+> doing the encrypting is the one Bridge AI wrote: the iPhone and Android apps have it built in, and
+> a pairing link opens them when they're installed, but in a phone's browser the page comes from the
+> relay, so whoever runs the relay could change it (the page says so before pairing). On a relay
+> that isn't yours, use the iPhone or Android app. Your computer checks the page the relay serves
+> once a day, and when you open Settings › Devices, against Bridge AI's own for the version the
+> relay says it runs (its own copy, or that release's from GitHub), and Settings › Devices says so
+> if they differ; nothing is sent but those requests. What it sees, as any server does: the IP
+> addresses of your phone and computer, when they connect, and how much they send.
 >
 > **What it keeps for your computer**: a random id (its address there), a hash of the token your
 > computer uses to connect (never the token), your account's and this device's ids, the Bridge AI
