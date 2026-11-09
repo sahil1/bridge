@@ -252,7 +252,9 @@ try {
   const cell = (a) => ({ v: s.getCell(a).value, fmt: s.getCell(a).numFmt, color: s.getCell(a).font?.color })
   const got = { B3: cell('B3'), B4: cell('B4'), B5: cell('B5'), B6: cell('B6'), E2: cell('E2'), D9: cell('D9'), A3: cell('A3'), A9: cell('A9') }
   ok(/\$/.test(got.B3.fmt || '') && /%/.test(got.B4.fmt || '') && got.B5.fmt === '#,##0.00' && !/\$/.test(got.B6.fmt || ''), 'Ctrl+Shift+4, 5 and 1: currency, percent and number, and ⌘\\ clears the formatting', got)
-  ok(got.E2.v instanceof Date && new Date().toISOString().slice(0, 10) === got.E2.v.toISOString().slice(0, 10), '⌘; puts in today\'s date, as a date', got.E2)
+  // Today where the sheet is (the local date), as Excel keeps a date: midnight UTC of that day.
+  const today = new Date(); today.setMinutes(today.getMinutes() - today.getTimezoneOffset())
+  ok(got.E2.v instanceof Date && today.toISOString().slice(0, 10) === got.E2.v.toISOString().slice(0, 10), '⌘; puts in today\'s date, as a date', got.E2)
   if (which === 'chromium') ok(got.D9.v === 1975 && !pasteSaid, '⇧⌘V pastes the values only: the total\'s 1975, not its formula', { D9: got.D9, pasteSaid })
   else ok(got.D9.v == null && /Couldn't paste the values: .+ Paste with (⌘V|Ctrl\+V), then pick Values only/.test(pasteSaid), '⇧⌘V where the page can\'t read what was copied: it says so, and how else', pasteSaid)
   ok(got.A3.v === 'Design work' && !got.A3.color && got.A9.v === 'New line' && !got.A9.color, 'what\'s typed is plain text in no colour of its own (Univer gave it its theme\'s ink, kept in the file)', { A3: got.A3, A9: got.A9 })
