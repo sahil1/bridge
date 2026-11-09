@@ -7,6 +7,10 @@
 // the relay nor Cloudflare can read it. A phone's requests are run here against this server, as
 // if made on this computer, so only phones you paired get in; remove one and it's out.
 //
+// The relay is trusted with nothing: what a phone says about itself counts only once it comes
+// sealed (its first record, ABOUT), a phone counts as connected only once it has shown it holds
+// its key, and one you removed is told so sealed (GONE), never in the clear.
+//
 // Kept in ~/.bridge-ai/relay.json (only you can read it): the relay's address and the token that
 // lets this computer (and only it) connect to it, this computer's key, the phones you paired, and
 // how to reach Cloudflare to update the relay.
@@ -49,7 +53,8 @@ const CF = 'https://api.cloudflare.com/client/v4'
 const OP = { DATA: 1, OPEN: 2, CLOSE: 3, OK: 4 }
 const HELLO_SECONDS = 15
 const PAIR_MINUTES = 15
-const PAIR_USES = 3
+const PAIR_USES = 1 // a code adds one device; Add another device makes a new one
+const REMOVED_DAYS = 90 // how long a removed device's key is kept, to tell it it was removed
 const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version
 
 let built = null
@@ -78,7 +83,7 @@ let lastNeeds = null // what the last sign-in needed first ('node'), for the app
 let busy = null // what's being done right now ('signing in', 'deploying', …)
 let loginUrl = null
 let relayBuild = null
-let pairing = null // { id, secret, code, expires, uses, tries }
+let pairing = null // { id, secret, code, expires, uses, tries, paired: { name, at } once a device has }
 let retry = null
 const FIRST_TRY = 500 // after the connection drops: soon, then less and less often
 let backoff = FIRST_TRY
@@ -150,7 +155,7 @@ export const thisName = () => computerName()
 export const publicKey = () => conf.key?.public || null
 
 export function status() {
-  const live = new Set([...conns.values()].filter((c) => c.session).map((c) => c.device?.id))
+  const live = new Set([...conns.values()].filter((c) => c.proven).map((c) => c.device?.id))
   return {
     configured: !!(conf.url && conf.token),
     computer: computerName(),
@@ -168,9 +173,12 @@ export function status() {
     limit: limit && limit.until > Date.now() ? limit : null,
     use: conf.hosted ? use : null,
     needsUpdate: !!(!conf.hosted && online && relayBuild && relayBuild !== relayCode().build),
-    devices: (conf.devices || []).map(({ id, name, kind, relay, addedAt, lastSeen }) => ({ id, name, kind: kind || 'phone', relay: relay || null, addedAt, lastSeen, connected: live.has(id) })),
+    // fresh: paired with Pair a device's code and not kept yet (Keep or Remove, said in the app).
+    devices: (conf.devices || []).map(({ id, name, kind, relay, addedAt, lastSeen, fresh }) => ({ id, name, kind: kind || 'phone', relay: relay || null, addedAt, lastSeen, connected: live.has(id), fresh: !!fresh })),
     asks: [...asks.values()].filter((a) => a.code && a.at > Date.now() - ASK_MINUTES * 60000).map(({ id, name, os, relay, at, code }) => ({ id, name, os, relay, at, code })),
     pairing: pairing && pairing.expires > Date.now() && pairing.uses < PAIR_USES ? { code: pairing.code, expires: pairing.expires, link: pairing.link, qr: pairing.qr } : null,
+    // The code was used: which device it paired, for "Add another device" (its QR is gone).
+    paired: pairing?.paired && pairing.paired.at > Date.now() - PAIR_MINUTES * 60000 ? pairing.paired : null,
     awake: conf.awake !== false,
     awakeNow: !!awakeProc,
     canAwake: CAN_AWAKE,
@@ -349,6 +357,23 @@ const DROP = new Set(['host', 'connection', 'origin', 'referer', 'cookie', 'cont
 const DROP_BACK = new Set(['content-encoding', 'content-length', 'transfer-encoding', 'connection', 'keep-alive', 'set-cookie'])
 // Worth compressing: text (pictures and fonts are compressed already).
 const PACKS = /javascript|css|json|svg|html|text\/|wasm|xml/
+const cleanName = (s) => (typeof s === 'string' ? s.trim().slice(0, 60) : '')
+
+// Hellos in the last 10 seconds, all of them and those from keys not paired here (a pairing, an
+// ask, or a stranger). Your phones and computers connecting again at once (after the relay or the
+// network drops) stay well under these.
+const HELLO_WINDOW = 10000
+const HELLO_MAX = 60
+const STRANGER_MAX = 12
+const hellos = { all: [], strangers: [] }
+function helloRoom(known) {
+  const now = Date.now()
+  for (const q of [hellos.all, hellos.strangers]) while (q.length && q[0] < now - HELLO_WINDOW) q.shift()
+  if (hellos.all.length >= HELLO_MAX || (!known && hellos.strangers.length >= STRANGER_MAX)) return false
+  hellos.all.push(now)
+  if (!known) hellos.strangers.push(now)
+  return true
+}
 
 class Conn {
   constructor(id) {
@@ -358,9 +383,10 @@ class Conn {
     this.q = Promise.resolve()
     this.out = Promise.resolve()
     this.streams = new Map() // id -> { abort, body: [], ws }
+    this.proven = false // its first sealed record opened: it holds its key
     // Anyone can open a connection to the relay; one that hasn't shown it's a paired phone in time
-    // is closed, so strangers can't sit on the relay's connections.
-    this.timer = setTimeout(() => { if (!this.session) this.close() }, HELLO_SECONDS * 1000)
+    // (a sealed record that opens) is closed, so strangers can't sit on the relay's connections.
+    this.timer = setTimeout(() => { if (!this.proven) this.close() }, HELLO_SECONDS * 1000)
   }
 
   // Anything that goes wrong ends this connection (the phone or device connects again), and says
@@ -392,7 +418,9 @@ class Conn {
   async handle(buf) {
     if (!this.session) return this.hello(buf)
     const { kind, id, body } = unpack(await this.session.open(buf))
-    if (this.told) this.proven()
+    if (this.gone) return // told it was removed: nothing it sends counts
+    if (!this.proven) { this.prove(kind === K.ABOUT ? body : null); if (kind === K.ABOUT) return }
+    else if (kind === K.ABOUT) return // once is enough
     // The phone asking whether this computer is still there (its relay can't always tell).
     if (kind === K.PING) return this.send(K.PONG, id)
     if (kind === K.REQ) return this.request(id, json(body))
@@ -408,6 +436,10 @@ class Conn {
   async hello(buf) {
     let msg
     try { msg = readPlain(buf) } catch { msg = null }
+    const devices = conf.devices || []
+    // Hellos are counted: past a few a second (fewer from keys not paired here), the rest are let go
+    // unanswered, so no one can keep this computer working out keys for them.
+    if (!helloRoom(typeof msg?.d === 'string' && !msg.pair && devices.some((d) => d.key === msg.d))) { this.close(); return }
     // The phone's code, or a one-time code for another of your devices.
     const code = (pid) => (pairing && pairing.id === pid && pairing.expires > Date.now() && pairing.uses < PAIR_USES && pairing.tries < 5 ? pairing : null)
       || invites.find((p) => p.id === pid && p.expires > Date.now() && p.uses < 1 && p.tries < 5) || null
@@ -415,61 +447,98 @@ class Conn {
     // proves this computer by the code: what puts it right for a device that has an old key for
     // this one (after this one was set up again).
     const fresh = !!msg?.pair
-    const r = await computerWelcome(await key(), msg, { known: (k) => (fresh ? null : (conf.devices || []).find((d) => d.key === k) || null), pairing: code })
+    // A device you removed, whose Bridge AI takes that only sealed (seal): it gets a session, to be
+    // told so in it (GONE). One from before is refused in the clear, as it always was; one asking to
+    // link again is an ask like any other.
+    const removed = !fresh && !msg?.ask && msg?.seal === 1 && (conf.removed || []).some((x) => x.key === msg.d)
+    const r = await computerWelcome(await key(), msg, { known: (k) => (fresh ? null : devices.find((d) => d.key === k) || (removed ? { gone: true } : null)), pairing: code })
     if (r.refuse) {
       if (r.refuse === 'wrong-code') { const p = [pairing, ...invites].find((x) => x?.id === r.pairId); if (p) p.tries++ }
-      // Another of your devices asking to link, with no code: it waits for you (askFrom).
-      const a = r.refuse === 'not-paired' && msg?.ask && msg.kind === 'computer' ? await askFrom(msg) : { why: r.refuse }
+      // Another of your devices asking to link, with no code: it waits for you (askFrom). A code
+      // that didn't work gets one answer whatever was wrong with it (used, expired or mistyped), so
+      // nothing tells a guess at one from another.
+      const a = r.refuse === 'not-paired' && msg?.ask && msg.kind === 'computer' ? await askFrom(msg) : { why: r.refuse === 'wrong-code' ? 'code-expired' : r.refuse }
       toRelay(OP.DATA, this.id, plainFrame({ t: 'refuse', why: a.why, ...(a.why === 'asked' ? { h: b64u((await key()).public), n: a.n } : {}) }))
       setTimeout(() => this.close(), 500)
       return
     }
-    let device = r.device
+    if (r.device?.gone) {
+      this.gone = true
+      this.session = r.session
+      toRelay(OP.DATA, this.id, plainFrame(r.welcome))
+      await this.send(K.GONE, 0)
+      setTimeout(() => this.close(), 500)
+      return
+    }
+    // What it says about itself in the clear, kept only for a device paired just now that turns out
+    // to be from before ABOUT (prove): anyone who saw its key (its relay) could send this.
+    const told = { name: typeof msg.name === 'string' ? msg.name.trim().slice(0, 60) : null, kind: msg.kind, relay: msg.relay }
+    let id = r.device?.id
     if (r.newDevice) {
       const used = [pairing, ...invites].find((p) => p?.id === r.newDevice.pairId)
       if (used) used.uses++
-      // Paired again: the same device, not a second copy of it.
-      device = (conf.devices || []).find((d) => d.key === r.newDevice.key)
-      if (!device) {
-        device = { id: randomBytes(6).toString('base64url'), key: r.newDevice.key, name: r.newDevice.name || 'Phone', addedAt: new Date().toISOString() }
-        conf.devices = [...(conf.devices || []), device]
-        roster().catch(() => {})
-        onPaired(device)
-      }
+      // Added once it has shown it holds its key (prove), as what it says sealed. Paired again: the
+      // same device, not a second copy of it.
+      const again = devices.find((d) => d.key === r.newDevice.key)
+      id = again?.id || randomBytes(6).toString('base64url')
+      this.pending = { id, key: r.newDevice.key, told, by: used === pairing ? 'code' : 'invite', code: used === pairing ? used : null }
     }
-    device = (conf.devices || []).find((d) => d.id === device.id)
-    device.lastSeen = new Date().toISOString()
-    save()
-    this.device = device
-    // What it says about itself (its name, that it's a computer, where it's reached) is kept once its
-    // first sealed message proves it holds its key: anyone who saw the key (its relay) could send this.
-    this.told = { name: typeof msg.name === 'string' ? msg.name.trim().slice(0, 80) : null, kind: msg.kind, relay: msg.relay }
+    this.device = devices.find((d) => d.id === id) || { id, name: told.name || 'A new device', kind: told.kind === 'computer' ? 'computer' : undefined }
     // ping: this computer answers PING (a phone checks it's still there with it).
-    toRelay(OP.DATA, this.id, plainFrame({ ...r.welcome, device: device.id, ping: 1 }))
+    toRelay(OP.DATA, this.id, plainFrame({ ...r.welcome, device: id, ping: 1 }))
     this.session = r.session
-    clearTimeout(this.timer)
-    toRelay(OP.OK, this.id) // tells the relay this one is yours, so it's never the one dropped
   }
 
-  // Its hello, now that it's proven. Another of your devices (machines.js), not a phone: where it's
-  // reached, so unlinking it here can tell it, and its own name.
-  proven() {
-    const { name, kind, relay } = this.told
-    this.told = null
-    const device = (conf.devices || []).find((d) => d.id === this.device?.id)
-    if (!device) return
-    if (name) device.name = name
-    if (kind === 'computer') {
-      const was = device.relay
-      device.kind = 'computer'
-      device.relay = cleanRelay(relay) || device.relay || null
-      if (was && device.relay && was !== device.relay) onMoved(was, device.relay)
+  // Its first sealed record opened: it holds its key. Only now is it connected, seen and kept, and
+  // the relay told it's yours (so it's never the one dropped). `about`: what it says about itself,
+  // sealed (ABOUT), or null from a Bridge AI from before, whose hello counts only when it pairs.
+  prove(about) {
+    this.proven = true
+    clearTimeout(this.timer)
+    let said = null
+    if (about) try { said = json(about) } catch { said = {} }
+    const p = this.pending
+    this.pending = null
+    let device = (conf.devices || []).find((d) => d.id === this.device?.id)
+    if (p && !device) {
+      // Paired just now. Its kind is how it paired, never changed after: a one-time code this
+      // computer made for another of yours is a computer; Pair a device's code is a phone, unless
+      // what it says sealed (or a Bridge AI from before, in its hello) is that it's a computer,
+      // as Link a device on another computer uses the same code.
+      const s = said || p.told
+      const computer = p.by === 'invite' || s.kind === 'computer'
+      device = { id: p.id, key: p.key, name: cleanName(s.name) || (computer ? 'Another computer' : 'Phone'), ...(computer ? { kind: 'computer', relay: cleanRelay(s.relay) } : {}), addedAt: new Date().toISOString(), ...(p.by === 'code' ? { fresh: true } : {}) }
+      conf.devices = [...(conf.devices || []), device]
+      conf.removed = (conf.removed || []).filter((x) => x.key !== p.key)
+      roster().catch(() => {})
+      onPaired(device)
+    } else if (device && said) {
+      // Known already: its name as it says now, and for a computer where it's reached (a move it
+      // asked for, sealed, which machines.js follows). Never its kind.
+      if (cleanName(said.name)) device.name = cleanName(said.name)
+      const r = device.kind === 'computer' && cleanRelay(said.relay)
+      if (r && r !== device.relay) {
+        const was = device.relay
+        device.relay = r
+        if (was) onMoved(was, r)
+      }
     }
+    if (!device) return
+    // Pair a device's code is used up: which device it paired, for Add another device.
+    if (p?.code) p.code.paired = { id: device.id, name: device.name, kind: device.kind || 'phone', at: Date.now() }
+    this.device = device
+    device.lastSeen = new Date().toISOString()
     save()
+    toRelay(OP.OK, this.id)
   }
+
+  // Removed here: what it asks from now on is turned down at once (its connections close a moment
+  // later, so a phone removing itself still gets the answer).
+  removed() { return !deviceOf(this.device?.id) }
 
   // A request from the phone, run against this server.
   request(sid, { m, u, h, body, z, w }) {
+    if (this.removed()) return this.send(K.ERR, sid, utf8('This device was removed from this computer'))
     const target = new URL(String(u || '/'), base)
     if (target.origin !== new URL(base).origin) return this.send(K.ERR, sid, utf8('Not allowed'))
     const abort = new AbortController()
@@ -532,6 +601,7 @@ class Conn {
 
   // A WebSocket from the phone (the live terminal), opened here.
   socket(sid, { u }) {
+    if (this.removed()) return this.send(K.WS_CLOSE, sid, { c: 1008, r: 'This device was removed from this computer' })
     const target = new URL(String(u || '/'), base)
     if (target.origin !== new URL(base).origin) return this.send(K.WS_CLOSE, sid, { c: 1008, r: 'Not allowed' })
     const ws = new WebSocket(target.href.replace(/^http/, 'ws'), { headers: { 'x-bridge-relay': this.device.id } })
@@ -552,7 +622,9 @@ export async function pair() {
   await key()
   const code = newPairCode()
   const { id, secret } = splitCode(code)
-  const link = `${conf.url.replace(/\/$/, '')}/#pair=${formatCode(code)}`
+  // This computer's name after the code, for the phone's "Pair with …?" (one from before, or an
+  // app that reads only the code, leaves it).
+  const link = `${conf.url.replace(/\/$/, '')}/#pair=${formatCode(code)}&name=${encodeURIComponent(computerName())}`
   pairing = { id, secret, code: formatCode(code), link, expires: Date.now() + PAIR_MINUTES * 60000, uses: 0, tries: 0 }
   pairing.qr = await QRCode.toString(link, { type: 'svg', margin: 1, errorCorrectionLevel: 'M' })
   return status()
@@ -632,6 +704,7 @@ export function answerAsk(id, allow) {
   if (!allow) { denied.set(a.key, Date.now() + 3600000); return status() }
   if (!(conf.devices || []).some((d) => d.key === a.key)) {
     conf.devices = [...(conf.devices || []), { id: randomBytes(6).toString('base64url'), key: a.key, name: a.name, kind: 'computer', relay: a.relay, addedAt: new Date().toISOString() }]
+    conf.removed = (conf.removed || []).filter((x) => x.key !== a.key)
     save()
     roster().catch(() => {})
   }
@@ -650,13 +723,40 @@ export const deviceOf = (id) => (id && (conf.devices || []).find((d) => d.id ===
 export const isMachine = (deviceId) => !!deviceId && (conf.devices || []).some((d) => d.id === deviceId && d.kind === 'computer')
 
 export function removeDevice(id) {
+  const gone = (conf.devices || []).filter((d) => d.id === id)
   conf.devices = (conf.devices || []).filter((d) => d.id !== id)
+  tombstone(gone)
   save()
   roster().catch(() => {})
-  // A moment later, so a phone removing itself still gets the answer.
+  onRemoved(id)
+  // A moment later, so a phone removing itself still gets the answer (what its connections ask
+  // meanwhile is turned down: Conn.removed).
   setTimeout(() => { for (const c of [...conns.values()]) if (c.device?.id === id) c.close() }, 500)
   return status()
 }
+// A removed device's key, kept a while: when it connects again it's told, sealed, that it was
+// removed (GONE), which is the only word that unpairs it there.
+function tombstone(devices) {
+  const now = Date.now()
+  conf.removed = [...(conf.removed || []).filter((x) => x.at > now - REMOVED_DAYS * 86400000 && !devices.some((d) => d.key === x.key)), ...devices.map((d) => ({ key: d.key, at: now }))].slice(-200)
+}
+// Its notifications go with it (index.js: push.js).
+let onRemoved = () => {}
+export const whenRemoved = (fn) => { onRemoved = fn }
+
+// Keep a device paired with Pair a device's code: you've seen it's yours. A computer kept here can
+// introduce others and be introduced to them (machines.js).
+let onKept = () => {}
+export const whenKept = (fn) => { onKept = fn }
+export function keepDevice(id) {
+  const d = (conf.devices || []).find((x) => x.id === id)
+  if (!d) throw Object.assign(new Error('That device isn\'t paired here any more'), { status: 404 })
+  if (d.fresh) { delete d.fresh; save(); onKept(d) }
+  return status()
+}
+// Another of your computers, paired here and kept (or allowed when it asked, or from before Keep).
+export const kept = (relayAt) => { const r = cleanRelay(relayAt); return !!r && (conf.devices || []).some((d) => d.kind === 'computer' && d.relay === r && !d.fresh) }
+export const isKept = (deviceId) => !!deviceId && (conf.devices || []).some((d) => d.id === deviceId && !d.fresh)
 
 // ---------- messages a phone left while this computer was offline ----------
 // Taken from the relay when this computer connects (the relay also hears which phones are paired,
@@ -991,8 +1091,10 @@ function leave() {
   limit = null
   use = null
   relayBuild = null
-  // (Which Worker was yours on Cloudflare stays, so going back to it updates that one.)
-  conf = { key: was.key, awake: was.awake, ...(was.leaving ? { leaving: was.leaving } : {}), ...(was.cf?.script ? { cf: { account: was.cf.account, accountName: was.cf.accountName, script: was.cf.script } } : {}) }
+  // (Which Worker was yours on Cloudflare stays, so going back to it updates that one. Its phones'
+  // keys stay too, so one that reaches this computer again is told it was forgotten, sealed.)
+  tombstone(was.devices || [])
+  conf = { key: was.key, awake: was.awake, removed: was.removed, ...(was.leaving ? { leaving: was.leaving } : {}), ...(was.cf?.script ? { cf: { account: was.cf.account, accountName: was.cf.accountName, script: was.cf.script } } : {}) }
   save()
   if (was.hosted) unregister(was)
 }
@@ -1109,8 +1211,9 @@ export function forget() {
   for (const c of conns.values()) c.end()
   conns.clear()
   pairing = null
-  const { key: k, awake: a, leaving: l } = conf
-  conf = { key: k, awake: a, ...(l ? { leaving: l } : {}) }
+  tombstone(conf.devices || [])
+  const { key: k, awake: a, leaving: l, removed: x } = conf
+  conf = { key: k, awake: a, removed: x, ...(l ? { leaving: l } : {}) }
   save()
   fs.rmSync(CF_HOME, { recursive: true, force: true }) // and sign Bridge AI out of Cloudflare
   return status()

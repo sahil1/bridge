@@ -46,6 +46,9 @@ const SLOW_MS = 3000 // a request with no word back this long: is that device st
 const ANSWER_MS = 4000 // no answer to that this long: the link starts over
 const byId = (id) => conf.machines.find((m) => m.id === id) || null
 const byRelay = (r) => conf.machines.find((m) => m.relay === r) || null
+// What this device says about itself to each of the others, sealed, as its first record (ABOUT):
+// its name, that it's a computer, and where it's reached, so a move to another relay is followed.
+const aboutMe = () => ({ name: relay.thisName(), kind: 'computer', relay: relay.relayUrl(), os: OS, version: VERSION })
 
 // This device's key for one of yours (made when they link, kept here).
 async function deviceKey(m) {
@@ -149,7 +152,9 @@ class Link {
     const pair = this.code ? splitCode(this.code) : null
     const state = await phoneHello(device, pair, `${relay.thisName()}`)
     // A device, not a phone: where it's reached (so the other can unlink it), and whether it's
-    // asking: with its commit, and its number once the other has sent its own.
+    // asking: with its commit, and its number once the other has sent its own. In the clear for a
+    // Bridge AI from before; one from now on takes this device's name, kind and relay only from
+    // ABOUT, sealed (aboutMe), so the relay can't change them.
     let asking = {}
     if (this.m.state === 'asking') {
       if (!this.m.ask?.c) {
@@ -183,16 +188,10 @@ class Link {
       try {
         done = await phoneFinish(state, device, msg, { hostKey: vouched ? null : this.m.hostKey || this.m.ask?.h || null, pair })
       } catch (e) {
-        // A different key than the one it was linked with: reinstalled or reset there, or
-        // something in between. Not tried again and again: you link again, checking six digits.
-        if (this.m.state === 'linked' && this.m.hostKey && !vouched) {
-          this.m.state = 'changed'
-          save()
-          this.error = `${this.m.name} doesn't have the key it was linked with (it was reinstalled or reset, or something is in between). Link again to check it's really ${this.m.name}.`
-          for (const w of this.waiters.splice(0)) w.no(new Error(this.error))
-          this.stop()
-          return
-        }
+        // A different key than the one it was linked with: reinstalled or reset there, or something
+        // in between (its relay). Nothing kept changes on that word alone: it says so and tries
+        // again, as for a refusal (unchecked). A code from it links it again, with its new key.
+        if (this.m.state === 'linked' && this.m.hostKey && !vouched) return this.unchecked()
         throw e
       }
       const first = this.m.state !== 'linked'
@@ -201,14 +200,18 @@ class Link {
       this.code = null
       save()
       this.session = done.session
+      // First, sealed: what this device says about itself (aboutMe).
+      this.send(K.ABOUT, 0, aboutMe()).catch(() => {})
       this.answers = msg.ping === 1 // it answers PING
       this.fromIt = Date.now()
       this.error = null
       this.backoff = 2000
       for (const w of this.waiters.splice(0)) w.ok()
       // Its agents, straight away: the sidebar and the top bar show them as soon as it's online.
+      // (Kept here while it was offline: it meets the others now.)
       if (first) onLinked(this.m)
       else refresh(this.m).catch(() => {})
+      if (!first && this.m.introduce) { delete this.m.introduce; save(); introduce(this.m).catch((e) => console.error(`machines: introducing ${this.m.name}:`, e.message)) }
       return
     }
     if (!this.session) return
@@ -216,6 +219,15 @@ class Link {
     this.fromIt = Date.now()
     if (kind === K.PING) return this.send(K.PONG, 0)
     if (kind === K.PONG) return
+    // That device removed this one, said sealed: the only word that ends the link here.
+    if (kind === K.GONE) {
+      this.m.state = 'removed'
+      this.error = `${this.m.name} unlinked this device`
+      save()
+      for (const w of this.waiters.splice(0)) w.no(new Error(this.error))
+      this.stop()
+      return
+    }
     const s = this.streams.get(id)
     if (!s) return
     if (kind === K.HEAD) s.onHead?.(json(body))
@@ -259,24 +271,41 @@ class Link {
     const text = {
       denied: `${this.m.name} turned this device down`,
       busy: `${this.m.name} has too many machines asking right now. Try again in a few minutes.`,
-      'not-paired': this.m.state === 'linked' ? `${this.m.name} unlinked this device` : `${this.m.name} doesn't know this device`,
-      'code-expired': 'That link has expired or was used up. Make a new one on the other device.',
-      'wrong-code': 'That link isn\'t right. Copy it again on the other device.',
+      'not-paired': `${this.m.name} doesn't know this device`,
+      // (One answer for a code that didn't work, whatever was wrong with it; from before, two.)
+      'code-expired': 'That link didn\'t work: it may be mistyped, used or expired. Make a new one on the other device.',
+      'wrong-code': 'That link didn\'t work: it may be mistyped, used or expired. Make a new one on the other device.',
       unsupported: `Update Bridge AI on ${this.m.name}, then try again.`,
     }[why] || why
+    // Already linked: a refusal in the clear could be the relay's, so it ends nothing. A new code
+    // that didn't work, or a version that can't talk yet, carries on with the keys it has; anything
+    // else is said, and tried again (unchecked). Only that device's sealed GONE unlinks it here.
+    if (this.m.state === 'linked') {
+      if (this.code || why === 'unsupported') {
+        this.error = text
+        for (const w of this.waiters.splice(0)) w.no(new Error(text))
+        this.code = null
+        if (why === 'unsupported') this.backoff = 60000
+        return
+      }
+      return this.unchecked()
+    }
     this.error = text
     for (const w of this.waiters.splice(0)) w.no(new Error(text))
     if (why === 'busy') return
-    // Already linked: a new code that didn't work, or a version that can't talk yet, doesn't end
-    // the link. It carries on with the keys it has (it used to stop until Bridge AI restarted).
-    if (this.m.state === 'linked' && (this.code || why === 'unsupported')) {
-      this.code = null
-      if (why === 'unsupported') this.backoff = 60000
-      return
-    }
-    this.m.state = why === 'denied' ? 'denied' : why === 'not-paired' && this.m.state === 'linked' ? 'removed' : this.m.state
+    this.m.state = why === 'denied' ? 'denied' : this.m.state
     save()
     this.stop()
+  }
+
+  // Turned away in the clear, or answered with a key that isn't the one it was linked with: either
+  // could be the relay's doing, so the link stays as it is, says so, and tries again (less and less
+  // often, as after any drop).
+  unchecked() {
+    const name = this.m.name
+    this.error = `Can't connect to ${name}: the answer through its relay couldn't be checked, so nothing was changed. Trying again. If ${name} was set up again, link it again with a code from ${name}.`
+    for (const w of this.waiters.splice(0)) w.no(new Error(this.error))
+    try { this.ws?.close() } catch { /* closed */ }
   }
 
   drop(msg) {
@@ -417,6 +446,7 @@ export function list() {
     return {
       id: m.id, name: s?.name || m.name, relay: m.relay, os: s?.os || m.os || null, version: s?.version || m.version || null,
       state: m.state, online: !!l?.session, lastSeen: m.lastSeen || null, addedAt: m.addedAt,
+      held: !!m.held, // linked back to it, and it meets your others once you keep it here (onLinked)
       code: m.state === 'asking' ? m.ask?.code || null : null, error: m.state === 'linked' && l?.session ? null : l?.error || null,
       counts: s?.counts || {}, agents: s?.agents || [],
       // What waits on you there (null from a Bridge AI too old to say), and when it last said.
@@ -610,8 +640,9 @@ export function unlinked(fromRelay) {
   return { ok: true }
 }
 
-// It moved to another relay (set up again there): it says so whenever it connects to this one, so
-// this device follows it instead of waiting at the old address for ever.
+// It moved to another relay (set up again there): it says so whenever it connects to this one,
+// sealed (ABOUT: the relay can't send it elsewhere), so this device follows it instead of waiting
+// at the old address for ever.
 relay.whenMoved((from, to) => {
   const m = byRelay(from)
   if (!m || byRelay(to)) return
@@ -631,14 +662,34 @@ export function strays() {
 // ---------- once linked ----------
 // The other device gets a code to link back (unless it's linking back), and meets the others
 // linked here (unless it was introduced: the one that introduced it does that).
+// Linked from here (you pasted its link, or asked it): at once. Linked back to it, because it
+// linked to this one with Pair a device's code: it meets the others only once you've kept it here
+// (Keep, where the app says it paired), so a code that got out reaches this computer at most.
+// (Introduced: only a computer kept here can introduce one: index.js.)
 function onLinked(m) {
   const via = links.get(m.id)?.via || 'you'
+  if (via === 'back' && !relay.kept(m.relay)) {
+    m.held = true
+    save()
+    refresh(m).catch(() => {})
+    return
+  }
   ;(async () => {
     if (via !== 'back') await linkBack(m).catch((e) => console.error(`machines: linking back from ${m.name}:`, e.message))
     if (via !== 'intro') await introduce(m).catch((e) => console.error(`machines: introducing ${m.name}:`, e.message))
     await refresh(m).catch(() => {})
   })()
 }
+// Kept here (relay.js keepDevice): the computer held back meets the others now.
+relay.whenKept((d) => {
+  for (const m of conf.machines) {
+    if (!m.held || m.relay !== d.relay) continue
+    delete m.held
+    save()
+    if (links.get(m.id)?.session) introduce(m).catch((e) => console.error(`machines: introducing ${m.name}:`, e.message))
+    else m.introduce = true // when it's next online
+  }
+})
 
 async function linkBack(m) {
   const mine = relay.relayUrl()
@@ -651,11 +702,12 @@ async function linkBack(m) {
 }
 
 // Each device linked here that the new one doesn't know yet: a code from it, handed to the new one.
+// (Not one held back until you keep it here: it meets no one through this one before then.)
 async function introduce(n) {
   const ln = links.get(n.id)
   const known = new Set(((await ln.call('GET', '/api/machines'))?.machines || []).filter((x) => x.state === 'linked').map((x) => x.relay))
   for (const k of conf.machines) {
-    if (k === n || k.state !== 'linked' || known.has(k.relay)) continue
+    if (k === n || k.state !== 'linked' || k.held || known.has(k.relay)) continue
     const lk = links.get(k.id)
     if (!lk?.session) continue
     try {
