@@ -1174,3 +1174,29 @@ async function start() {
 start().catch((e) => waitScreen('Something went wrong', e.message, true))
 // A pairing link opened while this page is already open: start over with its code.
 addEventListener('hashchange', () => { if (/[#&]pair=/.test(location.hash)) location.reload() })
+
+// ---------- Bridge AI's hosted relay, in a browser: whose code this page is ----------
+// Kept apart from the rest. On Bridge AI's relay (boldbridge.app, or <id>.localhost when it's tried
+// on a computer: relay/HOSTED.md), a browser runs this page as the relay serves it, so the
+// encryption rests on the relay serving it unchanged. The iPhone and Android apps carry their own
+// copy. So before pairing, one line says so, with the apps a tap away, until it's dismissed. Never
+// in the apps, and never on a relay of your own.
+function hostedNote() {
+  const KEY = 'bridge-hosted-note'
+  if (inApp || !/\.(boldbridge\.app|localhost)$/i.test(location.hostname)) return
+  try { if (localStorage.getItem(KEY) === '1') return } catch { /* no storage: it shows */ }
+  const link = (text, href) => Object.assign(document.createElement('a'), { textContent: text, href, target: '_blank', rel: 'noreferrer' })
+  const note = Object.assign(document.createElement('p'), { id: 'hosted-note' })
+  note.setAttribute('role', 'note')
+  note.style.cssText = 'display:flex;gap:8px;align-items:flex-start;text-align:left;font-size:13px;margin:14px 0 0;padding:8px 6px 8px 12px;border:1px solid var(--line);border-radius:10px'
+  const text = document.createElement('span')
+  text.append('In a browser, the code that encrypts this page comes from Bridge AI\'s relay. The ', link('iPhone', 'https://boldbridge.ai/phone'), ' and ', link('Android', 'https://boldbridge.ai/#android'), ' apps carry their own.')
+  for (const a of text.querySelectorAll('a')) a.style.color = 'inherit'
+  const close = Object.assign(document.createElement('button'), { type: 'button', textContent: '×', title: 'Dismiss' })
+  close.setAttribute('aria-label', 'Dismiss')
+  close.style.cssText = 'flex:none;height:24px;width:24px;padding:0;border-radius:6px;background:transparent;color:var(--muted);font-size:18px;line-height:1'
+  close.onclick = () => { note.remove(); try { localStorage.setItem(KEY, '1') } catch { /* for now, then */ } }
+  note.append(text, close)
+  $('pair').querySelector('p')?.after(note)
+}
+hostedNote()
