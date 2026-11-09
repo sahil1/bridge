@@ -1182,8 +1182,8 @@ function Slides({ doc, file, onDirty, onStats, handle, readOnly = false, onOpen 
           <Btn name={t('Grid')} icon="grid" on={grid} run={() => { flushTyping(); setEdit(null); setGrid((x) => !x) }} tip={t('Every slide at once, to see the whole deck and drag slides into order')} />
         </div>
         <div className="sd-group">
-          <span className="menu-anchor sd-split">
-            <button type="button" className="btn small primary sd-present-btn" onClick={() => startPresent(at)} title={withKeys(t('Present from this slide'), 'mod', 'enter')} aria-label={t('Present')}><Icon name="play" size={12} /> <span className="sd-btn-label">{t('Present')}</span></button>
+          <span className="menu-anchor sd-split primary">
+            <button type="button" className="sd-tool wide sd-present-btn" onClick={() => startPresent(at)} title={withKeys(t('Present from this slide'), 'mod', 'enter')} aria-label={t('Present')}><Icon name="play" size={13} /><span className="sd-tool-label">{t('Present')}</span></button>
             <button type="button" className={`sd-tool caret${menu === 'present' ? ' on' : ''}`} onClick={() => setMenu(menu === 'present' ? null : 'present')} aria-label={t('More ways to present')} title={t('More ways to present')} aria-haspopup="menu" aria-expanded={menu === 'present'}><Icon name="down" size={12} /></button>
             {menu === 'present' && <Menu label={t('Present')} className="right" onClose={() => setMenu(null)} items={[
               { label: t('From the beginning'), icon: 'play', run: () => startPresent(0), keys: keys('shift', 'mod', '↵') },
@@ -1192,7 +1192,7 @@ function Slides({ doc, file, onDirty, onStats, handle, readOnly = false, onOpen 
             ]} />}
           </span>
           <span className="menu-anchor">
-            <button type="button" className="sd-tool wide" onClick={() => setMenu(menu === 'export' ? null : 'export')} title={t('A PDF, a picture of this slide, or a Markdown deck')} aria-label={t('Export')} aria-haspopup="menu" aria-expanded={menu === 'export'}><Icon name="download" size={15} /><span className="sd-tool-label">{t('Export')}</span></button>
+            <button type="button" className="sd-tool wide" onClick={() => setMenu(menu === 'export' ? null : 'export')} title={t('A PDF, a picture of this slide, or a Markdown deck')} aria-label={t('Export')} aria-haspopup="menu" aria-expanded={menu === 'export'}><Icon name="export" size={15} /><span className="sd-tool-label">{t('Export')}</span></button>
             {menu === 'export' && <Menu label={t('Export')} className="right" onClose={() => setMenu(null)} items={[
               { label: t('PDF (print it, or save as PDF)'), icon: 'doc', run: printPdf },
               { label: t('This slide as a picture (PNG)'), icon: 'image', run: savePng },
@@ -1203,28 +1203,28 @@ function Slides({ doc, file, onDirty, onStats, handle, readOnly = false, onOpen 
         </div>
         {!readOnly && (
           <div className="px-row px-format" aria-label={t('Format')}>
-        {!readOnly && canText && (
+        {!readOnly && (
           <div className="sd-group sd-marks">
-            <Pop name={t('Font')} text={lookNow?.font || ''} className="sd-font-drop" panel={(close) => fonts.map((f) => <Item key={f} label={f} style={{ fontFamily: P.fontCss(f) }} on={lookNow?.font === f} run={() => fmt({ font: f })} close={close} hint={fontHere(f) ? '' : t('not on this computer')} />)} />
+            <Pop name={t('Font')} disabled={!canText} text={canText ? lookNow?.font || '' : t('Font')} className="sd-font-drop" panel={(close) => fonts.map((f) => <Item key={f} label={f} style={{ fontFamily: P.fontCss(f) }} on={lookNow?.font === f} run={() => fmt({ font: f })} close={close} hint={fontHere(f) ? '' : t('not on this computer')} />)} />
             <span className="sd-size">
-              <Btn name={t('Smaller')} icon="size-down" run={() => stepSize(-1)} k={['shift', 'mod', ',']} />
-              <Pop name={t('Size')} text={lookNow?.sz ?? ''} className="sd-size-drop" panel={(close) => SIZES.map((z) => <Item key={z} label={String(z)} on={lookNow?.sz === z} run={() => fmt({ sz: z })} close={close} />)} />
-              <Btn name={t('Bigger')} icon="size-up" run={() => stepSize(1)} k={['shift', 'mod', '.']} />
+              <Btn name={t('Smaller')} disabled={!canText} icon="size-down" run={() => stepSize(-1)} k={['shift', 'mod', ',']} />
+              <Pop name={t('Size')} disabled={!canText} text={canText ? lookNow?.sz ?? '' : '–'} className="sd-size-drop" panel={(close) => SIZES.map((z) => <Item key={z} label={String(z)} on={lookNow?.sz === z} run={() => fmt({ sz: z })} close={close} />)} />
+              <Btn name={t('Bigger')} disabled={!canText} icon="size-up" run={() => stepSize(1)} k={['shift', 'mod', '.']} />
             </span>
-            <Btn name={t('Bold')} icon="bold" run={() => toggle('b')} on={lookOn('b')} k={['mod', 'b']} />
-            <Btn name={t('Italic')} icon="italic" run={() => toggle('i')} on={lookOn('i')} k={['mod', 'i']} />
-            <Btn name={t('Underline')} icon="underline" run={() => toggle('u')} on={lookOn('u')} k={['mod', 'u']} />
-            <Btn name={t('Strikethrough')} icon="strike" run={() => toggle('strike')} on={lookOn('strike')} k={['shift', 'mod', 'x']} />
-            <Pop name={t('Text colour')} icon="text-color" swatch={lookNow?.color ? `#${lookNow.color}` : null} panel={(close) => <Swatches value={lookNow?.color} onPick={(c) => fmt({ color: c })} auto={t('As its style has it')} close={close} />} />
-            <Pop name={t('Align')} icon={{ ctr: 'align-center', r: 'align-right', just: 'align-justify' }[lookNow?.algn] || 'align-left'} panel={(close) => (<>
+            <Btn name={t('Bold')} disabled={!canText} icon="bold" run={() => toggle('b')} on={lookOn('b')} k={['mod', 'b']} />
+            <Btn name={t('Italic')} disabled={!canText} icon="italic" run={() => toggle('i')} on={lookOn('i')} k={['mod', 'i']} />
+            <Btn name={t('Underline')} disabled={!canText} icon="underline" run={() => toggle('u')} on={lookOn('u')} k={['mod', 'u']} />
+            <Btn name={t('Strikethrough')} disabled={!canText} icon="strike" run={() => toggle('strike')} on={lookOn('strike')} k={['shift', 'mod', 'x']} />
+            <Pop name={t('Text colour')} disabled={!canText} icon="text-color" swatch={lookNow?.color ? `#${lookNow.color}` : null} panel={(close) => <Swatches value={lookNow?.color} onPick={(c) => fmt({ color: c })} auto={t('As its style has it')} close={close} />} />
+            <Pop name={t('Align')} disabled={!canText} icon={{ ctr: 'align-center', r: 'align-right', just: 'align-justify' }[lookNow?.algn] || 'align-left'} panel={(close) => (<>
               {[['l', 'Left', 'align-left', 'l'], ['ctr', 'Centre', 'align-center', 'e'], ['r', 'Right', 'align-right', 'r'], ['just', 'Justified', 'align-justify', 'j']].map(([a, label, icon, key]) => <Item key={a} label={t(label)} icon={icon} on={lookNow?.algn === a} run={() => align(a)} close={close} keys={['shift', 'mod', key]} />)}
             </>)} />
-            <Pop name={t('Line spacing')} icon="line-spacing" panel={(close) => SPACINGS.map(([v, label]) => <Item key={v} label={t(label)} on={Math.abs((lookNow?.lnSpc || 1) - v) < 0.01} run={() => paraFmt({ lnSpc: v })} close={close} />)} />
-            <Btn name={t('Bulleted list')} icon="list" run={() => bullets('char')} on={canText ? lookNow?.bullet === 'char' : undefined} k={['shift', 'mod', '8']} />
-            <Btn name={t('Numbered list')} icon="list-ordered" run={() => bullets('num')} on={canText ? lookNow?.bullet === 'num' : undefined} k={['shift', 'mod', '7']} />
-            <Btn name={t('Decrease indent')} icon="outdent" run={() => indent(-1)} k={['shift', 'tab']} />
-            <Btn name={t('Increase indent')} icon="indent" run={() => indent(1)} k={['tab']} />
-            <Btn name={t('Clear formatting')} icon="eraser" run={() => fmt({ b: null, i: null, u: null, strike: null, sz: null, color: null, font: null })} k={['mod', '\\']} />
+            <Pop name={t('Line spacing')} disabled={!canText} icon="line-spacing" panel={(close) => SPACINGS.map(([v, label]) => <Item key={v} label={t(label)} on={Math.abs((lookNow?.lnSpc || 1) - v) < 0.01} run={() => paraFmt({ lnSpc: v })} close={close} />)} />
+            <Btn name={t('Bulleted list')} disabled={!canText} icon="list" run={() => bullets('char')} on={canText ? lookNow?.bullet === 'char' : undefined} k={['shift', 'mod', '8']} />
+            <Btn name={t('Numbered list')} disabled={!canText} icon="list-ordered" run={() => bullets('num')} on={canText ? lookNow?.bullet === 'num' : undefined} k={['shift', 'mod', '7']} />
+            <Btn name={t('Decrease indent')} disabled={!canText} icon="outdent" run={() => indent(-1)} k={['shift', 'tab']} />
+            <Btn name={t('Increase indent')} disabled={!canText} icon="indent" run={() => indent(1)} k={['tab']} />
+            <Btn name={t('Clear formatting')} disabled={!canText} icon="eraser" run={() => fmt({ b: null, i: null, u: null, strike: null, sz: null, color: null, font: null })} k={['mod', '\\']} />
           </div>
         )}
         {!readOnly && shownSel.length > 0 && !edit && (
@@ -1264,7 +1264,6 @@ function Slides({ doc, file, onDirty, onStats, handle, readOnly = false, onOpen 
             <Btn name={t('Delete')} icon="trash" run={removeSel} k={['⌫']} />
           </div>
         )}
-            {!canText && !shownSel.length && <span className="muted small px-hint">{t('Click something on the slide to change it: words, shapes, pictures, tables. Double-click a picture to crop it.')}</span>}
           </div>
         )}
       </div>
@@ -1312,6 +1311,9 @@ function Slides({ doc, file, onDirty, onStats, handle, readOnly = false, onOpen 
           <div className="sd-work">
             <div className="sd-stage px-stage" ref={stageEl} tabIndex={-1} onDragOver={(e) => { if ([...(e.dataTransfer?.types || [])].includes('Files')) e.preventDefault() }} onDrop={onStageDrop}
               onPointerDown={(e) => { if (e.target === e.currentTarget) { if (editRef.current) stopEdit(); setSel([]); setCrop(null) } }}>
+              {/* How to start changing it, in the space over the slide while nothing on it is picked
+                  (the format row's tools wait, greyed, for something to change). */}
+              {!readOnly && !canText && !shownSel.length && <p className="muted small px-hint">{t('Click something on the slide to change it: words, shapes, pictures, tables. Double-click a picture to crop it.')}</p>}
               {stage.w > 0 && (
                 <div className={`sd-canvas px-canvas${crop != null ? ' cropping' : ''}`} ref={canvasRef} style={{ width: Math.round(W * k), height: Math.round(H * k) }}
                   onPointerDown={onCanvasDown} onDoubleClick={onCanvasDouble} onPointerMove={(e) => { if (!drag.current) { const h = e.target.closest('[data-o]'); setHover(h ? Number(h.dataset.o) : null) } }} onPointerLeave={() => setHover(null)}

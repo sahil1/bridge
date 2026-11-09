@@ -693,8 +693,8 @@ html,body{margin:0;background:#fff}div.marpit>svg{display:block;width:100vw;heig
           {!pptx && tool(t('Markdown'), 'code', () => { flush(); setShow((s) => ({ ...s, md: !s.md })) }, { label: true, on: show.md, tip: t('The deck as Markdown, beside the slides') })}
         </div>
         <div className="sd-group">
-          <span className="menu-anchor sd-split">
-            <button type="button" className="btn small primary sd-present-btn" onClick={() => { flush(); setPresent({ at, presenter: false }) }} title={withKeys(t('Present from this slide'), 'mod', 'enter')} aria-label={t('Present')}><Icon name="play" size={12} /> <span className="sd-btn-label">{t('Present')}</span></button>
+          <span className="menu-anchor sd-split primary">
+            <button type="button" className="sd-tool wide sd-present-btn" onClick={() => { flush(); setPresent({ at, presenter: false }) }} title={withKeys(t('Present from this slide'), 'mod', 'enter')} aria-label={t('Present')}><Icon name="play" size={13} /><span className="sd-tool-label">{t('Present')}</span></button>
             <button type="button" className={`sd-tool caret${menu === 'present' ? ' on' : ''}`} onClick={() => setMenu(menu === 'present' ? null : 'present')} aria-label={t('More ways to present')} title={t('More ways to present')} aria-haspopup="menu" aria-expanded={menu === 'present'}><Icon name="down" size={12} /></button>
             {menu === 'present' && <Menu label={t('Present')} className="right" onClose={() => setMenu(null)} items={[
               { label: t('From the beginning'), icon: 'play', run: () => setPresent({ at: 0, presenter: false }), keys: keys('shift', 'mod', '↵') },
@@ -703,7 +703,7 @@ html,body{margin:0;background:#fff}div.marpit>svg{display:block;width:100vw;heig
             ]} />}
           </span>
           <span className="menu-anchor">
-            {tool(t('Export'), 'download', () => setMenu(menu === 'export' ? null : 'export'), { label: true, disabled: !!busy, tip: t('A PowerPoint or PDF of it'), more: { 'aria-haspopup': 'menu', 'aria-expanded': menu === 'export' } })}
+            {tool(t('Export'), 'export', () => setMenu(menu === 'export' ? null : 'export'), { label: true, disabled: !!busy, tip: t('A PowerPoint or PDF of it'), more: { 'aria-haspopup': 'menu', 'aria-expanded': menu === 'export' } })}
             {menu === 'export' && <Menu label={t('Export')} className="right" onClose={() => setMenu(null)} items={[
               pptx ? { label: t('Markdown deck, beside it'), icon: 'code', run: () => saveBeside('md') } : { label: t('PowerPoint, beside it'), icon: 'screen', run: () => saveBeside('pptx') },
               { label: t('PDF (print it, or save as PDF)'), icon: 'doc', run: print },

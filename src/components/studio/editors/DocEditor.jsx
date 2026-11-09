@@ -669,8 +669,11 @@ function WordDoc({ file, model, onDirty, onStats, handle, readOnly, onOpen }) {
   const alignIcon = (ALIGN.find((x) => x[0] === s.align || (s.align === 'start' && x[0] === 'left') || (s.align === 'end' && x[0] === 'right')) || ALIGN[0])[2]
   const zooms = [0.5, 0.75, 0.9, 1, 1.25, 1.5, 2]
 
+  // The formatting tools, wrapping onto a second row where the pane is too narrow for one; the view's
+  // (find, outline, print, zoom) at the right of the first row either way.
   const toolbar = !readOnly && (
     <div className="sd-toolbar sd-doc-tools" role="toolbar" aria-label={t('Formatting')}>
+      <div className="sd-tools-main">
       <span className="sd-group">
         <Tool name={t('Undo')} icon="undo" run={() => c().undo().run()} keys={['mod', 'z']} disabled={!s.undo} />
         <Tool name={t('Redo')} icon="redo" run={() => c().redo().run()} keys={['mod', 'shift', 'z']} disabled={!s.redo} />
@@ -732,8 +735,8 @@ function WordDoc({ file, model, onDirty, onStats, handle, readOnly, onOpen }) {
           <Item icon="header-footer" label={hf.footer ? t('Edit the footer') : t('Add a footer')} run={() => setEditingHf('footer')} close={close} />
         </>)} />
       </span>
-      <span className="sd-grow" />
-      <span className="sd-group">
+      </div>
+      <span className="sd-group sd-view-tools">
         {revs > 0 && <Drop name={t('Tracked changes')} className="sd-wide-only" icon="changes" text={String(revs)} tip={t('{n} tracked changes', { n: revs })} panel={(close) => (<>
           <div className="sd-drop-head">{t('{n} tracked changes', { n: revs })}</div>
           <Item icon="check" label={t('Accept all')} run={() => resolveAll(true)} close={close} />
@@ -1250,6 +1253,7 @@ function MarkdownDoc({ file, text, onDirty, onStats, handle, readOnly, onOpen })
       <div className="sd-doc-head">
         {!readOnly && (
           <div className="sd-toolbar sd-doc-tools" role="toolbar" aria-label={t('Formatting')}>
+            <div className="sd-tools-main">
             <span className="sd-group">
               <Tool name={t('Undo')} icon="undo" run={() => c().undo().run()} keys={['mod', 'z']} disabled={!s.undo} />
               <Tool name={t('Redo')} icon="redo" run={() => c().redo().run()} keys={['mod', 'shift', 'z']} disabled={!s.redo} />
@@ -1278,8 +1282,8 @@ function MarkdownDoc({ file, text, onDirty, onStats, handle, readOnly, onOpen })
               <input ref={picker} type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) putPictures([f]) }} />
               <TableTool editor={editor} c={c} on={s.table} />
             </span>
-            <span className="sd-grow" />
-            <span className="sd-group">
+            </div>
+            <span className="sd-group sd-view-tools">
               <Tool name={t('Outline')} icon="outline" on={showOutline} run={() => setOutline(!showOutline)} tip={t('Outline: the headings, to go to')} />
               <Tool name={t('Find and replace')} icon="search" on={!!finding} run={() => setFinding(finding ? null : 'find')} keys={['mod', 'f']} />
               <Drop name={t('File')} className="sd-wide-only" icon="printer" tip={t('Print, and a copy as a Word file')} disabled={exporting} panel={(close) => (<>
