@@ -146,8 +146,8 @@ try {
   ok((await bigSave).status === 200 && seen.length > 1 && seen.every((x) => !x.error && (!x.changed || x.by === 'you')) && !lv.some((v) => v.by === 'outside') && lv[0].by === 'you' && lv[0].size === long.length, 'looks at the file while Studio saves it wait for the save: never half written, never kept as a change from outside', { during: seen.length, by: [...new Set(seen.map((x) => x.by || (x.changed ? '?' : 'same')))], versions: lv.map((v) => [v.by, v.size]) })
   // A version of a page opens sandboxed, as /raw serves it: never as this app's own page.
   fs.writeFileSync(path.join(dir, 'page.html'), '<p>First</p><script>fetch("/api/fleet")</script>')
-  const pm = await api(`/studio/open?${q(F('page.html'))}`)
-  ok((await put(F('page.html'), Buffer.from('<p>Second</p>'), pm.mtime)).status === 200, 'a page saved in Studio')
+  const pgOpen = await api(`/studio/open?${q(F('page.html'))}`)
+  ok((await put(F('page.html'), Buffer.from('<p>Second</p>'), pgOpen.mtime)).status === 200, 'a page saved in Studio')
   const pv = await until(async () => (await api(`/studio/versions?${q(F('page.html'))}`)).versions.find((v) => v.by === 'opened'), 10000)
   const pr = pv && await fetch(`${kit.url}/api/studio/version?${q(F('page.html'))}&id=${encodeURIComponent(pv.id)}`)
   const csp = pr?.headers.get('content-security-policy') || ''
