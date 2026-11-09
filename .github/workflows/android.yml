@@ -150,7 +150,8 @@ jobs:
           badging=$("$bt/aapt2" dump badging "$apk")
           head -1 <<<"$badging"
           grep -q "^package: name='dev.bridgeai.phone' .*versionName='$version'" <<<"$badging" || fail "$apk isn't dev.bridgeai.phone $version"
-          for f in assets/demo/index.html assets/cloud/index.html assets/cloud/providers.json; do
+          # Its own copy of the phone page (relay/build.js --page), so a relay can't change its code.
+          for f in assets/demo/index.html assets/cloud/index.html assets/cloud/providers.json assets/relay/index.html assets/relay/shell.js assets/relay/link.js assets/relay/sw.js; do
             unzip -l "$apk" "$f" > /dev/null || fail "$apk has no $f"
           done
           if [ -f mobile/android/app/build/outputs/apk/debug/app-debug.apk ]; then
