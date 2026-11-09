@@ -171,8 +171,14 @@ history as `by`; without it, `400 admin`.
   The relay checks the signature and expiry offline and keeps `{ a, d }` with the computer. One relay
   address per device: registering again with the same `d` gives the same address back.
 - **Connecting** (`/_relay/host`) needs the computer's own token, as now, and a relay token that
-  hasn't expired, in `X-Relay-Token`, for the same account. Bridge AI sends a fresh one each time it
-  connects.
+  hasn't expired, in `X-Relay-Token`, for the same account and device. Bridge AI sends a fresh one
+  each time it connects. A computer signed in again (a new device on the account) keeps its address
+  if the device it was made for is off the account and the new one has none of its own.
+- **A device removed from the account** (or signed out) loses the relay then, not when its relay
+  token ends: the relay asks `GET /internal/status?a=&d=` about the device when its computer
+  registers or connects, when a phone connects, and with its tallies (keeping the answer a minute),
+  and once `device` is false, that computer and its phones are let go with `{ t: "limit", why:
+  "token" }`, and registering is refused (`401`, `token: "removed"`).
 - **Each account's use** is kept by a Durable Object per account (`idFromName(a)`), fed by the
   account's Hubs as they tally messages. Limits are the relay's settings:
 

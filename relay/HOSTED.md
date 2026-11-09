@@ -227,6 +227,13 @@ without a word.
   minutes before asking again. Bridge AI says the same in Settings › Devices and Settings › Account.
   A computer connecting without a relay token, or with one that ended or is another account's, is
   told `why: "token"`; Bridge AI gets a new one from the account and connects again.
+- **A device removed from the account** (removed in Settings › Account or the admin view, or signed
+  out there): its computer is turned away with `why: "token"` the next time it, or the Account, asks
+  the accounts service about it (`/internal/status?a=&d=`, at most a minute old), and its phones
+  with it, not when its relay token ends; registering with its relay token is refused (401, `token:
+  "removed"`). A computer connects only with a relay token of the device its address was made for;
+  one signed in again (a new device) keeps its address if the device before is off the account and
+  the new one has no address of its own, and is turned away otherwise.
 - **The whole relay's day** (`RELAY_DAILY_REQUESTS`): the same for every computer on the relay,
   in these words: "Bridge AI's relay has carried all it can for today, for every computer on it. It
   starts again at 00:00 UTC. For no limits, put the relay on your own Cloudflare account, or use

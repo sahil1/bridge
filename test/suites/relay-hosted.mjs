@@ -116,19 +116,22 @@ function namespace(env, Class = worker.Hub) {
 }
 
 // The accounts service, as the relay's binding reaches it: each account's status (active and
-// allowed the relay unless set here), and the usage reports it was sent.
+// allowed the relay unless set here), its devices (on it unless removed here), and the usage
+// reports it was sent.
 function accountsService() {
   const status = new Map()
+  const removed = new Set()
   const reports = []
   const asked = []
   return {
-    status, reports, asked,
+    status, removed, reports, asked,
     async fetch(input, init) {
       const r = input instanceof Request ? input : new Request(input, init)
       const u = new URL(r.url)
       const a = u.searchParams.get('a') || (r.method === 'POST' ? (await r.clone().json()).a : null)
+      const d = u.searchParams.get('d')
       const st = status.get(a) || { status: 'active', relay: 'approved', tester: 'none' }
-      if (u.pathname === '/internal/status') { asked.push(a); return Response.json(st) }
+      if (u.pathname === '/internal/status') { asked.push(a); return Response.json({ ...st, ...(d ? { device: !removed.has(d) } : {}) }) }
       if (u.pathname === '/internal/usage') { reports.push(await r.json()); return Response.json(st) }
       return new Response('Not found', { status: 404 })
     },
@@ -384,6 +387,43 @@ try {
     shift += 61000
     const p3 = await r.phone(c)
     ok(p3.got?.[0]?.why === 'relay' && /doesn't have Bridge AI's relay any more/.test(p3.got[0].text), 'its relay taken away: said that way', p3.got)
+    shift = 0
+  }
+
+  // ---------- A device removed from the account loses the relay then, not when its token ends ----------
+  {
+    shift = 0
+    const r = relay()
+    const a = newAccount()
+    const c = await r.register(a)
+    const keep = await r.register(a)
+    const host = await r.computer(c)
+    const other = await r.computer(keep)
+    const ph = await r.phone(c)
+    await r.say(c, host, frame(OK, ph.att.id))
+    r.accounts.removed.add(c.d)
+    shift += 61000 // (what the service said is kept a minute)
+    const late = await r.phone(c)
+    await until(() => host.closed, 2000, 20)
+    ok(late.got?.[0]?.why === 'token' && /signed in to a Bold Bridge account/.test(late.got[0].text) && host.said('limit').some((m) => m.why === 'token') && host.closed?.[0] === 4009 && ph.closed, 'removed from the account: within a minute its computer is told (as one without a relay token) and let go, with its phones, and a phone connecting is turned away', { late: late.got?.[0], host: host.closed, ph: ph.closed })
+    const again = await r.computer(c)
+    ok(again.got?.[0]?.why === 'token' && again.closed?.[0] === 4009, 'its relay token, still days from its end, no longer connects it', again.got)
+    const reg = await r.registerWith(c.rt)
+    const regJ = await reg.json()
+    ok(reg.status === 401 && regJ.token === 'removed' && /isn't on your Bold Bridge account any more/.test(regJ.error), 'nor registers it: 401, saying it isn\'t on the account any more', regJ)
+    ok(other.readyState === 1 && !other.said('limit').length && (await r.phone(keep)).readyState === 1, 'the account\'s other computer carries on', other.said('limit'))
+    // Only the device an address was made for connects to it: another of the account's, with an
+    // address of its own, is turned away.
+    const wrong = await r.computer(keep, relayToken(a, c.d))
+    const swapped = await r.computer(c, keep.rt)
+    ok(wrong.got?.[0]?.why === 'token' && swapped.got?.[0]?.why === 'token', 'a computer connects only with a relay token of the device its address was made for', [wrong.got?.[0]?.why, swapped.got?.[0]?.why])
+    // Signed in again on the same computer (a new device): its address moves with it.
+    const d2 = newDevice()
+    shift += 61000
+    const back = await r.computer(c, relayToken(a, d2))
+    ok(back instanceof End && back.readyState === 1 && !back.said('limit').length && r.env.HUB.of(c.id).store.get('meta').d === d2, 'signed in again (a new device, the old one off the account): it connects to its address, which is now the new device\'s', back.got)
+    const same = await r.register(a, d2)
+    ok(same.id === c.id && r.account(a).store.get('s').computers[d2] === c.id && !(c.d in r.account(a).store.get('s').computers), 'and registering as the new device gives the same address back', { same: same.id, was: c.id })
     shift = 0
   }
 

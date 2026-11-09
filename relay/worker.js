@@ -318,6 +318,7 @@ const NO_TOKEN = {
   none: 'Bridge AI\'s relay needs this computer signed in to a Bold Bridge account that may use it (Settings › Account).',
   forged: 'That pass for Bridge AI\'s relay doesn\'t check out. Sign in to your Bold Bridge account again (Settings › Account).',
   expired: 'This computer\'s pass for Bridge AI\'s relay ran out. Bridge AI gets a new one from your Bold Bridge account by itself; try again in a minute.',
+  removed: 'This computer isn\'t on your Bold Bridge account any more (it was removed, or signed out). Sign in again (Settings › Account).',
 }
 const FULL = 'Bridge AI\'s relay is full for now: it has as many accounts as it can take. Put a relay on your own Cloudflare account instead (it\'s free), or use Tailscale.'
 async function register(req, env, url) {
@@ -334,7 +335,12 @@ async function register(req, env, url) {
   const v = version(body?.version)
   const acc = await toAccount(env, t.a, 'check', { d: t.d }).catch(() => null)
   if (!acc) return json({ error: 'Bridge AI\'s relay couldn\'t check your account just now. Try again in a minute.' }, 503)
-  if (acc.refused) { count(env, '', 'refused', [acc.refused.why]); return json({ error: limitText(acc.refused.why, limits(env), Date.now()), why: acc.refused.why }, 403) }
+  if (acc.refused) {
+    count(env, '', 'refused', [acc.refused.why])
+    // This device isn't on the account any more: its relay token, still good for days, isn't enough.
+    if (acc.refused.why === 'token') return json({ error: NO_TOKEN.removed, why: 'token', token: 'removed' }, 401)
+    return json({ error: limitText(acc.refused.why, limits(env), Date.now()), why: acc.refused.why }, 403)
+  }
   const token = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
   const hash = await sha(token)
   const init = (id) => hub(env, id).fetch('https://hub/_hosted/init', { method: 'POST', body: JSON.stringify({ id, hash, version: v, a: t.a, d: t.d }) })
@@ -687,9 +693,10 @@ export class Hub {
     }
     if (p === '/_relay/host') {
       if (!(await this.tokenOk(req))) return new Response('Not allowed', { status: 403 })
-      // ...and a relay token from its account, not past its end (Bridge AI sends a fresh one each time).
+      // ...and a relay token from its account and its device, not past its end (Bridge AI sends a
+      // fresh one each time), the device still on the account (askAccount).
       const t = await relayToken(this.env, `Bearer ${req.headers.get('X-Relay-Token') || ''}`)
-      if (!t.ok || t.a !== this.meta.a) { this.limited('token'); return refuse(this.limit('token'), 4009) }
+      if (!t.ok || t.a !== this.meta.a || (t.d !== this.meta.d && !(await this.moved(t.d)))) { this.limited('token'); return refuse(this.limit('token'), 4009) }
       const s = await this.askAccount('check')
       if (s.refused) return refuse(this.limit(s.refused.why), 4009)
       // Let go for sending on past its account's limits: told so again, with when.
@@ -701,6 +708,17 @@ export class Hub {
       return why ? refuse(this.limit(why), 4005) : null
     }
     return notFound()
+  }
+
+  // This computer signed in to its account again, so it's another device there now: its address goes
+  // with it if its Account says the device it was made for is off the account, and the new one is on
+  // it with no address of its own here. Otherwise it's turned away.
+  async moved(d) {
+    const r = await toAccount(this.env, this.meta.a, 'move', { d: this.meta.d, to: d, id: this.meta.id }).catch(() => null)
+    if (!r?.ok) return false
+    this.meta = { ...this.meta, d }
+    await this.ctx.storage.put('meta', this.meta)
+    return true
   }
 
   async tokenOk(req) {
@@ -1109,7 +1127,8 @@ export class Hub {
 // about the account at most once a minute: a suspension is heard within a minute of its next use.
 // Kept, as s: { a, first (its first message ever, which its weeks start from), win { start, msgs },
 // week { start, msgs }, days { day: msgs } (the last few, for the accounts service), last (its last
-// use), computers { device: computer id }, status { status, relay, at }, told }.
+// use), computers { device: computer id }, status { status, relay, at }, devs { device: { on, at } }
+// (whether each device asking is still on the account), told }.
 export class Account {
   constructor(ctx, env) {
     this.ctx = ctx
@@ -1128,22 +1147,46 @@ export class Account {
     if (p === '/_account/computer') { s.computers[b.d] = b.id; await this.save(); return json({ ok: true }) }
     if (p === '/_account/left') { if (s.computers[b.d] === b.id) delete s.computers[b.d]; if (s.first != null || Object.keys(s.computers).length) await this.save(); else { this.s = null; await this.ctx.storage.delete('s') } return json({ ok: true }) }
     if (p === '/_account/check' || p === '/_account/tally') return json(await this.answer(b))
+    if (p === '/_account/move') return json(await this.move(b))
     return notFound()
   }
 
   // What a Hub (or a computer registering) is told: refused { why } (the account is suspended, has no
-  // relay any more, or was deleted), limit { why, until } (its window or week used up), left (messages
-  // to go), use, and the address of the device asking, if it has one.
+  // relay any more, or was deleted; or 'token', the device asking isn't on it any more), limit { why,
+  // until } (its window or week used up), left (messages to go), use, and the address of the device
+  // asking, if it has one.
   async answer(b) {
     const s = this.s
     const now = Date.now()
     const n = Math.max(0, Math.floor(Number(b.n) || 0))
     if (n) this.add(n, now)
-    const out = this.said(now, await this.status(now), b.id || null)
+    const out = this.said(now, await this.status(now, b.d), b.id || null)
     if (n) await this.reportSoon()
     await this.save()
+    // A device removed from the account (or signed out there) is turned away on its own, as a computer
+    // without a relay token is, the next time it asks: not when its relay token ends, days later.
+    if (!out.refused && this.offAccount(b.d)) return { ...out, refused: { why: 'token' }, id: null }
     return { ...out, id: s.computers[b.d] || null }
   }
+
+  // A computer signed in again as a new device (to): its address moves to it (Hub.moved), only when
+  // the device it was made for (d) is off the account, the new one is on it, and has no other address.
+  async move(b) {
+    const s = this.s
+    const now = Date.now()
+    const to = String(b.to || '')
+    if (!/^[a-z0-9]{12}$/.test(to) || !/^[a-z2-7]{12}$/.test(String(b.id))) return { ok: false }
+    await this.status(now, b.d)
+    await this.status(now, to)
+    const ok = this.offAccount(b.d) && s.devs?.[to]?.on === true && (!s.computers[to] || s.computers[to] === b.id)
+    if (ok) {
+      if (s.computers[b.d] === b.id) delete s.computers[b.d]
+      s.computers[to] = b.id
+      await this.save()
+    }
+    return { ok }
+  }
+  offAccount(d) { return !!d && this.s.devs?.[d]?.on === false }
 
   // The answer for now, and its other computers told at once when it changed.
   said(now, st, except = null) {
@@ -1159,19 +1202,25 @@ export class Account {
     return out
   }
 
-  // What the accounts service says of the account: asked at most once a minute. Can't ask just now:
-  // what it said last stands a little longer, or it's let through (its tokens say it was allowed).
-  async status(now) {
+  // What the accounts service says of the account, and of the device asking (d: whether it's still
+  // on the account), each asked at most once a minute. Can't ask just now: what it said last stands a
+  // little longer, or it's let through (its tokens say it was allowed).
+  async status(now, d = null) {
     const s = this.s
-    if (s.status && now - s.status.at < STATUS_MS) return s.status
+    d = /^[a-z0-9]{12}$/.test(String(d)) ? String(d) : null
+    const dev = d && s.devs?.[d]
+    if (s.status && now - s.status.at < STATUS_MS && (!d || (dev && now - dev.at < STATUS_MS))) return s.status
     if (!this.env.ACCOUNTS) return (s.status = { status: 'active', relay: 'approved', at: now })
+    s.devs = Object.fromEntries(Object.entries(s.devs || {}).filter(([, v]) => now - v.at < DAY))
     try {
-      const r = await this.env.ACCOUNTS.fetch(`https://accounts/internal/status?a=${s.a}`)
+      const r = await this.env.ACCOUNTS.fetch(`https://accounts/internal/status?a=${s.a}${d ? `&d=${d}` : ''}`)
       if (!r.ok) throw new Error(`answered ${r.status}`)
       const j = await r.json()
       s.status = { status: String(j.status), relay: j.relay || null, at: now }
+      if (d) s.devs[d] = { on: typeof j.device === 'boolean' ? j.device : null, at: now }
     } catch {
       s.status = { status: 'active', relay: 'approved', ...s.status, at: now - STATUS_MS + 15000 }
+      if (d) s.devs[d] = { on: dev?.on ?? null, at: now - STATUS_MS + 15000 }
     }
     return s.status
   }
