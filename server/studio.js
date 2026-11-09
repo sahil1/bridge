@@ -48,20 +48,48 @@ async function locate(root, rel) {
   return { real, rel: r, st }
 }
 
+// One at a time per key: each waits for the one before it to finish.
+function queue() {
+  const last = new Map() // key -> the last one's promise
+  return (key, fn) => {
+    const run = (last.get(key) || Promise.resolve()).then(fn)
+    const tail = run.catch(() => {})
+    last.set(key, tail)
+    tail.then(() => { if (last.get(key) === tail) last.delete(key) })
+    return run
+  }
+}
+
 // ---------- Versions ----------
 const indexOf = (real) => path.join(VERSIONS, keyOf(real), 'index.json')
-const versionsOf = async (real) => (await readJSON(indexOf(real), { path: real, versions: [] })).versions
+// A file's list of versions (its index.json), read and written one at a time: a look at the list
+// waits for a version being kept, so it never meets the list half written, nor holds it open while
+// it's replaced (Windows refuses that, and the look came back empty). A list that can't be read
+// is an error, never an empty one, which the next version would be kept over, losing the others;
+// one that isn't JSON any more is put aside (its copies stay), and a new one started.
+const inIndex = queue()
+async function readIndex(file) {
+  for (let i = 0; ; i++) {
+    try { return JSON.parse(await fsp.readFile(file, 'utf8')) } catch (e) {
+      if (e.code === 'ENOENT') return { versions: [] }
+      if (i < 3) { await new Promise((r) => setTimeout(r, 100 * (i + 1))); continue }
+      if (!(e instanceof SyntaxError)) throw new Error(`Couldn't read this file's versions: ${e.message}`)
+      await fsp.rename(file, `${file}.${Date.now()}.unreadable`).catch(() => {})
+      return { versions: [] }
+    }
+  }
+}
+const versionsOf = (real) => inIndex(indexOf(real), () => readIndex(indexOf(real))).then((idx) => idx.versions)
 // The file as it is now, kept as a version unless the newest one is the same. by: you, agent (with
 // its name), outside (changed by something else), restored. auto: saved as you typed (a document
 // saves itself): one version for each few minutes of typing, the newest of them, so typing for
 // an hour keeps a handful, not hundreds; a save of yours (Save, ⌘S) keeps the one it's at.
 const MERGE_MS = 10 * 60_000
-const snapping = new Map() // real -> promise: one at a time per file
 function snapshot(real, by, { name = null, buf = null, auto = false } = {}) {
-  const run = (snapping.get(real) || Promise.resolve()).then(async () => {
+  return inIndex(indexOf(real), async () => {
     const data = buf || await fsp.readFile(real)
     const h = hash(data)
-    const idx = await readJSON(indexOf(real), { path: real, versions: [] })
+    const idx = await readIndex(indexOf(real))
     const top = idx.versions[0]
     if (top?.hash === h) {
       if (by === 'you' && buf && !auto && top.auto) { delete top.auto; delete top.since; writeFileAtomic(indexOf(real), JSON.stringify(idx, null, 1)) }
@@ -76,15 +104,14 @@ function snapshot(real, by, { name = null, buf = null, auto = false } = {}) {
     const merge = auto && by === 'you' && top?.by === 'you' && top.auto && Date.now() - Date.parse(top.since || top.at) < MERGE_MS
     const v = { id, at, by, ...(name ? { name: String(name).slice(0, 80) } : {}), size: data.length, hash: h, file, ...(auto ? { auto: true, since: merge ? top.since || top.at : at } : {}) }
     idx.path = real
-    if (merge) await fsp.rm(path.join(dir, top.file), { force: true }).catch(() => {})
     idx.versions = merge ? [v, ...idx.versions.slice(1)] : [v, ...idx.versions]
-    for (const old of idx.versions.splice(KEEP)) await fsp.rm(path.join(dir, old.file), { force: true }).catch(() => {})
+    const dropped = [...(merge ? [top] : []), ...idx.versions.splice(KEEP)]
     writeFileAtomic(indexOf(real), JSON.stringify(idx, null, 1))
+    // Their copies only once the list no longer names them.
+    for (const old of dropped) await fsp.rm(path.join(dir, old.file), { force: true }).catch(() => {})
     prune().catch(() => {})
     return v
   })
-  snapping.set(real, run.catch(() => {}))
-  return run
 }
 // All the copies together over MAX_ALL: the oldest go, never a file's newest.
 let pruning = null
@@ -101,15 +128,23 @@ function prune() {
     let total = 0
     for (const d of dirs) for (const v of (await readJSON(path.join(VERSIONS, d, 'index.json'), { versions: [] })).versions) total += v.size || 0
     all.sort((a, b) => a.v.at.localeCompare(b.v.at))
-    const touched = new Set()
+    const gone = new Map() // folder -> the ids of its versions to go
     while (total > MAX_ALL && all.length) {
-      const { d, v, idx } = all.shift()
-      await fsp.rm(path.join(VERSIONS, d, v.file), { force: true }).catch(() => {})
-      idx.versions = idx.versions.filter((x) => x.id !== v.id)
+      const { d, v } = all.shift()
+      gone.set(d, (gone.get(d) || new Set()).add(v.id))
       total -= v.size || 0
-      touched.add(idx)
     }
-    for (const idx of touched) writeFileAtomic(path.join(VERSIONS, keyOf(idx.path), 'index.json'), JSON.stringify(idx, null, 1))
+    // Each file's list taken as it is by then (a version kept meanwhile stays on it), in its turn.
+    for (const [d, ids] of gone) {
+      const file = path.join(VERSIONS, d, 'index.json')
+      await inIndex(file, async () => {
+        const idx = await readIndex(file)
+        const out = idx.versions.filter((x) => ids.has(x.id))
+        idx.versions = idx.versions.filter((x) => !ids.has(x.id))
+        writeFileAtomic(file, JSON.stringify(idx, null, 1))
+        for (const v of out) await fsp.rm(path.join(VERSIONS, d, v.file), { force: true }).catch(() => {})
+      }).catch(() => {})
+    }
   })().finally(() => { pruning = null })
   return pruning
 }
@@ -202,14 +237,7 @@ export async function open(root, rel, { rootId = null, label = null } = {}) {
 // Studio's writes to a file (a save, a version put back) and the looks at whether it changed, one
 // at a time per file: a look never sees a save half written, or written and not yet kept as yours
 // (it took it for a change from outside, and kept a version by "outside" of your own save).
-const turns = new Map() // real -> the last one's promise
-function inTurn(real, fn) {
-  const run = (turns.get(real) || Promise.resolve()).then(fn)
-  const tail = run.catch(() => {})
-  turns.set(real, tail)
-  tail.then(() => { if (turns.get(real) === tail) turns.delete(real) })
-  return run
-}
+const inTurn = queue()
 
 // Saved from Studio: only if nobody changed it since you opened it (mtime: what you loaded),
 // unless force. What was there is kept first, if it isn't already. auto: saved as you typed.
