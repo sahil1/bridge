@@ -2349,7 +2349,8 @@ setInterval(() => { if (notify.active()) quota().then((q) => notify.onQuota(q, c
 
 app.get('/api/push/key', wrap(() => ({ publicKey: push.publicKey() })))
 app.get('/api/push/devices', wrap(() => push.devices()))
-app.post('/api/push/subscribe', wrap((req) => push.subscribe(req.body?.subscription, req.body?.label, fromHere(req))))
+// (Through a paired phone or computer: which one, so removing it stops its notifications.)
+app.post('/api/push/subscribe', wrap((req) => push.subscribe(req.body?.subscription, req.body?.label, fromHere(req), req.headers['x-bridge-relay'] || null)))
 app.post('/api/push/unsubscribe', wrap((req) => push.unsubscribe(req.body || {})))
 app.post('/api/push/test', wrap(() => notify.send({ kind: 'test', title: 'Bridge AI', body: 'Notifications are working.', url: '/', tag: 'test' })))
 // What a waiting agent is asking, for the desktop app's and the browser's own notifications.
@@ -2394,7 +2395,10 @@ const viaMachine = (req) => relay.isMachine(req.headers['x-bridge-relay'])
 const notByMachine = (req) => { if (viaMachine(req)) throw Object.assign(new Error('Another device can\'t do that'), { status: 403 }) }
 // port: where each one's pages are for the page asking (machinepages.js; null: at /m/<id>/ beside
 // it). machinePage: the page asking is one of theirs, at its port, which can't change these.
-app.get('/api/machines', wrap(async (req) => ({ here: { ...machines.here(), about: { ...(await machines.about()), runtime: rt.name } }, machines: machines.list().map((m) => ({ ...m, port: pages.portFor(req, m.id) })), machinePage: req.machinePage || null, strays: machines.strays(), asks: relay.status().asks, canBeLinked: !!relay.relayUrl(), hostedAvailable: relay.status().hostedAvailable })))
+// newDevices: phones and computers paired with Pair a device's code and not kept yet, said in the
+// app with Keep and Remove (Machines.jsx).
+const newDevices = () => relay.status().devices.filter((d) => d.fresh).map(({ id, name, kind, relay: at, addedAt }) => ({ id, name, kind, relay: at, addedAt, machine: kind === 'computer' ? machines.list().find((m) => m.relay === at)?.id || null : null }))
+app.get('/api/machines', wrap(async (req) => ({ here: { ...machines.here(), about: { ...(await machines.about()), runtime: rt.name } }, machines: machines.list().map((m) => ({ ...m, port: pages.portFor(req, m.id) })), machinePage: req.machinePage || null, strays: machines.strays(), asks: relay.status().asks, newDevices: newDevices(), canBeLinked: !!relay.relayUrl(), hostedAvailable: relay.status().hostedAvailable })))
 // This device's name, as your devices and phones show it: set here, or from one of your other
 // devices (through its link). '' goes back to the computer's own name.
 relay.useName(() => cfg.deviceName)
@@ -2408,13 +2412,17 @@ app.post('/api/machines/:id/name', wrap((req) => { notByMachine(req); return mac
 // Fix: where the connection to that device stops, starting it over on the way.
 app.post('/api/machines/:id/check', wrap((req) => { notByMachine(req); return machines.check(req.params.id) }))
 app.get('/api/machines/summary', wrap((req) => machines.summary({ home: req.query.home === '1' })))
+// Another computer introducing a third (intro) does so only once you've kept it here (Keep, where
+// the app said it paired): until then it reaches this computer, and no other through it.
 app.post('/api/machines', wrap((req) => {
   const via = ['back', 'intro'].includes(req.body?.via) && viaMachine(req) ? req.body.via : 'you'
+  if (via === 'intro' && !relay.isKept(req.headers['x-bridge-relay'])) throw Object.assign(new Error(`Keep ${relay.deviceOf(req.headers['x-bridge-relay'])?.name || 'that device'} in Bridge AI on ${relay.thisName()} first`), { status: 403 })
   return machines.add({ link: req.body?.link, name: req.body?.name, via })
 }))
 app.post('/api/machines/ask', wrap((req) => { notByMachine(req); return machines.ask({ relay: req.body?.relay, name: req.body?.name }) }))
 app.post('/api/machines/invite', wrap((req) => {
   if (!fromHere(req) && !viaMachine(req)) throw Object.assign(new Error('Only this device, or one linked to it, makes these'), { status: 403 })
+  if (!fromHere(req) && !relay.isKept(req.headers['x-bridge-relay'])) throw Object.assign(new Error(`Keep ${relay.deviceOf(req.headers['x-bridge-relay'])?.name || 'that device'} in Bridge AI on ${relay.thisName()} first`), { status: 403 })
   return relay.invite()
 }))
 app.post('/api/machines/unlinked', wrap((req) => {
@@ -2424,9 +2432,12 @@ app.post('/api/machines/unlinked', wrap((req) => {
 }))
 app.delete('/api/machines/:id', wrap((req) => { notByMachine(req); return machines.remove(req.params.id) }))
 app.post('/api/machines/asks/:id', wrap((req) => { relay.answerAsk(req.params.id, !!req.body?.allow); return { asks: relay.status().asks } }))
-// An ask reaches your phones too, so you can allow it from there.
-relay.whenAsked((a) => notify.send({ kind: 'machine', title: `${a.name} asks to link`, body: `Allow it in Bridge AI if both devices show ${a.code}.`, url: '/#settings/machines', tag: `machine-ask-${a.id}` }).catch(() => {}))
-relay.whenPaired((d) => notify.send({ kind: 'machine', title: `${d.name} is paired`, body: 'If that wasn\'t you, remove it in Settings › Devices.', url: '/#settings/machines', tag: `paired-${d.id}` }).catch(() => {}))
+// An ask reaches your phones too, so you can allow it from there. Its six digits stay in Bridge AI
+// (a notification goes through Apple's or Google's servers, and shows on a locked screen).
+relay.whenAsked((a) => notify.send({ kind: 'machine', title: `${a.name} asks to link`, body: 'Open Bridge AI to check the six digits on both devices, then allow it.', url: '/#settings/machines', tag: `machine-ask-${a.id}` }).catch(() => {}))
+relay.whenPaired((d) => notify.send({ kind: 'machine', title: `${d.name} is paired`, body: 'If that wasn\'t you, remove it in Bridge AI.', url: '/#settings/machines', tag: `paired-${d.id}` }).catch(() => {}))
+// A device removed: its notifications stop too.
+relay.whenRemoved((id) => push.forgetDevice(id))
 // What this device tells the others: its agents, for their sidebars and agent maps (agentmap.js),
 // and what waits on you here, for their needs-you inboxes.
 // With Home asked for (a device with Home on asks), everything Home lists from here too (home.js).
@@ -2511,6 +2522,12 @@ app.post('/api/relay/awake', wrap((req) => { onComputer(req); return relay.setAw
 app.post('/api/relay/forget', wrap((req) => { onComputer(req); return relay.forget() }))
 // A phone can also remove itself (when it forgets this computer).
 app.delete('/api/relay/devices/:id', wrap((req) => { if (req.headers['x-bridge-relay'] !== req.params.id) onComputer(req); return relay.removeDevice(req.params.id) }))
+// Keep a device that just paired (the app says so, with Keep and Remove): you, here or on another
+// of your phones; not the device itself, nor another computer.
+app.post('/api/relay/devices/:id/keep', wrap((req) => {
+  if (req.headers['x-bridge-relay'] === req.params.id || viaMachine(req)) throw Object.assign(new Error('Keep it in Bridge AI on this computer'), { status: 403 })
+  return relay.keepDevice(req.params.id)
+}))
 // Messages a phone sent while this computer was offline, still on the phone (server/inbox.js).
 app.post('/api/relay/inbox', wrap((req) => relay.fromPhone(req.headers['x-bridge-relay'], req.body)))
 
