@@ -14,10 +14,12 @@
 // send or copy.
 //
 // This device's page in a tab of another device's window doesn't listen itself: that window's page
-// does, and gives the words back (lent, below). Another device's page in the desktop app with no
-// such page around it can't use this computer's microphone at all, and says so (noMic).
+// does, and gives the words back (lent, below). The two pages are different sites, so that's only
+// in messages (Between a tab's page and this one, below). Another device's page in the desktop app
+// with no such page around it can't use this computer's microphone at all, and says so (noMic).
 import { useSyncExternalStore } from 'react'
 import { api, apiUrl, settingsChanged, viaRelay, embedded, machineId } from '../api.js'
+import { LOOPBACK } from '../../shared/machinehost.js'
 import { store } from '../components/layout.jsx'
 import { startPcm, microphone, wav, RATE, micRefused, micBlocked } from '../audio/pcm.js'
 import { clean, makeNames } from '../../shared/dictation/clean.js'
@@ -72,8 +74,8 @@ export const isPaused = () => paused
 
 // ---------- Where the text goes ----------
 // Message boxes say they're there (Composer.jsx): { insert(text, caret), visible() }. So does
-// another device's agent in a tab (RemoteAgent.jsx): { frame: true, name, win(), insert(text),
-// visible() }, its insert false when its page didn't take them.
+// another device's agent in a tab (RemoteAgent.jsx): { frame: true, name, origin, el(), win(),
+// insert(text), visible() }, its insert a promise of whether its page took them.
 const boxes = new Map()
 let lastBox = null
 let onScreen = () => null // the agent on screen (App.jsx)
@@ -122,36 +124,109 @@ function typeInto(el, text, sel) {
   el.dispatchEvent(new Event('input', { bubbles: true }))
 }
 // at: the words' time, by which they're kept (amend), for Ask out loud to say what came of them.
+// Whether they went in: for a tab's page here (another device's), a promise of what it said.
+const went = (r) => (typeof r?.then === 'function' ? r.then((x) => x !== false, () => false) : r !== false)
 function deliver(target, text, at) {
   if (!target || target.kind === 'hud') return true
   if (target.kind === 'ask') { const f = asks.get(target.id); if (f) f(text, { at }); return !!f }
   // Listened for the page in a tab here: given back to it, to put where it would have.
-  if (target.kind === 'frame') { try { return target.give(text, at) !== false } catch { return false } }
-  if (target.kind === 'composer' && boxes.get(target.id)) return boxes.get(target.id).insert(text, target.caret) !== false
+  if (target.kind === 'frame') { try { return went(target.give(text, at)) } catch { return false } }
+  if (target.kind === 'composer' && boxes.get(target.id)) return went(boxes.get(target.id).insert(text, target.caret))
   // Typed into the terminal, without Enter (Terminal.jsx and LiveShell.jsx listen for this).
   if (target.kind === 'terminal' && target.el?.isConnected) { target.el.dispatchEvent(new CustomEvent('bridge-type', { detail: text })); return true }
   if (target.kind === 'field' && target.el?.isConnected) { typeInto(target.el, text, target.sel); return true }
   // What you were in has gone: the message box on screen.
   const b = fallbackBox()
-  if (b) return boxes.get(b).insert(text) !== false
+  if (b) return went(boxes.get(b).insert(text))
   return false
 }
 // Words heard for this page by another: the page of a window showing this device's agent in a tab
 // (handOver), or the desktop app's dictation window, for its window showing this device
-// (desktop/dictation.js). Put where they'd have gone had they been heard here. Whether they were.
+// (desktop/dictation.js). Put where they'd have gone had they been heard here. Whether they were
+// (a promise, when that's another device's page in a tab here).
 export function take(text) {
   const target = typeof text === 'string' && text.trim() ? targetFromFocus() : null
   return !!target && target.kind !== 'password' && deliver(target, text)
 }
-// ...and handed to the page in a frame here (another device's agent: RemoteAgent.jsx). false when it
-// had nowhere to put them, or is a Bridge AI from before it could take them.
-export function handOver(frame, text) {
-  try {
-    const w = frame?.contentWindow
-    const d = { text, put: false }
-    w.dispatchEvent(new w.CustomEvent('bridge-dictated', { detail: d }))
-    return d.put === true
-  } catch { return false }
+
+// ---------- Between a tab's page and this one ----------
+// Another device's agent in a tab here is that device's page, at an address of its own (api.js
+// machineUrl): another site, which can't reach into this page, nor this one into it. So the two only
+// talk in messages, each checked for the window and the address it came from, of these kinds, and
+// nothing else of either page goes to the other:
+//   the tab's page says it's there (hello), its presses (press, release, cancel, finish: it doesn't
+//     listen itself, whatever starts it there: the key, its mic button, Ask out loud), and whether
+//     it put the words it was given (given, took);
+//   this page says whether it listens for it (host), how that's going (state), and the words: heard
+//     for a press there (give), or heard here with the focus in it or it on screen (words).
+const MSG = 'bridge-dictation'
+const FROM_TAB = new Set(['hello', 'press', 'release', 'cancel', 'finish', 'given', 'took'])
+const FROM_HOST = new Set(['host', 'state', 'give', 'words'])
+const PHASES = new Set(['idle', 'opening', 'listening', 'working'])
+const ANSWER_MS = 3000
+
+// This page, with tabs of other devices' pages: lending is its dictation while it listens for them
+// (Dictation.jsx lendTo); spoke, the tabs' windows whose page said it's there.
+let lending = null
+const spoke = new WeakSet()
+const answers = new Map() // a message's id -> what its answer settles
+let asked = 0
+const tabOf = (e) => [...boxes.values()].find((b) => b.frame && b.win?.() === e.source && e.origin === b.origin) || null
+const toTab = (b, type, more = {}) => { try { b.win()?.postMessage({ [MSG]: type, ...more }, b.origin) } catch { /* gone */ } }
+const hostSays = () => ({ listens: !!lending, app: !!window.bridgeApp?.desktop })
+// The words, to a tab's page: whether it put them, or false after a while (it went, or it's a Bridge
+// AI from before this, which never answers).
+function askTab(b, type, text, at) {
+  const w = b.win?.()
+  if (!w || !spoke.has(w)) return Promise.resolve(false)
+  return new Promise((resolve) => {
+    const id = ++asked
+    const timer = setTimeout(() => { answers.delete(id); resolve(false) }, ANSWER_MS)
+    answers.set(id, (put) => { clearTimeout(timer); answers.delete(id); resolve(put === true) })
+    toTab(b, type, { id, text, ...(Number.isFinite(at) ? { at } : {}) })
+  })
+}
+// ...heard here for it (RemoteAgent.jsx's insert).
+export const handOver = (b, text) => askTab(b, 'words', text)
+export function lendTo(l) {
+  lending = l
+  for (const b of boxes.values()) if (b.frame && spoke.has(b.win?.())) toTab(b, 'host', hostSays())
+}
+let told = null // the tab last told how it's going, and what
+function tellTab() {
+  const b = st.target?.kind === 'frame' ? boxes.get(st.target.id) : told?.b
+  if (!b) return
+  const now = `${st.phase}:${st.mode}`
+  if (told?.b !== b || told.now !== now) toTab(b, 'state', { phase: st.phase, mode: st.mode })
+  told = st.phase === 'idle' ? null : { b, now }
+}
+function fromTab(e) {
+  const d = e.data
+  if (!d || typeof d !== 'object' || !FROM_TAB.has(d[MSG])) return
+  const b = tabOf(e)
+  if (!b) return
+  const type = d[MSG]
+  if (type === 'hello') { spoke.add(e.source); toTab(b, 'host', hostSays()); return }
+  if (type === 'given' || type === 'took') { answers.get(d.id)?.(d.put); return }
+  if (!lending) return
+  // A press only from you, in it: just after a key or a click in this window (one in its frame counts
+  // here too), with the focus in its frame (which its page takes as it hands a press over, and can
+  // only with a key or click of its own). The rest only for the listening that's for it. So it can't
+  // start this computer's microphone by itself, nor stop what's listening for this page.
+  const inIt = document.hasFocus() && document.activeElement === b.el?.() && navigator.userActivation?.isActive !== false
+  const forIt = () => st.target?.kind === 'frame' && boxes.get(st.target.id) === b
+  const at = Number.isFinite(d.at) ? d.at : Date.now()
+  if (type === 'press' && inIt) lending.press(at, d.target ? { from: e.source, ask: d.ask === true, sentence: d.sentence !== false, give: (text, when) => askTab(b, 'give', text, when) } : null)
+  else if (type === 'release' && forIt()) lending.release(at)
+  else if (type === 'cancel' && forIt()) lending.cancel()
+  else if (type === 'finish' && forIt()) lending.finish()
+  // What came of it, even when nothing changed (a press it couldn't take): only its own listening,
+  // never whether this page is listening for something else.
+  toTab(b, 'state', forIt() ? { phase: st.phase, mode: st.mode } : { phase: 'idle', mode: null })
+}
+if (typeof window !== 'undefined' && !embedded) {
+  window.addEventListener('message', fromTab)
+  subs.add(tellTab)
 }
 
 // ---------- In a tab of another device's window ----------
@@ -159,9 +234,48 @@ export function handOver(frame, text) {
 // listen itself, whatever starts it here (the key, the mic button, Ask out loud): that window's page
 // does, as it does for the desktop app's key (in the desktop app only the app's own pages may use
 // the microphone), and the words come back here, to go where this page would have put them (give).
-// host: that page's dictation (window.bridgeDictation: Dictation.jsx), when it has one; lent: the
-// one listening for a press made here, which then has the key's let go, Esc, Enter and the state.
-const host = () => { try { return (embedded && window.parent.bridgeDictation) || null } catch { return null } }
+// That window's page is the computer's showing this device, at one of its own addresses there;
+// they talk in messages (above). host: its dictation, once it says it listens for this page; lent:
+// the one listening for a press made here, which then has the key's let go, Esc, Enter and the state.
+let around = null // { origin, listens, app }: that window's page, once it says it's there
+let mirror = { phase: 'idle', mode: null } // how its listening for this page is going
+let pending = null // what this page's press was for: { ask, sentence, give }
+let pressed = 0
+let stated = 0
+const aroundAt = (o) => { try { const u = new URL(o); return u.origin === location.origin || (u.protocol === 'http:' && LOOPBACK.has(u.hostname) && u.port === location.port) } catch { return false } }
+const toHost = (type, more = {}) => { try { window.parent.postMessage({ [MSG]: type, ...more }, around?.origin || '*') } catch { /* gone */ } }
+const relayed = {
+  press: (at, from) => {
+    if (from) pending = from
+    mirror = { phase: 'opening', mode: 'hold' }
+    const n = ++pressed
+    // Nothing back from it (it went): this page isn't left thinking it listens.
+    setTimeout(() => { if (pressed === n && stated < n) mirror = { phase: 'idle', mode: null } }, ANSWER_MS)
+    // The focus in this tab, which that page asks of a press (a button held here may not move it).
+    try { window.focus() } catch { /* it stays where it was */ }
+    toHost('press', { at, ...(from ? { target: true, ask: !!from.ask, sentence: from.sentence !== false } : {}) })
+  },
+  release: (at) => toHost('release', { at }),
+  cancel: () => toHost('cancel'),
+  finish: () => toHost('finish'),
+  state: () => mirror,
+}
+function fromHost(e) {
+  const d = e.data
+  if (e.source !== window.parent || !d || typeof d !== 'object' || !FROM_HOST.has(d[MSG]) || !aroundAt(e.origin)) return
+  const type = d[MSG]
+  if (type === 'host') { around = { origin: e.origin, listens: d.listens === true, app: d.app === true }; return }
+  if (e.origin !== around?.origin) return
+  if (type === 'state') { stated = pressed; mirror = { phase: PHASES.has(d.phase) ? d.phase : 'idle', mode: d.mode === 'free' || d.mode === 'hold' ? d.mode : null }; return }
+  const text = typeof d.text === 'string' ? d.text.slice(0, 200_000) : ''
+  const put = type === 'give' ? (pending && text ? pending.give(text, Number.isFinite(d.at) ? d.at : Date.now()) : false) : take(text)
+  Promise.resolve(put).then((x) => x === true, () => false).then((x) => toHost(type === 'give' ? 'given' : 'took', { id: d.id, put: x }))
+}
+if (typeof window !== 'undefined' && embedded) {
+  window.addEventListener('message', fromHost)
+  toHost('hello')
+}
+const host = () => (around?.listens ? relayed : null)
 let lent = null
 const hosted = () => (lent && lent.state().phase !== 'idle' ? lent : null)
 // ...and there, a press from such a page (its window): for its tab, the words given back to it.
@@ -170,10 +284,10 @@ export function lentTarget({ from, give, ask, sentence }) {
   return { kind: 'frame', id, give, ask: !!ask, sentence: sentence !== false }
 }
 // Another device's page in the desktop app with nothing around it to listen for it (a window showing
-// that device, or a tab of one from before it could): the app lets only its own pages use this
-// computer's microphone, so it isn't asked. In a window showing that device the dictation key works
-// all the same: the app listens for it there (desktop/dictation.js).
-const noMic = () => !!machineId && (!!window.bridgeApp?.machine || (() => { try { return embedded && !!window.parent.bridgeApp } catch { return false } })())
+// that device, or a tab of one whose page doesn't listen: dictation off there): the app lets only its
+// own pages use this computer's microphone, so it isn't asked. In a window showing that device the
+// dictation key works all the same: the app listens for it there (desktop/dictation.js).
+const noMic = () => !!machineId && (!!window.bridgeApp?.machine || !!around?.app)
 
 // ---------- Names to spell right (server/dictation.js), kept a minute ----------
 let wordsAt = 0
@@ -206,7 +320,7 @@ export async function press(target, at = Date.now()) {
   const h = host()
   if (h && (h.state().phase !== 'idle' || (target && target.kind !== 'password'))) {
     lent = h
-    h.press(at, target ? { from: window, ask: target.kind === 'ask', sentence: target.sentence, give: (text, when) => deliver(target, text, when) } : null)
+    h.press(at, target ? { ask: target.kind === 'ask', sentence: target.sentence, give: (text, when) => deliver(target, text, when) } : null)
     return
   }
   lent = null
@@ -338,8 +452,10 @@ async function transcribe(id) {
     lastAudio = null
     const at = Date.now()
     set({ phase: 'idle', mode: null, result: { text: out, at, ...tidied } })
-    const put = deliver(target, out, at)
+    const put = await deliver(target, out, at)
     keep(at, target, put, { text: out, raw: data.text, ...(said ? { said, tidiedBy: tidy.by } : {}), ms: Math.round(((blob.size - 44) / 2 / RATE) * 1000) }, blob)
+    // (A tab's page answers in a moment: by then you may be saying the next thing.)
+    if (seq !== id) return
     if (!put) set({ note: t('Nowhere to put it, so here it is: {text}', { text: out }) })
     else if (target?.kind !== 'hud') offerAnyApp()
   } catch (e) {
@@ -468,9 +584,17 @@ export async function forget(result) {
 // For the dictation window's "the agent I looked at last" (Hud.jsx), from whichever window it was in:
 // this device's, one showing another device (/m/<id>/), or another device's agent in a tab here.
 // Each window says which is on screen while it has the focus (Dictation.jsx). { machine: that
-// device's id on this one (null: this one), pane, name, at }.
-export const lookAt = (l) => { if (l?.pane) store.set('cc-looked', { machine: l.machine || null, pane: l.pane, name: l.name || '', at: Date.now() }) }
+// device's id on this one (null: this one), pane, name, at }. A window of the desktop app showing
+// another device is that device's page, at its own address, whose saved state the dictation window
+// can't read: it tells the app too, which says which device it is (desktop/dictation.js), and the
+// dictation window takes whichever was looked at last (latest).
+export const lookAt = (l) => {
+  if (!l?.pane) return
+  store.set('cc-looked', { machine: l.machine || null, pane: l.pane, name: l.name || '', at: Date.now() })
+  window.bridgeApp?.looking?.({ pane: l.pane, name: l.name || '' })
+}
 export const lookedAt = () => store.get('cc-looked', null)
+export const latest = (...ls) => ls.filter((l) => l?.pane && Number.isFinite(l.at)).sort((a, b) => b.at - a.at)[0] || null
 
 // ---------- The key from any app ----------
 // Off until you say yes (shared/dictation/platform.js). In the desktop app, where this computer lets

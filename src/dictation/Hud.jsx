@@ -7,7 +7,7 @@ import { useRecheck } from '../permissions.js'
 import { store } from '../components/layout.jsx'
 import { keyLabel } from '../../shared/dictation/keys.js'
 import { corrections } from '../../shared/dictation/corrected.js'
-import { useDictation, configure, press, release, finish, cancel, dismiss, retry, keysPlatform, dictationKey, amend, forget, lookedAt } from './controller.js'
+import { useDictation, configure, press, release, finish, cancel, dismiss, retry, keysPlatform, dictationKey, amend, forget, lookedAt, latest } from './controller.js'
 import { Morph, Listening, Working, Done } from './Pill.jsx'
 import { untidiedWhy, TidyNeeds } from './Tidy.jsx'
 import Remember from './Remember.jsx'
@@ -109,10 +109,11 @@ export default function Hud() {
   // Settings since this window opened), among the agents running now. The agent you looked at last
   // (controller.js lookAt; before that, this computer's window's) on another device is asked of that
   // device, and listed first as "… on Desk"; not running any more, wherever it was: said, with
-  // nobody picked.
+  // nobody picked. A window showing another device tells the app instead (hudLooked).
   const pickTarget = async () => {
     const g = press0.current
-    const seen = lookedAt()
+    const seen = latest(lookedAt(), await app().hudLooked?.().catch(() => null))
+    if (g !== press0.current) return
     const far = seen?.machine ? seen : null
     const [f, c, there, macs] = await Promise.all([
       api('/fleet').catch(() => null), api('/config').catch(() => null),

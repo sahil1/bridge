@@ -14,12 +14,13 @@
 //                  listening and the next stops it (GNOME asks once; sway has no portal: none)
 // With one of Bridge AI's windows in front, the key goes to that page (as if pressed there);
 // otherwise to the dictation window, shown without taking the keyboard from the app you're in. A
-// window of Bridge AI's showing another of your devices (/m/<id>/) is that device's page, which
-// can't use this computer's microphone (main.js): the dictation window listens for it, and hands
-// the words to that page (bridge:hud-into), which puts them where they'd have gone had it heard
-// them itself (src/dictation/controller.js take). Such a page leaves the key to the app (preload.js
-// dictates), so with the key from any app off it's heard there all the same, before the page gets it
-// (before-input-event), with this computer's key.
+// window of Bridge AI's showing another of your devices (/m/<id>/, at its own address: senders.js)
+// is that device's page, which can't use this computer's microphone (main.js): the dictation window
+// listens for it, and hands the words to that page (bridge:hud-into), which puts them where they'd
+// have gone had it heard them itself (src/dictation/controller.js take). Such a page leaves the key
+// to the app (preload.js dictates), so with the key from any app off it's heard there all the same,
+// before the page gets it (before-input-event), with this computer's key. It says which agent it
+// has on screen (bridge:looking), for the dictation window's "the agent I looked at last".
 //
 // "Where I'm typing" (Settings › Voice, off until you pick it): the dictation window, once it has
 // the text, asks for it to be pasted into the app you were in (pasteInto in platform.js says how,
@@ -283,13 +284,16 @@ const BUNDLE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/
 // electron: the module; ROOT: Bridge AI's code (shared/, native/bin); DATA: its data folder;
 // isOurs(win): one of the app's own windows, where the key goes to the page.
 // askAccess(pane): the Allow access tile (main.js); trusted(e): an IPC call from the app's own page.
+// pageOf(url): what a window shows ({ kind: 'own' | 'machine', machine }, senders.js); sentFrom(e):
+// the same for the page an IPC call came from.
 // openApp(bundle): brings that app to the front (Paste again, and back from the card; the tests
 // stand in for it).
 // perms: the app's permissions (permissions.js), which ask for Accessibility the same way everywhere.
 // onStatus(view): what Settings is told, each time the key is set (main.js keeps what it needs).
 // fnUsage(): what macOS does when 🌐 is pressed (System Settings › Keyboard), for the Fn key's note.
 const openBundle = (bundle) => new Promise((resolve) => execFile('open', ['-b', bundle], { timeout: 5000 }, () => resolve()))
-function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, askAccess, trusted = () => true, openApp = openBundle, perms = null, onStatus = null, fnUsage = readFnUsage }) {
+const byPath = (u) => { try { const m = /^\/m\/([A-Za-z0-9_-]{1,20})\//.exec(new URL(u).pathname); return m ? { kind: 'machine', machine: m[1] } : { kind: 'own', machine: null } } catch { return null } }
+function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, askAccess, trusted = () => true, pageOf = byPath, sentFrom = (e) => pageOf(e?.senderFrame?.url || ''), openApp = openBundle, perms = null, onStatus = null, fnUsage = readFnUsage }) {
   const { BrowserWindow, globalShortcut, screen, ipcMain, clipboard, systemPreferences, shell } = electron
   const IS_MAC = process.platform === 'darwin'
   let lib = null
@@ -323,8 +327,8 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, askAccess, tru
     }
     say(hud?.webContents, detail)
   }
-  // Another of your devices' page (/m/<id>/...), shown in a window of ours.
-  const elsewhere = (w) => { try { return /^\/m\/[A-Za-z0-9_-]{1,20}\//.test(new URL(w.webContents.getURL()).pathname) } catch { return false } }
+  // Another of your devices' page (/m/<id>/..., at its own address), shown in a window of ours.
+  const elsewhere = (w) => { try { return pageOf(w.webContents.getURL())?.kind === 'machine' } catch { return false } }
   // info: what the Mac's helper says was in front ({ app, bundle, path, pid, secure }). w: the window
   // it was pressed in, when it's known (else the one in front).
   function onDown(at, info, w = BrowserWindow.getFocusedWindow()) {
@@ -465,9 +469,19 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, askAccess, tru
   // gone, or had nowhere to put them (or is a Bridge AI from before it could take them).
   ipcMain.handle('bridge:hud-into', async (e, text) => {
     if (!fromHud(e) || typeof text !== 'string' || !text.trim() || !into || into.isDestroyed()) return { put: false }
-    const js = `(() => { const d = { text: ${JSON.stringify(text.slice(0, 200_000))}, put: false }; window.dispatchEvent(new CustomEvent('bridge-dictated', { detail: d })); return d.put === true })()`
+    const js = `(() => { const d = { text: ${JSON.stringify(text.slice(0, 200_000))}, put: false }; window.dispatchEvent(new CustomEvent('bridge-dictated', { detail: d })); return Promise.resolve(d.put).then((x) => x === true, () => false) })()`
     return { put: await into.executeJavaScript(js).then((x) => x === true, () => false) }
   })
+  // The agent a window showing another device has on screen while it has the focus (its page keeps
+  // it where the dictation window can't read it: src/dictation/controller.js lookAt), for "the agent
+  // I looked at last". Which device it's on is the window's, not something its page says.
+  let looked = null
+  ipcMain.on('bridge:looking', (e, l) => {
+    const from = sentFrom(e)
+    if (from?.kind !== 'machine' || typeof l?.pane !== 'string' || !l.pane || l.pane.length > 200) return
+    looked = { machine: from.machine, pane: l.pane, name: typeof l.name === 'string' ? l.name.slice(0, 120) : '', at: Date.now() }
+  })
+  ipcMain.handle('bridge:hud-looked', (e) => (fromHud(e) ? looked : null))
   // ---------- The words on the card, edited there ----------
   // The dictation window never takes the keyboard by itself. To edit the words on its card (click
   // them, or Edit), the page asks for it: on a Mac the window is let take it for that (it can't

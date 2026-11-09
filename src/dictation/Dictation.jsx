@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import Icon from '../components/Icon.jsx'
 import { VoiceSetup, MicFix } from '../components/Composer.jsx'
 import { parseKey, keyLabel, isKeyDown, isKeyUp } from '../../shared/dictation/keys.js'
-import { useDictation, getState, configure, setOnScreen, press, release, finish, cancel, dismiss, retry, targetFromFocus, isPaused, box, keysPlatform, dictationKey, listeningHint, answerOffer, eventTime, take, lentTarget, lookAt } from './controller.js'
+import { useDictation, getState, configure, setOnScreen, press, release, finish, cancel, dismiss, retry, targetFromFocus, isPaused, box, keysPlatform, dictationKey, listeningHint, answerOffer, eventTime, take, lentTarget, lookAt, lendTo } from './controller.js'
 import { embedded } from '../api.js'
 import { t } from '../i18n/index.js'
 import { Morph, Listening, Working, Done } from './Pill.jsx'
@@ -22,7 +22,7 @@ import './dictation.css'
 //
 // This device's agent in a tab of another device's window (embedded: RemoteAgent.jsx there) hands
 // its presses to that window's page, which listens and gives the words back (controller.js, lent);
-// so do the pages in this one's tabs (bridgeDictation, below). Another device's page in the desktop
+// so do the pages in this one's tabs (lendTo, below), in messages. Another device's page in the desktop
 // app (bridgeApp.dictates) leaves the key to the app, which listens for it in that window with this
 // computer's key (desktop/dictation.js). looking: the agent on screen ({ machine, pane, name }),
 // kept as the one you looked at last while this window has the focus, for the dictation window.
@@ -65,13 +65,13 @@ export default function Dictation({ conf, onScreen, looking = null }) {
     window.addEventListener('blur', blur)
     window.addEventListener('bridge-dictate-key', fromApp)
     // The pages in this one's tabs (another device's agent) hand their presses here (above).
-    if (!embedded) window.bridgeDictation = lend
+    if (!embedded) lendTo(lend)
     return () => {
       window.removeEventListener('keydown', down, true)
       window.removeEventListener('keyup', up, true)
       window.removeEventListener('blur', blur)
       window.removeEventListener('bridge-dictate-key', fromApp)
-      if (window.bridgeDictation === lend) delete window.bridgeDictation
+      if (!embedded) lendTo(null)
     }
   }, [off, key])
   const shown = useRef(looking)
@@ -82,9 +82,9 @@ export default function Dictation({ conf, onScreen, looking = null }) {
     window.addEventListener('focus', back)
     return () => window.removeEventListener('focus', back)
   }, [])
-  // Words heard for this page elsewhere: by the page of a window with this device's agent in a tab,
-  // or by the desktop app's dictation window, for its window showing this device. put: whether they
-  // went anywhere here (that one keeps them, and says so when they didn't).
+  // Words heard for this page elsewhere: by the desktop app's dictation window, for its window showing
+  // this device (a page in a tab gets them in a message: controller.js). put: whether they went
+  // anywhere here, or a promise of it (that one keeps them, and says so when they didn't).
   useEffect(() => {
     const heard = (e) => { if (e.detail && typeof e.detail === 'object') e.detail.put = take(e.detail.text) }
     window.addEventListener('bridge-dictated', heard)

@@ -6,9 +6,12 @@
 // its own window full screen for Studio's Focus, and says what an update would lose in the window.
 // Nothing else is exposed.
 const { contextBridge, ipcRenderer, webUtils } = require('electron')
-// Another of your devices, shown through this one (/m/<id>/): its pages get windows and nothing
-// of this computer's (no Finder, files, mic, screen or floating card), as on a phone.
+// Another of your devices, shown through this one (/m/<id>/, at an address of its own: senders.js):
+// its pages get windows and nothing of this computer's (no Finder, files, mic, screen or floating
+// card), as on a phone. So does any page that isn't this computer's own at its own address (a page an
+// agent made, at /api/...), and the app checks each message too (senders.js guard).
 const machine = /^\/m\/([A-Za-z0-9_-]{1,20})\//.exec(location.pathname)?.[1] || null
+const own = !machine && location.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(location.hostname) && !location.pathname.startsWith('/api/')
 // What an update would lose in this window, asked by the app before it updates by itself while
 // you're away (main.js): the page answers (src/busy.js). No answer: null, which counts as busy.
 let busyAnswer = null
@@ -22,15 +25,21 @@ const windows = {
   popOut: (paneId, title) => ipcRenderer.invoke('bridge:popout', { paneId, title, machine }),
   focusMain: () => ipcRenderer.invoke('bridge:focus-main'),
   focusPopout: (paneId) => ipcRenderer.invoke('bridge:focus-popout', paneId),
-  // One of your devices (or this one, id null) in a window of its own.
-  openMachine: (id, agent) => ipcRenderer.invoke('bridge:open-machine', { id: id || null, agent: agent || null }),
+  // One of your devices (or this one, id null) in a window of its own. pass: what this page passes
+  // to that one, for after the # of its address (src/passed.js).
+  openMachine: (id, agent, pass) => ipcRenderer.invoke('bridge:open-machine', { id: id || null, agent: agent || null, pass: typeof pass === 'string' ? pass : '' }),
   // How the page says what an update would lose in it (above).
   answerBusy: (fn) => { busyAnswer = typeof fn === 'function' ? fn : null },
 }
 // dictates: the app listens for the dictation key in its window (desktop/dictation.js), as its page
-// can't use this computer's microphone, so the page leaves the key to it.
-if (machine) contextBridge.exposeInMainWorld('bridgeApp', { platform: process.platform, desktop: false, machine, dictates: true, ...windows })
-else contextBridge.exposeInMainWorld('bridgeApp', {
+// can't use this computer's microphone, so the page leaves the key to it. looking: the agent it has
+// on screen, for the dictation window's "the agent I looked at last" (src/dictation/controller.js).
+if (!own) {
+  contextBridge.exposeInMainWorld('bridgeApp', {
+    platform: process.platform, desktop: false, machine, dictates: true, ...windows,
+    looking: (l) => ipcRenderer.send('bridge:looking', { pane: String(l?.pane || '').slice(0, 200), name: String(l?.name || '').slice(0, 120) }),
+  })
+} else contextBridge.exposeInMainWorld('bridgeApp', {
   platform: process.platform,
   desktop: true,
   capture: (rect) => ipcRenderer.invoke('bridge:capture', rect),
@@ -84,8 +93,10 @@ else contextBridge.exposeInMainWorld('bridgeApp', {
   // brought to the front first), whether it's allowed (a Mac's Accessibility), and asking for it.
   dictateStatus: () => ipcRenderer.invoke('bridge:dictate-status'),
   hudPaste: (text, o) => ipcRenderer.invoke('bridge:hud-paste', String(text), { back: o?.back === true }),
-  // ...or, for a window of Bridge AI's showing another of your devices, into that window's page.
+  // ...or, for a window of Bridge AI's showing another of your devices, into that window's page; and
+  // the agent such a window had on screen, when it was the one looked at last.
   hudInto: (text) => ipcRenderer.invoke('bridge:hud-into', String(text)),
+  hudLooked: () => ipcRenderer.invoke('bridge:hud-looked'),
   // Edit by voice: what was selected where you were typing, read as the key was let go.
   hudSelection: () => ipcRenderer.invoke('bridge:hud-selection'),
   pasteAccess: () => ipcRenderer.invoke('bridge:paste-access'),

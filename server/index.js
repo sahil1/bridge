@@ -8,6 +8,7 @@ import { listSubagents, runningFor, forgetExcept } from './subagents.js'
 import { ttyHandler } from './tty.js'
 import { attachHandler } from './attach.js'
 import { makeGuard } from './guard.js'
+import * as machinePages from './machinepages.js'
 import { usage } from './usage.js'
 import { usageStats } from './usagestats.js'
 import { everywhere } from './usageall.js'
@@ -144,12 +145,15 @@ const macro = makeMacro()
 const news = makeNews(cfg)
 
 const guard = makeGuard(cfg, { tailnetOwner: phone.tailnetOwner })
+// Another of your computers' pages, at addresses of their own here, and what they may ask of this one.
+const pages = machinePages.make({ thisName: () => relay.thisName(), nameOf: (id) => machines.list().find((m) => m.id === id)?.name || null })
 const app = express()
 app.use(guard.http)
+app.use(pages.http)
 // Each request timed, for how Bridge AI itself is doing (perf.js).
 app.use(perf.timing)
 // Your other devices' Bridge AI, through this one (machines.js), before anything reads the body.
-app.use('/m', (req, res) => machines.proxy(req, res))
+app.use('/m', (req, res) => machines.proxy(req, res, { frames: pages.frames }))
 // Saving a file from the viewer can send more than the usual 1 MB.
 const jsonSmall = express.json({ limit: '1mb' })
 const jsonFile = express.json({ limit: '6mb' })
@@ -703,7 +707,12 @@ fileInsights.setHelpers({
 fileInsights.routes(app, { rootOf, trialOff, here: (req) => fromHere(req) })
 // The copies this computer runs, and the ones others are making to it.
 app.get('/api/transfers', tx(() => transfers.list()))
-app.post('/api/transfers', tx((req) => { counts.add('files.sent'); return transfers.start(req.body || {}, { here: fromHere(req) }) }))
+app.post('/api/transfers', tx((req) => {
+  // From a window showing another computer (machinepages.js): only that computer's files copied here.
+  if (req.machinePage && (req.body?.from !== req.machinePage || req.body?.to)) throw Object.assign(new Error(machinePages.elsewhere(relay.thisName())), { status: 403, code: 'machinePage' })
+  counts.add('files.sent')
+  return transfers.start(req.body || {}, { here: fromHere(req) })
+}))
 app.post('/api/transfers/clear', tx(() => transfers.clear()))
 app.post('/api/transfers/:id/stop', tx((req) => transfers.stop(req.params.id)))
 app.post('/api/transfers/:id/retry', tx((req) => transfers.retry(req.params.id)))
@@ -2330,8 +2339,9 @@ notify.use(push.channel)
 notify.useRuntime(rt)
 // A finished agent whose last words name a video or a sound in its folder: its notification opens it.
 notify.useLastFile((a) => { try { return mediaNamed(preview(a)?.text || '', a.cwd) } catch { return null } })
-// This computer itself, not a phone (through the relay, or Tailscale's name for it).
-const fromHere = (req) => !req.headers['x-bridge-relay'] && /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i.test(req.headers.host || '')
+// This computer itself, not a phone (through the relay, or Tailscale's name for it). A window showing
+// another computer here is on it too, for what that page may ask of this one (machinepages.js).
+const fromHere = (req) => !req.headers['x-bridge-relay'] && (/^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i.test(req.headers.host || '') || !!req.machinePage)
 // Quotas: checked every 10 minutes while a notification channel is on.
 setInterval(() => { if (notify.active()) quota().then((q) => notify.onQuota(q, cfg), () => {}) }, 10 * 60 * 1000)
 
@@ -3296,7 +3306,7 @@ const upgrades = [
   ...(rt.attach ? [['/api/panes/', attachHandler(rt)]] : []),
 ]
 server.on('upgrade', async (req, socket, head) => {
-  if (!(await guard.upgrade(req))) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); return socket.destroy() }
+  if (!(await guard.upgrade(req)) || !pages.upgrade(req)) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); return socket.destroy() }
   if (machines.isMachinePath(req.url)) return machines.upgrade(req, socket, head) // a terminal on another of your devices
   const hit = upgrades.find(([prefix]) => req.url.startsWith(prefix))
   if (!hit) return socket.destroy()

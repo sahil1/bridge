@@ -1,6 +1,8 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import Icon, { StatusDot } from './Icon.jsx'
-import { api, hostApi, machineId, relayComputers, phoneApp } from '../api.js'
+import { api, hostApi, machineId, machineUrl, apart, relayComputers, phoneApp } from '../api.js'
+import { passOn } from '../passed.js'
+import { machineOfHost } from '../../shared/machinehost.js'
 import { t, tx, locale } from '../i18n/index.js'
 
 // Your other devices (server/machines.js): Macs, Windows and Linux computers running Bridge AI,
@@ -70,21 +72,27 @@ const demoUrl = (id, agent) => {
 // Show one of your devices (id), or the one this page comes from (null). In a window of its own
 // when asked, or while a meeting records here (the page changing would stop it). back: it's to open
 // something that's on that device (Home, Everything, a phone's inbox), what in a few words: the page
-// there says this window switched, with the way back to this one (SwitchedHere).
+// there says this window switched, with the way back to this one (SwitchedHere). Another device's
+// page is at an address of its own (api.js machineUrl), so what it needs of this one goes with it
+// (passed.js).
 const BACK = 'cc-switched'
 export function goMachine(id, { agent, own = false, back = null } = {}) {
-  const url = import.meta.env.MODE === 'demo' ? demoUrl(id, agent) : `${id ? `/m/${id}` : ''}/${agent ? `?agent=${encodeURIComponent(agent)}` : ''}`
+  const demo = import.meta.env.MODE === 'demo'
+  const rest = `/${agent ? `?agent=${encodeURIComponent(agent)}` : ''}`
+  const prefs = !!id && apart
   const recording = document.documentElement.dataset.recording === '1'
   if (own || recording) {
-    if (window.bridgeApp?.openMachine) return window.bridgeApp.openMachine(id, agent || null)
-    return window.open(url, '_blank')
+    if (window.bridgeApp?.openMachine) return window.bridgeApp.openMachine(id, agent || null, passOn({ prefs }).slice(1))
+    return window.open(demo ? demoUrl(id, agent) : `${machineUrl(id, rest)}${passOn({ prefs })}`, '_blank')
   }
+  let was = null
   if (back) {
     const d = seen.data
     const name = machineId ? d?.machines?.find((m) => m.id === machineId)?.name : d?.here?.name
-    try { sessionStorage.setItem(BACK, JSON.stringify({ from: machineId || null, name: name || null, to: id || null, what: typeof back === 'string' ? back : null, at: Date.now() })) } catch { /* no storage */ }
+    was = { from: machineId || null, name: name || null, to: id || null, what: typeof back === 'string' ? back : null, at: Date.now() }
+    if (demo) { try { sessionStorage.setItem(BACK, JSON.stringify(was)) } catch { /* no storage */ } }
   }
-  location.assign(url)
+  location.assign(demo ? demoUrl(id, agent) : `${machineUrl(id, rest)}${passOn({ prefs, back: was })}`)
 }
 
 // This window switched to the device it shows to open something there: a line under the top bar
@@ -354,6 +362,9 @@ export const onFor = (s) => (s >= 86400 ? (Math.floor(s / 86400) === 1 ? t('{n} 
 // What's known about a device (its system, chip, memory, versions, relay, security code), and its
 // name to change. The name is changed on that device itself, so it's the same everywhere: in its
 // own Bridge AI, on your other devices and on your phones. here: this device.
+// A window showing another device at its own address (api.js machineUrl) only reads the links of the
+// computer it runs on: that page can't change them (server/machinepages.js), so it doesn't offer to.
+const readOnly = !!machineOfHost(typeof location !== 'undefined' ? location.host : '')
 function DeviceDetails({ m, here = false, onChanged }) {
   const [name, setName] = useState(m.name)
   const [st, setSt] = useState(null) // 'saving' | 'saved' | { error }
@@ -385,18 +396,20 @@ function DeviceDetails({ m, here = false, onChanged }) {
   ].filter(([, v]) => v)
   return (
     <div className="mch-about">
-      <form className="mch-name" onSubmit={save}>
-        <label htmlFor={`mch-name-${m.id || 'here'}`}>{t('Name')}</label>
-        <input id={`mch-name-${m.id || 'here'}`} className="st-input" value={name} maxLength={60} disabled={!canRename || st === 'saving'} placeholder={m.systemName || ''}
-          onChange={(e) => { setName(e.target.value); setSt(null) }} />
-        <button type="submit" className="btn small" disabled={!canRename || st === 'saving' || name.trim() === m.name}>{st === 'saving' ? t('Saving…') : t('Rename')}</button>
-      </form>
-      <p className="muted small">
-        {!canRename ? t('{name} is offline. Rename it once it\'s back, or in Bridge AI on {name}.', { name: m.name })
-          : st === 'saved' ? t('Renamed. Your other devices show the new name within a few seconds.')
-            : here ? t('How your other devices and phones show this one. Leave it empty for the computer\'s own name.') : t('Changed on {name} itself, so it\'s the same everywhere. Leave it empty for the computer\'s own name.', { name: m.name })}
-      </p>
-      {st?.error && <p className="error-text small">{st.error}</p>}
+      {!readOnly && <>
+        <form className="mch-name" onSubmit={save}>
+          <label htmlFor={`mch-name-${m.id || 'here'}`}>{t('Name')}</label>
+          <input id={`mch-name-${m.id || 'here'}`} className="st-input" value={name} maxLength={60} disabled={!canRename || st === 'saving'} placeholder={m.systemName || ''}
+            onChange={(e) => { setName(e.target.value); setSt(null) }} />
+          <button type="submit" className="btn small" disabled={!canRename || st === 'saving' || name.trim() === m.name}>{st === 'saving' ? t('Saving…') : t('Rename')}</button>
+        </form>
+        <p className="muted small">
+          {!canRename ? t('{name} is offline. Rename it once it\'s back, or in Bridge AI on {name}.', { name: m.name })
+            : st === 'saved' ? t('Renamed. Your other devices show the new name within a few seconds.')
+              : here ? t('How your other devices and phones show this one. Leave it empty for the computer\'s own name.') : t('Changed on {name} itself, so it\'s the same everywhere. Leave it empty for the computer\'s own name.', { name: m.name })}
+        </p>
+        {st?.error && <p className="error-text small">{st.error}</p>}
+      </>}
       {rows.length > 0 && <dl className="mch-facts">{rows.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>}
       {m.safety && <p className="muted small">{here ? t('Your other devices show this security code for this one. If one shows a different code, it isn\'t linked to this device.') : t('On {name}, Settings › Devices › Details shows the same code. If it doesn\'t, link again.', { name: m.name })}</p>}
     </div>
@@ -461,7 +474,9 @@ export function MachinesSettings({ embedded = false, focus = false }) {
     <Wrap {...(embedded ? {} : { className: 'st-sections' })}>
       <section className="st-sec" id="st-machines" ref={setTop}>
         <h4>{t('Your Devices')}</h4>
-        {machineId && <p className="small">{t('These are the links of {name}, the device this window runs on.', { name: data.here.name })}</p>}
+        {machineId && (readOnly
+          ? <p className="small">{t("These are the links of {name}, the device this window runs on. A window showing another device can't change them: link, rename and unlink in a window showing {name}.", { name: data.here.name })} <button type="button" className="ghost-btn small" onClick={() => goMachine(null)}>{t('Go to {name}', { name: data.here.name })}</button></p>
+          : <p className="small">{t('These are the links of {name}, the device this window runs on.', { name: data.here.name })}</p>)}
         <p className="muted small">{t("Link your other computers running Bridge AI (Mac, Windows or Linux) and switch between them from the top bar, with each one's agents in the sidebar. A phone paired with any of them reaches them all. Each device is reached through its own relay, end-to-end encrypted.")}</p>
         <div className="mch-list">
           <div className="mch-row here">
@@ -499,15 +514,17 @@ export function MachinesSettings({ embedded = false, focus = false }) {
                 {m.state === 'linked' && <button type="button" className="btn small" disabled={!m.online} onClick={() => goMachine(m.id, { own: true })} title={t('Open {name} in a window of its own, beside this one', { name: m.name })}><Icon name="popout" size={12} /> {t('New window')}</button>}
                 {m.state === 'linked' && <button type="button" className="ghost-btn small" aria-expanded={shown === m.id} onClick={() => setShown(shown === m.id ? null : m.id)}>{t('Details')}</button>}
                 {m.state === 'asking' && relayComputers?.list?.().some((c) => c.relay === m.relay) && <button type="button" className="btn small" onClick={() => relayComputers.open(m.relay)}>{t('Go to {name}', { name: m.name })}</button>}
-                {m.state === 'linked' && !m.online && <button type="button" className="btn small" disabled={fixes[m.id] === 'checking'} onClick={() => fix(m)}>{t('Fix')}</button>}
-                {['denied', 'expired'].includes(m.state) && <button type="button" className="btn small" disabled={!!busy} onClick={() => askAgain(m)}>{t('Ask again')}</button>}
-                {m.state === 'removed' && <button type="button" className="btn small primary" disabled={!!busy} onClick={() => askAgain(m)}>{t('Link again')}</button>}
-                <button type="button" className="ghost-btn small" disabled={!!busy} onClick={() => run('remove', () => hostApi(`/machines/${encodeURIComponent(m.id)}`, { method: 'DELETE' }))}>{m.state === 'linked' ? t('Unlink') : t('Remove')}</button>
+                {!readOnly && <>
+                  {m.state === 'linked' && !m.online && <button type="button" className="btn small" disabled={fixes[m.id] === 'checking'} onClick={() => fix(m)}>{t('Fix')}</button>}
+                  {['denied', 'expired'].includes(m.state) && <button type="button" className="btn small" disabled={!!busy} onClick={() => askAgain(m)}>{t('Ask again')}</button>}
+                  {m.state === 'removed' && <button type="button" className="btn small primary" disabled={!!busy} onClick={() => askAgain(m)}>{t('Link again')}</button>}
+                  <button type="button" className="ghost-btn small" disabled={!!busy} onClick={() => run('remove', () => hostApi(`/machines/${encodeURIComponent(m.id)}`, { method: 'DELETE' }))}>{m.state === 'linked' ? t('Unlink') : t('Remove')}</button>
+                </>}
               </span>
               {shown === m.id && <DeviceDetails m={m} onChanged={() => { refresh(); machinesChanged() }} />}
             </div>
           ))}
-          {strays.map((d) => (
+          {!readOnly && strays.map((d) => (
             <div key={d.id} className="mch-row">
               <span className={`mc-dot ${d.connected ? 'on' : ''}`} />
               <div className="mch-main">
@@ -523,7 +540,7 @@ export function MachinesSettings({ embedded = false, focus = false }) {
         </div>
       </section>
 
-      {phoneOthers.length > 0 && (
+      {!readOnly && phoneOthers.length > 0 && (
         <section className="st-sec">
           <h4>{t('Also on this phone')}</h4>
           <p className="muted small">{t('This phone is paired with these computers too. Link one and it asks there; allow it on that computer (open it from here) after checking both show the same six digits.')}</p>
@@ -537,7 +554,7 @@ export function MachinesSettings({ embedded = false, focus = false }) {
         </section>
       )}
 
-      <section className="st-sec">
+      {!readOnly && <section className="st-sec">
         <h4>{t('Link a device')}</h4>
         <p className="muted small">{t('On the other device, open Settings › Devices and choose Pair a device. Paste its link here, or type its address and code. Its address alone asks instead, and waits for you to allow it there.')}</p>
         <form className="mch-add" onSubmit={add}>
@@ -550,7 +567,7 @@ export function MachinesSettings({ embedded = false, focus = false }) {
             ? t("Other devices reach this one through its relay, which isn't set up yet: sign in to Cloudflare (or use Bridge AI's relay) at the top of this page. It can still link to them.")
             : t("Other devices reach this one through its relay, which isn't set up yet: sign in to Cloudflare at the top of this page. It can still link to them.")}</p>}
         {msg && <p className={`small ${msg.error ? 'error-text' : 'muted'}`}>{msg.text}</p>}
-      </section>
+      </section>}
     </Wrap>
   )
 }

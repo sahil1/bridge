@@ -1,3 +1,5 @@
+// First: what the page that opened this one passed it, before anything reads what's saved.
+import './passed.js'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App.jsx'

@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import Icon from './Icon.jsx'
 import { api, apiUrl, hostApi, machineId, viaRelay, usePoll } from '../api.js'
+import { atThisComputer } from '../../shared/machinehost.js'
 import { t } from '../i18n/index.js'
 import './transfers.css'
 
@@ -16,10 +17,10 @@ const enc = encodeURIComponent
 // hours and a week, relay/HOSTED.md), with everything else its computers do; a copy bigger than BIG
 // through it says so first.
 const BIG = 64 * MB
-const LOOPBACK = /^(localhost|127\.0\.0\.1|\[::1\])$/
-// This window is on the computer it comes from (the desktop app, or a browser there): "this
-// computer" is the one in front of you, and what lands on it can be shown in Finder.
-export const atHost = typeof location !== 'undefined' && !viaRelay && LOOPBACK.test(location.hostname)
+// This window is on the computer it comes from (the desktop app, or a browser there, at its own
+// address or another computer's there): "this computer" is the one in front of you, and what lands
+// on it can be shown in Finder.
+export const atHost = typeof location !== 'undefined' && !viaRelay && atThisComputer(location.hostname)
 // A file on another of your devices, shown in a computer's window: it can be copied to that one.
 export const canCopyHere = !!machineId && !viaRelay
 export const copyHereLabel = () => (atHost ? t('Copy to this computer') : t('Copy to the computer this window is on'))
