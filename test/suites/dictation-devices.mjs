@@ -85,8 +85,8 @@ const hudOn = async (ctx, url) => {
 // for a window showing another computer (the dictation window's words: bridge:hud-into).
 const key = (pg, type) => pg.evaluate((tp) => window.dispatchEvent(new CustomEvent('bridge-dictate-key', { detail: { type: tp, at: Date.now() } })), type)
 const heardFor = (pg, text) => pg.evaluate((x) => { const d = { text: x, put: false }; window.dispatchEvent(new CustomEvent('bridge-dictated', { detail: d })); return Promise.resolve(d.put).then((y) => y === true) }, text)
-// Desk's page in a tab of Studio's window: at Desk's own address here, another site.
-const deskFrame = (pg) => pg.frames().find((f) => /^http:\/\/m-[0-9a-f]+\.localhost:\d+\/m\//.test(f.url())) || null
+// Desk's page in a tab of Studio's window: at Desk's own port here, another site.
+const deskFrame = (pg) => pg.frames().find((f) => { try { const u = new URL(f.url()); return u.port !== new URL(pg.url()).port && u.pathname.startsWith('/m/') } catch { return false } }) || null
 // Listening: the mic's sound has come (the pill's ✓, or a message box's own).
 const listens = (pg) => until(() => pg.locator('.rec-stop:enabled, .dp-ok:enabled').count(), 6000, 50)
 const hold = async (pg, ms = 1300) => { await key(pg, 'down'); await listens(pg); await sleep(ms); await key(pg, 'up') }
@@ -284,14 +284,15 @@ try {
     // The window switched to Desk, at its Chief of Staff: Desk's page, at Desk's own address here, in
     // a window of the desktop app (simulated: its page tells the app the agent it has on screen, and
     // the app tells the dictation window, which can't read that page's saved state).
-    await s.ctx.addInitScript(([k, w]) => {
-      if (!/^m-[0-9a-f]+\.localhost$/.test(location.hostname)) return
+    const studioPort = new URL(studio.url).port
+    await s.ctx.addInitScript(([k, w, studioPort]) => {
+      if (!location.pathname.startsWith('/m/') || location.port === studioPort) return
       localStorage.setItem(k, JSON.stringify(w))
       window.bridgeApp = { platform: navigator.platform.startsWith('Mac') ? 'darwin' : 'linux', desktop: false, machine: location.pathname.split('/')[2], dictates: true, looking: (l) => { window.__toldApp = l } }
-    }, [`cc-ws@${deskM.id}`, { tabs: [deskChief], active: deskChief, side: null, split: false, group: 'main' }])
+    }, [`cc-ws@${deskM.id}`, { tabs: [deskChief], active: deskChief, side: null, split: false, group: 'main' }, studioPort])
     await p.goto(`${studio.url}/m/${deskM.id}/`)
     await p.locator(`textarea[data-composer="${deskChief}"]`).waitFor({ timeout: 45000 })
-    ok(/^m-[0-9a-f]+\.localhost$/.test(new URL(p.url()).hostname), "a window switched to Desk shows Desk's page at Desk's own address here", p.url())
+    ok(new URL(p.url()).hostname === '127.0.0.1' && new URL(p.url()).port !== studioPort, "a window switched to Desk shows Desk's page at Desk's own port here", p.url())
     const l2 = await until(async () => { const l = await looked(); return l?.machine === deskM.id && l.pane === deskChief ? l : null }, 8000, 100)
     const toldApp = await until(() => p.evaluate(() => window.__toldApp?.pane ? window.__toldApp : null), 8000, 100)
     ok(!!l2 && toldApp?.pane === deskChief, 'a window switched to Desk, at its Chief of Staff: that, on Desk, told the app too', { l2, toldApp })

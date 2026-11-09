@@ -45,9 +45,8 @@ const SET_BY_YOU = {
   'server/machines.js': 'relay', // another of your computers, through its relay
   'server/phone.js': 'tailscale', // this computer's name on your tailnet
   'server/index.js': 'self', // the address Bridge AI itself listens on
-  // ...and the ones another of your computers' pages have on it (m-<id>.localhost, its own port)
+  // ...and the ports another of your computers' pages have on it
   'server/machinepages.js': 'self',
-  'shared/machinehost.js': 'self',
   'desktop/senders.js': 'self',
   'shared/cloud/cursor.js': 'cloudAgents', // a repo's address Cursor gave, read for its name
 }

@@ -1,27 +1,28 @@
 // Another of your computers' pages shown on this one get nothing of this computer but what's passed
 // to them, in the browser named by BRIDGE_TEST_BROWSER: two Bridge AIs, "Studio" and "Desk", on relays
-// of their own (stand-ins/relay.mjs), linked, with an agent at work on Desk.
+// of their own (stand-ins/relay.mjs), linked, with an agent at work on Desk. Each computer's pages are
+// at a port of their own on 127.0.0.1, which needs no name looked up: here no page may use a name
+// under localhost at all (WebKit on macOS 15 and before can't find one).
 //   The desktop app's side (desktop/senders.js, preload.js, main.js, with stand-ins): which page a
 //   message or a permission request comes from (this computer's own page, another computer's at its
-//   own address, anything else), every message checked before it's handled (only this computer's
-//   page, in a window's main frame; a window showing another computer only for windows, what an
-//   update would lose and the agent on screen; never from a frame), the microphone, a screen and
-//   reading the clipboard for this computer's own page only, copying for both; and what the preload
-//   gives each page (another computer's: windows, nothing of this computer's). The address of each
-//   computer's pages is the same here as in the desktop app.
-//   Studio's server: a page of Desk's asked for at Studio's own address is sent to Desk's (not
-//   through a phone); at Desk's address, Desk's own pages and API go through, and of Studio's only
-//   what that page shows of Studio (your devices; copies from Desk), never its agents, settings,
-//   terminals or another computer, each refused saying where to do it; only Studio's page frames it;
-//   another site can't reach Desk's API through Studio.
-//   In the browser, Desk's agent in a tab of Studio's window: its page is at Desk's own address, and
-//   from it (as a page broken into would try) Studio's page, its desktop app's powers, its saved
-//   state, its windows' channel, its API (at Desk's address and at Studio's, also blind) and its
-//   terminals are all out of reach; a dictation message from anything but that tab is ignored, and
-//   one from it starts nothing unless you're in it; the tab still works, the words reach it and only
-//   the words. A window switched to Desk: at Desk's address, with Studio's look passed to it, the
-//   devices menu and Settings › Devices from Studio (read only there, saying where to change them),
-//   and back to Studio's own page; Studio's agent in a tab there offers to switch instead.
+//   port, anything else), every message checked before it's handled (only this computer's page, in a
+//   window's main frame; a window showing another computer only for windows, what an update would
+//   lose and the agent on screen; never from a frame), the microphone, a screen and reading the
+//   clipboard for this computer's own page only, copying for both; and what the preload gives each
+//   page (another computer's: windows, nothing of this computer's).
+//   Studio's server: Desk has a port of its own, kept across a restart; a page of Desk's asked for at
+//   Studio's own address is sent there (not through a phone); there, Desk's own pages and API go
+//   through, and of Studio's only what that page shows of Studio (your devices; copies from Desk),
+//   never its agents, settings, terminals or another computer, each refused saying where to do it;
+//   only Studio's page frames it; another site can't reach Desk's API through Studio.
+//   In the browser, Desk's agent in a tab of Studio's window: its page is at Desk's port, and from it
+//   (as a page broken into would try) Studio's page, its desktop app's powers, its saved state, its
+//   windows' channel, its API (at Desk's port and at Studio's, also blind) and its terminals are all
+//   out of reach; a dictation message from anything but that tab is ignored, and one from it starts
+//   nothing unless you're in it; the tab still works, the words reach it and only the words. A window
+//   switched to Desk: at Desk's port, with Studio's look passed to it, the devices menu and Settings ›
+//   Devices from Studio (read only there, saying where to change them), and back to Studio's own
+//   page; Studio's agent in a tab there offers to switch instead.
 import fs from 'node:fs'
 import path from 'node:path'
 import http from 'node:http'
@@ -33,25 +34,22 @@ import { ROOT, TEST, startKit, startRelay, checks, until, sleep, browser, page, 
 const { ok, done } = checks('device-isolation')
 const require = createRequire(import.meta.url)
 const senders = require('../../desktop/senders.js')
-const mh = await import('../../shared/machinehost.js')
 
 // ---------- The desktop app's side ----------
 {
   const P = 7420
-  const pages = senders.create(P)
-  const ids = ['desk1', 'Desk_1', 'a-B', 'Z'.repeat(20)]
-  ok(ids.every((id) => mh.machineHost(id) === senders.machineHost(id) && mh.machineOfHost(mh.machineHost(id)) === id && senders.machineOfHost(senders.machineHost(id)) === id), 'each computer\'s pages have the same address in the app as in the page and the server, and it says which computer', ids.map(mh.machineHost))
-  ok(mh.machineHost('ab') !== mh.machineHost('AB') && mh.machineOfHost(mh.machineHost('AB').toUpperCase()) === 'AB' && !mh.machineHost('a/b') && !mh.machineOfHost('m-zz.localhost') && !mh.machineOfHost('localhost'), 'two ids in other capitals get two addresses (names have no capitals); anything else is no computer\'s')
-  const m = (id, rest = '/') => `http://${mh.machineHost(id)}:${P}/m/${id}${rest}`
+  const DP = 7433 // Desk's port, as the server keeps it in machines.json
+  const pages = senders.create(P, { ports: () => ({ desk1: DP, other: 7434 }) })
+  const m = (id, rest = '/', at = DP) => `http://127.0.0.1:${at}/m/${id}${rest}`
   const cases = [
     [`http://127.0.0.1:${P}/`, 'own'], [`http://localhost:${P}/?window=w1`, 'own'], [`http://127.0.0.1:${P}/?dictate=1`, 'own'],
-    [m('desk1', '/?window=w1%3Ap2'), 'machine'],
+    [m('desk1', '/?window=w1%3Ap2'), 'machine'], [`http://localhost:${DP}/m/desk1/`, 'machine'],
     [`http://127.0.0.1:${P}/m/desk1/`, null], [`http://127.0.0.1:${P}/api/agents/w1/site/index.html`, null], [`http://127.0.0.1:${P + 1}/`, null],
-    [`http://${mh.machineHost('desk1')}:${P}/m/other/`, null], [`http://${mh.machineHost('desk1')}:${P}/`, null], ['https://example.com/', null], ['data:text/html,hi', null],
+    [m('other'), null], [`http://127.0.0.1:${DP}/`, null], [m('desk1', '/', 7999), null], ['https://example.com/', null], ['data:text/html,hi', null], [`http://m-6465736b31.localhost:${P}/m/desk1/`, null],
   ]
   const kinds = cases.map(([u]) => pages.of(u)?.kind || null)
-  ok(cases.every(([, want], i) => kinds[i] === want), 'this computer\'s own page, another computer\'s at its own address, and nothing else counts as either (not one at this computer\'s address, a page an agent made, another port, a site, a data: page)', cases.map(([u], i) => `${u} ${kinds[i]}`))
-  ok(pages.of(m('desk1'))?.machine === 'desk1' && pages.machineUrl('desk1', '/?window=a') === m('desk1', '/?window=a'), 'which computer, and its address for a window')
+  ok(cases.every(([, want], i) => kinds[i] === want), 'this computer\'s own page, another computer\'s at its own port, and nothing else counts as either (not one at this computer\'s port or another computer\'s, a page an agent made, an unknown port, a site, a data: page, a name)', cases.map(([u], i) => `${u} ${kinds[i]}`))
+  ok(pages.of(m('desk1'))?.machine === 'desk1' && pages.machineUrl('desk1', '/?window=a') === `http://127.0.0.1:${P}/m/desk1/?window=a` && pages.local(m('desk1')) && !pages.local('http://127.0.0.1:7999/'), 'which computer; a window for one asks this computer\'s address (which sends it to its port); and only these ports are the app\'s')
 
   // Every channel main.js and dictation.js answer, checked first.
   const src = (f) => fs.readFileSync(path.join(ROOT, 'desktop', f), 'utf8')
@@ -116,11 +114,11 @@ const kitWith = async (name, rel) => {
   await k.api('/agents/catalog')
   return k
 }
-// A request to Studio's server as a browser would make it: host (its name, with the port), the rest
-// of the headers as given. { status, headers, body }.
-const ask = (k, p, { method = 'GET', host = null, headers = {}, body = null } = {}) => new Promise((resolve, reject) => {
-  const u = new URL(k.url)
-  const r = http.request({ host: '127.0.0.1', port: u.port, path: p, method, headers: { host: host ? `${host}:${u.port}` : u.host, ...(body ? { 'content-type': 'application/json' } : {}), ...headers } }, (res) => {
+// A request to Studio's server as a browser would make it: at port (Studio's own, or a computer's
+// there), the rest of the headers as given. { status, headers, body }.
+const ask = (k, p, { method = 'GET', port: at = null, headers = {}, body = null } = {}) => new Promise((resolve, reject) => {
+  const to = at || new URL(k.url).port
+  const r = http.request({ host: '127.0.0.1', port: to, path: p, method, headers: { host: `127.0.0.1:${to}`, ...(body ? { 'content-type': 'application/json' } : {}), ...headers } }, (res) => {
     let s = ''
     res.on('data', (c) => { s += c })
     res.on('end', () => { let j = null; try { j = JSON.parse(s) } catch { /* not JSON */ } resolve({ status: res.statusCode, headers: res.headers, body: j, text: s }) })
@@ -132,8 +130,11 @@ const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
 const real = (errors) => errors.filter((e) => !/\/api\/\S+ due to access control checks|WebSocket|_relay|Load failed|Failed to fetch|NetworkError/.test(e))
 const said = []
+// Names under localhost, which WebKit on macOS 15 and before can't look up: none is ever asked for.
+const named = []
 const before = async (ctx) => {
   await noServiceWorker(ctx)
+  await ctx.route(/^https?:\/\/[^/]+\.localhost(:\d+)?\//i, (r) => { named.push(r.request().url()); return r.abort() })
   if (which === 'webkit') {
     await ctx.addInitScript(() => {
       const tone = async () => { const ac = new AudioContext(); const o = ac.createOscillator(); const dest = ac.createMediaStreamDestination(); o.connect(dest); o.start(); return dest.stream }
@@ -152,7 +153,8 @@ const before = async (ctx) => {
     window.__secret = 'only Studio\'s page'
   })
 }
-const isMachine = (u) => /^http:\/\/m-[0-9a-f]+\.localhost:\d+\/m\//.test(u)
+let deskPort = null
+const isMachine = (u) => { try { const x = new URL(u); return x.hostname === '127.0.0.1' && x.port === String(deskPort) && x.pathname.startsWith('/m/') } catch { return false } }
 const deskFrame = (pg) => pg.frames().find((f) => isMachine(f.url())) || null
 
 try {
@@ -167,8 +169,11 @@ try {
   const deskM = await until(async () => (await studio.api('/machines')).machines.find((x) => x.name === 'Desk' && x.online), 30000, 300)
   ok(!!deskM, 'Studio is linked with Desk')
   const port = new URL(studio.url).port
-  const DESK = mh.machineHost(deskM.id)
-  const deskOrigin = `http://${DESK}:${port}`
+  // Desk's port on Studio, as Studio's own page is told (and kept in Studio's machines.json).
+  deskPort = await until(async () => (await studio.api('/machines')).machines.find((x) => x.id === deskM.id)?.port, 15000, 200)
+  const kept = () => JSON.parse(fs.readFileSync(path.join(studio.data, 'machines.json'), 'utf8')).machines.find((x) => x.id === deskM.id)?.port
+  ok(Number.isInteger(deskPort) && String(deskPort) !== port && kept() === deskPort, 'Desk has a port of its own on Studio, kept with it', { deskPort, port, kept: kept() })
+  const deskOrigin = `http://127.0.0.1:${deskPort}`
   await studio.api('/chief/launch', {})
   const chief = (await until(async () => ((await studio.api('/fleet')).agents || []).find((a) => a.chief), 30000, 500))?.paneId
   const work = path.join(desk.home, 'desk-work')
@@ -186,38 +191,42 @@ try {
     const old = await ask(studio, `/m/${deskM.id}/`, { headers: { accept: 'text/html' } })
     ok(old.status === 302 && old.headers.location.startsWith(deskOrigin), 'so does one asked for by a browser that doesn\'t say what for (it wants a page)', old.status)
     const phone = await ask(studio, `/m/${deskM.id}/`, { headers: { accept: 'text/html', 'x-bridge-relay': 'a-phone' } })
-    ok(phone.status !== 302 && /<html|<!doctype/i.test(phone.text), 'through a phone it stays at /m/<id>/, as a phone has no such addresses', phone.status)
+    ok(phone.status !== 302 && /<html|<!doctype/i.test(phone.text), 'through a phone it stays at /m/<id>/, as a phone can\'t reach that port', phone.status)
     const viaHere = await ask(studio, `/m/${deskM.id}/api/config`, { headers: { accept: '*/*', 'sec-fetch-dest': 'empty', 'sec-fetch-site': 'same-origin' } })
     ok(viaHere.status === 200 && viaHere.body?.name !== undefined, 'Studio\'s own page still reaches Desk\'s API through Studio', viaHere.status)
-    const page0 = await ask(studio, `/m/${deskM.id}/`, { host: DESK, headers: doc })
-    ok(page0.status === 200 && /frame-ancestors 'self' http:\/\/127\.0\.0\.1:\d+ http:\/\/localhost:\d+/.test(String(page0.headers['content-security-policy'])), 'at Desk\'s address, Desk\'s page, which only Studio\'s page (or itself) may put in a frame', page0.headers['content-security-policy'])
-    ok((await ask(studio, `/m/${deskM.id}/api/config`, { host: DESK })).status === 200, 'and Desk\'s API')
-    const refused = await ask(studio, '/api/config', { host: DESK })
+    const page0 = await ask(studio, `/m/${deskM.id}/`, { port: deskPort, headers: doc })
+    ok(page0.status === 200 && String(page0.headers['content-security-policy']).includes(`frame-ancestors 'self' http://127.0.0.1:${port} http://localhost:${port}`), 'at Desk\'s port, Desk\'s page, which only Studio\'s page (or itself) may put in a frame', page0.headers['content-security-policy'])
+    ok((await ask(studio, `/m/${deskM.id}/api/config`, { port: deskPort })).status === 200, 'and Desk\'s API')
+    const refused = await ask(studio, '/api/config', { port: deskPort })
     ok(refused.status === 403 && /Switch this window to Studio to do this/.test(refused.body?.error || '') && refused.body?.code === 'machinePage', 'Studio\'s API there: refused, saying where to do it', refused.body)
     const tries = [['POST', '/api/agents/launch', { kind: 'claude', cwd: work, label: 'Nope', prompt: 'idle' }], ['PATCH', '/api/settings', { name: 'Taken' }], ['POST', `/api/panes/${encodeURIComponent(chief)}/input`, { text: 'echo hi\r' }], ['GET', '/api/files?root=home'], ['POST', '/api/machines/asks/x', { allow: true }], ['DELETE', `/api/machines/${deskM.id}`], ['POST', '/api/relay/pair', {}], ['GET', `/api/agents/${encodeURIComponent(chief)}/screen`], ['POST', '/api/transfers', { to: deskM.id, src: { pane: chief, path: 'x' }, into: { where: 'downloads' } }], ['POST', '/api/transfers', { from: 'someone', src: { pane: 'p', path: 'x' }, into: { where: 'downloads' } }], ['GET', `/api/transfers/plan?to=${deskM.id}&pane=${chief}&path=x`]]
     const got = []
-    for (const [method, p, body] of tries) got.push([p, (await ask(studio, p, { method, host: DESK, body })).status])
+    for (const [method, p, body] of tries) got.push([p, (await ask(studio, p, { method, port: deskPort, body })).status])
     ok(got.every(([, s]) => s === 403), 'its agents, settings, terminals, files, links, pairing, screen, and copies of its files: all refused there', got)
     ok(await studioAgents() === agents0 && (await studio.api('/config')).name !== 'Taken', 'and nothing happened on Studio')
     const allowed = []
-    for (const p of ['/api/machines', '/api/machines/summary']) allowed.push([p, (await ask(studio, p, { host: DESK })).status])
+    for (const p of ['/api/machines', '/api/machines/summary']) allowed.push([p, (await ask(studio, p, { port: deskPort })).status])
     ok(allowed.every(([, s]) => s === 200), 'what Desk\'s page shows of Studio: your devices', allowed)
-    const other = await ask(studio, '/m/zz9/api/config', { host: DESK })
+    const other = await ask(studio, '/m/zz9/api/config', { port: deskPort })
     ok(other.status === 403 && /that computer/.test(other.body?.error || ''), 'another computer through Studio, from there: refused', other.body)
-    const back = await ask(studio, '/?agent=w1', { host: DESK, headers: doc })
+    const back = await ask(studio, '/?agent=w1', { port: deskPort, headers: doc })
     ok(back.status === 302 && back.headers.location === `http://127.0.0.1:${port}/?agent=w1`, 'Studio\'s page asked for there: at Studio\'s own address', back.headers.location)
-    ok((await ask(studio, '/assets/index.js', { host: DESK })).status === 404, 'and Studio\'s own files aren\'t there')
-    const origin = await ask(studio, '/api/fleet', { headers: { origin: deskOrigin } })
-    ok(origin.status === 403, 'Desk\'s page asking Studio\'s address: refused (its origin isn\'t Studio\'s page)', origin.body)
+    ok((await ask(studio, '/assets/index.js', { port: deskPort })).status === 404, 'and Studio\'s own files aren\'t there')
+    const origin = await ask(studio, '/api/fleet', { headers: { origin: deskOrigin, 'sec-fetch-site': 'same-site' } })
+    ok(origin.status === 403, 'Desk\'s page asking Studio\'s port: refused (its origin isn\'t Studio\'s page)', origin.body)
+    ok((await ask(studio, `/m/${deskM.id}/api/config`, { headers: { origin: deskOrigin, 'sec-fetch-site': 'same-site' } })).status === 403, 'and Desk\'s API there, from Desk\'s port: refused too (another port is another site)')
     const site = await ask(studio, `/m/${deskM.id}/api/config`, { headers: { 'sec-fetch-site': 'cross-site' } })
     ok(site.status === 403, 'another site can\'t reach Desk\'s API through Studio', site.body)
-    const ws = (host, p) => new Promise((resolve) => {
-      const s = new WebSocket(`ws://127.0.0.1:${port}${p}`, { headers: { host: `${host}:${port}`, origin: `http://${host}:${port}` } })
+    const ws = (at, p) => new Promise((resolve) => {
+      const s = new WebSocket(`ws://127.0.0.1:${at}${p}`, { headers: { origin: `http://127.0.0.1:${at}` } })
       s.on('open', () => { s.close(); resolve('open') })
       s.on('unexpected-response', (_q, r) => resolve(r.statusCode))
       s.on('error', () => resolve('error'))
     })
-    ok(await ws(DESK, `/api/panes/${encodeURIComponent(chief)}/attach?cols=80&rows=24`) === 403, 'a terminal of Studio\'s from Desk\'s address: refused')
+    ok(await ws(deskPort, `/api/panes/${encodeURIComponent(chief)}/attach?cols=80&rows=24`) === 403, 'a terminal of Studio\'s from Desk\'s port: refused')
+    // Studio quit and opened again: Desk at the same port, so what its pages saved there is still theirs.
+    await studio.restart()
+    ok(!!(await until(async () => (await studio.api('/machines')).machines.find((x) => x.id === deskM.id)?.port === deskPort, 30000, 300)) && (await ask(studio, `/m/${deskM.id}/api/config`, { port: deskPort })).status === 200, 'Studio opened again: Desk at the same port', deskPort)
   }
 
   // ---------- Desk's agent in a tab of Studio's window ----------
@@ -229,9 +238,9 @@ try {
     const deskBox = p.frameLocator('.remote-frame').locator('textarea[data-composer]')
     await deskBox.waitFor({ timeout: 45000 })
     const src = await p.locator('.remote-frame').getAttribute('src')
-    ok(src.startsWith(`${deskOrigin}/m/${deskM.id}/?window=${encodeURIComponent(deskPane)}#`), 'Desk\'s agent in a tab: its page at Desk\'s own address, another site to Studio\'s page', src)
     const fr = deskFrame(p)
-    ok(!!fr && !/#/.test(fr.url()), 'what Studio passed it is taken, and the address put back as it was', fr?.url())
+    ok(src.startsWith(`/m/${deskM.id}/?window=${encodeURIComponent(deskPane)}#`) && !!fr && fr.url().startsWith(`${deskOrigin}/m/${deskM.id}/?window=`), 'Desk\'s agent in a tab: its page sent to Desk\'s port, another site to Studio\'s page', [src, fr?.url()])
+    ok(!/#/.test(fr.url()), 'what Studio passed it is taken, and the address put back as it was', fr?.url())
     await p.evaluate(() => { localStorage.setItem('studio-only', 'yes'); const c = new BroadcastChannel('bridge-meetings'); window.__heard = []; c.onmessage = (e) => window.__heard.push(e.data) })
     // As a page broken into would try.
     const tried = await fr.evaluate(async ({ port, chief, studio }) => {
@@ -320,7 +329,7 @@ try {
     await p.locator('.mc-menu .mc-item', { hasText: 'Desk' }).first().click()
     await until(() => isMachine(p.url()), 20000, 100)
     await p.waitForSelector('.mc-chip', { timeout: 45000 })
-    ok(p.url().startsWith(`${deskOrigin}/m/${deskM.id}/`) && !p.url().includes('#'), 'switched to Desk: Desk\'s page at Desk\'s own address', p.url())
+    ok(p.url().startsWith(`${deskOrigin}/m/${deskM.id}/`) && !p.url().includes('#'), 'switched to Desk: Desk\'s page at Desk\'s port', p.url())
     ok(await p.evaluate(() => document.documentElement.getAttribute('data-theme')) === 'dark', 'with the look Studio\'s page passed it', await p.evaluate(() => document.documentElement.getAttribute('data-theme')))
     ok(/Desk/.test(await p.locator('.mc-chip').innerText()), 'its devices menu (Studio\'s list of your devices) works there', await p.locator('.mc-chip').innerText())
     await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'machines' } })))
@@ -356,6 +365,7 @@ try {
     ok(older.p.url().startsWith(`${studio.url}/m/${deskM.id}/`) && (await tab.getAttribute('src')).startsWith('/?window=') && !(await older.p.locator('.remote-away').count()), 'a page of Desk\'s that an older Studio sends at its own address keeps to paths there, as before', [older.p.url(), await tab.getAttribute('src')])
     await older.ctx.close()
   }
+  ok(!named.length, 'no page or window asked for a name under localhost: each computer is at a port of 127.0.0.1', named)
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
   for (const k of kits) console.log(k.log().slice(-1500))

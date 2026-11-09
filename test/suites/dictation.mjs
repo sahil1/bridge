@@ -44,8 +44,9 @@ const { globalKey, pasteInto, loneKeys, editByVoice, isTerminal } = await import
 const { clean, makeNames } = await import('../../shared/dictation/clean.js')
 const { corrections } = await import('../../shared/dictation/corrected.js')
 const desk = createRequire(import.meta.url)('../../desktop/dictation.js')
-// Which page is which, as the desktop app says (another computer's at its own address: senders.js).
-const pages = createRequire(import.meta.url)('../../desktop/senders.js').create(9)
+// Which page is which, as the desktop app says (another computer's at its own port: senders.js).
+const pages = createRequire(import.meta.url)('../../desktop/senders.js').create(9, { ports: () => ({ desk1: 19 }) })
+const deskAt = (rest = '/') => `http://127.0.0.1:19/m/desk1${rest}`
 
 // ---------- The key ----------
 ok(keys.defaultKey('darwin') === 'Alt+Space' && keys.defaultKey('win32') === 'Control+Alt+Space' && keys.defaultKey('linux') === 'Control+Alt+Space', 'the key is ⌥Space on a Mac, Ctrl+Alt+Space on Windows and Linux')
@@ -603,7 +604,7 @@ else {
     await call('bridge:dictate-configure', me, { background: true, to: 'last' })
     await until(() => downIn(ours.told.slice(o0)) || downIn(hud.told.slice(h0)), 3000, 50)
     ok(downIn(ours.told.slice(o0)) && !downIn(hud.told.slice(h0)), 'the key pressed in a window of the app\'s own: its page has it, as if pressed there', { page: ours.told.slice(o0), hud: hud.told.slice(h0) })
-    ours.url = pages.machineUrl('desk1', '/?window=w1%3Ap2')
+    ours.url = deskAt('/?window=w1%3Ap2')
     h0 = hud.told.length
     o0 = ours.told.length
     const reads = () => pasted().filter((x) => x.args?.[0] === 'selection').length
@@ -626,11 +627,11 @@ else {
     // it): told to the app, which says which computer it's on by the window's address, for the
     // dictation window alone.
     const at = (url, sub = false) => ({ senderFrame: { url, parent: sub ? {} : null } })
-    call('bridge:looking', at(pages.machineUrl('desk1', '/?window=w1%3Ap2')), { pane: 'w1:p2', name: 'Desk work', machine: 'someone-else' })
+    call('bridge:looking', at(deskAt('/?window=w1%3Ap2')), { pane: 'w1:p2', name: 'Desk work', machine: 'someone-else' })
     const lk = await call('bridge:hud-looked', from)
     ok(lk?.machine === 'desk1' && lk.pane === 'w1:p2' && lk.name === 'Desk work' && Number.isFinite(lk.at), 'a window showing another device says which agent it has on screen: the app keeps it, on the computer the window shows (not one its page names)', lk)
     call('bridge:looking', at('http://127.0.0.1:9/'), { pane: 'w9:p9', name: 'Here' })
-    call('bridge:looking', at(pages.machineUrl('desk1'), true), { pane: 'w8:p8', name: 'A frame' })
+    call('bridge:looking', at(deskAt(), true), { pane: 'w8:p8', name: 'A frame' })
     call('bridge:looking', at('http://127.0.0.1:9/m/desk1/'), { pane: 'w7:p7', name: 'At this address' })
     ok((await call('bridge:hud-looked', from))?.pane === 'w1:p2' && (await call('bridge:hud-looked', me)) === null, 'not from this computer\'s page (it keeps its own), a frame, or another computer\'s path at this computer\'s address; and only the dictation window may ask')
     // The key from any app off: in a window showing another device, whose page leaves the key to the
@@ -651,7 +652,7 @@ else {
     const own = press('keyDown')
     press('keyUp')
     ok(!own.kept && hud.told.length === h0, 'in a window showing this computer, its page has the key itself')
-    ours.url = pages.machineUrl('desk1')
+    ours.url = deskAt()
     await call('bridge:dictate-configure', me, { background: false, to: 'last', on: false })
     ok(!press('keyDown').kept && hud.told.length === h0, 'dictation turned off: nothing heard')
     press('keyUp')
