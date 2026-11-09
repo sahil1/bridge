@@ -74,7 +74,9 @@
 /* The desk: the page in the middle, the outline on the left and the comments on the right. */
 .sd-doc-main { position: relative; display: flex; min-height: 0; }
 .sd-desk { flex: 1; min-width: 0; overflow: auto; overscroll-behavior: contain; scroll-padding-top: 24px; }
-.sd-sheet { position: relative; margin: 28px auto 64px; }
+/* The page's own sheet of paper, on the desk (not a sheet's editor, also .sd-sheet: once a document
+   had been open, a sheet opened after it started 28px down, under a blank band). */
+.sd-desk > .sd-sheet { position: relative; margin: 28px auto 64px; }
 .sd-outline-pane, .sd-comments-pane { flex: none; display: flex; flex-direction: column; min-height: 0; overflow: auto; background: var(--pane); }
 .sd-outline-pane { width: 236px; border-right: 1px solid var(--line); }
 .sd-comments-pane { width: 300px; border-left: 1px solid var(--line); }
