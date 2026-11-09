@@ -878,7 +878,10 @@ export default function NeedsHome({ phone = false, calendar = false, onOpen, onO
   const pins = usePins(data, refresh, setNote)
   const arr = useArrangement(data, refresh, setNote, phone)
   // Edit Home: from Edit in the header, a long press on a section's name, or ⌘K (now or as Home opens).
+  // It opens once the computer's arrangement has come (Edit waits for it too): before, it would show
+  // the first order, and a move would be saved over the one the computer has.
   const [editing, setEditing] = useState(() => editNext)
+  const arranging = editing && !!data
   const [pressed, setPressed] = useState(false) // went into it by a long press: the finger, not the keyboard
   const editBtn = useRef(null)
   const edit = useCallback((on, press = false) => {
@@ -1114,9 +1117,9 @@ export default function NeedsHome({ phone = false, calendar = false, onOpen, onO
   const hiddenNames = arr.hidden.filter((id) => id !== 'away' || multi).map((id) => t(SECTION[id].name))
   const andList = (xs) => { try { return new Intl.ListFormat(locale(), { type: 'conjunction' }).format(xs) } catch { return xs.join(', ') } }
   return (
-    <div className={`hm by-${sort} ${phone ? 'phone' : ''} ${editing ? 'editing' : ''}`}>
+    <div className={`hm by-${sort} ${phone ? 'phone' : ''} ${arranging ? 'editing' : ''}`}>
       <div className="hm-in">
-        {editing ? <EditHome arr={arr} said={said} others={multi} phone={phone} focus={!pressed} onDone={() => edit(false)} /> : (
+        {arranging ? <EditHome arr={arr} said={said} others={multi} phone={phone} focus={!pressed} onDone={() => edit(false)} /> : (
           <>
             <header className="hm-head">
               <div className="hm-title">
@@ -1125,7 +1128,7 @@ export default function NeedsHome({ phone = false, calendar = false, onOpen, onO
                 <p className="muted">{date}{data && <><span className="hm-sep"> · </span><span className="hm-where">{where}</span></>}</p>
               </div>
               {/* On a phone, a long press on a section's name (and ⌘K) instead. */}
-              {!phone && <button type="button" ref={editBtn} className="btn small hm-edit-btn" onClick={() => edit(true)} aria-label={t('Edit Home')} title={t('Move sections, or hide them')}><Icon name="edit" size={12} /> {t('Edit')}</button>}
+              {!phone && <button type="button" ref={editBtn} className="btn small hm-edit-btn" disabled={!data} onClick={() => edit(true)} aria-label={t('Edit Home')} title={t('Move sections, or hide them')}><Icon name="edit" size={12} /> {t('Edit')}</button>}
               <button type="button" className="btn small hm-every" onClick={onEverything}>{t('See everything')} <Icon name="chevron" size={11} /></button>
             </header>
             {/* What to show (a kind, a computer) and in what order, once there's something to show. */}

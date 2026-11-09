@@ -11,9 +11,9 @@
 // and the other ways; signed out, to sign in first. Once there's room, Try again sets it up and the
 // computer connects with its relay token, showing the account's use; the account's window used up
 // (by its other computers) is said with when it resets and the way to your own Cloudflare, and
-// lifted when it resets (the relay's clock moved on); a suspension is said too, and lifted. Stop
-// using the relay gives the place back at once, or, stopped while the relay can't be reached, once it
-// can. The servers can't look up `<id>.localhost` (stand-ins/no-localhost-names.mjs, as on macOS and
+// lifted when it resets (the relay's clock moved on); a suspension is said too, with the way to your
+// own Cloudflare however the computer heard it first, and lifted. Stop using the relay gives the
+// place back at once, or, stopped while the relay can't be reached, once it can. The servers can't look up `<id>.localhost` (stand-ins/no-localhost-names.mjs, as on macOS and
 // Windows), so they reach a computer's address on the stand-in the way Bridge AI does everywhere.
 // First-run setup on a new computer asks for nothing: with the hosted relay there, it says Settings ›
 // Devices sets the phone up, and nothing is asked of the relay or the accounts service; with no
@@ -142,7 +142,9 @@ try {
   await acc.admin('POST', `/admin/accounts/${me.account.id}`, { status: 'suspended', note: 'Testing' })
   await hr.clock(8 * HOUR + 3 * 60000) // past the minute the relay keeps what the service said
   await hr.use(me.account.id, 1)
-  ok(!!(await until(async () => (await k.api('/relay')).limit?.why === 'suspended', 10000)) && !!(await until(async () => /account is suspended/.test(await s.p.locator('.st-note.warn').allInnerTexts().then((x) => x.join(' '))), 8000)), 'suspended: the relay lets the computer go, and Settings › Devices says why', (await k.api('/relay')).limit)
+  // (The computer asks its account then, and says it the same way once it has heard it from there.)
+  const stopped = s.p.locator('.st-note.warn', { hasText: 'account is suspended' })
+  ok(!!(await until(async () => (await k.api('/account')).account?.status === 'suspended' && !(await k.api('/relay')).online, 10000)) && (await k.api('/relay')).limit?.why === 'suspended' && !!(await stopped.waitFor({ timeout: 8000 }).then(() => true, () => false)) && await stopped.locator('button', { hasText: 'Use your own Cloudflare' }).count() === 1, 'suspended: the relay lets the computer go, and Settings › Devices says why, with the way to your own Cloudflare', (await k.api('/relay')).limit)
   await acc.admin('POST', `/admin/accounts/${me.account.id}`, { status: 'active', note: 'Done' })
   await hr.clock(8 * HOUR + 5 * 60000) // (the relay hears it restored once what it kept is a minute old)
   await hr.use(me.account.id, 1)

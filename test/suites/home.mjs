@@ -1097,13 +1097,20 @@ try {
     await ctx.close()
   }
   {
-    // Dark, and with Reduce Motion: still, with a clear outline instead.
-    const { ctx, p, errors } = await pageAt(b, a.url, { mode: 'dark', theme: 'midnight', width: 1440, height: 1000, before: busyDay })
+    // Dark, and with Reduce Motion: still, with a clear outline instead. Edit waits for the
+    // computer's arrangement (Home's list held back here), so it opens as it was left.
+    let letHome
+    const held = new Promise((r) => { letHome = r })
+    const { ctx, p, errors } = await pageAt(b, a.url, { mode: 'dark', theme: 'midnight', width: 1440, height: 1000, before: async (c2) => { await busyDay(c2); await c2.route(/\/api\/home(\?|$)/, async (r) => { await held; await r.fallback() }) } })
     await p.emulateMedia({ reducedMotion: 'reduce' })
+    await p.locator('.hm-edit-btn').waitFor({ timeout: 20000 })
+    ok(await p.locator('.hm-edit-btn').isDisabled(), 'Edit waits until Home has the computer\'s arrangement')
+    letHome()
     await p.locator('.hm-edit-btn').click({ timeout: 20000 })
     await p.locator('.hm-edit').waitFor({ timeout: 4000 })
     const still = await tile(p, 'ready').locator('.hm-tile-in').evaluate((e) => { const c = getComputedStyle(e); return { anim: c.animationName, outline: c.outlineStyle } })
-    ok(still.anim === 'none' && still.outline === 'dashed' && (await tiles(p))[0] === 'ready', 'Reduce Motion: no wiggle, a clear outline instead (and the computer\'s order as it was left)', still)
+    const order = await tiles(p)
+    ok(still.anim === 'none' && still.outline === 'dashed' && order[0] === 'ready', 'Reduce Motion: no wiggle, a clear outline instead (and the computer\'s order as it was left)', { ...still, order })
     await shot(p, `${tag}home-edit-1440-dark-reduced`)
     await p.emulateMedia({ reducedMotion: 'no-preference' })
     await p.waitForTimeout(400)

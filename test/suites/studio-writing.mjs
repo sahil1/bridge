@@ -367,7 +367,12 @@ try {
   pages.push(dark)
   await dark.p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
   await until(async () => { await dark.p.evaluate(({ root }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: 'report.docx' } })), { root }); return dark.p.locator('.sd-pb').first().waitFor({ timeout: 2000 }).then(() => true, () => false) }, 25000, 300)
-  // The cursor in the file's link, its checklist on the page.
+  // The cursor in the file's link, its checklist on the page, once its pages are laid out: the
+  // breaks are placed again once the first ones are drawn, which can take the link a page down, out
+  // of sight (and a link out of sight has no bubble).
+  const breaks = () => dark.p.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r([...document.querySelectorAll('.sd-w .sd-pb')].map((e) => e.offsetTop).join())))))
+  let laidOut = null
+  await until(async () => { const now = await breaks(); const same = !!now && now === laidOut; laidOut = now; return same }, 10000, 200)
   await dark.p.evaluate(() => { const ed = document.querySelector('.sd-w').editor; let r = null; ed.state.doc.descendants((n, pos) => { if (r == null && n.isText && n.marks.some((m) => m.type.name === 'link')) r = pos + 1; return r == null }); ed.view.focus(); ed.commands.setTextSelection(r); ed.commands.scrollIntoView() })
   // The bubble comes once the editor has the new selection, a moment later on a busy computer.
   const pop = await until(() => dark.p.locator('.sd-link-pop').evaluate((e) => getComputedStyle(e).backgroundColor).catch(() => null), 5000, 100)

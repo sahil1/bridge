@@ -193,12 +193,13 @@ function connect() {
   if (link) { const old = link; link = null; clearInterval(pinger); try { old.terminate() } catch { /* closed */ } for (const c of conns.values()) c.end(); conns.clear() }
   // Bridge AI's relay needs a relay token from the account too: without one (signed out, or the
   // account no longer has the relay), it isn't asked, and Settings says why; it's tried again when
-  // the account changes (accountChanged), or in a few minutes.
+  // the account changes (accountChanged), or in a few minutes. An account that's stopped (suspended,
+  // or without the relay) is said as the relay says it, however this computer heard it first.
   const relayToken = conf.hosted ? acct?.relayTokenNow() : null
   if (conf.hosted && !relayToken) {
     const st = acct?.relayState() || {}
     lastError = !st.signedIn ? 'Bridge AI\'s relay needs this computer signed in to your Bold Bridge account (Settings › Account).' : st.status === 'suspended' ? 'Your Bold Bridge account is suspended, so Bridge AI\'s relay doesn\'t carry this computer for now.' : st.relay !== 'approved' ? 'Your Bold Bridge account doesn\'t have Bridge AI\'s relay any more. Use your own Cloudflare or Tailscale, in Settings › Devices.' : 'Getting a pass for Bridge AI\'s relay from your Bold Bridge account…'
-    limit = { why: 'token', text: lastError, until: Date.now() + 5 * 60000 }
+    limit = { why: !st.signedIn ? 'token' : st.status === 'suspended' ? 'suspended' : st.relay !== 'approved' ? 'relay' : 'token', text: lastError, until: Date.now() + 5 * 60000 }
     if (st.signedIn && st.relay === 'approved') acct?.relayToken().then((t) => { if (t) connect() }).catch(() => {})
     retry = setTimeout(connect, 5 * 60000)
     return
@@ -305,7 +306,7 @@ function onUse(m) {
 // relay, connected again with it.
 export function accountChanged() {
   if (!conf.hosted || !conf.url) return
-  if (limit?.why === 'token') limit = null
+  if (['token', 'suspended', 'relay', 'deleted'].includes(limit?.why)) limit = null
   disconnect()
   connect()
 }
