@@ -525,6 +525,13 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
   const openBtn = (cls, size) => meta && (opener || usual) && <button type="button" className={cls} onClick={openIn} title={openTip} aria-label={opener ? openName : t('Open in its usual app')}><Icon name="external" size={size} /> <span className="sd-btn-label">{openName}</span></button>
   const leaveTip = t('Leave Focus (Esc or {key})', { key: keys('mod', '.') })
   const focusTip = withKeys(t('Focus: the page alone, in the whole window'), 'mod', 'alt', 'f')
+  // Whether it's saved, said quietly in the header, as Google Docs does; Save itself only while
+  // there's something to save that won't save itself (a document saves itself a moment after you
+  // stop typing, unless a save failed or a change from elsewhere waits for you), in the same place.
+  const needsSave = kind && !readOnly && dirty && !saving && (!SAVES_ITSELF.has(kind) || !!note?.error || !!conflict)
+  const saveSlot = kind && !readOnly && (needsSave
+    ? <button type="button" className="btn small primary sd-head-btn sd-save-btn" onClick={() => save()} title={withKeys(t('Save'), 'mod', 's')} aria-label={t('Save')}><Icon name="check" size={12} /> <span className="sd-btn-label">{t('Save')}</span></button>
+    : <span className="sd-save-state" title={meta?.mtime && !dirty ? t('The file last changed {when}', { when: when(meta.mtime) }) : undefined}>{saving || dirty ? <Icon name="refresh" size={12} className="spin" /> : <Icon name="check" size={12} />}<span className="sd-btn-label">{saving || dirty ? t('Saving…') : t('Saved')}</span></span>)
   return (
     <div className={`sd-file${focus.on ? ' focus sd-focus' : ''}`} data-esc={focus.on ? '' : undefined}>
       {/* In Focus, Studio's header folds away (on a Mac's desktop app, out of full screen, a strip
@@ -536,12 +543,14 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
             {at && <span className="path-chip sd-sub-where" title={`${at.label} · ${at.full}`}><Icon name="folder" size={10} /> <span>{at.path}</span></span>}
           </>}>
           {tabs}
-          {kind && !readOnly && <button type="button" className={`btn small sd-head-btn${dirty ? ' primary' : ''}`} onClick={() => save()} disabled={saving || !dirty} title={withKeys(dirty ? t('Save') : t('Saved: nothing new to save'), 'mod', 's')} aria-label={saving ? t('Saving…') : dirty ? t('Save') : t('Saved')}><Icon name="check" size={12} /> <span className="sd-btn-label">{saving ? t('Saving…') : dirty ? t('Save') : t('Saved')}</span></button>}
-          <button type="button" className="btn small sd-head-btn" onClick={() => (handle.current?.ask ? handle.current.ask() : setAsk({ selection: handle.current?.selection?.() || null }))} disabled={!meta} title={t('Have one of your agents change it: pick the part first, or describe it')} aria-label={t('Ask an agent')}><Icon name="bot" size={12} /> <span className="sd-btn-label">{t('Ask an agent')}</span></button>
+          {saveSlot}
+          <button type="button" className="btn small sd-head-btn sd-ask-btn" onClick={() => (handle.current?.ask ? handle.current.ask() : setAsk({ selection: handle.current?.selection?.() || null }))} disabled={!meta} title={t('Have one of your agents change it: pick the part first, or describe it')} aria-label={t('Ask an agent')}><Icon name="bot" size={12} /> <span className="sd-btn-label">{t('Ask an agent')}</span></button>
           {openBtn('btn small sd-head-btn sd-open-in', 12)}
-          <button type="button" className={`win-btn${panel === 'versions' ? ' on' : ''}`} onClick={() => setPanel(panel === 'versions' ? null : 'versions')} aria-pressed={panel === 'versions'} title={t('Versions: yours, your agents\' and changes from outside')} aria-label={t('Versions')} disabled={!meta}><Icon name="clock" size={14} /></button>
-          <a className="win-btn sd-dl-btn" href={rawUrl(f)} download={name} title={t('Download {name}', { name })} aria-label={t('Download')}><Icon name="download" size={14} /></a>
-          <button type="button" className="win-btn sd-focus-btn" onClick={focus.enter} disabled={!meta} title={focusTip} aria-label={t('Focus')}><Icon name="focus" size={14} /></button>
+          <span className="sd-head-icons">
+            <button type="button" className={`win-btn${panel === 'versions' ? ' on' : ''}`} onClick={() => setPanel(panel === 'versions' ? null : 'versions')} aria-pressed={panel === 'versions'} title={t('Versions: yours, your agents\' and changes from outside')} aria-label={t('Versions')} disabled={!meta}><Icon name="clock" size={15} /></button>
+            <a className="win-btn sd-dl-btn" href={rawUrl(f)} download={name} title={t('Download {name}', { name })} aria-label={t('Download')}><Icon name="download" size={15} /></a>
+            <button type="button" className="win-btn sd-focus-btn" onClick={focus.enter} disabled={!meta} title={focusTip} aria-label={t('Focus')}><Icon name="focus" size={15} /></button>
+          </span>
           {assist && assist('btn small sd-head-btn', { labelClass: 'sd-btn-label' })}
         </PaneHeader>
       )}

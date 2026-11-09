@@ -63,7 +63,7 @@ export default function Solo({ paneId }) {
 
   return (
     <div className="solo">
-      <Dictation conf={conf?.dictation} onScreen={() => paneId} />
+      <Dictation conf={conf?.dictation} onScreen={() => paneId} looking={agent && !embedded ? { machine: machineId, pane: paneId, name: nameOf(agent) } : null} />
       {!fleet ? <div className="pad"><div className="skeleton-rows"><div /><div /></div></div>
         : agent
           ? <ErrorBoundary name="This agent's view" resetKey={agent.paneId}><Console agent={agent} variant="focus" extraActions={embedded ? null : back} queued={fleet.queue?.[paneId] || []} delivered={fleet.delivered?.[paneId] || []} /></ErrorBoundary>

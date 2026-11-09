@@ -51,7 +51,11 @@ unified EN 0.6B is by NVIDIA, under the NVIDIA Open Model License
 sherpa-onnx project. The Whisper models are by OpenAI, under the MIT License, in whisper.cpp's
 form. Telling voices apart in a room uses ERes2Net, by Alibaba's 3D-Speaker project, under the
 Apache License 2.0 (https://www.modelscope.cn/models/iic/speech_eres2net_sv_en_voxceleb_16k), in the
-ONNX form made by the sherpa-onnx project, downloaded when you first ask for it.
+ONNX form made by the sherpa-onnx project, downloaded when you first ask for it. The natural voice
+that reads answers aloud is Supertonic 3, by Supertone, under the BigScience OpenRAIL-M License
+(https://huggingface.co/Supertone/supertonic-3), whose use restrictions (its Attachment A) apply to
+anyone who uses it; in the int8 ONNX form made by the sherpa-onnx project, downloaded when you pick
+it in Settings › Voice.
 
 The local model runs on llama.cpp's llama-server (https://github.com/ggml-org/llama.cpp, MIT License,
 Copyright (c) 2023-2026 The ggml authors), whose release builds come with the desktop app, with

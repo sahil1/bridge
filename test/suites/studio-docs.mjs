@@ -3,7 +3,8 @@
 // numbers, a comment, tracked changes, a footnote, lists, a table with a merged cell, a picture,
 // a bookmark, a link) opened as pages, edited and saved back with everything it didn't change
 // exactly as it was, part by part and paragraph by paragraph; its toolbar (styles, fonts, sizes,
-// colours, highlight, alignment, spacing, lists), pictures put in and resized, tables, its header
+// colours, highlight, alignment, spacing, lists; every control 30 px high, two rows at most at 1440
+// with the view's tools at the right of the first), pictures put in and resized, tables, its header
 // edited, find and replace, the outline, the word count; AI Assist on a Markdown file, by the words
 // picked and at the right end of the header (the change shown before it's taken, and a model that
 // can't answer saying why). Studio's Files: your
@@ -345,6 +346,16 @@ try {
   const status = await until(async () => { const x = await p.locator('.sd-status').innerText(); return /^Page 1 of [2-9]/.test(x) && x }, 5000, 100)
   ok(!!status && /Saved/.test(status), 'the status line: the page you\'re on of how many, and opened is not changed', status || await p.locator('.sd-status').innerText())
   await shot(p, `${tag}studio-docs-word`)
+  // The toolbar at 1440: its controls one height (30 px, as every Studio editor's), the formatting
+  // in at most two rows, and the view's tools (outline, find, print, zoom) at the right of the first
+  // rather than on a row of their own.
+  const rows = await p.locator('.sd-doc-tools').evaluate((t) => {
+    const r = (e) => e.getBoundingClientRect()
+    const shown = [...t.querySelectorAll('button')].filter((x) => r(x).width > 0 && !x.closest('.sd-drop'))
+    const tops = [...new Set(shown.map((x) => Math.round(r(x).top)))].sort((a, z) => a - z)
+    return { heights: [...new Set(shown.map((x) => Math.round(r(x).height)))], rows: tops.length, view: Math.round(r(t.querySelector('.sd-view-tools')).top - r(t.querySelector('.sd-group')).top) }
+  })
+  ok(rows.heights.join() === '30' && rows.rows <= 2 && rows.view === 0, 'a Word file\'s toolbar: every control 30 px high, in two rows at most, the view\'s tools at the right of the first', rows)
   // The toolbar: each control named, with its shortcut in its tooltip.
   const tb = p.locator('.sd-doc-tools')
   const names = await tb.locator('button').evaluateAll((bs) => bs.map((x) => x.getAttribute('aria-label')))

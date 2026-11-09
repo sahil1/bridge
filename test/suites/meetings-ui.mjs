@@ -15,7 +15,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { startKit, startModel, checks, until, sleep, browser, page, shot, solid, noServiceWorker, changeAnswer, TEST, IS_MAC } from '../lib/harness.mjs'
+import { startKit, startModel, checks, until, sleep, browser, page, shot, solid, noServiceWorker, changeAnswer, TEST, IS_MAC, advanced } from '../lib/harness.mjs'
 
 const { ok, skip, done } = checks('meetings-ui')
 const kit = await startKit('meetings-ui')
@@ -565,15 +565,16 @@ process.exit(1)`)
   await p.locator('.mt-transcript .mt-voices-btn').click({ timeout: 5000 }).catch(() => {})
   const failed = p.locator('.mt-transcript .mt-hint', { hasText: "The voices weren't told apart" })
   ok(!!(await until(() => failed.isVisible(), 10000)) && await failed.locator('button', { hasText: 'Try again' }).isVisible(), 'Who spoke with no way to download the voice model: it says why, with Try again', await p.locator('.mt-transcript').innerText({ timeout: 1000 }).catch(() => ''))
-  // Settings › Meetings: Voices in a room.
-  await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'meetings' } })))
+  // Settings › Meetings: Voices in a room, under its Advanced (a link to Who Spoke opens it there).
+  await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'who-spoke' } })))
   const sec = p.locator('.st-voices')
   const sectionShown = !!(await until(() => sec.isVisible(), 8000)) && /Tell voices apart in a room/.test(await sec.innerText()) && /Remember voices you name/.test(await sec.innerText()) && /ERes2Net, 26 MB, Apache-2\.0/.test(await sec.innerText())
   ok(sectionShown, 'Settings › Meetings: Voices in a room, with the model it uses and remembering voices', await sec.innerText().catch(() => ''))
   // Prepare for each meeting (where there's a calendar, a Mac) says where to ask for it, never naming Home, a beta
   // feature that's off here.
   if (IS_MAC) {
-    const prep = await p.locator('.st-check', { hasText: 'Prepare for each meeting' }).innerText().catch(() => '')
+    // (In a line; all of it on hover.)
+    const prep = await p.locator('.st-check', { hasText: 'Prepare for each meeting' }).locator('span[title]').first().getAttribute('title').catch(() => '')
     ok(/with AI Assist on the meeting in Calendar\./.test(prep) && !/Home/.test(prep) && !(await kit.api('/config')).trials.home, 'Settings › Meetings: Prepare for each meeting says AI Assist does it from the meeting in Calendar, and names no Home while Home is off', prep)
   }
   await sec.scrollIntoViewIfNeeded().catch(() => {})

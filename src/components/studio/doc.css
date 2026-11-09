@@ -4,13 +4,18 @@
    the page's own are the document's. */
 .sd-doc { --desk: color-mix(in srgb, var(--ink) 6%, var(--pane-2)); display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); height: 100%; min-height: 0; background: var(--desk); }
 .sd-doc .sd-doc-head { position: relative; z-index: 2; background: var(--pane); }
-.sd-doc .sd-toolbar { position: static; gap: 2px 4px; min-height: 44px; padding: 6px 10px; box-shadow: 0 1px 0 var(--line); border-bottom: 0; }
-.sd-doc .sd-group { gap: 1px; }
-.sd-doc .sd-group + .sd-group { margin-left: 3px; padding-left: 6px; border-left: 1px solid var(--line); }
-.sd-doc .sd-toolbar > .sd-grow { display: none; }
-/* The view's tools (find, outline, zoom) at the right, on the first row or the second. */
-.sd-doc .sd-grow + .sd-group { margin-left: auto; padding-left: 0; border-left: 0; }
-.sd-doc .sd-tool { width: 30px; height: 30px; border-radius: 6px; }
+.sd-doc .sd-toolbar { position: static; flex-wrap: nowrap; align-items: flex-start; box-shadow: 0 1px 0 var(--line); border-bottom: 0; }
+/* The formatting tools wrap onto a second row where there isn't room for one; the view's (find,
+   outline, print, zoom) stay at the right of the first. */
+.sd-tools-main { flex: 1 1 auto; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.sd-doc .sd-view-tools { flex: none; margin-left: 4px; padding-left: 0; background: none; }
+/* A narrower pane: all of them in one flow, the view's at the right of the last row, which takes
+   fewer rows there than keeping the first row's end for them. */
+@container (max-width: 960px) {
+  .sd-doc .sd-toolbar { flex-wrap: wrap; align-items: center; }
+  .sd-doc .sd-tools-main { display: contents; }
+  .sd-doc .sd-view-tools { margin-left: auto; }
+}
 .sd-doc .sd-tool.wide { width: auto; padding: 0 7px; gap: 4px; display: inline-flex; align-items: center; }
 .sd-tool-n { font: 600 11px var(--font); font-variant-numeric: tabular-nums; }
 
@@ -74,7 +79,9 @@
 /* The desk: the page in the middle, the outline on the left and the comments on the right. */
 .sd-doc-main { position: relative; display: flex; min-height: 0; }
 .sd-desk { flex: 1; min-width: 0; overflow: auto; overscroll-behavior: contain; scroll-padding-top: 24px; }
-.sd-sheet { position: relative; margin: 28px auto 64px; }
+/* The page's own sheet of paper, on the desk (not a sheet's editor, also .sd-sheet: once a document
+   had been open, a sheet opened after it started 28px down, under a blank band). */
+.sd-desk > .sd-sheet { position: relative; margin: 28px auto 64px; }
 .sd-outline-pane, .sd-comments-pane { flex: none; display: flex; flex-direction: column; min-height: 0; overflow: auto; background: var(--pane); }
 .sd-outline-pane { width: 236px; border-right: 1px solid var(--line); }
 .sd-comments-pane { width: 300px; border-left: 1px solid var(--line); }
@@ -274,6 +281,10 @@
 .app.narrow .sd-setup-body select, .app.narrow .sd-setup-margins input { height: 40px; font-size: 16px; }
 .app.narrow .sd-setup-margins { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .app.narrow .sd-radio { min-height: 40px; }
-.app.narrow .sd-doc .sd-group + .sd-group { margin-left: 0; padding-left: 0; border-left: 0; }
+/* On a phone its rows wrap a button at a time, the view's tools (outline, find) following the rest
+   rather than on a row of their own at its right. */
+.app.narrow .sd-doc .sd-toolbar { flex-wrap: wrap; align-items: center; }
+.app.narrow .sd-doc .sd-tools-main { display: contents; }
+.app.narrow .sd-doc .sd-group + .sd-group, .app.narrow .sd-doc .sd-view-tools { margin-left: 0; padding-left: 0; background: none; }
 .app.narrow .sd-sw-grid { grid-template-columns: repeat(10, 24px); }
 .app.narrow .sd-sw { width: 24px; height: 24px; }

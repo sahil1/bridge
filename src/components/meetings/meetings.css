@@ -675,7 +675,7 @@ button.mt-from-chip:hover { color: var(--ink); border-color: color-mix(in srgb, 
   .app.narrow .mt-view .pane-head .seg button { flex: none; flex-direction: row; gap: 6px; height: 40px; padding: 0 12px; }
   .app.narrow .mt-view .pane-head .seg button span { font-size: 12.5px; }
 }
-/* The list's header: the count under the name, Memory and Start recording whole beside it. */
+/* The list's header: the count under the name, Start recording whole beside it. */
 .app.narrow .mt-view .pane-head:not(:has(.mt-title)) { padding-left: max(14px, env(safe-area-inset-left)); padding-right: max(10px, env(safe-area-inset-right)); }
 .app.narrow .mt-view .pane-head:not(:has(.mt-title)) .pane-titles h2 { padding-left: 0; font-size: 16px; }
 .app.narrow .mt-view .pane-head:not(:has(.mt-title)) .pane-sub { margin-left: 0; }

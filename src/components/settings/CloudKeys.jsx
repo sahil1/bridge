@@ -126,7 +126,7 @@ export default function CloudKeys({ focus, bare = false, onChange }) {
   useEffect(() => { load() }, [])
   useEffect(() => { if (focus === 'cloud' && list) setTimeout(() => ref.current?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 120) }, [focus, !!list]) // eslint-disable-line react-hooks/exhaustive-deps
   return (
-    <section className={`pv-sec ${bare ? 'bare' : ''}`} id="pv-cloud" ref={ref}>
+    <section className={`pv-sec ${bare ? 'bare' : ''}`} id="pv-cloud" data-setting="cloud" ref={ref}>
       {!bare && (
         <div className="pv-head">
           <h4>Cloud Agents</h4>
@@ -142,7 +142,7 @@ export default function CloudKeys({ focus, bare = false, onChange }) {
       )}
       {cloudOnly
         ? <p className="pv-note">Keys stay on this phone, in {keyStore}, and go only to their own provider: the app adds the key to each request itself. Bridge AI on a computer keeps keys of its own.</p>
-        : <p className="pv-note">Keys stay on this computer, in your Bridge AI data folder (readable only by you). Bridge AI talks to the provider with your key; the agents it starts on this computer don't get these keys.</p>}
+        : <p className="pv-note" title="Keys stay on this computer, in your Bridge AI data folder (readable only by you). Bridge AI talks to the provider with your key; the agents it starts on this computer don't get these keys.">Keys stay on this computer, readable only by you, and go only to their own provider.</p>}
     </section>
   )
 }

@@ -69,8 +69,9 @@ try {
     const rows = [...table.slice(0, table.search(/\n\n/)).matchAll(/^\| ([^|]+?) \|/gm)].map((m) => m[1]).filter((x) => !/^(Section|-+)$/.test(x))
     ok(navs.every((x) => rows.includes(x)) && rows.every((x) => navs.includes(x) || x === 'Mail'), `${t}: README.md's Settings table has a row for each section, and only those`, { rows, navs })
     await p.locator('.st-nav-item', { hasText: 'Devices' }).click()
-    const heads = await until(async () => { const h = (await p.locator('.st-body h4').allInnerTexts()).map((x) => x.trim()); return h.includes('Your Devices') && h }, 6000)
-    const at = (re) => (heads || []).findIndex((h) => re.test(h))
+    // (Once the relay's own heading is in: Tailscale, when it isn't the way picked, is under Advanced at the end.)
+    const at = (re, h = heads) => (h || []).findIndex((x) => re.test(x))
+    const heads = await until(async () => { const h = (await p.locator('.st-body h4').allInnerTexts()).map((x) => x.trim()); return h.includes('Your Devices') && at(/relay|Tailscale/i, h) >= 0 && at(/relay|Tailscale/i, h) < at(/^Your Devices$/, h) && h }, 6000)
     ok(heads && at(/relay|Tailscale/i) >= 0 && at(/relay|Tailscale/i) < at(/^Your Devices$/) && at(/^Your Devices$/) < at(/^Notifications on this device$/), `${t}: connect first, then your devices, then notifications`, heads)
     await p.keyboard.press('Escape')
     // The devices menu's way in (section "machines") opens it at your devices.
@@ -131,7 +132,7 @@ try {
       ['a warning chip', '.work', '<div style="background:var(--pane)"><span class="st-chip warn">Off</span></div>', 'span', 4.5],
       ['a Done tag', '.work', '<div style="background:var(--pane)"><span class="state-tag st-done">Done</span></div>', 'span', 4.5],
       ['the sidebar\'s quiet text', '.rail', '<span class="rail-label">Spaces</span>', 'span', 4.5],
-      ['the sidebar\'s rows', '.rail', '<button class="rail-nav-btn">Memory</button>', 'button', 4.5],
+      ['the sidebar\'s rows', '.rail', '<button class="rail-nav-btn">Dictations</button>', 'button', 4.5],
     ]
     const failed = []
     for (const theme of themes) {

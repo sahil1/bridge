@@ -4,6 +4,7 @@ import { InstallNode, openSettings } from '../SignIn.jsx'
 import { RelayUse } from './Account.jsx'
 import { api, viaRelay, relayComputers } from '../../api.js'
 import { t, locale } from '../../i18n/index.js'
+import { Advanced } from './Advanced.jsx'
 
 // Settings › Devices › "From anywhere": your own relay on your Cloudflare account
 // (server/relay.js). Optional: Bridge AI works the same without it.
@@ -75,11 +76,11 @@ export default function Relay({ way, setWay, onOffer }) {
     else { setWay?.((w) => w || 'hosted'); api('/account').then(setAcct).catch(() => {}) } // turned away: it stays picked, saying why
   }
 
-  if (!st) return <section className="st-sec"><h4>From anywhere</h4><div className="skeleton-rows"><div /></div></section>
+  if (!st) return <section className="st-sec" data-setting="relay"><h4>From anywhere</h4><div className="skeleton-rows"><div /></div></section>
 
   if (viaRelay) {
     return (
-      <section className="st-sec">
+      <section className="st-sec" data-setting="relay">
         <h4>From anywhere</h4>
         <p className="muted small"><Icon name="check" size={12} /> This phone is connected to your computer through {st.hosted ? 'Bridge AI\'s relay' : 'your own relay'}, end-to-end encrypted. To add or remove phones, use Bridge AI on the computer.</p>
         {relayComputers && <Computers />}
@@ -111,7 +112,7 @@ export default function Relay({ way, setWay, onOffer }) {
     <div className="st-row">
       <button type="button" className="btn primary" onClick={() => deploy()}><Icon name="external" size={13} /> Sign in with Cloudflare</button>
       <button type="button" className="ghost-btn" onClick={() => setMode('token')}>Use an API token instead</button>
-      <span className="muted small">Free. Opens Cloudflare in your browser; Bridge AI then sets up the relay. Bridge AI keeps this sign-in to itself, apart from any other Cloudflare tools you use.</span>
+      <span className="muted small" title="Bridge AI keeps this sign-in to itself, apart from any other Cloudflare tools you use.">Free. Opens Cloudflare in your browser; Bridge AI then sets up the relay.</span>
     </div>
   )
   // Signing in with the browser needs Node.js, and there's none: install it, then sign in.
@@ -128,7 +129,7 @@ export default function Relay({ way, setWay, onOffer }) {
     const pick = way || (st.configured ? null : st.hostedFull ? 'cloudflare' : 'hosted')
     const current = st.configured ? (st.hosted ? 'hosted' : 'cloudflare') : null
     return (
-      <section className="st-sec">
+      <section className="st-sec" data-setting="relay">
         <h4>Use Bridge AI on your phone</h4>
         <p className="muted small">Pick how your phone reaches this computer when you're away from it.{st.configured ? ' Moving to another relay means pairing your phones again.' : ''}</p>
         <div className="ph-ways" role="radiogroup" aria-label="How your phone reaches this computer">
@@ -154,7 +155,7 @@ export default function Relay({ way, setWay, onOffer }) {
         )}
         {pick === 'cloudflare' && (
           <>
-            <p className="muted small">A small relay on your own free Cloudflare account: everything stays on your account, with no limits beyond Cloudflare's free plan. Bridge AI puts it there for you and keeps it up to date. Everything between phone and computer is end-to-end encrypted, so neither the relay nor Cloudflare can read it.</p>
+            <p className="muted small" title="A small relay on your own free Cloudflare account: everything stays on your account, with no limits beyond Cloudflare's free plan. Bridge AI puts it there for you and keeps it up to date. Everything between phone and computer is end-to-end encrypted, so neither the relay nor Cloudflare can read it.">A small relay on your own free Cloudflare account, end-to-end encrypted: neither the relay nor Cloudflare can read it.</p>
             {current === 'cloudflare' ? <p className="muted small"><Icon name="check" size={12} /> This is how your phone connects now.</p> : cloudflare}
           </>
         )}
@@ -182,11 +183,11 @@ export default function Relay({ way, setWay, onOffer }) {
   // under Your Devices, where unlinking one tells it too (removing it here left it half linked).
   const phones = (st.devices || []).filter((d) => d.kind !== 'computer')
   return (
-    <section className="st-sec">
+    <section className="st-sec" data-setting="relay">
       <h4>{st.hosted ? 'From anywhere, through Bridge AI\'s relay' : 'From anywhere, through your own relay'}</h4>
       {st.hosted
-        ? <p className="muted small">{t('Your phone reaches this computer through a relay run by Bold Bridge, for your Bold Bridge account. Everything between them is end-to-end encrypted, so the relay can\'t read it: it sees IP addresses, and when and how much data passes. Your account has a fair-use allowance every 8 hours and each week.')}</p>
-        : <p className="muted small">Your phone reaches this computer through a small relay on your own free Cloudflare account. No VPN and no app to keep running: Bridge AI connects to it whenever it's open. Everything between phone and computer is end-to-end encrypted, so neither the relay nor Cloudflare can read it.</p>}
+        ? <p className="muted small" title={t('Your phone reaches this computer through a relay run by Bold Bridge, for your Bold Bridge account. Everything between them is end-to-end encrypted, so the relay can\'t read it: it sees IP addresses, and when and how much data passes. Your account has a fair-use allowance every 8 hours and each week.')}>{t('End-to-end encrypted: the relay sees IP addresses and how much data passes, never what you do.')}</p>
+        : <p className="muted small" title="Your phone reaches this computer through a small relay on your own free Cloudflare account. No VPN and no app to keep running: Bridge AI connects to it whenever it's open. Everything between phone and computer is end-to-end encrypted, so neither the relay nor Cloudflare can read it.">On your own free Cloudflare account, end-to-end encrypted: neither the relay nor Cloudflare can read it.</p>}
 
       {!st.configured ? cloudflare : (
         <>
@@ -222,7 +223,7 @@ export default function Relay({ way, setWay, onOffer }) {
             </ul>
           )}
 
-          <KeepAwake st={st} onChange={setSt} />
+          <Advanced order={20}><KeepAwake st={st} onChange={setSt} /></Advanced>
           <div className={offer ? 'st-row' : undefined}>
             {offer && <button type="button" className="ghost-btn" onClick={() => { setChanging(true); setWay?.(null) }}>Change how your phone connects</button>}
             <button type="button" className="ghost-btn" onClick={() => { if (window.confirm(st.hosted ? 'Stop using Bridge AI\'s relay? Paired phones are forgotten, and this computer\'s address on the relay is removed.' : 'Stop using this relay? Paired phones are forgotten and Bridge AI signs out of Cloudflare. The relay stays on your Cloudflare account; delete it there if you like.')) run('/relay/forget') }}>Stop using the relay</button>
@@ -278,12 +279,12 @@ export function KeepAwake({ st: given = null, onChange }) {
     try { const s = await api('/relay/awake', { method: 'POST', body: { on } }); setOwn(s); onChange?.(s) } catch { /* left as it was */ }
   }
   return (
-    <div className="ph-awake">
+    <div className="ph-awake" data-setting="keep-awake">
       <label className="ph-check">
         <input type="checkbox" checked={!!st.awake} onChange={(e) => set(e.target.checked)} /> {t('Keep this computer awake while your phone can reach it')}
         {st.awake && st.awakeNow && <span className="st-chip good">{t('Awake now')}</span>}
       </label>
-      <p className="muted small">{t("Walk away and your agents are still a tap away. The screen still turns off and locks. Closing a laptop's lid can still put it to sleep.")}</p>
+      <p className="muted small" title={t("Walk away and your agents are still a tap away. The screen still turns off and locks. Closing a laptop's lid can still put it to sleep.")}>{t("The screen still locks; closing a laptop's lid can still put it to sleep.")}</p>
     </div>
   )
 }

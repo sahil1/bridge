@@ -92,6 +92,27 @@ export const VOICE = {
   repo: 'csukuangfj/speaker-embedding-models', rev: '0743f301363dec56491a490f6d6cbc9d67f9a3bf',
   files: [{ name: '3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx', bytes: 26485263, sha256: 'c59158379255ad66e161679cca6af8d52d51e389e3224ab7d7a7baae295c2db5' }],
 }
+// The natural voice that reads answers aloud (voicespeak.js): Supertone's Supertonic 3, in the int8
+// ONNX form the sherpa-onnx project made, ten voices (five women's, then five men's) in 31
+// languages. Not speech to text, so not in the list above; downloaded when you pick it in Settings ›
+// Voice › Spoken Answers. It reads the words as they're written: of the voices sherpa-onnx runs, the
+// others need a dictionary of words (sherpa-onnx 2 no longer has eSpeak NG to sound out the rest),
+// and Kokoro and Kitten left out "agents", "minutes" and "PR 42" from an agent's answer; Pocket
+// TTS's ONNX form is for non-commercial use only.
+export const NATURAL = {
+  id: 'supertonic-3', runtime: 'sherpa', label: 'Supertonic 3', mb: 145, memGB: 2, license: 'OpenRAIL-M', by: 'Supertone',
+  languages: ['en', 'ko', 'ja', 'ar', 'bg', 'cs', 'da', 'de', 'el', 'es', 'et', 'fi', 'fr', 'hi', 'hr', 'hu', 'id', 'it', 'lt', 'lv', 'nl', 'pl', 'pt', 'ro', 'ru', 'sk', 'sl', 'sv', 'tr', 'uk', 'vi'],
+  repo: 'csukuangfj2/sherpa-onnx-supertonic-3-tts-int8-2026-05-11', rev: 'cca5a0e6c96e1d2c720986bf7e75fcc81dee3ae4',
+  files: [
+    { name: 'tts.json', bytes: 8253, sha256: '42078d3aef1cd43ab43021f3c54f47d2d75ceb4e75f627f118890128b06a0d09' },
+    { name: 'unicode_indexer.bin', bytes: 262144, sha256: '8402ca48e5189a8950138580b0fff64db6f072f24ac07cd54ba8b2fbb9883b30' },
+    { name: 'voice.bin', bytes: 517168, sha256: '67d5209b0ee8ce6c74105ffbe12fe6a7628aea3b4ba2fcb308a4a67938a93ce8' },
+    { name: 'duration_predictor.int8.onnx', bytes: 3700147, sha256: 'c3eb91414d5ff8a7a239b7fe9e34e7e2bf8a8140d8375ffb14718b1c639325db' },
+    { name: 'text_encoder.int8.onnx', bytes: 36416150, sha256: 'c7befd5ea8c3119769e8a6c1486c4edc6a3bc8365c67621c881bbb774b9902ff' },
+    { name: 'vocoder.int8.onnx', bytes: 25991073, sha256: 'e923d60f53f95eb1ce235f1dc33ec56d9c057823c96fa6f8acf98f32b0da6152' },
+    { name: 'vector_estimator.int8.onnx', bytes: 78400833, sha256: '20cd86fa5c6effedfda0e7cffe5b0569ca401c440a0c3a1d72bf39286c0db3fd' },
+  ],
+}
 // Silero, so whisper.cpp skips what isn't speech inside a stretch (less made-up text in pauses).
 const VAD = { id: 'vad', runtime: 'whisper', label: 'Silero', file: 'ggml-silero-v6.2.0.bin', repo: 'ggml-org/whisper-vad', rev: '9ffd54a1e1ee413ddf265af9913beaf518d1639b', files: [{ name: 'ggml-silero-v6.2.0.bin', bytes: 885098, sha256: '2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987' }] }
 const standIns = (() => { try { return JSON.parse(fs.readFileSync(process.env.BRIDGE_SPEECH_MODELS, 'utf8')) } catch { return {} } })()
@@ -225,10 +246,10 @@ async function fetchFile(m, f, d) {
   fs.renameSync(tmp, dest)
 }
 export function fetchModel(id) {
-  const m = id === 'vad' ? VAD : id === VOICE.id ? VOICE : MODELS.find((x) => x.id === id)
+  const m = [VAD, VOICE, NATURAL].find((x) => x.id === id) || MODELS.find((x) => x.id === id)
   if (!m) throw new Error('No such model')
   if (have(m) || (downloads.has(m.id) && !downloads.get(m.id).error)) return
-  if (fitted && m.id !== 'vad' && m.id !== VOICE.id && !shown(m.id)) throw new Error(fitted.models.get(m.id)?.why || 'That model can\'t run on this computer')
+  if (fitted && MODELS.includes(m) && !shown(m.id)) throw new Error(fitted.models.get(m.id)?.why || 'That model can\'t run on this computer')
   const files = filesOf(m)
   const d = { got: 0, total: files.reduce((n, f) => n + (f.bytes || 0), 0), error: null, stop: new AbortController() }
   downloads.set(m.id, d)
@@ -250,7 +271,7 @@ export function fetchModel(id) {
 }
 // Stops its download first, if one is going (Windows won't delete a file still being written).
 export async function removeModel(id) {
-  const m = id === VOICE.id ? VOICE : MODELS.find((x) => x.id === id)
+  const m = [VOICE, NATURAL].find((x) => x.id === id) || MODELS.find((x) => x.id === id)
   if (!m) throw new Error('No such model')
   const d = downloads.get(m.id)
   if (d) { d.stop.abort(); await d.done }

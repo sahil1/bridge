@@ -1,12 +1,14 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import Icon from './Icon.jsx'
 import { useMedia } from './layout.jsx'
 import { THEMES, TEXT_SIZES, FONTS, DEFAULTS, useAppearance, resolve, isDark, validHex, luminance, themeString, parseThemeString } from '../appearance.js'
 import { PINS, usePins, setPin } from '../pins.js'
 import { cloudOnly } from '../api.js'
 import { t, tx, LANGS, chosen, setLang } from '../i18n/index.js'
+import { Advanced } from './settings/Advanced.jsx'
 
-// Preferences › Appearance, laid out like Slack's: color mode, theme, then text and layout.
+// Preferences › Appearance, laid out like Slack's: color mode, theme, text size and language; under
+// Advanced, density, the font, sharing a theme, what's in the top bar and Reset.
 const MODES = [
   { id: 'light', name: tx('Light') },
   { id: 'dark', name: tx('Dark') },
@@ -74,14 +76,12 @@ function ColorField({ label, value, onChange }) {
 
 // In the Top Bar: the Status menu's pins (src/pins.js) as one list, so they're found outside the
 // menu too. Only where there's the desktop's top bar: a phone's keeps to what needs you now.
-function TopBarPins({ focus }) {
+function TopBarPins() {
   const pins = usePins()
-  const ref = useRef(null)
-  useEffect(() => { if (focus) ref.current?.scrollIntoView({ block: 'start' }) }, [focus])
   return (
-    <section className="ap-sec" id="st-topbar" ref={ref}>
+    <section className="ap-sec" id="st-topbar" data-setting="topbar">
       <h4>{t('In the Top Bar')}</h4>
-      <p className="muted small">{t('What shows in the top bar beside what needs you, search and the next meeting. Each is in the Status menu too, with a pin that does the same. On a smaller window they become icons first, then move into Status.')}</p>
+      <p className="muted small" title={t('What shows in the top bar beside what needs you, search and the next meeting. Each is in the Status menu too, with a pin that does the same. On a smaller window they become icons first, then move into Status.')}>{t('Each is in the Status menu too, with a pin that does the same.')}</p>
       <div className="ap-pins">
         {PINS.map((x) => (
           <label key={x.id} className="st-check"><input type="checkbox" role="switch" checked={!!pins[x.id]} onChange={(e) => setPin(x.id, e.target.checked)} />
@@ -92,9 +92,9 @@ function TopBarPins({ focus }) {
   )
 }
 
-// The Appearance panel; Settings shows it as one of its sections. focus: 'topbar' starts at In the
-// Top Bar (from the Status menu).
-export default function Appearance({ focus = null }) {
+// The Appearance panel; Settings shows it as one of its sections, and opens it at In the Top Bar
+// from the Status menu (search.js: topbar).
+export default function Appearance() {
   const [a, save] = useAppearance()
   const bar = useMedia('(min-width: 900px)') && !cloudOnly // the desktop's top bar (App.jsx's wide)
   const [paste, setPaste] = useState('')
@@ -111,9 +111,8 @@ export default function Appearance({ focus = null }) {
   return (
     <div className="appearance">
 
-        <section className="ap-sec">
+        <section className="ap-sec" data-setting="color-mode">
           <h4>{t('Color Mode')}</h4>
-          <p className="muted small">{t('Choose light or dark, or follow your system.')}</p>
           <div className="ap-modes">
             {MODES.map((m) => (
               <button key={m.id} type="button" className={`ap-tile ${a.mode === m.id ? 'on' : ''}`} aria-pressed={a.mode === m.id} onClick={() => save({ mode: m.id })}>
@@ -124,9 +123,9 @@ export default function Appearance({ focus = null }) {
           </div>
         </section>
 
-        <section className="ap-sec">
+        <section className="ap-sec" data-setting="theme">
           <h4>{t('Theme')}</h4>
-          <p className="muted small">{t('Colors the window frame (top bar, sidebar and tabs) and the accent. Each theme has its own dark-mode shade.')}</p>
+          <p className="muted small" title={t('Colors the window frame (top bar, sidebar and tabs) and the accent. Each theme has its own dark-mode shade.')}>{t('The window frame and the accent, light and dark.')}</p>
           <div className="ap-themes">
             {THEMES.map((t) => {
               const c = resolve({ ...a, theme: t.id }, dark)
@@ -148,36 +147,15 @@ export default function Appearance({ focus = null }) {
               <ColorField label={t('Accent')} value={a.custom.accent} onChange={(v) => setCustom({ accent: v })} />
             </div>
           )}
-          <div className="ap-share">
-            <code title={t('Send this to someone so they can use your theme')}>{themeString(current)}</code>
-            <button type="button" className="ghost-btn" onClick={copy}><Icon name={copied ? 'check' : 'copy'} size={12} />{copied ? t('Copied') : t('Copy')}</button>
-            <form className="ap-paste" onSubmit={(e) => { e.preventDefault(); if (pasted) { save({ theme: 'custom', custom: pasted }); setPaste('') } }}>
-              <input value={paste} onChange={(e) => setPaste(e.target.value)} placeholder={t('Paste a theme…')} spellCheck={false} aria-label={t('Paste a theme')} />
-              <button className="ghost-btn strong" disabled={!pasted}>{t('Use')}</button>
-            </form>
-          </div>
         </section>
 
         <section className="ap-sec ap-rows">
-          <div className="ap-row">
-            <div><h4>{t('Text Size')}</h4><p className="muted small">{t('Chat, the message box and the terminal. ⌘+ and ⌘− zoom everything.')}</p></div>
+          <div className="ap-row" data-setting="text-size">
+            <div><h4>{t('Text Size')}</h4><p className="muted small" title={t('Chat, the message box and the terminal. ⌘+ and ⌘− zoom everything.')}>{t('⌘+ and ⌘− zoom everything.')}</p></div>
             <Seg label={t('Text Size')} value={a.text} options={TEXT_SIZES} onChange={(v) => save({ text: v })} />
           </div>
-          <div className="ap-row">
-            <div><h4>{t('Density')}</h4><p className="muted small">{t('Compact fits more messages and sidebar rows.')}</p></div>
-            <Seg label={t('Density')} value={a.density} options={[{ id: 'comfortable', name: t('Comfortable') }, { id: 'compact', name: t('Compact') }]} onChange={(v) => save({ density: v })} />
-          </div>
-          <div className="ap-row">
-            <div><h4>{t('Font')}</h4><p className="muted small">{t('For the app. Code and terminals stay monospace.')}</p></div>
-            <Seg label={t('Font')} value={a.font} options={FONTS} onChange={(v) => save({ font: v })} />
-          </div>
-        </section>
-
-        {bar && <TopBarPins focus={focus === 'topbar'} />}
-
-        <section className="ap-sec ap-rows">
-          <div className="ap-row">
-            <div><h4>{t('Language')}</h4><p className="muted small">{t('Bridge AI\'s own words. Not every screen is translated yet; the rest shows in English.')}</p></div>
+          <div className="ap-row" data-setting="language">
+            <div><h4>{t('Language')}</h4><p className="muted small" title={t('Bridge AI\'s own words. Not every screen is translated yet; the rest shows in English.')}>{t('Not every screen is translated yet.')}</p></div>
             <select className="st-input ap-lang" aria-label={t('Language')} value={chosen()} onChange={(e) => setLang(e.target.value)}>
               <option value="auto">{t('Match this computer')}</option>
               {LANGS.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
@@ -185,9 +163,37 @@ export default function Appearance({ focus = null }) {
           </div>
         </section>
 
-        <footer className="ap-foot">
-          <button type="button" className="ghost-btn" onClick={() => save({ ...DEFAULTS, mode: 'system' })}>{t('Reset appearance')}</button>
-        </footer>
+        <Advanced order={10}>
+          <section className="ap-sec ap-rows">
+            <div className="ap-row" data-setting="density">
+              <div><h4>{t('Density')}</h4><p className="muted small">{t('Compact fits more messages and sidebar rows.')}</p></div>
+              <Seg label={t('Density')} value={a.density} options={[{ id: 'comfortable', name: t('Comfortable') }, { id: 'compact', name: t('Compact') }]} onChange={(v) => save({ density: v })} />
+            </div>
+            <div className="ap-row" data-setting="font">
+              <div><h4>{t('Font')}</h4><p className="muted small">{t('Code and terminals stay monospace.')}</p></div>
+              <Seg label={t('Font')} value={a.font} options={FONTS} onChange={(v) => save({ font: v })} />
+            </div>
+          </section>
+          <section className="ap-sec" data-setting="share-theme">
+            <h4>{t('Share a Theme')}</h4>
+            <div className="ap-share">
+              <code title={t('Send this to someone so they can use your theme')}>{themeString(current)}</code>
+              <button type="button" className="ghost-btn" onClick={copy}><Icon name={copied ? 'check' : 'copy'} size={12} />{copied ? t('Copied') : t('Copy')}</button>
+              <form className="ap-paste" onSubmit={(e) => { e.preventDefault(); if (pasted) { save({ theme: 'custom', custom: pasted }); setPaste('') } }}>
+                <input value={paste} onChange={(e) => setPaste(e.target.value)} placeholder={t('Paste a theme…')} spellCheck={false} aria-label={t('Paste a theme')} />
+                <button className="ghost-btn strong" disabled={!pasted}>{t('Use')}</button>
+              </form>
+            </div>
+          </section>
+        </Advanced>
+
+        {bar && <Advanced order={20}><TopBarPins /></Advanced>}
+
+        <Advanced order={30}>
+          <footer className="ap-foot">
+            <button type="button" className="ghost-btn" onClick={() => save({ ...DEFAULTS, mode: 'system' })}>{t('Reset appearance')}</button>
+          </footer>
+        </Advanced>
     </div>
   )
 }

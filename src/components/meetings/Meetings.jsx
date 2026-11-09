@@ -23,6 +23,8 @@ import { ActionItems, SinceLastTime } from './work.jsx'
 import { useTrial } from '../../trials.js'
 import { InsightsView } from './insights.jsx'
 import { PeopleView } from './people.jsx'
+import Memory from '../memory/Memory.jsx'
+import { setMemoryAll } from '../memory/open.js'
 
 // The meeting pages: the list of meetings, and one meeting with your notes beside its transcript, the
 // summary, questions about it, and its action items for the Chief of Staff. The recording itself is
@@ -187,7 +189,8 @@ function InsightsOn({ n, onShow }) {
 }
 
 const SETUP = 'cc-meet-setup'
-const HOME_TABS = [['list', 'mic', tx('Meetings')], ['insights', 'trend', tx('Insights')], ['people', 'users', tx('People')]]
+// Memory always; Insights and People with Meeting Insights on (a beta feature).
+const HOME_TABS = [['list', 'mic', tx('Meetings')], ['insights', 'trend', tx('Insights')], ['people', 'users', tx('People')], ['memory', 'book', tx('Memory')]]
 const ASK_ALL = [tx('What did I agree to do this week?'), tx("What's still open from this week?"), tx('Write my weekly update from these meetings')]
 const ASK_ONE = [tx('Draft a follow-up email'), tx('What did I agree to do?'), tx("What's still open?")]
 
@@ -205,11 +208,13 @@ export function MeetingsHome({ onOpen }) {
   const archivedN = all.filter((x) => x.archived).length
   useEffect(() => { if (data && place && (place === ':archived' ? !archivedN : !folders.includes(place))) setPlace('') }, [data, place, archivedN, folders.join('|')]) // eslint-disable-line react-hooks/exhaustive-deps
   const hits = useSearch(q, place === ':archived')
-  // Insights and People beside the list (a beta feature, insights.jsx). ⌘K opens either, through
-  // the tab kept here and bridge-meetings-tab for a list already open.
+  // Memory beside the list (memory/Memory.jsx), what came up in your meetings to start with; Insights
+  // and People too, a beta feature (insights.jsx). ⌘K opens any of them, through the tab kept here and
+  // bridge-meetings-tab for a list already open.
   const insightsOn = useTrial('meeting-insights')
   const [tabKept, setTab] = usePersisted('cc-meet-tab', 'list')
-  const tab = insightsOn && ['insights', 'people'].includes(tabKept) ? tabKept : 'list'
+  const tab = tabKept === 'memory' || (insightsOn && ['insights', 'people'].includes(tabKept)) ? tabKept : 'list'
+  const tabs = HOME_TABS.filter(([v]) => insightsOn || v === 'list' || v === 'memory')
   const [person, setPerson] = useState(null)
   // Turned on by itself once there were meetings to add up (server/index.js): the tabs at once, and
   // a note saying so until it's read.
@@ -241,17 +246,16 @@ export function MeetingsHome({ onOpen }) {
           {data?.folder && <button type="button" className="path-chip" onClick={() => api('/meetings/folder/open', { method: 'POST' }).catch((e) => setErr(e))} onContextMenu={(e) => { e.preventDefault(); navigator.clipboard?.writeText(data.folder) }} title={`${t('Where notes are saved: {path}', { path: data.folder })}\n${t('Click to open it; right-click to copy')}`}><Icon name="folder" size={10} /> <span>{data.folder.replace(/^\/Users\/[^/]+/, '~')}</span></button>}
         </>
       )}>
-        {insightsOn && (
-          <div className="seg" role="tablist" aria-label={t('Show')}>
-            {HOME_TABS.map(([v, icon, label]) => (
-              <button key={v} type="button" role="tab" data-view={v} aria-selected={tab === v} className={tab === v ? 'on' : ''} onClick={() => { setTab(v); setPerson(null) }}><Icon name={icon} size={14} /><span>{t(label)}</span></button>
-            ))}
-          </div>
-        )}
-        <button type="button" className="btn small" onClick={openMemory} title={t('People, organizations and words from your meetings and dictations')}><Icon name="book" size={13} /> {t('Memory')}</button>
+        <div className="seg" role="tablist" aria-label={t('Show')}>
+          {tabs.map(([v, icon, label]) => (
+            <button key={v} type="button" role="tab" data-view={v} aria-selected={tab === v} className={tab === v ? 'on' : ''}
+              title={v === 'memory' ? t('People, organizations and words from your meetings and dictations') : undefined}
+              onClick={() => { if (v === 'memory' && tab !== 'memory') setMemoryAll('meetings', false); setTab(v); setPerson(null) }}><Icon name={icon} size={14} /><span>{t(label)}</span></button>
+          ))}
+        </div>
         {!m?.rec && <button type="button" className="btn small primary" onClick={() => go({})}><Icon name="mic" size={13} /> {t('Start recording')}</button>}
       </PaneHeader>
-    <div className="mt-home">
+    {tab === 'memory' ? <Memory from="meetings" /> : <div className="mt-home">
       {autoOn && insightsOn && <InsightsOn n={autoOn.meetings} onShow={() => { setTab('insights'); setPerson(null) }} />}
       {tab === 'insights' && <InsightsView onPerson={(pid) => { setTab('people'); setPerson(pid) }} onOpen={onOpen} onPeople={() => { setTab('people'); setPerson(null) }} />}
       {tab === 'people' && <PeopleView onOpen={onOpen} person={person} setPerson={setPerson} />}
@@ -320,7 +324,7 @@ export function MeetingsHome({ onOpen }) {
       {menu.msg && <p className={`small ${menu.msg.error ? 'error-text' : 'muted'}`} role="status">{menu.msg.text}</p>}
       {menu.node}
       </>}
-    </div>
+    </div>}
     </div>
   )
 }

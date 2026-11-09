@@ -34,7 +34,6 @@ const PATHS = {
   'view:new': { phone: 'Agents › New', shows: '.home-title' },
   'view:meetings': { phone: 'Meetings', shows: '.m-meetings' },
   'view:dictations': { phone: 'Meetings › Dictations', shows: '.dc-home, .dc-empty, .dc-body' },
-  'view:memory': { phone: 'More › Memory', shows: '.mm-page' },
   'view:whiteboards': { phone: 'More › Whiteboards', shows: '.wb-home' },
   'view:studio': { phone: 'More › Studio', shows: '.sd-home' },
   'view:files': { phone: 'More › Files', shows: '.fx' },
@@ -50,7 +49,7 @@ const PATHS = {
   'a:insights': { phone: 'Meetings › Insights', shows: '.m-meetings :is(.mi, .mi-empty)' },
   'a:people': { phone: 'Meetings › People', shows: '.m-meetings .mi-people' },
   'a:dictations': { phone: 'More › Dictations', shows: '.dc-home, .dc-empty, .dc-body' },
-  'a:memory': { phone: 'More › Memory', shows: '.mm-page' },
+  'a:memory': { phone: 'Meetings › Memory', shows: '.m-meetings .mt-view .mm-page' },
   'a:boards': { phone: 'More › Whiteboards', shows: '.wb-home' },
   'a:studio': { phone: 'More › Studio', shows: '.sd-home' },
   'a:files': { phone: 'More › Files', shows: '.fx' },
@@ -107,7 +106,6 @@ const PATHS = {
   'rail:Meetings': { phone: 'Meetings', shows: '.m-meetings' },
   'rail:Record a meeting now': { phone: 'Meetings', shows: '.m-meetings button:has-text("Start recording")' },
   'rail:Dictations': { phone: 'Meetings › Dictations', shows: '.dc-home, .dc-empty, .dc-body' },
-  'rail:Memory': { phone: 'More › Memory', shows: '.mm-page' },
   'rail:Whiteboards': { phone: 'More › Whiteboards', shows: '.wb-home' },
   'rail:Studio': { phone: 'More › Studio', shows: '.sd-home' },
   'rail:Files': { phone: 'More › Files', shows: '.fx' },
@@ -222,9 +220,9 @@ try {
     await ph.p.waitForSelector('.tabbar button', { timeout: 20000 })
     await ph.p.locator('.tabbar button', { hasText: 'More' }).click()
     await ph.p.locator('.tabbar button', { hasText: 'More' }).click()
-    await ph.p.locator('.m-more-row', { hasText: 'Memory' }).waitFor({ timeout: 8000 }).catch(() => {})
+    await ph.p.locator('.m-more-row[data-id="settings"]').waitFor({ timeout: 8000 }).catch(() => {})
     const moreFaults = await phoneFaults(ph.p, '.m-body')
-    ok(!Object.keys(moreFaults).length, `${width}: More fits, each row's words whole (Memory's too)`, moreFaults)
+    ok(!Object.keys(moreFaults).length, `${width}: More fits, each row's words whole`, moreFaults)
 
     // ⌘K's usage on a phone: More › Usage, from another tab.
     const notThere = []

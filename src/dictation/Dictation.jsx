@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import Icon from '../components/Icon.jsx'
 import { VoiceSetup, MicFix } from '../components/Composer.jsx'
 import { parseKey, keyLabel, isKeyDown, isKeyUp } from '../../shared/dictation/keys.js'
-import { useDictation, getState, configure, setOnScreen, press, release, finish, cancel, dismiss, retry, targetFromFocus, isPaused, box, keysPlatform, dictationKey, listeningHint, answerOffer, eventTime } from './controller.js'
+import { useDictation, getState, configure, setOnScreen, press, release, finish, cancel, dismiss, retry, targetFromFocus, isPaused, box, keysPlatform, dictationKey, listeningHint, answerOffer, eventTime, take, lentTarget, lookAt } from './controller.js'
+import { embedded } from '../api.js'
 import { t } from '../i18n/index.js'
 import { Morph, Listening, Working, Done } from './Pill.jsx'
 import './dictation.css'
@@ -15,9 +16,19 @@ import './dictation.css'
 // terminal it's pressed in (no non-breaking space, no Meta-Space to an agent).
 //
 // While it listens: the message box it's for shows its own bar (Composer.jsx); anywhere else (a
-// terminal, a search box, a meeting's notes), the pill at the bottom of the window (Pill.jsx), as
-// the dictation window shows over other apps. conf: /api/config's dictation; onScreen: the agent shown.
-export default function Dictation({ conf, onScreen }) {
+// terminal, a search box, a meeting's notes, another device's agent in a tab), the pill at the bottom
+// of the window (Pill.jsx), as the dictation window shows over other apps. conf: /api/config's
+// dictation; onScreen: the agent shown.
+//
+// This device's agent in a tab of another device's window (embedded: RemoteAgent.jsx there) hands
+// its presses to that window's page, which listens and gives the words back (controller.js, lent);
+// so do the pages in this one's tabs (bridgeDictation, below). Another device's page in the desktop
+// app (bridgeApp.dictates) leaves the key to the app, which listens for it in that window with this
+// computer's key (desktop/dictation.js). looking: the agent on screen ({ machine, pane, name }),
+// kept as the one you looked at last while this window has the focus, for the dictation window.
+const lend = { press: (at, from) => press(from ? lentTarget(from) : targetFromFocus(), at), release, cancel, finish, state: getState }
+
+export default function Dictation({ conf, onScreen, looking = null }) {
   const s = useDictation()
   const seen = useRef(onScreen)
   seen.current = onScreen
@@ -26,7 +37,7 @@ export default function Dictation({ conf, onScreen }) {
   const off = conf?.on === false
   const key = dictationKey(conf)
   useEffect(() => {
-    if (off) return
+    if (off || window.bridgeApp?.dictates) return
     const k = parseKey(key, keysPlatform())
     // A lone key (the right Alt) isn't kept from the page: it's AltGr on many keyboards, and another
     // key pressed while it's held (a character typed with it) cancels instead.
@@ -53,13 +64,32 @@ export default function Dictation({ conf, onScreen }) {
     window.addEventListener('keyup', up, true)
     window.addEventListener('blur', blur)
     window.addEventListener('bridge-dictate-key', fromApp)
+    // The pages in this one's tabs (another device's agent) hand their presses here (above).
+    if (!embedded) window.bridgeDictation = lend
     return () => {
       window.removeEventListener('keydown', down, true)
       window.removeEventListener('keyup', up, true)
       window.removeEventListener('blur', blur)
       window.removeEventListener('bridge-dictate-key', fromApp)
+      if (window.bridgeDictation === lend) delete window.bridgeDictation
     }
   }, [off, key])
+  const shown = useRef(looking)
+  shown.current = looking
+  useEffect(() => { if (looking && document.hasFocus()) lookAt(looking) }, [looking?.machine, looking?.pane, looking?.name]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const back = () => lookAt(shown.current)
+    window.addEventListener('focus', back)
+    return () => window.removeEventListener('focus', back)
+  }, [])
+  // Words heard for this page elsewhere: by the page of a window with this device's agent in a tab,
+  // or by the desktop app's dictation window, for its window showing this device. put: whether they
+  // went anywhere here (that one keeps them, and says so when they didn't).
+  useEffect(() => {
+    const heard = (e) => { if (e.detail && typeof e.detail === 'object') e.detail.put = take(e.detail.text) }
+    window.addEventListener('bridge-dictated', heard)
+    return () => window.removeEventListener('bridge-dictated', heard)
+  }, [])
   // A line said for a moment, then gone.
   useEffect(() => { if (!s.note || s.setup || s.retry) return; const id = setTimeout(dismiss, 6000); return () => clearTimeout(id) }, [s.note, s.setup, s.retry])
   // Typed into a terminal or another box: said for a moment in the pill, then it's gone. Worked out
@@ -69,16 +99,19 @@ export default function Dictation({ conf, onScreen }) {
   const [over, setOver] = useState(0) // the words (their time) said for long enough
   useEffect(() => { const at = s.result?.at; if (!at) return; const id = setTimeout(() => setOver(at), 1300); return () => clearTimeout(id) }, [s.result?.at])
   const k = last.current?.kind
-  const done = s.phase === 'idle' && s.result && over !== s.result.at && !s.note && !s.setup && (k === 'terminal' || k === 'field')
+  // Another device's agent in a tab: its page puts them where you were typing there (asked out loud
+  // there, it says what came of them itself).
+  const frame = (k === 'composer' && box(last.current.id)?.frame) || (k === 'frame' && !last.current.ask)
+  const done = s.phase === 'idle' && s.result && over !== s.result.at && !s.note && !s.setup && (k === 'terminal' || k === 'field' || frame)
     ? (k === 'terminal' ? t('Typed into the terminal') : t('Added where you were typing')) : null
 
   const label = keyLabel(key, keysPlatform())
   if (s.offer && s.phase === 'idle') return <Dock card><Offer s={s.offer} label={label} /></Dock>
-  // The message box shows its own.
-  const mine = s.target?.kind === 'composer' && box(s.target.id)
-  if (mine || (s.phase === 'idle' && !s.note && !s.setup && !done)) return null
+  // The message box shows its own (another device's agent in a tab can't: the pill, with its name).
+  const into = s.target?.kind === 'composer' || s.target?.kind === 'frame' ? box(s.target.id) : null
+  if ((into && !into.frame) || (s.phase === 'idle' && !s.note && !s.setup && !done)) return null
   const listening = s.phase === 'opening' || s.phase === 'listening'
-  const to = <span className="dp-to">{s.target?.kind === 'ask' ? t('To {name}', { name: t('Chief of Staff') }) : s.target?.kind === 'terminal' ? t('Into the terminal') : t('Where you\'re typing')}</span>
+  const to = <span className="dp-to">{s.target?.kind === 'ask' || s.target?.ask ? t('To {name}', { name: t('Chief of Staff') }) : into?.name ? t('To {name}', { name: into.name }) : s.target?.kind === 'terminal' ? t('Into the terminal') : t('Where you\'re typing')}</span>
   if (listening) return <Dock><Listening s={s} to={to} hint={listeningHint(s.mode, label)} onCancel={cancel} onStop={finish} /></Dock>
   if (s.phase === 'working') return <Dock><Working s={s} /></Dock>
   if (done && !s.note && !s.setup) return <Dock><Done text={done} /></Dock>

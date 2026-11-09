@@ -380,7 +380,8 @@ try {
     await doc.click()
     await lp.keyboard.press(process.platform === 'darwin' ? 'Meta+End' : 'Control+End')
     await lp.keyboard.type(' Edited on the laptop.')
-    await lp.locator('.pane-head button', { hasText: 'Save' }).click()
+    // A document saves itself, with no Save in its header; ⌘S saves it now.
+    await lp.keyboard.press(process.platform === 'darwin' ? 'Meta+s' : 'Control+s')
     const there = await until(() => /Edited on the laptop\./.test(fs.readFileSync(path.join(work, 'draft.md'), 'utf8')), 10000)
     ok(!!there && /^# Draft/.test(fs.readFileSync(path.join(work, 'draft.md'), 'utf8')), 'typed and saved on Laptop: the file on Studio changes, still Markdown', fs.readFileSync(path.join(work, 'draft.md'), 'utf8'))
     // The save is kept as your version just after the file is written, so that's waited for too.

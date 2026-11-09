@@ -83,6 +83,7 @@ import * as doctext from './doctext.js'
 import * as studioFound from './studiofound.js'
 import * as explorer from './explorer.js'
 import * as studioApps from './studioapps.js'
+import * as openIn from './openin.js'
 import { terminals, openAttach, openCommand } from './terminal.js'
 import { mcpRoutes } from './mcp.js'
 import * as notify from './notify.js'
@@ -1519,11 +1520,15 @@ app.post('/api/dictation/live/:sid', express.raw({ type: () => true, limit: '4mb
   try { res.json(await livewords.feed(req.params.sid, req.body, { cfg, words: dictation.hints(dictationSources) })) } catch (e) { res.status(e.status || 502).json({ error: e.message }) }
 })
 app.delete('/api/dictation/live/:sid', wrap((req) => livewords.end(req.params.sid)))
-// Answers read aloud where the device has no voice of its own (voicespeak.js): eSpeak NG here.
+// Answers read aloud by this computer (voicespeak.js): the natural voice once it's downloaded, or
+// eSpeak NG where the device has no voice of its own. Its download is asked for in Settings › Voice.
 app.get('/api/voice/speak', wrap(() => voicespeak.status()))
 app.post('/api/voice/speak', async (req, res) => {
-  try { res.type('audio/wav').send(await voicespeak.speak(req.body?.text, { lang: String(req.body?.lang || 'en') })) } catch (e) { res.status(e.status || 502).json({ error: e.message }) }
+  const b = req.body || {}
+  try { res.type('audio/wav').send(await voicespeak.speak(b.text, { lang: String(b.lang || 'en'), engine: b.engine === 'natural' ? 'natural' : 'espeak', voice: Number(b.voice) || 0, rate: Number(b.rate) || 1 })) } catch (e) { res.status(e.status || 502).json({ error: e.message }) }
 })
+app.post('/api/voice/natural', wrap(() => voicespeak.download()))
+app.delete('/api/voice/natural', wrap(() => voicespeak.remove()))
 // Edit by voice: the selected text rewritten as you said, by the model picked for it. Only from the
 // computer itself (the dictation window), never through the relay.
 // None picked: the local model built in, once it's downloaded (the text stays on this computer).
@@ -2070,6 +2075,11 @@ app.get('/api/calendar', wrap(async (req) => {
 }))
 // Join clicked on an event, on any of your devices: the call that starts next is likely for it.
 app.post('/api/calendar/joined', wrap((req) => callEvent.noteJoin(req.body?.id)))
+// Open in Mail and Open in Calendar (openin.js): the message or event itself in the Mac's own app,
+// to answer it there. Which of the two this Mac has, said only to a window on it (elsewhere, a
+// phone or another computer, there's nothing to open there), and opening only from one.
+app.get('/api/open-in', wrap((req) => (fromHere(req) ? openIn.here() : {})))
+app.post('/api/calendar/open', wrap((req) => { hereOnly(req, 'Open it in Calendar'); return openIn.openEvent(req.body || {}) }))
 app.get('/api/mail', wrap((req) => mail(req.query.refresh === '1')))
 // New mail as Mail's index changes: a line each time, for the app to look again at once.
 app.get('/api/mail/live', (req, res) => {
@@ -2082,6 +2092,7 @@ app.get('/api/mail/live', (req, res) => {
   req.on('close', () => { clearInterval(ping); stop() })
 })
 app.get('/api/mail/message/:id', wrap(async (req) => { const m = await mail.message(req.params.id); return { ...m, meet: meetHint(m) } }))
+app.post('/api/mail/:id/open', wrap(async (req) => { hereOnly(req, 'Open it in Mail'); return openIn.openMessage(await mail.messageId(req.params.id)) }))
 app.post('/api/mail/rules', wrap((req) => { const r = setRule(req.body?.address, req.body?.rule); mail.invalidate(); return r }))
 // Done, Remind me and "remind me if nobody answers", kept by Bridge AI: Mail is left as it is.
 app.post('/api/mail/mark', wrap((req) => { const r = setMark(req.body || {}); mail.invalidate(); return r }))
@@ -3146,8 +3157,13 @@ app.post('/api/signin/:kind', wrap(async (req) => {
 // A plain chat: an agent with no project, like talking to Claude or Codex directly. Chats share
 // one empty folder (each is its own session), so the agent asks to trust it only once.
 const CHAT_NOTE = `# Chat\n\nThis is a plain conversation with the user, not a project. Answer directly and helpfully. There are no project files here; only read or change files elsewhere if the user asks.\n`
-// kind 'chat': Bridge AI's own chat with any model (chatmodels.js), on the model picked.
-app.get('/api/chat/models', wrap(async (req) => ({ models: await chatModels.models({ fresh: !!req.query.refresh }), runtime: rt.name })))
+// kind 'chat': Bridge AI's own chat with any model (chatmodels.js), on the model picked. automatic:
+// the one meeting notes are written with when none is picked (pickMeetingModel), for Settings ›
+// Meetings to say which it is and where it runs.
+app.get('/api/chat/models', wrap(async (req) => {
+  const models = await chatModels.models({ fresh: !!req.query.refresh })
+  return { models, runtime: rt.name, automatic: await pickMeetingModel() }
+}))
 app.post('/api/chats', wrap(async (req) => {
   const kind = String(req.body?.kind || cfg.defaultAgent || 'claude')
   if (kind !== 'chat' && !(await installed()).some((k) => k.kind === kind)) throw notInstalled(kind)

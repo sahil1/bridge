@@ -8,13 +8,15 @@ import { keyLabel, keyFromEvent } from '../../../shared/dictation/keys.js'
 import { pause, keysPlatform, dictationKey } from '../../dictation/controller.js'
 import { TidyNeeds } from '../../dictation/Tidy.jsx'
 import { useTrial } from '../../trials.js'
+import { Advanced } from './Advanced.jsx'
 import { t, tx } from '../../i18n/index.js'
 import '../../dictation/dictation.css'
 
 // Settings › Voice › Dictation (dictation/controller.js): on or off, the key, whether it works from
 // other apps too (the desktop app, where this computer lets it: desktop/dictation.js says how), where
-// the text goes from there, and the light cleanup. Saved as `dictation` in config.json; the desktop
-// app is told at once.
+// the text goes from there; under Advanced (the end of Voice), Edit by voice, Tidy what I say, the
+// light cleanup, files by name, live words and the history. Saved as `dictation` in config.json;
+// the desktop app is told at once.
 //
 // "Where I'm typing" pastes it into the app you were in, and is offered only where this computer can
 // (shared/dictation/platform.js pasteInto). On a Mac it needs Accessibility, asked for the moment you
@@ -103,11 +105,11 @@ export default function Dictation() {
   }
   return (
     <>
-    <section className="st-sec st-dictation">
+    <section className="st-sec st-dictation" data-setting="dictation">
       <h4>{t('Dictation')}</h4>
       <SaveNote note={note} />
       <label className="st-check"><input type="checkbox" checked={on} onChange={(e) => set({ on: e.target.checked })} />
-        <span><b>{t('Talk to your agents')}</b> <span className="muted small">{touch ? t('Hold the mic button in a message box and talk; let go and the words are there. Tap it instead to keep listening.') : t('Hold {key} and talk; let go and the words are where you were typing (a message box, a terminal, a search). Tap it instead to keep listening. Esc cancels.', { key: label })}</span></span></label>
+        <span title={touch ? undefined : t('Hold {key} and talk; let go and the words are where you were typing (a message box, a terminal, a search). Tap it instead to keep listening. Esc cancels.', { key: label })}><b>{t('Talk to your agents')}</b> <span className="muted small">{touch ? t('Hold the mic button in a message box and talk; tap it to keep listening.') : t('Hold {key} and talk; let go and the words are where you were typing.', { key: label })}</span></span></label>
       {on && (
         <>
           {!touch && (
@@ -161,44 +163,49 @@ export default function Dictation() {
               </PermissionFix>
             </div>
           )}
-          {mode && background && status?.edit?.can && (
-            <>
-              <label className="st-check dict-edit"><input type="checkbox" checked={d.edit === true} onChange={async (e) => { const on = e.target.checked; await set({ edit: on }); if (on && !status.paste?.allowed) setAskEdit((n) => n + 1) }} />
-                <span><b>{t('Edit by voice')}</b> <span className="muted small">{t('With text selected in another app, hold {key} and say what to change ("make this shorter", "in Spanish"): the model you pick rewrites it, and it\'s put back in its place.', { key: label })}</span></span></label>
-              {d.edit === true && <EditModel value={d.editModel || null} onPick={(m) => set({ editModel: m })} />}
-              {d.edit === true && !needsAccess && status.edit.asks === 'accessibility' && !status.paste?.allowed && (
-                <PermissionFix pane="accessibility" ask={askEdit} onCheck={refresh}><p className="small">{t('Reading what you selected, and putting the new text in its place, need Accessibility.')}</p></PermissionFix>
-              )}
-            </>
-          )}
-          {mode && background && tidyTrial && <Tidy d={d} set={set} />}
           {/* wtype (Wayland) types it in, with no clipboard to put back. */}
           {pasting && paste && !needsAccess && paste.via !== 'wtype' && <p className="muted small">{paste.limit === 'admin'
             ? t('What you had copied is put back after. It can\'t paste into an app running as administrator.')
             : t('What you had copied is put back after.')}</p>}
           {/* Picked on another computer, and pasting can't work on this one: said once here. */}
           {pasting && status && !paste && <p className="st-note"><Icon name="info" size={13} /> {t('Pasting where you\'re typing can\'t work on this computer, so what you say goes to the agent you looked at last.')}</p>}
-          <label className="st-check"><input type="checkbox" checked={d.cleanup !== false} onChange={(e) => set({ cleanup: e.target.checked })} />
-            <span><b>{t('Light cleanup')}</b> <span className="muted small">{t('Drops "um" and "uh" and words said twice, starts with a capital and ends with a full stop, and spells the names of your agents, projects and branches, and the names in Memory, the way they\'re written. No AI model, nothing sent anywhere.')}</span></span></label>
-          <label className="st-check"><input type="checkbox" checked={d.atFiles !== false} onChange={(e) => set({ atFiles: e.target.checked })} />
-            <span><b>{t('Mention files by saying them')}</b> <span className="muted small">{t('"at payments dot ts" becomes @payments.ts in the message box.')}</span></span></label>
-          {/* Shown where a speech model sherpa-onnx runs is picked (Parakeet): hidden with Whisper or
-              the Mac's own speech, which hear a recording whole. Too slow here: said once. */}
-          {live && ['off', 'model', null].includes(live.why) && (
-            <label className="st-check"><input type="checkbox" checked={d.liveWords !== false} onChange={(e) => set({ liveWords: e.target.checked })} />
-              <span><b>{t('Show the words as you talk')}</b> <span className="muted small">{t('While it listens, and under a meeting\'s transcript while someone is talking. Heard on this computer as you go; the finished text is the same as before.')}</span></span></label>
-          )}
-          {live?.why === 'slow' && d.liveWords !== false && <p className="st-note"><Icon name="info" size={13} /> {t('This computer turns speech into text too slowly to show the words as you talk, so they come when you let go.')}</p>}
           {!app?.desktop && !touch && <p className="muted small">{t('In the desktop app, the key works from other apps too.')}</p>}
           {app?.desktop && !app.dictateStatus && !touch && <UpdateApp why={t('The key from other apps needs a newer Bridge AI desktop app.')} />}
+          {/* What most people leave as it is: under Advanced, at the end of Voice. */}
+          <Advanced order={20}>
+            <section className="st-sec st-dictation-more" data-setting="dictation-more">
+              <h4>{t('Dictation')}</h4>
+              {mode && background && status?.edit?.can && (
+                <>
+                  <label className="st-check dict-edit" data-setting="edit-by-voice"><input type="checkbox" checked={d.edit === true} onChange={async (e) => { const on = e.target.checked; await set({ edit: on }); if (on && !status.paste?.allowed) setAskEdit((n) => n + 1) }} />
+                    <span title={t('With text selected in another app, hold {key} and say what to change ("make this shorter", "in Spanish"): the model you pick rewrites it, and it\'s put back in its place.', { key: label })}><b>{t('Edit by voice')}</b> <span className="muted small">{t('Select text in another app, hold {key} and say what to change.', { key: label })}</span></span></label>
+                  {d.edit === true && <EditModel value={d.editModel || null} onPick={(m) => set({ editModel: m })} />}
+                  {d.edit === true && !needsAccess && status.edit.asks === 'accessibility' && !status.paste?.allowed && (
+                    <PermissionFix pane="accessibility" ask={askEdit} onCheck={refresh}><p className="small">{t('Reading what you selected, and putting the new text in its place, need Accessibility.')}</p></PermissionFix>
+                  )}
+                </>
+              )}
+              {mode && background && tidyTrial && <Tidy d={d} set={set} />}
+              <label className="st-check" data-setting="light-cleanup"><input type="checkbox" checked={d.cleanup !== false} onChange={(e) => set({ cleanup: e.target.checked })} />
+                <span title={t('Drops "um" and "uh" and words said twice, starts with a capital and ends with a full stop, and spells the names of your agents, projects and branches, and the names in Memory, the way they\'re written. No AI model, nothing sent anywhere.')}><b>{t('Light cleanup')}</b> <span className="muted small">{t('Drops "um" and words said twice, and spells your names right. No AI model, nothing sent anywhere.')}</span></span></label>
+              <label className="st-check" data-setting="mention-files"><input type="checkbox" checked={d.atFiles !== false} onChange={(e) => set({ atFiles: e.target.checked })} />
+                <span><b>{t('Mention files by saying them')}</b> <span className="muted small">{t('"at payments dot ts" becomes @payments.ts in the message box.')}</span></span></label>
+              {/* Shown where a speech model sherpa-onnx runs is picked (Parakeet): hidden with Whisper or
+                  the Mac's own speech, which hear a recording whole. Too slow here: said once. */}
+              {live && ['off', 'model', null].includes(live.why) && (
+                <label className="st-check" data-setting="live-words"><input type="checkbox" checked={d.liveWords !== false} onChange={(e) => set({ liveWords: e.target.checked })} />
+                  <span title={t('While it listens, and under a meeting\'s transcript while someone is talking. Heard on this computer as you go; the finished text is the same as before.')}><b>{t('Show the words as you talk')}</b> <span className="muted small">{t('Also under a meeting\'s transcript. Heard on this computer.')}</span></span></label>
+              )}
+              {live?.why === 'slow' && d.liveWords !== false && <p className="st-note"><Icon name="info" size={13} /> {t('This computer turns speech into text too slowly to show the words as you talk, so they come when you let go.')}</p>}
+            </section>
+          </Advanced>
         </>
       )}
-      <p className="muted small"><Icon name="laptop" size={12} /> {t('Your voice is turned into text on this computer. Nothing is sent anywhere.')}</p>
     </section>
-    <History d={d} set={set} cleared={cleared} onClear={async () => {
+    <Advanced order={30}><History d={d} set={set} cleared={cleared} onClear={async () => {
       if (!window.confirm(`${t('Delete every dictation kept on this computer?')}\n\n${t('Their words, their recordings and the apps\' icons go. This can\'t be undone.')}`)) return
       try { await api('/dictations', { method: 'DELETE' }); setCleared(t('Deleted.')); refetch(RECENT); refetch(ANY) } catch (e) { setCleared(e.message) }
-    }} />
+    }} /></Advanced>
     </>
   )
 }
@@ -208,10 +215,10 @@ function History({ d, set, cleared, onClear }) {
   const on = d.history !== false
   const keep = KEEP.some(([v]) => v === d.keepFor) ? d.keepFor : 'always'
   return (
-    <section className="st-sec st-dict-history">
+    <section className="st-sec st-dict-history" data-setting="dictation-history">
       <h4>{t('Dictation History')}</h4>
       <label className="st-check"><input type="checkbox" checked={on} onChange={(e) => set({ history: e.target.checked })} />
-        <span><b>{t('Keep a history of what you dictate')}</b> <span className="muted small">{t('In Dictations, under Meetings: what you said, when, and where it went (the app or the agent), to find, copy or send again. Only on this computer.')}</span></span></label>
+        <span title={t('In Dictations, under Meetings: what you said, when, and where it went (the app or the agent), to find, copy or send again. Only on this computer.')}><b>{t('Keep a history of what you dictate')}</b> <span className="muted small">{t('In Dictations, on this computer only.')}</span></span></label>
       {on && (
         <>
           <div className="st-row st-radios" role="radiogroup" aria-label={t('Keep them for')}><span>{t('Keep them for')}</span>
@@ -263,9 +270,9 @@ function Tidy({ d, set }) {
   useEffect(() => { load() }, [load, d.tidyModel])
   const on = d.tidy === true
   return (
-    <div className="dict-tidy">
+    <div className="dict-tidy" data-setting="tidy">
       <label className="st-check"><input type="checkbox" checked={on} onChange={(e) => set({ tidy: e.target.checked })} />
-        <span><b>{t('Tidy what I say')}</b> <span className="muted small">{t('Before what you say in another app is pasted or sent, a model takes out "um", false starts and words said twice, and fixes the punctuation. It keeps your words, and never answers them or adds to them. If it takes more than a few seconds, or anything goes wrong, your words go as you said them.')}</span></span></label>
+        <span title={t('Before what you say in another app is pasted or sent, a model takes out "um", false starts and words said twice, and fixes the punctuation. It keeps your words, and never answers them or adds to them. If it takes more than a few seconds, or anything goes wrong, your words go as you said them.')}><b>{t('Tidy what I say')}</b> <span className="muted small">{t('A model takes "um" and false starts out of your words before they\'re pasted, and never answers them or adds to them.')}</span></span></label>
       {st && !st.model && <TidyNeeds local={st.local} onReady={load} on={on} onProviders={() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'providers' } }))} />}
       {on && st?.model && <TidyModel value={d.tidyModel || null} st={st} onPick={(m) => set({ tidyModel: m })} />}
     </div>

@@ -20,7 +20,10 @@
 // pill; the app's icon kept for the list of dictations (not with history off); Paste again from that
 // list, into the app it was said in; the window taking the keyboard for its words to be edited and
 // giving it back (that app brought to the front again), also for a paste from the card, a click
-// into another app and the key pressed again. On a Mac:
+// into another app and the key pressed again; the key pressed in a window of the app's own (its page
+// has it) and in one showing another of your devices (the dictation window listens for it, and hands
+// that window's page the words), there with the key from any app off too (heard before its page gets
+// it). On a Mac:
 // native/bridgekeys builds for both chips, says what's in front, sets a key and prints its presses
 // (made through its stdin, no real key), says when macOS has the key, and pastes into a pasteboard of
 // the test's own (never a key pressed, never your clipboard): what was there back once it's read,
@@ -466,8 +469,14 @@ else {
   const tiles = []
   let allowed = false
   let hud = null
+  // One of the app's own windows (main.js's isOurs), in front when focused is it; url: the page it shows.
+  const ours = { url: 'http://127.0.0.1:9/', told: [], answer: false }
+  // input: what it does with a key before its page gets it (before-input-event).
+  ours.webContents = { getURL: () => ours.url, isDestroyed: () => false, executeJavaScript: async (js) => { ours.told.push(js); return ours.answer }, on: (ev, fn) => { if (ev === 'before-input-event') ours.input = fn } }
+  let focused = null
   class Win {
-    static getFocusedWindow() { return null }
+    static getFocusedWindow() { return focused }
+    static getAllWindows() { return [ours] }
     constructor(o) { hud = this; this.shown = false; this.made = o; this.bounds = { x: o.x, y: o.y, width: o.width, height: o.height }; this.through = []; this.told = []; this.focusable = []; this.focused = false; this.ons = {}; this.webContents = { setWindowOpenHandler() {}, on() {}, isDestroyed: () => false, executeJavaScript: async (js) => { this.told.push(js) } } }
     setAlwaysOnTop() {} setVisibleOnAllWorkspaces() {} setContentProtection() {} loadURL() {}
     on(ev, fn) { (this.ons[ev] ||= []).push(fn) }
@@ -505,7 +514,7 @@ else {
   const me = { own: true }
   const brought = []
   try {
-    await desk.start({ electron, ROOT, DATA: data, URL_BASE: 'http://127.0.0.1:9', preload: '', isOurs: () => false, tellMain: async () => {}, askAccess: (pane) => tiles.push(pane), trusted: (e) => e.own === true, openApp: async (b) => { brought.push(b) }, fnUsage: async () => 'emoji' })
+    await desk.start({ electron, ROOT, DATA: data, URL_BASE: 'http://127.0.0.1:9', preload: '', isOurs: (w) => w === ours, tellMain: async () => {}, askAccess: (pane) => tiles.push(pane), trusted: (e) => e.own === true, openApp: async (b) => { brought.push(b) }, fnUsage: async () => 'emoji' })
   } finally {
     Object.defineProperty(process, 'platform', platform)
   }
@@ -581,6 +590,66 @@ else {
     const got = await call('bridge:hud-selection', from)
     ok(ed.edit?.on && got?.text === 'teh draft' && pasted().some((x) => x.args.join(' ') === 'selection --pid 4242') && (await call('bridge:hud-selection', me)) === null, 'turned on: as the key\'s let go in TextEdit, what\'s selected there is read (asked of TextEdit, by its pid), for the dictation window only', { ed: ed.edit, got })
     delete process.env.BRIDGEKEYS_SELECTION
+    await call('bridge:dictate-configure', me, { background: true, to: 'last' })
+    // The key pressed with a window of the app's own in front: its page has it, as if pressed there.
+    // One showing another of your devices (/m/<id>/, whose page can't use this computer's
+    // microphone): the dictation window listens for it, and the words go into that window's page.
+    const downIn = (told) => told.some((js) => js.includes('bridge-dictate-key') && js.includes('"type":"down"'))
+    focused = ours
+    let h0 = hud.told.length
+    let o0 = ours.told.length
+    await call('bridge:dictate-configure', me, { background: true, to: 'last' })
+    await until(() => downIn(ours.told.slice(o0)) || downIn(hud.told.slice(h0)), 3000, 50)
+    ok(downIn(ours.told.slice(o0)) && !downIn(hud.told.slice(h0)), 'the key pressed in a window of the app\'s own: its page has it, as if pressed there', { page: ours.told.slice(o0), hud: hud.told.slice(h0) })
+    ours.url = 'http://127.0.0.1:9/m/desk1/?window=w1%3Ap2'
+    h0 = hud.told.length
+    o0 = ours.told.length
+    const reads = () => pasted().filter((x) => x.args?.[0] === 'selection').length
+    const r0 = reads()
+    await call('bridge:dictate-configure', me, { background: true, to: 'paste', edit: true })
+    await until(() => hud.told.slice(h0).some((js) => js.includes('"type":"up"')), 3000, 50)
+    const forIt = hud.told.slice(h0).find((js) => js.includes('"type":"down"')) || ''
+    ok(forIt.includes('"into":true') && !forIt.includes('TextEdit') && !downIn(ours.told.slice(o0)), 'one showing another of your devices: the dictation window listens for it (not for an app to paste into)', { hud: hud.told.slice(h0), page: ours.told.slice(o0) })
+    await sleep(300)
+    ok(reads() === r0, 'with edit by voice on, nothing selected is read from Bridge AI for it', pasted().slice(-2))
+    ours.answer = true
+    const put = await call('bridge:hud-into', from, 'For the desk agent.')
+    const js = ours.told.at(-1) || ''
+    ok(put?.put === true && js.includes('bridge-dictated') && js.includes('"For the desk agent."'), 'the words it heard go into that window\'s page, to put where they\'d have gone had it heard them', { put, js })
+    ours.answer = false
+    ok((await call('bridge:hud-into', from, 'Nowhere.'))?.put === false, 'nowhere to put them there: it says so (the words stay on the card)')
+    const w0 = ours.told.length
+    ok((await call('bridge:hud-into', me, 'Not the window.'))?.put === false && ours.told.length === w0, 'only the dictation window can hand words to a window')
+    // The key from any app off: in a window showing another device, whose page leaves the key to the
+    // app, it's heard before that page gets it and listened for all the same, with this computer's
+    // key; in one showing this computer, the page has it; with the key from any app on, the system
+    // hands it over instead, so it isn't heard twice.
+    const press = (type, x = {}) => { const ev = { kept: false, preventDefault() { this.kept = true } }; ours.input?.(ev, { type, code: 'Space', alt: true, control: false, meta: false, shift: false, isAutoRepeat: false, ...x }); return ev }
+    await call('bridge:dictate-configure', me, { background: false, to: 'last' })
+    h0 = hud.told.length
+    const kd = press('keyDown')
+    const kr = press('keyDown', { isAutoRepeat: true })
+    const ku = press('keyUp')
+    const there = hud.told.slice(h0)
+    ok(!!ours.input && kd.kept && kr.kept && ku.kept && there.filter((js) => js.includes('"type":"down"')).length === 1 && there.some((js) => js.includes('"into":true')) && there.some((js) => js.includes('"type":"up"')), 'the key from any app off, in a window showing another device: heard before its page gets it, and the dictation window listens for that window (held, its repeats, let go)', there)
+    h0 = hud.told.length
+    ok(!press('keyDown', { code: 'KeyA' }).kept && !press('keyDown', { alt: false }).kept && hud.told.length === h0, 'other keys go to the page as they are')
+    ours.url = 'http://127.0.0.1:9/'
+    const own = press('keyDown')
+    press('keyUp')
+    ok(!own.kept && hud.told.length === h0, 'in a window showing this computer, its page has the key itself')
+    ours.url = 'http://127.0.0.1:9/m/desk1/'
+    await call('bridge:dictate-configure', me, { background: false, to: 'last', on: false })
+    ok(!press('keyDown').kept && hud.told.length === h0, 'dictation turned off: nothing heard')
+    press('keyUp')
+    await call('bridge:dictate-configure', me, { background: true, to: 'last' })
+    await until(() => hud.told.slice(h0).some((js) => js.includes('"type":"up"')), 3000, 50)
+    const hb = hud.told.length
+    const viaSystem = press('keyDown')
+    press('keyUp')
+    ok(!viaSystem.kept && hud.told.length === hb, 'with the key from any app on: the system hands that key over, so it isn\'t heard twice')
+    focused = null
+    ours.url = 'http://127.0.0.1:9/'
     await call('bridge:dictate-configure', me, { background: true, to: 'last' })
     // History off: no icon kept (the stand-in helper presses the key again as it starts).
     fs.rmSync(iconFile, { force: true })

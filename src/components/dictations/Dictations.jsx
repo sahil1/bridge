@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import Icon, { StatusDot } from '../Icon.jsx'
-import { PaneHeader } from '../layout.jsx'
+import { PaneHeader, usePersisted } from '../layout.jsx'
 import { api, apiUrl, usePoll, refetch } from '../../api.js'
 import { keyLabel } from '../../../shared/dictation/keys.js'
 import { corrections } from '../../../shared/dictation/corrected.js'
@@ -9,8 +9,10 @@ import Remember from '../../dictation/Remember.jsx'
 import { RECENT, ANY, byDay, timeOf, length, whereOf, Glyph, takeWanted } from './shared.jsx'
 import PermissionFix from '../PermissionFix.jsx'
 import { agentName } from '../Rail.jsx'
-import { t } from '../../i18n/index.js'
+import { t, tx } from '../../i18n/index.js'
 import { sentTo } from '../../sendbox.js'
+import Memory, { useElsewhere } from '../memory/Memory.jsx'
+import { setMemoryAll } from '../memory/open.js'
 import './dictations.css'
 
 // Dictations: everything you've said with the dictation key, kept on this computer
@@ -20,6 +22,7 @@ import './dictations.css'
 // it went to (the desktop app, where pasting works), Send it to an agent, or Delete it, with Undo
 // for a moment. A name you put right in an edit is offered to meeting memory (Remember.jsx). It
 // sits under Meetings in the sidebar, and in the phone's Meetings tab: the other things you've said.
+// Memory is a tab of it (memory/Memory.jsx), what came up in your dictations to start with.
 const app = () => window.bridgeApp || {}
 const WHY = {
   secure: () => t('Secure input is on (a password field, or Secure Keyboard Entry), so it wasn\'t pasted.'),
@@ -28,7 +31,11 @@ const WHY = {
   held: () => t('A key was still held down, so it wasn\'t pasted. Let go of the keys once you\'ve said it.'),
 }
 
+const TABS = [['list', 'wave', tx('Dictations')], ['memory', 'book', tx('Memory')]]
+
 export default function Dictations() {
+  const [tab, setTab] = usePersisted('cc-dict-tab', 'list')
+  const elsewhere = useElsewhere()
   const [q, setQ] = useState('')
   const [query, setQuery] = useState('')
   useEffect(() => { const id = setTimeout(() => setQuery(q.trim()), 200); return () => clearTimeout(id) }, [q])
@@ -41,10 +48,15 @@ export default function Dictations() {
   const [msg, setMsg] = useState(null) // { text, error }
   const [paste, setPaste] = useState(null) // the desktop app's: can it paste here?
   useEffect(() => { app().dictateStatus?.().then((s) => setPaste(s?.paste?.can ? s.paste : null), () => {}) }, [])
-  // Opened for one (the sidebar's list): that one, open and in view.
+  // Opened for one (the sidebar's list, a name in Memory): the list, with that one open and in view.
   const listRef = useRef(null)
   useEffect(() => {
-    const take = () => { const id = takeWanted(); if (id) { setQ(''); setOpen(id) } }
+    const take = () => {
+      const w = takeWanted()
+      if (!w) return
+      setTab('list')
+      if (w.id) { setQ(''); setOpen(w.id) }
+    }
     take()
     window.addEventListener('bridge-open-dictations', take)
     return () => window.removeEventListener('bridge-open-dictations', take)
@@ -76,10 +88,17 @@ export default function Dictations() {
   const groups = byDay(items)
   return (
     <div className="dc-view">
-      <PaneHeader icon="wave" title={t('Dictations')} subtitle={<span className="dc-count">{data ? (total === 1 ? t('{n} dictation', { n: total }) : t('{n} dictations', { n: total })) : t('Dictations')} · {t('On this computer')}</span>}>
+      <PaneHeader icon="wave" title={t('Dictations')} subtitle={<span className="dc-count">{data ? (total === 1 ? t('{n} dictation', { n: total }) : t('{n} dictations', { n: total })) : t('Dictations')} · {elsewhere ? t('On {name}', { name: elsewhere }) : t('On this computer')}</span>}>
+        <div className="seg" role="tablist" aria-label={t('Show')}>
+          {TABS.map(([v, icon, label]) => (
+            <button key={v} type="button" role="tab" data-view={v} aria-selected={tab === v} className={tab === v ? 'on' : ''}
+              title={v === 'memory' ? t('People, organizations and words from your meetings and dictations') : undefined}
+              onClick={() => { if (v === 'memory' && tab !== 'memory') setMemoryAll('dictations', false); setTab(v) }}><Icon name={icon} size={14} /><span>{t(label)}</span></button>
+          ))}
+        </div>
         <button type="button" className="btn small" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'voice' } }))} title={t('Keep history, how long, the recordings, Delete all')}><Icon name="settings" size={13} /> {t('Settings')}</button>
       </PaneHeader>
-      <div className="dc-home" ref={listRef}>
+      {tab === 'memory' ? <Memory from="dictations" /> : <div className="dc-home" ref={listRef}>
         {data && !data.history && (
           <p className="dc-off small" role="status"><Icon name="info" size={13} /> {t('History is off, so new dictations aren\'t kept. Turn it on in Settings › Voice.')}</p>
         )}
@@ -102,7 +121,7 @@ export default function Dictations() {
           </section>
         ))}
         {data?.more && <button type="button" className="btn small dc-more" onClick={() => setLimit((n) => n + 200)}>{t('Show more')}</button>}
-      </div>
+      </div>}
       {(gone || msg) && (
         <div className={`dc-toast${msg?.error ? ' error' : ''}`} role="status">
           {gone ? <><span>{t('Deleted.')}</span><button type="button" className="link-btn" onClick={undo}>{t('Undo')}</button></> : <span>{msg.text}</span>}

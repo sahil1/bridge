@@ -23,7 +23,7 @@
 //   history off (nothing kept, and the view says so), 30 days, the recordings, Delete all.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, checks, until, sleep, browser, page, shot, noServiceWorker, TEST } from '../lib/harness.mjs'
+import { startKit, checks, until, sleep, browser, page, shot, noServiceWorker, TEST, advanced } from '../lib/harness.mjs'
 
 const { ok, done } = checks('dictation-history')
 const kit = await startKit('dictation-history', { env: { CLAUDE_STAND_IN: 'fresh' } })
@@ -514,6 +514,8 @@ try {
     const { ctx, p, errors } = await page(b, kit.url, { before })
     await p.locator('button[aria-label="Settings"]').first().click()
     await p.locator('.st-nav-item', { hasText: 'Voice' }).click()
+    // Under Voice's Advanced, which stays open for the next time.
+    await advanced(p)
     const sec = p.locator('.st-dict-history')
     await sec.waitFor({ timeout: 8000 })
     ok(await sec.locator('input[type=checkbox]').first().isChecked() && await sec.locator('input[name="dict-keep"]').nth(2).isChecked() && !(await sec.locator('label', { hasText: 'Keep the recordings too' }).locator('input').isChecked()), 'Settings › Voice: history on, kept always, the recordings not', await sec.innerText())

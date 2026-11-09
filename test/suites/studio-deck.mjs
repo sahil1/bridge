@@ -21,7 +21,10 @@
 // Markdown kept as it was where it wasn't touched. A PowerPoint edited as itself: typed in place,
 // shapes, pictures and a table put in and handled, copied, undone; presented; saved over itself
 // keeping everything it didn't change; in Focus, its slide bigger, Esc letting go of the shapes
-// picked before it leaves. At 1440 wide and on a 390 phone, light and dark.
+// picked before it leaves. Its header and toolbar: one split button (New slide, Present: its
+// halves one height, level, touching, one fill, Present's words AA on it), every header control
+// one height, Saved said in words, the download icon once (Export has its own), and no row spent
+// on a hint. At 1440 wide and on a 390 phone, light and dark.
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
@@ -315,10 +318,38 @@ for (const [k, v] of Object.entries(${JSON.stringify(Object.fromEntries(Object.e
   const open = async (pp, name) => pp.evaluate(({ root, name }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: name } })), { root, name })
   // Opened, asked again until it shows (a page that's just loaded can take the ask before it listens).
   const opened = (pp, name) => until(async () => { await open(pp, name); return pp.locator('.sd-canvas section[id]').waitFor({ timeout: 3000 }).then(() => true, () => false) }, 30000, 200)
+  // The header and the toolbar as they're drawn: the height of each of the header's controls and
+  // whether it's saved (in words, and their contrast on the page, WCAG); each split button's two
+  // halves (New slide, Present) and its words' contrast on its fill; how many times the download
+  // icon shows (the header's Download; Export is another); the toolbar's rows (each with
+  // controls in it, none spent on a hint) and the hint over the slide.
+  const chrome = (pp) => pp.evaluate(() => {
+    const box = (e) => e.getBoundingClientRect()
+    const rgb = (c) => { const m = /^rgba?\(([^)]+)\)/.exec(c); if (m) return m[1].split(/[\s,/]+/).filter(Boolean).slice(0, 3).map(Number); const s = /^color\(srgb ([^)]+)\)/.exec(c); return s ? s[1].trim().split(/\s+/).slice(0, 3).map((x) => Number(x) * 255) : [0, 0, 0] }
+    const lum = (c) => { const [r, g, bl] = rgb(c).map((v) => { const x = v / 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4 }); return 0.2126 * r + 0.7152 * g + 0.0722 * bl }
+    const contrast = (a, z) => { const [x, y] = [lum(a), lum(z)].sort((m, n) => n - m); return Math.round(((x + 0.05) / (y + 0.05)) * 100) / 100 }
+    const head = document.querySelector('.sd-file .pane-head .pane-extras')
+    const controls = [...head.querySelectorAll(':scope > :not(.sd-head-icons), .sd-head-icons > *')].filter((e) => box(e).width > 0)
+    const splits = [...document.querySelectorAll('.sd-toolbar .sd-split')].map((s) => {
+      const [main, more] = [...s.querySelectorAll(':scope > button')].map((x) => ({ r: box(x), bg: getComputedStyle(x).backgroundColor, ink: getComputedStyle(x).color }))
+      return { name: s.querySelector('button').getAttribute('aria-label'), heights: [main.r.height, more.r.height], tops: [main.r.top, more.r.top], gap: Math.round((more.r.left - main.r.right) * 10) / 10, sameFill: main.bg === more.bg, contrast: s.classList.contains('primary') ? contrast(main.ink, main.bg) : null }
+    })
+    const dl = document.querySelector('.sd-file .pane-head .sd-dl-btn svg')?.innerHTML
+    const downloads = [...document.querySelectorAll('.sd-file .pane-head svg, .sd-toolbar svg')].filter((x) => x.innerHTML === dl && box(x).width > 0).length
+    const rows = [...document.querySelectorAll('.sd-toolbar .px-row')].filter((r) => box(r).height > 0).map((r) => ({ h: Math.round(box(r).height), controls: [...r.querySelectorAll('button')].filter((x) => box(x).width > 0).length, hint: !!r.querySelector('.px-hint') }))
+    const saved = head.querySelector('.sd-save-state')
+    return { heights: [...new Set(controls.map((e) => Math.round(box(e).height)))], saved: saved ? { text: saved.innerText.trim(), contrast: contrast(getComputedStyle(saved).color, getComputedStyle(document.querySelector('.sd-file')).backgroundColor) } : null, splits, downloads, rows, hint: document.querySelector('.px-stage .px-hint')?.innerText || '' }
+  })
+  // One split button, the same everywhere: its halves the same height (the toolbar's 30 px), level,
+  // touching, one fill; Present's words AA on it.
+  const splitsOk = (c) => c.splits.length === 2 && c.splits.every((s) => s.heights.every((h) => Math.abs(h - 30) < 0.5) && Math.abs(s.tops[0] - s.tops[1]) < 0.5 && Math.abs(s.gap) < 0.5 && s.sameFill) && c.splits[1].name === 'Present' && c.splits[1].contrast >= 4.5
   await opened(p, 'pitch.md')
   await until(async () => (await p.locator('.sd-strip .sd-thumb').count()) === 6, 10000)
   ok((await p.locator('.sd-strip .sd-thumb').count()) === 6 && /Q4 pitch/.test(await p.locator('.sd-canvas').innerText()), 'a deck: its six slides down the side, the first in the middle')
   ok(!!(await until(async () => /Slide 1 of 6/.test(await p.locator('.sd-status').innerText()), 5000)), 'the status line: which slide of how many', await p.locator('.sd-status').innerText())
+  let looks = await chrome(p)
+  ok(splitsOk(looks), 'a deck\'s split buttons (New slide, Present): each two halves of one button, the same height, level, touching, one fill, Present\'s words AA on it', looks.splits)
+  ok(looks.heights.join() === '30' && looks.saved?.text === 'Saved' && looks.saved.contrast >= 4.5 && looks.downloads === 1, 'its header: every control 30 px high, Saved in words (AA), and the download icon once (Export has its own)', looks)
   await shot(p, `${tag}deck-1440`)
   const canvas = p.locator('.sd-canvas section[id]')
   const thumbs = p.locator('.sd-strip .sd-thumb')
@@ -533,6 +564,12 @@ for (const [k, v] of Object.entries(${JSON.stringify(Object.fromEntries(Object.e
     const go = async (i) => { await thumbs.nth(i).locator('.sd-thumb-btn').click(); await sleep(100) }
     await go(4)
     ok((await objs.count()) === 8 && /Order/.test(await p.locator('.px-canvas').innerText()), 'its shapes where they are, each one there to pick')
+    // Its toolbar: two rows of tools as high as any editor's (the format row's greyed until there's
+    // something to format, so the slide doesn't jump), the hint over the slide rather than a row of
+    // its own; its split buttons and header as a deck's.
+    looks = await chrome(p)
+    ok(looks.rows.length === 2 && looks.rows.every((r) => Math.abs(r.h - 42) <= 1 && r.controls > 0 && !r.hint) && /^Click something on the slide/.test(looks.hint) && await p.locator('.px-format button[aria-label="Bold"]').isDisabled(), 'a PowerPoint\'s toolbar: two rows of tools 42 px high, its format tools greyed with nothing picked, and the hint over the slide, not a row of its own', { rows: looks.rows, hint: looks.hint })
+    ok(splitsOk(looks) && looks.heights.join() === '30' && looks.downloads === 1, 'a PowerPoint\'s split buttons and header as a deck\'s: one look, one height, the download icon once', looks)
     await shot(p, `${tag}deck-pptx`)
     // In Focus: the slide bigger in the middle; Esc lets go of the shapes picked first, then leaves.
     const slideW = async () => (await p.locator('.px-canvas').boundingBox())?.width || 0
@@ -774,6 +811,9 @@ for (const [k, v] of Object.entries(${JSON.stringify(Object.fromEntries(Object.e
   await sleep(200)
   await shot(dk.p, `${tag}deck-ai-dark`)
   ok(!!(await until(async () => { await open(dk.p, 'board.pptx'); return dk.p.locator('.px-canvas [data-o]').first().waitFor({ timeout: 3000 }).then(() => true, () => false) }, 30000, 200)), 'dark: a PowerPoint opens, its slides white as they are')
+  await sleep(300)
+  looks = await chrome(dk.p)
+  ok(splitsOk(looks) && looks.heights.join() === '30' && looks.saved?.contrast >= 4.5 && looks.rows.every((r) => r.controls > 0 && !r.hint), 'dark: Present\'s halves one button, its words AA on the accent; the header one height, Saved AA; no row spent on a hint', looks)
   await dk.p.locator('.px-canvas [data-o]').nth(1).click()
   await sleep(200)
   await shot(dk.p, `${tag}deck-pptx-dark`)
@@ -803,6 +843,7 @@ for (const [k, v] of Object.entries(${JSON.stringify(Object.fromEntries(Object.e
       await sleep(300)
       f = await phoneFaults(ph.p, '.sd-file')
       ok(!Object.keys(f).length, 'phone: a PowerPoint fits, each control a whole 40 px target', f)
+      ok(!(await ph.p.locator('.px-format').isVisible()) && !(await ph.p.locator('.px-hint').isVisible()), 'phone: with nothing picked, no format row and no hint taking the screen', { format: await ph.p.locator('.px-format').isVisible() })
       await ph.p.locator('.sd-nav button[aria-label="Next"]').click()
       ok(!!(await until(async () => /2 of 22/.test(await ph.p.locator('.sd-nav').innerText()), 3000, 100)), 'phone: its next slide')
       await shot(ph.p, `${tag}deck-phone-pptx`)

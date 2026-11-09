@@ -19,7 +19,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
-import { startKit, checks, until, sleep, browser, page, shot, noServiceWorker, ROOT, OUT, IS_MAC, IS_WIN } from '../lib/harness.mjs'
+import { startKit, checks, until, sleep, browser, page, shot, noServiceWorker, ROOT, OUT, IS_MAC, IS_WIN, advanced } from '../lib/harness.mjs'
 
 const { ok, skip, done } = checks('permissions')
 // A stood-in answer for a request the page made, which may come after the page has closed (a slow
@@ -218,6 +218,8 @@ try {
   const ALL = ['microphone', 'accessibility', 'calendars', 'full-disk', 'files', 'automation', 'notifications']
   const settings = async (p) => {
     await p.locator('button[aria-label="Settings"]').first().click()
+    // Under General's Advanced.
+    await advanced(p).catch(() => {})
     const s = p.locator('.st-perms')
     await s.waitFor({ timeout: 10000 }).catch(() => {})
     return s
