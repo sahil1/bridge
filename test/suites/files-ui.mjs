@@ -253,7 +253,10 @@ try {
   await part('Files in the sidebar', async () => {
     await p.locator('.rail-nav-btn', { hasText: 'Files' }).click()
     ok(await p.locator('.fx .fx-row[data-name="Projects"]').waitFor({ timeout: 15000 }).then(() => true, () => false), 'Files opens from the sidebar, at your home folder')
-    // Its sidebar comes on its own (/api/files/sidebar), after the folder now and then (Windows in CI).
+    // Its sidebar comes on its own (/api/files/sidebar), after the folder now and then (Windows in
+    // CI): whole, with a placeholder until then, never Locations alone to jump down under the rest.
+    const early = await p.locator('.fx-side-sec h3').allInnerTexts()
+    ok(!early.length || early.includes('Favorites'), 'its sidebar comes whole, not Locations first and the rest above it after', early)
     await p.locator('.fx-side-sec h3', { hasText: 'Favorites' }).waitFor({ timeout: 15000 }).catch(() => {})
     const sections = await p.locator('.fx-side-sec h3').allInnerTexts()
     const sideRows = await p.locator('.fx-side-row').evaluateAll((els) => els.map((e) => e.dataset.label || e.dataset.computer))
