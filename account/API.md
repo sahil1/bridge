@@ -32,8 +32,13 @@ Three parts keep to this file:
   `approved`, `declined`). **Early Access is by request or invitation** (`tester`: `none`,
   `requested`, `yes`, `declined`). An admin can also invite an email that has no account yet: the
   account is made, marked, and the email says so.
-- **Suspended** (`status: suspended`) stops everything for the account at once: no relay token
-  works, no Early Access code is handed out, and signing in says it's suspended.
+- **Suspended** (`status: suspended`) stops the account using what it has, though not all in the
+  same moment: `GET /v1/me` hands out no relay token or Early Access code from then on (Bridge AI
+  drops the code it has when it next asks, within 6 hours); the relay hears of it within a minute of
+  the account's next use and lets its computers and phones go (a relay token handed out before still
+  checks out until it ends, so it's the relay asking that stops it); grants and requests are refused;
+  and a code asked for isn't sent (the email says it's suspended, and the answer is the same as for
+  any email). An Early Access code copied off a computer works until it ends (30 days).
 
 ## Tokens
 
@@ -63,15 +68,20 @@ HTTP status. A device token goes in `Authorization: Bearer <token>`.
 
 `POST /v1/code { email }` sends a code. `200 { sent: true }`. Errors: `invalid`, `throwaway`,
 `too-many` (with `retryAfter` seconds), `stopped` (429, with `retryAfter`: 20 wrong codes for the
-email today), `suspended`, and `unsent` (502) when the email couldn't be sent (nothing is counted
-then).
+email today), and `unsent` (502) when the email couldn't be sent (nothing is counted then). A
+suspended account's email gets the same `200 { sent: true }` as any other, so the answer doesn't say
+whether an email has an account; the email it's sent says the account is suspended, with no code.
+
+Each device signed in after an account's first is said in an email to the account ("A new sign-in
+to your Bold Bridge account": which device, and when), whether by a code or a grant.
 
 `POST /v1/verify { email, code, device: { name, kind: "computer" | "phone", platform }, replace? }`
 checks it and adds the device. `200 { account, device, deviceToken }`. Errors: `wrong` (with
 `triesLeft`), `expired` (also after the fifth wrong try, and for a code used already), `stopped`
-(the email's 20th wrong code today), `devices` (409, with `devices: [...]`), `suspended`. A
-`devices` refusal leaves the code good, so the same code with `replace: <device id>` removes that
-device and adds this one in its place.
+(the email's 20th wrong code today), `devices` (409, with `devices: [...]`), `suspended` (a code
+sent before the account was suspended). A `devices` refusal
+leaves the code good, so the same code with `replace: <device id>` removes that device and adds this
+one in its place.
 
 `account` is `{ id, email, tester, relay, status, createdAt }`; a `device` is
 `{ id, name, kind, platform, createdAt, lastSeen, thisOne }`.

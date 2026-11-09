@@ -183,8 +183,12 @@ try {
     ok(/^[a-z0-9]{12}$/.test(a.account?.id) && a.account.email === 'sam@example.com' && a.account.tester === 'none' && a.account.relay === 'none' && a.account.status === 'active' && a.device?.name === 'Studio' && a.device.kind === 'computer' && a.device.thisOne, 'the first sign-in makes the account: its id, email, flags and status, and this device', a)
     const t = payload(a.deviceToken)
     ok(verifies(a.deviceToken) && t.k === 'device' && t.a === a.account.id && t.d === a.device.id && t.exp - t.iat === 180 * 86400, 'a device token: signed with the key, the account and device, 180 days', t)
+    const notices = () => s.mail.sent.filter((m) => m.to === 'sam@example.com' && /new sign-in/.test(m.subject))
+    ok(!notices().length, 'the sign-in that makes the account emails no notice of itself')
     const again = await s.signIn('SAM@example.com ', 'Desk')
     ok(again.account.id === a.account.id, 'one account per email: signing in again, however it\'s typed, is the same account', again.account)
+    const notice = notices().at(-1)
+    ok(notices().length === 1 && /"Desk" \(a computer, mac\) was signed in to your Bold Bridge account \(sam@example\.com\) on \d{1,2} \w+ \d{4}, \d\d:\d\d UTC/.test(notice.text) && /remove it in Bridge AI/.test(notice.text) && !/\b\d{6}\b/.test(notice.text), 'another device signed in: the account\'s email hears which, and when, and what to do if it wasn\'t them', notice?.text)
     const me = await s.call('/v1/me', { token: a.deviceToken })
     ok(me.status === 200 && me.j.devices.length === 2 && me.j.devices.find((d) => d.thisOne)?.name === 'Studio' && me.j.earlyAccess === null && me.j.relay === null && !me.j.deviceToken, '/v1/me: the account, its devices (this one marked), and nothing given yet', me.j)
     const forged = `${a.deviceToken.split('.')[0]}.${Buffer.alloc(64).toString('base64url')}`
@@ -288,7 +292,14 @@ try {
     await s.call(`/admin/accounts/${a.account.id}`, { method: 'POST', bound: true, body: { status: 'suspended', note: 'Sharing it' } })
     const sus = (await s.call('/v1/me', { token: a.deviceToken })).j
     ok(sus.account.status === 'suspended' && sus.relay === null && sus.earlyAccess === null, 'suspended: /v1/me says so, with no relay token and no Early Access code', sus)
-    ok((await s.call('/v1/code', { method: 'POST', body: { email: 'ana@example.com' } })).j.code === 'suspended' && (await s.call('/v1/grant', { method: 'POST', token: a.deviceToken })).j.code === 'suspended' && (await s.call('/v1/request', { method: 'POST', token: a.deviceToken, body: { kind: 'early' } })).j.code === 'suspended', 'signing in, a grant and a request each say it\'s suspended')
+    ok((await s.call('/v1/grant', { method: 'POST', token: a.deviceToken })).j.code === 'suspended' && (await s.call('/v1/request', { method: 'POST', token: a.deviceToken, body: { kind: 'early' } })).j.code === 'suspended', 'a grant and a request each say it\'s suspended')
+    // Asking for a code: the same answer as for any email, so whoever asked can't tell; the email
+    // itself says it's suspended, with no code, and none is waiting.
+    const asks = await Promise.all(['ana@example.com', 'nobody-yet@example.com'].map((email) => s.call('/v1/code', { method: 'POST', body: { email } })))
+    const form = await s.call('/v1/request-public', { method: 'POST', body: { email: 'ana@example.com', kind: 'early' }, ip: '192.0.2.77' })
+    const toAna = s.mail.sent.filter((m) => m.to === 'ana@example.com').slice(-2)
+    ok(asks.every((x) => x.status === 200 && JSON.stringify(x.j) === '{"sent":true}') && form.status === 200 && JSON.stringify(form.j) === '{"sent":true}', 'a code for a suspended account\'s email (from Bridge AI or the website) is answered as for anyone\'s', [asks.map((x) => x.j), form.j])
+    ok(toAna.length === 2 && toAna.every((m) => /suspended/.test(m.subject) && !/\b\d{6}\b/.test(m.text)) && !s.rows('codes').some((c) => c.email === 'ana@example.com'), 'its email says it\'s suspended, with no code, and none is waiting', toAna.map((m) => m.subject))
     const st = (await s.call(`/internal/status?a=${a.account.id}`, { bound: true, admin: null })).j
     ok(st.status === 'suspended' && st.relay === 'approved', 'the relay asks (/internal/status) and hears it', st)
     ok((await s.call(`/admin/accounts/${a.account.id}`, { method: 'POST', bound: true, body: { status: 'active' } })).status === 400, 'restoring without a note is refused too')

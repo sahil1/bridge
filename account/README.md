@@ -16,7 +16,9 @@ keeps with the relay, Bridge AI (server/account.js, Settings › Account) and th
   up once; an email gets at most 5 codes an hour, a network (IPv4 /24, IPv6 /48) at most 20, and the
   website's form 5 requests an hour per network. After 20 wrong codes in a day, an email gets no codes
   for a day (where it's signed in already, nothing changes). `THROWAWAY` in worker.js is a short list
-  of throwaway domains, refused, saying why. An email's first sign-in makes its account.
+  of throwaway domains, refused, saying why. An email's first sign-in makes its account, and each
+  device signed in after that is said in an email to it. A suspended account's email is answered as
+  any other's (whoever asked can't tell), and the email says it's suspended, with no code.
 - **At most 5 devices**, computers and phones. A sixth sign-in is refused with the list, and the same
   code can then remove one to make room.
 - **Tokens**, signed with Ed25519 (`SIGNING_KEY`): a device token (180 days), a relay token for a

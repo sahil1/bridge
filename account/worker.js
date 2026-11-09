@@ -211,19 +211,28 @@ async function mayCode(db, req, email, now, form) {
   }
   return limits.map(([k]) => k)
 }
+// A suspended account's email is answered as any other's (whoever asked can't tell it has an
+// account, or that it's suspended), under the same limits; the email itself says it's suspended,
+// with no code in it.
 async function sendCode(req, env, email, purpose, data = null) {
   const db = env.DB
   const now = Date.now()
   const acct = await byEmail(db, email)
-  if (acct?.status === 'suspended') suspended()
+  const off = acct?.status === 'suspended'
   const keys = await mayCode(db, req, email, now, purpose === 'request')
   const code = sixDigits()
-  await db.prepare('INSERT INTO codes (email, hash, expires, tries, purpose, data) VALUES (?, ?, ?, 0, ?, ?) ON CONFLICT (email) DO UPDATE SET hash = excluded.hash, expires = excluded.expires, tries = 0, purpose = excluded.purpose, data = excluded.data')
-    .bind(email, await sha(`code ${email} ${code}`), now + CODE_MINUTES * 60000, purpose, data ? JSON.stringify(data) : null).run()
+  if (off) await db.prepare('DELETE FROM codes WHERE email = ?').bind(email).run()
+  else {
+    await db.prepare('INSERT INTO codes (email, hash, expires, tries, purpose, data) VALUES (?, ?, ?, 0, ?, ?) ON CONFLICT (email) DO UPDATE SET hash = excluded.hash, expires = excluded.expires, tries = 0, purpose = excluded.purpose, data = excluded.data')
+      .bind(email, await sha(`code ${email} ${code}`), now + CODE_MINUTES * 60000, purpose, data ? JSON.stringify(data) : null).run()
+  }
   try {
-    await mail(env, email, `${code} is your Bold Bridge code`, purpose === 'request'
-      ? `To confirm your request for ${WHAT[data.kind]}, enter this code on boldbridge.ai:\n\n${code}\n\nIt works for ${CODE_MINUTES} minutes. If you didn't ask, ignore this email: nothing happens without the code.\n\nBold Bridge`
-      : `Your code to sign in to Bold Bridge is:\n\n${code}\n\nIt works for ${CODE_MINUTES} minutes. If you didn't ask for it, ignore this email: nobody can sign in without the code.\n\nBold Bridge`)
+    if (off) await mail(env, email, 'Your Bold Bridge account is suspended', 'Someone, probably you, asked for a code for your Bold Bridge account. It\'s suspended, so there\'s no code to sign in with for now. If you think that\'s a mistake, reply to this email.\n\nBold Bridge')
+    else {
+      await mail(env, email, `${code} is your Bold Bridge code`, purpose === 'request'
+        ? `To confirm your request for ${WHAT[data.kind]}, enter this code on boldbridge.ai:\n\n${code}\n\nIt works for ${CODE_MINUTES} minutes. If you didn't ask, ignore this email: nothing happens without the code.\n\nBold Bridge`
+        : `Your code to sign in to Bold Bridge is:\n\n${code}\n\nIt works for ${CODE_MINUTES} minutes. If you didn't ask for it, ignore this email: nobody can sign in without the code.\n\nBold Bridge`)
+    }
   } catch (e) {
     await db.prepare('DELETE FROM codes WHERE email = ?').bind(email).run()
     refuse(502, 'unsent', `The email with your code couldn't be sent just now (${e.message}). Try again in a minute.`)
@@ -342,6 +351,14 @@ async function addDevice(env, acct, device, replace = null, claim = null) {
     db.prepare('INSERT INTO devices (id, account, name, kind, platform, created_at, last_seen, token_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(id, acct.id, device.name, device.kind, device.platform, now, now, await sha(token)),
     noted(db, acct.id, 'self', `signed in on ${device.name} (${device.kind}, ${device.platform})`),
   ])
+  // The account's email hears of each device signed in after its first, so one that wasn't the
+  // person's own doing doesn't go unseen. Not sent: written in its history, and the sign-in stands.
+  if (list.length) {
+    const at = new Date(now)
+    const when = `${at.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })}, ${at.toISOString().slice(11, 16)} UTC`
+    await mail(env, acct.email, 'A new sign-in to your Bold Bridge account', `"${device.name}" (a ${device.kind}, ${device.platform}) was signed in to your Bold Bridge account (${acct.email}) on ${when}.\n\nIf that was you, there's nothing to do. If it wasn't, remove it in Bridge AI on one of your computers (Settings › Account), and change your email's password: whoever signed in had a code sent to this email, or one of your computers signed in already.\n\nBold Bridge`)
+      .catch(() => noted(db, acct.id, 'service', `the email about ${device.name} signing in couldn't be sent`).run())
+  }
   return { account: accountView(acct), device: deviceView({ id, ...device, created_at: now, last_seen: now }, id), deviceToken: token }
 }
 
