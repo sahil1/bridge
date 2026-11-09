@@ -163,7 +163,7 @@ try {
   await dictFold.waitFor({ timeout: 20000 }).catch(() => {})
   if (await dictFold.getAttribute('aria-expanded').catch(() => null) === 'false') await dictFold.click()
   await until(() => p.locator('.rail-nav .rail-meetings').nth(1).locator('.rm-row').count(), 10000)
-  await p.locator('.rail-nav-btn', { hasText: 'Memory' }).scrollIntoViewIfNeeded()
+  await p.locator('.rail-nav-btn', { hasText: 'Whiteboards' }).scrollIntoViewIfNeeded()
   const fit = await p.evaluate(() => ({ bar: Math.round(document.querySelector('.topbar').getBoundingClientRect().top), page: document.scrollingElement.scrollTop, spaces: Math.round(document.querySelector('.rail-head').getBoundingClientRect().bottom), height: innerHeight, nav: [document.querySelector('.rail-nav').scrollHeight, document.querySelector('.rail-nav').clientHeight] }))
   ok(fit.bar === 0 && fit.page === 0 && fit.spaces < fit.height && fit.nav[0] > fit.nav[1], '1280x800 with both lists long: the sidebar\'s top scrolls on its own, Spaces stays in view, and the window stays put under the top bar', fit)
   await shot(p, `${tag}rail-lists-1280`)
