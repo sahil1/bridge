@@ -102,7 +102,10 @@ try {
       if (name !== 'MCP Servers' && name !== 'Agents') ok(has && (await isOpen(p)) === false, `${name}: the rest under Advanced, at the end, closed`, { has, open: await isOpen(p) })
       if (ALL[name]) {
         const got = await names(p)
-        const lost = ALL[name].filter((x) => { const [k, n] = x.split('|'); return !got.some((g) => g.startsWith(`${k}|`) && g.slice(k.length + 1).includes(n)) })
+        // Spoken Answers' speed and Test are there only where this browser has a voice of its own
+        // (none in Chromium on Linux).
+        const voiced = await p.evaluate(() => (window.speechSynthesis?.getVoices?.() || []).some((v) => v.localService))
+        const lost = ALL[name].filter((x) => voiced || !['select|Speed', 'button|Test'].includes(x)).filter((x) => { const [k, n] = x.split('|'); return !got.some((g) => g.startsWith(`${k}|`) && g.slice(k.length + 1).includes(n)) })
         ok(!lost.length, `${name}: every setting there was is still here`, { lost, got })
       }
       if (['Meetings', 'General', 'About & Updates'].includes(name)) await shot(p, `${tag}settings-ui-${name.replace(/\W+/g, '-').toLowerCase()}`)

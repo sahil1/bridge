@@ -23,6 +23,8 @@
 /* Checkboxes with a name and a short line beside them, in every section. */
 .st-check { display: flex; align-items: flex-start; gap: 9px; font-size: 13px; line-height: 1.45; cursor: pointer; }
 .st-check input { margin-top: 3px; flex: none; }
+/* A folder's path has no spaces to wrap at: it breaks anywhere rather than run past a phone's edge. */
+.st-check > span { min-width: 0; overflow-wrap: anywhere; }
 
 /* Found: marked for a moment. */
 .st-found { animation: st-found 2.4s ease-out; border-radius: 10px; }
