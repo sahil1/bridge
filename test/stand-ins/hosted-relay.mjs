@@ -50,7 +50,7 @@ class End {
 globalThis.WebSocketPair = class { constructor() { const server = new End(); return { 0: { server }, 1: server } } }
 const worker = await import('../../relay/worker.js')
 
-const env = { HOSTED: '1', HOSTED_DOMAIN: 'localhost', ...JSON.parse(vars) }
+const env = { HOSTED: '1', HOSTED_DOMAIN: 'localhost', ID_SECRET: 'the stand-in\'s own', ...JSON.parse(vars) }
 // One object per name, each taking its requests one at a time (as Cloudflare's input gates do).
 function namespace(Class) {
   const objs = new Map()

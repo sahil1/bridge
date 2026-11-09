@@ -32,10 +32,13 @@ this:
   everything past the handshake is end-to-end encrypted between phone and computer (in a browser,
   by the page the relay serves; the iPhone app has its own). One address per
   computer keeps each pairing, service worker and saved copy apart, as before.
-- Any other name under the domain gets a plain 404: names that aren't an id (ids end in two
-  checksum characters, so a made-up name is turned away without waking anything), reserved names
-  (www, api, relay, admin and a few more), names two levels down, and ids that aren't registered
-  (or were removed).
+- Any other name under the domain gets a plain 404: names that aren't an id, reserved names (www,
+  api, relay, admin and a few more), names two levels down, and ids that aren't registered (or were
+  removed). Ids end in two checksum characters keyed with a secret only the relay has (`ID_SECRET`),
+  so a made-up name is turned away by the Worker without waking a Hub, but for one in 1,024 that
+  passes by chance; each request still reaches the Worker, and is billed as one (the rate limiting
+  rule in Going live stops a flood of them first). An id the relay made and then removed wakes its
+  Hub once, which says it's gone, and the Worker remembers that for 30 seconds.
 - Addresses are one level below the domain because Cloudflare's free Universal SSL certificate
   covers `<domain>` and `*.<domain>`, not deeper. That's also why it needs a domain of its own: under
   boldbridge.ai, `<id>.relay.boldbridge.ai` is two levels down, which only a paid Advanced
@@ -109,11 +112,16 @@ belongs to the relay.
   npx wrangler@4.149.0 login                       # the project's Cloudflare account
   node relay/build.js relay/dist/worker.js
   npx wrangler@4.149.0 deploy -c relay/wrangler.hosted.toml
+  openssl rand -base64 32 | npx wrangler@4.149.0 secret put ID_SECRET -c relay/wrangler.hosted.toml
   openssl rand -base64 32    # the STATS_TOKEN: keep it in a password manager
   npx wrangler@4.149.0 secret put STATS_TOKEN -c relay/wrangler.hosted.toml    # paste it
   ```
 
-  The STATS_TOKEN reads `/_relay/stats`.
+  Until `ID_SECRET` is set, the relay answers every request with a 500 saying so. It keys the
+  checksum at the end of every computer's id, so it's set once and kept: a new one makes every
+  address on the relay a 404, and each computer has to be set up again (and its phones paired
+  again). Nobody needs to know it, so it isn't kept anywhere else. The STATS_TOKEN reads
+  `/_relay/stats`.
 - [ ] **A rate limiting rule** (owner; boldbridge.app › Security › WAF › Rate limiting rules; the
   Free plan has one): URI Path wildcard `/*`, counted by IP, 200 requests in 10 seconds, Block for
   10 seconds. It stops one address flooding the relay before the Worker runs, where nothing is
@@ -158,12 +166,19 @@ per computer unless it says it's per account or for the whole relay.
 | `RELAY_DAILY_REQUESTS` | `5000000` | The whole relay's Cloudflare requests a day, as `/_relay/stats` counts them: the backstop. Reached, the relay stops for every computer until 00:00 UTC, saying so. 500 accounts at their limits come to about 4.2 million a day, so it's met only past those, and at the defaults it holds the bill under about $44 a month whatever `MAX_ACCOUNTS` is (Cost). |
 | `WORKERS_PAID` | `1` | The account is on Workers Paid (it must be before going live), so `/_relay/stats` measures use against its allowance. `0` while trying it on Workers Free. |
 
-One secret, set with `npx wrangler@4.149.0 secret put STATS_TOKEN -c relay/wrangler.hosted.toml` and
-never written in the file. Without it, its address isn't there at all (404); with a wrong one, 403.
+Two secrets, each set with `npx wrangler@4.149.0 secret put <name> -c relay/wrangler.hosted.toml` and
+never written in the file.
 
-| Secret | What it opens |
+| Secret | What it's for |
 | --- | --- |
-| `STATS_TOKEN` | `GET https://<domain>/_relay/stats` (Watching it) |
+| `ID_SECRET` | The key of the checksum at the end of every computer's id, so only the relay can make an id that passes and a made-up address wakes no Hub. Without it the hosted relay answers nothing but a 500 saying so. Set once and kept (Going live). |
+| `STATS_TOKEN` | Opens `GET https://<domain>/_relay/stats` (Watching it). Without it, that address isn't there at all (404); with a wrong one, 403. |
+
+**Ids from before the checksum was keyed.** Until then an id's checksum was a plain hash anyone
+could work out. Those ids (made only while trying the relay out; it wasn't live) don't pass any more:
+their addresses answer 404, the computer says Bridge AI's relay doesn't know it any more, and
+setting it up again in Settings › Devices gives it a new address, after which its phones pair again.
+Its old Hub is deleted after `IDLE_DAYS`, as any computer's that stops connecting.
 
 And one binding to another Worker: `ACCOUNTS`, the accounts service's `Relay` entrypoint, which
 answers `/internal` and nothing else (never the admin view's `/admin`), for `GET
@@ -429,9 +444,9 @@ a computer, keepalives included, so 500 accounts with a computer each come to ab
 and 30 million a month: about $4.35 on top of the $5.
 
 **What the limits can't stop.** A request is billed once it reaches the Worker, before the relay can
-turn it away, so someone sending floods of requests (to made-up names, or connecting to one
-computer's address over and over) costs $0.30 a million past the included 10 million, and $0.15 a
-million more for each that wakes a Hub. The rate limiting rule in Going live blocks those at
+turn it away, so someone sending floods of requests (to made-up names, which wake no Hub, or
+connecting to one computer's address over and over) costs $0.30 a million past the included 10
+million, and $0.15 a million more for each that wakes a Hub. The rate limiting rule in Going live blocks those at
 Cloudflare before the Worker, where nothing is billed (only requests that reach a Worker are). A
 computer's own connection can't run on past its account's limits (it's let go after 1,000 messages
 that go nowhere). Registering needs an account an admin approved. The billing alert says if anything

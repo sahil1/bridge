@@ -168,11 +168,19 @@ function limitText(why, l, end) {
   }[why]
 }
 
-// A computer's id: 10 random base32 characters and 2 of checksum, so a made-up name is turned away
-// here, without waking a Hub.
-async function check(s) { const h = await sha(`bridge relay id ${s}`); const v = parseInt(h.slice(0, 3), 16) >> 2; return B32[v >> 5] + B32[v & 31] }
-async function newId() { const s = [...crypto.getRandomValues(new Uint8Array(10))].map((b) => B32[b & 31]).join(''); return s + (await check(s)) }
-const idOk = async (s) => /^[a-z2-7]{12}$/.test(s) && !RESERVED.has(s) && (await check(s.slice(0, 10))) === s.slice(10)
+// A computer's id: 10 random base32 characters and 2 of checksum, an HMAC keyed with a secret of the
+// relay's own (ID_SECRET), so only the relay can make a name that passes, and a made-up one is turned
+// away here, without waking a Hub (but for one in 1,024). Ids made before the checksum was keyed don't
+// pass any more (HOSTED.md, Settings).
+let idKey = null // [the secret, its CryptoKey]
+async function check(env, s) {
+  if (idKey?.[0] !== env.ID_SECRET) idKey = [env.ID_SECRET, await crypto.subtle.importKey('raw', new TextEncoder().encode(env.ID_SECRET), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])]
+  const h = new Uint8Array(await crypto.subtle.sign('HMAC', idKey[1], new TextEncoder().encode(`bridge relay id ${s}`)))
+  const v = ((h[0] << 8) | h[1]) >> 6
+  return B32[v >> 5] + B32[v & 31]
+}
+async function newId(env) { const s = [...crypto.getRandomValues(new Uint8Array(10))].map((b) => B32[b & 31]).join(''); return s + (await check(env, s)) }
+const idOk = async (env, s) => /^[a-z2-7]{12}$/.test(s) && !RESERVED.has(s) && (await check(env, s.slice(0, 10))) === s.slice(10)
 
 // The registry's counts for /_relay/stats: one day's, kept 35 days, with its busiest computers.
 // limits.full: registrations turned away because MAX_ACCOUNTS accounts had a computer on it;
@@ -252,6 +260,7 @@ async function hosted(req, env) {
   const p = url.pathname
   const domain = String(env.HOSTED_DOMAIN || '').toLowerCase().replace(/^\.+|\.+$/g, '')
   if (!domain) return new Response('HOSTED_DOMAIN isn\'t set', { status: 500 })
+  if (!env.ID_SECRET) return new Response('ID_SECRET isn\'t set (HOSTED.md, Going live)', { status: 500 })
   const host = url.hostname.toLowerCase()
   if (host === domain) {
     if (p === '/_relay/register') return req.method === 'POST' ? register(req, env, url) : new Response('Use POST', { status: 405 })
@@ -262,11 +271,14 @@ async function hosted(req, env) {
     return notFound()
   }
   const id = host.endsWith(`.${domain}`) ? host.slice(0, -domain.length - 1) : ''
-  if (!(await idOk(id)) || !(await registered(env, id))) return notFound()
-  if (p === '/_relay/host' || p === '/_relay/link') {
+  if (!(await idOk(env, id))) return notFound()
+  const sock = p === '/_relay/host' || p === '/_relay/link'
+  // Switched off: said before anything is asked of a Hub.
+  const off = sock && req.headers.get('Upgrade') === 'websocket' ? offText(env, p === '/_relay/link') : null
+  if (off) return refuse({ t: 'limit', why: 'off', text: off, until: Date.now() + 30 * 60000 }, 4009)
+  if (!(await registered(env, id))) return notFound()
+  if (sock) {
     if (req.headers.get('Upgrade') !== 'websocket') return new Response('Expected a WebSocket', { status: 426 })
-    const off = offText(env, p === '/_relay/link')
-    if (off) return refuse({ t: 'limit', why: 'off', text: off, until: Date.now() + 30 * 60000 }, 4009)
     return hub(env, id).fetch(req) // the Hub checks the computer's token, and its account
   }
   if (p === '/_relay/forget') return req.method === 'POST' ? hub(env, id).fetch(req) : new Response('Use POST', { status: 405 })
@@ -310,10 +322,10 @@ async function register(req, env, url) {
     return json({ id, url: `${url.protocol}//${id}.${url.host}`, token })
   }
   // This device has an address here: the same one, with a new token.
-  if (acc.id && (await idOk(acc.id)) && (await init(acc.id)).ok) { count(env, acc.id, 'register', [v, 'again']); return done(acc.id) }
+  if (acc.id && (await idOk(env, acc.id)) && (await init(acc.id)).ok) { count(env, acc.id, 'register', [v, 'again']); return done(acc.id) }
   const lim = limits(env)
   for (let i = 0; i < 4; i++) {
-    const id = await newId()
+    const id = await newId(env)
     if (RESERVED.has(id)) continue
     const gate = await registry(env, 'gate', { a: t.a, id, max: lim.accounts })
     if (gate.why === 'taken') continue // an id it has already (vanishingly unlikely): another

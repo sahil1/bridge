@@ -148,11 +148,21 @@ const newDevice = () => `dev${String(++n).padStart(9, '0')}`
 
 const DOMAIN = 'relay.test'
 const IP = '203.0.113.9'
+const ID_SECRET = 'test-id-secret'
+// A computer's id from 10 characters, its checksum keyed with secret (the relay's ID_SECRET), or
+// with none, as it was worked out before (a plain hash anyone could make).
+const B32 = 'abcdefghijklmnopqrstuvwxyz234567'
+const idFrom = (s, secret = ID_SECRET) => {
+  const h = secret ? crypto.createHmac('sha256', secret).update(`bridge relay id ${s}`).digest() : crypto.createHash('sha256').update(`bridge relay id ${s}`).digest()
+  const v = secret ? ((h[0] << 8) | h[1]) >> 6 : parseInt(h.toString('hex').slice(0, 3), 16) >> 2
+  return s + B32[v >> 5] + B32[v & 31]
+}
+const tenChars = () => [...crypto.randomBytes(10)].map((b) => B32[b & 31]).join('')
 // A hosted relay with these settings, and what it counted for Analytics Engine.
 function relay(vars = {}) {
   const points = []
   const accounts = accountsService()
-  const env = { HOSTED: '1', HOSTED_DOMAIN: DOMAIN, ACCOUNTS_PUBLIC_KEY: PUBLIC, ACCOUNTS: accounts, STATS: { writeDataPoint: (p) => points.push(p) }, ...vars }
+  const env = { HOSTED: '1', HOSTED_DOMAIN: DOMAIN, ID_SECRET, ACCOUNTS_PUBLIC_KEY: PUBLIC, ACCOUNTS: accounts, STATS: { writeDataPoint: (p) => points.push(p) }, ...vars }
   env.HUB = namespace(env)
   env.ACCOUNT = namespace(env, worker.Account)
   const call = (url, init = {}) => worker.default.fetch(new Request(url, init), env)
@@ -214,6 +224,36 @@ try {
     ok(second.id && second.id !== c.id, 'another device of the account: another address', second.id)
     const meta = r.env.HUB.of(c.id).store.get('meta')
     ok(meta.a === a && meta.d === d && !JSON.stringify(meta).includes(again.token), 'a Hub keeps which account and device it\'s for, and a hash of the token, never the token', meta)
+  }
+
+  // ---------- Made-up addresses wake nothing, and the kill switch is said first ----------
+  {
+    const r = relay()
+    const c = await r.register()
+    ok(c.id === idFrom(c.id.slice(0, 10)), 'a computer\'s id ends in a checksum keyed with the relay\'s own secret (ID_SECRET)', c.id)
+    let woken = 0
+    const get = r.env.HUB.get
+    r.env.HUB.get = (n) => { if (!r.env.HUB.of(n)) woken++; return get(n) }
+    const statuses = new Set()
+    for (let i = 0; i < 100; i++) {
+      const s = tenChars()
+      for (const made of [idFrom(s, null), idFrom(s, 'someone else\'s secret')]) {
+        if (made === idFrom(s)) continue // (one in 1,024 passes by chance)
+        statuses.add((await r.call(`https://${made}.${DOMAIN}/`)).status)
+        statuses.add((await r.call(`https://${made}.${DOMAIN}/_relay/link`, { headers: { Upgrade: 'websocket' } })).status)
+      }
+    }
+    ok(woken === 0 && [...statuses].join() === '404', '200 made-up addresses, with the checksum anyone could work out before or one keyed with another secret: each a plain 404, and not one Hub woken', { woken, statuses: [...statuses] })
+    const real = await r.call(`https://${c.id}.${DOMAIN}/`)
+    ok(real.status === 200, 'while the relay\'s own address still answers', real.status)
+    r.env.HOSTED_OFF = '1'
+    const unknown = idFrom(tenChars())
+    const off = await r.call(`https://${unknown}.${DOMAIN}/_relay/link`, { headers: { Upgrade: 'websocket' } })
+    const offHost = await r.call(`https://${unknown}.${DOMAIN}/_relay/host`, { headers: { Upgrade: 'websocket' } })
+    ok(off.webSocket?.server?.got?.[0]?.why === 'off' && offHost.webSocket?.server?.got?.[0]?.why === 'off' && woken === 0, 'switched off (HOSTED_OFF): a connection is told so before any Hub is asked whether the address is registered', { woken, said: off.webSocket?.server?.got?.[0] })
+    delete r.env.HOSTED_OFF
+    const noSecret = await worker.default.fetch(new Request(`https://${DOMAIN}/`), { ...r.env, ID_SECRET: '' })
+    ok(noSecret.status === 500 && /ID_SECRET isn't set/.test(await noSecret.text()), 'without ID_SECRET the hosted relay answers nothing but that it isn\'t set', noSecret.status)
   }
 
   // ---------- Connecting needs a relay token of its account ----------
@@ -531,7 +571,7 @@ try {
     const vars = Object.fromEntries([...toml.slice(toml.indexOf('[vars]')).matchAll(/^([A-Z_]+) = "([^"]*)"/gm)].map((m) => [m[1], m[2]]))
     const missing = Object.entries(vars).filter(([k, v]) => !new RegExp(`^\\| \`${k}\` \\| ${v === '' || ['HOSTED', 'HOSTED_DOMAIN'].includes(k) ? '' : `\`${v.replace(/[{}]/g, '\\$&')}\``}`, 'm').test(md))
     ok(Object.keys(vars).length >= 14 && !missing.length && ['ACCOUNT_WINDOW_HOURS', 'ACCOUNT_WINDOW_MESSAGES', 'ACCOUNT_WEEK_MESSAGES', 'MAX_ACCOUNTS', 'ACCOUNTS_PUBLIC_KEY'].every((k) => k in vars), 'every setting in wrangler.hosted.toml is in HOSTED.md\'s table, with the same default, the account limits among them', missing)
-    ok(/STATS_TOKEN/.test(md) && /\[observability\]\nenabled = false/.test(toml) && /class_name = "Account"/.test(toml) && /tag = "v2"\nnew_sqlite_classes = \["Account"\]/.test(toml), 'and its secret, the Account class with its migration, and the Worker\'s logs off', null)
+    ok(/^\| `ID_SECRET` \|/m.test(md) && /secret put ID_SECRET/.test(md) && /#   ID_SECRET /.test(toml) && /STATS_TOKEN/.test(md) && /\[observability\]\nenabled = false/.test(toml) && /class_name = "Account"/.test(toml) && /tag = "v2"\nnew_sqlite_classes = \["Account"\]/.test(toml), 'and its secrets (ID_SECRET in Going live), the Account class with its migration, and the Worker\'s logs off', null)
     ok(/\| 500 \| 142 million \| 825,000 GB-s \| \$5 \+ \$21\.15 \+ \$12\.50 = \*\*\$38\.65\*\* \|/.test(md) && /about \*\*\$43\.75\*\* a month/.test(md), 'the cost of 500 accounts at their limits ($38.65) and the backstop\'s most ($43.75) are both under $50', null)
   }
 
