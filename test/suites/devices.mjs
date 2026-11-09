@@ -5,12 +5,20 @@
 // that didn't work for a device already linked, a device that moved to a new relay, one whose key
 // changed, and one that forgot this device. And Fix, which says where a connection stops. And an
 // ask a relay in between can't steer to six digits of its choosing.
+// And what a relay in between can't do any more: phones spoken for here (lib/linkclient.mjs), one
+// as phones pair now (what it says about itself sealed, first) and one from before (in the clear
+// only), and the relay stood in for rewriting hellos or answering them itself. Nothing said in the
+// clear renames a device, makes a phone a computer, moves a computer, or unlinks one; a code pairs
+// one device; a device counts as connected once it has shown it holds its key; one removed is told so
+// sealed, its notifications and new requests stop at once; a computer that linked with Studio's code
+// meets the others only once kept there; and strangers' hellos are let go past a few a second.
 import fs from 'node:fs'
 import path from 'node:path'
 import { createHash, randomBytes } from 'node:crypto'
 import WebSocket from 'ws'
-import { newKey, rawPublic, phoneHello, plainFrame, readPlain } from '../../relay/web/link.js'
-import { startKit, startRelay, checks, until, sleep } from '../lib/harness.mjs'
+import { newKey, rawPublic, phoneHello, plainFrame, readPlain, K } from '../../relay/web/link.js'
+import { ROOT, startKit, startRelay, checks, until, sleep } from '../lib/harness.mjs'
+import { linkAs } from '../lib/linkclient.mjs'
 
 const { ok, done } = checks('devices')
 const QUIET = 1500 * 2.5 // BRIDGE_LINK_PING_MS below: a quiet link is started over after this
@@ -38,7 +46,7 @@ try {
 
   // ---------- Pair a device: one code, a QR and a link ----------
   const p = (await a.api('/relay/pair', {})).pairing
-  ok(/^<svg/.test(p?.qr || '') && p.link === `${ra.url}/#pair=${p.code}` && /^[A-Z2-9]{4}(-[A-Z2-9]{4}){4}$/.test(p.code), 'Pair a device gives a QR code, a link and a code', p && { link: p.link, code: p.code })
+  ok(/^<svg/.test(p?.qr || '') && p.link === `${ra.url}/#pair=${p.code}&name=Studio` && /^[A-Z2-9]{4}(-[A-Z2-9]{4}){4}$/.test(p.code), 'Pair a device gives a QR code, a link (with the computer\'s name, for the phone\'s "Pair with Studio?") and a code', p && { link: p.link, code: p.code })
   // Typed on the other computer: its address and the code, as they come (lower case, spaces).
   const typed = `${ra.url} ${p.code.toLowerCase().replace(/-/g, ' ')}`
   const added = await b.api('/machines', { link: typed })
@@ -49,6 +57,85 @@ try {
   const through = await fetch(`${b.url}/m/${studio.id}/api/machines/summary`).then((r) => r.json())
   ok(through?.name === 'Studio', 'Laptop reaches Studio\'s Bridge AI through the link', through)
   ok((await a.api('/relay')).devices.filter((d) => d.kind === 'computer').length === 1, 'Studio has Laptop once among its paired devices')
+  const ctl = (r, what) => fetch(`${r.url}/_test/${what}`, { method: 'POST' }).then((x) => x.json())
+
+  // ---------- nothing the relay can change in the clear is believed ----------
+  const pairCode = async () => (await a.api('/relay/pair', {})).pairing.code
+  const devOf = async (id) => (await a.api('/relay')).devices.find((d) => d.id === id) || null
+  const evil = { kind: 'computer', relay: 'http://127.0.0.1:9' }
+  const code1 = await pairCode()
+  // A phone pairing now, its hello made to say (as a relay in between could) it's a computer called
+  // Studio Mac at another relay; sealed, it says it's Pocket.
+  const pocket = await linkAs(ra.url, { code: code1, name: 'Studio Mac', hello: evil, about: { name: 'Pocket' } })
+  ok((await pocket.request?.('GET', '/api/version'))?.status === 200, 'a phone pairs with Pair a device\'s code, and is answered', pocket.refused)
+  const pd = await devOf(pocket.deviceId)
+  ok(pd?.name === 'Pocket' && pd.kind === 'phone' && !pd.relay && pd.fresh, 'what its hello said in the clear (a computer, its name, a relay) counts for nothing: it\'s a phone, by the name it sent sealed, and new until kept', pd)
+  const st1 = await a.api('/relay')
+  ok(!st1.pairing && st1.paired?.name === 'Pocket', 'a code pairs one device: its QR code goes, and Studio says which device it paired', { pairing: !!st1.pairing, paired: st1.paired })
+  ok((await a.api('/machines')).newDevices.some((d) => d.id === pocket.deviceId && d.kind === 'phone'), 'and the app says so on Studio, to keep or remove')
+  const second = await linkAs(ra.url, { code: code1, name: 'Second' })
+  const code2 = await pairCode()
+  const mistyped = await linkAs(ra.url, { code: code2.replace(/.$/, (x) => (x === 'A' ? 'B' : 'A')), name: 'Mistyped' })
+  ok(second.refused?.why === 'code-expired' && mistyped.refused?.why === 'code-expired', 'the same code again: turned away; and a mistyped one gets the very same answer, so nothing tells a guess from a used code', [second.refused, mistyped.refused])
+  pocket.close()
+  await until(async () => !(await devOf(pocket.deviceId))?.connected, 5000, 100)
+  const pocketAgain = await linkAs(ra.url, { device: pocket.device, hostKey: pocket.hostKey, name: 'Renamed in the clear', hello: evil, about: { name: 'Pocket 2', ...evil } })
+  ok((await pocketAgain.request?.('GET', '/api/version'))?.status === 200, 'paired, it connects again')
+  const pd2 = await devOf(pocket.deviceId)
+  ok(pd2?.name === 'Pocket 2' && pd2.kind === 'phone' && !pd2.relay, 'its name is the one it says sealed (never the one in the clear), and its kind never changes: still a phone, with no relay', pd2)
+  pocketAgain.close()
+  await until(async () => !(await devOf(pocket.deviceId))?.connected, 5000, 100)
+  const silent = await linkAs(ra.url, { device: pocket.device, hostKey: pocket.hostKey })
+  await sleep(1000)
+  const before = (await devOf(pocket.deviceId))?.connected
+  await silent.send(K.PING, 0)
+  ok(before === false && !!(await until(async () => (await devOf(pocket.deviceId))?.connected, 5000, 100)), 'a hello from its key (anyone who has seen the key, its relay, can send one) doesn\'t make it connected; its first sealed record does', { before })
+  silent.close()
+  // One from before: no sealed ABOUT, no seal (the iPhone app carries its own older copy).
+  const oldPhone = await linkAs(ra.url, { code: await pairCode(), name: 'Old phone', old: true })
+  ok((await oldPhone.request?.('GET', '/api/version'))?.status === 200 && (await devOf(oldPhone.deviceId))?.name === 'Old phone', 'a phone from before pairs, is answered, and keeps the name it gave in the clear when it paired', await devOf(oldPhone.deviceId))
+  oldPhone.close()
+  const oldAgain = await linkAs(ra.url, { device: oldPhone.device, hostKey: oldPhone.hostKey, name: 'Studio Mac', old: true, hello: evil })
+  const oldAnswer = await oldAgain.request?.('GET', '/api/version')
+  const od = await devOf(oldPhone.deviceId)
+  ok(oldAnswer?.status === 200 && od?.name === 'Old phone' && od.kind === 'phone' && !od.relay, 'then connects again as before, and what it says in the clear after that changes nothing', od)
+
+  // ---------- removing one removes it ----------
+  const sub = { endpoint: `https://127.0.0.1:9/push/${Date.now()}`, keys: { p256dh: 'not-a-key', auth: 'not-a-secret' } }
+  const subbed = await oldAgain.request('POST', '/api/push/subscribe', { subscription: sub, label: 'Old phone' })
+  ok(subbed.status === 200 && (await a.api('/push/devices')).some((x) => x.label === 'Old phone'), 'the old phone turns notifications on, through the link', subbed)
+  await a.api(`/relay/devices/${oldPhone.deviceId}`, null, 'DELETE')
+  const after = await oldAgain.request('GET', '/api/version')
+  ok(/removed/.test(after.error || ''), 'removed on Studio: what it asks right after is turned down at once', after)
+  ok(!(await a.api('/push/devices')).some((x) => x.label === 'Old phone'), 'and its notifications stop: its subscription goes with it', await a.api('/push/devices'))
+  oldAgain.close()
+  const oldBack = await linkAs(ra.url, { device: oldPhone.device, hostKey: oldPhone.hostKey, old: true })
+  ok(oldBack.refused?.why === 'not-paired', 'connecting again, a phone from before is refused in the clear, as it always was', oldBack.refused)
+  await a.api(`/relay/devices/${pocket.deviceId}`, null, 'DELETE')
+  const removedNow = await linkAs(ra.url, { device: pocket.device, hostKey: pocket.hostKey })
+  const word = removedNow.welcome ? await removedNow.next().catch(() => null) : null
+  ok(word?.kind === K.GONE, 'one from now on is told it was removed in a sealed record, the only word that unpairs it', { refused: removedNow.refused, kind: word?.kind })
+  removedNow.close?.()
+  const src = fs.readFileSync(path.join(ROOT, 'server', 'index.js'), 'utf8')
+  ok(/whenAsked\(/.test(src) && !/whenAsked\([^\n]*\$\{a\.code\}/.test(src), 'the six digits of an ask never go in a notification')
+
+  // ---------- a relay that rewrites Laptop's hello, or answers for Studio ----------
+  const machineOf = async (k, name) => (await k.api('/relay')).devices.find((d) => d.kind === 'computer' && d.name === name) || null
+  await ctl(ra, 'tamper?name=Evil&relay=http%3A%2F%2F127.0.0.1%3A9')
+  await ra.drop()
+  ok(!!(await online(b, 'Studio')), 'Laptop\'s hello rewritten on the way: it still links')
+  const lp = await machineOf(a, 'Laptop')
+  ok(lp?.relay === rb.url && !(await machineOf(a, 'Evil')) && (await other(a, 'Laptop'))?.relay === rb.url, 'and Studio keeps Laptop\'s name and relay as Laptop said them sealed: no other name, no move to the relay\'s address', { lp, machine: await other(a, 'Laptop') })
+  await ctl(ra, 'forge?as=refuse&why=not-paired')
+  await ra.drop()
+  const told = await until(async () => { const m = await other(b, 'Studio'); return m && !m.online && /couldn't be checked/.test(m.error || '') ? m : null }, 20000, 300)
+  ok(told?.state === 'linked', 'Studio\'s relay refuses Laptop in the clear ("not paired"): Laptop says the answer couldn\'t be checked, stays linked, and keeps trying (it used to take itself as unlinked)', await other(b, 'Studio'))
+  await ctl(ra, 'forge?as=welcome')
+  await sleep(4000)
+  ok((await other(b, 'Studio'))?.state === 'linked', 'answered with keys that aren\'t Studio\'s: still linked, saying so', await other(b, 'Studio'))
+  await ctl(ra, 'honest')
+  await b.api(`/machines/${(await other(b, 'Studio')).id}/check`, {})
+  ok(!!(await online(b, 'Studio')), 'the relay honest again: linked again')
 
   // ---------- a connection that goes quiet (a Mac that slept) ----------
   await ra.freeze()
@@ -75,7 +162,6 @@ try {
 
   // ---------- Studio drops off the network without a word (Wi-Fi off, a lid closed on the move) ----------
   // Its relay hears nothing either way, and kept saying it was there: Laptop asks Studio itself.
-  const ctl = (r, what) => fetch(`${r.url}/_test/${what}`, { method: 'POST' }).then((x) => x.json())
   let t0 = Date.now()
   await ctl(ra, 'away')
   const lost = await until(async () => (await other(b, 'Studio'))?.online === false, 60000, 200)
@@ -98,6 +184,17 @@ try {
   ok(!!(await until(async () => (await desk.api('/relay')).online, 20000)), 'Desk, which checks its links every 30 s, is on its relay')
   await desk.api('/machines', { link: (await a.api('/relay/pair', {})).pairing.link })
   ok(!!(await online(desk, 'Studio')), 'and linked with Studio')
+
+  // ---------- one that linked with Studio's code meets the others once kept there ----------
+  const fresh = await until(async () => { const m = await a.api('/machines'); return m.newDevices.some((d) => d.name === 'Desk' && d.machine) && m.newDevices.some((d) => d.name === 'Laptop') && m.machines.filter((x) => x.held).length === 2 ? m : null }, 15000, 300)
+  ok(!!fresh && fresh.machines.find((m) => m.name === 'Desk')?.held && fresh.machines.find((m) => m.name === 'Laptop')?.held, 'Desk and Laptop linked with Studio\'s code: Studio says so (Keep or Remove), and holds back introducing them to its other computers', fresh?.newDevices)
+  await sleep(2000)
+  ok(!(await other(desk, 'Laptop')) && !(await other(b, 'Desk')), 'so Desk and Laptop don\'t meet through Studio yet')
+  const asksInvite = await fetch(`${desk.url}/m/${(await other(desk, 'Studio')).id}/api/machines/invite`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }).then(async (r) => ({ status: r.status, ...(await r.json().catch(() => ({}))) }))
+  ok(asksInvite.status >= 400 && /^Keep Desk in Bridge AI on Studio first/.test(asksInvite.error || ''), 'nor can Desk get a code of Studio\'s to hand on', asksInvite)
+  for (const d of fresh.newDevices.filter((x) => ['Laptop', 'Desk'].includes(x.name))) await a.api(`/relay/devices/${d.id}/keep`, {})
+  ok(!!(await online(desk, 'Laptop')) && !!(await online(b, 'Desk')), 'kept on Studio: Desk and Laptop are introduced, and linked both ways')
+  ok(!(await a.api('/machines')).newDevices.some((d) => ['Laptop', 'Desk'].includes(d.name)), 'and Studio says no more about them')
   const studioOnDesk = await other(desk, 'Studio')
   await fetch(`${ra.url}/_test/silence`, { method: 'POST' }) // Studio's relay: the devices' connections to it go dead
   ok((await other(desk, 'Studio'))?.online === true, 'Studio still looks online to Desk')
@@ -152,9 +249,11 @@ try {
   a.stop()
   fs.writeFileSync(path.join(a.data, 'relay.json'), JSON.stringify(noKey))
   await a.restart()
-  const changed = await until(async () => (await other(b, 'Studio'))?.state === 'changed', 30000, 300)
-  ok(!!changed, 'Studio with a new key: Laptop says so instead of trying again and again', await other(b, 'Studio'))
-  ok(/doesn't have the key it was linked with/.test((await other(b, 'Studio'))?.error || (await b.api(`/machines/${studio.id}/check`, {})).steps.map((s) => s.text).join(' ')), 'with what to do')
+  // (A key that isn't the one it was linked with could be the relay's, so nothing kept changes on
+  // it: it says so, and keeps trying.)
+  const changed = await until(async () => { const m = await other(b, 'Studio'); return m?.state === 'linked' && !m.online && /couldn't be checked/.test(m.error || '') ? m : null }, 30000, 300)
+  ok(!!changed, 'Studio with a new key: Laptop says the answer couldn\'t be checked, and stays linked, trying again', await other(b, 'Studio'))
+  ok(/set up again, link it again with a code from Studio/.test((await other(b, 'Studio'))?.error || ''), 'with what to do')
   const p2 = (await a.api('/relay/pair', {})).pairing
   const relinked = await b.api('/machines', { link: p2.link })
   ok(relinked.machine?.state === 'linked', 'a new code from Studio links it again, with its new key', relinked.machine)
@@ -165,7 +264,7 @@ try {
   b.stop()
   await a.api(`/machines/${laptopAtStudio.id}`, null, 'DELETE')
   await b.restart()
-  ok(!!(await until(async () => (await other(b, 'Studio'))?.state === 'removed', 30000, 300)), 'Studio unlinked Laptop while it was closed: Laptop says so', await other(b, 'Studio'))
+  ok(!!(await until(async () => (await other(b, 'Studio'))?.state === 'removed', 30000, 300)), 'Studio unlinked Laptop while it was closed: Laptop is told so, sealed, and says so', await other(b, 'Studio'))
   const asked = await b.api('/machines/ask', { relay: ra.url, name: 'Studio' })
   ok(asked.machine?.state === 'asking' && /^\d{3} \d{3}$/.test(asked.machine.code || ''), 'Link again asks Studio, with six digits to check', asked.machine)
   const ask = await until(async () => (await a.api('/machines')).asks.find((x) => x.name === 'Laptop'), 15000)
@@ -208,6 +307,14 @@ try {
   ok(!!again?.n && again.n !== first.n && !(await shown()), 'a new commit starts it over: a new number from Studio, and no digits until the asking device shows its own', again)
   await a.api(`/machines/asks/${seen.id}`, { allow: false })
   ok((await knock({ c: commit(r1) }))?.why === 'denied', 'turned down: turned away')
+
+  // ---------- strangers' hellos, many at once ----------
+  await sleep(10500)
+  const knocks = await Promise.all(Array.from({ length: 20 }, () => linkAs(ra.url, { name: 'Stranger', ms: 4000 })))
+  const answered = knocks.filter((k) => k.refused).length
+  ok(answered >= 1 && answered <= 12 && knocks.some((k) => k.unanswered), `strangers' hellos past a dozen in 10 s are let go unanswered (${answered} of 20 answered), so no one keeps Studio working out keys`, { answered })
+  await sleep(10500)
+  ok(!!(await online(b, 'Studio')), 'while Laptop, paired, still links')
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
   for (const k of kits) console.log(k.log().slice(-1500))

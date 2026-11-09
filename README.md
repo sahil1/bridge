@@ -241,12 +241,14 @@ The call's sound comes from a small helper (`native/calltap.swift`) that uses ma
 Link your other computers running Bridge AI (Mac, Windows or Linux) and switch between them from the top left: each one's Bridge AI opens in the same window, its agents, chats, terminals and files, as if you were sitting at it. The sidebar's **Devices** lists them with their agents and what needs you, and the desktop app can open one in a window of its own. A phone paired with any of them reaches them all.
 
 1. Each device needs its relay (Settings › Devices, below).
-2. On one, Settings › Devices › **Pair a device**. It shows a QR code, a link and a code, the same for a phone or a computer, for 15 minutes and up to 3 devices.
-3. On the other computer, Settings › Devices › **Link a device**: paste the link, or type the address and code. They link both ways, and a third device you link is introduced to the others.
+2. On one, Settings › Devices › **Pair a device**. It shows a QR code, a link and a code, the same for a phone or a computer, for 15 minutes and one device (**Add another device** makes a new one). A pairing link opened on a phone asks "Pair with <name>?" first.
+3. On the other computer, Settings › Devices › **Link a device**: paste the link, or type the address and code. They link both ways. The first one says the new device paired, with **Keep** and **Remove**; once you keep it, it's introduced to your other devices too.
 
 Or let your phone do it: scan the new computer's code with the Bridge AI app on a phone that's paired with another of your computers. The phone offers to link the two, asks, and takes you to the other one to allow it after checking both show the same six digits. A device's relay address alone asks the same way.
 
 Devices talk end-to-end encrypted through each other's relay, the same way a phone does ([server/machines.js](server/machines.js)). A link looks after itself: one that goes quiet (a Mac that slept, a network that changed) starts over, a device that moves to a new relay is followed there, and one that was set up again says so and links again with a new code. When one is offline, **Fix** checks each step between the two, says plainly where it stops, and connects again. Unlink in Settings › Devices, on either one.
+
+The relay in between is trusted with nothing. What a device says about itself (its name, that it's a computer, where it's reached) counts only when it comes sealed, a refusal or another key through the relay is said ("the answer couldn't be checked") and tried again rather than acted on, and only the computer's own sealed word, or your Forget, unpairs a phone or unlinks a computer.
 
 ## Runtimes: where agents run
 

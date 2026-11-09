@@ -20,6 +20,12 @@
 // start screen says so in a few seconds, with the other computer a tap away, what it last sent, Cloud
 // Agents and the demo (it opened what it last sent instead, or waited on "Connecting…" for good).
 // And the page in a browser, with its relay not answering: it says so (it waited for good).
+// What a relay in between can do changes nothing kept (stand-ins/relay.mjs forge and tamper): a
+// pairing link asks first; a refusal in the clear, or a welcome with keys of the relay's own, leaves
+// the phone paired, saying it couldn't check the answer, and it's back once the relay is honest; a
+// hello rewritten on the way doesn't rename it or make it a computer. The service worker lets only
+// this address frame the pages it passes on, and no form posts to them. Only the computer's own
+// word, sealed, unpairs the app.
 import fs from 'node:fs'
 import path from 'node:path'
 import { startKit, startRelay, checks, until, browser, sleep, shot } from '../lib/harness.mjs'
@@ -40,7 +46,7 @@ try {
   kit = await startKit('phone-link', { env: ({ data }) => { fs.writeFileSync(path.join(data, 'relay.json'), JSON.stringify(relay.relayFile)); return {} } })
   await kit.api('/setup', { name: 'Tester' })
   ok(!!(await until(async () => (await kit.api('/relay')).online, 20000)), 'Bridge AI connects to its relay')
-  const code = (await kit.api('/relay/pair', {})).pairing.code
+  const pairing = (await kit.api('/relay/pair', {})).pairing
   const test = (what, q = '') => fetch(`${relay.url}/_test/${what}${q}`, { method: what === 'state' ? 'GET' : 'POST' }).then((r) => r.json())
   await test('net', `?ms=${NET.ms}&host=${NET.host}&kbps=${NET.kbps}`)
 
@@ -78,7 +84,11 @@ try {
   // ---------- the first time: pairing, then Bridge AI ----------
   await test('count')
   let t0 = Date.now()
-  await open(`${relay.url}/#pair=${code}`)
+  await open(pairing.link)
+  // A pairing link asks first, with its code ready: one tap.
+  const askedPair = await until(() => p.evaluate(() => (document.getElementById('pair')?.hidden === false ? `${document.querySelector('#pair h1').textContent} ${document.getElementById('code').value}` : null)), 15000, 20)
+  ok(/^Pair with .+\? [A-Z2-9-]{24}$/.test(askedPair || '') && !/this computer/.test(askedPair) && askedPair.endsWith(pairing.code), 'a pairing link asks first, "Pair with <its name>?", with its code ready', askedPair)
+  await p.locator('#pair-go').click()
   const first = await answered(t0)
   const firstBytes = (await test('state')).sent.downBytes
   say(`first open: answers at ${first} ms, ${Math.round(firstBytes / 1024)} KB over the link`)
@@ -227,6 +237,44 @@ try {
   const errs = errors.filter((e) => !(which === 'webkit' && /^Error: (Reconnecting to your computer|Connection lost|Your computer)/.test(e)))
   ok(errs.length === 0, 'no page errors', errs)
 
+  // ---------- what the relay can do changes nothing kept ----------
+  await test('net')
+  const frames = await app().evaluate(async () => { const r = await fetch('/'); return { csp: r.headers.get('content-security-policy'), xfo: r.headers.get('x-frame-options') } })
+  ok(/frame-ancestors 'self'/.test(frames.csp || '') && frames.xfo === 'SAMEORIGIN', 'a page passed on by the phone page\'s service worker may be put in a frame only by this address', frames)
+  const posted = await p.evaluate(() => new Promise((done) => {
+    const f = Object.assign(document.createElement('iframe'), { name: 'posted' })
+    f.style.display = 'none'
+    document.body.appendChild(f)
+    f.onload = () => { try { done(f.contentDocument.body.innerText) } catch { done('unreadable') } f.remove() }
+    const form = Object.assign(document.createElement('form'), { method: 'POST', action: '/api/config', target: 'posted' })
+    document.body.appendChild(form)
+    form.submit()
+    form.remove()
+  }))
+  ok(/Not allowed/.test(posted), 'and a form posted to one (a page opened with anything but GET) is turned away', posted)
+  const hasPairing = () => p.evaluate(() => new Promise((done) => {
+    const r = indexedDB.open('bridge-relay', 1)
+    r.onsuccess = () => { const g = r.result.transaction('kv').objectStore('kv').get('pairing'); g.onsuccess = () => done(!!g.result?.hostKey); g.onerror = () => done(false) }
+    r.onerror = () => done(false)
+  }))
+  const shown = () => p.evaluate(() => [document.getElementById('bar').hidden ? '' : document.getElementById('bar-text').textContent, document.getElementById('wait').hidden ? '' : document.getElementById('wait-text').textContent, document.getElementById('away').hidden ? '' : document.getElementById('away-title').textContent].join(' '))
+  for (const [as, what] of [['refuse', 'refuses the phone in the clear ("not paired")'], ['welcome', 'answers with keys of its own, not the computer\'s']]) {
+    await test('forge', `?as=${as}&why=not-paired`)
+    await test('drop')
+    const said = await until(async () => /couldn't be checked/.test(await shown()), 15000, 100)
+    ok(!!said && await hasPairing() && (await p.evaluate(() => document.getElementById('pair').hidden)), `the relay ${what}: the phone says the answer couldn't be checked, and stays paired (it used to forget the computer)`, await shown())
+    await test('honest')
+    ok((await backIn(25000)) != null, 'and it\'s back by itself once the relay is honest')
+  }
+  const phoneOn = async () => (await kit.api('/relay')).devices.find((d) => d.kind === 'phone') || null
+  const was = await phoneOn()
+  await test('tamper', `?name=${encodeURIComponent('Studio Mac')}&kind=computer&relay=${encodeURIComponent('http://127.0.0.1:9')}`)
+  await test('drop')
+  ok((await backIn(15000)) != null, 'a hello rewritten on the way: the phone still connects')
+  const now = await phoneOn()
+  ok(!!was && now?.id === was.id && now.name === was.name && now.kind === 'phone' && !now.relay, 'and the computer keeps it as it was: its name as the phone said it sealed, a phone, with no relay to follow', { was, now })
+  await test('honest')
+
   // ---------- two computers, and the one showing away ----------
   await test('net')
   relay2 = await startRelay('phone-link-2')
@@ -249,6 +297,7 @@ try {
   const pairApp = async (rel, k) => {
     const a = await phoneApp({ relay: rel.url, pairing: null, computers: [] })
     await a.p.goto(`${rel.url}/#pair=${(await k.api('/relay/pair', {})).pairing.code}`)
+    await a.p.locator('#pair-go').click({ timeout: 15000 })
     const kept = await until(() => a.p.evaluate(() => window.__posts.find((m) => m.type === 'keep' && m.pairing?.hostKey)?.pairing), 20000, 200)
     await a.c.close()
     return kept
@@ -365,6 +414,26 @@ try {
   say(`the browser, its relay not answering: ${safariMs} ms`, safari)
   ok(safariMs != null && safariMs < 9000, `in a browser, the relay not answering: it says so in ${s(safariMs)} (limit 9 s), instead of "Connecting…"`, safari || await look(p))
   await test('thaw')
+
+  // ---------- the app: only Desk's sealed word unpairs it ----------
+  const ctl2 = (what, q = '') => fetch(`${relay2.url}/_test/${what}${q}`, { method: 'POST' })
+  await ctl2('forge', '?as=refuse&why=not-paired')
+  const fk = await phoneApp({ relay: relay2.url, pairing: pair2, computers })
+  t0 = Date.now()
+  await fk.p.goto(`${relay2.url}/`)
+  const refusedApp = await saysIn(fk.p, /^Can't connect to Desk/, t0)
+  const forgot = () => fk.p.evaluate(() => window.__posts.some((m) => m.type === 'keep' && !m.pairing))
+  ok(refusedApp.ms != null && /couldn't be checked/.test(await fk.p.locator('#wait-text').innerText()) && !(await forgot()), 'the app, refused by Desk\'s relay in the clear: it says it couldn\'t check the answer, and keeps its pairing in the Keychain (it used to delete it)', refusedApp.l)
+  await ctl2('honest')
+  ok(!!(await until(async () => (await look(fk.p)).app, 25000, 200)) && !(await forgot()), 'and opens Desk once the relay is honest')
+  await fk.c.close()
+  const appOnDesk = (await kit2.api('/relay')).devices.find((d) => d.kind === 'phone')
+  await kit2.api(`/relay/devices/${appOnDesk.id}`, null, 'DELETE')
+  const gn = await phoneApp({ relay: relay2.url, pairing: pair2, computers })
+  await gn.p.goto(`${relay2.url}/`)
+  const unpaired = await until(() => gn.p.evaluate(() => (window.__posts.some((m) => m.type === 'keep' && m.pairing === null) && !document.getElementById('pair').hidden ? document.getElementById('pair-err').textContent : null)), 15000, 200)
+  ok(/removed on Desk/.test(unpaired || ''), 'Desk removes it: told so sealed, the app forgets the pairing and says why', unpaired)
+  await gn.c.close()
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
   if (kit) console.log(kit.log().slice(-1500))

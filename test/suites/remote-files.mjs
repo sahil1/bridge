@@ -154,6 +154,7 @@ try {
   const errors = []
   phone.on('pageerror', (e) => errors.push(e.message))
   await phone.goto(`${ra.url}/#pair=${code}`, { waitUntil: 'commit' })
+  await phone.locator('#pair-go').click({ timeout: 15000 }) // a pairing link asks first: one tap
   const app = () => phone.frames().find((f) => f !== phone.mainFrame() && f.url().startsWith(ra.url))
   // Not open: what the relay's page says instead (still pairing, offline, turned away), and the
   // phone's part goes no further.
@@ -233,6 +234,7 @@ try {
     await c.route('**/*', (r) => (r.request().isNavigationRequest() && r.request().frame().parentFrame() ? r.fulfill({ contentType: 'text/html', body: '<p>Bridge AI</p>' }) : r.continue()))
     const ip = await c.newPage()
     await ip.goto(`${ra.url}/#pair=${(await a.api('/relay/pair', {})).pairing.code}`)
+    await ip.locator('#pair-go').click({ timeout: 15000 })
     const paired = await until(() => ip.evaluate(() => window.__posts.some((m) => m.type === 'keep' && m.pairing?.hostKey)), 20000, 200)
     ok(!!paired, 'the iPhone app (stood in for) is paired with Studio')
     // As WebKit asks for a video: two bytes, then piece after piece, each a few kilobytes.
