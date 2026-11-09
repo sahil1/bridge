@@ -6,13 +6,16 @@ import { useTrial } from '../../trials.js'
 import { openMemory } from '../meetings/tools.jsx'
 import { t } from '../../i18n/index.js'
 import { MEETING_KEYS } from '../../../shared/mentions.js'
+import { Advanced, Line } from './Advanced.jsx'
 import '../meetings/meetings.css'
 
 // Settings › Meetings: which engine turns speech into text (on this computer, or a service you have
-// a key for), the language, recording the call's sound, the model that writes the notes, and where
-// they're saved, and the key that mentions a meeting in a message. Server: speech.js, meetings.js.
+// a key for), the language, names and terms, the model that writes the notes, calls and their sound,
+// and saving them as Markdown. Under Advanced: the other speech services, AI Assist in meetings, who
+// spoke, the key that mentions a meeting in a message, the floating card, and where and how notes
+// are saved. Server: speech.js, meetings.js.
 const LANGS = [['auto', 'Detect it'], ['en', 'English'], ['es', 'Spanish'], ['fr', 'French'], ['de', 'German'], ['it', 'Italian'], ['pt', 'Portuguese'], ['nl', 'Dutch'], ['hi', 'Hindi'], ['zh', 'Chinese'], ['ja', 'Japanese'], ['ko', 'Korean'], ['ar', 'Arabic'], ['ru', 'Russian'], ['pl', 'Polish'], ['tr', 'Turkish'], ['sv', 'Swedish'], ['uk', 'Ukrainian']]
-const home = (p) => String(p || '').replace(/^\/Users\/[^/]+/, '~')
+const tilde = (p) => String(p || '').replace(/^\/Users\/[^/]+/, '~')
 const WHAT = [['both', 'The summary and the transcript, two linked notes'], ['one', 'One note with everything'], ['summary', 'The summary only'], ['transcript', 'The transcript only']]
 
 // Where notes are saved, the way Granola's and Meetily's Obsidian plugins set it: for the summary
@@ -59,15 +62,15 @@ function SaveNotes({ set, pickFolder }) {
         </div>
       )}
       <p className="muted small">In the patterns: {'{year} {month} {day} {quarter} {date} {time} {title} {kind}'}. Empty subfolders: none.</p>
-      <p className="muted small mono mt-path">{d.example.map(home).join(' and ')}</p>
+      <p className="muted small mono mt-path">{d.example.map(tilde).join(' and ')}</p>
       <label className="st-check"><input type="checkbox" checked={f.frontmatter} onChange={(e) => put('frontmatter', 'frontmatter', e.target.checked)} />
-        <span><b>Front matter</b> <span className="muted small">YAML at the top of each note: the meeting's id, date, length, kind, people, and the link between the two notes.</span></span></label>
+        <span title="YAML at the top of each note: the meeting's id, date, length, kind, people, and the link between the two notes."><b>Front matter</b> <span className="muted small">{t("YAML at the top of each note: the meeting's date, people and more.")}</span></span></label>
       <div className="st-row st-speakers"><span>Speakers</span>
         <input className="st-input" value={f.you} onChange={(e) => setF({ ...f, you: e.target.value })} onBlur={(e) => e.target.value.trim() && e.target.value !== d.you && put('you', 'youLabel', e.target.value)} aria-label="Your mic, as" placeholder="You" />
         <input className="st-input" value={f.them} onChange={(e) => setF({ ...f, them: e.target.value })} onBlur={(e) => e.target.value.trim() && e.target.value !== d.them && put('them', 'themLabel', e.target.value)} aria-label="The call, as" placeholder="Them" />
       </div>
       <label className="st-check"><input type="checkbox" checked={f.keep} onChange={(e) => put('keep', 'keepSaved', e.target.checked)} />
-        <span><b>Keep saved notes up to date</b> <span className="muted small">A new summary, title or notes save the meeting again, except a note you've changed in your notes app, which is left as you made it. Off: a meeting is written once, and later changes stay in Bridge AI.</span></span></label>
+        <span title="A new summary, title or notes save the meeting again, except a note you've changed in your notes app, which is left as you made it. Off: a meeting is written once, and later changes stay in Bridge AI."><b>Keep saved notes up to date</b> <span className="muted small">{t('Saved again when it changes, unless you changed the note yourself.')}</span></span></label>
       {d.misplaced > 0 && (
         <div className="st-note"><Icon name="folder" size={13} /> {d.misplaced} saved meeting{d.misplaced === 1 ? ' is' : 's are'} somewhere these settings don't put them now.
           <button type="button" className="btn small" disabled={moving === '…'} onClick={move}>Move {d.misplaced === 1 ? 'it' : 'them'} here</button></div>
@@ -86,9 +89,9 @@ function ScreenNames() {
   return (
     <div className="st-row st-screen-names">
       <span><b>{t('Names from the call')}</b> <span className="muted small">{data.allowed
-        ? t("Screen Recording is on: as people talk, Bridge AI reads the names your call shows, to put them on the transcript. Only the words are kept, never the picture.")
+        ? t('Screen Recording is on: the names your call shows go on the transcript. Only the words are kept, never the picture.')
         : asked ? t('Turn on Bridge AI under System Settings › Privacy & Security › Screen & System Audio Recording, in Screen Recording.')
-          : t('Screen Recording lets Bridge AI read the names your call shows as people talk, to put them on the transcript. Only the words are kept, never the picture.')}</span></span>
+          : t('Screen Recording puts the names your call shows on the transcript. Only the words are kept, never the picture.')}</span></span>
       {!data.allowed && (asked
         ? <button type="button" className="btn small" onClick={() => api('/fix/settings', { method: 'POST', body: { pane: 'audio' } }).catch(() => {})}>{t('Open it')}</button>
         : <button type="button" className="btn small" onClick={async () => { setAsked(true); await api('/calls/screen', { method: 'POST' }).catch(() => {}); refresh() }}>{t('Allow')}</button>)}
@@ -103,32 +106,33 @@ function RoomVoices({ v, m, set, refresh }) {
   const on = (yes) => set({ roomVoices: yes }).then(() => { if (yes && !v.have) return api('/meetings/voices/download', { method: 'POST' }).then(refresh) }).catch((e) => setMsg(e.message))
   const forget = () => api('/meetings/voices/forget', { method: 'POST' }).then(() => { setMsg(t('Forgotten.')); refresh() }).catch((e) => setMsg(e.message))
   return (
-    <section className="st-sec st-voices">
+    <section className="st-sec st-voices" data-setting="who-spoke">
       <h4>{t('Who Spoke')}</h4>
       <label className="st-check">
         <input type="checkbox" checked={m.roomVoices === true} onChange={(e) => on(e.target.checked)} />
-        <span><b>{t('Tell voices apart in a room')}</b> <span className="muted small">{t('With your mic only (no call), each line says Speaker 1, Speaker 2 and so on, by voice, worked out on this computer. Name a speaker once and all their lines take the name.')} {t('It uses a small voice model ({model}, {mb} MB, {license}), downloaded the first time.', { model: v.label, mb: v.mb, license: v.license })} {v.live ? '' : t('On this computer it runs once a meeting ends, so the transcript keeps up while it records.')}</span></span>
+        <span title={`${t('With your mic only (no call), each line says Speaker 1, Speaker 2 and so on, by voice, worked out on this computer. Name a speaker once and all their lines take the name.')}${v.live ? '' : ` ${t('On this computer it runs once a meeting ends, so the transcript keeps up while it records.')}`}`}><b>{t('Tell voices apart in a room')}</b> <span className="muted small">{t('Speaker 1, Speaker 2 and so on, worked out on this computer.')} {t('It uses a small voice model ({model}, {mb} MB, {license}), downloaded the first time.', { model: v.label, mb: v.mb, license: v.license })}</span></span>
       </label>
       <label className="st-check">
         <input type="checkbox" checked={m.callVoices !== false} onChange={(e) => set({ callVoices: e.target.checked })} />
-        <span><b>{t('Tell voices apart on a call')}</b> <span className="muted small">{t("The call's sound is one for everyone on it, so each voice is told apart the same way, once the call ends, and named from what's said, who was invited and the names the call showed. By itself, on this computer: the model downloads after the first call with more than one other person.")}</span></span>
+        <span title={t("The call's sound is one for everyone on it, so each voice is told apart the same way, once the call ends, and named from what's said, who was invited and the names the call showed. By itself, on this computer: the model downloads after the first call with more than one other person.")}><b>{t('Tell voices apart on a call')}</b> <span className="muted small">{t('Once the call ends, on this computer.')}</span></span>
       </label>
       <label className="st-check">
         <input type="checkbox" checked={m.learnVoice !== false} onChange={(e) => set({ learnVoice: e.target.checked })} />
-        <span><b>{t('Learn my voice')}</b> <span className="muted small">{t("From your mic on calls, where every line is yours, so a meeting in a room knows which voice is you without your naming it. It's a few hundred numbers for how your voice sounds, on this computer only.")} {v.mine ? t('Learned.') : ''}</span></span>
+        <span title={t("From your mic on calls, where every line is yours, so a meeting in a room knows which voice is you without your naming it. It's a few hundred numbers for how your voice sounds, on this computer only.")}><b>{t('Learn my voice')}</b> <span className="muted small">{t('So a room knows which voice is you. Kept on this computer only.')} {v.mine ? t('Learned.') : ''}</span></span>
       </label>
       <ScreenNames />
       {v.downloading && <p className={`small ${v.downloading.error ? 'error-text' : 'muted'}`} role="status">{v.downloading.error || t('Downloading the voice model: {n}%', { n: v.downloading.percent })}</p>}
       <label className="st-check">
         <input type="checkbox" checked={m.rememberVoices === true} onChange={(e) => set({ rememberVoices: e.target.checked })} />
-        <span><b>{t('Remember voices you name')}</b> <span className="muted small">{t("Then someone you've named is named by their voice in the next meeting. What's kept is a few hundred numbers for how each voice sounds, with their name, on this computer only, and never sent anywhere.")}</span></span>
+        <span title={t("Then someone you've named is named by their voice in the next meeting. What's kept is a few hundred numbers for how each voice sounds, with their name, on this computer only, and never sent anywhere.")}><b>{t('Remember voices you name')}</b> <span className="muted small">{t('Named by voice next time. Kept on this computer only.')}</span></span>
       </label>
       {v.known > 0 && <div className="st-row"><button type="button" className="btn small" onClick={forget}><Icon name="trash" size={12} /> {v.known === 1 ? t('Forget {n} voice', { n: v.known }) : t('Forget {n} voices', { n: v.known })}</button></div>}
       {msg && <p className="muted small" role="status">{msg}</p>}
     </section>
   )
 }
-const openProviders = () => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'providers' } }))
+// Settings › Model Providers at its speech services, where their keys go; Settings › Voice.
+const openSpeechKeys = () => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'providers-speech' } }))
 const openVoice = () => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'voice' } }))
 
 export default function Meetings({ onOpenAgent }) {
@@ -150,14 +154,26 @@ export default function Meetings({ onOpenAgent }) {
   const card = !['off', 'menubar'].includes(m.floatCard) || (m.floatCard === 'menubar' && !mac)
   const model = d.local.models.find((x) => x.id === d.local.model)
   const pickFolder = window.bridgeApp?.pickFolder
+  // A speech service: first when it's the one picked or its key is saved, else under Advanced.
+  const service = (x) => (
+    <label key={x.id} className={`mt-engine ${d.engine === x.id ? 'on' : ''}`}>
+      <input type="radio" name="engine" checked={d.engine === x.id} onChange={() => set({ engine: x.id })} />
+      <span className="mt-engine-main"><b>{x.label}</b><small>{x.custom ? 'Its address, key and model, in Settings › Model Providers' : `${x.model}${x.price[x.model] ? `, ${x.price[x.model]} an hour` : ''}`}</small></span>
+      {x.ready ? <span className="mt-state good">Key saved</span> : <button type="button" className="link-btn" onClick={(e) => { e.preventDefault(); openSpeechKeys() }}>{x.custom ? 'Set it up' : 'Add a key'}</button>}
+    </label>
+  )
+  const mine = d.services.filter((x) => x.ready || d.engine === x.id)
+  const others = d.services.filter((x) => !mine.includes(x))
+  const prepWhy = home ? t("Fifteen minutes before a meeting with other people, AI Assist suggests goals and questions, with the model that writes your notes, from who's coming, last time with them, the invite and your mail with them. Off, it does this only when you ask, with AI Assist on the meeting in Calendar, or Prepare on Home.")
+    : t("Fifteen minutes before a meeting with other people, AI Assist suggests goals and questions, with the model that writes your notes, from who's coming, last time with them, the invite and your mail with them. Off, it does this only when you ask, with AI Assist on the meeting in Calendar.")
 
   return (
     <div className="st-sections st-meet">
       <SaveNote note={note} />
 
-      <section className="st-sec">
+      <section className="st-sec" data-setting="transcribe">
         <h4>Transcribe with</h4>
-        <p className="muted small">Speech is turned into text as you talk, a few seconds at a time. On this computer it's free and never leaves your Mac; a service is quicker on an older computer and costs a little per hour of audio.</p>
+        <p className="muted small" title={t("Speech is turned into text as you talk, a few seconds at a time. On this computer it's free and never leaves your Mac; a service is quicker on an older computer and costs a little per hour of audio.")}>{t('On this computer it\'s free and private; a service costs a little per hour of audio.')}</p>
         {d.auto && <p className="small">{d.engine === 'apple' ? t("Using the Mac's own speech until the speech model is on this computer. Pick one to keep it.") : t("Using the speech model on this computer when it's ready, else the Mac's own speech. Pick one to keep it.")}</p>}
         <div className="mt-engines" role="radiogroup" aria-label="Speech engine">
           <label className={`mt-engine ${d.engine === 'local' ? 'on' : ''}`}>
@@ -172,54 +188,47 @@ export default function Meetings({ onOpenAgent }) {
               <span className={`mt-state ${d.apple?.available ? 'good' : ''}`}>{d.apple?.available ? 'Ready' : 'Not on this Mac'}</span>
             </label>
           )}
-          {d.services.map((x) => (
-            <label key={x.id} className={`mt-engine ${d.engine === x.id ? 'on' : ''}`}>
-              <input type="radio" name="engine" checked={d.engine === x.id} onChange={() => set({ engine: x.id })} />
-              <span className="mt-engine-main"><b>{x.label}</b><small>{x.custom ? 'Its address, key and model, in Settings › Model Providers' : `${x.model}${x.price[x.model] ? `, ${x.price[x.model]} an hour` : ''}`}</small></span>
-              {x.ready ? <span className="mt-state good">Key saved</span> : <button type="button" className="link-btn" onClick={(e) => { e.preventDefault(); openProviders() }}>{x.custom ? 'Set it up' : 'Add a key'}</button>}
-            </label>
-          ))}
+          {mine.map(service)}
         </div>
+        {d.engine === 'local' && (
+          <div className="st-row" data-setting="meetings-speech-model">
+            <span className="muted small">{model?.have
+              ? t('{model}, the one voice notes and dictation use too.', { model: model.label })
+              : d.standIn === 'apple' ? t("{model} isn't downloaded yet, so the Mac's own speech is used until it is.", { model: model?.label || 'Parakeet' })
+                : t("{model} isn't downloaded yet. It downloads when your first meeting starts, or now from Settings › Voice.", { model: model?.label || 'Parakeet' })}</span>
+            <button type="button" className="btn small" onClick={openVoice}><Icon name="mic" size={12} /> {t('Speech models')}</button>
+          </div>
+        )}
       </section>
-
-      {d.engine === 'local' && (
-        <section className="st-sec">
-          <h4>{t('Speech model')}</h4>
-          <p className="muted small">{model?.have
-            ? t('{model}, the one voice notes and dictation use too.', { model: model.label })
-            : d.standIn === 'apple' ? t("{model} isn't downloaded yet, so the Mac's own speech is used until it is.", { model: model?.label || 'Parakeet' })
-              : t("{model} isn't downloaded yet. It downloads when your first meeting starts, or now from Settings › Voice.", { model: model?.label || 'Parakeet' })}</p>
-          <div className="st-row"><button type="button" className="btn small" onClick={openVoice}><Icon name="mic" size={12} /> {t('Speech models')}</button></div>
-        </section>
+      {others.length > 0 && (
+        <Advanced order={10}>
+          <section className="st-sec" data-setting="speech-services">
+            <h4>{t('Speech Services')}</h4>
+            <p className="muted small">{t('Quicker on an older computer. Each costs a little per hour of audio, with your own key.')}</p>
+            <div className="mt-engines" role="radiogroup" aria-label={t('Speech services')}>{others.map(service)}</div>
+          </section>
+        </Advanced>
       )}
 
-      <section className="st-sec">
-        <h4>Language</h4>
-        <select className="st-input" value={m.language || 'auto'} onChange={(e) => set({ language: e.target.value })} aria-label="Meeting language">
-          {LANGS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
-        </select>
-        <p className="muted small">An English-only model always listens for English.</p>
+      <section className="st-sec" data-setting="meeting-language">
+        <Line label={t('Language')} title={t('An English-only model always listens for English.')}>
+          <select className="st-input" value={m.language || 'auto'} onChange={(e) => set({ language: e.target.value })} aria-label="Meeting language">
+            {LANGS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+          </select>
+        </Line>
         {d.engine === 'local' && Array.isArray(model?.languages) && m.language && m.language !== 'auto' && !model.languages.includes(m.language) && <p className="st-note warn small"><Icon name="info" size={13} /> {t("{model} doesn't hear this language. Pick Whisper in Settings › Voice, or a speech service above.", { model: model.label })}</p>}
       </section>
 
-      <section className="st-sec">
+      <section className="st-sec" data-setting="names-terms">
         <h4>Names and terms</h4>
-        <p className="muted small">{t("Memory keeps the people, organizations and words from your meetings and dictations: how they're spelled, how they get misheard, who and what they are. The speech engine listens for them, transcripts show them fixed, and notes get them right. It grows as you fix words and as summaries are written.")}</p>
+        <p className="muted small" title={t("Memory keeps the people, organizations and words from your meetings and dictations: how they're spelled, how they get misheard, who and what they are. The speech engine listens for them, transcripts show them fixed, and notes get them right. It grows as you fix words and as summaries are written.")}>{t("Memory keeps the names and words from your meetings and dictations, so they're heard and spelled right.")}</p>
         <div className="st-row"><button type="button" className="btn small" onClick={() => (onOpenAgent ? onOpenAgent('view:memory') : openMemory())}><Icon name="book" size={12} /> {t('Open Memory')}</button></div>
-        <p className="muted small">More words to listen for, if you like (the meeting's title and invitees are added by themselves):</p>
-        <input className="st-input" value={vocab ?? ''} onChange={(e) => setVocab(e.target.value)} onBlur={() => vocab !== (m.vocabulary || '') && set({ vocabulary: vocab.trim() })} placeholder="e.g. Kubernetes, OKRs" aria-label="More words to listen for" />
+        <input className="st-input" value={vocab ?? ''} onChange={(e) => setVocab(e.target.value)} onBlur={() => vocab !== (m.vocabulary || '') && set({ vocabulary: vocab.trim() })} placeholder={t('More words to listen for, e.g. Kubernetes, OKRs')} aria-label="More words to listen for" title={t("The meeting's title and invitees are added by themselves.")} />
       </section>
 
-      <section className="st-sec">
-        <h4>The call's sound</h4>
-        <label className="st-check">
-          <input type="checkbox" checked={m.callAudio !== false} onChange={(e) => set({ callAudio: e.target.checked })} disabled={!d.canRecordCall} />
-          <span><b>Record the other side of calls</b> <span className="muted small">{d.canRecordCall ? 'What your Mac plays (Zoom, Meet, Teams), so the transcript says who said what: You, or Them. macOS asks once to allow System Audio Recording.' : 'On a Mac with macOS 14.2 or later. Here your mic records the meeting, which still hears a call on speakers.'}</span></span>
-        </label>
-      </section>
-
-      <section className="st-sec">
+      <section className="st-sec" data-setting="notes-model">
         <h4>Notes are written by</h4>
+        <p className="muted small">{t('It gets the transcript, and the invite and files that go with the meeting.')}</p>
         <select className="st-input" value={m.model || ''} onChange={(e) => set({ model: e.target.value || null })} aria-label="Model for meeting notes">
           <option value="">Automatic (your Claude sign-in first, then a key or a local model)</option>
           {(models || []).map((x) => <option key={x.id} value={x.id}>{x.label} ({x.provider})</option>)}
@@ -228,88 +237,106 @@ export default function Meetings({ onOpenAgent }) {
           <input type="checkbox" checked={m.autoSummary !== false} onChange={(e) => set({ autoSummary: e.target.checked })} />
           <span><b>Write the summary when a meeting ends</b> <span className="muted small">Otherwise, Summarize on the meeting when you want it.</span></span>
         </label>
-        <label className="st-check">
-          <input type="checkbox" checked={m.cleanup ?? m.autoSummary !== false} onChange={(e) => set({ cleanup: e.target.checked })} />
-          <span><b>Clean up the transcript when a meeting ends</b> <span className="muted small">The model fixes misheard words and names from what the meeting is about (its invite, files and Memory) and leaves out words nobody said. Each fixed line says what was heard, and Undo puts it back.</span></span>
-        </label>
-        <label className="st-check">
-          <input type="checkbox" checked={m.assist === true} onChange={(e) => set({ assist: e.target.checked })} />
-          <span><b>Suggest what to ask, in every meeting</b> <span className="muted small">While a meeting records, AI Assist reads along with the model that writes your notes and suggests what to ask or check next, from what's said, the invite and the files that go with it. AI Assist › Suggest what to ask on a meeting turns it on or off there, and for the meetings after.</span></span>
-        </label>
-        <label className="st-row" title="The slider on a meeting's Suggestions, while it records, changes it too">
-          <span>How often it suggests something</span>
-          <select className="st-input" value={['low', 'high'].includes(m.assistLevel) ? m.assistLevel : 'medium'} onChange={(e) => set({ assistLevel: e.target.value })} aria-label="How often AI Assist suggests something">
-            <option value="low">Low: one thing, every few minutes, only when something stands out</option>
-            <option value="medium">Medium: up to three, about once a minute</option>
-            <option value="high">High: up to three, about every 30 seconds</option>
-          </select>
-        </label>
-        {calendar && <label className="st-check">
-          <input type="checkbox" checked={m.prep !== false} onChange={(e) => set({ prep: e.target.checked })} />
-          <span><b>{t('Prepare for each meeting')}</b> <span className="muted small">{home ? t("Fifteen minutes before a meeting with other people, AI Assist suggests goals and questions, with the model that writes your notes, from who's coming, last time with them, the invite and your mail with them. Off, it does this only when you ask, with AI Assist on the meeting in Calendar, or Prepare on Home.")
-            : t("Fifteen minutes before a meeting with other people, AI Assist suggests goals and questions, with the model that writes your notes, from who's coming, last time with them, the invite and your mail with them. Off, it does this only when you ask, with AI Assist on the meeting in Calendar.")}{window.bridgeApp?.desktop && ` ${t('In the desktop app, the floating card shows them ten minutes before, with Join.')}`}</span></span>
-        </label>}
-        <label className="st-check">
-          <input type="checkbox" checked={m.nameSpeakers !== false} onChange={(e) => set({ nameSpeakers: e.target.checked })} />
-          <span><b>Name who spoke on the call</b> <span className="muted small">Before the first summary, the model works out who said each of Them's lines from names said, the invite and the screen. On a Mac, a watched screen is read while the call talks, and those pictures aren't kept. With one other person invited, it's them. In a room, the voices told apart are named the same way.</span></span>
-        </label>
-        <p className="muted small">Your own instructions for every summary, if you like:</p>
-        <textarea className="st-input" rows={2} value={instr ?? ''} onChange={(e) => setInstr(e.target.value)} onBlur={() => instr !== (m.instructions || '') && set({ instructions: instr.trim() })} placeholder="e.g. Keep it under ten bullets. Note any numbers mentioned." />
       </section>
 
-      {d.voices?.offered && <RoomVoices v={d.voices} m={m} set={set} refresh={() => sp.refresh()} />}
-
-      <section className="st-sec">
-        <h4>{t('Mention a Meeting')}</h4>
-        <div className="st-row"><span>{t('In a message, with')}</span>
-          <select className="st-input" value={MEETING_KEYS.includes(m.mentionKey) ? m.mentionKey : '@'} onChange={(e) => set({ mentionKey: e.target.value === '@' ? null : e.target.value })} aria-label={t('The key that mentions a meeting')}>
-            {MEETING_KEYS.map((k) => <option key={k} value={k}>{k === '@' ? t('@, with the files') : k}</option>)}
-          </select>
-        </div>
-        <p className="muted small">{t('In an agent\'s message box, type it and a few words of the meeting\'s name, and pick it: the agent gets the meeting as a file to read, with its summary and action items, your notes and the transcript.')} {t('Meetings recorded on your other computers are offered too.')}</p>
-      </section>
-
-      <section className="st-sec">
+      <section className="st-sec" data-setting="calls">
         <h4>Calls</h4>
+        <label className="st-check" data-setting="call-audio">
+          <input type="checkbox" checked={m.callAudio !== false} onChange={(e) => set({ callAudio: e.target.checked })} disabled={!d.canRecordCall} />
+          <span><b>Record the other side of calls</b> <span className="muted small">{d.canRecordCall ? t('What your Mac plays (Zoom, Meet, Teams), so the transcript says You or Them. macOS asks once.') : 'On a Mac with macOS 14.2 or later. Here your mic records the meeting, which still hears a call on speakers.'}</span></span>
+        </label>
         <label className="st-check">
           <input type="checkbox" checked={m.detect !== false} onChange={(e) => set({ detect: e.target.checked })} disabled={!d.canWatchCalls} />
-          <span><b>Notice calls</b> <span className="muted small">{d.canWatchCalls ? 'When Zoom, Teams, Meet, FaceTime, Slack or another call app starts using your mic, offer to take notes; when the call ends, offer to stop. Nothing is recorded until you say so.' : 'In the desktop app on a Mac with macOS 14 or later.'}</span></span>
+          <span title={d.canWatchCalls ? 'When Zoom, Teams, Meet, FaceTime, Slack or another call app starts using your mic, offer to take notes; when the call ends, offer to stop. Nothing is recorded until you say so.' : undefined}><b>Notice calls</b> <span className="muted small">{d.canWatchCalls ? t('Offer to take notes when a call starts. Nothing is recorded until you say so.') : 'In the desktop app on a Mac with macOS 14 or later.'}</span></span>
         </label>
         <label className="st-check">
           <input type="checkbox" checked={m.autoStop !== false} onChange={(e) => set({ autoStop: e.target.checked })} disabled={!d.canWatchCalls || m.detect === false} />
           <span><b>Stop by itself when the call ends</b> <span className="muted small">Two minutes after, unless you keep it going.</span></span>
         </label>
-        {window.bridgeApp?.desktop && (
-          <div className="st-row">
-            <span>The floating card</span>
-            <select className="st-input" value={m.floatCard === 'menubar' && !mac ? 'meetings' : m.floatCard || 'meetings'} onChange={(e) => set({ floatCard: e.target.value })} aria-label="The floating card">
-              <option value="meetings">During calls and meetings</option>
-              <option value="always">Always, with what needs you</option>
-              {mac && <option value="menubar">In the menu bar instead</option>}
-              <option value="off">Off</option>
-            </select>
-          </div>
-        )}
-        {window.bridgeApp?.desktop && card && (
-          <label className="st-check">
-            <input type="checkbox" checked={m.floatHover !== false} onChange={(e) => set({ floatHover: e.target.checked })} />
-            <span><b>Open it when I point at it</b> <span className="muted small">Otherwise it stays a slim bar until you click it.</span></span>
-          </label>
-        )}
-        {window.bridgeApp?.desktop && <p className="muted small">{card
-          ? `A small card over your other windows: the recording, with Pause and Stop, and Take notes when a call starts. Drag it anywhere.${mac ? ' Sharing your screen? Most sharing apps show it, so move it to the menu bar from the card first.' : ''}`
-          : m.floatCard === 'menubar' && mac ? 'The time in the menu bar while a meeting records, with Pause, Stop and the meeting in its menu, and Take notes when a call starts. It stays out of a window you share.' : 'Nothing over your other windows. While a meeting records, it shows at the top of Bridge AI.'}</p>}
       </section>
 
-      <section className="st-sec">
-        <h4>Save notes as Markdown</h4>
-        <p className="muted small">Save on a meeting writes it for Obsidian or any notes app, laid out like Granola's and Meetily's Obsidian plugins, so they sit side by side.</p>
-        <SaveNotes set={set} pickFolder={pickFolder} />
+      <section className="st-sec" data-setting="save-markdown">
         <label className="st-check">
           <input type="checkbox" checked={m.autoSave !== false} onChange={(e) => set({ autoSave: e.target.checked, ...(m.folder ? {} : { folder: d.folder }) })} />
-          <span><b>Save every meeting there by itself</b> <span className="muted small">As it ends, and again with its summary once that's written.</span></span>
+          <span title={t('As it ends, and again with its summary once that\'s written.')}><b>{t('Save every meeting as Markdown')}</b> <span className="muted small">{t('In {folder}, for Obsidian or any notes app.', { folder: tilde(d.folder) })}</span></span>
         </label>
       </section>
+
+      <Advanced order={20}>
+        <section className="st-sec" data-setting="meeting-assist">
+          <h4 className="st-wand"><Icon name="wand" size={13} /> {t('AI Assist')}</h4>
+          <label className="st-check">
+            <input type="checkbox" checked={m.cleanup ?? m.autoSummary !== false} onChange={(e) => set({ cleanup: e.target.checked })} />
+            <span title="The model fixes misheard words and names from what the meeting is about (its invite, files and Memory) and leaves out words nobody said. Each fixed line says what was heard, and Undo puts it back."><b>Clean up the transcript when a meeting ends</b> <span className="muted small">{t('Misheard words and names fixed; Undo puts a line back.')}</span></span>
+          </label>
+          <label className="st-check">
+            <input type="checkbox" checked={m.assist === true} onChange={(e) => set({ assist: e.target.checked })} />
+            <span title="While a meeting records, AI Assist reads along with the model that writes your notes and suggests what to ask or check next, from what's said, the invite and the files that go with it. AI Assist › Suggest what to ask on a meeting turns it on or off there, and for the meetings after."><b>Suggest what to ask, in every meeting</b> <span className="muted small">{t('While a meeting records, what to ask or check next.')}</span></span>
+          </label>
+          <label className="st-row" title="The slider on a meeting's Suggestions, while it records, changes it too">
+            <span>How often it suggests something</span>
+            <select className="st-input" value={['low', 'high'].includes(m.assistLevel) ? m.assistLevel : 'medium'} onChange={(e) => set({ assistLevel: e.target.value })} aria-label="How often AI Assist suggests something">
+              <option value="low">Low: one thing, every few minutes, only when something stands out</option>
+              <option value="medium">Medium: up to three, about once a minute</option>
+              <option value="high">High: up to three, about every 30 seconds</option>
+            </select>
+          </label>
+          {calendar && <label className="st-check" data-setting="prep">
+            <input type="checkbox" checked={m.prep !== false} onChange={(e) => set({ prep: e.target.checked })} />
+            <span title={`${prepWhy}${window.bridgeApp?.desktop ? ` ${t('In the desktop app, the floating card shows them ten minutes before, with Join.')}` : ''}`}><b>{t('Prepare for each meeting')}</b> <span className="muted small">{t('Goals and questions, fifteen minutes before a meeting with other people.')}</span></span>
+          </label>}
+          <label className="st-check">
+            <input type="checkbox" checked={m.nameSpeakers !== false} onChange={(e) => set({ nameSpeakers: e.target.checked })} />
+            <span title="Before the first summary, the model works out who said each of Them's lines from names said, the invite and the screen. On a Mac, a watched screen is read while the call talks, and those pictures aren't kept. With one other person invited, it's them. In a room, the voices told apart are named the same way."><b>Name who spoke on the call</b> <span className="muted small">{t("From names said, the invite and the screen, before the first summary.")}</span></span>
+          </label>
+          <textarea className="st-input" rows={2} value={instr ?? ''} onChange={(e) => setInstr(e.target.value)} onBlur={() => instr !== (m.instructions || '') && set({ instructions: instr.trim() })} placeholder="e.g. Keep it under ten bullets. Note any numbers mentioned." aria-label={t('Your own instructions for every summary')} title={t('Your own instructions for every summary, if you like')} />
+        </section>
+      </Advanced>
+
+      {d.voices?.offered && <Advanced order={30}><RoomVoices v={d.voices} m={m} set={set} refresh={() => sp.refresh()} /></Advanced>}
+
+      <Advanced order={40}>
+        <section className="st-sec" data-setting="mention-meeting">
+          <Line label={t('Mention a Meeting')} hint={t('Type it in a message box to give an agent a meeting to read.')}
+            title={`${t('In an agent\'s message box, type it and a few words of the meeting\'s name, and pick it: the agent gets the meeting as a file to read, with its summary and action items, your notes and the transcript.')} ${t('Meetings recorded on your other computers are offered too.')}`}>
+            <select className="st-input" value={MEETING_KEYS.includes(m.mentionKey) ? m.mentionKey : '@'} onChange={(e) => set({ mentionKey: e.target.value === '@' ? null : e.target.value })} aria-label={t('The key that mentions a meeting')}>
+              {MEETING_KEYS.map((k) => <option key={k} value={k}>{k === '@' ? t('@, with the files') : k}</option>)}
+            </select>
+          </Line>
+        </section>
+      </Advanced>
+
+      {window.bridgeApp?.desktop && (
+        <Advanced order={50}>
+          <section className="st-sec" data-setting="float-card">
+            <Line label={t('The floating card')} hint={card
+              ? t('Over your other windows: the recording, with Pause and Stop, and Take notes when a call starts.')
+              : m.floatCard === 'menubar' && mac ? t('The time in the menu bar while a meeting records. It stays out of a window you share.') : t('Nothing over your other windows.')}
+              title={card && mac ? t('Sharing your screen? Most sharing apps show it, so move it to the menu bar from the card first.') : undefined}>
+              <select className="st-input" value={m.floatCard === 'menubar' && !mac ? 'meetings' : m.floatCard || 'meetings'} onChange={(e) => set({ floatCard: e.target.value })} aria-label="The floating card">
+                <option value="meetings">During calls and meetings</option>
+                <option value="always">Always, with what needs you</option>
+                {mac && <option value="menubar">In the menu bar instead</option>}
+                <option value="off">Off</option>
+              </select>
+            </Line>
+            {card && (
+              <label className="st-check">
+                <input type="checkbox" checked={m.floatHover !== false} onChange={(e) => set({ floatHover: e.target.checked })} />
+                <span><b>Open it when I point at it</b> <span className="muted small">Otherwise it stays a slim bar until you click it.</span></span>
+              </label>
+            )}
+          </section>
+        </Advanced>
+      )}
+
+      <Advanced order={60}>
+        <section className="st-sec" data-setting="save-notes">
+          <h4>Save notes as Markdown</h4>
+          <p className="muted small" title={t("Save on a meeting writes it for Obsidian or any notes app, laid out like Granola's and Meetily's Obsidian plugins, so they sit side by side.")}>{t("Laid out like Granola's and Meetily's Obsidian plugins.")}</p>
+          <SaveNotes set={set} pickFolder={pickFolder} />
+        </section>
+      </Advanced>
     </div>
   )
 }

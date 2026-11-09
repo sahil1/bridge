@@ -4,14 +4,15 @@ import { api, usePoll, viaRelay } from '../../api.js'
 import { useSettings, SaveNote } from './General.jsx'
 import Dictation from './Dictation.jsx'
 import SpokenAnswers from '../../voice/SpokenAnswers.jsx'
+import { Advanced } from './Advanced.jsx'
 import { t } from '../../i18n/index.js'
 import '../meetings/meetings.css'
 
 // Settings › Voice: the speech models this computer can run (the ones it can't aren't listed), the
 // one voice notes, dictation and meetings use, and their downloads. Parakeet first; Whisper, for the
 // languages Parakeet doesn't hear, folded away until it's wanted. Server: speech.js (status, and
-// what this computer can run), voice.js. Then dictation's own settings (Dictation.jsx), and the
-// voice that reads the Chief of Staff's answers aloud (voice/SpokenAnswers.jsx).
+// what this computer can run), voice.js. Then dictation's own settings (Dictation.jsx), and under
+// Advanced the voice that reads the Chief of Staff's answers aloud (voice/SpokenAnswers.jsx).
 const size = (mb) => (mb >= 1000 ? t('{n} GB', { n: (mb / 1000).toFixed(1) }) : t('{n} MB', { n: mb }))
 const heard = (l) => (l === 'auto' ? t('about 100 languages') : l?.length === 1 ? t('English only') : t('{n} languages', { n: l?.length || 0 }))
 
@@ -76,9 +77,9 @@ export default function Voice() {
           : t("{from} can't run on this computer, so {to} is used here.", { from: fell.fromLabel || fell.from, to: fell.toLabel })}</p>
       )}
 
-      <section className="st-sec">
+      <section className="st-sec" data-setting="speech-model">
         <h4>{t('Speech to text')}</h4>
-        <p className="muted small">{t('Voice notes, dictation and meetings are turned into text on this computer by the speech model you pick here. What you say never leaves it. Each model is one download, from Hugging Face.')}</p>
+        <p className="muted small" title={t('Voice notes, dictation and meetings are turned into text on this computer by the speech model you pick here. What you say never leaves it. Each model is one download, from Hugging Face.')}>{t('Voice notes, dictation and meetings are turned into text here: what you say never leaves this computer.')}</p>
         {v.standIn === 'apple' && <p className="small">{t("Until {model} is downloaded, the Mac's own speech turns what you say into text.", { model: v.model.label })}</p>}
         <ul className="mt-models" aria-label={t('Speech models')}>
           {parakeets.map(row)}
@@ -90,8 +91,8 @@ export default function Voice() {
           )}
         </ul>
         {whispers.length > 0 && (
-          <details className="st-adv st-whisper" open={whisperOpen}>
-            <summary>{t('Whisper, for other languages')}</summary>
+          <details className="st-fold st-whisper" open={whisperOpen} data-setting="whisper">
+            <summary><Icon name="chevron" size={12} />{t('Whisper, for other languages')}</summary>
             <p className="muted small">{t('Whisper hears about 100 languages, through whisper.cpp, a free program installed separately.')}</p>
             <ul className="mt-models" aria-label={t('Whisper models')}>{whispers.map(row)}</ul>
             {!whisperHere && !viaRelay && (d.local.installCommand
@@ -103,7 +104,7 @@ export default function Voice() {
         {d.hidden?.length > 0 && <p className="muted small">{t('More speech models are offered on other computers.')}</p>}
       </section>
       <Dictation />
-      <SpokenAnswers />
+      <Advanced order={60}><div data-setting="spoken-answers"><SpokenAnswers /></div></Advanced>
     </div>
   )
 }
