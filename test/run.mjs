@@ -165,7 +165,7 @@ const runOne = (j, attempt) => new Promise((resolve) => {
     const how = signal ? `stopped by ${signal}` : `exit code ${code}`
     const last = text.trim().split('\n').reverse().find((l) => /: \d+ passed, \d+ failed/.test(l)) || (text.trim() ? `(no result, ${how}: see the log)` : `(no output at all, ${how})`)
     // A crash says where in the test it was (from its stack), and a page that crashed says so: a
-    // flaky one's log isn't kept in CI, so its line is all there is to go on.
+    // flaky one's line is what's read first.
     const lines = text.split('\n')
     const fails = lines.flatMap((l, i) => {
       if (l.startsWith('the page crashed')) return [`FAIL ${l}`]
@@ -192,6 +192,10 @@ await Promise.all(Array.from({ length: Math.min(lanes, jobs.length) }, async () 
     results.push({ j, r })
     console.log(`${r.ok ? (r.flaky ? 'FLAKY' : 'ok   ') : 'FAIL '} ${j.label}: ${r.line} (${Math.round(r.ms / 1000)} s)${r.flaky ? `: failed once (${(r.flaky.fails.length ? r.flaky.fails.slice(0, 2).join('; ') : r.flaky.line).slice(0, 200)}), passed on its own` : ''}`)
     if (!r.ok) for (const f of r.fails.slice(0, 8)) console.log(`        ${f.slice(0, 300)}`)
+    // CI keeps the logs of a run that failed, not of one that passed when tried again: the end of
+    // the try that failed is in the job's log instead, folded, with what a crash printed (its stack,
+    // its servers' last words).
+    if (r.flaky && process.env.GITHUB_ACTIONS) console.log(`::group::${j.label}: the end of the try that failed\n${fs.readFileSync(r.flaky.log, 'utf8').slice(-8000)}\n::endgroup::`)
   }
 }))
 const failed = results.filter((x) => !x.r.ok)
