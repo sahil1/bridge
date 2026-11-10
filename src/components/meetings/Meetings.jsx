@@ -26,6 +26,7 @@ import { InsightsView } from './insights.jsx'
 import { PeopleView } from './people.jsx'
 import Memory from '../memory/Memory.jsx'
 import { setMemoryAll } from '../memory/open.js'
+import { sayPlace } from '../../backForward.js'
 
 // The meeting pages: the list of meetings, and one meeting with your notes beside its transcript, the
 // summary, questions about it, and its action items for the Chief of Staff. The recording itself is
@@ -227,6 +228,8 @@ export function MeetingsHome({ onOpen }) {
     window.addEventListener('bridge-meetings-tab', on)
     return () => window.removeEventListener('bridge-meetings-tab', on)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  // Which tab, for Back and Forward (src/backForward.js): Memory, Insights and People are places.
+  useEffect(() => { sayPlace('view:meetings', tab, tab === 'list' ? null : t(HOME_TABS.find(([v]) => v === tab)?.[2] || '')) }, [tab])
   const list = all.filter((x) => (place === ':archived' ? x.archived : !x.archived && (!place || x.folder === place))).filter((x) => !q.trim() || !hits || hits.results.has(x.id))
   // What was asked for last, to carry on once the mic is allowed (MicFix).
   const last = useRef(null)

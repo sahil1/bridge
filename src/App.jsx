@@ -47,6 +47,8 @@ import NeedsHome, { Everything, useHome, needCount, editHome } from './component
 import More from './components/More.jsx'
 import RemoteAgent from './components/RemoteAgent.jsx'
 import Dictation from './dictation/Dictation.jsx'
+import BackForward from './components/BackForward.jsx'
+import { start as navStart, stop as navStop, seen as navSeen, recheck as navRecheck, usePlaces, placeOf, placeLabel, showPlaceIn, replacedWith, renamedTab, slotOf } from './backForward.js'
 import { t, tx } from './i18n/index.js'
 
 const MIN_PANE = 420
@@ -416,6 +418,9 @@ function App() {
       if (a?.chief) { setMtab('mate'); setMobileAgent(null); setMateId(paneId) } else { setMtab('agents'); setMobileAgent(paneId) }
       return
     }
+    // Back from it shows the one it replaced in that tab again (src/backForward.js); not Home's New,
+    // which an agent started there takes for good.
+    if (replace && replace !== 'view:new' && wsRef.current.tabs.includes(replace) && !wsRef.current.tabs.includes(paneId)) replacedWith(replace, paneId)
     setW((w) => {
       // In the tab it replaces: where that one was, or, when that one was behind another (a meeting
       // opened from Dictations' Memory while Meetings waits in a tab), to the front as any tab opened is.
@@ -510,6 +515,7 @@ function App() {
       else if (d.list) openAgentRef.current?.('view:whiteboards', { replace: d.replace || null })
       else if (d.renamed) {
         const from = `${BOARD}${d.renamed.from}`, to = `${BOARD}${d.renamed.to}`
+        renamedTab(from, to)
         setW((w) => (!w.tabs.includes(from) || w.tabs.includes(to) ? w : { ...w, tabs: w.tabs.map((x) => (x === from ? to : x)), active: w.active === from ? to : w.active, side: w.side === from ? to : w.side }))
       }
     }
@@ -842,6 +848,7 @@ function App() {
       <div className="top-left">
       <img className="mark" src={`${import.meta.env.BASE_URL}mark.svg`} alt="Bridge AI" width="24" height="24" />
       {railBtn}
+      {wide && <BackForward />}
       {!cloudOnly && <Quiet name="Devices menu"><MachineMenu phone={!wide} elsewhere={homeNeeds || ny.data ? needElse : null} /></Quiet>}
       {wide && liveView && (
         <nav className="view-tabs" role="tablist" aria-label={t('View')}>
@@ -934,6 +941,81 @@ function App() {
                 : <section className="pane view-pane"><MeetingPage id={id.slice(13)} onBack={onBack || (() => openAgent('view:meetings', { replace: id }))} /></section>}
     </ErrorBoundary>
   )
+
+  // ---------- Back and Forward (src/backForward.js, a beta feature) ----------
+  // On a computer's layout, once the window has what it shows (its agents and settings). What's on
+  // screen is a place: Herdr's view, a section of Settings, Today or the Agents board full size, or
+  // the tab in front (and the one beside it), full size or not, with where it is inside itself (an
+  // agent's Chat or Terminal, Meetings' Memory, the folder Files is in).
+  const navReady = useRef(false)
+  if (fleet && conf) navReady.current = true
+  const navOn = conf?.trials?.['back-forward'] === true && wide && !cloudOnly && navReady.current
+  usePlaces(navOn)
+  // rough: before the view has said where it is (its code on its way): what it says next is the same step.
+  const saidIn = W.active ? placeOf(W.active) : null
+  const navPlace = !navOn ? null : view === 'herdr' ? { herdr: true }
+    : settings ? (placeOf('settings') ? { settings: placeOf('settings') } : { settings, rough: true })
+      : L.max === 'dock' ? { max: 'dock', today: todayTab }
+        : L.max === 'board' ? { max: 'board' }
+          : { tab: W.active || null, side: W.split && W.side && W.side !== W.active ? W.side : null, max: L.max || null, inner: saidIn ?? null, ...(saidIn === undefined ? { rough: true } : {}) }
+  const navKey = navPlace ? JSON.stringify(navPlace) : ''
+  const byIdRef = useRef(byId)
+  byIdRef.current = byId
+  const tabOpen = (id) => wsRef.current.tabs.includes(id)
+  // Where a view or an agent was inside itself: there again as it shows (an agent's Chat or
+  // Terminal kept as the tab keeps it; Meetings' tab and Files' folder told to the view).
+  const showInner = (id, v) => {
+    if (v == null) return
+    if (id === 'view:meetings') { store.set('cc-meet-tab', v); window.dispatchEvent(new CustomEvent('bridge-meetings-tab', { detail: { tab: v } })); return }
+    if (isView(id) || isRemote(id) || id.startsWith('tab:')) { showPlaceIn(id, v); return }
+    try { localStorage.setItem('cc-agent-views', JSON.stringify({ ...JSON.parse(localStorage.getItem('cc-agent-views') || '{}'), [id]: v })) } catch { /* private mode */ }
+    setTimeout(() => window.dispatchEvent(new CustomEvent('cc-set-view', { detail: { paneId: id, view: v } })), 60)
+  }
+  const showPlace = (pl) => {
+    if (pl.herdr) { setSettings(null); setView('herdr'); return }
+    setView('command')
+    if (pl.settings) { window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: pl.settings } })); return }
+    setSettings(null)
+    if (pl.max === 'dock') { if (pl.today) setTodayTab(pl.today); set({ max: 'dock', dockMin: false, todayOpen: true }); return }
+    if (pl.max === 'board') { set({ max: 'board', boardMin: false }); return }
+    set({ max: pl.max || null })
+    if (!pl.tab) return
+    // Its tab, or the one that took its place since (a meeting in Meetings' tab), which it takes back.
+    const slot = slotOf(pl.tab, tabOpen)
+    if (!slot) return
+    if (slot !== pl.tab) replacedWith(slot, pl.tab)
+    showInner(pl.tab, pl.inner)
+    setW((w) => {
+      const tabs = w.tabs.map((x) => (x === slot ? pl.tab : x))
+      const side = pl.side && pl.side !== pl.tab && tabs.includes(pl.side) ? pl.side : null
+      return { ...w, tabs, active: pl.tab, side, split: !!side, group: 'main' }
+    })
+  }
+  const TODAY_NAMES = { overview: [tx('Today'), 'today'], calendar: [tx('Calendar'), 'calendar'], mail: [tx('Mail'), 'mail'], markets: [tx('Markets & News'), 'trend'], usage: [tx('Usage'), 'gauge'] }
+  // How a place is named in ‹'s and ›'s lists.
+  const describePlace = (pl) => {
+    if (pl.herdr) return { label: 'Herdr', icon: 'layers' }
+    if (pl.settings) return { label: placeLabel('settings') || t('Settings'), icon: 'settings' }
+    if (pl.max === 'dock') { const [name, icon] = TODAY_NAMES[pl.today] || TODAY_NAMES.overview; return { label: pl.today && pl.today !== 'overview' ? `${t('Today')} › ${t(name)}` : t('Today'), icon } }
+    if (pl.max === 'board') return { label: t('Agents'), icon: 'grid' }
+    if (!pl.tab) return { label: t('New'), icon: 'plus' }
+    const a = byIdRef.current[pl.tab]
+    const name = !a ? null : a.view || a.remote || a.shellTab ? a.title : agentName(a)
+    const icon = a?.view ? a.icon : a?.chief ? 'helm' : a?.shellTab ? 'terminal' : a?.remote ? 'laptop' : 'bot'
+    return { label: [name || t('Agent'), placeLabel(pl.tab)].filter(Boolean).join(' › '), icon }
+  }
+  const navHooks = useRef({})
+  navHooks.current = { show: showPlace, valid: (pl) => !pl.tab || !!slotOf(pl.tab, tabOpen), describe: describePlace }
+  useEffect(() => {
+    if (!navOn) return
+    navStart({ show: (pl) => navHooks.current.show(pl), valid: (pl) => navHooks.current.valid(pl), describe: (pl) => navHooks.current.describe(pl) })
+    return () => navStop()
+  }, [navOn])
+  useEffect(() => { if (navOn) navSeen(navPlace, navKey) }, [navKey, navOn]) // eslint-disable-line react-hooks/exhaustive-deps
+  // A tab closed: its places are passed over, and ‹ or › greyed when there's none left that way.
+  const openTabs = W.tabs.join('\n')
+  useEffect(() => { navRecheck() }, [openTabs])
+
   // ---------- Phone ----------
   // The phone's Cloud agents: their list (or the first key), and one agent at a time.
   if (cloudOnly) {

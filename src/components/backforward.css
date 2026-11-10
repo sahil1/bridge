@@ -1,0 +1,13 @@
+/* ============ Back and Forward (BackForward.jsx) ============ */
+/* ‹ and › after the sidebar's button, as Safari's and Finder's are: two of the bar's quiet buttons,
+   a little closer to each other than the bar's others, greyed with nowhere to go. */
+.nav-arrows { display: inline-flex; align-items: center; gap: 2px; }
+.top-left .rail-btn + .nav-arrows { margin-left: -8px; }
+.app.wide .topbar .nav-btn { width: 30px; }
+.app.wide .topbar .nav-btn > .icon { width: 17px; height: 17px; }
+.nav-btn:disabled:hover { background: none; color: var(--ink-3); }
+/* The places one way, held or right-clicked: under the button, each on one line. */
+.nav-menu { width: max-content; min-width: 220px; max-width: 300px; }
+.nav-menu .menu-item > .icon { flex: none; color: var(--ink-3); }
+.nav-menu .nav-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav-menu .nav-none { margin: 0; padding: 6px 9px; }

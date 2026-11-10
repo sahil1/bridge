@@ -23,7 +23,8 @@ export function openLink(href = location.href) {
   if (agent && url.searchParams.get('inbox')) window.dispatchEvent(new CustomEvent('bridge-needs-you', { detail: { paneId: agent } }))
   else if (agent) window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: agent, view: file ? 'files' : url.searchParams.get('ask') ? 'chat' : undefined, path: file || undefined } }))
   if (card) window.dispatchEvent(new CustomEvent('bridge-open-card', { detail: { id: card } }))
-  if (agent || card) history.replaceState(null, '', url.pathname)
+  // (What history keeps for this page stays: Back and Forward's step, src/backForward.js.)
+  if (agent || card) history.replaceState(history.state, '', url.pathname)
 }
 
 // Say when you're using Bridge AI on this computer (its window in front, or you typed or clicked in

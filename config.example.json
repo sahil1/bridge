@@ -19,5 +19,6 @@
     "metals": [["GC=F", "Gold"], ["SI=F", "Silver"]],
     "crypto": ["bitcoin", "ethereum"]
   },
-  "mortgage": null
+  "mortgage": null,
+  "trials": { "back-forward": true }
 }
