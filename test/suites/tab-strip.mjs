@@ -8,6 +8,10 @@
 // were until the pointer leaves the strip, so the next tab's × is under it; closing the tab on screen
 // shows the one after it; Ctrl+Shift+→ and dragging move a tab; side by side, both tabs on screen
 // keep their names and ×.
+// With Tab Groups on (a beta feature): each space's chip in its own color, before its tabs, a line in
+// that color under them; a click folds the group to its chip (how many, the most urgent dot), another
+// unfolds it; its right-click menu folds it, starts an agent in that space and closes its tabs;
+// another computer's group is grey, at the end.
 import fs from 'node:fs'
 import path from 'node:path'
 import { startKit, checks, until, browser, page, shot, TEST } from '../lib/harness.mjs'
@@ -191,6 +195,62 @@ try {
     await ctx.close()
   })
 
+  // ---------- Tab Groups ----------
+  await trial(true)
+  for (const look of [{ mode: 'light', theme: 'sky' }, { mode: 'dark', theme: 'midnight' }]) {
+    const t = look.mode
+    await part(`${t}: Tab Groups`, async () => {
+      const remote = 'remote:desk1:p9'
+      const tabs = ['view:meetings', 'view:map', A.checkout, A.deploy, A.weekly, A.board, A.rounding, remote]
+      const { ctx, p, errors } = await open(look, { ...ws(tabs, 'view:meetings'), 'cc-remote-tabs': { [remote]: { title: 'Nightly export', device: 'Desk' } } })
+      const s = p.locator('.ws-tabs-scroll')
+      await until(async () => (await s.locator('.ws-group').count()) >= 4, 10000)
+      const items = await s.evaluate((e) => [...e.children].map((x) => {
+        const cs = getComputedStyle(x)
+        const line = x.querySelector('.ws-tab-line')
+        const r = x.getBoundingClientRect()
+        return { chip: x.classList.contains('ws-group'), text: x.innerText.trim(), id: x.dataset.pane, bg: cs.backgroundColor, ink: cs.color, line: line ? getComputedStyle(line).backgroundColor : null, lineBottom: line ? Math.round(line.getBoundingClientRect().bottom) : null, bottom: Math.round(r.bottom), left: Math.round(r.left), right: Math.round(r.right) }
+      }))
+      const chip = (name) => items.findIndex((x) => x.chip && x.text === name)
+      const rep = chip('Reporting'), sh = chip('shop'), desk = chip('Desk')
+      ok(rep >= 0 && items[rep + 1]?.id === A.weekly && items[rep + 2]?.id === A.board && items[rep].right <= items[rep + 1].left, `${t}: Reporting's chip is before its tabs`, items.map((x) => (x.chip ? `[${x.text}]` : x.id)))
+      const clear = (c) => !/^(transparent|rgba\(\d+, \d+, \d+, 0\))$/.test(c)
+      ok(clear(items[rep].bg) && items[rep + 1].line === items[rep].bg && items[rep + 2].line === items[rep].bg && items[rep + 1].lineBottom === items[rep + 1].bottom, `${t}: the chip is filled in its color, and a line in that color runs under its tabs`, items.slice(rep, rep + 3))
+      ok(sh >= 0 && clear(items[sh].bg) && items[sh].bg !== items[rep].bg, `${t}: each space has its own color`, [items[sh]?.bg, items[rep].bg])
+      ok(desk === items.length - 2 && items.at(-1).id === remote && /^rgb\((9[0-9]|1[0-9]{2}|[5-9][0-9]), /.test(items[desk].bg), `${t}: another computer's group at the end, grey`, items[desk])
+      // Each chip's words readable on its color (4.5:1).
+      const lum = (c) => { const [r, g, bl] = c.match(/\d+(\.\d+)?/g).slice(0, 3).map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4 }); return 0.2126 * r + 0.7152 * g + 0.0722 * bl }
+      const ratio = (a, c) => { const [x, y] = [lum(a), lum(c)].sort((m, n) => n - m); return (x + 0.05) / (y + 0.05) }
+      const low = items.filter((x) => x.chip && ratio(x.bg, x.ink) < 4.5).map((x) => `${x.text} ${ratio(x.bg, x.ink).toFixed(2)}`)
+      ok(!low.length, `${t}: each chip's name reads on its color (4.5:1)`, low)
+      await strip(p, `${tag}tab-strip-groups-${t}`)
+      // A click folds the group to its chip; another unfolds it.
+      await s.locator('.ws-group', { hasText: 'Reporting' }).click()
+      const folded = await until(async () => !(await s.locator(`.ws-tab[data-pane="${A.weekly}"]`).count()) && (await s.locator('.ws-group.folded').innerText().catch(() => '')), 3000)
+      ok(/^Reporting\s*2$/.test(folded || '') && (await s.locator('.ws-group.folded .sdot').count()) === 1 && (await s.locator('.ws-group.folded').getAttribute('aria-expanded')) === 'false', `${t}: a click folds the group to its chip, with how many and the most urgent dot`, folded)
+      await s.locator('.ws-group', { hasText: 'Reporting' }).click()
+      ok(!!(await until(async () => (await s.locator(`.ws-tab[data-pane="${A.weekly}"]`).count()) === 1 && (await s.locator(`.ws-tab[data-pane="${A.board}"]`).count()) === 1, 3000)), `${t}: another unfolds it`)
+      // Right-click: fold, a new agent in that space, close its tabs.
+      await s.locator('.ws-group', { hasText: 'Reporting' }).click({ button: 'right' })
+      const menu = p.locator('.tab-group-menu')
+      const said = (await menu.innerText().catch(() => '')).replace(/\s+/g, ' ')
+      ok(/Fold its tabs away/.test(said) && /New agent in Reporting/.test(said) && /Close its 2 tabs/.test(said), `${t}: its right-click menu folds it, starts an agent in its space and closes its tabs`, said)
+      await shot(p, `${tag}tab-strip-group-menu-${t}`, { clip: { x: 0, y: 0, width: 1440, height: 260 } })
+      if (t === 'light') {
+        await menu.locator('.menu-item', { hasText: 'New agent in Reporting' }).click()
+        ok(!!(await until(() => p.locator('.modal').first().isVisible(), 5000)), `${t}: New agent in Reporting opens New agent`)
+        await p.keyboard.press('Escape')
+        await p.waitForTimeout(300)
+      } else {
+        await menu.locator('.menu-item', { hasText: 'Close its 2 tabs' }).click()
+        ok(!!(await until(async () => !(await s.locator(`.ws-tab[data-pane="${A.weekly}"], .ws-tab[data-pane="${A.board}"]`).count()) && !(await s.locator('.ws-group', { hasText: 'Reporting' }).count()), 3000)), `${t}: Close its 2 tabs closes them, and its chip goes`)
+        ok(/Weekly numbers/.test(await p.locator('.rail').innerText()), `${t}: its agents are still in the sidebar`)
+      }
+      ok(errors.length === 0, `${t}: groups: no page errors`, errors)
+      await ctx.close()
+    })
+  }
+  await trial(false)
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
   console.log(kit.log().slice(-1500))

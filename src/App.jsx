@@ -1118,7 +1118,7 @@ function App() {
   const foldGroup = (key) => setW((w) => ({ ...w, folded: { ...(w.folded || {}), [key]: !w.folded?.[key] } }))
   const tabStrip = (
     <TabStrip ids={W.tabs} byId={byId} active={W.active} side={split ? W.side : null} focus={W.group} folded={W.folded} grouping={grouping} spaces={fleet?.workspaces}
-      onOpen={openAgent} onClose={closeTab} onMove={moveTab} onNudge={nudgeTab} onFold={foldGroup}>
+      onOpen={openAgent} onClose={closeTab} onMove={moveTab} onNudge={nudgeTab} onFold={foldGroup} onNewAgent={(init) => setNewAgent(init)}>
       <button className={`win-btn ${split ? 'on' : ''}`} onClick={toggleSplit} disabled={!canSplit || W.tabs.length < 2}
         title={!canSplit ? t('Not enough room to split') : W.tabs.length < 2 ? t('Open a second agent to split') : split ? t('Unsplit') : t('Split side by side')} aria-label={t('Split')}>
         <Icon name="split" size={15} />
