@@ -70,9 +70,12 @@ try {
   ok(/usage limit/.test(failed || '') && !K2.summary, "and the notes aren't written, saying why, rather than saved as the limit's message", { failed, summary: K2.summary })
 
   // Notes saved before as only the limit's message: set aside, and written again once it starts.
-  out(pdir, false)
-  fs.writeFileSync(path.join(dirOf(K.id), 'summary.md'), "You've hit your weekly limit · resets 4am (America/Los_Angeles)\n")
-  await kit.restart()
+  // (Saved while it's closed: open, it tries the failed notes again a few seconds on, and with
+  // Personal back it wrote them over the limit's message first, now and then on CI's Windows.)
+  await kit.restart(() => {
+    out(pdir, false)
+    fs.writeFileSync(path.join(dirOf(K.id), 'summary.md'), "You've hit your weekly limit · resets 4am (America/Los_Angeles)\n")
+  })
   const again = await until(async () => { const m = await kit.api(`/meetings/${K.id}`); return /stand-in's notes/.test(m.summary || '') ? m.summary : null }, 40000, 500)
   ok(!!again && fs.existsSync(path.join(dirOf(K.id), 'summary-limit.md')), 'notes that were only the limit\'s message: set aside and written again at the next start', { again, files: fs.readdirSync(dirOf(K.id)) })
 } catch (e) {
