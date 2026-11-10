@@ -78,7 +78,8 @@ async function people() {
   return known.list
 }
 // Each one invited besides you: someone in your meetings already (how often, when last, what they
-// are, from Meeting Insights), or new to them. A first name alone counts only when one person fits.
+// are, from Meeting Insights; invited: the name they're on the invite by, for the event's guests
+// to say who they are), or new to them. A first name alone counts only when one person fits.
 async function whosComing(e) {
   const all = await people()
   const names = e.attendees.filter((a) => !isMe(a))
@@ -90,7 +91,7 @@ async function whosComing(e) {
     let p = (all || []).find((x) => (email && (x.emails || []).includes(email)) || nameKey(x.name) === k || (x.also || []).some((n) => nameKey(n) === k))
     if (!p && partsOf(a).length === 1) { const fits = (all || []).filter((x) => meetings.sameName(a, x.name)); if (fits.length === 1) p = fits[0] }
     if (p && seen.has(p.id)) continue
-    if (p) { seen.add(p.id); out.known.push({ name: p.name, id: p.id, meetings: p.meetings || 0, last: p.last || null, about: p.about || null, topics: (p.topics || []).slice(0, 3) }) } else out.new.push(email && !/\s/.test(a.trim()) ? a.split('@')[0] : a)
+    if (p) { seen.add(p.id); out.known.push({ name: p.name, id: p.id, invited: a, meetings: p.meetings || 0, last: p.last || null, about: p.about || null, topics: (p.topics || []).slice(0, 3) }) } else out.new.push(email && !/\s/.test(a.trim()) ? a.split('@')[0] : a)
   }
   return out
 }

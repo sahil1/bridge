@@ -6,8 +6,9 @@
 // two-day all-day event, one you organised, one you said maybe to, one you declined, one not answered
 // yet, the weekend's family events; today, a meeting starting in eight minutes with people you've met
 // and one you haven't (known from Meeting Insights, a beta feature: with it off, only who's invited
-// is said), one later with the files in its invite, one this morning that was recorded,
-// and a focus block with no one else. Three earlier meetings recorded, Chief of Staff's tasks that
+// is said), one later with the files in its invite, one this morning that was recorded, a big one
+// later with every kind of reply and a long invite, and a focus block with no one else; an all-hands
+// with 180 invited. Three earlier meetings recorded, Chief of Staff's tasks that
 // name a day, and on a Mac, Mail with a thread from one of them and one you sent that's had no reply.
 // Checks: each calendar keeps its colour from week to week (its own, or one from its name); hiding
 // one takes it off the grid and off the Schedule, kept on the server, and a click brings it back;
@@ -66,21 +67,52 @@ const week = (off) => [
   { ...ev('Football practice', 'Family', at(off + 5, 0), at(off + 6, 0)), allDay: true, response: '' },
   ev('Dinner with the Okafors', 'Family', at(off + 6, 18), at(off + 6, 19, 30), { response: '' }),
 ]
+// Who's invited as bridgecal says them: name, address, reply, role, who organised it and you.
+const guest = (name, email, status, more = {}) => ({ name, email, status, role: 'required', organizer: false, you: false, ...more })
 const SOON = ev('Northwind pricing sync', 'Work', mins(8), mins(38), {
   uid: 'uid-np-sync', local: 'EK-SOON', organizer: 'Maya Okafor',
   attendees: ['Tester', 'Maya Okafor', 'Leo Brandt', 'Ravi Menon'],
   emails: ['tester@example.com', 'maya.okafor@example.org', 'leo.brandt@example.org', 'ravi.menon@example.org'],
+  guests: [guest('Tester', 'tester@example.com', 'accepted', { you: true }), guest('Maya Okafor', 'maya.okafor@example.org', 'accepted', { role: 'chair', organizer: true }), guest('Leo Brandt', 'leo.brandt@example.org', 'tentative'), guest('Ravi Menon', 'ravi.menon@example.org', 'pending', { role: 'optional' })],
   notes: 'Agree the renewal price and the seat count for Q1.\n\nhttps://northwind.sharepoint.com/:p:/s/sales/renewal-deck.pptx\n________________\nMicrosoft Teams meeting\nJoin: https://teams.microsoft.com/l/meetup-join/19%3ameeting_abc',
 })
 // Its invite says a lot in one line: longer than the agenda the calendar keeps.
 const LONG_AGENDA = 'Walk through onboarding v2 before it goes to engineering, then agree which of the three empty-state designs ships first, who writes the copy for the welcome screens, and whether the import step can wait for the second release without hurting activation in the pilot accounts.'
 const LATER = ev('Design review with Ines', 'Work', mins(180), mins(225), { local: 'EK-LATER', response: 'none', attendees: ['Tester', 'Ines Varga'], notes: `${LONG_AGENDA}\nhttps://docs.google.com/document/d/onboarding-v2/edit` })
 const RECORDED = ev('Quarterly planning', 'Work', mins(-180), mins(-120), { attendees: ['Tester', 'Maya Okafor', 'Ines Varga'] })
+// A big invite, later today: its organizer not on the invite's own list, eleven others besides you
+// (one by an address alone) with every kind of reply, one optional, and a room and a team list
+// invited with them, who aren't people. Its words run long, with an Outlook safe link, and end in
+// Teams' join details with a passcode.
+const KICKOFF_GUESTS = [
+  guest('Priya Shah', 'priya.shah@example.org', 'accepted', { role: 'chair', organizer: true }),
+  guest('Tester', 'tester@example.com', 'accepted', { you: true }),
+  guest('Maya Okafor', 'maya.okafor@example.org', 'accepted'),
+  guest('Leo Brandt', 'leo.brandt@example.org', 'declined'),
+  guest('Ines Varga', 'ines.varga@example.org', 'tentative'),
+  guest('Ravi Menon', 'ravi.menon@example.org', 'pending'),
+  guest('Sam Ortiz', 'sam.ortiz@example.org', 'accepted', { role: 'optional' }),
+  guest('Pat Lin', 'pat.lin@example.org', 'declined'),
+  guest('Dana Whit', 'dana.whit@example.org', 'accepted'),
+  guest('Omar Haddad', 'omar.haddad@example.org', 'pending'),
+  guest('Kim Sato', 'kim.sato@example.org', 'accepted'),
+  guest('', 'lena.fischer@example.org', 'pending'),
+  guest('Boardroom 4 (12)', 'boardroom4@example.org', 'accepted', { role: '' }),
+  guest('Payments Team', 'payments-team@example.org', 'pending'),
+]
+const KICKOFF_NOTES = "Kick off the Northwind launch: scope, owners and the first milestone.\n\nAgenda\n- Scope and what's out\n- Owners for each workstream\n- The first milestone's date\n\nBrief: https://nam02.safelinks.protection.outlook.com/?url=https%3A%2F%2Fnorthwind.sharepoint.com%2F%3Aw%3A%2Fs%2Flaunch%2Fbrief.docx&data=05\nBoard: https://miro.com/app/board/kickoff=/\nI???ll share the timeline before we meet.\n________________________________________________________________________________\nMicrosoft Teams meeting\nJoin on your computer, mobile app or room device\nClick here to join the meeting: https://teams.microsoft.com/l/meetup-join/19%3akickoff\nMeeting ID: 123 456 789\nPasscode: Xy9abc"
+const KICKOFF = ev('Northwind launch kickoff', 'Work', mins(240), mins(285), {
+  local: 'EK-KICKOFF', organizer: 'Priya Shah', response: 'accepted', notes: KICKOFF_NOTES,
+  attendees: KICKOFF_GUESTS.slice(1).map((g) => g.name || g.email), emails: KICKOFF_GUESTS.slice(1).map((g) => g.email), guests: KICKOFF_GUESTS,
+})
 const FOCUS = ev('Focus time', 'Personal', mins(300), mins(360), { response: '' })
 const DECLINED = ev('Budget office hours', 'Work', mins(60), mins(90), { response: 'declined', attendees: ['Tester', 'Pat Lin'] })
 // Two weeks on, only the week's own meetings (nothing set by the time it's run): the one the grid's
 // hours are checked on. Four weeks on, a release window from 11 PM to half past midnight.
 const LATE = ev('Release window', 'Work', at(32, 23), at(33, 0, 30), { attendees: ['Tester', 'Leo Brandt'] })
+// An all-hands three weeks on, with 180 invited: more than an event carries.
+const MANY = Array.from({ length: 180 }, (_, i) => guest(`Person ${String.fromCharCode(65 + (i % 26))}${String.fromCharCode(97 + Math.floor(i / 26))} Example`, `person${i}@example.org`, ['accepted', 'pending', 'declined'][i % 3]))
+const ALLHANDS = ev('Company all-hands', 'Work', at(23, 16), at(23, 17), { organizer: MANY[0].name, attendees: MANY.map((g) => g.name), emails: MANY.map((g) => g.email), guests: MANY.map((g, i) => ({ ...g, organizer: i === 0 })) })
 // The weeks' own meetings keep clear of the hours the checks about now use (from 4 hours before to 7
 // after: last time, the next meeting, the one later): one that would fall there moves, on its own
 // day, to the nearest half hour that doesn't, so "the next meeting" is always the one meant, on any
@@ -95,8 +127,9 @@ const clear = (e) => {
   return { ...e, start: new Date(slot).toISOString(), end: new Date(slot + len).toISOString() }
 }
 const FIXED = [...week(-7), ...week(0), ...week(7), ...week(14)].map(clear)
-const EVENTS = [...FIXED, SOON, LATER, RECORDED, FOCUS, DECLINED, LATE]
-if (new Set([SOON, LATER, RECORDED, FOCUS, DECLINED, LATE].map((e) => e.title)).size !== 6 || FIXED.some((e) => [SOON, LATER, RECORDED, FOCUS, DECLINED, LATE].some((x) => x.title === e.title))) throw new Error('every seeded title must be its own')
+const OWN = [SOON, LATER, RECORDED, FOCUS, DECLINED, LATE, KICKOFF, ALLHANDS]
+const EVENTS = [...FIXED, ...OWN]
+if (new Set(OWN.map((e) => e.title)).size !== OWN.length || FIXED.some((e) => OWN.some((x) => x.title === e.title))) throw new Error('every seeded title must be its own')
 
 // The calendar helper: answers from bridgecal.json, and writes down every way it was asked.
 const helper = (bin) => {
@@ -107,8 +140,10 @@ const cmd = process.argv[2]
 if (cmd === 'events' && c.status === 'granted') {
   const from = new Date(process.argv[3] + 'T00:00:00'), to = new Date(process.argv[4] + 'T00:00:00'); to.setDate(to.getDate() + 1)
   const out = c.events.filter((e) => new Date(e.start) < to && new Date(e.end) > from)
-  process.stdout.write(JSON.stringify(process.argv[5] === 'light' ? out.map(({ notes, url, attendees, emails, organizer, ...e }) => e) : out)); process.exit(0)
+  process.stdout.write(JSON.stringify(process.argv[5] === 'light' ? out.map(({ notes, url, attendees, emails, organizer, guests, ...e }) => e) : out)); process.exit(0)
 }
+// A bridgecal from before it could read: it only says it may, and icalBuddy reads instead.
+if (c.status === 'old') { process.stdout.write('granted\\n'); process.exit(0) }
 process.stdout.write(c.status + '\\n')
 process.exit(cmd === 'events' ? 3 : 0)`)
   fs.writeFileSync(path.join(bin, 'bridgecal'), `#!/bin/sh\nexec "${process.execPath}" "${path.join(bin, 'bridgecal.cjs')}" "$@"\n`, { mode: 0o755 })
@@ -222,6 +257,24 @@ try {
   const asApp = (e) => [...today.today, ...today.tomorrow].find((x) => x.title === e.title && x.start === e.start)
   const [soonEv, laterEv] = [asApp(SOON), asApp(LATER)]
   ok(soonEv?.join && soonEv.agenda === 'Agree the renewal price and the seat count for Q1.' && soonEv.links.length === 1 && soonEv.emails.includes('ravi.menon@example.org'), "today's meeting: its join link, agenda, file and the addresses of who's invited", soonEv)
+  // Who's invited, as Google Calendar shows them: each one's name, address, reply and role, the
+  // organizer first though the invite's own list didn't have them, and you; not the room or the
+  // team list invited with them. Their names too, for Prep and a meeting's people, as before.
+  const kick = asApp(KICKOFF)
+  const gs = kick?.guests || []
+  const g = (name) => gs.find((x) => x.name === name) || {}
+  ok(gs.length === 12 && kick.guestCount === 12 && kick.replies === true && gs[0].name === 'Priya Shah' && gs[0].organizer === true && gs[0].email === 'priya.shah@example.org' && gs[0].role === 'chair' && gs[0].status === 'accepted' && g('Tester').you === true && g('Leo Brandt').status === 'declined' && g('Ines Varga').status === 'tentative' && g('Ravi Menon').status === 'pending' && g('Sam Ortiz').role === 'optional' && gs.some((x) => x.name === null && x.email === 'lena.fischer@example.org') && !gs.some((x) => /Boardroom|Payments/.test(x.name || '') || /boardroom4|payments-team/.test(x.email || '')), "who's invited: each one's name, address, reply and role, the organizer first and you marked, and no room or team list", gs)
+  ok(kick.attendees[0] === 'Priya Shah' && kick.attendeeCount === 12 && kick.attendees.includes('lena.fischer') && !kick.attendees.some((a) => /Boardroom|Payments/.test(a)), "and their names, the organizer's among them, for Prep and a meeting's people", kick.attendees)
+  // The invite's own words, whole: its lines as written, Outlook's safe link as where it goes, and
+  // Exchange's "???" an apostrophe; not Teams' join details, passcode and all, which Join stands for.
+  ok(kick.description?.startsWith('Kick off the Northwind launch: scope, owners and the first milestone.\n\nAgenda\n- Scope and what\'s out\n') && kick.description.includes('Brief: https://northwind.sharepoint.com/:w:/s/launch/brief.docx\n') && kick.description.endsWith("I'll share the timeline before we meet.") && !/Passcode|Meeting ID|teams\.microsoft|safelinks/.test(kick.description) && kick.join === 'https://teams.microsoft.com/l/meetup-join/19%3akickoff', "the invite's words, whole, with the safe link unwrapped, and not Teams' join details or passcode", kick?.description)
+  // An all-hands with 180 invited: everyone counted, the first 150 listed, 50 names.
+  const big = by('Company all-hands', (await api(`/calendar/range?from=${ymd(ALLHANDS.start)}&to=${ymd(ALLHANDS.start)}`)).events)
+  ok(big?.guests.length === 150 && big.guestCount === 180 && big.guests[0].organizer && big.attendees.length === 50 && big.attendeeCount === 180, 'a big invite: everyone counted, the first 150 guests listed and 50 names', big && { guests: big.guests.length, count: big.guestCount, names: big.attendees.length, n: big.attendeeCount })
+  // The year view stays light: no one's listed and no invite's words.
+  const year = await api(`/calendar/range?from=${from}&to=${ymd(at(80, 12))}`)
+  const kickY = year.events.find((e) => e.title === KICKOFF.title)
+  ok(year.light === true && kickY && !kickY.guests.length && kickY.guestCount === 0 && kickY.description === null && !kickY.attendees.length, 'the year view is read light: no guests, names or invite words', kickY)
   const nwk = await api(`/calendar/range?from=${nextFrom}&to=${nextTo}`)
   ok(by('Daily standup', nwk.events).color === by('Daily standup').color && by('Offsite prep', nwk.events).color === null, 'next week: the same colours', [by('Daily standup', nwk.events).color])
 
@@ -251,6 +304,7 @@ try {
   await api('/settings', { trials: { 'meeting-insights': true } }, 'PATCH')
   const p0 = await api('/prep', { event: soonEv })
   ok(p0.writer === null && !p0.suggest && p0.people.known.map((x) => x.name).sort().join() === 'Leo Brandt,Maya Okafor' && p0.people.new.join() === 'Ravi Menon', "no model: who's coming, the people you've met (Meeting Insights' People) and the one who's new", p0.people)
+  ok(p0.people.known.every((x) => x.invited === x.name && x.id), "each one you've met says the name they're invited by, for the guests to say who they are", p0.people.known)
   ok(p0.last?.title === 'Northwind pricing sync' && p0.last.why === 'series' && p0.last.summary[0] === 'Maya wants a three-year term if the price holds.' && p0.last.yours.map((x) => x.text).join() === 'You: send the revised quote to Maya' && p0.last.theirs.map((x) => x.text).join() === 'Maya: confirm the seat count', 'last time: the summary, and what\'s still open both ways (not what was done)', p0.last)
   ok(p0.agenda === 'Agree the renewal price and the seat count for Q1.' && p0.files.some((f) => /renewal-deck/.test(f.url)), "the invite's agenda and files", [p0.agenda, p0.files])
   if (mailOn) ok(p0.mail?.available && p0.mail.threads.map((m) => m.subject).join() === 'Seat count for the renewal' && p0.mail.waiting.map((m) => m.subject).join() === 'Intro and the renewal deck', 'your mail with them: a thread from Maya (not the shop\'s), and what you sent Ravi with no reply yet', p0.mail)
@@ -584,6 +638,19 @@ try {
     await shot(p, `${tag}calendar-phone-menu-${mode}`)
     ok(real(errors).length === 0, `phone, ${mode}: no page errors`, errors)
     await p.context().close()
+  }
+
+  // ---------- Through icalBuddy ----------
+  // On a Mac whose calendar helper only says it may read (one from before it could), icalBuddy reads
+  // instead: who's invited by name (an address when that's all there is), with no address, reply or
+  // role.
+  if (IS_MAC) {
+    const day = ymd(at(9, 12))
+    fs.writeFileSync(path.join(kit.bin, 'bridgecal.json'), JSON.stringify({ status: 'old', events: [] }))
+    kit.program('icalBuddy', `process.stdout.write(${JSON.stringify(`@@EV@@Partner check-in (Work)\u00a6${day} at 15:00 - 15:30\u00a6attendees: Priya Shah, Dan Ruiz, Tester, sam@example.org, Conf Room 4 (8)\u00a6notes: Catch up on the pilot.\nhttps://docs.google.com/document/d/pilot/edit\n`)})`)
+    const ib = by('Partner check-in', (await api(`/calendar/range?from=${day}&to=${day}&refresh=1`)).events)
+    ok(ib?.replies === false && ib.guests.map((x) => x.name || x.email).join() === 'Priya Shah,Dan Ruiz,Tester,sam@example.org' && ib.guests.every((x) => x.status === null && x.role === null && !x.organizer) && ib.guests[3].email === 'sam@example.org' && ib.attendees.join() === 'Priya Shah,Dan Ruiz,Tester,sam' && ib.description === 'Catch up on the pilot.\nhttps://docs.google.com/document/d/pilot/edit', "through icalBuddy: who's invited by name (an address alone as one), no replies, and the invite's words", ib)
+    fs.writeFileSync(path.join(kit.bin, 'bridgecal.json'), JSON.stringify({ status: 'granted', events: EVENTS }))
   }
 
   // ---------- Read-only ----------
