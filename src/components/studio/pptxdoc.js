@@ -151,6 +151,10 @@ export function colorOf(el, cx, ph = null) {
   if (!hex) return null
   return applyMods({ hex, alpha: 1 }, el)
 }
+// Tints and shades are worked out in linear light, as PowerPoint does (accent 1, 4472C4, tinted
+// 40% is CFD5EA, a table's banded rows), not in the screen's values.
+const toLinear = (x) => (x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4)
+const toSrgb = (x) => (x <= 0.0031308 ? x * 12.92 : 1.055 * Math.max(0, x) ** (1 / 2.4) - 0.055)
 function applyMods(c, el) {
   let [r, g, b] = rgbOf(c.hex)
   let alpha = c.alpha ?? 1
@@ -166,8 +170,8 @@ function applyMods(c, el) {
       else x[0] *= val
       x[1] = Math.max(0, Math.min(1, x[1])); x[2] = Math.max(0, Math.min(1, x[2]))
       ;[r, g, b] = rgb(x)
-    } else if (m.name === 'a:tint') [r, g, b] = [r, g, b].map((x) => x + (1 - x) * (1 - val))
-    else if (m.name === 'a:shade') [r, g, b] = [r, g, b].map((x) => x * val)
+    } else if (m.name === 'a:tint') [r, g, b] = [r, g, b].map((x) => toSrgb(toLinear(x) * val + 1 - val))
+    else if (m.name === 'a:shade') [r, g, b] = [r, g, b].map((x) => toSrgb(toLinear(x) * val))
     else if (m.name === 'a:alpha') alpha = val
     else if (m.name === 'a:alphaMod') alpha *= val
     else if (m.name === 'a:inv') [r, g, b] = [1 - r, 1 - g, 1 - b]
@@ -180,21 +184,78 @@ const COLOR_EL = new Set(['a:srgbClr', 'a:schemeClr', 'a:sysClr', 'a:prstClr', '
 const colorKid = (el) => (el?.kids || []).find((k) => COLOR_EL.has(k.name)) || null
 
 // A fill: solidFill, gradFill, blipFill, noFill, pattFill, grpFill. { type, color, stops, angle,
-// path, rid } or null when there's none (so it's inherited).
+// scaled, radial, path, focus, rid, … } or null when there's none (so it's inherited). A pattern is
+// its two colours ({ prst, fg, bg }, color its foreground, for what takes one colour).
 export function fillOf(parent, cx, ph = null) {
   for (const k of parent?.kids || []) {
     if (k.name === 'a:noFill') return { type: 'none' }
     if (k.name === 'a:solidFill') return { type: 'solid', color: colorOf(colorKid(k), cx, ph) }
     if (k.name === 'a:gradFill') {
-      const stops = deep(k, 'a:gs').map((g) => ({ at: num(g.attrs.pos, 0) / 1000, color: colorOf(colorKid(g), cx, ph) })).filter((x) => x.color)
-      const lin = first(k, 'a:lin')
-      return { type: 'grad', stops, angle: lin ? num(lin.attrs.ang, 0) / 60000 : 90, radial: !!first(k, 'a:path') && !lin }
+      const stops = deep(k, 'a:gs').map((g) => ({ at: num(g.attrs.pos, 0) / 1000, color: colorOf(colorKid(g), cx, ph) })).filter((x) => x.color).sort((a, b) => a.at - b.at)
+      const lin = first(k, 'a:lin'), path = first(k, 'a:path'), to = kid(path, 'a:fillToRect')
+      // A radial one grows from the middle of its fillToRect (insets from each side, out of 100000).
+      const focus = to ? { x: (num(to.attrs.l, 0) + 100000 - num(to.attrs.r, 0)) / 200000, y: (num(to.attrs.t, 0) + 100000 - num(to.attrs.b, 0)) / 200000 } : { x: 0.5, y: 0.5 }
+      return { type: 'grad', stops, angle: lin ? num(lin.attrs.ang, 0) / 60000 : 90, scaled: lin?.attrs.scaled === '1' || lin?.attrs.scaled === 'true', radial: !!path && !lin, path: path?.attrs.path || null, focus }
     }
-    if (k.name === 'a:blipFill') { const b = first(k, 'a:blip'); return { type: 'blip', rid: b?.attrs['r:embed'] || null, tile: !!kid(k, 'a:tile') } }
-    if (k.name === 'a:pattFill') return { type: 'solid', color: colorOf(colorKid(kid(k, 'a:fgClr')), cx, ph) }
+    if (k.name === 'a:blipFill') return blipOf(k)
+    if (k.name === 'a:pattFill') {
+      const fg = colorOf(colorKid(kid(k, 'a:fgClr')), cx, ph) || { hex: '000000', alpha: 1 }
+      return { type: 'pattern', prst: k.attrs.prst || 'pct5', fg, bg: colorOf(colorKid(kid(k, 'a:bgClr')), cx, ph) || { hex: 'FFFFFF', alpha: 1 }, color: fg }
+    }
     if (k.name === 'a:grpFill') return { type: 'group' }
   }
   return null
+}
+// A picture fill (a:blipFill): its picture, stretched into its box (fillRect: insets from each
+// side) or tiled (at tx, ty in px, sx, sy its scale, from its algn corner, flipped or not), cropped
+// (srcRect), and what's done to it: see-through (alphaModFix), grey (grayscl), brighter or more
+// contrasting (lum), recoloured (duotone). Fractions are of 1.
+function blipOf(k) {
+  const b = first(k, 'a:blip'), tile = kid(k, 'a:tile'), src = kid(k, 'a:srcRect'), fr = kid(kid(k, 'a:stretch'), 'a:fillRect')
+  const box = (el) => (el && ['l', 't', 'r', 'b'].some((n) => el.attrs[n]) ? { l: num(el.attrs.l, 0) / 100000, t: num(el.attrs.t, 0) / 100000, r: num(el.attrs.r, 0) / 100000, b: num(el.attrs.b, 0) / 100000 } : null)
+  const amt = kid(b, 'a:alphaModFix'), lum = kid(b, 'a:lum')
+  return {
+    type: 'blip', rid: deep(b, 'asvg:svgBlip')[0]?.attrs['r:embed'] || b?.attrs['r:embed'] || null,
+    tile: tile ? { tx: num(tile.attrs.tx, 0) / EMU_PX, ty: num(tile.attrs.ty, 0) / EMU_PX, sx: num(tile.attrs.sx, 100000) / 100000, sy: num(tile.attrs.sy, 100000) / 100000, flip: tile.attrs.flip || 'none', algn: tile.attrs.algn || 'tl' } : null,
+    crop: box(src), inset: box(fr), alpha: amt ? Math.max(0, Math.min(1, num(amt.attrs.amt, 100000) / 100000)) : 1,
+    gray: !!kid(b, 'a:grayscl'), lum: lum ? { bright: num(lum.attrs.bright, 0) / 100000, contrast: num(lum.attrs.contrast, 0) / 100000 } : null, duotone: !!kid(b, 'a:duotone'),
+  }
+}
+// A picture's size in px as PowerPoint sizes one (its pixels at its own dots to the inch, 96 when it
+// doesn't say), from its first bytes: PNG, JPEG, GIF, BMP and WebP; null for any other.
+export function imageSize(b) {
+  if (!b || b.length < 30) return null
+  const u16 = (o, le) => (le ? b[o] | (b[o + 1] << 8) : (b[o] << 8) | b[o + 1])
+  const u32 = (o, le) => (le ? (b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24)) >>> 0 : ((b[o] << 24) | (b[o + 1] << 16) | (b[o + 2] << 8) | b[o + 3]) >>> 0)
+  const tag = (o) => String.fromCharCode(b[o], b[o + 1], b[o + 2], b[o + 3])
+  let w = 0, h = 0, dx = 96, dy = 96
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) {
+    w = u32(16); h = u32(20)
+    for (let i = 8; i + 12 <= b.length;) {
+      const len = u32(i), type = tag(i + 4)
+      if (type === 'pHYs' && b[i + 16] === 1 && u32(i + 8) && u32(i + 12)) { dx = Math.round(u32(i + 8) * 0.0254); dy = Math.round(u32(i + 12) * 0.0254) }
+      if (type === 'IDAT' || type === 'IEND') break
+      i += len + 12
+    }
+  } else if (b[0] === 0xff && b[1] === 0xd8) {
+    for (let i = 2; i + 9 < b.length;) {
+      if (b[i] !== 0xff) { i++; continue }
+      const m = b[i + 1]
+      if (m === 0xff || m === 0xd8 || (m >= 0xd0 && m <= 0xd7) || m === 0x01) { i += m === 0xff ? 1 : 2; continue }
+      const len = u16(i + 2)
+      if (m === 0xe0 && tag(i + 4) === 'JFIF') { const unit = b[i + 11], x = u16(i + 12), y = u16(i + 14); if (x && y && unit === 1) { dx = x; dy = y } else if (x && y && unit === 2) { dx = x * 2.54; dy = y * 2.54 } }
+      if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) { h = u16(i + 5); w = u16(i + 7); break }
+      i += 2 + len
+    }
+  } else if (tag(0) === 'GIF8') { w = u16(6, true); h = u16(8, true) }
+  else if (b[0] === 0x42 && b[1] === 0x4d) { w = u32(18, true); h = Math.abs(u32(22, true) | 0); const ppm = u32(38, true); if (ppm) dx = dy = Math.round(ppm * 0.0254) }
+  else if (tag(0) === 'RIFF' && tag(8) === 'WEBP') {
+    const kind = tag(12)
+    if (kind === 'VP8X') { w = 1 + (b[24] | (b[25] << 8) | (b[26] << 16)); h = 1 + (b[27] | (b[28] << 8) | (b[29] << 16)) }
+    else if (kind === 'VP8 ') { w = u16(26, true) & 0x3fff; h = u16(28, true) & 0x3fff }
+    else if (kind === 'VP8L') { const v = u32(21, true); w = (v & 0x3fff) + 1; h = ((v >> 14) & 0x3fff) + 1 }
+  }
+  return w > 0 && h > 0 ? { w: (w * 96) / dx, h: (h * 96) / dy } : null
 }
 // A line (a:ln): { color, width (px), dash, head, tail } or { none: true }; null: inherited.
 export function lineOf(ln, cx, ph = null) {
@@ -203,7 +264,7 @@ export function lineOf(ln, cx, ph = null) {
   if (f?.type === 'none') return { none: true }
   const dash = kid(ln, 'a:prstDash')?.attrs.val || null
   const end = (n) => { const e = kid(ln, n); return e && e.attrs.type && e.attrs.type !== 'none' ? { type: e.attrs.type, w: e.attrs.w || 'med', len: e.attrs.len || 'med' } : null }
-  return { color: f?.type === 'solid' ? f.color : f?.type === 'grad' ? f.stops[0]?.color : null, width: ln.attrs.w != null ? num(ln.attrs.w, 9525) / EMU_PX : null, dash, head: end('a:headEnd'), tail: end('a:tailEnd'), cap: ln.attrs.cap || null }
+  return { color: f?.type === 'solid' || f?.type === 'pattern' ? f.color : f?.type === 'grad' ? f.stops[0]?.color : null, width: ln.attrs.w != null ? num(ln.attrs.w, 9525) / EMU_PX : null, dash, head: end('a:headEnd'), tail: end('a:tailEnd'), cap: ln.attrs.cap || null }
 }
 
 // ---------- Fonts ----------
@@ -263,7 +324,7 @@ function runProps(el, cx) {
   if (a.baseline != null) o.baseline = num(a.baseline, 0) / 1000
   if (a.spc != null) o.spc = num(a.spc, 0) / 100
   const f = fillOf(el, cx)
-  if (f?.type === 'solid') o.color = f.color
+  if (f?.type === 'solid' || f?.type === 'pattern') o.color = f.color
   else if (f?.type === 'grad') o.color = f.stops[0]?.color || null
   else if (f?.type === 'none') o.color = { hex: 'FFFFFF', alpha: 0 }
   const lat = kid(el, 'a:latin')
@@ -510,10 +571,15 @@ export function slideView(doc, slide) {
   const map = { ...(master?.clrMap || {}), ...(layout?.clrMapOvr || {}), ...(clrMapOf(first(kid(slideTop, 'p:clrMapOvr'), 'a:overrideClrMapping')) || {}) }
   const cx = { doc, theme, scheme: theme.scheme, map, layout, master }
   const view = { w: doc.size.cx / EMU_PX, h: doc.size.cy / EMU_PX, under: [], objs: [] }
-  // The background: the slide's own, else its layout's, else its master's.
+  // The background: the slide's own, else its layout's, else its master's; with none, the colour
+  // the master's map makes the background (bg1: lt1, or dk1 on a dark master).
   const bgOf = (top, rels) => { const bg = kid(kid(top, 'p:cSld'), 'p:bg'); return bg ? { bg, rels } : null }
   const bgAt = bgOf(slideTop, slide.rels) || (layout && bgOf(layout.top, layout.rels)) || (master && bgOf(master.top, master.rels))
-  view.bg = bgAt ? backgroundOf(bgAt.bg, { ...cx, rels: bgAt.rels }) : { type: 'solid', color: { hex: theme.scheme[map.bg1 || 'lt1'] || 'FFFFFF', alpha: 1 } }
+  const plain = { type: 'solid', color: { hex: theme.scheme[map.bg1 || 'lt1'] || 'FFFFFF', alpha: 1 } }
+  view.bg = bgAt ? backgroundOf(bgAt.bg, { ...cx, rels: bgAt.rels }) : plain
+  // A picture that can't be drawn here (an EMF, a TIFF, or one not in the file): that colour, as
+  // the nearest, and what it was kept so the editor can say so.
+  if (view.bg.type === 'blip' && view.bg.lost) { view.bgLost = view.bg.lost; view.bg = plain }
   // What the master and layout draw under the slide's own (not their placeholders).
   const showMaster = slideTop?.attrs.showMasterSp !== '0'
   if (showMaster && master && layout?.showMasterSp !== false) for (const k of kids(master.spTree)) { if (!phOf(k)) { const o = objOf(k, master.xml, { ...cx, rels: master.rels, level: 'master' }); if (o) view.under.push(o) } }
@@ -525,18 +591,58 @@ export function slideView(doc, slide) {
   })
   return view
 }
+// The deck's look in a Markdown deck's terms (pptx.js, and AI Assist's slides shown before they're
+// kept), from its first slide's master: its background as one colour (a see-through one over
+// white, a gradient's middle, a pattern's two mixed, a picture's nearest: the colour its colour map
+// makes the background), its titles' colour (its title style, through that map), its first accent
+// and its fonts. Words that wouldn't read on that background are the theme's dark or light,
+// whichever reads. Colours as #rrggbb.
+export function deckLook(doc) {
+  const s = doc.slides[0]
+  const layout = s?.layout ? doc.layoutOf(s.layout) : null
+  const master = layout?.master ? doc.masterOf(layout.master) : null
+  if (!master) return null
+  const theme = master.theme ? doc.themeOf(master.theme) : themeOf('')
+  const cx = { doc, theme, scheme: theme.scheme, map: { ...master.clrMap, ...(layout?.clrMapOvr || {}) }, layout, master }
+  const named = (n) => colorOf({ name: 'a:schemeClr', attrs: { val: n }, kids: [] }, cx) || { hex: n === 'bg1' ? 'FFFFFF' : '000000', alpha: 1 }
+  const blend = (c, under = 'FFFFFF') => { const a = rgbOf(c.hex), b = rgbOf(under); return hexOf(a.map((v, i) => v * c.alpha + b[i] * (1 - c.alpha))) }
+  const mixed = (a, b, t) => ({ hex: hexOf(rgbOf(a.hex).map((v, i) => v + (rgbOf(b.hex)[i] - v) * t)), alpha: a.alpha + (b.alpha - a.alpha) * t })
+  const own = kid(kid(master.top, 'p:cSld'), 'p:bg')
+  const bg = own ? backgroundOf(own, { ...cx, rels: master.rels }) : { type: 'none' }
+  const at = (stops, x) => { const i = stops.findIndex((g) => g.at >= x); if (i < 0) return stops.at(-1).color; if (i === 0) return stops[0].color; const a = stops[i - 1], b = stops[i]; return mixed(a.color, b.color, (x - a.at) / Math.max(0.001, b.at - a.at)) }
+  const one = bg.type === 'solid' && bg.color ? bg.color : bg.type === 'grad' && bg.stops.length ? at(bg.stops, 50) : bg.type === 'pattern' ? mixed(bg.fg, bg.bg, 0.5) : null
+  const back = blend(one || named('bg1'))
+  const lum = (h) => { const [r, g, b] = rgbOf(h).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)); return 0.2126 * r + 0.7152 * g + 0.0722 * b }
+  const contrast = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05) }
+  const title = levelsOf(master.txStyles.title, cx)[0]?.rPr?.color
+  let text = blend(title || named('tx1'), back)
+  if (contrast(text, back) < 3) text = [named('dk1').hex, named('lt1').hex].sort((a, b) => contrast(b, back) - contrast(a, back))[0]
+  return { name: 'theme', colors: { background: `#${back.toLowerCase()}`, text: `#${text.toLowerCase()}`, accent: `#${blend(named('accent1')).toLowerCase()}` }, fonts: { heading: theme.fonts.major, body: theme.fonts.minor } }
+}
+// A background (p:bg): its own fill (p:bgPr), or one of the theme's styles in a colour (p:bgRef:
+// 1001 and on the background styles, 1 to 999 the shapes' fills), a picture's in the part that
+// names it (the theme's, for a style).
 function backgroundOf(bg, cx) {
   const pr = kid(bg, 'p:bgPr')
-  if (pr) return fillOf(pr, cx) || { type: 'none' }
+  if (pr) return withPicture(fillOf(pr, cx) || { type: 'none' }, cx)
   const ref = kid(bg, 'p:bgRef')
   if (ref) {
     const idx = num(ref.attrs.idx, 0)
     const ph = colorOf(colorKid(ref), cx)
     const style = idx >= 1001 ? cx.theme.bgFills[idx - 1001] : idx > 0 ? cx.theme.fills[idx - 1] : null
-    const f = style ? fillOf({ kids: [style] }, { ...cx, rels: cx.theme.rels }, ph) : null
+    const tcx = { ...cx, rels: cx.theme.rels }
+    const f = style ? withPicture(fillOf({ kids: [style] }, tcx, ph), tcx) : null
     return f || (ph ? { type: 'solid', color: ph } : { type: 'none' })
   }
   return { type: 'none' }
+}
+// A picture fill with its address and its size (for tiling); lost: its kind, when it can't be shown.
+function withPicture(f, cx) {
+  if (f?.type !== 'blip') return f
+  const part = cx.rels?.[f.rid]?.target || null
+  const bytes = part ? cx.doc.bin.get(part) : null
+  if (!bytes) return { ...f, lost: part && cx.doc.zip?.file(part) ? (part.split('.').pop() || '').toUpperCase() : 'missing' }
+  return { ...f, part, url: mediaUrl(cx, f.rid), size: imageSize(bytes) }
 }
 const RENDERED_PH = new Set(['title', 'ctrTitle', 'subTitle', 'body', 'obj', 'pic', 'chart', 'tbl', 'dgm', 'media', 'clipArt', 'sldNum', 'dt', 'ftr', 'hdr'])
 // One thing on a slide (or a layout or master), for drawing.
@@ -615,7 +721,7 @@ function objOf(el, src, cx, inGroup = false) {
   const ownFill = fillOf(spPr, cx)
   const inherited = phSpPr.map((x) => fillOf(x, cx)).find(Boolean)
   o.fill = ownFill?.type === 'group' ? (cx.groupFill || null) : ownFill || inherited || (fr?.el ? fillOf({ kids: [fr.el] }, cx, fr.c) : null) || (kind === 'pic' ? null : { type: 'none' })
-  if (o.fill?.type === 'blip') o.fill.url = mediaUrl(cx, o.fill.rid)
+  if (o.fill?.type === 'blip') o.fill = withPicture(o.fill, cx)
   const ownLine = lineOf(kid(spPr, 'a:ln'), cx) || phSpPr.map((x) => lineOf(kid(x, 'a:ln'), cx)).find(Boolean)
   const styleLine = lr?.el ? lineOf(lr.el, cx, lr.c) : null
   o.line = ownLine || styleLine ? { ...(styleLine || {}), ...Object.fromEntries(Object.entries(ownLine || {}).filter(([, v]) => v != null)) } : null
@@ -625,13 +731,16 @@ function objOf(el, src, cx, inGroup = false) {
     const svg = deep(blip, 'asvg:svgBlip')[0]
     const rid = svg?.attrs['r:embed'] || blip?.attrs['r:embed']
     const src2 = kid(kid(el, 'p:blipFill'), 'a:srcRect')
-    o.img = { rid, url: mediaUrl(cx, rid), part: cx.rels[rid]?.target || null, crop: { l: num(src2?.attrs.l, 0) / 100000, t: num(src2?.attrs.t, 0) / 100000, r: num(src2?.attrs.r, 0) / 100000, b: num(src2?.attrs.b, 0) / 100000 }, video: !!first(nv, 'a:videoFile') || !!first(nv, 'p14:media') }
+    // How see-through, grey, bright and contrasting it's made (Picture Transparency, Recolor…).
+    const { alpha, gray, lum } = blipOf(kid(el, 'p:blipFill'))
+    o.img = { rid, url: mediaUrl(cx, rid), part: cx.rels[rid]?.target || null, crop: { l: num(src2?.attrs.l, 0) / 100000, t: num(src2?.attrs.t, 0) / 100000, r: num(src2?.attrs.r, 0) / 100000, b: num(src2?.attrs.b, 0) / 100000 }, video: !!first(nv, 'a:videoFile') || !!first(nv, 'p14:media'), alpha, gray, lum }
   }
   // Its text, with its levels' styles from the master down.
   const txBody = kid(el, 'p:txBody')
   const lt = (p) => p && kid(kid(p.el, 'p:txBody'), 'a:lstStyle')
   const master = cx.master
-  const ms = !ph ? (master?.txStyles.other) : /title|ctrTitle/i.test(ph.type) ? master?.txStyles.title : ['dt', 'ftr', 'sldNum', 'hdr'].includes(ph.type) ? master?.txStyles.other : master?.txStyles.body
+  // A title takes the master's title style; a subtitle, as the rest, its body style.
+  const ms = !ph ? (master?.txStyles.other) : ph.type === 'title' || ph.type === 'ctrTitle' ? master?.txStyles.title : ['dt', 'ftr', 'sldNum', 'hdr'].includes(ph.type) ? master?.txStyles.other : master?.txStyles.body
   const base = levelsOf(cx.doc.defaultText, cx)
   const fontColor = fo ? colorOf(colorKid(fo), cx) : null
   const fontRefFont = fo ? (fo.attrs.idx === 'major' ? '+mj-lt' : fo.attrs.idx === 'minor' ? '+mn-lt' : null) : null

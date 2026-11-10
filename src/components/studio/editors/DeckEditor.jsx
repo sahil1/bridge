@@ -127,14 +127,16 @@ function Deck({ file, start, pptx, onDirty, onStats, handle, readOnly, packs, on
 
   // ---------- Its look ----------
   // The pack the deck names (pack: Board), a theme of Studio's by that name, a PowerPoint's own
-  // theme, your default pack, else Studio's Paper. A deck can name one of Marp's own themes
+  // theme (or the colours one saved as a Markdown deck keeps: background, textColor, accent), your
+  // default pack, else Studio's Paper. A deck can name one of Marp's own themes
   // (theme: gaia) instead, drawn as Marp draws it with the pack's colours over it.
   const named = D.frontValue(md, 'pack')
   const marpTheme = (() => { const x = D.frontValue(md, 'theme'); return x && x !== 'studio' ? x : null })()
   const userPack = named ? packs.find((p) => p.name.toLowerCase() === named.toLowerCase()) : null
   const builtIn = named && !userPack ? D.LOOKS.find((l) => l.name.toLowerCase() === named.toLowerCase()) : null
   const def = packs.find((p) => p.isDefault) || null
-  const own = start.look ? { ...start.look, name: t('Its theme') } : null
+  const ownColors = useMemo(() => D.frontLook(md), [md])
+  const own = start.look ? { ...start.look, name: t('Its theme') } : ownColors ? { ...ownColors, name: t('Its theme') } : null
   const look = userPack || builtIn || (!named && own) || def || D.PLAIN
   const lookKey = userPack ? `pack:${userPack.id}` : builtIn ? `look:${builtIn.id}` : !named && own ? 'own' : def ? `pack:${def.id}` : `look:${D.PLAIN.id}`
   const missing = named && !userPack && !builtIn
@@ -232,6 +234,8 @@ function Deck({ file, start, pptx, onDirty, onStats, handle, readOnly, packs, on
     flush()
     let next = D.withFront(mdRef.current, 'theme', null)
     next = D.withFront(next, 'pack', l === own ? null : l.isDefault && !l.builtIn ? null : l.name)
+    // Another look: the deck's own colours go with the one it had.
+    if (l !== own) for (const key of Object.values(D.FRONT_COLORS)) next = D.withFront(next, key, null)
     change(next)
   }
   const go = (i, { extend = false, toggle = false } = {}) => {

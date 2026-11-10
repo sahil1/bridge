@@ -203,6 +203,17 @@ export function withFront(md, key, value) {
   return `---\n${lines.join('\n')}\n---\n${md.slice(m[0].length)}`
 }
 
+// A deck's own colours in its front matter (background, textColor, accent: a PowerPoint saved as
+// a Markdown deck keeps its own so), as Studio's look, its fonts Paper's; null when it has none.
+// Studio's own keys, not Marp's backgroundColor and color, which would paint over a section
+// slide's accent.
+export const FRONT_COLORS = { background: 'background', text: 'textColor', accent: 'accent' }
+export function frontLook(md) {
+  const colors = {}
+  for (const [k, key] of Object.entries(FRONT_COLORS)) { const v = frontValue(md, key); if (/^#[0-9a-f]{6}$/i.test(v || '')) colors[k] = v.toLowerCase() }
+  return Object.keys(colors).length ? { ...PLAIN, id: 'own', builtIn: false, colors: { ...PLAIN.colors, ...colors } } : null
+}
+
 // Where each slide is in the deck's lines, from where Marp starts them (render().maps): { lines,
 // front: the line after the front matter, slides: [{ start, end, sep }] }, sep the line of the
 // --- before it.
