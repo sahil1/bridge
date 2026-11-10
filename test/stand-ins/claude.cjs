@@ -60,18 +60,66 @@
 //                                           the sign-in of the config folder it's run for
 //                                           (CLAUDE_CONFIG_DIR, else ~/.claude): signed in until
 //                                           logged out. Each is noted in ~/claude-auth.log, with
-//                                           CLAUDE_CONFIG_DIR as it was given (null: not given)
+//                                           CLAUDE_CONFIG_DIR as it was given (null: not given).
+//                                           login signs in at once; with ~/claude-login.json there,
+//                                           as Claude Code 2.1.311 does it (signIn below)
+//   claude, with ~/claude-first-run.json there  a new Claude Code at its sign-in (firstRunSignIn)
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
+const http = require('node:http')
+const { spawn } = require('node:child_process')
 
 const args = process.argv.slice(2)
 if (args.includes('--version')) { console.log('2.1.312 (Claude Code)'); process.exit(0) }
+// The sign-in's two links, as Claude Code 2.1.311 makes them: the one it opens comes back to it on
+// localhost; the one it prints goes to Claude's page that shows a code to paste.
+const AUTHORIZE = 'https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&response_type=code'
+const linkTo = (back) => `${AUTHORIZE}&redirect_uri=${encodeURIComponent(back)}&scope=user%3Ainference&code_challenge=stand-in-challenge&code_challenge_method=S256&state=stand-in-state`
+const CODE_PAGE = 'https://platform.claude.com/oauth/code/callback'
+// Signed in: what `claude auth status` and Bridge AI's own look (~/.claude/.credentials.json) see.
+const signedIn = (dir) => { fs.mkdirSync(dir, { recursive: true }); fs.rmSync(path.join(dir, 'stand-in-signed-out'), { force: true }); fs.writeFileSync(path.join(dir, '.credentials.json'), '{"stand-in":true}') }
+// The browser, opened with the stand-in `open` beside this (a test's), never the computer's own.
+const openBrowser = (url) => { const open = path.join(__dirname, process.platform === 'win32' ? 'open.cmd' : 'open'); if (fs.existsSync(open)) spawn(open, [url], { stdio: 'ignore', shell: process.platform === 'win32' }).unref() }
+// claude auth login, as 2.1.311 does it: it listens on 127.0.0.1 (IPv4 only) for the browser to
+// come back to http://localhost:<port>/callback, opens the browser there, prints the other link
+// and waits at "Paste code here if prompted > ". The browser coming back, or a code typed there
+// (one starting "good"), signs it in; any other code doesn't ("Login failed", and it ends).
+// ~/claude-login.json: { endAfter: ms } ends it unsigned after that long, as when it gives up.
+// The port it listens on goes in ~/claude-login-port.txt, for a test to play the browser.
+function signIn(dir, how) {
+  const say = (s) => process.stdout.write(s)
+  const done = (ok, why) => { if (ok) { signedIn(dir); say('\r\nLogin successful.\r\n') } else say(`\r\nLogin failed: ${why}\r\n`); process.exit(ok ? 0 : 1) }
+  const server = http.createServer((req, res) => {
+    const u = new URL(req.url, 'http://localhost')
+    if (u.pathname !== '/callback') { res.writeHead(404).end(); return }
+    res.writeHead(u.searchParams.get('code') ? 200 : 400).end()
+    if (u.searchParams.get('code')) done(true)
+  }).listen(0, '127.0.0.1', () => {
+    const port = server.address().port
+    fs.writeFileSync(path.join(os.homedir(), 'claude-login-port.txt'), String(port))
+    openBrowser(linkTo(`http://localhost:${port}/callback`))
+    const code = linkTo(CODE_PAGE)
+    say(`Opening browser to sign in…\r\nIf the browser didn't open, visit: \x1b]8;;${code}\x07\x1b[94m${code}\x1b[39m\x1b]8;;\x07\r\nPaste code here if prompted > `)
+  })
+  let typed = ''
+  process.stdin.setEncoding('utf8')
+  process.stdin.on('data', (d) => {
+    typed += d
+    if (!/[\r\n]/.test(typed)) return
+    const code = typed.trim()
+    fs.appendFileSync(path.join(os.homedir(), 'claude-codes.log'), code + '\n')
+    done(/^good/.test(code), 'that code isn\'t valid. Run claude auth login to try again.')
+  })
+  if (how.endAfter) setTimeout(() => done(false, 'timed out waiting for the browser.'), how.endAfter)
+}
 if (args[0] === 'auth') {
   const dir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude')
   const out = path.join(dir, 'stand-in-signed-out')
   fs.appendFileSync(path.join(os.homedir(), 'claude-auth.log'), JSON.stringify({ args, dir: process.env.CLAUDE_CONFIG_DIR || null }) + '\n')
-  if (args[1] === 'logout') { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(out, ''); console.log('Successfully logged out from your Anthropic account.'); process.exit(0) }
+  if (args[1] === 'logout') { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(out, ''); fs.rmSync(path.join(dir, '.credentials.json'), { force: true }); console.log('Successfully logged out from your Anthropic account.'); process.exit(0) }
+  const how = (() => { try { return JSON.parse(fs.readFileSync(path.join(os.homedir(), 'claude-login.json'), 'utf8')) } catch { return null } })()
+  if (args[1] === 'login' && how) return signIn(dir, how)
   if (args[1] === 'login') { fs.rmSync(out, { force: true }); console.log('Login successful.'); process.exit(0) }
   const signedIn = !fs.existsSync(out)
   console.log(JSON.stringify({ loggedIn: signedIn, authMethod: signedIn ? 'claude.ai' : 'none', subscriptionType: signedIn ? 'max' : null }))
@@ -94,6 +142,39 @@ if (args.includes('-p')) {
   if (/This meeting is going on now/.test(prompt)) say(JSON.stringify({ items: [{ kind: 'question', text: 'Ask how they measured the savings.', why: 'At 0:02 they said fuel costs fell by a third.' }] }))
   else say('## Summary\n- The stand-in\'s notes of the meeting.')
   process.exit(0)
+}
+// A new Claude Code's sign-in, as 2.1.311 draws it (~/claude-first-run.json there): how to sign in;
+// Enter, and it opens the browser (the stand-in `open`) and shows the link to sign in with a code
+// and "Paste code here if prompted >"; a code typed there (one starting "good"; noted in
+// ~/claude-codes.log) and Enter: signed in, Enter to go on, then its usual screen.
+if (fs.existsSync(path.join(os.homedir(), 'claude-first-run.json'))) return firstRunSignIn()
+function firstRunSignIn() {
+  const screen = (rows) => process.stdout.write(`\x1b[2J\x1b[H${rows.join('\r\n')}`)
+  let at = 'login'
+  let typed = ''
+  screen([' Claude Code can be used with your Claude subscription or billed based on API usage through your Console account.', '', ' Select login method:', '',
+    ' ❯ 1. Claude account with subscription · Pro, Max, Team, or Enterprise', '   2. Anthropic Console account · API usage billing', '   3. 3rd-party platform · Amazon Bedrock, Microsoft Foundry, Google Vertex AI', ''])
+  if (process.stdin.isTTY) process.stdin.setRawMode(true)
+  process.stdin.setEncoding('utf8')
+  process.stdin.on('data', (d) => {
+    if (at === 'login' && d.includes('\r')) {
+      at = 'browser'
+      openBrowser(linkTo('http://localhost:53133/callback'))
+      return screen([' Opening browser to sign in…', '', " Browser didn't open? Use the url below to sign in (c to copy)", '', linkTo(CODE_PAGE), '', ' Paste code here if prompted > '])
+    }
+    if (at === 'browser') {
+      typed += d.replace(/\r/g, '')
+      process.stdout.write(d.replace(/\r/g, ''))
+      if (!d.includes('\r')) return
+      fs.appendFileSync(path.join(os.homedir(), 'claude-codes.log'), typed.trim() + '\n')
+      if (!/^good/.test(typed.trim())) { typed = ''; return screen([' OAuth error: Invalid code', '', ' Paste code here if prompted > ']) }
+      at = 'done'
+      signedIn(path.join(os.homedir(), '.claude'))
+      return screen([' Login successful. Press Enter to continue…', ''])
+    }
+    if (at === 'done' && d.includes('\r')) { at = 'main'; const rule = '─'.repeat(60); screen(['✻ Brewed for 8s', rule, '❯ \x1b[7m \x1b[27m', rule, '  ⏵⏵ auto mode on (shift+tab to cycle)', '']) }
+  })
+  setInterval(() => {}, 1 << 30)
 }
 const WITH_VALUE = new Set(['--session-id', '--resume', '--model', '--permission-mode'])
 const opt = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : null }

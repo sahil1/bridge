@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import Icon from './Icon.jsx'
 import { api, viaRelay } from '../api.js'
+import { CodeSignIn, DeviceCode } from './SignIn.jsx'
 import { t } from '../i18n/index.js'
 
 // A new agent's first-run screens (its look, signing in, safety notes, trusting its folder), as a
@@ -41,9 +42,10 @@ export function FirstRunAnswers({ agent }) {
   return null
 }
 
+const pause = (ms) => new Promise((r) => setTimeout(r, ms))
+
 export default function FirstRunCard({ agent, onOpenTerminal }) {
   const [busy, setBusy] = useState(false)
-  const [code, setCode] = useState('')
   const [err, setErr] = useState(null)
   const name = NAMES[agent.kind] || agent.kindLabel || agent.kind
   const pane = encodeURIComponent(agent.paneId)
@@ -56,6 +58,24 @@ export default function FirstRunCard({ agent, onOpenTerminal }) {
   const auto = AUTO[agent.setup]?.(agent)
   const btn = (label, k, primary = true) => <button type="button" className={primary ? 'btn small primary' : 'ghost-btn'} disabled={busy} onClick={() => keys(k)}>{label}</button>
   const claude = agent.kind === 'claude'
+  // A code pasted at Claude Code's "Paste code here if prompted >", then Enter once it has it.
+  const typeCode = async (code) => {
+    await api(`/panes/${pane}/input`, { method: 'POST', body: { steps: [{ text: code }] } })
+    await pause(150)
+    await api(`/panes/${pane}/input`, { method: 'POST', body: { steps: [{ keys: ['enter'] }] } })
+  }
+  // Codex's way with a one-time code, from its browser screen: Esc back to how to sign in, then
+  // its second way, Sign in with Device Code, once that screen is up.
+  const withCode = async () => {
+    setBusy(true); setErr(null)
+    try {
+      await api(`/panes/${pane}/input`, { method: 'POST', body: { steps: [{ keys: ['esc'] }], setup: 'browser' } })
+      let r = null
+      for (let i = 0; i < 10 && !r?.ok; i++) { await pause(400); r = await api(`/panes/${pane}/input`, { method: 'POST', body: { steps: [{ keys: ['down', 'enter'] }], setup: 'login' } }) }
+      if (!r?.ok) setErr(t('Codex didn\'t go back to its ways to sign in. Open in Terminal, press Esc there and choose Sign in with Device Code.'))
+    } catch (e) { setErr(e.message) }
+    setBusy(false)
+  }
 
   let text = null
   let acts = null
@@ -70,13 +90,21 @@ export default function FirstRunCard({ agent, onOpenTerminal }) {
         : t('Sign in with your ChatGPT account. Your browser opens to finish.')
       acts = claude
         ? <>{btn(t('Sign in with Claude account'), ['enter'])}{btn(t('Use an Anthropic Console account'), ['down', 'enter'], false)}</>
-        : <>{btn(t('Sign in with ChatGPT'), ['enter'])}<button type="button" className="ghost-btn" onClick={onOpenTerminal}>{t('Use an API key')}</button></>
+        : <>{btn(t('Sign in with ChatGPT'), ['enter'])}{btn(t('Sign in with a code'), ['down', 'enter'], false)}<button type="button" className="ghost-btn" onClick={onOpenTerminal}>{t('Use an API key')}</button></>
       break
     case 'browser':
-      text = viaRelay
-        ? (claude ? t('Open the sign-in page here, sign in, then paste the code it shows.') : t('Finish signing in with the browser on your computer.'))
-        : t("Your browser opened to sign in. This moves on by itself when you're done.")
-      acts = agent.setupUrl && (claude || !viaRelay) ? <a className={viaRelay ? 'btn small primary' : 'ghost-btn'} href={agent.setupUrl} target="_blank" rel="noreferrer"><Icon name="external" size={12} /> {t('Open the sign-in page')}</a> : null
+      // Claude Code: the browser comes back to it on localhost, or its other page shows a code to
+      // paste here (on a phone, that's the way). Codex: the browser, or a one-time code instead.
+      if (agent.setupCode) {
+        text = t('Open the sign-in page, sign in, then enter this code there. This moves on by itself once you have.')
+        acts = agent.setupUrl && <DeviceCode url={agent.setupUrl} code={agent.setupCode} />
+      } else if (claude) {
+        text = viaRelay ? t('Open the sign-in page here, sign in, then paste the code it shows.') : t("Your browser opened to sign in. This moves on by itself when you're done.")
+        acts = agent.setupUrl ? <CodeSignIn url={agent.setupUrl} onCode={typeCode} open={viaRelay} busy={busy} /> : null
+      } else {
+        text = viaRelay ? t('Finish signing in with the browser on your computer.') : t("Your browser opened to sign in. This moves on by itself when you're done.")
+        acts = <p className="muted small signin-out">{viaRelay ? t('Not at your computer?') : t('Browser says it can\'t connect to localhost, or nothing opened?')} <button type="button" className="link-btn small" disabled={busy} onClick={withCode}>{t('Sign in with a code instead')}</button></p>
+      }
       break
     case 'continue':
       text = claude
@@ -95,23 +123,13 @@ export default function FirstRunCard({ agent, onOpenTerminal }) {
     default:
       return null
   }
-  const paste = (e) => {
-    e.preventDefault()
-    if (code.trim()) { send([{ text: code.trim() }, { keys: ['enter'] }]); setCode('') }
-  }
   return (
     <div className="blocked-card firstrun" role="status" aria-live="polite">
       <FirstRunAnswers agent={agent} />
       <div className="blocked-head"><Icon name="sparkle" size={13} /> {t('{name} needs a one-time setup on this computer', { name })} <button type="button" className="link" onClick={onOpenTerminal}>{t('Open in Terminal')}</button></div>
       <div className="firstrun-body">
         <p>{auto ? <span className="muted">{t('Setting it up…')} </span> : null}{text}</p>
-        {acts && <div className="perm-acts">{acts}</div>}
-        {agent.setup === 'browser' && claude && (
-          <form className="firstrun-code" onSubmit={paste}>
-            <input value={code} onChange={(e) => setCode(e.target.value)} placeholder={viaRelay ? t('Paste the code') : t('Got a code instead? Paste it here')} aria-label={t('Sign-in code')} autoComplete="off" spellCheck={false} />
-            <button type="submit" className="btn small" disabled={!code.trim() || busy}>{t('Send')}</button>
-          </form>
-        )}
+        {acts && (agent.setup === 'browser' ? acts : <div className="perm-acts">{acts}</div>)}
         {err && <p className="error-text">{err}</p>}
       </div>
     </div>
