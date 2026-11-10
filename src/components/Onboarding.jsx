@@ -102,6 +102,7 @@ export default function Onboarding({ onDone }) {
   const [level, setLevel] = useState('basic')
   const [awake, setAwake] = useState(null) // { can, on }: keep this computer awake for your phone (server/relay.js)
   const [started, setStarted] = useState(null) // the level set going
+  const [installing, setInstalling] = useState(() => new Set()) // agents installed from here: once in, their sign-in starts by itself
   const phone = usePhoneOffer() // where to set up your phone, when Bridge AI's relay is offered
   const setup = useSetupPlan()
   const load = () => api('/setup').then(setD).catch((e) => setErr(e.message))
@@ -227,16 +228,18 @@ export default function Onboarding({ onDone }) {
                 {cards.map((c) => {
                   const here = c.here
                   const out = here?.signedIn === false
+                  // Installed from here just now: signing in is the rest of the same step.
+                  const next = installing.has(c.kind) && canSignIn(c.kind)
                   return (
                     <li key={c.kind}>
                       <AgentMark kind={c.kind} label={c.a.label} size={28} />
                       <span className="wiz-agent-main">
                         <b>{c.a.label}</b>
-                        <small>{here ? (out ? t('Installed. Sign in once with your account.') : t('Ready to work.')) : c.plan ? t(c.plan) : t('Not installed.')}</small>
+                        <small>{here ? (out ? (next ? t('Installed. Now sign in once with your account.') : t('Installed. Sign in once with your account.')) : t('Ready to work.')) : c.plan ? t(c.plan) : t('Not installed.')}</small>
                       </span>
                       {here && !out && <span className="wiz-ready"><Icon name="check" size={12} /> {t('Ready')}</span>}
-                      {here && out && canSignIn(c.kind) && <SignInButton kind={c.kind} onCheck={recheck} terminalLink={false} className="btn small" />}
-                      {!here && <InstallAgentButton kind={c.kind} needs={c.a.needs} onCheck={load} showLink={false} />}
+                      {here && out && canSignIn(c.kind) && <SignInButton kind={c.kind} onCheck={recheck} terminalLink={false} className="btn small" auto={next} />}
+                      {!here && <InstallAgentButton kind={c.kind} needs={c.a.needs} onCheck={load} onStart={() => setInstalling((s) => new Set(s).add(c.kind))} showLink={false} signIn={canSignIn(c.kind)} />}
                     </li>
                   )
                 })}

@@ -137,25 +137,57 @@ try {
   }
 
   // ---------- Installing an agent: the server runs its installer in a tab (the kit's stand-in
-  // installer, never the real one), the card shows how it's going, then moves on to signing in ----------
+  // installer, never the real one), the card shows how it's going, then signs in by itself. The
+  // Claude Code it leaves signs in as Claude Code 2.1.311 does (stand-ins/claude.cjs): it opens the
+  // browser (the stand-in open, into bin/opened.log) to come back to it on localhost, and prints a
+  // link to a page that shows a code to paste instead. On the desktop the browser can't come back
+  // (a code it is); on the phone it does ----------
   const uninstall = async (n) => { for (const f of [n, `${n}.cjs`, `${n}.cmd`]) fs.rmSync(path.join(kit.bin, f), { force: true }); await kit.api('/agents/catalog') }
+  standInSignIns(kit)
+  fs.writeFileSync(path.join(kit.bin, 'claude.standin.cjs'), fs.readFileSync(path.join(TEST, 'stand-ins', 'claude.cjs'), 'utf8'))
   for (const phone of [false, true]) {
     const t = phone ? 'phone' : 'desktop'
-    const { ctx, p, errors } = await open(LOOKS[1][1], { phone })
+    const { ctx, p, errors } = await open(LOOKS[1][1], { phone, before: noSignInPages })
     await later(p)
     await p.waitForSelector('.wiz-agents li')
-    await p.locator('.wiz-agents li').first().locator('button', { hasText: 'Install' }).click()
-    const li = await until(async () => { const x = await p.locator('.wiz-agents li').first().innerText(); return /Downloading 64%/.test(x) && x }, 30000)
-    ok(!!li && /Installing…/.test(li) && /moves on by itself/.test(li), `${t}: Install shows it's going, with the installer's last lines`, li || (await p.locator('.wiz-agents li').first().innerText()))
+    const card = p.locator('.wiz-agents li').first()
+    const was = openedBy(kit).length
+    await card.locator('button', { hasText: 'Install' }).click()
+    const li = await until(async () => { const x = await card.innerText(); return /Downloading 64%/.test(x) && x }, 30000)
+    ok(!!li && /Installing…/.test(li) && /Then the sign-in starts by itself/.test(li), `${t}: Install shows it's going, with the installer's last lines, and that signing in comes next by itself`, li || (await card.innerText()))
     const ran = fs.readFileSync(path.join(kit.bin, 'installs.log'), 'utf8').trim().split('\n').pop()
     ok(IS_WIN ? /install\.ps1/.test(ran) : /curl -fsSL https:\/\/claude\.ai\/install\.sh \| bash/.test(ran), `${t}: it's Claude Code's own installer for this computer (stood in for)`, ran)
-    ok(!!(await until(async () => /Sign in once with your account/.test(await p.locator('.wiz-agents li').first().innerText()), 30000)), `${t}: once installed, the card moves on to signing in`, await p.locator('.wiz-agents li').first().innerText())
+    const waiting = await until(async () => { const x = await card.innerText(); return /Installed\. Now sign in once/.test(x) && /Your browser opened to sign in with your Claude account/.test(x) && x }, 40000)
+    ok(!!waiting, `${t}: once installed, its sign-in starts by itself, and the card says the browser opened for it`, waiting || (await card.innerText()))
+    ok(!!(await until(async () => (await signInTabs(kit)).length === 1 && openedBy(kit).slice(was).some((u) => /redirect_uri=http%3A%2F%2Flocalhost%3A\d+%2Fcallback/.test(u)), 10000)), `${t}: it's Claude Code's own sign-in, which opened the browser to come back to it on localhost`, openedBy(kit))
+    await shot(p, `${tag}new-${t}-2-signing-in`)
+    if (!phone) {
+      // The browser can't get back to it: the page that shows a code, and the code pasted here.
+      const link = card.locator('a', { hasText: 'Sign in with a code' })
+      const href = (await link.getAttribute('href').catch(() => null)) || ''
+      ok(/^https:\/\/claude\.com\/cai\/oauth\/authorize\?/.test(href) && href.includes(encodeURIComponent('https://platform.claude.com/oauth/code/callback')), 'desktop: "Browser says it can\'t connect to localhost" offers the link Claude Code printed, to the page that shows a code', href)
+      await link.click()
+      await card.locator('input[aria-label="Sign-in code"]').fill('good-code#stand-in-state')
+      await shot(p, `${tag}new-desktop-2b-code`)
+      await card.locator('button', { hasText: /^Sign in$/ }).click()
+      ok(!!(await until(() => logOf(kit.home, 'claude-codes.log').includes('good-code#stand-in-state'), 10000)), 'desktop: the code is typed at Claude Code\'s "Paste code here" prompt', logOf(kit.home, 'claude-codes.log'))
+    } else {
+      // The browser comes back to it on localhost: signed in, nothing to paste.
+      const port = fs.readFileSync(path.join(kit.home, 'claude-login-port.txt'), 'utf8').trim()
+      await fetch(`http://127.0.0.1:${port}/callback?code=stand-in&state=stand-in-state`).catch(() => {})
+    }
+    ok(!!(await until(async () => /Ready to work/.test(await card.innerText()), 30000)), `${t}: signed in, the card says it's ready`, await card.innerText())
+    ok(!!(await until(async () => !(await signInTabs(kit)).length, 20000)), `${t}: and the sign-in's tab closes by itself`)
     ok(!!(await p.$('select[aria-label="Chief of Staff"]')), `${t}: and the chief can be picked`)
     await shot(p, `${tag}new-${t}-2-installed`)
     ok(errors.length === 0, `${t}: install: no page errors`, errors)
     await ctx.close()
     await uninstall('claude')
+    signedOut(kit)
+    await kit.api('/subscriptions?refresh=1')
   }
+  fs.rmSync(path.join(kit.bin, 'claude.standin.cjs'), { force: true })
+  ok(/CODEX_NON_INTERACTIVE=1/.test((await kit.api('/agents/catalog')).find((a) => a.kind === 'codex')?.install || ''), 'Codex installs without its installer stopping to ask whether to start it, in a tab nobody watches')
 
   // ---------- Node.js, for agents that only come through npm, installed with one click ----------
   {
@@ -200,7 +232,7 @@ try {
     const cache = /--cache '?([^' ]+)'?/.exec(ran || '')?.[1] || ''
     ok(/^npm install -g /.test(ran || '') && path.resolve(cache).startsWith(path.resolve(kit.data) + path.sep), "Gemini CLI installs through npm with Bridge AI's own cache", ran)
     ok(IS_WIN ? !/--prefix/.test(ran) : (ran || '').includes(`--prefix ${path.join(kit.home, '.local')}`), IS_WIN ? 'in npm\'s own folder (yours on Windows)' : 'into ~/.local, since npm\'s global folder needs an administrator', ran)
-    ok(!!(await until(async () => /Sign in once/.test(await gem.innerText()), 30000)), 'and its card moves on to signing in', await gem.innerText())
+    ok(!!(await until(async () => /Now sign in once/.test(await gem.innerText()) && !!(await gem.locator('.signin-wait').count()), 30000)), 'and its card moves on to signing in, which starts by itself', await gem.innerText())
     ok(errors.length === 0, 'Node.js: no page errors', errors)
     await ctx.close()
     await uninstall('gemini')

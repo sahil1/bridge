@@ -1,9 +1,10 @@
 // Stand-in for every installer a test's server would run (its BRIDGE_INSTALL_STANDIN): it says what
 // would have run, shows some progress like an installer, and for an agent's install leaves a
 // stand-in of that agent in the test's bin folder (beside this one), so Bridge AI finds it
-// installed. Each command goes in installs.log there. Setup's line on a Mac (scripts/setup-mac.sh)
-// asks for the Mac's password first when it installs Apple's developer tools or Homebrew: so does
-// this, as sudo does, and it carries on once a line is typed (noted in passwords.log; "no" stands
+// installed: one that only says its version, or <agent>.standin.cjs there when a test put one.
+// Each command goes in installs.log there. Setup's line on a Mac (scripts/setup-mac.sh) asks for
+// the Mac's password first when it installs Apple's developer tools or Homebrew, on a clean screen
+// that says what it's for: so does this, as sudo does, and it carries on once a line is typed (noted in passwords.log; "no" stands
 // for a password that didn't work: it stops the way setup-mac.sh does). An update of Bridge AI
 // itself goes through, or with update-fails.txt there, doesn't (its last line that file's words,
 // with an error from install.sh's stand-in and none from install.ps1's, as each really does).
@@ -24,7 +25,8 @@ const go = () => {
   setTimeout(() => {
     if (agent) {
       const js = path.join(bin, `${agent}.cjs`)
-      fs.writeFileSync(js, "console.log('1.0.0 (stand-in)')\n")
+      const own = path.join(bin, `${agent}.standin.cjs`)
+      fs.writeFileSync(js, fs.existsSync(own) ? fs.readFileSync(own) : "console.log('1.0.0 (stand-in)')\n")
       if (process.platform === 'win32') fs.writeFileSync(path.join(bin, `${agent}.cmd`), `@"${process.execPath}" "${js}" %*\r\n`)
       else fs.writeFileSync(path.join(bin, agent), `#!/bin/sh\nexec "${process.execPath}" "${js}" "$@"\n`, { mode: 0o755 })
     }

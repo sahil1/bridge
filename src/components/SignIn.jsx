@@ -219,14 +219,15 @@ export function InstallNode({ onDone, why, forAgent = false }) {
 // An agent that isn't installed, from wherever it's needed: its install command in a terminal tab
 // you can watch (the same as setup's Install), with its last lines here as it goes. onCheck runs
 // while that goes and when you come back. needs: what the install needs first (Node.js), from the
-// agent catalog; then Node.js comes first, and the agent's Install once it's there.
-export function InstallAgentButton({ kind, label = 'Install', onCheck, needs, showLink = true }) {
+// agent catalog; then Node.js comes first, and the agent's Install once it's there. onStart: the
+// install is under way (setup then signs in by itself once it's in). signIn: it says that's next.
+export function InstallAgentButton({ kind, label = 'Install', onCheck, onStart, needs, showLink = true, signIn = false }) {
   const [state, setState] = useState(null) // { openId, paneId } | { error, code }
   useRecheck(() => onCheck?.(), state?.openId ? 5000 : 0, !!onCheck && !!state?.openId)
   const { data: screen } = usePoll(state?.paneId ? `/agents/${encodeURIComponent(state.paneId)}/screen?lines=40` : null, 1500)
   const go = async () => {
     setState(null)
-    try { const r = await api(`/setup/install/${encodeURIComponent(kind)}`, { method: 'POST' }); setState({ openId: r.openId, paneId: r.paneId }) } catch (e) { setState({ error: e.message, code: e.code }) }
+    try { const r = await api(`/setup/install/${encodeURIComponent(kind)}`, { method: 'POST' }); setState({ openId: r.openId, paneId: r.paneId }); onStart?.() } catch (e) { setState({ error: e.message, code: e.code }) }
   }
   const show = () => window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: state.openId } }))
   const need = needs || (state?.code === 'needs:node' ? 'Node.js' : null)
@@ -236,7 +237,7 @@ export function InstallAgentButton({ kind, label = 'Install', onCheck, needs, sh
   return (
     <span className="signin">
       <button type="button" className="btn small primary" disabled={!!state?.openId} onClick={go}>{state?.openId ? <><Icon name="refresh" size={12} className="spin" /> Installing…</> : <><Icon name="download" size={12} /> {label}</>}</button>
-      {state?.openId && <span className="muted small">Usually a minute or two; this moves on by itself when it's done.{showLink && <> <button type="button" className="link-btn" onClick={show}>Show the terminal</button></>}</span>}
+      {state?.openId && <span className="muted small">{signIn ? t('Usually a minute or two. Then the sign-in starts by itself: your browser opens for it.') : t('Usually a minute or two; this moves on by itself when it\'s done.')}{showLink && <> <button type="button" className="link-btn" onClick={show}>{t('Show the terminal')}</button></>}</span>}
       {state?.openId && tail.length > 0 && <pre className="inst-log" aria-live="polite">{tail.join('\n')}</pre>}
       {state?.error && <span className="error-text">{state.error}</span>}
     </span>
