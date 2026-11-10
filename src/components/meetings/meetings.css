@@ -158,7 +158,8 @@
 .rail-nav-fold { flex: none; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 7px; color: var(--ink-3); }
 .rail-nav-fold:hover { background: var(--pane); color: var(--ink); }
 .rail-meetings { display: grid; gap: 4px; margin: 0 0 2px; }
-.rm-scroll { max-height: min(42vh, 360px); overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; }
+/* Long groups show their first eight and Show more (RailMeetings.jsx): no list here scrolls on its own. */
+.rm-more { justify-self: start; margin: 1px 0 3px 25px; }
 .rm-empty { margin: 2px 8px 4px 25px; }
 .rm-day { display: grid; grid-template-columns: minmax(0, 1fr); }
 .rm-day-label { margin: 6px 0 2px 25px; font: 600 10.5px var(--font); letter-spacing: .05em; text-transform: uppercase; color: var(--ink-3); }
@@ -182,6 +183,8 @@
 .mt-bulk.compact .mt-bulk-x { order: -1; }
 .mt-bulk.compact .ghost-btn { flex: none; padding: 0 6px; }
 .mt-home .mt-bulk { position: sticky; bottom: 0; z-index: 2; }
+/* In the sidebar, kept in sight above Spaces' heading while you pick down a long list. */
+.rail-meetings .mt-bulk.compact { position: sticky; bottom: 44px; z-index: 2; }
 .mt-pick { flex: none; width: 15px; height: 15px; margin: 0; accent-color: var(--accent); }
 .mt-row.picked { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 
