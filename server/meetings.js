@@ -2268,12 +2268,37 @@ export function target(m, o = saving()) {
 }
 // auto: a save by itself (Keep saved notes up to date), which leaves alone a note you've changed
 // in your notes app since it was saved. Save, asked for, writes it as Bridge AI has it.
-// One that can't be written says why on the meeting, until a save works.
+// One that can't be written says why on the meeting, until a save works. One meeting's saves are
+// written one after another: two at once (Save while one by itself was writing) left the meeting
+// keeping the other's mark of the note, so it looked changed in your notes app and was never kept
+// up to date again.
+const writing = new Map() // id -> its save being written
 export async function save(id, opts = {}) {
-  try { return await writeNotes(id, opts) } catch (e) {
+  const run = (writing.get(id) || Promise.resolve()).catch(() => {}).then(() => writeNotes(id, opts))
+  writing.set(id, run)
+  try { return await run } catch (e) {
     const why = savingError(e)
     try { patchMeta(id, { saveError: why }) } catch { /* gone */ }
     throw new Error(why)
+  } finally { if (writing.get(id) === run) writing.delete(id) }
+}
+// A note written whole: beside itself (hidden, so a notes app doesn't list it) and moved over the
+// one there, so your notes app, or anything else reading it, never finds it half written. A folder
+// that won't take that (a file held open on Windows, a drive that can't rename): in place, as before.
+let wholes = 0
+async function writeWhole(file, body) {
+  let to = file
+  try { to = await fs.promises.realpath(file) } catch { /* a new note */ }
+  const tmp = path.join(path.dirname(to), `.${path.basename(to)}.${process.pid}-${(wholes++).toString(36)}.tmp`)
+  try {
+    const was = await fs.promises.stat(to).catch(() => null)
+    await fs.promises.writeFile(tmp, body)
+    if (was && !IS_WIN) await fs.promises.chmod(tmp, was.mode & 0o777)
+    await fs.promises.rename(tmp, to)
+  } catch (e) {
+    await fs.promises.rm(tmp, { force: true }).catch(() => {})
+    if (!['EPERM', 'EACCES', 'EBUSY', 'EXDEV'].includes(e.code)) throw e
+    await fs.promises.writeFile(to, body)
   }
 }
 async function writeNotes(id, { auto = false } = {}) {
@@ -2318,7 +2343,7 @@ async function writeNotes(id, { auto = false } = {}) {
       if (was != null && hash(was) !== m.savedHashes[file]) { hashes[file] = m.savedHashes[file]; continue }
     }
     await fs.promises.mkdir(path.dirname(file), { recursive: true })
-    await fs.promises.writeFile(file, `${body}\n`)
+    await writeWhole(file, `${body}\n`)
     hashes[file] = hash(`${body}\n`)
   }
   // The ones it wrote before under another name or folder, if they're still as it left them (saved
